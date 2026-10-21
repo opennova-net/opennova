@@ -6,8 +6,10 @@
 // @ 0x40f7ae, WeaponDef_BuildItemRestrictionTable @ 0x54ddb0].
 #include <cstdio>
 #include <cstring>
+#include <memory>
 
 #include <formats/def/def.h>
+#include <runtime/inmatch/loadout_submit.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_inventory.h>
@@ -1048,6 +1050,39 @@ void test_mount_slot_reload() {
 // A kit name "None" resolves to the catalog's entry 0 and survives the filter, so the
 // knife fallback does not run [orig: Mission_LoadBMSFile @0x40f80e..0x40f830; the
 //  fallback @0x40f899].
+// An in-session joiner's armory ACCEPT resets the slot pool's entries and nothing else:
+// the current slot word, the pending and selected slots and the ammo pools keep their
+// values until the 0x5A grant's select; the 0x2F carries the slot word.
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (`cmp is_authority` @0x565D4F, the
+//  reset @0x565D66, g_CurrentWeaponSlot @0x565D73); WeaponSlotPool_ResetAllEntries
+//  @0x53F240 (the 780 entries @0x53F24C..0x53F284)]
+void test_an_accept_reset_keeps_the_current_slot() {
+    Fixture f;
+    auto world = std::make_unique<World>();
+    world->tables.weapons = f.t;
+    auto local = std::make_unique<LocalPlayer>(*world);
+    WeaponInventory &inv = local->inventory;
+    inv.reset(world->tables.weapons);
+    const int32_t rifle = weapon_combo::kDefaultSpawnCombo;
+    inv.slots[static_cast<size_t>(rifle)].adm_index = static_cast<int16_t>(f.m4);
+    inv.slots[static_cast<size_t>(rifle)].clip = 30;
+    inv.equipped_combo = rifle;
+    inv.pending_combo = rifle;
+    inv.selected_combo = rifle;
+    const int m4_class = f.t.entries[static_cast<size_t>(f.m4)].ammo_class_id;
+    inv.pools[static_cast<size_t>(m4_class)] = 90;
+    local->inventory_valid = true;
+    (void)opennova::inmatch::armory_accept_in_session(*world, *local,
+            {WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}}, 6, /*authority=*/false,
+            opennova::bms::MissionType{});
+    CHECK(inv.equipped_combo == rifle);
+    CHECK(inv.pending_combo == rifle);
+    CHECK(inv.selected_combo == rifle);
+    CHECK(inv.slots[static_cast<size_t>(rifle)].adm_index < 0);
+    CHECK(inv.slots[static_cast<size_t>(rifle)].clip == 0);
+    CHECK(inv.pools[static_cast<size_t>(m4_class)] == 90);
+}
+
 void test_kit_filter_keeps_none() {
     Fixture f;
     WeaponAvailability avail;
@@ -1057,6 +1092,7 @@ void test_kit_filter_keeps_none() {
 }
 
 int main() {
+    test_an_accept_reset_keeps_the_current_slot();
     test_kit_filter_keeps_none();
     test_mount_slot_reload();
     test_recalc_seat_legs();

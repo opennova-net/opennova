@@ -222,6 +222,13 @@ struct WeaponInventory {
         quick_switch_combo = -1;
         quick_switch_stash = -1;
     }
+    // The slot pool's reset: every entry zeroed, and nothing else: the current
+    // slot word, the pending and selected slots, the ammo pools and the shared
+    // clips keep their values (an in-session joiner's armory ACCEPT runs it
+    // ahead of its 0x2F; the 0x5A grant's select replaces the current slot).
+    // [orig: WeaponSlotPool_ResetAllEntries @0x53F240 (the 780 entries
+    //  @0x53F24C..0x53F284; the owner word +0x24 has no field here)]
+    void reset_slot_entries() { slots.fill(WeaponInventorySlot{}); }
     const WeaponInventorySlot *slot(int32_t combo) const {
         return (combo >= 0 && combo < weapon_combo::kSlotCount)
                        ? &slots[static_cast<size_t>(combo)]

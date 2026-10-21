@@ -118,8 +118,11 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 	local.loadout.spawn_kit = kit;
 	const world::WeaponInventory *inventory = local.inventory_valid ? &local.inventory : nullptr;
 	const int32_t current_slot = inventory != nullptr ? inventory->equipped_combo : -1;
-	// [orig: WeaponSlotPool_ResetAllEntries @0x565D66, off the authority alone]
-	if (!authority && !world.tables.weapons.empty()) local.inventory.reset(world.tables.weapons);
+	// The slot pool's entries alone, off the authority alone: the current slot word
+	// stays for the 0x2F and its readers until the 0x5A's select.
+	// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the call @0x565D66) ->
+	//  WeaponSlotPool_ResetAllEntries @0x53F240]
+	if (!authority) local.inventory.reset_slot_entries();
 	LoadoutSubmit submit;
 	const world::Entity *body = world.registry.get(world.cached.local_player);
 	submit.team = body != nullptr ? body->team : uint8_t{0};
