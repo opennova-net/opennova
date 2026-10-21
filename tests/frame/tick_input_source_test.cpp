@@ -443,9 +443,8 @@ void test_rows_poll_once_per_update_and_never_in_a_no_update_frame() {
 			++samples;
 			return {};
 		}
-		bool run_update_rows(uint32_t logic_tick, bool new_sample) override {
+		void run_update_rows(uint32_t logic_tick, bool new_sample, PauseRowWord &) override {
 			calls.emplace_back(logic_tick, new_sample);
-			return false;
 		}
 	};
 	{

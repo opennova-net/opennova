@@ -63,10 +63,12 @@ public:
 	// A later tick's movement and action rows of the frame before_world_tick
 	// sampled, over the device state its run_update_rows stepped to.
 	opennova::inmatch::InputPacket sample_tick(uint32_t p_logic_tick) override;
-	// An update's talk and HUD rows: true when its pause row flipped the
-	// single-player pause word. `p_new_sample` steps the device to the update's
-	// logic tick first (a later update of a running frame).
-	bool run_update_rows(uint32_t p_logic_tick, bool p_new_sample) override;
+	// An update's talk and HUD rows: each pause row they dispatch flips
+	// `r_pause`, whose word the rows behind it read at the head. `p_new_sample`
+	// steps the device to the update's logic tick first (a later update of a
+	// running frame).
+	void run_update_rows(uint32_t p_logic_tick, bool p_new_sample,
+			opennova::inmatch::PauseRowWord &r_pause) override;
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	// Drop the trigger latches (the presenter's reset-state path). The

@@ -230,7 +230,7 @@ int main() {
 	// Pause, a manual step and a reset keep the bank and its smoothing history
 	// (D-NET-NEW-LI-8): no pause writes g_TickPhase or g_FrameTimeSmoothedFp4, and
 	// a restart is no mode init [orig: Game_MainLoop @0x52B630 (the mode init
-	// @0x52B715 / @0x52B71B, the EMA @0x52B845, the drain's phase @0x52BA6B);
+	// @0x52B715 / @0x52B71B, the EMA's store @0x52B866, the drain's phase @0x52BA6B);
 	// Game_RestartRoundSP @0x5263A0]. Manual step and reset stay local-only.
 	{
 		TickProbe target;
@@ -273,9 +273,10 @@ int main() {
 			std::vector<std::pair<uint32_t, bool>> calls; // (logic tick, new sample)
 			int flip_at = -1;                              // the call whose pause row fires
 			InputPacket sample_tick(uint32_t) override { return {}; }
-			bool run_update_rows(uint32_t logic_tick, bool new_sample) override {
+			void run_update_rows(uint32_t logic_tick, bool new_sample,
+					PauseRowWord &pause) override {
 				calls.emplace_back(logic_tick, new_sample);
-				return static_cast<int>(calls.size()) - 1 == flip_at;
+				if (static_cast<int>(calls.size()) - 1 == flip_at) pause.flip();
 			}
 		};
 		auto target = std::make_unique<TickProbe>();
@@ -359,6 +360,81 @@ int main() {
 		if (!expect(world.hud_frames.main_frame == head.main_frame + 1 &&
 				world.hud_frames.hud_frame == head.hud_frame + 1,
 				"an unstepped head steps them at the tick")) return 1;
+	}
+
+	// Every row state an update's drain reads dispatches, the ones behind a pause row
+	// too: the keyboard pass has moved the whole key ring into the action queue before
+	// the drain runs, so case 25's ring reset drops nothing, and each pause row flips
+	// the word at once. A press, release and press of the pause key inside one update
+	// pauses and resumes there: the rows between meet the head with the word set (the
+	// weapon select drops, the radar zoom runs) and the update runs its tick unpaused.
+	// Each flip that leaves the word set shuts the audio channels down. In a session
+	// the row's case returns before its flip, so the head's word stays down.
+	// [orig: Input_ProcessPlayerFrame @0x49D4C0 (the Input_ProcessKeyboardEvents
+	// call @0x49D4C6); Input_ProcessFrame @0x49D520 (the drain @0x49D599..0x49D5E7);
+	// Input_HandleActionBinding @0x49AD40 (case 25 @0x49B520: the in-session return
+	// @0x49B527, `xor dword_A87050, 1` @0x49B52D, the ring reset's call @0x49B53E, the
+	// word's test @0x49B543..0x49B54A ahead of the audio stop @0x49B550; the pause gate
+	// @0x49ADDD..0x49ADE8); Input_ResetKeyQueue @0x760E00 (@0x760E02 / @0x760E07)]
+	for (const RoleKind kind : {RoleKind::SinglePlayer, RoleKind::ListenHost}) {
+		struct Drain final : TickInputSource {
+			Role *role = nullptr;
+			int32_t weapon = 0;
+			int32_t zoom = 0;
+			int calls = 0;
+			bool weapon_between = true; // the weapon select's head between the presses
+			bool zoom_between = false;  // the radar zoom's
+			InputPacket sample_tick(uint32_t) override { return {}; }
+			// The first update's queue: the pause row, the radar zoom, the pause row.
+			void run_update_rows(uint32_t, bool, PauseRowWord &pause) override {
+				if (calls++ != 0) return;
+				pause.flip();
+				weapon_between = role->action_head_admits(weapon);
+				zoom_between = role->action_head_admits(zoom);
+				pause.flip();
+			}
+		};
+		auto target = std::make_unique<TickProbe>();
+		target->probe_kind = kind;
+		Session session(*target);
+		if (!load(session)) return 1;
+		opennova::world::World &world = target->kernel.world;
+		world.registry.configure_pool(0, 8);
+		opennova::world::Entity seed;
+		seed.kind = opennova::world::EntityKind::Organic;
+		seed.alive = true;
+		world.cached.local_player = world.registry.spawn(0, seed);
+		Drain drain;
+		drain.role = target.get();
+		drain.weapon = opennova::controls::action_code(30); // Primary, 0x0C000801
+		drain.zoom = opennova::controls::action_code(48);   // radarout, 0x04000800
+		FrameInput frame;
+		frame.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		frame.tick_source = &drain;
+		const FrameOutcome out = session.advance(frame);
+		const bool single = kind == RoleKind::SinglePlayer;
+		if (!expect(out.status == FrameStatus::Ok && out.ticks_run() == 3 &&
+				session.state() == State::Running && !world.rules.pause_word,
+				"a press, release and press of the pause row in one update leave it "
+				"running")) return 1;
+		if (!expect(drain.weapon_between == !single && drain.zoom_between,
+				single ? "between the presses the head drops the weapon select and runs "
+						"the radar zoom"
+						: "in a session the head's word stays down")) return 1;
+		// The first flip left the word set, so its case shut the audio down; in a
+		// session the case returns before both.
+		if (!expect(world.out.audio_channels_shutdown == single,
+				"the flip that sets the word shuts the audio down")) return 1;
+		if (!single) continue;
+		// Under the pause the same queue lowers the word and raises it again: the
+		// update stays paused, and the second flip shuts the audio down.
+		world.out.audio_channels_shutdown = false;
+		if (!expect(session.pause().applied(), "the pause")) return 1;
+		drain.calls = 0;
+		const FrameOutcome held = session.advance(frame);
+		if (!expect(held.ticks_run() == 0 && session.state() == State::Paused &&
+				world.rules.pause_word && world.out.audio_channels_shutdown,
+				"a paused update's release and press stay paused and stop the audio")) return 1;
 	}
 
 	// A paused frame runs no tick but still runs the weather tick: retail's main

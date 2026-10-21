@@ -26,6 +26,20 @@ SessionError invalid_transition(const char *message) {
 	return {SessionErrorCode::InvalidTransition, message};
 }
 
+// One update's input-frame rows through the source: each pause row its drain
+// dispatches flips the word the action rows' head reads (a copy where case 25
+// returns before its flip), and a flip that leaves the word set shuts the audio
+// channels down, which the embedder's audio device runs
+// (WorldOutbox::audio_channels_shutdown; TickInputSource carries the witness).
+void drain_update_rows(TickInputSource &source, world::World &world, bool new_sample,
+		bool flips_apply) {
+	bool copy = world.rules.pause_word;
+	PauseRowWord pause;
+	pause.word = flips_apply ? &world.rules.pause_word : &copy;
+	source.run_update_rows(world.logic_tick, new_sample, pause);
+	if (flips_apply && pause.raised > 0) world.out.audio_channels_shutdown = true;
+}
+
 } // namespace
 
 Session::Session(Role &role) : role_(&role), kind_(role.kind()) {}
@@ -670,8 +684,11 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			if (kernel == nullptr) continue;
 			world::World &world = kernel->world;
 			world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
-			const bool resumes = source != nullptr &&
-					source->run_update_rows(world.logic_tick, /*new_sample=*/false) && flips_apply;
+			// The drain flips the word at each pause row it dispatches, the rows behind
+			// meeting the head with it; the update resumes when the drain leaves it
+			// down (TickInputSource carries the witness).
+			if (source != nullptr) drain_update_rows(*source, world, false, flips_apply);
+			const bool resumes = !world.rules.pause_word;
 			if (!resumes) {
 				run_paused_update_legs();
 				previous_ran = false;
@@ -715,10 +732,10 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		// replaces the held state with edges of its own to consume
 		// (TickInputSource carries the witness).
 		const bool new_sample = previous_ran && kernel != nullptr;
-		const bool pauses = source != nullptr &&
-				source->run_update_rows(kernel->world.logic_tick, new_sample) && flips_apply;
-		// The pause row raised the word in this input frame: the frame's later
-		// events meet the action rows' head with it set.
+		if (source != nullptr) drain_update_rows(*source, kernel->world, new_sample, flips_apply);
+		// The drain left the word raised (an odd count of pause rows): the frame's
+		// later events meet the action rows' head with it set.
+		const bool pauses = source != nullptr && kernel->world.rules.pause_word;
 		if (pauses) set_state(State::Paused);
 		if (new_sample && source != nullptr) {
 			latch_packet(source->sample_tick(kernel->world.logic_tick));
@@ -733,18 +750,15 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		int32_t axis[2] = {};
 		step_mouse_pump(i, due, menu_open, axis);
 		if (pauses) {
-			// The pausing update: case 25's key-queue reset drops the input frame's
-			// events still queued, the head's HUD counters stepped unpaused before
-			// the input frame, and the body runs paused: no role tick (no server
-			// tick, entity update or weapon walk), only the paused legs.
+			// The pausing update: the pending one-shots drop, as the action rows
+			// behind the pause row meet the head's pause gate (their bit 0) [orig:
+			// Input_HandleActionBinding @0x49AD40 (@0x49ADDD..0x49ADE8)]; the head's
+			// HUD counters stepped unpaused before the input frame, and the body runs
+			// paused: no role tick (no server tick, entity update or weapon walk),
+			// only the paused legs.
 			consume_pending_one_shots();
 			consume_one_shots = false;
 			world::World &world = kernel->world;
-			// The word is now set, so case 25 shuts the audio channels down after
-			// its key-queue reset; the embedder's audio device runs it
-			// (WorldOutbox::audio_channels_shutdown) [orig: Input_HandleActionBinding
-			// @0x49AD40 - @0x49B543..0x49B54A, the call @0x49B550].
-			world.out.audio_channels_shutdown = true;
 			world.hud_frames.step(/*menu_paused=*/false, world.epilog_screen_active());
 			run_paused_update_legs();
 			previous_ran = false;
@@ -1031,11 +1045,15 @@ TransitionResult Session::pause() {
 	}
 	// The frame-time bank runs on through the pause: g_TickPhase is written only by
 	// the main loop's mode init and its drain, g_FrameTimeSmoothedFp4 only by the
-	// mode init, the EMA and the cine fade's scale, so no pause restarts the phase,
-	// the smoothing history or the FR counter (D-NET-NEW-LI-8). The pending one-shots
-	// drop: no input frame consumes them under the menu and its close resets the
-	// queue. [orig: Game_MainLoop @0x52B630 (the mode init @0x52B715 / @0x52B71B, the
-	//  EMA @0x52B845 / @0x52B866, the drain's phase @0x52BA6B)]
+	// mode init, the EMA's store, the cine fade's scale and an unreferenced clear, so
+	// no pause restarts the phase, the smoothing history or the FR counter
+	// (D-NET-NEW-LI-8). The pending one-shots drop: no input frame consumes them
+	// under the menu and its close resets the queue. [orig: Game_MainLoop @0x52B630
+	//  (the mode init @0x52B715 / @0x52B71B, the EMA's read @0x52B845 and store
+	//  @0x52B866, the drain's phase @0x52BA6B); Game_ScaleSmoothedFrameTime @0x52B5D0
+	//  (the store @0x52B606, from CCineEventEditFade_Start @0x5726C9 /
+	//  CCineEventEditFade_Finish @0x572775); Game_ClearSmoothedFrameTime @0x52B620 (no
+	//  xref)]
 	consume_pending_one_shots();
 	// The in-game menu's paused frames run the mouse pump under the menu: the
 	// paused frame's first update under the menu zeroes the shares and its

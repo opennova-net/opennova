@@ -137,28 +137,52 @@ struct CameraSample {
 // is true for a later update of a running frame, whose device sample is its own
 // (the source steps its device to `logic_tick` first; that update's movement and
 // action rows then come from sample_tick); false for the frame's first update
-// and each paused update, whose device state is the frame's sample. The return
-// is true when the update's pause row flipped the single-player pause word
-// (case 25): the session applies it at that update (Session::run_updates). The
-// key events the frames since the last update queued wait in order, a press, its
-// release and a new press each its own event, and the drain dispatches them in
-// that order; case 25 resets the key queue, so the events behind the pause row
-// never dispatch (the source polls each row state its samples saw, in order, and
-// stops at a pause flip).
+// and each paused update, whose device state is the frame's sample. The key
+// events the frames since the last update queued wait in order, a press, its
+// release and a new press each its own event, and the update's input frame
+// dispatches every one of them in that order: its keyboard pass first moves the
+// whole key ring into the action queue, and the drain then runs until that queue
+// is empty, so case 25's key-queue reset (the ring alone) drops nothing behind the
+// pause row. Each pause row the drain dispatches flips the single-player pause word
+// at once (its case returns before the flip in a session), and the rows behind it
+// meet the action rows' head with the word as it then stands: under the pause the
+// bit-0 rows drop, while the talk rows, the HUD rows, the radar zoom and a second
+// pause row still run, so a press, release and press of the pause key inside one
+// update pauses and resumes there. Each flip that leaves the word set also shuts
+// the audio channels down. The source calls `pause.flip()` at each pause-row
+// dispatch (PauseRowWord: the session's word when the flips apply, which the head
+// reads, and a copy otherwise), and the session applies the word the drain leaves,
+// and the audio stop, at that update (Session::run_updates).
 // [orig: Game_MainLoop @0x52B630 (the drain @0x52BA08, the update call @0x52BA58);
 //  Game_ProcessMainFrame @0x5263F0 (Input_ProcessFrame @0x52661D under no menu
 //  screen, after the pause word's first test @0x5265A0); Input_ProcessFrame @0x49D520
-//  (the drain's Input_HandleActionBinding call @0x49D5D8); Input_HandleActionBinding
-//  @0x49AD40 (case 25 @0x49B520: `xor dword_A87050, 1` @0x49B52D, the
-//  Input_ResetKeyQueue call @0x49B53E)]
+//  (the Input_ProcessPlayerFrame call @0x49D58B, the drain @0x49D599..0x49D5E7 with the
+//  Input_HandleActionBinding call @0x49D5D8); Input_ProcessPlayerFrame @0x49D4C0 (the
+//  Input_ProcessKeyboardEvents call @0x49D4C6); Input_ProcessKeyboardEvents @0x49D1F0
+//  (the ring's dequeues @0x49D2D2 / @0x49D4A0, the action queue's Input_QueueEvent calls
+//  @0x49D42F / @0x49D488); Input_HandleActionBinding @0x49AD40 (case 25 @0x49B520: the
+//  in-session return @0x49B527, `xor dword_A87050, 1` @0x49B52D, the Input_ResetKeyQueue
+//  call @0x49B53E, the word's test @0x49B543..0x49B54A ahead of the
+//  Audio_ShutdownChannelsAndDeviceTable call @0x49B550; the head's pause gate
+//  @0x49ADDD..0x49ADE8); Input_ResetKeyQueue @0x760E00 (the ring's indices @0x760E02 /
+//  @0x760E07)]
+struct PauseRowWord {
+	bool *word = nullptr; // the word the action rows' head reads for the rows behind
+	int raised = 0;       // the flips that left it set, each an audio stop
+	void flip() {
+		*word = !*word;
+		if (*word) ++raised;
+	}
+};
+
 class TickInputSource {
 public:
 	virtual ~TickInputSource() = default;
 	virtual InputPacket sample_tick(uint32_t logic_tick) = 0;
-	virtual bool run_update_rows(uint32_t logic_tick, bool new_sample) {
+	virtual void run_update_rows(uint32_t logic_tick, bool new_sample, PauseRowWord &pause) {
 		(void)logic_tick;
 		(void)new_sample;
-		return false;
+		(void)pause;
 	}
 };
 
@@ -534,8 +558,8 @@ private:
 	void step_mouse_pump(int32_t update, int32_t due, bool menu_open, int32_t (&axis)[2]);
 	// The frame's `due` updates, each in retail's update order: its input frame
 	// (TickInputSource::run_update_rows, a later update's sample_tick), the mouse
-	// pump, then the running update's role tick, the pausing update (its pause row
-	// raised the pause word), the paused update's legs or the resuming update's
+	// pump, then the running update's role tick, the pausing update (its drain left
+	// the pause word raised), the paused update's legs or the resuming update's
 	// tick. `transport`: the debug transport's forced step (step_once, drive_one),
 	// whose updates run the role's tick whatever the state and apply no flip.
 	FrameOutcome run_updates(int32_t due, const FrameInput &input, bool transport);

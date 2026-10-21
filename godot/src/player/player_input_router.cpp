@@ -236,7 +236,8 @@ opennova::inmatch::InputPacket PlayerInputRouter::sample_tick(uint32_t p_logic_t
 	return tick_input->native_value().player;
 }
 
-bool PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample) {
+void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample,
+		opennova::inmatch::PauseRowWord &r_pause) {
 	// An update's input frame polls its talk and HUD rows, a paused update's too:
 	// the pause row's case dispatches from the drain of the update that reads it
 	// (engine inmatch::TickInputSource carries the witness). A later update of a
@@ -248,20 +249,15 @@ bool PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 	}
 	// A later paused update of the same frame reads the state the frame left.
 	if (row_samples_.empty()) queue_row_sample();
-	// The drain dispatches the queued states in their order, so a press, its
+	// The drain dispatches every queued state in its order, so a press, its
 	// release and a new press seen by frames that ran no update each reach the
-	// rows; the pause row's case resets the key queue, which drops every state
-	// queued behind it (engine inmatch::TickInputSource carries the witness).
-	bool pause_flipped = false;
+	// rows; a pause row flips the word at once, and the states behind it meet the
+	// head with it (engine inmatch::TickInputSource carries the witness).
 	for (const RowSample &sample : row_samples_) {
 		poll_talk_rows(rows_sim, sample.talk);
-		if (poll_hud_toggles(rows_sim, sample.hud)) {
-			pause_flipped = true;
-			break;
-		}
+		if (poll_hud_toggles(rows_sim, sample.hud)) r_pause.flip();
 	}
 	row_samples_.clear();
-	return pause_flipped;
 }
 
 void PlayerInputRouter::queue_row_sample() {
