@@ -806,14 +806,21 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 world::throw_class_from_tag(def->ai_function);
         const world::ThrowClass motor =
                 world::throw_motor_from_move_function(def->move_function);
+        // A round's +452 is its TrcrID def's physics row (def+0x158): a rokt def lands
+        // too, the one round motor outside the throwable classes ours runs (the
+        // ballistic leg's one-shot latch) [orig: Entity_InitFromItemDef @0x49E550
+        // (@0x49E586..0x49E58C); the rokt row @0x82AD18 -> 0x443DD0].
+        const world::PhysicsClass move_row =
+                world::physics_class_from_move_function(def->move_function);
         if (think == world::ThrowClass::kNone &&
-                motor == world::ThrowClass::kNone)
+                motor == world::ThrowClass::kNone && move_row != world::PhysicsClass::Rokt)
             continue;
         world::ThrowableClassRow row;
         row.item_id = def_id - mission::kItemIdOffset;
         row.item_type_index = static_cast<int32_t>(def - items.entries);
         row.think = think;
         row.motor = motor;
+        row.move_row = move_row;
         row.health_max = world::retail_signed_i16(def->hp);
         row.armor_impact = world::retail_signed_i16(def->armor_impact);
         row.armor_kz = world::retail_signed_i16(def->armor_kz);

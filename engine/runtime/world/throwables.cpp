@@ -1143,14 +1143,29 @@ void flare_motor_tick(World &world, RoundSim &sim, LiveRound &r,
 }
 
 void throwable_round_init(World &world, LiveRound &r, const ThrowableClassRow *row) {
+    // The item's init callback is its ai_function row's (def+0x148): only the nade, schl and
+    // vmne rows spin the round, 1 deg/tick on all three words; the clym row zeroes them and
+    // stores 1 into +0x2A8 (the word the spawn's mass took); a row with no init leaves the
+    // allocation's zeroes; the guided rows' inits are init_guided's.
+    // [orig: Entity_InitFromItemDef @0x49E550 (the tail-call @0x49E5D5..0x49E5EA); the event
+    //  rows @0x813138 / @0x813150 / @0x813168 / @0x813180; Entity_InitThrowableSpin_Nade
+    //  @0x4435A0, Entity_InitThrowableSpin_Satchel @0x4435C0, Entity_InitThrowableSpin_AVMine
+    //  @0x443610, Entity_InitThrowableSpin_Claymore @0x4435E0 (@0x4435F8);
+    //  CEntityManager_AllocateSlot @0x4EAAD0 (the memset @0x4EABC8); RoundData_SpawnRound
+    //  @0x4EC0D0 (the mass @0x4EC6B7 ahead of the bind @0x4EC7B7)]
     const ThrowClass think = row != nullptr ? row->think : ThrowClass::kNone;
-    if (think != ThrowClass::kAirFlare && think != ThrowClass::kGroundFlare) {
-        // [orig: Entity_InitThrowableSpin_Nade @0x4435A0]
+    if (think == ThrowClass::kNade || think == ThrowClass::kSatchel || think == ThrowClass::kAVMine) {
         r.spin_yaw = 11930464; // 1 deg/tick
         r.spin_pitch = 11930464;
         r.spin_roll = 11930464;
         return;
     }
+    if (think == ThrowClass::kClaymore) {
+        r.spin_yaw = r.spin_pitch = r.spin_roll = 0;
+        r.mass_q16 = 1;
+        return;
+    }
+    if (think != ThrowClass::kAirFlare && think != ThrowClass::kGroundFlare) return;
     // The round's source (+0x170) [orig: RoundData_SpawnRound @0x4EC0D0 (@0x4EC670)].
     const Entity *source = world.registry.get(r.owner);
     if (think == ThrowClass::kAirFlare) {

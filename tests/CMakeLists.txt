@@ -5318,6 +5318,11 @@ add_executable(mission_start_slices_test mission/mission_start_slices_test.cpp)
 target_link_libraries(mission_start_slices_test PRIVATE opennova_test_rig)
 target_include_directories(mission_start_slices_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_start_slices COMMAND mission_start_slices_test)
+# A round's TrcrID class: the spin-init rows alone spin it, the clym init, the rokt one-shot motor
+# (run in the ballistic leg, its bound +452 skipping the tail's gravity and drag).
+add_executable(round_class_init_test world/round_class_init_test.cpp)
+target_link_libraries(round_class_init_test PRIVATE opennova_runtime)
+add_test(NAME round_class_init COMMAND round_class_init_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

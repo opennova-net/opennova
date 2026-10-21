@@ -1245,7 +1245,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     if (item_id != 0 && (!no_tracers_rule || forcetracer)) {
         r.item_type_id = item_id;
         const ThrowableClassRow *row = world.throwables.classes.get(item_id);
-        if (row != nullptr) { r.motor = row->motor; r.think = row->think; }
+        if (row != nullptr) { r.motor = row->motor; r.think = row->think; r.move_row = row->move_row; }
         throwable_round_init(world, r, row);
     }
 
@@ -1756,10 +1756,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
 
         if (ammo && r.guided_family != GuidedFamily::None) tick_guided(world, r, *ammo, authoritative);
-        // The ballistic leg's +452 call, the flares' (no other class motor is ported there)
-        // [orig: Projectile_UpdatePhysics @0x4E9D70 (@0x4EA06A..0x4EA085)].
+        // The +452 call, the flares' and rokt's [orig: Projectile_UpdatePhysics @0x4E9D70 (@0x4EA085)].
         else if ((ammo_flags & kAmmoFlagUseOwnMove) == 0 && (r.motor == ThrowClass::kAirFlare ||
                          r.motor == ThrowClass::kGroundFlare)) flare_motor_tick(world, *this, r, terrain);
+        else if (r.move_row == PhysicsClass::Rokt) rocket_motor_tick(r);
 
         // `ignore` rounds skip the stock sweep after their class motor.
         if ((ammo_flags & kAmmoFlagIgnore) != 0) continue;

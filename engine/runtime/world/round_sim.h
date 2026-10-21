@@ -60,6 +60,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/impact_damage.h>
+#include <runtime/world/physics_class_table.h>
 #include <runtime/world/projectile_target_ring.h>
 #include <runtime/world/tracer_trails.h>
 
@@ -324,6 +325,10 @@ struct LiveRound {
     // [orig: itemDef updateCallback -> +452, deathCallback -> +456].
     ThrowClass motor{};
     ThrowClass think{};
+    // The item's physics row, whose update the +452 word holds (def+0x158), the null row's
+    // nullsub_2 included [orig: Entity_InitFromItemDef @0x49E550 (@0x49E586..0x49E58C);
+    // g_EntityClassPhysicsTable @0x82ABC8].
+    PhysicsClass move_row = PhysicsClass::Null;
     // Landed-on / stuck-to entity [orig: +40 groundEntity; the motors follow
     // it through the parent's own (live − savedLivePose) delta channel —
     // Entity_InterpolateFromParentDelta @ 0x4a8d60 keeps no rider-side copy].
@@ -374,10 +379,24 @@ struct LiveRound {
 };
 
 // Whether the round's +452 motor is bound (its TrcrID item's move row, or a guided
-// family's): the ballistic tail then skips its gravity and drag. ThrowClass{} is kNone.
-// [orig: Projectile_UpdatePhysics @0x4E9D70 (the tail's test @0x4EAA34..0x4EAA4C)]
+// family's): the ballistic tail then skips its gravity and drag. ThrowClass{} is kNone;
+// the rokt row's motor is the one-shot latch (rocket_motor_tick).
+// [orig: Projectile_UpdatePhysics @0x4E9D70 (the tail's test @0x4EAA34..0x4EAA4C); the
+//  rokt row @0x82AD18 -> 0x443DD0]
 inline bool round_class_motor_bound(const LiveRound &round) {
-    return round.guided_family != GuidedFamily::None || round.motor != ThrowClass{};
+    return round.guided_family != GuidedFamily::None || round.motor != ThrowClass{} ||
+           round.move_row == PhysicsClass::Rokt;
+}
+
+// The rokt row's motor: the round's +0x2BA word (GuidedFlightState::phase, which the
+// Guided serializer sends) goes 0 -> 1 at its first call and stays. Retail calls it from
+// both legs' motor call.
+// [orig: the rokt motor @0x443DD0 (undefined code: the test @0x443DD4, the store
+//  @0x443DDE); Projectile_UpdatePhysics @0x4E9D70 (the useownmove call @0x4E9F1E, the
+//  ballistic call @0x4EA06A..0x4EA085); Entity_SerializeGuidedMissileState @0x447C50
+//  (the +0x2BA read @0x447D9F)]
+inline void rocket_motor_tick(LiveRound &round) {
+    if (round.guided.phase == 0) round.guided.phase = 1;
 }
 
 // The heat-seeker arm of the shared target query (world/local_player_targeting.cpp), as
@@ -387,7 +406,7 @@ inline bool round_class_motor_bound(const LiveRound &round) {
 // round. `query_slot` is the query entity's AI slot (+0x68; null for the missile round),
 // whose 0x200 bit the head exit reads for a team-0 query; `attacker_occupant` is the query
 // entity's +368, which the MP air-flare roll reads.
-// [orig: Entity_SpawnWeaponEffect @0x545840 (the flags @0x54591B, the call @0x545890)]
+// [orig: Entity_SpawnWeaponEffect @0x545840 (the flags @0x54591B, the Entity_FindTargets call @0x545925)]
 TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &body,
         const AiSlot *query_slot, const AmmoTableEntry &ammo, const Entity *attacker_occupant);
 // A round held as a target (TargetRef::round): its Health word (+0x11E: its TrcrID item's

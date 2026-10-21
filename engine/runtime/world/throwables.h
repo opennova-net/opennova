@@ -33,6 +33,7 @@
 
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/physics_class_table.h>
 
 namespace opennova::terrain {
 struct TerrainHeightField;
@@ -138,6 +139,9 @@ struct ThrowableClassRow {
     uint32_t attrib = 0;
     uint32_t attrib2 = 0;
     bool has_graphic_model = false;
+    // The def's physics row by its move_function, the round's +452 binding [orig:
+    // Entity_InitFromItemDef @0x49E550 (+0x1C4 = def+0x158 @0x49E586..0x49E58C)].
+    PhysicsClass move_row = PhysicsClass::Null;
 };
 
 struct ThrowableClassTable {

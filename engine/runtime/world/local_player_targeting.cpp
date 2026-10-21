@@ -69,7 +69,9 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
     const int team = occupant ? occupant->team : owner.team;
     // The head exit needs the query entity's AI slot: a team-0 query whose slot lacks the
     // 0x200 bit finds nothing, and a query with no slot (the missile round) runs on
-    // [orig: Entity_FindTargets @0x53A610 (@0x53A6BF..0x53A6E1)].
+    // [orig: Entity_FindTargets @0x53A610 (@0x53A6BF..0x53A6E1)]. A zero heat range (the
+    // ammo's +100 word) finds nothing ahead of it [orig: Entity_SpawnWeaponEffect @0x545840
+    // (the test @0x545891..0x545895; the zero return @0x54588E, its retn @0x545890)].
     if (ammo.heat_det_range == 0 ||
             (query_slot != nullptr && team == 0 && (query_slot->f[1] & 0x200) == 0))
         return {};

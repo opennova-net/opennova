@@ -1899,10 +1899,11 @@ void test_claymore_cone_trigger() {
     rig.tick(160); // drop + convert + the 62-tick arm delay
     CHECK(rig.w.throwables.devices.size() == 1);
     if (rig.w.throwables.devices.empty()) return;
-    // The cone axis is the device's LANDED facing — the witnessed 1 deg/tick
-    // init spin rotates the claymore during its drop [orig: the clym motor's
-    // Yaw -= spin @ 0x447377 over Entity_InitThrowableSpin_* rates], so the
-    // test derives placement from the device yaw rather than the throw yaw.
+    // The cone axis is the device's LANDED facing: the clym motor turns the
+    // claymore by its spin word during its drop [orig: Entity_UpdateClaymorePhysics
+    // @0x4472F0 (Yaw -= +0xA4 @0x4473E5..0x4473EB)], which the clym row's init
+    // zeroes [orig: Entity_InitThrowableSpin_Claymore @0x4435E0], so the test
+    // derives placement from the device yaw rather than the throw yaw.
     const PlacedDevice &placed = rig.w.throwables.devices[0];
     const double axis = double(placed.yaw_bam) * (2.0 * 3.14159265358979323846 / 4294967296.0);
     const Vec3 ahead{placed.pos.x + 8.0f * float(std::cos(axis)),
