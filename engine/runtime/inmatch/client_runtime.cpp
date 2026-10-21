@@ -1802,10 +1802,10 @@ bool ClientRuntime::console_command(const std::string &line) {
 			seams.version_text = profile->version_text;
 	}
 	// VERSION's title is the start-up title text, g_TitleText (the connect log's
-	// TITLE line reads the same word) [orig: Client_ProcessLocalCommand @0x520D8E - the
-	// words dword_3342E6C / dword_3342E68 @0x520D9A..0x520DA0; Game_ParseCommandLineAndInit
-	// @0x4A7310 - &g_TitleText @0x4A7CFB, the title sprintf from off_8154D8
-	// @0x4A7D30..0x4A7D3C].
+	// TITLE line reads the same word) [orig: Client_ProcessLocalCommand @0x520BF0 - the
+	// VERSION test @0x520D8E, the words dword_3342E6C / dword_3342E68 @0x520D9A..0x520DA0;
+	// Game_ParseCommandLineAndInit @0x4A7310 - &g_TitleText @0x4A7CFB, the title sprintf
+	// from off_8154D8 @0x4A7D30..0x4A7D3C].
 	if (seams.title_text.empty() && title != nullptr && title->connect_log_title != nullptr)
 		seams.title_text = title->connect_log_title;
 	seams.version_line = [this](const std::string &text) {

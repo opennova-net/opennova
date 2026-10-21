@@ -3400,8 +3400,8 @@ bool run_console_command_sends_the_line() {
 		return false;
 	// VERSION's line is "Version <version>  - <title>": the title is the start-up title
 	// text, g_TitleText (the connect log's TITLE word) [orig: Client_ProcessLocalCommand
-	// @0x520D8E - "Version %s  - %s" @0x7D00AC over the words dword_3342E6C /
-	// dword_3342E68 @0x520D9A..0x520DA0; Game_ParseCommandLineAndInit @0x4A7310 -
+	// @0x520BF0 - the VERSION test @0x520D8E, "Version %s  - %s" @0x7D00AC over the words
+	// dword_3342E6C / dword_3342E68 @0x520D9A..0x520DA0; Game_ParseCommandLineAndInit @0x4A7310 -
 	// &g_TitleText @0x4A7CFB, the title sprintf from off_8154D8 @0x4A7D30..0x4A7D3C].
 	bool version_line = false;
 	const std::string title_tail = std::string("  - ") + kJo.connect_log_title;
