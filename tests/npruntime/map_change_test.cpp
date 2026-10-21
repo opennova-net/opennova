@@ -393,6 +393,7 @@ void test_an_orphaned_row_is_reset_and_respawned_at_the_map_change() {
 	CHECK(own != nullptr && own->link.owned_entity.valid());
 	if (own == nullptr || !own->link.owned_entity.valid()) return;
 	inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+	own->net_player_serial = ++ctx.last_net_player_serial; // the re-add's draw
 	inmatch::OrphanedPlayerRow orphan;
 	orphan.row = *own;
 	orphan.row.type = inmatch::NapiNPConnection::kTypeServerSide;

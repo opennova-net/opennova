@@ -1129,6 +1129,14 @@ bool run_an_orphaned_row_is_a_player_list_row() {
 	              "the orphaned row is a 0x16 row with its slot and team, counted in game");
 }
 
+// The 0x0A and 0x57 tags among one drain, in queue order.
+std::vector<uint8_t> frame_and_rtt_tags(const std::vector<uint8_t> &tags) {
+	std::vector<uint8_t> kept;
+	for (uint8_t t : tags)
+		if (t == opennova::s2c::PER_FRAME_UPDATE || t == opennova::s2c::RTT_ECHO) kept.push_back(t);
+	return kept;
+}
+
 // D-NET-NEW-L1-24 (L1-s16): the tick's per-row walks take an orphaned row as any active row. In
 // state 6 its own 0x0A (its own body's anchor) and its own 1 Hz 0x57 go to its net player (the
 // row's +0x1C), so the player whose re-add orphaned it is sent them for that row too while its
@@ -1162,33 +1170,61 @@ bool run_an_orphaned_row_takes_its_own_frame_rtt_and_list() {
 		for (uint8_t t : tags) n += t == tag ? 1 : 0;
 		return n;
 	};
-	inmatch::emit_periodic_rtt(*f.ctx, *f.world);
-	if (!expect(count(JoinFixture::drain(f.joiner_transport), opennova::s2c::RTT_ECHO) == 1 &&
+	// The tick: the fresh row is not in the match, the orphaned row is, so its frame and its
+	// 0x57 are the ones, the 0x57 right behind the frame.
+	f.joiner().s2c_send_boundary_open = true;
+	inmatch::Server_TickUpdate(*f.ctx);
+	if (!expect(frame_and_rtt_tags(JoinFixture::drain(f.joiner_transport)) ==
+	                            std::vector<uint8_t>{opennova::s2c::PER_FRAME_UPDATE,
+	                                    opennova::s2c::RTT_ECHO} &&
 	                    f.ctx->orphaned_player_rows[0].row.reply.rtt_request_countdown == 62,
-	            "the orphaned row's own 0x57 reaches its net player; its cooldown restarts"))
+	            "the orphaned row's own 0x0A and 0x57 reach its net player; its cooldown restarts"))
 		return false;
 	f.ctx->scoreboard_broadcast_timer = 0x136u; // the boundary is the next step
 	inmatch::emit_scoreboard_boundary(*f.ctx, *f.world);
 	if (!expect(count(JoinFixture::drain(f.joiner_transport), opennova::s2c::PLAYER_LIST) == 2,
 	            "the player takes a list for each of its two rows"))
 		return false;
-	// The tick: the fresh row is not in the match, the orphaned row is, so its frame is the one.
-	f.joiner().s2c_send_boundary_open = true;
-	inmatch::Server_TickUpdate(*f.ctx);
-	if (!expect(count(JoinFixture::drain(f.joiner_transport), opennova::s2c::PER_FRAME_UPDATE) == 1,
-	            "the orphaned row's own 0x0A reaches its net player"))
-		return false;
 	// The player leaves: the orphaned row stays active and reads no net player.
 	if (!expect(inmatch::destroy_connection(*f.ctx, peer, nullptr) &&
 	                    f.ctx->orphaned_player_rows.size() == 1,
 	            "the leave frees the current row alone")) return false;
 	(void)JoinFixture::drain(f.joiner_transport);
-	for (int i = 0; i < 70; ++i) inmatch::emit_periodic_rtt(*f.ctx, *f.world);
+	for (int i = 0; i < 70; ++i) inmatch::Server_TickUpdate(*f.ctx);
 	f.ctx->scoreboard_broadcast_timer = 0x136u;
 	inmatch::emit_scoreboard_boundary(*f.ctx, *f.world);
 	return expect(f.ctx->orphaned_player_rows[0].row.link.transport == nullptr &&
 	                      JoinFixture::drain(f.joiner_transport).empty(),
 	              "past the leave nothing goes through the orphaned row");
+}
+
+// D-NET-NEW-L1-24 (V-ROLL on L1-s16): the per-slot block takes one row at a time, its frame and
+// then its 0x57, so a net player with two rows in state 6 is queued [0x0A, 0x57] for the lower
+// slot ahead of the higher slot's [0x0A, 0x57], never both frames ahead of both 0x57s.
+// [orig: Server_TickUpdate's per-slot block @0x51E385..0x51E47C - the pump call @0x51E3E4
+//  (Server_SendPlayerSlotStateFrame @0x51BBA0 -> Server_SendEntityStateToPlayer @0x517BA0,
+//  sent @0x517CB5), then the 0x57 @0x51E450, per row in slot order]
+bool run_a_players_two_rows_interleave_frame_and_rtt() {
+	JoinFixture f(/*with_existing=*/false);
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.reply.admission_metadata_pushed = true;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the pump adds the joiner")) return false;
+	j.burst.spawned = true;
+	j.spawn_queue_unlinked = false;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    f.ctx->orphaned_player_rows.size() == 1,
+	            "the re-add orphans the in-match row")) return false;
+	// The fresh row's burst ends too: both rows are in state 6, both cooldowns at 0.
+	f.joiner().burst.spawned = true;
+	f.joiner().s2c_send_boundary_open = true;
+	(void)JoinFixture::drain(f.joiner_transport);
+	inmatch::Server_TickUpdate(*f.ctx);
+	const uint8_t frame = opennova::s2c::PER_FRAME_UPDATE;
+	const uint8_t rtt = opennova::s2c::RTT_ECHO;
+	return expect(frame_and_rtt_tags(JoinFixture::drain(f.joiner_transport)) ==
+	                      std::vector<uint8_t>{frame, rtt, frame, rtt},
+	              "each row's 0x57 follows its own 0x0A, ahead of the next row's");
 }
 
 // D-NET-NEW-L1-24 (Q7-31 (b), leg (b)): a C2S 0x02 in the NovaWorld ticket wait (game states 3
@@ -1300,6 +1336,7 @@ int main() {
 	if (!run_a_repeated_echo_adds_the_player_again()) ++failures;
 	if (!run_an_orphaned_row_is_a_player_list_row()) ++failures;
 	if (!run_an_orphaned_row_takes_its_own_frame_rtt_and_list()) ++failures;
+	if (!run_a_players_two_rows_interleave_frame_and_rtt()) ++failures;
 	if (!run_an_echo_in_the_ticket_wait_spawns_without_a_ticket()) ++failures;
 	if (!run_a_repeated_echo_keeps_the_held_nag_stamp()) ++failures;
 	if (failures != 0) return 1;

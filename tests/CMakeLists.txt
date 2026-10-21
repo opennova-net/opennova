@@ -5070,6 +5070,11 @@ target_link_libraries(npruntime_host_close_order_test PRIVATE opennova_net openn
 target_include_directories(npruntime_host_close_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(npruntime_host_close_order_test PRIVATE cxx_std_17)
 add_test(NAME npruntime_host_close_order COMMAND npruntime_host_close_order_test)
+# D-NET-NEW-L1-24: the auto-balance, the A&D swap arm and the list builder's hide test take an
+# orphaned row as any active row; its net player is bound by identity, not by the re-stampable id.
+add_executable(npruntime_orphan_row_walks_test npruntime/orphan_row_walks_test.cpp)
+target_link_libraries(npruntime_orphan_row_walks_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_orphan_row_walks COMMAND npruntime_orphan_row_walks_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

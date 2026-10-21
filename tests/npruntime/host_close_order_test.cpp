@@ -389,6 +389,7 @@ void test_close_resets_an_orphaned_row_through_its_net_player() {
 	joiner.client_scrk = "CLIENT-ORPHAN-SCRK";
 	joiner.server_scrk = server_scrk;
 	joiner.slot_state = inmatch::PlayerSlotState::Joined;
+	joiner.net_player_serial = ++host->ctx().last_net_player_serial; // the re-add's draw
 	inmatch::OrphanedPlayerRow orphan;
 	orphan.row = joiner; // the joiner's row as its re-add left it, on another slot
 	orphan.row.reply.player_slot = 5;

@@ -29,8 +29,10 @@ void refresh_next_flag_state(NapiNPServerCtx &ctx, world::World &world);
 // The 1 Hz requester-targeted S2C 0x81 score refresh.
 void emit_requester_score_refreshes(NapiNPServerCtx &ctx, world::World &world);
 
-// The per-slot RTT request clock.
-void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world);
+// One row's leg of the per-slot block's RTT request clock: the row's cooldown, then its 0x57
+// to its net player (the row itself, or an orphaned row's live connection; none once gone).
+void emit_row_rtt(NapiNPServerCtx &ctx, const world::World &world, NapiNPConnection &row,
+		NapiNPConnection *net_player);
 
 // The scoreboard boundary (the 0x16 and the integrity family), every tick after
 // the script pass and ahead of the play-tick walk.

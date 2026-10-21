@@ -47,18 +47,23 @@ bool slot_active(const NapiNPConnection &conn) {
 //  latch @0x522519..0x522520]
 void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 	if (!rotation.setnext_latch || rotation.is_flipped) {
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!slot_active(conn) || !conn.link.owned_entity.valid()) continue;
+		const auto swap_row = [](NapiNPConnection &conn) {
 			if (conn.spectator_restore_team != 0) {
 				conn.assigned_team = conn.spectator_restore_team;
 				conn.assigned_team_valid = true;
 			}
-			if (!conn.assigned_team_valid) continue;
+			if (!conn.assigned_team_valid) return;
 			if (conn.assigned_team == 1)
 				conn.assigned_team = 2;
 			else if (conn.assigned_team == 2)
 				conn.assigned_team = 1;
-		}
+		};
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
+			if (slot_active(conn) && conn.link.owned_entity.valid()) swap_row(conn);
+		// An orphaned row is a live row of the walk (D-NET-NEW-L1-24) [orig: Game_TeardownMission
+		//  - +4 and the entity pointer @0x522470..0x522479 over every row].
+		for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
+			if (orphan.row.link.owned_entity.valid()) swap_row(orphan.row);
 		// A Serve Only host's own slot 0 is live there too.
 		if (ctx.host_slot.active) {
 			if (ctx.host_slot.team == 1)
@@ -203,7 +208,8 @@ void reset_all_player_slots(HostRole &role) {
 	//  row's +0x1C @0x51619C, the 0x25 to the row @0x5161C2..0x5161D4, the null test
 	//  @0x5161DB and CNetPlayer_SetGameState(8) called @0x5161E1, state 1 @0x5161FD;
 	//  NapiNPServer_SendFiltered @0x4C87E0 - the 0x20 arm, the row's +0x1C @0x4C8A1F, its
-	//  connection's state @0x4C8A34]
+	//  connection's type (+0x24 == 1, server side) @0x4C8A30..0x4C8A34;
+	//  CNapiNPConnection_Create @0x62ACB0 stores the type @0x62AD6C]
 	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
 		NapiNPConnection &row = orphan.row;
 		NapiNPConnection *net_player = orphan_net_player(ctx, orphan);

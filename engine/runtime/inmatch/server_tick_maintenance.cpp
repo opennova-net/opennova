@@ -4,7 +4,6 @@
 #include <runtime/inmatch/server_dispatch_join.h> // admission_padding_probe
 #include <runtime/inmatch/server_overlay_state.h>     // the 14-tick minimap overlay visits
 #include <runtime/inmatch/server_player_death.h>     // the flag reset's Health store (kill_player_body_at_frame_tail)
-#include <runtime/inmatch/server_spawn.h>            // Server_AdvanceFreeRowTicks (the tail walk's free rows)
 
 #include <algorithm>
 #include <cstdint>
@@ -620,48 +619,35 @@ bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
 	return false;
 }
 
-// [orig: Server_TickUpdate @0x51D7E0] The player-slot
-// cooldown advances even while the connection's send boundary is closed.
-// State 6, an open boundary, and a live round admit one reliable 62-flush
-// RTT request. Death/deploy do not reset or suppress this clock.
-void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world) {
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.phase < ConnectionPhase::PlayerAdded ||
-				conn.phase >= ConnectionPhase::Goodbye || conn.host_disconnect_sent) continue;
-		if (conn.reply.rtt_request_countdown > 0) --conn.reply.rtt_request_countdown;
-		if (!ctx.is_in_session || world.match.outcome().ended ||
-				!is_in_match(conn) || conn.link.transport == nullptr ||
-				conn.s2c_send_holdoff_countdown != 0 || conn.reply.rtt_request_countdown != 0) continue;
-		conn.reply.rtt_request_countdown = 62;
-		std::vector<uint8_t> body;
-		io::append_u32_le(body, io::host_milliseconds_for_logic_tick(world.logic_tick));
-		body.push_back(1);
-		conn.link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
-	}
-	// An orphaned row is an active row of the walk (D-NET-NEW-L1-24): its own cooldown steps,
-	// and in state 6 its 0x57 goes to its net player (send_mask 2, the row's +0x1C) at that
-	// player's open boundary, so the player is sent one per row. Past the player's leave the
-	// row reads no net player (Q7-36 (a)).
-	// [orig: Server_TickUpdate - the row's +0x1C @0x51E3AA, the cooldown @0x51E3BB..0x51E3C8,
-	//  the connection's boundary @0x51E3D6, the session @0x51E3F3, the round, the cooldown and
-	//  state 6 @0x51E40B, the 0x57 to the net player @0x51E44A / @0x51E450]
-	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
-		NapiNPConnection &row = orphan.row;
-		if (row.reply.rtt_request_countdown > 0) --row.reply.rtt_request_countdown;
-		NapiNPConnection *net_player = orphan_net_player(ctx, orphan);
-		if (net_player == nullptr || !ctx.is_in_session || world.match.outcome().ended ||
-				!row.burst.spawned || net_player->host_disconnect_sent ||
-				net_player->link.transport == nullptr ||
-				net_player->s2c_send_holdoff_countdown != 0 ||
-				row.reply.rtt_request_countdown != 0)
-			continue;
-		row.reply.rtt_request_countdown = 62;
-		std::vector<uint8_t> body;
-		io::append_u32_le(body, io::host_milliseconds_for_logic_tick(world.logic_tick));
-		body.push_back(1);
-		net_player->link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
-	}
-	Server_AdvanceFreeRowTicks(ctx); // the same walk's inactive rows (D-NET-351)
+// One row's 0x57 leg of the per-slot block (Server_TickUpdate walks the rows in slot order,
+// each row's frame then this). The row's cooldown advances even while its net player's send
+// boundary is closed; state 6, an open boundary and a live round admit one reliable 62-flush
+// RTT request to the row's net player (send_mask 2, the row's +0x1C), so a player is sent one
+// per row. Death/deploy do not reset or suppress this clock. A connection's own row steps
+// from its add until its description is sent; an orphaned row (D-NET-NEW-L1-24) steps for as
+// long as it lives and, past its net player's leave, reads no net player (Q7-36 (a)). The
+// cooldown's step ahead of the pump call is read by nothing the frame writes.
+// [orig: Server_TickUpdate @0x51D7E0 - the row's +0x1C @0x51E3AA, the cooldown
+//  @0x51E3BB..0x51E3C8, the connection's boundary @0x51E3D6, the session @0x51E3F3, the
+//  round, the cooldown and state 6 @0x51E40B, the reload @0x51E40D, the 0x57 to the net
+//  player @0x51E44A / @0x51E450]
+void emit_row_rtt(NapiNPServerCtx &ctx, const world::World &world, NapiNPConnection &row,
+		NapiNPConnection *net_player) {
+	if (net_player == &row && (row.phase < ConnectionPhase::PlayerAdded ||
+			row.phase >= ConnectionPhase::Goodbye || row.host_disconnect_sent))
+		return;
+	if (row.reply.rtt_request_countdown > 0) --row.reply.rtt_request_countdown;
+	if (net_player == nullptr || !ctx.is_in_session || world.match.outcome().ended ||
+			!row.burst.spawned || net_player->host_disconnect_sent ||
+			net_player->link.transport == nullptr ||
+			net_player->s2c_send_holdoff_countdown != 0 ||
+			row.reply.rtt_request_countdown != 0)
+		return;
+	row.reply.rtt_request_countdown = 62;
+	std::vector<uint8_t> body;
+	io::append_u32_le(body, io::host_milliseconds_for_logic_tick(world.logic_tick));
+	body.push_back(1);
+	net_player->link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
 }
 
 // The server-info refresh: the countdown steps down once a server tick; at zero or below it

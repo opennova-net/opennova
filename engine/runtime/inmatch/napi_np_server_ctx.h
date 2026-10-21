@@ -241,11 +241,12 @@ using PlayerRowFreeTicks = std::array<int32_t, 256>;
 // free-row pick, the free-tick walk, the alive count and the team counts (D-NET-NEW-L1-24), and
 // as a slot row it is a 0x16 row and keys its squad (D-NET-NEW-L1-24, L1-s15). Every slot walk
 // takes it as any row: the reset's 0x25 walk, the round init's re-spawn and the tick's per-slot
-// block (L1-s16).
+// block (L1-s16); the auto-balance, the A&D swap arm and the list builder's hide test (L1-s17).
 // Ours keeps a row inside its connection, so the orphaned row is the connection as the re-add
 // found it: `row` holds the row's own words (its body, slot, state word, burst cursors, slot
 // team, spectator latch, squad key, kit, the 1 Hz cooldown); its net-player words are never
-// read from the copy but through the live connection orphan_net_player finds by `row`'s id.
+// read from the copy but through the live connection orphan_net_player finds by the net
+// player's identity `row` keeps (net_player_serial, which the 0x48's id re-stamp never moves).
 // Once that connection leaves, retail's +0x1C names a freed net player and its later reads
 // through the row read freed memory; ours reads nothing there, a deliberate fix of a retail
 // bug (the maintainer, 2026-10-21, via main, Q7-36 (a)).
@@ -768,6 +769,8 @@ struct NapiNPServerCtx {
 	PlayerRowFreeTicks player_row_free_ticks{};
 	// The rows a re-add orphaned (OrphanedPlayerRow); the table's allocation clears them.
 	std::vector<OrphanedPlayerRow> orphaned_player_rows;
+	// The last net-player identity drawn for an orphaned row (NapiNPConnection::net_player_serial).
+	uint32_t last_net_player_serial = 0;
 
 	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
 	// compiler-default special members suffice.
@@ -777,12 +780,14 @@ struct NapiNPServerCtx {
 };
 
 // An orphaned row's net player (+0x1C): the live connection the re-add left the row on, found by
-// the row's connection id, with the row's transport pointed at that connection's for the walk;
-// none once the connection has left (ids are never reused), when the row's transport is cleared,
-// where retail reads a freed net player (Q7-36 (a), OrphanedPlayerRow).
+// the net player's identity (net_player_serial; never the connection id, which a C2S 0x48
+// re-stamps), with the row's transport pointed at that connection's for the walk; none once the
+// connection has left (identities are never reused), when the row's transport is cleared, where
+// retail reads a freed net player (Q7-36 (a), OrphanedPlayerRow).
 inline NapiNPConnection *orphan_net_player(NapiNPServerCtx &ctx, OrphanedPlayerRow &orphan) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.connection_id != orphan.row.connection_id) continue;
+		if (conn.net_player_serial == 0 || conn.net_player_serial != orphan.row.net_player_serial)
+			continue;
 		orphan.row.link.transport = conn.link.transport;
 		return &conn;
 	}

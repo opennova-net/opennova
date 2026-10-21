@@ -511,6 +511,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	//  ServerLog_BufferAndFlush's g_CreateSvrLogTxt gate @0x4FC0C3..0x4FC0CA]
 	if (!player_slot.has_value()) return {};
 
+	// The remote add stamps the row's time in the server ahead of its body; the host's own arm
+	// and the round init's re-spawn store none [orig: Server_PlayerAdd @0x51CBC0 - GetTickCount
+	//  stored at +0x170B0 @0x51CD95; the own arm @0x51CC24..0x51CC60].
+	if (!round_init && conn.type != NapiNPConnection::kTypeClientSide)
+		conn.row_added_host_ms = ctx.np_protocol.host_run_duration_ms;
+
 	// The type-2 loopback is the host's OWN client (input-ordered, publishes cached.local_player); a
 	// type-1 node is a remote joiner the host snaps from the wire (never the local player). [ADR 0012]
 	const bool is_host_own = (conn.type == NapiNPConnection::kTypeClientSide);
@@ -1009,6 +1015,8 @@ void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn
 //  @0x51CD06, +0x1C @0x51CD4E, +0xC0 rebound @0x51CD51; the earlier row's +0x1C left pointing at
 //  the net player]
 static void orphan_player_row(NapiNPServerCtx &ctx, NapiNPConnection &conn) {
+	// The row's +0x1C keeps naming this net player whatever its id becomes (net_player_serial).
+	if (conn.net_player_serial == 0) conn.net_player_serial = ++ctx.last_net_player_serial;
 	OrphanedPlayerRow orphan;
 	orphan.row = conn; // the row's words as the re-add found them (OrphanedPlayerRow)
 	orphan.row.link.transport = nullptr; // its sends go through its net player (orphan_net_player)

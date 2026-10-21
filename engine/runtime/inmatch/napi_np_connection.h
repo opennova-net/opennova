@@ -469,6 +469,16 @@ struct NapiNPConnection {
 	// [orig +0x18] ConnectionId / dcb — the join-order id a player record is matched by [orig:
 	// NapiNP_GetLocalConnectionId @0x4c6d40; Player_FindLocalPlayerEntity @0x4e0090 numeric match].
 	uint32_t connection_id = 0;
+	// The net player's identity an orphaned row's +0x1C pointer holds (OrphanedPlayerRow): drawn
+	// from the context's counter at the connection's first orphaned row, 0 until then. Unlike
+	// connection_id, which a C2S 0x48 re-stamps, nothing rewrites it, as nothing rewrites a
+	// row's +0x1C [orig: Server_PlayerAdd @0x51CBC0 - +0x1C @0x51CD4E].
+	uint32_t net_player_serial = 0;
+	// The row's add stamp (+0x170B0): the host clock at the remote add, the auto-balance's
+	// time-in-server key; a re-add's fresh row takes its own, its orphaned row keeps the first
+	// [orig: Server_PlayerAdd @0x51CBC0 - GetTickCount stored @0x51CD95;
+	//  Server_AutoBalanceTeams @0x4FCC30 - the key `sub ecx, [esi+170B0h]` @0x4FCC82].
+	uint32_t row_added_host_ms = 0;
 
 	// The PER-PLAYER tick seed shipped as S2C 0x61 and stamped into this player's slot as the
 	// fire-freshness floor. Retail re-rolls it as `((rand() & 0xFE) + 1) << 16` on join,

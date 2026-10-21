@@ -77,15 +77,22 @@ std::vector<GameEntitySnapshot> snapshot_entity_states(const NapiNPServerCtx &ct
 	// is admitted only to its owner's list (the JO reduction of the
 	// slot+97536 hide byte — see replication_model.h owner_hidden)
 	// [orig: Server_BuildEntityPriorityList @0x50e6fd].
-	for (const NapiNPConnection &oc : ctx.np_protocol.connection_list) {
-		if (!oc.link.spectator || !oc.link.owned_entity.valid()) continue;
+	// The owning row is any active row, an orphaned one too (D-NET-NEW-L1-24): its own latch
+	// hides its body from every recipient row but itself, its net player's fresh row included.
+	// [orig: Entity_ValidatePtr @0x500910 - the walk over every active row @0x500930..0x500938;
+	//  Server_BuildEntityPriorityList - the owning row's +0x17D01 / +0x17D00 @0x50E6F4 /
+	//  @0x50E6FD]
+	const auto hide_owned_body = [&ents](const NapiNPConnection &row) {
+		if (!row.link.spectator || !row.link.owned_entity.valid()) return;
 		for (GameEntitySnapshot &es : ents) {
-			if (es.wire_handle == oc.link.owned_entity.packed) {
+			if (es.wire_handle == row.link.owned_entity.packed) {
 				es.owner_hidden = true;
 				break;
 			}
 		}
-	}
+	};
+	for (const NapiNPConnection &oc : ctx.np_protocol.connection_list) hide_owned_body(oc);
+	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) hide_owned_body(orphan.row);
 	return ents;
 }
 
