@@ -119,6 +119,47 @@ void NwuLobbySession::log_connection_down() {
 			value(record.dpc) + ",\"" + record.ddstr + "\"]");
 }
 
+// The record's lines over its sender and SN. [orig: Network_LogSessionDiscovered @0x4CF960 -
+//  Napi_FormatAddress of the record's +0x18 / +0x1C @0x4CF9A5, "%s : NWU SESSION DISCOVERED AT %s
+//  [%s]" over +0x1FC (the append @0x4CF9DD); Network_LogSessionRemoved @0x4CFA00 - "%s : NWU
+//  SESSION AT %s [%s] HAS BEEN REMOVED." (the append @0x4CFA7D); both installed on the enumerator
+//  by CNapiGameSession_InitPlayerConnection @0x4D4160 (+0x1C @0x4D420D, +0x20 @0x4D4221), the
+//  discovery called by Nwu_HandleServerHello (@0x6278FE / @0x627BE2), the removal by
+//  NapiNPTimer_Destroy @0x621E50 (the call @0x621E6F)]
+void NwuLobbySession::note_server_hello(const PeerAddr &from) {
+	const std::string &name = session_->server_hello_name();
+	for (auto it = records_.begin(); it != records_.end(); ++it) {
+		if (!(it->from == from)) continue;
+		// The record kept for this sender: the same SN refreshes it, another one replaces it.
+		// [orig: Nwu_HandleServerHello - sub_621EE0 (the call @0x62766C), the SN compare
+		//  @0x627928, NapiNPTimer_Destroy (the call @0x627941)]
+		if (it->name == name) return;
+		if (connect_log_on())
+			connect_log("NWU SESSION AT " + peer_addr_to_string(it->from) + " [" + it->name +
+					"] HAS BEEN REMOVED.");
+		records_.erase(it);
+		break;
+	}
+	records_.push_back(SessionRecord{ from, name });
+	if (connect_log_on())
+		connect_log("NWU SESSION DISCOVERED AT " + peer_addr_to_string(from) + " [" + name + "]");
+}
+
+void NwuLobbySession::note_session_drains() {
+	if (!session_ || session_->enumerator_drains() == drains_seen_) return;
+	drains_seen_ = session_->enumerator_drains();
+	drain_records();
+}
+
+void NwuLobbySession::drain_records() {
+	for (const SessionRecord &record : records_) {
+		if (connect_log_on())
+			connect_log("NWU SESSION AT " + peer_addr_to_string(record.from) + " [" + record.name +
+					"] HAS BEEN REMOVED.");
+	}
+	records_.clear();
+}
+
 bool NwuLobbySession::resolve(const std::string &host, uint16_t port, PeerAddr &out) const {
 	PeerAddr addr;
 	const bool ok = env_.resolve_ipv4 ? env_.resolve_ipv4(host, addr) : parse_dotted_quad(host, addr);
@@ -301,7 +342,10 @@ void NwuLobbySession::send_gate_probe() {
 	gate_socket_->send_to(gate_peer_, gate_probe_datagram_.data(), gate_probe_datagram_.size());
 }
 
+// The connection's destroy drains the enumerator's records. [orig: CNapiNPConnection_Destroy
+//  @0x62A4B0 - NapiNPEnumerator_DrainTimerList (the call @0x62A554)]
 void NwuLobbySession::close() {
+	drain_records();
 	session_.reset();
 	probe_sent_ = false;
 	gate_probe_datagram_.clear();
@@ -453,6 +497,7 @@ void NwuLobbySession::abort_connect() {
 	session_->abort_connect(out);
 	for (const auto &dg : out)
 		send(dg);
+	note_session_drains();
 }
 
 // The reset the connect waits run on a failure: a connection still up tears down (its burst out),
@@ -475,6 +520,7 @@ void NwuLobbySession::fail_connect(int code) {
 	session_->request_disconnect(out);
 	for (const auto &dg : out)
 		send(dg);
+	drain_records(); // the destroy's [orig: CNapiNPConnection_Destroy - the call @0x62A554]
 	if (hooks_.on_fatal)
 		hooks_.on_fatal(novaworld_connect_error_tag(code));
 	session_.reset();
@@ -854,6 +900,14 @@ std::vector<uint8_t> NwuLobbySession::begin_session() {
 			connect_log("NWU PROCESSING " + std::to_string(bytes) + " BYTES FROM " +
 					peer_addr_to_string(nw_peer_));
 	};
+	// [orig: Network_LogUnknownNWUMessage @0x4CDF90 - "%s : NWU UNKNOWN MESSAGE!! [%ld, %ld bytes]"
+	//  over the tag and the length (the append @0x4CDFEB), installed as the protocol's +0x27C
+	//  @0x4D42CF]
+	cfg.on_unknown_message = [this](uint8_t tag, std::size_t bytes) {
+		if (connect_log_on())
+			connect_log("NWU UNKNOWN MESSAGE!! [" + std::to_string(tag) + ", " +
+					std::to_string(bytes) + " bytes]");
+	};
 
 	session_ = std::make_unique<ClientSession>(cfg);
 	session_->set_clock_ms(clock_ms_);
@@ -899,6 +953,28 @@ void NwuLobbySession::send(const std::vector<uint8_t> &dg) {
 //  @0x61EC9F..0x61ECC6]
 void NwuLobbySession::send_one(const PeerAddr &to, const std::vector<uint8_t> &dg) {
 	if (to.ip == 0) return;
+	send_datagram(to, dg);
+	// A missing-sequence list naming a sequence, once sent. [orig: NWU_LogIncomingPacketError
+	//  @0x4CE010 - "%s : NWU INCOMING PACKET ERROR!!" (the append @0x4CE05A), installed as the
+	//  protocol's +0x280 @0x4D42DC; CNapiNPConnection_SendMissingSeqList @0x623560 - a nonzero
+	//  entry @0x62368A..0x623690, after CNapiNPManager_SendTo (the call @0x623766) the client's
+	//  callback @0x6237AA..0x6237BD]
+	if (connect_log_on()) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (nw_decode_inbound(dg.data(), dg.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_RESEND_LIST) {
+			for (std::size_t at = 4; at + 4 <= body.size(); at += 4) {
+				if (io::read_u32_le(body.data() + at) != 0) {
+					connect_log("NWU INCOMING PACKET ERROR!!");
+					break;
+				}
+			}
+		}
+	}
+}
+
+void NwuLobbySession::send_datagram(const PeerAddr &to, const std::vector<uint8_t> &dg) {
 	// Each NWU datagram the connection sends, ahead of the send: its length past the envelope
 	// (opcode included), its address, its opcode and, for a session packet, its packet sequence
 	// (0 for the others). [orig: Network_LogNWUSendPacket @0x4CDED0 - "%s : NWU SENDING %ld
@@ -961,15 +1037,27 @@ void NwuLobbySession::poll_session() {
 		rx.state_before = static_cast<int>(session_->state());
 		std::vector<std::vector<uint8_t>> replies;
 		const uint32_t hellos_taken = session_->server_hellos_taken();
+		const uint32_t resend_lists = session_->resend_lists_named();
 		rx.ok = session_->handle_datagram(rx.bytes.data(), rx.bytes.size(), replies);
-		// A 0x81 the connection took points it at the reply's sender, where its 0x42 goes.
+		// A 0x81 the connection took makes its record and points the connection at the reply's
+		// sender, where its 0x42 goes.
 		// [orig: CNapiNPConnection_InitFromSession @0x626320 - the session record's address
 		//  and port into the connection @0x6263B4 / @0x6263B7]
-		if (session_->server_hellos_taken() != hellos_taken) nw_peer_ = from;
+		if (session_->server_hellos_taken() != hellos_taken) {
+			note_server_hello(from);
+			nw_peer_ = from;
+		}
 		rx.state_after = static_cast<int>(session_->state());
 		rx.replies = replies.size();
 		if (hooks_.on_received) hooks_.on_received(rx);
 		for (const auto &dg : replies) send(dg);
+		// A resend list that named a sequence, once its resends are out.
+		// [orig: NWU_LogOutgoingPacketError @0x4CE080 - "%s : NWU OUTGOING PACKET ERROR!!" (the
+		//  append @0x4CE0CA), installed as the protocol's +0x284 @0x4D42E9; NapiNP_HandleResendList
+		//  @0x623800 - the call @0x623A37]
+		if (session_->resend_lists_named() != resend_lists)
+			connect_log("NWU OUTGOING PACKET ERROR!!");
+		note_session_drains();
 		if (!rx.ok) {
 			// While the first connect's poll runs, the poll reports the failure with the menu's
 			// NWEC (a rejected verify leaves the session down: the connection wait's NWEC48),
@@ -992,6 +1080,7 @@ void NwuLobbySession::poll_session() {
 	session_->pump(pumped);
 	session_->process_periodic_update();
 	for (const auto &dg : pumped) send(dg);
+	note_session_drains();
 	if (session_->state() == ClientSession::State::Closed && session_->disconnected_by_peer()) {
 		if (hooks_.on_session_state) hooks_.on_session_state();
 	}

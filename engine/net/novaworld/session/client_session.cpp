@@ -513,6 +513,7 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 	//  @0x6200F2]
 	if (!server_hello_is_ours(sh)) return;
 	++server_hellos_taken_;
+	server_hello_name_ = sh.sn;
 	if (reconnecting()) {
 		// The re-join: the probe stops and InitFromSession re-keys the connection (a fresh CK
 		// and SCRK, this hello's HK, the peer's keys and the CS template reset) into the 0x42
@@ -705,6 +706,7 @@ void ClientSession::abort_connect(std::vector<std::vector<uint8_t>> &out) {
 	request_disconnect(out);
 	first_probe_stopped_ = true;
 	reconnect_.probing = false;
+	++enumerator_drains_; // [orig: CNapiGameSession_PumpConnection - the call @0x4D0A84]
 	// A down connection leaves its state 4: the periodic update's leg moves it to 2 before its
 	// abort. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - SetState(2) @0x4D4477]
 	connection_down_ = false;
@@ -917,7 +919,9 @@ void ClientSession::on_server_resend_list(const std::vector<uint8_t> &body,
                                           std::vector<std::vector<uint8_t>> &out) {
 	std::vector<uint32_t> requested;
 	if (!decode_session_resend_list(body.data(), body.size(), client_key_, requested)) return;
+	bool named = false;
 	for (uint32_t requested_sequence : requested) {
+		if (requested_sequence != 0) named = true;
 		const uint32_t sequence = requested_sequence == 0 ? seq_.next_outbound_seq : requested_sequence;
 		std::vector<uint8_t> body_out;
 		if (!frame_session_packet_for_sequence(seq_, SessionCrypto{client_scrk_, {}, server_sk_},
@@ -926,6 +930,7 @@ void ClientSession::on_server_resend_list(const std::vector<uint8_t> &body,
 		}
 		out.push_back(nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(body_out)));
 	}
+	if (named) ++resend_lists_named_;
 }
 
 void ClientSession::finish_receive_batch(std::vector<std::vector<uint8_t>> &out) {
@@ -1009,6 +1014,9 @@ void ClientSession::pump_reconnect(std::vector<std::vector<uint8_t>> &out) {
 		grow_reconnect_gap();
 		return;
 	}
+	// The window's open drains the enumerator's records and restarts its timer.
+	// [orig: PumpStateMachine - the drain (the call @0x629646), the start @0x62965B..0x629667]
+	++enumerator_drains_;
 	reconnect_.probing = true;
 	reconnect_.window_start_ms = clock_ms_;
 	reconnect_.probe_sent = false;
@@ -1089,13 +1097,19 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 					apply_cs_config_update(pm);
 				continue;
 			}
-			if (pm.full_tag != 0) continue;           // only layer-4 lobby containers
-
 			// FIRST/MID/FINAL records fold into one statement before dispatch (a long
-			// ClientRequestVerifyResult reply spans several packets).
-			// [orig: CNapiNPConnection_DispatchMessage @0x622570]
+			// ClientRequestVerifyResult reply spans several packets); the fold runs ahead of the
+			// tag's lookup, and the client registers tag 0 alone (the layer-4 lobby container):
+			// any other tag, once whole, is an unknown message.
+			// [orig: CNapiNPConnection_DispatchMessage @0x622570 - the split buffer
+			//  @0x6225C7..0x62266B, NapiNPProtocol_FindMsgInfo (the call @0x622691), the unknown
+			//  leg @0x6226FB..0x62272A]
 			std::vector<uint8_t> assembled;
 			if (!reassemble_protocol_payload(reassembly_, pm, assembled)) continue;
+			if (pm.full_tag != 0) {
+				if (cfg_.on_unknown_message) cfg_.on_unknown_message(pm.tag, assembled.size());
+				continue;
+			}
 			if (assembled.empty()) continue;          // ack-only
 
 			std::vector<NapiMessage> containers;
@@ -1288,9 +1302,12 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		session_role_ = kSessionRoleNone;
 		mission_exit_reason_ = 12;
 		disconnected_by_peer_ = true;
-		// RequestDisconnect: the teardown's burst and disconnect callback.
-		// [orig: HandlePuntNotification @0x4d20b0 -> CNapiNPConnection_RequestDisconnect]
+		// RequestDisconnect: the teardown's burst and disconnect callback, then the enumerator's
+		// records drained.
+		// [orig: HandlePuntNotification @0x4d20b0 -> CNapiNPConnection_RequestDisconnect
+		//  (the call @0x4D21A4), NapiNPEnumerator_DrainTimerList (the call @0x4D21C8)]
 		teardown_connection(out);
+		++enumerator_drains_;
 		notices_.push_back(std::move(notice));
 		return;
 	}

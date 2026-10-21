@@ -89,6 +89,9 @@ bool decode(const std::vector<uint8_t> &dg, uint8_t &opcode, std::vector<uint8_t
 }
 
 const PeerAddr kServer{ 0x0100007Fu, 64206 }; // 127.0.0.1:64206, the gate's one UDPNOVAWORLD
+// The enumerator's record of kServer's 0x81 (its SN, the service's "OpenNova"): its two lines.
+const std::string kDiscovered = "NWU SESSION DISCOVERED AT 127.0.0.1:64206 [OpenNova]";
+const std::string kRemoved = "NWU SESSION AT 127.0.0.1:64206 [OpenNova] HAS BEEN REMOVED.";
 
 // One connect on in-memory sockets: the gate names kServer, and the session starts on the
 // first tick.
@@ -685,7 +688,9 @@ void check_connect_log_gate_and_connect() {
 	rig.session.inbound.push_back(
 			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
 	rig.lobby.tick(1300);
-	CHECK(rig.log.empty());
+	// The 0x81 the connection takes makes the enumerator's record.
+	CHECK(rig.log == std::vector<std::string>{ kDiscovered });
+	rig.log.clear();
 	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 	rig.session.inbound.push_back({ kServer, server_auth_to(auth) });
 	rig.lobby.tick(1400);
@@ -698,7 +703,10 @@ void check_connect_log_gate_and_connect() {
 	rig.lobby.tick(1500);
 	CHECK((rig.log == std::vector<std::string>{ "NWU YIPPEE WE ARE CONNECTED AND VALIDATED." }));
 	CHECK(rig.fatals.empty());
+	// The connection's destroy drains the record.
+	rig.log.clear();
 	rig.lobby.close();
+	CHECK(rig.log == std::vector<std::string>{ kRemoved });
 }
 
 // The NWU protocol's packet lines: each datagram the connection sends, ahead of its send, with
@@ -756,6 +764,88 @@ void check_connect_log_packet_lines() {
 //  CNapiGameSession_PollConnectPhase2 @0x4D4D70 - @0x4D4DF9; CGameSession_WaitForNWUConnection
 //  @0x4D1230 - "%s : NWU TIMEOUT2!!!" @0x4D1287, "%s : NWU NOT CONNECTED FOR SOME REASON..."
 //  @0x4D1372]
+// The service's 0x43 to the session's 0x42 `auth_dg` carrying one layer-4 record of `tag` with
+// `payload`, at packet sequence `seq`.
+std::vector<uint8_t> server_record_to(const std::vector<uint8_t> &auth_dg, uint8_t tag,
+		const std::vector<uint8_t> &payload, uint32_t seq) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	if (!decode(auth_dg, opcode, body) || opcode != SESSION_OPCODE_CLIENT_AUTH ||
+			!parse_client_auth(body.data(), body.size(), auth))
+		return {};
+	ProtocolMessage record;
+	record.flags.raw = 0x20u;
+	record.flags.len8 = true;
+	record.tag = tag;
+	record.full_tag = tag;
+	record.length = static_cast<uint32_t>(payload.size());
+	record.payload = payload;
+	ProtocolPacketHeader hdr;
+	hdr.session_id = auth.ck;
+	hdr.seq_num = seq;
+	std::vector<uint8_t> packet;
+	if (!encode_protocol_packet_plaintext(hdr, { record }, "servercrypt", packet))
+		return {};
+	return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+}
+
+// The NWU protocol's other lines on a verified session: a record whose tag the client registers
+// no handler for (tag 0 alone), with its tag and length; a missing-sequence list naming a
+// sequence, once sent; the peer's resend list naming one, once its resends are out (a list naming
+// none writes nothing); the punt's drain of the enumerator's record after the teardown.
+// [orig: Network_LogUnknownNWUMessage @0x4CDF90 - @0x4CDFEB; CNapiNPConnection_DispatchMessage
+//  @0x622570 - @0x622691, @0x6226FB..0x62272A; NWU_LogIncomingPacketError @0x4CE010 - @0x4CE05A;
+//  CNapiNPConnection_SendMissingSeqList @0x623560 - @0x62368A..0x623690, @0x6237AA..0x6237BD;
+//  NWU_LogOutgoingPacketError @0x4CE080 - @0x4CE0CA; NapiNP_HandleResendList @0x623800 -
+//  @0x6239AA, @0x623A24..0x623A37; CNapiGameSession_HandlePuntNotification @0x4D20B0 -
+//  @0x4D21A4, @0x4D21C8]
+void check_connect_log_packet_errors() {
+	Rig rig;
+	rig.log_on = true;
+	const std::vector<uint8_t> auth = bring_to_verify(rig);
+	rig.session.inbound.push_back({ kServer,
+			server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+	rig.lobby.tick(300);
+	rig.log.clear();
+	rig.session.inbound.push_back({ kServer, server_record_to(auth, 5, { 1, 2, 3 }, 2) });
+	rig.lobby.tick(400);
+	CHECK((rig.log == std::vector<std::string>{ "NWU UNKNOWN MESSAGE!! [5, 3 bytes]" }));
+	rig.log.clear();
+	// Sequence 4 ahead of 3: held, and the batch's missing-sequence list names 3.
+	rig.session.inbound.push_back({ kServer, server_record_to(auth, 0, {}, 4) });
+	rig.lobby.tick(500);
+	CHECK((rig.log == std::vector<std::string>{ "NWU INCOMING PACKET ERROR!!" }));
+	rig.log.clear();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth parsed;
+	CHECK(decode(auth, opcode, body) && parse_client_auth(body.data(), body.size(), parsed));
+	std::vector<uint8_t> none;
+	CHECK(encode_session_resend_list(parsed.ck, { 0 }, none));
+	rig.session.inbound.push_back(
+			{ kServer, nw_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, std::move(none)) });
+	rig.lobby.tick(550);
+	CHECK(rig.log.empty()); // a list naming no sequence: its next packet only, no line
+	std::vector<uint8_t> named;
+	CHECK(encode_session_resend_list(parsed.ck, { 1 }, named));
+	const std::size_t sent = rig.session.sent.size();
+	rig.session.inbound.push_back(
+			{ kServer, nw_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, std::move(named)) });
+	rig.lobby.tick(600);
+	CHECK(rig.session.sent.size() > sent); // the resend went
+	CHECK((rig.log == std::vector<std::string>{ "NWU OUTGOING PACKET ERROR!!" }));
+	rig.log.clear();
+	rig.session.inbound.push_back({ kServer,
+			server_statement_to(auth, "ServerLeaveNovaWorld", { { "MsgCode", "7" } }, 3) });
+	rig.lobby.tick(700);
+	CHECK(rig.log.size() >= 2 && rig.log.back() == kRemoved &&
+			rig.log[rig.log.size() - 2].rfind("NWU DISCONNECTING FROM NOVAWORLD ", 0) == 0);
+	rig.log.clear();
+	rig.lobby.close();
+	CHECK(rig.log.empty()); // drained already
+}
+
 void check_connect_log_give_ups() {
 	{
 		Rig rig;
@@ -776,7 +866,7 @@ void check_connect_log_give_ups() {
 		rig.lobby.tick(200 + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
 		// The abort tears the connection down: OnDisconnect's line, no record latched.
 		CHECK((rig.log == std::vector<std::string>{ "NWU 20 secs are up! (b)", "NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
-				"NWU TIMEOUT2!!!" }));
+				kRemoved, "NWU TIMEOUT2!!!" }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC46" });
 		rig.lobby.close();
 	}
@@ -789,7 +879,7 @@ void check_connect_log_give_ups() {
 				{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "0" } }) });
 		rig.lobby.tick(300);
 		CHECK((rig.log == std::vector<std::string>{ "NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
-				"NWU NOT CONNECTED FOR SOME REASON..." }));
+				kRemoved, "NWU NOT CONNECTED FOR SOME REASON..." }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC48" });
 		rig.lobby.close();
 	}
@@ -816,7 +906,7 @@ void check_connect_log_give_ups() {
 		CHECK((rig.log == std::vector<std::string>{ "NWU CONNECTED TO NOVAWORLD 127.0.0.1:64206 [NWServer]  [yourip=1.0.0.127:40000]",
 				"NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] "
 				"[1,2,0,0,\"\",0,\"NP.S:PT:STOP\"]",
-				"NWU LEAVING JOIN LOOP...", "NWU FAILURE2 [0]!!!" }));
+				"NWU LEAVING JOIN LOOP...", "NWU FAILURE2 [0]!!!", kRemoved }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC45" });
 		rig.lobby.close();
 	}
@@ -1091,7 +1181,7 @@ void check_escape_legs() {
 		rig.lobby.tick(300);
 		CHECK((rig.log == std::vector<std::string>{ "NWU USER ESCAPED2",
 				"NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
-				"NWU USER HIT ESCAPE2!!!" }));
+				kRemoved, "NWU USER HIT ESCAPE2!!!" }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC47" });
 		CHECK(rig.session.sent.size() > sent); // the 0x46 burst
 		rig.lobby.close();
@@ -1171,8 +1261,9 @@ void check_connect_or_host_lines() {
 		if (ClientSession *session = rig.lobby.session())
 			for (const auto &notice : session->take_notices()) role.handle_notice(notice);
 		role.tick(result_at);
+		const std::vector<std::string> lines = rig.log;
 		rig.lobby.close();
-		return std::make_pair(rig.log, failed);
+		return std::make_pair(lines, failed);
 	};
 	const auto started = hosting(false, "1", 320);
 	CHECK((started.first == L{ "NWU HOSTING STARTED!  YIPPEE", "NWU MOVING ON TO HOSTING OR PLAYING..." }));
@@ -1290,6 +1381,7 @@ int main() {
 	check_connect_or_host_lines();
 	check_escape_legs();
 	check_connect_validated();
+	check_connect_log_packet_errors();
 	check_stop_hosting_inout_line();
 	check_connect_error_tags();
 	check_connect_log_gate_and_connect();

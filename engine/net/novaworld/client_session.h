@@ -213,6 +213,13 @@ public:
 		// connect log's PROCESSING line. [orig: CNapiNPConnection_ParseMessages @0x625BC0 - the
 		//  connection's +0x274 callback with len + 1 (@0x625D1A..0x625D3E)]
 		std::function<void(std::size_t bytes)> on_packet_processed;
+		// A layer-4 record whose tag the NWU client registers no handler for (it registers tag 0,
+		// the lobby container, alone), once whole: its tag and length; the embedder writes the
+		// connect log's UNKNOWN MESSAGE line. [orig: CNapiNPConnection_DispatchMessage @0x622570 -
+		//  the reassembly ahead of NapiNPProtocol_FindMsgInfo (the call @0x622691), the client's
+		//  +0x27C callback @0x622711..0x62272A; the client table @0x82C088 (type 0 only),
+		//  installed by CNapiGameSession_InitNPConnection @0x4D3D7E]
+		std::function<void(uint8_t tag, std::size_t bytes)> on_unknown_message;
 
 		// The NovaWorld session connection of a title (complete:
 		// resolve_title_identity) whose gate manager holds `gate_tag`
@@ -529,6 +536,20 @@ public:
 	//  @0x627EE5 -> CNapiNPConnection_InitFromSession @0x626320 (the connection's address
 	//  @0x6263B4 / @0x6263B7)]
 	uint32_t server_hellos_taken() const { return server_hellos_taken_; }
+	// The last taken 0x81's SN, the session record's name. [orig: Nwu_HandleServerHello - SN
+	//  @0x627172, the record's +0x1FC @0x627CC5]
+	const std::string &server_hello_name() const { return server_hello_name_; }
+	// The enumerator's record list drains: a give-up's or an escape's connection pump, the punt,
+	// and each reconnect probe window's open (the embedder's records go, each with its line).
+	// [orig: CNapiGameSession_PumpConnection @0x4D0A40 - NapiNPEnumerator_DrainTimerList (the
+	//  call @0x4D0A84); CNapiGameSession_ProcessNetwork (the call @0x4D0A34);
+	//  CNapiGameSession_HandlePuntNotification (the call @0x4D21C8);
+	//  CNapiNPConnection_PumpStateMachine (the call @0x629646, the window's open)]
+	uint32_t enumerator_drains() const { return enumerator_drains_; }
+	// The peer's resend lists (0x84) that named a sequence, each counted once its resends are
+	// out. [orig: NapiNP_HandleResendList @0x623800 - the flag @0x6239AA, the client's +0x284
+	//  callback after the walk @0x623A24..0x623A37]
+	uint32_t resend_lists_named() const { return resend_lists_named_; }
 
 	State state() const { return state_; }
 	bool is_verified() const { return state_ == State::Verified; }
@@ -656,6 +677,9 @@ private:
 	bool disconnected_by_peer_ = false;
 	uint32_t tossed_datagrams_ = 0;
 	uint32_t server_hellos_taken_ = 0;
+	std::string server_hello_name_;
+	uint32_t enumerator_drains_ = 0;
+	uint32_t resend_lists_named_ = 0;
 
 	// The clocks (all in the owner's ms clock).
 	uint32_t clock_ms_ = 0;

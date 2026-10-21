@@ -334,6 +334,15 @@ private:
 	// The connection's state-5 callbacks' lines (ClientSession::Config::on_connection_up / _down).
 	void log_connection_up();
 	void log_connection_down();
+	// The enumerator's session records: a taken 0x81's record (its sender and SN) with its
+	// DISCOVERED line, one already kept for that sender with another SN replaced (its REMOVED line
+	// first); the session's drains (ClientSession::enumerator_drains) and the connection's
+	// destroy remove each kept record with its line.
+	void note_server_hello(const PeerAddr &from);
+	// One datagram to the socket, its SENDING line first (send_one's body).
+	void send_datagram(const PeerAddr &to, const std::vector<uint8_t> &dg);
+	void note_session_drains();
+	void drain_records();
 	// The gate socket as the gate lines name it: its bind address and port.
 	std::string gate_socket_text() const;
 
@@ -353,6 +362,13 @@ private:
 	uint32_t client_index_ = 0;
 	std::vector<Target> targets_; // the enumerator's target list
 	PeerAddr nw_peer_;
+	// The enumerator's session records and the session drains already read.
+	struct SessionRecord {
+		PeerAddr from;
+		std::string name;
+	};
+	std::vector<SessionRecord> records_;
+	uint32_t drains_seen_ = 0;
 	// The kept gate state, none of it reset by open() (GateMemory).
 	GateMemory own_memory_;
 	GateMemory *shared_memory_ = nullptr;
