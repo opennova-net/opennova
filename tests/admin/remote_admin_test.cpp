@@ -624,6 +624,55 @@ void test_idle_frame_exit() {
 	expect(!inmatch::remote_admin_idle_frame_exits(loading), "nor a load");
 }
 
+// The session's exit frame: retail's last main frame runs its whole tick ahead of its exit test,
+// which routes to the Post Menu without pumping the admin, so the menus' report reads that
+// frame's clock and time of day; ours' frame stops before its pump, so the console over the
+// session takes them at the stop. A console over another session takes nothing.
+// [orig: Game_ProcessMainFrame @0x5263F0 - Server_TickUpdate @0x5266B6,
+//  Environment_UpdateWeatherTick @0x526774, the exit test @0x52685E ahead of
+//  CAdminServer_ProcessFrame @0x5268F1; Menu_UpdateFrame @0x5528A0 (its pump @0x552901)]
+void test_exit_frame_words() {
+	inmatch::RemoteAdminConsoles consoles;
+	gamecfg::GameCfg block = gamecfg::defaults();
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &block;
+	auto world = std::make_unique<world::World>();
+	auto host = std::make_unique<inmatch::NapiNPServerCtx>();
+	host->world = world.get();
+	host->is_authority = 1;
+	host->is_in_session = 1;
+	inmatch::RemoteAdminBinding hosted;
+	hosted.host = host.get();
+	hosted.world = world.get();
+	hosted.session = 5;
+	consoles.bind(hosted, seams);
+	// The last pumped frame.
+	world->weather.tod_fixed24 = 0x0C000000u;
+	host->np_protocol.host_run_duration_ms = 60000u;
+	consoles.refresh_process_mission();
+	expect(consoles.process_mission().tod_fixed24 == 0x0C000000u &&
+	               consoles.process_mission().session_elapsed_ms == 60000u,
+	       "the pumped frame's words");
+	// The exit frame ticks once more and stops before its pump.
+	world->weather.tod_fixed24 = 0x0C000100u;
+	host->np_protocol.host_run_duration_ms = 60016u;
+	inmatch::RemoteAdminBinding other = hosted;
+	other.session = 6;
+	consoles.session_exit_frame(other);
+	expect(consoles.process_mission().tod_fixed24 == 0x0C000000u,
+	       "a console over another session keeps its words");
+	consoles.session_exit_frame(hosted);
+	expect(consoles.process_mission().tod_fixed24 == 0x0C000100u &&
+	               consoles.process_mission().session_elapsed_ms == 60016u,
+	       "the exit frame's words");
+	// Back in the menus: the clock cleared by the teardown, the time of day the exit frame's.
+	consoles.bind(inmatch::RemoteAdminBinding{}, seams);
+	consoles.refresh_process_mission();
+	expect(consoles.process_mission().tod_fixed24 == 0x0C000100u &&
+	               consoles.process_mission().session_elapsed_ms == 0u,
+	       "the menus keep the exit frame's time of day");
+}
+
 } // namespace
 
 int main() {
@@ -635,6 +684,7 @@ int main() {
 	test_listen_host_and_single_player();
 	test_single_player_cycle();
 	test_idle_frame_exit();
+	test_exit_frame_words();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "remote_admin: %d failure(s)\n", g_failures);
 		return 1;

@@ -221,6 +221,18 @@ public:
 	// the last session's (a destroy zeroed the game type, session_destroyed; the teardown the
 	// clock).
 	void refresh_process_mission();
+	// The session's exit frame, where the embedder's frame stops before its pump: retail's last
+	// main frame runs its whole tick (the round clock, the client and server net frames, the
+	// weather) ahead of its exit test, which routes to the Post Menu without pumping the admin,
+	// so the words the menus' admin reads next are that frame's. A console over `binding` takes
+	// them now; one over another session (or none) is left alone.
+	// [orig: Game_ProcessMainFrame @0x5263F0 - g_RoundTimeRemaining @0x526602,
+	//  Client_ProcessNetworkFrame @0x526692, Server_TickUpdate @0x5266B6,
+	//  Environment_UpdateWeatherTick @0x526774, the exit test @0x52685E and the Post Menu push
+	//  @0x526862, ahead of CAdminServer_ProcessFrame @0x5268F1]
+	void session_exit_frame(const RemoteAdminBinding &binding) {
+		if (bound_to(binding)) refresh_process_mission();
+	}
 
 private:
 

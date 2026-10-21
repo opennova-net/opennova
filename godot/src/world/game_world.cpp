@@ -701,6 +701,10 @@ Ref<EffectLightReport> GameWorld::get_effect_light_report() const {
 }
 
 void GameWorld::session_frame_failed(const String &p_reason) {
+	// The exit frame's process words, which no pump of this frame took (engine
+	// RemoteAdminConsoles::session_exit_frame).
+	const Ref<Simulation> sim = get_sim();
+	if (sim.is_valid()) admin_consoles_.session_exit_frame(sim->remote_admin_binding());
 	const String message = !p_reason.is_empty() ? p_reason : String("mission session lost");
 	emit_signal(kSignalSessionLost, message);
 }
