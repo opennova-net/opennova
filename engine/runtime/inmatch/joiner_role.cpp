@@ -34,7 +34,7 @@
 #include <runtime/world/destruction.h>   // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <runtime/world/geom.h>
 #include <runtime/inmatch/loadout_submit.h> // apply_weapon_loadout_name_list (the 0x5A name list)
-#include <runtime/world/player_spawn.h> // rebind_player_camouflage_row (the 0x5A row)
+#include <runtime/world/player_spawn.h> // rebind_player_camouflage_row (the 0x5A row), the replica re-pick
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <runtime/world/local_player_view.h> // local_player_view_refresh (the mount-change edge)
 #include <runtime/world/player_view.h>   // the fullscreen damage-feedback words + the shake arm
@@ -1067,6 +1067,26 @@ void JoinerRole::wire_frame_providers() {
 				out.deathtime_ticks = item->deathtime_ticks;
 				out.leave_corpse = (item->attrib & def::DEF_ITEM_ATTRIB_LEAVECORPSE) != 0;
 				out.decay_effect = item->particledeath[0] != '\0';
+				return true;
+			});
+	// A remote player record's def re-pick (D-NET-348): the class's camouflage
+	// item for this world's climate, looked up as an items row (the first row
+	// for a miss), as the joiner's spawn binds it; the client's own record is
+	// fold_local_record's, and a world with no charattr / items tables keeps
+	// the spawn's row.
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the climate pick
+	//  @0x4C1248..0x4C129C, ItemList_FindIndexByTypeId @0x4C129D]
+	rt.view().set_replica_player_cammo_resolver(
+			[this](uint16_t handle, uint8_t player_class, uint16_t &type_id) {
+				const world::World &w = kernel_->world;
+				if (runtime->has_self_handle() && handle == runtime->self_handle())
+					return false;
+				if (w.tables.item_rows.empty() || !w.tables.class_cammo_installed)
+					return false;
+				const int32_t index = world::item_index_by_type_id(
+						w, world::player_cammo_type_id(w, player_class));
+				type_id = static_cast<uint16_t>(
+						w.tables.item_rows[static_cast<size_t>(index)].type_id);
 				return true;
 			});
 	// The 0x13's class callback reads the joiner world's hit record, which

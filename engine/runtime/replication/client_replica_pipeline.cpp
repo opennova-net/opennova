@@ -1112,6 +1112,12 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// ::ground). carrier_handle keeps the seat relation alone.
 		uint16_t ground_carrier = wire_handle::kInvalid;
 		int32_t ground_local_heading = 0;
+		// The class the row held before this record (entity+0x294 as the readers
+		// take it: the last compact's nibble, else the spawn's), which a dead
+		// record's def re-pick reads below.
+		const uint8_t prior_player_class = es.net_has_compact
+				? static_cast<uint8_t>(es.health_class_byte & 0x0Fu)
+				: es.spawn_player_class;
 		switch (rec.cls) {
 		case EntityClass::Player:
 			cx = rec.player.pos_x_compressed;
@@ -1307,6 +1313,30 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
                 es.net_stance_bits = static_cast<uint8_t>(
                         ((flags & 0x100u) ? 2 : 0) | ((flags & 0x200u) ? 1 : 0));
             }
+		}
+		// Every remote player record then re-picks the body's def by its class: a
+		// live record's class is the field-17 nibble the health apply stores, a
+		// dead record skips that apply and keeps the class it had; the camouflage
+		// item for the mission climate is looked up as a row, and a row other than
+		// the body's rebinds it (the def, its models and bone types). The row then
+		// carries the new type, so the next record of the old one fails the
+		// pre-apply check above and queues the C2S 0x0F (D-NET-348).
+		// [orig: NetPacket_SerializePlayerState @0x4C09C0 -
+		//  Entity_SetHealthFromDifficultyByte @0x4C11B4 (the class store @0x4AD5A2),
+		//  the dead arms' jumps past it @0x4C102E / @0x4C1104, the remote stores
+		//  @0x4C11DF..0x4C1242, the climate pick @0x4C1248..0x4C129C,
+		//  ItemList_FindIndexByTypeId @0x4C129D, the compare @0x4C12A5..0x4C12A8, the
+		//  rebind @0x4C12B8..0x4C12D6, AnimMap_InitBoneTypes @0x4C12E0 / @0x4C12EC]
+		if (rec.cls == EntityClass::Player && replica_player_cammo_resolver_) {
+			const uint8_t player_class = wire_dead
+					? prior_player_class
+					: static_cast<uint8_t>(rec.player.health_class_byte & 0x0Fu);
+			uint16_t row_type = 0;
+			if (replica_player_cammo_resolver_(rec.handle, player_class, row_type) &&
+					row_type != es.type_id) {
+				es.type_id = row_type;
+				es.cls = classify(row_type);
+			}
 		}
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry ||
 				rec.cls == EntityClass::Vehicle) {

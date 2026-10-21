@@ -2916,6 +2916,86 @@ bool run_the_self_record_rebinds_ls_camouflage_row() {
 	return ok;
 }
 
+// D-NET-348's remote half: a remote player record re-picks its row by the record's
+// class nibble, the camouflage item for the joiner's climate looked up as a row; the
+// self record is L's fold's. Desert: class 6 -> 5311 (0x14BF).
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the class store @0x4C11B4
+//  (Entity_SetHealthFromDifficultyByte @0x4AD5A2), the climate pick @0x4C1248..0x4C129C,
+//  ItemList_FindIndexByTypeId @0x4C129D, the compare @0x4C12A5, the rebind
+//  @0x4C12B8..0x4C12D6]
+bool run_a_remote_record_repicks_its_rows_camouflage_row() {
+	static const char kItems[] =
+			"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
+			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n type person\r\n hp 150\r\nend\r\n"
+			"begin \"Player #1, Single player\"\r\n id 105310\r\n type person\r\n hp 120\r\nend\r\n"
+			"begin \"Generic Soldier\"\r\n id 105311\r\n type person\r\n hp 100\r\nend\r\n";
+	static const char kCharattr[] =
+		"[CHARACTER1]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER2]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER3]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER4]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER5]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5305\r\nARCTIC_CAMMO\t= 5311\r\n"
+		"[CHARACTER6]\r\nJUNGLE_CAMMO\t= 9999\r\nDESERT_CAMMO\t= 5311\r\nARCTIC_CAMMO\t= 5305\r\n";
+	constexpr uint16_t kRemote = 0x0007;
+	constexpr uint16_t kSelf = 0x0005;
+	opennova::def::DefItemsFile items{};
+	if (!expect(opennova::def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
+						sizeof(kItems) - 1, &items) == 0,
+				"remote camouflage row: the items parse"))
+		return false;
+	Harness h;
+	w::World &world = h.kernel->world;
+	opennova::mission::resolve_item_traits(world, items, {}, nullptr);
+	world.tables.bms_climate = 0;
+	inmatch::CharAttrTable table;
+	inmatch::charattr_load(table, reinterpret_cast<const uint8_t *>(kCharattr), sizeof(kCharattr) - 1);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, kSelf, w::kPlayerInfantryTypeId);
+	h.role.runtime->set_charattr_table(table);
+	h.role.run_tick(h.input);
+	for (uint16_t handle : {kRemote, kSelf}) {
+		auto &row = h.role.runtime->state().upsert(handle);
+		row.cls = EntityClass::Player;
+		row.type_id = w::kPlayerInfantryTypeId;
+	}
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	FrameUpdate fu;
+	fu.carried_handle = 0xFFFF;
+	fu.health = 100;
+	for (uint16_t handle : {kRemote, kSelf}) {
+		FrameUpdateRecord rec;
+		rec.handle = handle;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.health_class_byte = 0x26; // tier 2, class 6
+		fu.records.push_back(rec);
+	}
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input);
+	// Class 6's DESERT_CAMMO (5311) is the minted table's fourth row; its wire type is
+	// the row's id less the items offset.
+	const int expected_type = items.entries[3].id - opennova::mission::kItemIdOffset;
+	const auto *remote = h.role.runtime->state().find(kRemote);
+	const auto *self = h.role.runtime->state().find(kSelf);
+	bool ok = expect(items.count == 4 && expected_type == 5311 &&
+					expected_type != w::kPlayerInfantryTypeId,
+			"remote camouflage row: the minted class-6 desert row");
+	// (The row's class then follows its new type's class row: the pipeline pin,
+	// netsim_client_replica_pipeline_compact_self_heal.)
+	ok = ok && expect(remote != nullptr && remote->type_id == expected_type,
+			"remote camouflage row: a class-6 record re-types the remote row to 5311");
+	ok = ok && expect(self != nullptr && self->type_id == w::kPlayerInfantryTypeId,
+			"remote camouflage row: the self row is left to L's fold");
+	opennova::def::def_free_items(&items);
+	return ok;
+}
+
 // D-NET-710: a console-queued action dispatches by its code at the next input frame:
 // the Respawn row's code 55 runs the Respawn key's arm (its head gates, the input reset,
 // the bodiless 0x41), a code the role does not own goes to the embedder's dispatch. The
@@ -3993,6 +4073,7 @@ int main() {
 	ok &= run_the_join_screen_abort_bursts_the_minus_one_record();
 	ok &= run_the_spawn_takes_the_mission_starts_identity();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
+	ok &= run_a_remote_record_repicks_its_rows_camouflage_row();
 	ok &= run_a_self_team_assign_reinits_l();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_deploy_action_head_resets_input_and_dialogs();
