@@ -431,9 +431,13 @@ void test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch() {
 // sample, each later one over its own, and a paused update polls its rows too.
 // [orig: Game_MainLoop @0x52B630 (the drain @0x52BA08, the update call @0x52BA58);
 //  Game_ProcessMainFrame @0x5263F0 (Input_ProcessFrame @0x52661D)]
+// Each rows-hook call: (the logic tick, whether the update sampled anew). An
+// alias, so no template comma sits inside a CHECK argument.
+using RowCalls = std::vector<std::pair<uint32_t, bool>>;
+
 void test_rows_poll_once_per_update_and_never_in_a_no_update_frame() {
 	struct Rows final : TickInputSource {
-		std::vector<std::pair<uint32_t, bool>> calls;
+		RowCalls calls;
 		int samples = 0;
 		InputPacket sample_tick(uint32_t) override {
 			++samples;
@@ -459,8 +463,8 @@ void test_rows_poll_once_per_update_and_never_in_a_no_update_frame() {
 		FrameInput next;
 		next.delta_seconds = 0.014;
 		next.tick_source = &idle_rows;
-		CHECK(idle_session.advance(next).ticks_run() == 1 &&
-						idle_rows.calls == std::vector<std::pair<uint32_t, bool>>({{500u, false}}),
+		const RowCalls one_poll{{500u, false}};
+		CHECK(idle_session.advance(next).ticks_run() == 1 && idle_rows.calls == one_poll,
 				"the next frame's one update polls once over its sample");
 	}
 	auto role = std::make_unique<TickRecorder>();
@@ -471,8 +475,8 @@ void test_rows_poll_once_per_update_and_never_in_a_no_update_frame() {
 	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
 	three.tick_source = &rows;
 	CHECK(session.advance(three).ticks_run() == 3, "three updates");
-	CHECK(rows.calls == std::vector<std::pair<uint32_t, bool>>({{500u, false}, {501u, true}, {502u, true}}) &&
-					rows.samples == 2,
+	const RowCalls three_polls{{500u, false}, {501u, true}, {502u, true}};
+	CHECK(rows.calls == three_polls && rows.samples == 2,
 			"the first update polls over the frame's sample, each later one over its own");
 	rows.calls.clear();
 	CHECK(session.pause().applied(), "the pause");
