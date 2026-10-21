@@ -156,7 +156,8 @@ void player_class_init_animation(World &world, Entity &entity) {
     // word nothing in the loop writes. [orig: @0x4B11D2..0x4B11E8, @0x4B1200..0x4B1225]
     RootMotionFrame frame{};
     const uint32_t steps = organic_warmup_updates(entity.owner_connection_id);
-    for (uint32_t i = 0; i < steps; ++i) infantry_dual_update(inf, ai.root_motion, ai.anim_rings, frame);
+    for (uint32_t i = 0; i < steps; ++i)
+        infantry_dual_update(inf, ai.root_motion, ai.anim_rings, frame);
     ai.mirror_wire_anim(*body, world);
 }
 

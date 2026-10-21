@@ -1487,8 +1487,8 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 // (the join vars' class bytes, which the session start clamped; a joiner whose shell
 // installed none holds the fresh profile's, 8 on both sides).
 // [orig: Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, g_CharClassTeam2
-//  @0x4E1819..0x4E181F, g_CharClassTeam1 @0x4E182C..0x4E1832; NapiNPClientMsg_HandleWeaponLoadoutSync
-//  @0x4290E0 - @0x42941F / @0x429427]
+//  @0x4E1819..0x4E181F, g_CharClassTeam1 @0x4E182C..0x4E1832;
+//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x42941F / @0x429427]
 void JoinerRole::stamp_init_player_class(world::Entity &local) const {
 	const int side = local.team == 1 || local.team == 3 ? 0 : 1;
 	if (granted_side_class_[side] != 0) {

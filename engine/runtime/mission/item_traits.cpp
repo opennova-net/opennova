@@ -153,7 +153,7 @@ void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
     row.radar_sig = def != nullptr ? (def->radar_sig & 0xFFFF) : 0;
     row.heat_sig = def != nullptr ? (def->heat_sig & 0xFFFF) : 0;
     // The row's class by its ai_function (D-NET-348) [orig: EntityDef_InitAllCallbacks
-    //  @0x4A5A70 -> Entity_LookupRenderCallbacks @0x407DC0].
+    //  @0x4A5A70 -> EntityDef_LookupClassCallbacks @0x407DC0].
     if (def != nullptr) {
         row.body_class = world::player_body_class_from_tag(def->ai_function);
         row.item_event_class = world::item_death_class_from_tag(def->ai_function);
@@ -511,7 +511,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             // The +0x160/+0x26C/+0x2B0/+0x2C8 init is the ai_function class
             // row's second slot, run through def+0x148 whatever the move
             // function [orig: Entity_InitSquibFromDef @0x448CE0, row @0x813120 +12;
-            //  Entity_LookupRenderCallbacks stores it @0x407E36].
+            //  EntityDef_LookupClassCallbacks stores it @0x407E36].
             if (strutil::iequals(def->ai_function, "squib")) {
                 e->equipped_adm_index = 0;
                 e->squib.spread_q16 = static_cast<int32_t>(def->door_type);
@@ -591,7 +591,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // section clone's template pins its event and update callbacks, so
         // neither door row reaches it on any resolve; a palm fragment takes
         // item 900's own pair.
-        // [orig: Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2;
+        // [orig: EntityDef_LookupClassCallbacks @0x407dc0, stricmp @0x407de2;
         //  Entity_SpawnSectionEntity @0x440365 / @0x440370;
         //  Palm_SpawnFragment @0x53C35D / @0x53C36F]
         e->door_event = !e->section_clone && def != nullptr &&
@@ -640,7 +640,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // the particledeath family +0x412..; the event/death callback row
         // def+0x138 resolved from the ai_function tag by the whole-string
         // stricmp walk of g_EntityClassEventCallbackTable @0x813000
-        // (Entity_LookupRenderCallbacks @0x407dc0 via EntityDef_InitAllCallbacks
+        // (EntityDef_LookupClassCallbacks @0x407dc0 via EntityDef_InitAllCallbacks
         // @0x4a5aa9, "Null" for an empty tag)]
 		e->hud_image = def != nullptr ? def->hud_image : "";
         e->item_unit_type = def != nullptr ? def->unit_type : 0;
@@ -769,7 +769,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				// @0x4581b0 (the air machine); cveh @0x813378, cbot @0x813390 and
 				// ctrn @0x8133c0 -> EntityAI_ProcessGroundStateMachine @0x4583c0.
 				// [orig: g_EntityClassEventCallbackTable @0x813000 resolved by
-				// EntityDef_InitAllCallbacks @0x4a5aae -> Entity_LookupRenderCallbacks
+				// EntityDef_InitAllCallbacks @0x4a5aae -> EntityDef_LookupClassCallbacks
 				// @0x407dc0, the whole name stricmp'd @0x407de2]
 				const auto brain_is = [def](const char *row) {
 					return strutil::iequals(def->ai_function, row);
@@ -996,7 +996,7 @@ void resolve_minefields(world::World &world, const def::DefItemsFile &items,
         const auto &def = *it->second;
         // The think is the ai_function's lndm event row, bound by whole name
         // ignoring case; the render is the lndm bone row, bound by the render
-        // tag. [orig: Entity_LookupRenderCallbacks stricmp @0x407DD8, row
+        // tag. [orig: EntityDef_LookupClassCallbacks stricmp @0x407DD8, row
         // 'lndm' @0x813198 -> Entity_LandmineThink @0x441A40 /
         // Entity_InitHardpoints @0x4417D0; row 'lndm' @0x82CFC0]
         const bool think = strutil::iequals(def.ai_function, "lndm");

@@ -9,7 +9,7 @@
 // "brrl" Entity_HandleDeathOnAuthority (the authority's 1920 re-arm, the dying body's dead bit
 // and 10, the dead body's explosion and S2C 0x12 removal), "ele0" its 62 re-arm.
 // [orig: g_EntityClassEventCallbackTable @0x813000 (null @0x813000, org0 @0x813018, org1
-//  @0x813030, plyr @0x813048, brrl @0x813060, ele0 @0x8130A8); Entity_LookupRenderCallbacks
+//  @0x813030, plyr @0x813048, brrl @0x813060, ele0 @0x8130A8); EntityDef_LookupClassCallbacks
 //  @0x407DC0 - the stricmp call @0x407DD8, the row-0 default @0x407DEE; Entity_SpawnFromAnimSlotProperty
 //  @0x43C390 - the init @0x43C4F0..0x43C4FE, the event copy @0x43C530..0x43C536;
 //  PlayerClass_InitEntity @0x4B1060 - @0x4B10D0..0x4B10DE, @0x4B1100..0x4B1116;
@@ -272,7 +272,7 @@ void test_a_kill_event_runs_its_rows_callback() {
 // The knife's kill zone calls the victim's callback with event 3 (no null test): a player body
 // runs its bound row's (D-NET-348): a brrl row's body re-arms at 1920 with no plyr 64 and no
 // waypoint tail; a plyr row's body re-arms at 64.
-// [orig: Entity_ApplyVehicleCollisionDamage - the event word @0x4E673A, the call @0x4E6752;
+// [orig: Entity_ApplyKnifeKillZoneDamage - the event word @0x4E673A, the call @0x4E6752;
 //  Entity_HandleDeathOnAuthority @0x407CC0 (1920 @0x407D47); Entity_HandleDamageAndTriggerZones
 //  @0x407B5E, the tail @0x407B64..0x407C6B]
 void test_a_knife_runs_its_rows_callback() {
