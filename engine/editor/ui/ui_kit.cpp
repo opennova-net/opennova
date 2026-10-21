@@ -106,6 +106,12 @@ void refusal_text(const std::string &text) {
 	ImGui::PopStyleColor();
 }
 
+void dialog_text(const std::string &text) {
+	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 36.0f);
+	ImGui::TextUnformatted(text.c_str(), text.c_str() + text.size());
+	ImGui::PopTextWrapPos();
+}
+
 const char *reading_references() { return "Reading the project's references..."; }
 
 const char *nothing_names_it(bool file) {

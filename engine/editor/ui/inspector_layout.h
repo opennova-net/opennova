@@ -18,6 +18,13 @@ struct SessionView;
 std::string field_title(const Document &document, NodeKind kind, const std::string &id);
 std::string edge_field_title(const SessionView &view, const GraphEdge &edge);
 
+// --- what a record is called in a narrow column -----------------------------------------
+
+// The brief words of the record at `address` of the file at `path` while that file is open and its type has
+// them (graph/display_names record_brief: a mission's event by its first trigger's subject and verb), else "":
+// what a Problems row's Where and a Referenced by line show of a long title, whole in their tooltips.
+std::string open_record_brief(const SessionView &view, const std::string &path, const NodeAddress &address);
+
 // --- the inspector's plan for one record (ADR 0046 S9h2) ---------------------------------
 
 // A group of the record's fields: those whose dotted ids start with the same step

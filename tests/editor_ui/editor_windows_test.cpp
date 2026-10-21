@@ -1685,8 +1685,20 @@ void test_problems_window_ui() {
 	                      "Use spare.bin as gametext.bin", "requirement.missing"}) &&
 	              text.find("Renames spare.bin to gametext.bin.") == std::string::npos,
 	      "the selected row: every fix (what it does in its tooltip), and its code");
-	CHECK(text.find("As the original was seen to do:") != std::string::npos, "the manifest's own record of it, the cited detail");
+	CHECK(text.find("As the original was seen to do:") == std::string::npos, "the manifest's own record of it, no line");
 	CHECK(text.find("Blocks the build") != std::string::npos, "a row a build is refused for says so");
+	// The message on one line after Blocks the build, the manifest's record of the file in its tooltip, without
+	// its citation.
+	{
+		const ProblemsLines lines = problems_lines();
+		const ImGuiTableColumn &message = lines.table->Columns[1];
+		ui.mouse(message.WorkMinX + ui_kit::text_width("Blocks the build") + ImGui::GetStyle().ItemSpacing.x + 8.0f,
+		         lines.y(0));
+		const std::string tip = logged_frame(ui);
+		CHECK(tip.find("As the original was seen to do:") != std::string::npos && tip.find("[orig:") == std::string::npos,
+		      "the manifest's own record of it in the message's tooltip, without its citation");
+		ui.away();
+	}
 	ui.click(problems_lines().at(0, 2));
 	ui.away();
 	CHECK(logged_frame(ui).find("requirement.missing") == std::string::npos, "a second click folds it back");

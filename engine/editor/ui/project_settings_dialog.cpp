@@ -119,8 +119,8 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	if (ImGui::InputText("Name", title_.text, sizeof(title_.text))) set("title", io::JsonValue::make_string(title_.sent()));
 	bool mission = held.mission;
 	if (ImGui::Checkbox("Missions", &mission)) set("mission", io::JsonValue::make_bool(mission));
-	ui_kit::tooltip("The game then needs the files a mission reads: Problems lists the missing ones. A mission is most "
-	                "of the game, so File > Import the whole game install... is the way to bring them in.");
+	ui_kit::tooltip("The game then needs the files a mission reads, Problems listing the missing ones. A mission is most "
+	                "of the game: File > Import the whole game install... brings them in.");
 	bool multiplayer = held.multiplayer;
 	if (ImGui::Checkbox("Multiplayer", &multiplayer)) set("multiplayer", io::JsonValue::make_bool(multiplayer));
 	// What it does, in the game's terms: the files the game reads for multiplayer alone join the checklist
@@ -181,9 +181,9 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	const auto set_mode = [&set](PlayMode mode) { set("play_mode", io::JsonValue::make_string(play_mode_token(mode))); };
 	bool strict = plays_in_install(held.play_mode);
 	if (ImGui::Checkbox("Play in the game install (strict)", &strict)) set_mode(strict ? PlayMode::Strict : PlayMode::Runtime);
-	ui_kit::tooltip("Play starts the game install's own program on the build instead of the OpenNova runtime, as a "
-	                "player who dropped Jointops.exe into the build's folder runs it: nothing of the install but its "
-	                "program and Bink DLL, no /d. It starts at its menu, where the mission is chosen.");
+	ui_kit::tooltip("Play starts the game install's own program on the build, not the OpenNova runtime, as a player who "
+	                "dropped it in the build's folder runs it (its program and Bink DLL alone, no /d). It starts at its "
+	                "menu, where the mission is chosen.");
 	// DI-26: Play saves first instead of asking (S26 K6: kept here alone, the Build menu's copy gone).
 	bool save_first = held.save_before_play;
 	if (ImGui::Checkbox("Save all before Play", &save_first)) set("save_before_play", io::JsonValue::make_bool(save_first));

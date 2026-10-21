@@ -75,6 +75,9 @@ ImVec4 refusal_color();
 void warning_line(const std::string &text, const std::string &tip = std::string());
 // A one-line red refusal (why the control beside it cannot act), cut to the line, whole in its tooltip.
 void refusal_text(const std::string &text);
+// The text of a confirmation modal, wrapped at a dialog's width (36 ems): the one wrapped prose the rule keeps,
+// never drawn outside a modal (a raw ImGui::TextWrapped is the ratchet's count, scripts/lint/ratchet_counts.py).
+void dialog_text(const std::string &text);
 // The words a view shows while the project's references are still being read.
 const char *reading_references();
 // What a list of who uses a thing says when no file of the project names it (`file`: "or what it defines" too).

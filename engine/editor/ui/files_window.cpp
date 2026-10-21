@@ -1104,7 +1104,8 @@ void FilesWindow::draw_card(const SessionView &view) {
 	draw_file_card_head(card, false);
 	ui_kit::quiet_text(card.path);
 	ui_kit::clipped_text(card.build);
-	if (!card.imported_from.empty()) ui_kit::clipped_text("Made from " + card.imported_from + " by its import.");
+	if (!card.imported_from.empty())
+		ui_kit::clipped_text("Made from " + card.imported_from, "Its import makes it from " + card.imported_from + ".");
 	// A wave's sound, as the game decodes it, played by the editor.
 	if (card.wave) {
 		ImGui::Spacing();
@@ -1151,9 +1152,10 @@ void FilesWindow::draw_card(const SessionView &view) {
 				}
 				ImGui::Dummy(ImVec2(width, height));
 			}
-			if (!card.sound.plays)
-				ui_kit::refusal_text("The game's loader refuses it: " + card.sound.refusal +
-				                     " Import it again to write it as the game plays it.");
+			if (!card.sound.plays) {
+				ui_kit::refusal_text("The game's loader refuses it.");
+				ui_kit::tooltip(card.sound.refusal + " Import it again to write it as the game plays it.");
+			}
 		} else {
 			ui_kit::refusal_text("The game cannot play it: " + card.sound.error);
 		}

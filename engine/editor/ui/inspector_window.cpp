@@ -1295,7 +1295,7 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 				if (others_only && edge->source == document.path()) continue;
 				// The record in its type's words (the plain-words lane: an action as what it does).
 				const std::string field = edge_field_title(view, *edge), where = edge_record_words(*edge);
-				users_.push_back({edge, edge->source + ": " + (where.empty() ? field : where + " - " + field)});
+				users_.push_back({edge, edge->source + ": " + (where.empty() ? field : where + " - " + field), field});
 			}
 		}
 	}
@@ -1309,7 +1309,10 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
 			const Use &use = users_[size_t(i)];
 			ImGui::PushID(i);
-			const bool pressed = ui_kit::fitted_selectable(use.line, "use");
+			// A long title in its brief words while its file is open (a mission's event), whole in the tooltip.
+			const std::string brief = open_record_brief(view, use.edge->source, use.edge->address);
+			const bool pressed =
+			        ui_kit::fitted_selectable(brief.empty() ? use.line : use.edge->source + ": " + brief + " - " + use.field, "use");
 			if (pressed || ImGui::IsItemHovered()) {
 				const ReferenceTarget target = usage_target(*view.project.scan, *use.edge);
 				if (pressed) go_to(workspace_, target);

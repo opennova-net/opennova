@@ -533,8 +533,8 @@ void EditorWindows::draw_navigation(const SessionView &v) {
 		if (offered && ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("places");
 		const std::string keys = back ? " (Alt+Left, or the mouse's back button)" : " (Alt+Right, or the mouse's forward button)";
 		ui_kit::tooltip(places.empty() ? std::string(back ? "Back" : "Forward") + keys +
-		                                         ": nowhere yet. A Go to, a Problems row, a find's hit or another file opened "
-		                                         "is a place it takes you back to."
+		                                         ": nowhere yet. A Go to, a Problems row, a find's hit or a file opened is a "
+		                                         "place."
 		                               : std::string(back ? "Back to " : "Forward to ") + places.front().label + keys +
 		                                         ".\nA right-click lists every place " + (back ? "back." : "forward."));
 		if (ImGui::BeginPopup("places")) {
@@ -617,14 +617,8 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 
 void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *document) {
 	if (!ImGui::BeginMenu("Edit")) return;
-	// Each names the step it would take (the UX round's problems lane): its words under it, muted.
-	const auto step_words = [](const std::string &words) {
-		if (words.empty()) return;
-		ImGui::Indent();
-		ImGui::TextDisabled("%s", ui_kit::fit(words, ImGui::GetFontSize() * 24.0f).c_str());
-		ui_kit::tooltip(words);
-		ImGui::Unindent();
-	};
+	// Each names the step it would take (the UX round's problems lane), in its tooltip.
+	const auto step_words = [](const std::string &words) { ui_kit::tooltip(words); };
 	// S25: in the view of the active document, its own step or one its terrain tools made in another file (a view no
 	// session made holds no next step: the document's own then).
 	const DocumentsView::StepNext &undo = v.documents.undo_next, &redo = v.documents.redo_next;
@@ -656,7 +650,7 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 		                "(only what the rename wrote), then does it.");
 	}
 	// Files' chores (DI-25): a delete, a duplicate, a new file, a folder made, renamed or deleted, each a step of the
-	// file history, taken back and done again here; its words under each.
+	// file history, taken back and done again here; its words in its tooltip.
 	const ActivityView::FileHistory &chores = v.activity.file_history;
 	if (menu_item("Undo file", nullptr, v.project.open && !chores.undo.empty() && v.allows(EditorRequestKind::UndoFile)))
 		request(request::undo_file());
@@ -691,8 +685,7 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 		ImGui::EndMenu();
 	}
 	ui_kit::tooltip("What the model, animation, texture, particle, definition and HUD previews draw behind their "
-	                "picture, an editor setting kept on this computer. A mission's, an environment's, a terrain's and a "
-	                "menu's picture draws the game's own.");
+	                "picture, kept on this computer. A mission, an environment, a terrain and a menu draw the game's own.");
 	ImGui::EndMenu();
 }
 
@@ -720,9 +713,8 @@ void EditorWindows::draw_go_menu(const SessionView &v) {
 	if (menu_item("Go to definition", "F12", !subject.definition.empty() && v.allows(EditorRequestKind::OpenDocument)))
 		go_to_definition(subject);
 	ui_kit::tooltip(subject.definition.empty()
-	                        ? std::string("What a reference names: F12 with the pointer on a reference field (or Ctrl+click "
-	                                      "its value), or with a record selected that names something (a mission's "
-	                                      "entity: its item).")
+	                        ? std::string("What a reference names: F12 over a reference field or with a record selected that "
+	                                      "names something, or Ctrl+click on its value.")
 	                        : "Go to " + subject.definition.front().label + " (F12; Ctrl+click a reference's value).");
 	const bool usages = finds && !subject.usages_file.empty();
 	if (menu_item("Find usages", "Shift+F12", usages)) find_usages(v, subject);
@@ -770,16 +762,15 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	// DI-26: the active mission's view plans it, its player on the ground under the camera.
 	const bool from_here = plays && !play_mission_at(v, v.documents.active).empty();
 	if (menu_item("Play from here", "Alt+F5", from_here)) request(request::play_from_here(v.documents.active));
-	ui_kit::tooltip(from_here ? std::string("Build, then start the game in this mission with the player on the ground under "
-	                                        "the mission view's camera, facing the way it looks. The build's copy of the "
-	                                        "mission gets the start; the mission's own file is left as it is.")
+	ui_kit::tooltip(from_here ? std::string("Build, then start the game in this mission, the player on the ground under its "
+	                                        "view's camera, facing its way. The build's copy of the mission gets the start, "
+	                                        "never its own file.")
 	                          : std::string("Open a mission to start the game in it where its view's camera is."));
 	// A first run: the run directory emptied of what the runs before wrote there (run/run_directory.h), which
 	// Play keeps otherwise.
 	if (menu_item("Play fresh", nullptr, plays)) request(request::play(std::string(), false, true));
-	ui_kit::tooltip("Build, then start the game in an emptied run folder, as on its first run: without the game.cfg, "
-	                "saves and scores earlier runs wrote there (the game install asks for the display adapter again). "
-	                "Play keeps them.");
+	ui_kit::tooltip("Build, then start the game in an emptied run folder, as on its first run: no game.cfg, saves or "
+	                "scores of the runs before. Play keeps them.");
 	if (menu_item("Stop", "Shift+F5", v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
 		request(request::stop_play());
 	ImGui::Separator();
