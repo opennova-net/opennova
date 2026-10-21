@@ -51,8 +51,6 @@ constexpr float kBinocularAimOffsetDeg = 2.8125f;
 // [orig: the five NVG gain positions selected by actions 56/57]
 constexpr int32_t kNvgGainMin = 0;
 constexpr int32_t kNvgGainMax = 4;
-// [orig: the chase anchor ease @ 0x437c8d — one quarter per 62 Hz tick]
-constexpr float kTpAnchorEase = 0.25f;
 // The first-person eye pull-back along the full view rotation: -0x3000 on the
 // view-frame FORWARD axis [orig: Math_FixedPointTransformPoint22 of
 // (-0x3000, 0, 0) added onto g_ViewPosX/Y @ 0x438001..0x438031].
@@ -606,7 +604,7 @@ void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bi
                                    int action);
 
 // One 62.5 Hz tick: player_view_promote_tick, then player_view_anchor_tick.
-void player_view_tick(PlayerViewState &v, const float eye[3]);
+void player_view_tick(PlayerViewState &v, const int32_t eye_q16[3]);
 
 // The tick's Player_UpdatePerFrame leg: resolve the camera mode, step the
 // six-lane scope-camera interp toward its target and promote the settled byte
@@ -621,15 +619,18 @@ void player_view_tick(PlayerViewState &v, const float eye[3]);
 // under the pause word [orig: @0x42C184..0x42C18E].
 void player_view_promote_tick(PlayerViewState &v);
 
-// The follow anchor's update: chase the third-person anchor toward `eye`
-// (mission space). Entering third person seeds the anchor at the eye [orig:
+// The follow anchor's update: chase the third-person anchor toward `eye_q16`
+// a quarter step in 16.16, `(target - anchor + 4) >> 2` [orig:
+// ThirdPersonCamera_Update @0x437AF0 (@0x437C83..0x437CB5)]. Entering third
+// person seeds the anchor at the eye [orig:
 // Camera_SetTrackedEntity @ 0x4391d0 resets the track on change]; leaving
 // invalidates it. In a control seat the anchor chases the carrier position
 // lifted max(1.0, 0.375 r) instead, a sixteenth per tick horizontally and a
 // thirty-second vertically in 16.16 [orig: ThirdPersonCamera_Update @0x437AF0
 // — the lift @0x437B1F..0x437B4B, the ease @0x437C56..0x437C79]. It runs on
 // every main-frame update, paused ones included (local_player_camera_update).
-void player_view_anchor_tick(PlayerViewState &v, const float eye[3]);
+// `eye_q16`: the tracked body's Position + CameraOffset, 16.16 words.
+void player_view_anchor_tick(PlayerViewState &v, const int32_t eye_q16[3]);
 
 // Whether the scope-camera interp is mid-ease: its active latch, which holds
 // one call past the last lane snap. Every scope toggle is REFUSED while it

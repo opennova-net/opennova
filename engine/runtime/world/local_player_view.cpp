@@ -811,9 +811,12 @@ void local_player_camera_update(World &world, PlayerViewState &v, LocalPlayerVie
     // CameraOffset, re-anchored after movement [orig: ThirdPersonCamera_Update
     // @0x437AF0 (@0x437B70..0x437B76, the ease @0x437C56..0x437CB5)].
     player_view_chase_tick(v, world.script.input_action_bits, t.camera_tracked_dead);
-    const Vec3 current_eye = player_eye_position(*e);
-    const float eye[3] = {current_eye.x, current_eye.y, current_eye.z};
-    player_view_anchor_tick(v, eye);
+    // The target words: Position + CameraOffset, integer adds [orig:
+    //  ThirdPersonCamera_Update @0x437AF0 (@0x437B67..0x437B76)].
+    const int32_t eye_q16[3] = {io::bam_add(e->position.x.q16, e->eye_offset_x),
+            io::bam_add(e->position.y.q16, e->eye_offset_y),
+            io::bam_add(e->position.z.q16, e->eye_offset_z)};
+    player_view_anchor_tick(v, eye_q16);
 }
 
 bool local_view_draws_virtual_display(const World &world, const PlayerViewState &v,

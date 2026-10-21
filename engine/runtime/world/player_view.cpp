@@ -301,9 +301,9 @@ void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_c
     }
 }
 
-void player_view_tick(PlayerViewState &v, const float eye[3]) {
+void player_view_tick(PlayerViewState &v, const int32_t eye_q16[3]) {
     player_view_promote_tick(v);
-    player_view_anchor_tick(v, eye);
+    player_view_anchor_tick(v, eye_q16);
 }
 
 void player_view_promote_tick(PlayerViewState &v) {
@@ -326,17 +326,17 @@ void player_view_promote_tick(PlayerViewState &v) {
     }
 }
 
-void player_view_anchor_tick(PlayerViewState &v, const float eye[3]) {
+void player_view_anchor_tick(PlayerViewState &v, const int32_t eye_q16[3]) {
     // ThirdPersonCamera_Update's follow anchor, run on every main-frame update
     // (the single-player pause included: local_player_camera_update).
     if (v.third_person) {
         if (!v.tp_anchor_valid) {
             // Entering third person seeds the track at the eye.
             // [orig: Camera_SetTrackedEntity @ 0x4391d0 resets on change]
-            v.tp_anchor[0] = eye[0];
-            v.tp_anchor[1] = eye[1];
-            v.tp_anchor[2] = eye[2];
-            for (int i = 0; i < 3; ++i) v.tp_anchor_q16[i] = to_fixed(eye[i]);
+            for (int i = 0; i < 3; ++i) {
+                v.tp_anchor_q16[i] = eye_q16[i];
+                v.tp_anchor[i] = static_cast<float>(from_fixed(eye_q16[i]));
+            }
             v.tp_anchor_valid = true;
         } else if (v.mount.control_seat) {
             // MOUNTED: the anchor chases the CARRIER position lifted
@@ -360,11 +360,17 @@ void player_view_anchor_tick(PlayerViewState &v, const float eye[3]) {
                 v.tp_anchor[i] = static_cast<float>(from_fixed(v.tp_anchor_q16[i]));
             }
         } else {
-            // Quarter-step ease per 62 Hz tick. [orig: @ 0x437c8d]
-            v.tp_anchor[0] += (eye[0] - v.tp_anchor[0]) * kTpAnchorEase;
-            v.tp_anchor[1] += (eye[1] - v.tp_anchor[1]) * kTpAnchorEase;
-            v.tp_anchor[2] += (eye[2] - v.tp_anchor[2]) * kTpAnchorEase;
-            for (int i = 0; i < 3; ++i) v.tp_anchor_q16[i] = to_fixed(v.tp_anchor[i]);
+            // ON FOOT: the anchor chases Position + CameraOffset a quarter step
+            // per update, in 16.16 with the +4 rounding add (not the mounted
+            // legs' half step) [orig: ThirdPersonCamera_Update @0x437AF0 - the
+            // target @0x437B67..0x437B76, `(target - anchor + 4) >> 2`
+            // @0x437C83..0x437CB5].
+            for (int i = 0; i < 3; ++i) {
+                v.tp_anchor_q16[i] = io::bam_add(v.tp_anchor_q16[i],
+                        io::bam_sar(io::bam_add(io::bam_sub(eye_q16[i], v.tp_anchor_q16[i]), 4),
+                                2));
+                v.tp_anchor[i] = static_cast<float>(from_fixed(v.tp_anchor_q16[i]));
+            }
         }
     } else {
         v.tp_anchor_valid = false;

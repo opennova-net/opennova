@@ -78,7 +78,7 @@ LocalPlayerWeapon scoped_weapon(uint32_t flags, uint32_t flags2 = 0) {
 }
 
 void settle_ease(PlayerViewState &v) {
-    const float eye[3] = {0.0f, 0.0f, 0.0f};
+    const int32_t eye[3] = {0, 0, 0};
     for (int i = 0; i < kScopeEaseSteps + 1; ++i) player_view_tick(v, eye);
 }
 
@@ -3966,7 +3966,32 @@ void test_hud_death_gate_is_the_death_screen_latch_alone() {
     CHECK(!frame.hud_combat.state.death_screen);
 }
 
+// L5-s7 FOUND 2: the on-foot follow anchor chases Position + CameraOffset a
+// quarter step per update in 16.16 with the +4 add: a target 7 above moves it 2,
+// one 5 below moves it 1 down, one 4 below not at all (a float quarter step
+// would move each of them).
+// [orig: ThirdPersonCamera_Update @0x437AF0 - the target @0x437B67..0x437B76,
+//  `(target - anchor + 4) >> 2` @0x437C83..0x437CB5]
+void test_on_foot_anchor_quarter_step_is_integer() {
+    PlayerViewState v;
+    v.third_person = true;
+    const int32_t seed[3] = {0x10000, -0x20000, 0x8000};
+    player_view_anchor_tick(v, seed);
+    CHECK(v.tp_anchor_valid && v.tp_anchor_q16[0] == 0x10000 &&
+          v.tp_anchor_q16[1] == -0x20000 && v.tp_anchor_q16[2] == 0x8000);
+    const int32_t moved[3] = {0x10007, -0x20000 - 5, 0x8000 - 4};
+    player_view_anchor_tick(v, moved);
+    CHECK(v.tp_anchor_q16[0] == 0x10002);
+    CHECK(v.tp_anchor_q16[1] == -0x20001);
+    CHECK(v.tp_anchor_q16[2] == 0x8000);
+    player_view_anchor_tick(v, moved);
+    CHECK(v.tp_anchor_q16[0] == 0x10004); // (5 + 4) >> 2
+    CHECK(v.tp_anchor_q16[1] == -0x20001); // 4 below now: (-4 + 4) >> 2 = 0
+    CHECK(v.tp_anchor_q16[2] == 0x8000);
+}
+
 int main() {
+    test_on_foot_anchor_quarter_step_is_integer();
     test_hud_context_tracks_mount_weapon_and_dismount();
     test_hud_death_gate_is_the_death_screen_latch_alone();
     test_rendered_scope_applies_elevation_and_parallax();
