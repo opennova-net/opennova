@@ -544,6 +544,11 @@ bool NwuLobbySession::poll_connect() {
 				return true;
 			}
 			connect_log("NWU WAITING FOR VALIDATION...");
+			// The pass to the verify poll clears both flags and empties the key queue before the
+			// re-stamp: an ESC the connect poll did not read is dropped.
+			// [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - the flags @0x4D11EB / @0x4D11F1,
+			//  Input_ResetKeyQueue (the call @0x4D11F7)]
+			escape_requested_ = false;
 			connect_stamp_ms_ = clock_ms_;
 			connect_poll_ = ConnectPoll::Verify;
 			return false;

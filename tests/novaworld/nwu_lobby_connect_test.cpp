@@ -1052,6 +1052,30 @@ void check_escape_legs() {
 		CHECK(rig.session.sent.size() > sent); // the 0x46 burst
 		rig.lobby.close();
 	}
+	// An ESC taken in the tick the 0x82 lands: the connect poll reads the state first and passes
+	// to the validation wait, whose pass to the verify poll empties the key queue: the key is
+	// dropped and the verify goes on. [orig: CGameSession_WaitForNWUValidation @0x4D0F20 -
+	//  Input_ResetKeyQueue (the call @0x4D11F7)]
+	{
+		Rig rig;
+		rig.log_on = true;
+		rig.start(10);
+		rig.session.inbound.push_back(
+				{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
+		rig.lobby.tick(100);
+		const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
+		CHECK(!auth.empty());
+		CHECK(rig.lobby.escape());
+		rig.session.inbound.push_back({ kServer, server_auth_to(auth) });
+		rig.lobby.tick(200);
+		rig.log.clear();
+		rig.lobby.tick(300);
+		CHECK(rig.log.empty());
+		CHECK(rig.fatals.empty());
+		CHECK(rig.lobby.session() != nullptr &&
+				rig.lobby.session()->state() == ClientSession::State::Verifying);
+		rig.lobby.close();
+	}
 }
 
 // ConnectOrHost's lines: the legs' checks in order (the start line; not set up; the wrong state
