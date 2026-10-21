@@ -395,8 +395,8 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 					  : held))
 		pick(MissionTool::Place);
 	if (lit_tool(row, "Path stops", !brushing && tool == MissionTool::Path, edits,
-				edits ? "Add a waypoint path's stops: a click on the ground adds its next (a marker the path visits), a "
-						"click on its line one between two (Esc stops)."
+				edits ? "Add a waypoint path's stops: a click on the ground adds its next stop (a marker the path visits), "
+						"a click on its line one between two (Esc stops)."
 					  : held))
 		pick(MissionTool::Path);
 	if (lit_tool(row, "Area", !brushing && tool == MissionTool::Area, edits,
