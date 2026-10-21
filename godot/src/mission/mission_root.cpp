@@ -1,7 +1,5 @@
 #include "mission/mission_root.h"
 
-#include <runtime/mission/mission_sidecars.h>
-
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -334,8 +332,8 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			options->get_terrain_til(),
 			options->get_wac_basename(),
 			String(),
-			// The by-name readers' base: the name cut at its first '.'.
-			opennova::to_gd(opennova::mission::mission_base_name(opennova::to_std(mission_file_))),
+			// The mission file: the single player's g_MapFileName, the by-name readers' base.
+			mission_file_,
 			playable);
 	if (boot_err != OK) {
 		setup_error_ = ERR_CANT_OPEN;

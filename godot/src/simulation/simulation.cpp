@@ -18,6 +18,7 @@
 
 #include <runtime/inmatch/host_settings.h> // host_player_slot_limit (the BMS admission limit)
 #include <runtime/inmatch/slot_staging.h> // stage_slot_position (the parity runner's slot staging)
+#include <runtime/mission/mission_sidecars.h> // mission_base_name
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
 
@@ -615,7 +616,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		const Ref<ItemDatabase> &p_item_db,
 		const Ref<TerrainData> &p_terrain,
 		const PackedByteArray &p_terrain_til, const String &p_wac_basename,
-		const String &p_infantry_adm, const String &p_mission_file_basename,
+		const String &p_infantry_adm, const String &p_mission_file,
 		bool p_playable) {
 	namespace ms = opennova::mission;
 	namespace inmatch = opennova::inmatch;
@@ -631,7 +632,9 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	const opennova::bms::File &document = p_mission->native_file();
 	inmatch::HostBootRequest request;
 	request.mission = document;
-	request.mission_basename = opennova::to_std(p_mission_file_basename);
+	// The by-name readers' base: the mission file's name cut at its first '.'.
+	const std::string mission_file = opennova::to_std(p_mission_file);
+	request.mission_basename = ms::mission_base_name(mission_file);
 	if (p_resource_root.is_valid()) {
 		request.files = ms::boot_files_from_index(p_resource_root->native_index());
 		// The mount's expansion text-override table (the mission text's
@@ -665,7 +668,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		host_role_->set_rotation(&net_.rotation());
 	}
 	if (host_role_ != nullptr) {
-		request.host_cfg = host_session_cfg(mission_game_type);
+		request.host_cfg = host_session_cfg(mission_game_type, mission_file);
 		request.session_score_ini = is_host_listening();
 		request.next_mission = next_mission;
 	}

@@ -87,7 +87,8 @@ const opennova::TitleIdentity *session_title(const opennova::TitleIdentity *name
 
 } // namespace
 
-opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type) {
+opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
+		const std::string &p_sp_mission_file) {
 	namespace inmatch = opennova::inmatch;
 	// The record is the engine's (inmatch/host_config.h shell_host_config); the
 	// binding passes the session's values.
@@ -99,6 +100,7 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 		source.lan_network_type = net_.host_network_type;
 	}
 	source.sp_game_type = p_game_type;
+	source.sp_mission_file = p_sp_mission_file;
 	source.profile = player_.profile_record_set ? &player_.profile_record : nullptr;
 	source.cfg_block = net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr;
 	inmatch::HostConfig cfg = inmatch::shell_host_config(source);

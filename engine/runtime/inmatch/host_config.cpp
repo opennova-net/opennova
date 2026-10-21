@@ -104,6 +104,8 @@ HostConfig shell_host_config(const ShellHostSource &source) {
 		host.network_type = source.lan_network_type;
 	} else {
 		host.config = singleplayer_game_config(source.sp_game_type, source.profile);
+		// [orig: SinglePlayer_StartMission @0x561B69..0x561B80, the copy into g_MapFileName]
+		if (!source.sp_mission_file.empty()) host.config.mission_file = source.sp_mission_file;
 		// Single player's fill reads game.cfg's own zoom option
 		// [orig: g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F].
 		if (source.cfg_block != nullptr)

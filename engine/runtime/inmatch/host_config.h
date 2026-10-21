@@ -172,6 +172,11 @@ struct ShellHostSource {
 	bool lan_serve_and_play = true;         // false = the dedicated server type
 	NetworkType lan_network_type = NetworkType::Lan;
 	uint32_t sp_game_type = 0; // the mission's (game_type::for_mission_attribs)
+	// The single player's mission file, the selected list entry's name, which its start copies
+	// into g_MapFileName (the session's mission file: the admin's CURRENT MAP, the session
+	// title's key, the /PROFILE log's name); empty for a load that names no file (the in-memory
+	// loads), which keeps the config's. [orig: SinglePlayer_StartMission @0x561B69..0x561B80]
+	std::string sp_mission_file;
 	const playersav::ProfileRecord *profile = nullptr;
 	const gamecfg::GameCfg *cfg_block = nullptr;
 };

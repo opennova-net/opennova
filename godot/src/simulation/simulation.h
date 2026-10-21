@@ -528,9 +528,11 @@ private:
 	// Install the retained mission-start seam (the load flag, the side password).
 	void install_join_mission_start();
 	// The host's session record for a mission of `p_game_type` (the UI host config or the SP
-	// listen server's); host_bringup() adds the retained .til, text and Server strings for the
+	// listen server's, whose mission file is `p_sp_mission_file`: ShellHostSource::
+	// sp_mission_file); host_bringup() adds the retained .til, text and Server strings for the
 	// in-memory loads, which stage it themselves (the file boot's engine phase A stages its own).
-	opennova::inmatch::HostConfig host_session_cfg(uint32_t p_game_type);
+	opennova::inmatch::HostConfig host_session_cfg(uint32_t p_game_type,
+			const std::string &p_sp_mission_file = std::string());
 	opennova::inmatch::HostBringup host_bringup();
 	// The per-frame host owner loop: the ONE inmatch::HostRole::run_tick over the kernel
 	// (drain -> pre-tick -> host_session_pump -> local pumps -> adm ground), with the
@@ -654,7 +656,7 @@ public:
 			const Ref<ItemDatabase> &p_item_db,
 			const Ref<TerrainData> &p_terrain,
 			const PackedByteArray &p_terrain_til, const String &p_wac_basename,
-			const String &p_infantry_adm, const String &p_mission_file_basename,
+			const String &p_infantry_adm, const String &p_mission_file,
 			bool p_playable);
 	// Build + promote a small synthetic patrol mission (no file) for the headless unit test.
 	void build_demo_mission();
