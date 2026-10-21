@@ -5274,6 +5274,11 @@ add_test(NAME mission_start_tick COMMAND mission_start_tick_test)
 add_executable(glass_leg_test world/glass_leg_test.cpp)
 target_link_libraries(glass_leg_test PRIVATE opennova_runtime)
 add_test(NAME glass_leg COMMAND glass_leg_test)
+# D-NET-515: the suspension's x87 products (the travel's locked share, half an impulse, the flip
+# bound) at the FPU's length, not in float.
+add_executable(suspension_precision_test world/suspension_precision_test.cpp)
+target_link_libraries(suspension_precision_test PRIVATE opennova_runtime)
+add_test(NAME suspension_precision COMMAND suspension_precision_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the

@@ -61,17 +61,37 @@ inline constexpr float kOscPhasePreset = 1.57f;
 // [orig: `cmp [esi+0A0h], -2000; jge skip; sar [edi], 2` @0x45D21F..0x45D22D].
 inline constexpr int32_t kOscHardLandingBelow = -2000;
 
-// Suspension travel from the def's spring_comp PERCENTAGE
-// [orig: dword_815184 = ftol((100 - spring_comp) * 0xFFFF * flt_7C56A8 (0.01))
-//  @0x47C51F..0x47C544; the bound the compress step tests is
-//  dword_815180 - dword_815184 @0x45CFC2..0x45CFCE].
-// A spring_comp of 100 gives full travel; 0 gives none.
+// The locked share of the travel: the integer (100 - spring_comp) * 0xFFFF, then
+// one x87 product with the float 0.01, truncated; the product stays at the FPU's
+// length (the 53-bit double here, Q3-11), so spring_comp 0 locks 65534, not the
+// float product's 65535 (D-NET-515).
+// [orig: dword_815184: `sub edx, [eax+900h]; imul edx, 0FFFFh` @0x47C51F..0x47C525,
+//  `fild` @0x47C532, `fmul flt_7C56A8` (0.01f) @0x47C539, _ftol2_sse @0x47C53F, the
+//  store @0x47C544 (Entity_ProcessTrackedVehiclePhysics @0x47C1C0; the twins
+//  @0x476190..0x4761AF, @0x479807..0x479816, @0x47F238..0x47F247)]
+inline int32_t conform_travel_locked(int spring_comp) {
+	return static_cast<int32_t>(static_cast<double>((100 - spring_comp) * kSuspFull) *
+			static_cast<double>(0.01f));
+}
+
+// Suspension travel from the def's spring_comp PERCENTAGE: the bound the
+// compress step tests is dword_815180 (0xFFFF) - dword_815184 (the locked
+// share) [orig: @0x45CFC2..0x45CFCE]. A spring_comp of 100 gives full travel;
+// 0 gives one unit.
 inline int32_t conform_travel_from_def(int spring_comp) {
 	if (spring_comp < 0) spring_comp = 0;
 	if (spring_comp > 100) spring_comp = 100;
-	const float t = static_cast<float>(kSuspFull) *
-			static_cast<float>(100 - spring_comp) * 0.01f;
-	return kSuspFull - static_cast<int32_t>(t);
+	return kSuspFull - conform_travel_locked(spring_comp);
+}
+
+// Half a squared impulse, as the suspension adds it to a wheel's energy: the
+// integer through `fild`, times the float 0.5, truncated, at the FPU's length
+// (an integer past 2^24 keeps its low bits, which a float cast would round away;
+// D-NET-515). [orig: Entity_ProcessTrackedVehiclePhysics - the landing impulse
+//  `fild; fmul flt_7C3B94` (0.5f) @0x47EA86..0x47EA90, the settle term
+//  @0x47EB12..0x47EB1C]
+inline int32_t conform_half_energy(int32_t sq) {
+	return static_cast<int32_t>(static_cast<double>(sq) * static_cast<double>(0.5f));
 }
 
 // A slope threshold from a def BAM field, as Q22

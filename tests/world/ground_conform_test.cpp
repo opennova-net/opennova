@@ -49,18 +49,19 @@ void test_shock_clamps_in_place() {
 	CHECK(shock == 7, "an in-range shock is untouched");
 }
 
-// travel = 0xFFFF - ftol(0xFFFF * (100 - spring_comp) * 0.01)
+// travel = 0xFFFF - ftol(0xFFFF * (100 - spring_comp) * 0.01f), the product at the
+// FPU's length: 6553500 * 0.01f is 65534.9985, so spring_comp 0 leaves one unit.
 void test_travel_from_def() {
 	CHECK(conform_travel_from_def(100) == kSuspFull,
 			"spring_comp 100 gives full travel");
-	CHECK(conform_travel_from_def(0) == 0, "spring_comp 0 gives no travel");
+	CHECK(conform_travel_from_def(0) == 1, "spring_comp 0 gives one unit of travel");
 	// 50% lands near half, allowing for the float round-trip.
 	const int32_t half = conform_travel_from_def(50);
 	CHECK(half > kSuspFull / 2 - 2 && half < kSuspFull / 2 + 2,
 			"spring_comp 50 is about half travel");
 	// Out-of-range percentages clamp rather than producing nonsense travel.
 	CHECK(conform_travel_from_def(150) == kSuspFull, "over 100 clamps");
-	CHECK(conform_travel_from_def(-20) == 0, "under 0 clamps");
+	CHECK(conform_travel_from_def(-20) == conform_travel_from_def(0), "under 0 clamps");
 }
 
 // A wheel already past its travel limit ABSORBS NOTHING — that is what a

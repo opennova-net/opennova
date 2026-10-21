@@ -119,8 +119,11 @@ void vehicle_suspension_respawn(Entity::VehicleMotorState &m) {
 
 int32_t vehicle_flip_threshold_q16(const VehicleTraits &traits) {
 	// [orig: ftol(def->flip(+0x948) × flt_7C56A8 (0.01) × flt_7C32BC (65536.0))
-	//  @0x47d72e..0x47d745]
-	return static_cast<int32_t>(static_cast<float>(traits.flip) * 0.01f * 65536.0f);
+	//  @0x47d72e..0x47d745: `fild [ecx+948h]` @0x47D727, the two fmuls @0x47D732 /
+	//  @0x47D73A, _ftol2_sse @0x47D740]: the products at the FPU's length, so flip 50
+	//  gives 32767 where a float product rounds up to 32768 (D-NET-515).
+	return static_cast<int32_t>(static_cast<double>(traits.flip) * static_cast<double>(0.01f) *
+			static_cast<double>(65536.0f));
 }
 
 void VehicleSystem::suspension_crash_tests(Entity &veh, const VehicleTraits &traits, int32_t up_z16, SuspensionFamily family) {
@@ -226,10 +229,11 @@ void VehicleSystem::suspension_grounded_loop(Entity &veh, const VehicleTraits &t
 		if (m.plat_acc[k] > thr && contact[k]) {
 			const int32_t a = std::abs(m.plat_acc[k]);
 			const int32_t sq = wrap_mul(wrap_mul(traits.mass, a), a);
-			osc.energy += static_cast<int32_t>(static_cast<float>(sq) * 0.5f);
+			osc.energy += conform_half_energy(sq);
 			if (osc.energy < 0) osc.energy = 0x1000000; // [orig: @0x47ea97..0x47ea99]
+			// `fild [ebx]; fmul flt_7C6F18` (1.25f) at the FPU's length [orig: @0x47EA9F..0x47EAA7].
 			m.spring_energy += static_cast<int32_t>(
-					static_cast<float>(osc.energy) * 1.25f); // flt_7C6F18
+					static_cast<double>(osc.energy) * static_cast<double>(1.25f));
 		} else if (m.spring_energy <= 0) {
 			// The settle term [orig: @0x47eab4..0x47eb21]: the pad's excess
 			// penetration over the shallowest pad, less WHEEL 0's amplitude
@@ -240,7 +244,7 @@ void VehicleSystem::suspension_grounded_loop(Entity &veh, const VehicleTraits &t
 				if (e > 0) {
 					if (e > kSpringStepCap) e = kSpringStepCap;
 					const int32_t sq = wrap_mul(wrap_mul(2 * traits.spring, e), e);
-					osc.energy += static_cast<int32_t>(static_cast<float>(sq) * 0.5f);
+					osc.energy += conform_half_energy(sq);
 				}
 			}
 		}
@@ -459,11 +463,13 @@ void vehicle_suspension_tick_tail(Entity &veh, const VehicleTraits &traits) {
 	m.crash_request = 0; // [orig: @0x47eeee / @0x4795da / @0x47c0b6 — unconditional]
 	// The amplitude tail [orig: @0x48178a..0x4817c4]: thr = ftol(0.01 ×
 	// ftol(travel_locked)), where travel_locked = ftol(0xFFFF × (100 −
-	// spring_comp) × 0.01) is the global dword_815184 the tracked solve stamps.
-	const int32_t locked = static_cast<int32_t>(
-			static_cast<float>(kSuspFull) *
-			static_cast<float>(100 - std::min(std::max(traits.spring_comp, 0), 100)) * 0.01f);
-	const int32_t thr = static_cast<int32_t>(static_cast<float>(locked) * 0.01f);
+	// spring_comp) × 0.01) is the global dword_815184 the tracked solve stamps;
+	// both products at the FPU's length [orig: `fild dword_815184; fmul flt_7C56A8`
+	// @0x48178A..0x481790].
+	const int32_t locked =
+			conform_travel_locked(std::min(std::max(traits.spring_comp, 0), 100));
+	const int32_t thr =
+			static_cast<int32_t>(static_cast<double>(locked) * static_cast<double>(0.01f));
 	bool quiet = true;
 	for (int k = 0; k < 4; ++k) quiet = quiet && m.wheel_osc[k].amplitude <= thr;
 	if (quiet && m.spring_energy != 0) m.spring_energy = 0;
