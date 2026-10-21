@@ -225,12 +225,89 @@ void test_unchanged_input_packs_unchanged_ticks() {
 			"a catch-up tick with its own sample runs its own input frame");
 }
 
+// The main frame's mouse pump (world::MouseAxisPump carries the witness): the
+// cursor offset, four times over, spread over the frame's updates with the
+// remainder on the last, each update summed with the previous one's share.
+void test_the_mouse_pump_spreads_four_times_the_cursor_over_the_updates() {
+	using opennova::world::MouseAxisPump;
+	MouseAxisPump pump;
+	int32_t axis[2] = {};
+	const int32_t cursor[2] = {10, -5};
+	const int32_t none[2] = {0, 0};
+	// Three updates: x (1 + 40) / 3 = 13, 13, then 40 - 26 = 14; y (1 - 20) / 3
+	// truncates to -6, -6, then -20 + 12 = -8.
+	pump.step(true, false, 3, false, cursor, axis);
+	CHECK(axis[0] == 13 && axis[1] == -6, "the first update: its share alone");
+	pump.step(false, false, 3, false, none, axis);
+	CHECK(axis[0] == 26 && axis[1] == -12, "the middle update: its share plus the first's");
+	pump.step(false, true, 3, false, none, axis);
+	CHECK(axis[0] == 27 && axis[1] == -14, "the last update: the remainder plus the share");
+	pump.step(true, true, 1, false, none, axis);
+	CHECK(axis[0] == 14 && axis[1] == -8, "the next frame's first update carries the remainder");
+	pump.step(true, true, 1, false, none, axis);
+	CHECK(axis[0] == 0 && axis[1] == 0, "then nothing");
+	// Each pixel reached the axis eight times: 13 + 26 + 27 + 14 = 80.
+	// Two updates: (1 - 20) / 2 truncates to -9, the remainder -20 + 9 = -11.
+	const int32_t left[2] = {-5, 0};
+	pump.step(true, false, 2, false, left, axis);
+	CHECK(axis[0] == -9, "a negative share truncates toward zero");
+	pump.step(false, true, 2, false, none, axis);
+	CHECK(axis[0] == -20, "the remainder plus the share");
+	// A menu screen up at the first update zeroes the frame's shares.
+	pump.step(true, false, 2, true, cursor, axis);
+	CHECK(axis[0] == -11 && axis[1] == 0, "the menu's update still sums the previous share");
+	pump.step(false, true, 2, false, none, axis);
+	CHECK(axis[0] == 0 && axis[1] == 0, "and its frame's shares are zero");
+}
+
+// The session runs the pump on every tick: the frame's cursor offset reaches
+// the first tick's axis input, the spread shares the later ticks', also with
+// no per-tick source; a menu screen's ticks consume none of it.
+void test_the_session_spreads_the_frames_cursor_over_its_ticks() {
+	auto role = std::make_unique<TickRecorder>();
+	Session session(*role);
+	CHECK(load(session), "the session runs");
+	FrameInput in;
+	in.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	in.player.cursor_dx = 10;
+	in.player.look_delta_y = 2.0f; // a scripted axis addition rides the first tick
+	CHECK(session.advance(in).ticks_run() == 3, "three ticks");
+	FrameInput still;
+	still.delta_seconds = TickAccumulator::kTickDt;
+	const int ran = session.advance(still).ticks_run();
+	CHECK(ran >= 1, "the next frame ticks");
+	const std::vector<TickInput> &t = role->inputs;
+	CHECK(t.size() == static_cast<size_t>(3 + ran), "every tick recorded");
+	CHECK(t[0].player.look_delta_x == 13.0f && t[1].player.look_delta_x == 26.0f &&
+					t[2].player.look_delta_x == 27.0f,
+			"the cursor's four-fold spread over the frame's three ticks");
+	CHECK(t[0].player.look_delta_y == 2.0f && t[1].player.look_delta_y == 0.0f,
+			"the frame's axis addition goes to its first tick alone");
+	CHECK(t[3].player.look_delta_x == 14.0f, "the next frame's first tick carries the remainder");
+	float total = 0.0f;
+	for (const TickInput &tick : t) total += tick.player.look_delta_x;
+	CHECK(total == 80.0f, "ten cursor pixels reach the axis eighty times");
+
+	FrameInput menu;
+	menu.delta_seconds = TickAccumulator::kTickDt;
+	menu.player.cursor_dx = 10;
+	menu.player.held_action_bits = HELD_MENU_OPEN;
+	const size_t before = role->inputs.size();
+	CHECK(session.advance(menu).ticks_run() >= 1, "the menu frame ticks");
+	bool none = true;
+	for (size_t i = before; i < role->inputs.size(); ++i)
+		none = none && role->inputs[i].player.look_delta_x == 0.0f;
+	CHECK(none, "no input frame consumes the axis under a menu screen");
+}
+
 } // namespace
 
 int main() {
 	test_steps_land_on_their_ticks_inside_a_six_tick_frame();
 	test_a_frame_sample_alone_quantizes_to_the_frame();
 	test_unchanged_input_packs_unchanged_ticks();
+	test_the_mouse_pump_spreads_four_times_the_cursor_over_the_updates();
+	test_the_session_spreads_the_frames_cursor_over_its_ticks();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

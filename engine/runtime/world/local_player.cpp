@@ -217,10 +217,11 @@ void LocalPlayer::clear_stance_latches() {
 	if (w::AiEntity *p = player_ai()) p->inf.stance = w::InfantryState::Stance::kStand;
 }
 
-// Mouse pixels onto the look angles through the witnessed integer pipeline
-// [orig: Input_ProcessMouseAxisBindings @0x499680]. The float accumulator is
-// the device-input fold over retail's integer remainder pump [orig:
-// Game_ProcessMainFrame @0x526481..0x5264a9, g_MainLoopUpdatesDue].
+// Mouse axis input onto the look angles through the witnessed integer pipeline
+// [orig: Input_ProcessMouseAxisBindings @0x499680]. The session's tick hands it
+// the main frame's mouse-pump sum in whole units (MouseAxisPump, player_look.h);
+// the float accumulator carries only a direct feed's fractions
+// (Simulation::add_local_player_look).
 void LocalPlayer::look(float dx_px, float dy_px) {
 	World &world = world_;
 	int32_t scoped_zoom = 0;

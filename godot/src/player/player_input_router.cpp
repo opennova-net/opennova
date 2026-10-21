@@ -212,18 +212,27 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
     p_input->set_view_keys(active && pressed("FreeLook"),
         active && pressed("look_up"), active && pressed("look_down"),
         active && pressed("turn_left"), active && pressed("turn_right"));
-	// Scripted look pixels join the frame's mouse motion under the gate real
-	// motion meets on its way in (the shell hands handle_input only live
-	// gameplay with the mouse captured).
-	if (active && input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED) {
-		look_delta_ += p_scripted_look;
+	// The mouse motion as the cursor offset in whole pixels, its sub-pixel
+	// rest carried to the next sample (the session's mouse pump spreads the
+	// offset over the frame's ticks; engine world::MouseAxisPump). The
+	// scripted device's look pixels are axis input at their own tick, as
+	// onHook's driver adds them to the axis word in that input frame, under
+	// the gate real motion meets on its way in (the shell hands handle_input
+	// only live gameplay with the mouse captured).
+	const bool captured = input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED;
+	if (active) {
+		const Vector2i whole(
+				static_cast<int32_t>(look_delta_.x), static_cast<int32_t>(look_delta_.y));
+		look_delta_ -= Vector2(whole);
+		p_input->set_cursor_delta(whole);
+	} else {
+		look_delta_ = Vector2();
 	}
-	p_input->set_look_delta(active ? look_delta_ : Vector2());
-	look_delta_ = Vector2();
+	p_input->set_look_delta(active && captured ? p_scripted_look : Vector2());
 	const Ref<Simulation> action_sim = sim();
 	opennova::controls::PlayerActionPoll gate;
 	gate.active = active;
-	gate.captured = input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED;
+	gate.captured = captured;
 	gate.simulation_available = action_sim.is_valid();
 	gate.keyboard_captured = controls_.is_valid() && controls_->is_keyboard_captured();
 	gate.emotes_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();

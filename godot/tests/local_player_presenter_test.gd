@@ -373,10 +373,16 @@ func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
 
 	assert_true(_look(presenter, Vector2(300.0, 0.0)), "active mouse motion is consumed")
 	_frame(world, presenter, camera, 1)
-	# The default-sensitivity pipeline is exact: 300 px through the fresh sim's
-	# sens<<11 scale lands 6.591796875 degrees of yaw (mouse right = yaw right).
-	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 6.591796875, 0.001,
-			"raw pixels reach the sim's witnessed integer look pipeline")
+	# The default-sensitivity pipeline is exact: the main frame's mouse pump
+	# hands the axis four times the cursor's 300 px on the frame's one tick
+	# (1200 through the fresh sim's sens<<11 scale: 26.3671875 degrees of yaw,
+	# mouse right = yaw right), and the two-tap sum hands the same 1200 again
+	# on the next tick (engine world::MouseAxisPump).
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 26.3671875, 0.001,
+			"the cursor pixels reach the sim's witnessed integer look pipeline four-fold")
+	_frame(world, presenter, camera, 1)
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 52.734375, 0.001,
+			"and the next tick's two-tap sum doubles it")
 
 	var pitch0 := float(sim.get_local_player_pitch_deg())
 	assert_true(_look(presenter, Vector2(0.0, 600.0)))
@@ -1134,8 +1140,10 @@ func test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection() -> 
 	sim.debug_teleport_local_player(Vector3(256.0, 256.0, h + 40.0), 0.0, 0.0)
 	_frame(world, presenter, camera, 1)
 
-	# Aim well below the horizon.
-	assert_true(_look(presenter, Vector2(0.0, 2500.0)))
+	# Aim well below the horizon. A look is at most a few hundred cursor pixels
+	# a frame (retail's pump re-centres the cursor in its window each frame);
+	# a far larger offset wraps the axis value's << 16 in retail and here alike.
+	assert_true(_look(presenter, Vector2(0.0, 400.0)))
 	_frame(world, presenter, camera, 16)
 	assert_lt(float(sim.get_local_player_pitch_deg()), -40.0)
 	var range_down := world.local_player_view().aim_range_units
@@ -1155,7 +1163,7 @@ func test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection() -> 
 
 	# Aim at the sky: nothing is hit and the readout is the 1000-unit
 	# projection's far point.
-	assert_true(_look(presenter, Vector2(0.0, -8000.0)))
+	assert_true(_look(presenter, Vector2(0.0, -800.0)))
 	_frame(world, presenter, camera, 16)
 	assert_gt(float(sim.get_local_player_pitch_deg()), 45.0)
 	assert_between(world.local_player_view().aim_range_units, 999, 1001,

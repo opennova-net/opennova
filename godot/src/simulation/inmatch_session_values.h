@@ -6,6 +6,7 @@
 #include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/inmatch/session.h>
@@ -64,6 +65,10 @@ public:
 	void set_movement(bool p_forward, bool p_back, bool p_left, bool p_right,
 			bool p_lean_left, bool p_lean_right, bool p_jump);
 	void set_view_keys(bool p_free_look, bool p_up, bool p_down, bool p_left, bool p_right);
+	// The mouse cursor's offset in whole pixels since the previous sample
+	// (opennova::inmatch::InputPacket::cursor_dx / cursor_dy).
+	void set_cursor_delta(const Vector2i &p_delta);
+	// Axis input added at this input frame (the scripted device's look).
 	void set_look_delta(const Vector2 &p_delta);
 	void set_weapon_input(bool p_fire_held, bool p_fire_pressed,
 			bool p_reload_pressed, bool p_medic_pressed = false);

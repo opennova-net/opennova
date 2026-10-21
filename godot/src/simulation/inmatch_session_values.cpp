@@ -107,6 +107,11 @@ void MissionFrameInput::set_view_keys(bool p_free_look, bool p_up, bool p_down,
     movement.turn_right = p_right;
 }
 
+void MissionFrameInput::set_cursor_delta(const Vector2i &p_delta) {
+	value_.player.cursor_dx = p_delta.x;
+	value_.player.cursor_dy = p_delta.y;
+}
+
 void MissionFrameInput::set_look_delta(const Vector2 &p_delta) {
 	value_.player.look_delta_x = p_delta.x;
 	value_.player.look_delta_y = p_delta.y;

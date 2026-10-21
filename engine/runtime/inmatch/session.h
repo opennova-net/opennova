@@ -3,6 +3,7 @@
 #include <runtime/hud/hud_minimap.h> // HudMinimapRadar
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_input.h>
+#include <runtime/world/player_look.h> // MouseAxisPump
 #include <runtime/world/tick_accumulator.h>
 
 #include <cstdint>
@@ -72,6 +73,14 @@ struct TransitionResult {
 // accumulate until a logic tick consumes them.
 struct InputPacket {
 	world::PlayerInput movement;
+	// The mouse cursor's offset in whole pixels (screen sense) since the
+	// shell's previous sample; the session's mouse pump reads it in the frame's
+	// first tick and spreads it over the frame's ticks (world::MouseAxisPump).
+	int32_t cursor_dx = 0;
+	int32_t cursor_dy = 0;
+	// Axis input added at this tick's input frame as it stands (the scripted
+	// device's look, which onHook's driver adds to the axis word); the tick's
+	// mouse-pump share joins it in TickInput.
 	float look_delta_x = 0.0f;
 	float look_delta_y = 0.0f;
 	// Held actions survive every catch-up tick; pressed actions and look deltas
@@ -453,6 +462,8 @@ private:
 	int32_t frames_rendered_ = 0;
 	int32_t frames_last_second_ = 0;
 	InputPacket pending_input_;
+	// The main frame's mouse pump; its words never reset with the bank.
+	world::MouseAxisPump mouse_pump_;
 	CameraSample latest_camera_;
 	SessionError last_error_;
 	FramePerf last_perf_;

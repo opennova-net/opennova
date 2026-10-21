@@ -36,7 +36,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		return ProbeVerdict.failed("no local player (mission load stalled or cancelled)")
 	_ctx = ctx
 	var pose_json := String(ctx.args.get("pose_json", ""))
-	var look_dy := float(ctx.args.get("look_dy", 120.0))
+	var look_dy := float(ctx.args.get("look_dy", 15.0))
 	var fire_s := float(ctx.args.get("fire_seconds", 3.0))
 	var baseline_only := bool(ctx.args.get("baseline_only", false))
 	var forced_weapon := String(ctx.args.get("weapon", ""))

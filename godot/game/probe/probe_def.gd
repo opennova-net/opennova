@@ -263,7 +263,7 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "reflection, particle tick, handlers, _process). Fails on a firing regression.",
 				PERF + "perf_fire_probe.gd", {
 					"pose_json": { "type": "string", "default": "" },
-					"look_dy": { "type": "number", "default": 120.0 },
+					"look_dy": { "type": "number", "default": 15.0 },
 					"fire_seconds": { "type": "number", "minimum": 0.1, "default": 3.0 },
 					"baseline_only": { "type": "boolean", "default": false },
 					"weapon": { "type": "string", "default": "" },
@@ -481,7 +481,7 @@ static func _build_definitions() -> Array[ProbeDef]:
 				RUNTIME + "fp_impact_probe.gd", {
 					"weapon": { "type": "string", "default": "" },
 					"walk_frames": { "type": "integer", "minimum": 0, "default": 120 },
-					"look_px": { "type": "number", "default": 300.0 },
+					"look_px": { "type": "number", "default": 37.5 },
 					"burst_frames": { "type": "integer", "minimum": 1, "default": 20 },
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, true, 300_000),

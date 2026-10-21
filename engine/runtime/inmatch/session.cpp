@@ -438,6 +438,8 @@ void Session::latch_input(const FrameInput &input) {
 
 void Session::latch_packet(const InputPacket &packet) {
 	pending_input_.movement = packet.movement;
+	pending_input_.cursor_dx += packet.cursor_dx;
+	pending_input_.cursor_dy += packet.cursor_dy;
 	pending_input_.look_delta_x += packet.look_delta_x;
 	pending_input_.look_delta_y += packet.look_delta_y;
 	pending_input_.held_action_bits = packet.held_action_bits;
@@ -482,6 +484,19 @@ FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 			consume_one_shots = true;
 		}
 		TickInput tick_input = merged_tick_input(input, consume_one_shots);
+		// The mouse pump's axis input for this tick (world::MouseAxisPump
+		// carries the witness): the frame's first tick reads the cursor offset
+		// the frame banked, every tick takes its spread share; under a menu
+		// screen no input frame consumes it.
+		const bool menu_open = (tick_input.player.held_action_bits & HELD_MENU_OPEN) != 0;
+		const int32_t cursor[2] = {pending_input_.cursor_dx, pending_input_.cursor_dy};
+		if (i == 0) pending_input_.cursor_dx = pending_input_.cursor_dy = 0;
+		int32_t axis[2] = {};
+		mouse_pump_.step(i == 0, i + 1 == due, due, menu_open, cursor, axis);
+		if (!menu_open) {
+			tick_input.player.look_delta_x += static_cast<float>(axis[0]);
+			tick_input.player.look_delta_y += static_cast<float>(axis[1]);
+		}
 		// [orig: Game_MainLoop @0x52ba21..0x52ba3a -- dword_24E0E80 = 1 when
 		//  less than one 16 ms tick of backlog remains after this quantum, 0
 		//  while catching up (and always 0 under g_CineFixedStepMode, which

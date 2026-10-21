@@ -25,7 +25,7 @@ int32_t player_look_mouse_scale(PlayerLookSettings &s, int32_t param_value, bool
 
 PlayerLookDelta player_look_delta(const PlayerLookSettings &s,
         int32_t dx_px, int32_t dy_px, int32_t scoped_zoom) {
-    // Y sense: the raw center-lock delta is +down; the default (flipmouse OFF) negates
+    // Y sense: the axis word is +down; the default (flipmouse OFF) negates
     // it so pushing the mouse forward looks up. [orig: @ 0x4996cf — negate when the
     // setting dword is 0]
     const int32_t dy = s.invert_y ? dy_px : -dy_px;
@@ -61,6 +61,27 @@ void player_look_apply(int32_t &yaw_bam, int32_t &pitch_bam, const PlayerLookSet
     const int32_t up = prone ? kLookPitchProneMax : kLookPitchMax;
     if (pitch_bam > up) pitch_bam = up;
     if (pitch_bam < kLookPitchMin) pitch_bam = kLookPitchMin;
+}
+
+void MouseAxisPump::step(bool first_update, bool last_update, int32_t updates_due,
+		bool menu_open, const int32_t (&cursor)[2], int32_t (&axis)[2]) {
+	for (int a = 0; a < 2; ++a) {
+		if (first_update) {
+			if (menu_open) {
+				share[a] = 0;
+				remainder[a] = 0;
+			} else {
+				// `idiv` truncates toward zero, as C++ does.
+				const int32_t scaled = 4 * cursor[a];
+				share[a] = ((updates_due >> 1) + scaled) / updates_due;
+				remainder[a] = scaled - share[a] * (updates_due - 1);
+			}
+		} else if (last_update) {
+			share[a] = remainder[a];
+		}
+		axis[a] = share[a] + previous[a];
+		previous[a] = share[a];
+	}
 }
 
 void player_look_keys(int32_t &yaw, int32_t &pitch, bool left, bool right,

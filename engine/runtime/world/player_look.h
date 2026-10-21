@@ -1,9 +1,13 @@
-// The mouse-look pipeline: integer pixel deltas -> entity Yaw/Pitch (BAM32), the
-// faithful port of the engine's per-frame mouse pump + axis-binding apply.
+// The mouse-look pipeline: the cursor offset -> the main frame's pump
+// (MouseAxisPump: four times the offset spread over the frame's updates, each
+// summed with the previous share) -> the axis words -> entity Yaw/Pitch (BAM32),
+// the faithful port of the engine's per-frame mouse pump + axis-binding apply.
 //
-// [orig: Input_ProcessMouseAxisBindings @ 0x499680 — deltas are center-lock cursor
-//  PIXELS per frame (Input_PumpAndCenterCursor @ 0x7616e0 pins the cursor at 320,240
-//  and reads the offset); sensitivity = setting << 11 (profile +0x590, default 128
+// [orig: Input_ProcessMouseAxisBindings @ 0x499680: the deltas it scales are the
+//  pump's per-update sums (g_MouseState.deltaX / deltaY as Game_ProcessMainFrame
+//  rewrites them, MouseAxisPump below), over the center-lock cursor offset
+//  (Input_PumpAndCenterCursor @ 0x7616e0 pins the cursor at 320,240 and reads the
+//  offset); sensitivity = setting << 11 (profile +0x590, default 128
 //  @ PlayerProfile_InitDefaults 0x54bbc0, clamped [1, 0x1FF] by the 'mousescale'
 //  adjust @ 0x49b18b); the scoped reduction divides by the current zoom
 //  (Player_GetClampedWeaponElevation @ 0x4dc6b0 = slot zoom clamped to the def's
@@ -63,12 +67,38 @@ struct PlayerLookDelta { int32_t yaw = 0, pitch = 0; };
 PlayerLookDelta player_look_delta(const PlayerLookSettings &, int32_t dx_px,
                                  int32_t dy_px, int32_t scoped_zoom);
 
-// One frame of mouse pixels onto the look angles. `dx_px`/`dy_px` are cursor pixels
-// in screen sense (+x right, +y down — the raw center-lock offset). `scoped_zoom` is
+// One update's mouse axis words onto the look angles. `dx_px`/`dy_px` are in screen
+// sense (+x right, +y down): the pump's sum for the update. `scoped_zoom` is
 // the current zoom magnification when the scoped sensitivity reduction applies
 // (> 1 divides), else 0 or 1. `prone` selects the +40 deg up-clamp.
 void player_look_apply(int32_t &yaw_bam, int32_t &pitch_bam, const PlayerLookSettings &s,
                        int32_t dx_px, int32_t dy_px, int32_t scoped_zoom, bool prone);
+
+// The main frame's mouse pump, between the cursor and the axis bindings: the
+// drain's first update reads the cursor's offset since its last centering,
+// takes four times it and spreads that over the updates the drain runs (the
+// share (n / 2 + 4 * offset) / n on each, the remainder 4 * offset - share *
+// (n - 1) on the last), and every update hands the axis bindings its share
+// plus the previous update's, a two-tap sum: one cursor pixel feeds the axis
+// scale eight times over two updates. A menu screen up at the first update
+// zeroes the frame's shares. The words live for the whole process.
+// [orig: Game_ProcessMainFrame @0x5263F0 -- the first update's read @0x52640E
+//  (g_MainLoopFirstUpdate) -> Input_PumpAndCenterCursor @0x526458, the menu's
+//  zeroes @0x52642F..0x52644D, the share and the remainder @0x52645D..0x5264A9
+//  (the divisor g_MainLoopUpdatesDue; x's share @0x526481, its remainder
+//  @0x526491), the last update's remainder
+//  @0x5264B3..0x5264D4 (dword_24E0E80), the share @0x5264DB, the two-tap sum
+//  into g_MouseState.deltaX / deltaY @0x5264E6..0x526508, which
+//  Input_ProcessMouseAxisBindings @0x4996BE scales (player_look_delta)]
+struct MouseAxisPump {
+	int32_t share[2] = {};     // g_MouseUpdateShareX / Y: this update's
+	int32_t remainder[2] = {}; // g_MouseLastShareX / Y: the last update's
+	int32_t previous[2] = {};  // g_MousePrevShareX / Y: the two-tap's other half
+	// One update's axis input (x, y) into `axis`; `cursor` is read on the
+	// first update only. `updates_due` >= 1.
+	void step(bool first_update, bool last_update, int32_t updates_due, bool menu_open,
+			const int32_t (&cursor)[2], int32_t (&axis)[2]);
+};
 
 // Held look/turn keys advance 0x1FFFFFF BAM per tick and clamp relative to
 // body slope. [orig: Entity_ApplyFreeLookRotation @0x4ae090]
