@@ -131,8 +131,11 @@ void NwuLobbySession::note_server_hello(const PeerAddr &from) {
 	for (auto it = records_.begin(); it != records_.end(); ++it) {
 		if (!(it->from == from)) continue;
 		// The record kept for this sender: the same SN refreshes it, another one replaces it.
-		// [orig: Nwu_HandleServerHello - sub_621EE0 (the call @0x62766C), the SN compare
-		//  @0x627928, NapiNPTimer_Destroy (the call @0x627941)]
+		// Retail's identity is the 0x81's HK, then its SN; ours compares the SN alone, which
+		// differs only for a second 0x81 in one probe window, which never reaches the record
+		// logic (the taken 0x81 stops the enumerator).
+		// [orig: Nwu_HandleServerHello - sub_621EE0 (the call @0x62766C), the HK and SN
+		//  compares @0x627917 / @0x627928, NapiNPTimer_Destroy (the call @0x627941)]
 		if (it->name == name) return;
 		if (connect_log_on())
 			connect_log("NWU SESSION AT " + peer_addr_to_string(it->from) + " [" + it->name +
