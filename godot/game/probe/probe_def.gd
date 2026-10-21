@@ -288,6 +288,17 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"show_overlay": { "type": "boolean", "default": false },
 					"output": { "type": "string", "default": "" },
 				}, [], true, true, 1_200_000),
+		ProbeDef.make("perf_round_end",
+				"The round-end frame breakdown: drain FrameStats once per frame and, at each "
+				+ "round end (the match outcome or the S2C 0x1D header), record the frames "
+				+ "around it with every span; waits through the rotation for `rounds` round "
+				+ "ends and writes one JSON record (headless lacks only the draw legs).",
+				PERF + "perf_round_end_probe.gd", {
+					"rounds": { "type": "integer", "minimum": 1, "default": 3 },
+					"frames_before": { "type": "integer", "minimum": 0, "default": 20 },
+					"frames_after": { "type": "integer", "minimum": 1, "default": 90 },
+					"output": { "type": "string", "default": "" },
+				}, [], false, true, 1_800_000),
 		ProbeDef.make("frame_stats",
 				"The F3 Stats acceptance probe: open the dev tools' Stats window, let the "
 				+ "capture fill, snapshot every row twice, pass when the load-bearing rows "
