@@ -31,6 +31,11 @@ private:
 	int retries_ = 0;             // asks again after the slot was taken (two at most for a folder)
 };
 
+// The line under an install field, cut to the line: its check's `words` in green for an install the editor
+// imports from (`ok`), a refusal for a folder named that holds none, muted while none is `named` or the check
+// waits ("" for "Checking the folder...").
+void draw_install_line(const std::string &words, bool ok, bool named);
+
 // The new-project form: a name, a folder (Browse... asks the shell for one), the game install the project
 // imports from and plays in (the UX round's project lane: prefilled with the one the editor last chose,
 // Browse..., and checked as it is named, CheckInstall, what it holds said under it), what it builds on and

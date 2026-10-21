@@ -42,10 +42,8 @@ bool draw_music_bank_inspector(Workspace &workspace, const Document &document, c
 		                   "its place.");
 		ui_kit::WrapRow tools;
 		if (ui_kit::tool(tools, "Add a stream from a wave...", workspace.view().allows(EditorRequestKind::MusicStreamAudio),
-		                 "Adds a stream at the end of the bank, sound " + std::to_string(row->streams.size()) +
-		                         " to its music script, made from a wave of yours: its samples made the bank's byte-paired "
-		                         "stereo at 22050 a second (a mono wave on both sides, another rate resampled), named after it. "
-		                         "One undo step."))
+		                 "Adds a stream named after a wave of yours at the end, sound " + std::to_string(row->streams.size()) +
+		                         " to its music script, in the bank's stereo at 22050 a second. One undo step."))
 			pick_wave(workspace, document.path(), std::string());
 		return true;
 	}
@@ -55,7 +53,7 @@ bool draw_music_bank_inspector(Workspace &workspace, const Document &document, c
 			if (row->ids.lists[0][i].id == record.child) place = int(i);
 	if (place < 0 || size_t(place) >= row->streams.size()) return false;
 	const MusicBankStream &stream = row->streams[size_t(place)];
-	ui_kit::quiet_text("Sound " + std::to_string(place) + " of the music script",
+	ui_kit::quiet_text("Script sound " + std::to_string(place),
 	                   "The music script plays this stream by its place: moving or removing a stream before it changes "
 	                   "what the script plays.");
 	ui_kit::WrapRow tools;
@@ -68,9 +66,8 @@ bool draw_music_bank_inspector(Workspace &workspace, const Document &document, c
 	if (ui_kit::tool(tools, "Stop", true, "Stops the sound the editor plays.", true)) workspace.request(request::stop_sound());
 	ui_kit::WrapRow made;
 	if (ui_kit::tool(made, "Replace with a wave...", workspace.view().allows(EditorRequestKind::MusicStreamAudio),
-	                 "Makes " + stream.name + "'s audio from a wave of yours: its samples made the bank's byte-paired stereo "
-	                 "at 22050 a second (a mono wave on both sides, another rate resampled). Its name and its place stay. One "
-	                 "undo step; save the bank to hear it."))
+	                 "Makes " + stream.name + "'s audio from a wave of yours, in the bank's stereo at 22050 a second, its "
+	                 "name and place kept. One undo step; save the bank to hear it."))
 		pick_wave(workspace, document.path(), std::to_string(place));
 	const WorkspaceView::Sound &sound = workspace.view().workspace.sound;
 	if (!sound.voices.empty() && sound.voices.front().stream == place && sound.voices.front().path == document.path() &&

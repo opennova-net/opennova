@@ -90,7 +90,7 @@ bool draw_dialog_bank_inspector(Workspace &workspace, const Document &document, 
 	const std::string &name = row.dialog.name;
 	const int64_t number = audio::dialog_index_of(name);
 	if (number >= 1)
-		ui_kit::quiet_text("Dialog " + std::to_string(number) + " of a mission's Play dialog",
+		ui_kit::quiet_text("Play dialog " + std::to_string(number),
 		                   "A mission plays it by that number (its Play dialog action, its Dialog triggers): each line the "
 		                   "wave of its name in " + dialog_sounds_scope(document.path()) + ", its subtitle in the chat.");
 	else
@@ -127,8 +127,8 @@ bool draw_sound_profile_inspector(Workspace &workspace, const Document &document
 	const RecordHandle handle = profiles->record_in(*node, record);
 	if (!handle || record.kind != node_kind(SoundProfileKind::Slot)) return false;
 	const ProfileSlot &slot = handle.as<ProfileSlot>();
-	ui_kit::quiet_text(std::string(audio::sound_profile_slot_keyword(slot.slot)) + ": " + sound_profile_slot_words(slot.slot) +
-	                   " (" + sound_profile_slot_family(slot.slot) + ").");
+	ui_kit::quiet_text(std::string(audio::sound_profile_slot_keyword(slot.slot)) + ": " + sound_profile_slot_words(slot.slot),
+	                   std::string(sound_profile_slot_words(slot.slot)) + " (" + sound_profile_slot_family(slot.slot) + ").");
 	ui_kit::WrapRow tools;
 	if (ui_kit::tool(tools, "Play", !slot.set.empty(),
 	                 slot.set.empty() ? std::string("The slot names no set: the game plays nothing for it.")

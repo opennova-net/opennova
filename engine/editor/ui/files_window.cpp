@@ -137,9 +137,9 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	// it makes).
 	const std::string file = terrain ? std::string(name) + ".trn" : std::string(name);
 	const bool in_use = named && v.project.scan->find(file) != nullptr;
-	// Why Create waits, whole: the prompt grows to hold it.
-	if (named && !fits) ImGui::TextColored(ui_kit::refusal_color(), "%s", message.c_str());
-	else if (in_use) ImGui::TextColored(ui_kit::refusal_color(), "The project has a file named %s already.", file.c_str());
+	// Why Create waits, on one line, whole in its tooltip.
+	if (named && !fits) ui_kit::refusal_text(message);
+	else if (in_use) ui_kit::refusal_text(file + " is taken.");
 	// What the kind's blank takes beside its name (a mission's title, terrain and environment): a
 	// text, or one of the project's files its reference loads. A project is its own files, so a
 	// kind the project has no file of says to import one.
@@ -171,9 +171,7 @@ void NewFilePrompt::draw(Workspace &workspace) {
 			} else {
 				for (const AssetEntry &entry : v.project.scan->entries) offered += entry.kind == wanted ? 1 : 0;
 			}
-			if (offered == 0)
-				ImGui::TextColored(ui_kit::refusal_color(), "The project has no %s: import one first (Files > Import).",
-				                   param.token);
+			if (offered == 0) ui_kit::refusal_text("No " + std::string(param.token) + " in the project: import one.");
 		}
 		ImGui::PopID();
 		given = given && (!param.required || !values_[i].empty());
@@ -949,7 +947,7 @@ void FilesWindow::draw_move_menu(const SessionView &view, const AssetEntry &entr
 	ImGui::BeginDisabled(!named || folder == here);
 	const bool move = ImGui::Button("Move");
 	ImGui::EndDisabled();
-	if (new_folder_[0] != '\0' && !named) ImGui::TextColored(ui_kit::refusal_color(), "%s", why.c_str());
+	if (new_folder_[0] != '\0' && !named) ui_kit::refusal_text(why);
 	if ((move || enter) && named && folder != here) move_to(folder);
 	ImGui::EndMenu();
 }
@@ -1022,13 +1020,7 @@ void FilesWindow::draw_rename(const SessionView &view) {
 	}
 	const DialogsView::RenamePreview &plan = view.dialogs.rename_preview;
 	if (changed && !plan.symbol && plan.path == entry->relative_path && plan.requested == name) {
-		for (const Diagnostic &refusal : plan.refusals) {
-			ui_kit::severity_marker(refusal.severity);
-			ImGui::SameLine();
-			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 24.0f);
-			ImGui::TextWrapped("%s", refusal.message.c_str());
-			ImGui::PopTextWrapPos();
-		}
+		for (const Diagnostic &refusal : plan.refusals) ui_kit::finding_line(refusal.severity, refusal.message);
 		const std::vector<RenameSite> &sites = *plan.sites;
 		if (plan.refusals.empty())
 			ImGui::TextDisabled("%s", sites.empty() ? "Nothing names it." :
@@ -1118,7 +1110,8 @@ void FilesWindow::draw_card(const SessionView &view) {
 	draw_file_card_head(card, false);
 	ui_kit::quiet_text(card.path);
 	ui_kit::clipped_text(card.build);
-	if (!card.imported_from.empty()) ui_kit::clipped_text("Made from " + card.imported_from + " by its import.");
+	if (!card.imported_from.empty())
+		ui_kit::clipped_text("Made from " + card.imported_from, "Its import makes it from " + card.imported_from + ".");
 	// A wave's sound, as the game decodes it, played by the editor.
 	if (card.wave) {
 		ImGui::Spacing();
@@ -1165,9 +1158,10 @@ void FilesWindow::draw_card(const SessionView &view) {
 				}
 				ImGui::Dummy(ImVec2(width, height));
 			}
-			if (!card.sound.plays)
-				ui_kit::refusal_text("The game's loader refuses it: " + card.sound.refusal +
-				                     " Import it again to write it as the game plays it.");
+			if (!card.sound.plays) {
+				ui_kit::refusal_text("The game's loader refuses it.");
+				ui_kit::tooltip(card.sound.refusal + " Import it again to write it as the game plays it.");
+			}
 		} else {
 			ui_kit::refusal_text("The game cannot play it: " + card.sound.error);
 		}
@@ -1194,9 +1188,8 @@ void FilesWindow::draw_card(const SessionView &view) {
 	// A kind whose files name none (a wave, a texture) says nothing of it.
 	const bool names_any = !card.names.empty() || asset_kind_row(card.kind).names_files;
 	if (names_any && ImGui::CollapsingHeader(names.c_str(), card.names.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
-		if (card.names.empty())
-			ui_kit::empty_state(card.reading ? ui_kit::reading_references() : "No other file or record.");
-		else if (ImGui::BeginTable("names", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+		if (!ui_kit::no_uses(card.names.size(), card.reading, "No other file or record.") &&
+		    ImGui::BeginTable("names", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn("What", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 			ImGui::TableSetupColumn("##state", ImGuiTableColumnFlags_WidthStretch, 1.0f);
@@ -1233,9 +1226,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	// Who names it, or what it defines: a click goes to the use.
 	const std::string users = "Named by (" + count(card.used_by.size()) + ")###users";
 	if (ImGui::CollapsingHeader(users.c_str(), card.used_by.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
-		if (card.used_by.empty())
-			ui_kit::empty_state(card.reading ? ui_kit::reading_references()
-			                                 : "No file of the project names it or what it defines.");
+		ui_kit::no_uses(card.used_by.size(), card.reading, ui_kit::nothing_names_it(true));
 		ImGuiListClipper clipper;
 		clipper.Begin(static_cast<int>(card.used_by.size()));
 		while (clipper.Step())

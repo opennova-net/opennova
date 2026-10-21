@@ -59,22 +59,21 @@ void keyframe_words(const EnvironmentDocument &document, const NodeAddress &reco
 	const env::KeyframeSegment segment = env::find_keyframe_segment(hours, env::hhmm_to_hours_fp(float(at)));
 	if (segment.hi < 0) return;
 	const int next = times[size_t(segment.hi)];
-	if (times.size() < 2) ui_kit::quiet_text("The only keyframe: its colours hold all day.");
+	if (times.size() < 2) ui_kit::quiet_text("The only keyframe", "Its colours hold all day.");
 	else
-		ui_kit::quiet_text("At " + clock(at) + ", blending toward " + clock(next),
-		                   "The clock reaches these colours at " + clock(at) +
-		                           "; after it the game blends toward the keyframe at " + clock(next) + ".");
+		ui_kit::quiet_text("At " + clock(at) + ", toward " + clock(next),
+		                   "The clock reaches these colours at " + clock(at) + "; after it the game blends toward the "
+		                   "keyframe at " + clock(next) + ".");
 }
 
-// A terrain key's line of a mission: its terrain takes it after its .trn and overcast.def, over what the keyword held
-// before it (the file and value that set it, else the load's default).
-std::string terrain_key_words(const EnvironmentMissionUse &use, const EnvironmentTerrainKey &key, const std::string &self) {
+// What a terrain key of a mission takes the place of: its terrain takes it after its .trn and overcast.def, over
+// what the keyword held before it (the file and value that set it, else the load's default).
+std::string terrain_key_over(const EnvironmentMissionUse &use, const EnvironmentTerrainKey &key, const std::string &self) {
 	const std::string terrain = use.terrain_file.empty() ? use.terrain : io::utf8_file_name(use.terrain_file);
-	std::string words = "Its terrain's " + key.key + (key.value.empty() ? "" : " " + key.value) + " from this file";
-	if (key.over.empty()) return words + ", read after " + terrain + "'s lines";
-	if (key.over_file.empty()) return words + ", over the default " + key.over;
-	if (key.over_file == self) return words + ", over its own " + key.over + " above";
-	return words + ", over " + io::utf8_file_name(key.over_file) + "'s " + key.over;
+	if (key.over.empty()) return "Its terrain takes it from this file, read after " + terrain + "'s lines.";
+	if (key.over_file.empty()) return "Its terrain takes it from this file, over the default " + key.over + ".";
+	if (key.over_file == self) return "Its terrain takes it from this file, over its own " + key.over + " above.";
+	return "Its terrain takes it from this file, over " + io::utf8_file_name(key.over_file) + "'s " + key.over + ".";
 }
 
 } // namespace
@@ -89,14 +88,14 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 	// @ 0x6109AD; Environment_LoadTimeOfDayConfig @ 0x57DCBF] (D-TERRAIN-18).
 	const bool on_key = record.child && record.kind == node_kind(EnvironmentKind::TerrainKey);
 	if (on_key)
-		ui_kit::quiet_text("A terrain key, read over the mission's terrain",
-		                   "The terrain's reader reads this file's lines after each mission's .trn and overcast.def, so the "
-		                   "terrain of a mission that runs on this environment takes it over theirs.");
+		ui_kit::quiet_text("A terrain key", "The terrain's reader reads this file's lines after each mission's .trn and "
+		                                    "overcast.def: the terrain of a mission on this environment takes it over theirs.");
 	if (!view.project.scan) return true;
 	const AssetScan &scan = *view.project.scan;
 	const EnvironmentUses &uses = uses_of(view, environment->path());
-	if (!mission_uses_heading(uses.missions.size(), uses.reading,
-	                          "A mission's header names its environment (Environment).")) {
+	if (!ui_kit::uses_heading("Missions on it", uses.missions.size(), uses.reading,
+	                          "The missions whose header names this environment, with what each makes of it.",
+	                          "No mission runs on it.", "A mission's header names its environment (Environment).")) {
 		ImGui::Separator();
 		return true;
 	}
@@ -110,14 +109,14 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 		if (!use.terrain_file.empty())
 			inspector_jump_line(workspace, file_target(scan, use.terrain_file), "On the terrain " + io::utf8_file_name(use.terrain_file), "t" + tag);
 		else if (!use.terrain.empty())
-			ui_kit::quiet_text("On the terrain " + use.terrain + " (not in the project)");
+			ui_kit::quiet_text("On the terrain " + use.terrain + " (missing)", "The project has no " + use.terrain + ".");
 		// What its header sets over this environment, each on the header's field.
 		const std::string locator = use.edge ? use.edge->locator : std::string();
 		const auto header = [&](const char *field) { return window_requests::target_at(use.mission, locator, field); };
 		for (const EnvironmentOverride &each : environment_overrides(use))
 			inspector_jump_line(workspace, header(each.field), "Its header sets " + each.words + " over this", "o" + tag + each.field);
-		inspector_jump_line(workspace, header("start_time"), "It " + mission_clock_words(use) + " (curtime and tod_rate here are not read)",
-		                    "c" + tag);
+		inspector_jump_line(workspace, header("start_time"), "It " + mission_clock_words(use), "c" + tag,
+		                    "Its header sets the clock: curtime and tod_rate here are not read.");
 		// Where its water plane comes from: the header's, the terrain's or this environment's.
 		ReferenceTarget water;
 		if (use.water_from == env::WaterRung::Mission) water = header("water_override");
@@ -135,8 +134,8 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 			taken = true;
 			const ReferenceTarget target = window_requests::target_at(
 					environment->path(), at.child ? environment->locator(at) : std::string(), "value");
-			inspector_jump_line(workspace, target, terrain_key_words(use, key, environment->path()),
-			                    "k" + tag + "." + std::to_string(key.index));
+			inspector_jump_line(workspace, target, "Its terrain's " + key.key + (key.value.empty() ? "" : " " + key.value),
+			                    "k" + tag + "." + std::to_string(key.index), terrain_key_over(use, key, environment->path()));
 		}
 		if (on_key && !taken)
 			ui_kit::quiet_text(use.terrain_file.empty() ? "Its terrain is not in the project." : "Its terrain does not take this line.",

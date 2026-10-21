@@ -18,6 +18,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/inspector_layout.h>
 #include <editor/ui/project_find.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
@@ -320,7 +321,7 @@ void ProblemsWindow::draw_list(const SessionView &view, const ProblemAnswer &ans
 	ImGui::TableSetupColumn("Fix", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 	// The project's own ids: a press in one project never lands in the next.
 	ImGui::PushID(view.project.root.c_str());
-	// The selected finding's line is drawn whole (its message wrapped, every fix); the lines
+	// The selected finding's line is drawn whole (every fix, its code); the lines
 	// either side of it, all as high as a control, only where they show.
 	const std::vector<Line> &lines = list_.lines();
 	size_t split = lines.size();
@@ -364,10 +365,9 @@ void ProblemsWindow::draw_header(const SessionView &view, const ProblemAnswer &a
 	        ProblemsList::severity_counts(group.errors, group.warnings, group.infos);
 	ui_kit::clipped_text(group.title + " (" + counts + ")");
 	if (group.original)
-		ui_kit::tooltip("Problems the game has as it ships: its install, checked as a whole, has each of them too, in "
-		                "the file of the same name, so they are not yours to fix. A problem your edits bring, or your "
-		                "project's other files bring (a texture the install has that your project lacks), is never in "
-		                "it, nor one that would stop a build.");
+		ui_kit::tooltip("Problems the game has as it ships, its install checked as a whole having each in the file of the "
+		                "same name: not yours to fix. One your edits or your project's other files bring is never here, "
+		                "nor one that would stop a build.");
 	ImGui::TableSetColumnIndex(3);
 	const ProblemsList::Proposal &all = list_.group_fixes(line.group);
 	if (all.findings >= 2 && !all.requests.empty()) {
@@ -389,7 +389,7 @@ void ProblemsWindow::draw_header(const SessionView &view, const ProblemAnswer &a
 }
 
 // A finding's line: its severity, its message, where it is and its fixes. Expanded (the
-// selected one), the whole message wrapped, every fix with what it does, and its code.
+// selected one), every fix (what it does in its tooltip) and its code.
 void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, bool expanded) {
 	const Diagnostic &d = view.findings.diagnostics[line.finding];
 	ImGui::PushID(list_.key(line.finding).c_str());
@@ -433,12 +433,14 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 		ImGui::SameLine();
 	}
 	if (expanded) {
-		// The whole message; the blocker's reason, the shipped file's mark and each fix's detail are in their tooltips.
-		ImGui::TextWrapped("%s", d.message.c_str());
-		// A file the game reads by name: the manifest's own record of it, the plain words' cited detail.
+		// The message on one line, whole in its tooltip with, for a file the game reads by name, the manifest's own
+		// record of what the original does without it; the blocker's reason, the shipped file's mark and each fix's
+		// detail are in their tooltips.
+		std::string tip = d.message;
 		if (const RequirementSubject *requirement = requirement_subject(d))
 			if (const std::string witness = requirement_witness(requirement->role); !witness.empty())
-				ui_kit::quiet_text("As the original was seen to do: " + witness);
+				tip += "\n\nAs the original was seen to do: " + witness;
+		ui_kit::clipped_text(ui_kit::without_citations(d.message), tip);
 		for (const ProblemFix &fix : fixes) {
 			ImGui::PushID(fix.label.c_str());
 			const float room = ImGui::GetContentRegionAvail().x;
@@ -450,9 +452,7 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 			ui_kit::tooltip_lazy([&] { return fix_tip(fix, note, allowed); });
 			ImGui::PopID();
 		}
-		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ui_kit::clipped_text(d.code());
-		ImGui::PopStyleColor();
+		ui_kit::quiet_text(d.code());
 	} else {
 		// Cut to the line: the words without their witness citations, the whole message and its code in the tooltip.
 		ui_kit::clipped_text(ui_kit::without_citations(d.message), d.code().empty() ? d.message : d.message + "\n\n" + d.code());
@@ -460,17 +460,21 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	ImGui::TableNextColumn();
 	ImGui::AlignTextToFramePadding();
 	// The record in the words its document shows it by where it is open (a mission's trigger as what it
-	// tests, an entity by its item's name, S15), and the field by what the record calls it; its path in
-	// the tooltip.
+	// tests, an entity by its item's name, S15), in its brief words where its type has them (a long title
+	// cramps the column), and the field by what the record calls it; its path and its whole title in the
+	// tooltip.
 	const std::string title = finding_record_title(d, view), field = finding_field_title(d, view);
+	const std::string brief = open_record_brief(view, d.asset, {d.row_id, d.record_kind, d.child_id});
 	const std::string plain = ProblemsList::location_of(d, false);
-	std::string where = plain;
-	if (!title.empty() || !field.empty()) {
-		where = basename_of(d.asset);
-		for (const std::string *part : {title.empty() ? &d.record : &title, field.empty() ? &d.field : &field})
-			if (!part->empty()) where += " - " + *part;
-	}
-	const std::string whole = ProblemsList::location_of(d, true) + (where == plain ? std::string() : "\n" + where);
+	const auto place = [&](const std::string &record) {
+		if (record.empty() && field.empty()) return plain;
+		std::string out = basename_of(d.asset);
+		for (const std::string *part : {record.empty() ? &d.record : &record, field.empty() ? &d.field : &field})
+			if (!part->empty()) out += " - " + *part;
+		return out;
+	};
+	const std::string full = place(title), where = brief.empty() ? full : place(brief);
+	const std::string whole = ProblemsList::location_of(d, true) + (full == plain ? std::string() : "\n" + full);
 	// A texture's finding shows the texture as its tooltip (S18).
 	const AssetEntry *asset = view.project.scan && !d.asset.empty() ? view.project.scan->at_path(d.asset) : nullptr;
 	const bool texture = asset && asset->kind == AssetKind::Texture;
@@ -556,19 +560,15 @@ void ProblemsWindow::draw_more(const SessionView &view) {
 		ImGui::EndPopup();
 		return;
 	}
-	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32.0f);
-	// The game's own data's: said first (S15).
+	// The game's own data's: said first (S15), on one line; what each fix does in its tooltip alone.
 	const std::string note = shipped_note(finding, view);
-	if (!note.empty()) ImGui::TextDisabled("%s", note.c_str());
+	if (!note.empty()) ui_kit::quiet_text("Edits a file the game ships", note);
 	for (const ProblemFix &fix : list_.fixes(view, finding)) {
 		const bool allowed = view.allows(fix.request.kind);
 		const bool clicked = ImGui::Selectable(fix.label.c_str(), false, allowed ? 0 : ImGuiSelectableFlags_Disabled);
 		if (fix_pressed(view, finding, fix, clicked) && allowed) apply(view, finding, fix);
-		ImGui::Indent();
-		ImGui::TextDisabled("%s", fix.detail.c_str());
-		ImGui::Unindent();
+		ui_kit::tooltip_lazy([&] { return fix.detail + (allowed ? "" : std::string("\n") + kWaits); });
 	}
-	ImGui::PopTextWrapPos();
 	ImGui::EndPopup();
 }
 
@@ -636,11 +636,8 @@ void ProblemsWindow::draw_confirm(const SessionView &view) {
 		return;
 	}
 	const ProblemsList::Proposal &shown = list_.shown();
-	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 36.0f);
-	if (shown.requests.empty())
-		ImGui::TextUnformatted("Nothing is left to do: the problems it was for are gone.");
-	for (const std::string &line : shown.lines) ImGui::TextUnformatted(line.c_str());
-	ImGui::PopTextWrapPos();
+	if (shown.requests.empty()) ui_kit::dialog_text("Nothing is left to do: the problems it was for are gone.");
+	for (const std::string &line : shown.lines) ui_kit::dialog_text(line);
 	const bool allowed = allows_all(view, shown.requests);
 	ImGui::BeginDisabled(shown.requests.empty() || !allowed);
 	const bool apply = ImGui::Button("Apply");

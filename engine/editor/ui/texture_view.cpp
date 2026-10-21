@@ -114,11 +114,10 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 			ImGui::TableNextColumn();
 			ImGui::TextDisabled("%s", fact.label.c_str());
 			ImGui::TableNextColumn();
-			ImGui::PushTextWrapPos(0.0f);
-			if (fact.key == "loads" && !image->loads) ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Error), "%s", fact.words.c_str());
-			else if (fact.key == "rows" && image->upside_down) ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "%s", fact.words.c_str());
-			else ImGui::TextUnformatted(fact.words.c_str());
-			ImGui::PopTextWrapPos();
+			// A line each, cut to the column, whole in its tooltip.
+			if (fact.key == "loads" && !image->loads) ui_kit::refusal_text(fact.words);
+			else if (fact.key == "rows" && image->upside_down) ui_kit::warning_line(fact.words);
+			else ui_kit::clipped_text(fact.words);
 		}
 		ImGui::EndTable();
 	}
@@ -127,9 +126,9 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 	ui_kit::WrapRow made;
 	if (ui_kit::tool(made, "Replace with image...", view.allows(EditorRequestKind::PreviewTextureSource),
 	                 "Makes " + basename_of(document.path()) +
-	                         " from a PNG, a TGA or a PCX of yours, in the form it is stored in, under the name every file "
-	                         "that uses it writes, after showing you what changes. The file it replaces is kept under " +
-	                         std::string(kReplacedFolder) + "/. Dropping an image on this tab does the same.")) {
+	                         " from a PNG, a TGA or a PCX of yours in the form it is stored in, under the name its uses write, "
+	                         "after showing you what changes. The file it replaces is kept under " + std::string(kReplacedFolder) +
+	                         "/; an image dropped on this tab does the same.")) {
 		EditorRequest pick = request::pick_file(PickPurpose::TextureImage);
 		pick.path = document.path();
 		workspace.request(std::move(pick));
@@ -143,11 +142,9 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 	if (ui_kit::tool(made, "Edit in its program",
 	                 view.allows(has_source ? EditorRequestKind::OpenTextureSource : EditorRequestKind::PreviewTextureSource) && !unsaved,
 	                 unsaved ? "Save or discard its edits first: its program edits the file as saved."
-	                         : "Opens the image this texture is made from in the program your system has for it: its "
-	                           "import's source, or a PNG the game reads itself. A texture stored in another form gets a "
-	                           "source of its own once, in art/, which its import turns back into this file (you are shown "
-	                           "what changes first). What the program saves is imported again when you come back to the "
-	                           "editor."))
+	                         : "Opens the image it is made from in your system's program for it, one stored in another form "
+	                           "given a source of its own in art/ first (you are shown what changes). What the program saves "
+	                           "is imported again when you come back."))
 		workspace.request(has_source ? request::open_texture_source(document.path()) : request::preview_texture_source(document.path()));
 	if (!image->palette.empty() && ImGui::CollapsingHeader("Palette", ImGuiTreeNodeFlags_DefaultOpen)) draw_palette(image->palette);
 	draw_import(workspace, document);
@@ -203,10 +200,9 @@ void TextureView::draw_edits(Workspace &workspace, const DocumentBase &document,
 			if (ui_kit::tool(form, "24-bit", allowed, "Colour alone: a terrain colour map's form.")) operate("format", {{"format", "tga24"}});
 			// Its .dds, which a model row's loader opens before the .tga its row names (store_as_dds).
 			if (ui_kit::tool(form, "DDS", view.allows(EditorRequestKind::StoreAsDds) && image.loads && image.decoded && !document.dirty(),
-			                 "Stored as the .dds of its name, DXT1 (DXT5 with alpha) with its mip chain, the form of the game's "
-			                 "own model textures, a fraction of the TGA's size: a model's rows keep naming the .tga, whose .dds "
-			                 "the game reads first. The TGA becomes the source in art/ its import makes the .dds from. Refused "
-			                 "where a use reads the .tga itself (a terrain map, the HUD)."))
+			                 "Stored as the .dds of its name, DXT1 (DXT5 with alpha) with its mips: a model's rows keep naming "
+			                 "the .tga, whose .dds the game reads first, the TGA its source in art/. Refused where a use reads "
+			                 "the .tga itself (a terrain map, the HUD)."))
 				workspace.request(request::store_as_dds(path));
 		} else {
 			if (ui_kit::tool(form, "DXT5 with mips", allowed, "The form of the game's own model textures."))
@@ -327,10 +323,12 @@ void TextureView::draw_import(Workspace &workspace, const DocumentBase &document
 		const ImportOptionRow *row = import_option_row(state.importer->options, option);
 		if (row && strutil::to_lower(import_option_value(state, *row)) != strutil::to_lower(value)) asked.emplace_back(option, value);
 	}
-	ImGui::PushTextWrapPos(0.0f);
 	if (!asked.empty()) {
 		ImGui::TextUnformatted("Its uses ask for:");
-		for (const std::string &reason : needs.reasons) ImGui::BulletText("%s", reason.c_str());
+		for (const std::string &reason : needs.reasons) {
+			ImGui::Bullet();
+			ui_kit::clipped_text(reason);
+		}
 		if (ImGui::Button("Make it as its uses ask") && allowed)
 			workspace.request(request::set_import_options(state.source, {needs.options.begin(), needs.options.end()}));
 	} else if (needs.uses > 0 && needs.conflicts.empty()) {
@@ -349,7 +347,6 @@ void TextureView::draw_import(Workspace &workspace, const DocumentBase &document
 		                         " name from then on; each file is then made as its own uses ask. Undo does not take it back."))
 			workspace.request(request::split_texture(document.path(), copy, needs.split_referrers));
 	}
-	ImGui::PopTextWrapPos();
 	ImGui::EndDisabled();
 }
 
@@ -386,16 +383,11 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 			view.documents.texture_uses ? view.documents.texture_uses->uses_of(view, document.path()) : kNone;
 	const std::string heading = "Used as (" + std::to_string(uses.size()) + ")###used_as";
 	if (!ImGui::CollapsingHeader(heading.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) return;
-	if (!view.findings.graph) {
-		ui_kit::empty_state(ui_kit::reading_references());
+	if (ui_kit::no_uses(uses.size(), !view.findings.graph, ui_kit::nothing_names_it(false),
+	                    "A model, a terrain, a sky, a particle effect, the HUD, a definition, a menu or a mission names a "
+	                    "texture by its file name; the game opens some by name itself.") ||
+	    !view.findings.graph)
 		return;
-	}
-	if (uses.empty()) {
-		ui_kit::empty_state("Nothing in the project uses this file.",
-		                    "A model, a terrain, a sky, a particle effect, the HUD, a definition, a menu or a mission names a "
-		                    "texture by its file name; the game opens some by name itself.");
-		return;
-	}
 	for (size_t i = 0; i < uses.size(); ++i) {
 		const TextureUse &use = uses[i];
 		ImGui::PushID(int(i));
@@ -461,7 +453,6 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 				else if (*role.alpha)
 					tip += std::string("\nAlpha: ") + role.alpha;
 				if (role.size != renderer::TextureSizeRule::Any) tip += "\nSize: " + texture_size_words(role);
-				tip += std::string("\nWitness: ") + (use.fixed ? use.fixed_witness.c_str() : role.witness);
 			}
 			if (!use.fixed) tip += target.editable ? "\nOpens " + target.file + " at it." : "\nShows " + target.file + " in Files.";
 			return tip;

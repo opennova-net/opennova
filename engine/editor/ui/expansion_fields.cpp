@@ -71,9 +71,9 @@ bool ExpansionFields::draw(ExpansionChoice &choice, const std::vector<ProjectVie
 		changed = true;
 	}
 	ImGui::EndDisabled();
-	ui_kit::tooltip("Empty: the game install's base game. A folder: a standalone project of your own (from this "
-	                "project's folder when relative, as ../../assets), whose export is the base game the expansion "
-	                "imports from, builds over and plays over, Strict Play included. Export it first.");
+	ui_kit::tooltip("Empty: the game install's base game. A folder (relative to this project's, as ../../assets): a "
+	                "standalone project of yours whose export, made first, is the base game it imports from, builds over "
+	                "and plays over.");
 	if (!choice.base_project.empty() && !choice.builds_on.empty()) {
 		ui_kit::refusal_text("An expansion builds on an installed expansion or on a base game's project, never both.");
 		return false;

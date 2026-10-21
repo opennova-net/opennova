@@ -1727,8 +1727,20 @@ void test_problems_window_ui() {
 	                      "Use spare.bin as gametext.bin", "requirement.missing"}) &&
 	              text.find("Renames spare.bin to gametext.bin.") == std::string::npos,
 	      "the selected row: every fix (what it does in its tooltip), and its code");
-	CHECK(text.find("As the original was seen to do:") != std::string::npos, "the manifest's own record of it, the cited detail");
+	CHECK(text.find("As the original was seen to do:") == std::string::npos, "the manifest's own record of it, no line");
 	CHECK(text.find("Blocks the build") != std::string::npos, "a row a build is refused for says so");
+	// The message on one line after Blocks the build, the manifest's record of the file in its tooltip, without
+	// its citation.
+	{
+		const ProblemsLines lines = problems_lines();
+		const ImGuiTableColumn &message = lines.table->Columns[1];
+		ui.mouse(message.WorkMinX + ui_kit::text_width("Blocks the build") + ImGui::GetStyle().ItemSpacing.x + 8.0f,
+		         lines.y(0));
+		const std::string tip = logged_frame(ui);
+		CHECK(tip.find("As the original was seen to do:") != std::string::npos && tip.find("[orig:") == std::string::npos,
+		      "the manifest's own record of it in the message's tooltip, without its citation");
+		ui.away();
+	}
 	ui.click(problems_lines().at(0, 2));
 	ui.away();
 	CHECK(logged_frame(ui).find("requirement.missing") == std::string::npos, "a second click folds it back");
@@ -2606,7 +2618,7 @@ void test_inspector_kinds_alike() {
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	shown = logged_frame(ui);
-	CHECK(shown.find("2 records of different kinds selected") != std::string::npos &&
+	CHECK(shown.find("2 records of different kinds") != std::string::npos &&
 	              shown.find("a change here sets every one") == std::string::npos,
 	      "a note with a crate: the kinds differ");
 	ui.drain();
@@ -2646,10 +2658,12 @@ void test_used_by_ui() {
 	ui.away();
 	ui.drain();
 	const std::string text = logged_frame(ui);
-	CHECK(text.find("skinned.3di: used by 1 field") != std::string::npos, "the file's uses, counted");
+	// The toolbar's chip and the Inspector's heading, each counted.
+	const size_t chip = text.find("Used by (1)");
+	CHECK(chip != std::string::npos && text.find("Used by (1)", chip + 1) != std::string::npos,
+	      "the file's uses, counted, on the toolbar's chip and over the Inspector's list");
 	CHECK(text.find(items->logical_name + " (1)") != std::string::npos, "grouped by the file naming it");
 	CHECK(text.find("Skinned Thing") != std::string::npos, "the item naming it, in its words");
-	CHECK(text.find("Used by (1)") != std::string::npos, "the toolbar's chip, counted");
 	InspectorWindow *inspector_window = nullptr;
 	for (int i = 0; i < ui.windows.pass().window_count() && !inspector_window; ++i)
 		inspector_window = dynamic_cast<InspectorWindow *>(&ui.windows.pass().window(i));

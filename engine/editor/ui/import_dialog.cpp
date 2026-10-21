@@ -84,9 +84,8 @@ void not_followed_line(const ImportPlan &plan) {
 		line += std::string(line.empty() ? "" : " ") + "Defined only in the source's copy of a file the project has (its own is kept, "
 		        "so these stay undefined; import that file with Replace to take the source's): " + names_in_words(shadowed) + ".";
 	if (line.empty()) return;
-	ImGui::TextWrapped("%s", line.c_str());
 	if (!tip.empty()) tip.pop_back();
-	ui_kit::tooltip(tip);
+	ui_kit::clipped_text(line, tip.empty() ? std::string() : line + "\n\n" + tip);
 }
 
 // How many lines the notes under the plan take at most, for the table's height: the files not found
@@ -100,7 +99,7 @@ size_t note_lines(const ImportPlan &plan) {
 	}
 	size_t lines = (missing ? 1 + std::min<size_t>(missing <= 20 ? missing + 1 : 0, 6) : 0) + std::min<size_t>(rivals, 3) +
 	               plan.diagnostics.size() + (plan.truncated ? 1 : 0);
-	if (!plan.not_followed.empty() || !plan.undefined.empty() || !plan.shadowed.empty()) lines += 2;
+	if (!plan.not_followed.empty() || !plan.undefined.empty() || !plan.shadowed.empty()) ++lines;
 	return std::min<size_t>(lines, 10);
 }
 
@@ -227,9 +226,9 @@ void ImportDialog::draw(Workspace &workspace) {
 		                     "This is the import as they are now.");
 	const bool from_game = (!preview.roots.empty() && preview.roots.front().install) ||
 	                       (!preview.choices.empty() && preview.choices.front().install);
-	ImGui::TextWrapped("%s", preview.all ? "Copy every file of the game data into the project."
-	                         : from_game  ? "Copy files from the game data into the project."
-	                                      : "Copy files into the project.");
+	ui_kit::clipped_text(preview.all ? "Copy every file of the game data into the project."
+	                     : from_game  ? "Copy files from the game data into the project."
+	                                  : "Copy files into the project.");
 	// The lists scroll; Replace existing files, Import and Cancel stay under them, on two lines
 	// in a narrow dialog. A list to choose from takes some of the height, the plan the rest.
 	ImGui::BeginChild("import_body", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 3));
@@ -380,8 +379,7 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 	const auto fact = [&preview](size_t i) {
 		return i < preview.facts.size() ? preview.facts[i] : ImportChoiceFacts{};
 	};
-	ImGui::TextWrapped("Choose the files to import from %s (%s):", from.c_str(),
-	                   counted(preview.choices.size(), "file").c_str());
+	ui_kit::clipped_text("Choose the files to import from " + from + " (" + counted(preview.choices.size(), "file") + "):");
 	const float em = ImGui::GetFontSize();
 	ui_kit::WrapRow controls;
 	const float filter_width = em * 18.0f;
@@ -700,7 +698,7 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	}
 	// The plan in short: its files and bytes, then each kind with its count and size, a toggle that
 	// shows that kind's rows alone (the videos of a mission's closure unchecked in two clicks).
-	ImGui::TextWrapped("%s", (counted(plan.file_count(), "file") + ", " + strutil::byte_size_text(plan.total_bytes()) + ":").c_str());
+	ui_kit::clipped_text(counted(plan.file_count(), "file") + ", " + strutil::byte_size_text(plan.total_bytes()) + ":");
 	ui_kit::WrapRow kinds;
 	float kind_width = ui_kit::text_width("Kind"); // the Kind column as wide as the longest the plan has
 	for (const ImportPlanKind &entry : plan.by_kind()) {
@@ -814,21 +812,14 @@ void ImportDialog::draw_notes(const DialogsView::ImportPreview &preview) {
 		for (const ImportRival &rival : row.rivals) {
 			const std::string line = row.name + ": found in both " + row.found_in + " and " + rival.found_in + "; using " +
 			                         row.found_in + (rival.differs ? " (the two files differ)." : " (the same file).");
-			ImGui::TextWrapped("%s", line.c_str());
+			ui_kit::clipped_text(line);
 		}
 	not_followed_line(plan);
-	if (plan.truncated) {
-		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Warning));
-		ImGui::TextWrapped("The plan stopped at %s files: the files past them are not listed and not imported.",
-		                   strutil::grouped(kImportPlanFileCap).c_str());
-		ImGui::PopStyleColor();
-	}
-	for (const Diagnostic &d : plan.diagnostics) {
-		ui_kit::severity_marker(d.severity);
-		ImGui::SameLine();
-		const std::string text = d.asset.empty() ? d.message : d.asset + ": " + d.message;
-		ImGui::TextWrapped("%s", text.c_str());
-	}
+	if (plan.truncated)
+		ui_kit::warning_line("The plan stopped at " + strutil::grouped(kImportPlanFileCap) + " files.",
+		                     "The files past them are not listed and not imported.");
+	for (const Diagnostic &d : plan.diagnostics)
+		ui_kit::finding_line(d.severity, d.asset.empty() ? d.message : d.asset + ": " + d.message);
 }
 
 } // namespace opennova::editor

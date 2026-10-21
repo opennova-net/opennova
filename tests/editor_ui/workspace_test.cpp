@@ -1347,7 +1347,7 @@ void test_files_window() {
 	CHECK(modal_open("New file") && ui.drain().empty(), "a menu's name asked first");
 	const ImGuiID prompt = ImHashStr("New file");
 	type_into(ui, item_id(prompt, {"Name"}), "main.mnu");
-	CHECK(logged_frame(ui).find("The project has a file named main.mnu already.") != std::string::npos, "a name taken");
+	CHECK(logged_frame(ui).find("main.mnu is taken.") != std::string::npos, "a name taken");
 	ui.activate(item_id(prompt, {"Create"}));
 	CHECK(ui.drain().empty() && modal_open("New file"), "Create waits for a name the project can take");
 	type_into(ui, item_id(prompt, {"Name"}), "extra.mnu");
@@ -1363,8 +1363,8 @@ void test_files_window() {
 	ui.frames(2);
 	CHECK(modal_open("New file") && ui.drain().empty(), "a texture's name asked first");
 	type_into(ui, item_id(prompt, {"Name"}), "badge.png");
-	CHECK(logged_frame(ui).find("A placeholder texture is a .tga, .mdt, .pcx or .dds file") != std::string::npos,
-	      "no placeholder is a .png");
+	// On one line under the name, cut to the prompt, whole in its tooltip.
+	CHECK(logged_frame(ui).find("A placeholder texture is a") != std::string::npos, "no placeholder is a .png");
 	ui.activate(item_id(prompt, {"Create"}));
 	CHECK(ui.drain().empty() && modal_open("New file"), "Create waits for a name the factory takes");
 	type_into(ui, item_id(prompt, {"Name"}), "skin.tga");
@@ -1425,8 +1425,8 @@ void test_files_window() {
 	ui.frames(2);
 	CHECK(modal_open("New file") && ui.drain().empty(), "a mission's name asked first");
 	text = logged_frame(ui);
-	CHECK(in_order(text, {"New file: Mission", "Title", "Terrain", "The project has no terrain: import one first",
-	                      "Environment", "The project has no environment: import one first", "Create"}),
+	CHECK(in_order(text, {"New file: Mission", "Title", "Terrain", "No terrain in the project", "Environment",
+	                      "No environment in the project", "Create"}),
 	      "the mission's title, terrain and environment asked; none to choose yet");
 	editor_test::own(v.project.scan).entries.push_back(file_entry("island.trn", "terrain/island.trn", AssetKind::Terrain));
 	editor_test::own(v.project.scan).entries.push_back(file_entry("day.env", "day.env", AssetKind::Environment));
