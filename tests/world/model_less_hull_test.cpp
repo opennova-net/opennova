@@ -154,10 +154,12 @@ void test_a_model_less_boat_keeps_its_latch() {
 	CHECK(e.position.z.q16 == z0 - 167);
 }
 
-// The platform solve's null-model branch: retail writes the contact byte (+0x2F2) from an
-// uninitialized stack word and, on the authority, Flags 0x10 from +0x2F0; ours leaves both
-// as they stand (Q7-12 (a), PERMANENT: a deliberate fix of retail's unchecked read).
-// [orig: Entity_ProcessPlatformPhysics @0x481870 (@0x481A85..0x481AC1 -> @0x481A06..0x481A22)]
+// The platform solve's null-model branch: retail writes the contact byte (+0x2F2) from the
+// stack word esp+0x2C (the wake leg's row-2 Z, stale on the paths past both extractions) and,
+// on the authority, Flags 0x10 from +0x2F0; ours leaves both as they stand (Q7-12 / Q7-33 (a),
+// PERMANENT, the whole branch: a deliberate fix of retail's unchecked read).
+// [orig: Entity_ProcessPlatformPhysics @0x481870 (@0x481A85..0x481AC1 -> @0x481A06..0x481A22;
+//  the extractions @0x4819D4 / @0x481A54)]
 void test_the_platform_solve_leaves_a_model_less_hull_alone() {
 	auto world = std::make_unique<World>();
 	world->registry.configure_pool(1, 4);
