@@ -185,7 +185,8 @@ void OutlineView::finding_mark(const SessionView &view, const Document &document
 		const NodeKind kind = d.record_kind ? d.record_kind : address.kind;
 		tip += (tip.empty() ? "" : "\n") + (d.field.empty() ? d.message : field_title(document, kind, d.field) + ": " + d.message);
 	}
-	ImGui::SetTooltip("%s", tip.c_str());
+	// The mark's own rect, no item's: its tip set as the pointer is over it, without its citations as any tip.
+	ImGui::SetTooltip("%s", ui_kit::without_citations(tip).c_str());
 }
 
 void OutlineView::rebind(const DocumentBase &) {

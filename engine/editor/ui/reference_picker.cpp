@@ -726,7 +726,7 @@ bool ReferencePicker::accept_record(const SessionView &, const Document &documen
 			}
 		} else if (!refusal.empty()) {
 			// A record whose value names another one (S24): not taken, the reason beside the pointer.
-			ImGui::SetTooltip("%s", refusal.c_str());
+			ImGui::SetTooltip("%s", ui_kit::without_citations(refusal).c_str());
 		}
 	}
 	ImGui::EndDragDropTarget();
