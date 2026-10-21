@@ -260,6 +260,20 @@ struct AiSlot {
     // [orig: read Entity_IsSsnAtAlertLevel @0x43e780; command writes
     //  Entity_ApplyCommand @0x43ac2d/=2, @0x43ac8d/=1, @0x43acfd/=0]
     enum { kAlertByte = 136 };
+    // +0xC (f[3]), the current target pointer as one word: an entity's handle + 1, a
+    // round's -(slot + 1) (the heat-seeker query's 0x200 leg returns a round of the
+    // projectile array, D-NET-64), or 0. One word, so a writer of either kind replaces
+    // the other, as retail's one pointer store does.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B520A; the stng init @0x445F10;
+    //  Entity_FindTargets @0x53A610 (the ring leg @0x53ACF0..0x53ADE0)]
+    static int32_t target_word(const TargetRef &t) {
+        if (t.round >= 0) return -(t.round + 1);
+        return t.entity.valid() ? static_cast<int32_t>(t.entity.packed) + 1 : 0;
+    }
+    static TargetRef target_of(int32_t word) {
+        if (word < 0) return TargetRef::of_round(-word - 1);
+        return word != 0 ? TargetRef{EntityHandle{static_cast<uint16_t>(word - 1)}} : TargetRef{};
+    }
 };
 static_assert(sizeof(AiSlot) == 172, "AiSlot must match unk_A34B90 172-byte stride");
 

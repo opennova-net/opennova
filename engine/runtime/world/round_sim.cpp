@@ -327,7 +327,7 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
     piece.mount_bone = 0;
     piece.ground_target = EntityHandle{};
     piece.mounted_child = EntityHandle{};
-    piece.last_fire_target = EntityHandle{};
+    piece.last_fire_target = TargetRef{};
     piece.spawn_position = piece.position;
     return piece;
 }

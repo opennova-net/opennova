@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 
 #include <base/io/bam.h>
 #include <formats/def/def.h>
@@ -15,6 +16,9 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/local_player_view.h>
+#include <runtime/world/projectile_target_ring.h>
+#include <runtime/world/round_sim.h>
+#include <runtime/world/throwables.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -397,6 +401,43 @@ void test_aim_ray_names_a_remote_persons_proxy() {
     CHECK(local.aim_wire_person() == 0xFFFF);
 }
 
+
+// The heat lock is the shared query's winner over the pool legs and the projectile target
+// ring, so a flare round ahead is the lock: the +0xC word holds the round, the tone flag
+// tests that word, the shooter's fire target is the round (its wire word 0xFFFF), and the
+// infantry pass's entity mirror stays empty.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B51FE..0x4B520A (the tone @0x4B520D..0x4B5222)
+//  -> Entity_SpawnWeaponEffect @0x545840 -> Entity_FindTargets @0x53A610 (the ring leg
+//  @0x53ACF0..0x53ADE0)]
+void test_heat_lock_takes_a_flare_round() {
+    auto lw = std::make_unique<LocalWorld>();
+    CollisionWorld collision;
+    lw->w.collision = &collision;
+    AiEntity &body = lw->body();
+    body.team = 1; lw->entity().team = 1;
+    LocalPlayer local(lw->w);
+    const EntityHandle hot = seed_heat_lock(*lw, local);
+    lw->w.registry.get(hot)->health = 0; // dead past 16 ticks: no entity candidate
+    lw->w.logic_tick = 32;
+    ThrowableClassRow flare{3100, ThrowClass::kAirFlare, ThrowClass::kAirFlare, 5, 0, 0, 1};
+    lw->w.throwables.classes.set(flare);
+    LiveRound &round = lw->w.round_sim.rounds[0];
+    round.active = true;
+    round.item_type_id = 3100;
+    round.motor = ThrowClass::kAirFlare;
+    round.heat_sig = 0x1234;
+    round.pos.set_q16({110 << 16, 20 << 16, 3 << 16});
+    ProjectileTargetRing &ring = lw->w.round_sim.target_ring;
+    round.target_ring_slot = ring.update(0, -1, 10);
+    lw->w.round_sim.rounds[1].target_ring_slot = ring.update(1, -1, 10); // [0, count) reads slot 1
+    local.update_aim_target();
+    CHECK(body.slot.f[3] == -1);
+    CHECK((body.slot.f[2] & 1) != 0);
+    CHECK(!body.inf.combat_target.valid());
+    CHECK(lw->entity().last_fire_target == TargetRef::of_round(0));
+    CHECK(lw->entity().last_fire_target.entity.packed == 0xFFFF);
+}
+
 } // namespace
 
 int main() {
@@ -406,6 +447,7 @@ int main() {
     test_locked_tone_waits_for_the_last_catch_up_tick();
     test_camera_leg_aims_the_fire_pose_from_the_composed_eye();
     test_aim_ray_names_a_remote_persons_proxy();
+    test_heat_lock_takes_a_flare_round();
     if (failures == 0) std::printf("local_player_targeting_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

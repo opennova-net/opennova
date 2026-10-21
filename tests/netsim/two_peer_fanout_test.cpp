@@ -2204,6 +2204,35 @@ bool run_round_event_fanout() {
 		            "a swept round never repeats (per-connection watermark)"))
 			return false;
 	}
+
+	// A heat lock on a round (a flare the ring leg returned): the shooter word is set, so
+	// 0x40 goes out, and the pool walk finds no pool for the round: its word is 0xFFFF
+	// [orig: NetPacket_SerializeRoundEvent @0x504820 - the walk's miss @0x504886, the flag
+	//  @0x5048BF..0x5048C1, the word @0x504966]. (D-NET-64)
+	{
+		w::Entity *shooter = world.registry.get(peer_h);
+		if (!expect(shooter != nullptr, "shooter entity live")) return false;
+		shooter->last_fire_target = w::TargetRef::of_round(3);
+		w::RoundEvent ev;
+		ev.shooter_handle = peer_h.packed;
+		ev.origin_x = ox;
+		ev.origin_y = oy;
+		ev.origin_z = oz;
+		ev.shot_seq = 78;
+		ev.adm_index = 11;
+		world.out.rounds.add(ev);
+	}
+	emit_frame(world, conns);
+	{
+		nw::FrameUpdate fh, fp;
+		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp), "round-target frames decode"))
+			return false;
+		if (!expect(fh.round_events.size() == 1, "host gets the round-target event")) return false;
+		const nw::RoundEventRecord &re = fh.round_events[0];
+		if (!expect((re.flags & 0x40) != 0 && re.target_handle == 0xFFFF,
+		            "a round target sets 0x40 with the word 0xFFFF"))
+			return false;
+	}
 	std::printf("PASS round_event_fanout\n");
 	return true;
 }

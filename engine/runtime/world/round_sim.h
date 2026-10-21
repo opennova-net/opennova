@@ -79,6 +79,7 @@ class World;
 
 struct AmmoTableEntry; // world/ammo_table.h
 struct AiEntity;       // world/ai.h
+struct AiSlot;         // world/ai.h
 // Shared by live flight and the retail ballistic scope-table solver.
 // [orig: Entity_ApplyDragAndBounceForce @0x4e5ec0, the (proj, 1, 0) flight
 //  call @0x4eaa64]
@@ -379,20 +380,26 @@ inline bool round_class_motor_bound(const LiveRound &round) {
     return round.guided_family != GuidedFamily::None || round.motor != ThrowClass{};
 }
 
-// The heat-seeker query's winner: an entity, or (the 0x200 leg) a ring round's slot.
-struct HeatTargetPick {
-    EntityHandle entity;
-    int32_t round = -1;
-};
-// The heat-seeker arm of the shared target query (world/local_player_targeting.cpp):
-// `ring_leg` walks the projectile target ring as the 0x200 flag does; `attacker_occupant` is
-// the query entity's +368, which the MP air-flare roll reads.
-HeatTargetPick guided_heat_target_pick(World &world, const Entity &owner, const AiEntity &body,
-        const AmmoTableEntry &ammo, bool ring_leg, const Entity *attacker_occupant);
-// The same without the ring leg (the player's lock and the Stinger's launch until the
-// round-target reference lands).
-EntityHandle guided_heat_target(World &world, const Entity &owner, const AiEntity &body,
-        const AmmoTableEntry &ammo);
+// The heat-seeker arm of the shared target query (world/local_player_targeting.cpp), as
+// Entity_SpawnWeaponEffect runs it for all three of its callers (the player's lock, the
+// Stinger's launch, its in-flight acquisition): the pool legs and the projectile target
+// ring's leg (their context flags 0x662 carry 0x200), so the winner is an entity or a
+// round. `query_slot` is the query entity's AI slot (+0x68; null for the missile round),
+// whose 0x200 bit the head exit reads for a team-0 query; `attacker_occupant` is the query
+// entity's +368, which the MP air-flare roll reads.
+// [orig: Entity_SpawnWeaponEffect @0x545840 (the flags @0x54591B, the call @0x545890)]
+TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &body,
+        const AiSlot *query_slot, const AmmoTableEntry &ammo, const Entity *attacker_occupant);
+// A round held as a target (TargetRef::round): its Health word (+0x11E: its TrcrID item's
+// hp, which Entity_InitFromItemDef stores; 0 for any other round, the allocation's memset)
+// and its fire origin (its Position: no TARGET userpoint resolves on a round's def). Its
+// release clears neither word, so a released round reads as it last stood until its slot
+// is spawned again. [orig: Entity_InitFromItemDef @0x49E550 (@0x49E5C0);
+//  CEntityManager_AllocateSlot @0x4EAAD0 (the memset); Projectile_ReleaseEffects
+//  @0x4E8280 (@0x4E82C2..0x4E831E); Entity_ComputeWeaponFireOrigin @0x43B4B0
+//  (@0x43B54F / @0x43B619)]
+int32_t round_target_health(const World &world, int32_t slot);
+void round_target_origin(const World &world, int32_t slot, int32_t out[3]);
 
 // Retail keeps the selected TrcrID item/class bound independently of tracer
 // cadence (@0x4ec79b..0x4ec7b7), but clears the round+0x30 visible-model

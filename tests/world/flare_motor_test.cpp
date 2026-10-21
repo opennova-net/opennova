@@ -38,6 +38,9 @@ constexpr uint32_t kForceTracer = 0x8000u;
 constexpr int kAmmoFlare = 1;
 constexpr int kItemAirFlare = 3100;
 constexpr int kItemGroundFlare = 3101;
+constexpr int kAmmoStinger = 2;
+constexpr int kAmmoBullet = 3;
+constexpr int kItemStinger = 3102;
 
 struct FlatField {
     static constexpr int kDim = 512;
@@ -102,7 +105,56 @@ struct Rig {
     }
     LiveRound &round(int slot) { return w.round_sim.rounds[static_cast<size_t>(slot)]; }
     void tick() { w.round_sim.tick(w, &flat.field, nullptr); }
+    // A Stinger round (its TrcrID item binds the stng class) and a plain bullet, and an AI
+    // shooter with its slot (the stng init queries over it), facing +X at (50, 50, 30).
+    EntityHandle add_stinger() {
+        w.tables.ammo.entries.resize(4);
+        AmmoTableEntry &stinger = w.tables.ammo.entries[kAmmoStinger];
+        stinger.name = "STINGER";
+        stinger.valid = true;
+        stinger.velocity = 40;
+        stinger.max_age_ticks = 600;
+        stinger.heat_det_range = 3000;
+        stinger.boresight_maxang = 0x10000000;
+        stinger.tracer_item_friendly = kItemStinger;
+        ThrowableClassRow row{kItemStinger, ThrowClass::kNone, ThrowClass::kStinger};
+        w.throwables.classes.set(row);
+        AmmoTableEntry &bullet = w.tables.ammo.entries[kAmmoBullet];
+        bullet.name = "BULLET";
+        bullet.valid = true;
+        bullet.velocity = 100;
+        bullet.max_age_ticks = 600;
+        Entity person;
+        person.kind = EntityKind::Organic;
+        person.team = 1;
+        person.health = 100;
+        person.alive = true;
+        person.position.set_q16({50 << 16, 50 << 16, 30 << 16});
+        const EntityHandle shooter = w.registry.spawn(0, person);
+        w.ai.attach(shooter);
+        AiEntity &body = *w.ai.for_handle(shooter);
+        body.inf.active = true;
+        body.self->position.set_q16({50 << 16, 50 << 16, 30 << 16});
+        return shooter;
+    }
+    int fire_from(EntityHandle shooter, int ammo) {
+        RoundSpawnParams p;
+        p.owner = shooter;
+        p.shooter_handle = shooter.packed;
+        p.origin.set_q16({50 << 16, 50 << 16, 30 << 16});
+        p.ammo_index = ammo;
+        return w.round_sim.spawn(w, p);
+    }
+    // Two ring records: the first lands in slot 1, which [0, count) reads once a second exists.
+    void ring_pair(int seen, int other) {
+        ProjectileTargetRing &ring = w.round_sim.target_ring;
+        round(seen).target_ring_slot = ring.update(seen, -1, 10);
+        round(other).target_ring_slot = ring.update(other, -1, 10);
+    }
 };
+bool same_pos(const int32_t steer[3], const LiveRound &r) {
+    return steer[0] == r.pos.x.q16 && steer[1] == r.pos.y.q16 && steer[2] == r.pos.z.q16;
+}
 
 void test_the_ring_records() {
     auto ring = std::make_unique<ProjectileTargetRing>();
@@ -253,7 +305,7 @@ void test_a_ballistic_flare_takes_no_tail_gravity() {
 // missile wins over no entity, past the MP roll (a player's missile, a flare an AI source
 // fired): chance 100 above three deployed players draws nothing; at two the chance is 50 and
 // one rotate-LCG draw, (low 16 >> 2) % 101 under it, admits it. A missile no player fired
-// draws nothing, and the query without the ring leg finds nothing.
+// draws nothing.
 // [orig: Entity_FindTargets @0x53A610 (@0x53ACF0..0x53ADE0); Weapon_CalcDamageByType
 //  @0x539140 (@0x539385..0x539433); Weapon_GetFlareDeflectChance @0x5382A0]
 void test_the_in_flight_query_takes_an_air_flare() {
@@ -286,10 +338,9 @@ void test_the_in_flight_query_takes_an_air_flare() {
     pose.heading = 0;
     rig.w.server_num_players = 4;
     rig.w.ai.prng_a = 0x1234567u;
-    HeatTargetPick pick = guided_heat_target_pick(rig.w, seeker, pose, stinger, true, &shooter);
+    TargetRef pick = guided_heat_target(rig.w, seeker, pose, nullptr, stinger, &shooter);
     CHECK(pick.round == a && !pick.entity.valid());
     CHECK(rig.w.ai.prng_a == 0x1234567u);
-    CHECK(guided_heat_target_pick(rig.w, seeker, pose, stinger, false, &shooter).round == -1);
     // Two players: one draw against 50.
     rig.w.server_num_players = 2;
     for (uint32_t seed : {0x1234567u, 0x89ABCDEFu, 0x0F0F0F0Fu}) {
@@ -297,7 +348,7 @@ void test_the_in_flight_query_takes_an_air_flare() {
         uint32_t state = seed;
         const uint16_t draw = opennova::io::rotating_prng_next16(state);
         const bool kept = ((draw >> 2) % 101) < 50;
-        pick = guided_heat_target_pick(rig.w, seeker, pose, stinger, true, &shooter);
+        pick = guided_heat_target(rig.w, seeker, pose, nullptr, stinger, &shooter);
         CHECK(rig.w.ai.prng_a == state);
         CHECK(pick.round == (kept ? a : -1));
     }
@@ -305,8 +356,189 @@ void test_the_in_flight_query_takes_an_air_flare() {
     Entity ai_shooter = shooter;
     ai_shooter.flags = 0;
     rig.w.ai.prng_a = 0x1234567u;
-    CHECK(guided_heat_target_pick(rig.w, seeker, pose, stinger, true, &ai_shooter).round == a);
+    CHECK(guided_heat_target(rig.w, seeker, pose, nullptr, stinger, &ai_shooter).round == a);
     CHECK(rig.w.ai.prng_a == 0x1234567u);
+    // A team-0 query: the head exit needs the query entity's AI slot, so the missile
+    // round (no slot) still walks; a slot without the 0x200 bit finds nothing
+    // [orig: Entity_FindTargets @0x53A610 (@0x53A6BF..0x53A6E1)].
+    Entity neutral = seeker;
+    neutral.team = 0;
+    CHECK(guided_heat_target(rig.w, neutral, pose, nullptr, stinger, &ai_shooter).round == a);
+    AiSlot slot{};
+    CHECK(!guided_heat_target(rig.w, neutral, pose, &slot, stinger, &ai_shooter).valid());
+    slot.f[1] = 0x200;
+    CHECK(guided_heat_target(rig.w, neutral, pose, &slot, stinger, &ai_shooter).round == a);
+}
+
+
+// The +0xC word as one word: an entity's handle + 1, a round's -(slot + 1), 0 for none.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B520A; the stng init @0x445F10]
+void test_the_target_word() {
+    const EntityHandle h = EntityHandle::make(1, 5);
+    CHECK(AiSlot::target_word(TargetRef{h}) == int32_t(h.packed) + 1);
+    CHECK(AiSlot::target_word(TargetRef::of_round(7)) == -8);
+    CHECK(AiSlot::target_word(TargetRef{}) == 0);
+    CHECK(AiSlot::target_of(int32_t(h.packed) + 1) == TargetRef{h});
+    const TargetRef round = AiSlot::target_of(-8);
+    CHECK(round.round == 7 && !round.entity.valid() && round.entity.packed == 0xFFFF);
+    CHECK(!AiSlot::target_of(0).valid());
+}
+
+// The stng init's query walks the ring, so an air flare ahead is its winner: the shooter's
+// +0xC and the missile's +0x2D4 hold the round (the launch has no shell-projectile test),
+// the first tick's owner callback takes it again and sets flag 2, and each tick samples
+// its Position. Its release clears neither its Health nor its Position, so the missile
+// keeps the frozen point; a bullet spawned into the slot reads Health 0 and the missile
+// drops it.
+// [orig: the stng init @0x445EF0 (@0x445F02..0x445F22); PersonClass_GetTarget @0x4B0DD0;
+//  Entity_UpdateGuidedMissile_0 @0x446060 (the first tick @0x4460FD..0x44612C, the
+//  liveness @0x4461A6..0x4461E6, the sample @0x4463A3); Projectile_ReleaseEffects
+//  @0x4E8280; CEntityManager_AllocateSlot @0x4EAAD0]
+void test_the_launch_holds_a_flare() {
+    Rig rig;
+    const EntityHandle shooter = rig.add_stinger();
+    const int a = rig.fire();
+    const int b = rig.fire();
+    CHECK(a == 0 && b == 1);
+    if (a != 0 || b != 1) return;
+    rig.round(a).pos.set_q16({150 << 16, 50 << 16, 30 << 16});
+    rig.round(b).pos.set_q16({-150 << 16, 50 << 16, 30 << 16}); // behind: outside the bore
+    rig.ring_pair(a, b);
+    const int m = rig.fire_from(shooter, kAmmoStinger);
+    CHECK(m == 2);
+    if (m != 2) return;
+    LiveRound &missile = rig.round(m);
+    CHECK(missile.guided_family == GuidedFamily::Stinger);
+    const AiEntity &body = *rig.w.ai.for_handle(shooter);
+    CHECK(body.slot.f[3] == -(a + 1));
+    CHECK(rig.w.registry.get(shooter)->last_fire_target == TargetRef::of_round(a));
+    CHECK(missile.guided.target == 0xFFFF && missile.guided.target_round == a);
+    rig.tick(); // the first tick: the owner's word, flag 2; the flare moved first (slot 0)
+    CHECK((missile.guided.flags & 2) != 0 && missile.guided.target_round == a);
+    CHECK(same_pos(missile.guided.steer, rig.round(a)));
+    rig.tick();
+    rig.tick();
+    CHECK((missile.guided.flags & 2) != 0);
+    CHECK(same_pos(missile.guided.steer, rig.round(a)));
+    // The flare ends; the next head releases it.
+    LiveRound &flare = rig.round(a);
+    flare.max_age_ticks = flare.age_ticks;
+    rig.tick();
+    CHECK(!flare.active);
+    const int32_t frozen[3] = {flare.pos.x.q16, flare.pos.y.q16, flare.pos.z.q16};
+    rig.tick();
+    CHECK((missile.guided.flags & 2) != 0 && missile.guided.target_round == a);
+    CHECK(missile.guided.steer[0] == frozen[0] && missile.guided.steer[1] == frozen[1] &&
+          missile.guided.steer[2] == frozen[2]);
+    // A bullet takes the slot: Health 0, the target goes.
+    CHECK(rig.fire_from(shooter, kAmmoBullet) == a);
+    rig.tick();
+    CHECK((missile.guided.flags & 2) == 0 && missile.guided.target_round == -1);
+    CHECK(missile.guided.target == 0xFFFF);
+}
+
+// On a session's authority a dead target with the timer above 1 is cleared (group 2)
+// ahead of the acquisition, which then runs in the same tick: a ground flare (its motor
+// the jump thunk, no shell projectile) is kept as the target (group 3, its word 0xFFFF)
+// and the steer samples it, not the target it replaced.
+// [orig: Entity_UpdateGuidedMissile_0 @0x446060 - the liveness @0x4461A6..0x4461E6 (group
+//  2 @0x4461E6), the acquisition @0x4461F2..0x446345 (the kept target and group 3
+//  @0x44632B..0x446345), the sample @0x4463A3; Entity_SerializeGuidedMissileState
+//  @0x447C50 (the walk's miss @0x447CD2)]
+void test_a_dead_target_gives_way_to_a_ground_flare() {
+    Rig rig;
+    rig.w.rules.mp_session = true;
+    rig.w.logic_tick = 100;
+    const EntityHandle shooter = rig.add_stinger();
+    Entity hot;
+    hot.kind = EntityKind::Item;
+    hot.item_id = 2;
+    hot.item_type = 1;
+    hot.team = 2;
+    hot.health = 100;
+    hot.alive = true;
+    hot.heat_sig = 500;
+    hot.position.set_q16({250 << 16, 50 << 16, 30 << 16});
+    const EntityHandle target = rig.w.registry.spawn(1, hot);
+    const int m = rig.fire_from(shooter, kAmmoStinger);
+    CHECK(m == 0);
+    if (m != 0) return;
+    LiveRound &missile = rig.round(m);
+    CHECK(missile.guided.target == target.packed && missile.guided.target_round == -1);
+    rig.tick();
+    rig.tick();
+    rig.tick();
+    CHECK((missile.guided.flags & 2) != 0 && missile.guided.timer > 1);
+    rig.w.tables.ammo.entries[kAmmoFlare].tracer_item_friendly = kItemGroundFlare;
+    const int g = rig.fire();
+    const int b = rig.fire();
+    CHECK(g == 1 && b == 2);
+    if (g != 1 || b != 2) return;
+    rig.round(g).pos.set_q16({150 << 16, 50 << 16, 30 << 16});
+    rig.round(b).pos.set_q16({-150 << 16, 50 << 16, 30 << 16});
+    rig.ring_pair(g, b);
+    rig.w.registry.get(target)->health = 0;
+    rig.w.round_sim.guided_updates.clear();
+    const int32_t at[3] = {rig.round(g).pos.x.q16, rig.round(g).pos.y.q16, rig.round(g).pos.z.q16};
+    rig.tick(); // the missile (slot 0) ticks ahead of the flare
+    CHECK(missile.guided.target == 0xFFFF && missile.guided.target_round == g);
+    CHECK((missile.guided.flags & 2) != 0 && missile.guided.timer == 62);
+    CHECK(missile.guided.steer[0] == at[0] && missile.guided.steer[1] == at[1] &&
+          missile.guided.steer[2] == at[2]);
+    CHECK(!rig.w.round_sim.guided_updates.empty());
+    if (rig.w.round_sim.guided_updates.empty()) return;
+    const auto &update = rig.w.round_sim.guided_updates.back();
+    CHECK(update.groups == ((1u << 2) | (1u << 3)));
+    CHECK(update.state.target == 0xFFFF && update.state.target_round == g);
+}
+
+// Inside 400 u of the steer point the authority queues event 12 for the held target's
+// vehicle brain (timer 0, channel 0, its brain index), which AI_HandleCommand's case 0x0C
+// turns into the evade (a ground brain with the profile's 0x10 bit: pending 18, alert 2).
+// A person target carries no brain at +0x64 and takes none.
+// [orig: Entity_UpdateGuidedMissile_0 @0x446060 (@0x44657F..0x4465D3); AIEvent_QueueEntry
+//  @0x455DA0; AI_HandleCommand @0x465770 (@0x465906..0x4659A6)]
+void test_the_proximity_notice_reaches_the_brain() {
+    for (const bool vehicle : {true, false}) {
+        Rig rig;
+        const EntityHandle shooter = rig.add_stinger();
+        Entity hot;
+        hot.kind = vehicle ? EntityKind::Item : EntityKind::Organic;
+        hot.item_id = 2;
+        hot.item_type = vehicle ? 1 : 3;
+        hot.team = 2;
+        hot.health = 100;
+        hot.alive = true;
+        hot.heat_sig = 500;
+        hot.position.set_q16({150 << 16, 50 << 16, 30 << 16});
+        const EntityHandle target = rig.w.registry.spawn(1, hot);
+        const int index = rig.w.ai.attach(target);
+        AiEntity &brain = *rig.w.ai.for_handle(target);
+        brain.inf.active = !vehicle;
+        brain.profile.type = 2;
+        brain.profile.flags96 = 0x10;
+        brain.brain.f[AiBrain::kCurState] = 16;
+        const int m = rig.fire_from(shooter, kAmmoStinger);
+        CHECK(m == 0);
+        if (m != 0) return;
+        CHECK(rig.round(m).guided.target == target.packed);
+        rig.w.ai.events.clear();
+        rig.tick();
+        rig.tick();
+        rig.tick();
+        if (!vehicle) {
+            CHECK(rig.w.ai.events.count() == 0);
+            continue;
+        }
+        CHECK(rig.w.ai.events.count() >= 1);
+        if (rig.w.ai.events.count() < 1) return;
+        const AiEventEntry &notice = rig.w.ai.events.at(0);
+        CHECK(notice.type() == 12 && notice.channel() == 0 && notice.entity_index() == index);
+        CHECK(notice.timer() == 0.0f);
+        rig.w.ai.events.process_timed(rig.w.ai, rig.w);
+        CHECK(brain.brain.f[AiBrain::kCurState] == 18);
+        CHECK(brain.brain.f[AiBrain::kAlert] == 2);
+    }
 }
 
 } // namespace
@@ -318,6 +550,10 @@ int main() {
     test_the_bounces_the_eighth_and_the_release();
     test_a_ballistic_flare_takes_no_tail_gravity();
     test_the_in_flight_query_takes_an_air_flare();
+    test_the_target_word();
+    test_the_launch_holds_a_flare();
+    test_a_dead_target_gives_way_to_a_ground_flare();
+    test_the_proximity_notice_reaches_the_brain();
     if (failures == 0) std::printf("PASS flare_motor\n");
     return failures == 0 ? 0 : 1;
 }

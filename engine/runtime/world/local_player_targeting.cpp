@@ -53,10 +53,9 @@ bool flare_roll_drops(World &world, const LiveRound &flare, const Entity *attack
 // def; R * bboxCenter 0 + Position, or Position with no model), its target
 // selector words 0, its Health its item's hp, its heat word its own, and the
 // MP case's air-flare roll. LOS follows the bounded, stable score sort; the
-// query disables it during scan. The Stinger's in-flight acquisition walks the
-// ring here (its air-flare decoy); the player's lock and the launch, which
-// carry 0x200 as well, take a round as their target, the target reference
-// L7-s8 ports. [orig: Entity_SpawnWeaponEffect @0x545840 (ctx flags 0x662
+// query disables it during scan. All three callers carry 0x200, so the player's
+// lock, the Stinger's launch and its in-flight acquisition each may take a round
+// (TargetRef::round). [orig: Entity_SpawnWeaponEffect @0x545840 (ctx flags 0x662
 // @0x54591b); Entity_FindTargets @0x53a610 -- the pool legs, the ring leg
 // @0x53ACF0..0x53ADE0 (the 0x200 test's jz @0x53ACF7, the record test @0x53AD14..0x53AD18, the validate
 // @0x53AD71, the score @0x53AD8E, the 128 cut @0x53ADB0..0x53ADC9);
@@ -64,11 +63,16 @@ bool flare_roll_drops(World &world, const LiveRound &flare, const Entity *attack
 // the selectors @0x53A466..0x53A4C3, the heat leg @0x53A54A..0x53A56E);
 // Entity_ComputeWeaponFireOrigin @0x43B4B0 (@0x43B54F / @0x43B619);
 // Weapon_CalcDamageByType @0x539140 (@0x539385..0x539433)]
-HeatTargetPick guided_heat_target_pick(World &world, const Entity &owner, const AiEntity &body,
-        const AmmoTableEntry &ammo, bool ring_leg, const Entity *attacker_occupant) {
+TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &body,
+        const AiSlot *query_slot, const AmmoTableEntry &ammo, const Entity *attacker_occupant) {
     const Entity *occupant = world.registry.get(owner.primary_occupant);
     const int team = occupant ? occupant->team : owner.team;
-    if (ammo.heat_det_range == 0 || (team == 0 && (body.slot.f[1] & 0x200) == 0)) return {};
+    // The head exit needs the query entity's AI slot: a team-0 query whose slot lacks the
+    // 0x200 bit finds nothing, and a query with no slot (the missile round) runs on
+    // [orig: Entity_FindTargets @0x53A610 (@0x53A6BF..0x53A6E1)].
+    if (ammo.heat_det_range == 0 ||
+            (query_slot != nullptr && team == 0 && (query_slot->f[1] & 0x200) == 0))
+        return {};
     int32_t pose[6] = {0, 0, 0, body.heading, body.pitch, body.roll};
     world.ai.weapon_aim_origin(world, body, pose);
     struct Candidate { EntityHandle handle; int32_t round; int32_t score; };
@@ -110,17 +114,16 @@ HeatTargetPick guided_heat_target_pick(World &world, const Entity &owner, const 
             push({h, -1, score});
         }
     }
-    if (ring_leg) {
+    {
         const ProjectileTargetRing &ring = world.round_sim.target_ring;
         for (int32_t i = 0; i < ring.count; ++i) {
             const int32_t index = ring.records[static_cast<size_t>(i)].round;
             if (index < 0) continue;
             const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(index)];
-            const ThrowableClassRow *row = world.throwables.classes.get(round.item_type_id);
-            const int32_t health = row != nullptr ? row->health_max : 0;
-            if (health <= 0 && int32_t(world.logic_tick) > 16) continue;
+            if (round_target_health(world, index) <= 0 && int32_t(world.logic_tick) > 16) continue;
             if (!owner.target_selectors.allows(0, 0)) continue;
-            const int32_t aim[3] = {round.pos.x.q16, round.pos.y.q16, round.pos.z.q16};
+            int32_t aim[3];
+            round_target_origin(world, index, aim);
             int32_t metrics[6];
             const uint32_t arc = AiSystem::weapon_relative_metrics(pose, aim, metrics);
             if (arc > uint32_t(ammo.boresight_maxang) ||
@@ -139,15 +142,10 @@ HeatTargetPick guided_heat_target_pick(World &world, const Entity &owner, const 
     std::stable_sort(candidates.begin(), candidates.end(), descending);
     for (const Candidate &candidate : candidates) {
         int32_t aim[3];
-        if (candidate.round >= 0) {
-            const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(candidate.round)];
-            aim[0] = round.pos.x.q16;
-            aim[1] = round.pos.y.q16;
-            aim[2] = round.pos.z.q16;
-        } else {
-            world.ai.weapon_aim_origin(world, *world.registry.get(candidate.handle), aim);
-        }
-        const HeatTargetPick pick{candidate.handle, candidate.round};
+        if (candidate.round >= 0) round_target_origin(world, candidate.round, aim);
+        else world.ai.weapon_aim_origin(world, *world.registry.get(candidate.handle), aim);
+        const TargetRef pick = candidate.round >= 0 ? TargetRef::of_round(candidate.round)
+                                                    : TargetRef{candidate.handle};
         if (world.ai.line_of_sight_clear(world, pose, aim, owner.handle, candidate.handle)) return pick;
         if (((owner.flags | owner.engine_flags) & kEntityFlagIndoors) != 0) {
             const int32_t zero[3] = {}, offset[3] = {24576, 0, 0};
@@ -160,9 +158,17 @@ HeatTargetPick guided_heat_target_pick(World &world, const Entity &owner, const 
     return {};
 }
 
-EntityHandle guided_heat_target(World &world, const Entity &owner, const AiEntity &body,
-        const AmmoTableEntry &ammo) {
-    return guided_heat_target_pick(world, owner, body, ammo, /*ring_leg=*/false, nullptr).entity;
+int32_t round_target_health(const World &world, int32_t slot) {
+    const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+    const ThrowableClassRow *row = world.throwables.classes.get(round.item_type_id);
+    return row != nullptr ? int16_t(row->health_max) : 0;
+}
+
+void round_target_origin(const World &world, int32_t slot, int32_t out[3]) {
+    const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+    out[0] = round.pos.x.q16;
+    out[1] = round.pos.y.q16;
+    out[2] = round.pos.z.q16;
 }
 
 // Aim/range acquisition runs every sixteen ticks. The locked tone is refreshed
@@ -241,7 +247,7 @@ void LocalPlayer::update_aim_target() {
         weapon.aim_range_q16 = static_cast<int32_t>(std::min(std::sqrt(dx*dx+dy*dy+dz*dz), 2147418112.0));
         const bool allowed = !weapon.active || (weapon.def.flags2 & 0x20) == 0 || local_player_can_fire();
         if (allowed && weapon.active) {
-            EntityHandle target;
+            TargetRef target;
             if ((weapon.def.flags2 & 0x10) != 0) {
                 const Entity *candidate = world_.registry.get(hit.geometry_entity);
                 if (candidate && ((candidate->flags | candidate->engine_flags) & 4u) == 0 &&
@@ -272,16 +278,23 @@ void LocalPlayer::update_aim_target() {
                     }
                 }
             } else {
+                // The heat lock is the shared query's winner, an entity or a round (the
+                // ring leg: a flare); the roll's attacker is the body's +368.
+                // [orig: Entity_UpdateInfantryPlayerBody @0x4B51FE..0x4B520A ->
+                //  Entity_SpawnWeaponEffect @0x545840 (the query entity @0x5458B7)]
                 const int index = world_.tables.weapons.index_of(weapon.def_name.c_str());
                 const WeaponTableEntry *def = index < 0 ? nullptr : world_.tables.weapons.by_index(uint8_t(index));
                 const AmmoTableEntry *ammo = def ? world_.tables.ammo.by_index(def->ammo_index) : nullptr;
-                if (ammo) target = guided_heat_target(world_, *e, *body, *ammo);
+                if (ammo)
+                    target = guided_heat_target(world_, *e, *body, &body->slot, *ammo,
+                            world_.registry.get(e->primary_occupant));
             }
-            body->inf.combat_target = target;
-            body->slot.f[3] = target.valid() ? static_cast<int32_t>(target.packed) + 1 : 0;
+            body->inf.combat_target = target.entity;
+            body->slot.f[3] = AiSlot::target_word(target);
             e->last_fire_target = target;
         }
-        if (allowed && body->inf.combat_target.valid()) body->slot.f[2] |= 1;
+        // The tone flag tests the +0xC word, a round included [orig: @0x4B520D..0x4B5222].
+        if (allowed && body->slot.f[3] != 0) body->slot.f[2] |= 1;
         else body->slot.f[2] = -2;
     }
     // The tone registers only on a frame's last logic tick: the catch-up gate

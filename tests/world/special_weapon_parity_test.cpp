@@ -510,8 +510,22 @@ void authority_local_fire_scores_one_shot() {
     }
 }
 
+// A heat lock on a round (a flare the ring leg returned) rides the fire: the shooter's
+// claimed target is the round, and the C2S 0x06 word pool-walks the +0xC pointer, which a
+// round lies outside, so it writes 0xFFFF. (D-NET-64)
+// [orig: WeaponAction_Fire @0x542B10 (the target read @0x542C00..0x542C15);
+//  NetPacket_WriteEntityPositionUpdate @0x42A610 (the walk @0x42A713..0x42A745)]
+void a_round_lock_fires_as_0xffff() {
+    Rig r;
+    r.world.ai.for_handle(r.shooter)->slot.f[3] = AiSlot::target_word(TargetRef::of_round(2));
+    const LocalWeaponPumpIO io = r.fire();
+    CHECK(io.fired.target_handle == 0xFFFF);
+    CHECK(r.world.registry.get(r.shooter)->last_fire_target == TargetRef::of_round(2));
+}
+
 int main() {
     authority_local_fire_scores_one_shot();
+    a_round_lock_fires_as_0xffff();
     mortar_elevation_is_independent_of_view_pitch();
     mortar_elevation_survives_rebake_and_ignores_look_keys();
     designator_fire_uses_the_measured_position();
