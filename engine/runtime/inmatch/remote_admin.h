@@ -206,11 +206,11 @@ public:
 	// menus still print the last session's game type after a mapped disconnect, a NovaWorld
 	// session's end or a CD / system / bad-mission exit.
 	// [orig: PostMenu_RouteMissionExit @0x568460 (the error arms @0x5684A8..0x5685BD ->
-	//  loc_5686DA..0x568715 skip CNapiGameSession_FullDestroy @0x568683)]
+	//  loc_5686DA..0x568715 skip CNapiGameSession_FullDestroy @0x4C96A0 (the call @0x568683))]
 	void route_mission_exit(int32_t reason);
 	// The PLAYER_INFO screen's player preview drew: the process time of day is its 16:00, which
 	// the menus keep until a mission start sets the clock (a session's refresh reads its world).
-	// [orig: PlayerInfo_RenderPlayerPreview3D @0x560AF5]
+	// [orig: PlayerInfo_RenderPlayerPreview3D @0x5609C0 (the store @0x560AF5)]
 	void player_preview_drawn() { process_mission_.tod_fixed24 = kPlayerPreviewTodFixed24; }
 
 	// The bound session's mission into the process words, before each line runs and on every

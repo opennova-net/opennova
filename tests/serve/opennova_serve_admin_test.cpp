@@ -447,7 +447,8 @@ int main() {
 	// session is destroyed and the joiner dropped, as a retail dedicated server leaves its match
 	// for its main menu (this one has no menu, so its run ends).
 	// [orig: CAdminServer_HandleGotoCommand @0x404A5D; Input_HandleActionBinding case 3
-	//  @0x49AF26; PostMenu_RouteMissionExit @0x5684AB -> CNapiGameSession_FullDestroy @0x568683]
+	//  @0x49AF26; PostMenu_RouteMissionExit @0x5684AB -> CNapiGameSession_FullDestroy @0x4C96A0
+	//  (the call @0x568683)]
 	{
 		uint16_t quit_port = 0;
 		std::unique_ptr<serve::Server> quitter = start_server(quit_port);

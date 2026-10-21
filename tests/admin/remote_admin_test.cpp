@@ -284,7 +284,8 @@ std::vector<ProtocolMessage> joiner_sends(inmatch::ClientRuntime &client, const 
 //  "" @0x4C921A) -> CNapiNPConnection_TeardownActiveConnection @0x6253C0 (the client's state-5 arm: the
 //  clamp @0x62549E..0x6254B2, the burst @0x6254B4..0x6254D3, recv_max_per_tick 4 for the JO
 //  template, the leave callback @0x6254D5..0x6254E7); CNapiGameSession_FullDestroy
-//  @0x4C977A (g_GameType = 0); GameType_GetAbbreviation @0x5211B2 (STROVER29)]
+//  @0x4C96A0 (g_GameType = 0 @0x4C977A); GameType_GetAbbreviation @0x520FD0 (the STROVER29
+//  arm @0x5211A2..0x5211B2)]
 void test_joiner_console() {
 	const std::string client_scrk = "CLIENT-ADMIN-JOINER-SCRK";
 	const std::string server_scrk = "SERVER-ADMIN-JOINER-SCRK";
@@ -465,9 +466,10 @@ void test_joiner_console() {
 // [orig: PostMenu_RouteMissionExit @0x568460 - reason 2 @0x56846F..0x5684A7, the error arms
 //  @0x5684A8..0x5685BD -> loc_5686DA..0x568715, the destroy @0x568683 reached from @0x5684AB
 //  (reason 1), @0x5685C2..0x5685D6 and @0x56864F (the rotation's end);
-//  CNapiGameSession_FullDestroy @0x4C977A (g_GameType = 0); CNapiNetwork_OnDisconnectedFromServer
-//  @0x4C63D0 (DPC 36..45 -> reasons 9..18); PreMenu_OnAbortCancel @0x568CB4 (state 9) ->
-//  MultiPlayer_JoinSessionStateMachine @0x56A3E3; GameType_GetAbbreviation @0x5211B2]
+//  CNapiGameSession_FullDestroy @0x4C96A0 (g_GameType = 0 @0x4C977A);
+//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 (DPC 36..45 -> reasons 9..18);
+//  PreMenu_OnAbortCancel @0x568CB4 (state 9) -> MultiPlayer_JoinSessionStateMachine @0x56A3E3;
+//  GameType_GetAbbreviation @0x520FD0 (the STROVER29 arm @0x5211A2..0x5211B2)]
 void test_session_destroy_routes() {
 	inmatch::RemoteAdminConsoles consoles;
 	gamecfg::GameCfg block = gamecfg::defaults();
@@ -564,9 +566,10 @@ void test_listen_host_and_single_player() {
 
 // Single player's MISSION CYCLE: the round ends at once (no winner) and the 620-tick linger is
 // stored, but single player is out of a session (its network type 0), so its server tick never
-// drains the linger: no exit, the player stays on the round's end. A session host's tick drains
-// the same linger into exit 3. (Ours keeps the context in session; the world's mp_session word is
-// single player's is_in_session.)
+// drains the linger: no exit, the player stays on the round's end (the lose epilog, until the
+// player's key or the screen's 18600-frame timeout [orig: Cine_StartPlayback @0x51697B]). A session
+// host's tick drains the same linger into exit 3. (Ours keeps the context in session; the world's
+// mp_session word is single player's is_in_session.)
 // [orig: CAdminServer_HandleMissionCommand @0x40660B (Server_ProcessRoundEnd(0)), @0x40661F (the
 //  620 store); Server_TickUpdate @0x51D9A5 (the is_in_session test ahead of the drain), @0x51D9B1,
 //  the drain @0x51D9BD..0x51D9CC, 3 @0x51DB63; SinglePlayer_StartMission @0x561BD4]

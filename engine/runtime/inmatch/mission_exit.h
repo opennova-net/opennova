@@ -118,8 +118,8 @@ inline const char *post_mission_error_key(PostMissionError error) {
 // instead -- the rotation is not modeled.)
 // [orig: PostMenu_RouteMissionExit @0x568460 — reason 2 @0x568465..0x5684a7; 5/6/7
 //  @0x5684b1..0x568526; 9..19 @0x56852b..0x568588 -> CNapiNetwork_GetDisconnectReasonString
-//  @0x5686d0; 20 @0x56858e..0x5685bd; the rest -> CNapiGameSession_FullDestroy @0x568683 and
-//  the `transport_mode == 1` keep @0x568688]
+//  @0x5686d0; 20 @0x56858e..0x5685bd; the rest -> CNapiGameSession_FullDestroy @0x4C96A0 (the
+//  call @0x568683) and the `transport_mode == 1` keep @0x568688]
 inline PostMissionRoute route_mission_exit(int32_t reason, bool novaworld) {
 	PostMissionRoute route;
 	switch (reason) {

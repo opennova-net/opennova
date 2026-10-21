@@ -92,7 +92,7 @@ public:
 		// reason-1 arm). RemoteAdminConsoles::bind sets it from its binding.
 		// [orig: CAdminServer_HandleGotoCommand @0x404A4E (Game_CloseInGameScreens),
 		//  @0x404A5D (Input_HandleActionBinding(3)); PostMenu_RouteMissionExit @0x5684AB ->
-		//  CNapiGameSession_FullDestroy @0x568683]
+		//  CNapiGameSession_FullDestroy @0x4C96A0 (the call @0x568683)]
 		std::function<void()> quit_to_menu;
 		// The map rotation and its catalog (ADR 0051 PR3; HostRotationAdmin over the host's
 		// own); null reads as no rotation and an empty catalog.

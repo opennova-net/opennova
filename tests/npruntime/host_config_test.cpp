@@ -321,7 +321,8 @@ int main() {
 		TEST_EXPECT(shell_host_config(sp).local_auto_medic_disabled == 0u);
 		// Its mission file is the selected list entry's name, which its start copies into
 		// g_MapFileName (the admin's CURRENT MAP, the session title's key); a load naming no
-		// file keeps the config's. [orig: SinglePlayer_StartMission @0x561B69..0x561B80]
+		// file keeps the config's. [orig: SinglePlayer_StartMission @0x561AF0 (the copy
+		//  @0x561B69..0x561B80)]
 		sp.sp_mission_file = "TRAIN01.BMS";
 		TEST_EXPECT(shell_host_config(sp).config.mission_file == "TRAIN01.BMS");
 		sp.sp_mission_file.clear();

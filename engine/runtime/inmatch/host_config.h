@@ -175,7 +175,8 @@ struct ShellHostSource {
 	// The single player's mission file, the selected list entry's name, which its start copies
 	// into g_MapFileName (the session's mission file: the admin's CURRENT MAP, the session
 	// title's key, the /PROFILE log's name); empty for a load that names no file (the in-memory
-	// loads), which keeps the config's. [orig: SinglePlayer_StartMission @0x561B69..0x561B80]
+	// loads), which keeps the config's. [orig: SinglePlayer_StartMission @0x561AF0 (the copy
+	//  @0x561B69..0x561B80)]
 	std::string sp_mission_file;
 	const playersav::ProfileRecord *profile = nullptr;
 	const gamecfg::GameCfg *cfg_block = nullptr;

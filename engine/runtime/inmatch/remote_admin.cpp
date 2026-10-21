@@ -108,7 +108,8 @@ void RemoteAdminConsoles::session_destroyed() {
 }
 
 void RemoteAdminConsoles::route_mission_exit(int32_t reason) {
-	// [orig: PostMenu_RouteMissionExit @0x568460 -> CNapiGameSession_FullDestroy @0x568683]
+	// [orig: PostMenu_RouteMissionExit @0x568460 -> CNapiGameSession_FullDestroy @0x4C96A0 (the
+	//  call @0x568683)]
 	if (inmatch::route_mission_exit(reason, /*novaworld=*/false).destroys_session) session_destroyed();
 }
 

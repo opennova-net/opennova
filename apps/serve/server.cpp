@@ -1011,7 +1011,8 @@ void Server::bind_admin_console() {
 	// the session; with no menu to land on, the session's end is the process's (frame, quit()).
 	// [orig: Input_HandleActionBinding case 3 @0x49AF26 (g_MissionExitReason = 1),
 	//  CNapiNetwork_DisconnectActiveConnection @0x4C918F (no connection, no record);
-	//  PostMenu_RouteMissionExit @0x5684AB -> CNapiGameSession_FullDestroy @0x568683]
+	//  PostMenu_RouteMissionExit @0x5684AB -> CNapiGameSession_FullDestroy @0x4C96A0 (the call
+	//  @0x568683)]
 	inmatch::RemoteAdminBinding binding;
 	binding.host = &role_->state.host_owner.ctx;
 	admin_consoles_.bind(binding, std::move(seams));
