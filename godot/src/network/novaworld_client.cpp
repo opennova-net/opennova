@@ -328,7 +328,8 @@ void NovaWorldClient::start() {
 		}
 	}
 	if (!gate_bound) {
-		enter_state(STATE_ERROR, String("gate UDP bind failed"));
+		// The gate service's start failure: its connect-log lines and the menu's NWEC22.
+		enter_state(STATE_ERROR, opennova::to_gd(lobby_.gate_start_failed()));
 		return;
 	}
 	bool nw_bound = false;

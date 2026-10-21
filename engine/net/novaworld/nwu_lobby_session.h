@@ -222,6 +222,15 @@ public:
 	//  kept-response test @0x4D46D8; CNapiGateManager_InitDefaults @0x4d1460 - the host
 	//  @0x4d149f, the port @0x4d14af]
 	void probe(const std::string &gate_host, uint16_t gate_port);
+	// The gate service's start where no port of the gate quad bound (the embedder's bind before
+	// open): the manager's two lines, then the start failure with the gate state -6, and no probe;
+	// returns the menu's tag for -6 (NWEC22).
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - @0x4CE84D, @0x4CE88C,
+	//  CNapiGateManager_ProcessConnectStateMachine (the call @0x4CE89D), "%s : GATE GATE SERVICE
+	//  START FAILED [%ld]." over the gate state (the append @0x4CE8E7);
+	//  CNapiGateManager_ProcessConnectStateMachine @0x633D10 - CNapiGateManager_CreateAndBindSocket
+	//  (the call @0x633E48), SetState(-6) @0x633E64; novaworld_gate_error_tag's state-1 map]
+	std::string gate_start_failed();
 	// Drop the session and the sockets (the embedder closes them). Owners send their goodbye
 	// datagrams BEFORE closing (send()/session() are still live).
 	void close();
@@ -291,6 +300,8 @@ public:
 	void connect_log(const std::string &text);
 
 private:
+	// The gate manager's configure and start lines ahead of its socket's bind.
+	void log_gate_service_start();
 	// The session, its stamp and its first datagram (the caller sends it).
 	std::vector<uint8_t> begin_session();
 	// The connect over the gate memory's response: ConnectToNovaWorld's sessionless return, or

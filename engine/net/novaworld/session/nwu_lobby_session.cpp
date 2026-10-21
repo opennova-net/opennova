@@ -191,6 +191,29 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 	connect_last_send_ms_ = 0;
 }
 
+// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - "GATE CONFIGURING GATE MANAGER." the
+//  append @0x4CE84D, "GATE STARTING GATE SERVICE." @0x4CE88C, the stamp @0x4CE896]
+void NwuLobbySession::log_gate_service_start() {
+	if (connect_log_on()) {
+		connect_log("GATE CONFIGURING GATE MANAGER.");
+		if (connect_log_on()) {
+			connect_log("GATE STARTING GATE SERVICE.");
+			gate_log_stamp_ms_ = clock_ms_;
+		}
+	}
+}
+
+std::string NwuLobbySession::gate_start_failed() {
+	// The gate state a socket no port bound leaves. [orig:
+	//  CNapiGateManager_ProcessConnectStateMachine @0x633D10 - SetState(-6) @0x633E64]
+	constexpr int kGateStartFailedState = -6;
+	log_gate_service_start();
+	if (connect_log_on())
+		connect_log("GATE GATE SERVICE START FAILED [" + std::to_string(kGateStartFailedState) +
+				"].");
+	return novaworld_gate_error_tag(kGateStartFailedState, /*response_phase=*/false);
+}
+
 void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	if (gate_socket_ == nullptr) return;
 	if (title_ == nullptr) {
@@ -216,15 +239,7 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	kept.response = GateResponse{};
 	kept.gate_host = gate_host;
 	kept.gate_port = gate_port;
-	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - "GATE CONFIGURING GATE MANAGER." the
-	//  append @0x4CE84D, "GATE STARTING GATE SERVICE." @0x4CE88C, the stamp @0x4CE896]
-	if (connect_log_on()) {
-		connect_log("GATE CONFIGURING GATE MANAGER.");
-		if (connect_log_on()) {
-			connect_log("GATE STARTING GATE SERVICE.");
-			gate_log_stamp_ms_ = clock_ms_;
-		}
-	}
+	log_gate_service_start();
 	// The gate manager's tag: the title's, or the boot's gt.ssc (set_title).
 	// [orig: CNapiGateManager_ProbeThreadProc @0x6339e0 - the tag's bytes @0x633aa1]
 	const std::vector<uint8_t> probe_dg = gate_probe_build(gate_tag_);

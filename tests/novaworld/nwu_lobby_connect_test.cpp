@@ -829,6 +829,18 @@ void check_connect_log_give_ups() {
 //  the count's -9 with no line @0x4CF4F1..0x4CF51E; CNapiGateManager_WaitForConnect @0x4CE6B0 -
 //  the kept test @0x4CE6CF]
 void check_connect_log_gate_failures() {
+	// No port of the gate quad bound: the manager's two lines, the start failure with the gate
+	// state -6, the menu's NWEC22; no probe. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 -
+	//  @0x4CE84D, @0x4CE88C, "%s : GATE GATE SERVICE START FAILED [%ld]." (the append @0x4CE8E7);
+	//  CNapiGateManager_ProcessConnectStateMachine @0x633D10 - SetState(-6) @0x633E64]
+	{
+		Rig rig;
+		rig.log_on = true;
+		CHECK(rig.lobby.gate_start_failed() == "NWEC22");
+		CHECK((rig.log == std::vector<std::string>{ "GATE CONFIGURING GATE MANAGER.",
+				"GATE STARTING GATE SERVICE.", "GATE GATE SERVICE START FAILED [-6]." }));
+		CHECK(rig.gate.sent.empty());
+	}
 	const auto gate_lines = [](const std::string &body) {
 		Rig rig;
 		rig.log_on = true;
