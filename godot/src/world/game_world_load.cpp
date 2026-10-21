@@ -950,6 +950,9 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	opts->set_game_config(game_config_);
 	opts->set_host_rotation(&host_rotation_);
 	opts->set_client_process(&client_process_);
+	// The single player's restart, which this load consumes (set_restart_boot).
+	opts->set_restart_boot(restart_boot_);
+	restart_boot_ = false;
 	opts->set_log_devices(log_devices_.get());
 	opts->set_controls_model(controls_model_);
 	// Serve-and-play hosts run the listen server AND spawn their own player

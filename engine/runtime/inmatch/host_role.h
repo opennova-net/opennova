@@ -238,6 +238,8 @@ private:
 	// (NapiNPServerCtx::bind_spawned_body), installed after a bring-up's own spawn.
 	void install_spawned_body_bind();
 	void make_client_runtime(uint32_t game_type);
+	// The session create's UP-TIME stamp, kept across a single player's restart boot.
+	void keep_round_state_init_tick();
 public:
 	// A line the world's dialog queue loads on this host (authority_dialog_line_loaded).
 	void dialog_line_loaded(const audio::DialogLineRef &line);

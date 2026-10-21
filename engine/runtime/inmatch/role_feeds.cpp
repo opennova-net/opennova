@@ -1292,7 +1292,7 @@ bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gam
 		inputs.config_second = replication::server_config_second_text(state.server_config_strings);
 	} else if (view.host != nullptr) {
 		const std::vector<uint8_t> body = serialize_session_status(view.host->config,
-				view.host->np_protocol.host_run_duration_ms, view.host->is_in_session != 0, &w);
+				session_uptime_ms(*view.host), view.host->is_in_session != 0, &w);
 		SessionStatusBlock block;
 		(void)decode_session_status(body.data(), body.size(), block);
 		status = replication::fold_session_status(block, state.local_clock_ms);

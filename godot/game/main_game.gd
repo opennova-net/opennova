@@ -1791,6 +1791,9 @@ func _restart_mission() -> void:
 		return
 	_teardown_world(true)
 	_state = State.WORLD
+	# The restart's start: the boot skips the fresh start's intro cine and profile word
+	# and keeps the first start's UP-TIME stamp (engine KernelBootOptions::restart).
+	_world.set_restart_boot(true)
 	start_world_load(info, loader, true)
 
 

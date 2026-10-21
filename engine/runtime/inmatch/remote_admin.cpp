@@ -6,6 +6,7 @@
 #include <runtime/inmatch/host_settings.h> // mission_session_title
 #include <runtime/inmatch/joiner_role.h>   // JoinerRole::quit_to_menu (input action 3)
 #include <runtime/inmatch/mission_exit.h>
+#include <runtime/inmatch/napi_np_server_ctx.h> // session_uptime_ms (UP-TIME)
 #include <runtime/world/epilog_cine.h> // kWorldMissionExitQuit
 #include <runtime/world/world.h>
 
@@ -147,7 +148,9 @@ void RemoteAdminConsoles::refresh_process_mission() {
 		process_mission_.map_file = host->config.mission_file;
 		process_mission_.game_type =
 				host->world != nullptr ? host->world->match.rules().game_type : host->config.game_type;
-		process_mission_.session_elapsed_ms = host->np_protocol.host_run_duration_ms;
+		// UP-TIME: the round-state init's stamp to now [orig: Server_BuildStatusReport
+		//  @0x530B84..0x530B8C].
+		process_mission_.session_elapsed_ms = session_uptime_ms(*host);
 		if (host->world != nullptr) process_mission_.tod_fixed24 = host->world->weather.tod_fixed24;
 		process_mission_.rules_word =
 				host->world != nullptr ? host->world->rules.mpattrib : host->config.mp_attributes;

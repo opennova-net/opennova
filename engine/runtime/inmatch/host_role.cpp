@@ -169,8 +169,27 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	//  @0x551F6F..0x551F75, called from SinglePlayer_StartMission @0x561C28 and
 	//  Game_StartMission @0x524662, which `cmp esi, ebx` @0x52465E skips on the
 	//  restart's start (Game_RestartRoundSP pushes 1 @0x5263D9)].
-	if (!kernel.world.rules.mp_session && !kernel.restart_boot())
-		kernel.world.rules.difficulty = config.profile_difficulty;
+	// The restart's spawn raises read the word the previous start left: the same mission's
+	// mission-start word (D-PWR-8) [orig: Game_StartMission - the 0 @0x525CDD, the objective
+	//  Co-op's -1 @0x525CFA].
+	if (!kernel.world.rules.mp_session)
+		kernel.world.rules.difficulty = kernel.restart_boot()
+				? world::mission_start_difficulty(config.game_type)
+				: config.profile_difficulty;
+}
+
+// A single player's restart (Game_RestartRoundSP -> Game_StartMission(1)) runs no round-state
+// init, so its UP-TIME stamp is the first start's, which ours' restart boot takes back from the
+// process words over the one its fresh create stamped; every other start's create keeps its
+// own, which the process words remember.
+// [orig: Game_RestartRoundSP @0x5263A0 - Game_StartMission(1) @0x5263DB, no
+//  Server_InitNewRoundState; its stamp @0x51CBA0 from SinglePlayer_StartMission @0x561C23 and
+//  CNapiGameSession_BuildAndCreateSession @0x5695B3 alone]
+void HostRole::keep_round_state_init_tick() {
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	if (kernel_ != nullptr && kernel_->restart_boot())
+		ctx.round_state_init_tick = client_process_->round_state_init_tick;
+	client_process_->round_state_init_tick = ctx.round_state_init_tick;
 }
 
 // Every body the session spawns from here on (a mid-match join, a map change's
@@ -275,6 +294,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	host_cfg.session_seed_id = state.session_seed_id;
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	keep_round_state_init_tick();
 	install_spawned_body_bind();
 	make_client_runtime(config.game_type);
 	// Seed the look heading from the auto-spawned player's facing.
@@ -314,6 +334,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E983].
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	keep_round_state_init_tick();
 	install_spawned_body_bind();
 	if (host_cfg.serve_and_play) {
 		make_client_runtime(host_cfg.config.game_type);

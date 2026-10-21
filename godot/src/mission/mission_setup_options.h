@@ -95,6 +95,9 @@ public:
 	// The process's client words (Simulation.use_client_process), C++ only. Null = none.
 	opennova::inmatch::ClientProcessState *get_client_process() const { return client_process_; }
 	void set_client_process(opennova::inmatch::ClientProcessState *p_value) { client_process_ = p_value; }
+	// The single player's restart (Simulation.set_restart_boot), C++ only.
+	bool get_restart_boot() const { return restart_boot_; }
+	void set_restart_boot(bool p_value) { restart_boot_ = p_value; }
 	// The process's server log devices (Simulation.use_log_devices), C++ only. Null = none.
 	opennova::inmatch::ServerLogDevices *get_log_devices() const { return log_devices_; }
 	void set_log_devices(opennova::inmatch::ServerLogDevices *p_value) { log_devices_ = p_value; }
@@ -179,6 +182,7 @@ private:
 	Ref<GameConfigBlock> game_config_;
 	opennova::inmatch::HostRotation *host_rotation_ = nullptr;
 	opennova::inmatch::ClientProcessState *client_process_ = nullptr;
+	bool restart_boot_ = false;
 	opennova::inmatch::ServerLogDevices *log_devices_ = nullptr;
 	Ref<ControlsModel> controls_model_;
 	Ref<CharacterJoinProfile> join_character_profile_;

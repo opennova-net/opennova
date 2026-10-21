@@ -1229,7 +1229,9 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 	// Server_SendInitialGameStateToPlayer (tick_connections), NOT produced here. [orig: the 0x43 SESSION
 	// dispatch routes each gameplay message to its NapiNPServerMsg_0x0NN reply handler]
 	ServerDispatchInputs dispatch_inputs;
-	dispatch_inputs.session_uptime_ms = ctx.np_protocol.host_run_duration_ms;
+	// The status report's UP-TIME counts from the round-state init's stamp
+	// [orig: Server_BuildStatusReport @0x530B84..0x530B8C].
+	dispatch_inputs.session_uptime_ms = session_uptime_ms(ctx);
 	dispatch_inputs.mission_metadata_blob = &ctx.mission_metadata_blob;
 	dispatch_inputs.server_info_transfer_id = ctx.server_info_transfer_id;
 	dispatch_inputs.mission_metadata_transfer_id = ctx.mission_metadata_transfer_id;

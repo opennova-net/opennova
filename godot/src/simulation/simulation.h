@@ -236,6 +236,7 @@ private:
 	std::string host_game_root_;
 	SimulationAssetState assets_;
 	opennova::inmatch::HostBoot host_boot_; // the load's two-phase boot (boot_mission -> start_mission)
+	bool restart_boot_ = false; // set_restart_boot: the single player's restart (boot_mission)
 	opennova::world::ScriptVoiceChannel::SetResolver voice_set_resolver_;
 	SimulationPresentState present_;
 	SimulationPlayerState player_;
@@ -1456,6 +1457,8 @@ public:
 	// pump rebinds its console when it changes.
 	opennova::inmatch::ClientRuntime *host_client_runtime();
 	void use_client_process(opennova::inmatch::ClientProcessState *p_state) { net_.client_process = p_state; }
+	// The next boot is the single player's restart (KernelBootOptions::restart).
+	void set_restart_boot(bool p_restart) { restart_boot_ = p_restart; }
 	// The last load's session create ended the process on a nonzero mpreset (inmatch
 	// CreateSessionResult::ProcessExit): the embedder exits with code 0, saving nothing.
 	bool session_create_ended_process() const;

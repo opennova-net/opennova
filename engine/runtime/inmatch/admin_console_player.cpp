@@ -452,7 +452,7 @@ std::string AdminConsole::status_report() {
 	// [orig: CAdminServer_HandleStatus @0x402E83, @0x402FF6, @0x403052]
 	const AdminProcessMission own{ctx_.session_title, ctx_.config.mission_file,
 			world != nullptr ? world->match.rules().game_type : ctx_.config.game_type,
-			ctx_.np_protocol.host_run_duration_ms, world != nullptr ? world->weather.tod_fixed24 : 0u};
+			session_uptime_ms(ctx_), world != nullptr ? world->weather.tod_fixed24 : 0u};
 	const AdminProcessMission &mission = seams_.process_mission != nullptr ? *seams_.process_mission : own;
 	out += "SERVER: " + mission.session_title + "\r\n";
 	// The session clock: the authority's own status block's (session_status.h), a joiner's

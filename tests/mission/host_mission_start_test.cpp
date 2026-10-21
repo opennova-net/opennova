@@ -544,6 +544,67 @@ void run_single_player_restart_repromotes_the_mission_kit() {
 	CHECK(knife[0] == knife[1] && m4[0] == m4[1]);
 }
 
+// A single player's restart runs no round-state init (Game_RestartRoundSP -> Game_StartMission(1)),
+// so its status UP-TIME keeps counting from the first start's stamp, where a fresh start's create
+// stamps its own; and the restart's spawn raises read the word the previous start left, the
+// mission start's (D-PWR-8). The two boots share the process words, as the shell's do.
+// [orig: Server_InitNewRoundState - GetTickCount @0x51CB93, the store @0x51CBA0;
+//  Server_BuildStatusReport @0x530B84..0x530B8C; Game_RestartRoundSP @0x5263A0 - the push 1
+//  @0x5263D9; Game_StartMission - the 0 @0x525CDD]
+void run_single_player_restart_keeps_the_uptime_stamp() {
+	auto process = std::make_unique<inmatch::ClientProcessState>();
+	uint32_t stamps[3] = {0, 0, 0};
+	uint32_t uptimes[3] = {0, 0, 0};
+	int32_t difficulty[3] = {9, 9, 9};
+	const uint32_t start_ticks[3] = {1000, 5000, 9000};
+	const bool restarts[3] = {false, true, false};
+	for (int pass = 0; pass < 3; ++pass) {
+		std::map<std::string, std::string> files;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>(
+				inmatch::RoleKind::SinglePlayer, nullptr);
+		inmatch::HostRole &role = *role_storage;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "sp_uptime", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = false;
+		options.restart = restarts[pass];
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
+			cfg.config.server_name = "SINGLEPLAYERGAME";
+			cfg.config.max_players = 1;
+			cfg.config.game_type = options.game_type;
+			cfg.config.profile_difficulty = -1;
+			cfg.socket_mode = inmatch::SocketMode::Socketless;
+			cfg.serve_and_play = true;
+			cfg.host_start_tick = start_ticks[pass];
+			cfg.client_process = process.get();
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+			// The word the spawn raises read, ahead of the mission start's reset.
+			difficulty[pass] = kernel.world.rules.difficulty;
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		const inmatch::NapiNPServerCtx &ctx = host.host_owner.ctx;
+		stamps[pass] = ctx.round_state_init_tick;
+		uptimes[pass] = inmatch::session_uptime_ms(ctx);
+	}
+	// The fresh start stamps its own start tick; the restart keeps it, its UP-TIME the clock
+	// since the first start; the next fresh start stamps its own again.
+	CHECK(stamps[0] == 1000 && stamps[1] == 1000 && stamps[2] == 9000);
+	CHECK(uptimes[1] == uptimes[0] + 4000u && uptimes[2] == uptimes[0]);
+	CHECK(process->round_state_init_tick == 9000);
+	// A fresh start seeds the profile's word; the restart reads the previous start's.
+	CHECK(difficulty[0] == -1 && difficulty[2] == -1);
+	CHECK(difficulty[1] == w::mission_start_difficulty(mission_game_type(two_entity_mission())));
+}
+
 } // namespace
 
 int main() {
@@ -555,6 +616,7 @@ int main() {
 	run_single_player_retry_replays_the_own_join();
 	run_first_round_init_seeds_the_own_buffer();
 	run_single_player_restart_repromotes_the_mission_kit();
+	run_single_player_restart_keeps_the_uptime_stamp();
 	if (failures == 0) std::printf("host_mission_start: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
