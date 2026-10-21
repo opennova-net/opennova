@@ -1563,6 +1563,37 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 		}
 	}
 
+	// D-NET-NEW-L2-19 (L2-s10 row 7): a 0x11 and then a round end in ONE receive pass: the
+	// sync-tail wait reads the gate ahead of the 0x11's flag after the whole pass, so the
+	// mission start is abandoned with no 0x0A and no preload, the 0x11 notwithstanding.
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - the receive, then
+	//  @0x42CBC5 ahead of @0x42CBE7; Game_StartMission @0x524360 - "aborted 1"
+	//  @0x524DB0..0x524DD1; NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F]
+	{
+		inmatch::JoinerConnection fork = joiner;
+		SessionSequencing fork_seq = server_seq;
+		fork_seq.last_inbound_seq = 10;
+		const std::vector<uint8_t> tail = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x11, {})});
+		const std::vector<uint8_t> round_end = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x1D, {})});
+		(void)fork.handle_datagram(tail.data(), tail.size());
+		(void)fork.handle_datagram(round_end.data(), round_end.size());
+		(void)fork.finish_receive_pump();
+		bool sent_0a = false;
+		for (const std::vector<uint8_t> &dg : fork.pump(0)) {
+			std::vector<ProtocolMessage> messages;
+			ProtocolPacketHeader header;
+			if (decode_client_session(dg, client_auth.scrk, header, messages))
+				for (const ProtocolMessage &m : messages) sent_0a |= m.tag == 0x0A;
+		}
+		if (!expect(fork.mission_start_aborted() && !sent_0a && !fork.preload_ready() &&
+						!fork.in_mission_start(),
+				"a 0x11 and a round over in one pass abandon the mission start: no 0x0A")) {
+			return false;
+		}
+	}
+
 	server_seq.last_inbound_seq = 10;
 	const std::vector<uint8_t> sync_tail_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1570,9 +1601,14 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 	const inmatch::JoinerConnection::PollResult sync_tail_result =
 			joiner.handle_datagram(
 					sync_tail_datagram.data(), sync_tail_datagram.size());
-	if (!expect(sync_tail_result.outbound.size() == 1 &&
+	if (!expect(sync_tail_result.outbound.empty() && joiner.finish_receive_pump().empty(),
+			"the 0x11 sets the wait's flag: its 0x0A is owed to the send boundary")) {
+		return false;
+	}
+	const std::vector<std::vector<uint8_t>> sync_tail_answer = joiner.pump(0);
+	if (!expect(sync_tail_answer.size() == 1 &&
 				decode_client_session(
-						sync_tail_result.outbound[0], client_auth.scrk,
+						sync_tail_answer[0], client_auth.scrk,
 						client_header, client_messages) &&
 				matches_client_header(client_header, kServerKey, 11, 9) &&
 				client_messages.size() == 1 &&

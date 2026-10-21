@@ -1243,6 +1243,7 @@ private:
 	bool round_over_gate_ = false;
 	bool mission_start_aborted_ = false;           // mission_start_aborted
 	bool mission_start_released_this_pass_ = false; // the 0x1A of the receive pass in hand
+	bool sync_tail_this_pass_ = false; // the 0x11 of the receive pass in hand (its 0x0A owed)
 	bool initial_admission_complete_ = false; // a S2C 0x0F seen in the deploy wait
 	bool deployment_pick_sent_ = false;
 	uint32_t deployment_pick_sequence_ = 0; // release 0x5A must cumulatively ACK this C2S 0x0E

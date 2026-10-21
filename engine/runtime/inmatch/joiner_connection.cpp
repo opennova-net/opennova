@@ -253,6 +253,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	round_over_gate_ = false;
 	mission_start_aborted_ = false;
 	mission_start_released_this_pass_ = false;
+	sync_tail_this_pass_ = false;
 	initial_admission_complete_ = false;
 	loading_cancel_ = false; // [orig: CNapiNetwork_OnConnectedToServer @0x4C63B7]
 	deployment_pick_sent_ = false;
@@ -2034,14 +2035,20 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (round_over_gate_ && !out.mission_started &&
 					post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail)
 				mission_start_aborted_ = true;
+			// The 0x11 sets the wait's flag alone: the wait reads it after the whole pass and
+			// its send, behind the round-over test, and the game-start wait that follows
+			// queues the 0x0A at its head, so the 0x0A is owed to the send boundary (pump())
+			// and a gate a later message of this pass raises still withdraws it
+			// (finish_receive_pump). The world stream's stage starts now, so a 0x1A this pass
+			// carries is the game-start wait's.
+			// [orig: NapiNPClientMsg_0x011 @0x4226E0 (the flag); NapiClient_SendPlayerSyncAnd
+			//  WaitForSyncTail @0x42CB20 - the receive, the paced send, @0x42CBC5 ahead of
+			//  @0x42CBE7; NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F]
 			if (!mission_start_aborted_ &&
 					post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail) {
 				preload_ready_ = true;
 				pending_spawn_menu_request_ = true;
-			}
-			if (pending_spawn_menu_request_) {
-				out.outbound.push_back(frame_inner_pending(0x0A, {}));
-				pending_spawn_menu_request_ = false;
+				sync_tail_this_pass_ = true;
 				post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
 			}
 		}
@@ -2180,6 +2187,7 @@ std::vector<uint8_t> JoinerConnection::begin_mission_reload() {
 	round_over_gate_ = true; // the round end's gate holds until the mission start
 	mission_start_aborted_ = false;
 	mission_start_released_this_pass_ = false;
+	sync_tail_this_pass_ = false;
 	initial_admission_complete_ = false;
 	loading_cancel_ = false; // the mission start's head [orig: Game_StartMission @0x524575]
 	deployment_pick_sent_ = false;

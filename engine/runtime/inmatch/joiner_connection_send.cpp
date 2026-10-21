@@ -216,8 +216,17 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 		mission_start_aborted_ = true;
 		if (post_auth_stage_ == PostAuthStage::AwaitMissionStart)
 			post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
+		// A 0x11 this same pass ended the sync-tail wait's receive: that wait tests the
+		// gate first and returns 1, so no 0x0A is queued and nothing is preloaded.
+		// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - @0x42CBC5 ahead of
+		//  @0x42CBE7; Game_StartMission @0x524360 - "aborted 1" @0x524DB0..0x524DD1]
+		if (sync_tail_this_pass_) {
+			pending_spawn_menu_request_ = false;
+			preload_ready_ = false;
+		}
 	}
 	mission_start_released_this_pass_ = false;
+	sync_tail_this_pass_ = false;
 	if (!conn_.seq.missing_request_pending) return {};
 	conn_.seq.missing_request_pending = false;
 	if (conn_.seq.queued_inbound.empty()) return {};
@@ -387,7 +396,8 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 		// Remains inside ClientRuntime's surrounding logical send boundary.
 		out.push_back(frame_session({make_protocol_message(0x0A, {})}));
 		pending_spawn_menu_request_ = false;
-		post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
+		if (post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail)
+			post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
 	}
 
 	// Carry a pending cumulative ACK only when no substantive C2S producer above already did so.
