@@ -102,16 +102,18 @@ public:
 
 	// One frame's poll over the sampled rows (a mask of 1 << Row); returns the
 	// Event bits.
-	// `local_alive` feeds the commander_menu row's dead-player gate;
+	// `local_alive` feeds the bit-0 rows' dead-player gate;
 	// `authority` / `mp_session_peer` are the connection mode's two bits (the
 	// ToggleServer row, the map-legend gate and the playerlist reroute);
 	// `mouse_scale_negative` is the mousescale fire's sign bit
-	// (ControlsModel.is_token_fire_signed). The bits are the engine's unsigned
+	// (ControlsModel.is_token_fire_signed); `head_drops` the rows (1 << Row)
+	// whose event the dispatcher's head drops by their flags (engine
+	// HudKeyPoll::head_drops). The bits are the engine's unsigned
 	// 32-bit word, EVENT_JOIN_LOCK_TOGGLED its top bit, so the result is 64-bit.
 	int64_t poll(int p_rows_down, bool p_active,
 			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
 			bool p_authority = false, bool p_mp_session_peer = false,
-			bool p_mouse_scale_negative = false);
+			bool p_mouse_scale_negative = false, int p_head_drops = 0);
 	// The escape action's HUD-window close chain; returns the Event bits.
 	int escape(bool p_in_session, bool p_spawn_gate, bool p_authority = false);
 	// The session create / destroy's status-view rule (engine

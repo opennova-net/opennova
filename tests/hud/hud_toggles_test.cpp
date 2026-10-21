@@ -6,6 +6,7 @@
 // SP-only gate and sibling close, the respawn reset, the death-screen force,
 // the friendly-tags and verbose rows, the help / map legend / briefing
 // windows and the escape close chain.
+#include <runtime/controls/controls.h>
 #include <runtime/hud/hud_toggles.h>
 
 #include <cstdio>
@@ -395,6 +396,58 @@ void test_commander_menu_row() {
 	k.commander_menu = true;
 	k.active = false;
 	CHECK(hud_toggles_poll(s, k) == 0);
+}
+
+// Each row's queued event passes the dispatcher's head by its catalog row's
+// flags: a row the head drops (AudioEmote, 0x0C000C01, while the pre-round timer
+// runs or under the deploy overlay) fires nothing, and its latch still steps, so
+// a press held through the drop fires only at its next press; a bit-0 row
+// (dotsize) drops for a dead player through the operand. The catalog rows carry
+// the rows' tokens.
+// [orig: Input_HandleActionBinding @0x49AD40 - the flags @0x49AD8D, bit 0 with
+//  the operand @0x49AD95..0x49ADA0, 0x400 @0x49ADB3..0x49ADC2, 0x8000000
+//  @0x49ADC8..0x49ADD7]
+void test_head_drops_at_the_event_edge() {
+	HudToggleState s;
+	HudKeyPoll k = keys();
+	k.audio_emote = true;
+	k.head_drops = 1u << kRowAudioEmote;
+	CHECK(hud_toggles_poll(s, k) == 0);
+	CHECK(!s.emotes_menu_open);
+	k.head_drops = 0;
+	CHECK(hud_toggles_poll(s, k) == 0); // held through the drop: no new edge
+	k.audio_emote = false;
+	hud_toggles_poll(s, k);
+	k.audio_emote = true;
+	hud_toggles_poll(s, k);
+	CHECK(s.emotes_menu_open);
+	k.audio_emote = false;
+	hud_toggles_poll(s, k);
+	// A drop names its row alone.
+	k.head_drops = 1u << kRowAudioEmote;
+	k.huddetail = true;
+	CHECK(hud_toggles_poll(s, k) == kHudDetailCycled);
+	k.huddetail = false;
+	k.head_drops = 0;
+	hud_toggles_poll(s, k);
+	// dotsize for a dead local player.
+	k.dotsize = true;
+	k.local_alive = false;
+	CHECK(hud_toggles_poll(s, k) == 0);
+	k.dotsize = false;
+	k.local_alive = true;
+	hud_toggles_poll(s, k);
+	k.dotsize = true;
+	CHECK(hud_toggles_poll(s, k) == kDotsizeCycled);
+	std::size_t count = 0;
+	const opennova::controls::ActionDef *defs = opennova::controls::catalog(&count);
+	for (int row = 0; row < kHudToggleRowCount; ++row) {
+		const char *token = nullptr;
+		for (std::size_t i = 0; i < count; ++i)
+			if (defs[i].id == hud_toggle_row_catalog_row(row)) token = defs[i].token;
+		CHECK(token != nullptr && std::strcmp(token, hud_toggle_row_token(row)) == 0);
+	}
+	CHECK(hud_toggle_row_catalog_row(kHudToggleRowCount) == -1);
 }
 
 } // namespace
@@ -869,6 +922,7 @@ int main() {
 	test_briefing_and_goals_redispatch();
 	test_escape_chain();
 	test_commander_menu_row();
+	test_head_drops_at_the_event_edge();
 	test_pause_row();
 	test_voice_macro_menus();
 	test_escape_pause_and_voice_menus();

@@ -4,7 +4,7 @@ using namespace godot;
 
 int64_t HudToggles::poll(int p_rows_down, bool p_active,
 		bool p_in_session, bool p_objective_game, bool p_local_alive, bool p_authority,
-		bool p_mp_session_peer, bool p_mouse_scale_negative) {
+		bool p_mp_session_peer, bool p_mouse_scale_negative, int p_head_drops) {
 	opennova::hud::HudKeyPoll keys;
 	opennova::hud::hud_key_poll_set_rows(keys, static_cast<uint32_t>(p_rows_down));
 	keys.active = p_active;
@@ -14,6 +14,7 @@ int64_t HudToggles::poll(int p_rows_down, bool p_active,
 	keys.authority = p_authority;
 	keys.mp_session_peer = p_mp_session_peer;
 	keys.mouse_scale_negative = p_mouse_scale_negative;
+	keys.head_drops = static_cast<uint32_t>(p_head_drops);
 	return static_cast<int64_t>(opennova::hud::hud_toggles_poll(state_, keys));
 }
 
@@ -128,8 +129,9 @@ bool HudToggles::is_tip_showing() const { return opennova::hud::tip_is_showing(s
 void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("poll", "rows_down", "active",
 								 "in_session", "objective_game", "local_alive", "authority",
-								 "mp_session_peer", "mouse_scale_negative"),
-			&HudToggles::poll, DEFVAL(true), DEFVAL(false), DEFVAL(false), DEFVAL(false));
+								 "mp_session_peer", "mouse_scale_negative", "head_drops"),
+			&HudToggles::poll, DEFVAL(true), DEFVAL(false), DEFVAL(false), DEFVAL(false),
+			DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("escape", "in_session", "spawn_gate", "authority"),
 			&HudToggles::escape, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("session_init", "in_session", "mp_session_peer"),

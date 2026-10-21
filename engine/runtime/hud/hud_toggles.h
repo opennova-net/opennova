@@ -178,10 +178,21 @@ struct HudKeyPoll {
 	bool authority = false;
 	bool mp_session_peer = false;
 	bool objective_game = false; // g_GameType & kObjectiveBit (0x20000)
-	// The local player is alive: the commander_menu, AudioEmote and
-	// RadioMacro rows carry the binding flag 0x1 the dispatcher tests against
-	// a dead player (Flags & 2).
+	// The local player is alive: the rows whose binding flags carry 0x1
+	// (dotsize, view1st, viewwithgun, commander_menu, ShowFriendly, AudioEmote,
+	// RadioMacro) are dropped by the dispatcher's head for a dead player
+	// (Flags & 2).
 	bool local_alive = true;
+	// The rows (a mask of 1 << HudToggleRow) whose queued event the dispatcher's
+	// head drops this input frame by the row's binding flags, as the embedder's
+	// role reads them (inmatch::Role::action_head_admits: bit 0 with the
+	// authority word or under the round-over gate, 0x40 without it, 0x400 while
+	// the pre-round timer runs, 0x8000000 under the deploy overlay, 0x10 in a
+	// session); the pause word's gate is this state's own. A dropped row's latch
+	// still steps on its key, so a press held through the drop never fires.
+	// [orig: Input_HandleActionBinding @0x49AD40 - the row's flags
+	//  dword_8159AC[code * 0x6C] @0x49AD8D, the gates @0x49AD95..0x49AE23]
+	uint32_t head_drops = 0;
 };
 
 // What a poll flipped, for the embedder's device side effects.
@@ -290,6 +301,9 @@ enum HudToggleRow : int {
 };
 // The row's catalog config token.
 const char *hud_toggle_row_token(int row);
+// The row's static catalog row (controls::action_code reads the dispatch code
+// the head tests the row's flags by); -1 out of range.
+int hud_toggle_row_catalog_row(int row);
 // Sets the poll's key bits from a mask of (1 << HudToggleRow).
 void hud_key_poll_set_rows(HudKeyPoll &keys, uint32_t rows_down);
 

@@ -167,11 +167,22 @@ public:
 	// frame (each banked tick's) and a one-tick press opens its line on its
 	// tick; the command arm reads no local player (a non-peer authority's
 	// dispatch takes its authority word as 2 without one, and the command
-	// row's flags 0x5000800 carry none of the dispatch gates), so a host with
-	// no local player (Serve Only) probably opens the prompt too: the dispatch
-	// first offers each action to the hook at +0x170 of g_LocalPlayerEntity's
-	// def (+0x20), a nonzero return consuming it, and what that entity holds
-	// on a Serve Only host is unwitnessed [orig: Input_ProcessFrame @0x49D520
+	// row's flags 0x5000800 carry none of the dispatch gates), so a Serve Only
+	// host opens the prompt too: the dispatch first offers each action to the
+	// hook at +0x170 of g_LocalPlayerEntity's def (+0x20), a nonzero return
+	// consuming it, and every role's mission start points that word at its own
+	// row body (fatal with none), whose def's hook is its input name's table
+	// entry: troop and tank take Input_HandleActionBinding_0, whose switch
+	// sends code 1 to its default return of 0, and the null entry's hook
+	// returns 0, so no hook takes the command row [orig: Game_StartMission
+	// @0x524360 (the Player_InitPlayer call @0x525BBC); Player_InitPlayer
+	// @0x4E15F0 (the Player_FindLocalPlayerEntity store @0x4E17EB, the fatal
+	// @0x4E17F2); EntityDef_InitAllCallbacks @0x4A5A70 (the def's +0x168 name,
+	// "Null" when empty, @0x4A5B50..0x4A5B67); Entity_LookupPhysicsCallbacks
+	// @0x497910 (the table @0x829DA8, the +0x170 stores @0x497949 / @0x497965);
+	// Input_HandleActionBindingNull @0x497980; Input_HandleActionBinding_0
+	// @0x4E0420 (the range test @0x4E0475..0x4E047E, the default @0x4E13F9);
+	// Input_ProcessFrame @0x49D520
 	// (the drain's Input_HandleActionBinding call @0x49D5D8);
 	// Input_HandleActionBinding @0x49AD40 (the authority word
 	// @0x49AD52..0x49AD74; the row gates @0x49AD8A..0x49AE23: flag 0x1 with an

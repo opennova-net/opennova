@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/global_constants.hpp>
 
 #include <base/gameprofile/game_type.h>
+#include <runtime/controls/controls.h> // action_code (the HUD rows' dispatch codes)
 
 #include <cmath>
 
@@ -200,9 +201,9 @@ void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim) {
 	// The talk rows are action bindings the input frame's drain dispatches
 	// every tick, after any typed keys reached an open line, so a one-tick
 	// press inside a multi-tick frame opens its line on its tick; the command
-	// prompt opens with or without a local player (a Serve Only host's,
-	// probably: engine hud/hud_chat_entry.h ChatEntry::poll_rows carries the
-	// witness and its open point). The key
+	// prompt opens with or without a local player, as a Serve Only host's does
+	// (engine hud/hud_chat_entry.h ChatEntry::poll_rows carries the witness and
+	// its open point). The key
 	// sampling is this router's; the dispatch gates, the capture, the talk
 	// debounce and the flood are the engine's chat entry (ChatEntryFacts::frame,
 	// inmatch/chat_flood.h); the HUD presenter draws the line at its frame.
@@ -340,6 +341,15 @@ void PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim) {
 	int rows_down = 0;
 	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
 		if (pressed(opennova::hud::hud_toggle_row_token(row))) rows_down |= 1 << row;
+	// Each row's event passes the dispatcher's head by its catalog row's flags
+	// (the pre-round timer, the deploy overlay, the round-over gate, the dead
+	// operand): the rows the role's head drops this input frame (engine
+	// hud::HudKeyPoll::head_drops carries the witness).
+	int head_drops = 0;
+	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
+		if (!p_sim->action_head_admits(opennova::controls::action_code(
+					opennova::hud::hud_toggle_row_catalog_row(row))))
+			head_drops |= 1 << row;
 	// The connection mode's two bits: an authority is any role but a joiner, a
 	// session peer any role but a dedicated host. The mousescale row steps by
 	// its fire's sign bit (Shift on a modifier-less key).
@@ -351,7 +361,8 @@ void PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim) {
 			role != Simulation::ROLE_DEDICATED_HOST,
 			controls_.is_valid() &&
 					controls_->is_token_fire_signed(String(opennova::hud::hud_toggle_row_token(
-							HudToggles::ROW_MOUSE_SCALE))));
+							HudToggles::ROW_MOUSE_SCALE))),
+			head_drops);
 	if (events != 0) hud_toggle_events_.push_back(events);
 }
 
