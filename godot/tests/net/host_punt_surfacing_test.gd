@@ -156,6 +156,36 @@ func _join_pair_with_pending_pick() -> Dictionary:
 			break
 		OS.delay_msec(2)
 	assert_true(self_bound, "the joiner bound its wire handle before the kill")
+	# The fixture's team-owned spawn zone holds the joining slot at the deploy
+	# overlay (the join sets the slot's undeployed bit whenever the mission has
+	# spawn zones), and every 0x0A re-hides a held slot's body. A hidden body's
+	# tick returns ahead of its death edge, on the host and on the joiner alike,
+	# so a held joiner the authority kills reads alive (its zero tail beside an
+	# alive self record floors the local Health at 1) until its hold releases.
+	# Deploy out of the join hold first (the overlay's default pick): the death
+	# transaction then lands on an unhidden body, the host's death edge raises
+	# its dead bit and the dead self record runs the joiner's death edge.
+	# [orig: Server_OnPlayerJoin @0x51A680 - SpawnZoneList_GetCount @0x51A6E9,
+	#  the undeployed bit `or byte [esi+15F38h], 10h` @0x51A6F2;
+	#  NetPacket_WritePlayerState @0x4FF6B0 - the held slot's hide
+	#  @0x4FF7AA..0x4FF7B8; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
+	#  hidden return @0x4B411B..0x4B4127 ahead of the death edge
+	#  @0x4B4BF1..0x4B4C02; NetPacket_SerializePlayerState @0x4C09C0 - the floor
+	#  @0x4C11C4..0x4C11CE]
+	assert_true(joiner.is_deploy_overlay_active(),
+			"the spawn-zone mission holds the joiner at the deploy overlay")
+	var join_hold_released := false
+	for i in range(1200):
+		if i % 64 == 0:
+			joiner.send_deployment_pick(0)
+		host.step()
+		joiner.step()
+		if not joiner.is_deploy_overlay_active():
+			join_hold_released = true
+			break
+		OS.delay_msec(2)
+	assert_true(join_hold_released,
+			"the overlay's default pick releases the join hold")
 	assert_eq(host.debug_kill_player_entity(joiner.get_joiner_self_handle()), OK,
 			"the host queued the joiner's death")
 	var pick_pending := false
