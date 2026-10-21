@@ -40,7 +40,8 @@ struct Normalization {
 	char dir; // 'C', 'S', or '*' (either direction / not directional)
 	uint16_t selector; // the handshake opcode, or the 9-bit message identity
 	const char *name; // the TLV / CU field name, or the decoded field
-	uint32_t bytes; // BodyPrefix: the stripped prefix length; HandshakeLength: the class base
+	uint32_t bytes; // BodyPrefix: the stripped prefix length; HandshakeLength: the class base;
+	                // HandshakeField: 1 when the field's size follows its masked value
 	const char *reason;
 };
 
@@ -56,6 +57,24 @@ inline constexpr Normalization kNormalizations[] = {
 	// broadcast -1 and the enumerated host port on a LAN browse
 	// (CNapiGameSession_InitTransportConnection @0x4c9eab/@0x4c9ec5..0x4c9ed1),
 	// identical run to run.
+	{ "handshake.0x41.AP", MaskKind::HandshakeField, 'C', 0x41, "AP", 1,
+			"the game protocol's AP is the running executable's file name: CNapiNetwork_Init copies "
+			"Napi_GetExeBasename's result (the call @0x4ca747, the copy @0x4ca759) and the 0x41 announce (NapiNPSession_SendAnnouncePacket @0x61fb3a) "
+			"reads that copy, so each run names its own program (Jointops.exe on retail, the "
+			"runtime's executable on ours, D-NET-NEW-L9-2); no host compares it (the identity "
+			"checks read NVS, PN, PG and PV1). Its size follows the name" },
+	{ "handshake.0x42.AP", MaskKind::HandshakeField, 'C', 0x42, "AP", 1,
+			"the game protocol's AP is the running executable's file name: CNapiNetwork_Init copies "
+			"Napi_GetExeBasename's result (the call @0x4ca747, the copy @0x4ca759) and the 0x42 join (CNapiNPConnection_SendClientJoin @0x61ff52) "
+			"reads that copy, so each run names its own program (Jointops.exe on retail, the "
+			"runtime's executable on ours, D-NET-NEW-L9-2); no host compares it (the identity "
+			"checks read NVS, PN, PG and PV1). Its size follows the name" },
+	{ "handshake.0x81.AP", MaskKind::HandshakeField, 'S', 0x81, "AP", 1,
+			"the game protocol's AP is the running executable's file name: CNapiNetwork_Init copies "
+			"Napi_GetExeBasename's result (the call @0x4ca747, the copy @0x4ca759) and a host's 0x81 (NapiNPProtocol_SendServerInfoPacket @0x6205ea) "
+			"reads that copy, so each run names its own program (Jointops.exe on retail, the "
+			"runtime's executable on ours, D-NET-NEW-L9-2); no host compares it (the identity "
+			"checks read NVS, PN, PG and PV1). Its size follows the name" },
 	{ "handshake.0x41.CI", MaskKind::HandshakeField, 'C', 0x41, "CI", 0,
 			"the client's connection index, assigned per process" },
 	{ "handshake.0x42.CI", MaskKind::HandshakeField, 'C', 0x42, "CI", 0,
@@ -475,6 +494,13 @@ constexpr bool handshake_cu_low16(uint8_t opcode, std::string_view cu_name) {
 }
 
 // The size class base of a length-reduced handshake field, 0 when its size is exact.
+// The masked handshake field `name` of `opcode` has no fixed size either.
+constexpr bool handshake_field_size_masked(uint8_t opcode, std::string_view name) {
+	const Normalization *entry =
+			find_normalization(MaskKind::HandshakeField, handshake_dir(opcode), opcode, name);
+	return entry != nullptr && entry->bytes == 1;
+}
+
 constexpr uint32_t handshake_length_class(uint8_t opcode, std::string_view name) {
 	const Normalization *entry =
 			find_normalization(MaskKind::HandshakeLength, handshake_dir(opcode), opcode, name);

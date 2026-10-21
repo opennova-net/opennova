@@ -1397,6 +1397,19 @@ void test_handshake_rules() {
 				"HANDSHAKE_MISMATCH");
 	}
 	{
+		// AP names the running program (D-NET-NEW-L9-2): its value and size leave the key;
+		// another field's size still compares.
+		wire::ParityTrace runtime = scripted(3), wide = scripted(3);
+		set_tlv(handshake_of(runtime, 0x41), "AP", text_bytes("Godot_v4.6.1-stable_win64.exe"));
+		std::vector<uint8_t> wide_eip;
+		put_u32(wide_eip, 0xFFFFFFFFu);
+		wide_eip.push_back(0);
+		set_tlv(handshake_of(wide, 0x41), "EIP", wide_eip);
+		expect_row(judge_case(scripted(1), scripted(2), runtime), 'C', "handshake", "0x41", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), wide), 'C', "handshake", "0x41", "fail",
+				"HANDSHAKE_MISMATCH");
+	}
+	{
 		// CU CI0 keeps its low 16 bits: the residue high word never compares, the id does.
 		wire::ParityTrace bare = scripted(3), other_id = scripted(3);
 		set_cu(handshake_of(bare, 0x42), "CI0", "512");

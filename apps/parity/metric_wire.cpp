@@ -528,9 +528,11 @@ std::string handshake_field_key(uint8_t opcode, const FlatTlvField &field) {
 	const uint32_t size_class = handshake_length_class(opcode, name);
 	const bool in_class = size_class != 0 &&
 			(field.size == size_class || field.size == size_class + 1);
+	static_assert(has_normalization("handshake.0x41.AP"));
 	std::string key = name + "|" +
-			(in_class ? std::to_string(size_class) + "-" + std::to_string(size_class + 1)
-					  : std::to_string(field.size));
+			(handshake_field_size_masked(opcode, name) ? std::string("*")
+					: in_class ? std::to_string(size_class) + "-" + std::to_string(size_class + 1)
+							   : std::to_string(field.size));
 	if (name == "CU" && value.size() >= 5) {
 		// [u8 type][name\0][u16 len][value]
 		const uint8_t type = value[0];
