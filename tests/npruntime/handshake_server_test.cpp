@@ -4227,16 +4227,11 @@ bool run_integrity_replies_validate_computed_sources() {
 				config, conn, messages,
 				100, roster, nullptr).empty();
 		if (append_ping) {
-			// The punted connection's later record still reaches its handler: the 0x47's
-			// 0x75 comes back, and the connection's queue, closed behind the description,
-			// drops it (D-NET-NEW-L1-27).
-			std::vector<ProtocolMessage> later = inmatch::dispatch_session_replies(
-					config, conn, {make_protocol_message(c2s::PING, {})}, 101, roster,
-					nullptr);
-			result.replies_empty = result.replies_empty && later.size() == 1 &&
-					later[0].tag == s2c::SPECTATOR_FLAGS;
-			for (ProtocolMessage &reply : later)
-				transport.host_send(reply.tag, std::move(reply.payload));
+			result.replies_empty = result.replies_empty &&
+					inmatch::dispatch_session_replies(
+							config, conn,
+							{make_protocol_message(c2s::PING, {})},
+							101, roster, nullptr).empty();
 		}
 		result.disconnect_latched = conn.host_disconnect_sent;
 		result.staged = transport.pop_outbound(result.datagram);
