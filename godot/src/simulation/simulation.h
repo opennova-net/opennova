@@ -667,6 +667,11 @@ public:
 	bool is_playing() const {
 		return session_.state() == opennova::inmatch::State::Running;
 	}
+	// A single-player session the pause holds: its frames still take Session::advance's
+	// paused branch (engine inmatch::Session::step_paused_frame_counters).
+	bool is_session_paused() const {
+		return session_.state() == opennova::inmatch::State::Paused;
+	}
 	// Advance exactly ONE 62 Hz logic tick — the original's engine tick. The per-system
 	// dividers gate INSIDE the systems (the WAC VM self-gates to every 62nd tick, the BMS
 	// evaluator quarter-passes every 16th), exactly where the original keeps them. Returns

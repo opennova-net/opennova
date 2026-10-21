@@ -1198,6 +1198,10 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	assert_true(world.is_loaded(), "the minimal mission loaded through the full shell")
+	# Leave the start-mission splash (it holds the world un-ticked) so the frames below
+	# run the world frame.
+	_shell.dismiss_start_mission_splash()
+	await get_tree().create_timer(1.0).timeout
 
 	# The ESC-pause leg through the MCP verb: game.mnu over the kept world.
 	assert_eq(adapter.mcp_game_control("open_ingame_menu"), OK)

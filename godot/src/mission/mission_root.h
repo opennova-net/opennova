@@ -199,6 +199,7 @@ public:
 
 	int entity_count() const;
 	bool is_playing() const;
+	bool is_session_paused() const;
 
 	// Advance EXACTLY ONE cadence step and present. Returns true when a logic
 	// tick fired (and effects were drained). The deterministic single-tick

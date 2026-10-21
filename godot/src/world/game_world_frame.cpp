@@ -381,7 +381,12 @@ GameWorld::LegResult GameWorld::leg_begin(FrameContext &r_ctx) {
 
 GameWorld::LegResult GameWorld::leg_session(FrameContext &r_ctx) {
 	MissionRoot *presentation = get_runtime();
-	if (presentation == nullptr || !presentation->is_playing()) {
+	// A paused single-player session still takes its frame: Session::advance runs the paused
+	// frame's own legs (the main-frame counter, the weather tick ahead of the pause test, the
+	// cine and HUD-radar passes) and ticks nothing, as retail's main frame runs under the
+	// menu pause (engine inmatch::Session::step_paused_frame_counters carries the witness).
+	if (presentation == nullptr ||
+			!(presentation->is_playing() || presentation->is_session_paused())) {
 		return kLegSkipped;
 	}
 	const int64_t runtime_start = frame_timing_ ? now_us() : 0;

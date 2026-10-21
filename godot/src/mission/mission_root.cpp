@@ -656,6 +656,10 @@ bool MissionRoot::is_playing() const {
 	return sim_.is_valid() && sim_->is_playing();
 }
 
+bool MissionRoot::is_session_paused() const {
+	return sim_.is_valid() && sim_->is_session_paused();
+}
+
 void MissionRoot::present_entity_rows(bool p_stats_on) {
 	EntityPresenter *presenter = entities();
 	if (sim_.is_null() || presenter == nullptr) {
