@@ -56,8 +56,13 @@ const char kItems[] =
 		"begin \"Barrel man\"\r\n id 105321\r\n type person\r\n hp 100\r\n ai_function brrl\r\nend\r\n"
 		"begin \"Lift man\"\r\n id 105322\r\n type person\r\n hp 100\r\n ai_function ele0\r\nend\r\n";
 
-// Class 5 the plyr row, 6 the org0 row, 7 the classless row, 8 the brrl row, 9 the ele0 row.
+// Class 5 the plyr row, 6 the org0 row, 7 the classless row, 8 the brrl row, 9 the ele0 row
+// (classes 1..4 the plyr row: the load reads CHARACTER1 on until the first missing section).
 const char kCharattr[] =
+		"[CHARACTER1]\r\nJUNGLE_CAMMO\t= 5305\r\nDESERT_CAMMO\t= 5305\r\nARCTIC_CAMMO\t= 5305\r\n"
+		"[CHARACTER2]\r\nJUNGLE_CAMMO\t= 5305\r\nDESERT_CAMMO\t= 5305\r\nARCTIC_CAMMO\t= 5305\r\n"
+		"[CHARACTER3]\r\nJUNGLE_CAMMO\t= 5305\r\nDESERT_CAMMO\t= 5305\r\nARCTIC_CAMMO\t= 5305\r\n"
+		"[CHARACTER4]\r\nJUNGLE_CAMMO\t= 5305\r\nDESERT_CAMMO\t= 5305\r\nARCTIC_CAMMO\t= 5305\r\n"
 		"[CHARACTER5]\r\nJUNGLE_CAMMO\t= 5305\r\nDESERT_CAMMO\t= 5305\r\nARCTIC_CAMMO\t= 5305\r\n"
 		"[CHARACTER6]\r\nJUNGLE_CAMMO\t= 5311\r\nDESERT_CAMMO\t= 5311\r\nARCTIC_CAMMO\t= 5311\r\n"
 		"[CHARACTER7]\r\nJUNGLE_CAMMO\t= 5320\r\nDESERT_CAMMO\t= 5320\r\nARCTIC_CAMMO\t= 5320\r\n"
