@@ -508,6 +508,10 @@ bool run_ground_parked_rests_at_wheel_clearance() {
 			// and hovers — the witnessed retail floating-placement artifact.)
 			veh->flags |= w::kEntityFlagInAir;
 			veh->veh.grounded = false;
+		} else {
+			// The parked record's hull is mid-life: its last solve left the contact
+			// byte set (a spawn holds 0 until a solve writes it, D-NET-433).
+			veh->veh.grounded = true;
 		}
 		// The retail host's parked record: origin at terrain + clearance, no
 		// motion, re-sent every 8 ticks like a live 01TR join.
@@ -594,6 +598,10 @@ bool run_tank_parked_rests_at_wheel_clearance() {
 		if (pr.start_z != rest_fx) {
 			veh->flags |= w::kEntityFlagInAir;
 			veh->veh.grounded = false;
+		} else {
+			// The parked record's hull is mid-life: its last solve left the contact
+			// byte set (a spawn holds 0 until a solve writes it, D-NET-433).
+			veh->veh.grounded = true;
 		}
 		for (int t = 0; t < 120; ++t) {
 			if (t % 8 == 0)
@@ -674,6 +682,10 @@ bool run_bike_parked_rests_at_wheel_clearance() {
 		if (pr.start_z != rest_fx) {
 			veh->flags |= w::kEntityFlagInAir;
 			veh->veh.grounded = false;
+		} else {
+			// The parked record's hull is mid-life: its last solve left the contact
+			// byte set (a spawn holds 0 until a solve writes it, D-NET-433).
+			veh->veh.grounded = true;
 		}
 		for (int t = 0; t < 120; ++t) {
 			if (t % 8 == 0)

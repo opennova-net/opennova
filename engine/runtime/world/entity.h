@@ -1416,12 +1416,20 @@ struct Entity {
 		bool tumble_hard_latched = false;
 		bool tumble_med_latched = false;
 		uint32_t sound_anchor_until_tick = 0; // keep residual lanes attached after claimant loss
-        bool grounded = true;         // wheel contact / +0x2F2 [orig: BYTE2(entity->aiRef0) reuse];
-                                      // vehicles spawn RESTING (contact resolved at init),
-                                      // so the default is grounded — the first motor tick
-                                      // re-derives it from the terrain clamp. The same byte
-                                      // gates the tracked extend loop's pre-gate and is
-                                      // cleared by Entity_RespawnVehicle @0x45FFFD.
+        // Wheel contact, +0x2F2 [orig: BYTE2(entity->aiRef0) reuse]. Every vehicle spawn
+        // holds 0: a mission placement's slot is zeroed by the mission reset and the record
+        // spawn writes none of +0x2EC..+0x2FC; the runtime spawns zero a 0x550-byte template
+        // and clone it into pool 1; the respawn writes 0. Each contact solve re-derives it
+        // after the speed pipeline has read it, so a fresh vehicle's first tick takes the
+        // coast-brake test (@0x48C195..0x48C1C2) on the spawn's 0.
+        // [orig: Mission_ResetBmsState @0x40DB80 (the Pool_Clear @0x442060 call @0x40DBC7);
+        //  Entity_SpawnFromBMSRecord @0x40E9F0 (the memset @0x40EA27);
+        //  Entity_SpawnHelicopter @0x4521A0 (the memset @0x4521DA, Entity_CloneFromTemplateWithAI
+        //  @0x4397C0 called @0x4522E1); Entity_SpawnDeployable @0x51C2B0 (@0x51C2EA,
+        //  Entity_CloneFromTemplateToPool1 @0x439830 called @0x51C3FE);
+        //  Entity_RespawnVehicle @0x45FF40 (@0x45FFFD); Entity_UpdateVehiclePhysics
+        //  @0x48AF00 (the read @0x48C195, the tracked solve's call @0x48D0B1)]
+        bool grounded = false;
 
         // --- Joiner-side vehicle prediction (net-re §5.38e, D-NET-196). The
         // wire record apply stages these and the family client mover chases +

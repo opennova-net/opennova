@@ -121,10 +121,17 @@ void test_a_model_less_tracked_hull_takes_no_stand_in() {
 	Entity &e = *world->registry.get(h);
 	const VehicleTraits t = boxed_traits(VehicleFamily::Ground);
 	const int32_t z0 = e.position.z.q16;
+	// The spawn's contact byte is 0 [orig: Mission_ResetBmsState @0x40DB80 (the
+	//  Pool_Clear @0x442060 call @0x40DBC7); Entity_SpawnFromBMSRecord @0x40E9F0
+	//  (the memset @0x40EA27)].
+	CHECK(!e.veh.grounded);
 	world->vehicles.tick_motor(e, t);
 	CHECK(e.veh.slide_z == -162);
 	CHECK(e.position.z.q16 == z0);
 	CHECK((e.flags & (kEntityFlagInAir | 0x8000u)) == 0);
+	// The sleep leg, ahead of the model test, re-derives the byte from the upright
+	// pose [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 (@0x47C37B..0x47C395)].
+	CHECK(e.veh.grounded);
 }
 
 // The boat mover reads its afloat latch as the last platform solve left it: a hull

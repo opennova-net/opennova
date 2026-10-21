@@ -112,7 +112,11 @@ CollisionModel vehicle_sound_test_wall() {
 struct Rig {
     World w;
     EntityHandle veh_h, drv_h;
-    Rig() {
+    // `settled`: the buggy as its contact solve has left it standing (the contact
+    // byte +0x2F2 set); false is the spawn's 0, a fresh vehicle ahead of its first
+    // solve [orig: Entity_UpdateVehiclePhysics @0x48AF00 (the read @0x48C195, the
+    // solve @0x48D0B1)].
+    explicit Rig(bool settled = true) {
         w.registry.configure_pool(0, 16); // organics (the driver)
         w.registry.configure_pool(1, 16); // items (the buggy)
 
@@ -132,6 +136,7 @@ struct Rig {
         veh.health = 3000;
         veh.health_max = 3000;
         veh.alive = true;
+        veh.veh.grounded = settled;
         Seat ctrl;
         ctrl.type = SeatType::Controller;
         ctrl.bone_index = 1;
@@ -315,6 +320,38 @@ void test_drive_forward() {
     CHECK(dist > 1.0f);   // it MOVED
     CHECK(r.veh().heading == placed_heading_bam(0)); // straight line: heading holds
     CHECK(std::fabs(r.veh().position.z - start.z) < 0.01f); // flat-plane ground hold
+}
+
+// A fresh vehicle's contact byte is the spawn's 0 and the speed pipeline reads it
+// before the first contact solve writes it: with Flags 0x2000 clear and the current
+// speed (0) agreeing in sign with the forward command, the command is negated (the
+// airborne coast brake), so the standstill steps backward; the byte is then set (the
+// unit rig's terrain-less stand-in in place of a solve), and the second tick drives.
+// A settled vehicle (test_drive_forward) takes the command as given.
+// [orig: Entity_UpdateVehiclePhysics @0x48AF00 (the +0x2F2 read @0x48C195, the Flags
+//  test @0x48C1A8, the sign tests and the negation @0x48C1AD..0x48C1C2, the tracked
+//  solve @0x48D0B1); the spawn's 0: Mission_ResetBmsState @0x40DB80 (the Pool_Clear
+//  @0x442060 call @0x40DBC7), Entity_SpawnFromBMSRecord @0x40E9F0 (@0x40EA27),
+//  Entity_RespawnVehicle @0x45FF40 (@0x45FFFD)]
+void test_a_fresh_vehicle_coasts_its_first_tick() {
+    Rig fresh(false);
+    Rig settled;
+    const VehicleTraits t = buggy_traits();
+    for (Rig *r : {&fresh, &settled}) {
+        r->mount();
+        r->drv().net_move_input = 0x08; // moving, dir 0 (forward)
+        r->drv().heading = placed_heading_bam(0);
+    }
+    CHECK(!fresh.veh().veh.grounded);
+    fresh.tick(1, t);
+    settled.tick(1, t);
+    // The negated command's reversal chase: (-27542 - 0 + 16) >> 5 = -861.
+    CHECK(fresh.veh().veh.speed == -861);
+    CHECK(settled.veh().veh.speed == 861);
+    CHECK(fresh.veh().veh.grounded);
+    const int32_t after_brake = fresh.veh().veh.speed;
+    fresh.tick(1, t);
+    CHECK(fresh.veh().veh.speed > after_brake);
 }
 
 // Reverse: dir 4 commands -player_speed/2 -> speed goes negative.
@@ -3015,6 +3052,7 @@ int main() {
 	test_ctrl_register_projection();
     test_boarding_clears_the_scar_ring();
     test_drive_forward();
+    test_a_fresh_vehicle_coasts_its_first_tick();
     test_reverse();
     test_turn_in_place_holds();
     test_steer_toward_driver_yaw();

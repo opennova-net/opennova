@@ -102,6 +102,9 @@ w::Entity hull_seed(w::Vec3 pos, uint8_t team) {
 	v.position = pos;
 	v.health = v.health_max = 3000;
 	v.team = team;
+	// A settled hull: its contact byte as its last solve left it (a spawn holds 0 and a
+	// model-less hull's solve never writes it, D-NET-433).
+	v.veh.grounded = true;
 	return v;
 }
 
