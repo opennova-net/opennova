@@ -270,7 +270,7 @@ void test_cards() {
 	CHECK(v.workspace.document(run.path).logic_folded == std::vector<NodeId>{second->id}, "the second card folded");
 	run.ui.away();
 	text = logged_frame(run.ui);
-	CHECK(text.find("When event 2 has fired, then, after 5.1 s, kill group 2.") != std::string::npos, "folded: its sentence");
+	CHECK(text.find("When event 2 has fired, then") != std::string::npos, "folded: its sentence, a line cut to the card");
 	CHECK(overflowing().empty(), "nothing runs past its room");
 }
 
