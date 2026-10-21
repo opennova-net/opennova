@@ -1581,7 +1581,8 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	# test (Game_ProcessMainFrame @ 0x5263F0: the call @ 0x526774, the test
 	# @ 0x526779; D-NET-NEW-L5-7), so the scrubbed clock moves on under the
 	# pause by the quanta the accumulator drained for that frame (its smoothed
-	# bank, never past the 500 ms clamp: 0.2 minutes of this 24x clock).
+	# bank: a 0.25 s frame drains at least one and at most 30 ticks, 0.192
+	# minutes of this 24x clock; the 500 ms clamp alone would allow 32).
 	assert_gt(env.time_of_day, 2207.0,
 			"a paused host's weather tick still advances the scrubbed clock (D-NET-NEW-L5-7)")
 	assert_lt(env.time_of_day, 2207.2,
