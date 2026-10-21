@@ -4859,7 +4859,7 @@ void test_session_peer_without_authority_applies_no_blast() {
 // channel marks the node it stands in.
 // [orig: Entity_HandleDamageAndTriggerZones @0x407B64..0x407C6B;
 //  Entity_ApplyWeaponDamage's notify @0x4E6B72;
-//  Entity_ApplyVehicleCollisionDamage's notify @0x4E6752]
+//  Entity_ApplyKnifeKillZoneDamage's notify @0x4E6752]
 void test_player_blast_and_knife_run_the_waypoint_tail() {
     for (const bool knife : {false, true}) {
         auto storage = std::make_unique<World>();
@@ -4921,7 +4921,7 @@ void test_player_blast_and_knife_run_the_waypoint_tail() {
 // callback, not only a player body's: an NPC runs the organic class's, which
 // re-arms its think at 62 for both events.
 // [orig: Entity_ApplyWeaponDamage @0x4E6820 (`mov eax, [esi+1C8h]` @0x4E6B63, the
-//  call @0x4E6B72); Entity_ApplyVehicleCollisionDamage @0x4E6620 (@0x4E673A, the
+//  call @0x4E6B72); Entity_ApplyKnifeKillZoneDamage @0x4E6620 (@0x4E673A, the
 //  call @0x4E6752); OrganicClass_HandleEvent @0x407310 (+0x2AC = 62 @0x40732D)]
 void test_npc_blast_and_knife_rearm_the_organic_think() {
     for (const bool knife : {false, true}) {
@@ -5059,7 +5059,7 @@ void test_a_landmine_items_damage_runs_its_think() {
 // swept, and a KnifeBonus class reaches one unit further.
 // [orig: Projectile_ProcessExplosionQueue — jumptable @0x4EADC6 case 1
 //  @0x4EAE0C..0x4EAE34, the item-pool skip @0x4EB337..0x4EB343;
-//  Entity_ApplyVehicleCollisionDamage @0x4E6620]
+//  Entity_ApplyKnifeKillZoneDamage @0x4E6620]
 void test_knife_kill_zone() {
     auto storage = std::make_unique<World>();
     World &w = *storage;
@@ -5112,7 +5112,7 @@ void test_knife_kill_zone() {
     CHECK(v->death_anim_state ==
             compute_death_anim_state(kCollisionDeathBone, 0, kCollisionDeathCause));
     // The knife edge runs the kill accounting [orig:
-    // Entity_ApplyVehicleCollisionDamage @0x4E6620 (the Score_ProcessKillEvent
+    // Entity_ApplyKnifeKillZoneDamage @0x4E6620 (the Score_ProcessKillEvent
     // call @0x4E6773)].
     bool credited = false;
     for (const RoundDeath &death : w.round_sim.deaths)

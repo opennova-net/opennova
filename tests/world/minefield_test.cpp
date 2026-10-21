@@ -378,7 +378,7 @@ void authored_binding() {
 // The think binds the ai_function's lndm event row by whole name, ignoring
 // case; the render binds the render_function's lndm bone row by its first four
 // characters, case kept.
-// [orig: Entity_LookupRenderCallbacks stricmp @0x407dd8, row 'lndm' @0x813198;
+// [orig: EntityDef_LookupClassCallbacks stricmp @0x407dd8, row 'lndm' @0x813198;
 //  EntityDef_InitAllCallbacks @0x4a5ab8..0x4a5af1 -> BoneCallback_LookupByTag
 //  @0x4e32c6, row 'lndm' @0x82cfc0]
 void binding_names() {

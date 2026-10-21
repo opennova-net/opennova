@@ -215,7 +215,7 @@ void organic_class_event(World &world, Entity &body, int event);
 // row's (player_body_row_event, D-NET-348), any other person the organic class's (org0 and org1
 // both bind OrganicClass_HandleEvent), so an NPC's blast (2) or knife (3) re-arms its think at 62.
 // [orig: g_EntityClassEventCallbackTable - org0 @0x813018 / org1 @0x813030 -> OrganicClass_HandleEvent
-//  @0x407310 (the rows' words @0x813020 / @0x813038); Entity_ApplyVehicleCollisionDamage @0x4E6620
+//  @0x407310 (the rows' words @0x813020 / @0x813038); Entity_ApplyKnifeKillZoneDamage @0x4E6620
 //  (the call @0x4E6752); Entity_ApplyWeaponDamage @0x4E6820 (the call @0x4E6B72)]
 void person_class_event(World &world, Entity &body, int event, int32_t flags = 0);
 

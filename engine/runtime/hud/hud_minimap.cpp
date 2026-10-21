@@ -56,7 +56,7 @@ constexpr uint32_t kDepthspinColor = 0xFF16476Bu;
 // [orig: CGfxDevice_SetQuadDiffuse(0) @0x5a6068; SetQuadDepth(flt_7C69F4)
 //  @0x5a6556; dword_272E830 = 0 + flt_7D9F80 z @0x5a659d; the 33-vertex
 //  loop @0x5a6364 region -> DrawIndexedPrimitive @0x5a6645; shader #2 =
-//  sub_676D50(dev, 0, 545) @0x6780AF; pass 0x600000 @0x5a6527]
+//  GfxShader_CreateForTexture(dev, 0, 545) @0x6780AF; pass 0x600000 @0x5a6527]
 // Compass ring spans the map radius x1.25 [orig: flt_7C6F18 @0x59c9df]
 constexpr float kCompassScale = 1.25f;
 // Retail samples only the centered 90% of COMPRING. Cropping five percent

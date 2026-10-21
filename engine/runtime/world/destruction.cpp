@@ -474,7 +474,7 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
 }
 
 // The per-victim callback a queue entry's type installs [orig: the jumptable
-// @ 0x4eadc6 targets — Entity_ApplyWeaponDamage, Entity_ApplyVehicleCollisionDamage,
+// @ 0x4eadc6 targets — Entity_ApplyWeaponDamage, Entity_ApplyKnifeKillZoneDamage,
 // GameEvent_HandleMedicInteraction, nullsub_91].
 enum class KillZoneCallback : uint8_t { None, WeaponDamage, Melee, Medic };
 
@@ -525,7 +525,7 @@ int32_t kz_damage_if_authority(const World &world, const AmmoTableEntry &ammo) {
 }
 
 // The kind-1 (knife) kill-zone callback for one victim [orig:
-// Entity_ApplyVehicleCollisionDamage @ 0x4E6620]. Only a live, non-immune
+// Entity_ApplyKnifeKillZoneDamage @ 0x4E6620]. Only a live, non-immune
 // person other than the source takes it; it deals the ammo's kz_damage in
 // full (no falloff, armor, occupant or NoDie term), latches the knife cause
 // bit and notifies the class callback with event 3.
@@ -573,7 +573,7 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
         d.killer_handle = e.owner.packed;
         d.ammo_index = e.ammo_index;
         d.event_flags = target.cause_flags & 0xF00u;
-        // [orig: Entity_ApplyVehicleCollisionDamage @0x4E6620 (the
+        // [orig: Entity_ApplyKnifeKillZoneDamage @0x4E6620 (the
         // Score_ProcessKillEvent call @0x4E6773)]
         d.kill_event = true;
         world.round_sim.deaths.push_back(d);

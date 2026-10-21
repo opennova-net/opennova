@@ -270,8 +270,8 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // 0x22 create zero theirs, a clone copies a row whose word is 0), so it is 0
     // on every row.
     // [orig: Entity_UpdatePool1Slot @0x4B8DEE..0x4B8E1A (Server_RemoveEntityAndNotify
-    //  @0x4B8E11); NapiNPServerMsg_HandleWeaponSpawn @0x51A020 (the template word
-    //  @0x51A429, the clone @0x51A487); WeaponOverlay_ResetAuthorityFlagByNetId
+    //  @0x4B8E11); NapiNPServerMsg_HandleWeaponDrop @0x51A020 (the template word
+    //  @0x51A429, the clone @0x51A487); Entity_ExpireOwnerWeaponDrops
     //  @0x507F20 (@0x507F62); NetPacket_HandleEntityCreate @0x42EC90 (@0x42ED16);
     //  NapiNPClientMsg_0x00D @0x432C40 (@0x432D23); Entity_SpawnFromBMSRecord
     //  @0x40E9F0 (@0x40EA27)]

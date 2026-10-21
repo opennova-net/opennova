@@ -65,7 +65,7 @@ struct DeathEffectBank {
 // the S2C 0x13 client kill as cb(entity, 4, 0), and the pool think walks as
 // cb(entity, 0, 0) whenever the entity's +0x2AC countdown expires. An empty
 // tag and a tag without a row resolve the "null" row.
-// [orig: Entity_LookupRenderCallbacks @0x407dc0 — stricmp @0x407de2, the
+// [orig: EntityDef_LookupClassCallbacks @0x407dc0 — stricmp @0x407de2, the
 //  row-0 miss default @0x407dee, def+0x138 @0x407e2d; EntityDef_InitAllCallbacks
 //  @0x4a5aa9 ("Null" for an empty tag); the notify sites @0x4e6f93 / @0x42ebf5;
 //  the pool-1 think gate @0x4b8e1b, the pool-2 cohort gate @0x4c2291]

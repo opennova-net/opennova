@@ -67,7 +67,7 @@ void regional_sound_event(World &world, Entity &entity, int phase) {
 // ported death body (kUnwitnessed while its callback is unported). The walk
 // is a whole-string stricmp; a miss and the empty tag take row 0.
 // [orig: g_EntityClassEventCallbackTable @0x813000, count 41 @0x8133D8;
-//  Entity_LookupRenderCallbacks @0x407dc0 — stricmp @0x407de2, the row-0
+//  EntityDef_LookupClassCallbacks @0x407dc0 — stricmp @0x407de2, the row-0
 //  default @0x407dee; EntityDef_InitAllCallbacks @0x4a5aa9 pushes "Null" for
 //  an empty tag]
 ItemDeathClass item_death_class_from_tag(const char *ai_function) {

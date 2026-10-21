@@ -831,7 +831,7 @@ int main() {
     // mixed-case tag matches, the absent tag / a tag without a row (the
     // shipped "gnr1" typo) / the callback-less nade row resolve the null row
     // (0x406FF0, never dies), and bld2 resolves its collapse callback. [orig:
-    // Entity_LookupRenderCallbacks @0x407dc0; EntityDef_InitAllCallbacks @0x4a5aa9]
+    // EntityDef_LookupClassCallbacks @0x407dc0; EntityDef_InitAllCallbacks @0x4a5aa9]
     const auto class_of = [&](int32_t id) {
         const ItemDeathTraits *t = w.tables.item_death_traits.get(id);
         return t != nullptr ? t->death_class : ItemDeathClass::kUnwitnessed;
@@ -927,7 +927,7 @@ int main() {
         CHECK(helo_vt->physics == 0);
         // The ai_function binds the CHel event row in any case; the render
         // tag compares exactly, so `CHel` is not the lowercase chel bone row.
-        // [orig: Entity_LookupRenderCallbacks stricmp @0x407de2;
+        // [orig: EntityDef_LookupClassCallbacks stricmp @0x407de2;
         //  BoneCallback_LookupByTag @0x4e32c6, row 'chel' @0x82cfd0]
         CHECK(helo_vt->brain_class == VehicleBrainClass::Air);
         CHECK(helo_vt->render_family == VehicleRenderFamily::None);
@@ -944,7 +944,7 @@ int main() {
         CHECK(!prefix_tank_vt->amphibian);
         // `cvehX`: the event row is whole-name (no brain), while the render
         // tag is the first four characters (the cveh bone row).
-        // [orig: Entity_LookupRenderCallbacks stricmp @0x407de2; the tag
+        // [orig: EntityDef_LookupClassCallbacks stricmp @0x407de2; the tag
         //  packed from def+0x13C..0x13F @0x4a5ace..0x4a5af1]
         CHECK(prefix_tank_vt->brain_class == VehicleBrainClass::Unset);
         CHECK(prefix_tank_vt->render_family == VehicleRenderFamily::Ground);
