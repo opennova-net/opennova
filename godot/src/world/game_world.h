@@ -305,6 +305,12 @@ public:
 	// menus, so its destroy arm also destroys the session's process globals (the remote
 	// admin's game type, inmatch::RemoteAdminConsoles::route_mission_exit).
 	Ref<PostMissionRoute> post_mission_route(int p_reason);
+	// The mission's session closes ahead of the Post Menu router, which reads the exit the
+	// teardown left: the own client's teardown can remap it through the process latch (a stale
+	// kick turns a listen host's quit into 7 or 9..19, D-NET-NEW-L1-26). Returns that exit, the
+	// requested one when the session stored none (or there is none). The witness is the
+	// engine's (inmatch/host_role.cpp HostRole::close, inmatch/mission_exit.h).
+	int close_session_for_route(int p_requested_reason);
 	// The pre-game menu's cancel (its ABORT_CANCEL, the join choice's BACK): the join
 	// machine's cleanup destroys the session (RemoteAdminConsoles::session_destroyed).
 	void pre_game_cancelled();

@@ -348,6 +348,14 @@ Ref<PostMissionRoute> GameWorld::post_mission_route(int p_reason) {
 	return drive_.post_mission_route(p_reason);
 }
 
+int GameWorld::close_session_for_route(int p_requested_reason) {
+	const Ref<Simulation> sim = get_sim();
+	if (sim.is_null()) return p_requested_reason;
+	sim->close_session();
+	const int stored = sim->get_mission_exit_reason();
+	return stored != 0 ? stored : p_requested_reason;
+}
+
 void GameWorld::pre_game_cancelled() {
 	admin_consoles_.session_destroyed();
 }
@@ -993,6 +1001,8 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("restore_join_expansion", "root"), &GameWorld::restore_join_expansion);
 	ClassDB::bind_method(D_METHOD("release_novaworld_client"), &GameWorld::release_novaworld_client);
 	ClassDB::bind_method(D_METHOD("post_mission_route", "reason"), &GameWorld::post_mission_route);
+	ClassDB::bind_method(D_METHOD("close_session_for_route", "requested_reason"),
+			&GameWorld::close_session_for_route);
 	ClassDB::bind_method(D_METHOD("pre_game_cancelled"), &GameWorld::pre_game_cancelled);
 	ClassDB::bind_method(D_METHOD("player_preview_drawn"), &GameWorld::player_preview_drawn);
 	ClassDB::bind_method(D_METHOD("begin_map_change"), &GameWorld::begin_map_change);
