@@ -182,9 +182,10 @@ func _process(delta: float) -> void:
 func update_menu_frame(delta: float = 0.0) -> void:
 	# The pump, once a frame after the input events (each taken as its message
 	# in _gui_input): hover, the click and the window sounds of the mouse as the
-	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse).
-	if _driver != null and is_visible_in_tree():
-		_driver.pump_mouse()
+	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse). Over a
+	# running mission the game loop's frame runs it instead (pump_screen_pass).
+	if not _in_game:
+		pump_screen_pass()
 	# The blink/marquee clock rides the OS tick like the original's
 	# GetTickCount gate.
 	if _driver != null:
@@ -194,6 +195,25 @@ func update_menu_frame(delta: float = 0.0) -> void:
 	# advance is per-frame-guarded, so a mission's own driver takes precedence.
 	ObjectModel.advance_awake_frame(delta)
 	_consume_expansion_reload_request()
+
+
+## The screen pass's mouse pump: hover, the click and the window sounds of the
+## mouse as the events left it. The menu mode's update runs it once a frame; over
+## a running mission the game loop's frame runs it at its head, ahead of the
+## frame's net frame and tick, so an in-game screen's click (the INGAME
+## CONFIRM_YES's input action 3, a joiner's goodbye) runs before that frame's
+## session sends anything (MainGame._process).
+## retail: Game_ProcessMainFrame @ 0x5263f0 - UI_TeardownScene @ 0x52667b ->
+## CUIScene_EndFrame @ 0x54e668 -> CWnd_ProcessMouseEvent @ 0x647a00, ahead of
+## Client_ProcessNetworkFrame @ 0x526692; Menu_UpdateFrame @ 0x5528a0 in the menus.
+func pump_screen_pass() -> void:
+	if _driver != null and is_visible_in_tree():
+		_driver.pump_mouse()
+
+
+## Whether the shell is the in-game overlay over a kept-loaded mission.
+func is_in_game() -> bool:
+	return _in_game
 
 
 ## MainGame installs its process-lifetime owner before setup; standalone shells

@@ -153,7 +153,8 @@ enum class ExitSite : uint8_t {
 // (a listen host) disconnects that client as a user leave too (request_own_client_disconnect),
 // its goodbye taken where `site` says.
 // The in-game CONFIRM_YES and the HUD quit dialog's yes run it inline, so a joiner's goodbye
-// leaves at the click (the game's quit legs call it ahead of their return to the menu).
+// leaves at the click (the game's quit legs call it ahead of their return to the menu), each
+// playing the action's Exit Mission tone first (the PU_EXIT_CONFIRM trigger set).
 // [orig: Input_HandleActionBinding case 3 @0x49AF26 (g_MissionExitReason = 1),
 //  Sound_PlayInterfaceTriggerSet @0x49AF30 (the shell's tone), the disconnect
 //  @0x49AF38..0x49AF42; UI_RegisterIngameCallbacks @0x555510 -> UI_IngameConfirmExitCommand

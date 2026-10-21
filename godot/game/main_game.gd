@@ -1588,12 +1588,20 @@ func _on_camera_escape() -> void:
 ## click), and the shell returns to the menu (the host's session goes with it)
 ## (engine inmatch/remote_admin.h input_action_exit carries the witness).
 func _on_quit_confirmed() -> void:
-	var audio: MissionAudio = _world.get_mission_audio() if _world != null else null
-	if audio != null:
-		audio.ui_soundset(GameHudPresenter.QUIT_CONFIRM_SOUNDSET)
+	_play_exit_tone()
 	if _world != null and _world.get_sim() != null:
 		_world.get_sim().input_action_exit()
 	_on_return_to_menu.call_deferred()
+
+
+## Input action 3's Exit Mission tone, which the action plays ahead of its
+## disconnect on every path that runs it, the quit dialog's yes and the INGAME
+## CONFIRM_YES alike (engine inmatch/remote_admin.h input_action_exit carries the
+## witness).
+func _play_exit_tone() -> void:
+	var audio: MissionAudio = _world.get_mission_audio() if _world != null else null
+	if audio != null:
+		audio.ui_soundset(GameHudPresenter.QUIT_CONFIRM_SOUNDSET)
 
 
 func _on_command_map_requested() -> void:
@@ -1658,7 +1666,9 @@ func _on_return_to_menu() -> void:
 ## goodbye leaves at the click; then the shell returns to the menu (engine
 ## inmatch/remote_admin.h input_action_exit carries the witness).
 func _on_menu_return_to_menu() -> void:
-	if _state == State.PAUSED and not _world_load_pending and _world != null 			and _world.get_sim() != null:
+	if _state == State.PAUSED and not _world_load_pending and _world != null \
+			and _world.get_sim() != null:
+		_play_exit_tone()
 		_world.get_sim().input_action_exit()
 	_on_return_to_menu()
 
@@ -1892,6 +1902,15 @@ func _process(delta: float) -> void:
 	if _shutdown_prepared:
 		_dev_tools.set_game_play_available(false)
 		return
+	# The game loop's screen pass leads the frame: an in-game menu screen's click
+	# runs ahead of the frame's net frame and tick, so the INGAME CONFIRM_YES's
+	# exit (a joiner's goodbye) leaves before this frame's session sends
+	# (MenuShell.pump_screen_pass carries the witness). The GameWorld leg table is
+	# unchanged; the pump precedes the whole world frame.
+	if _menu_shell != null and _menu_shell.is_in_game():
+		_menu_shell.pump_screen_pass()
+		if _shutdown_prepared:
+			return
 	_refresh_dev_tools_game_state()
 	# The chat line's keyboard capture for this frame's samplers (the witness
 	# rides ControlsModel.set_keyboard_captured).
