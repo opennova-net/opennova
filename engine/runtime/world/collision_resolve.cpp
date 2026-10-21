@@ -657,6 +657,12 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                         kRunOverDeathBone, quadrant, kRunOverDeathCause);
                 ent->last_attacker = p->primary_occupant; // [orig: +0x178 = pusher->occupantEntity]
                 health = 0;
+                // The kill scores here, at once, while the victim exists: the
+                // pusher's occupant over the victim, no class callback between
+                // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (+0x178
+                //  @0x4B39D1, Health = 0 @0x4B39D7, the Score_ProcessKillEvent
+                //  call @0x4B39E2)].
+                world.match.process_kill_event(world, p->primary_occupant, source);
                 RoundDeath d;
                 d.victim = source;
                 d.killer = p->primary_occupant;
@@ -664,9 +670,6 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 d.killer_handle = p->primary_occupant.valid()
                         ? p->primary_occupant.packed : 0xFFFFu;
                 d.event_flags = ent->cause_flags & 0xF00u;
-                // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (the
-                // Score_ProcessKillEvent call @0x4B39E2)]
-                d.kill_event = true;
                 world.round_sim.deaths.push_back(d);
             }
             // The bump sound follows on every peer, killed or not: the

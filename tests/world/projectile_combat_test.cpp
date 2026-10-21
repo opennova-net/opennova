@@ -3565,8 +3565,8 @@ void test_same_projectile_second_player_kill_latches_0x100() {
 // The kill accounting's lethal edge reads the health word BEFORE the hit and
 // scores at the damage site, ahead of the subtraction: a scored victim's kill
 // tallies there (a teamless victim, a killer that is not the local player, out
-// of a session: by others, the team-0 count), so its death record carries no
-// kill event for the death routing to score again; a body an unclamped path
+// of a session: by others, the team-0 count), and its death record carries
+// the transaction alone; a body an unclamped path
 // left below zero is raised back to zero by the clamped hit but restages no
 // death and scores nothing; a lethal hit on a dead-flagged body stages its
 // death and scores nothing. [orig: Projectile_ProcessDamageOnTarget
@@ -3631,8 +3631,6 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
     CHECK(world.registry.get(live)->health == 0);
     CHECK(world.kill_stats.friendly_kills_by_others == 1);
     CHECK(world.round_sim.deaths.size() == 1);
-    if (world.round_sim.deaths.size() == 1)
-        CHECK(!world.round_sim.deaths[0].kill_event);
 
     world.round_sim.deaths.clear();
     const EntityHandle below_zero = spawn_victim(-5, 0);
@@ -3646,8 +3644,6 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
     hit_person(flagged);
     CHECK(world.registry.get(flagged)->health == 0);
     CHECK(world.round_sim.deaths.size() == 1);
-    if (world.round_sim.deaths.size() == 1)
-        CHECK(!world.round_sim.deaths[0].kill_event);
     CHECK(world.kill_stats.friendly_kills_by_others == 1);
 }
 

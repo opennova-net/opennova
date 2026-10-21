@@ -6400,11 +6400,20 @@ struct RunOverRig {
 
 // The kill: the death anim's quadrant reads the victim's displacement minus
 // the hull's, which points back at the hull behind the victim (quadrant 2);
-// the driver takes the credit; the bump plays at the victim and its set is
-// then held. [orig: @0x4B395D..0x4B39A7 (quadrant), @0x4B39C1..0x4B39E2
-// (credit), @0x4B39FD..0x4B3A4E (the sound, Server_TrackEntityInTable 0x1F)]
+// the driver takes the credit, and the kill scores at the resolver, at once
+// (a scored team-2 victim, a driver that is not the local player, out of a
+// session: the by-others enemy count), ahead of any death routing; the bump
+// plays at the victim and its set is then held. [orig: @0x4B395D..0x4B39A7
+// (quadrant), @0x4B39C1..0x4B39E2 (credit and the Score_ProcessKillEvent call
+// @0x4B39E2), @0x4B39FD..0x4B3A4E (the sound, Server_TrackEntityInTable 0x1F);
+// Score_ProcessKillEvent @0x4FD400 - the score word @0x4FD422,
+// Score_TallyKillByOthers @0x4FD300]
 void test_run_over_kills_an_enemy_and_plays_the_bump() {
 	RunOverRig rig;
+	Entity &scored = *rig.world.registry.get(rig.victim);
+	scored.has_item_def = true;
+	scored.item_score = 10;
+	CHECK(!rig.world.rules.mp_session && rig.world.cached.local_player != rig.driver);
 	rig.run_over();
 	CHECK(rig.pos[0] > fx(11.6)); // the hull pushed the victim out
 	CHECK(rig.health == 0);
@@ -6413,14 +6422,11 @@ void test_run_over_kills_an_enemy_and_plays_the_bump() {
 	CHECK(behind != compute_death_anim_state(kRunOverDeathBone, 0, kRunOverDeathCause));
 	CHECK(v != nullptr && v->death_anim_state == behind);
 	CHECK(v != nullptr && v->last_attacker == rig.driver);
-	// The run-over edge runs the kill accounting [orig:
-	// Entity_MovementCollisionResolver @0x4B2BD0 (the Score_ProcessKillEvent
-	// call @0x4B39E2)].
-	bool credited = false;
-	for (const RoundDeath &death : rig.world.round_sim.deaths)
-		if (death.victim == rig.victim && death.killer == rig.driver && death.kill_event)
-			credited = true;
-	CHECK(credited);
+	CHECK(rig.world.kill_stats.enemy_kills_by_others == 1);
+	CHECK(rig.world.round_sim.deaths.size() == 1);
+	if (rig.world.round_sim.deaths.size() == 1)
+		CHECK(rig.world.round_sim.deaths[0].victim == rig.victim &&
+				rig.world.round_sim.deaths[0].killer == rig.driver);
 	const std::vector<ReadyFireSound> sounds = rig.world.out.fire_sounds.drain();
 	CHECK(sounds.size() == 1 && sounds[0].set_name == "V_HULL_BUMP");
 	CHECK(!rig.world.out.fire_sounds.track_trigger("V_HULL_BUMP", 1));

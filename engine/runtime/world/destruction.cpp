@@ -456,19 +456,22 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
     else
         target.health = 0;
     // deathCallback(entity, 2, 0) — the explosion-hit notify [orig: @ 0x4e6f93].
+    const EntityHandle victim = target.handle; // a device's event may remove the item
     destruction_notify_item_damage(world, target, 2, {0, damage});
     if (target.health <= 0 && before > 0) {
-        // Score_ProcessKillEvent equivalence: stage the death for the host's
-        // kill routing (scoring + broadcasts) [orig: @ 0x4e6fb4].
+        // The kill scores here, at once, after the callback, crediting +0x178 as the
+        // callback left it; an item the callback removed scores nothing (its zeroed
+        // words in retail). The record stages the death for the host's broadcasts.
+        // [orig: Entity_ApplyWeaponDamage @0x4E6820 - Health <= 0 @0x4E6F98, before > 0
+        //  @0x4E6FA2, +0x178 @0x4E6FA9, the Score_ProcessKillEvent call @0x4E6FB4]
+        if (const Entity *still = world.registry.get(victim))
+            world.match.process_kill_event(world, still->last_attacker, victim);
         RoundDeath d;
-        d.victim = target.handle;
+        d.victim = victim;
         d.killer = attacker;
-        d.victim_handle = target.handle.packed;
+        d.victim_handle = victim.packed;
         d.killer_handle = attacker.packed;
         d.ammo_index = ammo_index;
-        // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the Score_ProcessKillEvent
-        // call @0x4E6FB4)]
-        d.kill_event = true;
         world.round_sim.deaths.push_back(d);
     }
 }
@@ -561,21 +564,23 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     // @0x407B64..0x407C6B]; an NPC the organic class's, its think re-armed at 62
     // (person_class_event). The AI reaction rides the RoundHit drain, as for a blast.
     world.round_sim.hits.push_back(RoundHit{target.handle, target.last_attacker, damage});
+    const EntityHandle victim = target.handle; // a device row's event may remove the body
     person_class_event(world, target, 3);
     if (collision_kill_fires(before, target.health)) {
-        // The kill event credits the entry's source itself, not the walk
-        // [orig: `mov edx, [ebx+20h]` @0x4E676A -> Score_ProcessKillEvent
-        //  @0x4E6773].
+        // The kill scores here, at once, after the event-3 callback, and credits the
+        // entry's source itself, not the walk; a body the callback removed scores
+        // nothing (its zeroed def word in retail)
+        // [orig: Entity_ApplyKnifeKillZoneDamage @0x4E6620 - the Health re-read
+        //  @0x4E6757, before > 0 @0x4E6761, `mov edx, [ebx+20h]` @0x4E676A, the
+        //  Score_ProcessKillEvent call @0x4E6773].
+        world.match.process_kill_event(world, e.owner, victim);
         RoundDeath d;
-        d.victim = target.handle;
+        d.victim = victim;
         d.killer = e.owner;
-        d.victim_handle = target.handle.packed;
+        d.victim_handle = victim.packed;
         d.killer_handle = e.owner.packed;
         d.ammo_index = e.ammo_index;
         d.event_flags = target.cause_flags & 0xF00u;
-        // [orig: Entity_ApplyKnifeKillZoneDamage @0x4E6620 (the
-        // Score_ProcessKillEvent call @0x4E6773)]
-        d.kill_event = true;
         world.round_sim.deaths.push_back(d);
     }
 }
@@ -698,6 +703,7 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             //  Entity_HandleDamageAndTriggerZones @0x40772f dead return;
             //  @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm; the
             //  tail @0x407B64..0x407C6B].
+            const EntityHandle victim = target.handle; // a device row's event may remove the body
             person_class_event(world, target, 2);
             // Right after that notify, a blast on the LOCAL player arms the red
             // damage vignette + the camera shake and the radar blip, unless the
@@ -710,19 +716,24 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             }
             if (target.health <= 0 && before > 0) {
                 world.script.relations.group(target.group_id).alert = TriggerRelations::kAlertRed;
+                // The kill scores here, at once, after the class callback: the
+                // dead-source walk runs again into +0x178 and the kill credits
+                // it; a body the callback removed scores nothing (its zeroed
+                // def word in retail). The death edge's scorer reads the cause
+                // word as this blast's callback left it.
+                // [orig: Entity_ApplyWeaponDamage @0x4E6820 - the callback
+                //  @0x4E6B72, Health <= 0 @0x4E6B92, before > 0 @0x4E6B9C, the
+                //  walk @0x4E6BA0..0x4E6BE1, the Score_ProcessKillEvent call
+                //  @0x4E6BFE over +0x178 @0x4E6BF0]
+                target.last_attacker = resolve_attacker_chain(world, e.owner);
+                world.match.process_kill_event(world, target.last_attacker, victim);
                 RoundDeath d;
-                d.victim = target.handle;
-                d.killer = attacker;
-                d.victim_handle = target.handle.packed;
-                d.killer_handle = attacker.packed;
+                d.victim = victim;
+                d.killer = target.last_attacker;
+                d.victim_handle = victim.packed;
+                d.killer_handle = target.last_attacker.packed;
                 d.ammo_index = e.ammo_index;
-                // The kill accounting runs here, and the death edge's scorer
-                // reads the cause word as this blast's class callback left it
-                // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the class
-                // callback call @0x4E6B72, the Score_ProcessKillEvent call
-                // @0x4E6BFE)].
                 d.event_flags = target.cause_flags & 0xF00u;
-                d.kill_event = true;
                 world.round_sim.deaths.push_back(d);
             }
         }

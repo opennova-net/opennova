@@ -447,23 +447,12 @@ struct RoundDeath {
     // for the host's classifier. The revive window is suppressed by either
     // 0x400 or 0x800.
     uint32_t event_flags = 0;
-    // True only for a death raised at one of the four damage-pass lethal edges
-    // whose Score_ProcessKillEvent call (the kill accounting: the single-player
-    // tallies and the unit-score event) the death routing runs. The fifth, the
-    // projectile site, scores at once while the victim exists
-    // (Match::process_kill_event), so its records stay false. Scripted,
-    // drowning, carry-limit and admin deaths never reach it.
-    // [orig: Score_ProcessKillEvent @0x4FD400, callers
-    // Entity_MovementCollisionResolver @0x4B39E2, Entity_ApplyKnifeKillZoneDamage
-    // @0x4E6773, Entity_ApplyWeaponDamage @0x4E6BFE / @0x4E6FB4,
-    // Projectile_ProcessDamageOnTarget @0x4E8133]
-    bool kill_event = false;
     // Raised by an org1 body's own death edge: the death transaction (0x13 +
-    // scoring against lastAttacker) without the damage-time SP tally. A
-    // damage-time record for such a body only feeds that tally; its edge
-    // raises the transaction. [orig: Entity_UpdateInfantryAI @0x4B9D4D ->
+    // scoring against lastAttacker), the damage site having run the SP tally.
+    // A damage-time record for such a body raises no transaction; its edge
+    // does. [orig: Entity_UpdateInfantryAI @0x4B9D4D ->
     // Entity_CheckAndProcessDeath @0x51B550; the tally Score_ProcessKillEvent
-    // @0x4FD400 is called only from the damage paths]
+    // @0x4FD400 is called only from the damage paths, at their sites]
     bool motor_edge = false;
     // Nonzero for the record of a transaction the entity update ran inline (a
     // player body's death edge, the explosion queue's medic arm: the host

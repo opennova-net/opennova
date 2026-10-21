@@ -198,14 +198,15 @@ EntityUpdateStaging::~EntityUpdateStaging() {
 // Drain the queued deaths in order. A transaction's record (a player body's
 // edge, the explosion queue's medic arm) releases the sends the transaction
 // staged in the entity update; a damage-time record for
-// a body whose edge raises its transaction only tallies (an org2 body's here,
-// an org1 body's in Server_ProcessPlayerDeath); every other record runs the
+// a body whose edge raises its transaction is dropped (an org2 body's here,
+// an org1 body's in Server_ProcessPlayerDeath: the damage site already scored
+// the kill); every other record runs the
 // transaction. The head's drain then drops any batch whose record is gone.
 // [orig: Game_ProcessMainFrame -- the Server_TickUpdate call @0x5266B6 (its
 //  send pump @0x51E487), then Entity_UpdateAllEntities @0x52674B, whose
 //  player-body edge calls Entity_CheckAndProcessDeath
 //  (Entity_UpdateInfantryPlayerBody @0x4B4CEA); Score_ProcessKillEvent
-//  @0x4FD400 from the damage paths only]
+//  @0x4FD400 from the damage paths only, at their sites]
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world,
 		EdgeDrain edges) {
 	std::vector<world::RoundDeath> queued = std::move(world.round_sim.deaths);
@@ -215,10 +216,8 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world,
 			release_staged_sends(ctx, d.staged_sends);
 			continue;
 		}
-		if (!d.motor_edge && world::org2_owns_death_transaction(world, d.victim)) {
-			if (d.kill_event) world.match.process_kill_event(world, d.killer, d.victim);
+		if (!d.motor_edge && world::org2_owns_death_transaction(world, d.victim))
 			continue;
-		}
 		Server_ProcessPlayerDeath(ctx, world, d);
 	}
 	if (edges != EdgeDrain::HoldAtHead) return;
@@ -242,16 +241,13 @@ namespace {
 // [orig: GameEvent_PlayerDeath @0x516DD0]
 void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 		const world::RoundDeath &d, bool direct) {
-	// The kill accounting of a damage-pass lethal edge (process_kill_event):
-	// scorer event 12 in every session, then the SP tallies behind
-	// world.rules.mp_session (our SP listen server always runs
-	// ctx.is_in_session = 1). [orig: Score_ProcessKillEvent @0x4fd400]
+	// The kill accounting of a damage-pass lethal edge (Match::process_kill_event)
+	// ran at its site, while the victim existed; no record carries it here.
 	// An org1 (NPC) body's transaction is its motor edge's motor_edge record; a
-	// damage-time record for it only tallies and leaves the dead bit to the edge.
+	// damage-time record for it leaves the dead bit to the edge.
 	// [orig: Entity_UpdateInfantryAI @0x4B9D4D -> Entity_CheckAndProcessDeath
 	//  @0x51B550; Score_ProcessKillEvent @0x4FD400 is called from damage paths only]
 	if (!d.motor_edge && world::org1_owns_death_transaction(world, d.victim)) {
-		if (d.kill_event) world.match.process_kill_event(world, d.killer, d.victim);
 		if (world::Entity *victim_entity = world.registry.get(d.victim))
 			victim_entity->alive = false; // health is already <= 0
 		return;
@@ -524,9 +520,6 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 			}
 		}
 	}
-
-	if (!d.motor_edge && !direct && d.kill_event)
-		world.match.process_kill_event(world, d.killer, d.victim);
 
 	// The killer-less arm names the victim its own last attacker, which a
 	// later medic test and a later edge's transaction read.

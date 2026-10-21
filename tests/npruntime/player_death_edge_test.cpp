@@ -245,8 +245,8 @@ void test_two_bodies_die_in_slot_order() {
 			(std::vector<uint16_t>{f.players[1].packed, f.players[0].packed}));
 }
 
-// A damage-time record for the body only tallies: the edge raises the one
-// transaction, and the kill is credited once.
+// A damage-time record for the body raises nothing (its site scored the kill):
+// the edge raises the one transaction, and the kill is credited once.
 void test_damage_record_only_tallies() {
 	Fixture f;
 	f.hit(0, 1);
@@ -255,7 +255,6 @@ void test_damage_record_only_tallies() {
 	d.killer = f.players[1];
 	d.victim_handle = f.players[0].packed;
 	d.killer_handle = f.players[1].packed;
-	d.kill_event = true;
 	f.world.round_sim.deaths.push_back(d);
 	inmatch::Server_TickUpdate(f.ctx);
 	inmatch::Server_TickUpdate(f.ctx);

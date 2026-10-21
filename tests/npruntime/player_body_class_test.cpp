@@ -738,8 +738,6 @@ void test_the_projectile_kill_runs_ahead_of_the_subtraction() {
 		const w::Entity *hit = r.world->registry.get(victim);
 		CHECK(hit != nullptr && hit->health == -7);
 		CHECK(r.world->round_sim.deaths.size() == 1);
-		if (r.world->round_sim.deaths.size() == 1)
-			CHECK(!r.world->round_sim.deaths[0].kill_event); // the site scored
 	}
 	for (const bool listen : {false, true}) {
 		Rig r;

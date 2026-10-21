@@ -680,7 +680,13 @@ void test_explosion_cone_wrap() {
 
 // Kill credit resolves a dead intermediary's last-attacker chain before the
 // pool sweeps. Every emitted hit/death record must use that resolved owner,
-// for both organic and non-person victims.
+// for both organic and non-person victims, and both lethal blast edges score
+// the kill at their sites, at once (two scored team-0 victims, a resolved
+// attacker that is not the local player, out of a session: the by-others
+// team-0 count) [orig: Entity_ApplyWeaponDamage @0x4E6820 - the walk
+// @0x4E6BA0..0x4E6BE1 and the Score_ProcessKillEvent call @0x4E6BFE (person),
+// +0x178 @0x4E6FA9 and the call @0x4E6FB4 (item); Score_TallyKillByOthers
+// @0x4FD300].
 void test_explosion_resolves_attacker_chain_for_events() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
@@ -709,6 +715,8 @@ void test_explosion_resolves_attacker_chain_for_events() {
     organic_seed.health_max = 40;
     organic_seed.position = Vec3{};
     organic_seed.bound_radius = 0.6f;
+    organic_seed.has_item_def = true;
+    organic_seed.item_score = 10; // the ItemDef `score` word the kill accounting reads
     const EntityHandle organic = w.registry.spawn(0, organic_seed);
 
     Entity item_seed;
@@ -719,6 +727,8 @@ void test_explosion_resolves_attacker_chain_for_events() {
     item_seed.health_max = 40;
     item_seed.position = Vec3{1.0f, 0.0f, 0.0f};
     item_seed.bound_radius = 1.0f;
+    item_seed.has_item_def = true;
+    item_seed.item_score = 10;
     const EntityHandle item = w.registry.spawn(1, item_seed);
     w.tables.item_death_traits.set(500, barrel_traits());
 
@@ -736,18 +746,19 @@ void test_explosion_resolves_attacker_chain_for_events() {
     for (const RoundHit &hit : w.round_sim.hits)
         if (hit.victim == organic && hit.shooter == live_attacker)
             organic_hit_resolved = true;
-    // Both lethal blast edges run the kill accounting
-    // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the Score_ProcessKillEvent
-    // calls @0x4E6BFE person, @0x4E6FB4 item)].
     for (const RoundDeath &death : w.round_sim.deaths) {
-        if (death.victim == organic && death.killer == live_attacker && death.kill_event)
+        if (death.victim == organic && death.killer == live_attacker)
             organic_death_resolved = true;
-        if (death.victim == item && death.killer == live_attacker && death.kill_event)
+        if (death.victim == item && death.killer == live_attacker)
             item_death_resolved = true;
     }
     CHECK(organic_hit_resolved);
     CHECK(organic_death_resolved);
     CHECK(item_death_resolved);
+    CHECK(w.registry.get(organic)->last_attacker == live_attacker);
+    CHECK(w.registry.get(item)->last_attacker == live_attacker);
+    CHECK(!w.rules.mp_session && w.cached.local_player != live_attacker);
+    CHECK(w.kill_stats.friendly_kills_by_others == 2);
 }
 
 // The destructible death chain: health 0 -> Flags|=6 + events + the kz chain
@@ -5055,11 +5066,14 @@ void test_a_landmine_items_damage_runs_its_think() {
 
 // The kind-1 (knife) kill zone: a live person other than the source inside
 // kz_maxradius takes the full kz_damage as a signed-word subtraction with the
-// knife cause bit, and the kill event credits the source; items are never
-// swept, and a KnifeBonus class reaches one unit further.
+// knife cause bit, and the kill event credits the source, scored at the site
+// at once (a scored team-2 victim, a source that is not the local player, out
+// of a session: the by-others enemy count); items are never swept, and a
+// KnifeBonus class reaches one unit further.
 // [orig: Projectile_ProcessExplosionQueue — jumptable @0x4EADC6 case 1
 //  @0x4EAE0C..0x4EAE34, the item-pool skip @0x4EB337..0x4EB343;
-//  Entity_ApplyKnifeKillZoneDamage @0x4E6620]
+//  Entity_ApplyKnifeKillZoneDamage @0x4E6620 (the Score_ProcessKillEvent call
+//  @0x4E6773); Score_TallyKillByOthers @0x4FD300]
 void test_knife_kill_zone() {
     auto storage = std::make_unique<World>();
     World &w = *storage;
@@ -5084,6 +5098,7 @@ void test_knife_kill_zone() {
     const EntityHandle attacker = w.registry.spawn(0, attacker_seed);
     Entity victim_seed = attacker_seed;
     victim_seed.team = 2;
+    victim_seed.item_score = 10; // the ItemDef `score` word the kill accounting reads
     victim_seed.position = Vec3{1.0f, 0.0f, 0.0f};
     victim_seed.heading = placed_heading_bam(270); // engine heading 0x80000000: facing the attacker
     const EntityHandle victim = w.registry.spawn(0, victim_seed);
@@ -5111,13 +5126,12 @@ void test_knife_kill_zone() {
     CHECK(v->last_attacker == attacker);
     CHECK(v->death_anim_state ==
             compute_death_anim_state(kCollisionDeathBone, 0, kCollisionDeathCause));
-    // The knife edge runs the kill accounting [orig:
-    // Entity_ApplyKnifeKillZoneDamage @0x4E6620 (the Score_ProcessKillEvent
-    // call @0x4E6773)].
+    CHECK(!w.rules.mp_session && w.cached.local_player != attacker);
+    CHECK(w.kill_stats.enemy_kills_by_others == 1);
     bool credited = false;
     for (const RoundDeath &death : w.round_sim.deaths)
         if (death.victim == victim && death.killer == attacker &&
-                death.event_flags == kDamageFlagCollision && death.kill_event)
+                death.event_flags == kDamageFlagCollision)
             credited = true;
     CHECK(credited);
     CHECK(w.registry.get(attacker)->health == 100);
@@ -5127,6 +5141,8 @@ void test_knife_kill_zone() {
     run_blast(w, e);
     CHECK(w.registry.get(far_victim)->health == -50);
     CHECK(w.registry.get(item)->health == 120);
+    // The second cut kills only the far victim: the first sits below zero.
+    CHECK(w.kill_stats.enemy_kills_by_others == 2);
 }
 
 // The knife's zone gates its cone apart from every other type's: in a session

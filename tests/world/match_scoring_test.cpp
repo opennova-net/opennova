@@ -271,6 +271,23 @@ void test_kill_event_adds_the_victim_score() {
     CHECK(dm->match.team_stats(1)[MatchStats::kUnitScore] == 0);
 }
 
+// The kill accounting returns off the authority: a peer that reaches a lethal
+// edge (its own knife entry) scores nothing, the authority scores the victim's
+// word. [orig: Score_ProcessKillEvent @0x4FD400 - `cmp g_NapiNPCtx.is_authority,
+//  0` @0x4FD412, ahead of the event-12 call @0x4FD438]
+void test_kill_event_scores_on_the_authority_alone() {
+    auto world = make_world(gt::kTeamDeathmatch);
+    const EntityHandle ace = player(*world, 0, 1);
+    const EntityHandle rifleman = npc(*world, 2);
+    world->registry.get(rifleman)->item_score = 25;
+    world->ai.is_authority = false;
+    world->match.process_kill_event(*world, ace, rifleman);
+    CHECK(world->match.player(ace)->stats[MatchStats::kUnitScore] == 0);
+    world->ai.is_authority = true;
+    world->match.process_kill_event(*world, ace, rifleman);
+    CHECK(world->match.player(ace)->stats[MatchStats::kUnitScore] == 25);
+}
+
 // Scorer event 1: one shot plus the FIRE value per accepted round, with the
 // team-mode mirror; a spectator's round scores nothing.
 // [orig: Server_ClientFiredRound @0x50BAA0 (the event-1 call @0x50C727);
@@ -704,6 +721,7 @@ int main() {
     test_npc_person_victims_score_their_killer();
     test_non_player_killer_credits_its_link();
     test_kill_event_adds_the_victim_score();
+    test_kill_event_scores_on_the_authority_alone();
     test_shot_scores_fire();
     test_enemy_player_kill_bonuses();
     test_revive_scores_medicsave();

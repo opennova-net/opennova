@@ -1166,9 +1166,10 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
     add_team_points(killer_team, score_value(37));
 }
 
-// Only the damage-pass lethal edges call Score_ProcessKillEvent (the
-// projectile site at once, the others through RoundDeath::kill_event), and it
-// returns without a killer or when the VICTIM's ItemDef `score` word is zero, so a Player (no score on any Player
+// Only the damage-pass lethal edges call Score_ProcessKillEvent, each at its
+// site while the victim exists, and it returns without a killer, off the
+// authority (a peer's own knife entry), or when the VICTIM's ItemDef `score`
+// word is zero, so a Player (no score on any Player
 // definition) never enters it, not even for a self-kill. Scorer event 12 runs
 // in every session; the SP tallies (the epilog score screen's counts and the
 // WAC bluekills/greenkills builtins) only outside one, by the local player
@@ -1183,7 +1184,8 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
 // bucket (victim+534 -> 0xC846A0, unreachable behind the score gate) are
 // unmodeled: nothing live reads them (world.h MissionKillStats; D-AI-10;
 // world-wac-ai-re §20.4).
-// [orig: Score_ProcessKillEvent @0x4FD400 — killer @0x4FD405, target def
+// [orig: Score_ProcessKillEvent @0x4FD400 — killer @0x4FD405, victim @0x4FD40E,
+//  `cmp g_NapiNPCtx.is_authority, 0` @0x4FD412, target def
 //  @0x4FD41E, `cmp word ptr [eax+194h], 0` @0x4FD422, event 12 @0x4FD438, the
 //  session test @0x4FD440..0x4FD447, `cmp edi, g_LocalPlayerEntity` @0x4FD449;
 //  Score_TallyKillByLocalPlayer @0x4FD160 (persons @0x4FD1F6 / @0x4FD213; the
@@ -1193,7 +1195,8 @@ void Match::process_kill_event(World &world, EntityHandle killer, EntityHandle v
     if (!killer.valid())
         return;
     const Entity *victim = world.registry.get(victim_handle);
-    if (victim == nullptr || !victim->has_item_def || victim->item_score == 0)
+    if (victim == nullptr || !world.ai.is_authority || !victim->has_item_def ||
+            victim->item_score == 0)
         return;
     record_kill_event(world, killer, victim_handle);
     if (world.rules.mp_session)

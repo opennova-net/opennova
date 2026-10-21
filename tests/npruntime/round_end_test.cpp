@@ -72,13 +72,13 @@ void push_death(w::World &world, w::EntityHandle victim, w::EntityHandle killer)
 	world.round_sim.deaths.push_back(d);
 }
 
-// A death raised at a damage-pass lethal edge whose kill accounting the death
-// routing runs (the projectile site scores at once and raises none)
+// A death raised at a damage-pass lethal edge: the edge scores the kill at its
+// site, at once, then stages the death record for the routing
 // [orig: Score_ProcessKillEvent @0x4FD400 from Entity_ApplyWeaponDamage
 // @0x4E6BFE].
 void push_kill(w::World &world, w::EntityHandle victim, w::EntityHandle killer) {
+	world.match.process_kill_event(world, killer, victim);
 	push_death(world, victim, killer);
-	world.round_sim.deaths.back().kill_event = true;
 }
 
 w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team,
@@ -1507,8 +1507,8 @@ int entity_death_records(ns::LoopbackChannel &wire, w::EntityHandle victim) {
 }
 
 // An org1 (NPC) body's death transaction is its own motor edge's, once per
-// life. A damage-time record only feeds the SP kill tally; the edge raises the
-// one 0x13, a script health write with no record reaches it too, and a
+// life. The damage site feeds the SP kill tally and its record raises nothing;
+// the edge raises the one 0x13, a script health write with no record reaches it too, and a
 // scripted kill adds no second one. An edge record still fans after its corpse
 // leg removed the row in the same pass, and never re-latches a row it no
 // longer owns. [orig: Entity_UpdateInfantryAI @0x4B9D44..0x4B9D4D ->
@@ -1577,7 +1577,7 @@ void test_org1_death_transaction_is_the_motor_edge() {
 	run_ticks(2);
 	peer_wire.clear();
 
-	// 1. A killing hit's record tallies once; the edge's own record raises the
+	// 1. A killing hit tallies once at its site; the edge's own record raises the
 	// one 0x13 and latches the dead bit.
 	const w::EntityHandle shot = spawn_org1(300, 500);
 	world.registry.get(shot)->health = 0;
@@ -1587,7 +1587,7 @@ void test_org1_death_transaction_is_the_motor_edge() {
 	expect(entity_death_records(peer_wire, shot) == 1,
 			"org1 kill: one 0x13, raised by the motor edge");
 	expect(world.kill_stats.enemy_kills_by_player() == 1,
-			"org1 kill: the damage-time record tallies once, the edge record never");
+			"org1 kill: the site tallies once, the edge record never");
 	expect(dead_bit(shot), "org1 kill: the edge latches the dead bit");
 
 	// 2. A script health write raises no record; the edge still sends the 0x13.
