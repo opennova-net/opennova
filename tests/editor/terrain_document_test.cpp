@@ -407,9 +407,10 @@ int test_source_issues() {
 		            blocking[0].severity == DiagnosticSeverity::Error);
 		auto scale = load(head + "polytrn_scale 128\r\n");
 		TEST_EXPECT(scale && scale->blocked() && has_issue(*scale, 4, true, "multiplayer"));
-		// polytrn_depthmap: an arm reads it (formats/trn trn_parser_key), the record does not hold it.
+		// polytrn_depthmap: stored and never read back, so the file stays editable and a save leaves it out.
 		auto depth = load(head + "polytrn_depthmap d.raw\r\n");
-		TEST_EXPECT(depth && depth->blocked() && has_issue(*depth, 4, true, "polytrn_depthmap"));
+		TEST_EXPECT(depth && !depth->blocked() && has_issue(*depth, 4, false, "never reads it back"));
+		TEST_EXPECT(depth && depth->serialize().text.find("polytrn_depthmap") == std::string::npos);
 		// horizon: no arm reads it and the record does not keep it (D-TERRAIN-20): skipped, as any unknown key.
 		auto horizon = load(head + "horizon 0\r\n");
 		TEST_EXPECT(horizon && !horizon->blocked() && has_issue(*horizon, 4, false, "skip 'horizon'"));
@@ -418,7 +419,7 @@ int test_source_issues() {
 	}
 	std::printf("source issues: a row before the width, short, wide; a key skipped, written again; a murk past 0.99; a "
 	            "block's codes past four, a line no arm reads; a fifth block; a cut last line; LF line ends restored; an "
-	            "environment keyword, polytrn_scale, polytrn_depthmap; horizon skipped\n");
+	            "environment keyword, polytrn_scale; polytrn_depthmap and horizon skipped\n");
 	return 0;
 }
 

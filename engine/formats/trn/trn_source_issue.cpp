@@ -148,8 +148,8 @@ std::vector<TrnSourceIssue> trn_source_issues(const std::string &text) {
 			return;
 		}
 		if (key == "polytrn_depthmap") {
-			// An arm reads it [orig: Terrain_ParseConfigCallback @ 0x60F81D]; the record (TrnConfig) does not hold it.
-			issue(TrnSourceRule::DepthmapKey, true, line, key);
+			// Stored and never read back (TrnSourceRule::DepthmapKey): the record (TrnConfig) need not hold it.
+			issue(TrnSourceRule::DepthmapKey, false, line, key);
 			return;
 		}
 		if (!terrain_reader_key(key) && !held_environment_key(key)) {

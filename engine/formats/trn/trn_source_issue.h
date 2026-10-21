@@ -61,8 +61,9 @@ enum class TrnSourceRule : uint8_t {
 	// polytrn_scale: read for the multiplayer file check alone, which the record does not hold [orig:
 	// Terrain_LoadEnvironmentConfig @ 0x61096D, its default; @ 0x60C5FD feeds the CRC]. Blocks.
 	ScaleKey,
-	// polytrn_depthmap: an arm reads it [orig: Terrain_ParseConfigCallback @ 0x60F81D]; the record does not hold
-	// it. Blocks.
+	// polytrn_depthmap: the arm copies it into the config's first field [orig: Terrain_ParseConfigCallback
+	// @ 0x60F81D..0x60F83D], which nothing reads back: the terrain's load copies the config whole [orig:
+	// PolyTrn_LoadTerrainConfig @ 0x60E404] and no instruction reads the copy's first field. A save leaves it out.
 	DepthmapKey,
 	// A keyword no reader reads (`token` as written): skipped, and a save leaves it out.
 	Skipped,
