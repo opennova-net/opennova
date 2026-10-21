@@ -759,10 +759,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				availability.requester_in_armory_zone =
 						((loadout_player->flags | loadout_player->engine_flags) &
 						 world::kEntityFlagArmoryZone) != 0;
+				// The slot holding the local player grants into the local table
+				// (D-NET-695) [orig: Player_InitPlayer @0x4E18A8..0x4E18C1].
+				world::LocalPlayer *local = own_slot_local_player(conn, *world);
 				const GrantedWeaponLoadout grant =
 						grant_weapon_loadout(req, config.class_allow_mask, armory, conn,
 								world::entity_ammo_seat(*world, *loadout_player),
-								world->rules.sniper_zoom_fill, &availability);
+								world->rules.sniper_zoom_fill, &availability,
+								local != nullptr ? &local->inventory : nullptr);
 				// The kept entries become the slot's loadout buffer, which every
 				// deploy rebuilds the kit from (D-NET-378) [orig: @0x515A5A..0x515A7E,
 				// @0x515CBD..0x515D83].
@@ -775,8 +779,24 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				conn.slot_class = grant.reply.avatar_class;
 				conn.player_list_type = grant.reply.avatar_class;
 				write_ammo_damage_classes(conn, grant);
-				apply_granted_loadout(conn, *loadout_player, grant, armory != nullptr);
-				if (armory != nullptr) {
+				apply_granted_loadout(conn, *loadout_player, grant, armory != nullptr, local);
+				if (armory != nullptr && local != nullptr) {
+					// The local player's EquippedSlot is the local table's equipped slot:
+					// the same store and clear.
+					const world::WeaponInventorySlot *submitted =
+							local->inventory.slot(static_cast<int32_t>(
+									req.weapon_slot_index <= 0x7FFFFFFFu ? req.weapon_slot_index
+																		  : 0x7FFFFFFFu));
+					const world::WeaponTableEntry *submitted_def =
+							submitted != nullptr && submitted->adm_index >= 0
+							? armory->by_index(static_cast<uint8_t>(submitted->adm_index))
+							: nullptr;
+					local->inventory.equipped_combo =
+							submitted_def != nullptr &&
+									(submitted_def->flags2 & world::weapon_flag2::kNoSelect) == 0
+							? static_cast<int32_t>(req.weapon_slot_index)
+							: -1;
+				} else if (armory != nullptr) {
 					// The accept points the entity's EquippedSlot at the submitted slot and
 					// clears it when that slot holds no def or a NoSelect one (flags2 bit 0).
 					// [orig: NapiNPServerMsg_HandlePlayerLoadout - the store @0x515F52..0x515F62,
@@ -799,10 +819,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						equipped.adm = submitted->second.adm_index;
 					}
 				}
-				// The list send, its own legs ahead of its rows [orig: the
-				//  Server_SendWeaponSlotListToPlayer call @0x515F95].
-				weapon_slot_list_own_legs(conn);
-				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				loadout_player->player_class = grant.reply.avatar_class;
@@ -814,6 +830,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// The impact damage's copy of the slot's damage-class bytes (D-NET-508).
 				loadout_player->ammo_damage_class.assign(conn.ammo_damage_classes.begin(),
 						conn.ammo_damage_classes.end());
+				// The list send, last of the accept's slot writes, with its own legs (the
+				// local select and mount for the slot holding the local player) [orig: the
+				//  Server_SendWeaponSlotListToPlayer call @0x515F95].
+				weapon_slot_list_own_legs(conn, world);
+				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
 				// The accept re-arms the armory cooldown unless the pre-round latch is
 				// set, then clears the latch, class 0 included. [orig: @0x515b96..0x515bb3,
 				//  `if (!(byte & 2)) slot[89] = armoryReuseTime_A38; byte &= 0xFD`]

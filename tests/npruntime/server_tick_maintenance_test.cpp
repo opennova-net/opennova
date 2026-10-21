@@ -2399,12 +2399,15 @@ bool check_deploy_rebuilds_an_unsubmitted_slot_empty() {
 			"an unsubmitted slot's deploy leaves no row and no pool");
 }
 
-// The listen host's own slot is kept apart from its local inventory (D-NET-479)
-// and takes no 0x2F: its deploy leaves the kit, its carry bits included, and the
-// slot's rows, where an empty rebuild would strip them.
-// [orig: Server_DeployPlayer @0x5178E1 over the host's slot, whose buffer is
-//  g_SpawnLoadoutBuffer (Server_InitAllPlayerEntitiesForRound @0x516BCA..0x516BE3)]
-bool check_deploy_leaves_the_listen_hosts_kit() {
+// The listen host's own slot table is its local table (D-NET-479): its deploy rebuilds
+// the local table from the slot's loadout buffer (the round init's seed of the spawn
+// buffer, or its accepts' kept entries), the rifle's 3 clips (90 rounds, one 30-round clip
+// drawn) and the fill's carry bits; the body's own rows, which the local player never
+// reads, are left alone.
+// [orig: Player_InitPlayer @0x4E18A8..0x4E18C1; Server_DeployPlayer @0x5178E1 ->
+//  PlayerSlot_InitWeaponsFromLoadout @0x515550 - the fill @0x515571..0x515581 (its carry
+//  clear WeaponSlotTable_LoadAllFromDefs @0x541503), the counts @0x5156C1..0x5156EA]
+bool check_deploy_rebuilds_the_listen_hosts_local_table() {
 	w::World world;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
@@ -2426,17 +2429,23 @@ bool check_deploy_leaves_the_listen_hosts_kit() {
 	auto &roster = ctx.np_protocol.connection_list;
 	roster.push_back(make_seeded_conn(0, 1, nullptr, ns::TransportMode::Client, host, true));
 	inmatch::NapiNPConnection &conn = roster[0];
+	conn.slot_class = 8;
+	conn.reply.loadout_buffer.entries.push_back(LoadoutSubmitEntry{5, 3, 0xFF, 0});
+	conn.reply.loadout_buffer_set = true;
 	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30};
 	w::Entity *body = world.registry.get(host);
-	body->carry_flags |= 0x18u; // the local kit's armor and parachute
+	body->carry_flags |= 0x18u; // the previous kit's armor and parachute
 	body->flags |= w::kEntityFlagDead;
 	body->alive = false;
 	body->health = 0;
 	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
 	body = world.registry.get(host);
-	return expect(body != nullptr && (body->carry_flags & 0x18u) == 0x18u &&
-					slots_of(world, conn).size() == 1,
-			"the listen host's deploy keeps its kit's carry bits and rows");
+	const w::WeaponInventorySlot *rifle = local.inventory.slot(3 * 65 + 2);
+	return expect(body != nullptr && (body->carry_flags & 0x18u) == 0u &&
+					local.inventory_valid && rifle != nullptr && rifle->adm_index == 5 &&
+					rifle->clip == 30 && local.inventory.pools[0] == 60 &&
+					slots_of(world, conn).size() == 1 && conn.reply.ammo_pools[0] == 0,
+			"the listen host's deploy rebuilds its local table from the slot's buffer");
 }
 
 // The deploy's pool leg looks the buffered name up again: of two weapons sharing a name,
@@ -3711,7 +3720,7 @@ int main() {
 	ok = check_kit_weight_reads_the_seat() && ok;
 	ok = check_deploy_rebuilds_the_kit_from_the_loadout_buffer() && ok;
 	ok = check_deploy_rebuilds_an_unsubmitted_slot_empty() && ok;
-	ok = check_deploy_leaves_the_listen_hosts_kit() && ok;
+	ok = check_deploy_rebuilds_the_listen_hosts_local_table() && ok;
 	ok = check_deploy_pools_follow_the_buffered_name() && ok;
 	ok = check_round_init_rebuilds_the_kept_kit() && ok;
 	ok = check_loadout_damage_class_bytes() && ok;

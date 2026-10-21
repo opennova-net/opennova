@@ -332,11 +332,11 @@ void init_all_player_entities_for_round(HostRole &role) {
 		// stamps @0x516B6C..0x516C20].
 		const world::EntityHandle h =
 				Server_BuildPlayerInfoAndAdd(ctx, *conn, world, /*round_init=*/true);
-		// Then the slot's table, rebuilt from its kept buffer. The listen host's
-		// own slot is its local inventory, which the local kit rebuilds (retail
-		// copies the host's g_SpawnLoadoutBuffer into it first, @0x516BCA..0x516BE3).
-		// [orig: @0x516BF3..0x516C20]
-		if (h.valid() && h != world.cached.local_player)
+		// Then the slot's table, rebuilt from its kept buffer; the authority's own
+		// slot (+5) first takes the spawn buffer into its buffer, and its table is
+		// the local one (D-NET-695) [orig: @0x516BC4..0x516BE3, @0x516BF3..0x516C20].
+		PlayerSlot_SeedOwnLoadoutBuffer(*conn, world);
+		if (h.valid())
 			if (world::Entity *player = world.registry.get(h))
 				PlayerSlot_RebuildKitForRound(*conn, world, *player);
 	}

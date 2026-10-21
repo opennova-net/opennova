@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -19,6 +20,7 @@
 
 namespace opennova::world {
 class World;
+class LocalPlayer;
 struct Entity;
 struct WeaponTable;
 }
@@ -77,7 +79,24 @@ struct GrantedWeaponLoadout {
 	// [orig: NapiNPServerMsg_HandlePlayerLoadout - the kept entry @0x515A5A..0x515A7E,
 	//  the buffer @0x515CBD..0x515D83]
 	std::vector<LoadoutSubmitEntry> kept_entries;
+	// The rebuilt table itself, its pools and buckets and the fill's carry bits: the
+	// slot's own table, which for the authority's local player is the local one
+	// (own_slot_local_player). On the heap: the 780 rows outweigh a test main's stack.
+	std::shared_ptr<const world::WeaponInventory> table;
 };
+
+// The local player whose weapon table is this slot's own, or null: on the authority
+// Player_InitPlayer points the local weapon table (g_WeaponSlotArrayBase) at the local
+// player's slot table (Entity_GetWeaponSlotsPtr, slot+0x1D0), so every slot-table
+// write for the slot holding the local player (the 0x2F accept's grant, the deploy's
+// and the round init's rebuilds) writes the local table (world::LocalPlayer::inventory,
+// its pools and buckets too, which the authority reads through the slot:
+// Entity_GetScoreValueBySlotType's validated slot @0x5407A4..0x5407B3) (D-NET-695,
+// D-NET-479). Null for every other slot, whose rows are its entity's
+// (world::Entity::weapon_slots) and whose pools are NapiNPConnection::reply's.
+// [orig: Player_InitPlayer @0x4E15F0 - the authority test @0x4E18A8, the call
+//  @0x4E18B7, the store @0x4E18C1]
+world::LocalPlayer *own_slot_local_player(const NapiNPConnection &conn, world::World &world);
 
 // The accept's availability gate over the host's weapon table (g_ArmoryWeaponAvailability,
 // 255 dwords, every entry 1 unless the admin's WEAPON SET restricted it): an entry at 0
@@ -103,14 +122,16 @@ bool loadout_envelope_accepted(const LoadoutSubmit &req, uint32_t game_type);
 // The rebuild starts from the slot's pools and buckets and reads its revive latch, team
 // and the entity's seat (world::entity_ammo_seat); the fills' sniper lock reads the
 // fill's zoom value (World::rules.sniper_zoom_fill). A null/empty `table` is the
-// resource-less request-echo fallback.
+// resource-less request-echo fallback. `local_table` is the slot's table when it is the
+// local one (own_slot_local_player), whose pools and buckets the rebuild starts from.
 GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 										  uint16_t class_allow_mask,
 										  const world::WeaponTable *table,
 										  const NapiNPConnection &conn,
 										  const world::WeaponAmmoSeat &seat,
 										  bool allow_sniper_scope_zoom,
-										  const LoadoutAvailability *availability = nullptr);
+										  const LoadoutAvailability *availability = nullptr,
+										  const world::WeaponInventory *local_table = nullptr);
 
 
 // The accept's damage-class stores onto the slot's table (NapiNPConnection::
@@ -125,11 +146,16 @@ void write_ammo_damage_classes(NapiNPConnection &conn, const GrantedWeaponLoadou
 // authority ammo pools and loaded-round buckets, and (with a weapon table) the
 // player entity's own slot rows (world::Entity::weapon_slots) — every granted combo
 // with its drawn clip replaces the previous rows. A table-less host keeps its rows.
+// For the slot holding the local player (`local` non-null) the rebuilt table, its
+// pools, buckets and the fill's carry bits are the local table's instead
+// (own_slot_local_player); the selection words (EquippedSlot, the pending and the
+// selected slot) are the entity's and stay.
 // [orig: WeaponSlotPool_ResetAllEntries + WeaponSlotTable_LoadAllFromDefs +
 //  WeaponSlots_RecalculateAmmoFromCapacity, NapiNPServerMsg_HandlePlayerLoadout
 //  @0x515DB5..0x515F4D and PlayerSlot_InitWeaponsFromLoadout @0x515571..0x51577C]
 void apply_granted_loadout(NapiNPConnection &conn, world::Entity &player,
-                           const GrantedWeaponLoadout &grant, bool rebuild_rows);
+                           const GrantedWeaponLoadout &grant, bool rebuild_rows,
+                           world::LocalPlayer *local = nullptr);
 
 // The deploy's kit rebuild: the slot's weapon table, ammo pools and clips rebuilt
 // from its loadout buffer (the last accepted 0x2F's entries and counts under the
@@ -156,15 +182,29 @@ void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
 //  @0x5025A8..0x5025DB, the header byte @0x5025E0..0x5025E6]
 uint8_t current_player_class(const NapiNPConnection &conn);
 
-// Every weapon-slot list send's own legs, ahead of its rows: the slot's PlayerType set to
-// its class, and for the authority's own slot (its local byte +5: the listen host's own
-// connection) the class stored into the profile's class for the slot team's side
-// (g_CharClassTeam1 for team 1 or 3, else g_CharClassTeam2: the own connection's
-// char_vars.char_class[0 / 1], which Player_InitPlayer re-stamps the own body's class
-// from at the next mission start).
+// Every weapon-slot list send's own legs: the slot's PlayerType set to its class; for
+// the authority's own slot (its local byte +5: the listen host's own connection) its
+// loadout buffer copied into the spawn buffer (g_SpawnLoadoutBuffer: the local player's
+// LocalPlayerLoadout::spawn_kit) and its class stored into the profile's class for the
+// slot team's side (g_CharClassTeam1 for team 1 or 3, else g_CharClassTeam2: the own
+// connection's char_vars.char_class[0 / 1], which Player_InitPlayer re-stamps the own
+// body's class from at the next mission start); and, after the rows, for the slot whose
+// entity is the local player, the local select of the slot the body's equipped weapon
+// names (g_CurrentWeaponSlot = its category * 65 + rank, the current one when the index
+// names no weapon) and the mount of the EquippedSlot.
 // [orig: Server_SendWeaponSlotListToPlayer @0x502550 - @0x5025A8..0x5025DB, the local
-//  test `cmp byte [ebp+5], 0` @0x5025EC, the class stores @0x502629..0x50264B]
-void weapon_slot_list_own_legs(NapiNPConnection &conn);
+//  test `cmp byte [ebp+5], 0` @0x5025EC, the buffer copy @0x502617..0x502627, the class
+//  stores @0x502629..0x50264B; the local entity test @0x5028B8..0x5028CB, the slot
+//  @0x5028CD..0x5028F5, Player_SelectWeaponSlot @0x5028FC, Player_MountWeaponSlot
+//  @0x50290E]
+void weapon_slot_list_own_legs(NapiNPConnection &conn, world::World *world);
+
+// The round init's seed of the authority's own slot (+5): the spawn buffer
+// (g_SpawnLoadoutBuffer, LocalPlayerLoadout's resident kit) copied into the slot's
+// loadout buffer ahead of the slot table's rebuild. Nothing without a local player.
+// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 - `cmp byte [ebp+5], 0`
+//  @0x516BC4, the copy @0x516BD3..0x516BE3]
+void PlayerSlot_SeedOwnLoadoutBuffer(NapiNPConnection &conn, world::World &world);
 
 // The tag=0x5A body for every re-send that grants NOTHING new: the retained granted body
 // when one exists, else the empty-table shape headed by the player's live class.
@@ -174,6 +214,6 @@ std::vector<uint8_t> build_current_loadout_reply(const std::vector<uint8_t> &ret
 // Server_SendWeaponSlotListToPlayer for a re-send that grants nothing new: the list's own
 // legs (weapon_slot_list_own_legs), then the slot class's current-list body
 // (build_current_loadout_reply over the retained body).
-std::vector<uint8_t> current_weapon_slot_list(NapiNPConnection &conn, const world::World *world);
+std::vector<uint8_t> current_weapon_slot_list(NapiNPConnection &conn, world::World *world);
 
 } // namespace opennova::inmatch

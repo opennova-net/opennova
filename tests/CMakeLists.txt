@@ -5097,6 +5097,12 @@ add_test(NAME npruntime_slot_staging COMMAND npruntime_slot_staging_test)
 add_executable(npruntime_player_camouflage_row_test npruntime/player_camouflage_row_test.cpp)
 target_link_libraries(npruntime_player_camouflage_row_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_player_camouflage_row COMMAND npruntime_player_camouflage_row_test)
+# D-NET-695 / D-NET-479: the authority's own slot table is the local one: the own
+# accept, the deploy's and the round init's rebuilds write LocalPlayer::inventory; the
+# list's own legs (the spawn buffer, the side class, the local select).
+add_executable(npruntime_own_slot_table_test npruntime/own_slot_table_test.cpp)
+target_link_libraries(npruntime_own_slot_table_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_own_slot_table COMMAND npruntime_own_slot_table_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same
