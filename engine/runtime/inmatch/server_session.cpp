@@ -7,7 +7,10 @@
 #include <runtime/world/world.h> // World::crt_rand — the session-seeded CRT stream
 
 #include <base/io/log.h>
-#include <net/npwire/nw_session_framing.h> // next_connection_index (the self-join's two creates)
+#include <net/npwire/nw_session_framing.h> // next_connection_index, manager_connection_keys
+#include <net/npwire/session_hello.h> // the self-join's 0x41 / 0x42 (their lengths)
+#include <net/npwire/session_keys.h> // SESSION_OPCODE_CLIENT_HELLO / _AUTH
+#include <runtime/inmatch/napi_np_protocol.h> // host_server_hello (the self-join's 0x81)
 #include <runtime/inmatch/server_console.h> // the /INOUT host line
 #include <runtime/inmatch/host_settings.h> // mission_session_title
 #include <runtime/inmatch/punt_log.h> // ConnectLog (a listen host's own connection turns it off)
@@ -229,6 +232,55 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 
 	// mode 3 (host + client): the listen server connects its own local client in-process.
 	if (ctx.connection_mode == ConnectionMode::HostClient && local_client != nullptr) {
+		// The self-join (D-NET-NEW-L1-22). The host's own client connection (type 2) takes the
+		// protocol's next index, its CI, and joins its own server inside the create's wait,
+		// through the manager's internal FIFO: an address-0 send queues the packet with address
+		// 0 and the send's port, and the manager's receive hands it over with no RAW or COOKED
+		// line. Its enumerator, the announce flag set, sends the 0x41 to address 0, port 0 (no
+		// PM, EIP, EPN or ET); the server's hello handler answers the 0x81 to that address,
+		// before any server-side node exists (no NP, no NC); the client's handler queues it
+		// (the announce flag skips the session-discovered callback) and the queued pass records
+		// the session; the connect draws the client's key and SCRK from the manager PRNG and the
+		// state machine sends the 0x42 to the session's address, 0 and 0 (no SIP or SPN, and no
+		// CU: the game's tags ride only a joiner's connect); the server takes it on its socket
+		// pass and its queued pass creates the server-side node (the next index, its key and
+		// SCRK drawn), whose new connection turns the log off. With the log on, each send writes
+		// its NET SENDING line (the protocol's client send callback) and each receipt its
+		// PROTOCOL line, from 0.0.0.0:0, ahead of the disabling line; NA is the session's
+		// player name, "???" when empty.
+		// [orig: CNapiGameSession_CreateSession @0x4C97C0 - "???" @0x4C9927..0x4C993B, the
+		//  type-2 create @0x4C9B9C, CNapiNPConnection_SetName @0x4C9BB7, the wait's call
+		//  @0x4C9C6F; CNapiGameSession_WaitForHostResponse @0x62B2D0 - the announce flag
+		//  @0x62B31F, the enumerator on @0x62B340, the pumps @0x62B36A / @0x62B389, the session
+		//  test @0x62B3B4, CNapiNPConnection_InitFromSession @0x626320 (the call @0x62B46C; the
+		//  key's draw @0x6263F4, the SCRK's @0x626401), the pumps to state 5 @0x62B47D..0x62B4BB;
+		//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 (NapiNPSession_SendAnnouncePacket
+		//  (conn, 0, 0, ..) @0x629170); NapiNPSession_SendAnnouncePacket @0x61FA00 (PM only
+		//  without the flag @0x61FCCA, the send callback proto+0x270 @0x61FDCA, the send
+		//  @0x61FDE4); CNapiNetwork_Init @0x4CA4A0 (NapiLog_OnSend into proto+0x270 @0x4CA978,
+		//  the server send slot proto+0x2E0 an empty stub @0x4CA918); NapiLog_OnSend @0x4C4760;
+		//  CNapiNPManager_SendTo @0x61EC20 (the address-0 arm @0x61EC59, the FIFO write
+		//  @0x61ECC6); NapiNPManager_RecvFrom @0x61ECE0; NapiNPManager_PumpReceive @0x623010 (the
+		//  FIFO read @0x6230B3, no RAW / COOKED for it @0x62318B, HandlePacket @0x623284);
+		//  NapiNPManager_HandlePacket @0x622F10 (cb_on_dispatch @0x622FCD);
+		//  NapiNPProtocol_HandleClientHello @0x6213B0 (the reply @0x6218FC);
+		//  NapiNPProtocol_SendServerInfoPacket @0x6204B0 (NC @0x620A55, the send @0x620C9A);
+		//  Nwu_HandleServerHello @0x626D20 (the socket pass's queue @0x627F45 and return 1
+		//  @0x627F5A, the discovered callback skipped under the flag @0x6278D7);
+		//  CNapiNPConnection_PumpStateMachine @0x6292E0 (CNapiNPConnection_SendClientJoin
+		//  called @0x629595); CNapiNPConnection_SendClientJoin @0x61FE20 (the send callback
+		//  @0x6203F0, the send @0x620413); NapiNPProtocol_HandleClientJoin @0x62B750 (the
+		//  type-1 create @0x62BF06, the SK's draw @0x62BF5E)]
+		const TitleIdentity *identity = ctx.np_protocol.identity;
+		const PeerAddr internal{}; // address 0, port 0
+		const uint32_t own_index = next_connection_index();
+		ClientHello hello;
+		ServerHello reply;
+		if (identity != nullptr) {
+			hello = make_title_client_hello(*identity, own_index);
+			reply = host_server_hello(ctx, hello, internal);
+		}
+		const ConnectionKeys own_keys = manager_connection_keys();
 		NapiNPConnection self;
 		// The host's own player dcb (entity+0x78). NOT 0 — dcb 0 is the dedicated-server reservation
 		// that makes the joining client drop the player slot and flood C2S 0x0F (see kHostPlayerDcb).
@@ -240,22 +292,52 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		self.phase = ConnectionPhase::New; // advanced by the host's own-player spawn flow (P3)
 		self.link.transport = local_client;
 		self.link.mode = replication::TransportMode::Loopback; // socketless mode 1
-		ctx.np_protocol.connection_list.push_back(self);
+		// The pair's keys: the client's CI, key and SCRK; the server-side node's key and SCRK
+		// (a forced mint stands for the draw, as a remote join's does).
+		self.client_ci = own_index;
+		self.client_ck = own_keys.key;
+		self.client_scrk = own_keys.scrk;
 		// Retail's self-join creates two connections on the game protocol, each stepping its
-		// connection counter: the host's own client (type 2), then the server-side node its own
-		// 0x42 creates (type 1). (D-NET-713)
-		// [orig: CNapiGameSession_CreateSession @0x4C97C0 - the type-2 create @0x4C9B9C;
-		//  NapiNPProtocol_HandleClientJoin @0x62BF06 (the self-join's 0x42, through
-		//  CNapiGameSession_WaitForHostResponse @0x4C9C6F); CNapiNPConnection_Create - the step
-		//  @0x62B282..0x62B296]
+		// connection counter: the host's own client (type 2) above, then the server-side node
+		// its own 0x42 creates (type 1). (D-NET-713)
+		// [orig: CNapiNPConnection_Create @0x62ACB0 - the step @0x62B282..0x62B296]
 		(void)next_connection_index();
-		(void)next_connection_index();
-		// The host's own connection coming up turns the _connectlog.txt debug log off and
-		// counts a login like every other [orig: NapiNPServer_HandleNewConnection @0x4C8040 - the
-		// disable @0x4C8054..0x4C80AF at its head, the login @0x4c8203, ahead of its
-		// local-connection arm @0x4c8213].
-		if (ctx.logs.connect != nullptr && ctx.logs.connect->enabled())
-			ctx.logs.connect->disable_at_server_connection();
+		if (ctx.server_key_mint.forced) {
+			self.server_sk = ctx.server_key_mint.server_sk;
+			self.server_scrk = ctx.server_key_mint.server_scrk;
+		} else {
+			const ConnectionKeys node_keys = manager_connection_keys();
+			self.server_sk = node_keys.key;
+			self.server_scrk = node_keys.scrk;
+		}
+		ctx.np_protocol.connection_list.push_back(self);
+		if (ctx.logs.connect != nullptr && ctx.logs.connect->enabled()) {
+			ConnectLog &log = *ctx.logs.connect;
+			if (identity != nullptr) {
+				const std::string pn = identity->pn != nullptr ? identity->pn : "";
+				const int32_t hello_len =
+						static_cast<int32_t>(client_hello_to_bytes(hello).size() + 1);
+				log.line(net_sending_text(hello_len, internal, SESSION_OPCODE_CLIENT_HELLO, 0));
+				log.line(napi_got_protocol_text(hello_len, internal, pn));
+				const int32_t reply_len =
+						static_cast<int32_t>(server_hello_to_bytes(reply).size() + 1);
+				log.line(napi_got_protocol_text(reply_len, internal, pn));
+				const std::string name =
+						config.player_name.empty() ? "???" : config.player_name.substr(0, 63);
+				const ClientAuth auth = make_title_client_auth(
+						*identity, own_index, own_keys.key, reply.hk, name, own_keys.scrk);
+				const int32_t join_len =
+						static_cast<int32_t>(client_auth_to_bytes(auth).size() + 1);
+				log.line(net_sending_text(join_len, internal, SESSION_OPCODE_CLIENT_AUTH, 0));
+				log.line(napi_got_protocol_text(join_len, internal, pn));
+			}
+			// The server-side node coming up turns the _connectlog.txt debug log off
+			// [orig: NapiNPServer_HandleNewConnection @0x4C8040 - the disable
+			//  @0x4C8054..0x4C80AF at its head].
+			log.disable_at_server_connection();
+		}
+		// ...and counts a login like every other [orig: NapiNPServer_HandleNewConnection
+		// @0x4C8040 - the login @0x4c8203, ahead of its local-connection arm @0x4c8213].
 		++ctx.total_logins;
 	}
 	return CreateSessionResult::Created;

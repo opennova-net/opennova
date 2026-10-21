@@ -748,59 +748,7 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) {
 		return; // host not started — no ServerHello, no node created
 	}
-	// client_ip_net: the builders take the IP as the four payload octets in LE packing (so retail's
-	// positional TLV reader prints a.b.c.d) — pass peer.ip verbatim, matching nw_udp_listener.
-	// The hello's EIP / EPN / ET ride back as the reply's, each written when nonzero: a stock
-	// enumerator's 0x41 names its own destination there (the broadcast or the dialed address,
-	// and the port), and the 0x81 echoes it (build_server_hello).
-	// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 - EIP @0x621756, EPN @0x621774, ET
-	//  @0x621792, passed to NapiNPProtocol_SendServerInfoPacket, which writes them
-	//  @0x620baa..0x620c0c]
-	ServerHello reply = build_server_hello(hello, peer.ip, peer.port);
-	// The host writes its OWN protocol identity, not the prober's: the title identity the
-	// network init installed, its PV3 build string included (D-NET-520), and UT, the
-	// uptime, whenever nonzero (D-NET-265). [orig: NapiNPProtocol_SendServerInfoPacket
-	//  @0x620583..0x62078a (CO/AP/BDAT/PN/PG/PV1/PV2/PV3 from the protocol, each gated, PV3
-	//  @0x620758..0x62078a); UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0, PV3 into
-	//  proto+0x1AC @0x4ca8bb..0x4ca8c2]
-	{
-		const ClientHello self = make_title_client_hello(*identity, 0);
-		reply.co = self.co;
-		reply.ap = self.ap;
-		reply.bdat = self.bdat;
-		reply.pn = self.pn;
-		reply.pg = self.pg;
-		reply.pv1 = self.pv1;
-		reply.pv2 = self.pv2;
-		reply.pv3 = self.pv3;
-		reply.ut = ctx.np_protocol.host_run_duration_ms;
-	}
-	// A LAN 0x41 is a stateless enumerate/handshake probe. Populate the retail
-	// game-server fields from live host state without registering the source as
-	// a peer; only a validated 0x42 creates the connection node.
-	reply.sn = ctx.config.server_name;
-	// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204b0, SF]
-	reply.sf = ctx.config.server_password.empty() ? 0u : 1u;
-	reply.p1 = ctx.config.game_type;
-	// Retail advertises the same session BuildFlags value here and in the
-	// trailing dword of S2C 0x08. create_session snapshots that live semantic
-	// value after installing GameConfig; never substitute a captured constant.
-	reply.p2 = ctx.np_protocol.build_flags;
-	reply.np = occupied_player_count(ctx);
-	reply.mp = ctx.np_protocol.max_players; // the session's cap [orig: protocol +0x524 @0x6209FF]
-	reply.nc = server_connection_count(ctx); // (D-NET-523)
-	// SUS1 is the protocol's server_user_string1: the GSID a NovaWorld
-	// ServerHostResult handed this host, copied into the protocol block and
-	// written whenever non-empty. A pure LAN host never ran that leg, so fresh
-	// retail LAN captures omit the field; it is never session_seed_id.
-	// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D5C0F
-	//  -> server_user_string1; NapiNPProtocol_SendServerInfoPacket @0x6204B0
-	//  SUS1 write @0x620AF2 gated on the first byte]
-	reply.sus1 = ctx.novaworld_gsid;
-	reply.sus2 = ctx.config.expansion;
-	// R1: advertise our real host key (seed-injected via SessionStartup) rather than
-	// build_server_hello's placeholder default, when one is set. The retail 0x81 carries host_key.
-	reply.hk = ctx.np_protocol.host_key;
+	const ServerHello reply = host_server_hello(ctx, hello, peer);
 	out.outbound.push_back(
 			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply)));
 	// The handler answers a PM-carrying announce too, but takes only a probe without PM
@@ -1443,6 +1391,65 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 }
 
 } // namespace
+
+// See header. [orig: NapiNPProtocol_SendServerInfoPacket @0x6204B0]
+ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hello,
+		const PeerAddr &peer) {
+	// client_ip_net: the builders take the IP as the four payload octets in LE packing (so retail's
+	// positional TLV reader prints a.b.c.d) — pass peer.ip verbatim, matching nw_udp_listener.
+	// The hello's EIP / EPN / ET ride back as the reply's, each written when nonzero: a stock
+	// enumerator's 0x41 names its own destination there (the broadcast or the dialed address,
+	// and the port), and the 0x81 echoes it (build_server_hello).
+	// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 - EIP @0x621756, EPN @0x621774, ET
+	//  @0x621792, passed to NapiNPProtocol_SendServerInfoPacket, which writes them
+	//  @0x620baa..0x620c0c]
+	ServerHello reply = build_server_hello(hello, peer.ip, peer.port);
+	// The host writes its OWN protocol identity, not the prober's: the title identity the
+	// network init installed, its PV3 build string included (D-NET-520), and UT, the
+	// uptime, whenever nonzero (D-NET-265). [orig: NapiNPProtocol_SendServerInfoPacket
+	//  @0x620583..0x62078a (CO/AP/BDAT/PN/PG/PV1/PV2/PV3 from the protocol, each gated, PV3
+	//  @0x620758..0x62078a); UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0, PV3 into
+	//  proto+0x1AC @0x4ca8bb..0x4ca8c2]
+	{
+		const ClientHello self = make_title_client_hello(*ctx.np_protocol.identity, 0);
+		reply.co = self.co;
+		reply.ap = self.ap;
+		reply.bdat = self.bdat;
+		reply.pn = self.pn;
+		reply.pg = self.pg;
+		reply.pv1 = self.pv1;
+		reply.pv2 = self.pv2;
+		reply.pv3 = self.pv3;
+		reply.ut = ctx.np_protocol.host_run_duration_ms;
+	}
+	// A LAN 0x41 is a stateless enumerate/handshake probe. Populate the retail
+	// game-server fields from live host state without registering the source as
+	// a peer; only a validated 0x42 creates the connection node.
+	reply.sn = ctx.config.server_name;
+	// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204b0, SF]
+	reply.sf = ctx.config.server_password.empty() ? 0u : 1u;
+	reply.p1 = ctx.config.game_type;
+	// Retail advertises the same session BuildFlags value here and in the
+	// trailing dword of S2C 0x08. create_session snapshots that live semantic
+	// value after installing GameConfig; never substitute a captured constant.
+	reply.p2 = ctx.np_protocol.build_flags;
+	reply.np = occupied_player_count(ctx);
+	reply.mp = ctx.np_protocol.max_players; // the session's cap [orig: protocol +0x524 @0x6209FF]
+	reply.nc = server_connection_count(ctx); // (D-NET-523)
+	// SUS1 is the protocol's server_user_string1: the GSID a NovaWorld
+	// ServerHostResult handed this host, copied into the protocol block and
+	// written whenever non-empty. A pure LAN host never ran that leg, so fresh
+	// retail LAN captures omit the field; it is never session_seed_id.
+	// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D5C0F
+	//  -> server_user_string1; NapiNPProtocol_SendServerInfoPacket @0x6204B0
+	//  SUS1 write @0x620AF2 gated on the first byte]
+	reply.sus1 = ctx.novaworld_gsid;
+	reply.sus2 = ctx.config.expansion;
+	// R1: advertise our real host key (seed-injected via SessionStartup) rather than
+	// build_server_hello's placeholder default, when one is set. The retail 0x81 carries host_key.
+	reply.hk = ctx.np_protocol.host_key;
+	return reply;
+}
 
 // See header.
 void finish_manager_receive(NapiNPServerCtx &ctx) {

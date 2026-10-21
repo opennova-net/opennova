@@ -4,6 +4,7 @@
 
 #include <net/npwire/peer_addr.h> // opennova::PeerAddr
 #include <net/npwire/protocol_message.h>     // opennova::ProtocolMessage
+#include <net/npwire/session_hello.h>        // ClientHello / ServerHello (host_server_hello)
 // inmatch::GameConfig (the consolidated server-state config) arrives via napi_np_server_ctx.h (ADR 0013).
 
 #include <cstddef>
@@ -153,6 +154,15 @@ std::vector<ReplayedSessionPacket> replay_ready_session_packets(
 //  receive @0x4FD981; NapiNPProtocol_PumpRecvQueues @0x6266A0 (the FIFO pass @0x6266CA..
 //  0x6267B2); NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF)]
 void finish_manager_receive(NapiNPServerCtx &ctx);
+
+// The host's 0x81 to one 0x41: the hello's CI and external triple echoed, the sender's address
+// and port reflected (each written when nonzero), the protocol's own identity and the live
+// session's fields. A remote probe's answer (handle_client_hello) and the listen host's own
+// client's, at its session create (create_session). Needs the protocol's identity.
+// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204B0, from NapiNPProtocol_HandleClientHello
+//  @0x6213B0 (the call @0x6218FC)]
+ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hello,
+		const PeerAddr &peer);
 
 // Finalize one host socket receive batch. Future packets latch a missing-sequence check while
 // handle_server_datagram drains; only here, after later datagrams could have closed the gap, does

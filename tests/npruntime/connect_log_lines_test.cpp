@@ -31,6 +31,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <string>
 #include <string_view>
@@ -231,16 +232,72 @@ void test_dedicated_host_receive_lines() {
 	CHECK(!host.log.enabled());
 }
 
-// A listen host's own connection turns the log off at its session create.
-// [orig: NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF) ahead of the local
-//  arm @0x4C8213]
-void test_listen_host_create_turns_the_log_off() {
+// One flat TLV's size: its name, the NUL, the u16 length, the value [orig: NapiNP_WriteTLV
+// @0x61DD60]; a string value carries its NUL.
+size_t tlv(const char *name, size_t value_len) { return std::strlen(name) + 1 + 2 + value_len; }
+size_t tlv_str(const char *name, const std::string &value) { return tlv(name, value.size() + 1); }
+
+// A listen host's own client joins its own server at the session create, through the manager's
+// internal FIFO (address 0, port 0, no RAW or COOKED line): its 0x41 (sent, then taken), the
+// server's 0x81, its 0x42 (sent, then taken), and the server-side node its 0x42 creates turns the
+// log off. Each length is the packet's TLV sum plus its opcode byte, from the builders' gates.
+// [orig: CNapiGameSession_CreateSession @0x4C97C0 (the wait's call @0x4C9C6F);
+//  NapiNPSession_SendAnnouncePacket @0x61FA00 (the identity block, CI, no PM under the announce
+//  flag @0x61FCCA, no EIP / EPN to address 0; the send callback @0x61FDCA);
+//  NapiNPProtocol_SendServerInfoPacket @0x6204B0 (CI, the identity, UT only when nonzero
+//  @0x620670, HK and SN always, SF always @0x620898, P1 / P2 / MP when nonzero, NP / NC 0 with no
+//  server-side node, RIP / RPN not for address 0 @0x620A81 / @0x620AA9, SUS2 when non-empty);
+//  CNapiNPConnection_SendClientJoin @0x61FE20 (the identity, CI, HK, CK, NA, SCRK; no PW, SIP,
+//  SPN, CU, NF, DCNT or RCNT on the self-join; the send callback @0x6203F0); NapiLog_OnSend
+//  @0x4C4760; NapiNPManager_HandlePacket @0x622F10 (cb_on_dispatch @0x622FCD);
+//  NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF) ahead of the local arm
+//  @0x4C8213]
+void test_listen_host_self_join_lines() {
 	ns::LoopbackChannel loop;
 	LoggedHost host(inmatch::ConnectionMode::HostClient, &loop);
 	CHECK(!host.log.enabled());
+	const inmatch::NapiNPConnection *own = nullptr;
+	for (const inmatch::NapiNPConnection &c : host.ctx.np_protocol.connection_list)
+		if (c.type == inmatch::NapiNPConnection::kTypeClientSide) own = &c;
+	CHECK(own != nullptr);
+	if (own == nullptr) return;
+	CHECK(own->client_ci != 0 && own->client_ck != 0 && !own->client_scrk.empty());
+	const ClientHello id = make_title_client_hello(kJo, own->client_ci);
+	const size_t identity = tlv_str("CO", id.co) + tlv_str("AP", id.ap) + tlv_str("BDAT", id.bdat) +
+			tlv_str("PN", id.pn) + tlv("PG", 16) + tlv_str("PV1", id.pv1) + tlv_str("PV2", id.pv2) +
+			(id.pv3.empty() ? 0 : tlv_str("PV3", id.pv3));
+	const size_t hello_len = 1 + tlv_str("NVS", id.nvs) + identity + tlv("CI", 4);
+	const inmatch::GameConfig &cfg = host.ctx.config;
+	const size_t reply_len = 1 + tlv("CI", 4) + identity + tlv("HK", 4) +
+			tlv_str("SN", cfg.server_name) + tlv("SF", 4) +
+			(cfg.game_type != 0 ? tlv("P1", 4) : 0) +
+			(host.ctx.np_protocol.build_flags != 0 ? tlv("P2", 4) : 0) +
+			(host.ctx.np_protocol.max_players != 0 ? tlv("MP", 4) : 0) +
+			(cfg.expansion.empty() ? 0 : tlv_str("SUS2", cfg.expansion));
+	const std::string na = cfg.player_name.empty() ? "???" : cfg.player_name;
+	const size_t join_len = 1 + tlv_str("NVS", id.nvs) + identity + tlv("CI", 4) + tlv("HK", 4) +
+			tlv("CK", 4) + tlv_str("NA", na) + tlv_str("SCRK", own->client_scrk);
+	const std::string pn = kJo.pn;
+	const std::string at = "0.0.0.0:0";
 	const std::vector<std::string> lines = log_lines(host.files);
-	CHECK(lines.size() == 1 &&
-			lines[0] == "NET SERVER DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.");
+	CHECK(lines.size() == 6);
+	if (lines.size() != 6) {
+		for (const std::string &l : lines) std::printf("  got: %s\n", l.c_str());
+		return;
+	}
+	const auto sending = [&](size_t len, const char *opcode) {
+		return "NET SENDING " + std::to_string(len) + " BYTES TO " + at + " [" + opcode + ", p#0]";
+	};
+	const auto taken = [&](size_t len) {
+		return "NAPI GOT PROTOCOL " + std::to_string(len) + " BYTES FROM " + at + " [" + pn + "]";
+	};
+	CHECK(lines[0] == sending(hello_len, "0x41"));
+	CHECK(lines[1] == taken(hello_len));
+	CHECK(lines[2] == taken(reply_len));
+	CHECK(lines[3] == sending(join_len, "0x42"));
+	CHECK(lines[4] == taken(join_len));
+	CHECK(lines[5] == "NET SERVER DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.");
+	for (const std::string &l : lines) std::printf("  self-join: %s\n", l.c_str());
 }
 
 } // namespace
@@ -248,7 +305,7 @@ void test_listen_host_create_turns_the_log_off() {
 int main() {
 	test_line_texts();
 	test_dedicated_host_receive_lines();
-	test_listen_host_create_turns_the_log_off();
+	test_listen_host_self_join_lines();
 	if (failures != 0) {
 		std::printf("connect_log_lines: %d failure(s)\n", failures);
 		return 1;
