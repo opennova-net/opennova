@@ -1107,8 +1107,7 @@ void test_the_current_slot_word() {
     auto local = std::make_unique<LocalPlayer>(*world);
     WeaponInventory &inv = local->inventory;
     auto rebuild = [&](std::vector<WeaponKitEntry> kit) {
-        local->loadout.spawn_kit = std::move(kit);
-        local->loadout.spawn_kit_set = true;
+        local->loadout.spawn_kit() = std::move(kit);
         local_loadout_rebuild(*world, local->loadout, local->weapon, inv,
                               local->inventory_valid, /*select_spawn_default=*/true);
     };
@@ -1185,8 +1184,7 @@ void test_a_missed_select_sends_195_raw() {
     world->cached.local_player = world->registry.spawn(0, seed);
     auto local = std::make_unique<LocalPlayer>(*world);
     auto rebuild = [&](std::vector<WeaponKitEntry> kit) {
-        local->loadout.spawn_kit = std::move(kit);
-        local->loadout.spawn_kit_set = true;
+        local->loadout.spawn_kit() = std::move(kit);
         local_loadout_rebuild(*world, local->loadout, local->weapon, local->inventory,
                               local->inventory_valid, /*select_spawn_default=*/true);
     };
