@@ -1,6 +1,6 @@
 // D-NET-133: the S2C 0x0C / 0x18 aiState byte is entity+0x2B4's low byte, a per-class word:
-// a person's 0, a dead item's 0 (its death chain zeroes the block; a live death effect's
-// emitter pointer is nothing portable), a 6088 marker's effect name, a powerup's respawn
+// a person's 0, a dead vehicle's 0 (its death chain zeroes the block; the death effects'
+// group slot stored there is nothing portable), a 6088 marker's effect name, a powerup's respawn
 // countdown, a door building's section-touch mask, a vehicle's steering filter, another
 // weapon carrier's MountSlot action counter.
 // [orig: NetPacket_SerializeObjectToBuffer @0x504D10 (the read @0x50518C);
@@ -66,6 +66,17 @@ int main() {
 	w::Entity gun = item(w::kItemAttribEweap);
 	gun.primary_weapon_slot.counter = 7;
 	expect(ai_state_of(gun) == 7, "a gun's aiState is its MountSlot's counter");
+	// The gun's death touches no word: its counter rides on (7 after its death's
+	// detach of a firing gunner) [orig: Entity_UpdateChildAttachment @0x4409A0 - the
+	// death `or [esi+24h], 6` @0x440C28 / @0x440B72; Entity_DetachFromMount @0x546D29].
+	gun.alive = false;
+	gun.flags |= w::kEntityFlagDead;
+	expect(ai_state_of(gun) == 7, "a dead gun's aiState keeps its MountSlot's counter");
+	// With PlayerControl (0x40) the MountSlot is +0x474, not the word
+	// [orig: Entity_GetWeaponSlots @0x5460F6..0x5460FA].
+	w::Entity controlled_gun = item(w::kItemAttribEweap | w::kItemAttribPlayerControl);
+	controlled_gun.primary_weapon_slot.counter = 7;
+	expect(ai_state_of(controlled_gun) == 0, "a PlayerControl carrier's word is not its MountSlot");
 
 	// A powerup's respawn countdown: -1 idle, the ticks while counting
 	// [orig: PowerupEntity_InitFromDef @0x442D65; Powerup_TickRespawn @0x442878].

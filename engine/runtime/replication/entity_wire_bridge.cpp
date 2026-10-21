@@ -486,7 +486,6 @@ int32_t entity_word_2b4(const world::Entity &e) {
 	// A squib's death event arms its arc with the def's deathTime in the word, which
 	// its own class keeps (its death runs no husked chain).
 	if (e.squib.interval != 0) return e.squib.interval;
-	if (!e.alive || (e.flags & world::kEntityFlagDead) != 0) return 0;
 	if (!e.script_effect_name.empty()) {
 		uint32_t word = 0;
 		for (size_t i = 0; i < 4 && i < e.script_effect_name.size(); ++i)
@@ -495,8 +494,16 @@ int32_t entity_word_2b4(const world::Entity &e) {
 	}
 	if (e.powerup_def_index >= 0) return e.powerup_respawn_timer;
 	if (e.door_slot >= 0) return static_cast<int32_t>(e.door_touch_mask);
-	if (e.has_item_def && e.item_type == kVehicleItemType) return e.veh.steer_state;
-	if (e.has_item_def && (e.item_attrib & world::kItemAttribEweap) != 0)
+	// A vehicle's death chain zeroes the block (Entity_InitDeathSounds; the effect-group
+	// slots it then stores there are nothing portable, ours stays 0): no other class's death
+	// touches the word, so a dead gun keeps its counter.
+	if (e.has_item_def && e.item_type == kVehicleItemType)
+		return !e.alive || (e.flags & world::kEntityFlagDead) != 0 ? 0 : e.veh.steer_state;
+	// A weapon carrier's MountSlot sits at +0x2B4 only without PlayerControl (0x40), whose
+	// slot is +0x474 [orig: Entity_GetWeaponSlots @0x5460E0 (@0x5460F6..0x546108)].
+	if (e.has_item_def &&
+			(e.item_attrib & (world::kItemAttribEweap | world::kItemAttribPlayerControl)) ==
+					world::kItemAttribEweap)
 		return e.primary_weapon_slot.counter;
 	return e.ai_state;
 }

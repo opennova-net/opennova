@@ -146,16 +146,21 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e);
 
 // entity+0x2B4, whose low byte the 0x0C / 0x18 records carry as aiState: the first word
 // past the common block the destroy and the 0x0D memset clear, owned per class. A dead
-// item's is 0 (its death chain zeroes the block, then may keep a live death effect's
-// emitter pointer there, a heap address: nothing portable, ours stays 0); a 6088 marker's
-// is its effect name's first characters; a powerup's its respawn countdown; a door
-// building's its section-touch mask; a vehicle's its movers' steering filter; another
-// weapon carrier's (def attrib 0x20) its MountSlot's action counter; an armed squib's
-// its def's deathTime; a person's 0.
+// vehicle's is 0 (its death chain zeroes the block, then stores its death effects' group
+// slots there: a static effect-group pool slot's address, (0xC8 + 0x78 * slot) & 0xFF,
+// set by the host's whole effect history and 0 under /NOPARTICLES: PERMANENT, ours stays
+// 0); no other class's death touches the word, so a dead gun keeps its MountSlot counter;
+// a 6088 marker's is its effect name's first characters; a powerup's its respawn
+// countdown; a door building's its section-touch mask; a vehicle's its movers' steering
+// filter; another weapon carrier's (def attrib 0x20 without 0x40) its MountSlot's action
+// counter; an armed squib's its def's deathTime; a person's 0.
 // [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 (the read @0x5032A3),
 //  NetPacket_SerializeObjectToBuffer @0x504D10 (the read @0x50518C); the writers:
-//  Entity_InitDeathSounds @0x4939B0 (@0x493A09..0x493A1B), Entity_UpdateDeadWreckEffects
-//  @0x493140 (the emitter slots @0x4931DA); Entity_SpawnFromBMSRecord @0x40E9F0 (the
+//  Entity_InitDeathSounds @0x4939B0 (the zero @0x493A09..0x493A1B, the effect-group stores
+//  Entity_SpawnMaskedEffectBank @0x493A9C / @0x493AEF and @0x493AC3 / @0x493B16), its
+//  reader Entity_UpdateDeadWreckEffects @0x493140; Entity_UpdateChildAttachment @0x4409A0
+//  (the ewep death `or [esi+24h], 6` @0x440B72 / @0x440C28, no +0x2B4 store),
+//  Entity_DetachFromMount @0x546D00 (7 @0x546D29); Entity_SpawnFromBMSRecord @0x40E9F0 (the
 //  6088 strncpy @0x40F136..0x40F14F); PowerupEntity_InitFromDef @0x442D00 (-1 @0x442D65),
 //  PowerupAction_Pickup @0x4428A0 (@0x442AE1), Powerup_TickRespawn @0x442850 (@0x442878 /
 //  @0x442883); Entity_ComputeBoneCollisionForce @0x4AE150 (the per-query reset @0x4AE281,
