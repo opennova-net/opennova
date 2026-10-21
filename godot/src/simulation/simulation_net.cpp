@@ -960,6 +960,18 @@ void Simulation::cancel_join() {
 	if (joiner_role_ != nullptr) joiner_role_->cancel_join();
 }
 
+bool Simulation::cancel_join_final_wait() {
+	return is_joiner() && runtime_ && runtime_->cancel_final_wait();
+}
+
+bool Simulation::is_join_game_loop() const {
+	return is_joiner() && runtime_ && runtime_->in_game_loop();
+}
+
+bool Simulation::is_join_mission_start_aborted() const {
+	return is_joiner() && runtime_ && runtime_->mission_start_aborted();
+}
+
 bool Simulation::is_join_preload_ready() const {
 	return is_joiner() && runtime_ && runtime_->preload_ready();
 }

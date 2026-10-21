@@ -404,12 +404,16 @@ void test_play_host_mid_match_join_binds_body() {
 // V-L2-s8 (NEW-L2-19 FOUND 3): a round end that reaches a joiner inside its mission start's
 // waits abandons that mission start: no load and no 0x2F / 0x2F / 0x0B for it; the game loop's
 // round-over linger runs out to exit 4, whose game loop restarts the mission start for the
-// host's next mission in the runtime (no shell reload), and the joiner plays that one.
+// host's next mission in the runtime (no shell reload), and the joiner plays that one. The
+// restart runs ahead of the frame after the one that stored the exit (V-L2-s9 f1): the main
+// frame's tail reads the exit after that frame's net frame and the main loop's next
+// iteration runs the mission start.
 // [orig: NapiClient_WaitForGameStart @0x42CC10 - `cmp g_RoundOver` @0x42CCA1;
 //  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - @0x42CBC5; Game_StartMission
 //  @0x524360 - "aborted 1" @0x524DB0..0x524DD1, "aborted 3" @0x524E2E..0x524E4F;
-//  Game_ProcessMainFrame @0x5263F0 - reason 4 @0x526822 -> UI_NavHistoryPush(
-//  &g_GameModeGameLoop) @0x526808]
+//  Game_ProcessMainFrame @0x5263F0 - the exit read @0x5267F8, reason 4 @0x526822 ->
+//  UI_NavHistoryPush(&g_GameModeGameLoop) @0x526808; Game_MainLoop @0x52B630 - the next
+//  mode's init @0x52B702..0x52B70D]
 void test_round_end_abandons_a_joiners_mission_start() {
 	auto host_storage = std::make_unique<Host>();
 	Host &host = *host_storage;
@@ -428,7 +432,8 @@ void test_round_end_abandons_a_joiners_mission_start() {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), host_ep, d.data(), d.size());
 	};
 	bool host_up = true;
-	bool aborted_seen = false;      // an abandoned start the frame did not restart at once
+	int exit_frames = 0;            // frames that ended abandoned with exit 4 stored
+	bool restarted_next = true;     // each such frame's next frame restarted the start
 	bool released_in_first = false; // the first mission's 0x1A released its mission start
 	int shell_reloads = 0;
 	auto step = [&]() {
@@ -440,9 +445,18 @@ void test_round_end_abandons_a_joiners_mission_start() {
 			if (n <= 0) break;
 			client.receive(rx, static_cast<size_t>(n));
 		}
+		const bool exit_pending = client.mission_start_aborted() &&
+				client.mission_exit_reason() == inmatch::kMissionExitRoundOver;
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
 		++tick;
-		if (client.mission_start_aborted()) aborted_seen = true;
+		if (exit_pending)
+			restarted_next &= !client.mission_start_aborted() &&
+					client.mission_exit_reason() == inmatch::kMissionExitNone;
+		if (client.mission_start_aborted() &&
+				client.mission_exit_reason() == inmatch::kMissionExitRoundOver) {
+			++exit_frames;
+			return; // the runtime restarts it ahead of the next frame, not the shell
+		}
 		if (host.missions == 1) released_in_first |= client.mission_start_released();
 		if (client.mission_exit_reason() == inmatch::kMissionExitRoundOver) {
 			CHECK(client.begin_mission_reload());
@@ -464,7 +478,7 @@ void test_round_end_abandons_a_joiners_mission_start() {
 	CHECK(run_until([&] {
 		return host.missions == 2 && client.in_match() && client.is_deployed();
 	}, 4000));
-	CHECK(!released_in_first && !aborted_seen);
+	CHECK(!released_in_first && exit_frames == 1 && restarted_next);
 	CHECK(shell_reloads == 0);
 	CHECK(client.map_file() == "MAPA.BMS" && !client.session_lost());
 	std::printf("map_change: a round end inside the mission start abandoned it for the next\n");

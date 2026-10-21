@@ -87,7 +87,8 @@ struct PlayerActionRequest {
 	// mount toggle, the Emotes / Radio menus' digit picks.
 	// [orig: Input_ProcessKeyboardEvents -> Input_QueueEvent -> Input_HandleActionBinding
 	//  @0x49AD40 (the head @0x49AD8D..0x49AE23); Input_HandleSpecialKeys @0x49c5c0 -
-	//  Entity_FindAvailableSeat @0x49c6e6..0x49c6ed, the menu picks @0x49c745 / @0x49c791;
+	//  the seat index @0x49c6e6..0x49c6ed, Entity_FindAvailableSeat (the call @0x49c702), the
+	//  menu picks @0x49c745 / @0x49c791;
 	//  Input_ProcessFrame @0x49d520 - the release edge @0x49d6c1..0x49d6dc]
 	int code = -1;
 };

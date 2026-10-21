@@ -582,6 +582,39 @@ bool run_an_early_release_stays_in_the_final_wait() {
 	return true;
 }
 
+
+// D-NET-NEW-L2-26 (V-L2-s9 FOUND 1): an ESC in the mission start's final wait for the S2C
+// 0x0F stores the loading cancel flag and leaves the wait, and nothing else: the game loop
+// runs (its frame's 0x2C, a key's 0x1D), the session stays (nothing torn down, no 0x46), a
+// second ESC finds no wait, and the 0x0F, when it comes, still completes the admission.
+// Outside the wait (the load) the ESC takes nothing here.
+// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5, its ESC
+//  @0x5262AB -> g_LoadingCancelFlag = 1 @0x5262E9 -> @0x5262F3; the flag's clear at the head
+//  @0x524575; NapiNPClientMsg_0x00F @0x42E2CD]
+bool run_an_esc_leaves_the_final_wait_for_the_game_loop() {
+	Harness h;
+	if (!drive_to_an_early_in_match_release(h, 0)) return false;
+	if (!expect(!h.client.in_game_loop() && h.client.cancel_final_wait() &&
+				h.client.in_game_loop() && h.client.in_session() &&
+				!h.client.initial_admission_complete(),
+			"final wait ESC: the game loop runs with the 0x0F still owed"))
+		return false;
+	if (!expect(!h.client.cancel_final_wait(), "final wait ESC: a second ESC finds no wait"))
+		return false;
+	if (!expect(h.client.queue_stance_change(0xA9),
+			"final wait ESC: the game loop's input queues its 0x1D"))
+		return false;
+	const std::vector<std::vector<uint8_t>> sent = sent_tags(h, h.frame());
+	if (!expect(carries(sent, 0x1D) && carries(sent, 0x2C) && !carries(sent, 0x46) &&
+				h.client.in_session() && !h.client.session_lost(),
+			"final wait ESC: the game loop's frame sends, nothing is torn down"))
+		return false;
+	std::vector<uint8_t> world_state(23, 0);
+	(void)h.frame({make_protocol_message(0x0F, world_state)});
+	return expect(h.client.initial_admission_complete() && h.client.in_game_loop(),
+			"final wait ESC: the later 0x0F still completes the admission");
+}
+
 } // namespace
 
 // A host's round reset that lands before the mission data is done does not
@@ -1012,6 +1045,7 @@ int main() {
 	ok = run_admission_follows_the_retail_loading_loops() && ok;
 	ok = run_timed_loops_pace_an_undictated_connection() && ok;
 	ok = run_an_early_release_stays_in_the_final_wait() && ok;
+	ok = run_an_esc_leaves_the_final_wait_for_the_game_loop() && ok;
 	ok = run_a_self_team_assign_waits_for_the_mission_starts_player_init() && ok;
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
 	ok = run_a_bodyless_joiner_pings() && ok;

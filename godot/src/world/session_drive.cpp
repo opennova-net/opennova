@@ -203,6 +203,11 @@ void SessionDrive::step_preload() {
 	if (!join_preload_sim_->is_join_preload_ready()) {
 		join_identified_ = false;
 		join_preload_sim_->poll_join_preload();
+		// The abandoned start's game loop runs no window: it lingers until the round's end
+		// stores exit 4 (retail's game loop has no clock; the next mission's identification
+		// arms the stream wait's window again; engine inmatch::ClientRuntime::run_frame and
+		// JoinerConnection::mission_start_aborted carry the witness).
+		if (join_preload_sim_->is_join_mission_start_aborted()) policy_->disarm_preload();
 		const int step = policy_->preload_step(join_preload_sim_->get_join_error(), now_ms());
 		if (step == NetSessionPolicy::STEP_FAIL) {
 			fail_join_preload(policy_->fail_reason());
@@ -513,7 +518,10 @@ void SessionDrive::update_joiner_admission_signals() {
 	// Only the native initial-admission boundary distinguishes that split
 	// ordering from a complete no-pick join; later redeploys leave the
 	// predicate monotonically true.
-	const bool initial_admission_complete = sim->is_join_initial_admission_complete();
+	// An ESC that left the final wait ends the loading hold as the 0x0F does: the game
+	// loop runs either way (SessionDrive::cancel_admission_wait).
+	const bool initial_admission_complete =
+			sim->is_join_initial_admission_complete() || sim->is_join_game_loop();
 	// The join error + admission stage only matter to the armed watchdog --
 	// read them exactly when the old inline machine did.
 	String join_error;
@@ -574,6 +582,17 @@ bool SessionDrive::cancel_preload() {
 }
 
 bool SessionDrive::cancel_admission_wait() {
+	// The final wait for the S2C 0x0F: its ESC leaves the wait for the game loop and
+	// nothing else (no exit reason, no teardown, no goodbye); the 0x0F still applies when
+	// it comes. Only the load's ESC is the abort (engine inmatch::JoinerConnection::
+	// cancel_final_wait carries the witness).
+	MissionRoot *runtime = world_->get_runtime();
+	Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
+	if (sim.is_valid() && sim->cancel_join_final_wait()) {
+		// The wait is over: a later ESC is the game loop's, never this watch's abort.
+		policy_->disarm_admission_watch();
+		return true;
+	}
 	return policy_->request_admission_abort();
 }
 

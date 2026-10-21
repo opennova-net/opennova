@@ -3193,6 +3193,68 @@ bool run_the_teardown_goodbye_follows_the_exit_route() {
 	return ok;
 }
 
+// V-L2-s9 (d): the join screen's ABORT ahead of the mission start leaves through the join
+// state machine's FullDestroy(-1): a joiner connected (its 0x82 taken) and still in the
+// pre-game bursts the "N.C:SWWAD[1]:-1" record. In the match it sends nothing
+// (run_the_teardown_goodbye_follows_the_exit_route).
+// [orig: PreMenu_OnAbortCancel @0x568CA0 - g_PreMenuState = 9 @0x568CB4;
+//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 9's CNapiGameSession_FullDestroy(-1)
+//  @0x56A3E3; CNapiGameSession_FullDestroy @0x4C96A0 - the sprintf @0x4C96CC, the leave
+//  @0x4C96DB]
+bool run_the_join_screen_abort_bursts_the_minus_one_record() {
+	Harness h;
+	h.role.poll_preload();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientHello hello;
+	if (!expect(h.socket.datagrams.size() == 1 &&
+						nw_decode_inbound(h.socket.datagrams[0].data(),
+								h.socket.datagrams[0].size(), opcode, body) &&
+						parse_client_hello(body.data(), body.size(), hello),
+				"abort: the ClientHello shipped"))
+		return false;
+	ServerHello server_hello = build_server_hello(hello, 0x7F000001u, 32769);
+	server_hello.hk = 0x13572468u;
+	const std::vector<uint8_t> server_hello_dg = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
+	h.socket.datagrams.clear();
+	h.role.runtime->receive(server_hello_dg.data(), server_hello_dg.size());
+	h.role.poll_preload();
+	ClientAuth auth;
+	bool have_auth = false;
+	for (const std::vector<uint8_t> &dg : h.socket.datagrams)
+		if (nw_decode_inbound(dg.data(), dg.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), auth))
+			have_auth = true;
+	if (!expect(have_auth, "abort: the 0x81 draws the 0x42")) return false;
+	ServerAuth server_auth = build_server_auth(
+			auth, 0x7F000001u, 32769, 0x0C0FFEE1u, "SERVER-ABORT-SCRK", "", "", "", false);
+	server_auth.mi = 4;
+	const std::vector<uint8_t> server_auth_dg = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
+	h.role.runtime->receive(server_auth_dg.data(), server_auth_dg.size());
+	h.role.poll_preload();
+	if (!expect(h.role.runtime->in_session() && h.role.runtime->in_pre_game(),
+				"abort: the joiner is connected and still in the pre-game"))
+		return false;
+	h.socket.datagrams.clear();
+	h.role.cancel_join();
+	std::vector<DisconnectEvent> goodbyes;
+	for (const std::vector<uint8_t> &datagram : h.socket.datagrams) {
+		DisconnectEvent event;
+		if (nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_GOODBYE && body.size() >= 4 &&
+				parse_disconnect_event(body.data() + 4, body.size() - 4, event))
+			goodbyes.push_back(event);
+	}
+	if (!expect(goodbyes.size() == 4u, "abort: the cancel writes the four-datagram burst"))
+		return false;
+	return expect(goodbyes[0].dc == 2u && goodbyes[0].dstr == "N.C:SWWAD[1]:-1" &&
+					goodbyes[0].dp1 == 0 && goodbyes[0].dp2 == 0 && goodbyes[0].dpc == 0,
+			"abort: the burst carries FullDestroy(-1)'s record");
+}
+
 // D-NET-562's pre-round leg: a client runs no entity update while its pre-round timer
 // (the 0x0A's phase-0 byte) is nonzero, so a Health of 0 a tail stores in the pre-round
 // latches no dead bit; the first frame whose tail reads the timer 0 runs the body tick
@@ -3861,6 +3923,7 @@ int main() {
 	ok &= run_a_console_deploy_pick_ends_the_drain();
 	ok &= run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it();
 	ok &= run_the_teardown_goodbye_follows_the_exit_route();
+	ok &= run_the_join_screen_abort_bursts_the_minus_one_record();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
 	ok &= run_a_self_team_assign_reinits_l();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();

@@ -342,7 +342,8 @@ void check_head_preround_reads_the_own_clients_copy(std::map<std::string, std::s
 // [orig: Client_ProcessConsoleCommand @0x520E80 - the peer's C2S 0x04 @0x520EFE..0x520F29;
 //  NapiNPServerMsg_HandleConsoleLine @0x5199D0 - the NETLOG arm @0x519A7B, the S2C 0x06
 //  @0x519AB5..0x519AC5; NapiNPClientMsg_HandleConsoleEcho @0x432BC0 ->
-//  NapiClientCmd_ParseAndExecute @0x432C12; NapiClientCmd_HandleDebugCommand @0x42C4D0 - the
+//  NapiClientCmd_ParseAndExecute @0x4329C0 (the call @0x432C12);
+//  NapiClientCmd_HandleDebugCommand @0x42C4D0 - the
 //  SERVER arm @0x42C85D, the match @0x42C867, the C2S 0x24 @0x42C904..0x42C922;
 //  NapiNPServerMsg_0x024 @0x514DC0 -> Server_HandleBanPuntCommand @0x50B380 (the sender's
 //  slot @0x514DE7, the local slot's authority @0x50B3C4, PUNT ALL @0x50B945..0x50B951)]

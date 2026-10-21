@@ -264,8 +264,9 @@ JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
 	// other exit [orig: Game_StartMission @0x5262df].
 	if (phase_ == Phase::InMatch && post_auth_stage_ != PostAuthStage::AwaitDeployment)
 		return SendPumpLoop::NetworkFrame;
-	// An abandoned mission start runs the game loop's frames.
-	if (mission_start_aborted_) return SendPumpLoop::NetworkFrame;
+	// An abandoned mission start runs the game loop's frames, as does one whose final
+	// wait an ESC left (cancel_final_wait) [orig: Game_StartMission @0x5262E9 -> @0x5262F3].
+	if (mission_start_aborted_ || loading_cancel_) return SendPumpLoop::NetworkFrame;
 	switch (post_auth_stage_) {
 	case PostAuthStage::AwaitServerInfo:
 		return SendPumpLoop::ServerInfoWait;

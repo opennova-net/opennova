@@ -911,6 +911,9 @@ public:
 	//  Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5, its ESC
 	//  test @0x5262A2..0x5262AD]
 	bool in_game_loop() const { return joiner_ && joiner_->in_game_loop(); }
+	// The final wait's ESC: it leaves the wait for the game loop and does nothing else
+	// (JoinerConnection::cancel_final_wait carries the witness); false outside the wait.
+	bool cancel_final_wait() { return joiner_ != nullptr && joiner_->cancel_final_wait(); }
 	bool in_mission_start() const { return joiner_ && joiner_->in_mission_start(); }
 	bool in_pre_game() const { return joiner_ && joiner_->in_pre_game(); }
 	bool mission_start_aborted() const { return joiner_ && joiner_->mission_start_aborted(); }

@@ -879,6 +879,14 @@ public:
 	// (engine inmatch::JoinerRole::cancel_join carries the witness); inside it the
 	// teardown routes the wait's abort.
 	void cancel_join();
+	// The final wait's ESC: it leaves the wait for the game loop and nothing else (engine
+	// inmatch::JoinerConnection::cancel_final_wait carries the witness); false outside it.
+	bool cancel_join_final_wait();
+	// The game loop runs: from the S2C 0x0F, or from an ESC that left the final wait.
+	bool is_join_game_loop() const;
+	// A mission start the round-over gate abandoned: its game loop lingers to exit 4, which
+	// restarts it (engine inmatch::JoinerConnection::mission_start_aborted).
+	bool is_join_mission_start_aborted() const;
 	bool is_join_preload_ready() const;
 	// The joiner's admission-FSM stage name (diagnostics: the shell's post-load join
 	// watchdog names the stage a stalled join is parked in). Empty when not joining.

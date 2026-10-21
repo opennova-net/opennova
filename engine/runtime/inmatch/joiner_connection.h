@@ -920,7 +920,29 @@ public:
 	//  Game_StartMission's final wait @0x526295..0x5262e5 runs no net frame and exits only
 	//  on g_ClientWorldStateLoaded, cleared @0x5243be and set only by NapiNPClientMsg_0x00F
 	//  @0x42e2cd]
-	bool in_game_loop() const { return in_session() && initial_admission_complete_; }
+	// An ESC in the final wait leaves it too, with the 0x0F still owed (cancel_final_wait).
+	bool in_game_loop() const {
+		return in_session() && (initial_admission_complete_ || loading_cancel_);
+	}
+	// The mission start's final wait for the S2C 0x0F: its submissions are pushed and the
+	// 0x0F is not yet applied. An ESC there stores the loading cancel flag and leaves the
+	// wait, and nothing else: no exit reason, no teardown, no goodbye. The game loop runs
+	// from then on with the 0x0F still owed, whose handler completes the admission when it
+	// comes; no game-loop code reads the flag, which each mission start's head and each
+	// connect clear. False (nothing done) outside the wait.
+	// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5, its ESC
+	//  @0x5262AB -> g_LoadingCancelFlag = 1 @0x5262E9, out of the wait at @0x5262F3 ("Mission
+	//  loading complete" @0x5262FD); the clear at the head @0x524575;
+	//  CNapiNetwork_OnConnectedToServer @0x4C62E0 - the clear @0x4C63B7]
+	bool in_final_wait() const {
+		return in_session() && !in_game_loop() && !mission_start_aborted_ &&
+				post_auth_stage_ == PostAuthStage::AwaitDeployment;
+	}
+	bool cancel_final_wait() {
+		if (!in_final_wait()) return false;
+		loading_cancel_ = true;
+		return true;
+	}
 	// Inside Game_StartMission's waits and its load, from the game-start flag's server-info leg
 	// to the load's end (the 0x0B; stage AwaitMissionStart): an abort there (a wait's ESC or
 	// expiry, the load's ESC) is exit reason 1. The final wait for the S2C 0x0F is not: its ESC
@@ -1130,6 +1152,7 @@ private:
 	static constexpr uint64_t kClientJoinRetryMilliseconds = 2000;
 	static constexpr uint64_t kClientJoinTimeoutMilliseconds = 30000;
 
+	bool loading_cancel_ = false; // g_LoadingCancelFlag: an ESC left the final wait (cancel_final_wait)
 	uint32_t client_index_ = 0; // start(): the row's browse CI, else next_connection_index()
 	uint32_t client_key_ = 1;
 	NapiPrng *key_prng_ = nullptr;

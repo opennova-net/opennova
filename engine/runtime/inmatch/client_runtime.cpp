@@ -1094,6 +1094,20 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	if (joiner_ != nullptr && joiner_->mission_start_released() &&
 			joiner_->mission_start_loading())
 		return outbound;
+	// A mission start the round-over gate abandoned has loaded nothing: the game loop's
+	// exit 4, which the previous frame's linger stored, for a session peer that is not the
+	// authority re-enters the game loop. The main frame's tail reads the exit after that
+	// frame's own net frame and send and pushes the Game Loop; the main loop's next
+	// iteration runs its mission start, the reload's legs for the host's next mission
+	// (JoinerConnection::mission_start_aborted carries the waits' witness). So the restart
+	// runs here, ahead of this frame, never inside the frame that stored the exit.
+	// [orig: Game_ProcessMainFrame @0x5263F0 - the exit read @0x5267F8, reason 4 @0x526822,
+	//  in session @0x52682A, not the authority @0x526841 -> UI_NavHistoryPush(
+	//  &g_GameModeGameLoop) @0x526808; Game_MainLoop @0x52B630 - the next mode's init
+	//  @0x52B702..0x52B70D]
+	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->mission_start_aborted() &&
+			mission_exit_reason_ == kMissionExitRoundOver)
+		(void)begin_mission_reload();
 
 	// The main frame's 62-frame quality fold runs ahead of the client net frame
 	// (the level it stores is what the 0x4C leg below reports). Its countdown steps
@@ -1619,16 +1633,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		if (linger <= 0 && mission_exit_reason_ == kMissionExitNone)
 			mission_exit_reason_ = kMissionExitRoundOver;
 	}
-	// A mission start the round-over gate abandoned has loaded nothing: the game loop's
-	// exit 4 for a session peer that is not the authority re-enters the game loop, whose
-	// mission start runs the reload's legs for the host's next mission (JoinerConnection::
-	// mission_start_aborted carries the waits' witness).
-	// [orig: Game_ProcessMainFrame @0x5263F0 - reason 4 @0x526822, in session @0x52682A,
-	//  not the authority @0x526841 -> UI_NavHistoryPush(&g_GameModeGameLoop) @0x526808]
-	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->mission_start_aborted() &&
-			mission_exit_reason_ == kMissionExitRoundOver)
-		(void)begin_mission_reload();
-
 	if (role_ == Role::HostClient) {
 		// The 0x4C report leg has no authority test: the listen host's own
 		// client reports its level over its local connection like any peer, so

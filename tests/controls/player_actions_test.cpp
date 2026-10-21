@@ -392,7 +392,8 @@ bool test_wheel_subset_and_repeated_events() {
 // cycleweaponP (row 39) 212; the held-USE digit's seat pick and the USE release's mount toggle
 // call their handlers directly, past no head.
 // [orig: word_8159A8 + 108 * row (the catalog's codes); Input_HandleSpecialKeys @0x49c5c0 -
-//  Entity_FindAvailableSeat @0x49c6e6..0x49c6ed; Input_ProcessFrame @0x49d520 - the release
+//  the seat index @0x49c6e6..0x49c6ed, Entity_FindAvailableSeat (the call @0x49c702);
+//  Input_ProcessFrame @0x49d520 - the release
 //  edge @0x49d6c1..0x49d6dc]
 bool test_key_rows_carry_their_dispatch_codes() {
 	{

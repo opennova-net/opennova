@@ -146,11 +146,12 @@ public:
 	void arm_admission_watch(uint64_t now_ms);
 	void disarm_admission_watch();
 	bool admission_watch_active() const { return watch_active_; }
-	// ESC/abort for the admission wait (the second interruptible joiner wait —
-	// as reachable as retail's ESC leg in the wait loop [orig:
-	// NapiClient_WaitForGameStart @0x42cc10 return 3;
-	// Client_CheckDisconnectOrEscDuringLoad @0x520270]). Returns true when a
-	// live watch was told to abort; the next frame reports the failure.
+	// ESC/abort for the admission wait while the mission start's load runs (the
+	// load's ESC legs [orig: Client_CheckDisconnectOrEscDuringLoad @0x520270 - the ESC's
+	// reason 1 @0x5202A8; Game_StartMission @0x524360 - its calls @0x52555B / @0x525910 /
+	// @0x525A1B]). The final wait's ESC is no abort: the drive ends that wait first
+	// (SessionDrive::cancel_admission_wait). Returns true when a live watch was told to
+	// abort; the next frame reports the failure.
 	bool request_admission_abort();
 
 	// One observed frame, split so the shell's settle call happens between the

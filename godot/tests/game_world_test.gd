@@ -1957,6 +1957,80 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	world.unload()
 
 
+# ESC in the mission start's FINAL wait for the S2C 0x0F: retail stores
+# g_LoadingCancelFlag and leaves the wait for the game loop, and nothing else: no
+# exit reason, no teardown, no goodbye; the 0x0F still applies when it comes
+# [orig: Game_StartMission @0x524360 - the final wait's ESC @0x5262AB ->
+# g_LoadingCancelFlag = 1 @0x5262E9 -> out of the wait @0x5262F3]. The host is held
+# after the local load so its 0x0F cannot arrive before the ESC.
+func test_escape_in_the_final_wait_leaves_it_for_the_game_loop() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	var mission := MissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Final Wait Host"
+	host_options.mission_name = mission.get_mission_name()
+	host_options.mission_file = "mnml.bms"
+	host_options.expansion = ""
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+	var lost: Array[String] = []
+	world.session_lost.connect(func(reason: String): lost.append(reason))
+	var observed := {"local_load": false}
+	world.world_loaded.connect(
+			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
+	for _frame in range(600):
+		host.step()
+		await get_tree().process_frame
+		if bool(observed["local_load"]):
+			break
+	assert_true(bool(observed["local_load"]), "the join reached its local load")
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		world.unload()
+		return
+	const FINAL_WAIT := "awaiting the world state (S2C 0x0F)"
+	for _frame in range(120):
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if sim.get_join_admission_stage() == FINAL_WAIT:
+			break
+	assert_eq(sim.get_join_admission_stage(), FINAL_WAIT,
+			"the load pushed its submissions: the joiner sits in the final wait")
+	assert_true(world.cancel_join_admission(), "the final wait takes the ESC")
+	world.tick(Vector3.ZERO)
+	await get_tree().process_frame
+	assert_eq(failures.size(), 0, "the final wait's ESC aborts nothing")
+	assert_eq(lost.size(), 0, "the final wait's ESC tears nothing down")
+	assert_ne(sim.get_joiner_phase(), 5, "the session stays")
+	assert_false(world.cancel_join_admission(), "the wait is over: a second ESC finds no wait")
+	# The host answers now: its 0x0F still reaches the joiner and completes the admission.
+	for _frame in range(600):
+		host.step()
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if sim.get_join_admission_stage() != FINAL_WAIT:
+			break
+	assert_ne(sim.get_join_admission_stage(), FINAL_WAIT, "the later 0x0F still applies")
+	assert_eq(failures.size(), 0)
+	world.unload()
+
+
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	var blocker := UdpPump.new()
 	assert_eq(blocker.bind_listen(0), OK)

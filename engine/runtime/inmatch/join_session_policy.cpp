@@ -139,9 +139,8 @@ uint32_t JoinSessionPolicy::begin_admission_frame(std::string_view session_loss_
 	frame_now_ms_ = now_ms;
 	if (watch_active_ && watch_abort_) {
 		disarm_admission_watch();
-		// The reachable ESC return of the retail wait loop [orig:
-		// NapiClient_WaitForGameStart @0x42cc10 return 3;
-		// Client_CheckDisconnectOrEscDuringLoad @0x520270].
+		// The load's ESC [orig: Client_CheckDisconnectOrEscDuringLoad @0x520270 - reason 1
+		// @0x5202A8; its calls @0x52555B / @0x525910 / @0x525A1B].
 		fail_reason_ = "Mission loading aborted";
 		return kAdmissionFrameDone | kAdmissionLoadFailed;
 	}

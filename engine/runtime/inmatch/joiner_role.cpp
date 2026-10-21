@@ -1704,7 +1704,7 @@ bool JoinerRole::reset_to_baseline(SessionError &error) {
 //  CNapiGameSession_FullDestroy @0x4C96A0 - @0x4C96CC, @0x4C96DB;
 //  Client_CheckDisconnectOrEscDuringLoad @0x520270 - reason 1 @0x5202A8; Game_ProcessMainFrame
 //  @0x5263F0 - the Post Menu only on a nonzero reason @0x526860..0x526867;
-//  Game_ShutdownSubsystems @0x4A5390 - NapiLib_Shutdown (the call @0x4A5398); NapiLib_Shutdown
+//  Game_ShutdownSubsystems @0x4A5300 - NapiLib_Shutdown (the call @0x4A5398); NapiLib_Shutdown
 //  @0x4C9580 - CNapiGameSession_ResetActiveSession (the call @0x4C958B)]
 void JoinerRole::close() {
 	if (kernel_) {

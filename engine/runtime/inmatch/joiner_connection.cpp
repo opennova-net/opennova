@@ -254,6 +254,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	mission_start_aborted_ = false;
 	mission_start_released_this_pass_ = false;
 	initial_admission_complete_ = false;
+	loading_cancel_ = false; // [orig: CNapiNetwork_OnConnectedToServer @0x4C63B7]
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
 	deployment_pick_sequence_unbound_ = false;
@@ -2180,6 +2181,7 @@ std::vector<uint8_t> JoinerConnection::begin_mission_reload() {
 	mission_start_aborted_ = false;
 	mission_start_released_this_pass_ = false;
 	initial_admission_complete_ = false;
+	loading_cancel_ = false; // the mission start's head [orig: Game_StartMission @0x524575]
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
 	deployment_pick_sequence_unbound_ = false;
