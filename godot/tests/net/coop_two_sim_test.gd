@@ -689,15 +689,42 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(reached, "joiner reached in-match (handshake -> spawn gate -> 0x0C name-match)")
 	assert_eq(host.get_host_peer_count(), before_peers + 1, "host registered exactly one joiner peer")
 	assert_true(joiner.has_local_player(), "joiner spawned its local player L at the H-learned pose")
-	# Retail's initial join sends no C2S 0x0E: the S2C 0x0F completes
-	# admission and the joiner deploys directly (witnessed on the wire
-	# against a live retail co-op host). The 0x0E spawn pick belongs to the DEATH
-	# flow — drive it there through the authority's real death transaction.
+	# Retail's initial join forces no C2S 0x0E: the S2C 0x0F completes
+	# admission (witnessed on the wire against a live retail co-op host). The
+	# only 0x0E before the death flow below is the player's own overlay pick.
 	assert_false(joiner.is_join_deploy_pick_pending(),
 			"the initial join deploys with no forced C2S 0x0E")
 	var health_before_death := joiner.get_local_player_health()
 	assert_gt(health_before_death, 0,
 			"the initial authoritative spawn latch keeps local L alive")
+	# The fixture's team-owned spawn zone holds the joining slot at the deploy
+	# overlay (the join sets the slot's undeployed bit whenever the mission has
+	# spawn zones), and every 0x0A re-hides a held slot's body. A hidden body's
+	# tick returns ahead of its death edge, on the host and on the joiner alike,
+	# so a held joiner the authority kills reads alive until its hold releases.
+	# Deploy out of the join hold first (the overlay's default pick): the death
+	# transaction then lands on an unhidden body, the host's death edge raises
+	# its dead bit and the dead self record latches the joiner's.
+	# [orig: Server_OnPlayerJoin @0x51A680 - SpawnZoneList_GetCount @0x51A6E9,
+	#  the undeployed bit `or byte [esi+15F38h], 10h` @0x51A6F2;
+	#  NetPacket_WritePlayerState @0x4FF6B0 - the held slot's hide
+	#  @0x4FF7AA..0x4FF7B8; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
+	#  hidden return @0x4B411B..0x4B4127 ahead of the death edge
+	#  @0x4B4BF1..0x4B4C02]
+	assert_true(joiner.is_deploy_overlay_active(),
+			"the spawn-zone mission holds the joiner at the deploy overlay")
+	var join_hold_released := false
+	for i in range(1200):
+		if i % 64 == 0:
+			joiner.send_deployment_pick(0)
+		host.step()
+		joiner.step()
+		if not joiner.is_deploy_overlay_active():
+			join_hold_released = true
+			break
+		OS.delay_msec(2)
+	assert_true(join_hold_released,
+			"the overlay's default pick releases the join hold")
 	assert_true(_kill_joiner_from_host(host, joiner),
 			"the authority's death transaction killed the joiner")
 	var death_pick_pending := false
