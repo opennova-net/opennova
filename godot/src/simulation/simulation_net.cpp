@@ -929,6 +929,11 @@ void Simulation::set_join_mission_start_loading(bool p_loading) {
 	install_join_mission_start();
 }
 
+void Simulation::set_join_sync_tail_loading(bool p_loading) {
+	net_.join_sync_tail_loading = p_loading;
+	install_join_mission_start();
+}
+
 bool Simulation::is_join_mission_start_released() const {
 	return is_joiner() && runtime_ != nullptr && runtime_->mission_start_released();
 }

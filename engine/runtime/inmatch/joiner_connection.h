@@ -609,16 +609,27 @@ public:
 	// under the declaration, the 0x11's own pass keeps the sync-tail wait's pace, later frames
 	// neither receive nor send (the client runtime's frame returns at its head), and the
 	// frame after the release queues the 0x0A at its head. Without the declaration the 0x0A
-	// joins the queue at the 0x11's own send boundary.
-	// [orig: Game_StartMission @0x524360 - NapiClient_SendPlayerSyncAndWaitForSyncTail (the
-	//  call @0x524DAB, the return test @0x524DB0), Game_LoadTerrainDuringConnect (the call
-	//  @0x524DF2), LoadingScreen_UpdateAndPresent @0x524E09, the gate manager's
-	//  CNapiGameSession_ProcessPeriodicUpdate @0x524E13, Avatars_LoadComboModels (the call
-	//  @0x524E24), NapiClient_WaitForGameStart (the call @0x524E29);
+	// joins the queue at the 0x11's own send boundary. Every mission start of a joiner runs the
+	// load: its isConnecting is the start's is_first_load (is_restart == 0), and a joiner's
+	// every start, the first join's and each reload's, is the game loop's
+	// Game_StartMission(0); the restart's 1 is the single-player restart's alone. The load
+	// reads the map and its environment (a failure leaves for the Post Menu, exit reason 20),
+	// the terrain and the mission's water overrides.
+	// [orig: Game_StartMission @0x524360 - is_first_load (setz @0x524385, esi @0x5243A4)
+	//  passed @0x524DF1, NapiClient_SendPlayerSyncAndWaitForSyncTail (the call @0x524DAB, the
+	//  return test @0x524DB0), Game_LoadTerrainDuringConnect (the call @0x524DF2, its failure
+	//  @0x524DFC -> exit 0x14 @0x524785), LoadingScreen_UpdateAndPresent @0x524E09, the gate
+	//  manager's CNapiGameSession_ProcessPeriodicUpdate @0x524E13, Avatars_LoadComboModels
+	//  (the call @0x524E24), NapiClient_WaitForGameStart (the call @0x524E29);
 	//  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - the receive @0x42CB95 /
 	//  @0x42CB9F, the paced send @0x42CBB5..0x42CBC0, the flag's test @0x42CBE7;
 	//  NapiClient_WaitForGameStart @0x42CC10 - CNapiNetwork_QueueReliableMessage(0x0A)
-	//  @0x42CC3F, the receive @0x42CC7E / @0x42CC88, the send @0x42CC92]
+	//  @0x42CC3F, the receive @0x42CC7E / @0x42CC88, the send @0x42CC92;
+	//  GameLoop_Init @0x526370 - Game_StartMission(0) @0x526375 / @0x526377;
+	//  Game_RestartRoundSP @0x5263A0 - Game_StartMission(1) @0x5263D9 / @0x5263DB;
+	//  Game_LoadTerrainDuringConnect @0x520710 - the isConnecting test @0x520715,
+	//  Terrain_LoadEnvironmentConfig @0x52073B (its 0 returned @0x520747), Terrain_Init
+	//  @0x52076F, Environment_SetWaterColor @0x5207A8, Environment_SetWaterMurk @0x5207CE]
 	void set_sync_tail_loading(bool loading) { sync_tail_loading_ = loading; }
 	bool sync_tail_loading() const { return sync_tail_loading_; }
 	// The declared 0x11 load runs: the 0x11 came and its 0x0A is still owed.

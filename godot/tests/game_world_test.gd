@@ -2063,6 +2063,73 @@ func test_escape_in_the_final_wait_leaves_it_for_the_game_loop() -> void:
 	world.unload()
 
 
+# A join's S2C 0x11 runs the 0x0B header's environment and terrain load ahead of the game-start
+# wait's C2S 0x0A, as retail's joiner arm loads between its sync-tail wait and
+# NapiClient_WaitForGameStart, and the S2C 0x1A's mission start goes on from the objects
+# (D-NET-NEW-L2-19; engine inmatch/joiner_connection.h set_sync_tail_loading carries the
+# witness). No mission root lives under the 0x11's load.
+func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_start() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	var mission := MissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Sync Tail Host"
+	host_options.mission_name = mission.get_mission_name()
+	host_options.mission_file = "mnml.bms"
+	host_options.expansion = ""
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+	var observed := {"identified": false, "root_at_identify": true, "local_load": false}
+	world.join_session_identified.connect(func(_info: LoadingScreenInfo) -> void:
+		observed["identified"] = true
+		observed["root_at_identify"] = world.get_runtime() != null
+	, CONNECT_ONE_SHOT)
+	world.world_loaded.connect(
+			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
+	for _frame in range(600):
+		host.step()
+		await get_tree().process_frame
+		if bool(observed["identified"]):
+			break
+	assert_true(bool(observed["identified"]), "the join reached its S2C 0x11")
+	assert_false(bool(observed["root_at_identify"]), "no mission root lives under the 0x11's load")
+	assert_false(bool(observed["local_load"]), "the mission start's load waits for the S2C 0x1A")
+	var sync_tail_load: LoadTimeline = world.last_load_timeline()
+	assert_not_null(sync_tail_load, "the 0x11's load ran in the identification's frame")
+	if sync_tail_load != null:
+		var stages := []
+		for span in sync_tail_load.spans():
+			stages.append(span.name)
+		assert_eq(stages, ["environment", "terrain"], "the 0x11 loads the environment and terrain")
+	for _frame in range(600):
+		host.step()
+		await get_tree().process_frame
+		if bool(observed["local_load"]):
+			break
+	assert_true(bool(observed["local_load"]), "the S2C 0x1A's mission start loaded the world")
+	assert_eq(failures.size(), 0)
+	var mission_start_load: LoadTimeline = world.last_load_timeline()
+	assert_not_null(mission_start_load)
+	if mission_start_load != null and not mission_start_load.spans().is_empty():
+		assert_eq(mission_start_load.spans()[0].name, "objects",
+				"the S2C 0x1A's load goes on from the objects; the 0x11 ran the head")
+	world.unload()
+
+
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	var blocker := UdpPump.new()
 	assert_eq(blocker.bind_listen(0), OK)

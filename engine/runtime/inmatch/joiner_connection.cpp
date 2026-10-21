@@ -2260,10 +2260,11 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			}
 		} else if (m.tag == s2c::DISCONNECT_UNLOCK) {
 			// S2C 0x11 is the terminal pre-world admission marker. It ends the mission start's
-			// sync-tail wait, and the joiner arm goes straight on into NapiClient_WaitForGameStart,
-			// which queues the empty reliable C2S 0x0A at its head and pumps it: the 0x0A answers
-			// the 0x11 with no mission load ahead of it (the load waits for the S2C 0x1A's mission
-			// start, set_mission_start_loading; D-NET-NEW-L2-19).
+			// sync-tail wait; the joiner arm loads the 0x0B header's terrain and environment
+			// and the avatar combo models (an embedder's declared load, set_sync_tail_loading),
+			// then NapiClient_WaitForGameStart queues the empty reliable C2S 0x0A at its head and
+			// pumps it; the rest of the load waits for the S2C 0x1A's mission start
+			// (set_mission_start_loading; D-NET-NEW-L2-19).
 			// [orig: NapiNPClientMsg_0x011 @0x4226E0; Game_StartMission @0x524360 - the joiner
 			//  arm's NapiClient_SendPlayerSyncAndWaitForSyncTail @0x524DAB, then
 			//  Game_LoadTerrainDuringConnect @0x524DF2, Avatars_LoadComboModels @0x524E24,

@@ -773,6 +773,15 @@ private:
 	// entry (load_mission_data) converge here.
 	int load_mission_internal(const Ref<MissionData> &p_mission, const String &p_bms_name,
 			const Ref<ResourceRoot> &p_resource_root);
+	// A join's S2C 0x11 load (SessionDrive::step_preload): the mission start's head and its
+	// terrain off the host's 0x0B header; its S2C 0x1A load_mission_internal goes on from the
+	// objects.
+	int load_join_terrain(const Ref<MissionData> &p_mission, const String &p_bms_name,
+			const Ref<ResourceRoot> &p_resource_root);
+	// The mission start's head through its terrain (the option copies, the tile info, the
+	// environment, the terrain); `r_timeline` takes the load's timeline.
+	int load_mission_head(const Ref<MissionData> &p_mission, const String &p_bms_name,
+			const Ref<ResourceRoot> &p_resource_root, Ref<LoadTimeline> &r_timeline);
 	void start_mission_root();
 	void place_mission_objects(const Ref<MissionData> &p_mission);
 	// The placer's per-model progress pulse (the load plan's per-model pulse
@@ -848,6 +857,9 @@ private:
 	bool join_wire_til_applied_ = false;
 	bool join_wire_assets_failed_ = false;
 	bool join_wire_asset_failure_emitted_ = false;
+	// A join's S2C 0x11 ran the mission start's head (load_join_terrain), which its S2C 0x1A load
+	// skips.
+	bool join_terrain_preloaded_ = false;
 	bool world_ready_ = false;
 	Ref<MissionData> loaded_mission_;
 	// The BMS clock the weather home is seeded with at the mission-start

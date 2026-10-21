@@ -878,6 +878,10 @@ public:
 	// set_mission_start_loading): the shell declares its load runs after the S2C 0x1A,
 	// reads the release, and once the load has ended pushes the two 0x2F and the 0x0B.
 	void set_join_mission_start_loading(bool p_loading);
+	// The joiner's load at the S2C 0x11 (engine: inmatch/joiner_connection.h
+	// set_sync_tail_loading): the shell declares it while the 0x11 is awaited and clears it
+	// once the load has ended; the 0x0A follows.
+	void set_join_sync_tail_loading(bool p_loading);
 	bool is_join_mission_start_released() const;
 	void finish_join_mission_start();
 	bool poll_join_preload();

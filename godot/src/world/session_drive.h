@@ -195,9 +195,16 @@ private:
 	bool reconcile_join_expansion();
 	// The S2C 0x11's identification of the joined session, before the world stream: the
 	// expansion reconcile, the promoted map name and header checks, the stream's item
-	// catalog, the identified signal, the stream wait's window. False when the join has
-	// been failed and the driver must stop.
+	// catalog, the identified signal. False when the join has been failed and the driver
+	// must stop.
 	bool identify_join_session();
+	// The S2C 0x11's load after the identification: the mission start's head and terrain
+	// off the 0x0B header, the declared load's end (the 0x0A follows), the stream wait's
+	// window. False when the join has been failed and the driver must stop.
+	bool load_join_terrain();
+	// The host's S2C 0x0B header as the join's mission document; null after the join's
+	// failure.
+	Ref<MissionData> open_join_mission_header(const String &p_bms);
 	// The per-frame admission/deploy/loss observer.
 	void update_joiner_admission_signals();
 	void fail_join_preload(const String &p_reason);
@@ -246,8 +253,8 @@ private:
 	// is never restarted.
 	Ref<Simulation> join_preload_sim_;
 	Ref<ResourceRoot> join_preload_root_;
-	// The S2C 0x11's identification ran (identify_join_session): the world stream
-	// runs until the S2C 0x1A's load.
+	// The S2C 0x11's identification and load ran (identify_join_session,
+	// load_join_terrain): the world stream runs until the S2C 0x1A's load.
 	bool join_identified_ = false;
 	// The map change's kept session and the join it came from.
 	Ref<Simulation> kept_sim_;

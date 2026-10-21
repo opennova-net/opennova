@@ -234,80 +234,19 @@ int GameWorld::load_mission_data(const Ref<MissionData> &p_mission, const String
 int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const String &p_bms_name,
 		const Ref<ResourceRoot> &p_resource_root) {
 	const bool wire_header_join = p_mission->is_wire_header_only();
-	// The mission start's copy of the options' object detail: the frames draw
-	// at it until the next mission start (engine: renderer/object_lod.h).
-	object_detail_ = object_polydetail_;
-	// The same copy of the texfilter level: the device mode the terrain detail
-	// family samples at follows it until the next mission start (engine:
-	// renderer/texture_filter.h).
-	session_texfilter_level_ = texfilter_level_;
-	publish_texfilter_state();
-	// The same copy of texcompression_level and particle_density: the terrain
-	// and the particle pages this mission builds, and the scene passes' particle
-	// stride, follow them until the next mission start (engine:
-	// renderer/texture_compression.h, renderer/particle_density.h).
-	session_texcompression_level_ = texcompression_level_;
-	session_terrain_texdetail_ = terrain_texdetail_;
-	session_particle_density_ = particle_density_;
-	publish_session_render_settings();
-	// The same copy of NoBlood's ragdoll bit: this mission's corpses ragdoll
-	// or keep their clips until the next mission start (engine:
-	// ragdoll/ragdoll_option.h).
-	ragdolls_.set_enabled(game_config_.is_valid() &&
-			opennova::ragdoll::ragdolls_enabled(game_config_->native().cfg().no_blood));
-	join_wire_assets_pending_ = wire_header_join;
-	join_wire_til_applied_ = false;
-	join_wire_assets_failed_ = false;
-	join_wire_asset_failure_emitted_ = false;
-	// The local-asset gate holds for wire-header joins too — there is no world
-	// without terrain, and retail joiners also resolve it from the local
-	// install by the name the wire supplies (net-re section 5.28: custom
-	// missions reference stock assets). Only the REPORT is join-aware: a wire
-	// join names the host's stream and the mounted expansion so a live punt
-	// reads as "your install lacks X", not as a bad local file.
-	// The document's references are basenames from either header source (the
-	// wire 0x0B header's extension is dropped by mission_info()).
-	const String trn = p_mission->get_terrain_ref() + ".trn";
-	if (!p_resource_root->has_file(trn)) {
-		emit_signal(kSignalLoadFailed,
-				missing_mission_asset_reason(trn, p_bms_name, p_resource_root, wire_header_join));
-		return ERR_FILE_NOT_FOUND;
+	// A join ran the head at its S2C 0x11 (load_join_terrain): this load, at its S2C 0x1A, goes
+	// on from the objects (engine inmatch/joiner_connection.h set_sync_tail_loading carries the
+	// witness).
+	const bool head_loaded = wire_header_join && join_terrain_preloaded_;
+	join_terrain_preloaded_ = false;
+	Ref<LoadTimeline> timeline;
+	if (head_loaded) {
+		timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+		last_load_timeline_ = timeline;
+	} else {
+		const int head_error = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
+		if (head_error != OK) return head_error;
 	}
-	// The environment gates nothing: a .env that is not there is skipped and the
-	// mission starts on the engine's defaults (load_environment).
-	const String env_name = p_mission->get_environment_ref() + ".env";
-
-	set_weather_world_tick_driven(true);
-	set_water_world_rendering_enabled(false);
-	// Keep stage attribution stable so load timelines remain comparable.
-	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
-	last_load_timeline_ = timeline;
-	resource_root_ = p_resource_root;
-	load_mission_tile_info(p_bms_name, p_mission, p_resource_root, PackedByteArray(),
-			p_mission->is_wire_header_only());
-	// Each stage below presents the plan's anchor when it starts.
-	emit_signal(kSignalLoadProgress,
-			MissionData::load_progress_percent(MissionData::LOAD_STAGE_ENVIRONMENT));
-	timeline->span("environment");
-	load_environment(trn, env_name);
-	apply_mission_environment_overrides(p_mission);
-	// Initialize the exact mission clock and the reset weather owner before the
-	// runtime is constructed. The authority publishes this T0 sample after setup
-	// but before play, so its first network tick cannot observe stale/default data.
-	Ref<MissionInfo> mission_info = p_mission->get_info();
-	mission_clock_start_q8_8_ = mission_info->get_start_time();
-	mission_clock_minutes_per_day_ = mission_info->get_minutes_per_day();
-	scene_.configure_mission_clock(mission_clock_start_q8_8_, mission_clock_minutes_per_day_);
-	prepare_world_driven_weather();
-	timeline->end_span();
-	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_TERRAIN));
-	timeline->span("terrain");
-	if (!load_terrain(trn, p_mission->get_tile_set_ref(), p_mission->get_environment_ref())) {
-		emit_signal(kSignalLoadFailed, vformat("failed to load %s", trn));
-		timeline->finish();
-		return ERR_CANT_OPEN;
-	}
-	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_OBJECTS));
 
 	loaded_mission_ = p_mission;
@@ -380,6 +319,107 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	build_minimap_water_mask();
 	emit_signal(kSignalLoadProgress, MissionData::LOAD_PROGRESS_WORLD_READY);
 	emit_signal(kSignalWorldLoaded);
+	return OK;
+}
+
+// A join's S2C 0x11 load (SessionDrive::step_preload): the mission start's head and its terrain
+// from the host's 0x0B header, ahead of the game-start wait's 0x0A; its S2C 0x1A load
+// (load_mission_internal) goes on from the objects. Every mission start of a join runs it, a
+// reload's too, whose previous world the shell unloaded first (engine
+// inmatch/joiner_connection.h set_sync_tail_loading carries the witness). Emits load_failed and
+// returns the error on a failure.
+int GameWorld::load_join_terrain(const Ref<MissionData> &p_mission, const String &p_bms_name,
+		const Ref<ResourceRoot> &p_resource_root) {
+	join_terrain_preloaded_ = false;
+	Ref<LoadTimeline> timeline;
+	const int err = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
+	if (err != OK) return err;
+	timeline->finish();
+	join_terrain_preloaded_ = true;
+	return OK;
+}
+
+// The mission start's head through its terrain: the start's copies of the options, the
+// terrain's gate, the tile info, the environment (the mission's overrides, its clock, the
+// weather owner) and the terrain. Emits load_failed and returns the error on a failure;
+// `r_timeline` is the load's timeline from the tile info on.
+int GameWorld::load_mission_head(const Ref<MissionData> &p_mission, const String &p_bms_name,
+		const Ref<ResourceRoot> &p_resource_root, Ref<LoadTimeline> &r_timeline) {
+	const bool wire_header_join = p_mission->is_wire_header_only();
+	// The mission start's copy of the options' object detail: the frames draw
+	// at it until the next mission start (engine: renderer/object_lod.h).
+	object_detail_ = object_polydetail_;
+	// The same copy of the texfilter level: the device mode the terrain detail
+	// family samples at follows it until the next mission start (engine:
+	// renderer/texture_filter.h).
+	session_texfilter_level_ = texfilter_level_;
+	publish_texfilter_state();
+	// The same copy of texcompression_level and particle_density: the terrain
+	// and the particle pages this mission builds, and the scene passes' particle
+	// stride, follow them until the next mission start (engine:
+	// renderer/texture_compression.h, renderer/particle_density.h).
+	session_texcompression_level_ = texcompression_level_;
+	session_terrain_texdetail_ = terrain_texdetail_;
+	session_particle_density_ = particle_density_;
+	publish_session_render_settings();
+	// The same copy of NoBlood's ragdoll bit: this mission's corpses ragdoll
+	// or keep their clips until the next mission start (engine:
+	// ragdoll/ragdoll_option.h).
+	ragdolls_.set_enabled(game_config_.is_valid() &&
+			opennova::ragdoll::ragdolls_enabled(game_config_->native().cfg().no_blood));
+	join_wire_assets_pending_ = wire_header_join;
+	join_wire_til_applied_ = false;
+	join_wire_assets_failed_ = false;
+	join_wire_asset_failure_emitted_ = false;
+	// The local-asset gate holds for wire-header joins too — there is no world
+	// without terrain, and retail joiners also resolve it from the local
+	// install by the name the wire supplies (net-re section 5.28: custom
+	// missions reference stock assets). Only the REPORT is join-aware: a wire
+	// join names the host's stream and the mounted expansion so a live punt
+	// reads as "your install lacks X", not as a bad local file.
+	// The document's references are basenames from either header source (the
+	// wire 0x0B header's extension is dropped by mission_info()).
+	const String trn = p_mission->get_terrain_ref() + ".trn";
+	if (!p_resource_root->has_file(trn)) {
+		emit_signal(kSignalLoadFailed,
+				missing_mission_asset_reason(trn, p_bms_name, p_resource_root, wire_header_join));
+		return ERR_FILE_NOT_FOUND;
+	}
+	// The environment gates nothing: a .env that is not there is skipped and the
+	// mission starts on the engine's defaults (load_environment).
+	const String env_name = p_mission->get_environment_ref() + ".env";
+
+	set_weather_world_tick_driven(true);
+	set_water_world_rendering_enabled(false);
+	// Keep stage attribution stable so load timelines remain comparable.
+	r_timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+	last_load_timeline_ = r_timeline;
+	resource_root_ = p_resource_root;
+	load_mission_tile_info(p_bms_name, p_mission, p_resource_root, PackedByteArray(),
+			p_mission->is_wire_header_only());
+	// Each stage below presents the plan's anchor when it starts.
+	emit_signal(kSignalLoadProgress,
+			MissionData::load_progress_percent(MissionData::LOAD_STAGE_ENVIRONMENT));
+	r_timeline->span("environment");
+	load_environment(trn, env_name);
+	apply_mission_environment_overrides(p_mission);
+	// Initialize the exact mission clock and the reset weather owner before the
+	// runtime is constructed. The authority publishes this T0 sample after setup
+	// but before play, so its first network tick cannot observe stale/default data.
+	Ref<MissionInfo> mission_info = p_mission->get_info();
+	mission_clock_start_q8_8_ = mission_info->get_start_time();
+	mission_clock_minutes_per_day_ = mission_info->get_minutes_per_day();
+	scene_.configure_mission_clock(mission_clock_start_q8_8_, mission_clock_minutes_per_day_);
+	prepare_world_driven_weather();
+	r_timeline->end_span();
+	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_TERRAIN));
+	r_timeline->span("terrain");
+	if (!load_terrain(trn, p_mission->get_tile_set_ref(), p_mission->get_environment_ref())) {
+		emit_signal(kSignalLoadFailed, vformat("failed to load %s", trn));
+		r_timeline->finish();
+		return ERR_CANT_OPEN;
+	}
+	r_timeline->end_span();
 	return OK;
 }
 
@@ -488,6 +528,7 @@ void GameWorld::unload() {
 	join_wire_til_applied_ = false;
 	join_wire_assets_failed_ = false;
 	join_wire_asset_failure_emitted_ = false;
+	join_terrain_preloaded_ = false;
 	stop_water_render_stats();
 	// Net-session teardown: the preload sim/root, the notification latches, the
 	// typed request staging, and the NovaWorld gate registration.
