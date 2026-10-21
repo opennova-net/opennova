@@ -638,7 +638,15 @@ joiner by the capture's first C2S 0x0C uplink, the host by roster slot 0
 `expect.sequence` in order. Each run's matched fields and `expect.count_kinds`
 counts must also equal the reference (RR when given). Capture-local fields
 (frame, time, session, positions) and the scenario's `expect.mask` fields are
-excluded.
+excluded. A run root moved since its run (the evidence copy) resolves its played
+copy and capture under its new directory, as `opennova-parity` does.
+
+`run_parity_suite.ps1` runs the check on a scenario case's cells before the
+judge (`<case>.scenario.json` beside the verdict). A cell whose expect sequence
+failed did not play the case and is not judged against one that did: a failed
+RR or RR-aa leaves the case unjudged, a failed subject leaves the verdict, and
+either makes the case `SCENARIO_FAIL` (x5 judged drive's rows from RR, RO and
+OO, whose USE never seated).
 
 A session-level disconnect prints as `kind=disconnect` (full tag 0x103, the
 connection-description record), with `class`, `reason` (DPC, the code the

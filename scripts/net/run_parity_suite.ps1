@@ -49,7 +49,9 @@
 # PARITY_SUITE_CELL / PARITY_SUITE_CASE lines, then
 # PARITY_SUITE_STATUS=PASS|FAIL and PARITY_SUITE_REPORT=<suite-summary.json>.
 # PASS needs every selected cell to succeed and every selected case judged PASS
-# with all three subject topologies present. Exit 0 PASS, 1 FAIL.
+# with all three subject topologies present; a scenario case also needs every
+# cell to have played its scenario (compare_scenario.py's expect sequence, else
+# SCENARIO_FAIL). Exit 0 PASS, 1 FAIL.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -685,6 +687,47 @@ foreach ($case in $selectedCases) {
             }
         }
     }
+    # A scenario case's cells are first checked against the scenario's expect
+    # sequence (compare_scenario.py). A run whose sequence failed did not play the
+    # case, so it is not judged against one that did (x5 judged drive's rows from
+    # RR, RO and OO, whose USE never seated, and the revive's from three cells
+    # where nothing happened): a failed RR or RR-aa leaves the case unjudged, and
+    # a failed subject leaves the verdict, which then cannot pass.
+    $scenarioStatus = ""
+    $scenarioReport = ""
+    $scenarioFailed = @()
+    if (-not $Plan -and $drift.Count -eq 0 -and $usable.Count -gt 0 -and
+            $case.PSObject.Properties.Name -contains "scenario") {
+        $scenarioReport = Join-Path $suiteDir "$($case.id).scenario.json"
+        if (Test-Path -LiteralPath $scenarioReport) { Remove-Item -LiteralPath $scenarioReport -Force }
+        $scenarioArgs = @("-I", (Join-Path $PSScriptRoot "compare_scenario.py"), "--out", $scenarioReport)
+        $wireExe = Find-App -Dir "wire"
+        if ($wireExe) { $scenarioArgs += @("--wire", $wireExe) }
+        foreach ($cell in $usable) {
+            $scenarioArgs += (Join-Path $cellResults[$cell.Name].run_root "run-summary.json")
+        }
+        $scenarioLines = @(& python @scenarioArgs)
+        $scenarioExit = $LASTEXITCODE
+        $scenarioLines | ForEach-Object { Write-Host "PARITY_SUITE_SCENARIO case=$($case.id) $_" }
+        if ($scenarioExit -notin @(0, 1) -or -not (Test-Path -LiteralPath $scenarioReport -PathType Leaf)) {
+            $scenarioStatus = "ERROR"
+        }
+        else {
+            $played = Get-Content -LiteralPath $scenarioReport -Raw | ConvertFrom-Json
+            foreach ($cell in $usable) {
+                $runId = [string] $cellResults[$cell.Name].run_id
+                $result = @($played.cells | Where-Object { [string] $_.run_id -ceq $runId })
+                if ($result.Count -ne 1 -or -not [bool] $result[0].passed_expectations) {
+                    $scenarioFailed += $cell.Name
+                }
+            }
+            $scenarioStatus = if ($scenarioFailed.Count -gt 0) { "FAIL" } else { "PASS" }
+        }
+        Write-Host ("PARITY_SUITE_NOTE case=$($case.id) scenario=$scenarioStatus" +
+            " failed=$(if ($scenarioFailed.Count) { $scenarioFailed -join ',' } else { '-' }) report=$scenarioReport")
+        $usable = @($usable | Where-Object { $_.Name -notin $scenarioFailed })
+        $subjects = @($subjects | Where-Object { $_.Name -notin $scenarioFailed })
+    }
     $caseResult = [ordered]@{
         id = [string] $case.id
         status = "INCOMPLETE"
@@ -692,6 +735,9 @@ foreach ($case in $selectedCases) {
         report = ""
         missing = @($missing)
         reference_drift = @($drift.ToArray())
+        scenario = $scenarioStatus
+        scenario_report = $scenarioReport
+        scenario_failed = @($scenarioFailed)
         cells = $cellResults
     }
     $haveReference = @($usable | Where-Object { $_.Name -in @("RR", "RR-aa") }).Count -eq 2
@@ -701,6 +747,14 @@ foreach ($case in $selectedCases) {
     elseif ($drift.Count -gt 0) {
         $caseResult.status = "ERROR"
         Write-Host "PARITY_SUITE_NOTE case=$($case.id) not judged: $($drift -join '; ')"
+    }
+    elseif ($scenarioStatus -eq "ERROR") {
+        $caseResult.status = "ERROR"
+        Write-Host "PARITY_SUITE_NOTE case=$($case.id) not judged: the scenario check did not run"
+    }
+    elseif (@($scenarioFailed | Where-Object { $_ -in @("RR", "RR-aa") }).Count -gt 0) {
+        $caseResult.status = "SCENARIO_FAIL"
+        Write-Host "PARITY_SUITE_NOTE case=$($case.id) not judged: the reference did not play the scenario"
     }
     elseif ($haveReference -and $subjects.Count -gt 0) {
         $report = Join-Path $suiteDir "$($case.id).verdict.json"
@@ -726,6 +780,9 @@ foreach ($case in $selectedCases) {
         }
         if ($caseResult.status -eq "PASS" -and $missing.Count -gt 0) {
             $caseResult.status = "INCOMPLETE"
+        }
+        if ($caseResult.status -eq "PASS" -and $scenarioFailed.Count -gt 0) {
+            $caseResult.status = "SCENARIO_FAIL"
         }
         # E3: the late joiner's own session, judged as a second verdict (each
         # run's late_joiner capture bound to its client port, from its readiness).

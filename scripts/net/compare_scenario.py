@@ -47,6 +47,22 @@ PLAYED_FIELDS = ("mission", "game_type", "actor", "prelude", "setup", "staging",
                  "settle_seconds")
 
 
+def resolve(recorded: str, summary: dict, summary_path: Path) -> Path:
+    """A path the summary recorded under its run root, rebased onto the directory
+    the summary sits in when the run root has moved since (the rule
+    opennova-parity's resolve_capture follows)."""
+    path = Path(recorded)
+    if path.exists():
+        return path
+    root = summary.get("run_root", "")
+    if root:
+        try:
+            return summary_path.parent / path.relative_to(Path(root))
+        except ValueError:
+            pass
+    return path
+
+
 def parse_utc_ns(text: str) -> int:
     """PowerShell's round-trip ("o") UTC timestamp, to Unix nanoseconds."""
     match = re.fullmatch(
@@ -133,14 +149,14 @@ def analyze(summary_path: Path, wire: Path, expectations: Path | None) -> dict:
     witness = summary.get("scenario_witness")
     if not witness:
         raise RuntimeError(f"{summary_path} is not a scenario run (no scenario_witness)")
-    played_path = Path(witness["path"])
+    played_path = resolve(witness["path"], summary, summary_path)
     digest = hashlib.sha256(played_path.read_bytes()).hexdigest()
     if digest != witness["sha256"]:
         raise RuntimeError(f"{played_path} changed since run {summary['run_id']}")
     played = json.loads(played_path.read_text(encoding="utf-8"))
     source = expectations or Path(witness["source"])
     scenario = json.loads(source.read_text(encoding="utf-8"))
-    events = decode_events(wire, Path(summary["evidence_capture"]))
+    events = decode_events(wire, resolve(summary["evidence_capture"], summary, summary_path))
     actor = actor_of(events, played.get("actor", "joiner"))
     start = parse_utc_ns(witness["started_utc"])
     stop = parse_utc_ns(witness["settled_utc"])
