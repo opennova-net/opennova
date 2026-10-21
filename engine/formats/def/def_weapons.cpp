@@ -779,6 +779,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 Token args[6]; const int count = value_tokens(tokens, args, 6);
                 if (count > 0) safe_copy(ca.function, sizeof(ca.function), args[0].s, args[0].len);
                 ca.function_args_count = count > 0 ? static_cast<size_t>(count - 1) : 0;
+                /* The arguments go to the arm's switch on their count, which packs one
+                   to four into the action's word and has no arm for more: the word keeps
+                   what an earlier line packed, which the record does not hold [orig:
+                   ActionDef_ParseScriptLine @0x402962..0x40296E, the default @0x402B67]. */
                 if (ca.function_args_count > 4) {
                     authoring_issue(ca.unmodeled_count, block_report, number, ca.name, as_read.c_str(), as_read.size(), DefIssueCode::InvalidValue);
                     ca.function_args_count = 4;

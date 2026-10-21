@@ -109,6 +109,10 @@ struct Diagnostic {
 	// The edits of its own file that set it right, as its maker planned them (PlannedFix), in the
 	// order Problems offers them; none for a finding whose code's row offers no EditRecord fix.
 	std::vector<PlannedFix> planned;
+	// A line of the file's source its reader read and its model cannot carry (a blocking SourceIssue,
+	// documents/source_issue_findings.h): `line` names the file's own line, which Problems offers to correct
+	// in place whatever the code's row (session/problem_fixes.h: Correct the line...).
+	bool source_line = false;
 
 	// The row the finding was made from; null for a Diagnostic no finding was made into (an error
 	// left as it was because nothing failed).
@@ -171,7 +175,7 @@ inline bool operator==(const Diagnostic &a, const Diagnostic &b) {
 			a.asset == b.asset && a.field == b.field && a.record == b.record && a.line == b.line &&
 			a.column == b.column && a.row_id == b.row_id && a.child_id == b.child_id && a.record_kind == b.record_kind &&
 			a.record_key == b.record_key && a.record_title == b.record_title && a.subject == b.subject &&
-			a.planned == b.planned;
+			a.planned == b.planned && a.source_line == b.source_line;
 }
 inline bool operator!=(const Diagnostic &a, const Diagnostic &b) { return !(a == b); }
 

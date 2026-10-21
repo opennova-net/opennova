@@ -16,6 +16,7 @@ void source_issue_findings(const Document &document, const FindingCodeRow &inval
 				row, issue.blocks ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning, message, document.path(),
 				issue.field);
 		finding.line = issue.line;
+		finding.source_line = issue.blocks && issue.line != 0;
 		finding.record = issue.record;
 		const NodeAddress address =
 				issue.locator.empty() ? NodeAddress() : document.source_address(issue.locator);

@@ -504,6 +504,7 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	new_file_.draw(*this);
 	find_.draw(*this);
 	rename_.draw(*this);
+	correct_line_.draw(*this);
 	texture_source_.draw(*this);
 	draw_build_panel(v);
 	if (files_window_) files_window_->draw_card_window();

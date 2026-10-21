@@ -17,7 +17,8 @@ namespace opennova::editor {
 // then places each finding the type's own way (a catalog finds its record by name). `game_reads`, when
 // given, ends each blocking finding under `invalid`: what the game does with the input, which it reads on
 // (an unwritable_code's words). `stops`, when given, takes a blocking issue the game's reader stops at
-// (SourceIssue::game_stops).
+// (SourceIssue::game_stops). A blocking issue on a line of the file is a source line
+// (Diagnostic::source_line), which Problems offers to correct in place.
 void source_issue_findings(const Document &document, const FindingCodeRow &invalid,
 		const FindingCodeRow &ignored, std::vector<Diagnostic> &findings,
 		const std::function<void(Diagnostic &)> &place = nullptr, const char *game_reads = nullptr,

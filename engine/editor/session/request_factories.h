@@ -208,6 +208,18 @@ inline EditorRequest music_stream_audio(std::string path, std::string wave, std:
 	request.open_first = open_first;
 	return request;
 }
+// Line `line` of the project file `path` written as `text` ("": taken out), refused where it no longer reads `was`
+// ("": unchecked); `ask`: Problems' Correct the line... opened on it instead, nothing written (session/source_line.h).
+inline EditorRequest correct_line(std::string path, size_t line, std::string text = {}, std::string was = {},
+                                  bool ask = false) {
+	EditorRequest request = of(EditorRequestKind::CorrectLine);
+	request.path = std::move(path);
+	request.values.emplace_back("line", std::to_string(line));
+	if (!ask) request.values.emplace_back("text", std::move(text));
+	if (!ask && !was.empty()) request.values.emplace_back("was", std::move(was));
+	request.ask_name = ask;
+	return request;
+}
 // A font named `name` made from a glyph sheet (round S23 lane A: import/font_import.h): `values` names the sheet
 // (sheet), its grid (columns, rows, first) and the importer's options (advance, tracking, space, spacing,
 // design_width, color).

@@ -73,9 +73,21 @@ void draw_document_toolbar(Workspace &workspace, const DocumentBase &document, c
 		window_requests::focus(workspace, "inspector");
 	}
 	if (document.blocked()) {
-		ui_kit::refusal_text(blocked_notice ? blocked_notice
-		                                    : "This file has unsupported or malformed input. See Problems, correct "
-		                                      "the source, then Reload.");
+		if (blocked_notice) {
+			ui_kit::refusal_text(blocked_notice);
+			return;
+		}
+		// Read only while a line its Save cannot write stands: how many, on one line; Problems' fix in the tooltip.
+		size_t lines = 0;
+		for (const SourceIssue &issue : document.issues()) lines += issue.blocks ? 1 : 0;
+		const std::string line = "Read only: " + std::to_string(lines) + (lines == 1 ? " line" : " lines") +
+		                         " the editor cannot carry (Problems)";
+		row.next(ui_kit::text_width(line.c_str()));
+		ImGui::AlignTextToFramePadding();
+		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::refusal_color());
+		ui_kit::clipped_text(line, "A save cannot write these lines as the game reads them. Problems' Correct the "
+		                           "line... rewrites one in the file and reads it again.");
+		ImGui::PopStyleColor();
 		return;
 	}
 	// What a save changes beyond the edits, on the tools' row, its words in the tooltip (while there are

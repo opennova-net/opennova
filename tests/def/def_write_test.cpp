@@ -438,10 +438,10 @@ int ignored_input() {
 	    !replaced.written.ok() || replaced.written.text.find("delayend 2") == std::string::npos) {
 		std::printf("FAIL replaced invalid block\n"); ++failures;
 	}
-	// A block between keeps its findings where they are (RELOAD's value still blocks), and
+	// A block between keeps its findings where they are (RELOAD's fifth argument still blocks), and
 	// each replaced block leaves its notice at the line it opened on.
 	const Outcome chain = run("weapon.def", "weapon \"WPN_CHAIN\"\r\naction \"FIRE\"\r\ndelayend nope\r\nend\r\n"
-	                                        "action \"RELOAD\"\r\ndelayend bad\r\nend\r\naction \"fire\"\r\ndelayend 2\r\nend\r\n"
+	                                        "action \"RELOAD\"\r\nfunction fire 1 2 3 4 5\r\nend\r\naction \"fire\"\r\ndelayend 2\r\nend\r\n"
 	                                        "action \"FIRE\"\r\ndelaystart 1\r\nend\r\nend\r\n");
 	if (!chain.blocking() || chain.diagnostics.size() != 3 || chain.diagnostics[0].line != 2 ||
 	    chain.diagnostics[0].blocks() || chain.diagnostics[1].line != 6 || !chain.diagnostics[1].blocks() ||
@@ -1364,8 +1364,9 @@ int main() {
 		if (fixture.empty()) { std::printf("FAIL fixtures/def/items.def unread\n"); ++failures; }
 		else failures += authored_catalog("items.def", fixture, true);
 	}
-	// Malformed values and blocks still refuse the write.
-	failures += refused("weapon.def", "ammoclass_max_carry bullets nope\r\n");
+	// Malformed values and blocks still refuse the write (a value the game reads as another is
+	// def_game_reads_test.cpp's).
+	failures += refused("weapon.def", "ammoclass_max_carry\r\n");
 	// A SIGHTS row reads its sixth value as the blend mode, a name the material maker does not know
 	// as `blend` [orig: WeaponDef_CreateBlendNamedMaterial @0x540190 over tokens[7] @0x544B3F]:
 	// reported, never a blocker; a `slide` with no frame count reads a slot an earlier line left.
@@ -1380,10 +1381,7 @@ int main() {
 	}
 	failures += refused("weapon.def", "weapon \"Bad\"\r\nsights a 0 0 1 1 blend slide\r\nend\r\n");
 	failures += refused("weapon.def", "weapon \"Open\"\r\ncategory 1\r\n");
-	failures += refused("ammo.def", "ammo Bad\r\neffects_table\r\nmetal hit snd nope\r\nend\r\nend\r\n");
 	failures += refused("ammo.def", "effects_table\r\nend\r\n");
-	failures += refused("ammo.def", "ammo Bad\r\ntracer_type unknown\r\nend\r\n");
-	failures += refused("items.def", "begin \"Bad\"\r\nhp twelve\r\nend\r\n");
 	failures += refused("items.def", "begin \"Partial\"\r\naddeweap ewep01 100201 15 37\r\nend\r\n");
 
 	// The corpus catalogs (fixtures/def/corpus: every key JO:CA's catalogs and its jox01 expansion's use, in the

@@ -509,6 +509,13 @@ add_executable(def_weapon_name_cap_test def/def_weapon_name_cap_test.cpp)
 target_link_libraries(def_weapon_name_cap_test PRIVATE opennova_formats)
 add_test(NAME def_weapon_name_cap COMMAND def_weapon_name_cap_test)
 
+# What the game reads of a .def line the model holds as it reads it (formats/def/def_scan.cpp's validate_property):
+# a number's start, a left-out value's reset slot, a name a table lacks, an item block no `end` closes; reported,
+# never a blocker, the record and the writer as the game reads it; and the lines that still block.
+add_executable(def_game_reads_test def/def_game_reads_test.cpp)
+target_link_libraries(def_game_reads_test PRIVATE opennova_formats)
+add_test(NAME def_game_reads COMMAND def_game_reads_test)
+
 # The items.def ids and rows the engine fixes (docs/world/itemdef-re.md, "The ids and rows the
 # engine fixes"): the table, its lookups and rules, and the runtime's constants for the same ids.
 add_executable(def_reserved_items_test def/def_reserved_items_test.cpp)
