@@ -213,7 +213,7 @@ public:
 		// g_LastKeepaliveTick, and the host stamps the same value into the player slot's
 		// fire-freshness expiration. `set` distinguishes "no 0x61 this poll" from a
 		// witnessed seed of ZERO (the round-end/disarm form ships four zero bytes).
-		// [orig: dispatch row 0x61 (table @0x82ae28) -> NapiNPClientMsg_HandleSessionKey
+		// [orig: dispatch row 0x61 (table @0x82ae28) -> NapiNPClientMsg_HandleTickSeed
 		//  @0x4297c0: g_ClientCurrentTick @0xA8229C <- @0x4297f8, g_LastKeepaliveTick @0xA822A0
 		//  <- @0x4297fd; a short body seeds 0 @0x4297eb]
 		bool tick_seed_set = false;

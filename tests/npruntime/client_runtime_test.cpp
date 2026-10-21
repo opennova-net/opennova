@@ -608,7 +608,7 @@ bool run_fire_queue_stamps_runtime_tick() {
 // but it DOES still transmit: the fire action's freshness predicate lives on the AUTHORITY
 // arm only, so a joiner emits the doomed 0x06 and lets the host discard it. Refusing it
 // client-side would be our own invention.
-// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 (both globals @0x4297f8/@0x4297fd,
+// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 (both globals @0x4297f8/@0x4297fd,
 //  short body -> 0 @0x4297eb); the zero-skip Client_ProcessNetworkFrame @0x42c193; the
 //  is_authority split Entity_FireWeaponAndSendPacket @0x42bdfd (client arm @0x42bf46,
 //  authority-only gate @0x42be3a); the host gate PlayerSlot_IsActive @0x4fc760 via
@@ -3373,7 +3373,7 @@ bool run_host_client_reports_its_quality_over_the_loopback() {
 // S2C 0x61 and, once the tick runs 29760 past the last keepalive, queues the C2S 0x34
 // [u32 tick] on its local connection like any client (no authority test); unseeded it
 // sends none. [orig: Client_ProcessNetworkFrame @0x42C180 - the seeded test
-// @0x42c1a9, `> 29760` @0x42c1c0, the queue @0x42c1e1; NapiNPClientMsg_HandleSessionKey
+// @0x42c1a9, `> 29760` @0x42c1c0, the queue @0x42c1e1; NapiNPClientMsg_HandleTickSeed
 // @0x4297c0 (no role gate)]
 bool run_host_client_keepalive_rides_the_loopback() {
 	for (const bool seeded : {true, false}) {
@@ -5440,7 +5440,7 @@ bool run_connection_indicators_on_the_host_client() {
 // The C2S 0x0D chat producer: `[u8 channel][cstr]` with the `<...>` strip and
 // the 59-character cut, `Flooded` for a repeat within 0x500 main frames of
 // its entry, and nothing for the non-peer channels 4/5 [orig:
-// Chat_SendGlobalMessage @0x49A6B0; Chat_CheckFloodControl @0x498F60 —
+// Chat_SendTeamMessage @0x49A6B0; Chat_CheckFloodControl @0x498F60 —
 // `dword_A8705C - entry <= 0x500` @0x499028; Chat_StripHtmlTags @0x4983F0].
 bool run_chat_uplink_api() {
 	using Result = hud::ChatSendResult;
@@ -6230,7 +6230,7 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 // for the process; a later 0x61 writes nothing. The packet carrying it writes its client
 // lines first: the client queue's NET GOT, then the parse's NET PROCESSING at the head of
 // ParseMessages, ahead of the messages it dispatches (D-NET-NEW-L8-8's joiner half, s10).
-// [orig: NapiNPClientMsg_HandleSessionKey @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
+// [orig: NapiNPClientMsg_HandleTickSeed @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
 //  @0x4297F1, the text @0x7C5398, the append @0x429831, the clear @0x42983E;
 //  NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv @0x6268AA;
 //  CNapiNPConnection_ParseMessages @0x625BC0 - NapiLog_OnProcess @0x625D3E ahead of the

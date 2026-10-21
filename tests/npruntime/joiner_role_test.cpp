@@ -2408,7 +2408,7 @@ bool run_a_weapon_loadout_rebuilds_the_process_name_list() {
 // Player-bit body classifies as no person at all, so the pass never reaches it.
 // [orig: EntityDef_InitAllCallbacks @0x4A5A70 (the tag push @0x4A5AA6, "Null" @0x4A5AA9,
 //  the call @0x4A5AAE);
-//  Entity_LookupRenderCallbacks @0x407DC0; Projectile_ProcessDamageOnTarget @0x4E7FB0
+//  EntityDef_LookupClassCallbacks @0x407DC0; Projectile_ProcessDamageOnTarget @0x4E7FB0
 //  (the +0x1C8 call @0x4E81FF..0x4E820E)]
 bool run_the_person_pass_keys_the_class_row() {
 	Harness h;

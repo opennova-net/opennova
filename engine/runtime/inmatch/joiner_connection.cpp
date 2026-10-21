@@ -1912,7 +1912,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// tick is zero or not past the seed it stamped into our slot — so an
 			// unseeded client's fire is silently discarded forever. Re-sent on join,
 			// death, revive and deploy release; the four-zero-byte form disarms.
-			// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 (short body -> 0
+			// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 (short body -> 0
 			//  @0x4297eb); the host stamp Server_SendRandomSeedToPlayer @0x5101a0;
 			//  the gate PlayerSlot_IsActive @0x4fc760 via
 			//  NapiNPServerMsg_0x006_ClientFiredRound @0x51358d]
