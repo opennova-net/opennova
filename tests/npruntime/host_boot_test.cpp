@@ -241,10 +241,16 @@ int main() {
 		CHECK(!kernel.world.tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
 		CHECK(kernel.world.tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
 
-		// Serve Only: no player of the host's own, no local client.
+		// Serve Only: no local client; the host's own slot 0 has its hidden body, owned by
+		// connection 0, which binds as the local player (D-NET-352) [orig:
+		//  Server_InitAllPlayerEntitiesForRound @0x516B56..0x516B72; NapiNP_GetLocalConnectionId
+		//  @0x4C6D40..0x4C6D4A; Game_StartMission @0x525C95..0x525C9E].
 		CHECK(!host.role.state.host_owner.serve_and_play);
 		CHECK(host.role.client_runtime() == nullptr);
-		CHECK(!kernel.local.has_local_player());
+		CHECK(kernel.local.has_local_player());
+		if (const world::Entity *own = kernel.world.registry.get(kernel.world.cached.local_player))
+			CHECK(own->owner_connection_id == 0 && (own->flags & world::kEntityFlagCarried) != 0 &&
+					kernel.world.cached.local_player == host.role.state.host_owner.ctx.host_slot.body);
 		CHECK(kernel.world.rules.mp_session);
 
 		// --- phase B: the mission start, then the load's end -----------------

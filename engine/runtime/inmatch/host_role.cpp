@@ -25,6 +25,7 @@
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_loadout_grant.h> // PlayerSlot_SeedOwnLoadoutBuffer (the first round init)
 #include <runtime/inmatch/server_powerup.h> // ServerRemoteWeaponTables
+#include <runtime/inmatch/server_spawn.h> // Server_SpawnHostSlotBody (the first round init)
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/entity_wire_bridge.h>
@@ -373,6 +374,8 @@ void HostRole::seed_own_slot_at_first_round_init() {
 	for (NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
 		if (conn.type == NapiNPConnection::kTypeClientSide)
 			PlayerSlot_SeedOwnLoadoutBuffer(conn, kernel_->world);
+	// A Serve Only host's own row's hidden body, slot 0's at this round init (D-NET-352).
+	(void)Server_SpawnHostSlotBody(state.host_owner.ctx, kernel_->world);
 }
 
 // See host_role.h. The add hid a held host's own body, as retail's spawn hides

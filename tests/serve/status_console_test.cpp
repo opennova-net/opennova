@@ -371,7 +371,9 @@ void test_switches_and_devices() {
 }
 
 
-// One `.sph` file decoded: its map, the joiner's one roster row with at least
+// One `.sph` file decoded: its map, the roster's two rows (the host's own slot 0's hidden
+// body first, pool 0's first entry, then the joiner: the pass walks every pool-0 row with the
+// Player bit, D-NET-352 [orig: Game_StartMission @0x526135..0x52617B]), the joiner's at least
 // five eighth-tick samples, the end chunk and no disconnect marker.
 void check_capture(const fs::path &path, const char *map, const char *joiner) {
 	std::ifstream in(path, std::ios::binary);
@@ -379,9 +381,11 @@ void check_capture(const fs::path &path, const char *map, const char *joiner) {
 	ServerLogDocument doc;
 	CHECK(!bytes.empty() && decode_server_log(bytes.data(), bytes.size(), doc));
 	CHECK(doc.version == 2 && strutil::iequals(doc.mission, map));
-	CHECK(doc.roster.size() == 1);
-	const uint32_t id = doc.roster.empty() ? 0 : doc.roster[0].net_id;
-	CHECK(!doc.roster.empty() && doc.roster[0].name == joiner && id != 0);
+	CHECK(doc.roster.size() == 2);
+	uint32_t id = 0;
+	for (const auto &row : doc.roster)
+		if (row.name == joiner) id = row.net_id;
+	CHECK(id != 0);
 	size_t samples = 0;
 	for (const ServerLogFrame &f : doc.frames)
 		for (const ServerLogEntity &e : f.entities)

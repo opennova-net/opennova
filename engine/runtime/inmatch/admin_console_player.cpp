@@ -162,6 +162,9 @@ void swap_host_team(NapiNPServerCtx &ctx) {
 	if (!host.active || ctx.is_authority == 0) return;
 	zero_stats(host.stats);
 	host.team = host.team == 2 ? uint8_t{1} : uint8_t{2};
+	// The row's body takes the entity legs (its team byte, the S2C 0x50) (D-NET-352)
+	// [orig: Server_ChangeEntityTeam @0x518D70 over the row's entity].
+	if (ctx.world != nullptr) Server_ChangeEntityTeam(ctx, *ctx.world, host.body, host.team);
 }
 
 void swap_team(NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
@@ -279,10 +282,14 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		//  @0x404284..0x404291]
 		if (ctx_.world != nullptr) {
 			if (all) {
+				// Slot 0 first: the host row's hidden body (D-NET-352).
+				if (ctx_.host_slot.active) kill_entity(ctx_, ctx_.host_slot.body);
 				for (NapiNPConnection *slot : active_slots(ctx_))
 					if (slot_entity(ctx_, *slot) != nullptr) kill_entity(ctx_, slot->link.owned_entity);
 			} else if (target != nullptr) {
 				kill_entity(ctx_, target->link.owned_entity);
+			} else if (host_target) {
+				kill_entity(ctx_, ctx_.host_slot.body);
 			}
 		}
 		replies.emplace_back(all ? "OK - All Players Killed." : "OK - Player Killed.");

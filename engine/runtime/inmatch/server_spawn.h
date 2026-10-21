@@ -87,6 +87,21 @@ void Server_AdvanceFreeRowTicks(NapiNPServerCtx &ctx);
 //  sideRequirement_424 @0x551B91..0x551BA2]
 void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection &own);
 
+// A Serve Only host's own slot 0's body (HostSlotRow::body), the round init's spawn of the
+// row at every mission start, first in slot order: the slot's class (+0x15EDC) and team, the
+// side's character id and avatar, owner connection 0, a spawn marker as a joiner's add takes
+// one; it binds as the host's local player (its owner connection, 0, is what
+// NapiNP_GetLocalConnectionId returns with no client connection) and the mission start hides
+// it, which no 0x0A writer ever clears for a row with no net player, so every joiner receives a
+// hidden organic owned by connection 0. Nothing for an inactive row (a listen host's) or off the
+// authority. Returns the body (invalid when pool 0 is full).
+// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 - the active test @0x516AE0..0x516AE4,
+//  Entity_SpawnFromAnimSlotProperty(slot, +0x1B8, +0x15EDC) @0x516B56..0x516B67, the owner
+//  +0x18 @0x516B6C..0x516B72, the team @0x516B78..0x516B7E, the animSlot @0x516B84..0x516B8E;
+//  NapiNP_GetLocalConnectionId @0x4C6D40..0x4C6D4A; Game_StartMission's hide of
+//  g_LocalPlayerEntity @0x525C95..0x525C9E]
+world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World &world);
+
 // §5.2a step 1 — [orig: Server_InitNewRoundState @0x51c8e0]. Set up the local-player/round context
 // for an authority host. Structural: clears the loading-progress counter for a fresh round (the
 // timeout gate, NOT the spawn-success gate, which the per-frame 0x0A drops, §5.2a step 4). No-op

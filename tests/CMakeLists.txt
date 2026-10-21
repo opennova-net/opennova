@@ -5113,6 +5113,11 @@ add_test(NAME npruntime_stale_slot_alias COMMAND npruntime_stale_slot_alias_test
 add_executable(npruntime_use_item_dead_drop_test npruntime/use_item_dead_drop_test.cpp)
 target_link_libraries(npruntime_use_item_dead_drop_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_use_item_dead_drop COMMAND npruntime_use_item_dead_drop_test)
+# D-NET-352: a Serve Only host's own slot 0's hidden body, owned by connection 0, first in
+# pool 0 and bound as the local player; its death runs the row's transaction.
+add_executable(npruntime_host_slot_body_test npruntime/host_slot_body_test.cpp)
+target_link_libraries(npruntime_host_slot_body_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_host_slot_body COMMAND npruntime_host_slot_body_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

@@ -165,6 +165,9 @@ struct HostSlotRow {
 	uint8_t team = 0;             // +0x1A0
 	int32_t player_class = 0;     // +0x15EDC, the admin tables' Class column
 	world::MatchStats stats;      // +0x48 CPlayerStats: Kills (5) and Deaths (7)
+	// +0: the row's hidden body, every mission start's round init's spawn (D-NET-352;
+	// Server_SpawnHostSlotBody).
+	world::EntityHandle body{};
 };
 
 // The end-of-round linger a round end stores, in ticks: 2790 (45 s), dfx2.exe's 1550 (25 s)

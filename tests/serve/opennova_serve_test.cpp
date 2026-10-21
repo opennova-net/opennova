@@ -203,11 +203,16 @@ int main() {
 	CHECK(tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
 	CHECK(!tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
 	CHECK(tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
-	// Serve Only: the dedicated role, no player of the host's own, no local client.
+	// Serve Only: the dedicated role, no local client; the host's own slot 0's hidden body,
+	// owned by connection 0, is its local player (D-NET-352) [orig:
+	//  Server_InitAllPlayerEntitiesForRound @0x516B56..0x516B72; Game_StartMission
+	//  @0x525C95..0x525C9E].
 	CHECK(server.role().kind() == inmatch::RoleKind::DedicatedHost);
 	CHECK(!server.role().state.host_owner.serve_and_play);
 	CHECK(server.role().client_runtime() == nullptr);
-	CHECK(!server.kernel().local.has_local_player());
+	CHECK(server.kernel().local.has_local_player());
+	CHECK(server.kernel().world.cached.local_player ==
+			server.role().state.host_owner.ctx.host_slot.body);
 	CHECK(server.kernel().world.rules.mp_session);
 	// A joiner's body binds its items.def row at its spawn (D-NET-395).
 	CHECK(static_cast<bool>(server.role().state.host_owner.ctx.bind_spawned_body));

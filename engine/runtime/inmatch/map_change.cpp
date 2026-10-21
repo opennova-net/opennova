@@ -58,8 +58,7 @@ void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 			else if (conn.assigned_team == 2)
 				conn.assigned_team = 1;
 		}
-		// A Serve Only host's own slot 0 is live there too: retail's has its hidden
-		// body, which this port does not model (D-NET-352).
+		// A Serve Only host's own slot 0 is live there too.
 		if (ctx.host_slot.active) {
 			if (ctx.host_slot.team == 1)
 				ctx.host_slot.team = 2;
@@ -319,6 +318,8 @@ void init_all_player_entities_for_round(HostRole &role) {
 	std::stable_sort(slots.begin(), slots.end(), [](const NapiNPConnection *a,
 			const NapiNPConnection *b) { return a->reply.player_slot < b->reply.player_slot; });
 	const uint32_t game_type = ctx.config.game_type;
+	// Slot 0 first: a Serve Only host's own row's hidden body (D-NET-352).
+	(void)Server_SpawnHostSlotBody(ctx, world);
 	for (NapiNPConnection *conn : slots) {
 		// An objective mode or a non-team mode has no team 2: such a slot takes
 		// team 1 with its side-1 selections.

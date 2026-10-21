@@ -1,5 +1,6 @@
 #include <runtime/inmatch/server_spawn.h>
 
+#include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars (the host row's side bytes)
 #include <runtime/inmatch/mission_rotation.h> // HostRotation (LASTGAME, the side-to-team map)
 #include <runtime/inmatch/server_chat.h> // broadcast_player_joined_text (the add's 0x32 line)
 #include <runtime/inmatch/server_squad_registry.h>
@@ -243,6 +244,58 @@ void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection
 	const uint8_t side_class = ctx.config.host_side_request == 0 ? own.char_vars.char_class[0]
 	                                                             : own.char_vars.char_class[1];
 	own.slot_class = static_cast<int8_t>(side_class); // movsx of the class byte
+}
+
+world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World &world) {
+	HostSlotRow &host = ctx.host_slot;
+	host.body = {};
+	if (!host.active || ctx.is_authority == 0) return {};
+	// An objective or non-team mode has no team 2: the row takes team 1, as every kept
+	// slot does [orig: @0x516AFD (0x20000), @0x516B33 (no 0x10000)].
+	const uint32_t game_type = ctx.config.game_type;
+	if (host.team == 2 && ((game_type & game_type::kObjectiveBit) != 0 ||
+			(game_type & game_type::kTeamBit) == 0))
+		host.team = 1;
+	world::PlayerSpawn spawn;
+	spawn.team = host.team;
+	// The row's side bytes are the session create's profile init's, a fresh record's on
+	// a host with no profile of its own [orig: PlayerSession_InitFromProfile @0x50CA80 -
+	//  +0x1B8 / +0x1BC, +0x15F01..+0x15F03].
+	const CharacterJoinVars vars = fresh_profile_character_vars(ctx.characters);
+	const int side = (spawn.team == 1 || spawn.team == 3 || (game_type & 0x10000u) == 0) ? 0 : 1;
+	spawn.anim_slot = vars.avatar[side];
+	spawn.minimap_net_id = vars.char_id[side];
+	spawn.player_class = static_cast<uint8_t>(host.player_class);
+	spawn.item_class = spawn.player_class;
+	const world::SpawnPointResult sel = world::resolve_player_spawn_pose(
+			world, world::EntityHandle{}, world::EntityHandle{}, 0, spawn.team, game_type,
+			world::SpawnSlotState{false, 0});
+	if (sel.found) {
+		spawn.position = sel.position;
+		spawn.heading = sel.heading_bam;
+		spawn.pitch = sel.pitch;
+		spawn.roll = sel.roll;
+	}
+	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
+	spawn.net_id = 0;
+	spawn.owner_connection_id = 0;
+	const int m4 = world.tables.weapons.index_of("WPN_M4AUTO");
+	spawn.equipped_adm_index = m4 >= 0 ? static_cast<uint8_t>(m4) : 0xFF;
+	spawn.berserk = (game_type & 0x10000u) == 0;
+	const world::EntityHandle h = world::spawn_player(world, spawn);
+	if (!h.valid()) return h;
+	if (ctx.bind_spawned_body) ctx.bind_spawned_body(h);
+	world::Entity *body = world.registry.get(h);
+	if (body == nullptr) return {};
+	world::apply_spawn_point_latches(*body, sel);
+	body->name = host.name;
+	body->display_name = host.name;
+	body->player_slot_id = 0;
+	// The mission start hides the local player's body for good on a host that never
+	// deploys [orig: Game_StartMission @0x525C95..0x525C9E].
+	body->flags |= world::kEntityFlagCarried;
+	host.body = h;
+	return h;
 }
 
 std::optional<uint8_t> Server_ReservePlayerSlot(

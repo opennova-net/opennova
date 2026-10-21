@@ -279,14 +279,19 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 	//  carried test `cmp [esi+268h], 0` @0x517442 and Entity_DropCarriedObject
 	//  @0x51744C; the latch `cmp [edi+188D7h], bl` @0x516E5A, the return
 	//  @0x516E60]
+	// A Serve Only host's own row holds its hidden body: an active slot, so its
+	// transaction runs, with no net player to send to (D-NET-352) [orig:
+	//  Entity_ValidatePtr @0x500910 - the row's active +4 and entity +0 @0x500930..0x500944].
+	const bool host_row_body = ctx.host_slot.active && ctx.host_slot.body.valid() &&
+			ctx.host_slot.body == d.victim;
 	if (victim_is_player) {
 		if (victim_entity->mounted) world.vehicles.detach(d.victim);
-		if (victim_connection == nullptr) {
+		if (victim_connection == nullptr && !host_row_body) {
 			world.match.unlink_point_share_links(world, d.victim);
 			world.match.drop_carried_object(world, d.victim);
 			return;
 		}
-		if (victim_connection->link.spectator) {
+		if (victim_connection != nullptr && victim_connection->link.spectator) {
 			world.match.unlink_point_share_links(world, d.victim);
 			return;
 		}
