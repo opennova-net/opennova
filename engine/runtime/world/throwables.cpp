@@ -1040,11 +1040,95 @@ static void refresh_round_indoors(World &world, LiveRound &round,
     round.indoors_flags = (accum.flags & kBlinkIndoorsBit) != 0;
 }
 
+// The arti row's motor: the shell a mortar fires (AMMO_60MM_MORTAR's TrcrID item binds
+// move_function arti; WPN_MORTAR, WPN_EMPLMORTAR and the WAC ammoarea fire it). The flight
+// drag first, then the words advance, Z under the -167 gravity step; a shell crossing
+// into the water, under the terrain or into a pool-2/1 entity stops there and arms the
+// 0x1000 bit the update head detonates on (the terrain and hit arms also clear the +0x114
+// bit 0x400000, which ours' rounds do not carry). The arti name binds no event row, so the
+// shell takes no class init. [orig: Entity_UpdateVehicleWreck @0x445500 (the physics row
+// "arti" @0x82AC7C); the event table @0x813000 holds no "arti" row]
+static bool motor_arti(World &world, RoundSim &sim, LiveRound &r, const AmmoTableEntry &ammo,
+                       CollisionWorld *collision, const terrain::TerrainHeightField *terrain) {
+    // [orig: Entity_ApplyDragAndBounceForce(round, 1, 0) @0x445530]
+    FixedVec3 dragged = r.vel.q16();
+    projectile_apply_drag(dragged, ammo, r.pos.z.q16, world.env.water_z);
+    r.vel.set_q16(dragged);
+    MotorFrame f;
+    load_frame(r, f);
+    // The saved pose is the last tick's committed position [orig: +0x80..+0x88, stored
+    // @0x4459B4..0x4459C6].
+    const FixedVec3 saved{f.px, f.py, f.pz};
+    // [orig: @0x445535..0x44557D]
+    if (f.vx != 0) f.px += f.vx;
+    if (f.vy != 0) f.py += f.vy;
+    f.vz -= 167;
+    f.pz += f.vz;
+    // The 3-D speed, clamped and truncated; under 0x800 it is none [orig: @0x445562..0x4455BE].
+    int32_t speed = speed3_q16(f);
+    if (speed < 0x800) speed = 0;
+    const int32_t water = throwable_water_q16(world);
+    // Into the water: the splash, the horizontal words at a quarter, armed
+    // [orig: the tests @0x4455C0..0x4455DB, the effect @0x445615, @0x44561A..0x44566C].
+    if (f.pz <= water && saved.z > water && speed != 0) {
+        push_motor_effect(world, sim, r, 11,
+                          Vec3{static_cast<float>(from_fixed(f.px)),
+                               static_cast<float>(from_fixed(f.py)),
+                               static_cast<float>(from_fixed(water))},
+                          world.logic_tick);
+        f.vx = qmul(f.vx, 0x4000);
+        f.vy = qmul(f.vy, 0x4000);
+        store_frame(r, f);
+        r.det_at_expiry = true;
+        return true;
+    }
+    // Under the terrain: armed where it stands [orig: @0x445686..0x4456CA].
+    const int32_t ground = ground_q16(terrain, f.px, f.py);
+    if (ground != INT32_MIN && f.pz < ground) {
+        store_frame(r, f);
+        r.det_at_expiry = true;
+        return true;
+    }
+    // The pool-2/1 walks along the unit direction over the speed: a hit nearer than the
+    // speed backs off 0x800, takes the shell there and lands the round's damage on the
+    // entity [orig: the direction @0x4456CB..0x445750, the walks @0x445842 / @0x44587A
+    //  and their keeps @0x445855..0x44589E, the back-off @0x4458A9..0x445922,
+    //  Projectile_ProcessDamageOnTarget @0x4E7FB0 called @0x445936].
+    const int32_t inv = speed != 0 ? static_cast<int32_t>(0x100000000LL / speed) : 0;
+    const int32_t dir[3] = {qmul(inv, f.vx), qmul(inv, f.vy), qmul(inv, f.vz)};
+    ProjectileHit hit;
+    if (motor_item_sweep(world, collision, r, saved, f, speed, hit, dir, speed) &&
+            hit.distance_q16 < speed) {
+        const int32_t back = hit.distance_q16 > 0x800 ? hit.distance_q16 - 0x800 : 0;
+        f.px = saved.x + qmul(back, dir[0]);
+        f.py = saved.y + qmul(back, dir[1]);
+        f.pz = saved.z + qmul(back, dir[2]);
+        store_frame(r, f);
+        FixedVec3 velocity = r.vel.q16();
+        sim.process_damage_hit(world, r, hit, velocity);
+        r.vel.set_q16(velocity);
+        // The phase the hit stored arms the round [orig: +0x2AC = 2 @0x44592C, the test
+        //  @0x445999..0x4459A2].
+        r.det_at_expiry = true;
+        return true;
+    }
+    store_frame(r, f);
+    return true;
+}
+
 bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
                           const AmmoTableEntry &ammo, CollisionWorld *collision,
                           const terrain::TerrainHeightField *terrain,
                           bool allow_consequences) {
     bool alive = true;
+    // A round whose TrcrID item binds the arti row runs that row's update.
+    // [orig: Projectile_UpdatePhysics @0x4E9D70 - the useownmove leg's +452 call
+    //  @0x4E9F1E; Entity_InitFromItemDef @0x49E550 (+0x1C4 @0x49E586..0x49E58C)]
+    if (round.move_row == PhysicsClass::Arti) {
+        alive = motor_arti(world, sim, round, ammo, collision, terrain);
+        refresh_round_indoors(world, round, collision);
+        return alive;
+    }
     switch (round.motor) {
     case ThrowClass::kNade:
         alive = motor_nade(world, sim, round, ammo, collision, terrain);
