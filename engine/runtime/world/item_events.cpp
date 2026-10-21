@@ -90,9 +90,9 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 		{"flag", ItemDeathClass::kFlag},   // @0x813108 -> 0x408430
 		{"squib", ItemDeathClass::kSquib},  // @0x813120 -> 0x449810
 		{"nade", ItemDeathClass::kNoCallback},    // @0x813138 -> no event callback (0)
-		{"schl", ItemDeathClass::kUnwitnessed},   // @0x813150 -> 0x443670
-		{"clym", ItemDeathClass::kUnwitnessed},   // @0x813168 -> 0x4438C0
-		{"vmne", ItemDeathClass::kUnwitnessed},   // @0x813180 -> 0x443BB0
+		{"schl", ItemDeathClass::kSatchel},       // @0x813150 -> 0x443670
+		{"clym", ItemDeathClass::kClaymore},      // @0x813168 -> 0x4438C0
+		{"vmne", ItemDeathClass::kAVMine},        // @0x813180 -> 0x443BB0
 		{"lndm", ItemDeathClass::kUnwitnessed},   // @0x813198 -> 0x441A40
 		{"bldg", ItemDeathClass::kBuilding},   // @0x8131B0 -> 0x43EE60
 		{"bld2", ItemDeathClass::kCollapsingBuilding},   // @0x8131C8 -> 0x43EEE0
@@ -773,6 +773,20 @@ void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
 		// [orig: the nade row @0x813138; Entity_UpdateInfantryPlayerBody @0x4B4BD2..0x4B4BDA;
 		//  Projectile_ProcessDamageOnTarget @0x4E8205]. The blast and knife sites call it
 		// unguarded, which crashes retail (PERMANENT, Q7-21: ours calls nothing).
+		return;
+	case ItemDeathClass::kSatchel:
+	case ItemDeathClass::kClaymore:
+	case ItemDeathClass::kAVMine:
+		// The device's think is its event callback, so a damage site's phase runs it
+		// too: the authority's Health <= 0 booms at the hit, a joiner's net kill (4)
+		// spawns the boom round [orig: schl @0x813150 -> Entity_SatchelThink @0x443670,
+		//  clym @0x813168 -> Entity_ClaymoreThink @0x4438C0, vmne @0x813180 ->
+		//  Entity_AVMineThink @0x443BB0, the callbacks the item's +0x1C8 holds]
+		world.throwables.device_class_event(world, target,
+				cls == ItemDeathClass::kSatchel     ? ThrowClass::kSatchel
+						: cls == ItemDeathClass::kClaymore ? ThrowClass::kClaymore
+														   : ThrowClass::kAVMine,
+				phase);
 		return;
 	case ItemDeathClass::kGnrc:
 		gnrc_death_event(world, target, phase, hit.section, hit.event_flags);

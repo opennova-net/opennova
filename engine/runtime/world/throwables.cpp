@@ -1430,7 +1430,20 @@ void ThrowableSim::detonate_device(World &world, PlacedDevice &device,
         p.shot_seq = RoundSim::kFreshRoundWord;
         world.round_sim.spawn(world, p);
     }
-    remove_device(world, device);
+    // The think's tail: +0x170 cleared, the kill packet (S2C 0x26, the device's handle and
+    // section 0) in a session, then Entity_Destroy, which notifies nobody (no S2C 0x12): a
+    // joiner's device dies by that 0x26, whose kill runs its own event-4 think
+    // (D-NET-NEW-L6-7; the joiner's mirror row is tombstoned, not re-materialized).
+    // [orig: Entity_SatchelThink @0x443670 - @0x443885, @0x443891..0x443895, @0x44389E;
+    //  Entity_ClaymoreThink @0x4438C0 - @0x443B75, @0x443B81..0x443B85, @0x443B8E;
+    //  Entity_AVMineThink @0x443BB0 - @0x443D97, @0x443DA3..0x443DA7, @0x443DB0;
+    //  Server_SendEntityStatePacket @0x509D70 (type 0x26 @0x509DBD)]
+    device.active = false;
+    Entity *entity = entity_for_lifetime(world, device.entity, device.entity_spawn_id);
+    if (entity == nullptr) return;
+    entity->primary_occupant = EntityHandle{};
+    if (world.rules.logic_authority && world.rules.mp_session) emit_item_state(world, *entity, 0);
+    world.commands.remove_ssn(entity->handle);
 }
 
 bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
@@ -1648,6 +1661,19 @@ void ThrowableSim::think_device_row_body(World &world, Entity &body, ThrowClass 
     body.primary_occupant = EntityHandle{};
     if (authority && world.rules.mp_session) emit_item_state(world, body, 0);
     world.commands.remove_ssn(body.handle);
+}
+
+// See throwables.h.
+void ThrowableSim::device_class_event(World &world, Entity &item, ThrowClass think, int event) {
+    if (world.rules.logic_authority) {
+        if (PlacedDevice *device = device_for(item)) {
+            CollisionWorld *collision = world.collision;
+            think_device(world, *device, &item, collision,
+                    collision != nullptr ? collision->terrain : nullptr);
+            return;
+        }
+    }
+    think_device_row_body(world, item, think, event);
 }
 
 void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {

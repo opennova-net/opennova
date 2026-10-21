@@ -277,6 +277,17 @@ public:
     //  Entity_AVMineThink @0x443BB0 (the cone @0x443CC7, @0x443BEF)]
     void think_device_row_body(World &world, Entity &body, ThrowClass think, int event);
 
+    // A schl / clym / vmne ITEM's class event (its +0x1C8 is the device's think, which
+    // the damage sites call with their phase: 1 the round hit, 2 the blast, 4 the net
+    // kill): on the authority a placed device's think over its record (think_device: a
+    // Health <= 0 booms at the hit, the claymore's and AV mine's cones run too); an
+    // item with no record, and every item off the authority, runs the think over its
+    // own words (think_device_row_body: off the authority only the kill's event 4).
+    // [orig: Entity_SatchelThink @0x443670, Entity_ClaymoreThink @0x4438C0,
+    //  Entity_AVMineThink @0x443BB0; the round hit's call Projectile_ProcessDamageOnTarget
+    //  @0x4E8205, the blast's @0x4E6F93, the net kill's @0x42EBF5]
+    void device_class_event(World &world, Entity &item, ThrowClass think, int event);
+
     // The DETONATOR [orig: RoundData_SpawnRound ammo flag 0x20 Detonatesatchels
     // -> Entity_DetonateSatchelsByOwner @ 0x546ed0]: every placed SATCHEL-ammo
     // device owned by `owner` gets Health = -1; the next think detonates it.
