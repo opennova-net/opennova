@@ -546,7 +546,7 @@ private:
         uint16_t handle_packed = 0; // guards the slot-index addressing
         const CollisionModel *cm = nullptr;
         int32_t heading = 0; // the Yaw word
-        float pitch = 0.0f, roll = 0.0f;
+        int32_t pitch_bam = 0, roll_bam = 0; // the Pitch / Roll words
         int32_t pos[3] = {0, 0, 0};
         int32_t center_world[3] = {0, 0, 0};
         int32_t radius = 0;

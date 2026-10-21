@@ -939,8 +939,8 @@ void test_glass_userpoints_shatter_once_at_authored_radius() {
     seed.position = Vec3{4.0f, 6.0f, 10.0f};
     seed.bound_radius = 2.0f;
     seed.heading = placed_heading_bam(0);
-    seed.pitch = 90.0f;
-    seed.roll = 90.0f;
+    seed.pitch_bam = spawn_angle_bam(90);
+    seed.roll_bam = spawn_angle_bam(90);
     const EntityHandle building = w.registry.spawn(2, seed);
 
     // Rz(90-yaw)*Ry(-pitch)*Rx(roll) maps local (x,y,z) to
@@ -1187,8 +1187,8 @@ void test_kz_point_full_euler() {
     seed.position = Vec3{4.0f, 6.0f, 10.0f};
     seed.bound_radius = 1.0f;
     seed.heading = placed_heading_bam(0);
-    seed.pitch = 90;
-    seed.roll = 90;
+    seed.pitch_bam = spawn_angle_bam(90);
+    seed.roll_bam = spawn_angle_bam(90);
     const EntityHandle h = w.registry.spawn(1, seed);
 
     ItemDeathTraits traits = barrel_traits();
@@ -1229,8 +1229,8 @@ void test_bridge_dead_points_emit_water_shocks() {
     seed.position = Vec3{4.0f, 6.0f, 10.0f};
     seed.bound_radius = 1.0f;
     seed.heading = placed_heading_bam(0);
-    seed.pitch = 90;
-    seed.roll = 90;
+    seed.pitch_bam = spawn_angle_bam(90);
+    seed.roll_bam = spawn_angle_bam(90);
     const EntityHandle h = w.registry.spawn(1, seed);
     entity_update_death_transforms(w, *w.registry.get(h), true);
 
@@ -1541,8 +1541,8 @@ void test_death_piece_section_center() {
     seed.position = Vec3{4.0f, 6.0f, 10.0f};
     seed.bound_radius = 2.0f;
     seed.heading = placed_heading_bam(0);
-    seed.pitch = 90;
-    seed.roll = 90;
+    seed.pitch_bam = spawn_angle_bam(90);
+    seed.roll_bam = spawn_angle_bam(90);
     const EntityHandle h = w.registry.spawn(1, seed);
     ItemDeathTraits t = barrel_traits();
     t.husk_section_count = 2; // sections 0..1 -> one piece from section 1
@@ -1582,8 +1582,8 @@ void test_death_piece_render_contract() {
     seed.position = Vec3{1.0f, 2.0f, 3.0f};
     seed.bound_radius = 2.0f;
     seed.heading = placed_heading_bam(30);   // the Yaw word ((60 << 16) / 360) << 16 = 0x2AAA0000
-    seed.pitch = -20;
-    seed.roll = 15;
+    seed.pitch_bam = spawn_angle_bam(-20);
+    seed.roll_bam = spawn_angle_bam(15);
     const EntityHandle h = w.registry.spawn(1, seed);
     ItemDeathTraits t = barrel_traits();
     t.husk_section_count = 4;
@@ -1854,8 +1854,8 @@ void test_specialized_piece_physics_callback() {
     seed.position = Vec3{8.0f, 8.0f, 1.0f};
     seed.bound_radius = 2.75f;
     seed.heading = placed_heading_bam(90); // engine heading BAM 0: forward probe is +mission X
-    seed.pitch = 10;
-    seed.roll = -3;
+    seed.pitch_bam = spawn_angle_bam(10);
+    seed.roll_bam = spawn_angle_bam(-3);
     const EntityHandle h = w.registry.spawn(1, seed);
     Entity *piece = w.registry.get(h);
     piece->engine_flags |=
@@ -1967,8 +1967,8 @@ void test_specialized_piece_physics_callback() {
     seed.item_id = 733;
     seed.position = Vec3{20.0f, 20.0f, 10.0f};
     seed.heading = placed_heading_bam(90);
-    seed.pitch = 0;
-    seed.roll = 0;
+    seed.pitch_bam = 0;
+    seed.roll_bam = 0;
     const EntityHandle ordered_h = ordered.registry.spawn(1, seed);
     Entity *ordered_piece = ordered.registry.get(ordered_h);
     ordered_piece->engine_flags |= kEntityFlagDead | kEntityFlagHusk;
@@ -2003,8 +2003,8 @@ void test_specialized_piece_physics_callback() {
     wet.tables.item_death_traits.set(731, wet_traits);
     seed.item_id = 731;
     seed.position = Vec3{2.0f, 3.0f, -0.25f};
-    seed.pitch = 4;
-    seed.roll = 2;
+    seed.pitch_bam = spawn_angle_bam(4);
+    seed.roll_bam = spawn_angle_bam(2);
     const EntityHandle wet_h = wet.registry.spawn(1, seed);
     Entity *submerged = wet.registry.get(wet_h);
     submerged->engine_flags |=
@@ -2060,8 +2060,8 @@ void test_specialized_piece_physics_callback() {
             opennova::terrain::height_field_height_world_bilinear(
                     ramp.field, 64.0f, -8.0f) + 1.25f};
     seed.heading = placed_heading_bam(90);
-    seed.pitch = 0;
-    seed.roll = 0;
+    seed.pitch_bam = 0;
+    seed.roll_bam = 0;
     const EntityHandle client_h = client.registry.spawn(1, seed);
     Entity *client_piece = client.registry.get(client_h);
     client_piece->engine_flags |= kEntityFlagDead | kEntityFlagHusk;
@@ -2089,8 +2089,8 @@ void test_specialized_piece_physics_callback() {
     seed.item_id = 734;
     seed.position = Vec3{8.0f, 8.0f, 0.5f};
     seed.heading = placed_heading_bam(90);
-    seed.pitch = 0;
-    seed.roll = 0;
+    seed.pitch_bam = 0;
+    seed.roll_bam = 0;
     const EntityHandle bare_h = bare.registry.spawn(1, seed);
     Entity *bare_piece = bare.registry.get(bare_h);
     bare_piece->engine_flags |= kEntityFlagDead | kEntityFlagHusk;
@@ -2972,14 +2972,14 @@ void test_generic_wreck_zero_velocity_and_inverted_rest() {
 	t.husk_rest_max_z = 2.0f;
 	w.tables.item_death_traits.set(e.item_id, t);
 	e.position = { 8, 8, ground + 1 };
-	e.roll = 180;
+	e.roll_bam = spawn_angle_bam(180);
 	e.veh.yaw_seeded = false;
 	e.veh.slide_z = -65536;
 	e.veh.vel_x = 65536;
 	tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
 	CHECK(e.position.x == 8 && e.position.z == ground + 1);
-	CHECK(e.roll == 180 && e.veh.slide_z == 0 && e.veh.vel_x == 65536);
-	e.roll = 0;
+	CHECK(e.roll_bam == spawn_angle_bam(180) && e.veh.slide_z == 0 && e.veh.vel_x == 65536);
+	e.roll_bam = 0;
 	e.veh.slide_z = -65536;
 	tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
 	CHECK(e.position.x == 9 && e.position.z < ground + 1); // upright lower bound permits this step

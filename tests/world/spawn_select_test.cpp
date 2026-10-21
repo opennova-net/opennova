@@ -211,8 +211,8 @@ int main() {
         const EntityHandle parent_h = w.registry.spawn(1, parent);
         const EntityHandle marker_h = spawn_marker(w, 6094, {1.0f, 0.0f, 2.0f}, 90);
         Entity *marker = w.registry.get(marker_h);
-        marker->pitch = 4;
-        marker->roll = 5;
+        marker->pitch_bam = spawn_angle_bam(4);
+        marker->roll_bam = spawn_angle_bam(5);
         marker->ground_target = parent_h;
         const SpawnPointResult r = resolve_player_spawn_pose(
             w, EntityHandle{}, EntityHandle{}, 0, 1, 0x30020u);
@@ -220,7 +220,7 @@ int main() {
         CHECK(approx(r.position.x, 100.0f));
         CHECK(approx(r.position.y, 51.0f));
         CHECK(approx(r.position.z, 12.0f));
-        CHECK(r.heading_bam == placed_heading_bam(0) && r.pitch == 4 && r.roll == 5);
+        CHECK(r.heading_bam == placed_heading_bam(0) && r.pitch_bam == spawn_angle_bam(4) && r.roll_bam == spawn_angle_bam(5));
         CHECK(r.flags_or == 0 && !r.carrier.valid()); // team 0 marker: no latch
     }
 
@@ -639,8 +639,8 @@ int main() {
         parent.heading = placed_heading_bam(0); // heading 90 degrees: local +X becomes world +Y
         const EntityHandle parent_handle = w.registry.spawn(1, parent);
         const EntityHandle marker = spawn_marker(w, 6007, {1.0f, 0.0f, 2.0f}, 90);
-        w.registry.get(marker)->pitch = 4;
-        w.registry.get(marker)->roll = 5;
+        w.registry.get(marker)->pitch_bam = spawn_angle_bam(4);
+        w.registry.get(marker)->roll_bam = spawn_angle_bam(5);
         w.registry.get(marker)->ground_target = parent_handle;
 
         (void)resolve_player_spawn_pose(
@@ -651,8 +651,8 @@ int main() {
         CHECK(approx(pose.position.y, 51.0f));
         CHECK(approx(pose.position.z, 12.0f));
         CHECK(pose.heading_bam == placed_heading_bam(0));
-        CHECK(pose.pitch == 4);
-        CHECK(pose.roll == 5);
+        CHECK(pose.pitch_bam == spawn_angle_bam(4));
+        CHECK(pose.roll_bam == spawn_angle_bam(5));
     }
 
     // With no in-radius 6007 candidate the retail counter is untouched.

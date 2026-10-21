@@ -254,9 +254,9 @@ void entity_live_euler_bam(const Entity &e, int32_t out[3]) {
             ? e.veh.yaw_bam
             : e.heading;
     out[1] = e.veh.yaw_seeded ? e.veh.air_pitch_bam
-                              : bam_from_degrees_wrapped(static_cast<double>(e.pitch));
+                              : e.pitch_bam;
     out[2] = e.veh.yaw_seeded ? e.veh.air_roll_bam
-                              : bam_from_degrees_wrapped(static_cast<double>(e.roll));
+                              : e.roll_bam;
 }
 
 CollisionMatrix entity_placement_matrix(const Entity &e) {
@@ -281,12 +281,11 @@ void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16) {
     }
 }
 
-CollisionMatrix collision_matrix_from_placement(int32_t heading, double pitch_deg,
-                                                double roll_deg, const int32_t pos[3],
+CollisionMatrix collision_matrix_from_placement(int32_t heading, int32_t pitch_bam,
+                                                int32_t roll_bam, const int32_t pos[3],
                                                 int32_t scale_q16) {
-    CollisionMatrix m = (pitch_deg != 0.0 || roll_deg != 0.0)
-            ? collision_matrix_from_euler(heading, bam_from_degrees_wrapped(pitch_deg),
-                                          bam_from_degrees_wrapped(roll_deg), pos)
+    CollisionMatrix m = (pitch_bam != 0 || roll_bam != 0)
+            ? collision_matrix_from_euler(heading, pitch_bam, roll_bam, pos)
             : collision_matrix_from_heading(heading, pos);
     collision_matrix_scale_rotation(m, scale_q16);
     return m;

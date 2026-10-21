@@ -45,7 +45,7 @@ inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, c
 	int state = anim_state::kSit + std::clamp<int>(seat.pose_index, 0, 30);
 	if (state == 100) {
 		const int32_t roll = target.veh.yaw_seeded ? target.veh.air_roll_bam
-												   : spawn_angle_bam(target.roll);
+												   : target.roll_bam;
 		if (roll < -71582784)
 			state = 110;
 		if (roll > 71582784)

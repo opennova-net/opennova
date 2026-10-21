@@ -380,7 +380,7 @@ int test_palm_sections() {
     // [orig: Palm_SpawnFragment @0x53C35D].
     CHECK(leaf.item_section_piece && !leaf.section_clone);
     CHECK(leaf.position.z == 7 && leaf.engine_flags == kEntityFlagDead);
-    CHECK(leaf.health == 20 && leaf.pitch == 0 && leaf.roll == 0);
+    CHECK(leaf.health == 20 && leaf.pitch_bam == 0 && leaf.roll_bam == 0);
     // The spawn stores the sector builder into item 900's collision and scar
     // callbacks, not its draw: the fragment draws by item 900's own render tag
     // (none here: every section at its own origin) and collides through the
@@ -419,7 +419,7 @@ int test_palm_sections() {
     const float yaw = mission_yaw_whole_deg(leaf.heading);
     tick_item_death_motion(w, leaf, nullptr, 0, w.out.destruction);
     CHECK(leaf.position.x == 8.015625f && leaf.position.z == .5f);
-    CHECK(leaf.veh.slide_z == 16384 - 167 && mission_yaw_whole_deg(leaf.heading) != yaw && leaf.pitch == 0);
+    CHECK(leaf.veh.slide_z == 16384 - 167 && mission_yaw_whole_deg(leaf.heading) != yaw && leaf.pitch_bam == 0);
     CHECK(leaf.saved_live_pos[2] == 16384);
     e.health = 0;
     destruction_notify_item_damage(w, e, 2);
@@ -536,7 +536,7 @@ int test_tower_sections() {
     piece.veh.slide_z = 65536;
     tick_item_death_motion(w, piece, nullptr, 0, w.out.destruction);
     CHECK(piece.position.z == 12 && piece.veh.slide_z == 32768);
-    piece.position.z = .25f; piece.pitch = 120; piece.veh.slide_z = 0;
+    piece.position.z = .25f; piece.pitch_bam = spawn_angle_bam(120); piece.veh.slide_z = 0;
     piece.death_anim_state &= ~3;
     tick_item_death_motion(w, piece, nullptr, 0, w.out.destruction);
     CHECK(piece.death_motion == DeathMotionMode::SectionSettled);

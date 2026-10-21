@@ -30,8 +30,8 @@ namespace {
 //  live +0x10..+0x18]
 void entity_orientation_words(const Entity &entity, int32_t out[3]) {
     out[0] = entity.veh.yaw_seeded ? entity.veh.yaw_bam : entity.heading;
-    out[1] = entity.veh.yaw_seeded ? entity.veh.air_pitch_bam : spawn_angle_bam(entity.pitch);
-    out[2] = entity.veh.yaw_seeded ? entity.veh.air_roll_bam : spawn_angle_bam(entity.roll);
+    out[1] = entity.veh.yaw_seeded ? entity.veh.air_pitch_bam : entity.pitch_bam;
+    out[2] = entity.veh.yaw_seeded ? entity.veh.air_roll_bam : entity.roll_bam;
 }
 
 SpawnPointResult entity_pose(const Entity &entity) {
@@ -41,8 +41,8 @@ SpawnPointResult entity_pose(const Entity &entity) {
     // [orig: Server_PositionPlayerForSpawn @0x50CF60 - the copies
     //  @0x50CFB7..0x50CFE2 / @0x50D3DB..0x50D403]
     out.position = entity.position;
-    out.pitch = entity.pitch;
-    out.roll = entity.roll;
+    out.pitch_bam = entity.pitch_bam;
+    out.roll_bam = entity.roll_bam;
     int32_t words[3];
     entity_orientation_words(entity, words);
     out.heading_bam = words[0];

@@ -831,8 +831,8 @@ bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[
         out[2] = io::bam_add(body ? body->self->position.z.q16 : rider.position.z.q16,
                 body ? body->inf.eye_offset_z : rider.eye_offset_z);
         out[3] = body ? body->heading : rider.heading;
-        out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
-        out[5] = body ? body->roll : bam_from_degrees_wrapped(rider.roll);
+        out[4] = body ? body->pitch : rider.pitch_bam;
+        out[5] = body ? body->roll : rider.roll_bam;
         // Only the EWEAP copy then adds the rider's +0x94 word (the body
         // attitude triple's roll slot, saved_live_roll) to the pitch
         // [orig: mov edx, [edi+94h]; add [eax+10h], edx @0x545F48..0x545F4E].
@@ -853,7 +853,7 @@ bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[
     out[3] = emplaced_gun_frame_heading(*parent);
     out[4] = emplaced_gun_frame_pitch(*parent);
     out[5] = parent->veh.yaw_seeded ? parent->veh.air_roll_bam
-            : bam_from_degrees_wrapped(parent->roll);
+            : parent->roll_bam;
     return true;
 }
 
@@ -872,8 +872,8 @@ bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[
     out[1] = body ? body->self->position.y.q16 : rider.position.y.q16;
     out[2] = body ? body->self->position.z.q16 : rider.position.z.q16;
     out[3] = body ? body->heading : rider.heading;
-    out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
-    out[5] = body ? body->roll : bam_from_degrees_wrapped(rider.roll);
+    out[4] = body ? body->pitch : rider.pitch_bam;
+    out[5] = body ? body->roll : rider.roll_bam;
     if (parent->virtual_display_camera) {
         // Every input row carries a camera callback, so def+0x174 never fails
         // the gate; def+0x1C0 is the virtual-display userpoint byte.
@@ -911,10 +911,10 @@ bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[
                                           : carrier->heading;
         out[4] = carrier_body ? carrier_body->pitch
                 : carrier->veh.yaw_seeded ? carrier->veh.air_pitch_bam
-                                          : bam_from_degrees_wrapped(carrier->pitch);
+                                          : carrier->pitch_bam;
         out[5] = carrier_body ? carrier_body->roll
                 : carrier->veh.yaw_seeded ? carrier->veh.air_roll_bam
-                                          : bam_from_degrees_wrapped(carrier->roll);
+                                          : carrier->roll_bam;
         return true;
     }
     // The seat-bone leg: an EWEAP that is not PlayerControl, a Person rider.

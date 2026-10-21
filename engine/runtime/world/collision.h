@@ -294,8 +294,8 @@ void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16);
 // authored with pitch or roll (a rock seated on a slope) takes the full Euler
 // matrix so the shell leans with the visual. [orig: the entity orientation
 // matrix @ 0x613f40 serves every collision query]
-CollisionMatrix collision_matrix_from_placement(int32_t heading, double pitch_deg,
-                                                double roll_deg, const int32_t pos[3],
+CollisionMatrix collision_matrix_from_placement(int32_t heading, int32_t pitch_bam,
+                                                int32_t roll_bam, const int32_t pos[3],
                                                 int32_t scale_q16);
 // A local box (min x, y, z, then max x, y, z; 16.16) as `matrix` places it:
 // the world box its eight corners span.

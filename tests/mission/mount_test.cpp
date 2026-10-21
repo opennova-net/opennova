@@ -656,8 +656,8 @@ int main() {
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         Entity gun = make_gun(200, 10.f, 20.f, 5.f, 37);
-        gun.pitch = -12;
-        gun.roll = 17;
+        gun.pitch_bam = world::spawn_angle_bam(-12);
+        gun.roll_bam = world::spawn_angle_bam(17);
         gun.seats[0].yaw_offset = 11;
         w.registry.spawn(1, gun);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
@@ -685,8 +685,8 @@ int main() {
         // look updates remain independent while the body stays in the carried frame.
         // [orig: request pre-snap @0x4364a0; UseGun save/restore @0x546416..0x546664]
         CHECK(occ->heading == kLookHeading); // the Yaw word is the live look
-        CHECK(occ->pitch == -12);
-        CHECK(occ->roll == 17);
+        CHECK(occ->pitch_bam == world::spawn_angle_bam(-12));
+        CHECK(occ->roll_bam == world::spawn_angle_bam(17));
         CHECK(ae->heading == kLookHeading);
         CHECK(ae->inf.body_heading == kSeatHeading);
         CHECK(ae->inf.leg_yaw[0] == kSeatHeading);
@@ -714,8 +714,8 @@ int main() {
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         Entity gun = make_gun(200, 10.f, 20.f, 5.f, 37);
-        gun.pitch = -12;
-        gun.roll = 17;
+        gun.pitch_bam = world::spawn_angle_bam(-12);
+        gun.roll_bam = world::spawn_angle_bam(17);
         gun.seats[0].yaw_offset = 11;
         w.registry.spawn(1, gun);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
@@ -743,8 +743,8 @@ int main() {
         const Entity *occ = w.registry.get(sh);
         CHECK(occ != nullptr);
         CHECK(occ->heading == look_heading); // the registry/wire/motor Yaw word is the look
-        CHECK(occ->pitch == -12);
-        CHECK(occ->roll == 17);
+        CHECK(occ->pitch_bam == world::spawn_angle_bam(-12));
+        CHECK(occ->roll_bam == world::spawn_angle_bam(17));
         CHECK(ae->heading == look_heading); // full precision, never the seat heading
         CHECK(ae->pitch == kLookPitch);
         CHECK(ae->inf.target_heading == look_heading);

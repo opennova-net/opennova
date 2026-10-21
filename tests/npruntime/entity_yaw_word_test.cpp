@@ -250,13 +250,77 @@ int fire_origin_reads_the_carrier_words() {
 	return 0;
 }
 
+// D-NET-NEW-L6-3: the Pitch (+0x14) and Roll (+0x18) words are the record's degrees in
+// the same spawn form, ((deg << 16) / 360) << 16 truncating [orig: Entity_SpawnFromBMSRecord
+// @0x40EB69..0x40EB86, @0x40EB89..0x40EBA6]; every reader reads them. Ours kept whole-degree
+// mirrors and rebuilt the word per reader, half through the floored product (pitch 10 gave
+// 0x071C71C7 for the collision and occlusion placements). Pitch 10 -> 1820, roll -7 ->
+// -1274, pitch 37 -> 6735, roll 100 -> 18204, each << 16.
+constexpr int32_t kPitch10 = 0x071C0000;
+constexpr int32_t kRollMinus7 = static_cast<int32_t>(0xFB060000u);
+constexpr int32_t kPitch37 = 0x1A4F0000;
+constexpr int32_t kRoll100 = 0x471C0000;
+
+int placed_rows_carry_the_pitch_roll_words() {
+	bms::File m{};
+	bms::Entity item = record(bms::ItemType::Item, 164, 21, 100);
+	item.pitch = 10;
+	item.roll = -7;
+	m.items.push_back(item);
+	bms::Entity hut = record(bms::ItemType::Building, 700, 41, 100);
+	hut.pitch = 37;
+	hut.roll = 100;
+	m.buildings.push_back(hut);
+	auto world = std::make_unique<w::World>();
+	opennova::mission::promote_mission(m, *world, {});
+	const w::EntityHandle item_h = world->registry.find_by_net_id(21);
+	const w::EntityHandle hut_h = world->registry.find_by_net_id(41);
+	if (!expect(item_h.valid() && hut_h.valid(), "promotion places each row")) return 1;
+	const w::Entity &it = *world->registry.get(item_h);
+	const w::Entity &bd = *world->registry.get(hut_h);
+	if (!expect(it.pitch_bam == kPitch10 && it.roll_bam == kRollMinus7 &&
+	                    bd.pitch_bam == kPitch37 && bd.roll_bam == kRoll100,
+	            "promotion stores each row's placed Pitch / Roll words"))
+		return 1;
+	if (!expect(w::bam_from_degrees_wrapped(10.0) != kPitch10,
+	            "the floored product differs from the placed word (the old rebuild)"))
+		return 1;
+	for (const w::EntityHandle h : {item_h, hut_h}) with_def(*world, h);
+	// 0x0D
+	const std::vector<uint8_t> d_wire =
+			opennova::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(*world));
+	opennova::PoolSpawnBatch d;
+	if (!expect(opennova::decode_pool_spawn_batch(d_wire.data(), d_wire.size(), d) &&
+	                    d.records.size() == 1 && d.records[0].euler_x == kPitch10 &&
+	                    d.records[0].euler_y == kRollMinus7,
+	            "the 0x0D streams the item's words"))
+		return 1;
+	// 0x10
+	const std::vector<uint8_t> s_wire =
+			opennova::encode_static_entity_batch(ns::build_pool2_static_batch(*world));
+	opennova::StaticEntityBatch st;
+	if (!expect(opennova::decode_static_entity_batch(s_wire.data(), s_wire.size(), st) &&
+	                    st.records.size() == 1 && st.records[0].euler_x == kPitch37 &&
+	                    st.records[0].euler_y == kRoll100,
+	            "the 0x10 streams the building's words"))
+		return 1;
+	// The 0x0A seam reads the same words.
+	const auto snap = ns::snapshot_of(it);
+	if (!expect(snap.pitch_bam == kPitch10 && snap.roll_bam == kRollMinus7,
+	            "the 0x0A snapshot reads the words"))
+		return 1;
+	std::printf("PASS placed_rows_carry_the_pitch_roll_words\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	const int placed = placed_rows_carry_the_word();
 	const int placement = placement_streams_the_word();
 	const int fire = fire_origin_reads_the_carrier_words();
-	for (const int r : {placed, placement, fire})
+	const int pitch_roll = placed_rows_carry_the_pitch_roll_words();
+	for (const int r : {placed, placement, fire, pitch_roll})
 		if (r != 0) return r;
 	return 0;
 }

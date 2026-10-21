@@ -392,8 +392,8 @@ bool AiSystem::usegun_gun_point(World &world, const Entity &gunner, int32_t out[
     } else {
         weapon_fire_origin(*parent, out);
         out[3] = parent->heading;
-        out[4] = bam_from_degrees_wrapped(parent->pitch);
-        out[5] = bam_from_degrees_wrapped(parent->roll);
+        out[4] = parent->pitch_bam;
+        out[5] = parent->roll_bam;
     }
     return true;
 }

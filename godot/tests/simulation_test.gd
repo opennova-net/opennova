@@ -2828,13 +2828,17 @@ func test_effect_state_lookup_uses_the_live_registry_not_the_ai_pool() -> void:
 	if state.size() == Simulation.EFFECT_STATE_COUNT:
 		assert_eq(state[Simulation.EFFECT_STATE_POSITION], Vector3(3, 5, -4),
 				"effect position uses the canonical mission-to-Godot frame")
-		# The entity keeps the placed Yaw word, the truncating spawn angle of
-		# 90 - yaw ((70 << 16) / 360 = 12743, then << 16), and the adapter reads
-		# it back as 90 - word degrees: 20.00061, not the authored 20.
-		# [orig: Entity_SpawnFromBMSRecord @0x40E9F0 - @0x40EB42..0x40EB66]
+		# The entity keeps the placed Yaw, Pitch and Roll words, each the
+		# truncating spawn angle of its degrees (90 - yaw for the Yaw word:
+		# (70 << 16) / 360 = 12743, then << 16), and the adapter reads them back
+		# as degrees: 20.00061 for the yaw, 9.99756 for the pitch 10 and
+		# 29.99817 for the roll 30, not the authored whole degrees.
+		# [orig: Entity_SpawnFromBMSRecord @0x40E9F0 - @0x40EB42..0x40EBA6]
 		var yaw_word := int((90 - 20) * 65536 / 360.0) * 65536
 		var yaw_deg := 90.0 - float(yaw_word) * 360.0 / 4294967296.0
-		assert_eq(state[Simulation.EFFECT_STATE_ROTATION_DEG], Vector3(10, yaw_deg, 30),
+		var pitch_deg := float(int(10 * 65536 / 360.0) * 65536) * 360.0 / 4294967296.0
+		var roll_deg := float(int(30 * 65536 / 360.0) * 65536) * 360.0 / 4294967296.0
+		assert_eq(state[Simulation.EFFECT_STATE_ROTATION_DEG], Vector3(pitch_deg, yaw_deg, roll_deg),
 				"effect orientation remains mission Euler degrees for the host adapter")
 	assert_true(sim.get_entity_effect_state_for_ssn(0).is_empty(), "SSN zero is invalid")
 	assert_true(sim.get_entity_effect_state_for_ssn(65536).is_empty(),

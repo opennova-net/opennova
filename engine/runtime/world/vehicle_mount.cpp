@@ -276,9 +276,9 @@ EntityPosition entity_local_point_world(const Entity &vehicle, const Vec3 &local
     const CollisionMatrix m = collision_matrix_from_euler(
             heading,
             vehicle.veh.yaw_seeded ? vehicle.veh.air_pitch_bam
-                    : spawn_angle_bam(vehicle.pitch),
+                    : vehicle.pitch_bam,
             vehicle.veh.yaw_seeded ? vehicle.veh.air_roll_bam
-                    : spawn_angle_bam(vehicle.roll), origin);
+                    : vehicle.roll_bam, origin);
     // seat_local is pre-swizzled ((-y, x, z) over the raw authored ints — a
     // baked-in Rz(90)), while the collision euler matrix with heading
     // bam(90 - yaw) expects RAW model coordinates: un-swizzle first.
@@ -342,8 +342,8 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
         occ.engine_flags |= kEntityFlagMatrixBuilt;
         live.position = occ.position;
         live.heading = occ.veh.yaw_seeded ? occ.veh.yaw_bam : occ.heading;
-        live.pitch = occ.veh.yaw_seeded ? occ.veh.air_pitch_bam : spawn_angle_bam(occ.pitch);
-        live.roll = occ.veh.yaw_seeded ? occ.veh.air_roll_bam : spawn_angle_bam(occ.roll);
+        live.pitch = occ.veh.yaw_seeded ? occ.veh.air_pitch_bam : occ.pitch_bam;
+        live.roll = occ.veh.yaw_seeded ? occ.veh.air_roll_bam : occ.roll_bam;
         return live;
     }
     if (world.pose_provider == nullptr ||
@@ -358,9 +358,9 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
                 ? io::bam_sub(vehicle.veh.yaw_bam, bam_from_degrees_wrapped(offset))
                 : io::bam_sub(vehicle.heading, bam_from_degrees_wrapped(offset));
         live.pitch = vehicle.veh.yaw_seeded ? vehicle.veh.air_pitch_bam
-                : spawn_angle_bam(vehicle.pitch);
+                : vehicle.pitch_bam;
         live.roll = vehicle.veh.yaw_seeded ? vehicle.veh.air_roll_bam
-                : spawn_angle_bam(vehicle.roll);
+                : vehicle.roll_bam;
         // An addeweap child with no anchor copies its carrier's root pose (the
         // carrier's matrix bit clear): the position and the Yaw / Pitch / Roll words
         // as they are, no seat offset. [orig: Entity_UpdateTransformAndTurret
@@ -375,8 +375,8 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
     // [orig: Math_FixedPointMatrixToEulerAngles @0x613481..0x61348C]
     occ.position = live.position;
     occ.heading = live.heading;
-    occ.pitch = static_cast<int16_t>(std::lround(live.pitch * kDegreesPerBam));
-    occ.roll = static_cast<int16_t>(std::lround(live.roll * kDegreesPerBam));
+    occ.pitch_bam = live.pitch;
+    occ.roll_bam = live.roll;
     if (seat.attachment_frame) {
         // An addeweap child carries the full bone attitude into its own model,
         // collision, and camera. Ordinary infantry retain independent LOOK.

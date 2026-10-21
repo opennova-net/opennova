@@ -94,11 +94,6 @@ uint8_t player_class_for_wire(const world::Entity &e) {
 	return e.player_class;
 }
 
-// Pitch/roll are pure degree-to-BAM axes; only heading has the 90-degree frame inversion.
-int32_t engine_axis_bam(int16_t degrees) {
-	return world::spawn_angle_bam(degrees);
-}
-
 // The carrier frame a mounted seat-local position is measured against: the one
 // BAM32 entity euler retail keeps on both sides of Entity_TransformWorldToLocal.
 // A seeded carrier (every vehicle past its first motor tick) poses its riders in
@@ -111,10 +106,10 @@ int32_t carrier_heading_bam(const world::Entity &c) {
 	return c.veh.yaw_seeded ? c.veh.yaw_bam : c.heading;
 }
 int32_t carrier_pitch_bam(const world::Entity &c) {
-	return c.veh.yaw_seeded ? c.veh.air_pitch_bam : engine_axis_bam(c.pitch);
+	return c.veh.yaw_seeded ? c.veh.air_pitch_bam : c.pitch_bam;
 }
 int32_t carrier_roll_bam(const world::Entity &c) {
-	return c.veh.yaw_seeded ? c.veh.air_roll_bam : engine_axis_bam(c.roll);
+	return c.veh.yaw_seeded ? c.veh.air_roll_bam : c.roll_bam;
 }
 
 // The per-tick displacement metric both priority walks score every row by:
@@ -786,8 +781,8 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w) {
 		rec.pos_y = e->position.y.q16;
 		rec.pos_z = e->position.z.q16;
 		rec.euler_z = e->heading; // entity+16 heading (gates 0x0001 if non-zero)
-		rec.euler_x = engine_axis_bam(e->pitch);   // entity+20 pitch (0x0002 when non-zero)
-		rec.euler_y = engine_axis_bam(e->roll);    // entity+24 roll (0x0004 when non-zero)
+		rec.euler_x = e->pitch_bam;   // entity+20 pitch (0x0002 when non-zero)
+		rec.euler_y = e->roll_bam;    // entity+24 roll (0x0004 when non-zero)
 		rec.team_byte = e->team;
 		// A door def's section word: entity+308 with bits 1..count re-read from
 		// its door rows, carried whenever the def's signed door byte (the low

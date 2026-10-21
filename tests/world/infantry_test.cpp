@@ -5410,7 +5410,7 @@ void test_slope_probes_include_candidate_models() {
  solid.bound_radius = 4.0f;
  solid.position = {10,10,0};
  solid.heading = placed_heading_bam(90);
- solid.pitch = 15;
+ solid.pitch_bam = spawn_angle_bam(15);
  const auto support = world.registry.spawn(2,solid);
  Entity person;
  person.kind = EntityKind::Organic;

@@ -293,6 +293,10 @@ void LocalPlayer::place_on_composed_view() {
 	input.look_heading = heading;
 	input.look_pitch = pitch;
 	e->heading = heading;
+	// The entity's Pitch and Roll words take the view's too (D-NET-NEW-L6-3)
+	// [orig: `mov [edx+14h], eax` @0x52B0DF, `mov [ecx+18h], edx` @0x52B0EE].
+	e->pitch_bam = pitch;
+	e->roll_bam = roll;
 }
 
 void LocalPlayer::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {

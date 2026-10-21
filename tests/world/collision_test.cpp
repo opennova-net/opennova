@@ -3391,7 +3391,7 @@ void test_vehicle_probes_support_model_decks_and_grade_slopes() {
 	const int slopes[4] = { 0, 40, 45, 60 };
 	const int expected[4] = { 0, 1, 2, 3 };
 	for (int test = 0; test < 4; ++test) {
-		world.registry.get(platform)->pitch = int16_t(slopes[test]);
+		world.registry.get(platform)->pitch_bam = spawn_angle_bam(slopes[test]);
 		const double radians = slopes[test] * 3.14159265358979323846 / 180.0;
 		const int32_t probes[1][3] = { { fx(10.0 - 1.25 * std::sin(radians)), fx(10.0),
 				fx(1.25 * std::cos(radians)) } };
@@ -4515,7 +4515,7 @@ void test_face_raycast_rolled_entity() {
           CollisionWorld::FaceRaycast::kHit);
 
     // Roll the entity 90 deg: the quad plane stands up at world y = 9 facing -y.
-    b->roll = 90;
+    b->roll_bam = spawn_angle_bam(90);
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
           CollisionWorld::FaceRaycast::kMiss); // the old plane position is empty air now
     const int32_t s_fw[3] = {fx(10.0), fx(7.0), fx(0.0)};
@@ -4525,7 +4525,7 @@ void test_face_raycast_rolled_entity() {
     CHECK(fh.material == 14);
     // dist = 2.0 of the 4.0 u segment (plane at world y = 9).
     CHECK(fh.dist > fx(1.9) && fh.dist < fx(2.1));
-    b->roll = 0;
+    b->roll_bam = 0;
 }
 
 void test_face_raycast_pitched_entity() {
@@ -4542,7 +4542,7 @@ void test_face_raycast_pitched_entity() {
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
           CollisionWorld::FaceRaycast::kHit);
 
-    b->pitch = 90;
+    b->pitch_bam = spawn_angle_bam(90);
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
           CollisionWorld::FaceRaycast::kMiss);
     const int32_t s_across[3] = {fx(8.0), fx(10.0), fx(0.0)};
@@ -4552,7 +4552,7 @@ void test_face_raycast_pitched_entity() {
           CollisionWorld::FaceRaycast::kHit);
     CHECK(fh.material == 14);
     CHECK(fh.dist > fx(0.95) && fh.dist < fx(1.05));
-    b->pitch = 0;
+    b->pitch_bam = 0;
 }
 
 void test_round_inside_bound_sphere_hits_wall() {

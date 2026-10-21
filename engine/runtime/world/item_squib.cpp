@@ -102,7 +102,7 @@ void squib_event(World &world, Entity &entity, int phase) {
         }
     } else direction = {0,65536,0};
     const auto second = rotation(io::bam_sub(0, io::bam_add(
-            heading, bam_from_degrees_wrapped(entity.pitch))),0);
+            heading, entity.pitch_bam)),0);
     state.direction = rotate(compose(first,second), direction);
     const int32_t twice = io::bam_add(distance,distance);
     state.center = {io::bam_sub(io::bam_add(source.x,end.x)/2,mul(twice,state.direction.x)),
@@ -155,8 +155,8 @@ void tick_squib(World &world, Entity &entity) {
                 round.ammo_index = state.damage_ammo_index;
                 round.pos = entity.position;
                 round.yaw_bam = entity.heading;
-                round.pitch_bam = bam_from_degrees_wrapped(entity.pitch);
-                round.roll_bam = bam_from_degrees_wrapped(entity.roll);
+                round.pitch_bam = entity.pitch_bam;
+                round.roll_bam = entity.roll_bam;
                 FixedVec3 velocity{entity.veh.vel_x,entity.veh.vel_y,entity.veh.slide_z};
                 world.round_sim.process_damage_hit(world,round,hit,velocity);
                 entity.veh.vel_x=velocity.x; entity.veh.vel_y=velocity.y; entity.veh.slide_z=velocity.z;

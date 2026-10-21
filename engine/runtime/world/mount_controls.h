@@ -220,7 +220,7 @@ inline int32_t emplaced_gun_frame_heading(const Entity &mount) {
 
 inline int32_t emplaced_gun_frame_pitch(const Entity &mount) {
 	return mount.veh.yaw_seeded ? mount.veh.air_pitch_bam
-			: spawn_angle_bam(mount.pitch);
+			: mount.pitch_bam;
 }
 
 // A stored word back to the BAM32 the IsTurret leg integrates: the raw 16
@@ -614,8 +614,8 @@ inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
 		if (emplaced_slot_def(world, mount) == nullptr) return;
 		mount.position = Vec3{};
 		mount.heading = 0; // the memset Yaw word
-		mount.pitch = 0;
-		mount.roll = 0;
+		mount.pitch_bam = 0;
+		mount.roll_bam = 0;
 		if (mount.veh.yaw_seeded) {
 			mount.veh.yaw_bam = 0;
 			mount.veh.air_pitch_bam = 0;

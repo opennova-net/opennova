@@ -443,8 +443,8 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 	if (sel.found) {
 		spawn.position = sel.position;
 		spawn.heading = sel.heading_bam;
-		spawn.pitch = sel.pitch;
-		spawn.roll = sel.roll;
+		spawn.pitch_bam = sel.pitch_bam;
+		spawn.roll_bam = sel.roll_bam;
 	} else {
 		// No start marker: the placement stores nothing, so the body keeps the
 		// zeroed entity's words, position 0 and heading word 0, as the session's

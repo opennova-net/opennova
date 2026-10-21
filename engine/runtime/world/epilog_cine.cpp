@@ -327,7 +327,7 @@ void EpilogCine::begin_win(const Entity *local_player) {
 	if (local_player != nullptr) {
 		camera.camera_position = local_player->position;
 		camera.camera_heading = local_player->heading;
-		camera.camera_pitch = local_player->pitch;
+		camera.camera_pitch = local_player->pitch_bam;
 	}
 	events.push_back(camera);
 	win_build_frame = kEpilogWinBuildFrame;

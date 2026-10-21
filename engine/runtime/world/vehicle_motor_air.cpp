@@ -154,8 +154,8 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
         //  Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
         m.yaw_bam = veh.heading;
         if (!m.net_predicted) {
-            m.air_pitch_bam = spawn_angle_bam(veh.pitch);
-            m.air_roll_bam = spawn_angle_bam(veh.roll);
+            m.air_pitch_bam = veh.pitch_bam;
+            m.air_roll_bam = veh.roll_bam;
         }
         m.yaw_seeded = true;
     }
@@ -339,7 +339,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 	if (view_pilot != nullptr) {
 		const AiEntity *body = world.ai.for_handle(view_pilot->handle);
 		const int32_t pitch =
-				body != nullptr ? body->pitch : bam_from_degrees_wrapped(view_pilot->pitch);
+				body != nullptr ? body->pitch : view_pilot->pitch_bam;
 		tilt_error = io::bam_sub(io::bam_sub(pitch, m.air_pitch_bam), m.view_tilt_bam);
 	}
 	int32_t tilt_step = io::bam_sar(io::bam_add(tilt_error, 4), 3);
@@ -733,10 +733,8 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
     // the next tick's conform overwriting.
     // [orig: Entity_UpdateAircraftPhysics common tail @0x49237E --
     //  `entity+20 += entity+168; entity+24 += entity+172`]
-    veh.pitch = static_cast<int16_t>(std::lround(
-            static_cast<double>(m.air_pitch_bam) * kDegreesPerBam));
-    veh.roll = static_cast<int16_t>(std::lround(
-            static_cast<double>(m.air_roll_bam) * kDegreesPerBam));
+    veh.pitch_bam = m.air_pitch_bam;
+    veh.roll_bam = m.air_roll_bam;
     // The matrix-build tail sets Flags 0x20000 (kEntityFlagMatrixBuilt, homed on
     // engine_flags) [orig: Entity_UpdateAircraftPhysics @0x49275E, OR @0x492766].
     veh.engine_flags |= kEntityFlagMatrixBuilt;

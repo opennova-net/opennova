@@ -23,8 +23,8 @@ bool local_player_report(const World &world, const LocalPlayer &local, const Col
 	out.dead = local.local_player_dead();
 	out.position = e->position;
 	out.yaw_deg = mission_yaw_whole_deg(e->heading);
-	out.pitch_deg = e->pitch;
-	out.roll_deg = e->roll;
+	out.pitch_deg = static_cast<float>(degrees_from_angle_bam(e->pitch_bam));
+	out.roll_deg = static_cast<float>(degrees_from_angle_bam(e->roll_bam));
 	out.stance = local.stance_latch();
 	out.anim_key = local.player_anim_key();
 	out.motor_speed_q16 = e->veh.speed;

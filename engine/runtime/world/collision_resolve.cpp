@@ -624,7 +624,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             berserk = (pa != nullptr && (pa->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0) ||
                       (va != nullptr && (va->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0);
             // A player victim keeps its life while its damage-disabled word
-            // (entity+0x124: spawn protection or the dead latch) is set, or
+            // (entity+0x124: spawn protection or a spectator's -1) is set, or
             // while its slot carries the spectator latch (+0x188D7).
             // [orig: `test eax, 100h` @0x4b3918, `cmp [esi+124h], 0`
             //  @0x4b391f; Entity_ValidatePtr @0x4b3933, the slot byte

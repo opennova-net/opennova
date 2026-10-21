@@ -42,8 +42,9 @@ struct PlayerSpawn {
     // [orig: Entity_FindBestSpawnPoint @0x50CF38;
     //  Server_PositionPlayerForSpawn @0x50D3F7]
     int32_t heading = placed_heading_bam(0);
-    int16_t pitch = 0;
-    int16_t roll = 0;
+    // The Pitch / Roll words the spawn stores (D-NET-NEW-L6-3).
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
     uint8_t team = 0;
     uint16_t net_id = 0xFFF0;
     // Item-less FALLBACK only: when the Player def is resolved (world.tables.player, the

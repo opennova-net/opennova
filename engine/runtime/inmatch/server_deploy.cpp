@@ -174,8 +174,8 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 		held.position = player.position;
 		held.heading_bam = 0;
 		player.heading = held.heading_bam;
-		player.pitch = 0;
-		player.roll = 0;
+		player.pitch_bam = 0;
+		player.roll_bam = 0;
 		return held;
 	}
 	// The placement resolves the handle it is handed again, against the player
@@ -199,8 +199,8 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 	if (pose.found) {
 		player.position = pose.position;
 		player.heading = pose.heading_bam; // the copied word (D-NET-376, D-NET-NEW-L6-2)
-		player.pitch = pose.pitch;
-		player.roll = pose.roll;
+		player.pitch_bam = pose.pitch_bam;
+		player.roll_bam = pose.roll_bam;
 	}
 	// The scored arm warms the body up after its pick; a pick that found no
 	// marker leaves the body where it stands (the spawn-state reset then takes

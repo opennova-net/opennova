@@ -231,8 +231,8 @@ void VehicleSystem::tick_simple_motor(
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
 		//  Entity_ProcessInfantryPhysics @0x46E133/@0x46E13C/@0x46E14C]
 		m.yaw_bam = e.heading;
-		m.air_pitch_bam = spawn_angle_bam(e.pitch);
-		m.air_roll_bam = spawn_angle_bam(e.roll);
+		m.air_pitch_bam = e.pitch_bam;
+		m.air_roll_bam = e.roll_bam;
 		m.yaw_seeded = true;
 	}
 	stamp_saved_live_pose(e);
@@ -330,8 +330,8 @@ void VehicleSystem::tick_simple_motor(
 	}
 	e.position.set_q16({x, y, z});
 	e.heading = m.yaw_bam;
-	e.pitch = degrees_i16_from_bam(m.air_pitch_bam);
-	e.roll = degrees_i16_from_bam(m.air_roll_bam);
+	e.pitch_bam = m.air_pitch_bam;
+	e.roll_bam = m.air_roll_bam;
 	// The rebuilt entity matrix sets the matrix bit (Flags 0x20000), homed on
 	// engine_flags, where its clears land.
 	// [orig: Entity_ProcessInfantryPhysics @0x46F9BD, OR @0x46F9C5;

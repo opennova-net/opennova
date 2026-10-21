@@ -218,7 +218,7 @@ void initialize_organic_ai(World &world, Entity &entity) {
     entity.saved_live_yaw = body->heading;
     entity.saved_live_pitch = entity.saved_live_roll = 0;
     body->pitch = body->body_pitch = body->roll = 0;
-    entity.pitch = entity.roll = 0;
+    entity.pitch_bam = entity.roll_bam = 0;
     inf.torso_roll = inf.lean_angle = 0;
     inf.arms_dip_ticks = inf.reload_anim_ticks = 0;
     inf.head_look_target = inf.last_look_target = inf.previous_look_target = {};

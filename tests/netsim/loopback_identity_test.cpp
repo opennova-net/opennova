@@ -1068,8 +1068,8 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	vehicle.item_id = 0x1004;
 	vehicle.position = {100.0f, 200.0f, 10.0f};
 	vehicle.heading = w::placed_heading_bam(90); // identity engine-frame carrier rotation
-	vehicle.pitch = 15;
-	vehicle.roll = -10;
+	vehicle.pitch_bam = w::spawn_angle_bam(15);
+	vehicle.roll_bam = w::spawn_angle_bam(-10);
 	vehicle.health = 3000;
 	vehicle.health_max = 3000;
 	vehicle.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);

@@ -160,8 +160,8 @@ void vehicle_follow_carrier(World &world, Entity &vehicle) {
 	m.air_pitch_bam = pose.pitch_bam;
 	m.air_roll_bam = pose.roll_bam;
 	vehicle.heading = m.yaw_bam;
-	vehicle.pitch = degrees_i16_from_bam(m.air_pitch_bam);
-	vehicle.roll = degrees_i16_from_bam(m.air_roll_bam);
+	vehicle.pitch_bam = m.air_pitch_bam;
+	vehicle.roll_bam = m.air_roll_bam;
 }
 
 int32_t vehicle_probe_pass(World &world, Entity &vehicle, const int32_t (*probes)[3],

@@ -1333,7 +1333,7 @@ bool run_0a_player_record_field_sources() {
 	if (!expect(ae != nullptr, "host AI pose resolvable")) return false;
 	e->net_move_input = 0x21; // the uplink-ingested +0x12C movement-input byte the record echoes
 	e->flags |= 0x40; // an arbitrary entity+0x24 bit rides the wire unmasked
-	e->pitch = -45; // deliberately disagree with the live split-store look
+	e->pitch_bam = w::spawn_angle_bam(-45); // deliberately disagree with the live split-store look
 	ae->pitch = 0x1F800000;
 	e->equipped_adm_index = 0x09; // the equipped-weapon adm index the record's off-16 echoes
 

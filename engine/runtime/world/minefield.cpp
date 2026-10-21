@@ -32,7 +32,7 @@ int32_t distance(FixedVec3 a, FixedVec3 b) {
 void fire(World &world, Entity &field, FixedVec3 p, uint8_t ammo_index) {
 	world.round_sim.fire_source(world, &field, p,
 			field.veh.yaw_seeded ? field.veh.yaw_bam : field.heading,
-			bam_from_degrees_wrapped(field.pitch), ammo_index);
+			field.pitch_bam, ammo_index);
 }
 
 } // namespace

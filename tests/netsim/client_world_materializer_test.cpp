@@ -653,8 +653,8 @@ bool decoded_world_stream_materializes_exact_rows() {
 			building->kind == w::EntityKind::Building &&
 			building->item_id == 0x0600 &&
 			building->net_id == 0 &&
-			building->heading == static_row.euler_z && building->pitch == -8 && // the wire word
-			building->roll == 5 &&
+			building->heading == static_row.euler_z && building->pitch_bam == w::spawn_angle_bam(-8) && // the wire word
+			building->roll_bam == w::spawn_angle_bam(5) &&
 			building->engine_flags == 0x04020400u &&
 			building->section_mask == 0x120u &&
 			building->ammo_count == 0xA5 &&
@@ -676,7 +676,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 			boat->ref_num == 0x17 && boat->sub_type == 0x33 &&
 			boat->zone_number == 2 && boat->zone_radius == 70 &&
 			std::fabs(boat->position.x - 2.0f) < 0.0001f &&
-			boat->heading == vehicle.euler_z && boat->pitch == 4 && boat->roll == -6 &&
+			boat->heading == vehicle.euler_z && boat->pitch_bam == w::spawn_angle_bam(4) && boat->roll_bam == w::spawn_angle_bam(-6) &&
 			boat->spawn_origin == w::kSpawnOriginNone,
 			"pool-1 materialization retains exact handle, identity, pose, and traits"))
 		return false;

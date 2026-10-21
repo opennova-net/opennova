@@ -164,10 +164,6 @@ Entity *entity_for_lifetime(World &world, EntityHandle handle, uint64_t spawn_id
     return entity;
 }
 
-int16_t item_angle_degrees_from_bam(int32_t bam) {
-    return static_cast<int16_t>(std::lround(double(bam) * kDegreesPerBam));
-}
-
 // The motors read and write the round's Position and velocity words in place
 // (D-NET-507). [orig: Entity_UpdateGrenadePhysics @0x4443D0 - the entity's
 //  +4/+8/+0xC and +0x98/+0x9C/+0xA0]
@@ -1110,8 +1106,8 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     seed.has_item_def = true;
     seed.position = round.pos;
     seed.heading = round.yaw_bam;
-    seed.pitch = item_angle_degrees_from_bam(round.pitch_bam);
-    seed.roll = item_angle_degrees_from_bam(round.roll_bam);
+    seed.pitch_bam = round.pitch_bam;
+    seed.roll_bam = round.roll_bam;
     seed.ground_target = parent_handle;
     seed.team = round.team;
     seed.item_id = item_id;
@@ -1504,8 +1500,8 @@ void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
             // The followed pose's words, stored raw (D-NET-507).
             e->position.set_q16({p.pos[0], p.pos[1], p.pos[2]});
             e->heading = d.yaw_bam;
-            e->pitch = item_angle_degrees_from_bam(d.pitch_bam);
-            e->roll = item_angle_degrees_from_bam(d.roll_bam);
+            e->pitch_bam = d.pitch_bam;
+            e->roll_bam = d.roll_bam;
             e->ground_target = d.parent;
         } else {
             d.parent = EntityHandle{};

@@ -22,9 +22,9 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 	const int32_t yaw = mount->veh.yaw_seeded ? mount->veh.yaw_bam
 											  : mount->heading;
 	const int32_t pitch = mount->veh.yaw_seeded ? mount->veh.air_pitch_bam
-												: bam_from_degrees_wrapped(mount->pitch),
+												: mount->pitch_bam,
 				  roll = mount->veh.yaw_seeded ? mount->veh.air_roll_bam
-											   : bam_from_degrees_wrapped(mount->roll);
+											   : mount->roll_bam;
 	if ((mount->item_attrib & kItemAttribEweap) && player->mount_type == SeatType::Controller &&
 			view.camera_mode == 0) {
 		// [orig: HUD_DrawWeaponSightCrosshair `fild [esi+45Ch]; fld dbl_7C3608`
@@ -40,7 +40,7 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 		const auto *body = world.ai.for_handle(player->handle);
 		const int32_t player_yaw =
 				body ? body->heading : player->heading;
-		const int32_t player_pitch = body ? body->pitch : bam_from_degrees_wrapped(player->pitch);
+		const int32_t player_pitch = body ? body->pitch : player->pitch_bam;
 		const uint16_t desired_yaw = uint16_t(uint32_t(io::bam_sub(yaw, player_yaw)) >> 16);
 		const uint16_t desired_pitch = uint16_t(uint32_t(io::bam_sub(pitch, player_pitch)) >> 16);
 		const int16_t dy = int16_t(desired_yaw - uint16_t(mount->emplaced_gun_yaw_word));

@@ -1632,19 +1632,18 @@ void sync_teleported_ai(World &world, Entity &entity) {
     AiEntity *ae = world.ai.for_handle(entity.handle);
     if (ae == nullptr) return;
     ae->heading = entity.heading;
-    ae->pitch = bam_from_degrees_wrapped(static_cast<double>(entity.pitch));
-    ae->roll = bam_from_degrees_wrapped(static_cast<double>(entity.roll));
+    ae->pitch = entity.pitch_bam;
+    ae->roll = entity.roll_bam;
 }
 
 // savedLivePose (+0x80..+0x94) takes a pose's words whole: Position, then the
-// Yaw / Pitch / Roll words (a placed row's Pitch / Roll the spawn form), the
-// one store (D-NET-507).
+// Yaw / Pitch / Roll words, the one store (D-NET-507).
 void stamp_pose_words(Entity &entity, const Entity &pose) {
     const auto words = pose.position.words();
     std::copy_n(words.data(), 3, entity.saved_live_pos);
     entity.saved_live_yaw = pose.heading;
-    entity.saved_live_pitch = spawn_angle_bam(pose.pitch);
-    entity.saved_live_roll = spawn_angle_bam(pose.roll);
+    entity.saved_live_pitch = pose.pitch_bam;
+    entity.saved_live_roll = pose.roll_bam;
     entity.saved_live_valid = true;
 }
 
@@ -1661,8 +1660,8 @@ void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
                       bool single_action) {
     entity.position = marker.position;
     entity.heading = marker.heading;
-    entity.pitch = marker.pitch;
-    entity.roll = marker.roll;
+    entity.pitch_bam = marker.pitch_bam;
+    entity.roll_bam = marker.roll_bam;
     if (single_action || entity.handle.pool() != 0)
         entity.engine_flags &= ~kEntityFlagMatrixBuilt;
     // The single action also stores the marker's whole pose into savedLivePose

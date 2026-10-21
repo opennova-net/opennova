@@ -41,20 +41,8 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
-// An unseeded carrier's angles are its placement angles: `deg << 16`, a
-// truncating signed /360, then << 16, so the low half is zero.
-// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
-int32_t placement_angle_bam(int32_t degrees) {
-	const int32_t turn16 = static_cast<int32_t>(static_cast<uint32_t>(degrees) << 16) / 360;
-	return static_cast<int32_t>(static_cast<uint32_t>(turn16) << 16);
-}
-
 int32_t carrier_heading_bam(const w::Entity &carrier) {
 	return carrier.heading; // the carrier's Yaw word
-}
-
-int32_t carrier_axis_bam(int16_t degrees) {
-	return placement_angle_bam(degrees);
 }
 
 bool drain_built_uplink(w::World &host, w::EntityHandle peer,
@@ -531,8 +519,8 @@ bool run_mounted_moving_carrier_roundtrip() {
 	w::Entity *source_carrier = source.registry.get(source_carrier_h);
 	source_carrier->position = {85.0f, -20.0f, 7.0f};
 	source_carrier->heading = w::placed_heading_bam(-35);
-	source_carrier->pitch = 12;
-	source_carrier->roll = -7;
+	source_carrier->pitch_bam = w::spawn_angle_bam(12);
+	source_carrier->roll_bam = w::spawn_angle_bam(-7);
 	source_body->heading = 0x61230000; // independent mounted LOOK
 	source_body->pitch = static_cast<int32_t>(0xF4000000u);
 	if (!expect(source_ai_system.refresh_mounted_pose(*source_body, source),
@@ -567,8 +555,8 @@ bool run_mounted_moving_carrier_roundtrip() {
 	w::Entity host_carrier_seed = carrier_seed;
 	host_carrier_seed.position = source_carrier->position;
 	host_carrier_seed.heading = source_carrier->heading;
-	host_carrier_seed.pitch = source_carrier->pitch;
-	host_carrier_seed.roll = source_carrier->roll;
+	host_carrier_seed.pitch_bam = source_carrier->pitch_bam;
+	host_carrier_seed.roll_bam = source_carrier->roll_bam;
 	const w::EntityHandle host_carrier_h = host.registry.spawn(1, host_carrier_seed);
 	if (!expect(host_player_h.packed == source_player_h.packed &&
 	                    host_carrier_h.packed == source_carrier_h.packed,
@@ -584,8 +572,8 @@ bool run_mounted_moving_carrier_roundtrip() {
 			w::to_fixed(source_carrier->position.y),
 			w::to_fixed(source_carrier->position.z),
 			static_cast<uint32_t>(source_carrier_yaw),
-			static_cast<uint32_t>(carrier_axis_bam(source_carrier->pitch)),
-			static_cast<uint32_t>(carrier_axis_bam(source_carrier->roll)));
+			static_cast<uint32_t>(source_carrier->pitch_bam),
+			static_cast<uint32_t>(source_carrier->roll_bam));
 	const w::AiEntity *host_body = host_ai_system.for_handle(host_player_h);
 	const w::Entity *host_player = host.registry.get(host_player_h);
 	if (!expect(host_player != nullptr && host_player->net_analog_x == -64 &&
@@ -632,8 +620,8 @@ bool run_ground_target_carrier_roundtrip() {
 	deck_seed.item_id = 0x0465;
 	deck_seed.position = {-40.0f, 65.0f, 4.0f};
 	deck_seed.heading = w::placed_heading_bam(25);
-	deck_seed.pitch = -6;
-	deck_seed.roll = 4;
+	deck_seed.pitch_bam = w::spawn_angle_bam(-6);
+	deck_seed.roll_bam = w::spawn_angle_bam(4);
 	const w::EntityHandle source_deck_h = source.registry.spawn(2, deck_seed);
 	if (!expect(source_deck_h.valid(), "ground carrier spawned")) return false;
 	w::Entity *source_player = source.registry.get(source_player_h);
@@ -646,8 +634,8 @@ bool run_ground_target_carrier_roundtrip() {
 			w::to_fixed(source_deck->position.y),
 			w::to_fixed(source_deck->position.z),
 			static_cast<uint32_t>(deck_yaw),
-			static_cast<uint32_t>(carrier_axis_bam(source_deck->pitch)),
-			static_cast<uint32_t>(carrier_axis_bam(source_deck->roll)));
+			static_cast<uint32_t>(source_deck->pitch_bam),
+			static_cast<uint32_t>(source_deck->roll_bam));
 	source_body->self->position.x.q16 = source_world_pose.x;
 	source_body->self->position.y.q16 = source_world_pose.y;
 	source_body->self->position.z.q16 = source_world_pose.z;
@@ -681,8 +669,8 @@ bool run_ground_target_carrier_roundtrip() {
 			up.pos_x, up.pos_y, up.pos_z,
 			w::to_fixed(deck_seed.position.x), w::to_fixed(deck_seed.position.y),
 			w::to_fixed(deck_seed.position.z), static_cast<uint32_t>(deck_yaw),
-			static_cast<uint32_t>(carrier_axis_bam(deck_seed.pitch)),
-			static_cast<uint32_t>(carrier_axis_bam(deck_seed.roll)));
+			static_cast<uint32_t>(deck_seed.pitch_bam),
+			static_cast<uint32_t>(deck_seed.roll_bam));
 	if (!expect(host_body != nullptr && host_body->net_smooth_target[0] == lifted.x &&
 	                    host_body->net_smooth_target[1] == lifted.y &&
 	                    host_body->net_smooth_target[2] == lifted.z,
@@ -785,8 +773,8 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 		carrier_seed.item_id = 0x1004;
 		carrier_seed.position = {85.0f, -20.0f, 7.0f};
 		carrier_seed.heading = w::placed_heading_bam(static_cast<int16_t>(std::lround(yaw_deg)));
-		carrier_seed.pitch = static_cast<int16_t>(std::lround(pitch_deg));
-		carrier_seed.roll = static_cast<int16_t>(std::lround(roll_deg));
+		carrier_seed.pitch_bam = w::spawn_angle_bam(static_cast<int16_t>(std::lround(pitch_deg)));
+		carrier_seed.roll_bam = w::spawn_angle_bam(static_cast<int16_t>(std::lround(roll_deg)));
 		carrier_seed.health = 3000;
 		carrier_seed.health_max = 3000;
 		w::Seat seat;

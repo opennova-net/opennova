@@ -165,9 +165,10 @@ Array Simulation::get_streamed_placement_records() const {
 		d["item_id"] = opennova::mission::visual_item_id_for_runtime_type(
 				row->item_id, false);
 		d["position"] = Vector3(row->position.x, row->position.y, row->position.z);
-		d["rotation_deg"] = Vector3(static_cast<float>(row->pitch),
+		d["rotation_deg"] = Vector3(
+				static_cast<float>(opennova::world::degrees_from_angle_bam(row->pitch_bam)),
 				static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(row->heading)),
-				static_cast<float>(row->roll));
+				static_cast<float>(opennova::world::degrees_from_angle_bam(row->roll_bam)));
 		d["team"] = row->team;
 		d["group"] = row->group_id;
 		d["ai_flags"] = static_cast<int64_t>(

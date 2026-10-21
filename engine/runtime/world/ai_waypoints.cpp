@@ -741,8 +741,8 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         //  the row's Yaw/Pitch/Roll, unmoved = the spawn form,
         //  Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
         m.yaw_bam = veh.heading;
-        m.air_pitch_bam = spawn_angle_bam(veh.pitch);
-        m.air_roll_bam = spawn_angle_bam(veh.roll);
+        m.air_pitch_bam = veh.pitch_bam;
+        m.air_roll_bam = veh.roll_bam;
         m.yaw_seeded = true;
     }
     m.ai_drive = true;

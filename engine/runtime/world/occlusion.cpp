@@ -39,8 +39,8 @@ inline int32_t ftol(double v) { return static_cast<int32_t>(v); }
 inline CollisionMatrix entity_euler_pose(const Entity &e, const int32_t pos[3]) {
     return collision_matrix_from_euler(
         e.heading,
-        bam_from_degrees_wrapped(static_cast<double>(e.pitch)),
-        bam_from_degrees_wrapped(static_cast<double>(e.roll)), pos);
+        e.pitch_bam,
+        e.roll_bam, pos);
 }
 
 // Per-axis Q22-quantized trig factor: c/s = float(ftol(trig(th) * 2^22)) / 2^22,
@@ -160,8 +160,8 @@ RenderMatrix render_matrix_from_entity_pose(const Entity &e) {
     int32_t pos[3];
     detail::entity_pos_fixed(e, pos);
     const int32_t heading = e.heading;
-    const int32_t pitch = bam_from_degrees_wrapped(static_cast<double>(e.pitch));
-    const int32_t roll = bam_from_degrees_wrapped(static_cast<double>(e.roll));
+    const int32_t pitch = e.pitch_bam;
+    const int32_t roll = e.roll_bam;
     return render_matrix_from_pose(pos, heading, pitch, roll);
 }
 
@@ -568,7 +568,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
                               memo.handle_packed == slot.h.packed &&
                               memo.cm == cm && memo.model_id == inst_model_id &&
                               memo.heading == e->heading &&
-                              memo.pitch == e->pitch && memo.roll == e->roll &&
+                              memo.pitch_bam == e->pitch_bam && memo.roll_bam == e->roll_bam &&
                               memo.pos[0] == epos[0] && memo.pos[1] == epos[1] &&
                               memo.pos[2] == epos[2];
         if (!pose_hit) {
@@ -579,8 +579,8 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
             memo.cm = cm;
             memo.model_id = inst_model_id;
             memo.heading = e->heading;
-            memo.pitch = e->pitch;
-            memo.roll = e->roll;
+            memo.pitch_bam = e->pitch_bam;
+            memo.roll_bam = e->roll_bam;
             memo.pos[0] = epos[0];
             memo.pos[1] = epos[1];
             memo.pos[2] = epos[2];
@@ -1182,8 +1182,8 @@ OcclusionWorld::TocCandidate toc_candidate(const Entity &e, const CollisionModel
     c.radius_q16 = e.bound_radius.q16;
     c.model = cm;
     c.heading_bam = e.heading;
-    c.pitch_bam = bam_from_degrees_wrapped(static_cast<double>(e.pitch));
-    c.roll_bam = bam_from_degrees_wrapped(static_cast<double>(e.roll));
+    c.pitch_bam = e.pitch_bam;
+    c.roll_bam = e.roll_bam;
     return c;
 }
 

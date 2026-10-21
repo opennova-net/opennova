@@ -500,8 +500,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		//  @0x50CFB7..0x50CFE2 / @0x50D3DB..0x50D403]
 		spawn.position = sel.position;
 		spawn.heading = sel.heading_bam; // the copied word (D-NET-376)
-		spawn.pitch = sel.pitch;
-		spawn.roll = sel.roll;
+		spawn.pitch_bam = sel.pitch_bam;
+		spawn.roll_bam = sel.roll_bam;
 	} else {
 		// No start marker authored: the placement stores nothing, so the body keeps the
 		// zeroed entity's words: position 0 and heading word 0 (mission yaw 90). Never an

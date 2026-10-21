@@ -23,8 +23,9 @@ class World;
 struct SpawnPointResult {
     bool found = false; // a start marker of some family type existed
     EntityPosition position; // mission space (Z-up): the chosen marker's words, copied raw
-    int16_t pitch = 0;
-    int16_t roll = 0;
+    // The chosen row's Pitch / Roll words, copied (D-NET-NEW-L6-3).
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
     // The heading word (+0x10) the placement copies onto the player verbatim:
     // the chosen entity's own Yaw (a start marker's placement angle, low 16
     // bits zero; a vehicle's live motor heading), plus its parent's Yaw for a

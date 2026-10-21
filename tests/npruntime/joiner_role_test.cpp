@@ -77,7 +77,7 @@ void look_at(w::World &world, w::EntityHandle player_h, float tx, float ty, floa
 	const double heading = std::atan2(dy, dx);
 	const double pitch = std::atan2(dz, std::hypot(dx, dy));
 	player->heading = w::placed_heading_bam(int16_t(std::lround(90.0 - heading * 180.0 / 3.14159265358979323846)));
-	player->pitch = int16_t(std::lround(pitch * 180.0 / 3.14159265358979323846));
+	player->pitch_bam = int32_t(pitch * opennova::io::kBamPerRadian);
 	if (w::AiEntity *body = world.ai.for_handle(player_h)) {
 		body->heading = int32_t(heading * opennova::io::kBamPerRadian);
 		body->pitch = int32_t(pitch * opennova::io::kBamPerRadian);

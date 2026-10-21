@@ -130,24 +130,20 @@ constexpr int32_t kPiecePhysicsYawStepBam = 0x02D82D82;
 constexpr int32_t kPiecePitchSnapThresholdBam = 0x02D82D80;
 constexpr int32_t kPiecePitchStepBam = 0x016C16C0;
 
-int16_t death_angle_degrees_from_bam(int32_t bam) {
-    return static_cast<int16_t>(std::lround(double(bam) * kDegreesPerBam));
-}
-
 void seed_piece_physics_angles(Entity &entity) {
     Entity::VehicleMotorState &motion = entity.veh;
     if (motion.yaw_seeded) return;
     motion.yaw_bam = entity.heading;
-    motion.air_pitch_bam = spawn_angle_bam(entity.pitch);
-    motion.air_roll_bam = spawn_angle_bam(entity.roll);
+    motion.air_pitch_bam = entity.pitch_bam;
+    motion.air_roll_bam = entity.roll_bam;
     motion.yaw_seeded = true;
 }
 
 void publish_piece_physics_angles(Entity &entity) {
     const Entity::VehicleMotorState &motion = entity.veh;
     entity.heading = motion.yaw_bam;
-    entity.pitch = death_angle_degrees_from_bam(motion.air_pitch_bam);
-    entity.roll = death_angle_degrees_from_bam(motion.air_roll_bam);
+    entity.pitch_bam = motion.air_pitch_bam;
+    entity.roll_bam = motion.air_roll_bam;
 }
 
 // Entity_RaycastGroundHeight @0x4142c0 casts a short vertical segment from
@@ -270,8 +266,8 @@ CollisionMatrix destruction_orientation(const Entity &target) {
     const int32_t origin[3] = {0, 0, 0};
     return collision_matrix_from_euler(
             target.heading,
-            bam_from_degrees_wrapped(static_cast<double>(target.pitch)),
-            bam_from_degrees_wrapped(static_cast<double>(target.roll)), origin);
+            target.pitch_bam,
+            target.roll_bam, origin);
 }
 
 Vec3 rotate_authored_point(const CollisionMatrix &orientation, const Vec3 &point) {
@@ -406,7 +402,8 @@ bool sweep_within(const Entity &t, const ExplosionEntry &e, int32_t reach, Sweep
 // held to it too (the bound sphere is not this leg's surface). Both extents
 // are 0 for every 3DI3 model (ItemDeathTraits::model_radius_xy_q16 / _z_q16),
 // so the box is the Position point. [orig: Projectile_ProcessExplosionQueue
-// @0x4EAD80 - @0x4EB6FD..0x4EB7AE, the length @0x4EB7B4..0x4EB7EA]
+// @0x4EAD80 - the extents `mov edx, [ebp+1Ch]` @0x4EB6FD / `mov eax, [ebp+18h]`
+// @0x4EB700, the box @0x4EB6FD..0x4EB7AE, the length @0x4EB7B4..0x4EB7EA]
 bool pool2_box_distance(const Entity &t, const ExplosionEntry &e, const SweepWords &sw,
                         int32_t half_xy, int32_t half_z, int32_t radius, int32_t &out) {
     const auto axis = [&](int32_t victim, int32_t entry, int32_t victim_less_entry,
@@ -645,8 +642,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
     // Blast armor class gate [orig: @ 0x4e69b0 — ammo penetration_kz (+200)
     // must reach def+0x192].
     if (traits != nullptr && ammo->penetration_kz < traits->armor_blast) damage = 0;
-    // The damage-disabled word (entity+0x124: a player's spawn protection or
-    // dead latch, a death piece's -1) zeroes the damage [orig: `cmp dword ptr
+    // The damage-disabled word (entity+0x124: a player's spawn protection, a
+    // spectator's -1, a death piece's -1) zeroes the damage [orig: `cmp dword ptr
     // [esi+124h], 0` @ 0x4e69b8..0x4e69c3].
     if (target.damage_state != 0) damage = 0;
     // A vehicle's occupants reduce what reaches its hull; dfx2.exe's twin has
@@ -941,7 +938,8 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         // for a victim whose def authors attrib 0x8000, against the entry's
         // source (entry+0x20), ahead of the cone: such a victim takes neither the
         // callback nor the attacker fill nor the blast-center store [orig: pool 1
-        // @0x4EB4DA..0x4EB502, pool 2 @0x4EB6A1..0x4EB6C9].
+        // @0x4EB4DA..0x4EB502 (the team bytes `mov cl, [edi+162h]` @0x4EB4F6), pool
+        // 2 @0x4EB6A1..0x4EB6C9].
         const auto session_team_immune = [&](const Entity &t) {
             if (!world.rules.mp_session || source == nullptr) return false;
             const ItemDeathTraits *traits = world.tables.item_death_traits.get(t.item_id);
@@ -985,7 +983,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 SweepWords sw;
                 if (!sweep_within(*t, e, reach, sw)) continue;
                 // A victim whose damage-disabled word (entity+0x124: spawn
-                // protection or the dead latch) is set skips straight to the
+                // protection, a spectator's -1) is set skips straight to the
                 // +0x1BA store and the player arm, whose own +0x124 test and the
                 // kill event's null attacker leave nothing, then the callback's
                 // +0x124 skip: nothing reaches it [orig: `cmp dword ptr [edi+124h],
@@ -1170,7 +1168,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // the entry's words into its savedLivePose, the section-debris
                 // launch origin [orig: the deathCallback ==
                 // Entity_HandleDestructibleDeathEvent check @0x4EB53F, Health > 0
-                // @0x4EB54B, the stores @0x4EB555..0x4EB569].
+                // @0x4EB54B..0x4EB553, the stores @0x4EB555..0x4EB569].
                 if (t->health > 0 && runs_tree_death_body(world, *t)) {
                     std::copy_n(entry_words, 3, t->saved_live_pos);
                     t->saved_live_valid = true;

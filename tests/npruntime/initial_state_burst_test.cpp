@@ -493,7 +493,7 @@ int main_impl() {
 	}
 
 	// A bound World entity without an AiEntity keeps the historical zero-pitch fallback. In
-	// particular, world::Entity::pitch is not a substitute: it has different ownership/units.
+	// particular, world::Entity::pitch_bam is not a substitute: it has different ownership/units.
 	{
 		auto no_ai_world_storage = std::make_unique<w::World>();
 		w::World &no_ai_world = *no_ai_world_storage;
@@ -501,7 +501,7 @@ int main_impl() {
 		w::Entity entity;
 		entity.kind = w::EntityKind::Organic;
 		entity.item_id = 0x14B9;
-		entity.pitch = 0x1234;
+		entity.pitch_bam = 0x12340000;
 		const w::EntityHandle entity_handle = no_ai_world.registry.spawn(0, entity);
 		if (!expect(entity_handle.valid(), "missing-AI pose fixture entity spawned")) return 1;
 

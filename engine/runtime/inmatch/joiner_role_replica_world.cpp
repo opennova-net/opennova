@@ -400,9 +400,8 @@ void JoinerRole::apply_authoritative_health() {
 									static_cast<uint32_t>(self->pitch_byte) << 24);
 					local->position.set_q16({self->x, self->y, self->z}); // the record's words (D-NET-507)
 					local->heading = heading;
-					local->pitch = static_cast<int16_t>(std::lround(
-							static_cast<double>(pitch) * world::kDegreesPerBam));
-					local->roll = 0;
+					local->pitch_bam = pitch;
+					local->roll_bam = 0;
 					local->health = health;
 					local->alive = true;
 					local->hidden = false;
@@ -549,10 +548,8 @@ void JoinerRole::apply_world_state_load() {
 		if (local != nullptr && local_ai != nullptr) {
 			local->position.set_q16({ws.pos_x, ws.pos_y, ws.pos_z}); // the 0x0F words (D-NET-507)
 			local->heading = ws.yaw_bam;
-			local->pitch = static_cast<int16_t>(std::lround(
-					static_cast<double>(ws.pitch_bam) * world::kDegreesPerBam));
-			local->roll = static_cast<int16_t>(std::lround(
-					static_cast<double>(ws.roll_bam) * world::kDegreesPerBam));
+			local->pitch_bam = ws.pitch_bam;
+			local->roll_bam = ws.roll_bam;
 			local_ai->heading = ws.yaw_bam;
 			local_ai->pitch = ws.pitch_bam;
 			local_ai->roll = ws.roll_bam;
@@ -811,10 +808,8 @@ void JoinerRole::mirror_mission_entities() {
 				local->veh.air_pitch_bam = es.pitch_bam;
 				local->veh.air_roll_bam = es.roll_bam;
 				local->heading = es.heading_bam; // the wire's Yaw word (D-NET-NEW-L6-2)
-				local->pitch = static_cast<int16_t>(std::lround(
-						double(es.pitch_bam) * world::kDegreesPerBam));
-				local->roll = static_cast<int16_t>(std::lround(
-						double(es.roll_bam) * world::kDegreesPerBam));
+				local->pitch_bam = es.pitch_bam;
+				local->roll_bam = es.roll_bam;
 				if (es.team_known) local->team = es.team;
 				continue;
 			}
@@ -856,10 +851,8 @@ void JoinerRole::mirror_mission_entities() {
 		// pose is the world-consumer source of truth.
 		if (es.heading_known || unresolved_persistent_attachment)
 			local->heading = es.heading_bam;
-		local->pitch = static_cast<int16_t>(std::lround(
-				double(es.pitch_bam) * world::kDegreesPerBam));
-		local->roll = static_cast<int16_t>(std::lround(
-				double(es.roll_bam) * world::kDegreesPerBam));
+		local->pitch_bam = es.pitch_bam;
+		local->roll_bam = es.roll_bam;
 		if (es.team_known) local->team = es.team;
 		// Watercraft prediction (§5.38e B-facet, D-NET-196): a placed cbot
 		// vehicle's motion is owned by the WORLD-side client mover — stage the
@@ -1061,10 +1054,8 @@ void JoinerRole::mirror_predicted_vehicles() {
 			// Mounted-pose and bone consumers read Entity pitch/roll, not the
 			// motor registers. Keep the exact-handle materialized carrier coherent before
 			// the post-mover attachment phase below.
-			local->pitch = static_cast<int16_t>(std::lround(
-					double(local->veh.air_pitch_bam) * world::kDegreesPerBam));
-			local->roll = static_cast<int16_t>(std::lround(
-					double(local->veh.air_roll_bam) * world::kDegreesPerBam));
+			local->pitch_bam = local->veh.air_pitch_bam;
+			local->roll_bam = local->veh.air_roll_bam;
 		}
 	}
 }

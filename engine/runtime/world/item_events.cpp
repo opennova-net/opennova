@@ -520,8 +520,8 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
             const int32_t origin[] = {entity.position.x.q16,
                     entity.position.y.q16, entity.position.z.q16};
             const auto matrix = collision_matrix_from_euler(
-                    entity.heading, bam_from_degrees_wrapped(entity.pitch),
-                    bam_from_degrees_wrapped(entity.roll), origin);
+                    entity.heading, entity.pitch_bam,
+                    entity.roll_bam, origin);
             const int32_t width = io::bam_sub(traits->model_max_q16[0], traits->model_min_q16[0]);
             const int32_t height = io::bam_sub(traits->model_max_q16[1], traits->model_min_q16[1]);
             const int nx = std::max(2, width / 393216);

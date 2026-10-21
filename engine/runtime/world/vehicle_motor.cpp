@@ -510,8 +510,8 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
         // solve conforms every grounded tick [orig: entity->Pitch/Roll writes
         // @0x47EC83/@0x47EC75]. (A joiner row arms through ground_client_tick,
         // whose staging already seeded these from the wire.)
-        m.air_pitch_bam = spawn_angle_bam(veh.pitch);
-        m.air_roll_bam = spawn_angle_bam(veh.roll);
+        m.air_pitch_bam = veh.pitch_bam;
+        m.air_roll_bam = veh.roll_bam;
         m.yaw_seeded = true;
 	}
 	// The mover prologue copies the entry pose to savedLivePose (+0x80..+0x94)
@@ -737,7 +737,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		// @0x40EB69..0x40EB86]).
 		const int32_t pitch_bam = wheeled_solve
 				? m.air_pitch_bam
-				: spawn_angle_bam(veh.pitch);
+				: veh.pitch_bam;
 		const int32_t c = slope_cos22(pitch_bam);
         const int32_t c2 = static_cast<int32_t>((static_cast<int64_t>(c) * c) >> 22);
         target_speed = static_cast<int32_t>((static_cast<int64_t>(c2) * cmd) >> 22);
@@ -1832,8 +1832,8 @@ void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
 		// An unmoved row: its placement angles in the spawn form.
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
 		yaw = e.heading;
-		pitch = spawn_angle_bam(e.pitch);
-		roll = spawn_angle_bam(e.roll);
+		pitch = e.pitch_bam;
+		roll = e.roll_bam;
 	}
 }
 
@@ -2138,8 +2138,8 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
 		//  Entity_UpdateWatercraftPhysics @0x48D4B2/@0x48D4BB/@0x48D4CB]
 		m.yaw_bam = veh.heading;
-        m.air_pitch_bam = spawn_angle_bam(veh.pitch);
-        m.air_roll_bam = spawn_angle_bam(veh.roll);
+        m.air_pitch_bam = veh.pitch_bam;
+        m.air_roll_bam = veh.roll_bam;
         m.yaw_seeded = true;
 	}
 	vehicle_refresh_ground_link(world, veh, traits);

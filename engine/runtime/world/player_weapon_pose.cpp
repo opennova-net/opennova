@@ -20,9 +20,9 @@ void carrier_pose(const World &world, const Entity &carrier, int32_t out[6]) {
     out[3] = body ? body->heading : carrier.veh.yaw_seeded ? carrier.veh.yaw_bam
         : carrier.heading;
     out[4] = body ? body->pitch : carrier.veh.yaw_seeded ? carrier.veh.air_pitch_bam
-        : bam_from_degrees_wrapped(carrier.pitch);
+        : carrier.pitch_bam;
     out[5] = body ? body->roll : carrier.veh.yaw_seeded ? carrier.veh.air_roll_bam
-        : bam_from_degrees_wrapped(carrier.roll);
+        : carrier.roll_bam;
 }
 
 // The local-space helper the G-redirect arm and the controller branch share:
@@ -151,8 +151,8 @@ void local_weapon_fire_pose(World &world, const LocalPlayerWeapon &weapon,
     out[1] = io::bam_add(body ? body->self->position.y.q16 : shooter->position.y.q16, body ? body->inf.eye_offset_y : shooter->eye_offset_y);
     out[2] = io::bam_add(body ? body->self->position.z.q16 : shooter->position.z.q16, body ? body->inf.eye_offset_z : shooter->eye_offset_z);
     out[3] = body ? body->heading : shooter->heading;
-    out[4] = body ? io::bam_add(body->pitch, body->inf.recoil_pitch) : bam_from_degrees_wrapped(shooter->pitch);
-    out[5] = body ? body->roll : bam_from_degrees_wrapped(shooter->roll);
+    out[4] = body ? io::bam_add(body->pitch, body->inf.recoil_pitch) : shooter->pitch_bam;
+    out[5] = body ? body->roll : shooter->roll_bam;
     // Add the minimum + local elevation offset, then the banded limit clamp.
     // [orig: seat-flag gate @0x4DC8A3; add @0x4DC8DE..0x4DC8EC;
     //  Math_ClampAngleToBounds @0x4DC8EF]

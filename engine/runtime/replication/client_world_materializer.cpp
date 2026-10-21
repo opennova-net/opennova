@@ -53,10 +53,8 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.position.set_q16({row.x, row.y, row.z});
 	seed.spawn_position = seed.position;
 	seed.heading = row.heading_bam;
-	seed.pitch = static_cast<int16_t>(std::lround(
-			static_cast<double>(row.pitch_bam) * world::kDegreesPerBam));
-	seed.roll = static_cast<int16_t>(std::lround(
-			static_cast<double>(row.roll_bam) * world::kDegreesPerBam));
+	seed.pitch_bam = row.pitch_bam;
+	seed.roll_bam = row.roll_bam;
 	seed.team = row.team_known ? row.team : 0;
 	// The streamed dword is the host's one Flags word, which the port splits;
 	// each bit lands in the half whose clears own it, as the host homes them:
@@ -92,16 +90,18 @@ world::Entity seed_from(const ClientEntityState &row) {
 bool update_live_row_state(
 		const ClientEntityState &row, world::Entity &entity) {
 	const world::Entity seed = seed_from(row);
-	const bool changed = entity.position.x != seed.position.x ||
-			entity.position.y != seed.position.y ||
-			entity.position.z != seed.position.z || entity.heading != seed.heading ||
-			entity.pitch != seed.pitch || entity.roll != seed.roll ||
+	// The change test compares the words (D-NET-507): a float view hides a move
+	// of a few words far from the origin.
+	const bool changed = entity.position.x.q16 != seed.position.x.q16 ||
+			entity.position.y.q16 != seed.position.y.q16 ||
+			entity.position.z.q16 != seed.position.z.q16 || entity.heading != seed.heading ||
+			entity.pitch_bam != seed.pitch_bam || entity.roll_bam != seed.roll_bam ||
 			entity.team != seed.team;
 	if (!changed) return false;
 	entity.position = seed.position;
 	entity.heading = seed.heading;
-	entity.pitch = seed.pitch;
-	entity.roll = seed.roll;
+	entity.pitch_bam = seed.pitch_bam;
+	entity.roll_bam = seed.roll_bam;
 	entity.team = seed.team;
 	return true;
 }

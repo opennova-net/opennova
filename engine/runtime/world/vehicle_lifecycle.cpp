@@ -36,8 +36,8 @@ void write_pose(Entity &e, const int32_t pose[6]) {
 	e.veh.air_pitch_bam = pose[4];
 	e.veh.air_roll_bam = pose[5];
 	e.heading = pose[3];
-	e.pitch = degrees_i16_from_bam(pose[4]);
-	e.roll = degrees_i16_from_bam(pose[5]);
+	e.pitch_bam = pose[4];
+	e.roll_bam = pose[5];
 }
 int32_t respawn_ground(World &world, Entity &e) {
 	const int32_t pos[3] = { e.position.x.q16, e.position.y.q16,
@@ -592,10 +592,10 @@ void VehicleSystem::update_attached_children(Entity &vehicle) {
 			: vehicle.heading;
 	const int32_t pitch = vehicle.veh.yaw_seeded
 			? vehicle.veh.air_pitch_bam
-			: bam_from_degrees_wrapped(static_cast<double>(vehicle.pitch));
+			: vehicle.pitch_bam;
 	const int32_t roll = vehicle.veh.yaw_seeded
 			? vehicle.veh.air_roll_bam
-			: bam_from_degrees_wrapped(static_cast<double>(vehicle.roll));
+			: vehicle.roll_bam;
 	for (int slot = 0; slot < count; ++slot) {
 		// A child with no assigned point is left alone [orig: @0x45D5F5].
 		const int32_t bone = b.f[AiBrain::kAttachSlots + 2 * slot];
@@ -612,8 +612,8 @@ void VehicleSystem::update_attached_children(Entity &vehicle) {
 		matrix.transform_point(t->agun_points[static_cast<size_t>(bone - 1)].position, world_point);
 		child->position.set_q16({world_point[0], world_point[1], world_point[2]});
 		child->heading = vehicle.heading;
-		child->pitch = vehicle.pitch;
-		child->roll = vehicle.roll;
+		child->pitch_bam = vehicle.pitch_bam;
+		child->roll_bam = vehicle.roll_bam;
 		child->veh.yaw_seeded = vehicle.veh.yaw_seeded;
 		child->veh.yaw_bam = vehicle.veh.yaw_bam;
 		child->veh.air_pitch_bam = vehicle.veh.air_pitch_bam;

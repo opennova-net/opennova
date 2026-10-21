@@ -173,8 +173,8 @@ void designation_point(world::World &world, const world::Entity &sender, int32_t
 				body ? body->inf.eye_offset_z : sender.eye_offset_z);
 		fire[3] = body ? body->heading : sender.heading;
 		fire[4] = body ? io::bam_add(body->pitch, body->inf.recoil_pitch)
-		               : world::bam_from_degrees_wrapped(sender.pitch);
-		fire[5] = body ? body->roll : world::bam_from_degrees_wrapped(sender.roll);
+		               : sender.pitch_bam;
+		fire[5] = body ? body->roll : sender.roll_bam;
 	}
 	const int32_t forward[3] = {kDesignationRayUnits << 16, 0, 0};
 	int32_t far_point[3];

@@ -123,8 +123,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.player_class = spawn.player_class; // entity+0x294 (host-diag 2026-07-01: was left 0)
     seed.position = spawn.position;
     seed.heading = spawn.heading; // the Yaw word (D-NET-NEW-L6-2)
-    seed.pitch = spawn.pitch;
-    seed.roll = spawn.roll;
+    seed.pitch_bam = spawn.pitch_bam;
+    seed.roll_bam = spawn.roll_bam;
     seed.team = spawn.team;
     // The wire record's item init stores the def word [orig: Entity_InitFromItemDef @0x49e550:
     // healthMax -> Health]; the authority's spawn zeroes it below.

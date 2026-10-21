@@ -887,7 +887,7 @@ bool run_full_entity_spawn_rich_fields() {
 	entity.seats[3].occupant = w::EntityHandle::make(0, 1);
 	entity.position = {-12.5f, 8.25f, 3.0f};
 	entity.heading = w::placed_heading_bam(215);
-	entity.pitch = -15;
+	entity.pitch_bam = w::spawn_angle_bam(-15);
 	entity.ai_state = 0x1234;
 	entity.anim_slot = 6;
 	entity.net_id = 0x4242;          // the SSN (+0x7C): never streamed

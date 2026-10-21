@@ -55,8 +55,8 @@ w::Entity *spawn_pool_row(opennova::mission::MissionKernel &kernel, int pool, in
 	seed.alive = true;
 	seed.position = {10.0f, 20.0f, 3.0f};
 	seed.heading = w::placed_heading_bam(45);
-	seed.pitch = 2;
-	seed.roll = -3;
+	seed.pitch_bam = w::spawn_angle_bam(2);
+	seed.roll_bam = w::spawn_angle_bam(-3);
 	seed.net_stance_bits = 0x02u; // the MoveOrder stance latch bit 9
 	seed.section_mask = 0x00010002u;
 	seed.spawn_origin = (1u << 24) | 7u; // placed identity: kind 1, index 7
@@ -360,8 +360,8 @@ bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
 	if (!expect(e != nullptr, "vehicle row exists"))
 		return false;
 	// Unseeded: the whole-degree mission mirrors are all a row carries.
-	e->pitch = 3;
-	e->roll = -2;
+	e->pitch_bam = w::spawn_angle_bam(3);
+	e->roll_bam = w::spawn_angle_bam(-2);
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
@@ -373,8 +373,8 @@ bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
 	e->veh.yaw_seeded = true;
 	e->veh.air_pitch_bam = static_cast<int32_t>(2.49 * bam_per_degree);
 	e->veh.air_roll_bam = static_cast<int32_t>(-1.51 * bam_per_degree);
-	e->pitch = 2;
-	e->roll = -2;
+	e->pitch_bam = w::spawn_angle_bam(2);
+	e->roll_bam = w::spawn_angle_bam(-2);
 	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
 	ok = expect(std::abs(rows[w::PF_PITCH_DEG] - 2.49f) < 1e-4f &&
 					 std::abs(rows[w::PF_ROLL_DEG] + 1.51f) < 1e-4f,
@@ -403,7 +403,7 @@ bool test_attached_rows_retain_subdegree_frame() {
     gun->veh.yaw_bam = w::bam_heading_from_mission_yaw_deg(33.125);
     gun->veh.air_pitch_bam = w::bam_from_degrees_wrapped(2.49);
     gun->veh.air_roll_bam = w::bam_from_degrees_wrapped(-1.51);
-    gun->heading = w::placed_heading_bam(33); gun->pitch = 2; gun->roll = -2;
+    gun->heading = w::placed_heading_bam(33); gun->pitch_bam = w::spawn_angle_bam(2); gun->roll_bam = w::spawn_angle_bam(-2);
     im::PoolPresentLifecycleMap lifecycle;
     std::vector<float> rows;
     im::DoorPhaseTable doors;
@@ -566,7 +566,7 @@ bool test_joiner_bldg_section_offset_reaches_present_rows() {
 	if (!expect(e != nullptr, "joiner bldg row spawns")) return false;
 	e->kind = w::EntityKind::Building;
 	e->position = {10.0f, 20.0f, 11.0f};
-	e->heading = w::placed_heading_bam(90); e->pitch = 0; e->roll = 0;
+	e->heading = w::placed_heading_bam(90); e->pitch_bam = 0; e->roll_bam = 0;
 	e->bldg_section_pivot = true;
 	e->death_anim_state = 0x0100;
 	w::ItemDeathTraits traits;
@@ -847,7 +847,7 @@ bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
 	w::Entity *e = spawn_pool_row(kernel, 2, 0, 1116);
 	if (!expect(e != nullptr, "joiner bldg row spawns")) return false;
 	e->position = {10.0f, 20.0f, 11.0f};
-	e->heading = w::placed_heading_bam(90); e->pitch = 0; e->roll = 0;
+	e->heading = w::placed_heading_bam(90); e->pitch_bam = 0; e->roll_bam = 0;
 	e->bldg_section_pivot = true;
 	e->death_anim_state = 0x0100;
 	w::ItemDeathTraits traits;
@@ -886,7 +886,7 @@ bool test_joiner_palm_source_and_local_fragment() {
     auto *source = spawn_pool_row(kernel, 2, 0, 812);
     source->kind = w::EntityKind::Building;
     source->palm_sections = true; source->palm_state = 2; source->section_mask = 0;
-    source->pitch = source->roll = 0; source->heading = w::placed_heading_bam(90);
+    source->pitch_bam = source->roll_bam = 0; source->heading = w::placed_heading_bam(90);
     opennova::replication::ClientEntityState decoded;
     decoded.handle = source->handle.packed;
     decoded.type_id = 812;
@@ -1330,8 +1330,8 @@ bool test_rows_carry_the_slot_march_start() {
 	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
 	if (!expect(e != nullptr, "the bare registry spawns a pool-1 row")) return false;
 	e->heading = w::placed_heading_bam(0);
-	e->pitch = 0;
-	e->roll = 0;
+	e->pitch_bam = 0;
+	e->roll_bam = 0;
 	e->item_type = 3;
 	e->bbox_center = {1.0f, 2.0f, 1.5f};
 	const im::PresentRowsContext context{kernel, nullptr, false};

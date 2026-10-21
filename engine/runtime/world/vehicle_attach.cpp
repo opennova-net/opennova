@@ -972,7 +972,7 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     // subtractions @0x4360b6 / @0x4360c6]: the body's BAM32 heading and pitch for
     // every real player, the entity's Yaw word and pitch mirror for a bare entity.
     int32_t view_heading = player.heading;
-    int32_t view_pitch = static_cast<int32_t>(player.pitch * kBamPerDegree);
+    int32_t view_pitch = player.pitch_bam;
     if (const AiEntity *body = world.ai.for_handle(player.handle)) {
         view_heading = body->heading;
         view_pitch = body->pitch;

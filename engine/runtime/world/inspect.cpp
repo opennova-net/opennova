@@ -183,8 +183,8 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 		// Motor-internal taps for the convoy-pace hunt (AI-PARITY-CONCEPT
 		// 6.12g): the integrated speed vs the command names which stage loses
 		// the pace.
-		d.vp = ve->pitch;
-		d.vr = ve->roll;
+		d.vp = static_cast<int32_t>(std::lround(degrees_from_angle_bam(ve->pitch_bam)));
+		d.vr = static_cast<int32_t>(std::lround(degrees_from_angle_bam(ve->roll_bam)));
 		d.mspd = ve->veh.speed;
 		d.pose_bam[0] = ve->veh.yaw_bam;
 		d.pose_bam[1] = ve->veh.air_pitch_bam;
@@ -333,8 +333,8 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 	}
 	d.mission_position = ent.position;
 	d.yaw = mission_yaw_whole_deg(ent.heading);
-	d.pitch = ent.pitch;
-	d.roll = ent.roll;
+	d.pitch = static_cast<int32_t>(std::lround(degrees_from_angle_bam(ent.pitch_bam)));
+	d.roll = static_cast<int32_t>(std::lround(degrees_from_angle_bam(ent.roll_bam)));
 	d.primary_weapon_clip = ent.primary_weapon_slot.clip;
 	d.primary_weapon_reserve = ent.primary_weapon_slot.reserve;
 	d.seats.reserve(ent.seats.size());

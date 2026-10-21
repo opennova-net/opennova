@@ -122,7 +122,7 @@ particle::EffectPose emitter_owner_pose(const Entity &entity) {
     const int32_t origin[3] = {};
     const auto matrix = collision_matrix_from_euler(
             entity.heading,
-            bam_from_degrees_wrapped(entity.pitch), bam_from_degrees_wrapped(entity.roll), origin);
+            entity.pitch_bam, entity.roll_bam, origin);
     particle::EffectPose pose;
     pose.position = {entity.position.x, entity.position.z, -entity.position.y};
     const int32_t scale = entity.uniform_scale_q16 != 0 ? entity.uniform_scale_q16 : 65536;

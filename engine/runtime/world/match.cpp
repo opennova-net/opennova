@@ -809,8 +809,8 @@ void drop_object_from_carrier(World &world, Entity &object, const DropCarrierPos
     // quarter turn; the pitch and roll words stay the object's own, now held
     // as live BAM words like a mover's. [orig: @0x439e9f..0x439ec3]
     if (!object.veh.yaw_seeded) {
-        object.veh.air_pitch_bam = spawn_angle_bam(object.pitch);
-        object.veh.air_roll_bam = spawn_angle_bam(object.roll);
+        object.veh.air_pitch_bam = object.pitch_bam;
+        object.veh.air_roll_bam = object.roll_bam;
         object.veh.yaw_seeded = true;
     }
     object.veh.yaw_bam = io::bam_add(carrier.heading_bam, 0x40000000);
@@ -1720,8 +1720,8 @@ void follow_ground(World &world, Entity &object, bool ride) {
         object.veh.air_pitch_bam = pose.pitch_bam;
         object.veh.air_roll_bam = pose.roll_bam;
         object.heading = pose.yaw_bam;
-        object.pitch = static_cast<int16_t>(std::lround(double(pose.pitch_bam) * kDegreesPerBam));
-        object.roll = static_cast<int16_t>(std::lround(double(pose.roll_bam) * kDegreesPerBam));
+        object.pitch_bam = pose.pitch_bam;
+        object.roll_bam = pose.roll_bam;
         if (ride && entity_dead(*ground)) {
             object.drop_motion = DropMotion::Fall;
             object.veh.slide_z = -0x4000;

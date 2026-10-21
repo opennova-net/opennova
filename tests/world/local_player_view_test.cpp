@@ -146,11 +146,11 @@ void test_mounted_first_person_camera_belongs_to_the_carrier() {
     //  Entity_AttachToBoneAndUpdateTransform @0x5463D0 writes it through
     //  Math_FixedPointMatrixToEulerAngles @0x54656F]
     body->roll = bam_from_degrees_wrapped(2.49);
-    rider.roll = 2; // the whole-degree mirror
+    rider.roll_bam = spawn_angle_bam(2); // the whole-degree mirror
     CHECK(local_player_mounted_camera(lw.w, rider, out));
     CHECK(out[5] == body->roll);
     body->roll = 0;
-    rider.roll = 0;
+    rider.roll_bam = 0;
     // The `tank` render class draws the virtual display instead of the hull
     // for the local CLAIMANT in mode 0 only. [orig: 0x449EF0 @0x449F12..0x449F27]
     {
@@ -192,12 +192,12 @@ void test_mounted_first_person_camera_belongs_to_the_carrier() {
     // whole-degree mirrors. [orig: @0x4DC732..0x4DC741]
     live_hull.veh.air_pitch_bam = bam_from_degrees_wrapped(2.49);
     live_hull.veh.air_roll_bam = bam_from_degrees_wrapped(-1.51);
-    live_hull.pitch = 2;
-    live_hull.roll = -2;
+    live_hull.pitch_bam = spawn_angle_bam(2);
+    live_hull.roll_bam = spawn_angle_bam(-2);
     CHECK(local_player_mounted_camera(lw.w, rider, out));
     CHECK(out[4] == live_hull.veh.air_pitch_bam && out[5] == live_hull.veh.air_roll_bam);
     live_hull.veh.air_pitch_bam = live_hull.veh.air_roll_bam = 0;
-    live_hull.pitch = live_hull.roll = 0;
+    live_hull.pitch_bam = live_hull.roll_bam = 0;
     // No virtual display on a plain vehicle: the person legs keep the view.
     live_hull.virtual_display_camera = false;
     CHECK(!local_player_mounted_camera(lw.w, rider, out));
@@ -263,7 +263,7 @@ void test_seat_bone_pose_rider_legs() {
     body->roll = bam_from_degrees_wrapped(1.3);
     body->inf.eye_offset_z = 0x18000;
     Entity &rider = lw.entity();
-    rider.roll = 1; // the whole-degree mirror
+    rider.roll_bam = spawn_angle_bam(1); // the whole-degree mirror
     rider.saved_live_roll = 0x00400000;
     Entity parent;
     parent.has_item_def = true;

@@ -51,8 +51,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // before either publication path so the matching scaled inverse can be
     // selected by the polygon walker.
     CollisionMatrix world_mat = collision_matrix_from_placement(
-            heading, static_cast<double>(e->pitch),
-            static_cast<double>(e->roll), p, e->uniform_scale_q16);
+            heading, e->pitch_bam, e->roll_bam, p, e->uniform_scale_q16);
 
     // Explicitly published matrices and the host callback both own the FINAL
     // world-space slot array for animated models. Slots pair with COBJ sections
@@ -92,7 +91,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
         const int32_t pos[3] = {int32_t(sector_pos.x * 65536),
                 int32_t(sector_pos.y * 65536), int32_t(sector_pos.z * 65536)};
         world_mat = collision_matrix_from_euler(heading,
-                bam_from_degrees_wrapped(e->pitch), bam_from_degrees_wrapped(e->roll), pos);
+                e->pitch_bam, e->roll_bam, pos);
     }
     bool live_pose = !sector_callback && !e->item_section_piece &&
             instance->section_matrices.size() == m->sections.size();
@@ -127,7 +126,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // though the authored angle is also baked into the section matrix.
     // [orig: targetEntity+20 Pitch read @ 0x4ae9a7]
     scratch.pitch_bam =
-            bam_from_degrees_wrapped(static_cast<double>(e->pitch));
+            e->pitch_bam;
     scratch.entity_flags = e->flags;
     scratch.bound_radius = entity_proximity_radius(*this, *e, m);
     scratch.is_building = (e->kind == EntityKind::Building);

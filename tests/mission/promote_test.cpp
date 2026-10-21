@@ -487,8 +487,8 @@ static void test_unresolved_emplacement_preserves_streamed_pose() {
     child_seed.kind = EntityKind::Item;
     child_seed.position = {17.f, 23.f, 9.f};
     child_seed.heading = placed_heading_bam(37);
-    child_seed.pitch = -4;
-    child_seed.roll = 6;
+    child_seed.pitch_bam = spawn_angle_bam(-4);
+    child_seed.roll_bam = spawn_angle_bam(6);
     child_seed.emplacement_parent = parent_h;
     child_seed.emplacement_parent_spawn_id = parent->registry_spawn_id;
     const EntityHandle child_h = world->registry.spawn(1, child_seed);
@@ -501,7 +501,7 @@ static void test_unresolved_emplacement_preserves_streamed_pose() {
     CHECK(!child->emplacement_pose_metadata_resolved);
     CHECK(child->position.x == 17.f && child->position.y == 23.f &&
           child->position.z == 9.f);
-    CHECK(child->heading == placed_heading_bam(37) && child->pitch == -4 && child->roll == 6);
+    CHECK(child->heading == placed_heading_bam(37) && child->pitch_bam == spawn_angle_bam(-4) && child->roll_bam == spawn_angle_bam(6));
 }
 
 // D-HUD-20: the authored display name rides name_index through the embedder's

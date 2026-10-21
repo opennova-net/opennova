@@ -33,7 +33,7 @@ int EntityCommands::fire_ammo_at_target(int32_t ammo, int32_t target) {
     if (!marker || ammo == 0) return 1;
     world_.round_sim.fire_source(world_, nullptr, script_position(world_, *marker),
             marker->heading,
-            bam_from_degrees_wrapped(marker->pitch), uint8_t(ammo));
+            marker->pitch_bam, uint8_t(ammo));
     return 0;
 }
 

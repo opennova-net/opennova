@@ -212,8 +212,8 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 			// them straight onto its local entity (<<16) at every 0x0F.
 			// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D80 (pitch hi)
 			//  / @0x502D9A (roll hi); NapiNPClientMsg_0x00F @0x42E3E9/@0x42E3F2]
-			pitch = static_cast<int16_t>(world::spawn_angle_bam(e->pitch) >> 16);
-			roll = static_cast<int16_t>(world::spawn_angle_bam(e->roll) >> 16);
+			pitch = static_cast<int16_t>(e->pitch_bam >> 16);
+			roll = static_cast<int16_t>(e->roll_bam >> 16);
 			recipient_team = e->team;
 		}
 	}
@@ -767,8 +767,8 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		if (pose.found) {
 			body->position = pose.position;
 			body->heading = pose.heading_bam; // the copied word (D-NET-NEW-L6-2)
-			body->pitch = pose.pitch;
-			body->roll = pose.roll;
+			body->pitch_bam = pose.pitch_bam;
+			body->roll_bam = pose.roll_bam;
 			world::apply_spawn_point_latches(*body, pose);
 		}
 		// The scored arm's warm-up, where the pick left the body (D-NET-431).

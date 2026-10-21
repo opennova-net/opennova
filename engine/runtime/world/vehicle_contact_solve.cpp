@@ -498,9 +498,8 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	m.air_roll_bam = fit.roll_bam;
 	if (m.crashed != 0)
 		m.yaw_bam = fit.yaw_bam;
-	veh.pitch = static_cast<int16_t>(std::lround(double(m.air_pitch_bam) * kDegreesPerBam));
-	veh.roll = static_cast<int16_t>(std::lround(
-            double(m.air_roll_bam) * kDegreesPerBam));
+	veh.pitch_bam = m.air_pitch_bam;
+	veh.roll_bam = m.air_roll_bam;
     if (m.crashed == 0 && up_z16 > 0) {
         // Upright: slideDecay clamped toward the ground, then Z = the solver
         // chassis Z — the wheeled solver's positive-corner average,
@@ -891,8 +890,8 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 		vehicle_contact_downhill_tail(veh, pz);
 		m.contact_solved_once = true;
 		m.plat_airborne_ticks = (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
-		veh.pitch = static_cast<int16_t>(std::lround(double(m.air_pitch_bam) * kDegreesPerBam));
-		veh.roll = static_cast<int16_t>(std::lround(double(m.air_roll_bam) * kDegreesPerBam));
+		veh.pitch_bam = m.air_pitch_bam;
+		veh.roll_bam = m.air_roll_bam;
 	};
 	// The fit writes pitch and roll, and adopts yaw once crashed.
 	// Witness sites: [orig: airborne @0x478B24..0x478B61; grounded @0x478FB3..0x478FEF]
@@ -1142,8 +1141,8 @@ static void light_apply_frame(World &world, Entity &entity, CollisionMatrix matr
     auto &m = entity.veh;
     m.air_pitch_bam = angles[1]; m.air_roll_bam = angles[2];
     if (write_yaw) m.yaw_bam = angles[0];
-    entity.pitch = static_cast<int16_t>(std::lround(double(angles[1]) * kDegreesPerBam));
-    entity.roll = static_cast<int16_t>(std::lround(double(angles[2]) * kDegreesPerBam));
+    entity.pitch_bam = angles[1];
+    entity.roll_bam = angles[2];
 }
 
 // Normalize displacement, replace its X/Y with the original forward row, normalize again.
@@ -1249,8 +1248,8 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
 	m.yaw_bam = angles[0];
 	m.air_pitch_bam = angles[1];
 	m.air_roll_bam = angles[2];
-	veh.pitch = int16_t(std::lround(double(angles[1]) * kDegreesPerBam));
-	veh.roll = int16_t(std::lround(double(angles[2]) * kDegreesPerBam));
+	veh.pitch_bam = angles[1];
+	veh.roll_bam = angles[2];
 	return true;
 }
 

@@ -442,8 +442,8 @@ void test_render_math() {
     Entity e;
     e.position = {3.0f, 5.0f, 7.0f};
     e.heading = placed_heading_bam(90);
-    e.pitch = 45;
-    e.roll = -30;
+    e.pitch_bam = spawn_angle_bam(45);
+    e.roll_bam = spawn_angle_bam(-30);
     const RenderMatrix from_entity = render_matrix_from_entity_pose(e);
     const RenderMatrix expected =
         render_matrix_from_pose(p, 0, static_cast<int32_t>(0x20000000u),
@@ -573,7 +573,7 @@ void test_tilted_pose_weld() {
     CHECK(tilted != nullptr);
     if (tilted != nullptr) {
         tilted->position.z = 3.5f;
-        tilted->pitch = 180;
+        tilted->pitch_bam = spawn_angle_bam(180);
     }
     rig.rebuild();
     rig.ow.init_mission(rig.world, rig.cw);
@@ -1360,7 +1360,7 @@ void test_collector_center_uses_full_euler_pose() {
         Entity *e = rig.world.registry.get(h);
         CHECK(e != nullptr);
         if (e == nullptr) return;
-        e->pitch = pitched ? 180.0f : 0.0f;
+        e->pitch_bam = pitched ? spawn_angle_bam(180) : 0;
         e->occlusion_latch = 200;
         rig.rebuild();
         rig.ow.init_mission(rig.world, rig.cw);
@@ -1574,7 +1574,7 @@ void test_round_restart_keeps_the_first_weld() {
     a->position = {10.0f, 10.0f, 0.0f};
     b->position = {14.1f, 10.0f, 0.0f};
     a->heading = b->heading = placed_heading_bam(90); // identity heading
-    a->pitch = b->pitch = a->roll = b->roll = 0.0f;
+    a->pitch_bam = b->pitch_bam = a->roll_bam = b->roll_bam = 0;
     QuadSpec qb;
     qb.type = kOccRecWindow;
     qb.section_a = 1;

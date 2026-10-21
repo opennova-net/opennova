@@ -198,7 +198,7 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 				collision_matrix_from_euler(aim_body
 								? aim_body->heading
 								: occupant->heading,
-						aim_body ? aim_body->pitch : bam_from_degrees_wrapped(occupant->pitch), 0,
+						aim_body ? aim_body->pitch : occupant->pitch_bam, 0,
 						camera)
 						.transform_point(forward, end);
 				ProjectileTrace ray;

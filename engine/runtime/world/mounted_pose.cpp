@@ -324,9 +324,9 @@ bool resolve_model_mounted_pose_from_parts(
 	const double carrier_yaw = mission_yaw_deg_from_bam_heading(
 			carrier.veh.yaw_seeded ? carrier.veh.yaw_bam : carrier.heading);
 	const double carrier_pitch = carrier.veh.yaw_seeded
-			? carrier.veh.air_pitch_bam * kDegreesPerBam : carrier.pitch;
+			? carrier.veh.air_pitch_bam * kDegreesPerBam : degrees_from_angle_bam(carrier.pitch_bam);
 	const double carrier_roll = carrier.veh.yaw_seeded
-			? carrier.veh.air_roll_bam * kDegreesPerBam : carrier.roll;
+			? carrier.veh.air_roll_bam * kDegreesPerBam : degrees_from_angle_bam(carrier.roll_bam);
 	const M3 carrier_basis = model_basis_from_mission_euler(
 			carrier_pitch, carrier_yaw, carrier_roll);
 	if (!v3_finite(live_model_position) || !m3_finite(carrier_basis) ||

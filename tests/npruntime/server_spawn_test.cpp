@@ -850,7 +850,7 @@ int main() {
 		// The body died 30 units away facing elsewhere; the revive saved its spot.
 		body->position = {-504.9119f, -139.3639f, 26.0f};
 		body->heading = w::placed_heading_bam(10);
-		body->pitch = 7;
+		body->pitch_bam = w::spawn_angle_bam(7);
 		body_motor->heading = 0x12340000;
 		body->alive = false;
 		body->health = 0;
@@ -865,7 +865,7 @@ int main() {
 		                    body->position.x == -504.9119f && body->position.z == 26.25f,
 		            "the revive deploy lands on the saved spot raised 0x4000")) return 1;
 		if (!expect(static_cast<uint32_t>(body_motor->heading) == 0xCC160000u &&
-		                    body->heading == w::placed_heading_bam(-197) && body->pitch == 0,
+		                    body->heading == w::placed_heading_bam(-197) && body->pitch_bam == 0,
 		            "the revived player keeps the start marker's facing, not the body's")) return 1;
 	}
 

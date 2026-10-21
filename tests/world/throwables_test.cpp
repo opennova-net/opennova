@@ -1398,8 +1398,8 @@ void test_placed_device_pose_and_ballistic_damage() {
     if (entity == nullptr) return;
     CHECK(entity->has_item_def);
     CHECK(entity->heading == 0x10000000); // the round's Yaw word
-    CHECK(entity->pitch == 45);
-    CHECK(entity->roll == -90);
+    CHECK(entity->pitch_bam == spawn_angle_bam(45));
+    CHECK(entity->roll_bam == spawn_angle_bam(-90));
     CHECK(!entity->ground_target.valid());
     CHECK(device.entity_spawn_id == entity->registry_spawn_id);
     const Entity *owner = rig.w.registry.get(rig.thrower);
@@ -1491,7 +1491,7 @@ void test_parented_device_adopts_parent_pitch() {
     Entity *carrier = rig.w.registry.get(parent);
     CHECK(carrier != nullptr);
     stamp_saved_live_pose(*carrier);
-    carrier->pitch = 45;
+    carrier->pitch_bam = spawn_angle_bam(45);
     step_devices(rig.w, nullptr, nullptr);
     CHECK(rig.w.throwables.devices.size() == 1);
     const PlacedDevice &device = rig.w.throwables.devices[0];

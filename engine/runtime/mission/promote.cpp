@@ -267,8 +267,10 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
 	// The Yaw word: the spawn angle of 90 - the record's yaw (D-NET-NEW-L6-2).
 	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
 	s.heading = placed_heading_bam(e.yaw);
-	s.pitch = e.pitch;
-    s.roll = e.roll;
+	// The Pitch / Roll words: the record's degrees in the spawn form
+	// (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+	s.pitch_bam = spawn_angle_bam(e.pitch);
+    s.roll_bam = spawn_angle_bam(e.roll);
     s.team = e.team;
 	s.vehicle_spawn_team = static_cast<int8_t>(e.team_budget);
 	s.group_id = e.group_id;
@@ -608,8 +610,8 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         // [orig: Entity_SpawnAddEWeapChildren @0x40F3C5..0x40F3EB]
         child_seed.position = carrier->position;
         child_seed.heading = carrier->heading;
-        child_seed.pitch = carrier->pitch;
-        child_seed.roll = carrier->roll;
+        child_seed.pitch_bam = carrier->pitch_bam;
+        child_seed.roll_bam = carrier->roll_bam;
         child_seed.team = carrier->team;
         // The child's record takes the carrier's command group and refNum;
         // the spawn then copies the carrier's Flags over the child's and

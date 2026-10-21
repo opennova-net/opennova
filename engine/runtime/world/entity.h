@@ -526,8 +526,14 @@ struct Entity {
     // memset and never places keeps word 0, and its port stores 0 (the user
     // waypoint, a player spawn with no start marker).
     int32_t heading = 0x40000000;
-    int16_t pitch = 0;
-    int16_t roll = 0;
+    // The Pitch and Roll words (entity+0x14 / +0x18), BAM32 like the Yaw word:
+    // a placed row holds the spawn angle of the record's degrees,
+    // ((deg << 16) / 360) << 16 with the low half zero (world::spawn_angle_bam);
+    // a mover stores its live words; every reader reads them, a reader that
+    // wants degrees converts (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord
+    //  @0x40E9F0 - @0x40EB69..0x40EB86 (Pitch), @0x40EB89..0x40EBA6 (Roll)]
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
     // The eye/camera-offset triple (entity+0x6C/+0x70/+0x74, 16.16): the
     // stance-driven eye above the entity origin, restamped each body tick.
     // NPCs take the capsule extent tilted by lean (lateral = delta*sin(lean)*
@@ -667,7 +673,9 @@ struct Entity {
     int32_t uniform_scale_q16 = 0;
     bool alive = true;
     // Retail entity+0x124 damage-disabled/respawn state: 0 damageable, 620
-    // join-pending countdown, -1 dead. Projectile damage gates on nonzero.
+    // join-pending / spawn-protection countdown, -1 a spectator or observer
+    // (the death stores nothing here, D-NET-NEW-L6-4). Projectile damage gates
+    // on nonzero.
     int32_t damage_state = 0;
     // The pending death-anim selection (GamePlayerEntity +0x2C0 deathAnimStateId):
     // written at DAMAGE time by the kill (RoundSim bullet selection [orig:

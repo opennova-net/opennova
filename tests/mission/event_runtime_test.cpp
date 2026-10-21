@@ -2777,8 +2777,8 @@ static void test_structural_bms_actions() {
     marker.wp_number = 9;
     marker.position = {10.0f, 20.0f, 30.0f};
     marker.heading = world::placed_heading_bam(45);
-    marker.pitch = 5;
-    marker.roll = -3;
+    marker.pitch_bam = world::spawn_angle_bam(5);
+    marker.roll_bam = world::spawn_angle_bam(-3);
     // The BMS spawn stamps the chute bit on engine_flags; the teleport read
     // merges both views.
     marker.engine_flags = world::kEntityFlagParachute;
@@ -2859,9 +2859,9 @@ static void test_structural_bms_actions() {
         CHECK(entity->position.y == 20.0f);
         CHECK(entity->position.z == 30.0f);
         CHECK(entity->heading == world::placed_heading_bam(45));
-        CHECK(entity->pitch == 5);
+        CHECK(entity->pitch_bam == world::spawn_angle_bam(5));
         // Pool 0 enters Entity_ResetToSpawnState, which levels Roll.
-        CHECK(entity->roll == (handle.pool() == 0 ? 0 : -3));
+        CHECK(entity->roll_bam == (handle.pool() == 0 ? 0 : world::spawn_angle_bam(-3)));
     }
     CHECK(w.registry.get(pool0_h)->spawn_position.x == 10.0f);
     CHECK((w.registry.get(pool0_h)->engine_flags &
