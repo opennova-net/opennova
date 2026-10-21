@@ -81,23 +81,30 @@ public:
 
 	// The task role's credentials as the agent serves them now; false with
 	// `error` when it does not answer them.
-	bool credentials(AwsCredentials &out, std::string &error);
+	// A per-call timeout of -1 uses the configured bound; zero refuses the
+	// call, and a positive value lowers both curl's and the runner's bounds.
+	// Callers with an overall deadline pass its remaining milliseconds.
+	bool credentials(AwsCredentials &out, std::string &error, int timeout_ms = -1);
+	// Short-lived credentials for the costs view's other account, via regional
+	// STS. No credentials or response bodies are included in errors.
+	bool assume_role(const AwsCredentials &source, const std::string &role_arn, AwsCredentials &out,
+			std::string &error, int timeout_ms = -1);
 
 	// A JSON-protocol call (ECS, SSM): `body` POSTed as
 	// application/x-amz-json-1.1 with X-Amz-Target `target`.
 	AwsReply json_call(const AwsCredentials &credentials, std::string_view service,
-			std::string_view target, const std::string &body);
+			std::string_view target, const std::string &body, int timeout_ms = -1);
 	// A JSON-protocol call to a global service at its one endpoint, whatever the
 	// config's region: `host` (Cost Explorer's "ce.us-east-1.amazonaws.com",
 	// Budgets' "budgets.amazonaws.com") signed for `signing_region` (the aws
 	// partition's us-east-1, for both).
 	AwsReply global_json_call(const AwsCredentials &credentials, std::string_view service,
 			std::string_view host, std::string_view signing_region, std::string_view target,
-			const std::string &body);
+			const std::string &body, int timeout_ms = -1);
 	// A Query-protocol call (Elastic Load Balancing, RDS, ElastiCache, EC2):
 	// `params` (Action and Version among them) POSTed as a form.
 	AwsReply query_call(const AwsCredentials &credentials, std::string_view service,
-			const std::vector<std::pair<std::string, std::string>> &params);
+			const std::vector<std::pair<std::string, std::string>> &params, int timeout_ms = -1);
 
 	// Why `reply` is no success, for the admin page: AWS's error code and
 	// message from a JSON or an XML error body ("ecs answered 400:
@@ -113,10 +120,10 @@ private:
 	// `body` as `content_type` (with `target` unless it is empty).
 	AwsReply signed_call(const AwsCredentials &credentials, std::string_view service,
 			std::string_view host, std::string_view region, std::string_view content_type,
-			std::string_view target, const std::string &body);
+			std::string_view target, const std::string &body, int timeout_ms);
 	// One curl run over the config text `text`: the file written, run, and
 	// deleted; `secrets` scrubbed from any error.
-	AwsReply run(const std::string &text, const std::vector<std::string> &secrets);
+	AwsReply run(const std::string &text, const std::vector<std::string> &secrets, int timeout_ms);
 
 	proc::CommandRunner &runner_;
 	AwsApiConfig config_;

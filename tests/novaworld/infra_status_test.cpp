@@ -203,7 +203,7 @@ int test_signed_calls() {
 	TEST_EXPECT(api.query_call(creds, "rds",
 						   { { "Action", "DescribeDBInstances" }, { "Version", "2014-10-31" },
 								   { "DBInstanceIdentifier", "opennova-prod-db" } })
-					.ok());
+						.ok());
 	{
 		const auto calls = stub.calls();
 		TEST_EXPECT(calls.size() == 1);
@@ -225,7 +225,7 @@ int test_signed_calls() {
 	infra::AwsCredentials long_lived{ "AKIAEXAMPLEEXAMPLE00", "secret", "" };
 	TEST_EXPECT(api.json_call(long_lived, "ssm", "AmazonSSM.GetParameter",
 						   "{\"Name\":\"/opennova/prod/release\"}")
-					.ok());
+						.ok());
 	TEST_EXPECT(!contains(stub.calls()[0].config, "x-amz-security-token"));
 
 	// A control byte in a value is refused before curl runs.
@@ -275,6 +275,130 @@ int test_signed_calls() {
 	TEST_EXPECT(!api.credentials(creds, error) && contains(error, "no usable credentials"));
 	stub.replies["credentials"] = answer(200, "not json");
 	TEST_EXPECT(!api.credentials(creds, error) && contains(error, "no JSON object"));
+	TEST_EXPECT(dir_empty(scratch.root()));
+	return 0;
+}
+
+int test_assume_role() {
+	test_temp::TempDir scratch("infra_assume_role");
+	infra::AwsApiConfig config = deployment_config(scratch.root()).aws;
+	config.region = "us-west-2";
+	AwsStub stub;
+	infra::AwsApi api(stub, config);
+	const infra::AwsCredentials source{ infra_stub::kKeyId, infra_stub::kSecret,
+		infra_stub::kToken };
+	const std::string role = "arn:aws:iam::234567890123:role/opennova-ci-cost-read";
+	const std::string fields = "<AccessKeyId>ASIACOSTSTUBKEY00001</AccessKeyId>"
+							   "<SecretAccessKey>cost-stub-secret/AbCd+1234</SecretAccessKey>"
+							   "<SessionToken>cost-stub-token&amp;+=/</SessionToken>"
+							   "<Expiration>2030-01-01T01:00:00Z</Expiration>";
+	const auto response = [](const std::string &credentials) {
+		return "<AssumeRoleResponse xmlns=\"https://sts.amazonaws.com/doc/2011-06-15/\">"
+			   "<AssumeRoleResult><Credentials>" +
+				credentials + "</Credentials></AssumeRoleResult></AssumeRoleResponse>";
+	};
+	stub.replies["sts AssumeRole"] = answer(200, response(fields));
+	infra::AwsCredentials assumed;
+	std::string error = "old error";
+	TEST_EXPECT(api.assume_role(source, role, assumed, error));
+	TEST_EXPECT(error.empty() && assumed.key_id == "ASIACOSTSTUBKEY00001" &&
+			assumed.secret == "cost-stub-secret/AbCd+1234" &&
+			assumed.token == "cost-stub-token&+=/");
+	{
+		const auto calls = stub.calls();
+		TEST_EXPECT(calls.size() == 1);
+		const auto &call = calls[0];
+		TEST_EXPECT(infra_stub::config_line(call.config, "url") ==
+				"https://sts.us-west-2.amazonaws.com/");
+		TEST_EXPECT(infra_stub::config_line(call.config, "aws-sigv4") == "aws:amz:us-west-2:sts");
+		TEST_EXPECT(infra_stub::config_line(call.config, "data-raw") ==
+				"Action=AssumeRole&Version=2011-06-15&"
+				"RoleArn=arn%3Aaws%3Aiam%3A%3A234567890123%3Arole%2Fopennova-ci-cost-read&"
+				"RoleSessionName=opennova-costs&DurationSeconds=900");
+		TEST_EXPECT(call.timeout_ms == config.timeout_ms);
+		for (const auto &arg : call.argv)
+			TEST_EXPECT(!holds_credential(arg) && !contains(arg, source.key_id));
+		TEST_EXPECT(!fs::exists(fs::u8path(call.argv[3])));
+	}
+	// Subsequent calls sign as CI, not as the source ECS role.
+	stub.replies["ce GetCostAndUsage"] = answer(200, "{}");
+	TEST_EXPECT(api.global_json_call(assumed, "ce", "ce.us-east-1.amazonaws.com", "us-east-1",
+						   "AWSInsightsIndexService.GetCostAndUsage", "{}")
+						.ok());
+	TEST_EXPECT(infra_stub::config_line(stub.calls().back().config, "user") ==
+			assumed.key_id + ":" + assumed.secret);
+	TEST_EXPECT(!holds_credential(stub.calls().back().config));
+
+	// A successful HTTP response must still contain the exact credential shape,
+	// with every temporary credential usable and no ambiguous duplicate fields.
+	const std::vector<std::string> invalid = {
+		"not XML",
+		"<Other>" + response(fields) + "</Other>",
+		response("<AccessKeyId>x</AccessKeyId><SecretAccessKey>y</SecretAccessKey>"),
+		response(fields + "<SessionToken>duplicate</SessionToken>"),
+		response("<AccessKeyId>x:y</AccessKeyId><SecretAccessKey>secret</SecretAccessKey>"
+				 "<SessionToken>token</SessionToken>"),
+		response("<AccessKeyId>x</AccessKeyId><SecretAccessKey> </SecretAccessKey>"
+				 "<SessionToken>token</SessionToken>"),
+		response("<AccessKeyId>x</AccessKeyId><SecretAccessKey>secret</SecretAccessKey>"
+				 "<SessionToken>token&#10;injected</SessionToken>"),
+		response("<AccessKeyId><Nested>x</Nested></AccessKeyId>"
+				 "<SecretAccessKey>secret</SecretAccessKey><SessionToken>token</SessionToken>"),
+	};
+	for (const auto &body : invalid) {
+		stub.replies["sts AssumeRole"] = answer(200, body);
+		assumed = source;
+		TEST_EXPECT(!api.assume_role(source, role, assumed, error));
+		TEST_EXPECT(assumed.key_id.empty() && assumed.secret.empty() && assumed.token.empty());
+		TEST_EXPECT(!error.empty() && !holds_credential(error));
+	}
+
+	stub.replies["sts AssumeRole"] = answer(403,
+			"<ErrorResponse><Error><Code>AccessDenied</Code><Message>cannot assume " +
+					std::string(infra_stub::kSecret) + " " + infra_stub::kToken + " " +
+					infra_stub::kKeyId + "</Message></Error></ErrorResponse>");
+	TEST_EXPECT(!api.assume_role(source, role, assumed, error));
+	TEST_EXPECT(contains(error, "AccessDenied") && !holds_credential(error) &&
+			!contains(error, source.key_id));
+	stub.replies["sts AssumeRole"] = infra_stub::curl_failed(7, source.secret);
+	TEST_EXPECT(!api.assume_role(source, role, assumed, error));
+	TEST_EXPECT(contains(error, "curl exited") && !holds_credential(error));
+	stub.clear();
+	TEST_EXPECT(!api.assume_role(source, "\ninvalid", assumed, error));
+	TEST_EXPECT(stub.calls().empty() && dir_empty(scratch.root()));
+	return 0;
+}
+
+int test_call_timeouts() {
+	test_temp::TempDir scratch("infra_call_timeouts");
+	infra::AwsApiConfig config = deployment_config(scratch.root()).aws;
+	AwsStub stub;
+	stub.replies = infra_stub::deployment_replies();
+	infra::AwsApi api(stub, config);
+	infra::AwsCredentials creds;
+	std::string error;
+	TEST_EXPECT(api.credentials(creds, error, 1250));
+	TEST_EXPECT(stub.calls().back().timeout_ms == 1250);
+	TEST_EXPECT(contains(stub.calls().back().config, "max-time = 1.250\n"));
+	TEST_EXPECT(contains(stub.calls().back().config, "connect-timeout = 1.250\n"));
+	TEST_EXPECT(api.json_call(creds, "ssm", "AmazonSSM.GetParameter", "{}", 325).ok());
+	TEST_EXPECT(stub.calls().back().timeout_ms == 325);
+	TEST_EXPECT(contains(stub.calls().back().config, "max-time = 0.325\n"));
+	TEST_EXPECT(api.json_call(creds, "ssm", "AmazonSSM.GetParameter", "{}", 45000).ok());
+	TEST_EXPECT(stub.calls().back().timeout_ms == config.timeout_ms);
+	TEST_EXPECT(contains(stub.calls().back().config, "max-time = 12.000\n"));
+	TEST_EXPECT(api.credentials(creds, error));
+	TEST_EXPECT(stub.calls().back().timeout_ms == config.timeout_ms);
+	TEST_EXPECT(contains(stub.calls().back().config, "max-time = 4.000\n"));
+	stub.clear();
+	TEST_EXPECT(!api.json_call(creds, "ssm", "AmazonSSM.GetParameter", "{}", 0).ok());
+	TEST_EXPECT(!api.credentials(creds, error, 0) && contains(error, "deadline"));
+	TEST_EXPECT(creds.key_id.empty() && stub.calls().empty());
+	config.timeout_ms = 800;
+	infra::AwsApi short_api(stub, config);
+	TEST_EXPECT(short_api.credentials(creds, error, 1200));
+	TEST_EXPECT(stub.calls().back().timeout_ms == 800);
+	TEST_EXPECT(contains(stub.calls().back().config, "max-time = 0.800\n"));
 	TEST_EXPECT(dir_empty(scratch.root()));
 	return 0;
 }
@@ -644,6 +768,8 @@ int main() {
 	const Case cases[] = {
 		{ "xml", test_xml },
 		{ "signed_calls", test_signed_calls },
+		{ "assume_role", test_assume_role },
+		{ "call_timeouts", test_call_timeouts },
 		{ "unconfigured", test_unconfigured },
 		{ "snapshot", test_snapshot },
 		{ "fleet_cluster", test_fleet_cluster },

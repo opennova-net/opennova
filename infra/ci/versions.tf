@@ -16,7 +16,8 @@
 # OrganizationAccountAccessRole (`./deploy/run.sh ci plan|apply|import|output|list`,
 # no --deployment), its inputs from the vault (deploy/env/ci.env.tpl), its state
 # in prod's state bucket beside the org stack's (key infra/ci/terraform.tfstate),
-# reached the same way.
+# reached the same way. infra/org separately owns CI's billing-only role for
+# prod's admin costs view; this stack continues to own the account's budget.
 
 terraform {
   # The toolbox's Terraform (deploy/Dockerfile), as infra/aws.

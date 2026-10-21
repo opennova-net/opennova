@@ -297,12 +297,64 @@ override_resource {
 variables {
   deployment                = "prod"
   aws_account_id            = "123456789012"
+  aws_account_id_ci         = "444444444444"
   region                    = "us-east-1"
   db_master_password        = "0123456789abcdef0123456789abcdef"
   cache_auth_token          = "fedcba9876543210fedcba9876543210"
   cloudflare_zone_id        = "0123456789abcdef0123456789abcdef"
   cloudflare_domain         = "example.com"
   service_eip_allocation_id = "eipalloc-0123456789abcdef0"
+}
+
+run "ci_billing" {
+  command = plan
+
+  assert {
+    condition = (
+      length(aws_iam_role_policy.ci_cost_read) == 1 &&
+      aws_iam_role_policy.ci_cost_read[0].role == aws_iam_role.program["web"].id &&
+      jsondecode(aws_iam_role_policy.ci_cost_read[0].policy).Statement == [{
+        Effect = "Allow", Action = "sts:AssumeRole", Resource = "arn:aws:iam::444444444444:role/opennova-ci-cost-read"
+      }] &&
+      local.infra_status_env.ONNET_INFRA_CI_COST_ROLE == "arn:aws:iam::444444444444:role/opennova-ci-cost-read" &&
+      local.infra_status_env.ONNET_INFRA_CI_BUDGET == "arn:aws:budgets::444444444444:budget/opennova-ci-monthly-cost"
+    )
+    error_message = "prod web reads CI through the exact billing role and CI's own budget"
+  }
+}
+
+run "staging_has_no_ci_billing" {
+  command = plan
+  variables {
+    deployment                = "staging"
+    service_eip_allocation_id = ""
+  }
+  assert {
+    condition = (
+      length(aws_iam_role_policy.ci_cost_read) == 0 &&
+      !contains(keys(local.infra_status_env), "ONNET_INFRA_CI_COST_ROLE") &&
+      !contains(keys(local.infra_status_env), "ONNET_INFRA_CI_BUDGET")
+    )
+    error_message = "staging cannot assume CI's role and receives no CI cost configuration"
+  }
+}
+
+run "ci_account_required_for_prod" {
+  command = plan
+  variables { aws_account_id_ci = "" }
+  expect_failures = [var.aws_account_id_ci]
+}
+
+run "ci_account_must_be_valid" {
+  command = plan
+  variables { aws_account_id_ci = "REPLACE_ME" }
+  expect_failures = [var.aws_account_id_ci]
+}
+
+run "ci_account_must_be_distinct" {
+  command = plan
+  variables { aws_account_id_ci = "123456789012" }
+  expect_failures = [var.aws_account_id_ci]
 }
 
 run "task_definitions" {

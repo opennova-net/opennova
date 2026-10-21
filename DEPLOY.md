@@ -61,7 +61,8 @@ There are three places the service runs, and nothing of one reaches another by a
 database, cache, buckets, SSM parameters, logs, alarms and their topic, budgets, SES
 identities and sandbox, Cloud Map namespace, hosted machines and their game data (its
 bucket's `data/`), and its Terraform state (a versioned, encrypted bucket in that account, locked by S3's own lock
-file) are its own, and no IAM principal of one account can touch the other's. Each
+file) are its own. Runtime access stays within its account except prod web's
+billing-only read of CI (the admin's **AWS costs** page). Each
 deployment's credentials: its deploy user (`opennova-deploy` in its account; its key in
 its own vault item) and its GitHub environment's OIDC role (which trusts that
 environment's jobs alone). A command holds its own deployment's key alone, with two
@@ -467,7 +468,8 @@ or an admin role), outside the toolbox; everything else is the toolbox.
    alone, under the role boundary; it rolls the programs and hostd, and execs into its
    deployment's web container to confirm hostd on the machines); in the management account, the
    Identity Center user and its two permission sets (`OpenNovaAdmin`, `OpenNovaReadOnly`)
-   in every member account (`opennova-ci` gets nothing else here: section "CI runners").
+   in every member account (`opennova-ci` also gets prod's billing reader here; its
+   runners and budget are the CI stack's: section "CI runners").
    Its first run applies with a local state, then moves the state into prod's state
    bucket (`org/terraform.tfstate`), where it lives. Every apply writes back
    to the vault, keys never on the screen: each deployment's `state_bucket`,
@@ -524,7 +526,9 @@ those into every run, so the toolbox refuses to run while one exists in `infra/a
 
 The deployment's account, region and (prod) gate address come from the vault, as
 `TF_VAR_deployment`, `TF_VAR_aws_account_id` (the AWS provider acts in that account alone),
-`TF_VAR_region` and `TF_VAR_service_eip_allocation_id`.
+`TF_VAR_region` and `TF_VAR_service_eip_allocation_id`. Prod also requires
+`TF_VAR_aws_account_id_ci`, resolved from `aws-ci/account_id`, for the admin's
+CI billing read; it must name a different account. Staging leaves it empty.
 
 Prod adopts the gate's Elastic IP, the one retail clients use: `aws-prod/gate_eip_allocation_id`
 names it in the prod account. Make it once, before prod's first plan (the deploy user may
@@ -1882,9 +1886,24 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
   forecast; Cost Anomaly Detection by AWS service emails daily anomalies over
   `cost_anomaly_threshold_usd`. The hosted servers' egress is metered and shown, never
   capped. The site's admin page **AWS costs** (`/admin/costs`, and its summary on the
-  admin Overview) shows the account's month so far by AWS service and by day, AWS's forecast
-  for the month and the monthly budget: web's task role reads Cost Explorer and the budget
-  (`infra/aws/programs.tf`), kept 6 hours, since each Cost Explorer request costs $0.01.
+  admin Overview) shows the month so far by AWS service and by day, and AWS's forecast.
+  **Prod includes both prod and CI**, with a combined total and each account's own
+  monthly budget. CI includes RunsOn's EC2 runners, S3 Magic Cache, control plane and
+  every other AWS charge in its account. Staging shows its own account alone. The
+  RunsOn license paid outside AWS is not part of the AWS bill. Web reads its own
+  account as its task role and assumes CI's billing-only `opennova-ci-cost-read` role
+  for CI (`infra/org/costs.tf`); neither account is filtered by resource tags. Reads
+  are kept 6 hours, since each Cost Explorer request costs $0.01.
+
+  Bringing CI billing into prod: `org apply` creates the CI reader and permits its
+  exact ARN in prod's role boundary; then `--deployment prod infra apply` gives web
+  its assumption policy and `ONNET_INFRA_CI_COST_ROLE` / `ONNET_INFRA_CI_BUDGET`;
+  deploy the application release (or `app converge` after that release is running)
+  to pick up the configuration. Prod's Terraform and `secrets check` require the
+  existing vault field `aws-ci/account_id`; staging does not read it. The management
+  account's Cost Explorer preferences must allow linked-account access. Check both
+  prod and CI on the admin page after rollout; an unavailable CI read must remain
+  visible rather than appearing as zero spend. No CI stack apply is needed.
 - **A shell.** `./deploy/run.sh --deployment <deployment> app shell PROGRAM [CONTAINER]` (ECS Exec; the toolbox
   carries the Session Manager plugin it uses). `db psql` opens psql as the
   service's role in a one-off task over ECS Exec; `db psql -c 'SELECT ...'` runs one

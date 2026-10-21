@@ -13,7 +13,15 @@
 //    none), "forecast_error" (why none; null), "by_service": [{"service", "cents"}]
 //    (largest first), "days": [{"date", "cents"}] (every day of the month so far),
 //    "budget": {"name", "currency", "limit_cents", "actual_cents", "forecast_cents"
-//    (AWS Budgets' own, null until computed)} (null for none), "budget_error" (null)}
+//    (AWS Budgets' own, null until computed)} (null for none), "budget_error" (null),
+//    "accounts": [{"id", "label", "currency", "error", "month_to_date_cents",
+//    "forecast_cents", "forecast_error", "budget", "budget_error"}]}
+//
+// With CI enabled, the top-level totals and charts combine production and CI,
+// and the budgets stay in their account summaries. Any account usage failure
+// sets the top-level error and withholds aggregate figures; successful accounts
+// still have their figures. A missing forecast or budget affects only that
+// optional result. The combined forecast requires both accounts' forecasts.
 //
 // Each admin's reads are drawn from a bucket of their own. Read only; no-store. Service
 // policy, not a port.

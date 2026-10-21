@@ -93,7 +93,7 @@ function percent(fraction: number): string {
 // 80% spent (warn), else within it. Null without a budget to hold it against.
 export function budgetState(costs: Pick<Costs, 'month_to_date_cents' | 'forecast_cents' | 'budget' | 'currency'>): BudgetState | null {
   const budget = costs.budget;
-  if (!budget || budget.limit_cents <= 0) return null;
+  if (!budget || budget.limit_cents <= 0 || budget.currency.toUpperCase() !== costs.currency.toUpperCase()) return null;
   const limit = budget.limit_cents;
   const spent = costs.month_to_date_cents;
   const forecast = costs.forecast_cents ?? budget.forecast_cents;
@@ -126,4 +126,21 @@ export function budgetState(costs: Pick<Costs, 'month_to_date_cents' | 'forecast
     spentShare,
     forecastShare,
   };
+}
+
+// The Overview names the account behind a warning; a failed account never
+// compares a placeholder amount with its budget. Legacy replies stay unchanged.
+export function worstCostBudget(costs: Costs): (BudgetState & { accountLabel: string | null }) | null {
+  if (!costs.available) return null;
+  if (costs.accounts.length <= 1) {
+    const state = costs.error ? null : budgetState(costs);
+    return state ? { ...state, accountLabel: null } : null;
+  }
+  const rank: Record<Tone, number> = { idle: 0, ok: 1, warn: 2, bad: 3 };
+  let worst: (BudgetState & { accountLabel: string }) | null = null;
+  for (const account of costs.accounts) {
+    const state = account.error ? null : budgetState(account);
+    if (state && (!worst || rank[state.tone] > rank[worst.tone])) worst = { ...state, accountLabel: account.label };
+  }
+  return worst;
 }

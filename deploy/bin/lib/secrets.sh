@@ -205,6 +205,13 @@ secrets_check() {
       err "  $(basename "$tpl")    FAILED: $VAULT_ERR"; rc=1
     fi
   done
+  if [ "$DEP" = prod ]; then
+    if infra_ci_cost_account; then
+      log "  CI billing account    OK"
+    else
+      err "  CI billing account    FAILED: $VAULT_ERR"; rc=1
+    fi
+  fi
   # The zone's (infra/zone): every deployment's edge secret, so it resolves
   # once each deployment's secrets init ran.
   if vault_tpl_resolve "$ZONE_ENV_TPL" check; then

@@ -13,6 +13,12 @@ variable "account_id" {
   type        = string
 }
 
+variable "cost_reader_role_arn" {
+  description = "Prod's one cross-account billing reader, or empty for staging."
+  type        = string
+  default     = ""
+}
+
 variable "region" {
   description = "The account's region."
   type        = string

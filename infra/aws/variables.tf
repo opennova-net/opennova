@@ -7,6 +7,18 @@ variable "deployment" {
     error_message = "deployment is prod or staging."
   }
 }
+
+variable "aws_account_id_ci" {
+  description = "CI's account id for prod's admin billing view (vault aws-ci/account_id). Required and distinct from prod's account; staging never reads CI."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.deployment != "prod" || (can(regex("^[0-9]{12}$", var.aws_account_id_ci)) && var.aws_account_id_ci != var.aws_account_id)
+    error_message = "prod requires aws_account_id_ci to be a 12-digit account id distinct from aws_account_id."
+  }
+}
+
 variable "aws_account_id" {
   description = "The deployment's AWS account (opennova-prod's, opennova-staging's): the provider refuses credentials of any other (allowed_account_ids). The toolbox fills it from the deployment's vault item, aws-<deployment> (TF_VAR_aws_account_id); no tracked file names an account."
   type        = string

@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CostsSection from './CostsSection.vue';
 import { fetchCosts } from '../../api/costs';
-import { costs, localCosts } from '../../test/costFixtures';
+import { combinedCosts, costs, localCosts } from '../../test/costFixtures';
 import { testRouter } from '../../test/router';
 
 vi.mock('../../api/costs', async (importOriginal) => ({
@@ -39,6 +39,13 @@ describe('CostsSection', () => {
     expect(page.get('h1').text()).toBe('AWS costs');
     expect(page.get('.cost-budget-state').text()).toContain('Within the budget');
     expect(page.findAll('.cost-service')).toHaveLength(5);
+  });
+
+  it('names the production and CI scope in the page description', async () => {
+    read.mockResolvedValue({ ok: true, value: combinedCosts() });
+    const page = await mountSection();
+    expect(page.get('header').text()).toContain('Monthly AWS spending for Production + CI');
+    expect(page.findAll('.cost-account')).toHaveLength(2);
   });
 
   it('reads once and on Refresh, never on a timer (web keeps the read 6 hours)', async () => {

@@ -3,7 +3,7 @@
 #   docker run --rm -v "$PWD:/w" -w /w/infra/org hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/org hashicorp/terraform:<the toolbox's> test
 # The organization and its three accounts adopted as they are (every feature,
-# never closed; ci, the CI runners' account, with no baseline here: infra/ci);
+# never closed; ci, the CI runners' account, with its billing reader here);
 # per deployment account, through its own provider: the state bucket
 # named after the account, versioned, encrypted, private, TLS only and reached
 # by its deploy user, its administrator role and its root alone; the deploy
@@ -84,6 +84,11 @@ mock_provider "aws" {
   }
 }
 
+mock_provider "aws" {
+  alias           = "ci"
+  override_during = plan
+}
+
 # The import blocks adopt these, and a mock provider cannot import: each is
 # stood in for at plan instead.
 override_resource {
@@ -122,6 +127,54 @@ variables {
   sso_given_name         = "Mock"
   sso_family_name        = "Maintainer"
   sso_email              = "maintainer@mail.example.org"
+}
+
+run "ci_cost_reader" {
+  command = plan
+
+  assert {
+    condition = (
+      aws_iam_role.ci_cost_read.name == "opennova-ci-cost-read" &&
+      jsondecode(aws_iam_role.ci_cost_read.assume_role_policy).Statement == [{
+        Effect    = "Allow", Action = "sts:AssumeRole",
+        Principal = { AWS = "arn:aws:iam::111111111111:root" },
+        Condition = { ArnEquals = { "aws:PrincipalArn" = "arn:aws:iam::111111111111:role/opennova-prod-web" } }
+      }] &&
+      jsondecode(aws_iam_role_policy.ci_cost_read.policy).Statement == [
+        { Effect = "Allow", Action = ["ce:GetCostAndUsage", "ce:GetCostForecast"], Resource = "*" },
+        { Effect = "Allow", Action = "budgets:ViewBudget", Resource = "arn:aws:budgets::444444444444:budget/opennova-ci-monthly-cost" },
+      ]
+    )
+    error_message = "only prod web may assume CI's role, which reads only Cost Explorer and CI's monthly budget"
+  }
+  assert {
+    condition = (
+      one([for s in jsondecode(module.prod.documents.boundary).Statement : s if try(s.Sid, "") == "AssumeCiCosts"]) == {
+        Sid = "AssumeCiCosts", Effect = "Allow", Action = "sts:AssumeRole", Resource = "arn:aws:iam::444444444444:role/opennova-ci-cost-read"
+      } &&
+      !strcontains(module.staging.documents.boundary, "sts:AssumeRole") &&
+      !strcontains(jsonencode(module.prod.documents.deploy), "sts:AssumeRole")
+    )
+    error_message = "only prod's role boundary permits the exact CI billing role; staging and deploy users cannot assume it"
+  }
+}
+
+run "boundary_size_with_long_region" {
+  command = plan
+  variables { region = "ap-southeast-5" }
+
+  assert {
+    condition = (
+      alltrue([for m in [module.prod.documents, module.staging.documents] : length(m.boundary) < 6144]) &&
+      strcontains(module.prod.documents.boundary, "arn:aws:ecs:ap-southeast-5:111111111111:") &&
+      !strcontains(module.prod.documents.boundary, "us-east-1") &&
+      one([for s in jsondecode(module.prod.documents.boundary).Statement : s if try(s.Sid, "") == "AssumeCiCosts"]) == {
+        Sid = "AssumeCiCosts", Effect = "Allow", Action = "sts:AssumeRole", Resource = "arn:aws:iam::444444444444:role/opennova-ci-cost-read"
+      } &&
+      !strcontains(module.staging.documents.boundary, "sts:AssumeRole")
+    )
+    error_message = "the role boundaries fit IAM's size limit in a longer AWS region without widening the exact CI role exception"
+  }
 }
 
 run "organization_and_accounts" {
@@ -215,8 +268,8 @@ run "deploy_users" {
   }
   assert {
     condition = alltrue([for d in concat(values(module.prod.documents.deploy), [module.prod.documents.boundary, module.prod.documents.machine_boundary]) :
-    length(regexall("arn:aws:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:", d)) == length(regexall("arn:aws:[a-z0-9-]+:[a-z0-9-]*:111111111111:", d))])
-    error_message = "prod's policies name prod's account and no other"
+    length(regexall("arn:aws:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:", replace(d, local.ci_cost_role_arn, ""))) == length(regexall("arn:aws:[a-z0-9-]+:[a-z0-9-]*:111111111111:", d))])
+    error_message = "prod's policies name prod's account, with only the exact CI billing reader as a cross-account exception"
   }
   assert {
     condition = alltrue([for d in concat(values(module.staging.documents.deploy), [module.staging.documents.boundary, module.staging.documents.machine_boundary]) :
@@ -230,27 +283,27 @@ run "deploy_users" {
   assert {
     condition = alltrue([
       for st in jsondecode(module.prod.documents.boundary).Statement : (
-        st.Sid == "ListTasks" ? (
+        try(st.Sid, "") == "ListTasks" ? (
           st.Action == "ecs:ListTasks" && st.Resource == "*" &&
           st.Condition.ArnLike["ecs:cluster"] == "arn:aws:ecs:us-east-1:111111111111:cluster/opennova-*"
-          ) : st.Sid == "TasksDbCache" ? (
+          ) : try(st.Sid, "") == "TasksDbCache" ? (
           toset(st.Action) == toset(["ecs:DescribeTasks", "ecs:ExecuteCommand", "rds:DescribeDBInstances", "elasticache:DescribeReplicationGroups"]) &&
           toset(st.Resource) == toset([
             "arn:aws:ecs:us-east-1:111111111111:task/opennova-*/*",
             "arn:aws:rds:us-east-1:111111111111:db:opennova-*",
             "arn:aws:elasticache:us-east-1:111111111111:replicationgroup:opennova-*",
           ])
-          ) : st.Sid == "Clusters" ? (
+          ) : try(st.Sid, "") == "Clusters" ? (
           toset(st.Action) == toset(["ecs:ListContainerInstances", "ecs:ExecuteCommand"]) &&
           st.Resource == "arn:aws:ecs:us-east-1:111111111111:cluster/opennova-*"
-          ) : st.Sid == "ReadFleet" ? (
+          ) : try(st.Sid, "") == "ReadFleet" ? (
           st.Action == "ecs:DescribeContainerInstances" && st.Resource == "arn:aws:ecs:us-east-1:111111111111:container-instance/opennova-*/*"
-          ) : st.Sid == "Unscoped" ? (
+          ) : try(st.Sid, "") == "Unscoped" ? (
           contains(st.Action, "elasticloadbalancing:DescribeTargetHealth") && contains(st.Action, "cloudwatch:GetMetricData") &&
           contains(st.Action, "cloudwatch:DescribeAlarms") && contains(st.Action, "ce:GetCostAndUsage") &&
           contains(st.Action, "ce:GetCostForecast") && contains(st.Action, "budgets:ViewBudget") &&
           st.Resource == "*" && !contains(keys(st), "Condition")
-          ) : st.Sid == "Logs" ? (
+          ) : try(st.Sid, "") == "Logs" ? (
           toset(st.Action) == toset(["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams", "logs:GetLogEvents", "logs:FilterLogEvents"]) &&
           toset(st.Resource) == toset([
             "arn:aws:logs:us-east-1:111111111111:log-group:/opennova/*",
@@ -259,67 +312,67 @@ run "deploy_users" {
         ) : true
       )
       ]) && length([for st in jsondecode(module.prod.documents.boundary).Statement : st
-    if contains(["ListTasks", "TasksDbCache", "Clusters", "ReadFleet", "Unscoped", "Logs"], st.Sid)]) == 6
+    if contains(["ListTasks", "TasksDbCache", "Clusters", "ReadFleet", "Unscoped", "Logs"], try(st.Sid, ""))]) == 6
     error_message = "the boundary holds web's infrastructure reads (infra/aws/programs.tf, fleet_agent.tf): OpenNova's clusters' tasks and container instances, its database and cache, the target groups' health, CloudWatch's metrics and alarms, Cost Explorer's month and forecast and the monthly budget (web's costs view), and the /opennova/* logs' events; and the deploy workflow's ECS Exec on OpenNova's clusters and tasks"
   }
   assert {
     condition = alltrue([for m in [module.prod.documents, module.staging.documents] :
       length([for st in jsondecode(m.boundary).Statement : st if st.Resource == "*" && !contains(keys(st), "Condition")]) == 1 &&
-      length(jsondecode(m.boundary).Statement) == length(distinct([for st in jsondecode(m.boundary).Statement : st.Sid])) &&
+      length([for st in jsondecode(m.boundary).Statement : st if can(st.Sid)]) == length(distinct([for st in jsondecode(m.boundary).Statement : st.Sid if can(st.Sid)])) &&
       !strcontains(m.boundary, "ecs:RegisterContainerInstance") && !strcontains(m.boundary, "ecs:Poll") && !strcontains(m.boundary, "ecs:DiscoverPollEndpoint")
     ])
-    error_message = "the role boundary holds its unscoped actions in one statement, names each statement once and holds none of the machines' ECS agent calls (the machine boundary's)"
+    error_message = "the role boundary holds its unscoped actions in one statement, never repeats an optional statement name and holds none of the machines' ECS agent calls (the machine boundary's)"
   }
   assert {
     condition = alltrue([
       for st in jsondecode(module.prod.documents.boundary).Statement : (
-        st.Sid == "LaunchTagged" ? (
+        try(st.Sid, "") == "LaunchTagged" ? (
           toset(st.Action) == toset(["ec2:RunInstances", "ec2:AllocateAddress"]) &&
           toset(st.Resource) == toset(["arn:aws:ec2:us-east-1:111111111111:instance/*", "arn:aws:ec2:us-east-1:111111111111:elastic-ip/*"]) &&
           st.Condition == { StringEquals = { "aws:RequestTag/opennova:hosted" = "1" }, StringLike = { "aws:RequestTag/opennova:deployment" = "opennova-*" } }
-          ) : st.Sid == "TagAtLaunch" ? (
+          ) : try(st.Sid, "") == "TagAtLaunch" ? (
           st.Action == "ec2:CreateTags" && toset(st.Condition.StringEquals["ec2:CreateAction"]) == toset(["RunInstances", "AllocateAddress"]) &&
           length(keys(st.Condition)) == 1 && length(keys(st.Condition.StringEquals)) == 1
-          ) : st.Sid == "EndMachines" ? (
+          ) : try(st.Sid, "") == "EndMachines" ? (
           toset(st.Action) == toset(["ec2:TerminateInstances", "ec2:AssociateAddress"]) &&
           st.Resource == "arn:aws:ec2:us-east-1:111111111111:instance/*" &&
           st.Condition == { StringEquals = { "aws:ResourceTag/opennova:hosted" = "1" }, StringLike = { "aws:ResourceTag/opennova:deployment" = "opennova-*" } }
-          ) : st.Sid == "MoveAddresses" ? (
+          ) : try(st.Sid, "") == "MoveAddresses" ? (
           toset(st.Action) == toset(["ec2:AssociateAddress", "ec2:DisassociateAddress", "ec2:ReleaseAddress"]) &&
           st.Resource == "arn:aws:ec2:us-east-1:111111111111:elastic-ip/*" &&
           st.Condition == { StringEquals = { "aws:ResourceTag/opennova:hosted" = "1" }, StringLike = { "aws:ResourceTag/opennova:deployment" = "opennova-*" } }
-          ) : st.Sid == "PlayRecords" ? (
+          ) : try(st.Sid, "") == "PlayRecords" ? (
           st.Action == "route53:ChangeResourceRecordSets" && st.Resource == "arn:aws:route53:::hostedzone/*" &&
           st.Condition["ForAllValues:StringEquals"]["route53:ChangeResourceRecordSetsRecordTypes"] == "A" &&
           toset(st.Condition["ForAllValues:StringEquals"]["route53:ChangeResourceRecordSetsActions"]) == toset(["UPSERT", "DELETE"]) &&
           st.Condition["ForAllValues:StringLike"] == { "route53:ChangeResourceRecordSetsNormalizedRecordNames" = "*.play.*" }
-          ) : st.Sid == "ZoneChanges" ? (
+          ) : try(st.Sid, "") == "ZoneChanges" ? (
           st.Action == "route53:GetChange" && st.Resource == "arn:aws:route53:::change/*" && !contains(keys(st), "Condition")
-          ) : st.Sid == "Unscoped" ? (
+          ) : try(st.Sid, "") == "Unscoped" ? (
           contains(st.Action, "ec2:DescribeAddresses")
         ) : !strcontains(jsonencode(st), "Address") && !strcontains(jsonencode(st), "route53:")
       )
       ]) && length([for st in jsondecode(module.prod.documents.boundary).Statement : st
-    if contains(["LaunchTagged", "TagAtLaunch", "EndMachines", "MoveAddresses", "PlayRecords", "ZoneChanges"], st.Sid)]) == 6
+    if contains(["LaunchTagged", "TagAtLaunch", "EndMachines", "MoveAddresses", "PlayRecords", "ZoneChanges"], try(st.Sid, ""))]) == 6
     error_message = "the role boundary holds the worker's static addresses: allocated and tagged at creation under this deployment's tags, associated with its machines, moved and released only while they carry both tags, their A records under a play zone by UPSERT and DELETE alone, a change's state; nothing else names an address or Route 53"
   }
   assert {
     condition = alltrue([
       for st in jsondecode(module.prod.documents.machine_boundary).Statement : (
-        st.Sid == "EcsAgentCluster" ? (
+        try(st.Sid, "") == "EcsAgentCluster" ? (
           toset(st.Action) == toset([
             "ecs:RegisterContainerInstance", "ecs:DeregisterContainerInstance", "ecs:SubmitContainerStateChange",
             "ecs:SubmitTaskStateChange", "ecs:SubmitAttachmentStateChanges",
           ]) && st.Resource == "arn:aws:ecs:us-east-1:111111111111:cluster/opennova-*-fleet"
-          ) : st.Sid == "EcsAgentInstance" ? (
+          ) : try(st.Sid, "") == "EcsAgentInstance" ? (
           toset(st.Action) == toset(["ecs:Poll", "ecs:StartTelemetrySession"]) &&
           st.Resource == "arn:aws:ecs:us-east-1:111111111111:container-instance/opennova-*-fleet/*"
-          ) : st.Sid == "Unscoped" ? (
+          ) : try(st.Sid, "") == "Unscoped" ? (
           toset(st.Action) == toset([
             "ecs:DiscoverPollEndpoint", "ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel",
             "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel",
           ]) && st.Resource == "*" && !contains(keys(st), "Condition")
-          ) : st.Sid == "MachineAndServerLogs" ? (
+          ) : try(st.Sid, "") == "MachineAndServerLogs" ? (
           toset(st.Action) == toset(["logs:CreateLogStream", "logs:PutLogEvents"]) &&
           toset(st.Resource) == toset([
             "arn:aws:logs:us-east-1:111111111111:log-group:/opennova/*/machines",
@@ -327,10 +380,10 @@ run "deploy_users" {
             "arn:aws:logs:us-east-1:111111111111:log-group:/opennova/*/servers",
             "arn:aws:logs:us-east-1:111111111111:log-group:/opennova/*/servers:*",
           ])
-          ) : st.Sid == "ListTrees" ? (
+          ) : try(st.Sid, "") == "ListTrees" ? (
           st.Action == "s3:ListBucket" && st.Resource == "arn:aws:s3:::opennova-*" &&
           st.Condition == { StringLike = { "s3:prefix" = "data/trees/*" } }
-          ) : st.Sid == "ReadTrees" ? (
+          ) : try(st.Sid, "") == "ReadTrees" ? (
           st.Action == "s3:GetObject" && st.Resource == "arn:aws:s3:::opennova-*/data/trees/*"
         ) : false
       )
@@ -339,7 +392,7 @@ run "deploy_users" {
   }
   assert {
     condition = alltrue([for account, m in { "111111111111" = module.prod.documents, "222222222222" = module.staging.documents } :
-      toset(one([for st in jsondecode(m.deploy["iam"]).Statement : st.Condition.StringEquals["iam:PermissionsBoundary"] if st.Sid == "WriteRolesUnderTheBoundary"])) == toset([
+      toset(one([for st in jsondecode(m.deploy["iam"]).Statement : st.Condition.StringEquals["iam:PermissionsBoundary"] if try(st.Sid, "") == "WriteRolesUnderTheBoundary"])) == toset([
         "arn:aws:iam::${account}:policy/opennova-role-boundary",
         "arn:aws:iam::${account}:policy/opennova-machine-boundary",
       ])
