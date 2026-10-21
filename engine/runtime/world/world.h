@@ -509,6 +509,9 @@ struct PlayerTemplate {
     // player rows' "plyr". An item class row's event body (item_death_class_from_tag).
     PlayerBodyClass body_class = PlayerBodyClass::kPlayer;
     ItemDeathClass item_event_class = ItemDeathClass::kNull;
+    // A satchel, claymore or AV mine row's device think, which a body bound to it runs as
+    // its class event (ThrowableSim::think_device_row_body); kNone for every other row.
+    ThrowClass device_think = ThrowClass::kNone;
 };
 
 // The per-mission tables the embedder feeds once (the def files, the terrain

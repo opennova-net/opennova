@@ -62,7 +62,9 @@ const char kItems[] =
 		"begin \"Classless\"\r\n id 105320\r\n type person\r\n hp 100\r\nend\r\n"
 		"begin \"Barrel man\"\r\n id 105321\r\n type person\r\n hp 100\r\n ai_function brrl\r\nend\r\n"
 		"begin \"Lift man\"\r\n id 105322\r\n type person\r\n hp 100\r\n ai_function ele0\r\nend\r\n"
-		"begin \"Grenade man\"\r\n id 105323\r\n type person\r\n hp 100\r\n ai_function nade\r\nend\r\n";
+		"begin \"Grenade man\"\r\n id 105323\r\n type person\r\n hp 100\r\n ai_function nade\r\nend\r\n"
+		"begin \"Satchel man\"\r\n id 105324\r\n type person\r\n hp 100\r\n ai_function schl\r\nend\r\n"
+		"begin \"Claymore man\"\r\n id 105325\r\n type person\r\n hp 100\r\n ai_function clym\r\nend\r\n";
 
 // Class 5 the plyr row, 6 the org0 row, 7 the classless row, 8 the brrl row, 9 the ele0 row
 // (classes 1..4 the plyr row: the load reads CHARACTER1 on until the first missing section).
@@ -76,9 +78,12 @@ const char kCharattr[] =
 		"[CHARACTER7]\r\nJUNGLE_CAMMO\t= 5320\r\nDESERT_CAMMO\t= 5320\r\nARCTIC_CAMMO\t= 5320\r\n"
 		"[CHARACTER8]\r\nJUNGLE_CAMMO\t= 5321\r\nDESERT_CAMMO\t= 5321\r\nARCTIC_CAMMO\t= 5321\r\n"
 		"[CHARACTER9]\r\nJUNGLE_CAMMO\t= 5322\r\nDESERT_CAMMO\t= 5322\r\nARCTIC_CAMMO\t= 5322\r\n"
-		"[CHARACTER10]\r\nJUNGLE_CAMMO\t= 5323\r\nDESERT_CAMMO\t= 5323\r\nARCTIC_CAMMO\t= 5323\r\n";
+		"[CHARACTER10]\r\nJUNGLE_CAMMO\t= 5323\r\nDESERT_CAMMO\t= 5323\r\nARCTIC_CAMMO\t= 5323\r\n"
+		"[CHARACTER11]\r\nJUNGLE_CAMMO\t= 5324\r\nDESERT_CAMMO\t= 5324\r\nARCTIC_CAMMO\t= 5324\r\n"
+		"[CHARACTER12]\r\nJUNGLE_CAMMO\t= 5325\r\nDESERT_CAMMO\t= 5325\r\nARCTIC_CAMMO\t= 5325\r\n";
 
-constexpr uint8_t kPlyr = 5, kOrg = 6, kNull = 7, kBrrl = 8, kEle0 = 9, kNade = 10;
+constexpr uint8_t kPlyr = 5, kOrg = 6, kNull = 7, kBrrl = 8, kEle0 = 9, kNade = 10, kSchl = 11,
+		kClym = 12;
 constexpr uint8_t kEquipped = 3;
 
 struct Rig {
@@ -445,6 +450,58 @@ void test_the_nade_row_has_no_callback() {
 	CHECK(nade->spawn_phase == -3);
 }
 
+// A satchel or claymore row's body runs the device's think: on the authority a live body
+// (the claymore's cone over ammo 0, the body's +0x26C word, finds nobody) keeps standing; a
+// body at 0 health spawns the boom rounds at its position (the satchel's satchelboom, the
+// claymore's claymoreshrapnel and claymorekillzone), sends its state packet (section 0) in a
+// session and is destroyed. Off the authority the think does nothing; the kill's event 4
+// fires the body with no packet.
+// [orig: Entity_SatchelThink @0x443670 (@0x443771, @0x4437E2, @0x443895, @0x44389E, event 4
+//  @0x443698); Entity_ClaymoreThink @0x4438C0 (@0x443A3F, @0x443ACC / @0x443B32, @0x443B85,
+//  @0x443B8E, event 4 @0x4438FD)]
+void test_a_device_rows_body_runs_the_device_think() {
+	for (const uint8_t player_class : {kSchl, kClym}) {
+		const bool claymore = player_class == kClym;
+		for (const bool authority : {true, false}) {
+			Rig r;
+			r.world->rules.logic_authority = authority;
+			r.world->rules.mp_session = true;
+			for (const char *name : {"AT_NULL", "satchelboom", "claymoreshrapnel",
+					"claymorekillzone"}) {
+				w::AmmoTableEntry ammo;
+				ammo.name = name;
+				ammo.valid = true;
+				ammo.velocity = 100;
+				ammo.max_age_ticks = 20;
+				r.world->tables.ammo.entries.push_back(ammo);
+			}
+			w::Entity *body = r.spawn_remote(player_class);
+			CHECK(body != nullptr);
+			if (body == nullptr) continue;
+			CHECK(w::player_item_row(*r.world, *body).device_think ==
+					(claymore ? w::ThrowClass::kClaymore : w::ThrowClass::kSatchel));
+			const w::EntityHandle h = body->handle;
+			w::player_body_row_event(*r.world, *body, 0);
+			CHECK(r.world->registry.get(h) != nullptr); // alive: it stands
+			CHECK(r.world->round_sim.active_count == 0);
+			body->health = 0;
+			r.world->out.entity_events.clear();
+			w::player_body_row_event(*r.world, *body, 0);
+			if (!authority) {
+				CHECK(r.world->registry.get(h) != nullptr); // only the kill's event 4
+				w::player_body_row_event(*r.world, *body, 4);
+			}
+			CHECK(r.world->registry.get(h) == nullptr);
+			CHECK(r.world->round_sim.active_count == (claymore ? 2 : 1));
+			bool packet = false;
+			for (const auto &ev : r.world->out.entity_events)
+				if (const auto *state = std::get_if<w::ItemStateEvent>(&ev))
+					packet = packet || (state->handle == h.packed && state->section == 0);
+			CHECK(packet == authority);
+		}
+	}
+}
+
 } // namespace
 
 int main() {
@@ -457,6 +514,7 @@ int main() {
 	test_a_round_hit_runs_its_rows_callback();
 	test_the_barrel_rows_dying_flag_reaches_the_uplink_gate();
 	test_the_nade_row_has_no_callback();
+	test_a_device_rows_body_runs_the_device_think();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

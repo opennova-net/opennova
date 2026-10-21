@@ -157,6 +157,10 @@ void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
     if (def != nullptr) {
         row.body_class = world::player_body_class_from_tag(def->ai_function);
         row.item_event_class = world::item_death_class_from_tag(def->ai_function);
+        const world::ThrowClass think = world::throw_class_from_tag(def->ai_function);
+        if (think == world::ThrowClass::kSatchel || think == world::ThrowClass::kClaymore ||
+                think == world::ThrowClass::kAVMine)
+            row.device_think = think;
     }
 }
 

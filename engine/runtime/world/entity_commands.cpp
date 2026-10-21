@@ -281,6 +281,13 @@ void player_body_row_event(World &world, Entity &body, int event, int32_t flags)
         organic_class_event(world, body, event);
         return;
     case PlayerBodyClass::kItem: {
+        // A satchel, claymore or AV mine row: the device's think over the body.
+        // [orig: schl @0x813150 -> Entity_SatchelThink @0x443670, clym @0x813168 ->
+        //  Entity_ClaymoreThink @0x4438C0, vmne @0x813180 -> Entity_AVMineThink @0x443BB0]
+        if (row.device_think != ThrowClass::kNone) {
+            world.throwables.think_device_row_body(world, body, row.device_think, event);
+            return;
+        }
         // The item row's body over the player body. Its +0x2AC word is the body's think
         // countdown (Entity::spawn_phase), which the item bodies write as class_think_ticks.
         // An item body reads the hit record's section, damage and angles.

@@ -1582,6 +1582,74 @@ void ThrowableSim::think_device(World &world, PlacedDevice &d, Entity *e,
     }
 }
 
+// See throwables.h. The round descriptor is the device thinks' (detonate_device's shape).
+void ThrowableSim::think_device_row_body(World &world, Entity &body, ThrowClass think,
+                                         int event) {
+    const bool authority = world.rules.logic_authority;
+    if (!authority && event != 4) return;
+    // The body in a device's shape: its words and facing, its team, its ground carrier
+    // (+0x28) and its +0x170 word (a person's ride link) as the owner.
+    PlacedDevice d;
+    d.entity = body.handle;
+    d.entity_spawn_id = body.registry_spawn_id;
+    d.owner = body.primary_occupant;
+    if (const Entity *owner = world.registry.get(d.owner)) d.owner_handle = owner->handle.packed;
+    d.team = body.team;
+    d.pos = body.position;
+    d.yaw_bam = body.heading;
+    d.pitch_bam = body.pitch_bam;
+    d.roll_bam = body.roll_bam;
+    d.parent = body.ground_target;
+    bool fire = !authority;
+    if (authority) {
+        // The cone test over the ammo at the body's +0x26C word (a person's: the organic
+        // fire's last advanced ammo, 0 on a player body), then the health test.
+        // [orig: g_AmmoDefTable[276 * +0x26C] +52 / +60 @0x443A3F / @0x443CC7; the
+        //  Health tests @0x443A5B / @0x443CE3]
+        if (think != ThrowClass::kSatchel) {
+            const AiEntity *ai = world.ai.for_handle(body.handle);
+            const AmmoTableEntry *ammo =
+                    world.tables.ammo.by_index(ai != nullptr ? ai->inf.last_advanced_ammo : 0);
+            CollisionWorld *collision = world.collision;
+            if (ammo != nullptr)
+                fire = enemy_in_cone(world, collision,
+                        collision != nullptr ? collision->terrain : nullptr, d,
+                        ammo->kz_minradius, ammo->kz_pieslice_bam, think == ThrowClass::kAVMine);
+        }
+        fire = fire || body.health <= 0;
+    }
+    if (!fire) return;
+    const auto spawn_round = [&](const char *name) {
+        const int index = world.tables.ammo.index_of(name);
+        if (index < 0) return;
+        RoundSpawnParams p;
+        p.owner = d.owner;
+        p.shooter_handle = d.owner_handle;
+        p.origin = d.pos;
+        p.dir_yaw_bam = d.yaw_bam;
+        p.dir_pitch_bam = d.pitch_bam;
+        p.ammo_index = index;
+        p.shot_seq = RoundSim::kFreshRoundWord; // D-NET-776, as the devices'
+        world.round_sim.spawn(world, p);
+    };
+    // [orig: RoundData_SpawnRound @0x4437E2 (satchelboom); @0x443ACC / @0x443B32
+    //  (claymoreshrapnel, claymorekillzone); @0x443D54 (AV_Minekillzone)]
+    if (think == ThrowClass::kSatchel) {
+        spawn_round("satchelboom");
+    } else if (think == ThrowClass::kClaymore) {
+        spawn_round("claymoreshrapnel");
+        spawn_round("claymorekillzone");
+    } else {
+        spawn_round("AV_Minekillzone");
+    }
+    // +0x170 cleared, the state packet in a session, then Entity_Destroy [orig:
+    //  @0x443885 / @0x443891..0x443895 / @0x44389E; @0x443B75 / @0x443B81..0x443B85 /
+    //  @0x443B8E; @0x443D97 / @0x443DA3..0x443DA7 / @0x443DB0]
+    body.primary_occupant = EntityHandle{};
+    if (authority && world.rules.mp_session) emit_item_state(world, body, 0);
+    world.commands.remove_ssn(body.handle);
+}
+
 void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
     // Ride the stuck-to parent [orig: the placed motor +452 =
     // Entity_InterpolateFromParentDelta @ 0x4a8d60, installed by

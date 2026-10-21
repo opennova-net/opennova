@@ -264,6 +264,19 @@ public:
     bool place_from_round(World &world, const LiveRound &round,
                           const AmmoTableEntry &ammo);
 
+    // A player body bound to a satchel, claymore or AV mine row (D-NET-348) runs the
+    // device's think over itself, the class event its row's +0x1C8 names: on the authority
+    // a body at or below 0 health (a claymore's also with an enemy person in the cone of
+    // the ammo at its +0x26C word, an AV mine's with a moving enemy vehicle) spawns the
+    // device's boom rounds at its position, its +0x170 word the owner, clears that word,
+    // sends its state packet (section 0) in a session and is destroyed; off the authority
+    // the kill's event 4 alone does the same with no packet. No PlacedDevice row: the
+    // body is no device.
+    // [orig: Entity_SatchelThink @0x443670 (the authority's health test @0x443771, event 4
+    //  @0x443698), Entity_ClaymoreThink @0x4438C0 (the cone @0x443A3F, @0x4438FD),
+    //  Entity_AVMineThink @0x443BB0 (the cone @0x443CC7, @0x443BEF)]
+    void think_device_row_body(World &world, Entity &body, ThrowClass think, int event);
+
     // The DETONATOR [orig: RoundData_SpawnRound ammo flag 0x20 Detonatesatchels
     // -> Entity_DetonateSatchelsByOwner @ 0x546ed0]: every placed SATCHEL-ammo
     // device owned by `owner` gets Health = -1; the next think detonates it.
