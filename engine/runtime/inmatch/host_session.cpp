@@ -317,8 +317,8 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 	// S2C send boundary, ahead of PumpFlags' 0x10 holdoff decrement below (D-NET-229).
 	// [orig: Server_TickUpdate -> CNapiNetwork_PumpServerProtocolRecv @0x51d895 (flags 0x19) ->
 	//  NapiNPProtocol_Pump @0x62a6ac -> PumpRecvQueues tail @0x6269bb..0x6269d6 ->
-	//  SendMissingSeqList(conn, 0) @0x6269ce; then CNapiNPConnection_PumpFlags @0x62a6f8, the
-	//  0x10 decrement @0x62979a..0x6297ac]
+	//  SendMissingSeqList(conn, 0) @0x6269ce; then CNapiNPConnection_PumpFlags @0x629780 (the
+	//  call @0x62A6F8), the 0x10 decrement @0x62979a..0x6297ac]
 	for (TickOut &t : flush_server_missing_requests(owner.ctx)) {
 		for (const std::vector<uint8_t> &dg : t.outbound)
 			sock.send_to(t.peer, dg.data(), dg.size());
