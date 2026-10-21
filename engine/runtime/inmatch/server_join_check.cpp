@@ -150,8 +150,9 @@ uint32_t validate_spectator_join(const GameConfig &config,
 // [orig: Server_ValidatePlayerJoinRequest @0x512100 - the required test
 //  @0x512432..0x51243D, the seed read @0x51243F, Server_GenerateSquadPassword
 //  called @0x512455; Server_InitNewRoundState @0x51C8E0 (ebx 0 @0x51C93E, the
-//  stores @0x51CAB0 / @0x51CAB6); the unreferenced setter @0x4FDEA0 (the store
-//  @0x4FDEA8) and toggle @0x4FE890 (@0x4FE8AE); Server_SendSquadPasswordsToPlayers
+//  stores @0x51CAB0 / @0x51CAB6); the unreferenced Squad_SetPasswordSeed @0x4FDEA0
+//  (the store @0x4FDEA8) and Squad_TogglePasswordRequired @0x4FE890 (@0x4FE8AE);
+//  Server_SendSquadPasswordsToPlayers
 //  @0x50C950 (the seed test @0x50C964)]
 uint32_t validate_side_password(const GameConfig &config, const NapiNPConnection &conn) {
 	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) == 0 ||
