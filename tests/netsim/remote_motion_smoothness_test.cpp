@@ -1005,7 +1005,7 @@ bool run_player_root_motion_dead_reckons() {
 // footsteps; groundEntity takes the carrier [orig: NetPacket_SerializePlayerState
 // @0x4c10d4 -> LABEL_123 stage, Entity_TryAttachOrDetach @0x436610 bone-0
 // detach, the +0x28 store @0x4c1353]. A non-zero bone is a seat: the row rides
-// the carrier attach and its channel disarms.
+// the carrier attach, and a seated player row keeps its channel (D-NET-330).
 bool run_player_on_ground_carrier_keeps_chasing() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
@@ -1078,13 +1078,16 @@ bool run_player_on_ground_carrier_keeps_chasing() {
 	ok &= expect(es->rm_state == opennova::world::anim_state::kWalkForward,
 	             "the grounded row's sim channel stays armed (footsteps scan it)");
 
-	// The same sample with a seat bone is a mount: carried, channel disarmed.
+	// The same sample with a seat bone is a mount: carried, and a seated player
+	// row keeps its channel, which its body pass runs at the head of the mounted
+	// site (D-NET-330).
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
 	           nw::encode_frame_update(grounded_frame(ax + step_fx * 96, 3)));
 	es = view.state().find(handle);
 	ok &= expect(es->carrier_handle == building && es->mount_bone == 3,
 	             "a non-zero bone is a seat: the row rides the carrier");
-	ok &= expect(es->rm_state == -1, "a seated row's channel disarms");
+	ok &= expect(es->rm_state == opennova::world::anim_state::kWalkForward,
+	             "a seated player row's channel stays armed");
 	return ok;
 }
 

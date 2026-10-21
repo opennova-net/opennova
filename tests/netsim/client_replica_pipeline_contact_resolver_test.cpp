@@ -257,6 +257,16 @@ int main() {
 		tick_fresh(view);
 		ok &= expect(view.drain_slot_sounds().empty(),
 		             "a grounded body with no airborne bit plays no thump");
+		// The staged dead tick also runs the body pass's dead in-air tumble
+		// (D-NET-196), which turns the body; the legs below read a level body,
+		// so the case puts back the words the tumble writes, as it puts back the
+		// Flags. (A residual turn of a few BAM truncates the eye's cosine below
+		// 2^22 and moves the stored eye, which the surface line reads.)
+		const int32_t level_body_pitch = row_a->rm_body_pitch;
+		const int32_t level_roll = row_a->roll_bam;
+		const int32_t level_heading = row_a->heading_bam;
+		const int32_t level_pitch = row_a->pitch_bam;
+		const int32_t level_aim = row_a->rm_aim_word;
 		row_a->rm_entity_flags = 0x2000u | 0x2u; // a dead body in the air
 		row_b->rm_entity_flags = 0;
 		tick_fresh(view);
@@ -264,6 +274,11 @@ int main() {
 		ok &= expect(dead.size() == 1 && dead[0].handle == kRowA && dead[0].slot == 15,
 		             "a dead body lands with SSFallDead");
 		row_a->rm_entity_flags = 0;
+		row_a->rm_body_pitch = level_body_pitch;
+		row_a->roll_bam = level_roll;
+		row_a->heading_bam = level_heading;
+		row_a->pitch_bam = level_pitch;
+		row_a->rm_aim_word = level_aim;
 	}
 	// The suppressed edge: a pre-set CL contact keeps the ledge edge closed.
 	row_a->rm_entity_flags = 0x100000u;
