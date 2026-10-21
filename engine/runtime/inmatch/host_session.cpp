@@ -110,8 +110,8 @@ std::vector<ProtocolMessage> send_session_batches(
 	// the record's place in the queue and keeps that first-cause-wins order; the 0x46 that
 	// answers the punt then makes the 0x86 burst echo this record. [orig:
 	//  CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 — the record @0x4c7f8e..0x4c7fe4,
-	//  latch-if-!valid @0x4c7ff2..0x4c8004, TrySendSessionInit @0x4c800c ->
-	//  NapiNPDataTransfer_SendDescription @0x628C80 serializes conn->disconnect_event and Creates
+	//  latch-if-!valid @0x4c7ff2..0x4c8004, CNapiNPConnection_SendDescriptionOnce (called
+	//  @0x4c800c) -> NapiNPDataTransfer_SendDescription @0x628C80 serializes conn->disconnect_event and Creates
 	//  it with flag 0x10 @0x628e42; NapiNPMessage_Create's latch @0x6280f9..0x62810a]
 	for (std::size_t m = 0; m < messages.size(); ++m) {
 		const ProtocolMessage &message = messages[m];

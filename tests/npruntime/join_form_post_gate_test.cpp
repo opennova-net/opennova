@@ -45,6 +45,7 @@
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect (a described node's records)
 #include <runtime/world/world.h>
 
 #include <cstdio>
@@ -364,6 +365,17 @@ void test_records_ahead_of_the_add_answer_nothing() {
 			conn, {make_protocol_message(c2s::FILE_CHUNK_REQUEST, std::vector<uint8_t>(8, 0))}, 7,
 			ctx.np_protocol.connection_list, world.get(), inputs);
 	CHECK(game_tags(replies) == (std::vector<uint8_t>{s2c::FILE_TRANSFER_CHUNK}));
+	// Its description staged, the same bound node's 0x33 reaches no handler: nothing answered
+	// (D-NET-NEW-L1-27, the per-record test of the description's sent byte).
+	DisconnectEvent kick;
+	kick.ds = 1;
+	kick.dc = 2;
+	kick.dpc = 35;
+	CHECK(inmatch::Server_StageHostDisconnect(conn, kick) && conn.host_disconnect_sent);
+	const std::vector<ProtocolMessage> described = inmatch::dispatch_session_replies(ctx.config,
+			conn, {make_protocol_message(c2s::FILE_CHUNK_REQUEST, std::vector<uint8_t>(8, 0))}, 8,
+			ctx.np_protocol.connection_list, world.get(), inputs);
+	CHECK(described.empty());
 }
 
 // A reject queues the description and returns with the game state kept; no record behind it

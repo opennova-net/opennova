@@ -585,8 +585,9 @@ void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx) {
 // nothing to port (its reader is WacCmd_PlayerIsGold, ported as 0).
 // [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940 — the player by connection id
 //  @0x4D1B20, the state-4 gate @0x4D1B40, NapiNPPlayer_ParseServerVarList (called @0x4D1C08),
-//  CNetPlayer_SetGameState(6) (called @0x4D1C11), the failure record @0x4D1B62..0x4D1BD0, TrySendSessionInit
-//  @0x4D1BF7; the request's state 4 CNapiNetwork_CheckPlayerTimeouts @0x4C8BCA]
+//  CNetPlayer_SetGameState(6) (called @0x4D1C11), the failure record @0x4D1B62..0x4D1BD0,
+//  CNapiNPConnection_SendDescriptionOnce (called @0x4D1BF7); the request's state 4
+//  CNapiNetwork_CheckPlayerTimeouts @0x4C8BCA]
 bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
 		bool success, int32_t msg_code, uint32_t now_tick) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
