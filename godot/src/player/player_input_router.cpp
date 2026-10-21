@@ -200,8 +200,9 @@ void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim) {
 	// The talk rows are action bindings the input frame's drain dispatches
 	// every tick, after any typed keys reached an open line, so a one-tick
 	// press inside a multi-tick frame opens its line on its tick; the command
-	// prompt opens with or without a local player (a Serve Only host's) (engine
-	// hud/hud_chat_entry.h ChatEntry::poll_rows carries the witness). The key
+	// prompt opens with or without a local player (a Serve Only host's,
+	// probably: engine hud/hud_chat_entry.h ChatEntry::poll_rows carries the
+	// witness and its open point). The key
 	// sampling is this router's; the dispatch gates, the capture, the talk
 	// debounce and the flood are the engine's chat entry (ChatEntryFacts::frame,
 	// inmatch/chat_flood.h); the HUD presenter draws the line at its frame.
