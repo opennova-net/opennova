@@ -972,6 +972,30 @@ struct WorldOutbox {
 	EffectLog effects;
     std::vector<ScriptEffectEvent> script_effects;
     std::vector<ScriptSoundEvent> script_sounds;
+    // An audio channel shutdown is owed: every audio channel falls silent and
+    // the ambient channel handles drop, so the mix takes its channels anew. The
+    // embedder's audio device takes and clears it. Three setters: the pause
+    // row once it has raised the single-player pause word (the session's
+    // pausing update; the gate word is the pause word itself, flipped @0x49B52D),
+    // the LOSE cine's start (World::process_round_end) and the LOSE epilog's
+    // build step (EpilogCine::update_lose). The fourth caller, the in-game
+    // options screen's open out of a session, is the embedder's own menu leg
+    // (GameWorld::shutdown_audio_channels) [orig: Input_HandleActionBinding
+    // @0x49AD40 - case 25, `cmp dword_A87050, 0; jz` @0x49B543..0x49B54A, the
+    // Audio_ShutdownChannelsAndDeviceTable call @0x49B550; UI_OptionsScreenInit
+    // @0x554800 - the call @0x554DE4 behind !is_in_session;
+    // Audio_ShutdownChannelsAndDeviceTable @0x527790 - AudioChannel_InitAll
+    // @0x7671B0 (silence on all 26 channels), the handle table zeroed
+    // @0x527797..0x5277BA].
+    bool audio_channels_shutdown = false;
+    // A round end out of a session stops the dialog channel's playing line (the
+    // channel the last loaded line holds) ahead of its Dialog_ResetAll; the
+    // embedder's audio device takes and clears it [orig: Server_ProcessRoundEnd
+    // @0x5164F0 - the session gate @0x516942..0x516948, the 0 argument @0x51694A,
+    // the DialogAudio_PlayNextChunkOrStop call @0x51694B; DialogAudio_PlayNextChunkOrStop
+    // @0x44E320 - a 0 argument jumps to AudioChannel_ResetByHandle on
+    // g_DialogAudioChannelHandle @0x44E32A..0x44E362].
+    bool dialog_line_stop = false;
     uint64_t next_script_effect_order = 0;
     // The WAC commands the VM replicated this tick (registry flags 0x18) for
     // the server tick to send as S2C 0x23; script_remote_command.h carries the
@@ -1006,9 +1030,9 @@ struct WorldOutbox {
 
     // The presentation half dropped undrawn, for a host with no presenter
     // (opennova-serve): everything a presenter drains each frame -- the tips,
-    // the HUD blank, the destruction, vehicle, script and effect queues, the
-    // pending scorches, the sound queues and the fire sounds' ready list --
-    // so nothing accumulates over a long run. The wire half (the entity
+    // the HUD blank, the audio stops, the destruction, vehicle, script and
+    // effect queues, the pending scorches, the sound queues and the fire
+    // sounds' ready list -- so nothing accumulates over a long run. The wire half (the entity
     // events, the relays, the grants, the round ring, the water crossings,
     // the replicated WAC commands) stays for the host tick's own drain; the
     // scar rings and the fire-sound countdown slots are fixed-size state, not
@@ -1016,6 +1040,8 @@ struct WorldOutbox {
     void discard_presentation() {
         tip_events.clear();
         hud_detail_blank = false;
+        audio_channels_shutdown = false;
+        dialog_line_stop = false;
         destruction.clear();
         vehicle_effects.clear();
         effects.clear();

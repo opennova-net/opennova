@@ -323,6 +323,18 @@ void Simulation::drain_script_sounds(std::vector<opennova::world::ScriptSoundEve
 	r_events.swap(kernel_->world.out.script_sounds);
 }
 
+bool Simulation::take_audio_stops(bool &r_dialog_line, bool &r_channels) {
+	r_dialog_line = false;
+	r_channels = false;
+	if (!world_installed_ || kernel_ == nullptr) return false;
+	opennova::world::WorldOutbox &out = kernel_->world.out;
+	r_dialog_line = out.dialog_line_stop;
+	r_channels = out.audio_channels_shutdown;
+	out.dialog_line_stop = false;
+	out.audio_channels_shutdown = false;
+	return r_dialog_line || r_channels;
+}
+
 Ref<EnvironmentSnapshot> Simulation::get_environment_snapshot() const {
 	opennova::devtools::EnvironmentSnapshot snapshot;
 	if (!native_environment_snapshot(snapshot)) return Ref<EnvironmentSnapshot>();

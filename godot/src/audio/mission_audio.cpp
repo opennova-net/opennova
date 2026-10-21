@@ -533,6 +533,34 @@ void MissionAudio::reset_oneshot_playback() {
     recent_fires_.clear();
 }
 
+void MissionAudio::shutdown_audio_channels() {
+	if (bank_.is_valid()) {
+		bank_->reset_oneshots(this);
+	}
+	_stop_all_ambient_channels();
+	const Ref<Simulation> sim = _simulation();
+	if (opennova::audio::DialogQueue *queue = sim.is_valid() ? sim->dialog_queue() : nullptr) {
+		for (const uint64_t voice : queue->voices()) {
+			if (AudioStreamPlayer *dialog = Object::cast_to<AudioStreamPlayer>(
+						ObjectDB::get_instance(ObjectID(voice)))) {
+				dialog->stop();
+			}
+		}
+	}
+	if (AudioStreamPlayer *dialog = _dialog_voice_node()) {
+		dialog->stop();
+	}
+	if (AudioStreamPlayer *wac = _wac_voice_node()) {
+		wac->stop();
+	}
+}
+
+void MissionAudio::stop_dialog_line() {
+	if (AudioStreamPlayer *dialog = _dialog_voice_node()) {
+		dialog->stop();
+	}
+}
+
 // The local player's own action-slot presentation arrives as source -1 with no
 // key (player_weapon_effects); it keys on that marker so its re-fires restart
 // their own voice like every other entity's. Everything else keeps the key the

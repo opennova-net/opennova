@@ -433,6 +433,10 @@ void GameWorld::set_shell_paused(bool p_paused) {
 	}
 }
 
+void GameWorld::shutdown_audio_channels() {
+	if (MissionAudio *audio = get_mission_audio()) audio->shutdown_audio_channels();
+}
+
 String GameWorld::missing_mission_asset_reason(const String &p_asset, const String &p_bms_name,
 		const Ref<ResourceRoot> &p_resource_root, bool p_wire_header_join) const {
 	if (!p_wire_header_join) {
@@ -1044,6 +1048,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("cancel_join_admission"), &GameWorld::cancel_join_admission);
 	ClassDB::bind_method(D_METHOD("is_net_session"), &GameWorld::is_net_session);
 	ClassDB::bind_method(D_METHOD("set_shell_paused", "paused"), &GameWorld::set_shell_paused);
+	ClassDB::bind_method(D_METHOD("shutdown_audio_channels"), &GameWorld::shutdown_audio_channels);
 	ClassDB::bind_method(D_METHOD("missing_mission_asset_reason", "asset", "bms_name",
 			"resource_root", "wire_header_join"), &GameWorld::missing_mission_asset_reason);
 	ClassDB::bind_method(D_METHOD("unload"), &GameWorld::unload);

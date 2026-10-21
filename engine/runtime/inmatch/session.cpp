@@ -740,6 +740,11 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			consume_pending_one_shots();
 			consume_one_shots = false;
 			world::World &world = kernel->world;
+			// The word is now set, so case 25 shuts the audio channels down after
+			// its key-queue reset; the embedder's audio device runs it
+			// (WorldOutbox::audio_channels_shutdown) [orig: Input_HandleActionBinding
+			// @0x49AD40 - @0x49B543..0x49B54A, the call @0x49B550].
+			world.out.audio_channels_shutdown = true;
 			world.hud_frames.step(/*menu_paused=*/false, world.epilog_screen_active());
 			run_paused_update_legs();
 			previous_ran = false;

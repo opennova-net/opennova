@@ -1278,6 +1278,10 @@ func set_menu_pause(paused: bool) -> void:
 	if sim != null and sim.is_mp_session():
 		return
 	_toggles.set_paused(paused)
+	# The options screen's open also shuts the audio channels down, as the pause
+	# row does (engine WorldOutbox::audio_channels_shutdown carries the witness).
+	if paused and _world != null:
+		_world.shutdown_audio_channels()
 
 
 ## One hudcolor poll step over pre-sampled device state (the seam the tests

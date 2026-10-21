@@ -230,6 +230,11 @@ int main() {
 		// round-end pose for 300 frames, the 62-frame letterbox, state 0.
 		// [orig: @0x578479..0x57861D]
 		CHECK(cine.mode == w::EpilogCineMode::Win && cine.active && cine.frame == -1);
+		// The SP tail stops the playing dialog line ahead of its Dialog_ResetAll
+		// [orig: DialogAudio_PlayNextChunkOrStop(0) @0x51694B]; the WIN epilog's
+		// start shuts no audio channel down (only the LOSE cine's does).
+		CHECK(world.out.dialog_line_stop);
+		CHECK(!world.out.audio_channels_shutdown);
 		CHECK(cine.win_state == 0 && cine.win_build_frame == 95);
 		CHECK(cine.events.size() == 2);
 		const w::CineEvent *camera = find_event(cine, w::CineEventKind::CacheCamera);
@@ -355,21 +360,31 @@ int main() {
 		// The SP tail's Dialog_ResetAll clears the world's dialog table, its
 		// waiting lines with it [orig: Server_ProcessRoundEnd @0x516953].
 		CHECK(world.script.dialog.history().empty() && world.script.dialog.slots().empty());
+		// The playing line stops ahead of that reset [orig: @0x51694B].
+		CHECK(world.out.dialog_line_stop);
 		CHECK(world.out.effects.count("round_end") == 1);
 		// Cine_StartPlayback: the 100-frame letterbox and the edit fade.
 		CHECK(cine.mode == w::EpilogCineMode::Lose && cine.lose_state == 0);
 		CHECK(cine.events.size() == 2);
+		// Cine_StartPlayback shuts the audio channels down for the embedder
+		// [orig: Cine_StartPlayback @0x577840 - the call @0x577853].
+		CHECK(world.out.audio_channels_shutdown);
+		world.out.audio_channels_shutdown = false; // the embedder took it
 		CHECK(find_event(cine, w::CineEventKind::EditFade) != nullptr);
 		// No cine frame has rendered in this process yet: the first dispatch
 		// enters state 1 and its render draws one; the second builds.
 		(void)m.frame();
 		CHECK(cine.lose_state == 1 && !cine.screen_active && cine.frame_drawn);
+		CHECK(!world.out.audio_channels_shutdown);
 		CHECK(world.script_may_advance());
 		// The build's Dialog_ResetAll clears the table again [orig:
 		// Cinematic_EpilogUpdate @0x5747DA].
 		world.script.dialog.enqueue(audio::dialog_name_of(6), {});
 		(void)m.frame();
 		CHECK(cine.screen_active && cine.lose_state == 2);
+		// The build shuts the audio channels down again [orig: Cinematic_EpilogUpdate
+		// @0x5747E6].
+		CHECK(world.out.audio_channels_shutdown);
 		CHECK(world.script.dialog.history().empty() && world.script.dialog.slots().empty());
 		CHECK(cine.frame == 2 && cine.lose_age == 1);
 		CHECK(!world.script_may_advance());

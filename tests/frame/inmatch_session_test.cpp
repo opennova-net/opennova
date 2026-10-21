@@ -318,6 +318,13 @@ int main() {
 		if (!expect(world.rules.pause_word && !target->action_head_admits(weapon) &&
 				!target->action_head_admits(stance) && target->action_head_admits(zoom),
 				"the pause word drops the bit-0 rows and passes the radar zoom")) return 1;
+		// The pausing update shuts the audio channels down for the embedder's
+		// audio device; the resuming update raises nothing [orig:
+		// Input_HandleActionBinding @0x49AD40 - `cmp dword_A87050, 0; jz`
+		// @0x49B543..0x49B54A, the Audio_ShutdownChannelsAndDeviceTable call @0x49B550].
+		if (!expect(world.out.audio_channels_shutdown,
+				"the pausing update requests the audio shutdown")) return 1;
+		world.out.audio_channels_shutdown = false; // the embedder took it
 		rows.calls.clear();
 		rows.flip_at = 1;
 		const opennova::world::HudFrameCounters paused_counters = world.hud_frames;
@@ -339,6 +346,8 @@ int main() {
 		if (!expect(!world.rules.pause_word && target->action_head_admits(weapon) &&
 				target->action_head_admits(stance),
 				"the resume admits the rows again")) return 1;
+		if (!expect(!world.out.audio_channels_shutdown,
+				"the resume shuts no audio down")) return 1;
 		// World::begin_tick skips its own step on the resuming tick.
 		const opennova::world::HudFrameCounters head = world.hud_frames;
 		world.rules.update_head_stepped = true;

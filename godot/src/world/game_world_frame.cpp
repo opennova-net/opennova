@@ -1225,6 +1225,16 @@ void GameWorld::mix_audio_frame(int p_ticks_run) {
                 audio->play_script_sounds(script_sounds, frame_camera_xform_);
 			}
 		}
+		// The audio stops run whether or not a tick ran: the pausing update runs
+		// none (engine WorldOutbox::dialog_line_stop / audio_channels_shutdown).
+		if (runtime != nullptr) {
+			const Ref<Simulation> stop_sim = runtime->get_sim();
+			bool dialog_line = false, channels = false;
+			if (stop_sim.is_valid() && stop_sim->take_audio_stops(dialog_line, channels)) {
+				if (dialog_line) audio->stop_dialog_line();
+				if (channels) audio->shutdown_audio_channels();
+			}
+		}
 		audio->tick(frame_camera_pos_, frame_delta_);
 		music_var_pump();
 		perf_audio_us_ = now_us() - audio_start;

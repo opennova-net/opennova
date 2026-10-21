@@ -797,14 +797,23 @@ void World::process_round_end(int32_t winning_team) {
     // @0x525581 opens it on the is_client bit, which mode 3 single player
     // carries). The music leg is host presentation: the effect carries the
     // winner (a) and the end track (b); the shell, in SP only, signals the
-    // track. Dialog_ResetAll clears the world's dialog table, its waiting lines
-    // with it (the playing line's stop is D-HUD-46).
+    // track. The playing dialog line stops first, then Dialog_ResetAll clears
+    // the world's dialog table, its waiting lines with it. The LOSE cine's start
+    // shuts the audio channels down after its own dialog reset. The embedder's
+    // audio device runs both stops (WorldOutbox::dialog_line_stop,
+    // WorldOutbox::audio_channels_shutdown).
     if (!rules.mp_session) {
+        // [orig: DialogAudio_PlayNextChunkOrStop(0) @0x51694B]
+        out.dialog_line_stop = true;
         script.dialog.reset(); // [orig: Dialog_ResetAll @0x516953 -> @0x44dc90]
-        if (winning_team == 1)
+        if (winning_team == 1) {
             epilog.begin_win(registry.get(cached.local_player)); // [orig: @0x516965]
-        else
+        } else {
             epilog.begin_lose(); // [orig: @0x51697b]
+            // [orig: Cine_StartPlayback @0x577840 - Dialog_ResetAll @0x57784E, the
+            //  Audio_ShutdownChannelsAndDeviceTable call @0x577853]
+            out.audio_channels_shutdown = true;
+        }
     }
     const int32_t end_track = winning_team == 1 ? 1 : 2;
     out.effects.push({"round_end", winning_team, end_track, 0, 0, std::string()});

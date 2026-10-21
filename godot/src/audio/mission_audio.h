@@ -138,6 +138,16 @@ public:
     void play_script_sounds(const std::vector<opennova::world::ScriptSoundEvent> &p_events,
             const Transform3D &p_camera_xform);
     void reset_oneshot_playback();
+	// The audio channel shutdown, as a device: every channel this node owns
+	// falls silent (the one-shot pool, the ambient pool with its candidate claims
+	// dropped, the dialog and WAC voices), so the ambient mix takes its channels
+	// anew on its next pass (engine WorldOutbox::audio_channels_shutdown carries
+	// the witness).
+	void shutdown_audio_channels();
+	// The round end's dialog line stop, as a device: the voice the dialog
+	// channel's last loaded line plays on falls silent (engine
+	// WorldOutbox::dialog_line_stop carries the witness).
+	void stop_dialog_line();
 	// PlayWavList / event-action seam: fire a one-shot sound set by name at a world
 	// position. The .bms action param -> set-name decode is left to the caller (the
 	// engine resolves a pre-loaded sound_id handle; the action path plays it at full

@@ -365,6 +365,10 @@ public:
 	// (ESC, armory close, menu RESUME, the MCP resume verb) can call this
 	// safely.
 	void set_shell_paused(bool p_paused);
+	// The in-game options screen's audio shutdown on its open out of a session,
+	// run on the device MissionAudio::shutdown_audio_channels (engine
+	// WorldOutbox::audio_channels_shutdown carries the witness).
+	void shutdown_audio_channels();
 	// The missing-terrain/env reason, join-aware: a wire-header join has no
 	// local .bms -- the host streamed the mission identity -- so the reason
 	// names the stream and what is mounted/installed, making a live punt read

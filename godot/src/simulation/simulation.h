@@ -590,6 +590,12 @@ public:
 	// NOT ClassDB-bound: MissionAudio plays the engine rows.
 	void drain_weather_sounds(std::vector<opennova::world::WeatherSoundEvent> &r_events);
 	void drain_script_sounds(std::vector<opennova::world::ScriptSoundEvent> &r_events);
+	// The audio stops owed since the last take, cleared by the take: the dialog
+	// channel's playing line and the full channel shutdown (engine WorldOutbox::
+	// dialog_line_stop / audio_channels_shutdown carry the witnesses). True when
+	// either is owed. NOT ClassDB-bound: the frame's audio leg runs them on
+	// MissionAudio.
+	bool take_audio_stops(bool &r_dialog_line, bool &r_channels);
 	// The F3 Environment record (devtools/environment_snapshot.h) as a typed
 	// read for the GUT/probe side; null without a world.
 	Ref<EnvironmentSnapshot> get_environment_snapshot() const;
