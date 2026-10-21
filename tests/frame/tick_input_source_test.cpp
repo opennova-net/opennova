@@ -5,7 +5,8 @@
 // Driven with the real scenario device (devtools::ScriptedInput) over a probe
 // role that records each tick's input at the logic tick it ran as. Also the
 // main frame's mouse pump (D-NET-NEW-LI-2), across the frames and the
-// single-player pause.
+// single-player pause, and a latched fire press's binding test at its
+// dispatch (D-NET-NEW-LI-3).
 #include <runtime/devtools/scripted_input.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
@@ -365,6 +366,39 @@ void test_the_pump_across_the_single_player_pause() {
 	}
 }
 
+// A fire press latched by a frame that ran no tick dispatches at the next
+// tick's input frame, where the attack row tests its binding live: released
+// by then, the press fires nothing; still held, it fires on that tick.
+void test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch() {
+	for (int still_held = 0; still_held < 2; ++still_held) {
+		auto role = std::make_unique<TickRecorder>();
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		// A cold bank drains nothing under 4 ms (inmatch_session_test's
+		// zero-tick frame), then a 14 ms frame runs one tick.
+		FrameInput press;
+		press.delta_seconds = 0.002;
+		press.player.held_action_bits = HELD_FIRE;
+		press.player.pressed_action_bits = PRESSED_FIRE | PRESSED_TO_SPECIAL;
+		CHECK(session.advance(press).ticks_run() == 0, "the press's frame runs no tick");
+		FrameInput next;
+		next.delta_seconds = 0.014;
+		next.player.held_action_bits = still_held != 0 ? HELD_FIRE : 0u;
+		CHECK(session.advance(next).ticks_run() == 1, "the next frame runs one tick");
+		CHECK(role->inputs.size() == 1, "one tick recorded");
+		if (role->inputs.size() != 1) continue;
+		const InputPacket &tick = role->inputs[0].player;
+		if (still_held != 0) {
+			CHECK(tick.pressed_action_bits == (PRESSED_FIRE | PRESSED_TO_SPECIAL) &&
+							tick.held_action_bits == HELD_FIRE,
+					"a press still held at its dispatch fires on that tick");
+		} else {
+			CHECK(tick.pressed_action_bits == PRESSED_TO_SPECIAL && tick.held_action_bits == 0,
+					"a press released before its dispatch fires nothing; other edges keep");
+		}
+	}
+}
+
 } // namespace
 
 int main() {
@@ -374,6 +408,7 @@ int main() {
 	test_the_mouse_pump_spreads_four_times_the_cursor_over_the_updates();
 	test_the_session_spreads_the_frames_cursor_over_its_ticks();
 	test_the_pump_across_the_single_player_pause();
+	test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

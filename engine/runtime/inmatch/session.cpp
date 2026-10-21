@@ -437,6 +437,15 @@ void Session::latch_input(const FrameInput &input) {
 }
 
 void Session::latch_packet(const InputPacket &packet) {
+	// A fire press an earlier sample latched and no tick consumed dispatches at
+	// the next tick's input frame, where the attack row's case tests its binding
+	// live: a binding the newer sample reads up takes the release leg, which
+	// fires nothing outside a PowerThrow windup (D-NET-NEW-LI-3) [orig:
+	// Input_HandleActionBinding_0 @0x4E0420 (case 0x95's Input_IsBindingActive(149)
+	// call @0x4E07D9, the release leg @0x4E07E9..0x4E07F1); Input_IsBindingActive
+	// @0x498320 (the key state @0x498348, the mouse buttons @0x49836E)].
+	if ((packet.held_action_bits & HELD_FIRE) == 0)
+		pending_input_.pressed_action_bits &= ~PRESSED_FIRE;
 	pending_input_.movement = packet.movement;
 	pending_input_.cursor_dx += packet.cursor_dx;
 	pending_input_.cursor_dy += packet.cursor_dy;
