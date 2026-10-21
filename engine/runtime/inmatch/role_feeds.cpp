@@ -135,10 +135,40 @@ int local_team_of(const RoleView &view) {
 	return player != nullptr ? player->team : 0;
 }
 
+// A Serve Only host folds no 0x1D: its end-round words are the board its own round end built,
+// whose build writes the globals the overlay reads (the winner, the two team scores, the draw
+// flag, rows 0..2's names and primary scores), then raises g_RoundOver. Its status page's
+// end-round leg runs the transition on that latch; the transition's STAT arm waits on
+// g_ScoreboardDirty, which only a client's 0x1D / 0x56 landings write, so the page never opens
+// stat.mnu. Null on any other role, or before the round ends.
+// [orig: Server_ProcessRoundEnd @0x5164F0 (Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590,
+//  g_RoundOver @0x5168E4); Server_BuildEndOfRoundScoreboard @0x508F30 (g_EndRoundWinnerTeam
+//  @0x508F77, g_ScoreTeamScore0 / 1 @0x508FD2..0x508FE0, the rows from 0x24C1A94: the name
+//  @0x5090D3, the primary @0x509152); Server_DrawStatusScreen @0x50A2D0 (@0x50B286..0x50B2A3);
+//  UI_ProcessEndRoundScreenTransition @0x5B8600 (`cmp g_ScoreboardDirty, 0` @0x5B8600, the
+//  first pass @0x5B864B..0x5B866D, HUD_DrawEndRoundStatsOverlay @0x5B8679)]
+const world::MatchResult *serve_only_round_board(const RoleView &view) {
+	if (view.runtime != nullptr || view.host == nullptr || view.kernel == nullptr) return nullptr;
+	const world::Match &match = view.kernel->world.match;
+	return match.outcome().ended && match.result().ready ? &match.result() : nullptr;
+}
+
 } // namespace
 
 EndRoundSessionState end_round_session_state(const RoleView &view) {
 	EndRoundSessionState v;
+	if (const world::MatchResult *board = serve_only_round_board(view)) {
+		v.header_known = true;
+		v.game_type = board->game_type;
+		v.winner = board->winner_team;
+		v.team_score_0 = board->team_scores[0];
+		v.team_score_1 = board->team_scores[1];
+		v.draw = board->draw;
+		v.round_ticks = round_ticks_remaining(view);
+		v.team_mode = game_type::is_team(board->game_type);
+		v.session_open = view.host->is_in_session != 0;
+		return v;
+	}
 	if (view.runtime == nullptr) return v;
 	const replication::ClientEndRoundStats &er = view.runtime->state().end_round;
 	v.header_known = er.header_known;
@@ -172,6 +202,24 @@ EndRoundSessionState end_round_session_state(const RoleView &view) {
 
 hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view) {
 	hud::EndRoundOverlayInput in;
+	if (const world::MatchResult *board = serve_only_round_board(view)) {
+		// The board build's globals: a row's name is copied into its 32-byte entry, its primary
+		// score kept whole (the host's words are 32-bit, the 0x1D's i16 only on the wire); a
+		// Serve Only host has no local team and no death screen.
+		// [orig: Server_BuildEndOfRoundScoreboard @0x508F30 (Napi_CopyString(entry + 4, name,
+		//  32) @0x5090D3, +0x40 @0x509152); HUD_DrawEndRoundStatsOverlay @0x5B7CD0]
+		in.game_type = board->game_type;
+		in.draw = board->draw;
+		in.winner_team = board->winner_team;
+		in.team_scores[0] = board->team_scores[0];
+		in.team_scores[1] = board->team_scores[1];
+		for (size_t i = 0; i < 3 && i < board->players.size(); ++i) {
+			in.player_names[i] = board->players[i].identity.name.substr(0, 31);
+			in.player_scores[i] = board->players[i].primary_score;
+		}
+		in.round_time_remaining_ticks = round_ticks_remaining(view);
+		return in;
+	}
 	if (view.runtime == nullptr) return in;
 	const replication::ClientEndRoundStats &er = view.runtime->state().end_round;
 	in.game_type = view.runtime->game_type();

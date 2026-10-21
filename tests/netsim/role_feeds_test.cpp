@@ -6,6 +6,7 @@
 // bare-role fallbacks.
 // [orig: NapiNPClientMsg_0x01D @0x430840; StatScreen_PopulateStatResultsList
 //  @0x562240; UI_UpdateDeathScreenContent @0x5536a0]
+#include <base/gameprofile/game_type.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/effect_pose_index.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -209,9 +210,60 @@ static void lighting_walk_keeps_the_row_at_l_cases() {
 	CHECK(feed.last_by_wire.count(w.cached.local_player.packed) == 1);
 }
 
+// A Serve Only host folds no 0x1D: its end-round words are the board its own round end built,
+// the globals HUD_DrawEndRoundStatsOverlay reads, and its status page's end-round leg runs the
+// transition on its g_RoundOver. Before the round ends nothing is announced; after, the header
+// is known and the board never (only a client's landings write g_ScoreboardDirty, so stat.mnu
+// never opens), and the overlay reads the board's rows: each name cut to the 32-byte entry.
+// [orig: Server_ProcessRoundEnd @0x5164F0 (Server_BuildEndOfRoundScoreboard @0x516590,
+//  g_RoundOver @0x5168E4); Server_BuildEndOfRoundScoreboard @0x508F30 (the name @0x5090D3, the
+//  primary @0x509152); Server_DrawStatusScreen @0x50A2D0 (@0x50B286..0x50B2A3);
+//  UI_ProcessEndRoundScreenTransition @0x5B8600 (`cmp g_ScoreboardDirty, 0` @0x5B8600)]
+static void serve_only_end_round_cases() {
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	world::World &w = kernel.world;
+	w.rules.mp_session = true;
+	w.registry.configure_pool(0, 8);
+	world::MatchRules rules;
+	rules.game_type = game_type::kDeathmatch;
+	w.match.configure(rules);
+	world::Entity body;
+	body.kind = world::EntityKind::Organic;
+	const world::EntityHandle ann = w.registry.spawn_at(world::EntityHandle::make(0, 1), body);
+	const world::EntityHandle bob = w.registry.spawn_at(world::EntityHandle::make(0, 2), body);
+	w.match.upsert_player({ann, 1, "Ann"});
+	w.match.upsert_player({bob, 2, "A name longer than thirty-one characters"});
+	auto ctx = std::make_unique<NapiNPServerCtx>();
+	ctx->is_in_session = 1;
+	RoleView serve_only;
+	serve_only.host = ctx.get();
+	serve_only.kernel = &kernel;
+	CHECK(!end_round_session_state(serve_only).header_known);
+	CHECK(end_round_overlay_input(serve_only).player_names[0].empty());
+	CHECK(w.match.finish(0, w));
+	const EndRoundSessionState s = end_round_session_state(serve_only);
+	CHECK(s.header_known && !s.board_known && s.session_open && !s.team_mode);
+	CHECK(s.game_type == game_type::kDeathmatch && s.winner == 0 && s.draw); // two zero rows tie
+	const hud::EndRoundOverlayInput in = end_round_overlay_input(serve_only);
+	CHECK(in.game_type == game_type::kDeathmatch && in.draw && in.winner_team == 0);
+	CHECK(in.local_team == 0 && !in.death_screen);
+	const std::string &n0 = in.player_names[0];
+	const std::string &n1 = in.player_names[1];
+	CHECK((n0 == "Ann" && n1 == "A name longer than thirty-one c") ||
+	      (n1 == "Ann" && n0 == "A name longer than thirty-one c"));
+	CHECK(in.player_names[2].empty() && in.player_scores[0] == 0 && in.player_scores[1] == 0);
+	// A listen host or a joiner keeps its client's folded words (none here).
+	ClientRuntime own("ServeOnlyOwn");
+	RoleView listen = serve_only;
+	listen.runtime = &own;
+	CHECK(!end_round_session_state(listen).header_known);
+}
+
 int main() {
 	voice_macro_override_cases();
 	lighting_walk_keeps_the_row_at_l_cases();
+	serve_only_end_round_cases();
 	// The bare local role: nothing folded, nothing gathered.
 	{
 		RoleView bare;
