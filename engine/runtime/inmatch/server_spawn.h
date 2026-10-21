@@ -87,6 +87,15 @@ void Server_AdvanceFreeRowTicks(NapiNPServerCtx &ctx);
 //  sideRequirement_424 @0x551B91..0x551BA2]
 void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection &own);
 
+// The same profile init's team for the listen host's own slot (+0x1A0), which overwrites the
+// round init's assignment after the own add wrote its PlayerList entry from that one: the net
+// config's side byte (GameConfig::host_side_request) when it is 1 or 2, else 1 for a slot whose
+// spectator latch is clear and 0 for one that is set. Stored into the connection and returned.
+// [orig: PlayerSession_InitFromProfile @0x50CA80 - the side byte against 1 and 2
+//  @0x50CA92..0x50CAA7, `cmp [esi+188D7h], al; setz al` @0x50CAA9..0x50CAB8, the store
+//  `mov [esi+1A0h], cl` @0x50CB72; its argument `movsx edx, byte [ebp+107Ch]` @0x4C9C9A]
+uint8_t PlayerSession_InitOwnSlotTeam(const NapiNPServerCtx &ctx, NapiNPConnection &own);
+
 // The session create's profile init of a Serve Only host's own row (HostSlotRow): the side
 // bytes the host's player profile carries (its char ids and avatars) and the class by the side
 // requirement, as PlayerSession_InitOwnSlotClass picks a listen host's (side A's profile class

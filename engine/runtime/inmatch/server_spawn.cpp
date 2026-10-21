@@ -255,6 +255,14 @@ void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection
 	own.slot_class = static_cast<int8_t>(side_class); // movsx of the class byte
 }
 
+uint8_t PlayerSession_InitOwnSlotTeam(const NapiNPServerCtx &ctx, NapiNPConnection &own) {
+	const int8_t side = ctx.config.host_side_request;
+	own.assigned_team = side == 1 || side == 2 ? static_cast<uint8_t>(side)
+	                                           : static_cast<uint8_t>(own.link.spectator ? 0 : 1);
+	own.assigned_team_valid = true;
+	return own.assigned_team;
+}
+
 void Player_InitPlayerSideWords(const NapiNPServerCtx &ctx, world::Entity &body) {
 	const CharacterJoinVars *words = ctx.host_slot.active ? &ctx.host_slot.char_vars : nullptr;
 	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list)
@@ -500,6 +508,20 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	spawn.team = Server_ReservePlayerTeam(
 			ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
 			conn, ctx.rotation, &ctx.host_slot); // [orig: Server_AssignPlayerTeam @0x4fe310]
+	// The listen host's own slot at the session create: its add writes its PlayerList entry
+	// from the round init's team (the bodyless arm, stamp_player_list_add; the round init's
+	// team preference is the side requirement, -1 on every host as the own connection's team
+	// request 0xFF is), then the create's profile init overwrites the slot's team, which the
+	// body (the next round init's, ours spawned here) takes: 1 where a locked side sent the
+	// assignment to side B's team or to 0. A map change's re-add keeps the slot's.
+	// [orig: Server_InitNewRoundState - Server_AssignPlayerTeam(slot, 0, g_SideRequirement)
+	//  @0x51CABE..0x51CAC8; Server_PlayerAdd's own arm, the entry @0x51D398;
+	//  CNapiGameSession_CreateSession - PlayerSession_InitFromProfile @0x4C9CCE after the add;
+	//  Server_InitAllPlayerEntitiesForRound - the body's team @0x516B78..0x516B7E]
+	if (is_host_own && !round_init) {
+		conn.player_list_team = spawn.team;
+		spawn.team = PlayerSession_InitOwnSlotTeam(ctx, conn);
+	}
 	// The join spawn enters the no-pick arm (Server_OnPlayerJoin passes spawn
 	// handle low word 0, which Server_ResolveSpawnTargetHandle rejects), where
 	// a spectator slot is POSITIONED with the substitute team (Co-op 1; team
@@ -693,8 +715,14 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// The host's own add takes no spectator leg: its arm attaches the local entity and jumps
 	// past the remote arm's (a host that ticked SPECTATE, D-NET-NEW-L4-10: its own join's
 	// spectator arm and its slot's 0x0A writer apply theirs) [orig: Server_PlayerAdd - the own
-	// arm @0x51CC24..0x51CC60 -> @0x51D314, the remote arm's leg @0x51D0B7..0x51D0ED].
-	if (conn.link.spectator && !is_host_own) {
+	// arm @0x51CC24..0x51CC60 -> @0x51D314, the remote arm's leg @0x51D0B7..0x51D0ED]. Nor
+	// does a map change's round init: its body copies the slot's team word (a spectator's 0)
+	// and holds the 620-tick protection above until the slot's first 0x0A restamps it (-1,
+	// Health 1, hidden: restamp_spectator_body) [orig: Server_InitAllPlayerEntitiesForRound
+	// @0x516AA0 - the team remaps @0x516AF6..0x516B19 / @0x516B2C..0x516B4F (2 -> 1 only), the
+	// body's team @0x516B78..0x516B7E, 620 @0x516BBA, no spectator leg;
+	// NetPacket_WritePlayerState @0x4FF6FA..0x4FF728].
+	if (conn.link.spectator && !is_host_own && !round_init) {
 		// Retail still creates a player entity for a spectator, but leaves it
 		// hidden and permanently damage-disabled while S2C 0x75 drives the
 		// client's free-fly camera: the spectator leg stores entity+36 |= 1
@@ -797,7 +825,8 @@ void stamp_player_list_add(NapiNPConnection &conn, const world::World &world) {
 	//  @0x51CAC8, the entity 0 @0x51CA2F; CNapiGameSession_CreateSession - the profile
 	//  init @0x4C9CCE after the add].
 	if (conn.type == NapiNPConnection::kTypeClientSide) {
-		conn.player_list_team = conn.assigned_team_valid ? conn.assigned_team : 0;
+		// The team the add stored, the round init's, ahead of the profile init's overwrite
+		// (PlayerSession_InitOwnSlotTeam).
 		conn.player_list_type = 0;
 		return;
 	}

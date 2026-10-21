@@ -318,16 +318,21 @@ namespace {
 // 1 is playerSlot+416 (team), the slot's own byte whatever its body's team
 // (D-NET-651), written straight into the retail client's g_LocalTeam loadout
 // selector. The authority's own slot's byte 0 reads the host's pre.mnu SPECTATE
-// word itself (GameConfig::join_spectate), normalized to 1.
+// word itself (GameConfig::join_spectate), normalized to 1; a remote slot's reads its
+// connection's latch, set at its join from a nonzero JSR and never by a later convert
+// (C2S 0x51 latches the slot alone), so a player converted in the match still reads 0.
 // [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890 - the own
-//  slot's (+5) word @0x5108A1..0x5108A7, the normalization @0x5108B9..0x5108BF,
-//  `mov dl, [eax+1A0h]` @0x5108D0; NapiNPClientMsg_SetSpectatorMode @0x4259E0]
+//  slot's (+5) word @0x5108A1..0x5108A7, the connection entry's +0x37 `setnz`
+//  @0x5108AF..0x5108B6, the normalization @0x5108B9..0x5108BF, `mov dl, [eax+1A0h]`
+//  @0x5108D0; NapiNPServer_HandlePlayerJoinMessage - +0x1C8 against 0, +0x37 = 1
+//  @0x512E57..0x512E60; Server_ConvertPlayerToSpectator - the slot latch alone
+//  @0x519E61; NapiNPClientMsg_SetSpectatorMode @0x4259E0]
 std::vector<uint8_t> build_tag75_player_state(const GameConfig &config,
 		const NapiNPConnection &conn) {
 	const uint8_t team = conn.assigned_team_valid ? conn.assigned_team : 0;
 	const bool spectator = conn.type == NapiNPConnection::kTypeClientSide
 			? static_cast<uint8_t>(config.join_spectate) != 0
-			: conn.link.spectator;
+			: conn.join_spectator_request != 0;
 	return {static_cast<uint8_t>(spectator ? 0x01u : 0x00u), team};
 }
 
