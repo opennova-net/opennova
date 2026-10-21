@@ -101,6 +101,10 @@ param(
 
     [switch] $AllowDirtyRepo,
 
+    # The machine-load policy's build lock directory: each cell records its
+    # owner in machine_load (run_parity_topology.ps1 -BuildLockPath).
+    [string] $BuildLockPath = "",
+
     [switch] $Plan
 )
 
@@ -306,6 +310,7 @@ function Get-CellArguments {
         "-ServerGameCfgSha256", [string] $Table.server_game_cfg_sha256
     )
     if ($Resolution) { $arguments += @("-Resolution", $Resolution) }
+    if ($BuildLockPath) { $arguments += @("-BuildLockPath", $BuildLockPath) }
     if ([bool] $Case.auto_deploy) { $arguments += "-AutoDeploy" }
     if ([bool] $Case.exercise_input) { $arguments += "-ExerciseInput" }
     if ($Case.PSObject.Properties.Name -contains "scenario") {

@@ -306,7 +306,8 @@ Every cell records the machine's load through its steady window in the summary's
 `machine_load`: the total CPU % (mean, p90 and max of a sample every 2 to 3 s),
 the minimum available RAM, the five busiest processes by name (their mean share
 of the machine, short-lived compilers included), and the build lock's owner at
-both ends when `-BuildLockPath` names the machine-load policy's lock. A run note
+both ends when `-BuildLockPath` names the machine-load policy's lock. The suite
+passes its own `-BuildLockPath` to every cell. A run note
 prints the same. A timing-class row from a loaded cell is suspect until it is
 rerun on a quiet machine.
 
