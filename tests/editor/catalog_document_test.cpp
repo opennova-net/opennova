@@ -252,7 +252,7 @@ static int session_gate() {
 }
 static int malformed() {
 	test_temp::TempDir dir("opennova_catalog_malformed_test");
-	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Bad\"\nhp twelve\nend\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Bad\"\naddeweap ewep01 100201 15 37\nend\n"));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.blocked() && document.issues().front().line == 2);
@@ -260,6 +260,37 @@ static int malformed() {
 	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Open\"\nid 100001\n"));
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.blocked());
+	return 0;
+}
+// Lines the game reads as another value open unblocked (formats/def/def_scan.cpp's validate_property): a number token
+// its reading takes the start of (WEAPON.DEF's `ammobucket 9mm`, abs(atol) 9 [orig: WeaponDefs_ParseLineCallback
+// @0x54402B..0x544045]), a value left out of the tokenizer's reset slots (`minai` alone, 0 [orig:
+// Config_TokenizeLine @0x53CB71..0x53CB81]), a kill zone the table lacks (stored nothing [orig: AmmoDef_ParseProperty
+// @0x40ACB0..0x40ACD2]), an item the file's end closes, its last `end` without CR LF [orig: File_ParseASCIIFile
+// @0x53D8E9..0x53D8F5]: each reported, the record editable, and a save writes what the game reads.
+static int game_reads() {
+	test_temp::TempDir dir("opennova_catalog_game_reads_test");
+	const struct {
+		const char *name, *text;
+		AssetKind kind;
+		const char *saved;
+	} files[] = {
+		{"weapon.def", "weapon \"WPN_MP5\"\r\nammobucket 9mm\r\nend\r\n", AssetKind::WeaponDefs, "ammobucket 9\r\n"},
+		{"items.def", "begin \"Car\"\r\nid 100001\r\nsid Car1\r\nminai\r\nend", AssetKind::ItemDefs, "end\r\n"},
+		{"ammo.def", "ammo Round\r\nkztype rounds_kz_bullet\r\nvelocity 10\r\nend\r\n", AssetKind::AmmoDefs, "velocity 10\r\n"},
+	};
+	for (const auto &file : files) {
+		TEST_EXPECT(test_io::write_file(dir.file(file.name), std::vector<uint8_t>(file.text, file.text + std::strlen(file.text))));
+		DefCatalogDocument document; Diagnostic error;
+		TEST_EXPECT(document.load(dir.file(file.name), file.name, file.kind, "jo", error));
+		TEST_EXPECT(!document.blocked() && !document.issues().empty());
+		for (const SourceIssue &issue : document.issues()) TEST_EXPECT(!issue.blocks);
+		TEST_EXPECT(document.save(error));
+		std::string saved, message;
+		TEST_EXPECT(opennova::io::read_file_text(dir.file(file.name), saved, message));
+		TEST_EXPECT(saved.find(file.saved) != std::string::npos && saved.find("9mm") == std::string::npos &&
+		            saved.find("rounds_kz_bullet") == std::string::npos);
+	}
 	return 0;
 }
 // Lines the game ignores never block the document: they are reported, the record
@@ -1006,7 +1037,7 @@ int main() {
 	int failures = 0;
 	for (int (*test)() : {repeated_weapon_name, type_words, adds_keep_the_ending, item_name_cut, unticked_line_saves_alone,
 	                      code_page_names, history_and_save, two_new_items, collections, nested_rows_follow_the_record,
-	                      session_gate, malformed, ignored_input, replaced_action_block, go_to_record, remove_last_item,
+	                      session_gate, malformed, game_reads, ignored_input, replaced_action_block, go_to_record, remove_last_item,
 	                      changes_since_save, written_units, witnessed_enums, powerup_weapon, duplicates_apart, plain_words})
 		failures += test() ? 1 : 0;
 	return failures ? 1 : 0;
