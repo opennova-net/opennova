@@ -275,10 +275,15 @@ bool Simulation::seed_session_kit_from_profile() {
 	// The composition is engine code now (inmatch::seed_session_kit_from_profile,
 	// ADR 0031 PR E — the Game_StartMission copy semantics live there). This
 	// binding keeps the ROLE gate: a live session covers a LISTEN HOST as
-	// well as a joiner, so single player and the editor keep the mission's
-	// .bms kit.
+	// well as a joiner; out of one the single player's page arm runs.
 	if (!kernel_) return false;
-	if (!is_host_listening() && !is_joiner()) return false;
+	// Single player: the current profile's single-player page, at the mission start and
+	// the restart alike, where the mission's own kit chunk did not promote one (the
+	// engine witness: inmatch::seed_single_player_kit_from_profile, D-NET-352).
+	if (!is_host_listening() && !is_joiner())
+		return player_.weapon_profile_loaded &&
+				opennova::inmatch::seed_single_player_kit_from_profile(kernel_->world,
+						player_.weapon_profile, kernel_->local.loadout);
 	const uint8_t assigned =
 			(is_joiner() && runtime_) ? runtime_->assigned_team() : 0;
 	return opennova::inmatch::seed_session_kit_from_profile(kernel_->world,
@@ -553,7 +558,8 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 	// page, copied in the moment the catalog can resolve its names — retail's
 	// Game_StartMission copy into restrictionData [orig: @0x525813], which runs
 	// before Player_InitPlayer builds the display list from that same buffer.
-	// Offline this no-ops and the mission's .bms kit stands.
+	// Offline the profile's single-player page fills it unless the mission's .bms
+	// kit promoted.
 	if (seed_session_kit_from_profile())
 		rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
 	// The catalog exists now: arm the joiner's 0x2F seam from the carried spawn

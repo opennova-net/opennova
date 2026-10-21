@@ -196,12 +196,66 @@ void test_the_accept_writes_the_list_not_the_resident_kit() {
 	}
 }
 
+// The single player's spawn buffer at its mission start and restart: the current profile's
+// single-player page when the mission's own kit chunk promoted none and the page's first name
+// is not empty; else the static page (the unset buffer's default). Never in a session.
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - @0x5519A6..0x5519E4; Game_StartMission
+//  @0x524683..0x5246C8; Mission_LoadBMSFile @0x40F6FF..0x40F77C]
+void test_the_single_players_page_fills_the_spawn_buffer() {
+	playersav::Record profile;
+	profile.single_player.entries = {playersav::KitEntry{"WPN_AK47AUTO", 4, -1, -1},
+			playersav::KitEntry{"WPN_KNIFE", -1, -1, -1}};
+	{
+		Rig r(inmatch::ConnectionMode::HostOnly);
+		r.world.rules.mp_session = false;
+		w::LocalPlayerLoadout loadout;
+		CHECK(inmatch::seed_single_player_kit_from_profile(r.world, profile, loadout));
+		CHECK(loadout.spawn_kit_set && loadout.spawn_kit.size() == 2);
+		if (!loadout.spawn_kit.empty())
+			CHECK(loadout.spawn_kit[0].name == "WPN_AK47AUTO" && loadout.spawn_kit[0].ammo_primary == 4);
+		// Seeded once, it stays (the copy is the start's alone).
+		playersav::Record other = profile;
+		other.single_player.entries[0].name = "WPN_M4AUTO";
+		CHECK(!inmatch::seed_single_player_kit_from_profile(r.world, other, loadout));
+		CHECK(loadout.spawn_kit[0].name == "WPN_AK47AUTO");
+	}
+	{
+		// The mission's own kit promoted: it stands.
+		Rig r(inmatch::ConnectionMode::HostOnly);
+		r.world.rules.mp_session = false;
+		w::LocalPlayerLoadout loadout;
+		loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", 2, -1, -1}};
+		loadout.spawn_kit_set = true;
+		CHECK(!inmatch::seed_single_player_kit_from_profile(r.world, profile, loadout));
+		CHECK(loadout.spawn_kit.size() == 1 && loadout.spawn_kit[0].name == "WPN_M4AUTO");
+	}
+	{
+		// An empty page: the static page stays (the unset buffer).
+		Rig r(inmatch::ConnectionMode::HostOnly);
+		r.world.rules.mp_session = false;
+		playersav::Record empty;
+		empty.single_player.entries.clear();
+		w::LocalPlayerLoadout loadout;
+		CHECK(!inmatch::seed_single_player_kit_from_profile(r.world, empty, loadout));
+		CHECK(!loadout.spawn_kit_set);
+		CHECK(w::local_loadout_kit(r.world, loadout).front().name == "WPN_M4AUTO");
+	}
+	{
+		// In a session the side's page is the copy (seed_session_kit_from_profile).
+		Rig r(inmatch::ConnectionMode::HostOnly);
+		w::LocalPlayerLoadout loadout;
+		CHECK(!inmatch::seed_single_player_kit_from_profile(r.world, profile, loadout));
+		CHECK(!loadout.spawn_kit_set);
+	}
+}
+
 } // namespace
 
 int main() {
 	test_a_dedicated_host_keeps_the_initializers_first_weapon();
 	test_a_listen_hosts_own_list_names_every_body_after_its_fold();
 	test_the_accept_writes_the_list_not_the_resident_kit();
+	test_the_single_players_page_fills_the_spawn_buffer();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

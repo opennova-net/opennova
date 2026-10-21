@@ -46,6 +46,23 @@ bool seed_session_kit_from_profile(world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side);
 
+// The single player's fill of the resident kit buffer (g_SpawnLoadoutBuffer) at its mission
+// start and at its restart: out of a session, with no kit the mission's own chunk promoted
+// over it, the current profile's single-player page (weapon.sav's record +65548, written by the
+// profile screen's save) when its first name is not empty; else the buffer stays unset and the
+// spawn reads the static page (weapon_kit_default: "WPN_M4AUTO" "-1" "-1" "-1" ..). The fill
+// precedes the mission load, whose non-empty kit chunk overwrites it; ours' kernel promoted that
+// chunk first, so a promoted kit (spawn_kit_set) keeps it. Copied raw, unfiltered. Returns true
+// when it seeded (the caller rebuilds the slot pool).
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (@0x5519A6..0x5519E4: the mission entry's
+//  loadout @0x5519A6..0x5519BB, the profile page byte_256113C[slot * 0x1080C] @0x5519BD..0x5519D8,
+//  the static page @0x5519DA, Buffer_CopyUntilDoubleNull @0x5519E4; from SinglePlayer_StartMission
+//  @0x561AF0 (the call @0x561C28)); Game_StartMission @0x524360 (the restart copy
+//  @0x524683..0x5246C8, currentProfileSlot @0x52469D); Mission_LoadBMSFile @0x40F4E0 (the kit
+//  chunk @0x40F6FF..0x40F77C)]
+bool seed_single_player_kit_from_profile(world::World &world,
+		const playersav::Record &profile, world::LocalPlayerLoadout &loadout);
+
 // The side-change re-copy rule: whenever the SIDE the selector names stops
 // matching the side the resident buffer was copied from, re-copy. Keyed on
 // the side rather than the raw team so a 1<->3 (or 2<->4) reassignment

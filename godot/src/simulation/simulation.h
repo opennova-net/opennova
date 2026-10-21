@@ -436,8 +436,9 @@ private:
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
 	// Copies the assigned side's profile page into the resident kit buffer
-	// (kernel_->local.loadout.spawn_kit) in a live session — retail's single restrictionData (engine: runtime/inmatch/loadout_submit.h). False when
-	// not in a session, before the catalog exists, or when the page resolves empty.
+	// (kernel_->local.loadout.spawn_kit) in a live session — retail's single restrictionData (engine: runtime/inmatch/loadout_submit.h);
+	// out of one the profile's single-player page unless the mission's kit promoted. False
+	// when it copied nothing.
 	bool seed_session_kit_from_profile();
 	// Re-copies the page when the SIDE the team selector names stops matching the side
 	// the resident buffer came from — the S2C 0x04 latch arriving after the catalog, or

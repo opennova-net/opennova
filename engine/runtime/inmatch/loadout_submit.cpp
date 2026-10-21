@@ -68,6 +68,24 @@ bool seed_session_kit_from_profile(world::World &world,
 	return true;
 }
 
+bool seed_single_player_kit_from_profile(world::World &world,
+		const playersav::Record &profile, world::LocalPlayerLoadout &loadout) {
+	if (world.rules.mp_session || loadout.spawn_kit_set) return false;
+	// The page's first byte: the page is a double-NUL list of strings whose first is the
+	// first entry's name, so a zero first byte (an empty first name, an empty page) is the
+	// copy's static-page arm [orig: Game_StartMission @0x524360 (`cmp byte_256113C[eax], bl;
+	//  jz` @0x5246A8..0x5246B9); Game_ApplySessionSettingsToGlobals @0x551500 (@0x5519C3..0x5519D5)].
+	const playersav::KitPage &page = profile.single_player;
+	if (page.entries.empty() || page.entries.front().name.empty()) return false;
+	std::vector<world::WeaponKitEntry> kit;
+	kit.reserve(page.entries.size());
+	for (const playersav::KitEntry &e : page.entries)
+		kit.push_back(world::WeaponKitEntry{e.name, e.ammo_primary, e.ammo_secondary, e.flags});
+	loadout.spawn_kit = std::move(kit);
+	loadout.spawn_kit_set = true;
+	return true;
+}
+
 bool reseed_session_kit_on_side_change(world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side) {
