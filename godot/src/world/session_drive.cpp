@@ -301,6 +301,30 @@ bool SessionDrive::reconcile_join_expansion() {
 	return true;
 }
 
+void SessionDrive::restore_kept_expansion(const Ref<ResourceRoot> &p_root) {
+	if (!expansion_kept_) return;
+	expansion_kept_ = false;
+	Ref<ResourceRoot> resource_root = p_root;
+	if (resource_root.is_null() ||
+			resource_root->get_expansion().to_lower() == kept_expansion_.to_lower()) {
+		return;
+	}
+	const String game_code = LaunchFlags::game(world_->resolver_game());
+	if (resource_root->mount_runtime(resource_root->get_root_dir(), kept_expansion_,
+				LaunchFlags::loose_override_enabled(), game_code) != OK) {
+		UtilityFunctions::push_warning(vformat(
+				"SessionDrive: the return could not mount the menu's expansion '%s': %s",
+				kept_expansion_, resource_root->get_last_error()));
+		return;
+	}
+	// The cfg block takes the restored mount's weapon table and reads nothing; the menu
+	// entry's read follows over it (engine: inmatch::GameConfigBlock::switch_expansion).
+	Ref<GameConfigBlock> block = world_->get_game_config();
+	if (block.is_valid()) {
+		block->switch_expansion(resource_root);
+	}
+}
+
 // The switch itself, shared by the pre-dial leg (the browse row's expansion,
 // GameWorld::mount_join_expansion) and the post-auth reconcile above. Returns
 // the failure text, or an empty string when the root holds the host's
@@ -358,6 +382,13 @@ String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
 	const String target_expansion = policy_->decided_expansion();
 	const String dir = resource_root->get_root_dir();
 	const String previous = resource_root->get_expansion();
+	// The switch keeps the expansion it leaves for the return to the main menu (the pre-dial
+	// leg's switch, not the reconcile after it, is a join's first) [orig: Expansion_SwitchTo
+	// @0x5688C0 - @0x568921..0x568932].
+	if (!expansion_kept_) {
+		kept_expansion_ = previous;
+		expansion_kept_ = true;
+	}
 	// Switch THIS root rather than swapping in a second one, the same
 	// in-place remount MenuShell._apply_expansion does for the Mods screen:
 	// every holder (the menu shell, the loading screen) is meant to move with

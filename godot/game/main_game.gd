@@ -1683,6 +1683,11 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 	if route.keep_session:
 		novaworld_client = _world.release_novaworld_client() as NovaWorldClient
 	_teardown_world(false)
+	# The return takes back the expansion a join's switch left, ahead of the menu's
+	# entry, whose game.cfg read and profile load then run over it (D-NET-622; engine
+	# SessionDrive::restore_kept_expansion carries the witness).
+	if _root != null:
+		_world.restore_join_expansion(_root)
 	if _root != null and _enter_menu(_root.get_root_dir()):
 		if _process_exit_pending:
 			# The menu entry's read ended the process: the session this exit

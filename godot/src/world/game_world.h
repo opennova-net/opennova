@@ -289,6 +289,10 @@ public:
 	// (SessionDrive::switch_join_expansion). Returns the failure text, empty on
 	// success; the post-auth reconcile remains the authoritative check.
 	String mount_join_expansion(const String &p_expansion);
+	// The return to the main menu's restore of the expansion a join's switch left
+	// (SessionDrive::restore_kept_expansion; D-NET-622): the shell runs it ahead of the
+	// menu's entry over its live mount.
+	void restore_join_expansion(const Ref<ResourceRoot> &p_root);
 	// The NovaWorld session (a NovaWorldClient), handed over by the shell with
 	// a NovaWorld join or host: the world keeps it playing or hosting through
 	// the match (SessionDrive::adopt_nw_client). A normal exit back to the

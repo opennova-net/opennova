@@ -323,6 +323,10 @@ String GameWorld::mount_join_expansion(const String &p_expansion) {
 			injected_root_.is_valid() ? injected_root_ : resource_root_, p_expansion);
 }
 
+void GameWorld::restore_join_expansion(const Ref<ResourceRoot> &p_root) {
+	drive_.restore_kept_expansion(p_root);
+}
+
 void GameWorld::adopt_novaworld_client(Node *p_client) {
 	drive_.adopt_nw_client(Object::cast_to<NovaWorldClient>(p_client));
 }
@@ -955,6 +959,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_mission_as_joiner", "target"), &GameWorld::load_mission_as_joiner);
 	ClassDB::bind_method(D_METHOD("adopt_novaworld_client", "client"), &GameWorld::adopt_novaworld_client);
 	ClassDB::bind_method(D_METHOD("mount_join_expansion", "expansion"), &GameWorld::mount_join_expansion);
+	ClassDB::bind_method(D_METHOD("restore_join_expansion", "root"), &GameWorld::restore_join_expansion);
 	ClassDB::bind_method(D_METHOD("release_novaworld_client"), &GameWorld::release_novaworld_client);
 	ClassDB::bind_method(D_METHOD("post_mission_route", "reason"), &GameWorld::post_mission_route);
 	ClassDB::bind_method(D_METHOD("begin_map_change"), &GameWorld::begin_map_change);
