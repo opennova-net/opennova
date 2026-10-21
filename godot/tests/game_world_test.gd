@@ -1576,8 +1576,16 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	assert_true(weather.get_smooth_fog().is_equal_approx(
 			env.get_fog_color_target()))
 	world.tick(Vector3.ZERO, Transform3D(), 0.25)
-	assert_almost_eq(env.time_of_day, 2207.0, 0.001,
-			"a paused host keeps the scrubbed clock and rendered weather")
+	# The paused frame still drains its banked quanta through the weather tick:
+	# retail's main frame calls Environment_UpdateWeatherTick ahead of its pause
+	# test (Game_ProcessMainFrame @ 0x5263F0: the call @ 0x526774, the test
+	# @ 0x526779; D-NET-NEW-L5-7), so the scrubbed clock moves on under the
+	# pause by the quanta the accumulator drained for that frame (its smoothed
+	# bank, never past the 500 ms clamp: 0.2 minutes of this 24x clock).
+	assert_gt(env.time_of_day, 2207.0,
+			"a paused host's weather tick still advances the scrubbed clock (D-NET-NEW-L5-7)")
+	assert_lt(env.time_of_day, 2207.2,
+			"the paused frame drains no more than the accumulator's 500 ms clamp")
 	world.unload()
 
 
