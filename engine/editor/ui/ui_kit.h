@@ -9,6 +9,8 @@
 // - Empty state: one line (empty_state); the how-to goes in its tooltip.
 // - Lengths: an inline line at most ~60 characters, drawn with clipped_text or quiet_text, never wrapped
 //   prose; a tooltip at most two sentences.
+// - Citations: in no window's words (the one tooltip drops them, a line shows without_citations of its
+//   words); the code, the RE records and the MCP's answers keep them.
 // - Session strings (a status, a refusal, a document's save words) are asserted by tests and read over
 //   MCP: they keep their words, and only where they are drawn changes.
 #pragma once
@@ -27,9 +29,9 @@
 struct ImVec4;
 
 // The pieces the editor's windows draw with (ADR 0046 S11): the tool kit both products draw with
-// (runtime/devtools/ui_kit.h: rows that wrap, tools, filter boxes, held values, cut text, the one
-// tooltip, empty states), and on it what is the editor's own: a popup the session holds open, a
-// finding's severity as a drawn mark (alone, or with a count), the unsaved-changes dot, a record's
+// (runtime/devtools/ui_kit.h: rows that wrap, tools, filter boxes, held values, cut text, words without
+// their citations, the one tooltip, empty states), and on it what is the editor's own: a popup the session
+// holds open, a finding's severity as a drawn mark (alone, or with a count), the unsaved-changes dot, a record's
 // change since the last save as a dot before its name, a reference's state, and whether Dear ImGui
 // draws over a rect. A name the tool kit declares is never declared here again: it would hide the
 // kit's from every `ui_kit::` call.
@@ -75,9 +77,6 @@ void warning_line(const std::string &text, const std::string &tip = std::string(
 void refusal_text(const std::string &text);
 // The words a view shows while the project's references are still being read.
 const char *reading_references();
-// `text` without its witness citations ("[orig: ...]" and the blank before each): what a line that is cut to
-// one line shows of a finding's words, the whole in its tooltip.
-std::string without_citations(const std::string &text);
 // A button that names what it acts on, `verb` then `name` ("Import gametext.bin..."; `tail` after the name),
 // cut to what is left of the line in its middle (a name's end tells two apart), its id the verb's whatever the
 // name: pressed only while `enabled`, `tip` its tooltip.

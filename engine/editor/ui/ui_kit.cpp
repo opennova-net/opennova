@@ -108,23 +108,6 @@ void refusal_text(const std::string &text) {
 
 const char *reading_references() { return "Reading the project's references..."; }
 
-std::string without_citations(const std::string &text) {
-	std::string out;
-	out.reserve(text.size());
-	size_t at = 0;
-	while (at < text.size()) {
-		const size_t cite = text.find("[orig:", at);
-		if (cite == std::string::npos) break;
-		const size_t end = text.find(']', cite);
-		if (end == std::string::npos) break;
-		out.append(text, at, cite - at);
-		while (!out.empty() && out.back() == ' ') out.pop_back();
-		at = end + 1;
-	}
-	out.append(text, at, std::string::npos);
-	return out;
-}
-
 bool named_action(const std::string &verb, const std::string &name, const char *tail, bool enabled,
                   const std::string &tip, bool small) {
 	const ImGuiStyle &style = ImGui::GetStyle();

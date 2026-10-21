@@ -1061,8 +1061,8 @@ void WeaponWindow::draw_transport() {
 		}
 		ImGui::SetClipboardText(out.c_str());
 	}
-	ui_kit::note("wheel: zoom   middle/right drag: pan   Home: fit   double-click a track: frame it"
-				 "   drag the trace ruler: measure");
+	ui_kit::quiet_text("wheel: zoom   middle/right drag: pan   Home: fit   double-click a track: frame it"
+	                   "   drag the trace ruler: measure");
 }
 
 void WeaponWindow::draw_properties() {

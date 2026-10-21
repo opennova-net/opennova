@@ -48,20 +48,22 @@ bool draw_animation_map_inspector(Workspace &workspace, const Document &document
 			ui_kit::tooltip("The slots no row of this map authors: each serves the reset row's first clip, and what the "
 			                "game does with it is the slot's own rule.");
 		if (open) {
+			// One line a group, by what the game does with its slots: the slots whole in its tooltip.
 			const struct {
 				AnimSlotAbsence absence;
-				const char *heading;
-			} groups[] = {{AnimSlotAbsence::PlaysReset, "The game plays the reset clip in:"},
-			              {AnimSlotAbsence::NotPicked, "The game never picks these without a clip:"},
-			              {AnimSlotAbsence::Untraced, "Whether the game picks these without a clip is not traced:"}};
+				const char *label;
+				const char *rule;
+			} groups[] = {{AnimSlotAbsence::PlaysReset, "Plays the reset clip", "The game plays the reset clip in these:"},
+			              {AnimSlotAbsence::NotPicked, "Never picked", "The game never picks these without a clip:"},
+			              {AnimSlotAbsence::Untraced, "Not traced",
+			               "Whether the game picks these without a clip is not traced:"}};
 			for (const auto &group : groups) {
 				std::string words;
 				for (const int slot : left_out)
 					if (animation_slot_absence(slot) == group.absence)
 						words += (words.empty() ? "" : ", ") + animation_slot_words(slot);
-				if (words.empty()) continue;
-				ImGui::TextWrapped("%s", group.heading);
-				ui_kit::note(words);
+				if (!words.empty())
+					ui_kit::quiet_text(std::string(group.label) + ": " + words, std::string(group.rule) + "\n" + words);
 			}
 			ImGui::TreePop();
 		}

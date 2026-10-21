@@ -2,8 +2,9 @@
 // over a null ImGui backend: the row that wraps whole controls and each control's measure, the text
 // cut to a width (at its end, in its middle, a fitted button), a tool that acts only while it is
 // enabled, the controls over a value their owner holds, and the quiet pieces of the prose rule (an
-// empty state's hint, a quiet line's whole text and a help mark's how-to in tooltips; a filter's
-// nothing with its Clear; a selectable cut to its line; a tool that opens its popup).
+// empty state on one line, its hint, a quiet line's whole text and a help mark's how-to in tooltips;
+// words without their citations, in every tooltip; a filter's nothing with its Clear; a selectable cut
+// to its line; a tool that opens its popup).
 #include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
@@ -181,8 +182,26 @@ void test_quiet_lines() {
 	CHECK(away.find("Nothing yet.") != std::string::npos && away.find("Add one with New.") == std::string::npos,
 	      "an empty state's hint is no line of its own");
 	CHECK(over.find("Add one with New.") != std::string::npos, "the hint is the line's tooltip");
-	// A quiet line cut to the window, whole in its tooltip; with a tip, the tip.
+	// An empty state longer than the window: one line cut to it, never wrapped onto a second; hovered,
+	// the whole line and then the hint.
 	const std::string text = "A note that runs much longer than the window it is drawn in, cut.";
+	ImVec2 at;
+	float high = 0.0f;
+	const auto long_empty = [&] {
+		ui_kit::empty_state(text.c_str(), "Add one with New.");
+		high = ImGui::GetItemRectSize().y;
+	};
+	away = quiet_frame(ImVec2(-100.0f, -100.0f), long_empty, &at);
+	CHECK(high <= ImGui::GetTextLineHeight() + 0.5f, "an empty state is one line");
+	CHECK(away.find("...") != std::string::npos && away.find(text) == std::string::npos &&
+	              away.find("Add one with New.") == std::string::npos,
+	      "a long empty state is cut to the window, its hint in no line");
+	quiet_frame(at, long_empty);
+	over = quiet_frame(at, long_empty);
+	CHECK(over.find(text) != std::string::npos && over.find("Add one with New.") != std::string::npos &&
+	              over.find("Add one with New.") > over.find(text),
+	      "whole in its tooltip, the hint after it");
+	// A quiet line cut to the window, whole in its tooltip; with a tip, the tip.
 	away_and_over([&] { ui_kit::quiet_text(text); }, away, over);
 	CHECK(away.find("...") != std::string::npos && away.find(text) == std::string::npos, "a quiet line is cut to the window");
 	CHECK(over.find(text) != std::string::npos, "whole in its tooltip");
@@ -199,6 +218,48 @@ void test_quiet_lines() {
 	CHECK(away.find("(?)") != std::string::npos && away.find("Drag over") == std::string::npos &&
 	              over.find("Drag over the ground to paint.") != std::string::npos,
 	      "a help mark's how-to is its tooltip");
+}
+
+// Words without their witness citations, each form the windows were seen to show, and the one tooltip
+// that drops them: the code, the RE records and the MCP's answers keep them, no window shows one.
+void test_without_citations() {
+	const auto same = [](const char *text, const char *want, const char *message) {
+		CHECK(ui_kit::without_citations(text) == want, message);
+	};
+	same("Reads past it [orig: ItemDef_ParseProperty @ 0x49eb00]; fix it.", "Reads past it; fix it.",
+	     "an [orig: ...] and the blank before it go, the stop after it kept");
+	same("A [orig: A @ 0x1] and B [orig: B @ 0x2]", "A and B", "every one goes");
+	same("Solid [orig: @ 0x413298, @ 0x4aebdd]. Then [orig: a [nested] one] end.", "Solid. Then end.",
+	     "a bracket inside one goes with it");
+	same("Cut [orig: never closed", "Cut [orig: never closed", "an unclosed one stands");
+	same("No citation [here] at all.", "No citation [here] at all.", "other brackets stand");
+	same("Press [ESC_KEY] to leave.", "Press [ESC_KEY] to leave.", "a key's name in brackets stands");
+	same("It stops at the first 0 [Model_SelectRlodLevel].", "It stops at the first 0.", "a function named in brackets goes");
+	same("Read as a mission starts (ConfigFile_ParseText @ 0x7609e8).", "Read as a mission starts.",
+	     "a Name @ 0xADDR in parentheses goes with them");
+	same("(What it reads: the .bms alone, Mission_LoadBMSFile @ 0x40F4E0)", "(What it reads: the .bms alone)",
+	     "a Name @ 0xADDR and the stop before it");
+	same("CGameFont::DrawText @ 0x6752c0 draws it.", "draws it.", "a class's function too");
+	same("Literals used (menu.mnx hardcoded @0x558449)", "Literals used (menu.mnx hardcoded)",
+	     "a bare @0xADDR goes, the word before it stays");
+	same("A range @ 0x4ae894..0x4aea30, a span @ 0x7d2a00-0x7d2a54 and +0x10.", "A range, a span and +0x10.",
+	     "an address's range goes with it");
+	same("It is unknown (render-occlusion-re D-OCC-8).", "It is unknown.", "a record's name and a divergence's id");
+	same("The fonts say 0 (D-FNT-3). Next.", "The fonts say 0. Next.", "a divergence's id alone");
+	same("Its preview model (sub_58A690) here", "Its preview model here", "an IDA name alone in parentheses");
+	same("Line one [orig: X_Y @ 0x1]\nLine two", "Line one\nLine two", "a line's end kept");
+	same("Plain words (with a remark), a pre-read and the D-pad stay.",
+	     "Plain words (with a remark), a pre-read and the D-pad stay.", "words that cite nothing stand");
+	NullBackend backend;
+	std::string away, over;
+	away_and_over(
+			[] {
+				ImGui::TextUnformatted("Damage");
+				ui_kit::tooltip("Each touch costs 50 health [orig: @ 0x4aeb39].");
+			},
+			away, over);
+	CHECK(over.find("Each touch costs 50 health.") != std::string::npos && over.find("0x4aeb39") == std::string::npos,
+	      "the one tooltip drops them");
 }
 
 // A filtered list's nothing: the filter named on one line, and a Clear (its id "Clear##nothing")
@@ -272,6 +333,7 @@ int main() {
 	test_tool_acts_only_enabled();
 	test_held_values();
 	test_quiet_lines();
+	test_without_citations();
 	test_nothing_matches();
 	test_fitted_selectable_and_tool_popup();
 	if (g_failures != 0) {
