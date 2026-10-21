@@ -521,7 +521,8 @@ static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 
 // See header. Each admission record of the datagram reaches its handler in order, as retail's
 // parse walk dispatches record by record, each handler with its own gate: the JOIN in game state
-// 1, the form post in game state 2, the 0x02 in any (D-NET-NEW-L1-24).
+// 1, the form post in game state 2, the 0x02 in any, every game record behind the server slot
+// the add sets (D-NET-NEW-L1-24).
 // [orig: CNapiNPConnection_ParseMessages @0x625BC0 (record by record); the server opcode table
 //  registered by CNapiNetwork_Init @0x4CA4A0 (@0x4CA8E7: {id, name, handler, 0} rows)]
 std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
@@ -615,11 +616,19 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 				break;
 
 			default:
-				// A game record ahead of the admission: its own handler's gates are not
-				// modelled for an unadmitted node yet (the rest of D-NET-NEW-L1-24): the node
-				// is released with no wire output.
-				conn.admission_stage = GameAdmissionStage::Rejected;
-				return {};
+				// A game record ahead of the admission reaches its own handler, which returns
+				// with nothing sent and nothing stored: every other handler of the server table
+				// is a bare return or tests the net player's server slot (+0xC0) first, and only
+				// the add sets the slot, after the admission. The node stays in its stage and the
+				// walk goes on (D-NET-NEW-L1-24; the per-handler gates in the L1-s13 audit).
+				// [orig: the server table @0x82B5D8..0x82BA47 ({id, name, handler, 0} rows); e.g.
+				//  NapiNPServerMsg_HandlePlayerSpawnRequest (0x0A) @0x513260 - the slot
+				//  @0x513280..0x513288; NapiNPServerMsg_PlayerJoinRequest (0x0B) @0x51AB10 - the
+				//  slot @0x51AB30..0x51AB38; NapiNPServerMsg_HandlePlayerLoadout (0x2F) @0x515790
+				//  - the slot @0x5157CF..0x5157DB; the bare returns 0x07 @0x4FC970, 0x31 @0x5024A0, 0x35
+				//  @0x500DF0, 0x36 @0x500E00, 0x38 @0x502510, 0x39 @0x500E20, 0x3E @0x500E10, 0x48
+				//  @0x510F30; Server_PlayerAdd @0x51CBC0, the slot stores @0x51CC52 / @0x51CD51]
+				break;
 		}
 	}
 	if (consumed != nullptr) *consumed = index;

@@ -1294,11 +1294,10 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 		// teardown. [orig: the @0x512aa0 failure return keeps the connection;
 		// teardown is the client's goodbye or the receive reap]
 		if (conn.host_disconnect_sent) return;
-		// The admission's remaining silent leg, a game record ahead of the
-		// admission, releases the pending node with no wire output, where retail
-		// dispatches it to its handler, whose own gates keep the node (the
-		// admission records reach their handlers in dispatch_admission)
-		// (D-NET-NEW-L1-24).
+		// A reject whose description could not be staged (a node with no remote
+		// transport) releases the node at once. A game record ahead of the
+		// admission is no reject: its handler's slot gate answers nothing and
+		// keeps the node (dispatch_admission, D-NET-NEW-L1-24).
 		if (teardown_connection(ctx, peer, nullptr)) {
 			HostAcceptEvent ev;
 			ev.kind = HostAcceptEvent::Kind::PeerGoodbye;
