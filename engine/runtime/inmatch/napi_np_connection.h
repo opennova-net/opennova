@@ -674,7 +674,7 @@ struct NapiNPConnection {
 	// The deadline base stays join_validated_host_ms.
 	// [orig: CNetPlayer_SetGameState(player, 4) @0x4C8BCA;
 	//  CNapiGameSession_HandlePlayEnterResponse @0x4D1940 — state-4 gate
-	//  @0x4D1B3E, SetGameState(6) @0x4D1C11]
+	//  @0x4D1B40, CNetPlayer_SetGameState(6) called @0x4D1C11]
 	bool player_enter_requested = false;
 	bool player_enter_admitted = false;
 	bool player_enter_pending() const { return player_enter_requested && !player_enter_admitted; }
