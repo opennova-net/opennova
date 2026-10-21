@@ -237,14 +237,19 @@ using PlayerRowFreeTicks = std::array<int32_t, 256>;
 // node again and the spawn pump's add picks it a fresh row and rebinds the net player's server
 // slot there, so the earlier row stays active (+4) with its net player (+0x1C) and its body,
 // which no disconnect reaches (the leave frees the net player's current row). It counts in the
-// free-row pick, the free-tick walk, the alive count and the team counts (D-NET-NEW-L1-24).
+// free-row pick, the free-tick walk, the alive count and the team counts (D-NET-NEW-L1-24), and
+// as a slot row it is a 0x16 row and keys its squad (D-NET-NEW-L1-24, L1-s15).
 // [orig: Server_PlayerAdd @0x51CBC0 - PlayerSlot_PickFreeSlot (the call @0x51CC95), +0x1C
 //  @0x51CD4E, +0xC0 rebound @0x51CD51; Server_CountPlayersOnTeam @0x501630 (@0x501650,
-//  @0x501656)]
+//  @0x501656); Server_BuildAndBroadcastScoreboard @0x50D960 (the slot walk, state 6 @0x50D9F6);
+//  CSlotArray152_CountActiveByKey @0x500660 (+4 @0x500690, +0x188DC @0x500699)]
 struct OrphanedPlayerRow {
 	uint8_t slot = 0;
 	world::EntityHandle body{};
 	uint8_t team = 0; // the row's +0x1A0
+	bool in_match = false; // the row's state word (+0x20) 6 when the re-add left it
+	bool spectator = false; // the row's spectator latch (+0x188D7)
+	int32_t squad_key = 0; // the row's squad key (+0x188DC)
 };
 
 struct NapiNPServerCtx {

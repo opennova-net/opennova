@@ -1009,6 +1009,9 @@ static void orphan_player_row(NapiNPServerCtx &ctx, NapiNPConnection &conn) {
 	row.slot = conn.reply.player_slot;
 	row.body = conn.link.owned_entity;
 	row.team = conn.assigned_team_valid ? conn.assigned_team : uint8_t{0};
+	row.in_match = slot_in_match(conn);
+	row.spectator = conn.link.spectator;
+	row.squad_key = conn.squad_key;
 	ctx.orphaned_player_rows.push_back(row);
 	conn.link.owned_entity = {};
 	conn.phase = ConnectionPhase::Joined;
