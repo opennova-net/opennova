@@ -264,10 +264,8 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 				R"({"kind": "environment", "options": {"rain": {"percent": 0, "seconds": 0}, "overcast": {"percent": 0, "seconds": 0}}})"));
 	// Listen (S23 C): the rain's loops and the lightning's thunder heard at the camera, as the game plays them.
 	const MissionListenOptions &listen = options.listen;
-	if (lit_tool(weather, "Listen", listen.on, true,
-			    listen.on ? std::string("Stop listening.")
-			              : std::string("Hear the weather where the camera stands, as the game plays it: the rain's two "
-			                            "loops beside the listener while it rains, the thunder of the lightning."))) {
+	if (listen_tool(weather, listen.on, "the weather",
+	                "The rain's two loops beside the listener while it rains, and the lightning's thunder.")) {
 		MissionListenOptions next = listen;
 		next.on = !next.on;
 		JsonValue change = JsonValue::make_object();
@@ -283,8 +281,7 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 		ui_kit::tooltip("The drops the game draws at this rain, of its 3072.");
 	}
 	// What the picture says of itself: no mission, a terrain the project lacks, a standing clock.
-	const JsonValue notes = model.notes_json(context.input);
-	for (const JsonValue &note : notes.array) ui_kit::clipped_text(note.get_string("message", ""));
+	picture_notes(model.notes_json(context.input));
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y));
 }
 

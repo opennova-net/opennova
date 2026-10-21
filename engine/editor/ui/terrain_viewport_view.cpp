@@ -14,7 +14,6 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <editor/ui/editor_requests.h>
 #include <editor/ui/overlay_legend.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_widgets.h>
@@ -91,14 +90,7 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		ImGui::EndPopup();
 	}
 	// The Terrain pane (S25): sculpt, paint and lay tiles in the picture (Ctrl+E), the button naming the brush's tool.
-	const bool terrain = workspace.view().workspace.document(model.path()).terrain;
-	const TerrainTool brushing = workspace.view().workspace.terrain_brush.tool;
-	const std::string terrain_label =
-			terrain && brushing != TerrainTool::None ? std::string("Terrain: ") + terrain_tool_label(brushing) : std::string("Terrain");
-	if (lit_tool(row, terrain_label.c_str(), terrain, true,
-			terrain ? std::string("Hide the Terrain pane (Ctrl+E).")
-					: std::string("Sculpt the ground, paint its maps and lay its tiles in the picture (Ctrl+E).")))
-		window_requests::show_terrain(workspace, model.path(), !terrain);
+	terrain_pane_tool(workspace, row, model.path());
 	if (ui_kit::tool(row, "Frame", true, "The camera on the terrain's sectors (F, or a double click)."))
 		workspace.request(request::set_viewport(model.path(), terrain_camera_change(model.framed(context.width, context.height))));
 	if (ui_kit::tool(row, "Top", true, "Straight down over the camera's target, north up.")) {
@@ -107,9 +99,7 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		workspace.request(request::set_viewport(model.path(), terrain_camera_change(camera)));
 	}
 	// What the picture says of itself: no mission, an environment the project lacks.
-	const JsonValue notes = model.notes_json(context.input);
-	for (const JsonValue &note : notes.array)
-		if (note.get_string("code", "") != "file.missing") ui_kit::clipped_text(note.get_string("message", ""));
+	picture_notes(model.notes_json(context.input), "file.missing");
 	// Under the canvas: the ground under the pointer (DI-07), then a line while the picture lacks a file.
 	const float line = ImGui::GetFrameHeightWithSpacing();
 	const float under = line + (model.missing().empty() ? 0.0f : line);
@@ -148,11 +138,8 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		       ground_surface_ = facts.on == MissionGroundOn::Terrain && !facts.under_water ? facts.surface : -1;
 	       });
 	if (!brush_hint_.empty()) ui_kit::clipped_text(brush_hint_);
-	else
-		ground_line(ground_, ground_surface_,
-		            "Point at the terrain to read its surface class, the footsteps a body plays there, the row a round "
-		            "plays and the foliage it grows.");
-	missing_files_line(model.missing());
+	else ground_line(ground_, ground_surface_);
+	files_line(model.missing(), "missing", "Import them to see them (Problems).");
 }
 
 } // namespace opennova::editor

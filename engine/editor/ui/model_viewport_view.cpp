@@ -141,28 +141,22 @@ void ModelViewportView::Tools::place_in_mission(Workspace &workspace, ui_kit::Wr
 	}
 	ImGui::EndDisabled();
 	const std::string name = basename_of(mission);
-	ui_kit::tooltip(mission.empty()
-	                        ? std::string("Open the mission to place this model in: Place in mission arms its Place tool with "
-	                                      "the model's item.")
-	                        : "Arms Place in " + name + " with the model's item: each click on its picture places one on the "
-	                          "ground there. " +
-	                                  (drawers.empty() ? std::string("No item draws the model yet: its item is made in the item "
-	                                                                 "catalog first, a decoration or a building as its parts say.")
-	                                   : drawers.size() > 1 ? std::string("Several items draw it: pick one.")
-	                                                        : std::string("")));
+	ui_kit::tooltip(mission.empty() ? std::string("Open a mission to place the model in: this arms its Place tool with the "
+	                                              "model's item.")
+	                                : "Arm the Place tool of " + name + " with the model's item." +
+	                                          (drawers.empty() ? std::string(" No item draws it yet: one is made in the item "
+	                                                                         "catalog first, a decoration or a building as its "
+	                                                                         "parts say.")
+	                                           : drawers.size() > 1 ? std::string(" Several items draw it: pick one.")
+	                                                                : std::string()));
 	if (ImGui::BeginPopup("place_in_mission")) {
-		for (const int64_t item : drawers) {
-			MissionItemFacts facts;
-			std::string ignored;
-			mission_item_facts(view, item, facts, ignored);
-			const std::string label = (facts.name.empty() ? std::string("Item") : facts.name) + " (" + std::to_string(item) + ")";
-			if (ImGui::Selectable(label.c_str())) {
-				window_requests::go_to_file(workspace, mission);
-				io::JsonValue options = io::JsonValue::make_object();
-				options.set("tool", io::json_string(mission_tool_token(MissionTool::Place)));
-				options.set("item", io::json_number(double(item)));
-				workspace.request(request::set_viewport(mission, viewport_change(ViewportKind::Mission, "options", std::move(options))));
-			}
+		const int64_t item = item_choice(view, drawers);
+		if (item >= 0) {
+			window_requests::go_to_file(workspace, mission);
+			io::JsonValue options = io::JsonValue::make_object();
+			options.set("tool", io::json_string(mission_tool_token(MissionTool::Place)));
+			options.set("item", io::json_number(double(item)));
+			workspace.request(request::set_viewport(mission, viewport_change(ViewportKind::Mission, "options", std::move(options))));
 		}
 		ImGui::EndPopup();
 	}
@@ -757,14 +751,9 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	                       : "The model's projected radius on the picture, the size Auto measures.");
 	// The preview clock: Run or Pause (Play is the game's); a clip's timeline runs and holds the same
 	// clock, so an animation has its button there alone.
-	const bool playing = context.input.clock.playing();
-	const char *clock = playing ? "Pause" : "Run";
-	if (!model.animating()) {
-		row.next(ui_kit::button_width(clock));
-		if (ImGui::Button(clock)) set_playing(workspace, model, !playing);
-		ui_kit::tooltip("Run or hold the preview clock: the model's part animations, flipbooks and colour "
-		                "generators.");
-	}
+	if (!model.animating())
+		clock_buttons(workspace, row, model, context.input.clock,
+		              "Run or hold the preview clock: the model's part animations, flipbooks and colour generators.");
 	if (model.animating()) sound(workspace, row, model);
 	if (model.animating() && !model.first_person().active()) fire(workspace, row, model);
 	if (model.animating() && model.first_person().active()) first_person(workspace, row, model);

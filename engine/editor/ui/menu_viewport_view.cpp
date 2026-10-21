@@ -27,19 +27,6 @@ namespace {
 
 constexpr int kMaxDevice = 8192;
 
-// The files the picture lacks or could not read as one amber line, what they are after their count ("2 files not in the
-// project: logo.tga, gunpl22b.fnt"), the first three named: every one, and `then`, in its tooltip.
-void files_line(const std::vector<std::string> &names, const char *what, const char *then) {
-	std::string line = std::to_string(names.size()) + (names.size() == 1 ? " file " : " files ") + what + ": ";
-	std::string all;
-	for (size_t i = 0; i < names.size(); ++i) {
-		if (i < 3) line += (i ? ", " : "") + names[i];
-		all += (i ? "\n" : "") + names[i];
-	}
-	if (names.size() > 3) line += ", ...";
-	ui_kit::warning_line(line, all + "\n" + then);
-}
-
 // The viewport's options set (a SetViewport of them).
 void set_options(Workspace &workspace, const MenuViewport &menu, const MenuViewportOptions &options) {
 	set_viewport_member(workspace, menu, "options", menu_options_to_json(options, menu.show(), menu.pointer(), menu.sound()));
@@ -427,10 +414,8 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 		draw_empty(workspace, &model, model.path());
 		return;
 	}
-	if (!menu.missing().empty())
-		files_line(menu.missing(), "not in the project", "Refresh in Files after adding files outside the editor.");
-	if (!menu.unreadable().empty())
-		files_line(menu.unreadable(), "did not load", "The project has them, but the game could not read them.");
+	files_line(menu.missing(), "not in the project", "Refresh in Files after adding files outside the editor.");
+	files_line(menu.unreadable(), "did not load", "The project has them, but the game could not read them.");
 	const MenuClipboard board = menu_canvas_clipboard(frame, !view.documents.clipboard.empty());
 	// The zoom and the snap the viewport holds, taken where they moved (a client's set_viewport) before the
 	// toolbar and the canvas draw.
