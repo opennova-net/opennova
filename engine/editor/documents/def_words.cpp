@@ -179,9 +179,9 @@ const DefWords kItemWords[] = {
 	{"light_transfer", "Interior daylight", "Looks", "For buildings: the percent of daylight that reaches inside, lighting the interior and the people in it, and scaling indoor rain volume.", "[orig: Terrain_RenderSectorModels @ 0x5c5df2]; [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7f7a]"},
 	{"reverb", "Interior reverb", "Sound", "While the local player is inside this building, a nonzero value picks the reverb preset (reverb points still win), but presets sound the same.", "[orig: Entity_UpdateInfantryPlayerBody @ 0x4B5F9E]; lwf-dbf-sound-re.md, Reverb selection"},
 	// The shadow line, stored and never drawn: the authored decal's gate (ItemDef+0x114) is never assigned in JO,
-	// its TGA never loaded, and the slot size its width and length give is a shadow type no JO caller allocates
-	// [orig: ItemDef_ParseProperty @ 0x49f3a5..0x49f44c; RenderSlot_AllocSlot @ 0x5d572a..0x5d5767; callers pass
-	// type 1, Entity_InitFromModel @ 0x40E1EA, PlayerClass_InitEntity @ 0x4b10f1].
+	// its TGA never loaded, and the slot reads its width and length only for a shadow type no JO caller allocates
+	// [orig: ItemDef_ParseProperty @ 0x49f3a5..0x49f44c; RenderSlot_AllocSlot @ 0x5d572a..0x5d5754; its callers
+	// pass type 1, Entity_InitFromModel @ 0x40E1EA, PlayerClass_InitEntity @ 0x4b10f1].
 	{"shadow_texture", "Shadow texture", "Looks", "The TGA the authored shadow decal would draw; JO never loads it.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md", kIgnored},
 	{"shadow_width", "Shadow width", "Looks", "The authored shadow decal's width, which JO never draws.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md", kIgnored},
 	{"shadow_length", "Shadow length", "Looks", "The authored shadow decal's length, which JO never draws.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md", kIgnored},
