@@ -513,7 +513,7 @@ struct PlayerViewState {
     // The camera's tracked entity as a key: 0 the local player, else the
     // spectate target the death screen's first-person sub-mode tracks
     // (kCameraTrackedTargetKey | its wire handle) [orig: g_CameraTrackedEntity
-    // @0xA890CC; Camera_SetTrackedEntity @0x4391e0..0x4391f9].
+    // @0xA890CC; Camera_SetTrackedEntity @0x4391D0 (@0x4391E7..0x4391F9)].
     uint32_t camera_tracked = 0;
 };
 

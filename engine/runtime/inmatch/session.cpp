@@ -642,7 +642,7 @@ void Session::step_paused_frame_counters(const FrameInput &input) {
 	// counters wait on the pause, as the tick does), and the weather tick, which
 	// the frame runs ahead of its pause test, so the time of day and the weather
 	// keep stepping through the pause [orig: Game_ProcessMainFrame @0x5263F0 --
-	// `cmp dword_A87050, 0` @0x5265A6 around the tick's ++g_CurrentTick,
+	// `cmp dword_A87050, 0` @0x5265A0 around the tick's ++g_CurrentTick,
 	// Game_TickHudFrameCounters @0x5265D5 every frame, Environment_UpdateWeatherTick
 	// @0x57E9B0 called @0x526774 ahead of the pause test @0x526779; the entity
 	// update's own pause return, Entity_UpdateAllEntities @0x4C2100 (@0x4C2103)].

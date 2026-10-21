@@ -732,7 +732,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     player_view_resolve_mode(v);
     // The arbiter's tracked entity: the spectate target while the death
     // screen's first-person sub-mode has one, else the local player
-    // [orig: Camera_SetTrackedEntity @0x4391e0..0x4391f9, called
+    // [orig: Camera_SetTrackedEntity @0x4391D0 (@0x4391E7..0x4391F9), called
     //  @0x5ca262 when it or the mode changed @0x5ca250..0x5ca25e]. The
     // compose itself stays on the local entity, whose pose copies the
     // target's (docs/net/novaworld-net-re.md, D-NET-330).
@@ -1221,7 +1221,7 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
     //  g_CameraTrackedEntity` @0x437D2B, CameraOffset [esi+6Ch..74h]
     //  @0x437FA2..0x437FB7, the recoil [esi+380h] @0x437FBD..0x437FC7, the roll
     //  [esi+2DCh] + ([esi+0B0h] sar 2) @0x437FCD..0x437FE6; Camera_SetTrackedEntity
-    //  @0x4391E0 (sub-mode 2 with a target @0x4391E7..0x4391F9)]
+    //  @0x4391D0 (sub-mode 2 with a target @0x4391E7..0x4391F9)]
     if ((v.camera_tracked & kCameraTrackedTargetKey) != 0 && world.rules.logic_authority) {
         const EntityHandle target{static_cast<uint16_t>(v.camera_tracked & 0xFFFFu)};
         const Entity *te = world.registry.get(target);

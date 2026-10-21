@@ -860,10 +860,19 @@ bool run_the_mission_start_submissions_follow_the_countdown() {
 				"loading: the frames neither receive nor send while the load runs"))
 			return false;
 	}
+	// The load zeroes the frame tick, g_CurrentTick's stand-in (D-NET-690), and the 0x0F
+	// wait that follows is no main frame: it stays 0 [orig: Game_StartMission @0x524360 -
+	// `mov g_CurrentTick, ebx` @0x525B9F; Game_StartMission's final wait @0x52628d..0x5262df].
+	h.client.view().step_frame_tick();
+	const bool ticked = h.client.view().frame_tick() != 0;
 	if (!expect(h.client.push_mission_start_end().empty() && !h.client.mission_start_released(),
 			"loading: the load's pumps hold all three (c = 12 at the exit)"))
 		return false;
+	if (!expect(ticked && h.client.view().frame_tick() == 0, "loading: the load zeroes the frame tick"))
+		return false;
 	const std::vector<std::vector<uint8_t>> after = h.frame();
+	if (!expect(h.client.view().frame_tick() == 0, "loading: the 0x0F wait is no main frame"))
+		return false;
 	ProtocolPacketHeader header;
 	std::vector<ProtocolMessage> messages;
 	bool replies_behind = after.size() == 1 &&

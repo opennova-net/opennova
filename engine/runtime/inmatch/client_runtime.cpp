@@ -1556,8 +1556,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	                                                : view_.mp_session();
 	// A joiner's wait loops are not main frames: they run inside Game_StartMission and
 	// pump the receive and the send alone (no tick step, no entity update).
-	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42cbb5; NapiClient_WaitForGameStart
-	//  @0x42cc92; Game_StartMission's final wait @0x52628d..0x5262df]
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (the site @0x42CBB5);
+	//  NapiClient_WaitForGameStart @0x42CC10 (the site @0x42CC92); Game_StartMission's final
+	//  wait @0x52628d..0x5262df]
 	const bool main_frame = role_ != Role::Joiner || joiner_ == nullptr ||
 			joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::NetworkFrame;
 	const bool entity_update_skipped = !main_frame ||
@@ -1604,8 +1605,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// returns on it into the game loop, whose frame then runs this countdown.
 	// The earlier join stages never read it (the mission start clears what
 	// they let through: JoinerConnection's mission_started).
-	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42cbc5 -> "Mission loading
-	//  aborted 1" @0x524db0..0x524dd1; NapiClient_WaitForGameStart @0x42cca1
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (@0x42cbc5) -> "Mission loading
+	//  aborted 1" @0x524db0..0x524dd1; NapiClient_WaitForGameStart @0x42CC10 (@0x42cca1)
 	//  -> "aborted 3" @0x524e2e..0x524e4f; both push g_GameModeGameLoop]
 	const bool gate_read = joiner_ != nullptr &&
 			(joiner_->in_game_loop() ||

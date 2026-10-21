@@ -1687,7 +1687,7 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 		out.push_back(std::move(item));
 		// A request that named a sequence fires the incoming link-error
 		// callback [orig: SendMissingSeqList has_missing_seqs @0x623690,
-		// cb_server_5 @0x623788..0x62379b = @0x4c4681, the g_NetQuality
+		// cb_server_5 @0x623788..0x62379b = @0x4C4680, the g_NetQuality
 		// flag-2 store behind the cooldown test].
 		if (std::any_of(missing.begin(), missing.end(),
 				[](uint32_t sequence) { return sequence != 0; }))

@@ -39,7 +39,7 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 //  cb_client_3); CNapiNPConnection_SendMissingSeqList @0x623780..0x6237bd
 //  (cb_server_5 / cb_client_2); the callbacks CNapiNetwork_Init installs
 //  @0x4ca948..0x4ca9cd: NapiNPServer_OnResendListCallback @0x4c62a0 and Network_LogOutgoingPacketError raise
-//  flag 1, @0x4c4681 and Network_LogIncomingPacketError flag 2]
+//  flag 1, @0x4C4680 and Network_LogIncomingPacketError flag 2]
 inline constexpr uint32_t kNetQualityLinkErrorOutgoing = 1u;
 inline constexpr uint32_t kNetQualityLinkErrorIncoming = 2u;
 

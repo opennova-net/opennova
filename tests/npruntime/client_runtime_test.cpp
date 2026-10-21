@@ -3467,14 +3467,22 @@ bool run_the_round_gate_holds_the_entity_update() {
 	                    0, 0x00100000u, /*replay_mode=*/false);
 	client.state().tracked_target.ticks_remaining = 5;
 	client.state().spawn_success_gate = true;
+	// The frame tick (g_CurrentTick's stand-in) steps on every main frame, the gated
+	// one too (D-NET-690) [orig: Game_ProcessMainFrame @0x5263F0 - `add g_CurrentTick,
+	// ebx` @0x5265B4 ahead of the entity gates @0x52672C..0x526742].
+	const uint32_t tick0 = client.view().frame_tick();
 	(void)client.Client_ProcessNetworkFrame(1);
 	if (!expect(client.in_session() && client.state().tracked_target.ticks_remaining == 5,
 			"the round-over gate in a session holds the entity update"))
 		return false;
+	if (!expect(client.view().frame_tick() == tick0 + 1,
+			"the gated main frame still steps the frame tick"))
+		return false;
 	client.state().spawn_success_gate = false;
 	(void)client.Client_ProcessNetworkFrame(2);
-	return expect(client.state().tracked_target.ticks_remaining == 4,
-			"with the gate down the entity update runs");
+	return expect(client.state().tracked_target.ticks_remaining == 4 &&
+					client.view().frame_tick() == tick0 + 2,
+			"with the gate down the entity update runs, stepping the frame tick once");
 }
 
 // D-NET-710: the console's input actions go through Input_QueueEvent's queue: the S2C
