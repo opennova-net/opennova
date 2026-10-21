@@ -5323,6 +5323,10 @@ add_test(NAME mission_start_slices COMMAND mission_start_slices_test)
 add_executable(round_class_init_test world/round_class_init_test.cpp)
 target_link_libraries(round_class_init_test PRIVATE opennova_runtime)
 add_test(NAME round_class_init COMMAND round_class_init_test)
+# The arti row's motor, the mortar shell (drag, advance, gravity; the water and terrain arms).
+add_executable(mortar_motor_test world/mortar_motor_test.cpp)
+target_link_libraries(mortar_motor_test PRIVATE opennova_runtime)
+add_test(NAME mortar_motor COMMAND mortar_motor_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

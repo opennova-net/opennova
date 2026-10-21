@@ -319,6 +319,15 @@ const char kItemsDef[] = "begin \"S5 Player\"\r\n"
     "  graphic psecevent\r\n"
     "  sid s5psecevent\r\n"
     "  ai_function psec\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Mortar Shell\"\r\n"
+    "  id 100604\r\n"
+    "  type object\r\n"
+    "  graphic s5shell\r\n"
+    "  sid s5shell\r\n"
+    "  ai_function arti\r\n"
+    "  move_function arti\r\n"
     "end\r\n";
 
 // The minimal SndProf shape ("default" first, so a real profile lands at
@@ -535,7 +544,7 @@ int main() {
     CHECK(def_parse_items_memory(
                   reinterpret_cast<const uint8_t *>(kItemsDef),
                   sizeof(kItemsDef) - 1, &file) == 0);
-    CHECK(file.count == 28);
+    CHECK(file.count == 29);
 
     // Stamp the fields whose authored-token spellings are the def parser's own
     // test surface: distinct sentinels per vehicle-physics slot so any
@@ -1135,6 +1144,17 @@ int main() {
     CHECK(dup_e != nullptr &&
           dup_e->item_type_index == static_cast<int32_t>(entry_for(file, 100602) - file.entries));
     CHECK(w.throwables.classes.get(500) == nullptr);
+    // An arti def lands its row for its physics row alone (the mortar shell's motor): the
+    // arti name binds no event row, so no think class.
+    // [orig: Entity_InitFromItemDef @0x49E550 (+0x1C4 @0x49E586..0x49E58C); the physics row
+    //  "arti" @0x82AC7C -> 0x445500; the event table @0x813000 holds no "arti" row]
+    const ThrowableClassRow *shell = w.throwables.classes.get(604);
+    CHECK(shell != nullptr);
+    if (shell != nullptr) {
+        CHECK(shell->move_row == PhysicsClass::Arti);
+        CHECK(shell->think == ThrowClass::kNone);
+        CHECK(shell->motor == ThrowClass::kNone);
+    }
 
     // Idempotent re-run: the once-per-id tables must not duplicate or reset.
     mission::resolve_item_traits(w, file, wire_class, nullptr);
