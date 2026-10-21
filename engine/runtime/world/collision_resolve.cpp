@@ -271,7 +271,14 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player_class ? 2 : 0));
                 ContactResult res;
                 const bool contact = collision_contact_force(*tv, q, blink, ladder, res);
-                const Entity *target_entity = world.registry.get(ch);
+                Entity *target_entity = world.registry.get(ch);
+                // The query's door-touch mask lands on the target, the building's
+                // started at 0 (D-NET-133). [orig: Entity_ComputeBoneCollisionForce
+                //  @0x4AE150 - the reset @0x4AE281, the OR @0x4AEB22]
+                if (target_entity != nullptr) {
+                    if (res.door_mask_reset) target_entity->door_touch_mask = 0;
+                    target_entity->door_touch_mask |= res.door_sections;
+                }
                 const bool powerup = contact && target_entity != nullptr &&
                     target_entity->has_item_def &&
                     (target_entity->item_attrib & kItemAttribPowerup) != 0;
@@ -511,7 +518,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     // [orig: Entity_MovementCollisionResolver @0x4B3505]
                     if ((res.flags & kTouchDoor) != 0)
                         if (Entity *door = world.registry.get(ch))
-                            world.doors.command(world, *door, 6, res.door_sections);
+                            world.doors.command(world, *door, 6);
                 }
             }
             if (pass == 0) {

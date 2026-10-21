@@ -766,10 +766,16 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
     if (target.model == nullptr || target.matrices == nullptr) return false;
     if ((target.entity_flags & 1u) != 0) return false; // [orig: targetEntity[9] & 1 @ 0x4ae1bd]
     const CollisionModel &model = *target.model;
-    if (model.sections.empty() || q.num_points <= 0) return false;
+    if (q.num_points <= 0) return false;
 
     // Broad phase per point. [orig: @ 0x4ae1d0]
     if (!contact_query_overlaps_bound(target.pos, target.bound_radius, q)) return false;
+    // A building's door-touch mask starts every query that gets this far at 0;
+    // the type-9 legs below OR their bits in (D-NET-133). [orig:
+    //  Entity_ComputeBoneCollisionForce @0x4AE150 - `cmp [ecx+5Ch], 5` @0x4AE275,
+    //  `mov [ebp+2B4h], ebx` @0x4AE281]
+    out.door_mask_reset = target.is_building;
+    if (model.sections.empty()) return false;
 
     int32_t any_collision = 0;
     int32_t max_penetration = 0;
@@ -978,7 +984,8 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             }
                         }
                         break;
-                    case bvol_type::kDoorCD: // door touch [orig: @ 0x4aeb0f-0x4aeb22]
+                    case bvol_type::kDoorCD: // door touch, ORed into the target's mask
+                                             // [orig: @ 0x4aeb0f-0x4aeb22, `or [eax+2B4h], edx` @0x4AEB22]
                         out.flags |= kTouchDoor;
                         out.door_sections |= 1u << ((static_cast<uint32_t>(si) -
                                 static_cast<uint32_t>(target.door_first_bone)) & 31u);

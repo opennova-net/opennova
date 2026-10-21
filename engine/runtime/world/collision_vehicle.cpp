@@ -134,7 +134,13 @@ int32_t CollisionWorld::resolve_vehicle_probes(World &world, Entity &source,
 			q.radii = &radii[i];
 			q.num_points = 1;
 			ContactResult contact;
-			if (!collision_contact_force(*target, q, blink, ladder, contact))
+			const bool touched = collision_contact_force(*target, q, blink, ladder, contact);
+			// The query's door-touch mask lands on the target, the building's started
+			// at 0 (D-NET-133). [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the
+			//  reset @0x4AE281, the OR @0x4AEB22]
+			if (contact.door_mask_reset) other->door_touch_mask = 0;
+			other->door_touch_mask |= contact.door_sections;
+			if (!touched)
 				continue;
 			if ((contact.flags & 0x800u) != 0)
 				source.carry_flags |= 0x40u;

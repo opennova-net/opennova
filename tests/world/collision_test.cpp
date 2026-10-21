@@ -404,6 +404,54 @@ void test_infantry_route_walks_around_wall() {
     CHECK(arrived);
 }
 
+// D-NET-133: every bone-collision query that passes a building's broad phase
+// starts its door-touch mask (+0x2B4) at 0 and ORs the door sections it touches;
+// a query the broad phase drops leaves it, and a target that is no building ORs
+// with no reset. [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the reset
+//  @0x4AE281, the OR @0x4AEB22; DoorClass_HandleEvent @0x43F370 reads it @0x43F3D9]
+void test_door_mask_resets_per_query() {
+    CollisionModel model = box_model(bvol_type::kDoorCD, 0, 2.0, 2.0, 3.0);
+    const CollisionSection door_section = model.sections[0];
+    model.sections.assign(4, CollisionSection{});
+    model.sections[2] = door_section;
+    model.sections[3] = door_section;
+    model.finalize_sections();
+    const int32_t origin[3]{};
+    std::vector<CollisionMatrix> matrices(4, collision_matrix_from_heading(0, origin));
+    CollisionTargetView target;
+    target.model = &model;
+    target.matrices = matrices.data();
+    target.bound_radius = fx(8);
+    target.door_first_bone = 2;
+    target.is_building = true;
+    CollisionPoint point{0, 0, fx(1), 0};
+    int32_t radius = 0;
+    ContactQuery query;
+    query.points = &point;
+    query.radii = &radius;
+    query.num_points = 1;
+    query.source_bound_radius = fx(1);
+    BlinkAccum blink;
+    LadderContact ladder;
+    ContactResult result;
+    // Two door sections touched by one query OR their bits.
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(result.door_mask_reset && result.door_sections == 3u);
+    // A query past the broad phase that touches no door: the mask restarts at 0.
+    point = CollisionPoint{fx(5), 0, fx(1), 0};
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(result.door_mask_reset && result.door_sections == 0u);
+    // The broad phase drops a far point: no reset.
+    point = CollisionPoint{fx(20), 0, fx(1), 0};
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(!result.door_mask_reset && result.door_sections == 0u);
+    // A target that is no building ORs its touches with no reset.
+    target.is_building = false;
+    point = CollisionPoint{0, 0, fx(1), 0};
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(!result.door_mask_reset && result.door_sections == 3u);
+}
+
 // ---------------------------------------------------------------------------
 // Door CD volumes publish indices relative to first_door, and the normal
 // movement resolver invokes the peer-local event even without a solid force.
@@ -6393,6 +6441,7 @@ int main() {
 	test_fixed_matrix_euler_witnessed_vector();
 	test_fixed_matrix_euler_round_trip();
 	test_door_contact_and_player_collision_split();
+	test_door_mask_resets_per_query();
 	test_matrix_roundtrip();
 	test_retail_render_pose_matrix_roundtrip_and_order();
     test_blink_query_and_refresh();

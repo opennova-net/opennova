@@ -784,8 +784,10 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
             // [orig: @0x43F889..0x43F8DC]
             if (hit.section < 1 || hit.section > 30) return;
             if (!world.doors.target_section_closed(target, hit.section)) return;
-            const uint32_t mask = 1u << ((hit.section - target.door_first_bone) & 31);
-            world.doors.command(world, target, 6, mask);
+            // The hit section's bit into +0x2B4, then the door event 6 reads it
+            // [orig: `mov [edx+2B4h], eax` @0x43F8CA, the jmp @0x43F8DC].
+            target.door_touch_mask = 1u << ((hit.section - target.door_first_bone) & 31);
+            world.doors.command(world, target, 6);
         } else {
             world.doors.command(world, target, phase);
         }

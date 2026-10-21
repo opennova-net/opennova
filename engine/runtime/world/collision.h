@@ -754,6 +754,12 @@ struct ContactResult {
     int32_t force[4] = {};         // world push force (16.16); [3] spare like the orig
     uint32_t flags = 0;            // contact flags (see the type table)
     uint32_t door_sections = 0;    // CD/type-9 bit-per-section mask [orig: target+692]
+    // The query reached a building (def type 5) past its broad phase: its
+    // door-touch mask (+0x2B4) starts this query at 0, then takes the touched
+    // door bits; the caller writes it to the target (D-NET-133).
+    // [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the reset @0x4AE281,
+    //  the OR @0x4AEB22]
+    bool door_mask_reset = false;
 };
 
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
