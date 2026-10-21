@@ -8,8 +8,9 @@
 // Godot or OS sockets — the harness carries raw datagrams between the two transports the way a
 // real UDP socket pair would.
 //
-// Asserts: (a) an ownerless/stale connection emits nothing and preserves its
-// replication state, while each live connection's frame is anchored to ITS OWN owned entity; (b) a
+// Asserts: (a) an ownerless connection emits nothing and preserves its replication state, a
+// stale one (its body destroyed, its entry reused) emits anchored at the entry's new body
+// (D-NET-449), while each live connection's frame is anchored to ITS OWN owned entity; (b) a
 // joiner's C2S 0x0C uplink drains through its connection and SNAPs its remote-peer entity; (c)
 // a 0x0C for the host's own player is drained but REJECTED (the §5.38a host-SNAP split).
 
@@ -247,11 +248,12 @@ bool run_fanout_and_per_connection_anchor() {
 	if (!expect(self_view.state().anchor_x == hx && jj->x == jx,
 	            "per-connection anchor: each frame anchored to its own recipient")) return false;
 
-	// A packed pool/slot can be reused, but the retail player slot's live
-	// entity pointer does not silently retarget to the new allocation. Preserve
-	// that lifetime edge across the reimpl's packed-handle registry.
-	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 slot gate and
-	// recipient entity read @0x517BF5..0x517C13]
+	// A packed pool/slot can be reused, and the retail player slot's entity pointer is the
+	// entry's address with no lifetime test: once a script destroyed its body and a later
+	// spawn reused the entry, the stale slot's 0x0A goes out anchored at the new body
+	// (D-NET-449, ruled (a); this pinned D-NET-121's refusal before).
+	// [orig: Server_SendEntityStateToPlayer @0x517BAB..0x517BE2 (no lifetime test), the
+	//  recipient entity read @0x517BEF..0x517C13; Pool_AllocEntry @0x44225C]
 	const uint64_t old_spawn_id = conns[conn_join].owned_entity_spawn_id;
 	world.registry.despawn(joiner_h);
 	w::Entity replacement_seed;
@@ -268,35 +270,17 @@ bool run_fanout_and_per_connection_anchor() {
 	            "pool slot reused by a distinct allocation lifetime"))
 		return false;
 
-	const uint8_t stale_phase = conns[conn_join].s2c_phase;
-	const uint8_t stale_age = conns[conn_join].s2c_entity_age[0];
-	const uint32_t stale_watermark = conns[conn_join].round_watermark;
 	const std::vector<nw::GameEntitySnapshot> replacement_snapshot =
 			ns::snapshot_world(world);
-	if (!expect(!ns::emit_connection_s2c(
-	                    world, conns[conn_join], replacement_snapshot),
-	            "same packed handle with a stale lifetime emits nothing"))
-		return false;
-	if (!expect(udp_host.outbound_pending() == 0 &&
-	                    conns[conn_join].s2c_phase == stale_phase &&
-	                    conns[conn_join].s2c_entity_age[0] == stale_age &&
-	                    conns[conn_join].round_watermark == stale_watermark,
-	            "stale-lifetime skip emits no bytes and mutates no frame state"))
-		return false;
-
-	// A deliberate rebind stamps the replacement lifetime and resumes on the
-	// next open frame boundary, anchored to that replacement's live position.
-	conns[conn_join].owned_entity_spawn_id =
-			world.registry.get(replacement)->registry_spawn_id;
 	if (!expect(ns::emit_connection_s2c(
 	                    world, conns[conn_join], replacement_snapshot),
-	            "valid replacement binding resumes emission"))
+	            "the stale slot's binding emits at the reused entry"))
 		return false;
 	std::vector<uint8_t> rebound_raw;
 	if (!expect(udp_host.pop_outbound(rebound_raw) &&
 	                    rebound_raw.size() > 13 &&
 	                    rebound_raw[0] == nw::s2c::PER_FRAME_UPDATE,
-	            "replacement frame reached the transport"))
+	            "the aliased frame reached the transport"))
 		return false;
 	nw::FrameUpdate rebound_frame;
 	if (!expect(nw::decode_frame_update(
@@ -305,7 +289,7 @@ bool run_fanout_and_per_connection_anchor() {
 	                    rebound_frame.anchor_x == w::to_fixed(75.0) &&
 	                    rebound_frame.anchor_y == w::to_fixed(80.0) &&
 	                    rebound_frame.anchor_z == w::to_fixed(-25.0),
-	            "replacement frame anchors to the replacement allocation"))
+	            "the aliased frame anchors to the body holding the entry"))
 		return false;
 	return true;
 }

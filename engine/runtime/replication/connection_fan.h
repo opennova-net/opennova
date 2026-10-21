@@ -101,6 +101,9 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
 // [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate and recipient
 // eye stores @0x517BF5..0x517C13]
 const world::Entity *owned_entity_for_emit(const world::World &w, const Connection &conn);
+// The body a slot reads once its entity is destroyed and before its entry is reused:
+// the zeroed entry (owned_entity_for_emit) (D-NET-449).
+const world::Entity &destroyed_entry_body();
 
 // The fan's phases lap onto the SIM_REPLICATION_* rows of the world's profile
 // (ADR 0043 d5); an inactive profile keeps selection and encoding free of

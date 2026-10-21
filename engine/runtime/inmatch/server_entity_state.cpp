@@ -1,5 +1,7 @@
 #include <runtime/inmatch/server_entity_state.h>
 
+#include <memory>
+
 #include <runtime/devtools/tick_profile.h>
 #include <net/npwire/ingame_encode.h>                   // encode_entity_remove
 #include <net/npwire/ingame_message_id.h>               // s2c::ENTITY_REMOVE
@@ -94,7 +96,15 @@ bool write_entity_state(NapiNPServerCtx &ctx, world::World &world, NapiNPConnect
 	if (conn.link.transport == nullptr ||
 			replication::owned_entity_for_emit(world, conn.link) == nullptr)
 		return false;
-	world::Entity &body = *world.registry.get(conn.link.owned_entity);
+	// The writer stores into the entry the slot's pointer names: the body holding it, or
+	// the zeroed free entry, whose stores the next spawn's memset wipes (D-NET-449).
+	// [orig: NetPacket_WritePlayerState @0x4FF6B0 - edi = [slot+0] @0x4FF6B8..0x4FF6C6;
+	//  Entity_SpawnFromAnimSlotProperty's memset @0x43C3FE]
+	world::Entity *live = world.registry.get(conn.link.owned_entity);
+	std::unique_ptr<world::Entity> freed;
+	if (live == nullptr)
+		freed = std::make_unique<world::Entity>(replication::destroyed_entry_body());
+	world::Entity &body = live != nullptr ? *live : *freed;
 	conn.link.receive_silence_ms = conn.receive_inactive_ms;
 	// The list (inside the builder) reads this body's row as `ents` holds it,
 	// before the writer's stores; the header and this body's own record read the

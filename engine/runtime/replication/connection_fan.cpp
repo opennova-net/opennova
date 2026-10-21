@@ -477,17 +477,44 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 
 } // namespace
 
+const world::Entity &destroyed_entry_body() {
+	// Entity_Destroy zeroes the entry (the 0x2B4-byte memset), so a slot whose body is
+	// gone reads a body at the origin with nothing set [orig: Entity_Destroy @0x43E810 -
+	//  the memset @0x43EA70].
+	static const world::Entity body = [] {
+		world::Entity e;
+		e.position = {0.0f, 0.0f, 0.0f};
+		e.eye_offset_x = 0;
+		e.eye_offset_y = 0;
+		e.eye_offset_z = 0;
+		e.health = 0;
+		e.health_max = 0;
+		e.alive = false;
+		e.flags = 0;
+		e.engine_flags = 0;
+		e.player_class = 0;
+		e.equipped_adm_index = 0;
+		e.team = 0;
+		return e;
+	}();
+	return body;
+}
+
 // See header.
 // [orig: the per-player send descriptor / 12-byte frame anchor = player.spawn_x/y/z, §5.2a.]
 const world::Entity *owned_entity_for_emit(const world::World &w,
                                            const Connection &conn) {
+	// The slot's entity pointer is its entry's address, kept past the body's destroy:
+	// the writer's gate has no lifetime test, so the slot's 0x0A reads whatever body
+	// holds the entry now (a later spawn's, the pool reusing the zeroed entry), or the
+	// zeroed body while the entry is free (D-NET-449).
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 - the active byte @0x517BAB, the
+	//  pointer @0x517BC8..0x517BCC, state 6 @0x517BD2..0x517BD6, the net player
+	//  @0x517BDD..0x517BE2, no lifetime test; Pool_AllocEntry @0x44225C (a zeroed
+	//  ItemTypeIndex reads free), the add's includeInUse 1 @0x43C3DF]
 	if (!conn.owned_entity.valid()) return nullptr;
-	const world::Entity *entity = w.registry.get(conn.owned_entity);
-	if (entity == nullptr) return nullptr;
-	if (conn.owned_entity_spawn_id != 0 &&
-	    entity->registry_spawn_id != conn.owned_entity_spawn_id)
-		return nullptr;
-	return entity;
+	if (const world::Entity *entity = w.registry.get(conn.owned_entity)) return entity;
+	return &destroyed_entry_body();
 }
 
 namespace {

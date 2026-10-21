@@ -5103,6 +5103,11 @@ add_test(NAME npruntime_player_camouflage_row COMMAND npruntime_player_camouflag
 add_executable(npruntime_own_slot_table_test npruntime/own_slot_table_test.cpp)
 target_link_libraries(npruntime_own_slot_table_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_own_slot_table COMMAND npruntime_own_slot_table_test)
+# D-NET-449: a removeSSN'd slot's 0x0A goes out at its entry (the zeroed body, then the
+# reused one) and its writer stores in the slot walk's order.
+add_executable(npruntime_stale_slot_alias_test npruntime/stale_slot_alias_test.cpp)
+target_link_libraries(npruntime_stale_slot_alias_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_stale_slot_alias COMMAND npruntime_stale_slot_alias_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same
