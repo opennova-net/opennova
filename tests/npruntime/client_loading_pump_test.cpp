@@ -31,7 +31,7 @@
 
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_connection.h>
-#include <runtime/inmatch/remote_admin.h> // the admin's GET over the seeded clock
+#include <runtime/inmatch/remote_admin.h> // the admin's GET over the joiner's clock
 #include <base/io/le.h>
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
@@ -926,65 +926,50 @@ bool run_the_mission_start_submissions_follow_the_countdown() {
 			"the last list, its 0x22s behind them");
 }
 
-// The joiner's round clock at its mission start: past the sync-tail and game-start waits the
-// start seeds g_RoundTimeRemaining = g_RoundTimeLimitMinutes x 3720 when in session, outside the
-// Co-op waypoint family and with a nonzero limit, over whatever 0x0A the waits folded; the limit
-// is the joiner's own cfg timeLimit (the apply's copy), not the host's. The remote admin's GET
-// reads the seeded clock. The cases: a timed team game with the cfg's 7 minutes seeds 26040 over
-// a folded 100 s; a Co-op game type or a zero limit keeps what the waits folded.
-// [orig: Game_StartMission @0x524360 - NapiClient_SendPlayerSyncAndWaitForSyncTail @0x524DAB,
-//  NapiClient_WaitForGameStart @0x524E29, the seed @0x525229..0x525251 (`imul eax, 0E88h`
-//  @0x52524B); Game_ApplySessionSettingsToGlobals @0x551500 (@0x551CCC..0x551CD2);
-//  CAdminServer_HandleGet @0x403390 (@0x403888..0x4038B8)] (D-NET-NEW-L8-23)
-bool run_the_mission_start_seeds_the_round_clock() {
-	struct Case {
-		uint32_t game_type;
-		int32_t limit_minutes;
-		int32_t clock_after; // round_time_remaining_ticks past the 0x1A's mission start
-		const char *what;
-	};
+// The joiner's round clock at its mission start: retail never seeds it. Game_StartMission's
+// round-clock seed (g_RoundTimeRemaining = g_RoundTimeLimitMinutes x 3720 when in session,
+// outside the Co-op waypoint family, with a nonzero limit) sits on the authority / single-player
+// arm; the joiner's arm runs its two waits and jumps past the seed and the pump that follows it,
+// so its clock is whatever the common path's -1 or the waits' 0x0A folds left, until the next
+// phase-1 0x0A (the host's seed is Match::configure's). A timed team game whose joiner's own cfg
+// limit is 7 keeps a folded 100 s past the 0x1A, and the remote admin's GET reads it as
+// 6200 / 60 / 62 = 1 over the joiner's own limit (D-NET-NEW-L8-23, NOT-A-DIVERGENCE).
+// [orig: Game_StartMission @0x524360 - the in-session split @0x524D7D..0x524D8F (`jnz
+//  loc_524F2B` @0x524D8F, the authority arm); the joiner's arm NapiClient_SendPlayerSyncAndWait-
+//  ForSyncTail @0x524DAB, NapiClient_WaitForGameStart @0x524E29, `jmp loc_52526C` @0x524E7D,
+//  past the seed @0x525229..0x525251 (`imul eax, 0E88h` @0x52524B; reached only from
+//  @0x52520D..0x525224 and @0x525025..0x5251A5) and Server_PumpNetworkTransport @0x525256;
+//  the -1 @0x524A5D;
+//  CAdminServer_HandleGet @0x403390 (@0x403888..0x4038B8)]
+bool run_the_joiner_mission_start_keeps_the_folded_round_clock() {
 	const int32_t folded = 62 * 100; // a phase-1 0x0A's 100 s, folded in the waits
-	const Case cases[] = {
-			{game_type::kTeamDeathmatch, 7, 7 * 3720,
-					"seed: a timed team game takes the cfg's 7 minutes over the folded clock"},
-			{0x10020u, 7, folded, "seed: a Co-op game type keeps the folded clock"},
-			{game_type::kTeamDeathmatch, 0, folded, "seed: a zero limit keeps the folded clock"},
-	};
-	for (const Case &c : cases) {
-		Harness h;
-		gamecfg::GameCfg cfg = gamecfg::defaults();
-		cfg.time_limit = c.limit_minutes;
-		inmatch::ClientProcessState process;
-		process.config_block = &cfg;
-		h.client.use_process_state(&process);
-		if (!expect(drive_into_the_world_stream(h, 0), "seed: the world stream runs")) return false;
-		std::vector<uint8_t> config(51, 0); // S2C 0x08: field 3 = g_GameType
-		for (int i = 0; i < 4; ++i) config[12 + i] = static_cast<uint8_t>(c.game_type >> (8 * i));
-		(void)h.frame({make_protocol_message(s2c::SESSION_CONFIG, config)});
-		h.client.state().round_time_remaining_ticks = folded;
-		(void)h.frame({make_protocol_message(0x1A, {})});
-		if (!expect(h.client.game_type() == c.game_type &&
-						h.client.state().round_time_remaining_ticks == c.clock_after,
-				c.what))
-			return false;
-		if (c.clock_after != folded) {
-			inmatch::RemoteAdminConsoles consoles;
-			inmatch::AdminConsole::Seams seams;
-			seams.config_block = &cfg;
-			inmatch::RemoteAdminBinding joined;
-			joined.client = &h.client;
-			joined.session = 1;
-			consoles.bind(joined, seams);
-			consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
-			std::vector<std::string> replies;
-			(void)consoles.dispatch(AdminSession{"boss", 0xFFFFFFFFu}, "GET GAMESETTINGS", replies);
-			if (!expect(replies.size() == 1 &&
-							replies[0].find("GameTime             = 7/7\n") != std::string::npos,
-					"seed: the admin's GET reads the seeded clock (26040 / 60 / 62 = 7)"))
-				return false;
-		}
-	}
-	return true;
+	Harness h;
+	gamecfg::GameCfg cfg = gamecfg::defaults();
+	cfg.time_limit = 7;
+	if (!expect(drive_into_the_world_stream(h, 0), "clock: the world stream runs")) return false;
+	std::vector<uint8_t> config(51, 0); // S2C 0x08: field 3 = g_GameType
+	for (int i = 0; i < 4; ++i)
+		config[12 + i] = static_cast<uint8_t>(game_type::kTeamDeathmatch >> (8 * i));
+	(void)h.frame({make_protocol_message(s2c::SESSION_CONFIG, config)});
+	h.client.state().round_time_remaining_ticks = folded;
+	(void)h.frame({make_protocol_message(0x1A, {})});
+	if (!expect(h.client.game_type() == game_type::kTeamDeathmatch &&
+					h.client.state().round_time_remaining_ticks == folded,
+			"clock: a timed team game's joiner keeps the folded clock past its mission start"))
+		return false;
+	inmatch::RemoteAdminConsoles consoles;
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &cfg;
+	inmatch::RemoteAdminBinding joined;
+	joined.client = &h.client;
+	joined.session = 1;
+	consoles.bind(joined, seams);
+	consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
+	std::vector<std::string> replies;
+	(void)consoles.dispatch(AdminSession{"boss", 0xFFFFFFFFu}, "GET GAMESETTINGS", replies);
+	return expect(replies.size() == 1 &&
+					replies[0].find("GameTime             = 1/7\n") != std::string::npos,
+			"clock: the admin's GET reads the folded clock over the joiner's own limit (6200 / 60 / 62 = 1)");
 }
 
 // The client's net-frame counter, the C2S 0x02 echo's third dword: one per process, stepped
@@ -1120,7 +1105,7 @@ int main() {
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;
-	ok = run_the_mission_start_seeds_the_round_clock() && ok;
+	ok = run_the_joiner_mission_start_keeps_the_folded_round_clock() && ok;
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;
 	if (ok) std::printf("client_loading_pump_test: OK\n");

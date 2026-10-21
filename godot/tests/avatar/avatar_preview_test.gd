@@ -210,11 +210,11 @@ func test_each_processed_frame_is_a_draw() -> void:
 	watch_signals(_preview)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var drawn := get_signal_emit_count(_preview, "drawn")
+	var drawn: int = get_signal_emit_count(_preview, "drawn")
 	assert_gt(drawn, 0, "a visible pane's frames emit drawn")
 	_preview.visible = false
 	await get_tree().process_frame
-	var hidden_from := get_signal_emit_count(_preview, "drawn")
+	var hidden_from: int = get_signal_emit_count(_preview, "drawn")
 	await get_tree().process_frame
 	await get_tree().process_frame
 	assert_eq(get_signal_emit_count(_preview, "drawn"), hidden_from, "a hidden pane draws nothing")
