@@ -7,7 +7,7 @@
   "staging": [
     {"slot": 1, "position_bms": [243.3, 840.05, 42.88]}
   ],
-  "setup": {"pose": {"position_bms": [-1271.5, 741.13, 42.87], "yaw": 300, "pitch": 0}},
+  "setup": {"pose": {"position_bms": [-1271.5, 741.13, 42.87], "yaw": 288, "pitch": -32}},
   "steps": [
     {"tick": 0, "down": 149},
     {"tick": 6, "up": 149},
