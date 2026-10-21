@@ -411,12 +411,16 @@ public:
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
 	// The main loop's frame statistics the authority's status page shows:
-	// the frames rendered during the last 62 logic ticks and the CPU share
-	// of the frame-rate window (world::TickAccumulator::cpu_percent).
+	// the frames rendered during the last 62 logic updates and the CPU share
+	// of the frame-rate window (world::TickAccumulator::cpu_percent). A paused
+	// single-player frame's updates and render count too, as both run past the
+	// pause word's tests.
 	// [orig: dword_24C193C — Game_ProcessMainFrame @0x5267ab..0x5267df counts
 	//  every logic update into dword_24D6130 and at 62 publishes
 	//  dword_24C1938, which GameLoop_RenderFrame @0x521cf9 increments once per
-	//  rendered frame; g_StatsCpuPercent]
+	//  rendered frame; its one reader Server_DrawStatusScreen @0x50A2D0 (the
+	//  read @0x50AFAF);
+	//  g_StatsCpuPercent]
 	struct FrameStatistics {
 		int32_t frames_last_second = 0;
 		int32_t cpu_percent = 0;
@@ -484,8 +488,14 @@ private:
 	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
 	TickOutcome run_one_tick(const TickInput &input);
 	void step_cine_render_frame();
-	// The paused frame's banked frames step the world's main-frame counter.
+	// The paused frame's banked updates: the legs retail's main frame runs past
+	// its pause tests (the mouse pump, the main-frame counter, the fire-sound
+	// slots, the tracer pool, the weather, the 62-update second).
 	void step_paused_frame_counters(const FrameInput &input);
+	// One update into the 62-update second, and one rendered frame into the
+	// frames it publishes, for the running and the paused frame alike.
+	void count_update_into_second();
+	void count_rendered_frame();
 	void step_hud_radar_frame();
 	static int64_t now_us();
 

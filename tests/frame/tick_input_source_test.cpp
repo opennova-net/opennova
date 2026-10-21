@@ -4,7 +4,7 @@
 // tick, and a hold keeps its scripted length on the ticks the role packs.
 // Driven with the real scenario device (devtools::ScriptedInput) over a probe
 // role that records each tick's input at the logic tick it ran as. Also the
-// main frame's mouse pump (D-NET-NEW-LI-2), across the frames and the
+// main frame's mouse pump (D-NET-NEW-LI-2), across the frames, an input reset and the
 // single-player pause, and a latched fire press's binding test at its
 // dispatch (D-NET-NEW-LI-3).
 #include <runtime/devtools/scripted_input.h>
@@ -39,10 +39,13 @@ constexpr int kFire = 149;    // attack_1
 
 // A role over a bare kernel recording every tick's input and the logic tick
 // it ran as (World::logic_tick at the tick's head; the tick then advances it).
+// `reset_at` runs the whole input reset inside that recorded tick, as a
+// dispatch's Input_ResetAllState does inside its update.
 struct TickRecorder final : Role {
 	opennova::mission::MissionKernel kernel;
 	std::vector<TickInput> inputs;
 	std::vector<uint32_t> ticks;
+	int reset_at = -1;
 
 	TickRecorder() {
 		bind(kernel);
@@ -50,6 +53,7 @@ struct TickRecorder final : Role {
 	}
 	RoleKind kind() const override { return RoleKind::SinglePlayer; }
 	void run_tick(const TickInput &input) override {
+		if (static_cast<int>(inputs.size()) == reset_at) reset_all_input_state();
 		inputs.push_back(input);
 		ticks.push_back(kernel.world.logic_tick);
 		++kernel.world.logic_tick;
@@ -320,8 +324,8 @@ FrameOutcome cursor_frame(Session &session, int32_t cursor_dx, uint32_t held = 0
 
 // The pump across the single-player pause: the in-game menu's paused frames
 // zero all six words, so nothing pumped before the pause reaches the first
-// tick after the resume (the shell routes no frame to the session under the
-// menu: the zero lands with the pause); the pause row's paused frames run the
+// tick after the resume (a pause that banks no paused update: pause()'s zero
+// stands in for the menu's first update); the pause row's paused frames run the
 // pump on the live cursor, so the first tick after the resume carries the last
 // paused update's share, which no paused input frame consumed.
 void test_the_pump_across_the_single_player_pause() {
@@ -366,6 +370,28 @@ void test_the_pump_across_the_single_player_pause() {
 	}
 }
 
+// An input reset inside an update recentres the cursor, which drops only the
+// motion since that update's pump: it writes the pump's deltaX / deltaY, which
+// the next update's two-tap overwrites, and leaves the shares, the remainder and
+// the previous share alone, so the frame's later ticks and the next frame's
+// first tick keep their axis input. Ours' device motion arrives between frames,
+// so no motion lies between a tick's pump and its reset.
+// [orig: Input_ResetAllState @0x497ED0 (the focus tests @0x497F10..0x497F20, the
+//  Input_PumpAndCenterCursor tail jump @0x497F22); Input_PumpAndCenterCursor
+//  @0x7616D0 (SetCursorPos @0x761706, the deltaX / deltaY stores
+//  @0x761724 / @0x76172A); Game_ProcessMainFrame @0x5263F0 (the two-tap
+//  @0x5264E6..0x526508)]
+void test_an_input_reset_leaves_the_pumps_words() {
+	auto role = std::make_unique<TickRecorder>();
+	role->reset_at = 0;
+	Session session(*role);
+	CHECK(load(session), "the session runs");
+	CHECK(cursor_frame(session, 10).ticks_run() == 3, "three ticks, the first resetting");
+	CHECK(cursor_frame(session, 0).ticks_run() == 3, "three more");
+	CHECK(axis_x_from(*role, 0) == std::vector<float>({13.0f, 26.0f, 27.0f, 14.0f, 0.0f, 0.0f}),
+			"the reset's frame keeps its spread and the next frame its remainder");
+}
+
 // A fire press latched by a frame that ran no tick dispatches at the next
 // tick's input frame, where the attack row tests its binding live: released
 // by then, the press fires nothing; still held, it fires on that tick.
@@ -408,6 +434,7 @@ int main() {
 	test_the_mouse_pump_spreads_four_times_the_cursor_over_the_updates();
 	test_the_session_spreads_the_frames_cursor_over_its_ticks();
 	test_the_pump_across_the_single_player_pause();
+	test_an_input_reset_leaves_the_pumps_words();
 	test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);

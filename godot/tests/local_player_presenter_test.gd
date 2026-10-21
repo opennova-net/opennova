@@ -398,6 +398,36 @@ func test_mouse_motion_reaches_the_sim_pipeline_through_the_mouse_pump() -> void
 			"inactive motion leaves the sim's look state untouched")
 
 
+func test_the_paused_frame_pumps_the_cursor_on_each_update() -> void:
+	# The pause row's paused frames still run the main frame's mouse pump on the
+	# live cursor: no input frame consumes their axis, and the last paused
+	# update's share pairs with the first tick after the resume (engine
+	# inmatch::Session::step_paused_frame_counters carries the witness).
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	_frame(world, presenter, camera, 2)
+	var yaw0 := float(sim.get_local_player_yaw_deg())
+	world.set_shell_paused(true)
+	assert_true(_look(presenter, Vector2(300.0, 0.0)), "active mouse motion is consumed")
+	_frame(world, presenter, camera, 1)
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()), yaw0, 0.001,
+			"no tick turns the player under the pause")
+	world.set_shell_paused(false)
+	_frame(world, presenter, camera, 1)
+	# The paused update's one-update spread is four times the 300 px, and its
+	# two-tap half reaches the first tick after the resume: 1200 axis units,
+	# 26.3671875 degrees of yaw through the fresh sim's scale.
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 26.3671875, 0.001,
+			"the last paused update's share turns the first tick after the resume")
+	_frame(world, presenter, camera, 1)
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 26.3671875, 0.001,
+			"and nothing more")
+
+
 func test_stance_keys_are_three_key_select_requests() -> void:
 	# The witnessed 3-key SELECT (Z prone, X crouch, C stand — catalog ids 9/10/11):
 	# each key REQUESTS its stance; the sim owns mutual exclusion + the ForceCrouch

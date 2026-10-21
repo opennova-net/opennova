@@ -3,6 +3,7 @@
 #include <runtime/mission/mission_kernel.h>
 
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -334,6 +335,55 @@ int main() {
 		if (!expect(crossing_frame > 0 &&
 				session.frame_statistics().frames_last_second == crossing_frame,
 				"the 62nd update publishes the frames drawn before its frame")) return 1;
+	}
+
+	// A paused single-player frame's updates run the legs retail's main frame
+	// runs outside its pause tests: the pending fire-sound slots count down and
+	// play, the tracer pool ages its channels, and the updates and the renders
+	// count into the 62-update second as a running frame's do.
+	// [orig: Game_ProcessMainFrame @0x5263F0 -- the Sound_TickPendingSlots call
+	//  @0x526697, the CEffectEmitterPool_Tick call @0x526758, the 62-update
+	//  second @0x5267AB..0x5267DF, the pause tests @0x5265A0 / @0x526779;
+	//  GameLoop_RenderFrame @0x521CF9]
+	{
+		auto target = std::make_unique<TickProbe>();
+		Session session(*target);
+		if (!load(session)) return 1;
+		opennova::world::World &world = target->kernel.world;
+		world.out.fire_sounds.set_listener({});
+		world.out.fire_sounds.play_throttled_interface("PAUSED_SET", {}, 3, 10);
+		const int slot = world.round_sim.trails.alloc(1);
+		world.round_sim.trails.append(slot, {});            // a fresh channel: count -1 -> 0
+		world.round_sim.trails.append(slot, {1.0f, 0.0f, 0.0f}); // one point, age 0
+		if (!expect(world.out.fire_sounds.pending_count() == 1 && slot >= 0,
+				"a pending slot and a live tracer channel")) return 1;
+		if (!expect(session.pause().applied(), "the drains' pause applies")) return 1;
+		FrameInput paused;
+		paused.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		if (!expect(session.advance(paused).status == FrameStatus::NotRunning &&
+				target->inputs.empty(), "a paused frame of three updates runs no tick")) return 1;
+		if (!expect(world.out.fire_sounds.pending_count() == 0 &&
+				world.out.fire_sounds.drain().size() == 1,
+				"the pending slot counts down and plays through the pause")) return 1;
+		if (!expect(world.round_sim.trails.channels[static_cast<size_t>(slot)].age == 3,
+				"the tracer channel ages once per paused update")) return 1;
+	}
+	{
+		auto target = std::make_unique<TickProbe>();
+		Session session(*target);
+		if (!load(session)) return 1;
+		if (!expect(session.pause().applied(), "the statistics' pause applies")) return 1;
+		const uint32_t main0 = target->kernel.world.hud_frames.main_frame;
+		FrameInput in;
+		in.delta_seconds = TickAccumulator::kTickDt;
+		int32_t crossing_frame = -1;
+		for (int32_t frame = 0; frame < 200 && crossing_frame < 0; ++frame) {
+			session.advance(in);
+			if (target->kernel.world.hud_frames.main_frame - main0 >= 62) crossing_frame = frame;
+		}
+		if (!expect(crossing_frame > 0 &&
+				session.frame_statistics().frames_last_second == crossing_frame,
+				"paused updates publish the frames drawn before the 62nd's frame")) return 1;
 	}
 
 	std::printf("OK: in-match session lifecycle/cadence/input/failure\n");

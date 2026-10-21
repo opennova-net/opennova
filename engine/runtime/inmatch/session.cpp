@@ -554,7 +554,7 @@ void Session::latch_packet(const InputPacket &packet) {
 	// fires nothing outside a PowerThrow windup (D-NET-NEW-LI-3) [orig:
 	// Input_HandleActionBinding_0 @0x4E0420 (case 0x95's Input_IsBindingActive(149)
 	// call @0x4E07D9, the release leg @0x4E07E9..0x4E07F1); Input_IsBindingActive
-	// @0x498320 (the key state @0x498348, the mouse buttons @0x49836E)].
+	// @0x498320 (the key slots @0x498338 / @0x498348, the mouse wParam @0x498368)].
 	if ((packet.held_action_bits & HELD_FIRE) == 0)
 		pending_input_.pressed_action_bits &= ~PRESSED_FIRE;
 	pending_input_.movement = packet.movement;
@@ -713,12 +713,47 @@ void Session::step_paused_frame_counters(const FrameInput &input) {
 	pending_input_.cursor_dx += input.player.cursor_dx;
 	pending_input_.cursor_dy += input.player.cursor_dy;
 	const bool menu_open = (input.player.held_action_bits & HELD_MENU_OPEN) != 0;
+	// The paused update's other unconditional legs, in its order: the pending
+	// fire-sound slots and the trigger holds count down, the tracer pool ages and
+	// drains its channels (the entity update that appends to them holds), and the
+	// update counts toward the 62-update second. Its tip countdown steps with the
+	// main-frame counter (hud_toggles_tip_frames) and its message rings' lives run
+	// on that counter too, so both age through the pause already [orig:
+	// Game_ProcessMainFrame @0x5263F0 (the Sound_TickPendingSlots call @0x526697,
+	// the Sound_TickTriggerHolds call @0x52669C, the CEffectEmitterPool_Tick call
+	// @0x526758, the CTipSystem_TickCountdown call @0x526762, the
+	// Input_DecrementCooldownTimers call @0x5267A6, the 62-update second
+	// @0x5267AB..0x5267DF, each outside the pause word's tests @0x5265A0 /
+	// @0x526779); CEffectEmitterPool_Tick @0x5DB830; Sound_TickTriggerHolds
+	// @0x5292D0].
 	for (int32_t i = 0; i < due; ++i) {
 		int32_t axis[2] = {};
 		step_mouse_pump(i, due, menu_open, axis);
 		world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
+		world.out.fire_sounds.tick();
+		world.round_sim.trails.tick();
 		kernel.tick_weather();
+		count_update_into_second();
 	}
+}
+
+void Session::count_update_into_second() {
+	// Every logic update counts toward the 62-update second; each second
+	// publishes the frames rendered since [orig: Game_ProcessMainFrame
+	// @0x5267AB..0x5267DF].
+	if (++second_update_count_ >= io::kTicksPerSecondInt) {
+		second_update_count_ -= io::kTicksPerSecondInt;
+		frames_last_second_ = frames_rendered_;
+		frames_rendered_ = 0;
+	}
+}
+
+void Session::count_rendered_frame() {
+	// The frame's render counts, paused or not, and the host's status page takes
+	// the statistics [orig: GameLoop_RenderFrame @0x521CF9].
+	++frames_rendered_;
+	if (role_ != nullptr)
+		role_->observe_frame_statistics(frames_last_second_, accumulator_.cpu_percent());
 }
 
 void Session::step_hud_radar_frame() {
@@ -747,6 +782,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		// so nothing ages, and the menu pause holds the lock tone.
 		if (state_ == State::Paused) {
 			step_paused_frame_counters(input);
+			count_rendered_frame();
 			step_cine_render_frame();
 			step_hud_radar_frame();
 		}
@@ -776,20 +812,10 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// @0x52ba9b..0x52baa1].
 	accumulator_.record_frame_work(
 			static_cast<uint32_t>(now_us() / 1000 - frame_start_ms), out.ticks_run());
-	// Every logic update counts toward the 62-update second; each second
-	// publishes the frames rendered since [orig: Game_ProcessMainFrame
-	// @0x5267ab..0x5267df], and this frame's render then counts
-	// [orig: GameLoop_RenderFrame @0x521cf9].
-	for (int32_t i = 0; i < out.ticks_run(); ++i) {
-		if (++second_update_count_ >= io::kTicksPerSecondInt) {
-			second_update_count_ -= io::kTicksPerSecondInt;
-			frames_last_second_ = frames_rendered_;
-			frames_rendered_ = 0;
-		}
-	}
-	++frames_rendered_;
-	if (role_ != nullptr)
-		role_->observe_frame_statistics(frames_last_second_, accumulator_.cpu_percent());
+	// Every logic update counts toward the 62-update second, then this frame's
+	// render counts.
+	for (int32_t i = 0; i < out.ticks_run(); ++i) count_update_into_second();
+	count_rendered_frame();
 	// Each of the first frames drawn after the mission start counts down and
 	// raises the re-base flag [orig: Render_ProcessMainSceneFrame
 	// @0x5caeff..0x5caf0e].
@@ -855,13 +881,14 @@ TransitionResult Session::pause() {
 	}
 	reset_bank();
 	// The in-game menu's paused frames run the mouse pump under the menu: the
-	// first update zeroes the shares and its two-tap clears the previous one, so
-	// all six words are zero by the resume. The shell routes no frame to the
-	// session under that menu, so the zero lands with the pause; the pause row's
-	// paused frames pump the cursor (step_paused_frame_counters), overwriting it
-	// at their first update [orig: Game_ProcessMainFrame @0x5263F0 (the
-	// UI_IsMenuScreenOpen call @0x52642F, the zeroes @0x526438..0x52644D, the
-	// two-tap @0x5264E6..0x526508)].
+	// paused frame's first update under the menu zeroes the shares and its
+	// two-tap clears the previous one (step_paused_frame_counters), so all six
+	// words are zero by the resume; the pause row's paused frames pump the
+	// cursor, overwriting them at their first update. Retail runs at least one
+	// such update between a pause and its resume; the zero here stands in for a
+	// pause that banks no paused update [orig: Game_ProcessMainFrame @0x5263F0
+	// (the UI_IsMenuScreenOpen call @0x52642F, the zeroes @0x526438..0x52644D,
+	// the two-tap @0x5264E6..0x526508)].
 	mouse_pump_ = {};
 	return transition(State::Paused);
 }
