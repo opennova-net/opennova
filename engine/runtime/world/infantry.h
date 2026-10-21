@@ -1276,9 +1276,11 @@ void infantry_ride_link(World &world, Entity &self);
 // Roll (+0x18), about y by the body pitch (+0x90) and about z by the body heading,
 // each angle's sine and cosine an x87 product of the BAM word and the radians per
 // BAM, scaled by 2^22 and truncated, each product a Q22 multiply truncated to a
-// dword; the height is floored at 0x2000. Every player body's pass runs it ahead
-// of its lean ramp and its slope chase, so it reads the lean decayed but unramped
-// and last tick's Roll and body pitch. Defined in infantry.cpp.
+// dword; the height is floored at 0x2000. An on-foot player body's pass runs it
+// ahead of its lean ramp and its slope chase, so it reads the lean decayed but
+// unramped and last tick's Roll and body pitch; a seated passenger's ramp runs
+// ahead of its eye (@0x4B66B5 / @0x4B66C3), so that eye reads the ramped lean.
+// Defined in infantry.cpp.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the extent cap
 //  @0x4B698C..0x4B6997, -lean @0x4B699F..0x4B69A7, the lean's pair
 //  @0x4B69AB..0x4B69D4, the twist @0x4B69D9..0x4B6A08, the first turn

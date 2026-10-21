@@ -480,7 +480,54 @@ void test_remote_body_conform_chases_the_slope() {
 			"conform: a standing body decays both words every tick and probes nothing");
 }
 
+// V-L5-s6 (D-NET-330): a remote player's on-foot lean ramp takes retail's gates: a
+// ladder contact or a chute (Flags 0x100020, the chute bit the record's), the prone
+// latch with none of Flags 0x10A000, and the dead bit stop both keys; an NPC row
+// ramps nothing.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B7DA2, @0x4B7DA9..0x4B7DAD
+//  (prone_local @0x4B416C..0x4B4183), @0x4B7DAF..0x4B7DB4, the ramps @0x4B7DBF /
+//  @0x4B7DD6]
+void test_remote_lean_ramp_gates() {
+	ns::ClientReplicaPipeline view;
+	struct Case {
+		uint16_t handle;
+		EntityClass cls;
+		uint32_t flags;
+		uint8_t wire_flags;
+		uint8_t stance;
+		bool ramps;
+		const char *what;
+	};
+	const Case cases[] = {
+		{0x0101, EntityClass::Player, 0u, 0u, 0u, true, "lean ramp: a free body ramps"},
+		{0x0102, EntityClass::Player, 0x100000u, 0u, 0u, false, "lean ramp: a ladder contact stops it"},
+		{0x0103, EntityClass::Player, 0u, 0x20u, 0u, false, "lean ramp: the record's chute bit stops it"},
+		{0x0104, EntityClass::Player, 0u, 0u, 1u, false, "lean ramp: the prone latch stops it"},
+		{0x0105, EntityClass::Player, 0x2000u, 0u, 1u, true,
+				"lean ramp: a prone latch in the air does not stop it"},
+		{0x0106, EntityClass::Player, world::kEntityFlagDead, 0u, 0u, false,
+				"lean ramp: the dead bit stops it"},
+		{0x0107, EntityClass::Infantry, 0u, 0u, 0u, false, "lean ramp: an NPC row has none"},
+	};
+	for (const Case &c : cases) {
+		ns::ClientEntityState &row = view.state().upsert(c.handle);
+		row.cls = c.cls;
+		row.rm_entity_flags = c.flags;
+		row.state_flags = c.wire_flags;
+		row.state_flags_known = true;
+		row.net_stance_bits = c.stance;
+		row.move_input = static_cast<uint8_t>(world::Entity::kMoveOrderLeanLeft);
+		row.lean_angle = 0;
+	}
+	view.tick_lean_ramp();
+	for (const Case &c : cases) {
+		const ns::ClientEntityState *row = view.state().find(c.handle);
+		expect(row != nullptr && row->lean_angle == (c.ramps ? -0x3000000 : 0), c.what);
+	}
+}
+
 int main() {
+	test_remote_lean_ramp_gates();
 	test_remote_body_conform_chases_the_slope();
 	test_tapped_roll_locks_and_queues();
 	test_remote_eye_restamps_from_the_capsule();

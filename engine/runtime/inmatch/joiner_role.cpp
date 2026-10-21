@@ -993,7 +993,7 @@ void JoinerRole::wire_frame_providers() {
         out.pos[2] = row->z;
         out.flags = row->rm_entity_flags;
         // The row's ride link, which a guided round's lock note reads (D-NET-196)
-        // [orig: Entity_UpdateGuidedMissile_0 @0x4465C0 - @0x4465DB..0x4465F5].
+        // [orig: Entity_UpdateGuidedMissile_0 @0x446060 - @0x4465DB..0x4465F5].
         out.ride_link_is_local = runtime->has_self_handle() &&
                 row->ride_occupant == runtime->self_handle();
         return true;

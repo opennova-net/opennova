@@ -467,7 +467,7 @@ void test_wire_shooter_and_target() {
 			"a pool-0 wire target resolves through the rows, not the registry");
 	// A remote person riding a hull the local player drives: the first arm reads
 	// the target row's ride link (D-NET-196) [orig: Entity_UpdateGuidedMissile_0
-	// @0x4465C0 - the target's +0x170 @0x4465DB..0x4465F5, the tone @0x4465F8].
+	// @0x446060 - the target's +0x170 @0x4465DB..0x4465F5, the tone @0x4465F8].
 	remote.ride_link_is_local = true;
 	world.round_sim.rounds[5].guided.target = 0x0005;
 	radar_note_guided_missile(world, world.round_sim.rounds[5], 5);

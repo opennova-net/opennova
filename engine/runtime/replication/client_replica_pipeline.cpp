@@ -974,9 +974,10 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// queued and the callback runs against a NULL target, consuming the
 		// record's bytes and landing nothing. A handle outside pools 0..4 or
 		// past its pool's capacity resolves to no slot at all: consumed
-		// silently, no request. A compact record therefore NEVER creates or
-		// re-types a row — only the spawn stream (0x0C/0x0D/0x10/0x20/0x18)
-		// does, and a row the team-assign leg created ahead of its spawn
+		// silently, no request. A compact record therefore never creates a row,
+		// and only the player record's def re-pick below re-types one (by its
+		// class, D-NET-348); the spawn stream (0x0C/0x0D/0x10/0x20/0x18) creates
+		// and types rows, and a row the team-assign leg created ahead of its spawn
 		// (type 0) is exactly retail's itemDef-less slot. [orig:
 		// NapiNPClientMsg_0x00A @0x42FEC0 — the pool resolve `(handle &
 		// 0xF000) < 0x5000` + `slot < capacity`, the check @0x4307B1..0x4307C4
@@ -1020,7 +1021,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		record_folded[rec_i] = 1u;
 		// The row exists with this exact type (the pre-apply check above): a
 		// compact never upserts, and a handle reused for a different type is
-		// re-armed by the spawn stream that re-typed it, never here.
+		// re-armed by the spawn stream that re-typed it; a player record's def
+		// re-pick (below) is the one re-type a compact makes.
 		ClientEntityState &es = *state_.find(rec.handle);
 		// Capture the previous body-anim sample before the per-record clear: if
 		// this record REPLACES it with a different state within one decode fold,

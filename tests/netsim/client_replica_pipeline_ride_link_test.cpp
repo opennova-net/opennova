@@ -6,7 +6,7 @@
 // link clears once the hold is spent. A guided round's lock note reads the
 // link on its target (radar_note_guided_missile's first arm).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B5EA9..0x4B5F2C;
-//  Entity_UpdateGuidedMissile_0 @0x4465C0 - @0x4465DB..0x4465F5]
+//  Entity_UpdateGuidedMissile_0 @0x446060 - @0x4465DB..0x4465F5]
 //
 // The rows are seated (a carrier handle), so the pass runs the link without the
 // chase legs: the seat's ground link is the record's store [orig: @0x4C1353].

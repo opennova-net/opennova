@@ -638,7 +638,7 @@ struct ClientEntityState {
 	// +4 per finding tick up to 0xF0 and spent one per missing tick before
 	// it clears. A guided missile's lock note reads it on its target (D-NET-196).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B5EA9..0x4B5F2C;
-	//  Entity_UpdateGuidedMissile_0 @0x4465C0 - @0x4465DB..0x4465F5]
+	//  Entity_UpdateGuidedMissile_0 @0x446060 - @0x4465DB..0x4465F5]
 	uint16_t ride_occupant = 0xFFFF;
 	int32_t ride_link_hold = 0;
 	// The row's persistent retail entity-Flags mirror — the caller-owned word

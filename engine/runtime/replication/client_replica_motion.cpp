@@ -352,14 +352,17 @@ void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
 		return;
 	}
 	const int32_t cb_neg = capsule_bottom > 0 ? 0 : capsule_bottom;
-	// The eye vertical (+0x74): a remote row derives it per tick from the anim
-	// capsule — min(top - bottom, 0xD000), floored at 0x2000 (the lean tilt is
-	// the local-lean channel's term, zero for an unleaning row)
-	// [orig: the non-local arm @0x4b6984..0x4b6991; the floor @0x4b68e7].
+	// The eye vertical (+0x74). The player body's surface line reads the stored
+	// word, which this tick's eye leg restamped (row_root_motion_tick)
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `mov edx, [esi+74h]`
+	// @0x4B8146]; the NPC line derives it from the anim capsule, min(top - bottom,
+	// 0xD000) floored at 0x2000 [orig: the non-local arm @0x4b6984..0x4b6991; the
+	// floor @0x4b68e7].
 	int32_t eye_h = capsule_top - capsule_bottom;
 	if (eye_h > 0xD000) eye_h = 0xD000;
 	if (eye_h < 0x2000) eye_h = 0x2000;
 	if (es.cls == EntityClass::Player) {
+		eye_h = es.eye_offset[2];
 		// The org2 buoyant-rise form, REMOTE arm: flat base -0x4C9 (the
 		// surface bob AND the capsule-bottom term are local-player-only in
 		// org2 [orig: @0x4b8063..0x4b8095 `-1225 - bob + v345` vs the else-arm
@@ -373,8 +376,8 @@ void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
 		es.rm_vel_xy[0] -= (es.rm_vel_xy[0] + 16) >> 5;
 		es.rm_vel_xy[1] -= (es.rm_vel_xy[1] + 16) >> 5;
 		es.rm_vel_z -= (es.rm_vel_z + 16) >> 5;
-		// Surface line: water + base/2 - eyeHeight/2, with the capsule-derived
-		// eye above [orig: line @0x4b8146..0x4b8169].
+		// Surface line: water + base/2 - eyeHeight/2, with the stored eye above
+		// [orig: line @0x4b8146..0x4b8169].
 		const int32_t surf = water_z + (base >> 1) - (eye_h >> 1);
 		if (es.z >= surf) {
 			es.rm_entity_flags &= ~0x200000u; // surfaced [orig: @0x4b8176]
