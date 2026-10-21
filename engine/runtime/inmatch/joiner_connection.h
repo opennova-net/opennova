@@ -1295,7 +1295,8 @@ private:
 	uint64_t client_join_start_ms_ = 0;
 	bool handshake_retry_clock_armed_ = false;
 	// The enumerate-and-join's session record: the 0x81 lands its HK, SF and SUS2 and the
-	// enumerate's loop exits on it, sending nothing; the join state machine's next pass starts
+	// enumerate's loop exits on it, sending no 0x42 (its pass still runs the announce test, a
+	// 0x41 when the 3000 ms interval has run out); the join state machine's next pass starts
 	// the connect state from the record (pump() -> enter_session_connect_state), its first 0x42
 	// at the first pump past that start (D-NET-NEW-L2-25).
 	// [orig: UI_EnumerateAndJoinSession @0x569F50 - the loop @0x56A0C1..0x56A0F9, the
@@ -1303,7 +1304,7 @@ private:
 	//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 3 @0x56A499, state 4 @0x56A4B3 ->
 	//  UI_JoinSelectedSession @0x5699D0 (the call @0x56A4C9)]
 	bool enumerated_session_recorded_ = false;
-	bool enumerate_pass_ended_ = false; // the record's own pass ran its pump
+	bool enumerate_pass_ended_ = false; // the record's own pass ran its pump (its announce test)
 	ProcessDisconnectLatch *disconnect_latch_ = nullptr; // use_disconnect_latch
 	int32_t teardown_exit_reason_ = 0; // the leave callback's switch over the latch (0: none)
 	// The connect state from a session record (a browse row's, or the enumerate's 0x81): retail's

@@ -63,8 +63,9 @@ std::vector<uint8_t> first_join_datagram(inmatch::JoinerConnection &joiner, uint
 }
 
 // An enumerated join's 0x42 after the host's 0x81 went through handle_datagram (which sends
-// nothing): the record's pass pumps nothing, the next pass starts the connect state (nothing at
-// its own millisecond), and the first pump past that start sends the 0x42 (D-NET-NEW-L2-25).
+// nothing): the record's pass sends nothing (its clock inside the 3000 ms announce interval),
+// the next pass starts the connect state (nothing at its own millisecond), and the first pump
+// past that start sends the 0x42 (D-NET-NEW-L2-25).
 // Steps the clock 1 ms before the last pump.
 // [orig: UI_EnumerateAndJoinSession @0x569F50 - g_PreMenuState = 4 @0x56A2D9;
 //  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4 @0x56A4B3 -> UI_JoinSelectedSession
@@ -372,15 +373,22 @@ bool run_discovered_join_sends_its_0x42_at_the_next_pump() {
 }
 
 // D-NET-NEW-L2-25: a join with no browse row enumerates on its own connection; the host's 0x81
-// records the session and the enumerate's pass ends there, with nothing sent (no 0x42 in its
-// receive, no announce at its pump, even past 3000 ms); the join state machine's next pass starts
-// the connect state from the record at that pass's clock and pumps it at once, so the first 0x42
-// leaves at the first pump whose clock reads past that start, and the 30000 ms window counts
-// from it, not from the 0x81.
-// [orig: UI_EnumerateAndJoinSession @0x569F50 - the loop @0x56A0C1..0x56A0F9, g_PreMenuState = 4
-//  @0x56A2D9; MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4 @0x56A4B3 ->
-//  UI_JoinSelectedSession @0x5699D0 (the call @0x56A4C9) - CNapiNetwork_StartClientConnection
-//  (the call @0x569DE6) -> CNapiNPConnection_InitFromSession @0x626320, then
+// records the session and the enumerate's pass ends there with no 0x42 (none in its receive,
+// none at its pump), but the same protocol pump still runs the enumerator's announce test after
+// the record: the pass sends the 0x41 when more than 3000 ms have passed since the last one, and
+// nothing inside that interval. The join state machine's next pass starts the connect state from
+// the record at that pass's clock and pumps it at once, so the first 0x42 leaves at the first
+// pump whose clock reads past that start, and the 30000 ms window counts from it, not from the
+// 0x81.
+// [orig: CNapiNetwork_PumpTransportAndProtocol @0x4C6E00 - NapiNPProtocol_Pump(-1) @0x62A650:
+//  PumpRecvQueues (the call @0x62A6AC) records the 0x81, then CNapiNPConnection_PumpFlags flag
+//  0x20 (the call @0x6297B7) -> CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 (`tick - last
+//  > interval` @0x629113..0x629119, the interval 3000 from CNapiGameSession_InitTransportConnection
+//  @0x4C9F9D); UI_EnumerateAndJoinSession @0x569F50 - the loop @0x56A0C1..0x56A0F9,
+//  g_PreMenuState = 4 @0x56A2D9; MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4
+//  @0x56A4B3 -> UI_JoinSelectedSession @0x5699D0 (the call @0x56A4C9) -
+//  CNapiNetwork_StartClientConnection (the call @0x569DE6; NapiTimer_Stop of the enumerator
+//  @0x4CA1D8) -> CNapiNPConnection_InitFromSession @0x626320, then
 //  CNapiNetwork_PumpAndCheckState @0x4C6E80 (the call @0x569E60) -> PumpStateMachine case 3
 //  @0x629508 (the resend test @0x629588, SendClientJoin @0x629595)]
 bool run_enumerated_join_sends_its_0x42_a_pass_after_the_0x81() {
@@ -388,6 +396,25 @@ bool run_enumerated_join_sends_its_0x42_a_pass_after_the_0x81() {
 	inmatch::NapiNPServerCtx host;
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, 0x0FE0E115u);
+
+	// A record pass inside the announce interval sends nothing.
+	const PeerAddr quiet_peer{0x0100007Fu, 32774};
+	uint64_t quiet_ms = 9000;
+	inmatch::JoinerConnection quiet("EnumQuiet", [&quiet_ms] { return quiet_ms; });
+	quiet.set_title(&kJo);
+	const std::vector<uint8_t> quiet_hello = quiet.start();
+	const inmatch::HandleResult quiet_reply = inmatch::handle_server_datagram(
+			host, quiet_peer, quiet_hello.data(), quiet_hello.size(), 0);
+	if (!expect(quiet_reply.outbound.size() == 1 &&
+	                    quiet.handle_datagram(quiet_reply.outbound[0].data(),
+	                                         quiet_reply.outbound[0].size()).outbound.empty(),
+	            "enumerate pass: a second joiner's 0x81 records its session"))
+		return false;
+	quiet_ms = 9000 + 2999;
+	if (!expect(quiet.pump(0).empty() && quiet.phase() == inmatch::JoinerConnection::Phase::Hello,
+	            "enumerate pass: a record pass 2999 ms after the 0x41 sends nothing"))
+		return false;
+
 	uint64_t now_ms = 9000;
 	inmatch::JoinerConnection joiner("EnumPass", [&now_ms] { return now_ms; });
 	joiner.set_title(&kJo);
@@ -407,9 +434,11 @@ bool run_enumerated_join_sends_its_0x42_a_pass_after_the_0x81() {
 	            "enumerate pass: the 0x81's receive records the session and sends nothing"))
 		return false;
 	now_ms = 9000 + 3001;
-	if (!expect(joiner.pump(0).empty() &&
+	const std::vector<std::vector<uint8_t>> announced = joiner.pump(0);
+	if (!expect(announced.size() == 1 && announced[0] == hello &&
 	                    joiner.phase() == inmatch::JoinerConnection::Phase::Hello,
-	            "enumerate pass: the record's own pass sends no 0x42 and no announce"))
+	            "enumerate pass: the record's own pass sends no 0x42; its announce test sends the "
+	            "0x41 3001 ms after the last"))
 		return false;
 	now_ms = 20000;
 	if (!expect(joiner.pump(0).empty() &&

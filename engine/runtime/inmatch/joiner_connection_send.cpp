@@ -309,21 +309,28 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 	std::vector<std::vector<uint8_t>> out;
 	if (session_lost() || phase_ == Phase::Error) return out;
 	if (phase_ == Phase::Hello || phase_ == Phase::Auth) {
-		// The enumerate's recorded session: the pass whose receive recorded it ends with the
-		// enumerate's loop and sends nothing (no announce); the join state machine's next
-		// pass starts the connect state and pumps it at once, so the first 0x42 leaves at
-		// the first pump whose clock reads past that start (D-NET-NEW-L2-25).
-		// [orig: UI_EnumerateAndJoinSession @0x569F50 - the loop's exit @0x56A0C1 ->
-		//  g_PreMenuState = 4 @0x56A2D9; MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4
-		//  @0x56A4B3 -> UI_JoinSelectedSession @0x5699D0 (the call @0x56A4C9) -
-		//  CNapiNetwork_StartClientConnection (the call @0x569DE6), CNapiNetwork_PumpAndCheckState
-		//  (the call @0x569E60) -> CNapiNPConnection_PumpStateMachine case 3 @0x629508]
+		// The enumerate's recorded session: the pass whose receive recorded it sends no 0x42,
+		// but the same protocol pump still runs the enumerator's announce test after the
+		// record, its timer stopped only by the next pass's connect start, so that pass sends
+		// the 0x41 when more than 3000 ms have passed since the last one. The join state
+		// machine's next pass starts the connect state and pumps it at once, so the first 0x42
+		// leaves at the first pump whose clock reads past that start (D-NET-NEW-L2-25).
+		// [orig: CNapiNetwork_PumpTransportAndProtocol @0x4C6E00 - NapiNPProtocol_Pump(-1) (the
+		//  call @0x4C6E3D) @0x62A650: PumpRecvQueues (flag 8, the call @0x62A6AC) records the
+		//  0x81, then CNapiNPConnection_PumpFlags (the call @0x62A6F8) flag 0x20 (the call
+		//  @0x6297B7) -> CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 (the enumerator's +0x2C
+		//  @0x6290E3, `tick - last > interval` @0x629113..0x629119); UI_EnumerateAndJoinSession
+		//  @0x569F50 - the loop's exit @0x56A0C1 -> g_PreMenuState = 4 @0x56A2D9;
+		//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4 @0x56A4B3 ->
+		//  UI_JoinSelectedSession @0x5699D0 (the call @0x56A4C9) -
+		//  CNapiNetwork_StartClientConnection (the call @0x569DE6; NapiTimer_Stop of the
+		//  enumerator @0x4CA1D8), CNapiNetwork_PumpAndCheckState (the call @0x569E60) ->
+		//  CNapiNPConnection_PumpStateMachine case 3 @0x629508]
 		if (phase_ == Phase::Hello && enumerated_session_recorded_) {
-			if (!enumerate_pass_ended_) {
+			if (enumerate_pass_ended_)
+				enter_session_connect_state();
+			else
 				enumerate_pass_ended_ = true;
-				return out;
-			}
-			enter_session_connect_state();
 		}
 		if (handshake_retry_datagram_.empty()) return out;
 		const uint64_t now_ms = monotonic_milliseconds_();
