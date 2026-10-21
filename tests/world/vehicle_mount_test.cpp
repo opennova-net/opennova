@@ -200,6 +200,15 @@ struct HeadingMountedPoseProvider final : IPoseProvider {
     }
 };
 
+// An organic occupant's words after a seat pose: the seat's Position, Yaw and Roll
+// words, its Pitch word left as the look made it (D-NET-NEW-L6-3).
+// [orig: Entity_UpdateInfantryAI - Roll @0x4BEDD7, the bone pitch into +0x90
+//  @0x4BEDDA; Entity_AttachToVehicleSlot @0x494752..0x494775 (no angle)]
+MountedPose organic_words(MountedPose seat, int32_t look_pitch) {
+    seat.pitch = look_pitch;
+    return seat;
+}
+
 void check_pose(const Entity &entity, const MountedPose &expected) {
     CHECK(std::abs(entity.position.x - expected.position.x) < 0.0001f);
     CHECK(std::abs(entity.position.y - expected.position.y) < 0.0001f);
@@ -501,7 +510,8 @@ void test_live_pose_provider_and_static_fallback() {
         const EntityHandle occupant_h = w.registry.spawn(0, occupant);
 
         CHECK(w.commands.mount(100, 200));
-        check_pose(*w.registry.get(occupant_h), provider.pose);
+        // A bodiless organic keeps its own Pitch word, 0.
+        check_pose(*w.registry.get(occupant_h), organic_words(provider.pose, 0));
     }
 
     // The shared attach path consumes the same seam, then AI tick follows a new
@@ -544,15 +554,16 @@ void test_live_pose_provider_and_static_fallback() {
 
         CHECK(w.vehicles.process_attach(occupant_h, vehicle_h, 7));
         // The attach stores no Position: the bodied occupant keeps its words
-        // until its motor's seat block poses it on the next pass (below); its
-        // attitude mirrors take the seat's. [orig: Entity_AttachToVehicleSlot
-        // @0x4946D0 - the stores @0x494752..0x494775]
+        // until its motor's seat block poses it on the next pass (below); ours'
+        // attach-edge pose gives it the seat's Yaw and Roll words, and its Pitch
+        // word stays its own (the attach writes no angle). [orig:
+        // Entity_AttachToVehicleSlot @0x4946D0 - the stores @0x494752..0x494775]
         {
             const Entity &attached = *w.registry.get(occupant_h);
             CHECK(attached.position.x.q16 == 0 && attached.position.y.q16 == 0 &&
                   attached.position.z.q16 == 0);
             CHECK(mission_yaw_whole_deg(attached.heading) == std::lround(mission_yaw_deg_from_bam_heading(provider.pose.heading)));
-            CHECK(attached.pitch_bam == provider.pose.pitch); // the seat's words (D-NET-NEW-L6-3)
+            CHECK(attached.pitch_bam == 0); // the occupant's own word (D-NET-NEW-L6-3)
             CHECK(attached.roll_bam == provider.pose.roll);
         }
 
@@ -567,7 +578,8 @@ void test_live_pose_provider_and_static_fallback() {
         const Entity *mounted = w.registry.get(occupant_h);
         MountedPose expected = provider.pose;
         expected.heading = 0; // BAM look 0, while the seated body faces yaw 44.
-        check_pose(*mounted, expected);
+        // The look's Pitch word, 0, while the body pitch takes the seat's 15.
+        check_pose(*mounted, organic_words(expected, 0));
         CHECK(body->heading == 0 && !body->inf.aim_valid);
         CHECK(body->self->position.x.q16 == to_fixed(31.5));
         CHECK(body->self->position.y.q16 == to_fixed(32.25));
@@ -644,8 +656,13 @@ void test_live_pose_provider_and_static_fallback() {
         CHECK(body->self->position.x.q16 == to_fixed(2.0));
         CHECK(body->self->position.y.q16 == to_fixed(1.0));
         CHECK(mounted->heading == kChasedHeading); // the Yaw word is the independent chased look, not the provider body yaw 12
-        CHECK(mounted->pitch_bam == spawn_angle_bam(21));
-        CHECK(mounted->roll_bam == spawn_angle_bam(-30));
+        // The Pitch word is the chased look the attach restores; the seat bone's
+        // 21-degree pitch is the body pitch's, and its Roll word as delivered is
+        // the occupant's (D-NET-NEW-L6-3). [orig: Entity_AttachToBoneAndUpdateTransform
+        //  @0x5463D0 - the bone Roll @0x546632, the Pitch word restored @0x546664;
+        //  Entity_UpdateInfantryAI's look chase @0x4BEF97]
+        CHECK(mounted->pitch_bam == kChasedPitch);
+        CHECK(mounted->roll_bam == bam_from_degrees_wrapped(-30.0));
         CHECK(body->inf.body_heading == bam_heading_from_mission_yaw_deg(12));
         CHECK(body->body_pitch == bam_from_degrees_wrapped(21.0));
         CHECK(body->roll == bam_from_degrees_wrapped(-30.0));
@@ -725,7 +742,16 @@ void test_live_pose_provider_and_static_fallback() {
         // {2,3,4}): Rz(90-yaw)Ry(-pitch)Rx(roll) on the un-swizzled local —
         // was {13, 18, 34} while the fallback was yaw-only (the pre-§6.13
         // stand-in). [orig: @0x4b0c50 over @0x613f40]
-        const MountedPose expected = pose_degrees({12.726887f, 17.658988f, 34.010455f}, 100, 4, 5);
+        MountedPose expected = pose_degrees({12.726887f, 17.658988f, 34.010455f}, 100, 4, 5);
+        // A model-less carrier has no retail counterpart (the bone transform
+        // returns 0 without a graphic model @0x4B0C66..0x4B0C74): ours' root
+        // frame composes no bone turn, so the seat's Roll word is the carrier's
+        // own, the spawn form of 5 (0x038E0000), and the organic's Pitch word
+        // stays its own, 0 (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord
+        //  @0x40EB89..0x40EBA6]
+        expected.pitch = 0;
+        expected.roll = vehicle.roll_bam;
+        CHECK(expected.roll == 0x038E0000);
 
         Entity occupant;
         w.vehicles.pose_mounted_occupant(occupant, vehicle, seat);

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <runtime/renderer/object_lod.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/death_piece_draw.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_camera.h>

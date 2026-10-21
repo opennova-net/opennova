@@ -87,9 +87,13 @@ bool test_world_rows_carry_the_authoritative_record() {
 			"PF_WIRE_HANDLE is the packed registry handle") && ok;
 	ok = expect(r[w::PF_POS_X] == 10.0f && r[w::PF_POS_Y] == 3.0f && r[w::PF_POS_Z] == -20.0f,
 			"the mission (x, y, z) triple presents as (x, z, -y)") && ok;
-	ok = expect(static_cast<int>(r[w::PF_YAW_DEG]) == 45 && static_cast<int>(r[w::PF_PITCH_DEG]) == 2 &&
-					static_cast<int>(r[w::PF_ROLL_DEG]) == -3,
-			"a plain row presents its whole-degree mission eulers") && ok;
+	// The row presents its Pitch / Roll words' exact degrees: the spawn form of
+	// 2 is (2 << 16) / 360 = 364 shifted up, 364 * 360 / 65536 = 1.99951171875
+	// degrees; of -3, -546 (truncated) shifted up, -2.999267578125 degrees
+	// (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+	ok = expect(static_cast<int>(r[w::PF_YAW_DEG]) == 45 && r[w::PF_PITCH_DEG] == 1.99951171875f &&
+					r[w::PF_ROLL_DEG] == -2.999267578125f,
+			"a plain row presents its Pitch / Roll words' degrees") && ok;
 	ok = expect(static_cast<int>(r[w::PF_KIND]) == 1 && static_cast<int>(r[w::PF_INDEX]) == 7 &&
 					static_cast<int>(r[w::PF_BMS_ID]) == 4242 && static_cast<int>(r[w::PF_NET_ID]) == 99,
 			"the placed identity rides kind/index/bms/net") && ok;
@@ -359,15 +363,19 @@ bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
 	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
 	if (!expect(e != nullptr, "vehicle row exists"))
 		return false;
-	// Unseeded: the whole-degree mission mirrors are all a row carries.
+	// Unseeded: the row's own Pitch / Roll words, here the spawn form of 3 and
+	// -2: (3 << 16) / 360 = 546 shifted up, 546 * 360 / 65536 = 2.999267578125
+	// degrees; (-2 << 16) / 360 truncates to -364, -1.99951171875 degrees
+	// (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
 	e->pitch_bam = w::spawn_angle_bam(3);
 	e->roll_bam = w::spawn_angle_bam(-2);
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
 	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
-	bool ok = expect(rows[w::PF_PITCH_DEG] == 3.0f && rows[w::PF_ROLL_DEG] == -2.0f,
-			"an unseeded row publishes the mission mirrors");
+	bool ok = expect(rows[w::PF_PITCH_DEG] == 2.999267578125f &&
+					rows[w::PF_ROLL_DEG] == -1.99951171875f,
+			"an unseeded row publishes its Pitch / Roll words' degrees");
 	// Seeded: 2.49 / -1.51 degrees round to 2 / -2 in the mirrors.
 	const double bam_per_degree = 4294967296.0 / 360.0;
 	e->veh.yaw_seeded = true;
@@ -836,8 +844,9 @@ bool test_emplaced_channels_take_the_owned_lifetime() {
 }
 
 // The callback turns the translation with the entity's one matrix: on a
-// joiner the row renders the decoded heading (here 90.45 degrees, where the
-// materialized row keeps a whole-degree 90), so the offset turns with it.
+// joiner the entity carries the decoded Yaw word (here a 90.45-degree heading,
+// which the materializer's seed stores), so the offset turns with it.
+// [orig: NapiNPClientMsg_0x010 @0x43351C]
 // [orig: BoneCallback_bldg_World @0x4E21A0 - the translate @0x4E2247 onto the
 //  entity matrix]
 bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
@@ -861,6 +870,7 @@ bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
 	decoded.y = 20 * 65536;
 	decoded.z = 11 * 65536;
 	decoded.heading_bam = w::bam_heading_from_mission_yaw_deg(90.45);
+	e->heading = decoded.heading_bam; // the materialized row's Yaw word
 	runtime.state().upsert(decoded.handle) = decoded;
 	const im::PresentRowsContext context{kernel, &runtime, true};
 	im::PoolPresentLifecycleMap lifecycle;

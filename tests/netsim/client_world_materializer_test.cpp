@@ -653,8 +653,11 @@ bool decoded_world_stream_materializes_exact_rows() {
 			building->kind == w::EntityKind::Building &&
 			building->item_id == 0x0600 &&
 			building->net_id == 0 &&
-			building->heading == static_row.euler_z && building->pitch_bam == w::spawn_angle_bam(-8) && // the wire word
-			building->roll_bam == w::spawn_angle_bam(5) &&
+			// The 0x10 record's Pitch / Roll dwords land on the row raw
+			// (D-NET-NEW-L6-3). [orig: NapiNPClientMsg_0x010 @0x433400 - +0x14
+			// @0x433533, +0x18 @0x43354A]
+			building->heading == static_row.euler_z && building->pitch_bam == static_row.euler_x &&
+			building->roll_bam == static_row.euler_y &&
 			building->engine_flags == 0x04020400u &&
 			building->section_mask == 0x120u &&
 			building->ammo_count == 0xA5 &&
@@ -676,7 +679,10 @@ bool decoded_world_stream_materializes_exact_rows() {
 			boat->ref_num == 0x17 && boat->sub_type == 0x33 &&
 			boat->zone_number == 2 && boat->zone_radius == 70 &&
 			std::fabs(boat->position.x - 2.0f) < 0.0001f &&
-			boat->heading == vehicle.euler_z && boat->pitch_bam == w::spawn_angle_bam(4) && boat->roll_bam == w::spawn_angle_bam(-6) &&
+			// The 0x0D record's Pitch / Roll dwords land raw (D-NET-NEW-L6-3)
+			// [orig: NapiNPClientMsg_0x00D @0x432DE1 / @0x432DF8].
+			boat->heading == vehicle.euler_z && boat->pitch_bam == vehicle.euler_x &&
+			boat->roll_bam == vehicle.euler_y &&
 			boat->spawn_origin == w::kSpawnOriginNone,
 			"pool-1 materialization retains exact handle, identity, pose, and traits"))
 		return false;

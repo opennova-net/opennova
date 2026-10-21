@@ -47,8 +47,8 @@ struct Rig {
         veh.net_id = 200;
         veh.position = {100.0f, 200.0f, 10.0f};
         veh.heading = placed_heading_bam(1);
-        veh.pitch = 10;
-        veh.roll = -3;
+        veh.pitch_bam = spawn_angle_bam(10); // the placed words (D-NET-NEW-L6-3)
+        veh.roll_bam = spawn_angle_bam(-3);
         veh.health = veh.health_max = 3000;
         veh.alive = true;
         veh_h = w.registry.spawn(1, veh);
@@ -200,13 +200,13 @@ void test_seat_point_reads_the_spawn_form() {
         Rig r;
         Entity &placed = r.veh();
         placed.heading = placed_heading_bam(37);
-        placed.pitch = tilted ? -12 : 0;
-        placed.roll = tilted ? 17 : 0;
+        placed.pitch_bam = spawn_angle_bam(tilted ? -12 : 0);
+        placed.roll_bam = spawn_angle_bam(tilted ? 17 : 0);
         Entity seeded = placed;
         seeded.veh.yaw_seeded = true;
         seeded.veh.yaw_bam = spawn_angle_bam(90 - 37);
-        seeded.veh.air_pitch_bam = spawn_angle_bam(placed.pitch);
-        seeded.veh.air_roll_bam = spawn_angle_bam(placed.roll);
+        seeded.veh.air_pitch_bam = placed.pitch_bam;
+        seeded.veh.air_roll_bam = placed.roll_bam;
         const Vec3 a = entity_local_point_world(placed, local);
         const Vec3 b = entity_local_point_world(seeded, local);
         CHECK(a.x == b.x && a.y == b.y && a.z == b.z);

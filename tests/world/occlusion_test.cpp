@@ -445,9 +445,13 @@ void test_render_math() {
     e.pitch_bam = spawn_angle_bam(45);
     e.roll_bam = spawn_angle_bam(-30);
     const RenderMatrix from_entity = render_matrix_from_entity_pose(e);
+    // The entity's words: the spawn form of pitch 45 ((45 << 16) / 360 = 8192,
+    // shifted up) and roll -30 ((-30 << 16) / 360 truncates to -5461, shifted
+    // up) (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EB86
+    // (Pitch), @0x40EB89..0x40EBA6 (Roll)]
     const RenderMatrix expected =
         render_matrix_from_pose(p, 0, static_cast<int32_t>(0x20000000u),
-                                static_cast<int32_t>(0xEAAAAAAAu));
+                                static_cast<int32_t>(0xEAAB0000u));
     for (int i = 0; i < 16; ++i)
         CHECK(std::fabs(from_entity.m[i] - expected.m[i]) < 1e-6f);
 }

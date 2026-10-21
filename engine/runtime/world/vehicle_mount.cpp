@@ -375,7 +375,16 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
     // [orig: Math_FixedPointMatrixToEulerAngles @0x613481..0x61348C]
     occ.position = live.position;
     occ.heading = live.heading;
-    occ.pitch_bam = live.pitch;
+    // The Roll word takes the seat bone's roll; an organic occupant's Pitch word
+    // stays its look (the carry writes the bone pitch into the body frame only;
+    // the look legs write the Pitch word); an addeweap child takes the whole
+    // bone attitude (D-NET-NEW-L6-3). [orig: Entity_UpdateInfantryPlayerBody
+    //  - Roll @0x4B6572, +0x90 @0x4B6575; Entity_UpdateInfantryAI - Roll
+    //  @0x4BEDD7, +0x90 @0x4BEDDA; Entity_AttachToBoneAndUpdateTransform
+    //  @0x5463D0 - the bone Roll kept @0x546632, the Pitch word restored
+    //  @0x546664; Entity_UpdateTransformAndTurret - the bone euler into
+    //  +4..+0x18 @0x4410DD]
+    if (seat.attachment_frame) occ.pitch_bam = live.pitch;
     occ.roll_bam = live.roll;
     if (seat.attachment_frame) {
         // An addeweap child carries the full bone attitude into its own model,

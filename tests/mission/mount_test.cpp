@@ -685,7 +685,11 @@ int main() {
         // look updates remain independent while the body stays in the carried frame.
         // [orig: request pre-snap @0x4364a0; UseGun save/restore @0x546416..0x546664]
         CHECK(occ->heading == kLookHeading); // the Yaw word is the live look
-        CHECK(occ->pitch_bam == world::spawn_angle_bam(-12));
+        // So is the Pitch word (here the unchased look 0); the seat's -12 is the
+        // body pitch's, its Roll word the occupant's (D-NET-NEW-L6-3). [orig:
+        //  Entity_AttachToBoneAndUpdateTransform @0x546632 (Roll), @0x546664 (the
+        //  Pitch word restored); Entity_UpdateInfantryAI's look chase @0x4BEF97]
+        CHECK(occ->pitch_bam == 0 && ae->pitch == 0);
         CHECK(occ->roll_bam == world::spawn_angle_bam(17));
         CHECK(ae->heading == kLookHeading);
         CHECK(ae->inf.body_heading == kSeatHeading);
@@ -743,7 +747,9 @@ int main() {
         const Entity *occ = w.registry.get(sh);
         CHECK(occ != nullptr);
         CHECK(occ->heading == look_heading); // the registry/wire/motor Yaw word is the look
-        CHECK(occ->pitch_bam == world::spawn_angle_bam(-12));
+        // The Pitch word is the mouse look too (D-NET-NEW-L6-3) [orig:
+        //  Input_HandleActionBinding_0 @0x4E1330 writes +0x14]; the Roll word the seat's.
+        CHECK(occ->pitch_bam == kLookPitch);
         CHECK(occ->roll_bam == world::spawn_angle_bam(17));
         CHECK(ae->heading == look_heading); // full precision, never the seat heading
         CHECK(ae->pitch == kLookPitch);

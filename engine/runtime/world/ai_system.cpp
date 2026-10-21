@@ -74,12 +74,15 @@ bool remote_player_controls_vehicle(const AiEntity &e, const Entity &occupant,
 
 } // namespace
 
-// The mounted body's heading refresh after the seat frame is applied: the local
-// player, every NPC seat, a gunner and a remote peer driving the vehicle keep
-// their full-precision LOOK heading/pitch after the seat transform. Other wire
-// riders adopt the seat heading. [orig: org1 mounted @0x4BEF57..0x4BEF97;
-// Entity_AttachToBoneAndUpdateTransform @0x5463D0, the look
-// restore @0x546661 / @0x546664; world-wac-ai-re.md §22.4 / §5.38]
+// The mounted body's heading refresh after the seat frame is applied: every
+// rider keeps its full-precision LOOK heading/pitch after the seat transform.
+// The attach's tail restores both look words saved at its entry, whatever the
+// rider (D-NET-NEW-L6-3); ours' seat-heading arm for other wire riders had no
+// witness. [orig: Entity_AttachToBoneAndUpdateTransform @0x5463D0 - the saves
+// @0x546416..0x54642C, the seat Yaw into +0x2D4 / +0x2D8 / +0x2E4 / +0x2E8
+// @0x546635..0x54665B, the restores @0x546661 (Yaw) / @0x546664 (Pitch), no
+// rider branch; org1 mounted @0x4BEF57..0x4BEF97; world-wac-ai-re.md §22.4 /
+// §5.38]
 bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
     Entity *occupant = world.registry.get(e.handle);
     if (occupant == nullptr || occupant->motor_suspended || !occupant->mounted || occupant->health <= 0) return false;
@@ -90,20 +93,14 @@ bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
     const Seat &seat = vehicle->seats[occupant->mount_seat];
     const int32_t saved_look_heading = e.heading;
     const int32_t saved_look_pitch = e.pitch;
-    const int32_t seat_heading = apply_resolved_mounted_seat_frame(
-            e, world, *occupant, *vehicle, seat);
-
-    if (e.inf.active &&
-        (e.inf.is_local_player || npc_mounted_body(e, *occupant) ||
-         seat.type == SeatType::Gunner || remote_player_controls_vehicle(e, *occupant, seat))) {
-        // Independent LOOK was already promoted/chased in pose_if_mounted. Restore
-        // that exact value without consulting input latches or advancing aim again.
-        e.heading = saved_look_heading;
-        e.pitch = saved_look_pitch;
-        occupant->heading = saved_look_heading;
-    } else {
-        e.heading = seat_heading;
-    }
+    apply_resolved_mounted_seat_frame(e, world, *occupant, *vehicle, seat);
+    // Independent LOOK was already promoted/chased in pose_if_mounted. Restore
+    // that exact value without consulting input latches or advancing aim again;
+    // the Yaw and Pitch words both take the look back.
+    e.heading = saved_look_heading;
+    e.pitch = saved_look_pitch;
+    occupant->heading = saved_look_heading;
+    occupant->pitch_bam = saved_look_pitch;
     return true;
 }
 
@@ -862,6 +859,9 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // [orig: Entity_UpdateInfantryPlayerBody mounted leg (bodyHeading only) +
         //  Entity_UpdateVehiclePhysics steer source @0x48ba59/v61->Yaw].
         occ->heading = e.inf.target_heading;
+        // So is its Pitch word the look, not the seat's (D-NET-NEW-L6-3)
+        // [orig: Input_HandleActionBinding_0 @0x4e1330 writes +0x14].
+        occ->pitch_bam = e.inf.look_pitch;
         // Mirror the live inputs into the wire fields the motor consumes — tick_infantry's
         // per-tick mirror is skipped while mounted (one entity struct in the original; the
         // split is ours) [orig: the MoveOrder packer @0x4df68f-0x4df741].
@@ -899,6 +899,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         e.heading = saved_look_heading;
         e.pitch = saved_look_pitch;
         occ->heading = saved_look_heading;
+        occ->pitch_bam = saved_look_pitch; // the look's Pitch word (D-NET-NEW-L6-3)
     } else if (e.inf.active && (seat.type == SeatType::Gunner || npc_mounted_body(e, *occ))) {
         // Attachment writes the seat/base pose but restores the child's independent
         // live look. The look then chases the desired solution instead of snapping:
@@ -934,7 +935,12 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
             e.heading = chased_look_heading;
             e.pitch = chased_look_pitch;
         }
+        // The look chase writes the Yaw and Pitch words; the UseGun attach
+        // restores both (D-NET-NEW-L6-3). [orig: Entity_UpdateInfantryAI
+        //  @0x4BEF84 / @0x4BEF97; Entity_AttachToBoneAndUpdateTransform
+        //  @0x546661 / @0x546664]
         occ->heading = e.heading;
+        occ->pitch_bam = e.pitch;
     }
     if (e.inf.active) {
         const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
