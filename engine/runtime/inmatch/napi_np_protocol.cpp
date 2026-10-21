@@ -1054,12 +1054,12 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		conn.server_scrk = keys.scrk;
 	}
 	conn.phase = ConnectionPhase::Joined;
-	// The connection is up: the new-connection callback first turns the
-	// _connectlog.txt debug log off for the process, then counts a login
+	// The connection is up: the new-connection callback turns the _connectlog.txt debug log
+	// off for the process, in the queued pass after the whole drain has written its lines
+	// (finish_manager_receive), then counts a login
 	// [orig: CNapiNPConnection_OnStateChange @0x6261c6 ->
 	//  NapiNPServer_HandleNewConnection @0x4c8054..0x4c80AF, @0x4c8203].
-	if (ctx.logs.connect != nullptr && ctx.logs.connect->enabled())
-		ctx.logs.connect->disable_at_server_connection();
+	ctx.connect_log_disable_queued = true;
 	++ctx.total_logins;
 	// The validation-phase deadline base for CheckPlayerTimeouts (netPlayer+0xA4
 	// is stamped with GetTickCount when the node enters the validating state).
@@ -1439,6 +1439,14 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 }
 
 } // namespace
+
+// See header.
+void finish_manager_receive(NapiNPServerCtx &ctx) {
+	if (!ctx.connect_log_disable_queued) return;
+	ctx.connect_log_disable_queued = false;
+	if (ctx.logs.connect != nullptr && ctx.logs.connect->enabled())
+		ctx.logs.connect->disable_at_server_connection();
+}
 
 HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
                                     const uint8_t *raw, std::size_t len, uint32_t now_tick,

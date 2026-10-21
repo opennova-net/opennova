@@ -197,22 +197,34 @@ void test_dedicated_host_receive_lines() {
 	if (lines != expected)
 		for (const std::string &l : lines) std::printf("  got: %s\n", l.c_str());
 
-	// The first join: taken on the socket pass (its PROTOCOL line), then the new connection
-	// turns the log off; nothing after it is written.
+	// The first join: taken on the socket pass (its PROTOCOL line); a probe behind it in the
+	// same drain still writes its lines; the queued pass's new connection then turns the log
+	// off, after the drain; nothing after it is written.
+	// [orig: NapiNPProtocol_HandleClientJoin's socket pass @0x62C323 / @0x62C328; the queued
+	//  pass NapiNPProtocol_PumpRecvQueues @0x6266CA..0x6267B2 after the manager's drain]
 	ClientAuth auth = make_title_client_auth(kJo, 1, 0x55AA, 0x1234, "Joiner", "SCRK1");
 	const std::vector<uint8_t> join =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 	(void)inmatch::handle_server_datagram(host.ctx, peer, join.data(), join.size());
 	(void)inmatch::handle_server_datagram(host.ctx, peer, probe.data(), probe.size());
+	CHECK(host.log.enabled()); // the drain is not over
+	inmatch::finish_manager_receive(host.ctx);
+	(void)inmatch::handle_server_datagram(host.ctx, peer, probe.data(), probe.size());
 	const std::vector<std::string> after = log_lines(host.files);
-	CHECK(after.size() == expected.size() + 4);
-	if (after.size() == expected.size() + 4) {
+	CHECK(after.size() == expected.size() + 7);
+	if (after.size() == expected.size() + 7) {
 		CHECK(after[expected.size()] == "NAPI GOT RAW " + n(join.size()) + " BYTES FROM " + from);
 		CHECK(after[expected.size() + 1] ==
 				"NAPI GOT COOKED " + m(unpacked_len(join)) + " BYTES FROM " + from);
 		CHECK(after[expected.size() + 2] == "NAPI GOT PROTOCOL " + m(unpacked_len(join)) +
 				" BYTES FROM " + from + " [" + pn + "]");
 		CHECK(after[expected.size() + 3] ==
+				"NAPI GOT RAW " + n(probe.size()) + " BYTES FROM " + from);
+		CHECK(after[expected.size() + 4] ==
+				"NAPI GOT COOKED " + m(unpacked_len(probe)) + " BYTES FROM " + from);
+		CHECK(after[expected.size() + 5] == "NAPI GOT PROTOCOL " + m(unpacked_len(probe)) +
+				" BYTES FROM " + from + " [" + pn + "]");
+		CHECK(after[expected.size() + 6] ==
 				"NET SERVER DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.");
 	}
 	CHECK(!host.log.enabled());

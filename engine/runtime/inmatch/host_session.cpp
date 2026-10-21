@@ -291,6 +291,8 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 				/*defer_in_match_replies=*/true);
 		consume(peer, r);
 	}
+	// The queued pass's new connections turn the connect log off after the drain's lines.
+	finish_manager_receive(owner.ctx);
 	// The connection-list walk after every datagram: the queued packets whose gap a datagram
 	// closed, per connection in list order (NEW-L1-9).
 	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the walk @0x626910..0x6269E8,

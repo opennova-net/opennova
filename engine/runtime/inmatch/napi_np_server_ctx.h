@@ -560,6 +560,14 @@ struct NapiNPServerCtx {
 	//  CNapiServer_OnPlayerDisconnected) @0x4c94f0 that
 	//  NapiNPProtocol_StartServer @0x62b640 runs; read @0x50b0e4]
 	uint32_t total_logins = 0;
+	// A 0x42 the manager's drain took: its new connection's callback turns the _connectlog.txt
+	// log off in the server receive pump's queued pass, after every datagram of the drain has
+	// written its lines (finish_manager_receive).
+	// [orig: NapiNPProtocol_HandleClientJoin's socket pass queues the 0x42 @0x62C323 and
+	//  returns 1 @0x62C328; NapiNPProtocol_PumpRecvQueues @0x6266A0's FIFO pass
+	//  @0x6266CA..0x6267B2 -> CNapiNPConnection_OnStateChange @0x6261C6 ->
+	//  NapiNPServer_HandleNewConnection @0x4C8054..0x4C80AF]
+	bool connect_log_disable_queued = false;
 	// The round tallies the status page's team block shows: every round end
 	// of Team Deathmatch, Team KOTH or CTF counts one round and one win for
 	// the winning side 1..4. Only the Reset Game action clears them

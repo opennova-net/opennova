@@ -146,6 +146,14 @@ struct ReplayedSessionPacket {
 std::vector<ReplayedSessionPacket> replay_ready_session_packets(
 		NapiNPServerCtx &ctx, uint32_t now_tick, bool defer_in_match_replies = false);
 
+// The end of one manager receive drain: the server receive pump's queued pass handles the 0x42s
+// the drain queued, whose new connection turns the _connectlog.txt log off, so every datagram
+// of the drain has written its lines first (NapiNPServerCtx::connect_log_disable_queued).
+// [orig: Server_PumpNetworkTransport - the manager receive @0x4FD977 ahead of the server
+//  receive @0x4FD981; NapiNPProtocol_PumpRecvQueues @0x6266A0 (the FIFO pass @0x6266CA..
+//  0x6267B2); NapiNPServer_HandleNewConnection @0x4C8054..0x4C80AF]
+void finish_manager_receive(NapiNPServerCtx &ctx);
+
 // Finalize one host socket receive batch. Future packets latch a missing-sequence check while
 // handle_server_datagram drains; only here, after later datagrams could have closed the gap, does
 // the host emit one 0x84 per connection whose ordered queue is still nonempty. This is the
