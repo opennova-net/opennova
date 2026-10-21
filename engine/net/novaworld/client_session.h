@@ -282,12 +282,12 @@ public:
 	// + NWU already applied — ready for the wire). Transitions Idle -> Hello.
 	std::vector<uint8_t> start();
 
-	// The datagram the current connect stage re-sends on the retransmit cadence
-	// (SESSION_CONNECT_RETRANSMIT_MS): the ClientHello while awaiting the ServerHello,
-	// the ClientAuth while awaiting the ServerAuth; empty in every other state.
-	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 (the 0x41 re-announce);
-	//  CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 (the 0x42 re-send)]
-	std::vector<uint8_t> retransmit_stage_datagram();
+	// The first connect's re-announce: the ClientHello the enumerator re-sends on its cadence
+	// (SESSION_CONNECT_RETRANSMIT_MS, the owner's stamp) while awaiting the ServerHello; empty
+	// in every other state, once a give-up stopped the probe, and during a reconnect (its 0x41
+	// rides pump()). The 0x42 is the state machine's, sent by pump() (case 3).
+	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 (the 0x41 re-announce)]
+	std::vector<uint8_t> reannounce_datagram();
 
 	// The 0x41 the enumerator sends one probe target: this connection's hello carrying the
 	// target's address and port as EIP / EPN, each written only when nonzero, and no ET (a
@@ -500,7 +500,7 @@ public:
 	bool reconnect_armed() const { return session_role_ != kSessionRoleNone; }
 	// Torn down (the peer's goodbye or description record, the reap) while armed and not yet
 	// back up: the session owns the 0x41 re-probe and the 0x42 re-join from here (the owner's
-	// first-connect retransmits and deadlines stand down; retransmit_stage_datagram() is
+	// first-connect retransmits and deadlines stand down; reannounce_datagram() is
 	// empty) until the re-join's 0x82 lands. [orig: the reconnect tail's guard
 	//  @0x629487..0x6294a5 — !conn_flag0 && conn_flag1 && is_client && +0x710]
 	bool reconnecting() const;
@@ -651,6 +651,19 @@ private:
 	// The reconnect's halves of the pump: the enumerator's 0x41 re-announce, the 0x42 leg
 	// (case 3) and the schedule tail.
 	void pump_reconnect(std::vector<std::vector<uint8_t>> &out);
+	// The connect state's leg of the state machine (case 3), the first connect's and the
+	// re-join's alike: the join fails once more than SESSION_JOIN_TIMEOUT_MS passed since the
+	// state's entry (JFC 2, the connection down with no teardown), else the 0x42 goes once more
+	// than SESSION_CONNECT_RETRANSMIT_MS passed since the last one, the entry's stamp standing
+	// one interval back so the first goes at the first pump past the entry.
+	// [orig: CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 @0x629508 - the timeout
+	//  @0x62950E..0x62951C (+0x5B4), JFC 2 @0x629525, state 4 @0x629564; the re-send test
+	//  @0x629580..0x629588 (+0x5B0), the stamp @0x62958F, CNapiNPConnection_SendClientJoin
+	//  @0x61FE20 (its one caller @0x629595); the lobby connection's +0x5B0 = 3000 @0x4D4318 and
+	//  +0x5B4 = 20000 @0x4D4321 (CNapiGameSession_InitPlayerConnection @0x4D4160)]
+	void pump_join(std::vector<std::vector<uint8_t>> &out);
+	// The connect state's entry on a taken 0x81, both connects': Auth with the stamps below.
+	void enter_connect_state();
 	void grow_reconnect_gap();
 	// The host and play legs' requests over the session-owned lists. [orig:
 	//  CNapiGameSession_StartHostingSession @0x4d4540 / StartPlayingSession @0x4d45e0]
@@ -735,8 +748,7 @@ private:
 	int reconnect_counter_ = 0;          // session+0x500
 
 	// The NP connection's reconnect state. [orig: NapiNPConnection — conn_flag1 +0x29, the
-	//  enumerator's timer_active / timer_start_tick / last_send_tick, +0x72C gap, +0x730 next,
-	//  +0x5E0 the state-3 entry, +0x5E4 the last 0x42]
+	//  enumerator's timer_active / timer_start_tick / last_send_tick, +0x72C gap, +0x730 next]
 	struct Reconnect {
 		bool was_connected = false;      // conn_flag1
 		bool probing = false;            // enumerator timer_active
@@ -745,10 +757,14 @@ private:
 		uint32_t last_probe_ms = 0;      // enumerator last_send_tick
 		uint32_t gap_ms = SESSION_RECONNECT_GAP_INITIAL_MS; // +0x72C
 		uint32_t next_ms = 0;            // +0x730
-		uint32_t join_started_ms = 0;    // +0x5E0
-		uint32_t join_last_send_ms = 0;  // +0x5E4
 	};
 	Reconnect reconnect_;
+	// The connect state's stamps, the first connect's and the re-join's: its entry and the last
+	// 0x42, which the entry sets one retransmit interval back (pump_join).
+	// [orig: CNapiNPConnection_InitFromSession @0x626320 - +0x5E0 = now @0x62648A, +0x5E4 =
+	//  now - +0x5B0 @0x626490..0x626499]
+	uint32_t join_started_ms_ = 0;       // +0x5E0
+	uint32_t join_last_send_ms_ = 0;     // +0x5E4
 	uint32_t dcnt_ = 0;                  // conn+0x734
 	uint32_t rcnt_ = 0;                  // conn+0x738
 	uint32_t jfc_ = 0; // conn+0x5F0

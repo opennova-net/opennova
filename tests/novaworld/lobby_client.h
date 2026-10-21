@@ -173,6 +173,7 @@ private:
 			net::Endpoint from;
 			const int n = net::udp_recv_from(socket_, rx, sizeof rx, from, 20);
 			std::lock_guard<std::mutex> lock(mu_);
+			session_.set_clock_ms(++clock_ms_); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 			std::vector<std::vector<uint8_t>> out;
 			if (n > 0)
 				session_.handle_datagram(rx, static_cast<size_t>(n), out);
@@ -188,6 +189,7 @@ private:
 
 	std::mutex mu_;
 	opennova::ClientSession session_;
+	uint32_t clock_ms_ = 0; // the session's clock
 	net::Socket socket_;
 	uint16_t port_ = 0;
 	net::Endpoint server_;

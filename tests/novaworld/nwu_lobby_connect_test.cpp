@@ -324,6 +324,7 @@ void check_verify_give_up() {
 	rig.session.inbound.push_back(
 			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
 	rig.lobby.tick(100);
+	rig.lobby.tick(101); // the 0x42 goes at the first pump past the 0x81's frame
 	CHECK(session.state() == ClientSession::State::Auth);
 	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 	CHECK(!auth.empty());
@@ -377,6 +378,7 @@ void check_rejected_connect() {
 	rig.session.inbound.push_back(
 			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
 	rig.lobby.tick(100);
+	rig.lobby.tick(101); // the 0x42 goes at the first pump past the 0x81's frame
 	CHECK(session.state() == ClientSession::State::Auth);
 	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 	CHECK(!auth.empty());
@@ -452,6 +454,7 @@ std::vector<uint8_t> bring_to_accept(Rig &rig) {
 	rig.session.inbound.push_back(
 			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
 	rig.lobby.tick(100);
+	rig.lobby.tick(101); // the 0x42 goes at the first pump past the 0x81's frame
 	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 	if (auth.empty())
 		return {};
@@ -535,6 +538,7 @@ void check_not_verifying() {
 	rig.session.inbound.push_back(
 			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
 	rig.lobby.tick(100);
+	rig.lobby.tick(101); // the 0x42 goes at the first pump past the 0x81's frame
 	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 	CHECK(!auth.empty());
 	uint8_t opcode = 0;
@@ -571,6 +575,7 @@ void check_late_accept_after_give_up() {
 	rig.session.inbound.push_back(
 			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
 	rig.lobby.tick(100);
+	rig.lobby.tick(101); // the 0x42 goes at the first pump past the 0x81's frame
 	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 	CHECK(!auth.empty());
 	rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 1);
@@ -615,6 +620,7 @@ void check_disconnect_request_by_state() {
 	rig.session.inbound.push_back(
 			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
 	rig.lobby.tick(100);
+	rig.lobby.tick(101); // the 0x42 goes at the first pump past the 0x81's frame
 	CHECK(session.state() == ClientSession::State::Auth);
 	session.request_disconnect(out);
 	CHECK(out.empty());
@@ -832,6 +838,7 @@ void check_connect_log_gate_and_connect() {
 	rig.session.inbound.push_back(
 			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
 	rig.lobby.tick(1300);
+	rig.lobby.tick(1301); // the 0x42 goes at the first pump past the 0x81's frame
 	// The 0x81 the connection takes makes the enumerator's record.
 	CHECK(rig.log == std::vector<std::string>{ kDiscovered });
 	rig.log.clear();
@@ -1046,6 +1053,7 @@ void check_connect_log_give_ups() {
 		rig.session.inbound.push_back(
 				{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
 		rig.lobby.tick(100);
+		rig.lobby.tick(101); // the 0x42 goes at the first pump past the 0x81's frame
 		const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;
@@ -1508,6 +1516,7 @@ void check_escape_legs() {
 		rig.session.inbound.push_back(
 				{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
 		rig.lobby.tick(100);
+		rig.lobby.tick(101); // the 0x42 goes at the first pump past the 0x81's frame
 		const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 		CHECK(!auth.empty());
 		CHECK(rig.lobby.escape());
@@ -1805,7 +1814,90 @@ void check_host_player_add_sends_update() {
 	rig.lobby.close();
 }
 
+// The first connect's sends ride the frame's head pump: after the receive and ahead of the
+// periodic update's give-up tests and the menu state's work. So a 0x41 re-announce that falls due
+// in an ESC's frame goes before the ESC stops the probe, and a 0x42 that falls due in the
+// validation wait's frame after a state-1 give-up goes before the reset (the give-up leaves the
+// connect state standing: RequestDisconnect returns -1 for it).
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - the pump @0x558DFA ahead of the state's
+//  case; CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - NapiNPManager_Pump @0x4D441F,
+//  NapiNPProtocol_Pump @0x4D442E, the give-up tests @0x4D4436..0x4D44B1;
+//  CNapiNPConnection_PumpFlags @0x629780 - PumpEnumeratorAndSend @0x6297B7, PumpStateMachine
+//  @0x6297C3; CNapiGameSession_PollConnectPhase1 @0x4D4C30 - the ESC @0x4D4CDE;
+//  CNapiNPConnection_RequestDisconnect @0x61E0F0 - -1 @0x61E110;
+//  CGameSession_WaitForNWUValidation @0x4D0F20 - -17 @0x4D111C]
+void check_head_pump_resends() {
+	{
+		Rig rig;
+		rig.start(10); // the first 0x41 at 11
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_HELLO) == 1);
+		CHECK(rig.lobby.escape());
+		rig.lobby.tick(11 + SESSION_CONNECT_RETRANSMIT_MS + 1); // the re-announce is due here
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_HELLO) == 2);
+		CHECK(rig.fatals.empty());
+		rig.lobby.tick(11 + SESSION_CONNECT_RETRANSMIT_MS + 2);
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC41" });
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_HELLO) == 2);
+		rig.lobby.close();
+	}
+	{
+		Rig rig;
+		rig.start(10);
+		rig.session.inbound.push_back(
+				{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
+		// The 0x81 late enough that the connect state's own 20 s join timeout stays clear of the
+		// validation frame.
+		rig.lobby.tick(5000);
+		rig.lobby.tick(5001); // the first 0x42
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 1);
+		const uint32_t give_up_at = 10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 1;
+		rig.lobby.tick(give_up_at); // a re-send due, then the state-1 give-up
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 2);
+		CHECK(rig.fatals.empty());
+		const uint32_t validation_at = give_up_at + SESSION_CONNECT_RETRANSMIT_MS + 1;
+		rig.lobby.tick(validation_at); // a re-send due, then the validation wait's NWEC42
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 3);
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC42" });
+		CHECK(rig.state_at_fatal == ClientSession::State::Auth);
+		rig.lobby.close();
+	}
+}
+
+// D-NET-NEW-L9-19: the connection's 0x42 is its state machine's alone. The 0x81 enters the connect
+// state, stamping its entry and the last 0x42 one retransmit interval back, and sends nothing; the
+// 0x42 goes at the first pump whose clock has passed the 0x81's, then each time more than the
+// interval passed since the last 0x42 (not since the last 0x41).
+// [orig: CNapiNPConnection_InitFromSession @0x626320 - +0x5E0 = now @0x62648A, +0x5E4 = now -
+//  +0x5B0 @0x626490..0x626499; CNapiNPConnection_PumpStateMachine @0x6292E0 case 3 - the test
+//  @0x629580..0x629588, the stamp @0x62958F, CNapiNPConnection_SendClientJoin @0x61FE20 (its one
+//  caller @0x629595); CNapiGameSession_InitPlayerConnection @0x4D4160 - +0x5B0 = 3000 @0x4D4318]
+void check_first_join_timing() {
+	Rig rig;
+	rig.start(10); // the first 0x41 at 11
+	const std::vector<uint8_t> hello = rig.last(SESSION_OPCODE_CLIENT_HELLO);
+	rig.session.inbound.push_back({ kServer, server_hello_to(hello) });
+	rig.lobby.tick(2000);
+	CHECK(rig.lobby.session() != nullptr &&
+			rig.lobby.session()->state() == ClientSession::State::Auth);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 0);
+	rig.lobby.tick(2000); // a frame whose clock has not passed the 0x81's
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 0);
+	rig.lobby.tick(2001);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 1);
+	// The re-send counts from that 0x42: not at the 0x41's interval (11 + 3001), only past 2001 + 3000.
+	rig.lobby.tick(11 + SESSION_CONNECT_RETRANSMIT_MS + 1);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 1);
+	rig.lobby.tick(2001 + SESSION_CONNECT_RETRANSMIT_MS);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 1);
+	rig.lobby.tick(2001 + SESSION_CONNECT_RETRANSMIT_MS + 1);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 2);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_HELLO) == 1); // no 0x41 once the 0x81 is taken
+	rig.lobby.close();
+}
+
 int main() {
+	check_head_pump_resends();
+	check_first_join_timing();
 	check_host_player_add_sends_update();
 	check_connect_or_host_lines();
 	check_escape_legs();

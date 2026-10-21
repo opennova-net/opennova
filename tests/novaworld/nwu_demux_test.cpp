@@ -345,6 +345,11 @@ int main() {
 		lobby.tick(kFirstAnnounceAt + SESSION_CONNECT_RETRANSMIT_MS + 2);
 		CHECK(lobby.session()->state() == ClientSession::State::Auth);
 		CHECK(lobby.nw_peer() == second);
+		// The 0x81's frame sends nothing; the 0x42 goes at the first pump past it.
+		// [orig: CNapiNPConnection_InitFromSession @0x626320 - @0x626490..0x626499;
+		//  CNapiNPConnection_PumpStateMachine @0x6292E0 case 3 @0x629580..0x62958F]
+		CHECK(session.sent.empty());
+		lobby.tick(kFirstAnnounceAt + SESSION_CONNECT_RETRANSMIT_MS + 3);
 		CHECK(session.sent.size() == 1);
 		CHECK(!session.sent.empty() && session.sent[0].first == second &&
 		      opcode_of(session.sent[0].second) == SESSION_OPCODE_CLIENT_AUTH);

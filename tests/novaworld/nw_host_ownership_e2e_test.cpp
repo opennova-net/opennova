@@ -298,9 +298,11 @@ private:
 			net::udp_send_to(socket_.get(), service_, dg.data(), dg.size());
 	}
 
-	// Receive, dispatch and answer until `done` holds (the session clock stays put).
+	// Receive, dispatch and answer until `done` holds, the session clock one millisecond on each
+	// round (a 0x81's 0x42 goes at the first pump past it).
 	bool drive(const std::function<bool()> &done, int rounds) {
 		for (int i = 0; i < rounds && !done(); ++i) {
+			session_.set_clock_ms(++clock_ms_);
 			uint8_t buf[4096];
 			net::Endpoint from;
 			const int n = socket_.is_valid()

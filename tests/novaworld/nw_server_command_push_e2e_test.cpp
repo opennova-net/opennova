@@ -174,11 +174,13 @@ int main(int argc, char **argv) {
 	std::vector<Notice> notices;
 	// The host's receive pump for up to `ms`: every datagram `drop` passes over is fed to the
 	// session, each one its own receive batch (the 0x44 tail, then the send pump), until `done`.
+	uint32_t session_clock = 0; // the session's clock
 	auto service = [&](int ms, const std::function<bool(const Seen &)> &drop,
 	                   const std::function<bool()> &done) {
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
 		uint8_t rx[4096];
 		while (std::chrono::steady_clock::now() < deadline && !done()) {
+			session.set_clock_ms(++session_clock); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 			opennova::net::Endpoint from;
 			const int n = opennova::net::udp_recv_from(client, rx, sizeof rx, from, 20);
 			std::vector<std::vector<uint8_t>> out;

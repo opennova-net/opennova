@@ -154,7 +154,14 @@ int main() {
 	std::vector<std::vector<uint8_t>> out;
 	expect(session.handle_datagram(server_hello_dg.data(), server_hello_dg.size(), out),
 	       "client accepts ServerHello");
-	expect(out.size() == 1, "client replies with exactly one datagram (the ClientAuth)");
+	// The 0x81 enters the connect state and sends nothing; the 0x42 is the state machine's, at
+	// the first pump past the 0x81's tick. [orig: CNapiNPConnection_InitFromSession @0x626320 -
+	//  @0x626490..0x626499; CNapiNPConnection_PumpStateMachine @0x6292E0 case 3
+	//  @0x629580..0x62958F]
+	expect(out.empty(), "the 0x81 itself sends nothing");
+	session.set_clock_ms(1);
+	session.pump(out);
+	expect(out.size() == 1, "the next pump sends exactly one datagram (the ClientAuth)");
 
 	if (!out.empty()) {
 		uint8_t auth_op = 0;

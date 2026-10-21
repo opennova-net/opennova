@@ -374,12 +374,29 @@ std::function<ConnectionKeys()> fixed_keys(uint32_t ck) {
 	return [ck]() { return ConnectionKeys{ ck, make_dev_scrk() }; };
 }
 
+// The 0x81 `s_hello` taken one millisecond ahead of the test's clock 0, then a pump at 0: the
+// connection enters its connect state and sends nothing, and its 0x42 goes at the first pump past
+// the 0x81's tick, so the rest of a handshake runs at 0 as the tests keep it. `out` gets what the
+// pump sent (the 0x42); false when the 0x81 was refused or itself sent anything.
+// [orig: CNapiNPConnection_InitFromSession @0x626320 - +0x5E0 = now @0x62648A, +0x5E4 = now -
+//  +0x5B0 @0x626490..0x626499; CNapiNPConnection_PumpStateMachine @0x6292E0 case 3 - the test
+//  @0x629580..0x629588, the stamp @0x62958F, CNapiNPConnection_SendClientJoin (the call @0x629595)]
+bool take_hello(ClientSession &client, const std::vector<uint8_t> &s_hello,
+                std::vector<std::vector<uint8_t>> &out) {
+	client.set_clock_ms(0xFFFFFFFFu);
+	const bool taken = client.handle_datagram(s_hello.data(), s_hello.size(), out);
+	if (!out.empty()) return false;
+	client.set_clock_ms(0);
+	client.pump(out);
+	return taken;
+}
+
 // Run one fresh ClientSession through the whole lobby handshake against `server`
 // (ClientHello .. ServerVerifyResult and its ACK); true when it reached Verified.
 bool bring_up(MiniServer &server, ClientSession &client) {
 	std::vector<std::vector<uint8_t>> out;
 	const auto s_hello = server.respond(client.start());
-	if (!client.handle_datagram(s_hello.data(), s_hello.size(), out) || out.size() != 1) return false;
+	if (!take_hello(client, s_hello, out) || out.size() != 1) return false;
 	const auto s_auth = server.respond(out[0]);
 	out.clear();
 	if (!client.handle_datagram(s_auth.data(), s_auth.size(), out) || !out.empty()) return false;
@@ -874,7 +891,7 @@ void test_client_correlates_handshake_echoes() {
 			server_hello_to_bytes(build_server_hello(rejected_client_hello, 0x7F000001u, 5000)));
 	out.clear();
 	ClientAuth rejected_auth;
-	expect(rejected.handle_datagram(rejected_server_hello.data(), rejected_server_hello.size(), out) &&
+	expect(take_hello(rejected, rejected_server_hello, out) &&
 	               out.size() == 1 && server_decode_inbound(out[0], opcode, body) &&
 	               parse_client_auth(body.data(), body.size(), rejected_auth),
 	       "reject leg reaches Auth");
@@ -910,8 +927,7 @@ void test_client_correlates_handshake_echoes() {
 			server_hello_to_bytes(build_server_hello(detailed_client_hello, 0x7F000001u, 5000)));
 	out.clear();
 	ClientAuth detailed_auth;
-	expect(detailed.handle_datagram(
-				   detailed_server_hello.data(), detailed_server_hello.size(), out) &&
+	expect(take_hello(detailed, detailed_server_hello, out) &&
 					out.size() == 1 && server_decode_inbound(out[0], opcode, body) &&
 					parse_client_auth(body.data(), body.size(), detailed_auth),
 			"detailed reject reaches Auth");
@@ -941,8 +957,7 @@ void test_client_correlates_handshake_echoes() {
 			server_hello_to_bytes(build_server_hello(accepting_client_hello, 0x7F000001u, 5000)));
 	out.clear();
 	ClientAuth accepting_auth;
-	expect(accepting.handle_datagram(
-				   accepting_server_hello.data(), accepting_server_hello.size(), out) &&
+	expect(take_hello(accepting, accepting_server_hello, out) &&
 					out.size() == 1 && server_decode_inbound(out[0], opcode, body) &&
 					parse_client_auth(body.data(), body.size(), accepting_auth),
 			"accept reaches Auth");
@@ -1010,7 +1025,7 @@ void test_client_reads_the_server_hello_as_retail() {
 		const std::vector<uint8_t> datagram =
 				server_encode_outbound(SESSION_OPCODE_SERVER_HELLO, std::move(bytes));
 		out.clear();
-		return client.handle_datagram(datagram.data(), datagram.size(), out);
+		return take_hello(client, datagram, out);
 	};
 	ServerHello foreign_pn = build_server_hello(hello, 0x7F000001u, 5000);
 	foreign_pn.pn = "JOINTOPERATIONS";
@@ -1130,6 +1145,17 @@ void exchange(MiniServer &server, ClientSession &client,
 	for (auto &dg : pump_client(client)) out.push_back(std::move(dg));
 }
 
+// The service's 0x81 to the probe `probe` (taken at `probe_at`, the probe's tick), then the first
+// pump past it, where the re-join's 0x42 goes; `joined` gets both pumps' datagrams.
+// [orig: CNapiNPConnection_InitFromSession @0x626320 - @0x626490..0x626499;
+//  CNapiNPConnection_PumpStateMachine @0x6292E0 case 3 @0x629580..0x62958F]
+void rejoin(MiniServer &server, ClientSession &client, const std::vector<std::vector<uint8_t>> &probe,
+            uint32_t probe_at, std::vector<std::vector<uint8_t>> &joined) {
+	exchange(server, client, probe, joined);
+	client.set_clock_ms(probe_at + 1);
+	for (auto &dg : pump_client(client)) joined.push_back(std::move(dg));
+}
+
 // Deterministic keys for the reconnect tests, as the connection's 0x81s draw them (D-NET-704):
 // the first connect's `connect_key`, then each re-join's `first_key`, `first_key` + 1, ... with
 // the SCRKs RECONNECTSCRK0..., RECONNECTSCRK1...
@@ -1209,7 +1235,7 @@ void test_reconnect_schedule() {
 	std::vector<std::vector<uint8_t>> out;
 	client.pump(out);
 	expect(client.reconnecting() && client.disconnect_count() == 1, "the reap starts the reconnect");
-	expect(client.retransmit_stage_datagram().empty(),
+	expect(client.reannounce_datagram().empty(),
 	       "the owner's stage retransmit stands down while reconnecting");
 
 	// Long enough for the gap to reach its 60000 ms cap (sixty windows).
@@ -1297,10 +1323,10 @@ void test_reconnect_replay() {
 	               client.play_state() == ClientSession::PlayState::Idle,
 	       "replay: the disconnect callback clears the NWUID, the web domain and the play leg");
 
-	uint32_t t = 1;
-	if (!expect(pump_until_probe(client, t, 5000, out) != 0, "replay: the probe goes out")) return;
+	const uint32_t probe_at = pump_until_probe(client, 1, 5000, out);
+	if (!expect(probe_at != 0, "replay: the probe goes out")) return;
 	std::vector<std::vector<uint8_t>> joined;
-	exchange(server, client, out, joined);
+	rejoin(server, client, out, probe_at, joined);
 	if (!expect(joined.size() == 1 && client.state() == ClientSession::State::Auth,
 	            "replay: the ServerHello re-joins with one 0x42")) return;
 	expect(client.client_key() == 0x51515100u && client.client_scrk().rfind("RECONNECTSCRK0", 0) == 0,
@@ -1391,9 +1417,10 @@ void test_reconnect_rehost() {
 	expect(client.host_gsid().empty() && client.session_role() == ClientSession::kSessionRoleHosting &&
 	               client.host_state() == ClientSession::HostState::Idle,
 	       "rehost: the drop clears the GSID and the host leg, the hosting word stays");
-	if (!expect(pump_until_probe(client, 240002, 5000, out) != 0, "rehost: the probe goes out")) return;
+	const uint32_t probe_at = pump_until_probe(client, 240002, 5000, out);
+	if (!expect(probe_at != 0, "rehost: the probe goes out")) return;
 	std::vector<std::vector<uint8_t>> joined, up, verify, rehost;
-	exchange(server, client, out, joined);
+	rejoin(server, client, out, probe_at, joined);
 	exchange(server, client, joined, up);
 	expect(server.last_dcnt == 1, "rehost: the re-join counts the disconnect");
 	up.clear();
@@ -1552,8 +1579,8 @@ void test_reconnect_join_timeout() {
 	const auto hello = server.respond(out[0]);
 	std::vector<std::vector<uint8_t>> joined;
 	client.handle_datagram(hello.data(), hello.size(), joined);   // the ServerHello at probe_at
-	if (!expect(joined.size() == 1 && client.state() == ClientSession::State::Auth,
-	            "join timeout: the ServerHello sends the first 0x42")) return;
+	if (!expect(joined.empty() && client.state() == ClientSession::State::Auth,
+	            "join timeout: the ServerHello enters the 0x42 leg and sends nothing")) return;
 	std::vector<uint32_t> resends;
 	uint32_t closed_at = 0;
 	uint32_t reprobe_at = 0;
@@ -1565,8 +1592,12 @@ void test_reconnect_join_timeout() {
 		if (reprobe_at == 0 && count_opcode(pumped, SESSION_OPCODE_CLIENT_HELLO) != 0) reprobe_at = t;
 		if (closed_at == 0 && client.state() == ClientSession::State::Closed) closed_at = t;
 	}
-	expect(resends.size() == 6 && resends[0] == probe_at + 3001 && resends[5] == probe_at + 6 * 3001,
-	       "join timeout: the 0x42 re-sends every > 3000 ms");
+	// The first 0x42 at the first pump past the ServerHello, then every > 3000 ms from the last.
+	// [orig: CNapiNPConnection_InitFromSession @0x626320 - @0x626490..0x626499;
+	//  PumpStateMachine case 3 @0x629580..0x62958F]
+	expect(resends.size() == 7 && resends[0] == probe_at + 1 &&
+	               resends[6] == probe_at + 1 + 6 * 3001,
+	       "join timeout: the first 0x42 at the next pump, then every > 3000 ms");
 	expect(closed_at == probe_at + 20001, "join timeout: the leg gives up past 20000 ms");
 	// D-NET-453: the give-up keeps JFC 2, JFP 0 and an empty JFS on the down connection.
 	// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 - @0x629525..0x629539]
@@ -1604,6 +1635,9 @@ void test_reconnect_rejoin_rejected() {
 	const auto hello = server.respond(out[0]);
 	std::vector<std::vector<uint8_t>> joined;
 	client.handle_datagram(hello.data(), hello.size(), joined);
+	expect(joined.empty(), "rejected re-join: the ServerHello itself sends nothing");
+	client.set_clock_ms(probe_at + 1); // the 0x42 at the first pump past the ServerHello
+	client.pump(joined);
 	ClientAuth rejoin;
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -1691,6 +1725,9 @@ void test_reconnect_takes_a_hello_only_while_probing() {
 	expect(client.takes_server_hello(hello.data(), hello.size()), "probe gate: the window claims it");
 	std::vector<std::vector<uint8_t>> joined;
 	client.handle_datagram(hello.data(), hello.size(), joined);
+	expect(joined.empty(), "probe gate: the window's 0x81 itself sends nothing");
+	client.set_clock_ms(probe_at + 1); // the 0x42 at the first pump past the 0x81
+	client.pump(joined);
 	if (!expect(joined.size() == 1 && client.state() == ClientSession::State::Auth &&
 	                    client.client_key() == 0x56565600u,
 	            "probe gate: the window's 0x81 re-joins with one 0x42"))
@@ -1742,9 +1779,10 @@ void test_reconnect_verified_word() {
 			server_goodbye_to_bytes(client.client_key(), stop));
 	std::vector<std::vector<uint8_t>> out;
 	client.handle_datagram(goodbye.data(), goodbye.size(), out);
-	if (!expect(pump_until_probe(client, 1, 5000, out) != 0, "verified word: the probe goes out")) return;
+	const uint32_t probe_at = pump_until_probe(client, 1, 5000, out);
+	if (!expect(probe_at != 0, "verified word: the probe goes out")) return;
 	std::vector<std::vector<uint8_t>> joined, up, verify, after;
-	exchange(server, client, out, joined);
+	rejoin(server, client, out, probe_at, joined);
 	exchange(server, client, joined, up);
 	up.clear();
 	periodic(client, up);
@@ -2068,8 +2106,8 @@ int main() {
 	auto s_hello = server.respond(d_hello);
 	expect(!s_hello.empty(), "ServerHello datagram non-empty");
 	std::vector<std::vector<uint8_t>> out;
-	expect(client.handle_datagram(s_hello.data(), s_hello.size(), out),
-	       "client handles ServerHello");
+	expect(take_hello(client, s_hello, out),
+	       "client handles ServerHello (its 0x42 at the next pump)");
 	expect(client.state() == ClientSession::State::Auth, "client in Auth after ServerHello");
 	expect(client.server_host_key() == server.advertised_hk,
 	       "client learned the advertised host key");
@@ -2531,7 +2569,7 @@ int main() {
 		std::vector<std::vector<uint8_t>> o2;
 		auto h2 = client2.start();
 		auto sh2 = server2.respond(h2);
-		expect(client2.handle_datagram(sh2.data(), sh2.size(), o2),
+		expect(take_hello(client2, sh2, o2),
 		       "D-NET-20 flow: ServerHello handled");
 		auto sa2 = server2.respond(o2[0]);
 		o2.clear();

@@ -142,6 +142,7 @@ int main() {
 	send(session.start());
 	uint8_t rx[4096];
 	for (int i = 0; i < 40 && !session.is_verified(); ++i) {
+		session.set_clock_ms(static_cast<uint32_t>(i + 1)); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 		opennova::net::Endpoint from;
 		const int n = opennova::net::udp_recv_from(client, rx, sizeof rx, from, 200);
 		if (n > 0 && first_server_auth.empty() &&

@@ -138,6 +138,7 @@ struct Host {
 	uint16_t port = 0;
 	net::Endpoint lobby;
 	std::vector<Notice> notices;
+	uint32_t service_clock = 0; // the session's clock
 
 	Host(uint16_t lobby_port, uint32_t index) : session(config_of(index)) {
 		socket = net::udp_bind(0, &port);
@@ -169,6 +170,7 @@ struct Host {
 		const auto deadline = Clock::now() + std::chrono::milliseconds(ms);
 		uint8_t rx[4096];
 		while (Clock::now() < deadline && !done()) {
+			session.set_clock_ms(++service_clock); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 			net::Endpoint from;
 			const int n = net::udp_recv_from(socket, rx, sizeof rx, from, 20);
 			std::vector<std::vector<uint8_t>> out;
@@ -622,7 +624,8 @@ struct RelistHost {
 		}
 		return done();
 	}
-	bool drive(const std::function<bool()> &done, int ms) { return turns(done, ms, 0); }
+	// One millisecond a turn: a 0x81's 0x42 goes at the first pump past it.
+	bool drive(const std::function<bool()> &done, int ms) { return turns(done, ms, 1); }
 	bool step(const std::function<bool()> &done, int ms) { return turns(done, ms, 20); }
 };
 

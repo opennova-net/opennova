@@ -171,13 +171,13 @@ int session_web_domain(uint16_t port, std::string &web_domain) {
 	};
 	send(session.start());
 	for (int i = 0; i < 25 && session.server_web_domain().empty(); ++i) {
+		session.set_clock_ms(static_cast<uint32_t>(i + 1)); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 		uint8_t rx[4096];
 		net::Endpoint from{};
 		const int n = net::udp_recv_from(client.get(), rx, sizeof(rx), from, 200);
-		if (n <= 0)
-			continue;
 		std::vector<std::vector<uint8_t>> out;
-		TEST_EXPECT(session.handle_datagram(rx, static_cast<size_t>(n), out));
+		if (n > 0)
+			TEST_EXPECT(session.handle_datagram(rx, static_cast<size_t>(n), out));
 		session.finish_receive_batch(out);
 		session.pump(out);
 		for (const auto &datagram : out)

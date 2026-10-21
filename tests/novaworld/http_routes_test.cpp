@@ -2950,6 +2950,7 @@ private:
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
 		uint8_t rx[4096];
 		while (std::chrono::steady_clock::now() < deadline && !done()) {
+			session_.set_clock_ms(++clock_ms_); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 			net::Endpoint from;
 			const int n = net::udp_recv_from(socket_.get(), rx, sizeof rx, from, 20);
 			std::vector<std::vector<uint8_t>> out;
@@ -2964,6 +2965,7 @@ private:
 
 	Cookies cookies_; // before session_, whose Cookie lists read it
 	opennova::ClientSession session_;
+	uint32_t clock_ms_ = 0; // the session's clock
 	net::ScopedSocket socket_;
 	uint16_t port_ = 0;
 	net::Endpoint service_{};

@@ -114,6 +114,13 @@ bool answer_hello(NwuLobbySession &lobby, MemorySocket &session, ClientAuth &aut
 	session.inbound.push_back({ kServer, nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(build_server_hello(hello, 0x7F000001u, 40000))) });
 	lobby.tick(20);
+	// The 0x81's frame enters the connect state and sends nothing; the 0x42 goes at the first
+	// pump past it. [orig: CNapiNPConnection_InitFromSession @0x626320 - +0x5E4 = now - +0x5B0
+	//  @0x626490..0x626499; CNapiNPConnection_PumpStateMachine @0x6292E0 case 3 - the test
+	//  @0x629580..0x629588, CNapiNPConnection_SendClientJoin (the call @0x629595)]
+	if (last_sent(session, SESSION_OPCODE_CLIENT_AUTH, body))
+		return false;
+	lobby.tick(21);
 	return last_sent(session, SESSION_OPCODE_CLIENT_AUTH, body) &&
 			parse_client_auth(body.data(), body.size(), auth);
 }

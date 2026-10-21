@@ -456,6 +456,26 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 		send(first);
 	}
 	if (session_socket_ != nullptr && session_) poll_session();
+	// The frame's head pump, after the receive and ahead of the periodic update's give-up tests
+	// and the menu state's work: the first connect's 0x41 re-announce every
+	// SESSION_CONNECT_RETRANSMIT_MS while its poll runs (here) and the 0x42 leg of the state
+	// machine (the session's pump, inside poll_session), so a send that falls due in a give-up's
+	// or an ESC's frame still goes. Once the poll ends the re-announce stands down for good: a
+	// reconnect's re-probe is the session's own (ClientSession::reconnecting).
+	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - the pump @0x558DFA ahead of the
+	//  state's case; CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - NapiNPManager_Pump
+	//  @0x4D441F, NapiNPProtocol_Pump @0x4D442E, the give-up tests @0x4D4436..0x4D44B1;
+	//  NapiNPProtocol_Pump @0x62A650 - CNapiNPConnection_PumpFlags (the call @0x62A6F8);
+	//  CNapiNPConnection_PumpFlags @0x629780 - PumpEnumeratorAndSend @0x6297B7,
+	//  PumpStateMachine @0x6297C3; CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0]
+	if (session_socket_ != nullptr && session_ && connect_polling() && !session_->reconnecting() &&
+			session_->state() == ClientSession::State::Hello &&
+			clock_ms_ - connect_last_send_ms_ > SESSION_CONNECT_RETRANSMIT_MS) {
+		const std::vector<uint8_t> again = session_->reannounce_datagram();
+		connect_last_send_ms_ = clock_ms_;
+		if (!again.empty())
+			send(again);
+	}
 	if (session_socket_ != nullptr && session_)
 		give_up_stalled_connect();
 
@@ -499,21 +519,7 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 
 	if (session_socket_ == nullptr || !session_)
 		return;
-	if (poll_connect())
-		return; // a give-up was reported
-	// The first connect's stage datagram (the 0x41 while the probe runs, the 0x42 while it
-	// awaits its 0x82) is re-sent every SESSION_CONNECT_RETRANSMIT_MS while its poll runs. Once
-	// the poll ends it stands down for good: a reconnect's re-probe and re-join are the
-	// session's own (ClientSession::reconnecting).
-	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0; PumpStateMachine case 3
-	//  @0x629508]
-	if (connect_polling() && !session_->reconnecting() &&
-			clock_ms_ - connect_last_send_ms_ > SESSION_CONNECT_RETRANSMIT_MS) {
-		const std::vector<uint8_t> again = session_->retransmit_stage_datagram();
-		connect_last_send_ms_ = clock_ms_;
-		if (!again.empty())
-			send(again);
-	}
+	poll_connect();
 }
 
 // The periodic update's give-ups of a first connect (the hosting/playing word 0): its connection

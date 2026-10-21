@@ -52,6 +52,21 @@ void expect(bool cond, const char *what) {
 	}
 }
 
+// The 0x81 `data` taken one millisecond ahead of a session's clock 0 (the clock wraps as
+// GetTickCount does), then a pump at 0: the connection enters its connect state and sends nothing,
+// and its 0x42 goes at the first pump past the 0x81's tick, so the rest of a handshake runs at 0.
+// `out` gets the pump's datagrams (the 0x42); false when the 0x81 was refused.
+// [orig: CNapiNPConnection_InitFromSession @0x626320 - @0x626490..0x626499;
+//  CNapiNPConnection_PumpStateMachine @0x6292E0 case 3 @0x629580..0x62958F]
+bool take_hello_at_zero(opennova::ClientSession &session, const uint8_t *data, size_t size,
+                        std::vector<std::vector<uint8_t>> &out) {
+	session.set_clock_ms(0xFFFFFFFFu);
+	const bool taken = session.handle_datagram(data, size, out);
+	session.set_clock_ms(0);
+	session.pump(out);
+	return taken;
+}
+
 opennova::net::Endpoint loopback_ep(uint16_t port) {
 	opennova::net::Endpoint ep;
 	ep.ip = {127, 0, 0, 1};
@@ -205,8 +220,7 @@ int main() {
 				receive_reordered(inbound, 1000);
 		expect(got_old_hello, "old lobby Hello receives ServerHello");
 		if (got_old_hello) {
-			expect(old_session.handle_datagram(
-					       inbound.data(), inbound.size(), old_out) &&
+			expect(take_hello_at_zero(old_session, inbound.data(), inbound.size(), old_out) &&
 			               old_out.size() == 1,
 			       "old ServerHello produces delayed ClientAuth");
 		}
@@ -226,8 +240,7 @@ int main() {
 		expect(got_fresh_hello,
 		       "replacement lobby Hello receives ServerHello");
 		if (got_fresh_hello) {
-			expect(fresh_session.handle_datagram(
-					       inbound.data(), inbound.size(), fresh_out) &&
+			expect(take_hello_at_zero(fresh_session, inbound.data(), inbound.size(), fresh_out) &&
 			               fresh_out.size() == 1,
 			       "replacement ServerHello produces matching ClientAuth");
 		}
@@ -384,6 +397,7 @@ int main() {
 	uint8_t rx[4096];
 	bool verified = false;
 	for (int i = 0; i < 40 && !verified; ++i) {
+		session.set_clock_ms(static_cast<uint32_t>(i + 1)); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 		opennova::net::Endpoint from;
 		const int n = opennova::net::udp_recv_from(client, rx, sizeof rx, from, 200);
 		std::vector<std::vector<uint8_t>> out;
@@ -560,9 +574,12 @@ int main() {
 				opennova::make_dev_scrk() };
 		};
 		opennova::ClientSession recon(rcfg);
-		// Receive, dispatch and answer until `done` holds (the session clock stays put).
+		// Receive, dispatch and answer until `done` holds, the session clock one millisecond on
+		// each round (a 0x81's 0x42 goes at the first pump past it).
+		uint32_t recon_clock = 0;
 		auto drive = [&](auto done, int rounds) {
 			for (int i = 0; i < rounds && !done(); ++i) {
+				recon.set_clock_ms(++recon_clock);
 				uint8_t buf[4096];
 				opennova::net::Endpoint from;
 				const int n = recon_client.is_valid()
@@ -603,7 +620,8 @@ int main() {
 		expect(hosting && rid_before != 0 && !gsid.empty(), "reconnect: the host row is listed");
 
 		// The session's own reap: its 0x46 burst drops the listener's connection.
-		recon.set_clock_ms(240001);
+		recon_clock = 240001;
+		recon.set_clock_ms(recon_clock);
 		std::vector<std::vector<uint8_t>> burst;
 		recon.pump(burst);
 		expect(recon.reconnecting() && burst.size() == 4, "reconnect: the reap sends the 0x46 burst");
@@ -619,6 +637,7 @@ int main() {
 		// The re-probe: past the 1000 ms first delay the window opens and the 0x41 goes out.
 		bool probed = false;
 		for (uint32_t t = 240002; t < 250000 && !probed; ++t) {
+			recon_clock = t;
 			recon.set_clock_ms(t);
 			std::vector<std::vector<uint8_t>> pumped;
 			recon.pump(pumped);
@@ -686,8 +705,7 @@ int main() {
 		const bool got_hello = receive_collision(inbound);
 		expect(got_hello, "CI-collision peer receives ServerHello");
 		if (got_hello) {
-			expect(collision.handle_datagram(
-					       inbound.data(), inbound.size(), out) &&
+			expect(take_hello_at_zero(collision, inbound.data(), inbound.size(), out) &&
 			               out.size() == 1,
 			       "CI-collision ServerHello produces ClientAuth");
 		}
@@ -776,8 +794,7 @@ int main() {
 		const bool got_retry_hello = receive_retry(inbound);
 		expect(got_retry_hello, "ClientAuth retry receives ServerHello");
 		if (got_retry_hello) {
-			expect(retry_session.handle_datagram(
-					       inbound.data(), inbound.size(), out) &&
+			expect(take_hello_at_zero(retry_session, inbound.data(), inbound.size(), out) &&
 			               out.size() == 1,
 			       "ClientAuth retry ServerHello produces one ClientAuth");
 		}

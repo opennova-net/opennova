@@ -268,20 +268,14 @@ std::vector<uint8_t> ClientSession::start() {
 	return build_client_hello();
 }
 
-std::vector<uint8_t> ClientSession::retransmit_stage_datagram() {
-	// A reconnect's 0x41 / 0x42 ride the session's own pump (pump()).
+std::vector<uint8_t> ClientSession::reannounce_datagram() {
+	// A reconnect's 0x41 rides the session's own pump (pump()).
 	if (reconnecting()) return {};
-	switch (state_) {
-		// The re-announce is the enumerator's, which a give-up's NapiTimer_Stop ends.
-		// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the timer gate
-		// @0x6290E0..0x629170]
-		case State::Hello:
-			return first_probe_stopped_ ? std::vector<uint8_t>{} : build_client_hello();
-		case State::Auth:
-			return build_client_auth();
-		default:
-			return {};
-	}
+	// The re-announce is the enumerator's, which a give-up's NapiTimer_Stop ends.
+	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the timer gate
+	// @0x6290E0..0x629170]
+	if (state_ != State::Hello || first_probe_stopped_) return {};
+	return build_client_hello();
 }
 
 // The shared identity struct-fill (declared in client_session.h) — used by ClientSession below AND by
@@ -531,19 +525,27 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 		server_sk_ = 0;
 		server_scrk_.clear();
 		cs_ = novaworld_service_cs_config(cfg_.max_packet_size);
-		state_ = State::Auth;
-		reconnect_.join_started_ms = clock_ms_;
-		reconnect_.join_last_send_ms = clock_ms_;
+		enter_connect_state();
 		reconnect_.next_ms = clock_ms_ + SESSION_RECONNECT_FIRST_DELAY_MS + SESSION_JOIN_TIMEOUT_MS;
-		out.push_back(build_client_auth());
 		return;
 	}
 	// The first connect's InitFromSession draws the CK and the SCRK the 0x42 carries.
 	// [orig: Nwu_HandleServerHello @0x627EBE..0x627EE5 -> CNapiNPConnection_InitFromSession]
 	draw_connection_keys();
 	server_hk_ = sh.hk;       // [Phase 1] the value we must echo in ClientAuth
+	enter_connect_state();
+	(void)out;
+}
+
+// The connect state's entry: nothing goes out here, the 0x42 is the state machine's, at the
+// first pump past the entry (pump_join).
+// [orig: CNapiNPConnection_InitFromSession @0x626320 - +0x5E0 = now @0x62648A, +0x5E4 = now -
+//  +0x5B0 @0x626490..0x626499, state 3 @0x626496; CNapiNPConnection_SendClientJoin @0x61FE20's
+//  one caller is PumpStateMachine case 3 @0x629595]
+void ClientSession::enter_connect_state() {
 	state_ = State::Auth;
-	out.push_back(build_client_auth());
+	join_started_ms_ = clock_ms_;
+	join_last_send_ms_ = clock_ms_ - SESSION_CONNECT_RETRANSMIT_MS;
 }
 
 void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
@@ -821,7 +823,10 @@ void ClientSession::process_periodic_update() {
 //  PumpStateMachine @0x6292e0 case 5 @0x6295a2..0x62961c]
 void ClientSession::pump(std::vector<std::vector<uint8_t>> &out) {
 	if (!receive_clock_armed_ || (state_ != State::Verifying && state_ != State::Verified)) {
-		pump_reconnect(out);
+		if (reconnecting())
+			pump_reconnect(out);
+		else
+			pump_join(out); // the first connect's 0x42 leg
 		return;
 	}
 	// The send leg: with the NOVAWORLDUDP template's zero holdoff and zero send interval, the
@@ -970,6 +975,26 @@ void ClientSession::reset_sequencing() {
 // state machine's 0x42 leg and its schedule tail.
 // [orig: CNapiNPConnection_PumpFlags @0x629780 — PumpEnumeratorAndSend @0x6297b7 ahead of
 //  PumpStateMachine @0x6297c3]
+// Case 3: the join's timeout from the state's entry, which drops back to the down state with no
+// teardown (the connection never came up), else the 0x42 re-sent each time more than the interval
+// passed since the last. [orig: PumpStateMachine @0x629508..0x629595, the timeout
+//  @0x629525..0x629564]
+void ClientSession::pump_join(std::vector<std::vector<uint8_t>> &out) {
+	if (state_ != State::Auth) return;
+	if (clock_ms_ - join_started_ms_ > SESSION_JOIN_TIMEOUT_MS) {
+		// The give-up keeps JFC 2, JFP 0 and an empty JFS on the connection.
+		// [orig: @0x629525..0x629539; the state switch to 4 @0x629556..0x629564]
+		jfc_ = 2;
+		jfp_ = 0;
+		jfs_.clear();
+		state_ = State::Closed;
+		connection_down_ = true;
+	} else if (clock_ms_ - join_last_send_ms_ > SESSION_CONNECT_RETRANSMIT_MS) {
+		join_last_send_ms_ = clock_ms_;
+		out.push_back(build_client_auth());
+	}
+}
+
 void ClientSession::pump_reconnect(std::vector<std::vector<uint8_t>> &out) {
 	if (!reconnecting()) return;
 	// The probe: the same-CI 0x41 at once and then every SESSION_CONNECT_RETRANSMIT_MS while
@@ -982,24 +1007,8 @@ void ClientSession::pump_reconnect(std::vector<std::vector<uint8_t>> &out) {
 		reconnect_.last_probe_ms = clock_ms_;
 		out.push_back(build_client_hello());
 	}
-	// Case 3, the re-join: the 0x42 re-sent every SESSION_CONNECT_RETRANSMIT_MS until
-	// SESSION_JOIN_TIMEOUT_MS from the state-3 entry, which drops back to the down state with
-	// no teardown (the connection never came up). [orig: PumpStateMachine @0x629508..0x629595,
-	//  the timeout @0x629525..0x629564]
-	if (state_ == State::Auth) {
-		if (clock_ms_ - reconnect_.join_started_ms > SESSION_JOIN_TIMEOUT_MS) {
-			// The give-up keeps JFC 2, JFP 0 and an empty JFS on the connection.
-			// [orig: @0x629525..0x629539; the state switch to 4 @0x629556..0x629564]
-			jfc_ = 2;
-			jfp_ = 0;
-			jfs_.clear();
-			state_ = State::Closed;
-			connection_down_ = true;
-		} else if (clock_ms_ - reconnect_.join_last_send_ms > SESSION_CONNECT_RETRANSMIT_MS) {
-			reconnect_.join_last_send_ms = clock_ms_;
-			out.push_back(build_client_auth());
-		}
-	}
+	// Case 3, the re-join's 0x42 leg.
+	pump_join(out);
 	// The schedule tail: past `next`, a re-join in flight pushes the check out by the gap plus
 	// the join timeout; a down connection opens a SESSION_RECONNECT_PROBE_WINDOW_MS probe
 	// window, and a window that ran out closes and waits the gap, which grows each time.
