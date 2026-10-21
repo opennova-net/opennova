@@ -131,9 +131,13 @@ struct RemoteAdminBinding {
 // code 3): exit reason 1 where the running role reads it, a host context's store, else the
 // joiner's, whose user leave sends its CIDEMIS goodbye inside the action
 // (JoinerRole::quit_to_menu), else the single-player world's.
+// The in-game CONFIRM_YES and the HUD quit dialog's yes run it inline, so a joiner's goodbye
+// leaves at the click (the game's quit legs call it ahead of their return to the menu).
 // [orig: Input_HandleActionBinding case 3 @0x49AF26 (g_MissionExitReason = 1),
 //  Sound_PlayInterfaceTriggerSet @0x49AF30 (the shell's tone), the disconnect
-//  @0x49AF38..0x49AF42]
+//  @0x49AF38..0x49AF42; UI_RegisterIngameCallbacks @0x555510 -> UI_IngameConfirmExitCommand
+//  @0x555460 - Game_CloseInGameScreens @0x55546A, Input_HandleActionBinding(3) @0x555479;
+//  the quit dialog's yes in Input_HandleSpecialKeys @0x49C5C0]
 void input_action_exit(const RemoteAdminBinding &binding);
 
 // The admin server's command half for a process whose sessions come and go, as retail's

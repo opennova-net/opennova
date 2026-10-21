@@ -333,10 +333,8 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 			close()
 			return
 		# In a session the apply sent its 0x2F and selects nothing: the screen
-		# closes (the jmp to the tail, g_WeaponScreenOpen = 0 and
-		# Game_CloseInGameScreens) and the host's grant mounts the kit.
-		# [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - @0x565D9C -> @0x56629F,
-		#  @0x5662A9]
+		# closes (the apply's tail) and the host's grant mounts the kit (engine
+		# inmatch/loadout_submit.h armory_accept_in_session carries the witness).
 		if sim != null and sim.is_mp_session():
 			close()
 			return

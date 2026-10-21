@@ -415,7 +415,14 @@ public:
 	std::vector<ConsoleAction> take_console_actions();
 	// Where a dispatched console action whose arm the role does not own goes: the
 	// embedder's action dispatch by code (its screens' and devices' arms). Unset: the
-	// action goes nowhere.
+	// action goes nowhere. The game's sink takes 3 the exit (input_action_exit), 12 the
+	// deploy pick from the record's parameter (0 the default, 0xFFFE the auto pick, else
+	// the spawn-zone list's index plus one) and the class callback's stance selects, 169
+	// crouch, 170 prone and 172 stand (one C2S 0x1D each).
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 3 @0x49AF26..0x49AF42, case 12
+	//  @0x49B024 (the pick @0x49B0C3..0x49B17B), the class callback @0x49AEB6 ->
+	//  Input_HandleActionBinding_0 @0x4E0420 - cases 169 @0x4E0D77, 170 @0x4E0DF3,
+	//  172 @0x4E0E3E]
 	void set_console_action_sink(ClientConsoleQueueAction sink) {
 		console_action_sink_ = std::move(sink);
 	}

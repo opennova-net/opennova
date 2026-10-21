@@ -1577,9 +1577,8 @@ func _on_camera_escape() -> void:
 
 ## The quit dialog's yes runs input action 3 inline: the Exit Mission tone, then the
 ## exit (a joiner's CIDEMIS goodbye leaves at once, so no later C2S follows the
-## click), and the shell returns to the menu (the host's session goes with it).
-## [orig: UI_IngameConfirmExitCommand @0x555460 - Game_CloseInGameScreens @0x55546A,
-##  Input_HandleActionBinding(3) @0x555479; case 3 @0x49AF26..0x49AF42]
+## click), and the shell returns to the menu (the host's session goes with it)
+## (engine inmatch/remote_admin.h input_action_exit carries the witness).
 func _on_quit_confirmed() -> void:
 	var audio: MissionAudio = _world.get_mission_audio() if _world != null else null
 	if audio != null:
@@ -1648,9 +1647,8 @@ func _on_return_to_menu() -> void:
 
 ## The menu shell's CONFIRM_YES. The INGAME screen's (the in-game menu over live
 ## play) runs input action 3 inline, as the quit dialog's yes does, so a joiner's
-## goodbye leaves at the click; then the shell returns to the menu.
-## [orig: UI_RegisterIngameCallbacks @0x555510 -> UI_IngameConfirmExitCommand
-##  @0x555460 - Input_HandleActionBinding(3) @0x555479]
+## goodbye leaves at the click; then the shell returns to the menu (engine
+## inmatch/remote_admin.h input_action_exit carries the witness).
 func _on_menu_return_to_menu() -> void:
 	if _state == State.PAUSED and not _world_load_pending and _world != null 			and _world.get_sim() != null:
 		_world.get_sim().input_action_exit()

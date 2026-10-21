@@ -100,7 +100,8 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 //  WeaponSlotPool_ResetAllEntries @0x565D58..0x565D66, g_ArmorySelectedClass
 //  @0x565D6B / @0x565D86, g_CurrentWeaponSlot @0x565D73, the team
 //  `movsx ecx, byte [eax+162h]` @0x565D8C, NetPacket_SendLoadoutSubmit @0x565D94, the jmp to
-//  the tail @0x565D9C;
+//  the tail @0x565D9C (g_WeaponScreenOpen = 0 @0x56629F, Game_CloseInGameScreens @0x5662A9:
+//  the armory screen closes with no select or mount);
 //  NetPacket_SendLoadoutSubmit @0x42CDC0 - the slot resolve @0x42CE2D..0x42CE8B, the name
 //  gate @0x42CF0B; dfx2.exe NetPacket_SendLoadoutSubmit @0x42EB40 (@0x42EC15..0x42EC3E)]
 LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &local,
