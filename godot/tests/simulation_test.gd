@@ -4769,7 +4769,13 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 		"the ACCEPT re-selected the accepted weapon")
 	assert_true(sim.apply_local_player_loadout([], 9), "the all-NONE kit is a valid apply")
 	assert_eq(sim.get_local_player_class(), 9, "NONE still commits the selected class")
-	assert_eq(sim.get_local_player_weapon_name(), "", "NONE clears the equipped AdmDef")
+	# The all-NONE kit's select finds no slot, and that arm stores no equipped AdmDef: the
+	# body keeps the one the previous ACCEPT selected (engine select_current_slot carries
+	# the witness: Player_SelectWeaponSlot's walk @0x4DD772..0x4DD794 returns 0 at
+	# @0x4DD796..0x4DD799 with no +0x2B0 store; WeaponLoadout_ApplyFromBuffer's select
+	# @0x566285).
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
+		"NONE selects no slot, so the body keeps its equipped AdmDef")
 	assert_true(sim.get_local_player_loadout().is_empty(),
 		"an explicit all-NONE kit remains empty instead of falling back to M4")
 

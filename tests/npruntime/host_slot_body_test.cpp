@@ -18,6 +18,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_player_death.h>
 #include <runtime/inmatch/server_spawn.h>
+#include <net/npwire/character_id.h>
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/player_spawn.h>
@@ -131,6 +132,14 @@ void test_the_row_takes_the_hosts_profile() {
 	profile.char_class[1] = 6;
 	profile.avatar[0] = 3;
 	profile.avatar[1] = 4;
+	// The host's avatar table names both words, so the create's re-resolve keeps them (a word
+	// it lacks packs the side's default: character_registry's own-row block) [orig:
+	// PlayerSession_InitFromProfile @0x50CA80 - CAvatarDefs_HasPackedId @0x50CAC4, the pack
+	// @0x50CADA].
+	for (const uint16_t id : {profile.char_id[0], profile.char_id[1]})
+		r.ctx->characters.add_entry(0, 0, 0, character_id::nationality(id),
+				character_id::division(id), character_id::combo(id), character_id::alignment(id),
+				0, false);
 	inmatch::PlayerSession_InitHostRowFromProfile(*r.ctx, profile);
 	const inmatch::HostSlotRow &host = r.ctx->host_slot;
 	CHECK(host.player_class == 6);

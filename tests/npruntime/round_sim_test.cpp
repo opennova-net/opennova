@@ -1521,7 +1521,12 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 			return false;
 	}
 	{
-		// A body already flagged dead takes nothing (the callback's first return).
+		// An NPC (the org callback) already flagged dead: the callback has no dead return, so
+		// its select restages the bone / quadrant death; only the roll tests the dead bit (the
+		// plyr callback's first return is a player body's alone, npruntime_player_body_class).
+		// [orig: OrganicClass_HandleEvent @0x407310 - the event-1 arm @0x4073BF, the select's
+		//  store @0x407483 with no dead test ahead of it, the roll's `test byte [esi+24h], 2`
+		//  @0x40755A..0x40755E]
 		DismembermentRig rig(3);
 		w::Entity *victim = rig.world.registry.get(rig.victim);
 		w::AiEntity *body = rig.ai.for_handle(rig.victim);
@@ -1530,8 +1535,10 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		victim->flags |= w::kEntityFlagDead;
 		victim->engine_flags |= w::kEntityFlagDead;
 		rig.fire();
-		if (!expect(body->roll == 0 && victim->death_anim_state == 0,
-		            "a dead body neither rolls nor re-stages [orig: @0x40772f]"))
+		if (!expect(body->roll == 0 &&
+		                    victim->death_anim_state ==
+		                            w::compute_death_anim_state(3, 2, w::death_cause::kBullet),
+		            "a dead NPC does not roll but restages its death [orig: @0x407483, @0x40755E]"))
 			return false;
 	}
 	return true;
