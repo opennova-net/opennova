@@ -2249,6 +2249,74 @@ bool run_tail_carried_word_lands_on_l() {
 // [orig: NapiNPClientMsg_EntityDeath @0x42EB50 - Health = 0 @0x42EBD6, +0x2C0
 //  @0x42EBDF, cb(entity, 4, 0) @0x42EBF5; Entity_HandleDamageAndTriggerZones
 //  @0x407B5E]
+// D-NET-NEW-L2-15's wire face (V-L2-s6's test gap): a seated L killed by a pump that carries a
+// zero 0x0A tail and the S2C 0x13 naming L. The tail stores Health alone, so the 0x13's plyr
+// callback runs past its dead return into the seat leave, which on a client is
+// Entity_SendDetachPacket: one reliable C2S 0x27 [self][the seat's carrier][0].
+// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - the Health store @0x4305DF;
+//  Entity_HandleDamageAndTriggerZones @0x407720 - the dead return @0x40772A..0x40772F, the
+//  parent @0x407B0B, the leave @0x407B0D..0x407B33; Entity_SendDetachPacket @0x435510 - the
+//  reliable 0x27 @0x435596..0x4355A2]
+bool run_a_seated_death_sends_the_seat_leave() {
+	Harness h;
+	w::World &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	world.load_systems();
+	h.role.poll_preload();
+	constexpr uint16_t self_handle = 0x0005;
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, self_handle, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr, "seated death: L spawned")) return false;
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
+	vehicle.position = local->position;
+	vehicle.position.x += 1.0f;
+	vehicle.health = vehicle.health_max = 100;
+	vehicle.team = local->team;
+	w::Seat seat;
+	seat.type = w::SeatType::Passenger;
+	seat.bone_index = 2;
+	seat.retail_slot = 0;
+	seat.source_name = "sitex00";
+	vehicle.seats.push_back(seat);
+	const auto vh = world.registry.spawn(1, vehicle);
+	auto &self = h.role.runtime->state().upsert(self_handle);
+	self.cls = EntityClass::Player;
+	self.type_id = w::kPlayerInfantryTypeId;
+	self.carrier_handle = vh.packed;
+	self.mount_bone = 2;
+	self.state_flags = w::kEntityFlagMounted;
+	self.state_flags_known = true;
+	h.role.run_tick(h.input);
+	local = h.kernel->local.player();
+	if (!expect(local != nullptr && local->mounted && local->mount_target == vh,
+			"seated death: the host's echo seats L")) return false;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	FrameUpdate dead_tail;
+	dead_tail.carried_handle = 0xFFFF;
+	dead_tail.health = 0;
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(dead_tail)),
+					make_protocol_message(s2c::ENTITY_DEATH,
+							std::vector<uint8_t>{0x05, 0x00, 0x2A, 0x00})},
+			packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.socket.datagrams.clear();
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	for (int i = 0; i < 12; ++i) h.role.run_tick(h.input);
+	ProtocolMessage leave;
+	return expect(h.socket.last_message(0x27, leave) && leave.payload.size() == 6 &&
+					leave.payload[0] == 0x05 && leave.payload[1] == 0x00 &&
+					leave.payload[2] == static_cast<uint8_t>(vh.packed) &&
+					leave.payload[3] == static_cast<uint8_t>(vh.packed >> 8),
+			"seated death: the 0x13's plyr callback sends the seat leave's C2S 0x27");
+}
+
 bool run_entity_death_names_l() {
 	Harness h;
 	h.role.poll_preload();
@@ -3544,6 +3612,7 @@ int main() {
 	ok &= run_tail_armor_lands_on_l();
 	ok &= run_tail_carried_word_lands_on_l();
 	ok &= run_entity_death_names_l();
+	ok &= run_a_seated_death_sends_the_seat_leave();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_respawn_key_before_the_first_tail();
