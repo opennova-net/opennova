@@ -1488,27 +1488,33 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	advance_zone_timers();
 	advance_tracked_window();
 	view_.refresh_minimap_live_markers();
-	const bool preround_active = view_.state().preround_delay_seconds != 0;
 	// Client_ProcessNetworkFrame and its maintenance continue, but the later
 	// Entity_UpdateAllEntities body is skipped while the phase-0 mirror is
-	// nonzero. These portable movers are that entity body, not network work.
-	// [orig: network pump @0x526692; entity gate @0x52672C]
+	// nonzero, and in a session while the round-over gate is up. These portable
+	// movers are that entity body, not network work.
+	// [orig: Game_ProcessMainFrame @0x5263F0 - the network pump @0x526692; the entity
+	//  gate g_ClientPreRoundTimer @0x52672C..0x526732, is_in_session @0x526734..0x52673A,
+	//  g_RoundOver @0x52673C..0x526742, Entity_UpdateAllEntities @0x52674B]
+	const bool session_word = role_ == Role::Joiner ? joiner_ != nullptr && joiner_->in_session()
+	                                                : view_.mp_session();
+	const bool entity_update_skipped = view_.state().preround_delay_seconds != 0 ||
+			(session_word && view_.state().spawn_success_gate);
 	// The remote lean integrator runs once per client frame regardless of role —
 	// the body tick that owns it in retail. [orig: decay @0x4b5c97, then the ramp
 	// @0x4b7dbf/@0x4b7dd6]
-	if (!preround_active) view_.tick_lean();
+	if (!entity_update_skipped) view_.tick_lean();
 	// The remote arms dip rides the same body tick as the lean integrator.
 	// [orig: lean @0x4b5c97 and dip @0x4b5cab, both inside Entity_UpdateInfantryPlayerBody]
-	if (!preround_active) view_.tick_arms_dip();
+	if (!entity_update_skipped) view_.tick_arms_dip();
 	// [orig: Entity_UpdateAllEntities @0x4C2221 -> sub_590950]
-	if (!preround_active && view_.state().tracked_target.ticks_remaining)
+	if (!entity_update_skipped && view_.state().tracked_target.ticks_remaining)
 		--view_.state().tracked_target.ticks_remaining;
 
 	// The per-class between-update mover: one step per 62.5 Hz tick after the
 	// recv fold (retail order: net frame first, entity movers after). No-op on
 	// the HostClient role (mode never enabled — the authority never
 	// interpolates, D-NET-89). [net-re §5.38e, D-NET-196]
-	if (!preround_active)
+	if (!entity_update_skipped)
 		view_.tick_remote_motion(joiner_ != nullptr && joiner_->has_self_handle()
 		                                 ? joiner_->self_handle()
 		                                 : 0xFFFFu);

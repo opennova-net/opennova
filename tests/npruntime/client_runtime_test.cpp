@@ -3459,6 +3459,31 @@ bool run_console_command_sends_the_line() {
 // next input frame, and the queue holds 32 records, the 33rd dropped.
 // [orig: NapiClientCmd_ParseAndExecute @0x432a64..0x432ba1 -> Input_QueueEvent @0x4979C0,
 //  the cap @0x4979C8..0x4979CB]
+// L5-s3 / V-L5-s3: the client's entity-update body (the movers, the tracked target's
+// count) skips a frame in a session while the round-over gate is up, as it does in
+// the pre-round [orig: Game_ProcessMainFrame @0x5263F0 - g_ClientPreRoundTimer
+// @0x52672C..0x526732, is_in_session @0x526734..0x52673A, g_RoundOver
+// @0x52673C..0x526742, Entity_UpdateAllEntities @0x52674B].
+bool run_the_round_gate_holds_the_entity_update() {
+	const std::string client_scrk = "CLIENT-ROUND-GATE-SCRK";
+	const std::string server_scrk = "SERVER-ROUND-GATE-SCRK";
+	inmatch::ClientRuntime client("RoundGate", [] { return uint64_t{7000}; });
+	client.set_title(&kJo);
+	client.seed_session(0x52474154u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	client.state().tracked_target.ticks_remaining = 5;
+	client.state().spawn_success_gate = true;
+	(void)client.Client_ProcessNetworkFrame(1);
+	if (!expect(client.in_session() && client.state().tracked_target.ticks_remaining == 5,
+			"the round-over gate in a session holds the entity update"))
+		return false;
+	client.state().spawn_success_gate = false;
+	(void)client.Client_ProcessNetworkFrame(2);
+	return expect(client.state().tracked_target.ticks_remaining == 4,
+			"with the gate down the entity update runs");
+}
+
 bool run_console_actions_queue_for_the_input_frame() {
 	const std::string client_scrk = "CLIENT-CONSOLE-QUEUE-SCRK";
 	const std::string server_scrk = "SERVER-CONSOLE-QUEUE-SCRK";
@@ -8765,6 +8790,7 @@ int main() {
 	                run_self_respawn_edge_releases_a_revive_deploy() &&
 	                run_zone_window_adoption_reads_the_pumps_respawn() &&
 	                run_console_actions_queue_for_the_input_frame() &&
+	                run_the_round_gate_holds_the_entity_update() &&
 	                run_live_frame_uses_wall_clock_and_batches_mount_requests() &&
 	                run_queued_gameplay_survives_a_death_before_the_boundary() &&
 	                run_dead_joiner_keeps_pinging_every_boundary() &&
