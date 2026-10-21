@@ -11,6 +11,7 @@
 #include <runtime/world/local_player.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/pose_provider.h>
+#include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -43,15 +44,32 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 		out.custom_texture = def->crosshair;
 		out.commander_texture = def->commanders_x;
 	}
-	// Combat target takes priority over the ordinary aim-ray fallback. Only
-	// the combat target sets HUD+8 and therefore admits the cursor sprite.
-	// [orig: HUD_BuildEntityInfo @0x4B87DA..0x4B882D]
-	const Entity *target = body ? world.registry.get(body->inf.combat_target) : nullptr;
-	s.target_cursor = target != nullptr && weapon.active;
+	// HUD+0x168 is the AI slot's +0xC target word: an entity, or a round when the heat
+	// lock took a flare (D-NET-64). Any nonzero word sets the cursor flag HUD+8; only a
+	// zero word takes the head-look target (+0x344). The crosshair draws the cursor at
+	// the word's fire origin (a round's Position) tinted by the word's team byte (+0x162,
+	// a round's own); the inset's brackets and friendly marker need the word's pool-0
+	// index, which a round has none of, so a round lock draws neither.
+	// [orig: HUD_BuildEntityInfo @0x4B8440 - the slot word into +0x168
+	//  @0x4B87ED..0x4B87F3, the zero test @0x4B8816..0x4B881D, the head-look fallback
+	//  @0x4B881F..0x4B8825, +8 = 1 @0x4B882D; HUD_DrawCrosshair - the cursor
+	//  @0x592776..0x592790, the team compare @0x5927AA..0x5927BD,
+	//  Entity_ComputeWeaponFireOrigin @0x592803; Render_WeaponInsetScene @0x5C9740 -
+	//  Pool_GetIndexFromPtr(0, cursor) @0x5C9F78]
+	const TargetRef cursor = body ? AiSlot::target_of(body->slot.f[3]) : TargetRef{};
+	const Entity *target = cursor.entity.valid() ? world.registry.get(cursor.entity) : nullptr;
+	const bool round_cursor = cursor.round >= 0 &&
+			static_cast<size_t>(cursor.round) < world.round_sim.rounds.size();
+	s.target_cursor = (target != nullptr || round_cursor) && weapon.active;
 	s.target_locked = body && (body->slot.f[2] & 1);
-	if (!target && body)
+	if (!cursor.valid() && body)
 		target = world.registry.get(body->inf.head_look_target);
-	if (target) {
+	if (round_cursor) {
+		s.target_friendly =
+				world.round_sim.rounds[static_cast<size_t>(cursor.round)].team == player->team;
+		round_target_origin(world, cursor.round, out.target.data());
+		out.target_valid = true;
+	} else if (target) {
 		s.target_friendly = target->team == player->team;
 		world.ai.weapon_aim_origin(world, *target, out.target.data());
 		out.target_valid = true;

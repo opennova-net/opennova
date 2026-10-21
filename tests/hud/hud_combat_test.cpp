@@ -335,6 +335,7 @@ static void world_feeds() {
 	seed.display_name = "Squadmate";
 	const auto target = world.registry.spawn(0, seed);
 	body->inf.combat_target = target;
+	body->slot.f[3] = AiSlot::target_word(TargetRef{target});
 	body->slot.f[2] = 1;
 	LocalPlayerWeapon weapon;
 	weapon.active = true;
@@ -349,6 +350,35 @@ static void world_feeds() {
 	read();
 	CHECK(frame.hud_combat.state.target_cursor && frame.hud_combat.state.target_locked);
 	CHECK(frame.hud_combat.state.target_brackets && frame.hud_combat.state.inset_friendly);
+	// A heat lock on a flare holds a round in the slot's +0xC word: the cursor flag
+	// stands, drawn at the round's Position and tinted by its own team byte; no
+	// head-look fallback runs, and the inset's brackets and friendly marker, which need
+	// a pool-0 index, stay off. [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B882D;
+	//  HUD_DrawCrosshair @0x5927AA..0x592803; Render_WeaponInsetScene @0x5C9F78]
+	{
+		LiveRound &flare = world.round_sim.rounds[5];
+		flare.pos.set_q16({ 200 << 16, 30 << 16, 12 << 16 });
+		flare.team = 2;
+		body->slot.f[3] = AiSlot::target_word(TargetRef::of_round(5));
+		body->inf.combat_target = {};
+		body->inf.head_look_target = target;
+		read();
+		const auto &st = frame.hud_combat.state;
+		CHECK(st.target_cursor && st.target_locked);
+		CHECK(!st.target_brackets && !st.inset_friendly && !st.target_friendly);
+		CHECK(frame.hud_combat.target_valid && frame.hud_combat.target[0] == 200 << 16 &&
+				frame.hud_combat.target[1] == 30 << 16 && frame.hud_combat.target[2] == 12 << 16);
+		flare.team = 1;
+		read();
+		CHECK(frame.hud_combat.state.target_friendly && !frame.hud_combat.state.target_brackets);
+		// A zero word takes the head-look target and sets no cursor.
+		body->slot.f[3] = 0;
+		read();
+		CHECK(!frame.hud_combat.state.target_cursor && frame.hud_combat.target_valid);
+		body->inf.head_look_target = {};
+		body->inf.combat_target = target;
+		body->slot.f[3] = AiSlot::target_word(TargetRef{target});
+	}
 	// Every HUD-owning instance is a client (modes 2 and 3): bit 3 admits or
 	// refuses the brackets on a listen host and a joiner alike, and bit 8 --
 	// the dedicated host's -- never reaches a HUD. [orig: @0x5926D4..0x5926E1]
