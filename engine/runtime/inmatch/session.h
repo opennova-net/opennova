@@ -247,6 +247,13 @@ public:
 	// The Respawn key's bodiless C2S 0x41 for this role, past request_respawn's
 	// gates: a session peer queues it on its connection. False = nothing sent.
 	virtual bool send_respawn_request() { return false; }
+	// A stance select past request_stance's head: the key's own refusals, then the
+	// C2S 0x1D on the role's client connection (JoinerRole, HostRole); a role with
+	// no client sends nothing. 0 stand / 1 crouch / 2 prone. False = nothing sent.
+	virtual bool send_stance_request(int stance) {
+		(void)stance;
+		return false;
+	}
 	virtual void run_tick(const TickInput &input) = 0;
 	virtual bool session_lost(SessionError &error) const { (void)error; return false; }
 	virtual bool reset_to_baseline(SessionError &error) = 0;
@@ -295,13 +302,24 @@ public:
 	// The medic call past the session/entity gates: a dead local player with
 	// the cooldown at zero sends through the role and stamps the cooldown.
 	bool request_medic();
+	// The dispatcher's head for an action row whose flags carry bit 0, 0x400 and
+	// 0x8000000 (the Respawn row 68, the stance rows 9..11 and the seat rows 17..26,
+	// 0x0C000C01; the scope row 105, 0x4C000C01; the mouse look rows 0x0C100425 /
+	// 0x0C200425): the local entity is there, and none of a dead local player, the
+	// round-over gate, the pre-round timer or the deploy overlay holds. True = the row
+	// reaches its arm.
+	bool local_action_head_admits();
 	// The Respawn key (dispatch 55) past the row's head gates: the local
 	// player's input reset, then in a session the role's 0x41. True = sent.
 	bool request_respawn();
+	// The stance selects (dispatch 169 crouch / 170 prone / 172 stand), a key's or a
+	// console-queued one, past their rows' head: the role's C2S 0x1D
+	// (send_stance_request). 0 stand / 1 crouch / 2 prone. True = sent.
+	bool request_stance(int stance);
 	// A console-queued input action (ClientRuntime::queue_console_action), dispatched
 	// by its action code at the input frame: the arms the role owns (the Respawn
-	// key's code, the medic call's), every other code to the embedder's dispatch
-	// (ClientRuntime::set_console_action_sink).
+	// key's code, the medic call's, the stance selects'), every other code to the
+	// embedder's dispatch (ClientRuntime::set_console_action_sink).
 	void dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3);
 	// Player_ResetLocalInput, which the Respawn key (case 55) and the Escape key (case
 	// 18, ahead of its `!is_in_session && g_RoundOver` test; the embedder's escape runs it)

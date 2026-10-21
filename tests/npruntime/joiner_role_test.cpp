@@ -2698,6 +2698,106 @@ bool run_a_console_action_dispatches_by_code() {
 			"the reset drops 202");
 }
 
+// D-NET-710 (V-L2-s7): the stance rows 9..11 carry flags 0x0C000C01, so the dispatcher's head
+// drops a stance select in the pre-round, under the deploy overlay and at round over, a
+// console-queued one (the role's own arm now) and a key's alike; with none held the select
+// sends its C2S 0x1D. The mouse look rows (0x0C100425 / 0x0C200425) pass the same head, so the
+// frame's look leaves L's heading alone while a gate holds (V-LI-s1 FOUND 5).
+// [orig: Input_HandleActionBinding @0x49AD40 - 0x400 @0x49ADB3..0x49ADC2, 0x8000000
+//  @0x49ADC8..0x49ADD7, g_RoundOver @0x49ADEE..0x49AE16; Input_HandleActionBinding_0
+//  @0x4E0420 - cases 170 @0x4E0DF3, 169 @0x4E0D77; Input_TryTriggerMouseAxisBinding
+//  @0x499130 - Input_QueueEvent @0x499156]
+bool run_a_stance_select_and_the_look_take_the_rows_head() {
+	enum class Gate { None, PreRound, Overlay, RoundOver };
+	bool ok = true;
+	for (const Gate gate : {Gate::None, Gate::PreRound, Gate::Overlay, Gate::RoundOver}) {
+		Harness h;
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h.role.run_tick(h.input);
+		if (!expect(h.role.local_spawned(), "stance head: L spawned")) return false;
+		replication::ClientState &cs = h.role.runtime->state();
+		if (gate == Gate::PreRound) {
+			cs.preround_delay_seconds = 5;
+			h.kernel->world.preround_delay_seconds = 5;
+		}
+		if (gate == Gate::Overlay) cs.deploy_overlay_active = true;
+		if (gate == Gate::RoundOver) cs.spawn_success_gate = true;
+		const bool admitted = gate == Gate::None;
+		ok &= expect(h.role.local_action_head_admits() == admitted,
+				admitted ? "stance head: nothing held admits the row"
+				         : "stance head: the gate drops the row");
+		std::vector<int32_t> sunk;
+		h.role.runtime->set_console_action_sink(
+				[&sunk](int32_t code, int32_t, int32_t, int32_t) { sunk.push_back(code); });
+		h.socket.datagrams.clear();
+		// The console's "Prone" (row 9, code 170) dispatches at the role's input frame.
+		(void)h.role.runtime->queue_console_action(170, 0, 0, 0);
+		const int32_t heading_before = h.kernel->local.input.look_heading;
+		inmatch::TickInput look = h.input;
+		look.player.look_delta_x = 40.0f;
+		h.role.apply_input(look);
+		ok &= expect((h.kernel->local.input.look_heading != heading_before) == admitted,
+				admitted ? "stance head: the look turns L" : "stance head: the gate drops the look");
+		ok &= expect(sunk.empty(), "stance head: the stance codes are the role's, not the embedder's");
+		for (int i = 0; i < 12; ++i) h.role.run_tick(h.input);
+		ProtocolMessage select;
+		const bool console_sent = h.socket.last_message(0x1D, select);
+		ok &= expect(console_sent == admitted,
+				admitted ? "stance head: the console's prone sends its 0x1D"
+				         : "stance head: the console's prone sends nothing");
+		if (console_sent)
+			ok &= expect(select.payload.size() == 2 && select.payload[0] == 0xAA &&
+							select.payload[1] == 0x00,
+					"stance head: the console's 0x1D carries action 170");
+		// The key's crouch takes the same head.
+		h.socket.datagrams.clear();
+		ok &= expect(h.role.request_stance(1) == admitted,
+				"stance head: the key's select passes or drops with the console's");
+		for (int i = 0; i < 12; ++i) h.role.run_tick(h.input);
+		ok &= expect(h.socket.last_message(0x1D, select) == admitted,
+				"stance head: the key's 0x1D follows the head");
+	}
+	return ok;
+}
+
+// D-NET-685 (V-L2-s7): the deploy action's head runs Input_ResetAllState, whose event-queue
+// memset ends the input frame's drain, so a console-queued pick (code 12, the game's sink)
+// leaves the codes queued behind it undispatched: the Respawn row's 55 sends no 0x41 and the
+// embedder never sees the code after it.
+// [orig: Input_HandleActionBinding @0x49AD40 - case 12 @0x49B024, Input_ResetAllState
+//  @0x49B042; Input_ResetAllState @0x497ED0 - the queue's memset @0x497EE6; Input_ProcessFrame
+//  @0x49D520 - the drain's count test @0x49D5E0]
+bool run_a_console_deploy_pick_ends_the_drain() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.kernel->world.rules.mp_session = true;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	std::vector<int32_t> sunk;
+	// The game's sink takes 12 as the deploy pick (Simulation::send_deployment_pick ->
+	// Role::request_deployment_pick).
+	h.role.runtime->set_console_action_sink([&](int32_t code, int32_t, int32_t, int32_t) {
+		sunk.push_back(code);
+		if (code == 12) (void)h.role.request_deployment_pick(0xFFFFu);
+	});
+	(void)h.role.take_input_reset();
+	(void)h.role.runtime->queue_console_action(12, 0, 0, 0);
+	(void)h.role.runtime->queue_console_action(55, 0, 0, 0);
+	(void)h.role.runtime->queue_console_action(201, 0, 0, 0);
+	h.role.apply_input(h.input);
+	for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+	ProtocolMessage m;
+	bool ok = expect(sunk == std::vector<int32_t>{12},
+			"console deploy pick: the drain ends at the pick (201 never reaches the embedder)");
+	ok &= expect(!h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m),
+			"console deploy pick: the Respawn code behind it sends no 0x41");
+	ok &= expect(h.role.take_input_reset(), "console deploy pick: the devices' reset is owed");
+	return ok;
+}
+
 // D-NET-562's pre-round leg: a client runs no entity update while its pre-round timer
 // (the 0x0A's phase-0 byte) is nonzero, so a Health of 0 a tail stores in the pre-round
 // latches no dead bit; the first frame whose tail reads the timer 0 runs the body tick
@@ -3356,6 +3456,8 @@ int main() {
 	ok &= run_an_alive_self_record_floors_a_zero_tail();
 	ok &= run_a_pre_l_reset_takes_the_device_legs();
 	ok &= run_a_console_action_dispatches_by_code();
+	ok &= run_a_stance_select_and_the_look_take_the_rows_head();
+	ok &= run_a_console_deploy_pick_ends_the_drain();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
 	ok &= run_a_self_team_assign_reinits_l();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();

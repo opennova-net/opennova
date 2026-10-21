@@ -198,13 +198,14 @@ public:
 
 	bool send_medic_request() override;
 	bool send_respawn_request() override;
-	// A stance key on the authority: the key's own refusals, then the C2S 0x1D
-	// on its own client connection -- every press sends, the selected stance
-	// included, and nothing latches until its own server handles the 0x1D on
-	// the next frame. 0 stand / 1 crouch / 2 prone.
+	// A stance select on the authority past the dispatcher's head
+	// (Role::request_stance): the key's own refusals, then the C2S 0x1D on its own
+	// client connection -- every press sends, the selected stance included, and
+	// nothing latches until its own server handles the 0x1D on the next frame.
+	// 0 stand / 1 crouch / 2 prone.
 	// [orig: Input_HandleActionBinding_0 cases 169/170/172 @0x4e0d77..0x4e0e87,
 	//  CNapiNetwork_QueueReliableMessage @0x4e0de7 with no is_authority test]
-	bool request_stance(int stance);
+	bool send_stance_request(int stance) override;
 	void run_tick(const TickInput &input) override;
 	// The mission exit the frame stored: the round end's linger (3 or 4,
 	// the map change's cue), the NovaWorld session's end, or a world-side

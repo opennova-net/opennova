@@ -350,7 +350,7 @@ bool JoinerRole::queue_stance_change(uint16_t action_id) {
 	return runtime && runtime->queue_stance_change(action_id);
 }
 
-bool JoinerRole::request_stance(int stance) {
+bool JoinerRole::send_stance_request(int stance) {
 	if (!kernel_ || stance < 0 || stance > 2) return false;
 	if (!kernel_->local.stance_request_allowed()) return false;
 	return queue_stance_change(world::LocalPlayer::kStanceActionIds[stance]);

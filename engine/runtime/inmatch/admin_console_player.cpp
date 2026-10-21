@@ -106,6 +106,8 @@ std::string slot_row(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 			static_cast<int>(conn.reply.rtt_ms));
 }
 
+} // namespace
+
 // Server_SendValidatedChatToPlayer (a misnomer: the punt): on the authority an in-range active
 // slot that is neither local nor dropping (+96481, which nothing sets on this host) gets the
 // disconnect description, reason `code`, extra info `detail`.
@@ -126,6 +128,8 @@ void validated_punt(NapiNPServerCtx &ctx, int32_t index, uint32_t code, const ch
 		return;
 	}
 }
+
+namespace {
 
 // GameEvent_PlayerDeath on the slot's entity, scored against its last attacker (+0x178) as it
 // stands, then Flags |= 2; health is not touched. [orig: CAdminServer_HandlePlayer

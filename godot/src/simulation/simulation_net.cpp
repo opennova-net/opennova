@@ -503,28 +503,29 @@ void Simulation::install_console_seams() {
 	};
 	runtime_->set_local_command_seams(std::move(seams));
 	// The console's queued input actions whose arms are the game's, at their input frame
-	// (the role keeps the Respawn row's 55 and the medic call's 217): the exit, the deploy
-	// pick and the stance selects (engine inmatch/client_runtime.h set_console_action_sink
-	// carries the witness). Any other code's arm is a screen's or a device's this sink
-	// does not reach.
+	// (the role keeps the Respawn row's 55, the medic call's 217 and the stance selects):
+	// the exit, the scope, the deploy pick, the punt by slot and the seat selects, the
+	// scope's and the seats' behind their rows' dispatcher head (engine
+	// inmatch/client_runtime.h set_console_action_sink carries the witness).
 	runtime_->set_console_action_sink([this](int32_t p_code, int32_t p_param, int32_t, int32_t) {
 		switch (p_code) {
 		case 3:
 			input_action_exit();
 			break;
+		case 6:
+			if (active_role().local_action_head_admits())
+				(void)request_local_player_scope_toggle();
+			break;
 		case 12:
 			(void)send_deployment_pick(p_param);
 			break;
-		case 169:
-			(void)request_local_player_stance(STANCE_CROUCH);
-			break;
-		case 170:
-			(void)request_local_player_stance(STANCE_PRONE);
-			break;
-		case 172:
-			(void)request_local_player_stance(STANCE_STAND);
+		case 34:
+			if (inmatch::NapiNPServerCtx *ctx = host_ctx())
+				inmatch::validated_punt(*ctx, p_param, 33, "ComIdPunt");
 			break;
 		default:
+			if (p_code >= 182 && p_code <= 191 && active_role().local_action_head_admits())
+				(void)local_player_select_seat(p_code - 182);
 			break;
 		}
 	});

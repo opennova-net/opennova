@@ -745,7 +745,7 @@ bool HostRole::send_respawn_request() {
 			state.client_runtime->queue_respawn_request();
 }
 
-bool HostRole::request_stance(int stance) {
+bool HostRole::send_stance_request(int stance) {
 	if (kernel_ == nullptr || stance < 0 || stance > 2 || !state.client_runtime) return false;
 	if (!kernel_->local.stance_request_allowed()) return false;
 	return state.client_runtime->queue_stance_change(world::LocalPlayer::kStanceActionIds[stance]);

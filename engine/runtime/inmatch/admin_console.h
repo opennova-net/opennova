@@ -70,6 +70,14 @@ struct AdminProcessMission {
 	int32_t round_ticks_remaining = 0;
 };
 
+// Server_SendValidatedChatToPlayer (a misnomer: the punt): on the authority the active slot
+// `index`, when in range and not the local one, gets the disconnect description (reason `code`,
+// extra info `detail`); a peer does nothing. The admin console's PUNT and BAN and the input
+// action 34 ("Punt", reason 33, "ComIdPunt") call it.
+// [orig: Server_SendValidatedChatToPlayer @0x50A210; Input_HandleActionBinding @0x49AD40 - case
+//  34 @0x49B766..0x49B773]
+void validated_punt(NapiNPServerCtx &ctx, int32_t index, uint32_t code, const char *detail);
+
 // The usage reply for a rights word: `USAGE - [QUIT`, then each listed verb by its usage bit
 // (CHAT, ADMIN and BANLIST by 0x80, 0x100 and 0x200, though the dispatch opens them on 0x40),
 // then `]`. [orig: CAdminServer_DispatchCommand @0x406A8D..0x406D58]
