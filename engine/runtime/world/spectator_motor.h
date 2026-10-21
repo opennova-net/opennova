@@ -34,6 +34,13 @@ struct SpectatorMotorState {
 	int32_t target_yaw = 0;            // BAM32, entity+0x10
 	int32_t target_pitch = 0;          // entity+0x14
 	int32_t target_roll = 0;           // entity+0x18
+	// A decoded target's compose words, which the death screen's first person reads
+	// from the tracked entity (D-NET-330): its eye (CameraOffset +0x6C..+0x74), lean
+	// (+0xB0), recoil (+0x380) and torso roll (+0x2DC).
+	int32_t target_eye[3] = {0, 0, 0};
+	int32_t target_lean = 0;
+	int32_t target_recoil = 0;
+	int32_t target_torso_roll = 0;
 	// The fast-flight gate: the per-recipient SU flag (S2C 0x24 "SU n"). Its
 	// alternative, bit 2 of the local cheat word dword_24C1930, has no writer
 	// in the image (Game_StartMission stores the whole word 0 or 0x2000000

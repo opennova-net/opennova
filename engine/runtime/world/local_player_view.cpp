@@ -1215,8 +1215,10 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
     // spectate target the death screen's first-person sub-mode tracks, whose
     // CameraOffset, recoil pitch, torso roll and lean and carrier legs then make
     // the view. On an authority world the target's wire handle is its own body's
-    // handle; a joiner's target is a decoded row with no body here, so its view
-    // keeps the local entity, whose pose copies the target's.
+    // handle; a joiner's target is a decoded row with no body here: the local
+    // entity's pose copies the row's, and the row's own compose words (its eye,
+    // lean, recoil and torso roll, which the spectator state carries) stand in for
+    // the local entity's.
     // [orig: Camera_ComputeThirdPersonView @0x437D10 - `mov esi,
     //  g_CameraTrackedEntity` @0x437D2B, CameraOffset [esi+6Ch..74h]
     //  @0x437FA2..0x437FB7, the recoil [esi+380h] @0x437FBD..0x437FC7, the roll
@@ -1231,6 +1233,10 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
             p = tp;
         }
     }
+    const SpectatorMotorState &spectate = world.spectator;
+    const bool row_target = (v.camera_tracked & kCameraTrackedTargetKey) != 0 &&
+            !world.rules.logic_authority && spectate.has_target &&
+            !spectate.target_entity.valid();
     // Compose from the body aim. The rendered view adds optical offsets
     // afterwards (LocalPlayer::present_view_frame).
     const float aim_yaw = static_cast<float>(mission_yaw_deg_from_bam_heading(p->heading));
@@ -1253,7 +1259,12 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
         // CameraOffset already includes the current motor's posed head and
         // its on-foot terrain floor. Re-anchor it after the motor's
         // translation. [orig: Camera_ComputeThirdPersonView @0x437FA5..0x437FB7]
-        const Vec3 current_eye = player_eye_position(*e);
+        Vec3 current_eye = player_eye_position(*e);
+        if (row_target) {
+            current_eye = {e->position.x + static_cast<float>(spectate.target_eye[0]) / 65536.0f,
+                           e->position.y + static_cast<float>(spectate.target_eye[1]) / 65536.0f,
+                           e->position.z + static_cast<float>(spectate.target_eye[2]) / 65536.0f};
+        }
         const float anchor_eye[3] = {current_eye.x, current_eye.y, current_eye.z};
         // The chase march runs only with proximity candidates at hand
         // [orig: the entity +0x1C0 count @0x4381CB].
@@ -1261,7 +1272,9 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
                 world.collision != nullptr && world.collision->candidate_count(e->handle) > 0;
         player_view_compose_camera(v, position, anchor_eye, p->inf.active, world.ai.terrain,
                                    (e->flags & kEntityFlagIndoors) != 0, aim_yaw, aim_pitch,
-                                   p->inf.recoil_pitch, p->inf.torso_roll, p->inf.lean_angle,
+                                   row_target ? spectate.target_recoil : p->inf.recoil_pitch,
+                                   row_target ? spectate.target_torso_roll : p->inf.torso_roll,
+                                   row_target ? spectate.target_lean : p->inf.lean_angle,
                                    march_candidates,
                                    static_cast<float>(static_cast<double>(p->roll) * kDegreesPerBam),
                                    out);

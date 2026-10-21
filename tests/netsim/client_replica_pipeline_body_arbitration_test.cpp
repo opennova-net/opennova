@@ -296,8 +296,69 @@ void test_row_weapon_channel_plays_an_emote_then_returns() {
 	expect(row->radio_request == 0, "the next window clears the latch");
 }
 
+// D-NET-330: a remote player's eye (CameraOffset +0x6C..+0x74) is its body update's
+// non-local arm over the clip's capsule, every tick: the extent capped at 0xD000 times
+// the cosine of the lean, the vertical floored at 0x2000 (x / y the tracked tilt residue,
+// 0); the local player's own row is its local arm's and keeps none.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the cap @0x4B6991..0x4B6997, the lean
+//  cosine @0x4B69A7..0x4B69D4, the floor @0x4B6B9E..0x4B6BA0, the stores
+//  @0x4B6BA5..0x4B6BAB]
+struct CapsuleSource final : public opennova::world::IRootMotionSource {
+	int32_t extent = 0;
+	bool has_clip(int, int) const override { return true; }
+	bool advance(int, int, int32_t &phase, opennova::world::RootMotionFrame &out) override {
+		++phase;
+		out = {};
+		out.capsule_bottom = 0x4000;
+		out.capsule_top = 0x4000 + extent;
+		return true;
+	}
+	int32_t clip_length_ticks(int, int, int) const override { return 62; }
+	bool clip_loops(int, int, int) const override { return true; }
+};
+
+void test_remote_eye_restamps_from_the_capsule() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	CapsuleSource src;
+	src.extent = 0x18000; // a 1.5 u standing capsule: the cap
+	view.set_root_motion_source(&src);
+	seed_row(view);
+	view.apply(0x0A, player_frame(as::kIdle, 0));
+	arm_row(view);
+	ns::ClientEntityState *es = view.state().find(kPlayerHandle);
+	if (es == nullptr) {
+		expect(false, "eye: the player row decoded");
+		return;
+	}
+	view.tick_remote_motion(0xFFFF);
+	expect(es->eye_offset[2] == 0xD000 && es->eye_offset[0] == 0 && es->eye_offset[1] == 0,
+			"eye: the extent caps at 0xD000, no lateral tilt");
+	src.extent = 0x8000;
+	view.tick_remote_motion(0xFFFF);
+	expect(es->eye_offset[2] == 0x8000, "eye: a crouched capsule's extent");
+	src.extent = 0x1000;
+	view.tick_remote_motion(0xFFFF);
+	expect(es->eye_offset[2] == 0x2000, "eye: the vertical floors at 0x2000");
+	// A 0x20000000 lean takes the extent times its Q22 cosine through retail's
+	// radians-per-BAM double (dbl_7C3608, io::kRadiansPerBamX87, slightly over 2 pi /
+	// 2^32): cos(0.785422) * 2^22 = 2965749.71 -> 2965749, and 0x8000 * 2965749 >> 22 =
+	// 23169 (23169.91), each step clear of a rounding edge at 53 or 64 bits.
+	src.extent = 0x8000;
+	es->lean_angle = 0x20000000;
+	es->move_input = 0;
+	view.tick_remote_motion(0xFFFF);
+	expect(es->eye_offset[2] == 23169, "eye: the extent times the lean's cosine");
+	// The self row is the local arm's: the replica restamps none.
+	es->eye_offset[2] = 0;
+	view.tick_remote_motion(kPlayerHandle);
+	expect(es->eye_offset[2] == 0, "eye: the local player's own row keeps its local arm's");
+}
+
 int main() {
 	test_tapped_roll_locks_and_queues();
+	test_remote_eye_restamps_from_the_capsule();
 	test_pending_promotes_at_clip_end();
 	test_gait_transition_insert();
 	test_dead_park_and_respawn_edges();

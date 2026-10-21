@@ -491,6 +491,13 @@ struct ClientEntityState {
 	// stance-indexed ammo impulse after calculating that shot's spread; the
 	// client body pass decays it later in the same frame.
 	int32_t recoil_pitch = 0;
+	// A remote player's torso roll (entity+0x2DC), which its body update chases
+	// toward its Roll word every tick (ClientReplicaPipeline::tick_arms_dip), and its
+	// eye (CameraOffset, entity+0x6C..+0x74), which the update's non-local arm
+	// restamps from the clip's capsule (the replica mover). The death screen's first
+	// person composes a spectated row from both with its lean and recoil (D-NET-330).
+	int32_t torso_roll = 0;
+	int32_t eye_offset[3] = {0, 0, 0};
 	// Client-owned +0x322/+0x324 gun channel, advanced by the joiner tick.
 	int16_t emplaced_gun_yaw_word = 0;
 	int16_t emplaced_gun_pitch_word = 0;

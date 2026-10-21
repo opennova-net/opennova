@@ -37,6 +37,12 @@ void stamp_spectator_motor(mission::MissionKernel &kernel, const ClientRuntime *
 			s.target_yaw = row->heading_bam;
 			s.target_pitch = row->pitch_bam;
 			s.target_roll = row->roll_bam;
+			s.target_eye[0] = row->eye_offset[0];
+			s.target_eye[1] = row->eye_offset[1];
+			s.target_eye[2] = row->eye_offset[2];
+			s.target_lean = row->lean_angle;
+			s.target_recoil = row->recoil_pitch;
+			s.target_torso_roll = row->torso_roll;
 		}
 	}
 	// The rising edge's eye, once the local entity exists to take it (the

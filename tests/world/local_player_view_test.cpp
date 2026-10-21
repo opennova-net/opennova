@@ -404,12 +404,25 @@ void test_first_person_compose_reads_the_tracked_target() {
     CHECK(near(frame.camera.eye[0], 30.0f) && near(frame.camera.eye[1], 40.0f - 0.1875f));
     CHECK(near(frame.camera.eye[2], 6.0f));
     CHECK(near(frame.camera.roll_deg, 4.0f));
-    // A joiner's world: the target is no body of its own, the local entity composes.
+    // A joiner's world with no decoded target in the spectator state: the local entity
+    // composes.
     lw->w.rules.logic_authority = false;
     local_player_view_frame(&lw->w, weapon, view, tracker, frame);
     CHECK(near(frame.camera.eye[0], 10.0f) && near(frame.camera.eye[1], 20.0f - 0.1875f));
     CHECK(near(frame.camera.eye[2], 4.5f));
     CHECK(near(frame.camera.roll_deg, 0.0f));
+    // A joiner's decoded target: the local entity's pose copies the row's, and the row's
+    // compose words the spectator state carries (its eye 0.5 u, its 6 degree torso roll)
+    // stand in for the local entity's (the joiner half).
+    lw->w.spectator.death_screen = true;
+    lw->w.spectator.submode = 2;
+    lw->w.spectator.has_target = true;
+    lw->w.spectator.target_eye[2] = 0x8000;
+    lw->w.spectator.target_torso_roll = bam_from_degrees_wrapped(6.0);
+    local_player_view_frame(&lw->w, weapon, view, tracker, frame);
+    CHECK(near(frame.camera.eye[0], 10.0f) && near(frame.camera.eye[1], 20.0f - 0.1875f));
+    CHECK(near(frame.camera.eye[2], 3.5f));
+    CHECK(near(frame.camera.roll_deg, 6.0f));
 }
 
 // Both shake legs add their yaw delta to the BAM HEADING, so the mission yaw

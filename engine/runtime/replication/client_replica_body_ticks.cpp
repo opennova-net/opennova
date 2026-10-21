@@ -5,6 +5,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 
 #include <runtime/world/entity.h> // kMoveOrderLean* (the wire move_input bits)
+#include <runtime/world/infantry.h> // anim_state (the prone idle and roll states)
 #include <base/io/bam.h>
 #include <base/io/rotating_prng.h>
 
@@ -40,6 +41,31 @@ void ClientReplicaPipeline::tick_arms_dip() {
 				es.pitch_kick_accum,
 				io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3)); // [orig: @0x4b5cc7..0x4b5cd5]
 		if (es.arms_dip_ticks > 0) --es.arms_dip_ticks;         // [orig: @0x4b5cdb..0x4b5ce7]
+		// A remote player's torso roll, the authority's player-body rule
+		// (world::AiSystem::infantry_torso_roll_tick): prone idle decays it a sixteenth
+		// toward level, the prone rolls step it 0x4000000, otherwise it chases the Roll
+		// word a sixteenth with the lag clamped to +-20 degrees (D-NET-330).
+		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - prone idle 0x30 @0x4b5d05, the
+		//  chase's skip of the rolls @0x4b5d20..0x4b5d28, the chase and clamps @0x4b5d4e /
+		//  @0x4b5d61; the rolls @0x4b700e / @0x4b701d]
+		if (es.cls != EntityClass::Player) continue;
+		if (es.rm_state == world::anim_state::kIdleProne) {
+			es.torso_roll = io::bam_sub(es.torso_roll, io::bam_sar(io::bam_add(es.torso_roll, 8), 4));
+			continue;
+		}
+		if (es.rm_state == world::anim_state::kRollLeft) {
+			es.torso_roll = io::bam_add(es.torso_roll, -0x4000000);
+			continue;
+		}
+		if (es.rm_state == world::anim_state::kRollRight) {
+			es.torso_roll = io::bam_add(es.torso_roll, 0x4000000);
+			continue;
+		}
+		es.torso_roll = io::bam_add(es.torso_roll,
+				io::bam_sar(io::bam_add(io::bam_sub(es.roll_bam, es.torso_roll), 8), 4));
+		const int32_t lag = io::bam_sub(es.torso_roll, es.roll_bam);
+		if (lag > 0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, 0x0E38E380);
+		if (lag < -0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, -0x0E38E380);
 	}
 }
 
