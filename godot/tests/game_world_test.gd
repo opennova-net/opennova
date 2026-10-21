@@ -1591,18 +1591,34 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 			env.get_sun_light_target()))
 	assert_true(weather.get_smooth_fog().is_equal_approx(
 			env.get_fog_color_target()))
+	# The paused frame steps the main-frame counter once per drained quantum
+	# (the session's paused leg runs the counters and the weather tick per
+	# quantum), so the counter's step is that frame's drained count.
+	var sim := world.get_runtime().get_sim()
+	var main_frames_before := int(sim.get_main_frame_counter())
+	var scrubbed := env.time_of_day
 	world.tick(Vector3.ZERO, Transform3D(), 0.25)
+	var drained := int(sim.get_main_frame_counter()) - main_frames_before
 	# The paused frame still drains its banked quanta through the weather tick:
 	# retail's main frame calls Environment_UpdateWeatherTick ahead of its pause
 	# test (Game_ProcessMainFrame @ 0x5263F0: the call @ 0x526774, the test
 	# @ 0x526779; D-NET-NEW-L5-7), so the scrubbed clock moves on under the
-	# pause by the quanta the accumulator drained for that frame (its smoothed
-	# bank: a 0.25 s frame drains at least one and at most 30 ticks, 0.192
-	# minutes of this 24x clock; the 500 ms clamp alone would allow 32).
-	assert_gt(env.time_of_day, 2207.0,
-			"a paused host's weather tick still advances the scrubbed clock (D-NET-NEW-L5-7)")
-	assert_lt(env.time_of_day, 2207.2,
-			"the paused frame drains no more than the accumulator's 500 ms clamp")
+	# pause by exactly the quanta the accumulator drained for that frame (its
+	# smoothed bank: a 0.25 s frame drains at least one and at most 30 ticks,
+	# 0.192 minutes of this 24x clock; the 500 ms clamp alone would allow 32).
+	assert_gt(drained, 0, "the paused frame drains banked quanta (D-NET-NEW-L5-7)")
+	assert_lte(drained, 30, "the paused 0.25 s frame drains no more than its own bank's 30 ticks")
+	# One quantum of this 24x clock, from the same clock model the first half
+	# checks against (0.0064 minutes): the paused frame moves the clock by its
+	# drained count of them, clear of a neighbouring count by half a quantum.
+	var quantum_clock := MissionEnvironment.new()
+	quantum_clock.configure_mission_clock(0x0540, 60)
+	var quantum_start := quantum_clock.time_of_day
+	quantum_clock.advance_mission_clock(1)
+	var quantum := quantum_clock.time_of_day - quantum_start
+	quantum_clock.free()
+	assert_almost_eq(env.time_of_day, scrubbed + drained * quantum, quantum * 0.25,
+			"a paused host's weather tick advances the scrubbed clock once per drained quantum")
 	world.unload()
 
 
