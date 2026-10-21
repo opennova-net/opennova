@@ -4917,6 +4917,55 @@ void test_player_blast_and_knife_run_the_waypoint_tail() {
     }
 }
 
+// The blast (event 2) and the knife (event 3) call every person victim's class
+// callback, not only a player body's: an NPC runs the organic class's, which
+// re-arms its think at 62 for both events.
+// [orig: Entity_ApplyWeaponDamage @0x4E6820 (`mov eax, [esi+1C8h]` @0x4E6B63, the
+//  call @0x4E6B72); Entity_ApplyVehicleCollisionDamage @0x4E6620 (@0x4E673A, the
+//  call @0x4E6752); OrganicClass_HandleEvent @0x407310 (+0x2AC = 62 @0x40732D)]
+void test_npc_blast_and_knife_rearm_the_organic_think() {
+    for (const bool knife : {false, true}) {
+        auto storage = std::make_unique<World>();
+        World &w = *storage;
+        seed_ammo(w);
+        AmmoTableEntry cut;
+        cut.name = "KNIFE";
+        cut.valid = true;
+        cut.kztype = ammo_kz::kKnife;
+        cut.kz_damage = 150;
+        cut.kz_maxradius = 1.5f;
+        w.tables.ammo.entries.push_back(cut); // index 4
+        w.registry.configure_pool(0, 4);
+        Entity source;
+        source.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
+        source.kind = EntityKind::Organic;
+        source.has_item_def = true;
+        source.item_type = 3;
+        source.health = 100;
+        source.team = 2;
+        const EntityHandle attacker = w.registry.spawn(0, source);
+        Entity npc;
+        npc.item_type_index = 1;
+        npc.kind = EntityKind::Organic;
+        npc.has_item_def = true;
+        npc.item_type = 3;
+        npc.health = npc.health_max = 1000;
+        npc.bound_radius = 0.6f;
+        npc.team = 1;
+        npc.spawn_phase = 5;
+        npc.position = knife ? Vec3{1.0f, 0.0f, 0.0f} : Vec3{5.6f, 0.0f, 0.0f};
+        const EntityHandle body = w.registry.spawn(0, npc);
+        ExplosionEntry e;
+        e.pos = Vec3{};
+        e.type = knife ? ammo_kz::kKnife : ammo_kz::kStandard;
+        e.ammo_index = knife ? 4 : 1;
+        e.owner = attacker;
+        run_blast(w, e);
+        CHECK(w.registry.get(body)->health < 1000);
+        CHECK(w.registry.get(body)->spawn_phase == 62);
+    }
+}
+
 // The kind-1 (knife) kill zone: a live person other than the source inside
 // kz_maxradius takes the full kz_damage as a signed-word subtraction with the
 // knife cause bit, and the kill event credits the source; items are never
@@ -5134,6 +5183,7 @@ int main() {
     test_knife_kill_zone();
     test_knife_cone_session_and_zero_half_angle();
     test_player_blast_and_knife_run_the_waypoint_tail();
+    test_npc_blast_and_knife_rearm_the_organic_think();
     test_blast_breaks_flagged_sections_at_transformed_box_centers();
     test_mounted_blast_protection_follows_seat_type();
 	test_gnrl_death_is_husk_sound_and_one_effect();

@@ -210,6 +210,15 @@ void player_body_health_tail(World &world, Entity &body);
 //  round test @0x40740F), the event-4 arm @0x407343..0x4073B1, +0x2AC = 62 @0x40732D]
 void organic_class_event(World &world, Entity &body, int event);
 
+// A person's class event callback (entity+0x1C8), which the knife and the blast call for every
+// victim they reach and a script kill for its target: a body with the Player bit runs its bound
+// row's (player_body_row_event, D-NET-348), any other person the organic class's (org0 and org1
+// both bind OrganicClass_HandleEvent), so an NPC's blast (2) or knife (3) re-arms its think at 62.
+// [orig: g_EntityClassEventCallbackTable - org0 @0x813018 / org1 @0x813030 -> OrganicClass_HandleEvent
+//  @0x407310 (the rows' words @0x813020 / @0x813038); Entity_ApplyVehicleCollisionDamage @0x4E6620
+//  (the call @0x4E6752); Entity_ApplyWeaponDamage @0x4E6820 (the call @0x4E6B72)]
+void person_class_event(World &world, Entity &body, int event, int32_t flags = 0);
+
 // A player body's class event callback (entity+0x1C8), by its bound row's class
 // (PlayerTemplate::body_class, D-NET-348): the plyr row's player_body_class_event, the organic
 // rows' organic_class_event, an item class row's event body (world::run_item_class_event of

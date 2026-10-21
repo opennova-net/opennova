@@ -553,14 +553,15 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     target.death_anim_state = compute_death_anim_state(
             kCollisionDeathBone, quadrant, kCollisionDeathCause); // [orig: @0x4E674C]
     target.cause_flags |= kDamageFlagCollision; // [orig: @0x4E6740]
-    // deathCallback(target, 3, 0), no null test [orig: the event word @0x4E673A, the call
-    // @0x4E6752]: a player body runs its bound row's callback (player_body_row_event,
-    // D-NET-348): the plyr body keeps its cause bits (3 is in the no-clear set), runs its
-    // health tail and re-arms its think before its waypoint tail [orig:
+    // deathCallback(target, 3, 0) for every victim, no null test [orig: the event word
+    // @0x4E673A, the call @0x4E6752]: a player body runs its bound row's callback
+    // (player_body_row_event, D-NET-348): the plyr body keeps its cause bits (3 is in the
+    // no-clear set), runs its health tail and re-arms its think before its waypoint tail [orig:
     // Entity_HandleDamageAndTriggerZones @0x407B3B..0x407B4F, @0x407B5E, the tail
-    // @0x407B64..0x407C6B]. The AI reaction rides the RoundHit drain, as for a blast.
+    // @0x407B64..0x407C6B]; an NPC the organic class's, its think re-armed at 62
+    // (person_class_event). The AI reaction rides the RoundHit drain, as for a blast.
     world.round_sim.hits.push_back(RoundHit{target.handle, target.last_attacker, damage});
-    if ((flags & kEntityFlagPlayer) != 0) player_body_row_event(world, target, 3);
+    person_class_event(world, target, 3);
     if (collision_kill_fires(before, target.health)) {
         // The kill event credits the entry's source itself, not the walk
         // [orig: `mov edx, [ebx+20h]` @0x4E676A -> Score_ProcessKillEvent
@@ -684,17 +685,20 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             // The processed hit feeds the AI reaction stamps, like a round hit
             // [orig: the deathCallback(2) notify @ 0x4e6b72].
             world.round_sim.hits.push_back(RoundHit{target.handle, attacker, damage});
-            // That notify is the class callback with event 2 (a player body's bound
-            // row's, player_body_row_event): on a live plyr-row PLAYER
+            // That notify is the class callback with event 2, for every person it
+            // reaches (person_class_event: a player body's bound row's,
+            // player_body_row_event; an NPC the organic class's, its think
+            // re-armed at 62): on a live plyr-row PLAYER
             // body the plyr callback runs its health tail, clears the kill-cause
             // bits 8..11 (a latched head-shot bit does not survive a blast, so
             // a blast kill routes as an ordinary death), re-arms the 64-tick
             // think and runs its waypoint tail
-            // [orig: Entity_HandleDamageAndTriggerZones @0x40772f dead return;
+            // [orig: Entity_ApplyWeaponDamage @0x4E6820 (`mov eax, [esi+1C8h]`
+            //  @0x4E6B63, the call @0x4E6B72);
+            //  Entity_HandleDamageAndTriggerZones @0x40772f dead return;
             //  @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm; the
             //  tail @0x407B64..0x407C6B].
-            if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
-                player_body_row_event(world, target, 2);
+            person_class_event(world, target, 2);
             // Right after that notify, a blast on the LOCAL player arms the red
             // damage vignette + the camera shake and the radar blip, unless the
             // record's kz type is 3 (the medic heal); the source is the entry's

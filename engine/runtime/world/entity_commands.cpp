@@ -239,13 +239,7 @@ void run_brain_class_event(World &world, const Entity &e, int event) {
 void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
     const HitRecord &record = world.round_sim.hit_record;
     if (e.kind == EntityKind::Organic) {
-        const uint32_t entity_flags = e.flags | e.engine_flags;
-        // A player body runs its bound row's callback (D-NET-348); any other organic the
-        // organic class's (org0 / org1).
-        if ((entity_flags & kEntityFlagPlayer) != 0)
-            player_body_row_event(world, e, phase, flags);
-        else
-            organic_class_event(world, e, phase);
+        person_class_event(world, e, phase, flags);
         return;
     }
     if (e.is_ai_capable) {
@@ -280,6 +274,14 @@ void organic_class_event(World &world, Entity &body, int event) {
         return;
     }
     body.spawn_phase = 62;
+}
+
+// See the infantry.h contract.
+void person_class_event(World &world, Entity &body, int event, int32_t flags) {
+    if (((body.flags | body.engine_flags) & kEntityFlagPlayer) != 0)
+        player_body_row_event(world, body, event, flags);
+    else
+        organic_class_event(world, body, event);
 }
 
 // See the infantry.h contract.
