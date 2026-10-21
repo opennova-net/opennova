@@ -74,9 +74,6 @@ int test_reads_and_writes_back() {
 	TEST_EXPECT(bank.get(stream_at(bank, 0), "seconds", value) && std::fabs(std::get<double>(value) - 2216.0 / 2.0 / 22050.0) < 1e-9);
 	TEST_EXPECT(bank.get(stream_at(bank, 1), "chunks", value) && std::get<int64_t>(value) == 3);
 	TEST_EXPECT(bank.record_title(stream_at(bank, 1)) == "1: TONE01");
-	// The name the outline titles a stream by is one the game never reads (the Inspector tags it).
-	for (const FieldSchema &field : bank.fields(kStream))
-		if (field.id == "name") TEST_EXPECT(bank.field_on(stream_at(bank, 1), field).applies == Applicability::Ignored);
 	// A stream by its place alone, as the game names one: a name is no place.
 	TEST_EXPECT(bank.stream_index("2") == 2 && bank.stream_index("12") == 12 && bank.stream_index("13") == -1 &&
 	            bank.stream_index("TONE02") == -1 && bank.stream_index("02") == -1 && bank.stream_index("-1") == -1);

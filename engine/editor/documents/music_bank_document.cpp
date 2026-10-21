@@ -78,12 +78,12 @@ RecordTable make_table() {
 	TableKind stream(RecordKindRow{kStream, "stream", "Stream", "", false});
 	{
 		// The game never reads it: the music script plays a stream by its place [orig: AudioVM_Op_Play @ 0x672CB0].
-		// The outline still names a stream by it (the collection's name field).
+		// It is not marked ignored all the same: it is the one name a person and the outline know a stream by, and the
+		// stream's one editable field.
 		FieldSchema name = schema_of("name", FieldType::Text, "Name",
 				"The stream's name in the index, 16 characters at the most; the music script plays a stream by its "
 				"place [orig: AudioVM_Op_Play @ 0x672CB0].");
 		name.width = SBF_NAME_SIZE;
-		name.applies = Applicability::Ignored;
 		stream.field(RF{name,
 		                {[](const RecordHandle &r, Value &out) { return out = stream_of(r).name, true; },
 		                 [](const RecordHandle &r, const Value &v, std::string &e) {
