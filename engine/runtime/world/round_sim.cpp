@@ -482,8 +482,12 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     const int64_t scaled_drag = first_division / io::kTicksPerSecondInt;
     // A positive surface multiplier scales the step directly and skips the
     // water/air legs [orig: the surfaceNormal > 0 arm @0x4e604e..0x4e6097
-    // ahead of the water-height test @0x4e60a9].
-    const bool underwater = water_z_q16 != 0 && position_z_q16 <= water_z_q16;
+    // ahead of the water-height test @0x4e60a9]. The round's Z word is compared
+    // with the water word raw: a map with no water holds 0 there, so a round at
+    // or below Z 0 takes the x25 step [orig: Entity_ApplyDragAndBounceForce
+    // @0x4E5EC0 - `cmp eax, g_EnvWaterHeightFixed` / `jle` @0x4E60A0..0x4E60A9,
+    // the x25 leg @0x4E616D].
+    const bool underwater = position_z_q16 <= water_z_q16;
     const int64_t drag_step = surface_normal > 0 ? scaled_drag * surface_normal
                               : underwater      ? scaled_drag * 25
                                                 : scaled_drag;

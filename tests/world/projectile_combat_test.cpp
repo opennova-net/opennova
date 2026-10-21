@@ -2345,6 +2345,19 @@ void test_retail_aerodynamic_drag_vectors() {
     FlightResult wet = fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536, 0,
                                     4 * 65536, 5 * 65536);
     CHECK(wet.active && wet.vel.x == 105079);
+    // The drag compares the round's Z word with the water word raw: with no water
+    // authored the word is 0, so a round at or below Z 0 takes the x25 step and one
+    // above it the dry step [orig: Entity_ApplyDragAndBounceForce @0x4E5EC0 -
+    // @0x4E60A0..0x4E60A9, the x25 leg @0x4E616D].
+    FlightResult dry_map_low = fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536, 0,
+                                            -65536, 0);
+    CHECK(dry_map_low.active && dry_map_low.vel.x == 105079);
+    FlightResult dry_map_zero = fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536, 0,
+                                             0, 0);
+    CHECK(dry_map_zero.active && dry_map_zero.vel.x == 105079);
+    FlightResult dry_map_high = fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536, 0,
+                                             65536, 0);
+    CHECK(dry_map_high.active && dry_map_high.vel.x == 105679);
     FlightResult slow_wet = fly_one_tick(FixedVec3{0x3fff, 0, 0}, 0x100u, 0, 0,
                                          4 * 65536, 5 * 65536);
     CHECK(!slow_wet.active);
