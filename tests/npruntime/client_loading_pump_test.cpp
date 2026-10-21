@@ -39,6 +39,7 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
@@ -552,6 +553,19 @@ bool run_an_early_release_stays_in_the_final_wait() {
 	if (!expect(h.client.in_match() && !h.client.in_game_loop() &&
 				!h.client.queue_stance_change(0xA9),
 			"final wait: the stance key queues nothing before the 0x0F"))
+		return false;
+	// The session-gated senders too: the input frame, the HUD and the in-game screens
+	// that call them run in the main frame alone, which the wait does not run
+	// (ClientRuntime::in_game_loop) [orig: Game_ProcessMainFrame @0x5263F0 -
+	// Input_ProcessFrame @0x52661D].
+	if (!expect(h.client.in_session() && !h.client.queue_medic_request() &&
+				!h.client.queue_respawn_request() && !h.client.queue_spectator_convert() &&
+				!h.client.queue_deployment_pick(0) &&
+				!h.client.queue_voice_menu_pick(opennova::c2s::RADIO_CALL_REQUEST, 1) &&
+				!h.client.queue_team_change_request() &&
+				!h.client.queue_vehicle_spawn_availability_request() &&
+				!h.client.queue_vehicle_spawn_request(0x1001, 0),
+			"final wait: no session sender queues before the 0x0F"))
 		return false;
 	std::vector<uint8_t> world_state(23, 0);
 	(void)h.frame({make_protocol_message(0x0F, world_state)});

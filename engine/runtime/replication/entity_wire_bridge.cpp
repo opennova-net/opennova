@@ -1273,7 +1273,7 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
 	// (JoinerRole::fold_local_record), so an unmounted body's link is the record's.
 	// [orig: NetPacket_SerializePlayerState case 2 -- the carrier resolve and
 	//  its no-itemDef drop @0x4C105E..0x4C10C7, Entity_TryAttachOrDetach
-	//  @0x4C1329, `parentEntity->groundEntity` @0x4C1346..0x4C1353]
+	//  @0x436610 (the call @0x4C1317), `parentEntity->groundEntity` @0x4C1346..0x4C1353]
 	const world::Entity *echo_seat = nullptr;
 	if (interest.self_echo != nullptr && interest.self_echo->mount_bone != 0 &&
 			interest.self_echo->carrier_handle != wire_handle::kInvalid)

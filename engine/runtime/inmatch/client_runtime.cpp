@@ -220,7 +220,6 @@ void ClientRuntime::apply_zone_timer_window(const ZoneTimerWindow &window) {
 
 void ClientRuntime::set_local_player_position(const world::World &world) {
 	const world::Entity *player = world.registry.get(world.cached.local_player);
-	local_player_present_ = player != nullptr;
 	if (player == nullptr) return;
 	local_player_position_[0] = player->position.x.q16;
 	local_player_position_[1] = player->position.y.q16;
@@ -232,10 +231,12 @@ void ClientRuntime::step_local_dead_latch() {
 	// Health of 0 or less (a folded tail's, or the zero a dead self record stores)
 	// latches the local entity's dead bit when the body tick runs: in the game loop,
 	// out of the pre-round and the session's round-over hold (the entity update's
-	// skip), and not under the local death screen (the body tick's return at its
-	// head) (D-NET-562) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B40F8..
-	// 0x4B411A, the edge @0x4B4BF1..0x4B4C02; Game_ProcessMainFrame @0x526703..0x526742;
-	// NetPacket_SerializePlayerState @0x4C10F1..0x4C10FB].
+	// skip), not under the local death screen (the body tick's return at its head)
+	// and not on a hidden body (its next return: Flags bit 0, which the self record's
+	// 0xE1 fold carries) (D-NET-562) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+	// @0x4B40F8..0x4B411A, the hidden return @0x4B411B..0x4B4127, the edge
+	// @0x4B4BF1..0x4B4C02; Game_ProcessMainFrame @0x5263F0 - @0x526703..0x526742;
+	// NetPacket_SerializePlayerState @0x4C09C0 - @0x4C10F1..0x4C10FB, the fold @0x4C12FF].
 	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_game_loop()) return;
 	const replication::ClientState &cs = view_.state();
 	const replication::ClientEntityState *self =
@@ -243,8 +244,10 @@ void ClientRuntime::step_local_dead_latch() {
 	const bool record_dead =
 			self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
 	const bool health_zero = (cs.health_updates_applied != 0 && cs.local_health <= 0) || record_dead;
+	const bool hidden = self != nullptr && self->state_flags_known && (self->state_flags & 0x01u) != 0;
 	const bool body_ticks = cs.preround_delay_seconds == 0 &&
-			!(joiner_->in_session() && cs.spawn_success_gate) && !cs.death_screen_active;
+			!(joiner_->in_session() && cs.spawn_success_gate) && !cs.death_screen_active &&
+			!hidden;
 	if (health_zero && body_ticks) local_dead_latch_ = true;
 }
 
@@ -628,7 +631,7 @@ bool ClientRuntime::queue_deployment_pick(uint16_t wire_value) {
 	if (queue_host_message(c2s::RESPAWN_REQUEST,
 			{static_cast<uint8_t>(wire_value & 0xFFu), static_cast<uint8_t>(wire_value >> 8)}))
 		return true;
-	if (!joiner_) return false;
+	if (role_ != Role::Joiner || !in_game_loop()) return false;
 	// Initial admission may finish while the authority still holds the
 	// deploy-map overlay. Its selection sends the same request as a death
 	// re-pick, even though the player is alive and no pick is in flight yet.
@@ -649,7 +652,7 @@ bool ClientRuntime::queue_spectator_convert() {
 	//  Server_ProcessClientRequestSpectatorRespawn @0x51C840]
 	const std::vector<uint8_t> body = {0xFF, 0xFF};
 	if (queue_host_message(c2s::SPECTATOR_RESPAWN, body)) return true;
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	if (role_ != Role::Joiner || !in_game_loop()) return false;
 	send_queue_.push_back(make_protocol_message(c2s::SPECTATOR_RESPAWN, body));
 	deployed_ = false;
 	return true;
@@ -661,8 +664,7 @@ bool ClientRuntime::queue_medic_request() {
 	// held one-shot queue that flushes at the next open send boundary rather
 	// than the deploy-gated gameplay queue [orig: QueueReliableMessage(0x2E)
 	// @0x49b50c, outside the 0x0C/0x2C deploy gate of Client_ProcessNetworkFrame].
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session() ||
-	    !joiner_->has_self_handle())
+	if (role_ != Role::Joiner || !in_game_loop() || !joiner_->has_self_handle())
 		return false;
 	MedicRequest request;
 	request.entity_index = joiner_->self_handle();
@@ -679,7 +681,7 @@ bool ClientRuntime::queue_respawn_request() {
 	// connection like a joiner [orig: Input_HandleActionBinding case 55, the
 	// call @0x49B22A behind is_in_session / is_mp_session_peer alone].
 	if (queue_host_message(c2s::DEATH_TIMEOUT_RESET, {})) return true;
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	if (role_ != Role::Joiner || !in_game_loop()) return false;
 	send_queue_.push_back(make_protocol_message(c2s::DEATH_TIMEOUT_RESET, {}));
 	return true;
 }
@@ -782,7 +784,7 @@ bool ClientRuntime::queue_voice_menu_pick(uint8_t tag, int16_t value) {
 		send_queue_.push_back(std::move(pick));
 		return true;
 	}
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	if (role_ != Role::Joiner || !in_game_loop()) return false;
 	pick.retention_flushes = 1; // the user param [orig: `push 1` @0x42c12c / @0x42c15c]
 	send_queue_.push_back(std::move(pick));
 	return true;
@@ -793,7 +795,7 @@ bool ClientRuntime::queue_team_change_request() {
 	// too [orig: DeathScreen_OnSwapTeams @0x5535ba -> NetPacket_SendPingRequest
 	//  @0x42dd90, QueueReliableMessage(0x4D) @0x42ddac].
 	if (!queue_host_message(c2s::TEAM_CHANGE_REQUEST, {})) {
-		if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+		if (role_ != Role::Joiner || !in_game_loop()) return false;
 		send_queue_.push_back(make_protocol_message(c2s::TEAM_CHANGE_REQUEST, {}));
 	}
 	view_.age_minimap_overlays(0x48A8u);
@@ -804,7 +806,7 @@ bool ClientRuntime::queue_team_change_request() {
 //  QueueReliableMessage(0x42, 1, 0, .., 0) @0x42DBFC]
 bool ClientRuntime::queue_vehicle_spawn_availability_request() {
 	if (queue_host_message(c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {})) return true;
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	if (role_ != Role::Joiner || !in_game_loop()) return false;
 	send_queue_.push_back(make_protocol_message(c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {}));
 	return true;
 }
@@ -818,7 +820,7 @@ bool ClientRuntime::queue_vehicle_spawn_request(uint16_t source_handle, uint8_t 
 	pick.type_index = type_index;
 	std::vector<uint8_t> body = encode_vehicle_spawn_request(pick);
 	if (queue_host_message(c2s::VEHICLE_SPAWN_REQUEST, body)) return true;
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	if (role_ != Role::Joiner || !in_game_loop()) return false;
 	send_queue_.push_back(make_protocol_message(c2s::VEHICLE_SPAWN_REQUEST, std::move(body)));
 	return true;
 }
@@ -1303,8 +1305,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 						tb.first == s2c::PER_FRAME_UPDATE && joiner_->has_self_handle()
 						? view_.state().find(joiner_->self_handle()) : nullptr;
 				const bool self_row_before = self_before != nullptr;
-				const uint32_t self_respawns_before =
-						self_row_before ? self_before->respawn_revision : 0u;
 				const uint32_t self_compact_before =
 						self_row_before ? self_before->compact_revision : 0u;
 				const uint32_t world_state_before = view_.state().world_state.revision;
@@ -1316,38 +1316,39 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				// The echo of our console line runs the client's command walk at its
 				// place [orig: NapiNPClientMsg_HandleConsoleEcho @0x432BC0].
 				if (tb.first == s2c::CLIENT_CONSOLE_COMMAND) run_console_echo(tb.second);
-				// The self record's respawn edge (its dead bit fell while ours was set)
-				// is the local respawn, whose Game_InitNewRound clears the deploy
-				// hold: the release of a deploy that sent no 0x5A, a medic revive's.
-				// [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
-				//  @0x4C114C, g_ClientDeployHold = 0 @0x4227CE; D-NET-379]
+				// The self record's respawn arm: an alive record (its dead bit clear)
+				// while the local entity's own dead bit is set (local_dead_latch_, the
+				// body's death edge; the record's bit is never folded into Flags). It
+				// clears the entity's bit, writes the local Position from the record in
+				// the receive, so the pump's later handlers read it (D-NET-687), and runs
+				// the local respawn's Game_InitNewRound, which clears the deploy hold:
+				// the release of a deploy that sent no 0x5A, a medic revive's
+				// (D-NET-379). A dead record that never latched the bit (the pre-round,
+				// the round-over hold, the death screen, a hidden body) fires nothing.
+				// [orig: NetPacket_SerializePlayerState @0x4C09C0 - `test bl, 2`
+				//  @0x4C0FE1 (its jz @0x4C1005), `test byte [edi+24h], 2` @0x4C1109, the
+				//  Position stores @0x4C110F..0x4C111D, Game_InitNewRound @0x4C114C; the
+				//  Flags folds 0xE1 / 0xFD @0x4C12FF / @0x4C1307; g_ClientDeployHold = 0
+				//  @0x4227CE]
 				if (self_row_before) {
 					const replication::ClientEntityState *self_after =
 							view_.state().find(joiner_->self_handle());
-					if (self_after != nullptr &&
-							self_after->respawn_revision != self_respawns_before) {
-						// The respawn arm writes the local player's Position from the
-						// record in the receive, so the pump's later handlers read it
-						// (D-NET-687) [orig: NetPacket_SerializePlayerState @0x4C09C0 -
-						// the arm @0x4C1109, the stores @0x4C110F..0x4C111D].
-						if (local_player_present_)
+					if (self_after != nullptr && self_after->compact_revision != self_compact_before &&
+							self_after->state_flags_known && (self_after->state_flags & 0x02u) == 0 &&
+							local_dead_latch_) {
+						local_dead_latch_ = false;
+						if (local_entity_bound())
 							for (int axis = 0; axis < 3; ++axis)
 								local_player_position_[axis] = self_after->record_sample[axis];
 						if (joiner_->release_deployment_on_respawn())
 							respawn_release_in_poll = true;
 					}
-					// The respawn arm tests the local entity's own dead bit: a self
-					// record alive while it is set clears it (local_player_dead)
-					// [orig: NetPacket_SerializePlayerState @0x4C09C0 - `test bl, 2`
-					//  @0x4C1005, `test byte [edi+24h], 2` @0x4C1109].
-					if (self_after != nullptr && self_after->compact_revision != self_compact_before &&
-							self_after->state_flags_known && (self_after->state_flags & 0x02u) == 0)
-						local_dead_latch_ = false;
 				}
-				// The 0x0F handler writes the local player's Position the same way
-				// [orig: NapiNPClientMsg_0x00F @0x42E200, the pose stores past its
-				// `g_LocalPlayerEntity` null test].
-				if (tb.first == s2c::WORLD_STATE_LOAD && local_player_present_ &&
+				// The 0x0F handler writes the local player's Position the same way, past
+				// its g_LocalPlayerEntity null test (local_entity_bound)
+				// [orig: NapiNPClientMsg_0x00F @0x42E200 - the null test @0x42E3AF, the
+				// stores @0x42E3B9..0x42E3CE].
+				if (tb.first == s2c::WORLD_STATE_LOAD && local_entity_bound() &&
 						view_.state().world_state.revision != world_state_before) {
 					const replication::ClientWorldStateLoad &ws = view_.state().world_state;
 					local_player_position_[0] = ws.pos_x;
@@ -1580,7 +1581,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// handed over by the JoinerRole): it runs free across joins and missions, so a later
 	// join's first report lands at its phase, not 311 frames in (D-NET-602).
 	// [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279, its one caller
-	//  Game_ProcessMainFrame @0x526692; g_NetQualityReportTimer @0xA85B84]
+	//  Game_ProcessMainFrame @0x5263F0 (the call @0x526692); g_NetQualityReportTimer @0xA85B84]
 	if (!replay_mode_ && joiner_->in_game_loop()) {
 		if (process_state().step_net_quality_report()) {
 			ProtocolMessage quality = make_protocol_message(

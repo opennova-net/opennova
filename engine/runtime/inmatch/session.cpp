@@ -32,6 +32,12 @@ void Role::apply_input(const TickInput &input) {
 	mission::MissionKernel &kernel = *kernel_;
 	ClientRuntime *runtime = client_runtime();
 	const bool joiner = kind() == RoleKind::Joiner;
+	// A joiner's input frame runs in its game loop alone: the join screen, the
+	// mission start's load and its final wait run no main frame, so no press of
+	// theirs reaches a sender (ClientRuntime::in_game_loop).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - Input_ProcessFrame @0x52661D;
+	//  Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5]
+	if (joiner && (runtime == nullptr || !runtime->in_game_loop())) return;
 	// The input pass's head drops the orbit-yaw bits before this tick's
 	// dispatch can raise them again [orig: Input_ProcessFrame
 	// `and g_InputActionBits, 0FFFFFFAFh` @0x49d52b].
@@ -148,6 +154,9 @@ bool Role::request_deployment_pick(uint16_t wire_value) {
 	mission::MissionKernel &kernel = *kernel_;
 	ClientRuntime *runtime = client_runtime();
 	if (runtime == nullptr) return false;
+	// The deploy screen is the game loop's, as every input sender is
+	// (ClientRuntime::in_game_loop).
+	if (kind() == RoleKind::Joiner && !runtime->in_game_loop()) return false;
 	// a6 is the head's dead read the Respawn key's gate takes (the local
 	// entity's Flags & 2; a HostOnly host's constant 2 has no client here):
 	// the authority's own body, a joiner's replica read (D-NET-562's window).
@@ -166,12 +175,16 @@ bool Role::request_deployment_pick(uint16_t wire_value) {
 	// The shared head of both send arms, none of it on the spectators-off arm above:
 	// Input_ResetAllState (the deferred queue here; the key state and the key-press
 	// latches are the embedder's devices, through take_input_reset), the epilog
-	// screen's input event 83, which no handler takes (record 83 is a zero record,
-	// the dispatcher's switch sends 75..99 to its default, the cine filter takes
-	// other codes), then Dialog_ResetAll (D-NET-685).
+	// screen's input event 83, which no handler takes (no catalog record carries
+	// code 83; the head's filters (the death screen's, the stub, the cine's, the
+	// troop class's 58..119 default) pass it and the dispatcher's switch sends
+	// 75..99 to its default), then Dialog_ResetAll (D-NET-685).
 	// [orig: Input_HandleActionBinding @0x49AD40 - the spectators-off jump @0x49B03C,
 	//  Input_ResetAllState @0x49B042, the epilog test and Input_QueueEvent(0x53)
-	//  @0x49B047..0x49B058, Dialog_ResetAll @0x49B060, the hold @0x49B067]
+	//  @0x49B047..0x49B058, Dialog_ResetAll @0x49B060, the hold @0x49B067; event 83's
+	//  filters DeathScreen_FilterInputAction @0x52AD50 (the call @0x49AE4C),
+	//  Input_NullActionFilter (@0x49AE68), Cine_FilterInputAction @0x56FC30 (@0x49AE84),
+	//  the def+0x170 callback Input_HandleActionBinding_0 @0x4E0420 (@0x49AEB6)]
 	kernel.local.clear_deferred_input();
 	input_reset_pending_ = true;
 	kernel.world.script.dialog.reset();

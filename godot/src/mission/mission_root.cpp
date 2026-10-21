@@ -215,10 +215,17 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		if (needs_join_connection && options->get_join_character_profile().is_valid()) {
 			sim_->set_join_character_profile(options->get_join_character_profile());
 		}
+		// The join's JSR and JSPP: the cfg block's join-screen words, as the session
+		// drive's dial sends them (GameConfigBlock::join_choice; D-NET-NEW-L2-12).
+		int join_role = JoinTarget::ROLE_PLAYER;
+		String spectator_password;
+		if (needs_join_connection && join_target.is_valid())
+			GameConfigBlock::join_choice(options->get_game_config(), join_target, join_role,
+					spectator_password);
 		if (needs_join_connection && join_target.is_valid() && join_identity && !sim_->enable_join(
 				join_target->get_host_ip(), join_target->get_port(),
-				join_target->get_player_name(), join_target->get_join_role(),
-				join_target->get_spectator_password(), join_target->get_server_password())) {
+				join_target->get_player_name(), join_role,
+				spectator_password, join_target->get_server_password())) {
 			UtilityFunctions::push_warning(vformat(
 					"MissionRoot: could not dial co-op host %s:%d — joiner disabled.",
 					join_target->get_host_ip(), join_target->get_port()));

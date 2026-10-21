@@ -858,7 +858,7 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 // vehicle stands on otherwise (that deck's frame). An unmounted joiner's
 // uplink is unchanged by the echo.
 // [orig: NetPacket_SerializePlayerState case 2 -- Entity_TryAttachOrDetach
-//  @0x4C1329, `groundEntity = parentEntity ? parentEntity->groundEntity :
+//  @0x436610 (the call @0x4C1317), `groundEntity = parentEntity ? parentEntity->groundEntity :
 //  carrier` @0x4C1346..0x4C1358; case 3 `mov ecx, [edi+28h]` @0x4C141D;
 //  Client_ProcessNetworkFrame -- the receive pump @0x42C228 ahead of the
 //  send block @0x42C3DD..0x42C4BC]

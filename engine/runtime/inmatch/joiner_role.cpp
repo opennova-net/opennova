@@ -998,8 +998,8 @@ void JoinerRole::wire_frame_providers() {
 	// keeps no dry sentinel (the word is 0 with no water authored), and the body
 	// updates compare against it unconditionally.
 	// [orig: g_EnvWaterHeightFixed @ 0x26C6454; Environment_InitDefaults
-	//  @0x57C010 (the memset @0x57C011..0x57C01E); Entity_UpdateInfantryPlayerBody @0x4B803C,
-	//  Entity_UpdateInfantryAI @0x4BFAFE]
+	//  @0x57C010 (the memset @0x57C011..0x57C01E); Entity_UpdateInfantryPlayerBody @0x4B40E0
+	//  (@0x4B803C), Entity_UpdateInfantryAI @0x4B9910 (@0x4BFAFE)]
 	rt.view().set_water_z(world.env.water_z);
 	// Replica peer/source spheres are initialized from the exact same typed
 	// items.def/model result as projectile and lighting projections. The
@@ -1681,7 +1681,7 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 				? (mirror & ~0xFDu) | (shooter_row->state_flags & 0xFDu)
 				: mirror;
 		// Retail tests eye Z (Position.Z + CameraOffset.Z) against the fixed
-		// water plane [orig: RoundData_SpawnRound @0x4EC2DE..0x4EC2EA]. The
+		// water plane [orig: RoundData_SpawnRound @0x4EC0D0 (@0x4EC2DE..0x4EC2EA)]. The
 		// decoded row has no CameraOffset carrier, so raw fixed position Z is
 		// the bounded projection. Do not invent a standing-eye constant here.
 		// The plane is compared raw (no dry sentinel) [orig: `cmp ecx,

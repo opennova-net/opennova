@@ -245,6 +245,14 @@ struct GameCfg {
 	int32_t contest = 0;           // +0x4B0
 	int32_t flag_return_time = 0;  // +0x41C: read `mp_flagreturntime`, written `flagreturntime`
 	int32_t flag_reset_time = 0;   // +0x420: read `mp_flagresettime`; never written
+	// The join screen's choice: two block words no cfg row names, so a read's
+	// defaults zero them (Config_SetDefaults' memset) and no read or save
+	// touches them. The pre.mnu commit writes them and every join's ClientAuth
+	// sends them as JSR / JSPP (inmatch::GameConfigBlock::commit_join_choice).
+	// [orig: g_GameConfigState unknownHostOption_428 / unknownHostText_42C;
+	//  Config_SetDefaults @0x54D030 - the memset @0x54D039..0x54D046]
+	int32_t join_spectate = 0;           // +0x428
+	std::string join_spectator_password; // +0x42C, an unbounded copy
 	int32_t ping = 0;              // +0x4B8
 	int32_t sendplayerlist = 0;    // +0x4BC
 	int32_t rememberlogin = 0;     // +0x4D4

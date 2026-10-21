@@ -27,6 +27,7 @@
 
 #include <runtime/inmatch/charattr_table.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/game_config_block.h>
 #include <runtime/inmatch/punt_log.h>
 #include <runtime/inmatch/server_files.h>
 #include <runtime/inmatch/mission_exit.h>
@@ -388,31 +389,74 @@ bool run_spectator_clientauth_and_state_latch() {
 	// JSPP rides on its own non-empty test, JSR's `jz` landing on it: the join
 	// choice's commit as a player keeps the spectator password it held, and that
 	// password goes up with no JSR [orig: CNapiServerInfo_SerializeToSession
-	// @0x4c3c54..0x4c3cb2]. The process's words: a spectate commit writes both, a
+	// @0x4c3c54..0x4c3cb2]. The cfg block's words: a spectate commit writes both, a
 	// player commit the spectate word alone [orig: UI_PreGameMenuStateMachine
 	// @0x568bf0 / @0x568c33].
-	inmatch::ClientProcessState process;
-	process.commit_join_choice(true, "spec");
-	process.commit_join_choice(false, "team");
-	if (!expect(!process.join_spectate && process.join_spectator_password == "spec",
-			"a player commit keeps the process's spectator password"))
+	test_temp::TempDir dir("client_runtime_join_choice");
+	inmatch::GameConfigBlock block(dir.file("game.cfg"));
+	block.commit_join_choice(true, "spec");
+	block.commit_join_choice(false, "team");
+	if (!expect(block.cfg().join_spectate == 0 && block.cfg().join_spectator_password == "spec",
+			"a player commit keeps the block's spectator password"))
 		return false;
+	const auto auth_choice = [](const ClientAuth &auth, int &jspp_count, std::string &jspp,
+			bool &jsr) {
+		jspp_count = 0;
+		jspp.clear();
+		jsr = false;
+		for (const std::vector<uint8_t> &blob : auth.cu) {
+			uint8_t type = 0;
+			std::string name, value;
+			if (!parse_client_cu_chunk(blob.data(), blob.size(), type, name, value)) continue;
+			if (name == "JSPP") {
+				++jspp_count;
+				jspp = value;
+			}
+			if (name == "JSR") jsr = true;
+		}
+	};
+	const auto block_role = [&block]() {
+		return block.cfg().join_spectate != 0 ? inmatch::JoinRole::Spectator
+				: inmatch::JoinRole::Player;
+	};
 	ClientAuth kept;
-	if (!expect(build_joiner_client_auth(inmatch::JoinRole::Player,
-				process.join_spectator_password, kept),
+	if (!expect(build_joiner_client_auth(block_role(), block.cfg().join_spectator_password, kept),
 			"kept-password player ClientAuth builds"))
 		return false;
 	int jspp_count = 0;
+	std::string jspp;
 	bool jsr = false;
-	for (const std::vector<uint8_t> &blob : kept.cu) {
-		uint8_t type = 0;
-		std::string name, value;
-		if (!parse_client_cu_chunk(blob.data(), blob.size(), type, name, value)) continue;
-		if (name == "JSPP" && value == "spec") ++jspp_count;
-		if (name == "JSR") jsr = true;
-	}
-	if (!expect(jspp_count == 1 && !jsr,
+	auth_choice(kept, jspp_count, jspp, jsr);
+	if (!expect(jspp_count == 1 && jspp == "spec" && !jsr,
 			"a player's kept spectator password rides JSPP=spec with no JSR"))
+		return false;
+	// The choice lives until the next main-menu entry: the MainMenu init's
+	// Game_LoadConfig runs Config_SetDefaults, whose memset zeroes the whole block,
+	// and no cfg row restores either word, so the next join that shows no choice
+	// sends neither JSR nor JSPP (D-NET-NEW-L2-12) [orig: Menu_InitShellResources
+	// @0x552500 - Game_LoadConfig @0x552534; Config_SetDefaults @0x54D030 - the memset
+	// @0x54D039..0x54D046].
+	block.commit_join_choice(true, "spec");
+	ClientAuth spectate_join;
+	if (!expect(build_joiner_client_auth(block_role(), block.cfg().join_spectator_password,
+				spectate_join), "the committed spectate join builds"))
+		return false;
+	auth_choice(spectate_join, jspp_count, jspp, jsr);
+	if (!expect(jsr && jspp_count == 1 && jspp == "spec",
+			"the commit's own join sends JSR=1 and JSPP"))
+		return false;
+	std::string menu_error;
+	if (!expect(block.enter_main_menu(inmatch::GameConfigBlock::MenuMount{}, menu_error) &&
+				block.cfg().join_spectate == 0 && block.cfg().join_spectator_password.empty(),
+			"a main-menu entry's read zeroes the join choice"))
+		return false;
+	ClientAuth after_menu;
+	if (!expect(build_joiner_client_auth(block_role(), block.cfg().join_spectator_password,
+				after_menu), "the no-choice join after the menu builds"))
+		return false;
+	auth_choice(after_menu, jspp_count, jspp, jsr);
+	if (!expect(!jsr && jspp_count == 0,
+			"a no-choice join after a return to the menu sends no JSR and no JSPP"))
 		return false;
 
 	const std::string client_scrk = "CLIENT-SPECTATOR-STATE-SCRK";
@@ -5920,12 +5964,6 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 //  @0x42c23e..0x42c279; the 0x2C gate @0x42c3ee..0x42c410, the 0x0C's @0x42c44f..0x42c46d;
 //  Player_BuildTag0CInputBody @0x42A550 (@0x42a58f, @0x42a599); CNetQuality_UpdateMetrics
 //  @0x4C52C0, the held test @0x4c5606..0x4c5630; Input_HandleActionBinding @0x49b067]
-// D-NET-602: the 0x4C report count is the process's. Its only writers are the client
-// net frame's step and its zero at the report, so it runs free across joins: a second
-// join's first report lands at the count's phase, 311 - 200 = 111 frames in after a
-// first join ran 200, where a fresh count would wait 311.
-// [orig: Client_ProcessNetworkFrame @0x42C180 - the step @0x42C22D..0x42C239, the zero
-//  @0x42C246, the queue @0x42C279; g_NetQualityReportTimer @0xA85B84]
 // NEW-L8-8's joiner half: the client's S2C 0x61 (the session key) closes the connect
 // log while it is on: its "<time> : NET CLIENT DISABLING CONNECTLOG ..." line, then off
 // for the process; a later 0x61 writes nothing.
@@ -5976,6 +6014,12 @@ bool run_the_session_key_closes_the_connect_log() {
 			"connect log: a later session key writes nothing");
 }
 
+// D-NET-602: the 0x4C report count is the process's. Its only writers are the client
+// net frame's step and its zero at the report, so it runs free across joins: a second
+// join's first report lands at the count's phase, 311 - 200 = 111 frames in after a
+// first join ran 200, where a fresh count would wait 311.
+// [orig: Client_ProcessNetworkFrame @0x42C180 - the step @0x42C22D..0x42C239, the zero
+//  @0x42C246, the queue @0x42C279; g_NetQualityReportTimer @0xA85B84]
 bool run_the_report_timer_runs_for_the_process() {
 	const auto first_report = [](inmatch::ClientProcessState *process, int frames,
 			const char *scrk_tag) {

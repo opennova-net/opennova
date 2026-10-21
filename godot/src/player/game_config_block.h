@@ -17,6 +17,7 @@
 
 namespace godot {
 
+class JoinTarget;
 class ResourceRoot;
 class RtxtStringFile;
 
@@ -74,6 +75,13 @@ public:
 	// Single player's mission start's block write after its save (the engine's
 	// GameConfigBlock::single_player_mission_start).
 	void single_player_mission_start() { block_.single_player_mission_start(); }
+	// A join's JSR and JSPP words over the process's block: a target that answered
+	// the join screen's choice commits it (the engine's
+	// GameConfigBlock::commit_join_choice), and the join sends what the block
+	// holds, which the next main-menu entry's read zeroes. With no block (a world
+	// the shell gave none) the join sends the target's own choice.
+	static void join_choice(const Ref<GameConfigBlock> &p_block, const Ref<JoinTarget> &p_target,
+			int &r_role, String &r_spectator_password);
 };
 
 } // namespace godot

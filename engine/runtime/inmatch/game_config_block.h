@@ -161,6 +161,21 @@ public:
 	// Single player's mission start, after its save (the embedder's save
 	// point): the block's mpattrib becomes kSinglePlayerMpAttrib.
 	void single_player_mission_start() { cfg_.mpattrib = kSinglePlayerMpAttrib; }
+	// The join screen's commit into the block: the SPECTATE state always, the
+	// shared password only when SPECTATE was checked (else it went to the side
+	// password, which is the join's). Every join copies both into its
+	// ClientAuth's JSR and JSPP. No cfg row names either word, so the next
+	// read's defaults zero them: the choice lives until the next main-menu
+	// entry (the MainMenu init's read), and a join after a return to the menu
+	// that shows no choice sends neither (D-NET-NEW-L2-12).
+	// [orig: UI_PreGameMenuStateMachine @0x568A40 - the stores @0x568BF0 /
+	//  @0x568C33; UI_JoinSelectedSession @0x5699D0 - the copies @0x569C5D /
+	//  @0x569C6A; Game_LoadConfig @0x551480 -> Config_SetDefaults @0x54D030,
+	//  the memset @0x54D039..0x54D046]
+	void commit_join_choice(bool spectate, const std::string &spectator_password) {
+		cfg_.join_spectate = spectate ? 1 : 0;
+		if (spectate) cfg_.join_spectator_password = spectator_password;
+	}
 
 	// The last read: whether the file opened, whether its version discarded
 	// it for the defaults, and whether it set mpreset.

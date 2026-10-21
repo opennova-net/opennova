@@ -1,5 +1,6 @@
 #include "player/game_config_block.h"
 
+#include "network/join_target.h"
 #include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
@@ -145,4 +146,20 @@ String GameConfigBlock::host_dialog_value(const String &p_control) const {
 bool GameConfigBlock::apply_host_dialog_control(const String &p_control, const String &p_value) {
 	return inmatch::apply_host_dialog_control(
 			block_.cfg(), opennova::to_std(p_control), opennova::to_std(p_value));
+}
+
+void GameConfigBlock::join_choice(const Ref<GameConfigBlock> &p_block,
+		const Ref<JoinTarget> &p_target, int &r_role, String &r_spectator_password) {
+	if (p_block.is_null()) {
+		r_role = p_target->get_join_role();
+		r_spectator_password = p_target->get_spectator_password();
+		return;
+	}
+	inmatch::GameConfigBlock &block = p_block->block_;
+	if (p_target->get_role_explicit()) {
+		block.commit_join_choice(p_target->get_join_role() == JoinTarget::ROLE_SPECTATOR,
+				opennova::to_std(p_target->get_spectator_password()));
+	}
+	r_role = block.cfg().join_spectate != 0 ? JoinTarget::ROLE_SPECTATOR : JoinTarget::ROLE_PLAYER;
+	r_spectator_password = opennova::to_gd(block.cfg().join_spectator_password);
 }

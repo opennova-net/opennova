@@ -159,18 +159,15 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	join_preload_sim_->use_client_process(&world_->client_process_);
 	// The process's log devices: the join's session key closes the connect log.
 	join_preload_sim_->use_log_devices(world_->log_devices_.get());
-	// The join's JSR and JSPP are the process's join-screen words: this target's commit
-	// (an answered choice) writes them, and every join sends what they hold
-	// (engine: inmatch/client_runtime.h ClientProcessState; D-NET-NEW-L2-12).
-	opennova::inmatch::ClientProcessState &process = world_->client_process_;
-	if (p_target->get_role_explicit()) {
-		process.commit_join_choice(p_target->get_join_role() == JoinTarget::ROLE_SPECTATOR,
-				opennova::to_std(p_target->get_spectator_password()));
-	}
+	// The join's JSR and JSPP are the cfg block's join-screen words: this target's commit
+	// (an answered choice) writes them, every join sends what they hold, and the next
+	// main-menu entry's read zeroes them (engine: inmatch/game_config_block.h
+	// commit_join_choice; D-NET-NEW-L2-12).
+	int join_role = JoinTarget::ROLE_PLAYER;
+	String spectator_password;
+	GameConfigBlock::join_choice(world_->game_config_, p_target, join_role, spectator_password);
 	if (!join_preload_sim_->enable_join(p_target->get_host_ip(), p_target->get_port(),
-				p_target->get_player_name(),
-				process.join_spectate ? JoinTarget::ROLE_SPECTATOR : JoinTarget::ROLE_PLAYER,
-				opennova::to_gd(process.join_spectator_password),
+				p_target->get_player_name(), join_role, spectator_password,
 				p_target->get_server_password(), p_target->get_join_password())) {
 		join_preload_sim_.unref();
 		clear_pending_session();

@@ -320,6 +320,26 @@ bool run_the_self_record_echo_chases_l() {
 	if (!expect(held == 0, "echo: 0.07 units off, the deadband holds L")) return false;
 	const int32_t stepped = echo(0x20000);
 	if (!expect(stepped == 256, "echo: 2 units off, L steps by its still bucket")) return false;
+	// The step lands in the frame's entity update, after its client net frame built the
+	// 0x0C, so the NEXT frame's C2S 0x0C carries the chased x [orig: Game_ProcessMainFrame
+	// @0x5263F0 - Client_ProcessNetworkFrame @0x526692 ahead of Entity_UpdateAllEntities
+	// @0x52674B; Client_ProcessNetworkFrame @0x42C180 - Player_BuildTag0CInputBody @0x42A550
+	// (the call @0x42C482)].
+	{
+		local = h.kernel->local.player();
+		const int32_t chased_x = local->position.x.q16;
+		PlayerCompactRecord again;
+		again.carrier_handle = 0xFFFF;
+		again.pos_x_compressed = network_compress_fixedpoint(chased_x - 256 + 0x20000);
+		again.pos_y_compressed = network_compress_fixedpoint(local->position.y.q16);
+		again.pos_z_compressed = network_compress_fixedpoint(local->position.z.q16);
+		const std::size_t from = h.socket.datagrams.size();
+		h.frame(again);
+		const std::vector<PlayerExtendedUplink> ups = uplinks_since(h.socket, from);
+		if (!expect(!ups.empty() && ups.back().pos_x == chased_x,
+				"echo: the next frame's 0x0C carries the chased x"))
+			return false;
+	}
 	const int32_t snapped = echo(0x30000);
 	const replication::ClientEntityState *self = h.role.runtime->state().find(kSelf);
 	return expect(self != nullptr && local->position.x.q16 == self->record_sample[0] &&

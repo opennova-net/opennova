@@ -181,7 +181,7 @@ struct UplinkClientInputs {
 	// the player's ground link, which the writer reads: a record that seats
 	// the player names the seat's own ground link.
 	// [orig: NetPacket_SerializePlayerState case 2 -- Entity_TryAttachOrDetach
-	//  @0x4C1329, then `groundEntity = parentEntity ? parentEntity->groundEntity
+	//  @0x436610 (the call @0x4C1317), then `groundEntity = parentEntity ? parentEntity->groundEntity
 	//  : carrier` @0x4C1346..0x4C1358; case 3 reads +0x28 @0x4C141D]
 	const ClientEntityState *self_echo = nullptr;
 };

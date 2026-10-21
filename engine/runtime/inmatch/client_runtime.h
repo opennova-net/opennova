@@ -91,7 +91,7 @@ struct ClientProcessState {
 	// One client net frame's step, which every mission frame of every role runs (a Serve Only
 	// host's included, with no client runtime): true at the 311th, which zeroes the word before
 	// the session test, so the caller's report (in session, a session peer) is its own.
-	// [orig: Game_ProcessMainFrame @0x526692 (the unconditional call); Client_ProcessNetworkFrame
+	// [orig: Game_ProcessMainFrame @0x5263F0 (the unconditional call @0x526692); Client_ProcessNetworkFrame
 	//  @0x42C22D..0x42C23E (the step), @0x42C246 (the zero, between the session compare @0x42C240
 	//  and its branch @0x42C24C), the peer compare @0x42C24E (its branch @0x42C254)]
 	bool step_net_quality_report() {
@@ -99,25 +99,10 @@ struct ClientProcessState {
 		net_quality_report_timer = 0;
 		return true;
 	}
-	// The join screen's spectate choice and spectator password: the pre.mnu commit is
-	// their only writer (the password only when SPECTATE is checked), and every join
-	// copies both into its ClientAuth's JSR and JSPP, so they hold for the process and a
-	// later join that shows no choice still sends them (D-NET-NEW-L2-12).
-	// [orig: g_GameConfigState unknownHostOption_428 / unknownHostText_42C -
-	//  UI_PreGameMenuStateMachine @0x568A40 (the stores @0x568bf0 / @0x568c33);
-	//  UI_JoinSelectedSession's copies @0x569c5d / @0x569c6a]
-	bool join_spectate = false;
-	std::string join_spectator_password;
 	// g_LocalPlayerEntity as the pool slot it points at (JoinerConnection::
 	// local_player_entity): bound by each mission start's Player_InitPlayer, never cleared.
 	// [orig: Player_InitPlayer @0x4E15F0 - the store @0x4E17EB]
 	uint16_t local_player_entity = 0xFFFFu;
-	// The commit's process half: the spectate state always, the shared password only
-	// when SPECTATE was checked (else it went to the side password, which is the join's).
-	void commit_join_choice(bool spectate, const std::string &spectator_password) {
-		join_spectate = spectate;
-		if (spectate) join_spectator_password = spectator_password;
-	}
 };
 
 class ClientRuntime {
@@ -830,6 +815,16 @@ public:
 	bool in_match() const { return joiner_ && joiner_->in_match(); }
 	bool in_session() const { return joiner_ && joiner_->in_session(); }
 	// The game loop runs (JoinerConnection::in_game_loop): alive, dead or redeploying.
+	// It is also the joiner's gate for every input-driven sender: the input frame,
+	// the HUD and the in-game screens that call them run in the main frame alone,
+	// which neither the join screen, the mission start's load nor its final wait
+	// runs (that wait reads the key queue against ESC only), so nothing input-driven
+	// is queued before the 0x0F ends the wait. A joiner's session-gated senders
+	// (the medic call, the Respawn key, the deploy pick and convert, the voice
+	// picks, the team change, the vehicle spawn screen) test this, not in_session.
+	// [orig: Game_ProcessMainFrame @0x5263F0 - Input_ProcessFrame @0x52661D;
+	//  Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5, its ESC
+	//  test @0x5262A2..0x5262AD]
 	bool in_game_loop() const { return joiner_ && joiner_->in_game_loop(); }
 	bool awaiting_deploy_pick() const { return joiner_ && joiner_->awaiting_deploy_pick(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
@@ -1012,10 +1007,11 @@ private:
 	void adopt_tracked_window(const ZoneTimerWindow &window);
 	void advance_tracked_window();
 	TrackedCaptureWindow tracked_window_;
-	int32_t local_player_position_[3] = {0, 0, 0}; // set_local_player_position
-	// The stamp found a local player (retail's g_LocalPlayerEntity non-null): the
-	// receive's own Position writes (the respawn arm, the 0x0F) land only then.
-	bool local_player_present_ = false;
+	// g_LocalPlayerEntity's Position as the receive's handlers read it: stamped from
+	// L at the frame head (set_local_player_position), then moved by the receive's
+	// own writes (the self record's respawn arm, the 0x0F) once the mission start
+	// bound the entity (local_entity_bound).
+	int32_t local_player_position_[3] = {0, 0, 0};
 	// local_player_dead's latch (the local entity's Flags & 2).
 	bool local_dead_latch_ = false;
 	ConnectLog *connect_log_ = nullptr; // set_connect_log
