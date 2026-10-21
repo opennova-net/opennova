@@ -1614,6 +1614,9 @@ bool run_local_replica_turret_channel() {
  h.role.run_tick(h.input);
  auto *local = h.kernel->local.player();
  if (!expect(local != nullptr,"local turret fixture has L")) return false;
+ // The mission start leaves L hidden; the seeded session has no 0x0F, whose landing
+ // clears the bit [orig: NapiNPClientMsg_0x00F @0x42E200 (Flags &= ~1)].
+ local->flags &= ~w::kEntityFlagCarried;
  w::Entity gun;
  gun.kind = w::EntityKind::Item;
  gun.has_item_def = true; // seats need the def (D-NET-422)
@@ -2876,6 +2879,33 @@ bool run_a_console_action_dispatches_by_code() {
 			"the reset drops 202");
 }
 
+// L2-s8 FOUND 4: the mission start's block on a non-null local player runs on a joiner's L
+// too: the indoors bit and the medic-revive latch cleared, the hidden bit cleared, the
+// proximity rebuild, the hidden bit set again; so a spawned L with no record folded and no
+// 0x0F landed is hidden, and the 0x0F's landing clears it.
+// [orig: Game_StartMission @0x524360 - @0x525C74, @0x525C81, @0x525C8C,
+//  Entity_BuildAllProximityLists @0x525C90, `or [eax+24h], edi` @0x525C9E (edi = 1 from
+//  @0x5255B9); NapiNPClientMsg_0x00F @0x42E200 (Flags &= ~1 unless the death screen)]
+bool run_the_mission_start_leaves_l_hidden() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr, "mission start block: L spawned")) return false;
+	bool ok = expect((local->flags & w::kEntityFlagCarried) != 0 &&
+					(local->flags & w::kEntityFlagIndoors) == 0 && !local->medic_reviving,
+			"mission start block: L leaves the mission start hidden, indoors and medic clear");
+	++h.role.runtime->state().world_state.revision;
+	h.role.run_tick(h.input);
+	local = h.kernel->local.player();
+	ok &= expect(local != nullptr && (local->flags & w::kEntityFlagCarried) == 0,
+			"mission start block: the 0x0F's landing clears the hidden bit");
+	return ok;
+}
+
 // D-NET-710 (L2-s8 FOUND 1): the console's "quit" (row 78, code 4, flags 0x04000000: no head
 // gate) stores exit reason 2 alone, on the joiner's runtime: the session leaves the mission
 // (the shell's Post Menu route ends the game), nothing is sent at the action, and the
@@ -3782,6 +3812,7 @@ int main() {
 	ok &= run_a_console_action_dispatches_by_code();
 	ok &= run_a_stance_select_and_the_look_take_the_rows_head();
 	ok &= run_the_console_quit_stores_the_reset_exit();
+	ok &= run_the_mission_start_leaves_l_hidden();
 	ok &= run_a_console_deploy_pick_ends_the_drain();
 	ok &= run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it();
 	ok &= run_the_teardown_goodbye_follows_the_exit_route();

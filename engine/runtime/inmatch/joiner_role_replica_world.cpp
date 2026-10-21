@@ -163,12 +163,25 @@ void JoinerRole::spawn_and_arm_local_player() {
 		// Player_InitPlayer weapon leg @ 0x4e15f0; equippedAdmIndex stamp @ 0x4dd727]
 		if (world::Entity *L = world.registry.get(h)) {
 			// Player_InitPlayer ends by clearing the local player's hidden bit, on a
-			// joiner as on a host, at every mission start; the frame's record fold
-			// (fold_local_record) then re-hides it as the next 0x0A's writer does.
+			// joiner as on a host, at every mission start.
 			// [orig: Game_StartMission @0x525BBC -> Player_InitPlayer @0x4E15F0,
 			//  `and dword ptr [eax+24h], 0FFFFFFFEh` @0x4E19C2]
 			L->hidden = false;
 			L->flags &= ~world::kEntityFlagCarried;
+			// Then the mission start's own block on a non-null local player, a joiner's L
+			// as the host's (HostRole::init_local_player_at_mission_start): the indoors bit
+			// and the medic-revive latch cleared, the hidden bit cleared, every proximity
+			// list rebuilt, the hidden bit set again, so L leaves the mission start hidden;
+			// the frame's record fold (fold_local_record, the 0x0A's Flags byte) and the
+			// world-state load (apply_world_state_load, the 0x0F's clear) then decide it.
+			// [orig: Game_StartMission @0x524360 - the null tests @0x525C70 / @0x525C9A,
+			//  `and [eax+24h], 0FF7FFFFFh` @0x525C74, +0x1E0 = 0 @0x525C81,
+			//  `and [eax+24h], 0FFFFFFFEh` @0x525C8C, Entity_BuildAllProximityLists
+			//  @0x525C90, `or [eax+24h], edi` @0x525C9E (edi = 1 from @0x5255B9)]
+			L->flags &= ~world::kEntityFlagIndoors;
+			L->medic_reviving = false;
+			if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
+			L->flags |= world::kEntityFlagCarried;
 			if (lp.loadout.pending_player_class >= 5 &&
 					lp.loadout.pending_player_class <= 9)
 				L->player_class =
