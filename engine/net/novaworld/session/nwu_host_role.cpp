@@ -1,7 +1,6 @@
 #include <net/novaworld/nwu_host_role.h>
 
 #include <base/io/log.h>
-#include <base/io/tick_rate.h>
 #include <net/novaworld/connect_or_host.h> // ConnectOrHost's lines
 #include <net/novaworld/lobby_update.h>
 #include <net/npwire/peer_addr.h>
@@ -19,8 +18,6 @@ NwuHostRole::NwuHostRole(NwuLobbySession &lobby, Hooks hooks)
 bool NwuHostRole::request(const HostRegistration &cfg) {
 	cfg_ = cfg;
 	players_.clear();
-	pcid_ring_ = SessionIdRing{};
-	refresh_ticks_ = 0.0;
 	// BuildHostVarLists mints the per-registration AppId first: (tick + rand) folded into
 	// [1000, 9999]. [orig: CNapiGameSession_BuildHostVarLists @0x4d0b6e ->
 	//  CNapiNetwork_RandomizeTimeout @0x4c4d80]
@@ -50,27 +47,11 @@ void NwuHostRole::stop() {
 	players_.clear();
 }
 
+// The server-info refresh is the hosted match's (inmatch::run_server_info_refresh, whose update
+// the embedder hooks to update_server_info): the role keeps no refresh clock and no cookie-key
+// ring of its own, its PCIDKey being the match's column.
 void NwuHostRole::tick(uint32_t now_ms) {
-	const uint32_t elapsed_ms = ticked_ ? now_ms - last_tick_ms_ : 0u;
-	last_tick_ms_ = now_ms;
-	ticked_ = true;
-	if (phase_ == Phase::Requested) {
-		poll_request(now_ms);
-		return;
-	}
-	ClientSession *session = lobby_.session();
-	if (session == nullptr) return;
-	if (phase_ != Phase::Hosting) return;
-	// The server-info refresh runs on the logic clock: every SESSION_HOST_INFO_REFRESH_TICKS the
-	// cookie-key ring advances and the Host list is republished as its changed vars.
-	// [orig: Server_TickUpdate @0x51d7e0 (the 0x744 refresh) -> Lobby_UpdateServerInfo @0x4fe8c0]
-	refresh_ticks_ += static_cast<double>(elapsed_ms) * io::kTickHz / 1000.0;
-	if (refresh_ticks_ >= static_cast<double>(SESSION_HOST_INFO_REFRESH_TICKS)) {
-		refresh_ticks_ -= static_cast<double>(SESSION_HOST_INFO_REFRESH_TICKS);
-		pcid_ring_.advance(now_ms, static_cast<int>(lobby_.random_u32() & 0x7FFFu));
-		cfg_.pcid_key = pcid_ring_.current();
-		update_server_info();
-	}
+	if (phase_ == Phase::Requested) poll_request(now_ms);
 }
 
 // The host poll's pass after each periodic update, while the request is out: the 60 s test,
@@ -233,7 +214,6 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 		menu_leg_line(kHostStartedLine);
 		menu_leg_line(kMovingOnLine);
 		phase_ = Phase::Hosting;
-		refresh_ticks_ = 0.0;
 		hosting_started_ms_ = lobby_.clock_ms();
 		fresh = true;
 		io::logf(io::LogLevel::kInfo, "[NovaWorld] hosting '%s' gsid=%s -> %s",
@@ -333,7 +313,6 @@ void NwuHostRole::set_columns(const HostRegistration &columns) {
 	next.app_id = cfg_.app_id;
 	next.host_key = cfg_.host_key;
 	next.lobby_name = cfg_.lobby_name;
-	next.pcid_key = cfg_.pcid_key;
 	next.reconnect_counter = cfg_.reconnect_counter;
 	next.player_count = cfg_.player_count;
 	next.round_time_remaining_ticks = columns.round_time_remaining_ticks;
@@ -400,7 +379,6 @@ HostRegistration NwuHostRole::host_cfg() const {
 		cfg.ver2 = title->ver2;
 		cfg.category_var = title->host_category_var;
 	}
-	cfg.pcid_key = pcid_ring_.current();
 	cfg.uptime_ms = phase_ == Phase::Hosting ? lobby_.clock_ms() - hosting_started_ms_ : 0u;
 	return cfg;
 }

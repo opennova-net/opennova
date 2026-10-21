@@ -52,6 +52,9 @@ void read_session_listing_columns(
 	r.country = config.country;
 	// [orig: g_ServerCustomText @0x24D21C4, pushed @0x4FEF46]
 	r.server_message = config.custom_text;
+	// The cookie-key ring's current key (the round init's, then each refresh's).
+	// [orig: g_NapiCookieKeyTable, `keys[keys[6]]` @0x4FF191..0x4FF196, "%ld" @0x4FF1AB]
+	r.pcid_key = ctx.cookie_key_table.current();
 	// The round init's draw (Server_InitNewRoundState).
 	// [orig: g_GameServerBaffleKey, read @0x4FF1CC]
 	r.game_server_baffle_key = ctx.game_server_baffle_key;

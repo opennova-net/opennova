@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include <net/napi/session.h>          // SessionIdRing / ServerCommand
+#include <net/napi/session.h>          // ServerCommand
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/lobby_vars.h>   // HostRegistration / HostLobbyText / HostPlayerSlot
 #include <net/novaworld/nwu_lobby_session.h>
@@ -36,7 +36,7 @@ RosterSync plan_roster_sync(const std::map<int, HostPlayerSlot> &current,
 // [orig: CNapiGameSession_ConnectOrHost @0x4d4f10 (the teamId != 0 leg);
 //  CNapiGameSession_BuildHostVarLists @0x4d0b50; CNapiGameSession_SendHostRequest @0x4d3700;
 //  CNapiGameSession_SendHostUpdate @0x4d3860; CNapiGameSession_HandleHostVerifyResponse
-//  @0x4d59d0; Server_TickUpdate @0x51d7e0 (the 0x744 refresh); Server_PlayerAdd @0x51d3f0;
+//  @0x4d59d0; Server_PlayerAdd @0x51d3f0;
 //  Game_StartMission @0x5248c6..0x524903 (the mission start's update)]
 class NwuHostRole {
 public:
@@ -74,8 +74,9 @@ public:
 	// ClientStopHosting (states 5/6 back to 4), the NovaWorld menu's re-entry after a match and
 	// the session's teardown. Clears the roster.
 	void stop();
-	// The 60 s host poll and, while hosting, the Host-list refresh on the logic clock. Call every
-	// tick after the lobby's tick and its notices, with the same clock.
+	// The 60 s host poll (poll_request) while the request is out. Call every tick after the
+	// lobby's tick and its notices, with the same clock. The Host list's refresh is the hosted
+	// match's server tick's (inmatch::run_server_info_refresh -> update_server_info).
 	void tick(uint32_t now_ms);
 	// The host poll's pass alone (tick's while the request is out): the 60 s test, then the
 	// session's leaving state 5 without its success, which ends the wait with the not-hosting
@@ -91,12 +92,13 @@ public:
 	// [orig: Game_StartMission @0x5248c6..0x524903 — the marks @0x5248e4 / @0x5248ef,
 	//  Lobby_UpdateServerInfo @0x5248f5, CPlayerManager_RebuildLists(1) @0x524903]
 	void publish_mission_start();
-	// The server-info update outside the refresh and the mission start, the join lock's toggle's
-	// (inmatch::Server_ToggleJoinLock through its embedder's hook): the Host list's columns into
-	// the session's list, then in state 6 the lists' changed vars, and the status heartbeat where
-	// no NWU session is in use. Nothing while the role is idle.
+	// The server-info update outside the mission start: the hosted match's 0x744 refresh's and
+	// the join lock's toggle's (inmatch::run_server_info_refresh / Server_ToggleJoinLock through
+	// its embedder's on_update_server_info hook): the Host list's columns into the session's
+	// list, then in state 6 the lists' changed vars, and the status heartbeat where no NWU
+	// session is in use. Nothing while the role is idle.
 	// [orig: Lobby_UpdateServerInfo @0x4fe8c0, its tail CPlayerManager_RebuildLists(0) @0x4ff63a;
-	//  Server_ToggleJoinLock's call @0x50d762]
+	//  Server_TickUpdate's call @0x51D943; Server_ToggleJoinLock's call @0x50d762]
 	void update_server_info();
 	// Route one session notice. True when the notice was a host-direction one.
 	bool handle_notice(const ClientSession::Notice &notice);
@@ -132,8 +134,8 @@ public:
 	void set_column_source(ColumnSource source) { column_source_ = std::move(source); }
 	// Every listing column at once (opennova-serve's listing source, each pass its match
 	// changed: Lister::refresh_listing): the registration's own keys stay (AppId, HostKey,
-	// LobbyName, the PCIDKey ring, the ReconnectCounter) and the changed columns ride the next
-	// refresh as its changed vars.
+	// LobbyName, the ReconnectCounter) and the changed columns, the match's PCIDKey among them,
+	// ride the next refresh as its changed vars.
 	void set_columns(const HostRegistration &columns);
 	// The gametext strings the Host list's STRNOVA / TimeOfDay tokens resolve to.
 	void set_lobby_text(const HostLobbyText &text) { lobby_text_ = text; }
@@ -144,9 +146,6 @@ public:
 	// The registration's ServerHostResult asked for join tickets.
 	bool requires_join_ticket() const;
 	int app_id() const { return static_cast<int>(cfg_.app_id); }
-	// The cookie-key table the in-match host decrypts the joiners' CD cookies under: the ring
-	// whose current key the Host list advertises as PCIDKey.
-	const SessionIdRing &cookie_keys() const { return pcid_ring_; }
 	// ClientPlayerEnterRequest for a joiner the in-match host is validating.
 	void request_player_enter(uint32_t connection_id, uint32_t ip_address, uint32_t port,
 	                          const std::string &join_ticket);
@@ -172,10 +171,6 @@ private:
 	HostLobbyText lobby_text_;
 	Phase phase_ = Phase::Idle;
 	std::map<int, HostPlayerSlot> players_;
-	SessionIdRing pcid_ring_;
-	double refresh_ticks_ = 0.0;           // logic ticks since the last refresh
-	uint32_t last_tick_ms_ = 0;            // the previous tick's clock
-	bool ticked_ = false;
 	uint32_t hosting_started_ms_ = 0;      // the Age column's clock (registration time)
 	uint32_t register_started_ms_ = 0;     // the 60 s host poll
 };

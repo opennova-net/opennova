@@ -699,10 +699,9 @@ public:
 	bool is_host_listening() const;
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted
-	// The gate registration's GSID (0x81 SUS1), AppId (the status page's key), cookie-key table (the
-	// joiners' CD cookie decrypt) and login PCID (the host's own player's); LAN: empty / 0.
-	void set_novaworld_registration(const String &p_gsid, int p_app_id,
-			const opennova::SessionIdRing &p_cookie_keys, const String &p_login_pcid);
+	// The gate registration's GSID (0x81 SUS1), AppId (the status page's key) and login PCID (the
+	// host's own player's); LAN: empty / 0. The joiners' cookie keys are the host context's own.
+	void set_novaworld_registration(const String &p_gsid, int p_app_id, const String &p_login_pcid);
 	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
 	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
 	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);

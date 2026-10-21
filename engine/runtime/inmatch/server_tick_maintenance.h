@@ -36,6 +36,10 @@ void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world);
 // the script pass and ahead of the play-tick walk.
 void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world);
 
+// The server-info refresh, every tick after the scoreboard boundary: the 0x744
+// countdown, the cookie-key ring's advance and the server-info update.
+void run_server_info_refresh(NapiNPServerCtx &ctx, world::World &world);
+
 // The periodic second's slot walk after the capture transaction (the dead-age
 // counter, the 0x6E, the t35 and t7 punts).
 void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world);

@@ -14,6 +14,8 @@
 #include <base/gameprofile/game_type.h>        // the CTF / FlagBall / Flag Me carry-limit modes
 #include <base/io/le.h>                        // append_u32_le
 #include <base/io/strutil.h>                   // iequals (the JOINTICKET key lookup)
+#include <base/io/tick_rate.h>                  // host_milliseconds_for_logic_tick (the refresh's tick)
+#include <net/napi/session.h>                   // SESSION_HOST_INFO_REFRESH_TICKS
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
@@ -633,6 +635,26 @@ void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world) {
 		conn.link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
 	}
 	Server_AdvanceFreeRowTicks(ctx); // the same walk's inactive rows (D-NET-351)
+}
+
+// The server-info refresh: the countdown steps down once a server tick; at zero or below it
+// reloads 0x744 ticks, advances the cookie-key ring (GetTickCount, the authoritative tick's
+// deterministic seam, plus the session CRT stream's next draw; on every authority, a LAN host's
+// included) and runs the server-info update, which only a NovaWorld host's embedder hooks
+// (on_update_server_info: retail's update returns outside a NovaWorld session). The round init
+// cleared the countdown, so a round's first server tick refreshes.
+// [orig: Server_TickUpdate @0x51D7E0 - the decrement @0x51D91D..0x51D927, `jg` @0x51D92C, the
+//  reload 0x744 @0x51D933, CSessionIdRing_AdvanceAndGenerate on g_NapiCookieKeyTable (the call
+//  @0x51D93D), Lobby_UpdateServerInfo(0) (the call @0x51D943); CSessionIdRing_AdvanceAndGenerate
+//  @0x4DBB80 - GetTickCount @0x4DBB97, rand @0x4DBB9F, the store @0x4DBBB5;
+//  Lobby_UpdateServerInfo @0x4FE8C0 - the session and transport gates @0x4FE8D8..0x4FE8FA]
+void run_server_info_refresh(NapiNPServerCtx &ctx, world::World &world) {
+	if (--ctx.server_info_update_timer > 0) return;
+	ctx.server_info_update_timer = static_cast<int32_t>(SESSION_HOST_INFO_REFRESH_TICKS);
+	ctx.cookie_key_table.advance(io::host_milliseconds_for_logic_tick(world.logic_tick),
+			static_cast<int>(world.crt_rand.next()));
+	if (ctx.on_update_server_info)
+		ctx.on_update_server_info();
 }
 
 // The scoreboard boundary, every tick after the script pass and ahead of the

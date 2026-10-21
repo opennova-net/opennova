@@ -351,12 +351,11 @@ int Simulation::get_host_peer_count() const {
 }
 
 void Simulation::set_novaworld_registration(const String &p_gsid, int p_app_id,
-		const opennova::SessionIdRing &p_cookie_keys, const String &p_login_pcid) {
+		const String &p_login_pcid) {
 	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx()) {
 		ctx->novaworld_gsid = opennova::to_std(p_gsid);
 		ctx->novaworld_app_id = static_cast<uint32_t>(p_app_id);
-		opennova::inmatch::set_novaworld_account_facts(*ctx, p_cookie_keys,
-				opennova::to_std(p_login_pcid));
+		opennova::inmatch::set_novaworld_account_facts(*ctx, opennova::to_std(p_login_pcid));
 	}
 }
 

@@ -3,7 +3,9 @@
 // an in-test stand-in for the live match. The host result publishes nothing (D-NET-465); the
 // mission start's update publishes the whole Host list and the roster; a roster edit removes one
 // player while the other keeps its slot, at once; a renamed column rides the next 1860-tick
-// refresh; the stop removes the row.
+// refresh (the bound match's server-info update, which ServeListing hooks to the host role's
+// update_server_info: called directly here, the stand-in having no match); the stop removes the
+// row.
 // [orig: CNapiGameSession_HandleHostVerifyResponse @0x4d5c52..0x4d5c58;
 //  Game_StartMission @0x5248c6..0x524903]
 
@@ -225,7 +227,7 @@ int main() {
 	expect(slot_of(row("Lister E2E"), "Bravo") == 1, "the staying player keeps its slot");
 	expect(slot_of(row("Lister E2E"), "Charlie") == 0, "the arriving player takes the freed slot");
 	expect(!row("Lister E2E Renamed"), "the renamed column waits for the refresh");
-	tick(30000); // past SESSION_HOST_INFO_REFRESH_TICKS (1860 ticks, ~29.8 s)
+	lister.host_role().update_server_info(); // the match's refresh (ServeListing's hook)
 	expect(tick_until([&] { return row("Lister E2E Renamed").has_value(); }, 300),
 			"the 1860-tick refresh carries the renamed column");
 

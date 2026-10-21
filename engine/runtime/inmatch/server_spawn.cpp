@@ -391,6 +391,15 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 		const uint32_t draw = ctx.world != nullptr ? ctx.world->crt_rand.next() : 0u;
 		ctx.game_server_baffle_key = (ctx.np_protocol.host_start_tick + draw) % 0xDBBA0u + 0x186A0u;
 	}
+	// The cookie-key ring starts right after it, authority or not: slot 0 from the same tick and
+	// the stream's next draw (the Host list's first PCIDKey, the joiners' cookie key). The
+	// server-info refresh's countdown clears with the round, so the first server tick refreshes.
+	// [orig: Server_InitNewRoundState @0x51C8E0 - g_ServerInfoUpdateTimer = 0 @0x51CA86,
+	//  CSessionIdRing_Init on g_NapiCookieKeyTable (the call @0x51CB8E); CSessionIdRing_Init
+	//  @0x4DBC20 - GetTickCount @0x4DBC3D, rand @0x4DBC45, the store @0x4DBC5B]
+	ctx.server_info_update_timer = 0;
+	ctx.cookie_key_table.init(ctx.np_protocol.host_start_tick,
+			static_cast<int>(ctx.world != nullptr ? ctx.world->crt_rand.next() : 0u));
 	// The designation table clears on every round init, authority or not
 	// [orig: memset(g_ServerDesignations, 0, 0x1B74) @0x51cb95..0x51cba5].
 	ctx.designations.fill(ServerDesignation{});

@@ -650,9 +650,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//  @0x51D8F4, ahead of the scoreboard @0x51D90D]
 	route_script_pass_records(ctx, world);
 	announce_round_end(ctx, world);
-	// The scoreboard boundary follows the script pass's BMS quarter pass and
-	// precedes the play-tick walk [orig: Server_TickUpdate @0x51D8F9..0x51D917].
+	// The scoreboard boundary follows the script pass's BMS quarter pass, then
+	// the server-info refresh, ahead of the play-tick walk
+	// [orig: Server_TickUpdate @0x51D8F9..0x51D917, @0x51D91D..0x51D948, @0x51D94B].
 	emit_scoreboard_boundary(ctx, world);
+	run_server_info_refresh(ctx, world);
 	advance_play_ticks(ctx, world);
 	lap.restart();
 	// The roster rows carry each slot's state-6 fact for the world's readers

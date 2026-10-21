@@ -603,12 +603,23 @@ struct NapiNPServerCtx {
 	// [orig: g_LocalNetAddressStr @0x7CA298]
 	static constexpr const char *kNovaWorldLocalAddress = "PUB";
 	// The cookie-key table the joiners' CD cookies are decrypted under: the
-	// six-slot ring whose current key the Host list advertises as PCIDKey,
-	// installed by the shell's NovaWorld host binding; empty on a LAN host.
-	// [orig: g_NapiCookieKeyTable @0xC87000 — CSessionIdRing_Init @0x51cb8e,
-	//  CSessionIdRing_AdvanceAndGenerate @0x51d93d, read by
-	//  NapiPacket_DecryptAndVerify @0x512d18/@0x512d74]
+	// six-slot ring whose current key the Host list advertises as PCIDKey. The
+	// round init starts it from the session's CRT stream (Server_InitNewRoundState,
+	// right after the listing's key) and the server tick's server-info refresh
+	// advances it (run_server_info_refresh), on every authority, a LAN host's
+	// included (whose ring no reader reads).
+	// [orig: g_NapiCookieKeyTable @0xC87000 — CSessionIdRing_Init (the call
+	//  @0x51CB8E), CSessionIdRing_AdvanceAndGenerate (the call @0x51D93D), read by
+	//  Lobby_UpdateServerInfo @0x4FF196 and the join's cookie decrypt
+	//  @0x512d18/@0x512d74]
 	SessionIdRing cookie_key_table;
+	// The server-info refresh's countdown (g_ServerInfoUpdateTimer): the round
+	// init clears it, each server tick steps it down, and at zero or below the
+	// refresh reloads it to 0x744 (SESSION_HOST_INFO_REFRESH_TICKS), so a round's
+	// first server tick refreshes. Signed, as retail's `jg` reads it.
+	// [orig: g_ServerInfoUpdateTimer @0xC8D818 — Server_InitNewRoundState @0x51CA86;
+	//  Server_TickUpdate @0x51D91D..0x51D933; Nbstat_StartupInit @0x4FDE46]
+	int32_t server_info_update_timer = 0;
 	// One ClientPlayerEnterRequest: the joiner's connection id, its UDP source
 	// and the JOINTICKET its JOIN carried. The shell binds the hook to its
 	// NovaWorld host session (ClientSession::send_player_enter_request); an
@@ -744,13 +755,12 @@ inline bool load_join_account_from_cookie(const NapiNPServerCtx &ctx, NapiNPConn
 			conn.join_identity_pairs, local_address, ctx.cookie_key_table, conn.account);
 }
 
-// The NovaWorld host binding's account facts: the cookie-key table, and the
-// host's own login PCID on its loopback connection when it is non-empty.
+// The NovaWorld host binding's account fact: the host's own login PCID on its
+// loopback connection when it is non-empty (the cookie-key table is the
+// context's own, cookie_key_table).
 // [orig: NapiNPServer_HandleNewConnection @0x4c8213..0x4c829f — the local
 //  connection on a NovaWorld session reads the PCID cookie into its net config]
-inline void set_novaworld_account_facts(NapiNPServerCtx &ctx, const SessionIdRing &cookie_keys,
-		const std::string &login_pcid) {
-	ctx.cookie_key_table = cookie_keys;
+inline void set_novaworld_account_facts(NapiNPServerCtx &ctx, const std::string &login_pcid) {
 	if (login_pcid.empty()) return;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type == NapiNPConnection::kTypeClientSide) set_join_account_pcid(conn.account, login_pcid);

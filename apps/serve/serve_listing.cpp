@@ -28,6 +28,12 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 		lister_->host_role().request_player_enter(request.connection_id, request.peer.ip, request.peer.port,
 		                                          request.join_ticket);
 	};
+	// The match's server-info update (its 0x744 refresh, the join lock's toggle) runs the hosting
+	// session's (inmatch::run_server_info_refresh, Server_ToggleJoinLock).
+	// [orig: Server_TickUpdate @0x51D7E0 (the Lobby_UpdateServerInfo call @0x51D943)]
+	ctx.on_update_server_info = [this]() {
+		if (lister_ != nullptr) lister_->host_role().update_server_info();
+	};
 	sync_session();
 }
 
@@ -35,6 +41,7 @@ void ServeListing::unbind() {
 	if (role_ != nullptr) {
 		inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
 		ctx.on_player_enter_request = nullptr;
+		ctx.on_update_server_info = nullptr;
 		ctx.novaworld_join_tickets_armed = false;
 		ctx.novaworld_gsid.clear();
 		ctx.novaworld_app_id = 0;
@@ -45,10 +52,10 @@ void ServeListing::unbind() {
 }
 
 // The hosting session meets its match: the GSID the 0x81 advertises (cleared while the
-// connection is down, re-supplied by a re-host), the AppId, the cookie-key ring the CD cookies
-// decrypt under (it advances every refresh), the join-ticket arm, and the session's word, flags
-// and exit store for the authority's NovaWorld exit. A dedicated server has no loopback, so no
-// login PCID of its own.
+// connection is down, re-supplied by a re-host), the AppId, the join-ticket arm, and the session's
+// word, flags and exit store for the authority's NovaWorld exit (the cookie-key ring the CD
+// cookies decrypt under is the match's own). A dedicated server has no loopback, so no login PCID
+// of its own.
 // [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D59D0 — the GSID @0x4D5BD6..0x4D5C0F;
 //  Game_ProcessMainFrame's NovaWorld exit @0x52654f..0x52657c (dword_B5FD2C, dword_B60108)]
 void ServeListing::sync_session() {
@@ -57,7 +64,7 @@ void ServeListing::sync_session() {
 	NwuHostRole &host = lister_->host_role();
 	ctx.novaworld_gsid = host.gsid();
 	ctx.novaworld_app_id = static_cast<uint32_t>(host.app_id());
-	inmatch::set_novaworld_account_facts(ctx, host.cookie_keys(), std::string());
+	inmatch::set_novaworld_account_facts(ctx, std::string());
 	ctx.novaworld_join_tickets_armed = host.requires_join_ticket();
 	const NwuLobbySession::MatchFacts facts = lister_->lobby().match_facts();
 	ctx.nwu_in_use = facts.in_use;
@@ -71,8 +78,9 @@ bool ServeListing::start(int &exit_code) {
 }
 
 // The live match changes every frame (the round clock, the joiners): once bound, every pass hands
-// the host role the columns (they ride its 1860-tick refresh as its changed vars) and syncs the
-// roster (ClientHostPlayerAdded / Removed go out at once, as Server_PlayerAdd sends them).
+// the host role the columns (they ride the match's next 1860-tick refresh as its changed vars) and
+// syncs the roster (ClientHostPlayerAdded / Removed go out at once, as Server_PlayerAdd sends
+// them).
 bool ServeListing::refresh(uint32_t now_ms, bool force) {
 	(void)now_ms;
 	return force || role_ != nullptr;

@@ -122,15 +122,30 @@ constexpr uint32_t SESSION_JOIN_TIMEOUT_MS = 20000u;           // conn+0x5B4
 // [orig: Server_TickUpdate @0x51d7e0 @0x51d91d..0x51d948]
 constexpr uint32_t SESSION_HOST_INFO_REFRESH_TICKS = 0x744u;
 
-// The six-slot cookie-key ring behind the Host list's "PCIDKey": every refresh advances the
-// index (wrapping at 6), mints ((rand() + GetTickCount()) & 0xFFFFFF) + 0x1000000 into that
-// slot and caps the population count at 6. PCIDKey is the CURRENT slot's key.
-// [orig: CSessionIdRing_AdvanceAndGenerate @0x4dbb80; the PCIDKey reader
-//  Lobby_UpdateServerInfo @0x4ff1ab (`keys[keys[6]]`)]
+// The six-slot cookie-key ring behind the Host list's "PCIDKey" (one per process in retail,
+// g_NapiCookieKeyTable; the in-match host's NapiNPServerCtx::cookie_key_table in ours): the round
+// init starts it (init: every slot, the index and the count zeroed, then slot 0 minted and the
+// count 1), every server-info refresh advances the index (wrapping at 6), mints
+// ((rand() + GetTickCount()) & 0xFFFFFF) + 0x1000000 into that slot and caps the population count
+// at 6. PCIDKey is the CURRENT slot's key; the joiners' CD cookies decrypt under the populated
+// slots.
+// [orig: CSessionIdRing_Init @0x4DBC20 - the zeroes @0x4DBC25..0x4DBC3A, GetTickCount
+//  @0x4DBC3D, rand @0x4DBC45, the mask and bias @0x4DBC4F..0x4DBC55, the store @0x4DBC5B, the
+//  count @0x4DBC5E..0x4DBC69; CSessionIdRing_AdvanceAndGenerate @0x4dbb80 - the index
+//  @0x4DBB83..0x4DBB8F, GetTickCount @0x4DBB97, rand @0x4DBB9F, the store @0x4DBBB5; the PCIDKey
+//  reader Lobby_UpdateServerInfo @0x4FE8C0 (`keys[keys[6]]` @0x4FF191..0x4FF196)]
 struct SessionIdRing {
 	std::array<uint32_t, 6> keys{};
 	uint32_t index = 0;
 	uint32_t count = 0;
+	uint32_t init(uint32_t tick_count, int rand_value) {
+		keys.fill(0u);
+		index = 0;
+		count = 0;
+		keys[index] = ((static_cast<uint32_t>(rand_value) + tick_count) & 0xFFFFFFu) + 0x1000000u;
+		if (count < 6) ++count;
+		return count;
+	}
 	uint32_t advance(uint32_t tick_count, int rand_value) {
 		if (++index >= 6) index = 0;
 		keys[index] = ((static_cast<uint32_t>(rand_value) + tick_count) & 0xFFFFFFu) + 0x1000000u;

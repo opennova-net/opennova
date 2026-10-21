@@ -676,16 +676,16 @@ void SessionDrive::observe_tick(MissionRoot *p_runtime) {
 		return;
 	}
 	// A hosting NovaWorld session follows the hosted match: one PlayerList slot
-	// per admitted player, the session's GSID as the in-match host's 0x81 SUS1
-	// (cleared when its connection tears down, re-supplied by a re-host), and
-	// the cookie-key ring as it advances. The listing's columns, the round
-	// clock's TimeLeft among them, are read off the match at each update (the
+	// per admitted player and the session's GSID as the in-match host's 0x81 SUS1
+	// (cleared when its connection tears down, re-supplied by a re-host). The
+	// listing's columns, the round clock's TimeLeft and the match's cookie-key
+	// ring's PCIDKey among them, are read off the match at each update (the
 	// column source bind_nw_host installs).
 	NovaWorldClient *client = nw_client();
 	if (client != nullptr && nw_host_bound_ && !sim->is_joiner()) {
 		opennova::NwuHostRole &host = client->host_role();
 		sync_nw_host_roster(host, sim);
-		sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(), host.cookie_keys(),
+		sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(),
 				opennova::to_gd(client->get_login_pcid()));
 	}
 	sync_nwu_session(sim);
@@ -886,8 +886,9 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 														: Ref<RtxtStringFile>()));
 		return true;
 	});
-	// The join lock's toggle runs the server-info update at once (D-NET-659), through the hosting
-	// session's role; the hook resolves the session node by identity on every call.
+	// The match's server-info update, the join lock's toggle's (D-NET-659) and its 0x744 refresh's
+	// (engine: inmatch::run_server_info_refresh), runs the hosting session's role; the hook
+	// resolves the session node by identity on every call.
 	// [orig: Server_ToggleJoinLock @0x50D750 -> Lobby_UpdateServerInfo(0) @0x50D762]
 	if (opennova::inmatch::NapiNPServerCtx *ctx = sim->host_ctx()) {
 		ctx->on_update_server_info = [columns_client_id]() {
@@ -898,7 +899,7 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		};
 	}
 	const std::string login_pcid = client->get_login_pcid();
-	sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(), host.cookie_keys(),
+	sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(),
 			opennova::to_gd(login_pcid));
 	// A service that asked for join tickets arms the in-match host's join-phase
 	// watchdog: it announces each validating joiner through this hook and holds
@@ -966,7 +967,7 @@ void SessionDrive::unbind_nw_host() {
 		if (opennova::inmatch::NapiNPServerCtx *ctx = sim->host_ctx())
 			ctx->on_update_server_info = nullptr;
 		sim->set_novaworld_join_tickets(false, Simulation::PlayerEnterRequestHook());
-		sim->set_novaworld_registration(String(), 0, opennova::SessionIdRing{}, String());
+		sim->set_novaworld_registration(String(), 0, String());
 	}
 }
 
