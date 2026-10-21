@@ -770,6 +770,10 @@ int ground_sampler_takes_the_words() {
 		                    row->position.z.q16 == expected,
 		            "the user waypoint's z word is the sampler's"))
 			return 1;
+		// The record starts from a memset and nothing writes its Yaw word.
+		// [orig: Waypoint_CreateForPlayer - the memset @0x4DFCE6]
+		if (!expect(row->heading == 0, "the user waypoint keeps the memset's Yaw word 0"))
+			return 1;
 	}
 	sectors.fill(0);
 	if (!expect(opennova::terrain::height_field_height_bilinear_fixed(field, x, y) == 0,
@@ -782,7 +786,8 @@ int ground_sampler_takes_the_words() {
 // The S2C 0x59 a placed device sends streams the resting round's Position words
 // raw, 21,000 units out with low bits set (D-NET-507). [orig:
 // Entity_ConvertRoundToPlacedEntity @0x5455B0 -> S2C 0x59; the record's words from
-// the round's +4 / +8 / +0xC, Entity_UpdateSatchelPhysics @0x448AEB..0x448B09]
+// the round's +4 / +8 / +0xC, Entity_UpdateSatchelPhysics - read @0x448AD9 /
+// @0x448AE4 / @0x448ADC, stored @0x448AE7 / @0x448AEF / @0x448AF7]
 int placed_device_spawn_streams_the_words() {
 	auto world = std::make_unique<w::World>();
 	world->rules.mp_session = true;

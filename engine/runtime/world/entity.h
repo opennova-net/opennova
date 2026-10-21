@@ -522,7 +522,9 @@ struct Entity {
     // (D-NET-NEW-L6-2). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
     //  Entity_ResetToSpawnState @0x4B9610 - the read @0x4B964A] Every placement
     // stores it; a bare seed starts at mission yaw 0's word, the facing the
-    // whole-degree field this replaced defaulted to.
+    // whole-degree field this replaced defaulted to. A row retail builds from a
+    // memset and never places keeps word 0, and its port stores 0 (the user
+    // waypoint, a player spawn with no start marker).
     int32_t heading = 0x40000000;
     int16_t pitch = 0;
     int16_t roll = 0;

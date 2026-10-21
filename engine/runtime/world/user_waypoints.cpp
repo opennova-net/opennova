@@ -39,6 +39,10 @@ EntityHandle waypoint_create_for_player(World &world, int32_t x, int32_t y, cons
 	seed.primary_occupant = owner;
 	seed.ammo_count = 3;
 	seed.team = 0;
+	// The record starts from a memset and nothing writes its Yaw word (+0x10),
+	// so the row's word is 0. [orig: Waypoint_CreateForPlayer - the template
+	//  memset @0x4DFCE6]
+	seed.heading = 0;
 
 	// Every pool-4 row with a def, the same owner, the same x / y dwords and
 	// the same name (stricmp) is wiped in place first. The wipe leaves the
