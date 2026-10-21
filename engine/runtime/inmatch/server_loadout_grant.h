@@ -203,7 +203,8 @@ void weapon_slot_list_own_legs(NapiNPConnection &conn, world::World *world);
 // (g_SpawnLoadoutBuffer, LocalPlayerLoadout's resident kit) copied into the slot's
 // loadout buffer ahead of the slot table's rebuild. Nothing without a local player.
 // [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 - `cmp byte [ebp+5], 0`
-//  @0x516BC4, the copy @0x516BD3..0x516BE3]
+//  @0x516BC4 (or the bot byte +0x178E3 @0x516BCA, never set in JO), the copy
+//  @0x516BD3..0x516BE3]
 void PlayerSlot_SeedOwnLoadoutBuffer(NapiNPConnection &conn, world::World &world);
 
 // The tag=0x5A body for every re-send that grants NOTHING new: the retained granted body

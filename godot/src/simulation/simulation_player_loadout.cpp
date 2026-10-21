@@ -226,9 +226,7 @@ bool Simulation::apply_local_player_loadout_rows(
 	if (!kernel_) return false;
 	// A listen host in a session sends the armory's kit as its own client's 0x2F and
 	// applies nothing itself: its own slot's accept grants it into the local table
-	// (engine: inmatch::armory_loadout_submit, D-NET-695) [orig:
-	// WeaponLoadout_ApplyFromBuffer @0x565D4D -> NetPacket_SendLoadoutSubmit @0x565D94,
-	// the authority skipping the pool reset @0x565D4F..0x565D56].
+	// (engine: inmatch::armory_loadout_submit, its witness there; D-NET-695).
 	if (p_submit_joiner_request && is_host_listening() && !is_joiner() && runtime_ != nullptr &&
 			kernel_->world.rules.mp_session && p_player_class >= 0 && p_player_class <= 0xFF) {
 		const opennova::LoadoutSubmit submit = opennova::inmatch::armory_loadout_submit(
@@ -323,8 +321,7 @@ void Simulation::push_joiner_loadout_kit() {
 	// their witnesses). This binding keeps the seam wiring: the role gate,
 	// the empty-catalog arm delay, the re-entry latch, and the pump handoff.
 	// A listen host's own client submits the same pair at its mission start
-	// (HostRole::send_own_mission_status, D-NET-695) [orig: Game_StartMission
-	// @0x525767..0x525836 / @0x525C2E, a session peer's whatever its authority].
+	// (engine: HostRole::send_own_mission_status, D-NET-695).
 	if (!(is_joiner() || is_host_listening()) || !runtime_ || !kernel_) return;
 	// The role hook runs before the shell loads weapon.def (MissionRoot orders
 	// load_from_mission_data ahead of load_weapon_table), and a kit resolved against an
