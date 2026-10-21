@@ -31,6 +31,7 @@
 #include <editor/session/problem_query.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
+#include <editor/session/source_line.h>
 #include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
@@ -131,6 +132,17 @@ constexpr WorkspaceMember kFileDelete[] = {
 			"goes.", kPathLongest },
 	{ "alone", J::Boolean, "An import source deleted alone: its outputs kept as files of the project." },
 	{ "paths", J::Strings, "The other project files deleted with it (Files' selection of several rows)." },
+};
+constexpr size_t kLineLongest = kWorkspaceLine - 1;
+constexpr WorkspaceMember kCorrectLine[] = {
+	{ "path", J::String,
+			"The project file Problems' Correct the line... corrects a line of (\"\" closes it; a correct_line with "
+			"ask_name opens it); the session closes it as the file goes or its correct_line is taken.", kPathLongest },
+	{ "line", J::Integer,
+			"The line, from 1, as the finding naming it counts lines; opening it on a path and a line reads the "
+			"line's text from the file (was), the text typed starting as it." },
+	{ "text", J::String, "The line's text typed; Apply writes it (correct_line), \"\" taking the line out.",
+			kLineLongest },
 };
 constexpr WorkspaceMember kRename[] = {
 	{ "open", J::Boolean,
@@ -255,6 +267,7 @@ constexpr WorkspacePartRow kParts[] = {
 	{ "new_file", kNewFile, std::size(kNewFile), "Files' New file prompt." },
 	{ "file_rename", kFileRename, std::size(kFileRename), "Files' Rename... of a file." },
 	{ "file_delete", kFileDelete, std::size(kFileDelete), "Files' Delete... of a file (DI-25)." },
+	{ "correct_line", kCorrectLine, std::size(kCorrectLine), "Problems' Correct the line... of a blocking source line." },
 	{ "rename", kRename, std::size(kRename), "Rename everywhere." },
 	{ "rename_back", kRenameBack, std::size(kRenameBack), "Rename back." },
 	{ "find", kFind, std::size(kFind), "The Document window's find bar." },
@@ -632,6 +645,41 @@ bool set_file_delete(Change &change, const JsonValue &part) {
 	}
 	WorkspaceView::FileDelete &held = change.workspace().file_delete;
 	if (asked.path == held.path && asked.paths == held.paths && asked.alone == held.alone) return false;
+	held = std::move(asked);
+	return true;
+}
+
+// Problems' Correct the line...: opened on a file's line (its text read from the file as it stands), the text typed.
+bool set_correct_line(Change &change, const JsonValue &part) {
+	WorkspaceView::CorrectLine asked = change.workspace().correct_line;
+	const JsonValue *path = part.get("path");
+	const JsonValue *line = part.get("line");
+	if (path && path->string.empty()) {
+		asked = WorkspaceView::CorrectLine();
+	} else if (path || line) {
+		const std::string named = path ? path->string : asked.path;
+		if (named.empty()) return change.closed("Correct the line...", "name the file first (correct_line.path)");
+		const AssetEntry *file = project_file(change.view, named);
+		if (!file) return change.refuse("The project has no file " + named + " to correct.", named);
+		const size_t number = line ? size_t(line->number) : asked.line;
+		if (number < 1) return change.refuse("Name the line to correct, from 1 (correct_line.line).", file->relative_path);
+		if (file->relative_path != asked.path || number != asked.line) {
+			std::string text, error;
+			if (!read_source_line(change.view.project.root, file->relative_path, file->kind, number, text, error))
+				return change.refuse(error, file->relative_path);
+			if (text.size() > kLineLongest)
+				return change.refuse("Line " + std::to_string(number) + " of " + file->relative_path + " is longer than " +
+				                     std::to_string(kLineLongest) + " characters.", file->relative_path);
+			asked = WorkspaceView::CorrectLine{ file->relative_path, number, text, text };
+		}
+	}
+	if (const JsonValue *text = part.get("text")) {
+		if (asked.path.empty()) return change.closed("Correct the line...", "name the file first (correct_line.path)");
+		asked.text = text->string;
+	}
+	WorkspaceView::CorrectLine &held = change.workspace().correct_line;
+	if (asked.path == held.path && asked.line == held.line && asked.was == held.was && asked.text == held.text)
+		return false;
 	held = std::move(asked);
 	return true;
 }
@@ -1053,7 +1101,7 @@ struct Openings {
 	bool new_project = false, settings = false, rename_back = false;
 	std::string project_find; // its scope and subject while open
 	AssetKind new_file = AssetKind::kCount;
-	std::string file_rename, file_delete, rename;
+	std::string file_rename, file_delete, rename, correct_line;
 	uint64_t confirm = 0;
 	std::map<std::string, uint64_t> remove;
 };
@@ -1068,6 +1116,7 @@ Openings openings_of(const WorkspaceView &w) {
 	out.new_file = w.new_file.kind;
 	out.file_rename = w.file_rename.path;
 	out.file_delete = w.file_delete.path;
+	if (!w.correct_line.path.empty()) out.correct_line = w.correct_line.path + '\n' + std::to_string(w.correct_line.line);
 	if (w.rename.open) out.rename = w.rename.path + '\n' + w.rename.locator + '\n' + w.rename.field;
 	out.confirm = w.problems.confirm.open() ? w.problems.confirm_serial : 0;
 	for (const auto &[path, shown] : w.documents)
@@ -1082,6 +1131,7 @@ bool opened_since(const Openings &before, const Openings &after) {
 	if (after.new_file != AssetKind::kCount && after.new_file != before.new_file) return true;
 	if (!after.file_rename.empty() && after.file_rename != before.file_rename) return true;
 	if (!after.file_delete.empty() && after.file_delete != before.file_delete) return true;
+	if (!after.correct_line.empty() && after.correct_line != before.correct_line) return true;
 	if (!after.rename.empty() && after.rename != before.rename) return true;
 	if (after.confirm && after.confirm != before.confirm) return true;
 	for (const auto &[path, screen] : after.remove) {
@@ -1275,6 +1325,7 @@ bool apply_workspace_change(SessionView &view, const std::string &json, std::vec
 		{ "new_file", set_new_file },
 		{ "file_rename", set_file_rename },
 		{ "file_delete", set_file_delete },
+		{ "correct_line", set_correct_line },
 		{ "rename", set_rename },
 		{ "rename_back", set_rename_back },
 		{ "find", set_find },
@@ -1343,6 +1394,22 @@ void workspace_follows(SessionCore &core, const EditorRequest &request) {
 				moved = true;
 			}
 			break;
+		case EditorRequestKind::CorrectLine:
+			// Correct the line... asked of a file's line: its text as the file holds it, the text typed starting as it.
+			if (request.ask_name)
+				if (const AssetEntry *file = project_file(view, request.path)) {
+					const size_t line = correct_line_number(request);
+					std::string text, error;
+					if (line && read_source_line(view.project.root, file->relative_path, file->kind, line, text, error) &&
+					    text.size() < kWorkspaceLine) {
+						WorkspaceView::CorrectLine asked{ file->relative_path, line, text, text };
+						const WorkspaceView::CorrectLine &held = workspace.correct_line;
+						moved = held.path != asked.path || held.line != asked.line || held.was != asked.was ||
+						        held.text != asked.text;
+						workspace.correct_line = std::move(asked);
+					}
+				}
+			break;
 		default:
 			break;
 	}
@@ -1381,6 +1448,16 @@ void workspace_closes_for(SessionCore &core, const EditorRequest &request) {
 			}
 			break;
 		}
+		case EditorRequestKind::CorrectLine: {
+			// Correct the line...'s Apply: the line it names written (or refused, the reasons in the outcome).
+			const AssetEntry *file = project_file(view, request.path);
+			if (!request.ask_name && !workspace.correct_line.path.empty() &&
+			    workspace.correct_line.path == (file ? file->relative_path : request.path)) {
+				workspace.correct_line = WorkspaceView::CorrectLine();
+				moved = true;
+			}
+			break;
+		}
 		case EditorRequestKind::CreateFile:
 			// The prompt's Create: the file it names made (or refused, the reasons in Problems).
 			if (workspace.new_file.kind != AssetKind::kCount && request.path == workspace.new_file.name) {
@@ -1415,6 +1492,10 @@ void workspace_tidies(SessionCore &core) {
 	}
 	if (!workspace.file_delete.path.empty() && !project_file(view, workspace.file_delete.path)) {
 		workspace.file_delete = WorkspaceView::FileDelete();
+		moved = true;
+	}
+	if (!workspace.correct_line.path.empty() && !project_file(view, workspace.correct_line.path)) {
+		workspace.correct_line = WorkspaceView::CorrectLine();
 		moved = true;
 	}
 	// Find usages of a file the files no longer have closes.
@@ -1497,6 +1578,7 @@ ShownModal shown_modal(const SessionView &view) {
 	if (w.rename_back.open && project && view.dialogs.rename_preview.back) return { M::RenameBack, {} };
 	if (w.project_find.open && project) return { M::ProjectFind, {} };
 	if (w.problems.confirm.open() && project) return { M::Confirm, {} };
+	if (!w.correct_line.path.empty() && project) return { M::CorrectLine, {} };
 	for (const auto &[path, shown] : w.documents)
 		if (shown.remove_screen) return { M::RemoveScreen, path };
 	return {};
@@ -1508,7 +1590,7 @@ bool modal_may_show(const SessionView &view, HeldModal modal, const std::string 
 }
 
 // "" none; unsaved, import, texture_source, settings, new_project, new_file, file_rename, file_delete, rename,
-// rename_back, project_find, confirm, remove_screen.
+// rename_back, project_find, confirm, correct_line, remove_screen.
 static const char *held_modal_token(HeldModal modal) {
 	switch (modal) {
 		case HeldModal::None: return "";
@@ -1524,6 +1606,7 @@ static const char *held_modal_token(HeldModal modal) {
 		case HeldModal::RenameBack: return "rename_back";
 		case HeldModal::ProjectFind: return "project_find";
 		case HeldModal::Confirm: return "confirm";
+		case HeldModal::CorrectLine: return "correct_line";
 		case HeldModal::RemoveScreen: return "remove_screen";
 	}
 	return "";
@@ -1598,6 +1681,14 @@ JsonValue workspace_to_json(const SessionView &view) {
 		file_delete.set("paths", std::move(others));
 	}
 	out.set("file_delete", std::move(file_delete));
+	JsonValue correct_line = JsonValue::make_object();
+	correct_line.set("path", text(workspace.correct_line.path));
+	if (!workspace.correct_line.path.empty()) {
+		correct_line.set("line", number(double(workspace.correct_line.line)));
+		correct_line.set("was", text(workspace.correct_line.was));
+		correct_line.set("text", text(workspace.correct_line.text));
+	}
+	out.set("correct_line", std::move(correct_line));
 	JsonValue rename = JsonValue::make_object();
 	rename.set("open", flag(workspace.rename.open));
 	if (workspace.rename.open) {
@@ -1774,6 +1865,7 @@ void forget_project_workspace(WorkspaceView &workspace) {
 	workspace.new_file = WorkspaceView::NewFile();
 	workspace.file_rename = WorkspaceView::FileRename();
 	workspace.file_delete = WorkspaceView::FileDelete();
+	workspace.correct_line = WorkspaceView::CorrectLine();
 	workspace.rename = WorkspaceView::Rename();
 	workspace.rename_back = WorkspaceView::RenameBack();
 	workspace.find.open = false;

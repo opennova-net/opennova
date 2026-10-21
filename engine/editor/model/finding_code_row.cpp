@@ -422,6 +422,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// A music_stream_audio the bank cannot take: a wave that does not read, holds no sample or has more than two
 	// channels, a stream the bank has not, a name the stream's field refuses.
 	{ C::MusicStreamAudio, code("music_bank.stream_audio", G::MusicBanks) },
+	// A correct_line the file cannot take: a file the project lacks, a line it has not, one another program changed
+	// since, a text holding a line end, a document of it with unsaved edits.
+	{ C::SourceLine, code("document.source_line", G::Documents) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");

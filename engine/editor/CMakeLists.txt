@@ -398,6 +398,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/workspace_parts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/sound_play.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/source_line.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/clip_sounds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/sounds_playing.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
@@ -481,6 +482,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_picker.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/rename_dialog.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/correct_line_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/script_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/script_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/styles_view.cpp

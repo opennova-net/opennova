@@ -246,6 +246,7 @@ enum class CoreFinding {
 	TextureCharMapShape,   // S25 B5, appended
 	TextureCharMapClass,   // S25, appended
 	MusicStreamAudio,      // appended
+	SourceLine,            // appended
 	kCount
 };
 inline constexpr size_t kCoreFindingCount = static_cast<size_t>(CoreFinding::kCount);

@@ -78,7 +78,10 @@ namespace opennova::editor {
 // trigger moved onto the last frame the game plays): each, an edit of its document (edit_fix). A
 // stylesheet variable no menu names (style.unused): Remove the line, where no menu's text names it
 // inside a longer text either (the render check's variables). Each edit of a document is opened
-// first, one step Undo takes back, never in bulk.
+// first, one step Undo takes back, never in bulk. A line of a file's source its model cannot carry
+// (Diagnostic::source_line: a blocking source issue, whatever its code's row): Correct the line...,
+// the line shown as the file holds it to correct or clear, Apply writing it in the file and reading
+// the file again (correct_line, session/source_line.h); never in bulk.
 // Every other finding has none: Problems goes to its place.
 struct ProblemFix {
 	std::string label;
