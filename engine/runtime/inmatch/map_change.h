@@ -33,10 +33,12 @@
 //     the round init over the kept slots
 //     (HostRole::init_round_after_premission -> init_all_player_entities_for_round).
 //   the boot's phase B ends with the load-end S2C 0x7B to every slot.
-// The host pumps its socket at the load's witnessed points (the 0x25s after
-// the teardown, then the rebuilt streams after the per-slot reset) with the
-// load's spawn gate held (D-NET-116), so a joiner reloading in place is
-// answered from its kept slot; the load end's 0x7B leaves at the first tick.
+// The host pumps its socket at the witnessed points: the teardown's pump ahead
+// of the slot reset, then the load's with its spawn gate held (D-NET-116): its
+// first (the 0x25s leave there when the send clock allows), then its window
+// over the rebuilt streams after the per-slot reset, so a joiner reloading in
+// place is answered from its kept slot; the load end's 0x7B leaves at the first
+// tick.
 
 #include <base/io/crt_rand.h>
 #include <runtime/mission/mission_catalog.h>

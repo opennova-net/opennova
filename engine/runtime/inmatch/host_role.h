@@ -113,10 +113,14 @@ public:
 	// over the role's socket): an in-session authority's load runs the server
 	// protocol's receive, its handlers and its send at the load's pump points,
 	// with the load's spawn gate set (NapiNPServerCtx::net_spawn_suspended,
-	// D-NET-116): the map change's first pump, then one after each bring-up
-	// [orig: Server_PumpNetworkTransport @0x4FD960, called by Game_StartMission
-	//  @0x5245E8 .. @0x525AC5].
-	void pump_load();
+	// D-NET-116): a map change's teardown pump (the gate clear) and its load's first,
+	// then the load's window after each bring-up (load_window_pumps; a fresh session's
+	// first too) [orig: Server_PumpNetworkTransport @0x4FD960, called by
+	//  Game_TeardownMission @0x522588 and Game_StartMission @0x5245E8 .. @0x525AC5]. `count` pumps back to back: each steps every
+	// connection's send clock, as each of retail's does (its receive's holdoff step).
+	void pump_load(int count = 1);
+	// The load's pump count from the round-over clear to the PreMission pass.
+	int load_window_pumps() const;
 	// The map change's round init over the kept slots, which the host boot
 	// runs after the kernel boot's PreMission pass and the round counters
 	// (map_change.h) [orig: Game_StartMission @0x524360, the

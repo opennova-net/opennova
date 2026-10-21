@@ -221,6 +221,12 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	//  @0x52266C, Server_DisconnectAndResetAllPlayerSlots @0x52269B]
 	if (authority_in_session && rotation != nullptr && rotation->list.map_launch_option != 0)
 		swap_sides_or_latch(ctx, *rotation);
+	// The teardown's own server pump, after the swap and ahead of the PostMission pass and
+	// the slot reset: its receive steps each connection's send clock as every server pump
+	// does, so the reset's 0x25s leave at the next load's first pump where retail's do
+	// [orig: Game_TeardownMission - Server_PumpNetworkTransport @0x522588, ahead of
+	//  EventTrigger_UpdateAllWithFlag4 @0x52266C and the reset @0x52269B].
+	role.pump_load();
 	if (kernel != nullptr) {
 		kernel->run_post_mission_pass(/*is_authority=*/true);
 		role.map_change.crt_rand = kernel->world.crt_rand;

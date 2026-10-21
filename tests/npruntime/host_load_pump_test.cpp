@@ -13,10 +13,15 @@
 //
 // Pinned here, core-only (a synthetic mount, a recording socket, no retail data):
 //   - the three handlers drop under the gate and answer with it clear;
-//   - a fresh session host's load pumps once its session stands (the bring-up), with
-//     the gate set, so a hello queued during the load is answered during the load;
-//   - a map change's load pumps at its head (the gate set, no World yet) and after the
-//     per-slot reset (the kept slot's ping word already zeroed), never after the 0x7B;
+//   - a fresh session host's load runs all its pumps once its session stands (the
+//     bring-up), with the gate set, so a hello queued during the load is answered during
+//     the load; a dedicated host's load pumps ten times (@0x5245E8 and the nine of the
+//     window @0x524A63 .. @0x525AC5, the render arm's @0x5259EC skipped @0x5259B4), each
+//     stepping the send clocks as retail's receive does;
+//   - a map change pumps at its teardown (the gate clear, the old World, ahead of the slot
+//     reset: Game_TeardownMission @0x522588), at its load's head (the gate set, no World
+//     yet), then the window's nine after the per-slot reset (the kept slot's ping word
+//     already zeroed), never after the 0x7B;
 //   - the gate is clear once the load ends.
 #include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
@@ -273,24 +278,24 @@ void test_fresh_load_pumps_its_session() {
 	host->socket.inbound.push_back(
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello)));
 	CHECK(host->boot_current(/*next_mission=*/false));
-	// The bring-up pumped, the gate held, and the 0x81 left inside the load.
-	CHECK(host->drains_at_bringup == 1);
+	// The bring-up pumped ten times, the gate held, and the 0x81 left inside the load.
+	CHECK(host->drains_at_bringup == 10);
 	CHECK(host->gate_at_bringup == 1);
 	CHECK(host->sent_at_bringup == 1);
 	CHECK(host->socket.inbound.empty());
 	// Nothing pumped after the bring-up: the load end's 0x7B waits for the first tick.
-	CHECK(host->socket.empty_drains == 1);
+	CHECK(host->socket.empty_drains == 10);
 	CHECK(host->ctx().net_spawn_suspended == 0);
 	CHECK(host->session.state() == inmatch::State::Running);
 }
 
-// A map change: the first pump at the next load's head (the gate set, the old map's
-// World gone), the second after the per-slot reset, none after the 0x7B; the gate is
-// clear once the load ends.
-// [orig: Game_StartMission @0x524360 - the set @0x524398, Server_PumpNetworkTransport
-//  @0x5245E8, the per-slot reset @0x5248BC, the pumps @0x524A63 .. @0x525AC5, the 0x7B
-//  @0x526267, the clear @0x52631B; Server_ResetAllPlayerSlotFrameState @0x4FC320 (the
-//  ping word @0x4FC356)]
+// A map change: the teardown's pump (the gate clear, the old World, ahead of the slot
+// reset), the next load's first (the gate set, the World gone), the window's nine after
+// the per-slot reset, none after the 0x7B; the gate is clear once the load ends.
+// [orig: Game_TeardownMission @0x522588 (ahead of the reset @0x52269B); Game_StartMission
+//  @0x524360 - the set @0x524398, Server_PumpNetworkTransport @0x5245E8, the per-slot reset
+//  @0x5248BC, the pumps @0x524A63 .. @0x525AC5, the 0x7B @0x526267, the clear @0x52631B;
+//  Server_ResetAllPlayerSlotFrameState @0x4FC320 (the ping word @0x4FC356)]
 void test_map_change_load_pumps_after_the_slot_reset() {
 	auto host = std::make_unique<Host>();
 	host->role.set_socket(&host->socket);
@@ -329,18 +334,23 @@ void test_map_change_load_pumps_after_the_slot_reset() {
 	drains.clear();
 	CHECK(inmatch::begin_host_map_change(host->role, host->catalog) ==
 			inmatch::MapChangeStep::NextMission);
-	CHECK(drains.size() == 1);
-	if (drains.size() == 1) {
-		CHECK(!drains[0].world);
-		CHECK(drains[0].gate == 1);
-		CHECK(drains[0].rtt_ms == 77);
-	}
-	CHECK(host->boot_current(/*next_mission=*/true));
 	CHECK(drains.size() == 2);
 	if (drains.size() == 2) {
-		CHECK(drains[1].world);
+		// The teardown's: the old World, the gate clear.
+		CHECK(drains[0].world);
+		CHECK(drains[0].gate == 0);
+		CHECK(drains[0].rtt_ms == 77);
+		// The load's first: no World yet, the gate set.
+		CHECK(!drains[1].world);
 		CHECK(drains[1].gate == 1);
-		CHECK(drains[1].rtt_ms == 0);
+		CHECK(drains[1].rtt_ms == 77);
+	}
+	CHECK(host->boot_current(/*next_mission=*/true));
+	CHECK(drains.size() == 11);
+	for (size_t i = 2; i < drains.size(); ++i) {
+		CHECK(drains[i].world);
+		CHECK(drains[i].gate == 1);
+		CHECK(drains[i].rtt_ms == 0);
 	}
 	CHECK(host->ctx().net_spawn_suspended == 0);
 	CHECK(host->session.state() == inmatch::State::Running);

@@ -303,14 +303,15 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	// Retail's session host stands its session up before its mission load and pumps it
 	// through the load, so a remote's hello, connect and admission legs are answered
 	// inside the load; ours's session exists from here, ahead of the PreMission pass,
-	// where retail's last in-load pumps fall (D-NET-116).
+	// where retail's last in-load pumps fall: all of the load's pumps run here, each
+	// stepping the connections' send clocks as retail's do (D-NET-116).
 	// [orig: Server_PumpNetworkTransport @0x4FD960 from Game_StartMission @0x52589D /
 	//  @0x5258E5 / @0x525A5C / @0x525AC5, ahead of the EventTrigger_UpdateAllWithFlag2
 	//  call @0x525B86; the session create ahead of the load, CNapiGameSession_CreateSession
 	//  @0x4C97C0 from CNapiGameSession_BuildAndCreateSession @0x56997D (the PreMenu's
 	//  MultiPlayer_JoinSessionStateMachine @0x56A46A), before GameLoop_Init's
 	//  Game_StartMission call @0x526377]
-	pump_load();
+	pump_load(1 + load_window_pumps());
 }
 
 // The map change's bring-up, inside the next mission's kernel boot where a
@@ -361,7 +362,7 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 		inmatch::Server_ResetAllPlayerSlotFrameState(ctx);
 	// Then the load's pumps over the reset slots and the rebuilt streams, the spawn
 	// gate still held (D-NET-116) [orig: Game_StartMission @0x524A63 .. @0x525AC5].
-	pump_load();
+	pump_load(load_window_pumps());
 }
 
 // The map change's round init, after the kernel boot's PreMission pass and
@@ -484,10 +485,20 @@ void HostRole::send_own_mission_status() {
 	state.client_runtime->flush_host_sends();
 }
 
-void HostRole::pump_load() {
+void HostRole::pump_load(int count) {
 	opennova::IDatagramSocket &socket =
 			socket_ != nullptr ? *socket_ : null_datagram_socket();
-	inmatch::host_session_load_pump(state.host_owner, socket);
+	for (int i = 0; i < count; ++i) inmatch::host_session_load_pump(state.host_owner, socket);
+}
+
+// The session host's load pumps from the round-over clear to the PreMission pass: nine on
+// a dedicated host, ten with its own client, whose render arm pumps once more.
+// [orig: Game_StartMission - Server_PumpNetworkTransport @0x524A63, @0x524F76, @0x524F8C
+//  (the .bms arm; @0x5251C7 / @0x5251DD the other), @0x525256, @0x5253EA, @0x52589D,
+//  @0x5258E5, @0x5259EC (skipped by the dedicated test @0x5259B4: in session, the
+//  authority, no own client), @0x525A5C, @0x525AC5]
+int HostRole::load_window_pumps() const {
+	return 9 + (state.host_owner.ctx.is_mp_session_peer != 0 ? 1 : 0);
 }
 
 void HostRole::finish_mission_load() {
