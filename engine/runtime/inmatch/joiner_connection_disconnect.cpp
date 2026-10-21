@@ -11,7 +11,6 @@
 #include <net/npwire/session_hello.h>      // DisconnectEvent / parse_disconnect_event / client_goodbye_to_bytes
 #include <net/npwire/session_keys.h>       // SESSION_OPCODE_CLIENT_GOODBYE / SESSION_OPCODE_CLIENT_PING
 #include <net/npwire/session_ping.h>       // the shared 0x45/0x85 body codec
-#include <runtime/inmatch/punt_log.h>        // net_got_text (the connect log)
 
 #include <cstddef>
 #include <cstdint>
@@ -31,19 +30,21 @@ namespace opennova::inmatch {
 // lands in session_keys.rtt_ms @0x623C9B. The pong leaves from inside the
 // receive pump: SendPing writes it straight to the socket (CNapiNPManager_SendTo
 // @0x61F261), so the host's round trip never includes our send-holdoff wait.
-void JoinerConnection::on_server_ping(const std::vector<uint8_t> &body, PollResult &out) {
+bool JoinerConnection::on_server_ping(const std::vector<uint8_t> &body,
+		std::vector<std::vector<uint8_t>> &immediate_outbound) {
 	SessionPingBody ping;
-	if (!parse_session_ping_body(body.data(), body.size(), ping)) return;
-	if (ping.receiver_local_key != client_key_) return;
+	if (!parse_session_ping_body(body.data(), body.size(), ping)) return false;
+	if (ping.receiver_local_key != client_key_) return false;
 	last_receive_ms_ = monotonic_milliseconds_();
 	receive_clock_armed_ = true;
 	if (ping.wants_reply) {
-		out.immediate_outbound.push_back(nw_encode_outbound(SESSION_OPCODE_CLIENT_PING,
+		immediate_outbound.push_back(nw_encode_outbound(SESSION_OPCODE_CLIENT_PING,
 				build_session_ping_body(conn_.server_sk, /*wants_reply=*/false,
 						ping.timestamp_ms)));
-		return;
+		return true;
 	}
 	session_rtt_ms_ = monotonic_milliseconds32() - ping.timestamp_ms;
+	return true;
 }
 
 // The host closed the session on its own terms (docs/net/novaworld-net-re.md §5.64 — the punt
@@ -221,11 +222,11 @@ void JoinerConnection::on_server_goodbye(const std::vector<uint8_t> &body, PollR
 			(static_cast<uint32_t>(body[2]) << 16) |
 			(static_cast<uint32_t>(body[3]) << 24);
 	if (receiver_local_key != client_key_) return;
-	// The connect log's NET GOT for the queued 0x86 [orig: Nwu_HandleDisconnect @0x623CE0 -
-	//  the key test @0x623E74 ahead of the queue @0x624125; NapiNPProtocol_PumpRecvQueues
-	//  @0x6266A0 - NapiLog_OnRecv @0x6268AA].
-	connect_log_line(net_got_text(static_cast<int32_t>(body.size() + 1), host_address_,
-			SESSION_OPCODE_SERVER_GOODBYE));
+	// (The client pump wrote the queued 0x86's NET GOT ahead of this queued leg; its burst's
+	// NET SENDING lines and the leave's NET DISCONNECTING FROM SERVER follow it at once, before
+	// the frame's later packets [orig: Nwu_HandleDisconnect @0x623CE0 - the key test @0x623E74
+	// ahead of the queue @0x624149; NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv
+	// @0x6268AA; CNapiNPConnection_RequestDisconnect @0x61E0F0 - SetState(6) @0x61E0FA].)
 	DisconnectEvent event;
 	(void)parse_disconnect_event(body.data() + 4, body.size() - 4, event);
 	// Teardown owns this receive result, exactly like the H:0x03 description punt.

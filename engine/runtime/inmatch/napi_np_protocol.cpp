@@ -144,28 +144,6 @@ namespace {
 // [orig: g_NPOpcodeHandlers @0x849D90, index 6; Nwu_HandleClientProbe @0x624280].
 constexpr uint8_t kClientProbeOpcode = 0x47;
 
-// PunkBuster's datagrams: 0xFF, then the "\xFF\xFF\xFFPB_" prefix (case-insensitive), more
-// than 7 bytes; the manager hands them to its PunkBuster handler unpacked (ours runs no
-// PunkBuster leg, D-NET-171) [orig: NapiNPManager_PumpReceive @0x6231A7..0x6231D9; the
-// prefix byte_7DFE30].
-bool punkbuster_datagram(const uint8_t *raw, std::size_t len) {
-	if (len <= 7 || raw[0] != 0xFF) return false;
-	static const uint8_t kPrefix[] = {0xFF, 0xFF, 0xFF, 'P', 'B', '_'};
-	for (std::size_t i = 0; i < sizeof(kPrefix); ++i) {
-		uint8_t got = raw[1 + i];
-		if (got >= 'a' && got <= 'z') got = static_cast<uint8_t>(got - 'a' + 'A');
-		if (got != kPrefix[i]) return false;
-	}
-	return true;
-}
-
-// The NAT magic ("baffle") packet: the words 0x1071 and '0', 48 bytes or more
-// [orig: NapiNPManager_HandlePacket @0x622F1B..0x622F36; NapiNP_HandleMagicPacket @0x622E70].
-bool baffle_packet(const std::vector<uint8_t> &unpacked) {
-	return unpacked.size() >= 0x30 && unpacked[0] == 0x71 && unpacked[1] == 0x10 &&
-			unpacked[2] == 0x30 && unpacked[3] == 0x00;
-}
-
 void connect_log_line(const NapiNPServerCtx &ctx, const std::string &text) {
 	if (ctx.logs.connect != nullptr) ctx.logs.connect->line(text);
 }
@@ -1580,6 +1558,24 @@ ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hel
 }
 
 // See header.
+bool napi_punkbuster_datagram(const uint8_t *raw, std::size_t len) {
+	if (raw == nullptr || len <= 7 || raw[0] != 0xFF) return false;
+	static const uint8_t kPrefix[] = {0xFF, 0xFF, 0xFF, 'P', 'B', '_'};
+	for (std::size_t i = 0; i < sizeof(kPrefix); ++i) {
+		uint8_t got = raw[1 + i];
+		if (got >= 'a' && got <= 'z') got = static_cast<uint8_t>(got - 'a' + 'A');
+		if (got != kPrefix[i]) return false;
+	}
+	return true;
+}
+
+// See header.
+bool napi_baffle_packet(const std::vector<uint8_t> &unpacked) {
+	return unpacked.size() >= 0x30 && unpacked[0] == 0x71 && unpacked[1] == 0x10 &&
+			unpacked[2] == 0x30 && unpacked[3] == 0x00;
+}
+
+// See header.
 void finish_manager_receive(NapiNPServerCtx &ctx) {
 	if (!ctx.connect_log_disable_queued) return;
 	ctx.connect_log_disable_queued = false;
@@ -1605,7 +1601,7 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	//  cb_on_error(4) @0x622FF9;
 	//  NapiLib_SetManagerCallbacks @0x4C6F50]
 	connect_log_line(ctx, napi_got_raw_text(static_cast<int32_t>(len), peer));
-	if (punkbuster_datagram(raw, len)) return out;
+	if (napi_punkbuster_datagram(raw, len)) return out;
 	std::vector<uint8_t> unpacked;
 	if (!nw_unpack_inbound(raw, len, unpacked)) {
 		connect_log_line(ctx, napi_tossed_text(static_cast<int32_t>(len), peer,
@@ -1614,7 +1610,7 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	const int32_t unpacked_len = static_cast<int32_t>(unpacked.size());
 	connect_log_line(ctx, napi_got_cooked_text(unpacked_len, peer));
-	if (baffle_packet(unpacked)) {
+	if (napi_baffle_packet(unpacked)) {
 		connect_log_line(ctx, napi_got_baffle_text(unpacked_len, peer));
 		// D-NET-NEW-L1-20 [orig: NapiNPManager_HandlePacket @0x622F10 (the call @0x622F62)]
 		reflect_magic_packet(ctx, unpacked, out);

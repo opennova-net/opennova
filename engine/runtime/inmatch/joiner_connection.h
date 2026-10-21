@@ -18,6 +18,7 @@
 #include <ctime>
 #include <string_view>
 #include <array>
+#include <deque>
 #include <functional>
 #include <string>
 #include <utility>
@@ -157,14 +158,13 @@ public:
 		// send-holdoff gate) and the handshake's ClientAuth (no holdoff exists before the
 		// host's CS update), or a terminal teardown's goodbye burst (shipped at once).
 		std::vector<std::vector<uint8_t>> outbound;
-		// Datagrams retail transmits from INSIDE the receive pump: the opcode handler
-		// calls CNapiNPManager_SendTo itself, so they never wait for the send-holdoff gate.
-		// They are the 0x84 resend answers (each requested sequence rebuilt from its
-		// retained records with the current ACK) and the 0x45 pong of a WR-flagged 0x85.
-		// The owner ships them at their datagram's receive position.
-		// [orig: NapiNPProtocol_PumpRecvQueues @0x6266a0 dispatches 0x84/0x85 off its
-		//  receive FIFO (the queue_mask & 2 leg @0x6267f2..0x6268d0, the client receive
-		//  pump's flags 26 from CNapiNetwork_PumpClientProtocolRecv @0x4c4fe0);
+		// handle_datagram only: the datagrams its manager receive wrote to the socket
+		// (ManagerPass::immediate_outbound), the 0x84 resend answers (each requested sequence
+		// rebuilt from its retained records with the ACK the connection held before the
+		// client pump) and the 0x45 pong of a WR-flagged 0x85; they never wait for the
+		// send-holdoff gate. The opcode handlers run in the manager's dispatch, never queued.
+		// [orig: NapiNPManager_HandlePacket @0x622F10 -> NapiNPProtocol_DispatchOpcode (the call
+		//  @0x622F9B) -> Nwu_HandleServerResendList @0x6242B0 / Nwu_HandleServerPing @0x6242E0;
 		//  NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket
 		//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039; Nwu_HandlePing @0x623a70 ->
 		//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61f261]
@@ -319,9 +319,67 @@ public:
 	// The process's _connectlog.txt (punt_log.h; null: off): this connection's receive-side
 	// client callbacks write their lines while it is on (connect_log_line).
 	void set_connect_log(ConnectLog *log) { connect_log_ = log; }
+	// The protocol's client send callback for one datagram as it leaves, while the log is on:
+	// NET SENDING with the packet's length before the manager's pack (its opcode byte included),
+	// the host, the opcode and, for a session packet, its packet sequence (0 for every other).
+	// [orig: NapiLog_OnSend @0x4C4760 (proto+0x270, installed by CNapiNetwork_Init @0x4CA978)]
+	void connect_log_send(const std::vector<uint8_t> &datagram) const;
 
-	// Feed one inbound datagram (off the socket, CRC envelope intact). Returns the reply datagrams +
-	// any surfaced 0x0A bodies + whether this datagram learned H.
+	// The joiner's receive runs in two passes each frame, as retail's does. The NAPI manager's
+	// receive reads every datagram the socket holds first (manager_receive, one call per
+	// datagram); then the protocol's client pump takes what those queued, in order
+	// (pump_client_queue, one queued packet per call).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - CNapiNetwork_PumpManagerReceive @0x4C4D10 (the call
+	//  @0x526528) at the frame's head, Client_ProcessNetworkFrame later (the call @0x526692) ->
+	//  CNapiNetwork_PumpClientProtocolRecv @0x4C4FE0 -> NapiNPProtocol_Pump(flags 26) @0x62A650
+	//  -> NapiNPProtocol_PumpRecvQueues @0x6266A0 (the call @0x62A6AC); the join stages' loops
+	//  call the same pair in the same order (MultiPlayer_JoinSessionStateMachine @0x56A320 -
+	//  @0x56A3C8, @0x56A5BF, @0x56A729; Game_StartMission @0x524360 - @0x5262B4 / @0x5262BE)]
+	//
+	// The manager's receive of one datagram (off the socket, CRC envelope intact): the connect
+	// log's manager lines (NAPI GOT RAW, then TOSSED [3] for an unpack failure, else GOT COOKED;
+	// GOT BAFFLE for the NAT magic packet, which a joiner's protocol never reflects; else the
+	// dispatch's GOT PROTOCOL or TOSSED [4]), and the S2C handler's socket leg: the 0x84 resend
+	// list and the 0x85 ping act at once (their datagrams leave from inside this receive, with
+	// the ACK the connection holds before this frame's client pump), a 0x81 / 0x82 / 0x83 / 0x86
+	// that passes its gates is queued for the client pump, a 0x87 is taken while the connection
+	// exists, and every other opcode finds no handler. PunkBuster's datagrams are set aside with
+	// no further line.
+	// [orig: NapiNPManager_PumpReceive @0x623010 - cb_on_raw @0x623121, the PunkBuster arm
+	//  @0x6231A7..0x6231D9, NapiNP_UnpackPacket @0x623206, cb_on_error(3) @0x623229, cb_on_packet
+	//  @0x623254, NapiNPManager_HandlePacket (the call @0x623284); NapiNPManager_HandlePacket
+	//  @0x622F10 - cb_on_unpack @0x622F53 ahead of NapiNP_HandleMagicPacket (the call @0x622F62),
+	//  NapiNPProtocol_DispatchOpcode (the call @0x622F9B), cb_on_dispatch @0x622FCD, cb_on_error(4)
+	//  @0x622FF9; g_NPOpcodeHandlers @0x849D90 rows 7..13 (0x81..0x87);
+	//  NapiLib_SetManagerCallbacks @0x4C6F50 - the five lines while the log is on @0x4C6F64..0x4C6FAC]
+	struct ManagerPass {
+		// The 0x84's rebuilt packets and the 0x85's pong, written to the socket by their
+		// handlers inside this receive (the owner ships them, and logs their NET SENDING, at
+		// once). [orig: NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket
+		//  (the call @0x6239B6); Nwu_HandlePing @0x623A70 -> CNapiNPConnection_SendPing (the call
+		//  @0x623C6F)]
+		std::vector<std::vector<uint8_t>> immediate_outbound;
+	};
+	ManagerPass manager_receive(const uint8_t *raw, std::size_t len);
+	// The protocol's client pump, one packet per call: first the packets this frame's manager
+	// receive queued, in order, each writing NET GOT and then running its handler's queued leg
+	// (the 0x81's session record, the 0x82's accept or refusal, an in-order 0x83's parse, the
+	// 0x86's teardown); then the connection's ordered successors whose gap the frame closed, one
+	// parse each. `out` collects what that packet's handlers produced. False when nothing is
+	// left. Once the session is lost the packets still queued write their NET GOT and nothing
+	// else (drain_client_queue_after_teardown), and the call returns false.
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the queue_mask & 2 leg @0x6267F2..0x6268D5
+	//  (NapiLog_OnRecv @0x6268AA ahead of the handler's queued call @0x6268D0), the connection
+	//  walk @0x626910..0x6269E8 (the head test @0x626960, CNapiNPConnection_ParseMessages
+	//  @0x62696B)]
+	bool pump_client_queue(PollResult &out);
+	// After a teardown in the client pump: every packet still queued is read with its NET GOT
+	// line; each queued leg then finds the connection down and returns at its active test.
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - @0x6268AA; NapiNPProtocol_HandleSessionPacket
+	//  @0x626A00 - conn_flag0 @0x626B01; Nwu_HandleDisconnect @0x623CE0 - @0x623DF2]
+	void drain_client_queue_after_teardown();
+	// One frame of one datagram: its manager receive, then the whole client pump, everything
+	// collected in one result (the manager pass's sends in immediate_outbound).
 	PollResult handle_datagram(const uint8_t *raw, std::size_t len);
 
 	// While awaiting 0x81/0x82, re-emit the exact pending 0x41/0x42 wire datagram, measured by the
@@ -1121,13 +1179,33 @@ private:
 	}
 	std::vector<uint8_t> frame_retained_session(uint32_t sequence);
 
+	// The socket legs' gates of the queued opcodes (manager_receive): true when the handler
+	// queues the packet for the client pump.
+	bool server_hello_queues(const std::vector<uint8_t> &body) const;
+	bool server_auth_queues(const std::vector<uint8_t> &body) const;
+	// The queued legs (pump_client_queue), each after its NET GOT.
 	void on_server_hello(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_auth(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_session(const std::vector<uint8_t> &body, PollResult &out);
+	// ParseMessages over the packets one admission carries (an in-order 0x83, or one ordered
+	// successor the client pump's connection walk takes).
+	void process_session_admission(const ProtocolPacketHeader &hdr,
+			std::vector<ProtocolMessage> messages, const SessionDeframeAdmission &admission,
+			PollResult &out);
+	// A packet the manager receive queued for the client pump: its opcode and its body past
+	// the opcode (NWU-decrypted). [orig: the protocol FIFO's 12-byte header {address, port,
+	//  opcode} and the packet (NapiFifo_WritePacketAtomic @0x637520)]
+	struct QueuedPacket {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+	};
+	std::deque<QueuedPacket> client_queue_;
 	void retire_self_handle(uint16_t handle);
 	void apply_self_spawn(uint16_t handle, bool has_body, uint32_t owner,
 			uint16_t flags, const SelfSpawn &spawn, PollResult &out);
-	void on_server_resend_list(const std::vector<uint8_t> &body, PollResult &out);
+	// The 0x84's handler, in the manager receive; true when it took the list (its key matched).
+	bool on_server_resend_list(const std::vector<uint8_t> &body,
+			std::vector<std::vector<uint8_t>> &immediate_outbound);
 	// The paged host lists a client walks with its own C2S reply
 	// (joiner_connection_walks.cpp): the team-change list's S2C 0x51 -> C2S 0x29
 	// {index + 1} and the join-window kill list's S2C 0x4E -> C2S 0x28
@@ -1139,8 +1217,10 @@ private:
 	void on_server_goodbye(const std::vector<uint8_t> &body, PollResult &out);
 	// S2C 0x85 the outer connection ping: keyed by OUR CK, `WR` set = the host wants our 0x45
 	// pong of its `MS` stamp, clear = the pong of our own ping (rtt = now - MS). Either form
-	// refreshes the reap clock exactly like an admitted 0x83.
-	void on_server_ping(const std::vector<uint8_t> &body, PollResult &out);
+	// refreshes the reap clock exactly like an admitted 0x83. In the manager receive; true when
+	// it took the ping (its key matched).
+	bool on_server_ping(const std::vector<uint8_t> &body,
+			std::vector<std::vector<uint8_t>> &immediate_outbound);
 	// Store `event` (with `role` as DS) as the connection's disconnect record only while none is
 	// latched — retail's store-if-!valid slot. The 128/32-byte record caps apply.
 	void latch_disconnect_event(const DisconnectEvent &event, uint32_t role);

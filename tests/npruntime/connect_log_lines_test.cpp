@@ -343,11 +343,21 @@ void test_remote_joiner_client_lines() {
 		std::vector<uint8_t> body;
 		return nw_decode_inbound(dg.data(), dg.size(), opcode, body) ? opcode : uint8_t{0};
 	};
+	// The manager receive's three lines for a datagram a handler took.
+	const std::string pn = kJo.pn != nullptr ? kJo.pn : "";
+	const auto manager_taken = [&](std::vector<std::string> &want, const std::vector<uint8_t> &dg) {
+		want.push_back("NAPI GOT RAW " + std::to_string(dg.size()) + " BYTES FROM " + host_at);
+		want.push_back("NAPI GOT COOKED " + std::to_string(unpacked_len(dg)) + " BYTES FROM " +
+				host_at);
+		want.push_back("NAPI GOT PROTOCOL " + std::to_string(unpacked_len(dg)) + " BYTES FROM " +
+				host_at + " [" + pn + "]");
+	};
 	// The enumerate's announce.
 	const std::vector<uint8_t> hello = client.start();
 	std::vector<std::string> lines = log_lines(files);
 	CHECK(lines.size() == 1 && lines[0] == sending(hello, "0x41", 0));
-	// The host's 0x81: queued (NET GOT) and its new session (DISCOVERED) in its frame; the
+	// The host's 0x81: the manager receive's lines (RAW, COOKED, PROTOCOL: the handler queued
+	// it), then the client pump's NET GOT and its new session (DISCOVERED) in its frame; the
 	// next frame starts the connect state and the first frame past that start sends the 0x42
 	// (D-NET-NEW-L2-25).
 	const inmatch::HandleResult reply =
@@ -362,23 +372,29 @@ void test_remote_joiner_client_lines() {
 	client.receive(reply.outbound[0].data(), reply.outbound[0].size());
 	now_ms += 16;
 	std::vector<std::vector<uint8_t>> sent = client.Client_ProcessNetworkFrame(1);
-	CHECK(sent.empty() && log_lines(files).size() == 3);
+	CHECK(sent.empty() && log_lines(files).size() == 6);
 	CHECK(client.Client_ProcessNetworkFrame(1).empty());
 	now_ms += 16;
 	sent = client.Client_ProcessNetworkFrame(1);
 	CHECK(sent.size() == 1 && opcode_of(sent[0]) == SESSION_OPCODE_CLIENT_AUTH);
 	if (sent.size() != 1) return;
 	lines = log_lines(files);
-	CHECK(lines.size() == 4);
-	if (lines.size() != 4) {
+	std::vector<std::string> hello_frame;
+	manager_taken(hello_frame, reply.outbound[0]);
+	hello_frame.push_back(got(reply.outbound[0], "0x81"));
+	hello_frame.push_back("NET SESSION DISCOVERED AT " + host_at + " [" + sh.sn + "]");
+	hello_frame.push_back(sending(sent[0], "0x42", 0));
+	CHECK(lines.size() == 1 + hello_frame.size());
+	if (lines.size() != 1 + hello_frame.size()) {
 		for (const std::string &l : lines) std::printf("  got: %s\n", l.c_str());
 		return;
 	}
-	CHECK(lines[1] == got(reply.outbound[0], "0x81"));
-	CHECK(lines[2] == "NET SESSION DISCOVERED AT " + host_at + " [" + sh.sn + "]");
-	CHECK(lines[3] == sending(sent[0], "0x42", 0));
-	// The 0x82 (and what the host bundles behind it): NET GOT, then NET CONNECTED with the
-	// RIP / RPN the host saw; a 0x83 queued and parsed writes NET GOT then NET PROCESSING.
+	for (std::size_t i = 0; i < hello_frame.size(); ++i) CHECK(lines[1 + i] == hello_frame[i]);
+	const std::size_t before_auth = lines.size();
+	// The 0x82 and what the host bundles behind it, one frame: the manager receive's lines
+	// for every datagram first (each queued: the 0x83s by their key, ahead of the accept),
+	// then the client pump's: the 0x82's NET GOT and NET CONNECTED with the RIP / RPN the host
+	// saw, then each 0x83's NET GOT and its parse's NET PROCESSING.
 	const std::vector<uint8_t> join = sent[0];
 	const inmatch::HandleResult admitted =
 			inmatch::handle_server_datagram(host, joiner_peer, join.data(), join.size(), 1);
@@ -389,8 +405,14 @@ void test_remote_joiner_client_lines() {
 	now_ms += 16;
 	sent = client.Client_ProcessNetworkFrame(2);
 	lines = log_lines(files);
-	std::vector<std::string> want = {got(admitted.outbound[0], "0x82"),
-			"NET CONNECTED TO SERVER " + host_at + " [yourip=10.0.0.9:4200]"};
+	std::vector<std::string> want;
+	for (std::size_t i = 0; i < admitted.outbound.size(); ++i) {
+		const uint8_t s2c = opcode_of(admitted.outbound[i]);
+		CHECK(s2c == SESSION_OPCODE_SERVER_AUTH || s2c == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE);
+		manager_taken(want, admitted.outbound[i]);
+	}
+	want.push_back(got(admitted.outbound[0], "0x82"));
+	want.push_back("NET CONNECTED TO SERVER " + host_at + " [yourip=10.0.0.9:4200]");
 	for (std::size_t i = 1; i < admitted.outbound.size(); ++i) {
 		if (opcode_of(admitted.outbound[i]) != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE) continue;
 		want.push_back(got(admitted.outbound[i], "0x83"));
@@ -409,12 +431,144 @@ void test_remote_joiner_client_lines() {
 		CHECK(session);
 		want.push_back(sending(dg, "0x43", session ? static_cast<int>(header.seq_num) : -1));
 	}
-	CHECK(lines.size() == 4 + want.size());
-	if (lines.size() != 4 + want.size()) {
+	CHECK(lines.size() == before_auth + want.size());
+	if (lines.size() != before_auth + want.size()) {
 		for (const std::string &l : lines) std::printf("  got: %s\n", l.c_str());
 		return;
 	}
-	for (std::size_t i = 0; i < want.size(); ++i) CHECK(lines[4 + i] == want[i]);
+	for (std::size_t i = 0; i < want.size(); ++i) CHECK(lines[before_auth + i] == want[i]);
+}
+
+// The joiner's receive in two passes (L2-s12, D-NET-NEW-L8-8's receive split): the NAPI
+// manager's receive reads every datagram of the frame first, its lines with it, and the 0x84
+// resend list acts there (its rebuilt packet carries the ACK the connection held before the
+// frame's client pump, its NET SENDING ahead of the 0x84's PROTOCOL line); only then the
+// client pump writes the queued packets' NET GOT and parses them. A 0x83 that arrives ahead
+// of the accepted 0x82 is queued by its key (PROTOCOL, NET GOT) and its queued leg returns at
+// the active test, unparsed.
+// [orig: Game_ProcessMainFrame @0x5263F0 - CNapiNetwork_PumpManagerReceive (the call
+//  @0x526528); NapiNPManager_PumpReceive @0x623010; NapiNPManager_HandlePacket @0x622F10 -
+//  cb_on_dispatch @0x622FCD; NapiNP_HandleResendList @0x623800 - a zero dword resends the next
+//  packet @0x6239A4, CNapiNPConnection_SendSessionPacket (the call @0x6239B6);
+//  NapiNPProtocol_HandleSessionPacket @0x626A00 - the key @0x626B72, the queue @0x626CB0,
+//  the queued leg's active test @0x626B01; NapiNPProtocol_PumpRecvQueues @0x6266A0 -
+//  NapiLog_OnRecv @0x6268AA; CNapiNPConnection_ParseMessages @0x625BC0 - @0x625D3E]
+void test_remote_joiner_manager_pass_ahead_of_the_client_pump() {
+	MemoryFiles files;
+	inmatch::ConnectLog log{files};
+	log.set_clock([] { return std::string("T"); });
+	log.start(inmatch::ConnectLogHeader{});
+	inmatch::NapiNPServerCtx host;
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			/*host_key=*/0x0FE0E119u);
+	const PeerAddr host_addr = peer_addr_from_octets({10, 0, 0, 1}, 32786);
+	const PeerAddr joiner_peer = peer_addr_from_octets({10, 0, 0, 9}, 4200);
+	const std::string host_at = "10.0.0.1:32786";
+	const std::string pn = kJo.pn != nullptr ? kJo.pn : "";
+	uint64_t now_ms = 1000;
+	inmatch::ClientRuntime client("SplitJoiner", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
+	client.set_host_address(host_addr);
+	client.set_connect_log(&log);
+	const auto decode = [](const std::vector<uint8_t> &dg, uint8_t &opcode,
+			std::vector<uint8_t> &body) {
+		return nw_decode_inbound(dg.data(), dg.size(), opcode, body);
+	};
+	// The enumerate, the host's 0x81, and the 0x42 two passes later (D-NET-NEW-L2-25).
+	const std::vector<uint8_t> hello = client.start();
+	const inmatch::HandleResult reply =
+			inmatch::handle_server_datagram(host, joiner_peer, hello.data(), hello.size(), 0);
+	CHECK(reply.outbound.size() == 1);
+	if (reply.outbound.size() != 1) return;
+	client.receive(reply.outbound[0].data(), reply.outbound[0].size());
+	std::vector<std::vector<uint8_t>> sent;
+	for (int pass = 0; pass < 3 && sent.empty(); ++pass) {
+		now_ms += 16;
+		sent = client.Client_ProcessNetworkFrame(1);
+	}
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	CHECK(sent.size() == 1 && decode(sent[0], opcode, body) &&
+			opcode == SESSION_OPCODE_CLIENT_AUTH && parse_client_auth(body.data(), body.size(), auth));
+	if (sent.size() != 1) return;
+	const inmatch::HandleResult admitted =
+			inmatch::handle_server_datagram(host, joiner_peer, sent[0].data(), sent[0].size(), 1);
+	std::vector<uint8_t> first_session; // the host's first 0x83 (packet 1)
+	std::vector<uint8_t> accept;
+	for (const std::vector<uint8_t> &dg : admitted.outbound) {
+		if (!decode(dg, opcode, body)) continue;
+		if (opcode == SESSION_OPCODE_SERVER_AUTH && accept.empty()) accept = dg;
+		if (opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE && first_session.empty())
+			first_session = dg;
+	}
+	CHECK(!accept.empty() && !first_session.empty());
+	if (accept.empty() || first_session.empty()) return;
+	const auto raw = [&](const std::vector<uint8_t> &dg) {
+		return "NAPI GOT RAW " + std::to_string(dg.size()) + " BYTES FROM " + host_at;
+	};
+	const auto cooked = [&](const std::vector<uint8_t> &dg) {
+		return "NAPI GOT COOKED " + std::to_string(unpacked_len(dg)) + " BYTES FROM " + host_at;
+	};
+	const auto taken = [&](const std::vector<uint8_t> &dg) {
+		return "NAPI GOT PROTOCOL " + std::to_string(unpacked_len(dg)) + " BYTES FROM " + host_at +
+				" [" + pn + "]";
+	};
+	const auto got = [&](const std::vector<uint8_t> &dg, const char *op) {
+		return "NET GOT " + std::to_string(unpacked_len(dg)) + " BYTES FROM " + host_at + " [" +
+				op + "]";
+	};
+	// A 0x83 ahead of the 0x82: queued by its key, read by the client pump, never parsed.
+	std::size_t at = log_lines(files).size();
+	client.receive(first_session.data(), first_session.size());
+	now_ms += 16;
+	(void)client.Client_ProcessNetworkFrame(2);
+	std::vector<std::string> lines = log_lines(files);
+	const std::vector<std::string> early = {raw(first_session), cooked(first_session),
+			taken(first_session), got(first_session, "0x83")};
+	CHECK(lines.size() >= at + early.size());
+	if (lines.size() < at + early.size()) return;
+	for (std::size_t i = 0; i < early.size(); ++i) CHECK(lines[at + i] == early[i]);
+	CHECK(lines.size() == at + early.size()); // no NET PROCESSING: the connection is not active
+	// The 0x82 accepts.
+	client.receive(accept.data(), accept.size());
+	now_ms += 16;
+	(void)client.Client_ProcessNetworkFrame(3);
+	// One frame: the 0x83 again (packet 1, now in order), then a 0x84 whose zero dword asks for
+	// the next packet. The manager receive answers the 0x84 before the client pump parses the
+	// 0x83: the rebuilt packet's ACK is 0, the connection's before this frame (no packet parsed
+	// yet), and it is the frame's first datagram out.
+	std::vector<uint8_t> resend_body;
+	CHECK(encode_session_resend_list(auth.ck, {0u}, resend_body));
+	const std::vector<uint8_t> resend =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, std::move(resend_body));
+	at = log_lines(files).size();
+	client.receive(first_session.data(), first_session.size());
+	client.receive(resend.data(), resend.size());
+	now_ms += 16;
+	const std::vector<std::vector<uint8_t>> out = client.Client_ProcessNetworkFrame(4);
+	std::vector<uint8_t> unpacked;
+	ProtocolPacketHeader rebuilt;
+	CHECK(!out.empty() && nw_unpack_inbound(out[0].data(), out[0].size(), unpacked) &&
+			nw_split_unpacked(unpacked, opcode, body) &&
+			opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
+			parse_protocol_packet_header(body.data(), body.size(), rebuilt));
+	if (out.empty()) return;
+	CHECK(rebuilt.ack_count == 0);
+	lines = log_lines(files);
+	const std::vector<std::string> frame = {raw(first_session), cooked(first_session),
+			taken(first_session), raw(resend), cooked(resend),
+			"NET SENDING " + std::to_string(unpacked.size()) + " BYTES TO " + host_at + " [0x43, p#" +
+					std::to_string(rebuilt.seq_num) + "]",
+			taken(resend), got(first_session, "0x83"),
+			"NET PROCESSING " + std::to_string(unpacked_len(first_session)) + " BYTES FROM " +
+					host_at};
+	CHECK(lines.size() >= at + frame.size());
+	if (lines.size() < at + frame.size()) {
+		for (const std::string &l : lines) std::printf("  got: %s\n", l.c_str());
+		return;
+	}
+	for (std::size_t i = 0; i < frame.size(); ++i) CHECK(lines[at + i] == frame[i]);
 }
 
 // The joiner's session destroy (FullDestroy): the leave's lines, then the transport's teardown,
@@ -455,6 +609,7 @@ int main() {
 	test_dedicated_host_receive_lines();
 	test_listen_host_self_join_lines();
 	test_remote_joiner_client_lines();
+	test_remote_joiner_manager_pass_ahead_of_the_client_pump();
 	test_remote_joiner_destroy_tears_down_the_socket();
 	if (failures != 0) {
 		std::printf("connect_log_lines: %d failure(s)\n", failures);

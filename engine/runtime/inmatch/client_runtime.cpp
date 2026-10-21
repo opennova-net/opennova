@@ -13,8 +13,6 @@
 #include <net/title/title_identity.h> // the title the VERSION line reads
 #include <base/io/le.h>
 #include <base/io/tick_rate.h>
-#include <net/npwire/nw_session_framing.h> // nw_unpack_inbound / nw_split_unpacked (the sends' lines)
-#include <net/npwire/session_keys.h>       // SESSION_OPCODE_PROTOCOL_MESSAGE
 
 #include <algorithm>
 #include <chrono>
@@ -521,33 +519,31 @@ std::vector<uint8_t> ClientRuntime::start() {
 //  @0x6254B4..0x6254D3, the leave callback @0x6254D5..0x6254E7;
 //  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the line @0x4C6421..0x4C6486]
 std::vector<std::vector<uint8_t>> ClientRuntime::log_client_sends(
-		std::vector<std::vector<uint8_t>> datagrams, bool session_lost_before) const {
+		std::vector<std::vector<uint8_t>> datagrams, bool session_lost_before) {
+	// The frame's receive already wrote the lines of the sends it made, at their position:
+	// the leading datagrams the manager receive and a teardown in the client pump returned
+	// (run_frame), and the leave line with the teardown's burst.
+	const std::size_t written = std::exchange(receive_sends_logged_, 0);
+	const bool leave_written = std::exchange(receive_leave_logged_, false);
 	if (role_ != Role::Joiner || joiner_ == nullptr || connect_log_ == nullptr ||
 			!connect_log_->enabled())
 		return datagrams;
-	for (const std::vector<uint8_t> &datagram : datagrams) {
-		std::vector<uint8_t> unpacked;
-		uint8_t opcode = 0;
-		std::vector<uint8_t> body;
-		if (!nw_unpack_inbound(datagram.data(), datagram.size(), unpacked) ||
-				!nw_split_unpacked(unpacked, opcode, body))
-			continue;
-		int32_t packet = 0;
-		ProtocolPacketHeader header;
-		if (opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
-				parse_protocol_packet_header(body.data(), body.size(), header))
-			packet = static_cast<int32_t>(header.seq_num);
-		connect_log_->line(net_sending_text(static_cast<int32_t>(unpacked.size()),
-				joiner_->host_address(), opcode, packet));
-	}
-	if (!session_lost_before && joiner_->session_lost() && joiner_->has_disconnect_event()) {
-		const DisconnectEvent &event = joiner_->last_disconnect_event();
-		connect_log_->line(net_disconnecting_from_server_text(joiner_->host_address(),
-				static_cast<int32_t>(event.ds), static_cast<int32_t>(event.dc),
-				static_cast<int32_t>(event.dp1), static_cast<int32_t>(event.dp2), event.dstr,
-				static_cast<int32_t>(event.dpc), event.ddstr));
-	}
+	for (std::size_t i = written; i < datagrams.size(); ++i)
+		joiner_->connect_log_send(datagrams[i]);
+	if (!leave_written && !session_lost_before && joiner_->session_lost())
+		log_client_leave();
 	return datagrams;
+}
+
+void ClientRuntime::log_client_leave() const {
+	if (joiner_ == nullptr || connect_log_ == nullptr || !connect_log_->enabled() ||
+			!joiner_->has_disconnect_event())
+		return;
+	const DisconnectEvent &event = joiner_->last_disconnect_event();
+	connect_log_->line(net_disconnecting_from_server_text(joiner_->host_address(),
+			static_cast<int32_t>(event.ds), static_cast<int32_t>(event.dc),
+			static_cast<int32_t>(event.dp1), static_cast<int32_t>(event.dp2), event.dstr,
+			static_cast<int32_t>(event.dpc), event.ddstr));
 }
 
 bool ClientRuntime::begin_mission_reload() {
@@ -1144,6 +1140,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		const UplinkBuilder *build_uplink, uint32_t now_tick) {
 	devtools::ProfileLap lap(profile_);
 	std::vector<std::vector<uint8_t>> outbound;
+	receive_sends_logged_ = 0;
+	receive_leave_logged_ = false;
 	// Session loss is a terminal owner state, not only a receive-side event. A
 	// prior host description (or the silence reap below) must stop the next frame
 	// before its tick/housekeeping producers can mint fresh C2S traffic.
@@ -1175,6 +1173,28 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->mission_start_aborted() &&
 			mission_exit_reason_ == kMissionExitRoundOver)
 		(void)begin_mission_reload();
+
+	// (0) The NAPI manager's receive at the frame's head, ahead of the quality fold and the
+	// indicators: every datagram the socket holds, its manager lines, the 0x84's resends and
+	// the 0x85's pong written to the socket from inside it (their NET SENDING lines with them,
+	// so the outbound's leading datagrams are logged), a resend list's link error at once; the
+	// queued packets wait for the client pump in (1).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - CNapiNetwork_PumpManagerReceive @0x4C4D10 (the
+	//  call @0x526528) ahead of the quality countdown @0x526537 and CNetQuality_UpdateIndicators
+	//  (the call @0x52668D); NapiNPManager_PumpReceive @0x623010; NapiNP_HandleResendList
+	//  @0x623800 - cb_client_3 @0x623A37]
+	if (role_ == Role::Joiner && joiner_ != nullptr) {
+		while (!recv_fifo_.empty()) {
+			std::vector<uint8_t> dg = std::move(recv_fifo_.front());
+			recv_fifo_.pop_front();
+			JoinerConnection::ManagerPass pass = joiner_->manager_receive(dg.data(), dg.size());
+			for (std::vector<uint8_t> &sent_now : pass.immediate_outbound) {
+				outbound.push_back(std::move(sent_now));
+				++receive_sends_logged_;
+			}
+			apply_net_quality_link_errors(joiner_->take_net_quality_link_errors());
+		}
+	}
 
 	// The main frame's 62-frame quality fold runs ahead of the client net frame
 	// (the level it stores is what the 0x4C leg below reports). Its countdown steps
@@ -1293,40 +1313,43 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// (and its 0x13 broadcast skips the loopback — mask 0x90 NOT_HOST).
 		view_.drain_weapon_reloads();
 	} else {
-		// A remote joiner: framed datagrams. JoinerConnection decodes the 0x83 SESSION envelope and
-		// surfaces the inner bodies, which we fold via ClientReplicaPipeline::apply (the single remote-wire
-		// fold path; pump(transport) is the loopback path — exactly one is active per role).
-		while (!recv_fifo_.empty()) {
-			std::vector<uint8_t> dg = std::move(recv_fifo_.front());
-			recv_fifo_.pop_front();
-			JoinerConnection::PollResult pr = joiner_->handle_datagram(dg.data(), dg.size());
-			// A 0x84's rebuilt packets and a 0x85's pong are written to the socket by
-			// their opcode handlers, inside this receive pump: they leave at this
-			// datagram's position, ahead of (and regardless of) the field-3 gate below
-			// [orig: NapiNP_HandleResendList -> CNapiNPConnection_SendSessionPacket
-			//  @0x6239b6; Nwu_HandlePing -> CNapiNPConnection_SendPing @0x623c6f].
-			for (std::vector<uint8_t> &sent_now : pr.immediate_outbound)
-				outbound.push_back(std::move(sent_now));
-			// A 0x84 resend list that named a sequence is the outgoing link
-			// error, at its datagram's position [orig: NapiNP_HandleResendList
-			// @0x6239ef..0x623a37 -> cb_client_3 = Network_LogOutgoingPacketError
-			// @0x4c4920 -> flag 1].
+		// A remote joiner: the client pump over what the manager receive (0) queued, one packet
+		// per poll: JoinerConnection decodes the 0x83 SESSION envelope and surfaces the inner
+		// bodies, which we fold via ClientReplicaPipeline::apply (the single remote-wire fold
+		// path; pump(transport) is the loopback path — exactly one is active per role); then the
+		// ordered successors this frame's packets made ready, one poll each.
+		// [orig: CNapiNetwork_PumpClientProtocolRecv @0x4C4FE0 -> NapiNPProtocol_PumpRecvQueues
+		//  @0x6266A0 - the queue_mask & 2 leg @0x6267F2..0x6268D5, the connection walk
+		//  @0x626910..0x6269E8]
+		for (;;) {
+			JoinerConnection::PollResult pr;
+			if (!joiner_->pump_client_queue(pr)) break;
 			apply_net_quality_link_errors(joiner_->take_net_quality_link_errors());
 			if (joiner_->session_lost()) {
 				// Host teardown sends its keyed goodbye burst synchronously, then
 				// destroys both pending and outgoing semantic queues. It does not
 				// wait for the normal field-3 send boundary, and nothing queued
 				// before or after the terminal record may follow the goodbyes
-				// (what earlier datagrams of this pump already wrote stays sent).
-				// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 ->
-				//  NapiNPDSPQueue_ClearPendingList @0x62556B;
-				//  NapiNPDSPQueue_ClearOutgoing @0x625574]
+				// (what the manager receive already wrote stays sent). The burst's
+				// NET SENDING lines and the leave's line are written here, before the
+				// client pump reads the packets still queued (their NET GOT alone).
+				// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the
+				//  burst @0x6254B4..0x6254D3, the leave callback @0x6254D5..0x6254E7,
+				//  NapiNPDSPQueue_ClearPendingList @0x62556B,
+				//  NapiNPDSPQueue_ClearOutgoing @0x625574; NapiNPProtocol_PumpRecvQueues
+				//  @0x6266A0 - NapiLog_OnRecv @0x6268AA]
 				recv_fifo_.clear();
 				framed_send_queue_.clear();
 				send_queue_.clear();
 				pending_reload_notifications_.clear();
-				for (std::vector<uint8_t> &goodbye : pr.outbound)
+				for (std::vector<uint8_t> &goodbye : pr.outbound) {
+					joiner_->connect_log_send(goodbye);
 					outbound.push_back(std::move(goodbye));
+					++receive_sends_logged_;
+				}
+				log_client_leave();
+				receive_leave_logged_ = true;
+				joiner_->drain_client_queue_after_teardown();
 				return outbound;
 			}
 			// 0x08/0x7B update the reducer's layout at their wire position.

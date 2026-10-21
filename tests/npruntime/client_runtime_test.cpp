@@ -6228,8 +6228,9 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 // NEW-L8-8's joiner half: the client's S2C 0x61 (the session key) closes the connect
 // log while it is on: its "<time> : NET CLIENT DISABLING CONNECTLOG ..." line, then off
 // for the process; a later 0x61 writes nothing. The packet carrying it writes its client
-// lines first: the client queue's NET GOT, then the parse's NET PROCESSING at the head of
-// ParseMessages, ahead of the messages it dispatches (D-NET-NEW-L8-8's joiner half, s10).
+// lines first: the manager receive's RAW, COOKED and PROTOCOL (L2-s12), the client queue's
+// NET GOT, then the parse's NET PROCESSING at the head of ParseMessages, ahead of the messages
+// it dispatches (D-NET-NEW-L8-8's joiner half, s10).
 // [orig: NapiNPClientMsg_HandleTickSeed @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
 //  @0x4297F1, the text @0x7C5398, the append @0x429831, the clear @0x42983E;
 //  NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv @0x6268AA;
@@ -6260,11 +6261,14 @@ bool run_the_session_key_closes_the_connect_log() {
 			w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	uint32_t tick = 1;
-	// The packet's length with its opcode byte, as the client lines print it.
+	// The packet's length with its opcode byte, as the client lines print it, and the
+	// datagram's as the socket hands it over (the manager's RAW).
 	int32_t packet_bytes = 0;
+	std::size_t raw_bytes = 0;
 	const auto session_key = [&] {
 		const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
 				{make_protocol_message(s2c::TICK_SEED, {0x10, 0x00, 0x00, 0x00})});
+		raw_bytes = dg.size();
 		std::vector<uint8_t> unpacked;
 		packet_bytes = nw_unpack_inbound(dg.data(), dg.size(), unpacked)
 				? static_cast<int32_t>(unpacked.size())
@@ -6276,6 +6280,9 @@ bool run_the_session_key_closes_the_connect_log() {
 	session_key();
 	const std::string &text = files.files[inmatch::kConnectLogFile];
 	const std::string want =
+			"T : " + inmatch::napi_got_raw_text(static_cast<int32_t>(raw_bytes), PeerAddr{}) +
+			"\r\n" + "T : " + inmatch::napi_got_cooked_text(packet_bytes, PeerAddr{}) + "\r\n" +
+			"T : " + inmatch::napi_got_protocol_text(packet_bytes, PeerAddr{}, kJo.pn) + "\r\n" +
 			"T : " + inmatch::net_got_text(packet_bytes, PeerAddr{}, 0x83) + "\r\n" +
 			"T : " + inmatch::net_processing_text(packet_bytes, PeerAddr{}) + "\r\n" +
 			"T : NET CLIENT DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.\r\n";

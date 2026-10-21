@@ -1119,9 +1119,21 @@ private:
 	std::vector<std::vector<uint8_t>> run_frame(
 			const UplinkBuilder *build_uplink, uint32_t now_tick);
 	// A joiner's datagrams as they leave, their connect-log lines written (NET SENDING each,
-	// then NET DISCONNECTING when the call ended the session that was up at its start).
+	// then NET DISCONNECTING when the call ended the session that was up at its start), past
+	// the lines the frame's receive already wrote (receive_sends_logged_ /
+	// receive_leave_logged_, consumed here).
 	std::vector<std::vector<uint8_t>> log_client_sends(
-			std::vector<std::vector<uint8_t>> datagrams, bool session_lost_before) const;
+			std::vector<std::vector<uint8_t>> datagrams, bool session_lost_before);
+	// The connection's leave callback line, NET DISCONNECTING FROM SERVER with its record.
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the leave callback
+	//  @0x6254D5..0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the line
+	//  @0x4C6421..0x4C6486]
+	void log_client_leave() const;
+	// How many leading datagrams of the frame's outbound the receive wrote its NET SENDING
+	// lines for (the manager receive's 0x84 / 0x85 sends, a client-pump teardown's burst), and
+	// whether that teardown wrote the leave line; log_client_sends consumes both.
+	std::size_t receive_sends_logged_ = 0;
+	bool receive_leave_logged_ = false;
 	devtools::TickProfile *profile_ = nullptr;
 	void stage_reload_notifications_before_body_tick();
 	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);
@@ -1177,7 +1189,7 @@ private:
 	// their retail grouping. They still belong to PumpClientProtocolSend, so hold the already-framed
 	// datagrams behind the same field-3 gate and flush them before any later sequence allocated at
 	// the open boundary. (A 0x84 reconstruction and a 0x45 pong are not held: retail transmits them
-	// from the receive pump, PollResult::immediate_outbound.)
+	// from the manager receive, JoinerConnection::ManagerPass::immediate_outbound.)
 	std::deque<std::vector<uint8_t>> framed_send_queue_;
 	// The connection's one C2S queue: every producer (the 0x34 keepalive, the receive handlers'
 	// replies, the 0x4C report, the input-side one-shots, the deploy pick, the loadout

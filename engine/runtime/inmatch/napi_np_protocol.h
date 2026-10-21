@@ -125,6 +125,16 @@ struct TickOut {
 	std::vector<HostAcceptEvent> events;
 };
 
+// The NAPI manager receive's two set-asides, shared by the host's and the joiner's receive:
+// PunkBuster's datagrams (0xFF, then the "\xFF\xFF\xFFPB_" prefix case-insensitively, more than 7
+// bytes), handed to the PunkBuster handler unpacked with no packet line after RAW (ours runs no
+// PunkBuster leg, D-NET-171) [orig: NapiNPManager_PumpReceive @0x6231A7..0x6231D9; the prefix
+// byte_7DFE30]; and the NAT magic ("baffle") packet, the unpacked words 0x1071 and '0', 48 bytes
+// or more [orig: NapiNPManager_HandlePacket @0x622F1B..0x622F36; NapiNP_HandleMagicPacket
+// @0x622E70].
+bool napi_punkbuster_datagram(const uint8_t *raw, std::size_t len);
+bool napi_baffle_packet(const std::vector<uint8_t> &unpacked);
+
 // Decode + dispatch one raw inbound datagram from `peer` (the bytes off the socket, envelope+NWU
 // still on). `now_tick` feeds the game-session tag clock. Returns the outbound datagrams to ship
 // back + events to react to. [orig: CNapiNPConnection_ParseMessages @0x625BC0 / the accept switch]

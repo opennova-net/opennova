@@ -19,6 +19,7 @@
 #include <base/vfs/vfs.h>
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 #include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the connect start's clear)
+#include <runtime/inmatch/napi_np_protocol.h> // the manager receive's set-asides
 
 #include <algorithm>
 #include <chrono>
@@ -513,9 +514,97 @@ const char *joiner_phase_name(JoinerConnection::Phase phase) {
 }
 } // namespace
 
-JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *raw, std::size_t len) {
+namespace {
+// The S2C probe, the last row of the manager's opcode table: taken while the protocol finds
+// the type-2 connection for the sender, nothing else [orig: g_NPOpcodeHandlers @0x849D90 row 13;
+// Nwu_HandleServerProbe @0x624340 - @0x62434E].
+constexpr uint8_t kServerProbeOpcode = 0x87;
+} // namespace
+
+JoinerConnection::ManagerPass JoinerConnection::manager_receive(const uint8_t *raw, std::size_t len) {
+	ManagerPass out;
+	if (raw == nullptr || len == 0 || session_lost() || phase_ == Phase::Error) return out;
+	connect_log_line(napi_got_raw_text(static_cast<int32_t>(len), host_address_));
+	if (napi_punkbuster_datagram(raw, len)) return out;
+	std::vector<uint8_t> unpacked;
+	if (!nw_unpack_inbound(raw, len, unpacked)) {
+		connect_log_line(napi_tossed_text(static_cast<int32_t>(len), host_address_,
+				NapiTossReason::Unpack));
+		return out; // bad envelope: dropped, the session goes on
+	}
+	const int32_t unpacked_len = static_cast<int32_t>(unpacked.size());
+	connect_log_line(napi_got_cooked_text(unpacked_len, host_address_));
+	// The magic packet goes to its reflection, which answers only for a protocol whose
+	// reflection the session create armed: a host's, never a joiner's. No dispatch line follows.
+	// [orig: NapiNPManager_HandlePacket @0x622F10 - @0x622F53, the call @0x622F62;
+	//  NapiNP_HandleMagicPacket @0x622E70 - the reflection test @0x622EA6]
+	if (napi_baffle_packet(unpacked)) {
+		connect_log_line(napi_got_baffle_text(unpacked_len, host_address_));
+		return out;
+	}
+	// The socket legs. The type-2 connection to the host exists from the join's start; it is
+	// active (conn_flag0) from the accepted 0x82. A 0x83 or a 0x86 is queued once its leading
+	// dword is this connection's key, active or not (the queued leg tests the active byte);
+	// the 0x84 and the 0x85 need the active connection and act here; a 0x81 and a 0x82 are
+	// queued past their own gates (server_hello_queues, server_auth_queues). The client
+	// opcodes' handlers find no server-side connection on a joiner.
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - FindConnection(2) @0x626AC5, the
+	//  socket leg's gates @0x626B01 (conn_flag0 only when queued), the key @0x626B72, the
+	//  queue @0x626CB0 (pool_server; the type-1 twin @0x626C8C); Nwu_HandleDisconnect @0x623CE0 - the
+	//  gates @0x623DF2, the key @0x623E74, the queue @0x624149 (the type-1 twin @0x624125);
+	//  NapiNP_HandleResendList @0x623800 - @0x6238EA, the key @0x623959, return 1 @0x623974 /
+	//  @0x623A45; Nwu_HandlePing @0x623A70 - @0x623B55, the key @0x623BC2, return 1 @0x623CAA]
+	bool taken = false;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (nw_split_unpacked(unpacked, opcode, body)) {
+		const bool connection = phase_ != Phase::Idle;
+		const bool active = phase_ == Phase::Driving || phase_ == Phase::InMatch;
+		const bool keyed = body.size() >= 4 && io::read_u32_le(body.data()) == client_key_;
+		bool queue = false;
+		switch (opcode) {
+		case SESSION_OPCODE_SERVER_HELLO:
+			queue = server_hello_queues(body);
+			break;
+		case SESSION_OPCODE_SERVER_AUTH:
+			queue = server_auth_queues(body);
+			break;
+		case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
+		case SESSION_OPCODE_SERVER_GOODBYE:
+			queue = connection && keyed;
+			break;
+		case SESSION_OPCODE_SERVER_RESEND_LIST:
+			taken = active && on_server_resend_list(body, out.immediate_outbound);
+			break;
+		case SESSION_OPCODE_SERVER_PING:
+			taken = active && on_server_ping(body, out.immediate_outbound);
+			break;
+		case kServerProbeOpcode:
+			taken = connection;
+			break;
+		default:
+			break; // the client opcodes and every unknown one: no handler takes it
+		}
+		if (queue) {
+			client_queue_.push_back(QueuedPacket{opcode, std::move(body)});
+			taken = true;
+		}
+	}
+	// The sends the handler wrote from inside this receive write their NET SENDING lines
+	// there, ahead of the dispatch's line [orig: CNapiNPConnection_SendSessionPacket
+	//  @0x61EE00 - NapiLog_OnSend (the call @0x61F00D); CNapiNPConnection_SendPing @0x61F080 -
+	//  @0x61F241; NapiNPManager_HandlePacket @0x622FCD after DispatchOpcode returned].
+	for (const std::vector<uint8_t> &sent : out.immediate_outbound) connect_log_send(sent);
+	connect_log_line(taken
+			? napi_got_protocol_text(unpacked_len, host_address_,
+					title_ != nullptr && title_->pn != nullptr ? title_->pn : "")
+			: napi_tossed_text(unpacked_len, host_address_, NapiTossReason::NoProtocol));
+	return out;
+}
+
+bool JoinerConnection::pump_client_queue(PollResult &out) {
 	// Diagnostic transition trace, emitted on every exit path: one kInfo line
-	// per phase/admission-stage change per datagram, plus the authoritative
+	// per phase/admission-stage change per packet, plus the authoritative
 	// 0x7B mission identity the moment it is learned. The sink is silent unless
 	// an embedder installed one (io/log.h), so live joins pay one branch here.
 	struct TransitionTrace {
@@ -538,53 +627,102 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 		}
 	} transition_trace{*this, phase_, post_auth_stage_, mission_known_};
 
-	PollResult out;
-	if (session_lost() || phase_ == Phase::Error) return out;
-	uint8_t opcode = 0;
-	std::vector<uint8_t> body;
-	if (!nw_decode_inbound(raw, len, opcode, body)) {
-		return out; // bad envelope — drop quietly, don't kill the session
+	if (session_lost()) {
+		drain_client_queue_after_teardown();
+		return false;
 	}
-	// The reap clock is NOT a per-datagram stamp: only an in-order admitted 0x83 (inside
-	// on_server_session) refreshes it, exactly retail's ParseMessages-only write; a 0x84
-	// resend list, a stale/other-key 0x83 and every ignored opcode leave it alone.
-	// [orig: HandleSessionPacket @0x626A00 in-order leg -> ParseMessages @0x625d54;
-	//  NapiNP_HandleResendList @0x62395f discards its GetTickCount; 0x81/0x82 stamp nothing]
-	switch (opcode) {
+	if (client_queue_.empty()) {
+		// The connection walk: the queued successor whose gap this frame closed, one parse
+		// each (the walk's own head test, against the connection's ACK as it now stands).
+		// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the walk @0x626910..0x6269E8, the
+		//  type mask @0x626939, the head test @0x626960, CNapiNPConnection_ParseMessages
+		//  @0x62696B]
+		if (phase_ != Phase::Driving && phase_ != Phase::InMatch) return false;
+		SessionDeframeAdmission admission;
+		if (!take_ready_session_packet(conn_.seq, admission)) return false;
+		const SessionDeframeAdmission::Packet &packet = admission.packets.front();
+		process_session_admission(packet.header, packet.messages, admission, out);
+		return true;
+	}
+	QueuedPacket packet = std::move(client_queue_.front());
+	client_queue_.pop_front();
+	// The client queue's receive callback for every packet the pump reads, then the handler's
+	// queued leg, which repeats its gates against the connection as it now stands (an earlier
+	// packet of this pump may have changed it).
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - pre_handler_callback2 (proto +0x26C,
+	//  NapiLog_OnRecv @0x4C46B0) @0x6268AA, the handler with its last argument 1 @0x6268D0]
+	connect_log_line(net_got_text(static_cast<int32_t>(packet.body.size() + 1), host_address_,
+			packet.opcode));
+	if (phase_ == Phase::Error) return true;
+	switch (packet.opcode) {
 	case SESSION_OPCODE_SERVER_HELLO:
 		// The enumerate reads 0x81s until one records the session; the loop then exits and
 		// reads nothing more before the join's connect state (D-NET-NEW-L2-25).
-		if (phase_ == Phase::Hello && !enumerated_session_recorded_) on_server_hello(body, out);
+		if (phase_ == Phase::Hello && !enumerated_session_recorded_) on_server_hello(packet.body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
-		if (phase_ == Phase::Auth) on_server_auth(body, out);
+		if (phase_ == Phase::Auth) on_server_auth(packet.body, out);
 		break;
 	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
-		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_session(body, out);
-		break;
-	case SESSION_OPCODE_SERVER_RESEND_LIST:
-		if (phase_ == Phase::Driving || phase_ == Phase::InMatch)
-			on_server_resend_list(body, out);
+		// The queued leg needs the active connection; a 0x83 queued ahead of the accepted 0x82
+		// returns here [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - `has_seq &&
+		//  !conn_flag0` @0x626B01].
+		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_session(packet.body, out);
 		break;
 	case SESSION_OPCODE_SERVER_GOODBYE:
 		// Dispatched only for an ACTIVE connection (retail: `is_response && !conn_flag0` drops
 		// it; our Driving/InMatch phases are the accepted-0x82 state 5).
 		// [orig: g_NPOpcodeHandlers @0x849D90 entry 12 -> Nwu_HandleServerGoodbye @0x624310
 		//  -> Nwu_HandleDisconnect(type 2) @0x623CE0, the active gate @0x623df2]
-		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_goodbye(body, out);
-		break;
-	case SESSION_OPCODE_SERVER_PING:
-		// The outer connection ping rides the same active-connection gate as
-		// the goodbye (retail resolves the type-2 connection and drops the
-		// datagram unless conn_flag0 is set) [orig: g_NPOpcodeHandlers
-		// @0x849D90 entry 11 -> Nwu_HandleServerPing @0x6242E0 ->
-		// Nwu_HandlePing @0x623A70, the FindConnection + conn_flag0 gate].
-		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_ping(body, out);
+		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_goodbye(packet.body, out);
 		break;
 	default:
-		break; // server-only / unexpected opcodes are non-fatal
+		break;
+	}
+	return true;
+}
+
+void JoinerConnection::drain_client_queue_after_teardown() {
+	while (!client_queue_.empty()) {
+		const QueuedPacket &packet = client_queue_.front();
+		connect_log_line(net_got_text(static_cast<int32_t>(packet.body.size() + 1),
+				host_address_, packet.opcode));
+		client_queue_.pop_front();
+	}
+}
+
+JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *raw, std::size_t len) {
+	PollResult out;
+	ManagerPass manager = manager_receive(raw, len);
+	out.immediate_outbound = std::move(manager.immediate_outbound);
+	while (pump_client_queue(out)) {
 	}
 	return out;
+}
+
+bool JoinerConnection::server_hello_queues(const std::vector<uint8_t> &body) const {
+	// The enumerator reads 0x81s while it probes: from the enumerate's start until a reply
+	// records the session (D-NET-NEW-L2-25). Any 0x81 is read (no field is required), then
+	// its CI must name this connection and the host's identity block must be the title's.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the size bound @0x626DC9, the enumerator
+	//  @0x627547..0x62755C, the CI lookup @0x627533, the identity compares @0x62758B /
+	//  @0x627624 / @0x627643, the queue @0x627F45, the return @0x627F4A..0x627F5A]
+	if (phase_ != Phase::Hello || enumerated_session_recorded_) return false;
+	ServerHello sh;
+	if (!parse_server_hello(body.data(), body.size(), sh)) return false;
+	if (title_ == nullptr || sh.ci != client_index_) return false;
+	return server_hello_matches_identity(sh, make_title_client_hello(*title_, client_index_));
+}
+
+bool JoinerConnection::server_auth_queues(const std::vector<uint8_t> &body) const {
+	// The connecting connection (state 3) reads any 0x82 whose TLV walk stays inside its CU
+	// bounds, then queues it once CI and CK name this connection.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - FindConnection(2) and state 3
+	//  @0x6298E0..0x629901, the CI / CK match @0x629CBF, the queue @0x629F01, return 1 @0x629F9D]
+	if (phase_ != Phase::Auth) return false;
+	ServerAuth sa;
+	if (!parse_server_auth(body.data(), body.size(), sa)) return false;
+	return sa.ci == client_index_ && sa.ck == client_key_;
 }
 
 void JoinerConnection::on_server_hello(
@@ -599,18 +737,16 @@ void JoinerConnection::on_server_hello(
 	//  @0x62758B / @0x627624 / @0x627643]
 	if (title_ == nullptr || sh.ci != client_index_) return;
 	if (!server_hello_matches_identity(sh, make_title_client_hello(*title_, client_index_))) return;
-	// The connect log's client callbacks (while it is on): the packet the handler queued is
-	// read by the protocol's client pump, NET GOT; its second pass records the enumerated
-	// session, whose discovered callback (the enumerate's own, installed by
-	// InitTransportConnection) writes NET SESSION DISCOVERED with the record's SN.
+	// The connect log's client callbacks (while it is on): after the client pump's NET GOT
+	// (pump_client_queue), the queued leg records the enumerated session, whose discovered
+	// callback (the enumerate's own, installed by InitTransportConnection) writes NET SESSION
+	// DISCOVERED with the record's SN.
 	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627541, the identity compares
 	//  @0x62758B.., the queue @0x627F45; NapiNPProtocol_PumpRecvQueues @0x6266A0 - the client
 	//  queue's NapiLog_OnRecv (proto+0x26C) @0x6268AA; NapiLog_OnRecv @0x4C46B0; the record's
 	//  SN @0x627775, the callback test @0x6278D7; CNapiNetwork_OnSessionDiscovered @0x4C8470
 	//  (the line @0x4C8631); CNapiGameSession_InitTransportConnection @0x4C9E10 - the install
 	//  @0x4C9FCB]
-	connect_log_line(net_got_text(static_cast<int32_t>(body.size() + 1), host_address_,
-			SESSION_OPCODE_SERVER_HELLO));
 	connect_log_line(net_session_discovered_text(host_address_, sh.sn.substr(0, 63)));
 	// An absent HK reads 0, and the 0x42 then omits it. [orig: Nwu_HandleServerHello @0x626D20 -
 	//  HK @0x626E97; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK gate @0x6200F2]
@@ -645,6 +781,23 @@ uint32_t JoinerConnection::client_net_frame_counter() { return g_client_net_fram
 
 void JoinerConnection::connect_log_line(const std::string &text) const {
 	if (connect_log_ != nullptr && connect_log_->enabled()) connect_log_->line(text);
+}
+
+void JoinerConnection::connect_log_send(const std::vector<uint8_t> &datagram) const {
+	if (connect_log_ == nullptr || !connect_log_->enabled()) return;
+	std::vector<uint8_t> unpacked;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (!nw_unpack_inbound(datagram.data(), datagram.size(), unpacked) ||
+			!nw_split_unpacked(unpacked, opcode, body))
+		return;
+	int32_t packet = 0;
+	ProtocolPacketHeader header;
+	if (opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
+			parse_protocol_packet_header(body.data(), body.size(), header))
+		packet = static_cast<int32_t>(header.seq_num);
+	connect_log_->line(net_sending_text(static_cast<int32_t>(unpacked.size()), host_address_,
+			opcode, packet));
 }
 
 void JoinerConnection::step_client_net_frame_counter() { ++g_client_net_frame_counter; }
@@ -704,11 +857,6 @@ void JoinerConnection::on_server_auth(
 	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
 	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
 	if (sa.ci != client_index_ || sa.ck != client_key_) return;
-	// The connect log's NET GOT for the queued 0x82 [orig: NapiNP_HandleServerJoinResponse
-	//  @0x629840 - the CI / CK match @0x629CBF ahead of the queue @0x629F01;
-	//  NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv @0x6268AA].
-	connect_log_line(net_got_text(static_cast<int32_t>(body.size() + 1), host_address_,
-			SESSION_OPCODE_SERVER_AUTH));
 	if (sa.cr == 0) {
 		// A CR=0 0x82 carries the NP-layer failure family in JFC (1 when absent) and, for the
 		// validate-callback family (JFC=14), the sub-reason in JFP. Spectator
@@ -964,25 +1112,32 @@ void JoinerConnection::apply_self_spawn(uint16_t handle, bool has_body, uint32_t
 }
 
 void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollResult &out) {
-	// The connect log: the handler queues a packet whose first dword is this connection's key
-	// (the protocol's client pump then writes NET GOT), and every packet the in-order parse
-	// takes writes NET PROCESSING with the parse's length plus its opcode byte.
-	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the key test @0x626B72, the queue
-	//  @0x626C8C; NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv @0x6268AA;
-	//  CNapiNPConnection_ParseMessages @0x625BC0 - NapiLog_OnProcess (proto+0x274, len + 1)
-	//  @0x625D3E; NapiLog_OnProcess @0x4C67D0]
-	if (body.size() >= 4 && io::read_u32_le(body.data()) == client_key_)
-		connect_log_line(net_got_text(static_cast<int32_t>(body.size() + 1), host_address_,
-				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE));
-	// Joiner recv: decrypt inbound 0x83 with the server's SCRK; deframe latches conn_.seq.last_inbound_seq.
+	// The 0x83's queued leg: decrypt with the server's SCRK; an in-order packet is parsed alone,
+	// a future one waits on the ordered queue for the client pump's connection walk, which
+	// parses each successor its gap closing made ready after every queued packet of the pump
+	// (pump_client_queue).
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the in-order parse @0x626BEB..
+	//  0x626BFC, the future's insert @0x626C32; NapiNPProtocol_PumpRecvQueues @0x6266A0 - the
+	//  walk @0x626910..0x6269E8]
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> messages;
 	SessionDeframeAdmission admission;
 	if (!deframe_session_packet(
 			conn_.seq, SessionCrypto{{}, conn_.server_scrk, 0, client_key_}, body.data(),
-	                            body.size(), hdr, messages, &admission)) {
+	                            body.size(), hdr, messages, &admission,
+	                            /*drain_queued_successors=*/false)) {
 		return; // lenient: an in-match streaming packet we can't parse is not fatal
 	}
+	process_session_admission(hdr, std::move(messages), admission, out);
+}
+
+void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr,
+		std::vector<ProtocolMessage> messages, const SessionDeframeAdmission &admission,
+		PollResult &out) {
+	// The connect log: every packet the parse takes writes NET PROCESSING with the parse's
+	// length plus its opcode byte.
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - NapiLog_OnProcess (proto+0x274,
+	//  len + 1) @0x625D3E; NapiLog_OnProcess @0x4C67D0]
 	for (const SessionDeframeAdmission::Packet &packet : admission.packets)
 		connect_log_line(net_processing_text(
 				static_cast<int32_t>(packet.body_bytes + 1), host_address_));
@@ -2161,12 +2316,12 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		session_ack_pending_ = true;
 }
 
-void JoinerConnection::on_server_resend_list(
-		const std::vector<uint8_t> &body, PollResult &out) {
+bool JoinerConnection::on_server_resend_list(
+		const std::vector<uint8_t> &body, std::vector<std::vector<uint8_t>> &immediate_outbound) {
 	std::vector<uint32_t> requested;
 	if (!decode_session_resend_list(
 			body.data(), body.size(), client_key_, requested)) {
-		return;
+		return false;
 	}
 	// A list that named a sequence fires the outgoing link-error callback
 	// after the resends [orig: NapiNP_HandleResendList @0x6239aa latches it on
@@ -2186,8 +2341,9 @@ void JoinerConnection::on_server_resend_list(
 				? conn_.seq.next_outbound_seq
 				: requested_sequence;
 		std::vector<uint8_t> datagram = frame_retained_session(sequence);
-		if (!datagram.empty()) out.immediate_outbound.push_back(std::move(datagram));
+		if (!datagram.empty()) immediate_outbound.push_back(std::move(datagram));
 	}
+	return true;
 }
 
 void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
