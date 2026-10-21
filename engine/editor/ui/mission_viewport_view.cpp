@@ -382,23 +382,30 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		put_brush_down();
 		options.tool = !brushing && tool == chosen ? MissionTool::Select : chosen;
 	};
-	// Each tool's tooltip its verb and key: the line under the picture says what a click does with it.
-	if (lit_tool(row, "Select", !brushing && tool == MissionTool::Select, true, "Select and move marks (Esc).")) {
+	// Each tool's tooltip how to use it: the line under the picture says what it does now, and its keys.
+	if (lit_tool(row, "Select", !brushing && tool == MissionTool::Select, true,
+				"Select marks and move them (Esc): Shift adds, Ctrl toggles, Alt-drag copies, a drag on nothing boxes. "
+				"The arrows nudge the selection (Shift finer), PgUp and PgDn raise it, Ctrl+D duplicates it.")) {
 		put_brush_down();
 		options.tool = MissionTool::Select;
 	}
 	if (lit_tool(row, "Place", !brushing && tool == MissionTool::Place, edits,
-				edits ? "Place the palette's items (Esc stops)." : held))
+				edits ? "Place the palette's items: a click on the ground places one facing the way the camera looks, "
+						"the item kept for the next; or drag one onto the picture (Esc stops)."
+					  : held))
 		pick(MissionTool::Place);
 	if (lit_tool(row, "Path stops", !brushing && tool == MissionTool::Path, edits,
-				edits ? "Add a waypoint path's stops (Esc stops)." : held))
+				edits ? "Add a waypoint path's stops: a click on the ground adds its next (a marker the path visits), a "
+						"click on its line one between two (Esc stops)."
+					  : held))
 		pick(MissionTool::Path);
 	if (lit_tool(row, "Area", !brushing && tool == MissionTool::Area, edits,
-				edits ? "Drag an area trigger on the ground (Esc stops)." : held))
+				edits ? "Drag a box on the ground to make an area trigger over it (Esc stops)." : held))
 		pick(MissionTool::Area);
 	// Shoot (DI-23) edits nothing: a held mission takes it too.
 	if (lit_tool(row, "Shoot", !brushing && tool == MissionTool::Shoot, true,
-				"Fire an ammo where you click, as the game plays its impact (Esc stops)."))
+				"Fire the ammo picked where you click the terrain or an object: its impact plays as the game plays it, "
+				"its effect, its sound and its scar, the object's damage (Esc stops)."))
 		pick(MissionTool::Shoot);
 	// A step of the options (the snap, the turn) picked from its list; one the wire set off the list shown as
 	// its value.
@@ -454,7 +461,8 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		}
 	}
 	if (ui_kit::tool(row, "Frame", true, "Look at the selected records, or at every entity (F, or a double click on "
-										 "the picture)."))
+										 "the picture). The right button looks (W A S D Q E fly), the middle pans, the "
+										 "wheel zooms."))
 		viewport_command(workspace, mission, "frame");
 	if (ui_kit::tool(row, "Top", true, "Look straight down over the camera's target, north up."))
 		viewport_command(workspace, mission, "top");

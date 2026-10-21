@@ -9,8 +9,9 @@
 
 namespace opennova::editor {
 
-// What the line under the mission's picture says (the canvas's hint): what the current tool does and
-// what a click or a drag on the picture does now, in a modder's words, the keys that reach the rest.
+// What the line under the mission's picture says (the canvas's hint): what the current tool does now, a click
+// or a drag on the picture, and its keys, in a modder's words and in one line (the rest of the how-to is the
+// tools' tooltips).
 struct MissionHintInput {
 	MissionTool tool = MissionTool::Select;
 	std::string item; // the item Place places, by its name ("" none picked)
