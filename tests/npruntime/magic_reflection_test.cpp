@@ -94,9 +94,10 @@ uint32_t draw_at(int index, io::CrtRand &stream) {
 void test_create_arms_a_novaworld_authority() {
 	const auto nw = create(inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::NovaWorldSocket,
 			inmatch::NetworkType::NovaWorld);
-	// The stream: the slot table's draw (0), the listing key's (1), the magic key's (2).
+	// The stream: the slot table's draw (0), the listing key's (1), the cookie-key ring's init (2,
+	// D-NET-NEW-L9-13: CSessionIdRing_Init's one rand @0x4DBC45 after the key @0x51CB6D), the magic key's (3).
 	io::CrtRand stream;
-	const uint32_t draw = draw_at(2, stream);
+	const uint32_t draw = draw_at(3, stream);
 	CHECK(nw->ctx->np_protocol.magic_reflect == 1);
 	CHECK(nw->ctx->np_protocol.magic_key == (kStartTick + draw) % 0xDBBA0u + 0x186A0u);
 	CHECK(nw->ctx->np_protocol.magic_key >= 100000u && nw->ctx->np_protocol.magic_key <= 999999u);
@@ -106,7 +107,8 @@ void test_create_arms_a_novaworld_authority() {
 	CHECK(nw->ctx->game_server_baffle_key ==
 			(kStartTick + draw_at(1, listing)) % 0xDBBA0u + 0x186A0u);
 
-	// A LAN host and a single player arm nothing and spend no draw past the round init's.
+	// A LAN host and a single player arm nothing and spend no draw past the round init's two (the
+	// listing key and the ring's init).
 	const std::unique_ptr<Created> others[2] = {
 			create(inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 					inmatch::NetworkType::Lan),
@@ -114,7 +116,7 @@ void test_create_arms_a_novaworld_authority() {
 					inmatch::NetworkType::Lan)};
 	for (const std::unique_ptr<Created> &other : others) {
 		io::CrtRand after_init;
-		(void)draw_at(1, after_init);
+		(void)draw_at(2, after_init);
 		CHECK(other->ctx->np_protocol.magic_reflect == 0);
 		CHECK(other->ctx->np_protocol.magic_key == 0);
 		CHECK(other->world->crt_rand.state == after_init.state);
