@@ -1958,8 +1958,11 @@ func _process(delta: float) -> void:
 	# tick]); session loads never splash, so the joiner pump is untouched.
 	if _world_load.is_splash_active():
 		return
-	if _state == State.PAUSED and not _world.is_net_session():
-		return
+	# The single-player pause menu still runs every frame: the engine session's Paused
+	# state holds the tick, and the paused frame's own legs (the main-frame counter, the
+	# weather tick ahead of the pause test, the cine pass and the HUD radar) run through
+	# the session's paused branch exactly as under the debug pause row
+	# (engine inmatch::Session::step_paused_frame_counters carries the witness).
 	# A joiner's mission start owes its input reset once its game-start wait
 	# ends (engine inmatch::ClientRuntime::take_input_reset).
 	var reset_sim: Simulation = _world.get_sim()

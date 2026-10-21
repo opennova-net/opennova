@@ -1214,6 +1214,18 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 			"the overlay is the in-game menu file")
 	assert_true(bool(snapshot["in_game"]),
 			"the shell marks the overlay as the in-game menu")
+	# The pause menu's frames still run the session's paused branch: the main-frame
+	# counter steps on every banked frame while the pause holds the session counter
+	# (engine inmatch::Session::step_paused_frame_counters carries the witness, the
+	# weather tick beside it, D-NET-NEW-L5-7).
+	var paused_sim: Simulation = world.get_sim()
+	var menu_main0: int = paused_sim.get_main_frame_counter()
+	var menu_session0: int = paused_sim.get_session_frame_counter()
+	await get_tree().create_timer(0.25).timeout
+	assert_gt(paused_sim.get_main_frame_counter(), menu_main0,
+			"the in-game menu's frames step the main-frame counter")
+	assert_eq(paused_sim.get_session_frame_counter(), menu_session0,
+			"the in-game menu's pause holds the session counter")
 	assert_eq(adapter.mcp_game_control("open_ingame_menu"), OK,
 			"open is idempotent while already paused")
 	assert_eq(adapter.mcp_game_control("open_armory"), ERR_UNAVAILABLE,
@@ -1240,6 +1252,21 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 	state = adapter.get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "world",
 			"resume closes the armory and hands play back")
+
+	# The debug pause row pauses the session under the WORLD shell state: the same
+	# paused branch runs on its frames.
+	assert_eq(adapter.mcp_game_control("pause"), OK)
+	assert_eq(String(adapter.get_mcp_game_state()["shell"]["state"]), "world",
+			"the pause row keeps the shell in the world")
+	var row_sim: Simulation = world.get_sim()
+	var row_main0: int = row_sim.get_main_frame_counter()
+	var row_session0: int = row_sim.get_session_frame_counter()
+	await get_tree().create_timer(0.25).timeout
+	assert_gt(row_sim.get_main_frame_counter(), row_main0,
+			"the pause row's frames step the main-frame counter")
+	assert_eq(row_sim.get_session_frame_counter(), row_session0,
+			"the pause row holds the session counter")
+	assert_eq(adapter.mcp_game_control("resume"), OK)
 
 	# F3's Resume is the debug-control table's runtime_transport row: it takes
 	# the same shell resume leg, so a pause overlay left up closes too.
