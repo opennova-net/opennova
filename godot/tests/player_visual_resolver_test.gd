@@ -133,9 +133,21 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 # [orig: NetPacket_SerializePlayerState @0x4C09C0 - the call @0x4C129D, the def /
 #  model stores @0x4C12B8..0x4C12D6] (D-NET-348).
 func test_runtime_player_type_resolves_to_its_own_row() -> void:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/terrain/tmap")), OK)
-	var placer := MissionObjectPlacer.create(root, null)
+	# Both player rows as the shipped table authors them (the Tmap fixture carries
+	# only the single player's, so the with-Tmap rigs keep a def-less body).
+	var tmp := ProjectSettings.globalize_path(
+			"user://player_rows_%d.def" % Time.get_ticks_usec())
+	var file := FileAccess.open(tmp, FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_string(TestFs.crlf(
+			"begin \"Player #1, Single player\"\n  id 105310\n  type person\n"
+			+ "  graphic US01\n  anim_def US01\nend\n"
+			+ "begin \"Player #1, Multiplayer\"\n  id 105305\n  type person\n"
+			+ "  graphic US01\n  anim_def US01\nend\n"))
+	file.close()
+	var items := ItemDatabase.new()
+	assert_eq(items.load(tmp), OK)
+	var placer := MissionObjectPlacer.create(null, items)
 	var db := placer.get_item_db()
 	assert_eq(db.get_graphic(0x14B9), "", "runtime type id is not an items.def authoring id")
 
@@ -145,6 +157,7 @@ func test_runtime_player_type_resolves_to_its_own_row() -> void:
 	assert_eq(db.get_anim_def(visual_id), "US01")
 	assert_eq(int(placer.resolve_player_visual_item_id(5310)), 105310,
 			"a single player's 5310 body binds its own row")
+	DirAccess.remove_absolute(tmp)
 
 
 func test_raw_runtime_item_type_resolves_to_full_items_def_id() -> void:
