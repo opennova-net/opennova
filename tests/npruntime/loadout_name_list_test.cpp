@@ -2,8 +2,8 @@
 // the process's loadout name list (g_LoadoutWeaponNameList), not a fixed WPN_M4AUTO. The list is
 // the image's initializer (WPN_M4AUTO first) until an armory ACCEPT copies the accepted class's
 // buffer over it (every leg) or a 0x5A apply rebuilds it from the list's rows (a listen host's
-// own client's included). So after a listen host's own ACCEPT or its own list, every body the
-// host spawns carries the host's first weapon in its records' equipped byte until its owner's
+// own client's included, at its next receive). So after a listen host's own ACCEPT or its own
+// list's apply, every body the host spawns carries the host's first weapon in its records' equipped byte until its owner's
 // uplink; a dedicated host never writes the list and keeps WPN_M4AUTO. The ACCEPT leaves the
 // resident kit (the spawn buffer every other 0x2F serializes) to the host's list.
 // [orig: PlayerClass_InitEntity @0x4B1100..0x4B1116; g_LoadoutWeaponNameList @0x8333F8;
@@ -20,6 +20,7 @@
 #include <runtime/inmatch/server_loadout_grant.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 #include <formats/mission/bms.h>
 #include <formats/playersav/player_sav.h>
 #include <runtime/world/local_player.h>
@@ -117,10 +118,18 @@ void test_a_dedicated_host_keeps_the_initializers_first_weapon() {
 	CHECK(r.equipped(joiner) == kM4);
 }
 
-// A listen host's own client applies the list its slot is sent and rebuilds the process's
-// list from the list's rows: every body spawned after it takes the first granted weapon.
-void test_a_listen_hosts_own_list_names_every_later_body() {
+// A listen host's own client applies the list its slot is sent at its next receive, the fold
+// between two server ticks (retail: the next frame's client receive, ahead of its server tick),
+// and rebuilds the process's list from the list's rows. So a joiner the pump adds in the list's
+// own tick takes the previous list's first weapon in its records' equipped byte, and every body
+// spawned after the fold the first granted weapon.
+// [orig: Server_TickUpdate @0x51D7E0 - the receive pump @0x51D895 (the 0x2F accept's list send)
+//  ahead of CNapiServer_ProcessPendingPlayerSpawns @0x51DBFD; Game_ProcessMainFrame @0x5263F0 -
+//  Client_ProcessNetworkFrame @0x526692 -> @0x42C228 ahead of Server_TickUpdate @0x5266B6;
+//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x42920C..0x4293B9]
+void test_a_listen_hosts_own_list_names_every_body_after_its_fold() {
 	Rig r(inmatch::ConnectionMode::HostClient);
+	auto own_client = std::make_unique<inmatch::ClientRuntime>(r.loop);
 	CHECK(inmatch::Server_ProcessPendingPlayerSpawns(*r.ctx, r.world) >= 1);
 	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb)) == kM4);
 	inmatch::NapiNPConnection *own = r.own();
@@ -131,21 +140,32 @@ void test_a_listen_hosts_own_list_names_every_later_body() {
 	list.slots.push_back(WeaponLoadoutSlot{kAk, 3, 0xFF, 0});
 	list.slots.push_back(WeaponLoadoutSlot{kM4, 2, 0xFF, 0});
 	own->reply.last_loadout_reply = encode_weapon_loadout(list);
-	inmatch::weapon_slot_list_own_legs(*own, &r.world);
+	// The tick's receive: the list send to the own slot, its legs then the 0x5A on the own
+	// connection.
+	r.loop.host_send(s2c::WEAPON_LOADOUT, inmatch::current_weapon_slot_list(*own, &r.world));
+	// The same tick's spawn pump: the list is the previous one.
+	CHECK(!r.process->loadout_weapon_names.set);
+	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb + 1)) == kM4);
+	// The own client's fold, ahead of the next tick.
+	(void)own_client->Client_ProcessNetworkFrame(0);
+	own_client->apply_received_effects(r.world);
 	const w::LoadoutWeaponNameList &names = r.process->loadout_weapon_names;
 	CHECK(names.set && names.entries.size() == 2);
 	if (names.entries.size() == 2)
 		CHECK(names.entries[0].name == "WPN_AK47AUTO" && names.entries[1].name == "WPN_M4AUTO");
-	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb + 1)) == kAk);
-	// A body spawned before the list keeps its own.
+	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb + 2)) == kAk);
+	// Bodies spawned before the fold keep their own.
 	CHECK(r.equipped(r.ctx->np_protocol.connection_list[1]) == kM4);
+	CHECK(r.equipped(r.ctx->np_protocol.connection_list[2]) == kM4);
 	// A list of no rows empties it: the lookup's miss, 0xFF.
 	own = r.own();
 	if (own == nullptr) return;
 	WeaponLoadout empty;
 	empty.avatar_class = 7;
 	own->reply.last_loadout_reply = encode_weapon_loadout(empty);
-	inmatch::weapon_slot_list_own_legs(*own, &r.world);
+	r.loop.host_send(s2c::WEAPON_LOADOUT, inmatch::current_weapon_slot_list(*own, &r.world));
+	(void)own_client->Client_ProcessNetworkFrame(0);
+	own_client->apply_received_effects(r.world);
 	CHECK(r.process->loadout_weapon_names.set && r.process->loadout_weapon_names.entries.empty());
 	CHECK(w::player_spawn_equipped_default(r.world) == 0xFF);
 }
@@ -180,7 +200,7 @@ void test_the_accept_writes_the_list_not_the_resident_kit() {
 
 int main() {
 	test_a_dedicated_host_keeps_the_initializers_first_weapon();
-	test_a_listen_hosts_own_list_names_every_later_body();
+	test_a_listen_hosts_own_list_names_every_body_after_its_fold();
 	test_the_accept_writes_the_list_not_the_resident_kit();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

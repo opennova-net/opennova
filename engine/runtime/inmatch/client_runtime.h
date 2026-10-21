@@ -1155,6 +1155,14 @@ private:
 	std::unordered_map<uint16_t, ZoneState> zone_states_;
 	WeaponLoadout authoritative_loadout_;
 	uint64_t authoritative_loadout_revision_ = 0;
+	// The S2C 0x5A lists the listen host's own client received this frame, in receive
+	// order: apply_received_effects rebuilds the process's loadout name list from each
+	// (apply_weapon_loadout_name_list), at the fold between two server ticks, as retail's
+	// own client applies the list at the next frame's head (D-NET-143).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - Client_ProcessNetworkFrame @0x526692 ->
+	//  CNapiNetwork_PumpClientProtocolRecv @0x42C228 -> NapiNPClientMsg_HandleWeaponLoadoutSync
+	//  @0x4290E0, ahead of Server_TickUpdate @0x5266B6]
+	std::vector<WeaponLoadout> pending_own_weapon_loadouts_;
 	std::array<int32_t, kWorldStateAmmoPoolCount> authoritative_ammo_pools_{};
 	// The HostClient's kit (set_loadout_kit).
 	JoinerConnection::LoadoutKit host_loadout_kit_;

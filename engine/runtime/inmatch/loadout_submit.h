@@ -75,6 +75,17 @@ void kit_from_authoritative_grant(const world::WeaponTable &weapons,
 		const WeaponLoadout &grant,
 		std::vector<world::WeaponKitEntry> &r_kit);
 
+// A client's S2C 0x5A apply rebuilds the process's loadout name list (World::
+// loadout_weapon_names) from the list's rows: emptied, then each row whose weapon the table
+// has, its name and its three values, with no authority test ahead of it, so a listen host's
+// own client and a joiner's rebuild it alike and every body the process spawns after it takes
+// the first granted weapon (D-NET-143). Nothing for a world bound to no list.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the rows
+//  @0x429222..0x4293B9 (AdmDef_GetEntryByIndex @0x42923D, its null skip @0x429249, the name
+//  @0x4292F0, the three "%d" values @0x42932B..0x4293A8); PlayerClass_InitEntity
+//  @0x4B1100..0x4B1116]
+void apply_weapon_loadout_name_list(world::World &world, const WeaponLoadout &list);
+
 // NetPacket_SendLoadoutSubmit does not blindly serialize the requested combo.
 // Once the local slot table exists it keeps a side-legal slot, otherwise walks
 // that combo's 65-rank category for the first populated side-legal slot. A

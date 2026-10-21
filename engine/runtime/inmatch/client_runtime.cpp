@@ -1169,6 +1169,16 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 					view_.apply(datagram.tag, datagram.body);
 				// The 0x58's parse stamps GetTickCount [orig: SessionStatus_ParseFromBuffer @0x53109F].
 				if (datagram.tag == s2c::SESSION_STATUS) session_status_receipt_ms_ = console_tick_ms();
+				// The list its slot is sent: the apply's name-list rebuild has no role gate, so
+				// the own client's rebuilds the process's list (at the fold, which reads the
+				// world's weapon table: apply_received_effects) (D-NET-143).
+				// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset
+				//  @0x42920C, the rows @0x429222..0x4293B9]
+				if (datagram.tag == s2c::WEAPON_LOADOUT) {
+					WeaponLoadout list;
+					if (decode_weapon_loadout(datagram.body.data(), datagram.body.size(), list))
+						pending_own_weapon_loadouts_.push_back(std::move(list));
+				}
 				// The host's own console line comes back to its own client too: the
 				// handler has no role gate [orig: NapiNPClientMsg_HandleConsoleEcho
 				// @0x432BC0; the authority's echo @0x519AB0..0x519AC5].

@@ -249,4 +249,11 @@ void kit_from_authoritative_grant(const world::WeaponTable &weapons,
 	}
 }
 
+void apply_weapon_loadout_name_list(world::World &world, const WeaponLoadout &list) {
+	if (world.loadout_weapon_names == nullptr) return;
+	world::LoadoutWeaponNameList &names = *world.loadout_weapon_names;
+	kit_from_authoritative_grant(world.tables.weapons, list, names.entries);
+	names.set = true;
+}
+
 } // namespace opennova::inmatch

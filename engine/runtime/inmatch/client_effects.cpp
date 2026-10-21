@@ -1,5 +1,6 @@
 // Ordered client effects: class deaths, explosions, one-shots, revive, and radio.
 #include "client_runtime.h"
+#include <runtime/inmatch/loadout_submit.h> // apply_weapon_loadout_name_list (the own 0x5A apply)
 #include <runtime/world/world.h>
 #include <runtime/world/infantry_sound.h>
 #include <runtime/world/radio_call.h>
@@ -236,6 +237,12 @@ void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
 }
 
 void ClientRuntime::apply_received_effects(world::World &world) {
+    // The own client's 0x5A applies: the process's loadout name list, rebuilt from each list
+    // in receive order (D-NET-143) [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 -
+    //  @0x42920C..0x4293B9].
+    for (const WeaponLoadout &list : pending_own_weapon_loadouts_)
+        apply_weapon_loadout_name_list(world, list);
+    pending_own_weapon_loadouts_.clear();
     for (const auto &request : view_.drain_effect_commands()) {
         if (const auto *squad = std::get_if<replication::ClientSquadEvent>(&request)) {
             apply_squad_event(world, *squad);
