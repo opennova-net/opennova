@@ -98,7 +98,7 @@ struct HandleResult {
 	std::vector<std::vector<uint8_t>> immediate_outbound;
 	// Datagrams to the address a packet names, sent from inside the receive at the datagram's
 	// position: the magic packet's reflection (D-NET-NEW-L1-20).
-	// [orig: NapiNP_HandleMagicPacket @0x622E70 -> CNapiNPManager_SendTo @0x622EF8]
+	// [orig: NapiNP_HandleMagicPacket @0x622E70 (the CNapiNPManager_SendTo call @0x622EF8)]
 	struct Addressed {
 		PeerAddr to;
 		std::vector<uint8_t> datagram;
@@ -151,7 +151,7 @@ std::vector<ReplayedSessionPacket> replay_ready_session_packets(
 // of the drain has written its lines first (NapiNPServerCtx::connect_log_disable_queued).
 // [orig: Server_PumpNetworkTransport - the manager receive @0x4FD977 ahead of the server
 //  receive @0x4FD981; NapiNPProtocol_PumpRecvQueues @0x6266A0 (the FIFO pass @0x6266CA..
-//  0x6267B2); NapiNPServer_HandleNewConnection @0x4C8054..0x4C80AF]
+//  0x6267B2); NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF)]
 void finish_manager_receive(NapiNPServerCtx &ctx);
 
 // Finalize one host socket receive batch. Future packets latch a missing-sequence check while

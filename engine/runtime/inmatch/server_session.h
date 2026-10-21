@@ -28,12 +28,14 @@ void set_connection_mode(NapiNPServerCtx &ctx, ConnectionMode mode);
 // CNapiNetwork_SetTransportMode @0x4c8750]
 void set_transport_mode(NapiNPServerCtx &ctx, SocketMode socket);
 
-// The volatile host-start values the original derives from GetTickCount / rand at StartServer
-// (§6.5: host_key, host_start_tick, session_seed_id). Passed in rather than sampled so the
-// headless runtime stays deterministic and a golden-pcap test can seed-inject the observed
-// values (the plan's determinism approach). [orig: NapiNP_GenerateSessionKey @0x61ea70 ->
-// host_key; GetTickCount -> host_start_tick; (GetTickCount + rand) % 900000 + 100000 ->
-// session_seed_id]
+// The volatile host-start values the original derives from GetTickCount / rand: StartServer's
+// host_key and host_start_tick, and the protocol create's +0x530 draw, which seeds the session
+// CRT stream here (session_seed_id). Passed in rather than sampled so the headless runtime
+// stays deterministic and a golden-pcap test can seed-inject the observed values (the plan's
+// determinism approach). [orig: NapiNPProtocol_StartServer @0x62B5E0 - NapiNP_GenerateSessionKey
+// @0x61ea70 -> host_key @0x62B5FC, GetTickCount -> host_start_tick @0x62B619;
+// NapiNPProtocol_Create @0x625730 - (GetTickCount + rand) % 900000 + 100000 -> +0x530
+// @0x6259B3..0x625A10]
 struct SessionStartup {
 	// The title identity the host speaks (HostConfig::title), installed on the protocol by
 	// start_server (NapiNPProtocol::identity).

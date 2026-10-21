@@ -14,8 +14,8 @@
 //  @0x623254); NapiNPManager_HandlePacket @0x622F10 (the magic test @0x622F1B..0x622F36,
 //  cb_on_dispatch @0x622FCD, cb_on_error(4) @0x622FF9); NapiNPProtocol_HandleClientHello
 //  @0x6213B0 (`return protocol_version == 0` @0x62190B); NapiNPProtocol_HandleClientJoin
-//  @0x62B750; NapiNPServer_HandleNewConnection @0x4C8054..0x4C80AF; CNapiNetwork_Init
-//  @0x4CA908..0x4CA9CD; Napi_FormatAddress @0x62DED0]
+//  @0x62B750; NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF);
+//  CNapiNetwork_Init @0x4CA908..0x4CA9CD; Napi_FormatAddress @0x62DED0]
 #include <net/napi/envelope.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/peer_addr.h>
@@ -200,8 +200,9 @@ void test_dedicated_host_receive_lines() {
 	// The first join: taken on the socket pass (its PROTOCOL line); a probe behind it in the
 	// same drain still writes its lines; the queued pass's new connection then turns the log
 	// off, after the drain; nothing after it is written.
-	// [orig: NapiNPProtocol_HandleClientJoin's socket pass @0x62C323 / @0x62C328; the queued
-	//  pass NapiNPProtocol_PumpRecvQueues @0x6266CA..0x6267B2 after the manager's drain]
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 (the socket pass @0x62C323 / @0x62C328);
+	//  the queued pass NapiNPProtocol_PumpRecvQueues @0x6266A0 (@0x6266CA..0x6267B2) after the
+	//  manager's drain]
 	ClientAuth auth = make_title_client_auth(kJo, 1, 0x55AA, 0x1234, "Joiner", "SCRK1");
 	const std::vector<uint8_t> join =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
@@ -231,7 +232,8 @@ void test_dedicated_host_receive_lines() {
 }
 
 // A listen host's own connection turns the log off at its session create.
-// [orig: NapiNPServer_HandleNewConnection @0x4C8054..0x4C80AF ahead of the local arm @0x4C8213]
+// [orig: NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF) ahead of the local
+//  arm @0x4C8213]
 void test_listen_host_create_turns_the_log_off() {
 	ns::LoopbackChannel loop;
 	LoggedHost host(inmatch::ConnectionMode::HostClient, &loop);

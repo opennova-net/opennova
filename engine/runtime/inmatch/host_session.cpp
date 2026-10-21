@@ -258,8 +258,8 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 		for (const std::vector<uint8_t> &dg : r.immediate_outbound)
 			sock.send_to(peer, dg.data(), dg.size());
 		// The magic packet's reflection goes to the address the packet named, from inside the
-		// receive (D-NET-NEW-L1-20) [orig: NapiNP_HandleMagicPacket -> CNapiNPManager_SendTo
-		//  @0x622EF8].
+		// receive (D-NET-NEW-L1-20) [orig: NapiNP_HandleMagicPacket @0x622E70 (the
+		//  CNapiNPManager_SendTo call @0x622EF8)].
 		for (const HandleResult::Addressed &a : r.addressed_outbound)
 			sock.send_to(a.to, a.datagram.data(), a.datagram.size());
 		for (const std::vector<uint8_t> &dg : r.outbound) {
@@ -297,7 +297,8 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 	// The connection-list walk after every datagram: the queued packets whose gap a datagram
 	// closed, per connection in list order (NEW-L1-9).
 	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the walk @0x626910..0x6269E8,
-	//  CNapiNPConnection_ParseMessages @0x62696B, after the FIFO pass @0x6266CA..0x6267B2]
+	//  CNapiNPConnection_ParseMessages @0x625BC0 (the walk's call @0x62696B), after the FIFO
+	//  pass @0x6266CA..0x6267B2]
 	for (ReplayedSessionPacket &replayed : replay_ready_session_packets(
 			owner.ctx, now, /*defer_in_match_replies=*/true))
 		consume(replayed.peer, replayed.result);
@@ -375,10 +376,11 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	//  CNapiNetwork_PumpServerProtocolRecv @0x51D895; NapiNPProtocol_PumpRecvQueues @0x6266A0 -
 	//  the FIFO pass @0x6266CA..0x6267B2, its handler call @0x6267AD -> Nwu_HandleClientSession
 	//  @0x626CF0 -> NapiNPProtocol_HandleSessionPacket @0x626A00, the in-order test @0x626BEB,
-	//  ParseMessages @0x626BFC; CNapiNPManager_SendTo's address-0 arm @0x61EC59, the loopback
-	//  FIFO write @0x61ECC6; NapiNPManager_PumpReceive @0x623010 reads that FIFO
-	//  @0x623084..0x6230B3 ahead of NapiNPManager_RecvFromSocket @0x6230EB, from
-	//  Game_ProcessMainFrame's CNapiNetwork_PumpManagerReceive call @0x526528]
+	//  CNapiNPConnection_ParseMessages @0x625BC0 (the call @0x626BF4); CNapiNPManager_SendTo
+	//  @0x61EC20 (the address-0 arm @0x61EC59, the loopback FIFO write @0x61ECC6);
+	//  NapiNPManager_PumpReceive @0x623010 reads that FIFO @0x623084..0x6230B3 ahead of
+	//  NapiNPManager_RecvFromSocket @0x61ED50 (the call @0x6230EB), from Game_ProcessMainFrame's
+	//  CNapiNetwork_PumpManagerReceive call @0x526528]
 	bool received = false;
 	auto receive_pump = [&]() {
 		received = true;

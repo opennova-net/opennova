@@ -85,7 +85,7 @@ public:
 	// One `"<time> : <text>"` line while the log is on.
 	void line(const std::string &text);
 	// The server's first new connection: its disabling line, then off for the
-	// process [orig: NapiNPServer_HandleNewConnection @0x4C8054..0x4C80AF].
+	// process [orig: NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF)].
 	void disable_at_server_connection();
 	// A client's S2C 0x61 (the session key): its disabling line while the log is on,
 	// then off for the process [orig: NapiNPClientMsg_HandleSessionKey @0x4297C0 -

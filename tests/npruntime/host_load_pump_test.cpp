@@ -448,20 +448,22 @@ bool same_packet(const std::vector<SentPacket> &packets, uint8_t a, uint8_t b) {
 
 // A synced remote kept across a map change, its send clock dictated (holdoff H) and its
 // countdown at `countdown` when the round's teardown starts. Retail's send build waits for a
-// spent countdown that each receive pump steps once (CNapiNPConnection_PumpFlags 0x10
-// @0x62979A..0x6297AC; the build's gate @0x62927B; the reload @0x6297F3), and queues the
-// reset's 0x25 with class 0, no bypass (NapiNPServer_SendToConn @0x4C4F20, `push 0`
-// @0x4C4F4F): the teardown's pump steps it to r = countdown - 1, the 0x25s are queued behind
-// it, and the datagram leaves at the load's r-th pump (the head @0x5245E8 for r = 1, then
-// @0x524A63, @0x524F76 ... ahead of the 0x7B), or with the 0x7B at the first tick's send pump
-// (Server_TickUpdate @0x51E487) once r passes the load's ten pumps (a dedicated host).
+// spent countdown that each receive pump steps once, and queues the reset's 0x25 with class 0,
+// no bypass: the teardown's pump steps it to r = countdown - 1 (a countdown of 1 builds there
+// and reloads the holdoff, r = H), the 0x25s are queued behind it, and the datagram leaves at
+// the load's r-th pump (the head for r = 1, then the window's, ahead of the 0x7B), or with the
+// 0x7B at the first tick's send pump once r passes the load's ten pumps (a dedicated host).
 // Pump indices: 0 the teardown's, 1 the load's head, 2..10 the window, 11 the first tick's.
 // An admitting remote's C2S 0x01 that reached the socket during the load is answered inside
 // it: its S2C 0x02 probe leaves at the window pump that read it.
-// [orig: Game_TeardownMission @0x522588 (ahead of the reset @0x52269B);
+// [orig: CNapiNPConnection_PumpFlags @0x629780 (the 0x10 step @0x62979A..0x6297AC, the 0x200
+//  reload @0x6297F3..0x629802); CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 (the build's
+//  gate @0x62927B); NapiNPServer_SendToConn @0x4C4F20 (`push 0` @0x4C4F4F);
+//  Game_TeardownMission @0x522350 (the pump @0x522588 ahead of the reset @0x52269B);
 //  Server_DisconnectAndResetAllPlayerSlots @0x516160 (the 0x25 sends @0x5161BB..0x516385);
-//  Game_StartMission @0x5245E8, @0x524A63 .. @0x525AC5, the 0x7B @0x526267;
-//  NapiNPServerMsg_HandleJoinRequest @0x512ED0 (the probe @0x512FAF..0x512FBD)]
+//  Game_StartMission @0x524360 (the head pump @0x5245E8, @0x524A63 .. @0x525AC5, the 0x7B
+//  @0x526267); Server_TickUpdate @0x51D7E0 (the send pump @0x51E487);
+//  NapiNPServerMsg_HandleJoinRequest @0x512ED0 (state 6 @0x512FB3, the probe's call @0x512FBC)]
 struct ResidualCase {
 	uint32_t holdoff = 0;
 	uint32_t countdown = 0;
@@ -540,8 +542,11 @@ void run_reset_residual(const ResidualCase &rc) {
 }
 
 void test_map_change_reset_leaves_at_the_residual_pump() {
-	// Holdoff 3: residuals 1..3 put the 0x25 at the head, @0x524A63 and @0x524F76.
-	for (uint32_t r = 1; r <= 3; ++r) run_reset_residual({3, r + 1, r, false});
+	// Holdoff 3: residuals 1..3 put the 0x25 at the head, @0x524A63 and @0x524F76. Residual 1
+	// and 2 come from countdowns 2 and 3; residual 3 (the holdoff) from countdown 1, which the
+	// teardown's pump spends, builds at and reloads (the 0x200 reload @0x6297F3..0x629802).
+	for (uint32_t r = 1; r <= 2; ++r) run_reset_residual({3, r + 1, r, false});
+	run_reset_residual({3, 1, 3, false});
 	// Holdoff 12, residual 11: past the load's ten pumps, the first tick's send carries the
 	// 0x25 with the 0x7B.
 	run_reset_residual({12, 12, 11, true});

@@ -205,11 +205,11 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	// The magic packet's reflection: a NovaWorld authority in a session sets it and draws its
 	// key as NapiNPTimer_GenerateRandomId does, (GetTickCount() + rand()) % 900000 + 100000, the
 	// rand the session CRT stream's next draw after the round init's (retail's round init runs
-	// ahead of the create, CNapiGameSession_BuildAndCreateSession @0x5695B3 then @0x569986), the
-	// tick the create's (the session's start tick, as the round init's key takes it); any other
-	// create zeroes both. Retail draws it ahead of NapiNPProtocol_StartServer, which never
-	// touches either word. (D-NET-NEW-L1-20)
-	// [orig: CNapiGameSession_CreateSession - in session `cmp [ebp+58h]` @0x4C9B05, the
+	// ahead of the create: CNapiGameSession_BuildAndCreateSession @0x5694D0, the round init's
+	// call @0x5695B3, then the create's @0x56997D), the tick the create's (the session's start
+	// tick, as the round init's key takes it); any other create zeroes both. Retail draws it
+	// ahead of NapiNPProtocol_StartServer, which never touches either word. (D-NET-NEW-L1-20)
+	// [orig: CNapiGameSession_CreateSession @0x4C97C0 - in session `cmp [ebp+58h]` @0x4C9B05, the
 	//  authority @0x4C9B0A, transport_mode == 1 @0x4C9B0F, +0x52C = 1 @0x4C9B1A, the draw
 	//  @0x4C9B26, else +0x52C = 0 @0x4C9B33, +0x530 = 0 @0x4C9B3F; NapiNPTimer_GenerateRandomId
 	//  @0x61E510 - GetTickCount @0x61E514, rand @0x61E51C, the add @0x61E521, div 0xDBBA0
@@ -251,7 +251,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		(void)next_connection_index();
 		(void)next_connection_index();
 		// The host's own connection coming up turns the _connectlog.txt debug log off and
-		// counts a login like every other [orig: NapiNPServer_HandleNewConnection - the
+		// counts a login like every other [orig: NapiNPServer_HandleNewConnection @0x4C8040 - the
 		// disable @0x4C8054..0x4C80AF at its head, the login @0x4c8203, ahead of its
 		// local-connection arm @0x4c8213].
 		if (ctx.logs.connect != nullptr && ctx.logs.connect->enabled())

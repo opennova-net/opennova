@@ -15,11 +15,12 @@
 //   - a matching magic packet is answered at the named address, a mismatched key or an unarmed
 //     host answers nothing, and no handler takes the packet;
 //   - the session owner sends the answer from inside its receive, to the named address.
-// [orig: CNapiGameSession_CreateSession @0x4C9B05..0x4C9B3F (the draw @0x4C9B26);
-//  NapiNPTimer_GenerateRandomId @0x61E510; CNapiGameSession_BuildAndCreateSession - the round
-//  init @0x5695B3 ahead of the create @0x569986; NapiNPManager_HandlePacket @0x622F10 (the magic
-//  test @0x622F1B..0x622F36, NapiNP_HandleMagicPacket @0x622F62); NapiNP_HandleMagicPacket
-//  @0x622E70 (@0x622EA6..0x622EB8, CNapiNPManager_SendTo(.., 4, 1) @0x622EF8);
+// [orig: CNapiGameSession_CreateSession @0x4C97C0 (@0x4C9B05..0x4C9B3F, the draw @0x4C9B26);
+//  NapiNPTimer_GenerateRandomId @0x61E510; CNapiGameSession_BuildAndCreateSession @0x5694D0 -
+//  the round init's call @0x5695B3 ahead of the create's @0x56997D; NapiNPManager_HandlePacket
+//  @0x622F10 (the magic test @0x622F1B..0x622F36, the NapiNP_HandleMagicPacket call @0x622F62);
+//  NapiNP_HandleMagicPacket @0x622E70 (@0x622EA6..0x622EB8, CNapiNPManager_SendTo(.., 4, 1)
+//  @0x622EF8);
 //  NapiSocket_SendTo @0x62CFA0 (NapiSocket_EncodePacket @0x62C8F0)]
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>

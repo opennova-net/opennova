@@ -179,7 +179,8 @@ void connect_log_line(const NapiNPServerCtx &ctx, const std::string &text) {
 //  [eax+52Ch], 0` @0x622EA6, `mov esi, [eax+530h]` @0x622EAF, `cmp esi, [edx+0Ch]` @0x622EB8),
 //  the port @0x622ED9, the address @0x622EDD, the bytes @0x622EE1..0x622EF1,
 //  CNapiNPManager_SendTo(.., 4, 1) @0x622EF8; NapiSocket_SendTo @0x62CFA0 - the encode
-//  @0x62CFEA..0x62D009 (NapiSocket_EncodePacket @0x62C8F0), htons @0x62D050]
+//  @0x62CFEA..0x62D009 (NapiSocket_EncodePacket @0x62C8F0), htons @0x62D040 (the port's store
+//  @0x62D050)]
 void reflect_magic_packet(const NapiNPServerCtx &ctx, const std::vector<uint8_t> &unpacked,
 		HandleResult &out) {
 	const NapiNPProtocol &p = ctx.np_protocol;
@@ -1110,8 +1111,9 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// An in-order packet is parsed at once; the queued successors its arrival made contiguous
 	// wait for the receive pump's connection-list walk, after every datagram of this pump
 	// (replay_ready_session_packets; NEW-L1-9).
-	// [orig: HandleSessionPacket @0x626A00 - the in-order test @0x626BEB, ParseMessages
-	//  @0x626BFC; NapiNPProtocol_PumpRecvQueues's walk @0x626910..0x6269E8 after its FIFO pass]
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the in-order test @0x626BEB,
+	//  CNapiNPConnection_ParseMessages @0x625BC0 (the call @0x626BF4);
+	//  NapiNPProtocol_PumpRecvQueues's walk @0x626910..0x6269E8 after its FIFO pass]
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> flat;
 	SessionDeframeAdmission admission;
@@ -1464,7 +1466,8 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	//  @0x623126..0x62317F, the PunkBuster arm @0x6231A7..0x6231D9, NapiNP_UnpackPacket
 	//  @0x623206, cb_on_error(3) @0x623229, cb_on_packet @0x623254, HandlePacket @0x623284;
 	//  NapiNPManager_HandlePacket @0x622F10 - cb_on_unpack @0x622F53 ahead of
-	//  NapiNP_HandleMagicPacket @0x622F62, cb_on_dispatch @0x622FCD, cb_on_error(4) @0x622FF9;
+	//  NapiNP_HandleMagicPacket @0x622E70 (the call @0x622F62), cb_on_dispatch @0x622FCD,
+	//  cb_on_error(4) @0x622FF9;
 	//  NapiLib_SetManagerCallbacks @0x4C6F50]
 	connect_log_line(ctx, napi_got_raw_text(static_cast<int32_t>(len), peer));
 	if (punkbuster_datagram(raw, len)) return out;
@@ -1478,7 +1481,8 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	connect_log_line(ctx, napi_got_cooked_text(unpacked_len, peer));
 	if (baffle_packet(unpacked)) {
 		connect_log_line(ctx, napi_got_baffle_text(unpacked_len, peer));
-		reflect_magic_packet(ctx, unpacked, out); // [orig: @0x622F62] (D-NET-NEW-L1-20)
+		// D-NET-NEW-L1-20 [orig: NapiNPManager_HandlePacket @0x622F10 (the call @0x622F62)]
+		reflect_magic_packet(ctx, unpacked, out);
 		return out;
 	}
 	uint8_t opcode = 0;
@@ -1489,8 +1493,8 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	// The session-level opcodes are taken by a server-side connection for the peer (their
 	// handlers' first test); a host's _connectlog.txt is off from its first connection on
-	// (NapiNPServer_HandleNewConnection @0x4C8054..0x4C80AF), so their later refusals never
-	// reach a line.
+	// (NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF)), so their later
+	// refusals never reach a line.
 	if (opcode >= SESSION_OPCODE_PROTOCOL_MESSAGE && opcode <= kClientProbeOpcode)
 		out.taken = server_connection_exists(ctx, peer);
 

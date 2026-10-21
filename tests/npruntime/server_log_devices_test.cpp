@@ -93,7 +93,7 @@ void run_the_devices_write_in_the_working_directory() {
 // first new connection writes its disabling line and turns the log off for the process.
 // [orig: g_ConnectLogEnabled @0xB4C720 (0); Game_ParseCommandLineAndInit @0x4A74AF / @0x4A74C9,
 //  @0x4A7E37..0x4A7F8A; NapiFile_AppendLine @0x61C020; NapiNPServer_HandleNewConnection
-//  @0x4C8054..0x4C80AF; CNapiNetwork_OpenTransportSocket @0x4C6BA0..0x4C6BD7]
+//  @0x4C8040 (@0x4C8054..0x4C80AF); CNapiNetwork_OpenTransportSocket @0x4C6BA0..0x4C6BD7]
 void run_the_connect_log() {
 	expect(!opennova::parse_launch_flags({}).log_switches.connect_log, "off by default");
 	expect(opennova::parse_launch_flags({"/connectlog"}).log_switches.connect_log,
