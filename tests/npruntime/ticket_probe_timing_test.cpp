@@ -5,8 +5,9 @@
 // session id, 0x100, then `rand() >> 3` bytes (D-NET-NEW-L8-20; a context with no world draws them
 // from a fresh stream).
 // [orig: NapiNPServerMsg_HandleJoinRequest @0x512F87..0x512FA6 (the gate, state 3, return),
-//  @0x512FAF..0x512FBD (state 6, the probe); CNapiGameSession_HandlePlayEnterResponse @0x4D1C11
-//  (state 6), @0x4D1C19 (CNetPlayer_SendFileTransferChunk(0) @0x4C9440)]
+//  @0x512FAF..0x512FBC (state 6, the probe's call); CNapiGameSession_HandlePlayEnterResponse
+//  @0x4D1940 (state 6 @0x4D1C11, the CNetPlayer_SendFileTransferChunk(0) call @0x4D1C19;
+//  CNetPlayer_SendFileTransferChunk @0x4C9440)]
 
 #include "npruntime/conn_fixture.h"
 

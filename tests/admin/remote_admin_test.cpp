@@ -567,7 +567,8 @@ void test_listen_host_and_single_player() {
 // Single player's MISSION CYCLE: the round ends at once (no winner) and the 620-tick linger is
 // stored, but single player is out of a session (its network type 0), so its server tick never
 // drains the linger: no exit, the player stays on the round's end (the lose epilog, until the
-// player's key or the screen's 18600-frame timeout [orig: Cine_StartPlayback @0x51697B]). A session
+// player's key or the screen's 18600-frame timeout [orig: Server_ProcessRoundEnd @0x5164F0 (the
+// Cine_StartPlayback call @0x51697B)]). A session
 // host's tick drains the same linger into exit 3. (Ours keeps the context in session; the world's
 // mp_session word is single player's is_in_session.)
 // [orig: CAdminServer_HandleMissionCommand @0x40660B (Server_ProcessRoundEnd(0)), @0x40661F (the
