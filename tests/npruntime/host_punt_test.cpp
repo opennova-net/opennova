@@ -685,14 +685,16 @@ bool check_host_control_punts_are_ordered_before_the_countdown() {
 // A connection whose description went keeps taking its packets until its teardown: retail's
 // session receive, resend list and ping test the connection's active byte (+0x28) and drop
 // byte (+0x2D, which nothing sets), never the description's sent byte, so a punted joiner's
-// in-flight records stamp its receive, run through the fragment fold and reach their handlers;
-// what a handler answers it dies in its queue, closed behind the description (QueueMessage
-// tests the sent byte the description set). Only the correctly keyed goodbye tears it down.
-// (D-NET-NEW-L1-27)
+// in-flight packets stamp its receive and run through the fragment fold; the per-record dispatch
+// then tests the sent byte and runs no record's handler (no 0x0C applied, no 0x47 answered), and
+// the queue, closed behind the description, holds it alone. Only the correctly keyed goodbye
+// tears the node down. (D-NET-NEW-L1-27)
 // [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - @0x626AE0 / @0x626AEA;
 //  CNapiNPConnection_ParseMessages @0x625BC0 - the drop byte @0x625C3D, the stamp @0x625D54,
-//  the record walk @0x625DF5..0x625F1B; NapiNP_HandleResendList @0x623800 - @0x6238C9 /
-//  @0x6238D3; CNapiNPConnection_SendDescriptionOnce @0x629750 - the store @0x629772;
+//  the record walk calling CNapiNPConnection_DispatchMessage @0x625EF1;
+//  CNapiNPConnection_DispatchMessage @0x622570 - `cmp byte ptr [esi+70Dh], 0` @0x622697 /
+//  `jnz` @0x62269E; NapiNP_HandleResendList @0x623800 - @0x6238C9 / @0x6238D3;
+//  CNapiNPConnection_SendDescriptionOnce @0x629750 - the store @0x629772;
 //  CNapiNPConnection_QueueMessage @0x628640 - the test @0x62864D..0x628654]
 bool check_described_connection_keeps_taking_records() {
 	inmatch::NapiNPServerCtx ctx;
@@ -765,9 +767,9 @@ bool check_described_connection_keeps_taking_records() {
 			"a described connection's packet stamps its receive and enters the fold"))
 		return false;
 
-	// The FINAL fragment completes the 0x0C, which reaches dispatch (the World-less unit
-	// path surfaces it for the transport FIFO); the in-match 0x47 reaches its handler, whose
-	// 0x75 answer the closed queue drops: the description stays the last record queued.
+	// The FINAL fragment completes the 0x0C, which reaches no handler (the World-less unit
+	// path surfaces nothing); nor does the in-match 0x47: the description stays the last
+	// record queued.
 	const std::vector<uint8_t> final_fragment = frame_c2s(
 			client_tx,
 			{make_protocol_message(c2s::ENTITY_UPLINK, {0x33, 0x44},
@@ -781,18 +783,16 @@ bool check_described_connection_keeps_taking_records() {
 	const inmatch::HandleResult ping_result = inmatch::handle_server_datagram(
 			ctx, peer, ping.data(), ping.size(), 3,
 			/*defer_in_match_replies=*/true);
-	if (!expect(nothing_sent(final_result) && final_result.events.size() == 1 &&
-				final_result.events[0].kind ==
-						inmatch::HostAcceptEvent::Kind::PeerC2SInMatch &&
+	if (!expect(nothing_sent(final_result) && final_result.events.empty() &&
 				live.c2s_reassembly.buffer.empty(),
-			"a described connection's completed record reaches dispatch"))
+			"a described connection's completed record folds and reaches no handler"))
 		return false;
 	replication::Datagram queued;
 	if (!expect(nothing_sent(ping_result) && ping_result.events.empty() &&
 				transport.outbound_pending() == 1 && transport.pop_outbound(queued) &&
 				queued.tag == hightag::DESCRIPTION_PACKET &&
 				queued.protocol_flags_raw == kDescriptionFlags,
-			"the handler's answer dies in the closed queue behind the description"))
+			"the 0x47 is not handled: the description is all the queue holds"))
 		return false;
 
 	// A future sequence is held for its gap and the gap requested, as for any connection.

@@ -496,10 +496,16 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       world::World *world,
                                                       const ServerDispatchInputs &inputs) {
 	std::vector<ProtocolMessage> replies;
-	// A connection whose description went still has its records dispatched, every one
-	// (D-NET-NEW-L1-27): its handlers run, their replies to it die in its closed queue and their
-	// sends to the others go out. [orig: CNapiNPConnection_ParseMessages @0x625BC0 - the record
-	// walk @0x625DF5..0x625F1B; CNapiNPConnection_QueueMessage @0x628640 - @0x62864D]
+	// A connection whose description went has its records parsed (the receive stamp, the ack,
+	// the sequencing and the fragment fold all ran ahead of this), but no record's handler runs:
+	// the per-record dispatch tests the description's sent byte after the record's lookup and
+	// skips the pre-handler and the handler, and the byte never clears, so the record that stages
+	// a description ends the handling of every later one, in its datagram and after. Both walks
+	// below test it ahead of each record (D-NET-NEW-L1-27).
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - the record walk calls
+	//  CNapiNPConnection_DispatchMessage @0x625EF1; CNapiNPConnection_DispatchMessage @0x622570 -
+	//  NapiNPProtocol_FindMsgInfo called @0x622687, `cmp byte ptr [esi+70Dh], 0` @0x622697 /
+	//  `jnz` @0x62269E past the handler's call @0x6226EF]
 	SessionReplyState &st = conn.reply;
 	const PlayerReplicationState rep = make_rep_state(config, conn, world);
 	const IntegritySources &integrity = config.integrity_sources;
@@ -516,6 +522,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	for (size_t message_index = first_in_match; message_index < messages.size();
 			++message_index) {
 		const ProtocolMessage &msg = messages[message_index];
+		// No handler once the description went (D-NET-NEW-L1-27) [orig:
+		//  CNapiNPConnection_DispatchMessage @0x622570 - @0x622697 / @0x62269E].
+		if (conn.host_disconnect_sent) continue;
 		// Protocol-control + settings-update frames are not gameplay messages (the original filters
 		// these before the gameplay dispatch). [orig: dispatch_in_match_session_messages gate]
 		if (msg.flags.settings_update || msg.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
@@ -784,10 +793,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// re-arms from the death screen; an alive one only from an armory volume;
 				// the pre-round window and the first post-join/deploy submit (the latch)
 				// bypass it. [orig: NapiNPServerMsg_HandlePlayerLoadout @0x51581c..0x51583e
-				//  -> Server_SendWeaponSlotListToPlayer] The joined test is the net player's game
-				// state (10 @0x5157F8), which a description writes no part of: a described
-				// sender keeps it (slot_in_match, D-NET-NEW-L1-27).
-				if (slot_in_match(conn) && !conn.link.preround_loadout_latch &&
+				//  -> Server_SendWeaponSlotListToPlayer; the joined test, the net player's game
+				//  state 10 @0x5157F8]
+				if (is_in_match(conn) && !conn.link.preround_loadout_latch &&
 				    ((loadout_player->flags | loadout_player->engine_flags) &
 				     (world::kEntityFlagDead | world::kEntityFlagArmoryZone)) == 0u &&
 				    world->preround_delay_seconds == 0) {
@@ -965,12 +973,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// its reachable analog is the Match outcome) and the
 				// sender's player slot (@0x514F38..0x514F53; the 0xA0 mask also
 				// needs it in the match). A short body reads index 0 (@0x514F5F..0x514F6A).
-				// A description writes no slot, so a described sender passes
-				// (slot_in_match, D-NET-NEW-L1-27).
 				if (inputs.server_ctx == nullptr || world == nullptr ||
 						inputs.server_ctx->is_authority == 0 ||
 						inputs.server_ctx->net_spawn_suspended != 0 ||
-						world->match.outcome().ended || !slot_in_match(conn))
+						world->match.outcome().ended || !is_in_match(conn))
 					break;
 				const uint16_t index = msg.payload.size() >= 2
 						? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))
@@ -1252,10 +1258,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// entity before relaying. The two need not be the same: a mounted player
 				// may address a vehicle weapon, so this is deliberately not an anti-spoof
 				// equality check. [orig: requester player slot/dead mark @0x514e02..1f;
-				// packed pool/slot + live item-def checks @0x514e5c..91] The slot is all it
-				// tests, which a description writes no part of: a described requester's
-				// reload is relayed to the others (slot_in_match, D-NET-NEW-L1-27).
-				if (world == nullptr || !slot_in_match(conn) ||
+				// packed pool/slot + live item-def checks @0x514e5c..91]
+				if (world == nullptr || !is_in_match(conn) ||
 				    !conn.link.owned_entity.valid())
 					break;
 				const world::Entity *requester =

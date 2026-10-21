@@ -1293,8 +1293,9 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 	}
 	if (conn.admission_stage == GameAdmissionStage::Rejected) {
 		// A join-gate reject that staged retail's description keeps the node in its stage and
-		// never reaches here: the records behind it went on through their handlers, and the
-		// punted joiner's CLIENT_GOODBYE burst (or the receive reap) performs the real teardown
+		// never reaches here: the records behind it are parsed and reach no handler
+		// (D-NET-NEW-L1-27), and the punted joiner's CLIENT_GOODBYE burst (or the receive reap)
+		// performs the real teardown
 		// (reject_join_record, D-NET-NEW-L1-24). [orig: the @0x512aa0 failure return keeps the
 		// connection] Only a reject whose description could not be staged (a node with no
 		// remote transport) is Rejected, and releases the node at once. A game record ahead of
@@ -1331,8 +1332,10 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 	// dispatch_session_replies above (retail's NapiNPServerMsg_0x00C applies during the
 	// dispatch walk). Only the World-less unit path still surfaces the uplinks for the
 	// transport FIFO that Server_TickUpdate drains; surfacing them here as well with a
-	// World would apply each pose twice. Pre-spawn 0x0C only updates the cached pose.
-	if (conn.spawned_announced && ctx.world == nullptr) {
+	// World would apply each pose twice. Pre-spawn 0x0C only updates the cached pose. A
+	// described connection's 0x0C reaches no handler, so none surfaces (D-NET-NEW-L1-27) [orig:
+	// CNapiNPConnection_DispatchMessage @0x622570 - @0x622697 / @0x62269E].
+	if (conn.spawned_announced && ctx.world == nullptr && !conn.host_disconnect_sent) {
 		std::vector<ProtocolMessage> c2s;
 		for (const ProtocolMessage &m : messages) {
 			if (m.tag == c2s::ENTITY_UPLINK) c2s.push_back(m);
@@ -1634,9 +1637,8 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// every leg until its teardown: the session packet, the resend list and the ping test the
 	// connection's active byte (+0x28, set at its state-1 entry, cleared at its teardown) and
 	// its drop byte (+0x2D, which nothing sets), never the description's sent byte, so its
-	// in-flight records reach their handlers and stamp its receive. What its handlers answer
-	// it the closed queue drops (close_host_queue); their sends to the others go out
-	// (D-NET-NEW-L1-27).
+	// in-flight packets stamp its receive, ack, sequence and fold; the per-record dispatch then
+	// runs no handler for them (dispatch_session_replies, D-NET-NEW-L1-27).
 	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - processing disabled @0x626A76 /
 	//  @0x626A84, the active byte @0x626AE0, the drop byte @0x626AEA, the size @0x626AFB;
 	//  CNapiNPConnection_ParseMessages @0x625BC0 - the drop byte @0x625C3D, the stamp @0x625D54,

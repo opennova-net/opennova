@@ -476,17 +476,15 @@ bool check_chat_routing() {
 	return expect(replies.empty(), "a spectator cannot chat");
 }
 
-// A punted sender's records still reach their handlers: the punt fills the connection's
-// description alone, and the chat handler's gate is the net player's game state (10 / 11) or the
-// local byte, neither of which the punt writes, so P1's team line still reaches P3. P1's own
-// queue is closed behind its description: its own copy, like any later send to it, returns
-// unqueued, so P1 is sent nothing past the description (ours drops the own copy at the fan's
-// is_in_match punt leg; the session's flush hands whatever the dispatch returns to P1's queue).
-// (D-NET-NEW-L1-27)
-// [orig: NapiNPServer_HandleChatMessage @0x513760 - the gate @0x5137AD..0x5137C1;
-//  CNapiNPConnection_SendDescriptionOnce @0x629750 - the store @0x629772;
-//  CNapiNPConnection_QueueMessage @0x628640 - the test @0x62864D..0x628654]
-bool check_punted_sender_chat_relays() {
+// A punted sender's records are parsed but never handled: the per-record dispatch tests the
+// description's sent byte the punt set and skips the record's handler, so P1's team line reaches
+// no one (P3 and P2 nothing) and P1's queue, closed behind its description, holds the description
+// alone. (D-NET-NEW-L1-27)
+// [orig: CNapiNPConnection_DispatchMessage @0x622570 - `cmp byte ptr [esi+70Dh], 0` @0x622697 /
+//  `jnz` @0x62269E past the handler's call @0x6226EF; CNapiNPConnection_SendDescriptionOnce
+//  @0x629750 - the store @0x629772; CNapiNPConnection_QueueMessage @0x628640 - the test
+//  @0x62864D..0x628654]
+bool check_punted_sender_chat_is_not_handled() {
 	HostFixture f(4);
 	for (auto &t : f.transports) (void)drain(t);
 	if (!expect(inmatch::Server_StageHostPunt(f.conn(0), 35) && f.conn(0).host_disconnect_sent,
@@ -499,11 +497,12 @@ bool check_punted_sender_chat_relays() {
 	const std::vector<ns::Datagram> to_p1 = drain(f.transports[0]);
 	if (!expect(to_p1.size() == 1 && to_p1[0].tag == hightag::DESCRIPTION_PACKET &&
 					to_p1[0].protocol_flags_raw == 0xA0,
-			"P1's queue holds its description alone: its own copy and a later send return unqueued"))
+			"P1's queue holds its description alone: a later send returns unqueued"))
 		return false;
-	return expect(count_tag(drain(f.transports[2]), s2c::CHAT_BROADCAST) == 1 &&
-					count_tag(drain(f.transports[1]), s2c::CHAT_BROADCAST) == 0,
-			"a punted sender's team line still reaches its team");
+	return expect(replies.empty() && drain(f.transports[2]).empty() &&
+					drain(f.transports[1]).empty() && drain(f.transports[3]).empty() &&
+					f.conn(0).reply.chat_last_ms == 0,
+			"a punted sender's team line reaches no handler: no one is sent it");
 }
 
 // --------------------------------------------------------------------------
@@ -2055,7 +2054,7 @@ int main() {
 	ok = check_host_novaworld_exit() && ok;
 	ok = check_chat_helpers() && ok;
 	ok = check_chat_routing() && ok;
-	ok = check_punted_sender_chat_relays() && ok;
+	ok = check_punted_sender_chat_is_not_handled() && ok;
 	ok = check_loaded_model_reply_stamp() && ok;
 	ok = check_vehicle_spawn_availability() && ok;
 	ok = check_duplicate_pcid_kick_at_the_quality_boundary() && ok;

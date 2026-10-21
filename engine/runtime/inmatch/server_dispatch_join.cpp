@@ -50,16 +50,17 @@ bool stage_join_gate_reject(NapiNPConnection &conn, uint32_t reason_dpc) {
 }
 
 // An admission handler's reject: the connection's description queued (the first record wins,
-// the description once), the handler returning with the net player's game state unchanged, so
-// the records behind it in the datagram reach their handlers and a later record of the same
-// stage is tested again (D-NET-NEW-L1-24). False only when no description could be queued at
-// all (a node with no remote transport), which the protocol owner releases (Rejected).
+// the description once), the handler returning with the net player's game state unchanged and
+// the node kept in its stage; its description's sent byte then keeps every later record of the
+// connection from its handler (the walks' per-record test, D-NET-NEW-L1-27). False only when no
+// description could be queued at all (a node with no remote transport), which the protocol owner
+// releases (Rejected) (D-NET-NEW-L1-24).
 // [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 - the sent byte @0x4C7F58..0x4C7F5F,
 //  DC 2 @0x4C7FAE, the first-wins slot @0x4C7FF2..0x4C8004; NapiNPServer_HandlePlayerJoinMessage
 //  @0x512AA0 (the validator's reject returns @0x512EAC, game state 1 kept);
-//  NapiNPServerMsg_HandleJoinRequest @0x512ED0 (the 17 @0x512F7E, the return @0x512FC2, game
-//  state 2 kept); CNapiNPConnection_ParseMessages @0x625BC0 (the record walk
-//  @0x625DF5..0x625F1B, no test of the description)]
+//  NapiNPServerMsg_HandleJoinRequest @0x512ED0 (the 17 called @0x512F7E, its return
+//  @0x512F83..0x512F86, game state 2 kept); CNapiNPConnection_DispatchMessage @0x622570 (the sent
+//  byte's test @0x622697 / @0x62269E)]
 bool reject_join_record(NapiNPConnection &conn, uint32_t reason_dpc) {
 	(void)stage_join_gate_reject(conn, reason_dpc);
 	if (conn.host_disconnect_sent) return true;
@@ -574,6 +575,10 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 	for (; index < messages.size() && conn.admission_stage != GameAdmissionStage::Complete;
 			++index) {
 		const ProtocolMessage &message = messages[index];
+		// No handler once the description went: a reject's description ends the handling of
+		// every record behind it (D-NET-NEW-L1-27) [orig: CNapiNPConnection_DispatchMessage
+		//  @0x622570 - `cmp byte ptr [esi+70Dh], 0` @0x622697 / `jnz` @0x62269E].
+		if (conn.host_disconnect_sent) continue;
 		// Header-only ACKs and settings records are not gameplay records.
 		if (message.flags.settings_update || message.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE)
 			continue;
@@ -602,7 +607,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 							inputs.server_ctx, conn, roster, message.payload);
 					if (reject_dpc != 0) {
 						// The handler queues the description and returns, the net player
-						// still in game state 1: the walk goes on (reject_join_record).
+						// still in game state 1; no later record is handled (reject_join_record).
 						if (!reject_join_record(conn, reject_dpc)) return {};
 						break;
 					}
@@ -632,7 +637,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 						conn.join_spectator_request == 0 &&
 						!strutil::iequals(conn.join_password, config.side_a_password) &&
 						!strutil::iequals(conn.join_password, config.side_b_password)) {
-					// The net player stays in game state 2, so a later 0x01 is tested again.
+					// The net player stays in game state 2; no later record is handled.
 					if (!reject_join_record(conn, 17)) return {};
 					break;
 				}

@@ -12,9 +12,10 @@
 // reaches its handler, whose server-slot gate (+0xC0, set only by the add) answers nothing: the
 // node stays (the 0x0A, 0x2F and 0x0B pinned). The same gate holds past the 0x02 until the
 // spawn pump's add: a 0x33 behind the completing 0x02 answers nothing (the 0x60 only once the
-// slot is bound). A reject queues the description and returns with the game state kept, so the
-// walk goes on: a later 0x01 is tested again (the first description wins, sent once) and a 0x02
-// behind a 17 reject completes the admission.
+// slot is bound). A reject queues the description and returns with the game state kept, and the
+// per-record dispatch then tests the description's sent byte ahead of each later record's
+// handler: neither a later 0x01 nor a 0x02 behind a 17 reject is handled (one description, no
+// completion; D-NET-NEW-L1-27, CNapiNPConnection_DispatchMessage @0x622570 - @0x622697).
 // [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - `cmp [edi+0A0h], 2` @0x512EF1,
 //  `cmp [edi+0C0h], 0` @0x512EFE, the two lengths @0x512F0B..0x512F3B, the JSR test @0x512F3D,
 //  _stricmp(JSP, A) @0x512F52 and (JSP, B) @0x512F64, CNapiNPConnection_QueueDisconnectEvent
@@ -365,10 +366,12 @@ void test_records_ahead_of_the_add_answer_nothing() {
 	CHECK(game_tags(replies) == (std::vector<uint8_t>{s2c::FILE_TRANSFER_CHUNK}));
 }
 
-// A reject queues the description and returns with the game state kept: a second 0x01 in the
-// datagram is tested again (no second description: the first wins and is sent once), and a
-// 0x02 behind the reject completes the admission.
-void test_a_reject_does_not_end_the_walk() {
+// A reject queues the description and returns with the game state kept; no record behind it
+// reaches its handler, the description's sent byte being set: a second 0x01 draws no second
+// description and a 0x02 behind the reject completes nothing (D-NET-NEW-L1-27).
+// [orig: CNapiNPConnection_DispatchMessage @0x622570 - `cmp byte ptr [esi+70Dh], 0` @0x622697 /
+//  `jnz` @0x62269E past the handler's call @0x6226EF]
+void test_a_reject_ends_the_handling() {
 	using S = inmatch::GameAdmissionStage;
 	for (const bool echo_behind : {false, true}) {
 		auto world = std::make_unique<w::World>(); // heap: 1 MB stack
@@ -401,12 +404,8 @@ void test_a_reject_does_not_end_the_walk() {
 				d.body == connection_description_to_bytes(reject));
 		CHECK(!wire.client_recv(d)); // one description
 		CHECK(conn.host_disconnect_sent);
-		if (echo_behind) {
-			CHECK(game_tags(replies) == kCompletion);
-			CHECK(conn.admission_stage == S::Complete && conn.burst.game_state == 7);
-		} else {
-			CHECK(replies.empty() && conn.admission_stage == S::AwaitFormPost);
-		}
+		CHECK(replies.empty() && conn.admission_stage == S::AwaitFormPost);
+		CHECK(conn.burst.game_state != 7);
 	}
 }
 
@@ -419,7 +418,7 @@ int main() {
 	test_each_admission_record_reaches_its_handler();
 	test_the_echo_zeroes_the_nag_stamp();
 	test_records_ahead_of_the_add_answer_nothing();
-	test_a_reject_does_not_end_the_walk();
+	test_a_reject_ends_the_handling();
 	std::printf("join_form_post_gate: %d failure(s)\n", g_failures);
 	return g_failures == 0 ? 0 : 1;
 }
