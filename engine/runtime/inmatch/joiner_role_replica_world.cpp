@@ -365,10 +365,16 @@ void JoinerRole::apply_authoritative_health() {
 				world::screen_flash_arm_health_drop(lp.view.flash, lp.view.shake,
 						health, local->health);
 			if (health <= 0) {
+				// A zero tail stores Health alone: the dead bit is the body's own
+				// death edge, in this frame's entity update after the pump, so a 0x13
+				// later in the same pump still finds L alive and its class callback
+				// runs past the dead return (the seat leave's C2S 0x27, the re-arm).
+				// [orig: NapiNPClientMsg_0x00A @0x42FEC0 (the Health store @0x4305DF, no Flags);
+				//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the death edge
+				//  @0x4B4BF1..0x4B4C02; the plyr callback's dead return
+				//  @0x40772A..0x40772F]
 				local->health = health;
 				local_ai->health = health;
-				local->alive = false;
-				local->flags |= 2u;
 			} else if (redeploy_release_pending_ &&
 					rt.state().health_updates_applied >
 							redeploy_health_updates_at_release_) {

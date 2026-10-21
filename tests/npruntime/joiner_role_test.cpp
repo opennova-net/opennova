@@ -2234,6 +2234,46 @@ bool run_entity_death_names_l() {
 					local->spawn_phase == 63,
 			"0x13 on L: Health 0 kills L, and the plyr callback re-armed its think"))
 		return false;
+	{
+		// L5-s3 FOUND 1: a zero tail and a 0x13 in one pump. The tail stores Health
+		// alone; the dead bit is the body's death edge in the entity update after the
+		// pump, so the 0x13's callback still runs past its dead return (the re-arm to
+		// 64, and on a seated L the seat leave's C2S 0x27)
+		// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - the Health store @0x4305DF;
+		//  the plyr callback's dead return @0x40772A..0x40772F; Entity_UpdateInfantryPlayerBody
+		//  @0x4B40E0 - the death edge @0x4B4BF1..0x4B4C02].
+		Harness h2;
+		h2.role.poll_preload();
+		h2.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+				1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h2.role.run_tick(h2.input);
+		auto &row2 = h2.role.runtime->state().upsert(0x0005);
+		row2.cls = EntityClass::Player;
+		row2.type_id = w::kPlayerInfantryTypeId;
+		SessionSequencing seq2 = inmatch::make_jo_game_session_sequencing();
+		auto send2 = [&](std::vector<ProtocolMessage> messages) {
+			std::vector<uint8_t> packet;
+			frame_session_packet(seq2, SessionCrypto{kServerScrk, {}, kClientKey}, messages, packet);
+			auto datagram =
+					nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+			h2.role.runtime->receive(datagram.data(), datagram.size());
+			h2.role.run_tick(h2.input);
+		};
+		send2({make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))});
+		w::Entity *l2 = h2.kernel->local.player();
+		if (!expect(l2 != nullptr && l2->alive, "zero tail + 0x13: L stands alive"))
+			return false;
+		l2->spawn_phase = 0;
+		FrameUpdate dead_tail = fu;
+		dead_tail.health = 0;
+		send2({make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(dead_tail)),
+				make_protocol_message(s2c::ENTITY_DEATH, std::vector<uint8_t>{0x05, 0x00, 0x2A, 0x00})});
+		if (!expect(l2->health == 0 && (l2->flags & w::kEntityFlagDead) != 0 &&
+						l2->spawn_phase == 63,
+				"zero tail + 0x13 in one pump: the callback runs past its dead return; the "
+				"death edge latches after"))
+			return false;
+	}
 
 	// An AI-data twin's callback is its brain machine (event 4, the death): in
 	// session off the authority it ticks the brain's state row and queues the
