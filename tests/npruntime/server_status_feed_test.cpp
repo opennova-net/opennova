@@ -136,6 +136,47 @@ void test_roster_and_facts() {
 	CHECK(!page.mp_session_peer && !page.novaworld);
 }
 
+// A Serve Only host's own slot 0 has no connection, but the round init keeps it active and
+// local: the feed lists it so, the score list skips it as it skips a listen host's loopback
+// row, and the current logins count only the joiner (slot 1).
+// [orig: Server_InitNewRoundState @0x51C8E0 (+4 @0x51CA31, +5 @0x51CA35);
+//  HUD_DrawPlayerScoreList @0x500300 (the +5 skip @0x500370); Server_DrawStatusScreen
+//  @0x50A2D0 (`+4 && !+5` @0x50B148)]
+void test_dedicated_host_slot_zero() {
+	world::World world;
+	world.registry.configure_pool(0, 8);
+	world::MatchRules rules;
+	rules.game_type = 0x10000u;
+	world.match.configure(rules);
+	const world::EntityHandle joe = player(world, 1, 2, 5, 100, "Joe");
+	replication::LoopbackChannel joe_wire;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_mp_session_peer = 0;
+	ctx.config.max_players = 4;
+	ctx.host_slot.active = true;
+	ctx.host_slot.name = "Host";
+	inmatch::NapiNPConnection j = conn_fixture::make_conn(2, 1, &joe_wire,
+			replication::TransportMode::Client, joe, true);
+	j.reply.player_slot = 1;
+	j.reply.player_name = "Joe";
+	ctx.np_protocol.connection_list.push_back(j);
+	hud::ServerStatusPageState page;
+	inmatch::fill_server_status_page(page, ctx, &world);
+	CHECK(!page.mp_session_peer && page.slots.size() == 4);
+	CHECK(page.slots[0].active && page.slots[0].local);
+	CHECK(page.slots[1].active && !page.slots[1].local && page.slots[1].name == "Joe");
+	CHECK(!hud::server_status_score_row(page, 0).drawn);
+	CHECK(hud::server_status_score_row(page, 1).drawn);
+	page.text.current_logins = "Now";
+	const std::vector<hud::ServerStatusTextLine> bottom = hud::server_status_bottom_row(page);
+	CHECK(bottom.size() == 5 && bottom[4].text == "Now 1");
+	// A listen host's row 0 is its loopback connection's; the feed adds no row of its own.
+	ctx.host_slot.active = false;
+	inmatch::fill_server_status_page(page, ctx, &world);
+	CHECK(!page.slots[0].active && !page.slots[0].local);
+}
+
 // The total logins: the host's own loopback coming up counts one, every
 // server start zeroes the count first [orig: CNapiServer_OnHostStarted
 // @0x4c94f0].
@@ -159,6 +200,7 @@ void test_total_logins() {
 
 int main() {
 	test_roster_and_facts();
+	test_dedicated_host_slot_zero();
 	test_total_logins();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

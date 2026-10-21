@@ -5,7 +5,7 @@
 #pragma once
 #include <cstdint>
 namespace opennova::world {
-struct World;
+class World; // world.h's class key (MSVC mangles the key into every signature)
 struct Entity;
 struct EntityHandle;
 struct FixedVec3;

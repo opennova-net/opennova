@@ -24,7 +24,7 @@
 
 namespace opennova::world {
 
-struct World;
+class World; // world.h's class key (MSVC mangles the key into every signature)
 struct ScopeToggleCallFlags;
 
 // The per-local-player view trackers the view cluster keeps beside the

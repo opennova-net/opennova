@@ -501,6 +501,10 @@ func _tick_dedicated_host(sim: Simulation) -> void:
 				sim.request_hud_map_close()
 			_apply_toggle_events(toggle_events)
 	var status_gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	# The page's riders read the frame's role facts as a listen host's do: its
+	# end-round leg the authority's round-over latch, its connection indicators
+	# the process's (engine inmatch/role_feeds.h hud_role_facts carries the witnesses).
+	_game_hud.set_role_facts(sim, status_gametext)
 	_game_hud.set_quit_dialog(_toggles.is_quit_dialog_open(), sim.is_mp_session(),
 			_authority(sim), status_gametext)
 	_game_hud.set_server_status_page(_toggles.is_server_status_view(),

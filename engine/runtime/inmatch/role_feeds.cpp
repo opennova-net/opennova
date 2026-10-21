@@ -201,6 +201,12 @@ BreathBarFacts breath_bar_facts(const RoleView &view) {
 		out.samples = cs.breath_samples;             // word_A85B7C
 		out.spawn_success_gate = cs.spawn_success_gate;
 		if (view.joiner) out.breath_time = cs.breathtime;
+	} else if (view.host != nullptr && view.kernel != nullptr) {
+		// A Serve Only host has no client to fold a 0x1D: its g_RoundOver is the authority's
+		// own round-end latch, which its status page's end-round leg tests
+		// [orig: Server_ProcessRoundEnd @0x5164F0 (`mov g_RoundOver, ebp` @0x5168E4);
+		//  Server_DrawStatusScreen @0x50A2D0 (`cmp g_RoundOver, 0` @0x50B286)].
+		out.spawn_success_gate = view.kernel->world.match.outcome().ended;
 	}
 	// The authority's frame carries no sub-block 1 to its own loopback, and
 	// its HUD reads the host's own named value [orig: g_WacVarBreathTime].

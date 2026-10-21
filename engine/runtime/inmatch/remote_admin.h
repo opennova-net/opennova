@@ -26,7 +26,7 @@ struct GameCfg;
 }
 
 namespace opennova::world {
-struct World;
+class World; // world.h's class key (MSVC mangles the key into every signature)
 }
 
 namespace opennova::rtxt {

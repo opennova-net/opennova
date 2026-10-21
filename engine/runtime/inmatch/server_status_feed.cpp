@@ -18,6 +18,16 @@ void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServe
 	page.capacity = capacity;
 	page.slot_limit = capacity;
 	page.slots.assign(static_cast<size_t>(capacity), hud::ServerStatusSlot{});
+	// A Serve Only host's own slot 0 (HostSlotRow) holds no connection, but its round init
+	// keeps it active and local, so the score list skips it and the current logins leave it
+	// out, as they do a listen host's loopback row.
+	// [orig: Server_InitNewRoundState @0x51C8E0 (+4 @0x51CA31, +5 @0x51CA35 on g_LocalNetPlayer);
+	//  HUD_DrawPlayerScoreList @0x500300 (the +5 skip @0x500370); Server_DrawStatusScreen
+	//  @0x50A2D0 (the current logins' `+4 && !+5` @0x50B148)]
+	if (ctx.host_slot.active && capacity > 0) {
+		page.slots[0].active = true;
+		page.slots[0].local = true;
+	}
 	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		// The slot's active byte (+4) [orig: Server_PlayerAdd @0x51CBC0].
 		if (!player_slot_active(c) || c.reply.player_slot >= capacity) continue;

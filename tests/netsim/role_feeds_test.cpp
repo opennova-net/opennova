@@ -395,6 +395,19 @@ int main() {
 		CHECK(h.samples == 12 && h.breath_time == 30 && !h.spawn_success_gate);
 		const BreathBarFacts none = breath_bar_facts(RoleView{});
 		CHECK(none.samples == 0 && none.breath_time == 20 && !none.spawn_success_gate);
+		// A Serve Only host (a host context, no client runtime): g_RoundOver is the
+		// authority's own round-end latch, which its status page's end-round leg tests
+		// [orig: Server_ProcessRoundEnd @0x5164F0 (@0x5168E4); Server_DrawStatusScreen
+		//  @0x50A2D0 (`cmp g_RoundOver, 0` @0x50B286)].
+		NapiNPServerCtx serve_only_ctx;
+		RoleView serve_only;
+		serve_only.host = &serve_only_ctx;
+		serve_only.kernel = &kernel;
+		CHECK(!breath_bar_facts(serve_only).spawn_success_gate);
+		kernel.world.match.latch_round_over();
+		CHECK(breath_bar_facts(serve_only).spawn_success_gate);
+		// A listen host keeps its own client's folded latch.
+		CHECK(!breath_bar_facts(host).spawn_success_gate);
 	}
 
 	// The HUD's role facts: the session lines' globals off the replica (a
