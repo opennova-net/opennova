@@ -2320,7 +2320,7 @@ bool run_tail_carried_word_lands_on_l() {
 // equipped default of every body it spawns (the image's initializer, WPN_M4AUTO first,
 // until a list arrives).
 // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the rows
-//  @0x429230..0x4293B9; PlayerClass_InitEntity @0x4B1100..0x4B1116]
+//  @0x429230..0x4293B9; PlayerClass_InitEntity @0x4B1060 (@0x4B1100..0x4B1116)]
 bool run_a_weapon_loadout_rebuilds_the_process_name_list() {
 	Harness h;
 	for (const char *name : {"WPN_KNIFE", "WPN_M4AUTO", "WPN_AK47AUTO"}) {
@@ -2366,7 +2366,8 @@ bool run_a_weapon_loadout_rebuilds_the_process_name_list() {
 // takes the event (+0x138) and the serializer (+0x164) from it together: a plyr row takes
 // the plyr arm (its +0x2AC = 64), an org row the organic arm (no store), and a brrl row's
 // Player-bit body classifies as no person at all, so the pass never reaches it.
-// [orig: EntityDef_InitAllCallbacks @0x4A5A70 (@0x4A5AA7 / "Null" @0x4A5AAE);
+// [orig: EntityDef_InitAllCallbacks @0x4A5A70 (the tag push @0x4A5AA6, "Null" @0x4A5AA9,
+//  the call @0x4A5AAE);
 //  Entity_LookupRenderCallbacks @0x407DC0; Projectile_ProcessDamageOnTarget @0x4E7FB0
 //  (the +0x1C8 call @0x4E81FF..0x4E820E)]
 bool run_the_person_pass_keys_the_class_row() {
@@ -2386,14 +2387,22 @@ bool run_the_person_pass_keys_the_class_row() {
 	w::World &world = h.kernel->world;
 	bool ok = expect(static_cast<bool>(world.round_sim.wire_person_body),
 			"person pass: the joiner binds the wire person view");
+	// The rows classify as the joiner's spawn stream types them: through the item
+	// catalog the shell installs on the view (Simulation's item_replication_catalog),
+	// by the def's ai_function.
+	const auto catalog = std::make_shared<const replication::ItemReplicationCatalog>(
+			replication::ItemReplicationCatalog::from_items_def(items));
+	h.role.runtime->view().set_item_catalog(catalog);
 	for (int i = 0; i < 3; ++i) {
 		replication::ClientEntityState &row = h.role.runtime->state().upsert(
 				static_cast<uint16_t>(0x0010 + i));
 		row.type_id = static_cast<uint16_t>(0x2000 + i);
-		row.cls = class_from_tag(tags[i]); // the row's class, from the same tag
+		const std::optional<EntityClass> cls = catalog->resolve_wire_entity_class(row.type_id);
+		ok &= expect(cls.has_value(), "person pass: the catalog types every row");
+		row.cls = cls.value_or(EntityClass::Unknown);
 		row.rm_entity_flags = w::kEntityFlagPlayer;
 	}
-	ok &= expect(class_from_tag("brrl") == EntityClass::NoNetworkCallback,
+	ok &= expect(h.role.runtime->state().find(0x0012)->cls == EntityClass::NoNetworkCallback,
 			"person pass: a brrl row is no person row");
 	bool plyr_visited = false, plyr_class = false;
 	ok &= expect(world.round_sim.wire_person_body(0x0010, [&](w::WirePersonBody &b) {
@@ -2924,11 +2933,12 @@ bool run_the_self_record_rebinds_ls_camouflage_row() {
 //  ItemList_FindIndexByTypeId @0x4C129D, the compare @0x4C12A5, the rebind
 //  @0x4C12B8..0x4C12D6]
 bool run_a_remote_record_repicks_its_rows_camouflage_row() {
+	// The camouflage rows are plyr rows (a player body's class row).
 	static const char kItems[] =
 			"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
-			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n type person\r\n hp 150\r\nend\r\n"
+			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n ai_function plyr\r\n type person\r\n hp 150\r\nend\r\n"
 			"begin \"Player #1, Single player\"\r\n id 105310\r\n type person\r\n hp 120\r\nend\r\n"
-			"begin \"Generic Soldier\"\r\n id 105311\r\n type person\r\n hp 100\r\nend\r\n";
+			"begin \"Generic Soldier\"\r\n id 105311\r\n ai_function plyr\r\n type person\r\n hp 100\r\nend\r\n";
 	static const char kCharattr[] =
 		"[CHARACTER1]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
 		"[CHARACTER2]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
@@ -2953,6 +2963,10 @@ bool run_a_remote_record_repicks_its_rows_camouflage_row() {
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.runtime->set_charattr_table(table);
+	// The view classifies through the item catalog the shell installs.
+	h.role.runtime->view().set_item_catalog(
+			std::make_shared<const replication::ItemReplicationCatalog>(
+					replication::ItemReplicationCatalog::from_items_def(items)));
 	h.role.run_tick(h.input);
 	for (uint16_t handle : {kRemote, kSelf}) {
 		auto &row = h.role.runtime->state().upsert(handle);
@@ -2986,10 +3000,10 @@ bool run_a_remote_record_repicks_its_rows_camouflage_row() {
 	bool ok = expect(items.count == 4 && expected_type == 5311 &&
 					expected_type != w::kPlayerInfantryTypeId,
 			"remote camouflage row: the minted class-6 desert row");
-	// (The row's class then follows its new type's class row: the pipeline pin,
-	// netsim_client_replica_pipeline_compact_self_heal.)
 	ok = ok && expect(remote != nullptr && remote->type_id == expected_type,
 			"remote camouflage row: a class-6 record re-types the remote row to 5311");
+	ok = ok && expect(remote->cls == EntityClass::Player,
+			"remote camouflage row: the re-typed row's class follows its plyr row");
 	ok = ok && expect(self != nullptr && self->type_id == w::kPlayerInfantryTypeId,
 			"remote camouflage row: the self row is left to L's fold");
 	opennova::def::def_free_items(&items);

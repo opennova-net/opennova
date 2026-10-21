@@ -691,7 +691,7 @@ void JoinerRole::pump() {
 	// The process's loadout name list, whose first name every body the joiner spawns takes as
 	// its equipped weapon (world::player_spawn_equipped_default), as HostRole::apply_rule_words
 	// binds the host's [orig: g_LoadoutWeaponNameList @0x8333F8; PlayerClass_InitEntity
-	//  @0x4B1100..0x4B1116].
+	//  @0x4B1060 (@0x4B1100..0x4B1116)].
 	world.loadout_weapon_names = &rt.loadout_weapon_names();
 	world.rules.title = title_ != nullptr ? title_->game_id : gameprofile::GAME_JO;
 	// The phase clocks (F3 Stats): each span below laps onto the SIM_CLIENT_*

@@ -8,7 +8,7 @@
 // Buffers freezes it: one dword per node not marked as foliage, head first, the page a
 // joiner's 0x3D answers and the count a host's S2C 0x68 cursor wraps at.
 // [orig: ThreediGp_LoadModel @0x5B6160 - the name @0x5b61a6..0x5b61d0, the find
-//  CEffectDef_FindByTypeName @0x5b01a0 (stricmp @0x5b01c2), CEffectDef_Construct @0x5b01e0
+//  CEffectDef_FindByTypeName @0x5b01a0 (the stricmp call @0x5B01B8), CEffectDef_Construct @0x5b01e0
 //  (the head insert @0x5b0229 / @0x5b0232), the failed load's destroy @0x5b623f;
 //  Game_StartMission @0x524360 - EffectWorld_DestroyAllAndInitDeviceCaps @0x524a6f;
 //  CEffectDef_MarkFoliage @0x5b2220 (node+0x3D4); CEffectWorld_RebuildAllModelBuffers
@@ -65,7 +65,8 @@ public:
 	// shell builds ahead of the mission's first frame, as each load builds its model and the
 	// freeze's first pass every node's buffers, so a later swap to one (a death's husk) builds
 	// nothing [orig: ThreediGp_LoadModel @0x5B6160 (ThreediGp_LoadFromFile @0x5b6230);
-	// CEffectWorld_RebuildAllModelBuffers @0x5B3A80 (the per-node rebuild @0x5b3a92)]. The
+	// CEffectWorld_RebuildAllModelBuffers @0x5B3A80 (each node's CEffectDef_ResolveSubobjectMaterials
+	// call @0x5B3A92)]. The
 	// marked foliage nodes are the terrain's foliage pass's to build.
 	std::vector<std::string> model_files() const;
 	// The nodes head first, each with its mark (tests and diagnostics).
