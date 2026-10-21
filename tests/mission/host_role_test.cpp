@@ -435,8 +435,7 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 // through its own client, the C2S 0x25 bytes [gun handle][FF FF] on the loopback, and
 // refills the gun as its S2C 0x49 echo does; a dedicated host has no client
 // connection: nothing is sent and the gun is never refilled (D-NET-NEW-L7-4). The
-// bare local role refills as the echo would. (A function of its own: main's frame is
-// near the 1 MB stack.)
+// bare local role refills as the echo would.
 // [orig: WeaponAction_Reload @0x5430B0 (@0x5430FF); NetPacket_SendReloadRequest
 //  @0x432930 (0xFFFF @0x432972..0x432974); CNapiNetwork_QueueReliableMessage
 //  @0x4C4FA0 (@0x4C4FA6..0x4C4FA8); CNapiGameSession_CreateSession @0x4C97C0
@@ -471,8 +470,10 @@ int main() {
 
 	// --- the SP listen bring-up and the per-tick frame ----------------------
 	{
-		ms::MissionKernel kernel;
-		inmatch::HostRole role;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
 		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
@@ -745,8 +746,10 @@ int main() {
 
 	// --- the dedicated (HostOnly) bring-up -----------------------------------
 	{
-		ms::MissionKernel kernel;
-		inmatch::HostRole role;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
 		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
@@ -808,8 +811,10 @@ int main() {
     // The shared deployment transaction resets local view state immediately,
     // even when the host never presents an intervening dead frame.
     {
-        ms::MissionKernel kernel;
-        inmatch::HostRole role;
+        auto kernel_storage = std::make_unique<ms::MissionKernel>();
+        ms::MissionKernel &kernel = *kernel_storage;
+        auto role_storage = std::make_unique<inmatch::HostRole>();
+        inmatch::HostRole &role = *role_storage;
         role.bind(kernel);
         kernel.open_document(two_entity_mission(), "respawn", source_over(&files));
         ms::KernelBootOptions options;
@@ -990,8 +995,10 @@ int main() {
 	//  Entity_FireWeaponAndSendPacket @0x42be12..0x42be44 -> PlayerSlot_IsActive
 	//  @0x4FC760; Server_SendRandomSeedToPlayer @0x5101A0]
 	{
-		ms::MissionKernel kernel;
-		inmatch::HostRole role;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
 		kernel.open_document(two_entity_mission(), "fire_gate", source_over(&files));
@@ -1067,8 +1074,10 @@ int main() {
 	//  NetPacket_SendRequestRespawn @0x42DBA0; NapiNPServerMsg_DeathTimeoutReset
 	//  @0x510540]
 	for (const bool mp : {true, false}) {
-		ms::MissionKernel kernel;
-		inmatch::HostRole role;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
 		kernel.open_document(two_entity_mission(), "respawn_key", source_over(&files));
@@ -1131,8 +1140,10 @@ int main() {
 	//  CNapiNetwork_PumpServerProtocolRecv @0x51d895;
 	//  NapiNPServerMsg_HandleStanceChange @0x501c60, latches @0x501d1b / @0x501d2d]
 	{
-		ms::MissionKernel kernel;
-		inmatch::HostRole role;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
 		kernel.open_document(two_entity_mission(), "stance", source_over(&files));
@@ -1231,8 +1242,10 @@ int main() {
 	//  @0x51a6f2; Input_HandleActionBinding case 12 @0x49b17b;
 	//  Render_ProcessMainSceneFrame @0x5CAC81]
 	for (const bool mp_session : {true, false}) {
-		ms::MissionKernel kernel;
-		inmatch::HostRole role;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
 		kernel.open_document(two_entity_mission(), "deploy_hold", source_over(&files));
@@ -1372,8 +1385,10 @@ int main() {
 	// leaves. [orig: Game_StartMission @0x525CC2..0x525D12;
 	//  Entity_GetMaxHealthWithDifficulty @0x43B8A0]
 	for (const bool objective : {true, false}) {
-		ms::MissionKernel kernel;
-		inmatch::HostRole role;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		bms::File mission = two_entity_mission();
 		mission.header.attrib_flags = objective ? bms::AttribFlags::Coop : bms::AttribFlags::None;
@@ -1412,8 +1427,10 @@ int main() {
 	//  @0x525CDD]
 	for (const int32_t profile_word : {-1, 1}) {
 		for (const bool restart : {false, true}) {
-			ms::MissionKernel kernel;
-			inmatch::HostRole role;
+			auto kernel_storage = std::make_unique<ms::MissionKernel>();
+			ms::MissionKernel &kernel = *kernel_storage;
+			auto role_storage = std::make_unique<inmatch::HostRole>();
+			inmatch::HostRole &role = *role_storage;
 			role.bind(kernel);
 			bms::File mission = two_entity_mission();
 			mission.header.attrib_flags = bms::AttribFlags::None;
@@ -1453,8 +1470,10 @@ int main() {
 	//  @0x5111B0 -> PlayerSlot_SetClientQuality @0x5006E0; Server_TickUpdate
 	//  @0x51DEC6..0x51DF10]
 	{
-		ms::MissionKernel kernel;
-		inmatch::HostRole role;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
 		kernel.open_document(two_entity_mission(), "quality_report", source_over(&files));
@@ -1518,7 +1537,8 @@ int main() {
 	// [orig: Game_MainLoop @0x52B948, the drain @0x52BA08; Server_TickUpdate
 	//  @0x51D7EA..0x51D7FB].
 	{
-		inmatch::HostRole role;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
 		role.observe_cpu_share(37);
 		CHECK(role.state.host_owner.ctx.stats_cpu_percent == 37);
 		role.observe_cpu_share(300);
