@@ -76,6 +76,12 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 //  Server_TickUpdate's send pump @0x51E487]
 void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world);
 
+// The frame update's per-slot walk order: the connections by their player slot, the slot
+// table's order, never the join order (ties keep the list's order), so each slot's 0x0A
+// writer stores show in the records of the slots after it (D-NET-449).
+// [orig: Server_TickUpdate's per-slot loop @0x51E3A0..0x51E47C over the slot table]
+std::vector<NapiNPConnection *> connections_in_slot_order(NapiNPServerCtx &ctx);
+
 // The authoritative per-frame host loop [orig: Server_TickUpdate @0x51d7e0]. One call = one engine
 // tick (the original 62 Hz cadence). Walks the SINGLE-OWNER connection table
 // NapiNPProtocol.connection_list (each node's embedded replication::Connection `link`) and, for every

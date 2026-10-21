@@ -14,6 +14,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_entity_state.h>
+#include <runtime/inmatch/server_tick.h> // connections_in_slot_order (the frame update's walk)
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/replication/connection_fan.h>
 #include <runtime/replication/entity_wire_bridge.h>
@@ -144,9 +145,14 @@ void test_the_walk_order_decides_what_each_slot_reads() {
 		const int32_t full = live->health;
 		std::vector<GameEntitySnapshot> ents =
 				inmatch::snapshot_entity_states(*r.ctx, r.world);
-		// The walk, in slot order.
-		std::vector<inmatch::NapiNPConnection *> walk = {&r.conn(0), &r.conn(1), &r.conn(2)};
-		if (!spectator_first) std::swap(walk[0], walk[1]);
+		// The frame update's own walk: the slot table's order, not the list's (the join
+		// order) [orig: Server_TickUpdate's per-slot loop @0x51E3A0..0x51E47C].
+		const std::vector<inmatch::NapiNPConnection *> walk =
+				inmatch::connections_in_slot_order(*r.ctx);
+		CHECK(walk.size() == 3);
+		if (walk.size() != 3) continue;
+		CHECK(walk[0] == (spectator_first ? &r.conn(0) : &r.conn(1)));
+		CHECK(walk[2] == &r.conn(2));
 		std::vector<uint8_t> after[3];
 		for (int i = 0; i < 3; ++i) {
 			std::vector<uint8_t> frame;

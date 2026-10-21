@@ -509,6 +509,17 @@ void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
 	Server_RouteWaterCrossings(ctx, world);
 }
 
+// See server_tick.h.
+std::vector<NapiNPConnection *> connections_in_slot_order(NapiNPServerCtx &ctx) {
+	std::vector<NapiNPConnection *> slots;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) slots.push_back(&conn);
+	std::stable_sort(slots.begin(), slots.end(),
+			[](const NapiNPConnection *a, const NapiNPConnection *b) {
+				return a->reply.player_slot < b->reply.player_slot;
+			});
+	return slots;
+}
+
 void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// A joiner is a pure non-authority client (its frame is P5's Client_ProcessNetworkFrame); the
 	// pre-World P2 unit-test path has no simulation to drive. Either way: no host frame. The host
@@ -1044,10 +1055,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// so Server_TickUpdate (the SP/host driver) fans it a per-frame 0x0A — its local view is no longer
 	// starved (the gap the legacy net-ISystem emit filled by emitting to every transport-bearing
 	// connection). Its 0x0A anchors to its owned_entity (the host player, bound by
-	// Server_BuildPlayerInfoAndAdd). An absent, freed, or lifetime-stale owner
-	// emits nothing and cannot advance per-recipient frame state.
-	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
-	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
+	// Server_BuildPlayerInfoAndAdd). The writer's gate has no lifetime test: a slot whose
+	// owner was freed or reused reads the entry its pointer names, the reused body or the
+	// zeroed one (D-NET-449, replication::owned_entity_for_emit); a slot with no owner at
+	// all emits nothing.
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, the pointer
+	// @0x517BC8..0x517BCC with no lifetime test, recipient eye stores @0x517BF5..0x517C13,
+	// phase increment @0x517BE8]
 	if (!world.match.outcome().ended) {
 		// The snapshot is built only for recipients that take entity records.
 		// Type-1 peers take one only at their open send boundary (see the fan below).
@@ -1063,13 +1077,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		if (any_record_recipient) ents = snapshot_entity_states(ctx, world);
 		// The slot table's order, not the join order: each slot's writer stores
 		// show in the records of the slots after it.
-		std::vector<NapiNPConnection *> slots;
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) slots.push_back(&conn);
-		std::stable_sort(slots.begin(), slots.end(),
-				[](const NapiNPConnection *a, const NapiNPConnection *b) {
-					return a->reply.player_slot < b->reply.player_slot;
-				});
-		for (NapiNPConnection *slot : slots) {
+		for (NapiNPConnection *slot : connections_in_slot_order(ctx)) {
 			NapiNPConnection &conn = *slot;
 			if (!is_in_match(conn)) continue;
 			// The host's type-2 loopback is an in-process seam and remains
