@@ -6,20 +6,37 @@
 //   - the Attack-and-Defend teardown's swap arm gives the row its restore byte and swaps it;
 //   - the list builder hides an orphaned spectator row's body from every other row;
 //   - the row's net player is found by the net player's identity, which the C2S 0x48's id
-//     re-stamp does not move, and no other connection carrying the row's old id takes it.
+//     re-stamp does not move, and no other connection carrying the row's old id takes it;
+//   - Server_TickUpdate's per-row walks: the play ticks count the row's body; the periodic
+//     second's walk steps the row's dead-age counter, sends its 0x6E to its net player and
+//     punts that net player at the dead-too-long limit (past the player's leave the counter
+//     alone steps); the downed resend sends the row's downed body to its team;
+//   - the scoreboard boundary's integrity family sends the row's request to its net player;
+//   - the round end sends the row's 0x61 and 0x1D to its net player, in slot order with the
+//     player's own row's pair, and moves the row to state 7.
 // [orig: Server_CalcTeamImbalance @0x4FCAE0 (+4 @0x4FCB10, +416 @0x4FCB19);
 //  Server_AutoBalanceTeams @0x4FCC30 (+4 @0x4FCC74, +5 @0x4FCC7A, the key @0x4FCC82, the walk
 //  @0x4FCCDC..0x4FCDD8); CPairList_ShellSort @0x526C00 (`cmp` @0x526C77, `jl` @0x526C7B);
 //  Server_PlayerAdd @0x51CBC0 (the add stamp @0x51CD95, +0x1C @0x51CD4E); Game_TeardownMission
 //  (the live test @0x522470..0x522479, the byte @0x52247B..0x522485, the swap
 //  @0x52248B..0x5224AA); Entity_ValidatePtr @0x500910 (@0x500930..0x500938);
-//  Server_BuildEntityPriorityList (+0x17D01 / +0x17D00 @0x50E6F4 / @0x50E6FD)]
+//  Server_BuildEntityPriorityList (+0x17D01 / +0x17D00 @0x50E6F4 / @0x50E6FD);
+//  Server_TickUpdate (the play-tick walk @0x51D95E..0x51D98A, the periodic walk's 0x6E to the
+//  row @0x51E09D..0x51E0CF and the t7 punt @0x51E18E, the downed resend's row walk
+//  @0x51E310..0x51E378); Server_LogCRCMismatchPunt @0x517ED0 (the row's +0x1C @0x517F47);
+//  Server_ProcessRoundEnd (the row walk @0x516730..0x51687D: the 0x61 @0x516790, the 0x1D
+//  @0x516839, game state 11 @0x516846, state 7 @0x51685E)]
 
 #include <runtime/inmatch/map_change.h>       // swap_sides_or_latch
 #include <runtime/inmatch/mission_rotation.h> // HostRotation
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_entity_state.h> // snapshot_entity_states
+#include <runtime/inmatch/server_medic.h>        // Server_ResendTeamDownedStates
+#include <runtime/inmatch/server_tick.h>         // Server_ProcessRoundEnd
+#include <runtime/inmatch/server_tick_maintenance.h> // the play ticks, the periodic walk
+#include <runtime/inmatch/udp_session_transport.h>
+#include <net/npwire/ingame_message_id.h>
 #include <runtime/inmatch/server_team_change.h>  // the imbalance and the auto-balance
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/player_spawn.h>
@@ -28,6 +45,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -35,6 +53,7 @@ namespace {
 using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
+namespace ns = opennova::replication;
 
 int failures = 0;
 #define CHECK(c)                                                                               \
@@ -201,6 +220,144 @@ void test_the_net_player_is_bound_by_identity() {
 	CHECK(orphan.row.link.transport == nullptr);
 }
 
+// A session host with one net player (slot 3, in the match, its own live body) whose re-add
+// orphaned its earlier row (slot 2, in the match, a body of its own).
+struct OrphanRig {
+	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	ns::UdpSessionTransport transport{ns::UdpSessionTransport::Role::Host};
+	w::EntityHandle own_body;
+	w::EntityHandle orphan_body;
+
+	OrphanRig() {
+		world->registry.configure_pool(0, 8);
+		world->rules.mp_session = true;
+		ctx->world = world.get();
+		ctx->is_authority = 1;
+		ctx->is_in_session = 1;
+		w::PlayerSpawn s;
+		s.position = {10.0f, 10.0f, 2.0f};
+		s.team = 1;
+		own_body = w::spawn_remote_player(*world, s);
+		s.position = {20.0f, 10.0f, 2.0f};
+		orphan_body = w::spawn_remote_player(*world, s);
+		inmatch::NapiNPConnection player = row(3, 1, 0);
+		player.burst.spawned = true;
+		player.link.owned_entity = own_body;
+		player.link.transport = &transport;
+		player.link.mode = ns::TransportMode::Client;
+		player.net_player_serial = ++ctx->last_net_player_serial;
+		inmatch::NapiNPConnection orphaned = player;
+		orphaned.reply.player_slot = 2;
+		orphaned.link.owned_entity = orphan_body;
+		orphaned.link.transport = nullptr;
+		ctx->np_protocol.connection_list.push_back(player);
+		ctx->orphaned_player_rows.push_back(orphan_of(orphaned));
+		for (const auto &[body, slot] : {std::pair{own_body, uint8_t{3}},
+				std::pair{orphan_body, uint8_t{2}}}) {
+			w::MatchPlayerIdentity identity;
+			identity.entity = body;
+			identity.slot = slot;
+			world->match.upsert_player(identity);
+		}
+	}
+	inmatch::NapiNPConnection &net_player() { return ctx->np_protocol.connection_list[0]; }
+	inmatch::NapiNPConnection &orphan() { return ctx->orphaned_player_rows[0].row; }
+	std::vector<uint8_t> drain() {
+		std::vector<uint8_t> tags;
+		ns::Datagram d;
+		while (transport.pop_outbound(d)) tags.push_back(d.tag);
+		return tags;
+	}
+};
+
+void test_the_play_ticks_count_an_orphaned_row() {
+	OrphanRig r;
+	inmatch::advance_play_ticks(*r.ctx, *r.world);
+	const w::MatchPlayer *orphan = r.world->match.player(r.orphan_body);
+	const w::MatchPlayer *own = r.world->match.player(r.own_body);
+	CHECK(orphan != nullptr && orphan->play_ticks == 1);
+	CHECK(own != nullptr && own->play_ticks == 1);
+}
+
+// The orphaned row's body has been dead 360 periodic seconds: the walk's next second counts
+// 361, sends the row's 0x6E to its net player and punts that player (t7). Past the player's
+// leave the counter alone steps.
+void test_the_periodic_walk_takes_an_orphaned_row() {
+	OrphanRig r;
+	if (w::Entity *body = r.world->registry.get(r.orphan_body)) {
+		body->flags |= w::kEntityFlagDead;
+		body->health = 0;
+	}
+	r.orphan().reply.dead_live_seconds = 360;
+	(void)r.drain();
+	inmatch::update_periodic_slot_walk(*r.ctx, *r.world);
+	const std::vector<uint8_t> tags = r.drain();
+	int status = 0;
+	for (uint8_t t : tags) status += t == s2c::SPAWN_WAVE_STATUS ? 1 : 0;
+	CHECK(status == 1);
+	CHECK(r.orphan().reply.dead_live_seconds == 361);
+	CHECK(r.net_player().host_disconnect_sent);
+	r.ctx->np_protocol.connection_list.clear();
+	inmatch::update_periodic_slot_walk(*r.ctx, *r.world);
+	CHECK(r.orphan().reply.dead_live_seconds == 362);
+	CHECK(r.drain().empty());
+}
+
+// The team-mode downed resend: the orphaned row's downed body goes to the row's team, its
+// net player's current row included.
+void test_the_downed_resend_takes_an_orphaned_row() {
+	OrphanRig r;
+	w::MatchRules rules;
+	rules.game_type = kTeamGame;
+	r.world->match.configure(rules);
+	if (w::Entity *body = r.world->registry.get(r.orphan_body)) {
+		body->flags |= w::kEntityFlagDead;
+		body->health = 0;
+	}
+	r.orphan().link.death_cause_revivable = true;
+	(void)r.drain();
+	inmatch::Server_ResendTeamDownedStates(*r.ctx, *r.world);
+	int syncs = 0;
+	for (uint8_t t : r.drain()) syncs += t == s2c::PLAYER_SYNC ? 1 : 0;
+	CHECK(syncs == 1);
+}
+
+// The scoreboard boundary's integrity family walks every row: the orphaned row's request (the
+// entity form here) goes to its net player beside the player's own row's.
+void test_the_integrity_family_takes_an_orphaned_row() {
+	OrphanRig r;
+	r.ctx->scoreboard_broadcast_timer = 0x136u; // the boundary is the next step
+	r.ctx->integrity_entity_family_next = true;
+	(void)r.drain();
+	inmatch::emit_scoreboard_boundary(*r.ctx, *r.world);
+	int lists = 0;
+	int requests = 0;
+	for (uint8_t t : r.drain()) {
+		lists += t == s2c::PLAYER_LIST ? 1 : 0;
+		requests += t == s2c::ENTITY_CHECKSUM_REQ ? 1 : 0;
+	}
+	CHECK(lists == 2);
+	CHECK(requests == 2);
+}
+
+// The round end: each state-6 row's 0x61 then its 0x1D go to its net player in slot order,
+// the orphaned slot 2's pair ahead of the player's own slot 3's; both rows enter state 7 and
+// the net player game state 11.
+void test_the_round_end_takes_an_orphaned_row() {
+	OrphanRig r;
+	(void)r.drain();
+	inmatch::Server_ProcessRoundEnd(*r.ctx, *r.world, 1);
+	std::vector<uint8_t> pairs;
+	for (uint8_t t : r.drain())
+		if (t == s2c::TICK_SEED || t == s2c::END_ROUND_HEADER) pairs.push_back(t);
+	CHECK((pairs == std::vector<uint8_t>{s2c::TICK_SEED, s2c::END_ROUND_HEADER, s2c::TICK_SEED,
+			s2c::END_ROUND_HEADER}));
+	CHECK(r.orphan().slot_state == inmatch::PlayerSlotState::RoundOver);
+	CHECK(r.net_player().slot_state == inmatch::PlayerSlotState::RoundOver);
+	CHECK(r.net_player().burst.game_state == 11);
+}
+
 } // namespace
 
 int main() {
@@ -210,6 +367,11 @@ int main() {
 	test_the_swap_arm_swaps_an_orphaned_row();
 	test_an_orphaned_spectator_rows_body_is_hidden();
 	test_the_net_player_is_bound_by_identity();
+	test_the_play_ticks_count_an_orphaned_row();
+	test_the_periodic_walk_takes_an_orphaned_row();
+	test_the_downed_resend_takes_an_orphaned_row();
+	test_the_integrity_family_takes_an_orphaned_row();
+	test_the_round_end_takes_an_orphaned_row();
 	if (failures != 0) {
 		std::printf("npruntime_orphan_row_walks: %d failure(s)\n", failures);
 		return 1;

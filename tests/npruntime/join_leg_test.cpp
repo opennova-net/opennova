@@ -49,6 +49,7 @@
 #include <runtime/world/geom.h> // to_fixed
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -1227,6 +1228,47 @@ bool run_a_players_two_rows_interleave_frame_and_rtt() {
 	              "each row's 0x57 follows its own 0x0A, ahead of the next row's");
 }
 
+// D-NET-NEW-L1-24 (L1-s17 row 0): a re-add that comes while the row runs its player-sync track
+// leaves the orphaned row in state 2, and the per-slot block runs its track on: a step per
+// boundary to its net player (0x2C first, the tail through the 0x11), the tail setting the net
+// player's game state 9 and parking the row in state 3, where no request of the player's
+// reaches it. The fresh row waits for its own C2S 0x09.
+// [orig: Server_TickUpdate's per-slot block - the row's +0x1C @0x51E3AA, the pump call
+//  @0x51E3E4; Server_SendPlayerSlotStateFrame @0x51BBA0 - the 0x2C @0x51BF5D..0x51C002, the
+//  0x11 @0x51C10E, CNetPlayer_SetGameState(9) on the row's +0x1C called @0x51C11C, state 3
+//  @0x51C134]
+bool run_an_orphaned_row_runs_on_its_player_sync_track() {
+	JoinFixture f(/*with_existing=*/false);
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.reply.admission_metadata_pushed = true;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the pump adds the joiner")) return false;
+	j.slot_state = inmatch::PlayerSlotState::PlayerSync; // its C2S 0x09 (state 2)
+	j.spawn_queue_unlinked = false;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    f.ctx->orphaned_player_rows.size() == 1 &&
+	                    f.ctx->orphaned_player_rows[0].row.slot_state ==
+	                            inmatch::PlayerSlotState::PlayerSync,
+	            "the re-add orphans the row in its player-sync track")) return false;
+	(void)JoinFixture::drain(f.joiner_transport);
+	f.joiner().burst.game_state = 7; // the 0x02's listing state (NapiNPServerMsg_0x002 @0x51319C)
+	std::vector<uint8_t> tags;
+	for (int i = 0; i < 40; ++i) {
+		const std::vector<uint8_t> step = f.pump();
+		tags.insert(tags.end(), step.begin(), step.end());
+	}
+	const auto has = [&tags](uint8_t tag) {
+		return std::find(tags.begin(), tags.end(), tag) != tags.end();
+	};
+	return expect(has(opennova::s2c::MISSION_MAP_NAMES) &&
+	                      has(opennova::s2c::DISCONNECT_UNLOCK) &&
+	                      f.ctx->orphaned_player_rows[0].row.slot_state ==
+	                              inmatch::PlayerSlotState::AwaitWorldRequest &&
+	                      f.joiner().slot_state == inmatch::PlayerSlotState::Added &&
+	                      f.joiner().burst.game_state == 9,
+	              "the orphaned row's track reaches its net player and parks in state 3");
+}
+
 // D-NET-NEW-L1-24 (Q7-31 (b), leg (b)): a C2S 0x02 in the NovaWorld ticket wait (game states 3
 // / 4) enters game state 7 and lists the node: the validation watchdog visits states 3 / 4 alone,
 // so it no longer punts it, the pump adds the player with no ticket, and the enter result (its
@@ -1337,6 +1379,7 @@ int main() {
 	if (!run_an_orphaned_row_is_a_player_list_row()) ++failures;
 	if (!run_an_orphaned_row_takes_its_own_frame_rtt_and_list()) ++failures;
 	if (!run_a_players_two_rows_interleave_frame_and_rtt()) ++failures;
+	if (!run_an_orphaned_row_runs_on_its_player_sync_track()) ++failures;
 	if (!run_an_echo_in_the_ticket_wait_spawns_without_a_ticket()) ++failures;
 	if (!run_a_repeated_echo_keeps_the_held_nag_stamp()) ++failures;
 	if (failures != 0) return 1;

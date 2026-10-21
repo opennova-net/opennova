@@ -12,6 +12,9 @@
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
+#include <vector>
+
 namespace opennova::inmatch {
 
 namespace {
@@ -219,11 +222,22 @@ void Server_ResendTeamDownedStates(NapiNPServerCtx &ctx, world::World &world) {
 		fire = --world.team_downed_resend_countdown == 0;
 	if (!fire) return;
 	world.team_downed_resend_countdown = 62;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.phase < ConnectionPhase::PlayerAdded ||
-				conn.phase >= ConnectionPhase::Goodbye ||
-				!conn.link.owned_entity.valid())
-			continue;
+	// The victims are the active rows in slot order, an orphaned row too (D-NET-NEW-L1-24):
+	// its downed body is resent to its team like any row's; the recipients are the
+	// connections, each by its current row's team.
+	// [orig: Server_TickUpdate - the row walk @0x51E2F7..0x51E378 (the active byte
+	//  @0x51E310, the entity @0x51E316); NapiNPServer_SendFiltered's connection walk
+	//  @0x4C8858..0x4C89F6, each connection's current row (+0xC0) @0x4C888C]
+	std::vector<NapiNPConnection *> rows;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
+		if (conn.phase >= ConnectionPhase::PlayerAdded && conn.phase < ConnectionPhase::Goodbye)
+			rows.push_back(&conn);
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) rows.push_back(&orphan.row);
+	std::stable_sort(rows.begin(), rows.end(), [](const NapiNPConnection *a,
+			const NapiNPConnection *b) { return a->reply.player_slot < b->reply.player_slot; });
+	for (NapiNPConnection *row : rows) {
+		NapiNPConnection &conn = *row;
+		if (!conn.link.owned_entity.valid()) continue;
 		const world::Entity *victim = world.registry.get(conn.link.owned_entity);
 		if (victim == nullptr || victim->health > 0 ||
 				((victim->flags | victim->engine_flags) & world::kEntityFlagDead) == 0u ||

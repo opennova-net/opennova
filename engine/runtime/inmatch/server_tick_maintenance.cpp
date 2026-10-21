@@ -87,7 +87,13 @@ bool stage_host_punt(NapiNPConnection &conn, uint32_t mismatch_type) {
 // [orig: Server_TickUpdate @0x51DFB0..0x51E00B (slot +0x170/+0x168/+0x16C)]
 void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 	if (!world.match.periodic_second()) return;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+	// Every active row's, an orphaned row's too (D-NET-NEW-L1-24): the row's own words
+	// [orig: Server_TickUpdate - the active byte @0x51DFB0, the timers @0x51DFBA..0x51E05C].
+	std::vector<NapiNPConnection *> rows;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) rows.push_back(&conn);
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) rows.push_back(&orphan.row);
+	for (NapiNPConnection *row : rows) {
+		NapiNPConnection &conn = *row;
 		// The +356 armory-reuse cooldown rides the same per-slot pass: a positive
 		// value counts down, a negative one clamps to zero.
 		// [orig: Server_TickUpdate @0x51e00b..0x51e022]
@@ -328,6 +334,18 @@ const world::Entity *integrity_player(
 	// The integrity slot walk tests only entity+36 bit 0x02. Health and the
 	// reimpl convenience `alive` latch may be stale without suppressing retail.
 	// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x50858A..0x508598]
+	if (player == nullptr ||
+			((player->flags | player->engine_flags) & world::kEntityFlagDead) != 0)
+		return nullptr;
+	return player;
+}
+
+// The same gate over an orphaned row's own words: its state word, its +5 and its body (its
+// net player is read only by the send).
+const world::Entity *orphan_integrity_player(
+		const NapiNPConnection &row, const world::World &world) {
+	if (!slot_in_match(row) || slot_is_local(row)) return nullptr;
+	const world::Entity *player = world.registry.get(row.link.owned_entity);
 	if (player == nullptr ||
 			((player->flags | player->engine_flags) & world::kEntityFlagDead) != 0)
 		return nullptr;
@@ -715,18 +733,46 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 					scoreboard.tag, scoreboard.payload, scoreboard.reliable);
 	}
 	if (world.match.outcome().ended) return;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		const world::Entity *player = integrity_player(conn, world);
+	// The family walks every active row in slot order, an orphaned one too (D-NET-NEW-L1-24):
+	// the row's gate and draw are its own (no net-player read, so they run past the player's
+	// leave too), and its request goes to its net player (send_mask 0x20 sends through the
+	// row's +0x1C), none past the leave (Q7-36 (a)).
+	// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 - the row walk
+	//  @0x508562..0x508686, the draws @0x5085A6..0x5085B9 / @0x508613..0x508626, the sends to
+	//  the row (send_mask 0x20 @0x5085BF / @0x50862C, SendFiltered @0x50866A)]
+	struct FamilyRow {
+		NapiNPConnection *row;
+		NapiNPConnection *net_player;
+	};
+	std::vector<FamilyRow> rows;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) rows.push_back({&conn, &conn});
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
+		rows.push_back({&orphan.row, orphan_net_player(ctx, orphan)});
+	std::stable_sort(rows.begin(), rows.end(), [](const FamilyRow &a, const FamilyRow &b) {
+		return a.row->reply.player_slot < b.row->reply.player_slot;
+	});
+	for (const FamilyRow &r : rows) {
+		NapiNPConnection &conn = *r.row;
+		const bool own_row = r.net_player == &conn;
+		const world::Entity *player =
+				own_row ? integrity_player(conn, world) : orphan_integrity_player(conn, world);
 		if (player == nullptr) continue;
+		replication::ISessionTransport *transport = own_row ? conn.link.transport
+				: r.net_player != nullptr &&
+								r.net_player->type == NapiNPConnection::kTypeServerSide &&
+								!r.net_player->host_disconnect_sent
+						? r.net_player->link.transport
+						: nullptr;
 		SessionReplyState &reply = conn.reply;
 		if (entity_integrity_family) {
 			if (reply.integrity_weapon_crc_salt == 0)
 				reply.integrity_weapon_crc_salt = next_maintenance_prng16(world);
 			reply.integrity_weapon_crc_salt = 0;
 			const uint32_t word = reply.integrity_weapon_crc_salt;
-			conn.link.transport->host_send(s2c::ENTITY_CHECKSUM_REQ,
-					{0xFF, static_cast<uint8_t>(word), static_cast<uint8_t>(word >> 8)},
-					/*reliable=*/false);
+			if (transport != nullptr)
+				transport->host_send(s2c::ENTITY_CHECKSUM_REQ,
+						{0xFF, static_cast<uint8_t>(word), static_cast<uint8_t>(word >> 8)},
+						/*reliable=*/false);
 			continue;
 		}
 		// AdmDef_GetEntryByIndex(*(u8 *)(entity+688)), then the body's byte
@@ -746,10 +792,11 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 				reply.integrity_ammo_crc_salt = next_maintenance_prng16(world);
 			reply.integrity_ammo_crc_salt = 0;
 			const uint32_t word = reply.integrity_ammo_crc_salt;
-			conn.link.transport->host_send(s2c::LOADOUT_CRC_REQ,
-					{static_cast<uint8_t>(adm->ammo_index), static_cast<uint8_t>(word),
-							static_cast<uint8_t>(word >> 8)},
-					/*reliable=*/false);
+			if (transport != nullptr)
+				transport->host_send(s2c::LOADOUT_CRC_REQ,
+						{static_cast<uint8_t>(adm->ammo_index), static_cast<uint8_t>(word),
+								static_cast<uint8_t>(word >> 8)},
+						/*reliable=*/false);
 		}
 	}
 }
@@ -788,45 +835,68 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 //  @0x51E18E; Server_ProcessRoundEnd's state 7 @0x51685E]
 void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.match.outcome().ended) return;
-	std::vector<NapiNPConnection *> slots;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) slots.push_back(&conn);
-	std::stable_sort(slots.begin(), slots.end(),
-			[](const NapiNPConnection *a, const NapiNPConnection *b) {
-				return a->reply.player_slot < b->reply.player_slot;
-			});
-	for (NapiNPConnection *slot : slots) {
-		NapiNPConnection &conn = *slot;
+	// Every active row in slot order: each connection's own row and every orphaned row
+	// (D-NET-NEW-L1-24), whose 0x6E goes to its net player (send_mask 0x20 sends through
+	// the row's +0x1C) and whose punts punt that net player (Server_LogCRCMismatchPunt
+	// describes the row's +0x1C); past the player's leave the row's counter still steps and
+	// nothing is sent or punted (Q7-36 (a)).
+	// [orig: Server_TickUpdate - the 0x6E's send_mask 0x20 and the row @0x51E09D..0x51E0A7,
+	//  sent @0x51E0CF; Server_LogCRCMismatchPunt @0x517ED0 - the row's +0x1C @0x517F47,
+	//  CNapiNPConnection_QueueDisconnectEvent called @0x517F5A; NapiNPServer_SendFiltered's
+	//  0x20 arm, the row's +0x1C @0x4C8A1F]
+	struct SlotRow {
+		NapiNPConnection *row;
+		NapiNPConnection *net_player;
+	};
+	std::vector<SlotRow> slots;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) slots.push_back({&conn, &conn});
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
+		slots.push_back({&orphan.row, orphan_net_player(ctx, orphan)});
+	std::stable_sort(slots.begin(), slots.end(), [](const SlotRow &a, const SlotRow &b) {
+		return a.row->reply.player_slot < b.row->reply.player_slot;
+	});
+	for (const SlotRow &slot : slots) {
+		NapiNPConnection &conn = *slot.row;
+		NapiNPConnection *net_player = slot.net_player;
 		SessionReplyState &reply = conn.reply;
-		// State 6 with an entity (ours's added, in-match slot with its body).
-		const bool state6 = is_in_match(conn) &&
-				conn.phase >= ConnectionPhase::PlayerAdded &&
-				conn.phase < ConnectionPhase::Goodbye;
+		// State 6 with an entity (ours's added, in-match slot with its body; an orphaned
+		// row's own state word).
+		const bool own_row = net_player == &conn;
+		const bool state6 = own_row ? is_in_match(conn) &&
+						conn.phase >= ConnectionPhase::PlayerAdded &&
+						conn.phase < ConnectionPhase::Goodbye
+				: slot_in_match(conn);
 		const world::Entity *body =
 				state6 ? world.registry.get(conn.link.owned_entity) : nullptr;
 		if (body == nullptr) continue;
 		const bool dead = ((body->flags | body->engine_flags) & world::kEntityFlagDead) != 0;
 		reply.dead_live_seconds = dead ? reply.dead_live_seconds + 1 : 0;
-		if ((dead || conn.link.respawn_pending) && conn.link.transport != nullptr)
-			conn.link.transport->host_send(
+		// The 0x20 arm sends to a server-side net player; a described one's queue drops it.
+		const bool reaches_net_player = net_player != nullptr &&
+				net_player->link.transport != nullptr &&
+				(own_row || (net_player->type == NapiNPConnection::kTypeServerSide &&
+						!net_player->host_disconnect_sent));
+		if ((dead || conn.link.respawn_pending) && reaches_net_player)
+			net_player->link.transport->host_send(
 					s2c::SPAWN_WAVE_STATUS,
 					build_spawn_wave_status_body(world, conn), // the slot's rows (D-NET-581)
 					/*reliable=*/false);
-		if (!ctx.is_in_session) continue;
+		if (!ctx.is_in_session || net_player == nullptr) continue;
 		const bool join_deploy_idle_gate =
 				conn.type == NapiNPConnection::kTypeServerSide &&
-				conn.link.transport != nullptr &&
+				net_player->link.transport != nullptr &&
 				conn.link.respawn_pending &&
 				!conn.link.spectator &&
 				reply.state6_entry_host_ms_valid;
 		if (join_deploy_idle_gate &&
 				static_cast<uint32_t>(ctx.np_protocol.host_run_duration_ms -
 						reply.state6_entry_host_ms) > kJoinDeployIdleLimitMs)
-			stage_host_punt(conn, kPuntJoinDeployIdle);
+			stage_host_punt(*net_player, kPuntJoinDeployIdle);
 		if (dead && reply.dead_live_seconds > kDeadLiveSecondLimit &&
 				!ctx.config.permanent_death &&
 				conn.type == NapiNPConnection::kTypeServerSide &&
 				!conn.link.spectator)
-			stage_host_punt(conn, kPuntDeadTooLong);
+			stage_host_punt(*net_player, kPuntDeadTooLong);
 	}
 }
 
@@ -888,7 +958,13 @@ void advance_play_ticks(NapiNPServerCtx &ctx, world::World &world) {
 	// for the rest of the slot-state-7 stop (announce_round_end).
 	// [orig: Server_ProcessRoundEnd -- the slot state 6 -> 7 store @0x51685E]
 	if (world.match.outcome().ended) return;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+	// Every active row's, an orphaned row's too (D-NET-NEW-L1-24): its own state and body
+	// [orig: Server_TickUpdate - the walk @0x51D95E..0x51D98A over every row].
+	std::vector<const NapiNPConnection *> rows;
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) rows.push_back(&conn);
+	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) rows.push_back(&orphan.row);
+	for (const NapiNPConnection *row : rows) {
+		const NapiNPConnection &conn = *row;
 		// The slot's own state: a punted slot plays on until the teardown (D-NET-652).
 		if (!slot_in_match(conn)) continue;
 		const world::Entity *player = world.registry.get(conn.link.owned_entity);

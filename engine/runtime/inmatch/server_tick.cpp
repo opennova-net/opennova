@@ -286,23 +286,55 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 	// [orig: EndRoundScoreboard_SerializeHeader form pick @0x5052a6]
 	const bool non_team_header =
 			world.rules.mp_session && (result.game_type & 0x10000u) == 0;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+	// Every state-6 row in slot order, an orphaned row too (D-NET-NEW-L1-24): its 0x61 and
+	// its own 0x1D go to its net player (send_mask 0x20 sends through the row's +0x1C), so
+	// that player takes a pair per row in slot order, and its net player enters game state
+	// 11; past the player's leave the row only enters state 7 (Q7-36 (a)).
+	// [orig: Server_ProcessRoundEnd - the row walk @0x516730..0x51687D, the row's +0x1C
+	//  @0x51673D, state 6 @0x516739..0x516740, the 0x61 to the row @0x516784..0x516790, the 0x1D
+	//  @0x516805..0x516839, CNetPlayer_SetGameState(11) called @0x516846 behind the null
+	//  test @0x516840]
+	struct SlotRow {
+		NapiNPConnection *row;
+		NapiNPConnection *net_player;
+	};
+	std::vector<SlotRow> rows;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) rows.push_back({&conn, &conn});
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
+		rows.push_back({&orphan.row, orphan_net_player(ctx, orphan)});
+	std::stable_sort(rows.begin(), rows.end(), [](const SlotRow &a, const SlotRow &b) {
+		return a.row->reply.player_slot < b.row->reply.player_slot;
+	});
+	for (const SlotRow &slot : rows) {
+		NapiNPConnection &conn = *slot.row;
+		NapiNPConnection *net_player = slot.net_player;
+		if (net_player == &conn) {
+			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+		} else if (!slot_in_match(conn)) {
+			continue;
+		}
+		// The 0x20 arm sends to a server-side net player; a described one's queue drops it.
+		const bool reaches_net_player = net_player != nullptr &&
+				net_player->link.transport != nullptr &&
+				(net_player == &conn || (net_player->type == NapiNPConnection::kTypeServerSide &&
+						!net_player->host_disconnect_sent));
 		// The zero 0x61 precedes each recipient-specific 0x1D header, then the
 		// player enters game-state 11. Match's sole outcome gate supplies the
 		// original slot-state-7 replication stop without duplicating lifecycle
 		// state. The client pulls 0x56 independently, so no board chunk is pushed.
 		// [orig: Server_ProcessRoundEnd @0x516790..0x51685E]
-		conn.link.transport->host_send(
-				s2c::TICK_SEED,
-				Server_DisarmPlayerTickSeed(conn, world.out.rounds.frame_clock)); // [orig: @0x516746]
-		conn.link.transport->host_send(
-				s2c::END_ROUND_HEADER,
-				encode_end_round_header(
-						build_end_round_header(result, conn.reply.player_slot,
-								non_team_header),
-						non_team_header));
-		conn.burst.game_state = 11;
+		std::vector<uint8_t> disarm =
+				Server_DisarmPlayerTickSeed(conn, world.out.rounds.frame_clock); // [orig: @0x516746]
+		if (reaches_net_player) {
+			net_player->link.transport->host_send(s2c::TICK_SEED, std::move(disarm));
+			net_player->link.transport->host_send(
+					s2c::END_ROUND_HEADER,
+					encode_end_round_header(
+							build_end_round_header(result, conn.reply.player_slot,
+									non_team_header),
+							non_team_header));
+		}
+		if (net_player != nullptr) net_player->burst.game_state = 11;
 		// Leaving game state 10, then slot state 6 (the loop's only slots), disarms the
 		// round-event watermark, and the slot enters state 7 (NEW-L1-8)
 		// [orig: Server_ProcessRoundEnd - the slot test @0x516730..0x516740,
