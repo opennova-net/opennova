@@ -1690,8 +1690,11 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		auto result = inmatch::handle_server_datagram(
 				ctx, peer, dg.data(), dg.size(), 11);
 		if (!expect(
-					result.outbound.empty() && inmatch::connection_count(ctx) == 0,
-					"out-of-order 0x01 is dropped and releases the pending admission")) {
+					result.outbound.empty() && inmatch::connection_count(ctx) == 1 &&
+							ctx.np_protocol.connection_list.front().admission_stage ==
+									inmatch::GameAdmissionStage::AwaitJoinRequest &&
+							!ctx.np_protocol.connection_list.front().link.owned_entity.valid(),
+					"an out-of-turn 0x01 is ignored: nothing sent, the pending node kept")) {
 			return false;
 		}
 	}
