@@ -787,7 +787,7 @@ void AdminConsole::handle_goto(const Args &args, std::vector<std::string> &repli
 // keyed on the one per-main-frame counter (set_main_frame). On that host the authority arm is
 // Server_SendConsoleChat's, which posts the sent line to the host's CHAT ring
 // (`ctx.console_chat`), and a refusal's echo lands in the same ring in Global's flood colour.
-// [orig: Chat_SendTeamMessage @0x49A900 (an IDB misnomer; the global sender) — the gates
+// [orig: Chat_SendGlobalMessage @0x49A900 (the global sender) - the gates
 //  @0x49A931, Chat_CheckFloodControl @0x49A93B, Chat_StripHtmlTags @0x49A971 into 64 bytes,
 //  the peer's QueueReliableMessage(0xD) @0x49A9B4, the authority's SendFiltered(0x14, 1, 310)
 //  with mask 0x80 @0x49AA1D and Chat_DispatchToChannel(0xFF, 10, message) @0x49AA2A, the

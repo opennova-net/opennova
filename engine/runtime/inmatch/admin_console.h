@@ -129,7 +129,8 @@ public:
 		// A session peer's flood refusal echoed into its HUD window in the global sender's flood
 		// colour. A host with no client sends through Server_SendConsoleChat, which posts the
 		// sent line, and echoes a refusal, into the context's CHAT ring.
-		// [orig: Chat_SendTeamMessage @0x49A953 (Chat_AddMessageChannel1(message, palette[3], 930))]
+		// [orig: Chat_SendGlobalMessage @0x49A900 (Chat_AddMessageChannel1(message, palette[3], 930)
+		//  @0x49A953)]
 		std::function<void(const std::string &text)> chat_echo;
 		// The process's own client (a listen host's, a joiner's): a session peer's CHAT SEND and
 		// CMD leave on its connection, CMD through its console sender. RemoteAdminConsoles::bind

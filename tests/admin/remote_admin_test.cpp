@@ -277,7 +277,7 @@ std::vector<ProtocolMessage> joiner_sends(inmatch::ClientRuntime &client, const 
 // action 3: exit reason 1 on its client and the user leave inside the action, its four 0x46
 // goodbyes written at once with the "I.C:CIDEMIS" record, after which no frame sends. Back in the
 // menus the report keeps the last map file while the destroyed session zeroed the game type.
-// [orig: Chat_SendTeamMessage @0x49A900 - the peer test @0x49A979, QueueReliableMessage(0xD, 1,
+// [orig: Chat_SendGlobalMessage @0x49A900 - the peer test @0x49A979, QueueReliableMessage(0xD, 1,
 //  310) @0x49A9B4; CAdminServer_HandleCmdCommand @0x404997 -> Client_ProcessConsoleCommand
 //  @0x520E80 (QueueReliableMessage(4, 1, 0) @0x520f29); CGameSession_SetConnectionMode
 //  @0x4C49F0 (mode 2); Input_HandleActionBinding case 3 @0x49AF26, @0x49AF38..0x49AF42 ->

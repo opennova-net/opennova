@@ -340,7 +340,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 		}
 		if (view.joiner) s.time_limit_minutes = cs.session_time_limit_minutes; // dword_A821C0
 	}
-	// The authority reads its own g_TimeLimitMinutes [orig: @0x59CCDB..0x59CCE3].
+	// The authority reads its own g_KothLimitMinutes [orig: @0x59CCDB..0x59CCE3].
 	if (!view.joiner && view.host != nullptr)
 		s.time_limit_minutes = static_cast<int32_t>(view.host->config.time_limit_minutes);
 	const world::Entity *player = w.registry.get(w.cached.local_player);
@@ -1373,7 +1373,7 @@ void scoreboard_feed(const RoleView &view, hud::HudScoreboardState &out) {
 	}
 	out.status_suffix = state.scoreboard_status_suffix != 0; // [orig: @0x423ef8]
 	out.timed = state.scoreboard.timed;                       // [orig: g_ScoreboardFlags & 2]
-	// [orig: `is_authority ? g_TimeLimitMinutes : dword_A821C0` @0x423a4b]
+	// [orig: `is_authority ? g_KothLimitMinutes : dword_A821C0` @0x423a4b]
 	out.time_limit = !view.joiner && view.host != nullptr
 			? static_cast<int>(view.host->config.time_limit_minutes)
 			: static_cast<int>(state.session_time_limit_minutes);

@@ -128,7 +128,7 @@ hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view);
 // entity team and class answered by the role's own entity model — the
 // authority's pools, a joiner's decoded rows), the 0x16 team table and side
 // count, the SU gate and the timed flag off the replica, the KOTH minutes
-// (the authority's own g_TimeLimitMinutes, a joiner's session-config copy),
+// (the authority's own g_KothLimitMinutes, a joiner's session-config copy),
 // the local player's team byte, and the latched flag carrier's name and team.
 // Strings (title, labels, class names) stay the embedder's.
 // [orig: HUD_DrawKillList @0x423a30 — T @0x423a4b..0x423a5e, the local team
