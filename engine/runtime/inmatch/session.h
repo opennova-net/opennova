@@ -302,13 +302,15 @@ public:
 	// The medic call past the session/entity gates: a dead local player with
 	// the cooldown at zero sends through the role and stamps the cooldown.
 	bool request_medic();
-	// The dispatcher's head for an action row whose flags carry bit 0, 0x400 and
-	// 0x8000000 (the Respawn row 68, the stance rows 9..11 and the seat rows 17..26,
-	// 0x0C000C01; the scope row 105, 0x4C000C01; the mouse look rows 0x0C100425 /
-	// 0x0C200425): the local entity is there, and none of a dead local player, the
-	// round-over gate, the pre-round timer or the deploy overlay holds. True = the row
+	// The dispatcher's head for the action a queued event names by its dispatch code,
+	// gated by that code's catalog row flags: the local entity is there; bit 0 drops it
+	// for a dead local player and under the round-over gate, 0x40 for a live one, 0x400
+	// while the local client's pre-round timer runs, 0x8000000 under the deploy overlay,
+	// 0x10 in a session. A key row's event and a console-queued one alike (the Respawn
+	// row 68, the stance rows 9..11 and the seat rows 17..26, 0x0C000C01; the scope row
+	// 105, 0x4C000C01; the mouse look rows, 0x0C100425 / 0x0C200425). True = the event
 	// reaches its arm.
-	bool local_action_head_admits();
+	bool action_head_admits(int32_t code);
 	// The Respawn key (dispatch 55) past the row's head gates: the local
 	// player's input reset, then in a session the role's 0x41. True = sent.
 	bool request_respawn();

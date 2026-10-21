@@ -219,6 +219,19 @@ std::vector<uint8_t> JoinerConnection::frame_retained_session(uint32_t sequence)
 //  NapiNPServer_HandleNewConnection @0x4c81bd (mask 0x2000)]
 std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 	if (session_lost() || phase_ == Phase::Error) return {};
+	// The mission-start waits' round-over test, after the pass's receive: a gate the pass
+	// raised abandons the wait in hand, a 0x1A the same pass carried included (the gate test
+	// precedes the flag's) (mission_start_aborted carries the witness).
+	if (round_over_gate_ && !mission_start_aborted_ &&
+			(post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail ||
+			 post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd ||
+			 (post_auth_stage_ == PostAuthStage::AwaitMissionStart &&
+			  mission_start_released_this_pass_))) {
+		mission_start_aborted_ = true;
+		if (post_auth_stage_ == PostAuthStage::AwaitMissionStart)
+			post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
+	}
+	mission_start_released_this_pass_ = false;
 	if (!conn_.seq.missing_request_pending) return {};
 	conn_.seq.missing_request_pending = false;
 	if (conn_.seq.queued_inbound.empty()) return {};
@@ -265,6 +278,8 @@ JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
 	// other exit [orig: Game_StartMission @0x5262df].
 	if (phase_ == Phase::InMatch && post_auth_stage_ != PostAuthStage::AwaitDeployment)
 		return SendPumpLoop::NetworkFrame;
+	// An abandoned mission start runs the game loop's frames.
+	if (mission_start_aborted_) return SendPumpLoop::NetworkFrame;
 	switch (post_auth_stage_) {
 	case PostAuthStage::AwaitServerInfo:
 		return SendPumpLoop::ServerInfoWait;

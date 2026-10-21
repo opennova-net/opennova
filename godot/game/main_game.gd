@@ -1612,6 +1612,20 @@ func _on_command_map_requested() -> void:
 func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
 	if _state == from_state:
 		_state = State.WORLD
+		_reset_screen_close_input()
+
+
+## Every menu screen's close runs the whole input reset: the queued events
+## (a console line's action, an echo's binding arm) and the deferred dispatches
+## are dropped, and the devices' reset follows at the next frame's head
+## (Simulation.take_input_reset); with no sim the devices reset at once
+## (engine inmatch/session.h Role::reset_all_input_state carries the witness,
+## UI_CloseMenuScreen @0x54E5E0 tail-calling Input_ResetAllState @0x54E63F).
+func _reset_screen_close_input() -> void:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim != null:
+		sim.reset_all_input_state()
+	else:
 		_reset_key_state()
 
 
@@ -1650,7 +1664,7 @@ func resume() -> void:
 			else State.WORLD
 	# Every resume leg lands here, so the session cannot stay stuck Paused.
 	_world.set_shell_paused(false)
-	_reset_key_state()
+	_reset_screen_close_input()
 	if _hud_presenter != null:
 		_hud_presenter.set_menu_pause(false)
 

@@ -86,19 +86,36 @@ void Role::apply_input(const TickInput &input) {
 		kernel.local.set_weapon_input(false, false, false);
 		return;
 	}
-	kernel.local.set_movement_keys(movement.forward, movement.back, movement.left,
-			movement.right, movement.lean_left, movement.lean_right, movement.jump);
-    kernel.local.set_view_keys(movement.free_look, movement.look_up,
-            movement.look_down, movement.turn_left, movement.turn_right);
+	// The held rows (the analog list: the movement, lean, jump, look and FreeLook rows,
+	// flags 0x0C000C05 / 0x2C000C05) queue their event every frame a key is down, and
+	// each passes the dispatcher's head by its row's flags, so a dead local player, the
+	// pre-round timer, the deploy overlay and the round-over gate drop the frame's held
+	// keys (V-L2-s8 defect 2's 0x400 rows).
+	// [orig: Input_ProcessAnalogBindings @0x4995F0 - Input_QueueEvent(row code)
+	//  @0x499660; Input_HandleActionBinding @0x49AD40 - the head @0x49AD8D..0x49AE23]
+	const auto held = [this](bool down, int row) {
+		return down && action_head_admits(controls::action_code(row));
+	};
+	kernel.local.set_movement_keys(held(movement.forward, 2), held(movement.back, 3),
+			held(movement.left, 4), held(movement.right, 5), held(movement.lean_left, 6),
+			held(movement.lean_right, 7), held(movement.jump, 8));
+	kernel.local.set_view_keys(held(movement.free_look, 97), held(movement.look_up, 13),
+			held(movement.look_down, 12), held(movement.turn_left, 14),
+			held(movement.turn_right, 15));
 	// The mouse look rows (flags 0x0C100425 / 0x0C200425) queue their axis as action
 	// events, which pass the dispatcher's head: a dead local player, the pre-round
 	// timer, the deploy overlay and the round-over gate drop the frame's look
 	// (V-LI-s1 FOUND 5). [orig: Input_TryTriggerMouseAxisBinding @0x499130 - the row's
 	//  0x100000 / 0x200000 tests @0x49913D / @0x499164, Input_QueueEvent @0x499156;
 	//  Input_HandleActionBinding @0x49AD40 - the head @0x49AD8A..0x49AE16]
-	if ((input.player.look_delta_x != 0.0f || input.player.look_delta_y != 0.0f) &&
-			local_action_head_admits())
-		kernel.local.look(input.player.look_delta_x, input.player.look_delta_y);
+	// Each axis is its own row's event (row 0 the X, row 1 the Y).
+	constexpr int kLookXRow = 0;
+	constexpr int kLookYRow = 1;
+	const float look_x = input.player.look_delta_x != 0.0f &&
+			action_head_admits(controls::action_code(kLookXRow)) ? input.player.look_delta_x : 0.0f;
+	const float look_y = input.player.look_delta_y != 0.0f &&
+			action_head_admits(controls::action_code(kLookYRow)) ? input.player.look_delta_y : 0.0f;
+	if (look_x != 0.0f || look_y != 0.0f) kernel.local.look(look_x, look_y);
 	kernel.local.set_weapon_input((input.player.held_action_bits & HELD_FIRE) != 0,
 			(input.player.pressed_action_bits & PRESSED_FIRE) != 0,
 			(input.player.pressed_action_bits & PRESSED_RELOAD) != 0);
@@ -157,33 +174,51 @@ bool Role::request_medic() {
 	return true;
 }
 
-bool Role::local_action_head_admits() {
+bool Role::action_head_admits(int32_t code) {
 	mission::MissionKernel &kernel = *kernel_;
 	ClientRuntime *runtime = client_runtime();
 	const bool joiner = kind() == RoleKind::Joiner;
-	// The head gates of a row whose flags carry bit 0, 0x400 and 0x8000000 (a dedicated
-	// host's bit-0 operand drops it; the menu pause, bit 0's third gate, holds a session
-	// that then takes no input): bit 0 drops it for a dead local player and under the
-	// round-over gate, 0x400 while the pre-round timer runs, 0x8000000 under the deploy
-	// overlay.
-	// [orig: Input_HandleActionBinding @0x49AD40 - the dead bit @0x49AD76..0x49AD7E, the
-	//  row's flags @0x49AD8D, bit 0 @0x49AD95..0x49ADA0; 0x400 @0x49ADB3..0x49ADC2
-	//  (g_ClientPreRoundTimer); 0x8000000 @0x49ADC8..0x49ADD7 (g_DeployScreenActive); the
-	//  pause @0x49ADDD..0x49ADE8; g_RoundOver @0x49ADEE..0x49AE16]
 	// The head reads the local entity, which a joiner has from its mission start's
 	// Player_InitPlayer whether or not L has spawned (D-NET-562) [orig:
 	// Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC].
 	if (joiner ? runtime == nullptr || !runtime->local_entity_bound()
 	           : !kernel.world.cached.local_player.valid())
 		return false;
-	// Bit 0's operand on the authority: the constant 2 on a dedicated host in a
-	// session, else the dead bit (LocalPlayer::action_dispatch_drops, D-NET-433).
+	// The flags word of the binding record the code names (the catalog row whose code it
+	// is); a code no row carries reads the zero record (D-NET-710, V-L2-s8).
+	// [orig: Input_HandleActionBinding @0x49AD40 - dword_8159AC[code * 0x6C] @0x49AD8D;
+	//  KeyBinding_SortBySequentialId @0x498260]
+	const controls::ActionDef *row = controls::action_for_code(code);
+	const uint32_t flags = row != nullptr ? row->flags : 0u;
+	// a6: on the authority the constant 2 on a dedicated host in a session, else the dead
+	// bit (LocalPlayer::action_dispatch_drops, D-NET-433); a joiner's replica dead bit.
+	// [orig: @0x49AD52..0x49AD6F (the constant), @0x49AD76..0x49AD7E (Flags & 2)]
 	const bool local_dead = joiner ? runtime->local_player_dead()
 			: kernel.local.action_dispatch_drops();
 	const bool round_over = joiner ? runtime->state().spawn_success_gate
 			: kernel.world.match.outcome().ended;
-	return !(local_dead || round_over || kernel.world.preround_delay_seconds != 0 ||
-			(runtime != nullptr && runtime->state().deploy_overlay_active));
+	// 0x400's operand is the local client's pre-round timer, whose one writer is the
+	// client's 0x0A handler: a joiner's replica copy, the listen host's own client's copy
+	// (World::CachedFrameState::client_preround_timer), which a dedicated host never
+	// writes (V-L2-s8).
+	// [orig: `cmp g_ClientPreRoundTimer, 0` @0x49ADBB; its one store
+	//  NapiNPClientMsg_0x00A @0x430064]
+	const uint32_t preround = joiner ? kernel.world.preround_delay_seconds
+			: kernel.world.cached.client_preround_timer;
+	// The gates in the head's order (the menu pause, bit 0's third gate, holds a session
+	// that then takes no input; the out-of-session round-over leg is the same drop).
+	// [orig: Input_HandleActionBinding @0x49AD40 - bit 0 with a6 @0x49AD95..0x49ADA0;
+	//  0x40 with !a6 @0x49ADA6..0x49ADAD; 0x400 @0x49ADB3..0x49ADC2; 0x8000000 with
+	//  g_DeployScreenActive @0x49ADC8..0x49ADD7; the pause @0x49ADDD..0x49ADE8;
+	//  g_RoundOver @0x49ADEE..0x49AE16; 0x10 in a session @0x49AE1C..0x49AE23]
+	if ((flags & 0x1u) != 0 && local_dead) return false;
+	if ((flags & 0x40u) != 0 && !local_dead) return false;
+	if ((flags & 0x400u) != 0 && preround != 0) return false;
+	if ((flags & 0x8000000u) != 0 && runtime != nullptr &&
+			runtime->state().deploy_overlay_active)
+		return false;
+	if ((flags & 0x1u) != 0 && round_over) return false;
+	return !((flags & 0x10u) != 0 && kernel.world.rules.mp_session);
 }
 
 bool Role::request_respawn() {
@@ -193,7 +228,8 @@ bool Role::request_respawn() {
 	// [orig: Input_HandleActionBinding @0x49AD40 - DeathScreen_FilterInputAction
 	//  @0x49AE4C, Input_NullActionFilter @0x49AE68, Cine_FilterInputAction @0x49AE84, the
 	//  def+0x170 callback @0x49AEB6 (Input_HandleActionBinding_0's default @0x4E13F9)]
-	if (!local_action_head_admits()) return false;
+	constexpr int kRespawnRow = 68;
+	if (!action_head_admits(controls::action_code(kRespawnRow))) return false;
 	// The input reset, then in a session on a peer the bodiless 0x41
 	// [orig: case 55 -- Player_ResetLocalInput @0x49B20B, is_in_session @0x49B210,
 	//  is_mp_session_peer @0x49B21D, NetPacket_SendRequestRespawn @0x49B22A].
@@ -211,7 +247,8 @@ bool Role::request_stance(int stance) {
 	//  def+0x170 callback @0x49AEB6 -> Input_HandleActionBinding_0 @0x4E0420 - cases 169
 	//  @0x4E0D77, 170 @0x4E0DF3, 172 @0x4E0E3E; the catalog rows 9 / 10 / 11
 	//  @0x815D74 / @0x815DE0 / @0x815E4C]
-	if (!local_action_head_admits()) return false;
+	constexpr int kStanceRows[3] = {11, 10, 9}; // stand 172, crouch 169, prone 170
+	if (!action_head_admits(controls::action_code(kStanceRows[stance]))) return false;
 	return send_stance_request(stance);
 }
 

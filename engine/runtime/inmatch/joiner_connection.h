@@ -530,6 +530,19 @@ public:
 	bool mission_start_released() const {
 		return post_auth_stage_ == PostAuthStage::AwaitMissionStart;
 	}
+	// The two mission-start waits (the sync tail's, the world stream's) test the round-over
+	// gate after each pass's receive (the stream wait after its send too), ahead of their
+	// completion flags: on it the mission start is abandoned, with no load, no 0x0A after
+	// it, no 0x2F / 0x2F / 0x0B, and the joiner runs the game loop's frames until the
+	// round-over linger's exit 4 restarts the mission start for the host's next mission
+	// (ClientRuntime::begin_mission_reload) (V-L2-s8, NEW-L2-19 FOUND 3).
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - `cmp g_RoundOver, 0`
+	//  @0x42CBC5 -> return 1, ahead of the 0x11's flag @0x42CBE7; NapiClient_WaitForGameStart
+	//  @0x42CC10 - the send @0x42CC92, `cmp g_RoundOver` @0x42CCA1 -> return 1, ahead of the
+	//  0x1A's flag @0x42CCBF; Game_StartMission @0x524360 - "Mission loading aborted 1"
+	//  @0x524DB0..0x524DD1 and "aborted 3" @0x524E2E..0x524E4F: UI_NavHistoryPush(
+	//  g_GameModeGameLoop), the jump past the load @0x524DD1 / @0x524E4F]
+	bool mission_start_aborted() const { return mission_start_aborted_; }
 	// The mission start's three submissions once the 0x1A released it, in retail's order,
 	// unframed (the runtime queues each at its own point); the stage moves on to the final
 	// wait for the S2C 0x0F. False when the mission start is not released.
@@ -905,14 +918,29 @@ public:
 	//  on g_ClientWorldStateLoaded, cleared @0x5243be and set only by NapiNPClientMsg_0x00F
 	//  @0x42e2cd]
 	bool in_game_loop() const { return in_session() && initial_admission_complete_; }
-	// Inside Game_StartMission's waits, from the game-start flag's server-info leg to the final
-	// wait's S2C 0x0F: an abort there (a wait's ESC or expiry) is exit reason 1.
+	// Inside Game_StartMission's waits and its load, from the game-start flag's server-info leg
+	// to the load's end (the 0x0B; stage AwaitMissionStart): an abort there (a wait's ESC or
+	// expiry, the load's ESC) is exit reason 1. The final wait for the S2C 0x0F is not: its ESC
+	// only raises the cancel flag and falls through into the game loop with no exit reason
+	// (V-L2-s8).
 	// [orig: Game_StartMission @0x524360 - the sync-tail wait's returns 2 / 3 / 4 store 1
-	//  @0x524EAF, NapiClient_WaitForGameStart's @0x524E87; Client_CheckDisconnectOrEscDuringLoad
-	//  @0x520270 - the ESC's 1 @0x5202A8]
+	//  @0x524EAF, NapiClient_WaitForGameStart's @0x524E87; the load's
+	//  Client_CheckDisconnectOrEscDuringLoad calls @0x52555B / @0x525910 / @0x525A1B;
+	//  Client_CheckDisconnectOrEscDuringLoad @0x520270 - the ESC's 1 @0x5202A8; the final
+	//  wait's ESC @0x5262AB -> g_LoadingCancelFlag = 1 @0x5262E9 -> @0x5262FD]
 	bool in_mission_start() const {
-		return !in_game_loop() && post_auth_stage_ >= PostAuthStage::AwaitServerInfo &&
-				post_auth_stage_ <= PostAuthStage::AwaitDeployment;
+		return !in_game_loop() && !mission_start_aborted_ &&
+				post_auth_stage_ >= PostAuthStage::AwaitServerInfo &&
+				post_auth_stage_ <= PostAuthStage::AwaitMissionStart;
+	}
+	// Ahead of the mission start: the pre-game join screen's connect, verify and admission
+	// stages, whose ABORT tears the session down through the join state machine's cleanup
+	// (FullDestroy(-1)).
+	// [orig: PreMenu_OnAbortCancel @0x568CA0 - g_PreMenuState = 9 @0x568CB4;
+	//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 9's
+	//  CNapiGameSession_FullDestroy(-1) @0x56A3E3]
+	bool in_pre_game() const {
+		return !in_game_loop() && post_auth_stage_ < PostAuthStage::AwaitServerInfo;
 	}
 	// The host's session-variable list parsed from the reassembled S2C 0x60
 	// server-info transfer (npwire/session_vars.h): the server name and
@@ -1172,6 +1200,8 @@ private:
 	// (the 0x57's); the replica's ClientState::spawn_success_gate serves the frame.
 	// [orig: g_RoundOver @0x24C1928]
 	bool round_over_gate_ = false;
+	bool mission_start_aborted_ = false;           // mission_start_aborted
+	bool mission_start_released_this_pass_ = false; // the 0x1A of the receive pass in hand
 	bool initial_admission_complete_ = false; // a S2C 0x0F seen in the deploy wait
 	bool deployment_pick_sent_ = false;
 	uint32_t deployment_pick_sequence_ = 0; // release 0x5A must cumulatively ACK this C2S 0x0E

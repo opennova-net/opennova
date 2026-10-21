@@ -51,7 +51,8 @@ int client_binding_by_token(const std::string &name);
 // record's zeros), equal `crc`; -1 for none. Both console walks compare the line's
 // CRC against the token's text this way, which only a crafted line meets.
 // [orig: NapiClientCmd_ParseAndExecute @0x432aa9..0x432b3e;
-//  Client_ProcessLocalCommand @0x520e0d..0x520e30 (`cmp eax, [ecx]` over aTurnLeftAbs)]
+//  Client_ProcessLocalCommand @0x520BF0 (the walk @0x520E0D..0x520E30, `cmp eax, [ecx]`
+//  over aTurnLeftAbs)]
 int client_binding_by_crc(int32_t crc);
 
 // Client_ProcessLocalCommand's seams: what its arms reach outside the line.

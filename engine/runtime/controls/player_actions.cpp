@@ -108,6 +108,16 @@ uint32_t row_modes(const char *token) {
 	return 0;
 }
 
+// A catalog row's dispatch code by its config token; a token no row carries
+// reads -1 [orig: word_8159A8 + 108 * row].
+int row_code(const char *token) {
+	std::size_t count = 0;
+	const ActionDef *rows = catalog(&count);
+	for (std::size_t i = 0; i < count; ++i)
+		if (std::string_view(rows[i].token) == token) return action_code(rows[i].id);
+	return -1;
+}
+
 } // namespace
 
 PlayerActions::PlayerActions() : rows_(std::size(kRows)) {}
@@ -263,6 +273,8 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		if (world::latched_key_edge(down, active && !swallowed, rows_[i].down) &&
 				gate.simulation_available) {
 			PlayerActionRequest request = row.request;
+			// The row's key event reaches its arm through the dispatcher's head.
+			request.code = row_code(row.token);
 			// NextWaypoint (code 23) reads the fire's sign: back when signed
 			// [orig: Input_HandleActionBinding case 23 @0x49B3DE..0x49B44D].
 			if (request.action == Action::WaypointCycle && source.fire_signed(row.token))
@@ -319,8 +331,13 @@ int WheelRemainder::feed(int32_t delta) {
 }
 
 std::optional<PlayerActionRequest> player_wheel_action(std::string_view token) {
-	for (const auto &row : kRows)
-		if ((row.flags & Wheel) && token == row.token) return row.request;
+	for (const auto &row : kRows) {
+		if (!(row.flags & Wheel) || token != row.token) continue;
+		// A wheel notch queues the row's event like its key does.
+		PlayerActionRequest request = row.request;
+		request.code = row_code(row.token);
+		return request;
+	}
 	return std::nullopt;
 }
 

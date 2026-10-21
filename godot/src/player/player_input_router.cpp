@@ -49,6 +49,9 @@ private:
 
 void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActionRequest &p_request) {
 	using Action = opennova::controls::PlayerAction;
+	// A binding row's event passes the dispatcher's head by its row's flags
+	// (engine inmatch::Role::action_head_admits carries the witness).
+	if (p_request.code >= 0 && !p_sim.action_head_admits(p_request.code)) return;
 	switch (p_request.action) {
 		case Action::ToggleMount: p_sim.local_player_toggle_mount(); break;
 		case Action::SelectSeat: p_sim.local_player_select_seat(p_request.value); break;

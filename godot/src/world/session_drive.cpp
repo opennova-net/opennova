@@ -197,8 +197,11 @@ void SessionDrive::step_preload() {
 		return;
 	}
 	// The connect exchange, until the S2C 0x11 ends the sync-tail wait, inside the
-	// ConnectOrHost window.
+	// ConnectOrHost window. A mission start the round-over gate abandoned restarts for the
+	// host's next mission in the runtime (engine inmatch/joiner_connection.h
+	// mission_start_aborted), so that mission is identified anew at its own 0x11.
 	if (!join_preload_sim_->is_join_preload_ready()) {
+		join_identified_ = false;
 		join_preload_sim_->poll_join_preload();
 		const int step = policy_->preload_step(join_preload_sim_->get_join_error(), now_ms());
 		if (step == NetSessionPolicy::STEP_FAIL) {
@@ -563,6 +566,9 @@ bool SessionDrive::cancel_preload() {
 	if (join_preload_sim_.is_null()) {
 		return false;
 	}
+	// The user's cancel: ahead of the mission start the join screen's ABORT leaves with
+	// its own record (Simulation::cancel_join); inside it the teardown below routes it.
+	join_preload_sim_->cancel_join();
 	fail_join_preload("Mission loading aborted");
 	return true;
 }

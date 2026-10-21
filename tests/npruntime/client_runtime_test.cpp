@@ -1359,6 +1359,14 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 		return false;
 	}
 
+	// Ahead of the game-start flag the join screen's ABORT is the join state machine's
+	// FullDestroy(-1), not a mission-start abort [orig: PreMenu_OnAbortCancel @0x568CA0;
+	// MultiPlayer_JoinSessionStateMachine @0x56A320 - @0x56A3E3].
+	if (!expect(joiner.in_pre_game() && !joiner.in_mission_start(),
+			"the post-handshake stages are the pre-game join screen's")) {
+		return false;
+	}
+
 	// Golden retail frame 16: the game-start flag is carried after a second
 	// settings pair and before the authoritative full-player-info row. Retail
 	// reacts immediately: no local mission is loaded before the S2C 0x1A.
@@ -1396,7 +1404,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 			"game-start emits retail frame 17's grouped pre-world admission request")) {
 		return false;
 	}
-	if (!expect(joiner.mission_known() && joiner.in_mission_start(),
+	if (!expect(joiner.mission_known() && joiner.in_mission_start() && !joiner.in_pre_game(),
 			"full-player-info advertises the mission; the game-start flag enters the mission "
 			"start's waits (the server-info leg)")) {
 		return false;
@@ -1521,6 +1529,40 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 	//  sync-tail wait @0x524DAB, Game_LoadTerrainDuringConnect @0x524DF2,
 	//  Avatars_LoadComboModels @0x524E24, NapiClient_WaitForGameStart @0x524E29;
 	//  NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F, the send pump @0x42CC92]
+	// V-L2-s8 (NEW-L2-19 FOUND 3): the sync-tail wait tests the round-over gate ahead of the
+	// 0x11's flag. A fork that takes a 0x1D and then the 0x11 abandons the mission start: no
+	// 0x0A answers, no preload, the game loop's frames run (no mission-start abort counted).
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - @0x42CBC5 ahead of
+	//  @0x42CBE7; Game_StartMission @0x524360 - "aborted 1" @0x524DB0..0x524DD1]
+	{
+		inmatch::JoinerConnection fork = joiner;
+		SessionSequencing fork_seq = server_seq;
+		fork_seq.last_inbound_seq = 10;
+		const std::vector<uint8_t> round_end = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x1D, {})});
+		(void)fork.handle_datagram(round_end.data(), round_end.size());
+		(void)fork.finish_receive_pump();
+		const std::vector<uint8_t> late_tail = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x11, {})});
+		const inmatch::JoinerConnection::PollResult late = fork.handle_datagram(
+				late_tail.data(), late_tail.size());
+		bool queued_0a = false;
+		for (const std::vector<uint8_t> &dg : late.outbound) {
+			std::vector<ProtocolMessage> messages;
+			ProtocolPacketHeader header;
+			if (decode_client_session(dg, client_auth.scrk, header, messages))
+				for (const ProtocolMessage &m : messages) queued_0a |= m.tag == 0x0A;
+		}
+		if (!expect(fork.mission_start_aborted() && !queued_0a && !fork.preload_ready() &&
+						!fork.in_mission_start() &&
+						fork.send_pump_loop() ==
+								inmatch::JoinerConnection::SendPumpLoop::NetworkFrame,
+				"a round over in the sync-tail wait abandons the mission start: the late 0x11 "
+				"draws no 0x0A")) {
+			return false;
+		}
+	}
+
 	server_seq.last_inbound_seq = 10;
 	const std::vector<uint8_t> sync_tail_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1546,6 +1588,27 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 		return false;
 	}
 
+	// The world stream's wait tests the gate after its send, ahead of the 0x1A's flag: a
+	// 0x1A and a 0x1D in one pass abandon the mission start (no release, no load, no
+	// 0x2F / 0x2F / 0x0B) [orig: NapiClient_WaitForGameStart @0x42CC10 - @0x42CCA1 ahead of
+	// @0x42CCBF; Game_StartMission @0x524360 - "aborted 3" @0x524E2E..0x524E4F].
+	{
+		inmatch::JoinerConnection fork = joiner;
+		SessionSequencing fork_seq = server_seq;
+		fork_seq.last_inbound_seq = 12;
+		const std::vector<uint8_t> same_pass = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck,
+				{make_protocol_message(0x1A, {}), make_protocol_message(0x1D, {})});
+		(void)fork.handle_datagram(same_pass.data(), same_pass.size());
+		(void)fork.finish_receive_pump();
+		inmatch::JoinerConnection::MissionStartSubmissions none;
+		if (!expect(fork.mission_start_aborted() && !fork.mission_start_released() &&
+						!fork.take_mission_start_submissions(none) && !fork.in_mission_start(),
+				"a round over in the world stream's pass abandons the 0x1A's mission start")) {
+			return false;
+		}
+	}
+
 	server_seq.last_inbound_seq = 12;
 	const std::vector<uint8_t> world_end_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1561,6 +1624,11 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 				!joiner.mission_start_released() &&
 				!joiner.take_mission_start_submissions(submissions),
 			"the 0x1A releases the mission start, whose submissions are taken once")) {
+		return false;
+	}
+	// The final wait for the 0x0F counts no mission-start abort: its ESC only raises the
+	// cancel flag (V-L2-s8) [orig: Game_StartMission @0x524360 - @0x5262AB -> @0x5262E9].
+	if (!expect(!joiner.in_mission_start(), "the final wait is past the mission start's aborts")) {
 		return false;
 	}
 	const std::vector<std::vector<uint8_t>> mission_start_end = joiner.frame_messages(
@@ -3350,8 +3418,8 @@ bool run_console_echo_runs_the_client_walk() {
 // last stamp minus 1000 unsigned, so it never drops a line once the tick is past its first
 // second, and drops one inside it.
 // [orig: Client_ProcessConsoleCommand @0x520E80 - the guard @0x520ea4..0x520ec7,
-//  Client_ProcessLocalCommand @0x520eec, NetPacket_WriteNullableString @0x42A430,
-//  QueueReliableMessage(4, 1, 0) @0x520f29]
+//  Client_ProcessLocalCommand @0x520BF0 (the call @0x520EEC), NetPacket_WriteNullableString
+//  @0x42A430, QueueReliableMessage(4, 1, 0) @0x520f29]
 bool run_console_command_sends_the_line() {
 	const std::string client_scrk = "CLIENT-CONSOLE-LINE-SCRK";
 	const std::string server_scrk = "SERVER-CONSOLE-LINE-SCRK";

@@ -875,6 +875,10 @@ public:
 	bool is_join_mission_start_released() const;
 	void finish_join_mission_start();
 	bool poll_join_preload();
+	// The shell's cancel of a join: ahead of the mission start the join screen's ABORT
+	// (engine inmatch::JoinerRole::cancel_join carries the witness); inside it the
+	// teardown routes the wait's abort.
+	void cancel_join();
 	bool is_join_preload_ready() const;
 	// The joiner's admission-FSM stage name (diagnostics: the shell's post-load join
 	// watchdog names the stage a stalled join is parked in). Empty when not joining.
@@ -1232,6 +1236,10 @@ public:
 	// gate runs sim-side) (engine: runtime/world/local_player_view.cpp).
 	void set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
 	                                   bool p_reload_pressed);
+	// The dispatcher's head for a binding row's event by its dispatch code (engine:
+	// inmatch::Role::action_head_admits); with no bound role it admits, and the
+	// seam's own gates decide.
+	bool action_head_admits(int p_code);
 	// The ADS toggle request: gated by the dispatcher rules (no toggle during
 	// RELOAD/SWITCHFROM, def Flags & 3 required), flips the sim-owned engaged bit
 	// and queues the scopeup/scopedown FSM states. Returns whether it toggled.

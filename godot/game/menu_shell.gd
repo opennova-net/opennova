@@ -203,8 +203,9 @@ func update_menu_frame(delta: float = 0.0) -> void:
 ## frame's net frame and tick, so an in-game screen's click (the INGAME
 ## CONFIRM_YES's input action 3, a joiner's goodbye) runs before that frame's
 ## session sends anything (MainGame._process).
-## retail: Game_ProcessMainFrame @ 0x5263f0 - UI_TeardownScene @ 0x52667b ->
-## CUIScene_EndFrame @ 0x54e668 -> CWnd_ProcessMouseEvent @ 0x647a00, ahead of
+## retail: Game_ProcessMainFrame @ 0x5263f0 - UI_TeardownScene @ 0x54e650 (the call
+## @ 0x52667b) -> CUIScene_EndFrame @ 0x63e600 (the call @ 0x54e668) ->
+## CWnd_ProcessMouseEvent @ 0x647a00, ahead of
 ## Client_ProcessNetworkFrame @ 0x526692; Menu_UpdateFrame @ 0x5528a0 in the menus.
 func pump_screen_pass() -> void:
 	if _driver != null and is_visible_in_tree():

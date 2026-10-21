@@ -80,6 +80,16 @@ enum class UseItemPressArm : uint8_t { kMountChain, kOpenArmory, kOpenVehicleMen
 struct PlayerActionRequest {
 	PlayerAction action = PlayerAction::ToggleMount;
 	int value = 0;
+	// The dispatch code of the binding row whose queued event carries the request,
+	// which the dispatcher's head gates by that row's flags before the arm runs
+	// (inmatch::Role::action_head_admits); -1 for an arm the input frame calls
+	// directly, past no head: the held-USE digit's seat pick, the USE release's
+	// mount toggle, the Emotes / Radio menus' digit picks.
+	// [orig: Input_ProcessKeyboardEvents -> Input_QueueEvent -> Input_HandleActionBinding
+	//  @0x49AD40 (the head @0x49AD8D..0x49AE23); Input_HandleSpecialKeys @0x49c5c0 -
+	//  Entity_FindAvailableSeat @0x49c6e6..0x49c6ed, the menu picks @0x49c745 / @0x49c791;
+	//  Input_ProcessFrame @0x49d520 - the release edge @0x49d6c1..0x49d6dc]
+	int code = -1;
 };
 
 struct PlayerActionPoll {

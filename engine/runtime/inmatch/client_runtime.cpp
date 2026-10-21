@@ -1609,7 +1609,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	//  aborted 1" @0x524db0..0x524dd1; NapiClient_WaitForGameStart @0x42CC10 (@0x42cca1)
 	//  -> "aborted 3" @0x524e2e..0x524e4f; both push g_GameModeGameLoop]
 	const bool gate_read = joiner_ != nullptr &&
-			(joiner_->in_game_loop() ||
+			(joiner_->in_game_loop() || joiner_->mission_start_aborted() ||
 			 joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::SyncTailWait ||
 			 joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::WorldStreamWait);
 	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session() && gate_read &&
@@ -1619,6 +1619,15 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		if (linger <= 0 && mission_exit_reason_ == kMissionExitNone)
 			mission_exit_reason_ = kMissionExitRoundOver;
 	}
+	// A mission start the round-over gate abandoned has loaded nothing: the game loop's
+	// exit 4 for a session peer that is not the authority re-enters the game loop, whose
+	// mission start runs the reload's legs for the host's next mission (JoinerConnection::
+	// mission_start_aborted carries the waits' witness).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - reason 4 @0x526822, in session @0x52682A,
+	//  not the authority @0x526841 -> UI_NavHistoryPush(&g_GameModeGameLoop) @0x526808]
+	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->mission_start_aborted() &&
+			mission_exit_reason_ == kMissionExitRoundOver)
+		(void)begin_mission_reload();
 
 	if (role_ == Role::HostClient) {
 		// The 0x4C report leg has no authority test: the listen host's own

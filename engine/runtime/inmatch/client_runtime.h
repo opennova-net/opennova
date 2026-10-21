@@ -399,8 +399,8 @@ public:
 	// line was taken. VERSION's version and title words default to the title's
 	// (gameprofile's version text, g_TitleText) when the embedder sets none.
 	// [orig: Client_ProcessConsoleCommand @0x520E80 - the guard @0x520ea4..0x520ec7,
-	//  Client_ProcessLocalCommand @0x520eec, the peer test @0x520EF8, NetPacket_WriteNullableString
-	//  @0x42A430 and QueueReliableMessage(4, 1, 0) @0x520f29; the authority test @0x520F49,
+	//  Client_ProcessLocalCommand @0x520BF0 (the call @0x520EEC), the peer test @0x520EF8,
+	//  NetPacket_WriteNullableString @0x42A430 and QueueReliableMessage(4, 1, 0) @0x520f29; the authority test @0x520F49,
 	//  Server_HandleAdminNetlogCommand @0x520F55, Server_HandleBanPuntCommand @0x520F63,
 	//  NapiClientCmd_ParseAndExecute @0x520F70; Game_ParseCommandLineAndInit @0x4A7310 (the title
 	//  sprintf @0x4A7D30..0x4A7D3C, g_TitleText)]
@@ -442,13 +442,13 @@ public:
 	// deploy pick from the record's parameter (0 the default, 0xFFFE the auto pick, else
 	// the spawn-zone list's index plus one), 34 the punt of the slot the parameter names
 	// (reason 33, "ComIdPunt", the authority's alone), and past their rows' head
-	// (Role::local_action_head_admits) the class callback's 6 the scope (a mounted gun's
+	// (Role::action_head_admits) the class callback's 6 the scope (a mounted gun's
 	// C2S 0x16) and 182..191 the seat selects (Entity_FindAvailableSeat's index 0..9, a
 	// joiner's C2S 0x26). The stance selects are the role's (Role::request_stance).
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 3 @0x49AF26..0x49AF42, case 12
 	//  @0x49B024 (the pick @0x49B0C3..0x49B17B), case 34 @0x49B766..0x49B773, the class
 	//  callback @0x49AEB6 -> Input_HandleActionBinding_0 @0x4E0420 - case 6
-	//  @0x4E0492..0x4E04F0, cases 182..191 @0x4E0B81..0x4E0C22; the catalog rows 105
+	//  @0x4E0492..0x4E04F0, case 182 @0x4E0B7E (the calls @0x4E0B81..0x4E0C22); the catalog rows 105
 	//  (flags 0x4C000C01) and 17..26 (0x0C000C01)]
 	void set_console_action_sink(ClientConsoleQueueAction sink) {
 		console_action_sink_ = std::move(sink);
@@ -907,6 +907,8 @@ public:
 	//  test @0x5262A2..0x5262AD]
 	bool in_game_loop() const { return joiner_ && joiner_->in_game_loop(); }
 	bool in_mission_start() const { return joiner_ && joiner_->in_mission_start(); }
+	bool in_pre_game() const { return joiner_ && joiner_->in_pre_game(); }
+	bool mission_start_aborted() const { return joiner_ && joiner_->mission_start_aborted(); }
 	uint32_t mp_attributes_revision() const {
 		return joiner_ ? joiner_->mp_attributes_revision() : 0u;
 	}

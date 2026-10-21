@@ -2342,13 +2342,6 @@ bool run_the_person_pass_keys_the_class_row() {
 	return ok;
 }
 
-// D-NET-588: an S2C 0x13 naming the joiner's own player lands on L: Health 0,
-// the word as L's deathAnimStateId and the plyr class callback with event 4
-// (its think re-arm to 64), as retail's handler runs on the slot entity at the
-// handle, whatever its class.
-// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 - Health = 0 @0x42EBD6, +0x2C0
-//  @0x42EBDF, cb(entity, 4, 0) @0x42EBF5; Entity_HandleDamageAndTriggerZones
-//  @0x407B5E]
 // D-NET-NEW-L2-15's wire face (V-L2-s6's test gap): a seated L killed by a pump that carries a
 // zero 0x0A tail and the S2C 0x13 naming L. The tail stores Health alone, so the 0x13's plyr
 // callback runs past its dead return into the seat leave, which on a client is
@@ -2417,6 +2410,13 @@ bool run_a_seated_death_sends_the_seat_leave() {
 			"seated death: the 0x13's plyr callback sends the seat leave's C2S 0x27");
 }
 
+// D-NET-588: an S2C 0x13 naming the joiner's own player lands on L: Health 0,
+// the word as L's deathAnimStateId and the plyr class callback with event 4
+// (its think re-arm to 64), as retail's handler runs on the slot entity at the
+// handle, whatever its class.
+// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 - Health = 0 @0x42EBD6, +0x2C0
+//  @0x42EBDF, cb(entity, 4, 0) @0x42EBF5; Entity_HandleDamageAndTriggerZones
+//  @0x407B5E]
 bool run_entity_death_names_l() {
 	Harness h;
 	h.role.poll_preload();
@@ -2902,9 +2902,15 @@ bool run_a_stance_select_and_the_look_take_the_rows_head() {
 		if (gate == Gate::Overlay) cs.deploy_overlay_active = true;
 		if (gate == Gate::RoundOver) cs.spawn_success_gate = true;
 		const bool admitted = gate == Gate::None;
-		ok &= expect(h.role.local_action_head_admits() == admitted,
+		ok &= expect(h.role.action_head_admits(170) == admitted,
 				admitted ? "stance head: nothing held admits the row"
 				         : "stance head: the gate drops the row");
+		// The seat key's row (17, code 182, 0x0C000C01) takes the same head (V-L2-s8); the
+		// Knife row (28, code 201, 0x0C000801) carries no 0x400, so the pre-round passes it.
+		ok &= expect(h.role.action_head_admits(182) == admitted,
+				"seat head: the seat key's row follows the stance row's head");
+		ok &= expect(h.role.action_head_admits(201) == (gate == Gate::None || gate == Gate::PreRound),
+				"knife head: no 0x400, so only the overlay and the round over drop it");
 		std::vector<int32_t> sunk;
 		h.role.runtime->set_console_action_sink(
 				[&sunk](int32_t code, int32_t, int32_t, int32_t) { sunk.push_back(code); });
@@ -2917,6 +2923,13 @@ bool run_a_stance_select_and_the_look_take_the_rows_head() {
 		h.role.apply_input(look);
 		ok &= expect((h.kernel->local.input.look_heading != heading_before) == admitted,
 				admitted ? "stance head: the look turns L" : "stance head: the gate drops the look");
+		// The held forward row (row 2, code 152, 0x0C002C05) queues its event each frame and
+		// takes the same head [orig: Input_ProcessAnalogBindings @0x4995F0 - @0x499660].
+		inmatch::TickInput walk = h.input;
+		walk.player.movement.forward = true;
+		h.role.apply_input(walk);
+		ok &= expect(h.kernel->local.input.forward == admitted,
+				admitted ? "held head: the forward key holds" : "held head: the gate drops the forward key");
 		ok &= expect(sunk.empty(), "stance head: the stance codes are the role's, not the embedder's");
 		for (int i = 0; i < 12; ++i) h.role.run_tick(h.input);
 		ProtocolMessage select;
@@ -2975,40 +2988,37 @@ bool run_a_console_deploy_pick_ends_the_drain() {
 	return ok;
 }
 
-// V-L2-s7 FOUND 2: no input frame runs under a menu screen, so a console-queued action waits
-// for the screen's close; the armory screen's ACCEPT and CANCEL head runs Input_ResetAllState,
-// whose event-queue memset drops it (and the devices owe their reset). Without the reset the
-// held action dispatches at the first input frame after the close.
+// V-L2-s7 FOUND 2 + V-L2-s8 (NEW-L2-17): no input frame runs under a menu screen, so a
+// console-queued action waits for the screen's close; every close runs Input_ResetAllState
+// (UI_CloseMenuScreen's tail call: the shell's resume and screen closes, and the armory's
+// ACCEPT / CANCEL head before it), whose event-queue memset drops it, and the devices owe their
+// reset. The close reaches the role as Role::reset_all_input_state.
 // [orig: Game_ProcessMainFrame @0x5263F0 - UI_IsMenuScreenOpen @0x52660D skips
-//  Input_ProcessFrame @0x52661D; WeaponLoadout_ApplyFromBuffer @0x565CD0 - Input_ResetAllState
-//  @0x565D01; Input_ResetAllState @0x497ED0 - the event queue's memset @0x497EE6]
+//  Input_ProcessFrame @0x52661D; UI_CloseMenuScreen @0x54E5E0 - Input_ResetAllState @0x54E63F;
+//  WeaponLoadout_ApplyFromBuffer @0x565CD0 - Input_ResetAllState @0x565D01; Input_ResetAllState
+//  @0x497ED0 - the event queue's memset @0x497EE6]
 bool run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it() {
-	bool ok = true;
-	for (const bool accept_reset : {false, true}) {
-		Harness h;
-		h.kernel->world.load_systems();
-		h.kernel->world.rules.mp_session = true;
-		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
-		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
-		(void)h.role.runtime->queue_console_action(55, 0, 0, 0);
-		inmatch::TickInput menu = h.input;
-		menu.player.held_action_bits = inmatch::HELD_MENU_OPEN;
-		h.role.apply_input(menu);
-		for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
-		ProtocolMessage m;
-		ok &= expect(!h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m),
-				"menu screen: the queued Respawn waits under the screen");
-		(void)h.role.take_input_reset();
-		if (accept_reset) h.role.reset_all_input_state();
-		ok &= expect(h.role.take_input_reset() == accept_reset,
-				"menu screen: the ACCEPT's reset owes the devices' reset");
-		h.role.apply_input(h.input);
-		for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
-		ok &= expect(h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m) == !accept_reset,
-				accept_reset ? "menu screen: the ACCEPT's reset dropped the held Respawn"
-				             : "menu screen: the held Respawn dispatches at the first input frame after");
-	}
+	Harness h;
+	h.kernel->world.load_systems();
+	h.kernel->world.rules.mp_session = true;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	(void)h.role.runtime->queue_console_action(55, 0, 0, 0);
+	inmatch::TickInput menu = h.input;
+	menu.player.held_action_bits = inmatch::HELD_MENU_OPEN;
+	h.role.apply_input(menu);
+	for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+	ProtocolMessage m;
+	bool ok = expect(!h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m),
+			"menu screen: the queued Respawn waits under the screen");
+	(void)h.role.take_input_reset();
+	h.role.reset_all_input_state(); // the screen's close
+	ok &= expect(h.role.take_input_reset(), "menu screen: the close owes the devices' reset");
+	h.role.apply_input(h.input);
+	for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+	ok &= expect(!h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m),
+			"menu screen: the screen's close dropped the held Respawn");
 	return ok;
 }
 
@@ -3028,7 +3038,10 @@ bool run_the_teardown_goodbye_follows_the_exit_route() {
 		uint32_t dc;
 		const char *dstr;
 	};
-	const Case cases[] = {{0, true, 2, "N.C:SWWAD[1]:0"}, {1, true, 2, "N.C:SWWAD[1]:1"},
+	// Reason 0 never reaches the Post Menu: its teardown is the process exit's session reset,
+	// the record as it stands (V-L2-s8) [orig: Game_ProcessMainFrame @0x5263F0 - @0x526860;
+	// NapiLib_Shutdown @0x4C9580 - CNapiGameSession_ResetActiveSession @0x4C958B].
+	const Case cases[] = {{0, true, 0, ""}, {1, true, 2, "N.C:SWWAD[1]:1"},
 			{2, true, 0, ""}, {5, false, 0, ""}};
 	bool ok = true;
 	for (const Case &c : cases) {
@@ -3039,6 +3052,10 @@ bool run_the_teardown_goodbye_follows_the_exit_route() {
 		h.role.run_tick(h.input);
 		h.role.runtime->set_mission_exit_reason(c.reason);
 		h.socket.datagrams.clear();
+		// A joiner in the match has no pre-game join screen: the shell's join cancel sends
+		// nothing there (JoinerRole::cancel_join).
+		h.role.cancel_join();
+		ok &= expect(h.socket.datagrams.empty(), "teardown: the pre-game cancel is not a match's");
 		h.role.close();
 		std::vector<DisconnectEvent> goodbyes;
 		for (const std::vector<uint8_t> &datagram : h.socket.datagrams) {

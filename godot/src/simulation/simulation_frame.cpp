@@ -32,6 +32,11 @@ opennova::inmatch::Role &Simulation::active_role() {
 	return *role_;
 }
 
+bool Simulation::action_head_admits(int p_code) {
+	if (role_ == nullptr || role_->kernel() == nullptr) return true;
+	return role_->action_head_admits(p_code);
+}
+
 opennova::inmatch::ListenHostState *Simulation::host_state() {
 	return host_role_ != nullptr ? &host_role_->state : nullptr;
 }

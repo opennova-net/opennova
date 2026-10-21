@@ -107,7 +107,9 @@ bool JoinerRole::bring_up() {
 		create_runtime(player_name_, join_role_, spectator_password_, server_password_, join_password_);
 		reset_for_runtime_rebuild();
 	}
-	runtime->view().begin_mission();
+	// The round-over gate is lowered only at the mission start's head, which the runtime
+	// folds at the mission data's pass (ClientRuntime's mission_started), never at the load
+	// (V-L2-s8) [orig: Game_StartMission @0x524360 - `mov g_RoundOver, ebx` @0x524A1F].
 	reset_for_load(runtime->deployment_release_revision());
 	stamp_mission_rules();
 	kernel_->local.loadout.pending_player_class = -1; // the embedder re-applies the kit after each load
@@ -1671,12 +1673,18 @@ bool JoinerRole::reset_to_baseline(SessionError &error) {
 // FullDestroy, which latches "N.C:SWWAD[1]:<exit reason>" when nothing is latched (a load
 // wait's ESC or timeout: reason 1); the session reset (reason 2, the "quit" row's exit) bursts
 // the record as it stands, zeros when nothing was latched; the error arms (5, 6, 7, 20 and the
-// disconnect classes 9..19) tear nothing down, so a connection still up sends no goodbye.
+// disconnect classes 9..19) tear nothing down, so a connection still up sends no goodbye. With
+// no exit reason the Post Menu never runs: the teardown is the process exit's (the app's quit,
+// the shell's unload), whose library shutdown resets the session, so the burst carries the
+// record as it stands too (V-L2-s8).
 // [orig: PostMenu_RouteMissionExit @0x568460 - reason 2's CNapiGameSession_ResetActiveSession
 //  @0x56846F (-> CNapiNPConnection_Destroy @0x4C8A93), the error arms' loc_5686DA..0x568715 (no
 //  teardown), CNapiGameSession_FullDestroy(g_MissionExitReason) @0x568677..0x568683;
 //  CNapiGameSession_FullDestroy @0x4C96A0 - @0x4C96CC, @0x4C96DB;
-//  Client_CheckDisconnectOrEscDuringLoad @0x520270 - reason 1 @0x5202A8]
+//  Client_CheckDisconnectOrEscDuringLoad @0x520270 - reason 1 @0x5202A8; Game_ProcessMainFrame
+//  @0x5263F0 - the Post Menu only on a nonzero reason @0x526860..0x526867;
+//  Game_ShutdownSubsystems @0x4A5390 - NapiLib_Shutdown (the call @0x4A5398); NapiLib_Shutdown
+//  @0x4C9580 - CNapiGameSession_ResetActiveSession (the call @0x4C958B)]
 void JoinerRole::close() {
 	if (kernel_) {
 		kernel_->world.round_sim.guided_inputs_provider = {};
@@ -1690,11 +1698,16 @@ void JoinerRole::close() {
 	int32_t reason = runtime->mission_exit_reason();
 	if (reason == kMissionExitNone && runtime->in_mission_start()) reason = kMissionExitQuit;
 	std::vector<std::vector<uint8_t>> burst;
-	if (route_mission_exit(reason, /*novaworld=*/false).destroys_session)
-		burst = runtime->disconnect("N.C:SWWAD[1]:" + std::to_string(reason));
-	else if (reason == kMissionExitReset)
+	if (reason == kMissionExitNone || reason == kMissionExitReset)
 		burst = runtime->disconnect();
+	else if (route_mission_exit(reason, /*novaworld=*/false).destroys_session)
+		burst = runtime->disconnect("N.C:SWWAD[1]:" + std::to_string(reason));
 	for (const std::vector<uint8_t> &dg : burst) send(dg);
+}
+
+void JoinerRole::cancel_join() {
+	if (!runtime || !runtime->in_pre_game()) return;
+	for (const std::vector<uint8_t> &dg : runtime->disconnect("N.C:SWWAD[1]:-1")) send(dg);
 }
 
 void JoinerRole::quit_to_menu() {

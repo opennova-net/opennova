@@ -516,7 +516,7 @@ void Simulation::install_console_seams() {
 			input_action_exit();
 			break;
 		case 6:
-			if (active_role().local_action_head_admits())
+			if (active_role().action_head_admits(p_code))
 				(void)request_local_player_scope_toggle();
 			break;
 		case 12:
@@ -527,7 +527,7 @@ void Simulation::install_console_seams() {
 				inmatch::validated_punt(*ctx, p_param, 33, "ComIdPunt");
 			break;
 		default:
-			if (p_code >= 182 && p_code <= 191 && active_role().local_action_head_admits())
+			if (p_code >= 182 && p_code <= 191 && active_role().action_head_admits(p_code))
 				(void)local_player_select_seat(p_code - 182);
 			break;
 		}
@@ -939,10 +939,14 @@ void Simulation::finish_join_mission_start() {
 bool Simulation::poll_join_preload() {
 	if (joiner_role_ == nullptr || !runtime_) return false;
 	// The pre-mission subset of the joiner role's frame: the same UDP socket and
-	// ClientRuntime advance the retail connect exchange, but no World exists yet
-	// to tick and the runtime's world-ready gate suppresses the load/spawn drive.
+	// ClientRuntime advance the retail connect exchange; no World exists yet to tick,
+	// and the load waits for the S2C 0x1A's mission start (D-NET-NEW-L2-19).
 	joiner_role_->poll_preload();
 	return true;
+}
+
+void Simulation::cancel_join() {
+	if (joiner_role_ != nullptr) joiner_role_->cancel_join();
 }
 
 bool Simulation::is_join_preload_ready() const {

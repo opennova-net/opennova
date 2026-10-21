@@ -96,8 +96,8 @@ public:
 		if (runtime) runtime->use_process_state(state);
 	}
 	// The pre-mission subset of the frame: the same socket and runtime advance
-	// the retail connect exchange, but no World exists yet to tick and the
-	// runtime's world-ready gate suppresses the load/spawn drive. The hello
+	// the retail connect exchange; no World exists yet to tick, and the load
+	// waits for the S2C 0x1A's mission start (D-NET-NEW-L2-19). The hello
 	// latch and the per-frame clock are shared with the in-mission frame.
 	void poll_preload();
 	// The end of a mission start whose load ran after the S2C 0x1A
@@ -145,6 +145,15 @@ public:
 	//  CNapiNPConnection_RequestDisconnect @0x61E0F0 (state 5: SetState(6) @0x61E0FA) ->
 	//  CNapiNPConnection_TeardownActiveConnection @0x6253C0]
 	void quit_to_menu();
+	// The pre-game join screen's ABORT (the shell's cancel of a join ahead of the mission
+	// start): the join state machine's cleanup, FullDestroy(-1), whose leave latches
+	// "N.C:SWWAD[1]:-1" and writes the goodbye burst at once. A cancel inside the mission
+	// start is the wait's abort, exit reason 1, which close() routes.
+	// [orig: PreMenu_OnAbortCancel @0x568CA0 (g_PreMenuState = 9 @0x568CB4);
+	//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 9's
+	//  CNapiGameSession_FullDestroy(-1) @0x56A3E3; CNapiGameSession_FullDestroy @0x4C96A0 -
+	//  the sprintf @0x4C96CC, the leave @0x4C96DB]
+	void cancel_join();
 	ClientRuntime *client_runtime() override { return runtime.get(); }
 	int64_t last_net_us() const override { return last_net_us_; }
 	// The frame statistics the C2S 0x0C's two stat bytes carry; the frame rate

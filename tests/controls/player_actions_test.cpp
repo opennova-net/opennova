@@ -387,6 +387,42 @@ bool test_wheel_subset_and_repeated_events() {
 	return true;
 }
 
+// A binding row's key or wheel event names its row's dispatch code, which the dispatcher's
+// head gates by that row's flags (V-L2-s8, D-NET-710): seat1 (row 17) 182, scope (row 105) 6,
+// cycleweaponP (row 39) 212; the held-USE digit's seat pick and the USE release's mount toggle
+// call their handlers directly, past no head.
+// [orig: word_8159A8 + 108 * row (the catalog's codes); Input_HandleSpecialKeys @0x49c5c0 -
+//  Entity_FindAvailableSeat @0x49c6e6..0x49c6ed; Input_ProcessFrame @0x49d520 - the release
+//  edge @0x49d6c1..0x49d6dc]
+bool test_key_rows_carry_their_dispatch_codes() {
+	{
+		PlayerActions actions;
+		Keys keys;
+		keys.hold("seat1", '1');
+		const PlayerActionFrame frame = actions.poll(keys, kLive);
+		CHECK(requests_are(frame, {{Action::SelectSeat, 0}}) && frame.requests[0].code == 182);
+	}
+	{
+		PlayerActions actions;
+		Keys keys;
+		keys.hold("scope");
+		const PlayerActionFrame frame = actions.poll(keys, kLive);
+		CHECK(requests_are(frame, {{Action::ToggleScope}}) && frame.requests[0].code == 6);
+	}
+	const auto wheel = player_wheel_action("cycleweaponP");
+	CHECK(wheel && wheel->code == 212);
+	{
+		PlayerActions actions;
+		Keys keys;
+		keys.hold("useitem");
+		actions.poll(keys, kLive);
+		keys.digits[1] = true;
+		const PlayerActionFrame frame = actions.poll(keys, kLive);
+		CHECK(requests_are(frame, {{Action::SelectSeat, 0}}) && frame.requests[0].code == -1);
+	}
+	return true;
+}
+
 } // namespace
 
 // The WM_MOUSEWHEEL accumulator: whole +/-120 notches dispatch, one event per
@@ -750,7 +786,7 @@ int main() {
 			test_spectator_rows_edge_to_their_codes, test_key_state_reset, test_reset_drops_the_held_release, test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen, test_to_special_latch_reads_the_key_state,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
 			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,
-			test_held_use_runs_the_arm_every_frame})
+			test_held_use_runs_the_arm_every_frame, test_key_rows_carry_their_dispatch_codes})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

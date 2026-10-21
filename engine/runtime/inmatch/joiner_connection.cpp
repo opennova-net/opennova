@@ -251,6 +251,8 @@ std::vector<uint8_t> JoinerConnection::start() {
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
 	round_over_gate_ = false;
+	mission_start_aborted_ = false;
+	mission_start_released_this_pass_ = false;
 	initial_admission_complete_ = false;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
@@ -1600,7 +1602,8 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (post_auth_stage_ == PostAuthStage::AwaitDeployment)
 				release_deployment(/*deployment_complete=*/false);
 		} else if (m.tag == s2c::WAIT_FOR_GAME_START_ACK &&
-		           post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd) {
+		           post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd &&
+		           !mission_start_aborted_ && (!round_over_gate_ || out.mission_started)) {
 			// The world-stream terminator ends the game-start wait and releases the mission
 			// start, whose end queues and pumps the loadout/status submissions
 			// (ClientRuntime::push_mission_start_end): in this frame when the embedder has no
@@ -1608,6 +1611,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// [orig: NapiClient_WaitForGameStart @0x42cc10 (the exit test @0x42ccbf) from
 			//  Game_StartMission @0x524e29]
 			post_auth_stage_ = PostAuthStage::AwaitMissionStart;
+			mission_start_released_this_pass_ = true;
 			out.game_start_acked = true;
 		} else if (m.tag == s2c::RTT_ECHO) {
 			// While the round-over gate is up the handler returns at once: no pong for
@@ -2017,7 +2021,16 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// arrival — a joiner stalled past that window mid-0x60/0x64 would otherwise drop it
 			// forever and park both sides (never preload_ready here, sync state 3 host-side).
 			sync_tail_seen_ = true;
-			if (post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail) {
+			// The sync-tail wait tests the round-over gate ahead of the 0x11's flag: a gate up
+			// already abandons the mission start, and no 0x0A answers (mission_start_aborted).
+			// A pass that carried the final 0x64 has the mission start's clear ahead of the wait.
+			// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - @0x42CBC5 ahead of
+			//  @0x42CBE7; Game_StartMission @0x524360 - the clear @0x524A1F]
+			if (round_over_gate_ && !out.mission_started &&
+					post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail)
+				mission_start_aborted_ = true;
+			if (!mission_start_aborted_ &&
+					post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail) {
 				preload_ready_ = true;
 				pending_spawn_menu_request_ = true;
 			}
@@ -2160,6 +2173,8 @@ std::vector<uint8_t> JoinerConnection::begin_mission_reload() {
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
 	round_over_gate_ = true; // the round end's gate holds until the mission start
+	mission_start_aborted_ = false;
+	mission_start_released_this_pass_ = false;
 	initial_admission_complete_ = false;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;

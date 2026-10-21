@@ -283,6 +283,55 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 	}
 }
 
+// V-L2-s8 (D-NET-710 iii): on the authority the head's 0x400 operand is the own client's
+// pre-round copy (g_ClientPreRoundTimer, written only by the client's 0x0A handler), not the
+// server's countdown: the seat row (17, code 182, 0x0C000C01) passes while only the server's
+// timer runs and drops while the own copy runs; the Knife row (28, code 201, 0x0C000801)
+// carries no 0x400.
+// [orig: Input_HandleActionBinding @0x49AD40 - `cmp g_ClientPreRoundTimer, 0` @0x49ADBB;
+//  NapiNPClientMsg_0x00A @0x430064]
+void check_head_preround_reads_the_own_clients_copy(std::map<std::string, std::string> &files) {
+	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	auto &kernel = *kernel_storage;
+	auto role_storage = std::make_unique<inmatch::HostRole>();
+	auto &role = *role_storage;
+	role.bind(kernel);
+	inmatch::ListenHostState &host = role.state;
+	kernel.open_document(two_entity_mission(), "head_preround", source_over(&files));
+	ms::KernelBootOptions options;
+	options.mp_session = true;
+	options.game_type = mission_game_type(kernel.mission);
+	options.bringup_net_session = [&] {
+		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
+		cfg.config.server_name = "head_preround";
+		cfg.config.max_players = 4;
+		cfg.config.game_type = options.game_type;
+		cfg.socket_mode = inmatch::SocketMode::Lan;
+		cfg.serve_and_play = true;
+		inmatch::HostBringup bringup;
+		bringup.host_cfg = cfg;
+		role.bring_up(bringup);
+	};
+	std::string error;
+	CHECK(kernel.boot(options, error));
+	CHECK(host.client_runtime != nullptr && kernel.local.has_local_player());
+	if (host.client_runtime == nullptr) return;
+	opennova::inmatch::NullDatagramSocket socket;
+	role.set_socket(&socket);
+	for (int i = 0; i < 4; ++i) role.run_tick(tick_input(0));
+	host.client_runtime->state().deploy_overlay_active = false;
+	host.client_runtime->state().spawn_success_gate = false;
+	CHECK(!kernel.local.local_player_dead());
+	kernel.world.preround_delay_seconds = 5;
+	kernel.world.cached.client_preround_timer = 0;
+	CHECK(role.action_head_admits(182));
+	kernel.world.preround_delay_seconds = 0;
+	kernel.world.cached.client_preround_timer = 5;
+	CHECK(!role.action_head_admits(182));
+	CHECK(role.action_head_admits(201));
+}
+
 // Its own frame: main's locals already fill the 1 MB test stack.
 void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 	// --- the 0x4C report's count is the process's: a remade client runs on --
@@ -1129,6 +1178,7 @@ int main() {
 	}
 
 	check_listen_host_deploy_convert(files);
+	check_head_preround_reads_the_own_clients_copy(files);
 
 	// --- the authority's own stance rides its looped-back C2S 0x1D ----------
 	// The server handler latches the host's own player from the 0x1D its own
