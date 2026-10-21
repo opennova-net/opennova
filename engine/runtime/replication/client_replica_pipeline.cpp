@@ -1367,7 +1367,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// Entity_ResetToSpawnState resets on the row: the leg and body yaws
 		// re-seed to the new heading, and the velocities zero
 		// [orig: @0x4b962c velocityX/Y + slideDecay = 0; @0x4b968c..0x4b96b0
-		// bodyHeading and the four leg yaws = Yaw]. (The one-shot phase seed
+		// savedLiveYaw and the four leg yaws = Yaw]. (The one-shot phase seed
 		// rides the arbitration's direct-commit leg — net_anim_ratio.)
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
 			const bool row_frozen =

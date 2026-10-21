@@ -599,7 +599,7 @@ struct ClientEntityState {
 	// moveTimer (net_corpse_timer, +0x148) [orig: org1 @0x4BBF8F, org2
 	// @0x4B70D9]; a replica row runs no selection of its own.
 	uint8_t hit_type = 0;
-	// bodyRoll (+0x94), the hit-time tilt toward the shot
+	// savedLiveRoll (+0x94), the hit-time tilt toward the shot
 	// [orig: OrganicClass_HandleEvent @0x407564 / @0x407575].
 	int32_t rm_body_roll = 0;
 	// Entity_OnDamageReceived's tail: wasHit (+0x36B), damageTimer (+0x2F8)
@@ -777,7 +777,7 @@ struct ClientEntityState {
 	int32_t rm_leg_yaw[2] = {};
 	int32_t rm_leg_target[2] = {};
 	int32_t rm_body_heading = 0;
-	// bodyPitch (+0x90), the player body's slope conform's pitch word (its Roll
+	// savedLivePitch (+0x90), the player body's slope conform's pitch word (its Roll
 	// is roll_bam, +0x18): the aim overlay's body and leg chains and the eye's
 	// third turn read both [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
 	// the decay @0x4B6DBD, the chase @0x4B6FC1; Entity_BuildBoneTransformMatrices

@@ -389,7 +389,7 @@ void test_remote_eye_restamps_from_the_capsule() {
 
 // D-NET-196: a remote player row runs the player body's slope conform. A prone body
 // (anim flag bit 2) probes four ground columns on every second tick, ahead, behind,
-// left and right, and chases bodyPitch and Roll a quarter of the way to the true
+// left and right, and chases savedLivePitch and Roll a quarter of the way to the true
 // slope angles, holding between; the eye reads the words the previous tick left. A
 // standing body (no flag bit 2, alive) decays both a sixteenth toward level every
 // tick. The slope angles are retail's arithmetic over the probe drops: a 0x3000 drop
@@ -523,6 +523,51 @@ void test_remote_lean_ramp_gates() {
 	for (const Case &c : cases) {
 		const ns::ClientEntityState *row = view.state().find(c.handle);
 		expect(row != nullptr && row->lean_angle == (c.ramps ? -0x3000000 : 0), c.what);
+	}
+
+	// A seated body's pass ends at the mounted site: no on-foot ramp; a passenger's
+	// keys move its lean 0x1400000 a tick, any other seat's not at all; a row standing
+	// on a deck (bone 0) is on foot.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `cmp [esi+168h], 1` @0x4B6684,
+	//  @0x4B66B5 / @0x4B66C3]
+	constexpr uint16_t kCarrier = 0x1010;
+	constexpr uint16_t kCarrierType = 0x0400;
+	ns::ClientReplicaPipeline seated;
+	seated.set_replica_seat_type_resolver([](uint16_t carrier_type, uint8_t bone) -> uint8_t {
+		if (carrier_type != kCarrierType) return 0;
+		return bone == 3 ? static_cast<uint8_t>(world::SeatType::Passenger)
+		     : bone == 5 ? static_cast<uint8_t>(world::SeatType::Controller) : 0;
+	});
+	seated.state().upsert(kCarrier).type_id = kCarrierType;
+	struct Seated {
+		uint16_t handle;
+		uint8_t bone;
+		uint8_t keys;
+		int32_t lean;
+		const char *what;
+	};
+	const Seated rows[] = {
+		{0x0111, 3, static_cast<uint8_t>(world::Entity::kMoveOrderLeanLeft), -0x1400000,
+				"lean ramp: a seated passenger's left key, 0x1400000"},
+		{0x0112, 3, static_cast<uint8_t>(world::Entity::kMoveOrderLeanRight), 0x1400000,
+				"lean ramp: a seated passenger's right key, 0x1400000"},
+		{0x0113, 5, static_cast<uint8_t>(world::Entity::kMoveOrderLeanLeft), 0,
+				"lean ramp: a driver's keys move nothing"},
+		{0x0114, 0, static_cast<uint8_t>(world::Entity::kMoveOrderLeanLeft), -0x3000000,
+				"lean ramp: a row standing on the deck ramps on foot"},
+	};
+	for (const Seated &r : rows) {
+		ns::ClientEntityState &row = seated.state().upsert(r.handle);
+		row.cls = EntityClass::Player;
+		row.carrier_handle = kCarrier;
+		row.mount_bone = r.bone;
+		row.move_input = r.keys;
+		row.lean_angle = 0;
+	}
+	seated.tick_lean_ramp();
+	for (const Seated &r : rows) {
+		const ns::ClientEntityState *row = seated.state().find(r.handle);
+		expect(row != nullptr && row->lean_angle == r.lean, r.what);
 	}
 }
 

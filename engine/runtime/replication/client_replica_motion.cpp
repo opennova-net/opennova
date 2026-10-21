@@ -210,7 +210,7 @@ void row_deck_ride(ClientEntityState &es,
 	// render heading and the body heading (org2 @0x4b5656..0x4b56c1, org1
 	// @0x4ba842..0x4ba861; the mounted 0x1000-seat skip is seat-machinery a
 	// transport row never reaches). org1 additionally drags its chase TARGET
-	// (+0x1A8 @0x4ba867) and look Pitch (+0x14 @0x4ba88e); org2's bodyPitch
+	// (+0x1A8 @0x4ba867) and look Pitch (+0x14 @0x4ba88e); org2's savedLivePitch
 	// and torso/aim target adds have no row channels — named deferrals. Roll
 	// adopts on both (+0x18 @0x4b5723/@0x4ba88b). The pitch/roll deltas are
 	// rotated by the carrier-vs-rider relative yaw taken BEFORE the yaw add.
@@ -410,12 +410,12 @@ void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
 
 // The player body's slope conform on a remote row, the world pass's org2 leg
 // on the row's words (world::AiSystem::infantry_slope_pass keeps the
-// authority's): a non-conforming body decays bodyPitch and Roll a sixteenth
+// authority's): a non-conforming body decays savedLivePitch and Roll a sixteenth
 // toward level every tick; a conforming one (the def's attrib 0x200, an anim
 // state with flag bit 2, or a corpse neither in the air, afloat nor on a
 // ladder) probes four ground columns every second tick, slides on steep ground
 // (dead 48 deg, alive 60), tips a corpse's look pitch an eighth and chases
-// bodyPitch and Roll a quarter of the way to the true slope angles, the roll
+// savedLivePitch and Roll a quarter of the way to the true slope angles, the roll
 // held while a combat roll plays. The selector and the roll hold read the
 // arbitrated current (+0x2BC), the dead and support bits the Flags word.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the selector

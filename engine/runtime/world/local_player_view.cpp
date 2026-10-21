@@ -1209,6 +1209,34 @@ void apply_inset_slot_offsets(World &world, LocalPlayerWeapon &w, LocalPlayerVie
 
 } // namespace
 
+namespace {
+// A joiner's decoded target composes its seated first person through the carrier
+// legs as an authority's mounted body does: the rider words its row carried
+// (Position, the rotation triple, CameraOffset, the body roll) on the carrier twin
+// and seat its record names; a decoded player is a person row.
+// [orig: Camera_ComputeThirdPersonView @0x437D10 - the tracked entity's
+//  +0x168 / +0x16C, mode 0 @0x437DAC..0x437EAD]
+bool row_target_mounted_camera(World &world, const SpectatorMotorState &s, int32_t out[6]) {
+    Entity rider;
+    rider.mounted = true;
+    rider.mount_target = s.target_carrier;
+    rider.mount_type = static_cast<SeatType>(s.target_seat_type);
+    rider.position.x.q16 = s.target_pos[0];
+    rider.position.y.q16 = s.target_pos[1];
+    rider.position.z.q16 = s.target_pos[2];
+    rider.heading = s.target_yaw;
+    rider.pitch_bam = s.target_pitch;
+    rider.roll_bam = s.target_roll;
+    rider.eye_offset_x = s.target_eye[0];
+    rider.eye_offset_y = s.target_eye[1];
+    rider.eye_offset_z = s.target_eye[2];
+    rider.saved_live_roll = s.target_body_roll;
+    rider.has_item_def = true;
+    rider.item_type = 3;
+    return local_player_mounted_camera(world, rider, out);
+}
+} // namespace
+
 bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerViewTracker &t,
                                  PlayerCameraPose &out, bool &mounted_camera) {
     out = PlayerCameraPose();
@@ -1256,7 +1284,13 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
     const float aim_yaw = static_cast<float>(mission_yaw_deg_from_bam_heading(p->heading));
     const float aim_pitch = static_cast<float>(static_cast<double>(p->pitch) * kDegreesPerBam);
     int32_t mounted[6];
-    if (v.camera_mode == 0 && e->mounted && local_player_mounted_camera(world, *e, mounted)) {
+    // A seated decoded target's carrier legs stand in for the local entity's
+    // (row_target_mounted_camera).
+    const bool mounted_leg = v.camera_mode == 0 &&
+            (row_target && spectate.target_seated
+                     ? row_target_mounted_camera(world, spectate, mounted)
+                     : e->mounted && local_player_mounted_camera(world, *e, mounted));
+    if (mounted_leg) {
         // A seated first-person view belongs to the carrier: its
         // virtual-display camera callback, or the gun's posed CAMERA
         // userpoint [orig: Camera_ComputeThirdPersonView mode 0

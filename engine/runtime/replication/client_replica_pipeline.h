@@ -549,6 +549,16 @@ public:
 	void set_replica_def_attrib_resolver(ReplicaDefAttribResolver resolver) {
 		replica_def_attrib_resolver_ = std::move(resolver);
 	}
+	// A seated row's seat type (+0x168: 1 sitex, 2 ctrlx, 3 UseGun, 5 drvrx), the
+	// type of the carrier's seat whose bone the record names, which the attach
+	// stamps from the carrier model's userpoint; 0 for none. The embedder answers
+	// it by the carrier's wire type and the bone [orig: NetPacket_SerializePlayerState
+	// @0x4C09C0 - the Entity_TryAttachOrDetach call @0x4C1317].
+	using ReplicaSeatTypeResolver =
+			std::function<uint8_t(uint16_t carrier_type_id, uint8_t bone)>;
+	void set_replica_seat_type_resolver(ReplicaSeatTypeResolver resolver) {
+		replica_seat_type_resolver_ = std::move(resolver);
+	}
 
 	// The phase-3 0x0A objective block has no on-wire discriminator. apply()
 	// learns the shared g_GameType from S2C 0x08 field 3 / 0x7B `extra`;
@@ -731,6 +741,7 @@ private:
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
 	ReplicaGroundProbe replica_ground_probe_;
 	ReplicaDefAttribResolver replica_def_attrib_resolver_;
+	ReplicaSeatTypeResolver replica_seat_type_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
 	GroundOccupantProvider ground_occupant_provider_;
 	int32_t water_z_ = 0;

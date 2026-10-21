@@ -102,7 +102,7 @@ inline bool aim_overlay_inputs_for_client(
 	out.body_yaw = out.aim_yaw;
 	out.leg_yaw_r = out.body_yaw;
 	out.leg_yaw_l = out.body_yaw;
-	// The body and leg chains take the body's bodyPitch and Roll, the slope
+	// The body and leg chains take the body's savedLivePitch and Roll, the slope
 	// conform's words a player row runs (row_body_conform); a mounted body's seat
 	// pose replaces them below [orig: Entity_BuildBoneTransformMatrices @0x4B1290 -
 	// the body build @0x4B182E, the leg chains @0x4B1845 / @0x4B185C].

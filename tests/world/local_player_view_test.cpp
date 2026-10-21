@@ -423,6 +423,27 @@ void test_first_person_compose_reads_the_tracked_target() {
     CHECK(near(frame.camera.eye[0], 10.0f) && near(frame.camera.eye[1], 20.0f - 0.1875f));
     CHECK(near(frame.camera.eye[2], 3.5f));
     CHECK(near(frame.camera.roll_deg, 6.0f));
+    // A seated decoded target composes its first person through the carrier legs its
+    // record names, as an authority's mounted body does: a troop-callback carrier
+    // gives its own Position + CameraOffset and rotation triple (D-NET-330).
+    // [orig: Camera_ComputeThirdPersonView @0x437D10 - @0x437DAC..0x437EAD; the troop
+    //  callback @0x4DC710 (@0x4DC732..0x4DC741)]
+    Entity hull;
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.position = {100.0f, 200.0f, 10.0f};
+    hull.veh.yaw_seeded = true;
+    hull.input_class = 1;
+    hull.virtual_display_camera = true;
+    hull.eye_offset_z = 2 * 65536;
+    const EntityHandle hull_handle = lw->w.registry.spawn(0, hull);
+    lw->w.spectator.target_seated = true;
+    lw->w.spectator.target_carrier = hull_handle;
+    lw->w.spectator.target_seat_type = static_cast<uint8_t>(SeatType::Passenger);
+    local_player_view_frame(&lw->w, weapon, view, tracker, frame);
+    CHECK(frame.mounted_camera);
+    CHECK(near(frame.camera.eye[0], 100.0f) && near(frame.camera.eye[1], 200.0f));
+    CHECK(near(frame.camera.eye[2], 12.0f));
 }
 
 // Both shake legs add their yaw delta to the BAM HEADING, so the mission yaw

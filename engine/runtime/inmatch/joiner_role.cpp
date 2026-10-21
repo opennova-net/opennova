@@ -1054,6 +1054,19 @@ void JoinerRole::wire_frame_providers() {
 			[this](uint16_t type_id) -> int32_t {
 				return kernel_->wire_collision_shape_for_type(type_id).bound_radius_q16;
 			});
+	// A seated row's seat type, from the carrier's seat table by the record's
+	// bone, as the attach stamps +0x168 off the carrier model's userpoint
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the Entity_TryAttachOrDetach
+	//  call @0x4C1317].
+	rt.view().set_replica_seat_type_resolver(
+			[this](uint16_t carrier_type_id, uint8_t bone) -> uint8_t {
+				const mission::ItemSeatSpec *spec =
+						mission::item_seat_spec_for_type(kernel_->seat_specs, carrier_type_id);
+				if (spec == nullptr) return 0;
+				for (const world::Seat &seat : spec->seats)
+					if (seat.bone_index == bone) return static_cast<uint8_t>(seat.type);
+				return 0;
+			});
 	// The player body's slope conform on a remote row reads the def's attrib
 	// word (the 0x200 conform bit), from the same items.def
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `test [def+54h], 200h`

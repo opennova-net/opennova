@@ -41,6 +41,16 @@ struct SpectatorMotorState {
 	int32_t target_lean = 0;
 	int32_t target_recoil = 0;
 	int32_t target_torso_roll = 0;
+	// A decoded target's seat (D-NET-330): the carrier its record names (the
+	// world's twin, which shares the wire handle), the seat type of the record's
+	// bone (+0x168) and the body roll (+0x94), which the death screen's first
+	// person composes through the carrier legs as the tracked entity's
+	// parentSlot / parentEntity give them [orig: Camera_ComputeThirdPersonView
+	// @0x437D10 - mode 0 @0x437DAC..0x437EAD].
+	bool target_seated = false;
+	EntityHandle target_carrier;
+	uint8_t target_seat_type = 0;
+	int32_t target_body_roll = 0;
 	// The fast-flight gate: the per-recipient SU flag (S2C 0x24 "SU n"). Its
 	// alternative, bit 2 of the local cheat word dword_24C1930, has no writer
 	// in the image (Game_StartMission stores the whole word 0 or 0x2000000

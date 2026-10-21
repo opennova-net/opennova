@@ -4,7 +4,8 @@
 // infantry_ladder.cpp precedent).
 #include <runtime/replication/client_replica_pipeline.h>
 
-#include <runtime/world/entity.h> // kMoveOrderLean* (the wire move_input bits)
+#include <runtime/world/entity.h> // kMoveOrderLean* (the wire move_input bits), SeatType
+#include <net/npwire/wire_handle.h>
 #include <runtime/world/infantry.h> // anim_state (the prone idle and roll states)
 #include <base/io/bam.h>
 #include <base/io/rotating_prng.h>
@@ -24,6 +25,24 @@ void ClientReplicaPipeline::tick_lean_ramp() {
 	for (ClientEntityState &es : state_.entities) {
 		// The on-foot ramp is the player body pass's (the NPC pass ramps none).
 		if (es.cls != EntityClass::Player) continue;
+		// A seated body's pass ends at the mounted site, ahead of the on-foot
+		// ramp; only a passenger's keys move its lean there, 0x1400000 a tick
+		// with no other gate, ahead of its eye (the replica's seated rows restamp
+		// none) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the passenger
+		// test `cmp [esi+168h], 1` @0x4B6684, left @0x4B66B5, right @0x4B66C3,
+		// the mounted site's end @0x4B6510 / @0x4B66D9..0x4B68FC].
+		if (es.carrier_handle != wire_handle::kInvalid && es.mount_bone != 0) {
+			const ClientEntityState *carrier = state_.find(es.carrier_handle);
+			const uint8_t seat = carrier != nullptr && replica_seat_type_resolver_
+					? replica_seat_type_resolver_(carrier->type_id, es.mount_bone)
+					: 0u;
+			if (seat != static_cast<uint8_t>(world::SeatType::Passenger)) continue;
+			if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
+				es.lean_angle = io::bam_sub(es.lean_angle, 0x1400000);
+			if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)
+				es.lean_angle = io::bam_add(es.lean_angle, 0x1400000);
+			continue;
+		}
 		// Its gates: a ladder contact or a chute (Flags 0x100020; a remote body's
 		// chute bit is the record's, whose low byte bar the dead bit lands on its
 		// Flags), the prone latch with none of Flags 0x10A000 (a remote body's
