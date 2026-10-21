@@ -1777,6 +1777,26 @@ void test_detonator_chain() {
     CHECK(rig.w.throwables.events.removes.size() == 1);
 }
 
+// The detonator's mark tests no authority: a peer's visual-only spawn of the round marks
+// the firer's satchels too (only the authority's think acts on the mark).
+// [orig: RoundData_SpawnRound @0x4EC231..0x4EC237 -> Entity_DetonateSatchelsByOwner
+//  @0x546ED0, no gate; Entity_SatchelThink @0x443670 - is_authority @0x44368D]
+void test_the_detonator_marks_on_every_peer() {
+    Rig rig(0);
+    rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 1.5f}, 0, 0);
+    rig.tick(120);
+    CHECK(rig.w.throwables.devices.size() == 1);
+    if (rig.w.throwables.devices.empty()) return;
+    RoundSpawnParams p;
+    p.owner = rig.thrower;
+    p.shooter_handle = rig.thrower.packed;
+    p.origin = Vec3{50, 50, 1};
+    p.ammo_index = kAmmoDetonator;
+    CHECK(rig.w.round_sim.spawn(rig.w, p, RoundConsequenceMode::VisualOnly) == -1);
+    const Entity *e = rig.w.registry.get(rig.w.throwables.devices[0].entity);
+    CHECK(e != nullptr && e->health == -1);
+}
+
 // Placed-claymore proximity: an enemy inside kz_minradius AND the pieslice
 // cone (with LOS) trips it — the shrapnel fan + the kill zone spawn with the
 // owner credited [orig: think @ 0x4438C0 + Entity_FindEnemyInCone @ 0x43cba0].
@@ -2683,6 +2703,7 @@ int main() {
     test_world_tick_uses_retail_device_order();
     test_per_owner_same_item_device_caps();
     test_detonator_chain();
+    test_the_detonator_marks_on_every_peer();
     test_claymore_cone_trigger();
     test_claymore_sweep_skips_rowless_defless_modelless();
     test_claymore_sector_los_blocks_trigger();

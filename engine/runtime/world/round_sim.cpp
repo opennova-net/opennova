@@ -1012,9 +1012,14 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         return -1;
     }
     if ((ammo->flags & kAmmoFlagDetonateSatchels) != 0) {
-        // Detonatesatchels [orig: @ 0x4ec234 -> Entity_DetonateSatchelsByOwner]
-        if (authoritative)
-            world.throwables.detonate_satchels_by_owner(world, params.owner);
+        // Detonatesatchels: every peer that spawns the round marks the firer's
+        // satchels, the call testing no authority; only the authority's satchel
+        // think acts on the mark (a peer's acts on its death message alone), and
+        // a peer holds no placed device of ours, so its walk finds none.
+        // [orig: RoundData_SpawnRound @0x4EC231..0x4EC237 -> Entity_DetonateSatchelsByOwner
+        //  @0x546ED0 (no gate); Entity_SatchelThink @0x443670 - is_authority @0x44368D,
+        //  the peer's deathType 4 leg @0x443698]
+        world.throwables.detonate_satchels_by_owner(world, params.owner);
         return -1;
     }
     if ((ammo->flags & kAmmoFlagDesignateTarget) != 0) {
