@@ -315,6 +315,23 @@ public:
 	//    for traitless vehicles and lib-only embedders.
 	// No-op unless remote-motion mode is enabled.
 	void tick_remote_motion(uint16_t self_handle);
+
+	// The S2C 0x70 table and its received flag. Retail's are process globals that
+	// no session or mission start touches (their writers are the 0x70 handler and
+	// the vehicle screen's first open), so the embedder hands in its process-lived
+	// store (inmatch::ClientProcessState); null keeps this pipeline's own.
+	// [orig: g_VehicleSpawnAvailabilityReceived 0xA81BB0 -- stores @0x429ACE /
+	//  @0x429AE7 / @0x56425D; the table 0xA81BC0 and its count 0xA821B8 --
+	//  @0x429AC8 / @0x429AE2]
+	void use_vehicle_spawn_store(ClientVehicleSpawnAvailability *store) {
+		vehicle_spawn_store_ = store;
+	}
+	ClientVehicleSpawnAvailability &vehicle_spawn_availability() {
+		return vehicle_spawn_store_ != nullptr ? *vehicle_spawn_store_ : own_vehicle_spawn_;
+	}
+	const ClientVehicleSpawnAvailability &vehicle_spawn_availability() const {
+		return vehicle_spawn_store_ != nullptr ? *vehicle_spawn_store_ : own_vehicle_spawn_;
+	}
 	// The mover ticks run so far: the replica's tick clock (the leg re-plant
 	// window, the stale-carrier sweep's 0x7F phase), g_CurrentTick's stand-in.
 	uint32_t remote_motion_tick() const { return rm_tick_counter_; }
@@ -637,6 +654,8 @@ private:
 	const world::WeaponTable *weapon_table_ = nullptr;
 	const terrain::TerrainHeightField *remote_motion_terrain_ = nullptr;
 	uint32_t rm_tick_counter_ = 0; // the mover tick clock [orig: tick&63, the sweep's tick&0x7F]
+	ClientVehicleSpawnAvailability own_vehicle_spawn_;             // use_vehicle_spawn_store
+	ClientVehicleSpawnAvailability *vehicle_spawn_store_ = nullptr;
 	bool remote_motion_mode_ = false;
 	ReplicaContactResolver replica_contact_resolver_;
 	// tick_remote_motion's per-tick replica-peer sphere table (reused capacity).

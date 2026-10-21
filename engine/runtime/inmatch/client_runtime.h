@@ -61,16 +61,33 @@ namespace opennova::inmatch {
 
 class ConnectLog; // punt_log.h
 
-// The client half's process-lived word: retail keeps the 0x4C report's frame count in a
-// global for the whole process, so it runs on across sessions, map changes and roles; only the
-// report zeroes it. The embedder that outlives its sessions owns one and hands it to every
-// client runtime (ClientRuntime::use_process_state); a runtime with none keeps its own.
+// The client half's process-lived words: retail keeps the 0x4C report's frame count, the
+// revive countdown's frame count and the vehicle screen's state in globals for the whole
+// process, so they run on across sessions, map changes and roles. The embedder that outlives
+// its sessions owns one and hands it to every client runtime (ClientRuntime::use_process_state);
+// a runtime with none keeps its own (a test fixture's).
 // [orig: g_NetQualityReportTimer @0xA85B84 - its only writers Client_ProcessNetworkFrame
 //  @0x42C239 (the step) and @0x42C246 (the zero at the report)]
 struct ClientProcessState {
 	// The report's period: the 311th step fires. [orig: Client_ProcessNetworkFrame @0x42C23E]
 	static constexpr uint32_t kNetQualityReportInterval = 310;
 	uint32_t net_quality_report_timer = 0;
+	// The 1 Hz revive countdown's frame count: stepped by every client net frame and zeroed
+	// only by its own 63rd step, so its phase runs on across sessions.
+	// [orig: g_SlotRefreshTimer @0xA85B80 -- its only accesses Client_ProcessNetworkFrame
+	//  @0x42C27E..0x42C288 (the step) and @0x42C2DA (the zero)]
+	uint32_t slot_refresh_timer = 0;
+	// The vehicle screen's state (vehicle_menu.h): the poll flag, its frame counter, the
+	// selection and the list live with the menu scene, which only the expansion reload or
+	// the quit destroys, so a later session in the same process polls from its start.
+	// [orig: g_VehicleMenuOpen @0x25DCF24, g_VehicleMenuPollCounter @0x25DCF28,
+	//  g_VehicleMenuSelection @0x25DCF2C; VehicleMenu_Close @0x563AC0, dispatched by
+	//  CUIScene_DestroyAllContent alone (@0x63C4DC)]
+	VehicleMenu vehicle_menu;
+	// The S2C 0x70 table and its received flag, which no session or mission start touches
+	// (the client runtime points its replica's store here: use_vehicle_spawn_store).
+	// [orig: g_VehicleSpawnAvailabilityReceived 0xA81BB0, the table 0xA81BC0]
+	replication::ClientVehicleSpawnAvailability vehicle_spawn_availability;
 	// One client net frame's step, which every mission frame of every role runs (a Serve Only
 	// host's included, with no client runtime): true at the 311th, which zeroes the word before
 	// the session test, so the caller's report (in session, a session peer) is its own.
@@ -109,6 +126,7 @@ public:
 	void use_process_state(ClientProcessState *state) {
 		external_process_ = state;
 		if (joiner_) joiner_->use_local_player_entity_word(state != nullptr ? &state->local_player_entity : nullptr);
+		view_.use_vehicle_spawn_store(&process_state().vehicle_spawn_availability);
 	}
 	enum class Role : uint8_t { Joiner, HostClient };
 	// The process's _connectlog.txt (punt_log.h ConnectLog; null: off): every S2C 0x61
@@ -413,17 +431,21 @@ public:
 	//  @0x42DB64..0x42DB77, QueueReliableMessage(0x40, 1, 0, .., 3) @0x42DB81]
 	bool queue_vehicle_spawn_availability_request();
 	bool queue_vehicle_spawn_request(uint16_t source_handle, uint8_t type_index);
+	// The S2C 0x70 rows and received flag (process-lived: ClientProcessState).
+	const replication::ClientVehicleSpawnAvailability &vehicle_spawn_availability() const {
+		return view_.vehicle_spawn_availability();
+	}
 	// The S2C 0x70 received flag the screen's first open clears ahead of its
 	// ask [orig: VehicleMenu_Open @0x56425D].
 	void clear_vehicle_spawn_availability_received() {
-		view_.state().vehicle_spawn_availability.received = false;
+		view_.vehicle_spawn_availability().received = false;
 	}
-	// The vehicle screen's state, which outlives every mission reload on this
-	// connection as retail's scene-lifetime globals do; its poll runs once per
-	// main frame of the game loop, after the client net frame (the roles call
+	// The vehicle screen's state, the process's (ClientProcessState::vehicle_menu)
+	// as retail's scene-lifetime globals are; its poll runs once per main frame
+	// of the game loop, after the client net frame (the roles call
 	// poll_vehicle_menu there).
-	VehicleMenu &vehicle_menu() { return vehicle_menu_; }
-	const VehicleMenu &vehicle_menu() const { return vehicle_menu_; }
+	VehicleMenu &vehicle_menu() { return process_state().vehicle_menu; }
+	const VehicleMenu &vehicle_menu() const { return process_state().vehicle_menu; }
 	void poll_vehicle_menu(const world::World &world, const def::DefItemsFile *items);
 	// The main loop's measured frame rate for the quality metric's
 	// frame-pressure term [orig: g_StatsAvgFps (dword_24E1F10), read by
@@ -1056,13 +1078,15 @@ private:
 	// [orig: Client_ProcessNetworkFrame @0x42c180]. The 0x34 keepalive / 0x4C net-quality / 0x2C RTT
 	// emits and the send-holdoff send-block gate, deferred-and-logged at P5, ported here. ---
 	uint32_t current_tick_ = 0;          // [orig: g_ClientCurrentTick @0xA8229C] bumped once per run_frame
-	uint32_t slot_refresh_frames_ = 0;   // [orig: g_SlotRefreshTimer @0xA85B80] the 1 Hz revive countdown
 	uint32_t last_keepalive_tick_ = 0;   // [orig: g_LastKeepaliveTick @0xA822A0] 0x34 send latch
 	// [orig: g_NetQualityReportTimer @0xA85B84] the 0x4C cadence: the embedder's
 	// process-lived word (use_process_state), else this runtime's own.
 	ClientProcessState own_process_;
 	ClientProcessState *external_process_ = nullptr;
 	ClientProcessState &process_state() {
+		return external_process_ != nullptr ? *external_process_ : own_process_;
+	}
+	const ClientProcessState &process_state() const {
 		return external_process_ != nullptr ? *external_process_ : own_process_;
 	}
 	// The joiner's input-driven producers queue only in the game loop: a 0x5A that
@@ -1123,8 +1147,6 @@ private:
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the
 	// determinism contract of the replay path — seed_session is "for replay/parity only").
 	bool replay_mode_ = false;
-	// The vehicle screen's scene-lifetime state (vehicle_menu.h).
-	VehicleMenu vehicle_menu_;
 };
 
 // The voice-macro key's A&S context: the speaker stands inside the nearest

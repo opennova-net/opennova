@@ -55,7 +55,7 @@ void VehicleMenu::populate(const ClientRuntime &rt, const world::World &world,
 	                                                : nullptr;
 	if (ground == nullptr) return;
 	const replication::ClientVehicleSpawnAvailability &availability =
-			rt.state().vehicle_spawn_availability;
+			rt.vehicle_spawn_availability();
 	const std::vector<VehicleSpawnGroup> groups =
 			items != nullptr ? vehicle_spawn_group_table(*items) : std::vector<VehicleSpawnGroup>{};
 	int added = 0;
@@ -141,7 +141,7 @@ void VehicleMenu::poll(ClientRuntime &rt, const world::World &world,
 	(void)rt.queue_vehicle_spawn_availability_request();
 	// With a reply in, the list refills; with none yet the counter steps back
 	// so the next frame asks again [orig: @0x563B0F..0x563B18, the -1 @0x563B1D].
-	if (rt.state().vehicle_spawn_availability.received)
+	if (rt.vehicle_spawn_availability().received)
 		populate(rt, world, items);
 	else
 		poll_counter_ = -1;

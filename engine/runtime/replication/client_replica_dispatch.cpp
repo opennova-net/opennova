@@ -466,8 +466,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		// send @0x51097D)].
 		VehicleSpawnAvailabilityList list;
 		(void)decode_vehicle_spawn_availability(body.data(), body.size(), list);
-		state_.vehicle_spawn_availability.rows = std::move(list.rows);
-		state_.vehicle_spawn_availability.received = true;
+		ClientVehicleSpawnAvailability &store = vehicle_spawn_availability();
+		store.rows = std::move(list.rows);
+		store.received = true;
 		state_.mark_changed();
 		break;
 	}

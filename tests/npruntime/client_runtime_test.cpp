@@ -3673,6 +3673,45 @@ bool run_zone_window_adoption_measures_from_the_local_player() {
 	              "zone adoption: a window past 20 u of the local player is not adopted");
 }
 
+// The revive countdown's frame count is the process's: a second runtime over the
+// same ClientProcessState continues the first's 63-frame phase instead of starting
+// its own [orig: g_SlotRefreshTimer @0xA85B80 -- Client_ProcessNetworkFrame
+// @0x42C27E..0x42C288 the step, @0x42C2DA the zero; no other access].
+bool run_revive_countdown_phase_is_the_process_s() {
+	inmatch::ClientProcessState process;
+	{
+		ns::LoopbackChannel first_loop;
+		inmatch::ClientRuntime first(first_loop);
+		first.use_process_state(&process);
+		for (int i = 0; i < 40; ++i) first.Client_ProcessNetworkFrame();
+	}
+	if (!expect(process.slot_refresh_timer == 40,
+	            "revive phase: the first runtime's 40 frames step the process word"))
+		return false;
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	host_view.use_process_state(&process);
+	PlayerReplicationState rep;
+	rep.player_slot = 3;
+	rep.player_name = "Downed";
+	rep.entity_handle = 0x0007;
+	host_loop.host_send(0x46, encode_player_sync(rep, kPlayerSyncHasName));
+	PlayerDownedState downed;
+	downed.entity_handle = 0x0007;
+	downed.revive_seconds = 120;
+	host_loop.host_send(s2c::PLAYER_DOWNED_STATE, encode_player_downed_state(downed));
+	host_loop.host_send(s2c::VISIBLE_PLAYERS, {0x01, 0x03, 0x07, 0x00});
+	host_view.Client_ProcessNetworkFrame(); // the process's frame 41
+	const ns::ClientRosterSlot &slot = host_view.state().roster[3];
+	for (int i = 0; i < 21; ++i) host_view.Client_ProcessNetworkFrame(); // 42..62
+	if (!expect(slot.downed_revive_seconds == 120,
+	            "revive phase: the second runtime's 22 frames end the process's 62nd"))
+		return false;
+	host_view.Client_ProcessNetworkFrame(); // 63
+	return expect(slot.downed_revive_seconds == 119 && process.slot_refresh_timer == 0,
+	              "revive phase: the process's 63rd frame ticks the second runtime's slot");
+}
+
 // The client-side 1 Hz revive countdown: every 63rd client frame each active
 // S2C 0x4C table slot with an entity and a nonzero window loses one second; the
 // medic-request latch survives [orig: Client_ProcessNetworkFrame
@@ -8360,6 +8399,10 @@ std::vector<w::SoundSlotEvent> replica_mover_sounds(uint32_t flags, int32_t vel_
     row.rm_chute_carry_flags = chute_carry;
     row.x = 7 << 16;
     row.net_smooth_target[0] = row.x;
+    // Well above the water plane: the replica channel compares the raw plane
+    // (0 here, no dry sentinel), so a fall must not reach it.
+    row.z = 100 << 16;
+    row.net_smooth_target[2] = row.z;
     for (int t = 0; t < ticks; ++t) {
         runtime.view().tick_remote_motion(0xFFFF);
         runtime.tick_remote_stance_sounds(world);
@@ -8586,6 +8629,7 @@ int main() {
 	                run_zone_presence_updates_only_a_tracked_window() &&
 	                run_zone_window_adoption_measures_from_the_local_player() &&
 	                run_roster_revive_countdown_ticks_once_per_63_frames() &&
+	                run_revive_countdown_phase_is_the_process_s() &&
 	                run_medic_request_queues_one_reliable_0x2e() &&
 	                run_respawn_request_queues_one_reliable_0x41() &&
 	                run_session_vars_exp_fanfare_walk() &&

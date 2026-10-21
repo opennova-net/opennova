@@ -64,12 +64,12 @@ void test_network_quality_lands_the_host_metric() {
 
 void test_vehicle_spawn_availability_keeps_rows_and_the_flag() {
 	ClientReplicaPipeline view;
-	CHECK(!view.state().vehicle_spawn_availability.received);
+	CHECK(!view.vehicle_spawn_availability().received);
 	VehicleSpawnAvailabilityList list;
 	list.rows.push_back({0x1004, 2, 4});
 	list.rows.push_back({0x100D, kVehicleSpawnUnlimited, kVehicleSpawnUnlimited});
 	view.apply(s2c::VEHICLE_SPAWN_AVAILABILITY, encode_vehicle_spawn_availability(list));
-	const ClientVehicleSpawnAvailability &a = view.state().vehicle_spawn_availability;
+	const ClientVehicleSpawnAvailability &a = view.vehicle_spawn_availability();
 	CHECK(a.received);
 	CHECK(a.rows.size() == 2);
 	CHECK(a.rows.size() == 2 && a.rows[0].type_id == 0x1004 && a.rows[0].available == 2 &&
@@ -82,7 +82,7 @@ void test_vehicle_spawn_availability_keeps_rows_and_the_flag() {
 	// @0x429AE7].
 	ClientReplicaPipeline cut;
 	cut.apply(s2c::VEHICLE_SPAWN_AVAILABILITY, {3, 0x04, 0x10, 0x05});
-	const ClientVehicleSpawnAvailability &c = cut.state().vehicle_spawn_availability;
+	const ClientVehicleSpawnAvailability &c = cut.vehicle_spawn_availability();
 	CHECK(c.received);
 	CHECK(c.rows.size() == 1 && c.rows[0].type_id == 0x1004 && c.rows[0].available == 5 &&
 			c.rows[0].max_count == 0);

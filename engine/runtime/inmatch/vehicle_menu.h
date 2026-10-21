@@ -12,8 +12,14 @@
 // vehicle.mnu is first parsed into the scene (a later open finds the file's CRC
 // and parses nothing), and cleared only by the scene's destroy; so once the
 // screen has opened, the poll asks again every 64 main frames, open or closed.
-// Ours lives with the client runtime (one connection), which spans every
-// mission reload on it.
+// Ours lives on the process state (ClientProcessState::vehicle_menu: the
+// game's process, a test's fixture), so a later session in the same process
+// polls from its first frame. The scene's destroy (the expansion reload, the
+// quit) clears only g_VehicleMenuOpen; the counter, the selection, the
+// received flag and the 0x70 table are never reset. Retail clears the received
+// flag and sends the 0x42 on every init event; ours runs the init leg when the
+// poll is unarmed, which differs only if vehicle.mnu's CRC changed without a
+// scene destroy (no stock path).
 // [orig: UI_DispatchScreenEvent @0x54E6A0 -- case 3 (init) VehicleMenu_Open @0x564240
 //  (the call @0x54EB30), case 4 (close) VehicleMenu_Close @0x563AC0 (the call
 //  @0x54EDBD), case 5 (activate) VehicleMenu_OnActivate @0x563AD0 (the call

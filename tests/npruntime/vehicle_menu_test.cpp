@@ -156,7 +156,7 @@ bool test_the_first_open_asks_once_and_a_later_open_only_refills() {
 	r.menu().open(*r.rt, *r.world, &r.items.file);
 	// The init event's populate read the old reply, then the flag went down
 	// and the activate event's refill found none.
-	if (!expect(!r.rt->state().vehicle_spawn_availability.received,
+	if (!expect(!r.rt->vehicle_spawn_availability().received,
 			"open: the received flag is cleared"))
 		return false;
 	if (!expect(r.menu().rows().empty() && r.menu().selection() == -1,
@@ -302,8 +302,8 @@ bool test_the_reply_and_the_poll_outlive_a_mission_reload() {
 	r.menu().open(*r.rt, *r.world, &r.items.file);
 	r.reply({{1291, 2, 5}});
 	if (!expect(r.rt->begin_mission_reload(), "reload: begins")) return false;
-	if (!expect(r.rt->state().vehicle_spawn_availability.received &&
-					r.rt->state().vehicle_spawn_availability.rows.size() == 1,
+	if (!expect(r.rt->vehicle_spawn_availability().received &&
+					r.rt->vehicle_spawn_availability().rows.size() == 1,
 			"reload: the 0x70 table and its flag stay"))
 		return false;
 	// The reload's admission runs no main frame: the poll counts nothing.
@@ -311,6 +311,51 @@ bool test_the_reply_and_the_poll_outlive_a_mission_reload() {
 	r.rt->poll_vehicle_menu(*r.world, &r.items.file);
 	return expect(r.menu().poll_armed() && r.menu().poll_counter() == before,
 			"reload: no poll while the mission start runs");
+}
+
+// The vehicle screen's state is the process's (the Q1 ruling): a second session in
+// the same process (a new client runtime over the same ClientProcessState) polls from
+// its first frame, the armed flag, the frame counter and the 0x70 table carrying over,
+// with no open of its own; the 64-frame phase continues the first session's.
+// [orig: g_VehicleMenuOpen @0x25DCF24, g_VehicleMenuPollCounter @0x25DCF28, the table
+//  0xA81BC0 and g_VehicleSpawnAvailabilityReceived 0xA81BB0: process globals;
+//  VehicleMenu_PollAvailability @0x563AF0 (`test al, 3Fh` @0x563B01), called every
+//  main frame @0x5266A1; VehicleMenu_Close @0x563AC0 only on the scene's destroy]
+bool test_a_second_session_in_the_process_polls_from_its_first_frame() {
+	auto process = std::make_unique<inmatch::ClientProcessState>();
+	int32_t counter = 0;
+	{
+		Rig first;
+		first.rt->use_process_state(process.get());
+		first.menu().open(*first.rt, *first.world, &first.items.file);
+		first.reply({{1291, 2, 5}});
+		for (int i = 0; i < 10; ++i) (void)first.frame();
+		counter = process->vehicle_menu.poll_counter();
+	}
+	Rig second; // the next session: a new runtime in the same process
+	second.rt->use_process_state(process.get());
+	if (!expect(second.menu().poll_armed() && second.menu().poll_counter() == counter,
+			"second session: the poll is armed and its counter runs on"))
+		return false;
+	if (!expect(second.rt->vehicle_spawn_availability().received &&
+					second.rt->vehicle_spawn_availability().rows.size() == 1,
+			"second session: the 0x70 table and its flag are the process's"))
+		return false;
+	// The poll queues its 0x42 on the frame whose counter reaches the next multiple
+	// of 64; it leaves at the following frame's send boundary.
+	const int queue_frame = 64 - static_cast<int>(counter & 0x3F);
+	for (int i = 1; i <= queue_frame; ++i) {
+		if (!expect(sent(second.frame(), c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST).empty(),
+				"second session: no 0x42 off the 64-frame phase"))
+			return false;
+	}
+	if (!expect(sent(second.frame(), c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST).size() == 1,
+			"second session: the poll asks on the process's phase with no open of its own"))
+		return false;
+	// A runtime with no process state handed in keeps its own (a fresh one, unarmed).
+	Rig own;
+	return expect(!own.menu().poll_armed() && !own.rt->vehicle_spawn_availability().received,
+			"no process state: the runtime's own, unarmed");
 }
 
 } // namespace
@@ -323,6 +368,7 @@ int main() {
 	ok &= test_the_poll_asks_every_frame_until_a_reply_then_every_64();
 	ok &= test_accept_sends_the_bay_and_the_group();
 	ok &= test_the_reply_and_the_poll_outlive_a_mission_reload();
+	ok &= test_a_second_session_in_the_process_polls_from_its_first_frame();
 	if (ok) std::printf("vehicle_menu: ok\n");
 	return ok ? 0 : 1;
 }

@@ -99,6 +99,7 @@ void ClientRuntime::reset_local_round_state() {
 ClientRuntime::ClientRuntime(std::string player_name)
 		: role_(Role::Joiner),
 		  joiner_(std::make_unique<JoinerConnection>(std::move(player_name))) {
+	view_.use_vehicle_spawn_store(&own_process_.vehicle_spawn_availability);
 	// A remote joiner's folds STAGE and its rows chase (net-re §5.38e,
 	// D-NET-196); the HostClient loopback keeps the snap fold (full-rate view;
 	// the authority never interpolates, D-NET-89).
@@ -110,11 +111,13 @@ ClientRuntime::ClientRuntime(std::string player_name,
 		: role_(Role::Joiner),
 		  joiner_(std::make_unique<JoinerConnection>(
 		          std::move(player_name), std::move(monotonic_milliseconds))) {
+	view_.use_vehicle_spawn_store(&own_process_.vehicle_spawn_availability);
 	view_.set_remote_motion_mode(true);
 }
 
 ClientRuntime::ClientRuntime(replication::ISessionTransport &host_loopback)
 		: role_(Role::HostClient), loopback_(&host_loopback) {
+	view_.use_vehicle_spawn_store(&own_process_.vehicle_spawn_availability);
 	// The host's own player parses the retail header-only loopback 0x0A
 	// (D-NET-140 closed) [orig: NapiNPClientMsg_0x00A @0x430174].
 	view_.set_authority_recipient(true);
@@ -396,7 +399,8 @@ void ClientRuntime::tick_roster_revive_countdown() {
 	// The walk visits the S2C 0x4C pointer table's slots, in table order
 	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA — g_PlayerSlotPtrTable
 	//  entry+4 @0x42c29f..0x42c2cb].
-	if (++slot_refresh_frames_ <= 62) return;
+	uint32_t &timer = process_state().slot_refresh_timer;
+	if (++timer <= 62) return;
 	replication::ClientState &cs = view_.state();
 	for (const replication::ClientVisiblePlayer &entry : cs.visible_players) {
 		replication::ClientRosterSlot &slot = cs.roster[entry.slot];
@@ -408,7 +412,7 @@ void ClientRuntime::tick_roster_revive_countdown() {
 		--slot.downed_revive_seconds;
 		view_.state().mark_changed();
 	}
-	slot_refresh_frames_ = 0;
+	timer = 0;
 }
 
 void ClientRuntime::drain_visible_refreshes() {
@@ -464,9 +468,9 @@ std::vector<uint8_t> ClientRuntime::start() {
 	local_resubmit_revision_ = 0;
 	cleared_player_slots_.clear();
 	current_tick_ = 0;
-	slot_refresh_frames_ = 0;
 	last_keepalive_tick_ = 0;
-	// The 0x4C report's count is the process's and runs on (ClientProcessState).
+	// The 0x4C report's count, the revive countdown's and the vehicle screen's state are the
+	// process's and run on (ClientProcessState).
 	tag2c_send_cooldown_ = 0;
 	send_holdoff_countdown_ = 0;
 	send_holdoff_ticks_ = 0;
@@ -511,17 +515,11 @@ bool ClientRuntime::begin_mission_reload() {
 	// (JoinerConnection's mission_started) [orig: g_RoundOver, cleared
 	// by Game_StartMission @0x524A1F]; the frame clock runs on.
 	const auto clock = view_.state().local_clock_ms;
-	// The S2C 0x70 table and its received flag are globals no mission start
-	// touches (their writers are the 0x70 handler and the vehicle screen's
-	// first open alone), so the vehicle screen's poll reads the last reply
-	// across the reload. [orig: g_VehicleSpawnAvailabilityReceived 0xA81BB0 --
-	//  stores @0x429ACE / @0x429AE7 / @0x56425D; g_VehicleSpawnAvailabilityCount
-	//  0xA821B8 -- @0x429AC8 / @0x429AE2]
-	replication::ClientVehicleSpawnAvailability vehicle_spawn =
-			std::move(view_.state().vehicle_spawn_availability);
+	// The S2C 0x70 table and its received flag are the process's
+	// (ClientProcessState), so the vehicle screen's poll reads the last reply
+	// across the reload.
 	view_.state() = replication::ClientState{};
 	view_.state().local_clock_ms = clock;
-	view_.state().vehicle_spawn_availability = std::move(vehicle_spawn);
 	view_.state().spawn_success_gate = true;
 	view_.reset_minimap_overlays();
 	view_.drain_round_events();
@@ -831,7 +829,7 @@ bool ClientRuntime::queue_vehicle_spawn_request(uint16_t source_handle, uint8_t 
 // its own frame.
 void ClientRuntime::poll_vehicle_menu(const world::World &world, const def::DefItemsFile *items) {
 	if (role_ == Role::Joiner && (joiner_ == nullptr || !joiner_->in_game_loop())) return;
-	vehicle_menu_.poll(*this, world, items);
+	vehicle_menu().poll(*this, world, items);
 }
 
 // [orig: Game_ProcessMainFrame — `if (--g_NetQualityUpdateCountdown <= 0) { g_NetQualityUpdateCountdown =

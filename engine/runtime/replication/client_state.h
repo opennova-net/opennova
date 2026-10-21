@@ -1397,9 +1397,8 @@ struct ClientState {
 	//  @0x431b10..0x431b2d -> Entity_BuildMapPoiLists @0x42de40].
 	std::uint32_t local_team_assigns = 0;
 	ClientNetQuality net;
-	// S2C 0x70 (the vehicle-spawn screen's availability rows) and S2C 0x2A
-	// (the console's server-command table).
-	ClientVehicleSpawnAvailability vehicle_spawn_availability;
+	// S2C 0x2A (the console's server-command table). The S2C 0x70 rows are
+	// process-lived (ClientReplicaPipeline::vehicle_spawn_availability).
 	ClientServerCommandTable server_commands{};
 
 	// The Tab board's two folded lanes: the 0x16 scoreboard and the 0x46
