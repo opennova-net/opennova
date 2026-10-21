@@ -1989,6 +1989,13 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
 	host_options.game_type = 0x30020
+	# In a session the listen host's armory ACCEPT is its own client's 0x2F, which
+	# its own slot's accept grants into the local table (D-NET-695); a live player
+	# outside an armory volume is answered with the current list, so both kits are
+	# chosen in the pre-round window (host StartDelay), then the round opens.
+	# [orig: WeaponLoadout_ApplyFromBuffer @0x565D4D..0x565D9C;
+	#  NapiNPServerMsg_HandlePlayerLoadout's gate @0x51581C..0x51583E]
+	host_options.start_delay = PREROUND_START_DELAY
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
@@ -2007,11 +2014,22 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 	var m4 := _fixture_m4()
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
-	host.set_local_player_weapon(m4, {})
-	joiner.set_local_player_weapon(m4, {})
-	for _settle in range(3):
+	for _i in range(PREROUND_START_DELAY * 62 + 40):
 		host.step()
 		joiner.step()
+	assert_eq(_inventory_clip(host, "WPN_M4AUTO"), 30,
+			"the listen host's pre-round submit is granted into its local table")
+	host.set_local_player_weapon(m4, {})
+	joiner.set_local_player_weapon(m4, {})
+	# The grant's list mounted the host's EquippedSlot on an idle hand, which
+	# draws it (SWITCHTO, about half a second): settle until the draw ends.
+	# [orig: Server_SendWeaponSlotListToPlayer -> Player_MountWeaponSlot @0x50290E;
+	#  WeaponAction_SwitchTo's -900 timer, +30 a tick @0x543207 / @0x54327B]
+	for _settle in range(80):
+		host.step()
+		joiner.step()
+		if host.get_local_player_weapon_state().current_action < 2:
+			break
 
 	# Spend one host round, then wait for the local FSM to return to an input-
 	# accepting state. The authority refill remains immediate, but retail also
@@ -3060,6 +3078,9 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
 	host_options.game_type = 0x30020
+	# The listen host's in-session ACCEPT is its own client's 0x2F (D-NET-695): its
+	# grenade kit is chosen in the pre-round window, then the round opens.
+	host_options.start_delay = PREROUND_START_DELAY
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
@@ -3077,11 +3098,20 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 
 	var smoke := _smoke_grenade()
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_GRENADESM")], 8))
+	for _i in range(PREROUND_START_DELAY * 62 + 40):
+		host.step()
+		joiner.step()
+	assert_ne(_inventory_clip(host, "WPN_GRENADESM"), -1,
+			"the listen host's pre-round submit is granted into its local table")
 	host.set_local_player_weapon(smoke, {})
-	for _settle in range(20):
+	# The grant's list mounted the host's EquippedSlot on an idle hand, which
+	# draws it (SWITCHTO): settle until the draw ends.
+	for _settle in range(80):
 		host.step()
 		joiner.step()
 		OS.delay_msec(1)
+		if _settle >= 19 and host.get_local_player_weapon_state().current_action < 2:
+			break
 
 	var host_health_before := host.get_local_player_health()
 	var joiner_health_before := joiner.get_local_player_health()
