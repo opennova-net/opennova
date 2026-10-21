@@ -1024,10 +1024,13 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		}
 		// The shooter's fire target is read LIVE off its entity at serialize time
 		// [orig: @0x50485a reads shooter+104->+12; a freed shooter reads as no target].
+		// Any target sets 0x40; a round (a flare the heat lock took) lies in no pool,
+		// so the walk writes its word as 0xFFFF [orig: the walk's miss @0x504886; the
+		// flag @0x5048BF..0x5048C1].
 		const world::Entity *shooter = w.registry.get(world::EntityHandle{ev.shooter_handle});
 		if (shooter != nullptr && shooter->last_fire_target.valid()) {
 			rec.flags |= 0x40;
-			rec.target_handle = shooter->last_fire_target.packed;
+			rec.target_handle = shooter->last_fire_target.entity.packed;
 		}
 		rec.shot_seq = ev.shot_seq;
 		// Fire origin compressed against the SAME anchor the frame header carries

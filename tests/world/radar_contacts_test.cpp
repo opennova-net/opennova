@@ -475,6 +475,22 @@ void test_lock_tone() {
 	world.round_sim.rounds[9].guided.target = rig.self.packed;
 	radar_note_guided_missile(world, world.round_sim.rounds[9], 9);
 	CHECK(state.lock_tone == 31, "the lock note stores 31");
+	// A round target (a flare the missile holds): its +368, its source, is the arm; a
+	// round is never the local player [orig: @0x4465DB..0x446602 over the round]. (D-NET-64)
+	{
+		const int32_t count = state.missile_count;
+		state.lock_tone = 0;
+		world.round_sim.rounds[11].owner = rig.enemy;
+		world.round_sim.rounds[12].guided.target_round = 11;
+		radar_note_guided_missile(world, world.round_sim.rounds[12], 12);
+		CHECK(state.lock_tone == 0 && state.missile_count == count,
+				"a missile on another's flare is not noted");
+		world.round_sim.rounds[11].owner = rig.self;
+		radar_note_guided_missile(world, world.round_sim.rounds[12], 12);
+		CHECK(state.lock_tone == 31 && state.missile_count == count + 1,
+				"a missile on the local player's flare is noted");
+		state.lock_tone = 31;
+	}
 	radar_tick_lock_tone(state);
 	CHECK(state.lock_tone == 30, "the pending-slot pass drains one per tick");
 	world.tick_pending_sound_slots();

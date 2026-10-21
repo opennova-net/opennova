@@ -45,8 +45,20 @@ int32_t ratio(int32_t distance, int32_t initial) {
 }
 constexpr int32_t hellfire[5][2] = {{65536,39321},{36044,32768},{32768,26214},{19660,9830},{9830,0}};
 constexpr int32_t javelin[5][2] = {{65536,6553},{58982,32768},{45875,39321},{19660,26214},{655,0}};
+// The +0x2D4 pointer: an entity's wire handle, or a round (target_round, the word then
+// 0xFFFF as the pool walk writes it); null when neither.
+// [orig: Entity_SerializeGuidedMissileState @0x447C50 (the walk's miss @0x447CD2)]
+bool has_target(const GuidedFlightState &s) { return s.target != 0xFFFF || s.target_round >= 0; }
+void set_target(GuidedFlightState &s, uint16_t target, int32_t round) {
+    s.target = round >= 0 ? uint16_t{0xFFFF} : target;
+    s.target_round = round;
+}
+void clear_target(GuidedFlightState &s) { set_target(s, 0xFFFF, -1); }
+void take_owner_target(GuidedFlightState &s, const GuidedInputs &in) {
+    set_target(s, in.owner_target, in.owner_target_round);
+}
 void track_saved(GuidedFlightState &s, const GuidedInputs &in) {
-    if (s.target != 0xFFFF && in.target_present) copy3(s.saved, in.target_origin);
+    if (has_target(s) && in.target_present) copy3(s.saved, in.target_origin);
     copy3(s.steer, s.saved);
 }
 }
@@ -80,15 +92,18 @@ void GuidedFlight::turn(GuidedFlightState &s, const int32_t *error, int32_t spee
 }
 void GuidedFlight::launch(GuidedFlightState &s, GuidedFamily family, const GuidedAmmo &a, const GuidedInputs &in) {
     if (family == GuidedFamily::Javelin) {
-        s.target = in.owner_target;
-        if (s.target != 0xFFFF && in.target_present) {
+        take_owner_target(s, in);
+        if (has_target(s) && in.target_present) {
             copy3(s.steer, in.target_origin); copy3(s.saved, s.steer);
         } else if (in.owner_ai && in.owner_aim) {
             copy3(s.steer, in.aim); copy3(s.saved, s.steer);
         }
         s.phase = 0;
-    } else if (family == GuidedFamily::Stinger && in.owner_ai)
-        s.target = in.acquisition_ran ? (in.acquired ? in.acquired_target : 0xFFFF) : in.owner_target;
+    } else if (family == GuidedFamily::Stinger && in.owner_ai) {
+        if (!in.acquisition_ran) take_owner_target(s, in);
+        else if (in.acquired) set_target(s, in.acquired_target, in.acquired_round);
+        else clear_target(s);
+    }
     if (family == GuidedFamily::Javelin || family == GuidedFamily::Stinger)
         turn(s, nullptr, int32_t(uint32_t(a.speed / 8) << 16) / 62, a);
     if (family == GuidedFamily::Stinger) s.timer = in.session && !in.authority ? -1 : 31;
@@ -109,25 +124,37 @@ GuidedMotorEvents GuidedFlight::motor(GuidedFlightState &s, GuidedFamily family,
         if (s.age < 2) {
             if (s.flags & 4) return ev;
             s.flags |= 4;
-            if (in.owner_aim) { copy3(s.steer, in.aim); s.target = in.owner_target; }
-            if (s.target != 0xFFFF) s.flags |= 2;
+            if (in.owner_aim) { copy3(s.steer, in.aim); take_owner_target(s, in); }
+            if (has_target(s)) s.flags |= 2;
             s.timer = (!in.session || in.authority) ? ((s.flags & 2) ? 31 : 62) : -1;
             if (in.session && in.authority && !(s.flags & 2)) s.timer = -1;
             return ev;
         }
-        if ((s.flags & 2) && s.target != 0xFFFF && (!in.target_present || !in.target_alive)) {
-            s.flags &= ~2u; s.target = 0xFFFF; s.timer = in.authority ? 0 : -1;
+        // The held target's liveness is tested ahead of the acquisition, and the steer
+        // samples whatever target the acquisition then stored: a target this tick's
+        // acquisition took is sampled, not the one it replaced.
+        // [orig: the liveness @0x4461A6..0x4461E6 ahead of the acquisition
+        //  @0x4461F2..0x446345; the sample @0x44637B..0x4463A3]
+        bool sample_present = in.target_present;
+        const int32_t *sample = in.target_origin;
+        if ((s.flags & 2) && has_target(s) && (!in.target_present || !in.target_alive)) {
+            s.flags &= ~2u; clear_target(s); s.timer = in.authority ? 0 : -1;
             if (in.authority) emit(2);
         }
         if (in.authority && s.timer == 0 && in.acquisition_ran) {
-            s.timer = 62; s.target = in.acquired ? in.acquired_target : 0xFFFF;
+            s.timer = 62;
+            if (in.acquired) set_target(s, in.acquired_target, in.acquired_round);
+            else clear_target(s);
             if (in.acquired) {
-                if (in.acquired_flare) { copy3(s.steer, in.acquired_origin); s.target = 0xFFFF; s.timer = 31; emit(5); }
-                else { s.flags |= 2; emit(3); }
+                if (in.acquired_flare) { copy3(s.steer, in.acquired_origin); clear_target(s); s.timer = 31; emit(5); }
+                else {
+                    s.flags |= 2; emit(3);
+                    if (in.acquired_present) { sample_present = true; sample = in.acquired_sample; }
+                }
             }
         }
-        if (s.target == 0xFFFF) s.flags &= ~2u;
-        if ((s.flags & 2) && in.target_present) copy3(s.steer, in.target_origin);
+        if (!has_target(s)) s.flags &= ~2u;
+        if ((s.flags & 2) && sample_present) copy3(s.steer, sample);
         else if (!s.steer[0] && !s.steer[1] && !s.steer[2]) {
             if (s.age >= 31) turn(s, nullptr, boost(s, a), a);
             return ev;
@@ -155,9 +182,10 @@ GuidedMotorEvents GuidedFlight::motor(GuidedFlightState &s, GuidedFamily family,
             if (s.phase == 0) {
                 if (!(s.flags & 4)) {
                     s.flags |= 4;
-                    if (in.owner_ai && in.owner_target != 0xFFFF && in.target_present) {
-                        s.flags |= 2; s.target = in.owner_target; copy3(s.steer, in.target_origin);
-                    } else if (in.owner_aim) { copy3(s.steer, in.aim); s.target = in.owner_target; }
+                    if (in.owner_ai && (in.owner_target != 0xFFFF || in.owner_target_round >= 0) &&
+                            in.target_present) {
+                        s.flags |= 2; take_owner_target(s, in); copy3(s.steer, in.target_origin);
+                    } else if (in.owner_aim) { copy3(s.steer, in.aim); take_owner_target(s, in); }
                     pursuit(s, s.steer, err);
                     if (!err[2]) { detonate(); return ev; }
                     s.initial_range = std::clamp(err[2], 300 * 65536, 1000 * 65536);
@@ -167,7 +195,7 @@ GuidedMotorEvents GuidedFlight::motor(GuidedFlightState &s, GuidedFamily family,
             }
             if (s.phase == 1 || s.phase == 2 || s.phase == 3) {
                 if (s.phase < 3) copy3(s.steer, s.saved);
-                else if (in.owner_aim) { copy3(s.steer, in.aim); s.target = in.owner_target; }
+                else if (in.owner_aim) { copy3(s.steer, in.aim); take_owner_target(s, in); }
                 s.steer[2] = bam_add(s.steer[2], q16(int64_t(s.initial_range) * hellfire[s.phase][1]));
                 pursuit(s, s.steer, err);
                 if (ratio(err[2], s.initial_range) < hellfire[s.phase][0]) {
@@ -177,11 +205,11 @@ GuidedMotorEvents GuidedFlight::motor(GuidedFlightState &s, GuidedFamily family,
             }
         }
         if (s.flags & 8) { s.flags &= ~8u; emit(4); }
-        if (s.phase >= 4 && in.owner_aim) { copy3(s.steer, in.aim); s.target = in.owner_target; }
+        if (s.phase >= 4 && in.owner_aim) { copy3(s.steer, in.aim); take_owner_target(s, in); }
     } else {
         if (!s.phase && !(s.flags & 4)) {
             s.flags |= 4;
-            if (s.target != 0xFFFF && in.target_present) { s.flags |= 2; copy3(s.steer, in.target_origin); }
+            if (has_target(s) && in.target_present) { s.flags |= 2; copy3(s.steer, in.target_origin); }
             pursuit(s, s.steer, err);
             if (!err[2]) { detonate(); return ev; }
             s.initial_range = std::clamp(err[2], 75 * 65536, 1000 * 65536);

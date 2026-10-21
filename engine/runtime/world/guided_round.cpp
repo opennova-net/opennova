@@ -27,25 +27,45 @@ void target_sample(World &world, const Entity &target, bool launch, int32_t out[
 GuidedAmmo parameters(const AmmoTableEntry &ammo) {
     return {ammo.velocity, ammo.turnrate_maxpit, ammo.turnrate_maxyaw, ammo.boresight_maxang};
 }
+// A round the missile holds (or would take from its owner): the projectile array's slot
+// is always there, so it is present; it lives while its Health word is above 0, and both
+// the raw copy and the in-flight sample read its Position. [orig: Entity_UpdateGuidedMissile_0
+//  @0x446060 - the liveness tests @0x4461A6..0x4461BA (authority) / @0x44634E..0x446361,
+//  the sample @0x4463A3; PersonClass_GetTarget @0x4B0DD0 (the raw copy @0x4B0DF1..0x4B0E12)]
+void round_target_inputs(World &world, int32_t slot, GuidedInputs &in) {
+    in.target_present = true;
+    in.target_alive = round_target_health(world, slot) > 0;
+    round_target_origin(world, slot, in.target_origin);
+}
 GuidedInputs inputs(World &world, const LiveRound &r, bool authority, bool launch) {
     GuidedInputs in;
     in.authority = authority; in.session = world.rules.mp_session;
     const Entity *owner = world.registry.get(r.owner);
     in.owner = owner != nullptr;
     if (owner) {
-        in.owner_target = owner->last_fire_target.packed;
+        TargetRef owner_target = owner->last_fire_target;
         if (const AiEntity *body = world.ai.for_handle(owner->handle)) {
             in.owner_aim = true; in.owner_ai = true;
-            if (body->slot.f[3]) in.owner_target = uint16_t(body->slot.f[3] - 1);
+            if (body->slot.f[3]) owner_target = AiSlot::target_of(body->slot.f[3]);
             std::copy_n(body->inf.aim_point, 3, in.aim);
         }
-        if (const Entity *aim = world.registry.get(EntityHandle{in.owner_target})) {
+        in.owner_target = owner_target.entity.packed;
+        in.owner_target_round = owner_target.round;
+        if (owner_target.round >= 0) {
+            in.owner_aim = true;
+            round_target_origin(world, owner_target.round, in.aim);
+        } else if (const Entity *aim = world.registry.get(owner_target.entity)) {
             in.owner_aim = true;
             target_position(*aim, in.aim);
         }
     }
-    const uint16_t target_id = r.guided.target == 0xFFFF && r.guided.phase == 0 ? in.owner_target : r.guided.target;
-    if (const Entity *target = world.registry.get(EntityHandle{target_id})) {
+    const bool held = r.guided.target != 0xFFFF || r.guided.target_round >= 0;
+    const bool from_owner = !held && r.guided.phase == 0;
+    const uint16_t target_id = from_owner ? in.owner_target : r.guided.target;
+    const int32_t target_round = from_owner ? in.owner_target_round : r.guided.target_round;
+    if (target_round >= 0) {
+        round_target_inputs(world, target_round, in);
+    } else if (const Entity *target = world.registry.get(EntityHandle{target_id})) {
         in.target_present = true; in.target_alive = target->health > 0;
         target_sample(world, *target, launch, in.target_origin);
     }
@@ -82,11 +102,19 @@ void RoundSim::init_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
     if (r.guided_family == GuidedFamily::Stinger && in.owner_ai) {
         if (Entity *owner = world.registry.get(r.owner)) {
             if (AiEntity *body = world.ai.for_handle(r.owner)) {
-                const auto target = guided_heat_target(world, *owner, *body, ammo);
-                body->slot.f[3] = target.valid() ? int32_t(target.packed) + 1 : 0;
+                // The stng init queries over its shooter (the roll's attacker the
+                // shooter's +368), stores the winner, an entity or a round, into the
+                // shooter's +0xC and the missile's +0x2D4 takes that word.
+                // [orig: the stng init @0x445EF0 (undefined code): the AiSlot test
+                //  @0x445EFB, Entity_SpawnWeaponEffect @0x445F02, the +0xC store
+                //  @0x445F10, the +0x2D4 store @0x445F22]
+                const TargetRef target = guided_heat_target(world, *owner, *body, &body->slot, ammo,
+                        world.registry.get(owner->primary_occupant));
+                body->slot.f[3] = AiSlot::target_word(target);
                 owner->last_fire_target = target;
                 in.acquisition_ran = true; in.acquired = target.valid();
-                in.acquired_target = target.packed;
+                in.acquired_target = target.entity.packed;
+                in.acquired_round = target.round;
             }
         }
     }
@@ -115,34 +143,51 @@ void RoundSim::tick_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
             // source, the shooter [orig: Entity_UpdateGuidedMissile_0 @0x446060 -> Entity_SpawnWeaponEffect
             //  @0x545840 (the calls @0x44620B / @0x44628A; the query entity @0x5458B7, its
             //  +368 @0x5458EA)].
-            const HeatTargetPick pick =
-                    guided_heat_target_pick(world, seeker, pose, ammo, /*ring_leg=*/true, owner);
+            const TargetRef pick = guided_heat_target(world, seeker, pose, nullptr, ammo, owner);
             const EntityHandle chosen = pick.entity;
             in.acquired_target = chosen.packed;
             if (pick.round >= 0) {
                 // An air flare is a decoy: the missile steers at its raw Position and keeps
-                // no target; a ground flare (no shell projectile) the missile keeps as its
-                // target, which the round-target reference (L7-s8) carries
-                // [orig: Entity_UpdateGuidedMissile_0 @0x446060 (the decoy @0x446232..0x44626B);
+                // no target; a ground flare (its +0x1C4 the jump thunk, no shell
+                // projectile) the missile keeps as its target, group 3 sending its word
+                // as 0xFFFF [orig: Entity_UpdateGuidedMissile_0 @0x446060 (the decoy
+                //  @0x446232..0x44626B; the kept target @0x44632B..0x446345);
                 //  Entity_IsShellProjectile @0x4E4040].
                 const LiveRound &flare = rounds[static_cast<size_t>(pick.round)];
+                in.acquired = true;
                 if (flare.motor == ThrowClass::kAirFlare) {
-                    in.acquired = true;
                     in.acquired_flare = true;
-                    in.acquired_target = 0xFFFF;
-                    in.acquired_origin[0] = flare.pos.x.q16;
-                    in.acquired_origin[1] = flare.pos.y.q16;
-                    in.acquired_origin[2] = flare.pos.z.q16;
+                    round_target_origin(world, pick.round, in.acquired_origin);
+                } else {
+                    in.acquired_round = pick.round;
+                    in.acquired_present = true;
+                    round_target_origin(world, pick.round, in.acquired_sample);
                 }
             } else if (const Entity *target = world.registry.get(chosen)) {
-                in.acquired = true; in.target_present = true; in.target_alive = target->health > 0;
-                target_sample(world, *target, false, in.target_origin);
+                in.acquired = true; in.acquired_present = true;
+                target_sample(world, *target, false, in.acquired_sample);
                 target_position(*target, in.acquired_origin);
             }
         }
     }
     if (guided_inputs_provider) guided_inputs_provider(r, in);
     const auto events = GuidedFlight::motor(s, r.guided_family, parameters(ammo), in);
+    // The proximity notice: inside 400 u of the steer point the held target's vehicle
+    // brain (+0x64; a round's is the allocation's zero, a person carries none) takes event
+    // 12 at once (timer 0.0, channel 0, the brain's index), AI_HandleCommand's case-0x0C
+    // evade arm. [orig: Entity_UpdateGuidedMissile_0 @0x446060 - the range test
+    //  @0x44657F..0x446587, the +0x2D4 and +0x64 tests @0x446589..0x446598, the entry
+    //  @0x44659A..0x4465CC, AIEvent_QueueEntry @0x455DA0 (the call @0x4465D3)]
+    if (events.proximity && s.target_round < 0) {
+        AiEntity *brain = world.ai.for_handle(EntityHandle{s.target});
+        if (brain != nullptr && !brain->inf.active && brain->brain.f[AiBrain::kOwner] != 0) {
+            AiEventEntry notice{};
+            notice.f[0] = 12;
+            notice.f[1] = world.ai.index_of(*brain) << 16;
+            notice.set_timer(0.0f);
+            world.ai.events.queue(notice);
+        }
+    }
     // The Stinger's lock note, at the pose the motor read [orig:
     // Entity_UpdateGuidedMissile_0 @0x4465db..0x446622 -> Radar_TrackMissile].
     if (events.threat_note)

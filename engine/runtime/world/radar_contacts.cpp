@@ -332,6 +332,16 @@ void radar_note_guided_missile(World &world, const LiveRound &round, uint32_t sl
 	if (local == nullptr || !world.cached.local_player.valid()) return;
 	const EntityHandle self = world.cached.local_player;
 	const uint32_t source = kRadarSourceRound | (slot & kRadarSourceIndexMask);
+	// A round target (a flare the missile took): its +368 is its source, and a round is
+	// never the local player [orig: @0x4465DB..0x446602 over the round; @0x44660A..0x446615].
+	if (round.guided.target_round >= 0) {
+		const LiveRound &held = world.round_sim.rounds[static_cast<size_t>(round.guided.target_round)];
+		if (held.owner.valid() && held.owner == self) {
+			local->radar.lock_tone = kRadarLockToneTicks;
+			radar_note_missile(local->radar, source, round.guided.pos);
+		}
+		return;
+	}
 	const uint16_t target_handle = static_cast<uint16_t>(round.guided.target);
 	// A joiner's pool-0 target is a wire proxy: its registry holds only its
 	// own body there, so the wire handle resolves through the replica rows,

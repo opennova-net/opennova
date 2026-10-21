@@ -1581,8 +1581,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// samples R>>8 before this shot adds its own impulse.
 				// [orig: Entity_CalcWeaponFirePosition @0x4DC847]
 				const int32_t dir_pitch = pose[4];
-                const EntityHandle fire_target{p->slot.f[3] != 0
-                    ? uint16_t(p->slot.f[3] - 1) : EntityHandle::kInvalid};
+                // The +0xC word, an entity or a round (a flare the heat lock took).
+                const TargetRef fire_target = AiSlot::target_of(p->slot.f[3]);
                 shooter->last_fire_target = fire_target;
 				// The fire tail reads the gun's point for the slot as the FSM
 				// leaves it: next = RECOIL (the mflash column), the clip spent.
@@ -1689,7 +1689,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					io.fired.adm_index = adm_index;
 					io.fired.ammo_index = adm->ammo_index;
 					io.fired.charge = w.pending_throw_charge;
-                    io.fired.target_handle = fire_target.packed;
+                    // The C2S 0x06 target word pool-walks the +0xC pointer: a round
+                    // lies in no pool, so it writes 0xFFFF, a round's entity word.
+                    // [orig: NetPacket_WriteEntityPositionUpdate @0x42A610 (the walk
+                    //  @0x42A713..0x42A745, its miss @0x42A745)]
+                    io.fired.target_handle = fire_target.entity.packed;
 					io.fired.shooter_pose[0] = p->self->position.x.q16;
 					io.fired.shooter_pose[1] = p->self->position.y.q16;
 					io.fired.shooter_pose[2] = p->self->position.z.q16;

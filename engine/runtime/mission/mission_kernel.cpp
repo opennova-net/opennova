@@ -908,6 +908,10 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	// [orig: g_EntityUpdateCounter, whose one writer is
 	// Entity_UpdateAllEntities @0x4C2639]
 	world.entity_update_counter = previous.world.entity_update_counter;
+	// [orig: g_ServerNumPlayers @0xC8FC54, a process global whose one writer is
+	//  Server_CountActivePlayers @0x4FD900 (the store @0x4FD94B), each periodic second:
+	//  the next mission reads the last count until its first recount]
+	world.server_num_players = previous.world.server_num_players;
 	// [orig: dword_26970F4, whose only live writer is the cine render pass
 	//  Cine_RenderOverlays @0x570C66]
 	world.epilog.frame_drawn = previous.world.epilog.frame_drawn;

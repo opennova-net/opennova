@@ -516,6 +516,19 @@ int main() {
 		CHECK(!frame.vertices.empty() && std::fabs(frame.vertices[0] - 10.0f) < 0.001f);
 	}
 
+	// --- the server's player count across kernels ---------------------------------
+	// g_ServerNumPlayers is a process global with one writer, the periodic second's
+	// recount: the next mission's flare roll reads the last count until its first recount
+	// [orig: Server_CountActivePlayers @0x4FD900 (the store @0x4FD94B);
+	//  Weapon_GetFlareDeflectChance @0x5382A0]. (D-NET-64)
+	{
+		auto first = std::make_unique<ms::MissionKernel>();
+		first->world.server_num_players = 3;
+		auto second = std::make_unique<ms::MissionKernel>();
+		second->carry_across_load_from(*first);
+		CHECK(second->world.server_num_players == 3);
+	}
+
 	// --- the no-session objective relay ------------------------------------------
 	// The bare tick has no connection for the S2C 0x3F relay, so the queue is
 	// released while the local chat effect stays. [orig:

@@ -15,6 +15,9 @@ struct GuidedFlightState {
     int32_t steer[3] = {}, saved[3] = {};
     uint16_t flags = 0, phase = 0; // entity+696/+698
     uint16_t target = 0xFFFF;
+    // +0x2D4 holding a round (a RoundSim::rounds slot; -1 none): `target` then reads
+    // 0xFFFF, the word the wire's pool walk writes for it (D-NET-64).
+    int32_t target_round = -1;
     int32_t timer = 0, initial_range = 0, previous_distance = INT32_MAX;
 };
 struct GuidedAmmo {
@@ -26,12 +29,19 @@ struct GuidedInputs {
     bool authority = false, session = false, owner = true;
     bool owner_aim = false, owner_ai = false;
     uint16_t owner_target = 0xFFFF;
+    int32_t owner_target_round = -1; // the owner's +0xC word holds a round (owner_target 0xFFFF)
     int32_t aim[3] = {};
     bool target_present = false, target_alive = true;
     int32_t target_origin[3] = {};
     bool acquisition_ran = false, acquired = false, acquired_flare = false;
     uint16_t acquired_target = 0xFFFF;
+    int32_t acquired_round = -1; // the query's winner is a round (a ground flare)
     int32_t acquired_origin[3] = {};
+    // The acquired target's in-flight sample, which the steer takes once the acquisition
+    // stores it; target_present / target_alive / target_origin stay the held target's,
+    // whose liveness is tested first. Unset: the steer reads target_origin.
+    bool acquired_present = false;
+    int32_t acquired_sample[3] = {};
 };
 struct GuidedMotorEvents {
     uint8_t groups = 0; // bit N requests serializer group N

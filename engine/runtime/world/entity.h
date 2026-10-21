@@ -93,6 +93,30 @@ struct EntityHandle {
     bool operator!=(const EntityHandle &o) const { return packed != o.packed; }
 };
 
+// A target as retail's target pointers hold one (an AiSlot's +0xC, a guided round's
+// +0x2D4): an entity, or a round of the projectile array (RoundSim::rounds' slot), which
+// the heat-seeker query's 0x200 leg returns. The rounds lie outside g_PoolList, so the
+// wire's pool walk finds no pool for one and writes 0xFFFF: a round's `entity` is
+// kInvalid, whose word is that 0xFFFF.
+// [orig: Entity_FindTargets @0x53A610 (the ring leg's candidate @0x53AD8E);
+//  NetPacket_SerializeRoundEvent @0x504820 (the walk's miss @0x504886);
+//  Entity_SerializeGuidedMissileState @0x447C50 (@0x447CD2, @0x447D81, @0x447FD7)]
+struct TargetRef {
+    EntityHandle entity;
+    int32_t round = -1; // a RoundSim::rounds slot; -1: none
+
+    constexpr TargetRef() = default;
+    constexpr TargetRef(EntityHandle h) : entity(h) {}
+    static constexpr TargetRef of_round(int32_t slot) {
+        TargetRef t;
+        t.round = slot;
+        return t;
+    }
+    constexpr bool valid() const { return entity.valid() || round >= 0; }
+    bool operator==(const TargetRef &o) const { return entity == o.entity && round == o.round; }
+    bool operator!=(const TargetRef &o) const { return !(*this == o); }
+};
+
 // Pool_GetIndexFromPtr(0, entity) as the wire's byte: the pool-0 index (a
 // pool-0 slot is below the pool's 256 capacity), the -1 (0xFF) of an entity
 // outside pool 0 or of none. [orig: Pool_GetIndexFromPtr @0x441f90 — the
@@ -1295,9 +1319,10 @@ struct Entity {
 
     // The shooter's last claimed fire target (entity+104 -> +12): stamped per accepted
     // C2S 0x06 [orig: Server_ClientFiredRound @0x50c2ad stores the resolved target ptr],
-    // read LIVE at 0x0A tag-2 serialize time — a set handle adds the wire 0x40 flag +
-    // target word [orig: NetPacket_SerializeRoundEvent @0x50485a]. (D-NET-152)
-    EntityHandle last_fire_target;      // kInvalid = no target claimed
+    // read LIVE at 0x0A tag-2 serialize time — a set target adds the wire 0x40 flag +
+    // target word, a round's word 0xFFFF [orig: NetPacket_SerializeRoundEvent @0x50485a;
+    // the flag @0x5048BF..0x5048C1]. (D-NET-152, D-NET-64)
+    TargetRef last_fire_target;         // !valid() = no target claimed
 
     // Medic drag link: self identifies the backward-walking dragger; a corpse
     // references its dragger. Serial prevents a recycled pool slot inheriting it.

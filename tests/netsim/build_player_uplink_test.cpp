@@ -949,6 +949,14 @@ bool run_hud_cursor_names_a_remote_person() {
 	ae.inf.combat_target = world.cached.local_player;
 	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == kSelf,
 			"the lock wins, L answering to its self handle");
+	// A lock on a round (a flare): the cursor is the round, which matches no entity, so no
+	// head-look fallback [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B882D;
+	// Server_BuildEntityPriorityListForPlayer @0x50E1C6 / @0x50E42C]. (D-NET-64)
+	ae.inf.combat_target = {};
+	ae.inf.head_look_target = crate_h;
+	ae.slot.f[3] = w::AiSlot::target_word(w::TargetRef::of_round(4));
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == 0xFFFF,
+			"a round lock names no cursor entity");
 	return ok;
 }
 
