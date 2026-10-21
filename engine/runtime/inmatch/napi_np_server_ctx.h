@@ -276,10 +276,11 @@ struct NapiNPServerCtx {
 	// [orig: Server_InitNewRoundState - GetTickCount @0x51CB93, the store @0x51CBA0;
 	//  Server_BuildStatusReport @0x530B84..0x530B8C; Lobby_UpdateServerInfo @0x4FEFAB]
 	uint32_t round_state_init_tick = 0;
-	// The server-info update a toggle runs at once (Lobby_UpdateServerInfo(0)): a NovaWorld
-	// embedder installs it while its session hosts the match; empty, nothing runs, as retail's
-	// update returns outside a NovaWorld session. [orig: Server_ToggleJoinLock @0x50D762;
-	//  Lobby_UpdateServerInfo's gates @0x4FE8D8..0x4FE8FA]
+	// The server-info update (Lobby_UpdateServerInfo(0)) a toggle runs at once and the server
+	// tick's refresh runs every 0x744 ticks: a NovaWorld embedder installs it while its session
+	// hosts the match; empty, nothing runs, as retail's update returns outside a NovaWorld session.
+	// [orig: Server_ToggleJoinLock @0x50D750 (the call @0x50D762); Server_TickUpdate @0x51D7E0
+	//  (the call @0x51D943); Lobby_UpdateServerInfo @0x4FE8C0 (the gates @0x4FE8D8..0x4FE8FA)]
 	std::function<void()> on_update_server_info;
 	ServerBanLists bans;
 	// The squad registry (server_squad_registry.h): the remote add files a node for a joiner
@@ -620,17 +621,20 @@ struct NapiNPServerCtx {
 	// right after the listing's key) and the server tick's server-info refresh
 	// advances it (run_server_info_refresh), on every authority, a LAN host's
 	// included (whose ring no reader reads).
-	// [orig: g_NapiCookieKeyTable @0xC87000 — CSessionIdRing_Init (the call
-	//  @0x51CB8E), CSessionIdRing_AdvanceAndGenerate (the call @0x51D93D), read by
-	//  Lobby_UpdateServerInfo @0x4FF196 and the join's cookie decrypt
-	//  @0x512d18/@0x512d74]
+	// [orig: g_NapiCookieKeyTable @0xC87000 — Server_InitNewRoundState @0x51C8E0
+	//  (the CSessionIdRing_Init call @0x51CB8E), Server_TickUpdate @0x51D7E0 (the
+	//  CSessionIdRing_AdvanceAndGenerate call @0x51D93D); read by
+	//  Lobby_UpdateServerInfo @0x4FE8C0 (@0x4FF196), the join's checks
+	//  Server_ValidatePlayerJoinRequest @0x512100 (@0x512641, @0x5126F7, @0x5128D3)
+	//  and its cookie decrypt NapiNPServer_HandlePlayerJoinMessage @0x512AA0
+	//  (@0x512D18 / @0x512D74)]
 	SessionIdRing cookie_key_table;
 	// The server-info refresh's countdown (g_ServerInfoUpdateTimer): the round
 	// init clears it, each server tick steps it down, and at zero or below the
 	// refresh reloads it to 0x744 (SESSION_HOST_INFO_REFRESH_TICKS), so a round's
 	// first server tick refreshes. Signed, as retail's `jg` reads it.
 	// [orig: g_ServerInfoUpdateTimer @0xC8D818 — Server_InitNewRoundState @0x51CA86;
-	//  Server_TickUpdate @0x51D91D..0x51D933; Nbstat_StartupInit @0x4FDE46]
+	//  Server_TickUpdate @0x51D91D..0x51D933; Nbstat_StartupInit @0x4FDE30 (@0x4FDE46)]
 	int32_t server_info_update_timer = 0;
 	// One ClientPlayerEnterRequest: the joiner's connection id, its UDP source
 	// and the JOINTICKET its JOIN carried. The shell binds the hook to its
