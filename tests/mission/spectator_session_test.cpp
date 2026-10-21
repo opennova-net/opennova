@@ -181,12 +181,26 @@ int main() {
 				replication::ClientReplicaPipeline::kSpectateActionCycleMode);
 		CHECK(client.state().death_screen_submode == 0);
 		const w::AiEntity *body = kernel.local.player_ai();
-		if (tb != nullptr && body != nullptr) {
-			// The composed first-person view sits at the copied pose, so the
-			// placement lands within the eye's pull-back of it.
+		const w::Entity *te = world.registry.get(target);
+		const w::Entity *le = kernel.local.player();
+		if (tb != nullptr && body != nullptr && te != nullptr && le != nullptr) {
+			// The wrap composes the view from the camera's tracked entity, still
+			// the target the first-person frames tracked, so the eye is the
+			// target's (its pose plus ITS CameraOffset, pulled back along its
+			// view), and the local entity lands at that eye less ITS OWN
+			// CameraOffset (the spectator's 0xD000 seat): the target's x / y
+			// within the pull-back, its z plus the target's eye less the seat.
+			// [orig: Spectator_CycleMode @0x52AFF0 - Camera_ComputeThirdPersonView
+			//  @0x52B082, g_ViewPos less g_LocalPlayerEntity's +0x6C..+0x74
+			//  @0x52B087..0x52B0B7; Camera_ComputeThirdPersonView @0x437D10 reads
+			//  g_CameraTrackedEntity @0x437D2B, which the render frame's
+			//  Camera_SetTrackedEntity @0x4391D0 (the call @0x5CA262) left on the
+			//  target in sub-mode 2 (@0x4391F7..0x4391F9)]
 			CHECK(std::abs(body->self->position.x.q16 - tb->self->position.x.q16) <= 0x8000);
 			CHECK(std::abs(body->self->position.y.q16 - tb->self->position.y.q16) <= 0x8000);
-			CHECK(std::abs(body->self->position.z.q16 - tb->self->position.z.q16) <= 0x8000);
+			CHECK(std::abs(body->self->position.z.q16 -
+							  (tb->self->position.z.q16 + te->eye_offset_z - le->eye_offset_z)) <= 0x8000);
+			CHECK(le->eye_offset_z == 0xD000);
 			CHECK(kernel.local.input.look_heading == body->heading);
 		}
 	}
