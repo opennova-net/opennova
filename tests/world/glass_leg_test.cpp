@@ -61,6 +61,7 @@ ModelUserPoint point(const char *name, int32_t x, int32_t y, int32_t z) {
 
 void build(Rig &rig) {
 	World &world = *rig.world;
+	world.registry.configure_pool(2, 4);
 	world.env.water_z = 0;
 	Entity b;
 	b.kind = EntityKind::Building;
