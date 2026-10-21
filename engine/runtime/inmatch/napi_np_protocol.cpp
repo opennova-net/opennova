@@ -1771,7 +1771,16 @@ std::vector<TickOut> tick_connections(
 	}
 	for (const std::optional<PeerAddr> &pending : destroy_pending) {
 		if (!pending.has_value()) {
-			(void)teardown_own_connection(ctx); // no wire face, no peer event
+			// The admin's GOTO MENUSTATE: the own client's teardown runs its disconnected
+			// callback as the input pass's does, so the process latch takes the record and
+			// maps the exit (a stale kick's 35 -> 7, 36..45 -> 9..18, 34 -> 5); no wire face,
+			// no peer event (D-NET-NEW-L1-26).
+			// [orig: CAdminServer_HandleGotoCommand -> Input_HandleActionBinding (the call
+			//  @0x404A5D) case 3 -> CNapiNetwork_DisconnectActiveConnection (called @0x49AF42)
+			//  -> CNapiNPConnection_RequestDisconnect @0x61E0F0 -> SetState(6) @0x61E0FA ->
+			//  CNapiNPConnection_TeardownActiveConnection (called @0x62628F), the client
+			//  callback called @0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0]
+			(void)drain_own_goodbye(ctx, OwnGoodbye::NextReceivePump);
 			continue;
 		}
 		const PeerAddr &peer = *pending;

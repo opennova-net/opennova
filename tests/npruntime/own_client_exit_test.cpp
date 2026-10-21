@@ -226,6 +226,30 @@ void test_admin_exit_removes_the_host_player_at_the_next_receive_pump() {
 	CHECK(host->ctx.np_protocol.connection_list.size() == 1);
 }
 
+// D-NET-NEW-L1-26 (L1-s16 FOUND 1): the admin path's teardown runs the own client's
+// disconnected callback too: a stale kick record in the process latch (DPC 35) maps the
+// admin's exit 1 to 7 at the next receive pump, as the input pass's path maps it.
+// [orig: Input_HandleActionBinding (the admin's call @0x404A5D) case 3 -> the own client's
+//  teardown, CNapiNPConnection_TeardownActiveConnection's client callback called @0x6254E7;
+//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the latch @0x4C6535..0x4C6559, 35 -> 7
+//  @0x4C65A2]
+void test_admin_exit_runs_the_own_client_callback() {
+	auto host = std::make_unique<ListenHost>(true);
+	inmatch::ProcessDisconnectLatch latch;
+	latch.latch(make_disconnect_event(1, 2, 0, 0, "", 35, "")); // a received kick, DPC 35
+	host->ctx.client_disconnect_latch = &latch;
+	inmatch::RemoteAdminBinding binding;
+	binding.host = &host->ctx;
+	inmatch::input_action_exit(binding, inmatch::ExitSite::Admin);
+	CHECK(host->ctx.mission_exit_reason == inmatch::kMissionExitQuit);
+	(void)inmatch::tick_connections(host->ctx, 0, 2, /*respect_s2c_send_boundary=*/false,
+			/*run_spawn_pump=*/false);
+	CHECK(host->own() == nullptr);
+	CHECK(host->ctx.mission_exit_reason == inmatch::kMissionExitPirate);
+	CHECK(latch.valid && latch.event.dpc == 35); // the first record wins
+	host->ctx.client_disconnect_latch = nullptr;
+}
+
 // An exit from the frame's input pass: the same CLIENT line, the twin held for the mission
 // teardown's pump; the next tick's receive pump removes nothing.
 void test_input_exit_holds_the_twin() {
@@ -359,6 +383,7 @@ void test_single_player_input_exit_leaves_the_record_only() {
 
 int main() {
 	test_admin_exit_removes_the_host_player_at_the_next_receive_pump();
+	test_admin_exit_runs_the_own_client_callback();
 	test_input_exit_holds_the_twin();
 	test_input_exit_leaves_at_the_teardown_pump();
 	test_dedicated_host_exit();
