@@ -318,14 +318,8 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 				// A model several items draw, let go over the picture: the item to place there.
 				if (ImGui::BeginPopup("mission_drop_choice")) {
 					ImGui::TextDisabled("Several items draw %s: place", tools.choice_model.c_str());
-					for (const int64_t item : tools.choices) {
-						MissionItemFacts facts;
-						std::string ignored;
-						mission_item_facts(view, item, facts, ignored);
-						const std::string label = (facts.name.empty() ? std::string("Item") : facts.name) + " (" +
-						                          std::to_string(item) + ")";
-						if (ImGui::Selectable(label.c_str())) drop_item(workspace, mission, item, tools.choice_at, tools.snap_metres());
-					}
+					const int64_t item = item_choice(view, tools.choices);
+					if (item >= 0) drop_item(workspace, mission, item, tools.choice_at, tools.snap_metres());
 					ImGui::EndPopup();
 				}
 			});
@@ -357,11 +351,8 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		ImGui::EndChild();
 	}
 	ui_kit::quiet_text(tools.hint);
-	if (terrain)
-		ground_line(tools.ground, tools.ground_surface,
-		            "Point at the terrain to read its surface class, the footsteps a body plays there and the row a round "
-		            "plays.");
-	missing_files_line(mission.missing());
+	if (terrain) ground_line(tools.ground, tools.ground_surface);
+	files_line(mission.missing(), "missing", "Import them to see them (Problems).");
 	if (stop) set_tool(workspace, mission, MissionTool::Select);
 }
 
@@ -391,23 +382,30 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		put_brush_down();
 		options.tool = !brushing && tool == chosen ? MissionTool::Select : chosen;
 	};
-	// Each tool's tooltip its verb and key: the line under the picture says what a click does with it.
-	if (lit_tool(row, "Select", !brushing && tool == MissionTool::Select, true, "Select and move marks (Esc).")) {
+	// Each tool's tooltip how to use it: the line under the picture says what it does now, and its keys.
+	if (lit_tool(row, "Select", !brushing && tool == MissionTool::Select, true,
+				"Select marks and move them (Esc): Shift adds, Ctrl toggles, Alt-drag copies, a drag on nothing boxes. "
+				"The arrows nudge the selection (Shift finer), PgUp and PgDn raise it, Ctrl+D duplicates it.")) {
 		put_brush_down();
 		options.tool = MissionTool::Select;
 	}
 	if (lit_tool(row, "Place", !brushing && tool == MissionTool::Place, edits,
-				edits ? "Place the palette's items (Esc stops)." : held))
+				edits ? "Place the palette's items: a click on the ground places one facing the way the camera looks, "
+						"the item kept for the next; or drag one onto the picture (Esc stops)."
+					  : held))
 		pick(MissionTool::Place);
 	if (lit_tool(row, "Path stops", !brushing && tool == MissionTool::Path, edits,
-				edits ? "Add a waypoint path's stops (Esc stops)." : held))
+				edits ? "Add a waypoint path's stops: a click on the ground adds its next stop (a marker the path visits), "
+						"a click on its line one between two (Esc stops)."
+					  : held))
 		pick(MissionTool::Path);
 	if (lit_tool(row, "Area", !brushing && tool == MissionTool::Area, edits,
-				edits ? "Drag an area trigger on the ground (Esc stops)." : held))
+				edits ? "Drag a box on the ground to make an area trigger over it (Esc stops)." : held))
 		pick(MissionTool::Area);
 	// Shoot (DI-23) edits nothing: a held mission takes it too.
 	if (lit_tool(row, "Shoot", !brushing && tool == MissionTool::Shoot, true,
-				"Fire an ammo where you click, as the game plays its impact (Esc stops)."))
+				"Fire the ammo picked where you click the terrain or an object: its impact plays as the game plays it, "
+				"its effect, its sound and its scar, the object's damage (Esc stops)."))
 		pick(MissionTool::Shoot);
 	// A step of the options (the snap, the turn) picked from its list; one the wire set off the list shown as
 	// its value.
@@ -451,12 +449,9 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		ImGui::EndPopup();
 	}
 	// Listen (DI-36): the mission's soundscape where the camera stands, as the game plays it, and what plays.
-	if (lit_tool(row, "Listen", options.listen.on, true,
-				options.listen.on
-						? std::string("Stop listening.")
-						: std::string("Hear the mission where the camera stands, as the game plays it: its ambient sources by "
-									  "the hour, on the game's eight channels, the rain and the thunder its script makes, "
-									  "the script's own sounds. The sources' reach is ringed on the ground.")))
+	if (listen_tool(row, options.listen.on, "the mission",
+				"Its ambient sources by the hour on the game's eight channels, its script's rain, thunder and sounds, each "
+				"source's reach ringed on the ground."))
 		options.listen.on = !options.listen.on;
 	if (options.listen.on) {
 		if (ui_kit::tool_popup(row, "Heard", "heard", true,
@@ -466,7 +461,8 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		}
 	}
 	if (ui_kit::tool(row, "Frame", true, "Look at the selected records, or at every entity (F, or a double click on "
-										 "the picture)."))
+										 "the picture). The right button looks (W A S D Q E fly), the middle pans, the "
+										 "wheel zooms."))
 		viewport_command(workspace, mission, "frame");
 	if (ui_kit::tool(row, "Top", true, "Look straight down over the camera's target, north up."))
 		viewport_command(workspace, mission, "top");
@@ -491,15 +487,13 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	// facing the way it looks (the picture's right-click menu starts it where the pointer was).
 	const bool from_here = plays && !play_mission_at(view, mission.path()).empty();
 	if (ui_kit::tool(row, "Play from here", from_here,
-				from_here ? "Build, then start the game in this mission with the player on the ground under the camera, "
-							"facing the way it looks (Alt+F5). The build's copy of the mission gets the start; the "
-							"mission's own file is left as it is."
+				from_here ? play_from_here_words("under the camera", "Alt+F5")
 						  : std::string("Make the mission the active document to start the game in it.")))
 		viewport_command(workspace, mission, "play_from_here");
 	// The mission's 2D map (S23 C) in the Preview window beside the picture, which stands aside for a mission until asked.
-	if (ui_kit::tool(row, "Map", true, "Show the mission's 2D map beside the picture (the Preview window): from straight "
-										 "above, north up (south up where the mission turns its map), the terrain as the "
-										 "game's commander map draws it, its records as pins you select and move as here.")) {
+	if (ui_kit::tool(row, "Map", true, "The mission's 2D map beside the picture, its terrain as the game's commander map "
+										 "draws it, north up (south up where the mission turns its map). Its records are "
+										 "pins you select and move as here.")) {
 		// The map asked for (the Windows menu's tick shows the kind shown before), and the window brought forward.
 		io::JsonValue change = io::JsonValue::make_object();
 		io::JsonValue document = io::JsonValue::make_object();
@@ -519,14 +513,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		window_requests::show_logic(workspace, mission.path(), !logic);
 	// The Terrain pane (S25): sculpt the ground, paint its maps and lay its tiles beside the picture (Ctrl+E; the
 	// Windows menu's tick), the button naming the brush's tool while it brushes.
-	const bool terrain = view.workspace.document(mission.path()).terrain;
-	const TerrainTool brush_tool = view.workspace.terrain_brush.tool;
-	const std::string terrain_label =
-			terrain && brush_tool != TerrainTool::None ? std::string("Terrain: ") + terrain_tool_label(brush_tool) : std::string("Terrain");
-	if (lit_tool(row, terrain_label.c_str(), terrain, true,
-				terrain ? std::string("Hide the Terrain pane (Ctrl+E): the picture's own tools again.")
-						: std::string("Sculpt the ground, paint its maps and lay its tiles here and on the map (Ctrl+E).")))
-		window_requests::show_terrain(workspace, mission.path(), !terrain);
+	terrain_pane_tool(workspace, row, mission.path());
 	// The mission's script (S15): the <stem>.wac the game compiles with it [orig: WacScript_InitAndLoad @
 	// 0x4F91F0], opened, or made beside the mission where the project has none.
 	const MissionScript script = mission_script(view, mission.path());
@@ -540,7 +527,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		}
 		if (ImGui::BeginPopup("make_script")) {
 			ImGui::TextUnformatted(("Make " + script.create_at + "?").c_str());
-			ImGui::TextDisabled("The game compiles it with the mission; an empty script does nothing.");
+			popup_line("The game compiles it with the mission.", "An empty script does nothing.", LineTone::Quiet);
 			if (ImGui::Button("Make it")) {
 				workspace.request(request::create_file(script.create_at));
 				ImGui::CloseCurrentPopup();
@@ -645,7 +632,7 @@ void MissionViewportView::Tools::shoot_list(Workspace &workspace, const MissionV
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Clear shots", !shots.shots().empty(), "Forget the shots: nothing of them runs or is drawn."))
 		viewport_command(workspace, mission, "clear_shots");
-	if (!shots.why().empty()) ui_kit::clipped_text(shots.why(), shots.why());
+	if (!shots.why().empty()) ui_kit::clipped_text(shots.why());
 	const std::vector<MissionShotEvent> &events = shots.events();
 	const DocumentBase *base = nullptr;
 	for (const auto &open : view.documents.open)
@@ -658,9 +645,8 @@ void MissionViewportView::Tools::shoot_list(Workspace &workspace, const MissionV
 			const MissionShotEvent &event = events[events.size() - 1 - i];
 			ImGui::PushID(int(i));
 			const std::string line = std::to_string(event.tick) + "  " + event.words;
-			if (ImGui::Selectable(ui_kit::fit(line, ImGui::GetContentRegionAvail().x).c_str()) && event.row && document)
+			if (ui_kit::fitted_selectable(line, "shot") && event.row && document)
 				workspace.request(request::select_record(mission.path(), document->address_of(event.row)));
-			ui_kit::tooltip(line);
 			ImGui::PopID();
 		}
 	}
@@ -720,8 +706,7 @@ void MissionViewportView::Tools::canvas_menu(Workspace &workspace, const Mission
 			view.allows(EditorRequestKind::Play) && !play_mission_at(view, mission.path()).empty();
 	if (ImGui::MenuItem("Play from here", nullptr, false, plays))
 		viewport_command(workspace, mission, "play_from_here", {}, &menu_at);
-	ui_kit::tooltip("Build, then start the game in this mission with the player on the ground here, facing the way the "
-					"camera looks.");
+	ui_kit::tooltip(play_from_here_words("here"));
 	ImGui::Separator();
 	if (ImGui::MenuItem("Frame", "F", false, true)) viewport_command(workspace, mission, "frame");
 	if (ImGui::MenuItem("Drop to ground", nullptr, false, edits && selected && mission.ground()))
@@ -793,9 +778,8 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Water", &options.water);
 	ImGui::Checkbox("Models", &options.models);
 	ImGui::Checkbox("Shadows", &options.shadows);
-	ui_kit::tooltip("The shadows as the game casts them, together: the terrain's static shadows under the placed "
-					"models, and the moving ground shadows of the people and the items that cast one (the game's "
-					"render slots).");
+	ui_kit::tooltip("The shadows as the game casts them: the terrain's static shadows under the placed models, and the "
+					"moving ground shadows of the people and the items that cast one.");
 	// DI-31: the game's own foliage, effects and lights.
 	ImGui::Checkbox("Foliage", &options.foliage);
 	ui_kit::tooltip("The terrain's foliage as the game grows it from its foliage map around the camera (its .trn's "
@@ -829,9 +813,8 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ui_kit::tooltip("A ring in each group's colour (the editor's own: no game colours a group), group 0 none, and a "
 					"legend of the groups in view.");
 	ImGui::Checkbox("Links", &options.links);
-	ui_kit::tooltip("The selected event's links: what its triggers watch and what its actions act on, ringed, a line "
-					"from one to the other, and a distance trigger's reach as the game measures it (a sphere about its "
-					"subject). And on each mark some event names, how many events name it.");
+	ui_kit::tooltip("The selected event's links: what its triggers watch and its actions act on, ringed and joined, and a "
+					"distance trigger's reach as the game measures it. On each mark an event names, how many name it.");
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
 	float range = options.mark_range;
 	if (ImGui::SliderFloat("Mark range", &range, 0.0f, 2000.0f, range <= 0.0f ? "no limit" : "%.0f m",
@@ -884,7 +867,9 @@ void MissionViewportView::Tools::heard_popup(Workspace &workspace, const Mission
 		ImGui::SameLine();
 		name_link(workspace, {ReferenceKind::BankWave, channel.wave, bank}, "wave");
 		ImGui::SameLine();
-		ImGui::Text("volume %d, %.0f m (%s)", channel.volume, double(channel.distance), from.c_str());
+		char heard[64];
+		std::snprintf(heard, sizeof(heard), "volume %d, %.0f m (%s)", channel.volume, double(channel.distance), from.c_str());
+		popup_line(heard, "Its volume, its distance from the camera, and what plays it: an ambient source or the rain.");
 		ImGui::PopID();
 	}
 	if (shown == 0) ImGui::TextDisabled("Nothing is heard here.");
@@ -896,8 +881,11 @@ void MissionViewportView::Tools::heard_popup(Workspace &workspace, const Mission
 		outranked += status == "outranked" ? 1 : 0;
 		silent += status != "playing" && status != "outranked" ? 1 : 0;
 	}
-	ImGui::Text("%zu ambient sources: %zu playing, %zu outranked, %zu silent here", listen.sources().size(), playing,
-			outranked, silent);
+	char sources[96];
+	std::snprintf(sources, sizeof(sources), "%zu ambient sources: %zu playing, %zu outranked, %zu silent", listen.sources().size(),
+			playing, outranked, silent);
+	popup_line(sources, "Outranked: heard here, but not among the loudest the channels take. Silent: out of reach, with "
+						"nothing for this hour, or with no set or wave the game finds.");
 	const MissionScriptRun &script = listen.script();
 	if (const world::WeatherState *weather = script.weather()) {
 		ImGui::Text("Rain %.0f%% (to %.0f%%), overcast %.0f%%", double(weather->rain_pct_current_q16()) * 100.0 / 65535.0,
@@ -905,7 +893,7 @@ void MissionViewportView::Tools::heard_popup(Workspace &workspace, const Mission
 				double(weather->overcast_blend_q16()) * 100.0 / 65535.0);
 	}
 	if (!script.error().empty()) {
-		ui_kit::warning_line(script.error());
+		popup_line(script.error(), std::string(), LineTone::Warning);
 	} else {
 		ImGui::TextDisabled("Script: %s, run %u times", script.scripted() ? "compiled" : "none", script.script_runs());
 	}

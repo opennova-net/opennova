@@ -51,61 +51,49 @@ std::string mission_handle_step(MissionHandle handle, float snap, float turn) {
 }
 
 std::string mission_canvas_hint(const MissionHintInput &in) {
-	if (!in.current) return "The picture is catching up with the mission; edits wait for it.";
+	// A line of at most ~60 characters: what the tool does now and its keys (the tools' tooltips hold the rest).
+	if (!in.current) return "Catching up with the mission: edits wait for it.";
 	// Shooting edits nothing: it takes a mission that is held too.
 	if (in.tool == MissionTool::Shoot)
-		return in.ammo.empty() ? "Shoot: pick an ammo, then click the terrain or an object to fire it there (Esc stops)."
-		                       : "Shoot " + in.ammo + ": click the terrain or an object to fire one there; the impact "
-		                                              "plays as the game plays it (Esc stops).";
+		return in.ammo.empty() ? "Shoot: pick an ammo in the list (Esc stops)."
+		                       : "Shoot " + in.ammo + ": click to fire one (Esc stops).";
 	if (!in.editable && in.tool != MissionTool::Select)
-		return "Nothing can be placed now: " + (in.not_editable.empty() ? std::string("the mission is held.") : in.not_editable);
+		return "Nothing can be placed: " + (in.not_editable.empty() ? std::string("the mission is held.") : in.not_editable);
 	switch (in.tool) {
 	case MissionTool::Place:
-		if (in.item.empty()) return "Place: pick an item in the palette, then click the ground to place it (Esc stops).";
-		return "Place " + in.item + ": click the ground to place one, facing the way the camera looks; it stays picked "
-				"for the next (Esc stops).";
+		if (in.item.empty()) return "Place: pick an item in the palette (Esc stops).";
+		return "Place " + in.item + ": click the ground (Esc stops).";
 	case MissionTool::Path:
-		if (in.path <= 0) return "Path stops: pick a path in the list, then click the ground to add its next stop (Esc stops).";
-		return "Path " + std::to_string(in.path) + ": click the ground to add a stop (a marker the path visits next), or "
-				"click its line to put one between two (Esc stops).";
+		if (in.path <= 0) return "Path stops: pick a path in the list (Esc stops).";
+		return "Path " + std::to_string(in.path) + ": click the ground to add a stop (Esc stops).";
 	case MissionTool::Area:
 		if (in.dragging) return "Let go to make an area trigger over the box.";
 		// The box takes the toolbar's grid whatever is held.
-		return "Area: drag a box on the ground to make an area trigger (snaps to " + mission_snap_words(in.grid) +
-				"; Esc stops).";
+		return "Area: drag a box on the ground (snaps to " + mission_snap_words(in.grid) + "; Esc stops).";
 	case MissionTool::Select:
 	case MissionTool::Shoot: break;
 	}
 	if (in.dragging) {
-		if (!in.handle) return "Let go to select what the box holds (Shift adds, Ctrl toggles).";
-		if (in.copying) return "Let go to place the copies here (" + mission_snap_words(in.snap) + " steps; hold Ctrl for free).";
+		if (!in.handle) return "Let go to select the box's marks (Shift adds, Ctrl toggles).";
+		if (in.copying) return "Let go to place the copies (" + mission_snap_words(in.snap) + " steps; Ctrl: free).";
 		return "Drag to " + mission_handle_words(in.which) + " (" + mission_handle_step(in.which, in.snap, in.turn) +
-				"; hold Ctrl for free).";
+				"; Ctrl: free).";
 	}
 	if (in.handle && in.editable)
 		return "Handle: drag to " + mission_handle_words(in.which) + " (" + mission_handle_step(in.which, in.snap, in.turn) +
 				").";
-	if (!in.hovered.empty()) {
-		std::string line = in.hovered + ": click to select";
-		if (in.editable && in.hovered_drags) line += ", drag to move (Alt-drag copies)";
-		line += "; Shift adds, Ctrl toggles; right-click for more.";
-		return line;
-	}
-	if (in.empty_mission)
-		return "An empty mission: Place puts people, vehicles and buildings on the ground; Area draws a trigger zone; "
-				"right-click for more.";
+	if (!in.hovered.empty())
+		return in.hovered + ": click to select" + (in.editable && in.hovered_drags ? ", drag to move." : ".");
+	if (in.empty_mission) return "An empty mission: Place puts items down, Area a trigger.";
 	if (in.selected > 0) {
-		std::string line = std::to_string(in.selected) + (in.selected == 1 ? " selected" : " selected records");
+		const std::string line = std::to_string(in.selected) + " selected";
+		// The arrows go a metre when the snap is free.
 		if (in.editable)
-			// The arrows go a metre when the snap is free.
-			line += ": arrows nudge (" + mission_snap_words(in.grid > 0.0f ? in.grid : 1.0f) + ", Shift finer), PgUp/PgDn raise, Ctrl+D "
-					"duplicates, Delete removes, F frames; click empty ground to select nothing.";
-		else
-			line += ": F frames; " + in.not_editable;
-		return line;
+			return line + ": arrows nudge (" + mission_snap_words(in.grid > 0.0f ? in.grid : 1.0f) +
+					"), PgUp/PgDn raise, Delete removes.";
+		return line + ": F frames; " + in.not_editable;
 	}
-	return "Click a mark to select it, drag for a box; right button looks (W A S D Q E fly), middle button pans, wheel "
-			"zooms, F frames everything.";
+	return "Click a mark to select it, drag for a box; F frames all.";
 }
 
 } // namespace opennova::editor

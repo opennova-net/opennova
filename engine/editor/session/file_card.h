@@ -34,6 +34,9 @@ struct FileCard {
 	// What a file of its kind holds, what in the game reads it and when, and the witness of that
 	// (assets/asset_kind_words).
 	std::string what, read_by, cite;
+	// The game never reads it by its name, the project's target game's witnessed set (assets/asset_kind_words'
+	// game_never_reads: a .def of no name the game opens).
+	bool never_read = false;
 	uint64_t size = 0;
 	std::string build;  // where a build puts it, in words
 	std::string editor; // what the editor does with it ("The editor opens it as a document.")

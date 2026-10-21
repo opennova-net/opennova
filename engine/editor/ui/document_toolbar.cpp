@@ -67,15 +67,30 @@ void draw_document_toolbar(Workspace &workspace, const DocumentBase &document, c
 	const std::string label = "Used by (" + (reading && !uses ? std::string("...") : std::to_string(uses)) + ")###used_by";
 	const std::string tip = reading && !uses ? std::string(ui_kit::reading_references())
 	                        : uses ? std::string("Who names this file or what it defines, listed in the Inspector.")
-	                               : std::string("No file of the project names it or what it defines.");
+	                               : std::string(ui_kit::nothing_names_it(true));
 	if (ui_kit::tool(row, label.c_str(), (uses || reading) && view.allows(EditorRequestKind::SelectRecord), tip)) {
 		workspace.request(request::select_record(document.path(), NodeAddress()));
 		window_requests::focus(workspace, "inspector");
 	}
 	if (document.blocked()) {
-		ui_kit::refusal_text(blocked_notice ? blocked_notice
-		                                    : "This file has unsupported or malformed input. See Problems, correct "
-		                                      "the source, then Reload.");
+		if (blocked_notice) {
+			ui_kit::refusal_text(blocked_notice);
+			return;
+		}
+		// Read only while input its Save cannot write stands: how many lines, on one line, Problems' fix in the
+		// tooltip; input on no line (a table's whole file) said as such, with no fix to point to.
+		size_t lines = 0;
+		for (const SourceIssue &issue : document.issues()) lines += issue.blocks && issue.line > 0 ? 1 : 0;
+		const std::string line = lines ? "Read only: " + std::to_string(lines) + (lines == 1 ? " line" : " lines") +
+		                                     " the editor cannot carry (Problems)"
+		                               : std::string("Read only: the editor cannot carry this file (Problems)");
+		row.next(ui_kit::text_width(line.c_str()));
+		ImGui::AlignTextToFramePadding();
+		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::refusal_color());
+		ui_kit::clipped_text(line, lines ? "A save cannot write these lines as the game reads them. Problems' Correct "
+		                                   "the line... rewrites one in the file and reads it again."
+		                                 : "A save cannot write this file as the game reads it: Problems says why.");
+		ImGui::PopStyleColor();
 		return;
 	}
 	// What a save changes beyond the edits, on the tools' row, its words in the tooltip (while there are

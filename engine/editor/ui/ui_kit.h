@@ -8,7 +8,10 @@
 // - Cut: anything said twice, click-here tails, prose about the editor's own layout.
 // - Empty state: one line (empty_state); the how-to goes in its tooltip.
 // - Lengths: an inline line at most ~60 characters, drawn with clipped_text or quiet_text, never wrapped
-//   prose; a tooltip at most two sentences.
+//   prose (a modal's text is dialog_text; a raw ImGui::TextWrapped is a ratchet, scripts/lint/ratchet_counts.py's
+//   editor_ui_wrapped_text); a tooltip at most two sentences.
+// - Citations: in no window's words (the one tooltip drops them, a line shows without_citations of its
+//   words); the code, the RE records and the MCP's answers keep them.
 // - Session strings (a status, a refusal, a document's save words) are asserted by tests and read over
 //   MCP: they keep their words, and only where they are drawn changes.
 #pragma once
@@ -27,9 +30,9 @@
 struct ImVec4;
 
 // The pieces the editor's windows draw with (ADR 0046 S11): the tool kit both products draw with
-// (runtime/devtools/ui_kit.h: rows that wrap, tools, filter boxes, held values, cut text, the one
-// tooltip, empty states), and on it what is the editor's own: a popup the session holds open, a
-// finding's severity as a drawn mark (alone, or with a count), the unsaved-changes dot, a record's
+// (runtime/devtools/ui_kit.h: rows that wrap, tools, filter boxes, held values, cut text, words without
+// their citations, the one tooltip, empty states), and on it what is the editor's own: a popup the session
+// holds open, a finding's severity as a drawn mark (alone, or with a count), the unsaved-changes dot, a record's
 // change since the last save as a dot before its name, a reference's state, and whether Dear ImGui
 // draws over a rect. A name the tool kit declares is never declared here again: it would hide the
 // kit's from every `ui_kit::` call.
@@ -73,11 +76,24 @@ ImVec4 refusal_color();
 void warning_line(const std::string &text, const std::string &tip = std::string());
 // A one-line red refusal (why the control beside it cannot act), cut to the line, whole in its tooltip.
 void refusal_text(const std::string &text);
+// The text of a confirmation modal, wrapped at a dialog's width (36 ems): the one wrapped prose the rule keeps,
+// never drawn outside a modal (a raw ImGui::TextWrapped is the ratchet's count, scripts/lint/ratchet_counts.py).
+void dialog_text(const std::string &text);
 // The words a view shows while the project's references are still being read.
 const char *reading_references();
-// `text` without its witness citations ("[orig: ...]" and the blank before each): what a line that is cut to
-// one line shows of a finding's words, the whole in its tooltip.
-std::string without_citations(const std::string &text);
+// What a list of who uses a thing says when no file of the project names it (`file`: "or what it defines" too).
+const char *nothing_names_it(bool file);
+// What a confirmation says of its way back: a document's Undo, or a file's chore's Edit > Undo file (`file`).
+const char *undo_brings_it_back(bool file);
+// Under a list of who uses a thing, one line while it lists none or the project's references are being read: the
+// reading's words (`reading`; while it lists some already, that the list may grow in its tooltip), else `none` with
+// `how` (what would name the thing) in its tooltip. True when it lists none.
+bool no_uses(size_t count, bool reading, const char *none, const char *how = nullptr);
+// A list of who uses a thing, headed (a record's Referenced by, a file's Used by, a clip's Played by, the
+// missions on a terrain): "<title> (<count>)" on a separator line, `tip` (what it lists) in its tooltip, then
+// no_uses. True when there are uses to list under it.
+bool uses_heading(const std::string &title, size_t count, bool reading, const std::string &tip, const char *none,
+                  const char *how = nullptr);
 // A button that names what it acts on, `verb` then `name` ("Import gametext.bin..."; `tail` after the name),
 // cut to what is left of the line in its middle (a name's end tells two apart), its id the verb's whatever the
 // name: pressed only while `enabled`, `tip` its tooltip.
@@ -87,6 +103,9 @@ bool named_action(const std::string &verb, const std::string &name, const char *
 // symbols): an error a filled red circle, a warning an amber triangle, a note a grey ring.
 // Hovered, it says which.
 void severity_marker(DiagnosticSeverity severity);
+// A finding on one line (a refusal of a plan, a record's finding): the mark of its `severity`, then `words`
+// without their citations, cut to the line; hovered, `tip` when one is given, else the whole words where cut.
+void finding_line(DiagnosticSeverity severity, const std::string &words, const std::string &tip = std::string());
 // The same mark over the right end of the item just drawn, inside what the window shows of it (an
 // outline's line that spans the window), taking no room: true while the pointer is over it.
 bool severity_mark_on_item(DiagnosticSeverity severity);

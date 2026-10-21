@@ -716,6 +716,13 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 	if (!view.project.open) return;
 	const FindingCodeRow *row = d.row();
 	if (!row) return;
+	// A line of the file's source its model cannot carry, whatever the code's row: corrected in the file itself, the
+	// document read again (a blocked document takes no edit, and its Save cannot write the line).
+	if (d.source_line && d.line && view.project.scan && view.project.scan->at_path(d.asset))
+		out.push_back({"Correct the line...",
+		               "Shows line " + std::to_string(d.line) + " of " + d.asset + " as the file holds it, to correct or clear; "
+		               "Apply writes it in the file and reads the file again." + std::string(kNotUndoable),
+		               request::correct_line(d.asset, d.line, {}, std::nullopt, true), false});
 	switch (row->fixes) {
 	case FindingFix::None: return;
 	case FindingFix::Requirement:

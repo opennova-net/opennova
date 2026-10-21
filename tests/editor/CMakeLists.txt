@@ -677,6 +677,9 @@ opennova_add_editor_test(project_cli_session NAME project_cli_session
 opennova_add_editor_test(menu_depth LIBS opennova_project_cli)
 
 opennova_add_editor_test(catalog SOURCES catalog_document_test.cpp)
+# A blocked file is never a dead end (session/source_line.h): a blocking source line's Correct the line..., the
+# dialog it opens, the line written on disk with its line end kept, the document read again unblocked.
+opennova_add_editor_test(correct_line)
 
 # The item ids the engine fixes, as the catalog keeps them (ADR 0046 S19, "Reserved item ids"): the
 # ids a new item never takes, the edits refused, the findings and their fixes, the engine's rows added.

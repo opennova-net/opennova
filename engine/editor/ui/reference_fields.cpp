@@ -55,7 +55,7 @@ void reference_jumps(Workspace &workspace, const Targets &targets_of) {
 		ProjectFind::open_usages(workspace, targets.front().file, targets.front().missing ? std::string() : targets.front().locator);
 	};
 	if (menu) {
-		if (targets.empty()) ImGui::TextDisabled("It names nothing the project holds.");
+		if (targets.empty()) ui_kit::quiet_text("Names nothing in the project.");
 		for (size_t i = 0; i < targets.size(); ++i) {
 			ImGui::PushID(static_cast<int>(i));
 			const std::string label = targets.size() == 1 ? std::string("Go to definition") : "Go to " + targets[i].label;

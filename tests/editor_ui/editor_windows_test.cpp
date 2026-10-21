@@ -345,6 +345,48 @@ void test_inspector_plan() {
 	CHECK(hidden && is_yes_no(*hidden) && !written(*document, back, *hidden), "a flag is a switch, left out while no");
 }
 
+// A def member the game never reads is in a record's plan only where the file sets it (it differs from the
+// table's default), tagged there; one no reader is witnessed for shows set or not; a read member always shows.
+void test_inspector_hides_unread_defaults() {
+	test_temp::TempDir dir("opennova_editor_ui_unread_defs");
+	CHECK(test_io::write_text(dir.file("items.def"), "begin \"Plain\"\nid 100001\ntype vehicle\nend\n"
+	                                                 "begin \"Heavy\"\nid 100002\ntype vehicle\ntop_heavy 3\nend\n") &&
+	              test_io::write_text(dir.file("weapon.def"), "weapon \"WPN_PLAIN\"\nend\nweapon \"WPN_ARMS\"\ngfx1a arms\nend\n"),
+	      "an item and a weapon table");
+	DefCatalogDocument items, weapons;
+	Diagnostic error;
+	CHECK(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error) && items.rows().size() == 2 &&
+	              weapons.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error) &&
+	              weapons.rows().size() == 2,
+	      "the two tables load");
+	if (items.rows().size() != 2 || weapons.rows().size() != 2) return;
+	const auto shown = [](const Document &document, const NodeAddress &record, const char *id, Applicability *applies) {
+		for (const InspectorSection &section : plan_inspector(document, record, record, ""))
+			for (const FieldUse &field : section.fields)
+				if (field.schema->id == id) {
+					if (applies) *applies = field.applies;
+					return true;
+				}
+		return false;
+	};
+	const NodeKind item = node_kind(opennova::def::DefRecordKind::Item);
+	const NodeKind weapon = node_kind(opennova::def::DefRecordKind::Weapon);
+	const NodeAddress plain{items.rows()[0]->id, item, 0}, heavy{items.rows()[1]->id, item, 0};
+	Applicability applies = Applicability::Reads;
+	CHECK(!shown(items, plain, "top_heavy", nullptr) && shown(items, heavy, "top_heavy", &applies) &&
+	              applies == Applicability::Ignored,
+	      "top_heavy: hidden at its default, shown and ignored where the file sets it");
+	CHECK(!shown(items, plain, "shadow_texture", nullptr) && !shown(items, plain, "max_attack_dist", nullptr),
+	      "the shadow line and the mission editor's keys: hidden while unset");
+	CHECK(shown(items, plain, "husk_swap_at", &applies) && applies == Applicability::Unverified,
+	      "an unwitnessed member shows unset, marked");
+	CHECK(shown(items, plain, "hp", &applies) && applies == Applicability::Reads, "a member the game reads shows");
+	const NodeAddress bare{weapons.rows()[0]->id, weapon, 0}, arms{weapons.rows()[1]->id, weapon, 0};
+	CHECK(!shown(weapons, bare, "gfx1a", nullptr) && shown(weapons, arms, "gfx1a", &applies) &&
+	              applies == Applicability::Ignored,
+	      "gfx1a: shown only where the file names one");
+}
+
 // --- driving the real windows ------------------------------------------------------------
 
 // The Problems list as ImGui laid it out in the last frame, for a test to press on what a
@@ -1685,8 +1727,20 @@ void test_problems_window_ui() {
 	                      "Use spare.bin as gametext.bin", "requirement.missing"}) &&
 	              text.find("Renames spare.bin to gametext.bin.") == std::string::npos,
 	      "the selected row: every fix (what it does in its tooltip), and its code");
-	CHECK(text.find("As the original was seen to do:") != std::string::npos, "the manifest's own record of it, the cited detail");
+	CHECK(text.find("As the original was seen to do:") == std::string::npos, "the manifest's own record of it, no line");
 	CHECK(text.find("Blocks the build") != std::string::npos, "a row a build is refused for says so");
+	// The message on one line after Blocks the build, the manifest's record of the file in its tooltip, without
+	// its citation.
+	{
+		const ProblemsLines lines = problems_lines();
+		const ImGuiTableColumn &message = lines.table->Columns[1];
+		ui.mouse(message.WorkMinX + ui_kit::text_width("Blocks the build") + ImGui::GetStyle().ItemSpacing.x + 8.0f,
+		         lines.y(0));
+		const std::string tip = logged_frame(ui);
+		CHECK(tip.find("As the original was seen to do:") != std::string::npos && tip.find("[orig:") == std::string::npos,
+		      "the manifest's own record of it in the message's tooltip, without its citation");
+		ui.away();
+	}
 	ui.click(problems_lines().at(0, 2));
 	ui.away();
 	CHECK(logged_frame(ui).find("requirement.missing") == std::string::npos, "a second click folds it back");
@@ -2564,7 +2618,7 @@ void test_inspector_kinds_alike() {
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	shown = logged_frame(ui);
-	CHECK(shown.find("2 records of different kinds selected") != std::string::npos &&
+	CHECK(shown.find("2 records of different kinds") != std::string::npos &&
 	              shown.find("a change here sets every one") == std::string::npos,
 	      "a note with a crate: the kinds differ");
 	ui.drain();
@@ -2604,10 +2658,12 @@ void test_used_by_ui() {
 	ui.away();
 	ui.drain();
 	const std::string text = logged_frame(ui);
-	CHECK(text.find("skinned.3di: used by 1 field") != std::string::npos, "the file's uses, counted");
+	// The toolbar's chip and the Inspector's heading, each counted.
+	const size_t chip = text.find("Used by (1)");
+	CHECK(chip != std::string::npos && text.find("Used by (1)", chip + 1) != std::string::npos,
+	      "the file's uses, counted, on the toolbar's chip and over the Inspector's list");
 	CHECK(text.find(items->logical_name + " (1)") != std::string::npos, "grouped by the file naming it");
 	CHECK(text.find("Skinned Thing") != std::string::npos, "the item naming it, in its words");
-	CHECK(text.find("Used by (1)") != std::string::npos, "the toolbar's chip, counted");
 	InspectorWindow *inspector_window = nullptr;
 	for (int i = 0; i < ui.windows.pass().window_count() && !inspector_window; ++i)
 		inspector_window = dynamic_cast<InspectorWindow *>(&ui.windows.pass().window(i));
@@ -2713,6 +2769,7 @@ void test_menu_sounds_inspector_ui() {
 
 void run_inspector_tests() {
 	test_inspector_plan();
+	test_inspector_hides_unread_defaults();
 	test_inspector_ui();
 	test_menu_sounds_inspector_ui();
 	test_inspector_kinds_alike();

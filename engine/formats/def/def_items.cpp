@@ -125,6 +125,16 @@ void def_init_item(DefItemDef &value) {
     d->fire_timer = 10;
 }
 
+/* An item block no `end` closes (the next `begin`, or the file's end, comes first): the `end`
+   arm only clears the open flag and derives the alias of an item with none [orig:
+   ItemDef_ParseProperty @0x49EB2F..0x49EB5F, `mov dword_B48364, ebx` @0x49EB43, the
+   sprintf @0x49EB5F], so an item whose alias the file states reads as the writer's form of
+   it, its `end` added: reported (Unclosed). One with none keeps it empty, where its `end`
+   would derive "S%06i": a save cannot give that back. */
+static DefIssueCode unclosed_code(const DefItemDef &item) {
+    return item.sid[0] != '\0' ? DefIssueCode::Unclosed : DefIssueCode::MalformedBlock;
+}
+
 /* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have
    zeroed `out` first. Lets both the path loader and the VFS/PFF byte loader share one parser.
 
@@ -146,6 +156,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
     bool powerup_branch = false, numeric_branch = false;
     size_t emplacement_attachments_cap = 0;
     size_t number = 0; // the line a finding names, counting from 1
+    /* A record holding both a powerup's and a numeric item's members, which the typed model's
+       union cannot carry: refused however the block is closed (its `end`, a nested `begin`, the
+       file's end), as the writer's form of it, its `end` added, would be. */
+    const auto check_union = [&] {
+        if (powerup_branch && numeric_branch)
+            authoring_issue(current.unmodeled_count, report, number, current.display_name,
+                "powerupdef", 10, DefIssueCode::Unrepresentable);
+    };
 
     io::ConfigTokens tokens_state;
     for_each_def_line(buf, file_len, tokens_state,
@@ -163,9 +181,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 return;
             }
             if (in_block) {
-                if (powerup_branch && numeric_branch)
-                    authoring_issue(current.unmodeled_count, report, number, current.display_name,
-                        "powerupdef", 10, DefIssueCode::Unrepresentable);
+                check_union();
                 /* A record closed with no alias takes "S%06i" of its authored
                    id [orig: the `end` arm @0x49EB2F..0x49EB5F, `cmp
                    [esi+30h], bl` then sprintf(alias, "S%06i", [esi+50h] +
@@ -190,7 +206,8 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
             if (in_block) {
                 // The open record, closed by no `end`, which the writer's form of it would add.
                 authoring_issue(out->unmodeled_count, report, number, current.display_name, "end", 3,
-                                DefIssueCode::MalformedBlock);
+                                unclosed_code(current));
+                check_union();
                 DA_PUSH(out->entries, out->count, entries_cap, current);
             }
             def_init_item(current); /* [orig: the begin arm calls
@@ -523,8 +540,13 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
             const int n = value_tokens(tokens, tok, 6);
             /* Retail has four fixed slots. A fifth valid record is recognized but
                silently ignored. The optional arc is all-or-none: partial tails
-               produce authoring diagnostics instead of inventing missing limits. */
-            if (n != 2 && n < 6) {
+               produce authoring diagnostics instead of inventing missing limits.
+               A user point alone takes the item id the reset second slot reads, 0
+               [orig: atol(tokens[3]) @0x4A1B8E..0x4A1BAD; Config_TokenizeLine
+               @0x53CB71..0x53CB81]; a line with none fills the first free slot with
+               an empty user point, the slot left free (the `cmp byte ptr [eax], 0`
+               @0x4A1B55), which the record cannot hold. */
+            if (n == 0 || (n > 2 && n < 6)) {
                 authoring_issue(current.unmodeled_count, report, number, current.display_name, as_read.c_str(), as_read.size(), DefIssueCode::InvalidValue);
                 return;
             }
@@ -537,7 +559,8 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 DefItemEmplacementAttachment attachment;
                 memset(&attachment, 0, sizeof(attachment));
                 safe_copy(attachment.userpoint, sizeof(attachment.userpoint), tok[0].s, tok[0].len);
-                attachment.item_id = parse_int_n(tok[1].s, tok[1].len);
+                const char *item_id = tokens.token(2);
+                attachment.item_id = parse_int_n(item_id, strlen(item_id));
                 attachment.kind = kind;
                 attachment.angle_count = n >= 6 ? 4 : 0;
                 if (n >= 6) {
@@ -937,9 +960,12 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
 
     /* A block the file never closes was allocated at its `begin` and stays an
        item [orig: the begin arm @0x49EBA8]; its `end` is missing, which the
-       writer's form of it would add. */
+       writer's form of it would add. A file whose last line is `end` with no
+       CR LF after it is one: the walk drops that line's last byte, and `en` is
+       no key [orig: File_ParseASCIIFile @0x53D8E9..0x53D8F5]. */
     if (in_block) {
-        authoring_issue(out->unmodeled_count, report, number, current.display_name, "end", 3, DefIssueCode::MalformedBlock);
+        authoring_issue(out->unmodeled_count, report, number, current.display_name, "end", 3, unclosed_code(current));
+        check_union();
         DA_PUSH(out->entries, out->count, entries_cap, current);
     }
 

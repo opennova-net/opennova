@@ -588,7 +588,7 @@ static int test_item_ids_within_a_table() {
 			{ "a/items.def", item("Alpha", 5) + item("Zero", 0) },
 			{ "b/items.def",
 					item("Bravo", 5) + item("Bravo2", 5) + item("Nil", 0) + item("Nil2", 0) },
-			{ "c/items.def", "begin \"Broken\"\n  id 7\n  type marker\n  hp twelve\nend\n" },
+			{ "c/items.def", "begin \"Broken\"\n  id 7\n  type marker\n  addeweap ewep01 100201 15 37\nend\n" },
 			{ "d/items.def", item("Delta", 7) },
 	}));
 	AssetGraph graph;

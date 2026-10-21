@@ -72,15 +72,18 @@ void draw_box(Workspace &workspace, const TextureThumbnail *picture, ImVec2 at, 
 	paint.AddRect(at, end, frame);
 }
 
-// What a picture says of itself, a line each (within the wrap the caller pushed): reading it, the game's refusal,
-// or its facts (its alpha with `alpha`) and what this use's load makes of it.
-void picture_words(const TextureThumbnail *picture, TextureLoadTransform transform, bool alpha) {
+// What a picture says of itself, a line each (within the wrap the caller pushed): reading it, the game's refusal
+// (in a tooltip, `tip`, wrapped with the rest; else one red line, whole in its own tooltip), or its facts (its
+// alpha with `alpha`) and what this use's load makes of it.
+void picture_words(const TextureThumbnail *picture, TextureLoadTransform transform, bool alpha, bool tip) {
 	if (!picture) {
 		ImGui::TextDisabled("Reading it...");
 		return;
 	}
 	if (picture->state != TextureThumbnail::State::Ready) {
-		ImGui::TextColored(ui_kit::refusal_color(), "The game cannot load it: %s", picture->refusal.c_str());
+		const std::string refusal = "The game cannot load it: " + picture->refusal;
+		if (tip) ImGui::TextColored(ui_kit::refusal_color(), "%s", refusal.c_str());
+		else ui_kit::refusal_text(refusal);
 		return;
 	}
 	ImGui::TextDisabled("%s", facts(*picture).c_str());
@@ -126,7 +129,7 @@ void facts_block(Workspace &workspace, const std::string &file, TextureLoadTrans
 	const std::shared_ptr<const TextureThumbnail> made = picture_of(workspace, file, transform);
 	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
 	ImGui::TextUnformatted(basename_of(file).c_str());
-	picture_words(made.get(), transform, false);
+	picture_words(made.get(), transform, false, false);
 	ImGui::PopTextWrapPos();
 }
 
@@ -139,7 +142,7 @@ void tooltip(Workspace &workspace, const std::string &file, TextureLoadTransform
 	draw_box(workspace, picture.get(), at, kTooltipSide);
 	ImGui::TextUnformatted(file.c_str());
 	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + kTooltipSide);
-	picture_words(picture.get(), transform, true);
+	picture_words(picture.get(), transform, true, true);
 	ImGui::PopTextWrapPos();
 	ImGui::EndTooltip();
 }
@@ -181,7 +184,7 @@ void reference_field(Workspace &workspace, const FieldUse &field, const Value &v
 	const bool as_written = !picture || picture->state != TextureThumbnail::State::Ready ||
 	                        pff::normalized_logical_name(name) == pff::normalized_logical_name(load.name);
 	ImGui::TextUnformatted(as_written ? name.c_str() : (name + " (the game loads it for " + load.name + ")").c_str());
-	picture_words(picture.get(), load.transform, false);
+	picture_words(picture.get(), load.transform, false, false);
 	ImGui::PopTextWrapPos();
 	ImGui::EndGroup();
 }

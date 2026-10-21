@@ -342,7 +342,7 @@ void test_welcome_install_and_first_steps() {
 	ui.key(ImGuiKey_Backspace, false);
 	ImGui::ClearActiveID();
 	ui.frames(2);
-	CHECK(logged_frame(ui).find("Left empty, the project takes the editor's game install, C:/Games/JO.") != std::string::npos,
+	CHECK(logged_frame(ui).find("Left empty, it takes the editor's install, C:/Games/JO.") != std::string::npos,
 	      "the field cleared: the install a project takes then said");
 	// A refused New project or Open says why on the page.
 	v.project.refused = "The project could not be created: C:/mods/New holds a project already.";

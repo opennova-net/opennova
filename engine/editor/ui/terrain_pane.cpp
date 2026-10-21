@@ -53,7 +53,7 @@ void draw_lock_line(TerrainPaneContext &context) {
 	const SessionView &view = context.workspace.view();
 	const std::vector<const MissionDocument *> missions = missions_under_view(view, context.document, context.family);
 	if (missions.empty()) {
-		ui_kit::quiet_text("No open mission stands on this terrain.", "A sculpt moves no entity open here.");
+		ui_kit::quiet_text("No open mission on this terrain.", "A sculpt moves no entity open here.");
 		return;
 	}
 	double x = 0.0, y = 0.0;

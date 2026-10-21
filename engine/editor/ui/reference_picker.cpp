@@ -530,9 +530,7 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 		const float side = ImGui::GetFontSize() * 12.0f;
 		if (choice.served.empty()) {
 			ImGui::Dummy(ImVec2(side, side));
-			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + side);
-			ImGui::TextDisabled("The game loads no file of the project for %s.", choice.name.c_str());
-			ImGui::PopTextWrapPos();
+			ui_kit::quiet_text("No file loaded", "The game loads no file of the project for " + choice.name + ".");
 		} else {
 			const TextureReferenceLoad load = texture_reference(*popup.view->findings.graph, popup.field.reference, choice.name,
 			                                                    popup.field.scope, popup.field.loader_arg);
@@ -728,7 +726,7 @@ bool ReferencePicker::accept_record(const SessionView &, const Document &documen
 			}
 		} else if (!refusal.empty()) {
 			// A record whose value names another one (S24): not taken, the reason beside the pointer.
-			ImGui::SetTooltip("%s", refusal.c_str());
+			ImGui::SetTooltip("%s", ui_kit::without_citations(refusal).c_str());
 		}
 	}
 	ImGui::EndDragDropTarget();

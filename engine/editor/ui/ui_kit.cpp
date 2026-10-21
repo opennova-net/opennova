@@ -106,23 +106,34 @@ void refusal_text(const std::string &text) {
 	ImGui::PopStyleColor();
 }
 
+void dialog_text(const std::string &text) {
+	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 36.0f);
+	ImGui::TextUnformatted(text.c_str(), text.c_str() + text.size());
+	ImGui::PopTextWrapPos();
+}
+
 const char *reading_references() { return "Reading the project's references..."; }
 
-std::string without_citations(const std::string &text) {
-	std::string out;
-	out.reserve(text.size());
-	size_t at = 0;
-	while (at < text.size()) {
-		const size_t cite = text.find("[orig:", at);
-		if (cite == std::string::npos) break;
-		const size_t end = text.find(']', cite);
-		if (end == std::string::npos) break;
-		out.append(text, at, cite - at);
-		while (!out.empty() && out.back() == ' ') out.pop_back();
-		at = end + 1;
-	}
-	out.append(text, at, std::string::npos);
-	return out;
+const char *nothing_names_it(bool file) {
+	return file ? "No file of the project names it or what it defines." : "No file of the project names it.";
+}
+
+const char *undo_brings_it_back(bool file) {
+	return file ? "Edit > Undo file brings it back." : "Undo brings it back.";
+}
+
+bool no_uses(size_t count, bool reading, const char *none, const char *how) {
+	if (reading) empty_state(reading_references(), count ? "The list may grow." : nullptr);
+	else if (!count) empty_state(none, how);
+	return count == 0;
+}
+
+bool uses_heading(const std::string &title, size_t count, bool reading, const std::string &tip, const char *none,
+                  const char *how) {
+	const std::string heading = title + " (" + std::to_string(count) + ")";
+	ImGui::SeparatorText(fit(heading, ImGui::GetContentRegionAvail().x - ImGui::GetStyle().SeparatorTextPadding.x * 2.0f).c_str());
+	tooltip(tip);
+	return !no_uses(count, reading, none, how);
 }
 
 bool named_action(const std::string &verb, const std::string &name, const char *tail, bool enabled,
@@ -147,6 +158,13 @@ void severity_marker(DiagnosticSeverity severity) {
 	ImGui::Dummy(ImVec2(size, size));
 	tooltip(severity_word(severity));
 	draw_mark(severity, ImVec2(at.x + size * 0.5f, at.y + size * 0.5f));
+}
+
+void finding_line(DiagnosticSeverity severity, const std::string &words, const std::string &tip) {
+	severity_marker(severity);
+	ImGui::SameLine();
+	ImGui::AlignTextToFramePadding();
+	clipped_text(without_citations(words), tip);
 }
 
 bool severity_mark_on_item(DiagnosticSeverity severity) {

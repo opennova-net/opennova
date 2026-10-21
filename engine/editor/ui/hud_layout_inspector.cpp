@@ -63,7 +63,7 @@ void draw_hud_layout_inspector(Workspace &workspace, const DocumentBase &documen
 	const HudPreviewElement *picked = model->picked();
 	if (!picked) {
 		ui_kit::empty_state("Pick an element in the HUD preview.",
-		                    "Its place, size, anchor, font, colour and detail level show here; drag it in the preview to "
+		                    "Its place, size, anchor, font, colour and detail level show here. Drag it in the preview to "
 		                    "move it, a corner of it to size it.");
 		return;
 	}
@@ -71,7 +71,7 @@ void draw_hud_layout_inspector(Workspace &workspace, const DocumentBase &documen
 	const def::DefHudPosDef *layout = model->layout_model();
 	const std::vector<HudField> fields = layout ? hud_element_fields(picked->element, *layout) : std::vector<HudField>();
 	if (fields.empty()) {
-		ImGui::TextDisabled("No line of hudpos.def places it: the game does.");
+		ui_kit::quiet_text("Placed by the game", "No line of hudpos.def places it: the game does.");
 		ImGui::Spacing();
 		return;
 	}

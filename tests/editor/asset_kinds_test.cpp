@@ -14,6 +14,7 @@
 
 #include <base/io/strutil.h>
 #include <base/resource_index/file_kind.h>
+#include <editor/assets/asset_kind_words.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 
@@ -83,10 +84,32 @@ static int test_new_names_fit() {
 	return 0;
 }
 
+// A definitions text of no other kind the game never reads where its name is none the target game's binary opens
+// (JO's witnessed set, overcast.def and reverb.def among it, compared without case); a file of a kind the game
+// reads by name is never so marked, and a profile whose binary is unwitnessed marks nothing.
+static int test_unread_defs() {
+	TEST_EXPECT(game_never_reads(AssetKind::OtherDefs, "MEDWEP.DEF", "jo") &&
+	            game_never_reads(AssetKind::OtherDefs, "Wingpos.def", "jo") &&
+	            game_never_reads(AssetKind::OtherDefs, "farppos.def", "JO") &&
+	            game_never_reads(AssetKind::OtherDefs, "hud.def", "jo"));
+	TEST_EXPECT(!game_never_reads(AssetKind::OtherDefs, "overcast.def", "jo") &&
+	            !game_never_reads(AssetKind::OtherDefs, "OVERCAST.DEF", "jo") &&
+	            !game_never_reads(AssetKind::OtherDefs, "reverb.def", "jo"));
+	TEST_EXPECT(!game_never_reads(AssetKind::ItemDefs, "items.def", "jo") &&
+	            !game_never_reads(AssetKind::Text, "notes.txt", "jo"));
+	TEST_EXPECT(!game_never_reads(AssetKind::OtherDefs, "MEDWEP.DEF", "dfx2") &&
+	            !game_never_reads(AssetKind::OtherDefs, "MEDWEP.DEF", "jodemo") &&
+	            !game_never_reads(AssetKind::OtherDefs, "MEDWEP.DEF", ""));
+	const std::string read_by = asset_kind_words(AssetKind::OtherDefs).read_by;
+	TEST_EXPECT(read_by.rfind("Unknown", 0) == std::string::npos && read_by.find("never reads") != std::string::npos);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_the_table();
 	failures += test_new_names_fit();
+	failures += test_unread_defs();
 	if (failures == 0) std::printf("editor_asset_kinds: every kind's row and document type agree\n");
 	return failures == 0 ? 0 : 1;
 }

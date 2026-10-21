@@ -534,8 +534,29 @@ static int test_impact_board_targets() {
 	return 0;
 }
 
+// A field the game never reads names nothing (def_words' Ignored): a weapon's gfx1a and gfx1b, lines the game
+// drops, make no Model edge and no Problems row for a model the project lacks, nor its heat_sound a Sound one;
+// the gfx1 the game reads beside them still does.
+static int test_unread_fields_name_nothing() {
+	Project project;
+	const std::string weapons = project.path("weapon.def");
+	TEST_EXPECT(!weapons.empty() && project.write(weapons, "weapon \"WPN_ARMS\"\n\tgfx1 fp_gone\n\tgfx1a arms_gone\n"
+	                                                        "\tgfx1b arms2_gone\n\theat_sound SND_GONE\nend\n"));
+	project.rescan();
+	const AssetGraph &graph = project.graph();
+	TEST_EXPECT(edge_of(graph, weapons, "gfx1", "fp_gone"));
+	TEST_EXPECT(!edge_of(graph, weapons, "gfx1a", "arms_gone") && !edge_of(graph, weapons, "gfx1b", "arms2_gone") &&
+	            !edge_of(graph, weapons, "heat_sound", "SND_GONE"));
+	bool named = false;
+	for (const Diagnostic &d : project.session.view().findings.diagnostics)
+		named = named || (d.asset == weapons && (d.field == "gfx1a" || d.field == "gfx1b" || d.field == "heat_sound"));
+	TEST_EXPECT(!named);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_unread_fields_name_nothing();
 	failures += test_impact_board_targets();
 	failures += test_fields_are_references();
 	failures += test_type_ids();

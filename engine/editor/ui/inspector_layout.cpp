@@ -3,6 +3,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/model/field_text.h>
 #include <editor/session/file_card.h>
 #include <editor/session/view/session_view.h>
@@ -26,6 +27,19 @@ std::string edge_field_title(const SessionView &view, const GraphEdge &edge) {
 	// The kind of the file the edge comes from, by its path (the scan's path index), and the
 	// field's name from its type's schema: a type's fields never depend on a file's content.
 	return edge_field_words(*view.project.scan, edge);
+}
+
+std::string open_record_brief(const SessionView &view, const std::string &path, const NodeAddress &address) {
+	if (!address.row || path.empty()) return std::string();
+	for (const auto &open : view.documents.open) {
+		if (!open || open->path() != path) continue;
+		const Document *document = records_of(*open);
+		if (!document) return std::string();
+		if (!view.findings.graph) return record_brief(*document, address, nullptr);
+		const GraphNameSource names(*view.findings.graph);
+		return record_brief(*document, address, &names);
+	}
+	return std::string();
 }
 
 namespace {

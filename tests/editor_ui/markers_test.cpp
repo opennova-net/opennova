@@ -11,7 +11,9 @@
 // time it is asked, and waits while the Inspector does not draw. Output says when it has nothing
 // yet, clears through the session, copies every line, colours a finding's line and keeps to the
 // newest line unless scrolled up; F2 renames the file Files has selected, and Ctrl+F gives the
-// keyboard to the filter of the window that has the focus.
+// keyboard to the filter of the window that has the focus. The editor kit's quiet lines, a
+// finding's words without their citations, and the one uses section every list of who uses a
+// thing is headed with.
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -925,6 +927,59 @@ void test_quiet_lines() {
 	}
 }
 
+// The one uses section every window heads its "who uses this" with (the Inspector's Referenced by and Used by,
+// a clip's Played by, the missions on a terrain, a file's page): the title and its count on a separator line;
+// none, one line saying so (the what-names-it in its tooltip), or while the references are read, that; and a
+// finding on one line, its words without their citations. One frame of a window 360 wide (the reading line
+// whole on its one line).
+void test_uses_section() {
+	NullBackend backend;
+	const auto frame_of = [&](const auto &draw) {
+		ImGui::GetIO().AddMousePosEvent(-100.0f, -100.0f);
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(360.0f, 300.0f));
+		ImGui::Begin("uses");
+		draw();
+		ImGui::End();
+		const std::string text = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return text;
+	};
+	bool listed = false;
+	std::string text = frame_of([&] { listed = ui_kit::uses_heading("Used by", 3, false, "Who names it.", "None."); });
+	CHECK(listed && text.find("Used by (3)") != std::string::npos && text.find("None.") == std::string::npos,
+	      "a list of uses headed by its title and count");
+	text = frame_of([&] { listed = ui_kit::uses_heading("Played by", 0, false, "", "The game never plays it.", "A map names it."); });
+	CHECK(!listed && text.find("Played by (0)") != std::string::npos && text.find("The game never plays it.") != std::string::npos &&
+	              text.find("A map names it.") == std::string::npos,
+	      "none: one line saying so, what names it no line of its own");
+	text = frame_of([&] { listed = ui_kit::uses_heading("Missions on it", 0, true, "", "No mission runs on it."); });
+	CHECK(!listed && text.find(ui_kit::reading_references()) != std::string::npos &&
+	              text.find("No mission runs on it.") == std::string::npos,
+	      "while the references are read, that, never none");
+	text = frame_of([&] { listed = !ui_kit::no_uses(2, true, "None."); });
+	CHECK(listed && text.find(ui_kit::reading_references()) != std::string::npos, "being read with some listed: they list");
+	CHECK(std::string(ui_kit::nothing_names_it(true)) == "No file of the project names it or what it defines." &&
+	              std::string(ui_kit::nothing_names_it(false)) == "No file of the project names it.",
+	      "one wording for nothing naming it, a file's with what it defines");
+	text = frame_of([] { ui_kit::finding_line(DiagnosticSeverity::Error, "Refused [orig: Rename_Plan @ 0x401000]."); });
+	CHECK(text.find("Refused.") != std::string::npos && text.find("[orig:") == std::string::npos,
+	      "a finding on one line, without its citations");
+	// A modal's text, the one wrapped prose the rule keeps: whole, on as many lines as a dialog's width takes.
+	const std::string question = "Remove the three files the project's trash holds for good, and the file history with "
+	                             "them, so that Undo file brings nothing back after?";
+	float high = 0.0f;
+	text = frame_of([&] {
+		ui_kit::dialog_text(question);
+		high = ImGui::GetItemRectSize().y;
+	});
+	CHECK(high > ImGui::GetTextLineHeight() * 1.5f && text.find("Undo file") != std::string::npos,
+	      "a modal's text wrapped at a dialog's width, whole");
+}
+
 } // namespace
 
 void run_marker_tests() {
@@ -941,6 +996,7 @@ void run_marker_tests() {
 	test_shortcuts();
 	test_quiet_lines();
 	test_without_citations();
+	test_uses_section();
 }
 
 } // namespace editor_ui_test

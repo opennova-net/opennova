@@ -11,6 +11,7 @@
 #include <cstring>
 #include <new>
 #include <utility>
+#include <vector>
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
@@ -284,7 +285,8 @@ void describe(const DefMember &member, FieldSchema &entry) {
 
 // A member's labelled field: its schema from the member inventory and its line, its value through the
 // member (in written units where its line writes it as a number of its own, as stored otherwise), its
-// presence its line's flag. The member is found once, here: a set reads nothing by its id again.
+// presence its line's flag, or for a member the game does not read whether it differs from the default. The
+// member is found once, here: a set reads nothing by its id again.
 LabelledField labelled(R kind, const DefField &field) {
 	const DefMember member = def_member(kind, field.id);
 	LabelledField out;
@@ -316,13 +318,14 @@ LabelledField labelled(R kind, const DefField &field) {
 	const bool flag = is_present_flag(kind, field.id);
 	entry.read_only = field.read_only || flag;
 	describe(member, entry);
-	// The member in a modder's words (def_words.h): its label, its section and what the game does with
-	// it, the parse's note after that meaning.
+	// The member in a modder's words (def_words.h): its label, its section, what the game does with it, the
+	// parse's note after that meaning, and whether the game reads it.
 	if (const DefWords *words = def_words_of(kind, field.id)) {
 		entry.label = words->label;
 		entry.section = words->section;
 		entry.description = entry.description.empty() ? std::string(words->meaning)
 		                                              : std::string(words->meaning) + "\n" + entry.description;
+		entry.applies = words->applies;
 	}
 
 	// A text the game holds in its code page (Windows-1252, one byte a character): the editor reads and
@@ -371,6 +374,17 @@ LabelledField labelled(R kind, const DefField &field) {
 		};
 		out.value.set_present = [shared](const RecordHandle &record, bool present, std::string &error) {
 			return def_set(record.data, *shared->present, int64_t(present ? 1 : 0), error);
+		};
+	} else if (entry.applies != Applicability::Reads) {
+		// A member the game does not read, or is not witnessed reading, is written where it differs from the
+		// table's default, the writer's own rule for a line (DefRecordWriter::record leaves a line at the
+		// default out): the Inspector shows an ignored one only where the file sets it. Its value alone says,
+		// so no Clear or Write takes it (no set_present).
+		std::vector<uint64_t> defaults((def_record_size(kind) + 7) / 8);
+		def_init_record(kind, defaults.data());
+		const DefValue initial = def_get(defaults.data(), *member.field);
+		out.value.present = [shared, initial](const RecordHandle &record) {
+			return def_get(record.data, *shared->field) != initial;
 		};
 	}
 	return out;

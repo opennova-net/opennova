@@ -185,7 +185,8 @@ void OutlineView::finding_mark(const SessionView &view, const Document &document
 		const NodeKind kind = d.record_kind ? d.record_kind : address.kind;
 		tip += (tip.empty() ? "" : "\n") + (d.field.empty() ? d.message : field_title(document, kind, d.field) + ": " + d.message);
 	}
-	ImGui::SetTooltip("%s", tip.c_str());
+	// The mark's own rect, no item's: its tip set as the pointer is over it, without its citations as any tip.
+	ImGui::SetTooltip("%s", ui_kit::without_citations(tip).c_str());
 }
 
 void OutlineView::rebind(const DocumentBase &) {
@@ -546,7 +547,6 @@ void OutlineView::draw_tree_tools(Workspace &workspace, const Document &document
 	ui_kit::RowTools tools;
 	tools.add = nullptr;
 	tools.small = true;
-	tools.pick = "Select a record to duplicate, remove or move it.";
 	if (nested) {
 		for (const Document::Collection &c : document.collections_of(at.owner))
 			if (c.spec.kind == at.spec.kind) tools.count = c.ids.size();
@@ -713,7 +713,6 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 		ui_kit::RowTools tools;
 		tools.count = ids.size();
 		tools.selected = at;
-		tools.pick = "Select one first (a click on its mark, or into one of its cells).";
 		tools.add_tip = "Adds one at the end of the selected one's list.";
 		const NodeAddress address = at < ids.size() ? NodeAddress{master->id, kind, ids[at]} : NodeAddress();
 		const ui_kit::RowTool tool = ui_kit::row_tools(row, tools);
@@ -775,15 +774,27 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 	const float table_width = ImGui::GetContentRegionAvail().x;
 	for (const FieldSchema *field : columns) {
 		if (field == defining)
-			ImGui::TableSetupColumn(field_widgets::column_header(*field).c_str(), ImGuiTableColumnFlags_WidthFixed,
+			ImGui::TableSetupColumn(field_title(*field).c_str(), ImGuiTableColumnFlags_WidthFixed,
 			                        std::min(key_room, table_width / 3.0f));
 		else
-			ImGui::TableSetupColumn(field_widgets::column_header(*field).c_str(), ImGuiTableColumnFlags_WidthStretch,
+			ImGui::TableSetupColumn(field_title(*field).c_str(), ImGuiTableColumnFlags_WidthStretch,
 			                        field->multiline ? 3.0f : 1.0f);
 	}
 	// As narrow as its header: the text keeps the room a narrow table has.
 	if (uses) ImGui::TableSetupColumn("Uses", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("Uses"));
-	ImGui::TableHeadersRow();
+	// Each heading under its column's id, as TableHeadersRow scopes them; a field's its tooltip (its unit, its range,
+	// what it is).
+	ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+	const int first_field = every ? 2 : 1;
+	for (int column = 0; column < count; ++column) {
+		if (!ImGui::TableSetColumnIndex(column)) continue;
+		ImGui::PushID(column);
+		ImGui::TableHeader(ImGui::TableGetColumnName(column));
+		const size_t field = size_t(column - first_field);
+		if (column >= first_field && field < columns.size())
+			ui_kit::tooltip_lazy([&] { return field_widgets::field_tip(*columns[field]); });
+		ImGui::PopID();
+	}
 	// Where the table's rows show (its own scrolling window), and how tall a row is: its tallest
 	// cell's box and the table's padding.
 	const ImGuiStyle &style = ImGui::GetStyle();
@@ -849,10 +860,10 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 			ui_kit::tooltip_lazy([&] {
 				const GraphSymbol *symbol = graph->symbol_at(document.path(), document.locator(line.address), defining->id);
 				if (!symbol || !count)
-					return std::string("No file of the project names it, nor does the game's code by a written key (a key "
-					                   "the code builds as it runs is not counted).");
+					return std::string(ui_kit::nothing_names_it(false)) +
+					       "\nNor does the game's code by a written key; a key it builds as it runs is not counted.";
 				const std::vector<const CodeTextKey *> code = code_reads_of(*graph, *symbol);
-				std::string tip = counted(count, "use") + " (a click lists the project's in the Inspector, each a Go to):";
+				std::string tip = counted(count, "use") + ", listed in the Inspector:";
 				size_t listed = 0;
 				for (const GraphEdge *edge : graph->users_of(*symbol)) {
 					if (++listed > 12) {
@@ -864,9 +875,7 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 					tip += "\n" + (source ? source->logical_name : edge->source) + (place.empty() ? std::string() : ": " + place);
 				}
 				// The game's own code, which reads the string by its name: a rename or a removal changes what it shows.
-				if (!code.empty())
-					tip += "\nThe game itself, by name, in " + counted(code.size(), "place") + " (" + code.front()->reader +
-					       (code.size() > 1 ? " and others)" : ")");
+				if (!code.empty()) tip += "\nThe game itself reads it by name, in " + counted(code.size(), "place") + ".";
 				return tip;
 			});
 		}
@@ -880,7 +889,7 @@ float OutlineView::defining_width(const Document &document, const std::vector<Ou
 	if (defining_.document == document.identity() && defining_.revision == document.revision() && defining_.lines == lines.size() &&
 	    defining_.first == (lines.empty() ? nullptr : &lines.front()))
 		return defining_.width;
-	float widest = ui_kit::text_width(field_widgets::column_header(field).c_str());
+	float widest = ui_kit::text_width(field_title(field).c_str());
 	for (const OutlineLine &line : lines) {
 		Value value;
 		if (!document.get(line.address, field.id, value)) continue;

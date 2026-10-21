@@ -1,6 +1,6 @@
 """Pins scripts/lint/ratchet_counts.py's godot_src_dictionary_params gauge (the Dictionary
-parameters of the methods godot/src binds, whatever their names) and the citation
-allowlist's stale-row check.
+parameters of the methods godot/src binds, whatever their names), the citation
+allowlist's stale-row check and the editor windows' raw wrapped text.
 
 Run: python -B -m unittest discover -s scripts/lint -p "test_*.py" (CI's gates job).
 """
@@ -115,6 +115,28 @@ class CitationAllowlist(unittest.TestCase):
 
     def test_the_count_is_unchanged_by_the_check(self):
         self.assertEqual(self.uncited(set())[0], 3)
+
+
+class EditorWrappedText(unittest.TestCase):
+    FILES = {
+        "engine/editor/ui/a_window.cpp": (
+            '\tImGui::TextWrapped("%s", message.c_str());\n'        # a raw call: counted
+            '\t// ImGui::TextWrapped here would break the rule.\n'  # a comment naming it: not
+            '\tui_kit::dialog_text(question);\n'                    # a modal's text: the kit's
+            '\tImGui::TextWrapped("a"); ImGui::TextWrapped("b");\n'  # two on a line: two
+        ),
+        "engine/editor/ui/a_window.h": "// TextWrapped is never drawn here.\n",
+        "engine/runtime/devtools/f3_window.cpp": '\tImGui::TextWrapped("%s", line);\n',  # not the editor's
+    }
+
+    def test_counts_the_raw_calls_of_the_editor_windows_alone(self):
+        with tempfile.TemporaryDirectory() as root:
+            for rel, text in self.FILES.items():
+                path = Path(root, rel)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            with mock.patch.object(ratchet_counts, "REPO", Path(root)):
+                self.assertEqual(ratchet_counts.count_editor_ui_wrapped_text(), 3)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,6 @@ void record_drag_source(const Document &document, const NodeAddress &record, con
 	drag.record = record;
 	ImGui::SetDragDropPayload(kRecordDragPayload, &drag, sizeof(drag));
 	ImGui::TextUnformatted(ui_kit::fit(words, ImGui::GetFontSize() * 24.0f).c_str());
-	ImGui::TextDisabled("Drop it on a value that names it.");
 	ImGui::EndDragDropSource();
 }
 

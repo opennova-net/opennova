@@ -99,9 +99,9 @@ bool workspace_follows_moves(WorkspaceView &workspace, const std::vector<std::pa
 // the first the session holds open in this order, and the others wait, held open still, until it closes (a
 // held dialog never opens itself over another). The unsaved-changes prompt (a request waits on its answer),
 // the import dialog, the texture source dialog, Project settings, File > New project..., Files' New file
-// prompt and Rename..., Rename everywhere, Rename back, Find in project, Problems' confirmation, a menu's
-// Remove screen prompt (the first menu holding one, by path). Find in project is the project's finder in any of
-// its scopes (Go to file, Go to name, Find usages too).
+// prompt and Rename..., Rename everywhere, Rename back, Find in project, Problems' confirmation and Correct the
+// line..., a menu's Remove screen prompt (the first menu holding one, by path). Find in project is the project's
+// finder in any of its scopes (Go to file, Go to name, Find usages too).
 enum class HeldModal : uint8_t {
 	None,
 	Unsaved,
@@ -116,6 +116,7 @@ enum class HeldModal : uint8_t {
 	RenameBack,
 	ProjectFind,
 	Confirm,
+	CorrectLine,
 	RemoveScreen,
 };
 // The one that shows, and for a Remove screen prompt its menu's path.

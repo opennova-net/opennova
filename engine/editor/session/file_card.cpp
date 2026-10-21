@@ -239,6 +239,8 @@ FileCard file_card(const SessionView &view, const std::string &path, const FileC
 	card.what = words.what;
 	card.read_by = words.read_by;
 	card.cite = words.cite;
+	card.never_read = game_never_reads(entry->kind, entry->logical_name,
+	                                   view.project.document ? view.project.document->target_game : std::string());
 	card.size = entry->size_bytes;
 	// Where a build puts it, by the plan's own rule (build_place_words: its word on the file first, then the
 	// archive, the expansion's archive or folder, or nowhere), and what the editor does with it.
@@ -318,6 +320,7 @@ JsonValue file_card_json(const FileCard &card) {
 	out.set("what", JsonValue::make_string(card.what));
 	out.set("read_by", JsonValue::make_string(card.read_by));
 	out.set("cite", JsonValue::make_string(card.cite));
+	out.set("never_read", JsonValue::make_bool(card.never_read));
 	out.set("build", JsonValue::make_string(card.build));
 	out.set("editor", JsonValue::make_string(card.editor));
 	out.set("imported_from", JsonValue::make_string(card.imported_from));

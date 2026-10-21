@@ -32,11 +32,9 @@ public:
 		ImGui::TextUnformatted(basename_of(document.path()).c_str());
 		ui_kit::tooltip(document.path() + "\nThe terrain's heights, " + heights_form_words(state.form) +
 		                ", 1024 x 1024, a height a world unit across. " +
-		                (state.form == HeightsForm::Cpt
-		                         ? "Sculpted in place: each stroke's ground is baked again by TrnGen's bake over the stretch "
-		                           "it reaches, and every other tile keeps its bytes."
-		                         : "An imported terrain's heightmap: made into the terrain's .cpt by its import as you save.") +
-		                "\nSculpt them in a mission's view or the terrain's: Terrain on the toolbar, or Ctrl+E.");
+		                (state.form == HeightsForm::Cpt ? "A stroke's ground is baked again over the stretch it reaches."
+		                                                : "Its import makes them the terrain's .cpt as you save.") +
+		                "\nSculpted in a mission's or the terrain's view (Ctrl+E).");
 		if (heights->plane_count() < 2) {
 			ui_kit::refusal_text("The editor reads no heights in this file.");
 			return;

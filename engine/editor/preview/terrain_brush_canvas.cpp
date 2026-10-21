@@ -430,9 +430,12 @@ std::string terrain_brush_hint(const TerrainBrush &brush, bool on_ground, Terrai
 		} else {
 			line = "Height " + metres(height) + " m";
 		}
-		if (brush.tool == TerrainTool::Set) line += ": drag to set it to " + metres(brush.height) + " m";
-		else if (brush.tool == TerrainTool::Flatten) line += ": drag to flatten to the height under the press";
-		else line += std::string(": drag to ") + (brush.tool == TerrainTool::Raise ? "raise" : brush.tool == TerrainTool::Lower ? "lower" : "smooth") + " it (Shift the other way)";
+		// The verb and its key: Shift turns Raise and Lower the other way, and no other sculpt tool (stroke_ask).
+		if (brush.tool == TerrainTool::Set) line += ": drag sets " + metres(brush.height) + " m";
+		else if (brush.tool == TerrainTool::Flatten) line += ": drag flattens to the pressed height";
+		else if (brush.tool == TerrainTool::Raise) line += ": drag raises (Shift lowers)";
+		else if (brush.tool == TerrainTool::Lower) line += ": drag lowers (Shift raises)";
+		else line += ": drag smooths";
 		return line + ".";
 	}
 	case TerrainToolFamily::Paint: {
@@ -460,10 +463,10 @@ std::string terrain_brush_hint(const TerrainBrush &brush, bool on_ground, Terrai
 	}
 	case TerrainToolFamily::Tiles:
 		if (brush.tool == TerrainTool::Stamp)
-			return "Click to stamp cell " + std::to_string(brush.cell) + ", its corner here, turned " +
-			       std::to_string(brush.rotation * 90) + " deg" + (brush.flip_h ? ", flipped across" : "") +
-			       (brush.flip_v ? ", flipped up and down" : "") + "; Shift snaps to 16.";
-		return "Click a tile to select it; R turns, H and V flip, PgUp and PgDn layer, Delete removes.";
+			return "Click to stamp cell " + std::to_string(brush.cell) + " here, turned " + std::to_string(brush.rotation * 90) +
+			       " deg" + (brush.flip_h ? ", flipped across" : "") + (brush.flip_v ? ", flipped up and down" : "") +
+			       " (Shift snaps to 16).";
+		return "Click a tile; R turns, H/V flip, PgUp/PgDn layer, Delete removes.";
 	case TerrainToolFamily::None: break;
 	}
 	return std::string();

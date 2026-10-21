@@ -2,8 +2,8 @@
 // past the window's edge; a button whose tooltip says what it does, or while it cannot act, why not; the
 // tools of a list's selected record; a path's field with its Browse...; a filter box; a control over a
 // value its owner holds; text cut to its cell with the whole of it in a tooltip; the one tooltip every
-// window's hover text goes through; a "(?)" holding a how-to; and what a view shows when it has nothing
-// to list, or its filter leaves nothing.
+// window's hover text goes through, its words without their witness citations; a "(?)" holding a how-to;
+// and what a view shows when it has nothing to list, or its filter leaves nothing.
 //
 // ImGui-free like every window's header: ui_kit.cpp draws, built with the pass.
 #pragma once
@@ -131,10 +131,17 @@ bool fitted_button(const std::string &label, const char *id, float width);
 // The first line of `text` in what is left of the line, cut to fit. Hovered, it shows `tip`
 // when one is given, else the whole text when it was cut.
 void clipped_text(const std::string &text, const std::string &tip = std::string());
-// The tooltip of the item just drawn (a disabled one too), wrapped: a finding's message and
-// a fix's detail run long. None for "". It shows in place of any tooltip set before it in the
-// frame (as ImGui::SetTooltip does: a table's header sets its own for a label it cut), so an
-// item shows one. Every window's hover text goes through it.
+// `text` without its witness citations, which the code, the RE records and the MCP's answers keep and no
+// window shows: an "[orig: ...]" (a bracket that cites an address or names a function alike), a
+// "Name @ 0xADDR" or a bare "@ 0xADDR" (a range or an offset after it included), a parenthesis of nothing but
+// divergence ids and record names ("(D-FNT-3)", "(render-occlusion-re D-OCC-8)") or an IDA name alone
+// ("(sub_58A690)"); with them the blanks and the stops they leave (an emptied parenthesis goes whole). An id
+// or a name outside parentheses is the prose's ("D-DAY-1.bms"); an unclosed "[orig:" stands, and the rest.
+std::string without_citations(const std::string &text);
+// The tooltip of the item just drawn (a disabled one too), wrapped, without its citations
+// (without_citations): a finding's message and a fix's detail run long. None for "". It shows in
+// place of any tooltip set before it in the frame (as ImGui::SetTooltip does: a table's header sets
+// its own for a label it cut), so an item shows one. Every window's hover text goes through it.
 void tooltip(const std::string &text);
 // Whether the item just drawn shows its tooltip now: hovered, a disabled one too.
 bool tooltip_hovered();
@@ -144,11 +151,9 @@ template <class Make> void tooltip_lazy(Make &&make) {
 	if (tooltip_hovered()) tooltip(make());
 }
 
-// What a view shows when it has nothing to list: a line of disabled text, what to do (`hint`, when
-// given) in its tooltip.
+// What a view shows when it has nothing to list: one line of disabled text cut to what is left of the
+// line; hovered, what to do (`hint`, when given), after the whole line where it was cut.
 void empty_state(const char *text, const char *hint = nullptr);
-// A sentence muted and wrapped (a type's notes in the Inspector, what a view has nothing of).
-void note(const std::string &text);
 // A line muted and cut to what is left of the line: hovered, `tip` when one is given, else the whole
 // text when it was cut (a value's note, a canvas's one context line).
 void quiet_text(const std::string &text, const std::string &tip = std::string());

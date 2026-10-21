@@ -296,7 +296,7 @@ void ProjectFind::draw_uses(const std::function<void(const ReferenceTarget &)> &
 	ui_kit::clipped_text(subject_ + ": " + count,
 	                     subject_ + ": " + count + "\nWho names it in the project's files (what a record defines: each "
 	                     "name a lookup of the game finds).");
-	if (uses_.empty()) ui_kit::empty_state("No file of the project names it.");
+	if (uses_.empty()) ui_kit::empty_state(ui_kit::nothing_names_it(false));
 	else if (shown_uses_.empty()) ui_kit::empty_state("No use holds the text.");
 	ImGui::BeginChild("uses", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing()), ImGuiChildFlags_Borders);
 	ImGuiListClipper clipper;

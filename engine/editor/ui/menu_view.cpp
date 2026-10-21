@@ -148,7 +148,7 @@ void MenuView::draw_modals(Workspace &workspace) {
 		return;
 	}
 	ImGui::Text("Remove the screen %s and every window on it?", screen->name().c_str());
-	ImGui::TextDisabled("Undo brings it back.");
+	ui_kit::quiet_text(ui_kit::undo_brings_it_back(false));
 	if (ImGui::Button("Remove")) {
 		edit(workspace, *document, EditOperation::Remove, {screen->id, kScreen, 0});
 		send(workspace, "remove_screen", io::JsonValue::make_number(0.0));

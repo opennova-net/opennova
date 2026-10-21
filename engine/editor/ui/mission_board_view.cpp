@@ -212,7 +212,8 @@ void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mi
 		}
 		ImGui::PopID();
 	}
-	ImGui::TextDisabled("A new variable is %s.", new_variable_.c_str());
+	ui_kit::quiet_text("A new variable is " + new_variable_ + ".",
+	                   "The lowest number no trigger, action or line of the script uses, and the mission names none.");
 	draw_variable_names_left(mission);
 }
 
@@ -312,7 +313,7 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 	MissionPickSlot picking;
 	if (shown.pick.active() && mission_pick_slot(*mission, shown.pick.record, shown.pick.slot, picking) &&
 	    picking.kind == mission::ParamKind::Event) {
-		ImGui::TextColored(ui_kit::warning_color(), "Click a card's title for %s (Esc cancels).", picking.label.c_str());
+		ui_kit::warning_line("Click a card's title for " + picking.label + " (Esc cancels).");
 		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !popup_last_frame_ && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows))
 			window_requests::pick_in_view(workspace, mission->path(), NodeAddress(), -1);
 	}

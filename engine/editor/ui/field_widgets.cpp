@@ -48,13 +48,13 @@ std::string number_text(const FieldSchema &field, double number) {
 	return text;
 }
 
-// The field's id, then what the schema says of it beyond its name.
+// The field's id, then what the schema says of it beyond its name (its description without its citations).
 std::string details(const FieldSchema &field) {
 	std::string tip = field.id;
 	if (!field.token.empty() && field.token != field.id) tip += "\nWritten as " + field.token;
 	if (!field.unit.empty()) tip += "\nIn " + field.unit;
 	if (field.ranged) tip += "\nFrom " + number_text(field, field.min) + " to " + number_text(field, field.max);
-	if (!field.description.empty()) tip += "\n" + field.description;
+	if (!field.description.empty()) tip += "\n" + ui_kit::without_citations(field.description);
 	return tip;
 }
 
@@ -150,10 +150,6 @@ size_t typed_capacity(const FieldSchema &field) {
 } // namespace
 
 std::string field_tip(const FieldSchema &field) { return details(field); }
-
-std::string column_header(const FieldSchema &field) {
-	return field_title(field) + (field.unit.empty() ? std::string() : " (" + field.unit + ")");
-}
 
 Edited number(const FieldSchema &field, Value &value, bool unit) {
 	Edited out;

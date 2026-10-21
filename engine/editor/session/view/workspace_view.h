@@ -30,6 +30,8 @@ inline constexpr size_t kWorkspaceText = 128;
 inline constexpr size_t kWorkspacePath = 512;
 inline constexpr size_t kWorkspaceFileName = 64;
 inline constexpr size_t kWorkspaceExpansion = kExpansionNameBytes; // the game's g_ExpansionName (boot_policy.h)
+// A line of a file's source (Correct the line...): the tokenizer's 1000 characters and room past them.
+inline constexpr size_t kWorkspaceLine = 1024;
 
 // What the workspace's windows show of their own, held by the session (ADR 0046, the MCP gaps lane; the
 // Workspace concern, CONTEXT.md "Workspace"): each card, panel and dialog open and what its fields hold,
@@ -158,6 +160,16 @@ struct WorkspaceView {
 		bool alone = false;
 	};
 	FileDelete file_delete;
+
+	// Problems' Correct the line... of a blocking source line (session/source_line.h): the file ("" closed), its line,
+	// the line as the file held it when it opened (`was`) and the text typed; Apply raises correct_line with them.
+	struct CorrectLine {
+		std::string path;
+		size_t line = 0;
+		std::string was;
+		std::string text;
+	};
+	CorrectLine correct_line;
 
 	// Rename everywhere (the Inspector's Rename... on a field defining a name: a preview_rename that asks the
 	// name opens it): the name it renames (the field of the record at the locator in the file defining it,

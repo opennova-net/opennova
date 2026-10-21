@@ -3,24 +3,29 @@
 #include <cstddef>
 #include <string>
 
+#include <editor/model/value.h>
 #include <formats/def/def_schema.h>
 
 namespace opennova::editor {
 
 // The def catalogs' members in a modder's words (ADR 0046, the UX round's plain-words lane): each
-// member of each record kind (def_fields) its label, the section the Inspector groups it under and
-// what the game does with it, from the RE records (docs/world/itemdef-re.md, powerup-re.md,
-// vehicle-client-movers-re.md, world-wac-ai-re.md, hud-re.md, ptl-format-re.md and the runtime's
-// cited consumers), each row citing its witness; a meaning no witness gives starts "Unknown:" and
-// says only what is known. Tooling words over the game's meanings: the format's own table
-// (formats/def/def_schema_properties.cpp) keeps what the parser makes of a line (its units, its
-// note), which follows the meaning in the field's tooltip.
+// member of each record kind (def_fields) its label, the section the Inspector groups it under,
+// what the game does with it and whether the game reads it, from the RE records
+// (docs/world/itemdef-re.md, powerup-re.md, vehicle-client-movers-re.md, world-wac-ai-re.md,
+// hud-re.md, ptl-format-re.md and the runtime's cited consumers), each row citing its witness. A
+// member the game is witnessed never to read is Ignored, one no reader of the game is witnessed for
+// Unverified, the Inspector's tag saying so and the meaning only what it is; a meaning whose
+// witness is partial starts "Unknown:" and says only what is known. Tooling words over the game's
+// meanings: the format's own table (formats/def/def_schema_properties.cpp) keeps what the parser
+// makes of a line (its units, its note), which follows the meaning in the field's tooltip.
 struct DefWords {
 	const char *id;      // the member, as def_fields names it ("soundloops[2]", "particlefx.effect")
 	const char *label;   // "Sound loop 3"
 	const char *section; // "Sound"; "" for a kind of one section (its fields need no heading)
 	const char *meaning; // what the game does with it, or "Unknown: ..."
 	const char *cite;    // its witness: "[orig: Name @ 0xADDR]", or a record and its section
+	// Whether the game reads it (FieldSchema::applies): Ignored only where its readers are witnessed in full.
+	Applicability applies = Applicability::Reads;
 };
 
 // The words of a kind's members, one row per member in def_fields' order (a test holds the two in

@@ -19,6 +19,7 @@
 #include <editor/session/rename_controller.h>
 #include <editor/session/session_core.h>
 #include <editor/session/sound_play.h>
+#include <editor/session/source_line.h>
 #include <editor/session/terrain_stroke.h>
 #include <editor/session/terrain_tiles.h>
 #include <editor/session/texture_show_use.h>
@@ -258,6 +259,9 @@ void serve_wave_operation(SessionCore &core, const EditorRequest &request) {
 }
 void serve_music_stream_audio(SessionCore &core, const EditorRequest &request) {
 	core.documents().music_stream_audio(request);
+}
+void serve_correct_line(SessionCore &core, const EditorRequest &request) {
+	correct_source_line(core, request);
 }
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
@@ -1384,6 +1388,20 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({ F::Values }, { F::Path, F::OpenFirst }))
 			.holds(kFiles, kDocuments)
 			.names_active()
+			.row,
+	// Problems' fix of a blocking source line (session/source_line.h; Diagnostic::source_line).
+	Request(K::CorrectLine, "correct_line", serve_correct_line,
+			"Line values.line (from 1) of the project file path written on disk as values.text, its line end kept and every "
+			"other byte as it was (values.text left out or \"\": the line taken out, its line end with it), then the file "
+			"read again: the scan, an open document of it (its records, read as an outside change is) and the validation. "
+			"A line is one the finding naming it counts: a file whose game reader ends a line at CR LF alone (a def, an AI "
+			"profile, an environment...) by CR LF pairs, any other by LF. values.was, the line as the correction was asked "
+			"over: refused where the file's line no longer reads so. ask_name: nothing written, Problems' Correct the line... "
+			"opened on the line (the workspace's correct_line), its text as the file holds it. Not undoable. Refused, nothing "
+			"written (document.source_line): a file the project lacks, a line it has not, a value of no key it takes, a text "
+			"holding a line end, a line changed since, a document of the file with unsaved edits.")
+			.takes(request_params({ F::Path, F::Values }, { F::AskName }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments)
 			.row,
 };
 

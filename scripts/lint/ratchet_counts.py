@@ -61,6 +61,17 @@ in maturity_baseline.json:
   oversize_cpp_headers  .h/.hpp under engine/, apps/, godot/src past the same
                         2500-line limit as oversize_cpp_files (the .cpp glob
                         never saw headers).
+  editor_ui_wrapped_text
+                        raw ImGui::TextWrapped calls on code lines under
+                        engine/editor/ui: the editor's prose rule (the top of
+                        engine/editor/ui/ui_kit.h) draws an inline line cut to
+                        one line (clipped_text, quiet_text, warning_line,
+                        refusal_text, empty_state) and the rest in its tooltip,
+                        never wrapped prose; the one wrapped prose it keeps, a
+                        confirmation modal's text, is the kit's dialog_text, so
+                        every raw call is outside a modal. Non-increasing from
+                        its 2026-10-20 seed (the parity-polish pass took it
+                        from 29).
   gd_dict_key_sites     Dictionary-keyed reads (`x["key"]`, `.get("key"`) on
                         code lines of the shipping GDScript (godot/game, godot/editor), excluding
                         godot/game/mcp and godot/editor/mcp (the
@@ -479,6 +490,26 @@ def count_oversize_cpp_headers() -> int:
     return count
 
 
+EDITOR_UI_WRAPPED_TEXT = re.compile(r"\bImGui::TextWrapped\s*\(")
+
+
+def count_editor_ui_wrapped_text() -> int:
+    """Raw wrapped prose in the editor's windows (the prose rule, engine/editor/ui/ui_kit.h):
+    ImGui::TextWrapped on a code line of engine/editor/ui (a comment naming it is no call). A
+    modal's confirmation text, the one wrapped prose the rule keeps, goes through the kit's
+    dialog_text, so each raw call counted is one outside a modal."""
+    count = 0
+    for pattern in ("*.cpp", "*.h"):
+        for path in (REPO / "engine" / "editor" / "ui").rglob(pattern):
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                count += len(EDITOR_UI_WRAPPED_TEXT.findall(line.split("//", 1)[0]))
+    return count
+
+
 def count_cpp_binding_console_writes() -> int:
     """Console writes in the GDExtension bindings (W1-2): error paths use
     push_error/push_warning (the engine's error channel); narration uses
@@ -712,6 +743,7 @@ def main() -> int:
         "gd_dict_key_sites": count_gd_dict_key_sites(),
         "godot_src_dictionary_returns": count_godot_src_dictionary_returns(),
         "godot_src_dictionary_params": count_godot_src_dictionary_params(),
+        "editor_ui_wrapped_text": count_editor_ui_wrapped_text(),
     }
 
     # Absolute floors, no baseline key: the MCP boundary carries zero witness

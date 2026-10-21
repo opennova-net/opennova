@@ -121,6 +121,8 @@ enum class EditorRequestKind {
 	TerrainStroke,
 	// A music bank stream's audio made from a wave, or a new stream added from one: one undo step of the bank
 	MusicStreamAudio,
+	// A line of a file's source corrected on disk (Problems' Correct the line...), the file read again
+	CorrectLine,
 	kCount,
 };
 
