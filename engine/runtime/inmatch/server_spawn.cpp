@@ -283,8 +283,8 @@ world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World 
 	if (sel.found) {
 		spawn.position = sel.position;
 		spawn.heading = sel.heading_bam;
-		spawn.pitch = sel.pitch;
-		spawn.roll = sel.roll;
+		spawn.pitch_bam = sel.pitch_bam; // the marker's words (D-NET-NEW-L6-3)
+		spawn.roll_bam = sel.roll_bam;
 	}
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	spawn.net_id = 0;
