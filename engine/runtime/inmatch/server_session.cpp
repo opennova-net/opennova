@@ -187,13 +187,20 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	resolve_mission_config(ctx, config, startup.title, startup.text_override);
 
 	if (ctx.is_authority) {
-		start_server(ctx, startup);
-		// §5.2a step 1 — round/local-player context init at session create. [orig:
-		// CNapiGameSession_BuildAndCreateSession @0x5694d0 + SinglePlayer_StartMission @0x561af0 both
-		// call Server_InitNewRoundState @0x51c8e0 here.] Previously declared but never invoked in
-		// production (the burst drove everything); wiring it at its faithful call site retires the
-		// dead-code path.
+		// §5.2a step 1: the round-state init runs AHEAD of the session create, the server start
+		// included: CNapiGameSession_BuildAndCreateSession and SinglePlayer_StartMission call it
+		// before CNapiGameSession_CreateSession. Its key draw reads GetTickCount in the create's
+		// frame, the start tick ours stamps, so the stamp lands first; the draws the create makes
+		// follow its own (the slot table's seed and draw above, the key). The listen host's
+		// own-slot legs need the own connection, which the create adds: start_host_session runs
+		// them after it, ahead of the spawn pump.
+		// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState
+		//  @0x5695B3 ahead of CNapiGameSession_CreateSession @0x56997D; SinglePlayer_StartMission
+		//  @0x561AF0 - @0x561C23 ahead of @0x561E65; Server_InitNewRoundState - the key's
+		//  GetTickCount @0x51CB69]
+		ctx.np_protocol.host_start_tick = startup.host_start_tick;
 		Server_InitNewRoundState(ctx);
+		start_server(ctx, startup);
 	}
 	// The magic packet's reflection: a NovaWorld authority in a session sets it and draws its
 	// key as NapiNPTimer_GenerateRandomId does, (GetTickCount() + rand()) % 900000 + 100000, the
