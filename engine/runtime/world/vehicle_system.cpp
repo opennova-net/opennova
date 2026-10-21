@@ -150,7 +150,13 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
             // (state stamps + the witnessed steer/speed leg). [orig: the occupant class
             // switch inside Entity_UpdateVehiclePhysics @0x48b949-0x48c034]
             VehicleDriveCmd cmd;
-            if (traits->player_control) {
+            // A dead hull's mover bails to its matrix tail ahead of its input block,
+            // so it stages nothing: no player stamp and no AI leg (the parked arm's
+            // state stamp and stuck count included). [orig: cveh `test byte ptr
+            // [esi+24h], 2; jnz` @0x48B810..0x48B814; ctan @0x4893E9..0x4893ED; cbik
+            // @0x484936..0x48493A; cbot @0x48DDFA..0x48DDFE]
+            const bool hull_dead = ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0;
+            if (traits->player_control && !hull_dead) {
                 Entity *ctrl = world.vehicles.resolve_controller(*veh);
                 // The parked test (an empty seat, or the hull's Flags 0x10000002 /
                 // the boat's dead bit) precedes the player test, and the occupant's

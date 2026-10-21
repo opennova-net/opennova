@@ -2873,8 +2873,43 @@ void test_watercraft_entry_reads_the_hull() {
     // one pass.)
 }
 
+// A dead hull whose live mover still runs (no husk, or a husk whose model did not load;
+// the item death raises the dead bit on engine_flags) bails to its matrix tail ahead of
+// its input block: the staging runs no AI leg (no parked-arm state stamp, no stuck
+// count), the mover no physics, and the tail sets the matrix bit.
+// [orig: Entity_UpdateVehiclePhysics @0x48AF00 (`test byte ptr [esi+24h], 2; jnz`
+//  @0x48B810..0x48B814 -> @0x48D43C..0x48D451); the tank @0x4893E9; the bike @0x484936]
+void test_a_dead_hull_bails_to_its_tail() {
+    for (const bool dead : {true, false}) {
+        Rig r;
+        const VehicleTraits t = buggy_traits();
+        r.w.vehicles.traits.set(r.veh().item_id, t);
+        r.w.ai.attach(r.veh_h);
+        AiEntity *brain = r.w.ai.for_handle(r.veh_h);
+        CHECK(brain != nullptr);
+        if (brain == nullptr) return;
+        brain->brain.f[AiBrain::kCurState] = 16;
+        if (dead) r.veh().engine_flags |= kEntityFlagDead;
+        r.veh().engine_flags &= ~kEntityFlagMatrixBuilt;
+        r.veh().veh.vel_x = 5000;
+        r.veh().veh.stuck_ticks = 9;
+        const int32_t x0 = r.veh().position.x.q16;
+        r.w.vehicles.update_motor(r.veh(), /*is_authority=*/true);
+        CHECK((r.veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
+        if (dead) {
+            CHECK(r.veh().position.x.q16 == x0);
+            CHECK(brain->brain.f[AiBrain::kCurState] == 16);
+            CHECK(r.veh().veh.stuck_ticks == 9);
+        } else {
+            // The live hull with no controller takes the parked arm's state stamp.
+            CHECK(brain->brain.f[AiBrain::kCurState] == 22);
+        }
+    }
+}
+
 int main() {
     test_watercraft_entry_reads_the_hull();
+    test_a_dead_hull_bails_to_its_tail();
     test_bike_lean_at_speed_both_ways();
     test_local_controls_reach_first_carrier_tick();
     test_mount_and_dismount_clear_the_local_stance_latches();

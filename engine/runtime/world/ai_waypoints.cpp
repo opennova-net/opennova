@@ -12,6 +12,7 @@
 
 #include <runtime/world/world.h>
 #include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_motor.h> // vehicle_hull_parked
 #include <base/io/fixed.h>
 #include <base/io/bam.h>
 
@@ -476,8 +477,10 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     // Parked is `occupant == 0 || Flags & 0x10000002` and nothing else: a hull
     // at zero health whose dead bit is not up yet keeps its driver's leg until
     // the dying state's death transforms land, exactly like the player leg.
+    // Both flag halves: the item death raises the dead bit on engine_flags
+    // (vehicle_hull_parked; the boat and aircraft legs read the same pair).
     // [orig: ctan @0x48954B..0x489560; cveh @0x48B972..0x48B987]
-    if (controller == nullptr || (veh.flags & 0x10000002u) != 0) {
+    if (controller == nullptr || vehicle_hull_parked(veh)) {
 		// Parked/no driver: the motor's no-controller branch holds heading + zeroes the
 		// command; the brain drops into the player-mode/parked state and the
 		// stuck escalation counts. [orig: @0x48c002-0x48c02d — aiComp[132] = Yaw,

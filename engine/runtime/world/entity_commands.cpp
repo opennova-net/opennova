@@ -944,7 +944,7 @@ bool EntityCommands::set_ssn_held(EntityTarget ssn, bool held) {
 
 bool EntityCommands::set_ssn_disabled(EntityTarget ssn, bool disabled) {
     // Flags bit 28: the vehicle motors' driver-input gate reads it together
-    // with the dead bit (vehicle_motor.cpp's `veh.flags & 0x10000002`).
+    // with the dead bit (vehicle_motor.h's vehicle_hull_parked).
     // [orig: WacCmd_DisableSsn @0x4F7690 — ItemTypeIndex gate @0x4F76D7,
     //  `or Flags,10000000h` @0x4F76DD; WacCmd_EnableSsn @0x4F76F0 — `and
     //  Flags,0EFFFFFFFh` @0x4F773D]

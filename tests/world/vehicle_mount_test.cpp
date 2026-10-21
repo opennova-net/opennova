@@ -3402,8 +3402,11 @@ struct DriveRig {
 
 // Zero health alone does not park: until the dying state's death transforms
 // raise the dead bit, the hull keeps its AI driver's leg (route command, no 22
-// stamp); the dead bit then parks it.
-// [orig: ctan @0x48954B..0x489560; cveh @0x48B972..0x48B987]
+// stamp). The AI leg's own parked test reads the dead bit, but the dead hull's
+// mover bails to its matrix tail ahead of its input block: its registers keep
+// their last values.
+// [orig: ctan @0x48954B..0x489560, the bail @0x4893E9..0x4893ED; cveh
+//  @0x48B972..0x48B987, the bail @0x48B810..0x48B814]
 void test_zero_health_hull_keeps_its_driver_leg() {
     for (VehicleFamily family : {VehicleFamily::Ground, VehicleFamily::Tank}) {
         DriveRig d(family);
@@ -3423,7 +3426,7 @@ void test_zero_health_hull_keeps_its_driver_leg() {
         CHECK(!parked.ai_drive);
         CHECK(d.brain().brain.f[AiBrain::kCurState] == 22);
         d.r.w.vehicles.tick_motor(d.r.veh(), d.t, &parked);
-        CHECK(d.r.veh().veh.cmd_speed == 0);
+        CHECK(d.r.veh().veh.cmd_speed == 40 * 293);
     }
 }
 

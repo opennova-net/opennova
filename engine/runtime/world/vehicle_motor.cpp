@@ -554,6 +554,17 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 	tick_health(veh, traits);
 	const bool wrecked = veh.health <= 0;
 
+	// A DEAD hull (one that keeps this live mover: no husk, or a husk whose model
+	// did not load) skips the input block, the physics and the sound fold to the
+	// matrix-build tail, as the boat twin does; the dead bit reads both flag halves
+	// (one Flags dword in retail). [orig: cveh `test byte ptr [esi+24h], 2; jnz`
+	// @0x48B810..0x48B814 -> the tail @0x48D43C..0x48D451; ctan @0x4893E9 -> @0x48AEB4;
+	// cbik @0x484936 -> @0x486A02]
+	if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
+	}
+
 	// ------------------------------------------------------------------ input block
 	// [orig: Entity_UpdateVehiclePhysics @0x48af00, the `attrib & 0x40` occupant block
 	// @0x48b949-0x48c034; ctan @0x489522..0x489545.] Only this block is role-gated:
