@@ -1731,21 +1731,26 @@ func mcp_open_armory() -> Error:
 # of the shell boundary rather than a menu-specific detail. The exit reason picks the
 # post-mission route (GameWorld.post_mission_route): a NovaWorld session the route keeps
 # leaves the world before it unloads and re-enters the NovaWorld menu; an error route
-# shows its text first.
+# shows its text first. The route reads the exit the session's teardown left, as the
+# Post Menu router reads it after the mission's teardown pump: the profile step, then the
+# session's close (GameWorld.close_session_for_route, whose own-client teardown can remap
+# a listen host's quit through the process latch: D-NET-NEW-L1-26), then the route.
 func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void:
-	var route: PostMissionRoute = _world.post_mission_route(exit_reason) if _world != null \
-			else PostMissionRoute.new()
+	_record_round_end()
+	var route: PostMissionRoute = PostMissionRoute.new()
+	if _world != null:
+		route = _world.post_mission_route(_world.close_session_for_route(exit_reason))
 	if route.exits_game:
 		# The "quit" row's exit (reason 2): the mission comes down (its session's reset sends
 		# the record as it stands), and the game ends as the main loop's does, game.cfg saved
 		# (engine inmatch/mission_exit.h PostMissionRoute::exits_game carries the witness).
-		_teardown_world(false)
+		_teardown_world(false, false)
 		request_quit()
 		return
 	var novaworld_client: NovaWorldClient = null
 	if route.keep_session:
 		novaworld_client = _world.release_novaworld_client() as NovaWorldClient
-	_teardown_world(false)
+	_teardown_world(false, false)
 	# The return takes back the expansion a join's switch left, ahead of the menu's
 	# entry, whose game.cfg read and profile load then run over it (D-NET-622; engine
 	# SessionDrive::restore_kept_expansion carries the witness).
@@ -1771,9 +1776,11 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 
 # The world and every presenter over it come down: the menu teardown's head, and
 # the SP restart's (`restart` keeps the HUD tip's once-counters, as the
-# restart's start does).
-func _teardown_world(restart: bool) -> void:
-	_record_round_end()
+# restart's start does). The menu teardown runs the profile step itself, ahead
+# of its session's close (`record_round_end` false).
+func _teardown_world(restart: bool, record_round_end := true) -> void:
+	if record_round_end:
+		_record_round_end()
 	_world_load.dismiss()
 	_join_screen.close()
 	finish_hud_hidden_capture()
