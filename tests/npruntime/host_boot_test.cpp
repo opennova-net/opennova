@@ -225,7 +225,7 @@ int main() {
 		CHECK(host.water_at_bringup == (20 << 16));
 		CHECK(host.mission_start_pending_at_bringup == false); // the boot had not ended yet
 		CHECK(kernel.world.env.water_z == (20 << 16));
-		CHECK(kernel.terrain_store.height_field().has_water);
+		CHECK(kernel.terrain_store.height_field().water_y == (20 << 16)); // the plane word itself: retail keeps no dry flag
 		// D-NET-709: the .env's timeofday "Dusk" leaves class 1 on the world (retail's chain
 		// stores 1 for anything but "dawn"), the class the listing's TimeOfDay reads
 		// [orig: TimeOfDay_ParseProperty @0x57CDE2; Lobby_UpdateServerInfo @0x4FF038].
