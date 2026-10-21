@@ -3,8 +3,8 @@
 // writes the /INOUT CLIENT line and sends its goodbye burst to the pair's address 0, the manager's
 // loopback. The admin's GOTO MENUSTATE runs after the frame's exit test, so the next tick's
 // receive pump takes the goodbye: the server-side twin is set pending and destroyed in that
-// pump's connection walk, its /INOUT SERVER line, then the host player's removal (the leave line
-// and the 0x46 removal to the others, the body gone). An exit from the frame's input pass waits
+// pump's connection walk, its /INOUT SERVER line, then the host player's removal (the leave line,
+// the body's S2C 0x12 and the 0x46 removal to the others, no 0x5D; the body gone). An exit from the frame's input pass waits
 // for the mission teardown's pump (held here). A dedicated host has no own client: nothing.
 // Single player is the same mode-3 session with no wire (ours: the in-process listen server, the
 // socketless host role of the SinglePlayer kind): the admin's exit runs the host player's
@@ -26,6 +26,7 @@
 //  ctx+0x68 @0x4C9D16; CNapiNetwork_PumpServerProtocolRecv @0x4C4EE0]
 #include "npruntime/conn_fixture.h"
 
+#include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_decode_session.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -191,9 +192,10 @@ void test_admin_exit_removes_the_host_player_at_the_next_receive_pump() {
 	CHECK(host->world.registry.get(host->remote_body) != nullptr);
 	lines = host->inout_lines();
 	CHECK(lines.size() == 1 && lines[0] == kServerRemoved);
-	// The remote hears the host player leave: the leave line, then the slot's removal record.
+	// The remote hears the host player leave: the leave line, the body's 0x12, then the slot's
+	// removal record, and no sweep.
 	const std::vector<ns::Datagram> sent = host->to_remote();
-	size_t leave = sent.size(), removal = sent.size();
+	size_t leave = sent.size(), body = sent.size(), removal = sent.size();
 	for (size_t i = 0; i < sent.size(); ++i) {
 		if (sent[i].tag == s2c::FORMATTED_GAME_TEXT && leave == sent.size()) {
 			FormattedGameText text;
@@ -201,10 +203,17 @@ void test_admin_exit_removes_the_host_player_at_the_next_receive_pump() {
 					text.subtype == kGameTextPlayerLeaving && text.text == "Host")
 				leave = i;
 		}
+		EntityRemove gone;
+		size_t consumed = 0;
+		if (sent[i].tag == s2c::ENTITY_REMOVE &&
+				decode_entity_remove(sent[i].body.data(), sent[i].body.size(), gone, consumed) &&
+				gone.entity_handle == host->host_body.packed)
+			body = i;
 		if (sent[i].tag == 0x46 && sent[i].body == encode_player_sync_removal(0, false))
 			removal = i;
+		CHECK(sent[i].tag != s2c::EMPTY_SLOT_SWEEP);
 	}
-	CHECK(leave < sent.size() && removal < sent.size() && leave < removal);
+	CHECK(leave < body && body < removal && removal < sent.size());
 	// The remote stays.
 	CHECK(host->ctx.np_protocol.connection_list.size() == 1);
 }

@@ -76,6 +76,13 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 //  Server_TickUpdate's send pump @0x51E487]
 void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world);
 
+// The match's objective records raised since the last drain (the 0x1E events and the 0x2F flag
+// states), sent now: a leaver's carried-flag drop at its body's destroy, inside the disconnect,
+// ahead of the slot's 0x46 (remove_connection_player).
+// [orig: Server_RemoveEntityAndNotify @0x50A270 -> Entity_Destroy @0x50A2C4 ->
+//  Entity_DropCarriedObject @0x439DF0 (Server_SendDestructibleDeathPacket called @0x439F34)]
+void route_match_objective_records(NapiNPServerCtx &ctx, world::World &world);
+
 // The frame update's per-slot walk order: the connections by their player slot, the slot
 // table's order, never the join order (ties keep the list's order), so each slot's 0x0A
 // writer stores show in the records of the slots after it (D-NET-449).

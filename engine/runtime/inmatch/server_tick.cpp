@@ -449,6 +449,10 @@ int32_t Server_CountActivePlayers(const NapiNPServerCtx &ctx, const world::World
 
 } // namespace
 
+// See server_tick.h.
+void route_match_objective_records(NapiNPServerCtx &ctx, world::World &world) {
+	route_match_gameplay_events(ctx, world);
+}
 
 void Server_ProcessRoundEnd(NapiNPServerCtx &ctx, world::World &world,
 		int32_t winning_team) {

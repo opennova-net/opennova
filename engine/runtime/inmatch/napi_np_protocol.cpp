@@ -44,6 +44,7 @@
 #include <iterator>
 #include <limits>
 #include <utility>
+#include <variant>
 
 namespace opennova::inmatch {
 
@@ -331,6 +332,24 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	return true;
 }
 
+// A Server_RemoveEntityAndNotify's S2C 0x12 [u16 packed handle] at its call: NapiNPServer_SendFiltered
+// under mask 0x90, the entity fan's recipients (an in-match remote slot, not the host's own),
+// the leaving node aside. [orig: Server_RemoveEntityAndNotify @0x50A270 - mask 0x90 @0x50A284,
+//  the send @0x50A2AC; Server_FanEntityEvents' recipient rule (server_entity_routes.cpp)]
+static void send_entity_remove_at_call(NapiNPServerCtx &ctx, const NapiNPConnection &leaving,
+		uint16_t handle) {
+	if (!ctx.is_in_session) return;
+	EntityRemove removal;
+	removal.entity_handle = handle;
+	const std::vector<uint8_t> body = encode_entity_remove(removal);
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (&conn == &leaving || !active_player_recipient(conn) ||
+				conn.link.mode == replication::TransportMode::Loopback)
+			continue;
+		conn.link.transport->host_send(s2c::ENTITY_REMOVE, body, /*reliable=*/true, 0);
+	}
+}
+
 // The removal callback's player teardown (Server_HandlePlayerDisconnect) for one node whose
 // player was added: the leave line, the squad leg, the match and spawn-wave removal, the /PROFILE
 // marker, the entity's removal and the 0x46 removal record to the others. A remote's node, or
@@ -352,10 +371,6 @@ void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving) {
 		// sends its squadron line and the registry removal and frees the node
 		// [orig: Server_HandlePlayerDisconnect @0x51B6D8..0x51B7FD].
 		Server_ReleaseSquadRegistryNode(ctx, leaving);
-		const bool freed_pool0_entity = ctx.world != nullptr && owned_entity.valid() &&
-				owned_entity.pool() == 0;
-		const uint16_t freed_pool0_slot =
-				freed_pool0_entity ? static_cast<uint16_t>(owned_entity.slot()) : uint16_t{0};
 		if (ctx.world != nullptr && owned_entity.valid()) {
 			ctx.world->match.remove_player(*ctx.world, owned_entity);
 			// The leaver drops out of every spawn-wave row it was queued in, before the
@@ -374,16 +389,40 @@ void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving) {
 					ctx.logs.profile->write_disconnect(*leaver);
 			}
 			ctx.world->vehicles.detach(owned_entity);
-			// The leaver's row goes through Server_RemoveEntityAndNotify, whose
-			// Player arm removes the placed devices the leaver owns, each through
-			// the notifying removal, before the row itself.
+			// The leaver's row goes through Server_RemoveEntityAndNotify: its S2C 0x12 to
+			// every in-match slot (mask 0x90) at the call, then its Player arm's sweep of the
+			// placed devices the leaver owns, each through the same notifying removal, its
+			// own 0x12 at its call, then the row's destroy. So the others retire the
+			// leaver's body on its 0x12, ahead of the slot's 0x46 (D-NET-176).
 			// [orig: Server_HandlePlayerDisconnect @0x51B5C0 — the
 			//  Server_RemoveEntityAndNotify call @0x51B82E; Server_RemoveEntityAndNotify
-			//  @0x50A270 — the Player test @0x50A2B1, the sweep call @0x50A2BB]
+			//  @0x50A270 — mask 0x90 @0x50A284, the handle @0x50A28E, the 0x12's
+			//  NapiNPServer_SendFiltered call @0x50A2AC, the Player test @0x50A2B1, the
+			//  sweep call @0x50A2BB, Entity_Destroy @0x50A2C4]
+			send_entity_remove_at_call(ctx, leaving, owned_entity.packed);
+			const size_t first_event = ctx.world->out.entity_events.size();
 			if (const world::Entity *leaver = ctx.world->registry.get(owned_entity);
 					leaver != nullptr &&
 					((leaver->flags | leaver->engine_flags) & world::kEntityFlagPlayer) != 0)
 				ctx.world->commands.remove_placed_devices_by_owner(owned_entity);
+			// The sweep's removals queue their 0x12s for the entity fan; each leaves at
+			// its call here instead [orig: Entity_RemovePlacedDevicesByOwner @0x546E00 -
+			//  the Server_RemoveEntityAndNotify calls @0x546E71 / @0x546E94 / @0x546EBB].
+			auto &events = ctx.world->out.entity_events;
+			for (size_t i = first_event; i < events.size();) {
+				if (const auto *removal = std::get_if<world::EntityRemoveEvent>(&events[i])) {
+					send_entity_remove_at_call(ctx, leaving, removal->handle);
+					events.erase(events.begin() + static_cast<std::ptrdiff_t>(i));
+				} else {
+					++i;
+				}
+			}
+			// The body's destroy drops a carried flag (Match::remove_player above made the
+			// drop): its 0x2F state leaves here, after the removals and ahead of the 0x46
+			// [orig: Entity_Destroy @0x43E810 - the mounted child's test @0x43E8B1, the
+			//  Entity_DropCarriedObject call @0x43E8B8; Entity_DropCarriedObject @0x439DF0 -
+			//  the Server_SendDestructibleDeathPacket call @0x439F34].
+			route_match_objective_records(ctx, *ctx.world);
 			// The player's brain (player_spawn attaches one) is freed with the row so
 			// the next pool-0 spawn into this slot starts brainless.
 			ctx.world->ai.release(owned_entity);
@@ -393,28 +432,17 @@ void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving) {
 		// removal record [orig: Server_SendPlayerStateAndSquad from
 		// Server_HandlePlayerDisconnect @0x51b837].
 		Server_DissolveSquadOf(ctx, leaving);
-		// The witnessed leave broadcast is S2C 0x46 bit15, which clears the peer's
-		// ROSTER BOOKKEEPING ONLY — PlayerSlot_ClearAndUnlink @0x434730 never
-		// destroys the entity (@0x431411..0x43144c; the entity-field wipes @0x431437
-		// are dead code there because entitySlotPtr is null). Retail relies on the
-		// client asking for a sweep (C2S 0x32 -> S2C 0x5D) to retire the entity, so
-		// on retail a leaver's body lingers until the next sweep.
-		// NOT WITNESSED (D-NET-176 delta (a)): pushing a sweep at teardown instead of
-		// waiting to be asked. The probe3 capture shows 0x5D coinciding with
-		// disconnects, which is consistent with a sweep, but the only witnessed
-		// TRIGGER is the 0x32 request. The body is not the witnessed builder's
-		// either: it lists the leaver's slot alone, where Server_CollectEmptyPool0Slots
-		// (@0x5160f0) lists every empty pool-0 slot below the used count.
-		DestroyEntityList leave_sweep;
-		if (freed_pool0_entity) leave_sweep.pool0_indices.push_back(freed_pool0_slot);
+		// The slot's removal record: S2C 0x46 bit15, which clears the peer's roster
+		// bookkeeping only (PlayerSlot_ClearAndUnlink @0x434730 never destroys the
+		// entity: the leaver's 0x12 above retired it). No sweep follows: the 0x5D
+		// answers only a C2S 0x32 request (D-NET-176).
+		// [orig: Server_HandlePlayerDisconnect @0x51B8BC; NapiNPServerMsg_SendEmptySlots
+		//  @0x51A600]
 		for (NapiNPConnection &other : list) {
 			if (&other == &leaving || !is_in_match(other) || other.link.transport == nullptr)
 				continue;
 			other.link.transport->host_send(
 					0x46, encode_player_sync_removal(player_slot, /*with_ack=*/false));
-			if (freed_pool0_entity)
-				other.link.transport->host_send(
-						0x5D, encode_destroy_entity_list(leave_sweep));
 		}
 	}
 }
