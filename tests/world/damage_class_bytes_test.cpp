@@ -74,7 +74,8 @@ struct Rig {
 };
 
 // L4-s6b FOUND 3: in a session the ACCEPT applies nothing locally: the selection
-// becomes the resident kit and, off the authority, the slot table empties, the class
+// becomes the process's loadout name list, the resident kit keeping its rows until the
+// host's list reaches it (D-NET-143), and, off the authority, the slot table empties, the class
 // and the damage bytes untouched, until the host's 0x5A grant; an authority keeps its
 // slots. The one 0x2F it sends carries the body's team, the ARMORY's class (V-L2-s6
 // FOUND 3: not the body's or the profile's), the selection through the name gate and the
@@ -98,8 +99,8 @@ void test_a_session_accept_resets_the_slots_and_applies_nothing() {
 			w::WeaponKitEntry{"WPN_NONE_SUCH", 1, -1, -1}};
 	const opennova::LoadoutSubmit sent = opennova::inmatch::armory_accept_in_session(r.world,
 			*r.local, selection, 6, /*authority=*/false, opennova::bms::MissionType{});
-	CHECK(r.local->loadout.spawn_kit_set && r.local->loadout.spawn_kit.size() == 2 &&
-			r.local->loadout.spawn_kit[0].ammo_primary == 3);
+	CHECK(r.local->loadout.spawn_kit_set && r.local->loadout.spawn_kit.size() == 1 &&
+			r.local->loadout.spawn_kit[0].ammo_primary == 2);
 	bool empty = true;
 	for (const w::WeaponInventorySlot &slot : r.local->inventory.slots)
 		empty = empty && slot.adm_index < 0;
