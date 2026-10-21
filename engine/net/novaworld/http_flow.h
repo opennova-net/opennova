@@ -78,7 +78,9 @@ struct JoinResult {
 	// The .joi lobby number. Nonzero means the retail transport dials the
 	// LAN-discovered endpoint for this session instead of host_ip/host_port
 	// and reports the number as the session var "Lan". 0 when absent.
-	// [orig: CNapiGameSession_InitTransportConnection @0x4c9e6c; ConnectOrHost @0x4d5418]
+	// [orig: CNapiGameSession_InitTransportConnection @0x4C9E10 - the LN test
+	//  @0x4C9E65..0x4c9e6c; CNapiGameSession_ConnectOrHost @0x4D4F10 - g_LobbyNum @0x4d5418,
+	//  "Lan" @0x4D541F]
 	int ln = 0;               // when Resolved
 	// The proxy-join triple, verbatim from the .joi: NI/NP are the proxy
 	// node's ip/port and BK its cookie. With all three present (plus the NK

@@ -98,7 +98,8 @@ struct JoiConnection {
 	// the session var "Lan"; 0 when absent. GS is copied but never read by
 	// any retail code. [orig: URL_ParseConnectionQueryString @0x54dfb0 LN
 	//  @0x54e33e / GS @0x54e38a; CNapiGameSession_InitTransportConnection
-	//  @0x4c9e6c; CNapiGameSession_ConnectOrHost @0x4d5418]
+	//  @0x4C9E10 - the LN test @0x4C9E65..0x4c9e6c; CNapiGameSession_ConnectOrHost
+	//  @0x4D4F10 - g_LobbyNum @0x4d5418, "Lan" @0x4D541F]
 	int ln = 0;
 	std::string gs;
 	std::string host_ip;   // decoded NK head (empty without NK: no join)

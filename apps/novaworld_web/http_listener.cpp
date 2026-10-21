@@ -1940,7 +1940,8 @@ void HttpListener::register_legacy_host_join_routes(
 		// [orig: URL_ParseConnectionQueryString @0x54B230 (dfx2.exe) - NK= @0x54B3BC,
 		//  LN= @0x54B56A, its atol @0x54B5BE]
 		// [orig: CNapiGameSession_InitTransportConnection @0x4C9F80 (dfx2.exe) - the LN
-		//  dial @0x4C9FD5..0x4C9FED, the proxy only with NI, NP and BK all set @0x4CA1B0]
+		//  dial @0x4C9FD5..0x4C9FED, the proxy only with NI, NP and BK all set: the tests
+		//  @0x4CA192..0x4CA1B0]
 		const auto lan_number = opennova::strutil::parse_int(
 				req.url_params.get("lan") ? std::string(req.url_params.get("lan")) : session->lan);
 		const bool lan_join = lan_number && *lan_number != 0;

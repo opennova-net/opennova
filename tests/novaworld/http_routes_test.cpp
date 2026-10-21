@@ -4700,7 +4700,8 @@ int test_join_identity(Harness &h) {
 //  URL_ParseConnectionQueryString @0x54B230 (dfx2.exe) - NK= @0x54B3BC (none: no join), LN=
 //  @0x54B56A, its atol @0x54B5BE], so the client dials the LAN address its discovery found, and
 // NI / NP / BK empty, so no proxy [orig: CNapiGameSession_InitTransportConnection @0x4C9F80
-//  (dfx2.exe) - the LN dial @0x4C9FD5..0x4C9FED, the proxy with all three set @0x4CA1B0].
+//  (dfx2.exe) - the LN dial @0x4C9FD5..0x4C9FED, the proxy with all three set: the tests
+//  @0x4CA192..0x4CA1B0].
 // The title's "LN=1&" goes out as the page text "LN=1&amp;", which the client's text loop
 // decodes [orig: XML_DecodeEntityReference @0x6E2640 (dfx2.exe), called @0x6E3471]. A GSID no
 // listing holds answers the msgbase page, whose title raises no join. A GLB join of the same
