@@ -135,6 +135,10 @@ struct ClientProcessState {
 	// it at its teardown (NapiNPServerCtx::client_disconnect_latch), a joiner at its connected
 	// teardown (JoinerConnection::use_disconnect_latch) (D-NET-NEW-L1-26).
 	ProcessDisconnectLatch disconnect_latch;
+	// ctx+0x68 and the protocol's list past a host's error-arm exit: the server that exit left
+	// unstopped, until the next session reset stops it (napi_np_connection.h UnstoppedServer;
+	// D-NET-NEW-L1-26).
+	UnstoppedServer unstopped_server;
 };
 
 class ClientRuntime {

@@ -47,6 +47,7 @@
 // CNapiNetwork_OpenTransportSocket; `/INOUT` @0x4a743d..0x4a744f].
 
 #include <formats/fnt/fnt.h>
+#include <net/npwire/peer_addr.h> // PeerAddr (the HOST STOPPED line's socket address)
 #include <net/npwire/protocol_message.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/inmatch/server_files.h>
@@ -228,6 +229,9 @@ uint32_t server_console_submit(NapiNPServerCtx &ctx, hud::ChatEntry &entry,
 // The /INOUT lines, with Napi_FormatAddress's "a.b.c.d:port" (retail's
 // "???.???.???.???:?????" when the host has no socket).
 std::string inout_host_line(const NapiNPServerCtx &ctx, bool started);
+// The same over the protocol's socket address then (null: none open) and its session name.
+std::string inout_host_line(const PeerAddr *local_address, const std::string &session_name,
+		bool started);
 std::string inout_player_added_line(const NapiNPConnection &conn);
 std::string inout_player_removed_line(const NapiNPConnection &conn);
 // The same for one half of the listen host's own pair, which our one own node stands for: its
@@ -307,6 +311,7 @@ private:
 // [orig: CNapiNPConnection_LogHostStarted @0x61e6a0 — the on byte (this + 0xF8B),
 //  NapiLog_Write(this + 0xF80) @0x61e757; its three siblings alike]
 void write_inout_line(const NapiNPServerCtx &ctx, const std::string &line);
+void write_inout_line(const ServerLogs &logs, const std::string &line);
 
 // The socket open's leg: the protocol's `_inout.txt` log on or off by the
 // /INOUT switch (a change writes its start or stop line).

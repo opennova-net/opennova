@@ -218,6 +218,10 @@ public:
 	// (nothing transmits it), then on the destroy arm the "NP.C:SH:STOP" burst to
 	// every connection.
 	void close() override;
+	// The process's network shutdown (opennova-serve's exit tail): a server an error-arm exit
+	// left unstopped writes its /INOUT lines, its socket already gone
+	// [orig: NapiLib_Shutdown - ResetActiveSession called @0x4C958B behind +0x68 @0x4C9586].
+	void stop_unstopped_server_at_exit(const ServerLogs &logs);
 	ClientRuntime *client_runtime() override { return state.client_runtime.get(); }
 	int64_t last_net_us() const override { return last_net_us_; }
 	// The FR counter also reaches the server context: the send window's

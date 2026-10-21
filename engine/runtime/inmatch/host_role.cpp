@@ -306,6 +306,11 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::GameConfig config = singleplayer_game_config(
 			game_type::for_mission_attribs(kernel.mission.header.attrib_flags), profile);
+	// The create's reset stops a server an earlier error-arm exit left unstopped; the start
+	// closed any socket first, so nothing reaches the wire [orig: SinglePlayer_StartMission -
+	// SetTransportMode(1) @0x561BEB, CNapiGameSession_CreateSession called @0x561E65 ->
+	// ResetActiveSession @0x4C97CC]
+	stop_unstopped_server(client_process_->unstopped_server, ServerLogs{}, nullptr, nullptr);
 	reset_state(config, /*serve_and_play=*/true, /*in_session=*/false, /*title=*/nullptr);
 	state.host_owner.host_loopback = &state.host_loop;
 	// The authority's start steps the process's file-transfer session words, which the context
@@ -337,6 +342,14 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
 	if (host_cfg.client_process != nullptr) client_process_ = host_cfg.client_process;
+	// A server an earlier error-arm exit left unstopped stops first, over this session's socket
+	// (the host screen opened it), ahead of the create
+	// [orig: PreMenu_HostSetup @0x5691F0 - CNapiGameSession_ResetActiveSession called @0x5691F5,
+	//  ahead of CNapiGameSession_BuildAndCreateSession @0x5694D0 (called @0x56A46A);
+	//  UI_HandleHostSessionStart's SetTransportMode(3) @0x556EA6 before; the create's own reset
+	//  @0x4C97CC where no pre-game menu runs]
+	stop_unstopped_server(client_process_->unstopped_server, host_cfg.logs, socket_,
+			host_cfg.local_address_known ? &host_cfg.local_address : nullptr);
 	reset_state(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
 			host_cfg.title);
 	state.host_owner.host_loopback = &state.host_loop;
@@ -1181,8 +1194,21 @@ void HostRole::close() {
 	//  @0x4C96E2)]
 	const int32_t exit_reason = ctx.mission_exit_reason != 0 ? ctx.mission_exit_reason
 			: kernel_ != nullptr ? kernel_->world.mission_exit_reason : 0;
-	if (route_mission_exit(exit_reason, /*novaworld=*/false).error != PostMissionError::None)
+	if (route_mission_exit(exit_reason, /*novaworld=*/false).error != PostMissionError::None) {
+		// The unstopped server outlives the session in the process (ctx+0x68 and the protocol's
+		// list are g_NapiNPCtx's): the next session reset stops it (stop_unstopped_server). The
+		// nodes' transports go with this session; the stop needs their keys, records and names.
+		UnstoppedServer &unstopped = client_process_->unstopped_server;
+		unstopped = UnstoppedServer{};
+		unstopped.running = ctx.np_protocol.host_running != 0;
+		unstopped.session_name = ctx.np_protocol.session_name;
+		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (conn.type != NapiNPConnection::kTypeServerSide) continue;
+			unstopped.connections.push_back(conn);
+			unstopped.connections.back().link.transport = nullptr;
+		}
 		return;
+	}
 	// NapiNPProtocol_StopServer: latch STOP and destroy every server-side node in
 	// list order; the burst rides the socket directly, like retail's SendTo.
 	std::vector<PeerAddr> peers;
@@ -1209,6 +1235,10 @@ void HostRole::close() {
 	// [orig: NapiNPProtocol_StopServer -> CNapiNPConnection_LogHostStopped
 	//  @0x62a97b, after host_running clears @0x62a95c]
 	inmatch::write_inout_line(ctx, inmatch::inout_host_line(ctx, /*started=*/false));
+}
+
+void HostRole::stop_unstopped_server_at_exit(const ServerLogs &logs) {
+	stop_unstopped_server(client_process_->unstopped_server, logs, nullptr, nullptr);
 }
 
 // The editor Stop/Start rewind: the kernel's own restore with the own connection as

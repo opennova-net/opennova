@@ -21,6 +21,7 @@
 #include "util/string_convert.h"
 #include "network/novaworld_client.h"
 #include <runtime/inmatch/mission_exit.h>
+#include <runtime/inmatch/napi_np_protocol.h> // stop_unstopped_server (the shutdown's reset)
 #include "audio/music_director.h"
 #include "hud/hud_inset_scope.h"
 #include "hud/hud_overlay.h" // the remote admin: the CHAT window and the echo
@@ -181,9 +182,15 @@ void GameWorld::_notification(int p_what) {
 		stop_water_render_stats();
 		// The admin server's sockets close with the process.
 		if (admin_pump_ != nullptr) admin_pump_->close();
-		// The process's network shut down: the _inout.txt log, then the net log, each
-		// stops and flushes (ServerLogDevices::close carries the witness).
-		if (log_devices_ != nullptr) log_devices_->close(0u);
+		// The process's network shut down: its session reset first stops a server an
+		// error-arm exit left unstopped (its /INOUT lines; engine stop_unstopped_server
+		// carries the witness), then the _inout.txt log, then the net log, each stops and
+		// flushes (ServerLogDevices::close carries the witness).
+		if (log_devices_ != nullptr) {
+			opennova::inmatch::stop_unstopped_server(client_process_.unstopped_server,
+					log_devices_->logs(), nullptr, nullptr);
+			log_devices_->close(0u);
+		}
 		NovaWorldClient::set_process_connect_log(nullptr);
 		NovaWorldClient::set_process_server_logs(nullptr);
 		return;

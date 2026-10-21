@@ -40,6 +40,7 @@
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_protocol.h> // stop_unstopped_server (the shutdown's reset)
 #include <runtime/inmatch/remote_admin.h> // input_action_exit
 #include <runtime/inmatch/server_console.h> // inout_host_line
 #include <runtime/inmatch/server_files.h>   // NapiLog (_inout.txt)
@@ -103,9 +104,16 @@ struct ListenHost {
 			std::make_unique<inmatch::ClientProcessState>();
 	CaptureSocket socket;
 	ns::UdpSessionTransport remote{ns::UdpSessionTransport::Role::Host};
+	// A host the same process runs later: its process words, its logs, its socket's address and
+	// the socket attached ahead of the bring-up, as the shell's host screen binds it.
+	inmatch::ClientProcessState *shared_process = nullptr;
+	inmatch::ServerLogs logs;
+	const PeerAddr *local_address = nullptr;
+	bool socket_at_boot = false;
 
 	bool boot(const opennova::bms::File &mission = test_mission::two_entity_mission()) {
 		role->bind(*kernel);
+		if (socket_at_boot) role->set_socket(&socket);
 		kernel->open_document(mission, "close", test_boot::source_over(&files));
 		ms::KernelBootOptions options;
 		options.mp_session = true;
@@ -119,7 +127,12 @@ struct ListenHost {
 			cfg.config.game_type = options.game_type;
 			cfg.socket_mode = inmatch::SocketMode::Lan;
 			cfg.serve_and_play = true;
-			cfg.client_process = process.get();
+			cfg.client_process = shared_process != nullptr ? shared_process : process.get();
+			cfg.logs = logs;
+			if (local_address != nullptr) {
+				cfg.local_address = *local_address;
+				cfg.local_address_known = true;
+			}
 			inmatch::HostBringup bringup;
 			bringup.host_cfg = cfg;
 			role->bring_up(bringup);
@@ -421,6 +434,127 @@ void test_close_resets_an_orphaned_row_through_its_net_player() {
 	CHECK(queued_resets(host->remote) == 2);
 }
 
+// D-NET-NEW-L1-26 (L8-s11 FOUND 1): an error arm leaves the server unstopped in the process
+// (ctx+0x68 set, the joiner's node kept with host_running set); the next host's pre-game setup
+// resets the session ahead of its create: StopServer latches STOP on the old joiner, writes its
+// /INOUT removal line and sends its STOP burst over the socket the host screen reopened, then
+// HOST STOPPED over that socket's address and the old session's name, all ahead of the new
+// session's HOST STARTED. With no socket open (the process's network shutdown) the lines alone.
+// [orig: PostMenu_RouteMissionExit @0x568460 - the error arms' loc_5686DA, no FullDestroy;
+//  UI_HandleHostSessionStart - SetTransportMode(3) @0x556EA6; MultiPlayer_JoinSessionStateMachine
+//  @0x56A320 - PreMenu_HostSetup called @0x56A43F (ResetActiveSession @0x5691F5), then
+//  CNapiGameSession_BuildAndCreateSession @0x5694D0 (called @0x56A46A);
+//  CNapiGameSession_ResetActiveSession @0x4C8A70 - StopServer called @0x4C8AA1;
+//  NapiNPProtocol_StopServer @0x62A820;
+//  CNapiNPConnection_LogHostStopped @0x61E780 - the socket read @0x61E7A6, the placeholder
+//  @0x61E7DD; NapiLib_Shutdown - ResetActiveSession called @0x4C958B]
+struct StoppedLater {
+	std::string text;
+	int stops = 0;
+	bool others = false;
+	bool held_after = true;
+};
+
+StoppedLater error_arm_then(bool next_host) {
+	StoppedLater out;
+	MemoryFiles files;
+	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
+	inout.set_stamp_text([] { return std::string(); });
+	inout.set_enabled(true);
+	inmatch::ClientProcessState process;
+	auto first = std::make_unique<ListenHost>();
+	first->shared_process = &process;
+	if (!first->boot()) {
+		++failures;
+		return out;
+	}
+	first->ctx().logs.inout = &inout;
+	first->ctx().logs.inout_switch = true;
+	inmatch::NapiNPConnection &joiner = first->ctx().np_protocol.connection_list.back();
+	joiner.client_ck = 0x5A5A1234u;
+	const std::string session_name = first->ctx().np_protocol.session_name;
+	const std::vector<uint8_t> stop = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(0x5A5A1234u, make_disconnect_event(1, 9, 0, 0, "", 0,
+					"NP.C:SH:STOP")));
+	first->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld;
+	first->role->close();
+	int early_stops = 0;
+	for (const auto &[to, bytes] : first->socket.sent)
+		if (to == kPeer && bytes == stop) ++early_stops;
+	CHECK(early_stops == 0);
+	CHECK(inout.pending().find("PLAYER REMOVED") == std::string::npos);
+	CHECK(process.unstopped_server.running && process.unstopped_server.connections.size() == 1);
+	first->ctx().logs.inout = nullptr;
+	first.reset(); // the session goes; the process keeps the server
+
+	inmatch::ServerLogs logs;
+	logs.inout = &inout;
+	logs.inout_switch = true;
+	const PeerAddr reopened{0x0100007Fu, 32768};
+	std::string expected_stopped;
+	if (next_host) {
+		auto second = std::make_unique<ListenHost>();
+		second->shared_process = &process;
+		second->logs = logs;
+		second->local_address = &reopened;
+		second->socket_at_boot = true;
+		if (!second->boot()) {
+			++failures;
+			return out;
+		}
+		for (const auto &[to, bytes] : second->socket.sent) {
+			if (to == kPeer && bytes == stop)
+				++out.stops;
+			else if (out.stops == 0)
+				out.others = true; // something ahead of the burst
+		}
+		expected_stopped = "127.0.0.1:32768 : HOST STOPPED \"" + session_name + "\".";
+	} else {
+		// The process's network shutdown, as the shell's exit runs it: no socket open.
+		inmatch::stop_unstopped_server(process.unstopped_server, logs, nullptr, nullptr);
+		expected_stopped = "???.???.???.???:????? : HOST STOPPED \"" + session_name + "\".";
+	}
+	out.held_after = process.unstopped_server.running ||
+			!process.unstopped_server.connections.empty();
+	// What a pump's interval flush already wrote, then what the log still holds.
+	out.text = files.files[inmatch::kInoutLogFileName] + inout.pending();
+	const std::size_t removed = out.text.find(
+			"127.0.0.1:31000 : SERVER PLAYER REMOVED \"\". [1,9,0,0,\"\",0,\"NP.C:SH:STOP\"]");
+	const std::size_t stopped = out.text.find(expected_stopped);
+	CHECK(removed != std::string::npos && stopped != std::string::npos && removed < stopped);
+	if (next_host) {
+		const std::size_t started = out.text.find(" : HOST STARTED ");
+		CHECK(started == std::string::npos || stopped < started);
+	}
+	return out;
+}
+
+void test_an_error_arm_leaves_the_server_to_the_next_hosts_reset() {
+	const StoppedLater out = error_arm_then(/*next_host=*/true);
+	CHECK(out.stops > 0 && !out.others);
+	CHECK(!out.held_after);
+}
+
+void test_the_process_shutdown_stops_a_held_server_without_a_socket() {
+	const StoppedLater out = error_arm_then(/*next_host=*/false);
+	CHECK(out.stops == 0);
+	CHECK(!out.held_after);
+}
+
+// The destroy arm stops the server itself: nothing is left for a later reset.
+void test_the_destroy_arm_leaves_no_server() {
+	inmatch::ClientProcessState process;
+	auto host = std::make_unique<ListenHost>();
+	host->shared_process = &process;
+	if (!host->boot()) {
+		++failures;
+		return;
+	}
+	host->ctx().mission_exit_reason = inmatch::kMissionExitQuit;
+	host->role->close();
+	CHECK(!process.unstopped_server.running && process.unstopped_server.connections.empty());
+}
+
 } // namespace
 
 int main() {
@@ -432,6 +566,9 @@ int main() {
 	test_close_sweeps_post_mission_then_queues_each_slots_reset(inmatch::kMissionExitQuit);
 	test_close_sweeps_post_mission_then_queues_each_slots_reset(inmatch::kMissionExitNovaWorld);
 	test_close_resets_an_orphaned_row_through_its_net_player();
+	test_an_error_arm_leaves_the_server_to_the_next_hosts_reset();
+	test_the_process_shutdown_stops_a_held_server_without_a_socket();
+	test_the_destroy_arm_leaves_no_server();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }

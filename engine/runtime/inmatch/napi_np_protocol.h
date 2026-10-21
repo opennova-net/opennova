@@ -12,6 +12,10 @@
 #include <string>
 #include <vector>
 
+namespace opennova {
+class IDatagramSocket;
+}
+
 // P2 — Per-connection handshake. The proven server legs of novaworld::HostSessionAccept, promoted
 // onto inmatch free functions over NapiNPServerCtx / NapiNPProtocol.connection_list (the legs
 // the original walks as NapiNPProtocol methods over its NapiListHead of NapiNPConnection nodes).
@@ -188,6 +192,19 @@ void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain);
 // to the others) and our one own node leaves the list. False when no goodbye is held for it.
 // [orig: NapiNPProtocol_Pump @0x62A650 - the pending walk @0x62A6FD..0x62A793] (D-NET-NEW-L8-21)
 bool drain_own_goodbye(NapiNPServerCtx &ctx, OwnGoodbye drain);
+
+// The next session reset's StopServer over a server an error-arm exit left unstopped
+// (UnstoppedServer, napi_np_connection.h): each node takes the STOP record (the first latch
+// wins), its /INOUT removal line and its 0x86 burst over `socket` (null: none open, nothing on
+// the wire), in list order; then HOST STOPPED over `local_address` (null: the placeholder)
+// and the old session name. Nothing when no server is held. The reset points: a host's
+// pre-game setup and a session create (HostRole's bring-ups), and the process's network
+// shutdown (the shells' exits). (D-NET-NEW-L1-26)
+// [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 from PreMenu_HostSetup @0x5691F5,
+//  CNapiGameSession_CreateSession @0x4C97CC and NapiLib_Shutdown @0x4C958B;
+//  NapiNPProtocol_StopServer @0x62A820]
+void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
+		opennova::IDatagramSocket *socket, const PeerAddr *local_address);
 
 // Finalize one host socket receive batch. Future packets latch a missing-sequence check while
 // handle_server_datagram drains; only here, after later datagrams could have closed the gap, does

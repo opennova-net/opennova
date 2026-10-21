@@ -928,7 +928,10 @@ void Server::stop() {
 	// The shutdown's banned.txt save, gated on the list and its dirty word
 	// [orig: Game_ShutdownSubsystems @0x4A539D -> j_BanList_SaveToFile @0x508E20].
 	if (exit_tail && role_) inmatch::Server_SaveAddressBanList(role_->state.host_owner.ctx);
-	// Its network's: the net log stops and flushes [orig: @0x4A5398 NapiLib_Shutdown].
+	// Its network's: a server an error-arm exit left unstopped writes its /INOUT lines (the
+	// shutdown's session reset, behind +0x68), then the net log stops and flushes
+	// [orig: @0x4A5398 NapiLib_Shutdown - ResetActiveSession called @0x4C958B].
+	if (exit_tail && role_) role_->stop_unstopped_server_at_exit(log_devices_.logs());
 	if (exit_tail) log_devices_.close(role_ ? role_->state.host_owner.ctx.np_protocol.host_run_duration_ms : 0u);
 	// The admin server's sockets close with the process.
 	if (admin_tcp_) admin_tcp_->close();

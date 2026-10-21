@@ -192,13 +192,6 @@ uint32_t server_console_submit(NapiNPServerCtx &ctx, hud::ChatEntry &entry,
 
 namespace {
 
-std::string host_address(const NapiNPServerCtx &ctx) {
-	// [orig: @0x61e6c6..0x61e6fd — the protocol's socket address, else the
-	//  placeholder]
-	if (!ctx.local_address_known) return "???.???.???.???:?????";
-	return peer_addr_to_string(ctx.local_address); // Napi_FormatAddress "%s:%ld" @0x62df22
-}
-
 const char *connection_kind(int type) {
 	// is_server (+0x2B) for a node the server created (type 1), is_client
 	// (+0x2A) for type 2 [orig: CNapiNPConnection_Create @0x62ad7b..0x62ae95].
@@ -212,10 +205,20 @@ const char *connection_kind(const NapiNPConnection &conn) { return connection_ki
 } // namespace
 
 std::string inout_host_line(const NapiNPServerCtx &ctx, bool started) {
+	return inout_host_line(ctx.local_address_known ? &ctx.local_address : nullptr,
+			ctx.np_protocol.session_name, started);
+}
+
+std::string inout_host_line(const PeerAddr *local_address, const std::string &session_name,
+		bool started) {
 	// [orig: "%s : HOST STARTED \"%s\"." @0x7dfa7c / "%s : HOST STOPPED \"%s\"."
-	//  @0x7dfaac over the protocol's session name (+0x288)]
-	return host_address(ctx) + (started ? " : HOST STARTED \"" : " : HOST STOPPED \"") +
-			ctx.np_protocol.session_name + "\".";
+	//  @0x7dfaac over the protocol's session name (+0x288); the protocol's socket
+	//  address @0x61e6c6..0x61e6fd (the manager's socket +0xB8 read @0x61E7A6 for the
+	//  stop), else the placeholder (@0x61E7DD); Napi_FormatAddress "%s:%ld" @0x62df22]
+	const std::string address = local_address != nullptr ? peer_addr_to_string(*local_address)
+	                                                      : "???.???.???.???:?????";
+	return address + (started ? " : HOST STARTED \"" : " : HOST STOPPED \"") + session_name +
+			"\".";
 }
 
 std::string inout_player_added_line(const NapiNPConnection &conn) {
@@ -297,8 +300,12 @@ void NapiLog::shutdown(uint32_t now_ms) {
 }
 
 void write_inout_line(const NapiNPServerCtx &ctx, const std::string &line) {
+	write_inout_line(ctx.logs, line);
+}
+
+void write_inout_line(const ServerLogs &logs, const std::string &line) {
 	io::logf(io::LogLevel::kInfo, "%s", line.c_str());
-	if (ctx.logs.inout != nullptr && ctx.logs.inout->enabled()) ctx.logs.inout->write(line);
+	if (logs.inout != nullptr && logs.inout->enabled()) logs.inout->write(line);
 }
 
 void open_inout_log(const NapiNPServerCtx &ctx) {

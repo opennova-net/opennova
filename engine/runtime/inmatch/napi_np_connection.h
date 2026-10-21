@@ -950,4 +950,17 @@ inline bool active_player_recipient(const NapiNPConnection &conn) {
 	return is_in_match(conn) && conn.link.transport != nullptr;
 }
 
+// A server a mission exit's error arm left unstopped. The post-mission router's error arms
+// skip the session's destroy, so ctx+0x68 stays set and the protocol keeps its server-side
+// nodes, host_running set, under a closed socket until the next session reset stops them
+// (stop_unstopped_server, napi_np_protocol.h). The process holds it (ClientProcessState).
+// [orig: PostMenu_RouteMissionExit @0x568460 - the error arms' loc_5686DA, no FullDestroy;
+//  CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0x68 test @0x4C8A73, StopServer
+//  called @0x4C8AA1, +0x68 cleared @0x4C8AC0]
+struct UnstoppedServer {
+	bool running = false;
+	std::vector<NapiNPConnection> connections; // the server-side nodes, in list order
+	std::string session_name;                  // the protocol's (+0x288), HOST STOPPED's
+};
+
 } // namespace opennova::inmatch
