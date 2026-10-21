@@ -3404,12 +3404,15 @@ bool run_the_teardown_goodbye_follows_the_exit_route() {
 // V-L2-s9 (d): the join screen's ABORT ahead of the mission start leaves through the join
 // state machine's FullDestroy(-1): a joiner connected (its 0x82 taken) and still in the
 // pre-game bursts the "N.C:SWWAD[1]:-1" record. In the match it sends nothing
-// (run_the_teardown_goodbye_follows_the_exit_route).
+// (run_the_teardown_goodbye_follows_the_exit_route). In the wait for the JOIN's S2C 0x00
+// (state 5: the host's initial settings answered with the C2S 0x00) the same pass's abort
+// test destroys with -2 (V-ROLL-C on L2-s11), so that burst carries "N.C:SWWAD[1]:-2".
 // [orig: PreMenu_OnAbortCancel @0x568CA0 - g_PreMenuState = 9 @0x568CB4;
 //  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 9's CNapiGameSession_FullDestroy(-1)
-//  @0x56A3E3; CNapiGameSession_FullDestroy @0x4C96A0 - the sprintf @0x4C96CC, the leave
+//  @0x56A3E3, state 5's abort test @0x56A591..0x56A59C and FullDestroy(-2) @0x56A59E /
+//  @0x56A5A0; CNapiGameSession_FullDestroy @0x4C96A0 - the sprintf @0x4C96CC, the leave
 //  @0x4C96DB]
-bool run_the_join_screen_abort_bursts_the_minus_one_record() {
+bool run_the_join_screen_abort_bursts_its_state_record(bool join_sent, const char *dstr) {
 	Harness h;
 	h.role.poll_preload();
 	uint8_t opcode = 0;
@@ -3448,6 +3451,31 @@ bool run_the_join_screen_abort_bursts_the_minus_one_record() {
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
 	h.role.runtime->receive(server_auth_dg.data(), server_auth_dg.size());
 	h.role.poll_preload();
+	if (join_sent) {
+		// Golden retail frame 6: the host's initial settings pair, which the joiner answers with
+		// its header-only ACK and the C2S 0x00 JOIN; the 0x00's answer is still owed.
+		SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
+		const std::vector<ProtocolMessage> settings = {
+				make_protocol_message(
+						0x00, {0x00, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00}, 0xA0),
+				make_protocol_message(
+						0x00, {0x01, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00}, 0xA0),
+		};
+		std::vector<uint8_t> packet;
+		if (!expect(frame_session_packet(server_seq,
+							SessionCrypto{"SERVER-ABORT-SCRK", {}, auth.ck}, settings, packet),
+					"abort: frame the initial settings pair"))
+			return false;
+		const std::vector<uint8_t> settings_dg =
+				nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.socket.datagrams.clear();
+		h.role.runtime->receive(settings_dg.data(), settings_dg.size());
+		h.role.poll_preload();
+		if (!expect(std::string(h.role.runtime->admission_stage_name()) ==
+							"awaiting the JOIN acknowledgement",
+					"abort: the settings are answered with the JOIN, whose 0x00 is owed"))
+			return false;
+	}
 	if (!expect(h.role.runtime->in_session() && h.role.runtime->in_pre_game(),
 				"abort: the joiner is connected and still in the pre-game"))
 		return false;
@@ -3463,9 +3491,9 @@ bool run_the_join_screen_abort_bursts_the_minus_one_record() {
 	}
 	if (!expect(goodbyes.size() == 4u, "abort: the cancel writes the four-datagram burst"))
 		return false;
-	return expect(goodbyes[0].dc == 2u && goodbyes[0].dstr == "N.C:SWWAD[1]:-1" &&
+	return expect(goodbyes[0].dc == 2u && goodbyes[0].dstr == dstr &&
 					goodbyes[0].dp1 == 0 && goodbyes[0].dp2 == 0 && goodbyes[0].dpc == 0,
-			"abort: the burst carries FullDestroy(-1)'s record");
+			"abort: the burst carries the state's FullDestroy record");
 }
 
 // D-NET-562's pre-round leg: a client runs no entity update while its pre-round timer
@@ -4136,7 +4164,8 @@ int main() {
 	ok &= run_a_console_deploy_pick_ends_the_drain();
 	ok &= run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it();
 	ok &= run_the_teardown_goodbye_follows_the_exit_route();
-	ok &= run_the_join_screen_abort_bursts_the_minus_one_record();
+	ok &= run_the_join_screen_abort_bursts_its_state_record(false, "N.C:SWWAD[1]:-1");
+	ok &= run_the_join_screen_abort_bursts_its_state_record(true, "N.C:SWWAD[1]:-2");
 	ok &= run_the_spawn_takes_the_mission_starts_identity();
 	ok &= run_the_spawn_takes_its_sides_class_word();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();

@@ -951,6 +951,10 @@ public:
 	bool cancel_final_wait() { return joiner_ != nullptr && joiner_->cancel_final_wait(); }
 	bool in_mission_start() const { return joiner_ && joiner_->in_mission_start(); }
 	bool in_pre_game() const { return joiner_ && joiner_->in_pre_game(); }
+	// ABORT's destroy reason (JoinerConnection::pre_game_cancel_reason carries the witness).
+	int32_t pre_game_cancel_reason() const {
+		return joiner_ ? joiner_->pre_game_cancel_reason() : -1;
+	}
 	bool mission_start_aborted() const { return joiner_ && joiner_->mission_start_aborted(); }
 	uint32_t mp_attributes_revision() const {
 		return joiner_ ? joiner_->mp_attributes_revision() : 0u;

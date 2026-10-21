@@ -1082,12 +1082,29 @@ public:
 	}
 	// Ahead of the mission start: the pre-game join screen's connect, verify and admission
 	// stages, whose ABORT tears the session down through the join state machine's cleanup
-	// (FullDestroy(-1)).
+	// (FullDestroy(-1), or -2 in state 5: pre_game_cancel_reason).
 	// [orig: PreMenu_OnAbortCancel @0x568CA0 - g_PreMenuState = 9 @0x568CB4;
 	//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 9's
 	//  CNapiGameSession_FullDestroy(-1) @0x56A3E3]
 	bool in_pre_game() const {
 		return !in_game_loop() && post_auth_stage_ < PostAuthStage::AwaitServerInfo;
+	}
+	// The reason that ABORT's session destroy carries ("N.C:SWWAD[1]:<reason>" in the goodbye's
+	// DSTR). In the wait for the JOIN's S2C 0x00 (state 5, from the queued C2S 0x00 to the 0x00's
+	// flag and its C2S 0x01), the click lands in that state's own message pump and the same
+	// pass's abort test destroys with -2. Everywhere else in the pre-game it is state 9's -1.
+	// The connect loop's -4 has no face: a connecting connection takes neither of the
+	// teardown's arms (no burst, no leave callback), and ours sends nothing before the 0x82.
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4: g_PreMenuState = 5
+	//  @0x56A51A, the 0x00 queued @0x56A53F; state 5: Game_PumpWindowMessages @0x56A578, the
+	//  abort test @0x56A591..0x56A59C, CNapiGameSession_FullDestroy(-2) @0x56A59E / @0x56A5A0,
+	//  the 0x00's flag @0x56A61B, state 6 @0x56A62D and NapiClient_SendDisconnectAndReset
+	//  @0x42CAD0 (the call @0x56A633: the C2S 0x01 {0} @0x42CB0C); state 9's FullDestroy(-1)
+	//  @0x56A3E3; PreMenu_OnAbortCancel @0x568CA0 - the flag @0x568CAA, state 9 @0x568CB4;
+	//  UI_JoinSelectedSession @0x5699D0 - FullDestroy(-4) @0x569F04 / @0x569F06;
+	//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the arms @0x6253E9 / @0x62549C]
+	int32_t pre_game_cancel_reason() const {
+		return post_auth_stage_ == PostAuthStage::AwaitJoinAck ? -2 : -1;
 	}
 	// The host's session-variable list parsed from the reassembled S2C 0x60
 	// server-info transfer (npwire/session_vars.h): the server name and

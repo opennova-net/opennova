@@ -147,8 +147,9 @@ public:
 	//  CNapiNPConnection_TeardownActiveConnection @0x6253C0]
 	void quit_to_menu();
 	// The pre-game join screen's ABORT (the shell's cancel of a join ahead of the mission
-	// start): the join state machine's cleanup, FullDestroy(-1), whose leave latches
-	// "N.C:SWWAD[1]:-1" and writes the goodbye burst at once. A cancel inside the mission
+	// start): the join state machine's cleanup, FullDestroy(-1), or FullDestroy(-2) in the wait
+	// for the JOIN's S2C 0x00 (JoinerConnection::pre_game_cancel_reason), whose leave latches
+	// "N.C:SWWAD[1]:<reason>" and writes the goodbye burst at once. A cancel inside the mission
 	// start is the wait's abort, exit reason 1, which close() routes.
 	// [orig: PreMenu_OnAbortCancel @0x568CA0 (g_PreMenuState = 9 @0x568CB4);
 	//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 9's

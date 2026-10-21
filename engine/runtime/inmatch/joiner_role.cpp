@@ -1887,7 +1887,9 @@ void JoinerRole::close() {
 
 void JoinerRole::cancel_join() {
 	if (!runtime || !runtime->in_pre_game()) return;
-	for (const std::vector<uint8_t> &dg : runtime->destroy_session(-1, join_novaworld_)) send(dg);
+	for (const std::vector<uint8_t> &dg :
+			runtime->destroy_session(runtime->pre_game_cancel_reason(), join_novaworld_))
+		send(dg);
 }
 
 void JoinerRole::quit_to_menu() {
