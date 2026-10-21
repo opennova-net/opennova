@@ -2490,10 +2490,15 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 					ctx.config, *remote, {make_protocol_message(0x47, {})},
 					7, ctx.np_protocol.connection_list, &world);
 	const ProtocolMessage *spectator_slot = find_reply(spectator_state, 0x75);
+	// The 0x75's byte 0 reads the join's spectator latch (NapiNPPlayer +0x37), which only the
+	// JOIN's JSR writes; an authority conversion writes no latch, so a converted spectator's
+	// byte 0 stays 0 while its team reads 0 (D-NET-NEW-L4-10; V-L4-s9 swept every +0x37 writer:
+	// NapiNPPlayer_Create @0x4C795E, HandleNewConnection @0x4C81FF, the join @0x512E60).
+	// [orig: NetPacket_SerializeHostEntityState @0x510890 (the latch read @0x5108AF..0x5108B6)]
 	if (!expect(
 			spectator_slot != nullptr &&
-			spectator_slot->payload == std::vector<uint8_t>({0x01, 0x00}),
-			"0x75 bit 0 advertises free-fly spectator mode on team 0")) {
+			spectator_slot->payload == std::vector<uint8_t>({0x00, 0x00}),
+			"a converted spectator's 0x75 byte 0 stays 0 (the join's latch) on team 0")) {
 		return false;
 	}
 	std::vector<ProtocolMessage> same_tick_stream;
