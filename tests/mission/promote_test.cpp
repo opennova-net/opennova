@@ -1464,6 +1464,9 @@ int main() {
         Seat s{};
         s.type = SeatType::Passenger;
         s.seat_local = {1.f, 2.f, 3.f};
+        s.bone_point[0] = 131072;
+        s.bone_point[1] = -65536;
+        s.bone_point[2] = 196608;
         seats.seats.push_back(s);
         co.item_seat_specs.push_back(seats);
 
@@ -1551,6 +1554,9 @@ int main() {
         s1.type = SeatType::Passenger;
         s1.bone_index = 2;
         s1.seat_local = {1.f, 0.f, 0.f};
+        s1.bone_point[0] = 0;
+        s1.bone_point[1] = -65536;
+        s1.bone_point[2] = 0;
         seats.seats.push_back(s0);
         seats.seats.push_back(s1);
         co.item_seat_specs.push_back(seats);
@@ -1591,10 +1597,16 @@ int main() {
         passenger.type = SeatType::Passenger;
         passenger.bone_index = 1;
         passenger.seat_local = {4.f, 0.f, 0.f};
+        passenger.bone_point[0] = 0;
+        passenger.bone_point[1] = -262144;
+        passenger.bone_point[2] = 0;
         Seat driver{};
         driver.type = SeatType::Driver;
         driver.bone_index = 2;
         driver.seat_local = {1.f, 0.f, 0.f};
+        driver.bone_point[0] = 0;
+        driver.bone_point[1] = -65536;
+        driver.bone_point[2] = 0;
         seats.seats.push_back(passenger);
         seats.seats.push_back(driver);
         co.item_seat_specs.push_back(seats);
@@ -1628,10 +1640,16 @@ int main() {
         controller.type = SeatType::Controller;
         controller.bone_index = 1;
         controller.seat_local = {1.f, 0.f, 0.f};
+        controller.bone_point[0] = 0;
+        controller.bone_point[1] = -65536;
+        controller.bone_point[2] = 0;
         Seat driver{};
         driver.type = SeatType::Driver;
         driver.bone_index = 2;
         driver.seat_local = {5.f, 0.f, 0.f};
+        driver.bone_point[0] = 0;
+        driver.bone_point[1] = -327680;
+        driver.bone_point[2] = 0;
         seats.seats.push_back(controller);
         seats.seats.push_back(driver);
         co.item_seat_specs.push_back(seats);
@@ -1663,10 +1681,16 @@ int main() {
         passenger.type = SeatType::Passenger;
         passenger.bone_index = 1;
         passenger.seat_local = {5.f, 0.f, 0.f};
+        passenger.bone_point[0] = 0;
+        passenger.bone_point[1] = -327680;
+        passenger.bone_point[2] = 0;
         Seat driver{};
         driver.type = SeatType::Driver;
         driver.bone_index = 2;
         driver.seat_local = {1.f, 0.f, 0.f};
+        driver.bone_point[0] = 0;
+        driver.bone_point[1] = -65536;
+        driver.bone_point[2] = 0;
         seats.seats.push_back(passenger);
         seats.seats.push_back(driver);
         co.item_seat_specs.push_back(seats);
@@ -1772,6 +1796,9 @@ int main() {
         Seat s{};
         s.type = SeatType::Passenger;
         s.seat_local = {2.f, 0.f, 0.f}; // seat point at (32, 0, 0)
+        s.bone_point[0] = 0;
+        s.bone_point[1] = -131072;
+        s.bone_point[2] = 0;
         seats.seats.push_back(s);
         co.item_seat_specs.push_back(seats);
 
@@ -1827,6 +1854,9 @@ int main() {
         Seat s{};
         s.type = SeatType::Passenger;
         s.seat_local = {2.f, 0.f, 0.f}; // seat point at (32, 0, 0)
+        s.bone_point[0] = 0;
+        s.bone_point[1] = -131072;
+        s.bone_point[2] = 0;
         seats.seats.push_back(s);
         co.item_seat_specs.push_back(seats);
 

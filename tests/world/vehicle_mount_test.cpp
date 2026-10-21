@@ -94,12 +94,18 @@ struct Rig {
         ctrl.bone_index = 1;
         ctrl.source_name = "ctrlx00";
         ctrl.seat_local = {0.5f, 1.5f, 1.0f};
+        ctrl.bone_point[0] = 98304;
+        ctrl.bone_point[1] = -32768;
+        ctrl.bone_point[2] = 65536;
         veh.seats.push_back(ctrl);
         Seat sit;
         sit.type = SeatType::Passenger;
         sit.bone_index = 2;
         sit.source_name = "sitex00";
         sit.seat_local = {0.0f, -2.0f, 1.2f};
+        sit.bone_point[0] = -131072;
+        sit.bone_point[1] = 0;
+        sit.bone_point[2] = 78643;
         veh.seats.push_back(sit);
         veh_h = w.registry.spawn(1, veh);
 
@@ -4814,6 +4820,45 @@ static void test_npc_detach_zeroes_the_equipped_byte() {
     CHECK(r.player().equipped_adm_index == 7);
 }
 
+// D-NET-448: on a vehicle (BoneCallback_Simple) the request snaps a sitex rider to the seat
+// bone's yaw, the fpatan of the userpoint's direction words through the carrier's matrix,
+// and the static pose takes the same bone pose; not the carrier heading less a whole-degree
+// offset. A pitched carrier turns the direction before the fpatan.
+// [orig: Entity_RequestVehicleAttach @0x4364A0 (the bone call @0x436540, the store
+//  @0x4365BF..0x4365C3); Entity_GetBoneTransformAndOrientation @0x4B0C50 (@0x4B0D42,
+//  @0x4B0D64..0x4B0D81, @0x4B0DA1..0x4B0DBB); EntityDef_LoadModelsAndCallbacks @0x439F50
+//  (@0x43A05A -> @0x43A072)]
+static void test_request_snaps_to_the_seat_bone_yaw() {
+    Rig r;
+    r.veh().item_type = 1;
+    r.veh().pitch_bam = bam_from_degrees_wrapped(7);
+    Seat &sit = r.veh().seats[1];
+    sit.bone_direction[0] = 3 << 16;
+    sit.bone_direction[1] = 4 << 16;
+    sit.bone_direction[2] = 1 << 16;
+    sit.yaw_offset = 53; // the whole-degree stand-in the static leg took
+    MountedPose bone;
+    seat_bone_pose_on_carrier_matrix(r.veh(), sit, bone);
+    VehicleSeatSelection pick;
+    pick.vehicle = r.veh_h;
+    pick.seat_index = 1;
+    pick.type = SeatType::Passenger;
+    r.w.vehicles.request_attach_heading(r.player_h, pick);
+    CHECK(r.player().heading == bone.heading);
+    CHECK(bone.heading != opennova::io::bam_sub(emplaced_gun_frame_heading(r.veh()),
+            bam_from_degrees_wrapped(53)));
+    Entity rider = r.player();
+    const MountedPose pose = r.w.vehicles.pose_mounted_occupant(rider, r.veh(), sit);
+    CHECK(pose.heading == bone.heading && pose.pitch == bone.pitch && pose.roll == bone.roll);
+    CHECK(pose.position.x.q16 == bone.position.x.q16 && pose.position.y.q16 == bone.position.y.q16 &&
+          pose.position.z.q16 == bone.position.z.q16);
+    // A carrier that is no vehicle keeps the static stand-in.
+    r.veh().item_type = 0;
+    r.w.vehicles.request_attach_heading(r.player_h, pick);
+    CHECK(r.player().heading == opennova::io::bam_sub(emplaced_gun_frame_heading(r.veh()),
+            bam_from_degrees_wrapped(53)));
+}
+
 // A body that boards in its own pass's think ends that pass on foot: the org1
 // motor keys its seat block on the mounted-live local its head took, so the
 // seat pose waits for the next pass. [orig: Entity_UpdateInfantryAI
@@ -5258,6 +5303,7 @@ int main() {
     test_claimant_detach_cuts_vehicle_slot_action();
     test_npc_detach_zeroes_the_equipped_byte();
     test_board_pass_stays_on_foot();
+    test_request_snaps_to_the_seat_bone_yaw();
     test_seat_bone_failure_runs_the_seat_tail();
     test_board_pass_on_an_attached_gun_stays_on_foot();
     test_use_scan_and_label_follow_live_seat_pose();

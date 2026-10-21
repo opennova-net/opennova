@@ -13,6 +13,7 @@
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/local_player.h> // the local look the request snaps
 #include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading, emplaced_word_bam
+#include <runtime/world/mounted_pose.h> // seat_bone_pose_on_carrier_matrix
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/weapon_inventory.h> // weapon_slot_initial_zoom
 
@@ -296,18 +297,39 @@ EntityPosition entity_local_point_world(const Entity &vehicle, const Vec3 &local
     return p;
 }
 
+namespace {
+
+// A vehicle's model takes BoneCallback_Simple, which hands every bone slot the
+// carrier's own matrix, so its sitex / ctrlx / drvrx bone is the userpoint through
+// that matrix (seat_bone_pose_on_carrier_matrix); a UseGun bone attaches through the
+// bone attach instead. [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (def+0x5C ==
+//  1 @0x43A05A -> BoneCallback_Simple @0x43A072); BoneCallback_Simple @0x4E2600]
+bool seat_bone_is_carrier_matrix(const Entity &carrier, const Seat &seat) {
+    return carrier.item_type == 1 && !seat.attachment_frame && seat.type != SeatType::Gunner;
+}
+
+} // namespace
+
 void VehicleSystem::presnap_attach_heading(Entity &occupant, const Entity &vehicle, const Seat &seat) {
     World &world = world_;
     // A UseGun requester faces along the gun: the carrier's own Yaw less its
     // stored gun yaw word (+0x322) shifted up. Every other seat takes the seat
-    // bone's yaw, the carrier frame turned by the seat offset as
-    // pose_mounted_occupant composes it.
+    // bone's yaw: on a vehicle the fpatan of the userpoint's direction through the
+    // carrier's matrix; on any other carrier the carrier frame turned by the seat
+    // offset, as pose_mounted_occupant composes it.
     // [orig: Entity_RequestVehicleAttach @0x43655F..0x43656E (UseGun),
-    //  @0x4365BF..0x4365C3 (the Entity_GetBoneTransformAndOrientation yaw)]
+    //  @0x4365BF..0x4365C3 (the Entity_GetBoneTransformAndOrientation yaw @0x436540)]
     const int32_t carrier = emplaced_gun_frame_heading(vehicle);
-    const int32_t seat_heading = seat.type == SeatType::Gunner && !seat.attachment_frame
-            ? io::bam_sub(carrier, emplaced_word_bam(vehicle.emplaced_gun_yaw_word))
-            : io::bam_sub(carrier, bam_from_degrees_wrapped(seat.yaw_offset));
+    int32_t seat_heading;
+    if (seat.type == SeatType::Gunner && !seat.attachment_frame) {
+        seat_heading = io::bam_sub(carrier, emplaced_word_bam(vehicle.emplaced_gun_yaw_word));
+    } else if (seat_bone_is_carrier_matrix(vehicle, seat)) {
+        MountedPose bone;
+        seat_bone_pose_on_carrier_matrix(vehicle, seat, bone);
+        seat_heading = bone.heading;
+    } else {
+        seat_heading = io::bam_sub(carrier, bam_from_degrees_wrapped(seat.yaw_offset));
+    }
     occupant.heading = seat_heading;
     // The local player's look yaw takes the same value: the request runs outside
     // the tick, so the input-owned look carries it into the next one.
@@ -348,6 +370,14 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
     }
     if (world.pose_provider == nullptr ||
         !world.pose_provider->resolve_mounted_pose(world, vehicle, seat, live)) {
+        if (seat_bone_is_carrier_matrix(vehicle, seat)) {
+            // A vehicle's seat bone: the userpoint through the carrier's Q22 matrix,
+            // the fpatan yaw, the matrix's pitch and roll (D-NET-448, D-INF-35).
+            // [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50 (@0x4B0D42,
+            //  @0x4B0D64..0x4B0D81, @0x4B0DA1..0x4B0DBB) from the carry @0x4B6510 /
+            //  @0x4BED72]
+            seat_bone_pose_on_carrier_matrix(vehicle, seat, live);
+        } else {
         // The root/local fallback uses the same complete carrier frame as
         // collision. Only an unseeded mission row needs degree-to-BAM conversion.
         // [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 over @0x613f40]
@@ -361,6 +391,7 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
                 : vehicle.pitch_bam;
         live.roll = vehicle.veh.yaw_seeded ? vehicle.veh.air_roll_bam
                 : vehicle.roll_bam;
+        }
         // An addeweap child with no anchor copies its carrier's root pose (the
         // carrier's matrix bit clear): the position and the Yaw / Pitch / Roll words
         // as they are, no seat offset, then the carrier's savedLivePose words
