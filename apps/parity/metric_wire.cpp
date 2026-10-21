@@ -961,26 +961,75 @@ std::vector<std::string> milestones(const RunFacts &run) {
 			found.emplace_back(first, m);
 	}
 	// E2's round end and rotation (a run whose host plays a next mission in the
-	// window): the first S2C 0x5D and the first 0x61 after it, the second 0x7B and
-	// 0x0B (the next mission's announcement and header) and the first 0x0A after
-	// that header (window.rotation_load_gap).
+	// window), in retail's order (window.rotation_load_gap):
+	// - the round end sends each playing slot the zero tick seed, then the end-round
+	//   board header [orig: Server_ProcessRoundEnd @0x5164F0 (the 0x61 @0x516790)]
+	//   [orig: Server_ProcessRoundEnd @0x5164F0 (the 0x1D @0x516839)];
+	// - the joiner's 0x1D pulls the stat board with C2S 0x2B
+	//   [orig: NapiNPClientMsg_0x01D @0x430840 (the queue @0x430B03)], answered with
+	//   S2C 0x56 [orig: NapiNPServerMsg_HandleReplayDataRequest @0x514FE0 (the send @0x51505A)];
+	// - the 2790-tick linger [orig: Server_ProcessRoundEnd @0x5164F0 (the arm @0x5166C4)]
+	//   ends in the teardown, which sends every slot S2C 0x25
+	//   [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 (the state-7 send @0x516385)]
+	//   [orig: Game_TeardownMission @0x522350 (the call @0x52269B)];
+	// - the joiner answers the 0x25 with its reload's C2S 0x48 while the host loads, the
+	//   host's load end sends S2C 0x7B
+	//   [orig: Game_StartMission @0x524360 (the Server_BroadcastPlayerInfoToAll call @0x526267)],
+	//   and the joiner's reload takes the next mission's 0x0B in its player-sync track,
+	//   then its first 0x0A.
+	// A first-join 0x7B or 0x0B is never "next": both key after the 0x25. No 0x5D belongs
+	// to the round end: it answers the C2S 0x32 of a 0x0F burst, a join leg. These legs
+	// count through the steady end only: a capture's tail past it is the runner's.
 	if (run.info.rotation) {
-		auto nth = [&](uint16_t identity, int occurrence, int after_frame) {
-			int seen = 0;
-			for (const wire::ParityEvent &event : run.trace.events)
-				if (event.dir == 'S' && event_identity(event) == identity &&
-						event.frame > after_frame && ++seen == occurrence)
-					return event.frame;
-			return -1;
+		const uint64_t until = run.info.steady_end_ns;
+		// The S2C messages in capture order (a message's first fragment's frame).
+		std::vector<const wire::ParityEvent *> s2c;
+		for (const wire::ParityEvent &event : run.trace.events)
+			if (event.dir == 'S' && event.ts_ns <= until)
+				s2c.push_back(&event);
+		std::stable_sort(s2c.begin(), s2c.end(),
+				[](const wire::ParityEvent *a, const wire::ParityEvent *b) {
+					return a->frame < b->frame;
+				});
+		const size_t none = s2c.size();
+		auto first_from = [&](uint16_t identity, size_t from) {
+			for (size_t i = from; i < s2c.size(); ++i)
+				if (event_identity(*s2c[i]) == identity)
+					return i;
+			return none;
 		};
-		const int sweep = nth(0x05D, 1, -1);
-		const int seed = sweep >= 0 ? nth(0x061, 1, sweep) : -1;
-		const int announce = nth(0x07B, 2, -1);
-		const int header = nth(0x00B, 2, -1);
-		const int frame = header >= 0 ? nth(0x00A, 1, header) : -1;
-		const std::pair<int, const char *> extra[] = { { sweep, "S:0x5d round" },
-			{ seed, "S:0x61 round" }, { announce, "S:0x7b next" }, { header, "S:0x0b next" },
-			{ frame, "S:0x0a next" } };
+		const size_t board = first_from(0x01D, 0);
+		// The round end's seed is the 0x61 queued just ahead of its board, in the
+		// zero form [orig: Server_ProcessRoundEnd @0x5164F0 (the body @0x516774)].
+		size_t seed = none;
+		for (size_t i = board; board != none && i-- > 0;)
+			if (event_identity(*s2c[i]) == 0x061) {
+				const std::vector<uint8_t> &body = s2c[i]->body;
+				if (std::all_of(body.begin(), body.end(), [](uint8_t b) { return b == 0; }))
+					seed = i;
+				break;
+			}
+		const size_t pull = board != none ? first_from(0x056, board + 1) : none;
+		const size_t reset = board != none ? first_from(0x025, board + 1) : none;
+		const size_t announce = reset != none ? first_from(0x07B, reset + 1) : none;
+		const size_t header = reset != none ? first_from(0x00B, reset + 1) : none;
+		const size_t frame = header != none ? first_from(0x00A, header + 1) : none;
+		auto frame_of = [&](size_t i) { return i != none ? s2c[i]->frame : -1; };
+		// The joiner's reload opens with C2S 0x48
+		// [orig: Game_StartMission @0x524360 (the 0x48 queue @0x524470)], answering the 0x25
+		// while the host still loads: retail's 0x25 leaves before the host's load and its
+		// 0x7B after it, so the 0x48 falls between them.
+		int reload = -1;
+		if (reset != none)
+			for (const wire::ParityEvent &event : run.trace.events)
+				if (event.dir == 'C' && event_identity(event) == 0x048 && event.ts_ns <= until &&
+						event.frame > s2c[reset]->frame && (reload < 0 || event.frame < reload))
+					reload = event.frame;
+		const std::pair<int, const char *> extra[] = { { frame_of(seed), "S:0x61 round" },
+			{ frame_of(board), "S:0x1d round" }, { frame_of(pull), "S:0x56 round" },
+			{ frame_of(reset), "S:0x25 reset" }, { reload, "C:0x48 next" },
+			{ frame_of(announce), "S:0x7b next" }, { frame_of(header), "S:0x0b next" },
+			{ frame_of(frame), "S:0x0a next" } };
 		for (size_t i = 0; i < std::size(extra); ++i)
 			if (extra[i].first >= 0)
 				found.emplace_back(extra[i].first, std::size(kMilestones) + i);

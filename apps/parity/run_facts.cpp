@@ -151,39 +151,48 @@ void check_gameplay_coverage(const RunFacts &facts, char dir, std::vector<Eviden
 				return true;
 		return false;
 	};
+	// E2's declared round-end pause (window.rotation_load_gap): a run whose host
+	// rotates stops gameplay at the round end and resumes it in the next mission.
+	// The round end moves each playing slot to state 7
+	// [orig: Server_ProcessRoundEnd @0x5164F0 (the store @0x51685E)] and the host's
+	// 0x0A goes to a state-6 slot only
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 (the gate @0x517BD2)]; the joiner's
+	// 0x1D raises its round-over gate
+	// [orig: NapiNPClientMsg_0x01D @0x430840 (the store @0x430858)], which holds its 0x0C
+	// [orig: Client_ProcessNetworkFrame @0x42C180 (the gate @0x42C467)] until the next
+	// mission's load clears it. The gap holding the round end's board (the run's first
+	// S2C 0x1D), or the window's tail when it ends inside that pause, is the pause, not a
+	// stall.
+	static_assert(has_normalization("window.rotation_load_gap"));
+	uint64_t round_end_ns = 0;
+	if (facts.info.rotation)
+		for (const wire::ParityEvent &event : facts.trace.events)
+			if (event.dir == 'S' && event.full_tag == 0x01D && !event.settings_update &&
+					(round_end_ns == 0 || event.ts_ns < round_end_ns))
+				round_end_ns = event.ts_ns;
+	auto paused = [&](uint64_t after, uint64_t until) {
+		return round_end_ns > after && round_end_ns < until;
+	};
 	const bool start_missing =
 			samples.front() > facts.info.steady_start_ns + kBoundaryToleranceNs &&
 			!dead_in(facts.info.steady_start_ns - kBoundaryToleranceNs, samples.front());
-	const bool end_missing =
-			samples.back() + kBoundaryToleranceNs < facts.info.steady_end_ns &&
-			!dead_in(samples.back(), facts.info.steady_end_ns);
+	const bool end_missing = samples.back() + kBoundaryToleranceNs < facts.info.steady_end_ns &&
+			!dead_in(samples.back(), facts.info.steady_end_ns) &&
+			!paused(samples.back(), facts.info.steady_end_ns);
 	if (start_missing || end_missing)
 		out.push_back({ "STEADY_BOUNDARY_GAMEPLAY_MISSING",
 				label +
 						" decoded gameplay has no sample within 500 ms of a steady "
 						"window edge" });
-	// E2's declared load gap: a run whose host rotates to its next mission stops
-	// gameplay while that mission loads. The gap holding the next mission's
-	// header (the run's second S2C 0x0B) is the load, not a stall
-	// (window.rotation_load_gap).
-	static_assert(has_normalization("window.rotation_load_gap"));
-	uint64_t next_mission_ns = 0;
-	if (facts.info.rotation) {
-		int headers = 0;
-		for (const wire::ParityEvent &event : facts.trace.events)
-			if (event.dir == 'S' && event.full_tag == 0x00B && !event.settings_update && ++headers == 2) {
-				next_mission_ns = event.ts_ns;
-				break;
-			}
-	}
 	uint64_t widest = 0;
 	uint64_t previous = facts.info.steady_start_ns;
 	for (const uint64_t ts : samples) {
-		if (!(next_mission_ns > previous && next_mission_ns < ts) && !dead_in(previous, ts))
+		if (!paused(previous, ts) && !dead_in(previous, ts))
 			widest = std::max(widest, ts - previous);
 		previous = ts;
 	}
-	if (!dead_in(previous, facts.info.steady_end_ns))
+	if (!paused(previous, facts.info.steady_end_ns) &&
+			!dead_in(previous, facts.info.steady_end_ns))
 		widest = std::max(widest, facts.info.steady_end_ns - previous);
 	if (widest > kMaximumGameplayGapNs) {
 		char buf[160];

@@ -22,6 +22,7 @@
 #include <cstring>
 #include <functional>
 #include <initializer_list>
+#include <iterator>
 #include <map>
 #include <set>
 #include <string>
@@ -866,25 +867,69 @@ void test_tag_window() {
 	}
 }
 
-// E2's rotation: the steady gap that holds the next mission's header (a run's
-// second S2C 0x0B) is the declared load, not a stall; without a declared rotation
-// the same gap is STEADY_GAMEPLAY_GAP. The next mission joins the milestones.
+// A message spliced into a scripted trace at `at`, in the datagram of the event before it
+// (the trace keeps capture order).
+void splice(wire::ParityTrace &trace, char dir, uint16_t identity, uint64_t at,
+		std::vector<uint8_t> body) {
+	auto at_or_after = std::find_if(trace.events.begin(), trace.events.end(),
+			[at](const wire::ParityEvent &event) { return event.ts_ns > at; });
+	wire::ParityEvent event;
+	event.frame = at_or_after == trace.events.begin() ? 1 : std::prev(at_or_after)->frame;
+	event.ts_ns = at;
+	event.dir = dir;
+	event.session = kClientPort;
+	event.participant = 1;
+	event.full_tag = identity;
+	event.material = true;
+	event.body = std::move(body);
+	event.length = event.body.size();
+	trace.events.insert(at_or_after, std::move(event));
+}
+
+// E2's round end and rotation in retail's order (x2's tdh-i3a-tdm-round RR joiner
+// capture: the zero 0x61 seed and the 7-byte 0x1D board in one datagram, the 0x56 the
+// board pull answers, the 0x25 after the linger and before the host's load, the joiner's
+// reload C2S 0x48 at once, then the next mission's 0x7B at the host's load end, its 0x0B
+// and first 0x0A; a retail joiner's first join carries two 0x7B). Gameplay pauses in
+// both directions from the round end to the next mission: the round end moves the slot
+// to state 7 and the host's 0x0A needs state 6 (Server_ProcessRoundEnd @0x51685E,
+// Server_SendEntityStateToPlayer @0x517BD2); the joiner's 0x1D raises the round-over
+// gate that holds its 0x0C (@0x430858, @0x42C467). The steady gap holding the round
+// end's board is that pause; a gap that does not hold it, or the same gap without a
+// declared rotation, is STEADY_GAMEPLAY_GAP.
+constexpr uint64_t kRoundEnd = 10200 * kMs;
+constexpr uint64_t kNextGameplay = 13 * kSec;
+
+struct Rotation {
+	bool zero_seed = true;
+	uint64_t pause_from = kRoundEnd;     // the gameplay pause's first moment
+	uint64_t reset_at = 11 * kSec;       // the 0x25 (retail: before the host's load)
+	uint64_t reload_at = 11150 * kMs;    // the joiner's reload 0x48, answering the 0x25
+	uint64_t announce_at = 11300 * kMs;  // the host's load-end 0x7B
+	uint64_t resume_at = kNextGameplay;  // the next mission's first gameplay
+};
+
 void test_rotation_load_gap() {
-	auto rotate = [](wire::ParityTrace trace) {
-		std::vector<wire::ParityFrameState> kept;
+	auto rotate = [](wire::ParityTrace trace, Rotation r = {}) {
+		std::vector<wire::ParityFrameState> frames;
 		for (const wire::ParityFrameState &frame : trace.frames)
-			if (frame.ts_ns < 10 * kSec || frame.ts_ns > 13 * kSec)
-				kept.push_back(frame);
-		trace.frames = std::move(kept);
-		wire::ParityEvent header = trace.events.back();
-		header.dir = 'S';
-		header.full_tag = 0x00B;
-		header.settings_update = false;
-		header.ts_ns = 11500 * kMs;
-		header.frame = 99999;
-		header.body = bytes({ 0x42, 0x4D, 0x53, 0x0C });
-		header.length = header.body.size();
-		trace.events.push_back(header);
+			if (frame.ts_ns < r.pause_from || frame.ts_ns >= r.resume_at)
+				frames.push_back(frame);
+		trace.frames = std::move(frames);
+		std::vector<wire::ParityUplinkState> uplinks;
+		for (const wire::ParityUplinkState &uplink : trace.uplinks)
+			if (uplink.ts_ns < r.pause_from || uplink.ts_ns >= r.resume_at)
+				uplinks.push_back(uplink);
+		trace.uplinks = std::move(uplinks);
+		splice(trace, 'S', 0x07B, 1290 * kMs, text_bytes("Untitled "));
+		splice(trace, 'S', 0x061, kRoundEnd,
+				r.zero_seed ? bytes({ 0, 0, 0, 0 }) : bytes({ 0, 0, 0xE5, 0 }));
+		splice(trace, 'S', 0x01D, kRoundEnd, bytes({ 0, 0, 0, 0, 0, 1, 1 }));
+		splice(trace, 'S', 0x056, 10400 * kMs, bytes({ 0x9E, 0, 0, 0, 0x15, 1, 2 }));
+		splice(trace, 'S', 0x025, r.reset_at, {});
+		splice(trace, 'C', 0x048, r.reload_at, bytes({ 3, 0, 0, 0 }));
+		splice(trace, 'S', 0x07B, r.announce_at, text_bytes("Untitled "));
+		splice(trace, 'S', 0x00B, r.announce_at + 200 * kMs, bytes({ 0x42, 0x4D, 0x53, 0x0C }));
 		return trace;
 	};
 	auto gap = [](const Case &c) {
@@ -893,14 +938,58 @@ void test_rotation_load_gap() {
 				return true;
 		return false;
 	};
+	auto milestones = [](const Case &c) {
+		const VerdictRow *row = find_row(c.verdict.rows, 'B', "milestones", "");
+		return row ? row->value.subject : std::string();
+	};
+
 	const Case declared = judge_case(rotate(scripted(1)), rotate(scripted(2)), rotate(scripted(3)),
 			"RO", true);
-	check(!gap(declared), "a declared rotation's load gap is no STEADY_GAMEPLAY_GAP");
-	const VerdictRow *milestones = find_row(declared.verdict.rows, 'B', "milestones", "");
-	check(milestones && milestones->value.subject.find("S:0x0b next") != std::string::npos,
-			"the next mission's header joins the milestones");
+	check(!gap(declared), "the round-end pause of a declared rotation is no STEADY_GAMEPLAY_GAP");
+	expect_row(declared, 'B', "milestones", "", "pass");
+	const std::string order = milestones(declared);
+	size_t at = 0;
+	for (const char *name : { "S:0x61 round", "S:0x1d round", "S:0x56 round", "S:0x25 reset",
+				 "C:0x48 next", "S:0x7b next", "S:0x0b next", "S:0x0a next" }) {
+		const size_t found = order.find(name, at);
+		check(found != std::string::npos, std::string(name) + " follows in retail's order: " + order);
+		if (found != std::string::npos)
+			at = found;
+	}
+	check(order.find("0x5d") == std::string::npos, "no 0x5D belongs to the round end");
+
+	const Case seeded = judge_case(rotate(scripted(1), { false }), rotate(scripted(2), { false }),
+			rotate(scripted(3), { false }), "RO", true);
+	check(milestones(seeded).find("S:0x61 round") == std::string::npos,
+			"a nonzero seed ahead of the board is no round-end 0x61");
+
+	// A 0x25 held until the host's load end rides the 0x7B's datagram, and the joiner's
+	// 0x48 follows both: the inversion the milestones keep, not normalize.
+	const Case late_reset = judge_case(rotate(scripted(1)), rotate(scripted(2)),
+			rotate(scripted(3), { true, kRoundEnd, 11300 * kMs, 11400 * kMs, 11300 * kMs }), "OR",
+			true);
+	expect_row(late_reset, 'B', "milestones", "", "fail", "MILESTONE_MISMATCH");
+
+	const Case resumed = judge_case(rotate(scripted(1)), rotate(scripted(2)),
+			rotate(scripted(3), { true, 11 * kSec }), "RO", true);
+	check(gap(resumed), "gameplay after the round end leaves a later gap a STEADY_GAMEPLAY_GAP");
+
 	const Case undeclared = judge_case(rotate(scripted(1)), rotate(scripted(2)), rotate(scripted(3)));
 	check(gap(undeclared), "the same gap without a declared rotation is STEADY_GAMEPLAY_GAP");
+
+	// A window that ends inside the pause (the host still loading at the steady end):
+	// its tail is the pause, and the legs past the steady end are the capture's tail.
+	const Rotation tail{ true, kRoundEnd, 11 * kSec, 11150 * kMs, 20500 * kMs, 30 * kSec };
+	const Case cut = judge_case(rotate(scripted(1), tail), rotate(scripted(2), tail),
+			rotate(scripted(3), tail), "RO", true);
+	check(!gap(cut), "a window ending inside the round-end pause has no STEADY_GAMEPLAY_GAP");
+	for (const EvidenceRow &row : cut.verdict.evidence)
+		check(row.code != "STEADY_BOUNDARY_GAMEPLAY_MISSING",
+				"the pause holds the window end: " + row.run + " " + row.detail);
+	const std::string cut_order = milestones(cut);
+	check(cut_order.find("C:0x48 next") != std::string::npos &&
+					cut_order.find("S:0x7b next") == std::string::npos,
+			"milestones count through the steady end only: " + cut_order);
 }
 
 // A dead joiner sends no C2S 0x0C (window.dead_joiner_uplink): a gap or a window

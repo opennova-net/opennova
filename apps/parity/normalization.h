@@ -362,11 +362,21 @@ inline constexpr Normalization kNormalizations[] = {
 			"0x40 overlay bursts every 1792 ticks) is not counted over different lengths" },
 	{ "window.rotation_load_gap", MaskKind::Field, 'B', 0, "E2 mission change", 0,
 			"a host whose rotation plays its next mission inside the steady window (E2) "
-			"stops gameplay while that mission loads: the steady gap holding the run's "
-			"second S2C 0x0B (the next mission's header) is the load, not a stall, and the "
-			"round end and the next mission's start join the milestones (the first 0x5D, "
-			"the first 0x61 after it, the second 0x7B and 0x0B, the first 0x0A after that "
-			"header)" },
+			"pauses gameplay from the round end to the next mission: the round end sends "
+			"each playing slot a zero 0x61 seed and the 0x1D board and moves it to state 7 "
+			"(Server_ProcessRoundEnd @0x516790 / @0x516839 / @0x51685E), the host's 0x0A "
+			"goes to state-6 slots only (Server_SendEntityStateToPlayer @0x517BD2), the "
+			"joiner's 0x1D raises its round-over gate (@0x430858), which holds its 0x0C "
+			"(Client_ProcessNetworkFrame @0x42C467); after the 2790-tick linger (@0x5166C4) "
+			"the teardown sends each slot S2C 0x25 (@0x516385) before the host loads, the "
+			"joiner's reload answers with C2S 0x48 (Game_StartMission @0x524470), the host's "
+			"load end sends 0x7B (@0x526267) and the joiner's reload takes the next 0x0B. "
+			"The steady gap holding the round end's board (the run's first S2C 0x1D), or the "
+			"window's tail when it ends inside that pause, is the pause, not a stall, and "
+			"the milestones take retail's order through the steady end: the round end's 0x61 "
+			"and 0x1D, the 0x56 its board pull answers, the 0x25, the joiner's first 0x48 "
+			"after it, the first 0x7B and 0x0B after the 0x25, the first 0x0A after that "
+			"header" },
 	{ "window.dead_joiner_uplink", MaskKind::Field, 'C', 0x00C, "uplink gap while dead", 0,
 			"a joiner whose own body has no health sends no C2S 0x0C: the uplink build "
 			"returns nothing on a zero health word or the dead flag "
