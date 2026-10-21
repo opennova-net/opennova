@@ -107,7 +107,7 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 	assert_eq(matched, 3, "every decoded entity matched a sim entity")
 
 
-func test_items_attachment_follows_through_listen_client() -> void:
+func test_items_anchorless_attachment_holds_through_listen_client() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(
@@ -139,22 +139,33 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	assert_gte(child_base, 0, "the ewep child reached the listen client")
 	var spawn_x := snapshot[child_base + Simulation.PF_POS_X]
 
-	# The child has no 0x0A callback of its own. Its presented motion comes from
-	# the stock 0x0D parent relation recomposed against the decoded vehicle row.
+	# The child has no 0x0A callback of its own: the stock 0x0D parent relation
+	# poses it against the decoded vehicle row. With no anchor row the update
+	# copies the carrier's root pose only while the carrier's matrix bit is clear;
+	# the carrier's mover sets that bit at its tail every tick (on the host, whose
+	# Flags the 0x0D streams, and on every client), so the anchorless child keeps
+	# its own pose while the carrier moves.
+	# [orig: Entity_UpdateTransformAndTurret @0x440CA0 (the gate @0x4410EA..0x4410F1,
+	#  the root copy @0x441153..0x4411BC); Entity_UpdateVehiclePhysics @0x48AF00
+	#  (the tail @0x48D43E..0x48D451); NapiNPClientMsg_0x00D @0x432D7D]
 	sim.debug_set_world_entity_position(
 			vehicle.bms_id, Vector3(30, 0, 0))
 	sim.step()
 	snapshot = sim.get_present_snapshot()
 	child_base = -1
+	var vehicle_x := INF
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		if int(snapshot[base + Simulation.PF_TYPE_ID]) == 1419:
+		var type_id := int(snapshot[base + Simulation.PF_TYPE_ID])
+		if type_id == 1419:
 			child_base = base
-			break
-	assert_gte(child_base, 0, "the moving child remains presented")
+		elif type_id == 1291:
+			vehicle_x = snapshot[base + Simulation.PF_POS_X]
+	assert_gte(child_base, 0, "the child remains presented")
+	assert_gt(absf(vehicle_x - spawn_x), 15.0, "the decoded carrier moved")
 	if child_base >= 0:
-		assert_gt(absf(snapshot[child_base + Simulation.PF_POS_X] - spawn_x), 15.0,
-				"the child follows the decoded carrier instead of freezing at spawn")
+		assert_almost_eq(snapshot[child_base + Simulation.PF_POS_X], spawn_x, 0.001,
+				"an anchorless child holds its pose under a carrier whose matrix bit is set")
 
 
 func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() -> void:
