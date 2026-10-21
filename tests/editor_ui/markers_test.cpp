@@ -967,6 +967,16 @@ void test_uses_section() {
 	text = frame_of([] { ui_kit::finding_line(DiagnosticSeverity::Error, "Refused [orig: Rename_Plan @ 0x401000]."); });
 	CHECK(text.find("Refused.") != std::string::npos && text.find("[orig:") == std::string::npos,
 	      "a finding on one line, without its citations");
+	// A modal's text, the one wrapped prose the rule keeps: whole, on as many lines as a dialog's width takes.
+	const std::string question = "Remove the three files the project's trash holds for good, and the file history with "
+	                             "them, so that Undo file brings nothing back after?";
+	float high = 0.0f;
+	text = frame_of([&] {
+		ui_kit::dialog_text(question);
+		high = ImGui::GetItemRectSize().y;
+	});
+	CHECK(high > ImGui::GetTextLineHeight() * 1.5f && text.find("Undo file") != std::string::npos,
+	      "a modal's text wrapped at a dialog's width, whole");
 }
 
 } // namespace

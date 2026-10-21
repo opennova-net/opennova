@@ -8,7 +8,8 @@
 // - Cut: anything said twice, click-here tails, prose about the editor's own layout.
 // - Empty state: one line (empty_state); the how-to goes in its tooltip.
 // - Lengths: an inline line at most ~60 characters, drawn with clipped_text or quiet_text, never wrapped
-//   prose; a tooltip at most two sentences.
+//   prose (a modal's text is dialog_text; a raw ImGui::TextWrapped is a ratchet, scripts/lint/ratchet_counts.py's
+//   editor_ui_wrapped_text); a tooltip at most two sentences.
 // - Citations: in no window's words (the one tooltip drops them, a line shows without_citations of its
 //   words); the code, the RE records and the MCP's answers keep them.
 // - Session strings (a status, a refusal, a document's save words) are asserted by tests and read over
