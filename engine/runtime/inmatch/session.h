@@ -247,6 +247,11 @@ public:
 	// key's code, the medic call's), every other code to the embedder's dispatch
 	// (ClientRuntime::set_console_action_sink).
 	void dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3);
+	// Player_ResetLocalInput, which the Respawn key (case 55) and the Escape key (case
+	// 18, ahead of its spawn gate; the embedder's escape runs it) run: the input reset
+	// (D-NET-560) [orig: Input_HandleActionBinding @0x49AD40 - case 55 @0x49B20B, case 18
+	//  Player_ResetLocalInput @0x49B234 ahead of the spawn gate @0x49B243].
+	void reset_local_input();
 	// The deploy action (dispatch 12) with its pick's [i16] wire value: a dead
 	// local player under permanent death converts to a spectator (the C2S
 	// 0x51) when spectators are allowed and does nothing when they are not;
@@ -272,6 +277,9 @@ public:
 protected:
 	mission::MissionKernel *kernel_ = nullptr;
 	bool input_reset_pending_ = false; // take_input_reset
+	// A reset ran in this input frame (Input_ResetAllState's queue memset): the
+	// frame's later dispatches are gone (apply_input; D-NET-560).
+	bool input_queue_reset_ = false;
 };
 
 // The held / pressed action bits of InputPacket, the retail action rows the

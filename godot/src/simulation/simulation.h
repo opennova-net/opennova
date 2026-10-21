@@ -924,6 +924,10 @@ public:
 	// resets at its load) or a role action's (inmatch::Role::take_input_reset, the
 	// deploy action's head); reading clears both.
 	bool take_input_reset();
+	// The Escape key over live play runs Player_ResetLocalInput ahead of its own chain
+	// (engine inmatch::Role::reset_local_input; D-NET-560); its device legs reach the
+	// shell through take_input_reset.
+	void escape_input_reset();
 	// Monotonic initial-admission boundary: the host's S2C 0x0F has landed in the
 	// deploy wait, for any role (D-NET-678). Deploy-pick state is intentionally
 	// exposed separately.

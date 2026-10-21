@@ -472,9 +472,8 @@ void Simulation::install_console_seams() {
 		seams.version_text = header.version;
 		seams.title_text = header.title;
 	}
-	// SAVENFO: Entity_DumpUsageStatistics("debug.nfo"), fopen("w+") in text mode, each
-	// '\n' a CR LF on the disk [orig: Client_ProcessLocalCommand @0x520D4B ->
-	// Entity_DumpUsageStatistics @0x40E620, fopen @0x40E6B2].
+	// SAVENFO: debug.nfo in text mode, each '\n' a CR LF on the disk (engine
+	// inmatch/client_console.h ClientLocalCommandSeams::save_nfo carries the witness).
 	seams.save_nfo = [this]() {
 		if (!kernel_ || net_.log_devices == nullptr) return;
 		const char *name = "debug.nfo";
@@ -487,23 +486,22 @@ void Simulation::install_console_seams() {
 		}
 		(void)net_.log_devices->files().write(file, text, /*append=*/false);
 	};
-	// SAVEKEYS: keylist.key, deleted then opened "a+t", over the live binding table
-	// [orig: Client_ProcessLocalCommand @0x520D10 -> KeyBinding_DumpAllToFile @0x54C0A0,
-	//  DeleteFileA / fopen @0x54C0BA..0x54C0CA].
+	// SAVEKEYS: keylist.key over the live binding table, written whole (engine
+	// inmatch/client_console.h ClientLocalCommandSeams::save_keys carries the witness).
 	seams.save_keys = [this]() {
 		if (controls_model_.is_null() || net_.log_devices == nullptr) return;
 		(void)net_.log_devices->files().write("keylist.key",
 				opennova::controls::keylist_text(controls_model_->native_bindings()),
 				/*append=*/false);
 	};
-	// The WAC overlay toggle, the authority's alone (a joiner's runtime never flips one)
-	// [orig: WacScript_ToggleOverlayByName @0x4EE750 - @0x4EE757; D-NET-371].
+	// The WAC overlay toggle, the authority's alone: a joiner's runtime never flips one
+	// (engine wac/wac_system.h WacSystem::toggle_cheat carries the witness; D-NET-371).
 	seams.toggle_overlay = [this](const std::string &p_line) {
 		return kernel_ && kernel_->wac.toggle_cheat(p_line, !is_joiner(), kernel_->world);
 	};
 	runtime_->set_local_command_seams(std::move(seams));
-	// [orig: Client_ProcessConsoleCommand @0x520F49..0x520F6D - Server_HandleAdminNetlogCommand
-	//  (line, 0) @0x520F55, Server_HandleBanPuntCommand(line, 0) @0x520F63]
+	// The authority's arms, NETLOG then BAN / PUNT with no sender (engine
+	// inmatch/client_runtime.h set_authority_console carries the witness).
 	runtime_->set_authority_console([this](const std::string &p_line) {
 		inmatch::NapiNPServerCtx *ctx = host_ctx();
 		if (ctx == nullptr) return false;
@@ -1035,6 +1033,12 @@ bool Simulation::ingame_restart() {
 
 bool Simulation::is_joined_in_match() const {
 	return is_joiner() && runtime_ && runtime_->in_match();
+}
+
+void Simulation::escape_input_reset() {
+	// The Escape key's reset (engine inmatch/session.h Role::reset_local_input carries
+	// the witness).
+	if (role_ != nullptr && kernel_) active_role().reset_local_input();
 }
 
 bool Simulation::take_input_reset() {

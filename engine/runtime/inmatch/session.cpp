@@ -50,14 +50,39 @@ void Role::apply_input(const TickInput &input) {
 	// this frame's own events behind them (ClientRuntime::queue_console_action)
 	// [orig: Input_ProcessFrame @0x49D520 - Input_ProcessPlayerFrame @0x49D58B, the
 	//  drain @0x49D599..0x49D5E7 -> Input_HandleActionBinding @0x49D5D8].
+	input_queue_reset_ = false;
 	if (runtime != nullptr)
-		for (const ClientRuntime::ConsoleAction &action : runtime->take_console_actions())
+		for (const ClientRuntime::ConsoleAction &action : runtime->take_console_actions()) {
 			dispatch_console_action(action.code, action.p1, action.p2, action.p3);
+			if (input_queue_reset_) break; // the queue's memset ends the drain (below)
+		}
 	if (kernel.world.spectator.death_screen && runtime != nullptr) {
 		apply_death_screen_input(kernel, *runtime, joiner, input.player);
 		return;
 	}
 	const world::PlayerInput &movement = input.player.movement;
+	// The Respawn key's row runs among the frame's key rows, which the devices queue
+	// ahead of the mouse-axis events, the toggles and the deferred dispatches.
+	if (!input_queue_reset_ && (input.player.pressed_action_bits & PRESSED_RESPAWN) != 0)
+		request_respawn();
+	// A reset this frame (Player_ResetLocalInput -> Input_ResetAllState, the Respawn
+	// key's or a console-queued one's) memsets the event queue in the middle of the
+	// drain, so the frame's later events never dispatch (the look, the weapon rows,
+	// the medic call, the ToSpecial and deferred dispatches), and it clears the key
+	// state, so a key held through it reads up (its held rows queue nothing) until its
+	// next key-down; the devices' own reset is the embedder's (take_input_reset)
+	// (D-NET-560). [orig: Player_ResetLocalInput @0x4B2B80 - Input_ResetAllState
+	//  @0x4B2B99; Input_ResetAllState @0x497ED0 - the queue's memset @0x497EE6,
+	//  Input_ClearKeyState; Input_ProcessFrame @0x49D520 - the drain's count test
+	//  @0x49D5E0, the loop @0x49D5E7; Input_ProcessPlayerFrame @0x49D4C0 - the key rows
+	//  @0x49D4C6, the mouse axis @0x49D4D8, the toggles @0x49D4DE; Input_FlushDeferredEvents
+	//  @0x49D591; Input_ProcessAnalogBindings @0x4995F0]
+	if (input_queue_reset_) {
+		kernel.local.set_movement_keys(false, false, false, false, false, false, false);
+		kernel.local.set_view_keys(false, false, false, false, false);
+		kernel.local.set_weapon_input(false, false, false);
+		return;
+	}
 	kernel.local.set_movement_keys(movement.forward, movement.back, movement.left,
 			movement.right, movement.lean_left, movement.lean_right, movement.jump);
     kernel.local.set_view_keys(movement.free_look, movement.look_up,
@@ -72,7 +97,6 @@ void Role::apply_input(const TickInput &input) {
 	// cooldown live in request_medic).
 	if ((input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
 		request_medic();
-	if ((input.player.pressed_action_bits & PRESSED_RESPAWN) != 0) request_respawn();
 	// The ToSpecial dispatches, with the deferred ones, once per outer frame
 	// on its first tick, as retail's input frame precedes the logic tick
 	// [orig: Input_ProcessFrame @0x49D520 -> Input_FlushDeferredEvents @0x49D591].
@@ -154,7 +178,7 @@ bool Role::request_respawn() {
 	// The input reset, then in a session on a peer the bodiless 0x41
 	// [orig: case 55 -- Player_ResetLocalInput @0x49B20B, is_in_session @0x49B210,
 	//  is_mp_session_peer @0x49B21D, NetPacket_SendRequestRespawn @0x49B22A].
-	kernel.local.reset_key_input();
+	reset_local_input();
 	return kernel.world.rules.mp_session && send_respawn_request();
 }
 
@@ -177,6 +201,24 @@ void Role::dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t
 	}
 	if (ClientRuntime *runtime = client_runtime())
 		runtime->dispatch_to_console_action_sink({code, p1, p2, p3});
+}
+
+void Role::reset_local_input() {
+	// Player_ResetLocalInput: the local entity and its def, then Input_DisableScrollLock
+	// (no auto-run here: D-NET-563), Input_ResetAllState (the deferred queue here; the key
+	// state and the key-press latches the embedder's devices, take_input_reset; the event
+	// queue's memset, which ends the frame's drain, apply_input's input_queue_reset_),
+	// then g_InputFlags, the pack and the idle snap (LocalPlayer::reset_key_input)
+	// (D-NET-560). [orig: Player_ResetLocalInput @0x4B2B80 - the entity and def tests
+	//  @0x4B2B85..0x4B2B8D, Input_DisableScrollLock @0x4B2B91, Input_ResetAllState
+	//  @0x4B2B99, @0x4B2B9E..0x4B2BC2]
+	mission::MissionKernel &kernel = *kernel_;
+	const world::Entity *local = kernel.local.player();
+	if (local == nullptr || !local->has_item_def) return;
+	kernel.local.clear_deferred_input();
+	input_reset_pending_ = true;
+	input_queue_reset_ = true;
+	kernel.local.reset_key_input();
 }
 
 bool Role::request_deployment_pick(uint16_t wire_value) {

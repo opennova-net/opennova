@@ -1554,6 +1554,11 @@ func _on_camera_escape() -> void:
 	# hud_toggles.h hud_toggles_escape / hud_round_over_key).
 	if _end_flow.is_round_ended():
 		return
+	# Over live play the Escape key's action first resets the input (its
+	# Player_ResetLocalInput, ahead of its spawn gate; engine
+	# inmatch::Role::reset_local_input, D-NET-560).
+	if _state == State.WORLD and _world != null and _world.get_sim() != null:
+		_world.get_sim().escape_input_reset()
 	# Over live play the HUD's escape chain closes one open HUD window first;
 	# only with none open does the in-game menu open.
 	if _state == State.WORLD and _hud_presenter != null and _hud_presenter.handle_escape():

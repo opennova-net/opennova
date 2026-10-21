@@ -2491,11 +2491,21 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 		body->inf.anim_state = w::anim_state::kWalkForward;
 		lp.input_flags.flags = w::kInputFlagForward;
 		lp.move_order = w::pack_player_body_input(lp.input_flags.flags, lp.input);
+		// The same frame holds the forward key: the reset clears the key state, so it
+		// reads up, and the queue's memset drops the frame's later events; the devices'
+		// own reset is owed to the embedder (D-NET-560) [orig: Player_ResetLocalInput
+		// @0x4B2B80 - Input_ResetAllState @0x4B2B99; Input_ResetAllState - the memset
+		// @0x497EE6; Input_ProcessFrame - the count test @0x49D5E0].
+		press.player.movement.forward = true;
+		(void)h.role.take_input_reset();
 		h.role.apply_input(press);
 		ok &= expect(body->inf.anim_state == w::anim_state::kIdle &&
 				lp.input_flags.flags == 0 && lp.input_flags.prev == 0 &&
 				lp.move_order.direction_bits == 0 && !lp.move_order.moving,
 				"respawn key: the input reset (word, pack, idle 43)");
+		ok &= expect(!lp.input.forward && h.role.take_input_reset(),
+				"respawn key: a key held through the reset reads up; the devices' reset is owed");
+		press.player.movement.forward = false;
 		for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
 		ok &= expect(respawn_sent(h.socket) == in_session,
 				in_session ? "respawn key: in a session one bodiless 0x41 leaves"
