@@ -47,9 +47,10 @@ static_assert(kDescriptionFlags == 0xA0);
 // SendChatMessage keeps the first pending event and sends none once the
 // description went [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0, the
 // sent byte conn+0x70D @0x4C7F58..0x4C7F5F, the pending slot conn+0x654
-// @0x4C7FF2..0x4C8004]. Closing the gameplay predicate here prevents later
-// producers from following it with an ordinary frame while HostOwner still has
-// one chance to flush the record.
+// @0x4C7FF2..0x4C8004]. The description's sent byte then closes the connection's
+// queue: every later message to it returns unqueued, so nothing follows the record
+// (D-NET-NEW-L1-27) [orig: CNapiNPConnection_SendDescriptionOnce @0x629750 - the
+// store @0x629772; CNapiNPConnection_QueueMessage @0x628640 - its test @0x62864D].
 bool stage_host_disconnect(
 		NapiNPConnection &conn, const DisconnectEvent &event) {
 	if (conn.host_disconnect_sent || conn.type != NapiNPConnection::kTypeServerSide ||
@@ -60,6 +61,7 @@ bool stage_host_disconnect(
 			connection_description_to_bytes(event),
 			/*reliable=*/true, kDescriptionFlags,
 			/*capacity_exempt=*/true);
+	conn.link.transport->close_host_queue();
 	conn.host_disconnect_sent = true;
 	return true;
 }

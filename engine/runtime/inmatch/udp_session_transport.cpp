@@ -25,6 +25,9 @@ bool UdpSessionTransport::unframe(const std::vector<uint8_t> &raw, Datagram &out
 void UdpSessionTransport::host_send(
 		uint8_t tag, std::vector<uint8_t> body, bool reliable,
 		uint8_t protocol_flags_raw, bool capacity_exempt, uint32_t retention_flushes) {
+	// Once the description went, every later message returns unqueued (D-NET-NEW-L1-27).
+	// [orig: CNapiNPConnection_QueueMessage @0x628640 - the sent byte's test @0x62864D..0x628654]
+	if (host_queue_closed_) return;
 	outbound_.push_back(
 			Datagram{tag, std::move(body), reliable, protocol_flags_raw,
 					capacity_exempt, retention_flushes});
