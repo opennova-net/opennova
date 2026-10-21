@@ -71,7 +71,7 @@ inline constexpr char kMovingOnLine[] = "NWU MOVING ON TO HOSTING OR PLAYING..."
 // before it (Input_ResetKeyQueue @0x4D54A1); each frame the periodic update, the timeout test, then
 // the key read (Input_DequeueKeyEvent @0x4D54DA): ESC writes kPlayEscapedLine with NWEC03
 // (@0x4D558A), a timeout kPlayTimeoutLine with NWEC02 (@0x4D553E), and either runs
-// CGameSession_StopPlaying (the call @0x4D5592); then any state but 8 writes
+// CGameSession_StopPlaying (the call @0x4D5597); then any state but 8 writes
 // play_not_playing_line (@0x4D55E7) and maps a result's MsgCode over the tag (@0x4D55FE).
 // The legs' two waits are GetTickCount loops inside the menu frame that runs ConnectOrHost, each
 // until its result or 60 s, so that frame (and its remote-admin pump) ends only with the wait: the
@@ -91,8 +91,9 @@ inline constexpr char kMovingOnLine[] = "NWU MOVING ON TO HOSTING OR PLAYING..."
 // the word is nonzero (a refusal, a ServerStopPlaying, a punt; the play request cleared it, so
 // the reap and a reconnect's state leave the tag).
 // [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the preset @0x4D4F89, the loop's state test
-//  @0x4D54E7..0x4D54EE, StopPlaying @0x4D5592, `cmp dword_B600FC,8` @0x4D559C, @0x4D55E7, the
-//  word's zero test @0x4D55F7..0x4D55FE, the map @0x4D5604..0x4D569F]
+//  @0x4D54E7..0x4D54EE, CGameSession_StopPlaying (the call @0x4D5597), `cmp dword_B600FC,8`
+//  @0x4D559C, @0x4D55E7, the word's zero test @0x4D55F7..0x4D55FE, the map
+//  @0x4D5604..0x4D569F]
 inline std::string play_leg_exit_tag(const std::string &tag, int msg_code_word) {
 	return msg_code_word != 0 ? novaworld_play_error_tag(msg_code_word) : tag;
 }

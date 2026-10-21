@@ -1524,7 +1524,8 @@ bool ClientSession::send_play_request(int currently_playing) {
 	play_state_ = PlayState::Requested;
 	play_result_ = ServerResultFields{};
 	set_lobby_state(7);
-	server_msg_code_ = 0; // [orig: StartPlayingSession @0x4D460D, after its SetState(7)]
+	// [orig: CNapiGameSession_StartPlayingSession @0x4D45E0 (@0x4D460D, after its SetState(7))]
+	server_msg_code_ = 0;
 	if (queue_lobby_record(make_client_play_request(currently_playing, cookie_vars(), play_setup_)))
 		return true;
 	play_state_ = previous;
@@ -1563,7 +1564,7 @@ std::vector<uint8_t> ClientSession::build_goodbye() {
 	// The reset drops the hosting/playing word to 0 (the reconnect disarmed with it), and the
 	// connection's teardown runs the disconnect callback. [orig: @0x4d08fc..0x4d0927]
 	session_role_ = kSessionRoleNone;
-	server_msg_code_ = 0; // [orig: ResetToDisconnected @0x4D08EA]
+	server_msg_code_ = 0; // [orig: CNapiGameSession_ResetToDisconnected @0x4D0890 (@0x4D08EA)]
 	on_disconnected();
 	receive_clock_armed_ = false;
 	// The connection is destroyed and its enumerator with it, so a probe window open at the

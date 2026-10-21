@@ -262,9 +262,10 @@ void check_connect_error_tags() {
 // A first connect no 0x81 answers: the periodic update gives it up 20 s after the session's
 // state-1 entry (not at 20 s, past it), the probe stops (no 0x41 from then on, a 0x81 for the
 // connection neither claimed nor read), the connect poll ends in that frame, and the validation
-// wait, the menu's next frame, reports the give-up word's NWEC42, once. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the 0x4E20 compare
-//  @0x4D44A3, +0x12C = 1 @0x4D44B1; CNapiGameSession_PumpConnection @0x4D0A40 - NapiTimer_Stop
-//  @0x4D0A71; CGameSession_WaitForNWUValidation @0x4D0F20 - -17 @0x4D111C]
+// wait, the menu's next frame, reports the give-up word's NWEC42, once.
+// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the 0x4E20 compare @0x4D44A3, +0x12C
+//  = 1 @0x4D44B1; CNapiGameSession_PumpConnection @0x4D0A40 - NapiTimer_Stop @0x4D0A71;
+//  CGameSession_WaitForNWUValidation @0x4D0F20 - -17 @0x4D111C]
 void check_state_one_give_up() {
 	Rig rig;
 	rig.start(10);
@@ -482,7 +483,8 @@ void log_in(Rig &rig, const std::vector<uint8_t> &auth, uint32_t at = 300) {
 // A verify the service rejects (ServerVerifyResult Success=0): the rejection runs the connect's
 // abort, the connection tearing down with its 0x46 burst, and drops the session to state 0, so
 // the verify poll ends and the connection wait, the menu's next frame, reports the session not
-// up, NWEC48, once: the session's own error is not reported while the poll runs. The driver then drops the connection.
+// up, NWEC48, once: the session's own error is not reported while the poll runs. The driver then
+// drops the connection.
 // [orig: CNapiGameSession_HandleConnectVerifyResponse @0x4d5800 - CNapiGameSession_PumpConnection
 //  @0x4D0A40 called @0x4d58ac, SetState(0) @0x4d58e1; CNapiGameSession_PollConnectPhase2
 //  @0x4D4D70 - the states @0x4D4D90..0x4D4D9E; CGameSession_WaitForNWUConnection @0x4D1230 - bit 2
@@ -776,9 +778,10 @@ void check_short_protocol_packets_keep_the_connection() {
 // 500 ms from the stamp (ahead of the reply's processing on the frame the reply lands), the
 // reply's size and every line its reader returns (an empty one too), the reflected address, and
 // ConnectToNovaWorld's lines around the session's start; then the validation wait's and the
-// connection wait's, each in the frame after the poll ahead of it ends. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - @0x4CE84D, @0x4CE88C,
-//  @0x4CEAE3; CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CEDF4, @0x4CEF02, @0x4CF037,
-//  @0x4CF083, @0x4CF10C, @0x4CF884; CNapiGameSession_ConnectToNovaWorld @0x4D4640 - @0x4D46C3,
+// connection wait's, each in the frame after the poll ahead of it ends.
+// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - @0x4CE84D, @0x4CE88C, @0x4CEAE3;
+//  CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CEDF4, @0x4CEF02, @0x4CF037, @0x4CF083,
+//  @0x4CF10C, @0x4CF884; CNapiGameSession_ConnectToNovaWorld @0x4D4640 - @0x4D46C3,
 //  @0x4D4751, @0x4D4B0C, @0x4D4BC2; CGameSession_WaitForNWUValidation @0x4D0F20 - @0x4D0F79,
 //  @0x4D11E3; CGameSession_WaitForNWUConnection @0x4D1230 - @0x4D13D3]
 void check_connect_log_gate_and_connect() {
@@ -1220,8 +1223,9 @@ void check_command_line_host_gate_wait() {
 // [orig: CNapiGateManager_ProcessResponse @0x4CED20 - 2 @0x4CF8AE, -9 @0x4CF6AC;
 //  UI_ProcessLANSessionStateMachine @0x558DE0 - state 2 @0x55906B..0x559094, state 3
 //  @0x5590B4..0x5590BB (NWEC25 @0x5590FD, state 0 @0x559111), 4 set @0x559131, the connect
-//  (the call @0x559156), 5 set @0x55917E, the pump @0x558DFA; CNapiNPConnection_PumpEnumeratorAndSend
-//  @0x6290C0 - the stamp test @0x629108..0x629119, the stamp @0x62911F;
+//  (the call @0x559156), 5 set @0x55917E, the pump @0x558DFA;
+//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the stamp test @0x629108..0x629119, the
+//  stamp @0x62911F;
 //  CNapiGateManager_WaitForConnect @0x4CE6B0 - the kept gate state 2 @0x4CE6F3]
 void check_gate_menu_frames() {
 	const std::string reply = "VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n";

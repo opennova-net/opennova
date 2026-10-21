@@ -409,8 +409,9 @@ public:
 	// The GSID the successful ServerHostResult's HostCommands carried (128-char cap): the
 	// value the in-match host publishes as its 0x81 SUS1. Empty until Established, and again
 	// from a connection teardown until a re-host's ServerHostResult re-supplies it.
-	// [orig: HandleHostVerifyResponse @0x4d59d0 @0x4d5bd6..0x4d5c0f -> server_user_string1;
-	//  CNapiGameSession_OnDisconnect @0x4cfc3b..0x4cfc54 clears both]
+	// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D59D0 (@0x4D5BD6..0x4D5C0F) ->
+	//  server_user_string1; CNapiGameSession_OnDisconnect @0x4CFAA0 (@0x4CFC3B..0x4CFC54) clears
+	//  both]
 	const std::string &host_gsid() const { return host_gsid_; }
 	int host_requires_join_ticket() const { return host_requires_join_ticket_; }
 
@@ -444,11 +445,13 @@ public:
 	uint32_t session_flags() const { return session_flags_; }
 	// The hosting/playing word (session+0x128, dword_B60108). Only the verify replies, the stop
 	// legs, the punt and the local reset write it; a peer close or the reap leaves it as it was.
-	// [orig: the writers HandleConnectVerifyResponse @0x4d5800, HandleHostVerifyResponse
-	//  @0x4d59d0, HandleVerifyResponse @0x4d1e00, HandleServerMessage @0x4d1c50,
-	//  HandleServerDisconnectMsg @0x4d1fa0, HandlePuntNotification @0x4d20b0,
-	//  CGameSession_StopHosting @0x4d0e60, CGameSession_StopPlaying @0x4d0ec0,
-	//  ResetToDisconnected @0x4d0890; the reader Game_ProcessMainFrame @0x52656d]
+	// [orig: the writers CNapiGameSession_HandleConnectVerifyResponse @0x4D5800,
+	//  CNapiGameSession_HandleHostVerifyResponse @0x4D59D0, CNapiGameSession_HandleVerifyResponse
+	//  @0x4D1E00, CNapiGameSession_HandleServerMessage @0x4D1C50,
+	//  CNapiGameSession_HandleServerDisconnectMsg @0x4D1FA0,
+	//  CNapiGameSession_HandlePuntNotification @0x4D20B0, CGameSession_StopHosting @0x4D0E60,
+	//  CGameSession_StopPlaying @0x4D0EC0, CNapiGameSession_ResetToDisconnected @0x4D0890; the
+	//  reader Game_ProcessMainFrame @0x5263F0 (@0x52656D)]
 	static constexpr int32_t kSessionRoleNone = 0;
 	static constexpr int32_t kSessionRoleVerified = 1;
 	static constexpr int32_t kSessionRoleHosting = 2;
@@ -465,11 +468,15 @@ public:
 	// leg's requested state without its success (host_leg_exit_tag / play_leg_exit_tag,
 	// connect_or_host.h). 0 at each connection's start and the reset; the play request clears
 	// it, the host request does not.
-	// [orig: the writers HandleHostVerifyResponse @0x4D59D0 (the refusal @0x4D5AE1),
-	//  HandleVerifyResponse @0x4D1E00 (@0x4D1EDC), HandleServerMessage @0x4D1C50 (@0x4D1D17),
-	//  HandleServerDisconnectMsg @0x4D1FA0 (@0x4D2041), HandlePuntNotification @0x4D20B0
-	//  (@0x4D2177); the clears InitNPConnection @0x4D40D9, ResetToDisconnected @0x4D08EA,
-	//  StartPlayingSession @0x4D460D; the readers ConnectOrHost @0x4D51F3 and @0x4D55F7]
+	// [orig: the writers CNapiGameSession_HandleHostVerifyResponse @0x4D59D0 (the refusal
+	//  @0x4D5AE1), CNapiGameSession_HandleVerifyResponse @0x4D1E00 (@0x4D1EDC),
+	//  CNapiGameSession_HandleServerMessage @0x4D1C50 (@0x4D1D17),
+	//  CNapiGameSession_HandleServerDisconnectMsg @0x4D1FA0 (@0x4D2041),
+	//  CNapiGameSession_HandlePuntNotification @0x4D20B0 (@0x4D2177); the clears
+	//  CNapiGameSession_InitNPConnection @0x4D3BE0 (@0x4D40D9),
+	//  CNapiGameSession_ResetToDisconnected @0x4D0890 (@0x4D08EA),
+	//  CNapiGameSession_StartPlayingSession @0x4D45E0 (@0x4D460D); the readers
+	//  CNapiGameSession_ConnectOrHost @0x4D4F10 (@0x4D51F3, @0x4D55F7)]
 	int server_msg_code() const { return server_msg_code_; }
 
 	// ---- the first connect's give-ups ---------------------------------------

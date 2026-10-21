@@ -409,13 +409,13 @@ private:
 	GateMenu gate_menu_ = GateMenu::Off;
 	int gate_result_ = 0;
 	std::vector<uint8_t> first_announce_;
-	// The first connect's poll, retail's NovaWorld menu running one state a frame: PollConnectPhase1
-	// (5) until it returns 0, the validation wait (6), PollConnectPhase2 (7) until it returns 0, the
-	// connection wait (8), the web lobby's open (9); the command-line host's blocking sequence runs
-	// each wait at once after its poll's loop and opens no web lobby. Its stamp (dword_B5F444), its
-	// timed-out flag (dword_B5F448) and the give-up word the periodic update sets (session+0x12C:
-	// 1 the state-1 give-up). The stage datagram is re-sent every retransmit interval while it
-	// runs (states 5..8).
+	// The first connect's poll, retail's NovaWorld menu running one state a frame:
+	// PollConnectPhase1 (5) until it returns 0, the validation wait (6), PollConnectPhase2 (7)
+	// until it returns 0, the connection wait (8), the web lobby's open (9); the command-line
+	// host's blocking sequence runs each wait at once after its poll's loop and opens no web
+	// lobby. Its stamp (dword_B5F444), its timed-out flag (dword_B5F448) and the give-up word the
+	// periodic update sets (session+0x12C: 1 the state-1 give-up). The stage datagram is re-sent
+	// every retransmit interval while it runs (states 5..8).
 	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - states 5..9 @0x55919E..0x5592F2;
 	//  CNapiGameSession_ConnectAndWaitForValidation @0x4D4EC0 - the loops @0x4D4ED0..0x4D4ED9 /
 	//  @0x4D4EE6..0x4D4EEF, the waits @0x4D4EDD / @0x4D4EF3]

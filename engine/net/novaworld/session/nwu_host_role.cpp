@@ -66,7 +66,7 @@ void NwuHostRole::tick(uint32_t now_ms) {
 // [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the 0xEA60 compare @0x4D518E (`ja`
 //  @0x4D5193), "%s : NWU HOSTING FAILED...TIMEOUT WAITING FOR REPLY FROM NOVAWORLD!!!" @0x4D5245,
 //  CGameSession_StopHosting (the call @0x4D5252), "%s : NWU HOSTING TIMEOUT!!!" @0x4D528E,
-//  NWEC52 @0x4D52A4; the state test @0x4D5195..0x4D519D, `cmp eax,6` @0x4D519F, "%s : NWU
+//  NWEC52 @0x4D529F; the state test @0x4D5195..0x4D519D, `cmp eax,6` @0x4D519F, "%s : NWU
 //  HOSTING FAILED...WE'RE NOT IN HOSTING STATE!!!" @0x4D51DF, the +0x130 switch
 //  @0x4D51F3..0x4D5207; Game_HostMultiplayerSession @0x4A65A0 - the untimed wait
 //  @0x4A671D..0x4A6742, state 6 @0x4A6744, else CNapiGameSession_ResetToDisconnected @0x4A674F]
