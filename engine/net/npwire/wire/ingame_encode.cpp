@@ -607,6 +607,11 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
 				append(encode_infantry_compact_record(rec.infantry));
 				break;
 			case EntityClass::NoNetworkCallback:
+			case EntityClass::Guided:
+				// A guided record is its header alone: the serializer's mode-1 call with
+				// format 11 writes nothing (D-NET-NEW-L1-28) [orig:
+				// NetPacket_SerializeEntityStatesToPacket @0x50F070 - @0x50F2C7 / @0x50F2CE,
+				// the call @0x50F2E2; Entity_SerializeGuidedMissileState @0x447C50 - @0x447C80].
 				w.u8(1);
 				w.u16(rec.handle);
 				w.u16(rec.type_id);
