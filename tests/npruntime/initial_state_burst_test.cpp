@@ -77,6 +77,10 @@ int main_impl() {
 	auto world_storage = std::make_unique<w::World>();
 	w::World &world = *world_storage;
 	w::AiSystem &ai = world.ai;
+	// An in-session host: the join's own 0x0A (D-NET-501) rides retail's is_in_session, which
+	// ours reads as the world's session fact (D-NET-NEW-L1-19) [orig: Server_OnPlayerJoin
+	// @0x51A824..0x51A82D].
+	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
@@ -535,6 +539,9 @@ int main_impl() {
 		auto w3_storage = std::make_unique<w::World>();
 		w::World &w3 = *w3_storage;
 		w::AiSystem &ai3 = w3.ai;
+		// A remote joiner's host is in session: the join's network reset rides is_in_session
+		// (D-NET-NEW-L1-19) [orig: PlayerSlot_ResetNetworkState @0x4F9FD3..0x4F9FD9].
+		w3.rules.mp_session = true;
 		w3.registry.configure_pool(0, 16);
 		w3.registry.configure_pool(3, 16);
 		{

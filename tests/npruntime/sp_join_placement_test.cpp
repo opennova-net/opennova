@@ -4,6 +4,11 @@
 // the join's placement moves the body to the start marker again.
 // [orig: Server_OnPlayerJoin `cmp g_NapiNPCtx.is_in_session, ebx` @0x51A777, `jz`
 //  @0x51A77D, the Server_PositionPlayerForSpawn call @0x51A786]
+// The single player's join also sends its own loopback no 0x0A and leaves its slot's
+// network words alone, both behind the same is_in_session test.
+// [orig: Server_OnPlayerJoin `cmp g_NapiNPCtx.is_in_session, ebx` @0x51A824, `jz` @0x51A82A,
+//  the Server_SendEntityStateToPlayer call @0x51A82D; PlayerSlot_ResetNetworkState @0x4F9FD0,
+//  `cmp` @0x4F9FD3, `jz` @0x4F9FD9, the 744 countdown @0x4FA021]
 // The host's own add files no /PROFILE row (the local arm jumps past it); the mission
 // start's roster pass files it. [orig: Server_PlayerAdd - the local arm @0x51CC29 ->
 //  `jmp loc_51D314` @0x51CC60, past the write @0x51D2FD..0x51D30F]
@@ -15,6 +20,8 @@
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
+#include <runtime/inmatch/server_tick.h>
+#include <net/npwire/ingame_message_id.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
 #include <net/npwire/serverlog_decode.h>
@@ -45,7 +52,13 @@ bool expect(bool cond, const char *msg) {
 // A Deathmatch host's own player on a mission with one DM start marker: the add
 // places the body on the marker; the body then stands elsewhere (its motor moved
 // it) when its join runs. Returns the body's x word after the join.
-int32_t join_x_after_moving(bool mp_session) {
+struct JoinResult {
+	int32_t x = 0;
+	int frames = 0;              // S2C 0x0A records among the join's sends
+	uint32_t control_countdown = 0; // the slot's quartet countdown after the join
+};
+
+JoinResult join_after_moving(bool mp_session) {
 	auto world = std::make_unique<w::World>();
 	world->registry.configure_pool(0, 16);
 	world->registry.configure_pool(3, 16);
@@ -67,12 +80,18 @@ int32_t join_x_after_moving(bool mp_session) {
 	inmatch::Server_InitNewRoundState(ctx);
 	expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, *world) == 1, "the own add runs");
 	w::Entity *body = world->registry.get(world->cached.local_player);
-	if (!expect(body != nullptr, "the own add binds the local player")) return 0;
+	if (!expect(body != nullptr, "the own add binds the local player")) return {};
 	expect(body->position.x.q16 == 100 * 65536, "the add places the body on the marker");
 	body->position.x.q16 = 5 * 65536;
 	inmatch::NapiNPConnection &own = ctx.np_protocol.connection_list.front();
-	(void)inmatch::Server_OnPlayerJoin(ctx, own, 1, {0, 0});
-	return world->registry.get(world->cached.local_player)->position.x.q16;
+	expect(own.slot_state != inmatch::PlayerSlotState::Joined, "the join is the slot's state-6 entry");
+	own.reply.control_request_countdown = 5; // a word the state-6 entry's reset would reseed
+	JoinResult out;
+	for (const inmatch::InitialStateMessage &m : inmatch::Server_OnPlayerJoin(ctx, own, 1, {0, 0}))
+		out.frames += m.tag == s2c::PER_FRAME_UPDATE ? 1 : 0;
+	out.x = world->registry.get(world->cached.local_player)->position.x.q16;
+	out.control_countdown = own.reply.control_request_countdown;
+	return out;
 }
 
 class MemoryFiles final : public inmatch::ServerFileSink {
@@ -117,13 +136,20 @@ void test_the_own_add_files_no_profile_row() {
 }
 
 void test_the_single_player_join_keeps_the_body_where_it_stands() {
-	expect(join_x_after_moving(/*mp_session=*/false) == 5 * 65536,
-			"single player: the join places nothing (is_in_session 0 @0x51A777)");
+	const JoinResult r = join_after_moving(/*mp_session=*/false);
+	expect(r.x == 5 * 65536, "single player: the join places nothing (is_in_session 0 @0x51A777)");
+	expect(r.frames == 0, "single player: the join sends its own loopback no 0x0A (@0x51A82A)");
+	expect(r.control_countdown == 5,
+			"single player: the state-6 entry resets no network word (@0x4F9FD9)");
 }
 
 void test_the_session_join_places_the_body_again() {
-	expect(join_x_after_moving(/*mp_session=*/true) == 100 * 65536,
+	const JoinResult r = join_after_moving(/*mp_session=*/true);
+	expect(r.x == 100 * 65536,
 			"session: the join's no-pick placement puts the body on the marker (@0x51A786)");
+	expect(r.frames == 1, "session: the join sends the slot one 0x0A ahead of the 0x0F (@0x51A82D)");
+	expect(r.control_countdown == inmatch::CONTROL_REQUEST_PERIOD_TICKS,
+			"session: the state-6 entry seeds the quartet countdown (@0x4FA021)");
 }
 
 } // namespace

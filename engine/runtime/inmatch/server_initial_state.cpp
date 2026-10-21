@@ -653,12 +653,15 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 // not on its first), and the loaded-model reply stamp set to the frame clock. The other words
 // it resets (+0x178F0, +0x178F8 = 62, +0x17CFC, the two 512-byte blocks, +0x17D10, +0x17D14,
 // +0x17D1C) have no reader here. (D-NET-532)
-// [orig: PlayerSlot_ResetNetworkState @0x4F9FD0 - is_in_session @0x4F9FD9, dwords 22486..22493
-//  @0x4F9FF1..0x4FA01B, the countdown +0x15F20 = 744 @0x4FA021, +0x15F24 = 0 @0x4FA02B,
-//  +97560 = dword_A87060 @0x4FA073; called from Server_OnPlayerJoin @0x51A72B]
-void PlayerSlot_ResetNetworkState(const NapiNPServerCtx &ctx, NapiNPConnection &conn,
+// Retail's is_in_session is 0 in the single player, whose own slot it leaves alone; ours's
+// single-player listen host keeps ctx.is_in_session 1, so the session fact is the world's
+// (world.rules.mp_session, as the join's placement reads it, D-NET-NEW-L1-19).
+// [orig: PlayerSlot_ResetNetworkState @0x4F9FD0 - is_in_session `cmp` @0x4F9FD3, `jz` @0x4F9FD9,
+//  dwords 22486..22493 @0x4F9FF1..0x4FA01B, the countdown +0x15F20 = 744 @0x4FA021, +0x15F24 = 0
+//  @0x4FA02B, +97560 = dword_A87060 @0x4FA073; called from Server_OnPlayerJoin @0x51A72B]
+void PlayerSlot_ResetNetworkState(const world::World &world, NapiNPConnection &conn,
 		uint32_t now_tick) {
-	if (!ctx.is_in_session) return;
+	if (!world.rules.mp_session) return;
 	SessionReplyState &st = conn.reply;
 	st.time_sync_host_baseline_ms = 0;
 	st.time_sync_round_host_ms = 0;
@@ -722,7 +725,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		// [orig: +418 = 0 @0x51A71F, +89860 = 0 @0x51A725]
 		st.client_quality = 0;
 		st.client_quality_dirty = false;
-		PlayerSlot_ResetNetworkState(ctx, conn, now_tick); // [orig: @0x51A72B] (D-NET-532)
+		PlayerSlot_ResetNetworkState(world, conn, now_tick); // [orig: @0x51A72B] (D-NET-532)
 		conn.link.armory_reuse_seconds = 0;                // +356 [orig: @0x51A752]
 		st.rtt_request_countdown = 0;                      // +89816 [orig: @0x51A758]
 		st.state6_entry_host_ms = ctx.np_protocol.host_run_duration_ms; // +100580 [orig: @0x51A770]
@@ -828,10 +831,12 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// In session the slot's entity state goes out now, ahead of the 0x0F, so the joiner reads
 	// one 0x0A before its world-state load and the server tick's next after the tail
 	// (D-NET-501). The slot is in state 6 already; the frame reads the body as the join
-	// placed it, before the 620 below.
-	// [orig: Server_OnPlayerJoin @0x51A82A..0x51A82D -> Server_SendEntityStateToPlayer
-	//  @0x517BA0 (the state-6 gate @0x517BD6, sent 0x0A msgClass 0 userParam 1 @0x517CB5)]
-	if (ctx.is_in_session) {
+	// placed it, before the 620 below. The single player sends its own loopback none (retail's
+	// is_in_session 0 there; ours, the world's session fact, D-NET-NEW-L1-19).
+	// [orig: Server_OnPlayerJoin `cmp g_NapiNPCtx.is_in_session, ebx` @0x51A824, `jz` @0x51A82A,
+	//  the call @0x51A82D -> Server_SendEntityStateToPlayer @0x517BA0 (the state-6 gate
+	//  @0x517BD6, sent 0x0A msgClass 0 userParam 1 @0x517CB5)]
+	if (world.rules.mp_session) {
 		std::vector<uint8_t> frame;
 		if (Server_SendEntityStateToPlayer(ctx, world, conn, frame))
 			out.push_back(InitialStateMessage{s2c::PER_FRAME_UPDATE, std::move(frame),
