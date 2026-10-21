@@ -219,8 +219,8 @@ namespace {
 
 // The rules word onto the world the round reads it from (apply_rules_word), so a SET of a rule
 // bit is live at once, as retail's single g_RulesFlags is; with no world, the context's word.
-// [orig: g_RulesFlags @0x24D1E34 — the FriendlyFire / FriendlyTags / TeamTriggerClaymore /
-//  Tracers sets @0x405DE1..0x405F48]
+// [orig: g_RulesFlags @0x24D1E34 — CAdminServer_HandleSetCommand @0x405A60: the FriendlyFire /
+//  FriendlyTags / TeamTriggerClaymore / Tracers stores @0x405EB4..0x405F86]
 void set_live_rules_word(NapiNPServerCtx &ctx, uint32_t word) {
 	if (ctx.world == nullptr) {
 		ctx.config.mp_attributes = word;
