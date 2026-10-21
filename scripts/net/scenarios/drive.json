@@ -5,6 +5,7 @@
   "game_type": 65568,
   "actor": "joiner",
   "staging": [
+    {"slot": 0, "position_bms": [-1262.46, 741.13, 42.87]},
     {"slot": 1, "position_bms": [-1271.16, 741.13, 42.87]}
   ],
   "setup": {"pose": {"position_bms": [-1271.16, 741.13, 42.87], "yaw": 130, "pitch": 0}},

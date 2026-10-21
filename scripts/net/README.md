@@ -578,6 +578,21 @@ what sticks:
   the two players spawn on one point and push each other apart, RR's joiner
   stood 3.9 units off, its pose snapped back and USE found no seat; RO's
   joiner glided 0.6 units back.
+- slot 0 is the listen host's own player (on our host its loopback row): no
+  client uplink pulls it back, so it sticks at any distance, as the host's own
+  setup pose does (above). A scenario stages it to move the host's body off a
+  place the actor needs. x5's `drive` staged only the joiner, onto the spawn
+  point both players share; the two bodies pushed each other 0.66 units apart,
+  east or west by the cell. Where the host ended on the buggy side (RR, RO), its
+  body stood across the line from the joiner to the 50cal's seat and none of
+  the three USE presses seated: the nearest-seat scan's last gate is a line of
+  sight against terrain and entities (`Entity_FindNearestSeatOrArmory
+  @0x435D50`: the 4.0-unit reach @0x436113, the aim cone @0x43611F, then
+  `Entity_CheckLineOfSightTerrainAndEntities` from the player's Position, the
+  call @0x436183). Where it ended on the far side (RR-aa and OR, and the first
+  pass's RR, RR-aa, RO and OR) the joiner seated. The retail leg writes the
+  host's Person yaw 0 with the position; nothing reads the host's heading in a
+  joiner-actor scenario.
 - the setup pose comes first, so a staged joiner actor turns while still at
   its spawn and is exposed only from the staging on (x1's `coop_ai_kill`: the
   camp's AI killed the staged joiner 0.55 s later, before its first tap).
@@ -633,7 +648,7 @@ expects.
 | Scenario | Mission / mode | Play | Notes |
 | --- | --- | --- | --- |
 | `self_nade` | 01TR co-op | select the frag, look down, 40-tick throw at the feet | `game_event.type` is masked: retail draws the suicide message type 1..3 from its PRNG (`GameEvent_PlayerDeath @0x5170ed`). Reload requests are sequence-only: a retail client repeats C2S 0x25 until the 0x49 echo refills the slot, so the count follows the round trip. |
-| `drive` | 01TR co-op | staged where its setup pose puts it, (-1271.16, 741.13, 42.87), facing the spawn buggy: USE takes its 50cal, USE drops onto the deck, USE takes the driver seat, drive, USE | The staging and the pose name one place, so the joiner reaches it whichever way the spawn push moved it (above). Seat swaps are held-USE digit keys, not action codes, so the seats come from retail's nearest-seat scan. |
+| `drive` | 01TR co-op | staged where its setup pose puts it, (-1271.16, 741.13, 42.87), facing the spawn buggy, the host's own body staged first 8.7 units east at (-1262.46, 741.13, 42.87): USE takes its 50cal, USE drops onto the deck, USE takes the driver seat, drive, USE | The staging and the pose name one place, so the joiner reaches it whichever way the spawn push moved it (above). The host leaves the spawn the two players share, so its body never stands across the scan's line of sight to the 50cal (x5, above); its place is where x4's OO host spawned and stood through a cell that seated on all three USE presses. Seat swaps are held-USE digit keys, not action codes, so the seats come from retail's nearest-seat scan. |
 | `frag_kill` | 01TR deathmatch | the `self_nade` play with the host on the shared spawn | The frag kills the host (a kill, 0x1E type 4..6 from the PRNG, `GameEvent_PlayerDeath @0x517237`), then the thrower (a suicide). `game_event.type` is masked. |
 | `chat` | TDH_I3A team deathmatch | the joiner opens the command prompt (action 1), types `hello` one `char` a step, return | E4. The line goes out as C2S 0x04 and the host echoes it to its sender alone as S2C 0x06, the line a NETLOG handler did not take (`NapiNPServerMsg_HandleConsoleLine @0x5199D0`; `opennova-wire --scenario-events` prints both as `console_line` / `console_echo` with the text in hex). A retail actor needs an onHook pair with `char` steps (opennova-int #73); an OpenNova actor's `scenario_play` types them as keystrokes. |
 | `kick` | TDH_I3A team deathmatch | the listen host opens the command prompt (action 1), types `SERVER PUNT ALL`, return | E4. In session a listen host is a peer of its own server, so its typed line goes there as C2S 0x04 (`Client_ProcessConsoleCommand @0x520E80`, the queue @0x520EFE..0x520F29; the binding-name match in `Client_ProcessLocalCommand @0x520BF0` is offline only). The server's handler runs NETLOG and STAT only and echoes any other line to its sender as S2C 0x06 (`NapiNPServerMsg_HandleConsoleLine @0x5199D0`, the send @0x519AC5), so a bare `PUNT ALL` punts no one. The echo runs the line as a client command (`NapiNPClientMsg_HandleConsoleEcho @0x432BC0`, the call @0x432C12), whose `SERVER` verb (`NapiClientCmd_HandleDebugCommand @0x42C4D0`, the arm @0x42C85D, the case-blind match @0x42C867) queues the rest as C2S 0x24 with no gate (@0x42C904..0x42C922). `NapiNPServerMsg_0x024 @0x514DC0` hands it to `Server_HandleBanPuntCommand @0x50B380` with the sender's slot (@0x514DE7), which a local slot authorizes (+5, @0x50B3C4). `PUNT ALL` sends every connected non-local player the session disconnect with an empty reason, code 33 and the tag `S.C:SPA` (the send @0x50B951; `PUNT <slot>` tags `S.C:SP#`, @0x50B9C6). `BAN <slot>` only adds the player's PCID to `banlist.txt` and disconnects no one. The joiner's capture (RR, OR), the host's (RO) or the external one (OO) carries it as `kind=disconnect`. A retail host needs an onHook pair with `char` steps (opennova-int #73); the OpenNova host's `scenario_play` types them as keystrokes into its command line, which runs the same leg (D-NET-710: the C2S 0x04 to its own server over the in-process loopback, the S2C 0x06 echo, the SERVER verb's C2S 0x24, PUNT ALL), none of it on the wire but the 0x103 record and the goodbyes. All five cells. |
