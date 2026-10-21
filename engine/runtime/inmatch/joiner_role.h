@@ -30,6 +30,7 @@
 
 #include <runtime/world/collision.h> // CollisionWorld::ResolveState (per-replica resolver state)
 #include <runtime/world/entity.h>
+#include <runtime/world/player_spawn.h> // PlayerSpawn (stamp_mission_start_identity)
 #include <runtime/world/world.h>
 
 #include <cstddef>
@@ -248,6 +249,7 @@ public:
 	bool begin_mission_reload() {
 		if (!runtime || !runtime->begin_mission_reload()) return false;
 		local_spawned_ = false;
+		post_start_identity_pending_ = false;
 		weather_revision_seen_ = 0;
 		weapon_availability_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
@@ -400,6 +402,12 @@ private:
 	// A self S2C 0x50's re-run of Player_InitPlayer(1) on L, then its identity pair
 	// (D-NET-570).
 	void reinit_local_player_on_team_assign();
+	// The mission start's Player_InitPlayer on the identity of the L about to spawn
+	// (D-NET-570's pre-spawn half; joiner_role.cpp carries the witness).
+	void stamp_mission_start_identity(world::PlayerSpawn &spawn);
+	// A self 0x50's local arm ran after the mission start bound the local entity, before L
+	// spawned: L takes that 0x50's animSlot at its spawn.
+	bool post_start_identity_pending_ = false;
 
 	// ~1 Hz frozen-session tripwire state.
 	uint32_t last_frontier_seq_ = 0;

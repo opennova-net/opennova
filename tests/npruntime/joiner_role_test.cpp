@@ -393,6 +393,73 @@ bool run_a_self_team_assign_reinits_l() {
 			"self 0x50: L takes team 1's class, unhides, and keeps the 0x50's identity pair");
 }
 
+// D-NET-570's pre-spawn half: L's spawn takes the mission start's Player_InitPlayer identity.
+// The init restamps animSlot from the avatar byte of the side L's team names and never writes
+// the NetId, so L keeps the self row's NetId (a pre-start 0x50's over the record's) and the
+// side's avatar byte (not the record's animSlot); a self 0x50 whose local arm ran after the
+// mission start bound the local entity, ahead of L's spawn, re-ran the init and stored its own
+// pair, so L takes that 0x50's animSlot.
+// [orig: Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, g_AvatarTeam2
+//  @0x4E1825 / g_AvatarTeam1 @0x4E1838, the store @0x4E1843; Game_StartMission @0x524360 -
+//  Player_InitPlayer @0x525BBC; NapiNPClientMsg_TeamAssign @0x431910 - @0x431B0A,
+//  Player_InitPlayer(1) @0x431B14, animSlot @0x431B3A, NetId @0x431B46]
+bool run_the_spawn_takes_the_mission_starts_identity() {
+	inmatch::CharacterJoinVars vars;
+	vars.avatar[0] = 0x11; // team 1 / 3
+	vars.avatar[1] = 0x22; // team 0 / 2
+	bool ok = true;
+	{
+		Harness h;
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+		                             /*game_type=*/0x10002u, 0, true, /*self_team=*/2);
+		h.role.runtime->set_character_join_vars(vars);
+		// The self row as a pre-start 0x50 left it (the pipeline's identity fold).
+		auto &row = h.role.runtime->state().upsert(0x0005);
+		row.cls = EntityClass::Player;
+		row.type_id = w::kPlayerInfantryTypeId;
+		row.net_id = 0x0213;
+		row.spawn_anim_slot = 0x2C;
+		h.role.run_tick(h.input); // the spawn frame
+		const w::Entity *L = h.kernel->local.player();
+		ok &= expect(h.role.local_spawned() && L != nullptr && L->team == 2 &&
+						L->anim_slot == 0x22 && L->minimap_net_id == 0x0213,
+				"mission start identity: the side's avatar byte and the self row's NetId");
+	}
+	{
+		Harness h;
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+		                             /*game_type=*/0x10002u);
+		h.role.runtime->set_character_join_vars(vars);
+		auto &row = h.role.runtime->state().upsert(0x0005);
+		row.cls = EntityClass::Player;
+		row.type_id = w::kPlayerInfantryTypeId;
+		row.net_id = 0x0100;
+		row.spawn_anim_slot = 0x05;
+		TeamAssign assign;
+		assign.entity_handle = 0x0005;
+		assign.team = 1;
+		assign.net_id = 0x0213;
+		assign.anim_slot = 0x2C;
+		SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, packet);
+		auto datagram =
+				nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input); // the 0x50's local arm, then the spawn
+		const w::Entity *L = h.kernel->local.player();
+		ok &= expect(h.role.local_spawned() && L != nullptr && L->team == 1 &&
+						L->anim_slot == 0x2C && L->minimap_net_id == 0x0213,
+				"mission start identity: a post-start self 0x50 leaves L its own pair");
+	}
+	return ok;
+}
+
 // L spawns on the in-match edge, after the boot's definition sweeps: the edge
 // binds its items.def row like the host's boot did, so L's body sounds resolve
 // through its own profile instead of the slotless "default" (silent footsteps
@@ -3924,6 +3991,7 @@ int main() {
 	ok &= run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it();
 	ok &= run_the_teardown_goodbye_follows_the_exit_route();
 	ok &= run_the_join_screen_abort_bursts_the_minus_one_record();
+	ok &= run_the_spawn_takes_the_mission_starts_identity();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
 	ok &= run_a_self_team_assign_reinits_l();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();

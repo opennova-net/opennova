@@ -52,9 +52,9 @@ world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 	spawn.heading = s.orientation;
 	spawn.team = s.team;
 	// The named player record carries the host-stamped character selector and
-	// packed minimap/character id; L keeps both (a zero animSlot recreated D-NET-146's
-	// DBuggy shadow), where retail's Player_InitPlayer keeps the NetId but restamps animSlot
-	// by Team (D-NET-570) [orig: Player_InitPlayer @0x4E15F0 - @0x4E1817..0x4E1843].
+	// packed minimap/character id (a zero animSlot recreated D-NET-146's DBuggy shadow);
+	// the spawn then takes the mission start's Player_InitPlayer identity over them
+	// (JoinerRole::stamp_mission_start_identity, D-NET-570).
 	spawn.anim_slot = s.anim_slot;
 	spawn.minimap_net_id = s.net_id;
 	// [D-NET-112] The packed id belongs to the wire NetId ONLY. A player carries no SSN, so L
@@ -140,7 +140,8 @@ void JoinerRole::spawn_and_arm_local_player() {
 	ClientRuntime &rt = *runtime;
 	if (rt.in_match() && rt.has_self_handle() && !local_spawned_) {
 		const JoinerConnection::SelfSpawn &sp = rt.spawn_pose();
-		const world::PlayerSpawn spawn = spawn_from_self(sp);
+		world::PlayerSpawn spawn = spawn_from_self(sp);
+		stamp_mission_start_identity(spawn);
 		const world::EntityHandle h = world::spawn_player(world, spawn);
 		local_spawned_ = h.valid();
 		// A client builds its own body from the host's 0x0C like every

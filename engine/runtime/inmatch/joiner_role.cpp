@@ -1456,7 +1456,15 @@ void JoinerRole::reinit_local_player_on_team_assign() {
 	world::World &world = kernel.world;
 	ClientRuntime &rt = *runtime;
 	world::Entity *local = world.registry.get(world.cached.local_player);
-	if (local == nullptr) return;
+	if (local == nullptr) {
+		// Past the mission start's binding (its Player_InitPlayer ran), ours' L spawns
+		// later (at its release): the re-run and the 0x50's own pair wait for that spawn
+		// (stamp_mission_start_identity). A local arm ahead of the binding (a stale one in
+		// a reload's waits) is overwritten by the mission start's init, so it leaves nothing.
+		if (!rt.in_mission_start() && !rt.in_pre_game() && !rt.mission_start_aborted())
+			post_start_identity_pending_ = true;
+		return;
+	}
 	const int side = local->team == 1 || local->team == 3 ? 0 : 1;
 	const CharacterJoinVars *vars = rt.character_join_vars();
 	// The side's word, stored as it is (Player_InitPlayer has no range test): the 0x5A's
@@ -1477,6 +1485,34 @@ void JoinerRole::reinit_local_player_on_team_assign() {
 		local->anim_slot = self->spawn_anim_slot;
 		local->minimap_net_id = self->net_id;
 	}
+}
+
+// The joiner's own entity's identity at the mission start's Player_InitPlayer, which ours runs
+// on L at its spawn (the release, after the final wait): the init restamps animSlot from the
+// avatar byte of the side L's Team names (team 1 or 3 the first side; the avatar bytes are
+// the ones the join sent as VCA / VCB) and never writes the NetId, so L keeps the latest
+// 0x0C / 0x50 NetId, the self row's; a self 0x50 whose local arm ran after the init (the
+// mission start bound the local entity, L not yet spawned here) re-ran the init and then
+// stored its own pair, so L takes that 0x50's animSlot instead. With no self row (a seeded
+// harness) the record's NetId stands; with no join vars installed, the record's animSlot.
+// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC; Player_InitPlayer
+//  @0x4E15F0 - the Team test @0x4E1809..0x4E1817, g_AvatarTeam2 @0x4E1825 / g_AvatarTeam1
+//  @0x4E1838, the animSlot store @0x4E1843; NapiNPClientMsg_TeamAssign @0x431910 - the local
+//  compare @0x431B0A, Player_InitPlayer(1) @0x431B14, animSlot @0x431B3A, NetId @0x431B46;
+//  UI_JoinSelectedSession @0x5699D0 - the join's avatar bytes g_AvatarTeam1 @0x569C2A /
+//  g_AvatarTeam2 @0x569C46]
+void JoinerRole::stamp_mission_start_identity(world::PlayerSpawn &spawn) {
+	ClientRuntime &rt = *runtime;
+	const replication::ClientEntityState *self =
+			rt.has_self_handle() ? rt.state().find(rt.self_handle()) : nullptr;
+	const bool self_row = self != nullptr && self->cls == EntityClass::Player;
+	if (self_row) spawn.minimap_net_id = self->net_id;
+	if (post_start_identity_pending_ && self_row) {
+		spawn.anim_slot = self->spawn_anim_slot;
+	} else if (const CharacterJoinVars *vars = rt.character_join_vars()) {
+		spawn.anim_slot = vars->avatar[spawn.team == 1 || spawn.team == 3 ? 0 : 1];
+	}
+	post_start_identity_pending_ = false;
 }
 
 // Drain typed S2C gameplay events after the client recv pump: tag-2 fires
