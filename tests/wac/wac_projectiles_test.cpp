@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdio>
 #include <memory>
 #include <runtime/wac/compiler.h>
@@ -140,6 +141,36 @@ static void test_area_draws_use_ai_stream_and_actual_surface_height() {
     f.script("ammoarea(SCRIPT,1128) store(v5)\n");
     CHECK(f.world.script.vars.get_mission(5) == 1); // the retail area table has 128 slots
     CHECK(f.world.ai.prng_a == saved_ai_seed);
+}
+
+// The launch box takes the area record's own words (D-NET-507): 21,000 units out
+// with low bits set, the round leaves x_min plus the drawn share of the x span and
+// y_min plus the drawn share of the y span, word for word (the same AI-stream
+// draws as above: +1 on a one-unit span, +2 x 32785 on a two-unit span); a float
+// view of the box drops those low bits. [orig: WacCmd_AmmoArea @0x4EE240 -
+//  @0x4EE272..0x4EE28C]
+static void test_area_launch_box_takes_the_record_words() {
+    Fixture f;
+    std::vector<uint16_t> heights(512 * 512, 10 * 256);
+    std::vector<int> sectors(256, 1);
+    opennova::terrain::TerrainHeightField terrain;
+    terrain.heightmap = heights.data(); terrain.dim = 512;
+    terrain.layout.sector_grid = sectors.data();
+    f.world.ai.terrain = &terrain;
+    f.world.ai.prng_a = 0;
+    const int32_t x_min = 0x52081235;
+    const int32_t y_min = 0x51F84321;
+    const Aabb bounds{{21000.07f, 20984.26f, 1000}, {21001.07f, 20986.26f, 1100}};
+    f.world.registry.register_area("artillery", bounds, false, 91, bounds, false,
+            std::array<int32_t, 4>{x_min, x_min + 0x10000, y_min, y_min + 0x20000});
+    f.script("ammoarea(SCRIPT,91) store(v1)\n");
+    CHECK(f.world.script.vars.get_mission(1) == 0);
+    CHECK(f.world.out.rounds.count == 1);
+    if (f.world.out.rounds.count == 1) {
+        const auto &round = f.world.out.rounds.records[0];
+        CHECK(round.origin_x == x_min + 1);
+        CHECK(round.origin_y == y_min + 2 * 32785);
+    }
 }
 
 static void test_rain_rng_exact_pose_and_restore() {
@@ -305,6 +336,7 @@ int main() {
     test_ammo_names_bind_indices_and_reject_unknown_names();
     test_target_scan_and_projectile_damage();
     test_area_draws_use_ai_stream_and_actual_surface_height();
+    test_area_launch_box_takes_the_record_words();
     test_rain_rng_exact_pose_and_restore();
     test_entry_authority_and_ceasefire_presentation();
     test_ssn_fire_uses_the_models_alternating_userpoints();
