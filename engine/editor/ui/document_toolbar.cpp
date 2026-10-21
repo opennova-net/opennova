@@ -67,7 +67,7 @@ void draw_document_toolbar(Workspace &workspace, const DocumentBase &document, c
 	const std::string label = "Used by (" + (reading && !uses ? std::string("...") : std::to_string(uses)) + ")###used_by";
 	const std::string tip = reading && !uses ? std::string(ui_kit::reading_references())
 	                        : uses ? std::string("Who names this file or what it defines, listed in the Inspector.")
-	                               : std::string("No file of the project names it or what it defines.");
+	                               : std::string(ui_kit::nothing_names_it(true));
 	if (ui_kit::tool(row, label.c_str(), (uses || reading) && view.allows(EditorRequestKind::SelectRecord), tip)) {
 		workspace.request(request::select_record(document.path(), NodeAddress()));
 		window_requests::focus(workspace, "inspector");

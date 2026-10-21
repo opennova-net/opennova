@@ -28,6 +28,7 @@
 #include <editor/ui/preview_window.h>
 #include <editor/ui/problems_window.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -763,9 +764,7 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	// DI-26: the active mission's view plans it, its player on the ground under the camera.
 	const bool from_here = plays && !play_mission_at(v, v.documents.active).empty();
 	if (menu_item("Play from here", "Alt+F5", from_here)) request(request::play_from_here(v.documents.active));
-	ui_kit::tooltip(from_here ? std::string("Build, then start the game in this mission, the player on the ground under its "
-	                                        "view's camera, facing its way. The build's copy of the mission gets the start, "
-	                                        "never its own file.")
+	ui_kit::tooltip(from_here ? play_from_here_words("under the mission view's camera")
 	                          : std::string("Open a mission to start the game in it where its view's camera is."));
 	// A first run: the run directory emptied of what the runs before wrote there (run/run_directory.h), which
 	// Play keeps otherwise.

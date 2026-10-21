@@ -930,7 +930,8 @@ void test_quiet_lines() {
 // The one uses section every window heads its "who uses this" with (the Inspector's Referenced by and Used by,
 // a clip's Played by, the missions on a terrain, a file's page): the title and its count on a separator line;
 // none, one line saying so (the what-names-it in its tooltip), or while the references are read, that; and a
-// finding on one line, its words without their citations. One frame of a window 240 wide.
+// finding on one line, its words without their citations. One frame of a window 360 wide (the reading line
+// whole on its one line).
 void test_uses_section() {
 	NullBackend backend;
 	const auto frame_of = [&](const auto &draw) {
@@ -938,7 +939,7 @@ void test_uses_section() {
 		ImGui::NewFrame();
 		ImGui::LogToBuffer();
 		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-		ImGui::SetNextWindowSize(ImVec2(240.0f, 300.0f));
+		ImGui::SetNextWindowSize(ImVec2(360.0f, 300.0f));
 		ImGui::Begin("uses");
 		draw();
 		ImGui::End();
