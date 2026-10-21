@@ -108,7 +108,11 @@ namespace {
 // (D-NET-NEW-L1-19), where the spawn had stored the placed default
 // 0x40000000; that moves the chain from 0xe722d011570202ed (restoring the
 // default gives that value back).
-constexpr uint64_t kSyntheticDigest = 0xdcc41c0472d7226dULL;
+// The registry row carries its Pitch / Roll words (D-NET-NEW-L6-3) and the
+// chain digests them in place of the whole-degree mirrors, which moves it from
+// 0xdcc41c0472d7226d; digesting the words' rounded whole degrees gives that
+// value back, so no tick behaviour moved.
+constexpr uint64_t kSyntheticDigest = 0xa7c762a945b847fdULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
@@ -137,8 +141,8 @@ void hash_entity(Digest &d, const w::Entity &e) {
 	d.value(static_cast<float>(e.position.y));
 	d.value(static_cast<float>(e.position.z));
 	d.value(e.heading);
-	d.value(e.pitch);
-	d.value(e.roll);
+	d.value(e.pitch_bam);
+	d.value(e.roll_bam);
 	d.value(e.health);
 	d.value(e.alive);
 	d.value(e.team);
