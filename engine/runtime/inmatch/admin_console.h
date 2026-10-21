@@ -118,8 +118,8 @@ public:
 		// The avatar registry PETERRABBIT SEXCHANGE picks its two combos from.
 		const CharacterRegistry *characters = nullptr;
 		// CMD VERSION's two texts, the binary's version and its title, each printed at its
-		// start [orig: Game_ParseCommandLineAndInit @0x4A7D30..0x4A7D3C (the title
-		//  off_8154D8), @0x4A7D75..0x4A7D90 ("V%i.%i.%i.%i" into g_VersionText)].
+		// start [orig: Game_ParseCommandLineAndInit @0x4A7310 (the title off_8154D8's sprintf
+		//  @0x4A7D30..0x4A7D3C, "V%i.%i.%i.%i" into g_VersionText @0x4A7D75..0x4A7D90)].
 		std::string version_text;
 		std::string title_text;
 		// The SYSTEM ring (Chat_AddMessageChannel2) of a host that is not a session peer, which
