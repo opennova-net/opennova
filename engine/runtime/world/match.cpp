@@ -987,6 +987,18 @@ void Match::score_death(World &world, EntityHandle victim_handle) {
     add_team_event(victim_entity->team, MatchStats::kDeaths, score_value(5));
 }
 
+// See match.h. The slot's CPlayerStats takes the counter and the points award as a
+// roster player's does (add_event), with no share: the row's body carries no point-share
+// links. [orig: GameEvent_ProcessScoring @0x53074E..0x530774 (the slot +0x48),
+//  @0x530779..0x5307A7 (the team record +0x44)]
+void Match::score_row_death(MatchStats &row, uint8_t team) {
+    if (outcome_.ended || !gt::has_score_table(rules_.game_type))
+        return;
+    row[MatchStats::kDeaths] = io::bam_add(row[MatchStats::kDeaths], 1);
+    row[MatchStats::kPoints] = io::bam_add(row[MatchStats::kPoints], score_value(5));
+    add_team_event(team, MatchStats::kDeaths, score_value(5));
+}
+
 // Scorer event 3 with an other-entity (the victim).
 // [orig: GameEvent_ProcessScoring @0x52F550 case 3 @0x52FF43]
 void Match::score_kill(World &world, EntityHandle killer_handle,

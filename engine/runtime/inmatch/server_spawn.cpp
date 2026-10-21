@@ -288,9 +288,17 @@ world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World 
 	world::Entity *body = world.registry.get(h);
 	if (body == nullptr) return {};
 	world::apply_spawn_point_latches(*body, sel);
+	// The round init's slot name (the local body's own name is Player_InitPlayer's, at the
+	// mission start: HostRole::init_local_player_at_mission_start) [orig: @0x516BA0..0x516BAF].
 	body->name = host.name;
 	body->display_name = host.name;
 	body->player_slot_id = 0;
+	// The round init's 620-tick spawn protection, as every active slot's new body takes it;
+	// the protection pass counts only a state-6 slot down, which the host row never is, so
+	// its hidden body stays damage-protected for good [orig: Server_InitAllPlayerEntitiesForRound
+	//  @0x516BBA; Server_UpdateAllActivePlayerSlots - the state-6 test @0x518874..0x518878;
+	//  the row's state, the allocation's zero, set to 6 only by a join @0x51A702..0x51A712].
+	body->damage_state = 620;
 	// The mission start hides the local player's body for good on a host that never
 	// deploys [orig: Game_StartMission @0x525C95..0x525C9E].
 	body->flags |= world::kEntityFlagCarried;

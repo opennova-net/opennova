@@ -98,6 +98,9 @@ void test_the_row_body_is_first_hidden_and_local() {
 	CHECK((e->flags & w::kEntityFlagCarried) != 0 && (e->flags & w::kEntityFlagPlayer) != 0);
 	CHECK(e->owner_connection_id == 0 && e->team == 1 && e->player_class == 8);
 	CHECK(e->name == host.name && e->player_slot_id == 0);
+	// The round init's 620-tick spawn protection, which no pass counts down for the row
+	// [orig: Server_InitAllPlayerEntitiesForRound @0x516BBA].
+	CHECK(e->damage_state == 620);
 	CHECK(r.world.cached.local_player == body);
 	// A joiner's body takes the next entry.
 	const inmatch::NapiNPConnection &joiner = r.add_joiner();
@@ -114,6 +117,9 @@ void test_the_row_body_is_first_hidden_and_local() {
 
 void test_player_kill_0_runs_the_rows_transaction() {
 	Rig r;
+	w::MatchRules rules;
+	rules.game_type = r.ctx->config.game_type; // a team game
+	r.world.match.configure(rules);
 	const w::EntityHandle body = inmatch::Server_SpawnHostSlotBody(*r.ctx, r.world);
 	(void)r.add_joiner();
 	ns::Datagram drained;
@@ -127,6 +133,11 @@ void test_player_kill_0_runs_the_rows_transaction() {
 				static_cast<uint16_t>(dg.body[0] | (dg.body[1] << 8)) == body.packed)
 			death = true;
 	CHECK(death);
+	// The scorer resolves the row: one Death on its CPlayerStats (PLAYER LIST's Deaths
+	// column) and on its team record [orig: GameEvent_PlayerDeath @0x516F06 ->
+	//  GameEvent_ProcessScoring @0x53074E..0x5307A7].
+	CHECK(r.ctx->host_slot.stats[w::MatchStats::kDeaths] == 1);
+	CHECK(r.world.match.team_stats(r.ctx->host_slot.team)[w::MatchStats::kDeaths] == 1);
 }
 
 } // namespace

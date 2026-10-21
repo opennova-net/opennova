@@ -317,6 +317,12 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 	// The authoritative score ledger consumes the same death transaction as
 	// the kill-feed; non-roster actors are ignored by Match.
 	world.match.record_death(world, d.victim, d.killer, d.event_flags);
+	// A Serve Only host's own row scores its hidden body's death on the row's CPlayerStats
+	// and its team record, as the scorer resolves the row (D-NET-352) [orig:
+	//  GameEvent_PlayerDeath @0x516F06 -> GameEvent_ProcessScoring - Entity_ValidatePtr
+	//  @0x52F67C, @0x53074E..0x5307A7].
+	if (host_row_body && victim_entity != nullptr)
+		world.match.score_row_death(ctx.host_slot.stats, victim_entity->team);
 	// Mark the victim DEAD on the entity: Flags bit1 is the wire-dead signal — the
 	// victim's OWN client learns of its death from its record byte13 bit 0x02
 	// (the LOCAL apply's dead path stores the anim + zeroes Health -> the death

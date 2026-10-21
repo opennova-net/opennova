@@ -442,6 +442,13 @@ class Match {
     void record_death(World &world, EntityHandle victim,
                       EntityHandle killer = EntityHandle{},
                       uint32_t cause_flags = 0);
+    // Scorer event 3's own-death leg for a slot row that files no roster player (a Serve
+    // Only host's own row 0, whose hidden body's death resolves the row, D-NET-352):
+    // RecordEvent 6 (Deaths) and the DEATH points on the row's CPlayerStats, then the same
+    // on its team row in team modes. [orig: GameEvent_PlayerDeath @0x516F06 ->
+    // GameEvent_ProcessScoring - the row through Entity_ValidatePtr @0x52F67C, case 3's
+    // own-death leg @0x53074E..0x5307A7]
+    void score_row_death(MatchStats &row, uint8_t team);
     // The death's first leg alone, which a spectator-latched slot's death
     // still runs: every pool-0 AI body whose +0x170 point-share link names the
     // Player victim is unlinked. [orig: GameEvent_PlayerDeath
