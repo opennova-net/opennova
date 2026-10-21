@@ -52,7 +52,7 @@ struct GameCfg;
 }
 
 namespace opennova::world {
-struct World;
+class World; // the class-key must match world.h (MSVC mangles it)
 }
 
 namespace opennova::inmatch {
