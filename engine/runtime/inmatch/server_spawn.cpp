@@ -421,13 +421,13 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	ctx.server_info_update_timer = 0;
 	ctx.cookie_key_table.init(ctx.np_protocol.host_start_tick,
 			static_cast<int>(ctx.world != nullptr ? ctx.world->crt_rand.next() : 0u));
-	// The round init's GetTickCount stamp, the status report's UP-TIME base, authority or not:
-	// the create's frame, the start tick (session_uptime_ms)
-	// [orig: GetTickCount @0x51CB93, `mov dword_C8FC74, eax` @0x51CBA0].
-	ctx.round_state_init_tick = ctx.np_protocol.host_start_tick;
 	// The designation table clears on every round init, authority or not
 	// [orig: memset(g_ServerDesignations, 0, 0x1B74) @0x51cb95..0x51cba5].
 	ctx.designations.fill(ServerDesignation{});
+	// Between the memset's pushes, the round init's GetTickCount stamp, the status report's
+	// UP-TIME base, authority or not: the create's frame, the start tick (session_uptime_ms)
+	// [orig: GetTickCount @0x51CB93, `mov dword_C8FC74, eax` @0x51CBA0].
+	ctx.round_state_init_tick = ctx.np_protocol.host_start_tick;
 	// The punt table clears on every round init too [orig: memset(&g_PuntLog,
 	//  0, 0x7000) @0x51c990, outside the authority test].
 	if (ctx.logs.punt != nullptr) ctx.logs.punt->clear_records();
