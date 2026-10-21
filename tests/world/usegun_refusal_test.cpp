@@ -260,8 +260,7 @@ void test_the_local_player_holds_a_refused_gun_on_foot() {
 	world.cached.local_player = r.requester_h;
 	w::LocalPlayer local(world);
 	world.local_player_state = &local;
-	local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
-	local.loadout.spawn_kit_set = true;
+	local.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
 	w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
 			local.inventory_valid, /*select_spawn_default=*/true);
 	const int32_t personal = local.inventory.equipped_combo;
@@ -300,8 +299,7 @@ void test_a_weapon_key_ends_a_slot_held_on_foot() {
 	world.cached.local_player = r.requester_h;
 	w::LocalPlayer local(world);
 	world.local_player_state = &local;
-	local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
-	local.loadout.spawn_kit_set = true;
+	local.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
 	w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
 			local.inventory_valid, /*select_spawn_default=*/true);
 	const int32_t personal = local.inventory.equipped_combo;
@@ -413,8 +411,7 @@ void test_a_ctrlx_seat_saves_a_gun_held_on_foot() {
 		world.cached.local_player = r.requester_h;
 		w::LocalPlayer local(world);
 		world.local_player_state = &local;
-		local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
-		local.loadout.spawn_kit_set = true;
+		local.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
 		w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
 				local.inventory_valid, /*select_spawn_default=*/true);
 		const auto install = [&](const std::string &name, bool preserve) {
@@ -619,9 +616,8 @@ void test_a_running_switchfrom_commits_the_forced_gun() {
 	world.cached.local_player = r.requester_h;
 	w::LocalPlayer local(world);
 	world.local_player_state = &local;
-	local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1},
+	local.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1},
 			w::WeaponKitEntry{"WPN_PISTOL", -1, -1, -1}};
-	local.loadout.spawn_kit_set = true;
 	w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
 			local.inventory_valid, /*select_spawn_default=*/true);
 	const int32_t rifle = local.inventory.equipped_combo;
@@ -684,8 +680,7 @@ void test_the_walk_queues_reloads_in_slot_order() {
 	world.cached.local_player = r.requester_h;
 	w::LocalPlayer local(world);
 	world.local_player_state = &local;
-	local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
-	local.loadout.spawn_kit_set = true;
+	local.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
 	w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
 			local.inventory_valid, /*select_spawn_default=*/true);
 	w::WeaponInstallData data;

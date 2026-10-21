@@ -830,8 +830,7 @@ int main() {
 			rifle.clipsize = 30;
 			rifle.startrounds = 210;
 			world.tables.weapons.entries.push_back(rifle);
-			kernel.local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
-			kernel.local.loadout.spawn_kit_set = true;
+			kernel.local.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
 			w::local_loadout_rebuild(world, kernel.local.loadout, kernel.local.weapon,
 					kernel.local.inventory, kernel.local.inventory_valid,
 					/*select_spawn_default=*/true);

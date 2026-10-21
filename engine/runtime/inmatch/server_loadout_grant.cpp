@@ -602,8 +602,7 @@ static void copy_buffer_to_spawn_kit(const NapiNPConnection &conn, const world::
 		k.flags = e.variant;
 		kit.push_back(std::move(k));
 	}
-	loadout.spawn_kit = std::move(kit);
-	loadout.spawn_kit_set = true;
+	loadout.spawn_kit() = std::move(kit);
 }
 
 // The slot's class, which the list reads for its PlayerType and its header byte, the

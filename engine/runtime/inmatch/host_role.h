@@ -245,6 +245,8 @@ private:
 			const replication::ClientState &own);
 	// The session create's UP-TIME stamp, kept across a single player's restart boot.
 	void keep_round_state_init_tick();
+	// Out of a session, the single player's fill of the spawn buffer: its static arm.
+	void fill_spawn_buffer_out_of_session();
 public:
 	// A line the world's dialog queue loads on this host (authority_dialog_line_loaded).
 	void dialog_line_loaded(const audio::DialogLineRef &line);

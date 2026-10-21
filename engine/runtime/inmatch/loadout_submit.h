@@ -29,12 +29,16 @@ namespace opennova::inmatch {
 uint8_t loadout_side_team(const world::World &world, uint8_t assigned_team);
 
 // The Game_StartMission copy: in a live session the assigned side's profile
-// page becomes the resident kit buffer [orig: @0x525813
+// page becomes the spawn buffer [orig: @0x525813
 // Buffer_CopyUntilDoubleNull(restrictionData, page, 0x800)], which is BOTH
 // what the local slot pool is built from [orig: Player_InitPlayer @0x4e15f0
 // -> AvatarDef_BuildDisplayList(.., restrictionData)] and what the C2S 0x2F
 // serializes [orig: NetPacket_SendLoadoutSubmit @0x42cdc0]. Retail keeps one
-// buffer; keeping two is how the local view and the wire drift apart.
+// buffer; keeping two is how the local view and the wire drift apart. The copy
+// runs on a session peer alone (a listen host, a joiner; a dedicated host copies
+// nothing), and an empty page copies empty: the copy writes the page's terminator
+// [orig: Game_StartMission - is_in_session @0x525767, is_mp_session_peer @0x525773;
+//  Buffer_CopyUntilDoubleNull @0x562F30 (the store ahead of the double-NUL test)].
 // The caller gates on a live session exactly as retail is (`is_in_session`
 // covers a LISTEN HOST as well as a joiner), so single player and the editor
 // keep the mission's .bms kit. Returns false (and copies nothing) while the
@@ -46,14 +50,15 @@ bool seed_session_kit_from_profile(world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side);
 
-// The single player's fill of the resident kit buffer (g_SpawnLoadoutBuffer) at its mission
-// start and at its restart: out of a session, with no kit the mission's own chunk promoted
-// over it, the current profile's single-player page (weapon.sav's record +65548, written by the
-// profile screen's save) when its first name is not empty; else the buffer stays unset and the
-// spawn reads the static page (weapon_kit_default: "WPN_M4AUTO" "-1" "-1" "-1" ..). The fill
-// precedes the mission load, whose non-empty kit chunk overwrites it; ours' kernel promoted that
-// chunk first, so a promoted kit (spawn_kit_set) keeps it. Copied raw, unfiltered. Returns true
-// when it seeded (the caller rebuilds the slot pool).
+// The single player's fill of the spawn buffer (g_SpawnLoadoutBuffer) at its mission start and
+// at its restart: out of a session, with no kit the mission's own chunk promoted over it, the
+// current profile's single-player page (weapon.sav's record +65548, written by the profile
+// screen's save) when there is a profile and its page's first name is not empty, else the
+// static page (weapon_kit_default: "WPN_M4AUTO" "-1" "-1" "-1" ..). The fill precedes the
+// mission load, whose non-empty kit chunk overwrites it; ours' kernel promotes that chunk first,
+// so a promoted kit (mission_kit_promoted) keeps it. Copied raw, unfiltered. Returns true when it
+// wrote (the caller rebuilds the slot pool). The host role runs its static arm at every single
+// player bring-up (no profile), the shell its profile arm after the table load.
 // [orig: Game_ApplySessionSettingsToGlobals @0x551500 (@0x5519A6..0x5519E4: the mission entry's
 //  loadout @0x5519A6..0x5519BB, the profile page byte_256113C[slot * 0x1080C] @0x5519BD..0x5519D8,
 //  the static page @0x5519DA, Buffer_CopyUntilDoubleNull @0x5519E4; from SinglePlayer_StartMission
@@ -61,7 +66,7 @@ bool seed_session_kit_from_profile(world::World &world,
 //  @0x524683..0x5246C8, currentProfileSlot @0x52469D); Mission_LoadBMSFile @0x40F4E0 (the kit
 //  chunk @0x40F6FF..0x40F77C)]
 bool seed_single_player_kit_from_profile(world::World &world,
-		const playersav::Record &profile, world::LocalPlayerLoadout &loadout);
+		const playersav::Record *profile, world::LocalPlayerLoadout &loadout);
 
 // The side-change re-copy rule: whenever the SIDE the selector names stops
 // matching the side the resident buffer was copied from, re-copy. Keyed on
@@ -116,7 +121,7 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 // The armory ACCEPT in a session: WeaponLoadout_ApplyFromBuffer's session leg, the one
 // apply a joiner's client and a listen host's own client run alike. The selection becomes
 // the process's loadout name list on both legs (World::loadout_weapon_names, whose first name
-// every body the process spawns takes; the resident kit, spawn_kit, waits for the host's
+// every body the process spawns takes; the spawn buffer waits for the host's
 // list); off the authority the slot table empties; and the 0x2F
 // the apply sends is returned for the caller's queue: the local body's team byte, the
 // armory's class (g_ArmorySelectedClass, the class picked on the armory screen), the

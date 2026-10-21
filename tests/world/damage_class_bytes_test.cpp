@@ -99,8 +99,8 @@ void test_a_session_accept_resets_the_slots_and_applies_nothing() {
 			w::WeaponKitEntry{"WPN_NONE_SUCH", 1, -1, -1}};
 	const opennova::LoadoutSubmit sent = opennova::inmatch::armory_accept_in_session(r.world,
 			*r.local, selection, 6, /*authority=*/false, opennova::bms::MissionType{});
-	CHECK(r.local->loadout.spawn_kit_set && r.local->loadout.spawn_kit.size() == 1 &&
-			r.local->loadout.spawn_kit[0].ammo_primary == 2);
+	CHECK(r.local->loadout.spawn_kit().size() == 1 &&
+			r.local->loadout.spawn_kit()[0].ammo_primary == 2);
 	bool empty = true;
 	for (const w::WeaponInventorySlot &slot : r.local->inventory.slots)
 		empty = empty && slot.adm_index < 0;
@@ -136,8 +136,7 @@ void test_a_session_accept_resets_the_slots_and_applies_nothing() {
 void test_the_spawn_rebuild_writes_no_byte() {
 	Rig r;
 	r.body().ammo_damage_class = {7, 7, 7, 7, 7, 7};
-	r.local->loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, 2}};
-	r.local->loadout.spawn_kit_set = true;
+	r.local->loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, 2}};
 	w::local_loadout_rebuild(r.world, r.local->loadout, r.local->weapon, r.local->inventory,
 			r.local->inventory_valid, true);
 	CHECK(r.body().ammo_damage_class == std::vector<uint8_t>(6, 7));

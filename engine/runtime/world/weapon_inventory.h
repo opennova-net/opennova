@@ -94,7 +94,7 @@ struct WeaponKitEntry {
 };
 
 // g_LoadoutWeaponNameList, the process's loadout name list, a buffer apart from the spawn
-// buffer (LocalPlayerLoadout::spawn_kit): the image's initializer (the title's default kit,
+// buffer (SpawnLoadoutBuffer): the image's initializer (the title's default kit,
 // weapon_kit_default) until an armory ACCEPT copies the accepted class's buffer over it, on
 // every leg in a session or out of one, or a 0x5A apply rebuilds it from the list's rows,
 // the listen host's own client's included. Every player body the process spawns takes its
@@ -106,6 +106,30 @@ struct WeaponKitEntry {
 struct LoadoutWeaponNameList {
     std::vector<WeaponKitEntry> entries;
     bool set = false; // false: the image's initializer
+};
+
+// g_SpawnLoadoutBuffer, the process's spawn buffer (restrictionData): zero in the image, so a
+// fresh process's buffer is empty, and no session, mission start or load clears it; only its
+// writers change it: out of a session the single player's fill (the mission's kit, else the
+// profile's single-player page, else the static page weapon_kit_default) at the start and at
+// the restart, in a session a peer's mission start copying its side's class page (an empty page
+// copies empty), the mission load's kit chunk out of a session, the own slot's list send on the
+// authority and the 0x5A apply off it. Every reader takes it as it stands: Player_InitPlayer's
+// display list and select 195, the mission start's 0x2F pair and the team assign's resubmit, and
+// the round init's own-slot seed; a dedicated start fills nothing, so a Serve Only process runs
+// on what its earlier missions left. One per process (inmatch::ClientProcessState), which the
+// role binds into the local player's loadout (LocalPlayerLoadout::process_buffer).
+// [orig: g_SpawnLoadoutBuffer @0x24D4E00 (0x800 bytes); Game_ApplySessionSettingsToGlobals
+//  @0x551500 (the dedicated start's jz @0x5517A7, the single player's fill
+//  @0x5519A2..0x5519E4); Game_StartMission @0x524360 (the restart's copy @0x524683..0x5246C8, the
+//  peer's side page @0x525767..0x525818, the 0x2F sends @0x52582F / @0x525C24);
+//  Buffer_CopyUntilDoubleNull @0x562F30; Mission_LoadBMSFile @0x40F4E0 (@0x40F961);
+//  Server_SendWeaponSlotListToPlayer @0x502550 (@0x502617..0x502627);
+//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4293D1..0x4293E9);
+//  NapiNPClientMsg_TeamAssign (@0x431AA3); Server_InitAllPlayerEntitiesForRound @0x516AA0
+//  (@0x516BC4..0x516BE3); Player_InitPlayer @0x4E15F0 (@0x4E1872..0x4E1882, @0x4E1995)]
+struct SpawnLoadoutBuffer {
+    std::vector<WeaponKitEntry> entries;
 };
 
 // The engine defaults: the profile-less spawn kit, the static single-player page

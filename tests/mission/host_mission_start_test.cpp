@@ -77,6 +77,73 @@ uint32_t mission_game_type(const bms::File &mission) {
 			static_cast<bms::AttribFlags>(mission.header.attrib_flags)));
 }
 
+// The shell's single player bring-up record (socketless, playing), over `process` when given.
+inmatch::HostBringup single_player_bringup(uint32_t game_type,
+		inmatch::ClientProcessState *process = nullptr) {
+	inmatch::HostConfig cfg;
+	cfg.title = &kJo;
+	cfg.config.server_name = "SINGLEPLAYERGAME";
+	cfg.config.max_players = 1;
+	cfg.config.game_type = game_type;
+	cfg.socket_mode = inmatch::SocketMode::Socketless;
+	cfg.serve_and_play = true;
+	cfg.client_process = process;
+	inmatch::HostBringup bringup;
+	bringup.host_cfg = cfg;
+	return bringup;
+}
+
+// A Serve Only host's bring-up record (a LAN session, no local player), over `process`.
+inmatch::HostBringup serve_only_bringup(uint32_t game_type, inmatch::ClientProcessState *process) {
+	inmatch::HostConfig cfg;
+	cfg.title = &kJo;
+	cfg.config.server_name = "serve_only";
+	cfg.config.max_players = 4;
+	cfg.config.game_type = game_type;
+	cfg.socket_mode = inmatch::SocketMode::Lan;
+	cfg.serve_and_play = false;
+	cfg.client_process = process;
+	inmatch::HostBringup bringup;
+	bringup.host_cfg = cfg;
+	return bringup;
+}
+
+// A Serve Only host's mission start over `process`: the boot, the round init's row body (the
+// host boot's step) and Player_InitPlayer's legs. Returns the row body's equipped byte (0xFF
+// with no body) and the local table's slot count.
+struct ServeOnlyStart {
+	uint8_t equipped = 0xFF;
+	size_t slots = 0;
+};
+ServeOnlyStart run_serve_only_start(inmatch::ClientProcessState &process) {
+	ServeOnlyStart out;
+	std::map<std::string, std::string> files;
+	files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
+	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	ms::MissionKernel &kernel = *kernel_storage;
+	auto role_storage = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost, nullptr);
+	inmatch::HostRole &role = *role_storage;
+	role.bind(kernel);
+	kernel.open_document(two_entity_mission(), "serve_only_buffer", source_over(&files));
+	ms::KernelBootOptions options;
+	options.playable = false;
+	options.mp_session = true;
+	options.game_type = mission_game_type(kernel.mission);
+	options.bringup_net_session = [&] { role.bring_up(serve_only_bringup(options.game_type, &process)); };
+	std::string error;
+	CHECK(kernel.boot(options, error));
+	role.seed_own_slot_at_first_round_init();
+	role.init_local_player_at_mission_start();
+	const w::Entity *body = kernel.world.registry.get(kernel.world.cached.local_player);
+	CHECK(body != nullptr);
+	if (body != nullptr) out.equipped = body->equipped_adm_index;
+	for (int combo = 0; combo < w::weapon_combo::kSlotCount; ++combo) {
+		const w::WeaponInventorySlot *slot = kernel.local.inventory.slot(combo);
+		if (slot != nullptr && slot->adm_index >= 0) ++out.slots;
+	}
+	return out;
+}
+
 inmatch::TickInput tick_input() {
 	inmatch::TickInput in;
 	in.loaded_model_list_count = 0;
@@ -464,13 +531,14 @@ void run_single_player_retry_replays_the_own_join() {
 }
 
 // The first mission start's round init seeds the own slot's loadout buffer from the spawn
-// buffer, which the mission load filled by then (here the title's default kit, the two of its
-// weapons the mission's weapon.def carries, in the kit's order); the session's own add, inside
-// the load ahead of the weapon table, seeds nothing. The host boot runs the seed at its
-// round-init point (HostRole::seed_own_slot_at_first_round_init); this rig's bare kernel boot
-// calls it as that step does.
+// buffer as it stands: a playing host's mission start copied its side's class page into it
+// first (the shell's seed_session_kit_from_profile; here the title's default kit stands for
+// it, the two of its weapons the mission's weapon.def carries, in the kit's order); the
+// session's own add, inside the load ahead of the weapon table, seeds nothing. The host boot
+// runs the seed at its round-init point (HostRole::seed_own_slot_at_first_round_init); this
+// rig's bare kernel boot calls it as that step does.
 // [orig: Game_StartMission @0x525BAF -> Server_InitAllPlayerEntitiesForRound
-//  @0x516BC4..0x516BE3; the default page @0x5246BE]
+//  @0x516BC4..0x516BE3; the peer's side page @0x525767..0x525818]
 void run_first_round_init_seeds_the_own_buffer() {
 	std::map<std::string, std::string> files;
 	files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
@@ -509,6 +577,7 @@ void run_first_round_init_seeds_the_own_buffer() {
 	// The add, inside the load ahead of the weapon table, seeded nothing; the host boot's
 	// round-init point (host_boot.cpp, after the PreMission pass) seeds the buffer.
 	CHECK(own->reply.loadout_buffer.entries.empty());
+	kernel.local.loadout.spawn_kit() = w::weapon_kit_default(kernel.world.rules.title);
 	role.seed_own_slot_at_first_round_init();
 	const std::vector<LoadoutSubmitEntry> &entries = own->reply.loadout_buffer.entries;
 	CHECK(own->reply.loadout_buffer_set && entries.size() == 2);
@@ -569,17 +638,23 @@ void run_single_player_restart_repromotes_the_mission_kit() {
 	// default page, WPN_M4AUTO first (with no profile page of the shell's)
 	// [orig: Game_ApplySessionSettingsToGlobals @0x5519A2..0x5519E4 (out of a session);
 	//  Game_StartMission @0x524683..0x5246C8 (the restart's copy), "WPN_M4AUTO" @0x5246BE].
+	// The fill is the single player start's (HostRole's bring-up writes the static arm).
 	std::vector<world::WeaponKitEntry> literal[2];
 	for (int pass = 0; pass < 2; ++pass) {
 		std::map<std::string, std::string> files;
 		files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>(
+				inmatch::RoleKind::SinglePlayer, nullptr);
+		inmatch::HostRole &role = *role_storage;
+		role.bind(kernel);
 		kernel.open_document(two_entity_mission(), "sp_restart_literal", source_over(&files));
 		ms::KernelBootOptions options;
 		options.mp_session = false;
 		options.restart = pass == 1;
 		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] { role.bring_up(single_player_bringup(options.game_type)); };
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		literal[pass] = world::local_loadout_kit(kernel.world, kernel.local.loadout);
@@ -708,6 +783,65 @@ void run_single_player_restart_keeps_the_uptime_stamp() {
 	CHECK(difficulty[1] == w::mission_start_difficulty(mission_game_type(two_entity_mission())));
 }
 
+// A fresh process's spawn buffer is the image's zero: a dedicated start fills nothing (no single
+// player fill, no peer's side page), so the Serve Only row's Player_InitPlayer builds an empty
+// table, its select of 195 finds no slot and stores nothing, and the row body keeps its spawn's
+// equipped byte, the loadout name list's first weapon (D-NET-352).
+// [orig: g_SpawnLoadoutBuffer @0x24D4E00 (zero in the image); Game_ApplySessionSettingsToGlobals
+//  @0x551500 - the dedicated start's jz @0x5517A7; Game_StartMission - is_mp_session_peer
+//  @0x525773 skips the side page; Player_InitPlayer @0x4E15F0 - the display list
+//  @0x4E1872..0x4E1882, Player_SelectWeaponSlot @0x4E1995 -> the no-slot return
+//  @0x4DD794..0x4DD79C; PlayerClass_InitEntity @0x4B1100..0x4B1116]
+void run_a_fresh_dedicated_process_runs_on_an_empty_buffer() {
+	auto process = std::make_unique<inmatch::ClientProcessState>();
+	const ServeOnlyStart start = run_serve_only_start(*process);
+	CHECK(process->spawn_loadout_buffer.entries.empty());
+	CHECK(start.slots == 0);
+	CHECK(start.equipped == 2); // WPN_M4AUTO: the name list initializer's first name
+}
+
+// The buffer lives as long as the process: a single player mission's fill (its kit chunk here)
+// is still the buffer when the same process hosts Serve Only, whose start fills nothing, so the
+// row's Player_InitPlayer builds its table from it and its select of 195 equips the kit's knife
+// over the spawn's WPN_M4AUTO, which every joiner's 0x0A off-16 then carries (D-NET-352).
+// [orig: g_SpawnLoadoutBuffer @0x24D4E00; Mission_LoadBMSFile @0x40F4E0 (the write @0x40F961);
+//  Game_ApplySessionSettingsToGlobals @0x551500 (@0x5517A7); Player_InitPlayer @0x4E15F0
+//  (@0x4E1872..0x4E1882, @0x4E1995); Player_SelectWeaponSlot @0x4DD680 (the store @0x4DD727)]
+void run_a_single_player_fill_carries_into_a_serve_only_row() {
+	auto process = std::make_unique<inmatch::ClientProcessState>();
+	{
+		std::map<std::string, std::string> files;
+		files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>(
+				inmatch::RoleKind::SinglePlayer, nullptr);
+		inmatch::HostRole &role = *role_storage;
+		role.bind(kernel);
+		bms::File mission = two_entity_mission();
+		bms::WeaponLoadoutRecord row;
+		row.name = "WPN_KNIFE";
+		row.ammo_primary = "1";
+		row.ammo_secondary = "0";
+		mission.loadout.entries.push_back(row);
+		kernel.open_document(std::move(mission), "sp_fill", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = false;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			role.bring_up(single_player_bringup(options.game_type, process.get()));
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+	}
+	const std::vector<w::WeaponKitEntry> &buffer = process->spawn_loadout_buffer.entries;
+	CHECK(buffer.size() == 1 && buffer[0].name == "WPN_KNIFE");
+	const ServeOnlyStart start = run_serve_only_start(*process);
+	CHECK(buffer.size() == 1 && buffer[0].name == "WPN_KNIFE");
+	CHECK(start.slots == 1);
+	CHECK(start.equipped == 1); // WPN_KNIFE
+}
+
 } // namespace
 
 int main() {
@@ -721,6 +855,8 @@ int main() {
 	run_single_player_restart_repromotes_the_mission_kit();
 	run_single_player_restart_keeps_the_uptime_stamp();
 	run_single_player_class_is_the_missions_type();
+	run_a_fresh_dedicated_process_runs_on_an_empty_buffer();
+	run_a_single_player_fill_carries_into_a_serve_only_row();
 	if (failures == 0) std::printf("host_mission_start: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

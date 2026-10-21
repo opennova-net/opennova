@@ -113,6 +113,10 @@ bool JoinerRole::bring_up() {
 	reset_for_load(runtime->deployment_release_revision());
 	stamp_mission_rules();
 	kernel_->local.loadout.pending_player_class = -1; // the embedder re-applies the kit after each load
+	// The process's spawn buffer, which no start clears (world::SpawnLoadoutBuffer)
+	// [orig: g_SpawnLoadoutBuffer @0x24D4E00].
+	kernel_->local.loadout.process_buffer =
+			client_process_ != nullptr ? &client_process_->spawn_loadout_buffer : nullptr;
 	return rebuild;
 }
 

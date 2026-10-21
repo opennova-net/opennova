@@ -186,7 +186,7 @@ uint8_t current_player_class(const NapiNPConnection &conn);
 // Every weapon-slot list send's own legs: the slot's PlayerType set to its class; for
 // the authority's own slot (its local byte +5: the listen host's own connection) its
 // loadout buffer copied into the spawn buffer (g_SpawnLoadoutBuffer: the local player's
-// LocalPlayerLoadout::spawn_kit) and its class stored into the profile's class for the
+// LocalPlayerLoadout::spawn_kit()) and its class stored into the profile's class for the
 // slot team's side (g_CharClassTeam1 for team 1 or 3, else g_CharClassTeam2: the own
 // connection's char_vars.char_class[0 / 1], which Player_InitPlayer re-stamps the own
 // body's class from at the next mission start); and, after the rows, for the slot whose

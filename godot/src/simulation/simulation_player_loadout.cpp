@@ -277,13 +277,13 @@ bool Simulation::seed_session_kit_from_profile() {
 	// binding keeps the ROLE gate: a live session covers a LISTEN HOST as
 	// well as a joiner; out of one the single player's page arm runs.
 	if (!kernel_) return false;
-	// Single player: the current profile's single-player page, at the mission start and
-	// the restart alike, where the mission's own kit chunk did not promote one (the
-	// engine witness: inmatch::seed_single_player_kit_from_profile, D-NET-352).
+	// Single player: the current profile's single-player page, else the static page, at the
+	// mission start and the restart alike, where the mission's own kit chunk did not promote
+	// one (the engine witness: inmatch::seed_single_player_kit_from_profile, D-NET-352).
 	if (!is_host_listening() && !is_joiner())
-		return player_.weapon_profile_loaded &&
-				opennova::inmatch::seed_single_player_kit_from_profile(kernel_->world,
-						player_.weapon_profile, kernel_->local.loadout);
+		return opennova::inmatch::seed_single_player_kit_from_profile(kernel_->world,
+				player_.weapon_profile_loaded ? &player_.weapon_profile : nullptr,
+				kernel_->local.loadout);
 	const uint8_t assigned =
 			(is_joiner() && runtime_) ? runtime_->assigned_team() : 0;
 	return opennova::inmatch::seed_session_kit_from_profile(kernel_->world,

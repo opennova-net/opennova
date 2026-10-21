@@ -126,8 +126,7 @@ void test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType gun_seat) {
 
 	w::LocalPlayer local(world);
 	world.local_player_state = &local;
-	local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
-	local.loadout.spawn_kit_set = true;
+	local.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
 	w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
 			local.inventory_valid, /*select_spawn_default=*/true);
 	const int32_t personal = local.inventory.equipped_combo;

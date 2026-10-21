@@ -159,11 +159,11 @@ void test_the_own_list_legs() {
 	r.entity().equipped_adm_index = kPistolAdm;
 	r.submit(7, static_cast<uint32_t>(kPistolCombo));
 	const w::LocalPlayerLoadout &kit = r.local->loadout;
-	CHECK(kit.spawn_kit_set && kit.spawn_kit.size() == 2);
-	if (kit.spawn_kit.size() == 2) {
-		CHECK(kit.spawn_kit[0].name == "WPN_RIFLE" && kit.spawn_kit[0].ammo_primary == 3 &&
-				kit.spawn_kit[0].ammo_secondary == -1);
-		CHECK(kit.spawn_kit[1].name == "WPN_PISTOL" && kit.spawn_kit[1].ammo_primary == 2);
+	CHECK(kit.spawn_kit().size() == 2);
+	if (kit.spawn_kit().size() == 2) {
+		CHECK(kit.spawn_kit()[0].name == "WPN_RIFLE" && kit.spawn_kit()[0].ammo_primary == 3 &&
+				kit.spawn_kit()[0].ammo_secondary == -1);
+		CHECK(kit.spawn_kit()[1].name == "WPN_PISTOL" && kit.spawn_kit()[1].ammo_primary == 2);
 	}
 	CHECK(r.conn().char_vars.char_class[0] == 7);
 	CHECK(r.local->inventory.equipped_combo == kPistolCombo);
@@ -175,7 +175,7 @@ void test_the_own_list_legs() {
 	Rig j(/*own=*/false);
 	j.conn().char_vars.char_class[0] = 5;
 	j.submit(7, static_cast<uint32_t>(kRifleCombo));
-	CHECK(!j.local->loadout.spawn_kit_set);
+	CHECK(j.local->loadout.spawn_kit().empty());
 	CHECK(j.conn().char_vars.char_class[0] == 5);
 }
 
@@ -198,9 +198,8 @@ void test_the_deploy_rebuilds_the_local_table() {
 // [orig: Server_InitAllPlayerEntitiesForRound @0x516BC4..0x516BE3, @0x516BF3..0x516C20]
 void test_the_round_init_seeds_the_own_buffer() {
 	Rig r(/*own=*/true);
-	r.local->loadout.spawn_kit = {w::WeaponKitEntry{"WPN_PISTOL", 4, -1, -1},
+	r.local->loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_PISTOL", 4, -1, -1},
 			w::WeaponKitEntry{"WPN_NONE_SUCH", 1, -1, -1}};
-	r.local->loadout.spawn_kit_set = true;
 	inmatch::PlayerSlot_SeedOwnLoadoutBuffer(r.conn(), r.world);
 	const LoadoutSubmit &buffer = r.conn().reply.loadout_buffer;
 	CHECK(buffer.entries.size() == 1);
@@ -210,8 +209,7 @@ void test_the_round_init_seeds_the_own_buffer() {
 	CHECK(r.local_slot(kPistolCombo).adm_index == kPistolAdm);
 	CHECK(r.local_slot(kRifleCombo).adm_index < 0);
 	Rig j(/*own=*/false);
-	j.local->loadout.spawn_kit = r.local->loadout.spawn_kit;
-	j.local->loadout.spawn_kit_set = true;
+	j.local->loadout.spawn_kit() = r.local->loadout.spawn_kit();
 	inmatch::PlayerSlot_SeedOwnLoadoutBuffer(j.conn(), j.world);
 	CHECK(j.conn().reply.loadout_buffer.entries.empty());
 }

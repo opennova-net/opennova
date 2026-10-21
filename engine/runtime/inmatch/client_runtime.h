@@ -120,6 +120,10 @@ struct ClientProcessState {
 	// [orig: g_LoadoutWeaponNameList @0x8333F8; its writers WeaponLoadout_ApplyFromBuffer
 	//  @0x565D46 and NapiNPClientMsg_HandleWeaponLoadoutSync @0x42920C..0x4292F0]
 	world::LoadoutWeaponNameList loadout_weapon_names;
+	// g_SpawnLoadoutBuffer (world/weapon_inventory.h SpawnLoadoutBuffer): empty in a fresh
+	// process, its writers' alone; the roles bind their kernels' loadouts to it
+	// (LocalPlayerLoadout::process_buffer). [orig: g_SpawnLoadoutBuffer @0x24D4E00]
+	world::SpawnLoadoutBuffer spawn_loadout_buffer;
 	// g_RoundStateInitTick as the last session create's round init stamped it
 	// (NapiNPServerCtx::round_state_init_tick): a single player's restart, which runs no
 	// round init, keeps it. [orig: Server_InitNewRoundState @0x51CBA0; Game_RestartRoundSP

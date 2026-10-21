@@ -56,33 +56,38 @@ bool seed_session_kit_from_profile(world::World &world,
 	uint8_t player_class = side.player_class;
 	if (player_class < 5 || player_class > 9) player_class = 8;
 	const playersav::KitPage *page = side.page_for_class(player_class);
-	if (page == nullptr || page->entries.empty()) return false;
+	if (page == nullptr) return false;
+	// An empty page copies empty: the copy stores the page's terminator [orig:
+	// Buffer_CopyUntilDoubleNull @0x562F30, called @0x525818].
 	std::vector<world::WeaponKitEntry> kit;
 	kit.reserve(page->entries.size());
 	for (const playersav::KitEntry &e : page->entries)
 		kit.push_back(world::WeaponKitEntry{e.name, e.ammo_primary,
 		                                    e.ammo_secondary, e.flags});
-	loadout.spawn_kit = std::move(kit);
-	loadout.spawn_kit_set = true;
+	loadout.spawn_kit() = std::move(kit);
 	seeded_side = static_cast<int>(playersav::side_for_team(team));
 	return true;
 }
 
 bool seed_single_player_kit_from_profile(world::World &world,
-		const playersav::Record &profile, world::LocalPlayerLoadout &loadout) {
-	if (world.rules.mp_session || loadout.spawn_kit_set) return false;
+		const playersav::Record *profile, world::LocalPlayerLoadout &loadout) {
+	if (world.rules.mp_session || loadout.mission_kit_promoted) return false;
 	// The page's first byte: the page is a double-NUL list of strings whose first is the
 	// first entry's name, so a zero first byte (an empty first name, an empty page) is the
 	// copy's static-page arm [orig: Game_StartMission @0x524360 (`cmp byte_256113C[eax], bl;
-	//  jz` @0x5246A8..0x5246B9); Game_ApplySessionSettingsToGlobals @0x551500 (@0x5519C3..0x5519D5)].
-	const playersav::KitPage &page = profile.single_player;
-	if (page.entries.empty() || page.entries.front().name.empty()) return false;
+	//  jz` @0x5246A8..0x5246B9, the static page @0x5246BE); Game_ApplySessionSettingsToGlobals
+	//  @0x551500 (@0x5519C3..0x5519D5, the static page @0x5519DA, the copy @0x5519E4)].
+	if (profile == nullptr || profile->single_player.entries.empty() ||
+			profile->single_player.entries.front().name.empty()) {
+		loadout.spawn_kit() = world::weapon_kit_default(world.rules.title);
+		return true;
+	}
+	const playersav::KitPage &page = profile->single_player;
 	std::vector<world::WeaponKitEntry> kit;
 	kit.reserve(page.entries.size());
 	for (const playersav::KitEntry &e : page.entries)
 		kit.push_back(world::WeaponKitEntry{e.name, e.ammo_primary, e.ammo_secondary, e.flags});
-	loadout.spawn_kit = std::move(kit);
-	loadout.spawn_kit_set = true;
+	loadout.spawn_kit() = std::move(kit);
 	return true;
 }
 
@@ -133,8 +138,7 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 		bms::MissionType mission_type) {
 	// The whole selection, unfiltered, on both legs, into the process's loadout name list
 	// (g_LoadoutWeaponNameList, whose first name every body the process spawns takes), not the
-	// spawn buffer: the resident kit (LocalPlayerLoadout::spawn_kit, g_SpawnLoadoutBuffer)
-	// keeps its rows until the host's list reaches it (a joiner's 0x5A apply copies the rebuilt
+	// spawn buffer: g_SpawnLoadoutBuffer (LocalPlayerLoadout::spawn_kit()) keeps its rows until the host's list reaches it (a joiner's 0x5A apply copies the rebuilt
 	// list over it, a listen host's own list send its slot's buffer) [orig: the rep movsd into
 	// g_LoadoutWeaponNameList @0x565D46..0x565D4B; NapiNPClientMsg_HandleWeaponLoadoutSync
 	// @0x4293D1..0x4293E9; Server_SendWeaponSlotListToPlayer @0x502617..0x502627].
@@ -218,13 +222,11 @@ void build_joiner_loadout_kit(const world::World &world,
 	// over it [orig: NetPacket_SendLoadoutSubmit's restrictionData argument: g_SpawnLoadoutBuffer
 	// @0x52582F / @0x525C24 / @0x431AA3, the ACCEPT's class buffer @0x565D7F..0x565D85;
 	// WeaponLoadout_ApplyFromBuffer @0x565D46; NapiNPClientMsg_HandleWeaponLoadoutSync
-	// @0x4293D1..0x4293E9]. `loadout.spawn_kit` is our restrictionData;
-	// `seed_session_kit_from_profile` is the Game_StartMission copy that fills it.
+	// @0x4293D1..0x4293E9]. `loadout.spawn_kit()` is our restrictionData, read as it stands
+	// (empty in a fresh process until a writer fills it); `seed_session_kit_from_profile` is
+	// the Game_StartMission copy that fills it.
 	{
-		const std::vector<world::WeaponKitEntry> &resident =
-				loadout.spawn_kit_set ? loadout.spawn_kit
-				                      : world::weapon_kit_default(world.rules.title);
-		for (const world::WeaponKitEntry &entry : resident) {
+		for (const world::WeaponKitEntry &entry : loadout.spawn_kit()) {
 			const int adm = world.tables.weapons.index_of(entry.name.c_str());
 			if (adm < 0) continue; // [orig: the AdmDef_FindByName gate @0x42cf0b]
 			out.rows.push_back(LoadoutSubmitEntry{

@@ -435,10 +435,10 @@ private:
 	// Player_InitPlayer's weapon leg (engine: runtime/inmatch/host_session.h); shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
-	// Copies the assigned side's profile page into the resident kit buffer
-	// (kernel_->local.loadout.spawn_kit) in a live session — retail's single restrictionData (engine: runtime/inmatch/loadout_submit.h);
-	// out of one the profile's single-player page unless the mission's kit promoted. False
-	// when it copied nothing.
+	// Copies the assigned side's profile page into the spawn buffer
+	// (kernel_->local.loadout.spawn_kit(), the process's) in a live session — retail's single restrictionData (engine: runtime/inmatch/loadout_submit.h);
+	// out of one the profile's single-player page, else the static page, unless the mission's
+	// kit promoted. False when it copied nothing.
 	bool seed_session_kit_from_profile();
 	// Re-copies the page when the SIDE the team selector names stops matching the side
 	// the resident buffer came from — the S2C 0x04 latch arriving after the catalog, or
@@ -1415,11 +1415,11 @@ public:
 	// rows {name, ammo_primary, ammo_secondary, flags} (values default -1). When
 	// p_filter_by_availability, the kit is filtered through the availability table
 	// with the knife fallback — the SP .bms promote leg (engine: runtime/world/player_loadout.cpp); the armory/profile legs store unfiltered (the server validates).
-	// An empty kit resets to the engine default {WPN_M4AUTO} (engine: runtime/mission/mission_kernel.cpp).
+	// An empty kit empties the buffer (engine: runtime/world/player_loadout.h).
 	void set_spawn_loadout(const TypedArray<WeaponKitEntry> &p_kit, bool p_filter_by_availability);
-	// True only after a mission/profile explicitly supplied a spawn kit; the
-	// WPN_M4AUTO engine fallback created by load_weapon_table leaves this false.
-	bool has_explicit_spawn_loadout() const { return kernel_->local.loadout.spawn_kit_set; }
+	// True only after this load's mission kit wrote the spawn buffer; the single player's
+	// static page and profile page leave this false (engine: LocalPlayerLoadout::mission_kit_promoted).
+	bool has_explicit_spawn_loadout() const { return kernel_->local.loadout.mission_kit_promoted; }
 	// Availability by weapon name: 0 banned / 1 allowed / 2 armory-zone-only /
 	// 3 mission-allowed; unknown names read 1. The armory UI filter term
 	// (engine: runtime/world/weapon_inventory.h).

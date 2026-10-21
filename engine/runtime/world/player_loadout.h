@@ -29,11 +29,25 @@ class World;
 struct LocalPlayerLoadout {
     // [orig: the all-1 default @ 0x551c86]
     WeaponAvailability availability{};
-    // The resident kit buffer [orig: g_SpawnLoadoutBuffer @ 0x24D4E00 — ONE buffer
-    // serves the local slot pool, the respawn refill, and the joiner's 0x2F
-    // serialization alike].
-    std::vector<WeaponKitEntry> spawn_kit;
-    bool spawn_kit_set = false;
+    // The spawn buffer (SpawnLoadoutBuffer, weapon_inventory.h): the process's, which the role
+    // binds (inmatch::ClientProcessState::spawn_loadout_buffer), else this loadout's own (a
+    // harness's). ONE buffer serves the local slot pool, the respawn refill, the own slot's
+    // seed and the 0x2F serialization alike; it is empty until a writer fills it.
+    // [orig: g_SpawnLoadoutBuffer @0x24D4E00]
+    SpawnLoadoutBuffer *process_buffer = nullptr;
+    SpawnLoadoutBuffer own_buffer;
+    std::vector<WeaponKitEntry> &spawn_kit() {
+        return (process_buffer != nullptr ? *process_buffer : own_buffer).entries;
+    }
+    const std::vector<WeaponKitEntry> &spawn_kit() const {
+        return (process_buffer != nullptr ? *process_buffer : own_buffer).entries;
+    }
+    // This load's mission kit chunk wrote the buffer. Retail's single player fills the buffer
+    // ahead of the mission load, whose chunk then overwrites it; ours' kernel promotes the
+    // chunk first, so the profile-page fill that follows stands back for it.
+    // [orig: Game_ApplySessionSettingsToGlobals @0x5519A2..0x5519E4 from SinglePlayer_StartMission
+    //  @0x561C28, ahead of Mission_LoadBMSFile @0x40F4E0 (@0x40F961)]
+    bool mission_kit_promoted = false;
     // A joiner's shell applies the profile class before L has spawned; the
     // latch survives until the spawn block stamps the entity. 8 (rifleman) is
     // retail's out-of-range clamp default [orig: Server_PlayerAdd class clamp
@@ -45,20 +59,12 @@ struct LocalPlayerLoadout {
     // mirrored into InfantryState::loadout_weight_fp16 each tick.
     // [orig: Terrain_AccumulateSectorScores @0x425220 (misnamed)]
     int32_t weight_fp16 = 0;
-
-    void reset() {
-        availability.reset();
-        spawn_kit.clear();
-        spawn_kit_set = false;
-        // The class latch deliberately survives kit resets — the shell
-        // re-applies the kit after each load, the class rides the profile.
-    }
 };
 
-// Install the spawn kit [orig: the S2C 0x5A apply / SP shared restrictionData
-// write @ 0x4293e4]. filter_by_availability runs the SP .bms promote leg —
-// availability-filter with the {WPN_KNIFE,-1,-1,-1} fallback [orig:
-// Mission_LoadBMSFile @ 0x40f7ae..0x40f95c].
+// The mission kit chunk's write into the spawn buffer (mission_kit_promoted marks it).
+// filter_by_availability runs the SP .bms promote leg — availability-filter with the
+// {WPN_KNIFE,-1,-1,-1} fallback [orig: Mission_LoadBMSFile @ 0x40f7ae..0x40f95c, the write
+// @0x40F961].
 void local_loadout_set_spawn_kit(World &world, LocalPlayerLoadout &loadout,
                                  std::vector<WeaponKitEntry> kit,
                                  bool filter_by_availability);
@@ -87,8 +93,8 @@ bool local_loadout_promote_mission_rules(
         const std::vector<std::pair<std::string, int32_t>> &availability_rows,
         std::vector<WeaponKitEntry> kit_rows);
 
-// The resident kit: the spawn kit when one is set, else the title's default
-// kit (weapon_kit_default).
+// The spawn buffer as it stands: an empty buffer reads empty (no fallback: the static page
+// is one writer's arm, the single player's fill).
 std::vector<WeaponKitEntry> local_loadout_kit(const World &world,
                                               const LocalPlayerLoadout &loadout);
 

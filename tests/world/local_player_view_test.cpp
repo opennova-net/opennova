@@ -2499,7 +2499,8 @@ void test_use_item_arm_order() {
 }
 
 // The shell's class pick: 5..9 stamps L, a joiner without L latches it, the
-// rest change nothing; the resident kit is the spawn kit, else the default.
+// rest change nothing; the resident kit is the spawn buffer as it stands, empty
+// until a writer fills it (no default).
 void test_loadout_class_pick_and_resident_kit() {
     LocalWorld lw;
     LocalPlayerLoadout loadout;
@@ -2512,11 +2513,9 @@ void test_loadout_class_pick_and_resident_kit() {
     CHECK(local_loadout_set_player_class(no_player, loadout, 6));
     CHECK(loadout.pending_player_class == 6);
 
-    CHECK(local_loadout_kit(lw.w, loadout).size() ==
-            weapon_kit_default(lw.w.rules.title).size());
-    loadout.spawn_kit = {WeaponKitEntry{}};
-    loadout.spawn_kit[0].name = "WPN_TEST";
-    loadout.spawn_kit_set = true;
+    CHECK(local_loadout_kit(lw.w, loadout).empty());
+    loadout.spawn_kit() = {WeaponKitEntry{}};
+    loadout.spawn_kit()[0].name = "WPN_TEST";
     const std::vector<WeaponKitEntry> kit = local_loadout_kit(lw.w, loadout);
     CHECK(kit.size() == 1 && kit[0].name == "WPN_TEST");
 }

@@ -882,8 +882,7 @@ void arm_at_boot(Rig &r, LocalPlayer &local) {
     m4.weapon_class_slot = 1;
     m4.ammo_class_id = 0;
     t.entries.push_back(m4);
-    local.loadout.spawn_kit = {WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
-    local.loadout.spawn_kit_set = true;
+    local.loadout.spawn_kit() = {WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
     local_loadout_rebuild(r.w, local.loadout, local.weapon, local.inventory,
             local.inventory_valid, /*select_spawn_default=*/true);
 }
@@ -971,8 +970,7 @@ void test_usegun_round_trip_reads_the_personal_bucket() {
     t.entries.push_back(m4);
     LocalPlayer local(r.w);
     r.w.local_player_state = &local;
-    local.loadout.spawn_kit = {WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
-    local.loadout.spawn_kit_set = true;
+    local.loadout.spawn_kit() = {WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
     local_loadout_rebuild(r.w, local.loadout, local.weapon, local.inventory,
             local.inventory_valid, /*select_spawn_default=*/true);
     r.veh().item_attrib |= kItemAttribEweap; // the UseGun's own slot

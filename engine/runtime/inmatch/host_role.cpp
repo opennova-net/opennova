@@ -125,6 +125,9 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	// as its equipped weapon (world::player_spawn_equipped_default) [orig:
 	//  g_LoadoutWeaponNameList @0x8333F8; PlayerClass_InitEntity @0x4B1100..0x4B1116].
 	kernel.world.loadout_weapon_names = &client_process_->loadout_weapon_names;
+	// The process's spawn buffer, which no start clears (world::SpawnLoadoutBuffer)
+	// [orig: g_SpawnLoadoutBuffer @0x24D4E00].
+	kernel.local.loadout.process_buffer = &client_process_->spawn_loadout_buffer;
 	kernel.world.rules.fat_bullets = config.fat_bullets != 0;
 	kernel.world.rules.one_shot_kill = config.one_shot_kill != 0;
 	// The mission-data block's unlimited-vehicles word, rebuilt from the host
@@ -190,6 +193,21 @@ void HostRole::keep_round_state_init_tick() {
 	if (kernel_ != nullptr && kernel_->restart_boot())
 		ctx.round_state_init_tick = client_process_->round_state_init_tick;
 	client_process_->round_state_init_tick = ctx.round_state_init_tick;
+}
+
+// The single player's start fills the spawn buffer ahead of its mission load: the mission's
+// kit (ours' kernel promotes the chunk at the table load, after this), else the profile's
+// single-player page (the shell's, which holds the profile), else the static page, which this
+// writes; a start in a session fills nothing here (a peer's mission start copies its side's
+// page; a dedicated start nothing at all).
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - `jz loc_5519A2` @0x5517A7 out of a
+//  session, the fill @0x5519A2..0x5519E4 (the static page @0x5519DA), from
+//  SinglePlayer_StartMission @0x561AF0 (the call @0x561C28); Game_StartMission's restart copy
+//  @0x524683..0x5246C8 (the static page @0x5246BE)]
+void HostRole::fill_spawn_buffer_out_of_session() {
+	mission::MissionKernel &kernel = *kernel_;
+	if (kernel.world.rules.mp_session) return;
+	(void)seed_single_player_kit_from_profile(kernel.world, nullptr, kernel.local.loadout);
 }
 
 // Every body the session spawns from here on (a mid-match join, a map change's
@@ -304,6 +322,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
 	keep_round_state_init_tick();
+	fill_spawn_buffer_out_of_session();
 	install_spawned_body_bind();
 	make_client_runtime(config.game_type);
 	// Seed the look heading from the auto-spawned player's facing.
@@ -345,6 +364,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
 	keep_round_state_init_tick();
+	fill_spawn_buffer_out_of_session();
 	install_spawned_body_bind();
 	if (host_cfg.serve_and_play) {
 		make_client_runtime(host_cfg.config.game_type);
@@ -487,6 +507,19 @@ void HostRole::init_local_player_at_mission_start() {
 		player->medic_reviving = false;
 		player->flags &= ~world::kEntityFlagCarried;
 	}
+	// A Serve Only host's Player_InitPlayer weapon leg over its row body (a playing host's runs
+	// at the table load and the round init): the display list from the spawn buffer as the
+	// process left it, the slot table, then the select of 195, which over an empty buffer (a
+	// fresh process: a dedicated start fills nothing) finds no slot and leaves the body's
+	// equipped byte, and over a buffer an earlier single player mission filled equips its slot
+	// (D-NET-352).
+	// [orig: Player_InitPlayer @0x4E15F0 - g_CurrentWeaponSlot = 195 @0x4E17FF, the display
+	//  list from g_SpawnLoadoutBuffer @0x4E1872..0x4E1882, Player_SelectWeaponSlot @0x4E1995;
+	//  Game_ApplySessionSettingsToGlobals @0x551500 (the dedicated start's jz @0x5517A7)]
+	if (!state.host_owner.serve_and_play)
+		world::local_loadout_rebuild(world, kernel_->local.loadout, kernel_->local.weapon,
+				kernel_->local.inventory, kernel_->local.inventory_valid,
+				/*select_spawn_default=*/true);
 	if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
 	if (player != nullptr) player->flags |= world::kEntityFlagCarried;
 }

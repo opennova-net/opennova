@@ -50,8 +50,8 @@ void local_loadout_set_spawn_kit(World &world, LocalPlayerLoadout &loadout,
         kit = weapon_kit_filter_by_availability(kit, world.tables.weapons,
                                                 loadout.availability);
     }
-    loadout.spawn_kit_set = !kit.empty();
-    loadout.spawn_kit = std::move(kit);
+    loadout.mission_kit_promoted = !kit.empty();
+    loadout.spawn_kit() = std::move(kit);
 }
 
 void local_loadout_apply_availability_pairs(
@@ -76,12 +76,13 @@ bool local_loadout_promote_mission_rules(
     if (kit_rows.empty()) return false;
     local_loadout_set_spawn_kit(world, loadout, std::move(kit_rows),
             /*filter_by_availability=*/true);
-    return loadout.spawn_kit_set;
+    return loadout.mission_kit_promoted;
 }
 
 std::vector<WeaponKitEntry> local_loadout_kit(const World &world,
                                               const LocalPlayerLoadout &loadout) {
-    return loadout.spawn_kit_set ? loadout.spawn_kit : weapon_kit_default(world.rules.title);
+    (void)world;
+    return loadout.spawn_kit();
 }
 
 bool local_loadout_set_player_class(World &world, LocalPlayerLoadout &loadout,
@@ -144,13 +145,14 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     const WeaponSwitchGates gates =
             local_weapon_switch_gates(world, weapon, &inventory);
     // The select of the word [orig: Player_InitPlayer @0x4E15F0 (the
-    //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E)].
+    //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E)]. An empty table (an
+    // empty buffer, the armory all-NONE kit) selects nothing, and the body keeps its
+    // equipped byte: the no-slot arm stores no +0x2B0 [orig: Player_SelectWeaponSlot
+    // @0x4DD680 - the global walk's return 0 @0x4DD794..0x4DD79C;
+    // Player_SwitchToWeaponByHandle @0x4E0170 stores none].
     if (!weapon_select_slot(table, inventory, inventory.current_slot,
-                !gates.equip_blocked)) {
-        // An empty table (the armory all-NONE kit) equips nothing.
-        if (e != nullptr) e->equipped_adm_index = 0xFF;
+                !gates.equip_blocked))
         return;
-    }
     // Player_InitPlayer follows the select with SwitchToWeaponByHandle(195)
     // [orig: @ 0x4e1995/@ 0x4e19a1], but the switch's mount walk rides the
     // entity's AI-slot binding gate [orig: entity+0x68 test @ 0x4e023a; writer
@@ -205,8 +207,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // The accepted loadout becomes the respawn kit [orig: the S2C 0x5A apply
     // writes restrictionData @ 0x4293e4; SP shares the buffer]. An explicit
     // empty kit stays empty (the armory all-NONE accept leaves the table bare).
-    loadout.spawn_kit_set = true;
-    loadout.spawn_kit = std::move(accepted);
+    loadout.spawn_kit() = std::move(accepted);
     // The apply runs no Player_InitPlayer: the current slot word keeps its value
     // through the rebuild's stamp, and the held weapon (the body's AdmDef index,
     // read before the rebuild's select restamps it) decides it below.
@@ -223,7 +224,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     //  @0x565DA8, the store @0x566182..0x56618C]
     if (!world.rules.mp_session) {
         if (Entity *local = world.registry.get(world.cached.local_player))
-            weapon_kit_store_damage_classes(loadout.spawn_kit, world.tables.weapons,
+            weapon_kit_store_damage_classes(loadout.spawn_kit(), world.tables.weapons,
                     world.tables.ammo.entries.size(), local->ammo_damage_class);
     }
     // The ACCEPT leg applies the REQUESTED ammo over the default seed: pool =
@@ -233,7 +234,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // WeaponSlot_SetAmmoCount @ 0x540b50; the walk over every sub-variant
     // @ 0x56621D..0x566233].
     const WeaponTable &table = world.tables.weapons;
-    for (const WeaponKitEntry &entry : loadout.spawn_kit) {
+    for (const WeaponKitEntry &entry : loadout.spawn_kit()) {
         const int adm = table.index_of(entry.name.c_str());
         if (adm < 0) continue;
         const WeaponTableEntry *def = table.by_index(static_cast<uint8_t>(adm));

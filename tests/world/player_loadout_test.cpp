@@ -82,7 +82,7 @@ void test_promotion_gate_skips_in_session() {
     r.world.rules.mp_session = true;
     CHECK(!local_loadout_promote_mission_rules(r.world, r.loadout,
             {{"WPN_AK47AUTO", 0}}, kit_of("WPN_M4AUTO", 3)));
-    CHECK(!r.loadout.spawn_kit_set);
+    CHECK(!r.loadout.mission_kit_promoted && r.loadout.spawn_kit().empty());
     CHECK(r.loadout.availability.value_for(3) ==
             weapon_availability_value::kAllowed);
 }
@@ -93,10 +93,10 @@ void test_promotion_applies_availability_then_filters_kit() {
     Rig r;
     CHECK(local_loadout_promote_mission_rules(r.world, r.loadout,
             {{"WPN_M4AUTO", 0}}, kit_of("WPN_M4AUTO", 3)));
-    CHECK(r.loadout.spawn_kit_set);
-    CHECK(r.loadout.spawn_kit.size() == 1);
-    if (r.loadout.spawn_kit.size() == 1)
-        CHECK(r.loadout.spawn_kit[0].name == "WPN_KNIFE");
+    CHECK(r.loadout.mission_kit_promoted);
+    CHECK(r.loadout.spawn_kit().size() == 1);
+    if (r.loadout.spawn_kit().size() == 1)
+        CHECK(r.loadout.spawn_kit()[0].name == "WPN_KNIFE");
 }
 
 // The ACCEPT overlay: requested clips expand to min(req, maxclips) * clipsize;
@@ -119,23 +119,20 @@ void test_accept_requested_ammo_and_banned_validation() {
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, kit_of("WPN_M4AUTO", 3), 8,
             /*validate_banned=*/true));
-    CHECK(r.loadout.spawn_kit.empty());
+    CHECK(r.loadout.spawn_kit().empty());
     // The S2C 0x5A grant apply skips the validation and keeps it.
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, kit_of("WPN_M4AUTO", 3), 8,
             /*validate_banned=*/false));
-    CHECK(r.loadout.spawn_kit.size() == 1);
+    CHECK(r.loadout.spawn_kit().size() == 1);
 }
 
-// The pre-spawn class latch survives resets and seeds the rebuild's pools
-// until L exists [orig: the clamp default 8 @ 0x51d102].
+// The pre-spawn class latch seeds the rebuild's pools until L exists, over an empty
+// spawn buffer too [orig: the clamp default 8 @ 0x51d102].
 void test_class_latch_survives_kit_reset() {
     Rig r;
     r.loadout.pending_player_class = 6;
-    r.loadout.spawn_kit = kit_of("WPN_M4AUTO");
-    r.loadout.spawn_kit_set = true;
-    r.loadout.reset();
-    CHECK(!r.loadout.spawn_kit_set);
+    CHECK(r.loadout.spawn_kit().empty());
     CHECK(r.loadout.pending_player_class == 6);
     local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, /*select_spawn_default=*/true);
@@ -158,8 +155,7 @@ void test_rebuild_and_mount_carry_the_slot_zoom() {
     r.world.cached.local_player = r.world.registry.spawn(0, Entity{});
     Entity *player = r.world.registry.get(r.world.cached.local_player);
     player->player_class = 8;
-    r.loadout.spawn_kit = kit_of("WPN_M4AUTO");
-    r.loadout.spawn_kit_set = true;
+    r.loadout.spawn_kit() = kit_of("WPN_M4AUTO");
     local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, /*select_spawn_default=*/true);
     CHECK(r.inventory.equipped_combo == 3 * 65);
