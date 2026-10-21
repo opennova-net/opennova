@@ -229,6 +229,7 @@ void ClientRuntime::set_local_player_position(const world::World &world) {
 void ClientRuntime::step_local_dead_latch() {
 	// The body's death edge, in the entity update after this frame's receive: a
 	// Health of 0 or less (a folded tail's, or the zero a dead self record stores)
+	// (the receive's word: an alive self record floors it at 1, local_entity_health_)
 	// latches the local entity's dead bit when the body tick runs: in the game loop,
 	// out of the pre-round and the session's round-over hold (the entity update's
 	// skip), not under the local death screen (the body tick's return at its head)
@@ -243,7 +244,7 @@ void ClientRuntime::step_local_dead_latch() {
 			joiner_->has_self_handle() ? cs.find(joiner_->self_handle()) : nullptr;
 	const bool record_dead =
 			self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
-	const bool health_zero = (cs.health_updates_applied != 0 && cs.local_health <= 0) || record_dead;
+	const bool health_zero = (cs.health_updates_applied != 0 && local_entity_health_ <= 0) || record_dead;
 	const bool hidden = self != nullptr && self->state_flags_known && (self->state_flags & 0x01u) != 0;
 	const bool body_ticks = cs.preround_delay_seconds == 0 &&
 			!(joiner_->in_session() && cs.spawn_success_gate) && !cs.death_screen_active &&
@@ -468,6 +469,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	self_team_revision_ = 0;
 	self_assigned_team_ = 0;
 	local_dead_latch_ = false;
+	local_entity_health_ = 0;
 	local_resubmit_revision_ = 0;
 	cleared_player_slots_.clear();
 	current_tick_ = 0;
@@ -511,6 +513,7 @@ bool ClientRuntime::begin_mission_reload() {
 	authoritative_ammo_pools_.fill(0);
 	deployed_ = false;
 	authoritative_spawn_released_ = false;
+	local_entity_health_ = 0;
 	local_dead_latch_ = false; // the next mission start's Player_InitPlayer
 	cleared_player_slots_.clear();
 	// The previous mission's replica goes with its world. The round gate the
@@ -1319,11 +1322,42 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				const uint32_t self_compact_before =
 						self_row_before ? self_before->compact_revision : 0u;
 				const uint32_t world_state_before = view_.state().world_state.revision;
+				const replication::ClientEntityState *local_row_before =
+						tb.first == s2c::PER_FRAME_UPDATE && local_entity_bound()
+						? view_.state().find(joiner_->local_player_entity()) : nullptr;
+				const uint32_t local_compact_before =
+						local_row_before != nullptr ? local_row_before->compact_revision : 0u;
 				// The zone messages run at their place in the pump, as every handler does,
 				// so a 0x53 measures from the local Position the handlers before it left
 				// (D-NET-687) [orig: NapiNPClientMsg_ZoneTimerWindow @0x428ae0 - the
 				// Position reads @0x428C19..0x428CB1].
 				if (!apply_zone_timer_body(tb.first, tb.second)) view_.apply(tb.first, tb.second);
+				// The local entity's Health as the 0x0A leaves it: the recipient tail's store
+				// comes first, then the record loop, where a record naming the local entity
+				// stores 0 when dead and, alive, raises a Health of 0 or less to 1. So a zero
+				// tail beside an alive self record (a stock host sends one on the death's
+				// frame: its 0x0A is built before its entity update raises the dead bit)
+				// leaves the local entity alive at 1, and the death waits for the next 0x0A's
+				// dead record. [orig: NapiNPClientMsg_0x00A @0x42FEC0 - the tail's Health
+				//  store @0x4305DF; NetPacket_SerializePlayerState @0x4C09C0 - the dead
+				//  arms' stores @0x4C1027 / @0x4C10FB, `cmp edi, g_LocalPlayerEntity`
+				//  @0x4C11AC, the floor @0x4C11C4..0x4C11CE; Server_TickUpdate @0x5266B6
+				//  ahead of Entity_UpdateAllEntities @0x52674B]
+				if (tb.first == s2c::PER_FRAME_UPDATE) {
+					if (view_.state().health_updates_applied != health_before)
+						local_entity_health_ = view_.state().local_health;
+					const replication::ClientEntityState *local_row =
+							local_entity_bound() ? view_.state().find(joiner_->local_player_entity())
+							                     : nullptr;
+					if (local_row != nullptr && local_row->state_flags_known &&
+							(local_row_before == nullptr ||
+									local_row->compact_revision != local_compact_before)) {
+						if ((local_row->state_flags & 0x02u) != 0)
+							local_entity_health_ = 0;
+						else if (local_entity_health_ <= 0)
+							local_entity_health_ = 1;
+					}
+				}
 				// The 0x58's parse stamps GetTickCount [orig: SessionStatus_ParseFromBuffer @0x53109F].
 				if (tb.first == s2c::SESSION_STATUS) session_status_receipt_ms_ = console_tick_ms();
 				// The echo of our console line runs the client's command walk at its
@@ -1379,7 +1413,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				// positive sample cannot erase an earlier death edge.
 				if (tb.first == s2c::PER_FRAME_UPDATE &&
 						view_.state().health_updates_applied != health_before &&
-						view_.state().local_health <= 0) {
+						local_entity_health_ <= 0) {
 					death_edge_in_poll = true;
 					authoritative_spawn_released_ = false;
 					joiner_->begin_redeployment();

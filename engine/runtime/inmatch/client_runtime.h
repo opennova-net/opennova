@@ -889,6 +889,11 @@ public:
 	//  NetPacket_SerializePlayerState @0x4C09C0 - the dead record's Health zero
 	//  @0x4C10F1..0x4C10FB, the respawn arm @0x4C1109]
 	bool local_player_dead() const { return local_dead_latch_; }
+	// The local entity's Health word as this frame's receive left it: each 0x0A's
+	// recipient tail stores it, then the record naming the local entity zeroes it when
+	// dead or, alive, raises a Health of 0 or less to 1 (the receive loop carries the
+	// witness). The dead latch and L's stored Health read it.
+	int16_t local_entity_health() const { return local_entity_health_; }
 	// The joiner's local player entity exists: a mission start's Player_InitPlayer
 	// bound it (JoinerConnection::local_player_entity), L spawned or not.
 	bool local_entity_bound() const {
@@ -1059,6 +1064,8 @@ private:
 	int32_t local_player_position_[3] = {0, 0, 0};
 	// local_player_dead's latch (the local entity's Flags & 2).
 	bool local_dead_latch_ = false;
+	// The local entity's Health word as the receive leaves it (local_entity_health).
+	int16_t local_entity_health_ = 0;
 	ConnectLog *connect_log_ = nullptr; // set_connect_log
 	// The body tick's death edge over this frame's fold (local_player_dead).
 	void step_local_dead_latch();

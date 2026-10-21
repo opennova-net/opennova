@@ -2723,6 +2723,79 @@ bool run_a_preround_death_latches_when_the_round_opens() {
 	return ok;
 }
 
+// V-L2-s6 FOUND 1: a 0x0A whose recipient tail is 0 beside an ALIVE self record (a stock
+// host's death frame: its 0x0A is built before its entity update raises the victim's dead
+// bit) leaves the local entity alive at Health 1, as the record loop floors the word the
+// tail stored; the death latches with the next 0x0A, whose dead self record stores 0.
+// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - the tail's store @0x4305DF;
+//  NetPacket_SerializePlayerState @0x4C09C0 - the dead arm's store @0x4C10FB, `cmp edi,
+//  g_LocalPlayerEntity` @0x4C11AC, the floor @0x4C11C4..0x4C11CE;
+//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the death edge @0x4B4BF1..0x4B4C02;
+//  Server_TickUpdate @0x5266B6 ahead of Entity_UpdateAllEntities @0x52674B]
+bool run_an_alive_self_record_floors_a_zero_tail() {
+	std::vector<opennova::def::DefItemDef> rows(1);
+	rows[0].id = static_cast<int>(w::kPlayerInfantryTypeId) +
+			static_cast<int>(opennova::mission::kItemIdOffset);
+	rows[0].hp = 100;
+	opennova::def::DefItemsFile items{};
+	items.entries = rows.data();
+	items.count = rows.size();
+	Harness h;
+	h.kernel->world.load_systems();
+	h.kernel->set_items_table(&items);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input); // the spawn frame
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(h.role.local_spawned() && local != nullptr && local->health > 0,
+			"floor: L spawned alive")) {
+		h.kernel->set_items_table(nullptr);
+		return false;
+	}
+	h.kernel->world.rules.mp_session = true;
+	{
+		// The spawn stream's row (a compact record never creates one).
+		replication::ClientEntityState &self = h.role.runtime->state().upsert(0x0005);
+		self.cls = EntityClass::Player;
+		self.type_id = w::kPlayerInfantryTypeId;
+	}
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	const auto deliver = [&](uint8_t record_flags) {
+		FrameUpdate fu;
+		fu.local_tail_present = true;
+		fu.health = 0;
+		fu.carried_handle = 0xFFFF;
+		fu.complete = true;
+		FrameUpdateRecord rec;
+		rec.handle = 0x0005;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.state_flags = record_flags;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram =
+				nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	deliver(0x00);
+	bool ok = expect(h.role.runtime->state().local_health == 0 &&
+			h.role.runtime->local_entity_health() == 1 && !h.role.runtime->local_player_dead(),
+			"floor: a zero tail beside an alive self record latches nothing");
+	ok &= expect(local->health == 1 && local->alive && (local->flags & 2u) == 0,
+			"floor: L keeps a Health of 1");
+	deliver(0x02);
+	ok &= expect(h.role.runtime->local_entity_health() == 0 && h.role.runtime->local_player_dead(),
+			"floor: the next 0x0A's dead self record latches the death");
+	ok &= expect(local->health == 0, "floor: the dead record's 0 reaches L");
+	h.kernel->set_items_table(nullptr);
+	return ok;
+}
+
 // The deploy action on a joiner (dispatch 12) under permanent death (the S2C
 // 0x08 bit 15): a player killed by a 0x0A tail at Health 0 is back in the
 // deploy flow, owing a pick, and its press sends the reliable 0x51 [i16
@@ -3237,6 +3310,7 @@ int main() {
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_respawn_key_before_the_first_tail();
 	ok &= run_a_preround_death_latches_when_the_round_opens();
+	ok &= run_an_alive_self_record_floors_a_zero_tail();
 	ok &= run_a_console_action_dispatches_by_code();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
 	ok &= run_a_self_team_assign_reinits_l();

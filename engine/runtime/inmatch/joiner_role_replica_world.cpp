@@ -376,12 +376,17 @@ void JoinerRole::apply_authoritative_health() {
 				// death edge, in this frame's entity update after the pump, so a 0x13
 				// later in the same pump still finds L alive and its class callback
 				// runs past the dead return (the seat leave's C2S 0x27, the re-arm).
+				// The record loop after the tail raises the word to 1 when the self
+				// record is alive (ClientRuntime::local_entity_health carries it).
 				// [orig: NapiNPClientMsg_0x00A @0x42FEC0 (the Health store @0x4305DF, no Flags);
+				//  NetPacket_SerializePlayerState @0x4C09C0 - the floor @0x4C11C4..0x4C11CE;
 				//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the death edge
-				//  @0x4B4BF1..0x4B4C02; the plyr callback's dead return
-				//  @0x40772A..0x40772F]
-				local->health = health;
-				local_ai->health = health;
+				//  @0x4B4BF1..0x4B4C02; Entity_HandleDamageAndTriggerZones @0x407720 (the
+				//  dead return @0x40772A..0x40772F)]
+				const int16_t stored =
+						rt.authoritative_spawn_released() ? rt.local_entity_health() : int16_t{0};
+				local->health = stored;
+				local_ai->health = stored;
 			} else if (redeploy_release_pending_ &&
 					rt.state().health_updates_applied >
 							redeploy_health_updates_at_release_) {
