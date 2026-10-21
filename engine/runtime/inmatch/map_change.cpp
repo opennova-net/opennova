@@ -221,6 +221,10 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	//  @0x52266C, Server_DisconnectAndResetAllPlayerSlots @0x52269B]
 	if (authority_in_session && rotation != nullptr && rotation->list.map_launch_option != 0)
 		swap_sides_or_latch(ctx, *rotation);
+	// The teardown has emptied the server-info stream ahead of its pump; the next mission
+	// start rebuilds it [orig: Game_TeardownMission - CDataStream_Resize(&stru_C9480C, 0)
+	//  @0x5223D1, ahead of the pump @0x522588].
+	ctx.server_info_stream_emptied = true;
 	// The teardown's own server pump, after the swap and ahead of the PostMission pass and
 	// the slot reset: its receive steps each connection's send clock as every server pump
 	// does, so the reset's 0x25s leave at the next load's first pump where retail's do

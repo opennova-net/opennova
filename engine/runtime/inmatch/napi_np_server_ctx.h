@@ -509,6 +509,16 @@ struct NapiNPServerCtx {
 	//  dword_C86FC8 (`++` in CNapiGameSession_InitRandomSeedOrRequest @0x51E9C1)]
 	uint32_t server_info_transfer_id = 0;
 	uint32_t mission_metadata_transfer_id = 0;
+	// The server-info stream the 0x60 copies stands empty from a map change's teardown,
+	// which resizes it to 0 ahead of the teardown's server pump, until the next mission
+	// start rebuilds it after the load's first pump: a C2S 0x33 answered in between gets the
+	// header alone, [the old token][0][0].
+	// [orig: Game_TeardownMission - CDataStream_Resize(&stru_C9480C, 0) @0x5223D1, ahead of
+	//  Server_PumpNetworkTransport @0x522588; Game_StartMission - the head pump @0x5245E8,
+	//  the rebuild Game_SerializeMissionInfoToDataStream @0x5247EB and the token @0x5247F3;
+	//  NetPacket_WriteReplayDataBlock @0x5071F0 (the size @0x50727F, the clamp
+	//  @0x507221..0x50723F, no copy at 0 @0x5072A2)]
+	bool server_info_stream_emptied = false;
 
 	// Retail's overloaded g_RoundOver is deliberately not copied into
 	// this host context. Per-connection InitialStateBurst owns load progress;

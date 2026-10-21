@@ -636,6 +636,17 @@ void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn
 // See header. [orig: NapiNPServerMsg_HandleReplayRequest (0x33) @0x515230]
 void dispatch_file_chunk_request(const GameConfig &config, const ProtocolMessage &msg,
 		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies) {
+	// Between a map change's teardown and the next mission start the stream is empty: the
+	// header alone, the offset clamped to 0 (NapiNPServerCtx::server_info_stream_emptied)
+	// [orig: NetPacket_WriteReplayDataBlock @0x5071F0 - @0x50727F, @0x507221..0x50723F,
+	//  @0x5072A2].
+	if (inputs.server_ctx != nullptr && inputs.server_ctx->server_info_stream_emptied) {
+		const std::vector<uint8_t> empty;
+		replies.push_back(make_protocol_message(s2c::FILE_TRANSFER_CHUNK,
+				build_transfer_chunk(inputs.server_info_transfer_id, empty.data(), 0,
+						chunk_request_offset(msg.payload, inputs.server_info_transfer_id))));
+		return;
+	}
 	replies.push_back(make_protocol_message(
 			s2c::FILE_TRANSFER_CHUNK,
 			build_tag60_server_info(

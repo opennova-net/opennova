@@ -86,6 +86,8 @@ void start_mission_state(NapiNPServerCtx &ctx, const GameConfig &config) {
 	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E9C1 `++dword_C86FC8`]
 	++ctx.server_info_transfer_id;
 	++ctx.mission_metadata_transfer_id;
+	// The rebuilt server-info stream [orig: Game_SerializeMissionInfoToDataStream @0x5247EB].
+	ctx.server_info_stream_emptied = false;
 }
 
 // The config the session serves from: the resolved send period, the session

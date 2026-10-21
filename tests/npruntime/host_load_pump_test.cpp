@@ -547,6 +547,82 @@ void test_map_change_reset_leaves_at_the_residual_pump() {
 	run_reset_residual({12, 12, 11, true});
 }
 
+// The server-info stream across a map change: the teardown empties it ahead of its pump and
+// the next mission start rebuilds it after the load's first pump, so a C2S 0x33 read at the
+// teardown's pump or the load's head gets the header alone, [the old token][0][0], and one read
+// in the window gets the rebuilt stream under the next token.
+// [orig: Game_TeardownMission - CDataStream_Resize(&stru_C9480C, 0) @0x5223D1, the pump
+//  @0x522588; Game_StartMission - the head pump @0x5245E8, the rebuild @0x5247EB, the token
+//  @0x5247F3, the window @0x524A63; NapiNPServerMsg_HandleReplayRequest @0x515230 ->
+//  NetPacket_WriteReplayDataBlock @0x5071F0 (@0x50727F, @0x5072A2)]
+void test_map_change_server_info_stream_is_empty_until_the_rebuild() {
+	auto host = std::make_unique<Host>();
+	host->role.set_socket(&host->socket);
+	host->role.set_rotation(&host->rotation);
+	inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
+	CHECK(host->boot_current(/*next_mission=*/false));
+	host->ctx().mission_exit_reason = inmatch::kMissionExitMapCycle;
+	inmatch::FrameInput input;
+	input.delta_seconds = kFrame;
+	bool ended = false;
+	for (int f = 0; f < 16 && !ended; ++f) ended = host->session.advance(input).terminal();
+	CHECK(ended);
+	const PeerAddr peer = host->socket.peer;
+	{
+		inmatch::NapiNPConnection &c =
+				add_session_conn(*host, peer, inmatch::kFirstJoinerDcb, 0x55667788u);
+		c.admission_stage = inmatch::GameAdmissionStage::Complete;
+		c.phase = inmatch::ConnectionPhase::InMatch;
+		c.slot_state = inmatch::PlayerSlotState::Joined;
+	}
+	const uint32_t token = host->ctx().server_info_transfer_id;
+	uint32_t next_seq = 1;
+	auto request = [&host, &next_seq, token]() {
+		ProtocolPacketHeader header;
+		header.session_id = 0x55667788u;
+		header.seq_num = next_seq++;
+		std::vector<uint8_t> body;
+		std::vector<uint8_t> payload(8, 0);
+		for (int i = 0; i < 4; ++i) payload[i] = static_cast<uint8_t>(token >> (8 * i));
+		(void)encode_protocol_packet_plaintext(header,
+				{make_protocol_message(c2s::FILE_CHUNK_REQUEST, std::move(payload))}, kClientScrk,
+				body);
+		host->socket.inbound.push_back(
+				nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(body)));
+	};
+	std::vector<size_t> marks;
+	host->socket.on_drain = [&host, &marks, &request]() {
+		marks.push_back(host->socket.sent.size());
+		if (marks.size() == 1 || marks.size() == 2) request(); // read at the head, the window
+	};
+	request(); // read at the teardown's pump
+	CHECK(inmatch::begin_host_map_change(host->role, host->catalog) ==
+			inmatch::MapChangeStep::NextMission);
+	CHECK(host->boot_current(/*next_mission=*/true));
+	std::vector<std::pair<size_t, std::vector<uint8_t>>> chunks;
+	for (const SentPacket &p : packets_to(host->socket, peer, marks))
+		for (const ProtocolMessage &m : p.records)
+			if (m.tag == s2c::FILE_TRANSFER_CHUNK) chunks.emplace_back(p.pump, m.payload);
+	CHECK(chunks.size() == 3);
+	if (chunks.size() == 3) {
+		const std::vector<uint8_t> header_only = {
+				static_cast<uint8_t>(token), static_cast<uint8_t>(token >> 8),
+				static_cast<uint8_t>(token >> 16), static_cast<uint8_t>(token >> 24),
+				0, 0, 0, 0, 0, 0, 0, 0};
+		CHECK(chunks[0].first == 0 && chunks[0].second == header_only); // the teardown's
+		CHECK(chunks[1].first == 1 && chunks[1].second == header_only); // the load's head
+		// The window's: the rebuilt stream under the next token, from offset 0.
+		CHECK(chunks[2].first == 2);
+		CHECK(chunks[2].second.size() > 12);
+		if (chunks[2].second.size() > 12) {
+			CHECK(chunks[2].second[0] == static_cast<uint8_t>(token + 1));
+			CHECK(chunks[2].second[4] != 0 || chunks[2].second[5] != 0);
+			CHECK(chunks[2].second[8] == 0);
+		}
+	}
+	CHECK(!host->ctx().server_info_stream_emptied);
+}
+
 } // namespace
 
 int main() {
@@ -554,6 +630,7 @@ int main() {
 	test_fresh_load_pumps_its_session();
 	test_map_change_load_pumps_after_the_slot_reset();
 	test_map_change_reset_leaves_at_the_residual_pump();
+	test_map_change_server_info_stream_is_empty_until_the_rebuild();
 	if (failures != 0) {
 		std::printf("host_load_pump: %d failure(s)\n", failures);
 		return 1;
