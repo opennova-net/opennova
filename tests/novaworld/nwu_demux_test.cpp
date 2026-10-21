@@ -107,6 +107,17 @@ std::vector<uint8_t> server_hello_to(const std::vector<uint8_t> &hello_dg, uint3
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply));
 }
 
+// The gate reply's frame at `at` and the NovaWorld menu's frames after it, one a tick: state 3
+// at + 1, state 4 at + 2, the connect at + 3, and the first announce at the next frame's pump,
+// at + 4 (a kept response's entry connects at + 2, its announce at + 3).
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - 3 set @0x559094, 4 set @0x559131,
+//  CNapiGameSession_ConnectToNovaWorld (the call @0x559156), the pump @0x558DFA]
+void gate_frames(NwuLobbySession &lobby, uint32_t at) {
+	for (uint32_t t = at; t <= at + 4; ++t)
+		lobby.tick(t);
+}
+constexpr uint32_t kFirstAnnounceAt = 14; // gate_frames(lobby, 10)'s
+
 PeerAddr at(uint8_t a, uint8_t b, uint8_t c, uint8_t d, uint16_t port) {
 	return peer_addr_from_octets({a, b, c, d}, port);
 }
@@ -175,7 +186,7 @@ int main() {
 		std::vector<uint8_t> inner(body.begin(), body.end());
 		nwu_decrypt(inner.data(), inner.size(), GATE_NWU_KEY);
 		gate.inbound.push_back({PeerAddr{0x0100007Fu, GATE_DEFAULT_PORT}, enveloped(inner)});
-		lobby.tick(10);
+		gate_frames(lobby, 10);
 		CHECK(lobby.session() != nullptr);
 		CHECK(!raw.sent.empty() && raw.sent.back().first == server);
 
@@ -278,7 +289,7 @@ int main() {
 		                                   "VAR \"UDPNOVAWORLD\" \"127.0.0.2:0\"\r\n"
 		                                   "VAR \"UDPNOVAWORLD\" \"255.255.255.255:9\"\r\n"
 		                                   "VAR \"UDPNOVAWORLD\" \"127.0.0.3:65537\"\r\n")});
-		lobby.tick(10);
+		gate_frames(lobby, 10);
 		CHECK(fatals.empty());
 		CHECK(lobby.session() != nullptr);
 		const std::vector<std::pair<uint32_t, uint32_t>> want = {
@@ -313,7 +324,7 @@ int main() {
 		CHECK(session.sent.size() == sent_to.size());
 		check_announces(0);
 		// The re-announce goes to every target again, each its own announce once more.
-		lobby.tick(10 + SESSION_CONNECT_RETRANSMIT_MS + 1);
+		lobby.tick(kFirstAnnounceAt + SESSION_CONNECT_RETRANSMIT_MS + 1);
 		CHECK(session.sent.size() == 2 * sent_to.size());
 		CHECK(session.sent.back().first == sent_to.back());
 		if (session.sent.size() == 2 * sent_to.size())
@@ -331,7 +342,7 @@ int main() {
 		CHECK(lobby.claims(second, reply.data(), reply.size()));
 		session.inbound.push_back({second, reply});
 		session.sent.clear();
-		lobby.tick(10 + SESSION_CONNECT_RETRANSMIT_MS + 2);
+		lobby.tick(kFirstAnnounceAt + SESSION_CONNECT_RETRANSMIT_MS + 2);
 		CHECK(lobby.session()->state() == ClientSession::State::Auth);
 		CHECK(lobby.nw_peer() == second);
 		CHECK(session.sent.size() == 1);
@@ -406,7 +417,7 @@ int main() {
 			lobby.open(gate, session);
 			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 			gate.inbound.push_back({PeerAddr{0x0100007Fu, GATE_DEFAULT_PORT}, gate_reply(body)});
-			lobby.tick(10);
+			gate_frames(lobby, 10);
 			CHECK(lobby.targets().empty());
 			CHECK(session.sent.empty());
 			CHECK((lobby.session() != nullptr) == want.session);
@@ -463,7 +474,7 @@ int main() {
 			lobby.open(gate, session);
 			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 			gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(body) });
-			lobby.tick(10);
+			gate_frames(lobby, 10);
 			CHECK(lobby.session() != nullptr);
 			CHECK(lobby.gate_response().glsvss_rims == c.want_rims);
 			CHECK(lobby.gate_response().glsvss_agrms == c.want_agrms);
@@ -506,7 +517,7 @@ int main() {
 			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 			gate.inbound.push_back(
 					{ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(body) });
-			lobby.tick(10);
+			gate_frames(lobby, 10);
 			for (const auto &target : lobby.targets())
 				out.targets.push_back({ target.ip, target.port });
 			for (const auto &dg : session.sent) {
@@ -640,7 +651,7 @@ int main() {
 			bool in_use = false;
 		};
 		// One menu entry: a new driver over `memory` opens, probes `host`, takes `reply` from
-		// the gate when one is given, and ticks once.
+		// the gate when one is given, and runs the menu's gate frames.
 		auto enter = [](NwuLobbySession::GateMemory &memory, const std::string &host,
 				const std::optional<std::string> &reply) {
 			MemorySocket gate;
@@ -658,7 +669,7 @@ int main() {
 			if (reply)
 				gate.inbound.push_back(
 						{ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(*reply) });
-			lobby.tick(10);
+			gate_frames(lobby, 10);
 			out.probes = gate.sent.size();
 			for (const auto &dg : session.sent) {
 				if (opcode_of(dg.second) == SESSION_OPCODE_CLIENT_HELLO) ++out.hellos;
@@ -675,8 +686,8 @@ int main() {
 		CHECK(first.probes == 1 && first.session && first.in_use && first.hellos == 1);
 		CHECK(first.responses.size() == 1 && first.responses[0].udp_code1 == "code-one");
 		CHECK(memory.response_kept && memory.response.udp_code1 == "code-one");
-		// The next entry sends no probe and connects at once from the kept response (no gate
-		// reply needed), the hook handed the kept one.
+		// The next entry sends no probe and connects from the kept response (no gate reply
+		// needed) the menu's frames after, the hook handed the kept one.
 		const Entry again = enter(memory, "127.0.0.1", std::nullopt);
 		CHECK(again.probes == 0 && again.session && again.in_use && again.hellos == 1);
 		CHECK(again.fatals.empty());

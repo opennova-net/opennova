@@ -63,6 +63,13 @@ bool parse_dotted_quad(const std::string &host, PeerAddr &out) {
 	return true;
 }
 
+// The gate context's state the response's processing leaves: 2 its success, -9 its failure (no
+// field counted, no POST pair), which the menu's state 3 shows as NWEC25.
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - 2 @0x4CF8AE, -9 @0x4CF6AC;
+//  UI_ProcessLANSessionStateMachine @0x558DE0 - NWEC25 @0x5590FD]
+constexpr int kGateStateSucceeded = 2;
+constexpr int kGateStateFailed = -9;
+
 } // namespace
 
 NwuLobbySession::NwuLobbySession(Hooks hooks, Environment env)
@@ -241,6 +248,9 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 	gate_started_ms_ = 0;
 	gate_last_send_ms_ = 0;
 	dedicated_wait_over_ = false;
+	gate_menu_ = GateMenu::Off;
+	gate_result_ = 0;
+	first_announce_.clear();
 	connect_poll_ = ConnectPoll::Off;
 	connect_stamp_ms_ = 0;
 	connect_timed_out_ = false;
@@ -283,18 +293,18 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 		return;
 	}
 	// While the last response that went through is kept, the wait starts no probe and the menu
-	// goes on to the connect over it, its processing not run again; a probe starts over with the
-	// response emptied.
+	// goes on to the connect over it (the frames of states 2..4 after this one), its processing
+	// not run again; a probe starts over with the response emptied.
 	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - dword_B5FF48 @0x4CE6CF, the gate state 2
 	//  @0x4CE6F3, 0 returned @0x4CE6FA; else CMissionInfo_Init(byte_B5F450) @0x4CE719;
-	//  UI_ProcessLANSessionStateMachine @0x558DE0 - state 2 @0x559072..0x559094, the connect
-	//  @0x559156]
+	//  UI_ProcessLANSessionStateMachine @0x558DE0 - 2 set @0x55904B, state 2 @0x55906B..0x559094,
+	//  the connect @0x559156]
 	GateMemory &kept = memory();
 	if (kept.response_kept && kept.gate_host == gate_host && kept.gate_port == gate_port) {
 		gate_answered_ = true;
 		if (hooks_.on_gate_response)
 			hooks_.on_gate_response(kept.response);
-		connect_from_response();
+		gate_processed(kGateStateSucceeded);
 		return;
 	}
 	kept.response_kept = false;
@@ -371,6 +381,8 @@ void NwuLobbySession::close() {
 	session_.reset();
 	probe_sent_ = false;
 	gate_probe_datagram_.clear();
+	gate_menu_ = GateMenu::Off;
+	first_announce_.clear();
 	gate_socket_ = nullptr;
 	session_socket_ = nullptr;
 }
@@ -427,7 +439,22 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 	clock_ms_ = now_ms;
 	if (session_) session_->set_clock_ms(clock_ms_);
 
-	if (gate_socket_ != nullptr && !gate_answered_) poll_gate();
+	if (gate_socket_ != nullptr && !gate_answered_)
+		poll_gate();
+	else if (gate_menu_ != GateMenu::Off && step_gate_menu())
+		return;
+	// The menu's connect sends nothing: its first announce goes at the next frame's pump, the
+	// enumerator's send stamp 0 until then, the re-announce interval counted from that send.
+	// [orig: CNapiGameSession_InitPlayerConnection @0x4D4160 - NapiTimer_Start @0x4D43C2;
+	//  UI_ProcessLANSessionStateMachine @0x558DE0 - the pump @0x558DFA;
+	//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the stamp test @0x629108..0x629119,
+	//  the stamp @0x62911F, the target walk @0x629183..0x6291B4]
+	if (session_socket_ != nullptr && session_ && !first_announce_.empty()) {
+		const std::vector<uint8_t> first = std::move(first_announce_);
+		first_announce_.clear();
+		connect_last_send_ms_ = clock_ms_;
+		send(first);
+	}
 	if (session_socket_ != nullptr && session_) poll_session();
 	if (session_socket_ != nullptr && session_)
 		give_up_stalled_connect();
@@ -789,8 +816,7 @@ void NwuLobbySession::poll_gate() {
 		//  @0x4CF0C0, the count test @0x4CF4ED..0x4CF4EF, the state's switch @0x4CF51E, -9
 		//  stored @0x4CF6AC]
 		if (!counted) {
-			if (hooks_.on_fatal)
-				hooks_.on_fatal(novaworld_gate_error_tag(-9, true));
+			gate_processed(kGateStateFailed);
 			return;
 		}
 		apply_command_line_overrides();
@@ -815,14 +841,12 @@ void NwuLobbySession::poll_gate() {
 			//  SERVICE...NO NW POST IP" @0x4CF5EC, "...NO NW POST PORT" @0x4CF671]
 			if (kept.response.post_ip == none) {
 				connect_log("GATE FAILING GATE SERVICE...NO NW POST IP");
-				if (hooks_.on_fatal)
-					hooks_.on_fatal(novaworld_gate_error_tag(-9, true));
+				gate_processed(kGateStateFailed);
 				return;
 			}
 			if (kept.response.post_port == 0) {
 				connect_log("GATE FAILING GATE SERVICE...NO NW POST PORT");
-				if (hooks_.on_fatal)
-					hooks_.on_fatal(novaworld_gate_error_tag(-9, true));
+				gate_processed(kGateStateFailed);
 				return;
 			}
 		}
@@ -851,8 +875,56 @@ void NwuLobbySession::poll_gate() {
 					std::to_string(ip[3]) + ":" +
 					std::to_string(static_cast<int32_t>(kept.response.reflected_port)) + "].");
 		}
+		gate_processed(kGateStateSucceeded);
+		return;
+	}
+}
+
+// The command-line host's gate wait returns once the gate state leaves 1 and the host goes on
+// to the connect at once (a failure ends the hosting); the menu runs its next states one a frame.
+// [orig: Game_HostMultiplayerSession @0x4A65A0 - CNapiGameSession_WaitForStateChange (the call
+//  @0x4A66B6), CNapiGameSession_ConnectAndWaitForValidation (@0x4A66E2) -> ConnectToNovaWorld
+//  (@0x4D4EC3); UI_ProcessLANSessionStateMachine @0x558DE0 - state 2 @0x55906B..0x559094]
+void NwuLobbySession::gate_processed(int gate_state) {
+	if (env_.command_line_host) {
+		if (gate_state < 0) {
+			if (hooks_.on_fatal)
+				hooks_.on_fatal(novaworld_gate_error_tag(gate_state, true));
+			return;
+		}
 		connect_from_response();
 		return;
+	}
+	gate_result_ = gate_state;
+	gate_menu_ = GateMenu::Answered;
+}
+
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - state 2: the gate state 1 test
+//  @0x55906B..0x559072 (CNapiGateManager_ProcessResponse, the call @0x559079, while it holds), 3
+//  set @0x559094; state 3: the test @0x5590B4..0x5590BB, a negative state's NWEC (-9: NWEC25
+//  @0x5590FD, UI_ShowNovaWorldErrorMessage the call @0x559109, state 0 @0x559111), else 4 set
+//  @0x559131; state 4: CNapiGameSession_ConnectToNovaWorld (the call @0x559156), 5 set
+//  @0x55917E]
+bool NwuLobbySession::step_gate_menu() {
+	switch (gate_menu_) {
+		case GateMenu::Answered:
+			gate_menu_ = GateMenu::Check;
+			return false;
+		case GateMenu::Check:
+			if (gate_result_ < 0) {
+				gate_menu_ = GateMenu::Off;
+				if (hooks_.on_fatal)
+					hooks_.on_fatal(novaworld_gate_error_tag(gate_result_, true));
+				return true;
+			}
+			gate_menu_ = GateMenu::Connect;
+			return false;
+		case GateMenu::Connect:
+			gate_menu_ = GateMenu::Off;
+			connect_from_response();
+			return true;
+		default:
+			return false;
 	}
 }
 
@@ -893,13 +965,18 @@ void NwuLobbySession::connect_from_response() {
 	//  NOVAWORLD..." @0x4D4B0C, InitPlayerConnection @0x4D4B16, "%s : NWU GOING INTO JOIN
 	//  LOOP..." @0x4D4BC2]
 	connect_log("NWU ATTEMPTING TO CONNECT TO NOVAWORLD...");
-	const std::vector<uint8_t> first = begin_session();
+	std::vector<uint8_t> first = begin_session();
 	connect_log("NWU GOING INTO JOIN LOOP...");
 	// The connection's first announce goes once the join loop runs: InitPlayerConnection starts the
-	// enumerator's timer and sends nothing; the loop's first network pump sends it.
+	// enumerator's timer and sends nothing; the loop's first network pump sends it, at once in the
+	// command-line host's blocking loop, at the menu's next frame otherwise (tick).
 	// [orig: CNapiGameSession_InitPlayerConnection @0x4D4160 - NapiTimer_Start @0x4D43C2, no send
-	//  among its callees; CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0]
-	send(first);
+	//  among its callees; CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0;
+	//  CNapiGameSession_ConnectAndWaitForValidation @0x4D4EC0 - the first poll @0x4D4ED2]
+	if (env_.command_line_host)
+		send(first);
+	else
+		first_announce_ = std::move(first);
 }
 
 // The session state machine and its ClientHello, once the gate response named the NW UDP

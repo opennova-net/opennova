@@ -314,6 +314,14 @@ private:
 	// The connect over the gate memory's response: ConnectToNovaWorld's sessionless return, or
 	// its probe targets and the session.
 	void connect_from_response();
+	// The gate response processed (or kept): the gate context's state, 2 its success or -9 its
+	// failure. The command-line host's blocking wait goes on at once; the menu takes it up the
+	// frames after (step_gate_menu).
+	void gate_processed(int gate_state);
+	// The menu's gate states past the response, one a frame: state 2 sees the gate state leave 1
+	// and sets 3; state 3 shows a failed gate's NWEC or sets 4; state 4 connects. True when the
+	// frame ends there (the connect's, or the failure's).
+	bool step_gate_menu();
 	GateMemory &memory() { return shared_memory_ != nullptr ? *shared_memory_ : own_memory_; }
 	const GateMemory &memory() const {
 		return shared_memory_ != nullptr ? *shared_memory_ : own_memory_;
@@ -394,6 +402,13 @@ private:
 	bool dedicated_wait_over_ = false;
 	// The connect log's gate stamp, written only while the log is on (dword_B5F440).
 	uint32_t gate_log_stamp_ms_ = 0;
+	// The menu's gate states 2..4 past the response (step_gate_menu) and the response's gate
+	// state; the menu's connect's first announce, which the next frame's pump sends.
+	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - states 2..4 @0x55906B..0x55917E]
+	enum class GateMenu { Off, Answered, Check, Connect };
+	GateMenu gate_menu_ = GateMenu::Off;
+	int gate_result_ = 0;
+	std::vector<uint8_t> first_announce_;
 	// The first connect's poll, retail's NovaWorld menu running one state a frame: PollConnectPhase1
 	// (5) until it returns 0, the validation wait (6), PollConnectPhase2 (7) until it returns 0, the
 	// connection wait (8), the web lobby's open (9); the command-line host's blocking sequence runs

@@ -98,8 +98,9 @@ const std::string kRemoved = "NWU SESSION AT 127.0.0.1:64206 [OpenNova] HAS BEEN
 //  validation wait @0x5591D5]
 constexpr uint32_t kVerifyStampAt = 210;
 
-// One connect on in-memory sockets: the gate names kServer, and the session starts on the
-// first tick.
+// One connect on in-memory sockets: the gate names kServer; its reply is taken three frames ahead
+// of the connect's (the menu's states 3 and 4 between), and the first 0x41 goes at the frame
+// after the connect's (the command-line host connects and sends in the reply's own frame).
 struct Rig {
 	MemorySocket gate;
 	MemorySocket session;
@@ -170,7 +171,8 @@ struct Rig {
 		lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 		gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT },
 				gate_reply("VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n") });
-		lobby.tick(at);
+		for (uint32_t t = at - 3; t <= at + 1; ++t)
+			lobby.tick(t);
 	}
 
 	std::size_t count(uint8_t opcode) const {
@@ -805,17 +807,24 @@ void check_connect_log_gate_and_connect() {
 		"GATE LINE #03 [VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"]",
 		"GATE LINE #04 [VAR \"REFLECTEDIPADDRESS\" \"203.0.113.9\"]",
 		"GATE LINE #05 [VAR \"REFLECTEDPORTNUMBER\" \"7001\"]",
-		"GATE GATE SERVICE DONE AND SUCCESSFUL [yourip=203.0.113.9:7001].",
-		"NWU DO ALL KINDS OF STUFF.", "NWU INIT STUFF.",
-		"NWU ATTEMPTING TO CONNECT TO NOVAWORLD...", "NWU GOING INTO JOIN LOOP..." };
+		"GATE GATE SERVICE DONE AND SUCCESSFUL [yourip=203.0.113.9:7001]." };
 	CHECK(rig.log == want);
 	for (std::size_t i = 0; i < rig.log.size() && i < want.size(); ++i) {
 		if (rig.log[i] != want[i])
 			std::printf("  line %zu: got [%s] want [%s]\n", i, rig.log[i].c_str(), want[i].c_str());
 	}
+	rig.log.clear();
+	// The menu's states 3 and 4, then the connect's frame.
+	rig.lobby.tick(1201);
+	rig.lobby.tick(1202);
+	CHECK(rig.log.empty() && rig.lobby.session() == nullptr);
+	rig.lobby.tick(1203);
+	CHECK((rig.log == std::vector<std::string>{ "NWU DO ALL KINDS OF STUFF.", "NWU INIT STUFF.",
+			"NWU ATTEMPTING TO CONNECT TO NOVAWORLD...", "NWU GOING INTO JOIN LOOP..." }));
 	CHECK(rig.lobby.session() != nullptr);
 	if (rig.lobby.session() == nullptr)
 		return;
+	rig.lobby.tick(1204); // the first 0x41
 	rig.log.clear();
 	rig.session.inbound.push_back(
 			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
@@ -1089,6 +1098,9 @@ void check_connect_log_gate_failures() {
 		rig.gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(body) });
 		rig.log.clear();
 		rig.lobby.tick(10);
+		rig.lobby.tick(11);
+		CHECK(rig.fatals.empty()); // the menu's state 3 shows it, the frame after next
+		rig.lobby.tick(12);
 		rig.lobby.close();
 		return std::make_pair(rig.log, rig.fatals);
 	};
@@ -1124,6 +1136,10 @@ void check_connect_log_gate_failures() {
 		again.lobby.set_gate_memory(&memory);
 		again.lobby.open(again.gate, again.session);
 		again.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+		again.lobby.tick(1);
+		again.lobby.tick(2);
+		CHECK(again.log.empty() && again.lobby.session() == nullptr);
+		again.lobby.tick(3);
 		CHECK((again.log == std::vector<std::string>{ "NWU DO ALL KINDS OF STUFF.", "NWU INIT STUFF.",
 				"NWU ATTEMPTING TO CONNECT TO NOVAWORLD...", "NWU GOING INTO JOIN LOOP..." }));
 		again.lobby.close();
@@ -1193,6 +1209,89 @@ void check_command_line_host_gate_wait() {
 	rig.lobby.tick(21000);
 	CHECK(rig.log.empty() && rig.fatals.size() == 1 && rig.gate.sent.size() == 5);
 	rig.lobby.close();
+}
+
+// The NovaWorld menu's gate states past the reply, one a frame: the reply's frame processes it
+// (its lines, the gate state 2), state 2 sets 3 the next frame, state 3 sets 4 (or shows a failed
+// gate's NWEC25 and stops), state 4 connects (no datagram: InitPlayerConnection only starts the
+// enumerator's timer), and the next frame's pump sends the first 0x41, the re-announce counted
+// from that send. The command-line host's wait goes on at once: the connect and its 0x41 in the
+// reply's own frame. A kept response's entry takes the same frames from its state-1 frame.
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - 2 @0x4CF8AE, -9 @0x4CF6AC;
+//  UI_ProcessLANSessionStateMachine @0x558DE0 - state 2 @0x55906B..0x559094, state 3
+//  @0x5590B4..0x5590BB (NWEC25 @0x5590FD, state 0 @0x559111), 4 set @0x559131, the connect
+//  (the call @0x559156), 5 set @0x55917E, the pump @0x558DFA; CNapiNPConnection_PumpEnumeratorAndSend
+//  @0x6290C0 - the stamp test @0x629108..0x629119, the stamp @0x62911F;
+//  CNapiGateManager_WaitForConnect @0x4CE6B0 - the kept gate state 2 @0x4CE6F3]
+void check_gate_menu_frames() {
+	const std::string reply = "VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n";
+	{
+		Rig rig;
+		rig.lobby.open(rig.gate, rig.session);
+		rig.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+		rig.gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(reply) });
+		rig.lobby.tick(100); // the reply's frame
+		CHECK(rig.lobby.session() == nullptr && rig.session.sent.empty());
+		rig.lobby.tick(101); // state 2 -> 3
+		rig.lobby.tick(102); // state 3 -> 4
+		CHECK(rig.lobby.session() == nullptr && rig.session.sent.empty());
+		rig.lobby.tick(103); // state 4: the connect
+		CHECK(rig.lobby.session() != nullptr && rig.session.sent.empty());
+		CHECK(rig.lobby.session() != nullptr && rig.lobby.session()->lobby_state() == 1 &&
+				rig.lobby.session()->lobby_state_entered_ms() == 103);
+		rig.lobby.tick(104); // the pump's first announce
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_HELLO) == 1);
+		rig.lobby.tick(104 + SESSION_CONNECT_RETRANSMIT_MS);
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_HELLO) == 1);
+		rig.lobby.tick(104 + SESSION_CONNECT_RETRANSMIT_MS + 1);
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_HELLO) == 2);
+		CHECK(rig.fatals.empty());
+		rig.lobby.close();
+	}
+	{
+		Rig rig;
+		rig.lobby.open(rig.gate, rig.session);
+		rig.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+		rig.gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT },
+				gate_reply("GATEPROTOCOL \"1.0\"") });
+		rig.lobby.tick(100);
+		rig.lobby.tick(101);
+		CHECK(rig.fatals.empty());
+		rig.lobby.tick(102);
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC25" });
+		rig.lobby.tick(103);
+		rig.lobby.tick(104);
+		CHECK(rig.fatals.size() == 1 && rig.lobby.session() == nullptr && rig.session.sent.empty());
+		rig.lobby.close();
+	}
+	{
+		Rig rig(/*command_line_host=*/true);
+		rig.lobby.open(rig.gate, rig.session);
+		rig.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+		rig.gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(reply) });
+		rig.lobby.tick(100);
+		CHECK(rig.lobby.session() != nullptr && rig.count(SESSION_OPCODE_CLIENT_HELLO) == 1);
+		rig.lobby.close();
+	}
+	{
+		NwuLobbySession::GateMemory memory;
+		Rig first;
+		first.lobby.set_gate_memory(&memory);
+		first.start(10);
+		first.lobby.close();
+		Rig again;
+		again.lobby.set_gate_memory(&memory);
+		again.lobby.open(again.gate, again.session);
+		again.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT); // the state-1 frame: the gate state 2
+		again.lobby.tick(1);
+		again.lobby.tick(2);
+		CHECK(again.lobby.session() == nullptr);
+		again.lobby.tick(3);
+		CHECK(again.lobby.session() != nullptr && again.session.sent.empty());
+		again.lobby.tick(4);
+		CHECK(again.count(SESSION_OPCODE_CLIENT_HELLO) == 1);
+		again.lobby.close();
+	}
 }
 
 // The gate reply's lines as its reader returns them: a LF, a CR or a CR LF ends one, an empty
@@ -1715,6 +1814,7 @@ int main() {
 	check_connect_log_packet_lines();
 	check_connect_log_gate_failures();
 	check_gate_probe_cadence();
+	check_gate_menu_frames();
 	check_command_line_host_gate_wait();
 	check_gate_response_lines();
 	check_short_protocol_packets_keep_the_connection();

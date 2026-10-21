@@ -92,12 +92,16 @@ bool last_sent(const MemorySocket &socket, uint8_t opcode, std::vector<uint8_t> 
 	return false;
 }
 
-// One connect up to its 0x41: the gate names kServer and the session starts on the tick.
+// One connect up to its 0x41: the gate names kServer, its reply taken at 10; the NovaWorld menu's
+// states 3 and 4 the frames after, the connect at 13 and its first 0x41 at the next frame's pump.
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - 3 set @0x559094, 4 set @0x559131, the
+//  connect (the call @0x559156), the pump @0x558DFA]
 void connect(NwuLobbySession &lobby, MemorySocket &gate, MemorySocket &session) {
 	lobby.open(gate, session);
 	lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 	gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply() });
-	lobby.tick(10);
+	for (uint32_t t = 10; t <= 14; ++t)
+		lobby.tick(t);
 }
 
 // The service's 0x81 to the session's last 0x41, taken on the next tick; the 0x42 it answers.
