@@ -4314,11 +4314,13 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	var weapon_state := sim.get_local_player_weapon_state()
 	assert_eq(weapon_state.round_ring_count, 1,
 			"local FIRE appends exactly one tag-2 fan-out record")
-	# The fixture M4's first shot samples the pre-consume 30-round magazine, so
-	# ((30 & 3) << 4) | 2 produces 0x22, not a hard-coded 0x02 and not the
+	# The mode byte's high bits are the slot's own word +0x10's low two bits, which
+	# only a weapon without an ammo bucket writes: the fixture M4AUTO authors
+	# ammobucket 1, so its word keeps the slot init's zero and the byte is 0x02 on
+	# every shot (a retail host's M4AUTO rounds carry 0x02, D-NET-NEW-L7-8), not the
 	# unrelated category/rank weapon-slot combo.
-	# [orig: WeaponAction_Fire @ 0x542c11; net-re §5.9.1 capture cross-witness]
-	assert_eq(weapon_state.last_round_flags, 0x22)
+	# [orig: WeaponAction_Fire @ 0x542BFC..0x542C11; Weapon_ConsumeAmmo @ 0x540907..0x540913]
+	assert_eq(weapon_state.last_round_flags, 0x02)
 	assert_eq(weapon_state.last_round_subtype, 12,
 			"ordinary on-foot hip fire carries the retail default zoom subtype")
 	assert_eq(weapon_state.last_round_slot_byte, 0,
