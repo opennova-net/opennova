@@ -76,6 +76,48 @@ int main() {
         CHECK(track.current == -1); // count must exceed one
     }
 
+    // --- the enemy capture point twin: the team's pair (1 -> 4098, 2 -> 4100,
+    //     3 -> 4103, 4 -> 4102), a def'd entry with its Flags & 1 set still taken,
+    //     any team else taking every def'd entry; the selection kept when none is
+    //     [orig: SpawnPoint_FindNearestEnemyCapturePoint @0x4DD180 - the def
+    //     @0x4DD1D6, the pairs @0x4DD1E1..0x4DD21D, the strict compare @0x4DD263]
+    {
+        EntityRegistry registry;
+        registry.configure_pool(3, 4);
+        WaypointTrack track;
+        const int32_t ids[4] = {4098, 4100, 4098, 4103};
+        for (int i = 0; i < 4; ++i) {
+            Entity marker;
+            marker.item_id = ids[i];
+            marker.has_item_def = true;
+            marker.position = {float(10 - i), 0, 50};
+            CHECK(registry.spawn_at(EntityHandle::make(3, i), marker).valid());
+            WaypointEntry entry;
+            entry.node = i;
+            track.entries.push_back(entry);
+        }
+        Entity local;
+        local.team = 1;
+        track.select_nearest_enemy_capture_point(registry, local, 65540);
+        CHECK(track.current == 2); // the nearer 4098
+        registry.get(EntityHandle::make(3, 2))->flags |= 1;
+        track.select_nearest_enemy_capture_point(registry, local, 65544);
+        CHECK(track.current == 2); // no Flags test
+        local.team = 3;
+        track.select_nearest_enemy_capture_point(registry, local, 65540);
+        CHECK(track.current == 3);
+        local.team = 4; // no 4102 entry: the selection is kept
+        track.select_nearest_enemy_capture_point(registry, local, 65540);
+        CHECK(track.current == 3);
+        local.team = 0; // every def'd entry
+        registry.get(EntityHandle::make(3, 3))->has_item_def = false;
+        track.select_nearest_enemy_capture_point(registry, local, 65540);
+        CHECK(track.current == 2);
+        track.current = -1;
+        track.select_nearest_enemy_capture_point(registry, local, 0x30020);
+        CHECK(track.current == -1); // CTF and Flagball only
+    }
+
     // --- proximity advance: the NL approx distance (max + min/2) vs radius ---
     {
         WaypointTrack t;

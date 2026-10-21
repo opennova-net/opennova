@@ -135,6 +135,16 @@ public:
     // [orig: SpawnPoint_FindNearestEnemyBasePoint @ 0x4DD290]
     void select_nearest_enemy_base(const EntityRegistry &registry, const Entity &local,
                                   uint32_t game_type);
+    // The enemy capture point twin: in CTF or Flagball with more than one entry,
+    // the nearest entry with a def whose type is the local team's enemy capture
+    // point (team 1 -> 4098, team 2 -> 4100, team 3 -> 4103, team 4 -> 4102; any
+    // other team takes every def'd entry); the selection is kept when none is.
+    // [orig: SpawnPoint_FindNearestEnemyCapturePoint @0x4DD180 - the game types
+    //  @0x4DD180..0x4DD194, the count @0x4DD19A..0x4DD1A2, the def @0x4DD1D6, the
+    //  team pairs @0x4DD1E1..0x4DD21D, the distance @0x4DD225..0x4DD25C, the
+    //  store @0x4DD263..0x4DD267]
+    void select_nearest_enemy_capture_point(const EntityRegistry &registry,
+                                            const Entity &local, uint32_t game_type);
 
     // A fired BMS event completes every entry linked to it, chaining backward
     // through chain_back-flagged predecessors, then skips current past done

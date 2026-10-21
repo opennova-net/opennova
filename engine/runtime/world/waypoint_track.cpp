@@ -75,6 +75,31 @@ void WaypointTrack::select_nearest_enemy_base(const EntityRegistry &registry,
     }
 }
 
+void WaypointTrack::select_nearest_enemy_capture_point(const EntityRegistry &registry,
+        const Entity &local, uint32_t game_type) {
+    if ((game_type != 65540 && game_type != 65544) || entries.size() <= 1) return;
+    int32_t nearest = INT32_MAX;
+    for (size_t index = 0; index < entries.size(); ++index) {
+        const Entity *marker = registry.get(entries[index].handle());
+        if (marker == nullptr || !marker->has_item_def) continue;
+        if ((local.team == 2 && marker->item_id != 4100) ||
+                (local.team == 1 && marker->item_id != 4098) ||
+                (local.team == 3 && marker->item_id != 4103) ||
+                (local.team == 4 && marker->item_id != 4102)) continue;
+        const int32_t dx = static_cast<int32_t>(static_cast<uint32_t>(local.position.x.q16) -
+                static_cast<uint32_t>(marker->position.x.q16));
+        const int32_t dy = static_cast<int32_t>(static_cast<uint32_t>(local.position.y.q16) -
+                static_cast<uint32_t>(marker->position.y.q16));
+        // The x87 distance caps at flt_7C19E0 (0x7fff0000), then truncates.
+        const double length = std::sqrt(double(dx) * dx + double(dy) * dy);
+        const int32_t distance = static_cast<int32_t>(std::min(length, 2147418112.0));
+        if (distance < nearest) {
+            nearest = distance;
+            current = static_cast<int32_t>(index);
+        }
+    }
+}
+
 // [orig: Player_UpdatePerFrame @ 0x4de5f7..0x4de72c]
 void WaypointTrack::tick_advance(const WaypointFrameInputs &in) {
     const int32_t count = static_cast<int32_t>(entries.size());

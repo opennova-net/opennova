@@ -2107,6 +2107,87 @@ bool run_tail_armor_lands_on_l() {
 	return expect(!local->alive && local->mana == 7, "armor: a dead L still takes the word");
 }
 
+// D-NET-728: the 0x0A tail's carried word lands on L: a word naming an entity
+// with a def that L does not carry attaches it (L's +0x268, the object's +0x170
+// and its hidden bit); 0xFFFF drops what L carries through the drop's own legs
+// (the fall installed, the hidden bit cleared); a word naming no def'd entity
+// reads as none.
+// [orig: NapiNPClientMsg_0x00A @0x4305F2..0x43069A; Entity_AttachCarriedObject
+//  @0x43C130; Entity_DropCarriedObject @0x439DF0]
+bool run_tail_carried_word_lands_on_l() {
+	constexpr uint16_t kFlagType = 4091;
+	Harness h;
+	w::World &world = h.kernel->world;
+	h.kernel->wire_header_world = true;
+	world.registry.configure_pool(1, 16);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	def::DefItemDef defs[2]{};
+	defs[0].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[0].type = 3;
+	defs[0].hp = 100;
+	defs[1].id = kFlagType + mission::kItemIdOffset;
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	const w::EntityHandle flag_h{0x1003};
+	PoolSpawnBatch batch;
+	PoolSpawnRecord spawn;
+	spawn.slot_id = flag_h.packed;
+	spawn.item_type_id = kFlagType;
+	spawn.pos_x = 10 << 16;
+	spawn.pos_y = -20 << 16;
+	batch.records.push_back(spawn);
+	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
+	auto &self_row = h.role.runtime->state().upsert(0x0005);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	auto frame = [&](uint16_t carried) {
+		FrameUpdate fu;
+		fu.carried_handle = carried;
+		fu.health = 100;
+		FrameUpdateRecord rec;
+		rec.handle = 0x0005;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	frame(0xFFFF);
+	// The embedder's trait sweep over the materialized row: the flag takes its def.
+	h.kernel->resolve_item_traits([](int) { return uint8_t{0}; });
+	w::Entity *local = h.kernel->local.player();
+	w::Entity *flag = world.registry.get(flag_h);
+	if (!expect(local != nullptr && flag != nullptr && flag->has_item_def &&
+					!local->mounted_child.valid(),
+			"carried: L carries nothing on 0xFFFF"))
+		return false;
+	frame(flag_h.packed);
+	if (!expect(local->mounted_child == flag_h && flag->primary_occupant == local->handle &&
+					(flag->flags & w::kEntityFlagCarried) != 0,
+			"carried: the named flag attaches to L"))
+		return false;
+	frame(flag_h.packed);
+	if (!expect(local->mounted_child == flag_h, "carried: the same word changes nothing"))
+		return false;
+	frame(0xFFFF);
+	if (!expect(!local->mounted_child.valid() && !flag->primary_occupant.valid() &&
+					(flag->flags & w::kEntityFlagCarried) == 0 &&
+					flag->drop_motion == w::DropMotion::Fall,
+			"carried: 0xFFFF drops it through the drop's legs"))
+		return false;
+	frame(0x1009); // a slot no row holds
+	return expect(!local->mounted_child.valid(), "carried: a word naming no def'd entity is none");
+}
+
 // D-COL-21: the redeploy release's reset ends in the candidate-slice rebuild and
 // L's own list, so L walks a slice built at its redeployed pose at once, where it
 // kept the one built at its death spot until the next 17-tick edge.
@@ -2879,6 +2960,7 @@ int main() {
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
 	ok &= run_tail_armor_lands_on_l();
+	ok &= run_tail_carried_word_lands_on_l();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_respawn_key_before_the_first_tail();

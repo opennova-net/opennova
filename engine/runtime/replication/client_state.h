@@ -1193,6 +1193,11 @@ struct ClientState {
 	// [orig: NapiNPClientMsg_0x00A -- the read @0x430442, the store
 	//  g_LocalPlayerEntity->Armor @0x4305EB]
 	int16_t local_armor = 0;
+	// The recipient's carried-object word off the same tail (the host's entity
+	// +0x268, 0xFFFF none), which the joiner lands on L
+	// (JoinerRole::apply_local_carried_object) [orig: NapiNPClientMsg_0x00A
+	// @0x4305F2].
+	uint16_t local_carried_handle = 0xFFFF;
 	// The 0x0A header tail's state byte: the authority's copy of this client's
 	// own stance, bit 0 prone and bit 1 crouch (MoveOrder bits 8/9 >> 8). The
 	// client re-latches its stance from it on every frame that carries the tail

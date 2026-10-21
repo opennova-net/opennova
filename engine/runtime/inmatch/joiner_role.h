@@ -287,6 +287,8 @@ private:
 	// the mount edge's position snap (D-NET-NEW-L2-13).
 	void fold_local_record();
 	void apply_authoritative_health();
+	// The tail's carried word onto L's carried link (D-NET-728).
+	void apply_local_carried_object(world::World &world, world::Entity &local);
 	void sync_authoritative_mount();
 	void apply_mounted_ammo_update();
 	void mirror_mission_entities();

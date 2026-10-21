@@ -11,6 +11,7 @@
 
 #include <runtime/replication/client_replica_pipeline.h>
 
+#include <base/gameprofile/game_type.h> // kCaptureTheFlag / kFlagBall (the fresh-pickup lookup)
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 
 
@@ -454,8 +455,59 @@ void JoinerRole::apply_authoritative_health() {
 				local->health = health;
 				local_ai->health = health;
 			}
+			// The same tail's carried word, after the Health and Armor stores.
+			apply_local_carried_object(world, *local);
 		}
 	}
+}
+
+// The 0x0A tail's carried word onto L's carried link. Retail resolves the word
+// through the pool tables (0xFFFF, a pool past 4, a slot past the pool's
+// capacity or a slot with no def all read as none); a fresh pickup (L carries
+// nothing yet) in CTF or Flagball first aims the HUD's waypoint at the nearest
+// enemy capture point; then a word naming another entity than L's +0x268
+// drops what L carries and attaches the named one. The attach hides the
+// object, links both ways, clears its scars and, for the three flags, puts
+// back the def's own update; its pickup event is the authority's alone, and
+// its non-flag sound reads dword_24E098C, which nothing writes (its one xref is
+// that read @0x43C174).
+// [orig: NapiNPClientMsg_0x00A @0x4305F2..0x43069A - the resolve
+//  @0x4305F6..0x430644, the fresh-pickup lookup @0x430646..0x430667
+//  (SpawnPoint_FindNearestEnemyCapturePoint @0x4DD180), the compare
+//  @0x43066C..0x43067A, Entity_DropCarriedObject @0x430681 (@0x439DF0),
+//  Entity_AttachCarriedObject @0x430695 (@0x43C130: the def test @0x43C135,
+//  +0x268 @0x43C144, Flags |= 1 @0x43C14A, +0x170 @0x43C14F,
+//  Scar_ClearEntriesByEntity @0x43C155, the flag ids @0x43C15A..0x43C172, the
+//  update @0x43C191; Server_BroadcastFlagPickupEvent @0x517460 gated on
+//  is_authority @0x517467)]
+void JoinerRole::apply_local_carried_object(world::World &world, world::Entity &local) {
+	ClientRuntime &rt = *runtime;
+	const uint16_t packed = rt.state().local_carried_handle;
+	world::Entity *carried = nullptr;
+	if (packed != world::EntityHandle::kInvalid) {
+		world::Entity *row = replica_world_entity(world, world::EntityHandle{packed});
+		if (row != nullptr && row->has_item_def) carried = row;
+	}
+	const uint32_t type_word = rt.game_type();
+	if (carried != nullptr && !local.mounted_child.valid() &&
+			(type_word == game_type::kCaptureTheFlag || type_word == game_type::kFlagBall))
+		world.script.waypoints.select_nearest_enemy_capture_point(world.registry, local, type_word);
+	const world::EntityHandle held = local.mounted_child;
+	if (carried != nullptr ? held == carried->handle : !held.valid()) return;
+	if (held.valid()) {
+		local.mounted_child = world::EntityHandle{};
+		if (world::Entity *object = world.registry.get(held)) {
+			object->primary_occupant = world::EntityHandle{};
+			world::drop_object_from_carrier(world, *object, world::drop_carrier_pose(world, local));
+		}
+	}
+	if (carried == nullptr) return;
+	local.mounted_child = carried->handle;
+	carried->flags |= world::kEntityFlagCarried;
+	carried->primary_occupant = local.handle;
+	world.out.scars.clear_entity(carried->handle);
+	if (carried->item_id == 4091 || carried->item_id == 4093 || carried->item_id == 4095)
+		carried->drop_motion = world::def_update_drop_motion(*carried);
 }
 
 // The S2C 0x0F world-state landing on L, once per decoded 0x0F. Retail writes
