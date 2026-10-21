@@ -211,7 +211,8 @@ std::optional<uint8_t> first_free_player_slot(
 	}
 	// An orphaned row stays active (D-NET-NEW-L1-24).
 	if (orphaned != nullptr)
-		for (const OrphanedPlayerRow &row : *orphaned) occupied[row.slot] = true;
+		for (const OrphanedPlayerRow &orphan : *orphaned)
+			occupied[orphan.row.reply.player_slot] = true;
 	const bool remote = joining != nullptr && joining->type == NapiNPConnection::kTypeServerSide;
 	const std::size_t bounded_capacity =
 			std::min<std::size_t>(slot_capacity, occupied.size());
@@ -397,7 +398,8 @@ void Server_AdvanceFreeRowTicks(NapiNPServerCtx &ctx) {
 	active[0] = ctx.host_slot.active;
 	for (const NapiNPConnection &connection : ctx.np_protocol.connection_list)
 		if (connection_claims_player_slot(connection)) active[connection.reply.player_slot] = true;
-	for (const OrphanedPlayerRow &row : ctx.orphaned_player_rows) active[row.slot] = true;
+	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
+		active[orphan.row.reply.player_slot] = true;
 	const std::size_t rows = std::min<std::size_t>(
 			ctx.config.total_player_slot_capacity(), ctx.player_row_free_ticks.size());
 	for (std::size_t row = 0; row < rows; ++row) {
@@ -917,8 +919,10 @@ int32_t count_players_on_team(const NapiNPServerCtx &ctx, uint8_t index) {
 			continue;
 		if ((c.assigned_team_valid ? c.assigned_team : uint8_t{0}) == team) ++count;
 	}
-	for (const OrphanedPlayerRow &row : ctx.orphaned_player_rows)
-		if (row.team == team) ++count; // D-NET-NEW-L1-24
+	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
+		const NapiNPConnection &row = orphan.row; // D-NET-NEW-L1-24
+		if ((row.assigned_team_valid ? row.assigned_team : uint8_t{0}) == team) ++count;
+	}
 	return count;
 }
 
@@ -1005,14 +1009,10 @@ void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn
 //  @0x51CD06, +0x1C @0x51CD4E, +0xC0 rebound @0x51CD51; the earlier row's +0x1C left pointing at
 //  the net player]
 static void orphan_player_row(NapiNPServerCtx &ctx, NapiNPConnection &conn) {
-	OrphanedPlayerRow row;
-	row.slot = conn.reply.player_slot;
-	row.body = conn.link.owned_entity;
-	row.team = conn.assigned_team_valid ? conn.assigned_team : uint8_t{0};
-	row.in_match = slot_in_match(conn);
-	row.spectator = conn.link.spectator;
-	row.squad_key = conn.squad_key;
-	ctx.orphaned_player_rows.push_back(row);
+	OrphanedPlayerRow orphan;
+	orphan.row = conn; // the row's words as the re-add found them (OrphanedPlayerRow)
+	orphan.row.link.transport = nullptr; // its sends go through its net player (orphan_net_player)
+	ctx.orphaned_player_rows.push_back(std::move(orphan));
 	conn.link.owned_entity = {};
 	conn.phase = ConnectionPhase::Joined;
 	const uint8_t game_state = conn.burst.game_state;

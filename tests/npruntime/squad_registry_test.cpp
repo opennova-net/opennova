@@ -387,8 +387,8 @@ void run_an_orphaned_row_keeps_its_squad_key() {
 	able = f.by_peer(30002);
 	if (able == nullptr) return;
 	expect(f.ctx->orphaned_player_rows.size() == 1 &&
-	               f.ctx->orphaned_player_rows[0].slot == first_row &&
-	               f.ctx->orphaned_player_rows[0].squad_key == 7 && able->squad_key == 7 &&
+	               f.ctx->orphaned_player_rows[0].row.reply.player_slot == first_row &&
+	               f.ctx->orphaned_player_rows[0].row.squad_key == 7 && able->squad_key == 7 &&
 	               able->reply.player_slot != first_row,
 	       "the first row is orphaned under squad 7, the fresh row keys it too");
 	expect(inmatch::count_active_slots_by_squad_key(*f.ctx, 7) == 2,

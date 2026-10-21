@@ -239,18 +239,23 @@ using PlayerRowFreeTicks = std::array<int32_t, 256>;
 // slot there, so the earlier row stays active (+4) with its net player (+0x1C) and its body,
 // which no disconnect reaches (the leave frees the net player's current row). It counts in the
 // free-row pick, the free-tick walk, the alive count and the team counts (D-NET-NEW-L1-24), and
-// as a slot row it is a 0x16 row and keys its squad (D-NET-NEW-L1-24, L1-s15).
+// as a slot row it is a 0x16 row and keys its squad (D-NET-NEW-L1-24, L1-s15). Every slot walk
+// takes it as any row: the reset's 0x25 walk, the round init's re-spawn and the tick's per-slot
+// block (L1-s16).
+// Ours keeps a row inside its connection, so the orphaned row is the connection as the re-add
+// found it: `row` holds the row's own words (its body, slot, state word, burst cursors, slot
+// team, spectator latch, squad key, kit, the 1 Hz cooldown); its net-player words are never
+// read from the copy but through the live connection orphan_net_player finds by `row`'s id.
+// Once that connection leaves, retail's +0x1C names a freed net player and its later reads
+// through the row read freed memory; ours reads nothing there, a deliberate fix of a retail
+// bug (the maintainer, 2026-10-21, via main, Q7-36 (a)).
 // [orig: Server_PlayerAdd @0x51CBC0 - PlayerSlot_PickFreeSlot (the call @0x51CC95), +0x1C
 //  @0x51CD4E, +0xC0 rebound @0x51CD51; Server_CountPlayersOnTeam @0x501630 (@0x501650,
 //  @0x501656); Server_BuildAndBroadcastScoreboard @0x50D960 (the slot walk, state 6 @0x50D9F6);
-//  CSlotArray152_CountActiveByKey @0x500660 (+4 @0x500690, +0x188DC @0x500699)]
+//  CSlotArray152_CountActiveByKey @0x500660 (+4 @0x500690, +0x188DC @0x500699);
+//  Server_ForwardEventToSession @0x51B8E0 (the leave frees +0xC0's row alone, @0x51B8ED)]
 struct OrphanedPlayerRow {
-	uint8_t slot = 0;
-	world::EntityHandle body{};
-	uint8_t team = 0; // the row's +0x1A0
-	bool in_match = false; // the row's state word (+0x20) 6 when the re-add left it
-	bool spectator = false; // the row's spectator latch (+0x188D7)
-	int32_t squad_key = 0; // the row's squad key (+0x188DC)
+	NapiNPConnection row;
 };
 
 struct NapiNPServerCtx {
@@ -770,6 +775,20 @@ struct NapiNPServerCtx {
 	NapiNPServerCtx(NapiNPServerCtx &&) noexcept = default;
 	NapiNPServerCtx &operator=(NapiNPServerCtx &&) noexcept = default;
 };
+
+// An orphaned row's net player (+0x1C): the live connection the re-add left the row on, found by
+// the row's connection id, with the row's transport pointed at that connection's for the walk;
+// none once the connection has left (ids are never reused), when the row's transport is cleared,
+// where retail reads a freed net player (Q7-36 (a), OrphanedPlayerRow).
+inline NapiNPConnection *orphan_net_player(NapiNPServerCtx &ctx, OrphanedPlayerRow &orphan) {
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.connection_id != orphan.row.connection_id) continue;
+		orphan.row.link.transport = conn.link.transport;
+		return &conn;
+	}
+	orphan.row.link.transport = nullptr;
+	return nullptr;
+}
 
 // The status report's UP-TIME: the host clock now (the start tick plus the run) less the
 // round-state init's stamp, in u32 arithmetic; a session's own run whenever its create

@@ -1067,8 +1067,8 @@ bool run_a_repeated_echo_adds_the_player_again() {
 	            "the second 0x04 names the new row")) return false;
 	// The first row is orphaned: active, its body in the world.
 	const std::vector<inmatch::OrphanedPlayerRow> &orphans = f.ctx->orphaned_player_rows;
-	if (!expect(orphans.size() == 1 && orphans[0].slot == first_row &&
-	                    orphans[0].body == first_body &&
+	if (!expect(orphans.size() == 1 && orphans[0].row.reply.player_slot == first_row &&
+	                    orphans[0].row.link.owned_entity == first_body &&
 	                    f.world->registry.get(first_body) != nullptr,
 	            "the first row is orphaned with its body")) return false;
 	const int32_t before = f.ctx->player_row_free_ticks[first_row];
@@ -1109,7 +1109,7 @@ bool run_an_orphaned_row_is_a_player_list_row() {
 	j.spawn_queue_unlinked = false;
 	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
 	                    f.ctx->orphaned_player_rows.size() == 1 &&
-	                    f.ctx->orphaned_player_rows[0].in_match,
+	                    f.ctx->orphaned_player_rows[0].row.burst.spawned,
 	            "the re-add orphans the in-match first row")) return false;
 	auto list_of = [&](const std::vector<inmatch::OrphanedPlayerRow> *orphaned) {
 		const opennova::ProtocolMessage m = inmatch::build_player_list_message(

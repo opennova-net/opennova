@@ -213,13 +213,14 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	const bool round_over = world != nullptr && world->match.outcome().ended;
 	if (orphaned != nullptr && !round_over) {
 		for (const OrphanedPlayerRow &orphan : *orphaned) {
-			if (!orphan.in_match || !orphan.body.valid()) continue;
+			const NapiNPConnection &o = orphan.row;
+			if (!o.burst.spawned || !o.link.owned_entity.valid()) continue;
 			PlayerListEntry row;
-			row.slot = orphan.slot;
-			row.team = orphan.team;
-			row.spectator = orphan.spectator;
+			row.slot = o.reply.player_slot;
+			row.team = o.assigned_team_valid ? o.assigned_team : uint8_t{0};
+			row.spectator = o.link.spectator;
 			row.status_flags = 0;
-			const int32_t computed_score = score_row(row, orphan.body);
+			const int32_t computed_score = score_row(row, o.link.owned_entity);
 			rows.push_back({computed_score, row});
 		}
 	}
