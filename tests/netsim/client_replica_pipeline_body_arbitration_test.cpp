@@ -530,8 +530,8 @@ void test_remote_lean_ramp_gates() {
 	// on a deck (bone 0) is on foot.
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `cmp [esi+168h], 1` @0x4B6684,
 	//  @0x4B66B5 / @0x4B66C3]
-	constexpr uint16_t kCarrier = 0x1010;
-	constexpr uint16_t kCarrierType = 0x0400;
+	static constexpr uint16_t kCarrier = 0x1010;
+	static constexpr uint16_t kCarrierType = 0x0400;
 	ns::ClientReplicaPipeline seated;
 	seated.set_replica_seat_type_resolver([](uint16_t carrier_type, uint8_t bone) -> uint8_t {
 		if (carrier_type != kCarrierType) return 0;
