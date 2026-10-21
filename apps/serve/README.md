@@ -46,6 +46,11 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 `--help` prints the usage. Ctrl+C, SIGTERM or closing the console window (Windows) stops
 the server: it sends every joiner the round reset and the session's STOP goodbye, and a
 listed server deregisters (ClientStopHosting and the goodbye), before it closes the socket.
+A `ServerStopHosting` from the service (an admin's or owner's stop from the site among them)
+ends the session as it ends a stock host's: the NovaWorld session drops to verified and stays
+up until the match's next 62-frame check ends the mission with the NovaWorld exit, at most a
+second later; the server then sends the service the goodbye alone (no ClientStopHosting), its
+joiners no STOP goodbye, and exits with 3.
 
 ## Title
 

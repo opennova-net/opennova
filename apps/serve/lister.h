@@ -72,7 +72,8 @@ public:
 	// One pass at the wall clock: the session, the HTTP leg, the host role, the listing. False
 	// once the lister has finished; exit_code() then says how.
 	bool tick(uint32_t now_ms);
-	// Deregister and finish: ClientStopHosting on one pump, then the goodbye burst.
+	// Deregister and finish: ClientStopHosting on one pump, then the goodbye burst (the burst
+	// alone once the service's ServerStopHosting left the hosting).
 	void stop();
 	// Finish without deregistering: the goodbye burst alone, as a process exit's atexit teardown
 	// of the NovaWorld session sends it, with no ClientStopHosting.
@@ -122,6 +123,9 @@ private:
 	IDatagramSocket *shared_session_socket_ = nullptr;
 	Phase phase_ = Phase::Connecting;
 	bool ending_ = false;
+	// The service's ServerStopHosting stopped the hosting: whatever ends the lister after it
+	// (the embedder's stop at the match's NovaWorld exit) finishes with kExitStoppedByService.
+	bool stopped_by_service_ = false;
 	int exit_code_ = kExitStopped;
 	uint32_t now_ms_ = 0;      // the session's clock: the embedder's, from the first pass
 	uint32_t clock_origin_ = 0;

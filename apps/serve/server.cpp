@@ -942,11 +942,11 @@ void Server::stop() {
 	//  CAdminServer_Construct's WSAStartup @0x402C22 (slot 0x7C0554), its
 	//  WSACleanup @0x406DE2 from the destructor registered @0x79377A].
 	if (lister_) {
-		if (lister_->finished()) last_lister_exit_ = lister_->exit_code();
 		if (reset_exit_)
 			lister_->disconnect();
 		else
 			lister_->stop();
+		last_lister_exit_ = lister_->exit_code();
 		lister_.reset();
 	}
 	listing_.reset();

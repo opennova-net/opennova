@@ -144,11 +144,23 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 				source_.on_host_result(false, tag);
 				end(kExitFailed);
 			};
+			// ServerStopHosting drops the session to verified and sends nothing; the session
+			// stays up, pumped, until the match's NovaWorld exit (12) over the dropped word
+			// reaches the router, whose network-type reset sends the goodbye burst with no
+			// ClientStopHosting (the embedder's stop at that exit). The lister finishes then,
+			// with the service's word as its outcome (D-NET-NEW-L9-20).
+			// [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 - SetState(4) @0x4D1D29,
+			//  the word 1 @0x4D1D4F, no send; Game_ProcessMainFrame @0x5263F0 - the 62-frame
+			//  check @0x52654F..0x52657C; PostMenu_RouteMissionExit @0x568460 - `cmp eax, 0Ch`
+			//  @0x56854F / jz @0x568552 -> loc_5686CB, SetNetworkType(0) (the call @0x5686E1);
+			//  CNapiNetwork_SetNetworkType @0x4C4A50 - ResetToDisconnected (the call @0x4C4A7D);
+			//  CNapiGameSession_ResetToDisconnected @0x4D0890 - CNapiNPConnection_RequestDisconnect
+			//  @0x61E0F0 (the call @0x4D08A1)]
 			hooks.on_stopped = [this](const std::string &key) {
 				io::logf(LogLevel::kError, "[host] the service stopped the hosting (%s)",
 						key.c_str());
 				source_.on_host_result(false, key);
-				end(kExitStoppedByService);
+				stopped_by_service_ = true;
 			};
 			hooks.on_command = [this](const ServerCommand &command) {
 				source_.on_command(command);
@@ -444,7 +456,7 @@ void Lister::sync_roster() {
 void Lister::end(int code) {
 	if (ending_ || phase_ == Phase::Done) return;
 	ending_ = true;
-	exit_code_ = code;
+	exit_code_ = stopped_by_service_ ? kExitStoppedByService : code;
 }
 
 // Close the session: with `stop_hosting` (stop) the ClientStopHosting statement leaves on one

@@ -200,9 +200,9 @@ public:
 	bool novaworld() const { return novaworld_; }
 	// The NovaWorld listing's lister (null when not listing).
 	Lister *lister() { return lister_.get(); }
-	// The exit code the lister had finished with when stop() tore it down, -1 when it had not
-	// finished (or there was none): a lister that finishes in the frame whose mission exit stops
-	// the server is gone before the caller can read it.
+	// The exit code the lister finished with when stop() tore it down (stop()'s own finish
+	// included: a ServerStopHosting keeps the lister up until the match's NovaWorld exit stops
+	// the server), -1 when there was none: the lister is gone before the caller can read it.
 	int last_lister_exit() const { return last_lister_exit_; }
 	// The remote-admin listener's bound port: game.cfg's remote_admin_port once it listens,
 	// 0 when the port is 0 (off) or the listen failed.

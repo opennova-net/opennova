@@ -376,21 +376,45 @@ void anonymous_lister_listed(Service &service) {
 }
 
 // The Lister with no account against ONNET_REQUIRE_HOST_KEY: answered, never
-// listed, and ended with ServerStopHosting once its update's HostKey names
-// nobody.
+// listed, and its hosting ended with ServerStopHosting once its update's HostKey
+// names nobody. The statement drops the session to verified and sends nothing, so
+// the session stays up, and the service keeps it, until the embedder's stop at its
+// match's NovaWorld exit (12), whose router resets the session with the goodbye
+// burst alone (no ClientStopHosting); the lister finishes then, on the service's
+// word.
+// [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 - SetState(4) @0x4D1D29, the
+//  word 1 @0x4D1D4F; PostMenu_RouteMissionExit @0x568460 - `cmp eax, 0Ch` @0x56854F /
+//  jz @0x568552 -> loc_5686CB, SetNetworkType(0) (the call @0x5686E1);
+//  CNapiNetwork_SetNetworkType @0x4C4A50 - CNapiGameSession_ResetToDisconnected @0x4D0890
+//  (the call @0x4C4A7D)]
 void anonymous_lister_stopped(Service &strict) {
 	FixedSource source("Refused Lister");
 	opennova::serve::Lister lister(lister_options(strict, false), source, nullptr);
 	expect(lister.start(), "strict lister: starts");
 	bool ever_listed = false;
-	ListerRun run{lister};
-	run.until([&] { return lister.finished(); },
-	          [&] { ever_listed = ever_listed || !hostdb::list_hosts(*strict.pool.acquire()).empty(); });
-	expect(lister.finished(), "strict lister: finishes");
-	expect(lister.exit_code() == opennova::serve::kExitStoppedByService,
-			"strict lister: the service stopped its hosting");
+	const auto watch = [&] {
+		ever_listed = ever_listed || !hostdb::list_hosts(*strict.pool.acquire()).empty();
+	};
+	ListerRun run{ lister };
+	expect(run.until([&] { return !source.failure.empty(); }, watch),
+			"strict lister: the service stops its hosting");
 	expect(!source.hosting && source.failure == kNeedToLogin,
-	       "strict lister: with NWUSERVERMSGCODE_NEEDTOLOGIN");
+			"strict lister: with NWUSERVERMSGCODE_NEEDTOLOGIN");
+	// Half a second of passes on, the session holds, verified, and the service keeps it.
+	run.until([] { return false; }, watch, 50);
+	const ClientSession *session = lister.lobby().session();
+	expect(!lister.finished() && !lister.hosting(),
+			"strict lister: up and not hosting after the service's stop");
+	expect(session != nullptr && session->lobby_state() == 4 &&
+					session->session_role() == ClientSession::kSessionRoleVerified,
+			"strict lister: its session dropped to verified (state 4, the word 1)");
+	expect(strict.manager.registry().size() == 1,
+			"strict lister: no goodbye before the embedder's stop");
+	lister.stop();
+	expect(lister.finished() && lister.exit_code() == opennova::serve::kExitStoppedByService,
+			"strict lister: the stop finishes it on the service's word");
+	expect(wait_for([&] { return strict.manager.registry().size() == 0; }),
+			"strict lister: the goodbye burst then ends its session on the service");
 	expect(!ever_listed, "strict lister: never in the browser");
 }
 
