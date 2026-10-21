@@ -481,12 +481,9 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
         (static_cast<int64_t>(raw) << 16) / ammo.drag_fp16;
     const int64_t scaled_drag = first_division / io::kTicksPerSecondInt;
     // A positive surface multiplier scales the step directly and skips the
-    // water/air legs [orig: the surfaceNormal > 0 arm @0x4e604e..0x4e6097
-    // ahead of the water-height test @0x4e60a9]. The round's Z word is compared
-    // with the water word raw: a map with no water holds 0 there, so a round at
-    // or below Z 0 takes the x25 step [orig: Entity_ApplyDragAndBounceForce
-    // @0x4E5EC0 - `cmp eax, g_EnvWaterHeightFixed` / `jle` @0x4E60A0..0x4E60A9,
-    // the x25 leg @0x4E616D].
+    // water/air legs [orig: the surfaceNormal > 0 arm @0x4e604e..0x4e6097]; the
+    // Z word against the water word raw, a dry map's 0 included, picks x25 [orig:
+    // Entity_ApplyDragAndBounceForce @0x4E5EC0 - @0x4E60A0..0x4e60a9, @0x4E616D].
     const bool underwater = position_z_q16 <= water_z_q16;
     const int64_t drag_step = surface_normal > 0 ? scaled_drag * surface_normal
                               : underwater      ? scaled_drag * 25
@@ -1012,13 +1009,9 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         return -1;
     }
     if ((ammo->flags & kAmmoFlagDetonateSatchels) != 0) {
-        // Detonatesatchels: every peer that spawns the round marks the firer's
-        // satchels, the call testing no authority; only the authority's satchel
-        // think acts on the mark (a peer's acts on its death message alone), and
-        // a peer holds no placed device of ours, so its walk finds none.
-        // [orig: RoundData_SpawnRound @0x4EC231..0x4EC237 -> Entity_DetonateSatchelsByOwner
-        //  @0x546ED0 (no gate); Entity_SatchelThink @0x443670 - is_authority @0x44368D,
-        //  the peer's deathType 4 leg @0x443698]
+        // Detonatesatchels on every peer, no gate; only the authority's satchel think
+        // acts on the mark [orig: @0x4EC231..0x4EC237 -> Entity_DetonateSatchelsByOwner
+        //  @0x546ED0; Entity_SatchelThink @0x443670 - @0x44368D, @0x443698].
         world.throwables.detonate_satchels_by_owner(world, params.owner);
         return -1;
     }
@@ -2340,13 +2333,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         //    @0x4E9866 (absorbed), @0x4E986E (kztype), @0x4E9875..0x4E9884
         //    (arm age), push @0x4E98A2; the returns of
         //    Projectile_ProcessDamageOnTarget @0x4E7FCB / @0x4E823D..0x4E8266];
-        //  - person: a kill-zone class, an armed round, the session authority
-        //    and a nonzero kz_damage [orig: Projectile_HandleTerrainImpact_0
-        //    @0x4E98F0 - @0x4E9AE2..0x4E9B08, push @0x4E9B26]. Its arm test is
-        //    the handler's unarmed byte (the decompiler's hasPenetrated), set by
-        //    the dud swap's own elapsed-age test, the terrain handler's compare
-        //    [orig: max age - remaining against the original row's arm age,
-        //    `jge` @0x4E9969..0x4E9978, the byte @0x4E99A4, read @0x4E9AE9];
+        //  - person: a kill-zone class, an armed round (the unarmed byte @0x4E9969..0x4E99A4,
+        //    read @0x4E9AE9), the session authority and a nonzero kz_damage [orig:
+        //    Projectile_HandleTerrainImpact_0 @0x4E98F0 - @0x4E9AE2..0x4E9B08, push @0x4E9B26];
         //  - water: the lifetime is halved first, then only an ODD class
         //    passes the compiled `!prearm & kztype` bit test, and the halved
         //    age must strictly pass the arm age [orig:
