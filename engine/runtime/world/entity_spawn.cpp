@@ -29,6 +29,12 @@ void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling) {
     e.spawn_position = e.position;
     e.spawn_heading = e.heading;
     e.spawn_flags = (e.flags | e.engine_flags) & ~kEntityFlagDead;
+    // The body attitude's first two words: +0x8C takes the Yaw word and +0x90
+    // zero, over whatever a teleport's stamp left there; +0x80..+0x88 and +0x94
+    // stay (D-NET-507). [orig: Entity_ResetToSpawnState @0x4B9610 - the Yaw read
+    //  @0x4B964A, +0x8C @0x4B968C, +0x90 @0x4B97DD]
+    e.saved_live_yaw = e.heading;
+    e.saved_live_pitch = 0;
     // Both portable flag views represent the same retail dword.
     e.flags &= ~2u;
     e.engine_flags &= ~2u;

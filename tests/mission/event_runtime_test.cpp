@@ -2896,14 +2896,16 @@ static void test_structural_bms_actions() {
     CHECK((w.registry.get(pool0_h)->engine_flags &
            world::kEntityFlagParachute) != 0);
     // The single action stores the marker's whole pose into savedLivePose ahead
-    // of the reset, which levels the entity's Roll and not the saved one.
-    // [orig: EventAction_TeleportEntityToSpawn @0x43E05F..0x43E096]
+    // of the pool-0 reset, which levels the entity's Roll word and not the saved
+    // one, and stores the Yaw word into +0x8C and zero into +0x90.
+    // [orig: EventAction_TeleportEntityToSpawn @0x43E05F..0x43E096;
+    //  Entity_ResetToSpawnState @0x4B968C / @0x4B97DD]
     {
         const world::Entity &moved = *w.registry.get(pool0_h);
         CHECK(moved.saved_live_valid && moved.saved_live_pos[0] == (10 << 16) &&
               moved.saved_live_pos[1] == (20 << 16) && moved.saved_live_pos[2] == (30 << 16));
         CHECK(moved.saved_live_yaw == world::placed_heading_bam(45) &&
-              moved.saved_live_pitch == world::spawn_angle_bam(5) &&
+              moved.saved_live_pitch == 0 &&
               moved.saved_live_roll == world::spawn_angle_bam(-3));
     }
 

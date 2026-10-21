@@ -290,8 +290,10 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
     entity.objective_death_scored = false;
     // The reset reads the Position words as they stand (no float view): the
     // spawn backup (+0x318..+0x320) is a dword copy of them (D-NET-507); it
-    // leaves savedLivePose (+0x80) alone. [orig: Entity_ResetToSpawnState
-    //  @0x4B9610 - the stores @0x4B9632 / @0x4B963B / @0x4B9644]
+    // leaves savedLivePose's Position words (+0x80..+0x88) alone, its +0x8C /
+    // +0x90 taking the Yaw word and zero in the base reset below.
+    // [orig: Entity_ResetToSpawnState @0x4B9610 - the stores @0x4B9632 /
+    //  @0x4B963B / @0x4B9644; +0x8C @0x4B968C, +0x90 @0x4B97DD]
     const EntityPosition origin = entity.position;
     const int32_t heading = entity.heading;
     const uint32_t flags = entity.flags | entity.engine_flags;
