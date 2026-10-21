@@ -157,11 +157,12 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e);
 // [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 (the read @0x5032A3),
 //  NetPacket_SerializeObjectToBuffer @0x504D10 (the read @0x50518C); the writers:
 //  Entity_InitDeathSounds @0x4939B0 (the zero @0x493A09..0x493A1B, the effect-group stores
-//  Entity_SpawnMaskedEffectBank @0x493A9C / @0x493AEF and @0x493AC3 / @0x493B16), its
+//  the Entity_SpawnMaskedEffectBank calls @0x493A9C / @0x493AEF and @0x493AC3 / @0x493B16), its
 //  reader Entity_UpdateDeadWreckEffects @0x493140 (the slots @0x4931DA);
 //  Entity_UpdateChildAttachment @0x4409A0
 //  (the ewep death `or [esi+24h], 6` @0x440B72 / @0x440C28, no +0x2B4 store),
-//  Entity_DetachFromMount @0x546D00 (7 @0x546D29); Entity_SpawnFromBMSRecord @0x40E9F0 (the
+//  Entity_DetachFromVehicle @0x4355F0 (the 0x20 arm's 7 @0x435765..0x435772);
+//  Entity_SpawnFromBMSRecord @0x40E9F0 (the
 //  6088 strncpy @0x40F136..0x40F14F); PowerupEntity_InitFromDef @0x442D00 (-1 @0x442D65),
 //  PowerupAction_Pickup @0x4428A0 (@0x442AE1), Powerup_TickRespawn @0x442850 (@0x442878 /
 //  @0x442883); Entity_ComputeBoneCollisionForce @0x4AE150 (the per-query reset @0x4AE281,

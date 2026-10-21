@@ -100,6 +100,15 @@ bool VehicleSystem::release_primary_occupant(Entity &vehicle, EntityHandle occup
     if (vehicle.has_item_def && (vehicle.item_attrib & kItemAttribPlayerControl) != 0 &&
             vehicle.primary_weapon_slot.counter != 0)
         vehicle.primary_weapon_slot.counter = 7;
+    // A weapon carrier without PlayerControl (an emplaced gun) cuts its own MountSlot
+    // counter (+0x2B4, the word its 0x0C / 0x18 aiState byte carries) the same way
+    // when its claimant leaves (D-NET-133).
+    // [orig: Entity_DetachFromVehicle @0x4355F0 - the 0x40 test's else @0x4356F4 ->
+    //  @0x435765, attrib 0x20 @0x435765..0x435767, the counter @0x435769..0x435772]
+    else if (vehicle.has_item_def && (vehicle.item_attrib & kItemAttribPlayerControl) == 0 &&
+            (vehicle.item_attrib & kItemAttribEweap) != 0 &&
+            vehicle.primary_weapon_slot.counter != 0)
+        vehicle.primary_weapon_slot.counter = 7;
     // The PlayerControl leg: the all-zero fold and the stop on the departing
     // occupant, then the +0x1CC smoke emitter release; the next mover tick
     // re-arms the smoke while the damage band still holds.

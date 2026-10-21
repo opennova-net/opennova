@@ -10,9 +10,12 @@
 #include <net/npwire/ingame_decode.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/vehicle_system.h> // VehicleSystem::detach (the release)
+#include <runtime/world/world.h>
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 
 namespace {
 
@@ -62,18 +65,50 @@ int main() {
 	expect(ai_state_of(jeep) == 0, "a dead vehicle's aiState is 0");
 
 	// A weapon carrier's MountSlot counter (slot+0 at +0x2B4)
-	// [orig: Entity_GetWeaponSlots @0x5460F4..0x546108; the detach's 7 @0x546D29].
-	w::Entity gun = item(w::kItemAttribEweap);
-	gun.primary_weapon_slot.counter = 7;
-	expect(ai_state_of(gun) == 7, "a gun's aiState is its MountSlot's counter");
-	// The gun's death touches no word: its counter rides on (7 after its death's
-	// detach of a firing gunner) [orig: Entity_UpdateChildAttachment @0x4409A0 - the
-	// death `or [esi+24h], 6` @0x440C28 / @0x440B72; Entity_DetachFromMount @0x546D29].
+	// [orig: Entity_GetWeaponSlots @0x5460E0 (@0x5460F4..0x546108)].
+	w::Entity loose_gun = item(w::kItemAttribEweap);
+	loose_gun.primary_weapon_slot.counter = 3;
+	expect(ai_state_of(loose_gun) == 3, "a gun's aiState is its MountSlot's counter");
+	// Its gunner's release cuts a running counter to 7: the gunner leaves through the
+	// detach, whose claimant leg takes the 0x20 arm for a carrier without PlayerControl
+	// (V-L5-s5 0a) [orig: Entity_DetachFromVehicle @0x4355F0 - @0x435765..0x435772].
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(0, 4);
+	world->registry.configure_pool(1, 4);
+	w::Entity gun_seed = item(w::kItemAttribEweap);
+	gun_seed.alive = true;
+	gun_seed.health = 100;
+	w::Seat usegun;
+	usegun.type = w::SeatType::Gunner;
+	usegun.bone_index = 6;
+	gun_seed.seats.push_back(usegun);
+	gun_seed.primary_weapon_slot.counter = 3;
+	const w::EntityHandle gun_h = world->registry.spawn(1, gun_seed);
+	w::Entity gunner_seed;
+	gunner_seed.kind = w::EntityKind::Organic;
+	gunner_seed.alive = true;
+	gunner_seed.health = 100;
+	const w::EntityHandle gunner_h = world->registry.spawn(0, gunner_seed);
+	w::Entity &gun = *world->registry.get(gun_h);
+	w::Entity &gunner = *world->registry.get(gunner_h);
+	gun.seats[0].occupant = gunner_h;
+	gun.primary_occupant = gunner_h;
+	gunner.mounted = true;
+	gunner.mount_target = gun_h;
+	gunner.mount_bone = 6;
+	gunner.mount_seat = 0;
+	gunner.mount_type = w::SeatType::Gunner;
+	expect(world->vehicles.detach(gunner_h), "the gunner detaches");
+	expect(gun.primary_weapon_slot.counter == 7 && ai_state_of(gun) == 7,
+			"the gunner's release cuts the gun's running counter to 7");
+	// The gun's death touches no word: its counter rides on [orig:
+	// Entity_UpdateChildAttachment @0x4409A0 - the death `or [esi+24h], 6` @0x440C28 /
+	// @0x440B72].
 	gun.alive = false;
 	gun.flags |= w::kEntityFlagDead;
 	expect(ai_state_of(gun) == 7, "a dead gun's aiState keeps its MountSlot's counter");
 	// With PlayerControl (0x40) the MountSlot is +0x474, not the word
-	// [orig: Entity_GetWeaponSlots @0x5460F6..0x5460FA].
+	// [orig: Entity_GetWeaponSlots @0x5460E0 (@0x5460F6..0x5460FA)].
 	w::Entity controlled_gun = item(w::kItemAttribEweap | w::kItemAttribPlayerControl);
 	controlled_gun.primary_weapon_slot.counter = 7;
 	expect(ai_state_of(controlled_gun) == 0, "a PlayerControl carrier's word is not its MountSlot");
