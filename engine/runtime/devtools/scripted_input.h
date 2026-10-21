@@ -7,8 +7,10 @@
 // fire 149, USE 177, ...), so the device holds the row's config token and
 // the embedder's binding seam reports that token held like any physical key:
 // the binding scan, PlayerActions' edges and gates, the simulation and the
-// wire run unchanged. Look steps are raw mouse pixels the embedder feeds
-// through its mouse-motion path.
+// wire run unchanged. Look steps are axis input the embedder adds at their
+// own tick (inmatch::InputPacket::look_delta), as onHook's driver adds its
+// look_px to the mouse axis word in that input frame; they bypass the main
+// frame's mouse pump, which turns one cursor pixel into eight axis units.
 //
 // Timing is keyed on the session's logic tick: the embedder samples the
 // device in every input frame, the display frame's own sample and each later

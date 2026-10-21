@@ -357,11 +357,11 @@ func test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive(
 			"releasing the lean eases the composed roll back out")
 
 
-func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
-	# The presenter no longer scales or accumulates look: raw pixel deltas go to
-	# Simulation.add_local_player_look and the witnessed integer pipeline —
-	# sens<<11, scoped zoom reduction, the pitch clamps — folds them in at the
-	# tick [orig: Input_ProcessMouseAxisBindings @0x499680].
+func test_mouse_motion_reaches_the_sim_pipeline_through_the_mouse_pump() -> void:
+	# The presenter neither scales nor spreads look: the motion's cursor offset
+	# rides the frame input to the session's mouse pump, whose axis words the
+	# witnessed integer pipeline (sens<<11, scoped zoom reduction, the pitch
+	# clamps) folds in at each tick [orig: Input_ProcessMouseAxisBindings @0x499680].
 	var world := _load_player_world()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)

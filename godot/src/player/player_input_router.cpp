@@ -358,9 +358,11 @@ void PlayerInputRouter::reset_input_state() {
 	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
 }
 
-// Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline
-// (the sim owns sensitivity, the scoped zoom reduction, Y-invert, and the
-// pitch clamps). (engine: runtime/world/local_player.cpp)
+// Mouse-look: the motion events add up the cursor offset the input frame
+// hands the session in whole pixels; the session's mouse pump spreads it into
+// the axis words the SIM's witnessed integer pipeline scales (the sim owns
+// sensitivity, the scoped zoom reduction, Y-invert, and the pitch clamps).
+// (engine: runtime/world/player_look.h MouseAxisPump, runtime/world/local_player.cpp)
 bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_active) {
 	LocalPlayerPresenter *owner = presenter();
 	if (!p_active || owner == nullptr || !owner->has_player()) {

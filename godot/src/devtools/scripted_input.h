@@ -20,8 +20,9 @@ namespace godot {
 // seam (ControlsModel::set_scripted_input), its held tokens read held like
 // keyboard slots; the input router steps it in every input frame (the
 // frame's sample and each later tick's, at the logic tick it runs as) before
-// that frame's device sample, and feeds its look pixels through the
-// mouse-motion path, under the same gates the real mouse passes. Compiled in
+// that frame's device sample, and hands its look steps to the session as
+// axis input at their own tick (MissionFrameInput.set_look_delta), under
+// the same gates the real mouse passes. Compiled in
 // every flavour, as the debug-control automation rows are; only the
 // source-only scenario_play probe arms it.
 class ScriptedInput : public RefCounted {

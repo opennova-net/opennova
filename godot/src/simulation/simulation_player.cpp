@@ -83,9 +83,9 @@ void Simulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool
 			p_lean_left, p_lean_right, p_jump);
 }
 
-// One frame of mouse pixels onto the kernel's look accumulator
-// (the center-lock accumulator, the scoped sensitivity reduction, the prone
-// up-limit) (engine: runtime/world/local_player.cpp).
+// Axis input straight onto the kernel's look pipeline, past the session's
+// mouse pump (the scoped sensitivity reduction, the prone up-limit)
+// (engine: runtime/world/local_player.cpp).
 void Simulation::add_local_player_look(float p_dx_px, float p_dy_px) {
 	kernel_->local.look(p_dx_px, p_dy_px);
 }

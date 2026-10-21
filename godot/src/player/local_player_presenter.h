@@ -56,9 +56,10 @@ class Simulation;
 // move it) [orig: the local bone path @0x4b6bb3 stores head-Position into
 // CameraOffset(+0x6C); the on-foot person camera leg adds it @0x437f9c].
 // +1.0 is the witnessed NON-person fallback bump (engine: runtime/world/player_view.cpp), kept for
-// the no-skeleton case. F4 swaps to the mode-1 chase camera (engine: runtime/world/player_view.cpp). Mouse look is SIM-owned: raw pixel
-// deltas feed Simulation.add_local_player_look (the witnessed integer
-// pipeline -- sensitivity<<11, scoped zoom reduction, +-80 deg pitch clamp
+// the no-skeleton case. F4 swaps to the mode-1 chase camera (engine: runtime/world/player_view.cpp). Mouse look is SIM-owned: the
+// cursor offset rides the frame input to the session's mouse pump, whose axis
+// words feed the witnessed integer pipeline (sensitivity<<11, scoped zoom
+// reduction, +-80 deg pitch clamp
 // with the +40 deg up-limit while prone) (engine: runtime/world/local_player.cpp). Calibration values live at engine world/player_view.h
 // (Simulation re-exports).
 //
@@ -249,8 +250,9 @@ public:
 	bool take_use_item_vehicle_menu_request();
 	// A menu close's input reset (PlayerInputRouter::reset_input_state).
 	void reset_input_state();
-	// Mouse-look rides the input router: raw pixel deltas into the SIM's
-	// witnessed integer pipeline (engine: runtime/world/local_player.cpp).
+	// Mouse-look rides the input router: the motion events' cursor offset,
+	// which the session's mouse pump spreads into the axis words the SIM's
+	// witnessed integer pipeline scales (engine: runtime/world/player_look.h).
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	bool has_player() const;

@@ -204,8 +204,9 @@ class BindingSet {
   // 0 while the keyboard is captured (below).
   int pressed_key(int index, const std::function<bool(int)> &key_down) const;
 
-  // The key scan's two live gates, which the embedder sets once a frame
-  // ahead of the polls: the death screen (g_DeathScreenActive) selects the
+  // The key scan's two live gates, which the embedder sets at the head of
+  // every input frame (each logic tick's) ahead of its polls: the death
+  // screen (g_DeathScreenActive) selects the
   // mode bit, and the scan word is set on a dedicated authority (in a
   // session, the authority, not a session peer) and otherwise while the
   // local body's dead bit (Flags & 2) is up.

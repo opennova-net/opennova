@@ -1081,8 +1081,10 @@ public:
 	// selection (engine: formats/def/def.h).
 	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
 	                      bool p_lean_left, bool p_lean_right, bool p_jump);
-	// One frame of mouse pixels (screen sense: +x right, +y down) applied to the local
-	// player's look through the witnessed integer pipeline: sens = setting << 11,
+	// Axis input (screen sense: +x right, +y down) applied to the local player's look
+	// at once, past the session's mouse pump: the direct feed of the probes, the
+	// tests and the debug look, in the axis units onHook's look_px is (one cursor
+	// pixel is eight of them through the pump). The witnessed integer pipeline: sens = setting << 11,
 	// scoped zoom reduction, (px*sens+0x8000)>>16 per axis; yaw wraps; pitch clamps
 	// +-80 deg with the up-limit +40 deg while prone. (engine: runtime/mission/mission_kernel.cpp)
 	void add_local_player_look(float p_dx_px, float p_dy_px);
