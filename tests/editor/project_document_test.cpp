@@ -26,7 +26,7 @@ static int test_create_then_open() {
 	TEST_EXPECT(created.title == "My Game");
 	TEST_EXPECT(created.target_game == "jo");
 	TEST_EXPECT(created.project_id.size() == 36);
-	TEST_EXPECT(created.features.menu && !created.features.mission);
+	TEST_EXPECT(!created.features.mission && !created.features.multiplayer);
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	TEST_EXPECT(fs::is_regular_file(paths.project_file));
 	TEST_EXPECT(fs::is_directory(paths.cache_dir));
@@ -99,7 +99,6 @@ static int test_on_disk_form_is_deterministic() {
 	        "    \"output\": \"build/export\"\n"
 	        "  },\n"
 	        "  \"features\": {\n"
-	        "    \"menu\": true,\n"
 	        "    \"mission\": true,\n"
 	        "    \"multiplayer\": false\n"
 	        "  },\n"
@@ -109,6 +108,15 @@ static int test_on_disk_form_is_deterministic() {
 	        "  \"title\": \"T\"\n"
 	        "}\n";
 	TEST_EXPECT(text == expected);
+	// No switch names the menu set, which every project requires: a file's "menu" key is no member of the
+	// features, read as nothing and written again without it.
+	const std::string with_menu = std::string(expected).replace(expected.find("    \"mission\""), 0, "    \"menu\": false,\n");
+	opennova::io::JsonValue json;
+	std::string parse_error;
+	ProjectDocument read;
+	Diagnostic error;
+	TEST_EXPECT(opennova::io::json_parse(with_menu, json, parse_error) && project_document_from_json(json, read, error));
+	TEST_EXPECT(read.features.mission && opennova::io::json_write(project_document_to_json(read)) == expected);
 	// An expansion project's object, both keys written; a standalone one has none (above).
 	doc.expansion = { "jxm", "jox01" };
 	const std::string with = opennova::io::json_write(project_document_to_json(doc));

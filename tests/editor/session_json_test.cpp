@@ -1189,7 +1189,8 @@ static int test_over_a_session() {
 	session.run_operations();
 	const JsonValue project = section(ViewSection::Project);
 	TEST_EXPECT(project.get_bool("open", false) && project.get_string("title", "") == "John Smith");
-	TEST_EXPECT(project.get_string("target_game", "") == "jo" && project.get("features")->get_bool("menu", false));
+	TEST_EXPECT(project.get_string("target_game", "") == "jo" && project.get("features")->get("mission") &&
+	            !project.get("features")->get("menu"));
 	const JsonValue requirements = section(ViewSection::Requirements);
 	TEST_EXPECT(requirements.get_int("total", 0) > 0 &&
 	            requirements.get_int("missing", -1) == requirements.get_int("total", 0));

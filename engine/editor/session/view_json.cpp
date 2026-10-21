@@ -114,7 +114,6 @@ JsonValue project_section(const SessionView &view) {
 	out.set("id", json_string(document.project_id));
 	out.set("target_game", json_string(document.target_game));
 	JsonValue features = JsonValue::make_object();
-	features.set("menu", boolean(document.features.menu));
 	features.set("mission", boolean(document.features.mission));
 	features.set("multiplayer", boolean(document.features.multiplayer));
 	out.set("features", std::move(features));
