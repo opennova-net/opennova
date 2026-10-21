@@ -1569,7 +1569,8 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     // The pose snapshot: savedLivePose (+0x80..+0x88) and the attitude triple
     // (+0x8C..+0x94) take Position and the Yaw / Pitch / Roll words, the one
     // store the dying vehicle's still-test reads (D-NET-507). [orig:
-    // @0x49467B..0x4946A4, the +0x80 store @0x494684]
+    // Entity_UpdateDeathTransforms @0x494660 - @0x49467B..0x4946B2, the +0x80
+    // store @0x494684, +0x8C / +0x90 / +0x94 @0x4946A4 / @0x4946AB / @0x4946B2]
     stamp_saved_live_pose(target);
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     const int unit_type = traits != nullptr ? traits->unit_type : 0;
@@ -2135,7 +2136,9 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
             if (tp.bounce_fx != nullptr)
                 events.effects.push_back(
                         DestructionEffectEvent{tp.bounce_fx, p.pos, Vec3{}, 0, 0});
-            if (x87_length(p.vel[0], p.vel[1], p.vel[2]) > 0x5000 && tp.bounce_snd != nullptr)
+            // The length sums (vz^2 + vy^2) + vx^2 [orig: the filds and squares
+            // @0x492F49..0x492F69].
+            if (x87_length(p.vel[2], p.vel[1], p.vel[0]) > 0x5000 && tp.bounce_snd != nullptr)
                 events.sounds.push_back(DestructionSoundEvent{tp.bounce_snd, p.pos});
         } else {
             // Exhausted [orig: the bounce count's `jle` @0x492EDB ->
