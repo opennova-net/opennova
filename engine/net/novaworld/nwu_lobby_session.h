@@ -215,7 +215,13 @@ public:
 	// While the gate memory keeps a response from this gate, no probe: the kept response goes to
 	// on_gate_response and the connect runs from it at once. The process's gate is its init's in
 	// retail, so a response is kept for the gate it came from alone (the shell's NovaWorld target
-	// can name another gate within one process).
+	// can name another gate within one process). The probe is the menu's state-1 frame, whose
+	// session pump runs ahead of the state's case, so the embedder's first tick() after it is the
+	// next frame's (the gate's answer read in state 2's frame at the earliest).
+	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - CNapiGameSession_ProcessPeriodicUpdate
+	//  (the call @0x558DFA) ahead of the switch; state 1: CNapiGateManager_WaitForConnect (the
+	//  call @0x558EAD), 2 set @0x55904B; state 2: CNapiGateManager_ProcessResponse (the call
+	//  @0x559079)]
 	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - dword_B5FF48 @0x4CE6CF, the gate state 2
 	//  @0x4CE6F3, 0 returned @0x4CE6FA; UI_ProcessLANSessionStateMachine @0x558DE0 - state 2
 	//  passing over the response's processing for a gate state other than 1 @0x559072..0x559094,

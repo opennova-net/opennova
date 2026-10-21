@@ -338,6 +338,9 @@ private:
 	std::unique_ptr<UdpPumpDatagramSocket> gate_socket_;
 	double clock_accum_s_ = 0.0;
 	uint32_t clock_ms_ = 0;
+	// The process frame whose start() ran the probe (Engine::get_process_frames): the menu's
+	// state-1 frame, which runs no lobby tick of its own (_process).
+	uint64_t probe_frame_ = ~uint64_t{ 0 };
 	// The shared gate/session driver (engine/net/novaworld): ClientSession, ci/ck,
 	// the NW endpoint, and the connect deadlines all live in here.
 	opennova::NwuLobbySession lobby_;

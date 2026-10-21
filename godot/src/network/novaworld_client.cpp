@@ -13,6 +13,7 @@
 #include <runtime/inmatch/server_files.h> // ServerLogs, server_logs_inout_line
 
 #include <array>
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/http_client.hpp>
 #include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/ip.hpp>
@@ -377,6 +378,7 @@ void NovaWorldClient::start() {
 	host_role_.stop();
 
 	enter_state(STATE_GATE_PROBING);
+	probe_frame_ = Engine::get_singleton()->get_process_frames();
 	lobby_.probe(opennova::to_std(host_), static_cast<uint16_t>(gate_port_));
 }
 
@@ -502,7 +504,13 @@ void NovaWorldClient::_process(double delta) {
 	// The ms wall clock every retail deadline and interval runs on (GetTickCount).
 	clock_accum_s_ += delta;
 	clock_ms_ = static_cast<uint32_t>(clock_accum_s_ * 1000.0);
-	lobby_.tick(clock_ms_);
+	// The probe is the menu's state-1 frame, whose session pump ran ahead of it, so the lobby's
+	// first tick is the next frame's (engine: NwuLobbySession::probe). An activation in the
+	// input step (a key, a button) runs start() before this frame's process step, which then
+	// reaches this node: the tick waits a frame. One in another node's process (the menu
+	// shell's mouse pump) is already right, the step walking the node list it began with.
+	if (Engine::get_singleton()->get_process_frames() != probe_frame_)
+		lobby_.tick(clock_ms_);
 	drain_session_notices();
 	host_role_.tick(clock_ms_);
 
