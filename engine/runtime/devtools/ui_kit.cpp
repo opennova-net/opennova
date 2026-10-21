@@ -126,10 +126,18 @@ bool cut_only(const std::string &s, size_t from, size_t to) {
 		    std::all_of(s.begin() + std::ptrdiff_t(from + n), s.begin() + std::ptrdiff_t(to), hex_char))
 			return true;
 	}
+	// Cuts, divergence ids and record names, between blanks and stops: never a word of the prose (a mission's
+	// "D-DAY-1.bms" outside parentheses stands).
 	bool cut = false;
-	for (size_t i = from; i < to; ++i) {
-		if (s[i] == kCut) cut = true;
-		else if (s[i] != ' ' && s[i] != ',' && s[i] != ';') return false;
+	for (size_t i = from; i < to;) {
+		if (s[i] == ' ' || s[i] == ',' || s[i] == ';') {
+			++i;
+			continue;
+		}
+		size_t end = s[i] == kCut ? i + 1 : s[i] == 'D' ? divergence_end(s, i) : record_end(s, i);
+		if (end == i || end > to) return false;
+		cut = true;
+		i = end;
 	}
 	return cut;
 }
@@ -354,11 +362,10 @@ TipsAbove::TipsAbove() : before_(g_tips_above) { g_tips_above = true; }
 TipsAbove::~TipsAbove() { g_tips_above = before_; }
 
 std::string without_citations(const std::string &text) {
-	if (text.find_first_of("@[(") == std::string::npos && text.find("D-") == std::string::npos &&
-	    text.find("-re") == std::string::npos)
-		return text;
-	// Each citation marked by a cut: a citing bracket whole, an address with the function it names, a
-	// divergence's id, a record's name; an unclosed "[orig:" stops the marking, the rest kept as it is.
+	if (text.find_first_of("@[(") == std::string::npos) return text;
+	// Each citation marked by a cut: a citing bracket whole, an address with the function it names; an unclosed
+	// "[orig:" stops the marking, the rest kept as it is. A parenthesis of divergence ids, record names and cuts
+	// alone goes as the cuts settle.
 	std::string marked;
 	marked.reserve(text.size());
 	bool cut = false;
@@ -380,10 +387,6 @@ std::string without_citations(const std::string &text) {
 				while (from > 0 && (word_char(marked[from - 1]) || marked[from - 1] == ':')) --from;
 				marked.resize(code_name(marked, from, name) ? from : name);
 			}
-		} else if (c == 'D') {
-			end = divergence_end(text, i);
-		} else if (std::islower(static_cast<unsigned char>(c))) {
-			end = record_end(text, i);
 		}
 		if (end == i) {
 			marked += c;

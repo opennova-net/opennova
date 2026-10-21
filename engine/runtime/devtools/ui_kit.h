@@ -133,10 +133,10 @@ bool fitted_button(const std::string &label, const char *id, float width);
 void clipped_text(const std::string &text, const std::string &tip = std::string());
 // `text` without its witness citations, which the code, the RE records and the MCP's answers keep and no
 // window shows: an "[orig: ...]" (a bracket that cites an address or names a function alike), a
-// "Name @ 0xADDR" or a bare "@ 0xADDR" (a range or an offset after it included), a divergence's id or a
-// record's name in parentheses ("(D-FNT-3)", "(render-occlusion-re D-OCC-8)"), an IDA name alone in them
-// ("(sub_58A690)"); with them the blanks and the stops they leave (an emptied parenthesis goes whole). An
-// unclosed "[orig:" stands, and with it the rest.
+// "Name @ 0xADDR" or a bare "@ 0xADDR" (a range or an offset after it included), a parenthesis of nothing but
+// divergence ids and record names ("(D-FNT-3)", "(render-occlusion-re D-OCC-8)") or an IDA name alone
+// ("(sub_58A690)"); with them the blanks and the stops they leave (an emptied parenthesis goes whole). An id
+// or a name outside parentheses is the prose's ("D-DAY-1.bms"); an unclosed "[orig:" stands, and the rest.
 std::string without_citations(const std::string &text);
 // The tooltip of the item just drawn (a disabled one too), wrapped, without its citations
 // (without_citations): a finding's message and a fix's detail run long. None for "". It shows in

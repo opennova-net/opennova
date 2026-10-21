@@ -250,6 +250,8 @@ void test_without_citations() {
 	same("Line one [orig: X_Y @ 0x1]\nLine two", "Line one\nLine two", "a line's end kept");
 	same("Plain words (with a remark), a pre-read and the D-pad stay.",
 	     "Plain words (with a remark), a pre-read and the D-pad stay.", "words that cite nothing stand");
+	same("Opens D-DAY-1.bms (its mission) and mis-format-re.md.", "Opens D-DAY-1.bms (its mission) and mis-format-re.md.",
+	     "an id or a record's name outside parentheses is a name of the prose");
 	NullBackend backend;
 	std::string away, over;
 	away_and_over(
