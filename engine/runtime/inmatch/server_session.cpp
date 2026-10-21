@@ -248,8 +248,8 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		// its NET SENDING line (the protocol's client send callback) and each receipt its
 		// PROTOCOL line, from 0.0.0.0:0, ahead of the disabling line; NA is the session's
 		// player name, "???" when empty.
-		// [orig: CNapiGameSession_CreateSession @0x4C97C0 - "???" @0x4C9927..0x4C993B, the
-		//  type-2 create @0x4C9B9C, CNapiNPConnection_SetName @0x4C9BB7, the wait's call
+		// [orig: CNapiGameSession_CreateSession @0x4C97C0 - "???" @0x4C9927..0x4C993B, NP's
+		//  proto+0x520 zeroed @0x4C9A6E, the type-2 create @0x4C9B9C, CNapiNPConnection_SetName @0x4C9BB7, the wait's call
 		//  @0x4C9C6F; CNapiGameSession_WaitForHostResponse @0x62B2D0 - the announce flag
 		//  @0x62B31F, the enumerator on @0x62B340, the pumps @0x62B36A / @0x62B389, the session
 		//  test @0x62B3B4, CNapiNPConnection_InitFromSession @0x626320 (the call @0x62B46C; the
