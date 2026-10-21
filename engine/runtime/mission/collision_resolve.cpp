@@ -11,7 +11,6 @@
 #include <formats/mission/mission.h> // kItemIdOffset
 #include <runtime/anim/adm_fallback.h>
 #include <runtime/mission/seat_spec_extract.h> // the userpoint names
-#include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
 #include <runtime/world/person_overlays.h> // kParachuteItemTypeId
 
 #include <algorithm>
@@ -51,16 +50,6 @@ std::unordered_map<int, const DefItemDef *> item_defs_by_id(const DefItemsFile &
 	for (size_t i = 0; i < items.count; ++i) rows.emplace(items.entries[i].id, &items.entries[i]);
 	return rows;
 }
-
-int visual_item_id_for_runtime_type(int item_id, const DefItemsFile &items) {
-	// The policy lives in mission/placement_traits.h; this overload only
-	// answers the catalog probe against the retained DefItemsFile.
-	return mission::visual_item_id_for_runtime_type(item_id,
-			find_item_def(items, kPlayerVisualItemId) != nullptr);
-}
-// The mission-side policy keys on the SAME runtime player type the world
-// names; a drift would silently break the visual resolve.
-static_assert(mission::kPlayerRuntimeTypeId == world::kPlayerInfantryTypeId);
 
 int32_t collision_model_for_graphic(CollisionResolveState &state,
 		const CollisionResolveDeps &deps, const std::string &graphic_key) {
@@ -198,7 +187,7 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 		int runtime_item_id, const DefItemsFile &items,
 		CollisionResolveState &state, const CollisionResolveDeps &deps) {
 	world::ResolvedCollisionShape shape;
-	const int visual_item_id = visual_item_id_for_runtime_type(runtime_item_id, items);
+	const int visual_item_id = mission::visual_item_id_for_runtime_type(runtime_item_id);
 	const DefItemDef *def = find_item_def(items, visual_item_id);
 	if (def == nullptr) return shape;
 	shape.pool1_candidate_source_eligible =
@@ -281,9 +270,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		}
 		state.resolution_attempted[h.packed] = e->registry_spawn_id;
 		const bool is_organic = e->kind == world::EntityKind::Organic;
-		const int def_id = is_organic
-				? visual_item_id_for_runtime_type(e->item_id, items)
-				: static_cast<int>(e->item_id) + mission::kItemIdOffset;
+		// Every body's def is the row its type word names, an organic's included.
+		const int def_id = mission::visual_item_id_for_runtime_type(e->item_id);
 		const DefItemDef *def = find_item_def(items, def_id);
 		// The collectors' render model: every entity whose graphic loads carries
 		// its CMDL sphere (the entity-init form, radius 0 without a collision

@@ -31,16 +31,20 @@ const BUILDING_ITEM_DEF := """begin "Guard Tower"
   hp 5000
 end
 """
-# The player's body: items.def person row 105310 (the placer's
-# PLAYER_VISUAL_ITEM_ID) over the synthetic 19-bone person, leading the file
-# (a type id resolves to its FIRST row).
+# The player's body: items.def person row 105305 (the row the player's type
+# word 0x14B9 names, D-NET-348) over the synthetic 19-bone person, leading the
+# file (a type id resolves to its FIRST row); it is the body's spawn row too, so it
+# carries the boot fixture's 105305 keys (plyr / PLAYER / org2, hp 150).
 const PLAYER_ITEM_DEF := """begin "Player Character"
-  id 105310
+  id 105305
   type person
   graphic person
   sid player
   anim_def soldier
-  hp 100
+  hp 150
+  ai_function plyr
+  disk_function PLAYER
+  move_function org2
 end
 """
 # Mission-space (Z up) site of the building on the Tmap surface, west of the

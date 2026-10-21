@@ -70,33 +70,25 @@ inline constexpr uint32_t kEntityAttribNoShadow = 0x01000000u;
 // bms::BmsiAttributeFlags::Reflective).
 inline constexpr uint32_t kEntityAttribMirrorReflect = 0x00800000u;
 
-// Runtime-only player type id -> the authored items.def visual item. The
-// runtime entity item/type id stays unchanged; this only chooses
-// graphics/ADM data for presentation.
-inline constexpr int kPlayerRuntimeTypeId = 0x14B9;
-// items.def "Player #1, Single player" -> US01/US01.adm.
-inline constexpr int kPlayerVisualItemId = 105310;
-
-// The items.def id presentation resolves graphics/ADM by, for a runtime
-// entity type id: the runtime-only player type maps to the authored visual
-// item when the catalog carries it (`player_visual_in_catalog` — the shell's
-// item database probe); every other type is the wire/BMS id + kItemIdOffset.
-inline constexpr int visual_item_id_for_runtime_type(
-		int item_id, bool player_visual_in_catalog) {
-	if (item_id == kPlayerRuntimeTypeId && player_visual_in_catalog)
-		return kPlayerVisualItemId;
+// The items.def id a body's graphics, ADM and collision come from, for its
+// runtime type word: the row the word itself names (wire/BMS id +
+// kItemIdOffset), the player's 0x14B9 included. Retail binds a body's def by
+// its type word and nothing else, so a player body of 0x14B9 draws "Player #1,
+// Multiplayer" (105305) and one of 5310 draws "Player #1, Single player" (105310).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - ItemList_FindIndexByTypeId
+//  @0x43C3CA, the row @0x43C3CF..0x43C3D9; NetPacket_SerializePlayerState
+//  @0x4C09C0 - the call @0x4C129D, the def / model stores @0x4C12B8..0x4C12D6
+//  (graphic model = def+0xF0 @0x4C12BE..0x4C12C4)]
+inline constexpr int visual_item_id_for_runtime_type(int item_id) {
 	return item_id + kItemIdOffset;
 }
 
-// The presenter's full resolution over a catalog probe `has_item(id)`: the
-// runtime player type maps to the authored visual item when the catalog
-// carries it; an id the catalog already knows is an authored id and stays; a
-// wire/BMS id below kItemIdOffset resolves to its authored twin when present;
-// anything else is returned unchanged for the caller's own fallback.
+// The presenter's full resolution over a catalog probe `has_item(id)`: an id
+// the catalog already knows is an authored id and stays; a wire/BMS id below
+// kItemIdOffset resolves to its authored twin when present; anything else is
+// returned unchanged for the caller's own fallback.
 template <typename HasItem>
 inline int resolve_visual_item_id(int runtime_type_id, HasItem &&has_item) {
-	if (runtime_type_id == kPlayerRuntimeTypeId && has_item(kPlayerVisualItemId))
-		return kPlayerVisualItemId;
 	if (has_item(runtime_type_id))
 		return runtime_type_id;
 	if (runtime_type_id > 0 && runtime_type_id < kItemIdOffset &&

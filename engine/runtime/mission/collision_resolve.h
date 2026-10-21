@@ -32,9 +32,6 @@ const opennova::def::DefItemDef *find_item_def(const opennova::def::DefItemsFile
 std::unordered_map<int, const opennova::def::DefItemDef *> item_defs_by_id(
 		const opennova::def::DefItemsFile &items);
 
-// Runtime item type -> items.def id, with the player's visual stand-in.
-int visual_item_id_for_runtime_type(int item_id, const opennova::def::DefItemsFile &items);
-
 // The first-husk piece-model metadata retail derives at death time (section
 // count, per-section centers, section 0's z extents).
 struct CollisionHuskPieceInfo {

@@ -88,8 +88,8 @@ func _tap_row(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3
 # --- real-world staging -------------------------------------------------------
 # The minimal fixture plus the committed model/anim fixtures arranged under the
 # names the production resolvers ask for: a small authored weapon table
-# (WPN_M4AUTO with gfx/animadm/pos rows), a person items.def row for the player visual item
-# (105310 -> person + soldier.adm), the infantry clip set (E_STAND.adm) so
+# (WPN_M4AUTO with gfx/animadm/pos rows), a person items.def row for the player's type
+# (105305 -> person + soldier.adm), the infantry clip set (E_STAND.adm) so
 # the motor's body selection runs, and the 19-bone person staged as the M4's
 # FP gun/arms rig with a wpn-key clip set over the committed .bads.
 
@@ -113,22 +113,33 @@ func _stage_root() -> String:
 	assert_eq(DirAccess.copy_absolute(
 			DefFixture.directory().path_join("weapon.def"),
 			root_dir.path_join("weapon.def")), OK)
-	# The player's third-person avatar: items.def person row 105310 (the placer's
-	# PLAYER_VISUAL_ITEM_ID) over the committed 19-bone person + soldier.adm.
-	# The minimal pack already authors a 105310 row (graphic US01), and a type
-	# id resolves to its FIRST row (retail's ItemList_FindIndexByTypeId stops
-	# at the first match), so the staged row leads the file.
+	# The player's third-person avatar: items.def person row 105305 (the row the
+	# local body's type word 0x14B9 names, D-NET-348) over the committed 19-bone
+	# person + soldier.adm. The minimal pack already authors a 105305 row, and a
+	# type id resolves to its FIRST row (retail's ItemList_FindIndexByTypeId
+	# stops at the first match), so the staged row leads the file; it is the
+	# body's spawn row too, so it carries the pack's 105305 keys bar the model.
 	var items_path := root_dir.path_join("items.def")
 	var base_items := FileAccess.get_file_as_string(items_path)
 	var items := FileAccess.open(items_path, FileAccess.WRITE)
 	assert_not_null(items, "staged items.def is writable")
 	items.store_string(TestFs.crlf("""begin "Player Character"
-  id 105310
+  id 105305
   type person
+  unit_type 9
   graphic person
   sid player
   anim_def soldier
-  hp 100
+  attrib: aidata fo notool pfoil
+  ai_function plyr
+  disk_function PLAYER
+  phrase_set 0
+  move_function org2
+  input_function troop
+  hp 150
+  armor 0 0
+  radarsig 300
+  mana 0
 end
 
 begin "Night Vision Goggles"

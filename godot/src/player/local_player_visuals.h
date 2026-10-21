@@ -97,9 +97,10 @@ public:
 	// In first person the body remains a live SHADOWS_ONLY source, but
 	// neither the gameplay beauty camera nor the water mirror renders it:
 	// retail's reflected entity collector has no player/person leg (engine: runtime/environment/water_mirror.h). Null when the
-	// resource root / item graphic is unavailable. The player runtime type id
-	// is the bound MissionObjectPlacer.PLAYER_RUNTIME_TYPE_ID [net-re §5.2b].
-	ObjectModel *build_local_player_avatar();
+	// resource root / item graphic is unavailable. `p_type_id` is the local
+	// body's own type word (local_player_type_id()): its def is the one the
+	// item model comes from, as for every body [net-re §5.2b; D-NET-348].
+	ObjectModel *build_local_player_avatar(int p_type_id);
 	// Resolve the .3DI definitions that LocalPlayerPresenter would otherwise
 	// load only on its first visible frame. Retail's
 	// Game_ReloadEntityModelsAndCallbacks and HUD model pass load the player +
@@ -178,6 +179,9 @@ public:
 	// record) -- the one word its third-person body/head and first-person arms
 	// key on, read from the sim rather than re-derived from team + profile.
 	int local_player_character_id() const;
+	// The local body's runtime type word (Simulation::get_local_player_type_id):
+	// the def its avatar's item model, visual spec and 0x3D prewarm bind by.
+	int local_player_type_id() const;
 
 protected:
 	static void _bind_methods();

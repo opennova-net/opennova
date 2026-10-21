@@ -103,7 +103,7 @@ std::string item_label(testrig::MissionRig &rig, const w::Entity &e) {
 	const def::DefItemsFile *items = rig.items_table();
 	if (items == nullptr) return "?";
 	const def::DefItemDef *d = mission::find_item_def(
-			*items, mission::visual_item_id_for_runtime_type(e.item_id, *items));
+			*items, mission::visual_item_id_for_runtime_type(e.item_id));
 	if (d == nullptr) return "?";
 	return std::string(d->sid) + "/" + d->graphic;
 }

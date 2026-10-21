@@ -518,14 +518,24 @@ void LocalPlayerPresenter::ensure_models() {
 	if (world() == nullptr || visuals_.is_null()) {
 		return;
 	}
+	// The local body draws the def its type word binds, so a re-picked body (a
+	// joiner's own record rebinding its def by the class's camouflage item)
+	// draws its new def's model: the avatar built for the old type goes, with
+	// the held gun and overlays it carried, and the new one builds (D-NET-348;
+	// the witness is engine/runtime/mission/placement_traits.h's).
+	const int type_id = visuals_->local_player_type_id();
+	if (avatar() != nullptr && type_id != avatar_type_id_) {
+		release_avatar();
+	}
 	if (avatar() == nullptr) {
-		ObjectModel *built = visuals_->build_local_player_avatar();
+		ObjectModel *built = visuals_->build_local_player_avatar(type_id);
 		avatar_id_ = built != nullptr ? ObjectID(built->get_instance_id()) : ObjectID();
+		avatar_type_id_ = type_id;
 	}
 	viewmodel_rig_->ensure_viewmodel();
 }
 
-void LocalPlayerPresenter::clear_models() {
+void LocalPlayerPresenter::release_avatar() {
 	if (ObjectModel *weapon = held_weapon()) {
 		weapon->queue_free();
 	}
@@ -536,6 +546,10 @@ void LocalPlayerPresenter::clear_models() {
 		body->queue_free();
 	}
 	avatar_id_ = ObjectID();
+}
+
+void LocalPlayerPresenter::clear_models() {
+	release_avatar();
 	viewmodel_rig_->clear_viewmodel();
 	// Every exit from live play (no player, a spectator, teardown) also ends
 	// the vehicle's first-person display.

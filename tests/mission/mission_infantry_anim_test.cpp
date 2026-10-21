@@ -73,7 +73,8 @@ struct Harness {
 	Assets &assets;
 
 	explicit Harness(Assets &source) : assets(source) {
-		rows[0].id = mission::kPlayerVisualItemId;
+		// The row the player's type word names (0x14B9 + the item id offset).
+		rows[0].id = static_cast<int>(w::kPlayerInfantryTypeId) + mission::kItemIdOffset;
 		for (size_t i = 1; i < rows.size(); ++i)
 			rows[i].id = mission::kItemIdOffset + 41 + static_cast<int>(i);
 		for (auto &row : rows) {

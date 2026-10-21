@@ -371,6 +371,19 @@ int Simulation::get_local_player_character_id() const {
 	return 0;
 }
 
+// The local body's type word: the one its def binds by (D-NET-348; the witness
+// is engine/runtime/mission/placement_traits.h's and world/player_spawn.cpp's).
+int Simulation::get_local_player_type_id() const {
+	if (kernel_ && kernel_->world.cached.local_player.valid()) {
+		const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
+		if (e) return static_cast<int>(e->item_id);
+	}
+	if (is_joiner() && runtime_ && runtime_->has_self_handle()) {
+		return static_cast<int>(runtime_->spawn_pose().item_type_id);
+	}
+	return static_cast<int>(opennova::world::kPlayerInfantryTypeId);
+}
+
 int Simulation::get_local_player_class() const {
 	if (!kernel_->world.cached.local_player.valid()) return 0;
 	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);

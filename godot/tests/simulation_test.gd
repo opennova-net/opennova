@@ -2537,7 +2537,7 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	var spawn := Vector3(24.0, 0.0, -12.0)
 	assert_true(sim.spawn_local_player(spawn, 0.0, 1))
-	# The player's visual item (105310, graphic US01) over the synthetic
+	# The player's row (105305, graphic US01, the row 0x14B9 names) over the synthetic
 	# person model gives the body its entity+0 bound radius, which the
 	# collector's person leg projects.
 	var item_db := ItemDatabase.new()

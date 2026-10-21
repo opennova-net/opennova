@@ -116,6 +116,12 @@ int LocalPlayerVisuals::local_player_character_id() const {
 	return id_sim.is_valid() ? id_sim->get_local_player_character_id() : 0;
 }
 
+int LocalPlayerVisuals::local_player_type_id() const {
+	const Ref<Simulation> type_sim = sim();
+	return type_sim.is_valid() ? type_sim->get_local_player_type_id()
+							   : static_cast<int>(opennova::world::kPlayerInfantryTypeId);
+}
+
 ObjectModel *LocalPlayerVisuals::build_local_player_held_weapon(const String &p_graphic) {
 	const Ref<MissionObjectPlacer> mission_placer = placer();
 	Node3D *parent = world_node3d();
@@ -151,7 +157,7 @@ void LocalPlayerVisuals::present_local_player_person_overlays(PersonOverlayModel
 			p_presentation);
 }
 
-ObjectModel *LocalPlayerVisuals::build_local_player_avatar() {
+ObjectModel *LocalPlayerVisuals::build_local_player_avatar(int p_type_id) {
 	const Ref<MissionObjectPlacer> mission_placer = placer();
 	Node3D *parent = world_node3d();
 	if (mission_placer.is_null() || parent == nullptr) {
@@ -160,7 +166,7 @@ ObjectModel *LocalPlayerVisuals::build_local_player_avatar() {
 	// The environment wires the TOD-reactive lighting/fog stamp -- without it
 	// the avatar freezes at the noon preview defaults (retail relights every
 	// entity per frame; witness: placement_traits.h ledger).
-	return mission_placer->build_player_animated_model(MissionObjectPlacer::PLAYER_RUNTIME_TYPE_ID, parent,
+	return mission_placer->build_player_animated_model(p_type_id, parent,
 			local_player_character_id());
 }
 
@@ -169,7 +175,7 @@ Ref<PlayerVisualSpec> LocalPlayerVisuals::local_player_visual_spec() {
 	if (mission_placer.is_null()) {
 		return Ref<PlayerVisualSpec>();
 	}
-	return mission_placer->resolve_player_visual_spec(MissionObjectPlacer::PLAYER_RUNTIME_TYPE_ID,
+	return mission_placer->resolve_player_visual_spec(local_player_type_id(),
 			local_player_character_id());
 }
 
@@ -231,7 +237,7 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 		}
 	}
 	const int player_visual_item_id = mission_placer->resolve_player_visual_item_id(
-			MissionObjectPlacer::PLAYER_RUNTIME_TYPE_ID);
+			local_player_type_id());
 	const String avatar_graphic = mission_placer->graphic_for(player_visual_item_id);
 	if (!avatar_graphic.is_empty()) {
 		mission_placer->object_data_for(avatar_graphic);

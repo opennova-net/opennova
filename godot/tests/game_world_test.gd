@@ -2748,7 +2748,8 @@ func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_fr
 	var root_dir := _stage_viewmodel_fixture("challenge_prewarm", true)
 	var world := WorldFixture.boot_minimal(self, root_dir)
 	assert_true(world.set_local_player_weapon_by_name("WPN_TEST"))
-	var body := world.get_item_db().get_graphic(MissionObjectPlacer.PLAYER_VISUAL_ITEM_ID)
+	# The local body's type word names its row (0x14B9 -> 105305, D-NET-348).
+	var body := world.get_item_db().get_graphic(0x14B9 + MissionData.ITEM_ID_OFFSET)
 	assert_false(body.is_empty(), "the player body graphic resolves from the staged catalog")
 
 	var resolved := world.prewarm_challenge_models()

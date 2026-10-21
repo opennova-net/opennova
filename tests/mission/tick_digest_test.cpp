@@ -113,6 +113,13 @@ namespace {
 // 0xdcc41c0472d7226d; digesting the words' rounded whole degrees gives that
 // value back, so no tick of this synthetic run moved (it carries no section
 // piece and no body on a tilted placed row).
+// The player's body binds the row its type word names (D-NET-348: 0x14B9 is
+// "Player #1, Multiplayer", 105305; the presentation's 105310 stand-in is gone),
+// so the player's row is that one: its traits sweep now finds a def where it
+// found none and its table the same soldier rows, which moves the chain from
+// 0xa7c762a945b847fd. The new value is this deterministic stream's own (a
+// self-consistency pin, not a retail value), re-pinned from CI's printed
+// `digest synthetic 240` line.
 constexpr uint64_t kSyntheticDigest = 0xa7c762a945b847fdULL;
 constexpr int kSyntheticTicks = 240;
 
@@ -202,8 +209,8 @@ constexpr int kPeopleTypeId = 2001; // items.def 102001
 constexpr const char *kPeopleItems =
 		"begin \"Null\"\r\nid 100000\r\ntype marker\r\nend\r\n"
 		"begin \"Synthetic soldier\"\r\nid 102001\r\ntype person\r\nanim_def soldier\r\nend\r\n"
-		"begin \"Player #1, Single player\"\r\n"
-		"id 105310\r\ntype person\r\nanim_def soldier\r\nend\r\n";
+		"begin \"Player #1, Multiplayer\"\r\n"
+		"id 105305\r\ntype person\r\nanim_def soldier\r\nend\r\n";
 
 struct PeopleClips final : FileSource {
 	std::map<std::string, std::vector<uint8_t>> files; // by lower-case name

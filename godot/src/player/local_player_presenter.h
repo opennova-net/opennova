@@ -268,6 +268,9 @@ public:
 	// the avatar when missing and let the rig (re)build the FP viewmodel.
 	void ensure_models();
 	void clear_models();
+	// The avatar and what it carries (the held gun, the person overlays) go;
+	// ensure_models builds the next.
+	void release_avatar();
 	void set_fly_camera_locked(bool p_locked);
 
 	// The crosshair's witnessed anchor. First person PINS the exact screen
@@ -325,6 +328,7 @@ private:
 	ObjectID camera_id_;
 	bool third_person_ = false;
 	ObjectID avatar_id_;
+	int avatar_type_id_ = 0; // the local body's type word the avatar was built for
 	ObjectID held_weapon_id_; // the 3P gun; a SIBLING of the avatar (see LocalPlayerVisuals)
 	String held_weapon_graphic_; // the gfx3 the live node was built from
 	Ref<PersonOverlayModels> person_overlays_;

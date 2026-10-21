@@ -1166,6 +1166,10 @@ public:
 	// stamped on the local player — entity+0x15C on the host's own spawn, the
 	// named 0x0C record's id on a joiner (also before L exists); 0 = none yet.
 	int get_local_player_character_id() const;
+	// The local body's runtime type word, the one its def (and so its avatar's
+	// item model) binds by: L's own, else a joiner's learned self record's (the
+	// deploy-screen hold, the challenge prewarm), else the player template's.
+	int get_local_player_type_id() const;
 	// Authoritative armory on-show state from the spawned entity. The class is
 	// playerClass +0x294; the name resolves equipped AdmDef index +0x2B0.
 	// (engine: runtime/world/player_loadout.cpp)

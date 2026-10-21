@@ -257,7 +257,7 @@ int MissionKernel::adm_id_for_runtime_type(uint16_t type_id) {
 	const DefItemsFile *item_rows = items_table();
 	if (!infantry_adm_retained_ || item_rows == nullptr) return -2;
 	const assets::AssetStore *adm_source = adm_assets_ != nullptr ? adm_assets_ : &assets();
-	const int visual = mission::visual_item_id_for_runtime_type(type_id, *item_rows);
+	const int visual = mission::visual_item_id_for_runtime_type(type_id);
 	const DefItemDef *def = mission::find_item_def(*item_rows, visual);
 	// An item naming no table registers none, so its body holds no animation
 	// channel: every pool-0 registrar skips the .adm load and the registration
@@ -1482,7 +1482,7 @@ bool MissionKernel::build_wire_person_section_matrices(w::World &p_world, uint16
 		const DefItemsFile *items = items_table();
 		const DefItemDef *def = items != nullptr
 				? mission::find_item_def(*items,
-						  mission::visual_item_id_for_runtime_type(type_id, *items))
+						  mission::visual_item_id_for_runtime_type(type_id))
 				: nullptr;
 		const assets::AssetStore &models = assets();
 		if (def != nullptr && def->anim_def[0] != '\0' && def->graphic[0] != '\0' &&

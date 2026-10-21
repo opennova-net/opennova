@@ -365,7 +365,8 @@ EntityHandle spawn(World &w, int pool, uint16_t item_id, EntityKind kind) {
 // a def that names none, for a .3di that fails to load and in a world with no
 // model source, so a carrier whose graphic failed is refused admission through
 // its loaded child's seat; the Player row's and a throwable class row's slots
-// take the same load, and an organic takes its visual def's.
+// take the same load, and an organic takes its own type's def's (D-NET-348: the
+// player's 0x14B9 binds 105305, no stand-in row).
 // [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the store @0x439FDC;
 //  Game_ReloadEntityModelsAndCallbacks @0x522830 - the +0x30 stores @0x5229D7 /
 //  @0x522B35 / @0x522CD1; Entity_InitFromItemDef @0x49E598; Entity_CanEnterVehicle
@@ -384,13 +385,12 @@ void test_graphic_model_is_the_loads_result() {
     fs::remove_all(root, ec);
     fs::create_directories(root, ec);
     CHECK(test_io::write_file(root + "/LoadsHull.3di", mount));
-    // Retail's head row; the Player row, its loading model; the visual row,
-    // a lost one; a carrier whose graphic is lost and one whose loads; a row
-    // with no graphic; a mine class row of each kind.
+    // Retail's head row; the Player row, its loading model; a carrier whose
+    // graphic is lost and one whose loads; a row with no graphic; a mine class
+    // row of each kind.
     static const char kDefs[] =
         "begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
         "begin \"Player\"\r\n id 105305\r\n type person\r\n graphic LoadsHull\r\n hp 100\r\nend\r\n"
-        "begin \"Player visual\"\r\n id 105310\r\n type person\r\n graphic LostBody\r\n hp 100\r\nend\r\n"
         "begin \"Hull lost\"\r\n id 100700\r\n type vehicle\r\n graphic LostHull\r\n hp 100\r\nend\r\n"
         "begin \"Hull kept\"\r\n id 100701\r\n type vehicle\r\n graphic LoadsHull\r\n hp 100\r\nend\r\n"
         "begin \"Bare\"\r\n id 100702\r\n type object\r\n hp 100\r\nend\r\n"
@@ -441,7 +441,8 @@ void test_graphic_model_is_the_loads_result() {
         // reaches the child's seat.
         CHECK(!vehicle_can_enter(w, nullptr, *w.registry.get(lost_h)));
         CHECK(vehicle_can_enter(w, nullptr, *w.registry.get(kept_h)));
-        // The collision sweep's load is the organic's visual def's, lost here.
+        // The collision sweep's load is the organic's own def's, the Player row's
+        // loading model, as the traits sweep's was.
         world::EntityPoseProvider pose;
         pose.set_assets(&models);
         CollisionWorld collision;
@@ -449,7 +450,7 @@ void test_graphic_model_is_the_loads_result() {
         mission::CollisionResolveState state;
         const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
         mission::resolve_collision_instances(w, defs, state, deps);
-        CHECK(!w.registry.get(body_h)->has_graphic_model);
+        CHECK(w.registry.get(body_h)->has_graphic_model);
         CHECK(!w.registry.get(lost_h)->has_graphic_model);
         CHECK(w.registry.get(kept_h)->has_graphic_model);
     }

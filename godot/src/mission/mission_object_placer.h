@@ -71,8 +71,6 @@ class MissionObjectPlacer : public RefCounted, public StaticSourceProvider {
 public:
 	enum {
 		RENDER_LOD = 0,
-		PLAYER_RUNTIME_TYPE_ID = opennova::mission::kPlayerRuntimeTypeId,
-		PLAYER_VISUAL_ITEM_ID = opennova::mission::kPlayerVisualItemId,
 	};
 
 	// One-expression construction for GDScript callers (native classes take

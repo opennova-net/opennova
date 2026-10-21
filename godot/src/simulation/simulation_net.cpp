@@ -168,8 +168,7 @@ Array Simulation::get_streamed_placement_records() const {
 		d["bms_id"] = row->bms_id;
 		// The placer resolves graphics by items.def id: the wire type plus the
 		// catalog offset (pools 1..3 never carry the runtime player type).
-		d["item_id"] = opennova::mission::visual_item_id_for_runtime_type(
-				row->item_id, false);
+		d["item_id"] = opennova::mission::visual_item_id_for_runtime_type(row->item_id);
 		d["position"] = Vector3(row->position.x, row->position.y, row->position.z);
 		d["rotation_deg"] = Vector3(
 				static_cast<float>(opennova::world::degrees_from_angle_bam(row->pitch_bam)),

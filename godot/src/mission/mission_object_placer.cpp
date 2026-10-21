@@ -195,10 +195,6 @@ void MissionObjectPlacer::_bind_methods() {
 
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_LOD",
 			RENDER_LOD);
-	ClassDB::bind_integer_constant(get_class_static(), "",
-			"PLAYER_RUNTIME_TYPE_ID", PLAYER_RUNTIME_TYPE_ID);
-	ClassDB::bind_integer_constant(get_class_static(), "",
-			"PLAYER_VISUAL_ITEM_ID", PLAYER_VISUAL_ITEM_ID);
 }
 
 // --- wiring -----------------------------------------------------------------
@@ -497,8 +493,6 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 		return p_runtime_type_id;
 	}
 	static_assert(MissionData::ITEM_ID_OFFSET == opennova::mission::kItemIdOffset);
-	static_assert(PLAYER_RUNTIME_TYPE_ID == opennova::mission::kPlayerRuntimeTypeId);
-	static_assert(PLAYER_VISUAL_ITEM_ID == opennova::mission::kPlayerVisualItemId);
 	const ItemDatabase *db = item_db_.ptr();
 	return opennova::mission::resolve_visual_item_id(p_runtime_type_id,
 			[db](int p_id) { return db->has_item(p_id); });
