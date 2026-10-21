@@ -642,7 +642,7 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 
 // The menu browser keeps every page global a page sets, by name, for the substitutions and the
 // menu's own reads. [orig: UI_ProcessWebResponseContent @0x63d50a..0x63d558 ->
-//  CUIScene_SetProperty @0x63b480; the reader sub_63B440]
+//  CUIScene_SetProperty @0x63b480; the reader CUIScene_FindNamedValue @0x63B440]
 void LobbyHttpFlow::capture_globals(const std::vector<uint8_t> &body) {
 	const std::string html = to_string_body(body);
 	const std::string lower = to_lower(html);

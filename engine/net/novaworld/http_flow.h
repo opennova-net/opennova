@@ -181,8 +181,8 @@ public:
 	// --- the Host leg ---
 	// Begin: the GET of the main page's @HOST_URL@ global (NeedRequest), or Failed when no page set
 	// one (log in first: the login lands on the main page). [orig: UI_HandleHostSessionStart
-	//  @0x556d00 @0x556f0d..0x556f98 — the PLoad / EXP form globals, sub_63B440("@HOST_URL@"),
-	//  UIScene_OpenUrl]
+	//  @0x556d00 @0x556f0d..0x556f98 — the PLoad / EXP form globals,
+	//  CUIScene_FindNamedValue @0x63B440 ("@HOST_URL@"), UIScene_OpenUrl]
 	HostKeyResult host();
 	// Feed a completed host-leg response. A page whose <TITLE> starts [HOSTKEY= resolves the key; a
 	// relay page's META refresh is followed (at most kMaxHostHops pages); any other page fails with
