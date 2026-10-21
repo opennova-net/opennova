@@ -2564,7 +2564,7 @@ void test_inspector_kinds_alike() {
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	shown = logged_frame(ui);
-	CHECK(shown.find("2 records of different kinds selected") != std::string::npos &&
+	CHECK(shown.find("2 records of different kinds") != std::string::npos &&
 	              shown.find("a change here sets every one") == std::string::npos,
 	      "a note with a crate: the kinds differ");
 	ui.drain();
