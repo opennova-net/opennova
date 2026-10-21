@@ -583,10 +583,11 @@ void NwuLobbySession::fail_connect(int code) {
 // it ends, the connection wait (verified, or its failure); the tick after that, the web lobby's
 // open (the validated hook). The command-line host's blocking sequence runs each wait at once
 // after its poll's loop and opens no web lobby. True when it reported a failure.
-// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - the pump @0x558DFA; state 5:
-//  PollConnectPhase1 (the call @0x5591A3), state 6 set @0x5591B0; state 6: the validation wait
-//  (@0x5591D5), 7 set @0x5591DE; state 7: PollConnectPhase2 (@0x559203), 8 set @0x559210; state
-//  8: the connection wait (@0x559235), 9 set @0x559242; state 9 @0x559262..0x5592F2;
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - the pump @0x558DFA; state 5 (@0x55919E):
+//  PollConnectPhase1 (the call @0x5591A3), state 6 set @0x5591B0; state 6 (@0x5591D0): the
+//  validation wait (@0x5591D5), 7 set @0x5591DE; state 7 (@0x5591FE): PollConnectPhase2
+//  (@0x559203), 8 set @0x559210; state 8 (@0x559230): the connection wait (@0x559235), 9 set
+//  @0x559242; state 9 @0x559262..0x5592F2;
 //  CNapiGameSession_ConnectAndWaitForValidation @0x4D4EC0 - the loops @0x4D4ED0..0x4D4ED9 /
 //  @0x4D4EE6..0x4D4EEF, the waits @0x4D4EDD / @0x4D4EF3;
 //  CNapiGameSession_PollConnectPhase1 @0x4D4C30 - the state-1 test @0x4D4C50, the compare

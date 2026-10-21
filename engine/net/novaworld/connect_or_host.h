@@ -91,9 +91,9 @@ inline constexpr char kMovingOnLine[] = "NWU MOVING ON TO HOSTING OR PLAYING..."
 // the word is nonzero (a refusal, a ServerStopPlaying, a punt; the play request cleared it, so
 // the reap and a reconnect's state leave the tag).
 // [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the preset @0x4D4F89, the loop's state test
-//  @0x4D54E7..0x4D54EE, CGameSession_StopPlaying (the call @0x4D5597), `cmp dword_B600FC,8`
-//  @0x4D559C, @0x4D55E7, the word's zero test @0x4D55F7..0x4D55FE, the map
-//  @0x4D5604..0x4D569F]
+//  @0x4D54E7..0x4D54EE, CGameSession_StopPlaying (its block @0x4D5592, the call @0x4D5597),
+//  `cmp dword_B600FC,8` @0x4D559C, @0x4D55E7, the word's zero test @0x4D55F7..0x4D55FE, the
+//  map @0x4D5604..0x4D569F]
 inline std::string play_leg_exit_tag(const std::string &tag, int msg_code_word) {
 	return msg_code_word != 0 ? novaworld_play_error_tag(msg_code_word) : tag;
 }
