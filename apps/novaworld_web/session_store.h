@@ -40,6 +40,10 @@ struct JoinSession {
 	std::string needexpkey;
 	std::string pfid;
 	std::string rid;             // RID of the host the client is joining
+	// A LAN-list join's link (the main page's @JOINLAN_URL@): the discovered server's
+	// GSID, which names the host when no RID does, and `lan`, nonzero for that join.
+	std::string gsid;
+	std::string lan;
 };
 
 struct HostSession {

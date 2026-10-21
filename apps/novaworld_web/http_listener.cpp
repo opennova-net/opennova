@@ -103,7 +103,7 @@ private:
 // fields the join / host page link carries (net/novaworld/relay_request.h).
 bool has_relay_first_call_query(const crow::request &req) {
 	for (const char *name : {"rid", "success", "failure", "relay", "msgbase", "needexpkey",
-	                         "pfid", "mode"}) {
+	                         "pfid", "mode", "gsid", "lan"}) {
 		if (req.url_params.get(name) != nullptr) return true;
 	}
 	return false;
@@ -200,6 +200,10 @@ void add_standard_headers(crow::response &res) {
 
 // The message POST /NWLogin.dll's failure page carries when the login brake
 // refuses the attempt (see handle_login_post).
+// The message the LAN-list join's page carries when the GSID it names is on no
+// listing (see handle_join).
+constexpr const char *kLanGameGoneMessage = "That game is no longer hosted on NovaWorld.";
+
 constexpr const char *kLoginThrottledMessage =
 		"Too many failed logins. Please try again later.";
 
@@ -1114,7 +1118,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		TemplateVars vars{
 			{"HOST_URL",     host_url()},
 			{"GSB_SERVER",   gsb_url(game)},
-			{"JOINLAN_URL",  ""},
+			{"JOINLAN_URL",  game.join_lan_url},
 		};
 		crow::response res(200);
 		res.body = render_template_file(templates_dir, url, vars);
@@ -1159,7 +1163,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"MSGBASE",     msgbase},
 			{"HOST_URL",    host_url()},
 			{"GSB_SERVER",  gsb_url(game)},
-			{"JOINLAN_URL", ""},
+			{"JOINLAN_URL", game.join_lan_url},
 		};
 		crow::response res(200);
 		res.body = render_template_file(templates_dir, out_p, vars);
@@ -1436,7 +1440,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"REFRESH_ENDPOINT", "NWLogin.dll"},
 			{"HOST_URL",         host_url()},
 			{"GSB_SERVER",       gsb_url(game)},
-			{"JOINLAN_URL",      ""},
+			{"JOINLAN_URL",      game.join_lan_url},
 		};
 		crow::response res(200);
 		res.body = render_template_file(templates_dir, relay_template, vars);
@@ -1519,7 +1523,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"MSGBASE",      session->msgbase},
 			{"HOST_URL",     host_url()},
 			{"GSB_SERVER",   gsb_url(game)},
-			{"JOINLAN_URL",  ""},
+			{"JOINLAN_URL",  game.join_lan_url},
 		};
 		const std::string success_template = session->success.empty() ? game.page("main.htm") : session->success;
 		crow::response res(200);
@@ -1608,7 +1612,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		TemplateVars vars{
 			{"HOST_URL",    host_url()},
 			{"GSB_SERVER",  gsb_url(game)},
-			{"JOINLAN_URL", ""},
+			{"JOINLAN_URL", game.join_lan_url},
 		};
 		crow::response res(200);
 		if (template_file(templates_dir, success_tpl)) {
@@ -1677,7 +1681,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		TemplateVars vars{
 			{"HOST_URL",    host_url()},
 			{"GSB_SERVER",  gsb_url(game)},
-			{"JOINLAN_URL", ""},
+			{"JOINLAN_URL", game.join_lan_url},
 			{"NWHANDLE",    user ? user->nwhandle : std::string()},
 			{"PCID",        user ? user->pcid     : std::string()},
 			{"NWH",         user ? user->nwh      : std::string()},
@@ -1817,6 +1821,8 @@ void HttpListener::register_legacy_host_join_routes(
 			s.needexpkey  = req.url_params.get("needexpkey") ? req.url_params.get("needexpkey") : "";
 			s.pfid        = req.url_params.get("pfid")       ? req.url_params.get("pfid")       : "";
 			s.rid         = req.url_params.get("rid")        ? req.url_params.get("rid")        : "";
+			s.gsid        = req.url_params.get("gsid")       ? req.url_params.get("gsid")       : "";
+			s.lan         = req.url_params.get("lan")        ? req.url_params.get("lan")        : "";
 			const std::string tag = s.session_tag;
 			sessions_.put_join(tag, s);
 
@@ -1837,7 +1843,7 @@ void HttpListener::register_legacy_host_join_routes(
 				{"REFRESH_ENDPOINT", "NWJoin.dll"},
 				{"HOST_URL",         host_url()},
 				{"GSB_SERVER",       gsb_url(game)},
-				{"JOINLAN_URL",      ""},
+				{"JOINLAN_URL",      game.join_lan_url},
 			};
 			crow::response res(200);
 			res.body = render_template_file(templates_dir, relay_template, vars);
@@ -1866,32 +1872,78 @@ void HttpListener::register_legacy_host_join_routes(
 			return res;
 		}
 
-		// Resolve RID — query param wins, falls back to stored value.
-		std::string rid_str = req.url_params.get("rid") ? req.url_params.get("rid") : session->rid;
-		if (rid_str.empty()) {
+		// The joiner's game: the row its page link names.
+		const catalog::GameRow &game =
+				client_game(impl_->games, req, cookies, session->pfid, session->success);
+
+		// Resolve RID — query param wins, falls back to stored value. A LAN-list
+		// join's link (the main page's @JOINLAN_URL@, the games row's join_lan_url)
+		// names the server by its GSID instead: the 0x81 SUS1 the client's LAN
+		// discovery found it by, which is the GSID this service's ServerHostResult
+		// handed that host (service choice: the page answers the link as a join of
+		// that listing).
+		// [orig: UI_DispatchScreenEvent @0x54B920 (dfx2.exe) case 12 - the GSID stored
+		//  @0x54B9AA, @JOINLAN_URL@ read @0x54B9BD, @GSID@ replaced from it
+		//  @0x54B9E1..0x54B9F0, UIScene_OpenUrl @0x54BA76]
+		// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D5BC0 (dfx2.exe) - "GSID"
+		//  @0x4D5DB3 -> the protocol's server_user_string1 @0x4D5DFF]
+		// [orig: CNapiNetwork_OnSessionDiscovered @0x4C8580 (dfx2.exe) - the 0x81's SUS1
+		//  into the record @0x4C86CD, the row @0x4C87D4]
+		const std::string rid_str = req.url_params.get("rid") ? req.url_params.get("rid") : session->rid;
+		const std::string gsid = req.url_params.get("gsid") ? req.url_params.get("gsid") : session->gsid;
+		if (rid_str.empty() && gsid.empty()) {
 			crow::response res(400);
 			res.body = "missing RID";
 			return res;
 		}
-		const auto rid_parsed = opennova::strutil::parse_ulong(rid_str);
-		if (!rid_parsed) {
-			crow::response res(400);
-			res.body = "bad RID";
-			return res;
+		std::optional<uint32_t> rid_value;
+		if (!rid_str.empty()) {
+			const auto rid_parsed = opennova::strutil::parse_ulong(rid_str);
+			if (!rid_parsed) {
+				crow::response res(400);
+				res.body = "bad RID";
+				return res;
+			}
+			rid_value = static_cast<uint32_t>(*rid_parsed);
 		}
-		const uint32_t rid_value = static_cast<uint32_t>(*rid_parsed);
 
 		// Look up the hosted entry from active_hosts (Phase I.2 — DB-backed).
 		auto db_conn = db_pool_.acquire();
-		auto host_row = hostdb::find_host_by_rid(*db_conn, rid_value);
+		auto host_row = rid_value ? hostdb::find_host_by_rid(*db_conn, *rid_value)
+		                          : hostdb::find_host_by_gsid(*db_conn, gsid);
+		if (!host_row && !rid_value) {
+			// A GSID no listing holds (the host stopped hosting since the LAN
+			// discovery found it): the msgbase page, which a stock client shows, its
+			// title raising no join.
+			// [orig: UI_ProcessWebResponseContent @0x6CA6C0 (dfx2.exe) - the title test
+			//  @0x6CA835..0x6CA874, event 7 only for "[NK=" / "[HOSTKEY=" (the raise
+			//  @0x6CA86A)]
+			std::fprintf(stderr, "[http] /NWJoin.dll GSID %s not in active_hosts\n",
+			             loggable(gsid).c_str());
+			return render_legacy_message(templates_dir, kLanGameGoneMessage,
+					session->failure.empty() ? game.page("main.htm") : session->failure,
+					session->msgbase.empty() ? game.page("msg.htm") : session->msgbase,
+					req.remote_ip_address, host_url(), gsb_url(game));
+		}
 		if (!host_row) {
 			std::fprintf(stderr, "[http] /NWJoin.dll RID %u not in active_hosts\n",
-			             static_cast<unsigned>(rid_value));
+			             static_cast<unsigned>(*rid_value));
 			crow::response res(404);
 			res.body = "host not found";
 			return res;
 		}
 		const auto &host = *host_row;
+		// The LAN-list join's .joi: LN nonzero, so the client dials the address its
+		// LAN discovery found (not NK's), and no NI / NP / BK, so no proxy rides the
+		// LAN dial; NK stays, the parse refusing a .joi without it (service choice to
+		// the client's contract).
+		// [orig: URL_ParseConnectionQueryString @0x54B230 (dfx2.exe) - NK= @0x54B3BC,
+		//  LN= @0x54B56A, its atol @0x54B5BE]
+		// [orig: CNapiGameSession_InitTransportConnection @0x4C9F80 (dfx2.exe) - the LN
+		//  dial @0x4C9FD5..0x4C9FED, the proxy only with NI, NP and BK all set @0x4CA1B0]
+		const auto lan_number = opennova::strutil::parse_int(
+				req.url_params.get("lan") ? std::string(req.url_params.get("lan")) : session->lan);
+		const bool lan_join = lan_number && *lan_number != 0;
 
 		// _encode_token (from base.py:113-116):
 		//   chr(ord(value[i]) + ord(key[i]) - 48)
@@ -1914,27 +1966,26 @@ void HttpListener::register_legacy_host_join_routes(
 		const std::string nk_token = encode_token(nk_plain, NOVAKEY_KEY);
 		const std::string ck_token = encode_token(ck_plain, CK_KEY);
 
-		std::printf("[http] /NWJoin.dll (second call) rid=%u host=%s:%d nk=%s ck=%s\n",
-				static_cast<unsigned>(rid_value), loggable(host.host_ip).c_str(), host.host_port,
-				loggable(nk_token).c_str(), loggable(ck_token).c_str());
+		std::printf("[http] /NWJoin.dll (second call) rid=%u host=%s:%d nk=%s ck=%s%s\n",
+				static_cast<unsigned>(host.rid), loggable(host.host_ip).c_str(), host.host_port,
+				loggable(nk_token).c_str(), loggable(ck_token).c_str(), lan_join ? " lan" : "");
 
-		// The joiner's game, and the listing's: the row its LobbyName names
-		// (the joiner's for a listing with none; null for a LobbyName no row
-		// has, which no game's access covers).
-		const catalog::GameRow &game =
-				client_game(impl_->games, req, cookies, session->pfid, session->success);
+		// The listing's game: the row its LobbyName names (the joiner's for a
+		// listing with none; null for a LobbyName no row has, which no game's
+		// access covers).
 		const catalog::GameRow *host_game =
 				host.game.empty() ? &game : impl_->games.by_lobby_name(host.game);
 		TemplateVars vars{
 			{"NK",          nk_token},
 			{"CK",          ck_token},
-			{"NI",          host.host_ip},
-			{"NP",          std::to_string(host.host_port)},
-			{"BK",          BK_VALUE},
+			{"NI",          lan_join ? std::string() : host.host_ip},
+			{"NP",          lan_join ? std::string() : std::to_string(host.host_port)},
+			{"BK",          lan_join ? std::string() : std::string(BK_VALUE)},
+			{"LAN",         lan_join ? "LN=1&" : ""},
 			{"SERVER_NAME", host.server_name.empty() ? std::string("OpenNova Server") : host.server_name},
 			{"HOST_URL",    host_url()},
 			{"GSB_SERVER",  gsb_url(game)},
-			{"JOINLAN_URL", ""},
+			{"JOINLAN_URL", game.join_lan_url},
 		};
 		const std::string success_template = session->success.empty() ? game.page("join.joi") : session->success;
 		crow::response res(200);
@@ -2194,7 +2245,7 @@ void HttpListener::register_legacy_host_join_routes(
 				{"REFRESH_ENDPOINT", "NWHost.dll"},
 				{"HOST_URL",         host_url()},
 				{"GSB_SERVER",       gsb_url(game)},
-				{"JOINLAN_URL",      ""},
+				{"JOINLAN_URL",      game.join_lan_url},
 			};
 			crow::response res(200);
 			res.body = render_template_file(templates_dir, relay_tpl, vars);
@@ -2228,7 +2279,7 @@ void HttpListener::register_legacy_host_join_routes(
 			{"HOSTKEY",     session->host_key},
 			{"HOST_URL",    host_url()},
 			{"GSB_SERVER",  gsb_url(game)},
-			{"JOINLAN_URL", ""},
+			{"JOINLAN_URL", game.join_lan_url},
 		};
 		crow::response res(200);
 		res.body = render_template_file(templates_dir, session->success, vars);

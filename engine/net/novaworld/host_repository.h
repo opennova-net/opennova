@@ -164,6 +164,9 @@ std::vector<HostRow>   list_hosts_by_game(db::Database &db, const std::string &g
 std::vector<HostRow>   list_hosts_by_owner(db::Database &db, int64_t user_id);
 std::optional<HostRow> find_host_by_rid(db::Database &db, uint32_t rid);
 std::optional<HostRow> find_host_by_key(db::Database &db, const std::string &host_key);
+// The listing whose GSID (the one ServerHostResult handed its host, which the host's
+// 0x81 carries to a LAN joiner) is `gsid`: the LAN-list join's server.
+std::optional<HostRow> find_host_by_gsid(db::Database &db, const std::string &gsid);
 std::vector<PlayerRow> list_players(db::Database &db, uint32_t host_rid);
 
 // Aggregates used by /api/stats and /api/lobbies.

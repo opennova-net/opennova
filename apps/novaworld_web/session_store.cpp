@@ -88,13 +88,14 @@ std::optional<LoginSession> login_of(const std::string &tag, const RedisReply &r
 
 std::string join_value(const JoinSession &s) {
 	std::string v;
-	for (const std::string &f : { s.success, s.failure, s.msgbase, s.needexpkey, s.pfid, s.rid })
+	for (const std::string &f :
+			{ s.success, s.failure, s.msgbase, s.needexpkey, s.pfid, s.rid, s.gsid, s.lan })
 		put_field(v, f);
 	return v;
 }
 
 std::optional<JoinSession> join_of(const std::string &tag, const RedisReply &reply) {
-	const auto f = fields_of(reply, 6);
+	const auto f = fields_of(reply, 8);
 	if (!f)
 		return std::nullopt;
 	JoinSession s;
@@ -105,6 +106,8 @@ std::optional<JoinSession> join_of(const std::string &tag, const RedisReply &rep
 	s.needexpkey = (*f)[3];
 	s.pfid = (*f)[4];
 	s.rid = (*f)[5];
+	s.gsid = (*f)[6];
+	s.lan = (*f)[7];
 	return s;
 }
 

@@ -2200,6 +2200,13 @@ struct CookieJar {
 // page naming the DFX2 browser list, that list holding the DFX2 listing
 // alone, the join of it (the DFX2 .joi, NWPF 38), and a DFX2 host's key on
 // the DFX2 host page, by its page link and by the bare HOST_URL.
+// The DFX2 games row's join_lan_url as backend/seed/0001_games.sql carries it (onnet's value,
+// verbatim): the main page's @JOINLAN_URL@ global, whose @GSID@ the client replaces.
+constexpr const char *kDfx2JoinLanUrl =
+		"NWJoin.dll?needexpkey=dfx2_0_key2err.htm&success=dfx2_0_join.joi&failure=dfx2_0_main.htm"
+		"&relay=dfx2_0_relay.htm&msgbase=dfx2_0_msg.htm&nodb=dfx2_0_nodb.htm&pfid=38&mode=Login"
+		"&gsid=@GSID@&lan=1";
+
 int test_dfx2_client_path(Harness &h) {
 	const uint16_t port = h.secure_port;
 	const std::string base = "http://127.0.0.1:" + std::to_string(port);
@@ -2275,7 +2282,7 @@ int test_dfx2_client_path(Harness &h) {
 	TEST_EXPECT(body_text(reply) ==
 			nws::render_template(page("dfx2_0_main.htm"),
 					{ { "HOST_URL", base + "/nwhost.dll" }, { "GSB_SERVER", base + "/dfx2_0.gsb" },
-							{ "JOINLAN_URL", "" } }));
+							{ "JOINLAN_URL", kDfx2JoinLanUrl } }));
 	TEST_EXPECT(body_text(reply).find(base + "/dfx2_0.gsb</IB3_SUBST>") != std::string::npos);
 	TEST_EXPECT(set_cookie_value(reply, "EXPBITS") == "1");
 	// Activated already: no NWACT, and no key minted for the account.
@@ -4143,7 +4150,8 @@ int test_template_names_refused(Harness &h) {
 
 // Every retail template still renders, by the names a stock client sends:
 // /nwprepare.dll?url= fills each in (with no gate tag, a DFX2 page's game is
-// DFX2's by its prefix, its browser list /dfx2_0.gsb; every other page's JO's),
+// DFX2's by its prefix, its browser list /dfx2_0.gsb and its LAN-list join's
+// link the games row's; every other page's JO's),
 // the catch-all serves each as it is, the retail static file serves, and the
 // default pages render.
 int test_retail_templates_render(Harness &h) {
@@ -4156,7 +4164,8 @@ int test_retail_templates_render(Harness &h) {
 		const nws::TemplateVars vars{
 			{ "HOST_URL", base + "/nwhost.dll" },
 			{ "GSB_SERVER", base + (name.rfind("dfx2_0_", 0) == 0 ? "/dfx2_0.gsb" : "/jop_2.gsb") },
-			{ "JOINLAN_URL", "" },
+			// DFX2's games row carries the LAN-list join's link; JO's carries none.
+			{ "JOINLAN_URL", name.rfind("dfx2_0_", 0) == 0 ? kDfx2JoinLanUrl : "" },
 		};
 		const std::string text = test_io::read_file_text(entry.path().string());
 		TEST_EXPECT(!text.empty());
@@ -4670,6 +4679,96 @@ int test_join_identity(Harness &h) {
 
 	forget_joins(h);
 	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kJoinRid);
+	return 0;
+}
+
+// DFX2's LAN-list join (Q7-24): dfx2.exe lists the LAN servers its discovery finds with a GSID
+// (the 0x81's SUS1) in the NovaWorld menu's LAN_LIST, and its Join opens the main page's
+// @JOINLAN_URL@ with @GSID@ replaced by that row's GSID
+// [orig: CNapiNetwork_OnSessionDiscovered @0x4C8580 (dfx2.exe) - the row @0x4C87D4]
+// [orig: UI_DispatchScreenEvent @0x54B920 (dfx2.exe) case 12 - the GSID stored @0x54B9AA,
+//  @JOINLAN_URL@ @0x54B9BD, the replace from it @0x54B9E1..0x54B9F0, UIScene_OpenUrl @0x54BA76].
+// The GSID is the one this service's ServerHostResult handed the host, which the host writes as
+// its 0x81 SUS1, so active_hosts.gsid names the server
+// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D5BC0 (dfx2.exe) - "GSID" @0x4D5DB3 ->
+//  server_user_string1 @0x4D5DFF].
+// The page (service choice, to the client's contract): the .joi whose title starts "[NK="
+// (event 7) [orig: UI_ProcessWebResponseContent @0x6CA6C0 (dfx2.exe) - the test
+//  @0x6CA835..0x6CA874, the raise @0x6CA86A], NK kept and LN=1 [orig:
+//  URL_ParseConnectionQueryString @0x54B230 (dfx2.exe) - NK= @0x54B3BC (none: no join), LN=
+//  @0x54B56A, its atol @0x54B5BE], so the client dials the LAN address its discovery found, and
+// NI / NP / BK empty, so no proxy [orig: CNapiGameSession_InitTransportConnection @0x4C9F80
+//  (dfx2.exe) - the LN dial @0x4C9FD5..0x4C9FED, the proxy with all three set @0x4CA1B0].
+// The title's "LN=1&" goes out as the page text "LN=1&amp;", which the client's text loop
+// decodes [orig: XML_DecodeEntityReference @0x6E2640 (dfx2.exe), called @0x6E3471]. A GSID no
+// listing holds answers the msgbase page, whose title raises no join. A GLB join of the same
+// listing keeps its .joi byte for byte: {{LAN}} empty, NI / NP / BK the host's.
+int test_dfx2_join_lan(Harness &h) {
+	const auto seeded = h.pool.acquire()->query(
+			"SELECT join_lan_url FROM games WHERE slug = 'dfx2_consumer';");
+	TEST_EXPECT(seeded.size() == 1 && seeded[0].as_text(0).value_or("") == kDfx2JoinLanUrl);
+	constexpr uint32_t kLanRid = 4344;
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = kLanRid;
+		row.gsid = "GSID-10-00000014-20261021130000000-00000000000a4b1c";
+		row.game = "dfx2_0_consumer";
+		row.app_id = "20";
+		row.server_name = "LAN Party";
+		row.host_ip = "10.0.32.9";
+		row.host_port = 32768;
+		row.pcid_key = "pcid-key-for-the-lan-join";
+		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
+	}
+	const auto relay_then_joi = [&h](const std::string &link) {
+		const auto first = h.send_to(h.fresh_port, "GET", "/" + link);
+		TEST_EXPECT(first.transport_ok && first.code == 200 && !join_tag(first).empty());
+		return h.send_to(h.fresh_port, "GET", "/NWJoin.dll",
+				{ "Cookie: NWJOINSESSIONTAG=" + join_tag(first) });
+	};
+	const std::string joi_page = test_io::read_file_text(
+			(h.retail_root / "templates" / "dfx2_0_join.joi").string());
+	// NK: "10.0.32.9:32768" and CK: app id "20", each char plus its key char less '0'.
+	const std::string nk = "eifegmgdqqffqio";
+
+	// The LAN-list join: the link as the client builds it from the global.
+	std::string link = kDfx2JoinLanUrl;
+	link.replace(link.find("@GSID@"), 6, "GSID-10-00000014-20261021130000000-00000000000a4b1c");
+	auto reply = relay_then_joi(link);
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(body_text(reply) ==
+			fill_markers(joi_page, { { "{{NK}}", nk }, { "{{CK}}", "ef" }, { "{{NI}}", "" },
+					{ "{{NP}}", "" }, { "{{BK}}", "" }, { "{{LAN}}", "LN=1&amp;" },
+					{ "{{SERVER_NAME}}", "LAN Party" } }));
+	TEST_EXPECT(body_text(reply).find("[NK=" + nk + "&CK=ef&NI=&NP=&BK=&LN=1&amp;]") !=
+			std::string::npos);
+	TEST_EXPECT(set_cookie_value(reply, "NWPF") == "38");
+
+	// The GLB join of the same listing: the .joi as before, no LN.
+	reply = relay_then_joi(
+			"NWJoin.dll?lan=0&needexpkey=dfx2_0_key2err.htm&success=dfx2_0_join.joi"
+			"&failure=dfx2_0_main.htm&relay=dfx2_0_relay.htm&msgbase=dfx2_0_msg.htm"
+			"&nodb=dfx2_0_nodb.htm&pfid=38&mode=Login&rid=" + std::to_string(kLanRid));
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(body_text(reply) ==
+			fill_markers(joi_page, { { "{{NK}}", nk }, { "{{CK}}", "ef" }, { "{{NI}}", "10.0.32.9" },
+					{ "{{NP}}", "32768" }, { "{{BK}}", "986119" }, { "{{LAN}}", "" },
+					{ "{{SERVER_NAME}}", "LAN Party" } }));
+	TEST_EXPECT(body_text(reply).find("[NK=" + nk + "&CK=ef&NI=10.0.32.9&NP=32768&BK=986119&]") !=
+			std::string::npos);
+
+	// A GSID no listing holds: the DFX2 message page, no "[NK=" title.
+	link = kDfx2JoinLanUrl;
+	link.replace(link.find("@GSID@"), 6, "GSID-10-00000014-20261021130000000-ffffffffffffffff");
+	reply = relay_then_joi(link);
+	const std::string gone = fill_markers(
+			test_io::read_file_text((h.retail_root / "templates" / "dfx2_0_msg.htm").string()),
+			{ { "{{MESSAGE}}", "That game is no longer hosted on NovaWorld." } });
+	TEST_EXPECT(gone.find("{{") == std::string::npos);
+	TEST_EXPECT(reply.transport_ok && reply.code == 200 && body_text(reply) == gone);
+	TEST_EXPECT(body_text(reply).find("[NK=") == std::string::npos);
+
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kLanRid);
 	return 0;
 }
 
@@ -8637,6 +8736,7 @@ int run(Harness &h, const char *part) {
 		{ "retail_pages", "header_values_cannot_split", test_header_values_cannot_split },
 		{ "retail_pages", "reset_during_login", test_reset_during_login },
 		{ "retail_pages", "join_identity", test_join_identity },
+		{ "retail_pages", "dfx2_join_lan", test_dfx2_join_lan },
 		{ "retail_pages", "api_proxy_only", test_api_proxy_only },
 		{ "retail_pages", "retail_proxy_names_client", test_retail_proxy_names_client },
 		{ "retail_pages", "template_values_escaped", test_template_values_escaped },
