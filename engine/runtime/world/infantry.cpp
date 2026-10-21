@@ -1345,11 +1345,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     //  the passenger test @0x4B6684, the seated ramp @0x4B66AB..0x4B66C3, the mounted
     //  eye @0x4B66D9..0x4B68FC; the on-foot eye @0x4B699F..0x4B6BAB, the ramp
     //  @0x4B7DBF / @0x4B7DD6]
-    const bool seated_body = !npc_body && tick_entity != nullptr && tick_entity->mounted &&
-            tick_entity->mount_target.valid();
+    // The site is chosen ahead of the seat block, so a body its seat-bone arm detached on the
+    // authority (pose_if_mounted) ends this pass at the mounted site still: no ramp (its
+    // seat type is 0 by then), the local eye unfloored.
+    // [orig: the selector @0x4B6386 ahead of Entity_DetachFromVehicleIfServer @0x4B6627;
+    //  Entity_DetachFromVehicle @0x4355F0 zeroes +0x168 @0x435921]
+    const bool seated_body = !npc_body && tick_entity != nullptr &&
+            (mounted || (tick_entity->mounted && tick_entity->mount_target.valid()));
     if (seated_body && tick_entity->mount_type == SeatType::Passenger)
         infantry_lean_seated_ramp(e);
-    if (have_clip || npc_body) infantry_restamp_eye(e, world, frame);
+    if (have_clip || npc_body) infantry_restamp_eye(e, world, frame, seated_body);
     if (!npc_body && !seated_body)
         infantry_lean_ramp(e, tick_entity != nullptr
                                   ? (tick_entity->flags | tick_entity->engine_flags)
@@ -2118,7 +2123,8 @@ void player_body_capsule_eye(int32_t extent, int32_t lean, int32_t yaw, int32_t 
     out[2] = z3 < 0x2000 ? 0x2000 : z3;
 }
 
-void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionFrame &frame) {
+void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionFrame &frame,
+                                    bool mounted_site) {
     // The local on-foot path terrain-floors the absolute eye; the mounted path
     // does not. The capsule fallback retains the org1/org2 extent and lean
     // formulas. [orig: carrier selector @0x4B6386; mounted local selector
@@ -2143,8 +2149,7 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
         // also on-foot only: the mounted leg is unfloored in retail
         // [orig: the 0x2000 floors @0x4b68e7/@0x4b6b98 belong to the
         //  capsule legs, and @0x4b6908 has no floor of any kind].
-        const bool seated = reg != nullptr && reg->mounted;
-        if (!seated) {
+        if (!mounted_site) {
             float abs_eye[3] = {static_cast<float>(from_fixed(e.self->position.x.q16) + head[0]),
                                 static_cast<float>(from_fixed(e.self->position.y.q16) + head[1]),
                                 static_cast<float>(from_fixed(e.self->position.z.q16) + head[2])};

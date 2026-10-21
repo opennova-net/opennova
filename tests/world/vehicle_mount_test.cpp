@@ -4956,6 +4956,84 @@ static void test_seat_bone_failure_runs_the_seat_tail() {
     }
 }
 
+// A player body's seat-bone lookup failing poses nothing and requests no seat
+// animation: the authority detaches the rider and kills no one, a client keeps it
+// seated, and both run the seat block's tail (groundEntity from parentEntity, the
+// legs and their targets to the body heading) and end the pass at the mounted
+// site. A carrier whose bone resolves poses the rider on its moved frame.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the bone call @0x4B6510, its
+//  test @0x4B6518..0x4B651A, the seat animation @0x4B65A8..0x4B65C3 (posed arm
+//  only), Entity_DetachFromVehicleIfServer @0x4359D0 called @0x4B6627, the tail
+//  @0x4B662F..0x4B66A3]
+static void test_player_seat_bone_failure_detaches_on_the_authority() {
+    struct NoSeatBone final : IPoseProvider {
+        bool resolve_seat_bone(World &, const Entity &, int) override { return false; }
+    };
+    struct SeatBone final : IPoseProvider {};
+    for (const bool resolves : {false, true}) {
+        for (const bool authority : {true, false}) {
+            auto w_heap = std::make_unique<World>();
+            World &w = *w_heap;
+            w.registry.configure_pool(0, 4);
+            w.registry.configure_pool(1, 4);
+            Entity vehicle;
+            vehicle.net_id = 200;
+            vehicle.kind = EntityKind::Item;
+            vehicle.has_item_def = true;
+            vehicle.has_graphic_model = true;
+            vehicle.position = {10.0f, 20.0f, 30.0f};
+            vehicle.health = 100;
+            vehicle.alive = true;
+            Seat seat;
+            seat.type = SeatType::Passenger;
+            seat.bone_index = 1;
+            seat.pose_index = 3; // the posed arm requests sit_3
+            seat.seat_local = {1.0f, 2.0f, 3.0f};
+            vehicle.seats.push_back(seat);
+            const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+            Entity player;
+            player.net_id = 100;
+            player.kind = EntityKind::Organic;
+            player.player_class = 8;
+            player.health = 100;
+            player.alive = true;
+            const EntityHandle player_h = w.registry.spawn(0, player);
+            AiEntity &body = *w.ai.at(w.ai.attach(player_h));
+            body.inf.active = true;
+            body.net_is_remote_peer = true; // a player body (org2)
+            CHECK(w.vehicles.process_attach(player_h, vehicle_h, 1));
+            NoSeatBone no_bone;
+            SeatBone bone;
+            w.pose_provider = resolves ? static_cast<IPoseProvider *>(&bone)
+                                       : static_cast<IPoseProvider *>(&no_bone);
+            // The carrier moves; a posed rider follows it.
+            w.registry.get(vehicle_h)->position = {50.0f, 60.0f, 70.0f};
+            const auto seated_at = w.registry.get(player_h)->position.words();
+            body.inf.body_heading = 0x10000000;
+            body.inf.leg_yaw[0] = body.inf.leg_yaw[1] = 0;
+            body.inf.leg_target[0] = body.inf.leg_target[1] = 0;
+            const int anim_before = body.inf.anim_state;
+            w.ai.is_authority = authority;
+            CHECK(w.ai.pose_if_mounted(body, w));
+            const Entity &rider = *w.registry.get(player_h);
+            CHECK(rider.health == 100);
+            if (resolves) {
+                CHECK(rider.mounted);
+                CHECK(rider.position.words() != seated_at);
+                CHECK(body.inf.anim_state == anim_state::kSit + 3);
+                continue;
+            }
+            CHECK(rider.mounted == !authority);
+            CHECK(rider.ground_target == (authority ? EntityHandle{} : vehicle_h));
+            CHECK(rider.position.words() == seated_at);
+            CHECK(body.inf.body_heading == 0x10000000);
+            CHECK(body.inf.leg_yaw[0] == 0x10000000 && body.inf.leg_yaw[1] == 0x10000000);
+            CHECK(body.inf.leg_target[0] == 0x10000000 && body.inf.leg_target[1] == 0x10000000);
+            CHECK(body.inf.anim_state == anim_before);
+        }
+    }
+}
+
 // Through the whole entity update: the pool-1 walk and the attached-child
 // refresh run ahead of the pool-0 bodies, so a body that boards an attached gun
 // in its pass's think ends the update where it walked, and the next update
@@ -5305,6 +5383,7 @@ int main() {
     test_board_pass_stays_on_foot();
     test_request_snaps_to_the_seat_bone_yaw();
     test_seat_bone_failure_runs_the_seat_tail();
+    test_player_seat_bone_failure_detaches_on_the_authority();
     test_board_pass_on_an_attached_gun_stays_on_foot();
     test_use_scan_and_label_follow_live_seat_pose();
     test_seat_and_emplacement_keep_subdegree_carrier_pose();
