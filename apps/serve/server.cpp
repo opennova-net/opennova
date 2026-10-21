@@ -1,6 +1,7 @@
 #include "server.h"
 
 #include "lister.h"
+#include "profile_name.h"
 #include "serve_listing.h"
 
 #include <base/gameprofile/game_type.h>
@@ -519,6 +520,13 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
 	config.session_channel = novaworld_ ? inmatch::GameSessionChannel::NovaWorld
 										: inmatch::GameSessionChannel::Lan;
+	// The local profile's name (g_LocalProfileName), which the mission start copies onto the
+	// row's body: with no player.sav the boot's seed, named after the process's account, as
+	// the row's side bytes are a fresh record's (D-NET-352) [orig: PlayerProfile_LoadAllFromDisk
+	//  @0x54F4D0 - GetUserNameA @0x54F535; Game_ApplySessionSettingsToGlobals
+	//  @0x551680..0x551695; Player_InitPlayer @0x4E184F..0x4E186A].
+	config.player_name = serve::serve_profile_name(config_.cfg().player_index,
+			serve::process_account_name());
 
 	// Serve Only: the dedicated role over the bound socket's game view, no
 	// player of the host's own, the session coming up inside the boot. The

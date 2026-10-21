@@ -12,6 +12,7 @@ add_library(opennova_serve_core STATIC
     credentials.cpp      # the --credentials file
     destination_policy.cpp
     lister.cpp           # the NovaWorld listing's driver: the gate, the NWU session, the login and HOSTKEY
+    profile_name.cpp     # the row's profile name: the boot's seed named after the account
     run_reports.cpp      # a supervisor's files: the tick health (--stats-file), the exit's line (--exit-file)
     serve_listing.cpp
     server.cpp
@@ -30,6 +31,10 @@ target_link_libraries(opennova_serve_core
         opennova_app_common  # the UDP socket and the HTTP exchange (PUBLIC-links ws2_32 on Windows)
         Threads::Threads     # the lister's HTTP exchange runs on a worker thread
 )
+
+if(WIN32)
+    target_link_libraries(opennova_serve_core PUBLIC advapi32) # GetUserNameA (profile_name.cpp)
+endif()
 
 target_compile_features(opennova_serve_core PUBLIC cxx_std_17)
 

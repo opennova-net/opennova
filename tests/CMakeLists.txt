@@ -5137,6 +5137,11 @@ add_test(NAME npruntime_host_slot_body COMMAND npruntime_host_slot_body_test)
 add_executable(npruntime_host_spectate_test npruntime/host_spectate_test.cpp)
 target_link_libraries(npruntime_host_spectate_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_host_spectate COMMAND npruntime_host_spectate_test)
+# opennova-serve's own row's profile name: the boot's seed with no player.sav, the first
+# record named after the account through the 16-byte buffer (D-NET-352, Q7-6).
+add_executable(opennova_serve_profile_name_test serve/opennova_serve_profile_name_test.cpp)
+target_link_libraries(opennova_serve_profile_name_test PRIVATE opennova_serve_core)
+add_test(NAME opennova_serve_profile_name COMMAND opennova_serve_profile_name_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

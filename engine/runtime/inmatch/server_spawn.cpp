@@ -255,6 +255,16 @@ void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection
 	own.slot_class = static_cast<int8_t>(side_class); // movsx of the class byte
 }
 
+void Player_InitPlayerSideWords(const NapiNPServerCtx &ctx, world::Entity &body) {
+	const CharacterJoinVars *words = ctx.host_slot.active ? &ctx.host_slot.char_vars : nullptr;
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list)
+		if (conn.type == NapiNPConnection::kTypeClientSide) words = &conn.char_vars;
+	if (words == nullptr) return;
+	const int side = body.team == 1 || body.team == 3 ? 0 : 1;
+	body.player_class = words->char_class[side];
+	body.anim_slot = words->avatar[side];
+}
+
 world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World &world) {
 	HostSlotRow &host = ctx.host_slot;
 	host.body = {};
@@ -299,7 +309,8 @@ world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World 
 	if (body == nullptr) return {};
 	world::apply_spawn_point_latches(*body, sel);
 	// The round init's slot name (the local body's own name is Player_InitPlayer's, at the
-	// mission start: HostRole::init_local_player_at_mission_start) [orig: @0x516BA0..0x516BAF].
+	// mission start: HostRole::init_local_player_at_mission_start)
+	// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 - the copy @0x516BA0..0x516BAF].
 	body->name = host.name;
 	body->display_name = host.name;
 	body->player_slot_id = 0;
@@ -561,8 +572,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		// <- Game_ApplySessionSettingsToGlobals @0x551500 (class clamp @0x5516ab..0x5516ec, avatar
 		// via Avatars_ResolveSelectionIndex (ex sub_57AE60)); ids validated + stored by PlayerSession_InitFromProfile @0x50ca80]
 		// The class word is Player_InitPlayer's re-stamp from g_CharClassTeam1/2 by the
-		// team, which every weapon-slot list sent to the own slot rewrites with the slot's
-		// class (weapon_slot_list_own_legs) (D-NET-695)
+		// team (the mission start runs it on the body: Player_InitPlayerSideWords), which
+		// every weapon-slot list sent to the own slot rewrites with the slot's class
+		// (weapon_slot_list_own_legs) (D-NET-695)
 		// [orig: Player_InitPlayer @0x4E1809..0x4E1832;
 		//  Server_SendWeaponSlotListToPlayer @0x502629..0x50264B].
 		spawn.anim_slot = conn.char_vars.avatar[side];

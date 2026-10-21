@@ -100,6 +100,22 @@ void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection
 //  @0x551500 over the current profile]
 void PlayerSession_InitHostRowFromProfile(NapiNPServerCtx &ctx, const CharacterJoinVars &vars);
 
+// Player_InitPlayer's per-team re-stamp of the local body (the mission start's
+// g_LocalPlayerEntity: a listen host's or the single player's own body, a Serve Only host's
+// row body): its class word from the session start's profile class of the body team's side
+// and its animSlot from that side's avatar byte, side A's for a team byte of 1 or 3, else side
+// B's, with no game-type test. The two words are the host's own slot's: a listen host's own
+// connection's char_vars (the profile's, which in a session the start clamped into 5..9 and
+// every weapon-slot list sent to the own slot rewrites with the slot's class,
+// weapon_slot_list_own_legs), a Serve Only host's row's (PlayerSession_InitHostRowFromProfile).
+// Nothing when the host has neither.
+// [orig: Player_InitPlayer @0x4E15F0 - the team byte +0x162 against 1 and 3
+//  @0x4E1809..0x4E1817, g_CharClassTeam2 / g_AvatarTeam2 @0x4E1819..0x4E1825,
+//  g_CharClassTeam1 / g_AvatarTeam1 @0x4E182C..0x4E1838, the stores +0x294 @0x4E181F /
+//  @0x4E1832 and +0x374 @0x4E1843; the words' session start Game_ApplySessionSettingsToGlobals
+//  @0x5516D0..0x5516FD; Server_SendWeaponSlotListToPlayer @0x502629..0x50264B]
+void Player_InitPlayerSideWords(const NapiNPServerCtx &ctx, world::Entity &body);
+
 // A Serve Only host's own slot 0's body (HostSlotRow::body), the round init's spawn of the
 // row at every mission start, first in slot order: the slot's class (+0x15EDC) and team, the
 // side's character id and avatar, owner connection 0, a spawn marker as a joiner's add takes

@@ -138,9 +138,44 @@ void test_the_row_takes_the_hosts_profile() {
 	const w::Entity *e = r.world.registry.get(body);
 	CHECK(e != nullptr);
 	if (e == nullptr) return;
-	// Team 1: side A's char id and avatar.
+	// Team 1: side A's char id and avatar; the round init's spawn by the slot's class.
 	CHECK(e->team == 1 && e->player_class == 6);
 	CHECK(e->minimap_net_id == 0x0301 && e->anim_slot == 3);
+}
+
+// D-NET-352 (V-L4-s8 defect A): the mission start's Player_InitPlayer, which runs on the row
+// body (the dedicated host's g_LocalPlayerEntity), re-stamps its class word and animSlot from
+// the profile's side words by the body's team, side A's for team 1 or 3, else side B's, after
+// the round init spawned it with the side requirement's class: a team-1 row leaves the mission
+// start with side A's class 5 (every joiner's 0x0C class byte), not side B's 6.
+// [orig: Player_InitPlayer @0x4E1809..0x4E1843; Game_StartMission @0x525BBC;
+//  UI_PreGameMenuStateMachine's side requirement -1 @0x568C52..0x568C55]
+void test_the_mission_start_restamps_the_rows_side_words() {
+	Rig r;
+	inmatch::CharacterJoinVars profile;
+	profile.char_id[0] = 0x0301;
+	profile.char_id[1] = 0x0402;
+	profile.char_class[0] = 5;
+	profile.char_class[1] = 6;
+	profile.avatar[0] = 3;
+	profile.avatar[1] = 4;
+	inmatch::PlayerSession_InitHostRowFromProfile(*r.ctx, profile);
+	w::Entity *e = r.world.registry.get(inmatch::Server_SpawnHostSlotBody(*r.ctx, r.world));
+	CHECK(e != nullptr);
+	if (e == nullptr) return;
+	CHECK(e->team == 1 && e->player_class == 6);
+	inmatch::Player_InitPlayerSideWords(*r.ctx, *e);
+	CHECK(e->player_class == 5 && e->anim_slot == 3);
+	// Any team but 1 or 3 takes side B's words, whatever the game type.
+	e->team = 2;
+	inmatch::Player_InitPlayerSideWords(*r.ctx, *e);
+	CHECK(e->player_class == 6 && e->anim_slot == 4);
+	e->team = 0;
+	inmatch::Player_InitPlayerSideWords(*r.ctx, *e);
+	CHECK(e->player_class == 6 && e->anim_slot == 4);
+	e->team = 3;
+	inmatch::Player_InitPlayerSideWords(*r.ctx, *e);
+	CHECK(e->player_class == 5 && e->anim_slot == 3);
 }
 
 void test_player_kill_0_runs_the_rows_transaction() {
@@ -173,6 +208,7 @@ void test_player_kill_0_runs_the_rows_transaction() {
 int main() {
 	test_the_row_body_is_first_hidden_and_local();
 	test_the_row_takes_the_hosts_profile();
+	test_the_mission_start_restamps_the_rows_side_words();
 	test_player_kill_0_runs_the_rows_transaction();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

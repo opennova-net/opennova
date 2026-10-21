@@ -128,12 +128,13 @@ public:
 	// Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 	void init_round_after_premission();
 	// Player_InitPlayer's body leg at every mission start, after the round
-	// init (the local profile's name, the hidden bit cleared), then the mission
-	// start's own local-player block, which leaves every host's local body hidden
-	// (a playing host's own join clears it in frame 1's receive pump)
+	// init (the class and animSlot by the body's team, the local profile's name,
+	// the hidden bit cleared), then the mission start's own local-player block,
+	// which leaves every host's local body hidden (a playing host's own join
+	// clears it in frame 1's receive pump)
 	// [orig: Game_StartMission -- the Player_InitPlayer call @0x525BBC, the block
-	//  @0x525C6B..0x525C9E; Player_InitPlayer @0x4E15F0 -- the Name
-	//  @0x4E184F..0x4E186A, `Flags &= ~1` @0x4E19C2].
+	//  @0x525C6B..0x525C9E; Player_InitPlayer @0x4E15F0 -- the side words
+	//  @0x4E1809..0x4E1843, the Name @0x4E184F..0x4E186A, `Flags &= ~1` @0x4E19C2].
 	void init_local_player_at_mission_start();
 	// A fresh session's first mission start, at its round init: the own slot's buffer
 	// seeded from the spawn buffer, which the mission load filled by then (a map
