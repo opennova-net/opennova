@@ -1306,6 +1306,13 @@ bool run_remote_vehicle_occupancy() {
 	             "remote rider appears as occupied in the vehicle panel");
 	ok &= expect(panel[0].health == 59 && panel[0].max_health == 100,
 	             "remote rider health uses the retail compact-tier midpoint");
+	// A rider the 0x13 killed holds Health 0 ahead of its next record, as the
+	// powerup picker reads it [orig: Entity_KillBySlotId Health = 0 @0x42BD33].
+	h.role.runtime->state().find(0x0006)->net_health_zero = true;
+	w::fill_vehicle_panel_seats(world, vh, local->handle, block, panel, &h.role);
+	ok &= expect(panel.size() == 1 && panel[0].health == 0 && panel[0].max_health == 100,
+	             "a rider the 0x13 killed shows Health 0");
+	h.role.runtime->state().find(0x0006)->net_health_zero = false;
 
 	// Another wire player can occupy the numeric handle of native L.
 	auto old_peer = *h.role.runtime->state().find(0x0006);

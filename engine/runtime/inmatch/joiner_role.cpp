@@ -236,7 +236,11 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 			: nullptr;
 	if (item == nullptr) return result;
 	result.health = result.max_health = item->hp;
-	if (rider->cls == EntityClass::Player && rider->net_has_compact) {
+	// A rider the 0x13 killed holds Health 0 ahead of its next record, as the
+	// powerup picker reads it [orig: Entity_KillBySlotId Health = 0 @0x42BD33].
+	if (rider->net_health_zero) {
+		result.health = 0;
+	} else if (rider->cls == EntityClass::Player && rider->net_has_compact) {
 		// The compact's health/class byte reconstructs a tier midpoint, not
 		// an exact health fraction (replication::replica_tier_health).
 		result.health = replication::replica_tier_health(rider->health_class_byte, item->hp);
