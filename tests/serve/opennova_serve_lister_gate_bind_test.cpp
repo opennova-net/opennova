@@ -14,6 +14,8 @@
 #include <formats/gamecfg/game_cfg.h>
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/host_config.h>
+#include <runtime/inmatch/punt_log.h>   // ConnectLog
+#include <runtime/inmatch/server_files.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -54,6 +56,18 @@ public:
 	void on_command(const ServerCommand &command) override { (void)command; }
 };
 
+// The connect log's file, in memory.
+struct MemoryFiles final : inmatch::ServerFileSink {
+	std::map<std::string, std::string> files;
+	bool exists(const std::string &name) override { return files.count(name) != 0; }
+	void remove(const std::string &name) override { files.erase(name); }
+	bool write(const std::string &name, std::string_view bytes, bool append) override {
+		if (!append) files[name].clear();
+		files[name].append(bytes.data(), bytes.size());
+		return true;
+	}
+};
+
 // A UDP port nothing holds right now: bound by the OS, then released.
 uint16_t free_port() {
 	uint16_t port = 0;
@@ -91,13 +105,25 @@ int main() {
 		CHECK(lister.start());
 		CHECK(lister.gate_port() == next);
 	}
-	// A scan with every port held binds nothing: the start fails.
+	// A scan with every port held binds nothing: the start fails, and with the connect log on
+	// the gate wait's line names the manager's state, 2 (the bind's state; the fall back to -6
+	// is out of the setter's range). [orig: CNapiGateManager_ProcessConnectStateMachine
+	// @0x633E3C, @0x633E64; CNapiGateManager_SetState @0x633886; CNapiGateManager_WaitForConnect
+	// @0x4CE8C2..0x4CE8E7]
 	options.gate_ports = {held_port};
+	MemoryFiles files;
+	inmatch::ConnectLog log(files);
+	log.set_clock([] { return std::string("T"); });
+	log.start(inmatch::ConnectLogHeader{});
+	const std::size_t header_bytes = files.files[inmatch::kConnectLogFile].size();
+	options.connect_log = &log;
 	{
 		serve::Lister lister(options, source, nullptr);
 		CHECK(!lister.start());
 		CHECK(lister.exit_code() == serve::kExitNetwork);
 	}
+	CHECK(files.files[inmatch::kConnectLogFile].substr(header_bytes) ==
+	      "T : GATE GATE SERVICE START FAILED [2].\r\n");
 	net::shutdown();
 	if (failures != 0) {
 		std::printf("opennova_serve_lister_gate_bind: %d failure(s)\n", failures);
