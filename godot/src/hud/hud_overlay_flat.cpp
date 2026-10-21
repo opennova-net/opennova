@@ -87,24 +87,43 @@ void fragment() {
 // samples texel i mod stage as retail's does -- and fragment() then applies
 // MODULATE2X(CURRENT, TEXTURE1) to the colour and
 // MODULATE(CURRENT, TEXTURE1) to the alpha, the stage-1 texture
-// wrap-addressed. Every other command keeps the default COLOR (vertex colour x
-// TEXTURE). The stage-1 witness rides the engine's HudQuad::texture2
-// (runtime/hud/hud_frame.h).
+// wrap-addressed. A wrap-addressed quad (HudQuad::wrap: the stdbox fill) arrives
+// with a +32 UV.x flag and no other UV: its vertex() derives the UV from the surface
+// position the way retail's fill strip carries it, (screen_px + 0.5) / the
+// texture's size, and fragment() samples wrap_texture (the quad's own texture,
+// bound on the material) through a repeat sampler, so one quad tiles the brush on
+// the absolute screen grid (runtime/hud/hud_frame.h HudQuad::wrap carries the
+// witness). Every other command keeps the default
+// COLOR (vertex colour x TEXTURE). The stage-1 witness rides the engine's
+// HudQuad::texture2 (runtime/hud/hud_frame.h).
 constexpr const char *kHudFlatShader = R"(
 shader_type canvas_item;
 render_mode unshaded, blend_mix;
 
 uniform sampler2D stage1_texture : repeat_enable, filter_nearest;
 uniform vec2 stage1_inv_size = vec2(0.0);
+uniform sampler2D wrap_texture : repeat_enable, filter_nearest;
+uniform vec2 wrap_inv_size = vec2(0.0);
 
 varying flat float stage1_on;
 varying flat float modulate2x_on;
+varying flat float wrap_on;
 varying vec2 stage1_uv;
+varying vec2 wrap_uv;
+varying vec4 wrap_color;
 
 void vertex() {
 	stage1_on = 0.0;
 	modulate2x_on = 0.0;
+	wrap_on = 0.0;
 	stage1_uv = vec2(0.0);
+	wrap_uv = vec2(0.0);
+	wrap_color = COLOR;
+	if (UV.x >= 16.0) {
+		UV.x -= 32.0;
+		wrap_on = 1.0;
+		wrap_uv = (VERTEX + vec2(0.5)) * wrap_inv_size;
+	}
 	if (UV.x >= 4.0) {
 		UV.x -= 8.0;
 		stage1_on = 1.0;
@@ -117,6 +136,9 @@ void vertex() {
 }
 
 void fragment() {
+	if (wrap_on > 0.5) {
+		COLOR = wrap_color * texture(wrap_texture, wrap_uv);
+	}
 	if (modulate2x_on > 0.5) {
 		COLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));
 	}
@@ -130,6 +152,8 @@ void fragment() {
 
 // The +8 UV.x flag a second-stage quad's vertices carry into kHudFlatShader.
 constexpr float kStage1UvFlag = 8.0f;
+// The +32 UV.x flag a wrap-addressed quad's vertices carry into kHudFlatShader.
+constexpr float kWrapUvFlag = 32.0f;
 // The +16 UV.y flag a family-0x600 texture's vertices carry into kHudFlatShader.
 constexpr float kModulate2xUvFlag = 16.0f;
 
@@ -336,6 +360,27 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 				PackedInt32Array(), PackedFloat32Array(), p_tex->get_rid());
 		record(p_quad.texture, "triangles", uv, colors);
 	};
+	// A wrap-addressed quad as a triangle pair carrying only kHudFlatShader's
+	// flags: the shader derives its UV from the surface position and samples the
+	// material's wrap_texture.
+	const auto submit_wrap_quad = [&](const opennova::hud::HudQuad &p_quad,
+										  const Ref<Texture2D> &p_tex, const Color &p_color,
+										  float p_v_flag) {
+		const Vector2 corners[4] = { Vector2(p_quad.x0, p_quad.y0), Vector2(p_quad.x1, p_quad.y0),
+			Vector2(p_quad.x1, p_quad.y1), Vector2(p_quad.x0, p_quad.y1) };
+		PackedVector2Array points, uv;
+		PackedColorArray colors;
+		PackedInt32Array indices;
+		for (int corner = 0; corner < 4; ++corner) {
+			points.push_back(corners[corner]);
+			uv.push_back(Vector2(kWrapUvFlag, p_v_flag));
+			colors.push_back(p_color);
+		}
+		for (int index : { 0, 1, 2, 0, 2, 3 }) indices.push_back(index);
+		rs->canvas_item_add_triangle_array(p_item, indices, points, colors, uv,
+				PackedInt32Array(), PackedFloat32Array(), p_tex->get_rid());
+		record(p_quad.texture, "triangles", uv, colors);
+	};
 	// Kind-grouped submission preserves the compiler's per-kind insertion
 	// order and keeps every glyph above the quads (retail draws its text
 	// elements over the bars/frames the same walk emitted).
@@ -364,6 +409,18 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 		const float v_flag = tex.is_valid() && texture_stage_(tex) == MaterialColorStage::Modulate2x
 				? kModulate2xUvFlag
 				: 0.0f;
+		// A wrap-addressed quad (the stdbox fill): its texture rides the item's
+		// material as wrap_texture with its size's reciprocal (every such quad names
+		// the same lifted brush cell).
+		if (quad.wrap && tex.is_valid() && tex->get_width() > 0 && tex->get_height() > 0) {
+			ensure_flat_material_();
+			flat_material_->set_shader_parameter("wrap_texture", tex);
+			flat_material_->set_shader_parameter("wrap_inv_size",
+					Vector2(1.0f / static_cast<float>(tex->get_width()),
+							1.0f / static_cast<float>(tex->get_height())));
+			submit_wrap_quad(quad, tex, color, v_flag);
+			continue;
+		}
 		// A second texture stage: the flagged triangle pair kHudFlatShader
 		// combines, the stage-1 texture and its divisors bound on the item's
 		// material (every such quad names the same stage, the boxtile camo).

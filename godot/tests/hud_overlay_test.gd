@@ -1102,16 +1102,21 @@ func test_stdbox_pieces_carry_the_camo_stage() -> void:
 	# @0x56b700, the diffuse @0x56b70e..0x56b713; BoxTexture_LoadAndSetupUVRegions
 	# 0x651 @0x56ae78 / @0x56af2d].
 	var pieces := 0
-	var fills := 0
 	for row: Dictionary in _flat_rows(hud, Vector2i(128, 128)):
 		assert_true(_flat_doubled(row), "a box quad carries the MODULATE2X flag")
 		assert_eq(row.colors[0].to_argb32(), 0xFF7F7F7F, "at the raw half-bright diffuse")
 		if row.uvs[0].x >= 4.0:
 			pieces += 1
-		else:
-			fills += 1
 	assert_eq(pieces, 8, "the eight pieces add the camo stage")
-	assert_gt(fills, 0, "the fill tiles draw the stage-0 doubling alone")
+	# The fill is ONE wrap-addressed quad on the atlas's lifted 32 px brush cell
+	# [orig: BoxTexture_LoadAndSetupUVRegions @0x56acd0 ("BoxCtr" @0x56ae73);
+	#  HUD_StdboxDrawFillWrapTiled @0x56b5d0, one strip @0x56b6f5].
+	var fills := _flat_rows(hud, Vector2i(32, 32))
+	assert_eq(fills.size(), 1, "the fill draws one quad, not a tile per cell")
+	if fills.size() == 1:
+		assert_true(_flat_doubled(fills[0]), "the fill draws the stage-0 doubling alone")
+		assert_eq(fills[0].uvs[0].x, 32.0, "its UV carries only the wrap flag")
+		assert_eq(fills[0].colors[0].to_argb32(), 0xFF7F7F7F, "at the raw half-bright diffuse")
 	await get_tree().process_frame
 	assert_true(is_instance_valid(hud), "The two-stage pieces render safely.")
 	hud.set_message_log_shown(false)
