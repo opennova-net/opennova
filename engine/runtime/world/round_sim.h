@@ -391,7 +391,7 @@ inline bool round_class_motor_bound(const LiveRound &round) {
 // The rokt row's motor: the round's +0x2BA word (GuidedFlightState::phase, which the
 // Guided serializer sends) goes 0 -> 1 at its first call and stays. Retail calls it from
 // both legs' motor call.
-// [orig: the rokt motor Entity_UpdateRocketFlag @0x443DD0 (undefined code: the test @0x443DD4, the store
+// [orig: the rokt motor Entity_UpdateRocketFlag @0x443DD0 (the test @0x443DD4, the store
 //  @0x443DDE); Projectile_UpdatePhysics @0x4E9D70 (the useownmove call @0x4E9F1E, the
 //  ballistic call @0x4EA06A..0x4EA085); Entity_SerializeGuidedMissileState @0x447C50
 //  (the +0x2BA read @0x447D9F)]

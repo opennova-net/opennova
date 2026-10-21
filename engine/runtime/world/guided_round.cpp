@@ -105,7 +105,7 @@ void RoundSim::init_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
                 // The stng init queries over its shooter (the roll's attacker the
                 // shooter's +368), stores the winner, an entity or a round, into the
                 // shooter's +0xC and the missile's +0x2D4 takes that word.
-                // [orig: the stng init StngClass_InitFromDef @0x445EF0 (undefined code): the AiSlot test
+                // [orig: the stng init StngClass_InitFromDef @0x445EF0: the AiSlot test
                 //  @0x445EFB, Entity_SpawnWeaponEffect @0x445F02, the +0xC store
                 //  @0x445F10, the +0x2D4 store @0x445F22]
                 const TargetRef target = guided_heat_target(world, *owner, *body, &body->slot, ammo,

@@ -295,7 +295,8 @@ void LocalPlayer::update_aim_target() {
             body->slot.f[3] = AiSlot::target_word(target);
             e->last_fire_target = target;
         }
-        // The tone flag tests the +0xC word, a round included [orig: @0x4B40E0 (@0x4B520D..0x4B5222)].
+        // The tone flag tests the +0xC word, a round included
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B520D..0x4B5222)].
         if (allowed && body->slot.f[3] != 0) body->slot.f[2] |= 1;
         else body->slot.f[2] = -2;
     }

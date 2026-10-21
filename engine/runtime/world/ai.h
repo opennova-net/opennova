@@ -1039,7 +1039,7 @@ public:
 
     // The two class event callbacks (fn1 of g_EntityClassEventCallbackTable
     // @0x813000, resolved per items.def ai_function by EntityDef_InitAllCallbacks
-    // @0x4a5aae -> Entity_LookupRenderCallbacks @0x407dc0): the CHel row and the
+    // @0x4a5aae -> EntityDef_LookupClassCallbacks @0x407DC0): the CHel row and the
     // cpln thunk @0x462120 run the air-class machine, the cveh row and the
     // cbot/ctrn thunks @0x462130/@0x462140 the vehicle-class one. Both share one
     // body; they differ only in the alert leg's state pair, the client tick and
