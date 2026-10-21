@@ -92,7 +92,12 @@ public:
 	// its bound key's own press or release event (slot 1, else slot 2), as a
 	// keyboard's would: the readers of raw key events (the deploy keys, the
 	// held-USE digits) see the script the way the binding scan does. A
-	// mouse-bound code holds its token only; no click is synthesized.
+	// mouse-bound code holds its token only; no click is synthesized. Each
+	// character a char step typed arrives as its key's press carrying the
+	// character, then its release, so an open chat line's editor takes it
+	// through the shell's chat route as a typed key; outside an open line it
+	// reaches only the readers of raw key events (retail's keystroke would
+	// also fire its key's binding).
 	void advance_scripted_input(int64_t p_logic_tick);
 	String mouse_event_token(int p_button) const;
 	// The VK (0 = none) of the keyboard slot firing the token RIGHT NOW under

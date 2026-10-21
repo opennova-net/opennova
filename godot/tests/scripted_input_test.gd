@@ -8,8 +8,8 @@ extends GutTest
 # gates and the mouse-motion path, over a real minimal world, in every
 # input frame of a multi-tick frame (the router is the session's per-tick
 # source). The engine schedule itself (one flip per token per sample, the
-# setup pose's conversion) is the scripted_input ctest; the session's
-# per-tick pull is the inmatch_tick_input_source ctest.
+# typed characters' order, the setup pose's conversion) is the scripted_input
+# ctest; the session's per-tick pull is the inmatch_tick_input_source ctest.
 
 var TICK := Simulation.tick_dt()
 var _root := ""
@@ -42,6 +42,10 @@ func test_load_steps_marshals_the_shared_script_shape() -> void:
 		[[{"tick": 0, "end": false}], "step 0: \"end\" must be true"],
 		[[{"tick": 0, "press": 9999}, {"tick": 2, "end": true}], "action code 9999"],
 		[[{"tick": 0, "press": 149}], "no end step"],
+		[[{"tick": 0, "char": "ab"}, {"tick": 2, "end": true}], "\"char\" must be one character"],
+		[[{"tick": 0, "char": 13}, {"tick": 2, "end": true}], "\"char\" must be one character"],
+		[[{"tick": 0, "char": "\t"}, {"tick": 2, "end": true}],
+				"is not backspace, return or printable ASCII"],
 	]
 	for case in refused:
 		var driver := ScriptedInput.new()
@@ -162,6 +166,57 @@ func test_the_seam_replays_scripted_holds_as_bound_key_events() -> void:
 	model.advance_scripted_input(24)
 	model.set_scripted_input(null)
 	assert_null(model.get_scripted_input(), "null detaches")
+
+
+# A char step types its character as a keystroke in the input frame it
+# applies in: the key's press carrying the character, then its release,
+# through the process input path (onHook's driver hands retail the key's
+# WM_KEYDOWN, the WM_CHAR and the WM_KEYUP within the tick). An open command
+# line's editor takes each as main_game's capture route hands it a typed key
+# (HudChatEntry.key_event), so the kick's SERVER PUNT ALL then return types
+# the line and submits it.
+func test_the_seam_types_scripted_chars_into_an_open_line() -> void:
+	var model := ControlsModel.new()
+	var driver := ScriptedInput.new()
+	var line := "SERVER PUNT ALL"
+	var steps: Array = []
+	for i in line.length():
+		steps.append({"tick": 2 * i, "char": line[i]})
+	var enter_tick := 2 * line.length() + 2
+	steps.append({"tick": enter_tick, "char": "\r"})
+	steps.append({"tick": enter_tick + 2, "end": true})
+	assert_eq(driver.load_steps(steps), OK, driver.get_error())
+	model.set_scripted_input(driver)
+	var chat := HudChatEntry.new()
+	var opened := chat.poll_rows(1 << HudChatEntry.ROW_COMMAND, true, null, null, 0)
+	assert_eq(opened & HudChatEntry.EVENT_BEGAN, HudChatEntry.EVENT_BEGAN,
+			"the command row opens the line")
+	var recorder := _KeyRecorder.new()
+	recorder.chat = chat
+	add_child_autofree(recorder)
+	assert_true(driver.start())
+	for tick in enter_tick:
+		model.advance_scripted_input(100 + tick)
+	await get_tree().process_frame
+	assert_eq(chat.get_text(), line, "every character reached the editor, in order")
+	assert_true(chat.is_capturing(), "the line is still open")
+	assert_false(Input.is_key_pressed(KEY_S), "each keystroke released its key")
+	model.advance_scripted_input(100 + enter_tick)
+	await get_tree().process_frame
+	assert_false(chat.is_capturing(), "return submitted the command line")
+	assert_eq(chat.get_text(), "", "and emptied it")
+	assert_eq(recorder.events.size(), 2 * (line.length() + 1), "a press and a release each")
+	var first: InputEventKey = recorder.events[0]
+	assert_true(first.pressed and first.keycode == KEY_S and first.unicode == 0x53,
+			"S: its key's press carries the character")
+	var released: InputEventKey = recorder.events[1]
+	assert_true(not released.pressed and released.keycode == KEY_S, "then its release")
+	var space: InputEventKey = recorder.events[12]
+	assert_true(space.pressed and space.keycode == KEY_SPACE and space.unicode == 0x20, "space")
+	var enter: InputEventKey = recorder.events[2 * line.length()]
+	assert_true(enter.pressed and enter.keycode == KEY_ENTER, "return is the Enter key")
+	model.advance_scripted_input(100 + enter_tick + 2)
+	assert_true(driver.is_done(), "the end follows")
 
 
 # The router steps the device on the logic tick its sample is keyed to and
@@ -365,3 +420,17 @@ func _frame(rig: Dictionary, count: int, active := true, ticks := 1) -> void:
 	for i in count:
 		var frame_input := presenter.before_world_tick(TICK * ticks, false, active)
 		world.tick(camera.global_position, camera.global_transform, TICK * ticks, frame_input)
+
+
+# The process input path's key events, each handed to an open chat line's
+# editor the way main_game's capture route hands it a typed key.
+class _KeyRecorder extends Node:
+	var chat: HudChatEntry
+	var events: Array = []
+
+	func _input(event: InputEvent) -> void:
+		if not (event is InputEventKey):
+			return
+		events.append(event)
+		if chat != null and chat.is_capturing():
+			chat.key_event(event, null, null, 0)

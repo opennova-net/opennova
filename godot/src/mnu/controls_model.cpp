@@ -292,6 +292,32 @@ void ControlsModel::advance_scripted_input(int64_t p_logic_tick) {
 	for (const int code : before) {
 		if (!holds(after, code)) replayed = replay(code, false) || replayed;
 	}
+	// Each typed character arrives as the keystroke onHook's driver hands
+	// retail within the step's tick: the key's press carrying the character
+	// (WM_KEYDOWN, then the WM_CHAR stored into its ring entry), then its
+	// release; an open line's editor takes it through the shell's chat route
+	// (HudChatEntry::key_event -> hud::ChatEntry::key) as the tick's ring
+	// drain hands the editor a capture-mode entry (engine
+	// devtools/scripted_input.h carries the witness). A letter is its own key
+	// (shifted when upper case), backspace and return theirs, any other
+	// printable character the key Godot gives its code.
+	for (const uint8_t character : script.take_chars()) {
+		Key key = static_cast<Key>(character);
+		if (character == 0x08) key = KEY_BACKSPACE;
+		else if (character == 0x0D) key = KEY_ENTER;
+		else if (character >= 'a' && character <= 'z') key = static_cast<Key>(character - 'a' + 'A');
+		for (const bool pressed : {true, false}) {
+			Ref<InputEventKey> event;
+			event.instantiate();
+			event->set_keycode(key);
+			event->set_physical_keycode(key);
+			event->set_shift_pressed(character >= 'A' && character <= 'Z');
+			if (pressed && character >= 0x20) event->set_unicode(character);
+			event->set_pressed(pressed);
+			input->parse_input_event(event);
+		}
+		replayed = true;
+	}
 	// The key state lands now, in step with the held tokens the sample reads
 	// next, not at the next frame's event flush.
 	if (replayed) input->flush_buffered_events();

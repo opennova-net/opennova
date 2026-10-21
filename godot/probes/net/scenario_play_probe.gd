@@ -8,8 +8,10 @@ extends GameProbe
 ##
 ## The scenario: {"setup": {"pose": {"position_bms": [x, y, z], "yaw": deg,
 ## "pitch": deg}}, "steps": [{"tick": t, then one of "down": code | "up":
-## code | "press": code | "look_px": [dx, dy] | "end": true}]}, codes being
-## retail action codes. The setup pose lands first: a host or single player
+## code | "press": code | "look_px": [dx, dy] | "char": "c" | "end": true}]},
+## codes being retail action codes and a char one typed character (backspace,
+## return or printable ASCII; the seam replays it as a keystroke, which an
+## open chat or command line takes). The setup pose lands first: a host or single player
 ## takes teleport_local_player, a joiner the ApplyPose write on its own L
 ## (Simulation.debug_apply_local_pose), which its next C2S 0x0C uplink carries.
 ## Then the script arms, the next device sample latches its start logic tick,

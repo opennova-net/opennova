@@ -11,6 +11,19 @@
 // own tick (inmatch::InputPacket::look_delta), as onHook's driver adds its
 // look_px to the mouse axis word in that input frame; they bypass the main
 // frame's mouse pump, which turns one cursor pixel into eight axis units.
+// Char steps type one character each, the set onHook's driver types
+// (backspace 0x08, return 0x0D, printable ASCII 0x20..0x7E), as the
+// keystroke that driver hands retail within the step's tick: the key's
+// WM_KEYDOWN queues a ring entry, the WM_CHAR stores the character into it
+// and the WM_KEYUP follows, and the tick's input frame drains the ring,
+// handing a capture-mode entry to the open line's editor as (character,
+// virtual key) [orig: Input_HandleKeyPress @0x760C90 (the queue @0x760CC2);
+// Input_HandleCharEvent @0x760D10 (the store @0x760D1F);
+// Input_ProcessKeyboardEvents @0x49D1F0 (the drain @0x49D2D2,
+// Chat_HandleInputChar's capture arm @0x49D498)]. The device queues the
+// characters its applied steps typed, in order; the embedder takes them in
+// the same sample and replays each as that keystroke. A char holds no token,
+// so the one-flip rule below never holds one back.
 //
 // Timing is keyed on the session's logic tick: the embedder samples the
 // device in every input frame, the display frame's own sample and each later
@@ -35,15 +48,22 @@ namespace opennova::devtools {
 
 // One step of the shared script, as its JSON carries it: {"tick": t, then one
 // of "down": code | "up": code | "press": code | "look_px": [dx, dy] |
-// "end": true}. A press is down at t and up at t + 1.
+// "char": "c" | "end": true}. A press is down at t and up at t + 1.
 struct ScriptStep {
-	enum class Kind : uint8_t { Down, Up, Press, Look, End };
+	enum class Kind : uint8_t { Down, Up, Press, Look, Char, End };
 	Kind kind = Kind::End;
 	int64_t tick = 0;   // relative logic tick, >= 0
 	int code = 0;       // retail action code (Down / Up / Press)
 	double dx_px = 0.0; // Look: raw mouse pixels, +x right, +y down
 	double dy_px = 0.0;
+	uint8_t character = 0; // Char: the typed character
 };
+
+// Whether a char step may type `character`: backspace, return or printable
+// ASCII, the set onHook's driver types (opennova-int #73).
+constexpr bool script_char_typeable(uint8_t character) {
+	return character == 0x08 || character == 0x0D || (character >= 0x20 && character <= 0x7E);
+}
 
 // One source step's outcome: the logic tick it applied at (the sample's L;
 // -1 while pending) and, for a press, the tick its release applied at.
@@ -71,8 +91,9 @@ public:
 
 	// Validate and schedule a script, replacing (and releasing) any previous
 	// one. Refused with `error` set, leaving the device as it was: a negative
-	// tick, a code no catalog row dispatches, a non-finite look, no end step
-	// or a second one, or a step (a press's release included) after the end.
+	// tick, a code no catalog row dispatches, a non-finite look, a character
+	// no char step types, no end step or a second one, or a step (a press's
+	// release included) after the end.
 	bool load(const std::vector<ScriptStep> &steps, std::string &error);
 	// Arm a loaded script; the next advance() latches the start. False when
 	// nothing is loaded or the script already started.
@@ -85,6 +106,9 @@ public:
 	bool token_held(std::string_view token) const;
 	// The look pixels the applied steps fed since the last take.
 	void take_look(double &r_dx_px, double &r_dy_px);
+	// The characters the applied char steps typed since the last take, in
+	// script order.
+	std::vector<uint8_t> take_chars();
 
 	State state() const { return state_; }
 	bool loaded() const { return !events_.empty(); }
@@ -96,7 +120,7 @@ public:
 	const std::string &cancel_reason() const { return cancel_reason_; }
 
 private:
-	enum class Op : uint8_t { Down, Up, Look, End };
+	enum class Op : uint8_t { Down, Up, Look, Char, End };
 	struct Event {
 		int64_t tick = 0;
 		uint32_t step = 0;
@@ -106,6 +130,7 @@ private:
 		int code = 0;
 		double dx_px = 0.0;
 		double dy_px = 0.0;
+		uint8_t character = 0;
 	};
 	struct Held {
 		const char *token = nullptr;
@@ -126,6 +151,7 @@ private:
 	int64_t last_tick_ = -1;
 	double look_dx_ = 0.0;
 	double look_dy_ = 0.0;
+	std::vector<uint8_t> chars_;
 	std::string cancel_reason_;
 };
 
