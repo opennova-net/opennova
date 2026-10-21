@@ -392,13 +392,8 @@ bool g_process_server_logs_set = false;
 const NovaWorldClient *g_process_leg_waiter = nullptr;
 } // namespace
 
-// The legs that block inside one menu frame: the play poll and the host poll, each a GetTickCount
-// loop that pumps the session's periodic update (the play loop the window messages and the key
-// read too) until its result or 60 s; the gate wait and the connect polls run frame by frame.
-// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the host loop @0x4D5180..0x4D519D
-//  (ProcessPeriodicUpdate @0x4D5185, the 0xEA60 compare @0x4D518E), the play loop
-//  @0x4D54C0..0x4D54EE (ProcessPeriodicUpdate @0x4D54C5, Game_PumpWindowMessages @0x4D54D5,
-//  Input_DequeueKeyEvent @0x4D54DA); its one caller UI_DispatchScreenEvent (the call @0x54F33B)]
+// The legs that block inside one menu frame: the play poll and the host poll, each until its
+// result or 60 s (engine: connect_or_host.h's legs' waits).
 bool NovaWorldClient::connect_or_host_wait() const {
 	return play_in_flight_ || host_role_.phase() == opennova::NwuHostRole::Phase::Requested;
 }
@@ -1160,8 +1155,7 @@ bool NovaWorldClient::escape_connect() {
 		return true;
 	}
 	// The host leg's wait reads no key and pumps no window message: its ESC is never taken, and
-	// the request stands. [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the host loop
-	//  @0x4D5180..0x4D519D]
+	// the request stands (engine: connect_or_host.h's legs' waits).
 	if (host_role_.phase() == opennova::NwuHostRole::Phase::Requested) return true;
 	return lobby_.escape();
 }
@@ -1280,9 +1274,7 @@ void NovaWorldClient::on_host_request_completed(int result, int response_code,
 		return;
 	case opennova::HostKeyResult::Kind::Resolved: {
 		// The page's HOSTKEY dispatches the leg: ConnectOrHost's checks run now, on the session
-		// and the gate reply as they stand. [orig: UI_DispatchScreenEvent - HostDialog_StartSession
-		//  @0x54F321, CNapiGameSession_ConnectOrHost (the call @0x54F33B), the error dialog
-		//  @0x54F349; UI_HandleHostSessionStart @0x556D00 runs no check before its open @0x556F98]
+		// and the gate reply as they stand (engine: connect_or_host.h, ahead of host_leg_refusal).
 		opennova::ClientSession *session = lobby_.session();
 		const opennova::GateResponse &gate = lobby_.gate_response();
 		const bool set_up = session != nullptr && lobby_.is_open();

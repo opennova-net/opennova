@@ -203,9 +203,9 @@ public:
 		// embedder writes the connect log's lines from them.
 		// [orig: CNapiGameSession_InitPlayerConnection @0x4D4160 - conn+0xC0 =
 		//  CNapiGameSession_OnNovaWorldConnected @0x4D428E, conn+0xC4 = CNapiGameSession_OnDisconnect
-		//  @0x4D429B; CNapiNPConnection_OnStateChange @0x626060 - the state-5 call @0x62622A;
-		//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the state-5 call @0x6254E7 after
-		//  the burst @0x6254BF..0x6254D3]
+		//  @0x4D429B; CNapiNPConnection_OnStateChange @0x626060 - the state-5 call @0x62622A (its
+		//  jge @0x626231); CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the state-5 call
+		//  @0x6254E7 after the burst @0x6254BF..0x6254D3]
 		std::function<void()> on_connection_up;
 		std::function<void()> on_connection_down;
 		// Each session packet the parse takes (the admitted in-order one and every queued one it

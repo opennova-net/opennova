@@ -19,6 +19,13 @@ namespace opennova {
 // the preset @0x4d4f89, the bail @0x4d4f95..0x4d4fd2].
 inline constexpr char NWEC_SESSION_NOT_SET_UP[] = "NWEC01";
 
+// The menu's Host runs none of these checks: it opens the main page's @HOST_URL@ (http_flow.h's
+// hosting line), and the hosting page whose title carries the HOSTKEY dispatches the leg; only then
+// do the checks and their lines run, over the session and the gate reply as they then stand.
+// [orig: UI_HandleHostSessionStart @0x556D00 - the open @0x556F98, no check ahead of it;
+//  UI_DispatchScreenEvent @0x54E6A0 - HostDialog_StartSession @0x54F321,
+//  CNapiGameSession_ConnectOrHost (the call @0x54F33B), the error dialog @0x54F349]
+//
 // The tag the hosting leg fails with before its request, or nullptr to send it: a session that
 // is not set up (NWEC01), one outside states 4..8 -- flags bits 2 and 8 -- (NWEC49), and a gate
 // reply missing or without a lobby name (NWEC50).
@@ -66,6 +73,17 @@ inline constexpr char kMovingOnLine[] = "NWU MOVING ON TO HOSTING OR PLAYING..."
 // (@0x4D558A), a timeout kPlayTimeoutLine with NWEC02 (@0x4D553E), and either runs
 // CGameSession_StopPlaying (the call @0x4D5592); then any state but 8 writes
 // play_not_playing_line (@0x4D55E7) and maps a result's MsgCode over the tag (@0x4D55FE).
+// The legs' two waits are GetTickCount loops inside the menu frame that runs ConnectOrHost, each
+// until its result or 60 s, so that frame (and its remote-admin pump) ends only with the wait: the
+// game shell's NovaWorldClient feeds the wait into inmatch::RemoteAdminIdleFrame. The host leg's
+// loop pumps the session's periodic update alone, reading no window message and no key, so the
+// player's ESC is never taken while the host request waits; the play leg's adds the window
+// messages and the key read (the play poll above). The gate wait and the connect polls run frame
+// by frame. [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the host loop @0x4D5180..0x4D519D
+//  (ProcessPeriodicUpdate @0x4D5185, the 0xEA60 compare @0x4D518E, the state test
+//  @0x4D519A..0x4D519D), the play loop @0x4D54C0..0x4D54EE (ProcessPeriodicUpdate @0x4D54C5,
+//  Game_PumpWindowMessages @0x4D54D5, Input_DequeueKeyEvent @0x4D54DA); its one caller
+//  UI_DispatchScreenEvent (the call @0x54F33B)]
 inline constexpr char kHostAttemptLine[] = "NWU ATTEMPTING TO START HOSTING";        // @0x4D5038
 inline constexpr char kHostGateNotOkLine[] = "NWU HOSTING FAILED...GATEINFO NOT OK!!!"; // @0x4D50C9
 inline constexpr char kHostStartFailedLine[] =
