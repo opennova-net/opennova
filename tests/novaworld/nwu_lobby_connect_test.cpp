@@ -92,6 +92,11 @@ const PeerAddr kServer{ 0x0100007Fu, 64206 }; // 127.0.0.1:64206, the gate's one
 // The enumerator's record of kServer's 0x81 (its SN, the service's "OpenNova"): its two lines.
 const std::string kDiscovered = "NWU SESSION DISCOVERED AT 127.0.0.1:64206 [OpenNova]";
 const std::string kRemoved = "NWU SESSION AT 127.0.0.1:64206 [OpenNova] HAS BEEN REMOVED.";
+// The menu runs one connect state a frame: the accepting 0x82 the rigs land at 200 ends the
+// connect poll in that frame, and the validation wait (the verify poll's re-stamp) runs in the
+// next, at 210. [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - state 6 set @0x5591B0, the
+//  validation wait @0x5591D5]
+constexpr uint32_t kVerifyStampAt = 210;
 
 // One connect on in-memory sockets: the gate names kServer, and the session starts on the
 // first tick.
@@ -254,8 +259,8 @@ void check_connect_error_tags() {
 
 // A first connect no 0x81 answers: the periodic update gives it up 20 s after the session's
 // state-1 entry (not at 20 s, past it), the probe stops (no 0x41 from then on, a 0x81 for the
-// connection neither claimed nor read), and the validation wait reports the give-up word's
-// NWEC42, once. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the 0x4E20 compare
+// connection neither claimed nor read), the connect poll ends in that frame, and the validation
+// wait, the menu's next frame, reports the give-up word's NWEC42, once. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the 0x4E20 compare
 //  @0x4D44A3, +0x12C = 1 @0x4D44B1; CNapiGameSession_PumpConnection @0x4D0A40 - NapiTimer_Stop
 //  @0x4D0A71; CGameSession_WaitForNWUValidation @0x4D0F20 - -17 @0x4D111C]
 void check_state_one_give_up() {
@@ -276,6 +281,9 @@ void check_state_one_give_up() {
 	CHECK(hellos == 2); // the re-announce
 
 	rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 1);
+	CHECK(rig.fatals.empty());
+	CHECK(session.lobby_state() == 0);
+	rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 2);
 	CHECK(rig.fatals == std::vector<std::string>{ "NWEC42" });
 	CHECK(rig.had_session_at_fatal && rig.lobby_state_at_fatal == 0 && rig.flags_at_fatal == 0);
 	CHECK(rig.lobby.session() == nullptr);
@@ -294,10 +302,10 @@ void check_state_one_give_up() {
 }
 
 // A first connect whose 0x82 lands but whose verify never completes: the validation wait passes
-// on the tick that sees the session out of state 1 and re-stamps, and the verify poll gives up
-// 20 s after that re-stamp (not at it, past it), the connection that was up tearing down (its
-// 0x46 burst to the server) before the connection wait reports NWEC46. The first connect's
-// state-1 give-up does not fire on a session past state 1.
+// in the frame after the one whose connect poll sees the session out of state 1 and re-stamps,
+// and the verify poll gives up 20 s after that re-stamp (not at it, past it), the connection that
+// was up tearing down (its 0x46 burst to the server); the connection wait reports NWEC46 the
+// next frame. The first connect's state-1 give-up does not fire on a session past state 1.
 // [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - the re-stamp @0x4D120C;
 //  CNapiGameSession_PollConnectPhase2 @0x4D4D70 - the 0x4E20 compare @0x4D4DB1, the give-up
 //  @0x4D4E03 -> CNapiNPConnection_RequestDisconnect @0x61E0F0 (state 5 -> SetState(6));
@@ -317,22 +325,25 @@ void check_verify_give_up() {
 	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 	CHECK(!auth.empty());
 	rig.session.inbound.push_back({ kServer, server_auth_to(auth) });
-	const uint32_t up_at = 200;
-	rig.lobby.tick(up_at);
+	rig.lobby.tick(200);
 	CHECK(session.state() == ClientSession::State::Verifying);
 	CHECK(session.lobby_state() == 2 || session.lobby_state() == 3);
+	CHECK(rig.fatals.empty());
+	rig.lobby.tick(kVerifyStampAt); // the validation wait's frame: the re-stamp
 	CHECK(rig.fatals.empty());
 
 	// Past 20 s from the state-1 entry, but the session left state 1: no give-up there.
 	rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 1);
 	CHECK(rig.fatals.empty());
-	rig.lobby.tick(up_at + SESSION_CONNECT_VERIFY_TIMEOUT_MS);
+	rig.lobby.tick(kVerifyStampAt + SESSION_CONNECT_VERIFY_TIMEOUT_MS);
 	CHECK(rig.fatals.empty());
 	CHECK(rig.count(SESSION_OPCODE_CLIENT_GOODBYE) == 0);
 
-	rig.lobby.tick(up_at + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
-	CHECK(rig.fatals == std::vector<std::string>{ "NWEC46" });
+	rig.lobby.tick(kVerifyStampAt + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
+	CHECK(rig.fatals.empty());
 	CHECK(rig.count(SESSION_OPCODE_CLIENT_GOODBYE) >= 1);
+	rig.lobby.tick(kVerifyStampAt + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 2);
+	CHECK(rig.fatals == std::vector<std::string>{ "NWEC46" });
 	CHECK(rig.state_at_fatal == ClientSession::State::Closed && rig.lobby_state_at_fatal == 0);
 	CHECK(rig.lobby.session() == nullptr);
 	for (const auto &dg : rig.session.sent) {
@@ -347,7 +358,8 @@ void check_verify_give_up() {
 // D-NET-453: a first connect the service rejects (CR 0) is not a session error. The connection
 // keeps the 0x82's JFC / JFP and drops to its down state with no teardown (no 0x46), and the
 // periodic update gives the first connect (the word 0) up on it with the give-up word 2: the
-// probe stays stopped, the 0x42 leg sends nothing more, and the validation wait reports NWEC43.
+// probe stays stopped, the 0x42 leg sends nothing more, and the validation wait, the menu's next
+// frame, reports NWEC43.
 // [orig: NapiNP_HandleServerJoinResponse @0x629840 - @0x629CD8..0x629CF6, the store @0x629F95;
 //  CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the state-4 test @0x4D4436..0x4D4441,
 //  +0x12C = 2 @0x4D446D, CNapiGameSession_ProcessNetwork @0x4D447E;
@@ -367,6 +379,8 @@ void check_rejected_connect() {
 	CHECK(!auth.empty());
 	rig.session.inbound.push_back({ kServer, server_reject_to(auth, 14, 2) });
 	rig.lobby.tick(200);
+	CHECK(rig.fatals.empty());
+	rig.lobby.tick(210);
 	CHECK(rig.fatals == std::vector<std::string>{ "NWEC43" });
 	CHECK(rig.jfc_at_fatal == 14 && rig.jfp_at_fatal == 2);
 	CHECK(rig.state_at_fatal == ClientSession::State::Closed && rig.lobby_state_at_fatal == 0);
@@ -425,9 +439,10 @@ std::vector<uint8_t> server_statement_to(const std::vector<uint8_t> &auth_dg, co
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
 }
 
-// A first connect up to its verify: the 0x81 at 100, the accepting 0x82 at 200. Returns the 0x42
-// the 0x82 answered (empty when the connect did not get that far).
-std::vector<uint8_t> bring_to_verify(Rig &rig) {
+// A first connect up to its accept: the 0x81 at 100, the accepting 0x82 at 200, the frame whose
+// connect poll ends (the validation wait is the next). Returns the 0x42 the 0x82 answered (empty
+// when the connect did not get that far).
+std::vector<uint8_t> bring_to_accept(Rig &rig) {
 	rig.start(10);
 	if (rig.lobby.session() == nullptr)
 		return {};
@@ -442,10 +457,30 @@ std::vector<uint8_t> bring_to_verify(Rig &rig) {
 	return auth;
 }
 
+// A first connect up to its verify poll: the accept, then the validation wait's frame at
+// kVerifyStampAt (the re-stamp). Returns the 0x42 the 0x82 answered.
+std::vector<uint8_t> bring_to_verify(Rig &rig) {
+	const std::vector<uint8_t> auth = bring_to_accept(rig);
+	if (!auth.empty())
+		rig.lobby.tick(kVerifyStampAt);
+	return auth;
+}
+
+// The session login's end over a connect in its verify poll: the service's accepting
+// ServerVerifyResult (packet 1) taken at `at` (the verify poll ends), the connection wait the
+// frame after (YIPPEE), the web lobby's open the frame after that (the validated hook).
+void log_in(Rig &rig, const std::vector<uint8_t> &auth, uint32_t at = 300) {
+	rig.session.inbound.push_back({ kServer,
+			server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+	rig.lobby.tick(at);
+	rig.lobby.tick(at + 2);
+	rig.lobby.tick(at + 4);
+}
+
 // A verify the service rejects (ServerVerifyResult Success=0): the rejection runs the connect's
 // abort, the connection tearing down with its 0x46 burst, and drops the session to state 0, so
-// the verify poll ends and the connection wait reports the session not up, NWEC48, once: the
-// session's own error is not reported while the poll runs. The driver then drops the connection.
+// the verify poll ends and the connection wait, the menu's next frame, reports the session not
+// up, NWEC48, once: the session's own error is not reported while the poll runs. The driver then drops the connection.
 // [orig: CNapiGameSession_HandleConnectVerifyResponse @0x4d5800 - CNapiGameSession_PumpConnection
 //  @0x4D0A40 called @0x4d58ac, SetState(0) @0x4d58e1; CNapiGameSession_PollConnectPhase2
 //  @0x4D4D70 - the states @0x4D4D90..0x4D4D9E; CGameSession_WaitForNWUConnection @0x4D1230 - bit 2
@@ -463,6 +498,8 @@ void check_verify_rejected() {
 	CHECK(!reject.empty());
 	rig.session.inbound.push_back({ kServer, reject });
 	rig.lobby.tick(300);
+	CHECK(rig.fatals.empty());
+	rig.lobby.tick(310);
 	CHECK(rig.fatals == std::vector<std::string>{ "NWEC48" });
 	CHECK(rig.lobby_state_at_fatal == 0 && rig.flags_at_fatal == 0);
 	CHECK(rig.count(SESSION_OPCODE_CLIENT_GOODBYE) >= 1);
@@ -482,7 +519,7 @@ void check_verify_rejected() {
 
 // The validation wait's -20: a session that left state 1 for a state outside 2..4 with no give-up
 // (the service accepts the 0x82 and closes the connection in the same receive batch, its goodbye
-// tearing the connection down to state 0) reports NWEC45, once.
+// tearing the connection down to state 0) reports NWEC45 in the frame after, once.
 // [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - the states @0x4D1137..0x4D114A, -20
 //  @0x4D1196]
 void check_not_verifying() {
@@ -506,6 +543,8 @@ void check_not_verifying() {
 			nw_encode_outbound(
 					SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(parsed.ck, stop)) });
 	rig.lobby.tick(200);
+	CHECK(rig.fatals.empty());
+	rig.lobby.tick(210);
 	CHECK(rig.fatals == std::vector<std::string>{ "NWEC45" });
 	CHECK(rig.lobby_state_at_fatal == 0);
 	CHECK(rig.lobby.session() == nullptr);
@@ -531,6 +570,8 @@ void check_late_accept_after_give_up() {
 	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 	CHECK(!auth.empty());
 	rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 1);
+	CHECK(rig.fatals.empty());
+	rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 2);
 	CHECK(rig.fatals == std::vector<std::string>{ "NWEC42" });
 	CHECK(rig.state_at_fatal == ClientSession::State::Auth);
 	CHECK(rig.lobby.session() == nullptr);
@@ -631,9 +672,7 @@ void check_teardown_line_order() {
 		Rig rig;
 		rig.log_on = true;
 		const std::vector<uint8_t> auth = bring_to_verify(rig);
-		rig.session.inbound.push_back({ kServer,
-				server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
-		rig.lobby.tick(300);
+		log_in(rig, auth);
 		CHECK(rig.lobby.session() != nullptr);
 		if (rig.lobby.session() == nullptr) return;
 		const std::size_t burst = rig.lobby.session()->disconnect_burst_count();
@@ -724,6 +763,8 @@ void check_short_protocol_packets_keep_the_connection() {
 	rig.session.inbound.push_back(
 			{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "0" } }, 2) });
 	rig.lobby.tick(at);
+	CHECK(rig.fatals.empty()); // the verify poll ends; the connection wait is the next frame
+	rig.lobby.tick(at + 10);
 	CHECK(rig.fatals == std::vector<std::string>{ "NWEC48" });
 	rig.lobby.close();
 }
@@ -733,7 +774,7 @@ void check_short_protocol_packets_keep_the_connection() {
 // 500 ms from the stamp (ahead of the reply's processing on the frame the reply lands), the
 // reply's size and every line its reader returns (an empty one too), the reflected address, and
 // ConnectToNovaWorld's lines around the session's start; then the validation wait's and the
-// connection wait's. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - @0x4CE84D, @0x4CE88C,
+// connection wait's, each in the frame after the poll ahead of it ends. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - @0x4CE84D, @0x4CE88C,
 //  @0x4CEAE3; CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CEDF4, @0x4CEF02, @0x4CF037,
 //  @0x4CF083, @0x4CF10C, @0x4CF884; CNapiGameSession_ConnectToNovaWorld @0x4D4640 - @0x4D46C3,
 //  @0x4D4751, @0x4D4B0C, @0x4D4BC2; CGameSession_WaitForNWUValidation @0x4D0F20 - @0x4D0F79,
@@ -785,13 +826,17 @@ void check_connect_log_gate_and_connect() {
 	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 	rig.session.inbound.push_back({ kServer, server_auth_to(auth) });
 	rig.lobby.tick(1400);
-	// The 0x82's state-5 entry writes OnNovaWorldConnected's line ahead of the waits'.
-	CHECK((rig.log == std::vector<std::string>{ "NWU CONNECTED TO NOVAWORLD 127.0.0.1:64206 [NWServer]  [yourip=1.0.0.127:40000]",
-			"NWU LEAVING JOIN LOOP...", "NWU WAITING FOR VALIDATION..." }));
+	// The 0x82's state-5 entry writes OnNovaWorldConnected's line; the connect poll ends.
+	CHECK((rig.log == std::vector<std::string>{ "NWU CONNECTED TO NOVAWORLD 127.0.0.1:64206 [NWServer]  [yourip=1.0.0.127:40000]" }));
+	rig.log.clear();
+	rig.lobby.tick(1410);
+	CHECK((rig.log == std::vector<std::string>{ "NWU LEAVING JOIN LOOP...", "NWU WAITING FOR VALIDATION..." }));
 	rig.log.clear();
 	rig.session.inbound.push_back(
 			{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }) });
 	rig.lobby.tick(1500);
+	CHECK(rig.log.empty()); // the verify poll ends
+	rig.lobby.tick(1510);
 	CHECK((rig.log == std::vector<std::string>{ "NWU YIPPEE WE ARE CONNECTED AND VALIDATED." }));
 	CHECK(rig.fatals.empty());
 	// The connection's destroy drains the record.
@@ -812,7 +857,7 @@ void check_connect_log_gate_and_connect() {
 void check_connect_log_packet_lines() {
 	Rig rig;
 	rig.log_on = true;
-	const std::vector<uint8_t> auth = bring_to_verify(rig);
+	const std::vector<uint8_t> auth = bring_to_accept(rig);
 	CHECK(!auth.empty());
 	// The join loop's line comes ahead of the first announce's send.
 	CHECK(!rig.log.empty());
@@ -895,9 +940,7 @@ void check_connect_log_packet_errors() {
 	Rig rig;
 	rig.log_on = true;
 	const std::vector<uint8_t> auth = bring_to_verify(rig);
-	rig.session.inbound.push_back({ kServer,
-			server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
-	rig.lobby.tick(300);
+	log_in(rig, auth);
 	rig.log.clear();
 	rig.session.inbound.push_back({ kServer, server_record_to(auth, 5, { 1, 2, 3 }, 2) });
 	rig.lobby.tick(400);
@@ -944,6 +987,8 @@ void check_connect_log_give_ups() {
 		rig.start(10);
 		rig.log.clear();
 		rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 1);
+		CHECK(rig.log.empty() && rig.fatals.empty()); // the give-up writes no line
+		rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 2);
 		CHECK((rig.log ==
 				std::vector<std::string>{ "NWU LEAVING JOIN LOOP...", "NWU FAILURE [1]!!!" }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC42" });
@@ -954,10 +999,14 @@ void check_connect_log_give_ups() {
 		rig.log_on = true;
 		bring_to_verify(rig);
 		rig.log.clear();
-		rig.lobby.tick(200 + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
+		rig.lobby.tick(kVerifyStampAt + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
 		// The abort tears the connection down: OnDisconnect's line, no record latched.
 		CHECK((rig.log == std::vector<std::string>{ "NWU 20 secs are up! (b)", "NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
-				kRemoved, "NWU TIMEOUT2!!!" }));
+				kRemoved }));
+		CHECK(rig.fatals.empty());
+		rig.log.clear();
+		rig.lobby.tick(kVerifyStampAt + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 2);
+		CHECK((rig.log == std::vector<std::string>{ "NWU TIMEOUT2!!!" }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC46" });
 		rig.lobby.close();
 	}
@@ -970,7 +1019,11 @@ void check_connect_log_give_ups() {
 				{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "0" } }) });
 		rig.lobby.tick(300);
 		CHECK((rig.log == std::vector<std::string>{ "NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
-				kRemoved, "NWU NOT CONNECTED FOR SOME REASON..." }));
+				kRemoved }));
+		CHECK(rig.fatals.empty());
+		rig.log.clear();
+		rig.lobby.tick(310);
+		CHECK((rig.log == std::vector<std::string>{ "NWU NOT CONNECTED FOR SOME REASON..." }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC48" });
 		rig.lobby.close();
 	}
@@ -996,8 +1049,11 @@ void check_connect_log_give_ups() {
 		// The peer's goodbye latches its record (the receiver's role 1) ahead of the teardown.
 		CHECK((rig.log == std::vector<std::string>{ "NWU CONNECTED TO NOVAWORLD 127.0.0.1:64206 [NWServer]  [yourip=1.0.0.127:40000]",
 				"NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] "
-				"[1,2,0,0,\"\",0,\"NP.S:PT:STOP\"]",
-				"NWU LEAVING JOIN LOOP...", "NWU FAILURE2 [0]!!!", kRemoved }));
+				"[1,2,0,0,\"\",0,\"NP.S:PT:STOP\"]" }));
+		CHECK(rig.fatals.empty());
+		rig.log.clear();
+		rig.lobby.tick(210);
+		CHECK((rig.log == std::vector<std::string>{ "NWU LEAVING JOIN LOOP...", "NWU FAILURE2 [0]!!!", kRemoved }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC45" });
 		rig.lobby.close();
 	}
@@ -1052,7 +1108,8 @@ void check_connect_log_gate_failures() {
 	{
 		Rig rig;
 		bring_to_verify(rig);
-		rig.lobby.tick(200 + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
+		rig.lobby.tick(kVerifyStampAt + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
+		rig.lobby.tick(kVerifyStampAt + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 2);
 		CHECK(rig.log.empty() && rig.fatals == std::vector<std::string>{ "NWEC46" });
 		rig.lobby.close();
 	}
@@ -1188,9 +1245,7 @@ std::vector<NapiMessage> client_statements(
 void check_stop_hosting_inout_line() {
 	Rig rig;
 	const std::vector<uint8_t> auth = bring_to_verify(rig);
-	rig.session.inbound.push_back({ kServer,
-			server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
-	rig.lobby.tick(300);
+	log_in(rig, auth);
 	std::vector<std::string> inout;
 	std::vector<std::string> stopped;
 	NwuHostRole::Hooks hooks;
@@ -1224,25 +1279,54 @@ void check_stop_hosting_inout_line() {
 //  @0x4D4E39, "%s : NWU USER ESCAPED2" @0x4D4E73, @0x4D4E7D; CGameSession_WaitForNWUConnection
 //  @0x4D1230 - "%s : NWU USER HIT ESCAPE2!!!" @0x4D12F1, -22 @0x4D1324; UI_ShowNetworkErrorByCode
 //  @0x5584A0 - NWEC(25 - code)]
-// The session login's end: the poll's YIPPEE line, then the validated hook once, where the menu's
-// next state opens the web lobby; the menu's two web opens' lines. [orig:
-//  CGameSession_WaitForNWUConnection @0x4D1230 - @0x4D13D3; UI_ProcessLANSessionStateMachine
-//  @0x558DE0 - state 9 @0x559242, "%s : HTTP Getting \"%s\"" @0x5592D8; UI_HandleHostSessionStart
-//  @0x556D00 - "%s : HTTP hosting with \"%s\"" @0x556F88]
+// The session login's end, one menu state a frame: the verify poll ends in the frame that takes
+// the accepting ServerVerifyResult, the connection wait's YIPPEE line is the next frame's, and the
+// validated hook (the web lobby's open) the frame after, once. The command-line host's blocking
+// sequence runs each wait at once after its poll's loop and opens no web lobby. The menu's two web
+// opens' lines. [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - 8 set @0x559210, the
+//  connection wait @0x559235, 9 set @0x559242, "%s : HTTP Getting \"%s\"" @0x5592D8;
+//  CGameSession_WaitForNWUConnection @0x4D1230 - @0x4D13D3;
+//  CNapiGameSession_ConnectAndWaitForValidation @0x4D4EC0 - the waits @0x4D4EDD / @0x4D4EF3;
+//  UI_HandleHostSessionStart @0x556D00 - "%s : HTTP hosting with \"%s\"" @0x556F88]
 void check_connect_validated() {
-	Rig rig;
-	rig.log_on = true;
-	const std::vector<uint8_t> auth = bring_to_verify(rig);
-	CHECK(rig.validated == 0);
-	rig.session.inbound.push_back({ kServer,
-			server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
-	rig.lobby.tick(300);
-	CHECK(rig.validated == 1);
-	CHECK(rig.validated_at_log > 0 && rig.validated_at_log <= rig.log.size() &&
-			rig.log[rig.validated_at_log - 1] == "NWU YIPPEE WE ARE CONNECTED AND VALIDATED.");
-	rig.lobby.tick(400);
-	CHECK(rig.validated == 1);
-	rig.lobby.close();
+	const std::string yippee = "NWU YIPPEE WE ARE CONNECTED AND VALIDATED.";
+	{
+		Rig rig;
+		rig.log_on = true;
+		const std::vector<uint8_t> auth = bring_to_verify(rig);
+		CHECK(rig.validated == 0);
+		rig.session.inbound.push_back({ kServer,
+				server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+		rig.lobby.tick(300);
+		CHECK(rig.validated == 0);
+		CHECK(rig.log.empty() || rig.log.back() != yippee);
+		rig.lobby.tick(310);
+		CHECK(rig.validated == 0);
+		CHECK(!rig.log.empty() && rig.log.back() == yippee);
+		rig.lobby.tick(320);
+		CHECK(rig.validated == 1);
+		CHECK(rig.validated_at_log == rig.log.size() && rig.validated_at_log > 0 &&
+				rig.log[rig.validated_at_log - 1] == yippee);
+		rig.lobby.tick(400);
+		CHECK(rig.validated == 1);
+		CHECK(rig.fatals.empty());
+		rig.lobby.close();
+	}
+	{
+		Rig rig(/*command_line_host=*/true);
+		rig.log_on = true;
+		const std::vector<uint8_t> auth = bring_to_accept(rig);
+		CHECK(!rig.log.empty() && rig.log.back() == "NWU WAITING FOR VALIDATION...");
+		rig.log.clear();
+		rig.session.inbound.push_back({ kServer,
+				server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+		rig.lobby.tick(300);
+		CHECK((rig.log == std::vector<std::string>{ yippee }));
+		rig.lobby.tick(310);
+		rig.lobby.tick(320);
+		CHECK(rig.validated == 0 && rig.fatals.empty());
+		rig.lobby.close();
+	}
 	CHECK(http_getting_line("http://gs.opennova.test/NWStart.dll?prepare=1") ==
 			"HTTP Getting \"http://gs.opennova.test/NWStart.dll?prepare=1\"");
 	CHECK(http_hosting_line("/NWHost.dll") == "HTTP hosting with \"/NWHost.dll\"");
@@ -1258,6 +1342,9 @@ void check_escape_legs() {
 		rig.log.clear();
 		CHECK(rig.lobby.escape());
 		rig.lobby.tick(20);
+		CHECK((rig.log == std::vector<std::string>{ "NWU USER ESCAPED1" }));
+		CHECK(rig.fatals.empty());
+		rig.lobby.tick(30);
 		CHECK((rig.log == std::vector<std::string>{ "NWU USER ESCAPED1", "NWU LEAVING JOIN LOOP...",
 				"NWU USER HIT ESCAPE!!!" }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC41" });
@@ -1275,9 +1362,12 @@ void check_escape_legs() {
 		rig.lobby.tick(300);
 		CHECK((rig.log == std::vector<std::string>{ "NWU USER ESCAPED2",
 				"NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
-				kRemoved, "NWU USER HIT ESCAPE2!!!" }));
-		CHECK(rig.fatals == std::vector<std::string>{ "NWEC47" });
+				kRemoved }));
+		CHECK(rig.fatals.empty());
 		CHECK(rig.session.sent.size() > sent); // the 0x46 burst
+		rig.lobby.tick(310);
+		CHECK(!rig.log.empty() && rig.log.back() == "NWU USER HIT ESCAPE2!!!");
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC47" });
 		rig.lobby.close();
 	}
 	// A second connect on the same driver: its escape's drain writes the record's line where the
@@ -1288,6 +1378,7 @@ void check_escape_legs() {
 		bring_to_verify(rig);
 		CHECK(rig.lobby.escape());
 		rig.lobby.tick(300);
+		rig.lobby.tick(310);
 		rig.lobby.close();
 		rig.log.clear();
 		rig.fatals.clear();
@@ -1296,16 +1387,17 @@ void check_escape_legs() {
 		rig.log.clear();
 		CHECK(rig.lobby.escape());
 		rig.lobby.tick(300);
+		rig.lobby.tick(310);
 		CHECK((rig.log == std::vector<std::string>{ "NWU USER ESCAPED2",
 				"NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
 				kRemoved, "NWU USER HIT ESCAPE2!!!" }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC47" });
 		rig.lobby.close();
 	}
-	// An ESC taken in the tick the 0x82 lands: the connect poll reads the state first and passes
-	// to the validation wait, whose pass to the verify poll empties the key queue: the key is
-	// dropped and the verify goes on. [orig: CGameSession_WaitForNWUValidation @0x4D0F20 -
-	//  Input_ResetKeyQueue (the call @0x4D11F7)]
+	// An ESC taken in the tick the 0x82 lands: the connect poll reads the state first and ends,
+	// and the validation wait, the next frame, empties the key queue on its pass to the verify
+	// poll: the key is dropped and the verify goes on. [orig: CGameSession_WaitForNWUValidation
+	//  @0x4D0F20 - Input_ResetKeyQueue (the call @0x4D11F7)]
 	{
 		Rig rig;
 		rig.log_on = true;
@@ -1319,11 +1411,58 @@ void check_escape_legs() {
 		rig.session.inbound.push_back({ kServer, server_auth_to(auth) });
 		rig.lobby.tick(200);
 		rig.log.clear();
+		rig.lobby.tick(kVerifyStampAt);
+		CHECK((rig.log == std::vector<std::string>{ "NWU LEAVING JOIN LOOP...",
+				"NWU WAITING FOR VALIDATION..." }));
+		rig.log.clear();
 		rig.lobby.tick(300);
 		CHECK(rig.log.empty());
 		CHECK(rig.fatals.empty());
 		CHECK(rig.lobby.session() != nullptr &&
 				rig.lobby.session()->state() == ClientSession::State::Verifying);
+		rig.lobby.close();
+	}
+	// An ESC in the frame after the 0x82's (D-NET-571, Q7-17): the menu is in state 6, whose
+	// validation wait reads no key and empties the queue on its pass, so the key is dropped:
+	// no line, no 0x46 burst, the verify goes on. [orig: UI_ProcessLANSessionStateMachine
+	//  @0x558DE0 - 6 set @0x5591B0, the validation wait @0x5591D5;
+	//  CGameSession_WaitForNWUValidation @0x4D0F20 - Input_ResetKeyQueue (the call @0x4D11F7)]
+	{
+		Rig rig;
+		rig.log_on = true;
+		bring_to_accept(rig);
+		rig.log.clear();
+		CHECK(rig.lobby.escape());
+		rig.lobby.tick(kVerifyStampAt);
+		CHECK((rig.log == std::vector<std::string>{ "NWU LEAVING JOIN LOOP...",
+				"NWU WAITING FOR VALIDATION..." }));
+		rig.lobby.tick(300);
+		rig.lobby.tick(310);
+		CHECK(rig.log.size() == 2);
+		CHECK(rig.fatals.empty());
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_GOODBYE) == 0);
+		CHECK(rig.lobby.session() != nullptr &&
+				rig.lobby.session()->state() == ClientSession::State::Verifying);
+		rig.lobby.close();
+	}
+	// An ESC in the connection wait's frame: no poll reads it (the wait reads no key), the login
+	// ends as it would. [orig: CGameSession_WaitForNWUConnection @0x4D1230 - the flags @0x4D1244,
+	//  bit 2 @0x4D1332, no key read]
+	{
+		Rig rig;
+		rig.log_on = true;
+		const std::vector<uint8_t> auth = bring_to_verify(rig);
+		rig.session.inbound.push_back({ kServer,
+				server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+		rig.lobby.tick(300);
+		rig.log.clear();
+		CHECK(rig.lobby.escape());
+		rig.lobby.tick(310);
+		rig.lobby.tick(320);
+		CHECK((rig.log == std::vector<std::string>{ "NWU YIPPEE WE ARE CONNECTED AND VALIDATED." }));
+		CHECK(rig.validated == 1 && rig.fatals.empty());
+		CHECK(rig.count(SESSION_OPCODE_CLIENT_GOODBYE) == 0);
+		CHECK(!rig.lobby.escape()); // the poll is over
 		rig.lobby.close();
 	}
 }
@@ -1364,9 +1503,7 @@ void check_connect_or_host_lines() {
 		Rig rig(command_line_host);
 		rig.log_on = true;
 		const std::vector<uint8_t> auth = bring_to_verify(rig);
-		rig.session.inbound.push_back({ kServer,
-				server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
-		rig.lobby.tick(300);
+		log_in(rig, auth);
 		std::vector<std::string> failed;
 		NwuHostRole::Hooks hooks;
 		hooks.on_failed = [&failed](const std::string &tag) { failed.push_back(tag); };
@@ -1420,9 +1557,7 @@ void check_connect_or_host_lines() {
 		Rig rig(command_line_host);
 		rig.log_on = true;
 		const std::vector<uint8_t> auth = bring_to_verify(rig);
-		rig.session.inbound.push_back({ kServer,
-				server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
-		rig.lobby.tick(300);
+		log_in(rig, auth);
 		Exit out;
 		NwuHostRole::Hooks hooks;
 		hooks.on_failed = [&out](const std::string &tag) { out.failed.push_back(tag); };
@@ -1485,9 +1620,7 @@ void check_host_player_add_sends_update() {
 	CHECK(!auth.empty());
 	if (auth.empty())
 		return;
-	rig.session.inbound.push_back(
-			{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
-	rig.lobby.tick(300);
+	log_in(rig, auth);
 	NwuHostRole role(rig.lobby, NwuHostRole::Hooks{});
 	HostRegistration reg;
 	reg.server_name = "Add Srv";

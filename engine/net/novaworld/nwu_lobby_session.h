@@ -58,10 +58,11 @@ public:
 		std::function<void(const std::string &)> on_fatal;
 		// Recoverable decode noise on the gate socket (a bad envelope or response).
 		std::function<void(const std::string &)> on_soft_error;
-		// The first connect's poll ended connected and validated: the menu's next state opens the
-		// web lobby (state 9). The command-line host runs no menu and leaves it unset.
-		// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - state 8's success
-		//  @0x55923C..0x559242]
+		// The first connect's poll ended connected and validated: the menu's state 9, the frame
+		// after the connection wait's success, opens the web lobby. The command-line host runs no
+		// menu and leaves it unset.
+		// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - state 8's success @0x559242, state 9
+		//  @0x559262..0x5592F2]
 		std::function<void()> on_connect_validated;
 		// The gate named no NWU address and its POST address and port are both set: the connect
 		// goes on with no NWU session (retail's NovaWorld menu then opens its web lobby, menu
@@ -295,9 +296,11 @@ public:
 	// The player's ESC during the first connect's poll (the NovaWorld menu's states 5..8): the
 	// next poll frame that reads the keyboard (the connect poll in session state 1, the verify
 	// poll in states 2 and 3) writes its line, gives the connect up and reports NWEC41 / NWEC47
-	// through the waits. False (nothing taken) when no poll runs. [orig:
+	// through the waits the frame after; the validation wait's pass to the verify poll drops it,
+	// and the connection wait reads none. False (nothing taken) when no poll runs. [orig:
 	//  CNapiGameSession_PollConnectPhase1 @0x4D4C30 - @0x4D4CDE..0x4D4D31;
-	//  CNapiGameSession_PollConnectPhase2 @0x4D4D70 - @0x4D4E25..0x4D4E7D]
+	//  CNapiGameSession_PollConnectPhase2 @0x4D4D70 - @0x4D4E25..0x4D4E7D;
+	//  CGameSession_WaitForNWUValidation @0x4D0F20 - Input_ResetKeyQueue (the call @0x4D11F7)]
 	bool escape();
 	// The connect log (Hooks::connect_log_on / connect_log): on now, and one line when on.
 	bool connect_log_on() const;
@@ -391,13 +394,22 @@ private:
 	bool dedicated_wait_over_ = false;
 	// The connect log's gate stamp, written only while the log is on (dword_B5F440).
 	uint32_t gate_log_stamp_ms_ = 0;
-	// The first connect's poll, retail's NovaWorld menu running PollConnectPhase1, the validation
-	// wait, PollConnectPhase2 and the connection wait in turn: its stamp (dword_B5F444), its
+	// The first connect's poll, retail's NovaWorld menu running one state a frame: PollConnectPhase1
+	// (5) until it returns 0, the validation wait (6), PollConnectPhase2 (7) until it returns 0, the
+	// connection wait (8), the web lobby's open (9); the command-line host's blocking sequence runs
+	// each wait at once after its poll's loop and opens no web lobby. Its stamp (dword_B5F444), its
 	// timed-out flag (dword_B5F448) and the give-up word the periodic update sets (session+0x12C:
 	// 1 the state-1 give-up). The stage datagram is re-sent every retransmit interval while it
-	// runs.
-	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - states 5..8 @0x55919E..0x55923C]
-	enum class ConnectPoll { Off, Connect, Verify, Done };
+	// runs (states 5..8).
+	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - states 5..9 @0x55919E..0x5592F2;
+	//  CNapiGameSession_ConnectAndWaitForValidation @0x4D4EC0 - the loops @0x4D4ED0..0x4D4ED9 /
+	//  @0x4D4EE6..0x4D4EEF, the waits @0x4D4EDD / @0x4D4EF3]
+	enum class ConnectPoll { Off, Connect, Validation, Verify, Connection, WebLobby, Done };
+	// The poll's states 5..8 (the menu's connect states, ahead of its web lobby).
+	bool connect_polling() const {
+		return connect_poll_ == ConnectPoll::Connect || connect_poll_ == ConnectPoll::Validation ||
+				connect_poll_ == ConnectPoll::Verify || connect_poll_ == ConnectPoll::Connection;
+	}
 	ConnectPoll connect_poll_ = ConnectPoll::Off;
 	uint32_t connect_stamp_ms_ = 0;
 	bool connect_timed_out_ = false;

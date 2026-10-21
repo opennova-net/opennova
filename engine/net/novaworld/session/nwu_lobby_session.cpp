@@ -480,9 +480,7 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 	// session's own (ClientSession::reconnecting).
 	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0; PumpStateMachine case 3
 	//  @0x629508]
-	const bool polling =
-			connect_poll_ == ConnectPoll::Connect || connect_poll_ == ConnectPoll::Verify;
-	if (polling && !session_->reconnecting() &&
+	if (connect_polling() && !session_->reconnecting() &&
 			clock_ms_ - connect_last_send_ms_ > SESSION_CONNECT_RETRANSMIT_MS) {
 		const std::vector<uint8_t> again = session_->retransmit_stage_datagram();
 		connect_last_send_ms_ = clock_ms_;
@@ -550,22 +548,29 @@ void NwuLobbySession::fail_connect(int code) {
 	nw_peer_ = PeerAddr{};
 }
 
-// The first connect's poll, one wait per tick as the menu runs one state per frame: the connect
-// poll while the session is in state 1 (giving up SESSION_CONNECT_POLL_TIMEOUT_MS after the
-// connect's stamp), the validation wait (its failures, else the re-stamp), the verify poll while
-// the session is in state 2 or 3 (giving up SESSION_CONNECT_VERIFY_TIMEOUT_MS after the
-// re-stamp), then the connection wait (verified, or its failure). True when it reported a
-// failure.
-// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - state 5 @0x55919E, 6 @0x5591D0, 7
-//  @0x5591FE, 8 @0x559230; CNapiGameSession_PollConnectPhase1 @0x4D4C30 - the state-1 test
-//  @0x4D4C50, the compare @0x4D4C6A, the give-up @0x4D4CB2, the flag @0x4D4CB7;
+// The first connect's poll, one menu state a tick as the NovaWorld menu runs one state a frame
+// (each frame pumping the session first): the connect poll while the session is in state 1
+// (giving up SESSION_CONNECT_POLL_TIMEOUT_MS after the connect's stamp); the tick after it ends,
+// the validation wait (its failures, else the re-stamp); the verify poll while the session is in
+// state 2 or 3 (giving up SESSION_CONNECT_VERIFY_TIMEOUT_MS after the re-stamp); the tick after
+// it ends, the connection wait (verified, or its failure); the tick after that, the web lobby's
+// open (the validated hook). The command-line host's blocking sequence runs each wait at once
+// after its poll's loop and opens no web lobby. True when it reported a failure.
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - the pump @0x558DFA; state 5:
+//  PollConnectPhase1 (the call @0x5591A3), state 6 set @0x5591B0; state 6: the validation wait
+//  (@0x5591D5), 7 set @0x5591DE; state 7: PollConnectPhase2 (@0x559203), 8 set @0x559210; state
+//  8: the connection wait (@0x559235), 9 set @0x559242; state 9 @0x559262..0x5592F2;
+//  CNapiGameSession_ConnectAndWaitForValidation @0x4D4EC0 - the loops @0x4D4ED0..0x4D4ED9 /
+//  @0x4D4EE6..0x4D4EEF, the waits @0x4D4EDD / @0x4D4EF3;
+//  CNapiGameSession_PollConnectPhase1 @0x4D4C30 - the state-1 test @0x4D4C50, the compare
+//  @0x4D4C6A, the give-up @0x4D4CB2, the flag @0x4D4CB7;
 //  CGameSession_WaitForNWUValidation @0x4D0F20 - the flag @0x4D0F86, the word @0x4D107E, the
 //  states @0x4D1137..0x4D114A, the re-stamp @0x4D120C;
 //  CNapiGameSession_PollConnectPhase2 @0x4D4D70 - the states @0x4D4D90..0x4D4D9E, the compare
 //  @0x4D4DB1, the flag @0x4D4DBF, the give-up @0x4D4E03; CGameSession_WaitForNWUConnection
 //  @0x4D1230 - the flag @0x4D1244, bit 2 @0x4D1332]
 bool NwuLobbySession::escape() {
-	if (connect_poll_ != ConnectPoll::Connect && connect_poll_ != ConnectPoll::Verify) return false;
+	if (!connect_polling()) return false;
 	escape_requested_ = true;
 	return true;
 }
@@ -593,6 +598,13 @@ bool NwuLobbySession::poll_connect() {
 					return false;
 				}
 			}
+			// The poll returned 0: the validation wait is the menu's next frame.
+			connect_poll_ = ConnectPoll::Validation;
+			if (!env_.command_line_host)
+				return false;
+			[[fallthrough]];
+		}
+		case ConnectPoll::Validation: {
 			// The validation wait's lines, each ahead of its reset.
 			// [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - "%s : NWU LEAVING JOIN
 			//  LOOP..." @0x4D0F79; "%s : NWU TIMEOUT!!!" @0x4D0FC0; "%s : NWU FAILURE [%ld]!!!"
@@ -658,6 +670,13 @@ bool NwuLobbySession::poll_connect() {
 					return false;
 				}
 			}
+			// The poll returned 0: the connection wait is the menu's next frame.
+			connect_poll_ = ConnectPoll::Connection;
+			if (!env_.command_line_host)
+				return false;
+			[[fallthrough]];
+		}
+		case ConnectPoll::Connection: {
 			// [orig: CGameSession_WaitForNWUConnection @0x4D1230 - "%s : NWU TIMEOUT2!!!"
 			//  @0x4D1287; "%s : NWU NOT CONNECTED FOR SOME REASON..." @0x4D1372; "%s : NWU
 			//  YIPPEE WE ARE CONNECTED AND VALIDATED." @0x4D13D3]
@@ -679,10 +698,16 @@ bool NwuLobbySession::poll_connect() {
 				return true;
 			}
 			connect_log("NWU YIPPEE WE ARE CONNECTED AND VALIDATED.");
+			connect_poll_ = env_.command_line_host ? ConnectPoll::Done : ConnectPoll::WebLobby;
+			return false;
+		}
+		case ConnectPoll::WebLobby:
+			// The menu's state 9 opens the web lobby (its HTTP Getting line is the hook's).
+			// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - NW_MULTI_PLAYER @0x55926F,
+			//  "%s : HTTP Getting \"%s\"" @0x5592D8, UIScene_OpenUrl @0x5592ED, state 0 @0x5592F2]
 			connect_poll_ = ConnectPoll::Done;
 			if (hooks_.on_connect_validated) hooks_.on_connect_validated();
 			return false;
-		}
 		default:
 			return false;
 	}
@@ -1096,9 +1121,7 @@ void NwuLobbySession::poll_session() {
 			// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - the error leg
 			//  @0x55915F..0x559160; CGameSession_WaitForNWUConnection @0x4D1230 - bit 2
 			//  @0x4D1332, -23 @0x4D1381]
-			const bool polling =
-					connect_poll_ == ConnectPoll::Connect || connect_poll_ == ConnectPoll::Verify;
-			if (!polling && hooks_.on_fatal)
+			if (!connect_polling() && hooks_.on_fatal)
 				hooks_.on_fatal(session_->last_error());
 			return;
 		}
