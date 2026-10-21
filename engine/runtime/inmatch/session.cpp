@@ -97,9 +97,9 @@ void Role::apply_input(const TickInput &input) {
 	// cooldown live in request_medic).
 	if ((input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
 		request_medic();
-	// The ToSpecial dispatches, with the deferred ones, once per outer frame
-	// on its first tick, as retail's input frame precedes the logic tick
-	// [orig: Input_ProcessFrame @0x49D520 -> Input_FlushDeferredEvents @0x49D591].
+	// The ToSpecial dispatches, with the deferred ones, once per input frame
+	// (a tick that consumes its own sample), as retail's input frame precedes
+	// the logic tick [orig: Input_ProcessFrame @0x49D520 -> Input_FlushDeferredEvents @0x49D591].
 	// Every queued dispatch, a press, a release or a deferred one queued
 	// again, passes the dispatcher's head, which drops the row (flags
 	// 0x8C000801) for a dead local player, under the deploy hold and once the
@@ -432,13 +432,17 @@ TransitionResult Session::fail(SessionError error) {
 }
 
 void Session::latch_input(const FrameInput &input) {
-	pending_input_.movement = input.player.movement;
-	pending_input_.look_delta_x += input.player.look_delta_x;
-	pending_input_.look_delta_y += input.player.look_delta_y;
-	pending_input_.held_action_bits = input.player.held_action_bits;
-	pending_input_.pressed_action_bits |= input.player.pressed_action_bits;
-	pending_input_.sequence = input.player.sequence;
+	latch_packet(input.player);
 	latest_camera_ = input.camera;
+}
+
+void Session::latch_packet(const InputPacket &packet) {
+	pending_input_.movement = packet.movement;
+	pending_input_.look_delta_x += packet.look_delta_x;
+	pending_input_.look_delta_y += packet.look_delta_y;
+	pending_input_.held_action_bits = packet.held_action_bits;
+	pending_input_.pressed_action_bits |= packet.pressed_action_bits;
+	pending_input_.sequence = packet.sequence;
 }
 
 TickInput Session::merged_tick_input(
@@ -469,6 +473,14 @@ FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 	const int64_t tick_start = now_us();
 	bool consume_one_shots = true;
 	for (int32_t i = 0; i < due; ++i) {
+		// Each later tick of the batch runs its own input frame at the logic
+		// tick it runs as (TickInputSource carries the witness): its sample
+		// replaces the held state and its edges are its own to consume.
+		if (i > 0 && input.tick_source != nullptr && role_ != nullptr &&
+				role_->kernel() != nullptr) {
+			latch_packet(input.tick_source->sample_tick(role_->kernel()->world.logic_tick));
+			consume_one_shots = true;
+		}
 		TickInput tick_input = merged_tick_input(input, consume_one_shots);
 		// [orig: Game_MainLoop @0x52ba21..0x52ba3a -- dword_24E0E80 = 1 when
 		//  less than one 16 ms tick of backlog remains after this quantum, 0

@@ -247,7 +247,12 @@ opennova::inmatch::FrameInput Simulation::begin_session_frame(
 	frame_sink_us_ = 0;
 	if (kernel_ != nullptr) kernel_->profile.reset();
 	opennova::inmatch::FrameInput input;
-	if (p_input.is_valid()) input = p_input->native_value();
+	if (p_input.is_valid()) {
+		input = p_input->native_value();
+		// The frame's later ticks pull their own input frames from the shell's
+		// device router (engine inmatch::TickInputSource).
+		input.tick_source = p_input->tick_source();
+	}
 	if (input.camera.listener_valid) {
 		set_sound_listener(Vector3(input.camera.position[0],
 				input.camera.position[1], input.camera.position[2]));

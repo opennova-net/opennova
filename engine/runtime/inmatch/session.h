@@ -67,8 +67,9 @@ struct TransitionResult {
 	bool applied() const { return code == TransitionCode::Applied; }
 };
 
-// One outer-frame input sample. Held state is replaced by the newest sample;
-// look deltas and one-shot actions accumulate until a logic tick consumes them.
+// One input sample: the outer frame's, or one tick's (TickInputSource). Held
+// state is replaced by the newest sample; look deltas and one-shot actions
+// accumulate until a logic tick consumes them.
 struct InputPacket {
 	world::PlayerInput movement;
 	float look_delta_x = 0.0f;
@@ -86,6 +87,35 @@ struct CameraSample {
 	bool listener_valid = false;
 };
 
+// The shell's per-tick input frame. Retail runs its input frame in every
+// logic tick, not once per rendered frame: the main loop's drain calls the
+// mode's update once per 16 ms tick it banked, and each update pumps the
+// window messages (the key state and the key-event ring the window procedure
+// fills) and then runs Input_ProcessFrame(g_CurrentTick), which dequeues the
+// ring and reads the key state for that tick alone, unless a menu screen is up.
+// A catch-up tick therefore sees the device as it stands at that tick (D-NET-NEW-LI-1).
+// [orig: Game_MainLoop @0x52B630 (the mode's +0x24 update call @0x52BA58 behind
+//  the phase gate @0x52BA40, the Game Loop mode @0x82F340's slot holding
+//  Game_ProcessMainFrame); Game_ProcessMainFrame @0x5263F0 (++g_CurrentTick @0x5265B4,
+//  Game_PumpWindowMessages @0x526608, UI_IsMenuScreenOpen @0x52660D,
+//  Input_ProcessFrame(g_CurrentTick) @0x52661D); Game_WindowProc @0x7624C0 ->
+//  Input_HandleKeyPress @0x760C90 (the key state @0x760CBB, Input_QueueKeyEvent
+//  @0x760CC2); Input_ProcessKeyboardEvents @0x49D1F0 (Input_DequeueKeyEvent
+//  @0x49D2D2 / @0x49D4A0)]
+// The frame's own sample (FrameInput::player) is its first tick's input frame;
+// every later tick the frame banked asks the source for its own, keyed to the
+// logic tick it runs as (World::logic_tick at the tick's head, which is
+// retail's g_CurrentTick once the tick's increment ran). The mouse motion
+// rides the frame's sample, as retail reads the cursor only in the frame's
+// first update [orig: Game_ProcessMainFrame @0x52640E (g_MainLoopFirstUpdate,
+// raised @0x52B9FC, dropped after each update @0x52BA5E) ->
+// Input_PumpAndCenterCursor @0x526458].
+class TickInputSource {
+public:
+	virtual ~TickInputSource() = default;
+	virtual InputPacket sample_tick(uint32_t logic_tick) = 0;
+};
+
 struct FrameInput {
 	double delta_seconds = 0.0;
 	// Wall-clock since the previous frame finished rendering (its present),
@@ -94,6 +124,11 @@ struct FrameInput {
 	double since_render_seconds = -1.0;
 	CameraSample camera;
 	InputPacket player;
+	// The shell's input frame for this frame's later ticks, valid for this
+	// advance call only; null when the shell has no device to sample (a
+	// dedicated host, a probe's direct frame): every banked tick then reuses
+	// this frame's sample.
+	TickInputSource *tick_source = nullptr;
 	// The host's frozen loaded-model list count (TickInput::loaded_model_list_count).
 	uint32_t loaded_model_list_count = 0;
 };
@@ -101,8 +136,11 @@ struct FrameInput {
 struct TickInput {
 	CameraSample camera;
 	InputPacket player;
-	// True only until the first successful tick in an outer frame. Targets use
-	// this to consume edge-triggered actions exactly once across catch-up.
+	// True on a tick that runs its own input frame: the frame's first
+	// successful tick, and each later tick that sampled the shell's
+	// TickInputSource. Targets use this to consume edge-triggered actions
+	// exactly once; a catch-up tick with no source of its own reuses the held
+	// state with no edges.
 	bool consume_one_shots = false;
 	// The count of the loaded-model list the host froze at its mission start,
 	// which the host wraps its S2C 0x68 cursor at (0 until a list froze)
@@ -388,6 +426,7 @@ private:
 	TransitionResult rejected(TransitionCode code, SessionError error = {}) const;
 	TickInput merged_tick_input(const FrameInput &input, bool consume_one_shots);
 	void latch_input(const FrameInput &input);
+	void latch_packet(const InputPacket &packet);
 	void consume_pending_one_shots();
 	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
 	TickOutcome run_one_tick(const TickInput &input);

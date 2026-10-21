@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -36,11 +37,19 @@ public:
 
 private:
 	opennova::inmatch::FrameInput value_;
+	opennova::inmatch::TickInputSource *tick_source_ = nullptr;
+	ObjectID tick_source_owner_;
 
 protected:
 	static void _bind_methods();
 
 public:
+	// The shell's input frame for this frame's later ticks (engine
+	// inmatch::TickInputSource carries the witness), which `p_owner` (the
+	// presenter whose input router samples the devices) owns: tick_source()
+	// hands it to the session only while that object lives.
+	void set_tick_source(opennova::inmatch::TickInputSource *p_source, ObjectID p_owner);
+	opennova::inmatch::TickInputSource *tick_source() const;
 	void set_delta_seconds(double p_delta);
 	double get_delta_seconds() const;
 	// Seconds since the previous frame's render finished (negative: unsampled).

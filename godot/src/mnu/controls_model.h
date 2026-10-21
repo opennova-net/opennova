@@ -86,9 +86,10 @@ public:
 	// open chat line silences it the same way. Null detaches.
 	void set_scripted_input(const Ref<ScriptedInput> &p_input) { scripted_input_ = p_input; }
 	Ref<ScriptedInput> get_scripted_input() const { return scripted_input_; }
-	// The device sample's step of the attached script at the session's logic
-	// tick. Each code the step starts or stops holding also arrives as its
-	// bound key's own press or release event (slot 1, else slot 2), as a
+	// The input frame's step of the attached script at the logic tick it runs
+	// as (the frame's sample and each later tick's; PlayerInputRouter's
+	// sample_tick). Each code the step starts or stops holding also arrives as
+	// its bound key's own press or release event (slot 1, else slot 2), as a
 	// keyboard's would: the readers of raw key events (the deploy keys, the
 	// held-USE digits) see the script the way the binding scan does. A
 	// mouse-bound code holds its token only; no click is synthesized.

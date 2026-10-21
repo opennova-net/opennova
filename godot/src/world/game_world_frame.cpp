@@ -96,7 +96,10 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	{ "begin", kNoSlot, &GameWorld::leg_begin, kLegNone },
 	// The one typed session call; a terminal outcome emits session_lost and
 	// STOPS the frame, so later device phases cannot run against a lost or
-	// failed session.
+	// failed session. The input leg rides it: the shell's sample is the
+	// frame's first tick's input frame, and each later tick the session banks
+	// pulls its own from the input router the frame input names (engine
+	// inmatch::TickInputSource carries the per-tick witness).
 	{ "session", FrameStats::WORLD_RUNTIME, &GameWorld::leg_session, kStopsFrame },
 	// The remote admin's pump ends the main frame, after the session's tick; a frame the session
 	// stopped never reaches it (engine inmatch/remote_admin.h). The menus' frames pump it from

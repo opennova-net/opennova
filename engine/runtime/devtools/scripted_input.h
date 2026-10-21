@@ -10,15 +10,18 @@
 // wire run unchanged. Look steps are raw mouse pixels the embedder feeds
 // through its mouse-motion path.
 //
-// Timing is keyed on the session's logic tick, quantized to the display
-// frame (one frame runs 0..n ticks): start() arms the device, the first
-// advance() latches its logic tick as the start S, and a step at relative
-// tick t applies at the first sample whose logic tick L has L - S >= t; its
-// record is that L. A token changes state at most once per sample: a step
-// that would flip a token this sample already flipped waits, with every later
-// step in order, for the next sample, so a press reaches at least one device
-// sample even when a frame banked several ticks. End (and cancel) releases
-// everything; a logic clock that runs backwards (a reloaded mission) cancels.
+// Timing is keyed on the session's logic tick: the embedder samples the
+// device in every input frame, the display frame's own sample and each later
+// tick's (inmatch::TickInputSource), as retail runs its input frame once per
+// logic tick, so a step lands on its own tick inside a multi-tick frame.
+// start() arms the device, the first advance() latches its logic tick as the
+// start S, and a step at relative tick t applies at the first sample whose
+// logic tick L has L - S >= t; its record is that L. A token changes state at
+// most once per sample: a step that would flip a token this sample already
+// flipped waits, with every later step in order, for the next sample, so a
+// press reaches at least one device sample even when one sample covers
+// several ticks. End (and cancel) releases everything; a logic clock that
+// runs backwards (a reloaded mission) cancels.
 #pragma once
 
 #include <cstdint>

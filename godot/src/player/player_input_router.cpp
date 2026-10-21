@@ -123,32 +123,20 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	frame_input->set_delta_seconds(p_delta);
 	++frame_sequence_;
 	frame_input->set_sequence(frame_sequence_);
+	frame_player_ = false;
+	frame_gameplay_input_active_ = p_gameplay_input_active;
+	frame_menu_open_ = p_menu_open;
 	LocalPlayerPresenter *owner = presenter();
 	if (owner == nullptr) {
 		return frame_input;
 	}
+	// The frame's sample is its first tick's input frame, at the logic tick
+	// that tick runs as; the session asks for each later tick's (sample_tick).
+	frame_input->set_tick_source(this, ObjectID(owner->get_instance_id()));
 	const Ref<Simulation> tick_sim = sim();
-	// The scripted input device (devtools/scripted_input.h) steps on the logic
-	// tick this sample is keyed to, ahead of every device read below.
-	const Ref<ScriptedInput> scripted =
-			controls_.is_valid() ? controls_->get_scripted_input() : Ref<ScriptedInput>();
 	Vector2 scripted_look;
-	if (scripted.is_valid()) {
-		if (tick_sim.is_valid()) controls_->advance_scripted_input(tick_sim->get_logic_tick());
-		scripted_look = scripted->take_look();
-	}
-	// The death screen samples the same device input: the engine's filter
-	// hands it to the free-fly motor or the chase orbit, and the binding scan
-	// admits only the death-screen rows (PlayerActionPoll::death_screen).
-	const bool spectating = tick_sim.is_valid() && tick_sim->local_death_screen_active();
-	// The key scan's gates for every poll of this frame, the HUD's after the
-	// world tick too: the death screen, and the scan word, set on a dedicated
-	// host and otherwise while the local body is dead (engine
-	// BindingSet::set_scan_gates carries the witness).
-	if (controls_.is_valid())
-		controls_->set_scan_gates(spectating, tick_sim.is_valid() &&
-				(tick_sim->session_role() == Simulation::ROLE_DEDICATED_HOST ||
-						tick_sim->local_player_dead()));
+	const bool spectating = begin_input_frame(
+			tick_sim, tick_sim.is_valid() ? tick_sim->get_logic_tick() : -1, scripted_look);
 	if (!owner->has_player()) {
 		owner->set_fly_camera_locked(false);
 		release_mouse_capture();
@@ -162,6 +150,50 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		input->set_mouse_mode(Input::MOUSE_MODE_CAPTURED);
 	}
 	if (!spectating) owner->ensure_models();
+	frame_player_ = true;
+	sample_input_frame(frame_input, scripted_look, spectating);
+	return frame_input;
+}
+
+opennova::inmatch::InputPacket PlayerInputRouter::sample_tick(uint32_t p_logic_tick) {
+	Ref<MissionFrameInput> tick_input;
+	tick_input.instantiate();
+	tick_input->set_sequence(frame_sequence_);
+	Vector2 scripted_look;
+	const bool spectating = begin_input_frame(sim(), p_logic_tick, scripted_look);
+	if (frame_player_) sample_input_frame(tick_input, scripted_look, spectating);
+	return tick_input->native_value().player;
+}
+
+bool PlayerInputRouter::begin_input_frame(const Ref<Simulation> &p_sim, int64_t p_logic_tick,
+		Vector2 &r_scripted_look) {
+	// The scripted input device (devtools/scripted_input.h) steps on the logic
+	// tick this sample is keyed to, ahead of every device read below.
+	const Ref<ScriptedInput> scripted =
+			controls_.is_valid() ? controls_->get_scripted_input() : Ref<ScriptedInput>();
+	if (scripted.is_valid()) {
+		if (p_sim.is_valid()) controls_->advance_scripted_input(p_logic_tick);
+		r_scripted_look = scripted->take_look();
+	}
+	// The death screen samples the same device input: the engine's filter
+	// hands it to the free-fly motor or the chase orbit, and the binding scan
+	// admits only the death-screen rows (PlayerActionPoll::death_screen).
+	const bool spectating = p_sim.is_valid() && p_sim->local_death_screen_active();
+	// The key scan's gates for every poll of this input frame, the HUD's after
+	// the world tick too: the death screen, and the scan word, set on a
+	// dedicated host and otherwise while the local body is dead (engine
+	// BindingSet::set_scan_gates carries the witness).
+	if (controls_.is_valid())
+		controls_->set_scan_gates(spectating, p_sim.is_valid() &&
+				(p_sim->session_role() == Simulation::ROLE_DEDICATED_HOST ||
+						p_sim->local_player_dead()));
+	return spectating;
+}
+
+void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input,
+		const Vector2 &p_scripted_look, bool p_spectating) {
+	const bool active = frame_gameplay_input_active_;
+	Input *input = Input::get_singleton();
 	// A live UI overlay keeps the world ticking but must actively submit a
 	// neutral movement frame. Skipping this call leaves the sim holding its
 	// previous input, so a player who opened the armory while running would
@@ -173,31 +205,31 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	// pair, overloaded.
 	bool forward = false, back = false, left = false, right = false;
 	bool lean_left = false, lean_right = false, jump = false;
-	if (p_gameplay_input_active) {
+	if (active) {
 		read_input_state(forward, back, left, right, lean_left, lean_right, jump);
 	}
-	frame_input->set_movement(forward, back, left, right, lean_left, lean_right, jump);
-    frame_input->set_view_keys(p_gameplay_input_active && pressed("FreeLook"),
-        p_gameplay_input_active && pressed("look_up"), p_gameplay_input_active && pressed("look_down"),
-        p_gameplay_input_active && pressed("turn_left"), p_gameplay_input_active && pressed("turn_right"));
+	p_input->set_movement(forward, back, left, right, lean_left, lean_right, jump);
+    p_input->set_view_keys(active && pressed("FreeLook"),
+        active && pressed("look_up"), active && pressed("look_down"),
+        active && pressed("turn_left"), active && pressed("turn_right"));
 	// Scripted look pixels join the frame's mouse motion under the gate real
 	// motion meets on its way in (the shell hands handle_input only live
 	// gameplay with the mouse captured).
-	if (p_gameplay_input_active && input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED) {
-		look_delta_ += scripted_look;
+	if (active && input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED) {
+		look_delta_ += p_scripted_look;
 	}
-	frame_input->set_look_delta(p_gameplay_input_active ? look_delta_ : Vector2());
+	p_input->set_look_delta(active ? look_delta_ : Vector2());
 	look_delta_ = Vector2();
 	const Ref<Simulation> action_sim = sim();
 	opennova::controls::PlayerActionPoll gate;
-	gate.active = p_gameplay_input_active;
+	gate.active = active;
 	gate.captured = input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED;
 	gate.simulation_available = action_sim.is_valid();
 	gate.keyboard_captured = controls_.is_valid() && controls_->is_keyboard_captured();
 	gate.emotes_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();
 	gate.radio_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
-	gate.death_screen = spectating;
-	gate.menu_open = p_menu_open;
+	gate.death_screen = p_spectating;
+	gate.menu_open = frame_menu_open_;
 	// The held USE row's arm through the sim's press latch (engine
 	// LocalPlayer::take_use_item_press).
 	gate.take_use_item_arm = [&action_sim]() {
@@ -216,11 +248,11 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		}
 	};
 	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
-	frame_input->set_weapon_input(actions.fire_held, actions.fire_edge,
+	p_input->set_weapon_input(actions.fire_held, actions.fire_edge,
 			actions.reload_edge, actions.medic_edge);
-	frame_input->set_to_special_input(actions.to_special_held, actions.to_special_edge);
-	frame_input->set_menu_open(p_menu_open);
-	frame_input->set_respawn_input(actions.respawn_edge);
+	p_input->set_to_special_input(actions.to_special_held, actions.to_special_edge);
+	p_input->set_menu_open(frame_menu_open_);
+	p_input->set_respawn_input(actions.respawn_edge);
 	for (const auto &request : actions.requests) {
 		// A menu pick closes its menu whether or not a session carries it
 		// (engine hud_toggles_close_voice_menu carries the witness).
@@ -239,12 +271,11 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		if (action_sim.is_valid()) apply_player_action(*action_sim.ptr(), request);
 	}
 	// The death screen's own rows (the spectate sub-mode and target).
-	if (spectating && action_sim.is_valid()) {
+	if (p_spectating && action_sim.is_valid()) {
 		for (const auto &request : actions_.poll_spectator(GodotActionSource(controls_),
-					 p_gameplay_input_active))
+					 active))
 			apply_player_action(*action_sim.ptr(), request);
 	}
-	return frame_input;
 }
 
 void PlayerInputRouter::consume_use_hold() {

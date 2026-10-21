@@ -5299,5 +5299,10 @@ target_link_libraries(npruntime_listing_baffle_key_test PRIVATE opennova_net ope
 target_include_directories(npruntime_listing_baffle_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_listing_baffle_key COMMAND npruntime_listing_baffle_key_test)
 
+# --- parity lane LI (input seam) ---
+add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)
+target_link_libraries(inmatch_tick_input_source_test PRIVATE opennova_runtime)
+add_test(NAME inmatch_tick_input_source COMMAND inmatch_tick_input_source_test)
+
 # --- parity lane LP (proof) ---
 

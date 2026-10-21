@@ -220,7 +220,7 @@ void LocalPlayer::clear_stance_latches() {
 // Mouse pixels onto the look angles through the witnessed integer pipeline
 // [orig: Input_ProcessMouseAxisBindings @0x499680]. The float accumulator is
 // the device-input fold over retail's integer remainder pump [orig:
-// Game_ProcessMainFrame @0x526481..0x5264a9, dword_24E0E78].
+// Game_ProcessMainFrame @0x526481..0x5264a9, g_MainLoopUpdatesDue].
 void LocalPlayer::look(float dx_px, float dy_px) {
 	World &world = world_;
 	int32_t scoped_zoom = 0;

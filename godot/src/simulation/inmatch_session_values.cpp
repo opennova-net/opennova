@@ -1,6 +1,8 @@
 #include "simulation/inmatch_session_values.h"
 #include "util/string_convert.h"
 
+#include <godot_cpp/core/object.hpp>
+
 #include <algorithm>
 
 namespace godot {
@@ -33,6 +35,18 @@ void MissionFrameInput::_bind_methods() {
 			"set_since_render_seconds", "get_since_render_seconds");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sequence"),
 			"set_sequence", "get_sequence");
+}
+
+void MissionFrameInput::set_tick_source(opennova::inmatch::TickInputSource *p_source,
+		ObjectID p_owner) {
+	tick_source_ = p_source;
+	tick_source_owner_ = p_owner;
+}
+
+opennova::inmatch::TickInputSource *MissionFrameInput::tick_source() const {
+	if (tick_source_ == nullptr || ObjectDB::get_instance(tick_source_owner_) == nullptr)
+		return nullptr;
+	return tick_source_;
 }
 
 void MissionFrameInput::set_delta_seconds(double p_delta) {

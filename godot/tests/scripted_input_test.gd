@@ -5,9 +5,11 @@ extends GutTest
 # action code -> catalog token map, the device seam (ControlsModel reads a
 # scripted token held like a keyboard slot) and the input router playing a
 # script on the logic tick through the ordinary binding scan, PlayerActions'
-# gates and the mouse-motion path, over a real minimal world. The engine
-# schedule itself (multi-tick frames, one flip per token per sample, the
-# setup pose's conversion) is the scripted_input ctest.
+# gates and the mouse-motion path, over a real minimal world, in every
+# input frame of a multi-tick frame (the router is the session's per-tick
+# source). The engine schedule itself (one flip per token per sample, the
+# setup pose's conversion) is the scripted_input ctest; the session's
+# per-tick pull is the inmatch_tick_input_source ctest.
 
 var TICK := Simulation.tick_dt()
 var _root := ""
@@ -238,6 +240,43 @@ func test_scripted_input_meets_the_real_devices_gates() -> void:
 	assert_eq(int(sim.get_local_player_stance()), 2, "the fresh prone press reaches the sim")
 
 
+# Retail runs its input frame in every logic tick (engine
+# inmatch::TickInputSource carries the witness): a frame that banks six ticks
+# samples the device at each of them, the router being the session's per-tick
+# source, so steps due inside the frame land on their own ticks, not on the
+# next frame's first, and a press due mid-frame still reaches the sim.
+func test_steps_inside_a_multi_tick_frame_land_on_their_own_ticks() -> void:
+	var rig := _rig()
+	if rig.is_empty():
+		return
+	var sim: Simulation = rig.world.get_sim()
+	# The 7/8 frame-time smoother settles the bank at six ticks a frame.
+	_frame(rig, 40, true, 6)
+	var before := int(sim.get_logic_tick())
+	_frame(rig, 1, true, 6)
+	assert_eq(int(sim.get_logic_tick()) - before, 6, "a six-tick frame banks six ticks")
+	var driver: ScriptedInput = rig.driver
+	assert_eq(driver.load_steps([
+		{"tick": 3, "down": 152},
+		{"tick": 5, "press": 169},
+		{"tick": 9, "up": 152},
+		{"tick": 13, "end": true},
+	]), OK, driver.get_error())
+	assert_true(driver.start())
+	var latch_tick := int(sim.get_logic_tick())
+	_frame(rig, 3, true, 6)
+	assert_eq(driver.get_state_name(), "finished", driver.get_cancel_reason())
+	var start := driver.get_start_logic_tick()
+	assert_eq(start, latch_tick, "the frame's own sample latches the start at its first tick")
+	assert_eq(driver.get_applied_logic_ticks(),
+			PackedInt64Array([start + 3, start + 5, start + 9, start + 13]),
+			"every step lands on its own tick inside the six-tick frames")
+	assert_eq(driver.get_release_logic_ticks()[1], start + 6,
+			"the press releases on the next tick, the next frame's first")
+	assert_eq(int(sim.get_local_player_stance()), 1,
+			"the crouch press sampled mid-frame reached the sim")
+
+
 # The packaged world over the minimal mission (its playable load spawns the
 # local player) with the infantry clip set staged so the motor's body
 # selection runs, and a presenter over a ControlsModel carrying a scripted
@@ -267,11 +306,11 @@ func _rig() -> Dictionary:
 	return {"world": world, "camera": camera, "presenter": presenter, "driver": driver}
 
 
-# Shell frames in main_game's order, one fixed tick each.
-func _frame(rig: Dictionary, count: int, active := true) -> void:
+# Shell frames in main_game's order, each banking `ticks` fixed ticks' time.
+func _frame(rig: Dictionary, count: int, active := true, ticks := 1) -> void:
 	var world: GameWorld = rig.world
 	var camera: Camera3D = rig.camera
 	var presenter: LocalPlayerPresenter = rig.presenter
 	for i in count:
-		var frame_input := presenter.before_world_tick(TICK, false, active)
-		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+		var frame_input := presenter.before_world_tick(TICK * ticks, false, active)
+		world.tick(camera.global_position, camera.global_transform, TICK * ticks, frame_input)
