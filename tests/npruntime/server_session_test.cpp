@@ -37,6 +37,7 @@
 #include <runtime/world/angle.h>
 
 #include "../common/flat_floor.h"
+#include "enumerated_join.h"
 
 #include <cmath>
 #include <cstdio>
@@ -627,17 +628,17 @@ bool check_pre_dictation_holdoff_keeps_initial_settings_open() {
 	if (!expect(opcode_is(socket.sent[0], opennova::SESSION_OPCODE_SERVER_HELLO),
 	            "pre-dictation fixture starts with ServerHello"))
 		return false;
-	const opennova::inmatch::JoinerConnection::PollResult hello_result =
-			joiner.handle_datagram(socket.sent[0].data(), socket.sent[0].size());
-	if (!expect(hello_result.outbound.size() == 1 &&
-	                    opcode_is(hello_result.outbound[0],
-	                              opennova::SESSION_OPCODE_CLIENT_AUTH),
-	            "ServerHello produces one ClientAuth"))
+	(void)joiner.handle_datagram(socket.sent[0].data(), socket.sent[0].size());
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	const std::vector<uint8_t> auth_datagram =
+			opennova::inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(opcode_is(auth_datagram, opennova::SESSION_OPCODE_CLIENT_AUTH),
+	            "ServerHello leads to one ClientAuth"))
 		return false;
 
 	socket.sent.clear();
 	socket.sent_to.clear();
-	socket.incoming.push_back({peer, hello_result.outbound[0]});
+	socket.incoming.push_back({peer, auth_datagram});
 	opennova::inmatch::host_session_pump(owner, socket);
 	if (!expect(socket.sent.size() == 2 &&
 	                    opcode_is(socket.sent[0],

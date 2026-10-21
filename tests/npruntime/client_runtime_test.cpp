@@ -44,6 +44,7 @@
 #include "common/temp_dir.h"
 #include "host_test_setup.h"
 #include "conn_fixture.h"
+#include "enumerated_join.h"
 #include <runtime/inmatch/server_message_dispatch.h>
 
 #include <runtime/replication/connection.h>
@@ -287,12 +288,9 @@ bool build_joiner_client_auth(inmatch::JoinRole role,
 	const std::vector<uint8_t> reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult result =
-			joiner.handle_datagram(reply.data(), reply.size());
-	return result.outbound.size() == 1 &&
-			nw_decode_inbound(
-					result.outbound[0].data(), result.outbound[0].size(),
-					opcode, body) &&
+	(void)joiner.handle_datagram(reply.data(), reply.size());
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+	return nw_decode_inbound(auth_datagram.data(), auth_datagram.size(), opcode, body) &&
 			opcode == SESSION_OPCODE_CLIENT_AUTH &&
 			parse_client_auth(body.data(), body.size(), out);
 }
@@ -987,14 +985,15 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 		server_hello.sus2 = "revx02";
 		const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 				SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-		const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+		(void)joiner.handle_datagram(
 				server_hello_datagram.data(), server_hello_datagram.size());
-		if (!expect(hello_result.outbound.size() == 1,
-		            "join-tokens: ServerHello emits one ClientAuth")) {
+		const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+		if (!expect(!auth_datagram.empty(),
+		            "join-tokens: ServerHello leads to one ClientAuth")) {
 			return false;
 		}
-		return expect(nw_decode_inbound(hello_result.outbound[0].data(),
-		                                hello_result.outbound[0].size(), opcode, body) &&
+		return expect(nw_decode_inbound(auth_datagram.data(),
+		                                auth_datagram.size(), opcode, body) &&
 		                      opcode == SESSION_OPCODE_CLIENT_AUTH &&
 		                      parse_client_auth(body.data(), body.size(), client_auth),
 		              "join-tokens: decode ClientAuth");
@@ -1174,16 +1173,17 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 	server_hello.sus2 = "revx02";
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
-	if (!expect(hello_result.outbound.size() == 1,
-			"ServerHello emits one ClientAuth")) {
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(!auth_datagram.empty(),
+			"ServerHello leads to one ClientAuth")) {
 		return false;
 	}
 
 	ClientAuth client_auth;
 	if (!expect(nw_decode_inbound(
-				hello_result.outbound[0].data(), hello_result.outbound[0].size(),
+				auth_datagram.data(), auth_datagram.size(),
 				opcode, body) &&
 				opcode == SESSION_OPCODE_CLIENT_AUTH &&
 				parse_client_auth(body.data(), body.size(), client_auth),
@@ -1860,14 +1860,15 @@ bool run_early_sync_tail_latch() {
 	server_hello.hk = 0x99AA0011u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
-	if (!expect(hello_result.outbound.size() == 1, "early-tail: ClientAuth emitted")) {
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(!auth_datagram.empty(), "early-tail: ClientAuth emitted")) {
 		return false;
 	}
 	ClientAuth client_auth;
 	if (!expect(nw_decode_inbound(
-				hello_result.outbound[0].data(), hello_result.outbound[0].size(),
+				auth_datagram.data(), auth_datagram.size(),
 				opcode, body) &&
 				parse_client_auth(body.data(), body.size(), client_auth),
 			"early-tail: decode ClientAuth")) {
@@ -2452,8 +2453,13 @@ bool run_roundtrip() {
 
 	// --- 1) Retail post-auth exchange learns the mission while the world/load drive is held. ---
 	pump_host(client.start()); // ClientHello -> ServerHello (queued back to the client)
-	for (int f = 0; f < 20 && !client.mission_known(); ++f)
+	// The ServerHello's frame records the session, the next frame starts the connect state, and
+	// its 0x42 leaves once the clock reads past that start: the connect state's frames step the
+	// clock (D-NET-NEW-L2-25).
+	for (int f = 0; f < 24 && !client.mission_known(); ++f) {
+		if (client.phase() == inmatch::JoinerConnection::Phase::Auth) ++client_clock_ms;
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
+	}
 	if (!expect(client.mission_known(), "joiner learned mission metadata from S2C 0x7B")) return false;
 	if (!expect(client.server_name() == host_config.server_name &&
 	                    client.mission_name() == host_config.mission_file &&
@@ -3020,7 +3026,9 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	};
 
 	pump_host(client.start());
-	for (int f = 0; f < 20 && !client.mission_known(); ++f)
+	// Two more frames than the 0x81's reply took before (D-NET-NEW-L2-25: the 0x42 leaves the
+	// frame after the connect state starts, a frame after the ServerHello's).
+	for (int f = 0; f < 24 && !client.mission_known(); ++f)
 		for (std::vector<uint8_t> &d : client_frame(tick)) pump_host(std::move(d));
 	if (!expect(client.mission_known(), "zones: joiner learned the mission")) return false;
 
@@ -6550,7 +6558,7 @@ bool run_same_packet_holdoff_keeps_first_admission_boundary_open() {
 	client.receive(
 			server_hello_datagram.data(), server_hello_datagram.size());
 	const std::vector<std::vector<uint8_t>> auth_frame =
-			client.Client_ProcessNetworkFrame(0);
+			inmatch::test::frames_to_enumerated_join(client, 0);
 	ClientAuth client_auth;
 	if (!expect(auth_frame.size() == 1 &&
 	                    nw_decode_inbound(
@@ -7497,15 +7505,15 @@ bool run_joiner_correlates_handshake_echoes() {
 	ServerHello valid_hello = build_server_hello(hello, 0x7F000001u, 32769);
 	const std::vector<uint8_t> valid_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(valid_hello));
-	const inmatch::JoinerConnection::PollResult auth_request =
-			joiner.handle_datagram(valid_hello_datagram.data(), valid_hello_datagram.size());
-	if (!expect(auth_request.outbound.size() == 1 &&
+	(void)joiner.handle_datagram(valid_hello_datagram.data(), valid_hello_datagram.size());
+	const std::vector<uint8_t> auth_request = inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(!auth_request.empty() &&
 	                    joiner.phase() == inmatch::JoinerConnection::Phase::Auth,
-			"matching ServerHello advances to Auth"))
+			"matching ServerHello leads to Auth"))
 		return false;
 	ClientAuth client_auth;
 	if (!expect(nw_decode_inbound(
-				auth_request.outbound[0].data(), auth_request.outbound[0].size(),
+				auth_request.data(), auth_request.size(),
 				opcode, body) &&
 	                    parse_client_auth(body.data(), body.size(), client_auth),
 			"echo-guard decodes ClientAuth"))
@@ -7659,14 +7667,15 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 	server_hello.hk = 0x44556677u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
-	if (!expect(hello_result.outbound.size() == 1, "pad-clamp: ClientAuth emitted")) {
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(!auth_datagram.empty(), "pad-clamp: ClientAuth emitted")) {
 		return false;
 	}
 	ClientAuth client_auth;
 	if (!expect(nw_decode_inbound(
-				hello_result.outbound[0].data(), hello_result.outbound[0].size(),
+				auth_datagram.data(), auth_datagram.size(),
 				opcode, body) &&
 				parse_client_auth(body.data(), body.size(), client_auth),
 			"pad-clamp: decode ClientAuth")) {
@@ -7777,7 +7786,8 @@ bool run_joiner_goodbye_tears_down_host() {
 		return false;
 	}
 	client.receive(hello_result.outbound[0].data(), hello_result.outbound[0].size());
-	const std::vector<std::vector<uint8_t>> auth = client.Client_ProcessNetworkFrame(0);
+	const std::vector<std::vector<uint8_t>> auth =
+			inmatch::test::frames_to_enumerated_join(client, 0);
 	if (!expect(auth.size() == 1, "goodbye: client emits ClientAuth")) return false;
 	const inmatch::HandleResult auth_result = inmatch::handle_server_datagram(
 			host, peer, auth[0].data(), auth[0].size(), 0);

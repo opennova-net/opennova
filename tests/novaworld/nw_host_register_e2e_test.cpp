@@ -28,6 +28,7 @@
 #include <net/npwire/session_keys.h>
 
 #include "net_sockets.h"
+#include "../npruntime/enumerated_join.h"
 
 #include <chrono>
 #include <cstdint>
@@ -1022,11 +1023,15 @@ int main() {
 			               server_hello.hk != 0,
 			       "standalone JO ServerHello advertises a nonzero production host key");
 			first_jo_host_key = server_hello.hk;
-			auto hello = joiner.handle_datagram(inbound.data(), inbound.size());
-			const bool has_client_auth = hello.outbound.size() == 1;
+			(void)joiner.handle_datagram(inbound.data(), inbound.size());
+			// The 0x42 leaves at the first pump past the connect state's start
+			// (D-NET-NEW-L2-25).
+			const std::vector<uint8_t> client_auth =
+					opennova::inmatch::test::enumerated_join_auth(joiner);
+			const bool has_client_auth = !client_auth.empty();
 			expect(has_client_auth, "JO ServerHello produces ClientAuth");
 			if (has_client_auth) {
-				send_jo(hello.outbound[0]);
+				send_jo(client_auth);
 			}
 		}
 		inbound.clear();
@@ -1365,15 +1370,17 @@ int main() {
 			               hello.hk != first_jo_host_key,
 			       "listener restart rotates the production JO host key");
 
-			auto handled = restart_joiner.handle_datagram(
+			(void)restart_joiner.handle_datagram(
 					rx, static_cast<size_t>(hello_size));
-			expect(handled.outbound.size() == 1,
+			const std::vector<uint8_t> restart_auth =
+					opennova::inmatch::test::enumerated_join_auth(restart_joiner);
+			expect(!restart_auth.empty(),
 			       "restarted JO ServerHello produces fresh ClientAuth");
-			if (handled.outbound.size() == 1) {
+			if (!restart_auth.empty()) {
 				opennova::net::udp_send_to(
 						restart_client, restarted_jo_ep,
-						handled.outbound[0].data(),
-						handled.outbound[0].size());
+						restart_auth.data(),
+						restart_auth.size());
 				const int auth_size = opennova::net::udp_recv_from(
 						restart_client, rx, sizeof rx, from, 1000);
 				expect(auth_size > 0,

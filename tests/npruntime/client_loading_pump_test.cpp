@@ -232,6 +232,9 @@ struct Harness {
 		const std::vector<uint8_t> server_hello_dg = nw_encode_outbound(
 				SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
 		client.receive(server_hello_dg.data(), server_hello_dg.size());
+		// The ServerHello's frame records the session; the next frame starts the connect
+		// state; the frame after it, past that start, sends the 0x42 (D-NET-NEW-L2-25).
+		if (!frame().empty() || !frame().empty()) return false;
 		const std::vector<std::vector<uint8_t>> auth_frame = frame();
 		if (auth_frame.size() != 1 ||
 				!nw_decode_inbound(auth_frame[0].data(), auth_frame[0].size(), opcode, body) ||

@@ -17,6 +17,8 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/session_timeout_config.h>
 
+#include "enumerated_join.h"
+
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
@@ -79,7 +81,7 @@ struct CsOverride {
 
 // Drive a joiner through 0x41/0x81/0x42 and answer with a 0x82 whose CLIENT-direction CS block
 // is the JOINTOPERATIONS template with `overrides` applied.
-bool accept_with_cs_overrides(inmatch::JoinerConnection &joiner,
+bool accept_with_cs_overrides(inmatch::JoinerConnection &joiner, uint64_t &now_ms,
 		const std::vector<CsOverride> &overrides) {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -94,13 +96,12 @@ bool accept_with_cs_overrides(inmatch::JoinerConnection &joiner,
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result =
-			joiner.handle_datagram(server_hello_datagram.data(), server_hello_datagram.size());
+	(void)joiner.handle_datagram(server_hello_datagram.data(), server_hello_datagram.size());
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner, now_ms);
 	ClientAuth client_auth;
 	body.clear();
-	if (!expect(hello_result.outbound.size() == 1 &&
-					nw_decode_inbound(hello_result.outbound[0].data(),
-							hello_result.outbound[0].size(), opcode, body) &&
+	if (!expect(nw_decode_inbound(auth_datagram.data(), auth_datagram.size(), opcode, body) &&
 					opcode == SESSION_OPCODE_CLIENT_AUTH &&
 					parse_client_auth(body.data(), body.size(), client_auth),
 			"decode the ClientAuth"))
@@ -124,8 +125,9 @@ bool accept_with_cs_overrides(inmatch::JoinerConnection &joiner,
 }
 
 // The 0x82 carrying `timeout_ms` (field 0) and `msg_out_max` (field 11).
-bool accept_with_cs(inmatch::JoinerConnection &joiner, uint32_t timeout_ms, uint32_t msg_out_max) {
-	return accept_with_cs_overrides(joiner, {{0, timeout_ms}, {11, msg_out_max}});
+bool accept_with_cs(inmatch::JoinerConnection &joiner, uint64_t &now_ms, uint32_t timeout_ms,
+		uint32_t msg_out_max) {
+	return accept_with_cs_overrides(joiner, now_ms, {{0, timeout_ms}, {11, msg_out_max}});
 }
 
 std::vector<uint8_t> frame_server_packet(SessionSequencing &server_tx, uint32_t client_key,
@@ -147,7 +149,7 @@ bool check_joiner_holds_out_of_order_packets_up_to_field_10() {
 		uint64_t now_ms = 1000;
 		inmatch::JoinerConnection joiner("QueueBoundJoiner", [&now_ms] { return now_ms; });
 		joiner.set_title(&kJo);
-		if (!accept_with_cs_overrides(joiner, {{10, bound}})) return false;
+		if (!accept_with_cs_overrides(joiner, now_ms, {{10, bound}})) return false;
 		if (!expect(joiner.session_timeouts().packet_queue_max == static_cast<int32_t>(bound),
 				"the 0x82 overlays CS field 10"))
 			return false;
@@ -175,7 +177,7 @@ bool check_joiner_builds_at_most_field_14_packets() {
 	uint64_t now_ms = 1000;
 	inmatch::JoinerConnection joiner("PacketBudgetJoiner", [&now_ms] { return now_ms; });
 	joiner.set_title(&kJo);
-	if (!accept_with_cs_overrides(joiner, {{14, 1}})) return false;
+	if (!accept_with_cs_overrides(joiner, now_ms, {{14, 1}})) return false;
 	if (!expect(joiner.session_timeouts().max_packets_per_tick == 1,
 			"the 0x82 overlays CS field 14"))
 		return false;
@@ -202,7 +204,7 @@ bool check_joiner_overlays_the_host_cs_block() {
 		uint64_t now_ms = 1000;
 		inmatch::JoinerConnection joiner("StockJoiner", [&now_ms] { return now_ms; });
 		joiner.set_title(&kJo);
-		if (!accept_with_cs(joiner, 120000u, 1200u)) return false;
+		if (!accept_with_cs(joiner, now_ms, 120000u, 1200u)) return false;
 		if (!expect(joiner.session_timeouts().timeout_ms == 120000 &&
 						joiner.session_timeouts().msg_out_max == 1200 &&
 						joiner.connection().seq.outbound_message_limit == 1200,
@@ -226,7 +228,7 @@ bool check_joiner_overlays_the_host_cs_block() {
 		uint64_t now_ms = 1000;
 		inmatch::JoinerConnection joiner("NeverJoiner", [&now_ms] { return now_ms; });
 		joiner.set_title(&kJo);
-		if (!accept_with_cs(joiner, 0xFFFFFFFFu, 0xFFFFFFFFu)) return false;
+		if (!accept_with_cs(joiner, now_ms, 0xFFFFFFFFu, 0xFFFFFFFFu)) return false;
 		if (!expect(joiner.session_timeouts().timeout_ms == -1 &&
 						joiner.session_timeouts().msg_out_max == -1 &&
 						joiner.connection().seq.outbound_message_limit == 0,
@@ -242,7 +244,7 @@ bool check_joiner_overlays_the_host_cs_block() {
 		uint64_t now_ms = 1000;
 		inmatch::JoinerConnection joiner("ThirtyJoiner", [&now_ms] { return now_ms; });
 		joiner.set_title(&kJo);
-		if (!accept_with_cs(joiner, 30000u, 1200u)) return false;
+		if (!accept_with_cs(joiner, now_ms, 30000u, 1200u)) return false;
 		now_ms += 30000;
 		if (!expect(!joiner.session_lost(), "30000 ms is inside a 30 s window")) return false;
 		now_ms += 1;

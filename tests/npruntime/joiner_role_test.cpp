@@ -48,6 +48,7 @@
 
 #include <base/io/bam.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -3419,15 +3420,20 @@ bool run_the_join_screen_abort_bursts_the_minus_one_record() {
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
 	h.socket.datagrams.clear();
 	h.role.runtime->receive(server_hello_dg.data(), server_hello_dg.size());
-	h.role.poll_preload();
+	// The 0x81's poll records the session, the next starts the connect state, and the 0x42
+	// leaves at the first poll whose (steady) clock reads past that start (D-NET-NEW-L2-25).
 	ClientAuth auth;
 	bool have_auth = false;
-	for (const std::vector<uint8_t> &dg : h.socket.datagrams)
-		if (nw_decode_inbound(dg.data(), dg.size(), opcode, body) &&
-				opcode == SESSION_OPCODE_CLIENT_AUTH &&
-				parse_client_auth(body.data(), body.size(), auth))
-			have_auth = true;
-	if (!expect(have_auth, "abort: the 0x81 draws the 0x42")) return false;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+	while (!have_auth && std::chrono::steady_clock::now() < deadline) {
+		h.role.poll_preload();
+		for (const std::vector<uint8_t> &dg : h.socket.datagrams)
+			if (nw_decode_inbound(dg.data(), dg.size(), opcode, body) &&
+					opcode == SESSION_OPCODE_CLIENT_AUTH &&
+					parse_client_auth(body.data(), body.size(), auth))
+				have_auth = true;
+	}
+	if (!expect(have_auth, "abort: the 0x81 leads to the 0x42")) return false;
 	ServerAuth server_auth = build_server_auth(
 			auth, 0x7F000001u, 32769, 0x0C0FFEE1u, "SERVER-ABORT-SCRK", "", "", "", false);
 	server_auth.mi = 4;

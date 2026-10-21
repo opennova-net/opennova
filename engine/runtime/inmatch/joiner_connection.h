@@ -1197,9 +1197,22 @@ private:
 	MonotonicMilliseconds monotonic_milliseconds_;
 	std::vector<uint8_t> handshake_retry_datagram_;
 	uint64_t handshake_last_send_ms_ = 0;
-	// When the 0x42 connect state began (the ServerHello): its 30000 ms window's start.
+	// When the 0x42 connect state began (enter_session_connect_state): its 30000 ms window's start.
 	uint64_t client_join_start_ms_ = 0;
 	bool handshake_retry_clock_armed_ = false;
+	// The enumerate-and-join's session record: the 0x81 lands its HK, SF and SUS2 and the
+	// enumerate's loop exits on it, sending nothing; the join state machine's next pass starts
+	// the connect state from the record (pump() -> enter_session_connect_state), its first 0x42
+	// at the first pump past that start (D-NET-NEW-L2-25).
+	// [orig: UI_EnumerateAndJoinSession @0x569F50 - the loop @0x56A0C1..0x56A0F9, the
+	//  record's words @0x56A207..0x56A236, g_PreMenuState = 4 @0x56A2D9;
+	//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 3 @0x56A499, state 4 @0x56A4B3 ->
+	//  UI_JoinSelectedSession @0x5699D0 (the call @0x56A4C9)]
+	bool enumerated_session_recorded_ = false;
+	bool enumerate_pass_ended_ = false; // the record's own pass ran its pump
+	// The connect state from a session record (a browse row's, or the enumerate's 0x81): retail's
+	// StartClientConnection -> InitFromSession, state 3, start = now, last = now - 2000, no send.
+	void enter_session_connect_state();
 	// Wall-clock stamp of the last IN-ORDER admitted 0x83 (a zero-message keepalive counts;
 	// duplicates, futures, 0x84 resend lists and every other opcode do not) or of a
 	// key-matched 0x85 ping — retail's per-connection reap clock conn+0x5E8, initialized at

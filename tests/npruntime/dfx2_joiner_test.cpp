@@ -29,6 +29,8 @@
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/joiner_connection.h>
 
+#include "enumerated_join.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -146,10 +148,11 @@ JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const s
 	ServerHello sh = build_server_hello(hello, 0x7F000001u, 32769);
 	sh.hk = 0x55667788u;
 	const std::vector<uint8_t> sh_dg = nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(sh));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(sh_dg.data(), sh_dg.size());
+	(void)joiner.handle_datagram(sh_dg.data(), sh_dg.size());
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	const std::vector<uint8_t> auth_dg = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth auth;
-	if (hello_result.outbound.size() != 1 ||
-			!nw_decode_inbound(hello_result.outbound[0].data(), hello_result.outbound[0].size(), opcode, body) ||
+	if (!nw_decode_inbound(auth_dg.data(), auth_dg.size(), opcode, body) ||
 			!parse_client_auth(body.data(), body.size(), auth))
 		return out;
 	for (const std::vector<uint8_t> &chunk : auth.cu) {

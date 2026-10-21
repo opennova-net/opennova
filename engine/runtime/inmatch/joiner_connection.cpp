@@ -237,6 +237,8 @@ std::vector<uint8_t> JoinerConnection::start() {
 	handshake_retry_clock_armed_ = false;
 	handshake_last_send_ms_ = 0;
 	client_join_start_ms_ = 0;
+	enumerated_session_recorded_ = false;
+	enumerate_pass_ended_ = false;
 	post_auth_stage_ = PostAuthStage::Inactive;
 	goodbye_sent_ = false;
 	session_last_send_ms_ = 0;
@@ -309,11 +311,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 		server_hk_ = discovered_.host_key;
 		server_password_required_ = discovered_.password_required;
 		advertised_expansion_ = discovered_.expansion;
-		phase_ = Phase::Auth;
-		handshake_retry_datagram_ = build_client_auth();
-		client_join_start_ms_ = monotonic_milliseconds_();
-		handshake_last_send_ms_ = client_join_start_ms_ - kClientJoinRetryMilliseconds;
-		handshake_retry_clock_armed_ = true;
+		enter_session_connect_state();
 		return {};
 	}
 	// No row: retail's enumerate-and-join on one connection. The enumerator announces
@@ -330,6 +328,17 @@ std::vector<uint8_t> JoinerConnection::start() {
 	handshake_last_send_ms_ = monotonic_milliseconds_();
 	handshake_retry_clock_armed_ = true;
 	return handshake_retry_datagram_;
+}
+
+void JoinerConnection::enter_session_connect_state() {
+	// [orig: CNapiNetwork_StartClientConnection @0x4ca160 -> CNapiNPConnection_InitFromSession
+	//  @0x626320 (the call @0x4ca41b) - state 3 @0x626496, the start @0x62648a, the last send
+	//  now - conn+0x5B0 @0x626490..0x626499]
+	phase_ = Phase::Auth;
+	handshake_retry_datagram_ = build_client_auth();
+	client_join_start_ms_ = monotonic_milliseconds_();
+	handshake_last_send_ms_ = client_join_start_ms_ - kClientJoinRetryMilliseconds;
+	handshake_retry_clock_armed_ = true;
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_hello() {
@@ -536,7 +545,9 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 	//  NapiNP_HandleResendList @0x62395f discards its GetTickCount; 0x81/0x82 stamp nothing]
 	switch (opcode) {
 	case SESSION_OPCODE_SERVER_HELLO:
-		if (phase_ == Phase::Hello) on_server_hello(body, out);
+		// The enumerate reads 0x81s until one records the session; the loop then exits and
+		// reads nothing more before the join's connect state (D-NET-NEW-L2-25).
+		if (phase_ == Phase::Hello && !enumerated_session_recorded_) on_server_hello(body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
 		if (phase_ == Phase::Auth) on_server_auth(body, out);
@@ -569,7 +580,8 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 	return out;
 }
 
-void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollResult &out) {
+void JoinerConnection::on_server_hello(
+		const std::vector<uint8_t> &body, PollResult & /*out*/) {
 	// Any 0x81 from the host is read; no field is required (parse_server_hello).
 	ServerHello sh;
 	if (!parse_server_hello(body.data(), body.size(), sh)) return;
@@ -602,13 +614,19 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	// reconciles against before the world loads is the AUTHORITATIVE S2C 0x7B expansion
 	// (expansion_, surfaced by ClientRuntime::expansion()) (D-NET-178).
 	advertised_expansion_ = sh.sus2;
-	phase_ = Phase::Auth;
-	handshake_retry_datagram_ = build_client_auth();
-	handshake_last_send_ms_ = monotonic_milliseconds_();
-	// The connect state's start: its 30000 ms window runs from here [orig: @0x62648a].
-	client_join_start_ms_ = handshake_last_send_ms_;
-	handshake_retry_clock_armed_ = true;
-	out.outbound.push_back(handshake_retry_datagram_);
+	// The record ends the enumerate: its loop exits on the discovered session and the join
+	// state machine returns, so nothing leaves in this receive. The machine's next pass (state
+	// 4) joins the selected session: StartClientConnection -> InitFromSession enters the
+	// connect state, and the state's pump sends the 0x42 once the clock reads past its start
+	// (pump(), D-NET-NEW-L2-25; the browse row's join takes the same start, D-NET-NEW-L2-24).
+	// [orig: UI_EnumerateAndJoinSession @0x569F50 - the loop @0x56A0C1..0x56A0F9 (the count
+	//  test CNapiNetwork_GetDiscoveredSessionCount @0x56A0C1), g_PreMenuState = 4 @0x56A2D9;
+	//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4 @0x56A4B3 -> UI_JoinSelectedSession
+	//  @0x5699D0 (the call @0x56A4C9) - CNapiNetwork_StartClientConnection (the call @0x569DE6),
+	//  then CNapiNetwork_PumpAndCheckState @0x4C6E80 (the call @0x569E60, the loop
+	//  @0x569E70..0x569E9E)]
+	enumerated_session_recorded_ = true;
+	enumerate_pass_ended_ = false;
 }
 
 namespace {

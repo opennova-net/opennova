@@ -36,6 +36,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
+#include "enumerated_join.h"
 #include "integrity_oracles.h"
 
 #include <algorithm>
@@ -122,16 +123,18 @@ bool drive_to_initial_server_settings(
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
-	if (!expect(hello_result.outbound.size() == 1,
-			"ServerHello emits the close-race ClientAuth"))
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(!auth_datagram.empty(),
+			"ServerHello leads to the close-race ClientAuth"))
 		return false;
 
 	ClientAuth client_auth;
 	body.clear();
 	if (!expect(nw_decode_inbound(
-				hello_result.outbound[0].data(), hello_result.outbound[0].size(),
+				auth_datagram.data(), auth_datagram.size(),
 				opcode, body) && opcode == SESSION_OPCODE_CLIENT_AUTH &&
 				parse_client_auth(body.data(), body.size(), client_auth),
 			"decode the close-race ClientAuth"))
@@ -1854,13 +1857,12 @@ bool check_join_rejection_retains_the_raw_reject_record() {
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth client_auth;
 	body.clear();
-	if (!expect(hello_result.outbound.size() == 1 &&
-					nw_decode_inbound(hello_result.outbound[0].data(),
-							hello_result.outbound[0].size(), opcode, body) &&
+	if (!expect(nw_decode_inbound(auth_datagram.data(), auth_datagram.size(), opcode, body) &&
 					parse_client_auth(body.data(), body.size(), client_auth),
 			"decode the rejected joiner's ClientAuth"))
 		return false;
@@ -1910,13 +1912,12 @@ bool check_pv2_mismatch_reports_an_incompatible_version() {
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth client_auth;
 	body.clear();
-	if (!expect(hello_result.outbound.size() == 1 &&
-					nw_decode_inbound(hello_result.outbound[0].data(),
-							hello_result.outbound[0].size(), opcode, body) &&
+	if (!expect(nw_decode_inbound(auth_datagram.data(), auth_datagram.size(), opcode, body) &&
 					parse_client_auth(body.data(), body.size(), client_auth),
 			"decode the version-mismatch joiner's ClientAuth"))
 		return false;

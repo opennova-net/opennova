@@ -347,7 +347,9 @@ void test_remote_joiner_client_lines() {
 	const std::vector<uint8_t> hello = client.start();
 	std::vector<std::string> lines = log_lines(files);
 	CHECK(lines.size() == 1 && lines[0] == sending(hello, "0x41", 0));
-	// The host's 0x81: queued (NET GOT), its new session (DISCOVERED), the 0x42 it draws.
+	// The host's 0x81: queued (NET GOT) and its new session (DISCOVERED) in its frame; the
+	// next frame starts the connect state and the first frame past that start sends the 0x42
+	// (D-NET-NEW-L2-25).
 	const inmatch::HandleResult reply =
 			inmatch::handle_server_datagram(host, joiner_peer, hello.data(), hello.size(), 0);
 	CHECK(reply.outbound.size() == 1);
@@ -360,6 +362,10 @@ void test_remote_joiner_client_lines() {
 	client.receive(reply.outbound[0].data(), reply.outbound[0].size());
 	now_ms += 16;
 	std::vector<std::vector<uint8_t>> sent = client.Client_ProcessNetworkFrame(1);
+	CHECK(sent.empty() && log_lines(files).size() == 3);
+	CHECK(client.Client_ProcessNetworkFrame(1).empty());
+	now_ms += 16;
+	sent = client.Client_ProcessNetworkFrame(1);
 	CHECK(sent.size() == 1 && opcode_of(sent[0]) == SESSION_OPCODE_CLIENT_AUTH);
 	if (sent.size() != 1) return;
 	lines = log_lines(files);
