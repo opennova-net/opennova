@@ -125,8 +125,20 @@ int test_session() {
 	editor_test::handle_to_end(session, request::correct_line(path, 2, "", "id 100001"));
 	TEST_EXPECT(io::read_file_text(file, text, message) &&
 	            text == "begin \"Gun\"\r\naddeweap ewep01 100201 15 37 0 0\r\nend\r\n");
+	// The game's text is the code page's bytes: a line holding 0xE9 reads as UTF-8 "é" in the dialog and over the
+	// wire, a text typed with it is written as the one byte, and a character the page has none for is refused.
+	const std::string accented = "begin \"Caf\xE9\"\r\nid 100001\r\naddeweap ewep01 100201 15 37\r\nend\r\n";
+	TEST_EXPECT(test_io::write_file(file, std::vector<uint8_t>(accented.begin(), accented.end())));
+	editor_test::handle_to_end(session, request::rescan());
+	session.handle(request::correct_line(path, 1, {}, std::nullopt, true));
+	TEST_EXPECT(view.workspace.correct_line.was == "begin \"Caf\xC3\xA9\"");
+	session.handle(request::correct_line(path, 1, "begin \"Gun \xE2\x86\x92\"", std::string("begin \"Caf\xC3\xA9\"")));
+	TEST_EXPECT(session.outcome().refused);
+	editor_test::handle_to_end(session, request::correct_line(path, 1, "begin \"Th\xC3\xA9\"", std::string("begin \"Caf\xC3\xA9\"")));
+	TEST_EXPECT(io::read_file_text(file, text, message) &&
+	            text == "begin \"Th\xE9\"\r\nid 100001\r\naddeweap ewep01 100201 15 37\r\nend\r\n");
 	std::printf("correct line: a blocked items.def's row offers it, the dialog opens on the line, the file is written "
-	            "and read again unblocked; the refusals\n");
+	            "and read again unblocked; the refusals; the code page's bytes as UTF-8 and back\n");
 	return 0;
 }
 

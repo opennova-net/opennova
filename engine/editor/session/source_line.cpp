@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/cp1252.h>
 #include <base/io/file_io.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/model/core_finding.h>
@@ -61,7 +62,7 @@ bool read_source_line(const std::string &root, const std::string &relative, Asse
 		        std::to_string(line) + ".";
 		return false;
 	}
-	text = bytes.substr(at.begin, at.end - at.begin);
+	text = cp1252_to_utf8(bytes.substr(at.begin, at.end - at.begin));
 	return true;
 }
 
@@ -105,14 +106,21 @@ void correct_source_line(SessionCore &core, const EditorRequest &request) {
 	// here where the file has no such line.
 	if (request.ask_name) {
 		std::string text, error;
-		if (!read_source_line(core.paths().root, file->relative_path, file->kind, line, text, error)) refuse(error);
+		if (!read_source_line(core.paths().root, file->relative_path, file->kind, line, text, error)) return refuse(error);
+		if (text.size() >= kWorkspaceLine)
+			refuse("Line " + std::to_string(line) + " of " + file->relative_path + " is longer than the dialog holds (" +
+			       std::to_string(kWorkspaceLine - 1) + " characters): correct it in a text editor.");
 		return;
 	}
 	const std::string *text = value_of(request, "text");
 	const std::string *was = value_of(request, "was");
-	const std::string corrected = text ? *text : std::string();
-	if (corrected.find_first_of("\r\n") != std::string::npos)
+	if (text && text->find_first_of("\r\n") != std::string::npos)
 		return refuse("A line's text holds no line end: correct one line at a time.");
+	// The game's text files are the code page's bytes: the text written as they hold it.
+	std::string corrected;
+	if (text && !utf8_to_cp1252(*text, corrected))
+		return refuse("The game's code page (Windows-1252) has no byte for a character of the text: correct the line "
+		              "without it.");
 	const std::string relative = file->relative_path;
 	DocumentBase *open = core.documents().document_for(relative);
 	if (open && open->dirty())
@@ -129,8 +137,9 @@ void correct_source_line(SessionCore &core, const EditorRequest &request) {
 		              std::to_string(line) + ".");
 	const std::string before = bytes.substr(at.begin, at.end - at.begin);
 	// The line as the correction was asked over: one another program changed since is not written over.
-	if (was && *was != before)
-		return refuse("Line " + std::to_string(line) + " of " + relative + " changed since: it reads \"" + before + "\".");
+	if (was && *was != cp1252_to_utf8(before))
+		return refuse("Line " + std::to_string(line) + " of " + relative + " changed since: it reads \"" +
+		              cp1252_to_utf8(before) + "\".");
 	if (before == corrected) {
 		core.note("Line " + std::to_string(line) + " of " + relative + " already reads so: nothing written.");
 		return;

@@ -77,16 +77,19 @@ void draw_document_toolbar(Workspace &workspace, const DocumentBase &document, c
 			ui_kit::refusal_text(blocked_notice);
 			return;
 		}
-		// Read only while a line its Save cannot write stands: how many, on one line; Problems' fix in the tooltip.
+		// Read only while input its Save cannot write stands: how many lines, on one line, Problems' fix in the
+		// tooltip; input on no line (a table's whole file) said as such, with no fix to point to.
 		size_t lines = 0;
-		for (const SourceIssue &issue : document.issues()) lines += issue.blocks ? 1 : 0;
-		const std::string line = "Read only: " + std::to_string(lines) + (lines == 1 ? " line" : " lines") +
-		                         " the editor cannot carry (Problems)";
+		for (const SourceIssue &issue : document.issues()) lines += issue.blocks && issue.line > 0 ? 1 : 0;
+		const std::string line = lines ? "Read only: " + std::to_string(lines) + (lines == 1 ? " line" : " lines") +
+		                                     " the editor cannot carry (Problems)"
+		                               : std::string("Read only: the editor cannot carry this file (Problems)");
 		row.next(ui_kit::text_width(line.c_str()));
 		ImGui::AlignTextToFramePadding();
 		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::refusal_color());
-		ui_kit::clipped_text(line, "A save cannot write these lines as the game reads them. Problems' Correct the "
-		                           "line... rewrites one in the file and reads it again.");
+		ui_kit::clipped_text(line, lines ? "A save cannot write these lines as the game reads them. Problems' Correct "
+		                                   "the line... rewrites one in the file and reads it again."
+		                                 : "A save cannot write this file as the game reads it: Problems says why.");
 		ImGui::PopStyleColor();
 		return;
 	}

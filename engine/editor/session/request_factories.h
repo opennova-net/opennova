@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -209,14 +210,15 @@ inline EditorRequest music_stream_audio(std::string path, std::string wave, std:
 	return request;
 }
 // Line `line` of the project file `path` written as `text` ("": taken out), refused where it no longer reads `was`
-// ("": unchecked); `ask`: Problems' Correct the line... opened on it instead, nothing written (session/source_line.h).
-inline EditorRequest correct_line(std::string path, size_t line, std::string text = {}, std::string was = {},
-                                  bool ask = false) {
+// (none: unchecked; a blank line's "" is checked); `ask`: Problems' Correct the line... opened on it instead, nothing
+// written (session/source_line.h).
+inline EditorRequest correct_line(std::string path, size_t line, std::string text = {},
+                                  std::optional<std::string> was = std::nullopt, bool ask = false) {
 	EditorRequest request = of(EditorRequestKind::CorrectLine);
 	request.path = std::move(path);
 	request.values.emplace_back("line", std::to_string(line));
 	if (!ask) request.values.emplace_back("text", std::move(text));
-	if (!ask && !was.empty()) request.values.emplace_back("was", std::move(was));
+	if (!ask && was) request.values.emplace_back("was", std::move(*was));
 	request.ask_name = ask;
 	return request;
 }

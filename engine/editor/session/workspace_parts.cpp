@@ -661,7 +661,9 @@ bool set_correct_line(Change &change, const JsonValue &part) {
 		if (named.empty()) return change.closed("Correct the line...", "name the file first (correct_line.path)");
 		const AssetEntry *file = project_file(change.view, named);
 		if (!file) return change.refuse("The project has no file " + named + " to correct.", named);
-		const size_t number = line ? size_t(line->number) : asked.line;
+		// A whole number from 1 (a negative, a fraction or one past any file's lines is none).
+		const bool whole = !line || (line->number >= 1.0 && line->number <= 1e9 && line->number == double(int64_t(line->number)));
+		const size_t number = !whole ? 0 : line ? size_t(line->number) : asked.line;
 		if (number < 1) return change.refuse("Name the line to correct, from 1 (correct_line.line).", file->relative_path);
 		if (file->relative_path != asked.path || number != asked.line) {
 			std::string text, error;

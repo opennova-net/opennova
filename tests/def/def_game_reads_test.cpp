@@ -229,6 +229,21 @@ int main() {
 	       "weapon \"WPN_THING\"\r\naction \"FIRE\"\r\nfunction fire 1 2 3 4 5\r\nend\r\nend\r\n");
 	blocks("ammoclass_max_carry alone", "weapon.def", "ammoclass_max_carry\r\n");
 	blocks("light_move alone", "ammo.def", ammo("light_move"));
+	// A powerup's and a number's members in one item the union cannot carry, however the block closes: here the
+	// file's end, its `end` lost to the walk.
+	blocks("a powerup and a clip size the file's end closes", "items.def",
+	       "begin \"Box\"\r\nid 100001\r\nsid Box1\r\npowerupdef PU_X\r\nclipsize 5\r\nend");
+	{
+		// A dupsound of no values: the parser's own finding alone, no "reads as 0" beside it.
+		const Read out = read("weapon.def", "weapon \"WPN_THING\"\r\naction \"FIRE\"\r\ndupsound\r\nend\r\nend\r\n",
+		                      [](const void *) { return true; });
+		bool reinterpreted_too = false;
+		for (const DefIssue &issue : out.report) reinterpreted_too |= issue.code == DefIssueCode::Reinterpreted;
+		if (!def_report_blocks(out.report) || reinterpreted_too) {
+			std::printf("FAIL dupsound alone: one blocking finding, not a reading beside it\n");
+			++failures;
+		}
+	}
 
 	if (failures) std::printf("%d failure(s)\n", failures);
 	else std::printf("def_game_reads: ok\n");

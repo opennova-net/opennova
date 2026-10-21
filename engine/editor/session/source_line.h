@@ -31,8 +31,9 @@ bool source_line_crlf_only(AssetKind kind);
 // the line out, its ending with it.
 std::string with_source_line(const std::string &bytes, const SourceLine &at, const std::string &text);
 
-// The text of line `line` of the project file `relative` (of `kind`) under the project's `root` as it stands on disk;
-// false, why in `error`.
+// The text of line `line` of the project file `relative` (of `kind`) under the project's `root` as it stands on disk,
+// as UTF-8: the game's text files are the code page's bytes (cp1252, as the def tables read them), which the dialog
+// and the wire take as UTF-8; false, why in `error`.
 bool read_source_line(const std::string &root, const std::string &relative, AssetKind kind, size_t line,
                       std::string &text, std::string &error);
 // The line a correct_line names (values.line: digits alone, from 1); 0 for none.
@@ -40,7 +41,9 @@ size_t correct_line_number(const EditorRequest &request);
 
 // CorrectLine (session/request_kinds.h): the line written in the file on disk (or taken out), the rest of its bytes
 // untouched, the file read again (an open document of it with its records and its validation, as an outside
-// change is). With ask_name, Problems' Correct the line... opened on the line instead (workspace_follows).
+// change is). The text and `was` are UTF-8, the line written as its code-page bytes (refused for a character the
+// page has no byte for). With ask_name, Problems' Correct the line... opened on the line instead
+// (workspace_follows), refused for a line longer than the dialog holds.
 void correct_source_line(SessionCore &core, const EditorRequest &request);
 
 } // namespace opennova::editor

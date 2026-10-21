@@ -722,7 +722,7 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		out.push_back({"Correct the line...",
 		               "Shows line " + std::to_string(d.line) + " of " + d.asset + " as the file holds it, to correct or clear; "
 		               "Apply writes it in the file and reads the file again." + std::string(kNotUndoable),
-		               request::correct_line(d.asset, d.line, {}, {}, true), false});
+		               request::correct_line(d.asset, d.line, {}, std::nullopt, true), false});
 	switch (row->fixes) {
 	case FindingFix::None: return;
 	case FindingFix::Requirement:

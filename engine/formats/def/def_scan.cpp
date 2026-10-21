@@ -697,8 +697,11 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
         // slot past the second; a light's reads four or five), a carry limit's after its class [orig: abs(atol(
         // tokens[3])) @0x543862..0x543873], an attachment's item id after its user point [orig:
         // ItemDef_ParseProperty, atol of tokens[3] @0x4A1B8E..0x4A1BAD]. Any other reads a slot no file states.
+        // (An action's dupsound is not one: its arm reads both values only on a line of both, the parser's own
+        // finding, def_weapons.cpp, which this one does not contradict.)
         const bool two_slots = property->fields.size() <= 2 && encoding != DefEncoding::LightMove &&
-                               encoding != DefEncoding::LightImpact;
+                               encoding != DefEncoding::LightImpact &&
+                               !(kind == DefRecordKind::Action && key == "dupsound");
         if ((count == 0 && first && first->type != DefFieldType::Text && two_slots) ||
             (count == 1 && (kind == DefRecordKind::Carry || encoding == DefEncoding::Attachment)))
             reads_as("0");

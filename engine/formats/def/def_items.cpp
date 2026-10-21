@@ -156,6 +156,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
     bool powerup_branch = false, numeric_branch = false;
     size_t emplacement_attachments_cap = 0;
     size_t number = 0; // the line a finding names, counting from 1
+    /* A record holding both a powerup's and a numeric item's members, which the typed model's
+       union cannot carry: refused however the block is closed (its `end`, a nested `begin`, the
+       file's end), as the writer's form of it, its `end` added, would be. */
+    const auto check_union = [&] {
+        if (powerup_branch && numeric_branch)
+            authoring_issue(current.unmodeled_count, report, number, current.display_name,
+                "powerupdef", 10, DefIssueCode::Unrepresentable);
+    };
 
     io::ConfigTokens tokens_state;
     for_each_def_line(buf, file_len, tokens_state,
@@ -173,9 +181,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 return;
             }
             if (in_block) {
-                if (powerup_branch && numeric_branch)
-                    authoring_issue(current.unmodeled_count, report, number, current.display_name,
-                        "powerupdef", 10, DefIssueCode::Unrepresentable);
+                check_union();
                 /* A record closed with no alias takes "S%06i" of its authored
                    id [orig: the `end` arm @0x49EB2F..0x49EB5F, `cmp
                    [esi+30h], bl` then sprintf(alias, "S%06i", [esi+50h] +
@@ -201,6 +207,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 // The open record, closed by no `end`, which the writer's form of it would add.
                 authoring_issue(out->unmodeled_count, report, number, current.display_name, "end", 3,
                                 unclosed_code(current));
+                check_union();
                 DA_PUSH(out->entries, out->count, entries_cap, current);
             }
             def_init_item(current); /* [orig: the begin arm calls
@@ -958,6 +965,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
        no key [orig: File_ParseASCIIFile @0x53D8E9..0x53D8F5]. */
     if (in_block) {
         authoring_issue(out->unmodeled_count, report, number, current.display_name, "end", 3, unclosed_code(current));
+        check_union();
         DA_PUSH(out->entries, out->count, entries_cap, current);
     }
 
