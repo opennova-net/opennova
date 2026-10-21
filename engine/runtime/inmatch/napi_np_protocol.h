@@ -99,7 +99,7 @@ struct HandleResult {
 	// [orig: Server_TickUpdate -> CNapiNetwork_PumpServerProtocolRecv @0x51d895 (flags 0x19:
 	//  0x8 = NapiNPProtocol_PumpRecvQueues @0x6266a0, queue_mask & 1 dispatch @0x6266ca..0x6267ad);
 	//  NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket @0x6239b6 ->
-	//  CNapiNPManager_SendTo @0x61f039]
+	//  CNapiNPManager_SendTo called @0x61F032]
 	std::vector<std::vector<uint8_t>> immediate_outbound;
 	// Datagrams to the address a packet names, sent from inside the receive at the datagram's
 	// position: the magic packet's reflection (D-NET-NEW-L1-20).

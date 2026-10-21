@@ -1805,6 +1805,53 @@ std::vector<TickOut> tick_connections(
 	if (run_spawn_pump && ctx.world != nullptr && ctx.world->match.periodic_second())
 		Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
 
+	// An orphaned row in its player-sync or world-stream track (D-NET-NEW-L1-24, a re-add
+	// that came while the row's burst ran) runs on through the per-slot block, the row's own
+	// cursors and state word: each step's records go to its net player (send_mask 0x20 sends
+	// through the row's +0x1C) at that player's open boundary and under its backlog gate, the
+	// track's tail sets that net player's game state 9, and the row parks in state 3 or 5,
+	// where no request of the player's ever reaches it (the player's records go to its
+	// current row). Past the player's leave nothing runs (Q7-36 (a)). The block walks the rows
+	// in slot order, so when a net player's own row and its orphaned row step on one boundary
+	// the lower slot's records lead that player's queue.
+	// [orig: Server_TickUpdate's per-slot block - the slot walk @0x51E385..0x51E47C, the row's
+	//  +0x1C @0x51E3AA, its connection @0x51E3B1, the boundary @0x51E3D6, the pump call
+	//  @0x51E3E4; Server_SendPlayerSlotStateFrame @0x51BBA0 - the backlog gate on the row's net
+	//  player's connection @0x51BBFD..0x51BC04 / @0x51BF14..0x51BF1B, the sends to the row
+	//  (send_mask 0x20 @0x51BC40 .. @0x51C10E), CNetPlayer_SetGameState(9) on the row's +0x1C
+	//  called @0x51BED7 / @0x51C11C, the row's state 5 @0x51BEF3 / 3 @0x51C134]
+	std::vector<OrphanedPlayerRow *> orphans;
+	if (ctx.world != nullptr)
+		for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) orphans.push_back(&orphan);
+	std::stable_sort(orphans.begin(), orphans.end(),
+			[](const OrphanedPlayerRow *a, const OrphanedPlayerRow *b) {
+				return a->row.reply.player_slot < b->row.reply.player_slot;
+			});
+	std::vector<const OrphanedPlayerRow *> stepped;
+	auto step_orphan = [&](OrphanedPlayerRow &orphan) {
+		stepped.push_back(&orphan);
+		NapiNPConnection &row = orphan.row;
+		if (row.burst.spawned) return;
+		NapiNPConnection *net_player = orphan_net_player(ctx, orphan);
+		if (net_player == nullptr || net_player->link.transport == nullptr ||
+				net_player->host_disconnect_sent)
+			return;
+		if (respect_s2c_send_boundary &&
+				net_player->type == NapiNPConnection::kTypeServerSide &&
+				!net_player->s2c_send_boundary_open)
+			return;
+		// The backlog gate and the game state are the net player's words.
+		row.seq.retained_outbound_message_count = net_player->seq.retained_outbound_message_count;
+		row.burst.game_state = net_player->burst.game_state;
+		InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, row, now_tick);
+		net_player->burst.game_state = row.burst.game_state;
+		std::vector<std::vector<uint8_t>> unframed;
+		ship_burst_messages(*net_player, step.messages, unframed);
+	};
+	auto orphan_stepped = [&](const OrphanedPlayerRow *orphan) {
+		return std::find(stepped.begin(), stepped.end(), orphan) != stepped.end();
+	};
+
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		const bool send_boundary_closed =
 				respect_s2c_send_boundary && conn.type == NapiNPConnection::kTypeServerSide &&
@@ -1884,6 +1931,11 @@ std::vector<TickOut> tick_connections(
 		// [orig: Server_TickUpdate's tail slot walk @0x51E385..0x51E47C, the call @0x51E3E4
 		//  at the connection's open send boundary @0x51E3D6..0x51E3DD]
 		if (conn.phase >= ConnectionPhase::PlayerAdded) {
+			// This player's orphaned rows on lower slots step first (the block's slot order).
+			for (OrphanedPlayerRow *orphan : orphans)
+				if (orphan->row.reply.player_slot < conn.reply.player_slot &&
+						!orphan_stepped(orphan) && orphan_net_player(ctx, *orphan) == &conn)
+					step_orphan(*orphan);
 			InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, conn, now_tick);
 			ship_burst_messages(conn, step.messages, to.outbound);
 		}
@@ -1897,46 +1949,9 @@ std::vector<TickOut> tick_connections(
 		out.push_back(std::move(to));
 	}
 
-	// An orphaned row in its player-sync or world-stream track (D-NET-NEW-L1-24, a re-add
-	// that came while the row's burst ran) runs on through the per-slot block, the row's own
-	// cursors and state word: each step's records go to its net player (send_mask 0x20 sends
-	// through the row's +0x1C) at that player's open boundary and under its backlog gate, the
-	// track's tail sets that net player's game state 9, and the row parks in state 3 or 5,
-	// where no request of the player's ever reaches it (the player's records go to its
-	// current row). Past the player's leave nothing runs (Q7-36 (a)).
-	// [orig: Server_TickUpdate's per-slot block - the row's +0x1C @0x51E3AA, its connection
-	//  @0x51E3B1, the boundary @0x51E3D6, the pump call @0x51E3E4;
-	//  Server_SendPlayerSlotStateFrame @0x51BBA0 - the backlog gate on the row's net player's
-	//  connection @0x51BBFD..0x51BC04 / @0x51BF14..0x51BF1B, the sends to the row (send_mask 0x20
-	//  @0x51BC40 .. @0x51C10E), CNetPlayer_SetGameState(9) on the row's +0x1C called @0x51BED7 /
-	//  @0x51C11C, the row's state 5 @0x51BEF3 / 3 @0x51C134]
-	if (ctx.world != nullptr && !ctx.orphaned_player_rows.empty()) {
-		std::vector<OrphanedPlayerRow *> orphans;
-		for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) orphans.push_back(&orphan);
-		std::stable_sort(orphans.begin(), orphans.end(),
-				[](const OrphanedPlayerRow *a, const OrphanedPlayerRow *b) {
-					return a->row.reply.player_slot < b->row.reply.player_slot;
-				});
-		for (OrphanedPlayerRow *orphan : orphans) {
-			NapiNPConnection &row = orphan->row;
-			if (row.burst.spawned) continue;
-			NapiNPConnection *net_player = orphan_net_player(ctx, *orphan);
-			if (net_player == nullptr || net_player->link.transport == nullptr ||
-					net_player->host_disconnect_sent)
-				continue;
-			if (respect_s2c_send_boundary &&
-					net_player->type == NapiNPConnection::kTypeServerSide &&
-					!net_player->s2c_send_boundary_open)
-				continue;
-			// The backlog gate and the game state are the net player's words.
-			row.seq.retained_outbound_message_count = net_player->seq.retained_outbound_message_count;
-			row.burst.game_state = net_player->burst.game_state;
-			InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, row, now_tick);
-			net_player->burst.game_state = row.burst.game_state;
-			std::vector<std::vector<uint8_t>> unframed;
-			ship_burst_messages(*net_player, step.messages, unframed);
-		}
-	}
+	// The rest of the orphaned rows, in slot order.
+	for (OrphanedPlayerRow *orphan : orphans)
+		if (!orphan_stepped(orphan)) step_orphan(*orphan);
 	return out;
 }
 

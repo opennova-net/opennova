@@ -1145,7 +1145,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
 		NapiNPConnection *net_player = orphan_net_player(ctx, orphan);
 		// The writer's rate test reads the net player's receive silence [orig:
-		//  Server_SendEntityStateToPlayer @0x517BA0 - CNetPlayer_GetConnectionUptime (called
+		//  Server_SendEntityStateToPlayer @0x517BA0 - CNetPlayer_GetReceiveSilenceMs (called
 		//  @0x517C58) on the row's net player, the 2000 ms test @0x517C5D..0x517C62].
 		if (net_player != nullptr) orphan.row.receive_inactive_ms = net_player->receive_inactive_ms;
 		slot_rows.push_back({&orphan.row, net_player});

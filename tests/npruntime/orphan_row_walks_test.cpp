@@ -358,6 +358,69 @@ void test_the_round_end_takes_an_orphaned_row() {
 	CHECK(r.net_player().burst.game_state == 11);
 }
 
+// The tick head's per-row block (Server_UpdateAllActivePlayerSlots) takes the orphaned row
+// (slot 2, ahead of its net player's slot 3): its body's spawn protection counts down, its
+// overlay visit runs (the cooldown re-armed at 13, the phase stepped), its frontier bit clears,
+// and its live quartet's countdown ends: the 0x39 / 0x42, the 0x43 and the 0x68 go to its net
+// player and its counts step; the player's own row, short of the live age, runs no quartet.
+// Past the player's leave the row's words still step and nothing is sent.
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 - the active byte @0x518840, the state
+//  test @0x518874..0x518878, the overlay visit @0x5188D6, the frontier send_mask 0xA0
+//  @0x518974, the quartet's sends @0x518A67 / @0x518A73 / @0x518A79]
+void test_the_slot_walk_takes_an_orphaned_row() {
+	OrphanRig r;
+	for (w::EntityHandle body : {r.own_body, r.orphan_body})
+		if (w::Entity *e = r.world->registry.get(body)) e->damage_state = 5;
+	if (w::MatchPlayer *p = r.world->match.player(r.orphan_body))
+		p->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	inmatch::NapiNPConnection &o = r.orphan();
+	o.reply.frontier_hint_pending = true;
+	o.reply.control_request_countdown = 1;
+	(void)r.drain();
+	inmatch::update_all_active_player_slots(*r.ctx, *r.world);
+	const w::Entity *orphan_body = r.world->registry.get(r.orphan_body);
+	const w::Entity *own_body = r.world->registry.get(r.own_body);
+	CHECK(orphan_body != nullptr && orphan_body->damage_state == 4);
+	CHECK(own_body != nullptr && own_body->damage_state == 4);
+	CHECK(o.reply.minimap_overlay_cooldown == 13 && o.reply.minimap_pool1_phase == 1);
+	CHECK(!o.reply.frontier_hint_pending);
+	CHECK(o.reply.control_request_countdown == inmatch::CONTROL_REQUEST_PERIOD_TICKS);
+	CHECK(o.reply.charattr_unanswered_count == 1 && o.reply.time_sync_unanswered_count == 1);
+	CHECK(r.net_player().reply.charattr_unanswered_count == 0);
+	int challenges = 0;
+	int latches = 0;
+	int pings = 0;
+	int pages = 0;
+	for (uint8_t t : r.drain()) {
+		challenges += t == s2c::CHARATTR_CRC_CHALLENGE ? 1 : 0;
+		latches += t == s2c::CHARATTR_DISABLED_PROPERTIES ? 1 : 0;
+		pings += t == s2c::TIME_SYNC_PING ? 1 : 0;
+		pages += t == s2c::LOADED_MODEL_PAGE_REQUEST ? 1 : 0;
+	}
+	CHECK(challenges == 1 && latches == 1 && pings == 1 && pages == 1);
+	// The player leaves: the row's words step on, nothing is sent.
+	r.ctx->np_protocol.connection_list.clear();
+	o.reply.control_request_countdown = 1;
+	inmatch::update_all_active_player_slots(*r.ctx, *r.world);
+	CHECK(orphan_body->damage_state == 3);
+	CHECK(o.reply.minimap_overlay_cooldown == 12);
+	CHECK(o.reply.charattr_unanswered_count == 2);
+	CHECK(r.drain().empty());
+}
+
+// The 1 Hz violation sweep walks the slot table: the orphaned row's body has ten suicides, so
+// its punt-log arm punts its net player (t6), the player's own row aside.
+// [orig: Server_CheckPlayerViolations @0x51ABD0 - the slot walk @0x51ABE0..0x51AD2E, the
+//  suicide arm Server_LogCRCMismatchPunt(slot, 6) called @0x51AD17; Server_LogCRCMismatchPunt
+//  @0x517ED0 - the row's +0x1C @0x517F47]
+void test_the_violation_sweep_takes_an_orphaned_row() {
+	OrphanRig r;
+	if (w::MatchPlayer *p = r.world->match.player(r.orphan_body))
+		p->stats[w::MatchStats::kSuicides] = 10;
+	inmatch::check_player_violations(*r.ctx, *r.world);
+	CHECK(r.net_player().host_disconnect_sent);
+}
+
 } // namespace
 
 int main() {
@@ -372,6 +435,8 @@ int main() {
 	test_the_downed_resend_takes_an_orphaned_row();
 	test_the_integrity_family_takes_an_orphaned_row();
 	test_the_round_end_takes_an_orphaned_row();
+	test_the_slot_walk_takes_an_orphaned_row();
+	test_the_violation_sweep_takes_an_orphaned_row();
 	if (failures != 0) {
 		std::printf("npruntime_orphan_row_walks: %d failure(s)\n", failures);
 		return 1;

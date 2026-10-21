@@ -1269,6 +1269,49 @@ bool run_an_orphaned_row_runs_on_its_player_sync_track() {
 	              "the orphaned row's track reaches its net player and parks in state 3");
 }
 
+// D-NET-NEW-L1-24 (L1-s18): a net player's own row and its orphaned row both in the
+// player-sync track step on one boundary in the per-slot block's slot order, so the lower
+// slot's record leads the player's queue: the orphaned row (the earlier add's, the lower slot)
+// at its session config ahead of the fresh row's map names. Stepped own row first, the map
+// names would lead.
+// [orig: Server_TickUpdate's per-slot block - the slot walk @0x51E385..0x51E47C, the row's
+//  +0x1C @0x51E3AA, the pump call @0x51E3E4; Server_PlayerAdd @0x51CBC0 - the re-add's fresh
+//  row (PlayerSlot_PickFreeSlot called @0x51CC95)]
+bool run_two_rows_of_one_player_step_in_slot_order() {
+	JoinFixture f(/*with_existing=*/false);
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.reply.admission_metadata_pushed = true;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the pump adds the joiner")) return false;
+	j.slot_state = inmatch::PlayerSlotState::PlayerSync;
+	j.spawn_queue_unlinked = false;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    f.ctx->orphaned_player_rows.size() == 1,
+	            "the re-add orphans the row")) return false;
+	inmatch::NapiNPConnection &orphan = f.ctx->orphaned_player_rows[0].row;
+	if (!expect(orphan.reply.player_slot < f.joiner().reply.player_slot,
+	            "the orphaned row holds the lower slot")) return false;
+	orphan.slot_state = inmatch::PlayerSlotState::PlayerSync;
+	orphan.burst.player_sync_subphase = inmatch::InitialStateBurst::kSyncSessionConfig;
+	f.joiner().slot_state = inmatch::PlayerSlotState::PlayerSync; // its own C2S 0x09
+	f.joiner().burst.game_state = 7;
+	(void)JoinFixture::drain(f.joiner_transport);
+	std::vector<uint8_t> tags;
+	for (int i = 0; i < 8; ++i) {
+		const std::vector<uint8_t> step = f.pump();
+		tags.insert(tags.end(), step.begin(), step.end());
+	}
+	const auto first = [&tags](uint8_t tag) {
+		return std::find(tags.begin(), tags.end(), tag) - tags.begin();
+	};
+	const auto end = static_cast<std::ptrdiff_t>(tags.size());
+	return expect(first(opennova::s2c::SESSION_CONFIG) < end &&
+	                      first(opennova::s2c::MISSION_MAP_NAMES) < end &&
+	                      first(opennova::s2c::SESSION_CONFIG) <
+	                              first(opennova::s2c::MISSION_MAP_NAMES),
+	              "the lower slot's track record leads the player's queue");
+}
+
 // D-NET-NEW-L1-24 (Q7-31 (b), leg (b)): a C2S 0x02 in the NovaWorld ticket wait (game states 3
 // / 4) enters game state 7 and lists the node: the validation watchdog visits states 3 / 4 alone,
 // so it no longer punts it, the pump adds the player with no ticket, and the enter result (its
@@ -1380,6 +1423,7 @@ int main() {
 	if (!run_an_orphaned_row_takes_its_own_frame_rtt_and_list()) ++failures;
 	if (!run_a_players_two_rows_interleave_frame_and_rtt()) ++failures;
 	if (!run_an_orphaned_row_runs_on_its_player_sync_track()) ++failures;
+	if (!run_two_rows_of_one_player_step_in_slot_order()) ++failures;
 	if (!run_an_echo_in_the_ticket_wait_spawns_without_a_ticket()) ++failures;
 	if (!run_a_repeated_echo_keeps_the_held_nag_stamp()) ++failures;
 	if (failures != 0) return 1;

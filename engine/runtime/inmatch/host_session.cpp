@@ -262,7 +262,7 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 		}
 		// A 0x44's rebuilt packets leave from inside the receive pump, at this datagram's
 		// position, whatever the connection's S2C send boundary says (D-NET-229).
-		// [orig: NapiNP_HandleResendList -> SendSessionPacket @0x6239b6 -> SendTo @0x61f039]
+		// [orig: NapiNP_HandleResendList -> SendSessionPacket @0x6239b6 -> SendTo (called @0x61F032)]
 		for (const std::vector<uint8_t> &dg : r.immediate_outbound)
 			sock.send_to(peer, dg.data(), dg.size());
 		// The magic packet's reflection goes to the address the packet named, from inside the
