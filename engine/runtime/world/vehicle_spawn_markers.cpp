@@ -120,8 +120,15 @@ void VehicleSystem::tick_spawn_markers() {
 						zone->team != static_cast<uint8_t>(vehicle->vehicle_spawn_team) ||
 						((marker->flags | marker->engine_flags) & 1) != 0)
 					continue;
+				// The marker's spawn-list group ids are the list's own tokens (atol,
+				// no offset) and the hull's side is its def's type id (the def's id
+				// less 100000), the entity's item id: "1291" names the 101291 FAV.
+				// [orig: the compare @0x52A02F..0x52A037 (group itemId == the hull
+				//  def +0x50); ItemDef_ParseProperty's spawn list @0x4A0290..0x4A029A
+				//  (ItemGroup_GetOrCreateSlot @0x49DFC0 keeps the atol), its id
+				//  @0x49EC3F..0x49EC5A (`sub eax, 186A0h` into +0x50)]
 				if (std::find(marker->vehicle_spawn_ids.begin(), marker->vehicle_spawn_ids.end(),
-							int32_t(vehicle->item_id) + 100000) == marker->vehicle_spawn_ids.end())
+							int32_t(vehicle->item_id)) == marker->vehicle_spawn_ids.end())
 					continue;
 				if (best == nullptr ||
 						direction * best->vehicle_spawn_priority <

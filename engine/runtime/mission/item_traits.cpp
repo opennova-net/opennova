@@ -260,12 +260,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 					e->vehicle_spawn_groups.push_back(static_cast<uint8_t>(group));
 					// A bay ORs each spawn group's flags, taken from the
 					// group item's unitType (an unresolved id reads the
-					// Null row, whose unitType sets none).
-					// [orig: ItemDefs_LoadAndValidate @0x4a1fa7..0x4a1fcf,
+					// Null row, whose unitType sets none). The group's item
+					// is the first row whose type id (its id less 100000) is
+					// the list's token.
+					// [orig: ItemDefs_LoadAndValidate @0x4a1f66..0x4a1f86 (the
+					//  row scan against def +0x50), @0x4a1fa7..0x4a1fcf,
 					//  @0x4a2010..0x4a2058]
 					if ((def->attrib2 & 1u) == 0) continue;
-					const DefItemDef *member =
-							find_item(by_id, items.vehicle_spawn_ids[group]);
+					const DefItemDef *member = find_item(by_id,
+							items.vehicle_spawn_ids[group] + mission::kItemIdOffset);
 					const int unit = member != nullptr ? member->unit_type : 0;
 					if (unit == 1 || unit == 2 || unit == 12) e->vehicle_bay_flags |= 1u;
 					else if (unit == 3 || unit == 4) e->vehicle_bay_flags |= 2u;

@@ -3272,7 +3272,7 @@ static void test_spawn_markers_ride_the_script_admission() {
 	seed.has_item_def = true;
 	seed.item_type = 4;
 	seed.item_attrib2 = 4;
-	seed.vehicle_spawn_ids = { 100042 };
+	seed.vehicle_spawn_ids = { 42 }; // the list token: the hull's type id
 	seed.zone_number = 1;
 	seed.position = { 10, 0, 3 };
 	(void)w.registry.spawn(3, seed);
@@ -3367,7 +3367,7 @@ static void test_vehicle_spawn_marker_selection() {
 	seed.has_item_def = true;
 	seed.item_type = 4;
 	seed.item_attrib2 = 4;
-	seed.vehicle_spawn_ids = { 100042 };
+	seed.vehicle_spawn_ids = { 42 }; // the list token: the hull's type id
 	seed.zone_number = 1;
 	seed.position = { 10, 0, 3 };
 	const auto m1 = w.registry.spawn(3, seed);
@@ -3409,7 +3409,7 @@ static void test_vehicle_spawn_marker_selection() {
 	w.vehicles.tick_spawn_markers();
 	CHECK(!v.veh.respawn_waiting_for_overlay); // live hull blocks first-pass eligibility
 	CHECK(v.veh.spawn_pose[0] == 10 * 65536);
-	w.registry.get(m1)->vehicle_spawn_ids = { 100043 }; // wrong category
+	w.registry.get(m1)->vehicle_spawn_ids = { 43 }; // wrong category
 	w.vehicles.tick_spawn_markers();
 	CHECK(v.veh.respawn_waiting_for_overlay);
 	w.registry.get(blocking)->position = { 100, 100, 0 };
@@ -3422,6 +3422,86 @@ static void test_vehicle_spawn_marker_selection() {
 	CHECK(v.veh.spawn_pose[0] == 20 * 65536);
 	(void)z1;
 	(void)m2;
+}
+
+// A wreck in a spawn group respawns on the marker the every-32 pass hands it.
+// The pass flags the wreck waiting and copies the pose of a free marker whose
+// spawn list names the hull's type id: the list keeps its tokens as written
+// ("1291") and the hull's side is its def's id less 100000, so the FAV's 1291
+// matches and its full id 101291 names nothing. The dead tick's 16th count
+// then moves the hull to the copied words and respawns it there; a hull still
+// waiting is buried 5000 u out on both axes instead.
+// [orig: Spawn_AssignOverlaySpawnPoints @0x529E60 (the waiting bit @0x529FA2,
+//  the compare @0x52A02F..0x52A037, the six-word copy @0x52A13D..0x52A166, the
+//  bit clear @0x52A17D); AI_TickState_VehicleDead @0x467EA0 (`moveTimer > 15`
+//  @0x467EF9, the bury @0x467F20..0x467F2C, the copy @0x467FC5..0x467FF2, the
+//  respawn @0x46802E)]
+static void test_a_grouped_wreck_respawns_on_its_marker() {
+	for (const int32_t listed : { 1291, 101291 }) {
+		auto storage = std::make_unique<World>();
+		World &w = *storage;
+		w.registry.configure_pool(1, 8);
+		w.registry.configure_pool(2, 4);
+		w.registry.configure_pool(3, 8);
+		w.env.water_z = INT32_MIN;
+		Entity seed;
+		seed.has_item_def = true;
+		seed.item_type = 5;
+		seed.item_attrib = 0x60000;
+		seed.zone_control = 65536;
+		seed.zone_number = 1;
+		seed.team = 1;
+		seed.position = { -445, -414, 11 };
+		(void)w.registry.spawn(2, seed);
+		seed = Entity{};
+		seed.has_item_def = true;
+		seed.item_type = 4;
+		seed.item_attrib2 = 4;
+		seed.vehicle_spawn_ids = { listed };
+		seed.zone_number = 1;
+		seed.position = { -470, -416, 11 };
+		(void)w.registry.spawn(3, seed);
+		seed = Entity{};
+		seed.has_item_def = true;
+		seed.item_type = 1;
+		seed.item_id = 1291;
+		seed.item_attrib = kItemAttribPlayerControl;
+		seed.vehicle_spawn_team = 1;
+		seed.team = 1;
+		seed.bound_radius = 2;
+		seed.health_max = 3000;
+		seed.position = { -21210, -12031, 10 };
+		const EntityHandle vh = w.registry.spawn(1, seed);
+		Entity &v = *w.registry.get(vh);
+		w.ai.attach(vh);
+		AiEntity &ai = *w.ai.for_handle(vh);
+		ItemDeathTraits death;
+		death.static_death = true;
+		w.tables.item_death_traits.set(seed.item_id, death);
+		w.vehicles.capture_spawn_pose(v);
+		w.vehicles.build_spawn_markers();
+		v.health = 0;
+		v.alive = false;
+		v.flags = v.engine_flags = kEntityFlagHusk | kEntityFlagDead;
+		ai.brain.f[AiBrain::kCurState] = 23;
+		w.vehicles.tick_dead(v, ai); // the first count: the pass may take it now
+		w.vehicles.tick_spawn_markers();
+		CHECK(v.veh.respawn_waiting_for_overlay == (listed != 1291));
+		for (int i = 0; i < 14; ++i)
+			w.vehicles.tick_dead(v, ai);
+		CHECK(v.veh.stuck_ticks == 15 && v.health == 0);
+		CHECK(v.position.x == -21210 && v.position.y == -12031);
+		w.vehicles.tick_dead(v, ai);
+		if (listed == 1291) {
+			CHECK(v.position.x == -470 && v.position.y == -416 && v.position.z == 11);
+			CHECK(v.health == 3000 && v.alive && v.team == 1);
+			CHECK(v.flags == kEntityFlagInAir && v.engine_flags == kEntityFlagMatrixBuilt);
+			CHECK(ai.brain.f[AiBrain::kPendState] == 22);
+		} else {
+			CHECK(v.position.x == -21210 + 5000 && v.position.y == -12031 + 5000);
+			CHECK(v.health == 0 && !v.alive);
+		}
+	}
 }
 
 static void test_aircraft_landing_and_navigation_states() {
@@ -5019,6 +5099,7 @@ int main() {
 	test_death_effect_banks_and_water_crossings();
 	test_aircraft_landing_and_navigation_states();
 	test_vehicle_spawn_marker_selection();
+	test_a_grouped_wreck_respawns_on_its_marker();
 	test_spawn_markers_ride_the_script_admission();
 	test_spawn_markers_skip_unnumbered_zones();
 	test_aircraft_death_lifecycle();

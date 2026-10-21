@@ -462,6 +462,35 @@ void test_graphic_model_is_the_loads_result() {
     fs::remove_all(root, ec);
 }
 
+// A bay's group flags come from each spawn-list group's item: the first row
+// whose type id (its id less 100000) is the list's token, so "1291" names the
+// 101291 row (unit_type 1 sets bit 0, unit_type 3 bit 1); a token naming no
+// row reads the Null row, which sets none.
+// [orig: ItemDefs_LoadAndValidate @0x4A1F66..0x4A1F86 (the row scan against
+//  def +0x50), @0x4A1FA7..0x4A1FCF, @0x4A2010..0x4A2058]
+void test_a_bay_takes_its_groups_unit_types() {
+    static const char kDefs[] =
+        "begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
+        "begin \"FAV\"\r\n id 101291\r\n type vehicle\r\n unit_type 1\r\nend\r\n"
+        "begin \"Helo\"\r\n id 101300\r\n type vehicle\r\n unit_type 3\r\nend\r\n"
+        "begin \"Bay\"\r\n id 101400\r\n type marker\r\n attrib: VehicleBay\r\n"
+        " pcvehicle_spawnlist 1291 1300\r\nend\r\n"
+        "begin \"Bay none\"\r\n id 101401\r\n type marker\r\n attrib: VehicleBay\r\n"
+        " pcvehicle_spawnlist 9999\r\nend\r\n";
+    DefItemsFile defs{};
+    CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(kDefs),
+            sizeof(kDefs) - 1, &defs) == 0);
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(2, 4);
+    const EntityHandle bay = spawn(w, 2, 1400, EntityKind::Item);
+    const EntityHandle none = spawn(w, 2, 1401, EntityKind::Item);
+    mission::resolve_item_traits(w, defs, {}, nullptr);
+    CHECK(w.registry.get(bay)->vehicle_bay_flags == (1u | 2u));
+    CHECK(w.registry.get(none)->vehicle_bay_flags == 0u);
+    def_free_items(&defs);
+}
+
 } // namespace
 
 // A row's sound profile binds its region loops (Soundloop_1..4, dawn to night)
@@ -1257,6 +1286,7 @@ int main() {
 
     def_free_items(&file);
     test_graphic_model_is_the_loads_result();
+    test_a_bay_takes_its_groups_unit_types();
     if (failures == 0) std::printf("mission_item_traits: OK\n");
     return failures == 0 ? 0 : 1;
 }
