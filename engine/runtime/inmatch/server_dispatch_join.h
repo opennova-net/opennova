@@ -30,17 +30,17 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 		const ServerDispatchInputs &inputs);
 
 // The S2C 0x02 padding probe (CNetPlayer_SendFileTransferChunk(0)): its 512-byte body over the
-// host context (the host's GetTickCount, the mission start's file-transfer session id, the
-// padding length, then 500 CRT draws), the two words the C2S 0x02 echo must return kept on the
+// host context (the host's GetTickCount, the process's file-transfer session id, the padding
+// length, then 500 CRT draws), the two words the C2S 0x02 echo must return kept on the
 // connection, which then awaits that echo. The C2S 0x01 sends it at once, or under the
 // join-ticket gate the enter result's success does. [orig: CNetPlayer_SendFileTransferChunk
-//  @0x4C9440; the 0x01's call @0x512FBD; CNapiGameSession_HandlePlayEnterResponse @0x4D1C19]
+//  @0x4C9440; NapiNPServerMsg_HandleJoinRequest @0x512ED0 (the call @0x512FBC);
+//  CNapiGameSession_HandlePlayEnterResponse @0x4D1C19]
 ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx *ctx);
 
 // The case bodies of the in-match switch.
 void dispatch_join(NapiNPConnection &conn, const ProtocolMessage &msg,
 		std::vector<ProtocolMessage> &replies);                            // C2S 0x00
-void dispatch_join_form_post(NapiNPServerCtx *ctx, std::vector<ProtocolMessage> &replies); // C2S 0x01
 void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn,
 		uint32_t now_tick, const ServerDispatchInputs &inputs,
 		std::vector<ProtocolMessage> &replies);                            // C2S 0x02

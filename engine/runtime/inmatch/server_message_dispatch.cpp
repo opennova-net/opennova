@@ -625,8 +625,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					return {};
 				break;
 			}
-			case c2s::JOIN_FORM_POST: // handshake push -> S2C 0x02 GLB_JOIN push [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0]
-				dispatch_join_form_post(inputs.server_ctx, replies);
+			case c2s::JOIN_FORM_POST:
+				// Answered only in net-player game state 2 with no server slot: the admission
+				// FSM's form-post arm. A completed admission is past state 2 (6 at the probe, 7
+				// on), so a repeated 0x01 answers nothing and draws nothing.
+				// [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - `cmp [edi+0A0h], 2`
+				//  @0x512EF1 / `jnz` @0x512EF8, `cmp [edi+0C0h], 0` @0x512EFE / `jnz` @0x512F05;
+				//  CNetPlayer_SetGameState(2) only from NapiNPServer_HandlePlayerJoinMessage
+				//  @0x512AA0 (the call @0x512E7D)]
 				break;
 			case c2s::JOIN_PADDING_ECHO: // duplicate GLB_JOIN reply after admission
 				dispatch_join_padding_echo(config, conn, now_tick, inputs, replies);

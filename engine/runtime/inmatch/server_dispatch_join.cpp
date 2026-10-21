@@ -561,10 +561,28 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 				conn.admission_stage = GameAdmissionStage::Rejected;
 				return {};
 			}
+			// The side passwords' second test, whatever the team-choose rule (the 0x00's
+			// validator tests them only under it): with either password set, a joiner that is
+			// no spectator and whose JSP equals neither (case-insensitive; an empty JSP equals
+			// an unset password) is rejected with reason 17 and gets no probe.
+			// [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - the two lengths
+			//  @0x512F0B..0x512F3B, the JSR test @0x512F3D, _stricmp(JSP, A) @0x512F52 and
+			//  (JSP, B) @0x512F64, CNapiNPConnection_QueueDisconnectEvent(player, "", 17, "")
+			//  @0x512F7E; NapiNetConfig_LoadFromConnTags @0x4C7260 (JSR @0x4C7607, JSP via
+			//  NapiNetConfig_SetJsp @0x4C26B0)] (D-NET-NEW-L1-21)
+			if ((!config.side_a_password.empty() || !config.side_b_password.empty()) &&
+					conn.join_spectator_request == 0 &&
+					!strutil::iequals(conn.join_password, config.side_a_password) &&
+					!strutil::iequals(conn.join_password, config.side_b_password)) {
+				(void)stage_join_gate_reject(conn, 17);
+				conn.admission_stage = GameAdmissionStage::Rejected;
+				return {};
+			}
 			// State 3 under the ticket gate, which returns with no probe: the enter result's
 			// success sends it (Server_ApplyPlayerEnterResult). Else state 6 and the probe at
-			// once. [orig: @0x512F87..0x512FA6 (the gate, state 3, return); @0x512FAF..0x512FBD
-			//  (state 6, SendFileTransferChunk(0))]
+			// once. [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - the gate, state 3 and
+			//  the return @0x512F87..0x512FA6; state 6 @0x512FB3, CNetPlayer_SendFileTransferChunk(0)
+			//  called @0x512FBC]
 			conn.join_ticket_validation =
 					inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
 			if (conn.join_ticket_validation) {
@@ -608,14 +626,6 @@ void dispatch_join(NapiNPConnection &conn, const ProtocolMessage &msg,
 		std::vector<ProtocolMessage> &replies) {
 	conn.join_identity_pairs = parse_join_identity_pairs(msg.payload, conn.join_cookie_present);
 	replies.push_back(make_protocol_message(s2c::INIT, {}));
-}
-
-// See header. [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0]
-void dispatch_join_form_post(NapiNPServerCtx *ctx, std::vector<ProtocolMessage> &replies) {
-	// Golden round-trip (f131-134): C 0x01 -> S 0x02 push -> C 0x02 -> S post-handshake
-	// burst. The retail client's join-FSM verification (state 6->7, 0x424740) needs this
-	// SEQUENCED exchange — a collapsed all-at-once burst leaves it stuck at "Verifying".
-	replies.push_back(make_protocol_message(s2c::JOIN_PADDING_PROBE, context_tag02_push(ctx)));
 }
 
 // See header.
