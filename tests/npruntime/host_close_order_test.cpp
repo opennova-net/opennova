@@ -397,7 +397,7 @@ void test_close_resets_an_orphaned_row_through_its_net_player() {
 	host->role->close();
 	int resets = 0;
 	for (const auto &[to, bytes] : host->socket.sent) {
-		if (to != kPeer) continue;
+		if (!(to == kPeer)) continue;
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;
 		if (!nw_decode_inbound(bytes.data(), bytes.size(), opcode, body) ||
