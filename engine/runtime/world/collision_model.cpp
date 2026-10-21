@@ -385,6 +385,14 @@ void render_float_rotation_mul(const float a[16], const float b[16], float out[1
 
 } // namespace
 
+void collision_matrix_to_render_float(const CollisionMatrix &fixed, float out_row_major[16]) {
+    fixed_to_render_float(fixed, out_row_major);
+}
+
+bool collision_matrix_from_render_float(const float in_row_major[16], CollisionMatrix &out) {
+    return render_float_to_fixed(in_row_major, out);
+}
+
 bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
                                         const float pose[16],
                                         CollisionMatrix &out) {

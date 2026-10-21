@@ -237,6 +237,8 @@ bool resolve_model_mounted_pose(const Threedi3di3 &model,
 		const world::Entity &carrier, const world::Seat &seat,
 		const int32_t *ctrl_values, uint32_t time_ms,
 		world::MountedPose &out) {
+	if (seat.type == world::SeatType::Gunner && !seat.attachment_frame)
+		return resolve_usegun_seat_pose(model, carrier, seat, ctrl_values, time_ms, out);
 	MountedPosePartMatrices rest_parts;
 	MountedPosePartMatrices live_parts;
 	if (!evaluate_model_mounted_pose_parts(model, 0u, nullptr, rest_parts) ||
@@ -251,7 +253,7 @@ bool resolve_model_mounted_pose_from_parts(
 		const Threedi3di3 &model, const world::Entity &carrier,
 		const world::Seat &seat, const MountedPosePartMatrices &rest_parts,
 		const MountedPosePartMatrices &live_parts, world::MountedPose &out) {
-	if (seat.type != world::SeatType::Gunner || seat.bone_index == 0)
+	if (seat.type != world::SeatType::Gunner || !seat.attachment_frame || seat.bone_index == 0)
 		return false;
 	const int userpoint_index = static_cast<int>(seat.bone_index) - 1;
 	if (userpoint_index < 0 || model.user_points == nullptr ||
@@ -381,11 +383,7 @@ bool resolve_model_mounted_pose_from_parts(
 		live_basis = m3_mul(m3_mul(carrier_basis, live_part.basis),
 				attachment_in_part);
 	} else {
-		const double baseline_yaw = seat.attachment_frame
-				? carrier_yaw + seat.yaw_offset
-				: seat.type == world::SeatType::Gunner
-				? carrier_yaw - seat.yaw_offset
-				: carrier_yaw + seat.yaw_offset;
+		const double baseline_yaw = carrier_yaw + seat.yaw_offset;
 		const M3 baseline_basis = model_basis_from_mission_euler(
 				carrier_pitch, baseline_yaw, carrier_roll);
 		M3 rest_basis_inverse;
@@ -420,6 +418,53 @@ bool resolve_model_mounted_pose_from_parts(
 	out.heading = bam_heading_from_mission_yaw_deg(yaw_deg);
 	out.pitch = bam_from_degrees_wrapped(pitch_deg);
 	out.roll = bam_from_degrees_wrapped(roll_deg);
+	return true;
+}
+
+// See mounted_pose.h. The carry rebuilds the carrier's +0xB4 matrix from its words
+// (entity_placement_matrix), swizzles it to render floats and copies it into every bone
+// slot, runs the model's bone pass over those inputs, converts the UseGun userpoint's
+// part back to Q22 / 16.16, transforms the userpoint's position words through it and
+// reads the occupant's Yaw / Pitch / Roll off it; the userpoint's direction words are
+// not read. A model with no part animation hands the inputs back, its every bone the
+// carrier's own matrix. [orig: Entity_AttachToBoneAndUpdateTransform @0x5463D0 - the
+// matrix build @0x546451..0x5464B4, Math_FixedPointToFloatMatrix4x4_Swizzled @0x5464CB,
+// the slot copies @0x5464D3..0x54650D, Model_TransformBoneMatrices @0x54652B (the
+// no-animation return @0x58F27C), Math_FloatMatrixToFixedPoint22 of the userpoint's part
+// (bone+0x18) @0x54653E, Math_FixedPointTransformPoint22 @0x546564,
+// Math_FixedPointMatrixToEulerAngles @0x54656F]
+bool resolve_usegun_seat_pose(const Threedi3di3 &model, const world::Entity &carrier,
+		const world::Seat &seat, const int32_t *ctrl_values, uint32_t time_ms,
+		world::MountedPose &out) {
+	if (seat.type != world::SeatType::Gunner || seat.attachment_frame || seat.bone_index == 0)
+		return false;
+	const size_t userpoint_index = static_cast<size_t>(seat.bone_index) - 1;
+	if (model.user_points == nullptr || userpoint_index >= model.user_point_count ||
+			model.lods == nullptr || model.lod_count == 0)
+		return false;
+	const ThreediUserPoint &up = model.user_points[userpoint_index];
+	if (up.subobject_index < 0 ||
+			static_cast<size_t>(up.subobject_index) >= model.lods[0].render_object_count)
+		return false;
+	ThreediMatrix4x4 carrier_float;
+	collision_matrix_to_render_float(entity_placement_matrix(carrier), carrier_float.m);
+	// One input per possible part (a node's part and parent indices are bytes).
+	const MountedPosePartMatrices inputs(256, carrier_float);
+	MountedPosePartMatrices bones;
+	threedi_panm_pose_parts_over(model, 0, time_ms, ctrl_values, inputs, bones, nullptr);
+	if (static_cast<size_t>(up.subobject_index) >= bones.size()) return false;
+	CollisionMatrix bone;
+	if (!collision_matrix_from_render_float(bones[static_cast<size_t>(up.subobject_index)].m, bone))
+		return false;
+	const int32_t point[3] = {up.x, up.y, up.z};
+	int32_t position[3];
+	bone.transform_point(point, position);
+	out.position.set_q16({position[0], position[1], position[2]});
+	int32_t euler[3];
+	collision_matrix_to_euler(bone, euler);
+	out.heading = euler[0];
+	out.pitch = euler[1];
+	out.roll = euler[2];
 	return true;
 }
 

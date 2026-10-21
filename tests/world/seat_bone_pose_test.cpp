@@ -13,9 +13,15 @@
 #include <runtime/world/mounted_pose.h>
 #include <runtime/world/vehicle_mount.h>
 
+#include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
+
 #include <cstdint>
 #include <cstdio>
+#include <climits>
+#include <cstring>
 
+using namespace opennova::threedi;
 using namespace opennova::world;
 
 static int failures = 0;
@@ -95,11 +101,141 @@ void test_an_unturned_carrier_keeps_the_userpoint_bearing() {
 	CHECK(pose.pitch == 0 && pose.roll == 0);
 }
 
+// The UseGun carry: the carrier's Q22 matrix as render floats in every bone slot, the bone
+// pass, the userpoint's part back to Q22 / 16.16, the userpoint's position words through it
+// and its own eulers; the userpoint's direction is never read. A model with no part
+// animation hands back its inputs, so the bone is the carrier's matrix after the float
+// round trip: a rotation entry below 2^24 survives it, a translation word of 2^24 or more
+// keeps 24 significant bits (19088743 = 0x01234567 becomes 19088744, ties to even;
+// -36984441 becomes -36984440). [orig: Entity_AttachToBoneAndUpdateTransform @0x5463D0 -
+// Math_FixedPointToFloatMatrix4x4_Swizzled @0x5464CB (`fimul [ecx+0Ch]; fstp dword`
+// @0x611122..0x611125), Model_TransformBoneMatrices @0x54652B (the no-animation return
+// @0x58F27C), Math_FloatMatrixToFixedPoint22 @0x54653E, Math_FixedPointTransformPoint22
+// @0x546564, Math_FixedPointMatrixToEulerAngles @0x54656F]
+void test_a_usegun_bone_is_the_carrier_matrix_through_render_floats() {
+	ThreediRenderObject part{};
+	ThreediLod lod{};
+	lod.render_objects = &part;
+	lod.render_object_count = 1;
+	ThreediUserPoint point{};
+	std::strcpy(point.name, "UseGun");
+	point.x = kOne;           // (1, 2, 0.5)
+	point.y = 2 * kOne;
+	point.z = kOne / 2;
+	point.rot_x = 3 * kOne;   // a facing the carry never reads
+	point.rot_y = 4 * kOne;
+	point.rot_z = 2 * kOne;
+	Threedi3di3 model{};
+	model.lods = &lod;
+	model.lod_count = 1;
+	model.user_points = &point;
+	model.user_point_count = 1;
+	Entity carrier;
+	carrier.heading = 0x40000000;
+	carrier.position.set_q16({0x01234567, -0x02345679, 3 * kOne});
+	Seat seat;
+	seat.type = SeatType::Gunner;
+	seat.bone_index = 1;
+	seat.yaw_offset = 37;
+	MountedPose pose;
+	CHECK(resolve_usegun_seat_pose(model, carrier, seat, nullptr, 0, pose));
+	// The rotation as in test_a_seat_point_rides_the_carrier_matrix (-131075, 65530, 32768)
+	// plus the rounded translation (19088744, -36984440, 196608).
+	CHECK(pose.position.x.q16 == 18957669);
+	CHECK(pose.position.y.q16 == -36918910);
+	CHECK(pose.position.z.q16 == 229376);
+	// The eulers of that matrix: the yaw is atan2(-4194303, -201) times -2^31 / pi =
+	// 1073774581.91, truncated; a level carrier's pitch and roll are 0.
+	CHECK(pose.heading == 1073774581);
+	CHECK(pose.pitch == 0 && pose.roll == 0);
+	// resolve_model_mounted_pose takes a UseGun seat to the same carry.
+	MountedPose routed;
+	CHECK(resolve_model_mounted_pose(model, carrier, seat, nullptr, 0, routed));
+	CHECK(routed.position.x.q16 == 18957669 && routed.heading == 1073774581);
+	// A userpoint on a part the LOD does not hold resolves nothing.
+	point.subobject_index = 1;
+	CHECK(!resolve_usegun_seat_pose(model, carrier, seat, nullptr, 0, pose));
+	// An addeweap frame is not the UseGun carry.
+	point.subobject_index = 0;
+	seat.attachment_frame = true;
+	CHECK(!resolve_usegun_seat_pose(model, carrier, seat, nullptr, 0, pose));
+}
+
+// A UseGun userpoint on an animated part rides that part's bone: part 1 turns a half turn
+// about the render Y axis (EWEAP_GUNYAW 0x10000 over a 0..8192 track: 2^21 units times
+// 1.4980282e-6 is the float pi, cosf -1, sinf -8.74e-8, which truncates to 0 in Q22), so
+// its bone on an unturned carrier at (10, 20, 3) is rows (-4194304, 0, 0 | 10),
+// (0, -4194304, 0 | 20), (0, 0, 4194304 | 3); part 0 keeps the carrier's matrix.
+// [orig: Model_TransformBoneMatrices @0x58E390 (the Euler arm @0x58E999..0x58EA7B, the
+// parent pivot @0x58EACF..0x58EB36); PANM_SampleTrack @0x5B2270]
+void test_a_usegun_on_an_animated_part_rides_its_bone() {
+	ThreediRenderObject parts[2] = {};
+	ThreediPartAnimation nodes[2];
+	std::memset(nodes, 0, sizeof(nodes));
+	nodes[0].subobject_index = 0;
+	nodes[0].parent_subobject = 0;
+	nodes[1].subobject_index = 1;
+	nodes[1].parent_subobject = 0;
+	nodes[1].flags = 2u << 8;            // Euler
+	nodes[1].rotation_x.control = 113;   // the rotation_x track turns about render Y
+	nodes[1].rotation_x.control_param = 0;
+	nodes[1].rotation_x.end = 8192;
+	ThreediControlRegister registers[1];
+	std::memset(registers, 0, sizeof(registers));
+	std::strcpy(registers[0].name, "EWEAP_GUNYAW");
+	ThreediLod lod{};
+	lod.render_objects = parts;
+	lod.render_object_count = 2;
+	lod.part_animations = nodes;
+	lod.part_animation_count = 2;
+	ThreediUserPoint point{};
+	std::strcpy(point.name, "UseGun");
+	point.x = kOne;
+	point.y = 2 * kOne;
+	point.z = kOne / 2;
+	point.rot_x = 3 * kOne;
+	point.rot_y = 4 * kOne;
+	point.subobject_index = 1;
+	Threedi3di3 model{};
+	model.lods = &lod;
+	model.lod_count = 1;
+	model.user_points = &point;
+	model.user_point_count = 1;
+	model.ctrl.registers = registers;
+	model.ctrl.count = 1;
+	int32_t bus[THREEDI_CTRL_REGISTER_COUNT] = {};
+	bus[THREEDI_CTRL_EWEAP_GUNYAW] = 0x10000;
+	Entity carrier;
+	carrier.heading = 0;
+	carrier.position.set_q16({10 * kOne, 20 * kOne, 3 * kOne});
+	Seat seat;
+	seat.type = SeatType::Gunner;
+	seat.bone_index = 1;
+	MountedPose pose;
+	CHECK(resolve_usegun_seat_pose(model, carrier, seat, bus, 0, pose));
+	// x = (65536 * -4194304 + 2^21) >> 22 = -65536 plus 655360; y = -131072 plus 1310720;
+	// z = 32768 plus 196608.
+	CHECK(pose.position.x.q16 == 589824);
+	CHECK(pose.position.y.q16 == 1179648);
+	CHECK(pose.position.z.q16 == 229376);
+	// atan2(0, -4194304) = pi times -2^31 / pi is -2^31: the Yaw word 0x80000000.
+	CHECK(pose.heading == INT32_MIN);
+	CHECK(pose.pitch == 0 && pose.roll == 0);
+	// The same userpoint on part 0 takes the carrier's matrix.
+	point.subobject_index = 0;
+	CHECK(resolve_usegun_seat_pose(model, carrier, seat, bus, 0, pose));
+	CHECK(pose.position.x.q16 == 11 * kOne && pose.position.y.q16 == 22 * kOne &&
+			pose.position.z.q16 == 229376);
+	CHECK(pose.heading == 0 && pose.pitch == 0 && pose.roll == 0);
+}
+
 } // namespace
 
 int main() {
 	test_a_seat_point_rides_the_carrier_matrix();
 	test_an_unturned_carrier_keeps_the_userpoint_bearing();
+	test_a_usegun_bone_is_the_carrier_matrix_through_render_floats();
+	test_a_usegun_on_an_animated_part_rides_its_bone();
 	if (failures != 0) return 1;
 	std::printf("seat_bone_pose: all passed\n");
 	return 0;
