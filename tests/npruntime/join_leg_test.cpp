@@ -1135,8 +1135,8 @@ bool run_an_orphaned_row_is_a_player_list_row() {
 // state-4 gate on both arms) then does nothing: no probe, no NWPENTERFAIL record.
 // [orig: NapiNPServerMsg_0x002 @0x512FD0 - game state 7 @0x51319C, the listing called @0x513193;
 //  CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 - states 3 / 4 @0x4C8B7C / @0x4C8BD4;
-//  CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 (no game-state test); CNapiGameSession_
-//  HandlePlayEnterResponse @0x4D1940 - the state-4 gate @0x4D1B40]
+//  CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 (no game-state test);
+//  CNapiGameSession_HandlePlayEnterResponse @0x4D1940 - the state-4 gate @0x4D1B40]
 bool run_an_echo_in_the_ticket_wait_spawns_without_a_ticket() {
 	JoinFixture f(/*with_existing=*/false);
 	f.ctx->novaworld_join_tickets_armed = true;
