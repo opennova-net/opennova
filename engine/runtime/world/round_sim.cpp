@@ -1477,18 +1477,19 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                 ((target->flags | target->engine_flags) & kEntityFlagDead) == 0;
             const PlayerBodyClass row_class =
                 person_hit_row_class(world, *target, damage_target_is_person);
-            // The local player's damage feedback (red vignette + camera shake +
-            // radar blip) arms on every hit that beats the 5-point floor, after
-            // the class damage callback and ahead of the kill routing; retail
-            // tests the value it just computed, not the applied health delta.
-            // The source is the projectile, the point its Position
-            // [orig: Projectile_ProcessDamageOnTarget @0x4e8213..0x4e822b ->
-            //  Player_OnDamageReceived @0x4dd880].
-            if (target_not_dead && target->handle == world.cached.local_player && damage > 5) {
+            // The local player's damage feedback (vignette, shake, blip): a hit past the 5-point
+            // floor, after the class callback, whose dead bit it re-reads, ahead of the kill routing
+            // [orig: Projectile_ProcessDamageOnTarget - @0x4E81FF..0x4E820E, the test @0x4E8213,
+            //  @0x4E8219..0x4E8224, Player_OnDamageReceived @0x4DD880 (the call @0x4E822B)].
+            const auto local_damage_feedback = [&]() {
+                const Entity *victim = world.registry.get(damage_entity);
+                if (victim == nullptr || ((victim->flags | victim->engine_flags) & kEntityFlagDead) ||
+                        victim->handle != world.cached.local_player || damage <= 5)
+                    return;
                 const int32_t at[3] = {r.pos.x.q16, r.pos.y.q16, r.pos.z.q16};
                 player_on_damage_received(world, radar_round_source(world, r,
                         static_cast<uint32_t>(&r - rounds.data())), at);
-            }
+            };
             // The record every event-1 callback reads, on both peers: this
             // round, the damage, the struck section and the target.
             // [orig: Projectile_ProcessDamageOnTarget
@@ -1505,6 +1506,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                 // [orig: Projectile_ProcessDamageOnTarget @ 0x4E7FB0]
                 destruction_notify_item_damage(world, *target, 1,
                         {collision.section_index, damage, r.yaw_bam, r.pitch_bam, r.roll_bam});
+                local_damage_feedback();
             } else {
                 // The lethal edge reads the health word BEFORE this hit's
                 // subtraction: a body already at or below zero never re-enters
@@ -1576,17 +1578,20 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
                     const int32_t death_section =
                         primary_section >= 0 ? primary_section : 1;
-                    if (target_not_dead && row_class != PlayerBodyClass::kItem) {
+                    // No dead return in the org callback, the roll's test aside; the plyr one has [orig:
+                    //  OrganicClass_HandleEvent @0x407483, @0x40755E; Entity_HandleDamageAndTriggerZones @0x40772F].
+                    if (row_class == PlayerBodyClass::kOrganic ||
+                            (target_not_dead && row_class == PlayerBodyClass::kPlayer)) {
                         target->death_anim_state =
                             compute_death_anim_state(death_section, quadrant,
                                                      death_cause::kBullet);
                         AiEntity *victim_body = world.ai.for_handle(target->handle);
-                        apply_hit_body_roll(victim_body, death_section, quadrant);
-                        // The plyr callback re-arms its 64-tick think on every event it
-                        // handles, around its waypoint tail.
-                        // [orig: Entity_HandleDamageAndTriggerZones @0x407b5e /
-                        //  @0x407c71; the tail @0x407B64..0x407C6B]
+                        if (target_not_dead) apply_hit_body_roll(victim_body, death_section, quadrant);
+                        // The plyr callback's health tail, then its 64-tick re-arm around the
+                        // waypoint tail [orig: Entity_HandleDamageAndTriggerZones - @0x407ACD..0x407B33,
+                        //  the re-arms @0x407b5e / @0x407c71; the tail @0x407B64..0x407C6B].
                         if (row_class == PlayerBodyClass::kPlayer) {
+                            player_body_health_tail(world, *target);
                             target->spawn_phase = 64;
                             player_body_waypoint_visits(world, *target);
                         }
@@ -1594,6 +1599,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                     if (row_class == PlayerBodyClass::kItem) // its row's (a barrel may remove it)
                         player_body_row_event(world, *target, 1);
                     if ((target = world.registry.get(damage_entity)) == nullptr) return;
+                    local_damage_feedback();
                     if (authoritative && damage != 0 && pre_hit_health > 0 &&
                         target->health <= 0) {
                         // A lethal player-flag hit counts on the ROUND; past the

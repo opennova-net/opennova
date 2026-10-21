@@ -417,6 +417,137 @@ void test_a_round_hit_runs_its_rows_callback() {
 	}
 }
 
+// One round fired into a remote player body of `player_class` (the rig of the case above): its
+// health before the round, whether it is already dead, whether it is the local player's.
+struct RoundHitOutcome {
+	bool struck = false;
+	int32_t death_anim_state = 0;
+	int32_t motor_anim_state = -1;
+	int motor_anim_pending = -1;
+	int32_t shake = 0;
+};
+RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, bool local) {
+	RoundHitOutcome out;
+	Rig r;
+	r.world->ai.is_authority = true;
+	w::CollisionWorld collision;
+	w::Entity s;
+	s.kind = w::EntityKind::Organic;
+	s.item_type_index = 3;
+	s.item_type = 3;
+	s.team = 2;
+	s.health = 100;
+	const w::EntityHandle shooter = r.world->registry.spawn(0, s);
+	w::PlayerSpawn spawn;
+	spawn.position = {5.0f, 0.0f, 0.0f};
+	spawn.net_id = 0xFFF1;
+	spawn.player_class = player_class;
+	spawn.heading = w::placed_heading_bam(90);
+	w::Entity *body = r.bind(w::spawn_remote_player(*r.world, spawn));
+	CHECK(body != nullptr);
+	if (body == nullptr) return out;
+	const w::EntityHandle victim = body->handle;
+	body->bound_radius = 1.0f;
+	body->team = 1;
+	body->health = health;
+	body->death_anim_state = 0x1234; // a clip no select produces
+	if (dead) body->flags |= w::kEntityFlagDead;
+	if (local) r.world->cached.local_player = victim;
+	w::AmmoTableEntry ammo;
+	ammo.name = "ZONE";
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 20;
+	ammo.weight_in_grains = 875;
+	r.world->tables.ammo.entries.push_back(ammo);
+	w::CollisionModel model;
+	model.sections.resize(14);
+	for (w::CollisionSection &section : model.sections) {
+		section.authored_bounds = true;
+		section.min_x = section.min_y = section.min_z = -0x10000;
+		section.max_x = section.max_y = section.max_z = 0x10000;
+		section.radius = 0x10000;
+	}
+	collision.assign_entity(victim, collision.add_model(std::move(model)));
+	r.world->collision = &collision;
+	std::vector<w::CollisionMatrix> matrices;
+	for (int section = 0; section < 14; ++section) {
+		const int32_t center[3] = {5 * 65536, section == 13 ? 0 : (20 + section) * 65536, 58982};
+		matrices.push_back(w::collision_matrix_from_heading(0, center));
+	}
+	CHECK(collision.publish_entity_section_matrices(victim, std::move(matrices)));
+	collision.build_tick_tables(*r.world);
+	w::RoundSpawnParams params;
+	params.owner = shooter;
+	params.shooter_handle = shooter.packed;
+	params.origin = {0.0f, 0.0f, 0.9f};
+	params.ammo_index = 0;
+	CHECK(r.world->round_sim.spawn(*r.world, params) >= 0);
+	r.world->round_sim.tick(*r.world, nullptr);
+	r.world->collision = nullptr;
+	out.struck = r.world->round_sim.hit_record.target == victim;
+	out.shake = r.local->view.shake.counter;
+	const w::Entity *hit = r.world->registry.get(victim);
+	if (hit == nullptr) return out;
+	out.death_anim_state = hit->death_anim_state;
+	if (const w::AiEntity *motor = r.world->ai.for_handle(victim)) {
+		out.motor_anim_state = motor->inf.anim_state;
+		out.motor_anim_pending = motor->inf.anim_pending;
+	}
+	return out;
+}
+
+// The round hit's plyr-row arm runs the plyr callback's health tail: a body the round leaves at
+// Health <= 0 requests its staged death clip on its primary channel, the deferred one cleared;
+// an org row's clip select runs on a dead body too (its callback has no dead return); and the
+// local player's damage feedback reads the dead bit after the callback, so a brrl row's body the
+// round kills (the barrel's dying arm sets the bit) arms none where a plyr row's does.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407720 - the dead return @0x40772F, the health
+//  tail @0x407ACD..0x407B33 (+0x2BC @0x407AFB, +0x2B8 @0x407B01); OrganicClass_HandleEvent
+//  @0x407310 - the select @0x407483; Projectile_ProcessDamageOnTarget @0x4E7FB0 - the callback
+//  @0x4E820E, `test byte [esi+24h], 2` @0x4E8213, Player_OnDamageReceived @0x4E822B;
+//  Entity_HandleDeathOnAuthority @0x407CC0 - `or [esi+24h], 2` @0x407D34]
+void test_a_round_hit_runs_the_callbacks_tails() {
+	const RoundHitOutcome lethal = fire_one_round(kPlyr, 10, /*dead=*/false, /*local=*/true);
+	CHECK(lethal.struck);
+	CHECK(lethal.death_anim_state != 0x1234);
+	CHECK(lethal.motor_anim_state == lethal.death_anim_state);
+	CHECK(lethal.motor_anim_pending == 0);
+	CHECK(lethal.shake > 0); // the plyr callback leaves the bit clear: the feedback arms
+	const RoundHitOutcome alive = fire_one_round(kPlyr, 5000, false, false);
+	CHECK(alive.struck);
+	CHECK(alive.motor_anim_state != alive.death_anim_state); // Health > 0: no tail
+	const RoundHitOutcome corpse = fire_one_round(kOrg, 100, /*dead=*/true, false);
+	if (corpse.struck) CHECK(corpse.death_anim_state != 0x1234); // the org select, dead or not
+	const RoundHitOutcome plyr_corpse = fire_one_round(kPlyr, 100, /*dead=*/true, false);
+	if (plyr_corpse.struck) CHECK(plyr_corpse.death_anim_state == 0x1234); // the dead return
+	const RoundHitOutcome barrel = fire_one_round(kBrrl, 10, false, /*local=*/true);
+	CHECK(barrel.struck);
+	CHECK(barrel.shake == 0); // the dying arm's bit, read after the callback
+}
+
+// Script SSN 10000 names the local body only when its row is the plyr row: the plyr class init
+// alone stamps the DcbId with 10000 + the slot byte; an org or item row's body keeps the spawn
+// memset's 0, so the SSN names nothing.
+// [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B1149..0x4B1173; Entity_InitOrganicAI @0x4BFCC0;
+//  Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE; EntityPool_FindByNetId
+//  @0x4F0A20]
+void test_the_player_ssn_follows_the_plyr_class_init() {
+	for (const uint8_t player_class : {kPlyr, kOrg, kBrrl}) {
+		Rig r;
+		const w::Entity *body = r.spawn_local(player_class);
+		CHECK(body != nullptr);
+		if (body == nullptr) continue;
+		const w::EntityHandle h = body->handle;
+		const w::EntityCommands commands(*r.world);
+		const w::EntityHandle named = commands.resolve_ssn(10000); // mission::kPlayerSsn
+		if (player_class == kPlyr)
+			CHECK(named == h);
+		else
+			CHECK(!named.valid());
+	}
+}
+
 // The barrel row's dying arm stores the dead bit into the Flags word every player path reads, so
 // the uplink's pose gate drops the body's pose from that tick.
 // [orig: Entity_HandleDeathOnAuthority @0x407CC0 - `or [esi+24h], 2` @0x407D34; the uplink's
@@ -512,6 +643,8 @@ int main() {
 	test_a_kill_event_runs_its_rows_callback();
 	test_a_knife_runs_its_rows_callback();
 	test_a_round_hit_runs_its_rows_callback();
+	test_a_round_hit_runs_the_callbacks_tails();
+	test_the_player_ssn_follows_the_plyr_class_init();
 	test_the_barrel_rows_dying_flag_reaches_the_uplink_gate();
 	test_the_nade_row_has_no_callback();
 	test_a_device_rows_body_runs_the_device_think();

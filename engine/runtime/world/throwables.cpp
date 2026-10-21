@@ -1645,8 +1645,9 @@ void ThrowableSim::think_device_row_body(World &world, Entity &body, ThrowClass 
         p.shot_seq = RoundSim::kFreshRoundWord; // D-NET-776, as the devices'
         world.round_sim.spawn(world, p);
     };
-    // [orig: RoundData_SpawnRound @0x4437E2 (satchelboom); @0x443ACC / @0x443B32
-    //  (claymoreshrapnel, claymorekillzone); @0x443D54 (AV_Minekillzone)]
+    // [orig: Entity_SatchelThink @0x443670 (the RoundData_SpawnRound call @0x4437E2, satchelboom);
+    //  Entity_ClaymoreThink @0x4438C0 (the calls @0x443ACC / @0x443B32, claymoreshrapnel,
+    //  claymorekillzone); Entity_AVMineThink @0x443BB0 (the call @0x443D54, AV_Minekillzone)]
     if (think == ThrowClass::kSatchel) {
         spawn_round("satchelboom");
     } else if (think == ThrowClass::kClaymore) {

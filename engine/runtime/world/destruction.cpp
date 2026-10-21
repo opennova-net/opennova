@@ -560,11 +560,7 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     // Entity_HandleDamageAndTriggerZones @0x407B3B..0x407B4F, @0x407B5E, the tail
     // @0x407B64..0x407C6B]. The AI reaction rides the RoundHit drain, as for a blast.
     world.round_sim.hits.push_back(RoundHit{target.handle, target.last_attacker, damage});
-    const EntityHandle victim = target.handle; // a barrel row's dead arm removes the body
-    if ((flags & kEntityFlagPlayer) != 0) {
-        player_body_row_event(world, target, 3);
-        if (world.registry.get(victim) == nullptr) return;
-    }
+    if ((flags & kEntityFlagPlayer) != 0) player_body_row_event(world, target, 3);
     if (collision_kill_fires(before, target.health)) {
         // The kill event credits the entry's source itself, not the walk
         // [orig: `mov edx, [ebx+20h]` @0x4E676A -> Score_ProcessKillEvent

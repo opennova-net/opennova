@@ -137,7 +137,7 @@ void run_the_roles_frame_reads_the_dedicated_operand() {
 		r.frame(0);
 		CHECK(lp.input.forward == peer);
 		// The ToSpecial release: past the head its deferred dispatch takes the stash
-		// (cleared at the release, @0x4E11D1); dropped, the deferred queue is gone and the
+		// (cleared at the release, Input_HandleActionBinding_0 @0x4E0420 (@0x4E11D1)); dropped, the deferred queue is gone and the
 		// stash stays.
 		lp.inventory_valid = true;
 		lp.inventory.quick_switch_stash = 0;

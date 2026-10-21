@@ -463,7 +463,7 @@ void barrel_event(World &world, Entity &target) {
         world.out.scars.clear_entity(target.handle);
         mark_class_dead(target); // [orig: `or [esi+24h],2` @0x407D34]
         // A player body's dead bit is the Flags word every player path reads (the uplink's
-        // pose gate drops its pose from here) [orig: `test byte [edi+24h], 2` @0x4C2000].
+        // pose gate drops its pose from here) [orig: NetPacket_SerializePlayerState @0x4C09C0 (`test byte [edi+24h], 2` @0x4C2000)].
         if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
             target.flags |= kEntityFlagDead;
         target.class_think_ticks = 10;

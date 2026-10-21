@@ -227,6 +227,22 @@ static void class_event_seat_leave(World &world, Entity &body) {
 }
 
 // See the infantry.h contract.
+void player_body_health_tail(World &world, Entity &body) {
+    if (retail_signed_i16(body.health) > 0) return;
+    if (body.death_anim_state == 0)
+        body.death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
+    // The staged clip becomes the primary channel's request, the deferred
+    // one cleared [orig: +0x2BC @0x407AFB, +0x2B8 @0x407B01].
+    if (AiEntity *motor = world.ai.for_handle(body.handle)) {
+        motor->inf.anim_state = body.death_anim_state;
+        motor->inf.anim_pending = 0;
+    }
+    // Every peer's arm [orig: the parent @0x407AED / @0x407B0B, the leave
+    //  @0x407B0D..0x407B33]
+    if (body.mounted) class_event_seat_leave(world, body);
+}
+
+// See the infantry.h contract.
 void player_body_class_event(World &world, Entity &body, int event) {
     // [orig: the dead return @0x40772A..0x40772F]
     if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;
@@ -244,19 +260,7 @@ void player_body_class_event(World &world, Entity &body, int event) {
         //  the parent @0x407A96, the leave @0x407AA0..0x407ABD]
         if (world.ai.is_authority && body.mounted) class_event_seat_leave(world, body);
     }
-    if (retail_signed_i16(body.health) <= 0) {
-        if (body.death_anim_state == 0)
-            body.death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
-        // The staged clip becomes the primary channel's request, the deferred
-        // one cleared [orig: +0x2BC @0x407AFB, +0x2B8 @0x407B01].
-        if (AiEntity *motor = world.ai.for_handle(body.handle)) {
-            motor->inf.anim_state = body.death_anim_state;
-            motor->inf.anim_pending = 0;
-        }
-        // Every peer's arm [orig: the parent @0x407AED / @0x407B0B, the leave
-        //  @0x407B0D..0x407B33]
-        if (body.mounted) class_event_seat_leave(world, body);
-    }
+    player_body_health_tail(world, body);
     if (event != 4 && event != 1 && event != 3 && event != 5) body.cause_flags &= ~0xF00u;
     body.spawn_phase = 64;
     player_body_waypoint_visits(world, body);

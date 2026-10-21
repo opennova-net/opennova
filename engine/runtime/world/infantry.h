@@ -190,6 +190,15 @@ class World;
 //  @0x407B64..0x407C6B]
 void player_body_class_event(World &world, Entity &body, int event);
 
+// That callback's health tail alone (every event it handles reaches it; the round hit's
+// plyr-row arm runs it between its round legs and the re-arm): a body at Health <= 0 stages
+// the default death clip when none is staged, requests the staged clip on its primary
+// channel (+0x2BC, the deferred +0x2B8 cleared) and leaves its seat.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407720 - the health tail @0x407ACD..0x407B33
+//  (Entity_ComputeAnimSlotIndex @0x407AE7, +0x2BC @0x407AFB, +0x2B8 @0x407B01, the leave
+//  @0x407B20 / @0x407B33)]
+void player_body_health_tail(World &world, Entity &body);
+
 // The organic class's event callback (org0 / org1): event 1 puts a body without the Player bit
 // and its trigger group on red alert (a player body's kill goes to the network kill scorer,
 // which past its round test only reaches GameEvent_ProcessScoring case 2, as the plyr arm's),

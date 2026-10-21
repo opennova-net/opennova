@@ -38,6 +38,23 @@ static_assert(TriggerRelations::kSingles == mission::kRelationSsnRows,
 // NapiNPServer_SendFiltered(..., 0x23, ...) @0x4f5e74 / @0x4f5ed1].
 // ----------------------------------------------------------------------------
 
+namespace {
+
+// Whether script SSN `ssn` names the local player's body through ours' alias: SSN 10000, a local
+// body, and its bound row the plyr row, whose class init alone stamps the DcbId with 10000 + the
+// slot byte; the organic init and an item row's write no DcbId, so their body keeps the spawn
+// memset's 0 and SSN 10000 names nothing (D-NET-348's class-init residue).
+// [orig: PlayerClass_InitEntity @0x4B1060 - the slot byte + 10000 @0x4B1149..0x4B1155, the
+//  DcbId store @0x4B1173; Entity_InitOrganicAI @0x4BFCC0 (no +0x7C store);
+//  Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE, the init call @0x43C4FE]
+bool local_player_ssn_alias(const World &world, int32_t ssn) {
+    if (ssn != mission::kPlayerSsn) return false;
+    const Entity *local = world.registry.get(world.cached.local_player);
+    return local != nullptr && player_item_row(world, *local).body_class == PlayerBodyClass::kPlayer;
+}
+
+} // namespace
+
 // Script SSN -> entity handle. Mission scripts (WAC SSN* commands + BMS Single
 // triggers/actions) address the players as SSN 10000 + player slot. The JO
 // player spawn [orig: Entity_SpawnFromAnimSlotProperty @0x43c390] leaves
@@ -49,8 +66,7 @@ static_assert(TriggerRelations::kSingles == mission::kRelationSsnRows,
 // place; MP joiner SSNs (10001+) wait on the net track.
 // [orig: EntityPool_FindByNetId @0x4f0a20]
 EntityHandle EntityCommands::resolve_ssn(uint16_t ssn) const {
-    if (ssn == mission::kPlayerSsn && world_.cached.local_player.valid())
-        return world_.cached.local_player;
+    if (local_player_ssn_alias(world_, ssn)) return world_.cached.local_player;
     // No SSN-0 guard and pools 0..3, like the retail lookup this mirrors;
     // resolve_ssn_in_pools012 below is the OTHER retail walk (dcb != 0 gate,
     // pools 0..2) and the two differ on purpose. [orig: EntityPool_FindByNetId
@@ -1064,8 +1080,9 @@ bool EntityCommands::ssn_in_area(int32_t ssn, int area_id) const {
             if (entity == nullptr) continue;
             // The SP listen-host model retains its existing script-player
             // alias: its socketless local body carries net_id 0 (D-NET-112).
-            const bool local_alias = !world_.rules.mp_session && ssn == mission::kPlayerSsn &&
-                    handle == world_.cached.local_player && entity->net_id == 0;
+            const bool local_alias = !world_.rules.mp_session &&
+                    handle == world_.cached.local_player && entity->net_id == 0 &&
+                    local_player_ssn_alias(world_, ssn);
             // The position words against the record's words (D-NET-507)
             // [orig: @0x43E596..0x43E5C1].
             if ((entity->net_id == ssn || local_alias) && area->trigger_contains(entity->position))
@@ -1191,8 +1208,9 @@ bool EntityCommands::bms_ref_alive(int32_t ssn) const {
             // 0 where retail stamps the player's DcbId 10000 + slot; the same
             // D-NET-112 alias ssn_in_area applies.
             // [orig: PlayerClass_InitEntity @0x4b1155..0x4b1173]
-            const bool local_alias = !world_.rules.mp_session && ssn == mission::kPlayerSsn &&
-                    handle == world_.cached.local_player && entity->net_id == 0;
+            const bool local_alias = !world_.rules.mp_session &&
+                    handle == world_.cached.local_player && entity->net_id == 0 &&
+                    local_player_ssn_alias(world_, ssn);
             if (static_cast<int32_t>(entity->net_id) != ssn && !local_alias) continue;
             return ((entity->flags | entity->engine_flags) & kEntityFlagDead) == 0;
         }
@@ -1616,9 +1634,7 @@ EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
     // The dcb != 0 gate and the 0..2 pool set are this walk's own; the
     // net-id lookup EntityCommands::resolve_ssn wraps has neither.
     if (ssn == 0) return EntityHandle{};
-    if (ssn == mission::kPlayerSsn &&
-        world.cached.local_player.valid())
-        return world.cached.local_player;
+    if (local_player_ssn_alias(world, ssn)) return world.cached.local_player;
     for (int pool : {0, 1, 2}) {
         const size_t capacity = world.registry.pool_capacity(pool);
         for (size_t slot = 0; slot < capacity; ++slot) {
@@ -1641,7 +1657,7 @@ EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
 //  (@0x43E0DD / @0x43E0E3), pool 2 @0x43E161 (@0x43E180 / @0x43E186)]
 EntityHandle resolve_teleport_target(const World &world, uint16_t ssn) {
     if (ssn == 0) return EntityHandle{};
-    if (ssn == mission::kPlayerSsn) {
+    if (local_player_ssn_alias(world, ssn)) {
         const Entity *local = world.registry.get(world.cached.local_player);
         if (local != nullptr && local->item_type_index != 0) return local->handle;
     }
