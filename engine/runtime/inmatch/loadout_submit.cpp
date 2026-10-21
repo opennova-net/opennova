@@ -109,6 +109,27 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 	return requested_combo;
 }
 
+LoadoutSubmit armory_loadout_submit(const world::World &world,
+		const std::vector<world::WeaponKitEntry> &kit, uint8_t player_class,
+		const world::WeaponInventory *inventory) {
+	LoadoutSubmit submit;
+	const world::Entity *local = world.registry.get(world.cached.local_player);
+	submit.team = local != nullptr ? local->team : uint8_t{0};
+	submit.player_class = player_class;
+	const int32_t current = inventory != nullptr ? inventory->equipped_combo : -1;
+	submit.weapon_slot_index = static_cast<uint32_t>(
+			resolve_loadout_submit_combo(world.tables.weapons, inventory, submit.team, current));
+	for (const world::WeaponKitEntry &entry : kit) {
+		const int adm = world.tables.weapons.index_of(entry.name.c_str());
+		if (adm < 0) continue; // [orig: the AdmDef_FindByName gate @0x42cf0b]
+		submit.entries.push_back(LoadoutSubmitEntry{static_cast<uint8_t>(adm),
+				static_cast<uint8_t>(entry.ammo_primary),
+				static_cast<uint8_t>(entry.ammo_secondary),
+				static_cast<uint8_t>(entry.flags)});
+	}
+	return submit;
+}
+
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		const world::LocalPlayerLoadout &loadout, int equipped_combo,

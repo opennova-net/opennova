@@ -14,6 +14,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_loadout_grant.h>
+#include <runtime/inmatch/loadout_submit.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -215,6 +216,37 @@ void test_the_round_init_seeds_the_own_buffer() {
 	CHECK(j.conn().reply.loadout_buffer.entries.empty());
 }
 
+// A listen host's in-session armory ACCEPT submits the armory's kit, its class, the body's
+// team and the live slot as its own client's 0x2F and applies nothing itself; the own
+// slot's accept grants it into the local table.
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565D4D -> NetPacket_SendLoadoutSubmit @0x565D94
+//  (the team `movsx ecx, byte [eax+162h]` @0x565D8C); the name gate @0x42cf0b]
+void test_the_armory_submit_feeds_the_own_accept() {
+	Rig r(/*own=*/true);
+	r.submit(8, static_cast<uint32_t>(kRifleCombo));
+	const LoadoutSubmit armory = inmatch::armory_loadout_submit(r.world,
+			{w::WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}, w::WeaponKitEntry{"WPN_NONE_SUCH", 1, -1, -1}},
+			6, &r.local->inventory);
+	CHECK(armory.team == 1 && armory.player_class == 6);
+	CHECK(armory.weapon_slot_index == static_cast<uint32_t>(kRifleCombo));
+	CHECK(armory.entries.size() == 1);
+	if (armory.entries.size() == 1)
+		CHECK(armory.entries[0].adm_index == kPistolAdm && armory.entries[0].ammo_primary == 4);
+	// The second submit of a live body passes the armory window inside an armory zone
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x51581C..0x51583E]; no cooldown.
+	r.entity().flags |= w::kEntityFlagArmoryZone;
+	r.conn().link.armory_reuse_seconds = 0;
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = r.ctx.get();
+	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, r.conn(),
+			{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(armory))}, 101,
+			r.roster, &r.world, inputs);
+	CHECK(r.conn().slot_class == 6);
+	CHECK(r.local_slot(kPistolCombo).adm_index == kPistolAdm);
+	CHECK(r.local_slot(kRifleCombo).adm_index < 0);
+	CHECK(r.local->inventory.pools[1] == 30);
+}
+
 } // namespace
 
 int main() {
@@ -222,6 +254,7 @@ int main() {
 	test_the_own_list_legs();
 	test_the_deploy_rebuilds_the_local_table();
 	test_the_round_init_seeds_the_own_buffer();
+	test_the_armory_submit_feeds_the_own_accept();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

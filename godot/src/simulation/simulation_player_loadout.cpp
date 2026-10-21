@@ -9,6 +9,9 @@
 #include "resource_index/launch_flags.h" // the /noreload flag the session copy reads
 #include "util/string_convert.h"
 
+#include <net/npwire/ingame_encode.h> // encode_loadout_submit (a listen host's armory 0x2F)
+#include <net/npwire/ingame_message_id.h> // c2s::LOADOUT_SUBMIT
+#include <runtime/inmatch/client_runtime.h> // ClientRuntime::queue_host_message
 #include <runtime/inmatch/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
 #include <runtime/mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
@@ -221,6 +224,19 @@ bool Simulation::apply_local_player_loadout_rows(
 		std::vector<opennova::world::WeaponKitEntry> p_kit, int p_player_class,
 		bool p_submit_joiner_request) {
 	if (!kernel_) return false;
+	// A listen host in a session sends the armory's kit as its own client's 0x2F and
+	// applies nothing itself: its own slot's accept grants it into the local table
+	// (engine: inmatch::armory_loadout_submit, D-NET-695) [orig:
+	// WeaponLoadout_ApplyFromBuffer @0x565D4D -> NetPacket_SendLoadoutSubmit @0x565D94,
+	// the authority skipping the pool reset @0x565D4F..0x565D56].
+	if (p_submit_joiner_request && is_host_listening() && !is_joiner() && runtime_ != nullptr &&
+			kernel_->world.rules.mp_session && p_player_class >= 0 && p_player_class <= 0xFF) {
+		const opennova::LoadoutSubmit submit = opennova::inmatch::armory_loadout_submit(
+				kernel_->world, p_kit, static_cast<uint8_t>(p_player_class),
+				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr);
+		return runtime_->queue_host_message(opennova::c2s::LOADOUT_SUBMIT,
+				opennova::encode_loadout_submit(submit));
+	}
 	if (!opennova::world::local_loadout_apply_accept(kernel_->world, kernel_->local.loadout,
 				kernel_->local.weapon, kernel_->local.inventory, kernel_->local.inventory_valid, p_kit,
 				p_player_class, /*validate_banned=*/p_submit_joiner_request))

@@ -82,6 +82,19 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 		const world::WeaponInventory *inventory, uint8_t team,
 		int32_t requested_combo);
 
+// The armory ACCEPT's in-session submission: the armory's own kit (each entry its
+// weapon resolves, the AdmDef gate), the armory's class, the local body's team byte and
+// g_CurrentWeaponSlot resolved against the local table. In a session the apply sends
+// this 0x2F and applies nothing else; a listen host's own slot accepts it into the local
+// table (D-NET-695). [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - the session test
+//  @0x565D4D, the authority skipping the pool reset @0x565D4F..0x565D56, the team
+//  `movsx ecx, byte [eax+162h]` @0x565D8C, NetPacket_SendLoadoutSubmit @0x565D94, the
+//  return @0x565D9C; NetPacket_SendLoadoutSubmit @0x42cdc0 - the name gate @0x42cf0b,
+//  the slot resolve @0x42ce2d..0x42ce8b]
+LoadoutSubmit armory_loadout_submit(const world::World &world,
+		const std::vector<world::WeaponKitEntry> &kit, uint8_t player_class,
+		const world::WeaponInventory *inventory);
+
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		const world::LocalPlayerLoadout &loadout, int equipped_combo,
