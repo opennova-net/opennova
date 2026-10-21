@@ -153,6 +153,9 @@ function Get-CaseTimeLimit { param($Case) return [int] (Get-CaseField $Case "tim
 # the SERVER copy's weapon.sav record; 0 keeps the copy's).
 function Get-CasePermanentDeath { param($Case) return [bool] (Get-CaseField $Case "permanent_death" $false) }
 function Get-CaseHostPlayerClass { param($Case) return [int] (Get-CaseField $Case "host_player_class" 0) }
+# serve_only (E5's kick): the retail host as retail's Serve Only server, whose
+# console runs PUNT (run_parity_topology.ps1 -ServeOnly); retail hosts only.
+function Get-CaseServeOnly { param($Case) return [bool] (Get-CaseField $Case "serve_only" $false) }
 function Get-CaseTopologies {
     param($Case)
     return @(Get-CaseField $Case "topologies" @("RR", "RR-aa", "RO", "OR", "OO"))
@@ -248,6 +251,10 @@ function Read-ParityCases {
                 $case.permanent_death -isnot [bool]) {
             throw "Parity case '$($case.id)': permanent_death is true or false"
         }
+        if ($case.PSObject.Properties.Name -contains "serve_only" -and
+                $case.serve_only -isnot [bool]) {
+            throw "Parity case '$($case.id)': serve_only is true or false"
+        }
         $class = Get-CaseHostPlayerClass $case
         if ($class -notin @(0, 5, 6, 7, 8, 9)) {
             throw "Parity case '$($case.id)': host_player_class is 5-9 (0 keeps the copy's)"
@@ -276,6 +283,10 @@ function Read-ParityCases {
         # The host's class is written for a retail host (run_parity_topology.ps1).
         if ($class -ne 0 -and @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
             throw "Parity case '$($case.id)': a host_player_class case runs RR, RR-aa and RO only"
+        }
+        # The runner wires a retail Serve Only host only (run_parity_topology.ps1).
+        if ((Get-CaseServeOnly $case) -and @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
+            throw "Parity case '$($case.id)': a serve_only case runs RR, RR-aa and RO only"
         }
         # The runner wires a retail late joiner only (run_parity_topology.ps1).
         if ((Get-CaseLateJoiner $case) -and
@@ -324,6 +335,7 @@ function Get-CellArguments {
     if (Get-CasePermanentDeath $Case) { $arguments += "-PermanentDeath" }
     $class = Get-CaseHostPlayerClass $Case
     if ($class -ne 0) { $arguments += @("-HostPlayerClass", [string] $class) }
+    if (Get-CaseServeOnly $Case) { $arguments += "-ServeOnly" }
     if (Get-CaseLateJoiner $Case) { $arguments += "-LateJoiner" }
     if ($AllowDirtyRepo) { $arguments += "-AllowDirtyRepo" }
     return $arguments
@@ -410,6 +422,10 @@ function Get-ReferenceMismatches {
     $recordedClass = if ($fields -contains "host_player_class") { [int] $Summary.host_player_class } else { 0 }
     if ($recordedClass -ne (Get-CaseHostPlayerClass $Case)) {
         $reasons.Add("host_player_class $recordedClass is not $(Get-CaseHostPlayerClass $Case)")
+    }
+    $recordedServeOnly = ($fields -contains "host_kind") -and [string] $Summary.host_kind -eq "serve_only"
+    if ($recordedServeOnly -ne (Get-CaseServeOnly $Case)) {
+        $reasons.Add("serve_only $recordedServeOnly is not $(Get-CaseServeOnly $Case)")
     }
     $recordedLate = ($fields -contains "late_joiner") -and ($null -ne $Summary.late_joiner)
     if ($recordedLate -ne (Get-CaseLateJoiner $Case)) {

@@ -90,6 +90,17 @@ param(
     [ValidateSet(0, 5, 6, 7, 8, 9)]
     [int] $HostPlayerClass = 0,
 
+    # E5's kick: the retail host as retail's Serve Only (dedicated) server
+    # (onhook_host_lan serve_only, connection mode 1). Its console line runs
+    # the BAN / PUNT verbs only on an authority that is not a session peer
+    # [orig: Client_ProcessConsoleCommand @0x520E80 (Server_HandleBanPuntCommand
+    # @0x520F63)]; a listen host is a peer and queues the line to its own server
+    # as C2S 0x04 [orig: @0x520EFE..0x520F29], whose handler runs NETLOG and STAT
+    # only [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0]. A retail host
+    # only: the OpenNova Serve Only host (opennova-serve) is not wired, so OR and
+    # OO refuse it.
+    [switch] $ServeOnly,
+
     # The pinned SHA-256 of the SERVER copy's game.cfg (the case table's
     # server_game_cfg_sha256): the cell refuses a copy whose game.cfg differs
     # at its start. Empty skips the check (a diagnostic run).
@@ -380,6 +391,9 @@ foreach ($entry in $RotationList) {
 }
 if ($HostPlayerClass -ne 0 -and $Topology -in @("OR", "OO")) {
     throw "-HostPlayerClass needs a retail host (RR or RO): the OpenNova listen host's class from weapon.sav is unchecked."
+}
+if ($ServeOnly -and $Topology -in @("OR", "OO")) {
+    throw "-ServeOnly needs a retail host (RR or RO): the OpenNova Serve Only host (opennova-serve) is not wired."
 }
 if ($LateJoiner -and $Topology -in @("RO", "OO")) {
     throw "-LateJoiner needs a retail joiner (RR or OR): an OpenNova late joiner is not wired yet."
@@ -2224,7 +2238,19 @@ function Get-RetailHostArguments {
         wait_timeout_ms = 240000
     }
     if ($RotationList.Count -gt 0) { $arguments.rotation = @($RotationList) }
+    if ($ServeOnly) { $arguments.serve_only = $true }
     return $arguments
+}
+
+# A Serve Only cell's host must report retail's Serve Only flag (the hook's
+# serve_only echo).
+function Assert-RetailHostServeOnly {
+    param([Parameter(Mandatory = $true)] $Result)
+    if (-not $ServeOnly) { return }
+    $echo = ($Result.PSObject.Properties.Name -contains "serve_only") -and [bool] $Result.serve_only
+    if (-not $echo) {
+        throw "onhook_host_lan did not host as Serve Only; deploy an onHook pair with serve_only (opennova-int #71)."
+    }
 }
 
 # The hook echoes the rotation it built; a hook pair without it (before
@@ -2325,6 +2351,7 @@ function Start-RetailHostExact {
     Assert-OnHookRoleLaunch -Tool "onhook_host_lan" -Result $result
     $script:OwnedRetailRuns.Add([string] $result.run_id)
     Assert-RetailHostRotation -Result $result
+    Assert-RetailHostServeOnly -Result $result
     $script:RetailHostProcess = Get-Process -Id ([int] $result.pid) -ErrorAction Stop
     Bind-EffectiveRetailConfig -Role server -Source (Join-Path $ServerDir "onhook.cfg")
     $probeOutput = @(& $ProbeExe --host 127.0.0.1 --port $Port --timeout-ms 240000 `
@@ -3076,6 +3103,7 @@ try {
             $script:OwnedRetailRuns.Add([string] $retailHost.run_id)
             Assert-OnHookRoleLaunch -Tool "onhook_host_lan" -Result $retailHost
             Assert-RetailHostRotation -Result $retailHost
+            Assert-RetailHostServeOnly -Result $retailHost
             Bind-EffectiveRetailConfig -Role server -Source (Join-Path $ServerDir "onhook.cfg")
             $script:EvidenceCapture = [string] $retailHost.capture_path
             $script:EvidencePerspective = "retail-host"
@@ -3545,9 +3573,9 @@ $summary = [pscustomobject]@{
     retail_stock_observer = [bool] $StockObserver
     onhook_mcp_sha256 = (Get-FileHash -LiteralPath $McpExe -Algorithm SHA256).Hash.ToLowerInvariant()
     onhook_proxy_sha256 = $OnHookProxySha256
-    # Both hosts here are listen hosts (a playing host); a dedicated host
-    # (opennova-serve, a retail Serve Only host) is another kind.
-    host_kind = "listen"
+    # A listen host (a playing host), or a retail Serve Only host (-ServeOnly);
+    # opennova-serve is not wired.
+    host_kind = $(if ($ServeOnly) { "serve_only" } else { "listen" })
     # E2: the host's rotation tail (empty: one mission) and the cell's round
     # time limit (0: the copy's own game.cfg value), with the game.cfg write
     # and its restore.
