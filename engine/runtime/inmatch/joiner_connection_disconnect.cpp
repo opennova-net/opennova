@@ -88,7 +88,8 @@ bool JoinerConnection::session_lost() const {
 	// A teardown that sent its goodbye burst (the user's leave inside input action 3) is
 	// terminal: the teardown clears the keys and both message queues and the leave callback
 	// zeroes the session's active connection, so no later frame sends on it.
-	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 (the burst @0x625405..0x625424);
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 (the connected state 5's burst
+	//  @0x6254B4..0x6254D3);
 	//  CNapiNetwork_OnDisconnectedFromServer @0x4C6495 (active_connection_id = 0)]
 	if (goodbye_sent_) return true;
 	// A self-initiated teardown (the pool-overflow MSGCRE) is terminal with its record latched.
@@ -162,7 +163,9 @@ const char *JoinerConnection::post_auth_stage_name() const {
 // burst size is cs_dir0.recv_max_per_tick clamped to [0, 32] — 4 for the JOINTOPERATIONS
 // template. Without this leg the host's only teardown trigger never fires from our client and
 // every leave leaks an admitted peer plus its spawned player.
-// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 (burst loop @0x6253ef..0x625424);
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 - the connected state 5's arm
+//  (`cmp eax, 5` @0x625499): the count clamp @0x62549E..0x6254B2, the burst loop
+//  @0x6254B4..0x6254D3, the leave callback @0x6254D5..0x6254E7;
 //  CNapiNPConnection_SendDisconnectPacket @0x61f2a0; CNapiNetwork_Init @0x4ca4a0 stores
 //  recv_max_per_tick = 4 @0x4cab60]
 std::vector<std::vector<uint8_t>> JoinerConnection::disconnect() {
