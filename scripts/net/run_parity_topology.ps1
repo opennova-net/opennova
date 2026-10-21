@@ -526,8 +526,12 @@ catch {
 # host. Every game MCP message (Send-GameMcpMessage, wrapped here) and every
 # onHook call lands in <run>\mcp-calls.jsonl with its duration and outcome.
 # Our process's CPU time is taken across the call; a slow call also takes its
-# window's responsiveness and its memory. A slow call overruns its own
-# long-poll wait by 2 s or more, and it also prints a run note.
+# window's responsiveness and its memory. A game MCP call carries where its
+# time went: the endpoint's own stamps (X-Mcp-Received / X-Mcp-Responded,
+# docs/mcp.md) split it into the wait until the game parsed it, the game's
+# time on it and the time from its response to our return, and the runner's
+# own CPU time across it says whether this side was working. A slow call
+# overruns its own long-poll wait by 2 s or more, and it also prints a run note.
 $script:McpCallLog = Join-Path $RunRoot "mcp-calls.jsonl"
 $script:SendGameMcpMessageUntimed = ${function:Send-GameMcpMessage}
 
@@ -552,6 +556,9 @@ function Write-McpCallTiming {
         [long] $WaitMs = 0,
         [System.Diagnostics.Process] $Process = $null,
         $CpuBeforeMs = $null,
+        # The endpoint's stamps of the call ($script:GameMcpLastServerTiming).
+        $ServerTiming = $null,
+        $RunnerCpuMs = $null,
         # onHook calls wait on purpose (a launch, a played script): logged, never noted.
         [switch] $NoNote
     )
@@ -581,6 +588,22 @@ function Write-McpCallTiming {
                 $record.working_set_mb = [int] ($Process.WorkingSet64 / 1MB)
                 $detail = " cpu_ms=$($record.cpu_ms) responding=$($record.responding) threads=$($record.threads) ws_mb=$($record.working_set_mb)"
             }
+        }
+        if ($ServerTiming) {
+            # Unix ms on this machine's one clock: request -> parsed by the game
+            # (the transport and the game's next poll of its endpoint, once a
+            # frame), parsed -> response written (the game's time on it, a
+            # long-poll's wait included), written -> our return (the transport
+            # and our decoding).
+            $startedMs = ([DateTimeOffset] $StartedUtc).ToUnixTimeMilliseconds()
+            $record.to_server_ms = [long] $ServerTiming.received_unix_ms - $startedMs
+            $record.server_ms = [long] $ServerTiming.responded_unix_ms - [long] $ServerTiming.received_unix_ms
+            $record.from_server_ms = $startedMs + $ElapsedMs - [long] $ServerTiming.responded_unix_ms
+            $detail += " to_server_ms=$($record.to_server_ms) server_ms=$($record.server_ms) from_server_ms=$($record.from_server_ms)"
+        }
+        if ($null -ne $RunnerCpuMs) {
+            $record.runner_cpu_ms = [long] $RunnerCpuMs
+            $detail += " runner_cpu_ms=$($record.runner_cpu_ms)"
         }
         Add-Content -LiteralPath $script:McpCallLog -Value ($record | ConvertTo-Json -Compress)
         if ($slow -and -not $NoNote) {
@@ -617,6 +640,8 @@ function Send-GameMcpMessage {
         }
     }
     $cpuBefore = Get-McpCallProcessCpuMs $process
+    $runner = [System.Diagnostics.Process]::GetCurrentProcess()
+    $runnerCpuBefore = $runner.TotalProcessorTime.TotalMilliseconds
     $startedUtc = [DateTime]::UtcNow
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     $outcome = "ok"
@@ -629,9 +654,12 @@ function Send-GameMcpMessage {
     }
     finally {
         $watch.Stop()
+        $runner.Refresh()
         Write-McpCallTiming -Role $role -Call $call -StartedUtc $startedUtc `
             -ElapsedMs $watch.ElapsedMilliseconds -Outcome $outcome -WaitMs $waitMs `
-            -Process $process -CpuBeforeMs $cpuBefore
+            -Process $process -CpuBeforeMs $cpuBefore `
+            -ServerTiming $script:GameMcpLastServerTiming `
+            -RunnerCpuMs ([long] ($runner.TotalProcessorTime.TotalMilliseconds - $runnerCpuBefore))
     }
 }
 

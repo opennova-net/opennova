@@ -10,6 +10,11 @@ extends RefCounted
 ## Writes use put_data (write-it-all semantics). Peers are loopback and
 ## responses are bounded by the server's payload budget, so a blocking write is
 ## acceptable; revisit if the perf pane ever shows it.
+##
+## The response to a parsed request carries the endpoint's own account of it
+## (docs/mcp.md): X-Mcp-Received and X-Mcp-Responded, the Unix time in ms at
+## which this side parsed the request and wrote the response, so a client on
+## the same machine tells the game's time from the transport's and its own.
 
 const IDLE_TIMEOUT_MS := 120000
 const MID_REQUEST_TIMEOUT_MS := 10000
@@ -28,6 +33,8 @@ var busy := false
 
 var _last_activity_ms := 0
 var _mid_request := false
+# When the request now being answered was parsed (Unix ms); 0 when none was.
+var _received_unix_ms := 0
 
 
 func setup(socket: StreamPeerTCP, now_ms: int) -> void:
@@ -62,6 +69,7 @@ func poll(now_ms: int) -> Dictionary:
 	if not request.is_empty():
 		_mid_request = false
 		_last_activity_ms = now_ms
+		_received_unix_ms = _unix_ms()
 	return request
 
 
@@ -104,6 +112,9 @@ func respond(status: int, headers: Dictionary, body: PackedByteArray, keep_alive
 	var text := "HTTP/1.1 %d %s\r\n" % [status, _STATUS_TEXT.get(status, "Status")]
 	for name in headers:
 		text += "%s: %s\r\n" % [name, headers[name]]
+	if _received_unix_ms > 0:
+		text += "X-Mcp-Received: %d\r\nX-Mcp-Responded: %d\r\n" % [_received_unix_ms, _unix_ms()]
+		_received_unix_ms = 0
 	text += "Content-Length: %d\r\n" % body.size()
 	text += "Connection: %s\r\n\r\n" % ("keep-alive" if keep_alive else "close")
 	var bytes := text.to_ascii_buffer()
@@ -118,3 +129,7 @@ func close() -> void:
 	if peer != null:
 		peer.disconnect_from_host()
 		peer = null
+
+
+static func _unix_ms() -> int:
+	return int(Time.get_unix_time_from_system() * 1000.0)

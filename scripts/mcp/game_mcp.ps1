@@ -18,6 +18,10 @@ $script:GameMcpHostPort = 8975
 $script:GameMcpJoinerPort = 8976
 $script:GameMcpSessions = @{}
 $script:GameMcpRequestId = 0
+# The endpoint's own stamps of the last message Send-GameMcpMessage sent: the
+# Unix ms at which the game parsed it and wrote its response (X-Mcp-Received /
+# X-Mcp-Responded, docs/mcp.md); $null when the response carried none.
+$script:GameMcpLastServerTiming = $null
 # The endpoint never answers "Expect: 100-continue", which Windows PowerShell's
 # .NET sends with every POST: the first request of each connection pool would
 # hold its body 350 ms (the continue timeout) before sending it.
@@ -349,10 +353,19 @@ function Send-GameMcpMessage {
     if ($script:GameMcpSessions.ContainsKey($Port)) {
         $headers["Mcp-Session-Id"] = $script:GameMcpSessions[$Port]
     }
+    $script:GameMcpLastServerTiming = $null
     $response = Invoke-WebRequest -UseBasicParsing -Method Post -Uri (Get-GameMcpUrl -Port $Port) `
         -ContentType "application/json" -Headers $headers -Body $bytes -TimeoutSec $TimeoutSeconds
     $session = $response.Headers["Mcp-Session-Id"]
     if ($session) { $script:GameMcpSessions[$Port] = [string] $session }
+    $received = $response.Headers["X-Mcp-Received"]
+    $responded = $response.Headers["X-Mcp-Responded"]
+    if ($received -and $responded) {
+        $script:GameMcpLastServerTiming = [pscustomobject]@{
+            received_unix_ms = [long] $received
+            responded_unix_ms = [long] $responded
+        }
+    }
     if (-not $response.RawContentStream -or $response.RawContentStream.Length -eq 0) { return $null }
     $text = [System.Text.Encoding]::UTF8.GetString($response.RawContentStream.ToArray())
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }

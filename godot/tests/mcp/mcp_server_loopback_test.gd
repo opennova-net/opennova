@@ -97,6 +97,22 @@ func test_tool_call_roundtrip() -> void:
 	assert_eq(payload["structuredContent"]["echo"]["x"], 7.0)
 
 
+func test_tool_call_response_carries_the_server_stamps() -> void:
+	var server := _server()
+	server.registry.register(_tool_def("wait"), func(_args, ctx):
+		await ctx.frames(3)
+		return "ok")
+	var client: RefCounted = await _client(server.get_port())
+	var before := int(Time.get_unix_time_from_system() * 1000.0)
+	var envelope: Variant = await client.call_tool(get_tree(), "wait")
+	var after := int(Time.get_unix_time_from_system() * 1000.0)
+	assert_eq(envelope["result"]["isError"], false)
+	var received := int(String(client.last_headers.get("x-mcp-received", "0")))
+	var responded := int(String(client.last_headers.get("x-mcp-responded", "0")))
+	assert_between(received, before, after, "The endpoint stamps when it parsed the request.")
+	assert_between(responded, received, after, "It stamps when it wrote the response, after the parse.")
+
+
 func test_unknown_tool_is_invalid_params() -> void:
 	var server := _server()
 	var client: RefCounted = await _client(server.get_port())

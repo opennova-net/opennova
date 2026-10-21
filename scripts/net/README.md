@@ -306,11 +306,16 @@ Every MCP call a cell makes lands in `mcp-calls.jsonl` in its run root, one line
 per call: the game MCP's messages to our host or joiner, and the onHook calls.
 Each line carries the call, its duration, its long-poll wait and its outcome
 (`ok`, `timeout` or `error`), whether the steady window was open, and our
-process's CPU time across the call. A game MCP call that overruns its wait by
-2 s or more also records the window's `responding` state, the thread count and
-the working set, and prints a `PARITY_RUN_NOTE mcp slow:` line. Our game
-answers its endpoint from the main thread, so such a call shows what that
-thread was doing.
+process's CPU time across the call. A game MCP call also says where its time
+went, from the endpoint's own stamps (`X-Mcp-Received` / `X-Mcp-Responded`,
+docs/mcp.md): `to_server_ms` until the game parsed the request (the transport
+and the game's next poll of its endpoint, once a frame on its main thread),
+`server_ms` from the parse to the response (the game's time on it, a long-poll
+wait included) and `from_server_ms` from the response to the runner's return
+(the transport and the runner's decoding), with `runner_cpu_ms`, the runner's
+own CPU time across the call. A game MCP call that overruns its wait by 2 s or
+more also records the window's `responding` state, the thread count and the
+working set, and prints a `PARITY_RUN_NOTE mcp slow:` line with the split.
 
 Both hosts run in the SERVER copy: retail's `Jointops.exe` in its install, the
 OpenNova host with `--working-dir` on it (`host_opennova.ps1 -WorkingDir`).
