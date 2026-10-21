@@ -220,8 +220,9 @@ struct SectionDebrisSample {
 // m[15] low bit = section disabled. [orig: the per-section matrix array returned
 // by the model's transform callback (model+168); consumed via
 // Math_TransformPointWithTranslation22 @ 0x412f60 (rotate>>22 + translate),
-// Math_TransformPointFixedPoint22 @ 0x412e90 / Math_FixedPointTransformPoint22
-// @ 0x615810 (rotate only), inverted by Matrix_Transpose3x3WithNegateCol3
+// Math_TransformPointFixedPoint22 @ 0x412e90 (rotate only), Math_FixedPointTransformPoint22
+// @ 0x615810 (each row's dot plus 0x200000, >> 22, plus the row's translation word
+// @0x61583B..0x61584E), inverted by Matrix_Transpose3x3WithNegateCol3
 // @ 0x6136d0 (orthonormal transpose + negated rotated translation). Row/column
 // convention is self-consistent here: we both build and invert the matrices.]
 // ----------------------------------------------------------------------------
