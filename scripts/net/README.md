@@ -302,6 +302,14 @@ at the clamp (i1's and c1's R1 rows). The runner therefore:
 
 Scripted input keeps its own virtual focus.
 
+Every cell records the machine's load through its steady window in the summary's
+`machine_load`: the total CPU % (mean, p90 and max of a sample every 2 to 3 s),
+the minimum available RAM, the five busiest processes by name (their mean share
+of the machine, short-lived compilers included), and the build lock's owner at
+both ends when `-BuildLockPath` names the machine-load policy's lock. A run note
+prints the same. A timing-class row from a loaded cell is suspect until it is
+rerun on a quiet machine.
+
 Every MCP call a cell makes lands in `mcp-calls.jsonl` in its run root, one line
 per call: the game MCP's messages to our host or joiner, and the onHook calls.
 Each line carries the call, its duration, its long-poll wait and its outcome

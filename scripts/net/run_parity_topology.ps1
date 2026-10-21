@@ -162,6 +162,11 @@ param(
     [ValidateSet("browse", "direct")]
     [string] $JoinerDial = "browse",
 
+    # The machine-load policy's build lock (a directory whose owner file names
+    # the lane building and since when): the cell's machine_load records its
+    # owner while the lock is held. Empty: the lock is not looked at.
+    [string] $BuildLockPath = "",
+
     # Diagnostic only: run from a checkout with uncommitted tracked changes.
     # A verdict-bearing run is evidence for its repo_commit alone.
     [switch] $AllowDirtyRepo
@@ -1308,6 +1313,95 @@ function Complete-DesktopWitness {
     }
 }
 
+# The machine load through the steady window (the maintainer's machine-load
+# policy): a timing-class row from a loaded cell is suspect until it is rerun
+# on a quiet machine. A sampler job reads the total CPU % and the available
+# RAM every 2 s; the processes' CPU time is taken at both ends, and its top
+# five by CPU are kept; the build lock's owner is read at both ends. Every step
+# is best effort: a failure only leaves a note.
+$script:MachineLoadJob = $null
+$script:MachineLoadStart = $null
+$script:MachineLoad = $null
+function Get-BuildLockOwner {
+    if (-not $BuildLockPath -or -not (Test-Path -LiteralPath $BuildLockPath)) { return $null }
+    $owner = Join-Path $BuildLockPath "owner"
+    if (Test-Path -LiteralPath $owner) { return ((Get-Content -LiteralPath $owner -Raw) -replace '\s+$', '') }
+    return "held (no owner file)"
+}
+
+function Start-MachineLoadSampler {
+    try {
+        $script:MachineLoadStart = [pscustomobject]@{ at = [DateTime]::UtcNow; lock = Get-BuildLockOwner }
+        # One line every 2 s: the total CPU %, the available MB, and the busiest
+        # processes then (per-core %, an instance's #n suffix dropped), which also
+        # catches short-lived compiler processes a start/end snapshot would miss.
+        $script:MachineLoadJob = Start-Job -ScriptBlock {
+            while ($true) {
+                try {
+                    $cpu = (Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'").PercentProcessorTime
+                    $free = [int] ((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024)
+                    $busy = @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process |
+                        Where-Object { $_.Name -notin @("_Total", "Idle") -and $_.PercentProcessorTime -gt 0 } |
+                        ForEach-Object { "{0}={1}" -f ($_.Name -replace '#\d+$', ''), $_.PercentProcessorTime }) -join ";"
+                    "{0}|{1}|{2}|{3}" -f [DateTime]::UtcNow.ToString("o"), $cpu, $free, $busy
+                }
+                catch { }
+                Start-Sleep -Seconds 2
+            }
+        }
+    }
+    catch { Write-Host "PARITY_RUN_NOTE machine load sampler did not start: $($_.Exception.Message)" }
+}
+
+function Complete-MachineLoadSampler {
+    if (-not $script:MachineLoadStart) { return }
+    try {
+        $samples = @()
+        if ($script:MachineLoadJob) {
+            $samples = @(Receive-Job -Job $script:MachineLoadJob -ErrorAction SilentlyContinue)
+            Stop-Job -Job $script:MachineLoadJob -ErrorAction SilentlyContinue
+            Remove-Job -Job $script:MachineLoadJob -Force -ErrorAction SilentlyContinue
+            $script:MachineLoadJob = $null
+        }
+        $cores = [Environment]::ProcessorCount
+        $cpu = @(); $free = @(); $byName = @{}
+        foreach ($line in $samples) {
+            $parts = "$line".Split('|')
+            if ($parts.Count -lt 4) { continue }
+            $cpu += [double] $parts[1]
+            $free += [int] $parts[2]
+            foreach ($pair in @($parts[3].Split(';') | Where-Object { $_ })) {
+                $kv = $pair.Split('=')
+                if ($kv.Count -ne 2) { continue }
+                $prior = if ($byName.ContainsKey($kv[0])) { [double] $byName[$kv[0]] } else { 0.0 }
+                $byName[$kv[0]] = $prior + [double] $kv[1]
+            }
+        }
+        $n = [Math]::Max(1, $cpu.Count)
+        $top = @($byName.GetEnumerator() | ForEach-Object {
+                [pscustomobject][ordered]@{ name = $_.Key; machine_pct = [Math]::Round($_.Value / $n / $cores, 1) }
+            } | Sort-Object machine_pct -Descending | Select-Object -First 5)
+        $sorted = @($cpu | Sort-Object)
+        $script:MachineLoad = [pscustomobject][ordered]@{
+            schema = "opennova.parity-machine-load.v1"
+            samples = $cpu.Count
+            cpu_pct_mean = $(if ($cpu.Count) { [Math]::Round(($cpu | Measure-Object -Average).Average, 1) } else { $null })
+            cpu_pct_p90 = $(if ($sorted.Count) { $sorted[[Math]::Min($sorted.Count - 1, [int] [Math]::Floor($sorted.Count * 0.9))] } else { $null })
+            cpu_pct_max = $(if ($cpu.Count) { ($cpu | Measure-Object -Maximum).Maximum } else { $null })
+            available_mb_min = $(if ($free.Count) { ($free | Measure-Object -Minimum).Minimum } else { $null })
+            logical_cores = $cores
+            top_processes = $top
+            build_lock_at_start = $script:MachineLoadStart.lock
+            build_lock_at_end = Get-BuildLockOwner
+        }
+        Write-Host ("PARITY_RUN_NOTE machine load: cpu mean {0}% p90 {1}% max {2}%, available {3} MB min, top {4}, build lock {5}/{6}" -f
+            $script:MachineLoad.cpu_pct_mean, $script:MachineLoad.cpu_pct_p90, $script:MachineLoad.cpu_pct_max,
+            $script:MachineLoad.available_mb_min, (($top | ForEach-Object { "$($_.name) $($_.machine_pct)%" }) -join ", "),
+            $script:MachineLoad.build_lock_at_start, $script:MachineLoad.build_lock_at_end)
+    }
+    catch { Write-Host "PARITY_RUN_NOTE machine load not recorded: $($_.Exception.Message)" }
+}
+
 function Begin-SteadyWindow {
     if ($script:SteadyStartedUtc) { throw "Steady window was already started" }
     if (-not $script:DesktopResetBeforeWindow) {
@@ -1315,6 +1409,7 @@ function Begin-SteadyWindow {
         catch { Write-Host "PARITY_RUN_NOTE desktop probe failed at the steady start: $($_.Exception.Message)" }
     }
     $script:SteadyStartedUtc = [DateTime]::UtcNow.ToString("o")
+    Start-MachineLoadSampler
 }
 
 function Publish-MotionGate {
@@ -1873,6 +1968,7 @@ function Complete-SteadyWindow {
     $script:SteadyCompletedUtc = [DateTime]::UtcNow.ToString("o")
     try { Complete-DesktopWitness }
     catch { Write-Host "PARITY_RUN_NOTE desktop probe failed at the steady end: $($_.Exception.Message)" }
+    Complete-MachineLoadSampler
 }
 
 function Stop-OwnedRetailRun {
@@ -3405,6 +3501,7 @@ $summary = [pscustomobject]@{
     # The shared desktop at the steady window's start (the cursor clip found
     # and released) and end (clean: the focused retail window could centre).
     desktop_witness = $(if ($script:DesktopWitness.Count) { [pscustomobject] $script:DesktopWitness } else { $null })
+    machine_load = $script:MachineLoad
     # The guard's hand-offs of the foreground from a game window to the desktop.
     desktop_guard_handoffs = $(if ($script:DesktopGuardLog -and (Test-Path -LiteralPath $script:DesktopGuardLog)) { @(Get-Content -LiteralPath $script:DesktopGuardLog | Where-Object { $_ -like '* foreground *' }).Count } else { $null })
     # The OpenNova host's working directory (OR, OO): the SERVER copy, as
