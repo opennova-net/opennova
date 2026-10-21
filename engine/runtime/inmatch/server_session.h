@@ -40,6 +40,9 @@ struct SessionStartup {
 	const TitleIdentity *title = nullptr;
 	uint32_t host_key = 0;
 	uint32_t host_start_tick = 0;
+	// The session CRT stream's seed (D-NET-115), drawn as NapiNPProtocol_Create draws the
+	// protocol's +0x530 [orig: @0x6259B3..0x625A10]; the create overwrites that word before any
+	// reader sees it (NapiNPProtocol::magic_key), so the seed is all ours keeps of the draw.
 	uint32_t session_seed_id = 0;
 	// The mount's text-override table (null = none), the session title's first lookup
 	// (HostConfig::text_override).
@@ -92,10 +95,10 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 void continue_session(NapiNPServerCtx &ctx, const GameConfig &config,
 		const rtxt::File *text_override);
 
-// [orig: NapiNPProtocol_StartServer @0x62b5e0] — host-only. Stamps host_key / host_start_tick /
-// session_seed_id (the latter only when gen_session_seed_flag is set), copies the MP TLV
-// max_players, and sets host_running = 1 (HandleClientHello rejects while it is 0). No-op unless
-// is_authority.
+// [orig: NapiNPProtocol_StartServer @0x62b5e0] — host-only. Stamps host_key / host_start_tick,
+// copies the MP TLV max_players, and sets host_running = 1 (HandleClientHello rejects while it is
+// 0); the protocol's magic key (+0x530) is the create's, not the start's (D-NET-NEW-L1-20). No-op
+// unless is_authority.
 void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup);
 
 } // namespace opennova::inmatch

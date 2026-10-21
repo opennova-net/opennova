@@ -96,6 +96,14 @@ struct HandleResult {
 	//  NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket @0x6239b6 ->
 	//  CNapiNPManager_SendTo @0x61f039]
 	std::vector<std::vector<uint8_t>> immediate_outbound;
+	// Datagrams to the address a packet names, sent from inside the receive at the datagram's
+	// position: the magic packet's reflection (D-NET-NEW-L1-20).
+	// [orig: NapiNP_HandleMagicPacket @0x622E70 -> CNapiNPManager_SendTo @0x622EF8]
+	struct Addressed {
+		PeerAddr to;
+		std::vector<uint8_t> datagram;
+	};
+	std::vector<Addressed> addressed_outbound;
 	// When the host owner asks to defer an in-match reply, these ordinary ProtocolMessages are
 	// framed at the end of the same owner tick beside the per-frame transport output. This is the
 	// retail send-boundary batching seam (for example S2C 0x57 + 0x0A).

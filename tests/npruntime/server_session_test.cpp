@@ -719,7 +719,10 @@ bool check_create_session_brings_up_host() {
 	if (!expect(ctx.np_protocol.host_key == 0xABCD1234, "host_key stamped")) return false;
 	if (!expect(ctx.np_protocol.host_start_tick == 100000, "host_start_tick stamped"))
 		return false;
-	if (!expect(ctx.np_protocol.session_seed_id == 654321, "session_seed_id stamped"))
+	// The protocol's magic key is the create's, armed only for a NovaWorld authority
+	// (D-NET-NEW-L1-20) [orig: CNapiGameSession_CreateSession @0x4C9B33 / @0x4C9B3F].
+	if (!expect(ctx.np_protocol.magic_reflect == 0 && ctx.np_protocol.magic_key == 0,
+	            "a single player's create arms no magic reflection"))
 		return false;
 	if (!expect(ctx.np_protocol.session_name == "SINGLEPLAYERGAME", "session_name = server_name"))
 		return false;
@@ -958,9 +961,8 @@ bool check_production_serve_mode_has_no_phantom_and_mints_startup() {
 	if (!expect(hk_chains, "the host key's bytes follow the manager LCG")) return false;
 	if (!expect(owner.ctx.np_protocol.host_start_tick != 0,
 	            "production startup records a nonzero monotonic start tick")) return false;
-	if (!expect(owner.ctx.np_protocol.session_seed_id >= 100000 &&
-	                    owner.ctx.np_protocol.session_seed_id <= 999999,
-	            "production startup mints the retail six-digit session seed")) return false;
+	if (!expect(owner.ctx.np_protocol.magic_reflect == 0 && owner.ctx.np_protocol.magic_key == 0,
+	            "a LAN host's create arms no magic reflection (D-NET-NEW-L1-20)")) return false;
 	return true;
 }
 

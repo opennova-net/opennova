@@ -38,7 +38,6 @@ void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	p.identity = startup.title;             // the network init's identity block (the 0x81's, the gates')
 	p.host_key = startup.host_key;          // HK TLV (validated against the client HK on join)
 	p.host_start_tick = startup.host_start_tick; // uptime base
-	if (p.gen_session_seed_flag) p.session_seed_id = startup.session_seed_id;
 	p.max_players = ctx.config.max_players; // MP TLV mirror
 	p.host_stop_tick = 0;                   // cleared until StopServer
 	p.host_run_duration_ms = 0;
@@ -193,6 +192,30 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		// production (the burst drove everything); wiring it at its faithful call site retires the
 		// dead-code path.
 		Server_InitNewRoundState(ctx);
+	}
+	// The magic packet's reflection: a NovaWorld authority in a session sets it and draws its
+	// key as NapiNPTimer_GenerateRandomId does, (GetTickCount() + rand()) % 900000 + 100000, the
+	// rand the session CRT stream's next draw after the round init's (retail's round init runs
+	// ahead of the create, CNapiGameSession_BuildAndCreateSession @0x5695B3 then @0x569986), the
+	// tick the create's (the session's start tick, as the round init's key takes it); any other
+	// create zeroes both. Retail draws it ahead of NapiNPProtocol_StartServer, which never
+	// touches either word. (D-NET-NEW-L1-20)
+	// [orig: CNapiGameSession_CreateSession - in session `cmp [ebp+58h]` @0x4C9B05, the
+	//  authority @0x4C9B0A, transport_mode == 1 @0x4C9B0F, +0x52C = 1 @0x4C9B1A, the draw
+	//  @0x4C9B26, else +0x52C = 0 @0x4C9B33, +0x530 = 0 @0x4C9B3F; NapiNPTimer_GenerateRandomId
+	//  @0x61E510 - GetTickCount @0x61E514, rand @0x61E51C, the add @0x61E521, div 0xDBBA0
+	//  @0x61E52A, + 0x186A0 @0x61E52D, the store @0x61E533]
+	{
+		NapiNPProtocol &p = ctx.np_protocol;
+		if (ctx.is_in_session != 0 && ctx.is_authority != 0 &&
+				ctx.transport_mode == NetworkType::NovaWorld) {
+			p.magic_reflect = 1;
+			const uint32_t draw = ctx.world != nullptr ? ctx.world->crt_rand.next() : 0u;
+			p.magic_key = (p.host_start_tick + draw) % 0xDBBA0u + 0x186A0u;
+		} else {
+			p.magic_reflect = 0;
+			p.magic_key = 0;
+		}
 	}
 
 	// mode 3 (host + client): the listen server connects its own local client in-process.

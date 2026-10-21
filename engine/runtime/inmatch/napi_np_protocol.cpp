@@ -9,6 +9,7 @@
 #include <runtime/inmatch/server_squad_registry.h>   // Server_ReleaseSquadRegistryNode (the disconnect's squad leg)
 #include <runtime/inmatch/server_tick.h>             // route_entity_pass_records (each handler's raised records)
 
+#include <net/napi/envelope.h>        // napi_envelope_encode (the magic packet's answer)
 #include <net/npwire/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
@@ -165,6 +166,35 @@ bool baffle_packet(const std::vector<uint8_t> &unpacked) {
 
 void connect_log_line(const NapiNPServerCtx &ctx, const std::string &text) {
 	if (ctx.logs.connect != nullptr) ctx.logs.connect->line(text);
+}
+
+// The magic packet's reflection: the manager's protocols in order, the first whose reflection
+// is set and whose key equals the packet's dword at +12 answers the address the packet names
+// (its dword at +4, the socket's address word, and its u16 at +8, the port the send swaps) with
+// the four bytes 72 10 04 00 (the dword 0x00041072), through the socket's envelope (SendTo's
+// last argument 1: NapiSocket_EncodePacket); no match answers nothing. A host's manager walks
+// the game protocol, the only one the session create arms (a NovaWorld host's gate-session
+// protocol never is).
+// [orig: NapiNP_HandleMagicPacket @0x622E70 - the walk @0x622E95..0x622EC5 (`cmp
+//  [eax+52Ch], 0` @0x622EA6, `mov esi, [eax+530h]` @0x622EAF, `cmp esi, [edx+0Ch]` @0x622EB8),
+//  the port @0x622ED9, the address @0x622EDD, the bytes @0x622EE1..0x622EF1,
+//  CNapiNPManager_SendTo(.., 4, 1) @0x622EF8; NapiSocket_SendTo @0x62CFA0 - the encode
+//  @0x62CFEA..0x62D009 (NapiSocket_EncodePacket @0x62C8F0), htons @0x62D050]
+void reflect_magic_packet(const NapiNPServerCtx &ctx, const std::vector<uint8_t> &unpacked,
+		HandleResult &out) {
+	const NapiNPProtocol &p = ctx.np_protocol;
+	if (p.magic_reflect == 0 || p.magic_key != io::read_u32_le(unpacked.data() + 12)) return;
+	static constexpr uint8_t kAnswer[4] = {0x72, 0x10, 0x04, 0x00};
+	HandleResult::Addressed reply;
+	reply.to.ip = io::read_u32_le(unpacked.data() + 4);
+	reply.to.port = io::read_u16_le(unpacked.data() + 8);
+	reply.datagram.resize(sizeof(kAnswer) + 4);
+	std::size_t encoded = 0;
+	if (napi_envelope_encode(kAnswer, sizeof(kAnswer), reply.datagram.data(),
+				reply.datagram.size(), &encoded) != 0)
+		return;
+	reply.datagram.resize(encoded);
+	out.addressed_outbound.push_back(std::move(reply));
 }
 
 // A server-side connection for the peer: the first test of the session-level handlers
@@ -1438,6 +1468,7 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	connect_log_line(ctx, napi_got_cooked_text(unpacked_len, peer));
 	if (baffle_packet(unpacked)) {
 		connect_log_line(ctx, napi_got_baffle_text(unpacked_len, peer));
+		reflect_magic_packet(ctx, unpacked, out); // [orig: @0x622F62] (D-NET-NEW-L1-20)
 		return out;
 	}
 	uint8_t opcode = 0;

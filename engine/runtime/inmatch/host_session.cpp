@@ -256,6 +256,11 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 		// [orig: NapiNP_HandleResendList -> SendSessionPacket @0x6239b6 -> SendTo @0x61f039]
 		for (const std::vector<uint8_t> &dg : r.immediate_outbound)
 			sock.send_to(peer, dg.data(), dg.size());
+		// The magic packet's reflection goes to the address the packet named, from inside the
+		// receive (D-NET-NEW-L1-20) [orig: NapiNP_HandleMagicPacket -> CNapiNPManager_SendTo
+		//  @0x622EF8].
+		for (const HandleResult::Addressed &a : r.addressed_outbound)
+			sock.send_to(a.to, a.datagram.data(), a.datagram.size());
 		for (const std::vector<uint8_t> &dg : r.outbound) {
 			// 0x81/0x82 remain immediate. The retained settings 0x83 and
 			// established retransmits use the connection's send boundary.

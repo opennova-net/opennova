@@ -5028,6 +5028,10 @@ add_executable(npruntime_connect_log_lines_test npruntime/connect_log_lines_test
 target_link_libraries(npruntime_connect_log_lines_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_connect_log_lines_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_connect_log_lines COMMAND npruntime_connect_log_lines_test)
+# The NovaWorld host's magic-packet reflection (D-NET-NEW-L1-20): the create's key, the answer.
+add_executable(npruntime_magic_reflection_test npruntime/magic_reflection_test.cpp)
+target_link_libraries(npruntime_magic_reflection_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_magic_reflection COMMAND npruntime_magic_reflection_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

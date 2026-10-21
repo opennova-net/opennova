@@ -97,8 +97,13 @@ struct NapiNPProtocol {
 	uint32_t server_flags = 0;          // [orig +0x500] P1 TLV (server config flag word)
 	uint32_t build_flags = 0;           // [orig +0x504] P2 TLV (CNapiServerConfig_BuildFlags)
 	uint32_t max_players = 1;           // [orig +0x524] MP TLV; clamped 1..251
-	uint32_t gen_session_seed_flag = 1; // [orig +0x52C] 1 -> regenerate session_seed_id at start
-	uint32_t session_seed_id = 0;       // [orig +0x530] (GetTickCount + rand) % 900000 + 100000
+	// The magic packet's reflection: the session create sets +0x52C and draws the key +0x530 for
+	// a NovaWorld authority in a session, else zeroes both; the manager's magic-packet handler
+	// answers a packet carrying the key. No list, TLV or page carries the key (D-NET-NEW-L1-20).
+	// [orig: CNapiGameSession_CreateSession @0x4C9B05..0x4C9B3F; NapiNPTimer_GenerateRandomId
+	//  @0x61E510; NapiNP_HandleMagicPacket @0x622EA6..0x622EB8, its one reader]
+	uint32_t magic_reflect = 0;         // [orig +0x52C]
+	uint32_t magic_key = 0;             // [orig +0x530]
 	uint32_t host_key = 0;              // [orig +0x534] HK TLV; NapiNP_GenerateSessionKey @0x61ea70
 	uint32_t host_running = 0;          // [orig +0x538] 1 once StartServer succeeds; Hello rejects 0
 	uint32_t host_start_tick = 0;       // [orig +0x53C] GetTickCount at StartServer (uptime base)
