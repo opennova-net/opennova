@@ -131,6 +131,7 @@
       "auto_deploy": true,
       "scenario": "medic_revive.json",
       "host_player_class": 5,
+      "deploy_zones": true,
       "topologies": ["RR", "RR-aa", "RO"]
     },
     {

@@ -153,6 +153,10 @@ function Get-CaseTimeLimit { param($Case) return [int] (Get-CaseField $Case "tim
 # the SERVER copy's weapon.sav record; 0 keeps the copy's).
 function Get-CasePermanentDeath { param($Case) return [bool] (Get-CaseField $Case "permanent_death" $false) }
 function Get-CaseHostPlayerClass { param($Case) return [int] (Get-CaseField $Case "host_player_class" 0) }
+# deploy_zones: the mission offers deploy zones, so a joiner joins on the
+# deploy screen; an in_match auto_deploy case deploys its retail roles with
+# onHook's deploy (run_parity_topology.ps1 -DeployZones).
+function Get-CaseDeployZones { param($Case) return [bool] (Get-CaseField $Case "deploy_zones" $false) }
 # serve_only: the retail host as retail's Serve Only server, whose console
 # runs PUNT (run_parity_topology.ps1 -ServeOnly); retail hosts only. No case
 # sets it (E4's kick stages a listen host's SERVER PUNT ALL).
@@ -256,6 +260,13 @@ function Read-ParityCases {
                 $case.serve_only -isnot [bool]) {
             throw "Parity case '$($case.id)': serve_only is true or false"
         }
+        if ($case.PSObject.Properties.Name -contains "deploy_zones" -and
+                $case.deploy_zones -isnot [bool]) {
+            throw "Parity case '$($case.id)': deploy_zones is true or false"
+        }
+        if ((Get-CaseDeployZones $case) -and -not [bool] $case.auto_deploy) {
+            throw "Parity case '$($case.id)': deploy_zones deploys an in_match auto_deploy case's roles"
+        }
         $class = Get-CaseHostPlayerClass $case
         if ($class -notin @(0, 5, 6, 7, 8, 9)) {
             throw "Parity case '$($case.id)': host_player_class is 5-9 (0 keeps the copy's)"
@@ -337,6 +348,7 @@ function Get-CellArguments {
     if (Get-CasePermanentDeath $Case) { $arguments += "-PermanentDeath" }
     $class = Get-CaseHostPlayerClass $Case
     if ($class -ne 0) { $arguments += @("-HostPlayerClass", [string] $class) }
+    if (Get-CaseDeployZones $Case) { $arguments += "-DeployZones" }
     if (Get-CaseServeOnly $Case) { $arguments += "-ServeOnly" }
     if (Get-CaseLateJoiner $Case) { $arguments += "-LateJoiner" }
     if ($AllowDirtyRepo) { $arguments += "-AllowDirtyRepo" }
@@ -424,6 +436,10 @@ function Get-ReferenceMismatches {
     $recordedClass = if ($fields -contains "host_player_class") { [int] $Summary.host_player_class } else { 0 }
     if ($recordedClass -ne (Get-CaseHostPlayerClass $Case)) {
         $reasons.Add("host_player_class $recordedClass is not $(Get-CaseHostPlayerClass $Case)")
+    }
+    $recordedDeploy = ($fields -contains "deploy_zones") -and [bool] $Summary.deploy_zones
+    if ($recordedDeploy -ne (Get-CaseDeployZones $Case)) {
+        $reasons.Add("deploy_zones $recordedDeploy is not $(Get-CaseDeployZones $Case)")
     }
     $recordedServeOnly = ($fields -contains "host_kind") -and [string] $Summary.host_kind -eq "serve_only"
     if ($recordedServeOnly -ne (Get-CaseServeOnly $Case)) {

@@ -35,6 +35,20 @@ param(
 
     [switch] $AutoDeploy,
 
+    # A mission with deploy zones (the case table's deploy_zones): its joiner
+    # joins undeployed, on the deploy screen [orig: Server_OnPlayerJoin
+    # @0x51A6E9..0x51A6F2, the slot's bit 0x10 iff SpawnZoneList_GetCount() is
+    # nonzero], which the host holds open through the S2C 0x0A flags1 bit 1
+    # [orig: NapiNPClientMsg_0x00A @0x42FF7A..0x42FF82, g_DeployScreenActive].
+    # An in_match auto-deploy cell deploys every retail role with onHook's
+    # deploy (SPACE until a local player stands): the screen's SPACE is the
+    # auto team pick [orig: Input_HandleSpecialKeys, the gate @0x49C9DA, the
+    # SPACE @0x49CA06..0x49CA14: Input_QueueEvent(12, 0xFFFE)], which an
+    # OpenNova joiner sends through parity_joiner_ready's auto_deploy. onHook's
+    # deploy defaults off for jo, so without it a retail joiner never stands
+    # and its in_match never comes (x5's cp04-objcoop-revive RR / RR-aa).
+    [switch] $DeployZones,
+
     [switch] $ExerciseInput,
 
     # A network-parity scenario (scripts/net/scenarios/*.json,
@@ -195,6 +209,9 @@ if ($HostSessionName.Length -gt 31 -or $HostSessionName -notmatch '^[\x20-\x7e]+
 $ServerName = $HostSessionName
 if ($ReadinessMode -eq "deploy_hold" -and ($AutoDeploy -or $ExerciseInput)) {
     throw "deploy_hold readiness cannot auto-deploy or exercise input."
+}
+if ($DeployZones -and -not $AutoDeploy) {
+    throw "-DeployZones deploys an in_match auto-deploy cell's retail roles; a deploy_hold cell holds them."
 }
 if ($WireOnly -and $Topology -ne "OR") {
     throw "WireOnly is an OR-only diagnostic mode."
@@ -2246,6 +2263,7 @@ function Get-RetailHostArguments {
         windowed = $true
         allow_many = $true
         stock_observer = $StockObserver
+        deploy = [bool] $DeployZones
         wait_timeout_ms = 240000
     }
     if ($RotationList.Count -gt 0) { $arguments.rotation = @($RotationList) }
@@ -2299,6 +2317,7 @@ function Start-RetailLateJoiner {
         windowed = $true
         allow_many = $true
         stock_observer = $StockObserver
+        deploy = [bool] $DeployZones
         readiness = $(if ($ReadinessMode -eq "in_match") { "in_match" } else { "peer" })
         wait_timeout_ms = 240000
     })
@@ -2394,6 +2413,7 @@ function Start-RetailJoinerExact {
         windowed = $true
         allow_many = $true
         stock_observer = $StockObserver
+        deploy = [bool] $DeployZones
         # deploy_hold returns once the session is connected: an A&S joiner
         # holds on the deploy screen with no local Person, which the
         # in_match readiness waits for.
@@ -2988,6 +3008,8 @@ try {
                 windowed = $true
                 allow_many = $true
                 stock_observer = $StockObserver
+                # The pair's deploy is both roles' (-DeployZones).
+                deploy = [bool] $DeployZones
                 wait_timeout_ms = 240000
             }
             if ($RotationList.Count -gt 0) { $pairArguments.rotation = @($RotationList) }
@@ -3198,6 +3220,7 @@ try {
                 windowed = $true
                 allow_many = $true
                 stock_observer = $StockObserver
+                deploy = [bool] $DeployZones
                 readiness = $(if ($ReadinessMode -eq "in_match") { "in_match" } else { "peer" })
                 wait_timeout_ms = 240000
             })
@@ -3617,6 +3640,8 @@ $summary = [pscustomobject]@{
     # with every game.cfg and weapon.sav write and its restore.
     permanent_death = [bool] $PermanentDeath
     host_player_class = $HostPlayerClass
+    # The case's deploy zones: onHook deployed the retail roles.
+    deploy_zones = [bool] $DeployZones
     server_game_cfg_overrides = @($script:ServerGameCfgOverrides)
     server_player_class_override = $script:ServerPlayerClassOverride
     # The SERVER copy's mutable files: each one's start hash (game.cfg's is

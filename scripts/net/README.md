@@ -397,6 +397,20 @@ so the default suite is unchanged. An extension case may add:
   records it). A retail host only: whether the OpenNova listen host's player
   takes its class from that record is unchecked, so OR and OO refuse it (and
   `cp04-objcoop-revive` keeps RR, RR-aa and RO until it is).
+- `deploy_zones`: the mission offers deploy zones (`-DeployZones`; an
+  `in_match` `auto_deploy` case only). Its joiner joins undeployed, on the
+  deploy screen (`Server_OnPlayerJoin @0x51A6E9..0x51A6F2` sets the slot's
+  bit 0x10 iff `SpawnZoneList_GetCount()` is nonzero), which the host holds
+  open through the S2C 0x0A flags1 bit 1 (`g_DeployScreenActive`,
+  `NapiNPClientMsg_0x00A @0x42FF7A..0x42FF82`). The runner passes onHook's
+  `deploy` to every retail role (`onhook_run_lan_pair`, `onhook_join_lan`,
+  `onhook_host_lan`): SPACE until a local player stands, the screen's auto team
+  pick (`Input_HandleSpecialKeys @0x49CA06..0x49CA14`, event 12 with 0xFFFE).
+  An OpenNova joiner's `auto_deploy` sends the same pick
+  (`parity_joiner_ready`). onHook's `deploy` defaults off for JO, so without
+  the key a retail joiner never stands and the `in_match` wait times out (x5's
+  `cp04-objcoop-revive` RR and RR-aa; `cp04-objcoop-deploy` holds on purpose).
+  The summary records it (`deploy_zones`).
 - `serve_only`: the retail host runs as retail's Serve Only server
   (`-ServeOnly`; `onhook_host_lan` `serve_only`, connection mode 1; the
   summary's `host_kind` is `serve_only`). Its console runs BAN and PUNT
@@ -437,8 +451,8 @@ scenario's OpenNova host (OR, OO) stages through the `stage_slot` probe
 dies and clicks the death screen's SWAP TEAMS; RR, RR-aa and OR, the click
 being onHook's), `tdh-i3a-tdm-permdeath` (`permanent_death`, with
 `permanent_death`; all five) and `cp04-objcoop-revive` (`medic_revive`, with
-`host_player_class` 5; RR, RR-aa and RO: the OpenNova host's class from
-`weapon.sav` is unchecked, above). The `scenario_play` driver types `char`
+`host_player_class` 5 and `deploy_zones`; RR, RR-aa and RO: the OpenNova host's
+class from `weapon.sav` is unchecked, above). The `scenario_play` driver types `char`
 steps (each a keystroke in its tick's input frame, which an open chat or
 command line takes, as onHook's driver hands retail the key's WM_KEYDOWN,
 WM_CHAR and WM_KEYUP) but plays no `click`, so a case whose scenario clicks
@@ -461,8 +475,8 @@ case 12, @0x49B024..0x49B03C), which `count_kinds` pins. The case's `note`
 says so.
 
 The summary records `rotation`, `time_limit_minutes`, `late_joiner`,
-`permanent_death` and `host_player_class`, and a reference is reused only for
-a case with the same values.
+`permanent_death`, `host_player_class` and `deploy_zones`, and a reference is
+reused only for a case with the same values.
 
 ### Comparing two suites
 

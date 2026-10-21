@@ -100,9 +100,29 @@ static func deploy_hold_ready(state: Dictionary, readiness_mode: String) -> bool
 			and bool(state.hold_ready) and bool(state.deploy_presented)
 
 
+## An auto-deploy joiner still held on the deploy screen is not ready: its
+## pick (auto_deploy_pick) releases the hold.
 static func in_match_ready(state: Dictionary, readiness_mode: String, auto_deploy: bool) -> bool:
 	return readiness_mode == "in_match" \
-			and bool(state.match_ready_auto if auto_deploy else state.match_ready)
+			and bool(state.match_ready_auto if auto_deploy else state.match_ready) \
+			and not (auto_deploy and bool(state.hold_ready))
+
+
+## The deployment pick auto_deploy owes, or -1 for none: the default pick
+## (param 0) while the post-auth pick is pending; on a mission with deploy
+## zones, whose joiner the host holds on the deploy screen past the admission
+## (the S2C 0x0A flags1 bit 1), the screen's SPACE, the auto team pick (param
+## 65534, wire 0xFFFE), as onHook's deploy presses it on a retail role.
+## [orig: Server_OnPlayerJoin @0x51A6E9..0x51A6F2 (the undeployed bit iff
+##  SpawnZoneList_GetCount()); NapiNPClientMsg_0x00A @0x42FF7A..0x42FF82
+##  (g_DeployScreenActive); Input_HandleSpecialKeys, the gate @0x49C9DA, the
+##  SPACE @0x49CA06..0x49CA14: Input_QueueEvent(12, 0xFFFE)]
+static func auto_deploy_pick(state: Dictionary) -> int:
+	if bool(state.pick_pending):
+		return 0
+	if bool(state.hold_ready):
+		return 65534
+	return -1
 
 
 ## The witness for one heartbeat: the raw state plus the run's configuration
