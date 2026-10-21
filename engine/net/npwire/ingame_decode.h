@@ -1119,7 +1119,7 @@ bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
 // so a client that ignores this message can never land a shot on a stock host. A body
 // shorter than four bytes seeds ZERO — which is also the witnessed round-end disarm form,
 // so a short read is a valid seed, not a decode failure (this always returns true).
-// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — g_ClientCurrentTick @0xA8229C @0x4297f8,
+// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 — g_ClientCurrentTick @0xA8229C @0x4297f8,
 //  g_LastKeepaliveTick @0xA822A0 @0x4297fd, short-body zero @0x4297eb;
 //  Server_SendRandomSeedToPlayer @0x5101a0 (value @0x5101d4, disarm @0x510237);
 //  gate PlayerSlot_IsActive @0x4fc760]
@@ -2016,7 +2016,7 @@ bool decode_entity_routed_packet(const uint8_t *body, size_t len,
 // ===========================================================================
 // S2C 0x45 — terrain-tile load batch (§5.37). The host streams the multiplayer
 // terrain-tile array to a JOINING client as phase 5 of the initial-state load
-// sequence (Server_SendInitialGameStateToPlayer @ 0x51BBA0 → repeats until the
+// sequence (Server_SendPlayerSlotStateFrame @ 0x51BBA0 → repeats until the
 // serializer returns 0). It is LOAD-ONLY (no gameplay-tick path), PAGED, and one
 // of the few messages that carries an actual payload despite the §4 dispatch
 // row historically reading "empty payload" (corrected by D-NET-83).

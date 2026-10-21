@@ -19,7 +19,7 @@ inline constexpr int32_t kMissionExitReset = 2;
 // reason and its disconnect: the trigger-set resolver's PU_EXIT_CONFIRM row. The console's
 // code 3 raises it on the world's interface channel, which a session frame the exit ends
 // still plays ahead of the frame's stop (the shell's session leg).
-// [orig: Input_HandleActionBinding @0x49AD40 - case 3: the handle dword_24E09C4 @0x49AF1F,
+// [orig: Input_HandleActionBinding @0x49AD40 - case 3: the handle g_SndPuExitConfirm @0x49AF1F,
 //  Sound_PlayInterfaceTriggerSet @0x527BE0 (the call @0x49AF30); the resolver row's name
 //  @0x82FF44, its handle slot @0x82FF64]
 inline constexpr const char *kExitMissionSoundset = "PU_EXIT_CONFIRM";

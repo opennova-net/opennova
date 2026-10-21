@@ -9,7 +9,7 @@
 // world pool (0x10 pool-2 static, 0x0D pool-1, 0x0C pool-0 organics, 0x20 pool-3 markers) PAGED into
 // per-datagram batches so a large mission does not exceed the UDP MTU and IP-fragment; the original caps
 // each S2C world-stream datagram at ~650 B and advances a pool cursor across calls [orig:
-// Server_SendInitialGameStateToPlayer @0x51bba0]. This is the pure byte-budget page slicer, factored out
+// Server_SendPlayerSlotStateFrame @0x51bba0]. This is the pure byte-budget page slicer, factored out
 // of server_initial_state.cpp's emit_paged_pool so it is ONE named, unit-tested chunker (it holds no
 // InitialStateStep / InitialStateBurst coupling; emit_paged_pool is a thin wrapper over it).
 //

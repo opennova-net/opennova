@@ -80,7 +80,7 @@ inline SessionSequencing make_jo_game_session_sequencing(
 //       -> InitRound          [Server_InitNewRoundState          @0x51c8e0]
 //       -> PendingSpawn       [CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]
 //       -> PlayerAdded        [Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
-//       -> SendingInitial     [Server_SendInitialGameStateToPlayer @0x51bba0]
+//       -> SendingInitial     [Server_SendPlayerSlotStateFrame @0x51bba0]
 //       -> Spawned            (spawn_remote_player binds owned_entity)
 //       -> InMatch            (per-frame 0x0A out / 0x0C in)
 //       -> Goodbye       0x46 [Nwu_HandleClientGoodbye @0x624250]
@@ -127,7 +127,7 @@ enum class GameAdmissionStage : uint8_t {
 // change returns a slot in states 2..7 to Added. Leaving Joined zeroes the slot's round-event
 // watermark (+97544) at every writer.
 // [orig: CNapiServer_ProcessPendingPlayerSpawns - PlayerSlot_SetState(slot, 1) @0x4C9123;
-//  NapiNPServerMsg_HandlePlayerSyncRequest @0x513200 - 2 @0x513249; Server_SendInitialGameStateToPlayer
+//  NapiNPServerMsg_HandlePlayerSyncRequest @0x513200 - 2 @0x513249; Server_SendPlayerSlotStateFrame
 //  @0x51BBA0 - the track switch @0x51BBB4..0x51BBBB, 3 @0x51C134, 5 @0x51BEF3;
 //  NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260 - 4 @0x5132B1; Server_OnPlayerJoin
 //  @0x51A680 - 6 @0x51A712, 7 @0x51AA5C; Server_DisconnectAndResetAllPlayerSlots @0x516160 -
@@ -657,7 +657,7 @@ struct NapiNPConnection {
 	// remote connection's, so the next S2C 0x79 boundary kicks it
 	// (Server_KickDuplicatePcids). Nothing clears it; the kick destroys the node.
 	// [orig: NapiNPPlayer+0x4D - its one writer Server_ValidatePlayerJoinRequest
-	//  @0x5127F3, its one reader CNapiServer_DisconnectPendingSpawnBans @0x4C92F5]
+	//  @0x5127F3, its one reader CNapiServer_KickDuplicatePcids @0x4C9290 (@0x4C92F5)]
 	bool duplicate_pcid_kick_pending = false;
 	// NetPlayer game state 3: the C2S 0x01 met the join-ticket gate
 	// (join_tickets_required), so the timeout watchdog validates this joiner;

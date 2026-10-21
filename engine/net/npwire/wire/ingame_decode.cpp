@@ -1021,7 +1021,7 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 // S2C 0x61 tick seed. The retail handler reads the dword only when four bytes are
 // present and otherwise seeds ZERO, then stores it unconditionally — a short body is a
 // seed of 0, not an error, and 0 is itself the witnessed round-end disarm value.
-// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — the `keyData+4 <= keyData+dataLen`
+// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 — the `keyData+4 <= keyData+dataLen`
 //  guard @0x4297eb, the stores @0x4297f8 / @0x4297fd]
 bool decode_tick_seed(const uint8_t *body, size_t len, uint32_t &out) {
 	out = 0;
@@ -1754,7 +1754,7 @@ bool decode_entity_routed_packet(const uint8_t *body, size_t len,
 }
 
 // S2C 0x45 terrain-tile load batch — §5.37. Paged stream the host sends during a
-// client's initial-state load (phase 5 of Server_SendInitialGameStateToPlayer).
+// client's initial-state load (phase 5 of Server_SendPlayerSlotStateFrame).
 // Witnessed byte-exact against the writer + reader (52-tile header chunk = 644 B,
 // 53-tile chunk = 640 B in operation_whitenoise). The 12-B tile entries are
 // opaque copies the network layer never interprets (D-NET-83).

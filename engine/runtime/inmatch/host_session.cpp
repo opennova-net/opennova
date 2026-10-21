@@ -673,7 +673,7 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 	match_rules.game_type = owner.ctx.config.game_type;
 	// SET GameTime feeds g_RoundTimeLimitMinutes (GameConfig::round_time_limit_minutes);
 	// KOTHLimit/time_limit_minutes is unrelated.
-	// [orig: Game_StartMission seed @0x524F66]
+	// [orig: Game_StartMission @0x524360 - the seed @0x525229..0x525251]
 	match_rules.game_time_minutes = owner.ctx.config.round_time_limit_minutes;
 	match_rules.score_limit = owner.ctx.config.score_limit;
 	match_rules.hill_limit_minutes = owner.ctx.config.time_limit_minutes;

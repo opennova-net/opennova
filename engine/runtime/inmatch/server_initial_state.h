@@ -10,7 +10,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/mission/mission_text.h>
 
-// P3 — [orig: Server_SendInitialGameStateToPlayer @0x51bba0]. The two-track initial-state burst
+// P3 — [orig: Server_SendPlayerSlotStateFrame @0x51bba0]. The two-track initial-state burst
 // machine: it advances one connection's InitialStateBurst cursor and emits the §5.2a load sequence,
 // every body produced from real World + bms::File + host-config state (ADR 0003, no fixtures). The player-sync
 // serializers (0x2C server-name+map, 0x08 server-config, 0x2A table×6, 0x66 weapon-restrictions, 0x76
@@ -51,7 +51,7 @@ uint32_t build_server_config_flags(const NapiNPServerCtx &ctx);
 // conn.burst.spawned (the PeerSpawned source). No-op (advanced=false) when ctx.world == nullptr,
 // the connection has not reached PlayerAdded, or its burst is already complete. now_tick sources
 // the 0x76 configured class-allow mask + 0x1A timestamp bodies.
-// [orig: Server_SendInitialGameStateToPlayer @0x51bba0]
+// [orig: Server_SendPlayerSlotStateFrame @0x51bba0]
 InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                      uint32_t now_tick = 0);
 

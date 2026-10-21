@@ -68,7 +68,7 @@ std::vector<uint8_t> serialize_server_name_map(const GameConfig &cfg) {
 // session fact is the socket mode's, read when the create builds the word ahead of the World's
 // rules (HostRole's rules_in_session, D-NET-405; D-NET-NEW-L1-19).
 // [orig: CNapiServerConfig_BuildFlags - `if (this->is_in_session)` @0x4C4DC4; reached in the
-//  single player by Server_SendInitialGameStateToPlayer @0x51BF95 (ServerConfig_SerializeToPacket
+//  single player by Server_SendPlayerSlotStateFrame @0x51BF95 (ServerConfig_SerializeToPacket
 //  @0x505D29); CNapiNetwork_SetNetworkType @0x4C4A85]
 uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	const GameConfig &r = ctx.config;   // rule-flag inputs (squad / perm-death / config_flag_*)
@@ -352,7 +352,7 @@ enum class Action { EmitEmpty, EmitBody, SkipSilent };
 
 // Page a world-stream pool into per-datagram batches and push each as its own InitialStateMessage.
 // The original caps each S2C world-stream datagram at ~650 B and advances a pool cursor across calls
-// [orig: Server_SendInitialGameStateToPlayer @0x51bba0]. The selected limit preserves each serializer's
+// [orig: Server_SendPlayerSlotStateFrame @0x51bba0]. The selected limit preserves each serializer's
 // witnessed post-write margin; 0x45 tiles select their distinct pre-write cap.
 // `encode_page(off, cnt)` slices the pool's records [off, off+cnt) into a sub-batch and returns its
 // encoded body. Each page climbs the F3 entity_batch_count. An empty pool still emits one header-only
@@ -407,7 +407,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		// game state 9 and slot state 3 with the subphase back to 0. The 0x0B is never
 		// skipped: a host in session always holds its mission's header (the null test
 		// is for World-only unit fixtures with no mission).
-		// [orig: Server_SendInitialGameStateToPlayer @0x51BBA0 - the tail
+		// [orig: Server_SendPlayerSlotStateFrame @0x51BBA0 - the tail
 		//  @0x51C03A..0x51C10E (the 0x0B NetPacket_WriteBMSHeader over g_BmsHeaderBlock
 		//  @0x51C054..0x51C077), game state 9 @0x51C113..0x51C11C, slot state 3 @0x51C134,
 		//  subphase 0 @0x51C13C]
@@ -445,7 +445,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		// needs the complete static / pool-1 / pool-3 world to finish loading the map — the prior
 		// minimal stream (empty 0x10, skipped 0x0D, spawn-marker-only 0x20) stalled a live retail join at
 		// 7%. This reverses the D-NET-97/98 shortcut (was sized to our own client; a stock client needs
-		// the real world-state). [orig: Server_SendInitialGameStateToPlayer @0x51bba0, phases
+		// the real world-state). [orig: Server_SendPlayerSlotStateFrame @0x51bba0, phases
 		// 0x10 -> 0x0D -> 0x0C -> 0x20]. The paged emits push directly; the action switch is a no-op here.
 		action = Action::SkipSilent;
 		switch (b.world_stream_phase) {
@@ -547,7 +547,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}
 			// The last chunk leaves the cursor at the end, and the phase advances on the
 			// NEXT call, whose serializer writes nothing: one more step with no send.
-			// [orig: Server_SendInitialGameStateToPlayer case 5 @0x51BDE7..0x51BE00 -
+			// [orig: Server_SendPlayerSlotStateFrame case 5 @0x51BDE7..0x51BE00 -
 			//  NetPacket_WriteTerrainTiles @0x506570 returns 0 when Terrain_SerializeTiles
 			//  writes nothing past the +89884 cursor]
 			if (b.phase_loop_counter >= n_tiles) {
@@ -648,7 +648,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		} else if (b.world_stream_phase >= InitialStateBurst::kStreamWaitForGameStartAck) {
 			// Case 7's 0x1A ends the stream: game state 9 and slot state 5, where the slot
 			// waits for the joiner's C2S 0x0B (Server_OnPlayerJoin).
-			// [orig: Server_SendInitialGameStateToPlayer case 7 - CNetPlayer_SetGameState(.., 9)
+			// [orig: Server_SendPlayerSlotStateFrame case 7 - CNetPlayer_SetGameState(.., 9)
 			//  @0x51BED7, slot state 5 @0x51BEF3]
 			b.game_state = 9;
 			conn.slot_state = PlayerSlotState::AwaitJoin;
@@ -965,7 +965,7 @@ uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
 	return build_server_config_flags_impl(ctx);
 }
 
-// [orig: Server_SendInitialGameStateToPlayer @0x51bba0]
+// [orig: Server_SendPlayerSlotStateFrame @0x51bba0]
 InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                      uint32_t now_tick) {
 	InitialStateStep step;
@@ -977,7 +977,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// match outcome latched), and both tracks also wait while the round-over flag is up
 	// (g_RoundOver, the same latch here). A joiner arriving in the post-round linger
 	// so waits for the map change, its track where it stood. (D-NET-NEW-L1-7)
-	// [orig: Server_SendInitialGameStateToPlayer @0x51BBA0 - `cmp g_MissionRunning, ebx; jz`
+	// [orig: Server_SendPlayerSlotStateFrame @0x51BBA0 - `cmp g_MissionRunning, ebx; jz`
 	//  @0x51BBA3..0x51BBA9; `cmp g_RoundOver, ebx; jnz` @0x51BBE8..0x51BBEE (world
 	//  track) / @0x51BEFF..0x51BF05 (player-sync track); Game_SetMissionRunning(0)
 	//  @0x5245E3 and (1) @0x525D58 in Game_StartMission; the round end's clear
@@ -992,7 +992,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// sets (dispatch_player_sync_request) once its mission load completed; until then the
 	// producer sends nothing (D-NET-500). The host's own client sends its 0x09 in-process:
 	// the type-2 loopback applies the same handler here.
-	// [orig: Server_SendInitialGameStateToPlayer @0x51BBA0 - the slot-state switch
+	// [orig: Server_SendPlayerSlotStateFrame @0x51BBA0 - the slot-state switch
 	//  @0x51BBB4..0x51BBBB, the track @0x51BEFF; NapiNPServerMsg_HandlePlayerSyncRequest @0x513200]
 	if (!is_remote && conn.slot_state == PlayerSlotState::Added)
 		dispatch_player_sync_request(conn);
@@ -1010,7 +1010,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// its steps back to back (a host-local stand-in for its in-process self-join, no
 	// remote wire effect).
 	// [orig: Server_TickUpdate's tail slot walk, conn+0x648 == 0 @0x51E3D6..0x51E3DD, the
-	//  call @0x51E3E4; Server_SendInitialGameStateToPlayer @0x51BBA0, one case per call]
+	//  call @0x51E3E4; Server_SendPlayerSlotStateFrame @0x51BBA0, one case per call]
 	const std::size_t page_budget = is_remote ? 1u : 0xFFFFu;
 
 	// The backlog gate: both tracks send nothing while 20 or more of the connection's S2C
@@ -1019,7 +1019,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// sweep destroys it) - the client-paced backpressure that stretches a world stream over a
 	// cold client's mission build. Ours is the session's retained message count, kept the same
 	// way (framed, then retired by the peer's echoed ack).
-	// [orig: Server_SendInitialGameStateToPlayer - `cmp [ecx+768h], 14h; jge`
+	// [orig: Server_SendPlayerSlotStateFrame - `cmp [ecx+768h], 14h; jge`
 	//  @0x51BBFD..0x51BC04 (world track) / @0x51BF14..0x51BF1B (player-sync track);
 	//  CNapiNPConnection_BuildOutgoingPackets @0x628430 - the sent-list link and count
 	//  @0x62855D..0x628584, the sequence stamp @0x6285C5; CNapiNPConnection_ParseMessages

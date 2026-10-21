@@ -563,7 +563,7 @@ bool check_vehicle_spawn_availability() {
 // D-NET-699: the S2C 0x79 boundary kicks a connection the join validator flagged for a
 // duplicate PCID; a tick off the boundary kicks no one.
 // [orig: Server_TickUpdate - the 0x79 countdown @0x51E1B2..0x51E1C5, the send @0x51E202,
-//  CNapiServer_DisconnectPendingSpawnBans @0x51E20C]
+//  CNapiServer_KickDuplicatePcids (called @0x51E20C)]
 bool check_duplicate_pcid_kick_at_the_quality_boundary() {
 	HostFixture f(2);
 	f.conn(0).account.pcid = "P-DUP-0001";

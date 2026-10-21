@@ -1073,7 +1073,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//  jnz @0x5266B4) sends its 0x0A, Entity_UpdateAllEntities follows @0x52674B;
 	//  Server_TickUpdate - is_in_session @0x51E211..0x51E217 (to the loop
 	//  @0x51E385), the call @0x51E3E4, the 0x57's session test @0x51E3EC;
-	//  Server_SendInitialGameStateToPlayer @0x51BBA0 (g_MissionRunning
+	//  Server_SendPlayerSlotStateFrame @0x51BBA0 (g_MissionRunning
 	//  @0x51BBA3, state 6 @0x51BBC6, the call @0x51BBDC); Server_SendEntityStateToPlayer
 	//  state 6 @0x517BD2]
 	// Build the world snapshot ONCE, then fan a per-connection-anchored 0x0A to every in-match
@@ -1120,7 +1120,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			// so a slot's records read the bodies of the slots written before it
 			// after their stores and those after it before theirs.
 			// [orig: Server_TickUpdate's per-slot loop @0x51E3A0..0x51E47C, the
-			//  call @0x51E3E4 -> Server_SendInitialGameStateToPlayer @0x51BBA0 (its
+			//  call @0x51E3E4 -> Server_SendPlayerSlotStateFrame @0x51BBA0 (its
 			//  state-6 call @0x51BBDC) -> Server_SendEntityStateToPlayer @0x517BA0]
 			conn.frame_update_staged =
 					write_entity_state(ctx, world, conn, ents, conn.staged_frame_update);

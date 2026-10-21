@@ -4,7 +4,7 @@
 // them (net-re §5.70.7). Each case pins one witnessed rule:
 //   - D-NET-500: the player-sync track (its S2C 0x2C first) waits for the joiner's C2S 0x09,
 //     which enters slot state 2 [orig: NapiNPServerMsg_HandlePlayerSyncRequest @0x513200 - game state 9
-//     @0x51322D, slot state 2 @0x513249; Server_SendInitialGameStateToPlayer @0x51BBA0 - the
+//     @0x51322D, slot state 2 @0x513249; Server_SendPlayerSlotStateFrame @0x51BBA0 - the
 //     switch @0x51BBB4..0x51BBBB, the track @0x51BEFF, the 0x2C call @0x51BF5D];
 //   - D-NET-504: no S2C 0x16 rides the C2S 0x37 reply or a spawn: retail's one 0x16 serializer
 //     call is the scoreboard clock's [orig: Server_BuildAndBroadcastScoreboard @0x50D960
@@ -14,7 +14,7 @@
 //     0x42 @0x51A81F, Server_SendEntityStateToPlayer @0x51A82D, 0x0F @0x51A869, 0x4D @0x51A97A,
 //     0x61 @0x51A982, 0x14 @0x51A9F3, the round-over legs @0x51A9F8..0x51AA5C, 0x3E @0x51AAEE];
 //   - D-NET-NEW-L1-7: the producer waits while the round is over [orig:
-//     Server_SendInitialGameStateToPlayer @0x51BBA3..0x51BBA9, @0x51BEFF..0x51BF05];
+//     Server_SendPlayerSlotStateFrame @0x51BBA3..0x51BBA9, @0x51BEFF..0x51BF05];
 //   - D-NET-401: the player-slot table is the slot limit alone [orig: Server_InitNewRoundState
 //     @0x51C948..0x51C97B];
 //   - D-NET-351: a remote add takes the row free the longest [orig: PlayerSlot_PickFreeSlot
@@ -276,7 +276,7 @@ bool run_no_player_list_off_the_scoreboard_clock() {
 
 // The producer's pacing: one step per send boundary, a step that sends nothing included, and
 // the 20-message backlog gate [orig: Server_TickUpdate @0x51E3D6..0x51E3E4;
-// Server_SendInitialGameStateToPlayer @0x51BBA0 - world case 0 @0x51BC22..0x51BC29, the gate
+// Server_SendPlayerSlotStateFrame @0x51BBA0 - world case 0 @0x51BC22..0x51BC29, the gate
 // `cmp [ecx+768h], 14h` @0x51BF14..0x51BF1B; the tail @0x51C03A..0x51C13C].
 bool run_one_step_per_boundary() {
 	JoinFixture f(/*with_existing=*/false);
@@ -441,7 +441,7 @@ bool run_join_into_a_finished_round() {
 }
 
 // D-NET-NEW-L1-7: once the round is over the producer sends nothing and holds the track
-// where it stood [orig: Server_SendInitialGameStateToPlayer @0x51BBA3..0x51BBA9,
+// where it stood [orig: Server_SendPlayerSlotStateFrame @0x51BBA3..0x51BBA9,
 // @0x51BEFF..0x51BF05].
 bool run_track_waits_while_the_round_is_over() {
 	JoinFixture f(/*with_existing=*/false);

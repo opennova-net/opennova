@@ -32,7 +32,7 @@ struct PlayerReplicationState; // net/npwire/replication_model.h
 // expects.
 //
 // What it does NOT do: the world-stream / spawn-gate burst. The original emits that ONE-SHOT on
-// player-add [orig: Server_OnPlayerJoin @0x51a680 → Server_SendInitialGameStateToPlayer @0x51bba0];
+// player-add [orig: Server_OnPlayerJoin @0x51a680 → Server_SendPlayerSlotStateFrame @0x51bba0];
 // the inmatch equivalent is `Server_SendInitialGameStateToPlayer` over `conn.burst`. An empirical
 // per-tick phase machine (queue_mission_bootstrap / queue_state4_loading_gate / the
 // 0x10/0x0A/0x57 tick cadence) has no original-engine counterpart, so there is none here (net-re §5.45 / D-NET-127). The reply
