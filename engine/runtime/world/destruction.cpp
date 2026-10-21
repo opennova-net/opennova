@@ -1156,8 +1156,11 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 //  @0x4EB814 / @0x4EB827 / @0x4EB83A / @0x4EB84D;
                 //  Terrain_SpawnEffectsAtUserPoint @0x5CEE20 - `cmp [ecx+0BCh], 0;
                 //  jnz` @0x5CF04D..0x5CF054 past Scar_AddEntry @0x5CF072 and the
-                //  rolls @0x5CF0CA..0x5CF154 to the next point @0x5CF180;
-                //  Terrain_FindSurfaceMaterialEntry @0x5CC280 over the table @0x841980]
+                //  rolls @0x5CF0CA..0x5CF154 (their useAltProbability pushes from
+                //  @0x5CF0B3; Effect_RollSurfaceEffectProbability @0x5CC1F0, its 100.0
+                //  scale @0x5CC25A over g_SurfaceEffectProbTable @0x8418B8) to the next
+                //  point @0x5CF180; Terrain_FindSurfaceMaterialEntry @0x5CC280 over the
+                //  table @0x841980]
                 // Pool 2 stores no blast center, and hands the callback the box
                 // distance [orig: `push ebx` @0x4EB85E].
                 run_callback(*t, distance);
