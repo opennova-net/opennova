@@ -323,6 +323,58 @@ void run_own_mission_start_submits_its_kit() {
 	CHECK(own->reply.loadout_buffer_set && own->reply.loadout_buffer.player_class == 8);
 }
 
+// The first mission start's round init seeds the own slot's loadout buffer from the spawn
+// buffer, which the mission load filled by then (here the title's default kit, the two of its
+// weapons the mission's weapon.def carries, in the kit's order); the session's own add, inside
+// the load ahead of the weapon table, seeds nothing. The host boot runs the seed at its
+// round-init point (HostRole::seed_own_slot_at_first_round_init); this rig's bare kernel boot
+// calls it as that step does.
+// [orig: Game_StartMission @0x525BAF -> Server_InitAllPlayerEntitiesForRound
+//  @0x516BC4..0x516BE3; the default page @0x5246BE]
+void run_first_round_init_seeds_the_own_buffer() {
+	std::map<std::string, std::string> files;
+	files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
+	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	ms::MissionKernel &kernel = *kernel_storage;
+	auto role_storage = std::make_unique<inmatch::HostRole>();
+	inmatch::HostRole &role = *role_storage;
+	role.bind(kernel);
+	inmatch::ListenHostState &host = role.state;
+	kernel.open_document(two_entity_mission(), "own_buffer_seed", source_over(&files));
+	ms::KernelBootOptions options;
+	options.mp_session = true;
+	options.game_type = mission_game_type(kernel.mission);
+	options.bringup_net_session = [&] {
+		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
+		cfg.config.server_name = "own_buffer_seed";
+		cfg.config.max_players = 4;
+		cfg.config.game_type = options.game_type;
+		cfg.socket_mode = inmatch::SocketMode::Lan;
+		cfg.serve_and_play = true;
+		inmatch::HostBringup bringup;
+		bringup.host_cfg = cfg;
+		role.bring_up(bringup);
+	};
+	std::string error;
+	CHECK(kernel.boot(options, error));
+	// Entry 0 is the engine's "null" def; the file's two follow it.
+	CHECK(kernel.world.tables.weapons.index_of("WPN_KNIFE") == 1 &&
+			kernel.world.tables.weapons.index_of("WPN_M4AUTO") == 2);
+	const inmatch::NapiNPConnection *own = nullptr;
+	for (const inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+		if (conn.type == inmatch::NapiNPConnection::kTypeClientSide) own = &conn;
+	CHECK(own != nullptr);
+	if (own == nullptr) return;
+	// The add, inside the load ahead of the weapon table, seeded nothing; the host boot's
+	// round-init point (host_boot.cpp, after the PreMission pass) seeds the buffer.
+	CHECK(own->reply.loadout_buffer.entries.empty());
+	role.seed_own_slot_at_first_round_init();
+	const std::vector<LoadoutSubmitEntry> &entries = own->reply.loadout_buffer.entries;
+	CHECK(own->reply.loadout_buffer_set && entries.size() == 2);
+	if (entries.size() == 2) CHECK(entries[0].adm_index == 2 && entries[1].adm_index == 1);
+}
+
 } // namespace
 
 int main() {
@@ -330,6 +382,7 @@ int main() {
 	run_held_host(/*mission_start=*/false);
 	run_own_join_warms_the_wired_body();
 	run_own_mission_start_submits_its_kit();
+	run_first_round_init_seeds_the_own_buffer();
 	if (failures == 0) std::printf("host_mission_start: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

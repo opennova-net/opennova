@@ -6,7 +6,6 @@
 #include <runtime/inmatch/server_initial_state.h> // Server_OnPlayerJoin (the 0x0B's join)
 #include <runtime/inmatch/server_message_dispatch.h> // broadcast_player_sync_on_join (the add's 0x46)
 #include <runtime/inmatch/server_files.h> // server_logs_punt (the join's HMCRC / CMCRC lines)
-#include <runtime/inmatch/server_loadout_grant.h> // PlayerSlot_SeedOwnLoadoutBuffer (the own slot's buffer)
 #include <runtime/inmatch/server_tick.h> // Server_StageHostPunt (the join's checksum punts)
 
 #include <runtime/world/entity.h>
@@ -481,14 +480,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
 		// The session's own add is the create's, whose profile init stores the slot's
 		// class after it (the add's PlayerList entry reads the zeroed class:
-		// stamp_player_list_add); a map change's round init keeps the class. The
-		// first mission start's round init then seeds the own slot's buffer from the
-		// spawn buffer (a map change's seeds it in init_all_player_entities_for_round)
-		// [orig: Server_InitAllPlayerEntitiesForRound @0x516BC4..0x516BE3].
-		if (!round_init) {
-			PlayerSession_InitOwnSlotClass(ctx, conn);
-			PlayerSlot_SeedOwnLoadoutBuffer(conn, world);
-		}
+		// stamp_player_list_add); a map change's round init keeps the class.
+		if (!round_init) PlayerSession_InitOwnSlotClass(ctx, conn);
 		// The body itself is the round init's spawn with the slot's class byte, which
 		// binds its camouflage row (D-NET-348): retail's own add attaches the local
 		// entity and never spawns, and every mission start's round init spawns the own

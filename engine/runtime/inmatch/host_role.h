@@ -124,6 +124,12 @@ public:
 	// [orig: Game_StartMission -- the Player_InitPlayer call @0x525BBC;
 	//  Player_InitPlayer @0x4E15F0 -- `Flags &= ~1` @0x4E19C2].
 	void init_local_player_at_mission_start();
+	// A fresh session's first mission start, at its round init: the own slot's buffer
+	// seeded from the spawn buffer, which the mission load filled by then (a map
+	// change's round init seeds its own, init_all_player_entities_for_round).
+	// [orig: Game_StartMission @0x525BAF -> Server_InitAllPlayerEntitiesForRound
+	//  @0x516BC4..0x516BE3, after the load's Mission_LoadBMSFile @0x40F4E0]
+	void seed_own_slot_at_first_round_init();
 	// The playing host's own client's mission-start end, as every session
 	// peer's: its C2S 0x0B queued and pumped onto the loopback, which the next
 	// frame's receive pump hands to the server's 0x0B receiver, whose join

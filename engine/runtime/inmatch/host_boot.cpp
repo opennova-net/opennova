@@ -393,6 +393,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		//  call @0x525B86, the Server_ResetRoundCounters call @0x525B90, the
 		//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
 		if (request.next_mission) request.host->init_round_after_premission();
+		else request.host->seed_own_slot_at_first_round_init();
 		// Then Player_InitPlayer's body leg, a fresh session's and a map
 		// change's alike [orig: Game_StartMission @0x525BBC].
 		request.host->init_local_player_at_mission_start();

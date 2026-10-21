@@ -23,6 +23,7 @@
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_loadout_grant.h> // PlayerSlot_SeedOwnLoadoutBuffer (the first round init)
 #include <runtime/inmatch/server_powerup.h> // ServerRemoteWeaponTables
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/mission/mission_kernel.h>
@@ -365,6 +366,13 @@ void HostRole::init_round_after_premission() {
 			kernel.local.inventory, kernel.local.inventory_valid, /*select_spawn_default=*/true);
 	(void)tick_connections(state.host_owner.ctx, /*elapsed_ms=*/0, state.host_owner.now_tick);
 	kernel.local.reset_local_player_input_to_player_facing();
+}
+
+void HostRole::seed_own_slot_at_first_round_init() {
+	if (kernel_ == nullptr) return;
+	for (NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
+		if (conn.type == NapiNPConnection::kTypeClientSide)
+			PlayerSlot_SeedOwnLoadoutBuffer(conn, kernel_->world);
 }
 
 // See host_role.h. The add hid a held host's own body, as retail's spawn hides
