@@ -463,7 +463,11 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	host_options.expansion = "jox01"
 	host_options.game_type = 0x30020
 	host_options.max_players = 4
-	host_options.class_allow_mask = 0x0155
+	# The host dialog's class words, not a mask: ALWAYS (1) for classes 0, 2, 4, 6 and 8,
+	# NEVER (0) for the rest; the session's first mission builds the S2C 0x76 mask 0x0155.
+	# [orig: HostDialog_OnWeaponRestrictionListClick @0x55781A..0x557839;
+	#  Game_ApplySessionSettingsToGlobals @0x551882..0x551996]
+	host_options.class_availability = PackedInt32Array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))

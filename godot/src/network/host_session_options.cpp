@@ -105,7 +105,7 @@ Dictionary HostSessionOptions::to_json_value() const {
 	out["spectator_password"] = get_spectator_password();
 	out["game_type"] = get_game_type();
 	out["mp_attributes"] = get_mp_attributes();
-	out["class_allow_mask"] = get_class_allow_mask();
+	out["class_availability"] = get_class_availability();
 	out["round_time_limit_minutes"] = get_round_time_limit_minutes();
 	out["time_limit_minutes"] = get_time_limit_minutes();
 	out["replay_enabled"] = get_replay_enabled();
@@ -208,7 +208,7 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::INT, spectator_slots)
 	HOST_SESSION_PROPERTY(Variant::INT, game_type)
 	HOST_SESSION_PROPERTY(Variant::INT, mp_attributes)
-	HOST_SESSION_PROPERTY(Variant::INT, class_allow_mask)
+	HOST_SESSION_PROPERTY(Variant::PACKED_INT32_ARRAY, class_availability)
 	HOST_SESSION_PROPERTY(Variant::INT, round_time_limit_minutes)
 	HOST_SESSION_PROPERTY(Variant::INT, time_limit_minutes)
 	HOST_SESSION_PROPERTY(Variant::INT, replay_enabled)

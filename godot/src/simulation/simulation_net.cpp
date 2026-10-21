@@ -1159,7 +1159,10 @@ int Simulation::get_class_allow_mask() const {
 	if (const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 			ctx != nullptr && ctx->is_authority != 0)
 		return ctx->config.class_allow_mask;
-	return net_.host_session_config.class_allow_mask;
+	// No session yet: the mask the configured class words build at the session's
+	// first mission (the host dialog writes words, never a mask).
+	return opennova::inmatch::class_allow_mask_from_words(
+			net_.host_session_config.class_availability, /*has_mission_entry=*/true);
 }
 
 const opennova::world::SpawnZoneRegistry &Simulation::deploy_zone_registry() {

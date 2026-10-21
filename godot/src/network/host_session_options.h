@@ -87,7 +87,20 @@ public:
 	// The g_GameType code word (NetProtocol.GAME_TYPE_*).
 	HOST_SESSION_INT(game_type, game_type)
 	HOST_SESSION_INT(mp_attributes, mp_attributes)
-	HOST_SESSION_INT(class_allow_mask, class_allow_mask)
+	// The cfg's ten class words (0 NEVER, 1 ALWAYS, 2 MISSION), what retail's host
+	// dialog writes; the session's first mission builds the S2C 0x76 mask from them
+	// (inmatch::class_allow_mask_from_words carries the witnesses).
+	PackedInt32Array get_class_availability() const {
+		PackedInt32Array out;
+		for (const int32_t word : config_.class_availability)
+			out.push_back(word);
+		return out;
+	}
+	void set_class_availability(const PackedInt32Array &p_words) {
+		for (size_t i = 0; i < config_.class_availability.size(); ++i)
+			config_.class_availability[i] =
+					static_cast<int64_t>(i) < p_words.size() ? p_words[static_cast<int64_t>(i)] : 0;
+	}
 	HOST_SESSION_INT(round_time_limit_minutes, round_time_limit_minutes)
 	HOST_SESSION_INT(time_limit_minutes, time_limit_minutes)
 	HOST_SESSION_INT(replay_enabled, replay_enabled)

@@ -84,6 +84,27 @@ inline std::array<int32_t, 255> filled_weapon_availability(int32_t value) {
 	return words;
 }
 
+// The class mask the cfg's ten class words build: a word of 1 enables its class (the
+// host dialog's ALWAYS), a word of 2 enables it while the mission-list entry's mask holds
+// its bit (MISSION; every entry's scan stores 0x3FF), any other word disables it (NEVER).
+// The host dialog's class list cycles each word 0 -> 1 -> 2 -> 0; it writes no mask.
+// [orig: Game_ApplySessionSettingsToGlobals @0x551790 (the words @0x551882..0x551990,
+//  the store @0x551996); HostDialog_OnWeaponRestrictionListClick (the cycle
+//  @0x55781A..0x557839); the entry mask MissionList_ScanAndBuildFromFiles @0x56334A,
+//  Mission_BuildMapListFromPFF @0x562B12]
+inline uint16_t class_allow_mask_from_words(
+		const std::array<int32_t, 10> &words, bool has_mission_entry) {
+	constexpr uint16_t kMissionEntryClassMask = 0x3FF;
+	uint16_t mask = 0;
+	for (size_t i = 0; i < words.size(); ++i) {
+		const uint16_t bit = static_cast<uint16_t>(1u << i);
+		if (words[i] == 1 ||
+				(has_mission_entry && words[i] == 2 && (kMissionEntryClassMask & bit) != 0))
+			mask = static_cast<uint16_t>(mask | bit);
+	}
+	return mask;
+}
+
 struct GameConfig {
 	// The title whose rules the session runs (gameprofile::GameId; CONTEXT.md "Title"): its player
 	// caps (title_player_caps), its built-in score table and the in-match rules the session stamps on

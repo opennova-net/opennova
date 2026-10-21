@@ -376,8 +376,8 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 	assert_false(config.game_type_auto,
 		"explicit callers stay pinned until a producer opts into mission derivation")
 	var options := config.to_session_options()
-	assert_eq(options.class_allow_mask, 0x03FF,
-			"ordinary host requests carry retail's all-ten-classes default")
+	assert_eq(options.class_availability, PackedInt32Array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+			"ordinary host requests carry retail's all-ALWAYS class words (Config_SetDefaults)")
 	assert_eq(options.round_time_limit_minutes, 30)
 	assert_eq(options.time_limit_minutes, 10)
 	assert_eq(options.replay_enabled, 1)
@@ -401,8 +401,9 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 	assert_eq(options.start_delay, 0)
 	assert_eq(options.destroy_buildings, 0)
 	assert_eq(options.death_messages, 1)
-	config.class_allow_mask = 1 << 6
-	assert_eq(config.to_session_options().class_allow_mask, 1 << 6,
+	config.class_availability = PackedInt32Array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0])
+	assert_eq(config.to_session_options().class_availability,
+			PackedInt32Array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
 			"the typed host request forwards a map-specific Soldier Class policy")
 
 

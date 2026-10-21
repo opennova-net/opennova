@@ -461,7 +461,10 @@ func test_multiplayer_open_uses_retail_server_class_allow_mask() -> void:
 			"the staged player carries the disallowed rifleman class")
 	var host_options := HostSessionOptions.new()
 	host_options.game_type = 0x30020
-	host_options.class_allow_mask = 1 << 9  # rifleman disallowed; engineer is next allowed
+	# The host dialog's class words: only class 9 ALWAYS, so the mask is 1 << 9 (rifleman
+	# disallowed; engineer is next allowed). [orig: HostDialog_OnWeaponRestrictionListClick
+	#  @0x55781A..0x557839]
+	host_options.class_availability = PackedInt32Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
 	sim.configure_host_session(host_options)
 	assert_true(sim.enable_host_listen(0), "the session class policy rides a real host")
 	var world := _make_world(sim, _make_weapons())

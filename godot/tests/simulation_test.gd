@@ -386,18 +386,23 @@ func test_host_spectator_options_and_live_f3_transition() -> void:
 			"the spectator keeps its slot and hidden body")
 
 
-func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
+# The host dialog writes the cfg's ten class words (0 NEVER, 1 ALWAYS, 2 MISSION), never a
+# mask; the mask is what the session's first mission builds from them, a MISSION word
+# enabled under the mission entry's 0x3FF. [orig: HostDialog_OnWeaponRestrictionListClick
+#  @0x55781A..0x557839; Game_ApplySessionSettingsToGlobals @0x551882..0x551996]
+func test_host_class_words_roundtrip_to_the_ui_seam() -> void:
 	var sim := Simulation.new()
 	assert_eq(sim.get_class_allow_mask(), 0x03FF,
 			"a fresh host exposes retail's all-ten-classes default")
+	var words := PackedInt32Array([1, 0, 1, 0, 1, 0, 2, 0, 2, 0])
 	var host_options := HostSessionOptions.new()
-	host_options.class_allow_mask = 0x0155
+	host_options.class_availability = words
 	sim.configure_host_session(host_options)
 	var options := sim.get_host_session_config()
-	assert_eq(options.class_allow_mask, 0x0155,
-			"the configured writer source survives the Godot session adapter")
+	assert_eq(options.class_availability, words,
+			"the configured class words survive the Godot session adapter")
 	assert_eq(sim.get_class_allow_mask(), 0x0155,
-			"the armory-facing seam exposes the same configured host mask")
+			"the armory-facing seam exposes the mask those words build")
 
 
 func test_all_mode_rule_options_roundtrip_to_the_host() -> void:

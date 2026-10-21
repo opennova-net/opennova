@@ -683,16 +683,8 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 	//  @0x551882..0x551990, the store @0x551996; dfx2.exe @0x54EAD7..0x54EB07 (the same
 	//  1 / 2 tests); the entry mask MissionList_ScanAndBuildFromFiles @0x56334A,
 	//  Mission_BuildMapListFromPFF @0x562B12]
-	constexpr uint16_t kMissionEntryClassMask = 0x3FF;
-	uint16_t mask = 0;
-	for (size_t i = 0; i < cfg.config.class_availability.size(); ++i) {
-		const int32_t word = cfg.config.class_availability[i];
-		const uint16_t bit = static_cast<uint16_t>(1u << i);
-		if (word == 1 || (ctx.mission != nullptr && word == 2 &&
-				(kMissionEntryClassMask & bit) != 0))
-			mask = static_cast<uint16_t>(mask | bit);
-	}
-	ctx.config.class_allow_mask = mask;
+	ctx.config.class_allow_mask =
+			class_allow_mask_from_words(cfg.config.class_availability, ctx.mission != nullptr);
 	// The weapon table: each cfg word equal to the title's mission value (Jointops.exe 3,
 	// dfx2.exe 2, the one of 2 and 3 that is not its armory-only value) takes the mission's
 	// own word, the mission's item_availability chunk through the builder's name-list mode
