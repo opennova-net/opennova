@@ -605,23 +605,31 @@ inline constexpr int kViewActionChase = 402;       // viewchase, F4
 void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bits,
                                    int action);
 
-// One 62.5 Hz tick: resolve the camera mode, step the six-lane scope-camera
-// interp toward its target and promote the settled byte on the tick its
-// active latch drops [orig: Player_UpdatePerFrame -- the step runs only
-// behind an active interp @0x4de4c7 -> Player_StepFpViewBiasInterp @0x4de4c9,
-// then `if (!activeFlag)` @0x4de4d9 -> g_WeaponScopeActive = (g_ScopeEngaged
-// != 0) @0x4de4f7; the stepper reports done on the call AFTER the last
-// moving lane snapped, so a 15-step authored ease promotes on tick 16, and
-// an unbound slot (null entitySlotPtr/Def) deactivates on its first step
-// @0x4DDD2B..0x4DDDBC and promotes at once], and chase the
-// third-person anchor toward `eye` (mission space). Entering third person
-// seeds the anchor at the eye [orig: Camera_SetTrackedEntity @ 0x4391d0
-// resets the track on change]; leaving invalidates it. In a control seat the
-// anchor chases the carrier position lifted max(1.0, 0.375 r) instead, a
-// sixteenth per tick horizontally and a thirty-second vertically in 16.16
-// [orig: ThirdPersonCamera_Update — the lift @0x437B1F..0x437B4B, the ease
-// @0x437C56..0x437C79].
+// One 62.5 Hz tick: player_view_promote_tick, then player_view_anchor_tick.
 void player_view_tick(PlayerViewState &v, const float eye[3]);
+
+// The tick's Player_UpdatePerFrame leg: resolve the camera mode, step the
+// six-lane scope-camera interp toward its target and promote the settled byte
+// on the tick its active latch drops [orig: Player_UpdatePerFrame -- the step
+// runs only behind an active interp @0x4de4c7 -> Player_StepFpViewBiasInterp
+// @0x4de4c9, then `if (!activeFlag)` @0x4de4d9 -> g_WeaponScopeActive =
+// (g_ScopeEngaged != 0) @0x4de4f7; the stepper reports done on the call AFTER
+// the last moving lane snapped, so a 15-step authored ease promotes on tick
+// 16, and an unbound slot (null entitySlotPtr/Def) deactivates on its first
+// step @0x4DDD2B..0x4DDDBC and promotes at once]. A paused single-player
+// update skips it, as Client_ProcessNetworkFrame skips Player_UpdatePerFrame
+// under the pause word [orig: @0x42C184..0x42C18E].
+void player_view_promote_tick(PlayerViewState &v);
+
+// The follow anchor's update: chase the third-person anchor toward `eye`
+// (mission space). Entering third person seeds the anchor at the eye [orig:
+// Camera_SetTrackedEntity @ 0x4391d0 resets the track on change]; leaving
+// invalidates it. In a control seat the anchor chases the carrier position
+// lifted max(1.0, 0.375 r) instead, a sixteenth per tick horizontally and a
+// thirty-second vertically in 16.16 [orig: ThirdPersonCamera_Update @0x437AF0
+// — the lift @0x437B1F..0x437B4B, the ease @0x437C56..0x437C79]. It runs on
+// every main-frame update, paused ones included (local_player_camera_update).
+void player_view_anchor_tick(PlayerViewState &v, const float eye[3]);
 
 // Whether the scope-camera interp is mid-ease: its active latch, which holds
 // one call past the last lane snap. Every scope toggle is REFUSED while it

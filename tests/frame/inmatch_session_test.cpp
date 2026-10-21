@@ -382,6 +382,67 @@ int main() {
 				target->profile_ticks[0] == 100 && target->profile_ticks[2] == 100,
 				"each paused update runs the /PROFILE leg at the frozen tick")) return 1;
 	}
+	// Each paused update also runs the third-person camera's update, as every
+	// running update does: a driver's chase anchor keeps easing toward the
+	// (held) carrier, a sixteenth a update across and a thirty-second up, and a
+	// dead tracked body's distance keeps reeling in. The orbit-yaw bits stay
+	// clear in single player (only the death screen's chase sub-mode raises
+	// them, and only a client receive sets the death screen), so the orbit holds.
+	// [orig: Game_ProcessMainFrame @0x5263F0 -- the tracked-entity test
+	//  @0x526767, the ThirdPersonCamera_Update call @0x52676F, the pause test
+	//  @0x526779; ThirdPersonCamera_Update @0x437AF0 -- the mounted target
+	//  @0x437B1F..0x437B63, the ease @0x437C56..0x437C79, the reel
+	//  @0x437CC0..0x437D02; DeathScreen_FilterInputAction @0x52AD50;
+	//  NapiNPClientMsg_SetSpectatorMode @0x425A18; NapiNPClientMsg_0x00A @0x42FFA0]
+	{
+		auto target = std::make_unique<TickProbe>();
+		Session session(*target);
+		if (!load(session)) return 1;
+		opennova::world::World &world = target->kernel.world;
+		world.registry.configure_pool(0, 8);
+		opennova::world::Entity seed;
+		seed.kind = opennova::world::EntityKind::Organic;
+		seed.alive = true;
+		world.cached.local_player = world.registry.spawn(0, seed);
+		opennova::world::PlayerViewState &view = target->kernel.local.view;
+		view.third_person = true;
+		view.tp_anchor_valid = true;
+		view.mount.control_seat = true;
+		view.mount.carrier_pos_q16[0] = 0x100000;
+		view.mount.carrier_pos_q16[1] = -0x80000;
+		view.mount.carrier_pos_q16[2] = 0x40000;
+		view.mount.bound_radius.q16 = 0x20000; // (24576 * r + 0x8000) >> 16 = 0xC000: floored to 1.0
+		view.chase_distance_q16 = 0x80000;
+		const int32_t orbit_yaw = view.chase_orbit_yaw;
+		target->kernel.local.view_tracker.camera_tracked_dead = true;
+		if (!expect(world.cached.local_player.valid() && session.pause().applied(),
+				"the camera's pause applies over a tracked driver")) return 1;
+		const int32_t carrier_target[3] = {0x100000, -0x80000, 0x40000 + 0x10000};
+		int32_t anchor[3] = {0, 0, 0};
+		int32_t distance = 0x80000;
+		for (int update = 0; update < 3; ++update) {
+			for (int i = 0; i < 3; ++i) {
+				anchor[i] += i == 2 ? (carrier_target[i] - anchor[i] + 16) >> 5
+						: (carrier_target[i] - anchor[i] + 8) >> 4;
+			}
+			if (distance > 458752) distance -= 0x10000;
+			else if (distance > 196608) {
+				if (distance - 196608 <= 16) distance = 0x30000;
+				else distance -= (distance - 196608) >> 4;
+			}
+		}
+		FrameInput paused;
+		paused.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		if (!expect(session.advance(paused).status == FrameStatus::NotRunning &&
+				target->inputs.empty(), "the camera's paused frame of three updates runs no tick")) return 1;
+		if (!expect(view.tp_anchor_q16[0] == anchor[0] && view.tp_anchor_q16[1] == anchor[1] &&
+				view.tp_anchor_q16[2] == anchor[2] && anchor[0] == 0x2D100,
+				"the chase anchor eases once per paused update")) return 1;
+		if (!expect(view.chase_distance_q16 == distance && distance == 427008,
+				"the dead target's distance reels in once per paused update")) return 1;
+		if (!expect(view.chase_orbit_yaw == orbit_yaw,
+				"the orbit holds: no single-player input raises its bits")) return 1;
+	}
 	{
 		auto target = std::make_unique<TickProbe>();
 		Session session(*target);

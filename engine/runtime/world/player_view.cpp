@@ -302,6 +302,11 @@ void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_c
 }
 
 void player_view_tick(PlayerViewState &v, const float eye[3]) {
+    player_view_promote_tick(v);
+    player_view_anchor_tick(v, eye);
+}
+
+void player_view_promote_tick(PlayerViewState &v) {
     // The mode first: the arbiter precedes the camera work every frame
     // [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2, ahead of the view build].
     player_view_resolve_mode(v);
@@ -319,7 +324,11 @@ void player_view_tick(PlayerViewState &v, const float eye[3]) {
             v.weapon_pose_interp.active = false;
         if (!v.weapon_pose_interp.active) v.scope_settled = v.scope_engaged;
     }
+}
 
+void player_view_anchor_tick(PlayerViewState &v, const float eye[3]) {
+    // ThirdPersonCamera_Update's follow anchor, run on every main-frame update
+    // (the single-player pause included: local_player_camera_update).
     if (v.third_person) {
         if (!v.tp_anchor_valid) {
             // Entering third person seeds the track at the eye.

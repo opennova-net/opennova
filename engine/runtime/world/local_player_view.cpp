@@ -775,14 +775,12 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     t.tick_prev_pos[1] = e->position.y;
     t.tick_prev_pos[2] = e->position.z;
     t.tick_prev_valid = true;
-    // Chase the current motor's CameraOffset, re-anchored after movement.
-    // [orig: ThirdPersonCamera_Update @0x437B70..0x437B76]
-    const Vec3 current_eye = player_eye_position(*e);
-    const float eye[3] = {current_eye.x, current_eye.y, current_eye.z};
-    // The same update's orbit legs, whatever the mode [orig:
-    // ThirdPersonCamera_Update @0x437c1b..0x437d02].
-    player_view_chase_tick(v, world->script.input_action_bits, tracked_dead);
-    player_view_tick(v, eye);
+    // The tick's Player_UpdatePerFrame leg, then the camera update past the
+    // entity update [orig: Client_ProcessNetworkFrame @0x42c18e; Game_ProcessMainFrame
+    // @0x5263F0 -- the ThirdPersonCamera_Update call @0x52676F].
+    player_view_promote_tick(v);
+    t.camera_tracked_dead = tracked_dead;
+    local_player_camera_update(*world, v, t);
     // The forced scope toggles see this tick's settle promoter, as retail's
     // do: Player_UpdatePerFrame steps the interp and promotes the sight first
     // [orig: Client_ProcessNetworkFrame @0x42c18e; the promoter @0x4de4c7..0x4de4f7],
@@ -800,6 +798,22 @@ void local_player_view_tick(World *world, PlayerViewState &v,
         if (camera_switch) local_player_forced_scope_toggle(*world, *weapon, v);
     }
     world->out.water_scope_legs.count = 0;
+}
+
+void local_player_camera_update(World &world, PlayerViewState &v, LocalPlayerViewTracker &t) {
+    // [orig: Game_ProcessMainFrame @0x5263F0 -- `cmp g_CameraTrackedEntity, esi`
+    //  @0x526767 ahead of the call @0x52676F]
+    const Entity *e = world.cached.local_player.valid()
+            ? world.registry.get(world.cached.local_player) : nullptr;
+    if (e == nullptr) return;
+    // The orbit legs, whatever the mode [orig: ThirdPersonCamera_Update @0x437AF0
+    // (@0x437c1b..0x437d02)], then the anchor's chase of the current motor's
+    // CameraOffset, re-anchored after movement [orig: ThirdPersonCamera_Update
+    // @0x437AF0 (@0x437B70..0x437B76, the ease @0x437C56..0x437CB5)].
+    player_view_chase_tick(v, world.script.input_action_bits, t.camera_tracked_dead);
+    const Vec3 current_eye = player_eye_position(*e);
+    const float eye[3] = {current_eye.x, current_eye.y, current_eye.z};
+    player_view_anchor_tick(v, eye);
 }
 
 bool local_view_draws_virtual_display(const World &world, const PlayerViewState &v,

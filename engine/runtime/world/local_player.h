@@ -321,6 +321,11 @@ public:
     // The post-tick local view in retail order: the sim-wrote-the-view fold,
     // then the per-frame view promoter and the camera compose.
     void run_local_view_tick();
+    // A paused single-player update's camera leg: the third-person camera's
+    // update alone (world::local_player_camera_update), which retail runs ahead
+    // of the pause test [orig: Game_ProcessMainFrame @0x5263F0 -- the
+    // ThirdPersonCamera_Update call @0x52676F, the pause test @0x526779].
+    void run_paused_camera_update();
     // The authority's own-slot fire gate the embedding role decides each frame
     // ahead of the weapon walk (true outside an MP listen host).
     // [orig: Entity_FireWeaponAndSendPacket @0x42be3a]

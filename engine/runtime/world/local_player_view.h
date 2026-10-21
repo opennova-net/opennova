@@ -70,6 +70,10 @@ struct LocalPlayerViewTracker {
     // The death stamp's edge detector [orig: g_CameraLerpStartTick =
     // current_tick on the local death path @0x4b4d00 / @0x42ec0f].
     bool camera_local_dead_seen = false;
+    // The tracked entity's dead bit as the tick's arbiter read it, which the
+    // camera update's reel tests [orig: ThirdPersonCamera_Update @0x437AF0 --
+    // `test byte [tracked+24h], 2` @0x437cc0].
+    bool camera_tracked_dead = false;
     // The last composed view: retail's g_view_pos / g_view_rot, which every
     // Camera_ComputeThirdPersonView call overwrites (once per logic quantum,
     // once per rendered frame, once more for the Inset scene) and every reader
@@ -383,6 +387,22 @@ void local_player_view_tick(World *world, PlayerViewState &v,
                             LocalPlayerViewTracker &t,
                             const LocalViewSessionInputs &session,
                             LocalPlayerWeapon *weapon);
+
+// The third-person camera's update: the orbit keys and the dead target's reel
+// (player_view_chase_tick), then the follow anchor (player_view_anchor_tick)
+// over the local entity's current eye and the carrier the tick last read.
+// Retail calls it on every main-frame update with a tracked entity, past the
+// entity update and ahead of the single-player pause test, so a paused update
+// runs it as a running one does (inmatch::Session's paused update); the
+// arbiter's state it reads (the mode, the carrier, the tracked dead bit) is
+// what the last running tick left, which the pause holds [orig:
+// ThirdPersonCamera_Update @0x437AF0; Game_ProcessMainFrame @0x5263F0 -- the
+// tracked-entity test @0x526767, the call @0x52676F, the pause test
+// @0x526779]. In single player the orbit bits never rise: only the death
+// screen's chase sub-mode raises 405 / 406 (DeathScreen_FilterInputAction
+// @0x52AD50), and the death screen is set only by a client receive
+// (NapiNPClientMsg_SetSpectatorMode @0x425A18, NapiNPClientMsg_0x00A @0x42FFA0).
+void local_player_camera_update(World &world, PlayerViewState &v, LocalPlayerViewTracker &t);
 
 // The motor writes CameraOffset; every later consumer re-anchors it to the
 // current position. [orig: Camera_ComputeThirdPersonView @0x437FA5..0x437FB7]

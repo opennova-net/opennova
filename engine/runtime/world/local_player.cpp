@@ -848,6 +848,10 @@ void LocalPlayer::run_local_view_tick() {
 	tick_view();
 }
 
+void LocalPlayer::run_paused_camera_update() {
+	w::local_player_camera_update(world_, view, view_tracker);
+}
+
 void LocalPlayer::pump_local_weapon() {
 	World &world = world_;
 	w::LocalWeaponPumpIO io;

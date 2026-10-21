@@ -724,14 +724,17 @@ void Session::step_paused_frame_counters(const FrameInput &input) {
 	// The paused update's other unconditional legs, in its order: the whole
 	// pending-sound pass (the fire-sound slots count down, then the incoming-lock
 	// tone drains) and the trigger holds count down, the tracer pool ages and
-	// drains its channels (the entity update that appends to them holds), and the
-	// update counts toward the 62-update second. Its tip countdown steps with the
+	// drains its channels (the entity update that appends to them holds), the
+	// third-person camera's update runs its orbit legs and eases its follow anchor
+	// (LocalPlayer::run_paused_camera_update), and the update counts toward the
+	// 62-update second. Its tip countdown steps with the
 	// main-frame counter (hud_toggles_tip_frames) and its message rings' lives run
 	// on that counter too, so both age through the pause already [orig:
 	// Game_ProcessMainFrame @0x5263F0 (the Sound_TickPendingSlots call @0x526697,
 	// the Sound_TickTriggerHolds call @0x52669C, the CEffectEmitterPool_Tick call
 	// @0x526758, the CTipSystem_TickCountdown call @0x526762, the
-	// Input_DecrementCooldownTimers call @0x5267A6, the 62-update second
+	// ThirdPersonCamera_Update call @0x52676F behind its tracked-entity test
+	// @0x526767, the Input_DecrementCooldownTimers call @0x5267A6, the 62-update second
 	// @0x5267AB..0x5267DF, each outside the pause word's tests @0x5265A0 /
 	// @0x526779); Sound_TickPendingSlots @0x529310 (the g_LockOnMeToneTicks drain
 	// @0x5293A5..0x5293AF); CEffectEmitterPool_Tick @0x5DB830;
@@ -742,6 +745,7 @@ void Session::step_paused_frame_counters(const FrameInput &input) {
 		world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
 		world.tick_pending_sound_slots();
 		world.round_sim.trails.tick();
+		kernel.local.run_paused_camera_update();
 		kernel.tick_weather();
 		count_update_into_second();
 		// The /PROFILE frame leg past the exit tests, at the frozen tick
