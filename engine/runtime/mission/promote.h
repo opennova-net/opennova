@@ -194,6 +194,14 @@ void initialize_ai_profile(world::AiEntity &entity, const aip::Profile &profile)
 // @0x4686C0 (speeds @0x4688C1..0x4688D3)]
 void initialize_class_brain(world::AiEntity &entity, const aip::Profile *profile,
         bool helicopter_init, world::AiSystem &ai);
+// An item's class init over its attached brain, once its profile row (if any) has
+// been copied: a missing row walks the zeroed record's class sort, then the class
+// speeds and draw (initialize_class_brain), then the generic allocator's seeds at the
+// brain's heading (initialize_vehicle_brain). The placed item's promote and the
+// deployable spawn share it. [orig: AIProfile_LoadOrFind @0x45FECA;
+// Entity_InitHelicopterAIFromDef @0x4683C0; Entity_InitVehicleAIFromDef @0x4686C0]
+void initialize_item_class_brain(world::AiEntity &entity, world::World &world,
+        world::AiSystem &ai, const aip::Profile *profile, bool helicopter_init);
 // The generic AI allocator's own brain seeds, shared by the BMS promote and the
 // teammate factory so a placed and a dynamically spawned vehicle brain start
 // identically: the three state words are the memset's zero read back, and the

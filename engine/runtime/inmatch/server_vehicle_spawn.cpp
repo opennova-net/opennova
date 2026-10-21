@@ -5,6 +5,7 @@
 #include <net/npwire/ingame_encode.h>   // encode_vehicle_spawn_availability / encode_full_entity_spawn
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/replication/entity_wire_bridge.h> // build_full_entity_spawn
+#include <runtime/world/collision.h>                // collision_matrix_from_euler
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
@@ -13,7 +14,7 @@ namespace opennova::inmatch {
 
 namespace {
 
-constexpr uint32_t kDeployableFlag = 0x1000u;  // Entity_SpawnDeployable @0x51C492
+constexpr uint32_t kDeployableFlag = 0x1000u;  // Entity_SpawnDeployable @0x51C2B0 (@0x51C492)
 constexpr int32_t kSpawnRaiseNoUserpoint = 0x20000; // +2.0 world units @0x51C682
 
 } // namespace
@@ -111,33 +112,58 @@ bool Server_HandleVehicleSpawnRequest(NapiNPServerCtx &ctx, NapiNPConnection &co
 	if (!ctx.config.unlimited_vehicles &&
 			!Server_VehicleSpawnAllowed(ctx, world, item_id, team, /*consume=*/true))
 		return false;
-	// The spawn position: the source's "boat" / "helo" userpoint transformed
-	// by its attitude, else its position raised 2.0 [orig: @0x51C60C..0x51C682].
-	// Model userpoints are not reachable from this layer: the raised position.
-	const int32_t position[3] = {
-			source->position.x.q16,
-			source->position.y.q16,
-			source->position.z.q16 + kSpawnRaiseNoUserpoint};
+	// The spawn block: the source's six words (x, y, z, Yaw, Pitch, Roll); with a
+	// "boat" userpoint, else a "helo" one, on its model the position is that point
+	// through the source's euler placement, else the source's raised 2.0. The words
+	// past the position carry the source's attitude into the spawn.
+	// [orig: @0x51C606..0x51C630 (the six-word copy from +4), the finds @0x51C63D /
+	//  @0x51C654, Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 (the call
+	//  @0x51C668), Math_FixedPointTransformPoint22 @0x615810 (the call @0x51C678), the
+	//  raise @0x51C682]
+	int32_t position[6] = {source->position.x.q16, source->position.y.q16,
+			source->position.z.q16, source->heading, source->pitch_bam, source->roll_bam};
+	if (source->deploy_point_valid) {
+		const world::CollisionMatrix placement = world::collision_matrix_from_euler(
+				source->heading, source->pitch_bam, source->roll_bam, position);
+		placement.transform_point(source->deploy_point, position);
+	} else {
+		position[2] += kSpawnRaiseNoUserpoint;
+	}
 	if (!ctx.deployable_spawner) return false;
 	const world::EntityHandle spawned = ctx.deployable_spawner(world, item_id, team, position);
 	world::Entity *vehicle = world.registry.get(spawned);
 	if (vehicle == nullptr) return false;                         // @0x51C6AA
 	vehicle->team = team;                                         // @0x51C6BD
-	vehicle->flags |= kDeployableFlag;                            // Entity_SpawnDeployable @0x51C492
-	// S2C 0x18, mask 0x90: every active player except the listen host.
-	{
+	// S2C 0x18, mask 0x90: every active player except the listen host; then, for a
+	// vehicle in a reference group (its addeweap children's), each other pool-1 row
+	// of that group in pool order [orig: NetPacket_SerializeObjectToBuffer @0x504D10
+	//  (the calls @0x51C6EC / @0x51C76A), the refNum test @0x51C6F6, the pool-1 walk
+	//  @0x51C70A..0x51C73D].
+	const auto fan = [&](const world::Entity &e) {
 		const std::vector<uint8_t> body =
-				encode_full_entity_spawn(replication::build_full_entity_spawn(*vehicle));
+				encode_full_entity_spawn(replication::build_full_entity_spawn(e));
 		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 			if (!is_in_match(c) || c.link.transport == nullptr) continue;
 			if (c.link.mode == replication::TransportMode::Loopback) continue;
 			c.link.transport->host_send(s2c::FULL_ENTITY_SPAWN, body);
 		}
+	};
+	fan(*vehicle);
+	if (vehicle->ref_num != 0) {
+		const uint8_t group = vehicle->ref_num;
+		world.registry.for_each_in_pool(1, [&](const world::Entity &e) {
+			if (e.handle != spawned && e.ref_num == group) fan(e);
+		});
 	}
-	// The entity+533 sibling fan (same +0x215 group) is unmodeled. Then the
-	// requester mounts: Entity_ProcessVehicleAttach({player, vehicle, def+613
-	// bone}) — the def's default seat bone is unmodeled, so bone 0.
-	world.vehicles.process_attach(conn.link.owned_entity, spawned, 0);
+	// Then the requester mounts at the vehicle def's control bone (its last ctrlx or
+	// drvrx userpoint row + 1, the seat in slot 8; 0 with none) [orig: the def+613 byte
+	//  @0x51C7EB, Entity_ProcessVehicleAttach @0x435AA0 (the call @0x51C7EF);
+	//  EntityDef_LoadModelsAndCallbacks @0x439F50 (the controlBone stores @0x43A532 /
+	//  @0x43A570)].
+	uint8_t control_bone = 0;
+	for (const world::Seat &seat : vehicle->seats)
+		if (seat.retail_slot == 8) control_bone = seat.bone_index;
+	world.vehicles.process_attach(conn.link.owned_entity, spawned, control_bone);
 	return true;
 }
 

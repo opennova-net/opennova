@@ -5262,6 +5262,11 @@ add_test(NAME fire_cadence COMMAND fire_cadence_test)
 add_executable(deck_spawn_markers_test world/deck_spawn_markers_test.cpp)
 target_link_libraries(deck_spawn_markers_test PRIVATE opennova_runtime)
 add_test(NAME deck_spawn_markers COMMAND deck_spawn_markers_test)
+# D-NET-332: a vehicle bay's deployable (the C2S 0x40 handler's block and attach; the kernel's spawner).
+add_executable(deployable_spawn_test mission/deployable_spawn_test.cpp)
+target_link_libraries(deployable_spawn_test PRIVATE opennova_test_rig)
+target_include_directories(deployable_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME deployable_spawn COMMAND deployable_spawn_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

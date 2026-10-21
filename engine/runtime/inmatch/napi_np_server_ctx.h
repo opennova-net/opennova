@@ -670,10 +670,12 @@ struct NapiNPServerCtx {
 	// no limit check. [orig: g_RulesUnlimitedVehicles @0x5105F5..0x5105FF, @0x51C5E2..0x51C5E9]
 	std::vector<VehicleSpawnLimitRow> vehicle_spawn_limits;
 	// The world-side spawner Entity_SpawnDeployable @0x51C2B0 delegates to: the
-	// embedder that owns the items.def traits sweep installs it; the C2S 0x40
-	// handler refuses the spawn when unset. Returns the new pool-1 handle.
+	// embedder that owns the items.def traits sweep installs it (HostRole, over
+	// mission::MissionKernel::spawn_deployable); the C2S 0x40 handler refuses the
+	// spawn when unset. `position` is the handler's six-word block (x, y, z 16.16,
+	// then Yaw, Pitch, Roll). Returns the new pool-1 handle.
 	std::function<world::EntityHandle(world::World &, uint16_t item_id, uint8_t team,
-			const int32_t position[3])> deployable_spawner;
+			const int32_t position[6])> deployable_spawner;
 	// The embedder's definition bind for a player body the authority spawns,
 	// run at the spawn (Server_BuildPlayerInfoAndAdd): its items.def row's
 	// traits, sound-profile pair, organic weapons and collision instance

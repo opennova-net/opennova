@@ -535,6 +535,7 @@ add_library(opennova_runtime STATIC
     # --- parity lane L5 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-NEW-L5-5)
     # --- parity lane L7 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/deployable_spawn.cpp # a vehicle bay's deployable (D-NET-332)
     # --- parity lane L8 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad_registry.cpp # the NovaWorld squad registry (D-NET-NEW-L8-2)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_devices.cpp # the log devices the server switches arm (game and serve)

@@ -489,6 +489,14 @@ public:
 
 	world::EntityHandle spawn_teammate(const world::TeammateSpawn &request) override;
     world::EntityHandle spawn_item_piece(const world::Entity &seed) override;
+	// A vehicle bay's deployable, the authority's C2S 0x40 spawn: the type's pool-1 row at
+	// the handler's block (x, y, z 16.16; its Yaw word, pitch and roll 0), the slot team,
+	// SSN 12000, the definition and model bound, health at its ceiling, the AI slot and the
+	// class brain for an AI-class def (its slot name the def's default_aip), the deployable
+	// bit 0x1000 and its addeweap children. Invalid when no row carries the type or pool 1
+	// is full. NapiNPServerCtx::deployable_spawner's installed body (HostRole).
+	// [orig: Entity_SpawnDeployable @0x51C2B0]
+	world::EntityHandle spawn_deployable(uint16_t item_id, uint8_t team, const int32_t position[6]);
 
 	// world::IPoseProvider: the seat leg is the kernel's own; the muzzle and
 	// userpoint legs ride collision_pose (the sim-clock skeleton / PANM pose).
@@ -548,6 +556,15 @@ private:
 	assets::AssetStore owned_assets_{&index};
 
 	BootFileSource files_;
+	// Every items.def row's seat, mount and attachment table is built at the def load in
+	// retail; ours builds a placed type's at the boot and any other type's at its first
+	// runtime spawn (a teammate, a deployable), merged into seat_specs in type order.
+	// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50]
+	void merge_item_seat_specs(int32_t item_type);
+	// The .aip row named `profile` (lowercase), loaded from the mission's files at its first
+	// use as AIProfile_LoadOrFind loads one; null when no file parses.
+	// [orig: AIProfile_LoadOrFind @0x45FD80]
+	const aip::Profile *find_or_load_ai_profile(const std::string &profile);
 	// The per-boot net bring-up hook (KernelBootOptions::bringup_net_session).
 	std::function<void()> bringup_net_session_;
 	// This boot is the SP restart's (KernelBootOptions::restart).

@@ -39,20 +39,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
 
     // Resolve the whole attachment family before allocating any rows. The
     // extractor's cycle/depth handling is shared with ordinary mission boot.
-    mission::SeatSpecExtraction extracted;
-    mission::extract_item_seat_specs(*table,
-            [this](const std::string &graphic) { return assets().model(graphic).get(); },
-            {int(request.item_type) + kItemIdOffset}, extracted);
-    for (const ItemSeatSpec &spec : extracted.specs) {
-        const auto existing = std::find_if(seat_specs.begin(), seat_specs.end(),
-                [&](const ItemSeatSpec &row) { return row.type_id == spec.type_id; });
-        if (existing == seat_specs.end()) seat_specs.push_back(spec);
-        else *existing = spec;
-    }
-    for (const auto &graphic : extracted.graphic_by_type) mounted_graphics[graphic.first] = graphic.second;
-    std::sort(seat_specs.begin(), seat_specs.end(),
-            [](const ItemSeatSpec &a, const ItemSeatSpec &b) { return a.type_id < b.type_id; });
-    mission::stamp_seat_spec_turret_limits(world, seat_specs);
+    merge_item_seat_specs(request.item_type);
 
     Entity seed;
     seed.kind = request.helicopter ? world::EntityKind::Item : world::EntityKind::Organic;

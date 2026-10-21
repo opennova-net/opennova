@@ -191,7 +191,7 @@ public:
     // @0x44228B; the player body's push 1 @0x43C3DF, the class callbacks'
     // clones (sections, dismemberment) in Entity_CloneFromTemplateByType
     // @0x4398BD / @0x439939 / @0x439962, the deployable's
-    // Entity_CloneFromTemplateToPool1 @0x439840].
+    // Entity_CloneFromTemplateToPool1 @0x439830 (the push 1 @0x439840)].
     // An includeInUse-0 caller (Reuse::Fresh) also passes over a destroyed row
     // (+0x219, which Entity_Destroy sets and the next occupant's write clears)
     // and grows the count (D-NET-485). spawn_at stands for a

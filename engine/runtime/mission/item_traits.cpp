@@ -114,6 +114,25 @@ uint32_t graphic_model_userpoints(const DefItemDef *def, const assets::AssetStor
     return static_cast<uint32_t>(model->user_point_count);
 }
 
+// That model's first "boat" userpoint, else its first "helo" one, as the
+// model-space words a vehicle bay's spawn transforms; false with neither.
+// [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0 (the
+//  ModelGPM_FindUserpointByName calls @0x51C63D / @0x51C654 on +0x30);
+//  ModelGPM_FindUserpointByName @0x5B2170]
+bool graphic_model_deploy_point(const DefItemDef *def, const assets::AssetStore *models,
+                                int32_t out[3]) {
+    if (!graphic_model_loads(def, models)) return false;
+    const assets::Model model = models->model(std::string(def->graphic));
+    int row = threedi::threedi_3di3_find_user_point(model.get(), "boat");
+    if (row < 0) row = threedi::threedi_3di3_find_user_point(model.get(), "helo");
+    if (row < 0) return false;
+    const threedi::ThreediUserPoint &point = model->user_points[row];
+    out[0] = point.x;
+    out[1] = point.y;
+    out[2] = point.z;
+    return true;
+}
+
 // One row's spawn traits (world::PlayerTemplate) from its def; a missing row
 // (null) reads none and keeps the seed's type id. The model slot is what the
 // row's graphic load returned, which a spawn copies into +0x30.
@@ -306,6 +325,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				e->kind != world::EntityKind::Marker;
 		e->graphic_model_userpoints =
 				e->has_graphic_model ? graphic_model_userpoints(def, models) : 0;
+		e->deploy_point_valid = e->has_graphic_model &&
+				graphic_model_deploy_point(def, models, e->deploy_point);
 		// The physics callback table's ewep row selects the gun update. A
 		// section clone's template pins its update callback (the floating
 		// physics) whatever its def, on every resolve.

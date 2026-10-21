@@ -457,6 +457,14 @@ struct Entity {
     // entry admission refuses a carrier whose model holds none.
     // [orig: Entity_CanEnterVehicle @0x435480 (@0x43549C..0x4354A3)]
     uint32_t graphic_model_userpoints = 0;
+    // That model's first "boat" userpoint, else its first "helo" one: the
+    // model-space position words (16.16) a vehicle bay's C2S 0x40 spawns its
+    // deployable at, through the bay's placement; invalid with neither (or no
+    // model), where the spawn rises 2.0 over the bay instead.
+    // [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0 (the two
+    //  ModelGPM_FindUserpointByName calls @0x51C63D / @0x51C654 on +0x30)]
+    bool deploy_point_valid = false;
+    int32_t deploy_point[3] = {};
     // The graphic model's XY half-extents (mission axes, 16.16), stamped by
     // the same model-resolve seam. The minimap blip drawer sizes footprint-
     // class blips from these; 0 = unstamped (the 10-wu class fallback).

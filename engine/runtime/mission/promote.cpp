@@ -230,6 +230,26 @@ void initialize_class_brain(AiEntity &ae, const aip::Profile *profile, bool heli
         b.f[51] = (uint16_t(ai.prng_step_a()) % 20) << 16;
 }
 
+void initialize_item_class_brain(AiEntity &ae, World &world, AiSystem &ai,
+		const aip::Profile *profile, bool helicopter_init) {
+	// A vehicle brain whose .aip did not load still walks the loader's sort of
+	// the zeroed record's four keys [orig: AIProfile_LoadOrFind @0x45FECA].
+	if (profile == nullptr) sort_class_walk(ae.profile, false);
+	// The class init writes the per-node mover speeds brain[49]/[50] from its own
+	// profile offsets and, for the helicopter family, draws the patrol offset; the
+	// family is the item's ai_function row, not the profile type
+	// [orig: Entity_InitHelicopterAIFromDef @0x4683C0; Entity_InitVehicleAIFromDef @0x4686C0].
+	initialize_class_brain(ae, profile, helicopter_init, ai);
+	// The allocator's own seeds (state 0, the constant block, the PRNG C draw) land for
+	// every vehicle-family brain — retail always reaches @0x460200 for an AI-data item,
+	// profile row found or not (AIProfile_LoadOrFind never returns null there)
+	// [orig: the def callbacks' @0x460200 call @0x4687ff / @0x4684bf / @0x4684cf]. (The
+	// former flags100 |= 2 no-acquire stand-in is gone: the class walk gates on the
+	// profile's priority words, and the shipped drivable-transport profiles author them
+	// zero — the same no-scan outcome, now via the witnessed path.)
+	initialize_vehicle_brain(ae, world, ae.heading);
+}
+
 namespace {
 
 // Kind -> g_PoolList index: the BMS loader places each record list in its own pool
@@ -396,28 +416,14 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
 			break;
 		}
     }
-    // A vehicle brain whose .aip did not load still walks the loader's sort of
-    // the zeroed record's four keys [orig: AIProfile_LoadOrFind @0x45FECA].
-    if (profile == nullptr && kind == EntityKind::Item) sort_class_walk(ae.profile, false);
-	// A placed item's class init writes the per-node mover speeds brain[49]/[50]
-	// from its own profile offsets and, for the helicopter family, draws the
-	// patrol offset; the family is the item's ai_function row, not the profile
-	// type [orig: Entity_InitHelicopterAIFromDef @0x4683C0;
-	// Entity_InitVehicleAIFromDef @0x4686C0].
+	// A placed item's class init (initialize_item_class_brain). Organics never run it:
+	// their AiSlot is the retail AI record [orig: Entity_InitAllFromModels pool-1 loop
+	// @0x40E5B8..0x40E5D8].
 	if (kind == EntityKind::Item) {
 		const bool helicopter_init =
 				opts.ai_profile_defaults && opts.ai_profile_defaults(e.type_id).helicopter_init;
-		initialize_class_brain(ae, profile, helicopter_init, ai);
+		initialize_item_class_brain(ae, world, ai, profile, helicopter_init);
 	}
-	// The allocator's own seeds (state 0, the constant block, the PRNG C draw) land for
-	// every vehicle-family brain — retail always reaches @0x460200 for an AI-data item,
-	// profile row found or not (AIProfile_LoadOrFind never returns null there). Organics
-	// never run it: their AiSlot is the retail AI record [orig: Entity_InitAllFromModels
-	// pool-1 loop @0x40E5B8..0x40E5D8 -> the def callbacks' @0x460200 call @0x4687ff /
-	// @0x4684bf / @0x4684cf]. (The former flags100 |= 2 no-acquire stand-in is gone: the
-	// class walk gates on the profile's priority words, and the shipped drivable-transport
-	// profiles author them zero — the same no-scan outcome, now via the witnessed path.)
-	if (kind == EntityKind::Item) initialize_vehicle_brain(ae, world, ae.heading);
 
     // Waypoint route words, copied verbatim from the slot words init_ai_slot just
     // stored: no count test and no clamp, so a route onto an empty list or a start

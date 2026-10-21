@@ -197,9 +197,16 @@ void HostRole::keep_round_state_init_tick() {
 // spawn, through the kernel the role is bound to at that time; the bodies the
 // bring-up spawned are the boot's later steps' (D-NET-395).
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 -> Entity_InitFromModel @0x40DC30]
+// The vehicle bays' C2S 0x40 spawns through the same kernel (D-NET-332)
+// [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0 -> Entity_SpawnDeployable
+//  @0x51C2B0 (the call @0x51C69E)].
 void HostRole::install_spawned_body_bind() {
 	state.host_owner.ctx.bind_spawned_body = [this](world::EntityHandle body) {
 		kernel_->bind_spawned_body(body);
+	};
+	state.host_owner.ctx.deployable_spawner = [this](world::World &, uint16_t item_id,
+			uint8_t team, const int32_t position[6]) {
+		return kernel_->spawn_deployable(item_id, team, position);
 	};
 }
 
