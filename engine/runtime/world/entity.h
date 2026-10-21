@@ -153,6 +153,13 @@ struct Seat {
     std::string source_name;     // original seat/userpoint name (`sitex00`, `drvrx01`, `UseGun`)
     Vec3 seat_local;            // seat offset from the vehicle origin (mission space, Z-up)
     int16_t yaw_offset = 0;     // the seat userpoint's authored facing vs the vehicle yaw, degrees
+    // The seat userpoint's own 16.16 words, as the model's bone record holds them: the
+    // position (bone+0..+8) and the direction (bone+12..+20) the seat bone pose
+    // transforms (seat_bone_pose_on_carrier_matrix). [orig:
+    // Entity_GetBoneTransformAndOrientation @0x4B0C50 - the position @0x4B0D29..0x4B0D42,
+    // the direction @0x4B0D5A..0x4B0D64]
+    int32_t bone_point[3] = {};
+    int32_t bone_direction[3] = {};
     // An items.def addeweap* anchor is not a mount-facing convention. Retail
     // builds the child entity's complete orientation from this userpoint's
     // authored direction and live owning bone every update. The flag keeps

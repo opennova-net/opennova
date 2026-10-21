@@ -76,4 +76,20 @@ bool resolve_model_mounted_pose(const opennova::threedi::Threedi3di3 &model,
                                 const int32_t *ctrl_values, uint32_t time_ms,
                                 world::MountedPose &out);
 
+// The seat bone of a carrier whose model's bone callback hands every bone slot the
+// carrier's own orientation matrix (an ItemType_Vehicle model's BoneCallback_Simple), as
+// the sitex / ctrlx / drvrx carry and the attach request read it: the seat userpoint's
+// position words (Seat::bone_point) through the carrier's Q22 placement matrix
+// (entity_placement_matrix), the heading the fpatan of its direction words
+// (Seat::bone_direction) rotated by that matrix, truncated as the CRT's _ftol2_sse does,
+// and the pitch and roll that matrix's own eulers. No part animation reaches such a
+// seat. [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (the vehicle's
+// BoneCallback_Simple @0x43A072); BoneCallback_Simple @0x4E2600 (the copies
+// @0x4E267E..0x4E26B7); Entity_GetBoneTransformAndOrientation @0x4B0C50 -
+// Math_FixedPointTransformPoint22 @0x4B0D42, Math_TransformPointFixedPoint22 @0x4B0D64,
+// the fpatan @0x4B0D69..0x4B0D7C and its store @0x4B0D81,
+// Math_FixedPointMatrixToEulerAngles @0x4B0DA1 (pitch @0x4B0DB1, roll @0x4B0DBB)]
+void seat_bone_pose_on_carrier_matrix(const world::Entity &carrier, const world::Seat &seat,
+                                      world::MountedPose &out);
+
 } // namespace opennova::world

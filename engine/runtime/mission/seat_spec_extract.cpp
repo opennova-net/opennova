@@ -178,6 +178,16 @@ void extract_seats(const Threedi3di3 &model,
 				seat_yaw_offset_from_user_point(up),
 				std::numeric_limits<int16_t>::min(),
 				std::numeric_limits<int16_t>::max()));
+		// The bone record's own words, which the seat bone pose transforms
+		// (world::seat_bone_pose_on_carrier_matrix). [orig:
+		// Entity_GetBoneTransformAndOrientation @0x4B0C50 - bone+0 @0x4B0D29..0x4B0D34,
+		// bone+0xC @0x4B0D5A]
+		seat.bone_point[0] = up.x;
+		seat.bone_point[1] = up.y;
+		seat.bone_point[2] = up.z;
+		seat.bone_direction[0] = up.rot_x;
+		seat.bone_direction[1] = up.rot_y;
+		seat.bone_direction[2] = up.rot_z;
 		(on_table ? r_seats : r_off_table).push_back(seat);
 	}
 }

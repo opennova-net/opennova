@@ -16,6 +16,7 @@
 #include <cmath>
 #include <vector>
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 
 using namespace opennova::threedi;
 
@@ -472,6 +473,28 @@ void compose_vehicle_pose_controls(World &world, const Entity &carrier,
 uint32_t mounted_pose_time_ms(uint32_t logic_tick, int64_t override_ms) {
     return override_ms >= 0 ? static_cast<uint32_t>(override_ms)
                             : logic_tick * 16u;
+}
+
+// See mounted_pose.h. The x87 fpatan of (y, x), times retail's BAM-per-radian double,
+// truncated toward zero; a result of +2^31 (the -x axis) leaves the int32 range and
+// takes the CRT's indefinite, the 0x80000000 that is BAM 180 all the same.
+// [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50 - `fild [var_14]` (y) then
+//  `fild [eventType]` (x) @0x4B0D69..0x4B0D6D, `fpatan` @0x4B0D74, `fmul dbl_7C19D8`
+//  @0x4B0D76, _ftol2_sse @0x4B0D7C]
+void seat_bone_pose_on_carrier_matrix(const Entity &carrier, const Seat &seat, MountedPose &out) {
+    const CollisionMatrix matrix = entity_placement_matrix(carrier);
+    int32_t position[3];
+    matrix.transform_point(seat.bone_point, position);
+    out.position.set_q16({position[0], position[1], position[2]});
+    int32_t direction[3];
+    matrix.rotate_point(seat.bone_direction, direction);
+    out.heading = io::retail_ftol_sse2(
+            std::atan2(static_cast<double>(direction[1]), static_cast<double>(direction[0])) *
+            io::kBamPerRadian);
+    int32_t euler[3];
+    collision_matrix_to_euler(matrix, euler);
+    out.pitch = euler[1];
+    out.roll = euler[2];
 }
 
 } // namespace opennova::world

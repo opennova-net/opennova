@@ -5218,6 +5218,11 @@ add_test(NAME npruntime_entity_yaw_word COMMAND npruntime_entity_yaw_word_test)
 add_executable(explosion_push_test world/explosion_push_test.cpp)
 target_link_libraries(explosion_push_test PRIVATE opennova_runtime)
 add_test(NAME explosion_push COMMAND explosion_push_test)
+# D-INF-35 (the vehicle-carrier half): a vehicle's seat bone is the userpoint through the
+# carrier's own Q22 matrix (BoneCallback_Simple), the heading an fpatan of the rotated direction.
+add_executable(seat_bone_pose_test world/seat_bone_pose_test.cpp)
+target_link_libraries(seat_bone_pose_test PRIVATE opennova_runtime)
+add_test(NAME seat_bone_pose COMMAND seat_bone_pose_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the

@@ -246,6 +246,13 @@ int main() {
         CHECK(near(p0.seat_local.x, -2.0f) && near(p0.seat_local.y, 1.0f) &&
                 near(p0.seat_local.z, 3.0f));
         CHECK(p0.source_name == "sitex06");
+        // The bone record's own words ride the seat for the seat bone pose
+        // (seat_bone_pose_on_carrier_matrix). [orig: Entity_GetBoneTransformAndOrientation
+        //  @0x4B0C50 - bone+0 @0x4B0D29..0x4B0D34, bone+0xC @0x4B0D5A]
+        CHECK(p0.bone_point[0] == 1 * 65536 && p0.bone_point[1] == 2 * 65536 &&
+                p0.bone_point[2] == 3 * 65536);
+        CHECK(p0.bone_direction[0] == 0 && p0.bone_direction[1] == 0 &&
+                p0.bone_direction[2] == 0);
         const world::Seat &p1 = cs.seats[1];
         CHECK(p1.type == world::SeatType::Passenger && p1.retail_slot == 1);
         const world::Seat &drv = cs.seats[2];
