@@ -249,8 +249,8 @@ void run_held_host(bool mission_start) {
 	// the mission start (the x4 cp04 RR records against OR's).
 	// [orig: Server_BuildEntitySlotLists @0x4F97A0 (+1 @0x4F98B1) from @0x51D89A; the gate
 	//  @0x52671C..0x52672A; Entity_UpdateAllEntities @0x52674B (frameTickCount g_CurrentTick,
-	//  stepped @0x5265B4 from the mission start's zero @0x525B9F); NetPacket_WritePlayerState
-	//  @0x4FF6D7 / @0x4FF7B8; Entity_UpdateInfantryAI's key parity @0x4BF146 / @0x4BF6A5..0x4BF6B2]
+	//  stepped @0x5265B4 from Game_StartMission @0x524360's zero @0x525B9F); NetPacket_WritePlayerState
+	//  @0x4FF6B0 (@0x4FF6D7 / @0x4FF7B8); Entity_UpdateInfantryAI's key parity @0x4BF146 / @0x4BF6A5..0x4BF6B2]
 	CHECK(kernel.world.logic_tick == 2);
 	role.run_tick(tick_input());
 	CHECK(kernel.world.cached.humans == 1);
