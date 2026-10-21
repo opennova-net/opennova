@@ -286,6 +286,10 @@ public:
 		(void)frames_last_second;
 		(void)cpu_percent;
 	}
+	// The /PROFILE frame leg that closes every logic update, a paused one too: a host
+	// with a server log writes FBEG and its PDATs on a tick with tick & 7 == 7
+	// (ServerLogRecorder::write_frame); the base writes none.
+	virtual void write_profile_frame() {}
 	// The kernel boot's net bring-up (KernelBootOptions::bringup_net_session),
 	// run between the world wiring and the system registration [orig:
 	// SinglePlayer_StartMission @0x561af0]: the host stands its session up

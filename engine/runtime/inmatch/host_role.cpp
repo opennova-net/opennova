@@ -1015,9 +1015,18 @@ void HostRole::run_tick(const TickInput &input) {
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;
 	if (kernel.world.profile != nullptr)
 		kernel.world.profile->add(devtools::Slot::SIM_NET, last_net_us_);
+	write_profile_frame();
+}
+
+void HostRole::write_profile_frame() {
 	// The /PROFILE frame leg closes the update, on a frame no mission exit
 	// cut short [orig: Game_ProcessMainFrame — the exit tests @0x526806..0x526860,
-	//  then the write @0x526879..0x5268e7].
+	//  then the write @0x526879..0x5268e7]. The leg sits past the pause word's
+	// tests, so a paused update writes too, at the tick the pause froze
+	// (++g_CurrentTick only inside the gate @0x5265A0..0x5265B4): FBEG and the
+	// PDATs again on each paused update while that tick has tick & 7 == 7.
+	mission::MissionKernel &kernel = *kernel_;
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	if (ctx.logs.profile != nullptr && ctx.mission_exit_reason == 0 &&
 			kernel.world.mission_exit_reason == 0)
 		ctx.logs.profile->write_frame(ctx, kernel.world, kernel.world.logic_tick);

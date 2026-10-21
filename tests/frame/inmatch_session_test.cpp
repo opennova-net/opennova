@@ -50,6 +50,8 @@ struct TickProbe final : Role {
 	}
 	void close() override { ++close_calls; }
 	void observe_frame_rate(int32_t fps) override { frame_rates.push_back(fps); }
+	std::vector<uint32_t> profile_ticks; // the logic tick each /PROFILE frame leg saw
+	void write_profile_frame() override { profile_ticks.push_back(kernel.world.logic_tick); }
 };
 
 bool load(Session &session) {
@@ -367,6 +369,12 @@ int main() {
 				"the pending slot counts down and plays through the pause")) return 1;
 		if (!expect(world.round_sim.trails.channels[static_cast<size_t>(slot)].age == 3,
 				"the tracer channel ages once per paused update")) return 1;
+		// The /PROFILE frame leg sits past the pause tests too: each paused update
+		// runs it at the tick the pause froze [orig: Game_ProcessMainFrame -- the
+		// write @0x526879..0x5268E7; ++g_CurrentTick inside the gate @0x5265A0..0x5265B4].
+		if (!expect(target->profile_ticks.size() == 3 &&
+				target->profile_ticks[0] == 100 && target->profile_ticks[2] == 100,
+				"each paused update runs the /PROFILE leg at the frozen tick")) return 1;
 	}
 	{
 		auto target = std::make_unique<TickProbe>();

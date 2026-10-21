@@ -742,6 +742,9 @@ void Session::step_paused_frame_counters(const FrameInput &input) {
 		world.round_sim.trails.tick();
 		kernel.tick_weather();
 		count_update_into_second();
+		// The /PROFILE frame leg past the exit tests, at the frozen tick
+		// [orig: Game_ProcessMainFrame @0x526879..0x5268E7].
+		role_->write_profile_frame();
 	}
 }
 

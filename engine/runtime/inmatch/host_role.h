@@ -227,6 +227,8 @@ public:
 	void observe_cpu_share(int32_t cpu_percent) override;
 	// ... and the frame statistics its status page shows.
 	void observe_frame_statistics(int32_t frames_last_second, int32_t cpu_percent) override;
+	// The /PROFILE frame leg: run_tick's tail and every paused update's.
+	void write_profile_frame() override;
 
 private:
 	void reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
