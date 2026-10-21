@@ -238,6 +238,31 @@ int main() {
 				"pause/reset discarded the stall's bank history")) return 1;
 	}
 
+	// A paused frame runs no tick but still runs the weather tick: retail's main
+	// frame calls Environment_UpdateWeatherTick ahead of its pause test, so the
+	// time of day keeps advancing (one advance per banked frame) and the
+	// 310-tick minute counter keeps counting down through the pause.
+	// [orig: Game_ProcessMainFrame @0x5263F0 -- Environment_UpdateWeatherTick
+	//  @0x57E9B0 called @0x526774, the pause test @0x526779; the clock
+	//  @0x57E9C7, the tickdown @0x57E9DA]
+	{
+		TickProbe target;
+		Session session(target);
+		if (!load(session)) return 1;
+		auto &weather = target.kernel.world.weather;
+		weather.tod_fixed24 = 0;
+		weather.tod_advance_per_tick = 0x100;
+		weather.tod_epoch_tickdown = 310;
+		if (!expect(session.pause().applied(), "the weather pause applies")) return 1;
+		FrameInput paused;
+		paused.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		const FrameOutcome out = session.advance(paused);
+		if (!expect(out.status == FrameStatus::NotRunning && target.inputs.empty(),
+				"a paused frame runs no tick")) return 1;
+		if (!expect(weather.tod_fixed24 == 0x300u && weather.tod_epoch_tickdown == 307,
+				"each paused frame steps the time of day and its minute counter")) return 1;
+	}
+
 	// Network roles cannot pause, step, or reset.
 	{
 		TickProbe target;

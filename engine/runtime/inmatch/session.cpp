@@ -638,12 +638,17 @@ void Session::step_cine_render_frame() {
 
 void Session::step_paused_frame_counters(const FrameInput &input) {
 	// Under the menu pause retail's frames still run, their pause-gated legs
-	// held: each banked frame steps the main-frame counter alone (the session
-	// and HUD counters wait on the pause, as the tick does) [orig:
-	// Game_ProcessMainFrame -- `cmp dword_A87050, 0` @0x5265A6 around the tick's
-	// ++g_CurrentTick, Game_TickHudFrameCounters @0x5265D5 every frame].
+	// held: each banked frame steps the main-frame counter (the session and HUD
+	// counters wait on the pause, as the tick does), and the weather tick, which
+	// the frame runs ahead of its pause test, so the time of day and the weather
+	// keep stepping through the pause [orig: Game_ProcessMainFrame @0x5263F0 --
+	// `cmp dword_A87050, 0` @0x5265A6 around the tick's ++g_CurrentTick,
+	// Game_TickHudFrameCounters @0x5265D5 every frame, Environment_UpdateWeatherTick
+	// @0x57E9B0 called @0x526774 ahead of the pause test @0x526779; the entity
+	// update's own pause return, Entity_UpdateAllEntities @0x4C2100 (@0x4C2103)].
 	if (role_ == nullptr || role_->kernel() == nullptr) return;
-	world::World &world = role_->kernel()->world;
+	mission::MissionKernel &kernel = *role_->kernel();
+	world::World &world = kernel.world;
 	const int32_t due = accumulator_.bank(input.delta_seconds);
 	// The mouse pump heads every main frame, ahead of the pause word's test, so its
 	// words hold what the paused frames pumped: the paused frame's cursor waits for
@@ -660,6 +665,7 @@ void Session::step_paused_frame_counters(const FrameInput &input) {
 		int32_t axis[2] = {};
 		step_mouse_pump(i, due, menu_open, axis);
 		world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
+		kernel.tick_weather();
 	}
 }
 
