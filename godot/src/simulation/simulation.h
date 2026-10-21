@@ -928,6 +928,10 @@ public:
 	// (engine inmatch::Role::reset_local_input; D-NET-560); its device legs reach the
 	// shell through take_input_reset.
 	void escape_input_reset();
+	// Input action 3, the exit: the in-game CONFIRM_YES runs it inline and a console-queued
+	// code 3 at its input frame (engine inmatch/remote_admin.h input_action_exit carries the
+	// witness): a joiner's CIDEMIS goodbye leaves inside it.
+	void input_action_exit();
 	// Monotonic initial-admission boundary: the host's S2C 0x0F has landed in the
 	// deploy wait, for any role (D-NET-678). Deploy-pick state is intentionally
 	// exposed separately.

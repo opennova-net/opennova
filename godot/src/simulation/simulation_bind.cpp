@@ -127,6 +127,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &Simulation::is_joined_in_match);
 	ClassDB::bind_method(D_METHOD("take_input_reset"), &Simulation::take_input_reset);
 	ClassDB::bind_method(D_METHOD("escape_input_reset"), &Simulation::escape_input_reset);
+	ClassDB::bind_method(D_METHOD("input_action_exit"), &Simulation::input_action_exit);
 	ClassDB::bind_method(D_METHOD("is_joiner_network_diagnostics_enabled"),
 	                     &Simulation::is_joiner_network_diagnostics_enabled);
 	ClassDB::bind_method(D_METHOD("set_joiner_network_diagnostics_enabled", "enabled"),

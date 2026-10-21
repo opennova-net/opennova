@@ -501,6 +501,37 @@ void Simulation::install_console_seams() {
 		return kernel_ && kernel_->wac.toggle_cheat(p_line, !is_joiner(), kernel_->world);
 	};
 	runtime_->set_local_command_seams(std::move(seams));
+	// The console's queued input actions whose arms are the game's, at their input frame
+	// (the role keeps the Respawn row's 55 and the medic call's 217): 3 the exit, 12 the
+	// deploy pick from the record's parameter (0 the default, 0xFFFE the auto pick, else the
+	// spawn-zone list's index plus one), and the class callback's stance selects, 169
+	// crouch, 170 prone and 172 stand (each one C2S 0x1D). Any other code's arm is a
+	// screen's or a device's this sink does not reach.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 3 @0x49AF26..0x49AF42, case 12
+	//  @0x49B024 (the pick @0x49B0C3..0x49B17B), the class callback @0x49AEB6 ->
+	//  Input_HandleActionBinding_0 @0x4E0420 - cases 169 @0x4E0D77, 170 @0x4E0DF3,
+	//  172 @0x4E0E3E]
+	runtime_->set_console_action_sink([this](int32_t p_code, int32_t p_param, int32_t, int32_t) {
+		switch (p_code) {
+		case 3:
+			input_action_exit();
+			break;
+		case 12:
+			(void)send_deployment_pick(p_param);
+			break;
+		case 169:
+			(void)request_local_player_stance(STANCE_CROUCH);
+			break;
+		case 170:
+			(void)request_local_player_stance(STANCE_PRONE);
+			break;
+		case 172:
+			(void)request_local_player_stance(STANCE_STAND);
+			break;
+		default:
+			break;
+		}
+	});
 	// The authority's arms, NETLOG then BAN / PUNT with no sender (engine
 	// inmatch/client_runtime.h set_authority_console carries the witness).
 	runtime_->set_authority_console([this](const std::string &p_line) {
@@ -1041,6 +1072,12 @@ void Simulation::escape_input_reset() {
 	// The Escape key's reset (engine inmatch/session.h Role::reset_local_input carries
 	// the witness).
 	if (role_ != nullptr && kernel_) active_role().reset_local_input();
+}
+
+void Simulation::input_action_exit() {
+	// Input action 3 over the running role (engine inmatch/remote_admin.h
+	// input_action_exit carries the witness).
+	if (kernel_) opennova::inmatch::input_action_exit(remote_admin_binding());
 }
 
 bool Simulation::take_input_reset() {
