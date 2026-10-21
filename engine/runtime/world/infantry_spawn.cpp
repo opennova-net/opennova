@@ -32,14 +32,19 @@ bool spawn_zone_ready(const World &world, const Entity &entity) {
     return zone != nullptr && zone->team == entity.team && zone->zone_control >= 0x10000;
 }
 
-bool player_watches(World &world, AiSystem &ai, const Entity &entity, const Vec3 &position) {
+bool player_watches(World &world, AiSystem &ai, const Entity &entity,
+                    const EntityPosition &position) {
     if (ai.is_in_session || world.rules.mp_session) return false;
     const Entity *player = world.registry.get(world.cached.local_player);
     if (player == nullptr) return false;
-    const int32_t from[3] = {to_fixed(position.x), to_fixed(position.y), to_fixed(position.z)};
+    // The ray runs from the body's Position words, or its spawn backup's
+    // (+0x318..+0x320), to the local player's Position words, with no float
+    // view (D-NET-507). [orig: Entity_UpdateInfantryAI - edi = Position
+    //  @0x4B9A5C into the ray @0x4B9F74..0x4B9F77; `lea ecx, [esi+318h]`
+    //  @0x4B9FDF into the ray @0x4B9FE8; the player's +4 @0x4B9F70 / @0x4B9FDB]
+    const int32_t from[3] = {position.x.q16, position.y.q16, position.z.q16};
     const int32_t to[3] = {player->position.x.q16, player->position.y.q16,
                            player->position.z.q16};
-    // Retail uses the entity origins, including for the spawn-position watch.
     return ai.line_of_sight_clear(world, from, to, entity.handle, player->handle);
 }
 
