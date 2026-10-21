@@ -554,6 +554,12 @@ opennova::NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 				String("The NovaWorld gate named no session server; its lobby without one is not "
 					   "supported."));
 	};
+	// The session login verified: the menu opens its web lobby over the gate's startup URL; the
+	// shell's lobby page loads from the same URL (engine http_flow.h http_getting_line).
+	hooks.on_connect_validated = [this]() {
+		sync_flow_context();
+		lobby_.connect_log(opennova::http_getting_line(flow_.resolve_startup_url()));
+	};
 	// The gate and connect lines to the process's _connectlog.txt.
 	hooks.connect_log_on = []() {
 		return g_process_connect_log != nullptr && g_process_connect_log->enabled();
@@ -1212,25 +1218,17 @@ opennova::NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
 	return hooks;
 }
 
-// The NovaWorld menu's Host, on this logged-in session: ConnectOrHost's
-// teamId != 0 leg (engine: net/novaworld/connect_or_host.h). Each failure
-// leaves its NWEC tag for the error dialog, and only a hosting session (state 6)
-// lets the shell start the mission.
+// The NovaWorld menu's Host, on this logged-in session: the hosting page first, then, once its
+// HOSTKEY dispatches the leg, ConnectOrHost's teamId != 0 leg (engine:
+// net/novaworld/connect_or_host.h). Each failure leaves its NWEC tag for the error dialog, and only
+// a hosting session (state 6) lets the shell start the mission.
 void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
-	opennova::ClientSession *session = lobby_.session();
-	const opennova::GateResponse &gate = lobby_.gate_response();
-	const bool set_up = options.is_valid() && session != nullptr && lobby_.is_open();
-	const char *refusal = opennova::host_leg_refusal(set_up,
-			set_up ? session->session_flags() : 0u, server_info_.is_valid(), gate.lobby_name);
-	for (const std::string &line : opennova::connect_or_host_check_lines(
-			     /*host_leg=*/true, refusal, set_up ? session->lobby_state() : 0))
-		lobby_.connect_log(line);
-	if (refusal != nullptr) {
-		emit_signal("host_failed", String(refusal));
+	// No hosting page without the verified session's lobby: the leg never reaches ConnectOrHost.
+	if (!options.is_valid() || state_ != STATE_CONNECTED) {
+		emit_signal("host_failed", String(opennova::NWEC_SESSION_NOT_SET_UP));
 		return;
 	}
 	opennova::HostRegistration cfg;
-	cfg.lobby_name = gate.lobby_name;
 	cfg.server_name = opennova::to_std(options->get_server_name());
 	cfg.max_players = opennova::host_leg_max_players(options->get_max_players(),
 			!options->get_serve_and_play(),
@@ -1252,6 +1250,10 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	pending_host_cfg_ = cfg;
 	sync_flow_context();
 	const opennova::HostKeyResult first = flow_.host();
+	if (first.kind == opennova::HostKeyResult::Kind::NeedRequest) {
+		if (const std::string *host_url = flow_.browser_global("@HOST_URL@"))
+			lobby_.connect_log(opennova::http_hosting_line(*host_url));
+	}
 	if (first.kind != opennova::HostKeyResult::Kind::NeedRequest ||
 	    ship_spec(host_http_, first.request) != OK) {
 		fail_host_leg(opennova::to_gd(first.reason.empty() ? "host request failed" : first.reason));
@@ -1276,7 +1278,24 @@ void NovaWorldClient::on_host_request_completed(int result, int response_code,
 		if (ship_spec(host_http_, r.request) != OK) fail_host_leg(String("host request failed"));
 		return;
 	case opennova::HostKeyResult::Kind::Resolved: {
+		// The page's HOSTKEY dispatches the leg: ConnectOrHost's checks run now, on the session
+		// and the gate reply as they stand. [orig: UI_DispatchScreenEvent - HostDialog_StartSession
+		//  @0x54F321, CNapiGameSession_ConnectOrHost (the call @0x54F33B), the error dialog
+		//  @0x54F349; UI_HandleHostSessionStart @0x556D00 runs no check before its open @0x556F98]
+		opennova::ClientSession *session = lobby_.session();
+		const opennova::GateResponse &gate = lobby_.gate_response();
+		const bool set_up = session != nullptr && lobby_.is_open();
+		const char *refusal = opennova::host_leg_refusal(set_up,
+				set_up ? session->session_flags() : 0u, server_info_.is_valid(), gate.lobby_name);
+		for (const std::string &line : opennova::connect_or_host_check_lines(
+				     /*host_leg=*/true, refusal, set_up ? session->lobby_state() : 0))
+			lobby_.connect_log(line);
+		if (refusal != nullptr) {
+			fail_host_leg(String(refusal));
+			return;
+		}
 		opennova::HostRegistration cfg = pending_host_cfg_;
+		cfg.lobby_name = gate.lobby_name;
 		cfg.host_key = r.host_key;
 		host_role_.request(cfg);
 		return;

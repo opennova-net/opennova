@@ -58,6 +58,11 @@ public:
 		std::function<void(const std::string &)> on_fatal;
 		// Recoverable decode noise on the gate socket (a bad envelope or response).
 		std::function<void(const std::string &)> on_soft_error;
+		// The first connect's poll ended connected and validated: the menu's next state opens the
+		// web lobby (state 9). The command-line host runs no menu and leaves it unset.
+		// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - state 8's success
+		//  @0x55923C..0x559242]
+		std::function<void()> on_connect_validated;
 		// The gate named no NWU address and its POST address and port are both set: the connect
 		// goes on with no NWU session (retail's NovaWorld menu then opens its web lobby, menu
 		// state 9). No session is created; match_facts().in_use stays false.

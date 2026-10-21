@@ -108,6 +108,21 @@ struct JoinResult {
 //  _atol of BK @0x4ca05b, of NP @0x4ca08a, the relay port's @0x4ca0b9]
 ProxyRendezvousConfig proxy_rendezvous_from_join(const JoinResult &resolved);
 
+// The menu's two web opens' _connectlog.txt lines, past their "<time> : " prefix: the web lobby's
+// open once the session login is verified (the next menu frame, state 9, over the gate's resolved
+// STARTUPURL: resolve_startup_url), and the Host's open of the main page's @HOST_URL@ global as the
+// page set it.
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - state 8's success sets state 9 @0x559242;
+//  state 9: "%s : HTTP Getting \"%s\"" over g_NovaWorldWebURL @0x5592AC..0x5592D8, UIScene_OpenUrl
+//  @0x5592ED; UI_HandleHostSessionStart @0x556D00 - "%s : HTTP hosting with \"%s\"" (the append
+//  @0x556F88), UIScene_OpenUrl @0x556F98]
+inline std::string http_getting_line(const std::string &url) {
+	return "HTTP Getting \"" + url + "\"";
+}
+inline std::string http_hosting_line(const std::string &url) {
+	return "HTTP hosting with \"" + url + "\"";
+}
+
 // --- host ---
 // The NovaWorld menu's Host leg: the hosting page the main page names answers, through its relay,
 // with a page whose <TITLE> carries [HOSTKEY=...&]; that key rides the host registration.

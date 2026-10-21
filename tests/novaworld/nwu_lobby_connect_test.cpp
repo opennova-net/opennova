@@ -16,6 +16,7 @@
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/gate_probe.h>
+#include <net/novaworld/http_flow.h> // http_getting_line / http_hosting_line
 #include <net/novaworld/nwu_host_role.h>
 #include <net/novaworld/nwu_lobby_session.h>
 #include <net/napi/tlv.h>
@@ -108,6 +109,9 @@ struct Rig {
 	std::vector<std::string> log;
 	// The NWU packet lines (SENDING / PROCESSING), kept apart so the other pins read the rest.
 	std::vector<std::string> packet_log;
+	// The first connect's validated hook: how many times, and the log's size when it ran.
+	int validated = 0;
+	std::size_t validated_at_log = 0;
 	NwuLobbySession lobby;
 
 	explicit Rig(bool command_line_host = false)
@@ -135,6 +139,10 @@ struct Rig {
 			flags_at_fatal = s->session_flags();
 			jfc_at_fatal = s->join_fail_code();
 			jfp_at_fatal = s->join_fail_param();
+		};
+		out.on_connect_validated = [this]() {
+			++validated;
+			validated_at_log = log.size();
 		};
 		out.connect_log_on = [this]() { return log_on; };
 		out.connect_log = [this](const std::string &text) {
@@ -1020,6 +1028,30 @@ void check_stop_hosting_inout_line() {
 //  @0x4D4E39, "%s : NWU USER ESCAPED2" @0x4D4E73, @0x4D4E7D; CGameSession_WaitForNWUConnection
 //  @0x4D1230 - "%s : NWU USER HIT ESCAPE2!!!" @0x4D12F1, -22 @0x4D1324; UI_ShowNetworkErrorByCode
 //  @0x5584A0 - NWEC(25 - code)]
+// The session login's end: the poll's YIPPEE line, then the validated hook once, where the menu's
+// next state opens the web lobby; the menu's two web opens' lines. [orig:
+//  CGameSession_WaitForNWUConnection @0x4D1230 - @0x4D13D3; UI_ProcessLANSessionStateMachine
+//  @0x558DE0 - state 9 @0x559242, "%s : HTTP Getting \"%s\"" @0x5592D8; UI_HandleHostSessionStart
+//  @0x556D00 - "%s : HTTP hosting with \"%s\"" @0x556F88]
+void check_connect_validated() {
+	Rig rig;
+	rig.log_on = true;
+	const std::vector<uint8_t> auth = bring_to_verify(rig);
+	CHECK(rig.validated == 0);
+	rig.session.inbound.push_back({ kServer,
+			server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+	rig.lobby.tick(300);
+	CHECK(rig.validated == 1);
+	CHECK(rig.validated_at_log > 0 && rig.validated_at_log <= rig.log.size() &&
+			rig.log[rig.validated_at_log - 1] == "NWU YIPPEE WE ARE CONNECTED AND VALIDATED.");
+	rig.lobby.tick(400);
+	CHECK(rig.validated == 1);
+	rig.lobby.close();
+	CHECK(http_getting_line("http://gs.opennova.test/NWStart.dll?prepare=1") ==
+			"HTTP Getting \"http://gs.opennova.test/NWStart.dll?prepare=1\"");
+	CHECK(http_hosting_line("/NWHost.dll") == "HTTP hosting with \"/NWHost.dll\"");
+}
+
 void check_escape_legs() {
 	{
 		Rig rig;
@@ -1245,6 +1277,7 @@ int main() {
 	check_host_player_add_sends_update();
 	check_connect_or_host_lines();
 	check_escape_legs();
+	check_connect_validated();
 	check_stop_hosting_inout_line();
 	check_connect_error_tags();
 	check_connect_log_gate_and_connect();

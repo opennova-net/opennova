@@ -597,6 +597,7 @@ bool NwuLobbySession::poll_connect() {
 			}
 			connect_log("NWU YIPPEE WE ARE CONNECTED AND VALIDATED.");
 			connect_poll_ = ConnectPoll::Done;
+			if (hooks_.on_connect_validated) hooks_.on_connect_validated();
 			return false;
 		}
 		default:
