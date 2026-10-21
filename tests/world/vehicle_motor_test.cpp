@@ -325,12 +325,16 @@ void test_drive_forward() {
 // A fresh vehicle's contact byte is the spawn's 0 and the speed pipeline reads it
 // before the first contact solve writes it: with Flags 0x2000 clear and the current
 // speed (0) agreeing in sign with the forward command, the command is negated (the
-// airborne coast brake), so the standstill steps backward; the byte is then set (the
-// unit rig's terrain-less stand-in in place of a solve), and the second tick drives.
-// A settled vehicle (test_drive_forward) takes the command as given.
+// airborne coast brake), and the zero byte routes the chase step to the off-ground
+// clamp, +-(deceleration >> 1), so the standstill steps backward by that much; the
+// byte is then set (the unit rig's terrain-less stand-in in place of a solve), and the
+// second tick drives. A settled vehicle (test_drive_forward) takes the command as given.
 // [orig: Entity_UpdateVehiclePhysics @0x48AF00 (the +0x2F2 read @0x48C195, the Flags
-//  test @0x48C1A8, the sign tests and the negation @0x48C1AD..0x48C1C2, the tracked
-//  solve @0x48D0B1); the spawn's 0: Mission_ResetBmsState @0x40DB80 (the Pool_Clear
+//  test @0x48C1A8, the sign tests and the negation @0x48C1AD..0x48C1C2, the step
+//  @0x48C1FC..0x48C20B, the byte test @0x48C20E..0x48C21B to the clamp
+//  @0x48C471..0x48C492 (+0x8E4 >> 1 @0x48C474..0x48C47A, its negation @0x48C486..0x48C48E,
+//  @0x48C45A..0x48C466), the tracked solve @0x48D0B1); the spawn's 0:
+//  Mission_ResetBmsState @0x40DB80 (the Pool_Clear
 //  @0x442060 call @0x40DBC7), Entity_SpawnFromBMSRecord @0x40E9F0 (@0x40EA27),
 //  Entity_RespawnVehicle @0x45FF40 (@0x45FFFD)]
 void test_a_fresh_vehicle_coasts_its_first_tick() {
@@ -345,8 +349,10 @@ void test_a_fresh_vehicle_coasts_its_first_tick() {
     CHECK(!fresh.veh().veh.grounded);
     fresh.tick(1, t);
     settled.tick(1, t);
-    // The negated command's reversal chase: (-27542 - 0 + 16) >> 5 = -861.
-    CHECK(fresh.veh().veh.speed == -861);
+    // The negated command's step, (-27542 - 0 + 16) >> 5 = -861, clamped to
+    // -(280 >> 1) = -140 off the ground.
+    CHECK(fresh.veh().veh.speed == -(t.deceleration >> 1));
+    CHECK(fresh.veh().veh.speed == -140);
     CHECK(settled.veh().veh.speed == 861);
     CHECK(fresh.veh().veh.grounded);
     const int32_t after_brake = fresh.veh().veh.speed;

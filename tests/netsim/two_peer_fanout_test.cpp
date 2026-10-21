@@ -2342,6 +2342,9 @@ bool run_vehicle_drive_authority() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+		// A settled hull: no contact solve runs for this model-less test hull, so the
+		// byte a solve would have set stands in (a spawn holds 0, D-NET-433).
+		veh.veh.grounded = true;
 		w::Seat drv;
 		drv.type = w::SeatType::Driver;
 		drv.bone_index = 1;

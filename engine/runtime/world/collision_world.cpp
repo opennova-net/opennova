@@ -1098,6 +1098,11 @@ void CollisionWorld::rebuild_candidate_slices(World &world) {
 }
 
 void CollisionWorld::rebuild_pool01_and_slices(World &world) {
+    // Retail's load has always built the slices by here (Entity_InitAllFromModels
+    // @0x40E460, the Entity_BuildAllProximityLists call @0x40E5A1); a headless world
+    // whose boot built no tables keeps its registry-sweep fallback, as
+    // refresh_after_registry_change keeps it.
+    if (!candidate_slices_built_) return;
     // The direct builder call bypasses the cadence gate. [orig: Game_StartMission
     //  @0x524360 - the calls @0x525E63 / @0x525E68; the builder zeroes its counter
     //  @0x4B8ECA]

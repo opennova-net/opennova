@@ -50,6 +50,9 @@ struct Rig {
         v.position = {10, -10, 0.25f};
         v.veh.yaw_seeded = true;
         v.veh.speed = v.veh.cmd_speed = 6000;
+        // A mid-life hull: its last contact solve left the contact byte set (a spawn
+        // holds 0 until a solve writes it, D-NET-433).
+        v.veh.grounded = true;
         Seat seat;
         seat.type = SeatType::Controller;
         seat.bone_index = 1;

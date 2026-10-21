@@ -2021,7 +2021,9 @@ end
 			Vector3.ZERO) * ctrl_point
 	assert_lt(pos.distance_to(expected_ctrl), 0.001,
 		"command-125 soldier uses the IDA-priority ctrlx seat, converted to Godot axes")
-	assert_almost_eq(sim.get_entity_yaw_deg(soldier_idx), 0.0, 0.01,
+	# The seat yaw is the bone direction's fpatan through the carrier's Q22 matrix
+	# (D-NET-448), so a forward point lands within the tolerance on either side of 0.
+	assert_almost_eq(wrapf(sim.get_entity_yaw_deg(soldier_idx), -180.0, 180.0), 0.0, 0.01,
 		"the forward-facing ctrlx13 point carries a zero yaw offset")
 	# The mounted anim state (89 = anim_sit_13) is asserted via the debug card below; the present
 	# snapshot is the listen-server ClientState now (covered by listen_server_test).
