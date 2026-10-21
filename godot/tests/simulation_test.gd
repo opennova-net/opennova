@@ -1878,6 +1878,7 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
   graphic carrier
   attrib: PlayerControl
   physics 1
+  hp 3000
   player_speed 60
   acceleration 10
   deceleration 20
@@ -1932,17 +1933,19 @@ end
 	sim.enable_listen_server(true)
 	_install_native_seat_table(sim, fixture_dir, item_db, PackedInt32Array([1294]))
 	sim.set_sound_profiles(FileAccess.get_file_as_bytes(sndprof_path))
-	# A map with no water leaves the water word 0, which this flat rig's hull settles
-	# on at the mission start: the hull's in-water test compares the word raw, and a
-	# hull in water drains two health per tick, so the plane goes well below the rig
-	# before the load, clear of that edge (the hull stays dry and whole).
-	# [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 (@0x47D516..0x47D53A);
-	#  Entity_UpdateVehiclePhysics @0x48AF00 (the drain @0x48D05A..0x48D083);
-	#  Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
-	sim.set_water_z(-100.0)
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
 	_install_people_table(sim)
 	sim.resolve_item_traits(item_db)
+	# A map with no water leaves the water word 0. This terrain-less rig's mission-start
+	# settle seats the hull on that word (the settle's floor is the higher of the ground
+	# and the plane), where the hull's in-water test, which compares the word raw, raises
+	# its flag. The plane then drops well below the rig, so from the first tick's solve
+	# on the hull is dry; that tick's drain (two health while the flag is up) is why the
+	# truck authors its hit points.
+	# [orig: Game_StartMission @0x525F80..0x526071; Entity_ProcessTrackedVehiclePhysics
+	#  @0x47C1C0 (@0x47D516..0x47D53A); Entity_UpdateVehiclePhysics @0x48AF00 (the drain
+	#  @0x48D05A..0x48D083); Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
+	sim.set_water_z(-100.0)
 	# Command-125 boarders spawn ON FOOT and attach through the infantry
 	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
 	# so drive a few 16-tick boundaries instead of a single step.
