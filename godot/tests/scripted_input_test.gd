@@ -383,6 +383,46 @@ func test_a_hud_row_pressed_inside_a_multi_tick_frame_fires_on_its_tick() -> voi
 	assert_eq(presenter.take_hud_toggle_events(), PackedInt64Array(), "reading cleared them")
 
 
+# The talk rows run in every input frame too (PlayerInputRouter::
+# poll_talk_rows carries the witness): a one-tick press of the command row
+# (code 1) inside a six-tick frame opens the command line on its tick, where
+# one poll after the frame would read the row released and never open it;
+# a char step in the next frame types into the open line.
+func test_a_talk_row_pressed_inside_a_multi_tick_frame_opens_its_line() -> void:
+	var rig := _rig()
+	if rig.is_empty():
+		return
+	var presenter: LocalPlayerPresenter = rig.presenter
+	var chat := HudChatEntry.new()
+	presenter.set_hud_chat(chat, null)
+	const COMMAND := 1
+	assert_eq(ScriptedInput.token_for_action_code(COMMAND),
+			HudChatEntry.row_token(HudChatEntry.ROW_COMMAND), "code 1 is the command row")
+	_frame(rig, 40, true, 6)
+	assert_false(chat.is_capturing(), "no line open while settling")
+	var recorder := _KeyRecorder.new()
+	recorder.chat = chat
+	add_child_autofree(recorder)
+	var driver: ScriptedInput = rig.driver
+	assert_eq(driver.load_steps([
+		{"tick": 3, "press": COMMAND},
+		{"tick": 7, "char": "K"},
+		{"tick": 9, "end": true},
+	]), OK, driver.get_error())
+	assert_true(driver.start())
+	_frame(rig, 1, true, 6)
+	var start := driver.get_start_logic_tick()
+	assert_eq(driver.get_applied_logic_ticks()[0], start + 3, "the press lands on tick 3")
+	assert_eq(driver.get_release_logic_ticks()[0], start + 4,
+			"and releases on tick 4, inside the same six-tick frame")
+	assert_true(chat.is_capturing(), "the command line opened on the press's tick")
+	_frame(rig, 1, true, 6)
+	await get_tree().process_frame
+	assert_eq(driver.get_state_name(), "finished", driver.get_cancel_reason())
+	assert_eq(chat.get_text(), "K", "the next frame's char typed into the open line")
+	presenter.set_hud_chat(null, null)
+
+
 # The packaged world over the minimal mission (its playable load spawns the
 # local player) with the infantry clip set staged so the motor's body
 # selection runs, and a presenter over a ControlsModel carrying a scripted

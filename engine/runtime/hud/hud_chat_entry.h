@@ -160,8 +160,20 @@ public:
 
 	// One chat action row's dispatch (100/101/104/105/109/110/111/112).
 	uint32_t dispatch(int action, const ChatEntryFacts &facts, const GameTextLookup &gametext);
-	// One frame's talk-row poll over the sampled rows (a mask of 1 <<
-	// ChatTalkRow): each row's press latch steps on the ungated key state; a
+	// One input frame's talk-row poll over the sampled rows (a mask of 1 <<
+	// ChatTalkRow). The talk rows are action bindings the input frame's key
+	// scan fires and its drain dispatches every tick, after the ring handed
+	// any typed keys to an open line, so the embedder polls in every input
+	// frame (each banked tick's) and a one-tick press opens its line on its
+	// tick; the command arm reads no local player (a non-peer authority's
+	// dispatch takes its authority word as 2 without one, and the command
+	// row's flags 0x5000800 carry none of the dispatch gates), so a host with
+	// no local player (Serve Only) opens the prompt too [orig:
+	// Input_ProcessFrame @0x49D520 (the drain's Input_HandleActionBinding call
+	// @0x49D5D8); Input_HandleActionBinding @0x49AD40 (the authority word
+	// @0x49AD52..0x49AD74, the row gates @0x49AD8A..0x49AE23, the command
+	// arm, cases 1 and 20, @0x49AEF7..0x49AF10); the command row's code 1 and
+	// flags @0x81779C / @0x8177A0]. Each row's press latch steps on the ungated key state; a
 	// press edge dispatches its row while gameplay input is active, no chat
 	// capture is open and the editor took no key this frame — a key the
 	// editor consumed (the Enter that submitted) never also re-dispatches,

@@ -11,9 +11,11 @@
 #include <runtime/controls/player_actions.h>
 #include <vector>
 
+#include "hud/hud_chat_entry.h"
 #include "hud/hud_toggles.h"
 #include "mnu/controls_model.h"
 #include "player/player_move_intent.h"
+#include "rtxt/rtxt_string_file.h"
 #include "simulation/inmatch_session_values.h"
 
 namespace godot {
@@ -91,6 +93,11 @@ public:
 	// since the last read, in their order; reading clears them. The HUD
 	// presenter applies them at its frame.
 	PackedInt64Array take_hud_toggle_events();
+	// The HUD's chat line and the gametext its prompts read: the talk rows
+	// (the command prompt among them) are polled here in every input frame.
+	// The HUD presenter hands its process-lifetime instance over. Null = no
+	// talk rows polled.
+	void set_hud_chat(const Ref<HudChatEntry> &p_chat, const Ref<RtxtStringFile> &p_gametext);
 
 private:
 	Ref<Simulation> sim() const;
@@ -98,8 +105,8 @@ private:
 	// The token's binding held RIGHT NOW (released with no model).
 	bool pressed(const char *p_token) const;
 	// An input frame's head at the logic tick it runs as: the scripted device
-	// stepped to it (its look pixels taken) and the key scan's gates set.
-	// Returns whether the death screen is up.
+	// stepped to it (its look pixels taken), the key scan's gates set and the
+	// talk rows polled. Returns whether the death screen is up.
 	bool begin_input_frame(const Ref<Simulation> &p_sim, int64_t p_logic_tick,
 			Vector2 &r_scripted_look);
 	// The input frame's device sample into `p_input` (movement, view keys,
@@ -109,6 +116,9 @@ private:
 	// The input frame's HUD toggle rows through the HUD's toggles, ahead of the
 	// action rows, which read the menus the rows open.
 	void poll_hud_toggles(const Ref<Simulation> &p_sim);
+	// The input frame's talk rows through the HUD's chat line, with or
+	// without a local player.
+	void poll_talk_rows(const Ref<Simulation> &p_sim);
 	void read_input_state(bool &r_forward, bool &r_back, bool &r_left, bool &r_right,
 			bool &r_lean_left, bool &r_lean_right, bool &r_jump) const;
 
@@ -118,6 +128,8 @@ private:
 	Ref<PlayerMoveIntent> input_override_;
 	Ref<HudToggles> hud_toggles_;
 	std::vector<int64_t> hud_toggle_events_;
+	Ref<HudChatEntry> hud_chat_;
+	Ref<RtxtStringFile> chat_gametext_;
 	opennova::controls::PlayerActions actions_;
 	bool armory_requested_ = false;
 	bool vehicle_menu_requested_ = false;

@@ -458,6 +458,11 @@ PackedInt64Array LocalPlayerPresenter::take_hud_toggle_events() {
 	return input_router_.take_hud_toggle_events();
 }
 
+void LocalPlayerPresenter::set_hud_chat(const Ref<HudChatEntry> &p_chat,
+		const Ref<RtxtStringFile> &p_gametext) {
+	input_router_.set_hud_chat(p_chat, p_gametext);
+}
+
 bool LocalPlayerPresenter::handle_input(const Ref<InputEvent> &p_event, bool p_active) {
 	return input_router_.handle_input(p_event, p_active);
 }
@@ -1177,6 +1182,8 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_hud_toggles", "toggles"), &LocalPlayerPresenter::set_hud_toggles);
 	ClassDB::bind_method(D_METHOD("take_hud_toggle_events"),
 			&LocalPlayerPresenter::take_hud_toggle_events);
+	ClassDB::bind_method(D_METHOD("set_hud_chat", "chat", "gametext"),
+			&LocalPlayerPresenter::set_hud_chat);
 	ClassDB::bind_method(D_METHOD("apply_view_action", "action"),
 			&LocalPlayerPresenter::apply_view_action);
 	ClassDB::bind_method(D_METHOD("set_debug_third_person", "enabled"),

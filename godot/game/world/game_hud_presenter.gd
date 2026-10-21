@@ -180,6 +180,8 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 	# PlayerActions' menu arms carry the witness).
 	if _player_presenter != null:
 		_player_presenter.set_hud_toggles(_toggles)
+		# The talk rows ride the router's input frames too (its poll_talk_rows).
+		_player_presenter.set_hud_chat(_chat, Strings.get_table(Strings.TABLE_GAMETEXT))
 	# Connect before any world can tick: PreMission/WAC effects may drain on the
 	# first runtime tick, while the local-player HUD is deliberately built only
 	# after that tick (the pending queue holds them). The connect persists for the
@@ -635,17 +637,13 @@ func tick(gameplay_input_active: bool = false) -> void:
 			if footprints.size() >= 2 and footprints[1] > 0:
 				_map_footprints_fed = true
 				_game_hud.set_minimap_footprints(footprints)
-	# The talk rows, sampled through the binding sampler (a shared key's first
-	# match is the sampler's, engine BindingSet::pressed_key); the dispatch
-	# gates, the capture and the line editor are the engine's chat entry, its
-	# talk-key debounce and flood on the main-frame counter (engine
-	# hud/hud_chat_entry.h ChatEntryFacts::frame, inmatch/chat_flood.h).
-	var talk_rows := 0
-	for row in HudChatEntry.ROW_COUNT:
-		if ControlsBindings.pressed(HudChatEntry.row_token(row)):
-			talk_rows |= 1 << row
-	_chat.poll_rows(talk_rows, gameplay_input_active, sim,
-			Strings.get_table(Strings.TABLE_GAMETEXT), sim.get_main_frame_counter())
+	# The talk rows are the player input router's: it polls them in every
+	# input frame, the frame's own sample and each later tick's, with the
+	# current gametext for the prompts (PlayerInputRouter::poll_talk_rows
+	# carries the witness); the dispatch gates, the capture and the line
+	# editor are the engine's chat entry. This frame draws the line.
+	if _player_presenter != null:
+		_player_presenter.set_hud_chat(_chat, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_game_hud.set_chat_input(_chat, sim.is_mp_session())
 	# The HUD binding rows' events in input-frame order: the player input
 	# router polls the rows in every input frame, the frame's own sample and

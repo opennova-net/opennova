@@ -189,7 +189,31 @@ bool PlayerInputRouter::begin_input_frame(const Ref<Simulation> &p_sim, int64_t 
 		controls_->set_scan_gates(spectating, p_sim.is_valid() &&
 				(p_sim->session_role() == Simulation::ROLE_DEDICATED_HOST ||
 						p_sim->local_player_dead()));
+	poll_talk_rows(p_sim);
 	return spectating;
+}
+
+void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim) {
+	// The talk rows are action bindings the input frame's drain dispatches
+	// every tick, after any typed keys reached an open line, so a one-tick
+	// press inside a multi-tick frame opens its line on its tick; the command
+	// prompt opens with or without a local player (a Serve Only host's) (engine
+	// hud/hud_chat_entry.h ChatEntry::poll_rows carries the witness). The key
+	// sampling is this router's; the dispatch gates, the capture, the talk
+	// debounce and the flood are the engine's chat entry (ChatEntryFacts::frame,
+	// inmatch/chat_flood.h); the HUD presenter draws the line at its frame.
+	if (hud_chat_.is_null() || p_sim.is_null()) return;
+	int rows_down = 0;
+	for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
+		if (pressed(opennova::hud::chat_talk_row_token(row))) rows_down |= 1 << row;
+	hud_chat_->poll_rows(rows_down, frame_gameplay_input_active_, p_sim, chat_gametext_,
+			p_sim->get_main_frame_counter());
+}
+
+void PlayerInputRouter::set_hud_chat(const Ref<HudChatEntry> &p_chat,
+		const Ref<RtxtStringFile> &p_gametext) {
+	hud_chat_ = p_chat;
+	chat_gametext_ = p_gametext;
 }
 
 void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input,

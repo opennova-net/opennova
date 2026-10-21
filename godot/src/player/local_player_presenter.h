@@ -119,6 +119,10 @@ public:
 	// read, in their order (PlayerInputRouter::take_hud_toggle_events); the
 	// HUD presenter applies them.
 	PackedInt64Array take_hud_toggle_events();
+	// The HUD's chat line and the gametext its prompts read, whose talk rows
+	// the input router polls in every input frame
+	// (PlayerInputRouter::set_hud_chat); the HUD presenter hands them over.
+	void set_hud_chat(const Ref<HudChatEntry> &p_chat, const Ref<RtxtStringFile> &p_gametext);
 
 	// A view action (Simulation::VIEW_ACTION_*: view1st F2, viewwithgun F3,
 	// viewchase F4): view1st/viewwithgun select first person, viewchase the
