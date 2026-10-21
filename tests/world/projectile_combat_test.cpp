@@ -377,8 +377,11 @@ void test_arming_dud_and_armed_damage() {
 // the first def's 74 only when its `end` is read. It is the notarmmedammo of
 // the M203 and Mk19 grenades and the RPG and AT4 rockets, so a hit before
 // arming continues as the dud and deals nothing (the round's own kill zone
-// never queues). The defs below are the base file's M203 and its dud
-// (effects tables, tracers, lights and the dud's velocity aside).
+// never queues: the person handler's unarmed byte, set by the same elapsed-age
+// test as the dud swap, skips the push [orig: Projectile_HandleTerrainImpact_0
+// @0x4E98F0 - @0x4E9969..0x4E9978, the byte @0x4E99A4, read @0x4E9AE9]). The
+// defs below are the base file's M203 and its dud (effects tables, tracers,
+// lights and the dud's velocity aside).
 void test_base_game_m203_hit_before_arming_is_the_dud() {
     Rig r;
     static const char kText[] =

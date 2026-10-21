@@ -2342,7 +2342,11 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         //    Projectile_ProcessDamageOnTarget @0x4E7FCB / @0x4E823D..0x4E8266];
         //  - person: a kill-zone class, an armed round, the session authority
         //    and a nonzero kz_damage [orig: Projectile_HandleTerrainImpact_0
-        //    @0x4E9AE2..0x4E9B08, push @0x4E9B26];
+        //    @0x4E98F0 - @0x4E9AE2..0x4E9B08, push @0x4E9B26]. Its arm test is
+        //    the handler's unarmed byte (the decompiler's hasPenetrated), set by
+        //    the dud swap's own elapsed-age test, the terrain handler's compare
+        //    [orig: max age - remaining against the original row's arm age,
+        //    `jge` @0x4E9969..0x4E9978, the byte @0x4E99A4, read @0x4E9AE9];
         //  - water: the lifetime is halved first, then only an ODD class
         //    passes the compiled `!prearm & kztype` bit test, and the halved
         //    age must strictly pass the arm age [orig:
