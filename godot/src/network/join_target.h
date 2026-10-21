@@ -87,7 +87,9 @@ public:
 	bool get_expansion_known() const { return expansion_known_; }
 	void set_expansion_known(bool p_value) { expansion_known_ = p_value; }
 	// The browse row's session record (a LAN row's 0x81 HK and SF): a join
-	// from it goes straight to the 0x42 (JoinerConnection::DiscoveredSession).
+	// from it skips the 0x41 and enters the connect state, its 0x42 at the
+	// first pump past the start (JoinerConnection::DiscoveredSession,
+	// D-NET-NEW-L2-24).
 	// `discovered_session` false = a target the shell enumerates first (D-NET-703).
 	bool get_discovered_session() const { return discovered_session_; }
 	void set_discovered_session(bool p_value) { discovered_session_ = p_value; }
