@@ -1910,7 +1910,7 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	CHECK(!wide.empty(), "the stdbox panel emits quads when its atlas loaded");
 
 	// The fill comes off the BORDER atlas's cell (3,0), lifted into its own
-	// texture — boxtile.tga is a flat camo sheet with no cell grid, so no quad
+	// texture; boxtile.tga is a flat camo sheet with no cell grid, so no quad
 	// samples it as stage 0.
 	bool any_tile_slot = false;
 	for (const HudQuad &q : wide) {
