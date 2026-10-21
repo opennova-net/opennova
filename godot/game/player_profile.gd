@@ -80,7 +80,11 @@ static func load_callsign() -> String:
 # Restore both side-specific character selections and expose the blue side as
 # the initially active PLAYER_INFO page (SIDE_BLUE is authored CHECKED). Packed
 # ids are resolved back through Avatars.def because their bit fields contain
-# authored ids, not UI row indices (engine: inmatch/character_registry.h).
+# authored ids, not UI row indices (engine: inmatch/character_registry.h). A side
+# whose word the table does not resolve (or every side with no Avatars.def) is
+# still the record's: its raw word and class byte, tree indices -1, which the join
+# projection carries as they are (engine: inmatch/join_character_profile.h,
+# D-PLAYERINFO-33).
 static func load_character_profile(root: ResourceRoot) -> Dictionary:
 	var profile := {
 		"name": load_callsign(),
@@ -91,20 +95,18 @@ static func load_character_profile(root: ResourceRoot) -> Dictionary:
 	if summary == null or not summary.loaded:
 		return profile
 	var db := AvatarDatabase.new()
-	if root == null or db.load_from_resource_root(root, "Avatars.def") != OK or not db.is_loaded():
-		return profile
+	var have_table := root != null and db.load_from_resource_root(root, "Avatars.def") == OK \
+			and db.is_loaded()
 	var sides: Array[Dictionary] = [{}, {}]
 	for side in 2:
 		var raw: WeaponProfileSide = summary.blue if side == 0 else summary.red
 		var packed := raw.avatar_packed
-		var resolved := db.resolve_character_id(packed, side)
-		if resolved == null:
-			continue
+		var resolved: AvatarComboRow = db.resolve_character_id(packed, side) if have_table else null
 		sides[side] = {
 			"team": side,
-			"nationality": resolved.nationality_index,
-			"division": resolved.division_index,
-			"combo": resolved.combo_index,
+			"nationality": resolved.nationality_index if resolved != null else -1,
+			"division": resolved.division_index if resolved != null else -1,
+			"combo": resolved.combo_index if resolved != null else -1,
 			"player_class": raw.player_class,
 			"avatar_a": raw.avatar_a,
 			"avatar_b": raw.avatar_b,

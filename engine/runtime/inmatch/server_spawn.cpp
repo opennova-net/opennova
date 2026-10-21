@@ -262,8 +262,15 @@ void PlayerSession_InitHostRowFromProfile(NapiNPServerCtx &ctx, const CharacterJ
 	HostSlotRow &host = ctx.host_slot;
 	if (!host.active) return;
 	host.char_vars = vars;
+	PlayerSession_ResolveOwnCharacterIds(ctx, host.char_vars);
 	host.player_class = static_cast<int8_t>(ctx.config.host_side_request == 0 ? vars.char_class[0]
 	                                                                        : vars.char_class[1]);
+}
+
+void PlayerSession_ResolveOwnCharacterIds(const NapiNPServerCtx &ctx, CharacterJoinVars &vars) {
+	for (int side = 0; side < 2; ++side)
+		if (ctx.characters.find_by_packed_id(vars.char_id[side]) == nullptr)
+			vars.char_id[side] = ctx.characters.first_character_id(side);
 }
 
 void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection &own) {
@@ -504,8 +511,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// validates the JSP ids into the add record and the add validates them again
 	// (a no-op after the first pass). The host's own add carries none: the local
 	// connection's net-flags byte takes the record's empty arm and the add's local
-	// branch, so neither pass runs; the own ids were validated when the profile was
-	// applied (join_character_profile; the boot's fresh_profile_character_vars).
+	// branch, so neither pass runs; the own ids were validated by the session's profile
+	// init (PlayerSession_ResolveOwnCharacterIds, run by start_host_session).
 	// The round init's kept slots were validated at their add.
 	// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 - CAvatarDefs_HasPackedId @0x51D6A4,
 	//  CAvatarDefs_PackFirstComboOfAlignment(side 0) @0x51D6BA; @0x51D6DD, side 1

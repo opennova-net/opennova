@@ -886,6 +886,10 @@ bool check_listen_host_installs_local_character_profile() {
 	local_vars.avatar[0] = 3;
 	local_vars.avatar[1] = 9;
 	config.local_character_vars = local_vars;
+	// The host's table names both words: the own row's profile init keeps a named word, else
+	// packs the side's default [orig: PlayerSession_InitFromProfile @0x50CAC4..0x50CB0D].
+	config.characters.add_entry(0, 0, 0, 0, 0, 2, opennova::avatars::AVATAR_ALIGN_GOOD, 3, false);
+	config.characters.add_entry(1, 0, 0, 7, 0, 2, opennova::avatars::AVATAR_ALIGN_EVIL, 9, false);
 
 	opennova::inmatch::start_host_session(owner, config);
 	if (!expect(owner.ctx.np_protocol.connection_list.size() == 1,

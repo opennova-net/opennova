@@ -109,6 +109,17 @@ uint8_t PlayerSession_InitOwnSlotTeam(const NapiNPServerCtx &ctx, NapiNPConnecti
 //  @0x551500 over the current profile]
 void PlayerSession_InitHostRowFromProfile(NapiNPServerCtx &ctx, const CharacterJoinVars &vars);
 
+// The same profile init's two character words for the host's own slot (a listen host's or the
+// single player's own connection, a Serve Only host's row): the session apply copies the record's
+// words raw, and the init keeps each the host's table names, else packs the side's default (the
+// first combo of its alignment, else entry 0; 0 over an empty table), so the own row never
+// carries a word its own table cannot draw, where a join's CI0 / CI1 carry the raw word and the
+// add validates it (D-PLAYERINFO-33, D-NET-137).
+// [orig: PlayerSession_InitFromProfile @0x50CA80 - CAvatarDefs_HasPackedId @0x50CAC4, the
+//  side-0 CAvatarDefs_PackFirstComboOfAlignment @0x50CADA, its word @0x50CADF..0x50CAE2;
+//  CAvatarDefs_HasPackedId @0x50CAF1, the side-1 pack @0x50CB08]
+void PlayerSession_ResolveOwnCharacterIds(const NapiNPServerCtx &ctx, CharacterJoinVars &vars);
+
 // Player_InitPlayer's per-team re-stamp of the local body (the mission start's
 // g_LocalPlayerEntity: a listen host's or the single player's own body, a Serve Only host's
 // row body): its class word from the session start's profile class of the body team's side

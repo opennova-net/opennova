@@ -808,6 +808,10 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			connection.char_vars = cfg.local_character_vars
 					? *cfg.local_character_vars
 					: fresh_profile_character_vars(CharacterRegistry());
+			// The profile init keeps each record word the host's table names, else the
+			// side's default (D-PLAYERINFO-33) [orig: PlayerSession_InitFromProfile
+			//  @0x50CA80 (@0x50CAC4..0x50CAE2, @0x50CAF1..0x50CB0D)].
+			PlayerSession_ResolveOwnCharacterIds(owner.ctx, connection.char_vars);
 			// The round init's copy of the host's own profile word into its
 			// slot +372 [orig: Server_InitNewRoundState @0x51ca55..0x51ca61].
 			connection.link.auto_medic_enabled = cfg.local_auto_medic_disabled == 0;
