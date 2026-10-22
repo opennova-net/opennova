@@ -556,7 +556,8 @@ std::vector<uint8_t> make_server_auth_datagram(const ClientAuth &auth, const Pee
 	// ceiling the new-connection callback already negotiated (D-NET-234). -1 rides as
 	// 0xFFFFFFFF. [orig: CNapiNPConnection_SendSessionInit @0x620ef0; CNapiNetwork_Init
 	//  stores @0x4caa81/@0x4cab20/@0x4cab54/@0x4cabf0; NapiNPServer_HandleNewConnection
-	//  stores @0x4c81ca/@0x4c81d0, run first by CNapiNPConnection_OnStateChange @0x6261cd]
+	//  stores @0x4c81ca/@0x4c81d0, run first by CNapiNPConnection_OnStateChange (the call
+	//  @0x6261C6)]
 	for (std::vector<CsField> *block : {&reply.client_cs, &reply.server_cs}) {
 		for (CsField &field : *block) {
 			if (field.field_index == 0)
@@ -636,7 +637,7 @@ void queue_session_messages(NapiNPConnection &conn, std::vector<ProtocolMessage>
 //  @0x4c8197, `> field 13 -> field 13` @0x4c81a9, `> 0x4000 -> 0x4000` @0x4c81b1, the stores
 //  @0x4c81ca/@0x4c81d0, SendConfigUpdateIfEnabled(conn, 1, 0x2000) @0x4c81d6 then (conn, 0)
 //  @0x4c81e4 (the wire direction byte is `direction == 0`, so 0 then 1); installed as cb_server_1
-//  @0x4c99c0 and run by CNapiNPConnection_OnStateChange @0x6261cd before SendSessionInit
+//  @0x4c99c0 and run by CNapiNPConnection_OnStateChange (the call @0x6261C6) before SendSessionInit
 //  @0x6261fc; the MPS tag NapiNetConfig_LoadFromConnTags @0x4c7260 ("MPS" @0x7ca070)]
 // [wire: host_and_join_lan frames 6-8; flags 0xA0 = settings update + u8 length]
 bool negotiate_max_packet_bytes(NapiNPConnection &conn, long mps) {
@@ -767,7 +768,8 @@ bool fill_joined_node(NapiNPConnection &conn, const ClientAuth &auth, const Peer
 	conn.server_scrk = server_keys.scrk;
 	conn.phase = ConnectionPhase::Joined;
 	// The new-connection callback negotiates the packet ceiling before the 0x82 goes out
-	// (D-NET-234) [orig: OnStateChange @0x6261cd -> HandleNewConnection @0x4c818d..0x4c81e4,
+	// (D-NET-234) [orig: OnStateChange (the call @0x6261C6) -> HandleNewConnection
+	// @0x4c818d..0x4c81e4,
 	// then SendSessionInit @0x6261fc].
 	return negotiate_max_packet_bytes(conn, mps);
 }
@@ -984,7 +986,8 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// Retransmitted 0x42 from the SAME client (matching CI + CK) on an already-joined connection:
 		// re-send the cached ServerAuth, do NOT re-mint. Re-minting would rotate the server SCRK/SK
 		// the joiner already latched from the first 0x82, so every later S2C 0x83 would fail to
-		// decrypt and the join would silently stall. [orig: conn_state == 1 &&
+		// decrypt and the join would silently stall. [orig: conn_state == 1 (@0x62BECA; a
+		// server-side node holds state 1 from its accept to its destroy) &&
 		// session_keys.client_id == CI && session_keys.remote_key == CK ->
 		// CNapiNPConnection_SendSessionInit @0x620ef0 (re-emits the same 0x82), return 1]
 		// The retransmit leg touches no receive clock: only an in-order session packet or
@@ -1026,7 +1029,8 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// (D-NET-713)
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - the pre-create gates
 	//  @0x62BDAE..0x62BE8F, the lookup @0x62BEBA, the retransmit @0x62BEE6..0x62BEF1, the create
-	//  @0x62BF06 ahead of the validate callback @0x62C0B1; CNapiNPConnection_Create - the step
+	//  @0x62BF06 ahead of the validate callback (+0x2D0 loaded @0x62C06E, `call edi` @0x62C0AA);
+	//  CNapiNPConnection_Create - the step
 	//  @0x62B282..0x62B296; CNapiNPConnection_OnStateChange @0x626060 - connection_id
 	//  @0x626199..0x62619C]
 	const uint32_t connection_id = next_connection_index();
@@ -1036,7 +1040,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// (golden byte-parity).
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - NapiNP_GenerateSessionKey @0x62bf5e
 	//  (the SK, stored @0x62bf6b), then CNapiNPConnection_GenerateTxKey @0x62bf99, ahead of the
-	//  validate callback called @0x62C0B1]
+	//  validate callback called @0x62C0AA]
 	const ConnectionKeys server_keys = ctx.server_key_mint.forced
 			? ConnectionKeys{ctx.server_key_mint.server_sk, ctx.server_key_mint.server_scrk}
 			: manager_connection_keys();

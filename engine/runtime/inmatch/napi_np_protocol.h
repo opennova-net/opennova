@@ -212,7 +212,8 @@ bool latch_client_goodbye(NapiNPConnection &conn, const std::vector<uint8_t> &bo
 // 0x82 (the family JFC, the reason JFP).
 // [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - the create @0x62BF06, the keys @0x62BF5E /
 //  @0x62BF99, the template copies @0x62BFC9 / @0x62BFE3, the state change @0x62C2D7;
-//  CNapiNPConnection_OnStateChange @0x626060 - cb_server_1 @0x6261CD, SendSessionInit @0x6261FC;
+//  CNapiNPConnection_OnStateChange @0x626060 - cb_server_1 called @0x6261C6, SendSessionInit
+//  @0x6261FC;
 //  NapiNPProtocol_SendJoinRejection @0x620CD0]
 CsConfig server_node_template(const NapiNPServerCtx &ctx);
 bool fill_joined_node(NapiNPConnection &conn, const ClientAuth &auth, const PeerAddr &peer,

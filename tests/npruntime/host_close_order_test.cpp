@@ -1255,7 +1255,8 @@ bool held_join(inmatch::UnstoppedServer &server, const inmatch::ServerLogs &logs
 // in the same pump as the node's first sequenced packet. The new node counts in the next 0x81's
 // NP and NC.
 // [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - host_running @0x62B7D7, the queue
-//  @0x62C323, the create @0x62BF06, the validate callback @0x62C0B1, OnStateChange @0x62C2D7;
+//  @0x62C323, the create @0x62BF06, the validate callback called @0x62C0AA, OnStateChange
+//  @0x62C2D7;
 //  NapiNPProtocol_PumpRecvQueues @0x6266A0 - the handler with 1 @0x6267AD;
 //  CNapiNPConnection_Create @0x62ACB0 - the counter @0x62B282..0x62B296;
 //  CNapiNPConnection_OnStateChange @0x626060 - connection_id @0x62619C, SendSessionInit

@@ -118,9 +118,15 @@ void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &log
 // session's create reached state 5), then its destroy: the record {role 2 (a client), 2, 0, 0,
 // "N.C:CSSAC", 0, ""} latched only where none is, the request, then the teardown's state-5 arm:
 // the CLIENT removal line, the 0x46s to address 0 (the manager's loopback FIFO, no wire), and the
-// client callback, whose process latch keeps the first record (the switch over a 2-class record
-// with reason 0 does nothing). Its NET DISCONNECTING line needs the connect log, which this
-// host's own new connection turned off at its session create, so it is never written here.
+// client callback, whose process latch keeps the first record. Its switch runs over the latch:
+// over the CSSAC record (reason 0) it does nothing, and over a stale record an earlier kick
+// latched it stores that record's exit reason (7, 9..19) or queues its input event (36 for code
+// 34, else 3). Neither reaches anything: no reader sees the exit reason before the next mission
+// start clears it, and the input queue is read only by the in-mission frames' input pass, after
+// that start has emptied it. Its other stores have no reader on this path either: the active
+// connection id, the loading timeout flag the same create sets 0 again, and the joined session's
+// strings. Its NET DISCONNECTING line needs the connect log, which this host's own new connection
+// turned off at its session create, so it is never written here.
 // The loopback's 0x46s reach the twin at the next manager receive (drained ahead of the socket):
 // its handler latches the client's record on it only where none is and requests its disconnect,
 // and the protocol pump's pending walk destroys it.
@@ -131,8 +137,17 @@ void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &log
 //  @0x4C9D7D; CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the line @0x6253D2, the
 //  state-5 burst @0x6254BF..0x6254D3, the client callback @0x6254E7;
 //  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the connect log's test ahead of
-//  @0x4C6486, the latch @0x4C6535..0x4C6559, the switch's `dc == 2` @0x4C6563 and reason test
-//  @0x4C6571; NapiNPServer_HandleNewConnection @0x4C8040 - g_ConnectLogEnabled cleared
+//  @0x4C6486, active_connection_id @0x4C6495, g_LoadingTimeoutFlag @0x4C64A4, the strings
+//  @0x4C64AE..0x4C6521, the latch @0x4C6535..0x4C6559, the switch's `dc == 2` @0x4C6563 and
+//  reason test @0x4C6571, its stores @0x4C65A2..0x4C677C and Input_QueueEvent called @0x4C67A4
+//  (36 from code 34's arm @0x4C6594..0x4C6596, else 3);
+//  CNapiGameSession_CreateServerConnection - g_LoadingTimeoutFlag 0 @0x4C9DF8;
+//  Session_ResetForStart - the exit reason cleared @0x5202CF; Game_StartMission - the exit
+//  reason cleared @0x525B16, Input_ResetAllState called @0x525C66; Input_ProcessFrame @0x49D520
+//  (the queue's one reader, Input_DequeueEvent called @0x49D5BA) - called by
+//  Game_ProcessMainFrame @0x52661D and UI_ProcessMenuScreenFrame @0x54E695, the in-mission
+//  screen pass; Input_ResetAllState - the queue's memset @0x497EE1..0x497EE6;
+//  NapiNPServer_HandleNewConnection @0x4C8040 - g_ConnectLogEnabled cleared
 //  @0x4C80AF; CNapiNPManager_SendTo @0x61EC20 - the address test @0x61EC59, the FIFO's write
 //  called @0x61ECC6; Nwu_HandleDisconnect @0x623CE0 - the latch @0x6240A8..0x6240BA,
 //  RequestDisconnect called @0x6240C4; NapiNPProtocol_Pump @0x62A650 - the pending walk
@@ -264,9 +279,13 @@ bool queue_unstopped_join(UnstoppedServer &server, const PeerAddr &from,
 // new-connection refusal byte 6); a held node at the sender's address whose CI and CK match is
 // sent its 0x82 again and nothing more, any other is destroyed (its removal line, its burst);
 // then the create (the process's connection counter, the server keys), the validate callback
-// over the dead session's words, set in session again by the browse's or the join's network
-// type (the join lock 14 / 2, the address bans 14 / 3, the held nodes against the capacity
-// 14 / 4, or 14 / 5 with the lineup queue open), a refused node going with no line; then the
+// over the dead session's words (the join lock 14 / 2, the address bans 14 / 3, the held nodes
+// against the capacity 14 / 4, or 14 / 5 with the lineup queue open), a refused node going with
+// no line. The lock and ban tests run under is_in_session, which every pump of a held server
+// meets set: the error arm cleared it with the network type, and every join attempt follows a
+// browse whose network type sets it again (the LAN search's, or the NovaWorld menu's entry; the
+// join's own state machine sets none), while the one clear that keeps the network type, the
+// full destroy's, follows its session reset, which stops the held server. Then the
 // accept: the node filled as the live host fills one (fill_joined_node), its state change's
 // receive stamp at `now_ms`, the new-connection callback's disabling line while the connect log
 // is still on and its MPS negotiation, the 0x82 over `socket`, the /INOUT line, and the two CS
@@ -275,20 +294,25 @@ bool queue_unstopped_join(UnstoppedServer &server, const PeerAddr &from,
 // [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the handler called with 1 @0x6267AD;
 //  NapiNPProtocol_HandleClientJoin @0x62B750 - HK @0x62BDD5 (3), PW @0x62BE18 (4), PV2 @0x62BE40
 //  (7), NA @0x62BE7D (5), +0x1F7 @0x62BE8F (6), FindConnection(1, sender) @0x62BEBA, the
-//  retransmit's SendSessionInit @0x62BEE9 (return @0x62BEF1), CNapiNPConnection_Destroy
-//  @0x62BEFB, CNapiNPConnection_Create @0x62BF06, the keys @0x62BF5E / @0x62BF99, the validate
-//  callback +0x2D0 called @0x62C0B1, the refusal @0x62C0E7 and the destroy @0x62C248, the state
-//  set @0x62C2D2 and CNapiNPConnection_OnStateChange called @0x62C2D7;
+//  retransmit's state 1 @0x62BECA, CI @0x62BED4, CK @0x62BEE0 and SendSessionInit @0x62BEE9
+//  (return @0x62BEF1), CNapiNPConnection_Destroy @0x62BEFB, CNapiNPConnection_Create @0x62BF06,
+//  the keys @0x62BF5E / @0x62BF99, the validate callback +0x2D0 (loaded @0x62C06E, `call edi`
+//  @0x62C0AA, its result's `jge` @0x62C0B1), the refusal @0x62C0E7 and the destroy @0x62C248,
+//  the state set @0x62C2D2 and CNapiNPConnection_OnStateChange called @0x62C2D7;
 //  CNapiNPConnection_Create @0x62ACB0 - the counter @0x62B282..0x62B296;
 //  CNapiNPConnection_Destroy @0x62A4B0 - TeardownActiveConnection only in states 1 / 5
 //  @0x62A4F0..0x62A4F9;
 //  CNapiNetwork_ValidateJoinRequest @0x4C61B0 - is_in_session @0x4C61C1, g_ServerJoinLocked
 //  @0x4C61CA (2), g_BannedIdList @0x4C6217 (3), the count @0x4C623F (4 / 5 @0x4C624E);
+//  PostMenu_RouteMissionExit @0x568460 - the error arms' SetNetworkType(0) called @0x5686E1;
 //  UI_StartLANSessionSearch @0x558300 - CNapiNetwork_SetNetworkType called @0x55831F;
 //  UI_ProcessLANSessionStateMachine - SetNetworkType(1) called @0x558E8C;
+//  MultiPlayer_JoinSessionStateMachine @0x56A320 (no SetNetworkType call);
 //  CNapiNetwork_SetNetworkType @0x4C4A50 - is_in_session @0x4C4A85;
+//  CNapiGameSession_FullDestroy @0x4C96A0 - CNapiGameSession_ResetActiveSession called
+//  @0x4C96E2 ahead of the is_in_session clear @0x4C973D;
 //  CNapiNPConnection_OnStateChange @0x626060 - connection_id from the counter @0x62619C,
-//  cb_server_1 @0x6261CD, SendSessionInit @0x6261FC, LogPlayerAdded @0x626204;
+//  cb_server_1 called @0x6261C6, SendSessionInit @0x6261FC, LogPlayerAdded @0x626204;
 //  NapiNPServer_HandleNewConnection @0x4C8040 - the disabling line @0x4C80A7, the MPS
 //  @0x4C818D..0x4C81E4, ++np_count @0x4C820D]
 void join_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
@@ -315,6 +339,12 @@ void join_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		return;
 	}
 	if (UnstoppedNode *existing = find_unstopped_node(server, from)) {
+		// Retail's retransmit also wants the node in state 1, which every held node is: a
+		// server-side node enters it at the accept and leaves it only at its destroy, a
+		// disconnect request on it setting just its pending byte.
+		// [orig: NapiNPProtocol_HandleClientJoin - `cmp [eax+1Ch], 1` @0x62BECA, the state store
+		//  @0x62C2D4; CNapiNPConnection_RequestDisconnect @0x61E0F0 - state 1's pending store
+		//  @0x61E107]
 		if (existing->conn.client_ci == auth.ci && existing->conn.client_ck == auth.ck) {
 			const std::vector<uint8_t> datagram =
 					make_server_auth_datagram(auth, from, existing->conn);
@@ -326,6 +356,8 @@ void join_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 	}
 	const uint32_t connection_id = next_connection_index();
 	const ConnectionKeys server_keys = manager_connection_keys();
+	// The lock and ban tests' is_in_session gate always passes here (the witness above).
+	// [orig: CNapiNetwork_ValidateJoinRequest - is_in_session @0x4C61C1]
 	if (server.join_locked) {
 		refuse(14, 2);
 		return;
