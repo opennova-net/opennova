@@ -5375,6 +5375,11 @@ add_test(NAME precipitation_floor COMMAND precipitation_floor_test)
 add_executable(probe_force_pass_test world/probe_force_pass_test.cpp)
 target_link_libraries(probe_force_pass_test PRIVATE opennova_runtime)
 add_test(NAME probe_force_pass COMMAND probe_force_pass_test)
+# D-NET-NEW-L6-10 / D-NET-515: the class-C settle against a placed static: a parked Chinook
+# pushed off a pure-yaw static over the settle and the first ticks, on retail's words.
+add_executable(settle_static_contact_test world/settle_static_contact_test.cpp)
+target_link_libraries(settle_static_contact_test PRIVATE opennova_runtime)
+add_test(NAME settle_static_contact COMMAND settle_static_contact_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the

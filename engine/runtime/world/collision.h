@@ -299,7 +299,9 @@ void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16);
 // (D-NET-NEW-L6-10). [orig: BoneCallback_Simple @0x4E2600 (the build @0x4E2662)
 // and BoneCallback_Generic @0x4E26D0 (@0x4E2745) call
 // Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 on every unscaled
-// placement, whose yaw stage @0x6140B2..0x6141DA runs fsin / fcos]
+// placement, whose yaw stage @0x6140B2..0x6141DA runs fsin / fcos; a building's,
+// decoration's or powerup's is built once by Entity_InitFromModel @0x40E0CC, the
+// same builder, which then sets Flags 0x20000 @0x40E105 so the callbacks keep it]
 CollisionMatrix collision_matrix_from_placement(int32_t heading, int32_t pitch_bam,
                                                 int32_t roll_bam, const int32_t pos[3],
                                                 int32_t scale_q16);
