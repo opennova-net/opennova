@@ -318,7 +318,7 @@ void test_the_net_quality_walk_samples_an_orphaned_row() {
 // (100 ms, ten past) sample the orphaned row alone, its 300 clamped 255, 255 * 255 / 1000 = 65;
 // at slot 11 (nine past) both, 51. A first sampled row deep in the table is reached (slots 20
 // and 29, and 20 alone with the other at 30), and the walk stops at the table's end (slots 30
-// and 31), where retail's reads on past g_PlayerSlots (the PERMANENT candidate note,
+// and 31), where retail's reads on past g_PlayerSlots (PERMANENT, ratified 2026-10-22, Q12-2 (a),
 // D-NET-NEW-L1-31).
 // [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the count from g_PlayerSlotCapacity @0x4C535B, the
 //  10 @0x4C53CC, `--count` @0x4C5400, `jg` @0x4C540B, the ping term @0x4C5442..0x4C5457]

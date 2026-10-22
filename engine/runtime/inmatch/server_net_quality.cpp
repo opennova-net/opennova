@@ -186,12 +186,15 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	// the last sampled one, so a row ten or more past the previous sampled row is never reached.
 	// Each sampled row's ten-sample mean is summed as it stands; the 255 clamp is the average's,
 	// past the walk (net_quality_host_ping_metric). Past the table's end retail's walk reads on
-	// into the memory after g_PlayerSlots, which ours never does: it stops at the capacity
-	// (a PERMANENT candidate note, D-NET-NEW-L1-31).
+	// into the memory after g_PlayerSlots, which ours never does: it stops at the capacity.
+	// PERMANENT (ratified 2026-10-22 by the maintainer, Q12-2 (a)): a deliberate fix of a retail
+	// out-of-bounds read; the table sits at a random offset in its buffer and only its own
+	// rows are zeroed, so what lies past it is no session's data (D-NET-NEW-L1-31).
 	// [orig: CNetQuality_UpdateMetrics - the count from g_PlayerSlotCapacity @0x4C535B, the
 	//  `count <= 0` exit @0x4C536D, the 10 @0x4C53CC, `--count` @0x4C5400, `jg` @0x4C540B; the
 	//  ring's sum over ten @0x4C53AA..0x4C53F7 added unclamped @0x4C53FA; the clamp on the
-	//  walk's average @0x4C5442..0x4C5448]
+	//  walk's average @0x4C5442..0x4C5448; Server_AllocatePlayerSlotTable @0x51C180 - the
+	//  random offset @0x51C1A4..0x51C1BC, the maxPlayers-only memset @0x51C1CB]
 	int32_t count = static_cast<int32_t>(capacity);
 	for (uint32_t slot = 0; count > 0 && slot < capacity; ++slot) {
 		if (const NapiNPConnection *conn = by_slot[slot]) {
