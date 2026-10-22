@@ -877,7 +877,24 @@ struct WireDynamicCollisionProxy {
     // Numeric handle equality alone is never treated as identity.
     EntityHandle registry_twin;
     int32_t model_id = -1;          // CollisionWorld model registry id; -1 = unresolved
+    // The table's copy of the mover's Position, taken at the tick's proximity
+    // build: the coarse gates read it, the candidate slices' build and the
+    // trace's slot gate.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 (the copies
+    //  @0x4B9393..0x4B93A7, the entity pointer @0x4B93B3);
+    //  Projectile_RaycastProximitySlots @0x4E5340 (the slot gate on
+    //  g_DynProxY/X/Z @0x4E55E6..0x4E575A)]
     FixedVec3 position_q16;
+    // The mover's LIVE Position, heading and pitch / roll samples, which the
+    // narrow phase reads through the table's entity pointer: the bound-sphere
+    // gate and the posed collision faces. The table build seeds the position
+    // from position_q16 (replace_wire_collision_proxies); a move after the
+    // build writes all four (set_wire_dynamic_proxy_live).
+    // [orig: Projectile_RaycastProximitySlots @0x4E5340 (g_DynProxEntity
+    //  @0x4E5760, the Physics_RaycastAgainstBoneCollision call @0x4E578D);
+    //  Physics_RaycastAgainstBoneCollision @0x4E4CB0 (the live +0 / +4..+12
+    //  reads @0x4E4CD4..0x4E4D23)]
+    FixedVec3 live_position_q16;
     int32_t heading_bam = 0;        // reconstructed entity+16 (yaw_byte << 24)
     int32_t pitch_bam = 0;          // retained entity+20 spawn/dead sample
     int32_t roll_bam = 0;           // retained entity+24 spawn/dead sample
@@ -1304,10 +1321,6 @@ public:
             std::vector<WirePersonCollisionProxy> persons,
             std::vector<WireDynamicCollisionProxy> dynamics,
             uint16_t local_player_wire_handle = 0xFFFF);
-    // The decoded person's entity+0 boundRadius as its current proxy carries
-    // it (0 when no proxy names the handle): a client's remote person is a
-    // replica row, never a registry entity.
-    int32_t wire_person_bound_radius_q16(uint16_t wire_handle) const;
     // A decoded person's update ran after the table was built: its proxy takes the
     // person's live Position and dead bit (a handle no proxy names is ignored), which
     // the next repulsion's dead skip and push and the next trace's bone walk re-read
@@ -1318,6 +1331,16 @@ public:
     //  @0x4B3B93..0x4B3B99)]
     void set_wire_person_proxy_live(uint16_t wire_handle, const FixedVec3 &position,
                                     bool dead);
+    // A decoded pool-1 mover moved after the table was built: its proxy takes the
+    // mover's live Position, heading and pitch / roll (a handle no proxy names is
+    // ignored), which the next trace's narrow phase reads through the table's entity
+    // pointer; the table's copy, which the slot gate reads, stays as built (D-NET-196).
+    // [orig: Projectile_RaycastProximitySlots @0x4E5340 (the slot gate on the copy
+    //  @0x4E55E6..0x4E575A, g_DynProxEntity @0x4E5760); Physics_RaycastAgainstBoneCollision
+    //  @0x4E4CB0]
+    void set_wire_dynamic_proxy_live(uint16_t wire_handle, const FixedVec3 &position,
+                                     int32_t heading_bam, int32_t pitch_bam,
+                                     int32_t roll_bam);
     // The decoded person's current proxy (null when none names the handle).
     const WirePersonCollisionProxy *wire_person_proxy(uint16_t wire_handle) const;
     // The decoded pool-1 mover's current proxy (null when none names the

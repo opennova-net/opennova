@@ -5271,6 +5271,12 @@ add_test(NAME netsim_joiner_replica_middle_leg COMMAND netsim_joiner_replica_mid
 add_executable(netsim_client_replica_rider_middle_leg_test netsim/client_replica_rider_middle_leg_test.cpp)
 target_link_libraries(netsim_client_replica_rider_middle_leg_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME netsim_client_replica_rider_middle_leg COMMAND netsim_client_replica_rider_middle_leg_test)
+# D-NET-196: a joiner's decoded rows join the proximity tables at the entity update's own
+# build, so its projectile pass reads the previous build; a pool-1 mover's proxy gates on the
+# table's copy and poses the live mover.
+add_executable(wire_proxy_table_age_test world/wire_proxy_table_age_test.cpp)
+target_link_libraries(wire_proxy_table_age_test PRIVATE opennova_runtime)
+add_test(NAME wire_proxy_table_age COMMAND wire_proxy_table_age_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

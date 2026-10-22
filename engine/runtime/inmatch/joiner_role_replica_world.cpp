@@ -1096,7 +1096,16 @@ void JoinerRole::mirror_predicted_vehicles() {
 // proxies: Player/Infantry rows join the person walk, pool-1 movers carry
 // their authored collision geometry at the decoded pose. Wire H remains
 // presentation identity; local World authority never receives a cloned
-// entity or an H->L owner mapping.
+// entity or an H->L owner mapping. The World's entity update calls it at its
+// proximity build (World::before_proximity_build, installed by the pump), so
+// the pool-1 walk and the projectile pass ahead of it read the table the
+// previous update built, and a row the receive spawned since joins no trace
+// until then (D-NET-196).
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9,
+//  the Weapon_UpdateAllProjectiles call @0x4C223A, the Entity_BuildProximityLists_Pool01
+//  call @0x4C240A; the build's other callers run at the load and the teleports only
+//  (@0x43D4FD, @0x4C20F5, @0x4F7F43), and Game_StartMission's @0x525E63 sits behind
+//  the is_authority jz @0x525E58]
 void JoinerRole::refresh_wire_collision_proxies() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;
@@ -1150,8 +1159,8 @@ void JoinerRole::refresh_wire_collision_proxies() {
 				proxy.moving = (entity.move_input & world::Entity::kMoveOrderMoving) != 0;
 				// The row's Flags dead bit as it stands at the build, which the
 				// person repulsion's live re-read skips (D-NET-NEW-L4-2); a row
-				// updated after the build carries its own (the pump's
-				// before_pool0_walk hook, set_wire_person_proxy_live).
+				// updated after the build carries its own
+				// (sync_wire_collision_proxies_live).
 				proxy.dead = (entity.rm_entity_flags & world::kEntityFlagDead) != 0;
 				person_proxies.push_back(proxy);
 				continue;
@@ -1202,6 +1211,31 @@ void JoinerRole::refresh_wire_collision_proxies() {
 	world.ai.collision->replace_wire_collision_proxies(
 			std::move(person_proxies), std::move(dynamic_proxies),
 			self_wire_handle);
+}
+
+// Each decoded row's proxy takes the row's live words, which a row moved since the
+// table was built carries (the receive's snaps, ClientRuntime's pool-1 visits, the
+// pool-0 visits around the own body): a person its Position and Flags dead bit, a
+// pool-1 mover its Position, heading and pitch / roll. The table's copies stay as
+// built, and a row the table does not hold gets no proxy (D-NET-196).
+// [orig: Entity_MovementCollisionResolver @0x4B2BD0 (g_PersonProxEntity @0x4B3B7A, the
+//  live reads @0x4B3B89..0x4B3B99); Physics_RaycastAgainstProximityList @0x4E4A30 (the
+//  Physics_RaycastAgainstBoneSections call @0x4E4C59); Projectile_RaycastProximitySlots
+//  @0x4E5340 (g_DynProxEntity @0x4E5760, the Physics_RaycastAgainstBoneCollision call
+//  @0x4E578D)]
+void JoinerRole::sync_wire_collision_proxies_live() {
+	world::World &world = kernel_->world;
+	if (world.ai.collision == nullptr) return;
+	for (const replication::ClientEntityState &row : runtime->state().entities) {
+		const world::FixedVec3 position{row.x, row.y, row.z};
+		if (row.cls == EntityClass::Player || row.cls == EntityClass::Infantry) {
+			world.ai.collision->set_wire_person_proxy_live(row.handle, position,
+					(row.rm_entity_flags & world::kEntityFlagDead) != 0);
+		} else if (wire_handle::pool(row.handle) == wire_handle::kPoolItem) {
+			world.ai.collision->set_wire_dynamic_proxy_live(row.handle, position,
+					row.heading_bam, row.pitch_bam, row.roll_bam);
+		}
+	}
 }
 
 } // namespace opennova::inmatch

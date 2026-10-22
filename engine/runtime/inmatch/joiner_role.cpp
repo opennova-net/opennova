@@ -900,10 +900,18 @@ void JoinerRole::pump() {
 	//  VehicleMenu_PollAvailability @0x5266A1, Entity_UpdateAllEntities @0x52674B]
 	rt.poll_vehicle_menu(world, kernel.items_table());
 
-	// Received projectile/reload gameplay and the decoded remote collision
-	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
-	// them here is the retail recv-before-actions boundary, not presentation work.
-	refresh_wire_collision_proxies();
+	// Received projectile/reload gameplay is a live input to this frame's
+	// entity/round/weapon pumps; applying it here is the retail recv-before-actions
+	// boundary, not presentation work. The decoded rows' collision proxies are the
+	// table the previous entity update built (rebuilt at this one's proximity build,
+	// below); the rows the receive and ClientRuntime's leg moved since then give
+	// their proxies their live words, which every trace from here re-reads past its
+	// coarse gate on the table's copy (D-NET-196).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9,
+	//  the Weapon_UpdateAllProjectiles call @0x4C223A, the Entity_BuildProximityLists_Pool01
+	//  call @0x4C240A; Projectile_RaycastProximitySlots @0x4E5340 (the slot gate on the
+	//  copy @0x4E55E6..0x4E575A, g_DynProxEntity @0x4E5760)]
+	sync_wire_collision_proxies_live();
 	lap.mark(devtools::Slot::SIM_CLIENT_PROXIES);
 	sync_replica_weapon_slots(rt.state(), world, self_wire_handle());
 	apply_gameplay_events();
@@ -939,20 +947,29 @@ void JoinerRole::pump() {
 	//  pool-0 walk @0x4C2426..0x4C2472; Entity_MovementCollisionResolver @0x4B2BD0 (the
 	//  dead skip @0x4B3B89..0x4B3B8D, the live reads @0x4B3B93..0x4B3B99);
 	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 (the death gate @0x4B4BF1)]
-	world.before_pool0_walk = [&world, &rt] {
+	world.before_pool0_walk = [this, &rt] {
 		rt.view().tick_remote_motion_through_self();
-		if (world.ai.collision == nullptr) return;
-		for (const replication::ClientEntityState &row : rt.state().entities)
-			if (row.cls == EntityClass::Player || row.cls == EntityClass::Infantry)
-				world.ai.collision->set_wire_person_proxy_live(row.handle,
-						world::FixedVec3{row.x, row.y, row.z},
-						(row.rm_entity_flags & world::kEntityFlagDead) != 0);
+		sync_wire_collision_proxies_live();
+	};
+	// The decoded rows join the entity update's proximity build, after its pool-1 walk
+	// and its projectile pass: the World movers' poses first reach their rows, as the
+	// build reads the movers' live entities, then the proxies are rebuilt from the rows
+	// (D-NET-196). The after-tick mirror below still covers a tick whose entity update
+	// is not admitted.
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9,
+	//  the Weapon_UpdateAllProjectiles call @0x4C223A, the Entity_BuildProximityLists_Pool01
+	//  call @0x4C240A; Entity_BuildProximityLists_Pool01 @0x4B9340 (the pool-1 copies
+	//  @0x4B9389..0x4B93A7)]
+	world.before_proximity_build = [this] {
+		mirror_predicted_vehicles();
+		refresh_wire_collision_proxies();
 	};
 	// The tick's own phases land on the SIM_WORLD_* / SIM_UPDATE_* rows inside run_logic_tick.
 	world.run_logic_tick(
 			/*is_authority=*/false,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
+	world.before_proximity_build = nullptr;
 	world.before_pool0_walk = nullptr;
 	// The replica rows past the own body's pool-0 slot take their visits now, after
 	// the World's entity pass ran the own body: retail's pool-0 walk updates every
@@ -980,6 +997,12 @@ void JoinerRole::pump() {
 	// the retail second carrier-follow phase; doing it before the world mover
 	// leaves children one tick behind their vehicle.
 	if (!preround_active) rt.refresh_remote_attachments();
+	// The rows the after-self leg and the recompose moved give their proxies their
+	// live words, which the frame's weapon actions (a knife's ray, a remote slot's)
+	// and the views read past the table's copy (D-NET-196).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - the Entity_UpdateAllEntities call @0x52674B
+	//  ahead of the WeaponAction_ProcessAllEntities call @0x526786]
+	sync_wire_collision_proxies_live();
 	lap.mark(devtools::Slot::SIM_CLIENT_ATTACH);
 	mirror_mission_entities();
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
@@ -1653,6 +1676,11 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		const uint16_t self = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
 		replication::UplinkClientInputs interest;
 		interest.replica = &rt.state();
+		// A decoded person's boundRadius, from the same typed items.def/model result its
+		// spawn takes (the replica pipeline's resolver).
+		interest.person_bound_radius_q16 = [this](uint16_t type_id) -> int32_t {
+			return kernel_->wire_collision_shape_for_type(type_id).bound_radius_q16;
+		};
 		interest.self_wire_handle = self;
 		interest.hud_target_wire_handle = replication::uplink_hud_target_wire_handle(
 				world, *ae, self, kernel.local.aim_wire_person());

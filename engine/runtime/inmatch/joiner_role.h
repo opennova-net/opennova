@@ -350,7 +350,10 @@ private:
 	void apply_mounted_ammo_update();
 	void mirror_mission_entities();
 	void mirror_predicted_vehicles();
+	// The decoded rows' collision proxies, rebuilt at the World's proximity build
+	// (World::before_proximity_build), and their live words between builds.
 	void refresh_wire_collision_proxies();
+	void sync_wire_collision_proxies_live();
 	void apply_gameplay_events();
     void apply_round_event(const replication::ClientRoundEvent &);
 

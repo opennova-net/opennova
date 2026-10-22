@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include <net/npwire/ingame_decode.h>   // EntityClass / PlayerExtendedUplink
@@ -197,6 +198,12 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent, bool s
 // [orig: Server_BuildEntityPriorityListForPlayer @0x50DF20]
 struct UplinkClientInputs {
 	const ClientState *replica = nullptr;
+	// A decoded pool-0 person's entity+0 boundRadius, by its type: the walk reads the
+	// entity's own word, which its spawn set, never a proximity table's copy (a person
+	// spawned since the last table build, or through a pre-round, has its radius all
+	// the same). Unset reads 0. [orig: Server_BuildEntityPriorityListForPlayer
+	//  @0x50DF20 - the pool-0 cursor @0x50DFE1, `sub ebp, [esi]` @0x50E087]
+	std::function<int32_t(uint16_t type_id)> person_bound_radius_q16;
 	uint16_t self_wire_handle = 0xFFFF;
 	uint16_t hud_target_wire_handle = 0xFFFF;
 	// The main loop's frame statistics the two stat bytes carry, as their low

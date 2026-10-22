@@ -5,8 +5,9 @@
 // person's collision proxy then carries its live Position and live dead bit, which the
 // own body's resolver re-reads through the table's entity pointer, while the proxy's
 // table copy (the reach gate's) keeps the position it was built at. A row past the own
-// slot moves and dies behind the own body, and its proxy keeps what the own body read
-// (L5-s14, V-ROLL-P's D1 / D2 on row 2).
+// slot moves and dies behind the own body (L5-s14, V-ROLL-P's D1 / D2 on row 2); its
+// live words reach its proxy after the World's entity pass, for the frame's weapon
+// actions, and its copy stays as built (L5-s15).
 // [orig: Entity_UpdateAllEntities @0x4C2100 - the proximity build @0x4C240A, the pool-0
 //  walk @0x4C2426..0x4C2472; Entity_MovementCollisionResolver @0x4B2BD0 (the reach gate
 //  on the copy @0x4B3AF6..0x4B3B74, the dead skip @0x4B3B89..0x4B3B8D, the live reads
@@ -160,15 +161,16 @@ void test_the_rows_through_the_own_slot_move_inside_the_entity_pass() {
 	CHECK(low_proxy->live_position_q16.x == low->x && low_proxy->live_position_q16.y == low->y &&
 			low_proxy->live_position_q16.z == low->z);
 	CHECK(low_proxy->position_q16.x == low_before);
-	// The high row moved behind the own body: its proxy keeps what the own body read.
-	CHECK(high_proxy->live_position_q16.x == high_before);
+	// The high row moved behind the own body: its table copy keeps the position it was
+	// built at, and its live words follow it once the after-self leg ran.
+	CHECK(high_proxy->live_position_q16.x == high->x);
 	CHECK(high_proxy->position_q16.x == high_before);
 }
 
 // The two remote players' records go dead in one pump. The low row dies in its own update
 // inside the entity pass (its death edge latches its Flags dead bit), so its proxy carries
 // that live bit to the own body's resolve after it, which passes over it. The high row dies
-// behind the own body, so its proxy keeps the alive bit the own body read.
+// behind the own body, and its live bit reaches its proxy after the entity pass.
 void test_a_row_dying_through_the_own_slot_carries_its_live_dead_bit() {
 	Harness h;
 	for (int i = 0; i < 4; ++i) h.pump(1, 20, 40);
@@ -188,7 +190,7 @@ void test_a_row_dying_through_the_own_slot_carries_its_live_dead_bit() {
 	CHECK((low->rm_entity_flags & w::kEntityFlagDead) != 0);
 	CHECK((high->rm_entity_flags & w::kEntityFlagDead) != 0);
 	CHECK(low_proxy->dead);
-	CHECK(!high_proxy->dead);
+	CHECK(high_proxy->dead);
 }
 
 } // namespace

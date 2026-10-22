@@ -1168,11 +1168,11 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 		const double dxd = dx, dyd = dy, dzhd = dz_half;
 		const double dist3 = std::min(std::sqrt(dzhd * dzhd + dxd * dxd + dyd * dyd), kMaxDistance);
 		// entity+0 boundRadius: a pool-1 row's materialized twin carries it; a
-		// pool-0 person is its decoded collision proxy's (the same model bound
-		// the retail client's own pool-0 entity holds).
+		// pool-0 person's is its type's model bound (the word the retail client's
+		// own pool-0 entity holds from its spawn).
 		const int32_t bound_q16 = native != nullptr ? native->bound_radius.q16
-				: (pool == 0 && world.collision != nullptr
-						? world.collision->wire_person_bound_radius_q16(row->handle) : 0);
+				: (pool == 0 && interest.person_bound_radius_q16
+						? interest.person_bound_radius_q16(row->type_id) : 0);
 		int32_t distance = static_cast<int32_t>(static_cast<uint32_t>(retail_ftol(dist3)) -
 				static_cast<uint32_t>(bound_q16)) >> 16;
 		if (distance > 2048) continue;

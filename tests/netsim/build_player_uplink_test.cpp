@@ -124,10 +124,12 @@ bool run_field_mapping() {
 	return true;
 }
 
-// A remote person's distance is measured to its bound sphere: its decoded
-// collision proxy carries the entity+0 boundRadius the retail client's own
-// pool-0 entity holds. (100,0,0) less a 2.0 radius is 98 tiles: 1026 + 712.
-// [orig: Server_BuildEntityPriorityListForPlayer --
+// A remote person's distance is measured to its bound sphere: the entity+0
+// boundRadius the retail client's own pool-0 entity holds from its spawn, which
+// its type gives (never a proximity table's copy, which a person spawned since
+// the last build does not have yet). (100,0,0) less a 2.0 radius is 98 tiles:
+// 1026 + 712.
+// [orig: Server_BuildEntityPriorityListForPlayer -- the pool-0 cursor @0x50DFE1,
 //  `sub ebp, [esi]` (boundRadius) @0x50E087, `sar ebp, 10h` @0x50E089]
 bool run_interest_person_bound_radius() {
 	ns::ClientState replica;
@@ -142,17 +144,13 @@ bool run_interest_person_bound_radius() {
 	w::World world;
 	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	w::CollisionWorld collision;
-	world.collision = &collision;
-	w::WirePersonCollisionProxy proxy;
-	proxy.wire_handle = 0x0000;
-	proxy.position_q16 = w::FixedVec3{person.x, 0, 0};
-	proxy.bound_radius_q16 = 2 << 16;
-	collision.replace_wire_collision_proxies({proxy}, {});
+	world.collision = &collision; // no proxy: the radius comes from the type
 	w::Entity self{};
 	self.team = 1;
 	w::AiEntity body{};
 	ns::UplinkClientInputs inputs;
 	inputs.replica = &replica;
+	inputs.person_bound_radius_q16 = [](uint16_t) -> int32_t { return 2 << 16; };
 	const nw::PlayerExtendedUplink up = ns::build_player_uplink(world, self, body, inputs);
 	if (!expect(up.priority_handle_0 == 0x0000 && up.priority_score_0 == 1738,
 			"a remote person's distance is to its bound sphere")) {

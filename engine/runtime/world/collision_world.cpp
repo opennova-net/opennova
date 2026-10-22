@@ -295,6 +295,11 @@ void CollisionWorld::replace_wire_collision_proxies(
     //  @0x4B93F5..0x4B9409, the entity pointer @0x4B9410)]
     for (WirePersonCollisionProxy &person : persons)
         person.live_position_q16 = person.position_q16;
+    // The same for each mover's Position.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 (the copies
+    //  @0x4B9393..0x4B93A7, the entity pointer @0x4B93B3)]
+    for (WireDynamicCollisionProxy &dynamic : dynamics)
+        dynamic.live_position_q16 = dynamic.position_q16;
     wire_person_proxies_ = std::move(persons);
     wire_dynamic_proxies_ = std::move(dynamics);
     wire_local_player_handle_ = local_player_wire_handle;
@@ -311,21 +316,25 @@ void CollisionWorld::set_wire_person_proxy_live(uint16_t wire_handle,
     it->dead = dead;
 }
 
+void CollisionWorld::set_wire_dynamic_proxy_live(uint16_t wire_handle,
+        const FixedVec3 &position, int32_t heading_bam, int32_t pitch_bam, int32_t roll_bam) {
+    const auto it = std::lower_bound(wire_dynamic_proxies_.begin(), wire_dynamic_proxies_.end(),
+            wire_handle, [](const WireDynamicCollisionProxy &proxy, uint16_t handle) {
+                return proxy.wire_handle < handle;
+            });
+    if (it == wire_dynamic_proxies_.end() || it->wire_handle != wire_handle) return;
+    it->live_position_q16 = position;
+    it->heading_bam = heading_bam;
+    it->pitch_bam = pitch_bam;
+    it->roll_bam = roll_bam;
+}
+
 const WirePersonCollisionProxy *CollisionWorld::wire_person_proxy(uint16_t wire_handle) const {
     const auto it = std::lower_bound(wire_person_proxies_.begin(), wire_person_proxies_.end(),
             wire_handle, [](const WirePersonCollisionProxy &proxy, uint16_t handle) {
                 return proxy.wire_handle < handle;
             });
     return it != wire_person_proxies_.end() && it->wire_handle == wire_handle ? &*it : nullptr;
-}
-
-int32_t CollisionWorld::wire_person_bound_radius_q16(uint16_t wire_handle) const {
-    const auto it = std::lower_bound(wire_person_proxies_.begin(), wire_person_proxies_.end(),
-            wire_handle, [](const WirePersonCollisionProxy &proxy, uint16_t handle) {
-                return proxy.wire_handle < handle;
-            });
-    return it != wire_person_proxies_.end() && it->wire_handle == wire_handle
-            ? it->bound_radius_q16 : 0;
 }
 
 const WireDynamicCollisionProxy *CollisionWorld::wire_dynamic_proxy(uint16_t wire_handle) const {

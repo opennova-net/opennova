@@ -1334,6 +1334,14 @@ public:
     // it. [orig: g_EntityUpdateCounter, `add g_EntityUpdateCounter,esi` in
     //  Entity_UpdateAllEntities @0x4C2639]
     uint32_t entity_update_counter = 0;
+    // The embedder's leg at the entity update's proximity build, ahead of the World's
+    // own tables: a joiner rebuilds its decoded rows' collision proxies there, after the
+    // pool-1 walk and the projectile pass, so those read the table the previous update
+    // built, as retail's do (D-NET-196). Empty on every other peer. [orig:
+    // Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+    // Weapon_UpdateAllProjectiles call @0x4C223A, the Entity_BuildProximityLists_Pool01
+    // call @0x4C240A]
+    std::function<void()> before_proximity_build;
     // The embedder's leg between the entity update's proximity build and its pool-0
     // walk: a joiner's replica pool-0 rows through its own body's slot take their
     // updates there, so the own body's update re-reads them moved (D-NET-196). Empty

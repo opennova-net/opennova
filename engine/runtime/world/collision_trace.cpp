@@ -974,6 +974,11 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 continue;
             const bool only_this = trace.only_entity.valid();
             if (only_this && proxy.registry_twin != trace.only_entity) continue;
+            // The slot gate reads the table's copy of the mover's Position; the
+            // bound-sphere gate and the posed faces below read the live mover.
+            // [orig: Projectile_RaycastProximitySlots @0x4E5340 (the gate on
+            //  g_DynProxY/X/Z @0x4E55E6..0x4E575A, then g_DynProxEntity @0x4E5760
+            //  into Physics_RaycastAgainstBoneCollision, the call @0x4E578D)]
             const float sc[3] = {
                 static_cast<float>(proxy.position_q16.x) / io::kFp16One,
                 static_cast<float>(proxy.position_q16.y) / io::kFp16One,
@@ -1001,8 +1006,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 if (profile_trace)
                     trace_profile_.dynamic_faces +=
                         static_cast<int64_t>(proxy_model->faces.size());
-                const int32_t pos[3] = {proxy.position_q16.x, proxy.position_q16.y,
-                                        proxy.position_q16.z};
+                const int32_t pos[3] = {proxy.live_position_q16.x,
+                                        proxy.live_position_q16.y,
+                                        proxy.live_position_q16.z};
                 // The decoded pose mirrors the retail client entity fields the
                 // placement matrix reads: live coarse heading (entity+16 high
                 // byte) plus the retained spawn/dead pitch/roll samples

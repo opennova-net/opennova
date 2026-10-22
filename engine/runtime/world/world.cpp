@@ -226,6 +226,9 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // @0x4b9340 every tick (@0x4c240a) + Entity_BuildProximityListsFromPools
     // @0x4b8eb0 (per-entity candidate slices, every 17th tick @0x4c2416); the statics
     // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
+    // A joiner's decoded rows join the tables here too (D-NET-196): the pool-1 walk and
+    // the projectiles above read the previous update's build.
+    if (world.before_proximity_build) world.before_proximity_build();
     if (world.ai.collision != nullptr) world.ai.collision->build_tick_tables(world);
     lap.mark(devtools::Slot::SIM_UPDATE_PROXIMITY);
     // A joiner's replica pool-0 rows through its own body's slot: they update ahead
