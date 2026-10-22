@@ -645,8 +645,16 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 //  @0x4C0320 - @0x4C06E9, the -1 @0x4C06D8; Entity_SerializeVehicleState @0x460560 - @0x460B47,
 //  the -1 @0x460B3C; Entity_ResetToSpawnState @0x4B9610 - +0x2EC / +0x2E4 / +0x2E8
 //  @0x4B9698..0x4B96A4; ArtyClass_InitFromDef @0x443430 - +0x2C4 = 10 @0x443473]
+// The ewep row's mover reads a person's +0x2D4 word, the spawn reset's Yaw, as its weapon def:
+// on the batch's last tick, while the +0x30F byte (the top byte of the aimPoint X word, which
+// the organic init's anchor writes) is nonzero, it loads [Yaw+0x294] and, counting that byte
+// down, [Yaw+0x298]. Those two garbage-pointer reads are a deliberate fix of a retail bug: ours
+// never runs them over a person (PERMANENT, ratified by the maintainer, Q16-1 (a), 2026-10-22).
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - `mov esi, [ebp+2D4h]` @0x440E8E, the
+//  byte @0x4413A6, @0x4413B0, @0x441417; Entity_ResetToSpawnState @0x4B9610 - +0x2D4
+//  @0x4B96AA; Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8 / @0x4C0238]
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
-// narrowed): ewep, towr, nade, rock, schl, clym, arti, aflr, gflr, stng, arty's barrage,
+// narrowed): ewep's other legs, towr, nade, rock, schl, clym, arti, aflr, gflr, stng, arty's barrage,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
 // pending word, upfx's swap-fade leg, and door's model callbacks.
 static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
