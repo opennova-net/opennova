@@ -961,6 +961,41 @@ void test_the_update_follows_the_rows_move_function() {
 	CHECK(w::body_move_row(*bare, e, &person) == w::PhysicsClass::Org2);
 }
 
+// The same dispatch through the entity update's pool-0 walk: a body on the null row is skipped
+// whole (no update, no tail), a body on the org2 row runs its update.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the nullsub_2 compare @0x4C2466..0x4C246B, the
+//  null test @0x4C246F to the next slot, the call @0x4C2472]
+void test_the_walk_skips_a_null_row_body_whole() {
+	struct Case {
+		uint8_t player_class;
+		bool ran;
+	};
+	for (const Case c : {Case{kNull, false}, Case{kPlyr, true}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		w::Entity *body = r.spawn_remote(c.player_class);
+		CHECK(body != nullptr);
+		if (body == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		body->flags &= ~w::kEntityFlagCarried;
+		body->engine_flags &= ~w::kEntityFlagCarried;
+		body->saved_live_valid = false;
+		const w::EntityHandle handle = body->handle;
+		w::TickContext ctx;
+		ctx.world = r.world.get();
+		ctx.logic_tick = 1;
+		ctx.is_authority = true;
+		r.world->logic_tick = 1;
+		r.world->update_all_entities(ctx);
+		const w::Entity *after = r.world->registry.get(handle);
+		CHECK(after != nullptr && after->saved_live_valid == c.ran);
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // The spawn's class init by the bound row (def+0x148): an org0 row's player body takes
 // Entity_InitOrganicAI, its legs as a placed person's: the anim pick (the player body's AI slot
 // reads zeros: no route, idle 43; the PERMANENT Q8-1 (a) reading of a slot retail would fault
@@ -1053,6 +1088,7 @@ int main() {
 	test_the_plyr_class_init_warms_up_its_channels();
 	test_the_placement_warm_up_counts_by_the_dcb_id();
 	test_the_update_follows_the_rows_move_function();
+	test_the_walk_skips_a_null_row_body_whole();
 	test_an_org_rows_player_body_takes_the_organic_init();
 	test_a_player_bodys_dcb_id_is_its_class_inits();
 	if (failures != 0) {
