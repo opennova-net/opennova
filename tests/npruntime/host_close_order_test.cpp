@@ -895,8 +895,10 @@ inmatch::UnstoppedNode held_node(const PeerAddr &peer, uint32_t client_ck) {
 	node.conn.phase = inmatch::ConnectionPhase::Joined;
 	node.conn.peer = peer;
 	node.conn.client_ck = client_ck;
-	node.conn.server_scrk = "SERVERHELDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD";
-	node.conn.client_scrk = "CLIENTHELDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD";
+	// 62 characters, a drawn key's longest: the 0x82 handler copies SCRK into 64 bytes
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - SCRK @0x629BF0].
+	node.conn.server_scrk = "SERVERHELDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	node.conn.client_scrk = "CLIENTHELDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
 	node.conn.server_sk = 0x0BADF00Du;
 	node.conn.receive_stamp_ms = 1000;
 	node.conn.last_session_send_ms = 1000;
@@ -1232,8 +1234,10 @@ bool held_join(inmatch::UnstoppedServer &server, const inmatch::ServerLogs &logs
 	CHECK(socket.sent.size() == sent_before && server.queue.size() == 1);
 	inmatch::pump_unstopped_server(server, logs, socket, now_ms);
 	CHECK(server.queue.empty());
-	for (const std::vector<uint8_t> &bytes : sent_to(socket, kStock))
-		if (parse_auth_datagram(bytes, reply)) return true;
+	// This pump's sends alone: an earlier join's 0x82 on the same socket is not this one's.
+	for (std::size_t i = sent_before; i < socket.sent.size(); ++i)
+		if (socket.sent[i].first == kStock && parse_auth_datagram(socket.sent[i].second, reply))
+			return true;
 	return false;
 }
 
