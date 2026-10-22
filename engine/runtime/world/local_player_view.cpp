@@ -186,9 +186,12 @@ void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
     Entity *parent = req.use_parent_slot ? world.registry.get(req.parent) : nullptr;
     if (player == nullptr || mount == nullptr || (req.use_parent_slot && parent == nullptr))
         return;
+    // Action 6 only queues the C2S 0x16; the authority's handler (a session-less
+    // world's own) moves the route bit and the EquippedSlot, never the AdmDef
+    // byte +0x2B0. [orig: Input_HandleActionBinding_0 @0x4E04BE..0x4E04F0, the
+    //  parent leg @0x4E04FC..0x4E0526; NapiNPServerMsg_HandleWeaponToggle
+    //  @0x511AFB..0x511B38]
     mount->primary_weapon_slot.redirect_to_parent_slot = req.use_parent_slot;
-    player->equipped_adm_index =
-        req.use_parent_slot ? parent->primary_weapon_slot_adm : mount->primary_weapon_slot_adm;
     sync_local_usegun_weapon_transition(world, w);
 }
 

@@ -923,6 +923,9 @@ int main() {
 		live_gun.primary_weapon_slot.reserve = 37;
 		live_hull.primary_weapon_slot.clip = 123;
 		live_hull.primary_weapon_slot.reserve = 321;
+		// The toggle moves the route bit (EquippedSlot) only, never the AdmDef
+		// byte [orig: NapiNPServerMsg_HandleWeaponToggle @0x511AFB..0x511B38].
+		const auto adm_before = kernel.local.player()->equipped_adm_index;
 		for (bool parent : {true, false, true, false}) {
 			MountedWeaponSlotSelection request;
 			request.use_parent_slot = parent;
@@ -933,8 +936,7 @@ int main() {
 			CHECK(live_gun.primary_weapon_slot.redirect_to_parent_slot == parent);
 			const auto *selected = world.vehicles.resolve_mounted_ammo_slot(live_gun);
 			CHECK(selected == (parent ? &live_hull.primary_weapon_slot : &live_gun.primary_weapon_slot));
-			CHECK(kernel.local.player()->equipped_adm_index ==
-					(parent ? live_hull.primary_weapon_slot_adm : live_gun.primary_weapon_slot_adm));
+			CHECK(kernel.local.player()->equipped_adm_index == adm_before);
 			CHECK(live_gun.primary_weapon_slot.clip == 0 && live_gun.primary_weapon_slot.reserve == 37);
 			CHECK(live_hull.primary_weapon_slot.clip == 123 && live_hull.primary_weapon_slot.reserve == 321);
 		}

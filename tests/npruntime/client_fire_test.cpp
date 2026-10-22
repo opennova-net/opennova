@@ -198,9 +198,11 @@ bool check_mounted_slot_select_fire_and_reload() {
 	dispatch_gameplay(c2s::MOUNTED_WEAPON_SLOT_SELECT,
 			encode_mounted_weapon_slot_selection(select_parent),
 			roster[0], roster, world);
+	// The toggle moves the route bit (EquippedSlot) only, never the AdmDef byte
+	// [orig: NapiNPServerMsg_HandleWeaponToggle @0x511B2C / @0x511B38].
 	if (!expect(live_child->primary_weapon_slot.redirect_to_parent_slot &&
-			player->equipped_adm_index == 6,
-			"C2S 0x16 nonzero selects the validated groundEntity vehicle slot"))
+			player->equipped_adm_index == 5,
+			"C2S 0x16 nonzero selects the validated groundEntity vehicle slot, +0x2B0 kept"))
 		return false;
 
 	// The authoritative C2S 0x06 must spend the selected world MountSlot, not

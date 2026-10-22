@@ -1046,9 +1046,15 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						!world->vehicles.prepare_weapon_slot(*mount))
 					break;
 
+				// The toggle writes the route bit and the EquippedSlot pointer
+				// alone (ours: the bit, which resolve_mounted_ammo_slot follows),
+				// never the AdmDef byte +0x2B0: the 0x31 row and the 0x0A
+				// animDef echo keep it until a fire or a 0x0C case-4 byte moves
+				// it. [orig: NapiNPServerMsg_HandleWeaponToggle - the clear
+				//  @0x511AFB and +0x118 = mount+0x2B4 @0x511B08; the set
+				//  @0x511B2C and +0x118 = parent+0x474 @0x511B38]
 				if (!selection.use_parent_slot) {
 					mount->primary_weapon_slot.redirect_to_parent_slot = false;
-					player->equipped_adm_index = mount->primary_weapon_slot_adm;
 					break;
 				}
 
@@ -1068,7 +1074,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						!world->vehicles.prepare_weapon_slot(*parent))
 					break;
 				mount->primary_weapon_slot.redirect_to_parent_slot = true;
-				player->equipped_adm_index = parent->primary_weapon_slot_adm;
 				break;
 			}
 			case c2s::STANCE_CHANGE: { // STANCE CHANGE [i16 stanceCode] — the crouch/prone replication leg.

@@ -1147,9 +1147,12 @@ void test_binoculars_survive_all_but_the_camera_reset() {
         req.use_parent_slot = true;
         req.mount = r.veh_h;
         req.parent = carrier_h;
+        // The toggle moves the route bit only, never the AdmDef byte +0x2B0
+        // [orig: NapiNPServerMsg_HandleWeaponToggle @0x511B2C / @0x511B38].
+        const uint8_t adm_before = r.player().equipped_adm_index;
         local_player_apply_mount_slot_select(r.w, local.weapon, req);
         CHECK(r.veh().primary_weapon_slot.redirect_to_parent_slot);
-        CHECK(r.player().equipped_adm_index == r.w.registry.get(carrier_h)->primary_weapon_slot_adm);
+        CHECK(r.player().equipped_adm_index == adm_before);
         CHECK(local.view.binoculars_requested && local.weapon.nvg_scope_restore);
         CHECK(r.w.weather.core.scalar_channels.camera_fov_target_fp == (20 << 16));
         r.w.local_player_state = nullptr;
