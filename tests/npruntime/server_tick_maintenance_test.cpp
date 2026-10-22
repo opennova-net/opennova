@@ -3647,7 +3647,7 @@ bool check_host_tracks_the_remote_equipped_slot() {
 // [orig: Entity_SendEffectPacket @0x445C40 (NapiNPServer_SendFiltered called @0x445CA2)
 //  from Entity_UpdateGuidedMissile_0 @0x446060 (group 3 with 0x136 @0x446345), run by
 //  Weapon_UpdateAllProjectiles, called @0x4C223A in Entity_UpdateAllEntities, which
-//  Game_ProcessMainFrame calls @0x52674B after Server_TickUpdate @0x5266B6]
+//  Game_ProcessMainFrame calls @0x52674B after Server_TickUpdate @0x51D7E0 (called @0x5266B6)]
 bool check_guidance_leads_the_next_frame() {
     inmatch::NapiNPServerCtx ctx;
     inmatch::set_connection_mode(ctx,inmatch::ConnectionMode::HostOnly);
