@@ -673,6 +673,10 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	//  the earlier call @0x5a8508 off the death screen draws the same two
 	//  lines at the same place first].
 	element_(HudElement::SquadOrders, [&] { element_squad_orders(state, surface_w, surface_h); });
+	// The takeover dialog off the death screen [orig: `cmp g_DeathScreenActive`
+	//  @0x5A87E2, HUD_DrawTakeoverStatus @0x5A87E4].
+	if (!death_arm)
+		element_(HudElement::TakeoverStatus, [&] { element_takeover_status(state, surface_w, surface_h); });
 	// The optical cues (the LollyPop marker, STROVER_DIST) close the pass, after
 	// the console messages, the squad orders and the takeover status, with no
 	// death-screen test [orig: HUD_RenderAllOverlays @0x5A87EF..0x5A89DA, after

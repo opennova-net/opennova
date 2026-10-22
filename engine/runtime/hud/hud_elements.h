@@ -65,6 +65,7 @@ enum class HudElement : uint8_t {
 	HelpScreen,
 	QuitDialog,
 	NetQuality,
+	TakeoverStatus,
 	kCount
 };
 inline constexpr size_t kHudElementCount = static_cast<size_t>(HudElement::kCount);

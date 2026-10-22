@@ -255,12 +255,14 @@ public:
 	void set_tip(int p_tip, int p_countdown, bool p_local_dead,
 			const Ref<RtxtStringFile> &p_gametext, const Ref<ControlsModel> &p_controls);
 	void set_message_log_title(const String &p_title);
-	// The AAS zone status panel: shown, the session game type (the conquest
-	// arm is unmodelled and draws nothing), the viewer's team (the blink reads
-	// the HUD frame counter, set_frame_clocks), the gametext table its two status strings
-	// resolve in (engine hud_lfp_panel.h, retail's fallbacks; null = the
-	// fallbacks), and the Simulation the zone rows are pulled from natively
-	// (Simulation::fill_lfp_zones). Pass null when hiding.
+	// The AAS zone status panel and the takeover dialog: shown, the session game
+	// type (the panel's conquest arm), the viewer's team (the blink reads the HUD
+	// frame counter, set_frame_clocks; the dialog's camp lines test it), the
+	// gametext table their strings resolve in (engine hud_lfp_panel.h /
+	// hud_takeover_status.h, retail's fallbacks; null = the fallbacks), and the
+	// Simulation the zone rows and the dialog's nearest entry are pulled from
+	// natively (Simulation::fill_lfp_zones / fill_takeover_facts). Pass null when
+	// hiding.
 	void set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
 			const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim);
 	void set_waypoint(const String &p_name, int p_distance_m,

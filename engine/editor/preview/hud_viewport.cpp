@@ -89,6 +89,7 @@ constexpr HudElementWords kWords[] = {
 	{ HudElement::HelpScreen, "Help", {} },
 	{ HudElement::QuitDialog, "Quit dialog", {} },
 	{ HudElement::NetQuality, "Connection indicators", { "NETWORKINDICATOR" } },
+	{ HudElement::TakeoverStatus, "Takeover status", { "LFP_TAKEOVERDLG" } },
 };
 static_assert(std::size(kWords) == opennova::hud::kHudElementCount, "every HudElement has its words");
 

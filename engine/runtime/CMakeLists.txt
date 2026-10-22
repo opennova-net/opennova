@@ -546,6 +546,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/remote_admin.cpp # the process's remote-admin console half (game and serve)
     # --- parity lane L9 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/gate_metrics_reports.cpp # the METPROTOCOL report clocks and senders (D-NET-NEW-L9-22)
+    # --- parity lane LH sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_takeover_status.cpp # the takeover dialog (HUD_DrawTakeoverStatus)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/takeover_status_feed.cpp # its nearest zone-timer entry
 )
 
 # engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.

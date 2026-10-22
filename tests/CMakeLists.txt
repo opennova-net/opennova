@@ -5635,3 +5635,9 @@ add_executable(zone_hud_feed_test netsim/zone_hud_feed_test.cpp)
 target_link_libraries(zone_hud_feed_test PRIVATE opennova_runtime opennova_net)
 target_compile_features(zone_hud_feed_test PRIVATE cxx_std_17)
 add_test(NAME zone_hud_feed COMMAND zone_hud_feed_test)
+# The takeover status dialog (HUD_DrawTakeoverStatus): its composition, the scaled line's
+# clip, its element off the death screen.
+add_executable(hud_takeover_status_test hud/hud_takeover_status_test.cpp)
+target_link_libraries(hud_takeover_status_test PRIVATE opennova_runtime)
+target_include_directories(hud_takeover_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_takeover_status COMMAND hud_takeover_status_test)

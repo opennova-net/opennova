@@ -20,6 +20,7 @@
 #include <runtime/hud/hud_map_view.h> // the DEATH window pass
 #include <runtime/hud/hud_overlay_windows.h>
 #include <runtime/hud/hud_server_status.h> // the server-status page
+#include <runtime/hud/hud_takeover_status.h> // the takeover dialog's state
 #include <runtime/hud/net_quality_indicators.h> // the connection indicators' state
 #include <runtime/hud/sight_overlay.h> // the SIGHTS row modes + sight-scale default
 
@@ -414,6 +415,11 @@ struct HudLayout {
 	std::array<bool, 3> lfp_icon_texture_valid{}; // team 1, team 2, neutral
 	bool lfp_tile_own_texture_valid = false;
 	bool lfp_tile_other_texture_valid = false;
+	// LFP_TAKEOVERDLG: the takeover dialog's anchor; unauthored, the BSS zero
+	// pair [orig: the hudpos writes g_HUDLfpTakeoverDlgX/Y @0x5a05a7 /
+	//  @0x5a05bf; read by HUD_DrawTakeoverStatus @0x59B64A / @0x59B652].
+	int lfp_takeover_x = 0;
+	int lfp_takeover_y = 0;
 	HudPosRecord clip_pos;
 	HudPosRecord stance_pos;
 	// HUDVEHSTANCEPOS — the vehicle panel's base before the rider's stance
@@ -992,6 +998,8 @@ struct HudFrameState {
 	KillAnnouncement kill_announcement;
 	// THE AAS ZONE STATUS PANEL (hud/hud_lfp_panel.h owns its policy).
 	HudLfpPanelState lfp_panel;
+	// THE TAKEOVER STATUS DIALOG (hud/hud_takeover_status.h).
+	HudTakeoverStatusState takeover_status;
 	float health_fraction = 1.0f;
 	int stance = 0;
     int mount_slot = 0, weapon_category = 0; // HUD info +560 and WeaponDef+0
@@ -1525,6 +1533,9 @@ private:
 	void compile_overlay_pass(const HudFrameState &state, float w, float h);
 	void compile_gameplay_overlay_windows(const HudFrameState &state, float w, float h);
 	void element_lfp_panel(const HudFrameState &state, float w, float h);
+	// The takeover status dialog (hud_takeover_status.cpp) [orig:
+	// HUD_DrawTakeoverStatus @0x59B630].
+	void element_takeover_status(const HudFrameState &state, float w, float h);
 	void element_scoreboard(const HudFrameState &state, float w, float h);
 	// The chat input line at design (50, y): the scene frame's panels pass
 	// y 608, the status page 480.

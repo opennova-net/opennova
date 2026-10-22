@@ -17,6 +17,7 @@
 #include <runtime/inmatch/client_runtime.h> // queue_chat_message (the talk keys' send)
 #include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType (the NovaWorld talk gate)
 #include <runtime/inmatch/server_status_feed.h> // the status page's roster and host facts
+#include <runtime/inmatch/takeover_status_feed.h> // the takeover dialog's nearest entry
 #include <runtime/world/player_present.h> // kWeaponSwitchDenySoundset (the crew key's tone)
 #include <runtime/world/script_sounds.h>
 #include <runtime/replication/client_state.h>
@@ -67,6 +68,12 @@ bool Simulation::fill_lfp_zones(int p_local_team,
 	// (inmatch/role_feeds.h collect_lfp_zones carries the witnesses).
 	return opennova::inmatch::collect_lfp_zones(role_view(), deploy_zone_registry(), p_local_team,
 			r_zones);
+}
+
+bool Simulation::fill_takeover_facts(opennova::hud::HudTakeoverFacts &r_facts) {
+	// The nearest running zone-timer entry over the role's image and map slots
+	// (inmatch/takeover_status_feed.h carries the witness).
+	return opennova::inmatch::collect_takeover_status(role_view(), deploy_zone_registry(), r_facts);
 }
 
 int64_t Simulation::get_session_game_type() const {

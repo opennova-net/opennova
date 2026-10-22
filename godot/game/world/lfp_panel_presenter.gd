@@ -11,6 +11,10 @@ extends RefCounted
 ## [orig: HUD_RenderAllOverlays @0x5a8530 -> HUD_DrawZoneStatusPanel @0x5a2480
 ##  -> HUD_DrawZoneMarker @0x5986f0; the game-type test @0x5a248d..0x5a24a1]
 ##
+## The same push carries the takeover dialog: the overlay pulls its nearest
+## zone-timer entry natively (Simulation.fill_takeover_facts) and composes it
+## (engine hud_takeover_status.h carries the witness).
+##
 ## The zone rows never round-trip through script (the overlay pulls them
 ## natively through Simulation.fill_lfp_zones); the two status strings resolve
 ## natively too, in the gametext table this lane hands over (engine

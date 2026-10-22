@@ -107,6 +107,7 @@ const std::vector<HudElementLayout> &element_rows() {
 		  joined({ point("HUDSCOPERANGEXY"), point("HUDSCOPEZEROXY", 0, false), point("HUDSCOPEMAGXY", 0, false) }), "", "",
 		  {}, false },
 		{ HudElement::LfpPanel, point("LFP_FLAGS"), "", "", {}, false },
+		{ HudElement::TakeoverStatus, point("LFP_TAKEOVERDLG"), "", "", {}, false },
 		{ HudElement::Spinmap,
 		  { at("HUDSPINMAPX1", 0, X, Near), at("HUDSPINMAPY1", 0, Y, Near), at("HUDSPINMAPX2", 0, X, Far),
 		    at("HUDSPINMAPY2", 0, Y, Far), at("MAPCOORDS", 0, X, Point, false), at("MAPCOORDS", 1, Y, Point, false) },

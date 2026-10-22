@@ -1468,8 +1468,11 @@ public:
 	bool fill_vehicle_panel(const opennova::def::DefVehicleHudBlock &p_block,
 			opennova::hud::HudVehiclePanelState &r_state) const;
 	// NOT ClassDB-bound: the AAS zone panel feed (world/lfp_feed.h), one HudLfpZone per
-	// spawn-zone entry joined with its zone-timer entry and transient minimap slot flags.
+	// spawn-zone entry joined with its zone-timer entry and its regular map slot's capture bits.
 	bool fill_lfp_zones(int p_local_team, std::vector<opennova::hud::HudLfpZone> &r_zones);
+	// NOT ClassDB-bound: the takeover dialog's nearest zone-timer entry
+	// (inmatch/takeover_status_feed.h); false when none qualifies.
+	bool fill_takeover_facts(opennova::hud::HudTakeoverFacts &r_facts);
 	// The in-match game type for every role (joiner header / HostClient view).
 	int64_t get_session_game_type() const;
 	String get_command_map_rules_text(const Ref<RtxtStringFile> &p_gametext) const; // RULELIST (inmatch::command_map_rules_text); "" = keep

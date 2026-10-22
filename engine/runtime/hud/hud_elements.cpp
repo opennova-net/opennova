@@ -60,6 +60,7 @@ constexpr const char *kTokens[] = {
 	"help_screen",
 	"quit_dialog",
 	"net_quality",
+	"takeover_status",
 };
 static_assert(std::size(kTokens) == kHudElementCount, "every HudElement has exactly one token");
 

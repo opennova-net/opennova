@@ -1266,17 +1266,23 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 	// (set_frame_clocks), stepped once per logic tick outside the pause and
 	// the epilog screen [orig: Game_ProcessMainFrame @0x5265d5 ->
 	// Game_TickHudFrameCounters @0x434c23].
-	// The compiler's element branches on it (the unmodelled conquest arm).
+	// The compiler's element branches on it (the conquest arm, D-HUD-61).
 	lp.game_type = static_cast<uint32_t>(p_game_type);
 	const opennova::hud::GameTextLookup gametext = game_text_lookup(p_gametext);
 	lp.under_attack_text = opennova::hud::lfp_under_attack_text(gametext);
 	lp.ready_text = opennova::hud::lfp_ready_text(gametext);
+	// The takeover dialog rides the same zone push: its nearest entry, composed
+	// with the gametext and the viewer's team; the frame draws it off the death
+	// screen (engine hud_takeover_status.h carries the witness).
+	opennova::hud::HudTakeoverFacts takeover;
 	if (p_shown && p_sim.is_valid()) {
 		lp.shown = p_sim->fill_lfp_zones(p_local_team, lp.zones);
+		p_sim->fill_takeover_facts(takeover);
 	} else {
 		lp.shown = false;
 		lp.zones.clear();
 	}
+	state_.takeover_status = opennova::hud::compose_takeover_status(takeover, p_local_team, gametext);
 	queue_redraw();
 }
 

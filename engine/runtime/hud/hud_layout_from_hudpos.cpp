@@ -125,6 +125,10 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	out.lfp_anchor_x = hud.lfp_flags[0];
 	out.lfp_anchor_y = hud.lfp_flags[1];
 	out.lfp_anchor_present = true;
+	// LFP_TAKEOVERDLG — the takeover dialog's anchor (retail
+	// g_HUDLfpTakeoverDlgX/Y, written by the hudpos parse @0x5a05a7/@0x5a05bf).
+	out.lfp_takeover_x = hud.lfp_takeover_dlg[0];
+	out.lfp_takeover_y = hud.lfp_takeover_dlg[1];
 	// HUDVEHSTANCEPOS — the vehicle panel's base before the stance offset.
 	out.veh_stance_pos = pos_record2(hud.veh_stance_pos[0], hud.veh_stance_pos[1]);
 	out.clip_pos = pos_record2(hud.clip_pos[0], hud.clip_pos[1]);
