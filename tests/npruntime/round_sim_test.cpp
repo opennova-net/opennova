@@ -1442,13 +1442,15 @@ bool test_dismemberment_damage_path() {
 
 		const w::AiEntity *victim_body = rig.ai.for_handle(rig.victim);
 		const w::AiEntity *piece_body = rig.ai.for_handle(piece->handle);
-		// bodyRoll (entity+0x94 -> AiEntity::roll), rear quadrant 2 negative;
-		// the clone memcpy-inherits the freshly written roll. The torso
-		// overlay channel (+0x2DC) is not the death roll's store.
+		// The savedLivePose roll word (+0x94, Entity::saved_live_roll), rear
+		// quadrant 2 negative; the clone memcpy-inherits the freshly written
+		// word. Neither the body's Roll (+0x18) nor the torso overlay channel
+		// (+0x2DC) is the hit roll's store.
 		// [orig: @0x407575; clone copy @0x4398dc]
 		if (!expect(victim_body != nullptr && piece_body != nullptr &&
-					victim_body->roll == -0x05B05B00 &&
-					piece_body->roll == -0x05B05B00 &&
+					victim->saved_live_roll == -0x05B05B00 &&
+					piece->saved_live_roll == -0x05B05B00 &&
+					victim_body->roll == 0 && piece_body->roll == 0 &&
 					victim_body->inf.torso_roll == 0 &&
 					piece_body->inf.torso_roll == 0,
 				"torso death takes the exact rear-quadrant body roll on both halves"))
@@ -1509,7 +1511,8 @@ bool test_dismemberment_damage_path() {
 }
 
 // Every projectile hit on a person runs the class callback's presentation
-// legs — the +0x2C0 selection, the torso-stack body roll, the +0x178 attacker
+// legs — the +0x2C0 selection, the torso-stack hit roll (the +0x94 word, never
+// the body's Roll +0x18 that its eye reads), the +0x178 attacker
 // stamp — lethal or not, damage 0 included; only the killing hit's lethal
 // tail (dismemberment, the death record) stays behind the health test.
 // [orig: OrganicClass_HandleEvent @0x407483 select, @0x40755e..0x407575
@@ -1522,8 +1525,8 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		const char *label;
 	};
 	const Case cases[] = {
-		{90, -0x05B05B00, "rear quadrant 2 tips a living body backward"},
-		{-90, 0x05B05B00, "front quadrant 0 tips a living body forward"},
+		{90, -0x05B05B00, "rear quadrant 2 stores the backward hit roll, the Roll level"},
+		{-90, 0x05B05B00, "front quadrant 0 stores the forward hit roll, the Roll level"},
 		{180, 0, "side quadrant 1 leaves the roll"},
 		{0, 0, "side quadrant 3 leaves the roll"},
 	};
@@ -1539,7 +1542,8 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		                    rig.piece() == nullptr,
 		            "a non-lethal torso hit takes damage without a death or a clone"))
 			return false;
-		if (!expect(body->roll == c.expected_roll, c.label)) return false;
+		if (!expect(victim->saved_live_roll == c.expected_roll && body->roll == 0, c.label))
+			return false;
 		const int quadrant = w::death_quadrant_from_round(
 				w::placed_heading_bam(c.yaw), 1.0f, 0.0f);
 		if (!expect(victim->death_anim_state ==
@@ -1558,7 +1562,7 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		victim->health = 100;
 		body->health = 100;
 		rig.fire();
-		if (!expect(victim->health == 90 && body->roll == 0 &&
+		if (!expect(victim->health == 90 && body->roll == 0 && victim->saved_live_roll == 0 &&
 		                    victim->death_anim_state ==
 		                            w::compute_death_anim_state(6, 2, w::death_cause::kBullet) &&
 		                    victim->last_attacker == rig.shooter,
@@ -1581,7 +1585,7 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		                    rig.world.round_sim.deaths.empty(),
 		            "a damage-state-gated hit applies no damage"))
 			return false;
-		if (!expect(body->roll == -0x05B05B00 &&
+		if (!expect(victim->saved_live_roll == -0x05B05B00 && body->roll == 0 &&
 		                    victim->death_anim_state ==
 		                            w::compute_death_anim_state(3, 2, w::death_cause::kBullet) &&
 		                    victim->last_attacker == rig.shooter,
@@ -1603,7 +1607,7 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		victim->flags |= w::kEntityFlagDead;
 		victim->engine_flags |= w::kEntityFlagDead;
 		rig.fire();
-		if (!expect(body->roll == 0 &&
+		if (!expect(body->roll == 0 && victim->saved_live_roll == 0 &&
 		                    victim->death_anim_state ==
 		                            w::compute_death_anim_state(3, 2, w::death_cause::kBullet),
 		            "a dead NPC does not roll but restages its death [orig: @0x407483, @0x40755E]"))

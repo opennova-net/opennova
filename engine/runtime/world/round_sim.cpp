@@ -216,19 +216,19 @@ void push_round_debug(RoundSim &sim, const RoundDebugEvent &event) {
 }
 
 // The hit-time body roll: EVERY projectile hit on a torso-stack bone (bone < 5)
-// of a not-yet-dead body tips it ~8 deg toward the shot — front quadrant
-// positive, rear negative — lethal or not, whatever the damage number, on both
+// of a not-yet-dead body stores ~8 deg toward the shot (front quadrant
+// positive, rear negative), lethal or not, whatever the damage number, on both
 // peers (the class callback runs after the authority-gated subtraction with
-// damage 0 on a joiner). The store is bodyRoll (entity+0x94), our
-// AiEntity::roll — the field the slope pass then chases toward the ground
-// slope (infantry_slope_pass conform leg) and the torso roll chases in turn
-// (fp_roll = torso_roll + lean/4), so a living body visibly flinches and
-// settles back while a corpse tips onto the terrain.
+// damage 0 on a joiner). The store is the savedLivePose roll word (+0x94,
+// Entity::saved_live_roll), not the body's Roll (+0x18, AiEntity::roll) that
+// the player body's eye leg reads and the slope pass decays or chases, so a
+// hit tips neither the eye nor the body.
 // [orig: OrganicClass_HandleEvent gate @0x40755e; +0x05B05B00 @0x407564;
 //  -0x05B05B00 @0x407575; Entity_HandleDamageAndTriggerZones gate @0x4078c6;
-//  @0x4078cc / @0x407918]
-void apply_hit_body_roll(AiEntity *body, int32_t bone, int quadrant) {
-    if (body != nullptr) hit_body_roll(body->roll, bone, quadrant);
+//  @0x4078cc / @0x407918; the eye's Roll `fild [esi+18h]` @0x4B6A68; the
+//  slope pass's Roll @0x4B6DD1..0x4B6DDC / @0x4B6FE7..0x4B6FF4]
+void apply_hit_body_roll(Entity &victim, int32_t bone, int quadrant) {
+    hit_body_roll(victim.saved_live_roll, bone, quadrant);
 }
 
 Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
@@ -817,7 +817,7 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
                               record.round_pos.q16(), record.round_owner);
     const bool dead = ((victim.flags | victim.engine_flags) & kEntityFlagDead) != 0;
     // [orig: the torso-stack roll @0x40755E..0x407575]
-    if (!dead) apply_hit_body_roll(world.ai.for_handle(victim.handle), record.section, quadrant);
+    if (!dead) apply_hit_body_roll(victim, record.section, quadrant);
     // Entity_OnDamageReceived(victim, ammo, owner): the local head here, the
     // AI tail on the RoundHit drain [orig: the call @0x407588].
     entity_on_damage_received(world, victim, ammo);
@@ -1597,8 +1597,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         target->death_anim_state =
                             compute_death_anim_state(death_section, quadrant,
                                                      death_cause::kBullet);
-                        AiEntity *victim_body = world.ai.for_handle(target->handle);
-                        if (target_not_dead) apply_hit_body_roll(victim_body, death_section, quadrant);
+                        if (target_not_dead) apply_hit_body_roll(*target, death_section, quadrant);
                         // The plyr callback's health tail, then its 64-tick re-arm around the
                         // waypoint tail [orig: Entity_HandleDamageAndTriggerZones - @0x407ACD..0x407B33,
                         //  the re-arms @0x407b5e / @0x407c71; the tail @0x407B64..0x407C6B].

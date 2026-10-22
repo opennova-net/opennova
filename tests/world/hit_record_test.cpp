@@ -114,7 +114,8 @@ static void test_kill_single_runs_the_recorded_round_legs() {
     CHECK(rear_quadrant() == 2);
     CHECK(rig.victim().death_anim_state ==
           compute_death_anim_state(3, 2, death_cause::kBullet));
-    CHECK(rig.w->ai.for_handle(rig.npc)->roll == -0x05B05B00);
+    CHECK(rig.victim().saved_live_roll == -0x05B05B00);
+    CHECK(rig.w->ai.for_handle(rig.npc)->roll == 0);
     CHECK(rig.w->round_sim.hits.size() == 1);
     if (rig.w->round_sim.hits.size() == 1) {
         CHECK(rig.w->round_sim.hits[0].victim == rig.npc);

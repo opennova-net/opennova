@@ -3650,7 +3650,8 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
 // On a non-authority in-session peer the person class callback still fires
 // (with Weapon_CalcImpactDamage's forced zero) on the peer's OWN body — the
 // only person a joiner resolves to a World entity: the hit stages the death
-// anim, tips the body (the FP camera roll's source), and stamps the attacker,
+// anim, stores the hit roll in the +0x94 word (not the Roll the eye and the
+// FP camera follow), and stamps the attacker,
 // with no health, hit, death, or cause-bit consequence. [orig:
 // Weapon_CalcImpactDamage @0x4ec933; Projectile_ProcessDamageOnTarget
 // @0x4e81b1 (authority-gated subtraction) / @0x4e820e (callback)]
@@ -3722,7 +3723,8 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     CHECK(v->cause_flags == 0);
     CHECK(v->death_anim_state == compute_death_anim_state(3, 2, death_cause::kBullet));
     CHECK(v->last_attacker == shooter);
-    if (body != nullptr) CHECK(body->roll == -0x05B05B00);
+    CHECK(v->saved_live_roll == -0x05B05B00);
+    if (body != nullptr) CHECK(body->roll == 0);
     world.collision = nullptr;
 }
 
