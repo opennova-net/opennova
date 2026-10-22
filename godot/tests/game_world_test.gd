@@ -858,6 +858,55 @@ func test_round_impacts_route_sound_only_without_a_particle() -> void:
 	world.unload()
 
 
+# DIAGNOSTIC (L5-s10 row 3, D-NET-348's open item; one CI run, removed by the fix):
+# the sound-only case with the body's type row (105305) staged, which binds the local
+# body a person def. Prints the local player's position, the locating round's
+# transient and the sound-only impact; asserts nothing that can fail.
+func test_diag_348_sound_only_impact_with_a_person_def() -> void:
+	var root_dir := _stage_impact_fixture("diag_348_sound_only")
+	_append_to_file(root_dir.path_join("items.def"), "\nbegin \"Player #1, Multiplayer\"\n"
+			+ "  id 105305\n  type person\n  graphic US01\n  graphicenemy Indo01\n"
+			+ "  sid player1_mp\n  anim_def US01\n  hp 150\n"
+			+ "  sound_profile SP_JO_SP_PlayerM1\n  sound_profileFemale SP_JO_SP_PlayerF1\nend\n")
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
+			func(mission: MissionData) -> void:
+				assert_true(mission.set_header_string("terrain", "Tmap"))), OK)
+	var sim := world.get_sim()
+	var effects := world.get_effect_world()
+	var audio := world.get_mission_audio()
+	print("diag-348 load: player pos=", sim.get_local_player_position(),
+			" eye=", sim.get_local_player_eye_offset(), " class=", sim.get_local_player_class(),
+			" tick=", sim.get_logic_tick())
+	sim.debug_spawn_round(Vector3(16, 60, -16), Vector3.DOWN, "AM_556MM")
+	var frames := _tick_until_impact(world, Vector3(16, 2000, -16))
+	var rows := effects.get_debug_group_report()
+	print("diag-348 locate: frames=", frames, " groups=", rows.size(),
+			" player pos=", sim.get_local_player_position(), " tick=", sim.get_logic_tick())
+	for row_v in rows:
+		var row: EffectGroupReport = row_v
+		print("diag-348 locate: transient origin=", row.transform.origin)
+	if rows.size() != 1:
+		world.unload()
+		pass_test("diagnostic: no single locating transient")
+		return
+	var ground := (rows[0] as EffectGroupReport).transform.origin
+	var near_listener := ground + Vector3(0, 5, 0)
+	sim.debug_spawn_round(Vector3(16, 60, -16), Vector3.DOWN, "AM_SOUNDONLY")
+	for frame in range(30):
+		world.tick(near_listener, Transform3D(), ONE_TICK_DELTA)
+		print("diag-348 frame ", frame, ": player pos=", sim.get_local_player_position(),
+				" tick=", sim.get_logic_tick())
+		if not _fired_named(audio, SOUND_ONLY_SOUND).is_empty():
+			break
+	for fired_v in audio.recent_fired_soundsets():
+		var fired: FiredSoundset = fired_v
+		print("diag-348 fired: set=", fired.set_name, " pos=", fired.position,
+				" slot=", fired.slot)
+	world.unload()
+	pass_test("diagnostic run")
+
+
 func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 	# The strict call ledger ["weapon", "impact", "advance"] the recording
 	# EffectWorld double kept has no public twin. The same contract is pinned
