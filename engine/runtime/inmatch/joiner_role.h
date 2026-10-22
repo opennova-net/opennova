@@ -23,6 +23,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/replica_query.h>
 #include <runtime/inmatch/replica_track.h>
+#include <runtime/inmatch/server_files.h> // ServerLogs (the held server's stop lines)
 #include <runtime/inmatch/session.h>
 
 #include <runtime/replication/client_state.h>
@@ -96,6 +97,9 @@ public:
 		client_process_ = state;
 		if (runtime) runtime->use_process_state(state);
 	}
+	// The process's log devices, whose protocol _inout.txt takes a held server's stop lines at
+	// a session destroy (destroy_session). Default: off.
+	void set_server_logs(const ServerLogs &logs) { server_logs_ = logs; }
 	// The pre-mission subset of the frame: the same socket and runtime advance
 	// the retail connect exchange; no World exists yet to tick, and the load
 	// waits for the S2C 0x1A's mission start (D-NET-NEW-L2-19). The hello
@@ -282,6 +286,10 @@ private:
 	// --- the frame's own legs (ex the shell's hook table) ------------------
 	// Ship one framed datagram to the dialed host (the socket send).
 	void send(const std::vector<uint8_t> &dg);
+	// FullDestroy(reason): the leave burst on the wire, then the session reset's stop of a held
+	// server over the same socket (stop_held_server; joiner_role.cpp).
+	void destroy_session(int32_t reason);
+	void stop_held_server();
 	// Deposit received framed datagrams for this frame's recv pump (socket
 	// drain -> runtime.receive).
 	void deposit_inbound();
@@ -334,6 +342,7 @@ private:
 	PeerAddr host_addr_{};
 	const TitleIdentity *title_ = nullptr; // set_title
 	ClientProcessState *client_process_ = nullptr; // use_process_state
+	ServerLogs server_logs_{};                     // set_server_logs
 	int64_t last_net_us_ = 0;
 	// g_StatsAvgFps / g_StatsCpuPercent as the session last handed them over.
 	int32_t uplink_avg_fps_ = 0;

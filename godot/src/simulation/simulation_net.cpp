@@ -759,6 +759,9 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	joiner_role_->set_title(title);
 	// The process's 0x4C report count runs on across joins (ClientProcessState).
 	joiner_role_->use_process_state(net_.client_process);
+	// The process's log devices: a session destroy's stop of a held server writes its
+	// _inout.txt lines (engine: inmatch::JoinerRole::destroy_session).
+	if (net_.log_devices != nullptr) joiner_role_->set_server_logs(net_.log_devices->logs());
 	if (net_.join_transport.is_valid() && net_.join_transport->is_open()) {
 		// The join goes on with the browse's socket, the one the row was found on:
 		// retail's client has one transport socket per network type, and the join

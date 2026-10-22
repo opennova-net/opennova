@@ -5099,6 +5099,10 @@ add_test(NAME controls_scroll_lock_auto_run COMMAND controls_scroll_lock_auto_ru
 add_executable(netsim_client_avatar_fallback_test netsim/client_avatar_fallback_test.cpp)
 target_link_libraries(netsim_client_avatar_fallback_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME netsim_client_avatar_fallback COMMAND netsim_client_avatar_fallback_test)
+# A joiner's session reset stops a held server after its own leave (D-NET-NEW-L1-26's joiner leg).
+add_executable(npruntime_joiner_held_server_stop_test npruntime/joiner_held_server_stop_test.cpp)
+target_link_libraries(npruntime_joiner_held_server_stop_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_joiner_held_server_stop COMMAND npruntime_joiner_held_server_stop_test)
 
 # --- parity lane L3 (host tick) ---
 # The 0x0A writer's stores on the slot's body, slot by slot (D-NET-439, 461, 462).

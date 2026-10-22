@@ -10,6 +10,7 @@
 #include <runtime/inmatch/client_weapon_replay.h>
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/mission_exit.h> // kMissionExitQuit (input action 3)
+#include <runtime/inmatch/napi_np_protocol.h> // stop_unstopped_server (the FullDestroy's reset)
 
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/charattr_table.h>
@@ -1878,19 +1879,48 @@ void JoinerRole::close() {
 	// return, which stores reason 1 ahead of the Post Menu.
 	int32_t reason = runtime->mission_exit_reason();
 	if (reason == kMissionExitNone && runtime->in_mission_start()) reason = kMissionExitQuit;
-	std::vector<std::vector<uint8_t>> burst;
-	if (reason == kMissionExitNone || reason == kMissionExitReset)
-		burst = runtime->disconnect();
-	else if (route_mission_exit(reason, /*novaworld=*/false).destroys_session)
-		burst = runtime->destroy_session(reason, join_novaworld_);
-	for (const std::vector<uint8_t> &dg : burst) send(dg);
+	if (reason == kMissionExitNone) {
+		for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
+	} else if (reason == kMissionExitReset) {
+		// The reason-2 arm's session reset: the connection's destroy, then the held server's stop.
+		for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
+		stop_held_server();
+	} else if (route_mission_exit(reason, /*novaworld=*/false).destroys_session) {
+		destroy_session(reason);
+	}
 }
 
 void JoinerRole::cancel_join() {
 	if (!runtime || !runtime->in_pre_game()) return;
-	for (const std::vector<uint8_t> &dg :
-			runtime->destroy_session(runtime->pre_game_cancel_reason(), join_novaworld_))
+	destroy_session(runtime->pre_game_cancel_reason());
+}
+
+// The joiner's FullDestroy(reason): the leave burst goes out at once, then the session reset
+// (stop_held_server), ahead of the transport's teardown.
+// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - the leave @0x4C96DB,
+//  CNapiGameSession_ResetActiveSession called @0x4C96E2, CNapiNetwork_TearDownSocket called
+//  @0x4C9763; CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the burst sent at once
+//  (CNapiNPConnection_SendDisconnectPacket called @0x625406)]
+void JoinerRole::destroy_session(int32_t reason) {
+	for (const std::vector<uint8_t> &dg : runtime->destroy_session(reason, join_novaworld_))
 		send(dg);
+	stop_held_server();
+}
+
+// A joiner's session reset (a destroying route's FullDestroy, the Post Menu's reason-2 arm)
+// stops a server an earlier error-arm exit left unstopped, after the connection's leave and over
+// the same socket, still open: each held joiner's STOP burst and /INOUT removal line, then HOST
+// STOPPED. A joiner's connection mode is 2, so no held player's slot teardown runs (no
+// `player_removed`); this shell passes no socket address, so HOST STOPPED carries the
+// placeholder, as its listen host's lines do (D-NET-NEW-L1-26's joiner leg).
+// [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - the connection's
+//  CNapiNPConnection_Destroy called @0x4C8A93, then NapiNPProtocol_StopServer called @0x4C8AA1;
+//  PostMenu_RouteMissionExit @0x568460 - reason 2's reset called @0x56846F ahead of
+//  CNapiNetwork_SetTransportMode(0) @0x568493; CGameSession_SetConnectionMode(2) called
+//  @0x558333 / @0x56A05B (is_authority 0 @0x4C4A2E)]
+void JoinerRole::stop_held_server() {
+	if (client_process_ != nullptr)
+		stop_unstopped_server(client_process_->unstopped_server, server_logs_, socket_, nullptr);
 }
 
 void JoinerRole::quit_to_menu() {
