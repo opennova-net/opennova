@@ -1241,6 +1241,26 @@ void HostRole::stop_unstopped_server_at_exit(const ServerLogs &logs) {
 	stop_unstopped_server(client_process_->unstopped_server, logs, nullptr, nullptr);
 }
 
+// The own type-2 is our one own node while it is in the list; past its leave the record it
+// held stays on the context (NapiNPServerCtx::own_client_left_record). Its join never failed,
+// so the join-failure words read zero.
+std::optional<ConnectionErrorRecord> HostRole::own_client_error_record() const {
+	const NapiNPServerCtx &ctx = state.host_owner.ctx;
+	std::optional<DisconnectEvent> event;
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type != NapiNPConnection::kTypeClientSide) continue;
+		event = conn.disconnect_event_valid ? conn.disconnect_event : DisconnectEvent{};
+		break;
+	}
+	if (!event && ctx.own_client_left) event = ctx.own_client_left_record;
+	if (!event) return std::nullopt;
+	ConnectionErrorRecord record;
+	record.disconnect_code = event->dc;
+	record.disconnect_text = event->dstr;
+	record.disconnect_param = event->dpc;
+	return record;
+}
+
 // The editor Stop/Start rewind: the kernel's own restore with the own connection as
 // the baseline's capture left it, then a fresh HostClient view re-fed from the
 // restored world's pools (the static, spawn, organic and marker batches) and the

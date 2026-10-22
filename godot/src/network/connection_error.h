@@ -19,19 +19,23 @@ class ConnectionError : public RefCounted {
 	GDCLASS(ConnectionError, RefCounted)
 
 	opennova::inmatch::ConnectionErrorRecord record_;
+	// No connection object at all (a host with no own client): the reason reads ERR1.
+	bool absent_ = false;
 
 protected:
 	static void _bind_methods();
 
 public:
 	static Ref<ConnectionError> make(const opennova::inmatch::ConnectionErrorRecord &p_record);
+	// The record of no connection (inmatch::disconnect_reason_key's null connection).
+	static Ref<ConnectionError> make_absent();
 	// A literal record (tests and fixtures author one through this).
 	static Ref<ConnectionError> from_fields(int p_connect_error, int p_connect_param,
 			const String &p_connect_text, int p_disconnect_code, int p_disconnect_param,
 			const String &p_disconnect_text);
 	const opennova::inmatch::ConnectionErrorRecord &record() const { return record_; }
 
-	// True when the record holds a join failure or a disconnect.
+	// True when the record holds a join failure or a disconnect, or there is no connection.
 	bool is_set() const;
 	int get_connect_error() const { return static_cast<int>(record_.connect_error); }
 	int get_connect_param() const { return static_cast<int>(record_.connect_param); }

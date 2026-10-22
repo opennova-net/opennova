@@ -7,6 +7,7 @@
 
 #include <net/npwire/idatagram_socket.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/disconnect_reason.h> // ConnectionErrorRecord (the router's reason text)
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/map_change.h>
@@ -222,6 +223,13 @@ public:
 	// left unstopped writes its /INOUT lines, its socket already gone
 	// [orig: NapiLib_Shutdown - ResetActiveSession called @0x4C958B behind +0x68 @0x4C9586].
 	void stop_unstopped_server_at_exit(const ServerLogs &logs);
+	// The record the post-mission router's reason text reads on this host (exits 9..19):
+	// ctx+0xE60, the own client connection, its record its leave latched or none; absent on a
+	// host with no own client, whose text is ERR1 (disconnect_reason.h).
+	// [orig: PostMenu_RouteMissionExit @0x568460 - CNapiNetwork_GetDisconnectReasonString called
+	//  @0x5686D0; CNapiNetwork_GetDisconnectReasonString @0x4C7000 - +0xE60 read @0x4C7001, null
+	//  ERR1 @0x4C701D, the record's DC @0x4C708B, DSTR @0x4C709C, DPC @0x4C70D4]
+	std::optional<ConnectionErrorRecord> own_client_error_record() const;
 	ClientRuntime *client_runtime() override { return state.client_runtime.get(); }
 	int64_t last_net_us() const override { return last_net_us_; }
 	// The FR counter also reaches the server context: the send window's

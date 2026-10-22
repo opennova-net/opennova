@@ -36,6 +36,7 @@
 #include <net/npwire/session_keys.h>
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/client_runtime.h> // ClientProcessState
+#include <runtime/inmatch/disconnect_reason.h> // disconnect_reason_key (the router's text)
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/mission_exit.h>
@@ -541,6 +542,56 @@ void test_the_process_shutdown_stops_a_held_server_without_a_socket() {
 	CHECK(!out.held_after);
 }
 
+// D-NET-NEW-L1-26 (L1-s18 row 2): the post-mission router's reason text for 9..19 reads ctx+0xE60,
+// the own client connection, which its leave left in state 6 with its record (nothing destroys it
+// before the session reset). A listen host whose stale kick maps its own leave to 10 shows the
+// leave's own record: DC 2, DPC 0, "I.C:CIDEMIS", so GDC000 with that text, never the kick's. A
+// NovaWorld session's end (12) with no leave reads a record with no code: no text. A host with
+// no own client has no connection there: ERR1.
+// [orig: PostMenu_RouteMissionExit @0x568460 - 9..19 -> CNapiNetwork_GetDisconnectReasonString
+//  called @0x5686D0; CNapiNetwork_GetDisconnectReasonString @0x4C7000 - +0xE60 read @0x4C7001,
+//  null ERR1 @0x4C701D, DC @0x4C708B (none: no text @0x4C7093), DSTR @0x4C709C, DPC
+//  @0x4C70D4; CNapiNPConnection_SetState @0x626250 - the teardown called @0x62628F, state 6
+//  @0x626297; CNapiNPConnection_PumpStateMachine @0x6292E0 (no state-6 arm)]
+void test_the_remapped_exit_reads_the_own_client_record() {
+	auto host = std::make_unique<ListenHost>();
+	if (!host->boot()) {
+		++failures;
+		return;
+	}
+	host->process->disconnect_latch = kick_record(37);
+	inmatch::RemoteAdminBinding binding;
+	binding.host = &host->ctx();
+	inmatch::input_action_exit(binding, inmatch::ExitSite::Input);
+	host->role->close();
+	CHECK(host->ctx().mission_exit_reason == 10);
+	const std::optional<inmatch::ConnectionErrorRecord> record =
+			host->role->own_client_error_record();
+	CHECK(record && record->disconnect_code == 2 && record->disconnect_param == 0 &&
+			record->disconnect_text == "I.C:CIDEMIS");
+	if (record) {
+		const inmatch::DisconnectReasonKey key = inmatch::disconnect_reason_key(&*record);
+		CHECK(key.section != nullptr && std::string(key.section) == "MPGameDisconnectCodes" &&
+				key.key == "GDC000" && key.substitutes && key.substitution == "I.C:CIDEMIS");
+	}
+
+	auto ended = std::make_unique<ListenHost>();
+	if (!ended->boot()) {
+		++failures;
+		return;
+	}
+	ended->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld;
+	ended->role->close();
+	const std::optional<inmatch::ConnectionErrorRecord> live =
+			ended->role->own_client_error_record();
+	CHECK(live && live->connect_error == 0 && live->disconnect_code == 0);
+	if (live) CHECK(inmatch::disconnect_reason_key(&*live).section == nullptr);
+
+	inmatch::HostRole dedicated; // no own client
+	CHECK(!dedicated.own_client_error_record());
+	CHECK(inmatch::disconnect_reason_key(nullptr).key == "ERR1");
+}
+
 // The destroy arm stops the server itself: nothing is left for a later reset.
 void test_the_destroy_arm_leaves_no_server() {
 	inmatch::ClientProcessState process;
@@ -569,6 +620,7 @@ int main() {
 	test_an_error_arm_leaves_the_server_to_the_next_hosts_reset();
 	test_the_process_shutdown_stops_a_held_server_without_a_socket();
 	test_the_destroy_arm_leaves_no_server();
+	test_the_remapped_exit_reads_the_own_client_record();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }

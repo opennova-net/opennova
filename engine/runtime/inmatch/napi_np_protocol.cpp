@@ -1472,6 +1472,9 @@ bool drain_own_goodbye(NapiNPServerCtx &ctx, OwnGoodbye drain) {
 		//  @0x4C6551]
 		const DisconnectEvent record =
 				conn.disconnect_event_valid ? conn.disconnect_event : DisconnectEvent{};
+		// The own type-2 stays in state 6 with that record until the session reset.
+		ctx.own_client_left = true;
+		ctx.own_client_left_record = record;
 		if (!teardown_own_connection(ctx)) return false;
 		own_client_disconnected(ctx, record);
 		return true;

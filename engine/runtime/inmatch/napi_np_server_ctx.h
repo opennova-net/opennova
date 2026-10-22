@@ -305,6 +305,17 @@ struct NapiNPServerCtx {
 	// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0, installed on the session's own
 	//  type-2 by CNapiGameSession_CreateSession @0x4C9BEC]
 	ProcessDisconnectLatch *client_disconnect_latch = nullptr;
+	// ctx+0xE60 past the own client's leave: retail's own type-2 connection stays allocated in
+	// state 6 (its pump state machine has no state-6 arm and nothing destroys it before the
+	// session reset), holding the record its leave latched, which the post-mission router's
+	// reason text reads. Ours's one own node leaves the list at the pump that drains the
+	// goodbye, so the record it held stays here (HostRole::own_client_error_record;
+	// D-NET-NEW-L1-26).
+	// [orig: CNapiNPConnection_SetState @0x626250 - the teardown called @0x62628F, state 6
+	//  @0x626297; CNapiNPConnection_PumpStateMachine @0x6292E0 (no state-6 arm);
+	//  CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0xE60 destroy called @0x4C8A93]
+	bool own_client_left = false;
+	DisconnectEvent own_client_left_record;
 	// g_RoundStateInitTick, the round-state init's GetTickCount stamp in the host clock
 	// (host_start_tick's milliseconds): the status report's UP-TIME counts from it
 	// (session_uptime_ms). Every session create's round init stamps it; a single player's

@@ -1046,6 +1046,13 @@ String Simulation::get_join_error() const {
 // shell builds retail's reason text from it through its gameerr table
 // (engine: inmatch/disconnect_reason.h).
 Ref<ConnectionError> Simulation::get_connection_error() const {
+	// A host's reason text reads its own client connection's record, none on a host with no
+	// own client (engine: HostRole::own_client_error_record carries the witness).
+	if (!is_joiner() && host_role_ != nullptr) {
+		const std::optional<opennova::inmatch::ConnectionErrorRecord> own =
+				host_role_->own_client_error_record();
+		return own ? ConnectionError::make(*own) : ConnectionError::make_absent();
+	}
 	return ConnectionError::make((is_joiner() && runtime_)
 					? runtime_->connection_error_record()
 					: opennova::inmatch::ConnectionErrorRecord{});
