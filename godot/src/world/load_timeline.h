@@ -23,6 +23,7 @@ public:
 	int get_depth() const { return depth_; }
 	void set_depth(int p_depth) { depth_ = p_depth; }
 	void set_start_us(int64_t p_value) { start_us_ = p_value; }
+	int64_t get_start_us() const { return start_us_; }
 	int64_t get_end_us() const { return end_us_; }
 	void set_end_us(int64_t p_value) { end_us_ = p_value; }
 	int64_t duration_us() const { return end_us_ - start_us_; }
@@ -74,6 +75,11 @@ public:
 	// plus the largest top-level spans (descending, up to `top_n`). For
 	// embedding in an owner's own status message.
 	String brief(int p_top_n = 4) const;
+	// Every span in its bracketing order, nested ones too ('>' per depth), each as its
+	// start's offset from the timeline's and its length: "objects +0 24ms, runtime +24
+	// 447ms, >first_leg +471 3ms". finish() prints it under the summary line (an instrument:
+	// it shows the time no top-level span covers).
+	String detail() const;
 	// The one duration rendering every perf surface shares (the summary line
 	// and the load status agree by construction).
 	static String format_ms(double p_ms);

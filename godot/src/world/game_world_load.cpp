@@ -303,8 +303,11 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// A joiner's definitions and world are in: its mission start's first leg queues the first
 	// 0x2F and runs the pumps ahead of the effect builds and the model warm, the freeze's
 	// analog (engine: ClientRuntime::push_mission_start_first_loadout, D-NET-NEW-L2-35).
-	if (challenge_sim.is_valid() && challenge_sim->is_joiner())
+	if (challenge_sim.is_valid() && challenge_sim->is_joiner()) {
+		timeline->span("first_leg");
 		challenge_sim->push_join_mission_start_first_loadout();
+		timeline->end_span();
+	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_AUDIO));
 	timeline->span("audio");
 	start_mission_audio(p_mission, p_bms_name);
@@ -339,18 +342,30 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		run_mission_start();
 		timeline->end_span();
 	}
+	timeline->span("script_effects");
 	route_script_effects(); // the start's WAC/BMS descriptors, past the warm-scene reset
+	timeline->end_span();
 	// The load end past the mission start: a host's S2C 0x7B and the spawn gate's clear
 	// (engine inmatch::end_host_mission_load).
+	timeline->span("load_end");
 	if (challenge_sim.is_valid()) challenge_sim->end_host_mission_load();
+	timeline->end_span();
+	// The tail's legs are spans too (an instrument): the world-ready edges and their
+	// listeners run inside the load's call.
+	timeline->span("finish");
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_FINISH));
-	timeline->finish();
+	timeline->end_span();
 	loaded_mission_file_ = p_bms_name;
 	world_ready_ = true;
+	timeline->span("water");
 	set_water_world_rendering_enabled(true);
 	build_minimap_water_mask();
+	timeline->end_span();
+	timeline->span("world_loaded");
 	emit_signal(kSignalLoadProgress, MissionData::LOAD_PROGRESS_WORLD_READY);
 	emit_signal(kSignalWorldLoaded);
+	timeline->end_span();
+	timeline->finish();
 	return OK;
 }
 
@@ -854,12 +869,20 @@ bool GameWorld::settle_join_wire_assets() {
 	if (!join_wire_assets_pending_) {
 		return true;
 	}
-	if (!apply_join_wire_til_if_ready()) {
+	// The settle's own timeline (an instrument: its lines print under --verbose beside the
+	// load's), the rest of the joiner's 0x1A -> C 0x2F window after load_mission_internal.
+	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Join settle %s", loaded_mission_file_));
+	timeline->span("til");
+	const bool til_applied = apply_join_wire_til_if_ready();
+	timeline->end_span();
+	if (!til_applied) {
+		timeline->finish();
 		return false;
 	}
 	Ref<Simulation> sim = get_sim();
 	if (sim.is_null() || !sim->is_joiner()) {
 		join_wire_assets_failed_ = true;
+		timeline->finish();
 		return false;
 	}
 	const int64_t til_state = sim->get_join_terrain_til_state();
@@ -867,17 +890,17 @@ bool GameWorld::settle_join_wire_assets() {
 			(til_state == Simulation::JOIN_TERRAIN_TIL_COMPLETE && !join_wire_til_applied_) ||
 			(til_state != Simulation::JOIN_TERRAIN_TIL_ABSENT && til_state != Simulation::JOIN_TERRAIN_TIL_COMPLETE)) {
 		join_wire_assets_failed_ = true;
+		timeline->finish();
 		return false;
 	}
-	// The settle's own timeline (an instrument: its line prints under --verbose beside the
-	// load's), the rest of the joiner's 0x1A -> C 0x2F window after load_mission_internal.
-	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Join settle %s", loaded_mission_file_));
 	timeline->span("streamed_objects");
 	// The stream lands in the World and its statics take their placed identity first: the
 	// settle runs in the mission start's call, ahead of any session update, whose frame phase
 	// does it (engine: inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
+	timeline->span("materialize");
 	sim->materialize_join_world_stream();
-	place_streamed_mission_objects(sim);
+	timeline->end_span();
+	place_streamed_mission_objects(sim, timeline);
 	timeline->end_span();
 	timeline->span("model_list");
 	player_visuals_->prewarm_loaded_model_challenge_definitions();
@@ -907,13 +930,23 @@ bool GameWorld::settle_join_wire_assets() {
 // index so the wire pass stops drawing them as individual animated nodes.
 // Retail's client draws its streamed pools through the same sector renderer
 // as the host; there is no per-role render path.
-void GameWorld::place_streamed_mission_objects(const Ref<Simulation> &p_sim) {
+void GameWorld::place_streamed_mission_objects(const Ref<Simulation> &p_sim,
+		const Ref<LoadTimeline> &p_timeline) {
 	if (placer_.is_null() || p_sim.is_null()) {
 		UtilityFunctions::print_verbose(vformat("GameWorld: streamed objects not placed (placer %s)",
 				placer_.is_null() ? "none" : "kept"));
 		return;
 	}
+	// The legs as nested spans of the caller's timeline (an instrument).
+	const auto leg = [&p_timeline](const char *p_name) {
+		if (p_timeline.is_valid()) p_timeline->span(p_name);
+	};
+	const auto leg_end = [&p_timeline]() {
+		if (p_timeline.is_valid()) p_timeline->end_span();
+	};
+	leg("records");
 	const Array records = p_sim->get_streamed_placement_records();
+	leg_end();
 	if (records.is_empty()) {
 		UtilityFunctions::print_verbose("GameWorld: streamed objects not placed (no placement records)");
 		return;
@@ -923,22 +956,38 @@ void GameWorld::place_streamed_mission_objects(const Ref<Simulation> &p_sim) {
 	skip_kinds.push_back(MissionData::KIND_ORGANIC);
 	options["skip_kinds"] = skip_kinds;
 	MissionRoot *runtime = get_runtime();
+	leg("place");
 	mission_stats_ = placer_->place_entities(records, runtime, options);
+	leg_end();
+	leg("rebind");
 	if (runtime != nullptr) {
 		runtime->rebind_placed_entities(placer_);
 	}
+	leg_end();
+	leg("occlusion");
 	occlusion_->rebind_placed_nodes();
+	leg_end();
 	// The authored .def item effects and effect lights attached at load against
 	// an empty placer; re-attach against the placed sources (the same pair the
 	// effect-catalog warm-up re-runs).
+	leg("reattach");
 	item_fx_->reattach();
 	if (light_director_.is_valid()) {
 		light_director_->reattach();
 	}
+	leg_end();
 	UtilityFunctions::print_verbose(vformat(
 			"GameWorld: placed %d streamed mission objects (%d batched / %d animated, %d unresolved, %d markers)",
 			mission_stats_->get_placed(), mission_stats_->get_batched(), mission_stats_->get_animated(),
 			mission_stats_->get_unresolved(), mission_stats_->get_markers()));
+	// The placement run's own unit spans (an instrument).
+	UtilityFunctions::print_verbose(vformat(
+			"GameWorld: streamed placement units: bucket %d ms, statics %d ms, models %d ms (%d graphics, %d batches, %d static shadow batches)",
+			static_cast<int>(mission_stats_->get_span_bucket_entities_usec() / 1000),
+			static_cast<int>(mission_stats_->get_span_static_batches_usec() / 1000),
+			static_cast<int>(mission_stats_->get_span_animated_models_usec() / 1000),
+			mission_stats_->get_graphics(), mission_stats_->get_batches(),
+			mission_stats_->get_static_shadow_batches()));
 }
 
 // The revealed world must never race the budgeted cold wire materialization:

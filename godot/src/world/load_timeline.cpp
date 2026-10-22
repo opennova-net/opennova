@@ -53,7 +53,21 @@ String LoadTimeline::finish() {
 	end_us_ = Time::get_singleton()->get_ticks_usec();
 	const String line = summary();
 	UtilityFunctions::print_verbose(String("LoadTimeline: ") + line);
+	UtilityFunctions::print_verbose(String("LoadTimeline detail: ") + label_ + String(": ") + detail());
 	return line;
+}
+
+String LoadTimeline::detail() const {
+	PackedStringArray parts;
+	for (const Ref<LoadTimelineSpan> &s : spans_) {
+		const double offset_ms = static_cast<double>(s->get_start_us() - start_us_) / US_PER_MS;
+		const String length = s->get_end_us() > 0
+				? format_ms(static_cast<double>(s->duration_us()) / US_PER_MS)
+				: String("open");
+		parts.append(String(">").repeat(s->get_depth()) + s->get_name() +
+				vformat(" +%d ", static_cast<int>(Math::round(offset_ms))) + length);
+	}
+	return format_ms(total_ms()) + String(" = ") + String(", ").join(parts);
 }
 
 double LoadTimeline::total_ms() const {

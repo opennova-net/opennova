@@ -801,7 +801,9 @@ private:
 			const Ref<ResourceRoot> &p_resource_root, const PackedByteArray &p_wire_til_bytes,
 			bool p_wire_is_authoritative);
 	bool apply_join_wire_til_if_ready();
-	void place_streamed_mission_objects(const Ref<Simulation> &p_sim);
+	// `p_timeline` (may be null) takes the placement's legs as nested spans (an instrument).
+	void place_streamed_mission_objects(const Ref<Simulation> &p_sim,
+			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
 	void clear_mission_tile_info();
 	// The terrain's load: the .trn, then overcast.def and the mission's .env (`p_environment`, its
 	// name without the extension; empty: none) through the terrain's parser (D-TERRAIN-18), with

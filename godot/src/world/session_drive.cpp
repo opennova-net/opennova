@@ -305,6 +305,7 @@ void SessionDrive::step_preload() {
 		if (mission.is_null()) return false;
 		join_preload_root_.unref();
 		join_identified_ = false;
+		join_window_mark("load_call");
 		const int err = world_->load_mission_internal(mission, bms, resource_root);
 		join_window_mark("load_end");
 		if (err != OK) {
@@ -329,7 +330,10 @@ void SessionDrive::step_preload() {
 	// The host's streamed assets settle and the loaded-model list freezes, ahead of the push.
 	legs.settle = [&]() {
 		join_window_mark("settle_begin");
-		if (world_->settle_join_wire_assets()) return true;
+		if (world_->settle_join_wire_assets()) {
+			join_window_mark("settle_end");
+			return true;
+		}
 		world_->report_join_wire_asset_failure(
 				"join: failed to settle the host's streamed mission assets");
 		return false;
