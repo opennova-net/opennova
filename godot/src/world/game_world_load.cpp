@@ -12,6 +12,7 @@
 
 #include <base/gameprofile/resource_missing.h>
 #include <formats/mission/bms_edit.h>
+#include <runtime/inmatch/loaded_model_list.h> // avatar_combo_models (the 0x11's avatar loads)
 #include <runtime/ragdoll/ragdoll_option.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/mission/mission_sidecars.h>
@@ -252,6 +253,8 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	loaded_mission_ = p_mission;
 	timeline->span("objects");
 	start_mission_root();
+	// A join whose S2C 0x11 ran the head keeps that load's placer, the avatar models in it.
+	if (!head_loaded) placer_.unref();
 	place_mission_objects(p_mission);
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_RUNTIME));
@@ -334,6 +337,19 @@ int GameWorld::load_join_terrain(const Ref<MissionData> &p_mission, const String
 	Ref<LoadTimeline> timeline;
 	const int err = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
 	if (err != OK) return err;
+	// Then the avatar combos' models, at the header's climate: their data loads into the
+	// placer the S2C 0x1A's load keeps, and that load's warm builds them with the rest of the
+	// list (engine: inmatch/loaded_model_list.h avatar_combo_models, D-NET-NEW-L2-19).
+	timeline->span("avatars");
+	placer_ = MissionObjectPlacer::create(resource_root_, Ref<ItemDatabase>());
+	const opennova::mission::BootFileSource files =
+			opennova::mission::boot_files_from_index(p_resource_root->native_index());
+	const auto climate = static_cast<opennova::bms::ClimateType>(p_mission->get_info()->get_climate());
+	for (const std::string &name : opennova::inmatch::avatar_combo_models(&files, climate)) {
+		const String file = opennova::to_gd(opennova::inmatch::LoadedModelList::node_name(name));
+		if (p_resource_root->has_file(file)) placer_->object_data_for(file);
+	}
+	timeline->end_span();
 	timeline->finish();
 	join_terrain_preloaded_ = true;
 	return OK;
@@ -457,7 +473,7 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 	if (resource_root_.is_null() || p_mission.is_null()) {
 		return;
 	}
-	placer_ = MissionObjectPlacer::create(resource_root_, Ref<ItemDatabase>());
+	if (placer_.is_null()) placer_ = MissionObjectPlacer::create(resource_root_, Ref<ItemDatabase>());
 	// The placer's Avatars.def is the one registry every player visual resolves
 	// against; the same table projects the local profile the sim stamps.
 	Ref<AvatarDatabase> avatar_db = placer_->get_avatar_db();

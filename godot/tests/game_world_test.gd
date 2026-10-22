@@ -2114,7 +2114,8 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 		var stages := []
 		for span in sync_tail_load.spans():
 			stages.append(span.name)
-		assert_eq(stages, ["environment", "terrain"], "the 0x11 loads the environment and terrain")
+		assert_eq(stages, ["environment", "terrain", "avatars"],
+				"the 0x11 loads the environment, the terrain and the avatar combos' models")
 	for _frame in range(600):
 		host.step()
 		await get_tree().process_frame
@@ -2237,8 +2238,8 @@ func test_a_joiner_reload_loads_the_next_maps_terrain_at_its_sync_tail() -> void
 		var stages := []
 		for span in sync_tail_load.spans():
 			stages.append(span.name)
-		assert_eq(stages, ["environment", "terrain"],
-				"the reload's 0x11 loads the environment and terrain")
+		assert_eq(stages, ["environment", "terrain", "avatars"],
+				"the reload's 0x11 loads the environment, the terrain and the avatar combos' models")
 	assert_eq(failures.size(), 0)
 	world.unload()
 	host_world.unload()

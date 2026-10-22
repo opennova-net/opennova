@@ -141,6 +141,21 @@ struct MissionStartModelSources {
 	bool foliage = true;
 };
 
+// The Avatars.def combos' models, the list's first loads: three parts a combo (head, body,
+// arms), each at the climate's variant (graphic, graphic_j, graphic_s) or its base graphic
+// where the variant is empty, in the file's order, repeats included (the load finds them
+// again). A joiner loads them at its S2C 0x11, after the 0x0B header's terrain and ahead of
+// the game-start wait, so their files are in before the 0x1A; the freeze at the end of the
+// mission start builds their buffers with every other node's. Empty when the mount holds no
+// Avatars.def that parses.
+// [orig: Game_StartMission @0x524360 - Game_LoadTerrainDuringConnect @0x524DF2, then
+//  Avatars_LoadComboModels(&g_AvatarDefs, g_BmsClimate) @0x524E24 ahead of
+//  NapiClient_WaitForGameStart @0x524E29 (the joiner's arm; @0x525267 the other); the freeze
+//  CEffectWorld_RebuildAllModelBuffers @0x5B3A80 (each node's CEffectDef_ResolveSubobjectMaterials
+//  @0x5B3A92) from Render_InitMissionTextures @0x525A6E]
+std::vector<std::string> avatar_combo_models(const mission::BootFileSource *files,
+		bms::ClimateType climate);
+
 // Whether a mission event carries an action 39 of subtype 1 or 2: the special event whose
 // items the mission start loads [orig: EventTrigger_HasActiveSpecialEvent @0x452d90 - each
 // event's actions @0x452da8..0x452dd1, type 39 and subtype 1 / 2 @0x452dc7].

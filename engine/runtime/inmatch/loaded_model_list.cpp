@@ -152,6 +152,39 @@ std::vector<PoolZeroBody> replica_pool0_bodies(const replication::ClientState &s
 	return out;
 }
 
+std::vector<std::string> avatar_combo_models(const mission::BootFileSource *files,
+		bms::ClimateType climate) {
+	// [orig: Avatars_LoadComboModels @0x57a0b0 (this = g_AvatarDefs, lod = g_BmsClimate) - the
+	//  variant picks @0x57a0d8..0x57a0ed / @0x57a14d..0x57a163 / @0x57a1c2..0x57a1de, the base
+	//  fallbacks @0x57a0f0 / @0x57a166 / @0x57a1e4, the loads @0x57a0fd / @0x57a174 / @0x57a1f5]
+	std::vector<std::string> names;
+	std::string avatars_text;
+	if (!read_text(files, "Avatars.def", avatars_text)) return names;
+	avatars::AvatarsFile file{};
+	if (avatars::avatars_parse_memory(avatars_text.data(), avatars_text.size(), &file) == 0) {
+		auto part = [&](const avatars::AvatarPartSnapshot &p) {
+			const char *variant = p.graphic;
+			if (climate == bms::ClimateType::Jungle) variant = p.graphic_j;
+			else if (climate == bms::ClimateType::Snow) variant = p.graphic_s;
+			names.emplace_back(variant[0] != '\0' ? variant : p.graphic);
+		};
+		for (size_t n = 0; n < file.nationalities_count; ++n) {
+			const avatars::AvatarNationality &nat = file.nationalities[n];
+			for (size_t d = 0; d < nat.divisions_count; ++d) {
+				const avatars::AvatarDivision &div = nat.divisions[d];
+				for (size_t c = 0; c < div.combos_count; ++c) {
+					const avatars::AvatarCombo &combo = div.combos[c];
+					part(combo.head);
+					part(combo.body);
+					part(combo.arms);
+				}
+			}
+		}
+	}
+	avatars::avatars_free(&file);
+	return names;
+}
+
 bool mission_has_special_event(const bms::File &mission) {
 	for (const bms::Event &event : mission.events) {
 		for (int k = 0; k < event.action_count; ++k) {
@@ -170,38 +203,8 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 	LoadedModelList list(src.model_loads);
 	ItemModelLoads items(list, src.items);
 
-	// (1) The Avatars.def combos, three parts each at the climate's variant (graphic,
-	// graphic_j, graphic_s), the part's base graphic where the variant is empty
-	// [orig: Game_StartMission @0x524e24 (the joiner's arm; @0x525267 the other) ->
-	//  Avatars_LoadComboModels @0x57a0b0 (this = g_AvatarDefs, lod = g_BmsClimate) - the
-	//  variant picks @0x57a0d8..0x57a0ed / @0x57a14d..0x57a163 / @0x57a1c2..0x57a1de, the
-	//  base fallbacks @0x57a0f0 / @0x57a166 / @0x57a1e4, the loads @0x57a0fd / @0x57a174 /
-	//  @0x57a1f5]
-	std::string avatars_text;
-	if (read_text(src.files, "Avatars.def", avatars_text)) {
-		avatars::AvatarsFile file{};
-		if (avatars::avatars_parse_memory(avatars_text.data(), avatars_text.size(), &file) == 0) {
-			auto part = [&](const avatars::AvatarPartSnapshot &p) {
-				const char *variant = p.graphic;
-				if (src.climate == bms::ClimateType::Jungle) variant = p.graphic_j;
-				else if (src.climate == bms::ClimateType::Snow) variant = p.graphic_s;
-				list.load(variant[0] != '\0' ? variant : p.graphic);
-			};
-			for (size_t n = 0; n < file.nationalities_count; ++n) {
-				const avatars::AvatarNationality &nat = file.nationalities[n];
-				for (size_t d = 0; d < nat.divisions_count; ++d) {
-					const avatars::AvatarDivision &div = nat.divisions[d];
-					for (size_t c = 0; c < div.combos_count; ++c) {
-						const avatars::AvatarCombo &combo = div.combos[c];
-						part(combo.head);
-						part(combo.body);
-						part(combo.arms);
-					}
-				}
-			}
-		}
-		avatars::avatars_free(&file);
-	}
+	// (1) The Avatars.def combos (avatar_combo_models).
+	for (const std::string &name : avatar_combo_models(src.files, src.climate)) list.load(name);
 
 	// (2) The world stream lands: its 0x0C / 0x10 / 0x0D / 0x20 records store each slot's item
 	// index and load no model; the reload below loads their rows (a joiner's pool 0 from its

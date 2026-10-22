@@ -193,6 +193,16 @@ void test_the_mission_start_list() {
 	sources.world = world.get();
 	const inmatch::LoadedModelList list = inmatch::build_mission_start_model_list(sources);
 
+	// The list's first loads, the ones a joiner runs at its S2C 0x11 (D-NET-NEW-L2-19): each
+	// combo's head, body and arms at the jungle variant or the base, repeats kept, the second
+	// combo's arms the tokenizer's stale ARMS_A [orig: Avatars_LoadComboModels @0x57a0b0].
+	const std::vector<std::string> avatar_models =
+			inmatch::avatar_combo_models(&files, bms::ClimateType::Jungle);
+	CHECK(avatar_models == (std::vector<std::string>{"hdA_j.3di", "bdA.3di", "amA.3di",
+								   "hdB.3di", "bdA.3di", "amA.3di"}));
+	CHECK(inmatch::avatar_combo_models(&files, bms::ClimateType::Desert).front() == "hdA.3di");
+	CHECK(inmatch::avatar_combo_models(nullptr, bms::ClimateType::Jungle).empty());
+
 	// Creation order, then the list head first (the reverse).
 	const char *created[] = {
 			"hdA_j.3DI", "bdA.3DI", "hdB.3DI",                          // the combos (amA fails)
