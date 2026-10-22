@@ -1329,11 +1329,14 @@ bool run_the_track_steps_after_the_scoreboard() {
 	inmatch::NapiNPConnection &j = f.joiner();
 	(void)f.send(opennova::c2s::CHECKSUM_RESPONSE); // slot state 2
 	(void)JoinFixture::drain(f.joiner_transport);
+	// The track waits at its entry subphase (the map names, 8) until its first step.
+	const uint16_t entry = j.burst.player_sync_subphase;
 	(void)inmatch::tick_connections(*f.ctx, /*elapsed_ms=*/0, /*now_tick=*/2,
 			/*respect_s2c_send_boundary=*/true, /*run_spawn_pump=*/false,
 			/*run_initial_state_steps=*/false);
-	if (!expect(JoinFixture::drain(f.joiner_transport).empty() &&
-	                    j.burst.player_sync_subphase == 0,
+	if (!expect(JoinFixture::drain(f.joiner_transport).empty(),
+	            "the receive pump's pass sends the joiner nothing")) return false;
+	if (!expect(j.burst.player_sync_subphase == entry,
 	            "the receive pump's pass steps nothing")) return false;
 	f.ctx->scoreboard_broadcast_timer = 0x136u; // this tick is a scoreboard boundary
 	inmatch::Server_TickUpdate(*f.ctx);
@@ -1361,15 +1364,17 @@ bool run_a_frame_whose_round_ends_steps_no_track() {
 	inmatch::NapiNPConnection &j = f.joiner();
 	(void)f.send(opennova::c2s::CHECKSUM_RESPONSE); // slot state 2
 	(void)JoinFixture::drain(f.joiner_transport);
+	const uint16_t entry = j.burst.player_sync_subphase;
 	f.world->match.set_remaining_ticks(0); // the round clock is out: the next win check ends it
 	if (!expect(!f.world->match.outcome().ended, "the round runs at the frame's start"))
 		return false;
 	inmatch::Server_TickUpdate(*f.ctx); // the first frame is a periodic second
-	return expect(f.world->match.outcome().ended &&
-	                      !contains(JoinFixture::drain(f.joiner_transport),
-	                              opennova::s2c::MISSION_MAP_NAMES) &&
+	if (!expect(f.world->match.outcome().ended, "the frame's win check ends the round"))
+		return false;
+	return expect(!contains(JoinFixture::drain(f.joiner_transport),
+	                      opennova::s2c::MISSION_MAP_NAMES) &&
 	                      j.slot_state == inmatch::PlayerSlotState::PlayerSync &&
-	                      j.burst.player_sync_subphase == 0,
+	                      j.burst.player_sync_subphase == entry,
 	              "the round ends in the frame: its track takes no step");
 }
 
