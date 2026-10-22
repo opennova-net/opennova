@@ -221,7 +221,17 @@ bool run_in_match_spawn_edge() {
 
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "in-match frame: L spawned on the edge")) return false;
-	if (!expect(h.socket.sends == 1, "in-match frame: no second hello on the seeded session")) return false;
+	// No second hello on the seeded session (the edge frame may ship its first 0x0C, built
+	// from the L its receive leg bore: D-NET-526, npruntime_joiner_record_flags).
+	int hellos = 0;
+	for (const std::vector<uint8_t> &datagram : h.socket.datagrams) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_HELLO)
+			++hellos;
+	}
+	if (!expect(hellos == 1, "in-match frame: no second hello on the seeded session")) return false;
 	if (!expect(h.kernel->world.cached.local_player.valid(),
 			"in-match frame: cached.local_player published")) return false;
 	if (!expect(h.role.self_wire_handle() == 0x0005,

@@ -400,8 +400,20 @@ public:
 	// [orig: Client_ProcessNetworkFrame -- PumpClientProtocolRecv @0x42C228
 	//  ahead of Player_BuildTag0CInputBody @0x42C482]
 	using UplinkBuilder = std::function<bool(PlayerExtendedUplink &)>;
+	// The receive handlers' writes on the embedder's own world (the local player's
+	// birth and its record, kit, team and world-state folds), run once per frame
+	// right after the receive pump, ahead of the send block whether or not its
+	// boundary opens: every handler runs inside the receive, on the local player
+	// that exists from the mission start, so the frame's 0x0C is built from what
+	// they left.
+	// [orig: Client_ProcessNetworkFrame @0x42C180 - CNapiNetwork_PumpClientProtocolRecv
+	//  (the call @0x42C228) ahead of the send block @0x42C3DD (the build from
+	//  g_LocalPlayerEntity @0x42C46F..0x42C482); the handlers' table g_NPMsgInfoClient,
+	//  installed by CNapiNetwork_Init @0x4CA4A0 (the store @0x4CA8D1)]
+	using AfterReceive = std::function<void()>;
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(const UplinkBuilder &build_uplink,
-	                                                             uint32_t now_tick = 0);
+	                                                             uint32_t now_tick = 0,
+	                                                             const AfterReceive &after_receive = {});
 	// No-uplink frame (HostClient, or a pre-deploy Joiner): recv pump + connect-drive only, no 0x0C.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(uint32_t now_tick = 0);
 	// The frame's phases (SIM_CLIENT_SETUP/RECEIVE/MAINTENANCE/SEND) lap onto
@@ -1180,9 +1192,10 @@ public:
 
 private:
 	// Shared body for the Client_ProcessNetworkFrame overloads. `build_uplink` is nullptr for a
-	// no-uplink frame.
+	// no-uplink frame; `after_receive` (null or empty: none) runs after the receive.
 	std::vector<std::vector<uint8_t>> run_frame(
-			const UplinkBuilder *build_uplink, uint32_t now_tick);
+			const UplinkBuilder *build_uplink, uint32_t now_tick,
+			const AfterReceive *after_receive = nullptr);
 	// A joiner's datagrams as they leave, their connect-log lines written (NET SENDING each,
 	// then NET DISCONNECTING when the call ended the session that was up at its start), past
 	// the lines the frame's receive already wrote (receive_sends_logged_ /

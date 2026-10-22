@@ -844,6 +844,9 @@ void JoinerRole::pump() {
 	lap.restart();
 	lp.apply_player_input_pre_tick(rt.send_block_opens_this_frame());
 	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
+	// L's spawn edge runs inside the net frame (its after-receive leg), so whether L
+	// existed is read ahead of it.
+	const bool had_local = local_spawned_;
 	const FrameSignals decoded = run_client_net_frame();
 	// Phase 0 of the authoritative 0x0A is the client's one pre-round
 	// predicate. Mirror it onto World before any local entity/system work.
@@ -851,12 +854,6 @@ void JoinerRole::pump() {
 			rt.state().preround_delay_seconds;
 	lap.restart(); // the wire leg has its own rows
 	materialize_replica_world();
-	const bool had_local = local_spawned_;
-	spawn_and_arm_local_player();
-	// Retail's L exists before any record; ours spawns here, after the frame's
-	// receive folded the self record, so a fresh L takes that record's byte now.
-	fold_local_record();
-	apply_world_state_load();
 	apply_replica_track(world, rt.state(), rt.game_type(), true, track_seen_);
 	if (decoded.health) apply_authoritative_health();
 	// The S2C 0x3A revive tint. Retail arms the word inside the message handler;
@@ -1480,172 +1477,185 @@ void JoinerRole::send_hello_once() {
 	}
 }
 
-// Recv-fold + connect-drive + the gated C2S 0x0C uplink, then the decoded-state
-// folds (loadout/kit, side assignment, deployment-release latch, the ~1 Hz
-// freeze tripwire, objective sync into world subgoals). The wire-leg-complete
-// hook fires right after the uplink ship, before the folds, so the embedder's
-// F3 Stats board measures exactly the wire leg. Returns what this frame's pump
-// decoded (drives the later phases).
+// The client net frame (recv-fold + connect-drive + the gated C2S 0x0C uplink) with the
+// receive handlers' writes on L in its after-receive leg (loadout/kit, side assignment,
+// the deployment-release latch, L's birth on the in-match edge, its own record and the
+// 0x0F's pose), then the ~1 Hz freeze tripwire and the objective sync into world subgoals.
+// The wire leg's clock stops right after the ship, so the embedder's F3 Stats board
+// measures the net frame with its folds. Returns what this frame's pump decoded (drives
+// the later phases).
 JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;
 	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
 	const uint32_t now = now_tick_;
-	// Run the client net frame first: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C
-	// uplink (gated InMatch && deployed inside the runtime). The uplink describes L's pose as left by
-	// the previous entity update; this frame's raw-input/motor pass follows all inbound application.
+	// The uplink describes L's pose as left by the previous entity update and this frame's
+	// receive; this frame's raw-input/motor pass follows all inbound application.
 	const uint32_t health_updates_before =
 			rt.state().health_updates_applied;
 	const uint32_t objective_updates_before =
 			rt.state().objective_updates_applied;
 	const bool local_existed_before_net = local_spawned_;
-	std::vector<std::vector<uint8_t>> outs;
-	const bool have_L = local_spawned_ && world.cached.local_player.valid();
-	const world::Entity *e =
-			have_L ? world.registry.get(world.cached.local_player) : nullptr;
-	const world::AiEntity *ae =
-			have_L ? world.ai.for_handle(world.cached.local_player) : nullptr;
-	// A release can arrive during this recv pump. Do not let that newly-opened
-	// runtime gate transmit the corpse/stale pre-deploy pose in the same frame;
-	// L resumes uplinking only after the simulation has consumed the release and
-	// a later positive authoritative health tail. The body's own dead test is the
-	// builder's: a Health word of 0, or the dead bit (no alive latch, D-NET-433).
+	// The own record's compact revision ahead of the receive: a record the receive folds
+	// is the uplink's echo (the builder below).
+	const uint16_t self_before = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
+	const replication::ClientEntityState *self_row_before = rt.state().find(self_before);
+	const uint32_t self_revision_before =
+			self_row_before != nullptr ? self_row_before->compact_revision : 0;
+	rt.set_local_player_position(world); // L, the receive handlers' local player
+	// The receive handlers' writes on L, in the receive's place: the runtime runs this leg
+	// right after its receive pump, ahead of the send block, open or not
+	// (ClientRuntime::AfterReceive). Each fold applies what the receive brought (each is
+	// revision-gated), in the handlers' order: the availability, the 0x5A's kit and row,
+	// the side's kit buffer, the 0x50's team and local arm, the release latch; then L's
+	// birth on the in-match edge (retail's L exists from the mission start, so its handlers
+	// write it inside the receive), its own record and the 0x0F's pose. So the release
+	// frame's 0x0C leaves with the 0x0F's completion burst, built from L as the receive
+	// left it (D-NET-526).
+	// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
+	//  block @0x42C3DD, the build from g_LocalPlayerEntity @0x42C46F..0x42C482;
+	//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC;
+	//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the L test @0x4293F2, the
+	//  selection @0x4296E3, the hold clear @0x429713; NapiNPClientMsg_TeamAssign @0x431910 -
+	//  @0x4319DB / @0x4319EE, the local arm @0x431A35..0x431A9E; NapiNPClientMsg_0x00F
+	//  @0x42E200 - the hold clear @0x42E391, the pose stores @0x42E3B9..0x42E3F2]
+	const ClientRuntime::AfterReceive after_receive = [&] {
+		// The host policy is installed before either the granted kit or side
+		// reseed can consult availability. A pre-load packet remains retained in
+		// ClientState until the first world frame reaches this boundary.
+		// [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0]
+		if (weapon_availability_revision_seen_ != rt.state().weapon_availability_revision) {
+			lp.loadout.availability.values = rt.state().weapon_availability;
+			weapon_availability_revision_seen_ = rt.state().weapon_availability_revision;
+		}
+		if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
+		// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
+		// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
+		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
+		//  the climate pick @0x42942D..0x429463, ItemList_FindIndexByTypeId @0x42946C, the
+		//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485, no index compare, the model
+		//  words through @0x4294BA, AnimMap_InitBoneTypes @0x4294C4]
+		if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
+			loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
+			// The apply first rebuilds the process's loadout name list from the list's rows (each
+			// row whose weapon the table has: its name and three values), ahead of its L test, so
+			// the next body the joiner spawns takes the list's first weapon (D-NET-143).
+			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the
+			//  rows @0x429230..0x4293B9 (AdmDef_GetEntryByIndex @0x42923D, the name @0x4292F0), the
+			//  L test @0x4293F2]
+			apply_weapon_loadout_name_list(world, rt.authoritative_loadout());
+			if (world::Entity *local = world.registry.get(world.cached.local_player)) {
+				world::rebind_player_camouflage_row(world, *local);
+				// Off the authority the grant's class is also its side's class word
+				// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the Team test
+				//  @0x429411..0x42941D, g_CharClassTeam2 @0x42941F, g_CharClassTeam1 @0x429427].
+				granted_side_class_[local->team == 1 || local->team == 3 ? 0 : 1] = local->player_class;
+			}
+		}
+		// The team selector may only just have become known (the S2C 0x04 latch landing
+		// after the catalog) or may have moved us across the line (S2C 0x50). Either way the
+		// resident kit buffer follows the side, exactly as retail re-copies restrictionData
+		// for the newly assigned side [orig: NapiNPClientMsg_TeamAssign @0x431a9a].
+		if (kit_seams.reseed_on_side_change && kit_seams.reseed_on_side_change())
+			if (kit_seams.push) kit_seams.push();
+		// S2C 0x50 re-latched OUR OWN team. L's team is seeded once by spawn_from_self
+		// (the self record's team byte, or a pre-spawn 0x50's); a later one must move both the
+		// entity's Team and the round sim's presenting-client team, or friend/foe styling
+		// keeps rendering the old side. Retail does the same two writes: g_LocalTeam for
+		// the latch and entity->Team for the entity itself.
+		// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — @0x4319db / @0x4319ee; the round-spawn
+		//  style select reads the local player's Team @0x4ec740]
+		{
+			const uint64_t self_team_revision = rt.self_team_revision();
+			if (self_team_revision > self_team_revision_seen_) {
+				self_team_revision_seen_ = self_team_revision;
+				// Leg 2's store on the joiner's own entity (not the g_LocalTeam latch,
+				// which the local arm alone takes, D-NET-572).
+				const uint8_t assigned = rt.self_assigned_team();
+				if (world::Entity *L =
+						world.registry.get(world.cached.local_player)) {
+					L->team = assigned;
+				}
+				world.round_sim.local_team = assigned;
+			}
+		}
+		{
+			const uint64_t local_resubmit_revision = rt.local_resubmit_revision();
+			if (local_resubmit_revision > local_resubmit_revision_seen_) {
+				local_resubmit_revision_seen_ = local_resubmit_revision;
+				// The 0x50 handler's local arm RE-SELECTS the newly assigned side's profile page
+				// and re-submits it: profileData = (team==1||team==3) ? blue : red, class
+				// = *profileData, page = profileData + {6,2054,4102,6150,8198}
+				// [orig: NapiNPClientMsg_TeamAssign @0x431a35..@0x431a9e — the submit
+				// passes slot 195 RAW]. The re-submission itself lives in the joiner
+				// runtime; re-arm the seam from the NEW side so its content is the page
+				// retail would have copied. The resident buffer itself moves with the side
+				// in reseed_kit_on_side_change above (retail's qmemcpy replaces
+				// restrictionData wholesale @0x431a9a) — a reassignment WITHIN one side
+				// reaches only this re-arm, which is what retail's unconditional re-submit
+				// does too.
+				if (kit_seams.push) kit_seams.push();
+				reinit_local_player_on_team_assign();
+			}
+		}
+		const uint64_t deployment_release_revision =
+				rt.deployment_release_revision();
+		if (deployment_release_revision > deployment_release_revision_seen_) {
+			deployment_release_revision_seen_ = deployment_release_revision;
+			// The first release creates L (below). A later release must revive that
+			// existing identity, but only after a positive 0x0A tail observed after
+			// this release frame (not a stale positive already queued ahead of it).
+			if (local_existed_before_net) {
+				redeploy_release_pending_ = true;
+				redeploy_health_updates_at_release_ =
+						rt.state().health_updates_applied;
+			}
+		}
+		spawn_and_arm_local_player();
+		fold_local_record();
+		apply_world_state_load();
+	};
+	// The builder at the send block, on L as the receive left it. Its own refusals: no
+	// body, a Health word of 0, the dead bit (no alive latch, D-NET-433); then the role's
+	// hold on a redeploy release L has not taken yet (apply_authoritative_health's revive).
 	// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0; jz`
 	//  @0x42A58F..0x42A597, `test byte [eax+24h], 2; jnz` @0x42A599..0x42A59D]
-	const bool can_offer_uplink =
-			rt.is_deployed() && e != nullptr && ae != nullptr &&
-			world::retail_signed_i16(e->health) != 0 && (e->flags & 2u) == 0u &&
-			!redeploy_release_pending_;
-	rt.set_local_player_position(world); // L, the receive handlers' local player
-	if (can_offer_uplink) {
+	const std::vector<std::vector<uint8_t>> outs = rt.Client_ProcessNetworkFrame(
+			[&](PlayerExtendedUplink &up) {
+		if (!local_spawned_ || !world.cached.local_player.valid() || redeploy_release_pending_)
+			return false;
+		const world::Entity *e = world.registry.get(world.cached.local_player);
+		const world::AiEntity *ae = world.ai.for_handle(world.cached.local_player);
+		if (e == nullptr || ae == nullptr || world::retail_signed_i16(e->health) == 0 ||
+				(e->flags & 2u) != 0u)
+			return false;
 		// The interest list scores the decoded entities against L; the HUD
 		// target cursor is the aim acquisition's combat target, else its
 		// aim-ray entity, named by its wire handle (a materialized pool-1..3
 		// row sits at its own; L answers to its self handle).
 		// [orig: HUD_BuildEntityInfo @0x4B87DA..0x4B882D -> g_HUDTargetCursorEntity
 		//  (HUD+0x168), read @0x50E1C6 / @0x50E42C]
-		// It is built at the send block, after this frame's receive, whose fold
-		// of L's own record (its compact revision moved) re-points L's ground
-		// link first [orig: @0x42C228 ahead of @0x42C482; case 2 @0x4C1346].
+		// The receive's fold of L's own record (its compact revision moved) re-pointed
+		// L's ground link first [orig: @0x42C228 ahead of @0x42C482; case 2 @0x4C1346].
 		const uint16_t self = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
+		replication::UplinkClientInputs interest;
+		interest.replica = &rt.state();
+		interest.self_wire_handle = self;
+		interest.hud_target_wire_handle = replication::uplink_hud_target_wire_handle(
+				world, *ae, self, kernel.local.aim_wire_person());
+		interest.avg_fps = uplink_avg_fps_;
+		interest.cpu_percent = uplink_cpu_percent_;
 		const replication::ClientEntityState *self_row = rt.state().find(self);
-		const uint32_t self_revision = self_row != nullptr ? self_row->compact_revision : 0;
-		outs = rt.Client_ProcessNetworkFrame([&](PlayerExtendedUplink &up) {
-			replication::UplinkClientInputs interest;
-			interest.replica = &rt.state();
-			interest.self_wire_handle = self;
-			interest.hud_target_wire_handle = replication::uplink_hud_target_wire_handle(
-					world, *ae, self, kernel.local.aim_wire_person());
-			interest.avg_fps = uplink_avg_fps_;
-			interest.cpu_percent = uplink_cpu_percent_;
-			self_row = rt.state().find(self);
-			if (self_row != nullptr && self_row->compact_revision != self_revision)
-				interest.self_echo = self_row;
-			// This receive's own record folded its Flags byte and its mount edge into L first.
-			fold_local_record();
-			up = replication::build_player_uplink(world, *e, *ae, interest);
-			return true;
-		}, now);
-	} else {
-		outs = rt.Client_ProcessNetworkFrame(now);
-	}
-	// A frame whose send block stayed shut still folded its receive's records.
-	fold_local_record();
+		const uint32_t revision_before = self == self_before ? self_revision_before : 0;
+		if (self_row != nullptr && self_row->compact_revision != revision_before)
+			interest.self_echo = self_row;
+		up = replication::build_player_uplink(world, *e, *ae, interest);
+		return true;
+	}, now, after_receive);
 	for (const std::vector<uint8_t> &dg : outs) send(dg);
 	// The wire leg ends here (the stats board's net split).
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - wire_leg_start_us_;
-	// The host policy is installed before either the granted kit or side
-	// reseed can consult availability. A pre-load packet remains retained in
-	// ClientState until the first world frame reaches this boundary.
-	// [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0]
-	if (weapon_availability_revision_seen_ != rt.state().weapon_availability_revision) {
-		lp.loadout.availability.values = rt.state().weapon_availability;
-		weapon_availability_revision_seen_ = rt.state().weapon_availability_revision;
-	}
-	if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
-	// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
-	// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
-	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
-	//  the climate pick @0x42942D..0x429463, ItemList_FindIndexByTypeId @0x42946C, the
-	//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485, no index compare, the model
-	//  words through @0x4294BA, AnimMap_InitBoneTypes @0x4294C4]
-	if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
-		loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
-		// The apply first rebuilds the process's loadout name list from the list's rows (each
-		// row whose weapon the table has: its name and three values), ahead of its L test, so
-		// the next body the joiner spawns takes the list's first weapon (D-NET-143).
-		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the
-		//  rows @0x429230..0x4293B9 (AdmDef_GetEntryByIndex @0x42923D, the name @0x4292F0), the
-		//  L test @0x4293F2]
-		apply_weapon_loadout_name_list(world, rt.authoritative_loadout());
-		if (world::Entity *local = world.registry.get(world.cached.local_player)) {
-			world::rebind_player_camouflage_row(world, *local);
-			// Off the authority the grant's class is also its side's class word
-			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the Team test
-			//  @0x429411..0x42941D, g_CharClassTeam2 @0x42941F, g_CharClassTeam1 @0x429427].
-			granted_side_class_[local->team == 1 || local->team == 3 ? 0 : 1] = local->player_class;
-		}
-	}
-	// The team selector may only just have become known (the S2C 0x04 latch landing
-	// after the catalog) or may have moved us across the line (S2C 0x50). Either way the
-	// resident kit buffer follows the side, exactly as retail re-copies restrictionData
-	// for the newly assigned side [orig: NapiNPClientMsg_TeamAssign @0x431a9a].
-	if (kit_seams.reseed_on_side_change && kit_seams.reseed_on_side_change())
-		if (kit_seams.push) kit_seams.push();
-	// S2C 0x50 re-latched OUR OWN team. L's team is seeded once by spawn_from_self
-	// (the self record's team byte, or a pre-spawn 0x50's); a later one must move both the
-	// entity's Team and the round sim's presenting-client team, or friend/foe styling
-	// keeps rendering the old side. Retail does the same two writes: g_LocalTeam for
-	// the latch and entity->Team for the entity itself.
-	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — @0x4319db / @0x4319ee; the round-spawn
-	//  style select reads the local player's Team @0x4ec740]
-	{
-		const uint64_t self_team_revision = rt.self_team_revision();
-		if (self_team_revision > self_team_revision_seen_) {
-			self_team_revision_seen_ = self_team_revision;
-			// Leg 2's store on the joiner's own entity (not the g_LocalTeam latch,
-			// which the local arm alone takes, D-NET-572).
-			const uint8_t assigned = rt.self_assigned_team();
-			if (world::Entity *L =
-					world.registry.get(world.cached.local_player)) {
-				L->team = assigned;
-			}
-			world.round_sim.local_team = assigned;
-		}
-	}
-	{
-		const uint64_t local_resubmit_revision = rt.local_resubmit_revision();
-		if (local_resubmit_revision > local_resubmit_revision_seen_) {
-			local_resubmit_revision_seen_ = local_resubmit_revision;
-			// The 0x50 handler's local arm RE-SELECTS the newly assigned side's profile page
-			// and re-submits it: profileData = (team==1||team==3) ? blue : red, class
-			// = *profileData, page = profileData + {6,2054,4102,6150,8198}
-			// [orig: NapiNPClientMsg_TeamAssign @0x431a35..@0x431a9e — the submit
-			// passes slot 195 RAW]. The re-submission itself lives in the joiner
-			// runtime; re-arm the seam from the NEW side so its content is the page
-			// retail would have copied. The resident buffer itself moves with the side
-			// in reseed_kit_on_side_change above (retail's qmemcpy replaces
-			// restrictionData wholesale @0x431a9a) — a reassignment WITHIN one side
-			// reaches only this re-arm, which is what retail's unconditional re-submit
-			// does too.
-			if (kit_seams.push) kit_seams.push();
-			reinit_local_player_on_team_assign();
-		}
-	}
-	const uint64_t deployment_release_revision =
-			rt.deployment_release_revision();
-	if (deployment_release_revision > deployment_release_revision_seen_) {
-		deployment_release_revision_seen_ = deployment_release_revision;
-		// The first release creates L below. A later release must revive that
-		// existing identity, but only after a positive 0x0A tail observed after
-		// this release frame (not a stale positive already queued ahead of it).
-		if (local_existed_before_net) {
-			redeploy_release_pending_ = true;
-			redeploy_health_updates_at_release_ =
-					rt.state().health_updates_applied;
-		}
-	}
 	// Frozen-session tripwire (live-diagnosis aid, ~1 Hz): sample the signature
 	// continuously; the embedder's diagnostic hook owns the (env-gated) print.
 	// An unrecovered S2C sequence gap stalls the ordered frontier, the remote world

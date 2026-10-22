@@ -347,10 +347,30 @@ bool run_the_self_record_echo_chases_l() {
 			"echo: over 2 units off, L snaps to the record's sample");
 }
 
+// D-NET-526: the frame that bears L ships its first C2S 0x0C. L is born in the net frame's
+// after-receive leg, ahead of the send block, as retail's handlers write the local player
+// inside the receive (it exists from the mission start); before, the edge frame's builder
+// found no L and the first 0x0C left a boundary later.
+// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
+//  block @0x42C3DD, the build from g_LocalPlayerEntity @0x42C46F..0x42C482;
+//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC]
+bool run_the_edge_frame_ships_its_first_uplink() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, kSelf, w::kPlayerInfantryTypeId);
+	const std::size_t from = h.socket.datagrams.size();
+	h.role.run_tick(h.input);
+	if (!expect(h.role.local_spawned(), "edge frame: L spawned")) return false;
+	return expect(uplinks_since(h.socket, from).size() == 1,
+			"edge frame: the frame that bears L ships its first 0x0C");
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
+	ok &= run_the_edge_frame_ships_its_first_uplink();
 	ok &= run_the_self_record_flags_ride_back_the_same_frame();
 	ok &= run_the_self_record_mount_edge_snaps_l();
 	ok &= run_the_self_record_echo_chases_l();

@@ -31,7 +31,9 @@
 
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/joiner_role.h> // the release frame through the role (D-NET-526)
 #include <runtime/inmatch/remote_admin.h> // the admin's GET over the joiner's clock
+#include <runtime/mission/mission_kernel.h>
 #include <base/io/le.h>
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
@@ -52,6 +54,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -425,7 +428,8 @@ bool run_timed_loops_pace_an_undictated_connection() {
 }
 
 // Run frames until one sends something (at most `limit`); the sent datagrams.
-std::vector<std::vector<uint8_t>> frame_until_sent(Harness &h, int limit) {
+template <class H>
+std::vector<std::vector<uint8_t>> frame_until_sent(H &h, int limit) {
 	for (int i = 0; i < limit; ++i) {
 		std::vector<std::vector<uint8_t>> sent = h.frame();
 		if (!sent.empty()) return sent;
@@ -433,10 +437,12 @@ std::vector<std::vector<uint8_t>> frame_until_sent(Harness &h, int limit) {
 	return {};
 }
 
-// Drive the admission under a dictated `period` to the final wait for S2C 0x0F, then let the
-// host release the player early: its self record and a first 0x5A grant (a host's answer to
-// the load's first 0x2F, which lands inside the final wait, ahead of the 0x0F).
-bool drive_to_an_early_in_match_release(Harness &h, uint8_t period) {
+// Drive the admission under a dictated `period` through the S2C 0x1A: the mission start ran,
+// the joiner sits in its final wait for the S2C 0x0F. `stream` (none: no self record yet) is
+// the world stream's packet ahead of the 0x1A.
+template <class H>
+bool drive_to_the_final_wait(H &h, uint8_t period,
+		const std::vector<ProtocolMessage> &stream = {}) {
 	if (!h.handshake()) return false;
 	(void)h.frame({settings_record(0), settings_record(1)});
 	(void)h.frame({make_protocol_message(0x00, {})});
@@ -453,7 +459,14 @@ bool drive_to_an_early_in_match_release(Harness &h, uint8_t period) {
 	(void)h.frame({make_protocol_message(0x16, player_list({{0, 1}, {1, 2}}))});
 	(void)frame_until_sent(h, 16);
 	(void)h.frame({make_protocol_message(0x11, {})});
+	if (!stream.empty()) (void)h.frame(stream);
 	(void)h.frame({make_protocol_message(0x1A, {})});
+	return std::string(h.client.admission_stage_name()) ==
+			std::string("awaiting the world state (S2C 0x0F)");
+}
+
+// The joiner's own S2C 0x0C organic spawn record: slot 0xC6, owned by the 0x82's MI.
+ProtocolMessage self_spawn_record() {
 	OrganicSpawnBatch batch;
 	batch.entity_count = 1;
 	OrganicSpawnRecord self;
@@ -466,8 +479,20 @@ bool drive_to_an_early_in_match_release(Harness &h, uint8_t period) {
 	self.team = 2;
 	self.net_id = 7;
 	batch.records.push_back(self);
-	(void)h.frame({make_protocol_message(0x0C, encode_organic_spawn_batch(batch)),
-			make_protocol_message(0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF})});
+	return make_protocol_message(0x0C, encode_organic_spawn_batch(batch));
+}
+
+// A first 0x5A grant (a host's answer to the load's first 0x2F).
+ProtocolMessage first_grant() {
+	return make_protocol_message(0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF});
+}
+
+// Drive the admission under a dictated `period` to the final wait for S2C 0x0F, then let the
+// host release the player early: its self record and a first 0x5A grant (a host's answer to
+// the load's first 0x2F, which lands inside the final wait, ahead of the 0x0F).
+bool drive_to_an_early_in_match_release(Harness &h, uint8_t period) {
+	if (!drive_to_the_final_wait(h, period)) return false;
+	(void)h.frame({self_spawn_record(), first_grant()});
 	return expect(h.client.in_match() &&
 	                      std::string(h.client.admission_stage_name()) ==
 	                              std::string("awaiting the world state (S2C 0x0F)"),
@@ -766,6 +791,176 @@ bool run_a_bodyless_joiner_pings() {
 			return false;
 	}
 	return true;
+}
+
+// The same admission driven through a JoinerRole on the virtual clock: each frame is the
+// role's tick (its receive, the after-receive leg on the role's own world, its send block),
+// and what it ships lands on the socket.
+struct RoleHarness {
+	struct KeepingSocket final : public IDatagramSocket {
+		std::vector<std::vector<uint8_t>> sent;
+		int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
+		void send_to(const PeerAddr &, const uint8_t *data, std::size_t size) override {
+			sent.emplace_back(data, data + size);
+		}
+	};
+	uint64_t now_ms = 100000;
+	// The kernel lives on the heap: a World-carrying frame is megabytes.
+	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	inmatch::JoinerRole role;
+	KeepingSocket socket;
+	inmatch::TickInput input;
+	std::string server_scrk = "SERVER-LOADING-PUMP-SCRK";
+	ClientAuth auth;
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	inmatch::ClientRuntime &client;
+
+	RoleHarness() : client(install()) {}
+
+	inmatch::ClientRuntime &install() {
+		kernel->world.registry.configure_pool(0, 16);
+		kernel->world.load_systems();
+		role.bind(*kernel);
+		role.set_socket(&socket, PeerAddr{});
+		role.set_title(&kJo);
+		role.create_runtime("LoadingPump", inmatch::JoinRole::Player, "", "");
+		// The role's runtime on the virtual clock, configured as create_runtime does.
+		role.runtime = std::make_unique<inmatch::ClientRuntime>(
+				"LoadingPump", [this] { return now_ms; });
+		role.runtime->set_title(&kJo);
+		role.runtime->set_weapon_table(&kernel->world.tables.weapons);
+		return *role.runtime;
+	}
+
+	std::vector<std::vector<uint8_t>> frame(
+			const std::vector<ProtocolMessage> *incoming = nullptr) {
+		now_ms += 16;
+		if (incoming != nullptr) {
+			const std::vector<uint8_t> dg =
+					frame_server_session(server_tx, server_scrk, auth.ck, *incoming);
+			client.receive(dg.data(), dg.size());
+		}
+		const std::size_t from = socket.sent.size();
+		role.run_tick(input);
+		return std::vector<std::vector<uint8_t>>(socket.sent.begin() +
+						static_cast<std::ptrdiff_t>(from), socket.sent.end());
+	}
+	std::vector<std::vector<uint8_t>> frame(std::vector<ProtocolMessage> incoming) {
+		return frame(&incoming);
+	}
+
+	// Each sent datagram's message tags against `want`, one list per datagram, in order.
+	bool packets(const std::vector<std::vector<uint8_t>> &sent,
+			const std::vector<std::vector<uint8_t>> &want) {
+		std::vector<std::vector<uint8_t>> got;
+		for (const std::vector<uint8_t> &dg : sent) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			std::vector<uint8_t> tags;
+			if (decode_client_session(dg, auth.scrk, header, messages))
+				for (const ProtocolMessage &m : messages) tags.push_back(m.tag);
+			else
+				tags = {0xFF, 0xFF};
+			got.push_back(tags);
+		}
+		if (got == want) return true;
+		std::fprintf(stderr, "  sent %zu datagram(s):", got.size());
+		for (const std::vector<uint8_t> &tags : got) {
+			std::fprintf(stderr, " [");
+			for (uint8_t tag : tags) std::fprintf(stderr, " %02X", tag);
+			std::fprintf(stderr, " ]");
+		}
+		std::fprintf(stderr, "\n");
+		return false;
+	}
+
+	// The role's first tick ships the ClientHello; the handshake then runs as Harness's.
+	bool handshake() {
+		const std::vector<std::vector<uint8_t>> first = frame();
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ClientHello hello;
+		if (first.empty() || !nw_decode_inbound(first[0].data(), first[0].size(), opcode, body) ||
+				!parse_client_hello(body.data(), body.size(), hello))
+			return false;
+		ServerHello server_hello = build_server_hello(hello, 0x7F000001u, 32769);
+		server_hello.hk = 0x13572468u;
+		const std::vector<uint8_t> server_hello_dg = nw_encode_outbound(
+				SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
+		client.receive(server_hello_dg.data(), server_hello_dg.size());
+		std::vector<std::vector<uint8_t>> auth_frame;
+		for (int i = 0; i < 4 && auth_frame.empty(); ++i) auth_frame = frame();
+		if (auth_frame.size() != 1 ||
+				!nw_decode_inbound(auth_frame[0].data(), auth_frame[0].size(), opcode, body) ||
+				!parse_client_auth(body.data(), body.size(), auth))
+			return false;
+		ServerAuth server_auth = build_server_auth(auth, 0x7F000001u, 32769,
+				Harness::kServerKey, server_scrk, "", "", "", false);
+		server_auth.mi = 4;
+		const std::vector<uint8_t> server_auth_dg = nw_encode_outbound(
+				SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
+		client.receive(server_auth_dg.data(), server_auth_dg.size());
+		return frame().empty();
+	}
+};
+
+// D-NET-526: the joiner's own body is born where retail's handlers write it, in the
+// receive. The release (a 0x5A) and the S2C 0x0F reach a joiner whose self record is
+// bound in one packet: the role's after-receive leg spawns L, folds its record and lands
+// the 0x0F's pose ahead of the send block, so that frame's one datagram carries the 0x0F's
+// completion burst, then the 0x2C ping and the first 0x0C, built from the 0x0F's position
+// (RR's 01tr / cp04 / ash joiners: [28 29 2D 32 22 23 2C 2C 0C], the extra 0x2C a 0x57's
+// pong). Before, L was born after the net frame and the first 0x0C left a boundary later.
+// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
+//  block @0x42C3DD, the 0x0C's build from g_LocalPlayerEntity @0x42C46F..0x42C482;
+//  NapiNPClientMsg_0x00F @0x42E200 - the pose stores @0x42E3B9..0x42E3CE;
+//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC]
+bool run_the_release_frame_bears_l_and_ships_its_uplink() {
+	RoleHarness h;
+	// The self record rides the world stream, ahead of the mission start.
+	if (!expect(drive_to_the_final_wait(h, 0, {self_spawn_record()}),
+			"release frame: the final wait runs"))
+		return false;
+	if (!expect(h.client.has_self_handle() && !h.client.in_match() && !h.role.local_spawned(),
+			"release frame: the self record is bound, no release yet, no L"))
+		return false;
+	// 23-byte header [u32 tick][i32 x][i32 y][i32 z][i16 yaw][i16 pitch][i16 roll][u8 flags],
+	// the 128 pool dwords, zero waypoint / location counts.
+	std::vector<uint8_t> world_state(23 + kWorldStateAmmoPoolCount * 4 + 4, 0);
+	const auto put_i32 = [&world_state](std::size_t at, int32_t v) {
+		for (int b = 0; b < 4; ++b)
+			world_state[at + static_cast<std::size_t>(b)] = static_cast<uint8_t>(v >> (8 * b));
+	};
+	put_i32(4, 100 << 16);
+	put_i32(8, 200 << 16);
+	put_i32(12, 42 << 16);
+	const std::vector<std::vector<uint8_t>> sent =
+			h.frame({first_grant(), make_protocol_message(0x0F, world_state)});
+	if (!expect(h.client.in_match() && h.role.local_spawned(),
+			"release frame: L is born in the frame whose receive released it"))
+		return false;
+	if (!expect(h.packets(sent, {{0x28, 0x29, 0x2D, 0x32, 0x22, 0x23, 0x2C, 0x0C}}),
+			"release frame: the burst, the 0x2C and the first 0x0C in one datagram"))
+		return false;
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!decode_client_session(sent[0], h.auth.scrk, header, messages) || messages.empty())
+		return expect(false, "release frame: the datagram decodes");
+	const ProtocolMessage &uplink_message = messages.back();
+	EntityPacketSubHeader sub;
+	PlayerExtendedUplink uplink;
+	std::size_t header_bytes = 0, body_bytes = 0;
+	if (!expect(decode_entity_packet_sub_header(uplink_message.payload.data(),
+						uplink_message.payload.size(), sub, header_bytes) &&
+					decode_player_extended_uplink(uplink_message.payload.data() + header_bytes,
+						uplink_message.payload.size() - header_bytes, uplink, body_bytes),
+			"release frame: the 0x0C decodes"))
+		return false;
+	if (!expect(sub.handle == 0x00C6, "release frame: the 0x0C names the self handle"))
+		return false;
+	return expect(uplink.pos_x == (100 << 16) && uplink.pos_y == (200 << 16) &&
+					uplink.pos_z == (42 << 16) && uplink.carrier_handle == 0xFFFF,
+			"release frame: the first 0x0C carries the 0x0F's position");
 }
 
 // The main frame's 62-frame quality fold steps in the game loop's frames alone and starts
@@ -1189,6 +1384,7 @@ int main() {
 	ok = run_a_self_team_assign_waits_for_the_mission_starts_player_init() && ok;
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
 	ok = run_a_bodyless_joiner_pings() && ok;
+	ok = run_the_release_frame_bears_l_and_ships_its_uplink() && ok;
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_sync_tail_0x0a_joins_the_queue() && ok;

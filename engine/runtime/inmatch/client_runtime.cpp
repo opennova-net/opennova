@@ -1159,7 +1159,7 @@ void ClientRuntime::seed_session(uint32_t session_id, uint32_t client_key,
 }
 
 std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
-		const UplinkBuilder *build_uplink, uint32_t now_tick) {
+		const UplinkBuilder *build_uplink, uint32_t now_tick, const AfterReceive *after_receive) {
 	devtools::ProfileLap lap(profile_);
 	std::vector<std::vector<uint8_t>> outbound;
 	receive_sends_logged_ = 0;
@@ -1675,6 +1675,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// connection's server-info landing [orig: g_SessionVarExpFanfare].
 		view_.state().exp_fanfare = joiner_->exp_fanfare();
 	}
+	// The embedder's receive-handler writes on its local player, in the receive's place:
+	// ahead of the frame's maintenance and its send block, open or not (AfterReceive).
+	// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the
+	//  0x4C timer @0x42C23E and the send block @0x42C3DD]
+	if (after_receive != nullptr && *after_receive) (*after_receive)();
 
 	// The roster revive countdown precedes the zone-list advance in the frame
 	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA, then @0x42C2E1].
@@ -2239,9 +2244,9 @@ ClientRuntime::Client_ProcessNetworkFrame(const PlayerExtendedUplink &uplink,
 
 std::vector<std::vector<uint8_t>>
 ClientRuntime::Client_ProcessNetworkFrame(const UplinkBuilder &build_uplink,
-		uint32_t now_tick) {
+		uint32_t now_tick, const AfterReceive &after_receive) {
 	const bool lost_before = joiner_ != nullptr && joiner_->session_lost();
-	return log_client_sends(run_frame(&build_uplink, now_tick), lost_before);
+	return log_client_sends(run_frame(&build_uplink, now_tick, &after_receive), lost_before);
 }
 
 std::vector<std::vector<uint8_t>> ClientRuntime::Client_ProcessNetworkFrame(
