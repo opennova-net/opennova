@@ -211,7 +211,7 @@ func test_back_on_the_shells_choice_runs_the_joins_abort() -> void:
 			"wait_ms": 1000})
 	assert_true(back.ok, back.summary)
 	assert_eq(_aborts, 1, "BACK runs the join's abort")
-	assert_eq_deep(_committed, [], "BACK commits nothing")
+	assert_true(_committed.is_empty(), "BACK commits nothing")
 
 
 # `join` is the real dial with no role answered: a silent endpoint enumerates on
