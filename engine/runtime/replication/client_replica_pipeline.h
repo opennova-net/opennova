@@ -381,13 +381,14 @@ public:
 	uint32_t frame_tick() const { return frame_tick_; }
 	void step_frame_tick() { ++frame_tick_; }
 	void zero_frame_tick() { frame_tick_ = 0; }
-	// Every armed player row's secondary channel, the own row excepted: the
-	// advance runs at the head of the tick's body pass, ahead of the rows'
-	// primaries, as the dual update runs the secondary first (its ring serves
+	// An armed player row's secondary channel, the own row excepted: the advance
+	// runs at the head of that row's visit in the body walk, ahead of its
+	// primary, as the dual update runs the secondary first (its ring serves
 	// precede the primary's); the 16-tick selection keyed on `tick` follows the
-	// pass. [orig: AnimMap_UpdateDualChannels @0x40B8C0, the secondary @0x40B908
-	// before the primary @0x40B94E; the selection @0x4b5d71..0x4b5ea3]
-	void advance_row_weapon_channels(uint16_t self_handle);
+	// pass for every row. [orig: AnimMap_UpdateDualChannels @0x40B8C0, the
+	// secondary @0x40B908 before the primary @0x40B94E; the selection
+	// @0x4b5d71..0x4b5ea3]
+	void advance_row_weapon_channel(ClientEntityState &es, uint16_t self_handle);
 	void select_row_weapon_channels(uint16_t self_handle, uint32_t tick);
 
 	// Recompose every carried row after its carrier's mover has completed. The
@@ -786,6 +787,8 @@ private:
 	ReplicaContactResolver replica_contact_resolver_;
 	// tick_remote_motion's per-tick replica-peer sphere table (reused capacity).
 	std::vector<ReplicaPeerSphere> contact_peer_scratch_;
+	// tick_remote_motion's walk order over state_.entities (reused capacity).
+	std::vector<size_t> walk_order_scratch_;
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
 	ReplicaGroundProbe replica_ground_probe_;
 	ReplicaDefAttribResolver replica_def_attrib_resolver_;

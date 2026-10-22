@@ -186,11 +186,11 @@ bool row_weapon_channel_runs(ClientEntityState &es, uint16_t self_handle) {
 
 } // namespace
 
-void ClientReplicaPipeline::advance_row_weapon_channels(uint16_t self_handle) {
+void ClientReplicaPipeline::advance_row_weapon_channel(ClientEntityState &es,
+		uint16_t self_handle) {
 	if (root_motion_ == nullptr) return;
-	for (ClientEntityState &es : state_.entities)
-		if (row_weapon_channel_runs(es, self_handle))
-			row_weapon_channel_advance(es, *root_motion_, anim_rings_, weapon_table_);
+	if (row_weapon_channel_runs(es, self_handle))
+		row_weapon_channel_advance(es, *root_motion_, anim_rings_, weapon_table_);
 }
 
 void ClientReplicaPipeline::select_row_weapon_channels(uint16_t self_handle, uint32_t tick) {

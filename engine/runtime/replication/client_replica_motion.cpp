@@ -1253,10 +1253,6 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
 	// The entity update steps the replica clock (frame_tick()).
 	const uint32_t rm_key = ++frame_tick_;
-	// The player rows' secondary advance heads the pass, ahead of their primaries
-	// (client_replica_weapon_channel.cpp): the dual update serves the secondary's
-	// ring entry first [orig: AnimMap_UpdateDualChannels @0x40B908 before @0x40B94E].
-	advance_row_weapon_channels(self_handle);
 	// The replica-peer sphere table for this tick's contact resolves — every
 	// live organic replica row, one snapshot per tick (replica rows are
 	// ordinary persons to the resolver's repulsion loop; the world person
@@ -1326,7 +1322,31 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 				row_corpse_tail(es, edge, org1, traits, corpse_decays_))
 			expired.emplace_back(es.handle, traits.decay_effect);
 	};
-	for (ClientEntityState &es : state_.entities) {
+	// The walk visits the rows as the entity pass does: pool 1 ahead of pool 0,
+	// each pool in slot order, one row's whole visit before the next row's. A
+	// player row's visit opens with its secondary channel, ahead of its primary
+	// (the dual update serves the secondary's ring entry first), so the shared
+	// ring heads serve body by body in slot order, not arrival order (D-NET-196).
+	// The pool-1 walk's early visits up a hull's ground chain belong to the World
+	// movers, which own those rows (net_world_mover).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9
+	//  ahead of the pool-0 walk @0x4C2437..0x4C2472 (from the pool base, += stride);
+	//  AnimMap_UpdateDualChannels @0x40B8C0, the secondary @0x40B908 before the
+	//  primary @0x40B94E]
+	std::vector<size_t> &walk = walk_order_scratch_;
+	walk.clear();
+	for (size_t i = 0; i < state_.entities.size(); ++i) walk.push_back(i);
+	const auto walk_key = [this](size_t i) {
+		const uint16_t h = state_.entities[i].handle;
+		const uint32_t pool = h >> 12;
+		const uint32_t rank = pool == 1u ? 0u : pool == 0u ? 1u : 2u + pool;
+		return (rank << 12) | (h & 0x0FFFu);
+	};
+	std::stable_sort(walk.begin(), walk.end(),
+			[&walk_key](size_t a, size_t b) { return walk_key(a) < walk_key(b); });
+	for (const size_t walk_index : walk) {
+		ClientEntityState &es = state_.entities[walk_index];
+		advance_row_weapon_channel(es, self_handle);
 		if (!es.net_has_compact) continue;
 		const bool chased_class = es.cls == EntityClass::Player ||
 		                          es.cls == EntityClass::Infantry ||
