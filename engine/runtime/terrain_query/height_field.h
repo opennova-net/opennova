@@ -160,7 +160,7 @@ TerrainHeightGradient height_field_gradient_fixed(
 // four bytes, halved, is the height. 0 with no grid and on an empty cell.
 // [orig: Foliage_SampleDensityBilinear @0x606200 - the centring @0x60620D / @0x606219, the
 //  grid @0x606220..0x606260, the empty return @0x606264, the weights @0x606275 / @0x606280,
-//  the tiles @0x6062AF..0x6062C8, the taps and the sum @0x606266 (g_TerrainMipchainStorage
+//  the tiles @0x6062AF..0x6062C8, the taps and the sum @0x6062D1..0x606318, the halving @0x60631B (g_TerrainMipchainStorage
 //  +0x14 @0x6062CB); Terrain_BuildMipchain @0x6056D0 - the finest cell's rows @0x605740..
 //  0x60575D, its bytes @0x60589B..0x6058A7, the finest-first level list @0x6058EE, the
 //  stores @0x6059D0..0x6059DC (+0x14 the fourth level, 64 x 64)]

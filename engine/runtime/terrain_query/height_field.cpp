@@ -260,7 +260,8 @@ int32_t height_field_mip_max_bilinear_fixed(const TerrainHeightField &f, int32_t
 	const int next_x = (tile_x + 1) & 0x3F;
 	const int next_z = (tile_z + 1) & 0x3F;
 	// The four taps' byte+1 (the max) of the +0x14 level, weighted, summed, halved
-	// [orig: @0x606266; g_TerrainMipchainStorage +0x14 @0x6062CB].
+	// [orig: the taps and the sum @0x6062D1..0x606318, the halving @0x60631B; g_TerrainMipchainStorage +0x14
+	//  @0x6062CB].
 	return (frac_z * (256 - frac_x) * mip64_max_byte(f, tile_x, next_z) +
 	        (256 - frac_z) * (256 - frac_x) * mip64_max_byte(f, tile_x, tile_z) +
 	        frac_x * frac_z * mip64_max_byte(f, next_x, next_z) +
