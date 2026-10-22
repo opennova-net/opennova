@@ -139,14 +139,17 @@ int local_team_of(const RoleView &view) {
 // whose build writes the globals the overlay reads (the winner, the two team scores, the draw
 // flag, rows 0..2's names and primary scores), then raises g_RoundOver. Its status page's
 // end-round leg runs the transition on that latch; the transition's STAT arm waits on
-// g_ScoreboardDirty, which only a client's 0x1D / 0x56 landings write, so the page never opens
-// stat.mnu. Null on any other role, or before the round ends.
+// g_ScoreboardDirty, which only a client's 0x56 landing sets (a client's 0x1D landing and the
+// round-end progress save's memset clear it), so the page never opens stat.mnu. Null on any
+// other role, or before the round ends.
 // [orig: Server_ProcessRoundEnd @0x5164F0 (Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590,
 //  g_RoundOver @0x5168E4); Server_BuildEndOfRoundScoreboard @0x508F30 (g_EndRoundWinnerTeam
 //  @0x508F77, g_ScoreTeamScore0 / 1 @0x508FD2..0x508FE0, the rows from 0x24C1A94: the name
 //  @0x5090D3, the primary @0x509152); Server_DrawStatusScreen @0x50A2D0 (@0x50B286..0x50B2A3);
 //  UI_ProcessEndRoundScreenTransition @0x5B8600 (`cmp g_ScoreboardDirty, 0` @0x5B8600, the
-//  first pass @0x5B864B..0x5B866D, HUD_DrawEndRoundStatsOverlay @0x5B8679)]
+//  first pass @0x5B864B..0x5B866D, HUD_DrawEndRoundStatsOverlay @0x5B8679); g_ScoreboardDirty's
+//  writers: NapiNPClientMsg_0x056 (the set @0x4321BE), NapiNPClientMsg_0x01D (the clear
+//  @0x430A2D), PlayerProfile_SaveRoundEndProgress (the memset @0x54D6B0)]
 const world::MatchResult *serve_only_round_board(const RoleView &view) {
 	if (view.runtime != nullptr || view.host == nullptr || view.kernel == nullptr) return nullptr;
 	const world::Match &match = view.kernel->world.match;

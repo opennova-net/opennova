@@ -213,7 +213,7 @@ static void lighting_walk_keeps_the_row_at_l_cases() {
 // A Serve Only host folds no 0x1D: its end-round words are the board its own round end built,
 // the globals HUD_DrawEndRoundStatsOverlay reads, and its status page's end-round leg runs the
 // transition on its g_RoundOver. Before the round ends nothing is announced; after, the header
-// is known and the board never (only a client's landings write g_ScoreboardDirty, so stat.mnu
+// is known and the board never (only a client's 0x56 landing sets g_ScoreboardDirty, so stat.mnu
 // never opens), and the overlay reads the board's rows: each name cut to the 32-byte entry.
 // [orig: Server_ProcessRoundEnd @0x5164F0 (Server_BuildEndOfRoundScoreboard @0x516590,
 //  g_RoundOver @0x5168E4); Server_BuildEndOfRoundScoreboard @0x508F30 (the name @0x5090D3, the
