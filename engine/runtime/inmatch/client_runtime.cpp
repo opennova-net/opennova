@@ -1760,7 +1760,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		//  address +0x30 == 0) @0x62bf1c..0x62bf21 (NapiNPProtocol_HandleClientJoin)
 		//  and @0x62607f..0x626093 (CNapiNPConnection_OnStateChange);
 		//  Client_ProcessNetworkFrame @0x42c3dd -> PumpClientProtocolSend
-		//  @0x42c4bc; CNapiNPConnection_SendSessionPacket @0x61f039 ->
+		//  @0x42c4bc; CNapiNPConnection_SendSessionPacket (the call @0x61F032) ->
 		//  CNapiNPManager_SendTo `addr == 0` @0x61ec59 -> NapiFifo_WritePacketAtomic
 		//  @0x61eccd; CNapiGameSession_CreateSession @0x4c9b9c..0x4c9c67 sets no
 		//  address; Game_ProcessMainFrame -> CNapiNetwork_PumpManagerReceive @0x526528]

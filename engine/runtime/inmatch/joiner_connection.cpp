@@ -759,10 +759,11 @@ void JoinerConnection::on_server_hello(
 	// callback (NET SESSION AT .. HAS BEEN REMOVED, its SN), then the new record's discovered
 	// callback writes its line again. The enumerate then joins the record as it stands.
 	// [orig: Nwu_HandleServerHello @0x626D20 - the HK TLV @0x627148, the SN copy @0x627172; the
-	//  record lookup sub_621EE0 (the call @0x62766C), the HK test @0x627917, the SN's
-	//  String_ExactMatch @0x627928, the update @0x627BFA..0x627E34 (no callback); the replace
-	//  NapiNPTimer_Destroy (the call @0x627941) -> NapiNPSession_Create @0x62794C, its callback
-	//  @0x627BB6..0x627BCD; NapiNPTimer_Destroy @0x621E50 - the enumerator's +0x20 callback
+	//  record lookup NapiNPEnumerator_FindSessionByAddress (the call @0x627667), the HK test
+	//  @0x627917, the SN's String_ExactMatch @0x627928, the update @0x627BFA..0x627E34 (no
+	//  callback); the replace NapiNPTimer_Destroy (the call @0x627941) -> NapiNPSession_Create
+	//  (the call @0x627947), its callback @0x627BB6..0x627BCD; NapiNPTimer_Destroy @0x621E50 -
+	//  the enumerator's +0x20 callback
 	//  @0x621E63..0x621E6F; CNapiGameSession_InitTransportConnection - the install @0x4C9FE2;
 	//  CNapiNetwork_OnSessionRemoved @0x4C68C0 - the line @0x4C6926..0x4C6975]
 	const std::string sn = sh.sn.substr(0, 63);

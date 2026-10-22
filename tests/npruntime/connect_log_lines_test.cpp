@@ -576,9 +576,10 @@ void test_remote_joiner_manager_pass_ahead_of_the_client_pump() {
 // SN replaces it: the old record's REMOVED line, the new record's DISCOVERED line, and the join
 // takes the new record's HK. A 0x81 in a later frame meets the stopped enumerator: no line, no
 // change.
-// [orig: Nwu_HandleServerHello @0x626D20 - the record lookup (the call @0x62766C), the HK test
-//  @0x627917, String_ExactMatch @0x627928, the update @0x627BFA..0x627E34; the replace
-//  NapiNPTimer_Destroy (the call @0x627941) -> NapiNPSession_Create @0x62794C, its callback
+// [orig: Nwu_HandleServerHello @0x626D20 - the record lookup
+//  NapiNPEnumerator_FindSessionByAddress (the call @0x627667), the HK test @0x627917,
+//  String_ExactMatch @0x627928, the update @0x627BFA..0x627E34; the replace NapiNPTimer_Destroy
+//  (the call @0x627941) -> NapiNPSession_Create (the call @0x627947), its callback
 //  @0x627BB6..0x627BCD; NapiNPTimer_Destroy @0x621E50 - the +0x20 callback @0x621E63..0x621E6F
 //  -> CNapiNetwork_OnSessionRemoved @0x4C68C0; the enumerator gate @0x627547..0x62755C;
 //  CNapiNetwork_StartClientConnection @0x4CA160 - NapiTimer_Stop @0x4CA1D8]

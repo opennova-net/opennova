@@ -1098,7 +1098,7 @@ public:
 	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4: g_PreMenuState = 5
 	//  @0x56A51A, the 0x00 queued @0x56A53F; state 5: Game_PumpWindowMessages @0x56A578, the
 	//  abort test @0x56A591..0x56A59C, CNapiGameSession_FullDestroy(-2) @0x56A59E / @0x56A5A0,
-	//  the 0x00's flag @0x56A61B, state 6 @0x56A62D and NapiClient_SendDisconnectAndReset
+	//  the 0x00's flag @0x56A61B, state 6 @0x56A62D and NapiClient_SendJoinFormPost
 	//  @0x42CAD0 (the call @0x56A633: the C2S 0x01 {0} @0x42CB0C); state 9's FullDestroy(-1)
 	//  @0x56A3E3; PreMenu_OnAbortCancel @0x568CA0 - the flag @0x568CAA, state 9 @0x568CB4;
 	//  UI_JoinSelectedSession @0x5699D0 - FullDestroy(-4) @0x569F04 / @0x569F06;
