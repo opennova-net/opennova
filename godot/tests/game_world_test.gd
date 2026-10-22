@@ -2211,6 +2211,120 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 	world.unload()
 
 
+# A joiner's reload for the host's next map runs the same 0x11 load as its first join: every
+# Game_StartMission(0) of a joiner runs the joiner arm's terrain load between its sync-tail wait
+# and its game-start wait, a reload's included, and the shell's round-end route unloaded the old
+# world before reload_joiner, so no mission root lives under the reload's 0x11 and the 0x11
+# loads the next map's environment and terrain alone (D-NET-NEW-L2-19; engine
+# inmatch/joiner_connection.h set_sync_tail_loading carries the witness). The host is a GameWorld
+# through its own map change (net/host_map_change_test.gd); its slot reset's S2C 0x25 ends the
+# joiner's round, exit 4, which the shell routes to the Game Loop (main_game.gd
+# _route_round_end).
+func test_a_joiner_reload_loads_the_next_maps_terrain_at_its_sync_tail() -> void:
+	var host_world := WorldFixture.make_world(self)
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	host_world.set_playable(false)
+	world.set_playable(false)
+	var host_root := ResourceRoot.new()
+	assert_eq(host_root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	host_world.set_resource_root(host_root)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	# REPLAY on a one-entry rotation: the map change names the same map again.
+	var config := HostSessionConfig.new()
+	config.mission = "mnml.bms"
+	config.missions.assign(["mnml.bms"])
+	config.mission_launch_options.assign([0])
+	config.bind_port = 0
+	config.game_type = HostSessionConfig.GAME_TYPE_COOP
+	var options := config.to_session_options()
+	options.replay_enabled = 1
+	assert_eq(host_world.load_mission_as_host(options), OK)
+	var host: Simulation = host_world.get_sim()
+	assert_not_null(host)
+	if host == null:
+		return
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+	var lost: Array[String] = []
+	world.session_lost.connect(func(reason: String): lost.append(reason))
+	var observed := {"local_load": false}
+	world.world_loaded.connect(
+			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
+	for _frame in range(600):
+		host_world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if bool(observed["local_load"]):
+			break
+	assert_true(bool(observed["local_load"]), "the first join loaded its world")
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		world.unload()
+		host_world.unload()
+		return
+	for _frame in range(600):
+		host_world.tick(Vector3.ZERO)
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if sim.is_joined_in_match():
+			break
+	assert_true(sim.is_joined_in_match(), "the joiner reached the match")
+
+	var next_map: String = host_world.begin_map_change()
+	assert_eq(next_map.to_lower(), "mnml.bms", "the rotation names the next map")
+	host_world.unload()
+	assert_eq(host_world.load_next_mission(next_map), OK)
+	for _frame in range(600):
+		host_world.tick(Vector3.ZERO)
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if not lost.is_empty():
+			break
+	assert_eq(lost.size(), 1, "the host's slot reset ended the joiner's round")
+	assert_eq(sim.get_mission_exit_reason(), GameWorld.MISSION_EXIT_ROUND_OVER)
+	assert_eq(world.main_frame_exit(GameWorld.MISSION_EXIT_ROUND_OVER),
+			GameWorld.MAIN_FRAME_EXIT_GAME_LOOP, "a joiner's round over is the Game Loop")
+
+	var reload := {"identified": false, "root_at_identify": true, "local_load": false}
+	world.join_session_identified.connect(func(_info: LoadingScreenInfo) -> void:
+		reload["identified"] = true
+		reload["root_at_identify"] = world.get_runtime() != null
+	, CONNECT_ONE_SHOT)
+	world.world_loaded.connect(
+			func(): reload["local_load"] = true, CONNECT_ONE_SHOT)
+	# The shell's round-end route: the kept session, the old world down, then the reload.
+	assert_true(world.begin_joiner_reload(), "the joiner keeps its session for the next map")
+	world.unload()
+	assert_eq(world.reload_joiner(), OK)
+	for _frame in range(600):
+		host_world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if bool(reload["identified"]):
+			break
+	assert_true(bool(reload["identified"]), "the reload reached the next map's S2C 0x11")
+	assert_false(bool(reload["root_at_identify"]),
+			"no mission root lives under the reload's 0x11 load")
+	assert_false(bool(reload["local_load"]), "the reload's mission start waits for the S2C 0x1A")
+	var sync_tail_load: LoadTimeline = world.last_load_timeline()
+	assert_not_null(sync_tail_load, "the reload's 0x11 load ran in the identification's frame")
+	if sync_tail_load != null:
+		var stages := []
+		for span in sync_tail_load.spans():
+			stages.append(span.name)
+		assert_eq(stages, ["environment", "terrain"],
+				"the reload's 0x11 loads the environment and terrain")
+	assert_eq(failures.size(), 0)
+	world.unload()
+	host_world.unload()
+
+
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	var blocker := UdpPump.new()
 	assert_eq(blocker.bind_listen(0), OK)
