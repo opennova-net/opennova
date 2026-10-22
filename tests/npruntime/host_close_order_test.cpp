@@ -402,9 +402,14 @@ void test_close_sweeps_post_mission_then_queues_each_slots_reset(int32_t exit_re
 	// The sweep's relay queued at its action's call, ahead of the walk's 0x25 [orig:
 	//  EventAction_Dispatch - GameMsg_AddChatLineAndRelay called @0x454632;
 	//  Server_BroadcastEntityActionPacket @0x5080D0 - SendFiltered(0x3F) called @0x508199].
+	// On the destroy arm the queue stays on the joiner's transport; an error arm hands it to
+	// the held node the process keeps (D-NET-NEW-L1-26).
 	std::vector<uint8_t> queued;
 	ns::Datagram staged;
 	while (host->remote.pop_outbound(staged)) queued.push_back(staged.tag);
+	for (const inmatch::UnstoppedNode &node : host->process->unstopped_server.nodes)
+		if (node.conn.peer == kPeer)
+			for (const ProtocolMessage &m : node.queued) queued.push_back(m.tag);
 	const auto at = [&queued](uint8_t tag) {
 		return std::find(queued.begin(), queued.end(), tag) - queued.begin();
 	};
@@ -638,9 +643,12 @@ void test_close_routes_the_last_entity_pass_first() {
 	host->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld; // the node stays
 	host->role->close();
 	CHECK(host->kernel->world.out.hud_relays.empty());
-	// Wherever the teardown's pump left it: on the wire, in the node's pending messages, or
-	// still on its transport.
+	// Wherever the teardown's pump left it: on the wire, or in the queue the held node keeps
+	// past the error arm (its pending messages and its transport's, D-NET-NEW-L1-26).
 	int relays = 0;
+	for (const inmatch::UnstoppedNode &node : host->process->unstopped_server.nodes)
+		for (const ProtocolMessage &m : node.queued)
+			relays += m.tag == s2c::OBJECTIVE_NOTIFICATION ? 1 : 0;
 	for (const auto &[to, bytes] : host->socket.sent) {
 		if (!(to == kPeer)) continue;
 		uint8_t opcode = 0;
