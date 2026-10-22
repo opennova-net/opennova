@@ -614,21 +614,6 @@ std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
 
 namespace {
 
-std::vector<uint8_t> frame_retained_session_reply(
-		NapiNPConnection &conn, uint32_t sequence) {
-	const auto retained = conn.seq.retained_outbound.find(sequence);
-	if (retained == conn.seq.retained_outbound.end() || retained->second.empty()) return {};
-
-	std::vector<uint8_t> body_out;
-	if (!frame_session_packet_for_sequence(
-			conn.seq, SessionCrypto{conn.server_scrk, {}, conn.client_ck},
-			sequence, body_out)) {
-		return {};
-	}
-	return nw_encode_outbound(
-			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
-}
-
 // Queue `messages` on the connection's transport, in order, behind whatever it already holds:
 // the owner's send boundary packs the connection's one queue (D-NET-525).
 // [orig: NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640;
@@ -1004,15 +989,15 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// CNapiNPConnection_SendSessionInit @0x620ef0 (re-emits the same 0x82), return 1]
 		// The retransmit leg touches no receive clock: only an in-order session packet or
 		// a ping stamps conn+0x5E8 [orig: HandleClientJoin @0x62bee6..0x62bef1].
+		// SendSessionInit is the leg's one send, the 0x82 alone: a session packet the joiner
+		// missed (the CS updates' sequence 1) comes back through the session's own legs (the
+		// joiner's resend list, NapiNP_HandleResendList @0x623800), never through the join
+		// handler.
+		// [orig: NapiNPProtocol_HandleClientJoin - SendSessionInit called @0x62BEE9, then the
+		//  handler's return @0x62BEF1; CNapiNPConnection_SendSessionInit @0x620EF0 - its one
+		//  CNapiNPManager_SendTo called @0x621301, return @0x62131C]
 		if (existing->client_ci == auth.ci && existing->client_ck == auth.ck) {
 			out.outbound.push_back(make_server_auth_datagram(auth, peer, *existing));
-			// A retry normally means the original ServerAuth/settings pair was lost. Reconstruct the
-			// retained first session packet under sequence 1 rather than minting a new sequence.
-			if (existing->peer_acked_seq < 1) {
-				std::vector<uint8_t> settings =
-						frame_retained_session_reply(*existing, 1);
-				if (!settings.empty()) out.outbound.push_back(std::move(settings));
-			}
 			return;
 		}
 		// A different client (CI/CK) reusing an already-joined addr: destroy the stale node and

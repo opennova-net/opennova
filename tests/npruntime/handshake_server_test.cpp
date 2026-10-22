@@ -2163,7 +2163,10 @@ bool run_client_join_rejects_match_retail() {
 			"failed password cannot tear down a live same-address connection")) return false;
 	ctx.join_locked = true;
 	const auto retry = send(auth);
-	return expect(retry.outbound.size() == 2 &&
+	// The retransmit is answered by its 0x82 alone: SendSessionInit's single SendTo, then the
+	// handler's return [orig: CNapiNPConnection_SendSessionInit @0x620EF0 - @0x621301;
+	//  NapiNPProtocol_HandleClientJoin @0x62BEF1].
+	return expect(retry.outbound.size() == 1 &&
 			ctx.np_protocol.connection_list.front().server_sk == saved_key,
 			"an authenticated retry precedes the callback lock and retains its keys");
 }
