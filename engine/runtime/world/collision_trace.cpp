@@ -128,7 +128,12 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
             e->pitch_bam;
     scratch.entity_flags = e->flags;
     scratch.bound_radius = entity_proximity_radius(*this, *e, m);
-    scratch.is_building = (e->kind == EntityKind::Building);
+    // The building gates read the target's own items.def type, not its record family: a pool-2
+    // decoration placed with family Building is no building here.
+    // [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - `cmp [ecx+5Ch], 5` @0x4AE275 (the door
+    //  reset), `cmp dword ptr [edx+5Ch], 5` @0x4AEA82 (the blink box); Entity_TestCollisionSections
+    //  @0x4AEF90 - `cmp dword ptr [eax+5Ch], 5` @0x4AEFAE]
+    scratch.is_building = building_def_row(*e);
     scratch.pool_index = h.slot();
     scratch.is_ground_of_source = false;
     scratch.uniform_scale_q16 = e->uniform_scale_q16;

@@ -3453,6 +3453,29 @@ void test_door_mask_store_clears_a_stale_mask() {
 	CHECK(walled->door_touch_mask == 1u);
 }
 
+// D-NET-NEW-L6-12: the bone-collision query's building gate is the target's own items.def type, not
+// its record family: a pool-2 row placed with family Building whose def is a decoration (type 2)
+// keeps its door-touch mask past the query (only the door volume's OR lands), where a type-5 def
+// starts it at 0. [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - `cmp [ecx+5Ch], 5`
+//  @0x4AE275, the reset @0x4AE281, the CD OR @0x4AEB22]
+void test_door_mask_reset_reads_the_def_type() {
+	for (const int def_type : {2, 5}) {
+		auto rig = std::make_unique<Rig>(box_model(bvol_type::kDoorCD, 0, 2.0, 2.0, 3.0));
+		Entity &row = *rig->world.registry.get(rig->building);
+		row.has_item_def = true;
+		row.item_type = static_cast<uint8_t>(def_type);
+		rig->move_soldier(10, 10, 0);
+		row.door_touch_mask = 0x6u;
+		int32_t pos[3] = {fx(10), fx(10), 0};
+		int32_t velocity[3]{};
+		int16_t health = 100;
+		CollisionWorld::ResolveState state;
+		rig->cw.resolve_entity(rig->world, rig->soldier, state, pos, velocity, velocity[2],
+				0, fx(1.8), 0, 0, false, false, 0, 43, 0u, health);
+		CHECK(row.door_touch_mask == (def_type == 5 ? 1u : 7u));
+	}
+}
+
 void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     World world;
     world.registry.configure_pool(1, 4);
@@ -6555,6 +6578,7 @@ int main() {
 	test_fixed_matrix_euler_round_trip();
 	test_door_contact_and_player_collision_split();
 	test_door_mask_store_clears_a_stale_mask();
+	test_door_mask_reset_reads_the_def_type();
 	test_door_mask_resets_per_query();
 	test_matrix_roundtrip();
 	test_retail_render_pose_matrix_roundtrip_and_order();
