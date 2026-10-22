@@ -62,8 +62,12 @@ SessionStartup make_session_startup(const HostConfig &cfg) {
 	// [orig: NapiNPProtocol_StartServer @0x62b5e0 - NapiNP_GenerateSessionKey on the
 	//  protocol's manager @0x62b5f3..0x62b5f5, stored @0x62b5fc]
 	startup.host_key = cfg.host_key != 0 ? cfg.host_key : manager_session_key();
-	startup.host_start_tick =
-			cfg.host_start_tick != 0 ? cfg.host_start_tick : host_monotonic_milliseconds();
+	// The start's GetTickCount stamp, the process clock's (D-NET-NEW-L8-27).
+	// [orig: NapiNPProtocol_StartServer @0x62B5E0 - GetTickCount @0x62B612, stored to +0x53C
+	//  @0x62B619]
+	startup.host_start_tick = cfg.host_start_tick != 0 ? cfg.host_start_tick
+			: cfg.clock_ms ? cfg.clock_ms()
+			               : host_monotonic_milliseconds();
 	if (cfg.session_seed_id != 0) {
 		startup.session_seed_id = cfg.session_seed_id;
 	} else {
@@ -760,6 +764,10 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.now_tick = 0;
 	owner.clock_ms = cfg.clock_ms;
+	// The host context's GetTickCount, ahead of the create whose start and round init stamp
+	// it: the status report's UP-TIME, the S2C 0x58's uptime, the 0x81's UT and the S2C 0x02
+	// probe read it (host_tick_count_ms; D-NET-NEW-L8-27).
+	owner.ctx.process_clock_ms = cfg.clock_ms;
 	// The process's log devices and the socket address, ahead of the session
 	// create whose server start logs HOST STARTED and whose round init clears
 	// the punt table.

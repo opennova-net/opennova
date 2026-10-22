@@ -28,10 +28,12 @@
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/host_session.h> // start_host_session (the process clock's install)
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h> // make_jo_game_session_sequencing
+#include <runtime/inmatch/napi_np_protocol.h>   // host_server_hello (the 0x81's UT)
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/remote_admin.h>
 #include <runtime/inmatch/role_feeds.h> // session_rules_word
@@ -1067,6 +1069,50 @@ void test_joiner_set_holds() {
 	expect(consoles.process_mission().rules_word == 0x3A06u, "the admin reads the new copy");
 }
 
+// D-NET-NEW-L8-27: the host's wall-clock readers take the process clock, GetTickCount's, so a
+// load and a held start count. The start stamps it (its +0x53C) and the round init (its
+// g_RoundStateInitTick) at the create; 185000 ms of clock later, of which the host ran 35000,
+// the status report's UP-TIME is 0 00:03:05 and the 0x81's UT 185000.
+// [orig: NapiNPProtocol_StartServer @0x62B5E0 - GetTickCount @0x62B612, the store @0x62B619;
+//  Server_InitNewRoundState - GetTickCount @0x51CB93, the store @0x51CBA0;
+//  Server_BuildStatusReport - GetTickCount @0x530B84, `sub eax, g_RoundStateInitTick`
+//  @0x530B86; NapiNPProtocol_SendServerInfoPacket - GetTickCount @0x620657, `sub eax,
+//  [esi+53Ch]` @0x62065C]
+void test_host_uptime_reads_the_process_clock() {
+	auto world = std::make_unique<world::World>();
+	auto owner = std::make_unique<inmatch::HostOwner>();
+	owner->ctx.world = world.get();
+	uint32_t clock = 7000;
+	inmatch::HostConfig cfg;
+	cfg.title = &kJo;
+	cfg.config.server_name = "Clocked";
+	cfg.config.max_players = 8;
+	cfg.socket_mode = inmatch::SocketMode::Socketless;
+	cfg.serve_and_play = false;
+	cfg.clock_ms = [&clock] { return clock; };
+	(void)inmatch::start_host_session(*owner, cfg);
+	inmatch::NapiNPServerCtx &ctx = owner->ctx;
+	expect(ctx.np_protocol.host_start_tick == 7000u && ctx.round_state_init_tick == 7000u,
+	       "the start and the round init stamp the process clock at the create");
+	clock += 185000u;
+	ctx.np_protocol.host_run_duration_ms = 35000u; // the held start ran no tick
+	expect(inmatch::session_uptime_ms(ctx) == 185000u, "UP-TIME counts the clock, not the run");
+
+	inmatch::RemoteAdminConsoles consoles;
+	gamecfg::GameCfg block = gamecfg::defaults();
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &block;
+	inmatch::RemoteAdminBinding hosted;
+	hosted.host = &ctx;
+	hosted.session = 1;
+	consoles.bind(hosted, seams);
+	expect(consoles.status_report().find("UP-TIME: 0 00:03:05\r\n") != std::string::npos,
+	       "the status report's UP-TIME reads the process clock");
+	const ServerHello hello =
+			inmatch::host_server_hello(ctx, make_title_client_hello(kJo, 1), PeerAddr{0x0100007Fu, 32110});
+	expect(hello.ut == 185000u, "the 0x81's UT reads the process clock less the start's stamp");
+}
+
 } // namespace
 
 int main() {
@@ -1084,6 +1130,7 @@ int main() {
 	test_idle_frame_exit();
 	test_exit_frame_words();
 	test_joiner_set_holds();
+	test_host_uptime_reads_the_process_clock();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "remote_admin: %d failure(s)\n", g_failures);
 		return 1;

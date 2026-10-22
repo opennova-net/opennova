@@ -1585,7 +1585,14 @@ ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hel
 		reply.pv1 = self.pv1;
 		reply.pv2 = self.pv2;
 		reply.pv3 = self.pv3;
-		reply.ut = ctx.np_protocol.host_run_duration_ms;
+		// UT: GetTickCount less the start's stamp while the host runs, else the stopped run's
+		// length; ours keeps the run clock there, its only word past a stop
+		// (D-NET-NEW-L8-27). [orig: NapiNPProtocol_SendServerInfoPacket - `cmp [esi+538h]`
+		//  @0x62064F, GetTickCount @0x620657, `sub eax, [esi+53Ch]` @0x62065C, else `mov eax,
+		//  [esi+544h]` @0x620664]
+		reply.ut = ctx.np_protocol.host_running != 0
+				? host_tick_count_ms(ctx) - ctx.np_protocol.host_start_tick
+				: ctx.np_protocol.host_run_duration_ms;
 	}
 	// A LAN 0x41 is a stateless enumerate/handshake probe. Populate the retail
 	// game-server fields from live host state without registering the source as

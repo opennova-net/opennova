@@ -323,6 +323,15 @@ struct NapiNPServerCtx {
 	//  CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0xE60 destroy called @0x4C8A93]
 	bool own_client_left = false;
 	DisconnectEvent own_client_left_record;
+	// The process's GetTickCount the host's wall-clock readers take (host_tick_count_ms): the
+	// owner's HostConfig::clock_ms, which every embedder supplies (host_monotonic_milliseconds)
+	// and a test injects, installed ahead of the create; empty is the deterministic stand-in.
+	// The status report's UP-TIME, the S2C 0x58's uptime, the 0x81's UT and the S2C 0x02
+	// probe's tick read it, so a load and a held start count, as retail's do; the host's
+	// protocol timers stay on the run clock (host_run_duration_ms) (D-NET-NEW-L8-27).
+	// [orig: Server_BuildStatusReport @0x530B84; NapiNPProtocol_SendServerInfoPacket @0x620657;
+	//  NetPacket_BuildPaddedTimestampPayload @0x502A4E; each a GetTickCount call]
+	std::function<uint32_t()> process_clock_ms;
 	// g_RoundStateInitTick, the round-state init's GetTickCount stamp in the host clock
 	// (host_start_tick's milliseconds): the status report's UP-TIME counts from it
 	// (session_uptime_ms). Every session create's round init stamps it; a single player's
@@ -830,13 +839,20 @@ inline NapiNPConnection *orphan_net_player(NapiNPServerCtx &ctx, OrphanedPlayerR
 	return nullptr;
 }
 
-// The status report's UP-TIME: the host clock now (the start tick plus the run) less the
-// round-state init's stamp, in u32 arithmetic; a session's own run whenever its create
-// stamped it. [orig: Server_BuildStatusReport - GetTickCount @0x530B84, `sub eax,
-//  g_RoundStateInitTick` @0x530B86, +0x70 @0x530B8C]
+// GetTickCount on the host context: the process clock (process_clock_ms), else the
+// deterministic stand-in a clockless test runs on, the start tick plus the host's run.
+inline uint32_t host_tick_count_ms(const NapiNPServerCtx &ctx) {
+	return ctx.process_clock_ms
+			? ctx.process_clock_ms()
+			: ctx.np_protocol.host_start_tick + ctx.np_protocol.host_run_duration_ms;
+}
+
+// The status report's UP-TIME: GetTickCount now less the round-state init's stamp, in u32
+// arithmetic, so the wall time since the create's round init, a load and a held start
+// included (D-NET-NEW-L8-27). [orig: Server_BuildStatusReport - GetTickCount @0x530B84, `sub
+//  eax, g_RoundStateInitTick` @0x530B86, +0x70 @0x530B8C]
 inline uint32_t session_uptime_ms(const NapiNPServerCtx &ctx) {
-	return ctx.np_protocol.host_start_tick + ctx.np_protocol.host_run_duration_ms -
-			ctx.round_state_init_tick;
+	return host_tick_count_ms(ctx) - ctx.round_state_init_tick;
 }
 
 // Install the host's "Server" strings (HostRole::bring_up, from the host

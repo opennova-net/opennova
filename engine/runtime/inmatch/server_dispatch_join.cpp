@@ -170,8 +170,8 @@ std::vector<uint8_t> build_tag02_push(uint32_t tick_count_ms, uint32_t file_tran
 	return payload;
 }
 
-// The probe over the host context: our GetTickCount (the start's stamp plus the run's
-// milliseconds), the process's file-transfer session id as it stands at the send (read live, as
+// The probe over the host context: GetTickCount (host_tick_count_ms, the process clock;
+// D-NET-NEW-L8-27), the process's file-transfer session id as it stands at the send (read live, as
 // the probe reads the global @0x4C9468; 0 with no process words) and the world's CRT stream (the
 // one the session's draws share). With no context: zero words over a fresh stream.
 std::vector<uint8_t> context_tag02_push(NapiNPServerCtx *ctx) {
@@ -179,8 +179,8 @@ std::vector<uint8_t> context_tag02_push(NapiNPServerCtx *ctx) {
 	if (ctx == nullptr) return build_tag02_push(0, 0, fresh);
 	const uint32_t session_id =
 			ctx->file_transfer_session != nullptr ? ctx->file_transfer_session->id : 0u;
-	return build_tag02_push(ctx->np_protocol.host_start_tick + ctx->np_protocol.host_run_duration_ms,
-			session_id, ctx->world != nullptr ? ctx->world->crt_rand : fresh);
+	return build_tag02_push(host_tick_count_ms(*ctx), session_id,
+			ctx->world != nullptr ? ctx->world->crt_rand : fresh);
 }
 
 // tag=0x7A: the recipient's own PCID (NOT the player name). [orig: NetPacket_WritePCID @0x5076e0 —
