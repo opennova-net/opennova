@@ -303,6 +303,17 @@ void test_a_joiner_scan_records_its_pick_and_the_0x26_leaving() {
 	vehicle.seats.push_back(seat);
 	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
 	look_at(world, local->handle, vehicle.position.x, vehicle.position.y, vehicle.position.z);
+	// The view the scan reads, taken before the press: the request that follows a pick
+	// turns L to the seat (its yaw snap), so the body's heading after the press is the
+	// seat's, not the view the scan subtracted.
+	// [orig: Entity_TryEnterNearestVehicle @0x4368C0 - the scan @0x43691A ahead of the
+	//  request @0x436931; Entity_RequestVehicleAttach @0x4364A0 - the yaw writes
+	//  @0x43656E / @0x4365C3]
+	const w::AiEntity *view_body = world.ai.for_handle(local->handle);
+	CHECK(view_body != nullptr);
+	if (view_body == nullptr) return;
+	const int32_t view_heading = view_body->heading;
+	const int32_t view_pitch = view_body->pitch;
 	h.socket.datagrams.clear();
 	// The scan's watch rides the scan record (UseScanWatch).
 	h.kernel->local.use_trace.watch = vh.packed;
@@ -332,8 +343,7 @@ void test_a_joiner_scan_records_its_pick_and_the_0x26_leaving() {
 	CHECK(scan.scan.reach_q16 > 0 && scan.scan.reach_q16 <= 0x40000);
 	CHECK(scan.scan.eye_q16[0] == local->position.x.q16 + local->eye_offset_x);
 	CHECK(scan.scan.eye_q16[2] == local->position.z.q16 + local->eye_offset_z);
-	if (const w::AiEntity *body = world.ai.for_handle(local->handle))
-		CHECK(scan.scan.view_heading == body->heading && scan.scan.view_pitch == body->pitch);
+	CHECK(scan.scan.view_heading == view_heading && scan.scan.view_pitch == view_pitch);
 	// Queued, not yet framed: the count rises at the next send build, with the 0x26 on the
 	// wire.
 	CHECK(h.role.runtime->attach_requests_sent() == 0);
