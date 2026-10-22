@@ -234,10 +234,10 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		const uint16_t cz = network_compress_fixedpoint(e.z - az);
 		// Coarse wire heading from the engine BAM (D-NET-86). The write sides differ per class:
 		// the PLAYER record TRUNCATES the high byte [orig: `*(u8*)(entity+19)` @0x4c0c5d — no
-		// rounding]; the INFANTRY record ROUNDS `(v+0x800000)>>24` [orig: @0x4c08f8]; the VEHICLE
-		// record rounds the high i16 `(v+0x8000)>>16` [orig: @0x460d0a].
+		// rounding]; the INFANTRY record ROUNDS `(v+0x800000)>>24` of its target heading (the
+		// Infantry case) [orig: @0x4c08f8]; the VEHICLE record rounds the high i16
+		// `(v+0x8000)>>16` [orig: @0x460d0a].
 		const uint8_t yaw_byte_trunc = uint8_t(uint32_t(e.euler_z) >> 24);
-		const uint8_t yaw_byte_round = uint8_t((uint32_t(e.euler_z) + 0x00800000u) >> 24);
 		const int16_t yaw_bam16 = int16_t((uint32_t(e.euler_z) + 0x00008000u) >> 16);
 		FrameUpdateRecord rec;
 		// The authoritative wire handle carried off the registry Entity (snapshot_of), not
@@ -414,7 +414,11 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// Existing 14-byte infantry record, with the exact witnessed field
 			// sources [orig: NetPacket_SerializeInfantryEntityState @0x4C0320].
 			// A mounted entity writes its raw bone, vehicle handle, and local pose;
-			// no overlay-specific protocol extension is needed.
+			// no overlay-specific protocol extension is needed. The writer puts
+			// the target heading (+0x1A8) in the heading's place for the pose and
+			// the yaw byte, the mounted leg's local yaw included [orig: the swap
+			// @0x4C07C9..0x4C07CD; Entity_TransformWorldToLocal @0x4C07E3,
+			// srcPos[3] @0x43BB87].
 			rec.infantry.seat_bone_idx =
 					e.mount_handle != wire_handle::kInvalid ? e.veh_bone : 0;
 			if (e.mount_handle != wire_handle::kInvalid && e.carrier_pose_valid) {
@@ -427,7 +431,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				rec.infantry.pos_y_compressed = network_compress_fixedpoint(local.y);
 				rec.infantry.pos_z_compressed = network_compress_fixedpoint(local.z);
 				const uint32_t local_heading =
-						uint32_t(e.euler_z) - uint32_t(e.carrier_yaw_bam);
+						uint32_t(e.infantry_target_heading_bam) - uint32_t(e.carrier_yaw_bam);
 				rec.infantry.yaw_byte =
 						uint8_t((local_heading + 0x00800000u) >> 24);
 			} else {
@@ -435,14 +439,17 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				rec.infantry.pos_x_compressed = cx;
 				rec.infantry.pos_y_compressed = cy;
 				rec.infantry.pos_z_compressed = cz;
-				rec.infantry.yaw_byte = yaw_byte_round; // rounded [orig: @0x4c08f8]
+				// rounded [orig: @0x4c08f8]
+				rec.infantry.yaw_byte = uint8_t(
+						(uint32_t(e.infantry_target_heading_bam) + 0x00800000u) >> 24);
 			}
 			rec.infantry.flags_byte = e.state_flags; // entity+36 low byte [orig: @0x4c0917]
-			// Clamp entity+748 to entity+16 +/- 536870880, then pack the
-			// rounded absolute BAM high byte [orig: @0x4c0921..0x4c0960].
-			// Unsigned arithmetic preserves the original BAM wrap before the
-			// signed comparisons.
-			int32_t target_heading = e.infantry_target_heading_bam;
+			// Clamp entity+748 (the aim heading) to the live entity+16, restored
+			// after the yaw byte, +/- 536870880, then pack the rounded absolute
+			// BAM high byte [orig: @0x4c0905, @0x4c0921..0x4c0960]. Unsigned
+			// arithmetic preserves the original BAM wrap before the signed
+			// comparisons.
+			int32_t target_heading = e.infantry_aim_heading_bam;
 			const int32_t target_delta = static_cast<int32_t>(
 					uint32_t(target_heading) - uint32_t(e.euler_z));
 			constexpr int32_t kInfantryTargetClamp = 536870880;

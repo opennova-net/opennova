@@ -1063,7 +1063,11 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	ai.attach(ih);
 	w::AiEntity *ae = ai.for_handle(ih);
 	if (!expect(ae != nullptr, "infantry AI state attached")) return false;
-	ae->inf.target_heading = 0x40000000; // clamps to +0x1FFFFFE0, rounds to byte 0x20.
+	// The target heading (+0x1A8) takes the heading's place for the yaw byte,
+	// carrier-local [orig: @0x4C07C9..0x4C07CD, @0x43BB87]: byte 0x10 against the
+	// identity carrier. The aim heading (+0x2EC) clamps around the live heading.
+	ae->inf.target_heading = 0x10000000;
+	ae->inf.aim_heading = 0x40000000; // clamps to +0x1FFFFFE0, rounds to byte 0x20.
 	ae->inf.aim_pitch = static_cast<int32_t>(0xF0000000u); // rounded high byte 0xF0.
 	w::Entity *infantry_entity = world.registry.get(ih);
 	if (!expect(infantry_entity != nullptr, "infantry entity resolvable")) return false;
@@ -1121,6 +1125,8 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	// set entity Flags 0x40. [orig: Entity_AttachToUseGunSlot @0x546c5c]
 	if (!expect((wire->infantry.flags_byte & 0x40u) == 0,
 	            "UseGun infantry leaves the generic vehicle-seat flag clear")) return false;
+	if (!expect(wire->infantry.yaw_byte == 0x10,
+	            "mounted infantry's yaw byte is its target heading, carrier-local")) return false;
 	if (!expect(wire->infantry.pitch_byte == 0x20 &&
 	                    wire->infantry.aim_yaw_byte == 0xF0 &&
 	                    wire->infantry.anim_byte == 47,

@@ -241,12 +241,19 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 		// channel carries entity+0x134 (world-wac-ai-re §19.2).
 		GameEntitySnapshot s = snapshot_of(e);
 		if (s.entity_class == EntityClass::Unknown) return; // no 0x0A compact form
-		// Retail's infantry compact writer reads entity+0x2EC (target heading)
-		// and entity+0x2D0 (aim pitch). In the port those animation-owned fields
-		// live on AiEntity, so lift them at the one world-to-wire snapshot seam.
+		// Retail's infantry compact writer reads entity+0x1A8 (the target heading,
+		// in the heading's place for the yaw byte), entity+0x2EC (the aim heading)
+		// and entity+0x2D0 (the aim pitch). In the port those fields live on
+		// AiEntity, so lift them at the one world-to-wire snapshot seam; a body
+		// with no AI row keeps its heading in the +0x1A8 slot (the yaw it sent).
+		// [orig: NetPacket_SerializeInfantryEntityState @0x4C07C9..0x4C07CD,
+		//  @0x4C0921, @0x4C0977; the +0x1A8 / +0x2EC stores @0x4BAD29 / @0x4BAD2F,
+		//  +0x2EC @0x4BC88E, +0x2D0 @0x4BC8DA]
 		if (s.entity_class == EntityClass::Infantry) {
+			s.infantry_target_heading_bam = s.euler_z;
 			if (const world::AiEntity *ai = w.ai.for_handle(e.handle)) {
 				s.infantry_target_heading_bam = ai->inf.target_heading;
+				s.infantry_aim_heading_bam = ai->inf.aim_heading;
 				s.infantry_aim_pitch_bam = ai->inf.aim_pitch;
 			}
 		}
