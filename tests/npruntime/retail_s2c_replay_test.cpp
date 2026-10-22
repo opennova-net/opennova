@@ -18,7 +18,8 @@
 //   - frames applied == the S2C 0x0A count; the self handle stays bound with its row;
 //   - each pool's row count == what the capture's spawn pages decode to, at the load's
 //     end and at the run's end;
-//   - the Tab board == the last S2C 0x16;
+//   - the Tab board == the last S2C 0x16, less the rows the retail client re-requested
+//     right after it (its parser drops a row whose slot is not active yet);
 //   - the reply tags, body for body and in order, == the retail client's own C2S
 //     (client_startup + client_runtime): 0x0F carrier repairs, 0x20, 0x21, 0x22, 0x23,
 //     0x28, 0x29, 0x2D, 0x32 and the 0x2C pongs; no other C2S tag leaves;
@@ -815,19 +816,55 @@ void run_client_leg(const std::string &fixture_root, const RunSpec &spec) {
 		if (!decode_player_list(board->body.data(), board->body.size(), list)) {
 			fail("the last S2C 0x16 (%s) does not decode", down.where(board->packet).c_str());
 		} else {
+			// Retail's parser keeps only the rows whose connection slot is active when the 0x16
+			// arrives; a row on an inactive slot is dropped and re-requested with one C2S 0x22
+			// {slot, 0xF7, 0x1C} [orig: NapiNPClientMsg_PlayerList @0x42FAE0 -
+			// the PlayerSlotTable_GetActiveSlot call @0x42FBE4, the drop and the re-request
+			// @0x42FC05..0x42FC3A], and only the 0x16 parser writes the row count (@0x42FB46,
+			// @0x42FC8E). Only an S2C 0x46 or 0x4C activates a slot [orig:
+			// PlayerSlotTable_GetOrInitSlot @0x4346C0, called @0x431461 and @0x428643]. The
+			// re-requests in the retail client's first packet after the 0x16 name the rows its
+			// parser dropped, so those rows leave the expected board.
+			std::set<uint8_t> retail_dropped;
+			{
+				const uint64_t at = down.packets[board->packet].ts_us;
+				const Stream *next_stream = nullptr;
+				std::size_t next_packet = 0;
+				for (const Stream *s : {&startup, &runtime_c2s})
+					for (std::size_t p = 0; p < s->packets.size(); ++p)
+						if (s->packets[p].ts_us > at &&
+								(next_stream == nullptr ||
+										s->packets[p].ts_us < next_stream->packets[next_packet].ts_us)) {
+							next_stream = s;
+							next_packet = p;
+						}
+				if (next_stream != nullptr)
+					for (const Logical &m : next_stream->messages)
+						if (m.packet == next_packet && m.full_tag == c2s::PLAYER_SYNC_REQUEST &&
+								m.body.size() == 3 && m.body[1] == 0xF7 && m.body[2] == 0x1C)
+							retail_dropped.insert(m.body[0]);
+			}
+			std::vector<PlayerListRow> kept;
+			for (const PlayerListRow &r : list.players)
+				if (retail_dropped.count(r.slot_id) == 0) kept.push_back(r);
+			if (kept.size() != list.players.size())
+				std::printf("note: the retail client re-requested %zu of the 0x16's %zu rows at %s "
+						"(C2S 0x22 {slot, F7 1C}): its board drops them\n",
+						list.players.size() - kept.size(), list.players.size(),
+						down.where(board->packet).c_str());
 			const rep::ClientScoreboard &sb = runtime->state().scoreboard;
 			if (!sb.known || sb.in_game_count != list.in_game_count ||
 					sb.spectator_count != list.spectator_count || sb.team_count != list.team_count ||
-					sb.teams.size() != list.teams.size() || sb.rows.size() != list.players.size())
+					sb.teams.size() != list.teams.size() || sb.rows.size() != kept.size())
 				fail("the board (known %d, in game %u, spectators %u, teams %u/%zu, rows %zu) != the "
-						"last S2C 0x16 at %s (in game %u, spectators %u, teams %u/%zu, rows %zu)",
+						"last S2C 0x16 at %s (in game %u, spectators %u, teams %u/%zu, rows %zu of %zu)",
 						sb.known ? 1 : 0, sb.in_game_count, sb.spectator_count, sb.team_count,
 						sb.teams.size(), sb.rows.size(), down.where(board->packet).c_str(),
 						list.in_game_count, list.spectator_count, list.team_count, list.teams.size(),
-						list.players.size());
-			for (std::size_t i = 0; i < sb.rows.size() && i < list.players.size(); ++i) {
+						kept.size(), list.players.size());
+			for (std::size_t i = 0; i < sb.rows.size() && i < kept.size(); ++i) {
 				const rep::ClientScoreboardRow &got = sb.rows[i];
-				const PlayerListRow &want = list.players[i];
+				const PlayerListRow &want = kept[i];
 				if (got.slot_id != want.slot_id || got.score1 != static_cast<int16_t>(want.score1) ||
 						got.score2 != want.score2 || got.team != (want.flags >> 1) ||
 						got.spectator != ((want.flags & 1u) != 0))
