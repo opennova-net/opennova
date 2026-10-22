@@ -248,6 +248,9 @@ public:
 	void consume_use_hold();
 	// The USE hold the HUD's special-key chain reads (PlayerInputRouter::is_use_held).
 	bool is_use_held() const { return input_router_.is_use_held(); }
+	// One key-down's VK through the HUD's special-key chain's digit arms
+	// (PlayerInputRouter::chain_digit_key); true = taken.
+	bool chain_digit_key(int p_vk) { return input_router_.chain_digit_key(p_vk); }
 	// The held USE row's armory arm took its open this frame (PlayerInputRouter::
 	// take_armory_request); reading clears it.
 	bool take_use_item_armory_request();

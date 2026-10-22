@@ -13,7 +13,6 @@
 #include <runtime/controls/player_actions.h>
 
 #include <algorithm>
-#include <array>
 #include <iostream>
 #include <set>
 #include <string>
@@ -32,10 +31,8 @@ namespace {
 
 struct Keys : PlayerActionSource {
 	std::set<std::string> held;
-	std::array<bool, 10> digits{};
 	bool pressed(const char *token) const override { return held.count(token) != 0; }
 	int pressed_key(const char *) const override { return 0; }
-	bool digit_down(int digit) const override { return digits[digit]; }
 	bool fire_signed(const char *) const override { return false; }
 	bool keys_down(const char *token) const override { return pressed(token); }
 };
@@ -127,11 +124,10 @@ bool test_use_row_and_release_tail() {
 	PlayerActions consumed;
 	keys.held = {"useitem"};
 	(void)consumed.poll(keys, live(false));
-	keys.digits[1] = true;
-	const PlayerActionFrame picked = consumed.poll(keys, live(false));
-	CHECK(picked.requests.size() == 1 && picked.requests[0].action == PlayerAction::SelectSeat);
+	const ChainDigitTake picked = consumed.chain_digit_key('1', false, false);
+	CHECK(picked.pick && picked.pick->action == PlayerAction::SelectSeat);
+	CHECK(consumed.poll(keys, live(false)).requests.empty());
 	keys.held.clear();
-	keys.digits[1] = false;
 	const PlayerActionFrame tail = consumed.poll(keys, live(false));
 	CHECK(offs_are(tail, {-1}) && tail.requests.empty());
 	return true;

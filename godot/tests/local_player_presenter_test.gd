@@ -49,9 +49,11 @@ var _models := {}
 
 
 # The keyboard pass's legs over a bare presenter (the shell's MainGame legs,
-# trimmed): no chat line and no special-key chain, the binding scan over the
-# presenter's own binding model, every row's event into the presenter's input
-# router, and the release pass first (KeyboardPass carries the order).
+# trimmed): no chat line, of the special-key chain only its digit arms (the
+# presenter's chain_digit_key, which the HUD presenter's chain runs), the binding
+# scan over the presenter's own binding model, every row's event into the
+# presenter's input router, and the release pass first (KeyboardPass carries the
+# order).
 class PresenterKeyLegs:
 	extends RefCounted
 	var presenter: LocalPlayerPresenter
@@ -67,8 +69,8 @@ class PresenterKeyLegs:
 	func ring_chat_key(_key: InputEventKey) -> bool:
 		return false
 
-	func ring_special_key(_key: InputEventKey, _events: Array[int]) -> bool:
-		return false
+	func ring_special_key(key: InputEventKey, _events: Array[int]) -> bool:
+		return presenter.chain_digit_key(ControlsModel.vk_from_godot_key(key.physical_keycode))
 
 	func ring_binding_code(scan_code: int) -> int:
 		return model.event_code(scan_code)
@@ -787,7 +789,7 @@ func test_local_avatar_overlays_follow_the_first_person_rule() -> void:
 	assert_false(nvg.visible, "removed goggles hide")
 
 
-# The router's digit rows over the LIVE binding table and key state, on a row
+# The digit rows over the LIVE binding table and key state, on a row
 # that samples without mouse capture (the weapon-category rows need it and
 # headless has no cursor to capture): radarout rebound to 0 fires on a bare 0
 # (the dispatcher's fallback pass; no other modifier-less row carries the 0,
@@ -910,11 +912,12 @@ func test_the_use_hold_passes_a_key_past_the_round_over_leg() -> void:
 	_frame(world, presenter, camera, 1)
 
 
-# The router's menu arms: while the HUD's F9 Emotes menu is open a digit is its
-# pick, closing the menu and reaching no row (radarout rebound to 0 stays put);
-# once the menu is closed the same 0 fires the row again.
-# [orig: Input_HandleSpecialKeys @0x49c731..0x49c77c; the consumed key skips
-#  the binding scan, Input_ProcessKeyboardEvents @0x49d2fb]
+# The special-key chain's menu arms (the presenter's chain_digit_key, per key
+# event): while the HUD's F9 Emotes menu is open a digit's key-down is its pick,
+# closing the menu and reaching no row (radarout rebound to 0 stays put); once
+# the menu is closed the same 0 fires the row again.
+# [orig: Input_HandleSpecialKeys @0x49c731..0x49c77c; a take's skip of the
+#  binding scan, Input_ProcessKeyboardEvents @0x49d305]
 func test_open_voice_menu_takes_the_digit_before_the_rows() -> void:
 	var world := _load_player_world()
 	var camera := Camera3D.new()

@@ -1056,8 +1056,10 @@ func handle_chat_key(key: InputEventKey) -> bool:
 
 ## One key-down through the special-key chain (engine hud_toggles.h), over
 ## live play and in a pass-through screen's input frame: the quit dialog's keys
-## first; unless the dialog took the chain or an earlier arm holds it (the USE
-## hold, an open Emotes / Radio menu: _chain_arm_holds), the round-over leg once
+## first; unless the dialog took the chain, the digit arms (the held-USE seat
+## pick, the open Emotes / Radio menu's pick: the player presenter's
+## chain_digit_key); unless the dialog took the chain or an earlier arm holds it
+## (the USE hold, an open Emotes / Radio menu: _chain_arm_holds), the round-over leg once
 ## the round-over gate holds (Simulation.round_over_key: a session's end-of-round board takes
 ## PgUp / PgDn, a co-op session or single player every key, its RESTART
 ## queueing input event 12), else the Tab board's page keys and then the
@@ -1083,6 +1085,10 @@ func handle_special_key(key: InputEventKey, deploy_param := Callable(),
 		quit_confirmed.emit()
 	if bits & HudToggles.SPECIAL_KEY_CONSUMED:
 		ControlsBindings.model().consume_key_press(vk)
+		return true
+	# A digit the held-USE arm or an open menu takes runs its pick at once and
+	# reaches no row (engine controls::PlayerActions::chain_digit_key).
+	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0 and _player_presenter != null 			and _player_presenter.chain_digit_key(vk):
 		return true
 	var page_key := key.keycode == KEY_PAGEUP or key.keycode == KEY_PAGEDOWN
 	var taken := false
@@ -1116,7 +1122,7 @@ func handle_special_key(key: InputEventKey, deploy_param := Callable(),
 
 ## Whether an arm ahead of the round-over leg holds the special-key chain: the
 ## held-USE seat arm (the USE hold the next input frame reads), then the Emotes
-## and Radio menus. Each takes a digit (PlayerActions' seat pick and menu
+## and Radio menus. Each takes a digit (chain_digit_key's seat pick and menu
 ## picks) and passes every other key to the chain's tail, so the round-over,
 ## Tab board and status page legs never run for it (engine
 ## controls::PlayerActions::use_held carries the witness).

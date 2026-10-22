@@ -122,8 +122,9 @@ int row_code(const char *token) {
 
 PlayerActions::PlayerActions() : rows_(std::size(kRows)) {}
 
-// USE ages before the action rows: LAST frame's hold governs digit swallowing,
-// including a digit arriving on the release frame. A fresh press clears the
+// USE ages before the action rows: LAST frame's hold governs the digit row swallow,
+// including a digit arriving on the release frame, as it governs the special-key
+// chain's digit arm (chain_digit_key, between the polls). A fresh press clears the
 // consumed flag; a shell chord applies after that clear. Every input frame
 // ages the latch and runs the release edge, one whose gameplay gate is down
 // too; the death and stat screens run whole input frames while their word
@@ -132,15 +133,10 @@ PlayerActions::PlayerActions() : rows_(std::size(kRows)) {}
 // [orig: Game_ProcessMainFrame @0x52661D and UI_ProcessMenuScreenFrame's tail
 //  @0x54E695 (the DEATH / STAT word g_MenuInputPassThrough), the two callers of
 //  Input_ProcessFrame]
-// The special-key chain's digit arms, first open wins: the held-USE seat pick,
-// then the Emotes menu, then the Radio menu; a digit an arm takes never
-// reaches the binding rows (the swallow in poll()).
 // [orig: Input_ProcessFrame @0x49d520 -- the latch aging @0x49d57f..0x49d585,
 //  the release edge @0x49d6c1..0x49d6dc -> Entity_ToggleVehicleMount
 //  @0x436950; Input_HandleActionBinding_0 case 0xB1 @0x4e0a84, LABEL_121
-//  @0x4e0b65..0x4e0b71; Input_HandleSpecialKeys @0x49c5c0, the held-USE digit
-//  arm @0x49c6d8..0x49c730 -> Entity_FindAvailableSeat @0x436790, the Emotes
-//  arm @0x49c731..0x49c77c, the Radio arm @0x49c783..0x49c7c8]
+//  @0x4e0b65..0x4e0b71]
 void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,
 		PlayerActionFrame &frame) {
 	use_held_prev_ = use_latched_;
@@ -177,29 +173,6 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 		use_consume_pending_ = false;
 	}
 	menu_digits_ = gate.active && (gate.emotes_menu_open || gate.radio_menu_open);
-	for (int digit = 0; digit < 10; ++digit) {
-		// The digit arm is a key-press path, so an open text line takes the
-		// digits [orig: Input_HandleSpecialKeys @0x49c5c0 runs only with
-		// g_InputCaptureMode clear, Input_ProcessKeyboardEvents @0x49d2e3].
-		const bool digit_down = !gate.keyboard_captured && source.digit_down(digit);
-		if (!world::latched_key_edge(digit_down, use_held_prev_ || menu_digits_,
-				use_digit_was_down_[digit])) continue;
-		if (!use_held_prev_) {
-			// The menu arms: keys 1..9 pick 1..9 and key 0 picks 10, sent and
-			// the menu closed; the Emotes menu wins when both are open.
-			// [orig: @0x49c745..0x49c75c (emotes, C2S 0x14) and
-			//  @0x49c791..0x49c7a8 (radio, C2S 0x13)]
-			const int pick = digit == 0 ? 10 : digit;
-			frame.requests.push_back(
-					{gate.emotes_menu_open ? Action::EmotePick : Action::RadioPick, pick});
-			continue;
-		}
-		// Keys 1..9 select seats 0..8, key 0 seat 9 [orig: @0x49c6e6..0x49c6ed].
-		const int seat = digit == 0 ? 9 : digit - 1;
-		if (!use_hold_consumed_ && gate.simulation_available)
-			frame.requests.push_back({Action::SelectSeat, seat});
-		use_hold_consumed_ = true;
-	}
 	// The release tail turns the auto-run's toggle off ahead of its mount toggle, whether or
 	// not a seat pick consumed the hold (D-NET-563).
 	// [orig: Input_ProcessFrame - the release test @0x49D6AD..0x49D6C1, Input_DisableScrollLock
@@ -228,13 +201,13 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	frame.fire_edge = world::latched_key_edge(frame.fire_held, true, fire_was_held_);
 	// The event rows fire once per queued key event (an OS repeat included), in
 	// the queue's order; their mouse, joystick and scripted arms on their press
-	// edges, after the keyboard pass's events (held_off_keyboard). A digit's event
-	// the special-key chain took fires nothing (chain_takes_key).
+	// edges, after the keyboard pass's events (held_off_keyboard). A key the special-key
+	// chain took queued no event (chain_digit_key).
 	// [orig: Input_ProcessPlayerFrame @0x49D4C0 - Input_ProcessKeyboardEvents
 	//  @0x49D4C6 ahead of the mouse and toggle passes @0x49D4D8 / @0x49D4DE]
-	const auto key_fired = [this, &gate](int code) {
+	const auto key_fired = [&gate](int code) {
 		for (const KeyRowEvent &event : gate.key_events)
-			if (!event.release && event.code == code && !chain_takes_key(event)) return true;
+			if (!event.release && event.code == code) return true;
 		return false;
 	};
 	// The reload row: one record per key event under its gates, its off-keyboard arm's
@@ -319,7 +292,6 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// a Respawn ahead of a weapon row ends the drain before it (its reset), and one behind
 	// it runs after it.
 	for (const KeyRowEvent &event : gate.key_events) {
-		if (chain_takes_key(event)) continue;
 		// ToSpecial's press and its release pass's event, each a record in key order.
 		if (event.code == to_special_code) {
 			if (to_special_admits(event.release))
@@ -408,7 +380,7 @@ std::vector<PlayerActionRequest> PlayerActions::poll_spectator(const PlayerActio
 	std::vector<PlayerActionRequest> out;
 	// The keyboard pass's events first, one each in their order (poll()).
 	for (const KeyRowEvent &event : events) {
-		if (event.release || !active || chain_takes_key(event)) continue;
+		if (event.release || !active) continue;
 		for (const auto &row : kSpectatorRows)
 			if (event.code == row.code)
 				out.push_back({Action::Spectate, row.code, row.code, event.sign});
@@ -421,12 +393,32 @@ std::vector<PlayerActionRequest> PlayerActions::poll_spectator(const PlayerActio
 	return out;
 }
 
-bool PlayerActions::chain_takes_key(const KeyRowEvent &event) const {
-	// [orig: Input_HandleSpecialKeys @0x49c5c0 - the held-USE arm @0x49c6d8 and its
-	//  (key - 48) <= 9 test @0x49c6e0, the Emotes arm's @0x49c73f, the Radio arm's
-	//  @0x49c78b; Input_ProcessKeyboardEvents - a taken key skips the scan @0x49d2fb]
-	return !event.release && (use_held_prev_ || menu_digits_) && event.key >= 0x30 &&
-			event.key <= 0x39;
+ChainDigitTake PlayerActions::chain_digit_key(int vk, bool emotes_menu_open,
+		bool radio_menu_open) {
+	// [orig: Input_HandleSpecialKeys @0x49c5c0 - the `(key - 48) <= 9` tests @0x49c6e0 /
+	//  @0x49c73f / @0x49c78b; an arm whose word holds sends a non-digit to the tail]
+	const bool digit = static_cast<unsigned>(vk - 0x30) <= 9u;
+	ChainDigitTake take;
+	if (use_latched_) {
+		if (!digit) return take;
+		take.taken = true;
+		// Keys 1..9 select seats 0..8, key 0 seat 9 [orig: @0x49c6e6..0x49c6ed]; one pick per
+		// hold [orig: the consumed test @0x49c6f8, the store @0x49c70c].
+		int seat = vk - 0x31;
+		if (seat < 0) seat = 9;
+		if (!use_hold_consumed_) take.pick = PlayerActionRequest{Action::SelectSeat, seat};
+		use_hold_consumed_ = true;
+		return take;
+	}
+	if (!emotes_menu_open && !radio_menu_open) return take;
+	if (!digit) return take;
+	// The open menu's pick: keys 1..9 pick 1..9 and key 0 picks 10, the Emotes menu ahead
+	// of the Radio menu [orig: @0x49c745..0x49c74c (emotes, C2S 0x14 @0x49c752) and
+	// @0x49c791..0x49c798 (radio, C2S 0x13 @0x49c79e)].
+	take.taken = true;
+	take.pick = PlayerActionRequest{emotes_menu_open ? Action::EmotePick : Action::RadioPick,
+			vk == 0x30 ? 10 : vk - 0x30};
+	return take;
 }
 
 void PlayerActions::reset() {

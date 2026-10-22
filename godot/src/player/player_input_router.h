@@ -127,6 +127,12 @@ public:
 	// The USE hold the special-key chain's held-USE arm reads
 	// (controls::PlayerActions::use_held carries the witness).
 	bool is_use_held() const { return actions_.use_held(); }
+	// One key-down (its VK) through the special-key chain's digit arms, the shell's chain
+	// calling it past its quit dialog's leg: the held-USE seat pick, then the open Emotes /
+	// Radio menu's pick (the HUD's menu words as they stand), each run at once, the menu's
+	// sent and that menu closed. True = an arm took the key, which reaches no row
+	// (controls::PlayerActions::chain_digit_key carries the witness).
+	bool chain_digit_key(int p_vk);
 	// The held USE row's armory arm took its open on the last frame's poll
 	// (controls::PlayerAction::OpenArmory); reading clears it. The shell
 	// opens weapon.mnu's WEAPON screen.
@@ -166,9 +172,8 @@ public:
 	// witness). The next sample takes it.
 	void close_pass_through_screen();
 	// The HUD's key toggles, whose F9 Emotes / F10 Radio menus take a digit
-	// before the weapon rows do (controls::PlayerActions' menu arms); the HUD
-	// presenter hands its process-lifetime instance over. Null = no menus, and
-	// no HUD rows polled here.
+	// before the weapon rows do (chain_digit_key); the HUD presenter hands its
+	// process-lifetime instance over. Null = no menus, and no HUD rows polled here.
 	void set_hud_toggles(const Ref<HudToggles> &p_toggles) { hud_toggles_ = p_toggles; }
 	// The HUD toggle rows' event words (HudToggles::poll) of the input frames
 	// since the last read, in their order; reading clears them. The HUD

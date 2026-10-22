@@ -12,14 +12,12 @@
 namespace opennova::controls {
 
 // The embedder resolves bindings against its devices. A keyboard match returns
-// its VK; a mouse/joystick match has no keyboard VK. Digits are physical keys,
-// independent of remapping and modifier claims.
+// its VK; a mouse/joystick match has no keyboard VK.
 class PlayerActionSource {
 public:
 	virtual ~PlayerActionSource() = default;
 	virtual bool pressed(const char *token) const = 0;
 	virtual int pressed_key(const char *token) const = 0;
-	virtual bool digit_down(int digit) const = 0;
 	// The sign bit the fire of the token's row carries: Shift held on a
 	// modifier-less key's fire (the fallback pass) or a held mouse button,
 	// never a fire through the row's held modifier (the modifier pass) or a
@@ -59,9 +57,9 @@ enum class PlayerAction {
 	// The death screen's spectator rows (value = the dispatch code 500 / 501
 	// / 502; replication::ClientReplicaPipeline::spectate_action).
 	Spectate,
-	// A digit while the Emotes / Radio menu is open: value 1..10 (the 0 key
-	// is 10). The embedder sends it (C2S 0x14 / C2S 0x13) and closes that
-	// menu (hud::hud_toggles_close_voice_menu).
+	// A digit key-down while the Emotes / Radio menu is open (PlayerActions::chain_digit_key):
+	// value 1..10 (the 0 key is 10). The embedder sends it (C2S 0x14 / C2S 0x13) and closes
+	// that menu (hud::hud_toggles_close_voice_menu).
 	EmotePick,
 	RadioPick,
 	// The USE-ITEM armory arm's open (weapon.mnu WEAPON): the embedder's shell
@@ -128,10 +126,11 @@ struct PlayerActionPoll {
 	bool captured = false;
 	bool simulation_available = false;
 	// An open text line owns the keyboard (BindingSet::set_keyboard_captured):
-	// the held-USE digits go to the line, not the seats.
+	// ToSpecial's off-keyboard release is the line's.
 	bool keyboard_captured = false;
 	// The F9 Emotes / F10 Radio menus' open words as the HUD toggles hold them
-	// this frame (hud::HudToggleState): a digit goes to the open menu.
+	// this frame (hud::HudToggleState): the chain takes a digit's key-down for the open
+	// menu (chain_digit_key), and a digit row's off-keyboard arm fires nothing under it.
 	bool emotes_menu_open = false;
 	bool radio_menu_open = false;
 	// The death screen is up (g_DeathScreenActive): the binding scan admits
@@ -169,22 +168,20 @@ struct PlayerActionPoll {
 	// event is its own record (no merge of equal ones), and the drain dispatches every
 	// record in order; the keyboard pass runs ahead of the mouse and toggle passes, so
 	// its events dispatch first. (The embedder routes the talk and HUD rows' events
-	// to its update's drain on the same rule.) A digit's event is the special-key
-	// chain's while the USE hold or an Emotes / Radio menu holds it, so no row fires
-	// for it. The rows' off-keyboard arms keep their press edges
+	// to its update's drain on the same rule.) A key the special-key chain took (a digit
+	// under the USE hold or an open Emotes / Radio menu: PlayerActions::chain_digit_key)
+	// queues no event. The rows' off-keyboard arms keep their press edges
 	// (PlayerActionSource::held_off_keyboard).
 	// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the release pass @0x49d249..
-	//  0x49d2b9, the press scan's queue @0x49d42f / @0x49d488; Input_QueueEvent
-	//  @0x4979C0; Input_HandleSpecialKeys @0x49c5c0 - the digit tests @0x49c6e0 /
-	//  @0x49c73f / @0x49c78b; Input_ProcessFrame @0x49d520 - the drain's dispatch
+	//  0x49d2b9, the press scan's queue @0x49d42f / @0x49d488, a taken key's skip of the
+	//  scan @0x49d305; Input_QueueEvent @0x4979C0; Input_ProcessFrame @0x49d520 - the drain's dispatch
 	//  @0x49d5d8; Input_ProcessPlayerFrame @0x49d4c0 - the keyboard pass @0x49d4c6
 	//  ahead of the mouse and toggle passes @0x49d4d8 / @0x49d4de]
 	std::vector<KeyRowEvent> key_events;
 	// The codes of the rows among key_events whose arms the embedder owns (its talk, HUD
 	// and pause rows): each such key-down is a record in key order with the action rows'
 	// (PlayerAction::EmbedderRow), under none of this table's gates (the rows' own arms and
-	// the dispatcher's head gate them at the drain), a digit the special-key chain took
-	// excepted. Unset = none.
+	// the dispatcher's head gate them at the drain). Unset = none.
 	// [orig: Input_ProcessKeyboardEvents @0x49D1F0 (Input_QueueEvent per scanned key-down
 	//  @0x49D42F / @0x49D488); Input_ProcessFrame @0x49D520 (the drain @0x49D599..0x49D5E7)]
 	std::function<bool(int code)> embedder_row;
@@ -242,7 +239,7 @@ struct PlayerActionFrame {
 	//  @0x76117A; Game_InitSubsystems (the call @0x4A7260); Game_ShutdownSubsystems (the call
 	//  @0x4A53B7)]
 	std::vector<int> scroll_lock_off;
-	// In order: the USE special-key / release arms (no code: they run at once), then the
+	// In order: the USE row's opens and its release arm (no code: they run at once), then the
 	// action rows' records (a code: the embedder queues them for the update's drain), the
 	// keyboard pass's events first, then the off-keyboard arms' press edges.
 	std::vector<PlayerActionRequest> requests;
@@ -300,6 +297,15 @@ inline constexpr int kVkCapital = 0x14;
 inline constexpr int kVkNumLock = 0x90;
 inline constexpr int kVkScroll = 0x91;
 
+// One key-down through the special-key chain's digit arms (PlayerActions::chain_digit_key):
+// whether an arm took the key, which then reaches no binding row, and the arm's request when
+// it makes one, which the embedder runs at once (past no head): the held-USE seat pick
+// (PlayerAction::SelectSeat), a menu's pick (EmotePick / RadioPick, sent and that menu closed).
+struct ChainDigitTake {
+	bool taken = false;
+	std::optional<PlayerActionRequest> pick;
+};
+
 // Owns the action table's gates and latches across frames and mission rebuilds.
 // A host without a player (including spectator mode) does not poll this state.
 // Request refusal and all gameplay effects belong to the simulation.
@@ -315,9 +321,9 @@ public:
 	// The USE hold the special-key chain's held-USE arm reads: the hold the last poll's USE
 	// row latched, which the next input frame's head ages into the word its keyboard pass
 	// reads, so a key the embedder's chain takes between two polls meets it. While it
-	// holds, the arm takes a digit (the seat pick, poll()) and passes every other key to
-	// the chain's tail: the Emotes, Radio and round-over arms, the Tab board's page keys
-	// and the status page's keys never run for it.
+	// holds, the arm takes a digit (the seat pick, chain_digit_key) and passes every other
+	// key to the chain's tail: the Emotes, Radio and round-over arms, the Tab board's page
+	// keys and the status page's keys never run for it.
 	// [orig: Input_ProcessFrame @0x49d520 - g_UseItemHoldPrev = g_UseItemHoldLatch
 	//  @0x49d57f, the latch cleared @0x49d585, ahead of the keyboard pass
 	//  (Input_ProcessPlayerFrame @0x49d58b); Input_HandleActionBinding_0 case 0xB1's
@@ -325,6 +331,27 @@ public:
 	//  @0x49c6d8 (its clear word on to the Emotes arm @0x49c731), a non-digit's jump to
 	//  the tail @0x49c6e0 -> @0x49c9c9]
 	bool use_held() const { return use_latched_; }
+	// One key-down (its VK) through the special-key chain's digit arms, in the keyboard
+	// pass's key order: the embedder's chain calls it per dequeued key, past its quit
+	// dialog's leg and ahead of its round-over leg. The first arm that holds the chain
+	// decides: the USE hold (use_held), then the Emotes menu, then the Radio menu; a
+	// non-digit passes on to the chain's tail (no take), as does every key when none holds.
+	// Under the USE hold a digit picks the seat (keys 1..9 seats 0..8, key 0 seat 9) unless
+	// a pick already consumed the hold, and consumes it either way, so the hold's release
+	// toggles no mount; under an open menu a digit picks its entry (keys 1..9, key 0 as 10),
+	// which the embedder sends, closing that menu, so a second digit of the same input
+	// frame reaches the next arm or the binding scan.
+	// [orig: Input_HandleSpecialKeys @0x49c5c0 - the held-USE arm @0x49c6d8..0x49c730 (the
+	//  (key - 48) <= 9 test @0x49c6e0, the seat index @0x49c6e6..0x49c6ed, the consumed test
+	//  @0x49c6f8, Entity_FindAvailableSeat (the call @0x49c702), the consumed store
+	//  @0x49c70c); the Emotes arm @0x49c731..0x49c77c (the test @0x49c73f, 0 as 10
+	//  @0x49c74a, NetPacket_SendEmoteRequest @0x49c752, the word's clear @0x49c75c); the
+	//  Radio arm @0x49c783..0x49c7c8 (the test @0x49c78b, NetPacket_SendRadioCallRequest
+	//  @0x49c79e, the clear @0x49c7a8); Input_ProcessKeyboardEvents @0x49d1f0 - the chain
+	//  per dequeued key with the capture word clear @0x49d2e3 (its call @0x49d2fb), a take's
+	//  skip of the scan @0x49d305; Input_ProcessFrame @0x49d520 - the release edge's consumed
+	//  test @0x49d6d4]
+	ChainDigitTake chain_digit_key(int vk, bool emotes_menu_open, bool radio_menu_open);
 	// The death screen's spectator rows, the catalog's mode-2 rows 110..112
 	// (CycleSpectatorMode, IncSpectatorTarget, DecSpectatorTarget): the binding
 	// scan admits them only while the death screen is up, so the embedder
@@ -350,23 +377,13 @@ private:
 	bool use_held_prev_ = false;
 	bool use_hold_consumed_ = false;
 	bool use_consume_pending_ = false;
-	bool use_digit_was_down_[10] = {};
-	// This frame's menu digit arm: a menu was open while gameplay input ran.
+	// This frame's open Emotes / Radio menu while gameplay input ran: a digit row's
+	// off-keyboard arm fires nothing under it, as under the USE hold.
 	bool menu_digits_ = false;
 	bool spectator_was_down_[3] = {};
 
 	void sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,
 			PlayerActionFrame &frame);
-	// A key event the special-key chain took ahead of the binding scan: a digit
-	// while the USE hold (the hold the last poll latched) or an open Emotes / Radio
-	// menu holds the chain, whose arm picks the seat or the menu entry from the
-	// digit's key state (sample_use), so no row fires for its event. The menus are
-	// read as the sample found them: retail's arm runs per dequeued key and its pick
-	// closes the menu at once, so a second digit in the same input frame reaches the
-	// scan (D-CTRL-6's next row: the digit arms per key event in the keyboard pass)
-	// [orig: Input_HandleSpecialKeys @0x49C5C0 - the Emotes pick's send @0x49C752 and
-	//  the word's clear @0x49C75C, the Radio pick's @0x49C79E / @0x49C7A8].
-	bool chain_takes_key(const KeyRowEvent &event) const;
 };
 
 // Only the seven currently routed wheel actions. The host admits a pressed

@@ -4,7 +4,6 @@
 #include <runtime/controls/player_actions.h>
 #include <runtime/controls/key_state_reset.h>
 
-#include <array>
 #include <cstdlib>
 #include <initializer_list>
 #include <iostream>
@@ -29,7 +28,6 @@ const PlayerActionPoll kLive{true, true, true};
 
 struct Keys : PlayerActionSource {
 	std::map<std::string, int> held;
-	std::array<bool, 10> digits{};
 	void hold(const char *token, int vk = 0) { held[token] = vk; }
 	void release(const char *token) { held.erase(token); }
 	bool pressed(const char *token) const override { return held.count(token) != 0; }
@@ -37,7 +35,6 @@ struct Keys : PlayerActionSource {
 		const auto it = held.find(token);
 		return it == held.end() ? 0 : it->second;
 	}
-	bool digit_down(int digit) const override { return digits[digit]; }
 	bool shift = false;
 	bool fire_signed(const char *) const override { return shift; }
 	// The key state alone, for a held key the scan or a text line hides.
@@ -75,6 +72,12 @@ bool requests_are(const PlayerActionFrame &frame, const std::vector<PlayerAction
 		if (rows[i].action != expected[i].action || rows[i].value != expected[i].value)
 			return false;
 	return true;
+}
+
+// The special-key chain's take of a key-down names this pick (code -1: past no head).
+bool picks(const ChainDigitTake &take, Action action, int value) {
+	return take.taken && take.pick && take.pick->action == action && take.pick->value == value &&
+			take.pick->code == -1;
 }
 
 // A source whose keyboard keys reach the rows only through the key queue's events
@@ -145,31 +148,40 @@ bool test_event_rows_fire_once_per_event() {
 	return true;
 }
 
-// A digit's key event is the special-key chain's while the USE hold or an open
-// Emotes / Radio menu holds it: no row fires for it (a rebound row on a digit
-// included, the medic row's 9 too), while a non-digit's event fires its row.
-// [orig: Input_HandleSpecialKeys @0x49c5c0 - the held-USE arm @0x49c6d8, the
-//  (key - 48) <= 9 tests @0x49c6e0 / @0x49c73f / @0x49c78b; a taken key skips
-//  the scan @0x49d2fb]
-bool test_the_chain_takes_digit_events() {
+// The special-key chain's digit arms, one key-down at a time, the first whose word holds
+// deciding: under the USE hold (the hold the last poll latched) a digit picks its seat
+// (keys 1..9 seats 0..8, key 0 seat 9) once per hold and is taken thereafter, and a
+// non-digit passes on to the tail, the menus' arms skipped; under an open Emotes / Radio
+// menu, the Emotes menu first, a digit picks its entry (0 as 10); with no arm holding no
+// key is taken. A taken key queues no event, so the poll's events are the keys the chain
+// left, a digit's included.
+// [orig: Input_HandleSpecialKeys @0x49c5c0 - the held-USE arm @0x49c6d8 (the
+//  (key - 48) <= 9 test @0x49c6e0, the seat index @0x49c6e6..0x49c6ed, the consumed test
+//  @0x49c6f8 and store @0x49c70c), the Emotes arm's test @0x49c73f and 0 as 10 @0x49c74a,
+//  the Radio arm's @0x49c78b / @0x49c796; Input_ProcessKeyboardEvents - a take's skip of
+//  the scan @0x49d305; Input_ProcessFrame - the release edge's consumed test @0x49d6d4]
+bool test_the_chain_takes_digit_keys() {
 	PlayerActions actions;
 	QueuedKeys keys;
+	CHECK(!actions.chain_digit_key('1', false, false).taken); // no arm holds
 	keys.hold("useitem", 0x10);
 	actions.poll(keys, kLive); // the hold latches for the next frame's chain
+	CHECK(!actions.chain_digit_key('N', false, false).taken);
+	CHECK(!actions.chain_digit_key('N', true, false).taken); // the menu's arm never runs
+	CHECK(picks(actions.chain_digit_key('0', true, false), Action::SelectSeat, 9));
+	const ChainDigitTake again = actions.chain_digit_key('1', false, false);
+	CHECK(again.taken && !again.pick); // one seat per hold
+	// The keys the chain left reach their rows, a digit's among them.
 	PlayerActionPoll gate = kLive;
-	gate.key_events = {key_row("Knife", '1'), key_row("radarout", '0'),
-			key_row("radarout", 0xBD), key_row("MedicReq", '9')};
+	gate.key_events = {key_row("radarout", 0xBD), key_row("MedicReq", '9')};
 	auto frame = actions.poll(keys, gate);
-	CHECK(requests_are(frame, {{Action::RadarZoom, 1}}));
-	CHECK(!medic(frame));
+	CHECK(requests_are(frame, {{Action::RadarZoom, 1}}) && medic(frame) == 1);
 	keys.release("useitem");
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::ToggleMount}}));
-	PlayerActionPoll emotes = kLive;
-	emotes.emotes_menu_open = true;
-	emotes.key_events = {key_row("Knife", '1'), key_row("NVG", 'N')};
-	CHECK(requests_are(actions.poll(keys, emotes), {{Action::NightVision}}));
-	gate.key_events = {key_row("Knife", '1')};
-	CHECK(requests_are(actions.poll(keys, gate), {{Action::WeaponCategory, 1}}));
+	CHECK(actions.poll(keys, kLive).requests.empty()); // the consumed hold toggles nothing
+	CHECK(picks(actions.chain_digit_key('5', true, true), Action::EmotePick, 5));
+	CHECK(picks(actions.chain_digit_key('0', false, true), Action::RadioPick, 10));
+	CHECK(!actions.chain_digit_key(':', false, true).taken);
+	CHECK(!actions.chain_digit_key('/', true, false).taken);
 	return true;
 }
 
@@ -399,43 +411,31 @@ bool test_reset_preserves_switch_hud_medic_and_use_state() {
 	CHECK(frame.fire_edge && reload(frame) && !medic(frame));
 	CHECK(requests_are(frame, {{Action::ToggleScope}, {Action::Stance, 0}, {Action::Stance, 1},
 			{Action::Stance, 2}, {Action::ScopeZero, -1}, {Action::ScopeZero, 1}}));
-	keys.digits[8] = true;
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::SelectSeat, 7}}));
+	CHECK(picks(actions.chain_digit_key('8', false, false), Action::SelectSeat, 7));
 	actions.reset();
-	keys.held.clear(); // consumed USE and the raw digit latch both survive reset
+	keys.held.clear(); // the consumed hold survives the reset: its release toggles nothing
 	CHECK(actions.poll(keys, kLive).requests.empty());
 	return true;
 }
 
-// An open text line takes the digits: a (mouse-bound) USE hold selects no
-// seat while the keyboard is captured, so its release still mounts
-// [orig: Input_HandleSpecialKeys @0x49c5c0 runs only with g_InputCaptureMode
-// clear].
-bool test_captured_keyboard_keeps_the_use_digits() {
-	const PlayerActionPoll kTyping{true, true, true, true};
-	PlayerActions actions;
-	Keys keys;
-	keys.hold("useitem");
-	CHECK(actions.poll(keys, kTyping).requests.empty());
-	keys.digits[3] = true;
-	CHECK(actions.poll(keys, kTyping).requests.empty());
-	keys.release("useitem");
-	CHECK(requests_are(actions.poll(keys, kTyping), {{Action::ToggleMount}}));
-	return true;
-}
-
+// The chain reads the hold the LAST poll latched: a digit in the USE press's own frame is
+// the scan's; one seat per hold; the digit's row held under the hold stays swallowed.
+// [orig: Input_ProcessFrame @0x49d520 - the aging @0x49d57f ahead of the keyboard pass;
+//  Input_HandleSpecialKeys @0x49c6d8..0x49c730]
 bool test_use_previous_frame_and_single_seat() {
 	PlayerActions actions;
 	Keys keys;
-	keys.hold("useitem"); keys.hold("Knife", '1'); keys.digits[1] = true;
+	keys.hold("useitem"); keys.hold("Knife", '1');
+	CHECK(!actions.chain_digit_key('1', false, false).taken); // USE was not held before the 1
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WeaponCategory, 1}}));
-	CHECK(actions.poll(keys, kLive).requests.empty()); // USE was not held before initial 1
-	keys.release("Knife"); keys.digits[1] = false;
+	CHECK(actions.poll(keys, kLive).requests.empty());
+	keys.release("Knife");
 	actions.poll(keys, kLive);
-	keys.hold("radarout", '9'); keys.digits[9] = true;
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::SelectSeat, 8}}));
-	keys.digits[0] = true;
-	CHECK(actions.poll(keys, kLive).requests.empty()); // one seat per hold
+	keys.hold("radarout", '9');
+	CHECK(picks(actions.chain_digit_key('9', false, false), Action::SelectSeat, 8));
+	CHECK(actions.poll(keys, kLive).requests.empty()); // the digit's row is swallowed
+	const ChainDigitTake again = actions.chain_digit_key('0', false, false);
+	CHECK(again.taken && !again.pick); // one seat per hold
 	keys.release("useitem");
 	CHECK(actions.poll(keys, kLive).requests.empty()); // consumed release never mounts
 	CHECK(actions.poll(keys, kLive).requests.empty()); // swallowed held row cannot re-fire
@@ -446,20 +446,27 @@ bool test_use_previous_frame_and_single_seat() {
 	return true;
 }
 
+// The release frame's keyboard pass still meets the hold the last frame latched: its digit
+// picks the seat, a second digit is taken with no pick, the digit rows held then stay
+// swallowed, and the release edge toggles no mount. The pick consumes the hold whether or
+// not the embedder has a simulation to run it on, so a later release never mounts.
+// [orig: Input_ProcessFrame @0x49d520 - the aging @0x49d57f..0x49d585 ahead of the keyboard
+//  pass, the release edge @0x49d6c1..0x49d6dc; Input_HandleSpecialKeys @0x49c6f8..0x49c70c]
 bool test_use_release_digit_priority_and_no_sim_consumption() {
 	PlayerActions actions;
 	Keys keys;
 	keys.hold("useitem");
 	actions.poll(keys, kLive);
-	keys.release("useitem"); keys.digits[0] = true; keys.digits[1] = true;
+	keys.release("useitem");
 	keys.hold("Knife", '1'); keys.hold("seat10", '0'); keys.hold("scope");
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::SelectSeat, 9}, {Action::ToggleScope}}));
-	// Even an absent sim consumes the special digit, and prevents a later
-	// release from unexpectedly mounting when a sim becomes available.
+	CHECK(picks(actions.chain_digit_key('0', false, false), Action::SelectSeat, 9));
+	const ChainDigitTake second = actions.chain_digit_key('1', false, false);
+	CHECK(second.taken && !second.pick);
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::ToggleScope}}));
 	PlayerActions no_sim;
 	keys = Keys{}; keys.hold("useitem");
 	no_sim.poll(keys, kLive);
-	keys.digits[4] = true;
+	CHECK(no_sim.chain_digit_key('4', false, false).taken);
 	CHECK(no_sim.poll(keys, {true, true, false}).requests.empty());
 	keys.release("useitem");
 	CHECK(no_sim.poll(keys, kLive).requests.empty());
@@ -477,11 +484,11 @@ bool test_shell_consume_and_overlay_cancel() {
 	CHECK(actions.poll(keys, kLive).requests.empty());
 	keys.hold("useitem");
 	actions.poll(keys, kLive);
-	keys.digits[2] = true;
 	// An inactive frame runs the input frame too: the held USE's digit picks a
 	// seat (the hold is consumed), and the arm is not asked.
-	CHECK(requests_are(actions.poll(keys, {false, false, true}), {{Action::SelectSeat, 1}}));
-	CHECK(actions.poll(keys, kLive).requests.empty()); // a fresh hold, the digit latched
+	CHECK(picks(actions.chain_digit_key('2', false, false), Action::SelectSeat, 1));
+	CHECK(actions.poll(keys, {false, false, true}).requests.empty());
+	CHECK(actions.poll(keys, kLive).requests.empty()); // a fresh hold
 	keys.release("useitem");
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::ToggleMount}})); // fresh hold
 	keys.hold("useitem"); actions.poll(keys, kLive);
@@ -521,7 +528,6 @@ struct BoundKeys : PlayerActionSource {
 		return bindings.pressed_key(bindings.index_of_token(token),
 				[this](int vk) { return down.count(vk) != 0; });
 	}
-	bool digit_down(int digit) const override { return down.count('0' + digit) != 0; }
 	bool fire_signed(const char *token) const override {
 		return bindings.fire_signed(bindings.index_of_token(token), 0,
 				[this](int vk) { return down.count(vk) != 0; });
@@ -544,7 +550,8 @@ bool test_live_binding_modifier_remap_and_use_stream() {
 	keys.down.clear(); actions.poll(keys, kLive);
 	keys.down = {16}; actions.poll(keys, kLive); // Shift is USE; special keys run first
 	keys.down.insert('7');
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::SelectSeat, 6}}));
+	CHECK(picks(actions.chain_digit_key('7', false, false), Action::SelectSeat, 6));
+	CHECK(actions.poll(keys, kLive).requests.empty()); // the 7's rows are swallowed
 	keys.down.clear();
 	CHECK(actions.poll(keys, kLive).requests.empty());
 	keys.down = {'7'};
@@ -669,9 +676,7 @@ bool test_key_rows_carry_their_dispatch_codes() {
 		Keys keys;
 		keys.hold("useitem");
 		actions.poll(keys, kLive);
-		keys.digits[1] = true;
-		const PlayerActionFrame frame = actions.poll(keys, kLive);
-		CHECK(requests_are(frame, {{Action::SelectSeat, 0}}) && frame.requests[0].code == -1);
+		CHECK(picks(actions.chain_digit_key('1', false, false), Action::SelectSeat, 0));
 	}
 	return true;
 }
@@ -726,58 +731,29 @@ bool test_spectator_rows_edge_to_their_codes() {
 	return true;
 }
 
-// While the Emotes or Radio menu is open a digit is the menu's pick (keys
-// 1..9, and 0 as 10) and never reaches a digit-bound row, the Emotes menu
-// first; the held-USE seat arm precedes both; inactive gameplay input and an
-// open text line pick nothing.
-// [orig: Input_HandleSpecialKeys @0x49c6d8 (seat), @0x49c731..0x49c77c
-//  (emotes), @0x49c783..0x49c7c8 (radio); the consumed key skips the binding
-//  scan, Input_ProcessKeyboardEvents @0x49d2fb]
+// While the Emotes or Radio menu is open a digit's key-down is the menu's pick (the chain)
+// and a digit row's off-keyboard arm fires nothing either; the embedder's send closes the
+// menu, so the next digit is the scan's again. The held-USE seat arm precedes the menus.
+// [orig: Input_HandleSpecialKeys @0x49c6d8 (seat), @0x49c731..0x49c77c (emotes),
+//  @0x49c783..0x49c7c8 (radio); the (key - 48) <= 9 tests @0x49c6e0 / @0x49c73f /
+//  @0x49c78b; a take's skip of the scan, Input_ProcessKeyboardEvents @0x49d305]
 bool test_voice_menu_digits_pick_and_swallow_the_rows() {
 	PlayerActionPoll emotes = kLive;
 	emotes.emotes_menu_open = true;
-	PlayerActionPoll radio = kLive;
-	radio.radio_menu_open = true;
-	PlayerActionPoll both = emotes;
-	both.radio_menu_open = true;
 	PlayerActions actions;
 	Keys keys;
 	keys.hold("Knife", '1');
-	keys.digits[1] = true;
-	CHECK(requests_are(actions.poll(keys, emotes), {{Action::EmotePick, 1}}));
+	CHECK(picks(actions.chain_digit_key('1', true, false), Action::EmotePick, 1));
+	CHECK(actions.poll(keys, emotes).requests.empty()); // the digit's row is swallowed
 	// The embedder closed the menu; the held digit fires no row afterwards.
 	CHECK(actions.poll(keys, kLive).requests.empty());
 	keys.release("Knife");
-	keys.digits[1] = false;
 	actions.poll(keys, kLive);
-	keys.digits[0] = true;
-	CHECK(requests_are(actions.poll(keys, radio), {{Action::RadioPick, 10}}));
-	keys.digits[0] = false;
-	actions.poll(keys, kLive);
-	keys.digits[5] = true;
-	CHECK(requests_are(actions.poll(keys, both), {{Action::EmotePick, 5}}));
-	keys.digits[5] = false;
-	actions.poll(keys, kLive);
-	// Inactive gameplay input: no pick, and the latched key cannot fire later.
-	PlayerActionPoll idle = emotes;
-	idle.active = false;
-	keys.digits[2] = true;
-	CHECK(actions.poll(keys, idle).requests.empty());
-	CHECK(actions.poll(keys, emotes).requests.empty());
-	keys.digits[2] = false;
-	actions.poll(keys, kLive);
-	// An open text line owns the digits.
-	PlayerActionPoll typing = emotes;
-	typing.keyboard_captured = true;
-	keys.digits[4] = true;
-	CHECK(actions.poll(keys, typing).requests.empty());
-	keys.digits[4] = false;
-	actions.poll(keys, kLive);
+	CHECK(!actions.chain_digit_key('1', false, false).taken); // closed: the scan's key
 	// The held-USE seat arm comes first.
 	keys.hold("useitem");
 	actions.poll(keys, emotes);
-	keys.digits[3] = true;
-	CHECK(requests_are(actions.poll(keys, emotes), {{Action::SelectSeat, 2}}));
+	CHECK(picks(actions.chain_digit_key('3', true, false), Action::SelectSeat, 2));
 	return true;
 }
 
@@ -890,10 +866,10 @@ bool test_use_held_is_the_hold_the_chain_reads() {
 	keys.hold("useitem");
 	actions.poll(keys, gate);
 	CHECK(actions.use_held()); // the first held frame's latch: the next frame's word
-	keys.digits[2] = true;
-	CHECK(requests_are(actions.poll(keys, gate), {{Action::SelectSeat, 1}}));
+	CHECK(picks(actions.chain_digit_key('2', false, false), Action::SelectSeat, 1));
 	CHECK(actions.use_held()); // the seat pick consumes the hold, not the word
-	keys.digits[2] = false;
+	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(actions.use_held());
 	actions.poll(keys, gate);
 	CHECK(actions.use_held());
 	// A taken press latches no hold: the word drops while the key is down, and the
@@ -1027,7 +1003,7 @@ int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
 			test_missing_simulation_freezes_only_scope_zero, test_reset_preserves_switch_hud_medic_and_use_state,
-			test_use_previous_frame_and_single_seat, test_captured_keyboard_keeps_the_use_digits,
+			test_use_previous_frame_and_single_seat,
 			test_use_release_digit_priority_and_no_sim_consumption,
 			test_shell_consume_and_overlay_cancel, test_use_swallows_only_digit_event_rows,
 			test_live_binding_modifier_remap_and_use_stream,
@@ -1035,7 +1011,7 @@ int main() {
 			test_wheel_remainder_dispatches_whole_notches,
 			test_spectator_rows_edge_to_their_codes, test_key_state_reset,
 			test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen,
-			test_event_rows_fire_once_per_event, test_the_chain_takes_digit_events,
+			test_event_rows_fire_once_per_event, test_the_chain_takes_digit_keys,
 			test_reload_medic_and_respawn_fire_on_their_events, test_embedder_rows_keep_the_key_order,
 			test_to_special_dispatches_its_key_events, test_spectator_rows_fire_on_their_events,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
