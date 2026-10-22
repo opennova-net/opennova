@@ -180,6 +180,35 @@ bool run_record_tail_mirrors_flags_and_health() {
 	return ok;
 }
 
+// D-NET-NEW-L5-15, PERMANENT (Q9-1 (a)): a spawned hull holds its spawn pose until
+// its first compact arms the client mover. Retail's joiner runs the chase from its
+// first entity pass over the 0x0D memset's zero target and pulls a hull lying more than
+// 2 u from the world origin onto it; ours keeps the pose as a deliberate fix.
+// [orig: NapiNPClientMsg_0x00D @0x432C40 - the memset @0x432D1B..0x432D23;
+//  Entity_UpdateVehiclePhysics @0x48AF00 - the client chase @0x48B54C, the snap
+//  @0x48B563..0x48B640]
+bool run_hull_holds_its_spawn_pose_until_its_first_compact() {
+	Harness h;
+	bool ok = true;
+	const w::Vec3 spawn{100.0f, 200.0f, 10.0f};
+	h.hull().position = spawn;
+	replication::ClientEntityState *row = h.role.runtime->state().find(h.tank.packed);
+	ok &= expect(row != nullptr, "the hull's replica row exists");
+	if (row == nullptr) return ok;
+	row->x = w::to_fixed(spawn.x);
+	row->y = w::to_fixed(spawn.y);
+	row->z = w::to_fixed(spawn.z);
+	for (int frame = 0; frame < 4; ++frame) h.role.run_tick(h.input);
+	ok &= expect(!h.hull().veh.net_predicted, "no compact yet: the client mover is not armed");
+	ok &= expect(w::to_fixed(h.hull().position.x) == w::to_fixed(spawn.x) &&
+	                     w::to_fixed(h.hull().position.y) == w::to_fixed(spawn.y) &&
+	                     w::to_fixed(h.hull().position.z) == w::to_fixed(spawn.z),
+	             "the hull holds its spawn pose, not the world origin");
+	h.record(0x00, 3000);
+	ok &= expect(h.hull().veh.net_predicted, "the first compact arms the client mover");
+	return ok;
+}
+
 // The destroyed bit on a client row that is not dead yet kills it through
 // Entity_KillBySlotId while its Health word is nonzero; the dead-pose form
 // then stores a zero health word. [orig: Entity_SerializeVehicleState
@@ -562,6 +591,7 @@ bool run_topology_resweep_keeps_initialized_words() {
 int main() {
 	bool ok = true;
 	ok &= run_record_tail_mirrors_flags_and_health();
+	ok &= run_hull_holds_its_spawn_pose_until_its_first_compact();
 	ok &= run_destroyed_bit_kills_the_client_row();
 	ok &= run_freeze_predicate_and_pivot_clear();
 	ok &= run_remote_driver_is_the_claimant();
