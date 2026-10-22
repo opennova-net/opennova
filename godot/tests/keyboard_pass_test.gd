@@ -3,23 +3,24 @@ extends GutTest
 # KeyboardPass, the input frame's keyboard pass over the device's key queue
 # (the native KeyEventQueue), over recording legs: one drain is the keyboard pass
 # in key order (the open chat line first, then the special-key chain's inline
-# legs and its queued deploy picks, then the binding scan's Escape event), then
-# the event drain in queue order, which the first input reset ends (engine
-# world::pass_through_close_axis and controls::KeyEventQueue carry the witness).
+# legs and its queued deploy picks, then the binding scan's row events, the
+# escape row's among them), the picks and the row events queued in key order for
+# the update's drain, whose first input reset ends it (engine
+# inmatch::Role::drain_input_events; ctest inmatch_tick_input_source pins it;
+# engine world::pass_through_close_axis and controls::KeyEventQueue carry the
+# witness).
 
 
 # The shell's ring legs, recorded: the chat line takes every key while open (its
 # Escape closes it), the special-key chain takes PgUp / PgDn inline and queues X
-# and SPACE as picks (the default spawn 0 and the auto-team 0xFFFE), every pick's
-# case resets the input and the Escape action's does when `escape_resets`.
+# and SPACE as picks (the default spawn 0 and the auto-team 0xFFFE), the scan's
+# row events queue in the same order.
 class RecordingLegs:
 	extends RefCounted
 	var chat_open := false
-	var escape_resets := true
 	var calls: Array[String] = []
 	var release_passes := 0
 	var release_pass_first := false
-	var _reset := false
 
 	# The release pass: counted, and whether it ran ahead of every other leg.
 	func ring_release_pass() -> void:
@@ -34,16 +35,16 @@ class RecordingLegs:
 			chat_open = false
 		return true
 
-	func ring_special_key(key: InputEventKey, events: Array[int]) -> bool:
+	func ring_special_key(key: InputEventKey) -> bool:
 		match key.keycode:
 			KEY_PAGEUP, KEY_PAGEDOWN:
 				calls.append("page %s" % _name(key.keycode))
 				return true
 			KEY_X:
-				events.append(0)
+				calls.append("pick 0")
 				return true
 			KEY_SPACE:
-				events.append(0xFFFE)
+				calls.append("pick %d" % 0xFFFE)
 				return true
 		return false
 
@@ -56,19 +57,6 @@ class RecordingLegs:
 
 	func ring_row_event(_key: InputEventKey, code: int, _scan_code: int) -> void:
 		calls.append("row %d" % code)
-
-	func ring_escape() -> void:
-		calls.append("escape")
-		_reset = escape_resets
-
-	func ring_pick(param: int) -> void:
-		calls.append("pick %d" % param)
-		_reset = true
-
-	func ring_reset_ran() -> bool:
-		var ran := _reset
-		_reset = false
-		return ran
 
 	func _name(keycode: int) -> String:
 		match keycode:
@@ -106,13 +94,16 @@ func _drained(keys: Array, legs: RecordingLegs) -> Array[String]:
 	return legs.calls
 
 
-# The special keys run inline in the keyboard pass, ahead of every queued event,
-# a key behind the Escape included.
-func test_inline_special_keys_run_ahead_of_the_queued_escape() -> void:
+# Every key in key order: the escape row's event queues at its key, the special
+# key behind it runs inline at its own.
+# [orig: Input_ProcessKeyboardEvents @0x49d1f0 - Input_HandleSpecialKeys per
+#  dequeued key (the call @0x49d2fb), the scan's Input_QueueEvent @0x49d42f /
+#  @0x49d488]
+func test_the_pass_takes_each_key_in_key_order() -> void:
 	var calls := _drained([KEY_ESCAPE, KEY_PAGEDOWN], RecordingLegs.new())
 	assert_eq(calls.size(), 2)
-	assert_eq(calls[0] if calls.size() > 0 else "", "page pgdn")
-	assert_eq(calls[1] if calls.size() > 1 else "", "escape")
+	assert_eq(calls[0] if calls.size() > 0 else "", "row 18")
+	assert_eq(calls[1] if calls.size() > 1 else "", "page pgdn")
 
 
 # The release pass runs once per drain, ahead of the first dequeue (its latched
@@ -130,39 +121,18 @@ func test_the_release_pass_runs_ahead_of_the_dequeue() -> void:
 	assert_eq(idle.release_passes, 1, "an empty queue runs the release pass too")
 
 
-# A deploy key waiting ahead of an Escape: its pick's reset drops the Escape
-# event (face (a)'s Escape NO).
-func test_a_pick_ahead_of_an_escape_drops_it() -> void:
+# The deploy picks and the escape row's event queue in key order, every one of
+# them: the drain dispatches them in that order, and the first whose case resets
+# the input ends it (face (a)'s Escape NO: a pick ahead of the Escape drops it).
+# [orig: Input_HandleSpecialKeys @0x49c5c0 - Input_QueueEvent(12, ...) @0x49ca14 /
+#  @0x49ca73; Input_ProcessFrame @0x49d520 - the drain @0x49d599..0x49d5e7]
+func test_the_picks_and_the_escape_queue_in_key_order() -> void:
 	var calls := _drained([KEY_X, KEY_ESCAPE], RecordingLegs.new())
-	assert_eq(calls.size(), 1)
-	assert_eq(calls[0] if calls.size() > 0 else "", "pick 0")
-
-
-# An Escape ahead of a deploy key: the Escape action's reset drops the pick.
-func test_an_escape_ahead_of_a_pick_drops_it() -> void:
-	var calls := _drained([KEY_ESCAPE, KEY_X], RecordingLegs.new())
-	assert_eq(calls.size(), 1)
-	assert_eq(calls[0] if calls.size() > 0 else "", "escape")
-
-
-# Two Escapes run one action; with no local entity the action resets nothing
-# and the drain goes on to the pick.
-func test_the_escape_actions_reset_ends_the_drain_only_when_it_runs() -> void:
-	var calls := _drained([KEY_ESCAPE, KEY_ESCAPE], RecordingLegs.new())
-	assert_eq(calls.size(), 1, "the first Escape's reset drops the second")
-	var no_entity := RecordingLegs.new()
-	no_entity.escape_resets = false
-	calls = _drained([KEY_ESCAPE, KEY_X], no_entity)
-	assert_eq(calls.size(), 2)
-	assert_eq(calls[1] if calls.size() > 1 else "", "pick 0",
-			"a reset that did not run leaves the queue")
-
-
-# Two deploy keys queue two picks; the first one's reset drops the second.
-func test_the_first_pick_drops_the_next() -> void:
-	var calls := _drained([KEY_SPACE, KEY_X], RecordingLegs.new())
-	assert_eq(calls.size(), 1)
-	assert_eq(calls[0] if calls.size() > 0 else "", "pick 65534")
+	assert_eq_deep(calls, ["pick 0", "row 18"])
+	calls = _drained([KEY_ESCAPE, KEY_X], RecordingLegs.new())
+	assert_eq_deep(calls, ["row 18", "pick 0"])
+	calls = _drained([KEY_SPACE, KEY_X], RecordingLegs.new())
+	assert_eq_deep(calls, ["pick 65534", "pick 0"])
 
 
 # An open chat line takes the keys, its Escape closing it; the keys behind
@@ -260,12 +230,12 @@ func test_the_player_presenter_owns_the_queue_its_input_reset_empties() -> void:
 	assert_eq(pass_over.take_key(), x, "the shell's pass reads the presenter's queue")
 
 
-# A key the chain leaves that the scan gives another row queues that row's event
-# for the input router in the keyboard pass, once per key-down (a held key's OS
-# repeat again), ahead of the event drain's Escape action.
+# A key the chain leaves that the scan gives a row queues that row's event for the
+# input router in the keyboard pass, once per key-down (a held key's OS repeat
+# again), in key order with the escape row's.
 func test_another_rows_key_queues_its_row_event_in_the_pass() -> void:
 	var calls := _drained([KEY_ESCAPE, KEY_F6, KEY_F6], RecordingLegs.new())
 	assert_eq(calls.size(), 3)
-	assert_eq(calls[0] if calls.size() > 0 else "", "row 19")
-	assert_eq(calls[1] if calls.size() > 1 else "", "row 19", "the repeat fires the row again")
-	assert_eq(calls[2] if calls.size() > 2 else "", "escape")
+	assert_eq(calls[0] if calls.size() > 0 else "", "row 18")
+	assert_eq(calls[1] if calls.size() > 1 else "", "row 19")
+	assert_eq(calls[2] if calls.size() > 2 else "", "row 19", "the repeat fires the row again")

@@ -799,6 +799,62 @@ void test_a_menu_screen_an_update_opens_gates_the_frames_later_updates() {
 			"the later updates' records wait under the screen");
 }
 
+// D-CTRL-6 (LI-s16): the special-key chain's deploy pick (input event 12) and the escape row's
+// event (18) are records of the update's drain in key order with the rows': the pick's
+// parameter rides its record's first argument to the source's arm, a console record waiting
+// ahead of the update's records dispatches first, and the pick's input reset (here the
+// role's whole input reset, the memset its case runs) ends the drain there: the escape and the
+// row behind it never dispatch.
+// [orig: Input_HandleSpecialKeys @0x49c5c0 - Input_QueueEvent(12, 65534, 0, 0) @0x49ca14;
+//  Input_ProcessFrame @0x49D520 (the drain @0x49D599..0x49D5E7); Input_HandleActionBinding
+//  @0x49AD40 - case 12's Input_ResetAllState @0x49B042; Input_ResetAllState @0x497ED0 (the
+//  memset @0x497EE6)]
+void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
+	using opennova::controls::InputEventOrigin;
+	using opennova::controls::InputEventQueue;
+	using opennova::controls::InputEventRecord;
+	struct PickDevice final : TickInputSource {
+		TickRecorder *role = nullptr;
+		bool queued = false;
+		std::vector<std::pair<int32_t, int32_t>> dispatched; // (code, first argument)
+		bool quit_first = false;
+		InputPacket sample_tick(uint32_t) override { return {}; }
+		void queue_records(InputEventQueue &records) override {
+			if (queued) return;
+			queued = true;
+			for (const InputEventRecord &record :
+					{InputEventRecord{201, 0, 0, 0, false, InputEventOrigin::Device},
+							InputEventRecord{12, 0xFFFE, 0, 0, false, InputEventOrigin::Device},
+							InputEventRecord{18, 0, 0, 0, false, InputEventOrigin::Device},
+							InputEventRecord{203, 0, 0, 0, false, InputEventOrigin::Device}})
+				(void)records.push(record);
+		}
+		void dispatch_record(const InputEventRecord &record) override {
+			if (dispatched.empty())
+				quit_first = role->kernel.world.mission_exit_reason ==
+						opennova::inmatch::kMissionExitReset;
+			dispatched.emplace_back(record.code, record.p1);
+			if (record.code == 12) role->reset_all_input_state();
+		}
+	};
+	auto role = std::make_unique<TickRecorder>();
+	PickDevice device;
+	device.role = role.get();
+	Session session(*role);
+	CHECK(load(session), "the session runs");
+	CHECK(role->input_events().push({4, 0, 0, 0, false, InputEventOrigin::Console}),
+			"the console's quit record waits at the head");
+	FrameInput three;
+	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	three.tick_source = &device;
+	CHECK(session.advance(three).ticks_run() == 3, "three updates");
+	const std::vector<std::pair<int32_t, int32_t>> order{{201, 0}, {12, 0xFFFE}};
+	CHECK(device.dispatched == order && device.quit_first,
+			"the console's record first, then the rows' and the pick's in key order, the pick's "
+			"parameter on its record; its reset drops the escape and the row behind it");
+	CHECK(role->input_events().empty(), "the reset emptied the queue");
+}
+
 } // namespace
 
 int main() {
@@ -815,6 +871,7 @@ int main() {
 	test_the_update_drains_its_records_in_queue_order();
 	test_the_reload_record_meets_the_head_in_key_order();
 	test_a_menu_screen_an_update_opens_gates_the_frames_later_updates();
+	test_a_deploy_pick_is_a_record_of_the_drain_in_key_order();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

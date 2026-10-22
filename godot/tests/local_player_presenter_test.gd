@@ -69,7 +69,7 @@ class PresenterKeyLegs:
 	func ring_chat_key(_key: InputEventKey) -> bool:
 		return false
 
-	func ring_special_key(key: InputEventKey, _events: Array[int]) -> bool:
+	func ring_special_key(key: InputEventKey) -> bool:
 		return presenter.chain_digit_key(ControlsModel.vk_from_godot_key(key.physical_keycode))
 
 	func ring_binding_code(scan_code: int) -> int:
@@ -77,15 +77,6 @@ class PresenterKeyLegs:
 
 	func ring_row_event(_key: InputEventKey, code: int, scan_code: int) -> void:
 		presenter.queue_row_event(code, model.event_signed(scan_code), scan_code)
-
-	func ring_escape() -> void:
-		pass
-
-	func ring_pick(_param: int) -> void:
-		pass
-
-	func ring_reset_ran() -> bool:
-		return false
 
 
 func before_all() -> void:

@@ -331,6 +331,10 @@ func _ready() -> void:
 	# update's keyboard pass opens (the escape row's INGAME) gates the frame's later
 	# updates (PlayerInputRouter::set_menu_screen_probe).
 	_player_presenter.set_menu_screen_probe(_input_frame_menu_open)
+	# The escape row's and the deploy picks' records run the shell's arms when the
+	# update's drain reaches them, in key order with the rows' records
+	# (PlayerInputRouter::set_record_leg).
+	_player_presenter.set_record_leg(_run_record_leg)
 	# The console's SAVEKEYS dumps the live binding table (GameWorld.set_controls_model).
 	_world.set_controls_model(ControlsBindings.model())
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
@@ -1660,11 +1664,11 @@ func _on_camera_escape() -> void:
 		return
 	# Over live play and under a pass-through screen (death.mnu's DEATH, stat.mnu's
 	# STAT) the Escape key is the key queue's: the binding scan queues the escape
-	# row's event in the input frame's keyboard pass and its case runs there
-	# (ring_escape), after a screen's hotkey (DEATH's LEAVE MISSION lowers the word,
-	# the confirmation's NO raises it); over a screen it never opens the in-game
-	# menu: a joiner parked at the pick leaves through LEAVE MISSION's YES
-	# (KeyboardPass and engine world::pass_through_close_axis carry the witness).
+	# row's event in the input frame's keyboard pass and its case runs at its record
+	# in the update's drain (_run_record_leg), after a screen's hotkey (DEATH's
+	# LEAVE MISSION lowers the word, the confirmation's NO raises it); over a
+	# screen it never opens the in-game menu: a joiner parked at the pick leaves
+	# through LEAVE MISSION's YES (KeyboardPass and engine world::pass_through_close_axis carry the witness).
 	if _keyboard_pass_owns_keys():
 		return
 	# The tools window's interact mode: the HUD's escape chain closes one open HUD
@@ -1766,7 +1770,8 @@ func ring_chat_key(key: InputEventKey) -> bool:
 
 
 ## The special-key chain over the queue's key, its event-12 picks (the deploy
-## keys', a co-op round-over RESTART's) queued into the drain's events: the quit
+## keys', a co-op round-over RESTART's) queued in key order with the rows' events
+## (LocalPlayerPresenter.queue_pick_event): the quit
 ## dialog's keys, a session's round-over keys, the page keys (the Tab board, the
 ## status page, help, the briefing), the status page's Enter and the deploy keys.
 ## The deploy keys' test is the engine's (dead, or the deploy overlay up), not the
@@ -1782,7 +1787,7 @@ func ring_chat_key(key: InputEventKey) -> bool:
 ## briefing page keys, as over live play (GameHudPresenter.handle_special_key skips
 ## the held legs). An open quit dialog leads them all: its keys run ahead of the
 ## round-over leg, and a key it leaves goes to the tail.
-func ring_special_key(key: InputEventKey, events: Array[int]) -> bool:
+func ring_special_key(key: InputEventKey) -> bool:
 	if _hud_presenter == null:
 		return false
 	if _state == State.WORLD and _end_flow.is_round_ended() \
@@ -1792,8 +1797,7 @@ func ring_special_key(key: InputEventKey, events: Array[int]) -> bool:
 			_begin_restart_splash()
 		if bits & HudToggles.ROUND_OVER_CONSUMED:
 			return true
-	return _hud_presenter.handle_special_key(key, _deploy_key_param,
-			func(param: int) -> void: events.append(param))
+	return _hud_presenter.handle_special_key(key, _deploy_key_param, _queue_pick)
 
 
 ## The binding scan over a key the chain left: the dispatch code of the row it
@@ -1802,12 +1806,14 @@ func ring_binding_code(scan_code: int) -> int:
 	return ControlsBindings.model().event_code(scan_code)
 
 
-## Any other row the scan fired: its event, with the fire's sign (Shift on a
-## fallback-pass fire) and the event's key, waits for the player input router,
-## which dispatches it once (PlayerInputRouter::queue_row_event). A key the
-## scripted device replayed for its hold fires its row through the hold instead.
+## Any row the scan fired, the escape row's included: its event, with the fire's
+## sign (Shift on a fallback-pass fire) and the event's key, waits for the player
+## input router, which dispatches it once (PlayerInputRouter::queue_row_event). A
+## key the scripted device replayed for its hold fires its row through the hold
+## instead, the escape row's excepted (it has no hold arm).
 func ring_row_event(key: InputEventKey, code: int, scan_code: int) -> void:
-	if _player_presenter == null or ControlsModel.is_scripted_key_event(key):
+	if _player_presenter == null or (code != KeyboardPass.ESCAPE_CODE \
+			and ControlsModel.is_scripted_key_event(key)):
 		return
 	_player_presenter.queue_row_event(code, ControlsBindings.model().event_signed(scan_code),
 			scan_code)
@@ -1825,29 +1831,30 @@ func _deploy_key_param(key: InputEventKey) -> int:
 	return _deploy_presenter.deploy_key_param(key) if _deploy_presenter != null else -1
 
 
-## The escape row's event (case 18): the Escape action; over live play, with no
-## HUD window to close, the in-game menu opens; under a pass-through screen never
-## (a menu screen is open), nor once the round is over.
-func ring_escape() -> void:
-	if not _run_escape_action() and is_gameplay_input_active():
-		_pause()
+## The special-key chain's pick (input event 12), queued in key order with the
+## rows' events for the update's drain.
+func _queue_pick(param: int) -> void:
+	if _player_presenter != null:
+		_player_presenter.queue_pick_event(param)
 
 
-## Input event 12: the pick (the deploy keys', a co-op round-over RESTART's),
-## with or without the deploy screen open.
-func ring_pick(param: int) -> void:
-	if _deploy_presenter != null:
+## A record of the update's drain whose arm is the shell's, reached in key order
+## (PlayerInputRouter::set_record_leg): the escape row's (case 18), the Escape
+## action: over live play, with no HUD window to close, the in-game menu opens;
+## under a pass-through screen never (a menu screen is open), nor once the round
+## is over; or input event 12, the pick (the deploy keys', a co-op round-over
+## RESTART's), with or without the deploy screen open. A case that reset the
+## input (its Input_ResetAllState: the role's memset of the event queue ends the
+## drain there) owes the devices' reset, which runs at once.
+func _run_record_leg(code: int, param: int) -> void:
+	if code == KeyboardPass.ESCAPE_CODE:
+		if not _run_escape_action() and is_gameplay_input_active():
+			_pause()
+	elif _deploy_presenter != null:
 		_deploy_presenter.send_pick(param)
-
-
-## Whether the event just dispatched reset the input (its Input_ResetAllState):
-## the devices' reset runs now and the drain ends.
-func ring_reset_ran() -> bool:
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim == null or not bool(sim.take_input_reset()):
-		return false
-	_reset_key_state()
-	return true
+	if sim != null and bool(sim.take_input_reset()):
+		_reset_key_state()
 
 
 ## The quit dialog's yes runs input action 3 inline: the Exit Mission tone, then the

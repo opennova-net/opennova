@@ -251,6 +251,11 @@ public:
 	// One key-down's VK through the HUD's special-key chain's digit arms
 	// (PlayerInputRouter::chain_digit_key); true = taken.
 	bool chain_digit_key(int p_vk) { return input_router_.chain_digit_key(p_vk); }
+	// The special-key chain's deploy pick into the input frame's event list
+	// (PlayerInputRouter::queue_pick_event), and the shell's arms for the escape row's and
+	// the picks' records (PlayerInputRouter::set_record_leg).
+	void queue_pick_event(int p_param) { input_router_.queue_pick_event(p_param); }
+	void set_record_leg(const Callable &p_leg) { input_router_.set_record_leg(p_leg); }
 	// The held USE row's armory arm took its open this frame (PlayerInputRouter::
 	// take_armory_request); reading clears it.
 	bool take_use_item_armory_request();

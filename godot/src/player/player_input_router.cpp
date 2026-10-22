@@ -36,6 +36,15 @@ bool scroll_lock_device_turn_off() {
 // The held USE row's catalog row (useitem; its dispatch code is the action head's key).
 constexpr int kUseItemRow = 44;
 
+// The records whose arms are the shell's (set_record_leg): the special-key chain's deploy
+// pick, input event 12, and the escape row's, catalog row 67 (code 18) (engine
+// controls::KeyRowEvent and PlayerAction::EmbedderRow carry the witness).
+constexpr int kDeployPickCode = 12;
+constexpr int kEscapeRow = 67;
+bool shell_record(int p_code) {
+	return p_code == kDeployPickCode || p_code == opennova::controls::action_code(kEscapeRow);
+}
+
 // The Num Lock state the process start found, which its exit puts back; the exit runs only
 // once the start leg ran.
 bool s_key_locks_started = false;
@@ -295,10 +304,12 @@ opennova::inmatch::InputPacket PlayerInputRouter::sample_tick(uint32_t p_logic_t
 	} else {
 		// No sample takes the action rows' events: they are dropped. The talk and HUD
 		// rows' run with or without a local player (the command prompt a Serve Only
-		// host opens), so their key-downs are records still.
+		// host opens), as do the escape row's and the deploy picks, so their key-downs are
+		// records still, a pick's with its parameter.
 		for (const opennova::controls::KeyRowEvent &event : action_events_)
-			if (!event.release && (talk_row_of(event.code) >= 0 || hud_row_of(event.code) >= 0))
-				sample_records_.push_back({event.code, 0, 0, 0, event.sign,
+			if (!event.release && (talk_row_of(event.code) >= 0 || hud_row_of(event.code) >= 0 ||
+										  shell_record(event.code)))
+				sample_records_.push_back({event.code, event.param, 0, 0, event.sign,
 						opennova::controls::InputEventOrigin::Device});
 		action_events_.clear();
 	}
@@ -396,12 +407,26 @@ void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventReco
 		if (poll_hud_toggles(record_sim, 1 << hud_row, p_record.sign)) key_events()->reset();
 		return;
 	}
+	// The escape row's record (case 18: the Escape action) and a deploy pick's (case 12, its
+	// pick the record's first argument) run the shell's arms at their place in the drain;
+	// their cases' input reset (the role's memset of the event queue) ends the drain there,
+	// and the shell's leg runs the devices' reset at once.
+	if (shell_record(p_record.code)) {
+		if (record_leg_.is_valid()) record_leg_.call(p_record.code, p_record.p1);
+		return;
+	}
 	if (const auto request = opennova::controls::player_action_request(p_record))
 		apply_player_action(*record_sim.ptr(), *request);
 }
 
 void PlayerInputRouter::queue_row_event(int p_code, bool p_signed, int p_key) {
 	queue_key_row_event(opennova::controls::KeyRowEvent{p_code, p_signed, p_key, false});
+}
+
+void PlayerInputRouter::queue_pick_event(int p_param) {
+	// Input event 12 with the pick its first argument (engine controls::KeyRowEvent::param
+	// carries the witness).
+	queue_key_row_event(opennova::controls::KeyRowEvent{kDeployPickCode, false, 0, false, p_param});
 }
 
 void PlayerInputRouter::queue_key_row_event(const opennova::controls::KeyRowEvent &p_event) {
@@ -531,11 +556,14 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	gate.radio_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
 	gate.death_screen = p_spectating;
 	gate.menu_open = frame_menu_open_;
-	// The keyboard pass's row events since the last sample; the talk, HUD and pause rows'
-	// are this router's records in key order with the action rows' (dispatch_record).
+	// The keyboard pass's events since the last sample; the talk, HUD and pause rows', the
+	// escape row's and the deploy picks are this router's records in key order with the
+	// action rows' and the spectator rows' (dispatch_record).
 	gate.key_events.swap(action_events_);
 	action_events_.clear();
-	gate.embedder_row = [](int p_code) { return talk_row_of(p_code) >= 0 || hud_row_of(p_code) >= 0; };
+	gate.embedder_row = [](int p_code) {
+		return talk_row_of(p_code) >= 0 || hud_row_of(p_code) >= 0 || shell_record(p_code);
+	};
 	// The Scroll Lock word is a device the scripted input replaces like the keys.
 	gate.scroll_lock_on =
 			input_override_.is_null() && !scroll_lock_turned_off_ && scroll_lock_device_on();
@@ -581,10 +609,13 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	p_input->set_menu_open(frame_menu_open_);
 	for (const auto &request : actions.requests) {
 		// An action row's request is a record the update's drain dispatches in queue order
-		// (queue_records, dispatch_record), a talk, HUD or pause row's key event's among
-		// them; the USE row's opens and its release arm run here.
+		// (queue_records, dispatch_record), a talk, HUD, pause or escape row's key event's and
+		// a deploy pick's among them (a pick's parameter its first argument); the USE row's
+		// opens and its release arm run here.
 		if (request.code >= 0) {
-			sample_records_.push_back({request.code, 0, 0, 0, request.sign,
+			const int32_t first =
+					request.action == opennova::controls::PlayerAction::EmbedderRow ? request.value : 0;
+			sample_records_.push_back({request.code, first, 0, 0, request.sign,
 					opennova::controls::InputEventOrigin::Device});
 			continue;
 		}
@@ -598,12 +629,12 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 		}
 		if (action_sim.is_valid()) apply_player_action(*action_sim.ptr(), request);
 	}
-	// The death screen's own rows (the spectate sub-mode and target): records of the
-	// update's drain behind the sample's other rows, each past the dispatcher's head at its
-	// dispatch (dispatch_record, engine controls::player_action_request).
+	// The death screen's own rows (the spectate sub-mode and target): their key events are
+	// the poll's records in key order; their off-keyboard arms' press edges are records of
+	// the update's drain behind the sample's other rows, each past the dispatcher's head at
+	// its dispatch (dispatch_record, engine controls::player_action_request).
 	if (p_spectating && action_sim.is_valid()) {
-		for (const auto &request : actions_.poll_spectator(GodotActionSource(controls_),
-					 active, gate.key_events))
+		for (const auto &request : actions_.poll_spectator(GodotActionSource(controls_), active))
 			sample_records_.push_back({request.code, 0, 0, 0, request.sign,
 					opennova::controls::InputEventOrigin::Device});
 	}

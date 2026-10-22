@@ -77,8 +77,13 @@ enum class PlayerAction {
 	// records whose arms the role owns (inmatch::Role::dispatch_record), past the head there.
 	Reload,
 	ToSpecial,
-	// A key event of a row whose arm the embedder owns (PlayerActionPoll::embedder_row:
-	// the talk, HUD and pause rows): its record, in key order with the action rows'.
+	// A key event whose arm the embedder owns (PlayerActionPoll::embedder_row: the talk, HUD
+	// and pause rows, the escape row, the special-key chain's deploy pick): its record, in key
+	// order with the action rows', value = the record's first argument (KeyRowEvent::param:
+	// the pick's; 0 for a row's). The escape row's and the pick's arms run when the drain
+	// reaches their records, and their cases' input reset ends the drain there.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 12 @0x49B024 (its Input_ResetAllState
+	//  @0x49B042), case 18 @0x49B234 (Player_ResetLocalInput)]
 	EmbedderRow,
 };
 
@@ -178,12 +183,15 @@ struct PlayerActionPoll {
 	//  @0x49d5d8; Input_ProcessPlayerFrame @0x49d4c0 - the keyboard pass @0x49d4c6
 	//  ahead of the mouse and toggle passes @0x49d4d8 / @0x49d4de]
 	std::vector<KeyRowEvent> key_events;
-	// The codes of the rows among key_events whose arms the embedder owns (its talk, HUD
-	// and pause rows): each such key-down is a record in key order with the action rows'
-	// (PlayerAction::EmbedderRow), under none of this table's gates (the rows' own arms and
-	// the dispatcher's head gate them at the drain). Unset = none.
+	// The codes among key_events whose arms the embedder owns (its talk, HUD and pause rows,
+	// the escape row, the deploy pick's event 12): each such key-down is a record in key
+	// order with the action rows' (PlayerAction::EmbedderRow), under none of this table's
+	// gates (the rows' own arms and the dispatcher's head gate them at the drain). The death
+	// screen's spectator rows (500..502) are records in the same order (PlayerAction::
+	// Spectate). Unset = none.
 	// [orig: Input_ProcessKeyboardEvents @0x49D1F0 (Input_QueueEvent per scanned key-down
-	//  @0x49D42F / @0x49D488); Input_ProcessFrame @0x49D520 (the drain @0x49D599..0x49D5E7)]
+	//  @0x49D42F / @0x49D488, the special-key chain's own queue per dequeued key, its call
+	//  @0x49D2FB); Input_ProcessFrame @0x49D520 (the drain @0x49D599..0x49D5E7)]
 	std::function<bool(int code)> embedder_row;
 };
 
@@ -355,14 +363,13 @@ public:
 	// The death screen's spectator rows, the catalog's mode-2 rows 110..112
 	// (CycleSpectatorMode, IncSpectatorTarget, DecSpectatorTarget): the binding
 	// scan admits them only while the death screen is up, so the embedder
-	// polls them there while gameplay input is active: one request per queued
-	// key event in `events` (the poll's key_events), in their order, then the
-	// press edges of the rows' off-keyboard arms. Each carries its code, a record of the
-	// update's drain (player_action_request maps it back).
+	// polls them there while gameplay input is active. Their key events are poll()'s, in
+	// key order with every other record's (gate.death_screen); this polls the press edges
+	// of the rows' off-keyboard arms, behind the keyboard pass's records. Each carries its
+	// code, a record of the update's drain (player_action_request maps it back).
 	// [orig: Input_IsBindingActiveForMode @0x497ea0 — row +8 bit 2 on the
 	//  death screen; rows @0x818810 / @0x81887C / @0x8188E8 -> codes 500..502]
-	std::vector<PlayerActionRequest> poll_spectator(const PlayerActionSource &source, bool active,
-			const std::vector<KeyRowEvent> &events = {});
+	std::vector<PlayerActionRequest> poll_spectator(const PlayerActionSource &source, bool active);
 
 private:
 	struct RowLatch { bool down = false; };

@@ -28,16 +28,21 @@ var _overlay: Control = null
 
 
 # The shell's ring legs (MainGame's ring_* legs), trimmed to the deploy screen's:
-# the special-key chain is its deploy leg alone, the Escape action is counted and
-# runs its input reset, and the drain ends at the first reset the sim reports
-# (KeyboardPass carries the order; engine world::pass_through_close_axis the
-# witness).
+# the special-key chain is its deploy leg alone, whose picks queue in key order
+# with the escape row's events as the update's records; then the update's drain
+# over them (MainGame._run_record_leg's arms): the Escape action is counted and
+# runs its input reset, a pick is sent, and the drain ends at the first reset the
+# sim reports, as the role's memset of the event queue ends it (KeyboardPass
+# carries the order; engine inmatch::Role::drain_input_events the drain's and
+# world::pass_through_close_axis the screens' witness).
 class DeployRingLegs:
 	extends RefCounted
 	var presenter = null
 	var sim: Simulation = null
 	var picks: Array[int] = []
 	var escapes := 0
+	# The update's records in key order: [code, first argument].
+	var records: Array = []
 
 	func _init(p_presenter, p_sim: Simulation) -> void:
 		presenter = p_presenter
@@ -50,11 +55,11 @@ class DeployRingLegs:
 	func ring_chat_key(_key: InputEventKey) -> bool:
 		return false
 
-	func ring_special_key(key: InputEventKey, events: Array[int]) -> bool:
+	func ring_special_key(key: InputEventKey) -> bool:
 		var param: int = presenter.deploy_key_param(key)
 		if param < 0:
 			return false
-		events.append(param)
+		records.append([12, param])
 		return true
 
 	# The binding scan over the live binding model (ControlsModel.event_code):
@@ -62,20 +67,24 @@ class DeployRingLegs:
 	func ring_binding_code(scan_code: int) -> int:
 		return ControlsBindings.model().event_code(scan_code)
 
-	# No other row is the deploy screen's.
-	func ring_row_event(_key: InputEventKey, _code: int, _scan_code: int) -> void:
-		pass
+	# The escape row's event; no other row is the deploy screen's.
+	func ring_row_event(_key: InputEventKey, code: int, _scan_code: int) -> void:
+		if code == KeyboardPass.ESCAPE_CODE:
+			records.append([code, 0])
 
-	func ring_escape() -> void:
-		escapes += 1
-		sim.escape_input_reset()
-
-	func ring_pick(param: int) -> void:
-		picks.append(param)
-		presenter.send_pick(param)
-
-	func ring_reset_ran() -> bool:
-		return bool(sim.take_input_reset())
+	# The update's drain over its records, in order, until a case resets the input.
+	func drain_records() -> void:
+		var queued := records
+		records = []
+		for record in queued:
+			if record[0] == KeyboardPass.ESCAPE_CODE:
+				escapes += 1
+				sim.escape_input_reset()
+			else:
+				picks.append(record[1])
+				presenter.send_pick(record[1])
+			if bool(sim.take_input_reset()):
+				return
 
 
 func before_each() -> void:
@@ -351,6 +360,7 @@ func _ring_frame(presenter: DeployPresenter, ring: KeyboardPass,
 		legs: DeployRingLegs) -> void:
 	if presenter.is_open() and presenter.is_input_pass_through():
 		ring.drain(legs)
+		legs.drain_records()
 
 
 # The keys under DEATH (engine world::pass_through_close_axis carries the key
@@ -507,6 +517,7 @@ func test_a_dead_players_deploy_key_picks_with_the_deploy_screen_closed() -> voi
 	ring.push(_key_down(KEY_X))
 	# STAT's word holds for the whole screen: its input frame drains the ring.
 	ring.drain(legs)
+	legs.drain_records()
 	assert_eq(legs.picks.size(), 1, "the dead player's X queued one pick")
 	assert_eq(legs.picks[0] if not legs.picks.is_empty() else -1, 0, "the Default Spawn's")
 	assert_false(presenter.is_open(), "the pick opens no screen")

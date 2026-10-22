@@ -106,6 +106,11 @@ public:
 	// carries the witness). Kept across a teardown, as the shell installs it once; unset,
 	// the frame head's read holds for the frame.
 	void set_menu_screen_probe(const Callable &p_probe) { menu_screen_probe_ = p_probe; }
+	// The shell's arms for the records it owns, called as (code, first argument) when the
+	// update's drain reaches one: the escape row's (code 18, the Escape action) and the
+	// deploy pick's (input event 12, its pick). Kept across a teardown, as the shell installs
+	// it once; unset, those records do nothing.
+	void set_record_leg(const Callable &p_leg) { record_leg_ = p_leg; }
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	// Drop the trigger latches (the presenter's reset-state path). The
@@ -160,6 +165,10 @@ public:
 	// or HUD row's as its record (controls::PlayerActionPoll::key_events and
 	// embedder_row carry the witness).
 	void queue_row_event(int p_code, bool p_signed, int p_key);
+	// The special-key chain's deploy pick (input event 12, its parameter the record's first
+	// argument), queued in key order with the rows' events (the shell's KeyboardPass):
+	// a record of the update's drain like theirs (controls::KeyRowEvent carries the witness).
+	void queue_pick_event(int p_param);
 	// The keyboard pass's release pass, ahead of its first dequeue: each key whose
 	// press latch is set and that reads up queues its release row's event for the
 	// next device sample (engine controls::BindingSet::release_pass carries the
@@ -272,6 +281,7 @@ private:
 	// (set_menu_screen_probe).
 	Callable keyboard_pass_;
 	Callable menu_screen_probe_;
+	Callable record_leg_;
 	// This display frame sent the Scroll Lock turn-off (D-NET-563): the keyboard state reads
 	// it only once the window's messages are read, so the frame's later samples read the word
 	// off and send no second one.

@@ -302,10 +302,11 @@ bool test_to_special_dispatches_its_key_events() {
 bool test_spectator_rows_fire_on_their_events() {
 	PlayerActions actions;
 	QueuedKeys keys;
-	keys.hold("IncSpectatorTarget");
-	const std::vector<KeyRowEvent> events{key_row("DecSpectatorTarget", 0),
-			key_row("CycleSpectatorMode", 0), key_row("DecSpectatorTarget", 0)};
-	auto requests = actions.poll_spectator(keys, true, events);
+	PlayerActionPoll dead = kLive;
+	dead.death_screen = true;
+	dead.key_events = {key_row("DecSpectatorTarget", 0), key_row("CycleSpectatorMode", 0),
+			key_row("DecSpectatorTarget", 0)};
+	const auto requests = actions.poll(keys, dead).requests;
 	CHECK(requests.size() == 3 && requests[0].action == Action::Spectate &&
 			requests[0].value == 502 && requests[1].value == 500 && requests[2].value == 502);
 	// Each is a record of the update's drain by its code, which maps back to its request
@@ -314,8 +315,49 @@ bool test_spectator_rows_fire_on_their_events() {
 	const auto back = player_action_request(InputEventRecord{501, 0, 0, 0, false,
 			InputEventOrigin::Device});
 	CHECK(back && back->action == Action::Spectate && back->value == 501 && back->code == 501);
-	CHECK(actions.poll_spectator(keys, true).empty());
-	CHECK(actions.poll_spectator(keys, false, events).empty());
+	CHECK(actions.poll_spectator(keys, true).empty()); // no off-keyboard arm held
+	PlayerActionPoll idle = dead;
+	idle.active = false;
+	CHECK(actions.poll(keys, idle).requests.empty());
+	return true;
+}
+
+// The special-key chain's deploy pick (input event 12, its pick the event's first argument)
+// and the escape row's event (18) are the embedder's records in key order with the action
+// rows', the pick's argument on its record; on the death screen the spectator rows' events
+// (500..502) are records in the same order, and off it (or with gameplay input down) they
+// fire nothing.
+// [orig: Input_HandleSpecialKeys @0x49c5c0 - Input_QueueEvent(12, key - 65 + 1, 0, 0)
+//  @0x49ca73; Input_ProcessKeyboardEvents @0x49d1f0 - the scan's queue @0x49d42f / @0x49d488;
+//  Input_HandleActionBinding @0x49AD40 - cases 500 @0x49bd58, 502 @0x49bd89]
+bool test_picks_escape_and_spectator_rows_keep_the_key_order() {
+	PlayerActions actions;
+	QueuedKeys keys;
+	PlayerActionPoll gate = kLive;
+	gate.embedder_row = [](int code) { return code == 12 || code == 18; };
+	const KeyRowEvent pick{12, false, 0, false, 3};
+	gate.key_events = {key_row("Knife", '1'), pick, KeyRowEvent{18, false, 0x1B, false},
+			key_row("Primary", '3')};
+	auto frame = actions.poll(keys, gate);
+	CHECK(frame.requests.size() == 4 && frame.requests[0].code == code_of("Knife") &&
+			frame.requests[1].action == Action::EmbedderRow && frame.requests[1].code == 12 &&
+			frame.requests[1].value == 3 && frame.requests[2].action == Action::EmbedderRow &&
+			frame.requests[2].code == 18 && frame.requests[2].value == 0 &&
+			frame.requests[3].code == code_of("Primary"));
+	PlayerActionPoll dead = gate;
+	dead.death_screen = true;
+	dead.key_events = {key_row("DecSpectatorTarget", 0), pick, key_row("CycleSpectatorMode", 0)};
+	frame = actions.poll(keys, dead);
+	CHECK(frame.requests.size() == 3 && frame.requests[0].action == Action::Spectate &&
+			frame.requests[0].code == 502 && frame.requests[1].code == 12 &&
+			frame.requests[2].action == Action::Spectate && frame.requests[2].value == 500);
+	PlayerActionPoll alive = gate;
+	alive.key_events = {key_row("CycleSpectatorMode", 0)};
+	CHECK(actions.poll(keys, alive).requests.empty());
+	PlayerActionPoll idle = dead;
+	idle.active = false;
+	idle.key_events = {key_row("CycleSpectatorMode", 0)};
+	CHECK(actions.poll(keys, idle).requests.empty());
 	return true;
 }
 
@@ -1014,6 +1056,7 @@ int main() {
 			test_event_rows_fire_once_per_event, test_the_chain_takes_digit_keys,
 			test_reload_medic_and_respawn_fire_on_their_events, test_embedder_rows_keep_the_key_order,
 			test_to_special_dispatches_its_key_events, test_spectator_rows_fire_on_their_events,
+			test_picks_escape_and_spectator_rows_keep_the_key_order,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
 			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,
 			test_held_use_runs_the_arm_every_frame, test_use_held_is_the_hold_the_chain_reads,

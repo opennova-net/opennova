@@ -304,7 +304,15 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 			continue;
 		}
 		if (gate.embedder_row && gate.embedder_row(event.code)) {
-			frame.requests.push_back({Action::EmbedderRow, 0, event.code, event.sign});
+			frame.requests.push_back({Action::EmbedderRow, event.param, event.code, event.sign});
+			continue;
+		}
+		// The death screen's spectator rows (codes 500..502), whose scan admits them only
+		// there [orig: Input_HandleActionBinding @0x49AD40 - cases 500 @0x49bd58, 501
+		// @0x49bd67, 502 @0x49bd89].
+		if (event.code >= 500 && event.code <= 502) {
+			if (gate.death_screen && gate.active && gate.simulation_available)
+				frame.requests.push_back({Action::Spectate, event.code, event.code, event.sign});
 			continue;
 		}
 		if (event.code == medic_code) {
@@ -366,7 +374,7 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 }
 
 std::vector<PlayerActionRequest> PlayerActions::poll_spectator(const PlayerActionSource &source,
-		bool active, const std::vector<KeyRowEvent> &events) {
+		bool active) {
 	// [orig: rows 110 / 111 / 112 -> Input_HandleActionBinding cases 500
 	//  @0x49bd58, 501 @0x49bd67, 502 @0x49bd89]
 	static constexpr struct {
@@ -378,13 +386,6 @@ std::vector<PlayerActionRequest> PlayerActions::poll_spectator(const PlayerActio
 		{"DecSpectatorTarget", 502},
 	};
 	std::vector<PlayerActionRequest> out;
-	// The keyboard pass's events first, one each in their order (poll()).
-	for (const KeyRowEvent &event : events) {
-		if (event.release || !active) continue;
-		for (const auto &row : kSpectatorRows)
-			if (event.code == row.code)
-				out.push_back({Action::Spectate, row.code, row.code, event.sign});
-	}
 	for (std::size_t i = 0; i < std::size(kSpectatorRows); ++i) {
 		const bool down = source.held_off_keyboard(kSpectatorRows[i].token);
 		if (world::latched_key_edge(down, active, spectator_was_down_[i]))

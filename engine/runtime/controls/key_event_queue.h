@@ -101,16 +101,21 @@ private:
 	uint8_t write_ = 0;
 };
 
-// One binding event the keyboard pass queues for a row (Input_QueueEvent's id: the row's
-// dispatch code, the sign in bit 31), with the key it came from: the press scan's event key
-// (key_event_scan_code), or the latched key of the release pass (BindingSet::release_pass).
+// One event the keyboard pass queues (Input_QueueEvent's id: the dispatch code, the sign in
+// bit 31), in key order: a row's, with the key it came from (the press scan's event key,
+// key_event_scan_code, or the latched key of the release pass, BindingSet::release_pass), its
+// arguments 0; or the special-key chain's deploy pick (event 12), its pick in the first
+// argument (`param`: a spawn zone's letter index + 1, 0 for the default spawn or a RESTART,
+// 0xFFFE for the auto team).
 // [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the release pass's queue @0x49d2b1, the
-//  press scan's @0x49d42f / @0x49d488]
+//  press scan's @0x49d42f / @0x49d488; Input_HandleSpecialKeys @0x49c5c0 - Input_QueueEvent(12,
+//  ...) @0x49c658 (0), @0x49c8a3 (0), @0x49ca14 (65534), @0x49ca73 (key - 65 + 1)]
 struct KeyRowEvent {
 	int code = -1;
 	bool sign = false;
 	int key = 0;
 	bool release = false;
+	int32_t param = 0;
 };
 
 // The keyboard pass's key-press latch (g_KeyPressLatch), one byte per key: the pass sets the
