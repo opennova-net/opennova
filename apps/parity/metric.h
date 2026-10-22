@@ -37,7 +37,9 @@ struct MetricValue {
 	double distance = 0.0;
 	double floor = 0.0;
 	// False when a side has too few samples to compare. With RR short the metric
-	// is skipped; with the compared run short it fails unless the A/A was too.
+	// is skipped; with the compared run short it fails unless the A/A was too. A
+	// rule whose floor is a phase slice on either side (steady.distribution_floor)
+	// sets `reference_short` for a short side of either run, so it skips.
 	bool comparable = true;
 	bool reference_short = false;
 	std::string subject; // the compared run's value, rendered

@@ -756,6 +756,10 @@ foreach ($case in $selectedCases) {
         $caseResult.status = "SCENARIO_FAIL"
         Write-Host "PARITY_SUITE_NOTE case=$($case.id) not judged: the reference did not play the scenario"
     }
+    elseif ($haveReference -and $subjects.Count -eq 0 -and $scenarioFailed.Count -gt 0) {
+        $caseResult.status = "SCENARIO_FAIL"
+        Write-Host "PARITY_SUITE_NOTE case=$($case.id) not judged: every subject failed its scenario"
+    }
     elseif ($haveReference -and $subjects.Count -gt 0) {
         $report = Join-Path $suiteDir "$($case.id).verdict.json"
         $parityArgs = @("--items", $itemsPath, "--out", $report, "--evidence", $Evidence)

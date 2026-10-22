@@ -10,6 +10,7 @@
 
 #include "normalization.h"
 
+#include <base/io/tick_rate.h>
 #include <net/npwire/flat_tlv.h>
 
 #include <algorithm>
@@ -37,6 +38,12 @@ bool stable_identity(char dir, uint16_t identity) {
 	if (dir == 'C')
 		return std::find(std::begin(kStableC), std::end(kStableC), identity) != std::end(kStableC);
 	return std::find(std::begin(kStableS), std::end(kStableS), identity) != std::end(kStableS);
+}
+
+// The reload round trip: the joiner's C2S 0x25 request and the host's S2C 0x49 echo
+// (count.reload_echo).
+bool reload_echo_identity(char dir, uint16_t identity) {
+	return (dir == 'C' && identity == 0x025) || (dir == 'S' && identity == 0x049);
 }
 
 MetricValue metric(char dir, const char *name, std::string key, const char *code) {
@@ -205,7 +212,18 @@ void compare_tags(
 
 		MetricValue count = metric(dir, "tag_count", key, "COUNT_MISMATCH");
 		const double cadence = sa.count < 20 ? periodic_cadence_ms(sa.times, end_a) : 0.0;
-		if (cadence > 0.0) {
+		if (reload_echo_identity(dir, identity)) {
+			// The reload request re-arms on its own echo: past the first re-send the
+			// count is the round trip's phase (count.reload_echo).
+			static_assert(has_normalization("count.reload_echo"));
+			const size_t a_class = std::min<size_t>(sa.count, 2);
+			const size_t b_class = std::min<size_t>(sb.count, 2);
+			count.distance = a_class == b_class ? 0.0 : 1.0;
+			count.floor = 0.0;
+			count.subject = std::to_string(sb.count);
+			count.reference = std::to_string(sa.count);
+			count.detail = "a lone request against one its echo re-armed (1 against 2 or more)";
+		} else if (cadence > 0.0) {
 			const uint64_t first = *std::min_element(sb.times.begin(), sb.times.end());
 			const double span_ms = end_b > first ? double(end_b - first) / 1e6 : 0.0;
 			cadence_count_metric(count, double(sa.count), cadence, double(sb.count), span_ms);
@@ -221,16 +239,35 @@ void compare_tags(
 			const bool joined = join_a != 0 && join_b != 0;
 			const uint64_t first_a = joined ? std::min(join_a, own_a) : own_a;
 			const uint64_t first_b = joined ? std::min(join_b, own_b) : own_b;
-			const uint64_t span = std::min(end_a - first_a, end_b - first_b);
-			auto within = [span](const std::vector<uint64_t> &times, uint64_t first) {
+			auto within = [](const std::vector<uint64_t> &times, uint64_t first, uint64_t span) {
 				return double(std::count_if(times.begin(), times.end(),
 						[&](uint64_t t) { return t >= first && t - first <= span; }));
 			};
-			const double span_ms = double(span) / 1e6;
-			count_metric(count, within(sa.times, first_a), span_ms, within(sb.times, first_b),
-					span_ms);
-			count.detail += " over " + std::to_string(int64_t(span_ms / 1000.0)) +
-					(joined ? " s from each run's join" : " s from each run's first");
+			const bool from_join = joined && own_a >= join_a && own_b >= join_b;
+			if ((rr.info.ends_session || other.info.ends_session) && from_join) {
+				// A scenario that ends the joiner's session stops a stream of the slot
+				// at the disconnect, a readiness wait after the join: each run counts
+				// from its join to its own coverage end, over that span; a load-phase
+				// stream (one before the join) keeps the common span
+				// (window.session_end).
+				static_assert(has_normalization("window.session_end"));
+				auto covered = [](const RunFacts &run, uint64_t end, uint64_t first) {
+					const uint64_t until = std::min(end, coverage_end(run));
+					return until > first ? until - first : 0;
+				};
+				const uint64_t span_a = covered(rr, end_a, first_a);
+				const uint64_t span_b = covered(other, end_b, first_b);
+				count_metric(count, within(sa.times, first_a, span_a), double(span_a) / 1e6,
+						within(sb.times, first_b, span_b), double(span_b) / 1e6);
+				count.detail += " over each run's covered play from its join";
+			} else {
+				const uint64_t span = std::min(end_a - first_a, end_b - first_b);
+				const double span_ms = double(span) / 1e6;
+				count_metric(count, within(sa.times, first_a, span), span_ms,
+						within(sb.times, first_b, span), span_ms);
+				count.detail += " over " + std::to_string(int64_t(span_ms / 1000.0)) +
+						(joined ? " s from each run's join" : " s from each run's first");
+			}
 		} else {
 			count_metric(count, double(sa.count), common_ms, double(sb.count), common_ms);
 		}
@@ -433,7 +470,8 @@ void tally(Distribution &d, const std::string &key) {
 }
 
 // One sample moves a key's share by 1 / n against the max(0.08, RR / 2) unit, so
-// under 13 samples one sample's phase alone crosses a unit (steady.distribution_floor).
+// under 13 samples one sample's phase alone crosses a unit, on either side
+// (steady.distribution_floor).
 constexpr size_t kDistributionMinSamples = 13;
 
 // Share delta in tolerance units: max(0.08, RR share / 2) is one unit.
@@ -447,10 +485,11 @@ MetricValue distribution_metric(char dir, const char *name, const char *code, co
 	value.reference =
 			std::to_string(a.total) + " samples, " + std::to_string(a.counts.size()) + " keys";
 	if (a.total < kDistributionMinSamples || b.total < kDistributionMinSamples) {
+		// Either side short is the window's phase, never a finding: the row skips.
 		value.comparable = false;
-		value.reference_short = a.total < kDistributionMinSamples;
+		value.reference_short = true;
 		value.code = "GAMEPLAY_DISTRIBUTION_UNEXERCISED";
-		value.detail = "fewer than 13 samples after the first gameplay packet";
+		value.detail = "fewer than 13 samples after the first gameplay packet on a side";
 		return value;
 	}
 	std::set<std::string> keys;
@@ -878,6 +917,12 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 	return out;
 }
 
+// The scoreboard boundary that sends the integrity challenges: g_ScoreboardBroadcastTimer
+// counts from 0 and fires past 0x136 [orig: Server_TickUpdate @0x51D7E0 (the reset
+// register @0x51D807, the compare @0x51D901, the challenge call @0x51D912, the reset
+// @0x51D917)], every 311 ticks of 16 ms.
+constexpr uint64_t kIntegrityBoundaryNs = 311ull * uint64_t(io::kTickMs) * 1000000ull;
+
 // A PUNT for a failed CRC: the reliable H:0x03 (identity 0x103) description.
 size_t integrity_punts(const RunFacts &run) {
 	size_t n = 0;
@@ -962,8 +1007,14 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 		}
 	}
 
-	// The two families alternate on one phase, each challenge immediately after a
-	// transient S2C 0x16 in the same packet.
+	// The two families are one process-global toggle flipped at every scoreboard
+	// boundary, each challenge immediately after a transient S2C 0x16 in the same
+	// packet [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 (the toggle read
+	// @0x50859E, the flip @0x50868E)], sent only to a slot in state 6 whose body's +0x24
+	// bit 2 is clear (@0x508584, @0x508594..0x508598): within one mission a challenge's
+	// family is its predecessor's flipped once per boundary between them; an S2C 0x25
+	// ends the mission and the count with it (integrity.family_toggle).
+	static_assert(has_normalization("integrity.family_toggle"));
 	auto stream_faults = [](const RunFacts &run, size_t &repeats, size_t &ungrouped,
 								 size_t &challenges) {
 		repeats = ungrouped = challenges = 0;
@@ -972,15 +1023,24 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 			if (packet.dir == 'S')
 				server_packets.emplace(packet.frame, &packet);
 		uint16_t previous = 0;
+		uint64_t previous_ns = 0;
 		for (const wire::ParityEvent &event : run.trace.events) {
 			const uint16_t identity = event_identity(event);
+			if (event.dir == 'S' && identity == 0x025 && run.in_comparison(event.ts_ns))
+				previous = 0;
 			if (event.dir != 'S' || (identity != 0x030 && identity != 0x031) ||
 					!run.in_comparison(event.ts_ns))
 				continue;
 			++challenges;
-			if (previous == identity)
-				++repeats;
+			if (previous != 0) {
+				const double boundaries =
+						double(event.ts_ns - previous_ns) / double(kIntegrityBoundaryNs);
+				const bool flipped = std::llround(boundaries) % 2 != 0;
+				if ((previous != identity) != flipped)
+					++repeats;
+			}
 			previous = identity;
+			previous_ns = event.ts_ns;
 			const auto owner = server_packets.find(event.frame);
 			bool grouped = false;
 			if (owner != server_packets.end()) {
@@ -997,8 +1057,9 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 	stream_faults(other, rb, ub, cb);
 	MetricValue alternation = metric('B', "integrity_alternation", "", "INTEGRITY_NOT_ALTERNATING");
 	alternation.distance = double(rb);
-	alternation.subject = std::to_string(rb) + "/" + std::to_string(cb) + " repeats";
-	alternation.reference = std::to_string(ra) + "/" + std::to_string(ca) + " repeats";
+	alternation.subject = std::to_string(rb) + "/" + std::to_string(cb) + " off the toggle";
+	alternation.reference = std::to_string(ra) + "/" + std::to_string(ca) + " off the toggle";
+	alternation.detail = "challenges whose family is not the boundary toggle's, within one mission";
 	out.push_back(alternation);
 	MetricValue scoreboard = metric('B', "integrity_scoreboard", "", "INTEGRITY_SCOREBOARD_ORDER");
 	scoreboard.distance = double(ub);

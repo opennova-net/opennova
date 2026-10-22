@@ -84,10 +84,21 @@ std::vector<std::string> initial_groups(const RunFacts &run, char dir, bool sync
 		kept.tags.clear();
 		bool static_page = false;
 		size_t loadout_replies = 0;
+		// The window's last S2C packet carries the join bundle's own 0x0A; a second one
+		// behind it is the per-slot block's, there by the C2S 0x0B's arrival against the
+		// send holdoff (initial.S.join_tail).
+		static_assert(has_normalization("initial.S.join_tail"));
+		const bool closing = dir == 'S' && carries_low_tag(packet, gameplay_identity(dir));
+		bool gameplay_seen = false;
 		for (const wire::ParityWireRecord &record : packet.records) {
 			if (dir == 'S' && record.full_tag == 0x010) {
 				static_page = true;
 				continue;
+			}
+			if (closing && record.full_tag == gameplay_identity(dir)) {
+				if (gameplay_seen)
+					continue;
+				gameplay_seen = true;
 			}
 			if (dir == 'S' && record.full_tag == 0x05A) {
 				++loadout_replies;

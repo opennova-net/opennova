@@ -1264,6 +1264,28 @@ void test_session_end() {
 	const Case undeclared_sooner = judge_case(punt_at(scripted(1), kPunt),
 			punt_at(scripted(2), kPunt), punt_at(scripted(3), kPunt - 1500 * kMs));
 	expect_row(undeclared_sooner, 'S', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
+
+	// A stream's count runs from each run's join to its own punt over that span: a punt
+	// a readiness wait later (x6's kick: 15.26 s from the join on RR, 14.36 s on RR-aa,
+	// 16.82 s on OO) carries more of the same stream, not a faster one.
+	const Case later = judge_case(punt_at(scripted(1), kPunt), punt_at(scripted(2), kPunt),
+			punt_at(scripted(3), kPunt + 1500 * kMs), "RO", false, true);
+	expect_row(later, 'C', "tag_count", "0x0c:0", "pass");
+	const Case undeclared_later = judge_case(punt_at(scripted(1), kPunt),
+			punt_at(scripted(2), kPunt), punt_at(scripted(3), kPunt + 1500 * kMs));
+	expect_row(undeclared_later, 'C', "tag_count", "0x0c:0", "fail", "COUNT_MISMATCH");
+	// The same span sending the stream twice as often still fails.
+	wire::ParityTrace doubled = punt_at(scripted(3), kPunt);
+	std::vector<wire::ParityEvent> events;
+	for (const wire::ParityEvent &event : doubled.events) {
+		events.push_back(event);
+		if (event.dir == 'C' && event.full_tag == 0x00C)
+			events.push_back(event);
+	}
+	doubled.events = std::move(events);
+	const Case faster = judge_case(punt_at(scripted(1), kPunt), punt_at(scripted(2), kPunt),
+			std::move(doubled), "RO", false, true);
+	expect_row(faster, 'C', "tag_count", "0x0c:0", "fail", "COUNT_MISMATCH");
 }
 
 void test_aa_widening() {
@@ -1476,6 +1498,65 @@ void test_integrity() {
 		const Case c = judge_case(scripted(1), scripted(2), subject);
 		expect_row(c, 'B', "integrity_alternation", "", "fail", "INTEGRITY_NOT_ALTERNATING");
 	}
+	{
+		// The family is one toggle flipped at every boundary, a slot challenged only
+		// while it plays (integrity.family_toggle): a boundary the joiner sat out
+		// (dead) flips it unseen, so two challenges two boundaries apart share a family;
+		// a host that flipped only on its sends would not.
+		wire::ParityTrace skipped = scripted(3);
+		erase_events(skipped, 'S', 0x030);
+		expect_row(judge_case(scripted(1), scripted(2), skipped), 'B', "integrity_alternation",
+				"", "pass");
+		wire::ParityTrace per_send = scripted(3);
+		erase_events(per_send, 'S', 0x030);
+		for_events(per_send, 'S', 0x031, [](wire::ParityEvent &e) {
+			if (e.ts_ns > 15 * kSec && e.ts_ns < 17 * kSec)
+				e.full_tag = 0x030;
+		});
+		expect_row(judge_case(scripted(1), scripted(2), per_send), 'B', "integrity_alternation",
+				"", "fail", "INTEGRITY_NOT_ALTERNATING");
+		// A mission change (its S2C 0x25) ends the count: the next mission's first
+		// family is free (x6's round RO retail host repeated across it).
+		auto across = [](bool reset) {
+			wire::ParityTrace trace = scripted(3);
+			for_events(trace, 'S', 0x030, [](wire::ParityEvent &e) {
+				if (e.ts_ns < 12 * kSec)
+					e.full_tag = 0x031;
+			});
+			for_events(trace, 'S', 0x031, [](wire::ParityEvent &e) {
+				if (e.ts_ns > 15 * kSec && e.ts_ns < 17 * kSec)
+					e.full_tag = 0x030;
+			});
+			if (reset)
+				splice(trace, 'S', 0x025, 8 * kSec, {});
+			return trace;
+		};
+		expect_row(judge_case(scripted(1), scripted(2), across(true)), 'B',
+				"integrity_alternation", "", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), across(false)), 'B',
+				"integrity_alternation", "", "fail", "INTEGRITY_NOT_ALTERNATING");
+	}
+}
+
+// The reload request re-arms on its own echo (count.reload_echo): RR's 2 and RR-aa's 3
+// against a subject's 5 are the round trip's phase (retail held 2 to 6 over x1..x6);
+// a lone request whose echo never re-armed one is not.
+void test_reload_echo() {
+	auto reloads = [](uint32_t seed, int n) {
+		wire::ParityTrace trace = scripted(seed);
+		for (int i = 0; i < n; ++i) {
+			const uint64_t at = 9 * kSec + uint64_t(i) * 190 * kMs;
+			splice(trace, 'C', 0x025, at, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+			splice(trace, 'S', 0x049, at + 80 * kMs, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		}
+		return trace;
+	};
+	const Case more = judge_case(reloads(1, 2), reloads(2, 3), reloads(3, 5));
+	expect_row(more, 'C', "tag_count", "0x25:0", "pass");
+	expect_row(more, 'S', "tag_count", "0x49:0", "pass");
+	const Case lone = judge_case(reloads(1, 2), reloads(2, 3), reloads(3, 1));
+	expect_row(lone, 'C', "tag_count", "0x25:0", "fail", "COUNT_MISMATCH");
+	expect_row(lone, 'S', "tag_count", "0x49:0", "fail", "COUNT_MISMATCH");
 }
 
 void test_milestones_and_rates() {
@@ -2309,6 +2390,30 @@ void test_reply_rules() {
 
 void test_order_rules() {
 	{
+		// A joiner's first S2C 0x40s ride the join bundle or follow the per-slot block a
+		// boundary later, by the C2S 0x0B's arrival (order.S.0x40): x6's aikill RR-aa
+		// and late RR carry them after the first gameplay frame, their partners before.
+		static_assert(first_order_excluded('S', 0x040));
+		auto overlay_at = [](uint32_t seed, uint64_t at) {
+			wire::ParityTrace trace = scripted(seed);
+			splice(trace, 'S', 0x040, at, bytes({ 1, 0, 0, 0, 0, 0, 0 }));
+			return trace;
+		};
+		expect_row(judge_case(overlay_at(1, 1900 * kMs), overlay_at(2, 1900 * kMs),
+						   overlay_at(3, 2500 * kMs)),
+				'S', "first_order", "", "pass");
+		// The join packet keys its 0x0A once: a second behind the bundle is the
+		// per-slot block's, by the same phase (initial.S.join_tail).
+		wire::ParityTrace tail = scripted(3);
+		for (wire::ParityPacket &p : tail.packets)
+			if (p.dir == 'S' && carries_low_tag(p, 0x00A)) {
+				p.tags.push_back(0x00A);
+				p.records.push_back(p.records.front());
+				break;
+			}
+		expect_row(judge_case(scripted(1), scripted(2), tail), 'S', "initial_grouping", "", "pass");
+	}
+	{
 		// S2C 0x46 is no milestone (the scoreboard's phase); C2S 0x09 -> S2C 0x2C is.
 		wire::ParityTrace early = scripted(3), late = scripted(3);
 		for_events(early, 'S', 0x046, [](wire::ParityEvent &e) { e.frame = 0; });
@@ -2566,6 +2671,14 @@ void test_steady_rules() {
 				"steady_group_distribution", "", "skip");
 		expect_row(judge_case(trimmed(1, 14), trimmed(2, 14), trimmed(3, 14)), 'S',
 				"steady_group_distribution", "", "pass");
+		// One side short skips whichever run it is: x4..x6's kick retail runs held 10 to
+		// 14 steady packets before the punt, so a subject under 13 against an RR over
+		// it is the punt's phase, not an unexercised stream.
+		constexpr size_t kAll = ~size_t(0);
+		expect_row(judge_case(trimmed(1, kAll), trimmed(2, kAll), trimmed(3, 13)), 'S',
+				"steady_group_distribution", "", "skip");
+		expect_row(judge_case(trimmed(1, 13), trimmed(2, kAll), trimmed(3, kAll)), 'S',
+				"steady_group_distribution", "", "skip");
 	}
 }
 
@@ -2589,6 +2702,7 @@ int main() {
 	test_steady_and_envelope();
 	test_handshake();
 	test_integrity();
+	test_reload_echo();
 	test_milestones_and_rates();
 	test_state();
 	test_evidence();

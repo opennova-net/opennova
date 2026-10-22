@@ -291,6 +291,18 @@ inline constexpr Normalization kNormalizations[] = {
 	{ "order.S.0x6f", MaskKind::FirstOrder, 'S', 0x06F, "ZONE_TIMER_VALUE", 0,
 			"the 1 Hz Server_UpdateCaptureZoneEntities pass (@0x519690): its first send races "
 			"the joiner's 0x28/0x23 round trip" },
+	{ "order.S.0x40", MaskKind::FirstOrder, 'S', 0x040, "OVERLAY_STATE", 0,
+			"a joiner's first 0x40s are the tick head's overlay walk (Server_TickUpdate: "
+			"Server_UpdateAllActivePlayerSlots called @0x51D88B, its visit's "
+			"Server_BuildOverlayStateForPlayer @0x5188D6), which runs ahead of the receive "
+			"pump that takes the C2S 0x0B (@0x51D895; Server_OnPlayerJoin's bundle ends with "
+			"its 0x3E @0x51AAEE), and the per-slot block sends the 0x0A / 0x57 behind the "
+			"connection's send holdoff (@0x51E3D6): a bundle that waits for a boundary leaves "
+			"with the next tick's walk 0x40s ahead of that block's 0x0A / 0x57, one that leaves "
+			"at once has the block's 0x0A / 0x57 first and the 0x40s a boundary later. x6's "
+			"01tr-coop-aikill RR-aa (5.4 ms from the 0x0B to the bundle) and tdh-i3a-tdm-late "
+			"RR's late joiner (9.5 ms) carry the 0x57 ahead of the 0x40, their partners (180 "
+			"and 195 ms) the 0x40 first" },
 	{ "order.C.0x20", MaskKind::FirstOrder, 'C', 0x020, "ENTITY_CHECKSUM_REPLY", 0,
 			"answers S2C 0x30, whose half of the 0x30/0x31 alternation is process-global" },
 	{ "order.C.0x21", MaskKind::FirstOrder, 'C', 0x021, "CHECKSUM_REPLY", 0,
@@ -364,18 +376,31 @@ inline constexpr Normalization kNormalizations[] = {
 	{ "initial.S.0x5a.reply", MaskKind::Field, 'S', 0x05A, "loadout reply boundary", 0,
 			"the host answers each C2S 0x2F loadout submit with an S2C 0x5A "
 			"(NapiNPServerMsg_HandlePlayerLoadout @0x515790, Server_SendWeaponSlotListToPlayer "
-			"called @0x515F95, its send @0x502948) on its next boundary, so whether a joiner's "
+			"called @0x515F95, its send @0x502943) on its next boundary, so whether a joiner's "
 			"two 0x5A share a packet follows how its send pump batched the two 0x2F "
 			"(initial.C.pump_boundary): x5's 03tr-dm RR joiner sent them 3.1 s apart and the "
 			"0x5A answering the lone first one left alone, RR-aa sent both in one packet and "
 			"got both together. Each 0x5A stands as its own element of the S2C initial "
 			"grouping, ahead of its packet's other records" },
+	{ "initial.S.join_tail", MaskKind::Field, 'S', 0x00A, "join packet tail", 0,
+			"the S2C initial window closes on the packet that carries the join bundle "
+			"(Server_OnPlayerJoin @0x51A680, its last send the 0x3E @0x51AAEE), whose own "
+			"0x0A opens the gameplay stream; what rides behind the bundle is the 0x0B's "
+			"arrival against the send holdoff (@0x51E3D6): the next tick's overlay 0x40s "
+			"(order.S.0x40) when the bundle waited for a boundary, the per-slot block's own "
+			"0x0A when it left in the same frame (x6's 01tr-coop-aikill: RR's packet ends "
+			"[0x3E, 0x40] 180 ms after the 0x0B, RR-aa's [0x3E, 0x0A] 5.4 ms after). That "
+			"packet keys its 0x0A once" },
 	{ "steady.distribution_floor", MaskKind::Field, '*', 0, "share distribution samples", 0,
 			"a share distribution's tolerance unit is max(0.08, RR share / 2): one sample moves a "
 			"key's share by 1 / n, so under 13 samples (1 / 13 < 0.08) one sample's phase alone "
 			"crosses a unit. x5's kick (11 to 14 steady packets before the punt) read 1.21 units "
 			"between RR and RR-aa on S2C. A distribution compares at 13 samples or more on both "
-			"sides" },
+			"sides, and one side under it skips the row whichever run it is: how many steady "
+			"packets precede a punt is its phase, the retail runs of x4..x6's kick holding 10 "
+			"to 14 on C2S and S2C alike (x4 RR 10 against RR-aa 13 on C2S, x5 RR 11 against "
+			"RR-aa 14 on S2C), so a subject's 10 to 12 against an RR at 13 (x6) is retail's "
+			"own range; a subject with no steady gameplay still fails gameplay_cadence" },
 	{ "initial.C.pump_boundary", MaskKind::GroupBoundary, 'C', 0, "group boundary", 0,
 			"the per-frame send pump (PumpClientProtocolSend @0x42c4bc) flushes what each "
 			"frame queued; whether the game-start 0x4E (@0x42e1d9) and Game_StartMission's "
@@ -471,7 +496,12 @@ inline constexpr Normalization kNormalizations[] = {
 			"never read off the capture. Its rates (bandwidth, gameplay_cadence) count that "
 			"covered play over its own length, since the window's rate is the punt's timing: "
 			"x5's kick covered 1.08 to 1.29 s of a 45 s window, S2C 75 B/s on RR against 90 on "
-			"RR-aa over the window and 3149 against 3451 over the play" },
+			"RR-aa over the window and 3149 against 3451 over the play. A stream's count "
+			"(window.tag_stream_anchor) stops at the same record, which lands a readiness wait "
+			"after the join, so each run counts from its join to its own coverage end over that "
+			"span's length: x6's kick joiner sent C2S 0x0C 78 times over RR's 15.26 s from the "
+			"join to the punt and 73 over RR-aa's 14.36 s, 5 apart over a common span and 0.4 "
+			"apart over each run's own" },
 	{ "window.dead_joiner_uplink", MaskKind::Field, 'C', 0x00C, "uplink gap while dead", 0,
 			"a joiner whose own body has no health sends no C2S 0x0C: the uplink build "
 			"returns nothing on a zero health word or the dead flag "
@@ -550,6 +580,36 @@ inline constexpr Normalization kNormalizations[] = {
 			"host and no PUNT a reply RR never witnessed is witnessed. A row's CRC is a "
 			"corpus property, so RR-aa's rows of the same integrity profile join RR's "
 			"oracle" },
+	{ "integrity.family_toggle", MaskKind::Field, 'S', 0x030, "challenge family", 0,
+			"the 0x30 / 0x31 family is one process-global toggle that every scoreboard "
+			"boundary flips (Server_BroadcastWeaponSlotStateToPlayers @0x508540: the read "
+			"@0x50859E, the flip @0x50868E after the slot loop, its only writer), called each "
+			"311 ticks (Server_TickUpdate @0x51D912), while a slot takes its challenge only in "
+			"state 6 with a body whose +0x24 bit 2 is clear (@0x508584, @0x508594..0x508598): a "
+			"boundary the joiner spends outside that (x6's deaths) flips the family unseen, so "
+			"within one mission a challenge's family is its "
+			"predecessor's flipped once per boundary between them (x6's fragrespawn: RR, RR-aa "
+			"and RO's retail host skip two boundaries over the death and continue the family, "
+			"OO skips three and repeats it, both as the toggle runs). The boundary clock "
+			"restarts with each mission (Nbstat_StartupInit @0x4FDE41) after a load of its own "
+			"length, so the count does not carry across the S2C 0x25 that ends a mission "
+			"(Server_DisconnectAndResetAllPlayerSlots @0x516160, the send @0x516385): x6's "
+			"round RO retail host began its second mission on the family it ended the first "
+			"on, RR and RR-aa on the other" },
+	{ "count.reload_echo", MaskKind::Field, '*', 0, "C2S 0x25 / S2C 0x49 count", 0,
+			"a reload action queues its C2S 0x25 on a tick whose slot phase byte (+0x5A) has "
+			"bit 0 set and bit 0x80 clear, then sets 0x80 (WeaponAction_Reload @0x5430B0: "
+			"the tests @0x5430C0 / @0x5430C6, the send @0x543103, the latch @0x543108); the "
+			"host echoes every request to its sender as S2C 0x49 "
+			"(NapiNPServerMsg_HandleReloadRequest @0x514DF0, the sender's copy @0x514EE3) and "
+			"the local player's echo refills the clip and clears the latch "
+			"(NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 calling WeaponSlot_ReloadAmmo "
+			"@0x541720 @0x42C116, the clear @0x5417A2), so the action re-sends once per echo "
+			"that lands while it runs: past the first re-send the count is the round trip's "
+			"phase against the action. The self-grenade cases' retail runs of x1..x6 carry 2 "
+			"to 6 requests, one pass's RR and RR-aa up to 3 apart (x5's team switch 5 against "
+			"2), and never 1. The pair's counts compare as a lone request against a re-armed "
+			"one" },
 };
 
 inline constexpr size_t kNormalizationCount = sizeof(kNormalizations) / sizeof(kNormalizations[0]);
