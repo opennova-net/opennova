@@ -6,6 +6,7 @@
 // injects one, holds the logic tick and the run clock and moves the clock, so only a reader on the
 // process clock passes.
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -18,7 +19,11 @@
 #include <runtime/world/world.h>
 
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/peer_addr.h>
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_keys.h>
+#include <net/npwire/session_ping.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -376,6 +381,25 @@ void test_hold_nag_reads_the_process_clock() {
 	       "the next millisecond of clock re-nags it");
 }
 
+// D-NET-NEW-L8-37: a WR-clear 0x45 ClientPing's round trip is GetTickCount less its echoed MS.
+// The in-match peer echoes 70000; 300 ms of clock later, the logic tick and the run clock held,
+// the stored round trip is 300 ms (on the run clock it would be 0 less the stamp).
+// [orig: Nwu_HandlePing @0x623A70 - the key compare @0x623BC2, MS @0x623C2A, GetTickCount less
+//  MS into the rtt @0x623C9B]
+void test_session_ping_reads_the_process_clock() {
+	ClockHost host;
+	inmatch::NapiNPConnection &conn = host.conn();
+	conn.peer = PeerAddr{0x0100007Fu, 33217};
+	conn.server_sk = 0x5EEDF00Du;
+	host.clock += 300u; // the logic tick and the run clock hold
+	const std::vector<uint8_t> ping = nw_encode_outbound(SESSION_OPCODE_CLIENT_PING,
+			build_session_ping_body(conn.server_sk, /*wants_reply=*/false, 70000u));
+	const inmatch::HandleResult result =
+			inmatch::handle_server_datagram(host.ctx, conn.peer, ping.data(), ping.size());
+	expect(result.outbound.empty() && host.conn().session_ping_rtt_ms == 300u,
+	       "the WR-clear ping measures 300 ms on the clock");
+}
+
 } // namespace
 
 int main() {
@@ -387,6 +411,7 @@ int main() {
 	test_ticket_wait_reads_the_process_clock();
 	test_deploy_idle_reads_the_process_clock();
 	test_hold_nag_reads_the_process_clock();
+	test_session_ping_reads_the_process_clock();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "npruntime_host_process_clock: %d failure(s)\n", g_failures);
 		return 1;

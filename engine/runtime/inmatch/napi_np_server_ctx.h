@@ -327,8 +327,10 @@ struct NapiNPServerCtx {
 	// owner's HostConfig::clock_ms, which every embedder supplies (host_monotonic_milliseconds)
 	// and a test injects, installed ahead of the create; empty is the deterministic stand-in.
 	// The status report's UP-TIME, the S2C 0x58's uptime, the 0x81's UT and the S2C 0x02
-	// probe's tick read it, so a load and a held start count, as retail's do; the host's
-	// protocol timers stay on the run clock (host_run_duration_ms) (D-NET-NEW-L8-27).
+	// probe's tick read it, so a load and a held start count, as retail's do (D-NET-NEW-L8-27);
+	// so do the protocol timers (the ticket wait, the deploy-idle punt, the held joiner's
+	// re-nag, the session ping's round trip; D-NET-NEW-L8-34..37). The log devices' flush
+	// timers alone stay on the run clock (host_run_duration_ms): no peer sees them.
 	// [orig: Server_BuildStatusReport @0x530B84; NapiNPProtocol_SendServerInfoPacket @0x620657;
 	//  NetPacket_BuildPaddedTimestampPayload @0x502A4E; each a GetTickCount call]
 	std::function<uint32_t()> process_clock_ms;

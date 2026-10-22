@@ -1430,9 +1430,11 @@ namespace {
 // 0x45 ClientPing -> 0x85 ServerPing (WR set) or an RTT sample (WR clear). The
 // body is the receiver-local key dword then WR/MS TLVs (net/npwire/session_ping.h);
 // a mismatched key is dropped before anything else. The ping refreshes the reap
-// clock like an in-order session packet. [orig: Nwu_HandlePing @0x623A70 —
+// clock like an in-order session packet. The round trip is GetTickCount less the
+// echoed MS, the process clock (D-NET-NEW-L8-37). [orig: Nwu_HandlePing @0x623A70 —
 // active/drop gates @0x623B55, key compare @0x623BC2, WR @0x623BFF, MS @0x623C1A,
-// activity stamp @0x623C56, SendPing(conn, 0, MS) @0x623C6F, rtt store @0x623C9B]
+// activity stamp @0x623C56, SendPing(conn, 0, MS) @0x623C6F, GetTickCount less MS
+// into the rtt @0x623C9B]
 void handle_client_ping(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		const std::vector<uint8_t> &body, HandleResult &out) {
 	NapiNPConnection *conn = find_connection(ctx, peer);
@@ -1440,7 +1442,7 @@ void handle_client_ping(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			conn->phase < ConnectionPhase::Joined)
 		return;
 	(void)answer_session_ping(*conn, body, ctx.np_protocol.receive_clock_ms,
-			ctx.np_protocol.host_run_duration_ms, out.outbound);
+			host_tick_count_ms(ctx), out.outbound);
 }
 
 } // namespace
