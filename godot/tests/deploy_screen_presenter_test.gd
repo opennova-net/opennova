@@ -509,6 +509,85 @@ func test_a_dead_players_deploy_key_picks_with_the_deploy_screen_closed() -> voi
 	_assert_no_key_held()
 
 
+# A key-down event as the shell's key leg takes it: its label and its physical key.
+func _key_event(keycode: Key) -> InputEventKey:
+	var key := _key_down(keycode)
+	key.physical_keycode = keycode
+	return key
+
+
+# The round-over leg's session arm through the HUD's special-key chain (V-ROLL-N's
+# pin on D-HUD-45 / D-NET-NEW-LI-11): a listen host's session round ends (Objective
+# Co-op carries bit 0x20000, so its round-over leg is the end-of-round board's, not
+# co-op's every-key arm) with the host's own player dead. PgDn is the board's scroll:
+# taken, and the deploy leg never sees it. Every other key goes on to the chain's
+# tail: the dead player's X is the deploy leg's (the engine's rule, as the shell's
+# deploy leg asks it), which queues its pick, and a key no leg takes is not consumed.
+# [orig: Input_HandleSpecialKeys @0x49c5c0 - the session/co-op test
+#  @0x49c7d5..0x49c7fd, VK_NEXT @0x49c82c -> EndRoundBoard_Scroll(1) @0x49c830, any
+#  other key to the tail @0x49c859, the deploy test @0x49c9f7, 'X' @0x49ca00 ->
+#  Input_QueueEvent(12, 0) @0x49c658]
+func test_the_round_over_board_arm_passes_a_dead_players_x_to_the_deploy_leg() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	var config := HostSessionConfig.new()
+	config.mission = "mnml.bms"
+	config.bind_port = 0
+	config.game_type = HostSessionConfig.GAME_TYPE_COOP
+	assert_eq(world.load_mission_as_host(config.to_session_options()), OK)
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim, "the hosted world carries its simulation")
+	if sim == null:
+		world.unload()
+		return
+	assert_true(sim.is_mp_session(), "a listen host's session")
+	assert_eq(sim.get_session_game_type(), NetProtocol.GAME_TYPE_COOP, "Objective Co-op 0x30020")
+	assert_true(sim.spawn_local_player(Vector3(5, 0, 5), 0.0, 1), "the host's own player")
+	assert_eq(sim.debug_kill_player_entity(sim.get_local_player_wire_handle()), OK,
+			"the host queued its own player's death")
+	var dead := false
+	for _i in range(240):
+		world.tick(Vector3.ZERO)
+		if sim.is_local_player_dead():
+			dead = true
+			break
+	assert_true(dead, "the host's own player died")
+	# The script's first execution loses the round.
+	assert_true(sim.compile_and_set_wac(PackedStringArray(["Lose(0)"])))
+	for _i in range(600):
+		world.tick(Vector3.ZERO)
+		if sim.is_round_over():
+			break
+	assert_true(sim.is_round_over(), "the WAC Lose ends the session's round")
+	var hud := GameHudPresenter.new()
+	add_child_autofree(hud)
+	hud.setup(world, null, null)
+	# The shell's deploy leg: the key's event-12 parameter by the engine's rule.
+	var asked: Array[int] = []
+	var deploy_param := func(key: InputEventKey) -> int:
+		asked.append(key.keycode)
+		return int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
+	var picks: Array[int] = []
+	var queue_pick := func(param: int) -> void: picks.append(param)
+	assert_true(hud.handle_special_key(_key_event(KEY_PAGEDOWN), deploy_param, queue_pick),
+			"PgDn is the end-of-round board's scroll")
+	assert_eq(asked.size(), 0, "a key the board arm takes never reaches the deploy leg")
+	assert_true(hud.handle_special_key(_key_event(KEY_X), deploy_param, queue_pick),
+			"the dead player's X goes on to the deploy leg, which takes it")
+	assert_eq(picks.size(), 1, "the X queued one pick")
+	assert_eq(picks[0] if not picks.is_empty() else -1, 0, "the Default Spawn's")
+	assert_false(hud.handle_special_key(_key_event(KEY_Q), deploy_param, queue_pick),
+			"a key no leg takes is not consumed")
+	assert_eq(asked.size(), 2, "the X and the Q both reached the deploy leg")
+	world.unload()
+	_assert_no_key_held()
+
+
 # The shell leg (MainGame over its key ring): under DEATH's word the shell runs
 # the input frame, whose special-key chain takes the deploy keys; Escape there is
 # the ring's and never opens the in-game menu; under the confirmation a key waits
