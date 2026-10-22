@@ -2,9 +2,11 @@
 // keeps it, ClientProcessState::unstopped_server): a destroying route's FullDestroy and the Post
 // Menu's reason-2 arm run CNapiGameSession_ResetActiveSession with the joiner's socket still
 // open, so after the joiner's own leave burst each held joiner takes its STOP burst over that
-// socket and its /INOUT removal line, then HOST STOPPED (the placeholder: the shell passes no
-// socket address); an error arm (reason 5) tears nothing down and keeps the server held
+// socket and its /INOUT removal line, then HOST STOPPED over that socket's bind address and
+// port; an error arm (reason 5) tears nothing down and keeps the server held
 // (D-NET-NEW-L1-26's joiner leg).
+// [orig: CNapiNPConnection_LogHostStopped @0x61E780 - the manager's socket +8 / +12 @0x61E7A6;
+//  NapiUdpSocket_CreateAndBind @0x62D2A0 - bindAddress @0x62D4C1, boundPort @0x62D4C4]
 // [orig: CNapiGameSession_FullDestroy @0x4C96A0 - the leave @0x4C96DB,
 //  CNapiGameSession_ResetActiveSession called @0x4C96E2; CNapiGameSession_ResetActiveSession
 //  @0x4C8A70 - CNapiNPConnection_Destroy called @0x4C8A93, NapiNPProtocol_StopServer called
@@ -48,6 +50,8 @@ namespace {
 const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
 const PeerAddr kHost{0x0200000Au, 32786};  // the joined host
 const PeerAddr kHeld{0x0100007Fu, 31000};  // the held server's joiner
+// The join's own socket: bound on every interface, at the client quad's first port.
+const PeerAddr kOwnSocket{0u, 32768};
 constexpr uint32_t kHeldCk = 0x5A5A1234u;
 
 class MemoryFiles final : public inmatch::ServerFileSink {
@@ -109,6 +113,7 @@ Outcome close_with_a_held_server(int32_t reason) {
 	role.set_title(&kJo);
 	role.use_process_state(&process);
 	role.set_server_logs(logs);
+	role.set_local_address(kOwnSocket);
 	role.kit_seams.apply_authoritative = [] {};
 	role.kit_seams.reseed_on_side_change = [] { return false; };
 	role.kit_seams.push = [] {};
@@ -154,8 +159,9 @@ void test_a_session_reset_stops_the_held_server_after_the_leave() {
 		CHECK(!out.held_after);
 		const std::size_t removed = out.inout.find(
 				"127.0.0.1:31000 : SERVER PLAYER REMOVED \"\". [1,9,0,0,\"\",0,\"NP.C:SH:STOP\"]");
+		// HOST STOPPED formats the socket the stop goes out on: its bind address and port.
 		const std::size_t stopped =
-				out.inout.find("???.???.???.???:????? : HOST STOPPED \"Held\".");
+				out.inout.find("0.0.0.0:32768 : HOST STOPPED \"Held\".");
 		CHECK(removed != std::string::npos && stopped != std::string::npos && removed < stopped);
 	}
 }

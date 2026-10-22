@@ -100,6 +100,16 @@ public:
 	// The process's log devices, whose protocol _inout.txt takes a held server's stop lines at
 	// a session destroy (destroy_session). Default: off.
 	void set_server_logs(const ServerLogs &logs) { server_logs_ = logs; }
+	// The address the join's socket is bound on (its bind address, 0 on every interface, and
+	// the port it bound), which a held server's HOST STOPPED prints, as retail formats the
+	// manager's socket there; unset prints the no-socket placeholder.
+	// [orig: CNapiNPConnection_LogHostStopped @0x61E780 - the manager's socket read @0x61E7A6,
+	//  Napi_FormatAddress of its +8 / +12 @0x61E7C2, the placeholder @0x61E7DD;
+	//  NapiUdpSocket_CreateAndBind @0x62D2A0 - bindAddress @0x62D4C1, boundPort @0x62D4C4]
+	void set_local_address(const PeerAddr &address) {
+		local_address_ = address;
+		local_address_known_ = true;
+	}
 	// The pre-mission subset of the frame: the same socket and runtime advance
 	// the retail connect exchange; no World exists yet to tick, and the load
 	// waits for the S2C 0x1A's mission start (D-NET-NEW-L2-19). The hello
@@ -343,6 +353,8 @@ private:
 	const TitleIdentity *title_ = nullptr; // set_title
 	ClientProcessState *client_process_ = nullptr; // use_process_state
 	ServerLogs server_logs_{};                     // set_server_logs
+	PeerAddr local_address_{};                     // set_local_address
+	bool local_address_known_ = false;
 	int64_t last_net_us_ = 0;
 	// g_StatsAvgFps / g_StatsCpuPercent as the session last handed them over.
 	int32_t uplink_avg_fps_ = 0;

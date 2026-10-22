@@ -1910,9 +1910,9 @@ void JoinerRole::destroy_session(int32_t reason) {
 // A joiner's session reset (a destroying route's FullDestroy, the Post Menu's reason-2 arm)
 // stops a server an earlier error-arm exit left unstopped, after the connection's leave and over
 // the same socket, still open: each held joiner's STOP burst and /INOUT removal line, then HOST
-// STOPPED. A joiner's connection mode is 2, so no held player's slot teardown runs (no
-// `player_removed`); this shell passes no socket address, so HOST STOPPED carries the
-// placeholder, as its listen host's lines do (D-NET-NEW-L1-26's joiner leg).
+// STOPPED over the join socket's bound address (set_local_address; the placeholder without
+// one). A joiner's connection mode is 2, so no held player's slot teardown runs (no
+// `player_removed`) (D-NET-NEW-L1-26's joiner leg).
 // [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - the connection's
 //  CNapiNPConnection_Destroy called @0x4C8A93, then NapiNPProtocol_StopServer called @0x4C8AA1;
 //  PostMenu_RouteMissionExit @0x568460 - reason 2's reset called @0x56846F ahead of
@@ -1920,7 +1920,8 @@ void JoinerRole::destroy_session(int32_t reason) {
 //  @0x558333 / @0x56A05B (is_authority 0 @0x4C4A2E)]
 void JoinerRole::stop_held_server() {
 	if (client_process_ != nullptr)
-		stop_unstopped_server(client_process_->unstopped_server, server_logs_, socket_, nullptr);
+		stop_unstopped_server(client_process_->unstopped_server, server_logs_, socket_,
+				local_address_known_ ? &local_address_ : nullptr);
 }
 
 void JoinerRole::quit_to_menu() {

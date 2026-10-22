@@ -101,6 +101,7 @@ int UdpPump::bind_listen_at(int port, uint32_t address) {
 		return static_cast<int>(err);
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
+	bound_address_ = address;
 	g_process_transport = this;
 	capture_ = opennova::net::PcapUdpWriter::from_path(
 			opennova::to_std(capture_path_));
@@ -132,6 +133,7 @@ int UdpPump::bind_client() {
 		return static_cast<int>(err);
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
+	bound_address_ = client_bind_address_;
 	g_process_transport = this;
 	capture_ = opennova::net::PcapUdpWriter::from_path(
 			opennova::to_std(capture_path_));
@@ -168,6 +170,7 @@ void UdpPump::close() {
 	socket_.unref();
 	if (g_process_transport == this) g_process_transport = nullptr;
 	local_port_ = 0;
+	bound_address_ = 0;
 	dest_ip_ = String();
 	dest_port_ = 0;
 	inbound_.clear();

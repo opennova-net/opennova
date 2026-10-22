@@ -70,6 +70,12 @@ public:
 
 	bool is_open() const { return socket_.is_valid(); }
 	int local_port() const { return local_port_; }
+	// The open socket's bind address and bound port, as retail's socket keeps them for the
+	// /INOUT host lines (engine: inmatch::JoinerRole::set_local_address carries the witness);
+	// zeros when closed.
+	opennova::PeerAddr local_address() const {
+		return opennova::PeerAddr{bound_address_, static_cast<uint16_t>(local_port_)};
+	}
 	// The process's transport socket: the pump whose socket opened last (a host's or the
 	// NovaWorld session's listen, the LAN browse's or a join's client arm) while it stays
 	// open; null once it closes. Retail holds one transport socket, the manager's, and the
@@ -133,6 +139,7 @@ private:
 
 	Ref<PacketPeerUDP> socket_;
 	int local_port_ = 0;
+	uint32_t bound_address_ = 0; // the open socket's bind address (local_address)
 	std::vector<uint16_t> client_bind_ports_; // set_client_bind_scan
 	uint32_t client_bind_address_ = 0;
 	bool client_bind_scan_set_ = false;

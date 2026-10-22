@@ -802,6 +802,9 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 				std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr()));
 		joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
 	}
+	// The join socket's bound address, which a held server's HOST STOPPED prints (engine:
+	// inmatch::JoinerRole::set_local_address).
+	joiner_role_->set_local_address(net_.pump->local_address());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
 	// The callsign goes out as the profile name's code-page bytes, the NA TLV and the host's
