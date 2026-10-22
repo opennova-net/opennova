@@ -630,10 +630,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::destroy_session(
 	//  @0x4C96E2, ahead of the transport's teardown].
 	drain_enumerator(enumerator_drain);
 	// The transport's teardown, after the leave's lines (a joiner's socket is always open:
-	// SetTransportMode 2 / 4 at the enumerate) [orig: CNapiGameSession_FullDestroy @0x4C96A0 -
-	// @0x4C9722, @0x4C974E, @0x4C9763; CNapiNetwork_TearDownSocket @0x4C4C90 - @0x4C4CBE..0x4C4CE7].
-	if (!novaworld_join && connect_log_ != nullptr && connect_log_->enabled())
-		connect_log_->line(net_tearing_down_socket_text());
+	// SetTransportMode 2 / 4 at the enumerate; it closes with the join's session) [orig:
+	// CNapiGameSession_FullDestroy @0x4C96A0 - @0x4C9722, @0x4C974E, @0x4C9763].
+	tear_down_session_transport(novaworld_join, /*socket_open=*/true, connect_log_);
 	return burst;
 }
 

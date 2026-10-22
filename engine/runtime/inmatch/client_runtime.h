@@ -213,9 +213,9 @@ public:
 	// `leave_tag`: JoinerConnection::disconnect's.
 	std::vector<std::vector<uint8_t>> disconnect(std::string_view leave_tag = {});
 	// The session destroy, FullDestroy(reason): the leave burst latching "N.C:SWWAD[1]:<reason>"
-	// (disconnect), then the transport's teardown, which writes NET TEARING DOWN SOCKET while the
-	// connect log is on, unless the join runs on NovaWorld (`novaworld_join`: the menu's connect
-	// type 1 keeps the transport).
+	// (disconnect), then the transport's teardown (tear_down_session_transport), which writes NET
+	// TEARING DOWN SOCKET while the connect log is on, unless the join runs on NovaWorld
+	// (`novaworld_join`: the menu's connect type 1 keeps the transport).
 	// Between the two, the session reset destroys the connection, which drains its enumerator
 	// (drain_enumerator with `enumerator_drain`).
 	// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - the sprintf @0x4C96CC, the leave @0x4C96DB,

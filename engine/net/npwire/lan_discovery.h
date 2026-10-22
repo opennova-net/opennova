@@ -236,10 +236,17 @@ public:
 	//  to enumerator+4 @0x4c9f0b]
 	bool begin(const TitleIdentity &title, uint32_t client_index, uint32_t enumerate_ip,
 	           int port_min, int port_max, int connect_type);
-	// Stops the enumerator; its records and the rows stay (the window's end).
+	// Stops the enumerator; its records and the rows stay (the window's end). A row's join
+	// press stops the browse's pump too: the press pushes the join machine's PreMenu mode,
+	// whose frame runs no LAN screen state machine, so a refused row's join screen sends
+	// and reads nothing until its Cancel (the join machine's state 9).
 	// [orig: UI_ProcessLANSessionStateMachine @0x558de0 -
 	//  CNapiNetwork_DrainPendingDataTransfers (the call @0x559341) stops the enumerator
-	//  alone]
+	//  alone; UI_HandleLANGameListEvent @0x556C70 - the PreMenu mode pushed @0x556C4E
+	//  (stru_83C9D0, whose frame is MultiPlayer_JoinSessionStateMachine @0x56A320);
+	//  Menu_UpdateFrame @0x5528A0 - UI_ProcessLANSessionStateMachine's one call @0x5528ED;
+	//  UI_EnumerateAndJoinSession @0x569F50 - off NovaWorld no pump ahead of the node walk
+	//  @0x56A118, the refusal's error arm @0x56A03B]
 	void stop();
 	// Every session record goes, the enumerator's list from its head, each through the
 	// removed callback (its line); the rows stay. The search, the LAN screen's

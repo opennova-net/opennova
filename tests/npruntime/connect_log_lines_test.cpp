@@ -703,6 +703,45 @@ void test_remote_joiner_destroy_tears_down_the_socket() {
 	}
 }
 
+// The join machine's state 9 ahead of a dial (a refused row, the choice's BACK or Cancel, the
+// enumerate's ABORT) has no connection of the join's own to leave; off NovaWorld its transport
+// teardown writes NET TEARING DOWN SOCKET while the log is on and closes the socket (true). On
+// NovaWorld (the menu's connect type 1) the transport stays, and with no socket open there is
+// nothing to tear down: no line, false.
+// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - `networkConnectType_480 != 1` @0x4C9722, the
+//  transport mode @0x4C974E, CNapiNetwork_TearDownSocket (the call @0x4C9763);
+//  CNapiNetwork_TearDownSocket @0x4C4C90 - the line @0x4C4CBE..0x4C4CE7 ahead of
+//  NapiNPManager_CloseSocket @0x4C4CF5; MultiPlayer_JoinSessionStateMachine @0x56A320 - state
+//  9's CNapiGameSession_FullDestroy(-1) @0x56A3E3]
+void test_pre_dial_destroy_tears_down_the_transport() {
+	struct Case {
+		bool novaworld;
+		bool socket_open;
+		bool log_on;
+		bool tears_down;
+		std::vector<std::string> lines;
+	};
+	const std::vector<Case> cases = {
+		{false, true, true, true, {"NET TEARING DOWN SOCKET"}},
+		{true, true, true, false, {}},
+		{false, false, true, false, {}},
+		{true, false, true, false, {}},
+		{false, true, false, true, {}},
+	};
+	for (const Case &c : cases) {
+		MemoryFiles files;
+		inmatch::ConnectLog log{files};
+		log.set_clock([] { return std::string("T"); });
+		if (c.log_on) log.start(inmatch::ConnectLogHeader{});
+		CHECK(inmatch::tear_down_session_transport(c.novaworld, c.socket_open, &log) ==
+				c.tears_down);
+		CHECK(log_lines(files) == c.lines);
+	}
+	// No connect log: the teardown still closes the socket.
+	CHECK(inmatch::tear_down_session_transport(false, true, nullptr));
+	CHECK(!inmatch::tear_down_session_transport(true, true, nullptr));
+}
+
 // The session destroy's connection destroy drains its enumerator between the leave and the
 // transport's teardown: the record a join with no row enumerated writes its REMOVED line, then
 // the embedder's drain (the browse records a row's join went on from) runs, then NET TEARING
@@ -772,6 +811,7 @@ int main() {
 	test_remote_joiner_manager_pass_ahead_of_the_client_pump();
 	test_remote_joiner_duplicate_hellos();
 	test_remote_joiner_destroy_tears_down_the_socket();
+	test_pre_dial_destroy_tears_down_the_transport();
 	test_remote_joiner_destroy_drains_the_enumerator();
 	if (failures != 0) {
 		std::printf("connect_log_lines: %d failure(s)\n", failures);

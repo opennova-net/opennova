@@ -86,6 +86,21 @@ public:
 	// open: it is its owner's), as a mode change does. The session records stay. The
 	// window's end stops the enumerator alone and keeps the socket.
 	void stop();
+	// Stop the enumerator alone: the records, the rows and the socket stay. The window's
+	// end does this, and so does a row's join press: the press hands the frame to the join
+	// machine, and the LAN screen's browse pumps no more (MpMenuCompanion._on_lan_join;
+	// engine: LanDiscoveryBrowser::stop carries the witness).
+	void stop_enumerator();
+	// The join machine's state 9 ahead of a dial (a refused row, the choice's BACK or Cancel,
+	// the enumerate's ABORT): the rest of its session destroy after the session reset's
+	// connection destroy, whose drain is the caller's (the process enumerator's records, or
+	// the enumerate's). The connection is not active yet, so there is no leave. The reset
+	// stops the process's held server over the process's transport socket (engine:
+	// inmatch::stop_unstopped_server). Then, unless the join runs on NovaWorld (`novaworld`,
+	// the menu's connect type 1), the transport's teardown: NET TEARING DOWN SOCKET to the
+	// process's _connectlog.txt, then the socket closes. The next LAN search binds the client
+	// range again. (engine: inmatch::tear_down_session_transport carries the witness.)
+	static void destroy_pre_dial_session(bool novaworld);
 	// The enumerator's session records go, each writing its removed line to the
 	// process's _connectlog.txt (LanDiscoveryBrowser::drain_records): the LAN screen's
 	// activation and a join's enumerate-and-join drain them, as a search does.
@@ -132,8 +147,6 @@ private:
 	int send_probe_burst(Error &first_send_error);
 	void rebuild_rows();
 	void emit_error(const String &message);
-	// Stop the enumerator and release the game socket; the transport stays.
-	void stop_enumerator();
 
 	opennova::LanDiscoveryBrowser browser_;
 	Ref<ResourceRoot> resource_root_;

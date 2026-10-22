@@ -227,6 +227,14 @@ std::string net_outgoing_packet_error_text() { return "NET OUTGOING PACKET ERROR
 
 std::string net_tearing_down_socket_text() { return "NET TEARING DOWN SOCKET"; }
 
+bool tear_down_session_transport(bool novaworld_join, bool socket_open, ConnectLog *log) {
+	// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - @0x4C9722, @0x4C974E, @0x4C9763;
+	//  CNapiNetwork_TearDownSocket @0x4C4C90 - @0x4C4CBE..0x4C4CE7, @0x4C4CF5]
+	if (novaworld_join || !socket_open) return false;
+	if (log != nullptr) log->line(net_tearing_down_socket_text());
+	return true;
+}
+
 std::string net_connected_to_server_text(const PeerAddr &server, const PeerAddr &yours) {
 	return format_text("NET CONNECTED TO SERVER %s [yourip=%s]",
 			peer_addr_to_string(server).c_str(), peer_addr_to_string(yours).c_str());

@@ -395,9 +395,12 @@ func _cancel_spectator_probe() -> void:
 # (GameWorld.pre_game_cancelled).
 func _abort_spectator_preflight() -> void:
 	# State 9's FullDestroy drains the enumerate's records, each writing its removed line
-	# (engine: ClientRuntime::drain_enumerator carries the witness).
+	# (engine: ClientRuntime::drain_enumerator carries the witness), then stops a held server
+	# and, off NovaWorld, tears the transport down with its line (LanSession.destroy_pre_dial_session).
 	if _spectator_probe != null:
 		_spectator_probe.drain_records()
+	LanSession.destroy_pre_dial_session(_spectator_probe_target != null
+			and _spectator_probe_target.network_type == JoinTarget.NETWORK_NOVAWORLD)
 	_cancel_spectator_probe()
 	_release_novaworld_client()
 	if _world != null:
@@ -448,11 +451,17 @@ func _commit_join_choice(game_password: String, spectate: bool, team_password: S
 
 # The choice's BACK or Cancel: retail's state 9 as above.
 func _cancel_join_role_choice() -> void:
+	# A refused LAN row has no target: the LAN screen's join.
+	var target := _join_choice_target
 	_join_choice_target = null
 	# State 9's FullDestroy drains the process enumerator's records (the browse the join came
-	# from), each writing its removed line (engine: ClientRuntime::drain_enumerator).
+	# from), each writing its removed line (engine: ClientRuntime::drain_enumerator), then
+	# stops a held server and, off NovaWorld, tears the transport down with its line: the
+	# socket the join would have gone on with (LanSession.destroy_pre_dial_session).
 	if _shell != null:
 		_shell.drain_lan_records()
+	LanSession.destroy_pre_dial_session(target != null
+			and target.network_type == JoinTarget.NETWORK_NOVAWORLD)
 	_release_novaworld_client()
 	if _world != null:
 		_world.pre_game_cancelled()

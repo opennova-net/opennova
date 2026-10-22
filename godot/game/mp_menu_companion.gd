@@ -208,6 +208,10 @@ func _on_lan_join() -> void:
 	# session-less companion (the menu seam's harness) joins the row as listed.
 	var row: LanServerRow = _servers[_selected_server]
 	if _lan_session != null:
+		# The press hands the frame to the join machine: the LAN screen's browse pumps no
+		# more, its records and socket staying (engine: LanDiscoveryBrowser::stop carries
+		# the witness), so a refused join's screen sends and reads nothing.
+		_lan_session.stop_enumerator()
 		row = _lan_session.get_join_row(_selected_server)
 	if row == null:
 		lan_join_refused.emit(Strings.lookup(Strings.TABLE_GAMEERR, "MP Errors", "CVUNABLETOCREATE"))

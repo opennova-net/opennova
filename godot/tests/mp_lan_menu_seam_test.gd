@@ -615,7 +615,10 @@ func test_appended_lan_row_keeps_the_selection() -> void:
 # A join from a row takes the session's listed session at the row's index; a row whose
 # index names none (here a session whose browse holds no record) is refused before
 # anything is sent: no join request, the gameerr CVUNABLETOCREATE text instead (engine:
-# net/npwire/lan_discovery.h join_session; ctest lan_discovery).
+# net/npwire/lan_discovery.h join_session; ctest lan_discovery). The press hands the frame
+# to the join machine: the live search's pump stops, and its socket stays open for the
+# refusal's state 9, which tears it down (engine: LanDiscoveryBrowser::stop carries the
+# witness; spectator_join_prompt_test pins the teardown).
 func test_a_row_with_no_listed_session_refuses_the_join() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
@@ -624,6 +627,7 @@ func test_a_row_with_no_listed_session_refuses_the_join() -> void:
 	var session := LanSession.new()
 	autofree(session)
 	mp.set_lan_session(session)
+	assert_eq(session.start_browsing("127.0.0.1", 32787, 32787), OK, "a live search")
 	_publish(session, [LanServerRow.make("gone", "192.168.1.10", 32768)])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.select_row(lan_list, 0)
@@ -635,6 +639,12 @@ func test_a_row_with_no_listed_session_refuses_the_join() -> void:
 		var text: String = get_signal_parameters(mp, "lan_join_refused")[0]
 		assert_eq(text, Strings.lookup(Strings.TABLE_GAMEERR, "MP Errors", "CVUNABLETOCREATE"),
 				"the refusal reads gameerr's CVUNABLETOCREATE")
+	assert_false(session.is_browsing(), "the press stops the LAN screen's search")
+	var pump: UdpPump = session.take_transport()
+	assert_not_null(pump, "the search's socket stays for the join machine's state 9")
+	if pump != null:
+		assert_true(pump.is_open(), "nothing closed it at the press")
+		pump.close()
 
 
 func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> void:

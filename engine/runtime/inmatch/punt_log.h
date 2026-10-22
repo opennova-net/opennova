@@ -130,6 +130,25 @@ std::string net_outgoing_packet_error_text();
 // The socket's teardown [orig: CNapiNetwork_TearDownSocket @0x4C4C90, the line
 // @0x4C4CBE..0x4C4CE7 ahead of NapiNPManager_CloseSocket @0x4C4CF5].
 std::string net_tearing_down_socket_text();
+// The session destroy's transport teardown, after its leave and its session reset: a join off
+// NovaWorld with a socket open writes NET TEARING DOWN SOCKET to `log` (null: none; the line only
+// while the log is on), and the embedder then closes the socket (true). A join on NovaWorld (the
+// menu's connect type 1) keeps its transport, and with no socket open there is nothing to tear
+// down (false, nothing written). A join's destroy runs it with the join's socket open
+// (ClientRuntime::destroy_session). The join machine's state 9 ahead of a dial (a refused row, the
+// choice's BACK or Cancel, the enumerate's ABORT) runs the same destroy over the process's
+// transport, with no connection of the join's own to leave (the connection is not active): its
+// session reset drains the enumerator's records (their REMOVED lines), then stops a held server
+// (stop_unstopped_server, over the still-open socket), then this teardown.
+// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - `networkConnectType_480 != 1` @0x4C9722, the
+//  transport mode @0x4C974E, CNapiNetwork_TearDownSocket (the calls @0x4C9763 / @0x4C976F);
+//  CNapiNetwork_TearDownSocket @0x4C4C90 - the manager test, the line @0x4C4CBE..0x4C4CE7 ahead
+//  of NapiNPManager_CloseSocket @0x4C4CF5; MultiPlayer_JoinSessionStateMachine @0x56A320 -
+//  state 9's CNapiGameSession_FullDestroy(-1) @0x56A3E3; CNapiNetwork_DisconnectActiveConnection
+//  @0x4C9140 - the active-connection test @0x4C918F; CNapiGameSession_ResetActiveSession
+//  @0x4C8A70 - CNapiNPConnection_Destroy called @0x4C8A93, NapiNPProtocol_StopServer called
+//  @0x4C8AA1]
+bool tear_down_session_transport(bool novaworld_join, bool socket_open, ConnectLog *log);
 // The client's session callbacks [orig: CNapiNetwork_OnConnectedToServer @0x4C62E0
 //  (@0x4C6348 / @0x4C6362); CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 (the
 //  record's ds, dc, dp1, dp2, dstr, dpc, ddstr, @0x4C6421)]. The enumerator's two

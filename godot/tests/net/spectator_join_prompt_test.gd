@@ -152,6 +152,46 @@ func test_unprotected_spectator_host_omits_password_field_and_cancel_closes() ->
 	assert_false(target.role_explicit)
 
 
+# The join machine's state 9 ahead of a dial (the choice's BACK here) runs FullDestroy(-1):
+# off NovaWorld its transport teardown closes the socket the join would have gone on with
+# (with its NET TEARING DOWN SOCKET line while the connect log is on); a NovaWorld join keeps
+# its transport (the menu's connect type 1) (engine: inmatch::tear_down_session_transport
+# carries the witness; ctest npruntime_connect_log_lines).
+func test_the_choice_back_tears_down_a_lan_joins_socket() -> void:
+	for novaworld: bool in [false, true]:
+		var layer := Control.new()
+		add_child_autofree(layer)
+		var controller := _controller(layer)
+		var pump := UdpPump.new()
+		assert_eq(pump.bind_client(), OK, "the browse's socket the join goes on with")
+		var target := _target(JoinTarget.FLAG_ALLOW_SPECTATORS)
+		target.transport = pump
+		if novaworld:
+			target.network_type = JoinTarget.NETWORK_NOVAWORLD
+		controller.join_lan_server(target)
+		assert_true(controller.is_join_choice_pending())
+		JoinScreenFixture.press(_screen, "BACK")
+		assert_false(controller.is_join_choice_pending(), "BACK abandons the join")
+		assert_eq(pump.is_open(), novaworld,
+				"a NovaWorld join keeps its transport" if novaworld
+				else "a LAN join's socket is torn down")
+		pump.close()
+
+
+# A refused row's Cancel is the same state 9: the LAN screen's socket, which the refused join
+# never took, is torn down.
+func test_a_refused_rows_cancel_tears_down_the_lan_socket() -> void:
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	var pump := UdpPump.new()
+	assert_eq(pump.bind_client(), OK, "the LAN screen's search socket")
+	# With no shell the refusal's screen is skipped: its Cancel runs at once.
+	controller.refuse_lan_join("CVUNABLETOCREATE")
+	assert_false(pump.is_open(), "the refusal's state 9 tears the LAN socket down")
+	pump.close()
+
+
 func test_server_password_prompt_is_independent_of_spectator_access() -> void:
 	var layer := Control.new()
 	add_child_autofree(layer)

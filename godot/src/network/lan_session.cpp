@@ -113,6 +113,23 @@ void LanSession::adopt_records(LanSession *p_from) {
 	if (p_from != nullptr && p_from != this) browser_.adopt_records(p_from->browser_);
 }
 
+void LanSession::destroy_pre_dial_session(bool p_novaworld) {
+	UdpPump *transport = UdpPump::process_transport();
+	// The session reset's StopServer over the process's socket, still open (engine:
+	// inmatch::stop_unstopped_server; nothing when no server is held).
+	if (g_held_server != nullptr) {
+		UdpPumpDatagramSocket socket(transport);
+		const opennova::PeerAddr address =
+				transport != nullptr ? transport->local_address() : opennova::PeerAddr{};
+		opennova::inmatch::stop_unstopped_server(*g_held_server, g_held_server_logs,
+				transport != nullptr ? &socket : nullptr, transport != nullptr ? &address : nullptr);
+	}
+	// The transport's teardown off NovaWorld: its line, then the socket's close.
+	if (opennova::inmatch::tear_down_session_transport(p_novaworld, transport != nullptr,
+				NovaWorldClient::process_connect_log()))
+		transport->close();
+}
+
 void LanSession::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("start_browsing", "destination", "port_min", "port_max", "connect_type"),
@@ -127,6 +144,9 @@ void LanSession::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &LanSession::set_resource_root);
 	ClassDB::bind_method(D_METHOD("get_resource_root"), &LanSession::get_resource_root);
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
+	ClassDB::bind_method(D_METHOD("stop_enumerator"), &LanSession::stop_enumerator);
+	ClassDB::bind_static_method("LanSession", D_METHOD("destroy_pre_dial_session", "novaworld"),
+			&LanSession::destroy_pre_dial_session);
 	ClassDB::bind_method(D_METHOD("drain_records"), &LanSession::drain_records);
 	ClassDB::bind_method(D_METHOD("set_process_enumerator", "enabled"), &LanSession::set_process_enumerator);
 	ClassDB::bind_method(D_METHOD("adopt_records", "from"), &LanSession::adopt_records);
