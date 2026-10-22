@@ -2081,6 +2081,75 @@ func test_escape_in_the_final_wait_leaves_it_for_the_game_loop() -> void:
 	world.unload()
 
 
+# ESC after the S2C 0x0F ended the final wait: retail is out of the mission start ("Mission
+# loading complete") and in its game loop, so the ESC is the game loop's and aborts nothing,
+# whatever presentation hold the shell still shows (D-NET-NEW-L2-39)
+# [orig: Game_StartMission @0x524360 - out of the final wait @0x5262F3, "Mission loading
+# complete" @0x5262FD].
+func test_escape_after_the_world_state_aborts_nothing() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	var mission := MissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Game Loop Escape Host"
+	host_options.mission_name = mission.get_mission_name()
+	host_options.mission_file = "mnml.bms"
+	host_options.expansion = ""
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+	var lost: Array[String] = []
+	world.session_lost.connect(func(reason: String): lost.append(reason))
+	var observed := {"local_load": false}
+	world.world_loaded.connect(
+			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
+	for _frame in range(600):
+		host.step()
+		await get_tree().process_frame
+		if bool(observed["local_load"]):
+			break
+	assert_true(bool(observed["local_load"]), "the join reached its local load")
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		world.unload()
+		return
+	# The host answers the submissions: its 0x0F ends the final wait.
+	const PAST_THE_WAIT := ["awaiting the player's deployment pick",
+			"awaiting the deployment release", "complete"]
+	for _frame in range(600):
+		host.step()
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if PAST_THE_WAIT.has(sim.get_join_admission_stage()):
+			break
+	assert_true(PAST_THE_WAIT.has(sim.get_join_admission_stage()),
+			"the host's 0x0F ended the final wait")
+	assert_false(world.cancel_join_admission(), "the game loop's ESC is no admission abort")
+	for _frame in range(3):
+		host.step()
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+	assert_eq(failures.size(), 0, "nothing fails the join after the 0x0F")
+	assert_eq(lost.size(), 0, "nothing tears the session down")
+	assert_ne(sim.get_joiner_phase(), 5, "the session stays")
+	assert_true(world.is_loaded(), "the world stays loaded")
+	world.unload()
+
+
 # A join's S2C 0x11 runs the 0x0B header's environment and terrain load ahead of the game-start
 # wait's C2S 0x0A, as retail's joiner arm loads between its sync-tail wait and
 # NapiClient_WaitForGameStart, and the S2C 0x1A's mission start goes on from the objects

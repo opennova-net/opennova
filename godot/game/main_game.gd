@@ -206,7 +206,6 @@ func begin_runtime_shutdown() -> WorldLoadOperation:
 			presenter.teardown()
 	if _world != null:
 		_world.cancel_join_preload()
-		_world.cancel_join_admission()
 		# The F3 windows' Simulation dies with the runtime unload frees.
 		_dev_tools.set_simulation(null)
 		_world.unload()
@@ -1636,12 +1635,13 @@ func _abort_to_menu(stage: String, reason: String,
 
 func _on_camera_escape() -> void:
 	# Esc: pause <-> resume while in a world (the armory closes back to play);
-	# ignored in the main menu (EXIT quits). During a load, BOTH joiner waits are
-	# interruptible legs — the pre-load connect/session wait and the post-load
-	# admission tail, which is polled once per world tick. Aborting either
-	# is the reachable analog of the original's per-asset ESC/disconnect abort
-	# poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]. The
-	# SP/host map load remains a single synchronous call the SceneTree cannot
+	# ignored in the main menu (EXIT quits). During a join's load presentation
+	# the ESC is the joiner wait's: the game-start wait's aborts the join
+	# [orig: NapiClient_WaitForGameStart @0x42CC10 - the ESC @0x42CC77, return 3 @0x42CCC7],
+	# and the final wait's leaves that wait for the game loop, aborting nothing
+	# (GameWorld.cancel_join_admission). The cold-spawn hold after the S2C 0x0F
+	# takes none: retail's game loop already runs there (D-NET-NEW-L2-39). The
+	# mission start's load is a single synchronous call the SceneTree cannot
 	# interrupt (docs/interface/loading-screen-re.md D-LOADSCR-7).
 	# The join screen's Cancel answers ESC.
 	if _join_screen.is_open():

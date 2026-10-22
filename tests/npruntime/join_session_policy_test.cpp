@@ -3,7 +3,8 @@
 // ConnectOrHost windows (0xEA60 reachable-analog reuse), the S2C 0x7B promote
 // validation, the admission/deploy/loss edge machine, and the D-NET-178
 // expansion reconcile decision. This locks the admission-frame ORDERING
-// (loss > abort > settle > window > edges) and the edge latches.
+// (loss > settle > window > edges) and the edge latches. The watch takes no ESC
+// (D-NET-NEW-L2-39): the hold after the S2C 0x0F is the game loop's.
 
 #include <runtime/inmatch/join_session_policy.h>
 
@@ -158,19 +159,6 @@ void test_admission_watchdog_window() {
 	expect(p.fail_reason() == "join failed: kicked", "...with the error text");
 }
 
-void test_admission_abort() {
-	inmatch::JoinSessionPolicy p;
-	expect(!p.request_admission_abort(), "no live watch: nothing to abort");
-	p.arm_admission_watch(0);
-	expect(p.request_admission_abort(), "a live watch accepts the abort");
-	const uint32_t pre = p.begin_admission_frame("", false, false, "", "HELLO", 1);
-	expect(pre == (inmatch::kAdmissionFrameDone | inmatch::kAdmissionLoadFailed),
-			"the abort fails the frame terminally");
-	expect(p.fail_reason() == "Mission loading aborted",
-			"...with the retail ESC-abort wording [orig: @0x520270]");
-	expect(!p.admission_watch_active(), "...and disarms");
-}
-
 void test_admission_settle_gate() {
 	inmatch::JoinSessionPolicy p;
 	p.arm_admission_watch(0);
@@ -279,7 +267,6 @@ int main() {
 	test_preload_window();
 	test_promote_validation();
 	test_admission_watchdog_window();
-	test_admission_abort();
 	test_admission_settle_gate();
 	test_admission_deploy_edge_and_ready();
 	test_admission_ready_holds_for_wire_drain();

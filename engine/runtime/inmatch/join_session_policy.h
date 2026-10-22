@@ -146,20 +146,21 @@ public:
 	void arm_admission_watch(uint64_t now_ms);
 	void disarm_admission_watch();
 	bool admission_watch_active() const { return watch_active_; }
-	// ESC/abort for the admission wait while the mission start's load runs (the
-	// load's ESC legs [orig: Client_CheckDisconnectOrEscDuringLoad @0x520270 - the ESC's
-	// reason 1 @0x5202A8; Game_StartMission @0x524360 - its calls @0x52555B / @0x525910 /
-	// @0x525A1B]). The final wait's ESC is no abort: the drive ends that wait first
-	// (SessionDrive::cancel_admission_wait). Returns true when a live watch was told to
-	// abort; the next frame reports the failure.
-	bool request_admission_abort();
+	// The watch takes no ESC. The load's ESC legs run inside the mission start's one
+	// synchronous call, where no key reaches the drive; the final wait's ESC only leaves
+	// that wait (SessionDrive::cancel_admission_wait); after the S2C 0x0F the game loop
+	// runs, and its ESC is the game loop's, while the shell's cold-spawn hold still shows
+	// the loading screen (D-NET-NEW-L2-39).
+	// [orig: Client_CheckDisconnectOrEscDuringLoad @0x520270 - the ESC's reason 1
+	//  @0x5202A8, its calls in Game_StartMission @0x52555B / @0x525910 / @0x525A1B; the
+	//  final wait's ESC @0x5262AB -> @0x5262F3, "Mission loading complete" @0x5262FD]
 
 	// One observed frame, split so the shell's settle call happens between the
 	// two halves at exactly the witnessed point in the ordering: terminal
 	// state first (the loss latch wins over every admission edge — the
 	// initial-admission predicate is monotonic and reading it first could
-	// reveal the world in the same tick the loss leg tears it down), then the
-	// abort, then settle, then the window, then the edges.
+	// reveal the world in the same tick the loss leg tears it down), then
+	// settle, then the window, then the edges.
 	uint32_t begin_admission_frame(std::string_view session_loss_reason,
 			bool deploy_pending, bool initial_admission_complete,
 			std::string_view join_error, std::string_view admission_stage,
@@ -176,7 +177,7 @@ public:
 	void reset();
 
 	// The failure this join reported (empty while none; cleared by reset_for_join). A join
-	// that failed left its mission start: the load's ESC stores exit 1 and leaves
+	// that failed left its mission start: a failing leg stores exit 1 and leaves
 	// Game_StartMission ahead of its final wait, so the drive has no final wait for a later
 	// ESC to leave (SessionDrive::cancel_admission_wait).
 	// [orig: Client_CheckDisconnectOrEscDuringLoad @0x520270 - reason 1 @0x5202A8;
@@ -190,7 +191,6 @@ private:
 	uint64_t preload_deadline_ms_ = 0;
 	// admission watchdog
 	bool watch_active_ = false;
-	bool watch_abort_ = false;
 	uint64_t admission_deadline_ms_ = 0;
 	// begin -> finish frame carry
 	bool frame_deploy_pending_ = false;

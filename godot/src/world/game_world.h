@@ -342,9 +342,9 @@ public:
 	// ESC/abort for the joiner's pre-load connect/session wait. Returns true
 	// when an in-flight preload was aborted (see SessionDrive::cancel_preload).
 	bool cancel_join_preload();
-	// ESC/abort for the joiner's post-load admission wait. Returns true when
-	// a live admission wait was told to abort (see
-	// SessionDrive::cancel_admission_wait).
+	// ESC in the joiner's final wait for the S2C 0x0F: it leaves the wait
+	// for the game loop and aborts nothing. Returns true when the final wait
+	// took it (see SessionDrive::cancel_admission_wait).
 	bool cancel_join_admission();
 	// True while this world is a live network session (a co-op JOINER or a
 	// LISTEN HOST). The shell uses it to keep the world ticking through the

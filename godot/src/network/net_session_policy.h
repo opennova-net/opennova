@@ -55,7 +55,6 @@ public:
 	void arm_admission_watch(int64_t p_now_ms);
 	void disarm_admission_watch();
 	bool is_admission_watch_active() const;
-	bool request_admission_abort();
 	int begin_admission_frame(const String &p_session_loss_reason,
 			bool p_deploy_pending, bool p_initial_admission_complete,
 			const String &p_join_error, const String &p_admission_stage,

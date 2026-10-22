@@ -69,6 +69,8 @@ JoinPreloadStep JoinSessionPolicy::preload_step(std::string_view join_error,
 		fail_reason_ += join_error;
 		return JoinPreloadStep::kFail;
 	}
+	// The window's reachable-analog reuse (join_session_policy.h kJoinConnectWindowMs)
+	// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - `cmp eax, 0EA60h` @0x4D54CE].
 	if (preload_armed_ && now_ms >= preload_deadline_ms_) {
 		fail_reason_ = "join timed out before the host completed preload admission";
 		return JoinPreloadStep::kFail;
@@ -98,20 +100,12 @@ bool JoinSessionPolicy::validate_promote_header(std::size_t header_size) {
 
 void JoinSessionPolicy::arm_admission_watch(uint64_t now_ms) {
 	watch_active_ = true;
-	watch_abort_ = false;
 	admission_deadline_ms_ = now_ms + kJoinConnectWindowMs;
 }
 
 void JoinSessionPolicy::disarm_admission_watch() {
 	watch_active_ = false;
-	watch_abort_ = false;
 	admission_deadline_ms_ = 0;
-}
-
-bool JoinSessionPolicy::request_admission_abort() {
-	if (!watch_active_) return false;
-	watch_abort_ = true;
-	return true;
 }
 
 uint32_t JoinSessionPolicy::begin_admission_frame(std::string_view session_loss_reason,
@@ -137,13 +131,6 @@ uint32_t JoinSessionPolicy::begin_admission_frame(std::string_view session_loss_
 	frame_join_error_ = std::string(join_error);
 	frame_admission_stage_ = std::string(admission_stage);
 	frame_now_ms_ = now_ms;
-	if (watch_active_ && watch_abort_) {
-		disarm_admission_watch();
-		// The load's ESC [orig: Client_CheckDisconnectOrEscDuringLoad @0x520270 - reason 1
-		// @0x5202A8; its calls @0x52555B / @0x525910 / @0x525A1B].
-		fail_reason_ = "Mission loading aborted";
-		return kAdmissionFrameDone | kAdmissionLoadFailed;
-	}
 	// The revealed world must settle the host's streamed assets first; the
 	// shell performs the settle between the two frame halves.
 	if (frame_deploy_pending_ || frame_initial_complete_) return kAdmissionSettleRequired;

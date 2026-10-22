@@ -86,16 +86,12 @@ public:
 	// aborted; the ordinary load-failure leg reports it to the shell (engine: runtime/inmatch/join_session_policy.cpp)
 	// (docs/interface/loading-screen-re.md D-LOADSCR-7).
 	bool cancel_preload();
-	// ESC/abort for the SECOND interruptible joiner wait: the post-load
-	// admission tail, where the map is loaded but the world stays hidden until
-	// the host drives the join to its deploy pick or in-match edge.
-	// D-LOADSCR-7's "single synchronous operation.call()" reasoning covers the
-	// host/SP map load, NOT this one -- the admission state machine is polled
-	// once per world tick, so the ESC window is as reachable here as it is in
-	// the pre-load connect wait. Without this a player who joins a host that
-	// stalls after the wire-header world load has no way out for the full
-	// ConnectOrHost window. Returns true when a live admission wait was told
-	// to abort; the watchdog reports it through the ordinary load-failure leg.
+	// ESC in the mission start's final wait for the S2C 0x0F: it leaves the
+	// wait for the game loop and aborts nothing (engine
+	// inmatch::JoinerConnection::cancel_final_wait). Returns true when the
+	// final wait took it; false anywhere else, the shell's cold-spawn hold
+	// after the 0x0F included, where the game loop already runs
+	// (D-NET-NEW-L2-39).
 	bool cancel_admission_wait();
 	// True while the staged host request is a DEDICATED serve (no local-player
 	// spawn, ADR 0015 serve mode); read by the world's playable gate before

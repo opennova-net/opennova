@@ -668,20 +668,21 @@ bool SessionDrive::cancel_preload() {
 bool SessionDrive::cancel_admission_wait() {
 	// The final wait for the S2C 0x0F: its ESC leaves the wait for the game loop and
 	// nothing else (no exit reason, no teardown, no goodbye); the 0x0F still applies when
-	// it comes. Only the load's ESC is the abort (engine inmatch::JoinerConnection::
-	// cancel_final_wait carries the witness).
-	// A join the drive already failed (the load's ESC, a stall) left its mission start: there
-	// is no final wait to leave, whatever the doomed runtime reads until the shell's unload
-	// (engine inmatch/join_session_policy.h fail_reason carries the witness).
+	// it comes (engine inmatch::JoinerConnection::cancel_final_wait carries the witness).
+	// Outside that wait the ESC aborts nothing: the load is one synchronous call, and after
+	// the 0x0F the game loop runs, the shell's cold-spawn hold notwithstanding (engine
+	// inmatch/join_session_policy.h, D-NET-NEW-L2-39).
+	// A join the drive already failed (a stall, a settle failure) left its mission start:
+	// there is no final wait to leave, whatever the doomed runtime reads until the shell's
+	// unload (engine inmatch/join_session_policy.h fail_reason carries the witness).
 	if (!policy_->fail_reason().is_empty()) return false;
 	MissionRoot *runtime = world_->get_runtime();
 	Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
-	if (sim.is_valid() && sim->cancel_join_final_wait()) {
-		// The wait is over: a later ESC is the game loop's, never this watch's abort.
-		policy_->disarm_admission_watch();
-		return true;
-	}
-	return policy_->request_admission_abort();
+	if (sim.is_null() || !sim->cancel_join_final_wait()) return false;
+	// The wait is over: the game loop runs, and the watch's window covers no server-owed
+	// transition of the wait any more.
+	policy_->disarm_admission_watch();
+	return true;
 }
 
 Ref<JoinScreenStatus> SessionDrive::join_screen_status() const {

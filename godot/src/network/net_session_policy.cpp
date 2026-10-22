@@ -75,10 +75,6 @@ bool NetSessionPolicy::is_admission_watch_active() const {
 	return policy_.admission_watch_active();
 }
 
-bool NetSessionPolicy::request_admission_abort() {
-	return policy_.request_admission_abort();
-}
-
 int NetSessionPolicy::begin_admission_frame(const String &p_session_loss_reason,
 		bool p_deploy_pending, bool p_initial_admission_complete,
 		const String &p_join_error, const String &p_admission_stage,
