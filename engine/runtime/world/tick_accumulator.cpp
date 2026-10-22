@@ -49,4 +49,13 @@ int TickAccumulator::bank(double delta) {
 	return ticks;
 }
 
+void TickAccumulator::scale_smoothing_history(float factor) {
+	// [orig: Game_ScaleSmoothedFrameTime @0x52B5D0 — fild + the 2^32 bias of a
+	//  negative word @0x52B5D5..0x52B5E2, fmul @0x52B5E8, fistp under RC = chop
+	//  @0x52B5F5..0x52B600, the store @0x52B606]
+	const double scaled = static_cast<double>(static_cast<uint32_t>(smoothed_)) *
+			static_cast<double>(factor);
+	smoothed_ = static_cast<int32_t>(static_cast<int64_t>(scaled));
+}
+
 } // namespace opennova::world

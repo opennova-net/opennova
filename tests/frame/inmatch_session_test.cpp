@@ -35,9 +35,19 @@ struct TickProbe final : Role {
 	TickStatus next_status = TickStatus::Ran;
 	RoleKind probe_kind = RoleKind::SinglePlayer;
 
+	// Smoothing-history scales the next tick raises, as the lose cine's edit fade
+	// does from inside its update (WorldOutbox::frame_time_scales).
+	// They are raised by the tick that finds `raise_after_ticks` ticks already run.
+	std::vector<float> scales_to_raise;
+	size_t raise_after_ticks = 0;
+
 	TickProbe() { bind(kernel); kernel.world.logic_tick = 100; }
 	RoleKind kind() const override { return probe_kind; }
 	void run_tick(const TickInput &input) override {
+		if (inputs.size() >= raise_after_ticks) {
+			for (const float factor : scales_to_raise) kernel.world.out.frame_time_scales.push_back(factor);
+			scales_to_raise.clear();
+		}
 		inputs.push_back(input);
 		rules_batch_flags.push_back(kernel.world.rules.last_tick_of_batch);
 		head_flags.push_back(kernel.world.rules.update_head_stepped);
@@ -680,6 +690,44 @@ int main() {
 		if (!expect(stream > 0 && catchup(0.300) - stream == 17 &&
 				catchup(8.0 / 60.0) - stream == 6,
 				"a 300 ms frame keeps its time; the 8/60 s cap dropped it")) return 1;
+	}
+
+	// The lose cine's edit fade scales the bank's smoothing history from inside an
+	// update; the session applies each scale after the tick that raised it, before
+	// any later tick of the frame and before the next frame's bank, and the frame
+	// that raised it keeps the ticks its bank already counted. A 16 ms stream's
+	// 272-unit history x1.66f is 451, and the next 16 ms frame smooths to 429
+	// units, two ticks where the unscaled stream runs one. A 48 ms frame's three
+	// ticks stand when the second raises the scale; its 784-unit history x1.66f is
+	// 1301, and the next 16 ms frame smooths to 1172 units, 18 quanta from phase 12,
+	// five ticks where the unscaled stream's 720 units run three
+	// (world::TickAccumulator::scale_smoothing_history carries the witness).
+	// [orig: Game_ScaleSmoothedFrameTime @0x52B5D0, called @0x5726C9 / @0x572775
+	//  inside the update (Game_ProcessMainFrame @0x5263F0 -> Entity_UpdateAllEntities
+	//  @0x52674B -> Cinematic_EpilogUpdate @0x4C2230); Game_MainLoop's EMA read
+	//  @0x52B845, the word's one reader]
+	{
+		const auto next_frame = [](double first_seconds, bool scaled, size_t raise_after,
+				int32_t first_ticks) -> int {
+			auto target = std::make_unique<TickProbe>();
+			Session session(*target);
+			if (!load(session)) return -1;
+			target->raise_after_ticks = raise_after;
+			if (scaled) target->scales_to_raise = {1.66f};
+			FrameInput first;
+			first.delta_seconds = first_seconds;
+			if (session.advance(first).ticks_run() != first_ticks) return -2;
+			if (!target->kernel.world.out.frame_time_scales.empty()) return -3;
+			FrameInput in;
+			in.delta_seconds = TickAccumulator::kTickDt;
+			return static_cast<int>(session.advance(in).ticks_run());
+		};
+		const double one = TickAccumulator::kTickDt;
+		const double three = TickAccumulator::kTickDt * 3.0;
+		if (!expect(next_frame(one, false, 0, 1) == 1 && next_frame(one, true, 0, 1) == 2,
+				"the scaled history banks the next frame's extra tick")) return 1;
+		if (!expect(next_frame(three, false, 1, 3) == 3 && next_frame(three, true, 1, 3) == 5,
+				"a mid-frame scale leaves its frame's ticks and reaches the next bank")) return 1;
 	}
 
 	std::printf("OK: in-match session lifecycle/cadence/input/failure\n");

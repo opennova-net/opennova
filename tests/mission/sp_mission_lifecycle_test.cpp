@@ -418,6 +418,34 @@ int main() {
 		CHECK(out.status == im::FrameStatus::SessionLost);
 	}
 
+	// --- the lose cine's edit fade scales the bank's smoothing history ---------
+	{
+		// The fade (start 0, one frame) scales the main loop's frame-time
+		// smoothing history by 1.66f at its start (timeline frame 0) and by
+		// 0.60240966f at its finish (frame 1), while the cine runs; the session
+		// applies the scales after the tick and clears the list (world::
+		// TickAccumulator::scale_smoothing_history carries the witness).
+		// [orig: Cine_AdvanceTimelineFrame @0x56FFC4 (vtable+4 on the start frame)
+		//  / @0x56FFE5 (vtable+0x10 on the last); CCineEventEditFade_Start @0x5726C9;
+		//  CCineEventEditFade_Finish @0x572775]
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		world.process_round_end(2);
+		CHECK(world.out.frame_time_scales.empty());
+		world.epilog.update(world);
+		CHECK(world.out.frame_time_scales.size() == 1 &&
+				world.out.frame_time_scales[0] == w::kEpilogEditFadeStartScale);
+		world.epilog.update(world);
+		CHECK(world.out.frame_time_scales.size() == 2 &&
+				world.out.frame_time_scales[1] == w::kEpilogEditFadeFinishScale);
+		world.epilog.update(world);
+		CHECK(world.out.frame_time_scales.size() == 2);
+		(void)m.frame();
+		CHECK(world.out.frame_time_scales.empty());
+	}
+
 	// --- the round init's dialog reset -----------------------------------------
 	{
 		// The local player's (re)deploy runs round init, which clears the

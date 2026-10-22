@@ -996,6 +996,12 @@ struct WorldOutbox {
     // @0x44E320 - a 0 argument jumps to AudioChannel_ResetByHandle on
     // g_DialogAudioChannelHandle @0x44E32A..0x44E362].
     bool dialog_line_stop = false;
+    // The lose cine's edit fade scales the main loop's frame-time smoothing
+    // history (g_FrameTimeSmoothedFp4) at its start and its finish, in call
+    // order; the in-match session applies each to its bank after the tick
+    // (world::TickAccumulator::scale_smoothing_history carries the witness)
+    // and clears the list. Neither the presentation nor the wire reads it.
+    std::vector<float> frame_time_scales;
     uint64_t next_script_effect_order = 0;
     // The WAC commands the VM replicated this tick (registry flags 0x18) for
     // the server tick to send as S2C 0x23; script_remote_command.h carries the

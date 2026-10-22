@@ -103,6 +103,42 @@ int check_bank() {
         TEST_EXPECT(catchup(8.0 / 60.0) - stream == 6);
     }
 
+    // The lose cine's edit fade scales the smoothing history, not the bank:
+    // the frame that scaled it keeps its ticks and the next frame banks against
+    // the scaled word. A 16 ms frame banks 272 units (1 tick, 16 left); x1.66f
+    // truncates the history to 451; the next 16 ms frame smooths to
+    // (7 * 451 + 272 + 4) >> 3 = 429 units, 6 quanta from phase 4 = 2 ticks
+    // (45 left); x0.60240966f truncates 429 to 258; the next frame smooths to
+    // (7 * 258 + 301 + 4) >> 3 = 263 units, 4 quanta from phase 10 = 1 tick.
+    // Unscaled, every one of those frames runs 1 tick. The products sit clear
+    // of an integer, so x87's 24-bit device precision truncates them the same.
+    // [orig: Game_ScaleSmoothedFrameTime @0x52B5D0; CCineEventEditFade_Start
+    //  @0x5726C9 (flt_7D6858); CCineEventEditFade_Finish @0x572775 (flt_7D685C);
+    //  Game_MainLoop's EMA read @0x52B845]
+    {
+        const float kStart = 1.66f;      // 0x3FD47AE1
+        const float kFinish = 0.60240966f; // 0x3F1A3785
+        TickAccumulator acc;
+        TEST_EXPECT(acc.bank(TickAccumulator::kTickDt) == 1);
+        acc.scale_smoothing_history(kStart);
+        TEST_EXPECT(std::abs(acc.banked() - kMs) < 1e-9); // the bank itself is untouched
+        TEST_EXPECT(acc.bank(TickAccumulator::kTickDt) == 2);
+        TEST_EXPECT(std::abs(acc.banked() - 45.0 / 16000.0) < 1e-9);
+        acc.scale_smoothing_history(kFinish);
+        TEST_EXPECT(acc.bank(TickAccumulator::kTickDt) == 1);
+        TEST_EXPECT(std::abs(acc.banked() - 7.0 / 16000.0) < 1e-9);
+
+        TickAccumulator twin;
+        TEST_EXPECT(twin.bank(TickAccumulator::kTickDt) == 1);
+        TEST_EXPECT(twin.bank(TickAccumulator::kTickDt) == 1);
+        TEST_EXPECT(twin.bank(TickAccumulator::kTickDt) == 1);
+
+        // An empty history stays empty: the next frame banks unsmoothed.
+        TickAccumulator cold;
+        cold.scale_smoothing_history(kStart);
+        TEST_EXPECT(cold.bank(TickAccumulator::kTickDt) == 1);
+    }
+
     // reset() discards the bank, the smoothing history and the phase: the
     // frame after it banks from the 1 ms seed, unsmoothed.
     {

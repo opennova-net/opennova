@@ -155,6 +155,12 @@ inline constexpr int32_t kEpilogWinLetterboxFrames = 62;
 // [orig: Cine_StartPlayback @0x5778B3 (100) / @0x5778E0 (1)].
 inline constexpr int32_t kEpilogLoseLetterboxFrames = 100;
 inline constexpr int32_t kEpilogLoseEditFadeFrames = 1;
+// The edit fade's start and finish scale the main loop's frame-time smoothing
+// history while the cine runs (WorldOutbox::frame_time_scales)
+// [orig: CCineEventEditFade_Start @0x5726B0 — flt_7D6858 (0x3FD47AE1) @0x5726BF;
+//  CCineEventEditFade_Finish @0x572750 — flt_7D685C (0x3F1A3785) @0x57276B].
+inline constexpr float kEpilogEditFadeStartScale = 1.66f;
+inline constexpr float kEpilogEditFadeFinishScale = 0.60240966f;
 // The lose screen starts 249 frames past its build frame; the win screen 1
 // [orig: Cinematic_EpilogUpdate @0x574512 `add esi, 249`;
 //  Cine_EpilogStateMachineUpdate @0x5764F6 (+1)].
@@ -224,7 +230,7 @@ enum class EpilogCineMode : int32_t { None = 0, Win = 1, Lose = 2 };
 
 struct EpilogCine {
 	// The cine runs: the entity update steps it while set, the render pass
-	// clears it once the timeline passes its last event [orig: dword_26970FC].
+	// clears it once the timeline passes its last event [orig: g_CinePlaying].
 	bool active = false;
 	// The timeline frame, advanced once per dispatch [orig: dword_2697100;
 	//  Cine_AdvanceTimelineFrame @0x56FF52].
@@ -297,9 +303,9 @@ private:
 	// on its start frame, updates, and ends on its last frame, in list order
 	// [orig: Cine_AdvanceTimelineFrame @0x56FF40].
 	void step_timeline(World &world);
-	void activate_event(CineEvent &e);
+	void activate_event(CineEvent &e, World &world);
 	void update_event(CineEvent &e, World &world);
-	void end_event(const CineEvent &e);
+	void end_event(const CineEvent &e, World &world);
 	void update_lose(World &world);
 	void update_win(World &world);
 	void build_lose_screen();

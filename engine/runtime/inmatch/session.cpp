@@ -814,6 +814,21 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 	role_->apply_input(input);
 	const int64_t tick_start = now_us();
 	role_->run_tick(input);
+	// The lose cine's edit fade scaled the main loop's smoothing history from
+	// inside this update. Retail's store lands mid-drain, after the bank's EMA
+	// and before the frame's later updates, which count their quanta off the
+	// bank register and never re-read the word; its one reader is the next
+	// frame's EMA. So the scales apply here, after the tick that raised them and
+	// ahead of the frame's next tick and the next frame's bank, in their call
+	// order (world::TickAccumulator::scale_smoothing_history carries the witness)
+	// [orig: Game_MainLoop @0x52B630 (the EMA's store @0x52B866, the drain
+	//  @0x52BA08..0x52BA6B, the EMA's read @0x52B845); Game_ProcessMainFrame
+	//  @0x5263F0 (Entity_UpdateAllEntities @0x52674B) -> Cinematic_EpilogUpdate
+	//  (the call @0x4C2230) -> CCineEventEditFade_Start @0x5726C9 /
+	//  CCineEventEditFade_Finish @0x572775 -> Game_ScaleSmoothedFrameTime @0x52B5D0].
+	std::vector<float> &scales = role_->kernel()->world.out.frame_time_scales;
+	for (const float factor : scales) accumulator_.scale_smoothing_history(factor);
+	scales.clear();
 	out.tick_us = now_us() - tick_start;
 	out.net_us = role_->last_net_us();
 	out.logic_tick = static_cast<int32_t>(role_->kernel()->world.logic_tick);

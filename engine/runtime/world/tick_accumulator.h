@@ -92,6 +92,19 @@ public:
 		update_count_ = 0;
 	}
 
+	// Scale the smoothing history, the value the next frame's EMA reads: retail's
+	// one writer outside the main loop, called by the lose cine's edit fade
+	// (world::EpilogCine) from inside the drain's logic update, so the frame
+	// that called it keeps its ticks and the next frame banks against the
+	// scaled history. The word loads unsigned, multiplies by the float in x87
+	// precision and stores truncated toward zero (the 0xC00 rounding control).
+	// [orig: Game_ScaleSmoothedFrameTime @0x52B5D0 (the unsigned load
+	//  @0x52B5D5..0x52B5E2, the multiply @0x52B5E8, the truncating store
+	//  @0x52B5EC..0x52B606); its callers CCineEventEditFade_Start @0x5726B0 (the
+	//  call @0x5726C9) and CCineEventEditFade_Finish @0x572750 (the call
+	//  @0x572775); the EMA's read Game_MainLoop @0x52B845]
+	void scale_smoothing_history(float factor);
+
 	// The banked residual in seconds.
 	double banked() const { return static_cast<double>(bank_) / (1000.0 * kUnitsPerMs); }
 
