@@ -77,6 +77,10 @@ enum class PlayerAction {
 	// records whose arms the role owns (inmatch::Role::dispatch_record), past the head there.
 	Reload,
 	ToSpecial,
+	// The fire row (catalog row 43 attack_1, code 149 = 0x95): a record whose arm the role
+	// owns (inmatch::Role::dispatch_record), past the head there, a key's press and its
+	// release pass's event alike (PlayerActionFrame::fire_held carries the witness).
+	Fire,
 	// A key event whose arm the embedder owns (PlayerActionPoll::embedder_row: the talk, HUD
 	// and pause rows, the escape row, the special-key chain's deploy pick): its record, in key
 	// order with the action rows', value = the record's first argument (KeyRowEvent::param:
@@ -196,8 +200,22 @@ struct PlayerActionPoll {
 };
 
 struct PlayerActionFrame {
+	// The fire row (catalog row 43 attack_1, code 149 = 0x95, flags 0x8C400C01: no held bit 4,
+	// the release bit 0x80000000 and the button-up bit 0x400000) is an event row: its key's
+	// scanned key-down (an OS repeat included) and the release pass's event for it are records
+	// in `requests` (PlayerAction::Fire) in key order with the action rows', its off-keyboard
+	// arm's press and release edges behind them; a mouse button's down and up are the message
+	// pump's click records (the embedder's, BindingSet::mouse_click_action). The role's arm
+	// (inmatch::Role::dispatch_record) tests the binding live at the record's dispatch:
+	// `fire_held`, the binding's state under the poll's gates, which the weapon pump's refire
+	// and the PowerThrow hold read too. A press record dispatches its press leg while the
+	// binding holds, the release leg once it reads up.
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95 @0x4E07B5 (the binocular test
+	//  @0x4E07B5, g_InCeaseFire @0x4E07C2, Input_IsBindingActive(0x95) @0x4E07D9, the release
+	//  leg @0x4E07E9, the press leg @0x4E08DC); Input_IsBindingActive @0x498320 (the key slots
+	//  @0x498348, the mouse wParam @0x49836E, the joystick @0x4983A0); Input_ProcessKeyboardEvents
+	//  @0x49D1F0 (the release pass @0x49D249..0x49D2B9, the press @0x49D42F)]
 	bool fire_held = false;
-	bool fire_edge = false;
 	// The reload (catalog row 47 magazine, code 211 = 0xD3) and ToSpecial (row 37, default
 	// F, code 220 = 0xDC) rows are records in `requests` (PlayerAction::Reload / ToSpecial),
 	// one per event in key order with the action rows', whose arms the role owns
@@ -374,12 +392,12 @@ public:
 private:
 	struct RowLatch { bool down = false; };
 	std::vector<RowLatch> rows_;
-	bool fire_was_held_ = false;
 	bool reload_was_down_ = false;
 	bool medic_was_down_ = false;
 	bool respawn_was_down_ = false;
-	// ToSpecial's off-keyboard arm, whose edges dispatch both ways.
+	// ToSpecial's and the fire row's off-keyboard arms, whose edges dispatch both ways.
 	bool to_special_off_down_ = false;
+	bool fire_off_down_ = false;
 	bool use_latched_ = false;
 	bool use_held_prev_ = false;
 	bool use_hold_consumed_ = false;

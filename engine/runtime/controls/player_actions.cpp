@@ -198,7 +198,17 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		return !gate.death_screen || (row_modes(token) & 2u) != 0;
 	};
 	frame.fire_held = captured && admitted("attack_1") && source.pressed("attack_1");
-	frame.fire_edge = world::latched_key_edge(frame.fire_held, true, fire_was_held_);
+	// The fire row's records (PlayerActionFrame::fire_held carries the witness): a key's press
+	// under the captured gate and the scan's mode word, the release pass's event under none,
+	// as ToSpecial's. Its off-keyboard arm's edges follow the gated state, as the trigger's
+	// latch always has (a capture regained over a held arm presses again), its release
+	// unless an open text line holds the keyboard.
+	const int fire_code = row_code("attack_1");
+	const bool fire_gate = captured && admitted("attack_1");
+	const bool fire_off = fire_gate && source.held_off_keyboard("attack_1");
+	const bool fire_off_press = fire_off && !fire_off_down_;
+	const bool fire_off_release = !fire_off && fire_off_down_ && !gate.keyboard_captured;
+	fire_off_down_ = fire_off;
 	// The event rows fire once per queued key event (an OS repeat included), in
 	// the queue's order; their mouse, joystick and scripted arms on their press
 	// edges, after the keyboard pass's events (held_off_keyboard). A key the special-key
@@ -292,6 +302,12 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// a Respawn ahead of a weapon row ends the drain before it (its reset), and one behind
 	// it runs after it.
 	for (const KeyRowEvent &event : gate.key_events) {
+		// The fire row's press and its release pass's event, each a record in key order.
+		if (event.code == fire_code) {
+			if (event.release || fire_gate)
+				frame.requests.push_back({Action::Fire, 0, fire_code, event.sign});
+			continue;
+		}
 		// ToSpecial's press and its release pass's event, each a record in key order.
 		if (event.code == to_special_code) {
 			if (to_special_admits(event.release))
@@ -342,6 +358,7 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	//  @0x49D4DE); Game_WindowProc @0x7624C0 (Input_DispatchMouseEvent @0x762574) ->
 	//  Input_ProcessBindings @0x4DDA50 -> Input_TryDispatchBindingByWeaponType @0x499180
 	//  (Input_QueueEvent @0x499251)].
+	if (fire_off_press || fire_off_release) frame.requests.push_back({Action::Fire, 0, fire_code});
 	if (reload_off) frame.requests.push_back({Action::Reload, 0, reload_code});
 	if ((to_special_off_press || to_special_off_release) &&
 			to_special_admits(to_special_off_release))
@@ -423,7 +440,7 @@ ChainDigitTake PlayerActions::chain_digit_key(int vk, bool emotes_menu_open,
 }
 
 void PlayerActions::reset() {
-	fire_was_held_ = false;
+	fire_off_down_ = false;
 	reload_was_down_ = false;
 	for (std::size_t i = 0; i < std::size(kRows); ++i)
 		if (kRows[i].flags & Reset) rows_[i].down = false;

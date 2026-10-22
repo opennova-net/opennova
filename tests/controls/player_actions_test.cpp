@@ -44,12 +44,13 @@ struct Keys : PlayerActionSource {
 	}
 };
 
-// The Respawn, MedicReq, reload and ToSpecial rows' records, whose arms the role owns
+// The Respawn, MedicReq, reload, ToSpecial and fire rows' records, whose arms the role owns
 // (inmatch::Role::dispatch_record); requests_are leaves them out, medic() / respawn() /
-// reload() / to_special() count them.
+// reload() / to_special() / fire() count them.
 bool role_record(const PlayerActionRequest &request) {
 	return request.action == Action::Respawn || request.action == Action::MedicRequest ||
-			request.action == Action::Reload || request.action == Action::ToSpecial;
+			request.action == Action::Reload || request.action == Action::ToSpecial ||
+			request.action == Action::Fire;
 }
 
 int count_of(const PlayerActionFrame &frame, Action action) {
@@ -62,6 +63,7 @@ int medic(const PlayerActionFrame &frame) { return count_of(frame, Action::Medic
 int respawn(const PlayerActionFrame &frame) { return count_of(frame, Action::Respawn); }
 int reload(const PlayerActionFrame &frame) { return count_of(frame, Action::Reload); }
 int to_special(const PlayerActionFrame &frame) { return count_of(frame, Action::ToSpecial); }
+int fire(const PlayerActionFrame &frame) { return count_of(frame, Action::Fire); }
 
 bool requests_are(const PlayerActionFrame &frame, const std::vector<PlayerActionRequest> &expected) {
 	std::vector<PlayerActionRequest> rows;
@@ -261,6 +263,46 @@ bool test_embedder_rows_keep_the_key_order() {
 	return true;
 }
 
+// The fire row (attack_1, code 149) is an event row: its key's press is a record per key
+// event (an OS repeat again) under captured gameplay input and the scan's mode word, in key
+// order with the action rows'; the release pass's event is a record under no gate; its
+// off-keyboard arm dispatches its press and its release; fire_held is the binding's state
+// the record's arm tests live. A held key fires nothing more.
+// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the press @0x49d42f, the release pass's
+//  queue @0x49d2b1; Input_HandleActionBinding_0 case 0x95 @0x4E07B5 (Input_IsBindingActive
+//  @0x4E07D9)]
+bool test_fire_row_dispatches_its_key_events() {
+	PlayerActions actions;
+	QueuedKeys keys;
+	const int code = code_of("attack_1");
+	CHECK(code == 149);
+	keys.hold("attack_1", 'J');
+	PlayerActionPoll gate = kLive;
+	gate.key_events = {KeyRowEvent{code, false, 'J', false}, key_row("Knife", '1'),
+			KeyRowEvent{code, false, 'J', false}};
+	auto frame = actions.poll(keys, gate);
+	CHECK(frame.fire_held && frame.requests.size() == 3 &&
+			frame.requests[0].action == Action::Fire && frame.requests[0].code == 149 &&
+			frame.requests[1].action == Action::WeaponCategory && frame.requests[2].action == Action::Fire);
+	CHECK(!fire(actions.poll(keys, kLive))); // the held key: no event
+	PlayerActionPoll uncaptured = kLive;
+	uncaptured.captured = false;
+	uncaptured.key_events = {KeyRowEvent{code, false, 'J', false}};
+	CHECK(!fire(actions.poll(keys, uncaptured)));
+	keys.release("attack_1");
+	uncaptured.key_events = {KeyRowEvent{code, false, 'J', true}};
+	frame = actions.poll(keys, uncaptured);
+	CHECK(!frame.fire_held && fire(frame) == 1); // the release pass's event: no gate
+	keys.off.insert("attack_1");
+	keys.hold("attack_1");
+	CHECK(fire(actions.poll(keys, kLive)) == 1); // the off-keyboard arm's press
+	CHECK(!fire(actions.poll(keys, kLive)));
+	keys.off.clear();
+	keys.release("attack_1");
+	CHECK(fire(actions.poll(keys, kLive)) == 1); // and its release
+	return true;
+}
+
 // ToSpecial's press dispatches on its key-down's event (an OS repeat again), with
 // captured gameplay input; its release on the release pass's event, which has no
 // capture or mode gate (over a screen too); neither with no simulation. The
@@ -376,7 +418,7 @@ bool test_order_and_held_rows() {
 			"ScopeZeroDec", "ScopeZeroInc", "radarout", "radarin", "map_toggle", "binoculars",
 			"NVG", "nvggainup", "nvggaindown", "NextWaypoint"}) keys.hold(token);
 	auto frame = actions.poll(keys, kLive);
-	CHECK(frame.fire_held && frame.fire_edge && reload(frame) && medic(frame));
+	CHECK(frame.fire_held && fire(frame) == 1 && reload(frame) && medic(frame));
 	std::vector<PlayerActionRequest> expected{{Action::ToggleMount}, {Action::ToggleScope}};
 	for (int seat = 0; seat < 10; ++seat) expected.push_back({Action::SelectSeat, seat});
 	for (int category = 1; category <= 9; ++category)
@@ -389,7 +431,7 @@ bool test_order_and_held_rows() {
 		expected.push_back(request);
 	CHECK(requests_are(frame, expected));
 	frame = actions.poll(keys, kLive);
-	CHECK(frame.fire_held && !frame.fire_edge && !reload(frame) && !medic(frame));
+	CHECK(frame.fire_held && !fire(frame) && !reload(frame) && !medic(frame));
 	CHECK(frame.requests.empty());
 	return true;
 }
@@ -400,15 +442,16 @@ bool test_capture_and_overlay_edges() {
 	for (const char *token : {"attack_1", "magazine", "scope", "MedicReq", "Knife", "seat1",
 			"cycleweaponN", "Crouch", "radarout", "map_toggle"}) keys.hold(token);
 	auto frame = actions.poll(keys, {false, true, true});
-	CHECK(!frame.fire_held && !frame.fire_edge && !reload(frame) && medic(frame) == 1);
+	CHECK(!frame.fire_held && !fire(frame) && !reload(frame) && medic(frame) == 1);
 	CHECK(requests_are(frame, {}));
 	frame = actions.poll(keys, kLive);
-	CHECK(frame.fire_held && frame.fire_edge && reload(frame) && !medic(frame));
+	CHECK(frame.fire_held && fire(frame) == 1 && reload(frame) && !medic(frame));
 	CHECK(requests_are(frame, {{Action::ToggleScope}})); // raw held rows do not re-fire
 	frame = actions.poll(keys, {true, false, true});
-	CHECK(!frame.fire_held && frame.requests.empty());
+	// The freed cursor ends the trigger arm's gated hold: its release record.
+	CHECK(!frame.fire_held && requests_are(frame, {}) && !reload(frame) && fire(frame) == 1);
 	frame = actions.poll(keys, kLive);
-	CHECK(frame.fire_edge && reload(frame));
+	CHECK(fire(frame) == 1 && reload(frame));
 	CHECK(requests_are(frame, {{Action::ToggleScope}}));
 	keys = Keys{};
 	actions.poll(keys, kLive);
@@ -426,9 +469,9 @@ bool test_missing_simulation_freezes_only_scope_zero() {
 			"cycleweaponP", "Prone", "ScopeZeroDec", "ScopeZeroInc", "radarin", "map_toggle"})
 		keys.hold(token);
 	auto frame = actions.poll(keys, {true, true, false});
-	CHECK(frame.fire_edge && reload(frame) && medic(frame) == 1 && requests_are(frame, {}));
+	CHECK(fire(frame) == 1 && reload(frame) && medic(frame) == 1 && requests_are(frame, {}));
 	frame = actions.poll(keys, kLive);
-	CHECK(!frame.fire_edge && !reload(frame) && !medic(frame));
+	CHECK(!fire(frame) && !reload(frame) && !medic(frame));
 	CHECK(requests_are(frame, {{Action::ScopeZero, -1}, {Action::ScopeZero, 1}}));
 	keys = Keys{};
 	actions.poll(keys, {true, true, false}); // zero's held latch does not see this release
@@ -450,7 +493,7 @@ bool test_reset_preserves_switch_hud_medic_and_use_state() {
 	actions.poll(keys, kLive);
 	actions.reset();
 	auto frame = actions.poll(keys, kLive);
-	CHECK(frame.fire_edge && reload(frame) && !medic(frame));
+	CHECK(fire(frame) == 1 && reload(frame) && !medic(frame));
 	CHECK(requests_are(frame, {{Action::ToggleScope}, {Action::Stance, 0}, {Action::Stance, 1},
 			{Action::Stance, 2}, {Action::ScopeZero, -1}, {Action::ScopeZero, 1}}));
 	CHECK(picks(actions.chain_digit_key('8', false, false), Action::SelectSeat, 7));
@@ -550,7 +593,7 @@ bool test_use_swallows_only_digit_event_rows() {
 				"seat5", "cycleweaponN", "Prone", "ScopeZeroInc", "radarout", "map_toggle"})
 			keys.hold(token, vk);
 		const auto frame = actions.poll(keys, kLive);
-		CHECK(frame.fire_edge && reload(frame) && medic(frame));
+		CHECK(fire(frame) == 1 && reload(frame) && medic(frame));
 		if (vk == 0x30 || vk == 0x39) {
 			CHECK(requests_are(frame, {{Action::ToggleScope}}));
 		} else {
@@ -1055,7 +1098,8 @@ int main() {
 			test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen,
 			test_event_rows_fire_once_per_event, test_the_chain_takes_digit_keys,
 			test_reload_medic_and_respawn_fire_on_their_events, test_embedder_rows_keep_the_key_order,
-			test_to_special_dispatches_its_key_events, test_spectator_rows_fire_on_their_events,
+			test_to_special_dispatches_its_key_events, test_fire_row_dispatches_its_key_events,
+			test_spectator_rows_fire_on_their_events,
 			test_picks_escape_and_spectator_rows_keep_the_key_order,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
 			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,

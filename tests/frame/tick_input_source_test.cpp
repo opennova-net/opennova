@@ -855,6 +855,51 @@ void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
 	CHECK(role->input_events().empty(), "the reset emptied the queue");
 }
 
+// D-CTRL-6 (LI-s16): the fire row's record (attack_1, code 149 = 0x95: a key's, a click's,
+// a press's or a release's) is the role's arm past the head: the case drops it whole under a
+// cease fire, then tests the binding live at its dispatch (the update's sample, HELD_FIRE):
+// held, the press leg latches the weapon pump's fire request; up (a click whose button came
+// up before its update), the release leg latches none (D-NET-NEW-LI-3).
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95: g_InCeaseFire @0x4E07C2,
+//  Input_IsBindingActive(0x95) @0x4E07D9, the release leg @0x4E07E9, the press leg
+//  @0x4E08DC]
+void test_the_fire_record_tests_its_binding_live() {
+	using opennova::controls::InputEventOrigin;
+	using opennova::controls::InputEventQueue;
+	CHECK(opennova::controls::action_code(43) == 149, "attack_1's code");
+	struct FireDevice final : TickInputSource {
+		bool held = false;
+		bool queued = false;
+		InputPacket sample_tick(uint32_t) override {
+			InputPacket p;
+			p.held_action_bits = held ? HELD_FIRE : 0u;
+			return p;
+		}
+		void queue_records(InputEventQueue &records) override {
+			if (queued) return;
+			queued = true;
+			(void)records.push({149, 0, 0, 0, false, InputEventOrigin::Device});
+		}
+	};
+	for (const int face : {0, 1, 2}) { // held; up; held under a cease fire
+		auto role = std::make_unique<TickRecorder>();
+		spawn_local_player(*role);
+		role->kernel.world.rules.cease_fire = face == 2;
+		FireDevice device;
+		device.held = face != 1;
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		FrameInput three;
+		three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 3, "three updates");
+		CHECK(role->kernel.local.weapon.fire_pressed == (face == 0),
+				face == 0   ? "a held binding's record latches the fire request"
+				: face == 1 ? "a binding that reads up takes the release leg: no request"
+				            : "a cease fire drops the record whole");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -872,6 +917,7 @@ int main() {
 	test_the_reload_record_meets_the_head_in_key_order();
 	test_a_menu_screen_an_update_opens_gates_the_frames_later_updates();
 	test_a_deploy_pick_is_a_record_of_the_drain_in_key_order();
+	test_the_fire_record_tests_its_binding_live();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

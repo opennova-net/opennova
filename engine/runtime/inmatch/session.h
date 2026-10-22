@@ -425,8 +425,9 @@ public:
 	// reads empty, so a reset inside a dispatch (Player_ResetLocalInput's, the deploy pick's
 	// Input_ResetAllState) ends it. The arms the role owns run here: the quit row's exit,
 	// the Respawn key (55), the medic call (217), the stance selects (169 / 170 / 172), the
-	// pause row (25), the reload row (211: the weapon pump's reload latch) and ToSpecial
-	// (220: one dispatch with the keys' state, a deferral kept for the next input frame).
+	// pause row (25), the reload row (211: the weapon pump's reload latch), ToSpecial
+	// (220: one dispatch with the keys' state, a deferral kept for the next input frame) and
+	// the fire row (149: the binding's live test, the press leg's fire request).
 	// Every other record goes to the embedder: a console record to the console sink
 	// (ClientRuntime::set_console_action_sink), a device record to `source`
 	// (TickInputSource::dispatch_record). A joiner outside its game loop runs no input
@@ -436,7 +437,8 @@ public:
 	// loop the deferred dispatches (ToSpecial's, LocalPlayer::to_special_queued) join the
 	// queue behind the update's records, each passing the head again at its dispatch.
 	// `held_action_bits`: the update's sample's held bits (HELD_MENU_OPEN, under which no
-	// input frame runs; HELD_TO_SPECIAL, the keys' state ToSpecial's dispatch reads).
+	// input frame runs; HELD_TO_SPECIAL, the keys' state ToSpecial's dispatch reads;
+	// HELD_FIRE, the binding state the fire row's dispatch reads).
 	// `pause_flips`: the pause row's flip of the session's word applies (the session's
 	// main-loop updates; the debug transport's forced step applies none).
 	// [orig: Input_ProcessFrame @0x49D520 - Input_FlushDeferredEvents @0x49D591, the drain
@@ -530,10 +532,11 @@ protected:
 	// A reset ran in this input frame's drain (Input_ResetAllState's queue memset): the
 	// frame's later events are gone, the held rows' with them (apply_input; D-NET-560).
 	bool input_queue_reset_ = false;
-	// The running drain's pause_flips and its sample's ToSpecial key state
-	// (drain_input_events).
+	// The running drain's pause_flips and its sample's ToSpecial key state and fire binding
+	// state (drain_input_events).
 	bool pause_flips_ = false;
 	bool to_special_held_ = false;
+	bool fire_held_ = false;
 };
 
 // The held / pressed action bits of InputPacket, the retail action rows the
