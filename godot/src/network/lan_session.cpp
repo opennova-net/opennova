@@ -302,8 +302,11 @@ void LanSession::_process(double delta) {
 		send_probe_burst(ignored_error);
 	}
 	if (browser_.servers().size() != listed) rebuild_rows();
+	// The window's end stops the enumerator alone: the transport stays open until the
+	// mode changes, and a join from a row goes on with it (engine: LanDiscoveryBrowser::stop
+	// and the class comment carry the witness, D-NET-NEW-R3-3).
 	if (!open) {
-		stop();
+		stop_enumerator();
 		emit_signal("browse_finished");
 	}
 }

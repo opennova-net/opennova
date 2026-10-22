@@ -83,7 +83,8 @@ public:
 	// stops and forgets it (nothing closes it here); null when the browse has none.
 	Ref<UdpPump> take_transport();
 	// Stop the enumerator and close the browse's own socket (an installed one stays
-	// open: it is its owner's). The session records stay.
+	// open: it is its owner's), as a mode change does. The session records stay. The
+	// window's end stops the enumerator alone and keeps the socket.
 	void stop();
 	// The enumerator's session records go, each writing its removed line to the
 	// process's _connectlog.txt (LanDiscoveryBrowser::drain_records): the LAN screen's

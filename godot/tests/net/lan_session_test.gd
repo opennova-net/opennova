@@ -4,6 +4,18 @@ extends GutTest
 # retail game-session 0x41 probe and projects the host's 0x81 reply; it does not
 # use an online service and intentionally cannot know the mission before join.
 
+# The engine's time scale before the case (test_the_window_end_keeps_the_browse_socket
+# runs the window under a scaled clock): after_each puts it back whatever the case did.
+var _saved_time_scale := 1.0
+
+
+func before_each() -> void:
+	_saved_time_scale = Engine.time_scale
+
+
+func after_each() -> void:
+	Engine.time_scale = _saved_time_scale
+
 
 func _mission() -> MissionData:
 	var mission := MissionData.new()
@@ -329,6 +341,31 @@ func test_launch_browse_joins_the_row_on_its_port() -> void:
 	JoinScreenFixture.press(screen, "BACK")
 	LaunchFlags.clear_args_override()
 	JoinScreenFixture.unstage(screen_dir)
+
+
+# The window's end stops the enumerator alone: the browse's own socket stays open
+# until the mode changes, and the join from a row goes on with it (engine:
+# LanDiscoveryBrowser::stop and the class comment carry the witness; D-NET-NEW-R3-3).
+# Engine.time_scale runs the 30-second window in a few frames.
+func test_the_window_end_keeps_the_browse_socket() -> void:
+	var browser := LanSession.new()
+	add_child_autofree(browser)
+	watch_signals(browser)
+	assert_eq(browser.start_browsing("127.0.0.1", 32787, 32787), OK)
+	# after_each restores the scale too, should the case stop early.
+	Engine.time_scale = 10000.0
+	for _i in range(600):
+		await get_tree().process_frame
+		if not browser.is_browsing():
+			break
+	Engine.time_scale = _saved_time_scale
+	assert_false(browser.is_browsing(), "the window ended")
+	assert_signal_emitted(browser, "browse_finished")
+	var pump: UdpPump = browser.take_transport()
+	assert_not_null(pump, "the browse keeps its socket past the window's end")
+	if pump != null:
+		assert_true(pump.is_open(), "the socket the join goes on with is still open")
+		pump.close()
 
 
 # D-NET-712: the proxy-assisted join's rendezvous rides the browse; the shell

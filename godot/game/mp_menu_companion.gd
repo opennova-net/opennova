@@ -213,8 +213,8 @@ func _on_lan_join() -> void:
 		lan_join_refused.emit(Strings.lookup(Strings.TABLE_GAMEERR, "MP Errors", "CVUNABLETOCREATE"))
 		return
 	var target := JoinTarget.from_lan_row(row)
-	# The join goes on with the search's socket (D-NET-NEW-R3-3); a search whose
-	# window closed has none, and the join opens the client arm's again.
+	# The join goes on with the search's socket (D-NET-NEW-R3-3), which stays open past
+	# the window's end.
 	if _lan_session != null:
 		target.transport = _lan_session.take_transport()
 	lan_join_requested.emit(target)
