@@ -666,6 +666,7 @@ void JoinerRole::sync_authoritative_mount() {
 	//  @0x4C135B..0x4C13F8: byte 1 `and byte [esi+312h], 0F7h` @0x4C1390 and +0x118
 	//  @0x4C139D, byte 2 `or byte [esi+312h], 8` @0x4C13EB and +0x118 @0x4C13F8]
 	bool route_changed = false;
+	world::Entity *route_mount = nullptr;
 	if (wire_mounted && (self->seat_type == 1u || self->seat_type == 2u)) {
 		world::Entity *mount = replica_world_entity(
 				world, world::EntityHandle{self->carrier_handle});
@@ -698,16 +699,30 @@ void JoinerRole::sync_authoritative_mount() {
 						mount->primary_weapon_slot.redirect_to_parent_slot != select_parent;
 				mount->primary_weapon_slot.redirect_to_parent_slot =
 						select_parent;
+				route_mount = mount;
 			}
 		}
 	}
-	if (!changed && !route_changed) return;
-	if (changed) {
-		// The embedder refreshes its view effects and the mounted input
-		// heading for the new relation.
-		on_mount_changed();
+	if (changed || route_changed) {
+		if (changed) {
+			// The embedder refreshes its view effects and the mounted input
+			// heading for the new relation.
+			on_mount_changed();
+		}
+		world::sync_local_usegun_weapon_transition(world, lp.weapon);
 	}
-	world::sync_local_usegun_weapon_transition(world, lp.weapon);
+	// The leg's EquippedSlot store, while L sits on the gun: after the record's attach
+	// staged its switch-out above, L's slot becomes the route's at once, so that
+	// switch-out never completes (the weapon walk pumps the EquippedSlot alone) and the
+	// AdmDef byte keeps its def. Each frame stands in for each record: the store is
+	// idempotent once the borrow holds the slot, and every staging of a switch follows a
+	// record that moves L's seat (D-WPN-52 follow).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TryAttachOrDetach called
+	//  @0x4C1317, L's parent read @0x4C1346, the stores @0x4C139D / @0x4C13F8;
+	//  WeaponAction_ProcessAllEntities @0x542690 (@0x5426AD)]
+	if (route_mount != nullptr && local->mounted &&
+			local->mount_target == route_mount->handle)
+		world::local_usegun_store_equipped_slot(world, lp.weapon, *route_mount);
 }
 
 // Fold the latest complete phase-8 mounted-ammo sample into the exact

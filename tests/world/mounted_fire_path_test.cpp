@@ -70,7 +70,15 @@ w::Entity carrier(uint32_t attrib, w::SeatType seat_type, const char *seat_name)
 	return e;
 }
 
-void test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType gun_seat) {
+// `route_store`: a designated-G route leg's record seats L on the gun, and its EquippedSlot
+// store follows the attach in the same apply: the attach's switch-out never completes, the
+// borrow holds the gun's slot at once, the AdmDef byte keeps the rifle, and the trigger
+// fires the gun under the gun's def, through the binding gate the slot's def keys.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TryAttachOrDetach @0x4C1317
+//  ahead of the store @0x4C139D; WeaponAction_ProcessAllEntities @0x542690 (@0x5426AD);
+//  Input_HandleActionBinding_0 @0x4E0420 (@0x4E08E2, @0x4E08F2, @0x4E0961);
+//  WeaponAction_Fire @0x542B10 (@0x542C1C..0x542C2F)]
+void test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType gun_seat, bool route_store) {
 	auto wp = std::make_unique<w::World>();
 	w::World &world = *wp;
 	world.registry.configure_pool(0, 8);
@@ -165,15 +173,24 @@ void test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType gun_seat) {
 	// The attach's mount replaced the detach's pending personal slot.
 	CHECK(!local.weapon.switch_in_flight);
 	CHECK(local.weapon.usegun_switch == w::LocalUseGunSwitch::kAttach);
+	const uint8_t adm_at_attach = world.registry.get(player_h)->equipped_adm_index;
+	if (route_store) {
+		w::local_usegun_store_equipped_slot(world, local.weapon, *world.registry.get(gun_h));
+		CHECK(local.weapon.usegun_switch == w::LocalUseGunSwitch::kNone);
+		CHECK(local.weapon.usegun_slot_active && local.weapon.usegun_mount == gun_h);
+		CHECK(local.weapon.usegun_weapon_adm == kGunAdm);
+		CHECK(world.registry.get(player_h)->equipped_adm_index == adm_at_attach);
+	}
 	for (int i = 0; i < 16 && !local.weapon.usegun_slot_active; ++i) pump();
 	for (int i = 0; i < 16; ++i) pump();
 
 	const w::Entity &player = *world.registry.get(player_h);
 	CHECK(player.mounted && player.mount_target == gun_h);
 	CHECK(local.weapon.usegun_slot_active);
-	CHECK(player.equipped_adm_index == kGunAdm);
+	CHECK(player.equipped_adm_index == (route_store ? adm_at_attach : kGunAdm));
 	CHECK(local.inventory.equipped_combo == personal);
 	CHECK(installs.size() == 1 && installs[0] == "WPN_MINIGUN");
+	CHECK(w::local_weapon_fire_adm(world, local.weapon, player) == kGunAdm);
 
 	// The trigger fires the gun's own slot. The binding request reads the equipped
 	// def's category (ScriptWeaponInput::record_fire_request), so a mission that
@@ -189,15 +206,17 @@ void test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType gun_seat) {
 	}
 	CHECK(local.weapon.fired_serial > 0);
 	CHECK(gun_e.primary_weapon_slot.clip < clip_before);
-	CHECK(player.equipped_adm_index == kGunAdm);
+	CHECK(player.equipped_adm_index == (route_store ? adm_at_attach : kGunAdm));
 	world.local_player_state = nullptr;
 }
 
 } // namespace
 
 int main() {
-	test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType::Gunner);
-	test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType::Controller);
+	for (const bool route_store : {false, true}) {
+		test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType::Gunner, route_store);
+		test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType::Controller, route_store);
+	}
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

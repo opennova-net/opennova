@@ -327,6 +327,12 @@ const WeaponSlotState *active_local_weapon_slot(const World &world,
 // def. [orig: WeaponAction_Fire @0x542B10 - @0x542C1C..0x542C3F]
 uint8_t local_weapon_fire_adm(World &world, const LocalPlayerWeapon &w, const Entity &shooter);
 
+// A designated-G route leg's EquippedSlot store for the local player (each record seating L
+// on `gun`): the borrow holds the gun's routed slot at once, cutting off a switch-out the
+// record's attach staged; the AdmDef byte is left as it was.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - @0x4C139D / @0x4C13F8]
+void local_usegun_store_equipped_slot(World &world, LocalPlayerWeapon &w, Entity &gun);
+
 // g_LocalPlayerEntity->Pitch = 0, shared by the AbsorbPitch mount stamp and
 // the scope-up leg. [orig: @0x4DFAB7; @0x4DF314]
 void local_player_level_pitch(World &world);

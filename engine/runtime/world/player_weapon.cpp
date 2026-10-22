@@ -418,26 +418,81 @@ static uint8_t borrowed_slot_adm(World &world, Entity &gun) {
 	return carrier != nullptr ? carrier->primary_weapon_slot_adm : uint8_t{0xFF};
 }
 
+// The def of L's EquippedSlot, the slot the weapon walk pumps (active_local_weapon_slot):
+// a borrow's resolved slot (the gun's own, or its carrier's on a designated-G route, whose
+// def neither a route switch nor the route leg's store stamps into the AdmDef byte,
+// D-WPN-52), else the personal slot, which holds the installed def. `has_def` is false
+// for a slot with no def; the adm is the def's index by name (0xFF for one the table
+// lacks).
+static uint8_t local_equipped_slot_def_adm(World &world, const LocalPlayerWeapon &w,
+		bool &has_def) {
+	if (w.usegun_slot_active && w.usegun_mount.valid()) {
+		if (Entity *gun = world.registry.get(w.usegun_mount)) {
+			if (world.vehicles.resolve_mounted_ammo_slot(*gun) != nullptr) {
+				const uint8_t slot_adm = borrowed_slot_adm(world, *gun);
+				has_def = slot_adm != 0xFF;
+				return slot_adm;
+			}
+		}
+	}
+	has_def = !w.def_name.empty();
+	return has_def ? static_cast<uint8_t>(world.tables.weapons.index_of(w.def_name.c_str()))
+	               : uint8_t{0xFF};
+}
+
 // The adm byte a local fire names: the firing slot's def, looked up by its name; only a
-// slot with no def takes its owner's AdmDef byte (+0x2B0). The firing slot is the
-// EquippedSlot the weapon walk runs (active_local_weapon_slot): a borrow's slot (the
-// gun's own, or its carrier's on a designated-G route, whose def a route switch never
-// stamps into the byte, D-WPN-52), else the personal slot, which holds the installed def.
+// slot with no def takes its owner's AdmDef byte (+0x2B0).
 // [orig: WeaponAction_Fire @0x542B10 - the slot's def test @0x542C1C..0x542C21,
 //  AdmDef_FindIndexByName(def + 0x14) @0x542C23..0x542C2F, the +0x2B0 fallback
 //  @0x542C35..0x542C3F, the byte pushed as weaponFlags @0x542C55 to
 //  Entity_FireWeaponAndSendPacket @0x542C5E]
 uint8_t local_weapon_fire_adm(World &world, const LocalPlayerWeapon &w, const Entity &shooter) {
-	if (w.usegun_slot_active && w.usegun_mount.valid()) {
-		if (Entity *gun = world.registry.get(w.usegun_mount)) {
-			if (world.vehicles.resolve_mounted_ammo_slot(*gun) != nullptr) {
-				const uint8_t slot_adm = borrowed_slot_adm(world, *gun);
-				return slot_adm != 0xFF ? slot_adm : shooter.equipped_adm_index;
-			}
-		}
+	bool has_def = false;
+	const uint8_t slot_adm = local_equipped_slot_def_adm(world, w, has_def);
+	return has_def ? slot_adm : shooter.equipped_adm_index;
+}
+
+// A designated-G route leg's EquippedSlot store for the local player, on each record that
+// seats L on the gun: the gun's own slot (byte 1) or its carrier's (byte 2). The record's
+// attach ran first in the same apply, and its mount queued the switch-out on the slot L
+// held; the weapon walk pumps only the EquippedSlot, so that switch-out never completes.
+// The borrow holds the stored slot at once, nothing stays staged, the AdmDef byte keeps
+// the def it had, and the first-person model follows the slot's def.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TryAttachOrDetach called
+//  @0x4C1317 ahead of the stores @0x4C139D / @0x4C13F8; Entity_AttachToUseGunSlot
+//  @0x546B80 -> Player_MountWeaponSlot (called @0x546C38; g_PendingWeaponSlot @0x4DFB16,
+//  the switch-out queued on the EquippedSlot @0x4DFB96 / @0x4DFB9E);
+//  WeaponAction_ProcessAllEntities @0x542690 (the EquippedSlot read @0x5426AD, the
+//  WeaponAction_ProcessFrame call @0x5426C1)]
+void local_usegun_store_equipped_slot(World &world, LocalPlayerWeapon &w, Entity &gun) {
+	Entity *player = world.registry.get(world.cached.local_player);
+	if (player == nullptr) return;
+	const uint8_t slot_adm = borrowed_slot_adm(world, gun);
+	if (slot_adm == 0xFF) return;
+	if (w.usegun_slot_active && w.usegun_mount == gun.handle &&
+			w.usegun_weapon_adm == slot_adm && w.usegun_switch == LocalUseGunSwitch::kNone)
+		return;
+	// The personal def a later detach mounts again: the byte the attach left unstamped.
+	if (!w.usegun_slot_active && w.usegun_switch == LocalUseGunSwitch::kNone)
+		w.usegun_saved_adm = player->equipped_adm_index;
+	w.usegun_switch = LocalUseGunSwitch::kNone;
+	w.usegun_switch_action = -1;
+	w.switch_deferred_action = -1;
+	w.usegun_pending_mount = EntityHandle{};
+	w.usegun_pending_weapon_adm = 0xFF;
+	w.usegun_pending_on_foot = false;
+	w.usegun_slot_active = true;
+	w.usegun_on_foot = false;
+	w.usegun_mount = gun.handle;
+	w.usegun_weapon_adm = slot_adm;
+	if (const WeaponTableEntry *def = world.tables.weapons.by_index(slot_adm)) {
+		WeaponPresentationEvent event;
+		event.tick = world.logic_tick;
+		event.world_position = local_player_mission_position(world);
+		event.switch_to_weapon = def->name;
+		event.preserve_slot_state = true;
+		w.events.push_back(std::move(event));
 	}
-	if (w.def_name.empty()) return shooter.equipped_adm_index;
-	return static_cast<uint8_t>(world.tables.weapons.index_of(w.def_name.c_str()));
 }
 
 void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun) {
@@ -1459,8 +1514,13 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// [orig: Input_HandleActionBinding_0 @0x4E0420 (Input_IsBindingActive(149)
 		//  @0x4E07D9 ahead of the gate @0x4E0968..0x4E097B)]
 		if (player_alive && (w.fire_pressed || (active_slot.refire_queued && in.fire_held))) {
+			// The gate reads the EquippedSlot's def, not the AdmDef byte.
+			// [orig: Input_HandleActionBinding_0 @0x4E0420 - the EquippedSlot
+			//  @0x4E08DC..0x4E08E2, its def @0x4E08F2, the def's Type @0x4E0961]
+			bool slot_has_def = false;
+			const uint8_t slot_adm = local_equipped_slot_def_adm(world, w, slot_has_def);
 			const WeaponTableEntry *def =
-					world.tables.weapons.by_index(player->equipped_adm_index);
+					slot_has_def ? world.tables.weapons.by_index(slot_adm) : nullptr;
 			if (def != nullptr && !world.script.weapon_input.record_fire_request(def->category)) {
 				in.fire_pressed = false;
 				active_slot.refire_queued = false;

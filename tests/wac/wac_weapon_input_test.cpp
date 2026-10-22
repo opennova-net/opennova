@@ -36,6 +36,10 @@ struct Fixture {
         def.valid = true;
         def.category = static_cast<uint8_t>(category);
         def.weapon_class_slot = 8; // not the WAC category
+        // The EquippedSlot holds this def: the binding gate reads the slot's def
+        // [orig: Input_HandleActionBinding_0 @0x4E08E2 / @0x4E08F2 / @0x4E0961].
+        def.name = "WPN_WACTEST";
+        weapon.def_name = def.name;
         weapon.active = true;
         weapon_fsm_bake(nullptr, 0, nullptr, nullptr, nullptr, weapon.def);
         weapon.def.clip_capacity = 30;
