@@ -566,7 +566,12 @@ on both of retail's input-frame paths), an OpenNova actor through the
 `scenario_play` probe, whose scripted keys also arrive as the bound key's own
 events (the deploy keys read those). The summary's `scenario_witness` records
 each step's applied logic tick, and the run root keeps the exact script it
-played.
+played. A diagnostic `-ActorScenarioProbes <json>` (`[{"name": .., "args":
+{..}}]`) runs those game probes on an OpenNova actor while its scenario plays
+(`scenario_play` with `wait` false, each probe in turn, then a collecting
+`scenario_play`), for instruments whose watch lasts only while their run does
+(`use_press_trace`'s `watch_handle`, `body_trace`'s `watch_handles`); their
+statuses land in `scenario-probes.json`.
 
 A setup pose sticks only on the host's own player. A client snaps its players,
 its own included, to the host's replicated pose once they are more than two

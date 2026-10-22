@@ -60,6 +60,16 @@ param(
     # records every step's applied logic tick.
     [string] $Scenario = "",
 
+    # Diagnostic: a JSON file of game probes, [{"name": "<probe>", "args":
+    # {...}}], that run in turn on an OpenNova actor's MCP port while its
+    # scenario plays (a probe watch such as use_press_trace's watch_handle or
+    # body_trace's watch_handles lasts only while its run does, and the game
+    # runs one probe at a time): scenario_play starts with wait false, each
+    # probe runs to its end, then a scenario_play with neither scenario nor
+    # path collects the script's record. Every probe's final status lands in
+    # <run>\scenario-probes.json. A retail actor ignores it.
+    [string] $ActorScenarioProbes = "",
+
     # Round end and rotation (extension E2): the missions after -Mission in
     # the host's rotation, .BMS basenames in play order (a comma-separated
     # list is accepted). A retail host takes them through onhook_host_lan's
@@ -2015,11 +2025,34 @@ function Invoke-ScenarioStage {
     if ($null -ne $Setup) { $stage.setup = $Setup }
     $port = if ($actor -eq "host") { $HostMcpPort } else { $JoinerMcpPort }
     $process = if ($actor -eq "host") { $script:OpenNovaHost } else { $script:OpenNovaJoiner }
+    $probes = @()
+    if ($ActorScenarioProbes -and -not $SetupOnly) {
+        $probes = @(Get-Content -LiteralPath $ActorScenarioProbes -Raw | ConvertFrom-Json)
+    }
     $status = Invoke-GameProbe -Port $port -Name "scenario_play" -Process $process `
         -TimeoutSeconds $timeoutSeconds -PollMs 500 -Arguments @{
             scenario = $stage
-            wait = $true
+            wait = ($probes.Count -eq 0)
         }
+    if ($probes.Count -gt 0) {
+        if ([string] $status.state -ne "passed") {
+            throw "OpenNova scenario $($script:ScenarioSpec.name) did not start for its probes: state=$($status.state)"
+        }
+        $probeStatus = @(foreach ($probe in $probes) {
+            $probeArgs = @{}
+            if ($probe.PSObject.Properties.Name -contains "args") {
+                foreach ($field in $probe.args.PSObject.Properties) { $probeArgs[$field.Name] = $field.Value }
+            }
+            $result = Invoke-GameProbe -Port $port -Name ([string] $probe.name) -Process $process `
+                -TimeoutSeconds ($timeoutSeconds + 60) -PollMs 500 -Arguments $probeArgs
+            Write-Host "PARITY_RUN_NOTE scenario probe $($probe.name): state=$($result.state)"
+            [pscustomobject]@{ name = [string] $probe.name; args = $probe.args; status = $result }
+        })
+        $probeStatus | ConvertTo-Json -Depth 40 |
+            Set-Content -LiteralPath (Join-Path $RunRoot "scenario-probes.json") -Encoding UTF8
+        $status = Invoke-GameProbe -Port $port -Name "scenario_play" -Process $process `
+            -TimeoutSeconds $timeoutSeconds -PollMs 500 -Arguments @{ wait = $true }
+    }
     if ([string] $status.state -ne "passed" -or -not $status.verdict -or
             -not [bool] $status.verdict.ok) {
         $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
