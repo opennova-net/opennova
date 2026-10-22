@@ -1749,11 +1749,13 @@ func ring_chat_key(key: InputEventKey) -> bool:
 ## session's mission exit (_on_session_lost). A key such an arm passes (a non-digit
 ## under the USE hold) goes on to the chain's tail, the deploy test and the help and
 ## briefing page keys, as over live play (GameHudPresenter.handle_special_key skips
-## the held legs).
+## the held legs). An open quit dialog leads them all: its keys run ahead of the
+## round-over leg, and a key it leaves goes to the tail.
 func ring_special_key(key: InputEventKey, events: Array[int]) -> bool:
 	if _hud_presenter == null:
 		return false
-	if _state == State.WORLD and _end_flow.is_round_ended():
+	if _state == State.WORLD and _end_flow.is_round_ended() \
+			and not _hud_presenter.toggles().is_quit_dialog_open():
 		var bits := _hud_presenter.handle_round_over_key(key)
 		if bits & HudToggles.ROUND_OVER_RESTART:
 			_begin_restart_splash()
