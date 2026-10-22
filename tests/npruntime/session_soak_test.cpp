@@ -423,15 +423,35 @@ bool run_soak(const SoakCase &soak) {
 	// A reliable record a joiner sent within the last round trip is still on the wire when the
 	// drain ends; the host's ACK must retire it within the loss-free recovery bound, which is
 	// the property, whatever record the join's timeline happens to put in flight at that tick.
+	// The joiner keeps playing through the bound, and a record it frames meanwhile (a reply a
+	// host S2C draws) may be the one in flight at the bound's end, wherever the send boundaries
+	// fall (each remote add re-phases its connection's, D-NET-NEW-L3-21): the property covers
+	// the records framed when the drain ends, every packet below the joiner's next sequence.
 	std::vector<bool> c2s_retired(joiners.size(), false);
+	std::vector<uint32_t> drain_seq(joiners.size(), 0);
+	std::vector<std::size_t> depth_min(joiners.size(), SIZE_MAX), depth_max(joiners.size(), 0);
+	for (std::size_t i = 0; i < joiners.size(); ++i) drain_seq[i] = joiners[i].client->outbound_seq();
 	for (uint32_t f = 0;; ++f) {
 		bool all = true;
 		for (std::size_t i = 0; i < joiners.size(); ++i) {
-			if (joiners[i].client->retained_outbound_depth() == 0) c2s_retired[i] = true;
+			const inmatch::ClientRuntime &c = *joiners[i].client;
+			const uint32_t oldest = c.oldest_retained_outbound_seq();
+			if (oldest == 0 || oldest >= drain_seq[i]) c2s_retired[i] = true;
+			depth_min[i] = std::min(depth_min[i], c.retained_outbound_depth());
+			depth_max[i] = std::max(depth_max[i], c.retained_outbound_depth());
 			all = all && c2s_retired[i];
 		}
 		if (all || f > quick_ticks + 2u * kHoldoffTicks) break;
 		step(true);
+	}
+	for (std::size_t i = 0; i < joiners.size(); ++i) {
+		const inmatch::NapiNPConnection *hc = host_connection(joiners[i].addr);
+		std::printf("[soak %s] joiner %zu drain: below seq %u, oldest retained %u, depth %zu..%zu,"
+		            " host acks %u (queued %zu), joiner frontier %u\n",
+				soak.name, i, drain_seq[i], joiners[i].client->oldest_retained_outbound_seq(),
+				depth_min[i], depth_max[i], hc != nullptr ? hc->seq.last_inbound_seq : 0u,
+				hc != nullptr ? hc->seq.queued_inbound.size() : std::size_t{0},
+				joiners[i].client->inbound_frontier_seq());
 	}
 
 	bool ok = true;

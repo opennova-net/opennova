@@ -331,6 +331,14 @@ public:
 		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->retained_outbound_depth()
 		                                                     : 0;
 	}
+	// The oldest packet sequence still holding a retained (unACKed) reliable record, 0 when
+	// none: against outbound_seq() read earlier, whether the records framed by then retired,
+	// whatever later ones the session framed since.
+	uint32_t oldest_retained_outbound_seq() const {
+		if (role_ != Role::Joiner || joiner_ == nullptr) return 0;
+		const auto &retained = joiner_->connection().seq.retained_outbound;
+		return retained.empty() ? 0 : retained.begin()->first;
+	}
 	uint32_t send_flush_counter() const {
 		return (role_ == Role::Joiner && joiner_ != nullptr)
 				? joiner_->send_flush_counter()
