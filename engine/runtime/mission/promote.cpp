@@ -260,6 +260,15 @@ void initialize_item_class_brain(AiEntity &ae, World &world, AiSystem &ai,
 		hull->veh.net_smooth_target[2] = hull->position.z.q16;
 		hull->veh.net_smooth_heading = hull->heading;
 		hull->veh.net_interp_progress = 0;
+		// The brain's received registers, which a client's mover mirrors into its command
+		// ahead of any record: speed and lateral zero, the steer the hull's own Yaw, so a
+		// hull no record has staged yet holds its heading.
+		// [orig: Entity_InitVehicleAI @0x460200 - brain+0x2C4 = 0 @0x46032D, +0x2C8 = 0
+		//  @0x460333, +0x2CC = Yaw @0x46034F..0x460352; the cveh client mirror
+		//  @0x48B7F8..0x48B80A]
+		hull->veh.net_recv_speed = 0;
+		hull->veh.net_recv_lat = 0;
+		hull->veh.net_recv_steer_bam = hull->heading;
 	}
 }
 

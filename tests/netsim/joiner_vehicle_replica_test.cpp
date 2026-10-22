@@ -200,6 +200,9 @@ bool run_record_tail_mirrors_flags_and_health() {
 //  call @0x4687FF); Entity_InitVehicleAI @0x460200 - the seed @0x4602F9..0x460326;
 //  Entity_UpdateVehiclePhysics @0x48AF00 - the client chase @0x48B54C, the snap
 //  @0x48B563..0x48B640 not reached, the < 0x2000 arm @0x48B64B]
+// This rig spawns its hull straight into the registry, so no class init arms the hull's
+// mover ahead of the compact; a streamed hull's class init does
+// (run_streamed_hull_runs_its_client_mover_from_the_staged_pose).
 bool run_hull_holds_its_spawn_pose_until_its_first_compact() {
 	Harness h;
 	bool ok = true;
@@ -212,7 +215,7 @@ bool run_hull_holds_its_spawn_pose_until_its_first_compact() {
 	row->y = w::to_fixed(spawn.y);
 	row->z = w::to_fixed(spawn.z);
 	for (int frame = 0; frame < 4; ++frame) h.role.run_tick(h.input);
-	ok &= expect(!h.hull().veh.net_predicted, "no compact yet: the client mover is not armed");
+	ok &= expect(!h.hull().veh.net_predicted, "a rig hull with no class init: the client mover is not armed");
 	ok &= expect(w::to_fixed(h.hull().position.x) == w::to_fixed(spawn.x) &&
 	                     w::to_fixed(h.hull().position.y) == w::to_fixed(spawn.y) &&
 	                     w::to_fixed(h.hull().position.z) == w::to_fixed(spawn.z),
@@ -695,6 +698,76 @@ bool run_streamed_ai_row_takes_its_brain() {
 	return ok;
 }
 
+// A streamed brained hull's client mover runs from its class init, ahead of its first
+// compact: the allocator staged the row's own pose as the chase target and its Yaw as the
+// received steer, so the chase takes its hold arm and the mirrored command holds the hull's
+// heading. The first compact then stages a target without re-seeding the attitude.
+// [orig: Entity_InitVehicleAI @0x460200 - @0x4602F9..0x460326, the received registers
+//  @0x46032D / @0x460333 / @0x46034F..0x460352; Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53;
+//  Entity_UpdateVehiclePhysics @0x48AF00 - the client chase @0x48B53F..0x48B7C5 (the
+//  < 0x2000 arm @0x48B64B, the progress count @0x48B7BC..0x48B7C5), the received-register
+//  mirror @0x48B7F8..0x48B80A]
+bool run_streamed_hull_runs_its_client_mover_from_the_staged_pose() {
+	constexpr int32_t kHullType = 1502;
+	constexpr int32_t kYaw = 0x40000000;
+	std::array<def::DefItemDef, 2> rows{};
+	rows[0].id = mission::kItemIdOffset + 1;
+	rows[0].type = 1;
+	rows[1].id = mission::kItemIdOffset + kHullType;
+	rows[1].type = 1;
+	rows[1].hp = 500;
+	rows[1].physics = 1;
+	rows[1].attrib = w::kItemAttribAIData;
+	std::strcpy(rows[1].ai_function, "cveh");
+	std::strcpy(rows[1].move_function, "cveh");
+	def::DefItemsFile items{rows.data(), rows.size()};
+	Harness h;
+	h.kernel->wire_header_world = true;
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_item_traits([](int) -> uint8_t { return 0; });
+	aip::Profile profile;
+	h.kernel->ai_profiles = {{"wire_profile", profile}, {"helo1", profile}};
+	const w::EntityHandle hull_h{0x1007};
+	PoolSpawnBatch batch;
+	PoolSpawnRecord rec;
+	rec.slot_id = hull_h.packed;
+	rec.item_type_id = static_cast<uint16_t>(kHullType);
+	rec.pos_x = 40 * 65536;
+	rec.pos_y = -25 * 65536;
+	rec.pos_z = 3 * 65536;
+	rec.euler_z = kYaw;
+	rec.has_ai_trailer = true;
+	rec.ai_name = "Wire_Profile";
+	batch.records.push_back(rec);
+	batch.entity_count = 1;
+	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
+	h.role.run_tick(h.input);
+	bool ok = true;
+	const w::Entity *hull = h.kernel->world.registry.get(hull_h);
+	ok &= expect(hull != nullptr && h.kernel->world.ai.for_handle(hull_h) != nullptr &&
+					h.kernel->world.vehicles.traits.get(kHullType) != nullptr && hull->health > 0,
+			"staged pose: the streamed AIData hull takes its brain and its mover traits");
+	if (hull == nullptr) return ok;
+	ok &= expect(hull->veh.net_predicted,
+			"staged pose: the class init arms the client mover, no compact needed");
+	ok &= expect(hull->veh.net_recv_speed == 0 && hull->veh.net_recv_lat == 0 &&
+					hull->veh.net_recv_steer_bam == kYaw,
+			"staged pose: the allocator seeds the received registers, the steer its Yaw");
+	ok &= expect(hull->veh.net_interp_progress == 1 && hull->veh.net_interp_steps == 0,
+			"staged pose: the stream's tick ran the chase's hold arm once");
+	ok &= expect(hull->veh.cmd_speed == 0 && hull->veh.steer_target_bam == kYaw,
+			"staged pose: the mirror stages the seeded registers as the command");
+	for (int frame = 0; frame < 3; ++frame) h.role.run_tick(h.input);
+	hull = h.kernel->world.registry.get(hull_h);
+	if (hull == nullptr) return expect(false, "staged pose: the hull row stays");
+	ok &= expect(hull->veh.net_interp_progress == 4,
+			"staged pose: every tick ahead of the first compact runs the chase");
+	ok &= expect(hull->position.x.q16 == 40 * 65536 && hull->position.y.q16 == -25 * 65536 &&
+					hull->veh.yaw_bam == kYaw,
+			"staged pose: the hull holds its staged ground position and heading");
+	return ok;
+}
+
 int main() {
 	bool ok = true;
 	ok &= run_record_tail_mirrors_flags_and_health();
@@ -708,6 +781,7 @@ int main() {
 	ok &= run_streamed_building_takes_its_armory_points();
 	ok &= run_topology_resweep_keeps_initialized_words();
 	ok &= run_streamed_ai_row_takes_its_brain();
+	ok &= run_streamed_hull_runs_its_client_mover_from_the_staged_pose();
 	if (!ok || failures != 0) {
 		std::fprintf(stderr, "joiner_vehicle_replica_test: %d failure(s)\n", failures);
 		return 1;

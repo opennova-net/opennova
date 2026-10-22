@@ -560,7 +560,24 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 				runtime->state().find(lifetime.handle.packed);
 		if (row == nullptr || wire == nullptr) continue;
 		row->ai_text_file = wire->spawn_ai_name;
-		kernel.init_item_class_brain(lifetime.handle);
+		// A brained vehicle row's client mover runs from its class init, not from its
+		// first compact: the allocator staged the row's own pose as the chase target and
+		// its Yaw as the received steer, so ahead of any record the chase holds and the
+		// solve settles the row from that pose. The mover's entry reads the row's
+		// attitude and Flags as the 0x0D landed them (D-NET-433).
+		// [orig: Entity_InitVehicleAI @0x460200 - @0x4602F9..0x460326, @0x46032D..0x460352;
+		//  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the mover called ungated);
+		//  Entity_UpdateVehiclePhysics @0x48AF00 - the client chase @0x48B53F..0x48B7C5,
+		//  the received-register mirror @0x48B7F8..0x48B80A]
+		if (kernel.init_item_class_brain(lifetime.handle) &&
+				kernel.world.vehicles.traits.get(row->item_id) != nullptr) {
+			world::Entity::VehicleMotorState &m = row->veh;
+			m.air_pitch_bam = row->pitch_bam;
+			m.air_roll_bam = row->roll_bam;
+			m.plat_solve_valid = false;
+			m.net_engine_on = (row->flags & 0x80u) != 0u;
+			m.net_predicted = true;
+		}
 	}
 	// The wire materializer deliberately does not fabricate seat
 	// definitions. Item/model resolution above installs them, then this
