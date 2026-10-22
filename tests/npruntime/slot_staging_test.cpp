@@ -1,6 +1,7 @@
 // The parity runner's slot staging on our host (inmatch::stage_slot_position):
-// the authority writes the three Position words of the body a player slot holds,
-// nothing else; an empty slot, a bodiless player and a joiner refuse. On the
+// the authority writes the three Position words of the body a player slot holds
+// and, as the onHook bridge's slot pose does, mission yaw 0 and pitch 0 on the body
+// and its brain; an empty slot, a bodiless player and a joiner refuse. On the
 // authority the staged body then holds against its player's uplinks from the old
 // spot only past the chase's 2-unit drop, as on a retail host.
 // [orig: Server_NotifyPlayerKicked @0x508304..0x508332 (the slot walk);
@@ -60,9 +61,12 @@ struct Rig {
     w::Entity &ent() { return *world->registry.get(body); }
 };
 
-void test_a_slot_body_takes_the_three_position_words() {
+void test_a_slot_body_takes_the_three_position_words_and_yaw_0() {
     Rig r;
     r.ent().heading = w::placed_heading_bam(33);
+    r.ent().pitch_bam = 0x01000000;
+    r.world->ai.for_handle(r.body)->heading = w::placed_heading_bam(33);
+    r.world->ai.for_handle(r.body)->pitch = 0x01000000;
     const inmatch::SlotStagingResult staged =
             inmatch::stage_slot_position(r.ctx, 1, 35.0, -16.0, 16.9);
     CHECK(staged.status == inmatch::SlotStagingStatus::Staged);
@@ -72,7 +76,15 @@ void test_a_slot_body_takes_the_three_position_words() {
     CHECK(r.ent().position.y.q16 == -16 * 65536);
     CHECK(r.ent().position.z.q16 == 1107558);
     CHECK(staged.position_q16[2] == 1107558);
-    CHECK(r.ent().heading == w::placed_heading_bam(33)); // position only
+    // Mission yaw 0 and pitch 0, on the body and its brain (x6's staged retail body:
+    // heading byte 64, the yaw-0 heading's top byte).
+    const int32_t yaw0 = w::bam_heading_from_mission_yaw_deg(0.0);
+    CHECK(static_cast<uint32_t>(yaw0) >> 24 == 64u);
+    CHECK(r.ent().heading == yaw0);
+    CHECK(r.ent().pitch_bam == 0);
+    CHECK(r.world->ai.for_handle(r.body)->heading == yaw0);
+    CHECK(r.world->ai.for_handle(r.body)->pitch == 0);
+    CHECK(staged.heading_bam == yaw0 && staged.pitch_bam == 0);
 }
 
 void test_an_empty_slot_a_bodiless_player_and_a_joiner_refuse() {
@@ -121,7 +133,7 @@ void test_a_staged_body_holds_against_its_players_uplink_only_past_two_units() {
 } // namespace
 
 int main() {
-    test_a_slot_body_takes_the_three_position_words();
+    test_a_slot_body_takes_the_three_position_words_and_yaw_0();
     test_an_empty_slot_a_bodiless_player_and_a_joiner_refuse();
     test_a_staged_body_holds_against_its_players_uplink_only_past_two_units();
     if (failures == 0) std::printf("npruntime_slot_staging: all passed\n");

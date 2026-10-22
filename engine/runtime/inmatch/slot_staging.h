@@ -3,11 +3,12 @@
 // slot holds. The onHook bridge's apply_pose_slot does the same on a retail
 // host: it walks the slot table (an index under the capacity, the row's
 // in-use byte, the Person at +0) and writes the Person's three Position
-// words (the hook also writes yaw 0 and pitch 0; retail's authority has no
-// move-a-slot-body path of its own). Position only: a staged heading never holds
-// (the player's own look returns next frame), and on the authority a staged pose
-// holds against the player's own uplinks only past the chase's 2-unit drop
-// (D-NET-NEW-LP-2).
+// words and its yaw and pitch from the snapshot's mission yaw 0 and pitch 0
+// (retail's authority has no move-a-slot-body path of its own). Ours writes the
+// same: the yaw-0 heading shows until the player's own look returns, as x6's
+// RR / RR-aa frames show a staged retail body's heading byte 64 for a frame
+// (ours kept the body's own, 14); on the authority a staged pose holds against
+// the player's own uplinks only past the chase's 2-unit drop (D-NET-NEW-LP-2).
 // [orig: the slot walk Server_NotifyPlayerKicked @0x5082D0 - the capacity test
 //  @0x508304..0x508316, the row g_PlayerSlots + index * 0x188E8 @0x50831C..0x508322,
 //  the in-use byte +4 @0x50832E..0x508332; the Person's Position words, as the
@@ -34,12 +35,14 @@ struct SlotStagingResult {
 	SlotStagingStatus status = SlotStagingStatus::NotAuthority;
 	uint16_t handle = 0xFFFF;       // the body's wire handle when staged
 	int32_t position_q16[3] = {};   // the words written
+	int32_t heading_bam = 0;        // the mission-yaw-0 heading written
+	int32_t pitch_bam = 0;          // the pitch written (0)
 	std::string error;              // the refusal, for the probe's per-entry result
 };
 
-// Stage the body slot `slot` holds at the BMS position (x, y, z) in units: the
-// same 16.16 conversion the scenario driver's setup pose takes
-// (devtools::script_pose_from_mission).
+// Stage the body slot `slot` holds at the BMS position (x, y, z) in units, with
+// mission yaw 0 and pitch 0: the same 16.16 and angle conversions the scenario
+// driver's setup pose takes (devtools::script_pose_from_mission).
 SlotStagingResult stage_slot_position(NapiNPServerCtx &ctx, int slot, double x, double y,
 		double z);
 

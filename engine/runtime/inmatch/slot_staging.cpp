@@ -4,6 +4,7 @@
 #include <runtime/devtools/scripted_input.h> // script_pose_from_mission: the driver's 16.16 conversion
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/world.h>
 
 namespace opennova::inmatch {
@@ -41,12 +42,23 @@ SlotStagingResult stage_slot_position(NapiNPServerCtx &ctx, int slot, double x, 
 		out.status = SlotStagingStatus::OutOfRange;
 		return out;
 	}
-	// The three Position words, nothing else. [orig: Server_PositionPlayerForSpawn
+	// The three Position words. [orig: Server_PositionPlayerForSpawn
 	//  @0x50CFBE / @0x50CFCA / @0x50CFD0]
 	body->position.set_q16({pose.position_q16[0], pose.position_q16[1], pose.position_q16[2]});
+	// The bridge's yaw 0 and pitch 0 with them: the Person's heading and pitch words
+	// (entity+16 / entity+20) on the body and its brain, as LocalPlayer::apply_pose writes
+	// the bridge's ApplyPose; the player's own look takes them back on its next update.
+	body->heading = pose.heading_bam;
+	body->pitch_bam = pose.pitch_bam;
+	if (world::AiEntity *person = ctx.world->ai.for_handle(body->handle)) {
+		person->heading = pose.heading_bam;
+		person->pitch = pose.pitch_bam;
+	}
 	out.status = SlotStagingStatus::Staged;
 	out.handle = body->handle.packed;
 	for (int axis = 0; axis < 3; ++axis) out.position_q16[axis] = pose.position_q16[axis];
+	out.heading_bam = pose.heading_bam;
+	out.pitch_bam = pose.pitch_bam;
 	return out;
 }
 

@@ -582,8 +582,11 @@ applies them through `onhook_load_debug_snapshot`'s `target_slot` (an onHook
 pair with `apply_pose_slot`, opennova-int #74); an OpenNova host (OR, OO)
 through the `stage_slot` probe on its MCP port (`game_probe stage_slot
 {"staging": [...]}`, `godot/probes/net/stage_slot_probe.gd`), which writes the
-three Position words of the body that slot holds, as `apply_pose_slot` does
-(`inmatch::stage_slot_position`), and answers one result per entry. An entry
+three Position words of the body that slot holds and its heading and pitch at
+mission yaw 0 and pitch 0, as `apply_pose_slot` does with the snapshot's yaw 0
+and pitch 0 (`inmatch::stage_slot_position`; x6's RR frames show the staged
+retail body's heading byte 64 for a frame, where ours kept the body's own), and
+answers one result per entry. An entry
 the OpenNova host refuses (an empty slot, a player with no body, a position
 outside the fixed-point range) fails the cell. The scenario witness records
 the driver and each entry's result, and `compare_scenario.py` requires every
@@ -596,10 +599,10 @@ what sticks:
   when it is staged.
 - z settles onto the ground, so a staging z is on or near the ground.
 - the heading never sticks: the host's next frame carries the player's own
-  heading again. A staging entry has no heading (for a retail host the runner
-  writes yaw 0 and pitch 0, which the snapshot format needs; `stage_slot`
-  refuses any field but the position); a joiner actor's heading comes from its
-  own setup pose.
+  heading again. A staging entry has no heading (both hosts write yaw 0 and
+  pitch 0 with the position, the retail runner's because the snapshot format
+  needs them; `stage_slot` refuses any field but the position); a joiner
+  actor's heading comes from its own setup pose.
 - a joiner actor staged where its own setup pose puts it lands there from
   either side of the two units: past them the staging snaps it, within them
   its pose put it there and the glide holds it. x1's `drive` had no staging:
