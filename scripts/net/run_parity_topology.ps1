@@ -453,6 +453,8 @@ function Test-ScenarioEndsJoinerSession {
 $script:ScenarioSpec = $null
 $script:ScenarioWitness = $null
 $script:ScenarioEarlySetup = $null
+# The previous aim_at's read and look (Resolve-ScenarioAim); none before the first.
+$script:LastScenarioAim = $null
 $script:DesktopResetBeforeWindow = $false
 if ($Scenario) {
     if ($ExerciseInput -or $WireOnly) {
@@ -3704,8 +3706,20 @@ function Wait-OpenNovaJoinerAfterRotation {
                 auto_deploy = [bool] $AutoDeploy
                 exercise_motion = [bool] $ExerciseInput
             }
+        # At the 0x25 our joiner unloads the old mission; until the next one's
+        # load builds a simulation the snapshot has nothing to witness. That is
+        # the reload in progress, not a failure (p192's Serve Only RO).
+        if ([string] $status.state -eq "failed" -and $status.verdict -and
+                [string] $status.verdict.summary -eq "no simulation to witness") {
+            if ([DateTime]::UtcNow -ge $deadline) {
+                throw "OpenNova joiner had no simulation for $TimeoutSeconds s after the rotation's S2C 0x25"
+            }
+            Start-Sleep -Milliseconds 1000
+            continue
+        }
         if ([string] $status.state -ne "passed" -or -not $status.verdict) {
-            throw "OpenNova joiner state snapshot failed after the rotation: state=$($status.state) $($status.error)"
+            $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
+            throw "OpenNova joiner state snapshot failed after the rotation: state=$($status.state) $why"
         }
         $state = $status.verdict.data
         if (-not $first) { $first = $state }
