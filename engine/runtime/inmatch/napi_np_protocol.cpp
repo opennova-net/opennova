@@ -1026,13 +1026,18 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// accepted node's index is its dcb: the state change makes it connection_id, the 0x82's
 	// MI, the joiner's 0x48 echo and its player's entity+0x78. A process that browsed, joined
 	// or hosted before numbers its joiners from where those creates left the counter.
-	// (D-NET-713)
+	// (D-NET-713) The state change also keeps the first address-0 node's (a listen host's
+	// self-join twin's) connection_id in the protocol, first-wins, and its teardown clears and
+	// rescans it; nothing reads that word, so it is not modeled.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - the pre-create gates
 	//  @0x62BDAE..0x62BE8F, the lookup @0x62BEBA, the retransmit @0x62BEE6..0x62BEF1, the create
 	//  @0x62BF06 ahead of the validate callback (+0x2D0 loaded @0x62C06E, `call edi` @0x62C0AA);
 	//  CNapiNPConnection_Create - the step
 	//  @0x62B282..0x62B296; CNapiNPConnection_OnStateChange @0x626060 - connection_id
-	//  @0x626199..0x62619C]
+	//  @0x626199..0x62619C, proto+0xED8 @0x6261A6..0x6261AE (net_flags = address 0 @0x626093);
+	//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - its clear @0x625450 and rescan
+	//  @0x625456..0x625491; NapiNPProtocol_Create @0x625730 - its zero @0x625A93; the
+	//  displacement in no other instruction]
 	const uint32_t connection_id = next_connection_index();
 	// The created node's keys come at the create too, ahead of the validate callback, so a
 	// refused 0x42 has drawn them from the manager's PRNG as well. R2: the server SK and then

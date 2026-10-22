@@ -582,6 +582,13 @@ struct NapiNPConnection {
 	// read. Zero = not yet armed; the first per-tick read arms it without sending.
 	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 reads +0x640;
 	//  BuildOutgoingPackets stamps it @0x628605]
+	// The word beside it, +0x63C, is a write-only stamp, not modeled: every send wrapper sets it
+	// to GetTickCount after a good SendTo, and nothing reads it.
+	// [orig: CNapiNPConnection_SendSessionPacket @0x61F041, CNapiNPConnection_SendPing
+	//  @0x61F269, CNapiNPConnection_SendDisconnectPacket @0x61F563,
+	//  CNapiNPConnection_SendSessionInit @0x621314, CNapiNPConnection_SendMissingSeqList
+	//  @0x62377A; CNapiNPConnection_Create's zero @0x62AFE7; CNapiNPConnection_OnStateChange
+	//  @0x626166; the displacement in no other instruction]
 	uint32_t last_session_send_ms = 0;
 	// Retail's has_pending_out (+0x650): an admitted C2S packet carried message records, so
 	// the next open S2C boundary builds a packet (header-only if nothing else) to ACK it;
