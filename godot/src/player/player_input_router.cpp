@@ -160,6 +160,7 @@ void PlayerInputRouter::teardown() {
 	row_events_.clear();
 	action_events_.clear();
 	sample_records_.clear();
+	pump_records_.clear();
 }
 
 // The sim, re-resolved per use: mission reloads free the runtime and its sim,
@@ -345,7 +346,11 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 }
 
 void PlayerInputRouter::queue_records(opennova::controls::InputEventQueue &r_records) {
-	// Behind the records already waiting (the console's); the queue's cap drops the rest.
+	// Behind the records already waiting (the console's): the message pump's wheel records,
+	// then the sample's action rows; the queue's cap drops the rest.
+	for (const opennova::controls::InputEventRecord &record : pump_records_)
+		(void)r_records.push(record);
+	pump_records_.clear();
 	for (const opennova::controls::InputEventRecord &record : sample_records_)
 		(void)r_records.push(record);
 	sample_records_.clear();
@@ -660,6 +665,7 @@ void PlayerInputRouter::reset_input_state() {
 	row_events_.clear();
 	action_events_.clear();
 	sample_records_.clear();
+	pump_records_.clear();
 	const Ref<Simulation> reset_sim = sim();
 	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
 }
@@ -717,10 +723,15 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
                 : opennova::controls::kWheelDelta;
         int notches = wheel_.feed(
                 button->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? units : -units);
+        // Each notch's row is a record the next update's message pump queues, ahead of
+        // that update's keyboard pass, and its drain dispatches (queue_records; engine
+        // controls::WheelRemainder and inmatch::TickInputSource carry the witness).
         const auto dispatch = [&](MouseButton p_wheel) {
             const String token = controls_->mouse_event_token(p_wheel);
             if (const auto request = opennova::controls::player_wheel_action(token.utf8().get_data()))
-                apply_player_action(*event_sim.ptr(), *request);
+                pump_records_.push_back({request->code, 0, 0, 0,
+                        controls_->is_token_fire_signed(token),
+                        opennova::controls::InputEventOrigin::Device});
         };
         for (; notches > 0; --notches) dispatch(MOUSE_BUTTON_WHEEL_UP);
         for (; notches < 0; ++notches) dispatch(MOUSE_BUTTON_WHEEL_DOWN);
@@ -742,6 +753,7 @@ void PlayerInputRouter::reset() {
 	row_events_.clear();
 	action_events_.clear();
 	sample_records_.clear();
+	pump_records_.clear();
 	tick_scripted_look_ = Vector2();
 }
 

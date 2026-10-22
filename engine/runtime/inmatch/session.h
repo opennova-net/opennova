@@ -194,6 +194,17 @@ struct PauseRowWord {
 // dispatches every record in order, handing each one whose arm the role does not own to
 // dispatch_record [orig: Input_ProcessFrame @0x49D520 (Input_ProcessPlayerFrame @0x49D58B
 //  appends, the drain @0x49D599..0x49D5E7, Input_HandleActionBinding @0x49D5D8)].
+// The update's message pump queues the mouse wheel's records ahead of its input frame, so
+// the source queues them first: each whole notch's row (the 256 / 512 event onto the rows
+// bound to the wheel's 1024 / 2048 mask) with the arguments 0 and the Shift sign; a frame
+// that runs no update pumps no message, so its notches wait for the next update
+// [orig: Game_ProcessMainFrame @0x5263F0 (Game_PumpWindowMessages @0x526608 ahead of
+//  Input_ProcessFrame @0x52661D); Game_PumpWindowMessages @0x7621C0 (DispatchMessageA
+//  @0x762203); Game_WindowProc @0x7624C0 (Input_DispatchMouseEvent @0x762574);
+//  Input_DispatchMouseEvent @0x761470 (the callbacks' 256 / 512 events @0x76158F /
+//  @0x7615C0); Input_ProcessBindings @0x4DDA50 (the arguments 0 @0x4DDB6D..0x4DDB78);
+//  Input_TryDispatchBindingByWeaponType @0x499180 (the sign @0x49919E..0x4991A4, the wheel
+//  rows @0x4992FE..0x499327, Input_QueueEvent @0x499238)].
 class TickInputSource {
 public:
 	virtual ~TickInputSource() = default;
