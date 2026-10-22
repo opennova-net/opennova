@@ -209,7 +209,15 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
                 }
                 score += 4;
             }
-            score += static_cast<int32_t>((uint32_t(e.net_id) + (key >> 8) - uint32_t(candidate.net_id)) & 7u);
+            // Both DcbIds (+0x7C): a player body's is its class-init word (body_dcb_id),
+            // 10000 + its slot on a plyr row, where ours' Entity::net_id holds its net id.
+            // [orig: `sar eax, 8; sub eax, [edi+7Ch]; add eax, [esi+7Ch]; and eax, 7`
+            //  @0x4BE38C..0x4BE39F]
+            const int32_t candidate_dcb_id = candidate_body != nullptr
+                    ? body_dcb_id(world, *candidate_body, &candidate)
+                    : candidate.net_id;
+            score += static_cast<int32_t>((uint32_t(body_dcb_id(world, e, body)) + (key >> 8) -
+                    uint32_t(candidate_dcb_id)) & 7u);
             if (score > best_score && score >= 4 &&
                     io::bam_abs(io::bam_sub(bearing, inf.body_heading)) <= 835132480) {
                 best_score = score;

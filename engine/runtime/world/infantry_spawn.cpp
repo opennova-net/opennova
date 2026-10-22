@@ -132,8 +132,8 @@ void warm_up_player_body(World &world, Entity &entity) {
     if (body == nullptr || !body->inf.active) return;
     // The placement wrote the entity's words; the warm-up works on them. Its count reads the
     // DcbId (+0x7C): the plyr class init stamps 10000 + the slot byte, which ours keeps off
-    // Entity::net_id (player bodies carry 0 there); the organic init and an item row write
-    // none, so their body keeps the spawn memset's 0.
+    // Entity::net_id (player bodies carry their net id there; world::body_dcb_id); the
+    // organic init and an item row write none, so their body keeps the spawn memset's 0.
     // [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B1149..0x4B1173; Entity_InitOrganicAI
     //  @0x4BFCC0; Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE]
     const uint32_t dcb_id = player_item_row(world, entity).body_class == PlayerBodyClass::kPlayer

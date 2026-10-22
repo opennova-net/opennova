@@ -417,6 +417,26 @@ static void test_mounted_attention_respects_vehicle_motion() {
     }
 }
 
+// The scan's & 7 term reads both bodies' DcbId (+0x7C): a player candidate's is its class
+// init's word, 10000 + its slot (body_dcb_id), not the net id ours keeps on its Entity and
+// AiEntity. Here the base is (20 u - 6.5 u) >> 16 = 13 less 12; the observer's 8
+// plus 512 >> 8 less 10007 is 3 mod 8, so the joiner at slot 7 scores 4 and is looked at,
+// where its net id 0xFFF0 in its place would leave 2 and a score of 3.
+// [orig: Entity_UpdateInfantryAI @0x4BE38C..0x4BE39F; PlayerClass_InitEntity
+//  @0x4B1149..0x4B1173]
+static void test_a_player_candidates_term_reads_its_dcb_id() {
+    Fixture f;
+    const auto joiner = f.person({6.5f, 0, 2}, 0xFFF0); // ours: a player body's net id
+    Entity &row = *f.world.registry.get(joiner);
+    row.engine_flags |= kEntityFlagPlayer;
+    row.player_slot_id = 7;
+    AiEntity &body = *f.world.ai.at(f.world.ai.attach(joiner));
+    body.net_id = 0xFFF0;    // the same net id on its AiEntity, which the term never reads
+    body.inf.active = false; // its own update stays out of the tick
+    f.tick(512);
+    CHECK(f.body().inf.head_look_target == joiner);
+}
+
 int main() {
     test_idle_scan_relations_and_history();
     test_speaker_identity_and_authority();
@@ -429,6 +449,7 @@ int main() {
     test_look_does_not_steer_root_motion();
     test_look_chase_instruction_boundaries();
     test_mounted_attention_respects_vehicle_motion();
+    test_a_player_candidates_term_reads_its_dcb_id();
     std::printf("infantry attention: %s (%d failures)\n", failures ? "FAILED" : "OK", failures);
     return failures ? 1 : 0;
 }

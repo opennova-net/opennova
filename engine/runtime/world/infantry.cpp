@@ -155,12 +155,14 @@ bool AiSystem::infantry_think(AiEntity &e, World &world) {
     // other think clears it. [orig: @0x4b9910 think head — aiComp[36] = 0
     // unless aiComp[37] == 125]
     if (ch != 125) slot.f[36] = 0;
-    // Every think seeds aimPitch from the SSN; the tracking reset or an aim
+    // Every think seeds aimPitch from the DcbId (+0x7C: a placed record's SSN, a
+    // player body's class-init word, body_dcb_id); the tracking reset or an aim
     // producer overwrites it later, so it shows only while airborne. An
     // airborne body without the 0x80 climb order skips the rest of the think.
-    // [orig: `shl ecx,1Bh; sar ecx,4` @0x4BAA4B..0x4BAA59; the skip
-    //  @0x4BAA57..0x4BAA66]
-    inf.aim_pitch = io::bam_sar(static_cast<int32_t>(static_cast<uint32_t>(e.net_id) << 27), 4);
+    // [orig: `mov ecx,[esi+7Ch]; shl ecx,1Bh; sar ecx,4` @0x4BAA4B..0x4BAA59; the
+    //  skip @0x4BAA57..0x4BAA66]
+    const int32_t dcb_id = body_dcb_id(world, e, world.registry.get(e.handle));
+    inf.aim_pitch = io::bam_sar(static_cast<int32_t>(static_cast<uint32_t>(dcb_id) << 27), 4);
     if (const Entity *self = world.registry.get(e.handle)) {
         const uint32_t flags = self->flags | self->engine_flags;
         if ((flags & kEntityFlagAiClimb) == 0 && (flags & kEntityFlagInAir) != 0) return false;
@@ -767,6 +769,21 @@ PhysicsClass body_move_row(const World &world, const AiEntity &e, const Entity *
     return player_item_row(world, *ent).move_row;
 }
 
+// See the ai.h declaration.
+int32_t body_dcb_id(const World &world, const AiEntity &e, const Entity *ent) {
+    const bool player_body = e.inf.is_local_player || e.net_is_remote_peer ||
+            (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0);
+    if (!player_body || ent == nullptr) return e.net_id;
+    // The bound row as body_move_row picks it (the seed's in the harness case).
+    const PlayerTemplate &row =
+            world.tables.item_rows.empty() || !world.tables.class_cammo_installed
+            ? world.tables.player
+            : player_item_row(world, *ent);
+    // [orig: PlayerClass_InitEntity `movzx edx, byte [esi+154h]; add edx, 2710h`
+    //  @0x4B1149..0x4B1155, the +0x7C store @0x4B1173]
+    return row.body_class == PlayerBodyClass::kPlayer ? 10000 + ent->player_slot_id : 0;
+}
+
 // See infantry_internal.h.
 bool infantry_org2_body(const World &world, const AiEntity &e, const Entity *ent) {
     return body_move_row(world, e, ent) == PhysicsClass::Org2;
@@ -1151,10 +1168,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     InfantryState &inf = e.inf;
-    // Per-entity stagger key. [orig: Entity_UpdateInfantryAI @0x4b9910 head
-    //  @0x4b9948..0x4b9953 — tickKey = current_tick + 36 * entity+0x7C (the net
-    //  id), strength-reduced as lea [eax+eax*8] then lea [tick+edx*4]]
-    const uint32_t key = infantry_org1_key(logic_tick, e.net_id);
+    // Per-entity stagger key: the tick plus 36 times the DcbId (+0x7C: a placed
+    // record's SSN, a player body's class-init word, body_dcb_id).
+    // [orig: Entity_UpdateInfantryAI @0x4b9910 head @0x4b9948..0x4b9953, tickKey =
+    //  current_tick + 36 * entity+0x7C, strength-reduced as lea [eax+eax*8] then
+    //  lea [tick+edx*4]]
+    const uint32_t key = infantry_org1_key(logic_tick, body_dcb_id(world, e, tick_entity));
     // Tick-start pose Z: the resolver's ladder entry gate measures the CL anchor
     // against the pose at the motor head, not the integrated one.
     // [orig: savedLivePose captured @ 0x4b4190-0x4b419c; entry read @ 0x4b327d]

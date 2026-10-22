@@ -1003,6 +1003,37 @@ void test_an_org_rows_player_body_takes_the_organic_init() {
 	}
 }
 
+// A body's DcbId (+0x7C), which the org1 update's stagger key and its think's aim seed read:
+// a player body's is its class init's word, 10000 + its slot on a plyr row (ours' AiEntity
+// keeps the player's net id), 0 on an org row (the organic init writes none); a placed
+// person's is its record's.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the key @0x4B9948..0x4B9953, the aim seed
+//  @0x4BAA4B..0x4BAA59; PlayerClass_InitEntity @0x4B1060 - @0x4B1149..0x4B1173;
+//  Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE]
+void test_a_player_bodys_dcb_id_is_its_class_inits() {
+	Rig r;
+	w::Entity *plyr = r.spawn_remote(kPlyr);
+	w::Entity *org = r.spawn_remote(kOrg);
+	CHECK(plyr != nullptr && org != nullptr);
+	if (plyr == nullptr || org == nullptr) return;
+	plyr->player_slot_id = 3;
+	org->player_slot_id = 3;
+	const w::AiEntity *plyr_ai = r.world->ai.for_handle(plyr->handle);
+	const w::AiEntity *org_ai = r.world->ai.for_handle(org->handle);
+	CHECK(plyr_ai != nullptr && org_ai != nullptr);
+	if (plyr_ai == nullptr || org_ai == nullptr) return;
+	CHECK(w::body_dcb_id(*r.world, *plyr_ai, plyr) == 10003);
+	CHECK(plyr_ai->net_id != 10003);
+	CHECK(w::body_dcb_id(*r.world, *org_ai, org) == 0);
+	// The org row's key steps by the tick alone.
+	CHECK(w::infantry_org1_key(16, w::body_dcb_id(*r.world, *org_ai, org)) == 16u);
+	// A placed person: its record's id.
+	w::AiEntity npc{};
+	npc.net_id = 77;
+	w::Entity person{};
+	CHECK(w::body_dcb_id(*r.world, npc, &person) == 77);
+}
+
 } // namespace
 
 int main() {
@@ -1023,6 +1054,7 @@ int main() {
 	test_the_placement_warm_up_counts_by_the_dcb_id();
 	test_the_update_follows_the_rows_move_function();
 	test_an_org_rows_player_body_takes_the_organic_init();
+	test_a_player_bodys_dcb_id_is_its_class_inits();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
