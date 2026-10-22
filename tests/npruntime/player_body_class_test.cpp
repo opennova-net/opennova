@@ -1573,7 +1573,7 @@ void test_an_arty_row_body_runs_the_barrage() {
 		ae->inf.wpn_state = 44;
 		ae->inf.wpn_deferred = c.shells;
 		r.world->rules.mp_session = false;
-		r.world->terrain = nullptr;
+		r.world->tables.terrain = nullptr;
 		r.world->logic_tick = c.tick;
 		r.world->ai.update_organic(*ae, *r.world, c.tick);
 		if (!c.fires) {

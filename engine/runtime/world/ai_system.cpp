@@ -742,9 +742,9 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
             FixedVec3 origin = body.position.q16();
             origin.x = io::bam_add(origin.x, static_cast<int32_t>((radius * cos_q22) >> 22));
             origin.y = io::bam_add(origin.y, static_cast<int32_t>((radius * sin_q22) >> 22));
-            const int32_t ground = world.terrain != nullptr
+            const int32_t ground = world.tables.terrain != nullptr
                     ? terrain::height_field_mip_max_bilinear_fixed(
-                              *world.terrain, origin.x, origin.y)
+                              *world.tables.terrain, origin.x, origin.y)
                     : 0;
             origin.z = io::bam_add(ground, 0x2BC0000);
             world.round_sim.fire_npc_ammo(world, body.primary_occupant, origin, e.heading,
