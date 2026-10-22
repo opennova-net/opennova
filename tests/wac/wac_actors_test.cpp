@@ -252,7 +252,9 @@ static void test_turn_reaches_the_motor_and_org2_word() {
         f.body().net_is_remote_peer = player_kind == 1;
         f.entity().engine_flags = player_kind == 2 ? kEntityFlagPlayer : 0;
         f.body().inf.jump_cooldown = 7;
-        f.script("ssnturn(1,91)\n");
+        // A player body answers the script by its DcbId, 10000 + its slot byte 0
+        // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 1.
+        f.script("ssnturn(10000,91)\n");
         CHECK(f.body().inf.jump_cooldown == -11927552);
         CHECK(f.body().inf.target_heading == 0x40000000);
     }

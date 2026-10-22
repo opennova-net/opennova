@@ -2651,7 +2651,9 @@ static void run_mounted_collision_tail_phase(bool player_body) {
     ai.root_motion = &channel_only; // the gunner holds its channel
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x10, 1);
-    CHECK(w->commands.mount(0x10, 0x20));
+    // A player body answers the script by its DcbId, 10000 + its slot byte 0 (entity_dcb_id,
+    // D-NET-NEW-L4-21), not its record word.
+    CHECK(w->commands.mount(player_body ? 10000 : 0x10, 0x20));
     w->registry.get(gun_h)->has_item_def = false; // the def-less gun past boarding
     CHECK(collision.instance_count() == 0);
 

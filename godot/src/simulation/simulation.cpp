@@ -1021,7 +1021,9 @@ Error Simulation::debug_crew_local_player(int p_vehicle_ssn) {
 	const opennova::world::Entity *lp =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (lp == nullptr) return ERR_UNAVAILABLE;
-	return kernel_->world.commands.mount(static_cast<uint16_t>(lp->net_id),
+	// The local body by its handle: its script SSN is its DcbId (world::entity_dcb_id), never
+	// its record word.
+	return kernel_->world.commands.mount(opennova::world::EntityTarget(lp->handle),
 	                              static_cast<uint16_t>(p_vehicle_ssn))
 			? OK
 			: ERR_INVALID_PARAMETER;

@@ -1282,9 +1282,11 @@ static void test_player_group_loops_and_handle_aliases() {
     Entity seed; seed.item_id = 1001; seed.item_type_index = 7; seed.health = seed.health_max = 100;
     seed.flags = kEntityFlagPlayer; seed.team = 1; seed.net_id = 100;
     const EntityHandle first = w.registry.spawn(0, seed);
-    seed.net_id = 500; seed.team = 2; seed.flags |= kEntityFlagDead;
+    // A player body answers a script SSN by its DcbId, 10000 + its slot byte (entity_dcb_id,
+    // D-NET-NEW-L4-21), not its record word: second is SSN 10005.
+    seed.net_id = 500; seed.team = 2; seed.flags |= kEntityFlagDead; seed.player_slot_id = 5;
     const EntityHandle second = w.registry.spawn(0, seed); // dead humans stay in lists
-    seed.net_id = 1; seed.flags |= 1u;
+    seed.net_id = 1; seed.flags |= 1u; seed.player_slot_id = 6;
     const EntityHandle excluded = w.registry.spawn(0, seed); // net ID collides with second's handle
     seed.net_id = 600; seed.flags = 1; seed.team = 1;
     w.registry.spawn(0, seed); // enters all AI, not blue AI
@@ -1319,7 +1321,7 @@ static void test_player_group_loops_and_handle_aliases() {
         "gloop G_emptygroup inc(v7) end\n"
         "gloop G_authored v8 = v8*10+Item end\n"
         "v9 = auto\n"
-        "v10 = SSN_500\n"
+        "v10 = SSN_10005\n"
         "ssnname(v10, TT_ALIASED)\n",
         env);
     // `gloop(G_blueai)` is retail's Unknown Group leg: the `(` is the group
@@ -1353,8 +1355,7 @@ static void test_player_group_loops_and_handle_aliases() {
     CHECK(nested.ok() && !nested.diagnostics.empty() && nested.diagnostics[0].message == "No LOOP Nesting!");
 
     // Both rows now share an SSN; a bound variable must still name second.
-    w.registry.get(first)->net_id = 800;
-    w.registry.get(second)->net_id = 800;
+    w.registry.get(first)->player_slot_id = 5; // first's DcbId is second's 10005 too
     w.registry.get(second)->display_name.clear();
     vm.execute(w);
     CHECK(w.registry.get(first)->display_name == "visited");
@@ -1362,7 +1363,7 @@ static void test_player_group_loops_and_handle_aliases() {
 
     // The compiled reference survives raw SSN changes and runtime restore.
     const auto baseline = vm.capture_runtime_state();
-    w.registry.get(second)->net_id = 800;
+    w.registry.get(second)->player_slot_id = 9; // its DcbId moves to 10009
     vm.execute(w);
     CHECK(w.script.vars.get_mission(10) == second.packed);
     vm.restore_runtime_state(program, baseline);
@@ -1413,9 +1414,11 @@ static void test_wac_area_and_location_queries() {
     e.position = Vec3{}; e.item_id = 2001; e.item_type_index = 7; e.net_id = 100;
     w.registry.spawn(2, e); // slot 0: packed blink hit must be nonzero
     const EntityHandle building = w.registry.spawn(2, e);
+    // The player body answers the SSN tests by its DcbId, 10000 + its slot byte 0
+    // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 42.
     Program program = compile_source(
-        "v1=area(37) v2=area3D(37) v3=SSNarea(42,37) v4=SSNarea3D(42,37) "
-        "v5=area(0) v6=outside v7=SSNloc(42,9) v8=location(9)", {});
+        "v1=area(37) v2=area3D(37) v3=SSNarea(10000,37) v4=SSNarea3D(10000,37) "
+        "v5=area(0) v6=outside v7=SSNloc(10000,9) v8=location(9)", {});
     CHECK(program.ok() && program.diagnostics.empty());
     WacVm vm; vm.load(program); vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 1 && w.script.vars.get_mission(3) == 1);

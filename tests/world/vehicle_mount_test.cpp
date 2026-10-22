@@ -1034,6 +1034,8 @@ void test_script_mount_reads_the_boot_equipped_slot() {
         Rig r(2.0f);
         arm_usegun_seat(r);
         r.veh().seats.resize(1); // the UseGun alone
+        // A script names the player body by its DcbId, 10000 + its slot byte 0
+        // (entity_dcb_id, D-NET-NEW-L4-21), never by its record word.
         r.player().net_id = 55;
         r.player().item_type_index = 9;
         AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
@@ -1046,7 +1048,7 @@ void test_script_mount_reads_the_boot_equipped_slot() {
         if (arm == 2) local.weapon.usegun_slot_active = true;
         CHECK(!local.weapon.active);
         CHECK(local.equipped_slot_held() == (arm != 0));
-        CHECK(r.w.commands.use_boarding_target(55) == (arm != 0));
+        CHECK(r.w.commands.use_boarding_target(10000) == (arm != 0));
         CHECK(r.player().mounted == (arm != 0));
         r.w.local_player_state = nullptr;
     }

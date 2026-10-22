@@ -137,8 +137,10 @@ static void test_mount_config_lifecycle() {
     soldier.flags |= 0x100u;
     soldier.engine_flags |= 0x100u;
     const EntityHandle sh = w.registry.spawn(0, soldier);
+    // The player-flag body answers the script by its DcbId, 10000 + its slot byte 0
+    // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 100.
 
-    CHECK(w.commands.mount(100, 200));
+    CHECK(w.commands.mount(10000, 200));
     CHECK(w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
     CHECK(w.registry.get(sh)->mount_bone == 7);
@@ -155,7 +157,7 @@ static void test_mount_config_lifecycle() {
     CHECK(w.registry.get(gh)->primary_weapon_slot.clip == -1);
     const auto occupied = std::make_unique<World::Snapshot>(w.snapshot());
 
-    CHECK(w.commands.dismount(100));
+    CHECK(w.commands.dismount(10000));
     CHECK(!w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
     CHECK(w.registry.get(sh)->mount_bone == 0);
@@ -739,7 +741,9 @@ int main() {
         ae->body_pitch = 0x12345678;
         ae->roll = 0x23456789;
 
-        CHECK(w.commands.mount(100, 200));
+        // The local player's body answers the script by its DcbId, 10000 + its slot byte 0
+        // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 100.
+        CHECK(w.commands.mount(10000, 200));
         CHECK(ae->heading == request_heading);
         CHECK(ae->inf.target_heading == request_heading);
         ae->inf.target_heading = look_heading; // first post-attach mouse look

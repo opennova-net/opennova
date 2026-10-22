@@ -36,6 +36,7 @@ struct Fixture {
     EntityHandle spawn(uint16_t ssn, uint8_t slot, bool registered = true) {
         Entity entity;
         entity.net_id = ssn;
+        entity.player_slot_id = slot; // the add's +0x154 slot byte [orig: Server_PlayerAdd @0x51D08B]
         entity.item_id = 1;
         entity.has_item_def = true;
         entity.health = 100;
@@ -323,8 +324,10 @@ static void test_remote_command_classes() {
               queue[1].args.size() == 1 && queue[1].args[0].text == "DBG");
     }
     queue.clear();
-    // Ssn and numeric operands travel resolved: the packed handle and the dword.
-    f.run("hideSSN(11)\ntext#(numbered,7)\n");
+    // Ssn and numeric operands travel resolved: the packed handle and the dword. A player
+    // body answers its DcbId, 10000 + its slot byte (entity_dcb_id, D-NET-NEW-L4-21): second,
+    // slot 1, is SSN 10001.
+    f.run("hideSSN(10001)\ntext#(numbered,7)\n");
     CHECK(queue.size() == 2);
     if (queue.size() == 2) {
         CHECK(!queue[0].targeted && queue[0].command_index == wac_command_index("hideSSN"));
