@@ -45,7 +45,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	// The shell's input frame for this frame's later ticks (engine
+	// The shell's input frame for this frame's updates (engine
 	// inmatch::TickInputSource carries the witness), which `p_owner` (the
 	// presenter whose input router samples the devices) owns: tick_source()
 	// hands it to the session only while that object lives.

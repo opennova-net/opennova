@@ -67,15 +67,15 @@ func _key_event(keycode: Key, pressed: bool, shift_pressed := false) -> InputEve
 
 
 # One press-and-release of `keycode` through Input: the same device edge feeds
-# MainGame._unhandled_key_input (the event) and the presenters' polled binding
-# rows (Input's physical key state, sampled in the next shell frames).
+# MainGame's key queue (the event) and the presenters' polled binding rows
+# (Input's physical key state). The keyboard pass runs in an update's input frame
+# (engine inmatch::TickInputSource carries the witness), so each edge waits for
+# the next update.
 func _tap(keycode: Key) -> void:
 	Input.parse_input_event(_key_event(keycode, true))
-	await get_tree().process_frame
-	await get_tree().process_frame
+	await _next_update()
 	Input.parse_input_event(_key_event(keycode, false))
-	await get_tree().process_frame
-	await get_tree().process_frame
+	await _next_update()
 
 
 # The Shift chord as a real keyboard produces it: Shift down, the key down
@@ -84,12 +84,25 @@ func _tap_with_shift(keycode: Key) -> void:
 	Input.parse_input_event(_key_event(KEY_SHIFT, true, true))
 	await get_tree().process_frame
 	Input.parse_input_event(_key_event(keycode, true, true))
-	await get_tree().process_frame
-	await get_tree().process_frame
+	await _next_update()
 	Input.parse_input_event(_key_event(keycode, false, true))
 	await get_tree().process_frame
 	Input.parse_input_event(_key_event(KEY_SHIFT, false, false))
+	await _next_update()
+
+
+# Frames until the session ran an update, whose input frame passed the keys the
+# frames before it queued: a headless frame can bank under one 16 ms quantum, so a
+# key may wait a few frames (D-NET-NEW-LI-8). Every update steps the main-frame
+# counter, a paused one too. Bounded by wall time, not frames.
+func _next_update() -> void:
+	var sim: Simulation = _shell.get_world().get_sim() if _shell != null else null
+	var before := int(sim.get_main_frame_counter()) if sim != null else 0
+	var deadline := Time.get_ticks_msec() + 2000
 	await get_tree().process_frame
+	while sim != null and int(sim.get_main_frame_counter()) == before \
+			and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
 	await get_tree().process_frame
 
 

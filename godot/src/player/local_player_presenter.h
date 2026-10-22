@@ -268,6 +268,9 @@ public:
 	}
 	// The keyboard pass's release pass (PlayerInputRouter::run_key_release_pass).
 	void run_key_release_pass() { input_router_.run_key_release_pass(); }
+	// The shell's keyboard pass, run at each update's input-frame head
+	// (PlayerInputRouter::set_keyboard_pass).
+	void set_keyboard_pass(const Callable &p_pass) { input_router_.set_keyboard_pass(p_pass); }
 	// A pass-through screen's close: the next input frame takes the menu
 	// cursor's offset (PlayerInputRouter::close_pass_through_screen).
 	void close_pass_through_screen();

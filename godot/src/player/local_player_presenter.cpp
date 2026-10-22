@@ -1281,6 +1281,8 @@ void LocalPlayerPresenter::_bind_methods() {
 			&LocalPlayerPresenter::queue_row_event);
 	ClassDB::bind_method(D_METHOD("run_key_release_pass"),
 			&LocalPlayerPresenter::run_key_release_pass);
+	ClassDB::bind_method(D_METHOD("set_keyboard_pass", "pass"),
+			&LocalPlayerPresenter::set_keyboard_pass);
 	ClassDB::bind_method(D_METHOD("close_pass_through_screen"),
 			&LocalPlayerPresenter::close_pass_through_screen);
 	ClassDB::bind_method(D_METHOD("release_capture_for_screen"),

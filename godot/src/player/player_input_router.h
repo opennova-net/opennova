@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/object_id.hpp>
+#include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
@@ -36,13 +37,16 @@ class Simulation;
 // null model reads every token released.
 //
 // The router is also the session's per-update input source (engine
-// inmatch::TickInputSource carries the witness): before_world_tick's sample is
-// the frame's first update's movement and action rows, each later update the
-// frame banks samples the devices again at the logic tick it runs as, under the
-// gates the frame's sample took, and every update the session runs, a paused one
-// too, polls its talk and HUD rows (run_update_rows). A frame that runs no update
-// polls no row; the row states it saw queue, in order, for the next update's poll,
-// as retail's queue keeps each key event for the next update's drain.
+// inmatch::TickInputSource carries the witness): before_world_tick steps the
+// devices to the frame's first update and takes the frame's head reads (the
+// cursor offset, the menu-screen bit); every update the session runs, a paused one
+// too, runs its input frame here: the shell's keyboard pass, then its talk and
+// HUD rows (run_update_rows), and an update that runs a tick, the first included,
+// samples its movement and action rows at the logic tick it runs as (sample_tick),
+// under the gates the frame's head took. A frame that runs no update runs no
+// keyboard pass and polls no row: its keys stay in the queue and the row states it
+// saw queue, in order, for the next update, as retail's queue keeps each key event
+// for the next update's input frame.
 class PlayerInputRouter final : public opennova::inmatch::TickInputSource {
 public:
 	// The world serves the sim; the presenter serves the presentation surfaces
@@ -72,15 +76,22 @@ public:
 	// returned frame names this router as its per-tick source.
 	Ref<MissionFrameInput> before_world_tick(double p_delta, bool p_capture_mouse,
 			bool p_gameplay_input_active, bool p_menu_open = false);
-	// A later tick's movement and action rows of the frame before_world_tick
-	// sampled, over the device state its run_update_rows stepped to.
+	// An update's movement and action rows (the frame's first update's included),
+	// over the device state the frame's head or the update's run_update_rows
+	// stepped to, after that update's keyboard pass.
 	opennova::inmatch::InputPacket sample_tick(uint32_t p_logic_tick) override;
-	// An update's talk and HUD rows: each pause row they dispatch flips
-	// `r_pause`, whose word the rows behind it read at the head. `p_new_sample`
-	// steps the device to the update's logic tick first (a later update of a
-	// running frame).
+	// An update's input frame: the shell's keyboard pass at its head (the callable
+	// set_keyboard_pass installs), then its talk and HUD rows; each pause row they
+	// dispatch flips `r_pause`, whose word the rows behind it read at the head.
+	// `p_new_sample` steps the device to the update's logic tick first (a later
+	// update of a running frame).
 	void run_update_rows(uint32_t p_logic_tick, bool p_new_sample,
 			opennova::inmatch::PauseRowWord &r_pause) override;
+	// The shell's keyboard pass over the key queue (its KeyboardPass over the
+	// shell's legs), run at each update's input-frame head under no menu screen;
+	// it decides itself whether its shell state drains the keys. Kept across a
+	// teardown, as the shell installs it once.
+	void set_keyboard_pass(const Callable &p_pass) { keyboard_pass_ = p_pass; }
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	// Drop the trigger latches (the presenter's reset-state path). The
@@ -124,10 +135,10 @@ public:
 	void push_key_event(const Ref<InputEventKey> &p_event);
 	// One row event the keyboard pass's scan queued (the shell's KeyboardPass):
 	// the row's dispatch code, the sign bit its fire carries and the event's key
-	// (its scan code). A talk or HUD row's waits for the next update's input
-	// frame, whose drain dispatches it (run_update_rows); an action row's for the
-	// next device sample, whose action poll fires it (controls::PlayerActionPoll::
-	// key_events carries the witness).
+	// (its scan code). The pass runs at an update's input-frame head: a talk or HUD
+	// row's event dispatches behind it in that input frame (run_update_rows), an
+	// action row's in the update's sample, whose action poll fires it
+	// (controls::PlayerActionPoll::key_events carries the witness).
 	void queue_row_event(int p_code, bool p_signed, int p_key);
 	// The keyboard pass's release pass, ahead of its first dequeue: each key whose
 	// press latch is set and that reads up queues its release row's event for the
@@ -165,8 +176,8 @@ private:
 	// Returns whether the death screen is up.
 	bool begin_input_frame(const Ref<Simulation> &p_sim, int64_t p_logic_tick,
 			Vector2 &r_scripted_look);
-	// The input frame's device sample into `p_input` (movement, view keys,
-	// look, the action rows and their requests), under the frame's gates.
+	// An update's device sample into `p_input` (movement, view keys, look, the
+	// action rows and their requests), under the frame's gates.
 	void sample_input_frame(const Ref<MissionFrameInput> &p_input, const Vector2 &p_scripted_look,
 			bool p_spectating);
 	// The input frame's HUD toggle row events (`p_rows_fired`, 1 << HudToggles::Row)
@@ -204,8 +215,8 @@ private:
 	// The axis input a pass-through screen's close owes the next sample.
 	Vector2 close_axis_;
 	int64_t frame_sequence_ = 0;
-	// The gates the frame's sample took, which its later ticks' samples keep:
-	// whether the frame sampled a player at all, and the shell's live/menu words.
+	// The gates the frame's head took, which its updates' samples keep: whether
+	// the frame has a player to sample at all, and the shell's live/menu words.
 	bool frame_player_ = false;
 	bool frame_gameplay_input_active_ = false;
 	bool frame_menu_open_ = false;
@@ -232,10 +243,12 @@ private:
 	// since the last device sample, in order.
 	std::vector<opennova::controls::KeyRowEvent> action_events_;
 	void queue_key_row_event(const opennova::controls::KeyRowEvent &p_event);
-	// A later update's device step (run_update_rows): the look pixels and the
-	// death screen its sample_tick reads.
+	// The device step of the frame's head or of a later update (run_update_rows): the
+	// look pixels and the death screen the update's sample_tick reads.
 	Vector2 tick_scripted_look_;
 	bool tick_spectating_ = false;
+	// The shell's keyboard pass (set_keyboard_pass).
+	Callable keyboard_pass_;
 	// This display frame sent the Scroll Lock turn-off (D-NET-563): the keyboard state reads
 	// it only once the window's messages are read, so the frame's later samples read the word
 	// off and send no second one.

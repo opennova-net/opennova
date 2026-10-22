@@ -104,14 +104,15 @@ bool load(Session &session) {
 	return session.begin_load().applied() && session.complete_load().applied();
 }
 
-// One shell frame banking six ticks: the frame's own sample at the logic tick
-// its first tick runs as, then the session's advance with (or without) the
-// device as the per-tick source.
+// One shell frame banking six ticks, then the session's advance: with the device
+// as the per-update source every update samples it, the first included (the
+// frame's own sample carries only the frame's head reads); without it the frame's
+// own sample at the logic tick its first tick runs as.
 FrameOutcome six_tick_frame(Session &session, TickRecorder &role, ScriptedDevice &device,
 		bool per_tick) {
 	FrameInput in;
 	in.delta_seconds = TickAccumulator::kTickDt * 6.0;
-	in.player = device.sample_tick(role.kernel.world.logic_tick);
+	if (!per_tick) in.player = device.sample_tick(role.kernel.world.logic_tick);
 	in.tick_source = per_tick ? &device : nullptr;
 	return session.advance(in);
 }
@@ -212,7 +213,7 @@ void test_unchanged_input_packs_unchanged_ticks() {
 		seen[per_tick] = role->inputs;
 		samples[per_tick] = device->samples;
 	}
-	CHECK(samples[0] == 0 && samples[1] == 5, "the five catch-up ticks each sample the device");
+	CHECK(samples[0] == 0 && samples[1] == 6, "every update samples the device, the first included");
 	bool same = seen[0].size() == 6 && seen[1].size() == 6;
 	for (size_t i = 0; same && i < seen[0].size(); ++i) {
 		const InputPacket &a = seen[0][i].player;
@@ -475,8 +476,9 @@ void test_rows_poll_once_per_update_and_never_in_a_no_update_frame() {
 	three.tick_source = &rows;
 	CHECK(session.advance(three).ticks_run() == 3, "three updates");
 	const RowCalls three_polls{{500u, false}, {501u, true}, {502u, true}};
-	CHECK(rows.calls == three_polls && rows.samples == 2,
-			"the first update polls over the frame's sample, each later one over its own");
+	CHECK(rows.calls == three_polls && rows.samples == 3,
+			"every update polls and samples, the first over the device state the frame's "
+			"head stepped, each later one stepped to its own tick");
 	rows.calls.clear();
 	CHECK(session.pause().applied(), "the pause");
 	const int ran = session.advance(three).ticks_run();
@@ -484,6 +486,109 @@ void test_rows_poll_once_per_update_and_never_in_a_no_update_frame() {
 	bool frozen = true;
 	for (const auto &call : rows.calls) frozen = frozen && call.first == 503u && !call.second;
 	CHECK(frozen, "each paused update polls its rows at the frozen tick over the frame's sample");
+}
+
+// The keyboard pass belongs to the update's input frame (D-CTRL-6 item 7): the
+// source runs it at the head of run_update_rows and the update's sample follows, the
+// frame's first update's included, so a key queued ahead of a frame that drains no
+// update waits for the next update, whose first tick dispatches it. A paused
+// update's sample takes its rows too, and the one-shots it leaves drop with it; the
+// resuming update samples after the rows that lowered the word, so its tick
+// dispatches what the same input frame queued.
+// [orig: Game_MainLoop @0x52B630 (the update call @0x52BA58); Game_ProcessMainFrame
+//  @0x5263F0 (Input_ProcessFrame @0x52661D); Input_ProcessPlayerFrame @0x49D4C0 (the
+//  Input_ProcessKeyboardEvents call @0x49D4C6)]
+// Each source call: ('r' rows or 's' sample, the logic tick).
+using SourceCalls = std::vector<std::pair<char, uint32_t>>;
+
+void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
+	struct KeyDevice final : TickInputSource {
+		SourceCalls calls;
+		int queued = 0;           // keys the shell queued, not yet passed
+		int events = 0;           // the pass's action row events, not yet sampled
+		int rows_calls = 0;
+		int unpause_at_rows = -1; // the rows call whose pass lowers the pause word
+		void run_update_rows(uint32_t logic_tick, bool, PauseRowWord &pause) override {
+			calls.emplace_back('r', logic_tick);
+			// The keyboard pass: every queued key becomes its row's event.
+			events += queued;
+			queued = 0;
+			if (rows_calls++ == unpause_at_rows) pause.flip();
+		}
+		InputPacket sample_tick(uint32_t logic_tick) override {
+			calls.emplace_back('s', logic_tick);
+			InputPacket p;
+			if (events != 0) p.pressed_action_bits = PRESSED_RELOAD;
+			events = 0;
+			return p;
+		}
+	};
+	const auto reload = [](const TickInput &t) {
+		return (t.player.pressed_action_bits & PRESSED_RELOAD) != 0;
+	};
+	{
+		auto role = std::make_unique<TickRecorder>();
+		KeyDevice device;
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		device.queued = 1;
+		// A cold bank drains nothing under 4 ms, then a 14 ms frame drains one update.
+		FrameInput idle;
+		idle.delta_seconds = 0.002;
+		idle.tick_source = &device;
+		CHECK(session.advance(idle).ticks_run() == 0 && device.calls.empty() &&
+						device.queued == 1,
+				"a frame that drains no update runs no keyboard pass: the key waits");
+		FrameInput next;
+		next.delta_seconds = 0.014;
+		next.tick_source = &device;
+		const SourceCalls rows_then_sample{{'r', 500u}, {'s', 500u}};
+		CHECK(session.advance(next).ticks_run() == 1 && device.calls == rows_then_sample,
+				"the next update passes the key at its input frame's head, then samples");
+		CHECK(role->inputs.size() == 1 && reload(role->inputs[0]),
+				"the update's own tick dispatches the waiting key");
+	}
+	{
+		// The key passes in the first (paused) update; the second update's pass
+		// lowers the word: its tick carries no edge of the first's sample.
+		auto role = std::make_unique<TickRecorder>();
+		KeyDevice device;
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		CHECK(session.pause().applied(), "the pause");
+		device.queued = 1;
+		device.unpause_at_rows = 1;
+		FrameInput three;
+		three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 2, "the second update resumes");
+		const SourceCalls paused_calls{
+				{'r', 500u}, {'s', 500u}, {'r', 500u}, {'s', 500u}, {'r', 501u}, {'s', 501u}};
+		CHECK(device.calls == paused_calls,
+				"the paused update passes and samples at the frozen tick, as every update does");
+		CHECK(role->inputs.size() == 2 && !reload(role->inputs[0]) && !reload(role->inputs[1]),
+				"the paused update's sample dropped its one-shot: no tick dispatches it");
+	}
+	{
+		auto role = std::make_unique<TickRecorder>();
+		KeyDevice device;
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		CHECK(session.pause().applied(), "the pause");
+		device.queued = 1;
+		device.unpause_at_rows = 0;
+		FrameInput three;
+		three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 3 && session.state() == State::Running,
+				"the first update's pause row resumes it");
+		CHECK(role->inputs.size() == 3 && reload(role->inputs[0]) &&
+						role->inputs[0].head_stepped,
+				"the resuming tick dispatches the key its own input frame passed");
+		const SourceCalls resumed_calls{
+				{'r', 500u}, {'s', 500u}, {'r', 501u}, {'s', 501u}, {'r', 502u}, {'s', 502u}};
+		CHECK(device.calls == resumed_calls, "rows then sample in every update");
+	}
 }
 
 } // namespace
@@ -498,6 +603,7 @@ int main() {
 	test_an_input_reset_leaves_the_pumps_words();
 	test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch();
 	test_rows_poll_once_per_update_and_never_in_a_no_update_frame();
+	test_the_keyboard_pass_runs_in_the_update_that_samples_it();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

@@ -23,8 +23,10 @@ extends RefCounted
 ## keys) and the deploy leg queues its pick (event 12; under STAT too, a dead
 ## player's); a key the chain leaves is the binding scan's: the escape row's key
 ## queues its event (18), any other row's key its row event, which the player
-## input router dispatches once per event (a talk or HUD row's in the next
-## update's input frame, an action row's in the next device sample). Then the
+## input router dispatches once per event in the same update (a talk or HUD row's
+## behind the pass in its input frame, an action row's in its sample). The shell's
+## pass runs at the head of each update's input frame (the router's
+## run_update_rows), so a frame that runs no update keeps its keys. Then the
 ## queued events dispatch in order,
 ## and the first whose case resets the input (12's and 18's Input_ResetAllState
 ## memset the event queue) drops the rest. So a deploy key pressed under the

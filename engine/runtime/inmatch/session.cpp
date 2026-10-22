@@ -229,7 +229,7 @@ bool Role::action_head_admits(int32_t code) {
 	const uint32_t preround = joiner ? kernel.world.preround_delay_seconds
 			: kernel.world.cached.client_preround_timer;
 	// The gates in the head's order; bit 0's third gate is the single-player pause word,
-	// which the paused frame's sample meets (its action rows poll while the pause row's
+	// which a paused update's sample meets (its action rows poll while the pause row's
 	// pause holds; the out-of-session round-over leg is the same drop).
 	// [orig: Input_HandleActionBinding @0x49AD40 - bit 0 with a6 @0x49AD95..0x49ADA0;
 	//  0x40 with !a6 @0x49ADA6..0x49ADAD; 0x400 @0x49ADB3..0x49ADC2; 0x8000000 with
@@ -668,9 +668,9 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 	// the action rows' head with it: the pause word is down for its tick.
 	if (transport && kernel != nullptr) kernel->world.rules.pause_word = false;
 	bool consume_one_shots = true;
-	// Whether the update before ran a tick: a later update then samples the device
-	// at the logic tick it runs as; the frame's first update and a paused one read
-	// the frame's sample.
+	// Whether the update before ran a tick: a later update then steps the device
+	// to the logic tick it runs as; the frame's first update and a paused one read
+	// the device state the frame's head stepped.
 	bool previous_ran = false;
 	for (int32_t i = 0; i < due; ++i) {
 		++out.perf.updates;
@@ -690,16 +690,22 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			// down (TickInputSource carries the witness).
 			if (source != nullptr) drain_update_rows(*source, world, false, flips_apply);
 			const bool resumes = !world.rules.pause_word;
+			// The update's movement and action rows, behind its rows: they meet the
+			// head with the word as the drain left it, so a paused update's bit-0 rows
+			// drop and its other rows run, and the one-shots it leaves drop with it, as
+			// no tick consumes them; the resuming update's rows run unpaused (with no
+			// source, the frame's sample).
+			InputPacket sample =
+					source != nullptr ? source->sample_tick(world.logic_tick) : input.player;
 			if (!resumes) {
 				run_paused_update_legs();
 				previous_ran = false;
 				continue;
 			}
-			// The resuming update: its body runs unpaused over the frame's sample
-			// (the cursor excluded: the paused head pumped it), with no tick step of
-			// its own at the head and its counters already stepped.
+			// The resuming update: its body runs unpaused over that sample (the cursor
+			// excluded: the paused head pumped it), with no tick step of its own at the
+			// head and its counters already stepped.
 			set_state(State::Running);
-			InputPacket sample = input.player;
 			sample.cursor_dx = sample.cursor_dy = 0;
 			latch_packet(sample);
 			latest_camera_ = input.camera;
@@ -728,9 +734,10 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			count_update_into_second();
 			continue;
 		}
-		// A running update's input frame: its talk and HUD rows, then (a later
-		// update) its own device sample at the logic tick it runs as, which
-		// replaces the held state with edges of its own to consume
+		// A running update's input frame: its keyboard pass and its talk and HUD
+		// rows, then its movement and action rows at the logic tick it runs as (the
+		// frame's first update's too, over the device state the frame's head
+		// stepped), which replace the held state with edges of their own to consume
 		// (TickInputSource carries the witness).
 		const bool new_sample = previous_ran && kernel != nullptr;
 		if (source != nullptr) drain_update_rows(*source, kernel->world, new_sample, flips_apply);
@@ -738,7 +745,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		// later events meet the action rows' head with it set.
 		const bool pauses = source != nullptr && kernel->world.rules.pause_word;
 		if (pauses) set_state(State::Paused);
-		if (new_sample && source != nullptr) {
+		if (source != nullptr) {
 			latch_packet(source->sample_tick(kernel->world.logic_tick));
 			consume_one_shots = true;
 		}

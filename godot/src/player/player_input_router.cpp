@@ -203,22 +203,24 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	if (owner == nullptr) {
 		return frame_input;
 	}
-	// The frame's sample is its first update's movement and action rows, at the
-	// logic tick that update runs as; the session asks for each later update's
-	// (sample_tick) and for every update's talk and HUD rows (run_update_rows).
+	// The frame's head steps the devices to the logic tick its first update runs as;
+	// the session runs every update's input frame through this router: its keyboard
+	// pass and its talk and HUD rows (run_update_rows), then its movement and action
+	// rows (sample_tick).
 	frame_input->set_tick_source(this, ObjectID(owner->get_instance_id()));
 	const Ref<Simulation> tick_sim = sim();
 	Vector2 scripted_look;
-	const bool spectating = begin_input_frame(
+	tick_spectating_ = begin_input_frame(
 			tick_sim, tick_sim.is_valid() ? tick_sim->get_logic_tick() : -1, scripted_look);
-	// The rows' state this sample sees waits for the next update's poll: a frame
+	// The look waits for the next update's sample, a frame that drains none
+	// included, as the session kept it for the next tick.
+	tick_scripted_look_ += scripted_look;
+	// The rows' state this frame sees waits for the next update's poll: a frame
 	// whose bank drains no update runs no input frame, and its key events stay
 	// queued, a release and a new press included (engine inmatch::TickInputSource
 	// carries the witness).
 	queue_row_sample();
 	if (!owner->has_player()) {
-		// No sample takes the action rows' events: they are dropped.
-		action_events_.clear();
 		owner->set_fly_camera_locked(false);
 		release_mouse_capture();
 		owner->clear_models();
@@ -230,20 +232,39 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	if (p_capture_mouse && input->get_mouse_mode() != Input::MOUSE_MODE_CAPTURED) {
 		input->set_mouse_mode(Input::MOUSE_MODE_CAPTURED);
 	}
-	if (!spectating) owner->ensure_models();
+	if (!tick_spectating_) owner->ensure_models();
 	frame_player_ = true;
-	sample_input_frame(frame_input, scripted_look, spectating);
+	// The frame's head reads: the mouse motion as the cursor offset in whole pixels,
+	// its sub-pixel rest carried to the next frame, which the session's mouse pump
+	// reads in the frame's first update and spreads over the frame's updates
+	// (engine world::MouseAxisPump), and the menu-screen bit the paused updates
+	// read.
+	if (p_gameplay_input_active) {
+		const Vector2i whole(
+				static_cast<int32_t>(look_delta_.x), static_cast<int32_t>(look_delta_.y));
+		look_delta_ -= Vector2(whole);
+		frame_input->set_cursor_delta(whole);
+	} else {
+		look_delta_ = Vector2();
+	}
+	frame_input->set_menu_open(frame_menu_open_);
 	return frame_input;
 }
 
 opennova::inmatch::InputPacket PlayerInputRouter::sample_tick(uint32_t p_logic_tick) {
-	// The device already stands at p_logic_tick: this update's run_update_rows
-	// stepped it and polled the rows ahead of the action rows.
+	// The device already stands at p_logic_tick: the frame's head or this update's
+	// run_update_rows stepped it, and the update's keyboard pass and rows ran ahead of
+	// the action rows.
 	(void)p_logic_tick;
 	Ref<MissionFrameInput> tick_input;
 	tick_input.instantiate();
 	tick_input->set_sequence(frame_sequence_);
-	if (frame_player_) sample_input_frame(tick_input, tick_scripted_look_, tick_spectating_);
+	if (frame_player_) {
+		sample_input_frame(tick_input, tick_scripted_look_, tick_spectating_);
+	} else {
+		// No sample takes the action rows' events: they are dropped.
+		action_events_.clear();
+	}
 	tick_scripted_look_ = Vector2();
 	return tick_input->native_value().player;
 }
@@ -264,14 +285,19 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 	// DEATH's exit confirmation, for the first input frame after its NO raises
 	// the word (the shell's KeyboardPass carries the witness).
 	if (frame_menu_open_) return;
+	// The input frame's head: the shell's keyboard pass drains the key queue, its
+	// special-key legs land in this update, and the row events it queues dispatch
+	// below and in this update's sample; a frame that runs no update keeps its keys
+	// (engine inmatch::TickInputSource carries the witness). Its legs may run the
+	// input reset, which drops the rows queued so far.
+	if (keyboard_pass_.is_valid()) keyboard_pass_.call();
 	// A later paused update of the same frame reads the state the frame left.
 	if (row_samples_.empty()) queue_row_sample();
 	// The keyboard pass's events since the last update's input frame, one dispatch
 	// each in their queue order: a talk or HUD row's key-down (an OS repeat
 	// included) fires its row once, with the sign its fire carried (D-CTRL-6;
 	// engine hud_toggles_dispatch and ChatEntry::dispatch_rows carry the witness).
-	// A frame that ran no update left them waiting here, as retail's queue keeps a
-	// key for the next update's drain. The keyboard pass runs ahead of the mouse
+	// The keyboard pass runs ahead of the mouse
 	// and joystick passes, so its events dispatch first (engine
 	// controls::PlayerActionPoll::key_events carries the witness: one record per
 	// queued event, no merge, each dispatched by the drain).
@@ -438,22 +464,12 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
     p_input->set_view_keys(active && pressed("FreeLook"),
         active && pressed("look_up"), active && pressed("look_down"),
         active && pressed("turn_left"), active && pressed("turn_right"));
-	// The mouse motion as the cursor offset in whole pixels, its sub-pixel
-	// rest carried to the next sample (the session's mouse pump spreads the
-	// offset over the frame's ticks; engine world::MouseAxisPump). The
-	// scripted device's look pixels are axis input at their own tick, as
-	// onHook's driver adds them to the axis word in that input frame, under
-	// the gate real motion meets on its way in (the shell hands handle_input
-	// only live gameplay with the mouse captured).
+	// The mouse motion rides the frame's head (before_world_tick). The scripted
+	// device's look pixels are axis input at their own tick, as onHook's driver
+	// adds them to the axis word in that input frame, under the gate real motion
+	// meets on its way in (the shell hands handle_input only live gameplay with the
+	// mouse captured).
 	const bool captured = input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED;
-	if (active) {
-		const Vector2i whole(
-				static_cast<int32_t>(look_delta_.x), static_cast<int32_t>(look_delta_.y));
-		look_delta_ -= Vector2(whole);
-		p_input->set_cursor_delta(whole);
-	} else {
-		look_delta_ = Vector2();
-	}
 	// A pass-through screen's close owes this sample its cursor offset, axis
 	// input of this tick alone (close_pass_through_screen).
 	p_input->set_look_delta(active && captured ? p_scripted_look + close_axis_ : Vector2());

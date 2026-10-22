@@ -349,7 +349,8 @@ int main() {
 				"the resuming tick runs at the frozen tick with its head stepped")) return 1;
 		if (!expect(rows.calls == std::vector<std::pair<uint32_t, bool>>(
 				{{101u, false}, {101u, false}, {102u, true}}),
-				"the resuming update reads the frame's sample, the next its own")) return 1;
+				"the resuming update's rows read the device state the frame's head stepped, "
+				"the next update steps its own")) return 1;
 		if (!expect(world.hud_frames.main_frame - paused_counters.main_frame == 2 &&
 				world.hud_frames.session_frame == paused_counters.session_frame,
 				"the probe's ticks step no counters: the paused and the resuming head's "

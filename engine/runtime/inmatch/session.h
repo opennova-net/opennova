@@ -119,25 +119,36 @@ struct CameraSample {
 //  @0x760C90 (the key state @0x760CBB, the Input_QueueKeyEvent call @0x760CC2);
 //  Input_ProcessKeyboardEvents @0x49D1F0 (the Input_DequeueKeyEvent calls
 //  @0x49D2D2 / @0x49D4A0)]
-// The frame's own sample (FrameInput::player) is its first tick's input frame;
-// every later tick the frame banked asks the source for its own, keyed to the
-// logic tick it runs as (World::logic_tick at the tick's head, which is
-// retail's g_CurrentTick once the tick's increment ran). The mouse motion
-// rides the frame's sample, as retail reads the cursor only in the frame's
-// first update [orig: Game_ProcessMainFrame @0x5263F0 (the g_MainLoopFirstUpdate
-//  test @0x52640E, the Input_PumpAndCenterCursor call @0x526458); Game_MainLoop
-//  @0x52B630 (g_MainLoopFirstUpdate raised @0x52B9FC, dropped after each update
-//  @0x52BA5E); Input_PumpAndCenterCursor @0x7616D0].
+// The frame's own sample (FrameInput::player) carries what the frame's first
+// update reads at its head: the mouse motion, as retail reads the cursor only in
+// the frame's first update, and the menu-screen bit [orig: Game_ProcessMainFrame
+//  @0x5263F0 (the g_MainLoopFirstUpdate test @0x52640E, the
+//  Input_PumpAndCenterCursor call @0x526458); Game_MainLoop @0x52B630
+//  (g_MainLoopFirstUpdate raised @0x52B9FC, dropped after each update @0x52BA5E);
+//  Input_PumpAndCenterCursor @0x7616D0]. With a source, every update takes its
+// movement and action rows from the source (sample_tick, keyed to the logic tick it
+// runs as: World::logic_tick at the tick's head, which is retail's g_CurrentTick
+// once the tick's increment ran), the frame's first update and a paused one
+// included, after its input frame's rows; a paused update's rows meet the head's
+// pause gate and the one-shots it leaves drop, as no tick consumes them. With no
+// source every update reuses the frame's sample.
 // An input frame belongs to an update: a frame whose bank drains no update runs
-// none, so its key events wait in the queue for the next update's drain, and a
-// paused update runs its input frame as a running one does (no menu screen up).
+// none, so its key events wait in the queue for the next update's keyboard pass,
+// and a paused update runs its input frame as a running one does (no menu screen
+// up). The keyboard pass heads the input frame, ahead of the mouse and toggle
+// passes and the drain [orig: Input_ProcessPlayerFrame @0x49D4C0 (the
+//  Input_ProcessKeyboardEvents call @0x49D4C6 ahead of the
+//  Input_ProcessMouseAxisBindings call @0x49D4D8 and the Input_ProcessToggleBindings
+//  call @0x49D4DE)], so the source runs the shell's keyboard pass at the head of
+// run_update_rows, and its special-key legs (the round-over keys, the escape row's
+// in-game menu, a deploy pick) land in the update that reads them.
 // The session therefore calls run_update_rows at EVERY update it runs, the
-// paused ones included: the update's talk and HUD rows, the rows whose dispatch
-// changes their own state at once (the HUD toggles, the chat line). `new_sample`
-// is true for a later update of a running frame, whose device sample is its own
-// (the source steps its device to `logic_tick` first; that update's movement and
-// action rows then come from sample_tick); false for the frame's first update
-// and each paused update, whose device state is the frame's sample. The key
+// paused ones included: the update's keyboard pass, then its talk and HUD rows,
+// the rows whose dispatch changes their own state at once (the HUD toggles, the
+// chat line). `new_sample` is true for a later update of a running frame, whose
+// device state is its own (the source steps its device to `logic_tick` first);
+// false for the frame's first update and each paused update, whose device state
+// the shell stepped at the frame's head. The update's sample_tick follows. The key
 // events the frames since the last update queued wait in order, a press, its
 // release and a new press each its own event, and the update's input frame
 // dispatches every one of them in that order: its keyboard pass first moves the
@@ -194,10 +205,10 @@ struct FrameInput {
 	double since_render_seconds = -1.0;
 	CameraSample camera;
 	InputPacket player;
-	// The shell's input frame for this frame's later ticks, valid for this
-	// advance call only; null when the shell has no device to sample (a
-	// dedicated host, a probe's direct frame): every banked tick then reuses
-	// this frame's sample.
+	// The shell's input frame for this frame's updates, the first included,
+	// valid for this advance call only; null when the shell has no device to
+	// sample (a dedicated host, a probe's direct frame): every banked tick then
+	// reuses this frame's sample.
 	TickInputSource *tick_source = nullptr;
 	// The host's frozen loaded-model list count (TickInput::loaded_model_list_count).
 	uint32_t loaded_model_list_count = 0;
@@ -562,7 +573,7 @@ private:
 	// cursor offset the frame banked; `axis` is the update's two-tap sum.
 	void step_mouse_pump(int32_t update, int32_t due, bool menu_open, int32_t (&axis)[2]);
 	// The frame's `due` updates, each in retail's update order: its input frame
-	// (TickInputSource::run_update_rows, a later update's sample_tick), the mouse
+	// (TickInputSource::run_update_rows, then its sample_tick), the mouse
 	// pump, then the running update's role tick, the pausing update (its drain left
 	// the pause word raised), the paused update's legs or the resuming update's
 	// tick. `transport`: the debug transport's forced step (step_once, drive_one),

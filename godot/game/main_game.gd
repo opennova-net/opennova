@@ -324,6 +324,10 @@ func _ready() -> void:
 	# is the shell's ControlsBindings model.
 	_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
 	_keys = KeyboardPass.new(_player_presenter.get_key_events())
+	# The keyboard pass runs at each update's input-frame head, inside the session's
+	# update (PlayerInputRouter::run_update_rows), so a frame that runs no update keeps
+	# its keys (engine inmatch::TickInputSource carries the witness).
+	_player_presenter.set_keyboard_pass(_run_keyboard_pass)
 	# The console's SAVEKEYS dumps the live binding table (GameWorld.set_controls_model).
 	_world.set_controls_model(ControlsBindings.model())
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
@@ -1723,6 +1727,18 @@ func _sync_keyboard_capture() -> void:
 
 # --- The keyboard pass's legs (KeyboardPass.drain) -----------------------------
 
+## The input frame's keyboard pass, which the player input router runs at the head
+## of each update's input frame (under no menu screen): over live play and under a
+## pass-through screen whose word holds, it drains the key queue, so a key its
+## special-key chain takes never reaches the rows, and its legs (the round-over
+## keys, the escape row's in-game menu, a deploy pick) land in that update; a frame
+## that runs no update keeps its keys (KeyboardPass and engine
+## inmatch::TickInputSource carry the witness).
+func _run_keyboard_pass() -> void:
+	if _input_frame_drains_keys():
+		_keys.drain(self)
+
+
 ## An open chat line takes the queue's key (the keyboard pass's capture branch);
 ## a key that closes the line hands the keyboard back to the frame's samplers at
 ## once, as the capture word does.
@@ -2247,12 +2263,8 @@ func _process(delta: float) -> void:
 	var reset_sim: Simulation = _world.get_sim()
 	if reset_sim != null and reset_sim.take_input_reset():
 		_reset_key_state()
-	# The input frame's keyboard pass drains the key queue ahead of the frame's
-	# sample, over live play and under a pass-through screen whose word holds, so a
-	# key its special-key chain takes never reaches the rows (KeyboardPass carries
-	# the witness).
-	if _input_frame_drains_keys():
-		_keys.drain(self)
+	# The input frame's keyboard pass runs inside each update the world tick's session
+	# drains, at the input frame's head (_run_keyboard_pass).
 	# The session banks the frame's measured elapsed wall time, not Godot's
 	# process delta, which Godot caps (GameWorld.take_frame_elapsed_seconds and
 	# engine world::TickAccumulator::bank carry the witness).
@@ -2273,18 +2285,6 @@ func _process(delta: float) -> void:
 				_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP
 						or _state == State.VEHICLE or (_state == State.DEPLOY
 								and not _deploy_presenter.is_input_pass_through()))
-		# The held USE row's armory arm took its open in that poll (engine
-		# controls::PlayerActions, through the sim's press latch); the shell
-		# opens what it names, over live play only: the screen open refuses while
-		# another menu screen is up (engine world::pass_through_close_axis carries
-		# the witness).
-		if _player_presenter.take_use_item_armory_request() and _state == State.WORLD:
-			_open_armory()
-		# The vehicle-loadout arm's open (engine controls::PlayerActions; the team
-		# gate in the router): vehicle.mnu VEHICLE over live play.
-		if _player_presenter.take_use_item_vehicle_menu_request() and _state == State.WORLD \
-				and _vehicle_menu_presenter != null:
-			_vehicle_menu_presenter.open()
 	else:
 		frame_input = MissionFrameInput.new()
 		frame_input.delta_seconds = frame_elapsed
@@ -2297,6 +2297,19 @@ func _process(delta: float) -> void:
 		_world.tick(_camera.global_position, _camera.global_transform,
 				frame_elapsed, frame_input)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
+	if _player_presenter != null:
+		# The held USE row's armory arm took its open in an update's sample (engine
+		# controls::PlayerActions, through the sim's press latch); the shell
+		# opens what it names, over live play only: the screen open refuses while
+		# another menu screen is up (engine world::pass_through_close_axis carries
+		# the witness).
+		if _player_presenter.take_use_item_armory_request() and _state == State.WORLD:
+			_open_armory()
+		# The vehicle-loadout arm's open (engine controls::PlayerActions; the team
+		# gate in the router): vehicle.mnu VEHICLE over live play.
+		if _player_presenter.take_use_item_vehicle_menu_request() and _state == State.WORLD \
+				and _vehicle_menu_presenter != null:
+			_vehicle_menu_presenter.open()
 	# Camera placement runs in the world frame now (local-view device leg,
 	# D-RORD-8); this covers frames that skip it (probe world-skip, no live world).
 	if _player_presenter != null and (skip_world or not _world.is_loaded()):

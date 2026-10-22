@@ -254,8 +254,8 @@ opennova::inmatch::FrameInput Simulation::begin_session_frame(
 	opennova::inmatch::FrameInput input;
 	if (p_input.is_valid()) {
 		input = p_input->native_value();
-		// The frame's later ticks pull their own input frames from the shell's
-		// device router (engine inmatch::TickInputSource).
+		// The frame's updates, the first included, pull their own input frames
+		// from the shell's device router (engine inmatch::TickInputSource).
 		input.tick_source = p_input->tick_source();
 	}
 	if (input.camera.listener_valid) {

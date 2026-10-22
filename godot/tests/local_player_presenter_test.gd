@@ -337,6 +337,21 @@ func _frame(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
 		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
 
 
+# One frame whose trigger and reload are the test's: a headless display captures no
+# mouse, so no router sample can hold the trigger. The presenter's frame head runs
+# as the shell's does, and the world ticks over a frame input of the test's, which
+# names no per-update source: the update reads its weapon bits (the router's own
+# sample, which every update takes, would replace them; engine
+# inmatch::TickInputSource carries the witness).
+func _trigger_frame(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
+		fire_held: bool, fire_pressed: bool, reload_pressed: bool) -> void:
+	presenter.before_world_tick(TICK, false, true)
+	var frame_input := MissionFrameInput.new()
+	frame_input.delta_seconds = TICK
+	frame_input.set_weapon_input(fire_held, fire_pressed, reload_pressed)
+	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+
+
 # Frames until `predicate` (no arguments -> bool) holds; false when `max_frames`
 # elapse first.
 func _frame_until(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
@@ -1450,11 +1465,8 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 				"anim_wpn_idle", "the mounted weapon idles in its FP holding pose")
 	var serial_before := int(world.local_player_weapon_view().play_serial)
 
-	# One trigger pull, injected on the same seam the input router drives (the
-	# router's own sample overwrites earlier in this frame; last write wins).
-	var frame_input := presenter.before_world_tick(TICK, false, true)
-	frame_input.set_weapon_input(true, true, false)
-	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+	# One trigger pull on the session's frame input seam (_trigger_frame).
+	_trigger_frame(world, presenter, camera, true, true, false)
 
 	assert_eq(String(world.local_player_weapon_view().anim_key), "anim_wpn_fire",
 			"the real FSM entered its fire action")
@@ -1469,9 +1481,7 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 	var part0 := presenter.vm_parts()[0] as ObjectModel
 	var reached_recoil := false
 	for i in 30:
-		frame_input = presenter.before_world_tick(TICK, false, true)
-		frame_input.set_weapon_input(true, false, false)
-		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+		_trigger_frame(world, presenter, camera, true, false, false)
 		if String(part0.get_active_body_clip()) == "anim_wpn_recoil":
 			reached_recoil = true
 			break
@@ -1712,13 +1722,9 @@ func test_local_avatar_presents_the_parked_tick() -> void:
 
 	# The weapon channel: fire once, reload, and step to the park at the
 	# reload clip's wrap after the 80-tick window.
-	var frame_input := presenter.before_world_tick(TICK, false, true)
-	frame_input.set_weapon_input(true, true, false)
-	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+	_trigger_frame(world, presenter, camera, true, true, false)
 	_frame(world, presenter, camera, 16)
-	frame_input = presenter.before_world_tick(TICK, false, true)
-	frame_input.set_weapon_input(false, false, true)
-	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+	_trigger_frame(world, presenter, camera, false, false, true)
 	var weapon_parked := false
 	for i in 200:
 		_frame(world, presenter, camera, 1)
