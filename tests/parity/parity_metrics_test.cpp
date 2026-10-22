@@ -1556,6 +1556,41 @@ void test_integrity() {
 		const Case after = judge_case(scripted(1), scripted(2), extra_row(3 * kSec), "OO");
 		expect_row(after, 'B', "integrity_rows", "ammo", "fail", "HOST_AMMO_ROW_MISMATCH");
 	}
+	{
+		// An ammo challenge carries the row of the ADM the uplinks name (integrity.held_adm):
+		// x6's selfnade holds the grenade (ADM 52, row 54) 6.5 s, under the two boundaries
+		// an ammo challenge needs, so RR's row 54 there against a run whose ammo boundary
+		// fell before the select is the stay's phase. A stay of two boundaries or more
+		// compares.
+		auto grenade = [](uint32_t seed, uint64_t from, uint64_t until, bool challenged) {
+			wire::ParityTrace trace = scripted(seed);
+			for (wire::ParityUplinkState &u : trace.uplinks)
+				if (u.ts_ns >= from && u.ts_ns < until)
+					u.adm = 52;
+			if (challenged) {
+				for_events(trace, 'S', 0x031, [from, until](wire::ParityEvent &e) {
+					if (e.ts_ns >= from && e.ts_ns < until)
+						e.body[0] = 0x36;
+				});
+				for_events(trace, 'C', 0x021, [from, until](wire::ParityEvent &e) {
+					if (e.ts_ns >= from && e.ts_ns < until + 20 * kMs)
+						e.body[0] = 0x36;
+				});
+			}
+			return trace;
+		};
+		// The 16 s ammo challenge: inside RR's 14..17 s stay, before the run's 16.5..19.5 s.
+		const Case short_stay = judge_case(grenade(1, 14 * kSec, 17 * kSec, true),
+				grenade(2, 14 * kSec, 17 * kSec, true), grenade(3, 16500 * kMs, 19500 * kMs, false),
+				"OR");
+		expect_row(short_stay, 'B', "integrity_rows", "ammo", "pass");
+		expect_row(short_stay, 'B', "integrity_row_unwitnessed", "ammo", "pass");
+		// Held 8..20 s (over two boundaries) on both sides: the row must be there.
+		const Case long_stay = judge_case(grenade(1, 8 * kSec, 21 * kSec, true),
+				grenade(2, 8 * kSec, 21 * kSec, true), grenade(3, 8 * kSec, 21 * kSec, false),
+				"OR");
+		expect_row(long_stay, 'B', "integrity_rows", "ammo", "fail", "HOST_AMMO_ROW_MISMATCH");
+	}
 }
 
 // The reload request re-arms on its own echo (count.reload_echo): RR's 2 and RR-aa's 3

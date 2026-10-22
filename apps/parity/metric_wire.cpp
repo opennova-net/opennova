@@ -874,6 +874,7 @@ void compare_handshakes(
 struct Transaction {
 	bool valid = false;
 	bool join_adm = false; // ammo, before the joiner's first uplink (integrity.join_adm)
+	uint32_t adm = UINT32_MAX; // ammo: the ADM the latest C2S 0x0C before it named
 	uint32_t row = 0;
 	uint32_t base_crc = 0; // the reply CRC with the challenge key XORed out
 };
@@ -898,6 +899,33 @@ std::vector<std::pair<uint64_t, uint64_t>> join_adm_windows(const RunFacts &run)
 	return out;
 }
 
+// Each ADM's longest stay in the joiner's uplinks: consecutive C2S 0x0C naming it, from
+// the first to the last (integrity.held_adm).
+std::map<uint32_t, uint64_t> adm_stays(const RunFacts &run) {
+	std::map<uint32_t, uint64_t> out;
+	bool open = false;
+	uint32_t adm = 0;
+	uint64_t first = 0, last = 0;
+	auto finish = [&]() {
+		if (open)
+			out[adm] = std::max(out[adm], last - first);
+	};
+	for (const wire::ParityUplinkState &u : run.trace.uplinks) {
+		if (!u.decoded || !run.in_comparison(u.ts_ns))
+			continue;
+		if (open && u.adm == adm) {
+			last = u.ts_ns;
+			continue;
+		}
+		finish();
+		open = true;
+		adm = u.adm;
+		first = last = u.ts_ns;
+	}
+	finish();
+	return out;
+}
+
 uint32_t u16_at(const std::vector<uint8_t> &b, size_t at) {
 	return b[at] | (uint32_t(b[at + 1]) << 8);
 }
@@ -918,11 +946,18 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 	const std::vector<std::pair<uint64_t, uint64_t>> windows =
 			ammo ? join_adm_windows(run) : std::vector<std::pair<uint64_t, uint64_t>>{};
 	std::vector<Transaction> out;
+	size_t uplink = 0;
+	uint32_t latest_adm = UINT32_MAX;
 	for (size_t i = 0; i < events.size(); ++i) {
 		const wire::ParityEvent &challenge = events[i];
 		if (challenge.dir != 'S' || event_identity(challenge) != challenge_id ||
 				!run.in_comparison(challenge.ts_ns))
 			continue;
+		for (; uplink < run.trace.uplinks.size() &&
+				run.trace.uplinks[uplink].ts_ns <= challenge.ts_ns;
+				++uplink)
+			if (run.trace.uplinks[uplink].decoded)
+				latest_adm = run.trace.uplinks[uplink].adm;
 		const wire::ParityEvent *reply = nullptr;
 		for (size_t j = i + 1; j < events.size(); ++j) {
 			const uint16_t identity = event_identity(events[j]);
@@ -934,6 +969,7 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 			}
 		}
 		Transaction t;
+		t.adm = ammo ? latest_adm : UINT32_MAX;
 		for (const auto &window : windows)
 			t.join_adm = t.join_adm ||
 					(challenge.ts_ns >= window.first && challenge.ts_ns < window.second);
@@ -981,6 +1017,28 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 		const std::vector<Transaction> ta = transactions(rr, ammo), tb = transactions(other, ammo);
 		std::map<uint32_t, std::set<uint32_t>> oracle;
 		std::set<std::string> rows_a, rows_b;
+		// A 0x31 carries the row of the ADM the body holds at the boundary [orig:
+		// Server_BroadcastWeaponSlotStateToPlayers @0x508540 (+0x2B0 @0x5085F6, the row
+		// @0x50863E)], the ADM the joiner's uplink writes (@0x4C20A3), and the family flips
+		// at every boundary (the read @0x50859E, the flip @0x50868E), so an ammo challenge
+		// falls every second boundary: an ADM held under two boundaries in either run is
+		// challenged or not by the stay's phase against them. Such a challenge leaves the row
+		// sets and the unwitnessed rows; RR's CRC still joins the oracle and the run's still
+		// checks against it (integrity.held_adm).
+		static_assert(has_normalization("integrity.held_adm"));
+		const std::map<uint32_t, uint64_t> stays_a = ammo ? adm_stays(rr)
+														  : std::map<uint32_t, uint64_t>{},
+										   stays_b = ammo ? adm_stays(other)
+														  : std::map<uint32_t, uint64_t>{};
+		auto stay_phase = [&stays_a, &stays_b](const Transaction &t) {
+			if (t.adm == UINT32_MAX)
+				return false;
+			auto held = [&t](const std::map<uint32_t, uint64_t> &stays) {
+				const auto found = stays.find(t.adm);
+				return found != stays.end() && found->second >= 2 * kIntegrityBoundaryNs;
+			};
+			return !held(stays_a) || !held(stays_b);
+		};
 		// A challenge before the joiner's first uplink carries the class-init ADM's
 		// row, there by the join's phase against the boundary: it leaves the rows,
 		// the oracle and the CRC checks, its reply's shape still counts
@@ -988,7 +1046,8 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 		for (const Transaction &t : ta)
 			if (t.valid && !t.join_adm) {
 				oracle[t.row].insert(t.base_crc);
-				rows_a.insert(std::to_string(t.row));
+				if (!stay_phase(t))
+					rows_a.insert(std::to_string(t.row));
 			}
 		if (options.oracle_pool)
 			for (const Transaction &t : transactions(*options.oracle_pool, ammo))
@@ -1004,10 +1063,12 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 			}
 			if (t.join_adm)
 				continue;
-			rows_b.insert(std::to_string(t.row));
+			const bool phase = stay_phase(t);
+			if (!phase)
+				rows_b.insert(std::to_string(t.row));
 			const auto found = oracle.find(t.row);
 			if (found == oracle.end())
-				unwitnessed += retail_oracle ? 0 : 1;
+				unwitnessed += retail_oracle || phase ? 0 : 1;
 			else if (!found->second.count(t.base_crc))
 				++crc_mismatch;
 		}

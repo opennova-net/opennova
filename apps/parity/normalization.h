@@ -657,6 +657,19 @@ inline constexpr Normalization kNormalizations[] = {
 			"joiner's first 0x0C; its RR and RR-aa never met the span. Such a challenge leaves "
 			"the row sets, the CRC oracle and the unwitnessed rows; its reply's shape still "
 			"counts (integrity_pairs)" },
+	{ "integrity.held_adm", MaskKind::Field, 'S', 0x031, "ammo challenge row", 0,
+			"an S2C 0x31 carries the round row (AdmDef+4) of the ADM the body holds at the "
+			"boundary (Server_BroadcastWeaponSlotStateToPlayers @0x508540: +0x2B0 @0x5085F6, "
+			"the row @0x50863E), the ADM the joiner's C2S 0x0C writes (@0x4C20A3), and the "
+			"0x30 / 0x31 family flips at every boundary (@0x50859E, @0x50868E), so an ammo "
+			"challenge falls every second boundary: an ADM the uplinks name for less than two "
+			"boundaries in either run is challenged or not by its stay's phase. x6: selfnade "
+			"and permdeath select the grenade (uplink ADM 52, round row 54) about 0.8 s into "
+			"the window and die 6.5 s later; selfnade's RR, RR-aa and RO's retail host met an "
+			"ammo boundary in that stay and OR's host did not, permdeath's RR and RR-aa did not "
+			"and OR's host did; fragrespawn holds ADM 52 for 89 s and every run challenges row "
+			"54. Such a challenge leaves the row sets and the unwitnessed rows; RR's CRC still "
+			"joins the oracle and the run's still checks against it" },
 	{ "count.reload_echo", MaskKind::Field, '*', 0, "C2S 0x25 / S2C 0x49 count", 0,
 			"a reload action queues its C2S 0x25 on a tick whose slot phase byte (+0x5A) has "
 			"bit 0 set and bit 0x80 clear, then sets 0x80 (WeaponAction_Reload @0x5430B0: "
