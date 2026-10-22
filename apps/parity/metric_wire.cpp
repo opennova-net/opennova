@@ -910,7 +910,7 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 	const size_t reply_size = ammo ? 9 : 5;
 	const std::vector<wire::ParityEvent> &events = run.trace.events;
 	// The 0x31 sends the ammo row of the body's equipped ADM, entity+0x2B0
-	// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 (the lookup @0x50860A, the
+	// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 (the lookup called @0x508605, the
 	// row @0x50863E)], which the plyr class init writes [orig: PlayerClass_InitEntity
 	// @0x4B1116] until the joiner's uplink does [orig: NetPacket_SerializePlayerState
 	// @0x4C20A3] (or a fired round [orig: Server_ClientFiredRound @0x50BD56]).
@@ -1049,7 +1049,7 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 	// boundary, each challenge immediately after a transient S2C 0x16 in the same
 	// packet [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 (the toggle read
 	// @0x50859E, the flip @0x50868E)], sent only to a slot in state 6 whose body's +0x24
-	// bit 2 is clear (@0x508584, @0x508594..0x508598): within one mission a challenge's
+	// bit 1 (mask 0x02) is clear (@0x508584, @0x508594..0x508598): within one mission a challenge's
 	// family is its predecessor's flipped once per boundary between them; an S2C 0x25
 	// ends the mission and the count with it (integrity.family_toggle).
 	static_assert(has_normalization("integrity.family_toggle"));

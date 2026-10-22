@@ -293,8 +293,9 @@ inline constexpr Normalization kNormalizations[] = {
 			"the joiner's 0x28/0x23 round trip" },
 	{ "order.S.0x40", MaskKind::FirstOrder, 'S', 0x040, "OVERLAY_STATE", 0,
 			"a joiner's first 0x40s are the tick head's overlay walk (Server_TickUpdate: "
-			"Server_UpdateAllActivePlayerSlots called @0x51D88B, its visit's "
-			"Server_BuildOverlayStateForPlayer @0x5188D6), which runs ahead of the receive "
+			"Server_UpdateAllActivePlayerSlots @0x518820 called @0x51D88B, its visit calling "
+			"Server_BuildOverlayStateForPlayer @0x517FC0 (the call @0x5188D6)), which runs "
+			"ahead of the receive "
 			"pump that takes the C2S 0x0B (@0x51D895; Server_OnPlayerJoin's bundle ends with "
 			"its 0x3E @0x51AAEE), and the per-slot block sends the 0x0A / 0x57 behind the "
 			"connection's send holdoff (@0x51E3D6): a bundle that waits for a boundary leaves "
@@ -585,7 +586,8 @@ inline constexpr Normalization kNormalizations[] = {
 			"boundary flips (Server_BroadcastWeaponSlotStateToPlayers @0x508540: the read "
 			"@0x50859E, the flip @0x50868E after the slot loop, its only writer), called each "
 			"311 ticks (Server_TickUpdate @0x51D912), while a slot takes its challenge only in "
-			"state 6 with a body whose +0x24 bit 2 is clear (@0x508584, @0x508594..0x508598): a "
+			"state 6 with a body whose +0x24 bit 1 (mask 0x02) is clear (@0x508584, "
+			"@0x508594..0x508598): a "
 			"boundary the joiner spends outside that (x6's deaths) flips the family unseen, so "
 			"within one mission a challenge's family is its "
 			"predecessor's flipped once per boundary between them (x6's fragrespawn: RR, RR-aa "
@@ -598,7 +600,8 @@ inline constexpr Normalization kNormalizations[] = {
 			"on, RR and RR-aa on the other" },
 	{ "integrity.join_adm", MaskKind::Field, 'S', 0x031, "ammo challenge row", 0,
 			"an S2C 0x31 carries the ammo row of the recipient body's equipped ADM, entity+0x2B0 "
-			"(Server_BroadcastWeaponSlotStateToPlayers @0x508540: the lookup @0x50860A, the row "
+			"(Server_BroadcastWeaponSlotStateToPlayers @0x508540: the lookup called @0x508605, "
+			"the row "
 			"@0x50863E), which the plyr class init writes (PlayerClass_InitEntity @0x4B1116) "
 			"until the joiner's first C2S 0x0C writes its own (@0x4C20A3) or a round it fires "
 			"does (Server_ClientFiredRound @0x50BD56): between a C2S 0x0B and the first C2S "
