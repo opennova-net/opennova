@@ -148,14 +148,26 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	// severe hit cuts speed to one quarter when its strongest planar probe lies beyond the
 	// hull. [orig: the decay @0x47F905..; the quarter cut @0x47FDF8 region]
 	contact_speed_response(m, traits, sev, hit_entity, forces, probes, 7, px, py);
+	// Two depth views leave the passes. `d` is the contact copy (pass one's depths, averaged with
+	// pass two and mass-shared): the +0x2F2 byte, landing, extend, crush, crash state, the branch
+	// select, the loop's contact tests, the fit's contact array and the sink clear read it. `rec`
+	// is the force records' depth (pass two's whenever it ran, never mass-shared): the depth scans,
+	// both arms' Z lifts and the grounded spring loop with its corner lift read it.
+	// [orig: the copy @0x47F8AC..0x47F8D6 (`mov [esp+..+wheelContactFlags], edx` from var_180
+	//  @0x47F8BA); the records read at the scans @0x480BF9, the airborne depth @0x480D69, the
+	//  grounded min / max @0x481112, the settle term @0x4812DC, `sub [esp+edi+..+var_180], eax`
+	//  @0x4813E5 and the lift @0x48141E..0x481427]
 	int32_t d[7];
     for (int i = 0; i < 7; ++i) d[i] = forces[i].fz;
     if (sev >= 1) {
         // plat_second_pass: the planar separation that keeps a remote
         // aircraft out of hillsides [orig: @0x480143..].
 		plat_second_pass(world, veh, ProbeForcePass::ComputeCollisionForces, probes, radii, soft,
-				hard, forces, d, px, py, pz, hit_entity);
+				hard, forces, d, px, py, pz, hit_entity, /*pass_two_hit_slot=*/false);
 	}
+	int32_t rec[7];
+	for (int i = 0; i < 7; ++i)
+		rec[i] = forces[i].fz;
 
 	// Water entry uses r/2 hysteresis, releases the dry trail bank and emits the local splash and
 	// positioned sound edge.
@@ -213,13 +225,14 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	const int32_t up_z16 = basis.q22.m[10] >> 6;
 
 	// Save the pre-spring penetration. Upright live hulls leave the -1 sentinel. The deepest
-	// probe of all seven feeds the tail.
-	// [orig: Entity_ProcessAircraftContactPhysics @ 0x47EF10, the scans @0x480BD3..0x480CE5]
+	// probe of all seven feeds the tail. Both scan the force records.
+	// [orig: Entity_ProcessAircraftContactPhysics @ 0x47EF10, the scans @0x480BD3..0x480CE5
+	//  (`mov ecx, [esp+..+var_180]` @0x480BF9 / @0x480C88)]
 	int32_t crash_depth = -1;
 	if (m.crashed || up_z16 < 0 || m.settle_2f0)
-		for (int i = 0; i < 7; ++i) crash_depth = std::max(crash_depth, d[i]);
+		for (int i = 0; i < 7; ++i) crash_depth = std::max(crash_depth, rec[i]);
 	int32_t max_all = -1;
-	for (int i = 0; i < 7; ++i) max_all = std::max(max_all, d[i]);
+	for (int i = 0; i < 7; ++i) max_all = std::max(max_all, rec[i]);
 	vehicle_flush_sinks(world, veh, up_z16, pz); // [orig: @0x480CE9..0x480D1F]
 	// Both arms fit the pad quad as it stood before either moves Z, corner k over pad k
 	// (+f+s, +f-s, -f-s, -f+s, the probes' order).
@@ -235,10 +248,10 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 		// Airborne marks the flag; the park and wreck latches decide whether to retain the
 		// vertical pose. A crashed hull whose spine touches first freezes its park, marking the
 		// +0x364 cue when it still rolls, else +0x365.
-		// Witness sites: [orig: @0x480D4D..0x480DFF, @0x480EBC..0x480ED5]
+		// Witness sites: [orig: @0x480D4D..0x480DFF (the records from @0x480D69), @0x480EBC..0x480ED5]
 		int32_t depth = -1;
 		if (m.crashed || up_z16 < 0) {
-			for (int i = 0; i < 7; ++i) depth = std::max(depth, d[i]);
+			for (int i = 0; i < 7; ++i) depth = std::max(depth, rec[i]);
 			if (depth > 0 && m.crashed && !m.byte_2ef && !m.settle_2f0) {
 				m.byte_2ef = 1;
 				if (m.air_roll_rate != 0)
@@ -286,21 +299,22 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 		air_contact_tail(world, veh, traits, max_all, up_z16);
 		return;
 	}
-	// The grounded spring loop resolves the pad depths; each corner then lifts by its pad's
-	// resolved depth and its catch-up term. The fit reads contact off the resolved depths.
-	// Witness sites: [orig: the loop @0x481112..0x481447, the lift `dest[k].z += depth[k]`
-	//  @0x481425..0x481427; Entity_ProcessWheeledVehicleSuspension @0x46B140, the call @0x481475
-	//  with the depth array @0x481454]
-	{
-		const bool loop_contact[4] = { d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0 };
-		world.vehicles.suspension_air_grounded_loop(veh, traits, d, loop_contact, sink_growth,
-				corner_adj);
-	}
+	// The grounded spring loop resolves the records' pad depths, its contact tests reading the
+	// contact copy; each corner then lifts by its record's resolved depth and its catch-up term.
+	// The fit, the sink clear and the pair below read the contact copy, which the loop never
+	// writes.
+	// Witness sites: [orig: the loop @0x481112..0x481447 (min / max over the records
+	//  @0x481112..0x481183, the contact tests @0x4811D2 / @0x481289, `depth -= delta` into the
+	//  records @0x4813E5), the lift `dest[k].z += record[k]` @0x48141E..0x481427;
+	//  Entity_ProcessWheeledVehicleSuspension @0x46B140, the call @0x481475 with the contact array
+	//  `lea edx, [esp+..+wheelContactFlags]` @0x481454]
+	const bool pad_contact4[4] = { d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0 };
+	world.vehicles.suspension_air_grounded_loop(veh, traits, rec, pad_contact4, sink_growth,
+			corner_adj);
 	for (int k = 0; k < 4; ++k)
-		c[k][2] = io::bam_add(io::bam_add(c[k][2], corner_adj[k]), d[k]);
-	const bool fit_contact[4] = { d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0 };
+		c[k][2] = io::bam_add(io::bam_add(c[k][2], corner_adj[k]), rec[k]);
     PlatFit fit;
-	vehicle_suspension_fit(world, veh, c, fit_contact, fit, px, py, pz);
+	vehicle_suspension_fit(world, veh, c, pad_contact4, fit, px, py, pz);
 	// Conform writes pitch and roll; the parked arm also adopts yaw. The mover integrates the
 	// rates after return.
 	// Witness sites: [orig: @0x48148A]
@@ -322,12 +336,14 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 		//  @0x4814B4..0x4814BB, `Position.Z += max depth` @0x4814C0..0x4814C4; the test @0x481828].
 		pz = io::bam_add(pz, crash_depth);
 	}
-	// [orig: @0x4814CE..0x4817EA] contact sink clear on the resolved depths (from @0x4814C7), then
+	// The contact copy's sink clear (from `mov edi, [esp+..+wheelContactFlags]` @0x4814C7), then
 	// replicated crash recovery. Aircraft use the opposite diagonal indexing.
+	// [orig: @0x4814C7..0x4817EA]
 	for (int k = 0; k < 4; ++k)
-		if (d[k] != 0)
+		if (pad_contact4[k])
 			m.plat_acc[k] = 0;
-	if (((d[0] && d[3]) || (d[1] && d[2])) && up_z16 > 0 && !m.crashed) {
+	if (((pad_contact4[0] && pad_contact4[3]) || (pad_contact4[1] && pad_contact4[2])) &&
+			up_z16 > 0 && !m.crashed) {
 		m.landing_2ee = 0;
 		m.byte_2ef = 0;
 		std::fill_n(m.plat_acc, 4, 0);
@@ -477,8 +493,18 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 		// depths by the contacted entity mass share.
 		// Witness sites: [orig: @0x47D0F5, @0x47D330, @0x47D452, @0x47D458]
 		plat_second_pass(world, veh, ProbeForcePass::CheckCollisionState, probes, radii, soft, hard,
-				forces, d, px, py, pz, hit_entity);
+				forces, d, px, py, pz, hit_entity, /*pass_two_hit_slot=*/true);
 	}
+	// The force records' depth (pass two's whenever it ran): the depth scans, the inverted no-pad
+	// lift and the grounded spring loop with its corner lift read it; `d`, the contact copy, feeds
+	// every contact test.
+	// [orig: the copy @0x47CB97..0x47CC05 (`mov [esp+..+wheelContactFlags], ecx` from var_1C4
+	//  @0x47CBA5); the records read at the scans @0x47E095, the no-pad depth @0x47E1DF, the grounded
+	//  min / max @0x47E8E7, the settle term @0x47EABD, `sub [esp+edi+..+var_1C4], eax` @0x47EBC3 and
+	//  the lift @0x47EBF7..0x47EC05]
+	int32_t rec[7];
+	for (int i = 0; i < 7; ++i)
+		rec[i] = forces[i].fz;
 
 	// ---- water leg [orig: @0x47D45B..0x47D629]. Pad support forces raise the
     // hull toward the waterline only on the amphibian dispatch (the mover's
@@ -541,10 +567,11 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	vehicle_crash_state(world, veh, traits, pad_contact, up_z16);
 	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	up_z16 = basis.q22.m[10] >> 6;
-	// [orig: Entity_ProcessTrackedVehiclePhysics @ 0x47E09F..0x47E107]
+	// The deepest force record. [orig: Entity_ProcessTrackedVehiclePhysics @ 0x47E09F..0x47E107
+	//  (`mov ecx, [esp+..+var_1C4]` @0x47E095)]
 	int32_t crash_depth = -1;
 	if (m.crashed || up_z16 < 0 || m.settle_2f0)
-		for (int i = 0; i < 7; ++i) crash_depth = std::max(crash_depth, d[i]);
+		for (int i = 0; i < 7; ++i) crash_depth = std::max(crash_depth, rec[i]);
 	// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0, the flush @0x47E122..0x47E157]
 	vehicle_flush_sinks(world, veh, up_z16, pz);
 	int32_t corner_adj[4] = { 0, 0, 0, 0 };
@@ -553,11 +580,11 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // @0x47E1A9].
     if (!any_pad) {
         if (up_z16 < 0) {
-			// Inverted spine contact lifts the hull by the greatest penetration across all seven
+			// Inverted spine contact lifts the hull by the deepest force record across all seven
 			// probes and feeds crush/crash state.
-			// Witness sites: [orig: @0x47E1E9, @0x47E23E, @0x47E358, @0x47E4C6]
+			// Witness sites: [orig: @0x47E1DF, @0x47E1E9, @0x47E23E, @0x47E358, @0x47E4C6]
 			int32_t maxd = 0;
-			for (int i = 0; i < 7; ++i) maxd = std::max(maxd, d[i]);
+			for (int i = 0; i < 7; ++i) maxd = std::max(maxd, rec[i]);
             if (maxd > 0) {
                 pz += maxd;
                 veh.flags &= ~kEntityFlagInAir;
@@ -590,23 +617,29 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 		vehicle_capture_contact_direction(veh, basis);
 	// ---- pad contact: airborne clears unconditionally [orig: @0x47E8EE].
 	veh.flags &= ~kEntityFlagInAir;
-    // The grounded spring loop over this tick's pad depths: the catch-up, the
-    // landing impulse, the settle term and the compress/oscillate arms. It
-    // RESOLVES d_k (the wheel absorbs the compression delta) and the
-    // compressions feed NEXT tick's pad points above
-    // [orig: the loop @0x47E960..0x47EC1F; `d_k -= delta` @0x47EBC3].
-    world.vehicles.suspension_grounded_loop(veh, traits, 4, d, pad_contact,
+    // The grounded spring loop over this tick's force records, its contact tests
+    // reading the contact copy: the catch-up, the landing impulse, the settle
+    // term and the compress/oscillate arms. It RESOLVES rec_k (the wheel absorbs
+    // the compression delta) and the compressions feed NEXT tick's pad points
+    // above [orig: the loop @0x47E960..0x47EC1F; min / max over the records
+    // @0x47E8E7..0x47E956; `sub [esp+edi+..+var_1C4], eax` @0x47EBC3].
+    world.vehicles.suspension_grounded_loop(veh, traits, 4, rec, pad_contact,
                                      sink_growth, corner_adj);
     // The pad-rectangle bounding quad, in the witnessed winding — corner k
-    // sits over pad k, so the identity d_k lift pairing is geometric here
+    // sits over pad k, so the identity lift pairing is geometric here
     // [orig: Entity_ComputeBoundingQuad @0x45B6E0 non-square arm, called
     // @0x47DAE2/@0x47DB54: c0=(+f,+s), c1=(+f,-s), c2=(-f,-s), c3=(-f,+s), each
     // corner the origin plus two separately rounded Q16 row products;
-    // corner_z[k] += the resolved d_k @0x47EC05 and the catch-up term @0x47E9EF].
+    // corner_z[k] += the resolved rec_k @0x47EBF7..0x47EC05 and the catch-up
+    // term @0x47E9EF]. A crashed hull with a spring skips the rest of each
+    // pad's step, its lift included; with no spring every pad lifts
+    // [orig: `cmp byte ptr [esi+2ECh], 0; jnz loc_47EC0C` @0x47E9B5 / @0x47EA33,
+    //  the spring-0 jump to the lift @0x47E973..0x47E998].
     int32_t c[4][3];
     vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, c);
+    const bool lift = traits.spring == 0 || m.crashed == 0;
     for (int k = 0; k < 4; ++k)
-        c[k][2] = io::bam_add(io::bam_add(c[k][2], d[k]), corner_adj[k]);
+        c[k][2] = io::bam_add(io::bam_add(c[k][2], lift ? rec[k] : 0), corner_adj[k]);
     PlatFit fit;
 	vehicle_suspension_fit(world, veh, c, pad_contact, fit, px, py, pz);
 	// Conform always adopts pitch and roll; crash state also adopts yaw.

@@ -143,11 +143,35 @@ void test_the_extend_loop_grows_free_pads() {
 	}
 }
 
+// The grounded spring loop resolves the force records' depths, never the contact copy, so a free
+// pad whose oscillator steps stays out of contact: its sink keeps this tick's growth (187), where
+// fitting the resolved depth (-delta, nonzero) as a contact would clear it. Pads 0 and 1 sit 4096
+// into the ground (no diagonal pair, so the pair reset leaves the sinks), pads 2 and 3 are lifted
+// clear by their 8192 compression, and pad 2's oscillator has a live amplitude.
+// [orig: Entity_ProcessAircraftContactPhysics @0x47EF10 - `sub [esp+edi+..+var_180], eax`
+//  @0x4813E5 writes the records; the fit's contact array `lea edx, [esp+..+wheelContactFlags]`
+//  @0x481454 and the sink clear from @0x4814C7 read the copy]
+void test_a_free_pads_oscillation_stays_out_of_contact() {
+	VehicleTraits tr = chinook();
+	tr.spring = 6;
+	auto rig = std::make_unique<Rig>();
+	auto &m = rig->e().veh;
+	m.wheel_comp[2] = m.wheel_comp[3] = 8192;
+	m.wheel_osc[2].amplitude = 3000;
+	rig->solve(tr, kRestZ - 4096);
+	CHECK((rig->e().flags & kEntityFlagInAir) == 0);
+	CHECK(m.wheel_comp[2] != 8192); // the oscillator stepped: its delta is nonzero
+	CHECK(m.plat_acc[0] == 0 && m.plat_acc[1] == 0);
+	CHECK(m.plat_acc[2] == 187);
+	CHECK(m.plat_acc[3] == 187);
+}
+
 } // namespace
 
 int main() {
 	test_a_compressed_pad_lifts_its_probe();
 	test_the_extend_loop_grows_free_pads();
+	test_a_free_pads_oscillation_stays_out_of_contact();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
