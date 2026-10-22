@@ -347,6 +347,8 @@ func _ready() -> void:
 	_deploy_presenter = DeployScreenPresenter.install(self, _world.world_view(),
 			_hud if _hud != null else self, func() -> void: _state = State.DEPLOY,
 			_leave_screen.bind(State.DEPLOY))
+	# DEATH's exit confirmation YES runs input action 3, as the quit dialog's yes does.
+	_deploy_presenter.exit_confirmed.connect(_on_quit_confirmed)
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
 	# The process's cfg block every mission's session create reads, and the
 	# create's mpreset exit (docs/net/novaworld-net-re.md D-NET-385).
@@ -1572,20 +1574,28 @@ func _on_camera_escape() -> void:
 	# hud_toggles.h hud_toggles_escape / hud_round_over_key).
 	if _end_flow.is_round_ended():
 		return
-	# Over live play the Escape key's action first resets the input (its
-	# Player_ResetLocalInput, ahead of its spawn gate; engine
-	# inmatch::Role::reset_local_input, D-NET-560).
+	# Under the deploy screen (death.mnu's DEATH) the Escape key's action runs only
+	# in the update's pass-through input frame, after the screen's hotkey (LEAVE
+	# MISSION lowers the word, the confirmation's NO raises it;
+	# DeployScreenPresenter.handle_key), and with the screen open it never opens the
+	# in-game menu: a joiner parked at the pick leaves through LEAVE MISSION's YES
+	# (engine world::pass_through_close_axis carries the key witness).
+	var deploy_frame := _state == State.DEPLOY and _deploy_presenter != null \
+			and _deploy_presenter.is_input_pass_through()
+	var input_frame := _state == State.WORLD or deploy_frame
+	# The Escape key's action first resets the input (its Player_ResetLocalInput,
+	# ahead of its spawn gate; engine inmatch::Role::reset_local_input, D-NET-560).
 	# Its Scroll Lock turn-off goes out at the next frame's head (D-NET-563).
-	if _state == State.WORLD and _world != null and _world.get_sim() != null:
+	if input_frame and _world != null and _world.get_sim() != null:
 		if _world.get_sim().escape_input_reset() and _player_presenter != null:
 			_player_presenter.owe_scroll_lock_turn_off()
-	# Over live play the HUD's escape chain closes one open HUD window first;
-	# only with none open does the in-game menu open.
-	if _state == State.WORLD and _hud_presenter != null and _hud_presenter.handle_escape():
+	# Then the HUD's escape chain closes one open HUD window first; only with none
+	# open and no menu screen up does the in-game menu open.
+	if input_frame and _hud_presenter != null and _hud_presenter.handle_escape():
 		return
-	if _state in [State.WORLD, State.DEPLOY, State.END_ROUND]:
-		# ESC from the deploy screen still reaches the in-game menu (and therefore
-		# RETURN TO MENU): a joiner parked at the pick must be able to leave.
+	if _state == State.DEPLOY:
+		return
+	if _state in [State.WORLD, State.END_ROUND]:
 		_pause()
 	elif _state == State.PAUSED or _state == State.ARMORY:
 		resume()

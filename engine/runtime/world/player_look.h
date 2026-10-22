@@ -153,6 +153,35 @@ inline constexpr int32_t kCursorCentreY = 0xF0;
 //  current screen @0x63B787, from UI_OpenMenuScreen @0x54E520's call @0x54E599); the
 //  death screen's close request Render_ProcessMainSceneFrame @0x5CA0F0
 //  (Game_CloseInGameScreens @0x5CAC9C)]
+//
+// The keys under a pass-through screen (the shell's deploy screen, death.mnu's
+// DEATH). A key-down reaches the key ring and, through the open menu's keyboard
+// hook, the screen's hotkey scan at once: with no edit focused, the first
+// registered row whose widget is visible up its chain marks that widget pressed.
+// The update's menu pass then clicks it (the click event 0x3000001, its ACTION rows
+// and its callback) ahead of the pass-through test, so a click that clears the word
+// (LEAVE MISSION) leaves the key to no input frame, and one that raises it (the
+// confirmation's NO) lets that update's input frame take it. That frame runs the
+// special keys (the deploy keys) and the action rows; the Escape key's action
+// (case 18) resets the input and walks the HUD close chain, and with a menu screen
+// open never opens the in-game menu. So Escape on DEATH is LEAVE MISSION once the
+// shroud is revealed, the confirmation's NO while it is up, and before the reveal
+// (the shroud hides LEAVE MISSION) the action alone; it never reaches the in-game
+// menu. The confirmation's YES (Return) closes the in-game screens, then runs
+// input action 3, the exit.
+// [orig: Input_HandleKeyPress @0x760C90 (Input_QueueKeyEvent @0x760CC2, the
+//  callbacks @0x760CEC); UI_OpenMenuScreen @0x54E520 (UI_GameMenuKeyCallback @0x54B920,
+//  registered through Input_SetKeyCallback @0x761030, the call @0x54E564);
+//  UI_DispatchKeyboardEventToChildren @0x63AD10 (the focus test @0x63ADE5,
+//  CWnd_IsVisibleInHierarchy @0x63AE04, CWnd_SetHotkeyPressed @0x63AE2A);
+//  CWnd_ProcessMouseEvent @0x647A00 (the pressed word @0x647B20 / @0x647B5F, the click
+//  @0x647D15); UI_ProcessMenuScreenFrame @0x54E650 (CUIScene_EndFrame @0x54E668, the
+//  pass-through test @0x54E686, Input_ProcessFrame @0x54E695);
+//  Input_ProcessKeyboardEvents @0x49D1F0 (Input_HandleSpecialKeys @0x49D2FB);
+//  Input_HandleActionBinding @0x49AD40 (case 18 @0x49B234, the UI_IsMenuScreenOpen
+//  gate @0x49B39E..0x49B3A5); DeathScreen_OnConfirmYes @0x553530
+//  (Game_CloseInGameScreens @0x55353A, Input_HandleActionBinding(3) @0x553549;
+//  registered on CONFIRM_YES @0x554647)]
 inline void pass_through_close_axis(int32_t client_x, int32_t client_y, int32_t (&axis)[2]) {
 	axis[0] = client_x - kCursorCentreX;
 	axis[1] = client_y - kCursorCentreY;

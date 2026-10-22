@@ -267,6 +267,54 @@ func test_the_exit_confirmation_holds_the_pass_through_word_down() -> void:
 	assert_true(presenter.is_input_pass_through(), "a new show raises it again")
 
 
+func _key_down(keycode: Key) -> InputEventKey:
+	var key := InputEventKey.new()
+	key.keycode = keycode
+	key.pressed = true
+	return key
+
+
+# The keys under DEATH (engine world::pass_through_close_axis carries the key
+# witness): the screen's hotkeys run first and the Escape
+# key is always left for the shell's escape leg, which runs the Escape action only
+# under the word and never opens the in-game menu over the screen. Before the
+# reveal the hidden shroud's LEAVE MISSION takes no key, so the word holds; once
+# revealed, Escape is LEAVE MISSION (the confirmation shows, the word drops, and
+# no input frame takes the deploy keys), then the confirmation's NO (the word
+# rises); Return on the confirmation is YES, which closes the screen and asks the
+# shell for the exit.
+func test_death_hotkeys_take_escape_and_return_ahead_of_the_input_frame() -> void:
+	DeployMenuFixture.stage(self, TMP_DIR, STAGED_FIXTURES, true)
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	watch_signals(presenter)
+	assert_true(presenter.open(), "a pending pick opens the screen")
+	var driver := presenter.get_menu_driver()
+	var confirm := driver.widget_id("CONFIRM_EXIT")
+	assert_gte(confirm, 0, "the fixture authors the exit confirmation")
+	assert_false(presenter.handle_key(_key_down(KEY_ESCAPE)), "Escape is the shell's")
+	assert_false(driver.is_widget_shown(confirm),
+			"the hidden shroud's LEAVE MISSION takes no key")
+	assert_true(presenter.is_input_pass_through(), "so the word holds for the Escape action")
+	await _await_refresh(pair)
+	assert_false(presenter.handle_key(_key_down(KEY_ESCAPE)), "Escape stays the shell's")
+	assert_true(driver.is_widget_shown(confirm), "LEAVE MISSION shows the confirmation")
+	assert_false(presenter.is_input_pass_through(), "and lowers the word")
+	assert_false(presenter.handle_key(_key_down(KEY_X)),
+			"no input frame runs under the confirmation: the deploy keys wait")
+	assert_true(presenter.is_open())
+	assert_false(presenter.handle_key(_key_down(KEY_ESCAPE)))
+	assert_false(driver.is_widget_shown(confirm), "the confirmation's NO hides it")
+	assert_true(presenter.is_input_pass_through(), "and raises the word")
+	assert_false(presenter.handle_key(_key_down(KEY_ESCAPE)))
+	assert_true(driver.is_widget_shown(confirm), "LEAVE MISSION again")
+	assert_signal_not_emitted(presenter, "exit_confirmed")
+	assert_true(presenter.handle_key(_key_down(KEY_ENTER)), "Return is the confirmation's YES")
+	assert_false(presenter.is_open(), "YES closes the in-game screens")
+	assert_signal_emitted(presenter, "closed")
+	assert_signal_emitted(presenter, "exit_confirmed", "then asks the shell for the exit")
+
+
 # The MAP window (hud-re D-HUD-19): the presenter mounts the windowed map view
 # over the authored MAP widget inside DEATH_SHROUD, follows its frame rect, and
 # the show event fits the zoom; the window's model takes the mouse-class events.

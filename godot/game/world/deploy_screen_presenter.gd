@@ -46,12 +46,17 @@ const SHROUD_WIDGET := "DEATH_SHROUD"
 const SWAP_TEAMS := "SWAP_TEAMS"
 const TEAM_LIST := "BUTTON_TEAMLIST"
 # The LEAVE MISSION button (its Esc hotkey shows CONFIRM_EXIT) and the
-# confirmation's NO.
+# confirmation's NO and YES.
 const HIDDEN_BACK := "HIDDEN_BACK"
 const CONFIRM_NO := "CONFIRM_NO"
+const CONFIRM_YES := "CONFIRM_YES"
 
 signal opened
 signal closed
+## The exit confirmation's YES, after the screen closed: the shell runs input
+## action 3 (the Exit Mission tone, then the exit; engine
+## world::pass_through_close_axis carries the key witness).
+signal exit_confirmed
 
 var _view: WorldView = null
 var _ui_parent: Node = null
@@ -212,28 +217,43 @@ func close() -> void:
 		closed.emit()
 
 
-# The deploy keys (X, SPACE, a team zone's letter) queue the pick while the
-# player is dead or the overlay is up: the engine's rule picks the event-12
-# parameter (Simulation.deploy_key_pick). Like a list select, the initial
-# overlay closes on the send and a death re-pick keeps the screen until the
-# host releases the hold.
 func _unhandled_key_input(event: InputEvent) -> void:
-	if not is_open():
-		return
-	var key := event as InputEventKey
-	if key == null or not key.pressed or key.echo:
-		return
+	if handle_key(event as InputEventKey):
+		get_viewport().set_input_as_handled()
+
+
+## One key-down over the open screen, in the original's order (engine
+## world::pass_through_close_axis carries the key witness): the menu's
+## keyboard hook runs the screen's hotkeys first (death.mnu's LEAVE MISSION and
+## the confirmation's NO on Escape, its YES on Return), whose click lands ahead
+## of the pass-through test; then, only while the word holds, the input frame
+## takes the key: the deploy keys here, the Escape key's action in the shell
+## (MainGame's escape leg). True when the key is taken here; an Escape never is,
+## so the shell's escape leg sees it.
+func handle_key(key: InputEventKey) -> bool:
+	if not is_open() or key == null or not key.pressed or key.echo:
+		return false
+	var hotkey := _driver != null and _driver.handle_key_input(key)
+	if key.keycode == KEY_ESCAPE:
+		return false
+	if not is_open() or not _input_pass_through:
+		return hotkey
+	# The deploy keys (X, SPACE, a team zone's letter) queue the pick while the
+	# player is dead or the overlay is up: the engine's rule picks the event-12
+	# parameter (Simulation.deploy_key_pick). Like a list select, the initial
+	# overlay closes on the send and a death re-pick keeps the screen until the
+	# host releases the hold.
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
-		return
+		return hotkey
 	# The handler compares Windows VK codes, which follow the key's label.
 	var param := int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
 	if param < 0:
-		return
+		return hotkey
 	var initial_overlay := _initial_overlay(sim)
 	if sim.send_deployment_pick(param) and initial_overlay:
 		close()
-	get_viewport().set_input_as_handled()
+	return true
 
 
 func teardown() -> void:
@@ -399,12 +419,18 @@ func _apply_team_service_buttons(shown: bool) -> void:
 # SWAP_TEAMS asks the host for the other side (C2S 0x4D; the engine's
 # ClientRuntime::queue_team_change_request carries the witness). HIDDEN_BACK
 # and CONFIRM_NO lower and raise the pass-through word (_input_pass_through).
+# CONFIRM_YES closes the in-game screens, then asks the shell for the exit
+# (exit_confirmed).
 func _on_widget_activated(_id: int, widget_name: String) -> void:
 	if widget_name.nocasecmp_to(HIDDEN_BACK) == 0:
 		_input_pass_through = false
 		return
 	if widget_name.nocasecmp_to(CONFIRM_NO) == 0:
 		_input_pass_through = true
+		return
+	if widget_name.nocasecmp_to(CONFIRM_YES) == 0:
+		close()
+		exit_confirmed.emit()
 		return
 	if widget_name.nocasecmp_to(SWAP_TEAMS) != 0:
 		return
