@@ -317,9 +317,15 @@ void NovaWorldClient::start() {
 	// (the pump's demux, D-NET-346); its open writes the socket's connect-log lines
 	// (engine: inmatch::write_novaworld_socket_open_lines). Then the gate worker's
 	// socket: on every interface over the cfg block's mpgateserverlocalport quad
-	// (engine: inmatch::gate_bind_ports, its first free port the probe's source). Then
-	// the driver mints the ci/ck pair on them; a bind failure is the error state.
+	// (engine: inmatch::gate_bind_ports, its first free port the probe's source), the
+	// gate manager's own socket, so never the process's transport socket. Then the driver
+	// mints the ci/ck pair on them. A session socket that bound nothing goes on closed
+	// (engine: inmatch::write_novaworld_socket_open_lines carries the witness): the gate's
+	// start, the gate's exchange and the NovaWorld connect run as ever, the session's
+	// datagrams go nowhere, and the connect ends as an unanswered one does; a gate socket bind
+	// failure is the error state.
 	gate_pump_.instantiate();
+	gate_pump_->set_process_transport_claim(false);
 	nw_pump_.instantiate();
 	bool nw_bound = false;
 	const std::vector<uint16_t> nw_ports = game_config_.is_valid()
@@ -342,10 +348,6 @@ void NovaWorldClient::start() {
 				game_config_.is_valid() ? game_config_->native().cfg()
 										: opennova::gamecfg::defaults(),
 				nw_bound ? &local : nullptr);
-	}
-	if (!nw_bound) {
-		enter_state(STATE_ERROR, String("nw UDP bind failed"));
-		return;
 	}
 	bool gate_bound = false;
 	const std::vector<uint16_t> gate_ports = opennova::inmatch::gate_bind_ports(

@@ -82,6 +82,12 @@ public:
 	// process's network shutdown sends a held server's STOP bursts over it (GameWorld's exit;
 	// engine: inmatch::stop_unstopped_server carries the witness, D-NET-NEW-L1-26).
 	static UdpPump *process_transport();
+	// Whether this pump is the process's transport socket now.
+	bool is_process_transport() const;
+	// A pump that is not the process's transport socket opens without taking
+	// process_transport: the NovaWorld gate worker's, the gate manager's own socket
+	// (engine: inmatch::gate_port_quad carries the witness). Set before the bind.
+	void set_process_transport_claim(bool p_claim) { claims_process_transport_ = p_claim; }
 	// The dialed default destination as a packed PeerAddr (zero before dial).
 	opennova::PeerAddr dialed_host() const;
 	void close();
@@ -143,6 +149,7 @@ private:
 	std::vector<uint16_t> client_bind_ports_; // set_client_bind_scan
 	uint32_t client_bind_address_ = 0;
 	bool client_bind_scan_set_ = false;
+	bool claims_process_transport_ = true; // set_process_transport_claim
 	String dest_ip_;
 	int dest_port_ = 0;
 

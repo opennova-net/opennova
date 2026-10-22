@@ -130,11 +130,15 @@ TransportPortQuad transport_port_quad(const gamecfg::GameCfg &cfg, NetworkType t
 // the network type, scanned as the session socket's (transport_bind_ports: the shipped 49152 /
 // 65536 / 1 / 0 clamp to 49152..65535 from 49152). The bound port is the probe's source port,
 // which the gate reflects as REFLECTEDPORTNUMBER and the connect log's "GATE GATE SERVICE
-// STARTED" line prints. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - the bind address 0
+// STARTED" line prints. The socket is the gate manager's own, never the process's transport
+// socket (the NP manager's, which the transport mode's teardown closes).
+// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - the bind address 0
 // @0x4CE7D2, the quad g_GameConfigState +0x218..+0x224 into the context's +0x110..+0x11C
 // @0x4CE7DE..0x4CE810; CNapiGateManager_CreateAndBindSocket @0x633770 - the address and the quad
 // into the bind's parameters @0x6337D4..0x633824, NapiUdpSocket_CreateAndBind (the call
-// @0x633830); NapiUdpSocket_CreateAndBind @0x62D2A0]
+// @0x633830), the socket into the gate manager's +0x30 @0x63383A; NapiUdpSocket_CreateAndBind
+// @0x62D2A0; CNapiNetwork_TearDownSocket @0x4C4C90 - NapiNPManager_CloseSocket of the NP
+// manager @0x4C4CF5]
 TransportPortQuad gate_port_quad(const gamecfg::GameCfg &cfg);
 std::vector<uint16_t> gate_bind_ports(const gamecfg::GameCfg &cfg);
 // The socket open's bind address: the block's mpipaddressstring through Napi_ResolveAddress with
@@ -171,11 +175,21 @@ void write_transport_socket_open_lines(ConnectLog &log, const PeerAddr *bound, u
 // mpnovaworld quad, a non-authority's NovaWorld arm, on its mpipaddressstring; `bound` is the
 // bound socket, null when every bind failed. The session's later legs open nothing: a NovaWorld
 // join's enumerate-and-join meets mode 4 already set, and the same mode returns at once.
+// A failed open goes on: the menu does not test the open's result, so the gate's start, its
+// exchange and the NovaWorld connect run as ever over a manager with no socket. The connect
+// tests the network type, not the transport mode, and its InitNPConnection only the manager;
+// the session's sends go nowhere (SendTo answers -1 with no socket, and the Hello's caller
+// does not test it) and nothing arrives, so the connect ends as an unanswered one does.
 // [orig: UI_ProcessLANSessionStateMachine @0x558E00 - SetNetworkType(1) called @0x558E8C,
 //  SetConnectionMode(0) @0x558E97, SetTransportMode(4) @0x558EA3 (4 pushed @0x558E9C),
-//  CNapiGateManager_WaitForConnect @0x558EAD; CNapiNetwork_SetTransportMode @0x4C8750 - the
-//  same mode's return @0x4C8766; UI_EnumerateAndJoinSession @0x569F50 - 4 pushed @0x56A06A,
-//  SetTransportMode called @0x56A07C]
+//  CNapiGateManager_WaitForConnect @0x558EAD, ConnectToNovaWorld called @0x559156 (state 4);
+//  CNapiNetwork_SetTransportMode @0x4C8750 - the same mode's return @0x4C8766, the failure's
+//  SetTransportMode(0) @0x4C87A3; UI_EnumerateAndJoinSession @0x569F50 - 4 pushed @0x56A06A,
+//  SetTransportMode called @0x56A07C; CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the
+//  network type test @0x4D46CB..0x4D46D2, InitNPConnection called @0x4D49B8, InitPlayerConnection
+//  @0x4D4B16; CNapiGameSession_InitNPConnection @0x4D3BE0 - the manager test @0x4D3C75;
+//  CNapiNPManager_SendTo @0x61EC20 - the socket test @0x61EC61; CNapiNPConnection_PumpStateMachine
+//  @0x6292E0 - the Hello called @0x629595, the jump past its result @0x62959D]
 void write_novaworld_socket_open_lines(ConnectLog &log, const gamecfg::GameCfg &cfg,
 		const PeerAddr *bound);
 // The session socket's close when the NovaWorld session goes: the main menu's activation off

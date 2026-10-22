@@ -52,13 +52,17 @@ uint32_t ipv4_from_string(const String &ip) {
 	return out;
 }
 
-// The pump whose socket opened last, while it stays open (UdpPump::process_transport).
+// The claiming pump whose socket opened last, while it stays open (UdpPump::process_transport).
 UdpPump *g_process_transport = nullptr;
 
 } // namespace
 
 UdpPump *UdpPump::process_transport() {
 	return g_process_transport;
+}
+
+bool UdpPump::is_process_transport() const {
+	return g_process_transport == this;
 }
 
 UdpPump::UdpPump() {}
@@ -102,7 +106,7 @@ int UdpPump::bind_listen_at(int port, uint32_t address) {
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
 	bound_address_ = address;
-	g_process_transport = this;
+	if (claims_process_transport_) g_process_transport = this;
 	capture_ = opennova::net::PcapUdpWriter::from_path(
 			opennova::to_std(capture_path_));
 	if (capture_ != nullptr) {
@@ -134,7 +138,7 @@ int UdpPump::bind_client() {
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
 	bound_address_ = client_bind_address_;
-	g_process_transport = this;
+	if (claims_process_transport_) g_process_transport = this;
 	capture_ = opennova::net::PcapUdpWriter::from_path(
 			opennova::to_std(capture_path_));
 	return static_cast<int>(OK);
@@ -255,6 +259,7 @@ void UdpPump::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bind_client"), &UdpPump::bind_client);
 	ClassDB::bind_method(D_METHOD("set_broadcast_enabled", "enabled"), &UdpPump::set_broadcast_enabled);
 	ClassDB::bind_method(D_METHOD("is_open"), &UdpPump::is_open);
+	ClassDB::bind_method(D_METHOD("is_process_transport"), &UdpPump::is_process_transport);
 	ClassDB::bind_method(D_METHOD("local_port"), &UdpPump::local_port);
 	ClassDB::bind_method(D_METHOD("close"), &UdpPump::close);
 	ClassDB::bind_method(D_METHOD("poll"), &UdpPump::poll);
