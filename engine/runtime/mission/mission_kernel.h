@@ -74,6 +74,13 @@ struct KernelBootOptions {
 	// A world presenter seeds weather after boot, then completes mission start.
 	// Native boots with their weather already seeded finish here.
 	bool defer_mission_start = false;
+	// An embedder whose render device builds its mission inits after the boot (the game's
+	// effect world and warm): the boot stops ahead of the PreMission pass, which
+	// begin_mission_start runs after those inits, as retail's mission start runs its pass
+	// past its render inits and its last load pump [orig: Game_StartMission -
+	// Render_InitMissionTextures @0x525A6E, HUD_InitAllFonts @0x525A9A, the pump @0x525AC5,
+	// then the EventTrigger_UpdateAllWithFlag2 call @0x525B86]. Implies defer_mission_start.
+	bool defer_premission = false;
 	// The single-player restart's boot: the same mission started again by the
 	// SP restart (Game_StartMission(1)), whose start skips the first start's
 	// intro-cine leg [orig: Game_RestartRoundSP @0x5263DB pushes 1; the first
@@ -221,6 +228,12 @@ public:
 	// boot appends its round init ("round_init") after it.
 	bool boot(const KernelBootOptions &options, std::string &error);
 	std::vector<std::string> boot_trace;
+	// The boot's last legs, which KernelBootOptions::defer_premission leaves to the
+	// embedder: on the authority the PreMission pass ("premission") and the SP score
+	// block's zero, then on every peer the frame tick and the HUD's frame counters zeroed;
+	// the mission start (complete_mission_start) is then pending. False when the boot ran
+	// them already or did not run.
+	bool begin_mission_start();
 	// This boot is the SP restart's (KernelBootOptions::restart), for the
 	// bring-up's legs its start skips.
 	bool restart_boot() const { return restart_boot_; }
@@ -428,6 +441,8 @@ public:
 	size_t text_size = 0;
 	world::World::Snapshot baseline;
 	bool have_baseline = false;
+	bool premission_pending = false;   // begin_mission_start's legs owed
+	bool premission_authority = false; // the boot was the authority's (not a joiner's)
 	bool mission_start_pending = false;
 	wac::WacSystem::RuntimeState wac_baseline;
 	bool have_wac_baseline = false;

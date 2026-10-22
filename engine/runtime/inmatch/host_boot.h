@@ -9,9 +9,10 @@
 //
 // The phases bracket the embedder's device stages: the game places the
 // mission objects and builds its render terrain before phase A, and binds its
-// occlusion, audio and effects between the two; a headless host runs them
-// back to back. Everything an embedder still owns is the config (the host
-// screen or the host file), the mount, the socket, the clock and its devices.
+// occlusion, audio and effects and warms its effect catalog between the two; a
+// headless host runs them back to back. Everything an embedder still owns is
+// the config (the host screen or the host file), the mount, the socket, the
+// clock and its devices.
 //
 //   boot_host_mission (A): the loose score.ini into the session config, the
 //     mission .til, the mission text, the gametext "Server" strings,
@@ -19,8 +20,11 @@
 //     with the placed tiles and the .TSD table, the environment and the water
 //     plane (both before the PreMission pass), the HostRole's staged
 //     bring-up, MissionKernel::boot with the bringup_net_session hook, the
-//     item catalog and traits, charattr.def, and a map change's round init.
-//   start_host_mission (B): the water plane, the mission-start environment
+//     item catalog and traits, charattr.def, then the mission start's head
+//     (the PreMission pass, the restrictions, a map change's round init,
+//     Player_InitPlayer), which a deferred authority boot leaves to phase B.
+//   start_host_mission (B): the head a deferred boot left, after the render
+//     arm's last pump; the water plane, the mission-start environment
 //     boundary (the weather seed, the embedder's render bind, the kernel's
 //     complete_mission_start: the eager WAC, the 255-tick settle, the
 //     vehicles, the baseline), the load end (the authority's S2C 0x7B to
@@ -98,10 +102,11 @@ struct HostBootRequest {
 	// The map change's boot (inmatch/map_change.h): the host continues its
 	// kept session on the new kernel instead of starting one.
 	bool next_mission = false;
-	// The embedder runs its render device's mission inits after phase A (the game's effect
-	// world and warm): the host's load window leaves its render arm's pumps owed for the
-	// embedder's device stages (HostRole::render_arm_pumps), and phase B leaves the load
-	// end, which end_host_mission_load runs after them. A headless host runs both itself.
+	// The embedder runs its render device's mission inits between the phases (the game's
+	// effect world and warm): the host's load window leaves its render arm's pumps owed for
+	// the embedder's device stages (HostRole::render_arm_pumps), phase A leaves the mission
+	// start's head to phase B, which runs it past the arm's last pump, and phase B leaves the
+	// load end, which end_host_mission_load runs. A headless host runs all of it itself.
 	bool render_arm_deferred = false;
 	// The .til bytes when the embedder has them (a joiner's S2C 0x45 stream,
 	// which must never fall back to a same-named local file); unset = the
@@ -159,6 +164,12 @@ struct HostBoot {
 	// for end_host_mission_load (set where phase B would have run it).
 	bool load_end_deferred = false;
 	bool load_end_owed = false;
+	// The mission start's head a deferred authority boot leaves to phase B, which the
+	// embedder runs after its device stages: the render arm's last pump, the PreMission
+	// pass, the restrictions, the round init and Player_InitPlayer (the words it reads).
+	bool mission_start_head_owed = false;
+	bool next_mission = false;
+	CharAttrRestrictions charattr_restrictions;
 	// The tables the boot read, for the embedder to retain.
 	mission::MissionText mission_text;
 	std::vector<uint8_t> terrain_til;
@@ -241,12 +252,14 @@ struct HostStartDevice {
 	std::function<void()> bind_render;
 };
 
-// Phase B. False with `error` when the session cannot leave its load.
+// Phase B. False with `error` when the session cannot leave its load. After a deferred
+// authority boot (HostBootRequest::render_arm_deferred) the embedder runs it past its device
+// stages: it opens with the render arm's pumps still owed and the mission start's head.
 bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::string &error);
 
-// The load end phase B left (HostBootRequest::render_arm_deferred), after the embedder's
-// device stages: the render arm's pumps still owed, then the S2C 0x7B to every slot and the
-// spawn gate's clear (HostRole::finish_mission_load). A no-op when nothing is owed.
+// The load end phase B left (HostBootRequest::render_arm_deferred): the render arm's pumps
+// still owed, then the S2C 0x7B to every slot and the spawn gate's clear
+// (HostRole::finish_mission_load). A no-op when nothing is owed.
 void end_host_mission_load(HostBoot &boot);
 
 } // namespace opennova::inmatch

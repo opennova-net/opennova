@@ -601,6 +601,9 @@ public:
 	// carries the witness). No-ops on a joiner or a load that owes neither.
 	void set_render_arm_deferred(bool p_deferred) { render_arm_deferred_ = p_deferred; }
 	void pump_host_render_arm_ahead_of_textures();
+	// Phase A left the host's mission-start head to phase B (engine inmatch/host_boot.h
+	// HostBoot::mission_start_head_owed): the world runs phase B past its device stages.
+	bool host_mission_start_deferred() const { return host_boot_.mission_start_head_owed; }
 	void end_host_mission_load();
 	// The precipitation drop pool's per-render update + compile for a camera
 	// (renderer/precipitation_frame.h carries the cites): the compiled frame the

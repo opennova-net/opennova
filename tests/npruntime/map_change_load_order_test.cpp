@@ -27,8 +27,11 @@
 //   - a playing listen host's: its head's pumps ahead of the terrain too, and ten window pumps;
 //   - with the embedder's device stages deferred (the game's effect world and warm, which
 //     stand for retail's render inits): the render arm's pumps (two dedicated, three listen)
-//     and the load end run at those stages, so a reload leg that lands while they run is
-//     answered ahead of the 0x7B.
+//     run at those stages and at phase B's head, so a reload leg that lands while they run is
+//     answered ahead of the 0x7B; the PreMission pass and the round init wait for the arm's
+//     last pump (Game_StartMission's EventTrigger_UpdateAllWithFlag2 @0x525B86 and
+//     Server_InitAllPlayerEntitiesForRound @0x525BAF past @0x525AC5), so a leg the arm's
+//     pumps read meets the slots before their round init.
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
 #include <formats/def/def.h>
@@ -87,6 +90,13 @@ int failures = 0;
 
 constexpr double kFrame = 1.0 / 62.5;
 constexpr size_t kNoPump = static_cast<size_t>(-1);
+
+// The index of a boot step in a kernel's boot_trace, or -1.
+int step_index(const std::vector<std::string> &trace, const char *step) {
+	for (size_t i = 0; i < trace.size(); ++i)
+		if (trace[i] == step) return static_cast<int>(i);
+	return -1;
+}
 
 const char kServerScrk[] = "SERVERLOADORDERSCRK23456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789A";
 const char kClientScrk[] = "CLIENTLOADORDERSCRK23456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789A";
@@ -180,7 +190,8 @@ struct DedicatedHost {
 	std::unique_ptr<mission::MissionKernel> kernel;
 	RecordingSocket socket;
 	std::function<void()> at_terrain;
-	// The embedder's device stages between the phases (HostBootRequest::render_arm_deferred).
+	// The embedder's device stages between the phases (HostBootRequest::render_arm_deferred),
+	// in the game's order: phase A, the stages, phase B, the load end.
 	bool render_arm_deferred = false;
 	std::function<void()> device_stages;
 
@@ -227,12 +238,15 @@ struct DedicatedHost {
 			if (at_terrain) at_terrain();
 		};
 		std::string error;
-		if (!inmatch::boot_host_mission(std::move(r), boot, error) ||
-				!inmatch::start_host_mission(boot, inmatch::HostStartDevice{}, error)) {
+		if (!inmatch::boot_host_mission(std::move(r), boot, error)) {
 			std::printf("boot: %s\n", error.c_str());
 			return false;
 		}
 		if (device_stages) device_stages();
+		if (!inmatch::start_host_mission(boot, inmatch::HostStartDevice{}, error)) {
+			std::printf("boot: %s\n", error.c_str());
+			return false;
+		}
 		inmatch::end_host_mission_load(boot);
 		return true;
 	}
@@ -431,12 +445,15 @@ struct ListenHost {
 			if (at_terrain) at_terrain();
 		};
 		std::string error;
-		if (!inmatch::boot_host_mission(std::move(r), boot, error) ||
-				!inmatch::start_host_mission(boot, inmatch::HostStartDevice{}, error)) {
+		if (!inmatch::boot_host_mission(std::move(r), boot, error)) {
 			std::printf("listen boot: %s\n", error.c_str());
 			return false;
 		}
 		if (device_stages) device_stages();
+		if (!inmatch::start_host_mission(boot, inmatch::HostStartDevice{}, error)) {
+			std::printf("listen boot: %s\n", error.c_str());
+			return false;
+		}
 		inmatch::end_host_mission_load(boot);
 		return true;
 	}
@@ -479,9 +496,12 @@ void test_listen_map_change_pumps_ten_through_the_load() {
 // Render_InitTerrainSubsystems @0x5259FD, @0x525A5C, Render_InitMissionTextures @0x525A6E,
 // HUD_InitAllFonts @0x525A9A, @0x525AC5, then Server_BroadcastPlayerInfoToAll @0x526267. A
 // dedicated host's arm is the two after its skipped inits (the test @0x5259B4). With the
-// embedder's stages deferred, the boot's phases leave those two and the load end: a kept
-// joiner's reload legs that reach the socket while the stages run (after phase B) are read
-// at the arm's first pump, over the new World, and their replies still lead the 0x7B.
+// embedder's stages deferred, phase A leaves those two, and the PreMission pass and the round
+// init wait for the arm's last pump, which phase B runs first: a kept joiner's reload legs
+// that reach the socket while the stages run (between the phases) are read at the arm's first
+// pump, over the new World and ahead of the slots' round init, and their replies still lead
+// the 0x7B [orig: Game_StartMission - @0x525AC5, then EventTrigger_UpdateAllWithFlag2
+// @0x525B86 and Server_InitAllPlayerEntitiesForRound @0x525BAF].
 void test_dedicated_render_arm_answers_a_leg_during_the_device_stages() {
 	auto host = std::make_unique<DedicatedHost>();
 	host->role.set_socket(&host->socket);
@@ -499,23 +519,31 @@ void test_dedicated_render_arm_answers_a_leg_during_the_device_stages() {
 	std::vector<size_t> marks;
 	size_t read_at = kNoPump;
 	bool world_at_read = false;
+	int round_init_at_read = 0;
+	int premission_at_last_pump = 0;
 	bool legs_queued = false;
 	host->socket.on_drain = [&]() {
 		marks.push_back(host->socket.sent.size());
 		if (legs_queued && read_at == kNoPump) {
 			read_at = marks.size() - 1;
 			world_at_read = host->ctx().world != nullptr;
+			round_init_at_read = step_index(host->kernel->boot_trace, "round_init");
 		}
+		// The arm's last pump (@0x525AC5), phase B's first leg.
+		if (legs_queued && marks.size() - 1 == 10)
+			premission_at_last_pump = step_index(host->kernel->boot_trace, "premission");
 	};
 	size_t pumps_at_stages = kNoPump;
 	int owed_at_stages = -1;
 	int owed_past_effects = -1;
 	uint8_t gate_at_stages = 0;
+	int premission_at_stages = 0;
 	host->render_arm_deferred = true;
 	host->device_stages = [&]() {
 		pumps_at_stages = marks.size();
 		owed_at_stages = host->role.render_arm_pumps_owed();
 		gate_at_stages = host->ctx().net_spawn_suspended;
+		premission_at_stages = step_index(host->kernel->boot_trace, "premission");
 		host->socket.inbound.push_back(reload_legs(host->ctx().server_info_transfer_id));
 		legs_queued = true;
 		host->role.pump_render_arm_ahead_of_textures();
@@ -525,20 +553,31 @@ void test_dedicated_render_arm_answers_a_leg_during_the_device_stages() {
 			inmatch::MapChangeStep::NextMission);
 	CHECK(host->boot_current(/*next_mission=*/true));
 	const size_t load_pumps = marks.size();
-	// The phases ran the teardown's, the head's and seven of the window's nine; the stages
-	// ran the arm's first (@0x525A5C) and the load end its last (@0x525AC5).
+	// Phase A ran the teardown's, the head's and seven of the window's nine; the stages
+	// ran the arm's first (@0x525A5C) and phase B its last (@0x525AC5).
 	CHECK(pumps_at_stages == 9);
 	CHECK(owed_at_stages == 2);
 	CHECK(owed_past_effects == 1);
 	CHECK(load_pumps == 11);
 	CHECK(host->role.render_arm_pumps_owed() == 0);
-	// Phase B left the load end: the spawn gate held through the stages.
+	// The spawn gate held through the stages, until the load end.
 	CHECK(gate_at_stages == 1);
 	CHECK(host->ctx().net_spawn_suspended == 0);
 	CHECK(host->session.state() == inmatch::State::Running);
-	// The legs were read at the arm's first pump, the next World standing.
+	// The legs were read at the arm's first pump, the next World standing, its slots not yet
+	// in their round init.
 	CHECK(read_at == 9);
 	CHECK(world_at_read);
+	CHECK(round_init_at_read == -1);
+	// The PreMission pass waits for the arm's last pump, then the round init follows it.
+	CHECK(premission_at_stages == -1);
+	CHECK(premission_at_last_pump == -1);
+	if (host->kernel != nullptr) {
+		const int premission = step_index(host->kernel->boot_trace, "premission");
+		const int round_init = step_index(host->kernel->boot_trace, "round_init");
+		CHECK(premission >= 0);
+		CHECK(round_init > premission);
+	}
 	for (int f = 0; f < 16; ++f) (void)host->session.advance(input);
 	const std::vector<SentPacket> to_kept = packets_to(host->socket, host->socket.peer, marks);
 	CHECK(to_kept.size() >= 2);
@@ -577,11 +616,15 @@ void test_listen_render_arm_pumps_three_around_the_textures() {
 	size_t drains_at_stages = kNoPump;
 	size_t drains_past_effects = kNoPump;
 	int owed_at_stages = -1;
+	int premission_at_stages = 0;
+	int round_init_at_stages = 0;
 	host->socket.on_drain = [&drains]() { ++drains; };
 	host->render_arm_deferred = true;
 	host->device_stages = [&]() {
 		drains_at_stages = drains;
 		owed_at_stages = host->role.render_arm_pumps_owed();
+		premission_at_stages = step_index(host->kernel->boot_trace, "premission");
+		round_init_at_stages = step_index(host->kernel->boot_trace, "round_init");
 		host->role.pump_render_arm_ahead_of_textures();
 		drains_past_effects = drains;
 	};
@@ -593,6 +636,16 @@ void test_listen_render_arm_pumps_three_around_the_textures() {
 	CHECK(drains_past_effects == 11);
 	CHECK(drains == 12);
 	CHECK(ctx.net_spawn_suspended == 0);
+	// The mission start's head waited for the stages: the PreMission pass, then the round
+	// init over the kept slots, the own host's among them.
+	CHECK(premission_at_stages == -1);
+	CHECK(round_init_at_stages == -1);
+	if (host->kernel != nullptr) {
+		const int premission = step_index(host->kernel->boot_trace, "premission");
+		const int round_init = step_index(host->kernel->boot_trace, "round_init");
+		CHECK(premission >= 0);
+		CHECK(round_init > premission);
+	}
 }
 
 } // namespace

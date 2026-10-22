@@ -142,6 +142,10 @@ public:
 	// (an own client's two, a dedicated host's one) [orig: Game_StartMission @0x5259EC,
 	//  @0x525A5C, ahead of Render_InitMissionTextures @0x525A6E].
 	void pump_render_arm_ahead_of_textures();
+	// The render arm's pumps still owed: its last, after the mission's textures and the
+	// fonts (@0x525AC5), and any the embedder's stages left. Phase B of a deferred boot runs
+	// it ahead of the PreMission pass, else the load end (finish_mission_load).
+	void pump_render_arm_owed();
 	int render_arm_pumps_owed() const { return render_arm_pumps_owed_; }
 	// A map change's next mission start, its world-free head, ahead of the load's terrain:
 	// the file-transfer session and the report clocks, the mission text and the "Server"
@@ -194,10 +198,10 @@ public:
 	// installed with the client view), ahead of finish_mission_load
 	// [orig: Game_StartMission @0x526189..0x526255, ahead of @0x526267].
 	void send_own_mission_status();
-	// The mission load's end: the render arm's pumps still owed (the last one, after the
-	// mission's textures, @0x525AC5), then on the authority the S2C 0x7B to every slot, then
-	// the load's spawn gate clears. No pump follows: the 0x7B leaves at the first tick's send
-	// pump. Phase B of the host boot runs it, or the embedder after its device stages
+	// The mission load's end: the render arm's pumps still owed (pump_render_arm_owed; none
+	// past a deferred boot's phase B, which ran them), then on the authority the S2C 0x7B to
+	// every slot, then the load's spawn gate clears. No pump follows: the 0x7B leaves at the
+	// first tick's send pump. Phase B of the host boot runs it, or the embedder after it
 	// (end_host_mission_load) [orig: Game_StartMission @0x52625F..0x526267, the clear
 	//  @0x52631B; its last server pump @0x525AC5; Server_TickUpdate's send pump @0x51E487].
 	void finish_mission_load();

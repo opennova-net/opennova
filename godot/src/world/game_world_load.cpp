@@ -329,10 +329,19 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	warm_effect_world_catalog(challenge_sim.is_valid() && !wire_header_join
 					? challenge_sim->get_mission_start_model_files()
 					: PackedStringArray());
-    route_script_effects(); // initial WAC/BMS descriptors survived the warm-scene reset
 	timeline->end_span();
-	// The load end past the textures: the render arm's last pump, then a host's S2C 0x7B and
-	// the spawn gate's clear (engine inmatch::end_host_mission_load).
+	// A host's mission start past its device stages: phase B opens with the render arm's
+	// last pump, then the PreMission pass, the round init and Player_InitPlayer, as retail's
+	// start runs them past its mission textures (engine inmatch/host_boot.h start_host_mission
+	// carries the witness).
+	if (challenge_sim.is_valid() && challenge_sim->host_mission_start_deferred()) {
+		timeline->span("mission_start");
+		run_mission_start();
+		timeline->end_span();
+	}
+	route_script_effects(); // the start's WAC/BMS descriptors, past the warm-scene reset
+	// The load end past the mission start: a host's S2C 0x7B and the spawn gate's clear
+	// (engine inmatch::end_host_mission_load).
 	if (challenge_sim.is_valid()) challenge_sim->end_host_mission_load();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_FINISH));
 	timeline->finish();
@@ -1125,18 +1134,10 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// contexts. Re-handed per load; unload's reset() forgets them.
 	occlusion_->bind_mission(runtime->get_sim(), runtime->get_entity_index(), runtime->get_entity_presenter(),
 			placer_);
-	// Phase B of the one host boot: the water plane the vehicle init grounds
-	// hulls against (07TR's offshore LCACs otherwise settle on the seabed
-	// before crews board), the environment boundary and the session's load
-	// end (inmatch/host_boot.h).
-	run_mission_start_environment_boundary();
+	// Phase B of the one host boot, here unless the boot left the host's mission-start head
+	// to it: then it runs past the device stages (load_mission_internal).
+	if (!runtime->get_sim()->host_mission_start_deferred()) run_mission_start();
 	sync_runtime_profiling();
-	// The player profile's saved weapon kits, loaded before ANY kit is applied
-	// or submitted: in a net session the original's spawn kit is a page of
-	// this file, selected by the very class byte it also puts on the wire
-	// [orig: Game_StartMission @ 0x525767-0x525836].
-	load_player_weapon_profile();
-	player_visuals_->apply_local_player_spawn_loadout();
 	runtime->set_presentation_time_ms(panm_clock_->get_time_ms());
 	runtime->connect("effects_drained", callable_mp(this, &GameWorld::on_runtime_effects));
 	runtime->connect("fixed_tick_completed", callable_mp(this, &GameWorld::on_runtime_fixed_tick));
@@ -1148,6 +1149,21 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// transport can pause/step a live mission).
 	runtime->play();
 	return OK;
+}
+
+// Phase B of the one host boot (inmatch/host_boot.h): on a host whose boot left it the
+// mission-start head (the render arm's last pump, the PreMission pass, the round init,
+// Player_InitPlayer), then the water plane the vehicle init grounds hulls against (07TR's
+// offshore LCACs otherwise settle on the seabed before crews board), the environment
+// boundary and the session's load end; then the local player's spawn kit.
+void GameWorld::run_mission_start() {
+	run_mission_start_environment_boundary();
+	// The player profile's saved weapon kits, loaded before ANY kit is applied
+	// or submitted: in a net session the original's spawn kit is a page of
+	// this file, selected by the very class byte it also puts on the wire
+	// [orig: Game_StartMission @ 0x525767-0x525836].
+	load_player_weapon_profile();
+	player_visuals_->apply_local_player_spawn_loadout();
 }
 
 // The player profile's current weapon.sav record onto the sim, again after the

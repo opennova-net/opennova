@@ -761,13 +761,17 @@ void HostRole::pump_render_arm_ahead_of_textures() {
 	render_arm_pumps_owed_ -= ahead;
 }
 
-void HostRole::finish_mission_load() {
+void HostRole::pump_render_arm_owed() {
 	// The render arm's last pump, after the mission's textures, the fonts and the box
 	// texture [orig: Game_StartMission - Render_InitMissionTextures @0x525A6E,
 	//  HUD_InitAllFonts @0x525A9A, BoxTexture_LoadAndSetupUVRegions @0x525AC0,
 	//  Server_PumpNetworkTransport @0x525AC5], and any the embedder's stages left.
 	pump_load(render_arm_pumps_owed_);
 	render_arm_pumps_owed_ = 0;
+}
+
+void HostRole::finish_mission_load() {
+	pump_render_arm_owed();
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	if (ctx.is_authority != 0) inmatch::Server_BroadcastPlayerInfoToAll(ctx);
 	ctx.net_spawn_suspended = 0;

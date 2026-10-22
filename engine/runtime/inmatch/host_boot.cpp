@@ -52,6 +52,34 @@ ServerTextTable read_host_server_text(const mission::BootFileSource &files,
 
 namespace {
 
+// The mission start's head on the authority, past the render device's mission inits and
+// the load's last pump: the kernel's PreMission pass and its tail (MissionKernel::
+// begin_mission_start; a no-op when the boot ran it), then the round's start below.
+void run_host_mission_start_head(HostBoot &boot) {
+	mission::MissionKernel &kernel = *boot.kernel;
+	(void)kernel.begin_mission_start();
+	// Each mission start on the authority zeroes and disables the
+	// properties the session's mp_No* words name (D-NET-374).
+	// [orig: Game_StartMission @0x525b90 -> Server_ResetRoundCounters
+	//  @0x516C50, its tail @0x516DBD -> @0x4FCF10, the body of
+	//  CharAttr_ApplyMpRestrictions @0x4247D0; single player's
+	//  SinglePlayer_StartMission @0x561e7b runs the same step]
+	charattr_apply_restrictions(boot.charattr, boot.charattr_restrictions);
+	install_class_attribute_flags(kernel.world, nullptr, boot.charattr);
+	// A map change's round init over the kept slots follows the
+	// PreMission pass and the round counters' reset with its charattr
+	// tail, where retail's mission start runs it (D-NET-354); a fresh
+	// session's own player still spawns in the bring-up, ahead of the pass.
+	// [orig: Game_StartMission @0x524360 -- the EventTrigger_UpdateAllWithFlag2
+	//  call @0x525B86, the Server_ResetRoundCounters call @0x525B90, the
+	//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
+	if (boot.next_mission) boot.host->init_round_after_premission();
+	else boot.host->seed_own_slot_at_first_round_init();
+	// Then Player_InitPlayer's body leg, a fresh session's and a map
+	// change's alike [orig: Game_StartMission @0x525BBC].
+	boot.host->init_local_player_at_mission_start();
+}
+
 // The mission's environment (its .trn, overcast.def and its .env) with the BMS
 // override layer, and the water plane by its witnessed precedence (the BMS
 // override, the .env, the .trn), resolved onto the world before the boot's
@@ -175,6 +203,9 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	boot.item_catalog.reset();
 	boot.load_end_deferred = request.host != nullptr && request.render_arm_deferred;
 	boot.load_end_owed = false;
+	boot.mission_start_head_owed = false;
+	boot.next_mission = false;
+	boot.charattr_restrictions = CharAttrRestrictions{};
 	if (request.session == nullptr || request.role == nullptr || !request.fresh_kernel) {
 		error = "the host boot needs a session, a role and a fresh kernel";
 		return false;
@@ -373,6 +404,9 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	// the weather settle) is phase B's.
 	mission::KernelBootOptions options = std::move(request.boot_options);
 	options.defer_mission_start = true;
+	// An embedder with a render device: the PreMission pass waits for the head phase B runs
+	// past the device stages (run_host_mission_start_head).
+	options.defer_premission = boot.load_end_deferred;
 	// A map change's host player is a kept slot: the round init after the
 	// boot spawns it and Player_InitPlayer finds it, so the kernel's own spawn
 	// step stands down. [orig: Player_InitPlayer @0x4E15F0 ->
@@ -425,26 +459,12 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	}
 
 	if (request.host != nullptr) {
-		// Each mission start on the authority zeroes and disables the
-		// properties the session's mp_No* words name (D-NET-374).
-		// [orig: Game_StartMission @0x525b90 -> Server_ResetRoundCounters
-		//  @0x516C50, its tail @0x516DBD -> @0x4FCF10, the body of
-		//  CharAttr_ApplyMpRestrictions @0x4247D0; single player's
-		//  SinglePlayer_StartMission @0x561e7b runs the same step]
-		charattr_apply_restrictions(boot.charattr, charattr_restrictions);
-		install_class_attribute_flags(kernel.world, nullptr, boot.charattr);
-		// A map change's round init over the kept slots follows the
-		// PreMission pass and the round counters' reset with its charattr
-		// tail, where retail's mission start runs it (D-NET-354); a fresh
-		// session's own player still spawns in the bring-up, ahead of the pass.
-		// [orig: Game_StartMission @0x524360 -- the EventTrigger_UpdateAllWithFlag2
-		//  call @0x525B86, the Server_ResetRoundCounters call @0x525B90, the
-		//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
-		if (request.next_mission) request.host->init_round_after_premission();
-		else request.host->seed_own_slot_at_first_round_init();
-		// Then Player_InitPlayer's body leg, a fresh session's and a map
-		// change's alike [orig: Game_StartMission @0x525BBC].
-		request.host->init_local_player_at_mission_start();
+		boot.next_mission = request.next_mission;
+		boot.charattr_restrictions = charattr_restrictions;
+		// The mission start's head, now, or past the embedder's device stages, which hold
+		// its render arm (phase B).
+		if (boot.load_end_deferred) boot.mission_start_head_owed = true;
+		else run_host_mission_start_head(boot);
 	}
 	return true;
 }
@@ -460,6 +480,20 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 	// whatever the embedder's device stages left between the phases.
 	kernel.world.env.water_z = boot.water_z_q16;
 	kernel.sync_water_plane();
+
+	// A deferred authority boot's mission-start head, past the embedder's device stages:
+	// the render arm's last pump, after the mission's textures and the fonts, then the
+	// PreMission pass, the round init and Player_InitPlayer, so a leg the arm's pumps read
+	// meets the slots as the load left them [orig: Game_StartMission @0x524360 -
+	// Render_InitMissionTextures @0x525A6E, HUD_InitAllFonts @0x525A9A,
+	// Server_PumpNetworkTransport @0x525AC5, then the EventTrigger_UpdateAllWithFlag2 call
+	// @0x525B86, Server_InitAllPlayerEntitiesForRound @0x525BAF, Player_InitPlayer @0x525BBC,
+	// ahead of the Environment_MissionStartInit call @0x525CB8].
+	if (boot.mission_start_head_owed) {
+		boot.mission_start_head_owed = false;
+		boot.host->pump_render_arm_owed();
+		run_host_mission_start_head(boot);
+	}
 
 	// The mission-start environment boundary: the weather seed from the .env
 	// and the BMS clock, the embedder's render bind, then the kernel's

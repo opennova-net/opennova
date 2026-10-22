@@ -43,10 +43,11 @@
 //     then the window's remaining pumps (5 with an own client, 4 dedicated), but
 //     the render arm's (3 / 2) when the game's device stages run them
 //     (HostRole::render_arm_pumps).
-//   after the kernel boot's PreMission pass and the round counters' reset,
+//   after the kernel's PreMission pass and the round counters' reset,
 //     the round init over the kept slots
-//     (HostRole::init_round_after_premission -> init_all_player_entities_for_round).
-//   the boot's phase B, or after the game's device stages end_host_mission_load,
+//     (HostRole::init_round_after_premission -> init_all_player_entities_for_round);
+//     with the game's device stages these run in phase B, past the render arm's last pump.
+//   the boot's phase B, or end_host_mission_load after it on the game,
 //     ends with the load-end S2C 0x7B to every slot.
 // The host pumps its socket at the witnessed points: the teardown's pump ahead
 // of the slot reset, then the load's with its spawn gate held (D-NET-116): its

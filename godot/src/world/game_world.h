@@ -810,6 +810,7 @@ private:
 			const String &p_trn_path, const String &p_tile_set, const String &p_environment);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
+	void run_mission_start();
 	void load_player_weapon_profile();
 	void start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	int warm_effect_world_catalog(const PackedStringArray &p_models);

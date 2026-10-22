@@ -617,6 +617,7 @@ bool MissionKernel::load_powerup_table(const BootFileSource &files,
 }
 
 bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
+	premission_pending = false;
 	mission_start_pending = false;
 	have_baseline = false;
 	have_wac_baseline = false;
@@ -874,11 +875,24 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	world.registry.for_each_in_pool(0, [&](const w::Entity &row) {
 		w::initialize_organic_ai(world, *world.registry.get(row.handle));
 	});
+	premission_authority = !options.joiner;
+	premission_pending = true;
+	// An embedder with a render device runs the pass after its mission inits
+	// (KernelBootOptions::defer_premission); the mission start follows it.
+	if (options.defer_premission) return true;
+	(void)begin_mission_start();
+	if (!options.defer_mission_start) complete_mission_start();
+	return true;
+}
+
+bool MissionKernel::begin_mission_start() {
+	if (!premission_pending) return false;
+	premission_pending = false;
 	// Only authority runs the PreMission whole-list pass. A joiner can
 	// carry a full BMS in a tool session without replaying its actions.
-	// [orig: Game_StartMission @0x525b86, g_NapiNPCtx.is_authority gate]
-	if (!options.joiner) {
-		step("premission");
+	// [orig: Game_StartMission @0x525b86, g_NapiNPCtx.is_authority gate @0x525B78]
+	if (premission_authority) {
+		boot_trace.emplace_back("premission");
 		world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
 		// Then the SP score block zeroes whole, so a PreMission SubGoalWon
 		// keeps its mask bit but not its tally; the WAC init and the census
@@ -902,7 +916,6 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// @0x525BAA -> Game_ResetSessionHudState @0x434BD0].
 	world.hud_frames = w::HudFrameCounters{};
 	mission_start_pending = true;
-	if (!options.defer_mission_start) complete_mission_start();
 	return true;
 }
 
