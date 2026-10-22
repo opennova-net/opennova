@@ -2684,8 +2684,8 @@ void test_mounted_ammo_slot_route() {
     CHECK(w.vehicles.resolve_mounted_ammo_slot(ungated) == nullptr);
 
     // With the witnessed gate satisfied, the unredirected route is the
-    // entity's own embedded MountSlot; the cross-entity route remains closed
-    // until the strict EWeap relationship proof is present.
+    // entity's own embedded MountSlot. The route bit with no groundEntity is
+    // retail's wild +0x474 off a null pointer; ours resolves no slot there.
     Entity direct_only;
     direct_only.primary_weapon_slot_adm = 3;
     direct_only.has_item_def = true;
@@ -2737,12 +2737,25 @@ void test_mounted_ammo_slot_route() {
     CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) == nullptr);
     live_child->ground_target = parent_h;
 
-    // A packed handle may be reused. The child-side generation captured when
-    // the relationship was authored must reject the replacement lifetime.
+    // The route reads the groundEntity's slot with no check of that entity: not
+    // the addeweap identity, nor its def, type or attrib, nor the lifetime the
+    // relationship was made with. A replacement at the handle (here a plain
+    // defless row) is the slot the route names.
+    // [orig: Entity_GetWeaponSlots @0x5460E0 - the bit test @0x546101, the
+    //  groundEntity read @0x546110, +0x474 @0x546113]
     w.registry.despawn(parent_h);
-    Entity replacement = parent;
+    Entity replacement;
+    replacement.kind = EntityKind::Item;
+    replacement.primary_weapon_slot.clip = 13;
     CHECK(w.registry.spawn_at(parent_h, replacement) == parent_h);
-    CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) == nullptr);
+    live_child = w.registry.get(child_h);
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) ==
+          &w.registry.get(parent_h)->primary_weapon_slot);
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child)->clip == 13);
+    live_child->emplacement_parent = EntityHandle{};
+    live_child->emplacement_parent_spawn_id = 0;
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) ==
+          &w.registry.get(parent_h)->primary_weapon_slot);
 }
 
 // An optic weapon (Flags & 3, here sighted) seeds its vehicle slot's elevation

@@ -203,20 +203,16 @@ const WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(const Entity &mo
     if (mount.item_type == 1u)
         return &mount.primary_weapon_slot;
 
-    // Retail follows entity+0x28 (groundEntity), not the addeweap metadata
-    // pointer. Promotion/materialization capture the same relationship's live
-    // generation so packed-handle reuse cannot redirect into an unrelated row.
-    if (!mount.ground_target.valid() ||
-        mount.emplacement_parent != mount.ground_target ||
-        mount.emplacement_parent_spawn_id == 0)
-        return nullptr;
-    const Entity *parent = world.registry.get(mount.ground_target);
-    if (parent == nullptr ||
-        parent->registry_spawn_id != mount.emplacement_parent_spawn_id ||
-        !parent->has_item_def || parent->item_type != 1u ||
-        (parent->item_attrib & kItemAttribEweap) == 0u)
-        return nullptr;
-    return &parent->primary_weapon_slot;
+    // The route bit sends the entity straight to its groundEntity's vehicle slot
+    // (+0x28, then +0x474): no def, type, attrib or addeweap identity of that
+    // entity is read, whatever entity the ground link names when the slot is
+    // asked for. The gates live where the route legs set the bit
+    // (designated_g_route_carrier). With no groundEntity retail's helper returns
+    // the wild 0x474 its next read faults on; ours resolves no slot there.
+    // [orig: Entity_GetWeaponSlots @0x5460E0 - the bit test @0x546101, the
+    //  groundEntity read @0x546110, +0x474 @0x546113]
+    const Entity *ground = world.registry.get(mount.ground_target);
+    return ground != nullptr ? &ground->primary_weapon_slot : nullptr;
 }
 
 WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(Entity &mount) {

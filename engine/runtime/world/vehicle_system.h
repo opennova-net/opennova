@@ -227,10 +227,9 @@ public:
     const WeaponSlotState *resolve_mounted_ammo_slot(const Entity &mount) const;
     // Resolve the EWeap MountSlot selected by retail's live route bit. A type-1
     // vehicle uses its own embedded slot. An attached non-vehicle EWeap uses its
-    // own slot until redirect_to_parent_slot is set, then follows the exact
-    // groundEntity relationship to a live type-1 EWeap carrier. Invalid/stale
-    // routes return null rather than falling back to attachment metadata.
-    // [orig: shared helper @0x5460e0; NetPacket_WritePlayerState @0x4ffe18]
+    // own slot until redirect_to_parent_slot is set, then its groundEntity's slot,
+    // read with no check of that entity; no groundEntity resolves null.
+    // [orig: Entity_GetWeaponSlots @0x5460E0; NetPacket_WritePlayerState @0x4ffe18]
     WeaponSlotState *resolve_mounted_ammo_slot(Entity &mount);
     // An EWeap entity's reload: the routed slot and its def with the entity's own
     // slot and def (weapon_mount_slot_reload). False when the slot resolves to
