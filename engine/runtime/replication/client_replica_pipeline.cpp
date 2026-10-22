@@ -226,7 +226,8 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 	if (!remote_motion_mode_ || force_live_snap || es.net_world_mover) {
 		// Live snap: the host/SP roles (full-rate loopback; the authority never
 		// interpolates, D-NET-89), the respawn edge [orig: live snap +
-		// Entity_ResetToSpawnState @0x4C113C], and the vehicle dead-pose form.
+		// Entity_ResetToSpawnState @0x4B9610 (the call @0x4C113C)], and the vehicle
+		// dead-pose form.
 		es.x = wx;
 		es.y = wy;
 		es.z = wz;

@@ -1520,7 +1520,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				// hold, the death screen, a hidden body) fires nothing.
 				// [orig: NetPacket_SerializePlayerState @0x4C09C0 - `test bl, 2`
 				//  @0x4C0FE1 (its jz @0x4C1005), `test byte [edi+24h], 2` @0x4C1109, the
-				//  Position stores @0x4C110F..0x4C111D, Game_InitNewRound @0x4C114C; the
+				//  Position stores @0x4C110F..0x4C111D, the Game_InitNewRound call @0x4C114C; the
 				//  Flags folds 0xE1 / 0xFD @0x4C12FF / @0x4C1307; Game_InitNewRound
 				//  @0x422740 - g_ClientDeployHold = 0 @0x4227CE, `mov [eax+1E0h], ebx`
 				//  @0x4227D4]

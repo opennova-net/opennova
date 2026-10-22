@@ -278,9 +278,10 @@ public:
 	// The literal g_ClientDeployHold state. Every valid S2C 0x5A opens it, including
 	// an unrelated loadout echo while dead; that alone cannot resume gameplay.
 	bool gameplay_gate_open() const { return deployed_; }
-    // The listen host's own Game_InitNewRound (its deploy's, Server_DeployPlayer @0x5178AA)
-    // clears the medic latch and gameplay hold. A joiner's runs inside the receive, in the
-    // self record's respawn arm (NetPacket_SerializePlayerState @0x4C114C).
+    // The listen host's own Game_InitNewRound (its deploy's: Server_DeployPlayer @0x517740,
+    // the call @0x5178AA) clears the medic latch and gameplay hold. A joiner's runs inside
+    // the receive, in the self record's respawn arm (NetPacket_SerializePlayerState
+    // @0x4C09C0, the Game_InitNewRound call @0x4C114C).
     void reset_local_round_state();
 	// Monotonic receive-side deployment-release edge. It advances when initial
 	// establishment becomes applicable (even if deploy UI remains pending), and
