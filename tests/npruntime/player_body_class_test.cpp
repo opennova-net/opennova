@@ -1199,6 +1199,73 @@ void test_an_item_row_body_runs_its_movers_head() {
 	}
 }
 
+// A body bound to the psec row runs the physics step over its own words: the savedLivePose
+// stamp, then its velocity triple (+0x98 / +0x9C / +0xA0, the motor's) against the terrain
+// plus a quarter unit (no terrain here: 0x4000). Airborne it moves by the triple, falls 167,
+// turns 0x800000 and pitches 0x1000000 (its +0x270 word, a person's 0, is not 17); on the
+// ground it lands there, the horizontal pair quartered and the fall reflected at a quarter.
+// Either way the Flags 0x20000 bit clears, and no player-body update follows.
+// [orig: Entity_UpdatePhysicsStep @0x53BE10 - the stamp @0x53BE1E..0x53BE4D, the ground
+//  compare @0x53BE6D, the landing @0x53BED7..0x53BF09, the flight @0x53BE75..0x53BECF]
+void test_a_psec_row_body_runs_the_physics_step() {
+	struct Case {
+		int32_t z;
+		int32_t vel[3];
+		int32_t pos_after[3]; // relative to the entry X / Y, absolute Z
+		int32_t vel_after[3];
+		bool airborne;
+	};
+	for (const Case c : {Case{10 << 16, {0x400, -0x400, 0x300},
+				{0x400, -0x400, (10 << 16) + 0x300}, {0x400, -0x400, 0x300 - 167}, true},
+				Case{0x1000, {0x400, -0x400, -0x2000}, {0, 0, 0x4000}, {0x100, -0x100, 0x800},
+				false}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		w::Entity *body = r.spawn_remote(kPlyr);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr && body->item_type_index > 0);
+		if (ae == nullptr || body->item_type_index <= 0) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		r.world->tables.item_rows[static_cast<size_t>(body->item_type_index)].move_row =
+				w::PhysicsClass::Psec;
+		CHECK(w::body_move_row(*r.world, *ae, body) == w::PhysicsClass::Psec);
+		body->flags &= ~w::kEntityFlagCarried;
+		body->engine_flags &= ~w::kEntityFlagCarried;
+		body->engine_flags |= w::kEntityFlagMatrixBuilt;
+		body->net_move_input = 0x08;
+		body->position.set_q16({5 << 16, 6 << 16, c.z});
+		body->heading = 0x12340000;
+		body->pitch_bam = 0x00560000;
+		body->roll_bam = -0x00780000;
+		body->saved_live_valid = false;
+		for (int i = 0; i < 3; ++i) ae->inf.vel[i] = c.vel[i];
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		const w::Entity *after = r.world->registry.get(ae->handle);
+		CHECK(after != nullptr);
+		if (after != nullptr) {
+			CHECK(after->saved_live_valid);
+			CHECK(after->saved_live_pos[0] == 5 << 16);
+			CHECK(after->saved_live_pos[1] == 6 << 16);
+			CHECK(after->saved_live_pos[2] == c.z);
+			CHECK(after->saved_live_yaw == 0x12340000);
+			CHECK(after->saved_live_pitch == 0x00560000);
+			CHECK(after->saved_live_roll == -0x00780000);
+			CHECK(after->position.x.q16 == (5 << 16) + c.pos_after[0]);
+			CHECK(after->position.y.q16 == (6 << 16) + c.pos_after[1]);
+			CHECK(after->position.z.q16 == c.pos_after[2]);
+			CHECK(after->heading == (c.airborne ? 0x12340000 + 0x800000 : 0x12340000));
+			CHECK(after->pitch_bam == (c.airborne ? 0x00560000 + 0x1000000 : 0x00560000));
+			CHECK((after->engine_flags & w::kEntityFlagMatrixBuilt) == 0);
+		}
+		for (int i = 0; i < 3; ++i) CHECK(ae->inf.vel[i] == c.vel_after[i]);
+		CHECK(!ae->inf.player_moving);
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // The spawn's class init by the bound row (def+0x148): an org0 row's player body takes
 // Entity_InitOrganicAI, its legs as a placed person's: the anim pick (the player body's AI slot
 // reads zeros: no route, idle 43; the PERMANENT Q8-1 (a) reading of a slot retail would fault
@@ -1295,6 +1362,7 @@ int main() {
 	test_a_vehicle_row_body_runs_its_movers_person_path();
 	test_a_genx_row_body_rides_its_ground_entity();
 	test_an_item_row_body_runs_its_movers_head();
+	test_a_psec_row_body_runs_the_physics_step();
 	test_an_org_rows_player_body_takes_the_organic_init();
 	test_a_player_bodys_dcb_id_is_its_class_inits();
 	if (failures != 0) {

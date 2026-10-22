@@ -606,8 +606,14 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // `cmp dword ptr [ebp+1ACh], 0` @0x448D5E, `jz` @0x448D65 to the return @0x4497EE;
 // Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - @0x4A92E8, `test byte ptr [esi+24h], 4`
 // @0x4A92F5, the envs leg @0x4A93D6]
+// The psec row's mover is the physics step over the body's words, its velocity triple (+0x98 /
+// +0x9C / +0xA0) the motor's (InfantryState::vel) and its +0x270 word Entity::palm_state, zero
+// on a person (the spawn's memset; the class inits and the spawn reset write neither).
+// [orig: Entity_UpdatePhysicsStep @0x53BE10 - the stamp @0x53BE1E..0x53BE4D, the +0xA0 read
+//  @0x53BE58, the +0x270 test @0x53BE81; Entity_ResetToSpawnState @0x4B9610 - the zeroed
+//  +0x98..+0xA8 @0x4B9668..0x4B9686; PlayerClass_InitEntity @0x4B1060]
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
-// narrowed): ewep, ele0, towr, nade, rock, schl, clym, arti, aflr, gflr, stng, arty and psec,
+// narrowed): ewep, ele0, towr, nade, rock, schl, clym, arti, aflr, gflr, stng and arty,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
 // pending word, upfx's swap-fade leg, and envs / door's emitter and model callbacks.
 static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
@@ -627,6 +633,9 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
     case PhysicsClass::Hlfr:
     case PhysicsClass::Jvln:
         if (!body.primary_occupant.valid()) set_anim_pending(e, body, e.inf.anim_pending | 1);
+        return true;
+    case PhysicsClass::Psec:
+        update_physics_step(world, body, e.inf.vel[0], e.inf.vel[1], e.inf.vel[2]);
         return true;
     case PhysicsClass::Envs:
     case PhysicsClass::Door:
@@ -657,8 +666,8 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // The body's +0x1C4 is its bound row's move function: org1 the AI update, org2 the
     // player-body update. The null row's stub is skipped, org0's and chld's are bare
     // returns, and a body bound to an item row runs that row's mover over its own words:
-    // a vehicle, aircraft or genx row's, the rokt / hlfr / jvln rows' pending-word writes
-    // (person_item_mover, the pool-0 walk's: a pool-1 slot's visit runs a row's vehicle
+    // a vehicle, aircraft or genx row's, the rokt / hlfr / jvln rows' pending-word writes,
+    // psec's physics step (person_item_mover, the pool-0 walk's: a pool-1 slot's visit runs a row's vehicle
     // mover and drop motion in its own legs); the other item rows' movers are not run here
     // (D-NET-NEW-L4-14 (a), narrowed).
     // [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472; Entity_UpdatePool1Slot

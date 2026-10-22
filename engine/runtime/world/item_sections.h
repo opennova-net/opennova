@@ -13,6 +13,13 @@ public:
 bool tower_item_event(World &world, Entity &entity, int phase, ItemHitContext hit);
 void palm_item_event(World &world, Entity &entity, int phase, ItemHitContext hit);
 bool tick_item_section_motion(World &world, Entity &entity);
+// The psec row's mover over an entity's words: the savedLivePose stamp, then the fall by its
+// velocity words (+0x98 / +0x9C / +0xA0, which the caller passes: a palm piece's motor words,
+// a person body's InfantryState::vel) onto the terrain plus a quarter unit, the spin by its
+// +0x270 word while airborne, and the Flags 0x20000 clear.
+// [orig: Entity_UpdatePhysicsStep @ 0x53BE10]
+void update_physics_step(World &world, Entity &entity, int32_t &vel_x, int32_t &vel_y,
+        int32_t &slide_z);
 // The draw's hidden sections and origin: the sector builder's for a psec /
 // cesp render tag (palm_sections), else the section and piece masks and a
 // tower clone's husk pivot under the cveh / chel / tank / cpln render tag

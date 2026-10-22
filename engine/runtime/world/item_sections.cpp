@@ -462,6 +462,13 @@ bool tick_item_section_motion(World &world, Entity &entity) {
             entity.death_motion == DeathMotionMode::SectionSettled)
         return tick_tower_section(world, entity);
     if (entity.death_motion != DeathMotionMode::PalmPiece) return false;
+    update_physics_step(world, entity, entity.veh.vel_x, entity.veh.vel_y, entity.veh.slide_z);
+    return true;
+}
+
+// [orig: Entity_UpdatePhysicsStep @ 0x53BE10]
+void update_physics_step(World &world, Entity &entity, int32_t &vel_x, int32_t &vel_y,
+        int32_t &slide_z) {
     int32_t pos[3] = {entity.position.x.q16,
             entity.position.y.q16, entity.position.z.q16};
     for (int i = 0; i < 3; ++i) entity.saved_live_pos[i] = pos[i];
@@ -474,25 +481,24 @@ bool tick_item_section_motion(World &world, Entity &entity) {
             ? terrain::height_field_height_bilinear_fixed(*terrain, entity.position.x.q16,
                     entity.position.y.q16)
             : 0, 16384);
-    const int32_t z = io::bam_add(pos[2], entity.veh.slide_z);
+    const int32_t z = io::bam_add(pos[2], slide_z);
     if (z <= ground) {
-        entity.veh.vel_x >>= 2;
-        entity.veh.vel_y >>= 2;
-        entity.veh.slide_z = io::bam_sub(0, entity.veh.slide_z) >> 2;
-        if (entity.veh.slide_z < 167) entity.veh.slide_z = 0;
+        vel_x >>= 2;
+        vel_y >>= 2;
+        slide_z = io::bam_sub(0, slide_z) >> 2;
+        if (slide_z < 167) slide_z = 0;
         pos[2] = ground;
     } else {
-        pos[0] = io::bam_add(pos[0], entity.veh.vel_x);
-        pos[1] = io::bam_add(pos[1], entity.veh.vel_y);
+        pos[0] = io::bam_add(pos[0], vel_x);
+        pos[1] = io::bam_add(pos[1], vel_y);
         pos[2] = z;
         entity.heading = io::bam_add(
                 entity.saved_live_yaw, entity.palm_state == 17 ? 0x2000000 : 0x800000);
         if (entity.palm_state != 17 && uint32_t(entity.saved_live_pitch) < 0x40000000u)
             entity.pitch_bam = io::bam_add(entity.saved_live_pitch, 0x1000000);
-        entity.veh.slide_z = io::bam_sub(entity.veh.slide_z, 167);
+        slide_z = io::bam_sub(slide_z, 167);
     }
     entity.position.set_q16({pos[0], pos[1], pos[2]});
     entity.engine_flags &= ~0x20000u;
-    return true;
 }
 } // namespace opennova::world
