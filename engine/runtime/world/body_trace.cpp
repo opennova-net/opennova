@@ -1,0 +1,128 @@
+// The body readout's recording calls (an instrument, no behaviour; body_trace.h).
+#include <runtime/world/body_trace.h>
+
+#include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/world.h>
+
+namespace opennova::world {
+
+namespace {
+
+BodyTraceRecord body_trace_head(const World &world, BodyTraceEvent event, EntityHandle h) {
+    BodyTraceRecord record;
+    record.logic_tick = world.logic_tick;
+    record.event = event;
+    record.handle = h.valid() ? static_cast<uint16_t>(h.packed) : uint16_t{0xFFFFu};
+    return record;
+}
+
+uint16_t handle_word(EntityHandle h) {
+    return h.valid() ? static_cast<uint16_t>(h.packed) : uint16_t{0xFFFFu};
+}
+
+int32_t collision_model_of(const World &world, EntityHandle h) {
+    return world.collision != nullptr && h.valid() ? world.collision->entity_model_id(h) : -1;
+}
+
+} // namespace
+
+// The words a body's motion and death turn on, after the entity pass: a person's velocity
+// triple is the infantry body's (+0x98 / +0x9C / +0xA0, the last its slideDecay), a hull's
+// the motor's two words and its vertical word; +0x28 is the word the movement resolver's
+// ground probe stores [orig: Entity_RaycastGroundHeightAndObject @0x414320 - the store
+// @0x414370; Entity_MovementCollisionResolver @0x4B2BD0 - the call @0x4B3D95].
+void body_trace_tick(World &world) {
+    if (!world.body_trace.any_watch()) return;
+    for (const uint16_t word : world.body_trace.watch) {
+        if (word == 0xFFFFu) continue;
+        EntityHandle h;
+        h.packed = word;
+        BodyTraceRecord record = body_trace_head(world, BodyTraceEvent::kTick, h);
+        const Entity *e = world.registry.get(h);
+        record.present = e != nullptr;
+        if (e != nullptr) {
+            record.pos[0] = e->position.x.q16;
+            record.pos[1] = e->position.y.q16;
+            record.pos[2] = e->position.z.q16;
+            if (const AiEntity *body = world.ai.for_handle(h); body != nullptr && body->inf.active) {
+                record.vel[0] = body->inf.vel[0];
+                record.vel[1] = body->inf.vel[1];
+                record.vel[2] = body->inf.vel[2];
+            } else {
+                record.vel[0] = e->veh.vel_x;
+                record.vel[1] = e->veh.vel_y;
+                record.vel[2] = e->veh.slide_z;
+            }
+            record.flags = e->flags;
+            record.engine_flags = e->engine_flags;
+            record.health = static_cast<int16_t>(e->health);
+            record.mounted = e->mounted;
+            record.mount_target = handle_word(e->mount_target);
+            record.mount_seat = e->mount_seat;
+            record.mount_bone = e->mount_bone;
+            record.ground_target = handle_word(e->ground_target);
+            record.collision_model = collision_model_of(world, h);
+        }
+        world.body_trace.append(record);
+    }
+}
+
+EntityHandle body_trace_ground_probe(World &world, EntityHandle body, const int32_t start[3],
+        int32_t ground_z, EntityHandle hit) {
+    if (!world.body_trace.watches(body)) return hit;
+    BodyTraceRecord record = body_trace_head(world, BodyTraceEvent::kGroundProbe, body);
+    record.present = true;
+    record.pos[0] = start[0];
+    record.pos[1] = start[1];
+    record.pos[2] = start[2];
+    record.probe_z = ground_z;
+    record.ground_target = handle_word(hit);
+    record.collision_model = collision_model_of(world, hit);
+    world.body_trace.append(record);
+    return hit;
+}
+
+void body_trace_force(World &world, const Entity &target, uint8_t hit_type, uint8_t force_type,
+        const FixedVec3 &source, EntityHandle attacker, const int32_t vel[3]) {
+    if (!world.body_trace.watches(target.handle)) return;
+    BodyTraceRecord record = body_trace_head(world, BodyTraceEvent::kForce, target.handle);
+    record.present = true;
+    record.vel[0] = vel[0];
+    record.vel[1] = vel[1];
+    record.vel[2] = vel[2];
+    record.flags = target.flags;
+    record.engine_flags = target.engine_flags;
+    record.health = static_cast<int16_t>(target.health);
+    record.other = handle_word(attacker);
+    record.hit_type = hit_type;
+    record.force_type = force_type;
+    record.source[0] = source.x;
+    record.source[1] = source.y;
+    record.source[2] = source.z;
+    world.body_trace.append(record);
+}
+
+void body_trace_blast(World &world, const Entity &target, int32_t kz_type, EntityHandle attacker,
+        const int32_t centre[3], int32_t damage, int32_t health_before) {
+    if (!world.body_trace.watches(target.handle)) return;
+    BodyTraceRecord record = body_trace_head(world, BodyTraceEvent::kBlast, target.handle);
+    record.present = true;
+    record.pos[0] = target.position.x.q16;
+    record.pos[1] = target.position.y.q16;
+    record.pos[2] = target.position.z.q16;
+    record.flags = target.flags;
+    record.engine_flags = target.engine_flags;
+    record.health = static_cast<int16_t>(target.health);
+    record.health_before = static_cast<int16_t>(health_before);
+    record.other = handle_word(attacker);
+    record.hit_type = static_cast<uint8_t>(kz_type);
+    record.source[0] = centre[0];
+    record.source[1] = centre[1];
+    record.source[2] = centre[2];
+    record.damage = damage;
+    world.body_trace.append(record);
+}
+
+} // namespace opennova::world

@@ -686,6 +686,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             else
                 target.health = 0;
             target.last_attacker = attacker; // [orig: +0x178 @ 0x4e6b11]
+            body_trace_blast(world, target, e.type, attacker, e.pos.words().data(), damage,
+                    before); // the readout (body_trace.h)
             target.death_anim_state = compute_death_anim_state(1, quadrant, cause);
             // The processed hit feeds the AI reaction stamps, like a round hit
             // [orig: the deathCallback(2) notify @ 0x4e6b72].
@@ -778,6 +780,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             }
         }
     }
+    // The readout's item record, ahead of the drain (body_trace.h; the next tick record shows it).
+    body_trace_blast(world, target, e.type, attacker, e.pos.words().data(), damage, target.health);
     apply_item_blast_damage(world, target, damage, attacker, e.ammo_index);
 }
 

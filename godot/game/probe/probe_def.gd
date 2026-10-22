@@ -709,4 +709,27 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"watch_handle": { "type": "integer", "minimum": -1, "maximum": 65534,
 							"default": -1 },
 				}, [], false, true, 600_000),
+		ProbeDef.make("body_trace",
+				"The body readout (Simulation.debug_body_trace): per logic tick, each of up to 8 "
+				+ "watched registry handles' (`watch_handles`, plus the local body's own with "
+				+ "`watch_local`) Position, velocity triple, Flags words, Health, seat, "
+				+ "+0x28 ground target and collision model instance; and the events on it: the "
+				+ "movement resolver's settle-tail ground probe (start, height, hit, the hit's "
+				+ "collision model), the collision force kick and a blast's damage leg. "
+				+ "`trigger_handle` keeps the window from `pre_ticks` before that entity's first "
+				+ "tick at Health <= 0 to `post_ticks` after, and ends the run there; an "
+				+ "instrument that changes nothing.",
+				NET + "body_trace_probe.gd", {
+					"watch_handles": { "type": "array", "maxItems": 8, "default": [],
+							"items": { "type": "integer", "minimum": 0, "maximum": 65534 } },
+					"watch_local": { "type": "boolean", "default": false },
+					"watch_ms": { "type": "integer", "minimum": 0, "maximum": 590_000,
+							"default": 60_000 },
+					"trigger_handle": { "type": "integer", "minimum": -1, "maximum": 65534,
+							"default": -1 },
+					"pre_ticks": { "type": "integer", "minimum": 0, "maximum": 3_100,
+							"default": 62 },
+					"post_ticks": { "type": "integer", "minimum": 0, "maximum": 3_100,
+							"default": 310 },
+				}, [], false, true, 600_000),
 	]

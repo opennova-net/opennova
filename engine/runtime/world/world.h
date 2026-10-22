@@ -48,6 +48,7 @@
 #include <runtime/world/rotor_wash.h>
 #include <runtime/world/zone_system.h>
 #include <runtime/world/trigger_relations.h>
+#include <runtime/world/body_trace.h>
 #include <runtime/world/round_ring.h>
 #include <runtime/world/water_cross.h>
 #include <runtime/world/fire_sound.h>
@@ -1269,6 +1270,11 @@ public:
     // @0x4ead80 runs once per frame after the projectile update]; the host drains
     // `destruction` (present) and feeds `item_death_traits` (item-traits sweep).
     ExplosionSim explosions;
+
+    // The body readout (an instrument, no behaviour; body_trace.h, the body_trace probe):
+    // the watched handles and their per-tick, ground-probe, force and blast records. Not
+    // part of the snapshot.
+    BodyTrace body_trace;
 
     // Placed throwable devices + class bindings (world-wac-ai-re §27).
     ThrowableSim throwables;

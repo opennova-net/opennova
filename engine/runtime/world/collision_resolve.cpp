@@ -947,6 +947,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     const int32_t ground =
         raycast_ground(world, source, pos, 0, 0, 0, 0x20000, &ground_hit);
     lap.mark(devtools::Slot::SIM_AI_INFANTRY_COLLISION_GROUND);
+    body_trace_ground_probe(world, source, pos, ground, ground_hit); // the readout (body_trace.h)
     pos[2] = saved_z;
     // The probe's hit ALWAYS lands in groundEntity — null on a miss, overwriting
     // even a same-resolve CL latch. Generic ground is still resolved only by

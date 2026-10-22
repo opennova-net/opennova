@@ -543,6 +543,8 @@ void World::update_all_entities(const TickContext &ctx) {
     tick_item_event_pool(*this, 3);
     lap.mark(devtools::Slot::SIM_UPDATE_EXPLOSIONS);
     finish_entity_update(*this, ctx, lap);
+    // The body readout's per-tick record (an instrument, no behaviour; body_trace.h).
+    body_trace_tick(*this);
 }
 
 // The whole frame: the embedders without a server tick (the bare local

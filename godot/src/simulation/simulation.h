@@ -91,6 +91,7 @@ class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
 class UsePressRow;          // one USE readout record (simulation/use_press_row.h)
+class BodyTraceRow;         // one body readout record (simulation/body_trace_row.h)
 class PlayerProfiles; // the player profile's records (player/player_profiles.h)
 class EnvironmentSnapshot;  // the F3 Environment record as a typed read (simulation/environment_snapshot.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
@@ -2242,6 +2243,16 @@ public:
 	// entity's scan inputs (its Flags, its pool-1 table row and radius, the local body's
 	// slice membership). Instrument state only.
 	void debug_set_use_press_watch(int64_t p_handle);
+	// The body readout (a debug instrument; engine world/body_trace.h, the body_trace probe):
+	// the held per-tick, ground-probe, force and blast records with seq >= p_from_seq, oldest
+	// first (none without a kernel); the seq the next record takes; and the watched registry
+	// handles (up to BodyTrace::kWatchSlots; an empty array clears). Instrument state only.
+	// debug_local_body_handle is the local body's own registry handle (a joiner's L, not the
+	// wire handle H), -1 without one: the handle a joiner's readout watches its body by.
+	TypedArray<BodyTraceRow> debug_body_trace(int64_t p_from_seq) const;
+	int64_t debug_body_trace_next_seq() const;
+	void debug_set_body_trace_watch(const PackedInt32Array &p_handles);
+	int64_t debug_local_body_handle() const;
 	// A useitem key's release clears the press latch (engine
 	// LocalPlayer::release_use_item_key).
 	void release_use_item_key(bool p_system_key_up);

@@ -27,6 +27,7 @@
 #include "simulation/player_inventory.h" // the local inventory snapshot record
 #include "simulation/weapon_kit_entry.h" // one loadout tuple record
 #include "simulation/use_press_row.h" // one USE readout record
+#include "simulation/body_trace_row.h" // one body readout record
 #include "object/weapon_def.h" // the typed weapon.def row the install seams take
 
 #include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
@@ -449,6 +450,12 @@ void Simulation::_bind_methods() {
 			&Simulation::debug_attach_requests_sent);
 	ClassDB::bind_method(D_METHOD("debug_set_use_press_watch", "handle"),
 			&Simulation::debug_set_use_press_watch);
+	ClassDB::bind_method(D_METHOD("debug_body_trace", "from_seq"), &Simulation::debug_body_trace);
+	ClassDB::bind_method(D_METHOD("debug_body_trace_next_seq"),
+			&Simulation::debug_body_trace_next_seq);
+	ClassDB::bind_method(D_METHOD("debug_set_body_trace_watch", "handles"),
+			&Simulation::debug_set_body_trace_watch);
+	ClassDB::bind_method(D_METHOD("debug_local_body_handle"), &Simulation::debug_local_body_handle);
 	ClassDB::bind_method(D_METHOD("release_use_item_key", "system_key_up"),
 			&Simulation::release_use_item_key);
 	ClassDB::bind_method(D_METHOD("is_armory_press_latched"), &Simulation::is_armory_press_latched);

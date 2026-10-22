@@ -115,6 +115,7 @@ void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
     const int damage_multiplier = collision_force_body(body->self->position.words().data(), body->heading, flags,
             owner != nullptr ? &owner_group : nullptr, target.group_id, hit_type, force_type,
             source, inf.burn_state, inf.idle_counter, inf.combat_move_timer, inf.vel);
+    body_trace_force(world, target, hit_type, force_type, source, attacker, inf.vel); // the readout
     if (force_type != 3) return;
     // The local-player hit blackout [orig: @0x4af6c5..0x4af77e]
     if (!(target.handle == world.cached.local_player)) return;

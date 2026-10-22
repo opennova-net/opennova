@@ -5208,6 +5208,11 @@ add_test(NAME npruntime_loadout_name_list COMMAND npruntime_loadout_name_list_te
 add_executable(npruntime_player_body_class_test npruntime/player_body_class_test.cpp)
 target_link_libraries(npruntime_player_body_class_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_player_body_class COMMAND npruntime_player_body_class_test)
+# The body readout (an instrument for the body_trace probe): the per-tick record of each watched
+# handle, the ground probe, force and blast records, nothing for an unwatched one, the ring.
+add_executable(body_trace_test world/body_trace_test.cpp)
+target_link_libraries(body_trace_test PRIVATE opennova_runtime)
+add_test(NAME body_trace COMMAND body_trace_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

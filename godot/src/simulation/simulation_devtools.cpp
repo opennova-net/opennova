@@ -9,6 +9,11 @@
 #include <runtime/world/collision_debug_rows.h>
 #include <runtime/world/inspect_markers.h>
 
+#include "simulation/body_trace_row.h" // one body readout record
+
+#include <algorithm>
+#include <cstdint>
+
 bool Simulation::native_ai_debug(
 		opennova::world::inspect::AiDebugReport &r_out) const {
 	// The joiner's tooling AI pool is non-authoritative and never joins the
@@ -85,4 +90,42 @@ bool Simulation::native_hitbox_debug(const opennova::world::Vec3 &p_anchor,
 	budget.face_cap = 4000;
 	opennova::mission::collect_debug_hitboxes(*kernel_, r_out, budget);
 	return true;
+}
+
+// The body readout (an instrument; engine world/body_trace.h): the held records from a seq, the
+// next seq, and the watched handles. The body_trace probe reads these.
+TypedArray<BodyTraceRow> Simulation::debug_body_trace(int64_t p_from_seq) const {
+	TypedArray<BodyTraceRow> rows;
+	if (!kernel_) return rows;
+	const uint32_t from = static_cast<uint32_t>(
+			std::clamp<int64_t>(p_from_seq, 0, static_cast<int64_t>(UINT32_MAX)));
+	for (const opennova::world::BodyTraceRecord &record : kernel_->world.body_trace.since(from)) {
+		Ref<BodyTraceRow> row;
+		row.instantiate();
+		row->assign(record);
+		rows.push_back(row);
+	}
+	return rows;
+}
+
+int64_t Simulation::debug_body_trace_next_seq() const {
+	return kernel_ ? static_cast<int64_t>(kernel_->world.body_trace.next_seq()) : 0;
+}
+
+void Simulation::debug_set_body_trace_watch(const PackedInt32Array &p_handles) {
+	if (!kernel_) return;
+	opennova::world::BodyTrace &trace = kernel_->world.body_trace;
+	trace.clear_watch();
+	const int64_t count = std::min<int64_t>(p_handles.size(),
+			static_cast<int64_t>(opennova::world::BodyTrace::kWatchSlots));
+	for (int64_t i = 0; i < count; ++i) {
+		const int32_t handle = p_handles[i];
+		trace.watch[static_cast<size_t>(i)] =
+				handle >= 0 && handle < 0xFFFF ? static_cast<uint16_t>(handle) : uint16_t{0xFFFF};
+	}
+}
+
+int64_t Simulation::debug_local_body_handle() const {
+	return kernel_ && kernel_->world.cached.local_player.valid()
+			? static_cast<int64_t>(kernel_->world.cached.local_player.packed) : -1;
 }
