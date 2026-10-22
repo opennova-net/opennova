@@ -520,8 +520,8 @@ void medic_interaction_callback(World &world, Entity &target, const ExplosionEnt
 
 // The ammo's kill-zone damage as the drain and its callbacks read it: the
 // kz_damage word off-session or on the session authority, 0 on a session
-// peer [orig: Entity_GetNetIdIfAuthority @ 0x4E4010 — an IDB misnomer; it
-// returns word +0x2E @0x4E4029].
+// peer [orig: AmmoDef_GetKzDamageIfAuthority @ 0x4E4010, which returns word
+// +0x2E @0x4E4029].
 int32_t kz_damage_if_authority(const World &world, const AmmoTableEntry &ammo) {
     if (world.rules.mp_session && !world.rules.logic_authority) return 0;
     return ammo.kz_damage;
@@ -1052,7 +1052,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // An entry that deals no damage here stops after the burn:
                 // a zero kz_damage, or any entry on a non-authority session
                 // peer, where the damage read returns 0; the medic kit is
-                // the exception [orig: Entity_GetNetIdIfAuthority @0x4E4010
+                // the exception [orig: AmmoDef_GetKzDamageIfAuthority @0x4E4010
                 // called @ 0x4eb2a0, the type-3 test @ 0x4eb2ac..0x4eb2b0].
                 if (kz_damage_if_authority(world, *ammo) == 0 && e.type != ammo_kz::kMedic)
                     continue;

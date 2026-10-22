@@ -11,7 +11,7 @@
 //  @0x4EC1F3..0x4EC20E; Entity_UpdateGrenadePhysics @0x444A0F;
 //  Projectile_HandleTerrainImpact_0 @0x4E9AF0..0x4E9B00 (the one authority test);
 //  WeaponEffect_PushExplosionQueueEntry @0x4E83C0; Projectile_ProcessExplosionQueue
-//  @0x4EAD80 - the force @0x4EB1D2 ahead of Entity_GetNetIdIfAuthority @0x4EB2A0;
+//  @0x4EAD80 - the force @0x4EB1D2 ahead of AmmoDef_GetKzDamageIfAuthority @0x4EB2A0;
 //  Entity_ApplyCollisionForce @0x4AF4A0 - the walk push @0x4AF56B..0x4AF602;
 //  GameEvent_HandleMedicInteraction @0x4E6790 - the authority tests @0x4E67D4 /
 //  @0x4E67FE]

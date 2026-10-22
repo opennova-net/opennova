@@ -4491,7 +4491,7 @@ void test_person_blast_quadrant_faces_the_blast() {
 // drain's damage read sits after it, per victim, not ahead of the entry.
 // [orig: Projectile_ProcessExplosionQueue @0x4EAD80 — the burn (the
 //  Entity_ApplyCollisionForce call @0x4EB1D2) ahead of the damage read (the
-//  Entity_GetNetIdIfAuthority call @0x4EB2A0)]
+//  AmmoDef_GetKzDamageIfAuthority call @0x4EB2A0)]
 void test_zero_damage_kill_zone_still_burns() {
     auto storage = std::make_unique<World>();
     World &w = *storage;
@@ -4824,7 +4824,7 @@ void test_dead_unattributed_source_credits_no_one() {
 // A session peer without the authority applies no blast: its damage read
 // returns 0, which stops the drain after the burn and skips the item pools,
 // and the applicator returns at its session head.
-// [orig: Entity_GetNetIdIfAuthority @0x4E4010, read @0x4EB2A0 / @0x4EB349;
+// [orig: AmmoDef_GetKzDamageIfAuthority @0x4E4010, read @0x4EB2A0 / @0x4EB349;
 //  Entity_ApplyWeaponDamage @0x4E683A..0x4E684A]
 void test_session_peer_without_authority_applies_no_blast() {
     auto storage = std::make_unique<World>();
