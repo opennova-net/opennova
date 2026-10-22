@@ -558,8 +558,33 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 			nw::encode_deployed_item_spawn(orphan));
 	row = pipeline.state().find(orphan.slot_handle);
 	if (!expect(row != nullptr && row->type_id == spawn.item_id,
-			"an unresolved owner falls back to the base item"))
+			"an owner past its pool's capacity keeps the base item"))
 		return false;
+	// An in-range owner slot no row holds reads a cleared slot's team byte, 0,
+	// against the viewer's 2: the enemy variant. Past the five pools (pool 5, or
+	// 0xFFFF) the base item stays.
+	// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - the owner pointer
+	//  @0x54677D..0x5467B5, the byte @0x5469DD; Pool_Clear @0x442060]
+	nw::DeployedItemSpawn vacant = spawn;
+	vacant.slot_handle = 0x1009;
+	vacant.owner_handle = 0x0005;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
+			nw::encode_deployed_item_spawn(vacant));
+	row = pipeline.state().find(vacant.slot_handle);
+	if (!expect(row != nullptr && row->type_id == spawn.enemy_item_id,
+			"an in-range owner slot with no row reads team 0: the enemy variant"))
+		return false;
+	for (const uint16_t outside : {uint16_t{0x5001}, uint16_t{0xFFFF}}) {
+		nw::DeployedItemSpawn stray = spawn;
+		stray.slot_handle = 0x100A;
+		stray.owner_handle = outside;
+		pipeline.apply(nw::s2c::DEPLOYED_ITEM,
+				nw::encode_deployed_item_spawn(stray));
+		row = pipeline.state().find(stray.slot_handle);
+		if (!expect(row != nullptr && row->type_id == spawn.item_id,
+				"an owner handle past the five pools keeps the base item"))
+			return false;
+	}
 
 	nw::EntityRemove removal;
 	removal.entity_handle = spawn.slot_handle;

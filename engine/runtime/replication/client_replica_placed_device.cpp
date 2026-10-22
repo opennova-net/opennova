@@ -73,12 +73,28 @@ void ClientReplicaPipeline::apply_deployed_item(
 	}
 
 	uint16_t selected_type = spawn.item_id;
+	// The owner is packet word 1's pool slot, its address computed with no test of
+	// the handle, and its team byte read whatever the slot holds: a slot no row
+	// holds is a cleared one (the mission's pool clear, a destroy's memset), whose
+	// byte is 0, as an unknown team's is. An owner handle outside the five pools'
+	// capacities addresses memory past the pool table or the pool; ours keeps the
+	// base item there (the not-found pick's own fallback; a PERMANENT candidate,
+	// the D-NET-NEW-L7-20 follow).
+	// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - the owner pointer
+	//  @0x54677D..0x5467B5, its null test @0x5469BE, the byte @0x5469DD; Pool_Clear
+	//  @0x442060 (Mission_ResetBmsState's call @0x40DBC7); Entity_Destroy @0x43E810
+	//  (the memset @0x43EA70)]
+	const world::EntityHandle owner_handle{spawn.owner_handle};
+	const bool owner_in_pools = owner_handle.valid() &&
+			owner_handle.pool() < world::kEntityPoolCount &&
+			static_cast<std::size_t>(owner_handle.slot()) <
+					world::retail_pool_capacity(owner_handle.pool());
 	const ClientEntityState *owner = state_.find(spawn.owner_handle);
 	const ClientEntityState *viewer = state_.find(viewer_handle_);
-	const bool owner_team_known = owner != nullptr && owner->team_known;
-	const uint8_t owner_team = owner_team_known ? owner->team : uint8_t{0xFF};
-	const bool viewer_team_known = viewer != nullptr && viewer->team_known;
-	const uint8_t viewer_team = viewer_team_known ? viewer->team : uint8_t{0xFF};
+	const uint8_t owner_team =
+			owner != nullptr && owner->team_known ? owner->team : uint8_t{0};
+	const uint8_t viewer_team =
+			viewer != nullptr && viewer->team_known ? viewer->team : uint8_t{0};
 	// A copied device takes its round's item. The not-found leg's team-variant
 	// pick needs BOTH authored variant ids nonzero (a one-sided pair shows every
 	// client the base item id) and runs on every such record, a slot that
@@ -88,7 +104,7 @@ void ClientReplicaPipeline::apply_deployed_item(
 	//  @0x5469db, the enemy pick @0x5469fb..0x546a08, the base id @0x546a11)]
 	if (copy.copied) {
 		selected_type = static_cast<uint16_t>(copy.item_id);
-	} else if (owner_team_known && viewer_team_known &&
+	} else if (owner_in_pools && viewer != nullptr &&
 			spawn.friendly_item_id != 0 && spawn.enemy_item_id != 0) {
 		const bool enemy = (mp_attributes_ & 0x8000u) != 0 ||
 				owner_team != viewer_team;
