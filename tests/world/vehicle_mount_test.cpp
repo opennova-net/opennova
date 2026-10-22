@@ -1150,9 +1150,23 @@ void test_binoculars_survive_all_but_the_camera_reset() {
         // The toggle moves the route bit only, never the AdmDef byte +0x2B0
         // [orig: NapiNPServerMsg_HandleWeaponToggle @0x511B2C / @0x511B38].
         const uint8_t adm_before = r.player().equipped_adm_index;
+        const size_t events_before = local.weapon.events.size();
         local_player_apply_mount_slot_select(r.w, local.weapon, req);
         CHECK(r.veh().primary_weapon_slot.redirect_to_parent_slot);
         CHECK(r.player().equipped_adm_index == adm_before);
+        // The route switch stores the EquippedSlot and switches nothing: no switch
+        // staged or queued, the borrow names the carrier's slot and def at once, and
+        // the first-person model follows its def (D-WPN-52) [orig:
+        // NapiNPServerMsg_HandleWeaponToggle @0x511B2C..0x511B38;
+        // WeaponAction_ProcessAllEntities @0x5426AD; Player_RenderFirstPersonViewModel
+        // @0x4DED60].
+        CHECK(local.weapon.usegun_switch == LocalUseGunSwitch::kNone);
+        CHECK(local.weapon.usegun_switch_action == -1);
+        CHECK(local.weapon.usegun_slot_active && local.weapon.usegun_mount == r.veh_h);
+        CHECK(local.weapon.usegun_weapon_adm ==
+                r.w.registry.get(carrier_h)->primary_weapon_slot_adm);
+        CHECK(local.weapon.events.size() == events_before + 1 &&
+                local.weapon.events.back().switch_to_weapon == "WPN_HULL");
         CHECK(local.view.binoculars_requested && local.weapon.nvg_scope_restore);
         CHECK(r.w.weather.core.scalar_channels.camera_fov_target_fp == (20 << 16));
         r.w.local_player_state = nullptr;

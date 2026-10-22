@@ -300,9 +300,8 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 	const auto stage_parent = [&](Entity &p_mount, uint8_t target_adm) {
 		// No camera reset here: the UseGun attach's, like a control seat's, ran
 		// at the attach (vehicle_attach.cpp attach_apply), and a designated-G
-		// route switch, which stages here too, resets nothing (D-WPN-49). Retail's
-		// route leg stores the EquippedSlot alone and switches nothing, where this
-		// staging queues a switch action (D-WPN-52).
+		// route switch resets nothing (D-WPN-49) and never stages here: its route
+		// leg stores the EquippedSlot alone (D-WPN-52, below).
 		// [orig: Entity_AttachToUseGunSlot @0x546B80 (the
 		//  Player_ResetCameraAndMovementState call @0x546ba4); the route leg's
 		//  EquippedSlot stores NetPacket_SerializePlayerState @0x4c139d / @0x4c13f8,
@@ -361,7 +360,30 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 				w.usegun_pending_mount == mounted_parent->handle &&
 				w.usegun_pending_weapon_adm == mounted_adm;
 		if (w.usegun_switch == LocalUseGunSwitch::kNone) {
-			if (!active_matches) stage_parent(*mounted_parent, mounted_adm);
+			if (active_matches) {
+			} else if (w.usegun_slot_active && w.usegun_mount == mounted_parent->handle) {
+				// A designated-G route switch: the same gun, its slot routed to or
+				// from its carrier. The route legs store the route bit and the
+				// EquippedSlot and return: no switch action, no AdmDef stamp; the
+				// weapon walk runs the new slot as it stands, and the first-person
+				// model follows the EquippedSlot's def.
+				// [orig: NetPacket_SerializePlayerState @0x4C1390..0x4C139D /
+				//  @0x4C13EB..0x4C13F8; NapiNPServerMsg_HandleWeaponToggle @0x511A70
+				//  (@0x511AFB..0x511B08, @0x511B2C..0x511B38); WeaponAction_ProcessAllEntities
+				//  @0x5426AD (the EquippedSlot read); Player_RenderFirstPersonViewModel
+				//  @0x4DED60]
+				w.usegun_weapon_adm = mounted_adm;
+				if (const WeaponTableEntry *def = world.tables.weapons.by_index(mounted_adm)) {
+					WeaponPresentationEvent event;
+					event.tick = world.logic_tick;
+					event.world_position = local_player_mission_position(world);
+					event.switch_to_weapon = def->name;
+					event.preserve_slot_state = true;
+					w.events.push_back(std::move(event));
+				}
+			} else {
+				stage_parent(*mounted_parent, mounted_adm);
+			}
 		} else if (!pending_matches) {
 			// A later attach overwrites g_PendingWeaponSlot without changing the
 			// outgoing slot. This includes direct old-gun -> new-gun swaps.
