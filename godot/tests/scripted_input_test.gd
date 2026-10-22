@@ -460,6 +460,15 @@ func test_a_frame_that_drains_no_update_fires_no_hud_row_until_the_next_update()
 			PackedInt64Array([HudToggles.EVENT_HUD_COLOR_CYCLED]),
 			"the next update's input frame fired the waiting press once")
 	assert_eq(toggles.get_hud_color_index(), (color_before + 1) % 6, "the colour cycled")
+	# The script runs to its end, so the press's keys (hudcolor's Ctrl+F6) come up
+	# in Godot's global Input before the next script reads it: a Ctrl left held
+	# turns a later wheel event into the Ctrl-modified scope-zero rows.
+	for i in 16:
+		if driver.is_done():
+			break
+		_frame(rig, 1, true, 0.25)
+	assert_eq(driver.get_state_name(), "finished", driver.get_cancel_reason())
+	assert_false(Input.is_key_pressed(KEY_CTRL), "the press's modifier came up")
 
 
 # The pause row (code 25) dispatches from the drain of the update that reads
