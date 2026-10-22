@@ -1121,6 +1121,48 @@ bool run_the_mission_start_submissions_follow_the_countdown() {
 			"the last list, its 0x22s behind them");
 }
 
+// D-NET-NEW-L2-35: the load's two legs. A shell whose load runs after the release calls the
+// first leg once its definitions and models are in. With the countdown at 1 at the wait's exit
+// (c = 2 ahead of the 0x1A's frame), the leg's receive spends it and the pump after the first
+// 0x2F's queue sends that 0x2F alone, mid-load, while the load's frames still neither receive
+// nor send; the end leg holds the second 0x2F and the 0x0B, which leave from the 0x0F wait.
+// Retail's x7 wire shows the same split (03tr-dm-rr: the first 0x2F at +1.18 s after the 0x1A,
+// the host's 0x5A at +1.34 s, the second 0x2F with the 0x0B at +3.86 s).
+// [orig: Game_StartMission @0x524360 - @0x5253ef, the loads @0x525495..0x525762, @0x525784,
+//  @0x525836, @0x5258a2 / @0x5258ea / @0x5259f1 / @0x525a61, the freeze @0x525a6e, @0x525aca,
+//  @0x525bd9, @0x525c2e, @0x52624b, @0x526255]
+bool run_the_mission_start_first_leg_runs_mid_load() {
+	Harness h;
+	if (!expect(drive_into_the_world_stream(h, 12), "first leg: the world stream runs"))
+		return false;
+	h.client.set_mission_start_loading(true);
+	for (int i = 0; i < 24 && h.client.send_holdoff_countdown() != 2; ++i) (void)h.frame();
+	if (!expect(h.client.send_holdoff_countdown() == 2, "first leg: c = 2 ahead of the 0x1A"))
+		return false;
+	if (!expect(h.frame({make_protocol_message(0x1A, {})}).empty() &&
+	                    h.client.mission_start_released() &&
+	                    h.client.send_holdoff_countdown() == 1,
+			"first leg: the 0x1A's frame sends nothing at c = 2 and releases the mission start"))
+		return false;
+	if (!expect(h.frame().empty() && h.client.send_holdoff_countdown() == 1,
+			"first leg: the load's frames neither receive nor send"))
+		return false;
+	if (!expect(h.packets(h.client.push_mission_start_first_loadout(), {{0x2F}}) &&
+	                    h.client.mission_start_released(),
+			"first leg: its receive spends the countdown, the first 0x2F leaves alone mid-load"))
+		return false;
+	if (!expect(h.client.push_mission_start_first_loadout().empty() && h.frame().empty(),
+			"first leg: it runs once, and the load's frames stay quiet"))
+		return false;
+	if (!expect(h.client.push_mission_start_end().empty() &&
+	                    !h.client.mission_start_released() &&
+	                    h.client.send_holdoff_countdown() == 11,
+			"end leg: the second 0x2F and the 0x0B wait in the queue at c = 11"))
+		return false;
+	return expect(h.packets(h.frame(), {{0x2F, 0x0B}}),
+			"end leg: the 0x0F wait sends the second 0x2F with the 0x0B");
+}
+
 // The joiner's round clock at its mission start: retail never seeds it. Game_StartMission's
 // round-clock seed (g_RoundTimeRemaining = g_RoundTimeLimitMinutes x 3720 when in session,
 // outside the Co-op waypoint family, with a nonzero limit) sits on the authority / single-player
@@ -1459,6 +1501,7 @@ int main() {
 	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_sync_tail_0x0a_joins_the_queue() && ok;
 	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;
+	ok = run_the_mission_start_first_leg_runs_mid_load() && ok;
 	ok = run_the_joiner_mission_start_keeps_the_folded_round_clock() && ok;
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;

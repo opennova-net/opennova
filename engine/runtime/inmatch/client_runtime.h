@@ -896,7 +896,19 @@ public:
 	// only at a spent countdown and reload it, so the first 0x2F, the second and the 0x0B
 	// leave in one packet or two by where the countdown stood; what it still holds at the
 	// last send leaves from the next frame's final wait, after that frame's receive
-	// (D-NET-NEW-L2-6).
+	// (D-NET-NEW-L2-6). The pumps run in two legs at the load's two points:
+	// push_mission_start_first_loadout once its definition and model loads are in (the
+	// send pump ahead of them, the receive after them, the first 0x2F queued, the four
+	// send pumps ahead of the model freeze), so a countdown spent there sends the first
+	// 0x2F alone mid-load; push_mission_start_end at its end (the pump after the freeze,
+	// the frame tick's zero, the receive, the second 0x2F and the 0x0B queued, the last
+	// send), running the first leg too when the embedder did not (D-NET-NEW-L2-35).
+	// [orig: Game_StartMission @0x524360 - NetClient_FlushAndSync @0x5253EF, the loads
+	//  @0x525495..0x525762, the receive @0x525784, the first 0x2F @0x525836, the pumps
+	//  @0x5258A2 / @0x5258EA / @0x5259F1 / @0x525A61, the freeze @0x525A6E, the pump
+	//  @0x525ACA, the zero @0x525B9F, the receive @0x525BD9, the second 0x2F @0x525C2E, the
+	//  0x0B @0x52624B, the send @0x526255]
+	std::vector<std::vector<uint8_t>> push_mission_start_first_loadout();
 	std::vector<std::vector<uint8_t>> push_mission_start_end();
 	void set_weapon_table(const world::WeaponTable *weapons) {
 		if (joiner_) joiner_->set_weapon_table(weapons);
@@ -1387,6 +1399,12 @@ private:
 	// (its ACK) and the one flush.
 	void build_send_boundary(std::vector<std::vector<uint8_t>> &outbound, uint32_t now_tick,
 			const std::function<void(std::vector<ProtocolMessage> &)> &append = {});
+	// The mission start's pumps (push_mission_start_first_loadout / _end): a send pump builds
+	// only at a spent countdown and reloads it, else it only ages the flush; a receive pump
+	// steps the countdown and reads no socket. The first leg: false when it does not run.
+	void mission_start_send_pump(std::vector<std::vector<uint8_t>> &outbound);
+	void mission_start_receive_pump();
+	bool mission_start_first_leg(std::vector<std::vector<uint8_t>> &outbound);
 	// The C2S 0x0F self-heal requests the replica fold and the stale-carrier sweep raised,
 	// appended to the one queue where their producer ran.
 	void queue_carrier_repair_requests();

@@ -662,9 +662,18 @@ public:
 	//  @0x524DB0..0x524DD1 and "aborted 3" @0x524E2E..0x524E4F: UI_NavHistoryPush(
 	//  g_GameModeGameLoop), the jump past the load @0x524DD1 / @0x524E4F]
 	bool mission_start_aborted() const { return mission_start_aborted_; }
-	// The mission start's three submissions once the 0x1A released it, in retail's order,
-	// unframed (the runtime queues each at its own point); the stage moves on to the final
-	// wait for the S2C 0x0F. False when the mission start is not released.
+	// The mission start's first submission once the 0x1A released it: the 0x2F with slot 195,
+	// unframed, which the load queues after its definition and model loads, ahead of its
+	// render init and the model freeze (ClientRuntime::push_mission_start_first_loadout).
+	// False when the mission start is not released or the first was taken already.
+	// [orig: Game_StartMission @0x524360 - the loads @0x525495..0x525762, the first 0x2F
+	//  @0x525836, the freeze @0x525a6e]
+	bool take_mission_start_first_loadout(ProtocolMessage &out);
+	// The mission start's submissions at its end, in retail's order, unframed (the runtime
+	// queues each at its own point): the first 0x2F when take_mission_start_first_loadout has
+	// not taken it (first_loadout's tag 0 when it has), the second and the 0x0B; the stage
+	// moves on to the final wait for the S2C 0x0F. False when the mission start is not
+	// released.
 	struct MissionStartSubmissions {
 		ProtocolMessage first_loadout;  // C2S 0x2F, slot 195 [orig: @0x525836]
 		ProtocolMessage second_loadout; // C2S 0x2F, the spawn fill's slot [orig: @0x525c2e]
@@ -1419,6 +1428,7 @@ private:
 	bool loadout_kit_set_ = false;
 	const world::WeaponTable *weapons_ = nullptr; // set_weapon_table
 	bool mission_start_loading_ = false;          // set_mission_start_loading
+	bool mission_start_first_loadout_taken_ = false; // take_mission_start_first_loadout
 	bool sync_tail_loading_ = false;              // set_sync_tail_loading
 	CharacterJoinVars character_join_vars_{};
 	uint32_t auto_medic_disabled_ = 0; // profile +1660 (set_auto_medic_preference)

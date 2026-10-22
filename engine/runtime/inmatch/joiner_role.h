@@ -116,6 +116,10 @@ public:
 	// waits for the S2C 0x1A's mission start (D-NET-NEW-L2-19). The hello
 	// latch and the per-frame clock are shared with the in-mission frame.
 	void poll_preload();
+	// The first leg of a mission start whose load runs after the S2C 0x1A, once its
+	// definition and model loads are in (ClientRuntime::push_mission_start_first_loadout):
+	// sends what its pumps build, the first 0x2F when the countdown is spent there.
+	void push_mission_start_first_loadout();
 	// The end of a mission start whose load ran after the S2C 0x1A
 	// (ClientRuntime::set_mission_start_loading): sends what its pumps build, the two
 	// 0x2F and the 0x0B; nothing before the release or after the push.

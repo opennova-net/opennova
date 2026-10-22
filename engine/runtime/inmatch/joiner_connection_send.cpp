@@ -487,15 +487,28 @@ LoadoutSubmit profile_loadout_submit(const JoinerConnection::LoadoutKit &kit, ui
 	return submit;
 }
 
+bool JoinerConnection::take_mission_start_first_loadout(ProtocolMessage &out) {
+	if (post_auth_stage_ != PostAuthStage::AwaitMissionStart ||
+			mission_start_first_loadout_taken_)
+		return false;
+	// The SAME per-side profile kit twice, first with the fixed slot 195, then (at the end)
+	// with the spawn fill's equipped slot. "Per-side" is literal: the latched team byte picks
+	// the profile side block, and that block's class byte picks the page [orig: @0x525767].
+	// [orig: Game_StartMission @0x525836 -> NetPacket_SendLoadoutSubmit @0x42cdc0]
+	out = make_protocol_message(c2s::LOADOUT_SUBMIT,
+			encode_loadout_submit(build_profile_loadout_submit(assigned_team_, false)));
+	mission_start_first_loadout_taken_ = true;
+	return true;
+}
+
 bool JoinerConnection::take_mission_start_submissions(MissionStartSubmissions &out) {
 	if (post_auth_stage_ != PostAuthStage::AwaitMissionStart) return false;
-	// The SAME per-side profile kit twice — first with the fixed slot 195, then with the
-	// spawn fill's equipped slot — and the mission status, in that order. "Per-side" is
-	// literal: the latched team byte picks the profile side block, and that block's class
-	// byte picks the page [orig: @0x525767].
+	// The first 0x2F unless the load's first leg took it, the second and the mission status,
+	// in that order.
 	// [orig: Game_StartMission @0x525836 / @0x525c2e -> NetPacket_SendLoadoutSubmit
 	//  @0x42cdc0; the 0x0B @0x52623f..0x52624b]
-	const LoadoutSubmit first = build_profile_loadout_submit(assigned_team_, false);
+	out.first_loadout = ProtocolMessage{};
+	(void)take_mission_start_first_loadout(out.first_loadout);
 	// Player_InitPlayer between the two binds the local player entity to the joiner's
 	// own entity (the S2C 0x50's compares read it from here on) [orig: Game_StartMission
 	// @0x524360 - the call @0x525BBC; Player_InitPlayer @0x4E15F0 - the store @0x4E17EB].
@@ -503,7 +516,6 @@ bool JoinerConnection::take_mission_start_submissions(MissionStartSubmissions &o
 	const LoadoutSubmit second = build_profile_loadout_submit(assigned_team_, true);
 	const gameprofile::GameProfile *profile =
 			title_ != nullptr ? gameprofile::gameprofile_by_id(title_->game_id) : nullptr;
-	out.first_loadout = make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(first));
 	out.second_loadout = make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(second));
 	out.mission_status = make_protocol_message(0x0B, build_mission_status(
 			mission_status_side_password(),

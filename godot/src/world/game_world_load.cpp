@@ -291,6 +291,11 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		}
 		challenge_sim->finalize_loaded_model_challenge_snapshot();
 	}
+	// A joiner's definitions and world are in: its mission start's first leg queues the first
+	// 0x2F and runs the pumps ahead of the effect builds and the model warm, the freeze's
+	// analog (engine: ClientRuntime::push_mission_start_first_loadout, D-NET-NEW-L2-35).
+	if (challenge_sim.is_valid() && challenge_sim->is_joiner())
+		challenge_sim->push_join_mission_start_first_loadout();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_AUDIO));
 	timeline->span("audio");
 	start_mission_audio(p_mission, p_bms_name);

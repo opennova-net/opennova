@@ -905,6 +905,10 @@ public:
 	// once the load has ended; the 0x0A follows.
 	void set_join_sync_tail_loading(bool p_loading);
 	bool is_join_mission_start_released() const;
+	// The load's first leg once its definition and model loads are in (engine:
+	// ClientRuntime::push_mission_start_first_loadout): the first 0x2F; nothing before the
+	// release or after the leg ran.
+	void push_join_mission_start_first_loadout();
 	void finish_join_mission_start();
 	bool poll_join_preload();
 	// The shell's cancel of a join: ahead of the mission start the join screen's ABORT

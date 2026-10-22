@@ -1029,6 +1029,10 @@ bool Simulation::is_join_mission_start_released() const {
 	return is_joiner() && runtime_ != nullptr && runtime_->mission_start_released();
 }
 
+void Simulation::push_join_mission_start_first_loadout() {
+	if (joiner_role_ != nullptr) joiner_role_->push_mission_start_first_loadout();
+}
+
 void Simulation::finish_join_mission_start() {
 	if (joiner_role_ != nullptr) joiner_role_->push_mission_start_end();
 }

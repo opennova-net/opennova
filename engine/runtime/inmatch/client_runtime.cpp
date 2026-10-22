@@ -2169,51 +2169,73 @@ void ClientRuntime::build_send_boundary(std::vector<std::vector<uint8_t>> &outbo
 	joiner_->complete_send_flush();
 }
 
+// Game_StartMission's pumps between the 0x1A and the final wait for the S2C 0x0F. A receive
+// pump steps the countdown and reads no socket: the load's two pump the protocol's client queue
+// alone, which the game-start wait's last pass drained, so what arrives during the load waits for
+// the final wait's first manager receive, as ours waits in the queue for the next frame; a send
+// pump builds only at a spent countdown and reloads it from the dictated period, and every send
+// pump call ages the flush.
+// [orig: CNapiNPConnection_PumpFlags @0x629780 - the step @0x6297ac, the flush @0x6297d5, the
+//  reload @0x629802; CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the build gate
+//  @0x62927b; CNapiNetwork_PumpClientProtocolRecv @0x4C4FE0 (flags 26, no manager receive);
+//  NapiNPManager_Pump @0x62AC40 - the socket read only under flag 4 (NapiNPManager_PumpReceive
+//  @0x623010); NetClient_FlushAndSync @0x424710 (the send pump @0x42472c)]
+void ClientRuntime::mission_start_send_pump(std::vector<std::vector<uint8_t>> &outbound) {
+	if (send_holdoff_countdown_ != 0) {
+		joiner_->complete_send_flush();
+		return;
+	}
+	build_send_boundary(outbound, current_tick_);
+	send_holdoff_countdown_ = send_holdoff_ticks_;
+}
+
+void ClientRuntime::mission_start_receive_pump() {
+	if (send_holdoff_countdown_ > 0) --send_holdoff_countdown_;
+}
+
+// The load's first leg, once its definition and model loads are in: the send pump the load ran
+// ahead of them, its receive after them, the first 0x2F queued, then the four send pumps ahead of
+// the model freeze, so a countdown spent there puts the first 0x2F on the wire alone, mid-load
+// (D-NET-NEW-L2-35).
+// [orig: Game_StartMission @0x524360 - NetClient_FlushAndSync @0x5253ef, the loads
+//  @0x525495..0x525762, the receive @0x525784, the first 0x2F queued @0x525836,
+//  NetClient_FlushAndSync @0x5258a2, @0x5258ea, @0x5259f1, @0x525a61 (ahead of the model freeze
+//  @0x525a6e)]
+bool ClientRuntime::mission_start_first_leg(std::vector<std::vector<uint8_t>> &outbound) {
+	ProtocolMessage first;
+	if (joiner_ == nullptr || !joiner_->take_mission_start_first_loadout(first)) return false;
+	mission_start_send_pump(outbound);
+	mission_start_receive_pump();
+	send_queue_.push_back(std::move(first));
+	for (int call = 0; call < 4; ++call) mission_start_send_pump(outbound);
+	return true;
+}
+
+std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_first_loadout() {
+	std::vector<std::vector<uint8_t>> outbound;
+	if (!mission_start_first_leg(outbound)) return outbound;
+	return log_client_sends(std::move(outbound), joiner_->session_lost());
+}
+
 std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end() {
 	std::vector<std::vector<uint8_t>> outbound;
-	JoinerConnection::MissionStartSubmissions submissions;
-	if (joiner_ == nullptr || !joiner_->take_mission_start_submissions(submissions))
-		return outbound;
-	// The load's zero of the frame tick, between its pumps (no main frame runs until the
-	// final wait ends) [orig: Game_StartMission @0x524360 - `mov g_CurrentTick, ebx`
-	// @0x525B9F].
+	if (joiner_ == nullptr || !joiner_->mission_start_released()) return outbound;
+	// The first leg here when the embedder's load did not run it at its point.
+	(void)mission_start_first_leg(outbound);
+	// The pump after the freeze, then the load's zero of the frame tick (no main frame runs
+	// until the final wait ends), Player_InitPlayer (the submissions' take binds the local
+	// player entity), the receive, the second 0x2F and the 0x0B queued, the last send.
+	// [orig: Game_StartMission @0x524360 - NetClient_FlushAndSync @0x525aca, `mov
+	//  g_CurrentTick, ebx` @0x525B9F, Player_InitPlayer @0x525BBC, the receive @0x525bd9, the
+	//  second 0x2F @0x525c2e and the 0x0B @0x52624b queued, the send @0x526255]
+	mission_start_send_pump(outbound);
 	view_.zero_frame_tick();
-	// Game_StartMission's pumps between the 0x1A and the final wait for the S2C 0x0F.
-	// A receive pump steps the countdown and reads no socket: the load's two pump the
-	// protocol's client queue alone, which the game-start wait's last pass drained, so what
-	// arrives during the load waits for the final wait's first manager receive, as ours waits
-	// in the queue for the next frame; a send pump builds only at a spent countdown and
-	// reloads it from the dictated period, and every send pump call ages the flush.
-	// [orig: CNapiNPConnection_PumpFlags @0x629780 - the step @0x6297ac, the flush
-	//  @0x6297d5, the reload @0x629802; CNapiNPConnection_PumpEnumeratorAndSend
-	//  @0x6290c0 - the build gate @0x62927b; CNapiNetwork_PumpClientProtocolRecv @0x4C4FE0
-	//  (flags 26, no manager receive); NapiNPManager_Pump @0x62AC40 - the socket read only
-	//  under flag 4 (NapiNPManager_PumpReceive @0x623010)]
-	const uint32_t now_tick = current_tick_;
-	auto receive_pump = [this] {
-		if (send_holdoff_countdown_ > 0) --send_holdoff_countdown_;
-	};
-	auto send_pump = [&] {
-		if (send_holdoff_countdown_ != 0) {
-			joiner_->complete_send_flush();
-			return;
-		}
-		build_send_boundary(outbound, now_tick);
-		send_holdoff_countdown_ = send_holdoff_ticks_;
-	};
-	// [orig: Game_StartMission @0x524360 - NetClient_FlushAndSync @0x424710 (the send
-	//  pump @0x42472c) called @0x5253ef; the receive @0x525784; the first 0x2F queued
-	//  @0x525836; NetClient_FlushAndSync @0x5258a2, @0x5258ea, @0x5259f1, @0x525a61
-	//  (ahead of the model freeze @0x525a6e), @0x525aca; the receive @0x525bd9; the second
-	//  0x2F @0x525c2e and the 0x0B @0x52624b queued; the send @0x526255]
-	send_pump();
-	receive_pump();
-	send_queue_.push_back(std::move(submissions.first_loadout));
-	for (int call = 0; call < 5; ++call) send_pump();
-	receive_pump();
+	JoinerConnection::MissionStartSubmissions submissions;
+	(void)joiner_->take_mission_start_submissions(submissions);
+	mission_start_receive_pump();
 	send_queue_.push_back(std::move(submissions.second_loadout));
 	send_queue_.push_back(std::move(submissions.mission_status));
-	send_pump();
+	mission_start_send_pump(outbound);
 	// The push ends here. What the countdown still holds waits in the queue for the final
 	// wait for the S2C 0x0F, whose every pass reads the socket and runs the receive
 	// handlers before its send: everything that arrived during the load is folded first,

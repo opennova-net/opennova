@@ -166,6 +166,13 @@ void JoinerRole::push_mission_start_end() {
 	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_end()) send(dg);
 }
 
+// The load's first leg (ClientRuntime::push_mission_start_first_loadout) [orig:
+// Game_StartMission @0x524360 - the first 0x2F @0x525836, the pumps @0x5258a2..@0x525a61].
+void JoinerRole::push_mission_start_first_loadout() {
+	if (!runtime) return;
+	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_first_loadout()) send(dg);
+}
+
 // Drain every datagram pending on the socket into the runtime's recv fold
 // (the witnessed poll-before-logic order [orig: Game_ProcessMainFrame
 // @0x5263f0]). A held node's joiner's datagram (a server an earlier error-arm exit left

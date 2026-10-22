@@ -1875,6 +1875,7 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			// [orig: NapiClient_WaitForGameStart @0x42cc10 (the exit test @0x42ccbf) from
 			//  Game_StartMission @0x524e29]
 			post_auth_stage_ = PostAuthStage::AwaitMissionStart;
+			mission_start_first_loadout_taken_ = false;
 			mission_start_released_this_pass_ = true;
 			out.game_start_acked = true;
 		} else if (m.tag == s2c::RTT_ECHO) {
