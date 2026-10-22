@@ -767,10 +767,13 @@ static void ride_parent_blink_quad(const World &world, Entity &occ) {
 
 bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     Entity *occ = world.registry.get(e.handle);
-    // A dead occupant cannot enter the live mounted-pose path: it must reach the
-    // infantry death edge, detach, then consume its staged death animation.
-    // [orig: Entity_UpdateInfantryAI @0x4b9960..0x4b9983]
-    if (occ == nullptr || !occ->mounted || occ->health <= 0) return false;
+    // The seat site keys on the parent alone. Org1's mounted-live local adds a
+    // positive Health word, which its caller tests; the player body's selector reads
+    // the parent and its def with no Health test, so a client's dead body (its death
+    // edge detaches only on the authority) keeps the seat until the record's detach.
+    // [orig: Entity_UpdateInfantryAI @0x4B9960..0x4B9985; Entity_UpdateInfantryPlayerBody
+    //  @0x4B637C..0x4B6392]
+    if (occ == nullptr || !occ->mounted) return false;
     Entity *veh = world.registry.get(occ->mount_target);
     if (veh == nullptr) {              // vehicle gone -> auto-dismount, resume normal AI
         world.vehicles.detach(e.handle);

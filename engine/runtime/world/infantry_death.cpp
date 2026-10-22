@@ -104,11 +104,13 @@ void infantry_death_scream(AiSystem &ai, const AiEntity &e, World &world, const 
 void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
                          uint32_t logic_tick) {
     InfantryState &inf = e.inf;
-    // A mounted body detaches so the corpse falls with the world, not the seat.
+    // A mounted body detaches so the corpse falls with the world, not the seat, on the
+    // authority alone: a client's body keeps its seat until the record detaches it.
     // [orig: Entity_UpdateInfantryAI @0x4B9910 (the +0x16C test @0x4B9C57, the
     //  Entity_DetachFromVehicleIfServer call @0x4B9C60); the player-body twin
-    //  @0x4B4C08..0x4B4C11]
-    if (ent != nullptr && ent->mounted)
+    //  @0x4B4C08..0x4B4C11; Entity_DetachFromVehicleIfServer @0x4359D0 (the
+    //  is_authority test @0x4359D7)]
+    if (ai.is_authority && ent != nullptr && ent->mounted)
         world.vehicles.detach(e.handle);
     // [orig: @0x4B9C68] Section bit 0 forces silent, shortened cleanup
     // even for LeaveCorpse items and cancels scripted respawns.

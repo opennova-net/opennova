@@ -25,6 +25,7 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
+#include <runtime/world/infantry_internal.h> // infantry_death_edge
 
 #include <algorithm>
 #include <cmath>
@@ -5090,6 +5091,54 @@ static void test_remote_rider_detach_pass_ends_at_the_mounted_site() {
     CHECK(body.inf.idle_counter == 0);
 }
 
+// A player body that dies seated leaves its seat at its death edge on the authority
+// alone (Entity_DetachFromVehicleIfServer). Off the authority it keeps the seat, and the
+// player body's seat site, which reads the parent and its def with no Health word, still
+// poses the dead body there until the record detaches it.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the death edge's detach
+//  @0x4B4C08..0x4B4C11, the seat-site selector @0x4B637C..0x4B6392;
+//  Entity_DetachFromVehicleIfServer @0x4359D0 (the is_authority test @0x4359D7)]
+static void test_a_seated_death_detaches_on_the_authority_alone() {
+    for (const bool authority : {true, false}) {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+        w.ai.root_motion = &channel_only; // the rider holds its channel
+        Entity vehicle;
+        vehicle.net_id = 200;
+        vehicle.kind = EntityKind::Item;
+        vehicle.has_item_def = true;
+        vehicle.has_graphic_model = true;
+        vehicle.position = {10.0f, 20.0f, 30.0f};
+        vehicle.health = 100;
+        vehicle.alive = true;
+        Seat seat;
+        seat.type = SeatType::Passenger;
+        seat.bone_index = 1;
+        vehicle.seats.push_back(seat);
+        const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+        Entity player;
+        player.net_id = 100;
+        player.kind = EntityKind::Organic;
+        player.player_class = 8;
+        player.health = 100;
+        player.alive = true;
+        const EntityHandle player_h = w.registry.spawn(0, player);
+        AiEntity &body = *w.ai.at(w.ai.attach(player_h));
+        body.inf.active = true;
+        body.health = 100;
+        CHECK(w.vehicles.process_attach(player_h, vehicle_h, 1));
+        Entity &rider = *w.registry.get(player_h);
+        rider.health = 0;
+        body.health = 0;
+        w.ai.is_authority = authority;
+        infantry_death_edge(w.ai, body, w, &rider, /*org1=*/false, 4);
+        CHECK(rider.mounted == !authority);
+        if (!authority) CHECK(w.ai.pose_if_mounted(body, w)); // dead, still seated
+    }
+}
+
 // Through the whole entity update: the pool-1 walk and the attached-child
 // refresh run ahead of the pool-0 bodies, so a body that boards an attached gun
 // in its pass's think ends the update where it walked, and the next update
@@ -5441,6 +5490,7 @@ int main() {
     test_seat_bone_failure_runs_the_seat_tail();
     test_player_seat_bone_failure_detaches_on_the_authority();
     test_remote_rider_detach_pass_ends_at_the_mounted_site();
+    test_a_seated_death_detaches_on_the_authority_alone();
     test_board_pass_on_an_attached_gun_stays_on_foot();
     test_use_scan_and_label_follow_live_seat_pose();
     test_seat_and_emplacement_keep_subdegree_carrier_pose();

@@ -1285,8 +1285,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Org1 keys its seat block on the local its head took, so a body that
     // boarded in this pass's think walks on foot to its end: no seat pose, no
     // dedicated request, no mounted return.
+    // The player body's selector reads the parent and its def, no Health word: a
+    // body that died seated off the authority (no detach at its death edge) takes the
+    // seat site until the record detaches it.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B637C..0x4B6392; the death edge's
+    //  Entity_DetachFromVehicleIfServer @0x4B4C08..0x4B4C11 (is_authority @0x4359D7)]
     const bool mounted = npc_body ? mounted_live && pose_if_mounted(e, world)
-                                  : e.health > 0 && pose_if_mounted(e, world);
+                                  : pose_if_mounted(e, world);
     // A body not mounted-live at its head chases heading, legs and look here,
     // ahead of its eye offset and its sound/fire passes. One that was, but
     // holds no parent now (it left in this pass, or its seat block dropped

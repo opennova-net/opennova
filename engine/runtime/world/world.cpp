@@ -313,7 +313,8 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     else if (body == nullptr && !row.is_ai_capable) kind = ThinkKind::Item;
     // A mounted non-organic brain takes the seat-follow shortcut: no think and
     // no clock step this visit (its row still runs the motor legs).
-    if (brain != nullptr && !row.motor_suspended && ai.pose_if_mounted(*brain, *this))
+    if (brain != nullptr && !row.motor_suspended && row.health > 0 &&
+            ai.pose_if_mounted(*brain, *this))
         kind = ThinkKind::None;
     auto clock_of = [kind](Entity &e) -> int32_t * {
         switch (kind) {
