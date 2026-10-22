@@ -423,10 +423,13 @@ so the default suite is unchanged. An extension case may add:
   says so (serve and play iff `dedicated` is 0), so the cell writes the SERVER
   copy's `dedicated` = 1 (a `server_game_cfg_overrides` entry, restored after);
   its readiness takes a loaded world hosting on the port with no own player.
-  The window's end saves the host's frame: the retail host's
-  (`retail-frame.png`) and ours (`opennova-host-frame.png`, the summary's
-  `opennova_host_screenshot`), the dedicated host's round-end overlay when the
-  window ends in a round's linger. No tracked case sets it: the kick case
+  A Serve Only host's S2C 0x46 roster names no host (slot 0 cleared, on a
+  retail Serve Only host as on ours), so the wire-readiness gate takes
+  `-NoHostPlayer` and requires the joiner's row alone. Every Serve Only cell saves its host's frame at the steady deadline, before
+  the closing checks (`serve-only-host-frame.png`, the summary's
+  `serve_only_host_screenshot`; onHook's screenshot of a retail host, the game
+  MCP's of ours): the dedicated host's round-end overlay when the deadline
+  falls in a round's linger. No tracked case sets it: the kick case
   stages a listen host's `SERVER PUNT ALL`, which reaches the same PUNT (the
   `kick` row below).
 - `late_joiner`: E3's second joiner (`-LateJoiner`). It is the first joiner's

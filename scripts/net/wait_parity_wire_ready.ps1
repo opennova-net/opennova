@@ -29,6 +29,10 @@ param(
     [int] $TimeoutSeconds = 240,
     [ValidateRange(100, 10000)]
     [int] $PollMilliseconds = 1000,
+    # A Serve Only host has no player of its own: its S2C 0x46 roster names no
+    # host (slot 0 cleared, on a retail Serve Only host as on ours; LP-s7), so
+    # no host sync row is required.
+    [switch] $NoHostPlayer,
     [switch] $SelfTest
 )
 
@@ -615,7 +619,8 @@ function Test-SessionWireReadiness {
     $joinerSync = @($syncNames | Where-Object {
         $_.name.Equals($Expected.joiner_callsign, [StringComparison]::Ordinal)
     } | Sort-Object { $_.event.ts_ns } | Select-Object -First 1)
-    if ($hostSync.Count -eq 0) {
+    $noHostPlayer = ($Expected.PSObject.Properties.Name -contains 'no_host_player') -and [bool] $Expected.no_host_player
+    if ($hostSync.Count -eq 0 -and -not $noHostPlayer) {
         return New-NotReady "session $Session S2C 0x46 has not identified exact host '$($Expected.host_callsign)'"
     }
     if ($joinerSync.Count -eq 0) {
@@ -633,7 +638,7 @@ function Test-SessionWireReadiness {
 
     [uint64]$notBefore = 0
     foreach ($milestone in @(
-        [uint64]$hostSync[0].event.ts_ns
+        $(if ($hostSync.Count -gt 0) { [uint64]$hostSync[0].event.ts_ns } else { [uint64]0 })
         [uint64]$joinerSync[0].event.ts_ns
         [uint64]$missionHeaders[0].ts_ns
         [uint64]$missionStatus[0].ts_ns
@@ -703,7 +708,7 @@ function Test-SessionWireReadiness {
             advertised_mission = $advertisedMission
             session_config_frame = [int]$sessionConfigs[0].frame
             mission_header_frame = [int]$missionHeaders[0].frame
-            host_player_sync_frame = [int]$hostSync[0].event.frame
+            host_player_sync_frame = $(if ($hostSync.Count -gt 0) { [int]$hostSync[0].event.frame } else { $null })
             joiner_player_sync_frame = [int]$joinerSync[0].event.frame
             mission_status_frame = [int]$missionStatus[0].frame
             world_load_frame = [int]$worldLoad[0].frame
@@ -1209,6 +1214,7 @@ $expected = [pscustomobject]@{
     mission_header = [byte[]] $missionIdentity.Bytes
     mission_header_sha256 = [string] $missionIdentity.Sha256
     game_type = [uint32]$GameType; expansion = $Expansion
+    no_host_player = [bool] $NoHostPlayer
 }
 
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')

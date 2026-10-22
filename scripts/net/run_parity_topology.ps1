@@ -130,9 +130,10 @@ param(
     # OpenNova host (OR, OO) serves only when its game.cfg's server type says so
     # (host_screen_from_block: serve and play iff `dedicated` is 0), so the cell
     # writes the SERVER copy's `dedicated` = 1 (restored after); its readiness
-    # takes a loaded world hosting on the port with no own player, and the
-    # window's end saves its frame (opennova-host-frame.png) beside the retail
-    # host's (retail-frame.png): the dedicated host's round-end overlay.
+    # takes a loaded world hosting on the port with no own player. Every Serve
+    # Only cell saves its host's frame at the steady deadline, before the
+    # closing checks (serve-only-host-frame.png): the dedicated host's round-end
+    # overlay when the deadline falls in the round's linger.
     [switch] $ServeOnly,
 
     # The pinned SHA-256 of the SERVER copy's game.cfg (the case table's
@@ -743,7 +744,7 @@ $script:EvidencePerspective = ""
 $script:EvidenceRole = ""
 $script:EvidenceInstanceId = ""
 $script:Screenshot = ""
-$script:OpenNovaHostScreenshot = ""
+$script:ServeOnlyHostScreenshot = ""
 $script:Acceptance = $null
 $script:StopEvidence = @()
 $script:CleanupFailure = ""
@@ -2251,7 +2252,9 @@ function Wait-RetailRunForPeer {
         }
         Start-Sleep -Milliseconds 1000
     } while ((Get-Date) -lt $deadline)
-    throw "Timed out waiting for retail run $OwnedRunId to observe a peer"
+    # The last run state names the flag that never held (LP-s7: a retail
+    # Serve Only host under our joiner played 154 uplinks yet timed out here).
+    throw "Timed out waiting for retail run $OwnedRunId to observe a peer; last run_state: $($state | ConvertTo-Json -Depth 4 -Compress)"
 }
 
 function Assert-RetailEndpointState {
@@ -2340,7 +2343,7 @@ function Wait-RetailProcessForPeer {
         }
         Start-Sleep -Milliseconds 1000
     } while ((Get-Date) -lt $deadline)
-    throw "Timed out waiting for retail $Role PID $ProcessId to satisfy readiness_mode=$ReadinessMode"
+    throw "Timed out waiting for retail $Role PID $ProcessId to satisfy readiness_mode=$ReadinessMode; last run_state: $(if ($instance) { $instance.run_state | ConvertTo-Json -Depth 4 -Compress } else { 'no instance' })"
 }
 
 function Assert-RetailHostOwnsPort {
@@ -2652,6 +2655,7 @@ function Wait-ParityWireReady {
         "-Output", $witnessPath,
         "-TimeoutSeconds", "240"
     )
+    if ($ServeOnly) { $arguments += "-NoHostPlayer" }
     $output = @(& powershell.exe @arguments)
     if ($LASTEXITCODE -ne 0) {
         throw "wait_parity_wire_ready.ps1 failed: $($output -join ' | ')"
@@ -2670,19 +2674,31 @@ function Wait-ParityWireReady {
     return $script:WireReadyWitness
 }
 
-# A Serve Only cell's OpenNova host frame at the window's end (the dedicated
-# host's round-end overlay when the window ends in the round's linger), from
-# the game MCP's game_screenshot.
-function Save-OpenNovaHostScreenshot {
+# A Serve Only cell's host frame at the steady deadline, before the closing
+# checks (the dedicated host's round-end overlay when the deadline falls in the
+# round's linger): a retail host's through onhook_screenshot, ours through the
+# game MCP's game_screenshot.
+function Save-ServeOnlyHostFrame {
+    param([string] $RetailInstanceId = "")
+    if (-not $ServeOnly) { return }
+    $path = Join-Path $RunRoot "serve-only-host-frame.png"
+    if ($RetailInstanceId) {
+        $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_screenshot" -Arguments @{
+            instance_id = $RetailInstanceId
+            path = $path
+            preview_max_dim = 256
+        })
+        $script:ServeOnlyHostScreenshot = [string] $result.path
+        return
+    }
     $result = Invoke-GameTool -Port $HostMcpPort -Name "game_screenshot" -Arguments @{
         format = "png"
         max_dim = 4096
     }
     $image = @($result.content | Where-Object { $_.type -eq "image" }) | Select-Object -First 1
     if (-not $image) { throw "game_screenshot returned no image from the OpenNova host" }
-    $path = Join-Path $RunRoot "opennova-host-frame.png"
     [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String([string] $image.data))
-    $script:OpenNovaHostScreenshot = $path
+    $script:ServeOnlyHostScreenshot = $path
 }
 
 function Save-RetailScreenshot {
@@ -3157,6 +3173,7 @@ try {
                     -RetailHostInstanceId $hostInstanceId
                 Start-RetailLateJoiner
                 Wait-UntilSteadyDeadline
+                Save-ServeOnlyHostFrame -RetailInstanceId $hostInstanceId
                 $hostInstance = Wait-RetailProcessForPeer `
                     -ProcessId $script:RetailHostProcess.Id -Role host
                 $joinerInstance = if (Test-ScenarioEndsJoinerSession) {
@@ -3179,9 +3196,6 @@ try {
                 }
                 Complete-RetailLateJoiner
                 Complete-SteadyWindow
-                # A Serve Only host's frame: its round-end overlay when the
-                # window ends in the round's linger.
-                if ($ServeOnly) { Save-RetailScreenshot -InstanceId $hostInstanceId }
                 Stop-RetailProcessCapture -InstanceId ([string] $retailJoiner.instance_id) `
                     -RunLabel "$RunId-joiner"
                 Stop-RetailProcessCapture -InstanceId $hostInstanceId `
@@ -3374,6 +3388,7 @@ try {
                 Publish-MotionGate
             }
             Wait-UntilSteadyDeadline
+            Save-ServeOnlyHostFrame -RetailInstanceId ([string] $retailHost.instance_id)
             $script:OpenNovaJoiner.Refresh()
             if ($script:OpenNovaJoiner.HasExited) {
                 throw "OpenNova joiner exited during the RO steady window"
@@ -3504,6 +3519,7 @@ try {
                 }
                 Start-RetailLateJoiner
                 Wait-UntilSteadyDeadline
+                Save-ServeOnlyHostFrame
                 $script:RetailProcess.Refresh()
                 $script:OpenNovaHost.Refresh()
                 if ($script:RetailProcess.HasExited -or $script:OpenNovaHost.HasExited) {
@@ -3542,7 +3558,6 @@ try {
                 if ($ReadinessMode -eq "in_match") {
                     Save-RetailScreenshot -InstanceId $script:RetailInstanceId
                 }
-                if ($ServeOnly) { Save-OpenNovaHostScreenshot }
             }
             if ($script:RetailInstanceId) {
                 Stop-RetailProcessCapture -InstanceId $script:RetailInstanceId `
@@ -3572,6 +3587,7 @@ try {
                 Publish-MotionGate
             }
             Wait-UntilSteadyDeadline
+            Save-ServeOnlyHostFrame
             $script:OpenNovaHost.Refresh()
             $script:OpenNovaJoiner.Refresh()
             if ($script:OpenNovaHost.HasExited -or $script:OpenNovaJoiner.HasExited) {
@@ -3616,7 +3632,6 @@ try {
                 opennova_joiner = $joinerAcceptance
             }
             Complete-SteadyWindow
-            if ($ServeOnly) { Save-OpenNovaHostScreenshot }
             $stoppedJoiner = $script:OpenNovaJoiner
             $stoppedHost = $script:OpenNovaHost
             $null = Stop-OpenNovaJoinerCooperatively
@@ -3898,8 +3913,8 @@ $summary = [pscustomobject]@{
     evidence_role = $script:EvidenceRole
     evidence_instance_id = $script:EvidenceInstanceId
     screenshot = $script:Screenshot
-    # A Serve Only cell's OpenNova host frame at the window's end.
-    opennova_host_screenshot = $script:OpenNovaHostScreenshot
+    # A Serve Only cell's host frame at the steady deadline.
+    serve_only_host_screenshot = $script:ServeOnlyHostScreenshot
     acceptance = $script:Acceptance
     opennova_launch_proofs = [pscustomobject] $script:OpenNovaLaunchProofs
     direct_runtime_launch = [bool] $AllowDirectRuntime
