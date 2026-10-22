@@ -922,6 +922,98 @@ void test_own_body_serves_the_rings_at_its_slot() {
 	expect(late->lean_angle == -0x3000000, "the after-self leg runs once per walk");
 }
 
+// D-NET-196 (V-ROLL-K, L5-s12 row 0): a row parked past the own body's slot keeps its
+// lean, its kick, its dip window and its torso roll until its own visit. Retail runs
+// the decay, the dip and the roll inside each body's update, so the World legs ahead
+// of the pool-0 walk (the projectile pass, the bone raycast's pose) read a higher body
+// as its last frame left it. Rows 3, the own 4 and 5 lean, kick and roll alike: slot 3
+// takes the legs ahead of the walk, slot 5 none until the after-self leg, where it
+// takes the same steps ahead of its visit.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - Weapon_UpdateAllProjectiles @0x4C223A
+//  ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
+//  @0x4B40E0 - the decay @0x4B5C97..0x4B5CA5, the dip @0x4B5CAB..0x4B5CE7, the torso
+//  roll @0x4B5CFF..0x4B5D67]
+void test_parked_row_keeps_its_body_legs_until_its_visit() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	view.set_self_body_split(true);
+	BodySource src;
+	view.set_root_motion_source(&src);
+	static constexpr uint16_t kEarly = 0x0003;
+	static constexpr uint16_t kSelf = 0x0004;
+	static constexpr uint16_t kLate = 0x0005;
+	FrameUpdate fu;
+	fu.anchor_x = 100 << 16;
+	fu.anchor_y = 200 << 16;
+	fu.anchor_z = 10 << 16;
+	fu.flags2 = 0;
+	fu.carried_handle = 0xFFFF;
+	for (const uint16_t handle : {kLate, kSelf, kEarly}) {
+		view.state().upsert(handle).type_id = kPlayerType;
+		FrameUpdateRecord rec;
+		rec.handle = handle;
+		rec.type_id = kPlayerType;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.pos_x_compressed = network_compress_fixedpoint(1 << 16);
+		rec.player.pos_y_compressed = network_compress_fixedpoint(2 << 16);
+		rec.player.pos_z_compressed = network_compress_fixedpoint(0);
+		rec.player.yaw_byte = 0x40;
+		rec.player.anim_state_id = as::kIdle;
+		rec.player.anim_channel_ratio = 0;
+		fu.records.push_back(rec);
+	}
+	view.apply(0x0A, encode_frame_update(fu));
+	static constexpr int32_t kLean = 0x10000000;
+	static constexpr int32_t kKick = -0x8000000;
+	static constexpr int32_t kTorso = 0x1000000;
+	for (const uint16_t handle : {kLate, kSelf, kEarly}) {
+		ns::ClientEntityState &row = *view.state().find(handle);
+		row.rm_adm_id = -1; // no channel: the body legs alone
+		row.lean_angle = kLean;
+		row.pitch_kick_accum = kKick;
+		row.arms_dip_ticks = 6;
+		row.torso_roll = kTorso;
+	}
+	// The roll the torso chases, read ahead of each row's visit.
+	const int32_t early_roll = view.state().find(kEarly)->roll_bam;
+	// ClientRuntime's order: the decay, the dip, the walk, the ramp.
+	view.tick_lean_decay(kSelf);
+	view.tick_arms_dip(kSelf);
+	view.tick_remote_motion(kSelf);
+	view.tick_lean_ramp();
+	const ns::ClientEntityState *early = view.state().find(kEarly);
+	const ns::ClientEntityState *late = view.state().find(kLate);
+	// The decay: lean -= (lean + 8) >> 4. The dip: the open window drops 0x2800000 and
+	// steps, the kick eases an eighth, the window steps again. The roll chases the Roll
+	// word a sixteenth.
+	const int32_t kick_dropped = kKick - 0x2800000;
+	const int32_t kick_eased = kick_dropped - ((kick_dropped + 4) >> 3);
+	const int32_t torso_chased = kTorso + ((early_roll - kTorso + 8) >> 4);
+	expect(early->lean_angle == 0x0F000000 && early->pitch_kick_accum == kick_eased &&
+					early->arms_dip_ticks == 4 && early->torso_roll == torso_chased,
+			"slot 3 takes its decay, dip and torso roll ahead of the own body");
+	expect(late->lean_angle == kLean && late->pitch_kick_accum == kKick &&
+					late->arms_dip_ticks == 6 && late->torso_roll == kTorso,
+			"slot 5, parked, keeps its lean, kick, window and torso roll between the halves");
+	const int32_t late_roll = late->roll_bam;
+	view.tick_remote_motion_after_self();
+	expect(late->lean_angle == 0x0F000000 && late->pitch_kick_accum == kick_eased &&
+					late->arms_dip_ticks == 4 &&
+					late->torso_roll == kTorso + ((late_roll - kTorso + 8) >> 4),
+			"slot 5 takes the same decay, dip and torso roll ahead of its own visit");
+	view.tick_remote_motion_after_self();
+	expect(late->lean_angle == 0x0F000000 && late->pitch_kick_accum == kick_eased &&
+					late->arms_dip_ticks == 4,
+			"the after-self leg runs the parked row's legs once per walk");
+	// No split (no own row in the walk): every row takes the legs ahead of the walk.
+	ns::ClientEntityState &late_row = *view.state().find(kLate);
+	late_row.lean_angle = kLean;
+	view.tick_lean_decay(0x0006);
+	expect(late_row.lean_angle == 0x0F000000, "with no own row the decay runs for every row");
+}
+
 // D-NET-196 (V-ROLL's edge): a dead player row in the air tumbles where the conform
 // selector would decay it: the body pitch and Roll hold on three ticks of four, and
 // on the fourth they ease an eighth toward the tick-phase ramps a and b while the
@@ -963,6 +1055,7 @@ int main() {
 	test_row_channels_serve_the_shared_variant_rings();
 	test_rows_serve_the_rings_in_slot_order();
 	test_own_body_serves_the_rings_at_its_slot();
+	test_parked_row_keeps_its_body_legs_until_its_visit();
 	test_record_flags_land_on_the_mirror();
 	test_remote_lean_ramp_gates();
 	test_remote_body_conform_chases_the_slope();

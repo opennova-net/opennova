@@ -1632,6 +1632,24 @@ void ClientReplicaPipeline::erase_expired_remote_rows() {
 	remote_motion_expired_.clear();
 }
 
+// The walk's order: pool 1 ahead of pool 0, then the higher pools, each by slot.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9,
+//  the pool-0 walk @0x4C2426..0x4C2472]
+uint32_t ClientReplicaPipeline::remote_walk_key(uint16_t handle) {
+	const uint32_t pool = handle >> 12u;
+	const uint32_t rank = pool == 1u ? 0u : pool == 0u ? 1u : 2u + pool;
+	return (rank << 12u) | (handle & 0x0FFFu);
+}
+
+// The own-body split's line (the own row's key), read by the walk and by the
+// decay and dip ahead of it, so all three part the rows alike.
+uint32_t ClientReplicaPipeline::remote_walk_split_key(uint16_t self_handle) const {
+	if (!remote_motion_mode_ || !self_body_split_ || (self_handle >> 12u) != 0u ||
+			state_.find(self_handle) == nullptr)
+		return UINT32_MAX;
+	return remote_walk_key(self_handle);
+}
+
 void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
 	// A half the last tick parked finishes before this tick opens.
@@ -1679,29 +1697,25 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	std::vector<size_t> &walk = walk_order_scratch_;
 	walk.clear();
 	for (size_t i = 0; i < state_.entities.size(); ++i) walk.push_back(i);
-	const auto walk_key = [this](size_t i) {
-		const uint16_t h = state_.entities[i].handle;
-		const uint32_t pool = h >> 12;
-		const uint32_t rank = pool == 1u ? 0u : pool == 0u ? 1u : 2u + pool;
-		return (rank << 12) | (h & 0x0FFFu);
-	};
-	std::stable_sort(walk.begin(), walk.end(),
-			[&walk_key](size_t a, size_t b) { return walk_key(a) < walk_key(b); });
+	std::stable_sort(walk.begin(), walk.end(), [this](size_t a, size_t b) {
+		return remote_walk_key(state_.entities[a].handle) <
+				remote_walk_key(state_.entities[b].handle);
+	});
 	// The own body's slot splits the walk: retail's pool-0 walk calls every used
 	// slot's class update in slot order with no local-player case, so the local
 	// body serves the shared ring heads at its own slot. Ours serves it in the
 	// World's entity pass, so a joiner's walk (self_body_split_) visits the rows
-	// through the own row's slot here and parks the rest, with their selection and
-	// lean ramp, for tick_remote_motion_after_self once that pass has run (D-NET-196).
+	// through the own row's slot here and parks the rest, with their lean decay,
+	// arms dip, selection and lean ramp, for tick_remote_motion_after_self once
+	// that pass has run (D-NET-196).
 	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472,
 	//  the +0x1C4 call @0x4C2472]
+	const uint32_t split = remote_walk_split_key(self_handle);
 	size_t through = walk.size();
-	if (self_body_split_ && (self_handle >> 12) == 0u) {
-		for (size_t k = 0; k < walk.size(); ++k) {
-			if (state_.entities[walk[k]].handle == self_handle) {
-				through = k + 1;
-				break;
-			}
+	for (size_t k = 0; k < walk.size(); ++k) {
+		if (remote_walk_key(state_.entities[walk[k]].handle) > split) {
+			through = k;
+			break;
 		}
 	}
 	parked_self_ = self_handle;
@@ -1734,11 +1748,18 @@ void ClientReplicaPipeline::tick_remote_motion_after_self() {
 	for (size_t i = 0; i < state_.entities.size(); ++i)
 		row_by_handle.emplace(state_.entities[i].handle, i);
 	remote_motion_expired_.clear();
+	// Each parked row's lean decay and arms dip (with the torso roll) open its own
+	// visit, as retail's body update runs them in its own pass; the embedder's
+	// tick_lean_decay / tick_arms_dip skipped it (D-NET-196).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97..0x4B5CA5,
+	//  the dip @0x4B5CAB..0x4B5CE7, the torso roll @0x4B5CFF..0x4B5D67]
 	for (const uint16_t handle : rows) {
 		const auto it = row_by_handle.find(handle);
 		if (it == row_by_handle.end()) continue;
 		ClientEntityState &es = state_.entities[it->second];
 		es.rm_parked = false;
+		lean_decay_row(es);
+		arms_dip_row(es);
 		visit_remote_row(es, parked_self_, parked_tick_);
 	}
 	// Each parked row's selection and lean ramp close its own visit, as the

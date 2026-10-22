@@ -12,13 +12,25 @@
 
 namespace opennova::replication {
 
-void ClientReplicaPipeline::tick_lean_decay() {
-	for (ClientEntityState &es : state_.entities) {
-		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
-			continue;
-		es.lean_angle = io::bam_sub(es.lean_angle,
-				io::bam_sar(io::bam_add(es.lean_angle, 8), 4));
-	}
+// A row the walk will park past the own body's slot keeps its lean, its kick and
+// its torso roll until its own visit: retail runs the decay, the dip and the roll
+// inside each body's update, so the legs ahead of the pool-0 walk (the projectile
+// pass among them) see a higher body as its last frame left it.
+// tick_remote_motion_after_self runs them ahead of the parked row's visit (D-NET-196).
+// [orig: Entity_UpdateAllEntities @0x4C2100 - Weapon_UpdateAllProjectiles @0x4C223A
+//  ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
+//  @0x4B40E0 - the decay @0x4B5C97..0x4B5CA5, the dip @0x4B5CAB..0x4B5CE7, the torso
+//  roll @0x4B5CFF..0x4B5D67]
+void ClientReplicaPipeline::tick_lean_decay(uint16_t self_handle) {
+	const uint32_t split = remote_walk_split_key(self_handle);
+	for (ClientEntityState &es : state_.entities)
+		if (remote_walk_key(es.handle) <= split) lean_decay_row(es);
+}
+
+void ClientReplicaPipeline::lean_decay_row(ClientEntityState &es) {
+	if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) return;
+	es.lean_angle = io::bam_sub(es.lean_angle,
+			io::bam_sar(io::bam_add(es.lean_angle, 8), 4));
 }
 
 void ClientReplicaPipeline::tick_lean_ramp() {
@@ -59,45 +71,48 @@ void ClientReplicaPipeline::lean_ramp_row(ClientEntityState &es) {
 // runs for authoritative bodies, applied here to wire-decoded peers. The window byte
 // decrements in BOTH branches -- twice per tick -- so an 80 stamp dips for 40 ticks.
 // [orig: @0x4b5cab..0x4b5ce7]
-void ClientReplicaPipeline::tick_arms_dip() {
-	for (ClientEntityState &es : state_.entities) {
-		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
-			continue;
-		if (es.arms_dip_ticks > 0) {
-			--es.arms_dip_ticks;                 // [orig: @0x4b5cb5]
-			es.pitch_kick_accum = io::bam_sub(
-					es.pitch_kick_accum, 0x2800000); // [orig: @0x4b5cb7 += 0xFD800000]
-		}
+void ClientReplicaPipeline::tick_arms_dip(uint16_t self_handle) {
+	const uint32_t split = remote_walk_split_key(self_handle);
+	for (ClientEntityState &es : state_.entities)
+		if (remote_walk_key(es.handle) <= split) arms_dip_row(es);
+}
+
+void ClientReplicaPipeline::arms_dip_row(ClientEntityState &es) {
+	if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) return;
+	if (es.arms_dip_ticks > 0) {
+		--es.arms_dip_ticks;                 // [orig: @0x4b5cb5]
 		es.pitch_kick_accum = io::bam_sub(
-				es.pitch_kick_accum,
-				io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3)); // [orig: @0x4b5cc7..0x4b5cd5]
-		if (es.arms_dip_ticks > 0) --es.arms_dip_ticks;         // [orig: @0x4b5cdb..0x4b5ce7]
-		// A remote player's torso roll, the authority's player-body rule
-		// (world::AiSystem::infantry_torso_roll_tick): prone idle decays it a sixteenth
-		// toward level, the prone rolls step it 0x4000000, otherwise it chases the Roll
-		// word a sixteenth with the lag clamped to +-20 degrees (D-NET-330).
-		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - prone idle 0x30 @0x4b5d05, the
-		//  chase's skip of the rolls @0x4b5d20..0x4b5d28, the chase and clamps @0x4b5d4e /
-		//  @0x4b5d61; the rolls @0x4b700e / @0x4b701d]
-		if (es.cls != EntityClass::Player) continue;
-		if (es.rm_state == world::anim_state::kIdleProne) {
-			es.torso_roll = io::bam_sub(es.torso_roll, io::bam_sar(io::bam_add(es.torso_roll, 8), 4));
-			continue;
-		}
-		if (es.rm_state == world::anim_state::kRollLeft) {
-			es.torso_roll = io::bam_add(es.torso_roll, -0x4000000);
-			continue;
-		}
-		if (es.rm_state == world::anim_state::kRollRight) {
-			es.torso_roll = io::bam_add(es.torso_roll, 0x4000000);
-			continue;
-		}
-		es.torso_roll = io::bam_add(es.torso_roll,
-				io::bam_sar(io::bam_add(io::bam_sub(es.roll_bam, es.torso_roll), 8), 4));
-		const int32_t lag = io::bam_sub(es.torso_roll, es.roll_bam);
-		if (lag > 0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, 0x0E38E380);
-		if (lag < -0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, -0x0E38E380);
+				es.pitch_kick_accum, 0x2800000); // [orig: @0x4b5cb7 += 0xFD800000]
 	}
+	es.pitch_kick_accum = io::bam_sub(
+			es.pitch_kick_accum,
+			io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3)); // [orig: @0x4b5cc7..0x4b5cd5]
+	if (es.arms_dip_ticks > 0) --es.arms_dip_ticks;         // [orig: @0x4b5cdb..0x4b5ce7]
+	// A remote player's torso roll, the authority's player-body rule
+	// (world::AiSystem::infantry_torso_roll_tick): prone idle decays it a sixteenth
+	// toward level, the prone rolls step it 0x4000000, otherwise it chases the Roll
+	// word a sixteenth with the lag clamped to +-20 degrees (D-NET-330).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - prone idle 0x30 @0x4b5d05, the
+	//  chase's skip of the rolls @0x4b5d20..0x4b5d28, the chase and clamps @0x4b5d4e /
+	//  @0x4b5d61; the rolls @0x4b700e / @0x4b701d]
+	if (es.cls != EntityClass::Player) return;
+	if (es.rm_state == world::anim_state::kIdleProne) {
+		es.torso_roll = io::bam_sub(es.torso_roll, io::bam_sar(io::bam_add(es.torso_roll, 8), 4));
+		return;
+	}
+	if (es.rm_state == world::anim_state::kRollLeft) {
+		es.torso_roll = io::bam_add(es.torso_roll, -0x4000000);
+		return;
+	}
+	if (es.rm_state == world::anim_state::kRollRight) {
+		es.torso_roll = io::bam_add(es.torso_roll, 0x4000000);
+		return;
+	}
+	es.torso_roll = io::bam_add(es.torso_roll,
+			io::bam_sar(io::bam_add(io::bam_sub(es.roll_bam, es.torso_roll), 8), 4));
+	const int32_t lag = io::bam_sub(es.torso_roll, es.roll_bam);
+	if (lag > 0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, 0x0E38E380);
+	if (lag < -0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, -0x0E38E380);
 }
 
 void ClientReplicaPipeline::tick_recoil() {

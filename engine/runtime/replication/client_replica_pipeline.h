@@ -135,11 +135,17 @@ public:
 	// so the pass's eye (tick_remote_motion) reads the decayed, unramped lean.
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the
 	//  eye @0x4B699F..0x4B6BAB, the ramp @0x4B7DBF / @0x4B7DD6]
-	void tick_lean_decay();
+	// The decay and the arms dip (with the torso roll) take the walk's own-body
+	// split (tick_remote_motion's self_handle): a row the walk will park past the
+	// own body's slot takes them in tick_remote_motion_after_self, ahead of its
+	// visit, as retail runs them inside each body's own update (D-NET-196).
+	void tick_lean_decay(uint16_t self_handle = 0xFFFFu);
+	void lean_decay_row(ClientEntityState &es);
 	// Every visited row's ramp (a row the walk parked ramps after its visit).
 	void tick_lean_ramp();
 	void lean_ramp_row(ClientEntityState &es);
-	void tick_arms_dip();
+	void tick_arms_dip(uint16_t self_handle = 0xFFFFu);
+	void arms_dip_row(ClientEntityState &es);
 	// Wire handles whose compact record was dropped because its carrier could
 	// not be resolved (the retail bail queues a C2S 0x0F entity request); the
 	// embedding runtime drains and sends them once per frame.
@@ -351,13 +357,23 @@ public:
 	// No-op unless remote-motion mode is enabled.
 	// With the own-body split on (a joiner, whose own body serves its rings in the
 	// World's entity pass), the walk visits the rows through the own row's pool-0
-	// slot and parks the rest; tick_remote_motion_after_self visits them, with
-	// their selection and lean ramp, once that pass has run the own body. A parked
-	// half the embedder never finished finishes at the next tick's head.
-	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472]
+	// slot and parks the rest; tick_remote_motion_after_self visits them, each with
+	// its lean decay and arms dip ahead of the visit and its selection and lean
+	// ramp after it, once that pass has run the own body. Until then the World
+	// tick's readers of a parked row (the round pass's guided inputs, wire actor and
+	// person body, the bone raycast's pose) see it as its last tick left it, as
+	// retail's projectile pass sees a higher pool-0 body. A parked half the embedder
+	// never finished finishes at the next tick's head.
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472,
+	//  Weapon_UpdateAllProjectiles @0x4C223A ahead of it]
 	void tick_remote_motion(uint16_t self_handle);
 	void tick_remote_motion_after_self();
 	void set_self_body_split(bool on) { self_body_split_ = on; }
+	// The walk's order key (pool 1, pool 0, then the higher pools, each by slot) and
+	// the split's line: the own row's key when the walk parks the rows past it,
+	// else no line (UINT32_MAX).
+	static uint32_t remote_walk_key(uint16_t handle);
+	uint32_t remote_walk_split_key(uint16_t self_handle) const;
 
 	// The S2C 0x70 table and its received flag. Retail's are process globals that
 	// no session or mission start touches (their writers are the 0x70 handler and
