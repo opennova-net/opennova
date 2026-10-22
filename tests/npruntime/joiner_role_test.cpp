@@ -3910,9 +3910,14 @@ bool run_deploy_action_converts_a_dead_permanent_death_player() {
 // D-NET-NEW-L2-38: a header-only joiner's streamed static takes its placed identity when the
 // mission start's settle asks for the stream, with no session update between the stream and
 // the settle (the first frame after the load may bank none); the next update finds the World
-// in step and keeps the identity.
-// [orig: NapiNPClientMsg_0x00D @0x432C40 - Pool_UpdateMaxUsedFromSlotId called @0x4333CD;
-//  Game_StartMission @0x524360 - Entity_InitAllFromModels called @0x52567F]
+// in step and keeps the identity. The stream arrives in the pages a stock host sends: the
+// building in a pool-2 0x10 page (its slot the page's start index plus its place in the page;
+// the 0x0D takes pool-1 rows), then the host's own body in a pool-0 0x0C page, the initial
+// state's pool-0 fence.
+// [orig: NapiNPClientMsg_0x010 @0x433400 - Pool_GetEntryUnchecked(2, start + i) called
+//  @0x43347D, Pool_UpdateMaxUsed called @0x433771; NapiNPClientMsg_0x00C @0x42E730 - the
+//  slot resolve @0x42E7A5..0x42E7DD; Game_StartMission @0x524360 - Entity_InitAllFromModels
+//  called @0x52567F]
 bool run_the_settle_materializes_the_world_stream() {
 	Harness h;
 	w::World &world = h.kernel->world;
@@ -3921,21 +3926,27 @@ bool run_the_settle_materializes_the_world_stream() {
 	h.role.poll_preload();
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
-	// The stream, all of it ahead of the load's end: the host's own body in pool 0 (the
-	// initial state's pool-0 fence) and a building in pool 2. No update runs before the settle.
-	auto &host_row = h.role.runtime->state().upsert(0x0000);
-	host_row.cls = EntityClass::Player;
-	host_row.type_id = w::kPlayerInfantryTypeId;
+	// The stream, all of it ahead of the load's end, in the witnessed initial-state order (pool 2
+	// before pool 0). No update runs before the settle.
 	const w::EntityHandle hut{0x2011};
-	PoolSpawnBatch batch;
-	PoolSpawnRecord rec;
-	rec.slot_id = hut.packed;
-	rec.item_type_id = 0x04B3;
-	rec.pos_x = -22 * 65536;
-	rec.pos_y = -80 * 65536;
-	rec.pos_z = 16 * 65536;
-	batch.records.push_back(rec);
-	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
+	StaticEntityRecord building;
+	building.item_type_id = 0x04B3;
+	building.pos_x = -22 * 65536;
+	building.pos_y = -80 * 65536;
+	building.pos_z = 16 * 65536;
+	StaticEntityBatch statics;
+	statics.start_index = static_cast<uint16_t>(hut.slot());
+	statics.records.push_back(building);
+	h.role.runtime->view().apply(s2c::STATIC_ENTITY_BATCH, encode_static_entity_batch(statics));
+	OrganicSpawnRecord host_body;
+	host_body.slot_id = 0x0000;
+	host_body.def_type = 3; // a person def
+	host_body.item_type_id = w::kPlayerInfantryTypeId;
+	host_body.team = 1;
+	OrganicSpawnBatch organics;
+	organics.records.push_back(host_body);
+	organics.entity_count = 1;
+	h.role.runtime->view().apply(s2c::ENTITY_SPAWN_BATCH, encode_organic_spawn_batch(organics));
 	if (!expect(h.role.materializer().placed_rows(world).empty(),
 			"settle stream: nothing is placed before the settle"))
 		return false;

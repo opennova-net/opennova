@@ -129,9 +129,11 @@ public:
 	// (materialize_replica_world) runs only in a session update, and the first frame after
 	// the load may bank none (its clock re-base), so the settle runs it ahead of placing the
 	// streamed statics; the next update finds the World in step. Retail's client writes each
-	// streamed row into its pool slot in the 0x0D's receive, and the mission start's load
-	// initializes every pool's rows from their models ahead of its 0x0B.
+	// streamed row into its pool slot in its page's receive (a pool-1 0x0D's, a pool-2 0x10's),
+	// and the mission start's load initializes every pool's rows from their models ahead of its
+	// 0x0B.
 	// [orig: NapiNPClientMsg_0x00D @0x432C40 - Pool_UpdateMaxUsedFromSlotId called @0x4333CD;
+	//  NapiNPClientMsg_0x010 @0x433400 - Pool_UpdateMaxUsed called @0x433771;
 	//  Game_StartMission @0x524360 - Entity_InitAllFromModels called @0x52567F]
 	void materialize_world_stream();
 	// The mission data's rules word into the world (bring_up and the S2C 0x64 copy's step).
