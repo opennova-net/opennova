@@ -270,7 +270,7 @@ w::CollisionModel box_model(double hx, double hy, double height) {
 // 25 * (1 + 2 * (los + 1) + 1)) + 200 = 2126 with LOS, 2026 behind a Building.
 // [orig: Server_BuildEntityPriorityListForPlayer @0x50DF20 - the LOS call
 //  @0x50E179; Entity_CheckLineOfSightTerrainAndEntities @0x53B130 - the entity
-//  leg @0x53B17B; Physics_RaycastFindCollisionEntity @0x539A70 - the candidate's
+//  leg, the call @0x53B16C; Physics_RaycastFindCollisionEntity @0x539A70 - the candidate's
 //  itemDef @0x539B7E, `cmp dword ptr [edx+5Ch], 5` @0x539B9E]
 bool run_interest_person_los_passes_a_decoration() {
 	bool ok = true;

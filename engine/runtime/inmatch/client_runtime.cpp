@@ -1289,9 +1289,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// incoming link error every main frame, ahead of the receive pump; the join's
 	// waits, which run no client net frame, never test it (D-NET-NEW-L2-40) [orig:
 	// Client_ProcessNetworkFrame @0x42c1f8..0x42c21e — `is_mp_session_peer &&
-	// !is_authority && CNapiNetwork_GetSessionUptime(ctx) > 2`; that getter
-	// @0x4c6ed0 is (GetTickCount() - napi_conn+0x5E8) / 1000, the connection's
-	// last-admitted-receive stamp, not a session uptime].
+	// !is_authority && CNapiNetwork_GetSecondsSinceLastReceive(ctx) > 2`; that
+	// getter @0x4C6ED0 is (GetTickCount() - napi_conn+0x5E8) / 1000, the
+	// connection's last-admitted-receive stamp].
 	if (role_ == Role::Joiner && in_main_frame() &&
 			joiner_->milliseconds_since_last_receive() / 1000u > 2u)
 		hud::net_quality_set_flag(net_indicators_, hud::kNetLinkErrorIncoming,
