@@ -423,6 +423,110 @@ func test_a_talk_row_pressed_inside_a_multi_tick_frame_opens_its_line() -> void:
 	presenter.set_hud_chat(null, null)
 
 
+# An input frame belongs to an update (engine inmatch::TickInputSource
+# carries the witness): a frame whose bank drains no update runs none, so a
+# HUD row pressed in it fires nothing there; the press waits in the router's
+# queue and the next frame's update fires it. Quarter-tick frames settle the
+# bank at one 4 ms quantum a frame, so an update drains every fourth frame
+# and the three after it drain none (engine world::TickAccumulator).
+func test_a_frame_that_drains_no_update_fires_no_hud_row_until_the_next_update() -> void:
+	var rig := _rig()
+	if rig.is_empty():
+		return
+	var sim: Simulation = rig.world.get_sim()
+	var presenter: LocalPlayerPresenter = rig.presenter
+	var toggles := HudToggles.new()
+	presenter.set_hud_toggles(toggles)
+	const HUDCOLOR := 10
+	_frame(rig, 60, true, 0.25)
+	assert_true(_frame_until_update(rig, 8, 0.25), "a quarter-tick stream drains an update")
+	presenter.take_hud_toggle_events()
+	var color_before := toggles.get_hud_color_index()
+	var driver: ScriptedInput = rig.driver
+	assert_eq(driver.load_steps([
+		{"tick": 0, "press": HUDCOLOR},
+		{"tick": 2, "end": true},
+	]), OK, driver.get_error())
+	assert_true(driver.start())
+	var tick := int(sim.get_logic_tick())
+	_frame(rig, 1, true, 0.25)
+	assert_eq(int(sim.get_logic_tick()), tick, "the frame after an update drains none")
+	assert_eq(driver.get_applied_logic_ticks()[0], tick, "its sample took the press")
+	assert_eq(presenter.take_hud_toggle_events(), PackedInt64Array(),
+			"no update, no input frame: the row fired nothing")
+	assert_eq(toggles.get_hud_color_index(), color_before)
+	assert_true(_frame_until_update(rig, 4, 0.25), "the stream's next update")
+	assert_eq(presenter.take_hud_toggle_events(),
+			PackedInt64Array([HudToggles.EVENT_HUD_COLOR_CYCLED]),
+			"the next update's input frame fired the waiting press once")
+	assert_eq(toggles.get_hud_color_index(), (color_before + 1) % 6, "the colour cycled")
+
+
+# The pause row (code 25) dispatches from the drain of the update that reads
+# it (engine inmatch::Session::run_updates and TickInputSource carry the
+# witness): pressed on the second tick of a three-tick frame, it pauses the
+# session at that update, the frame's third update runs paused, and the logic
+# tick freezes at the pausing update's own. The rows behind it in the same
+# update meet the action rows' head with the word set: the weapon select (row
+# 30, code 203, bit 0) is dropped, the radar zoom (row 48, code 361, flags
+# 0x04000800, no bit 0) still steps.
+func test_the_pause_row_mid_frame_pauses_its_update_and_drops_the_bit0_rows_behind_it() -> void:
+	var rig := _rig()
+	if rig.is_empty():
+		return
+	var world: GameWorld = rig.world
+	var sim: Simulation = world.get_sim()
+	assert_eq(sim.session_role(), Simulation.ROLE_SINGLE_PLAYER,
+			"the minimal playable load is a single-player session")
+	var presenter: LocalPlayerPresenter = rig.presenter
+	var toggles := HudToggles.new()
+	presenter.set_hud_toggles(toggles)
+	const PAUSE := 25
+	const PRIMARY := 203
+	const RADAROUT := 361
+	assert_eq(ScriptedInput.token_for_action_code(PAUSE),
+			HudToggles.row_token(HudToggles.ROW_PAUSE), "code 25 is the pause row")
+	assert_eq(ScriptedInput.token_for_action_code(RADAROUT), "radarout", "code 361 is radarout")
+	assert_false(ScriptedInput.token_for_action_code(PRIMARY).is_empty(), "code 203 has a row")
+	_frame(rig, 40, true, 3)
+	var before := int(sim.get_logic_tick())
+	_frame(rig, 1, true, 3)
+	assert_eq(int(sim.get_logic_tick()) - before, 3, "a three-tick frame banks three ticks")
+	presenter.take_hud_toggle_events()
+	var zoom_before := int(sim.get_hud_radar_zoom_q16())
+	var weapon_before := String(sim.get_local_player_weapon_name())
+	var driver: ScriptedInput = rig.driver
+	assert_eq(driver.load_steps([
+		{"tick": 1, "press": PAUSE},
+		{"tick": 1, "press": RADAROUT},
+		{"tick": 1, "press": PRIMARY},
+		{"tick": 4, "end": true},
+	]), OK, driver.get_error())
+	assert_true(driver.start())
+	_frame(rig, 1, true, 3)
+	var start := driver.get_start_logic_tick()
+	assert_eq(driver.get_applied_logic_ticks()[0], start + 1, "the presses land on the second tick")
+	assert_eq(sim.session_state(), MissionFrameOutcome.STATE_PAUSED,
+			"the pause row paused the session at its update")
+	assert_eq(int(sim.get_logic_tick()), start + 1,
+			"the logic tick froze at the pausing update's own")
+	assert_true(toggles.is_paused(), "the HUD's pause word is set")
+	assert_eq(presenter.take_hud_toggle_events(),
+			PackedInt64Array([HudToggles.EVENT_PAUSE_TOGGLED]), "the pause row fired once")
+	assert_gt(int(sim.get_hud_radar_zoom_q16()), zoom_before,
+			"the radar zoom behind the pause row still stepped (no bit 0)")
+	_frame(rig, 2, true, 3)
+	assert_eq(sim.session_state(), MissionFrameOutcome.STATE_PAUSED, "the held key flips nothing more")
+	assert_eq(int(sim.get_logic_tick()), start + 1, "paused frames run no tick")
+	# The weapon select behind the pause row was dropped at the head, so the
+	# resumed session never walks a switch for it.
+	world.set_shell_paused(false)
+	_frame(rig, 30, true, 1)
+	assert_true(sim.is_playing(), "the resume runs the session again")
+	assert_eq(String(sim.get_local_player_weapon_name()), weapon_before,
+			"the weapon select behind the pause row was dropped")
+
+
 # The packaged world over the minimal mission (its playable load spawns the
 # local player) with the infantry clip set staged so the motor's body
 # selection runs, and a presenter over a ControlsModel carrying a scripted
@@ -453,13 +557,25 @@ func _rig() -> Dictionary:
 
 
 # Shell frames in main_game's order, each banking `ticks` fixed ticks' time.
-func _frame(rig: Dictionary, count: int, active := true, ticks := 1) -> void:
+func _frame(rig: Dictionary, count: int, active := true, ticks := 1.0) -> void:
 	var world: GameWorld = rig.world
 	var camera: Camera3D = rig.camera
 	var presenter: LocalPlayerPresenter = rig.presenter
 	for i in count:
 		var frame_input := presenter.before_world_tick(TICK * ticks, false, active)
 		world.tick(camera.global_position, camera.global_transform, TICK * ticks, frame_input)
+
+
+# Frames of `ticks` ticks' time until one drains an update (the logic tick
+# moves), at most `limit` of them; true when one did.
+func _frame_until_update(rig: Dictionary, limit: int, ticks: float) -> bool:
+	var sim: Simulation = rig.world.get_sim()
+	var tick := int(sim.get_logic_tick())
+	for i in limit:
+		_frame(rig, 1, true, ticks)
+		if int(sim.get_logic_tick()) != tick:
+			return true
+	return false
 
 
 # The process input path's key events, each handed to an open chat line's
