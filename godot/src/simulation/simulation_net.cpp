@@ -108,6 +108,13 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
 	// process runs, a listen host's as a dedicated one's (base/resource_index boot_policy.h
 	// LogSwitches carries the witness).
 	if (net_.log_devices != nullptr) cfg.logs = net_.log_devices->logs();
+	// The listen socket's bind address and bound port, which HOST STARTED / STOPPED print
+	// (the NovaWorld session's when the host rides it); a socketless host prints the
+	// placeholder (engine: inmatch::inout_host_line, JoinerRole::set_local_address).
+	if (is_host_listening() && net_.pump.is_valid() && net_.pump->is_open()) {
+		cfg.local_address = net_.pump->local_address();
+		cfg.local_address_known = true;
+	}
 	// The mounted Avatars.def's combos the player add validates against (D-NET-137).
 	cfg.characters = assets_.character_registry;
 	// banned.txt and banlist.txt by bare name in the same working directory, as retail opens

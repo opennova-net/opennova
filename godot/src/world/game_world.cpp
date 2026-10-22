@@ -188,13 +188,16 @@ void GameWorld::_notification(int p_what) {
 		// process's transport socket when one is open: a LAN browse's, a join's or the
 		// NovaWorld session's; engine stop_unstopped_server carries the witness), then the
 		// _inout.txt log, then the net log, each stops and flushes (ServerLogDevices::close
-		// carries the witness). This shell passes no socket address: HOST STOPPED carries
-		// the placeholder, as the joiner's reset does (D-NET-NEW-L1-26).
+		// carries the witness). HOST STOPPED formats that socket's bind address and port, the
+		// placeholder with none open (engine: inmatch::inout_host_line, D-NET-NEW-L1-26).
 		if (log_devices_ != nullptr) {
-			UdpPumpDatagramSocket transport(UdpPump::process_transport());
+			UdpPump *open_transport = UdpPump::process_transport();
+			UdpPumpDatagramSocket transport(open_transport);
+			const opennova::PeerAddr transport_address =
+					open_transport != nullptr ? open_transport->local_address() : opennova::PeerAddr{};
 			opennova::inmatch::stop_unstopped_server(client_process_.unstopped_server,
-					log_devices_->logs(),
-					UdpPump::process_transport() != nullptr ? &transport : nullptr, nullptr);
+					log_devices_->logs(), open_transport != nullptr ? &transport : nullptr,
+					open_transport != nullptr ? &transport_address : nullptr);
 			log_devices_->close(0u);
 		}
 		NovaWorldClient::set_process_connect_log(nullptr);
