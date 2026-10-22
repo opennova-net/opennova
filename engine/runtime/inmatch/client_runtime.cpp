@@ -2058,12 +2058,15 @@ bool ClientRuntime::queue_console_action(int32_t code, int32_t p1, int32_t p2, i
 }
 
 void ClientRuntime::queue_carrier_repair_requests() {
-	for (const uint16_t handle : view_.drain_carrier_repair_requests()) {
-		std::vector<uint8_t> body;
-		body.push_back(static_cast<uint8_t>(handle & 0xFFu));
-		body.push_back(static_cast<uint8_t>(handle >> 8));
-		send_queue_.push_back(make_protocol_message(c2s::ENTITY_INFO_QUERY, std::move(body)));
-	}
+	for (const uint16_t handle : view_.drain_carrier_repair_requests())
+		queue_entity_info_request(handle);
+}
+
+void ClientRuntime::queue_entity_info_request(uint16_t handle) {
+	std::vector<uint8_t> body;
+	body.push_back(static_cast<uint8_t>(handle & 0xFFu));
+	body.push_back(static_cast<uint8_t>(handle >> 8));
+	send_queue_.push_back(make_protocol_message(c2s::ENTITY_INFO_QUERY, std::move(body)));
 }
 
 // One frame of the joiner's send cadence. The frame's receive pump steps a

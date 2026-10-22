@@ -133,6 +133,23 @@ public:
 		}
 		return false;
 	}
+	// Every shipped message with `tag`, in send order.
+	std::vector<ProtocolMessage> messages_with(uint8_t tag) const {
+		std::vector<ProtocolMessage> out;
+		for (const std::vector<uint8_t> &dg : datagrams) {
+			uint8_t opcode = 0;
+			std::vector<uint8_t> body;
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!nw_decode_inbound(dg.data(), dg.size(), opcode, body) ||
+					opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
+					!decode_protocol_packet_plaintext(body.data(), body.size(),
+							kClientScrk, header, messages)) continue;
+			for (const ProtocolMessage &msg : messages)
+				if (msg.tag == tag) out.push_back(msg);
+		}
+		return out;
+	}
 };
 
 // The kernel lives on the heap: a World-carrying frame is megabytes.
@@ -4039,6 +4056,45 @@ bool run_a_full_spawn_row_loads_its_def() {
 	return ok;
 }
 
+// The ewep mover's stale-ground pair on a joiner: the World reads a slot's destroyed mark off
+// the decoded rows' marks, and the two C2S 0x0F the mover raises (the ground's, then its own
+// body's) leave in raise order, the own body L asking by its wire handle H.
+// [orig: Entity_Destroy @0x43E810 - the mark @0x43EA7F; Entity_UpdateTransformAndTurret
+//  @0x440CA0 - the read @0x440D2A, the 0x0Fs @0x440DAB / @0x440E29]
+bool run_the_ewep_stale_ground_asks_leave_as_0x0f() {
+	Harness h;
+	constexpr uint16_t kSelf = 0x0005;
+	constexpr uint16_t kGround = 0x1003;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, kSelf, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	w::World &world = h.kernel->world;
+	const w::EntityHandle local = world.cached.local_player;
+	if (!expect(h.role.local_spawned() && local.valid(), "stale ground: L spawned"))
+		return false;
+	bool ok = expect(world.destroyed_mark && !world.destroyed_mark(kGround),
+			"stale ground: an unmarked slot reads no mark");
+	h.role.runtime->state().destroyed_marks.push_back(kGround);
+	ok &= expect(world.destroyed_mark(kGround), "stale ground: the decoded rows' mark reads set");
+	// The mover's raise, as the World's entity pass leaves it.
+	world.out.entity_info_requests.push_back(w::EntityHandle{kGround});
+	world.out.entity_info_requests.push_back(local);
+	const std::size_t before = h.socket.messages_with(c2s::ENTITY_INFO_QUERY).size();
+	for (int i = 0; i < 4; ++i) h.role.run_tick(h.input);
+	ok &= expect(world.out.entity_info_requests.empty(), "stale ground: the outbox drained");
+	const std::vector<ProtocolMessage> asks = h.socket.messages_with(c2s::ENTITY_INFO_QUERY);
+	const auto handle_of = [](const ProtocolMessage &m) {
+		return m.payload.size() == 2 ? static_cast<uint16_t>(m.payload[0] | (m.payload[1] << 8))
+		                             : uint16_t{0};
+	};
+	ok &= expect(asks.size() == before + 2 && handle_of(asks[before]) == kGround &&
+					handle_of(asks[before + 1]) == kSelf,
+			"stale ground: the ground's 0x0F, then the body's own by H");
+	h.role.runtime->state().destroyed_marks.clear();
+	return ok;
+}
+
 } // namespace
 
 // A pool-1 shooter's round takes the Indoors bit retail's client keeps for the
@@ -4457,6 +4513,7 @@ int main() {
 	ok &= run_role_runtimes_step_the_process_report_count();
 	ok &= run_the_settle_materializes_the_world_stream();
 	ok &= run_a_full_spawn_row_loads_its_def();
+	ok &= run_the_ewep_stale_ground_asks_leave_as_0x0f();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

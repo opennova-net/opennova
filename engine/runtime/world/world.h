@@ -949,6 +949,11 @@ struct WorldOutbox {
     // witness); the joiner role drains them into its send queue. The authority
     // never fills it.
     std::vector<uint16_t> detach_requests;
+    // A client's C2S 0x0F entity requests the movers raised, in raise order, by World handle
+    // (the ewep mover's stale-ground pair, ai_system.cpp carries the witness); the joiner role
+    // drains them into its carrier-repair queue, its own body L by its wire handle. The
+    // authority never fills it.
+    std::vector<EntityHandle> entity_info_requests;
     // HUD relays pending the host's S2C 0x3F fan.
     std::vector<HudRelay> hud_relays;
     // Powerup ammo grants for REMOTE players' connection pools (world/powerup.h);
@@ -1371,6 +1376,13 @@ public:
     // Entity_UpdatePool1Slot calls @0x4C21B9 / @0x4C21D0 / @0x4C21E0 / @0x4C21E9;
     // Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C4 mover @0x4B8E41..0x4B8E53]
     std::function<void(EntityHandle)> pool1_slot_leg;
+    // A slot's destroyed mark (+0x219) by its wire handle: retail's shared destroy zeroes a
+    // slot and marks it, and a record that rewrites the slot clears the mark with its memset.
+    // A joiner's decoded rows keep the marks (replication::ClientState::destroyed_marks) and
+    // its role binds this to read them; empty on every other peer, where no reader runs (the
+    // readers run off the authority only). [orig: Entity_Destroy @0x43E810 - the memset
+    // @0x43EA70, the mark @0x43EA7F; read by Entity_UpdateTransformAndTurret @0x440D2A]
+    std::function<bool(uint16_t wire_handle)> destroyed_mark;
 
     // May the mission script advance this tick? Retail wraps its WAC tick, the
     // idle-timer sweep and the BMS event pump in ONE condition, and the half that

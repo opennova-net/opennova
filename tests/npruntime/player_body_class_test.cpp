@@ -1743,6 +1743,63 @@ void test_an_ewep_row_body_runs_the_ewep_legs() {
 	}
 }
 
+// The ewep row's joiner leg over a person body: a session peer off the authority whose ground
+// link names a slot the shared destroy marked asks for the ground, then for itself, over two
+// C2S 0x0F (the World outbox, the ground first), on a tick whose low seven bits are all set,
+// and its update ends there (the spin tail does not run). Any gate off (the tick, the mark,
+// the authority, the session, the peer bit) leaves the update to its other legs.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the gates @0x440D03..0x440D24, the mark
+//  @0x440D2A, the tick @0x440D37..0x440D41, the 0x0Fs @0x440DAB / @0x440E29, the tail
+//  @0x440E37]
+void test_an_ewep_row_body_asks_for_a_destroyed_ground() {
+	constexpr uint16_t kGround = 0x1003;
+	struct Case {
+		uint32_t tick;
+		bool marked, authority, session, peer;
+		bool asks;
+	};
+	for (const Case c : {Case{0x17F, true, false, true, true, true},
+				Case{0x17E, true, false, true, true, false},
+				Case{0x17F, false, false, true, true, false},
+				Case{0x17F, true, true, true, true, false},
+				Case{0x17F, true, false, false, true, false},
+				Case{0x17F, true, false, true, false, false}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		r.world->registry.configure_pool(1, 8);
+		w::Entity *body = r.spawn_remote(kEwep);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr);
+		if (ae == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		// The link still names the ground's slot; the slot holds no row.
+		body->ground_target = w::EntityHandle{kGround};
+		CHECK(r.world->registry.get(body->ground_target) == nullptr);
+		r.world->rules.mp_session = c.session;
+		r.world->rules.mp_session_peer = c.peer;
+		r.world->rules.logic_authority = c.authority;
+		r.world->destroyed_mark = [&c](uint16_t handle) { return c.marked && handle == kGround; };
+		r.world->logic_tick = c.tick;
+		ae->inf.leg_yaw[0] = 0x40000000;
+		ae->inf.aim_point[0] = 0x01123456;
+		r.world->ai.update_organic(*ae, *r.world, c.tick);
+		const std::vector<w::EntityHandle> &asks = r.world->out.entity_info_requests;
+		if (c.asks) {
+			CHECK(asks.size() == 2);
+			CHECK(asks.size() == 2 && asks[0] == w::EntityHandle{kGround} && asks[1] == body->handle);
+			CHECK(ae->inf.aim_point[0] == 0x01123456);
+		} else {
+			CHECK(asks.empty());
+			CHECK(ae->inf.aim_point[0] == 0x00123456);
+		}
+		r.world->destroyed_mark = {};
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // A body bound to the psec row runs the physics step over its own words: the savedLivePose
 // stamp, then its velocity triple (+0x98 / +0x9C / +0xA0, the motor's) against the terrain
 // plus a quarter unit (no terrain here: 0x4000). Airborne it moves by the triple, falls 167,
@@ -1911,6 +1968,7 @@ int main() {
 	test_an_arty_row_body_takes_the_arty_init();
 	test_an_arty_row_body_runs_the_barrage();
 	test_an_ewep_row_body_runs_the_ewep_legs();
+	test_an_ewep_row_body_asks_for_a_destroyed_ground();
 	test_an_ele0_row_body_runs_the_elevator_mover();
 	test_an_upfx_row_body_runs_the_husk_leg();
 	test_a_psec_row_body_runs_the_physics_step();

@@ -662,8 +662,8 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 //  @0x4B96AA; Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8 / @0x4C0238]
 // The rest of the ewep mover runs over the person's words (person_ewep_mover), save the legs
 // that need a word ours does not yet home on a person (D-NET-NEW-L4-14 (a), narrowed): the
-// anchor byte's refill from the ground def's slot table, the joiner's C2S 0x0F pair and
-// destroy, the anchored bone attach, and the +0x170 occupant's clamp or detach.
+// anchor byte's refill from the ground def's slot table, the joiner's destroy of its own body
+// behind its C2S 0x0F pair, the anchored bone attach, and the +0x170 occupant's clamp or detach.
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
 // narrowed): towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
@@ -698,6 +698,27 @@ static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
     Entity *ground = world.registry.get(body.ground_target);
     if (emplaced_carrier_is_dead_hull(ground)) {
         body.flags |= kEntityFlagCarried;
+        return;
+    }
+    // A session peer off the authority asks the host again for a ground the shared destroy
+    // removed (the link still names its slot, whose destroyed mark is set) on a tick whose low
+    // seven bits are all set: a reliable C2S 0x0F for the ground's handle, then one for the
+    // body's own, and the update ends. The ground's refNum group removal and store act on a
+    // zeroed slot and change nothing. The body's own destroy, whose slot the reply's 0x18
+    // rebuilds, is not run: our joiner's L has no rebuild from a 0x18 of its own handle
+    // (D-NET-NEW-L4-14 (a), narrowed).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the ground @0x440CBF, the gates
+    //  @0x440D03..0x440D24 (is_in_session, is_mp_session_peer, is_authority), the mark
+    //  `cmp byte ptr [edi+219h], 0` @0x440D2A, `and eax, 7Fh` / `cmp al, 7Fh`
+    //  @0x440D37..0x440D41, the ground's 0x0F @0x440DAB, EntityReference_RemoveFromRefGroup
+    //  @0x43EE40 (the call @0x440DC1) and the +0x215 store @0x440DC9, the body's 0x0F
+    //  @0x440E29, Entity_Destroy @0x440E2F, the tail @0x440E37]
+    if (body.ground_target.valid() && world.rules.mp_session && world.rules.mp_session_peer &&
+            !world.rules.logic_authority && world.destroyed_mark &&
+            world.destroyed_mark(body.ground_target.packed) &&
+            (world.logic_tick & 0x7Fu) == 0x7Fu) {
+        world.out.entity_info_requests.push_back(body.ground_target);
+        world.out.entity_info_requests.push_back(body.handle);
         return;
     }
     const int32_t def_word = e.inf.leg_yaw[0];

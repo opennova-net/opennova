@@ -1070,6 +1070,16 @@ void JoinerRole::pump() {
 	// (world/infantry_death.cpp carries the witness).
 	for (const uint16_t target : world.out.detach_requests) (void)rt.queue_detach_packet(target);
 	world.out.detach_requests.clear();
+	// The movers' C2S 0x0F requests, raised in the entity update behind this frame's send
+	// block, queue for the next boundary in raise order; the own body L asks by its wire handle
+	// H, the one slot retail's body is (world/ai_system.cpp's ewep mover carries the witness).
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the 0x0Fs @0x440DAB / @0x440E29;
+	//  Game_ProcessMainFrame: Client_ProcessNetworkFrame @0x526692, then
+	//  Entity_UpdateAllEntities @0x52674B]
+	for (const world::EntityHandle request : world.out.entity_info_requests)
+		rt.queue_entity_info_request(request == world.cached.local_player ? self_wire_handle()
+		                                                                  : request.packed);
+	world.out.entity_info_requests.clear();
 	if (!preround_active)
 		mirror_predicted_vehicles(); // predicted boat poses -> presented rows
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
@@ -1255,6 +1265,14 @@ void JoinerRole::wire_frame_providers() {
     // whiz blip reads; the local player's own wire handle is the missile
     // note's target-is-local arm. [orig: NetPacket_DeserializeRoundEvent
     //  @0x42f491; Entity_SerializeGuidedMissileState @0x447ece]
+    // A slot's destroyed mark, read by the ewep mover's stale-ground leg: the decoded rows'
+    // marks, which the shared destroy sets and a record's memset clears.
+    // [orig: Entity_Destroy @0x43E810 - the mark @0x43EA7F; Entity_UpdateTransformAndTurret
+    //  @0x440CA0 - the read @0x440D2A]
+    world.destroyed_mark = [this](uint16_t handle) {
+        const std::vector<uint16_t> &marks = runtime->state().destroyed_marks;
+        return std::find(marks.begin(), marks.end(), handle) != marks.end();
+    };
     world.round_sim.wire_actor_provider = [this](uint16_t handle, world::RoundSim::WireActor &out) {
         out = world::RoundSim::WireActor{};
         out.is_local = runtime->has_self_handle() && handle == runtime->self_handle();
@@ -2167,6 +2185,7 @@ void JoinerRole::close() {
 	if (kernel_) {
 		kernel_->world.round_sim.guided_inputs_provider = {};
 		kernel_->world.round_sim.wire_actor_provider = {};
+		kernel_->world.destroyed_mark = {};
 		kernel_->world.round_sim.wire_person_body = {};
 		kernel_->wire_person_pose = {};
 	}

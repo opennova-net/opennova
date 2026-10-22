@@ -665,6 +665,12 @@ public:
 	// toggle's caller adds its own gates in queue_vehicle_detach).
 	// [orig: Entity_SendDetachPacket @0x435510]
 	bool queue_detach_packet(uint16_t target_handle);
+	// One reliable C2S 0x0F entity request [u16 handle], appended to the send queue at once:
+	// the self-heal requests' encoding (queue_carrier_repair_requests), for a request a World
+	// mover raised behind this frame's send block (the ewep mover's stale-ground pair).
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - QueueReliableMessage(0x0F, 1, 0)
+	//  @0x440DAB / @0x440E29]
+	void queue_entity_info_request(uint16_t handle);
 	std::vector<replication::ClientRoundEvent> drain_round_events();
 	// S2C 0x1E game events the recv fold surfaced this frame — the kill /
 	// objective / medic feed lane. The embedder formats each into a canned
