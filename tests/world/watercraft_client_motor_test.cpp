@@ -19,6 +19,8 @@
 
 #include <base/io/bam.h>
 
+#include "../common/hull_brain.h"
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -263,6 +265,7 @@ bool run_ground_vehicle_glides() {
 	Rig r;
 	make_rig(r);
 	r.traits.family = w::VehicleFamily::Ground;
+	test_common::brain_hull(r.world, r.boat);
 	r.traits.player_speed = 20972; // ~20 m/s ground max
 	r.traits.acceleration = 512;   // per-tick speed clamp: cruise in ~32 ticks
 	r.traits.deceleration = 512;   // (the predicted twin ramps like retail's)
@@ -309,6 +312,7 @@ bool run_bike_family_deltas() {
 	Rig r;
 	make_rig(r);
 	r.traits.family = w::VehicleFamily::Bike;
+	test_common::brain_hull(r.world, r.boat);
 	r.traits.player_speed = 20972;
 	r.traits.acceleration = 512;
 	r.traits.deceleration = 512;
@@ -362,6 +366,7 @@ bool run_bike_family_deltas() {
 	Rig g;
 	make_rig(g);
 	g.traits.family = w::VehicleFamily::Ground;
+	test_common::brain_hull(g.world, g.boat);
 	g.traits.player_speed = 20972;
 	g.traits.acceleration = 512;
 	g.traits.deceleration = 512;
@@ -403,6 +408,7 @@ bool run_bike_contact_loss_accumulates_gravity() {
 	r.world.env.water_z = 0;
 	r.world.tables.terrain = &field;
 	r.traits.family = w::VehicleFamily::Bike;
+	test_common::brain_hull(r.world, r.boat);
 	r.traits.player_speed = 20972;
 	r.traits.acceleration = 512;
 	r.traits.deceleration = 512;
@@ -484,6 +490,7 @@ bool run_ground_parked_rests_at_wheel_clearance() {
 		r.world.env.water_z = 0; // dry land
 		r.world.tables.terrain = &field;
 		r.traits.family = w::VehicleFamily::Ground;
+		test_common::brain_hull(r.world, r.boat);
 		r.traits.player_speed = 20972;
 		r.traits.acceleration = 512;
 		r.traits.deceleration = 512;
@@ -574,6 +581,7 @@ bool run_tank_parked_rests_at_wheel_clearance() {
 		r.world.env.water_z = 0; // dry land
 		r.world.tables.terrain = &field;
 		r.traits.family = w::VehicleFamily::Tank;
+		test_common::brain_hull(r.world, r.boat);
 		r.traits.player_speed = 15000;
 		r.traits.acceleration = 512;
 		r.traits.deceleration = 512;
@@ -654,6 +662,7 @@ bool run_bike_parked_rests_at_wheel_clearance() {
 		r.world.env.water_z = 0;
 		r.world.tables.terrain = &field;
 		r.traits.family = w::VehicleFamily::Bike;
+		test_common::brain_hull(r.world, r.boat);
 		r.traits.player_speed = 20972;
 		r.traits.acceleration = 512;
 		r.traits.deceleration = 512;
@@ -723,6 +732,7 @@ bool run_bike_wreck_falls_under_gravity() {
 	r.world.env.water_z = 0;
 	r.world.tables.terrain = &field;
 	r.traits.family = w::VehicleFamily::Bike;
+	test_common::brain_hull(r.world, r.boat);
 	r.traits.player_speed = 20972;
 	r.traits.acceleration = 512;
 	r.traits.deceleration = 512;
@@ -807,6 +817,7 @@ bool run_tank_family_deltas() {
 	Rig r;
 	make_rig(r);
 	r.traits.family = w::VehicleFamily::Tank;
+	test_common::brain_hull(r.world, r.boat);
 	r.traits.player_speed = 15000;
 	r.traits.acceleration = 512;
 	r.traits.deceleration = 512;
@@ -1102,6 +1113,7 @@ bool run_bike_grounded_lean_recovers_roll() {
 		r.world.tables.terrain = &flat.field;
 		r.world.env.water_z = 0;
 		r.traits.family = w::VehicleFamily::Bike;
+		test_common::brain_hull(r.world, r.boat);
 		r.traits.lean = 40;
 		r.traits.lean_velocity = 50;
 		auto *e = r.world.registry.get(r.boat);
@@ -1324,6 +1336,7 @@ bool run_vehicle_chase_wraps_bam_seam() {
 	make_rig(r);
 	r.world.env.water_z = 0;
 	r.traits.family = w::VehicleFamily::Ground;
+	test_common::brain_hull(r.world, r.boat);
 	r.traits.turn_rate = 0;
 	r.traits.turn_rate2 = 0;
 	r.traits.player_speed = 0;
@@ -1349,6 +1362,7 @@ bool run_ground_rudder_wraps_bam_seam() {
 	make_rig(r);
 	r.world.env.water_z = 0;
 	r.traits.family = w::VehicleFamily::Ground;
+	test_common::brain_hull(r.world, r.boat);
 	r.traits.turn_rate = 0x01000000;
 	r.traits.turn_rate2 = 0x00400000;
 	r.traits.player_speed = 100 << 16;
@@ -1380,6 +1394,7 @@ bool run_ground_and_bike_local_driver_input_gate() {
 		make_rig(local);
 		local.world.env.water_z = 0;
 		local.traits.family = family;
+		test_common::brain_hull(local.world, local.boat);
 		local.traits.player_control = true;
 		local.traits.player_speed = 12000;
 		w::Entity *local_vehicle = local.world.registry.get(local.boat);
@@ -1407,6 +1422,7 @@ bool run_ground_and_bike_local_driver_input_gate() {
 		make_rig(remote);
 		remote.world.env.water_z = 0;
 		remote.traits.family = family;
+		test_common::brain_hull(remote.world, remote.boat);
 		remote.traits.player_control = true;
 		remote.traits.player_speed = 12000;
 		w::Entity *remote_vehicle = remote.world.registry.get(remote.boat);
@@ -2084,6 +2100,8 @@ bool run_client_family_sound_dispatch_scope() {
 	const w::EntityHandle plane_h = spawn_vehicle(6102, 120.0f);
 	const w::EntityHandle ground_h = spawn_vehicle(6103, 140.0f);
 	const w::EntityHandle water_h = spawn_vehicle(6104, 160.0f);
+	// The cveh row's class init brained it: its client mover runs past its head.
+	test_common::brain_hull(world, ground_h);
 
 	auto install_traits = [&](int item_id, w::VehicleFamily family,
 	                          int physics, const char *idle_set) {
@@ -2521,6 +2539,7 @@ bool run_amphibian_selects_water_mover_on_both_roles() {
 		world.rules.logic_authority = authority;
 		auto *vehicle = world.registry.get(r.boat);
 		r.traits.family = w::VehicleFamily::Ground;
+		test_common::brain_hull(r.world, r.boat);
 		r.traits.amphibian = true;
 		r.traits.player_speed = 30000;
 		// The rotor (part-spin) machine sits inside the ground mover's

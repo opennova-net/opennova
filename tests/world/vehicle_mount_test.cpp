@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "channel_clip_source.h"
+#include "../common/hull_brain.h"
 
 using namespace opennova::world;
 
@@ -3421,6 +3422,7 @@ void test_handbrake_latch() {
     VehicleTraits t = truck_traits();
     t.hand_brake = 1;
     r.w.vehicles.traits.set(r.veh().item_id, t);
+    test_common::brain_hull(r.w, r.veh_h); // the truck's class init: its mover runs
     CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
     Entity &drv = r.player();
     drv.net_move_input = 0x08; // moving forward
@@ -3973,6 +3975,7 @@ void test_local_player_drive_mirror() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
     r.w.vehicles.traits.set(r.veh().item_id, t);
+    test_common::brain_hull(r.w, r.veh_h); // the truck's class init: its mover runs
 
     // The local player as an infantry-active AI entity in the ctrl seat.
     const int ai_idx = r.sys.attach(r.player_h);

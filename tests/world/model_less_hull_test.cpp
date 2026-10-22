@@ -10,6 +10,8 @@
 #include <runtime/world/vehicle_motor_detail.h>
 #include <runtime/world/world.h>
 
+#include "../common/hull_brain.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -118,6 +120,7 @@ void test_a_model_less_tracked_hull_takes_no_stand_in() {
 	auto world = std::make_unique<World>();
 	world->registry.configure_pool(1, 4);
 	const EntityHandle h = world->registry.spawn(1, hull(false));
+	test_common::brain_hull(*world, h); // the mover runs past its head
 	Entity &e = *world->registry.get(h);
 	const VehicleTraits t = boxed_traits(VehicleFamily::Ground);
 	const int32_t z0 = e.position.z.q16;

@@ -19,6 +19,8 @@
 
 #include <formats/def/def.h>
 
+#include "../common/hull_brain.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -143,6 +145,9 @@ struct Rig {
         ctrl.source_name = "ctrlx00";
         veh.seats.push_back(ctrl);
         veh_h = w.registry.spawn(1, veh);
+        // The buggy row's class init (AIData, ai_function cveh) gives the hull its
+        // brain; without one every mover stops at its head.
+        test_common::brain_hull(w, veh_h);
 
         Entity drv;
         drv.kind = EntityKind::Organic;
@@ -157,6 +162,7 @@ struct Rig {
     }
     Entity &veh() { return *w.registry.get(veh_h); }
     Entity &drv() { return *w.registry.get(drv_h); }
+    AiEntity &brain() { return *w.ai.for_handle(veh_h); }
     void mount() { CHECK(w.vehicles.process_attach(drv_h, veh_h, 1)); }
     void tick(int n, const VehicleTraits &t) {
         for (int i = 0; i < n; ++i) w.vehicles.tick_motor(veh(), t);
@@ -621,20 +627,24 @@ void test_physics_selector_gate() {
 // (the retracted full-rate default gave eff = 12507690, steer = -50030760).
 void test_zero_player_speed_turns_at_min_rate() {
 	for (const VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Bike }) {
-		World world;
+		auto world = std::make_unique<World>();
+		world->registry.configure_pool(1, 4);
 		VehicleTraits t;
 		t.physics = 1;
 		t.family = family;
 		t.player_speed = 0;
 		t.turn_rate = 65 * 192426;
 		t.turn_rate2 = 41 * 192426;
-		Entity e;
-		e.health = e.health_max = 10000;
-		e.veh.yaw_seeded = true;
-		e.veh.yaw_bam = 0;
-		e.veh.steer_target_bam = 0x40000000;
-		e.position.z = 10.0f;
-		world.vehicles.tick_motor(e, t);
+		Entity row;
+		row.health = row.health_max = 10000;
+		row.veh.yaw_seeded = true;
+		row.veh.yaw_bam = 0;
+		row.veh.steer_target_bam = 0x40000000;
+		row.position.z = 10.0f;
+		const EntityHandle h = world->registry.spawn(1, row);
+		test_common::brain_hull(*world, h, family);
+		Entity &e = *world->registry.get(h);
+		world->vehicles.tick_motor(e, t);
 		CHECK(e.veh.steer_state == -31557864);
 	}
 }
@@ -886,7 +896,7 @@ void test_npc_claimant_registers_stationary_idle_sound() {
     r.mount();
     r.w.out.sound_emitters.clear(); // ignore mount-edge effects; inspect the motor tick
 
-    r.w.vehicles.tick_motor(r.veh(), t); // a brainless hull: the registers hold at 0
+    r.w.vehicles.tick_motor(r.veh(), t); // the fresh brain's AI leg commands 0
 
     CHECK(r.w.out.sound_emitters.size() == 1);
     if (r.w.out.sound_emitters.size() == 1) {
@@ -1515,6 +1525,7 @@ void test_every_mover_tail_sets_the_matrix_bit() {
 				VehicleTraits t = buggy_traits();
 				t.family = family;
 				t.physics = physics;
+				r.brain().profile.type = test_common::hull_profile_type(family);
 				r.veh().engine_flags = 0;
 				r.veh().flags = dead ? kEntityFlagDead : 0u;
 				if (vehicle_family_uses_direct_air_mover(family)) {
@@ -1535,6 +1546,7 @@ void test_every_mover_tail_sets_the_matrix_bit() {
 	Rig parked;
 	VehicleTraits air = buggy_traits();
 	air.family = VehicleFamily::Helicopter;
+	parked.brain().profile.type = test_common::hull_profile_type(air.family);
 	parked.veh().engine_flags = 0;
 	parked.w.vehicles.aircraft_client_tick(parked.veh(), air);
 	CHECK((parked.veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
@@ -1551,6 +1563,7 @@ void test_family_health_cadence_and_submersion() {
 		t.critical_drain = 7;
 		t.non_critical_regen = 10;
 		t.climb_speed = 1000;
+		r.brain().profile.type = test_common::hull_profile_type(family);
 		r.veh().net_id = 1;
 		r.veh().health_max = 500;
 		const auto tick = [&] {
@@ -1722,6 +1735,7 @@ void test_engine_and_light_sound_edges() {
 
 	r.mount();
 	t.family = VehicleFamily::Helicopter;
+	r.brain().profile.type = test_common::hull_profile_type(t.family);
 	r.veh().veh.part_spin = {};
 	r.w.vehicles.part_anim_tick(r.veh(), t);
 	CHECK(r.w.out.slot_sounds.size() == 1);
@@ -1848,6 +1862,7 @@ void test_warning_cadence_by_family() {
 		t.critical_drain = 0;
 		t.climb_speed = 1000;
 		t.sound_profile = "SP_Warn";
+		r.brain().profile.type = test_common::hull_profile_type(family);
 		r.veh().net_id = 1;
 		r.veh().health_max = 500;
 		r.veh().health = 100;
@@ -1887,12 +1902,13 @@ void test_handbrake_skid_and_grip_recovery() {
 		t.hand_brake = 1;
 		t.tire_slip = 5;
 		r.mount();
-		r.drv().player_class = 0; // NPC command registers are retained.
+		r.drv().player_class = 0; // an NPC: the AI leg commands the brain's out-speed
 		auto &v = r.veh();
 		auto &m = v.veh;
 		m.yaw_seeded = true;
 		m.yaw_bam = m.steer_target_bam = 0;
 		m.speed = m.cmd_speed = 20000;
+		r.brain().brain.f[AiBrain::kOutSpeed] = 20000;
 		m.bike_ground_contact_ticks = 10;
 		m.contact_direction[1] = 65536;
 		v.flags |= 8;
@@ -1935,7 +1951,7 @@ void test_handbrake_skid_and_grip_recovery() {
 		CHECK(m.contact_direction[0] == 0 && m.contact_direction[1] == 0);
 		CHECK(m.slip_started_tick == 0);
 		CHECK(m.vel_y == 0 && m.vel_x > 0);
-		m.cmd_speed = 0;
+		r.brain().brain.f[AiBrain::kOutSpeed] = 0;
 		r.w.logic_tick = 129;
 		r.tick(1, t);
 		CHECK(m.wheel_slip_phase == 0);
@@ -2557,6 +2573,7 @@ void test_skid_effects_and_sound_edges() {
 	v.heading = placed_heading_bam(90);
 	v.uniform_scale_q16 = 2 << 16;
 	m.speed = m.cmd_speed = 20000;
+	r.brain().brain.f[AiBrain::kOutSpeed] = 20000; // the NPC's AI leg command
 	m.contact_direction[1] = 65536;
 	r.w.logic_tick = 100;
 	r.w.out.fire_sounds.set_listener(v.position);
@@ -2695,8 +2712,7 @@ void test_state0_brain_with_ai_driver_holds() {
 	const VehicleTraits t = buggy_traits();
 	r.w.vehicles.traits.set(r.veh().item_id, t);
 	r.w.ai.is_authority = true;
-	const int idx = r.w.ai.attach(r.veh_h);
-	AiEntity &ae = *r.w.ai.at(idx);
+	AiEntity &ae = r.brain();
 	ae.brain.f[AiBrain::kCurState] = 0;
 	ae.brain.f[AiBrain::kPendState] = 0;
 	ae.brain.f[AiBrain::kFallback] = 0;
@@ -2744,9 +2760,11 @@ static void test_rider_below_its_carrier_follows_the_same_pass() {
     // The carrier moves up to slot 5; the rider takes slot 0 below it, on the
     // carrier's origin (so a carrier yaw cannot move it sideways).
     Entity carrier = r.veh();
+    r.w.ai.release(r.veh_h);
     r.w.registry.despawn(r.veh_h);
     r.veh_h = r.w.registry.spawn_at(EntityHandle::make(1, 5), carrier);
     CHECK(r.veh_h.valid());
+    test_common::brain_hull(r.w, r.veh_h);
     Entity rider = carrier;
     rider.net_id = 201;
     rider.item_id = 1292;
@@ -2755,6 +2773,7 @@ static void test_rider_below_its_carrier_follows_the_same_pass() {
     rider.ground_target = r.veh_h;
     const EntityHandle rider_h = r.w.registry.spawn(1, rider);
     CHECK(rider_h.slot() == 0);
+    test_common::brain_hull(r.w, rider_h);
     r.w.vehicles.traits.set(carrier.item_id, traits);
     r.w.vehicles.traits.set(rider.item_id, traits);
     auto &body = *r.w.ai.at(r.w.ai.attach(r.drv_h));
@@ -2897,7 +2916,7 @@ void test_watercraft_entry_reads_the_hull() {
     CHECK(r.w.vehicles.process_attach(r.drv_h, r.veh_h, 1));
     CHECK(r.w.vehicles.resolve_controller(r.veh()) != nullptr);
     // The hull's brain: the leg's command is its out-speed (no waypoint, no turn).
-    AiBrain &brain = r.w.ai.at(r.w.ai.attach(r.veh_h))->brain;
+    AiBrain &brain = r.brain().brain;
     brain.f[AiBrain::kCurState] = 16;
     brain.f[AiBrain::kOutSpeed] = 20 * 293;
     // A seated controller at zero health still takes the AI leg.
@@ -2923,7 +2942,6 @@ void test_a_dead_hull_bails_to_its_tail() {
         Rig r;
         const VehicleTraits t = buggy_traits();
         r.w.vehicles.traits.set(r.veh().item_id, t);
-        r.w.ai.attach(r.veh_h);
         AiEntity *brain = r.w.ai.for_handle(r.veh_h);
         CHECK(brain != nullptr);
         if (brain == nullptr) return;
@@ -2946,6 +2964,102 @@ void test_a_dead_hull_bails_to_its_tail() {
     }
 }
 
+// A hull with no brain (+0x64) jumps from its mover-entry stamp to the matrix-build
+// tail on both roles: the stamp lands and the matrix bit rises, and nothing between
+// them runs: no health cadence, no occupant block (its stuck reset), no input, no
+// motion, on a predicting client no chase, on a client row the chase does not run no
+// movement-sound fold. Its brained twin runs the same tick in full.
+// [orig: cveh `mov edi, [esi+64h]` @0x48AF1A, `jz` @0x48AFA6 -> the tail
+//  @0x48D43E..0x48D451; ctan @0x488ACA, @0x488B56 -> @0x48AEB6; cbik @0x483FFA,
+//  @0x484086 -> @0x486A04]
+void test_a_brainless_hull_bails_at_its_head() {
+	for (const VehicleFamily family :
+			{ VehicleFamily::Ground, VehicleFamily::Tank, VehicleFamily::Bike }) {
+		for (const bool brained : { false, true }) {
+			// The authority: a seated driver's forward order on a hull with way on.
+			{
+				auto r = std::make_unique<Rig>();
+				VehicleTraits t = buggy_traits();
+				t.family = family;
+				t.critical_hp = 100;
+				t.non_critical_regen = 10;
+				r->w.vehicles.traits.set(r->veh().item_id, t);
+				if (!brained) r->w.ai.release(r->veh_h);
+				r->mount();
+				r->drv().net_move_input = 0x08;
+				Entity &veh = r->veh();
+				veh.net_id = 1;
+				veh.health = 2000;
+				veh.veh.speed = 8000;
+				veh.veh.stuck_ticks = 9;
+				veh.engine_flags &= ~kEntityFlagMatrixBuilt;
+				const int32_t entry[3] = { veh.position.x.q16, veh.position.y.q16,
+					veh.position.z.q16 };
+				r->w.logic_tick = 28; // (28 + 36 * 1) & 63 == 0: the cadence's tick
+				r->w.vehicles.tick_motor(veh, t);
+				CHECK(veh.saved_live_valid);
+				for (int axis = 0; axis < 3; ++axis)
+					CHECK(veh.saved_live_pos[axis] == entry[axis]);
+				CHECK((veh.engine_flags & kEntityFlagMatrixBuilt) != 0);
+				CHECK(veh.health == (brained ? 2010 : 2000));
+				CHECK(veh.veh.stuck_ticks == (brained ? 0 : 9));
+				if (!brained) {
+					CHECK(veh.veh.speed == 8000);
+					CHECK(veh.veh.cmd_speed == 0);
+					CHECK(veh.position.x.q16 == entry[0] && veh.position.y.q16 == entry[1] &&
+							veh.position.z.q16 == entry[2]);
+				}
+			}
+			// A predicting client: a record 8 u ahead, past the snap radius.
+			{
+				auto r = std::make_unique<Rig>();
+				VehicleTraits t = buggy_traits();
+				t.family = family;
+				r->w.vehicles.traits.set(r->veh().item_id, t);
+				if (!brained) r->w.ai.release(r->veh_h);
+				r->w.ai.is_authority = false;
+				Entity &veh = r->veh();
+				auto &m = veh.veh;
+				m.net_predicted = true;
+				m.yaw_seeded = true;
+				const int32_t entry[3] = { veh.position.x.q16, veh.position.y.q16,
+					veh.position.z.q16 };
+				m.net_smooth_target[0] = entry[0] + (8 << 16);
+				m.net_smooth_target[1] = entry[1];
+				m.net_smooth_target[2] = entry[2];
+				veh.engine_flags &= ~kEntityFlagMatrixBuilt;
+				r->w.vehicles.ground_client_tick(veh, t);
+				CHECK(veh.saved_live_valid);
+				for (int axis = 0; axis < 3; ++axis)
+					CHECK(veh.saved_live_pos[axis] == entry[axis]);
+				CHECK((veh.engine_flags & kEntityFlagMatrixBuilt) != 0);
+				CHECK((veh.position.x.q16 != entry[0]) == brained); // the chase's snap
+				CHECK((m.net_smooth_target[0] == entry[0] + (8 << 16)) == !brained);
+			}
+			// A client row the chase does not run (not predicted): the claimant's
+			// idle lane folds only on a brained hull.
+			{
+				auto r = std::make_unique<Rig>();
+				VehicleTraits t = buggy_traits();
+				t.family = family;
+				t.sound_profile = "SP_Transport";
+				load_transport_sound_profile(r->w);
+				r->w.vehicles.traits.set(r->veh().item_id, t);
+				if (!brained) r->w.ai.release(r->veh_h);
+				r->mount();
+				r->w.ai.is_authority = false;
+				r->veh().engine_flags &= ~kEntityFlagMatrixBuilt;
+				r->w.out.sound_emitters.clear();
+				r->w.vehicles.update_motor(r->veh(), /*is_authority=*/false);
+				CHECK(r->veh().saved_live_valid);
+				CHECK(r->w.out.sound_emitters.empty() == !brained);
+				if (!brained)
+					CHECK((r->veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
+			}
+		}
+	}
+}
+
 // A dead aircraft hull runs the shared aircraft mover's head and bails to its
 // matrix tail at the dead bit, ahead of the occupant and AI block: the parked
 // arm (its PRETTY stamp and stuck count) never runs, so the dead state's word
@@ -2960,7 +3074,6 @@ void test_a_dead_aircraft_bails_ahead_of_its_ai_block() {
         VehicleTraits t = buggy_traits();
         t.family = VehicleFamily::Helicopter;
         r->w.vehicles.traits.set(r->veh().item_id, t);
-        r->w.ai.attach(r->veh_h);
         AiEntity *brain = r->w.ai.for_handle(r->veh_h);
         CHECK(brain != nullptr);
         if (brain == nullptr) return;
@@ -3041,7 +3154,7 @@ void test_selector_zero_ground_ai_leg_runs_in_the_mover() {
 		t.non_critical_regen = 10;
 		r->w.vehicles.traits.set(r->veh().item_id, t);
 		r->w.ai.is_authority = true;
-		AiBrain &b = r->w.ai.at(r->w.ai.attach(r->veh_h))->brain;
+		AiBrain &b = r->brain().brain;
 		b.f[AiBrain::kCurState] = 22;
 		b.f[AiBrain::kTargetRef] = 0x1234;
 		b.f[AiBrain::kOutSpeed] = t.player_speed + 1000;
@@ -3121,7 +3234,7 @@ void test_family_occupant_blocks_run_after_the_head() {
 			t.non_critical_regen = 10;
 			r->w.vehicles.traits.set(r->veh().item_id, t);
 			r->w.ai.is_authority = true;
-			AiBrain &b = r->w.ai.at(r->w.ai.attach(r->veh_h))->brain;
+			AiBrain &b = r->brain().brain;
 			b.f[AiBrain::kCurState] = 22;
 			b.f[AiBrain::kTargetRef] = 0x1234;
 			b.f[AiBrain::kOutSpeed] = t.player_speed + 1000;
@@ -3268,6 +3381,7 @@ void test_client_local_boat_driver_runs_its_block() {
 int main() {
     test_watercraft_entry_reads_the_hull();
     test_a_dead_hull_bails_to_its_tail();
+    test_a_brainless_hull_bails_at_its_head();
     test_a_dead_aircraft_bails_ahead_of_its_ai_block();
     test_selector_zero_park_reads_the_hull_not_the_occupant();
     test_selector_zero_ground_ai_leg_runs_in_the_mover();

@@ -20,6 +20,7 @@
 #include <unordered_map>
 
 #include "channel_clip_source.h"
+#include "../common/hull_brain.h"
 
 using namespace opennova::world;
 
@@ -2701,6 +2702,9 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     vehicle.veh.speed = 0;
     vehicle.primary_occupant = npc_h; // NPC claimant: the PlayerControl loop gate
     const EntityHandle vehicle_h = w->registry.spawn(1, vehicle);
+    // The truck row's class init brained it: a brainless hull's mover stops at its
+    // head, sound fold included, on the client as on the authority.
+    test_common::brain_hull(*w, vehicle_h);
     Entity *npc_live = w->registry.get(npc_h);
     CHECK(npc_live != nullptr);
     npc_live->mounted = true;

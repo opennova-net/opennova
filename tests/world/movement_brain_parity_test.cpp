@@ -1,6 +1,9 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/world.h>
+
+#include "../common/hull_brain.h"
+
 #include <cstdio>
 #include <memory>
 
@@ -87,6 +90,7 @@ void player_motor_vectors() {
     seat.bone_index = 1;
     vehicle.seats.push_back(seat);
     const auto vh = w.registry.spawn(1, vehicle);
+    test_common::brain_hull(w, vh); // the mover runs past its head
     Entity driver;
     driver.kind = EntityKind::Organic;
     driver.health = driver.health_max = 100;

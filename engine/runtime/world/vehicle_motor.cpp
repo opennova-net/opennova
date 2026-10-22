@@ -521,6 +521,18 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, bool pr
 	if (!prediction)
 		stamp_saved_live_pose(veh);
 
+	// A hull with no brain (+0x64) jumps from the stamp to the matrix-build tail
+	// on every role: no ground probe, carrier ride, health cadence, input, motion
+	// or sound. Only the class init brains a row (an AIData def whose ai_function
+	// row is a brain class), on the authority and the client alike.
+	// [orig: cveh `mov edi, [esi+64h]` @0x48AF1A, `jz` @0x48AFA6 -> the tail
+	//  @0x48D43E..0x48D451; ctan @0x488ACA, @0x488B56 -> @0x48AEB6; cbik @0x483FFA,
+	//  @0x484086 -> @0x486A04]
+	if (world.ai.for_handle(veh.handle) == nullptr) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
+	}
+
 	if (!m.net_predicted) {
 		vehicle_refresh_ground_link(world, veh, traits);
 		vehicle_follow_carrier(world, veh);
@@ -2266,6 +2278,13 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
 	// [orig: ctan @0x488B24..0x488B50, chase @0x48912B; cveh
 	//  @0x48AF74..0x48AFA0; cbik @0x484054..0x484080]
 	stamp_saved_live_pose(veh);
+	// The brainless bail precedes the chase: a client row the class init never
+	// brained keeps its wire pose. [orig: ctan @0x488B56 -> @0x48AEB6, chase
+	//  @0x48912B; cveh @0x48AFA6 -> @0x48D43E; cbik @0x484086 -> @0x486A04]
+	if (world.ai.for_handle(veh.handle) == nullptr) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
+	}
 	// The bike's chase reads the up.z of the mover-entry matrix, built before
 	// the carrier follow [orig: Entity_UpdateLightVehiclePhysics @0x484039].
 	const int32_t entry_up_z16 =

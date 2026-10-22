@@ -271,6 +271,23 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
                 world.vehicles.ground_client_tick(*veh, *traits);
                 return;
             }
+            // A brainless cveh / ctan / cbik row's mover jumps from its stamp to the
+            // matrix-build tail on the client as on the authority, so a row the chase
+            // does not run (wire-frozen or wrecked) folds no movement sound either:
+            // each mover's Entity_ProcessMovementSoundEffects calls sit inside the
+            // bailed span, and the tail holds only the matrix build and the Flags OR.
+            // [orig: cveh @0x48AFA6 -> @0x48D43E (the fold calls @0x48D1BF, @0x48D3F9;
+            //  the tail @0x48D43E..0x48D451); ctan @0x488B56 -> @0x48AEB6 (@0x48AB20,
+            //  @0x48AE08; the tail @0x48AEB6..0x48AEC9); cbik @0x484086 -> @0x486A04
+            //  (@0x486769, @0x4869B5; the tail @0x486A04..0x486A17);
+            //  Entity_ProcessMovementSoundEffects @0x5294A0]
+            if (((traits->family == VehicleFamily::Ground && traits->physics != 0) ||
+                        traits->family == VehicleFamily::Tank ||
+                        traits->family == VehicleFamily::Bike) &&
+                    world.ai.for_handle(h) == nullptr) {
+                veh->engine_flags |= kEntityFlagMatrixBuilt;
+                return;
+            }
             // The shared aircraft mover has no movement-sound call. In retail,
             // Entity_ProcessMovementSoundEffects @0x5294A0 is reached from the
             // ground/bike/water paths, but neither CHel @0x490310 nor cpln's

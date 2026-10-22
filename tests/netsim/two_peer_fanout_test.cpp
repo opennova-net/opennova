@@ -23,6 +23,7 @@
 #include <runtime/inmatch/udp_session_transport.h>
 
 #include "conn_fan_test_util.h"
+#include "../common/hull_brain.h"
 
 #include <net/npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
 #include <runtime/terrain_query/height_field.h>
@@ -2352,6 +2353,8 @@ bool run_vehicle_drive_authority() {
 		vh = world.registry.spawn_from(1, 0, veh);
 	}
 	if (!expect(vh.valid(), "vehicle spawned")) return false;
+	// The buggy row's class init brains the hull; its mover runs past its head.
+	test_common::brain_hull(world, vh);
 	// The JOX dune buggy's pre-scaled physics block (vehicle_motor_test pins the parse).
 	{
 		w::VehicleTraits t;

@@ -12,6 +12,9 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/terrain_query/height_field.h>
+
+#include "../common/hull_brain.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -67,6 +70,13 @@ struct Rig {
         CHECK(world.vehicles.process_attach(driver, handle, 1));
     }
     Entity &entity() { return *world.registry.get(handle); }
+    // The class init's brain, for a rig that runs the mover (a brainless hull stops
+    // at its head). The seated NPC's AI leg then commands the brain's out-speed: the
+    // rig's preset command.
+    void brain() {
+        test_common::brain_hull(world, handle).brain.f[AiBrain::kOutSpeed] =
+                entity().veh.cmd_speed;
+    }
     VehicleTraits traits(VehicleFamily family, bool boxed = false) {
         VehicleTraits t;
         t.family = family;
@@ -106,6 +116,7 @@ struct Rig {
 
 void wheelie_request_and_acceleration() {
     Rig r;
+    r.brain();
     auto t = r.traits(VehicleFamily::Bike);
     auto &v = r.entity();
     auto &m = v.veh;
@@ -125,6 +136,7 @@ void wheelie_request_and_acceleration() {
     // The brake requires retained contact, even if the def has no handbrake.
     for (int active : {0, 1}) {
         Rig brake;
+        brake.brain();
         auto bt = brake.traits(VehicleFamily::Bike);
         auto &b = brake.entity();
         b.flags |= 8;
@@ -135,6 +147,7 @@ void wheelie_request_and_acceleration() {
         CHECK(b.veh.handbrake_latched == (active ? 0 : 1));
     }
     Rig fresh;
+    fresh.brain();
     auto ft = fresh.traits(VehicleFamily::Bike);
     ft.hand_brake = 1;
     fresh.entity().flags |= 8;
@@ -178,6 +191,7 @@ void wheelie_launch_velocity_and_input() {
 void wheelie_vertical_cap_and_catchup() {
     for (int active : {0, 1}) for (int airborne : {0, 1}) {
         Rig r;
+        r.brain();
         auto t = r.traits(VehicleFamily::Bike);
         auto &v = r.entity();
         v.veh.wheelie_active = uint8_t(active);

@@ -48,6 +48,8 @@
 
 #include <base/io/bam.h>
 
+#include "../common/hull_brain.h"
+
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -891,6 +893,8 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		vehicle.seats.insert(vehicle.seats.begin(), passenger);
 	}
 	const auto vh = world.registry.spawn(1, vehicle);
+	// The buggy row's class init brains the hull: its client mover runs past its head.
+	test_common::brain_hull(world, vh);
 	w::EntityHandle previous_driver;
 	if (occupancy == 2) {
 		w::Entity peer;
@@ -992,6 +996,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		w::Entity carrier = vehicle;
 		for (auto &seat : carrier.seats) seat.occupant = {};
 		authority->registry.spawn_from(1, vh.slot(), carrier);
+		test_common::brain_hull(*authority, vh);
 		authority->vehicles.traits.set(vehicle.item_id, traits);
 		if (!expect(authority->vehicles.process_attach(
 				w::EntityHandle{self_handle}, vh, 1), "authority confirms driver")) return false;

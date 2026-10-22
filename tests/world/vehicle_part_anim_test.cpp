@@ -14,6 +14,8 @@
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
 
+#include "../common/hull_brain.h"
+
 #include <cstdio>
 #include <cmath>
 #include <memory>
@@ -157,6 +159,9 @@ struct Rig {
 		ctrl.source_name = "ctrlx00";
 		veh.seats.push_back(ctrl);
 		veh_h = w.registry.spawn(1, veh);
+		// The buggy row's class init gives the hull its GROUND-profile brain;
+		// without one every mover stops at its head.
+		test_common::brain_hull(w, veh_h);
 
 		Entity drv;
 		drv.kind = EntityKind::Organic;
@@ -170,6 +175,7 @@ struct Rig {
 	}
 	Entity &veh() { return *w.registry.get(veh_h); }
 	Entity &drv() { return *w.registry.get(drv_h); }
+	AiEntity &brain() { return *w.ai.for_handle(veh_h); }
 	void mount() { CHECK(w.vehicles.process_attach(drv_h, veh_h, 1), "mount"); }
 	void tick(int n, const VehicleTraits &t) {
 		for (int i = 0; i < n; ++i) w.vehicles.tick_motor(veh(), t);
@@ -326,6 +332,7 @@ void test_helo_family_decays_at_the_helo_rate() {
 	Rig r;
 	VehicleTraits t = buggy_traits(true);
 	t.family = VehicleFamily::Helicopter;
+	r.w.ai.release(r.veh_h); // a row with no brain: its family stands in
 	r.mount();
 	for (int i = 0; i < 3; ++i) r.w.vehicles.part_anim_tick(r.veh(), t);
 	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull,
@@ -349,6 +356,7 @@ void test_predicted_aircraft_rotor_keeps_the_movers_gate() {
 	auto r = std::make_unique<Rig>();
 	VehicleTraits t = buggy_traits(true);
 	t.family = VehicleFamily::Helicopter;
+	r->brain().profile.type = test_common::hull_profile_type(t.family);
 	r->w.vehicles.traits.set(r->veh().item_id, t);
 	r->mount();
 	r->veh().veh.net_predicted = true;
@@ -419,7 +427,7 @@ void test_selector_zero_boat_runs_the_ground_machine() {
 			veh.flags |= 0x8000u;
 		}
 		r.w.vehicles.traits.set(veh.item_id, t);
-		auto &brain = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+		auto &brain = r.brain();
 		brain.profile.type = 2; // d_lcac: `type GROUND`
 		const uint32_t prng0 = r.w.prng16_state;
 		r.tick(2, t);
@@ -479,6 +487,7 @@ void test_suspension_registers_and_rotor_threshold_tick() {
 	VehicleTraits t = buggy_traits(true);
 	t.family = VehicleFamily::Helicopter;
 	t.climb_speed = 1000;
+	r.brain().profile.type = test_common::hull_profile_type(t.family);
 	r.mount();
 	r.veh().veh.part_spin.speed = kRotorSpeedMax - kRotorRateFull;
 	r.veh().veh.part_spin.rate = kRotorRateFull;
@@ -498,7 +507,7 @@ void test_tracks_and_turret_motor_commit() {
 		Rig r;
 		auto t = buggy_traits(true);
 		t.family = VehicleFamily::Helicopter;
-		AiEntity &ai = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+		AiEntity &ai = r.brain();
 		ai.profile.type = 2;
 		r.veh().veh.part_spin.speed = 123;
 		r.veh().veh.part_spin.rate = 456;
@@ -522,7 +531,7 @@ void test_tracks_and_turret_motor_commit() {
 		Rig r;
 		auto t = buggy_traits(true);
 		t.family = family;
-		AiEntity &ai = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+		AiEntity &ai = r.brain();
 		ai.profile.type = 2;
 		for (int i = 0; i < 6; ++i)
 			ai.brain.f[AiBrain::kStagingBlock + i] = 10 + i;

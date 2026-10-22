@@ -29,6 +29,8 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
 
+#include "../common/hull_brain.h"
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -204,6 +206,9 @@ bool run_carried_vehicles_predict_and_ride_their_carrier() {
 		return false;
 	if (!expect(bridge_h.pool() == 2 && deck_h.pool() == 1, "carrier pools as intended"))
 		return false;
+	// Each hull row's class init brained it: its client mover runs past its head.
+	for (const w::EntityHandle hull : {deck_h, rider_h, parked_h, bridged_h})
+		test_common::brain_hull(world, hull);
 
 	replication::ClientState &state = h.role.runtime->state();
 	seed_row(state, deck_h, deck, EntityClass::Vehicle);
