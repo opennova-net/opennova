@@ -747,6 +747,22 @@ int32_t terrain_word_at(const terrain::TerrainHeightField &terrain, int32_t x, i
     return terrain::height_field_height_bilinear_fixed(terrain, x, y);
 }
 
+// The mounted look-ahead ease, a thirty-second per axis toward the carrier's
+// matrix x (6.0, 0, 0), run by EVERY compose whose tracked entity has a parent
+// in a control seat (the logic quantum's and the rendered frame's, mode 4's
+// included) [orig: Camera_ComputeThirdPersonView @0x437D10 - the parent and
+// slot 2 / 5 tests @0x438811..0x43882B, g_CameraLookaheadX..Z += (target -
+// lookahead + 16) >> 5 @0x4388A4..0x4388AF].
+void ease_mount_lookahead(PlayerViewState &v) {
+    for (int i = 0; i < 3; ++i) {
+        v.lookahead_q16[i] = io::bam_add(v.lookahead_q16[i],
+                io::bam_sar(io::bam_add(io::bam_sub(v.mount.lookahead_target_q16[i],
+                                                    v.lookahead_q16[i]),
+                                        16),
+                            5));
+    }
+}
+
 // THE CHASE (mode 1). One path serves the on-foot orbit and the control-seat
 // arm (mount state +0x168 in {2, 5}): the arms choose the seed angles, the
 // distance and the anchor; the pivot, the collision-march landing, the
@@ -856,19 +872,11 @@ void compose_chase_camera(PlayerViewState &v, const int32_t position_q16[3],
     int32_t delta[3] = {io::bam_sub(target[0], eye[0]), io::bam_sub(target[1], eye[1]),
                         io::bam_sub(target[2], eye[2])};
     if (mounted) {
-        // The look-ahead eases a thirty-second per axis on EVERY compose
-        // (the logic quantum's and the rendered frame's), and the eased
-        // offset rides the deltas [orig: g_CameraLookaheadX..Z += (target -
-        // lookahead + 16) >> 5 @0x43885A..0x4388AF; added onto the deltas
-        // @0x43887B / @0x43888F / @0x4388A0].
-        for (int i = 0; i < 3; ++i) {
-            v.lookahead_q16[i] = io::bam_add(v.lookahead_q16[i],
-                    io::bam_sar(io::bam_add(io::bam_sub(m.lookahead_target_q16[i],
-                                                        v.lookahead_q16[i]),
-                                            16),
-                                5));
-            delta[i] = io::bam_add(delta[i], v.lookahead_q16[i]);
-        }
+        // The look-ahead eases (ease_mount_lookahead), and the eased offset
+        // rides the deltas [orig: added onto the deltas @0x43887B / @0x43888F /
+        // @0x4388A0].
+        ease_mount_lookahead(v);
+        for (int i = 0; i < 3; ++i) delta[i] = io::bam_add(delta[i], v.lookahead_q16[i]);
     }
 
     // The final angles: the yaw ftol(fpatan(dy, dx) * dbl_7C19D8) [orig:
@@ -971,9 +979,15 @@ void player_view_compose_camera(PlayerViewState &v,
                                 bool march_candidates, int32_t entity_roll_bam,
                                 PlayerCameraPose &out) {
     // Mode 4: the death lerp camera, the composed FROM/TO poses against the
-    // view tick, nothing of the FP/TP legs below [orig: the g_CameraMode == 4
-    // branch @0x4389eb..0x438b49 returns before the mode 0/1 composition].
+    // view tick. Of the composition ahead of it only the look-at block runs
+    // (every non-zero mode reaches it), and the lerp writes over its view, so
+    // the one word it leaves is the mounted look-ahead's ease: a dead occupant
+    // still in a control seat keeps easing it [orig: Camera_ComputeThirdPersonView
+    // @0x437D10 - mode 4 passes the mode 0 / 1 legs to LABEL_90 @0x4380E7, the
+    // `if (g_CameraMode)` look-at @0x4387D5..0x438933 with the ease
+    // @0x4388A4..0x4388AF, then the g_CameraMode == 4 lerp @0x4389F2..0x438B3D].
     if (v.camera_mode == 4 && v.death_cam.valid) {
+        if (v.mount.control_seat) ease_mount_lookahead(v);
         DeathCameraPose pose;
         death_camera_view(v.death_cam, v.view_tick, pose);
         for (int i = 0; i < 3; ++i) out.pos_q16[i] = pose.pos[i];

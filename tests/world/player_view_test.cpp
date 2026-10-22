@@ -1489,6 +1489,58 @@ void test_mounted_lookahead_eases_on_every_compose() {
     CHECK(v.lookahead_q16[2] > 0);
 }
 
+// MODE 4 still runs the look-at block, whose mounted ease is the one word it
+// leaves: a dead occupant still in a control seat keeps easing the look-ahead
+// toward the carrier x (6, 0, 0) while the death lerp writes the whole view; off
+// the seat the word holds. [orig: Camera_ComputeThirdPersonView @0x437D10 - the
+// look-at @0x4387D5..0x438933 with the ease @0x4388A4..0x4388AF ahead of the
+// g_CameraMode == 4 lerp @0x4389F2..0x438B3D]
+void test_mode4_keeps_the_mounted_lookahead_ease() {
+    PlayerViewState v = mounted_state(5.0f);
+    v.camera_mode = 4;
+    v.death_cam.valid = true;
+    v.death_cam.start_tick = 100;
+    v.view_tick = 100 + 64; // t = 64 << 9 = 0x8000: halfway
+    v.death_cam.from.pos[0] = 0;
+    v.death_cam.from.pos[1] = 0;
+    v.death_cam.from.pos[2] = 0;
+    v.death_cam.to.pos[0] = 4 * 0x10000;
+    v.death_cam.to.pos[1] = -2 * 0x10000;
+    v.death_cam.to.pos[2] = 6 * 0x10000;
+    v.death_cam.from.yaw_bam = 0;
+    v.death_cam.to.yaw_bam = 0x20000000;
+    for (int i = 0; i < 3; ++i) v.lookahead_q16[i] = 0;
+    v.mount.lookahead_target_q16[0] = 0;
+    v.mount.lookahead_target_q16[1] = 387242;
+    v.mount.lookahead_target_q16[2] = 68280;
+    const int32_t position[3] = {0, 0, 10 << 16};
+    const int32_t no_anchor[3] = {0, 0, 0};
+    int32_t expected[3] = {0, 0, 0};
+    PlayerCameraPose pose;
+    for (int call = 0; call < 3; ++call) {
+        player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
+                kCarrierHeading, 0, 0, 0, 0, false, 0, pose);
+        for (int i = 0; i < 3; ++i)
+            expected[i] += (v.mount.lookahead_target_q16[i] - expected[i] + 16) >> 5;
+        CHECK(v.lookahead_q16[0] == expected[0]);
+        CHECK(v.lookahead_q16[1] == expected[1]);
+        CHECK(v.lookahead_q16[2] == expected[2]);
+        // The lerp owns the view: from + ((to - from) * 0x8000 + 0x8000) >> 16.
+        CHECK(pose.pos_q16[0] == 2 * 0x10000 && pose.pos_q16[1] == -0x10000 &&
+              pose.pos_q16[2] == 3 * 0x10000);
+        CHECK(pose.yaw_bam == 0x10000000 && pose.pitch_bam == 0 && pose.roll_bam == 0);
+        CHECK(pose.third_person);
+    }
+    CHECK(expected[1] == 12101 + 11723 + 11357);
+    // Off the control seat the mode-4 compose leaves the word where it is.
+    v.mount.control_seat = false;
+    const int32_t held[3] = {v.lookahead_q16[0], v.lookahead_q16[1], v.lookahead_q16[2]};
+    player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
+            kCarrierHeading, 0, 0, 0, 0, false, 0, pose);
+    CHECK(v.lookahead_q16[0] == held[0] && v.lookahead_q16[1] == held[1] &&
+          v.lookahead_q16[2] == held[2]);
+}
+
 // The view-frame bias: (raw def pos + the published Q16 bias / 256) / 256;
 // the NoCardSwitch reload suppression drops the published half (the hip
 // offset).
@@ -1787,6 +1839,7 @@ int main() {
     test_compose_camera_mounted_terrain();
     test_tick_mounted_anchor_ease();
     test_mounted_lookahead_eases_on_every_compose();
+    test_mode4_keeps_the_mounted_lookahead_ease();
     test_bias_view_units();
     test_motion_lead_tracker();
     if (failures == 0) std::printf("player_view_test: all passed\n");
