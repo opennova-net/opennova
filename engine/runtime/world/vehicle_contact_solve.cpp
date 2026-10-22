@@ -113,7 +113,8 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
     PlatProbeForce forces[7];
 	EntityHandle hit_entity;
 	const int32_t sev =
-			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
+			plat_probe_pass(world, veh, ProbeForcePass::ComputeCollisionForces, probes, radii, soft,
+					hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
 	// The shared impact fold applies authority damage, sound and momentum. A terrain-only
 	// severe hit cuts speed to one quarter when its strongest planar probe lies beyond the
@@ -124,7 +125,8 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
     if (sev >= 1) {
         // plat_second_pass: the planar separation that keeps a remote
         // aircraft out of hillsides [orig: @0x480143..].
-		plat_second_pass(world, veh, probes, radii, soft, hard, forces, d, px, py, pz, hit_entity);
+		plat_second_pass(world, veh, ProbeForcePass::ComputeCollisionForces, probes, radii, soft,
+				hard, forces, d, px, py, pz, hit_entity);
 	}
 
 	// Water entry uses r/2 hysteresis, releases the dry trail bank and emits the local splash and
@@ -343,7 +345,8 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     PlatProbeForce forces[7];
 	EntityHandle hit_entity;
 	const int32_t sev =
-			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
+			plat_probe_pass(world, veh, ProbeForcePass::CheckCollisionState, probes, radii, soft,
+					hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
 	// The decay per severity [orig: @0x47CC31 (1), @0x47CC71 (2), @0x47CCA1 (3)]. The shared
 	// impact fold owns damage, scrape sound and momentum. The terrain-only quarter-speed cut
@@ -356,7 +359,8 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 		// Average the two planar force passes. Scale the resulting position push and vertical
 		// depths by the contacted entity mass share.
 		// Witness sites: [orig: @0x47D0F5, @0x47D330, @0x47D452, @0x47D458]
-		plat_second_pass(world, veh, probes, radii, soft, hard, forces, d, px, py, pz, hit_entity);
+		plat_second_pass(world, veh, ProbeForcePass::CheckCollisionState, probes, radii, soft, hard,
+				forces, d, px, py, pz, hit_entity);
 	}
 
 	// ---- water leg [orig: @0x47D45B..0x47D629]. Pad support forces raise the
@@ -549,7 +553,8 @@ void wheeled_second_pass(World &world, Entity &veh, int32_t (&probes)[13][3],
 	PlatProbeForce second[13];
 	EntityHandle hit;
 	const int32_t sev2 =
-			plat_probe_pass(world, veh, probes, radii, soft, hard, second, px, py, pz, &hit);
+			plat_probe_pass(world, veh, ProbeForcePass::CheckCollisionState, probes, radii, soft,
+					hard, second, px, py, pz, &hit);
 	if (sev2 != 0) {
 		int64_t dX2 = 0, dY2 = 0;
 		for (int i = 0; i < 13; ++i) {
@@ -691,7 +696,8 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
     PlatProbeForce forces[13];
 	EntityHandle hit_entity;
 	const int32_t sev =
-			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
+			plat_probe_pass(world, veh, ProbeForcePass::CheckCollisionState, probes, radii, soft,
+					hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
 	// The quarter-speed cut scans the first SEVEN probes only.
 	contact_speed_response(m, traits, sev, hit_entity, forces, probes, 7, px, py);
@@ -1305,7 +1311,8 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 	const int32_t radii[6] = { r, r, r, r, r, r };
 	EntityHandle hit_entity;
 	const int32_t sev =
-			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
+			plat_probe_pass(world, veh, ProbeForcePass::CheckCollisionState, probes, radii, soft,
+					hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
 	contact_speed_response(m, traits, sev, hit_entity, forces, probes, 5, px, py);
 	int32_t d[6];
@@ -1322,7 +1329,8 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         }
         PlatProbeForce forces2[6];
 		const int32_t sev2 =
-				plat_probe_pass(world, veh, probes, radii, soft, hard, forces2, px, py, pz);
+				plat_probe_pass(world, veh, ProbeForcePass::CheckCollisionState, probes, radii,
+						soft, hard, forces2, px, py, pz);
 		if (sev2 != 0) {
 			int64_t dX2 = 0, dY2 = 0;
             for (int i = 0; i < 5; ++i) {

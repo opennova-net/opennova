@@ -164,20 +164,22 @@ void vehicle_follow_carrier(World &world, Entity &vehicle) {
 	vehicle.roll_bam = m.air_roll_bam;
 }
 
-int32_t vehicle_probe_pass(World &world, Entity &vehicle, const int32_t (*probes)[3],
-		const int32_t *radii, int count, int32_t soft, int32_t hard, PlatProbeForce *forces,
-		int32_t px, int32_t py, int32_t pz, EntityHandle *hit_entity) {
-	const VehicleTraits *traits = world.vehicles.traits.get(vehicle.item_id);
-	const bool boat = traits != nullptr && traits->family == VehicleFamily::Watercraft;
+int32_t vehicle_probe_pass(World &world, Entity &vehicle, ProbeForcePass pass,
+		const int32_t (*probes)[3], const int32_t *radii, int count, int32_t soft, int32_t hard,
+		PlatProbeForce *forces, int32_t px, int32_t py, int32_t pz, EntityHandle *hit_entity) {
 	int32_t severity = 0;
 	for (int i = 0; i < count; ++i) {
 		forces[i] = {};
 		// Indoors suppresses terrain only; decks and other models still solve.
 		// [orig: Entity_CheckCollisionState @0x462A30, @0x462AE0..0x462AFA]
+		// Only the CheckCollisionState pass exempts its four wheel probes from the broad
+		// phase; the ComputeCollisionForces pass skips any clear probe
+		// [orig: @0x462C13..0x462C45; Entity_ComputeCollisionForces @0x462150, @0x4622D2].
 		if (((vehicle.flags | vehicle.engine_flags) & 0x800000u) == 0)
 			severity = std::max(severity,
 					plat_terrain_probe(world, probes[i][0], probes[i][1], probes[i][2], radii[i],
-							soft, hard, forces[i], !boat && i < 4));
+							soft, hard, forces[i],
+							pass == ProbeForcePass::CheckCollisionState && i < 4));
 	}
 	EntityHandle hit;
 	if (world.ai.collision != nullptr) {

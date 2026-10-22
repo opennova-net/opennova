@@ -5349,6 +5349,11 @@ add_test(NAME suspension_precision COMMAND suspension_precision_test)
 add_executable(precipitation_floor_test mission/precipitation_floor_test.cpp)
 target_link_libraries(precipitation_floor_test PRIVATE opennova_runtime)
 add_test(NAME precipitation_floor COMMAND precipitation_floor_test)
+# D-NET-515: the aircraft, platform and physics-0 solves' force pass skips every probe clear of
+# the terrain by its radius; the ground family's pass never skips its four wheel probes.
+add_executable(probe_force_pass_test world/probe_force_pass_test.cpp)
+target_link_libraries(probe_force_pass_test PRIVATE opennova_runtime)
+add_test(NAME probe_force_pass COMMAND probe_force_pass_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the

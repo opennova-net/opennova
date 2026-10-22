@@ -149,19 +149,31 @@ inline void place_probes(const VehicleEulerBasis &basis,
     }
 }
 
-// Terrain and models share the authored probe array. The boat variant's
-// terrain broad phase applies to every point; the other families always
-// evaluate the first four wheel points. [orig: @0x462C13..0x462C45]
-int32_t vehicle_probe_pass(World &world, Entity &vehicle, const int32_t (*probes)[3],
-		const int32_t *radii, int count, int32_t soft, int32_t hard, PlatProbeForce *forces,
-		int32_t px, int32_t py, int32_t pz, EntityHandle *hit_entity);
+// Which of retail's two force passes a solve calls. They differ in the terrain broad phase only:
+// a probe whose four samples all lie more than its radius below it is skipped.
+// - CheckCollisionState (the tracked, wheeled and light solves) skips only past the
+//   first four, the wheel probes, which it always evaluates.
+//   [orig: Entity_CheckCollisionState @0x462A30, the `wheelIdx < 4` test @0x462C13..0x462C45]
+// - ComputeCollisionForces (the aircraft, platform and physics-0 suspension solves) skips
+//   every probe: each call passes no per-wheel array, and the skip tests that array alone.
+//   [orig: Entity_ComputeCollisionForces @0x462150, the skip @0x4622D2; the null
+//    per_wheel_distances pushes of Entity_ProcessAircraftContactPhysics @0x47F855 / @0x47FE13
+//    and Entity_ProcessVehicleSuspension @0x4640AB / @0x464638, and the null argument at
+//    both Entity_ProcessPlatformPhysics calls @0x4820A4 / @0x482818]
+enum class ProbeForcePass : uint8_t { CheckCollisionState, ComputeCollisionForces };
+
+// Terrain and models share the authored probe array.
+int32_t vehicle_probe_pass(World &world, Entity &vehicle, ProbeForcePass pass,
+		const int32_t (*probes)[3], const int32_t *radii, int count, int32_t soft, int32_t hard,
+		PlatProbeForce *forces, int32_t px, int32_t py, int32_t pz, EntityHandle *hit_entity);
 
 template <int N>
-inline int32_t plat_probe_pass(World &world, Entity &vehicle, const int32_t (&probes)[N][3],
-		const int32_t (&radii)[N], int32_t soft, int32_t hard, PlatProbeForce (&forces)[N],
-		int32_t px, int32_t py, int32_t pz, EntityHandle *hit_entity = nullptr) {
+inline int32_t plat_probe_pass(World &world, Entity &vehicle, ProbeForcePass pass,
+		const int32_t (&probes)[N][3], const int32_t (&radii)[N], int32_t soft, int32_t hard,
+		PlatProbeForce (&forces)[N], int32_t px, int32_t py, int32_t pz,
+		EntityHandle *hit_entity = nullptr) {
 	return vehicle_probe_pass(
-			world, vehicle, probes, radii, N, soft, hard, forces, px, py, pz, hit_entity);
+			world, vehicle, pass, probes, radii, N, soft, hard, forces, px, py, pz, hit_entity);
 }
 
 // The lighter contacted machine takes its share of the separation. Each
@@ -226,9 +238,10 @@ inline void contact_speed_response(Entity::VehicleMotorState &m, const VehicleTr
 // contacted entity mass share. Boat keeps its depth buffer locally because the grounded branch
 // consumes it.
 template <int N>
-inline void plat_second_pass(World &world, Entity &vehicle, int32_t (&probes)[N][3],
-		const int32_t (&radii)[N], int32_t soft, int32_t hard, PlatProbeForce (&forces)[N],
-		int32_t (&d)[N], int32_t &px, int32_t &py, int32_t pz, EntityHandle hit) {
+inline void plat_second_pass(World &world, Entity &vehicle, ProbeForcePass pass,
+		int32_t (&probes)[N][3], const int32_t (&radii)[N], int32_t soft, int32_t hard,
+		PlatProbeForce (&forces)[N], int32_t (&d)[N], int32_t &px, int32_t &py, int32_t pz,
+		EntityHandle hit) {
 	int64_t dX = 0, dY = 0;
 	for (int i = 0; i < N; ++i) {
 		dX += forces[i].fx;
@@ -240,7 +253,7 @@ inline void plat_second_pass(World &world, Entity &vehicle, int32_t (&probes)[N]
     }
     PlatProbeForce forces2[N];
 	const int32_t sev2 =
-			plat_probe_pass(world, vehicle, probes, radii, soft, hard, forces2, px, py, pz);
+			plat_probe_pass(world, vehicle, pass, probes, radii, soft, hard, forces2, px, py, pz);
 	for (int i = 0; i < N; ++i)
 		forces[i].terrain_gap = forces2[i].terrain_gap;
 	if (sev2 != 0) {

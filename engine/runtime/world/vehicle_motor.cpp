@@ -1481,7 +1481,8 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     PlatProbeForce forces[7];
 	EntityHandle hit_entity;
 	const int32_t sev =
-			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
+			plat_probe_pass(world, veh, ProbeForcePass::ComputeCollisionForces, probes, radii, soft,
+					hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
 	// The decay per severity [orig: @0x4821E7 (1), @0x4822A4 (2), @0x4822C9 (3)]. The shared
 	// contact fold applies authority damage, sound and momentum. The quarter-speed cut requires
@@ -1503,7 +1504,8 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
         for (int i = 0; i < 7; ++i) { probes[i][0] += int32_t(dX); probes[i][1] += int32_t(dY); }
         PlatProbeForce forces2[7];
 		const int32_t sev2 =
-				plat_probe_pass(world, veh, probes, radii, soft, hard, forces2, px, py, pz);
+				plat_probe_pass(world, veh, ProbeForcePass::ComputeCollisionForces, probes, radii,
+						soft, hard, forces2, px, py, pz);
 		for (int i = 0; i < 7; ++i)
 			zc[i] = forces2[i].fz;
 		if (sev2 != 0) {

@@ -56,7 +56,8 @@ void vehicle_simple_contact(
 	PlatProbeForce first[7], second[7];
 	const int32_t soft = cos22_of_bam_x87(t.max_slope), hard = cos22_of_bam_x87(t.slip_slope);
 	EntityHandle hit;
-	const int severity = plat_probe_pass(world, e, points, radii, soft, hard, first, x, y, z, &hit);
+	const int severity = plat_probe_pass(world, e, ProbeForcePass::ComputeCollisionForces, points,
+			radii, soft, hard, first, x, y, z, &hit);
 	vehicle_contact_impact(world, e, t, severity, hit, x, y, z);
 	if (severity != 0)
 		m.speed = io::bam_sub(m.speed, m.speed >> ((t.torque + (severity == 2 ? 1 : 2)) & 31));
@@ -100,7 +101,8 @@ void vehicle_simple_contact(
 		point[0] = io::bam_add(point[0], push_x);
 		point[1] = io::bam_add(point[1], push_y);
 	}
-	if (plat_probe_pass(world, e, points, radii, soft, hard, second, x, y, z) != 0) {
+	if (plat_probe_pass(world, e, ProbeForcePass::ComputeCollisionForces, points, radii, soft, hard,
+				second, x, y, z) != 0) {
 		int32_t second_x = 0, second_y = 0;
 		for (int i = 0; i < 7; ++i) {
 			second_x = io::bam_add(second_x, second[i].fx);
