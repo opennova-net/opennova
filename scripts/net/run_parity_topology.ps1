@@ -2149,7 +2149,10 @@ function Invoke-ScenarioStage {
     $process = if ($actor -eq "host") { $script:OpenNovaHost } else { $script:OpenNovaJoiner }
     $probes = @()
     if ($ActorScenarioProbes -and -not $SetupOnly) {
-        $probes = @(Get-Content -LiteralPath $ActorScenarioProbes -Raw | ConvertFrom-Json)
+        # Windows PowerShell's ConvertFrom-Json hands a JSON array on as ONE
+        # object; @() alone wraps it whole, so each probe's args went missing
+        # (LP-s7's drive probe cells). The ForEach-Object unrolls it.
+        $probes = @((Get-Content -LiteralPath $ActorScenarioProbes -Raw | ConvertFrom-Json) | ForEach-Object { $_ })
     }
     $status = Invoke-GameProbe -Port $port -Name "scenario_play" -Process $process `
         -TimeoutSeconds $timeoutSeconds -PollMs 500 -Arguments @{
