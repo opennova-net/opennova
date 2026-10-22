@@ -187,11 +187,50 @@ bool check_mounted_slot_select_fire_and_reload() {
 	player->mount_target = child_h;
 	player->mount_type = w::SeatType::Gunner;
 	player->use_gun_slot_swapped = true;
+	// The UseGun attach's borrow: the EquippedSlot names the gun's slot, which the
+	// toggle's first gate reads [orig: Entity_AttachToUseGunSlot @0x546C42..0x546C4E;
+	// NapiNPServerMsg_HandleWeaponToggle +0x118 @0x511ACE].
+	player->equipped_slot.kind = w::WeaponSlotRef::kMount;
+	player->equipped_slot.mount = child_h;
 	player->equipped_adm_index = 5;
 
 	std::vector<inmatch::NapiNPConnection> roster;
 	roster.push_back(make_seeded_conn(
 			2, 1, nullptr, ns::TransportMode::Client, shooter, true));
+
+	// A sender holding no EquippedSlot moves nothing (D-NET-NEW-L2-34).
+	{
+		const w::WeaponSlotRef held = player->equipped_slot;
+		player->equipped_slot = {};
+		MountedWeaponSlotSelection request;
+		request.use_parent_slot = true;
+		dispatch_gameplay(c2s::MOUNTED_WEAPON_SLOT_SELECT,
+				encode_mounted_weapon_slot_selection(request), roster[0], roster, world);
+		if (!expect(!live_child->primary_weapon_slot.redirect_to_parent_slot,
+				"C2S 0x16 from a sender with no EquippedSlot leaves the route"))
+			return false;
+		player->equipped_slot = held;
+	}
+	// The gun's addeweap parent identity is no gate of the toggle: a groundEntity that
+	// is a type-1 EWeap takes the route bit whatever the metadata names
+	// (D-NET-NEW-L2-34) [orig: @0x511B12..0x511B2A].
+	{
+		const w::EntityHandle metadata_parent = live_child->emplacement_parent;
+		const uint32_t metadata_spawn_id = live_child->emplacement_parent_spawn_id;
+		live_child->emplacement_parent = w::EntityHandle{};
+		live_child->emplacement_parent_spawn_id = 0;
+		MountedWeaponSlotSelection request;
+		request.use_parent_slot = true;
+		dispatch_gameplay(c2s::MOUNTED_WEAPON_SLOT_SELECT,
+				encode_mounted_weapon_slot_selection(request), roster[0], roster, world);
+		const bool routed = live_child->primary_weapon_slot.redirect_to_parent_slot;
+		live_child->emplacement_parent = metadata_parent;
+		live_child->emplacement_parent_spawn_id = metadata_spawn_id;
+		live_child->primary_weapon_slot.redirect_to_parent_slot = false;
+		if (!expect(routed, "C2S 0x16 nonzero routes onto a type-1 EWeap groundEntity "
+				"whatever the addeweap metadata names"))
+			return false;
+	}
 
 	MountedWeaponSlotSelection select_parent;
 	select_parent.use_parent_slot = true;

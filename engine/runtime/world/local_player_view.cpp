@@ -148,30 +148,25 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
                                     MountSlotSelectRequest &out) {
     out = MountSlotSelectRequest();
     if (!w.active) return false;
+    // L's parent, a mountable gun with the G capability, owns the action; anything else
+    // falls to the scope toggle. With the route bit set the request picks the gun's own
+    // slot; clear, the groundEntity's when it is a type-1 EWeap, else the action ends
+    // with nothing sent and no scope toggle (D-NET-NEW-L2-34). Nothing else gates it:
+    // no slot state, no addeweap parent identity.
+    // [orig: Input_HandleActionBinding_0 case 6 - L's parent @0x4E04A0, the null test
+    //  @0x4E04A6, Entity_IsMountableGun @0x4E04AC, +0x326 & 2 @0x4E04B5 (each failing to
+    //  the scope toggle @0x4E0528), the route bit @0x4E04BE, the groundEntity gates
+    //  @0x4E04FC..0x4E051F (each failing to the end @0x4E13F5), the C2S 0x16 @0x4E04F0]
     Entity *player = world.registry.get(world.cached.local_player);
-    Entity *mount = player != nullptr && player->mounted && player->use_gun_slot_swapped &&
-                            player->mount_target.valid()
+    Entity *mount = player != nullptr && player->mounted && player->mount_target.valid()
                         ? world.registry.get(player->mount_target)
                         : nullptr;
-    if (mount == nullptr || !mount->has_item_def || mount->item_type == 1u ||
-        (mount->item_attrib & kItemAttribEweap) == 0u ||
-        (mount->emplacement_attachment_flags & 0x02u) == 0u ||
-        !world.vehicles.prepare_weapon_slot(*mount))
-        return false;
+    if (mount == nullptr || !mount_is_designated_g_gun(*mount)) return false;
+    (void)world.vehicles.prepare_weapon_slot(*mount);
     const bool use_parent_slot = !mount->primary_weapon_slot.redirect_to_parent_slot;
-    Entity *parent = nullptr;
-    bool route_valid = !use_parent_slot;
-    if (use_parent_slot && mount->ground_target.valid() &&
-        mount->emplacement_parent == mount->ground_target &&
-        mount->emplacement_parent_spawn_id != 0) {
-        parent = world.registry.get(mount->ground_target);
-        route_valid = parent != nullptr &&
-                      parent->registry_spawn_id == mount->emplacement_parent_spawn_id &&
-                      parent->has_item_def && parent->item_type == 1u &&
-                      (parent->item_attrib & kItemAttribEweap) != 0u &&
-                      world.vehicles.prepare_weapon_slot(*parent);
-    }
-    if (!route_valid) return false;
+    Entity *parent = use_parent_slot ? world.registry.get(mount->ground_target) : nullptr;
+    if (use_parent_slot && !designated_g_route_carrier(parent)) return true;
+    if (parent != nullptr) (void)world.vehicles.prepare_weapon_slot(*parent);
     out.applies = true;
     out.use_parent_slot = use_parent_slot;
     out.mount = player->mount_target;

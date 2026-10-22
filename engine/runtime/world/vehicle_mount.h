@@ -85,6 +85,28 @@ inline bool mount_hides_fp_viewmodel(const Entity &occupant,
     return true;
 }
 
+// The designated-G route legs' gates, each read off the entity's parent (L's own after a
+// record's attach, a remote record's, action 6's, the authority's 0x16 sender's): the parent
+// is a mountable gun (an ItemDef not of type 1 carrying the EWeap attrib) with the G
+// capability. Nothing else is read: no MountSlot state, no addeweap parent identity.
+// [orig: Entity_IsMountableGun @0x434240 (def +0x5C != 1, def +0x54 & 0x20);
+//  NetPacket_SerializePlayerState @0x4C09C0 - the parent @0x4C1346, the null test @0x4C1367,
+//  Entity_IsMountableGun @0x4C1371, +0x326 & 2 @0x4C137E]
+inline bool mount_is_designated_g_gun(const Entity &mount) {
+    return mount.has_item_def && mount.item_type != 1u &&
+            (mount.item_attrib & kItemAttribEweap) != 0u &&
+            (mount.emplacement_attachment_flags & 0x02u) != 0u;
+}
+
+// The parent-slot route's carrier, the gun's groundEntity: present, with an ItemDef of
+// type 1 carrying the EWeap attrib.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - groundEntity @0x4C13C1, its def
+//  @0x4C13CC, type 1 @0x4C13D7, attrib 0x20 @0x4C13E1]
+inline bool designated_g_route_carrier(const Entity *ground) {
+    return ground != nullptr && ground->has_item_def && ground->item_type == 1u &&
+            (ground->item_attrib & kItemAttribEweap) != 0u;
+}
+
 inline bool mount_collapses_right_hand_row(const Entity &entity) {
     // This terminal skeletal row is stricter than the secondary-channel gate:
     // retail requires a controller/gunner/driver parent slot AND no Flags 0x100.

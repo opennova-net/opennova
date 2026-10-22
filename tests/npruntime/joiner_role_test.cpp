@@ -1805,24 +1805,28 @@ bool run_local_replica_turret_channel() {
    "local joiner input is tethered within ninety degrees of the gun");
 }
 
-// D-NET-NEW-L3-15's joiner leg: the self record's route byte on a designated-G EWeap
-// stores the mount's route bit (and L's EquippedSlot) alone. L's AdmDef byte (+0x2B0),
-// which its next C2S 0x0C echoes, keeps its word; ours stamped the route's weapon there.
-// The gun here has no seat at the record's bone, so L stays on foot. Retail's legs need L's
-// parent and run for no on-foot L (@0x4C1346, @0x4C1367); ours still key them on the
-// record's carrier (D-NET-NEW-L2-34, NARROWED), so the case pins only that no leg stamps L's
-// byte, whichever runs.
-// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the route legs @0x4C135B..0x4C13F8:
-//  byte 1 @0x4C1390 / @0x4C139D, byte 2 @0x4C13EB / @0x4C13F8, no +0x2B0 store]
+// D-NET-NEW-L2-34 with D-NET-NEW-L3-15's joiner leg: the self record's route byte runs on
+// L's own parent as the record's attach left it, with retail's gates alone (the parent a
+// mountable gun with the G capability; for byte 2 its groundEntity a type-1 EWeap, whatever
+// the addeweap metadata names), and stores the gun's route bit (and L's EquippedSlot) alone.
+// An on-foot L runs no leg, so the gun's bit keeps its state and L's AdmDef byte (+0x2B0),
+// which its next C2S 0x0C echoes, its word.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - L's parent @0x4C1346, the null test
+//  @0x4C1367, Entity_IsMountableGun @0x4C1371, +0x326 & 2 @0x4C137E; byte 1 @0x4C1390 /
+//  @0x4C139D; byte 2's groundEntity gates @0x4C13C1..0x4C13E5, @0x4C13EB / @0x4C13F8; no
+//  +0x2B0 store]
 bool run_the_route_apply_keeps_ls_adm_byte() {
 	Harness h;
 	auto &world = h.kernel->world;
 	world.registry.configure_pool(1, 4);
 	world.load_systems();
-	world.tables.weapons.entries.resize(3);
+	world.tables.weapons.entries.resize(4);
 	w::WeaponTableEntry &gun_weapon = world.tables.weapons.entries[2];
 	gun_weapon.valid = true;
 	gun_weapon.name = "WPN_GUN";
+	w::WeaponTableEntry &hull_weapon = world.tables.weapons.entries[3];
+	hull_weapon.valid = true;
+	hull_weapon.name = "WPN_HULL";
 	h.role.poll_preload();
 	constexpr uint16_t self_handle = 5;
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
@@ -1830,7 +1834,20 @@ bool run_the_route_apply_keeps_ls_adm_byte() {
 	h.role.run_tick(h.input);
 	w::Entity *local = h.kernel->local.player();
 	if (!expect(local != nullptr, "route apply: L spawned")) return false;
+	// The mission start leaves L hidden; the seeded session has no 0x0F, whose landing
+	// clears the bit [orig: NapiNPClientMsg_0x00F @0x42E200 (Flags &= ~1)].
+	local->flags &= ~w::kEntityFlagCarried;
 	local->equipped_adm_index = 1;
+	w::Entity hull;
+	hull.kind = w::EntityKind::Item;
+	hull.has_item_def = true;
+	hull.item_id = 125;
+	hull.spawn_origin = (1u << 24) | 1u;
+	hull.item_type = 1;
+	hull.item_attrib = w::kItemAttribEweap;
+	hull.primary_weapon = "WPN_HULL";
+	hull.health = 100;
+	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.has_item_def = true;
@@ -1842,20 +1859,61 @@ bool run_the_route_apply_keeps_ls_adm_byte() {
 	gun.emplacement_attachment_flags = 0x02;
 	gun.primary_weapon = "WPN_GUN";
 	gun.health = 100;
+	gun.team = local->team;
+	gun.ground_target = hull_h; // no addeweap metadata: the identity is no gate
+	w::Seat seat;
+	seat.type = w::SeatType::Gunner;
+	seat.bone_index = 1;
+	seat.source_name = "UseGun";
+	gun.seats.push_back(seat);
 	const w::EntityHandle gun_h = world.registry.spawn(1, gun);
+	w::Entity *live_gun = world.registry.get(gun_h);
+	w::Entity *live_hull = world.registry.get(hull_h);
 	auto &state = h.role.runtime->state();
 	auto &row = state.upsert(gun_h.packed);
 	row.type_id = 124;
 	row.cls = EntityClass::NoNetworkCallback;
-	auto &self = state.upsert(self_handle);
-	self.cls = EntityClass::Player;
-	self.carrier_handle = gun_h.packed;
-	self.mount_bone = 1;
-	self.seat_type = 1; // the child's own MountSlot
+	{
+		auto &self = state.upsert(self_handle);
+		self.cls = EntityClass::Player;
+		self.carrier_handle = gun_h.packed;
+		self.mount_bone = 2; // no seat at this bone: the attach leaves L on foot
+		self.seat_type = 1;  // the child's own MountSlot
+	}
+	live_gun->primary_weapon_slot.redirect_to_parent_slot = true;
 	h.role.run_tick(h.input);
 	local = h.kernel->local.player();
-	return expect(local != nullptr && !local->mounted && local->equipped_adm_index == 1,
-			"route apply: L's AdmDef byte keeps its word");
+	if (!expect(local != nullptr && !local->mounted && local->equipped_adm_index == 1 &&
+			live_gun->primary_weapon_slot.redirect_to_parent_slot,
+			"route apply: an on-foot L runs no leg; its AdmDef byte keeps its word"))
+		return false;
+
+	// L seated on the gun: byte 1 clears the bit, byte 2 sets it onto the hull.
+	{
+		auto &self = *state.find(self_handle);
+		self.mount_bone = 1;
+		self.state_flags = w::kEntityFlagMounted;
+		self.state_flags_known = true;
+	}
+	h.role.run_tick(h.input);
+	local = h.kernel->local.player();
+	if (!expect(local != nullptr && local->mounted && local->mount_target == gun_h &&
+			!live_gun->primary_weapon_slot.redirect_to_parent_slot,
+			"route apply: byte 1 on L's gun selects its own slot"))
+		return false;
+	state.find(self_handle)->seat_type = 2;
+	h.role.run_tick(h.input);
+	if (!expect(live_gun->primary_weapon_slot.redirect_to_parent_slot,
+			"route apply: byte 2 routes onto a type-1 EWeap groundEntity, no identity read"))
+		return false;
+	// A groundEntity whose def is not a type-1 EWeap takes no route.
+	state.find(self_handle)->seat_type = 1;
+	h.role.run_tick(h.input);
+	live_hull->item_type = 3;
+	state.find(self_handle)->seat_type = 2;
+	h.role.run_tick(h.input);
+	return expect(!live_gun->primary_weapon_slot.redirect_to_parent_slot,
+			"route apply: byte 2 leaves the bit when the groundEntity fails its gates");
 }
 
 // Every in-match pump stamps World::rules from the joiner's session: the

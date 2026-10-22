@@ -142,10 +142,13 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w,
 void local_player_view_refresh(World *world, PlayerViewState &v);
 
 // Action 6's FIRST leg: on a designated-G carried EWeap the action toggles the
-// selected MountSlot instead of the scope. `applies` = the branch matched a
-// valid route; the caller routes the selection (the joiner queues it toward
-// the authority, a serving host sends it to its own loopback, a standalone
-// world applies it at once through local_player_apply_mount_slot_select).
+// selected MountSlot instead of the scope. True = the leg owns the action (L's
+// parent is such a gun); false = the scope toggle follows. `applies` = a route
+// was selected; true with `applies` false ends the action with nothing sent and
+// no scope toggle (the parent route's groundEntity failed its gates). The caller
+// routes a selection (the joiner queues it toward the authority, a serving host
+// sends it to its own loopback, a standalone world applies it at once through
+// local_player_apply_mount_slot_select).
 // [orig: Input_HandleActionBinding_0 @0x4e0420, case 6 @0x4e0492]
 struct MountSlotSelectRequest {
     bool applies = false;

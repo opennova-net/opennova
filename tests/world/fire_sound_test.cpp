@@ -341,6 +341,21 @@ void test_replica_borrows_the_carrier_slot_for_received_actions() {
     CHECK(ready.size() == 1 && ready[0].set_name == "MOUNT_TAIL");
     CHECK(parent->primary_weapon_slot.counter == 6);
 
+    // The record's route legs read no addeweap identity: with the metadata cleared, byte 1
+    // then byte 2 still move the gun's bit onto the type-1 EWeap groundEntity
+    // (D-NET-NEW-L2-34) [orig: NetPacket_SerializePlayerState @0x4C09C0 - @0x4C1390,
+    // @0x4C13C1..0x4C13E5, @0x4C13EB].
+    mount->emplacement_parent = EntityHandle{};
+    mount->emplacement_parent_spawn_id = 0;
+    state.entities[0].seat_type = 1;
+    im::sync_replica_weapon_slots(state, r.world, 0xFFFF);
+    CHECK(!mount->primary_weapon_slot.redirect_to_parent_slot);
+    state.entities[0].seat_type = 2;
+    im::sync_replica_weapon_slots(state, r.world, 0xFFFF);
+    CHECK(mount->primary_weapon_slot.redirect_to_parent_slot);
+    mount->emplacement_parent = parent_handle;
+    mount->emplacement_parent_spawn_id = parent->registry_spawn_id;
+
     // Dismount restores a null remote slot. Each on-foot event starts a
     // temporary context, so it plays the wire definition's head every time.
     state.entities[0].mount_bone = 0;

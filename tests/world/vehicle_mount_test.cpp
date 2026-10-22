@@ -1183,6 +1183,66 @@ void test_binoculars_survive_all_but_the_camera_reset() {
     }
 }
 
+// Action 6 on L's parent (D-NET-NEW-L2-34): a mountable gun with the G capability owns the
+// action; the route bit set selects its own slot, clear the groundEntity's when that is a
+// type-1 EWeap, else the action ends with nothing sent and no scope toggle. A parent without
+// the G capability falls to the scope toggle. Neither the UseGun slot swap nor the addeweap
+// parent identity is read. [orig: Input_HandleActionBinding_0 case 6 - L's parent @0x4E04A0,
+// @0x4E04AC, +0x326 & 2 @0x4E04B5 (the scope toggle @0x4E0528), the route bit @0x4E04BE, the
+// groundEntity gates @0x4E04FC..0x4E051F (the end @0x4E13F5), the C2S 0x16 @0x4E04F0]
+void test_action6_reads_ls_parent_with_retails_gates() {
+    Rig r(2.0f);
+    arm_usegun_seat(r);
+    r.w.rules.mp_session = true;
+    WeaponTableEntry hull;
+    hull.name = "WPN_HULL";
+    hull.valid = true;
+    r.w.tables.weapons.entries.push_back(hull);
+    Entity carrier;
+    carrier.kind = EntityKind::Item;
+    carrier.has_item_def = true;
+    carrier.has_graphic_model = true;
+    carrier.item_type = 1;
+    carrier.item_attrib = kItemAttribEweap;
+    carrier.primary_weapon = "WPN_HULL";
+    carrier.position = {200.0f, 200.0f, 10.0f};
+    const EntityHandle carrier_h = r.w.registry.spawn(1, carrier);
+    r.veh().item_type = 2;
+    r.veh().item_attrib |= kItemAttribEweap;
+    r.veh().emplacement_attachment_flags = 0x02;
+    r.veh().ground_target = carrier_h; // no addeweap metadata: the identity is no gate
+    LocalPlayer local(r.w);
+    r.w.local_player_state = &local;
+    CHECK(local.toggle_mount());
+    CHECK(r.player().mounted && r.player().mount_target == r.veh_h);
+    local.weapon.active = true;
+    r.player().use_gun_slot_swapped = false; // not read
+
+    MountSlotSelectRequest req;
+    // The route bit clear: the groundEntity's slot.
+    r.veh().primary_weapon_slot.redirect_to_parent_slot = false;
+    CHECK(local_player_mount_slot_select(r.w, local.weapon, req));
+    CHECK(req.applies && req.use_parent_slot && req.mount == r.veh_h && req.parent == carrier_h);
+    // The route bit set: the gun's own slot.
+    r.veh().primary_weapon_slot.redirect_to_parent_slot = true;
+    CHECK(local_player_mount_slot_select(r.w, local.weapon, req));
+    CHECK(req.applies && !req.use_parent_slot && req.mount == r.veh_h);
+    // The bit clear onto a groundEntity that is no type-1 EWeap: the gun keeps the action,
+    // nothing is selected and no scope toggle follows.
+    r.veh().primary_weapon_slot.redirect_to_parent_slot = false;
+    r.w.registry.get(carrier_h)->item_type = 3;
+    CHECK(local_player_mount_slot_select(r.w, local.weapon, req));
+    CHECK(!req.applies);
+    r.veh().ground_target = EntityHandle{};
+    CHECK(local_player_mount_slot_select(r.w, local.weapon, req));
+    CHECK(!req.applies);
+    // A parent without the G capability falls to the scope toggle.
+    r.veh().emplacement_attachment_flags = 0;
+    CHECK(!local_player_mount_slot_select(r.w, local.weapon, req));
+    CHECK(!req.applies);
+    r.w.local_player_state = nullptr;
+}
+
 // The nearest-seat toggle: a free seat within the 4.0 u horizontal gate attaches; out of
 // range does nothing. [orig: @0x435d50 gate @0x436123; @0x436950]
 void test_toggle_nearest_seat() {
@@ -5542,6 +5602,7 @@ int main() {
     test_usegun_round_trip_reads_the_personal_bucket();
     test_script_mount_reads_the_boot_equipped_slot();
     test_binoculars_survive_all_but_the_camera_reset();
+    test_action6_reads_ls_parent_with_retails_gates();
     test_best_seat_walks_vehicle_children();
     test_seat_gates_read_the_dead_bit_alone();
     test_use_scan_reads_the_dead_bit_alone();

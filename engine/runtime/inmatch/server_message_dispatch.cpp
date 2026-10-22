@@ -1033,18 +1033,26 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							msg.payload.data(), msg.payload.size(),
 							selection, consumed))
 					break;
+				// The sender's EquippedSlot set (a serving host's own player's is
+				// LocalPlayer::equipped_slot_held, any other's its slot reference),
+				// then its parent a mountable gun with the G capability; nothing else
+				// gates it (no slot state, no addeweap parent identity;
+				// D-NET-NEW-L2-34). The slot init (prepare_weapon_slot, our stand-in
+				// for the spawn-time MountSlot init) runs but gates nothing.
+				// [orig: NapiNPServerMsg_HandleWeaponToggle @0x511A70 - +0x118 @0x511ACE,
+				//  the parent +0x16C @0x511AD8, Entity_IsMountableGun @0x511AE4, +0x326 & 2
+				//  @0x511AED; WeaponSlot_InitFromEntityDef @0x5466C0]
 				world::Entity *player =
 						world->registry.get(conn.link.owned_entity);
-				if (player == nullptr || !player->use_gun_slot_swapped ||
-						!player->mount_target.valid())
-					break;
+				if (player == nullptr) break;
+				const bool equipped = player->handle == world->cached.local_player &&
+								world->local_player_state != nullptr
+						? world->local_player_state->equipped_slot_held()
+						: player->equipped_slot.kind != world::WeaponSlotRef::kNone;
+				if (!equipped || !player->mounted || !player->mount_target.valid()) break;
 				world::Entity *mount = world->registry.get(player->mount_target);
-				if (mount == nullptr || !mount->has_item_def ||
-						mount->item_type == 1u ||
-						(mount->item_attrib & world::kItemAttribEweap) == 0u ||
-						(mount->emplacement_attachment_flags & 0x02u) == 0u ||
-						!world->vehicles.prepare_weapon_slot(*mount))
-					break;
+				if (mount == nullptr || !world::mount_is_designated_g_gun(*mount)) break;
+				(void)world->vehicles.prepare_weapon_slot(*mount);
 
 				// The toggle writes the route bit and the EquippedSlot pointer
 				// alone (ours: the bit, which resolve_mounted_ammo_slot follows),
@@ -1059,20 +1067,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				}
 
 				// Retail follows groundEntity (+0x28), then requires a type-1
-				// EWeap ItemDef before setting the route bit. The generation
-				// sidecar rejects a recycled packed-handle lifetime.
-				if (!mount->ground_target.valid() ||
-						mount->emplacement_parent != mount->ground_target ||
-						mount->emplacement_parent_spawn_id == 0)
-					break;
+				// EWeap ItemDef before setting the route bit.
+				// [orig: @0x511B12..0x511B2A]
 				world::Entity *parent = world->registry.get(mount->ground_target);
-				if (parent == nullptr ||
-						parent->registry_spawn_id !=
-								mount->emplacement_parent_spawn_id ||
-						!parent->has_item_def || parent->item_type != 1u ||
-						(parent->item_attrib & world::kItemAttribEweap) == 0u ||
-						!world->vehicles.prepare_weapon_slot(*parent))
-					break;
+				if (!world::designated_g_route_carrier(parent)) break;
+				(void)world->vehicles.prepare_weapon_slot(*parent);
 				mount->primary_weapon_slot.redirect_to_parent_slot = true;
 				break;
 			}

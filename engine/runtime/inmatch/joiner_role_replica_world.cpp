@@ -657,44 +657,35 @@ void JoinerRole::sync_authoritative_mount() {
 			wire_mounted ? self->mount_bone : 0);
 
 	// A designated-G EWeap uses the compact player's seat_type as an
-	// authoritative selected-MountSlot echo: 1 = child slot, 2 = the validated
-	// groundEntity vehicle slot. Apply this even when the carrier+bone relation
-	// is unchanged; action 6 commonly changes only this byte. Each leg stores the
-	// mount's route bit and L's EquippedSlot alone, never L's AdmDef byte (+0x2B0),
-	// which the next C2S 0x0C echoes (D-NET-NEW-L3-15's joiner leg).
-	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the route legs
-	//  @0x4C135B..0x4C13F8: byte 1 `and byte [esi+312h], 0F7h` @0x4C1390 and +0x118
-	//  @0x4C139D, byte 2 `or byte [esi+312h], 8` @0x4C13EB and +0x118 @0x4C13F8]
+	// authoritative selected-MountSlot echo: 1 = child slot, 2 = the groundEntity
+	// vehicle slot. Apply this even when the carrier+bone relation is unchanged;
+	// action 6 commonly changes only this byte. The legs read L's own parent as the
+	// record's attach above left it (an L on foot, or one whose attach did not take,
+	// runs them on what it rides, none on foot), with retail's gates alone: the
+	// parent a mountable gun with the G capability, and for byte 2 its groundEntity
+	// a type-1 EWeap (D-NET-NEW-L2-34). The slot init (prepare_weapon_slot, our
+	// stand-in for the spawn-time MountSlot init) runs but gates nothing. Each leg
+	// stores the mount's route bit and L's EquippedSlot alone, never L's AdmDef byte
+	// (+0x2B0), which the next C2S 0x0C echoes (D-NET-NEW-L3-15's joiner leg).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TryAttachOrDetach called
+	//  @0x4C1317, L's parent read @0x4C1346, the byte @0x4C135B, the parent's null test
+	//  @0x4C1367, Entity_IsMountableGun @0x4C1371, +0x326 & 2 @0x4C137E; byte 1
+	//  `and byte [esi+312h], 0F7h` @0x4C1390 and +0x118 @0x4C139D; byte 2's groundEntity
+	//  gates @0x4C13C1..0x4C13E5, `or byte [esi+312h], 8` @0x4C13EB and +0x118 @0x4C13F8;
+	//  WeaponSlot_InitFromEntityDef @0x5466C0]
 	bool route_changed = false;
 	world::Entity *route_mount = nullptr;
-	if (wire_mounted && (self->seat_type == 1u || self->seat_type == 2u)) {
-		world::Entity *mount = replica_world_entity(
-				world, world::EntityHandle{self->carrier_handle});
-		if (mount != nullptr) {
-			// Retail does not blindly trust the authority byte: both route legs first
-			// require Entity_IsMountableGun (non-type-1 EWeap) and the authored G
-			// capability. Only the type-2 leg adds the groundEntity parent check.
-			// [orig: compact apply @0x4c1353; Entity_IsMountableGun @0x434240]
-			bool route_valid = mount->has_item_def && mount->item_type != 1u &&
-					(mount->item_attrib & world::kItemAttribEweap) != 0u &&
-					(mount->emplacement_attachment_flags & 0x02u) != 0u &&
-					world.vehicles.prepare_weapon_slot(*mount);
-			if (route_valid && self->seat_type == 2u && mount->ground_target.valid() &&
-					mount->emplacement_parent == mount->ground_target &&
-					mount->emplacement_parent_spawn_id != 0) {
-				world::Entity *parent =
-						replica_world_entity(world, mount->ground_target);
-				route_valid = parent != nullptr &&
-						parent->registry_spawn_id ==
-								mount->emplacement_parent_spawn_id &&
-						parent->has_item_def && parent->item_type == 1u &&
-						(parent->item_attrib & world::kItemAttribEweap) != 0u &&
-						world.vehicles.prepare_weapon_slot(*parent);
-			} else if (self->seat_type == 2u) {
-				route_valid = false;
-			}
-			if (route_valid) {
-				const bool select_parent = self->seat_type == 2u;
+	if (self->seat_type == 1u || self->seat_type == 2u) {
+		world::Entity *mount = local->mounted && local->mount_target.valid()
+				? world.registry.get(local->mount_target)
+				: nullptr;
+		if (mount != nullptr && world::mount_is_designated_g_gun(*mount)) {
+			const bool select_parent = self->seat_type == 2u;
+			world::Entity *parent =
+					select_parent ? world.registry.get(mount->ground_target) : nullptr;
+			if (!select_parent || world::designated_g_route_carrier(parent)) {
+				(void)world.vehicles.prepare_weapon_slot(*mount);
+				if (parent != nullptr) (void)world.vehicles.prepare_weapon_slot(*parent);
 				route_changed =
 						mount->primary_weapon_slot.redirect_to_parent_slot != select_parent;
 				mount->primary_weapon_slot.redirect_to_parent_slot =
@@ -711,17 +702,16 @@ void JoinerRole::sync_authoritative_mount() {
 		}
 		world::sync_local_usegun_weapon_transition(world, lp.weapon);
 	}
-	// The leg's EquippedSlot store, while L sits on the gun: after the record's attach
-	// staged its switch-out above, L's slot becomes the route's at once, so that
-	// switch-out never completes (the weapon walk pumps the EquippedSlot alone) and the
-	// AdmDef byte keeps its def. Each frame stands in for each record: the store is
-	// idempotent once the borrow holds the slot, and every staging of a switch follows a
-	// record that moves L's seat (D-WPN-52 follow).
+	// The leg's EquippedSlot store, L sitting on the gun (route_mount is L's own
+	// parent): after the record's attach staged its switch-out above, L's slot becomes
+	// the route's at once, so that switch-out never completes (the weapon walk pumps the
+	// EquippedSlot alone) and the AdmDef byte keeps its def. Each frame stands in for
+	// each record: the store is idempotent once the borrow holds the slot, and every
+	// staging of a switch follows a record that moves L's seat (D-WPN-52 follow).
 	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TryAttachOrDetach called
 	//  @0x4C1317, L's parent read @0x4C1346, the stores @0x4C139D / @0x4C13F8;
 	//  WeaponAction_ProcessAllEntities @0x542690 (@0x5426AD)]
-	if (route_mount != nullptr && local->mounted &&
-			local->mount_target == route_mount->handle)
+	if (route_mount != nullptr)
 		world::local_usegun_store_equipped_slot(world, lp.weapon, *route_mount);
 }
 
