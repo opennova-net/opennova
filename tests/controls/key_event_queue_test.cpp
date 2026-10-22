@@ -118,13 +118,70 @@ bool test_each_event_fires_its_row() {
 	return true;
 }
 
+// The keyboard pass's release pass over its press latch. Every dequeued event sets
+// its key's latch; a latched key that reads up queues its release row's event and
+// clears the latch: ToSpecial's (code 220), the only keyboard-bound row whose flags
+// carry the release bit, signed while Shift is down; a held key queues nothing; an open
+// text line clears the latch with no event; a key no release row holds keeps its latch;
+// the whole input reset's clear drops a held key's release; a rebound ToSpecial
+// releases from its new key.
+// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the latch set @0x49d2ed, the release
+//  pass @0x49d240..0x49d2b9 (the walk @0x49d252..0x49d27f, Shift @0x49d283, the capture
+//  word @0x49d29f, the queue @0x49d2b1, the clear @0x49d2b9, no row @0x49d281);
+//  Input_ResetAllState @0x497ED0 - the memset @0x497F08]
+bool test_release_pass_follows_the_press_latch() {
+	BindingSet set;
+	KeyPressLatch latch;
+	std::set<int> down;
+	const auto key_state = [&](int vk) { return down.count(vk) != 0; };
+	const int to_special = set.index_of_token("ToSpecial");
+	CHECK(to_special >= 0 && set.release_row('F') == to_special);
+	CHECK(set.release_row('W') == -1); // move_forward carries no release bit
+	KeyEvent f;
+	f.vk = 'F';
+	latch.set(f);
+	down = {'F'};
+	CHECK(set.release_pass(latch, key_state).empty() && latch.is_set('F')); // held
+	down.clear();
+	auto events = set.release_pass(latch, key_state);
+	CHECK(events.size() == 1 && events[0].code == 220 && events[0].release &&
+			!events[0].sign && events[0].key == 'F');
+	CHECK(!latch.is_set('F') && set.release_pass(latch, key_state).empty());
+	latch.set(f);
+	down = {0x10};
+	events = set.release_pass(latch, key_state);
+	CHECK(events.size() == 1 && events[0].code == 220 && events[0].sign);
+	latch.set(f);
+	down.clear();
+	set.set_keyboard_captured(true);
+	CHECK(set.release_pass(latch, key_state).empty() && !latch.is_set('F'));
+	set.set_keyboard_captured(false);
+	KeyEvent w;
+	w.vk = 'W';
+	latch.set(w);
+	CHECK(set.release_pass(latch, key_state).empty() && latch.is_set('W'));
+	latch.set(f);
+	down = {'F'};
+	latch.clear();
+	down.clear();
+	CHECK(set.release_pass(latch, key_state).empty() && !latch.is_set('W'));
+	CHECK(set.assign_key(to_special, 'G', false, false, false, false));
+	CHECK(set.release_row('G') == to_special);
+	KeyEvent g;
+	g.vk = 'G';
+	latch.set(g);
+	events = set.release_pass(latch, key_state);
+	CHECK(events.size() == 1 && events[0].code == 220 && events[0].key == 'G');
+	return true;
+}
+
 } // namespace
 
 int main() {
 	int failed = 0;
 	for (const auto test : {test_queue_keeps_each_press_in_order,
 				 test_queue_wraps_without_a_full_test, test_keypad_enter_scans_as_269,
-				 test_each_event_fires_its_row})
+				 test_each_event_fires_its_row, test_release_pass_follows_the_press_latch})
 		if (!test()) ++failed;
 	std::cout << "controls_key_event_queue: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

@@ -112,7 +112,7 @@ public:
 	bool take_vehicle_menu_request();
 	// A menu close's input reset: the key queue (KeyEventQueue::reset), the key
 	// state (ControlsModel::reset_key_state), the key-press latch
-	// (controls::PlayerActions::clear_key_press_latches) and the deferred queue
+	// (KeyEventQueue::clear_press_latch) and the deferred queue
 	// (Simulation::clear_deferred_input).
 	void reset_input_state();
 	// The device's key queue, one per process: the shell feeds it every key-down in
@@ -123,10 +123,17 @@ public:
 	// the key state holds them (KeyEventQueue::push_key).
 	void push_key_event(const Ref<InputEventKey> &p_event);
 	// One row event the keyboard pass's scan queued (the shell's KeyboardPass):
-	// the row's dispatch code and the sign bit its fire carries. It waits for the
-	// next update's input frame, whose drain dispatches the talk and HUD rows'
-	// (run_update_rows); the other rows still fire from their held edges.
-	void queue_row_event(int p_code, bool p_signed);
+	// the row's dispatch code, the sign bit its fire carries and the event's key
+	// (its scan code). A talk or HUD row's waits for the next update's input
+	// frame, whose drain dispatches it (run_update_rows); an action row's for the
+	// next device sample, whose action poll fires it (controls::PlayerActionPoll::
+	// key_events carries the witness).
+	void queue_row_event(int p_code, bool p_signed, int p_key);
+	// The keyboard pass's release pass, ahead of its first dequeue: each key whose
+	// press latch is set and that reads up queues its release row's event for the
+	// next device sample (engine controls::BindingSet::release_pass carries the
+	// witness).
+	void run_key_release_pass();
 	// A pass-through screen closed (death.mnu's DEATH, stat.mnu's STAT): its
 	// close's input frame takes the menu cursor's offset from the re-centre
 	// point as one update's axis input, read here from the cursor's
@@ -214,12 +221,17 @@ private:
 	// The off-keyboard holds the last edge read, which a press edge leaves behind.
 	int talk_held_ = 0;
 	int hud_held_ = 0;
-	// The keyboard pass's row events since the last update's input frame, in order.
+	// The keyboard pass's talk and HUD row events since the last update's input
+	// frame, in order.
 	struct RowEvent {
 		int code = -1;
 		bool sign = false;
 	};
 	std::vector<RowEvent> row_events_;
+	// The keyboard pass's action row events (its scan's and its release pass's)
+	// since the last device sample, in order.
+	std::vector<opennova::controls::KeyRowEvent> action_events_;
+	void queue_key_row_event(const opennova::controls::KeyRowEvent &p_event);
 	// A later update's device step (run_update_rows): the look pixels and the
 	// death screen its sample_tick reads.
 	Vector2 tick_scripted_look_;

@@ -72,8 +72,10 @@ public:
 	// joiner's at the end of its game-start wait, whose loop dequeues and drops each key
 	// but Escape), the pause row's case behind its flip, and the start-mission splash
 	// as it begins, whose exit test then dequeues the key that ended it. The game-mode
-	// push, the options and control-remap screens and the session connect waits reset it
-	// too, all ahead of the mission start's.
+	// push, the options and control-remap screens (the remap list's refresh and its
+	// display update among them), the session connect waits, the session's random-seed
+	// request and the save file's server wait reset it too, each ahead of a reset above
+	// (the mission start's, or the menu screen close's).
 	// [orig: Input_ResetAllState @0x497ED0 (the call @0x497ED0); Input_HandleActionBinding
 	//  @0x49AD40 (case 25: the flip @0x49B52D, the call @0x49B53E); Game_StartMission
 	//  @0x524360 (the joiner's wait: the call @0x526288, the dequeue @0x5262A2, Escape
@@ -82,7 +84,11 @@ public:
 	//  @0x554800 (the call @0x554DDF); UI_ControlsRemapArmHandler @0x55D560 (the call
 	//  @0x55D5BE); CGameSession_WaitForNWUValidation @0x4D0F20 (the call @0x4D11F7);
 	//  CNapiGameSession_ConnectToNovaWorld @0x4D4640 (the call @0x4D4BCA);
-	//  CNapiGameSession_ConnectOrHost @0x4D4F10 (the call @0x4D54A1)]
+	//  CNapiGameSession_ConnectOrHost @0x4D4F10 (the call @0x4D54A1);
+	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (the call @0x51EA05);
+	//  SaveFile_SendAndWaitForServerAck @0x5204B0 (the call @0x520543);
+	//  UI_RefreshControlMappingList @0x55B320 (the call @0x55B6D2);
+	//  UI_UpdateControlMappingDisplay @0x55B700 (the call @0x55B9A7)]
 	void reset() { read_ = write_ = 0; }
 	// The slot the next push writes and the slot the next pop reads, for an embedder
 	// that keeps its device's own record of each queued message beside the slot.
@@ -93,6 +99,41 @@ private:
 	std::array<KeyEvent, kCapacity> slots_{};
 	uint8_t read_ = 0;
 	uint8_t write_ = 0;
+};
+
+// One binding event the keyboard pass queues for a row (Input_QueueEvent's id: the row's
+// dispatch code, the sign in bit 31), with the key it came from: the press scan's event key
+// (key_event_scan_code), or the latched key of the release pass (BindingSet::release_pass).
+// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the release pass's queue @0x49d2b1, the
+//  press scan's @0x49d42f / @0x49d488]
+struct KeyRowEvent {
+	int code = -1;
+	bool sign = false;
+	int key = 0;
+	bool release = false;
+};
+
+// The keyboard pass's key-press latch (g_KeyPressLatch), one byte per key: the pass sets the
+// byte of every event it dequeues, ahead of the capture and special-key branches (an event an
+// open text line or the special-key chain takes too), and its release pass clears it once the
+// key reads up (BindingSet::release_pass). The queue's own reset leaves it; the whole input
+// reset clears it, so a key held through a menu close dispatches no release.
+// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the set @0x49d2ed on the event's low byte
+//  @0x49d2ea, the release pass's test @0x49d240 and clear @0x49d2b9; Input_ResetAllState
+//  @0x497ED0 - the memset @0x497F08]
+class KeyPressLatch {
+public:
+	static constexpr int kKeyCount = 256;
+
+	void set(const KeyEvent &event) { set_[event.vk] = true; }
+	bool is_set(int key) const { return key >= 0 && key < kKeyCount && set_[key]; }
+	void release(int key) {
+		if (key >= 0 && key < kKeyCount) set_[key] = false;
+	}
+	void clear() { set_.fill(false); }
+
+private:
+	std::array<bool, kKeyCount> set_{};
 };
 
 } // namespace opennova::controls

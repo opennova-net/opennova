@@ -26,8 +26,17 @@ public:
 	// them, the extended bit by the VK (keypad Enter queues VK 13 with it), the repeat bit
 	// from the echo. A key with no VK queues nothing.
 	void push_key(const Ref<InputEventKey> &p_event, bool p_ctrl_down, bool p_shift_down);
-	// The next unread key-down, null when the read index meets the write index.
+	// The next unread key-down, null when the read index meets the write index (a reader
+	// outside the input frame's keyboard pass: the start-mission splash's exit test).
 	Ref<InputEventKey> pop_key();
+	// The keyboard pass's dequeue: pop_key, and the key-press latch set for the event's
+	// key, for every event the pass takes (engine controls::KeyPressLatch carries the
+	// witness).
+	Ref<InputEventKey> pop_pass_key();
+	// The latch the pass sets and the input router's release pass reads; the queue's reset
+	// leaves it, the whole input reset clears it.
+	opennova::controls::KeyPressLatch &press_latch() { return latch_; }
+	void clear_press_latch() { latch_.clear(); }
 	// The binding scan's key for the last popped event (controls::key_event_scan_code:
 	// its VK, keypad Enter 269); 0 before any pop.
 	int last_scan_code() const { return opennova::controls::key_event_scan_code(last_); }
@@ -41,6 +50,7 @@ private:
 	opennova::controls::KeyEventQueue queue_;
 	std::array<Ref<InputEventKey>, opennova::controls::KeyEventQueue::kCapacity> events_;
 	opennova::controls::KeyEvent last_;
+	opennova::controls::KeyPressLatch latch_;
 };
 
 } // namespace godot

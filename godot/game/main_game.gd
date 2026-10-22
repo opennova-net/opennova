@@ -1746,7 +1746,10 @@ func ring_chat_key(key: InputEventKey) -> bool:
 ## round-over leg takes every key an earlier arm (the USE hold, an open Emotes /
 ## Radio menu) does not hold: RESTART runs the splash re-run (over a custom loading
 ## background) and the restart, ESC the quit; both reach the shell as the
-## session's mission exit (_on_session_lost).
+## session's mission exit (_on_session_lost). A key such an arm passes (a non-digit
+## under the USE hold) goes on to the chain's tail, the deploy test and the help and
+## briefing page keys, as over live play (GameHudPresenter.handle_special_key skips
+## the held legs).
 func ring_special_key(key: InputEventKey, events: Array[int]) -> bool:
 	if _hud_presenter == null:
 		return false
@@ -1754,7 +1757,8 @@ func ring_special_key(key: InputEventKey, events: Array[int]) -> bool:
 		var bits := _hud_presenter.handle_round_over_key(key)
 		if bits & HudToggles.ROUND_OVER_RESTART:
 			_begin_restart_splash()
-		return (bits & HudToggles.ROUND_OVER_CONSUMED) != 0
+		if bits & HudToggles.ROUND_OVER_CONSUMED:
+			return true
 	return _hud_presenter.handle_special_key(key, _deploy_key_param,
 			func(param: int) -> void: events.append(param))
 
@@ -1766,13 +1770,21 @@ func ring_binding_code(scan_code: int) -> int:
 
 
 ## Any other row the scan fired: its event, with the fire's sign (Shift on a
-## fallback-pass fire), waits for the player input router's next update, whose
-## drain dispatches it (PlayerInputRouter::queue_row_event). A key the scripted
-## device replayed for its hold fires its row through the hold instead.
+## fallback-pass fire) and the event's key, waits for the player input router,
+## which dispatches it once (PlayerInputRouter::queue_row_event). A key the
+## scripted device replayed for its hold fires its row through the hold instead.
 func ring_row_event(key: InputEventKey, code: int, scan_code: int) -> void:
 	if _player_presenter == null or ControlsModel.is_scripted_key_event(key):
 		return
-	_player_presenter.queue_row_event(code, ControlsBindings.model().event_signed(scan_code))
+	_player_presenter.queue_row_event(code, ControlsBindings.model().event_signed(scan_code),
+			scan_code)
+
+
+## The keyboard pass's release pass, ahead of its first dequeue: a latched key that
+## reads up queues its release row's event (PlayerInputRouter::run_key_release_pass).
+func ring_release_pass() -> void:
+	if _player_presenter != null:
+		_player_presenter.run_key_release_pass()
 
 
 ## A key's deploy pick parameter by the engine's rule, -1 when not taken.
@@ -1863,9 +1875,9 @@ func _reset_screen_close_input() -> void:
 
 # Every menu screen's close resets the input state: a key held through it
 # reads up until its next key-down and dispatches no release, and a deferred
-# dispatch is dropped (engine controls::KeyStateReset and
-# PlayerActions::clear_key_press_latches carry the witness); the key queue goes
-# with it (Input_ResetAllState's Input_ResetKeyQueue; the input router resets it).
+# dispatch is dropped (engine controls::KeyStateReset and KeyPressLatch carry the
+# witness); the key queue goes with it (Input_ResetAllState's Input_ResetKeyQueue;
+# the input router resets it).
 func _reset_key_state() -> void:
 	if _player_presenter != null:
 		_player_presenter.reset_input_state()

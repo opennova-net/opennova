@@ -6,6 +6,8 @@
 #include <string_view>
 #include <vector>
 
+#include <runtime/controls/key_event_queue.h>
+
 namespace opennova::controls {
 
 // The embedder resolves bindings against its devices. A keyboard match returns
@@ -27,14 +29,15 @@ public:
 	//  Input_TryTriggerJoystickButton @0x497B7A / @0x497BA9 (unsigned)]
 	virtual bool fire_signed(const char *token) const = 0;
 	// Whether a key bound to the token's row is down by the key state alone:
-	// no scan gate, no keyboard capture, a special-key take included. Retail's
-	// key-press latch is set on every key event (a captured or consumed one
-	// too) and its release pass reads only the latch and the key state; the
-	// ToSpecial handler reads the keys raw.
-	// [orig: Input_ProcessKeyboardEvents -- the latch set @0x49D2ED ahead of
-	//  the capture and special-key branches, the release pass @0x49D240 /
-	//  @0x49D249; Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
+	// no scan gate, no keyboard capture, a special-key take included. The
+	// ToSpecial handler reads its keys raw to tell its press from its release.
+	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
 	virtual bool keys_down(const char *token) const { return pressed(token); }
+	// The token held by an arm the key queue does not carry: the mouse buttons,
+	// the joystick and the scripted device's hold. A keyboard key fires an event
+	// row once per queued key event (PlayerActionPoll::key_events); these arms
+	// keep their press edges. A source with no key queue reads every arm here.
+	virtual bool held_off_keyboard(const char *token) const { return pressed(token); }
 };
 
 enum class PlayerAction {
@@ -133,6 +136,23 @@ struct PlayerActionPoll {
 	// [orig: Input_ProcessAnalogBindings @0x4995F0, run from
 	//  Input_ProcessPlayerFrame @0x49D50C]
 	std::function<UseItemPressArm()> take_use_item_arm;
+	// The keyboard pass's events for the action rows since the last poll, in their
+	// queue order: each scanned key-down (an OS auto-repeat included) fires its row
+	// once, and the release pass's events dispatch ToSpecial's release. Each queued
+	// event is its own record (no merge of equal ones), and the drain dispatches every
+	// record in order; the keyboard pass runs ahead of the mouse and toggle passes, so
+	// its events dispatch first. (The embedder routes the talk and HUD rows' events
+	// to its update's drain on the same rule.) A digit's event is the special-key
+	// chain's while the USE hold or an Emotes / Radio menu holds it, so no row fires
+	// for it. The rows' off-keyboard arms keep their press edges
+	// (PlayerActionSource::held_off_keyboard).
+	// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the release pass @0x49d249..
+	//  0x49d2b9, the press scan's queue @0x49d42f / @0x49d488; Input_QueueEvent
+	//  @0x4979C0; Input_HandleSpecialKeys @0x49c5c0 - the digit tests @0x49c6e0 /
+	//  @0x49c73f / @0x49c78b; Input_ProcessFrame @0x49d520 - the drain's dispatch
+	//  @0x49d5d8; Input_ProcessPlayerFrame @0x49d4c0 - the keyboard pass @0x49d4c6
+	//  ahead of the mouse and toggle passes @0x49d4d8 / @0x49d4de]
+	std::vector<KeyRowEvent> key_events;
 };
 
 struct PlayerActionFrame {
@@ -141,10 +161,14 @@ struct PlayerActionFrame {
 	bool reload_edge = false;
 	bool medic_edge = false;
 	// ToSpecial (catalog row 37, default F, dispatch 220): its keys' live state
-	// and a dispatch on either edge, press or release — the row's flags carry
-	// the release bit (0x80000000) beside the press dispatch, and the handler
-	// tells the two apart by the keys' state [orig: Input_ProcessKeyboardEvents
-	// @0x49D249..0x49D2B9 (release) / @0x49D42F (press); row flags 0x8C000801].
+	// and a dispatch: its scanned key-down's event (a press, an OS repeat
+	// included), the release pass's event (the row's flags carry the release bit
+	// 0x80000000), or an edge of its off-keyboard arm; the handler tells a press
+	// from a release by the keys' state. Two in one input frame run one dispatch:
+	// the handler's second press or second release changes nothing.
+	// [orig: Input_ProcessKeyboardEvents @0x49D249..0x49D2B9 (release) / @0x49D42F
+	//  (press); row flags 0x8C000801; Input_HandleActionBinding_0 case 0xDC
+	//  @0x4E1161..0x4E1181]
 	bool to_special_held = false;
 	bool to_special_edge = false;
 	// The Respawn row (catalog row 68, Ctrl+R, dispatch 55): its press edge
@@ -263,20 +287,16 @@ public:
 	//  @0x49c6d8 (its clear word on to the Emotes arm @0x49c731), a non-digit's jump to
 	//  the tail @0x49c6e0 -> @0x49c9c9]
 	bool use_held() const { return use_latched_; }
-	// A menu close's reset clears the key-press latch, which gates the release
-	// dispatch: a key held through it dispatches no release, neither then nor
-	// at its physical release (ToSpecial's release arm is the one ported).
-	// [orig: Input_ResetAllState @0x497ED0 -- the g_KeyPressLatch memset
-	//  @0x497F08; Input_ProcessKeyboardEvents, the release pass's latch test
-	//  @0x49D249 and clear @0x49D2B9, the latch set on a key event @0x49D2ED]
-	void clear_key_press_latches();
 	// The death screen's spectator rows, the catalog's mode-2 rows 110..112
 	// (CycleSpectatorMode, IncSpectatorTarget, DecSpectatorTarget): the binding
 	// scan admits them only while the death screen is up, so the embedder
-	// polls them there, on their press edges, while gameplay input is active.
+	// polls them there while gameplay input is active: one request per queued
+	// key event in `events` (the poll's key_events), in their order, then the
+	// press edges of the rows' off-keyboard arms.
 	// [orig: Input_IsBindingActiveForMode @0x497ea0 — row +8 bit 2 on the
 	//  death screen; rows @0x818810 / @0x81887C / @0x8188E8 -> codes 500..502]
-	std::vector<PlayerActionRequest> poll_spectator(const PlayerActionSource &source, bool active);
+	std::vector<PlayerActionRequest> poll_spectator(const PlayerActionSource &source, bool active,
+			const std::vector<KeyRowEvent> &events = {});
 
 private:
 	struct RowLatch { bool down = false; };
@@ -285,7 +305,8 @@ private:
 	bool reload_was_down_ = false;
 	bool medic_was_down_ = false;
 	bool respawn_was_down_ = false;
-	bool to_special_was_down_ = false;
+	// ToSpecial's off-keyboard arm, whose edges dispatch both ways.
+	bool to_special_off_down_ = false;
 	bool use_latched_ = false;
 	bool use_held_prev_ = false;
 	bool use_hold_consumed_ = false;
@@ -297,6 +318,11 @@ private:
 
 	void sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,
 			PlayerActionFrame &frame);
+	// A key event the special-key chain took ahead of the binding scan: a digit
+	// while the USE hold (the hold the last poll latched) or an open Emotes / Radio
+	// menu holds the chain, whose arm picks the seat or the menu entry from the
+	// digit's key state (sample_use), so no row fires for its event.
+	bool chain_takes_key(const KeyRowEvent &event) const;
 };
 
 // Only the seven currently routed wheel actions. The host admits a pressed

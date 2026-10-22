@@ -17,7 +17,14 @@ class RecordingLegs:
 	var chat_open := false
 	var escape_resets := true
 	var calls: Array[String] = []
+	var release_passes := 0
+	var release_pass_first := false
 	var _reset := false
+
+	# The release pass: counted, and whether it ran ahead of every other leg.
+	func ring_release_pass() -> void:
+		release_passes += 1
+		release_pass_first = calls.is_empty()
 
 	func ring_chat_key(key: InputEventKey) -> bool:
 		if not chat_open:
@@ -106,6 +113,21 @@ func test_inline_special_keys_run_ahead_of_the_queued_escape() -> void:
 	assert_eq(calls.size(), 2)
 	assert_eq(calls[0] if calls.size() > 0 else "", "page pgdn")
 	assert_eq(calls[1] if calls.size() > 1 else "", "escape")
+
+
+# The release pass runs once per drain, ahead of the first dequeue (its latched
+# keys' releases queue before the pass's own events), and with no key waiting too.
+# [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the release pass @0x49d22f..
+#  0x49d2cc ahead of the first Input_DequeueKeyEvent @0x49d2d2]
+func test_the_release_pass_runs_ahead_of_the_dequeue() -> void:
+	var legs := RecordingLegs.new()
+	var calls := _drained([KEY_PAGEDOWN, KEY_ESCAPE], legs)
+	assert_eq(calls.size(), 2)
+	assert_eq(legs.release_passes, 1, "one release pass per drain")
+	assert_true(legs.release_pass_first, "ahead of the keys")
+	var idle := RecordingLegs.new()
+	KeyboardPass.new().drain(idle)
+	assert_eq(idle.release_passes, 1, "an empty queue runs the release pass too")
 
 
 # A deploy key waiting ahead of an Escape: its pick's reset drops the Escape

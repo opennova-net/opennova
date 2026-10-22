@@ -16,23 +16,26 @@ extends RefCounted
 ## menu: the escape row's case finds a menu screen open (stat.mnu's STAT opens
 ## through UI_OpenMenuScreen like DEATH).
 ## One drain is the keyboard pass and then the event drain, in the original's
-## order: an open chat line takes each key; otherwise the special-key chain runs
-## its inline legs (the quit dialog's keys, the round-over leg's, the page keys)
-## and the deploy leg queues its pick (event 12; under STAT too, a dead
+## order: first the release pass (each key whose press latch is set and that reads
+## up queues its release row's event, ToSpecial's); then every dequeued key sets
+## its press latch, and an open chat line takes it; otherwise the special-key chain
+## runs its inline legs (the quit dialog's keys, the round-over leg's, the page
+## keys) and the deploy leg queues its pick (event 12; under STAT too, a dead
 ## player's); a key the chain leaves is the binding scan's: the escape row's key
 ## queues its event (18), any other row's key its row event, which the player
-## input router dispatches in the next update's input frame (the talk and HUD
-## rows; every other row still fires from its held edge). Then the queued events
-## dispatch in order,
+## input router dispatches once per event (a talk or HUD row's in the next
+## update's input frame, an action row's in the next device sample). Then the
+## queued events dispatch in order,
 ## and the first whose case resets the input (12's and 18's Input_ResetAllState
 ## memset the event queue) drops the rest. So a deploy key pressed under the
 ## confirmation sends its pick after the NO, ahead of the NO's own Escape, which
 ## the pick's reset drops; a stale LEAVE MISSION Escape runs the Escape action
 ## once. (Engine world::pass_through_close_axis carries the screens' witness;
 ## engine controls::KeyEventQueue and BindingSet::event_row the queue's and the
-## scan's.)
+## scan's, controls::KeyPressLatch and BindingSet::release_pass the latch's.)
 ##
 ## The legs are the shell's (MainGame implements them; a test supplies its own):
+##   ring_release_pass()                the release pass, ahead of the dequeue
 ##   ring_chat_key(key) -> bool        an open chat line took the key
 ##   ring_special_key(key, events) -> bool
 ##                                      the special-key chain took the key; its
@@ -87,8 +90,9 @@ func take_key() -> InputEventKey:
 
 ## One input frame over the queue (the class comment carries the order).
 func drain(legs: Object) -> void:
+	legs.ring_release_pass()
 	var events: Array[int] = []
-	var key := _keys.pop_key()
+	var key := _keys.pop_pass_key()
 	while key != null:
 		if not legs.ring_chat_key(key) and not legs.ring_special_key(key, events):
 			var scan_code := _keys.last_scan_code()
@@ -97,7 +101,7 @@ func drain(legs: Object) -> void:
 				events.append(ESCAPE_EVENT)
 			elif code >= 0:
 				legs.ring_row_event(key, code, scan_code)
-		key = _keys.pop_key()
+		key = _keys.pop_pass_key()
 	for event in events:
 		if event == ESCAPE_EVENT:
 			legs.ring_escape()

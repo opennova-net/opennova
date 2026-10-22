@@ -263,9 +263,11 @@ public:
 		input_router_.push_key_event(p_event);
 	}
 	// One row event the keyboard pass's scan queued (PlayerInputRouter::queue_row_event).
-	void queue_row_event(int p_code, bool p_signed) {
-		input_router_.queue_row_event(p_code, p_signed);
+	void queue_row_event(int p_code, bool p_signed, int p_key) {
+		input_router_.queue_row_event(p_code, p_signed, p_key);
 	}
+	// The keyboard pass's release pass (PlayerInputRouter::run_key_release_pass).
+	void run_key_release_pass() { input_router_.run_key_release_pass(); }
 	// A pass-through screen's close: the next input frame takes the menu
 	// cursor's offset (PlayerInputRouter::close_pass_through_screen).
 	void close_pass_through_screen();

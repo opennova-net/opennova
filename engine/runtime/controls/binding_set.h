@@ -24,6 +24,7 @@
 #include <vector>
 
 #include <runtime/controls/controls.h>
+#include <runtime/controls/key_event_queue.h>
 
 namespace opennova::controls {
 
@@ -221,6 +222,32 @@ class BindingSet {
   //  @0x49d498]
   int event_row(int scan_code, const std::function<bool(int)> &key_down,
                 bool *fallback_signed = nullptr) const;
+
+  // The release pass's row for a key: the first row of the walk (by action
+  // code) holding the key in either slot whose flags carry the release bit
+  // 0x80000000 or the release-only 0x800000 (ToSpecial and attack_1 in the
+  // catalog), or -1. No scan gate, no mode bit, no modifier word.
+  // [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the mask 0x80800000
+  //  @0x49d236, the walk @0x49d252..0x49d27f (the slots @0x49d260 /
+  //  @0x49d268, the flags test @0x49d26f)]
+  int release_row(int key) const;
+
+  // The keyboard pass's release pass, ahead of its first dequeue: every key
+  // whose press latch is set and whose key state reads up, in key order,
+  // queues its release row's event (the sign: Shift's key state, or flag
+  // 0x200 of the record the walk's second pointer reaches, the row whose code
+  // is the key's index, which no catalog row carries) and clears its latch;
+  // an open text line (keyboard_captured) clears the latch with no event, and
+  // a key no release row holds keeps its latch. `key_state` is the device's
+  // key state alone (a menu close's reset honoured; no scan gate, no special
+  // key's take).
+  // [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the loop @0x49d22f..
+  //  0x49d2cc (the latch @0x49d240, the key state @0x49d249), Shift's state
+  //  @0x49d283 or [edi] & 0x200 @0x49d28c -> 0x80000000 @0x49d298, the
+  //  capture word @0x49d29f, Input_QueueEvent(sign | code) @0x49d2b1, the
+  //  clear @0x49d2b9; no row found leaves the latch @0x49d281]
+  std::vector<KeyRowEvent> release_pass(
+      KeyPressLatch &latch, const std::function<bool(int)> &key_state) const;
 
   // The key scan's two live gates, which the embedder sets at the head of
   // every input frame (each logic tick's) ahead of its polls: the death

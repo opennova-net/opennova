@@ -144,6 +144,10 @@ public:
 	// special-key take included; engine controls::PlayerActionSource::keys_down
 	// carries the witness).
 	bool is_token_key_down(const char *p_token) const;
+	// A VK down by the key state alone (the reset-aware device state; a key the
+	// special-key chain took still reads down): the keyboard pass's release pass
+	// reads it (engine BindingSet::release_pass carries the witness).
+	bool is_key_state_down(int p_vk) const;
 	// A menu close's key-state reset: every key held now reads up until its
 	// next key-down, which the shell reports through key_down_event for every
 	// key press and OS repeat, or its release (engine controls::KeyStateReset

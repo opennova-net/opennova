@@ -43,6 +43,10 @@ class DeployRingLegs:
 		presenter = p_presenter
 		sim = p_sim
 
+	# No release row is the deploy screen's.
+	func ring_release_pass() -> void:
+		pass
+
 	func ring_chat_key(_key: InputEventKey) -> bool:
 		return false
 

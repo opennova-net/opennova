@@ -44,6 +44,46 @@ const IDLE_BAD_FIXTURE := "res://../fixtures/anim/idle.bad"
 const WALK_BAD_FIXTURE := "res://../fixtures/anim/walk.bad"
 
 var _shared_root := ""
+# The binding model each presenter of the case reads (its keyboard pass's scan).
+var _models := {}
+
+
+# The keyboard pass's legs over a bare presenter (the shell's MainGame legs,
+# trimmed): no chat line and no special-key chain, the binding scan over the
+# presenter's own binding model, every row's event into the presenter's input
+# router, and the release pass first (KeyboardPass carries the order).
+class PresenterKeyLegs:
+	extends RefCounted
+	var presenter: LocalPlayerPresenter
+	var model: ControlsModel
+
+	func _init(p_presenter: LocalPlayerPresenter, p_model: ControlsModel) -> void:
+		presenter = p_presenter
+		model = p_model
+
+	func ring_release_pass() -> void:
+		presenter.run_key_release_pass()
+
+	func ring_chat_key(_key: InputEventKey) -> bool:
+		return false
+
+	func ring_special_key(_key: InputEventKey, _events: Array[int]) -> bool:
+		return false
+
+	func ring_binding_code(scan_code: int) -> int:
+		return model.event_code(scan_code)
+
+	func ring_row_event(_key: InputEventKey, code: int, scan_code: int) -> void:
+		presenter.queue_row_event(code, model.event_signed(scan_code), scan_code)
+
+	func ring_escape() -> void:
+		pass
+
+	func ring_pick(_param: int) -> void:
+		pass
+
+	func ring_reset_ran() -> bool:
+		return false
 
 
 func before_all() -> void:
@@ -57,8 +97,10 @@ func after_all() -> void:
 func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	# A key a failed assertion left down must not leak into the next case.
-	for keycode in [KEY_SHIFT, KEY_CTRL, KEY_7, KEY_Z, KEY_X, KEY_C]:
+	for keycode in [KEY_SHIFT, KEY_CTRL, KEY_7, KEY_Z, KEY_X, KEY_C, KEY_0, KEY_B, KEY_N,
+			KEY_EQUAL, KEY_MINUS]:
 		_hold(keycode, false)
+	_models.clear()
 
 
 # Physical key state through Input, flushed so the router's next sample sees it.
@@ -71,17 +113,29 @@ func _hold(keycode: Key, pressed: bool) -> void:
 	Input.flush_buffered_events()
 
 
-# One press of a polled binding row over the live key state (Ctrl held for a
-# modified row), a frame down and a frame up.
+# A key's press or release as the shell takes it over a bare presenter: the key
+# state through Input, a key-down into the presenter's key queue, and the next
+# input frame's keyboard pass over the queue, whose row events wait in the input
+# router for the next sample (D-CTRL-6: an event row fires once per key-down).
+func _press(presenter: LocalPlayerPresenter, keycode: Key, pressed: bool) -> void:
+	_hold(keycode, pressed)
+	if pressed:
+		presenter.push_key_event(_key_event(keycode))
+	KeyboardPass.new(presenter.get_key_events()).drain(
+			PresenterKeyLegs.new(presenter, _models[presenter]))
+
+
+# One press of a binding row (Ctrl held for a modified row), a frame down and a
+# frame up.
 func _tap_row(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
 		keycode: Key, ctrl: bool = false) -> void:
 	if ctrl:
-		_hold(KEY_CTRL, true)
-	_hold(keycode, true)
+		_press(presenter, KEY_CTRL, true)
+	_press(presenter, keycode, true)
 	_frame(world, presenter, camera, 1)
-	_hold(keycode, false)
+	_press(presenter, keycode, false)
 	if ctrl:
-		_hold(KEY_CTRL, false)
+		_press(presenter, KEY_CTRL, false)
 	_frame(world, presenter, camera, 1)
 
 
@@ -257,7 +311,9 @@ func _bare_world() -> GameWorld:
 func _attach_presenter(world: GameWorld, camera: Camera3D) -> LocalPlayerPresenter:
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup(world, camera, null, ControlsModel.new())
+	var model := ControlsModel.new()
+	presenter.setup(world, camera, null, model)
+	_models[presenter] = model
 	presenter.set_input_override(_move_intent())
 	return presenter
 
@@ -458,9 +514,9 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 	assert_eq(int(sim.get_local_player_stance()), 0, "the spawned player stands")
 
 	for pair in [[KEY_Z, 2], [KEY_X, 1], [KEY_C, 0]]:
-		_hold(pair[0], true)
+		_press(presenter, pair[0], true)
 		_frame(world, presenter, camera, 3)
-		_hold(pair[0], false)
+		_press(presenter, pair[0], false)
 		_frame(world, presenter, camera)
 		assert_eq(int(sim.get_local_player_stance()), int(pair[1]),
 				"the sim grants the requested stance for key %d" % pair[0])
@@ -482,21 +538,22 @@ func test_overlay_key_latch_and_remapped_wheel_reach_the_sim() -> void:
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, camera, null, model)
+	_models[presenter] = model
 	presenter.set_input_override(_move_intent())
 	await get_tree().process_frame
 	var sim := world.get_sim()
 
-	_hold(KEY_Z, true)
+	_press(presenter, KEY_Z, true)
 	_frame(world, presenter, camera, 2, false)
 	assert_eq(int(sim.get_local_player_stance()), 0, "an overlay blocks the new prone press")
 	_frame(world, presenter, camera, 2)
 	assert_eq(int(sim.get_local_player_stance()), 0, "closing it does not re-fire the held key")
-	_hold(KEY_Z, false)
+	_press(presenter, KEY_Z, false)
 	_frame(world, presenter, camera)
-	_hold(KEY_Z, true)
+	_press(presenter, KEY_Z, true)
 	_frame(world, presenter, camera, 3)
 	assert_eq(int(sim.get_local_player_stance()), 2, "a fresh press reaches the sim")
-	_hold(KEY_Z, false)
+	_press(presenter, KEY_Z, false)
 	_frame(world, presenter, camera)
 
 	var wheel := InputEventMouseButton.new()
@@ -742,43 +799,44 @@ func test_use_hold_swallows_digit_rows_and_ctrl_digit_claims_them() -> void:
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, camera, null, model)
+	_models[presenter] = model
 	presenter.set_input_override(_move_intent())
 	await get_tree().process_frame
 	_frame(world, presenter, camera, 2)
 	var sim := world.get_sim()
 	var zoom := sim.get_hud_radar_zoom_q16()
 
-	_hold(KEY_0, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 2)
 	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "a bare 0 fires the rebound radarout row")
-	_hold(KEY_0, false)
+	_press(presenter, KEY_0, false)
 	_frame(world, presenter, camera, 2)
 	zoom = sim.get_hud_radar_zoom_q16()
 
-	_hold(KEY_SHIFT, true)
+	_press(presenter, KEY_SHIFT, true)
 	_frame(world, presenter, camera, 2)  # the hold must have been live LAST frame
-	_hold(KEY_0, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 3)
 	assert_eq(sim.get_hud_radar_zoom_q16(), zoom,
 			"a digit under the USE hold is the seat chord and reaches no row")
-	_hold(KEY_0, false)
-	_hold(KEY_SHIFT, false)
+	_press(presenter, KEY_0, false)
+	_press(presenter, KEY_SHIFT, false)
 	_frame(world, presenter, camera, 2)
 	assert_eq(sim.get_hud_radar_zoom_q16(), zoom, "releasing the hold fires nothing")
 
-	_hold(KEY_CTRL, true)
-	_hold(KEY_0, true)
+	_press(presenter, KEY_CTRL, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 3)
 	assert_eq(sim.get_hud_radar_zoom_q16(), zoom,
 			"Ctrl+0 is the seat10 row: the modifier pass claims the key")
-	_hold(KEY_0, false)
-	_hold(KEY_CTRL, false)
+	_press(presenter, KEY_0, false)
+	_press(presenter, KEY_CTRL, false)
 	_frame(world, presenter, camera, 2)
 
-	_hold(KEY_0, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 2)
 	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "the same bare 0 fires again")
-	_hold(KEY_0, false)
+	_press(presenter, KEY_0, false)
 	_frame(world, presenter, camera, 2)
 
 
@@ -857,6 +915,7 @@ func test_open_voice_menu_takes_the_digit_before_the_rows() -> void:
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, camera, null, model)
+	_models[presenter] = model
 	presenter.set_input_override(_move_intent())
 	var toggles := HudToggles.new()
 	presenter.set_hud_toggles(toggles)
@@ -869,17 +928,17 @@ func test_open_voice_menu_takes_the_digit_before_the_rows() -> void:
 	toggles.poll(0, true, false, false)
 	assert_true(toggles.is_emotes_menu_open(), "the emotes menu is open")
 
-	_hold(KEY_0, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 2)
 	assert_false(toggles.is_emotes_menu_open(), "the digit picks and closes the menu")
 	assert_eq(sim.get_hud_radar_zoom_q16(), zoom, "the picked digit reaches no row")
-	_hold(KEY_0, false)
+	_press(presenter, KEY_0, false)
 	_frame(world, presenter, camera, 2)
 
-	_hold(KEY_0, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 2)
 	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "with the menu closed the 0 fires the row")
-	_hold(KEY_0, false)
+	_press(presenter, KEY_0, false)
 	_frame(world, presenter, camera, 2)
 
 

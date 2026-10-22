@@ -453,6 +453,44 @@ int BindingSet::event_row(int scan_code, const std::function<bool(int)> &key_dow
   return fallback;
 }
 
+int BindingSet::release_row(int key) const {
+  // [orig: Input_ProcessKeyboardEvents -- the walk @0x49d252..0x49d27f over
+  //  the re-laid records, the slots @0x49d260 / @0x49d268, `test [eax-12h],
+  //  ebp` (0x80800000 @0x49d236) @0x49d26f]
+  std::size_t n = 0;
+  const ActionDef *cat = catalog(&n);
+  for (const int i : scan_order()) {
+    const BindingRecord &rec = records_[static_cast<std::size_t>(i)];
+    if (rec.primary != key && rec.secondary != key) continue;
+    if ((cat[i].flags & 0x80800000u) != 0) return i;
+  }
+  return -1;
+}
+
+std::vector<KeyRowEvent> BindingSet::release_pass(
+    KeyPressLatch &latch, const std::function<bool(int)> &key_state) const {
+  std::vector<KeyRowEvent> out;
+  std::size_t n = 0;
+  const ActionDef *cat = catalog(&n);
+  // [orig: Input_ProcessKeyboardEvents @0x49d22f..0x49d2cc]
+  for (int key = 0; key < KeyPressLatch::kKeyCount; ++key) {
+    if (!latch.is_set(key) || key_state(key)) continue;  // @0x49d240 / @0x49d249
+    const int row = release_row(key);
+    if (row < 0) continue;  // the latch stays set @0x49d281
+    // The sign: Shift's state, else the 0x200 flag of the record the second
+    // pointer reaches, the one at the key's index (the row whose code is the
+    // key) [orig: @0x49d283..0x49d298].
+    const ActionDef *by_index = action_for_code(key);
+    const bool sign =
+        key_state(16) || (by_index != nullptr && (by_index->flags & 0x200u) != 0);
+    // An open text line queues nothing [orig: @0x49d29f; the queue @0x49d2b1].
+    if (!keyboard_captured_)
+      out.push_back(KeyRowEvent{action_code(cat[row].id), sign, key, true});
+    latch.release(key);  // @0x49d2b9
+  }
+  return out;
+}
+
 int BindingSet::pressed_key(int index,
                             const std::function<bool(int)> &key_down) const {
   const BindingRecord *r = record(index);
