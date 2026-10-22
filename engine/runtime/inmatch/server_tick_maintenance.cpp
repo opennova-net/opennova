@@ -729,8 +729,11 @@ void emit_row_rtt(NapiNPServerCtx &ctx, const world::World &world, NapiNPConnect
 			row.reply.rtt_request_countdown != 0)
 		return;
 	row.reply.rtt_request_countdown = 62;
+	// The request's body is GetTickCount, the process clock the host binds, which the return
+	// leg subtracts from its own (D-NET-NEW-L8-30) [orig: Server_TickUpdate - GetTickCount
+	// @0x51E417, the store @0x51E42E].
 	std::vector<uint8_t> body;
-	io::append_u32_le(body, io::host_milliseconds_for_logic_tick(world.logic_tick));
+	io::append_u32_le(body, world::authority_tick_count_ms(world));
 	body.push_back(1);
 	net_player->link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
 }

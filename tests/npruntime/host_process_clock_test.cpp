@@ -106,10 +106,39 @@ void test_time_sync_reads_the_process_clock() {
 	       "a held tick's 5000 ms of clock closes the round");
 }
 
+// D-NET-NEW-L8-30: the RTT request's body and the return leg's now are GetTickCount. The row's
+// S2C 0x57 carries the clock; 300 ms of clock later, the logic tick held, the echoed stamp's
+// C2S 0x2C (no echo flag) measures a 300 ms round trip (the seam would measure 0).
+// [orig: Server_TickUpdate - GetTickCount @0x51E417 into the 0x57's body @0x51E42E;
+//  NapiNPServerMsg_HandlePingResponse @0x515070 - GetTickCount @0x515116, `sub eax, edi`
+//  @0x51511C, the store @0x515121]
+void test_rtt_reads_the_process_clock() {
+	ClockHost host;
+	inmatch::Server_TickUpdate(host.ctx);
+	uint32_t stamp = 0;
+	bool sent = false;
+	ns::Datagram datagram;
+	while (host.transport->pop_outbound(datagram))
+		if (datagram.tag == s2c::RTT_ECHO && datagram.body.size() == 5) {
+			sent = true;
+			stamp = static_cast<uint32_t>(datagram.body[0]) |
+					(static_cast<uint32_t>(datagram.body[1]) << 8) |
+					(static_cast<uint32_t>(datagram.body[2]) << 16) |
+					(static_cast<uint32_t>(datagram.body[3]) << 24);
+		}
+	expect(sent && stamp == 70000u, "the RTT request carries the process clock");
+	host.clock += 300u; // the logic tick holds
+	std::vector<uint8_t> back = u32_pair(stamp, 0u);
+	back.resize(4); // the bare stamp: no echo flag, the return leg
+	host.reply(c2s::RTT_CONSUMED, back);
+	expect(host.conn().reply.rtt_ms == 300u, "the return leg measures 300 ms on the clock");
+}
+
 } // namespace
 
 int main() {
 	test_time_sync_reads_the_process_clock();
+	test_rtt_reads_the_process_clock();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "npruntime_host_process_clock: %d failure(s)\n", g_failures);
 		return 1;

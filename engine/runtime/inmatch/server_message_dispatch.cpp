@@ -1175,8 +1175,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					pong.reliable = false; // SendFiltered @0x51510C userParam=1
 					replies.push_back(std::move(pong));
 				} else if (conn.link.owned_entity.valid()) {
+					// Now is GetTickCount, the process clock (D-NET-NEW-L8-30)
+					// [orig: @0x515116, `sub eax, edi` @0x51511C].
 					Server_RecordPingSample(config, conn, ts,
-							io::host_milliseconds_for_logic_tick(now_tick),
+							world::authority_tick_count_ms(world, now_tick),
 							inputs.server_ctx != nullptr && inputs.server_ctx->is_in_session != 0);
 				}
 				break;
