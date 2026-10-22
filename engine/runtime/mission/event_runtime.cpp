@@ -600,7 +600,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             cmds.set_ssn_team(static_cast<uint16_t>(a.param1), a.param2);
             break;
         case bms::ActionType::SingleChangeGroup:
-            // [orig: Entity_SetNetIdByParentRef @0x43D6C0]
+            // [orig: Entity_SetCommandGroupByDcbId @0x43D6C0]
             cmds.set_ssn_group(static_cast<uint16_t>(a.param1), a.param2);
             break;
         case bms::ActionType::SingleTeleportAction:
@@ -632,7 +632,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         case bms::ActionType::KillSingle: cmds.kill_ssn(static_cast<uint16_t>(a.param1)); break;
         case bms::ActionType::VaporizeSingle:
             // [orig: EventAction_Dispatch case 22 @0x454828 ->
-            //  Entity_FindByParentAndDispatch @0x43E210]
+            //  Entity_RemoveByDcbId @0x43E210]
             cmds.remove_bms_ref(a.param1);
             break;
         case bms::ActionType::KillGroup: cmds.kill_group(a.param1); break;

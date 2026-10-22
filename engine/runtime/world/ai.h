@@ -628,7 +628,7 @@ int32_t body_dcb_id(const World &world, const AiEntity &body, const Entity *enti
 //  Entity_FindNearestThreat @0x4B0990 - self @0x4B0A7B / @0x4B0A99 / @0x4B0ABF / @0x4B0ADD,
 //  target @0x4B0A85 / @0x4B0A96 / @0x4B0AC9 / @0x4B0ADA;
 //  Projectile_ProcessDamageOnTarget @0x4E7FB0 - shooter @0x4E80C0 / @0x4E80EA, target
-//  @0x4E80D0 / @0x4E80E1; the guard e.g. TeamMatrix_SetEnemy @0x452BF0 - @0x452BF4..0x452C05]
+//  @0x4E80D0 / @0x4E80E1; the guard e.g. SeesMatrix_SetSingleSingleBit @0x452BF0 - @0x452BF4..0x452C05]
 int32_t entity_dcb_id(const World &world, const Entity &entity);
 
 class AiSystem; // fwd
@@ -811,14 +811,14 @@ struct RelMatCall {
 // [orig: AI_HandleEvent_HelicopterCombatD @0x4677b3..0x4678b2.] The matrices live in the
 // net/relation layer; we record the calls (op + the two keys) rather than apply them.
 enum RelOp {
-    kRelEventSpecial = 0, // EventMatrix_SetSpecialBit   @0x452a40 (self relmat, target relmat)
-    kRelSharedMem = 1,    // SharedMem_Init              @0x452ad0 (self net,    target relmat)
-    kRelProximity = 2,    // EntityMatrix_SetProximityBit@0x452b60 (self relmat, target net)
-    kRelEnemy = 3,        // TeamMatrix_SetEnemy         @0x452bf0 (self net,    target net)
-    kRelAllied = 4,       // TeamMatrix_SetAllied        @0x452aa0 (self relmat, target relmat)
+    kRelEventSpecial = 0, // SeesMatrix_SetGroupGroupBit   @0x452a40 (self relmat, target relmat)
+    kRelSharedMem = 1,    // SeesMatrix_SetSingleGroupBit              @0x452ad0 (self net,    target relmat)
+    kRelProximity = 2,    // SeesMatrix_SetGroupSingleBit@0x452b60 (self relmat, target net)
+    kRelEnemy = 3,        // SeesMatrix_SetSingleSingleBit         @0x452bf0 (self net,    target net)
+    kRelAllied = 4,       // TargetedMatrix_SetGroupGroupBit        @0x452aa0 (self relmat, target relmat)
     kRel452B30 = 5,       // TargetedMatrix_SetSingleGroupBit @0x452b30 (self net, target relmat)
-    kRelDamaged = 6,      // EntityMatrix_SetDamagedBit  @0x452bc0 (self relmat, target net)
-    kRelSpotted = 7,      // TeamMatrix_SetSpottedBy     @0x452c70 (self net,    target net)
+    kRelDamaged = 6,      // TargetedMatrix_SetGroupSingleBit  @0x452bc0 (self relmat, target net)
+    kRelSpotted = 7,      // TargetedMatrix_SetSingleSingleBit     @0x452c70 (self net,    target net)
 };
 struct RelOpCall { int op; int32_t a; int32_t b; };
 

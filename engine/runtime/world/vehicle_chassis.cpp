@@ -423,7 +423,7 @@ void vehicle_apply_chassis(World &world, Entity &e, CollisionMatrix &matrix) {
 // [orig: Entity_ComputeBoundingQuad @0x45B6E0 - the halves @0x45B8E4..0x45B8FC, @0x45B9A8,
 //  @0x45BA40..0x45BA86 (flt_7C59B0 = -0.5f), @0x45BC83; c0 @0x45BA6E..0x45BA7E, c1
 //  @0x45BBD2..0x45BBE4, c2 @0x45BD36..0x45BD48, c3 @0x45BE93..0x45BE9F. The callers pass row 1
-//  (CWnd_HitTest @0x6137D0, the row-1 extractor) as its right axis with the width and row 0
+//  (Math_ExtractRow1FromFixedPoint22 @0x6137D0, the row-1 extractor) as its right axis with the width and row 0
 //  (Math_ExtractRow0FromFixedPoint22 @0x613770) as its up axis with the length, e.g.
 //  Entity_ProcessTrackedVehiclePhysics @0x47DA5C..0x47DAE2]
 void vehicle_bounding_quad(const CollisionMatrix &matrix, int32_t width, int32_t length,

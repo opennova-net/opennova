@@ -1092,7 +1092,7 @@ static void light_bounding_quad(const VehicleTraits &traits, const VehicleEulerB
 // Preserve SIDE, rebuild UP from axle x side, then forward from side x up.
 // Column helpers and the cross-product operands, not Hex-Rays local names,
 // determine the axes. [orig: Entity_UpdateVehicleChassisOrientation @ 0x468A50;
-// Math_FixedPointCrossProduct @ 0x6134A0; CWnd_HitTest @ 0x6137D0]
+// Math_FixedPointCrossProduct @ 0x6134A0; Math_ExtractRow1FromFixedPoint22 @ 0x6137D0]
 static CollisionMatrix light_axle_frame(const int32_t corners[4][3], const CollisionMatrix &old) {
     const int64_t axle[3] = {int64_t(corners[0][0]) - corners[1][0],
             int64_t(corners[0][1]) - corners[1][1], int64_t(corners[0][2]) - corners[1][2]};

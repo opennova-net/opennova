@@ -442,7 +442,7 @@ static void test_a_player_candidates_term_reads_its_dcb_id() {
 // rows and the observer's single-group row and no single row of its own, where its net id
 // (0 on our host) would set row 0. The pick itself reads 10007 as the test above does.
 // [orig: Entity_UpdateInfantryAI - self @0x4BE42C / @0x4BE456, target @0x4BE43C / @0x4BE453;
-//  SharedMem_Init @0x452AD0 - `cmp eax, 80h` @0x452AD4; TeamMatrix_SetEnemy @0x452BF0 -
+//  SeesMatrix_SetSingleGroupBit @0x452AD0 - `cmp eax, 80h` @0x452AD4; SeesMatrix_SetSingleSingleBit @0x452BF0 -
 //  @0x452BF4 / @0x452BFF]
 static void test_a_player_targets_sees_relations_read_its_dcb_id() {
     Fixture f;

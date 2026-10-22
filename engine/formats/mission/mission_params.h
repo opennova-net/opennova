@@ -173,7 +173,7 @@ uint8_t trigger_ssn_pools(const bms::Trigger &trigger);
 // The same of an action's param1 (docs/mission/bms-event-runtime-re.md 7.5, 10): ChangeSingleAI,
 // ChangeSteam, SingleChangeGroup and SingleTeleport the organics, items and buildings [orig:
 // Entity_HandleAlertStateEvent @0x43DEE0, pools 0, 1, 2 @0x43DF20 / @0x43DF41 / @0x43DF69;
-// Entity_FindByDCBAndSetFlag @0x43DB30; Entity_SetNetIdByParentRef @0x43D6C0;
+// Entity_FindByDCBAndSetFlag @0x43DB30; Entity_SetCommandGroupByDcbId @0x43D6C0;
 // EventAction_TeleportEntityToSpawn @0x43DFC0, @0x43E02D / @0x43E0DD / @0x43E180]; a medevac's or a
 // flyover's patient the organics [orig: HeliLift_SpawnPickup @0x4525E0; docs/world/world-wac-ai-re.md
 // 33.32]. 0 for any other action.

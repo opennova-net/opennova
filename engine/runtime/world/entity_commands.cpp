@@ -516,7 +516,7 @@ bool EntityCommands::remove_bms_ref(int32_t ssn) {
     // SSN 0 and a non-authority peer do nothing; otherwise the first row
     // carrying the SSN, walking pools 0..3 in slot order, goes through the
     // notifying removal. An SSN past 16 bits matches no DcbId we carry.
-    // [orig: Entity_FindByParentAndDispatch @0x43e210 — SSN 0 @0x43e214,
+    // [orig: Entity_RemoveByDcbId @0x43e210 — SSN 0 @0x43e214,
     //  the authority gate @0x43e21c, the pool scans @0x43e249/@0x43e279/
     //  @0x43e2a9/@0x43e2d9 tail-jumping to Server_RemoveEntityAndNotify]
     if (ssn <= 0 || ssn > 0xFFFF || !world_.rules.logic_authority) return false;
@@ -1621,7 +1621,7 @@ namespace {
 // The single-target SSN walk the team and group commands share: first
 // matching row in pool order 0,1,2, no item gate; SSN 0 never matches
 // [orig: the dcb gate + pools-0,1,2 walks — Entity_FindByDCBAndSetFlag
-// @0x43db30, Entity_SetNetIdByParentRef @0x43d6c0]. The single teleport walks
+// @0x43db30, Entity_SetCommandGroupByDcbId @0x43d6c0]. The single teleport walks
 // with its item gate inside (resolve_teleport_target below). The key is the
 // row's DcbId, every player body's 10000 + its slot included (dcb_id_is)
 // [orig: `cmp [ecx+7Ch], edx` @0x43db59 / @0x43db89 / @0x43dbb9, @0x43d6e9 /
@@ -1920,7 +1920,7 @@ bool EntityCommands::set_ssn_team(uint16_t ssn, int32_t team) {
 }
 
 bool EntityCommands::set_ssn_group(uint16_t ssn, int32_t group) {
-    // [orig: Entity_SetNetIdByParentRef @0x43D6C0] First DcbId match walking
+    // [orig: Entity_SetCommandGroupByDcbId @0x43D6C0] First DcbId match walking
     // pools 0,1,2 in order (no item gate; the commandGroup word is entity+284
     // @0x43d6f4). The relmat mirror + recount are our derived-cache upkeep.
     const EntityHandle handle = resolve_ssn_in_pools012(world_, ssn);

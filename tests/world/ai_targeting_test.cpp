@@ -319,7 +319,7 @@ static void test_air_class_takes_only_helo_brained_vehicles() {
 // exclusive SSN word matches it.
 // [orig: AI_FindBestTargetB @0x466F60; AI_HandleEvent_HelicopterCombatD - self +0x7C
 //  @0x4677BF / @0x4677DD / @0x46788F / @0x4678AD, target @0x4677C9 / @0x4677DA / @0x467899 /
-//  @0x4678AA; TeamMatrix_SetEnemy @0x452BF0 - @0x452BF4 / @0x452BFF;
+//  @0x4678AA; SeesMatrix_SetSingleSingleBit @0x452BF0 - @0x452BF4 / @0x452BFF;
 //  Entity_ValidateWeaponTarget @0x53A400 - @0x53A4C0; PlayerClass_InitEntity
 //  @0x4B1149..0x4B1173]
 static void test_a_player_target_engages_by_its_dcb_id() {

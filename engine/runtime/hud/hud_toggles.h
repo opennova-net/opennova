@@ -445,7 +445,7 @@ uint32_t hud_toggles_quit_dialog_key(HudToggleState &state, const HudQuitDialogK
 //  key to the tail @0x49c859. EndRoundBoard_Scroll @0x5baf20 steps
 //  dword_28E4DE8 and wraps it between dword_28E4DEC and dword_28E4DF0, whose
 //  writers are Game_InitMissionRoundState @0x5b7283 and
-//  Network_CalcSendRateTiers @0x5b7c65 (called from NapiNPClientMsg_0x01D
+//  EndRoundBoard_CalcScrollBounds @0x5b7c65 (called from NapiNPClientMsg_0x01D
 //  @0x430ad0 and NapiNPClientMsg_0x056 @0x4321c4); EndRoundBoard_ToggleAdvanced
 //  @0x5baea0 flips dword_28E3D64, read only by
 //  Overlay_ComputeStatFieldColumnLayout @0x5b7ac1, whose dword_28E3AB0 /

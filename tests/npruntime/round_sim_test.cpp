@@ -2129,7 +2129,7 @@ int main() {
 	// (+0x7C, entity_dcb_id): a player's is 10000 + its slot, outside the retail
 	// < 0x80 guard, so no single row of two players lands [orig:
 	// Projectile_ProcessDamageOnTarget @ 0x4e80ae..0x4e80ef (shooter +0x7C @0x4E80C0 /
-	// @0x4E80EA, target @0x4E80D0 / @0x4E80E1); guard e.g. EntityMatrix_SetProximityBit
+	// @0x4E80EA, target @0x4E80D0 / @0x4E80E1); guard e.g. SeesMatrix_SetGroupSingleBit
 	// @ 0x452b60].
 	{
 		const w::Entity *sh = world.registry.get(hb);
