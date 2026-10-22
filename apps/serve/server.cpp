@@ -906,6 +906,23 @@ void Server::stop() {
 	// @0x4A8009..0x4A800E DeleteFileA("activesrvr.txt")].
 	const bool exit_tail = exit_save_owed_;
 	exit_save_owed_ = false;
+	// An error arm's router resets the NovaWorld session first: SetNetworkType(0) runs
+	// ResetToDisconnected, whose goodbye burst alone (no ClientStopHosting, whatever the hosting
+	// state) and its NWU DISCONNECTING line come ahead of SetTransportMode(0)'s socket teardown
+	// line below. A NovaWorld exit (12) after the service's ServerStopHosting is one (the lister
+	// held its session up to it, D-NET-NEW-L9-20) (D-NET-NEW-L9-23).
+	// [orig: PostMenu_RouteMissionExit @0x568460 - loc_5686DA: CNapiNetwork_SetNetworkType(0)
+	//  called @0x5686E1, CNapiNetwork_SetTransportMode(0) called @0x5686F9;
+	//  CNapiNetwork_SetNetworkType @0x4C4A50 - CNapiGameSession_ResetToDisconnected called
+	//  @0x4C4A7D; CNapiGameSession_ResetToDisconnected @0x4D0890 - RequestDisconnect called
+	//  @0x4D08A1; CNapiNPConnection_RequestDisconnect @0x61E0F0 - SetState(6) @0x61E0FA;
+	//  CNapiNPConnection_SetState @0x626250 - TeardownActiveConnection called @0x62628F (the
+	//  state-5 burst, then the OnDisconnect line); CNapiNetwork_SetTransportMode @0x4C8750 -
+	//  CNapiNetwork_TearDownSocket called @0x4C877B]
+	const inmatch::PostMissionRoute exit_route = inmatch::route_mission_exit(
+			role_ ? role_->state.host_owner.ctx.mission_exit_reason : 0, /*novaworld=*/true);
+	if (lister_ && role_ && exit_route.error != inmatch::PostMissionError::None)
+		lister_->disconnect();
 	// The game socket's teardown line, once, while the _connectlog.txt log is still on (no
 	// connection ever came): the session's FullDestroy on the rotation's end or the quit, else
 	// the shutdown's (D-NET-NEW-L8-8) [orig: CNapiNetwork_TearDownSocket @0x4C4C90 (the line

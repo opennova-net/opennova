@@ -44,9 +44,11 @@
 
 #include "common/temp_dir.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -86,9 +88,15 @@ void expect(bool cond, const char *what) {
 
 constexpr const char *kNeedToLogin = "NWUSERVERMSGCODE_NEEDTOLOGIN";
 
+// The service's ClientStopHosting receipts: its lobby session logs each hosting it ends with the
+// statement that ended it (LobbySession::end_hosting).
+std::atomic<int> g_client_stop_hosting_logs{ 0 };
+
 // The engine's diagnostics (the lobby, the lister) beside the listeners' own
 // printf lines, so a failure reads in order.
 void log_sink(opennova::io::LogLevel level, const char *message) {
+	if (std::strstr(message, "reason=ClientStopHosting") != nullptr)
+		++g_client_stop_hosting_logs;
 	if (level == opennova::io::LogLevel::kDebug) return;
 	std::printf("%s\n", message);
 }
@@ -410,11 +418,14 @@ void anonymous_lister_stopped(Service &strict) {
 			"strict lister: its session dropped to verified (state 4, the word 1)");
 	expect(strict.manager.registry().size() == 1,
 			"strict lister: no goodbye before the embedder's stop");
+	const int stop_hosting_logs = g_client_stop_hosting_logs.load();
 	lister.stop();
 	expect(lister.finished() && lister.exit_code() == opennova::serve::kExitStoppedByService,
 			"strict lister: the stop finishes it on the service's word");
 	expect(wait_for([&] { return strict.manager.registry().size() == 0; }),
 			"strict lister: the goodbye burst then ends its session on the service");
+	expect(g_client_stop_hosting_logs.load() == stop_hosting_logs,
+			"strict lister: the service read no ClientStopHosting, the goodbye went alone");
 	expect(!ever_listed, "strict lister: never in the browser");
 }
 

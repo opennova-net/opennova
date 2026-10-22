@@ -56,13 +56,17 @@ void expect(bool cond, const char *what) {
 // The 0x81 `data` taken one millisecond ahead of a session's clock 0 (the clock wraps as
 // GetTickCount does), then a pump at 0: the connection enters its connect state and sends nothing,
 // and its 0x42 goes at the first pump past the 0x81's tick, so the rest of a handshake runs at 0.
-// `out` gets the pump's datagrams (the 0x42); false when the 0x81 was refused.
+// `out` gets the pump's datagrams (the 0x42); false when the 0x81 was refused or its own frame
+// sent anything.
 // [orig: CNapiNPConnection_InitFromSession @0x626320 - @0x626490..0x626499;
 //  CNapiNPConnection_PumpStateMachine @0x6292E0 case 3 @0x629580..0x62958F]
 bool take_hello_at_zero(opennova::ClientSession &session, const uint8_t *data, size_t size,
                         std::vector<std::vector<uint8_t>> &out) {
+	const size_t before = out.size();
 	session.set_clock_ms(0xFFFFFFFFu);
 	const bool taken = session.handle_datagram(data, size, out);
+	if (out.size() != before)
+		return false;
 	session.set_clock_ms(0);
 	session.pump(out);
 	return taken;
