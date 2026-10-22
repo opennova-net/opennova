@@ -107,6 +107,11 @@ param(
 
     [switch] $AllowDirtyRepo,
 
+    # A diagnostic: game probes for an OpenNova scenario actor, passed to every
+    # cell (run_parity_topology.ps1 -ActorScenarioProbes; a retail actor
+    # ignores it).
+    [string] $ActorScenarioProbes = "",
+
     # The machine-load policy's build lock directory: each cell records its
     # owner in machine_load (run_parity_topology.ps1 -BuildLockPath).
     [string] $BuildLockPath = "",
@@ -370,6 +375,7 @@ function Get-CellArguments {
     if (Get-CasePreJoinMissionCycle $Case) { $arguments += "-PreJoinMissionCycle" }
     if (Get-CaseLateJoiner $Case) { $arguments += "-LateJoiner" }
     if ($AllowDirtyRepo) { $arguments += "-AllowDirtyRepo" }
+    if ($ActorScenarioProbes) { $arguments += @("-ActorScenarioProbes", $ActorScenarioProbes) }
     return $arguments
 }
 

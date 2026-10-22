@@ -576,7 +576,8 @@ played. A diagnostic `-ActorScenarioProbes <json>` (`[{"name": .., "args":
 (`scenario_play` with `wait` false, each probe in turn, then a collecting
 `scenario_play`), for instruments whose watch lasts only while their run does
 (`use_press_trace`'s `watch_handle`, `body_trace`'s `watch_handles`); their
-statuses land in `scenario-probes.json`.
+statuses land in `scenario-probes.json`; the suite passes its own
+`-ActorScenarioProbes` to every cell.
 
 A setup pose sticks only on the host's own player. A client snaps its players,
 its own included, to the host's replicated pose once they are more than two
