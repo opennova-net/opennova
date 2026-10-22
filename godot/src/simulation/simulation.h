@@ -913,6 +913,9 @@ public:
 	// ClientRuntime::push_mission_start_first_loadout): the first 0x2F; nothing before the
 	// release or after the leg ran.
 	void push_join_mission_start_first_loadout();
+	// The streamed pools into the World ahead of the settle's placement (engine:
+	// inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
+	void materialize_join_world_stream();
 	void finish_join_mission_start();
 	bool poll_join_preload();
 	// The shell's cancel of a join: ahead of the mission start the join screen's ABORT

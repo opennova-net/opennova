@@ -83,6 +83,11 @@ world::Entity *JoinerRole::replica_world_entity(
 	return materializer_.replica_world_entity(world, handle, kernel_->wire_header_world);
 }
 
+void JoinerRole::materialize_world_stream() {
+	if (!runtime || kernel_ == nullptr) return;
+	materialize_replica_world();
+}
+
 void JoinerRole::materialize_replica_world() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;

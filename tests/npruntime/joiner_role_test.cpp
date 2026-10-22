@@ -3902,6 +3902,53 @@ bool run_deploy_action_converts_a_dead_permanent_death_player() {
 	return ok;
 }
 
+// D-NET-NEW-L2-38: a header-only joiner's streamed static takes its placed identity when the
+// mission start's settle asks for the stream, with no session update between the stream and
+// the settle (the first frame after the load may bank none); the next update finds the World
+// in step and keeps the identity.
+// [orig: NapiNPClientMsg_0x00D @0x432C40 - Pool_UpdateMaxUsedFromSlotId called @0x4333CD;
+//  Game_StartMission @0x524360 - Entity_InitAllFromModels called @0x52567F]
+bool run_the_settle_materializes_the_world_stream() {
+	Harness h;
+	w::World &world = h.kernel->world;
+	h.kernel->wire_header_world = true;
+	world.registry.configure_pool(2, 32);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	// The stream, all of it ahead of the load's end: the host's own body in pool 0 (the
+	// initial state's pool-0 fence) and a building in pool 2. No update runs before the settle.
+	auto &host_row = h.role.runtime->state().upsert(0x0000);
+	host_row.cls = EntityClass::Player;
+	host_row.type_id = w::kPlayerInfantryTypeId;
+	const w::EntityHandle hut{0x2011};
+	PoolSpawnBatch batch;
+	PoolSpawnRecord rec;
+	rec.slot_id = hut.packed;
+	rec.item_type_id = 0x04B3;
+	rec.pos_x = -22 * 65536;
+	rec.pos_y = -80 * 65536;
+	rec.pos_z = 16 * 65536;
+	batch.records.push_back(rec);
+	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
+	if (!expect(h.role.materializer().placed_rows(world).empty(),
+			"settle stream: nothing is placed before the settle"))
+		return false;
+	h.role.materialize_world_stream();
+	std::vector<const w::Entity *> placed = h.role.materializer().placed_rows(world);
+	if (!expect(placed.size() == 1 && placed[0]->handle == hut &&
+					w::spawn_origin_kind(placed[0]->spawn_origin) ==
+							static_cast<int>(w::EntityKind::Building),
+			"settle stream: the settle's call materializes the building with its placed identity"))
+		return false;
+	const uint32_t origin = placed[0]->spawn_origin;
+	h.role.run_tick(h.input);
+	placed = h.role.materializer().placed_rows(world);
+	return expect(placed.size() == 1 && placed[0]->handle == hut &&
+					placed[0]->spawn_origin == origin,
+			"settle stream: the next update keeps the one placed row and its identity");
+}
+
 } // namespace
 
 // A pool-1 shooter's round takes the Indoors bit retail's client keeps for the
@@ -4318,6 +4365,7 @@ int main() {
 	ok &= run_round_event_needs_a_resolved_shooter();
 	ok &= run_zoom_rule_follows_the_session_flags();
 	ok &= run_role_runtimes_step_the_process_report_count();
+	ok &= run_the_settle_materializes_the_world_stream();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

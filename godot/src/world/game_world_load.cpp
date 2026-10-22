@@ -858,6 +858,10 @@ bool GameWorld::settle_join_wire_assets() {
 	// load's), the rest of the joiner's 0x1A -> C 0x2F window after load_mission_internal.
 	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Join settle %s", loaded_mission_file_));
 	timeline->span("streamed_objects");
+	// The stream lands in the World and its statics take their placed identity first: the
+	// first frame after the load may run no session update, whose frame phase does it
+	// (engine: inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
+	sim->materialize_join_world_stream();
 	place_streamed_mission_objects(sim);
 	timeline->end_span();
 	timeline->span("model_list");
