@@ -540,6 +540,146 @@ void test_a_ctrlx_seat_saves_a_gun_held_on_foot() {
 	}
 }
 
+// The borrowed seat's detach mounts slot[g_CurrentWeaponSlot] when +0x308 holds no
+// def of category < 11, whatever personal def the attach left in the AdmDef byte. The
+// player holds gun A's slot on foot (category 11) and takes carrier B's ctrlx seat, so
+// +0x308 names A's slot. With a kit whose spawn select missed slot 195 (a pistol alone),
+// the current slot word stays 195 and holds no def: the mount returns at once, no local
+// restore follows, and the player leaves holding B's slot on foot. With the word naming
+// the pistol while the rifle was equipped, the switch back draws the pistol and its
+// completion makes the pistol's slot the EquippedSlot.
+// [orig: Entity_DetachFromVehicle @0x4355F0 (+0x308 @0x43563A, its def
+//  @0x435644..0x435649, the category test @0x43564B..0x43564E, the fallback
+//  @0x435650..0x435658, the mount @0x43565F, no local restore @0x435669..0x43566F);
+//  Player_InitPlayer @0x4E15F0 (g_CurrentWeaponSlot = 195 @0x4E17FF);
+//  Player_MountWeaponSlot @0x4DFA40 (the target def @0x4DFA53..0x4DFA58,
+//  g_PendingWeaponSlot @0x4DFB16); WeaponAction_SwitchFrom @0x5433B0 (@0x543475)]
+void test_a_borrowed_seat_detach_mounts_the_current_slot() {
+	constexpr uint8_t kCannonAdm = 2;
+	constexpr uint8_t kPistolAdm = 3;
+	constexpr int32_t kPistolCombo = 2 * 65;
+	for (const bool pistol_only : {true, false}) {
+		Rig r;
+		w::World &world = r.world;
+		world.tables.weapons.entries.resize(4);
+		w::WeaponTableEntry &cannon = world.tables.weapons.entries[kCannonAdm];
+		cannon.name = "WPN_CANNON";
+		cannon.valid = true;
+		cannon.category = 10;
+		cannon.clipsize = 10;
+		cannon.startrounds = 10;
+		cannon.ammo_class_count = 1;
+		cannon.ammo_class_id = 0;
+		cannon.ammo_index = 0;
+		bake(cannon);
+		w::WeaponTableEntry &pistol = world.tables.weapons.entries[kPistolAdm];
+		pistol.name = "WPN_M9";
+		pistol.valid = true;
+		pistol.category = 2;
+		pistol.clipsize = 15;
+		pistol.startrounds = 150;
+		pistol.maxclips = 10;
+		pistol.ammo_class_count = 1;
+		pistol.weapon_class_slot = 1;
+		pistol.ammo_class_id = 1;
+		bake(pistol);
+		world.tables.weapons.entries[kGunAdm].category = 11;
+		w::Entity b;
+		b.kind = w::EntityKind::Item;
+		b.has_item_def = true;
+		b.has_graphic_model = true;
+		b.item_type = 6;
+		b.item_attrib = w::kItemAttribEweap | w::kItemAttribPlayerControl;
+		b.health = b.health_max = 1000;
+		b.alive = true;
+		b.position = {106.0f, 200.0f, 10.0f};
+		b.primary_weapon = "WPN_CANNON";
+		w::Seat c;
+		c.type = w::SeatType::Controller;
+		c.bone_index = 1;
+		c.source_name = "ctrlx00";
+		c.seat_local = {0.5f, 1.5f, 1.0f};
+		b.seats.push_back(c);
+		const w::EntityHandle b_h = world.registry.spawn(1, b);
+		CHECK(world.vehicles.prepare_weapon_slot(*world.registry.get(b_h)));
+
+		CHECK(r.attach(r.claimant_h, 0)); // the claimant holds A's +368
+		world.cached.local_player = r.requester_h;
+		w::LocalPlayer local(world);
+		world.local_player_state = &local;
+		if (pistol_only)
+			local.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M9", -1, -1, -1}};
+		else
+			local.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1},
+					w::WeaponKitEntry{"WPN_M9", -1, -1, -1}};
+		w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
+				local.inventory_valid, /*select_spawn_default=*/true);
+		CHECK(local.inventory.current_slot == 195);
+		CHECK(local.inventory.equipped_combo == (pistol_only ? kPistolCombo : kRifleCombo));
+		const auto install = [&](const std::string &name, bool preserve) {
+			w::WeaponInstallData data;
+			data.name = name;
+			data.clipsize = world.tables.weapons.entries[size_t(
+					world.tables.weapons.index_of(name.c_str()))].clipsize;
+			data.table_baked = true;
+			w::local_weapon_install(world, local.weapon, data, preserve, false,
+					&local.inventory, local.view);
+		};
+		std::vector<w::WeaponPresentationEvent> seen;
+		const auto pump = [&]() {
+			++world.logic_tick;
+			local.pump_local_weapon();
+			const std::vector<w::WeaponPresentationEvent> events = local.weapon.events;
+			local.weapon.events.clear();
+			for (const w::WeaponPresentationEvent &e : events) {
+				seen.push_back(e);
+				if (!e.switch_to_weapon.empty()) install(e.switch_to_weapon, e.preserve_slot_state);
+			}
+		};
+		install(pistol_only ? "WPN_M9" : "WPN_M4AUTO", false);
+		for (int i = 0; i < 8; ++i) pump();
+
+		// Refused at A's UseGun seat: A's slot is held on foot. B's ctrlx seat then
+		// saves A's slot at +0x308 and borrows B's.
+		CHECK(!r.attach(r.requester_h, r.use_gun_index()));
+		for (int i = 0; i < 4; ++i) pump();
+		CHECK(local.weapon.usegun_on_foot && local.weapon.usegun_mount == r.gun_h);
+		CHECK(world.vehicles.attach_to_seat(r.requester_h, {b_h, 0, w::SeatType::Controller}));
+		CHECK(local.inventory.selected_mount == r.gun_h.packed);
+		for (int i = 0; i < 32 && local.weapon.usegun_mount != b_h; ++i) pump();
+		CHECK(local.weapon.usegun_slot_active && !local.weapon.usegun_on_foot);
+		CHECK(local.weapon.usegun_mount == b_h);
+		CHECK(r.requester().equipped_adm_index == kCannonAdm);
+		// The word names the pistol's slot while the rifle's was the personal one.
+		if (!pistol_only) local.inventory.current_slot = kPistolCombo;
+
+		CHECK(world.vehicles.detach(r.requester_h));
+		seen.clear();
+		for (int i = 0; i < 32 && local.weapon.usegun_switch != w::LocalUseGunSwitch::kNone; ++i)
+			pump();
+		for (int i = 0; i < 8; ++i) pump();
+		CHECK(local.weapon.usegun_switch == w::LocalUseGunSwitch::kNone);
+		if (pistol_only) {
+			// Slot 195 holds no def: B's slot stays the EquippedSlot, held on foot.
+			CHECK(local.weapon.usegun_slot_active && local.weapon.usegun_on_foot);
+			CHECK(local.weapon.usegun_mount == b_h);
+			CHECK(r.requester().equipped_adm_index == kCannonAdm);
+			CHECK(local.inventory.equipped_combo == kPistolCombo);
+			for (const w::WeaponPresentationEvent &e : seen)
+				CHECK(e.switch_to_weapon.empty() && !e.clear_weapon);
+		} else {
+			CHECK(!local.weapon.usegun_slot_active && !local.weapon.usegun_on_foot);
+			CHECK(r.requester().equipped_adm_index == kPistolAdm);
+			CHECK(local.inventory.equipped_combo == kPistolCombo);
+			bool drew_pistol = false;
+			for (const w::WeaponPresentationEvent &e : seen)
+				if (e.switch_to_weapon == "WPN_M9") drew_pistol = true;
+			CHECK(drew_pistol);
+		}
+		world.local_player_state = nullptr;
+	}
+}
+
 // D-NET-336 (the walk's leg): a reload the authority's walk begins on another row's
 // slot queues its C2S 0x25 for the host's own dispatcher, which broadcasts S2C 0x49:
 // a UseGun gunner's addresses the gun (an EWeap: 0xFFFF), a slot held on foot the
@@ -790,6 +930,7 @@ int main() {
 	test_an_unarmed_attach_takes_the_direct_leg();
 	test_a_weapon_key_ends_a_slot_held_on_foot();
 	test_a_ctrlx_seat_saves_a_gun_held_on_foot();
+	test_a_borrowed_seat_detach_mounts_the_current_slot();
 	test_the_walk_relays_an_authority_reload();
 	test_a_dedicated_host_refills_no_gun();
 	test_an_unoccupied_gun_relays_its_reload();

@@ -436,8 +436,9 @@ void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun)
 // attach; else the last selected one) or, without a def of category < 11 there,
 // the current slot, and the mount, past its early-outs (a target def, an equipped
 // slot and def), clears the NVG scope restore latch. A saved gun's slot is staged
-// here as a borrow whose completion holds it on foot; a borrowed seat's switch-out
-// to the personal slot is staged by the UseGun transition; an unborrowed seat's
+// here as a borrow whose completion holds it on foot; a borrowed seat's target
+// slot is stored as the pending slot (g_PendingWeaponSlot) and its def as the one
+// the UseGun transition's switch-out restores; an unborrowed seat's
 // personal mount runs here (D-WPN-48). A borrowed seat whose target holds no def
 // (the direct leg's, which saved no slot) mounts nothing and keeps the borrow,
 // held on foot (D-WPN-52).

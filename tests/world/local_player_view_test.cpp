@@ -1063,9 +1063,10 @@ void test_vehicle_seats_clear_the_nvg_restore_latch() {
     }
 }
 
-// The detach mount's target on a borrowed seat: the personal slot the attach
+// The detach mount's target on a borrowed seat: +0x308, the slot the attach
 // saved, or the current slot when that has no def of category < 11; the latch
-// clears only with a target def (and an equipped weapon). An unborrowed seat's
+// clears only with a target def (and an equipped weapon), and the target is the
+// mount's g_PendingWeaponSlot, whose def the switch back restores. An unborrowed seat's
 // target is entity+0x308, the last selected slot, under the same fallback, and
 // the mount itself runs (D-WPN-48).
 // [orig: Entity_DetachFromVehicle @0x43563a..0x43565f, the fallback
@@ -1098,14 +1099,23 @@ void test_detach_mount_latch_target() {
         inventory.equipped_combo = 3 * 65;
         inventory.current_slot = 3 * 65; // the fallback's g_CurrentWeaponSlot
         inventory.slots[3 * 65].adm_index = c.current ? 1 : -1;
+        if (c.saved != 0xFF) {
+            inventory.selected_combo = 7 * 65;
+            inventory.slots[7 * 65].adm_index = c.saved;
+        }
         LocalPlayerWeapon w;
         w.active = true;
         w.usegun_slot_active = true;
-        w.usegun_saved_adm = c.saved;
         w.nvg_scope_restore = true;
         PlayerViewState view;
         local_weapon_detach_mount(world, w, &inventory, view);
         CHECK(w.nvg_scope_restore == !c.clears);
+        if (c.clears) {
+            // [orig: Player_MountWeaponSlot @0x4DFA40 (g_PendingWeaponSlot @0x4DFB16)]
+            const bool saved_target = c.saved == 1;
+            CHECK(inventory.pending_combo == (saved_target ? 7 * 65 : 3 * 65));
+            CHECK(w.usegun_saved_adm == 1);
+        }
     }
     // Unborrowed: +0x308 (the selected slot) else the current slot; the mount
     // clears the latch past its early-outs, the target's def and the EquippedSlot's

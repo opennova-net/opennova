@@ -217,6 +217,18 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 		}
 	}
 	if (!select_parent) {
+		// A detach's switch back completes its mount: g_PendingWeaponSlot, the slot
+		// local_weapon_detach_mount staged, becomes the EquippedSlot.
+		// [orig: WeaponAction_SwitchFrom @0x5433B0 (the store @0x543475) /
+		//  WeaponAction_SwitchRank @0x543500 (the store @0x543539)]
+		if (w.usegun_switch == LocalUseGunSwitch::kDetach &&
+				world.local_player_state != nullptr &&
+				world.local_player_state->inventory_valid) {
+			WeaponInventory &inventory = world.local_player_state->inventory;
+			const WeaponInventorySlot *pending = inventory.slot(inventory.pending_combo);
+			if (pending != nullptr && pending->adm_index == w.usegun_saved_adm)
+				inventory.equipped_combo = inventory.pending_combo;
+		}
 		w.usegun_slot_active = false;
 		next_adm = w.usegun_saved_adm;
 		next_slot = &w.slot;
@@ -612,16 +624,44 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 		return;
 	}
 	{
+		// A borrowed seat's +0x308: the saved gun's slot (reaching here, its def is
+		// of category 11 or more, or none), else the personal slot its attach saved,
+		// else none. With no def of category < 11 there the detach mounts the current
+		// slot word's slot instead, whichever slot the attach saved.
+		// [orig: Entity_DetachFromVehicle @0x4355F0 - +0x308 @0x43563A, its def
+		//  @0x435644..0x435649, the category test @0x43564B..0x43564E, the fallback
+		//  slot[g_CurrentWeaponSlot] @0x435650..0x435658, the Player_MountWeaponSlot
+		//  call @0x43565F]
 		const WeaponTable &table = world.tables.weapons;
-		const WeaponTableEntry *target = table.by_index(w.usegun_saved_adm);
-		if (target == nullptr || target->category >= 11) {
-			// The fallback is the current slot word [orig: Entity_DetachFromVehicle
-			//  @0x4355F0 (@0x43564E..0x435658)].
-			const WeaponInventorySlot *current =
-					inventory != nullptr ? inventory->slot(inventory->current_slot) : nullptr;
-			target = current != nullptr && current->adm_index >= 0
-					? table.by_index(static_cast<uint8_t>(current->adm_index))
+		const auto personal_def = [&](int32_t combo) -> const WeaponTableEntry * {
+			const WeaponInventorySlot *slot = inventory->slot(combo);
+			return slot != nullptr && slot->adm_index >= 0
+					? table.by_index(static_cast<uint8_t>(slot->adm_index))
 					: nullptr;
+		};
+		int32_t target_combo = -1;
+		const WeaponTableEntry *target = nullptr;
+		if (inventory == nullptr) {
+			target = table.by_index(w.usegun_saved_adm);
+		} else if (inventory->selected_mount != EntityHandle::kInvalid) {
+			target = saved_gun_def;
+		} else {
+			target_combo = inventory->selected_combo;
+			target = personal_def(target_combo);
+		}
+		if (target == nullptr || target->category >= 11) {
+			target_combo = inventory != nullptr ? inventory->current_slot : -1;
+			target = inventory != nullptr ? personal_def(target_combo) : nullptr;
+		}
+		if (target != nullptr && inventory != nullptr) {
+			// The mount stores the target in g_PendingWeaponSlot, whose completion
+			// makes it the EquippedSlot: the switch back the transition stages
+			// (stage_personal) restores its def, and its commit the slot.
+			// [orig: Player_MountWeaponSlot @0x4DFA40 (the store @0x4DFB16);
+			//  WeaponAction_SwitchFrom @0x5433B0 (@0x543475) / WeaponAction_SwitchRank
+			//  @0x543500 (@0x543539)]
+			inventory->pending_combo = target_combo;
+			w.usegun_saved_adm = static_cast<uint8_t>(inventory->slot(target_combo)->adm_index);
 		}
 		if (target == nullptr) {
 			// The mount returns at once on the target's def [orig: @0x4dfa53..0x4dfa58]
