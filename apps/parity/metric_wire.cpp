@@ -552,12 +552,17 @@ void steady_profile(const RunFacts &run, char dir, Distribution &groups, Distrib
 				boundary = i;
 				break;
 			}
+		// The order runs over the producers' records: where a receive-pump reply lands
+		// among them is its request's arrival phase (group.S.0x57.order).
+		static_assert(has_normalization("group.S.0x57.order"));
 		std::string previous;
 		for (size_t i = boundary + 1; i < origin.size(); ++i) {
 			if (origin[i]->records.empty())
 				continue;
 			tally(groups, steady_group_key(*origin[i]));
 			for (const wire::ParityWireRecord &record : origin[i]->records) {
+				if (group_reply(dir, record.full_tag))
+					continue;
 				const std::string identity = identity_key(record.full_tag);
 				if (!previous.empty())
 					tally(orders, previous + ">" + identity);

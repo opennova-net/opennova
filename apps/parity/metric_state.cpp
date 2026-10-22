@@ -11,7 +11,8 @@
 //                      position RR changes that the run never does
 //   field population   per entity class, the fields RR ever fills (diff_0a)
 //   dynamic vectors    origin-normalized range, displacement and step p90
-//                      (nearest rank) within 1/8x..8x of RR, entity positions in
+//                      (nearest rank) within 1/8x..8x of RR, each sequence from its
+//                      first sample past a lone transient lead, entity positions in
 //                      world units; priority scores' per-slot median likewise;
 //                      initial position/anchor within 64 units
 // Session-local handles reduce to none/bound (normalization.h).
@@ -99,18 +100,31 @@ double wrapped(double delta, double modulus) {
 	return delta;
 }
 
+// A sequence's first sample is a lone transient when the next one differs from it and
+// the one after repeats the next: the sequence comes to rest on its second sample, and
+// the first is a change the window's edge cut (a pose landing, a lone change record),
+// so it sets no baseline (state.transient_lead).
+size_t sequence_start(const std::vector<const Sample *> &seq) {
+	static_assert(has_normalization("state.transient_lead"));
+	if (seq.size() >= 3 && seq[0]->axes != seq[1]->axes && seq[1]->axes == seq[2]->axes)
+		return 1;
+	return 0;
+}
+
 // `samples` in capture order.
 VectorStats vector_stats(const std::vector<Sample> &samples, double modulus) {
 	VectorStats stats;
 	stats.samples = samples.size();
-	if (!samples.empty())
-		stats.baseline = samples.front().axes;
 	std::map<std::string, std::vector<const Sample *>> groups;
 	for (const Sample &sample : samples)
 		groups[sample.group].push_back(&sample);
 	std::vector<double> ranges, displacements, steps;
 	for (const auto &group : groups) {
-		const std::vector<const Sample *> &seq = group.second;
+		const std::vector<const Sample *> seq(
+				group.second.begin() + std::ptrdiff_t(sequence_start(group.second)),
+				group.second.end());
+		if (group.first == samples.front().group)
+			stats.baseline = seq.front()->axes;
 		if (seq.size() < 2)
 			continue;
 		const size_t axes = seq.front()->axes.size();
@@ -169,7 +183,7 @@ void dynamic_metrics(std::vector<MetricValue> &out, char dir, const std::string 
 				v.push_back(render_number(x));
 			return v;
 		}());
-		value.detail = "the first sample's largest axis delta (16.16)";
+		value.detail = "the first sample's largest axis delta (16.16), a lone transient lead skipped";
 		out.push_back(value);
 	}
 	const struct {

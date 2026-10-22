@@ -1735,6 +1735,57 @@ void test_state() {
 	}
 }
 
+// The camp AI's records (x7 selfnade's 0x0035): `lead` records at pitch `lead_pitch` from
+// the steady start, then its pitch at rest, stepping 210..212 every 20 frames.
+void add_camp_ai(wire::ParityTrace &trace, size_t lead, int32_t lead_pitch) {
+	std::vector<wire::ParityEntity> added;
+	size_t k = 0;
+	for (const wire::ParityFrameState &f : trace.frames) {
+		if (f.ts_ns < kSteadyStart)
+			continue;
+		wire::ParityEntity e;
+		e.frame = f.frame;
+		e.ts_ns = f.ts_ns;
+		e.session = kClientPort;
+		e.cls = 'I';
+		e.handle = 0x0035;
+		e.type_id = 1799;
+		e.pos_x = 4000;
+		e.pos_y = 4000;
+		e.pos_z = 100;
+		e.orient_a = 210;
+		e.orient_b = k < lead ? lead_pitch : 210 + int32_t(k / 20 % 3);
+		place(e, f);
+		added.push_back(e);
+		++k;
+	}
+	trace.entities.insert(trace.entities.end(), added.begin(), added.end());
+}
+
+// A dynamic sequence's lone transient lead sets no baseline (state.transient_lead): x7's
+// selfnade RR, RR-aa and RO carried 0x0035's one aim-change record (210,3) in the window
+// before its (210,210) rest, OR's fell before the window; a lead the next record repeats
+// is a rest and keeps its baseline.
+void test_dynamic_rules() {
+	auto runs = [](size_t lead) {
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), subject = scripted(3);
+		add_camp_ai(rr, lead, 3);
+		add_camp_ai(aa, lead, 3);
+		add_camp_ai(subject, 0, 3);
+		return judge_case(std::move(rr), std::move(aa), std::move(subject));
+	};
+	{
+		const Case c = runs(1);
+		expect_row(c, 'S', "entity_I_orientation_displacement_p90", "", "pass");
+		expect_row(c, 'S', "entity_I_orientation_range_p90", "", "pass");
+	}
+	{
+		const Case c = runs(10);
+		expect_row(c, 'S', "entity_I_orientation_displacement_p90", "", "fail",
+				"DYNAMIC_RANGE_MISMATCH");
+	}
+}
+
 void test_evidence() {
 	{
 		wire::ParityTrace subject = scripted(3);
@@ -2879,6 +2930,36 @@ void test_steady_rules() {
 				"", "fail", "GAMEPLAY_GROUP_DISTRIBUTION");
 	}
 	{
+		// The order runs over the producers' records (group.S.0x57.order): x7's ash-capture
+		// OR mostly packed [0x57, 0x40, 0x0A] where RR packed [0x40, 0x57, 0x0A], the 0x57's
+		// place its C2S 0x2C's arrival in the host's send window. The producers' own order
+		// still compares.
+		auto packed = [](uint32_t seed, const std::vector<uint16_t> &order) {
+			wire::ParityTrace trace = scripted(seed);
+			for (wire::ParityPacket &p : trace.packets)
+				if (p.dir == 'S' && p.tags.size() == 1 && p.tags[0] == 0x00A && p.frame % 3 == 0) {
+					const wire::ParityWireRecord gameplay = p.records.front();
+					p.tags.clear();
+					p.records.clear();
+					for (const uint16_t tag : order) {
+						wire::ParityWireRecord record = gameplay;
+						record.full_tag = tag;
+						if (tag != 0x00A)
+							record.encoded_length = tag == 0x057 ? 5 : 25;
+						p.tags.push_back(tag);
+						p.records.push_back(record);
+					}
+				}
+			return trace;
+		};
+		const std::vector<uint16_t> retail{ 0x040, 0x057, 0x046, 0x00A },
+				early{ 0x057, 0x040, 0x046, 0x00A }, swapped{ 0x057, 0x046, 0x040, 0x00A };
+		expect_row(judge_case(packed(1, retail), packed(2, retail), packed(3, early)), 'S',
+				"steady_order_distribution", "", "pass");
+		expect_row(judge_case(packed(1, retail), packed(2, retail), packed(3, swapped)), 'S',
+				"steady_order_distribution", "", "fail", "GAMEPLAY_ORDER_DISTRIBUTION");
+	}
+	{
 		// A share distribution compares at 13 samples or more on both sides
 		// (steady.distribution_floor): one sample's 1 / n share stays under the 0.08
 		// unit. x5's kick held 11 to 14 steady packets before the punt.
@@ -2933,6 +3014,7 @@ int main() {
 	test_reload_echo();
 	test_milestones_and_rates();
 	test_state();
+	test_dynamic_rules();
 	test_evidence();
 	test_document();
 	test_handshake_rules();

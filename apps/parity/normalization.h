@@ -368,12 +368,27 @@ inline constexpr Normalization kNormalizations[] = {
 			"the next boundary's packet: how many ride with the gameplay record follows the "
 			"client's frame rate against the host's boundary. A steady gameplay packet keys "
 			"without them; a packet of replies alone keeps them" },
+	{ "group.S.0x57.order", MaskKind::Field, 'S', 0x057, "RTT_ECHO", 0,
+			"steady_order_distribution leaves the RTT replies out of its record sequence too: "
+			"the host queues the tick's slot walk (Server_UpdateAllActivePlayerSlots, called "
+			"@0x51D88B in Server_TickUpdate, the S2C 0x40 overlay among it) before its receive "
+			"pump (CNapiNetwork_PumpServerProtocolRecv @0x51D895, the 0x57 answering a C2S "
+			"0x2C) into one connection queue packed at the boundary, so whether a 0x57 rides "
+			"ahead of or behind the 0x40 follows the tick its 0x2C arrived on against the tick "
+			"the overlay was queued on, and the share follows where the joiner's 0x2C falls in "
+			"the host's send window: one monotone curve for retail "
+			"hosts and ours in x7 (L3-s7: the 0x2C's median ms after the host's previous packet "
+			"against the 0x57-before-0x40 share, RR 156 / 172 / 171 at 5.7 / 4.0 / 5.7%, RR-aa "
+			"171 / 94 / 172 at 3.7 / 8.8 / 5.8%, OR 57 / 19 / 119 at 13.1 / 14.6 / 10.1% on "
+			"ash-capture / ash-deploy / cp04-deploy); over the producers alone x7's RR against "
+			"RR-aa reads 0.00..0.15 units on every case" },
 	{ "group.steady_order", MaskKind::Field, '*', 0, "record order within a packet", 0,
 			"a reply the receive pump queues (S2C 0x57 for a C2S 0x2C, C2S 0x2C for a S2C "
 			"0x57) lands before or after the tick's own records by when its request arrived: "
 			"the connection queue (CNapiNPConnection_QueueMessage @0x628640) is packed in "
 			"queue order at the boundary (BuildOutgoingPackets @0x628430). A steady packet "
-			"groups as its record multiset; steady_order_distribution judges the order" },
+			"groups as its record multiset; steady_order_distribution judges the order of "
+			"its producers' records (group.S.0x57.order)" },
 	{ "initial.S.0x5a.reply", MaskKind::Field, 'S', 0x05A, "loadout reply boundary", 0,
 			"the host answers each C2S 0x2F loadout submit with an S2C 0x5A "
 			"(NapiNPServerMsg_HandlePlayerLoadout @0x515790, Server_SendWeaponSlotListToPlayer "
@@ -630,6 +645,19 @@ inline constexpr Normalization kNormalizations[] = {
 			"relative to the recipient's eye anchor, Network_CompressFixedPoint @0x4C2780, "
 			"not a linear coordinate), carrier-local records skipped; frame_self_offset "
 			"keeps the anchor's own offset visible" },
+	{ "state.transient_lead", MaskKind::Field, '*', 0, "dynamic sequence start", 0,
+			"a dynamic sequence (one handle's records, the uplink stream, the frame anchor) "
+			"whose first in-window sample differs from the next while the one after repeats "
+			"that next one comes to rest on its second sample, and the first is a change the "
+			"window's edge cut: it sets no baseline. x7's hostkill RR opened on one record of "
+			"the host body mid-pose (x 1036.9, heading 0, pitch 247) and then (64,247) from "
+			"0.195 s, where RR-aa and RO opened on (64,247): RR read orientation range 65 "
+			"against RR-aa's 2. x7's selfnade: the camp AI 0x0035's lone aim-change record "
+			"(210,3), sent once, then (210,210) at every frame from the joiner's death, fell "
+			"1.34, 1.53 and 2.38 s into the window on RR, RR-aa and RO (the AI's think "
+			"14.8..17.1 s after the join on the three retail hosts, the window opening at the "
+			"runner's readiness) and 0.81 s before it on OR. A sequence with no rest at its "
+			"second sample keeps its first" },
 	{ "integrity.key", MaskKind::Field, '*', 0, "challenge key", 0,
 			"each integrity challenge's key is random per request: CRCs compare with the "
 			"key XORed out" },
