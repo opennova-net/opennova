@@ -680,7 +680,7 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "attached scenario. `aim_read` (a pool-0 handle, alone) plays nothing and "
 				+ "answers the runner's aim_at reads: the local player's heading BAM, its and "
 				+ "the handle's mission positions, the session's mouse sensitivity word. "
-				+ "`place_read` (true, alone) answers the runner's staged-joiner wait: the "
+				+ "`place_read` (true, alone) answers the runner's window-open wait: the "
 				+ "local player's mission position and heading BAM at this logic tick.",
 				NET + "scenario_play_probe.gd", {
 					"scenario": { "type": "object", "default": {} },

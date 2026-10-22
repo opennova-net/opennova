@@ -578,7 +578,7 @@ host body's orientation range as 64 on RR, RR-aa and OR and as 5 on RO and OO.
 The steady start's desktop reset runs just before that setup, so the window
 opens and the steps follow the pose with no more delay than inside one stage.
 The witness's `setup_before_window` records that stage's start, the staging's
-end, a staged joiner's in-place reads (below) and the stage's end. A
+end, the window-open wait's reads (`at_rest`, below) and the stage's end. A
 prelude must come before the pose, so a scenario with one plays wholly inside
 the window. A retail actor plays
 through onHook's virtual keyboard (`onhook_play_input`, bridge protocol 1.10,
@@ -664,12 +664,30 @@ what sticks:
   reached the joiner 0.14..0.19 s into the window on RR, RR-aa and OR, whose
   first in-window uplink therefore stood at the spawn (the ~1518-unit jump
   inside the window, and on RR the first frame too), and just before the
-  window on RO and OO. So after the staging the runner reads the joiner's own
-  body (a retail joiner's pool-0 record with DcbId 10001 through
-  `onhook_pool_entities`, an OpenNova joiner's `scenario_play` `place_read`)
-  every 0.1 s until two reads in a row stand within two units (x, y) of its
-  staged spot, then opens the window; `setup_before_window.in_place` keeps the
-  reads. A slot-0 staging has no client to wait for.
+  window on RO and OO.
+- a retail pose lands on the game's next frame, after its
+  `onhook_load_debug_snapshot` call returns. x7's `tdm_host_kill`: RR's window
+  opened on one host-body record mid-pose (x 1036.9, heading 0) with the posed
+  (64, 247) 0.19 s later, where RR-aa and RO opened on the pose; their last
+  pre-window frames still carried the pre-pose body.
+- the two players spawn on one point and push each other apart, on 03TR for
+  about 14 s, and a host posed beside the joiner pushes it again. x7's 03tr-dm:
+  RR's joiner moved -0.339 -> -0.361 inside the window (the pose's push), RR-aa's
+  -5.28 -> -5.48 (the slide's end), OR's and OO's stopped just before it, so the
+  frame anchor and the uplink read 0 against RR's 8433 and 2083.
+- so after the setup and the staging the runner waits for the setup's bodies
+  at rest, one rule on every topology (`Wait-ScenarioBodiesAtRest`). It reads
+  each player's own body every 0.1 s (a retail player's pool-0 record with
+  DcbId 10000 + its slot through `onhook_pool_entities`, an OpenNova player's
+  `scenario_play` `place_read`): a posed or staged body (the actor's setup pose,
+  a staged slot 0 or 1) until two reads in a row stand within two units (x, y)
+  of its spot, the host's first; then the pair's joiner, when nothing posed
+  it, until it stands at one planar Q16 position across two send periods, 24
+  logic ticks (LAN mode 1's holdoff, `NapiNPServer_GetSendHoldoffTicks
+  @0x4C4ADB`), so its own uplink and the host frame echoing it carry the rest.
+  Each body throws after 15 s. `setup_before_window.at_rest` keeps, per body,
+  its rule, spot, waited ms and ticks and every read (tick, Q16 position,
+  heading BAM, distance), so the triage sees what the wait skipped.
 
 An `aim_at` step (`{"tick": n, "aim_at": "0x0019"}`, a pool-0 handle) turns
 the actor onto that entity. The drivers take no such step: the runner plays

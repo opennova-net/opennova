@@ -155,7 +155,7 @@ func test_aim_read_answers_the_aim_reads() -> void:
 	assert_string_contains(absent.summary, "no entity 0x0fff")
 
 
-# The runner's staged-joiner wait (run_parity_topology.ps1 Wait-ScenarioStagingInPlace):
+# The runner's window-open wait (run_parity_topology.ps1 Wait-ScenarioBodiesAtRest):
 # the local player's mission position and heading at this logic tick; it reads alone.
 func test_place_read_answers_the_staged_joiner_wait() -> void:
 	if await _booted_in_world() == null:

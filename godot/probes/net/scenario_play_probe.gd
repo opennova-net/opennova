@@ -27,10 +27,10 @@ extends GameProbe
 ## word, the onhook_pool_entities read's counterparts.
 ##
 ## `place_read` (true, alone) reads the local player's mission position and
-## heading BAM at this logic tick: the runner's wait for a staged joiner to
-## stand in place before the steady window (run_parity_topology.ps1
-## Wait-ScenarioStagingInPlace), the counterpart of onhook_pool_entities' read
-## of a retail joiner's own body.
+## heading BAM at this logic tick: the runner's wait for the setup's bodies at
+## rest before the steady window (run_parity_topology.ps1
+## Wait-ScenarioBodiesAtRest), the counterpart of onhook_pool_entities' read
+## of a retail player's own body.
 
 const LOCAL_PLAYER_TIMEOUT_MS := 60_000
 ## A start that no device sample latches means the world is not ticking.
@@ -235,7 +235,7 @@ func _aim_read(handle: int) -> ProbeVerdict:
 	})
 
 
-## The staged-joiner wait's read: the local player's mission position (its own
+## The window-open wait's read: the local player's mission position (its own
 ## L, which its next C2S 0x0C uplink carries) and heading at this logic tick.
 func _place_read() -> ProbeVerdict:
 	var sim := _ctx.sim()
