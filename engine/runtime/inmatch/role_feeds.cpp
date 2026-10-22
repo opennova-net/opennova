@@ -716,15 +716,15 @@ bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zon
 		t.count_other = e.contest_other;
 		return true;
 	};
-	// The transient minimap slot's flag byte for the zone; the 0x6B ring slots
-	// land in the special bank here, so both are searched.
+	// The zone's first regular overlay slot's source byte (+4), whose 0xC0 bits
+	// are the host's capture bits; a SpawnPoint row rides the persistent bank
+	// (flags 0x10). No slot reads 0 [orig: HUD_DrawZoneStatusPanel @0x5A2517..0x5A2565
+	//  / @0x5A269B..0x5A26E6, the inlined MapOverlay_FindRegularSlotByEntity @0x5BE870
+	//  and `mov dl, [esi+4]` @0x5A2562].
 	const world::LfpCaptureFlagsLookup capture_flags = [runtime](world::EntityHandle h) -> uint8_t {
-		const replication::ClientMinimapState &map = runtime->state().minimap;
-		for (const auto &slot : map.transient)
-			if (slot.active && slot.handle == h.packed) return slot.flags;
-		for (const auto &slot : map.special)
-			if (slot.active && slot.handle == h.packed) return slot.flags;
-		return 0;
+		const replication::ClientMinimapOverlaySlot *slot =
+				replication::find_regular_overlay_slot(runtime->state().minimap, h.packed);
+		return slot != nullptr ? slot->source : 0;
 	};
 	world::build_lfp_zones(w, zones, *local, local_team, timer, capture_flags, out);
 	return true;

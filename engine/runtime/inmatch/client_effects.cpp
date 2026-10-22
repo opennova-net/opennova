@@ -97,13 +97,15 @@ bool in_active_radio_zone(const world::World &world, const world::Entity &speake
         const int32_t radius = int32_t(zone->zone_radius) << 16;
         if (dist > radius ||
                 std::abs(double(zone->position.z.q16) - speaker.position.z.q16) > radius/2) continue;
-        const auto matches = [&](const auto &slot) {
-            return slot.active && slot.handle == pair.first &&
-                (!(zone->item_attrib & 0x40000u) || !zone->zone_number || (slot.flags & 0xC0u));
-        };
-        bool visible = false;
-        for (const auto &slot : runtime.state().minimap.transient) if (matches(slot)) visible = true;
-        for (const auto &slot : runtime.state().minimap.special) if (matches(slot)) visible = true;
+        // The zone's first regular overlay slot, then the SpawnPoint def, the
+        // zone number or the slot's source capture bits (+4 & 0xC0)
+        // [orig: MapOverlay_FindRegularSlotByEntity @0x5BE870 (the call @0x538197);
+        //  `test [edx+54h], 40000h` @0x5381A8, `cmp [ecx+21Ah], 0` @0x5381B1,
+        //  `test byte [eax+4], 0C0h` @0x5381BA].
+        const replication::ClientMinimapOverlaySlot *slot =
+            replication::find_regular_overlay_slot(runtime.state().minimap, pair.first);
+        const bool visible = slot != nullptr &&
+            (!(zone->item_attrib & 0x40000u) || !zone->zone_number || (slot->source & 0xC0u));
         if (!visible || dist >= best) continue;
         best = dist;
         nearest = zone;

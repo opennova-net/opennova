@@ -5626,3 +5626,12 @@ add_test(NAME npruntime_retail_s2c_replay COMMAND npruntime_retail_s2c_replay_te
 add_executable(npwire_capture_goodbye_test npwire/capture_goodbye_test.cpp)
 target_link_libraries(npwire_capture_goodbye_test PRIVATE opennova_net opennova_base)
 add_test(NAME npwire_capture_goodbye COMMAND npwire_capture_goodbye_test)
+
+# --- parity lane LH (HUD zone status) ---
+# The zone HUD's client feeds: the regular overlay slot a zone's capture bits ride
+# (MapOverlay_FindRegularSlotByEntity), the A&S radio context over it, the zone status
+# panel's rows and the takeover dialog's nearest entry.
+add_executable(zone_hud_feed_test netsim/zone_hud_feed_test.cpp)
+target_link_libraries(zone_hud_feed_test PRIVATE opennova_runtime opennova_net)
+target_compile_features(zone_hud_feed_test PRIVATE cxx_std_17)
+add_test(NAME zone_hud_feed COMMAND zone_hud_feed_test)

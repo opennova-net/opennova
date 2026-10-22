@@ -1029,6 +1029,25 @@ struct ClientMinimapState {
 	std::uint64_t revision = 0;
 };
 
+// The first REGULAR overlay slot naming `handle`: the 1160 slots in address
+// order (transient, persistent, special), skipping a free handle and a special
+// (flags 0x40) slot; null when none. The zone HUD reads the found slot's source
+// byte (+4), whose 0xC0 bits are the host's capture bits for this recipient.
+// [orig: MapOverlay_FindRegularSlotByEntity @0x5BE870 -- the 0x488-slot walk from
+//  word_28E5620, `cmp cx, 0FFFFh` @0x5BE883, `test byte [eax+3], 40h` @0x5BE88A;
+//  inlined twice in HUD_DrawZoneStatusPanel @0x5A2517 / @0x5A269B]
+inline const ClientMinimapOverlaySlot *find_regular_overlay_slot(
+		const ClientMinimapState &map, uint16_t handle) {
+	const auto search = [handle](const auto &bank) -> const ClientMinimapOverlaySlot * {
+		for (const ClientMinimapOverlaySlot &slot : bank)
+			if (slot.active && slot.handle == handle && (slot.flags & 0x40u) == 0) return &slot;
+		return nullptr;
+	};
+	if (const ClientMinimapOverlaySlot *slot = search(map.transient)) return slot;
+	if (const ClientMinimapOverlaySlot *slot = search(map.persistent)) return slot;
+	return search(map.special);
+}
+
 // The decoded world the client holds after pumping the loopback. Positions are
 // post-compression (lossy, ~|v|>>11 quantization) — exactly what the original
 // client renders for its decoded peers. Callers must NOT "correct" them toward the
