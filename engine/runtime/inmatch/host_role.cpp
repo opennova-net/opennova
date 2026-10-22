@@ -348,8 +348,15 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	//  ahead of CNapiGameSession_BuildAndCreateSession @0x5694D0 (called @0x56A46A);
 	//  UI_HandleHostSessionStart's SetTransportMode(3) @0x556EA6 before; the create's own reset
 	//  @0x4C97CC where no pre-game menu runs]
+	// A NovaWorld host's setup runs once its session hosts (state 6) and as the authority, so each
+	// held player's teardown sends ClientHostPlayerRemoved on it (D-NET-NEW-L9-21)
+	// [orig: UI_DispatchScreenEvent @0x54E6A0 - HostDialog_StartSession called @0x54F321
+	//  (HostDialog_StartSession @0x558760, its connection mode @0x55878F),
+	//  CNapiGameSession_ConnectOrHost called @0x54F33B, the Premenu scene pushed @0x54F371 only
+	//  on its success]
 	stop_unstopped_server(client_process_->unstopped_server, host_cfg.logs, socket_,
-			host_cfg.local_address_known ? &host_cfg.local_address : nullptr);
+			host_cfg.local_address_known ? &host_cfg.local_address : nullptr,
+			client_process_->nwu_player_removed);
 	reset_state(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
 			host_cfg.title);
 	state.host_owner.host_loopback = &state.host_loop;

@@ -872,6 +872,15 @@ void SessionDrive::adopt_nw_client(NovaWorldClient *p_client) {
 		world_->add_child(p_client);
 	}
 	nw_client_id_ = ObjectID(p_client->get_instance_id());
+	// The process's one NovaWorld session takes the player teardowns no hosted match's roster
+	// sync sees: a held server's, stopped by the next host's session reset (engine:
+	// inmatch/client_runtime.h ClientProcessState::nwu_player_removed, D-NET-NEW-L9-21).
+	const ObjectID client_id = nw_client_id_;
+	world_->client_process_.nwu_player_removed = [client_id](int p_player_number) {
+		NovaWorldClient *live = Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(client_id));
+		if (live != nullptr)
+			live->host_role().clear_player_slot(p_player_number);
+	};
 	// A hosting session's service traffic reaches the in-match host.
 	const Callable command = callable_mp(world_, &GameWorld::on_nw_host_server_command);
 	if (!p_client->is_connected("server_command", command)) {
@@ -891,6 +900,7 @@ NovaWorldClient *SessionDrive::release_nw_client() {
 	NovaWorldClient *client = nw_client();
 	unbind_nw_host();
 	nw_client_id_ = ObjectID();
+	world_->client_process_.nwu_player_removed = nullptr;
 	nwu_feed_live_ = false;
 	if (client == nullptr) {
 		return nullptr;
@@ -943,6 +953,7 @@ void SessionDrive::stop_nw_client() {
 		client->queue_free();
 	}
 	nw_client_id_ = ObjectID();
+	world_->client_process_.nwu_player_removed = nullptr;
 }
 
 // The hosting session meets its match once the runtime is live: the GSID and

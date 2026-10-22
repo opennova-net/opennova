@@ -109,6 +109,8 @@ public:
 	// The roster the PlayerList and ClientHostPlayerAdded/Removed carry: one slot per player the
 	// hosted match added, the host's own player included (Server_PlayerAdd's five per-slot vars).
 	void set_player_slot(const HostPlayerSlot &slot);
+	// A player's teardown: its slot leaves the roster and the PlayerList, and in state 6
+	// ClientHostPlayerRemoved goes out, whether or not the roster held the slot.
 	void clear_player_slot(int slot);
 	// A kept player's PlayerTeam and PlayerType, as the in-match handlers SetOrCreate them
 	// (a team change, a loadout's accept, a weapon-slot list): the vars alone change in the

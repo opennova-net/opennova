@@ -139,6 +139,15 @@ struct ClientProcessState {
 	// unstopped, until the next session reset stops it (napi_np_connection.h UnstoppedServer;
 	// D-NET-NEW-L1-26).
 	UnstoppedServer unstopped_server;
+	// The process's NovaWorld game session's leg of a player's teardown, which no hosted match's
+	// roster sync reaches: a held server's, stopped by the next host's session reset
+	// (stop_unstopped_server from HostRole::bring_up). ClientHostPlayerRemoved in state 6 alone
+	// and the slot's PlayerList vars dropped (NwuHostRole::clear_player_slot); the embedder that
+	// holds the session installs it, unset when none (D-NET-NEW-L9-21).
+	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - CNapiGameSession_SendPlayerRemovedIfHosting
+	//  (the call @0x51B5F3; its state-6 test @0x4D0E48), NapiLinkedList_RemoveByUserData on the
+	//  session's PlayerList (the call @0x51B601)]
+	std::function<void(int player_number)> nwu_player_removed;
 };
 
 class ClientRuntime {

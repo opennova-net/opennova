@@ -677,6 +677,82 @@ void test_the_destroy_arm_leaves_no_server() {
 	CHECK(!process.unstopped_server.running && process.unstopped_server.connections.empty());
 }
 
+// D-NET-NEW-L9-21 (L1-s18's hand-over): at the next host's session reset each held node's destroy
+// runs its removal callback after its burst, and on the authority a node whose player was added
+// reaches its slot's teardown, whose first leg is the process's NovaWorld session's
+// (ClientHostPlayerRemoved in state 6): the leg gets the slot once per such node, after that
+// node's STOP burst, and nothing for a node whose player was never added. The process's network
+// shutdown passes no leg (the router cleared the connection mode, so no authority remains).
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the burst @0x6253EF..0x625424,
+//  the protocol's +0x2D8 callback called @0x625438; NapiNPServer_DestroyPlayerCtx @0x4C8400
+//  (installed @0x4C99D0) - Server_ForwardEventToSession called @0x4C8426;
+//  Server_HandlePlayerDisconnect @0x51B5C0 - is_authority @0x51B5D0, the active byte @0x51B5DC,
+//  CNapiGameSession_SendPlayerRemovedIfHosting called @0x51B5F3; PostMenu_RouteMissionExit
+//  @0x568460 - CGameSession_SetConnectionMode(0) @0x5686ED; NapiLib_Shutdown @0x4C9580 - the reset
+//  @0x4C958B]
+void test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_session() {
+	for (const bool next_host : { true, false }) {
+		inmatch::ClientProcessState process;
+		auto first = std::make_unique<ListenHost>();
+		first->shared_process = &process;
+		if (!first->boot()) {
+			++failures;
+			return;
+		}
+		first->ctx().np_protocol.connection_list.back().client_ck = 0x5A5A1234u;
+		first->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld;
+		first->role->close();
+		CHECK(process.unstopped_server.connections.size() == 1);
+		if (process.unstopped_server.connections.size() != 1)
+			return;
+		// The held joiner's player was added on slot 3; a second held node never got its player.
+		inmatch::NapiNPConnection &added = process.unstopped_server.connections.front();
+		added.phase = inmatch::ConnectionPhase::PlayerAdded;
+		added.reply.player_slot = 3;
+		inmatch::NapiNPConnection pending = added;
+		pending.peer = PeerAddr{ 0x0100007Fu, 31001 };
+		pending.phase = inmatch::ConnectionPhase::Joined;
+		pending.link.owned_entity = {};
+		pending.reply.player_slot = 4;
+		process.unstopped_server.connections.push_back(pending);
+
+		const std::vector<uint8_t> stop = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+				server_goodbye_to_bytes(
+						0x5A5A1234u, make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP")));
+		std::vector<std::pair<int, int>> removed; // (the slot, the STOP datagrams sent by then)
+		if (next_host) {
+			first.reset();
+			auto second = std::make_unique<ListenHost>();
+			second->shared_process = &process;
+			second->socket_at_boot = true;
+			const CaptureSocket &socket = second->socket;
+			process.nwu_player_removed = [&removed, &socket, &stop](int player_number) {
+				int stops = 0;
+				for (const auto &[to, bytes] : socket.sent)
+					if (to == kPeer && bytes == stop)
+						++stops;
+				removed.emplace_back(player_number, stops);
+			};
+			if (!second->boot()) {
+				++failures;
+				return;
+			}
+			CHECK(removed.size() == 1);
+			if (removed.size() == 1) {
+				CHECK(removed[0].first == 3);
+				CHECK(removed[0].second > 0);
+			}
+		} else {
+			process.nwu_player_removed = [&removed](int player_number) {
+				removed.emplace_back(player_number, 0);
+			};
+			first->role->stop_unstopped_server_at_exit(inmatch::ServerLogs{});
+			CHECK(removed.empty());
+		}
+		CHECK(!process.unstopped_server.running && process.unstopped_server.connections.empty());
+	}
+}
+
 } // namespace
 
 int main() {
@@ -693,6 +769,7 @@ int main() {
 	test_the_destroy_arm_leaves_no_server();
 	test_the_remapped_exit_reads_the_own_client_record();
 	test_close_routes_the_last_entity_pass_first();
+	test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_session();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }

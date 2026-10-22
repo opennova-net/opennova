@@ -1793,6 +1793,30 @@ void check_host_player_add_sends_update() {
 	CHECK(statements.size() == 1 && !statements.empty() &&
 			statements[0].name == "ClientHostPlayerRemoved");
 
+	// D-NET-NEW-L9-21: the teardown's legs read no roster, so a slot this hosting never announced
+	// (a held server's player at the next host's session reset) still sends its statement, the
+	// PlayerNumber the slot's index. [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the call
+	//  @0x51B5F3; CNapiGameSession_SendPlayerRemovedIfHosting @0x4D0E40 - the state test
+	//  @0x4D0E48; CNapiGameSession_SendPlayerRemoved @0x4D01A0 - the slot's +0x14 @0x4D0205]
+	before = rig.session.sent.size();
+	role.clear_player_slot(7);
+	rig.lobby.tick(355);
+	sent.clear();
+	for (std::size_t i = before; i < rig.session.sent.size(); ++i)
+		sent.push_back(rig.session.sent[i].second);
+	statements = client_statements(sent, session->client_scrk());
+	CHECK(statements.size() == 1 && !statements.empty() &&
+			statements[0].name == "ClientHostPlayerRemoved");
+	if (statements.size() == 1) {
+		std::string number;
+		for (const NapiField &f : statements[0].fields)
+			if (f.name == "PlayerNumber")
+				number.assign(f.data.begin(), f.data.end());
+		while (!number.empty() && number.back() == '\0')
+			number.pop_back();
+		CHECK(number == "7");
+	}
+
 	// D-NET-659: the local player's slot keeps the round init's +5, so a listen host's own add
 	// sends its statement alone, the PlayerList change riding the next update. [orig:
 	// Server_InitNewRoundState @0x51C8E0 - +5 = 1 @0x51CA35; Server_PlayerAdd @0x51CBC0 - the

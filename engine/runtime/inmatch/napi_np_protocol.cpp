@@ -2018,10 +2018,18 @@ bool destroy_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 // sends the burst over whatever socket the manager holds then, a reopened one carrying it (a
 // closed one fails the first SendTo and ends the loop); host_running clears and HOST STOPPED
 // reads the manager's socket then and the session name the next create has not yet replaced.
-// The destroy's removal callback (Server_HandlePlayerDisconnect @0x51B5C0, gated on is_authority
-// @0x51B5DC, which the next host's connection mode has set again) is not run here: the slots it
-// reads are the ones the teardown reset, its game sends queue to nodes this walk destroys, and
-// its NovaWorld gate legs (@0x51B5F3, @0x51B696) are the lobby's.
+// The destroy's removal callback, after the burst, reaches Server_HandlePlayerDisconnect @0x51B5C0
+// for a node whose player was added (gated on is_authority @0x51B5D0, which the next host's
+// connection mode has set again, and the slot's active byte @0x51B5DC, which the teardown's
+// reset keeps): its first leg is the NovaWorld session's ClientHostPlayerRemoved, sent in state 6
+// alone (`player_removed`, the caller's; D-NET-NEW-L9-21). Its game sends queue to nodes this
+// walk destroys; its gate metrics report (@0x51B696) is not sent by our host at all.
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the protocol's +0x2D8 callback
+//  called @0x625438; CNapiGameSession_CreateSession @0x4C97C0 - NapiNPServer_DestroyPlayerCtx
+//  installed there @0x4C99D0; NapiNPServer_DestroyPlayerCtx @0x4C8400 -
+//  Server_ForwardEventToSession called @0x4C8426 (its is_authority test @0x51B8E7);
+//  Server_HandlePlayerDisconnect @0x51B5C0 - the removal called @0x51B5F3;
+//  HostDialog_StartSession @0x558760 - CGameSession_SetConnectionMode called @0x55878F]
 // [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0x68 test @0x4C8A73, StopServer
 //  called @0x4C8AA1; NapiNPProtocol_StopServer @0x62A820 - the record @0x62A8C3..0x62A8F6
 //  latched-if-invalid @0x62A904..0x62A919, CNapiNPConnection_Destroy @0x62A924, host_running
@@ -2031,14 +2039,20 @@ bool destroy_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 //  @0x5691F0 ahead of CNapiGameSession_BuildAndCreateSession @0x5694D0 (called @0x56A46A; the
 //  session create's name copy @0x4C9985 comes after)]
 void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
-		opennova::IDatagramSocket *socket, const PeerAddr *local_address) {
+		opennova::IDatagramSocket *socket, const PeerAddr *local_address,
+		const std::function<void(int player_number)> &player_removed) {
 	if (!server.running) return;
 	for (NapiNPConnection &conn : server.connections) {
 		latch_disconnect_event(conn, make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP"));
 		write_inout_line(logs, inout_player_removed_line(conn));
-		if (socket == nullptr) continue;
-		for (const std::vector<uint8_t> &datagram : host_goodbye_burst(/*host_running=*/true, conn))
-			socket->send_to(conn.peer, datagram.data(), datagram.size());
+		if (socket != nullptr) {
+			for (const std::vector<uint8_t> &datagram :
+					host_goodbye_burst(/*host_running=*/true, conn))
+				socket->send_to(conn.peer, datagram.data(), datagram.size());
+		}
+		if (player_removed &&
+				(conn.link.owned_entity.valid() || conn.phase >= ConnectionPhase::PlayerAdded))
+			player_removed(conn.reply.player_slot);
 	}
 	const std::string session_name = std::move(server.session_name);
 	server = UnstoppedServer{};
