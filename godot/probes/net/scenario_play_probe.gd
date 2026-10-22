@@ -215,18 +215,14 @@ func _aim_read(handle: int) -> ProbeVerdict:
 	var sim := _ctx.sim()
 	if sim == null or not sim.has_local_player():
 		return ProbeVerdict.failed("no local player to aim")
-	var own: EntityCard = sim.entity_card(sim.get_local_player_wire_handle())
 	var target: EntityCard = sim.entity_card(handle)
-	if own == null or not (own.has_ai() or own.has_world()):
-		return ProbeVerdict.failed("the local player has no entity card")
 	if target == null or not (target.has_ai() or target.has_world()):
 		return ProbeVerdict.failed("no entity 0x%04x to aim at" % handle)
-	var own_position := own.get_mission_position()
 	var target_position := target.get_mission_position()
 	return ProbeVerdict.passed("aim read 0x%04x" % handle, {
 		"logic_tick": sim.get_logic_tick(),
 		"heading_bam": sim.get_local_player_heading_bam(),
-		"position_bms": [own_position.x, own_position.y, own_position.z],
+		"position_bms": _own_mission_position(sim),
 		"target": {
 			"handle": handle,
 			"position_bms": [target_position.x, target_position.y, target_position.z],
@@ -241,15 +237,20 @@ func _place_read() -> ProbeVerdict:
 	var sim := _ctx.sim()
 	if sim == null or not sim.has_local_player():
 		return ProbeVerdict.failed("no local player to read")
-	var own: EntityCard = sim.entity_card(sim.get_local_player_wire_handle())
-	if own == null or not (own.has_ai() or own.has_world()):
-		return ProbeVerdict.failed("the local player has no entity card")
-	var position := own.get_mission_position()
 	return ProbeVerdict.passed("place read", {
 		"logic_tick": sim.get_logic_tick(),
 		"heading_bam": sim.get_local_player_heading_bam(),
-		"position_bms": [position.x, position.y, position.z],
+		"position_bms": _own_mission_position(sim),
 	})
+
+
+## The local player's own body L as mission (x, y, z). On a joiner the wire
+## handle (get_local_player_wire_handle) is H, the host-assigned identity, which
+## names no body in the joiner's own pool, so the read takes L's position
+## directly: Godot (x, y up, z) -> mission (x, -z, y).
+func _own_mission_position(sim: Simulation) -> Array:
+	var godot_position: Vector3 = sim.get_local_player_position()
+	return [godot_position.x, -godot_position.z, godot_position.y]
 
 
 func _read_scenario(path: String) -> Dictionary:
