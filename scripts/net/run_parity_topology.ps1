@@ -70,6 +70,12 @@ param(
     # <run>\scenario-probes.json. A retail actor ignores it.
     [string] $ActorScenarioProbes = "",
 
+    # L2-s22's load probe (D-NET-NEW-L2-35): --verbose on our joiner's Godot
+    # command line, so its godot.log carries the LoadTimeline: lines (each a
+    # print_verbose). Nothing else in the cell changes; a retail joiner
+    # ignores it.
+    [switch] $JoinerVerbose,
+
     # Round end and rotation (extension E2): the missions after -Mission in
     # the host's rotation, .BMS basenames in play order (a comma-separated
     # list is accepted). A retail host takes them through onhook_host_lan's
@@ -3294,11 +3300,13 @@ function Start-OpenNovaJoinerExact {
     $joinerDir = Join-Path $RunRoot "joiner"
     New-Item -ItemType Directory -Path $joinerDir -Force | Out-Null
     $joinTarget = if ($JoinerDial -eq "browse") { "browse:$Port" } else { "127.0.0.1:$Port" }
+    $godotArguments = @(
+        "--windowed", "--resolution", $Resolution,
+        "--log-file", (Join-Path $joinerDir "godot.log")
+    )
+    if ($JoinerVerbose) { $godotArguments += "--verbose" }
     $script:OpenNovaJoiner = Start-OpenNovaProcess `
-        -GodotArguments @(
-            "--windowed", "--resolution", $Resolution,
-            "--log-file", (Join-Path $joinerDir "godot.log")
-        ) `
+        -GodotArguments $godotArguments `
         -GameArguments (@(
             "--lan-join", $joinTarget,
             "--callsign", $JoinerCallsign
@@ -4217,6 +4225,8 @@ $summary = [pscustomobject]@{
     # client port (the comparator's session selector), ready and final state.
     late_joiner = $script:LateJoinerWitness
     joiner_dial =$(if ($Topology -in @("RO", "OO")) { $JoinerDial } else { $null })
+    # L2-s22's load probe: our joiner ran under --verbose (-JoinerVerbose).
+    joiner_verbose = [bool] ($JoinerVerbose -and $Topology -in @("RO", "OO"))
     repo_commit = [string] $RepoCommit
     repo_dirty = $RepoDirty
     allow_dirty_repo = [bool] $AllowDirtyRepo

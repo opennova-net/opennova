@@ -277,6 +277,9 @@ subject whose retail role's config differs from the reference's (RO's host,
 OR's joiner) leaves its case unjudged (`ERROR`). Every cell refuses a dirty
 checkout unless `-AllowDirtyRepo`, and the OpenNova joiner browses unless
 `-JoinerDial direct` (both diagnostics, passed through to the runner).
+`-JoinerVerbose` (a diagnostic) starts the OpenNova joiner of each RO and OO
+cell under Godot's `--verbose`, so its `godot.log` carries the
+`LoadTimeline:` lines; the summary records it (`joiner_verbose`).
 
 A case (`parity-cases.json`, `opennova.parity-cases.v1`) gives `id`,
 `mission`, `mission_sha256`, `game_type`, `port` (inside the SERVER copy's `mplanserverportmin`..`max`, stock 32768-32787), `readiness` (`in_match` or

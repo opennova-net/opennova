@@ -12,7 +12,7 @@
 #       [-Topologies RR,RR-aa,RO,OR,OO] `
 #       [-Resolution 2560x1440] [-Evidence summary|external] `
 #       [-ReferencePrefix parity-20261019-base [-ReferenceRoot <dir>]] `
-#       [-JoinerDial browse|direct] [-AllowDirtyRepo] [-Plan]
+#       [-JoinerDial browse|direct] [-JoinerVerbose] [-AllowDirtyRepo] [-Plan]
 #
 # Run it from a real console: the cells' Godot console wrapper stalls without
 # one. -Resolution must match the retail copies' own video setting (the runner
@@ -100,6 +100,10 @@ param(
 
     [ValidateSet("browse", "direct")]
     [string] $JoinerDial = "browse",
+
+    # L2-s22's load probe: every RO / OO cell runs our joiner under --verbose
+    # (run_parity_topology.ps1 -JoinerVerbose), for its LoadTimeline: lines.
+    [switch] $JoinerVerbose,
 
     [switch] $AllowDirtyRepo,
 
@@ -353,6 +357,7 @@ function Get-CellArguments {
         $arguments += @("-Scenario", (Join-Path $PSScriptRoot ("scenarios\" + [string] $Case.scenario)))
     }
     if ($Cell.Topology -in @("RO", "OO")) { $arguments += @("-JoinerDial", $JoinerDial) }
+    if ($JoinerVerbose -and $Cell.Topology -in @("RO", "OO")) { $arguments += "-JoinerVerbose" }
     $rotation = @(Get-CaseRotation $Case)
     if ($rotation.Count -gt 0) { $arguments += @("-Rotation", ($rotation -join ",")) }
     $limit = Get-CaseTimeLimit $Case
