@@ -49,6 +49,10 @@ Dictionary BodyTraceRow::to_json_value() const {
 	out["source"] = get_source();
 	out["damage"] = get_damage();
 	out["health_before"] = get_health_before();
+	out["brain_state"] = get_brain_state();
+	out["brain_pend"] = get_brain_pend();
+	out["think_clock"] = get_think_clock();
+	out["ai_event"] = get_ai_event();
 	return out;
 }
 
@@ -76,5 +80,9 @@ void BodyTraceRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::PACKED_INT32_ARRAY, source)
 	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, damage)
 	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, health_before)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, brain_state)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, brain_pend)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, think_clock)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, ai_event)
 	ClassDB::bind_method(D_METHOD("to_json_value"), &BodyTraceRow::to_json_value);
 }

@@ -106,6 +106,43 @@ static void test_the_event_records_follow_the_watch() {
     CHECK(std::string(body_trace_event_name(rows[2].event)) == "blast");
 }
 
+// A watched row with a brain: its tick carries the brain's current and pending states and the
+// think countdown (+0x2AC); a timed event dispatched to it gives an ai_event record with the
+// event's type and the states either side of the dispatch's transition (here a pending 5 the
+// dispatch commits, through state rows whose handlers do nothing).
+static void test_a_brain_row_records_its_states_and_events() {
+    Rig r;
+    World &w = *r.w;
+    Entity hull;
+    hull.kind = EntityKind::Item;
+    hull.health = 40;
+    hull.spawn_phase = 7;
+    const EntityHandle h = w.registry.spawn(1, hull);
+    const int index = w.ai.attach(h);
+    AiEntity &brain = *w.ai.at(index);
+    brain.handle = h;
+    brain.brain.f[AiBrain::kCurState] = 3;
+    brain.brain.f[AiBrain::kPendState] = 5;
+    w.body_trace.watch[0] = h.packed;
+    w.body_trace.watch[1] = r.a.packed;
+    body_trace_tick(w);
+    AiEventEntry event{};
+    event.f[0] = 1;
+    event.f[1] = index << 16;
+    event.set_timer(0.0f);
+    w.ai.events.queue(event);
+    w.ai.events.process_timed(w.ai, w);
+    const std::vector<BodyTraceRecord> rows = w.body_trace.since(0);
+    CHECK(rows.size() == 3);
+    if (rows.size() != 3) return;
+    CHECK(rows[0].handle == h.packed && rows[0].brain_state == 3 && rows[0].brain_pend == 5);
+    CHECK(rows[0].think_clock == 7);
+    CHECK(rows[1].handle == r.a.packed && rows[1].brain_state == -1 && rows[1].brain_pend == -1);
+    CHECK(rows[2].event == BodyTraceEvent::kAiEvent && rows[2].handle == h.packed);
+    CHECK(rows[2].ai_event == 1 && rows[2].brain_pend == 3 && rows[2].brain_state == 5);
+    CHECK(std::string(body_trace_event_name(rows[2].event)) == "ai_event");
+}
+
 static void test_the_ring_keeps_the_last_records() {
     BodyTrace trace;
     for (std::size_t i = 0; i < BodyTrace::kCapacity + 3; ++i) {
@@ -124,6 +161,7 @@ static void test_the_ring_keeps_the_last_records() {
 int main() {
     test_the_tick_records_each_watched_handle();
     test_the_event_records_follow_the_watch();
+    test_a_brain_row_records_its_states_and_events();
     test_the_ring_keeps_the_last_records();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);

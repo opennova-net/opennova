@@ -24,6 +24,7 @@
 
 #include "ai_detail.h"
 
+#include <runtime/world/body_trace.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -134,6 +135,7 @@ void AiEventQueue::process_timed(AiSystem &sys, World &world) {
         if (remaining <= 0.0f) {
             AiEntity *e = sys.at(entry.entity_index());
             if (e && e->brain.f[AiBrain::kOwner]) {
+                const int32_t state_before = e->brain.f[AiBrain::kCurState];
                 AiThinkCtx ctx{&sys, e, &world, &entry};
                 sys.row(e->brain.f[AiBrain::kCurState]).event(ctx); // off_815244
                 int32_t pend = e->brain.f[AiBrain::kPendState];
@@ -148,6 +150,9 @@ void AiEventQueue::process_timed(AiSystem &sys, World &world) {
                         e->brain.f[AiBrain::kCurState] = e->brain.f[AiBrain::kPendState];
                     }
                 }
+                // The body readout (an instrument, no behaviour; body_trace.h).
+                body_trace_ai_event(world, e->handle, entry.type(), state_before,
+                        e->brain.f[AiBrain::kCurState]);
             }
             // Compact: swap-with-last (faithful to the orig array compaction).
             buf_[index] = buf_[count_ - 1];

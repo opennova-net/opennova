@@ -18,7 +18,12 @@
 // - kTick: once per entity pass, after it (World::update_all_entities), every watched handle's
 //   words: Position, the velocity triple (a person's +0x98 / +0x9C / +0xA0, a hull's motor
 //   words), both Flags words, Health, the seat (mounted, its carrier, seat and bone), +0x28
-//   and the collision model instance.
+//   and the collision model instance; for a row with a brain, the brain's current and pending
+//   states and the think countdown (+0x2AC), which a think re-arms from the brain's step.
+// - kAiEvent: a timed AI event dispatched to a watched brain (AiEventQueue::process_timed): the
+//   event's type word and the brain's state before and after the dispatch's transition, the
+//   one place besides a think that commits a pending state [orig: AIEvent_ProcessTimedEntries
+//   @0x455DF0 - the dispatch @0x455E4F, the commit @0x455E51..0x455E87].
 // The ring holds the last kCapacity records; a reader polls by seq (since).
 #pragma once
 
@@ -39,6 +44,7 @@ enum class BodyTraceEvent : uint8_t {
     kGroundProbe = 1,
     kForce = 2,
     kBlast = 3,
+    kAiEvent = 4,
 };
 
 struct BodyTraceRecord {
@@ -70,6 +76,13 @@ struct BodyTraceRecord {
     int32_t source[3] = {}; // kForce: the source point; kBlast: the entry's centre
     int32_t damage = 0;     // kBlast
     int16_t health_before = 0; // kBlast
+    // kTick: the brain's current and pending states (-1 without a brain) and the think
+    // countdown (+0x2AC, Entity::spawn_phase). kAiEvent: the states before (brain_pend) and
+    // after (brain_state) the dispatch, the event's type word in ai_event.
+    int16_t brain_state = -1;
+    int16_t brain_pend = -1;
+    int32_t think_clock = 0;
+    int32_t ai_event = 0;
 };
 
 // The watched handles and the last kCapacity records; seq counts every record appended.
@@ -143,12 +156,18 @@ void body_trace_force(World &world, const Entity &target, uint8_t hit_type, uint
 void body_trace_blast(World &world, const Entity &target, int32_t kz_type, EntityHandle attacker,
         const int32_t centre[3], int32_t damage, int32_t health_before);
 
+// kAiEvent: a timed event of type `type` dispatched to the brain of `entity`, its state
+// `state_before` ahead of the dispatch and `state_after` past its transition.
+void body_trace_ai_event(World &world, EntityHandle entity, int32_t type, int32_t state_before,
+        int32_t state_after);
+
 inline const char *body_trace_event_name(BodyTraceEvent event) {
     switch (event) {
         case BodyTraceEvent::kTick: return "tick";
         case BodyTraceEvent::kGroundProbe: return "ground_probe";
         case BodyTraceEvent::kForce: return "force";
         case BodyTraceEvent::kBlast: return "blast";
+        case BodyTraceEvent::kAiEvent: return "ai_event";
     }
     return "unknown";
 }

@@ -64,6 +64,12 @@ void body_trace_tick(World &world) {
             record.mount_bone = e->mount_bone;
             record.ground_target = handle_word(e->ground_target);
             record.collision_model = collision_model_of(world, h);
+            record.think_clock = e->spawn_phase;
+            if (const AiEntity *brain = world.ai.for_handle(h);
+                    brain != nullptr && !brain->inf.active && brain->brain.f[AiBrain::kOwner] != 0) {
+                record.brain_state = static_cast<int16_t>(brain->brain.f[AiBrain::kCurState]);
+                record.brain_pend = static_cast<int16_t>(brain->brain.f[AiBrain::kPendState]);
+            }
         }
         world.body_trace.append(record);
     }
@@ -122,6 +128,17 @@ void body_trace_blast(World &world, const Entity &target, int32_t kz_type, Entit
     record.source[1] = centre[1];
     record.source[2] = centre[2];
     record.damage = damage;
+    world.body_trace.append(record);
+}
+
+void body_trace_ai_event(World &world, EntityHandle entity, int32_t type, int32_t state_before,
+        int32_t state_after) {
+    if (!world.body_trace.watches(entity)) return;
+    BodyTraceRecord record = body_trace_head(world, BodyTraceEvent::kAiEvent, entity);
+    record.present = world.registry.get(entity) != nullptr;
+    record.ai_event = type;
+    record.brain_pend = static_cast<int16_t>(state_before);
+    record.brain_state = static_cast<int16_t>(state_after);
     world.body_trace.append(record);
 }
 

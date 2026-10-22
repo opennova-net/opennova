@@ -12,7 +12,9 @@ extends GameProbe
 ##   triple (`vel`: a person's +0x98 / +0x9C / +0xA0, the last its slideDecay; a hull's motor
 ##   words), both Flags words (`flags`, `engine_flags`: 0x40 the seat bit, 2 the dead bit),
 ##   `health`, its seat (`mounted`, `mount_target`, `mount_seat`, `mount_bone`), +0x28
-##   (`ground_target`) and its collision model instance (`collision_model`, -1 none).
+##   (`ground_target`) and its collision model instance (`collision_model`, -1 none); for a
+##   row with a brain, its current and pending states (`brain_state`, `brain_pend`, -1 without
+##   one) and the think countdown +0x2AC (`think_clock`).
 ## and, as they happen:
 ## - `ground_probe`: the movement resolver's settle-tail probe on it: the probe's start
 ##   (`pos`), the height it returned (`probe_z`), the entity it hit (`ground_target`, the word
@@ -22,6 +24,9 @@ extends GameProbe
 ## - `blast`: a blast's damage leg on it (the entry's kz type in `hit_type`, the attacker in
 ##   `other`, the entry's centre in `source`, `damage`, `health_before`, `health`; an item's
 ##   record is taken ahead of its drain, which the next `tick` shows).
+## - `ai_event`: a timed AI event dispatched to its brain: the event's type word (`ai_event`)
+##   and the brain's state before the dispatch (`brain_pend`) and after its transition
+##   (`brain_state`).
 ##
 ## `trigger_handle` (-1 none) keeps only the window around that entity's first `tick` at
 ## Health <= 0: `pre_ticks` before it to `post_ticks` after, and ends the run once the window
@@ -169,4 +174,7 @@ func _line(row: Dictionary) -> String:
 		"blast":
 			line += " kz=%d by=0x%04x damage=%d health %d->%d" % [int(row.hit_type),
 					int(row.other), int(row.damage), int(row.health_before), int(row.health)]
+		"ai_event":
+			line += " type=%d state %d->%d" % [int(row.ai_event), int(row.brain_pend),
+					int(row.brain_state)]
 	return line

@@ -49,6 +49,10 @@ public:
 	PackedInt32Array get_source() const;
 	int get_damage() const { return value_.damage; }
 	int get_health_before() const { return value_.health_before; }
+	int get_brain_state() const { return value_.brain_state; }
+	int get_brain_pend() const { return value_.brain_pend; }
+	int get_think_clock() const { return value_.think_clock; }
+	int get_ai_event() const { return value_.ai_event; }
 
 	Dictionary to_json_value() const;
 };
