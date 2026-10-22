@@ -448,7 +448,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
     if (body != nullptr) {
         body->health = static_cast<int16_t>(entity.health);
         entity.net_anim_state = static_cast<uint8_t>(body->inf.anim_state);
-        entity.net_anim_pending = static_cast<uint8_t>(body->inf.anim_pending);
+        entity.net_anim_pending = body->inf.anim_pending;
     }
 
     if (ai.is_authority) {

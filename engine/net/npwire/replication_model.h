@@ -126,7 +126,8 @@ struct GameEntitySnapshot {
 	// infantry motor (AiSystem::mirror_wire_anim). Defaults keep snapshot-only tests on the
 	// retail spawn/idle bytes (44/0). (D-NET-159)
 	uint8_t anim_state_id = 44;
-	uint8_t anim_pending_id = 0;
+	// The whole +0x2B8 dword (snapshot_anim_byte tests it whole).
+	int32_t anim_pending_id = 0;
 	uint8_t anim_channel_ratio = 0;
 	// InfantryCompactRecord's witnessed orientation sources. These stay full
 	// BAM32 in the transport-neutral snapshot; connection_fan performs the retail
@@ -229,5 +230,14 @@ struct GameEntitySnapshot {
 	// wire field; stamped by the host caller that knows the connection list.
 	bool owner_hidden = false;
 };
+
+// The anim byte the player and infantry records carry: the pending dword's low byte while the
+// dword is nonzero, else the current state's. [orig: NetPacket_SerializePlayerState @0x4C09C0 -
+// `cmp dword ptr [edi+2B8h], 0` @0x4C0CC7, `mov cl, [edi+2B8h]` @0x4C0CD6, `mov cl, [edi+2BCh]`
+// @0x4C0CDE; NetPacket_SerializeInfantryEntityState @0x4C0320 - @0x4C0988 / @0x4C0997 /
+// @0x4C099F]
+inline uint8_t snapshot_anim_byte(const GameEntitySnapshot &s) {
+	return s.anim_pending_id != 0 ? static_cast<uint8_t>(s.anim_pending_id) : s.anim_state_id;
+}
 
 } // namespace opennova

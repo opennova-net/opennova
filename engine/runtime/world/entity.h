@@ -853,7 +853,11 @@ struct Entity {
     // AnimChannel_AdvancePlayback @0x40B140 via @0x4c0cf2]). Spawn default 44 (idle2)
     // [orig: Entity_ResetToSpawnState @0x4b9714]; 43 = idle collapse.
     uint8_t net_anim_state = 44;
-    uint8_t net_anim_pending = 0;
+    // The pending word is the whole +0x2B8 dword: the emit tests the dword and sends its low
+    // byte, and a person body on the rokt row sets its high word (+0x2BA) alone.
+    // [orig: `cmp dword ptr [edi+2B8h], 0` @0x4C0CC7, `mov cl, [edi+2B8h]` @0x4C0CD6;
+    //  Entity_UpdateRocketFlag @0x443DD0 - the +0x2BA store @0x443DDE]
+    int32_t net_anim_pending = 0;
     uint8_t net_anim_phase = 0;
     // Analog control axes (entity+0x130..+0x132, the extended-uplink off-21..23 bytes):
     // joystick steering/throttle. The vehicle motor consumes the CONTROLLING occupant's

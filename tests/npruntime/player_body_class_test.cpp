@@ -1126,6 +1126,79 @@ void test_a_genx_row_body_rides_its_ground_entity() {
 	r.world->ai.root_motion = nullptr;
 }
 
+// A body bound to the rokt, hlfr or jvln row runs that row's mover over its +0x2B8 pending
+// dword, which the player record tests whole and sends the low byte of: rokt sets the high word
+// (+0x2BA) to 1 while it is 0, so the record sends the low byte (0) over the current state;
+// hlfr and jvln set bit 0 when the body has no +0x170 link and return while it is set. The
+// envs, door, squib (a live body: its death tick 0) and upfx (its 0x4 bit clear) rows write no
+// word of the body's. None runs the player-body update after it (D-NET-NEW-L4-14 (a)).
+// [orig: Entity_UpdateRocketFlag @0x443DD0 - @0x443DD4, @0x443DDE; Entity_UpdateGuidedMissile
+//  @0x446690 - @0x4466B3..0x4466CB, @0x4466DA..0x4466DC; Missile_UpdateGuidance @0x446BA0 -
+//  @0x446BBD..0x446BD9, @0x446BE8..0x446BEA; the player record @0x4C0CC7 / @0x4C0CD6 /
+//  @0x4C0CDE; Entity_ProcessProjectileTravel @0x448D50 - @0x448D5E..0x448D65;
+//  Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - @0x4A92F5; Entity_UpdateEnvSoundEmitter
+//  @0x4A8080; Entity_SetDefaultBoneCallbacks @0x4A91D0]
+void test_an_item_row_body_runs_its_movers_head() {
+	struct Case {
+		w::PhysicsClass row;
+		bool link;       // the body carries a +0x170 link
+		int32_t pending; // the pending dword before the visit
+		int32_t after;   // and after it
+	};
+	using P = w::PhysicsClass;
+	for (const Case c : {Case{P::Rokt, false, 0, 0x10000}, Case{P::Rokt, false, 0x20005, 0x20005},
+				Case{P::Hlfr, false, 0, 1}, Case{P::Jvln, false, 12, 13},
+				Case{P::Hlfr, true, 13, 13}, Case{P::Jvln, true, 13, 13},
+				Case{P::Envs, false, 12, 12}, Case{P::Door, false, 12, 12},
+				Case{P::Squib, false, 12, 12}, Case{P::Upfx, false, 12, 12}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		const w::Entity *other = r.spawn_remote(kPlyr);
+		const w::EntityHandle link = other != nullptr ? other->handle : w::EntityHandle{};
+		w::Entity *body = r.spawn_remote(kPlyr);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(link.valid() && ae != nullptr && body->item_type_index > 0);
+		if (!link.valid() || ae == nullptr || body->item_type_index <= 0) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		// The test's own row: the plyr person bound to the case's move function.
+		r.world->tables.item_rows[static_cast<size_t>(body->item_type_index)].move_row = c.row;
+		CHECK(w::body_move_row(*r.world, *ae, body) == c.row);
+		body->flags &= ~(w::kEntityFlagCarried | w::kEntityFlagMatrixBuilt | w::kEntityFlagNVGWorn);
+		body->engine_flags &=
+				~(w::kEntityFlagCarried | w::kEntityFlagMatrixBuilt | w::kEntityFlagNVGWorn);
+		body->primary_occupant = c.link ? link : w::EntityHandle{};
+		body->death_tick = 0;
+		body->net_move_input = 0x08;
+		body->saved_live_valid = false;
+		ae->inf.anim_pending = c.pending;
+		body->net_anim_pending = c.pending;
+		const int32_t entry[3] = {body->position.x.q16, body->position.y.q16,
+				body->position.z.q16};
+		const uint32_t flags = body->flags | body->engine_flags;
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		const w::Entity *after = r.world->registry.get(ae->handle);
+		CHECK(after != nullptr);
+		if (after != nullptr) {
+			CHECK(ae->inf.anim_pending == c.after);
+			CHECK(after->net_anim_pending == c.after);
+			const GameEntitySnapshot s = replication::snapshot_of(*after);
+			const uint8_t sent = c.after != 0 ? static_cast<uint8_t>(c.after & 0xFF)
+			                                  : after->net_anim_state;
+			CHECK(snapshot_anim_byte(s) == sent);
+			CHECK(!after->saved_live_valid);
+			CHECK((after->flags | after->engine_flags) == flags);
+			CHECK(after->position.x.q16 == entry[0]);
+			CHECK(after->position.y.q16 == entry[1]);
+			CHECK(after->position.z.q16 == entry[2]);
+		}
+		CHECK(!ae->inf.player_moving); // no player-body update decoded the MoveOrder
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // The spawn's class init by the bound row (def+0x148): an org0 row's player body takes
 // Entity_InitOrganicAI, its legs as a placed person's: the anim pick (the player body's AI slot
 // reads zeros: no route, idle 43; the PERMANENT Q8-1 (a) reading of a slot retail would fault
@@ -1221,6 +1294,7 @@ int main() {
 	test_the_walk_skips_a_null_row_body_whole();
 	test_a_vehicle_row_body_runs_its_movers_person_path();
 	test_a_genx_row_body_rides_its_ground_entity();
+	test_an_item_row_body_runs_its_movers_head();
 	test_an_org_rows_player_body_takes_the_organic_init();
 	test_a_player_bodys_dcb_id_is_its_class_inits();
 	if (failures != 0) {

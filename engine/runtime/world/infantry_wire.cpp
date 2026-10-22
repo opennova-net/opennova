@@ -16,7 +16,7 @@ void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
     if (ent == nullptr) return;
     const InfantryState &inf = e.inf;
     ent->net_anim_state = static_cast<uint8_t>(inf.anim_state);
-    ent->net_anim_pending = static_cast<uint8_t>(inf.anim_pending);
+    ent->net_anim_pending = inf.anim_pending;
     // The eye-offset mirror (entity+0x6C/+0x70/+0x74): the body tick's restamp
     // reaches the registry entity the friendly-tag gather (z) and the retail
     // camera consumer (full triple) walk [orig: the same entity fields the

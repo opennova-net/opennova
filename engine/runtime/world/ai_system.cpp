@@ -588,10 +588,50 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the +0x1C4 store @0x43C453;
 //  Entity_UpdateParentTransform @0x4A88B0 - the def+0x8DC gate @0x4A88BB, the stamp
 //  @0x4A88D5..0x4A8902, the +0x28 read @0x4A88F1]
-static bool person_item_mover(World &world, PhysicsClass row, Entity &body) {
+// The rokt, hlfr and jvln movers write the body's +0x2B8 pending dword, which the motor's
+// pending anim (and its wire mirror, the dword the records test whole) is: rokt sets the high
+// word (+0x2BA) to 1 while it is 0; hlfr and jvln set the low word's bit 0 when the body has no
+// +0x170 link (Entity::primary_occupant), then return while that bit is set.
+// [orig: Entity_UpdateRocketFlag @0x443DD0 - the test @0x443DD4, the store @0x443DDE;
+//  Entity_UpdateGuidedMissile @0x446690 - the +0x170 test @0x4466B3..0x4466C9, `or word ptr
+//  [esi+2B8h], 1` @0x4466CB, the bit test @0x4466DA..0x4466DC to the return @0x446B82;
+//  Missile_UpdateGuidance @0x446BA0 - @0x446BBD..0x446BD7, @0x446BD9, @0x446BE8..0x446BEA to
+//  the return @0x44712F]
+// The envs, door and squib movers write no word of a person body's: envs registers its def's
+// loop emitter, door rebinds its def model's bone callbacks, and squib returns at its head on
+// the zero death tick (+0x1AC) a live body's update would have written; nor does upfx while
+// the body's 0x4 bit is clear (its def+0x8DC return, or envs's emitter). [orig:
+// Entity_UpdateEnvSoundEmitter @0x4A8080; Entity_SetDefaultBoneCallbacks @0x4A91D0 (the def
+// model @0x4A91D8, the slots @0x4A91F0..0x4A922D); Entity_ProcessProjectileTravel @0x448D50 -
+// `cmp dword ptr [ebp+1ACh], 0` @0x448D5E, `jz` @0x448D65 to the return @0x4497EE;
+// Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - @0x4A92E8, `test byte ptr [esi+24h], 4`
+// @0x4A92F5, the envs leg @0x4A93D6]
+// The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
+// narrowed): ewep, ele0, towr, nade, rock, schl, clym, arti, aflr, gflr, stng, arty and psec,
+// squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
+// pending word, upfx's swap-fade leg, and envs / door's emitter and model callbacks.
+static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
+    e.inf.anim_pending = word;
+    body.net_anim_pending = word;
+}
+
+static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entity &body) {
     switch (row) {
     case PhysicsClass::Genx:
         update_dropped_object(world, body);
+        return true;
+    case PhysicsClass::Rokt:
+        if ((static_cast<uint32_t>(e.inf.anim_pending) >> 16) == 0)
+            set_anim_pending(e, body, (e.inf.anim_pending & 0xFFFF) | 0x10000);
+        return true;
+    case PhysicsClass::Hlfr:
+    case PhysicsClass::Jvln:
+        if (!body.primary_occupant.valid()) set_anim_pending(e, body, e.inf.anim_pending | 1);
+        return true;
+    case PhysicsClass::Envs:
+    case PhysicsClass::Door:
+    case PhysicsClass::Squib:
+    case PhysicsClass::Upfx:
         return true;
     case PhysicsClass::Cveh:
     case PhysicsClass::Ctrn:
@@ -617,15 +657,16 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // The body's +0x1C4 is its bound row's move function: org1 the AI update, org2 the
     // player-body update. The null row's stub is skipped, org0's and chld's are bare
     // returns, and a body bound to an item row runs that row's mover over its own words:
-    // a vehicle, aircraft or genx row's (person_item_mover, the pool-0 walk's: a pool-1
-    // slot's visit runs a row's vehicle mover and drop motion in its own legs); the other
-    // item rows' movers are not run here (D-NET-NEW-L4-14 (a), narrowed).
+    // a vehicle, aircraft or genx row's, the rokt / hlfr / jvln rows' pending-word writes
+    // (person_item_mover, the pool-0 walk's: a pool-1 slot's visit runs a row's vehicle
+    // mover and drop motion in its own legs); the other item rows' movers are not run here
+    // (D-NET-NEW-L4-14 (a), narrowed).
     // [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472; Entity_UpdatePool1Slot
     //  @0x4B8E41..0x4B8E53; Entity_UpdateOrg0Movement @0x4AFF60; the chld row's nullsub_82
     //  @0x45D540]
     const PhysicsClass move_row = body_move_row(world, e, motor_entity);
     if (Entity *body = world.registry.get(e.handle); body != nullptr &&
-            e.handle.pool() == 0 && person_item_mover(world, move_row, *body))
+            e.handle.pool() == 0 && person_item_mover(world, move_row, e, *body))
         return;
     if (move_row != PhysicsClass::Org1 && move_row != PhysicsClass::Org2) return;
     // Joiners retain seat-follow presentation for wire-owned peers. The

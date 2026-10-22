@@ -306,8 +306,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// infantry motor's wire mirror — the authority selection pass drives remote
 			// players from their replicated input (D-NET-159; the 43-hardcode was v31's
 			// frozen-body defect).
-			rec.player.anim_state_id =
-					e.anim_pending_id != 0 ? e.anim_pending_id : e.anim_state_id;
+			rec.player.anim_state_id = snapshot_anim_byte(e);
 			rec.player.anim_channel_ratio = e.anim_channel_ratio;
 			                                   // entity+0x188 channel elapsed-ticks-in-loop,
 			                                   // clamp 255 [orig: @0x4c0cf2]
@@ -464,8 +463,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 					(uint32_t(target_heading) + 0x00800000u) >> 24);
 			rec.infantry.aim_yaw_byte = uint8_t(
 					(uint32_t(e.infantry_aim_pitch_bam) + 0x00800000u) >> 24);
-			rec.infantry.anim_byte =
-					e.anim_pending_id != 0 ? e.anim_pending_id : e.anim_state_id;
+			rec.infantry.anim_byte = snapshot_anim_byte(e); // [orig: @0x4C0988..0x4C099F]
 			break;
 		}
 		case EntityClass::Guided:
