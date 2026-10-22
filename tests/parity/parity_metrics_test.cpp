@@ -1788,6 +1788,25 @@ void test_state() {
 		check(aa != nullptr && aa->status == "pass", "the frame change widens no A/A");
 	}
 	{
+		// A frame change is no motion either: a joiner standing still across its respawn into
+		// the hut's frame keys no uplink motion, as one that stood still in the world.
+		auto still = [](uint32_t seed, bool hut_half) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			for (size_t i = 0; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				const bool hut = hut_half && i >= half;
+				u.carrier = hut ? 0x2011 : 0xFFFF;
+				u.pos_x = hut ? int32_t(2 * 65536) : int32_t(1000 * 65536);
+				u.pos_y = hut ? int32_t(-3 * 65536) : int32_t(2000 * 65536);
+				u.pos_z = hut ? 65536 : 50 * 65536;
+			}
+			return trace;
+		};
+		expect_row(judge_case(still(1, true), still(2, true), still(3, false)), 'C',
+				"uplink_motion", "", "pass");
+	}
+	{
 		// Session-local handles: another carrier/priority handle number is the same state.
 		wire::ParityTrace subject = scripted(3);
 		for (wire::ParityUplinkState &u : subject.uplinks)
@@ -3152,6 +3171,106 @@ void test_position_quantum() {
 			"entity_V_position_displacement_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
 }
 
+// x8's 01tr-coop (L7-s19): a civilian standing on the building under its placed spot streams
+// its position and heading local to that building (entity.carrier), where our x8 host sent
+// world records. Each handle's records run one sequence per carrier word: a walk on the
+// building compares with the same walk in world units, a still record against a walk fails,
+// and a change of carrier is a change of frame, never a step or a turn.
+void test_entity_carrier() {
+	// The civilian's pose at its k-th record and capture time: the carrier word (0xFFFF: none,
+	// the position a world one), the position in that frame (16.16) and the heading byte.
+	struct Pose {
+		uint32_t carrier = 0xFFFF;
+		int32_t x = 0, y = 0;
+		int32_t yaw = 0;
+	};
+	using Walk = std::function<Pose(int32_t k, uint64_t ts_ns)>;
+	auto civilian = [](uint32_t seed, const Walk &walk) {
+		wire::ParityTrace trace = scripted(seed);
+		std::map<int, const wire::ParityFrameState *> frames;
+		for (const wire::ParityFrameState &f : trace.frames)
+			frames[f.frame] = &f;
+		std::vector<wire::ParityEntity> entities;
+		int32_t k = 0;
+		for (const wire::ParityEntity &v : trace.entities) {
+			entities.push_back(v);
+			if (v.cls != 'V')
+				continue;
+			const wire::ParityFrameState &f = *frames.at(v.frame);
+			const Pose pose = walk(k++, v.ts_ns);
+			wire::ParityEntity e = v;
+			e.cls = 'I';
+			e.handle = 0x0032;
+			e.type_id = 2069;
+			e.orient_a = pose.yaw;
+			e.orient_b = 0;
+			e.state_a = e.state_b = e.vital = 0;
+			e.carrier = pose.carrier;
+			e.carrier_local = pose.carrier != 0xFFFF;
+			if (e.carrier_local) {
+				// The decode: a carrier-local offset is the position in the carrier's frame.
+				e.pos_x = network_compress_fixedpoint(pose.x);
+				e.pos_y = network_compress_fixedpoint(pose.y);
+				e.pos_z = network_compress_fixedpoint(-45000);
+				place(e, f);
+				e.world_x = e.offset_x;
+				e.world_y = e.offset_y;
+				e.world_z = e.offset_z;
+			} else {
+				e.pos_x = network_compress_fixedpoint(pose.x - f.anchor_x);
+				e.pos_y = network_compress_fixedpoint(pose.y - f.anchor_y);
+				e.pos_z = network_compress_fixedpoint(52 * 65536 - f.anchor_z);
+				place(e, f);
+			}
+			entities.push_back(e);
+		}
+		trace.entities = std::move(entities);
+		return trace;
+	};
+	static constexpr int32_t kUnit = 65536;
+	const Walk on_building = [](int32_t k, uint64_t) {
+		return Pose{ 0x213F, 2 * kUnit + k * kUnit, kUnit / 2, 40 };
+	};
+	const Walk in_world = [](int32_t k, uint64_t) {
+		return Pose{ 0xFFFF, -265 * kUnit + k * kUnit, 755 * kUnit, 90 };
+	};
+	const Walk still_on_building = [](int32_t, uint64_t) {
+		return Pose{ 0x213F, 2 * kUnit, kUnit / 2, 40 };
+	};
+	{
+		const Case c = judge_case(
+				civilian(1, on_building), civilian(2, on_building), civilian(3, in_world), "OO");
+		expect_row(c, 'S', "entity_motion", "I", "pass");
+		expect_row(c, 'S', "entity_I_position_step_p90", "", "pass");
+		expect_row(c, 'S', "entity_I_position_range_p90", "", "pass");
+	}
+	{
+		const Case c = judge_case(civilian(1, on_building), civilian(2, on_building),
+				civilian(3, still_on_building), "OO");
+		expect_row(c, 'S', "entity_motion", "I", "fail", "FRAME_ENTITY_CONSTANT");
+		expect_row(c, 'S', "entity_I_position_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	}
+	{
+		// A still civilian whose carrier changes (x8's 46: 0x206D, then 0x213D) has two
+		// constant sequences: no step, no turn, against a still world record.
+		const Walk two_buildings = [](int32_t, uint64_t ts_ns) {
+			const bool later = ts_ns >= 12 * kSec;
+			return later ? Pose{ 0x213D, -40 * kUnit, 12 * kUnit, 200 }
+						 : Pose{ 0x206D, 3 * kUnit, kUnit, 40 };
+		};
+		const Walk still_in_world = [](int32_t, uint64_t) {
+			return Pose{ 0xFFFF, -265 * kUnit, 755 * kUnit, 90 };
+		};
+		const Case c = judge_case(civilian(1, two_buildings), civilian(2, two_buildings),
+				civilian(3, still_in_world), "OO");
+		expect_row(c, 'S', "entity_motion", "I", "pass");
+		for (const char *row : { "entity_I_position_range_p90", "entity_I_position_step_p90",
+					 "entity_I_orientation_range_p90", "entity_I_orientation_step_p90" })
+			check(find_row(c.verdict.rows, 'S', row) == nullptr,
+					std::string("a change of carrier makes no ") + row);
+	}
+}
+
 void test_steady_rules() {
 	{
 		// A steady packet groups as its record multiset, without the RTT replies its
@@ -3278,6 +3397,7 @@ int main() {
 	test_frame_rules();
 	test_frame_draws();
 	test_position_quantum();
+	test_entity_carrier();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return 1;

@@ -14,7 +14,7 @@
 //                      (nearest rank) within 1/8x..8x of RR, each sequence past a
 //                      lone transient lead and short of a lone tail, entity positions in
 //                      world units (a move within the records' compressed steps none),
-//                      uplink positions one sequence per carrier frame;
+//                      entity and uplink positions one sequence per carrier frame;
 //                      priority scores' per-slot median likewise;
 //                      initial position/anchor within 64 units
 // Session-local handles reduce to none/bound (normalization.h).
@@ -248,15 +248,16 @@ void dynamic_metrics(std::vector<MetricValue> &out, char dir, const std::string 
 	}
 }
 
-// Handles whose key changes over the samples (a moving or turning entity), each handle's
-// keys past its lone transients (sequence_span).
+// Sequences whose key changes over the samples (a moving or turning entity), each
+// sequence's keys past its lone transients (sequence_span). A sequence is one handle's
+// records in one frame of reference (`sequence`: the handle and its carrier word).
 template <typename T>
 size_t changing_handles(const std::vector<const T *> &records,
-		const std::function<uint32_t(const T &)> &handle,
+		const std::function<std::string(const T &)> &sequence,
 		const std::function<std::string(const T &)> &key) {
-	std::map<uint32_t, std::vector<std::string>> seen;
+	std::map<std::string, std::vector<std::string>> seen;
 	for (const T *record : records)
-		seen[handle(*record)].push_back(key(*record));
+		seen[sequence(*record)].push_back(key(*record));
 	size_t changing = 0;
 	for (const auto &entry : seen) {
 		const std::pair<size_t, size_t> span = sequence_span(
@@ -390,13 +391,18 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 			[](const U &s) { return s.analog_x != 0 || s.analog_y != 0 || s.analog_z != 0; });
 	fills("uplink_priority_fill", "UPLINK_PRIORITY_EMPTY",
 			[](const U &s) { return s.priority_nonzero != 0; });
-	const std::function<uint32_t(const U &)> handle = [](const U &s) { return s.handle; };
+	// The position is relative to the carrier word's pose (uplink.carrier): a change of
+	// the word is a change of frame, not motion.
+	const std::function<std::string(const U &)> sequence = [](const U &s) {
+		return std::to_string(s.handle) + "@" + std::to_string(s.carrier);
+	};
 	const std::function<std::string(const U &)> position = [](const U &s) {
 		return std::to_string(s.pos_x) + "," + std::to_string(s.pos_y) + "," +
 				std::to_string(s.pos_z);
 	};
 	fill_metric(out, 'C', "uplink_motion", "UPLINK_CONSTANT",
-			changing_handles(a, handle, position) > 0, changing_handles(b, handle, position) > 0);
+			changing_handles(a, sequence, position) > 0,
+			changing_handles(b, sequence, position) > 0);
 
 	auto samples = [](const std::vector<const U *> &states, int which) {
 		std::vector<Sample> out;
@@ -859,38 +865,39 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 
 	// Positions compare in world 16.16: a compact code is sign/exponent/mantissa
 	// relative to the recipient's eye anchor (state.position), so code arithmetic is
-	// no distance and every code moves with the recipient. A carrier-local record is
-	// relative to its carrier: left out of the position samples.
+	// no distance and every code moves with the recipient. A record that names a
+	// carrier carries its position and heading local to that carrier instead, never
+	// anchor-relative (entity.carrier): each handle's records run one sequence per
+	// carrier word, so a carrier-local offset is a position in its carrier's frame and
+	// no step or motion key spans two frames.
+	static_assert(has_normalization("entity.carrier"));
 	for (const char cls : { 'P', 'V', 'I' }) {
-		std::vector<const E *> ca, cb, wa, wb;
+		std::vector<const E *> ca, cb;
 		for (const E *e : a)
-			if (e->cls == cls) {
+			if (e->cls == cls)
 				ca.push_back(e);
-				if (!e->carrier_local)
-					wa.push_back(e);
-			}
 		for (const E *e : b)
-			if (e->cls == cls) {
+			if (e->cls == cls)
 				cb.push_back(e);
-				if (!e->carrier_local)
-					wb.push_back(e);
-			}
 		if (ca.empty() && cb.empty())
 			continue;
 		const std::string key(1, cls);
-		const std::function<uint32_t(const E &)> handle = [](const E &e) { return e.handle; };
+		const std::function<std::string(const E &)> sequence = [](const E &e) {
+			return std::to_string(e.handle) +
+					(e.carrier_local ? "@" + std::to_string(e.carrier) : std::string());
+		};
 		const std::function<std::string(const E &)> position = [](const E &e) {
 			return std::to_string(e.world_x) + "," + std::to_string(e.world_y) + "," +
 					std::to_string(e.world_z);
 		};
 		fill_metric(out, 'S', "entity_motion", "FRAME_ENTITY_CONSTANT",
-				changing_handles(wa, handle, position) > 0,
-				changing_handles(wb, handle, position) > 0, key);
-		auto samples = [](const std::vector<const E *> &entities, bool orientation) {
+				changing_handles(ca, sequence, position) > 0,
+				changing_handles(cb, sequence, position) > 0, key);
+		auto samples = [&sequence](const std::vector<const E *> &entities, bool orientation) {
 			std::vector<Sample> out;
 			for (const E *e : entities) {
 				Sample sample;
-				sample.group = std::to_string(e->handle);
+				sample.group = sequence(*e);
 				if (orientation) {
 					sample.axes = { double(e->orient_a), double(e->orient_b) };
 				} else {
@@ -905,8 +912,8 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 			return out;
 		};
 		const double modulus = cls == 'V' ? 65536.0 : 256.0;
-		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_position", samples(wa, false),
-				samples(wb, false), 0.0, false);
+		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_position", samples(ca, false),
+				samples(cb, false), 0.0, false);
 		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_orientation", samples(ca, true),
 				samples(cb, true), modulus, false);
 	}

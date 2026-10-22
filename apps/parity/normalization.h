@@ -569,7 +569,8 @@ inline constexpr Normalization kNormalizations[] = {
 			"0x2011 at the respawn), where a joiner whose link flips each record sends "
 			"positions in two frames. The heading word follows the position (@0x4C19D4) and "
 			"the host's apply adds the carrier's pose back to both, so the uplink's position "
-			"and orientation sequences run per carrier word and no step spans a frame change: "
+			"and orientation sequences and its motion key run per carrier word and no step "
+			"spans a frame change: "
 			"x8's fragrespawn RR-aa and OR ranked the respawn's jump into the hut's frame as "
 			"their p90 step (3885822, 3895546) against RR's motion step (102143)" },
 	{ "uplink.priority_handle", MaskKind::Field, 'C', 0x00C, "priority_handle", 0,
@@ -699,12 +700,32 @@ inline constexpr Normalization kNormalizations[] = {
 	{ "entity.handle", MaskKind::Field, 'S', 0x00A, "handle", 0,
 			"entity handles are allocated per session: motion groups per handle, never by "
 			"number" },
+	{ "entity.carrier", MaskKind::Field, 'S', 0x00A, "carrier", 0,
+			"a compact record that names a carrier carries its position and heading local to "
+			"that carrier, never relative to the recipient's anchor: a player or infantry "
+			"record's carrier is its mount (+0x16C) else the entity it stands on (+0x28, a "
+			"building included), a vehicle record's its ground entity (+0x28), and with one "
+			"the writer runs Entity_TransformWorldToLocal @0x43BB50 against the carrier's pose "
+			"(the position delta, the heading less the carrier's @0x43BB81..0x43BB87) "
+			"(NetPacket_SerializePlayerState @0x4C09C0: the select @0x4C0A00..0x4C0A08, the "
+			"call @0x4C0B07, the local heading byte @0x4C0B7E..0x4C0B85; "
+			"NetPacket_SerializeInfantryEntityState @0x4C0320: the select @0x4C06EF..0x4C0708, "
+			"the test @0x4C0735, the call @0x4C07E3, the local heading @0x4C0857; "
+			"Entity_SerializeVehicleState @0x460560: the word @0x460B4D, the call @0x460BB6), "
+			"where a record without one writes its offset from g_PriorityRef (@0x4C0BE6, "
+			"@0x4C0860, @0x460C52). So each handle's records run one position, orientation and "
+			"motion sequence per carrier word, and no step spans a frame change. x8's 01tr-coop: "
+			"on RR, RR-aa and RO the civilians 42..51 and the soldiers 1 and 25 streamed on the "
+			"pool-2 buildings under their placed spots (0x213F under 42 at the local offset "
+			"(2.94, 0.45, -0.69)), where our x8 host sent world records; read anchor-relative, "
+			"the building-local offsets sat about 3 units from the joiner" },
 	{ "state.position", MaskKind::Field, '*', 0, "position/orientation/analog", 0,
 			"motion follows independent input: origin-normalized range and step within 8x "
 			"of RR, and a 64-unit initial baseline. Entity positions compare decompressed "
 			"and anchor-added in world 16.16 (a compact code is sign/exponent/mantissa "
 			"relative to the recipient's eye anchor, Network_CompressFixedPoint @0x4C2780, "
-			"not a linear coordinate), carrier-local records skipped; frame_self_offset "
+			"not a linear coordinate), a carrier-local record in its carrier's frame "
+			"(entity.carrier); frame_self_offset "
 			"keeps the anchor's own offset visible" },
 	{ "state.transient_lead", MaskKind::Field, '*', 0, "dynamic sequence start", 0,
 			"a dynamic sequence (one handle's records, the uplink stream, the frame anchor) "
