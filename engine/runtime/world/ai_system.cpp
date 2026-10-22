@@ -609,7 +609,12 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // @0x4A92F5, the envs leg @0x4A93D6]
 // The envs row's mover IS the loop emitter, so the body registers its def's regional loop on
 // every pool-0 visit, with no gate; upfx's tail registers it on the batch's last tick for a def
-// with no physics selector (def+0x8DC) and a body with neither Flags 0x2 nor 0x4.
+// with no physics selector (def+0x8DC) and a body with neither Flags 0x2 nor 0x4. Ahead of that
+// tail, a body whose 0x4 bit is set (on a person the NVG bit, the view refresh's) runs the
+// husk leg: the swap fade, the authority's one S2C 0x26 in a session (sub-type 0x20), and a
+// building def's two blasts (0x80). [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - the
+// bit @0x4A92F5, Entity_PublishSwapFadePhases called @0x4A9304, the 0x26 @0x4A9310..0x4A9336,
+// the +0x34 test @0x4A933D, the blasts @0x4A934E..0x4A93BD]
 // [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 `call eax` @0x4C2472 (the envs row's
 //  entry Entity_UpdateEnvSoundEmitter @0x4A8080); Entity_UpdateWaterPhysicsAndEffects @0x4A92E0
 //  - the def+0x8DC test @0x4A92E8, `test byte ptr [esi+24h], 6` @0x4A93C5, dword_24E0E80
@@ -656,7 +661,7 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
 // narrowed): ewep's other legs, towr, nade, rock, schl, clym, arti, aflr, gflr, stng, arty's barrage,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
-// pending word, upfx's swap-fade leg, and door's model callbacks.
+// pending word, and door's model callbacks.
 static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
     e.inf.anim_pending = word;
     body.net_anim_pending = word;
@@ -683,9 +688,13 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
         return true;
     case PhysicsClass::Upfx: {
         const ItemDeathTraits *traits = world.tables.item_death_traits.get(body.item_id);
-        if (traits != nullptr && traits->physics == 0 &&
-                ((body.flags | body.engine_flags) & (kEntityFlagDead | kEntityFlagHusk)) == 0 &&
-                world.rules.last_tick_of_batch)
+        if (traits == nullptr || traits->physics != 0) return true;
+        const uint32_t flags = body.flags | body.engine_flags;
+        if ((flags & kEntityFlagNVGWorn) != 0) {
+            publish_swap_fade_phases(world, body);
+            upfx_husk_leg(world, body, *traits, body.destroy_progress);
+        }
+        if ((flags & (kEntityFlagDead | kEntityFlagHusk)) == 0 && world.rules.last_tick_of_batch)
             update_item_ambient_sound(world, body);
         return true;
     }

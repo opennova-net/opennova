@@ -1267,6 +1267,63 @@ void test_an_envs_or_upfx_row_body_registers_its_loop() {
 	}
 }
 
+// A body on the upfx row whose 0x4 bit (on a person the NVG bit) is set runs the mover's husk
+// leg: the swap fade, then on the session's authority one S2C 0x26 for the body (section 0,
+// sub-type bit 0x20 latching it), and on the authority a building def's blasts once (bit 0x80,
+// with no husk model loaded); no loop registers while the bit is set.
+// [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - @0x4A92F5, @0x4A9304,
+//  @0x4A9310..0x4A9336, @0x4A933D..0x4A936E, @0x4A93C5; Server_SendEntityStatePacket @0x509D70]
+void test_an_upfx_row_body_runs_the_husk_leg() {
+	struct Case {
+		bool session, authority;
+		uint8_t item_type;
+		size_t sends;   // S2C 0x26s over two visits
+		bool blasted;   // sub-type 0x80
+	};
+	for (const Case c : {Case{true, true, 3, 1, false}, Case{false, true, 3, 0, false},
+				Case{true, false, 3, 0, false}, Case{true, true, 5, 1, true}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		w::Entity *body = r.spawn_remote(kPlyr);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		w::ItemDeathTraits *traits =
+				body != nullptr ? r.world->tables.item_death_traits.get_mutable(body->item_id) : nullptr;
+		CHECK(ae != nullptr && traits != nullptr && body->item_type_index > 0);
+		if (ae == nullptr || traits == nullptr || body->item_type_index <= 0) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		r.world->tables.item_rows[static_cast<size_t>(body->item_type_index)].move_row =
+				w::PhysicsClass::Upfx;
+		for (std::string &loop : traits->regional_loops) loop = "loop";
+		traits->physics = 0;
+		traits->primary_husk_loaded = false;
+		body->flags &= ~(w::kEntityFlagCarried | w::kEntityFlagDead);
+		body->engine_flags &= ~(w::kEntityFlagCarried | w::kEntityFlagDead);
+		body->flags |= w::kEntityFlagNVGWorn; // the view refresh's bit
+		body->net_move_input = 0x08;
+		body->sub_type = 0;
+		body->item_type = c.item_type;
+		r.world->rules.mp_session = c.session;
+		r.world->rules.logic_authority = c.authority;
+		r.world->out.entity_events.clear();
+		r.world->out.sound_emitters.clear();
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 2);
+		CHECK(r.world->out.entity_events.size() == c.sends);
+		if (c.sends == 1 && r.world->out.entity_events.size() == 1) {
+			const auto *state = std::get_if<w::ItemStateEvent>(&r.world->out.entity_events[0]);
+			CHECK(state != nullptr && state->handle == body->handle.packed && state->section == 0);
+		}
+		CHECK(((body->sub_type & 0x20) != 0) == (c.sends == 1));
+		CHECK(((body->sub_type & 0x80) != 0) == c.blasted);
+		CHECK(r.world->out.sound_emitters.empty());
+		CHECK(!ae->inf.player_moving);
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // A body bound to the ele0 row runs the elevator mover over its own words: its lift the +0x1A8
 // word (InfantryState::target_heading), its vertical step the motor's +0xA0, its state +0x29C and
 // previous state +0x2A0 a player body's 0s. Above 0 it lowers by 0x400 a visit with no change;
@@ -1571,6 +1628,7 @@ int main() {
 	test_an_envs_or_upfx_row_body_registers_its_loop();
 	test_an_arty_row_body_zeroes_its_velocity_and_sends_group_6();
 	test_an_ele0_row_body_runs_the_elevator_mover();
+	test_an_upfx_row_body_runs_the_husk_leg();
 	test_a_psec_row_body_runs_the_physics_step();
 	test_an_org_rows_player_body_takes_the_organic_init();
 	test_a_player_bodys_dcb_id_is_its_class_inits();

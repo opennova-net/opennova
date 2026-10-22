@@ -743,6 +743,13 @@ inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
     return delay ? std::max(delay, husked_at) : 0;
 }
 void update_item_destroy_fade(World &world, Entity &entity);
+// Entity_PublishSwapFadePhases with no Flags gate: the fade phases and the progress from the
+// death tick, the destroy delay and the def's timing (the caller tests the 0x4 bit).
+void publish_swap_fade_phases(World &world, Entity &entity);
+// The upfx mover's husk leg (Flags 0x4 set): the authority's one S2C 0x26 in a session (sub-type
+// bit 0x20), then a building def's two blasts once the husk fade completes or there is no husk
+// model (bit 0x80). `progress` is the swap fade's.
+void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, double progress);
 void update_item_ambient_sound(World &world, const Entity &entity);
 // The ele0 row's mover over an entity's words (the caller passes the words its kind keeps them
 // in): the savedLivePose stamp, the step (state << 10) - 0x400 into the lift, Z and the vertical

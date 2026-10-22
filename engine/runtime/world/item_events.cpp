@@ -677,6 +677,14 @@ void update_item_destroy_fade(World &world, Entity &entity) {
     entity.destroy_phases_q16.fill(0);
     entity.destroy_progress = 0;
     if ((entity.engine_flags & kEntityFlagHusk) == 0) return;
+    publish_swap_fade_phases(world, entity);
+}
+
+// [orig: Entity_PublishSwapFadePhases @0x5C3F40 - the six zeroes @0x5C3F48..0x5C3F66, the
+//  delay @0x5C3F6C..0x5C3FA6]
+void publish_swap_fade_phases(World &world, Entity &entity) {
+    entity.destroy_phases_q16.fill(0);
+    entity.destroy_progress = 0;
     const auto *traits=world.tables.item_death_traits.get(entity.item_id);
     if (!traits) return;
     const DestroyFadeClock clock=destroy_fade_clock(int32_t(world.logic_tick-entity.death_tick),
@@ -974,19 +982,24 @@ bool tick_item_class_motion(World &world, Entity &entity,
     if ((entity.engine_flags & 6u) == 0 && world.rules.last_tick_of_batch)
         update_item_ambient_sound(world, entity);
     if ((entity.engine_flags & kEntityFlagHusk) == 0) return true;
-    const double progress = entity.destroy_progress;
+    upfx_husk_leg(world, entity, *traits, entity.destroy_progress);
+    return true;
+}
+
+// [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - the 0x26 @0x4A9310..0x4A9336, the
+//  blasts @0x4A933D..0x4A93BD]
+void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, double progress) {
     // The one-time 0x26 send uses subtype bit 0x20.
     if (world.rules.mp_session && world.rules.logic_authority && (entity.sub_type & 0x20) == 0) {
         emit_item_state(world, entity, 0);
         entity.sub_type |= 0x20;
     }
-    if ((!traits->primary_husk_loaded || progress >= 1.0) &&
+    if ((!traits.primary_husk_loaded || progress >= 1.0) &&
             world.rules.logic_authority && (entity.sub_type & 0x80) == 0 && entity.item_type == 5) {
         entity.sub_type |= 0x80;
-        queue_class_blast(world, entity, kAmmoKzOrganicBlast, traits->kz);
-        queue_class_blast(world, entity, kAmmoKzMItemBlast, traits->kz);
+        queue_class_blast(world, entity, kAmmoKzOrganicBlast, traits.kz);
+        queue_class_blast(world, entity, kAmmoKzMItemBlast, traits.kz);
     }
-    return true;
 }
 
 // The pool-2/3 cohort walks of the entity update: each row on its slot cohort
