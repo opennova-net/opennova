@@ -184,7 +184,7 @@ void Server_RouteWaterCrossings(NapiNPServerCtx &ctx, world::World &world) {
 					world::SoundSlotEvent local;
 					local.pos[0] = int32_t{static_cast<int16_t>(ev.x >> 16)} * 65536;
 					local.pos[1] = int32_t{static_cast<int16_t>(ev.y >> 16)} * 65536;
-					local.pos[2] = int32_t{static_cast<int16_t>(ev.water_z >> 16)} * 65536;
+					local.pos[2] = int32_t{static_cast<int16_t>(ev.z >> 16)} * 65536;
 					std::snprintf(local.set_name, sizeof(local.set_name), "%s",
 							ev.airborne ? kWaterCrossAirborneEffect : kWaterCrossWadeEffect);
 					world.out.slot_sounds.push_back(local);

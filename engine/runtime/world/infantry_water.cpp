@@ -110,20 +110,25 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
     const int32_t target = water + bob - (e.inf.eye_offset_z >> 1)
                          - kWaterFloatSink + depth;
 
+    // The target is stored outright; the motor's quarter-step tail that follows
+    // this block turns it into the settle. [orig: `mov [esi+0Ch], eax` @0x4bfb84]
+    e.self->position.z.q16 = target;
+
     // The entry edge, fanned once. Which of the two sounds it takes is the body's
-    // own airborne bit: a soldier who WADED in and one who JUMPED in are heard
-    // differently. Position is the body's XY at the PLANE, not at its own Z.
+    // own airborne bit, read before the latch below clears it: a soldier who WADED
+    // in and one who JUMPED in are heard differently. The 0x34 carries the body's
+    // own position, the target just stored, not the plane (the local effect's).
+    // [orig: the afloat test `jnz` @0x4BFB87, the airborne test @0x4BFC24,
+    //  `lea eax, [esi+4]` @0x4BFC2B, Server_SendOverlayActionToAlive @0x4BFC40;
+    //  the effect at g_EnvWaterHeightFixed @0x4BFBC4..0x4BFBE3]
     if (!was_afloat) {
-        world.out.water_crossings.add(e.self->position.x.q16, e.self->position.y.q16, water,
+        world.out.water_crossings.add(e.self->position.x.q16, e.self->position.y.q16,
+                                  e.self->position.z.q16,
                                   /*airborne=*/(flags & kEntityFlagInAir) != 0);
     }
     tick_entity->flags = (flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
     tick_entity->engine_flags &= ~kEntityFlagInAir; // the pair's other half of that clear
     e.inf.airborne = false; // the motor-side mirror of the 0x2000 clear
-
-    // The target is stored outright; the motor's quarter-step tail that follows
-    // this block turns it into the settle. [orig: `mov [esi+0Ch], eax` @0x4bfb84]
-    e.self->position.z.q16 = target;
 }
 
 // The org2 (player body) water block -- see the ai.h declaration. Same
@@ -194,16 +199,19 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
 
     // The surface line, clamped from above; the dive bit below it - 0x2000 with
     // the dive splash once (the non-airborne sound; the overlay fan rides the
-    // crossing queue). The eye is this tick's +0x74 restamp, not the registry
+    // crossing queue, the 0x34 carrying the body's own risen position, ebp being
+    // its +4). The eye is this tick's +0x74 restamp, not the registry
     // mirror the tick publishes after this block. [orig: `mov edx, [esi+74h]`
-    // @0x4b8146, the line @0x4b815b..0x4b8169; @0x4b8169-0x4b81f5]
+    // @0x4b8146, the line @0x4b815b..0x4b8169; @0x4b8169-0x4b81f5; `lea ebp,
+    // [esi+4]` @0x4B7CB7 / @0x4B7CD6, the send `push ebp` @0x4B8265..0x4B8267]
     const int32_t surf = water + (base >> 1) - (inf.eye_offset_z >> 1);
     if (e.self->position.z.q16 < surf) {
         if (e.self->position.z.q16 < surf - kWaterDiveDepth &&
             (flags & kEntityFlagDiveLatch) == 0) {
             tick_entity->flags |= kEntityFlagDiveLatch;
             tick_entity->engine_flags |= kEntityFlagDiveLatch;
-            world.out.water_crossings.add(e.self->position.x.q16, e.self->position.y.q16, water, /*airborne=*/false);
+            world.out.water_crossings.add(e.self->position.x.q16, e.self->position.y.q16,
+                                      e.self->position.z.q16, /*airborne=*/false);
         }
     } else {
         tick_entity->flags &= ~kEntityFlagDiveLatch;
@@ -211,11 +219,13 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
         e.self->position.z.q16 = surf;
     }
 
-    // The entry splash, once, selected by the was-airborne bit; then the latch
-    // `(Flags & ~0x2000) | 0x8000` -- swimming overrides airborne.
-    // [orig: @0x4b8182 / @0x4b8363]
+    // The entry splash, once, selected by the was-airborne bit, at the body's own
+    // position after the clamp; then the latch `(Flags & ~0x2000) | 0x8000` --
+    // swimming overrides airborne.
+    // [orig: @0x4b8182 / @0x4b8363; the send `push ebp` @0x4B82EA..0x4B82FC]
     if (!was_afloat) {
-        world.out.water_crossings.add(e.self->position.x.q16, e.self->position.y.q16, water,
+        world.out.water_crossings.add(e.self->position.x.q16, e.self->position.y.q16,
+                                  e.self->position.z.q16,
                                   /*airborne=*/(flags & kEntityFlagInAir) != 0);
     }
     // Between them the local body's scope legs, each a toggle call the view

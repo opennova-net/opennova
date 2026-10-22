@@ -1864,7 +1864,7 @@ static void test_water_crossing_fires_once_on_entry() {
     q.add(to_fixed(-834.0), to_fixed(122.0), w.env.water_z, /*airborne=*/true);
     CHECK(q.events.size() == 1);
     CHECK(q.events[0].airborne);
-    CHECK(q.events[0].water_z == to_fixed(12.0));
+    CHECK(q.events[0].z == to_fixed(12.0));
 
     // The queue is per-tick: the host drains and clears it, so a hull that stays
     // submerged contributes nothing further.
@@ -1915,7 +1915,12 @@ static void test_infantry_floats_and_splashes_once() {
     ai.infantry_water_block(npc, *w, ent, 0, 1);
     CHECK(w->out.water_crossings.events.size() == 1);
     CHECK(!w->out.water_crossings.events[0].airborne);
-    CHECK(w->out.water_crossings.events[0].water_z == w->env.water_z);
+    // The splash rides the body's own position, the float target the block just
+    // stored, not the plane: the 0x34's z word is the body's (D-NET-NEW-L3-13).
+    // [orig: Entity_UpdateInfantryAI - the store @0x4BFB84, `lea eax, [esi+4]`
+    //  @0x4BFC2B, the send @0x4BFC40]
+    CHECK(w->out.water_crossings.events[0].z == npc.self->position.z.q16);
+    CHECK(w->out.water_crossings.events[0].z < w->env.water_z);
     CHECK((ent->flags & kEntityFlagDrowning) != 0);
     // He is being lifted toward the surface, not left on the riverbed: the block
     // stores the float target outright; the motor's +0xAC quarter-step tail that

@@ -1950,8 +1950,15 @@ void test_local_player_swims_on_the_plane() {
     CHECK((ent->flags & 0x200000u) != 0);
     CHECK(!e->inf.airborne);
     CHECK(world.out.water_crossings.events.size() == 2);
-    if (!world.out.water_crossings.events.empty()) {
-        CHECK(world.out.water_crossings.events[0].water_z == fx(5.0));
+    if (world.out.water_crossings.events.size() == 2) {
+        // Both splashes ride the body's own position, ebp being its +4, not the
+        // plane: the dive's and the entry's z is the one risen, unclamped z near
+        // the bed's 0.05u, 5u under the plane (D-NET-NEW-L3-13).
+        // [orig: `lea ebp, [esi+4]` @0x4B7CB7 / @0x4B7CD6; the dive send
+        //  @0x4B8265..0x4B8267, the entry send @0x4B82EA..0x4B82FC]
+        const int32_t z0 = world.out.water_crossings.events[0].z;
+        CHECK(z0 == world.out.water_crossings.events[1].z);
+        CHECK(z0 > -fx(1.0) && z0 < fx(1.0));
         CHECK(!world.out.water_crossings.events[0].airborne);
     }
 

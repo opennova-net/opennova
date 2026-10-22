@@ -1227,9 +1227,10 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
 	// its family — see world::WaterCrossEvent::airborne for the witness and
 	// npwire's kWaterCross* constants for the sets. Coordinates are world UNITS
 	// (the wire's i16), so the 16.16 fixed positions shift down 16 - the same
-	// convention the decode documents.
-	// [orig: NetPacket_WriteOverlayAction @0x505d50 via
-	//  Server_SendOverlayActionToAlive @0x50a1b0]
+	// convention the decode documents; the triple is the crossing site's own
+	// (world::WaterCrossEvent: an infantry body's position, a hull pad's at the plane).
+	// [orig: NetPacket_WriteOverlayAction @0x505d50 (the high words @0x505DB7 /
+	//  @0x505DCB / @0x505DE1) via Server_SendOverlayActionToAlive @0x50a1b0]
 	std::vector<std::vector<uint8_t>> out;
 	for (const world::WaterCrossEvent &ev : world.out.water_crossings.events) {
 		PlaySoundCommand cmd;
@@ -1244,7 +1245,7 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
 		cmd.has_pos = true;
 		cmd.pos_x = static_cast<int16_t>(ev.x >> 16);
 		cmd.pos_y = static_cast<int16_t>(ev.y >> 16);
-		cmd.pos_z = static_cast<int16_t>(ev.water_z >> 16);
+		cmd.pos_z = static_cast<int16_t>(ev.z >> 16);
 		out.push_back(encode_play_sound(cmd));
 	}
 	return out;
