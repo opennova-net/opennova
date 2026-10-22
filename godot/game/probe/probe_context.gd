@@ -67,6 +67,11 @@ func deploy_presenter() -> DeployScreenPresenter:
 	return _live(shell.get_deploy_presenter() if shell != null else null) as DeployScreenPresenter
 
 
+## The join screen (pre.mnu PRE_GAME_MENU), open or closed.
+func join_screen() -> PreGameMenuPresenter:
+	return _live(shell.get_join_screen() if shell != null else null) as PreGameMenuPresenter
+
+
 func dev_tools() -> DevTools:
 	return _live(shell.get_dev_tools() if shell != null else null) as DevTools
 

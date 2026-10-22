@@ -94,6 +94,18 @@ func return_to_menu() -> Error:
 	return ERR_UNAVAILABLE
 
 
+# --- the join screen (the join_screen probe's, ADR 0041) ----------------------
+
+## The join screen (pre.mnu PRE_GAME_MENU), open or closed; null from the null shell.
+func get_join_screen() -> PreGameMenuPresenter:
+	return null
+
+
+## "Join this server": the LAN row's, the NovaWorld row's and `--lan-join`'s entry.
+func join_lan_server(_target: JoinTarget) -> void:
+	pass
+
+
 # --- shell action legs (the debug adapter's game_control verbs) ---------------
 
 ## The shell's resume leg: closes pause/armory and hands play back.

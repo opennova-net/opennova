@@ -762,4 +762,29 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"post_ticks": { "type": "integer", "minimum": 0, "maximum": 3_100,
 							"default": 310 },
 				}, [], false, true, 600_000),
+		ProbeDef.make("join_screen",
+				"The join screen (pre.mnu PRE_GAME_MENU), driven as a player drives it, one "
+				+ "`op` a run. `state` reads only. `join` dials `address`:`port` from the "
+				+ "menus (`port` 0: the target's default), the `--lan-join` hook's dial with "
+				+ "no role answered, so a session offering a choice opens its panels. "
+				+ "`set_text` types `text` into GAME_PASSWORD or TEAM_PASSWORD. `press` "
+				+ "activates ACCEPT, BACK or ABORT_CANCEL through the screen's menu driver. "
+				+ "Either refuses a control whose pre.mnu window is hidden. The run then "
+				+ "waits up to `wait_ms` for `until` (open, closed, or a panel showing) and "
+				+ "returns the screen's read: open, the panel, the pre.mnu windows shown, the "
+				+ "MESSAGES line, both edits' text, the SPECTATE radio and the shell state.",
+				NET + "join_screen_probe.gd", {
+					"op": { "type": "string", "enum": ["state", "join", "set_text", "press"],
+							"default": "state" },
+					"address": { "type": "string", "default": "" },
+					"port": { "type": "integer", "minimum": 0, "maximum": 65535, "default": 0 },
+					"control": { "type": "string", "enum": ["", "GAME_PASSWORD",
+							"TEAM_PASSWORD", "ACCEPT", "BACK", "ABORT_CANCEL"], "default": "" },
+					"text": { "type": "string", "default": "" },
+					"until": { "type": "string", "enum": ["", "open", "closed", "progress",
+							"error", "game_password", "spectate", "spectator_password",
+							"team_password"], "default": "" },
+					"wait_ms": { "type": "integer", "minimum": 0, "maximum": 590_000,
+							"default": 0 },
+				}, [], false, false, 600_000),
 	]
