@@ -4921,12 +4921,19 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	                         pending(a) && pending(b),
 	                 "the join mirrors the undeployed bit onto the roster row");
 	deployer.reply.capture_nag_held = true;
+	// The join's scan ran (its first overlay visit clears bit 0x01).
+	deployer.reply.minimap_initial_scan_pending = false;
 	opennova::inmatch::Server_ReleasePlayerDeployment(
 			ctx.config, deployer, world, opennova::world::EntityHandle{}, 0xFFFF);
 	ok = expect(!deployer.link.respawn_pending && !pending(a),
 	            "the deploy leg clears the roster row's undeployed bit") && ok;
 	ok = expect(!deployer.reply.frontier_hint_pending && !deployer.reply.capture_nag_held,
 	            "the deploy leg clears the frontier-hint bit and the nag hold") && ok;
+	// The byte's 1 sets bit 0x01: the next overlay visit runs the pool-2 scan again
+	// (D-NET-NEW-L3-16) [orig: Server_DeployPlayer @0x517803; Server_BuildOverlayStateForPlayer
+	//  @0x518019].
+	ok = expect(deployer.reply.minimap_initial_scan_pending,
+	            "the deploy leg re-arms the persistent minimap scan") && ok;
 	opennova::inmatch::Server_SetPlayerSpectator(ctx, watcher, world, true);
 	ok = expect(watcher.link.spectator && watcher.link.respawn_pending && pending(b),
 	            "entering spectator mode leaves the undeployed bit alone") && ok;

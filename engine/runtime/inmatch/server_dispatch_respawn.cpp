@@ -201,6 +201,12 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 			title_in_match(title).join_state_fixed;
 	conn.reply.frontier_hint_pending = false; // bits 0x04/0x08 of the same byte
 	conn.reply.capture_nag_held = false;
+	// Bit 0x01 of the byte, which both values set, re-arms the slot's persistent pool-2
+	// minimap scan, so its next overlay visit sends every pool-2 row again (the S2C 0x40
+	// burst a joiner's respawn draws) (D-NET-NEW-L3-16) [orig: Server_DeployPlayer
+	//  @0x517803 / @0x517812; Server_BuildOverlayStateForPlayer - the test @0x518019, the
+	//  clear @0x518171].
+	conn.reply.minimap_initial_scan_pending = true;
 	conn.link.armory_reuse_seconds = 0;
 	// The leg stores nothing to the hide bit: the slot's next 0x0A clears it and
 	// re-sets a spectator's or a held slot's, so a held body stays hidden, and
