@@ -465,11 +465,87 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 			[](const F &f) { return std::to_string(f.armor); });
 	both("frame_carried", "FRAME_HEADER_VALUES_MISMATCH",
 			[](const F &f) { return std::string(f.carried == 0xFFFF ? "none" : "bound"); });
-	both("frame_weapon", "FRAME_WEAPON_PHASE_MISMATCH", [](const F &f) {
-		return f.weapon_present
-				? "1:" + join(f.weapon, 7) + "," + std::to_string(f.weapon_uniform_team_mask)
-				: std::string("0");
-	});
+	// The weapon block rides one frame in four [orig: NetPacket_WritePlayerState @0x4FF6B0
+	// (the phase test @0x4FF81B)], and its slot bytes +0x168, +0x170, +0x16C and +0x164
+	// (weapon[1..4], written @0x4FF845, @0x4FF876, @0x4FF8A1, @0x4FF8BB) are counters the
+	// host steps down once a second [orig: Server_TickUpdate @0x51D7E0 (the per-slot pass
+	// @0x51DFBA..0x51E011)]. A countdown's first sample is its first second or the next (its
+	// start against the block's phase), and one the window cuts ends where the window does:
+	// each countdown compares over the values both runs' samples cover
+	// (frame.weapon_countdown).
+	static_assert(has_normalization("frame.weapon_countdown"));
+	{
+		struct Countdown {
+			size_t first = 0, last = 0; // its samples, indices into the run's blocks
+			uint32_t top = 0, bottom = 0;
+		};
+		auto blocks = [](const std::vector<const F *> &frames) {
+			std::vector<const F *> out;
+			for (const F *f : frames)
+				if (f->weapon_present)
+					out.push_back(f);
+			return out;
+		};
+		// A countdown: consecutive nonzero samples, none above the one before it.
+		auto countdowns = [](const std::vector<const F *> &w, size_t slot) {
+			std::vector<Countdown> out;
+			bool open = false;
+			for (size_t i = 0; i < w.size(); ++i) {
+				const uint32_t v = w[i]->weapon[slot];
+				if (v == 0) {
+					open = false;
+					continue;
+				}
+				if (open && v <= out.back().bottom) {
+					out.back().last = i;
+					out.back().bottom = v;
+					continue;
+				}
+				out.push_back({ i, i, v, v });
+				open = true;
+			}
+			return out;
+		};
+		const std::vector<const F *> wa = blocks(a), wb = blocks(b);
+		std::set<const F *> dropped;
+		for (size_t slot = 1; slot <= 4; ++slot) {
+			const std::vector<Countdown> ca = countdowns(wa, slot), cb = countdowns(wb, slot);
+			if (ca.size() != cb.size())
+				continue;
+			for (size_t k = 0; k < ca.size(); ++k) {
+				const Countdown &x = ca[k], &y = cb[k];
+				// The top: one second apart, or a countdown already running when the window
+				// opened. The bottom: a countdown the window's end cut.
+				uint32_t hi = std::max(x.top, y.top), lo = std::min(x.bottom, y.bottom);
+				if (x.top != y.top &&
+						(hi - std::min(x.top, y.top) == 1 || x.first == 0 || y.first == 0))
+					hi = std::min(x.top, y.top);
+				if (x.bottom != y.bottom && (x.last + 1 == wa.size() || y.last + 1 == wb.size()))
+					lo = std::max(x.bottom, y.bottom);
+				if (lo > hi)
+					continue;
+				auto drop = [&dropped, slot, lo, hi](
+									const std::vector<const F *> &w, const Countdown &c) {
+					for (size_t i = c.first; i <= c.last; ++i)
+						if (w[i]->weapon[slot] > hi || w[i]->weapon[slot] < lo)
+							dropped.insert(w[i]);
+				};
+				drop(wa, x);
+				drop(wb, y);
+			}
+		}
+		auto rendered = [&dropped](const std::vector<const F *> &frames) {
+			std::set<std::string> out;
+			for (const F *f : frames)
+				if (!dropped.count(f))
+					out.insert(f->weapon_present ? "1:" + join(f->weapon, 7) + "," +
+											std::to_string(f->weapon_uniform_team_mask)
+												 : std::string("0"));
+			return out;
+		};
+		set_metric(
+				out, 'S', "frame_weapon", "FRAME_WEAPON_PHASE_MISMATCH", rendered(a), rendered(b));
+	}
 	// breathtime and fallmps; the fps and CPU bytes are machine-load measurements.
 	both("frame_timer", "FRAME_TIMER_PHASE_MISMATCH", [](const F &f) {
 		return f.timer_present ? "1:" + join(f.timer_state, 2) : std::string("0");

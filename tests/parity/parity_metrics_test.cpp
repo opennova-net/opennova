@@ -2752,6 +2752,41 @@ void test_frame_draws() {
 		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), hit(3, 120, 36), "OO"), 'S',
 				"frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
 	}
+	{
+		// x6's hostkill: the +0x168 countdown (weapon[1]) from `top` and the +0x170 one
+		// (weapon[2]) from 120, both started at steady frame `start` `skipped` seconds in, a
+		// second every 8 frames (two weapon blocks), +0x170 still running at the window's end
+		// (frame.weapon_countdown).
+		auto countdown = [&rewrite](uint32_t seed, size_t start, uint32_t skipped, uint32_t top) {
+			return rewrite(scripted(seed),
+					[start, skipped, top](
+							size_t i, wire::ParityFrameState &f, wire::ParityEntity &) {
+						if (!f.weapon_present)
+							return;
+						f.weapon[1] = f.weapon[2] = 0;
+						if (i < start)
+							return;
+						const uint32_t step = uint32_t(i - start) / 8 + skipped;
+						f.weapon[1] = step < top ? top - step : 0;
+						f.weapon[2] = 120 - step;
+					});
+		};
+		// RR-aa's first sample is the second second (x6: (4, 119) against RR's (5, 120)).
+		const Case late_sample =
+				judge_case(countdown(1, 40, 0, 5), countdown(2, 48, 1, 5), countdown(3, 48, 1, 5));
+		const VerdictRow *aa = find_row(late_sample.verdict.rows, 'S', "frame_weapon");
+		check(aa && aa->aa_distance == 0.0, "a countdown's first second missed is no A/A distance");
+		expect_row(late_sample, 'S', "frame_weapon", "", "pass");
+		// A countdown started two seconds later ends two higher at the window's end
+		// (x6: 79 on RR, 76 on OO).
+		expect_row(judge_case(countdown(1, 40, 0, 5), countdown(2, 40, 0, 5),
+						   countdown(3, 56, 0, 5), "OO"),
+				'S', "frame_weapon", "", "pass");
+		// A countdown from another value is no phase.
+		expect_row(judge_case(countdown(1, 40, 0, 5), countdown(2, 40, 0, 5),
+						   countdown(3, 40, 0, 7), "OO"),
+				'S', "frame_weapon", "", "fail", "FRAME_WEAPON_PHASE_MISMATCH");
+	}
 }
 
 void test_steady_rules() {

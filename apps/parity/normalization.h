@@ -592,6 +592,19 @@ inline constexpr Normalization kNormalizations[] = {
 			"x5's 01tr-coop-aikill RR read {0, 150, 36} against RR-aa's {0, 150, 8} (base 114 "
 			"at 1.0 and at 1.25), x1's RR-aa 7 (base 115 at 1.25). The full and dead values "
 			"compare exactly and a residual as 'hit'" },
+	{ "frame.weapon_countdown", MaskKind::Field, 'S', 0x00A, "weapon[1..4]", 0,
+			"the weapon block rides one frame in four (NetPacket_WritePlayerState @0x4FF6B0, "
+			"the phase test @0x4FF81B) and its slot bytes +0x168, +0x170, +0x16C and +0x164 "
+			"(weapon[1..4], @0x4FF845, @0x4FF876, @0x4FF8A1, @0x4FF8BB; the first two only "
+			"while the body's +0x24 mask 0x02 is set, @0x4FF843 / @0x4FF874) are counters the "
+			"host steps down once a second (Server_TickUpdate @0x51D7E0, the per-slot pass "
+			"@0x51DFBA..0x51E011), so a countdown's first sample is its first second or the "
+			"next, by its start against the block's phase, and a countdown the window cuts ends "
+			"where the window does. Each countdown compares over the values both runs cover: a "
+			"top one second higher (or one running when the window opened) and a bottom below "
+			"the other's window-cut end leave the set. x6 retail: hostkill RR first sampled "
+			"(5, 120) and RR-aa (4, 119), their window-cut ends 79 and 78; selfnade RR's +0x168 "
+			"countdown first read 5, RR-aa's 4; swap RR 59 against RR-aa 60" },
 	{ "frame.env_tod", MaskKind::Field, 'S', 0x00A, "tod_fixed", 0,
 			"the time of day advances with the session clock: the env block compares the "
 			"weather fields" },
