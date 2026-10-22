@@ -3,6 +3,7 @@
 #include <runtime/inmatch/end_round_protocol.h>
 #include <runtime/inmatch/mission_exit.h>         // the round end's exit reasons 3 / 4
 #include <runtime/inmatch/mission_rotation.h>     // HostRotation::last_game
+#include <runtime/inmatch/napi_np_protocol.h>     // step_initial_state_row (the per-slot block's §5.2a step)
 #include <runtime/inmatch/server_idle_timers.h>      // the every-32 breath samples
 #include <runtime/inmatch/server_message_dispatch.h> // Server_ReleasePlayerDeployment, build_spawn_wave_status_body
 #include <runtime/inmatch/server_net_quality.h>      // the host CNetQuality sample + the 0x46 quality resend
@@ -588,8 +589,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 
 	// (1) net-before-logic: drain each in-match connection's queued C2S 0x0C and read-apply (SNAP).
 	// burst.spawned marks an in-match connection — a mid-burst peer is still receiving its §5.2a
-	// initial-state stream via tick_connections (which skips spawned peers, napi_np_protocol.cpp:509)
-	// and has no per-frame C2S 0x0C uplink yet. [orig: PumpRecvQueues walks connection_list.]
+	// initial-state stream (the per-slot block's step at (3), step_initial_state_row) and has no
+	// per-frame C2S 0x0C uplink yet. [orig: PumpRecvQueues walks connection_list.]
 	// Spawned remote-peer (type-1) nodes stay resident until explicit disconnect/drop. The only
 	// whole-table reset is create_session, so a live configuration update cannot evict this fan.
 	// drain_connection_c2s null-checks conn.link.transport internally + enforces the owner gate.
@@ -1155,6 +1156,22 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				}
 				conn.staged_frame_update.clear();
 			}
+		} else if (!conn.burst.spawned) {
+			// A row short of state 6 takes its §5.2a step at the same call (the slot-state
+			// switch's state-2 and state-4 arms), so the step's records follow every record the
+			// frame sent the row's net player ahead of the block (the receive pump's replies, the
+			// scoreboard's 0x16, an add's roster records, a broadcast) and lead the row's 0x57,
+			// and a round the frame ended (the win check, a script's Win) steps nothing, both
+			// tracks waiting on the round-over flag. The receive pump steps nothing
+			// (tick_connections' run_initial_state_steps false). The step's clock is the world's
+			// (host_tick_count) (D-NET-NEW-L1-29).
+			// [orig: Server_TickUpdate - the receive pump @0x51D895, the scoreboard @0x51D90D,
+			//  the spawn pump @0x51DBFD, the win check @0x51DF5A, then the call @0x51E3E4;
+			//  Server_SendPlayerSlotStateFrame @0x51BBA0 - `cmp g_RoundOver, ebx` @0x51BBE8
+			//  (world track) / @0x51BEFF (player-sync track)]
+			std::vector<std::vector<uint8_t>> unframed; // the frame sends through transports
+			step_initial_state_row(ctx, conn, r.net_player, world.logic_tick,
+					/*respect_s2c_send_boundary=*/true, unframed);
 		}
 		// The row's 0x57 right behind its frame [orig: Server_TickUpdate - the pump call
 		//  @0x51E3E4, then the 0x57's session test @0x51E3EC and its send @0x51E450].

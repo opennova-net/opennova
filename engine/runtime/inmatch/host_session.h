@@ -109,10 +109,11 @@ void dispatch_event(HostOwner &owner, const PeerAddr &peer, const HostAcceptEven
 //           recv_from -> handle_server_datagram -> queue replies + react to events; the
 //           receive pump's own sends (0x44 rebuilds, the 0x84 request, the 0x85 pong) leave
 //           at once; then the send-boundary clocks
-//       (2) tick_connections: pre-spawn §5.2a bursts + surface F3/spawned, then
+//       (2) tick_connections: the receive-timeout reap + surface F3/spawned, then
 //           `before_server_tick`, then the records the handlers raised, behind their sends
 //       then the tick's single C2S drain, one logic tick, on the periodic second the
-//       spawn pump (after the scoreboard), and the per-connection 0x0A fan
+//       spawn pump (after the scoreboard), and the per-slot block: each row's 0x0A, or its
+//       §5.2a step short of state 6 (D-NET-NEW-L1-29), then its 0x57
 //   (4) S2C flush: on each peer's send boundary, ship pre-framed 0x83 packets,
 //       then pop its transport's identity [tag][body] -> frame/batch as 0x83 -> send
 //   (5) drain an unused embedder loopback for HostOnly; preserve the HostClient local view

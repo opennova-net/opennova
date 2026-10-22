@@ -396,7 +396,9 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		if (own_client_drain != nullptr) own_client_drain(own_client_drain_context);
 		receive_and_advance_boundaries(owner, sock, now, event_observer, event_observer_context);
 		lap.mark(devtools::Slot::SIM_HOST_RECEIVE);
-		// (2) tick_connections: drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
+		// (2) tick_connections: the receive-timeout reap; surface F3/PeerSpawned. Each
+		// not-yet-spawned row's §5.2a step runs in Server_TickUpdate's tail per-slot block, not
+		// here (run_initial_state_steps false, D-NET-NEW-L1-29).
 		// The reap measures the host clock against each connection's last receive stamp, so a
 		// connection heard during a long load is charged only the time since that receive, and a
 		// silent one the whole time since its last.
@@ -409,7 +411,8 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 				c.receive_inactive_ms = clock_now - c.receive_stamp_ms;
 		for (TickOut &t : tick_connections(
 				owner.ctx, /*elapsed_ms=*/0, now,
-				/*respect_s2c_send_boundary=*/true, /*run_spawn_pump=*/false)) {
+				/*respect_s2c_send_boundary=*/true, /*run_spawn_pump=*/false,
+				/*run_initial_state_steps=*/false)) {
 			for (const std::vector<uint8_t> &dg : t.outbound) {
 				send_or_stage_established_datagram(owner, sock, t.peer, dg);
 			}

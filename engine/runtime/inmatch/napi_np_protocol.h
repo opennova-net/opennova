@@ -256,9 +256,25 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx);
 // the tick a peer's batches start (F3). Spawned peers are skipped — Server_TickUpdate owns their 0x0A.
 // `run_spawn_pump` runs the pending-player spawn pump first on the periodic second; the host's
 // own frame passes false, since Server_TickUpdate runs the pump in its periodic block.
+// `run_initial_state_steps` steps each row's §5.2a track here (step_initial_state_row, the rows
+// in slot order); the host's own frame passes false, since Server_TickUpdate steps them in its
+// tail per-slot block (D-NET-NEW-L1-29).
 std::vector<TickOut> tick_connections(
 		NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick,
-		bool respect_s2c_send_boundary = false, bool run_spawn_pump = true);
+		bool respect_s2c_send_boundary = false, bool run_spawn_pump = true,
+		bool run_initial_state_steps = true);
+
+// One row's §5.2a step, the call Server_TickUpdate's per-slot block makes for a row short of
+// state 6 (Server_SendInitialGameStateToPlayer): a connection's own row (`net_player` is the row
+// itself) or an orphaned row (D-NET-NEW-L1-24; `net_player` is orphan_net_player's, null past the
+// player's leave, when nothing runs). The step waits while the net player's send boundary is
+// closed (`respect_s2c_send_boundary`), and its records go to the net player's transport; a
+// connection with no transport (a protocol-only test seam) has them framed into `outbound`.
+// [orig: Server_TickUpdate's per-slot block @0x51E385..0x51E47C - the row's +0x1C @0x51E3AA,
+//  its connection @0x51E3B1, the boundary @0x51E3D6, the call @0x51E3E4]
+void step_initial_state_row(NapiNPServerCtx &ctx, NapiNPConnection &row,
+		NapiNPConnection *net_player, uint32_t now_tick, bool respect_s2c_send_boundary,
+		std::vector<std::vector<uint8_t>> &outbound);
 
 // Wrap one in-match S2C inner message (e.g. the per-frame 0x0A body) into a fully-framed 0x83 SESSION
 // datagram for `peer`, using that connection's live SCRK + seq (advances its outbound seq). False

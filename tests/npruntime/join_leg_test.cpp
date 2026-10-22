@@ -26,6 +26,9 @@
 //   - D-NET-NEW-L1-8: the join arms the round-event watermark at the frame clock less one
 //     [orig: CNetPlayer_SetGameState @0x4C422D; Server_OnPlayerJoin @0x51A74C;
 //     Server_BuildRoundEventListForPlayer @0x4FFEE8, @0x5001A8..0x5001AE].
+//   - D-NET-NEW-L1-29: the server tick steps a row's track in its tail per-slot block, after
+//     the scoreboard and the win check [orig: Server_TickUpdate - the scoreboard @0x51D90D,
+//     the win check @0x51DF5A, the call @0x51E3E4].
 
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/punt_log.h> // PuntLog (the checksum legs' _PUNT.TXT lines)
@@ -1312,6 +1315,64 @@ bool run_two_rows_of_one_player_step_in_slot_order() {
 	              "the lower slot's track record leads the player's queue");
 }
 
+// D-NET-NEW-L1-29: the host's frame steps a row's §5.2a track at the row's place in
+// Server_TickUpdate's tail per-slot block, not in the receive pump: the receive pump's pass
+// (tick_connections, run_initial_state_steps false) steps nothing, and a mid-burst row at a
+// scoreboard frame takes the scoreboard's 0x16 ahead of its track's 0x2C, both in that frame.
+// [orig: Server_TickUpdate - the receive pump @0x51D895, the scoreboard @0x51D90D, the per-slot
+//  block's call @0x51E3E4 -> Server_SendPlayerSlotStateFrame @0x51BBA0 (the 0x2C @0x51BF5D);
+//  Server_BuildAndBroadcastScoreboard's send walk @0x50DDC0 (the active row, its state not read)]
+bool run_the_track_steps_after_the_scoreboard() {
+	JoinFixture f(/*with_existing=*/false);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	inmatch::NapiNPConnection &j = f.joiner();
+	(void)f.send(opennova::c2s::CHECKSUM_RESPONSE); // slot state 2
+	(void)JoinFixture::drain(f.joiner_transport);
+	(void)inmatch::tick_connections(*f.ctx, /*elapsed_ms=*/0, /*now_tick=*/2,
+			/*respect_s2c_send_boundary=*/true, /*run_spawn_pump=*/false,
+			/*run_initial_state_steps=*/false);
+	if (!expect(JoinFixture::drain(f.joiner_transport).empty() &&
+	                    j.burst.player_sync_subphase == 0,
+	            "the receive pump's pass steps nothing")) return false;
+	f.ctx->scoreboard_broadcast_timer = 0x136u; // this tick is a scoreboard boundary
+	inmatch::Server_TickUpdate(*f.ctx);
+	const std::vector<uint8_t> tags = JoinFixture::drain(f.joiner_transport);
+	const auto at = [&tags](uint8_t tag) {
+		return std::find(tags.begin(), tags.end(), tag) - tags.begin();
+	};
+	const auto end = static_cast<std::ptrdiff_t>(tags.size());
+	return expect(at(opennova::s2c::PLAYER_LIST) < at(opennova::s2c::MISSION_MAP_NAMES) &&
+	                      at(opennova::s2c::MISSION_MAP_NAMES) < end &&
+	                      std::count(tags.begin(), tags.end(), opennova::s2c::MISSION_MAP_NAMES) == 1,
+	              "the frame's 0x16, then the track's one 0x2C step");
+}
+
+// D-NET-NEW-L1-29: a frame whose win check ends the round steps no track: the per-slot block
+// runs after it, and both tracks wait on the round-over flag. Ours stepped in the receive pump,
+// ahead of the win check.
+// [orig: Server_TickUpdate - the win check @0x51DF5A, then the call @0x51E3E4;
+//  Server_SendPlayerSlotStateFrame - `cmp g_RoundOver, ebx` @0x51BEFF (player-sync track),
+//  @0x51BBE8 (world track)]
+bool run_a_frame_whose_round_ends_steps_no_track() {
+	JoinFixture f(/*with_existing=*/false);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	inmatch::NapiNPConnection &j = f.joiner();
+	(void)f.send(opennova::c2s::CHECKSUM_RESPONSE); // slot state 2
+	(void)JoinFixture::drain(f.joiner_transport);
+	f.world->match.set_remaining_ticks(0); // the round clock is out: the next win check ends it
+	if (!expect(!f.world->match.outcome().ended, "the round runs at the frame's start"))
+		return false;
+	inmatch::Server_TickUpdate(*f.ctx); // the first frame is a periodic second
+	return expect(f.world->match.outcome().ended &&
+	                      !contains(JoinFixture::drain(f.joiner_transport),
+	                              opennova::s2c::MISSION_MAP_NAMES) &&
+	                      j.slot_state == inmatch::PlayerSlotState::PlayerSync &&
+	                      j.burst.player_sync_subphase == 0,
+	              "the round ends in the frame: its track takes no step");
+}
+
 // D-NET-NEW-L1-24 (Q7-31 (b), leg (b)): a C2S 0x02 in the NovaWorld ticket wait (game states 3
 // / 4) enters game state 7 and lists the node: the validation watchdog visits states 3 / 4 alone,
 // so it no longer punts it, the pump adds the player with no ticket, and the enter result (its
@@ -1424,6 +1485,8 @@ int main() {
 	if (!run_a_players_two_rows_interleave_frame_and_rtt()) ++failures;
 	if (!run_an_orphaned_row_runs_on_its_player_sync_track()) ++failures;
 	if (!run_two_rows_of_one_player_step_in_slot_order()) ++failures;
+	if (!run_the_track_steps_after_the_scoreboard()) ++failures;
+	if (!run_a_frame_whose_round_ends_steps_no_track()) ++failures;
 	if (!run_an_echo_in_the_ticket_wait_spawns_without_a_ticket()) ++failures;
 	if (!run_a_repeated_echo_keeps_the_held_nag_stamp()) ++failures;
 	if (failures != 0) return 1;
