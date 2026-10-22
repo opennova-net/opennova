@@ -355,9 +355,9 @@ void test_replies_are_filtered_and_listed_at_first_sighting() {
 void test_window_lists_at_most_thirty_two_hosts() {
     opennova::LanDiscoveryBrowser b;
     CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
-    const std::vector<uint8_t> reply = server_reply("Many", 1, 8);
+    const std::vector<uint8_t> many = server_reply("Many", 1, 8);
     for (int i = 1; i <= 40; ++i)
-        reply(b, reply, sender("10.0.0." + std::to_string(i), 32768));
+        reply(b, many, sender("10.0.0." + std::to_string(i), 32768));
     walk(b);
     CHECK(b.record_count() == 40);
     CHECK(b.servers().size() == kLanBrowseMaxSessions);
