@@ -2425,6 +2425,12 @@ function Resolve-ScenarioAim {
             logic_tick = $(if ($pool.PSObject.Properties.Name -contains "logic_tick") { $pool.logic_tick } else { $null })
             heading_bam = [long] $self[0].yaw_bam
             actor_q16 = @($self[0].pos)
+            # The look's gate words on the actor's record: +0x24 (the dispatcher's
+            # flag-0x01 operand), health, team, parent slot.
+            actor_flags = [long] $self[0].flags
+            actor_health = $self[0].health
+            actor_team = $self[0].team
+            actor_parent_slot = $self[0].parent_slot
             target_handle = [int] $mark[0].handle
             target_q16 = @($mark[0].pos)
             mouse_sensitivity = [int] $word.mouse_sensitivity
@@ -2453,10 +2459,40 @@ function Resolve-ScenarioAim {
         $actorXY = "$(([double] $data.position_bms[0]).ToString('R', $invariant)),$(([double] $data.position_bms[1]).ToString('R', $invariant))"
         $targetXY = "$(([double] $data.target.position_bms[0]).ToString('R', $invariant)),$(([double] $data.target.position_bms[1]).ToString('R', $invariant))"
     }
+    # The previous aim's look must have turned the actor before this aim reads on
+    # from it, on either driver. The look's only writes are the local player's
+    # +0x10 heading and g_LocalPlayerLookYaw [orig: Input_HandleActionBinding_0
+    # @0x4E0420 - g_LocalPlayerEntity @0x4E0434, case 166 @0x4E10A4..0x4E10AA,
+    # case 167 @0x4E1102..0x4E110F], the word this read returns, and the event
+    # reaches them only past the dispatcher's head, which drops a look row (flags
+    # 0x0C100425 / 0x0C200425) under the pre-round timer (0x400 @0x49ADB3..0x49ADC2),
+    # the deploy screen (0x8000000 @0x49ADC8..0x49ADD7), the local player's +0x24 bit
+    # 2 (0x1 @0x49AD76..0x49ADA0) or the round's end (@0x49ADEE..0x49AE16)
+    # [orig: Input_HandleActionBinding @0x49AD40]. x7's revive pre-flight (push 167,
+    # RR) read the posed heading 0x40000000 on all three aims, so aims two and
+    # three turned from a heading the actor no longer had in mind.
+    $previous = $script:LastScenarioAim
+    if ($null -ne $previous -and [int] $previous.look.look_px -ne 0 -and
+            [long] $read.heading_bam -eq [long] $previous.read.heading_bam) {
+        # The actor's own screen at that moment shows which gate holds (a deploy
+        # screen or an open menu); a failed shot does not hide the finding.
+        if ($retailActor) {
+            try {
+                $null = Invoke-OnHookTool -Name "onhook_screenshot" -Arguments @{
+                    instance_id = $RetailInstanceId
+                    path = (Join-Path $RunRoot "aim-gated-$actor.png")
+                    preview_max_dim = 256
+                }
+            } catch { Write-Host "PARITY_RUN_NOTE aim_at ${Handle}: the gated actor's screenshot failed: $($_.Exception.Message)" }
+        }
+        throw "aim_at ${Handle}: the previous look ($($previous.look.look_px) px for $($previous.aim_at)) did not turn the $actor (heading still $($read.heading_bam) BAM, expected $($previous.look.heading_after_bam)): its look rows are gated; read $(ConvertTo-Json $read -Compress)"
+    }
     $look = Invoke-ScenarioAimTool -Arguments @("look", "--heading-bam=$($read.heading_bam)",
         "--actor=$actorXY", "--target=$targetXY", "--sensitivity=$($read.mouse_sensitivity)")
     Write-Host "PARITY_RUN_NOTE aim_at ${Handle}: heading $($read.heading_bam) -> look_px $($look.look_px) (S $($read.mouse_sensitivity), residual $($look.residual_bam) BAM)"
-    return [pscustomobject][ordered]@{ aim_at = $Handle; read = $read; look = $look }
+    $aim = [pscustomobject][ordered]@{ aim_at = $Handle; read = $read; look = $look }
+    $script:LastScenarioAim = $aim
+    return $aim
 }
 
 # A stage with aim_at steps plays in parts: the steps before each aim_at (the

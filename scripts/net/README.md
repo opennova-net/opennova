@@ -723,7 +723,17 @@ held, and no press released, across an `aim_at`, since a part's end releases
 everything. The witness's `record` then carries each part's record and each
 aim's reads and look, and the run prints one `PARITY_RUN_NOTE aim_at` line per
 aim. The parts add the reads' round trips (a fraction of a second each) to
-the play's span.
+the play's span. Each aim after the first checks that the previous look turned
+the actor: the look's only writes are the local player's +0x10 heading (the
+word both reads return) and `g_LocalPlayerLookYaw`
+(`Input_HandleActionBinding_0 @0x4E0420`, cases 166 / 167), past the
+dispatcher's head, which drops a look row under the pre-round timer, the
+deploy screen, the local player's +0x24 bit 2 or the round's end
+(`Input_HandleActionBinding @0x49AD40`, @0x49AD76..0x49AE16). A heading the
+look left unchanged throws, with the read (a retail actor's screen saved as
+`aim-gated-<actor>.png` first); a retail read also keeps the actor's +0x24,
+health, team and parent slot. x7's revive pre-flight (push 167,
+RR) read the posed heading 0x40000000 on all three aims.
 
 A scenario whose play ends the joiner's session (E4's `kick`) says
 `"ends_joiner_session": true`. The runner then reads the joiner's closing
