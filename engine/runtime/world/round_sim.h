@@ -45,8 +45,9 @@
 //  * spawn-time Weapon_CalcRandomSpreadOffset and recoil follow the recovered
 //    player/rules/stance gates. Impact-energy armor-density loss and shell-eject
 //    physics remain outside this model.
-//  * kztype Knife(1)/Medic(3) raycast leaves and item-placing ammo (`hasitem`) do not
-//    spawn a sim round.
+//  * past the allocation every round flies: a zero velocity, a Knife(1)/Medic(3)
+//    kztype outside instantkillzone and a `hasitem` ammo take the ballistic default
+//    like any other.
 #pragma once
 
 #include <array>

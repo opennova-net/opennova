@@ -1619,9 +1619,9 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 } // namespace
 
 // The round ids come from the pool's one counter: a fresh word mints (local slot << 9)
-// | counter, any other word is the id as it stands; the allocation precedes every leg
-// that flies nothing here (no velocity, a kill-zone kztype, hasitem, an unheld row),
-// and a spawn that allocates nothing (instantkillzone) hands the ring pool slot 0's.
+// | counter, any other word is the id as it stands; the allocation precedes the round
+// whatever it carries (hasitem, no velocity) and an unheld row's empty return, and a
+// spawn that allocates nothing (instantkillzone) hands the ring pool slot 0's.
 // [orig: CEntityManager_AllocateSlot @0x4EAAD0 - the 0xFFFF test @0x4EAAE6, the counter
 //  @0x4EAAE8..0x4EAB04; RoundData_SpawnRound - the null return @0x4EC230, the
 //  allocation @0x4EC388; RoundData_AddRound ring+28 @0x4FDCF5; the slotless ammo-arm
@@ -1746,6 +1746,54 @@ bool test_round_pool_allocates_after_its_cursor() {
 	return ok;
 }
 
+// Past the allocation every round flies: a zero velocity, a Knife or Medic kztype outside
+// instantkillzone and a hasitem ammo each take a live slot and present their fire, and the
+// zero velocity's round launches at speed 0.
+// [orig: RoundData_SpawnRound @0x4EC0D0 - the kztype test @0x4EC21B inside the 0x400 leg,
+//  the allocation @0x4EC388, the speed (v << 16) / 62 @0x4EC58E..0x4EC5AB, the velocity
+//  stores @0x4EC5DD..0x4EC60D]
+bool test_every_allocated_round_flies() {
+	auto world = std::make_unique<w::World>();
+	std::vector<w::AmmoTableEntry> &rows = world->tables.ammo.entries;
+	rows.resize(4);
+	w::AmmoTableEntry &still = rows[0];
+	still.valid = true;
+	still.velocity = 0;
+	still.max_age_ticks = 100;
+	w::AmmoTableEntry &knife = rows[1];
+	knife = still;
+	knife.velocity = 620;
+	knife.kztype = w::ammo_kz::kKnife;
+	w::AmmoTableEntry &medic = rows[2];
+	medic = knife;
+	medic.kztype = w::ammo_kz::kMedic;
+	w::AmmoTableEntry &item = rows[3];
+	item = knife;
+	item.kztype = 0;
+	item.flags = w::kAmmoFlagHasItem;
+	w::RoundSim &rs = world->round_sim;
+	bool ok = true;
+	for (int32_t ammo = 0; ammo < 4; ++ammo) {
+		w::RoundSpawnParams p;
+		p.ammo_index = ammo;
+		p.no_weapon = true;
+		p.shot_seq = w::RoundSim::kFreshRoundWord;
+		p.origin = {10.0f, 20.0f, 30.0f};
+		const size_t fired_before = rs.fired.size();
+		const int slot = rs.spawn(*world, p);
+		ok &= expect(slot == ammo + 1 && rs.rounds[size_t(slot)].active &&
+						rs.rounds[size_t(slot)].ammo_index == ammo &&
+						rs.fired.size() == fired_before + 1,
+				"every allocated round flies and presents its fire");
+	}
+	const w::LiveRound &still_round = rs.rounds[1];
+	ok &= expect(still_round.vel.x.q16 == 0 && still_round.vel.y.q16 == 0 &&
+					still_round.vel.z.q16 == 0,
+			"a zero velocity launches at speed 0");
+	ok &= expect(rs.active_count == 4, "four live rounds");
+	return ok;
+}
+
 // The ammo-def arm's word: a source whose occupant owns a player slot (single player's
 // local player included) packs that slot over 0x1FF, a slotless one is 0xF7FF; the
 // ring carries it [orig: Entity_ValidatePtr @0x42BE0A; Server_ClientFiredRound
@@ -1786,6 +1834,7 @@ int main() {
 	if (!test_respawned_vehicle_takes_projectile_damage()) return 1;
 	if (!test_round_ids_share_the_pool_counter()) return 1;
 	if (!test_round_pool_allocates_after_its_cursor()) return 1;
+	if (!test_every_allocated_round_flies()) return 1;
 	if (!test_ammo_arm_word_follows_the_slot()) return 1;
 	if (!test_retail_random_spread_vectors()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;

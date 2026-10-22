@@ -1046,18 +1046,21 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         return first;
     }
     // The allocation takes the slot and stamps the round's id, which seeds its
-    // spread below; it follows the shotgun leg and precedes everything else, so
-    // the legs below that fly nothing here still take their id and their slot
+    // spread below; it follows the shotgun leg and precedes everything else
     // [orig: RoundData_SpawnRound -> CEntityManager_AllocateSlot @0x4EC388, which
     // never fails; the seed round+0x78 @0x4EC394].
     const int slot = allocate_slot(world, params.shot_seq);
     const uint16_t round_id = rounds[static_cast<size_t>(slot)].shot_seq;
-    // Null/non-ballistic ammo spawns nothing at this altitude: the Knife(1)/Medic(3)
-    // kill zones are the immediate-raycast leaves [orig: kztype dispatch @0x4ec21f],
-    // `hasitem` ammo places an item entity instead of flying.
-    if (ammo->velocity <= 0) return -1;
-    if (ammo->kztype == 1 || ammo->kztype == 3) return -1;
-    if ((ammo->flags & kAmmoFlagHasItem) != 0) return -1;
+    // Past the allocation every round flies, whatever its ammo: a velocity of 0 or
+    // less launches at that speed, a kill-zone kztype is read only inside the
+    // instantkillzone leg (the knife's raycast), and no leg reads `hasitem`
+    // [orig: RoundData_SpawnRound - the kztype test @0x4EC21B inside the 0x400 leg
+    //  (its Weapon_RaycastAndSpawnImpact call @0x4ec21f), no test between the
+    //  allocation @0x4EC388 and the speed's (v << 16) / 62 @0x4EC58E..0x4EC5AB; no
+    //  fire path tests 0x200 ahead of its call:
+    //  Entity_FireWeaponAndSendPacket @0x42BD80 (the call @0x42C008),
+    //  RoundData_AddRound @0x4FDB40 (the call @0x4FDC58),
+    //  NetPacket_DeserializeRoundEvent @0x42F270 (the call @0x42F5BA)].
 
     int32_t final_yaw = params.dir_yaw_bam;
     int32_t final_pitch = params.dir_pitch_bam;
