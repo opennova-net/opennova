@@ -168,8 +168,8 @@ function Get-CaseHostPlayerClass { param($Case) return [int] (Get-CaseField $Cas
 # passwords, the SERVER game.cfg's mphostsidepassworda / b for the cell
 # (run_parity_topology.ps1 -HostSidePasswordA / B; "" keeps the copy's).
 function Get-CaseHostSidePassword { param($Case, [string] $Side) return [string] (Get-CaseField $Case "host_side_password_$Side" "") }
-# joiner_side_password: the side password a retail joiner enters (RR, RR-aa,
-# OR; run_parity_topology.ps1 -JoinerSidePassword).
+# joiner_side_password: the side password the joiner enters on its join
+# screen, retail's or ours (run_parity_topology.ps1 -JoinerSidePassword).
 function Get-CaseJoinerSidePassword { param($Case) return [string] (Get-CaseField $Case "joiner_side_password" "") }
 # deploy_zones: the mission offers deploy zones, so a joiner joins on the
 # deploy screen; an in_match auto_deploy case deploys its retail roles with

@@ -121,8 +121,9 @@ param(
     # 16 characters at most; the cell then requires the tool's
     # side_password_entered (false: the host never advertised the side
     # bits 0x30, a finding). RR and RR-aa launch their roles one by one for
-    # it (onhook_run_lan_pair takes none). Our joiner's join screen has no
-    # runner seam yet, so RO and OO refuse it.
+    # it (onhook_run_lan_pair takes none). RO and OO enter it on our joiner's
+    # join screen through the join_screen probe (Enter-OpenNovaJoinerSidePassword),
+    # with the same requirement.
     [string] $JoinerSidePassword = "",
 
     # E5's medic: the host player's class for this cell (5..9; 0 keeps the
@@ -268,9 +269,6 @@ if ($HostSessionName.Length -gt 31 -or $HostSessionName -notmatch '^[\x20-\x7e]+
 $ServerName = $HostSessionName
 if ($ReadinessMode -eq "deploy_hold" -and ($AutoDeploy -or $ExerciseInput)) {
     throw "deploy_hold readiness cannot auto-deploy or exercise input."
-}
-if ($JoinerSidePassword -and $Topology -in @("RO", "OO")) {
-    throw "-JoinerSidePassword is a retail joiner's (RR, RR-aa, OR): our joiner's join screen has no runner seam yet."
 }
 if ($JoinerSidePassword -and $JoinerSidePassword -cnotmatch '^[\x21\x23-\x7E]{1,16}$') {
     throw "-JoinerSidePassword is 1-16 printable ASCII characters, no space or quote."
@@ -3220,6 +3218,38 @@ function Assert-JoinerSidePasswordEntered {
 }
 $script:JoinerSidePasswordEntered = $null
 
+# D-NET-167: our joiner's side password, entered on its join screen as a
+# player does, through the join_screen probe. The --lan-join dial answers no
+# role (no --spectator), so a host advertising its side passwords (P2 0x30)
+# opens the team-password panel. The joiner types the password and presses
+# ACCEPT, which closes the choice; the join's load reopens the screen on its
+# progress. The side check is the retail joiner's: the panel showed and took
+# the password, else the cell fails.
+function Enter-OpenNovaJoinerSidePassword {
+    $script:JoinerSidePasswordEntered = $false
+    $steps = @(
+        @{ fails = "never showed the team-password panel: the host did not advertise its side passwords (P2 0x30)"
+           arguments = @{ op = "state"; until = "team_password"; wait_ms = 120000 } },
+        @{ fails = "did not take the side password"
+           arguments = @{ op = "set_text"; control = "TEAM_PASSWORD"; text = $JoinerSidePassword } },
+        @{ fails = "did not leave the team-password panel for the join's progress"
+           arguments = @{ op = "press"; control = "ACCEPT"; until = "progress"; wait_ms = 10000 } }
+    )
+    foreach ($step in $steps) {
+        $status = Invoke-GameProbe -Port $JoinerMcpPort -Name "join_screen" -Process $script:OpenNovaJoiner `
+            -TimeoutSeconds 180 -PollMs 1000 -Arguments $step.arguments
+        $ok = [string] $status.state -eq "passed" -and $status.verdict -and [bool] $status.verdict.ok
+        if ($ok -and $step.arguments.op -eq "set_text") {
+            $ok = [string] $status.verdict.data.team_password -ceq $JoinerSidePassword
+        }
+        if (-not $ok) {
+            $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
+            throw "Our joiner's join screen $($step.fails) ($($step.arguments.op): $why)"
+        }
+    }
+    $script:JoinerSidePasswordEntered = $true
+}
+
 function Start-RetailJoinerExact {
     $joinerDir = Join-Path $RunRoot "joiner"
     New-Item -ItemType Directory -Path $joinerDir -Force | Out-Null
@@ -3631,6 +3661,7 @@ function Start-OpenNovaJoinerExact {
         -McpPort $JoinerMcpPort
     if (-not $script:OpenNovaJoiner) { throw "OpenNova joiner launcher returned no process" }
     Register-OpenNovaLaunchProof -Role joiner -Process $script:OpenNovaJoiner
+    if ($JoinerSidePassword) { Enter-OpenNovaJoinerSidePassword }
 }
 
 # The joiner's readiness witness. The first call runs parity_joiner_ready in

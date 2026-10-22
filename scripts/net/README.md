@@ -406,8 +406,10 @@ so the default suite is unchanged. An extension case may add:
   presses Enter, and the cell requires its `side_password_entered` (false:
   the host never advertised the side bits 0x30). RR and RR-aa then launch
   host and joiner one by one (`onhook_run_lan_pair` takes no side password).
-  RO and OO refuse it: our joiner's join screen has no runner seam yet. The
-  host needs a team game type, no game password and no spectator slots, or
+  RO and OO enter it on our joiner's join screen through the `join_screen`
+  probe (the `--lan-join` dial with no `--spectator`: wait for the
+  `team_password` panel, type into `TEAM_PASSWORD`, press `ACCEPT` until the
+  join's progress), with the same requirement. The host needs a team game type, no game password and no spectator slots, or
   retail shows another panel first.
 - `host_player_class`: E5's medic (`-HostPlayerClass`, 5..9): the host
   player's class for the cell. The class is the current `weapon.sav` record's
