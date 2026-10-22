@@ -391,6 +391,14 @@ so the default suite is unchanged. An extension case may add:
   takes it on the authority (`g_SessionPermanentDeath @0x5522AA`) and the
   OpenNova host reads the same word (`host_config.cpp`), so every topology
   runs it.
+- `host_side_password_a` / `host_side_password_b`: D-NET-167's acceptance
+  (`-HostSidePasswordA` / `-HostSidePasswordB`, 1-16 printable ASCII
+  characters, no space or quote): the host's side passwords, the SERVER
+  copy's `game.cfg` `mphostsidepassworda` / `mphostsidepasswordb` for the
+  cell (entries in `server_game_cfg_overrides`, restored like `time_limit`).
+  Both hosts read them there, so every topology takes them. A joiner that
+  enters one is not staged yet: our joiner's join screen has no runner seam
+  and `onhook_join_lan` takes no side password.
 - `host_player_class`: E5's medic (`-HostPlayerClass`, 5..9): the host
   player's class for the cell. The class is the current `weapon.sav` record's
   side byte (+0 blue, +0x8006 red, each record 0x1080C bytes after a 16-byte

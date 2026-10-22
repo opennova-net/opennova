@@ -104,6 +104,17 @@ param(
     # permanent_death), so every topology takes it.
     [switch] $PermanentDeath,
 
+    # D-NET-167's acceptance: the host's side passwords for this cell, the
+    # SERVER copy's game.cfg string keys mphostsidepassworda / b (16
+    # characters at most; empty keeps the copy's), restored with the copy's
+    # files after it. Both hosts read them there (retail's game settings
+    # +0x40 / +0x60, which raise the session's side-password bits 0x20 / 0x10
+    # and answer a wrong side password with join reject 19 / 20; ours:
+    # host_config's side_a_password / side_b_password), so every topology
+    # takes them.
+    [string] $HostSidePasswordA = "",
+    [string] $HostSidePasswordB = "",
+
     # E5's medic: the host player's class for this cell (5..9; 0 keeps the
     # copy's). The class is the current weapon.sav record's side byte
     # (+0 blue, +0x8006 red), which the session start clamps to 5..9 into
@@ -1674,7 +1685,8 @@ function Restore-ServerCopyFiles {
 }
 
 # The cell's writes into the SERVER copy's game.cfg, one integer key each:
-# E2's time_limit and E5's mp_permanent_death. The retail host reads the file
+# E2's time_limit and E5's mp_permanent_death (and D-NET-167's two side
+# passwords, Set-ServerGameCfgString below). The retail host reads the file
 # at its start and the OpenNova host runs in the same copy; each write starts
 # from the file as the previous one left it, and the cleanup's restore takes
 # the copy back to the cell's start bytes (the pin).
@@ -1707,6 +1719,38 @@ function Set-ServerGameCfgValue {
     $cfg.effective_sha256 = $override.effective_sha256
     [IO.File]::WriteAllBytes($path, $bytes)
     Write-Host "PARITY_RUN_NOTE SERVER game.cfg $Key $($digits.Value) -> $Value for this cell"
+}
+
+# A quoted string key's write (D-NET-167's side passwords), as
+# Set-ServerGameCfgValue writes an integer one: exactly one line, the value
+# between its quotes replaced, the restore the copy's.
+function Set-ServerGameCfgString {
+    param([Parameter(Mandatory = $true)] [string] $Key, [Parameter(Mandatory = $true)] [string] $Value)
+    $cfg = $script:ServerCopyFiles | Where-Object { $_.file -eq "game.cfg" }
+    $path = $cfg.path
+    $latin1 = [Text.Encoding]::GetEncoding(28591)
+    $before = [IO.File]::ReadAllBytes($path)
+    $text = $latin1.GetString($before)
+    $found = [regex]::Matches($text, '(?m)^[ \t]*' + [regex]::Escape($Key) + '[ \t]*=[ \t]*"([^"\r\n]*)"')
+    if ($found.Count -ne 1) {
+        throw "SERVER game.cfg holds $($found.Count) quoted $Key lines; the cell's write needs exactly one."
+    }
+    $quoted = $found[0].Groups[1]
+    $updated = $text.Substring(0, $quoted.Index) + $Value + $text.Substring($quoted.Index + $quoted.Length)
+    $bytes = $latin1.GetBytes($updated)
+    $override = [pscustomobject][ordered]@{
+        path = $path
+        key = $Key
+        value = $Value
+        original_value = [string] $quoted.Value
+        original_sha256 = $cfg.sha256
+        effective_sha256 = Get-BytesSha256 $bytes
+        restored = $false
+    }
+    $script:ServerGameCfgOverrides.Add($override)
+    $cfg.effective_sha256 = $override.effective_sha256
+    [IO.File]::WriteAllBytes($path, $bytes)
+    Write-Host "PARITY_RUN_NOTE SERVER game.cfg $Key '$($quoted.Value)' -> '$Value' for this cell"
 }
 
 # E5's medic: the host player's class into the SERVER copy's active weapon.sav
@@ -3450,6 +3494,8 @@ try {
     Start-DesktopGuard
     if ($TimeLimitMinutes -gt 0) { Set-ServerGameCfgValue -Key "time_limit" -Value $TimeLimitMinutes }
     if ($PermanentDeath) { Set-ServerGameCfgValue -Key "mp_permanent_death" -Value 1 }
+    if ($HostSidePasswordA) { Set-ServerGameCfgString -Key "mphostsidepassworda" -Value $HostSidePasswordA }
+    if ($HostSidePasswordB) { Set-ServerGameCfgString -Key "mphostsidepasswordb" -Value $HostSidePasswordB }
     if ($HostPlayerClass -ne 0) { Set-ServerHostPlayerClass }
     if ($PreJoinMissionCycle) { Enable-HostAdminConsole }
     if ($ServeOnly -and $Topology -in @("OR", "OO")) { Set-ServerGameCfgValue -Key "dedicated" -Value 1 }
@@ -4196,6 +4242,9 @@ $summary = [pscustomobject]@{
     # with every game.cfg and weapon.sav write and its restore.
     permanent_death = [bool] $PermanentDeath
     host_player_class = $HostPlayerClass
+    # D-NET-167: the host's side passwords ("" keeps the copy's).
+    host_side_password_a = $HostSidePasswordA
+    host_side_password_b = $HostSidePasswordB
     # The case's deploy zones: onHook deployed the retail roles.
     deploy_zones = [bool] $DeployZones
     server_game_cfg_overrides = @($script:ServerGameCfgOverrides)

@@ -164,6 +164,10 @@ function Get-CaseTimeLimit { param($Case) return [int] (Get-CaseField $Case "tim
 # the SERVER copy's weapon.sav record; 0 keeps the copy's).
 function Get-CasePermanentDeath { param($Case) return [bool] (Get-CaseField $Case "permanent_death" $false) }
 function Get-CaseHostPlayerClass { param($Case) return [int] (Get-CaseField $Case "host_player_class" 0) }
+# host_side_password_a / _b (D-NET-167's acceptance): the host's side
+# passwords, the SERVER game.cfg's mphostsidepassworda / b for the cell
+# (run_parity_topology.ps1 -HostSidePasswordA / B; "" keeps the copy's).
+function Get-CaseHostSidePassword { param($Case, [string] $Side) return [string] (Get-CaseField $Case "host_side_password_$Side" "") }
 # deploy_zones: the mission offers deploy zones, so a joiner joins on the
 # deploy screen; an in_match auto_deploy case deploys its retail roles with
 # onHook's deploy (run_parity_topology.ps1 -DeployZones).
@@ -272,6 +276,13 @@ function Read-ParityCases {
                 $case.permanent_death -isnot [bool]) {
             throw "Parity case '$($case.id)': permanent_death is true or false"
         }
+        foreach ($side in @("a", "b")) {
+            $name = "host_side_password_$side"
+            if ($case.PSObject.Properties.Name -contains $name -and
+                    ($case.$name -isnot [string] -or [string] $case.$name -cnotmatch '^[\x21\x23-\x7E]{1,16}$')) {
+                throw "Parity case '$($case.id)': $name is 1-16 printable ASCII characters, no space or quote"
+            }
+        }
         if ($case.PSObject.Properties.Name -contains "serve_only" -and
                 $case.serve_only -isnot [bool]) {
             throw "Parity case '$($case.id)': serve_only is true or false"
@@ -368,6 +379,10 @@ function Get-CellArguments {
     $limit = Get-CaseTimeLimit $Case
     if ($limit -gt 0) { $arguments += @("-TimeLimitMinutes", [string] $limit) }
     if (Get-CasePermanentDeath $Case) { $arguments += "-PermanentDeath" }
+    $sideA = Get-CaseHostSidePassword $Case "a"
+    if ($sideA) { $arguments += @("-HostSidePasswordA", $sideA) }
+    $sideB = Get-CaseHostSidePassword $Case "b"
+    if ($sideB) { $arguments += @("-HostSidePasswordB", $sideB) }
     $class = Get-CaseHostPlayerClass $Case
     if ($class -ne 0) { $arguments += @("-HostPlayerClass", [string] $class) }
     if (Get-CaseDeployZones $Case) { $arguments += "-DeployZones" }
@@ -456,6 +471,13 @@ function Get-ReferenceMismatches {
     $recordedPermanent = ($fields -contains "permanent_death") -and [bool] $Summary.permanent_death
     if ($recordedPermanent -ne (Get-CasePermanentDeath $Case)) {
         $reasons.Add("permanent_death $recordedPermanent is not $(Get-CasePermanentDeath $Case)")
+    }
+    foreach ($side in @("a", "b")) {
+        $name = "host_side_password_$side"
+        $recordedSide = if ($fields -contains $name) { [string] $Summary.$name } else { "" }
+        if ($recordedSide -cne (Get-CaseHostSidePassword $Case $side)) {
+            $reasons.Add("$name '$recordedSide' is not '$(Get-CaseHostSidePassword $Case $side)'")
+        }
     }
     $recordedClass = if ($fields -contains "host_player_class") { [int] $Summary.host_player_class } else { 0 }
     if ($recordedClass -ne (Get-CaseHostPlayerClass $Case)) {
