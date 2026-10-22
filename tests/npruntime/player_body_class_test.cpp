@@ -42,6 +42,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -1131,7 +1132,8 @@ void test_a_genx_row_body_rides_its_ground_entity() {
 // (+0x2BA) to 1 while it is 0, so the record sends the low byte (0) over the current state;
 // hlfr and jvln set bit 0 when the body has no +0x170 link and return while it is set. The
 // envs, door, squib (a live body: its death tick 0) and upfx (its 0x4 bit clear) rows write no
-// word of the body's. None runs the player-body update after it (D-NET-NEW-L4-14 (a)).
+// word of the body's (envs's and upfx's loop registration is the next test's). None runs the
+// player-body update after it (D-NET-NEW-L4-14 (a)).
 // [orig: Entity_UpdateRocketFlag @0x443DD0 - @0x443DD4, @0x443DDE; Entity_UpdateGuidedMissile
 //  @0x446690 - @0x4466B3..0x4466CB, @0x4466DA..0x4466DC; Missile_UpdateGuidance @0x446BA0 -
 //  @0x446BBD..0x446BD9, @0x446BE8..0x446BEA; the player record @0x4C0CC7 / @0x4C0CD6 /
@@ -1195,6 +1197,68 @@ void test_an_item_row_body_runs_its_movers_head() {
 			CHECK(after->position.z.q16 == entry[2]);
 		}
 		CHECK(!ae->inf.player_moving); // no player-body update decoded the MoveOrder
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
+// A body bound to the envs row registers its def's regional loop on every visit: the row's mover
+// is the emitter itself, with no gate (a dead body's too, off the batch's last tick too). The upfx
+// row's tail registers it only on the batch's last tick, for a def with no physics selector and a
+// body with neither Flags 0x2 nor 0x4. The registration is the def's: a person's type (3) keeps
+// the default 10-tick lifetime, the same loop in every region a full blend.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 call @0x4C2472;
+//  Entity_UpdateEnvSoundEmitter @0x4A8080 - the def+0x5C switch @0x4A80A0, the 10 @0x4A80BC,
+//  the 0xFFFF blend @0x4A819F, the volume @0x4A81C6, the register @0x4A81DE;
+//  Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - @0x4A92E8, @0x4A93C5, @0x4A93CC, @0x4A93D6]
+void test_an_envs_or_upfx_row_body_registers_its_loop() {
+	struct Case {
+		w::PhysicsClass row;
+		uint32_t flags;   // the body's Flags bits for the visit
+		bool last_tick;   // the batch's last tick
+		int32_t physics;  // the def's +0x8DC selector
+		bool registered;
+	};
+	using P = w::PhysicsClass;
+	for (const Case c : {Case{P::Envs, 0, true, 0, true}, Case{P::Envs, 0, false, 0, true},
+				Case{P::Envs, w::kEntityFlagDead, false, 3, true},
+				Case{P::Upfx, 0, true, 0, true}, Case{P::Upfx, 0, false, 0, false},
+				Case{P::Upfx, w::kEntityFlagDead, true, 0, false},
+				Case{P::Upfx, w::kEntityFlagNVGWorn, true, 0, false},
+				Case{P::Upfx, 0, true, 3, false}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		w::Entity *body = r.spawn_remote(kPlyr);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		w::ItemDeathTraits *traits =
+				body != nullptr ? r.world->tables.item_death_traits.get_mutable(body->item_id) : nullptr;
+		CHECK(ae != nullptr && traits != nullptr && body->item_type_index > 0);
+		if (ae == nullptr || traits == nullptr || body->item_type_index <= 0) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		r.world->tables.item_rows[static_cast<size_t>(body->item_type_index)].move_row = c.row;
+		CHECK(w::body_move_row(*r.world, *ae, body) == c.row);
+		for (std::string &loop : traits->regional_loops) loop = "loop";
+		traits->physics = c.physics;
+		body->flags &= ~(w::kEntityFlagCarried | w::kEntityFlagDead | w::kEntityFlagNVGWorn);
+		body->engine_flags &= ~(w::kEntityFlagCarried | w::kEntityFlagDead | w::kEntityFlagNVGWorn);
+		body->flags |= c.flags;
+		body->engine_flags |= c.flags;
+		body->net_move_input = 0x08;
+		r.world->rules.last_tick_of_batch = c.last_tick;
+		r.world->out.sound_emitters.clear();
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		const auto &sent = r.world->out.sound_emitters.pending();
+		CHECK(sent.size() == (c.registered ? 1u : 0u));
+		if (c.registered && sent.size() == 1) {
+			CHECK(sent[0].source_handle == body->handle.packed);
+			CHECK(sent[0].set_name == "loop");
+			CHECK(sent[0].lifetime_ticks == 10);
+			CHECK(sent[0].volume_q8_8 == 0xFFFE);
+			CHECK(sent[0].pitch_q16 == 0x10000);
+		}
+		CHECK(!ae->inf.player_moving);
 		r.world->ai.root_motion = nullptr;
 	}
 }
@@ -1362,6 +1426,7 @@ int main() {
 	test_a_vehicle_row_body_runs_its_movers_person_path();
 	test_a_genx_row_body_rides_its_ground_entity();
 	test_an_item_row_body_runs_its_movers_head();
+	test_an_envs_or_upfx_row_body_registers_its_loop();
 	test_a_psec_row_body_runs_the_physics_step();
 	test_an_org_rows_player_body_takes_the_organic_init();
 	test_a_player_bodys_dcb_id_is_its_class_inits();

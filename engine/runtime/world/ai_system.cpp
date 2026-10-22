@@ -606,6 +606,13 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // `cmp dword ptr [ebp+1ACh], 0` @0x448D5E, `jz` @0x448D65 to the return @0x4497EE;
 // Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - @0x4A92E8, `test byte ptr [esi+24h], 4`
 // @0x4A92F5, the envs leg @0x4A93D6]
+// The envs row's mover IS the loop emitter, so the body registers its def's regional loop on
+// every pool-0 visit, with no gate; upfx's tail registers it on the batch's last tick for a def
+// with no physics selector (def+0x8DC) and a body with neither Flags 0x2 nor 0x4.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 `call eax` @0x4C2472 (the envs row's
+//  entry Entity_UpdateEnvSoundEmitter @0x4A8080); Entity_UpdateWaterPhysicsAndEffects @0x4A92E0
+//  - the def+0x8DC test @0x4A92E8, `test byte ptr [esi+24h], 6` @0x4A93C5, dword_24E0E80
+//  @0x4A93CC, the call @0x4A93D6]
 // The psec row's mover is the physics step over the body's words, its velocity triple (+0x98 /
 // +0x9C / +0xA0) the motor's (InfantryState::vel) and its +0x270 word Entity::palm_state, zero
 // on a person (the spawn's memset; the class inits and the spawn reset write neither).
@@ -615,7 +622,7 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
 // narrowed): ewep, ele0, towr, nade, rock, schl, clym, arti, aflr, gflr, stng and arty,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
-// pending word, upfx's swap-fade leg, and envs / door's emitter and model callbacks.
+// pending word, upfx's swap-fade leg, and door's model callbacks.
 static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
     e.inf.anim_pending = word;
     body.net_anim_pending = word;
@@ -638,9 +645,18 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
         update_physics_step(world, body, e.inf.vel[0], e.inf.vel[1], e.inf.vel[2]);
         return true;
     case PhysicsClass::Envs:
+        update_item_ambient_sound(world, body);
+        return true;
+    case PhysicsClass::Upfx: {
+        const ItemDeathTraits *traits = world.tables.item_death_traits.get(body.item_id);
+        if (traits != nullptr && traits->physics == 0 &&
+                ((body.flags | body.engine_flags) & (kEntityFlagDead | kEntityFlagHusk)) == 0 &&
+                world.rules.last_tick_of_batch)
+            update_item_ambient_sound(world, body);
+        return true;
+    }
     case PhysicsClass::Door:
     case PhysicsClass::Squib:
-    case PhysicsClass::Upfx:
         return true;
     case PhysicsClass::Cveh:
     case PhysicsClass::Ctrn:
