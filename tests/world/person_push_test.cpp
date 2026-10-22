@@ -187,7 +187,7 @@ void test_a_joiners_resolve_gates_on_the_copy_and_reads_the_live_person() {
 		CHECK(built != nullptr && built->live_position_q16.x == fx(c.copy_x) &&
 				built->live_position_q16.y == fx(c.copy_y) && !built->dead);
 		rig.cw.set_wire_person_proxy_live(0x0058, FixedVec3{fx(c.live_x), fx(c.live_y), 0},
-				c.dead);
+				c.dead, /*live_flags=*/0);
 		rig.resolve(local, out);
 	};
 	int32_t out[2];

@@ -852,6 +852,17 @@ struct WirePersonCollisionProxy {
     //  @0x4B3B7A, the +0x24 & 2 skip @0x4B3B89..0x4B3B8D);
     //  Entity_UpdateInfantryPlayerBody @0x4B40E0 (the death gate @0x4B4BF1)]
     bool dead = false;
+    // The LIVE Flags bits both proximity traces pass a row over on, past their coarse
+    // gate: 0x1 (carried / hidden) and 0x2000000 (a minefield: the lndm class init marks
+    // a row with a graphic). The build passes over a bit-0 row already; one that gains a
+    // bit after the build is passed over here (D-NET-196).
+    // [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (g_PersonProxEntity @0x4E4C2C,
+    //  `test [eax+24h], 2000001h` @0x4E4C33); Projectile_RaycastProximitySlots @0x4E5340
+    //  (g_DynProxEntity @0x4E5760, the test @0x4E5767); Entity_BuildProximityLists_Pool01
+    //  @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4); Entity_InitHardpoints @0x4417D0,
+    //  the lndm row's init (g_EntityClassEventCallbackTable @0x813000, the row @0x813198) -
+    //  `or [esi+24h], 2000000h` @0x441A23]
+    uint32_t live_flags = 0;
     // The person's LIVE Position: the movement resolver's push and the trace's
     // bone walk read the entity, not the table's copy. The table build seeds it
     // from position_q16 (replace_wire_collision_proxies); a person's update
@@ -898,6 +909,17 @@ struct WireDynamicCollisionProxy {
     int32_t heading_bam = 0;        // reconstructed entity+16 (yaw_byte << 24)
     int32_t pitch_bam = 0;          // retained entity+20 spawn/dead sample
     int32_t roll_bam = 0;           // retained entity+24 spawn/dead sample
+    // The LIVE Flags bits both proximity traces pass a row over on, past their coarse
+    // gate: 0x1 (carried / hidden) and 0x2000000 (a minefield: the lndm class init marks
+    // a row with a graphic). The build passes over a bit-0 row already; one that gains a
+    // bit after the build is passed over here (D-NET-196).
+    // [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (g_PersonProxEntity @0x4E4C2C,
+    //  `test [eax+24h], 2000001h` @0x4E4C33); Projectile_RaycastProximitySlots @0x4E5340
+    //  (g_DynProxEntity @0x4E5760, the test @0x4E5767); Entity_BuildProximityLists_Pool01
+    //  @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4); Entity_InitHardpoints @0x4417D0,
+    //  the lndm row's init (g_EntityClassEventCallbackTable @0x813000, the row @0x813198) -
+    //  `or [esi+24h], 2000000h` @0x441A23]
+    uint32_t live_flags = 0;
     int32_t bound_radius_q16 = 0;   // exact entity+0 boundRadius
     int32_t uniform_scale_q16 = 0;  // entity+0x158/itemDef+0x1B8 effective scale
     FixedVec3 bbox_center_q16;       // entity+0x1FC..+0x204 sun/LOS origin offset
@@ -1330,7 +1352,7 @@ public:
     //  @0x4B3AF6..0x4B3B74, the live dead skip @0x4B3B89..0x4B3B8D, the live reads
     //  @0x4B3B93..0x4B3B99)]
     void set_wire_person_proxy_live(uint16_t wire_handle, const FixedVec3 &position,
-                                    bool dead);
+                                    bool dead, uint32_t live_flags);
     // A decoded pool-1 mover moved after the table was built: its proxy takes the
     // mover's live Position, heading and pitch / roll (a handle no proxy names is
     // ignored), which the next trace's narrow phase reads through the table's entity
@@ -1340,7 +1362,7 @@ public:
     //  @0x4E4CB0]
     void set_wire_dynamic_proxy_live(uint16_t wire_handle, const FixedVec3 &position,
                                      int32_t heading_bam, int32_t pitch_bam,
-                                     int32_t roll_bam);
+                                     int32_t roll_bam, uint32_t live_flags);
     // The decoded person's current proxy (null when none names the handle).
     const WirePersonCollisionProxy *wire_person_proxy(uint16_t wire_handle) const;
     // The decoded pool-1 mover's current proxy (null when none names the

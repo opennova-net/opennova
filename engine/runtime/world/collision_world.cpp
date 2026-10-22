@@ -306,7 +306,7 @@ void CollisionWorld::replace_wire_collision_proxies(
 }
 
 void CollisionWorld::set_wire_person_proxy_live(uint16_t wire_handle,
-        const FixedVec3 &position, bool dead) {
+        const FixedVec3 &position, bool dead, uint32_t live_flags) {
     const auto it = std::lower_bound(wire_person_proxies_.begin(), wire_person_proxies_.end(),
             wire_handle, [](const WirePersonCollisionProxy &proxy, uint16_t handle) {
                 return proxy.wire_handle < handle;
@@ -314,10 +314,12 @@ void CollisionWorld::set_wire_person_proxy_live(uint16_t wire_handle,
     if (it == wire_person_proxies_.end() || it->wire_handle != wire_handle) return;
     it->live_position_q16 = position;
     it->dead = dead;
+    it->live_flags = live_flags;
 }
 
 void CollisionWorld::set_wire_dynamic_proxy_live(uint16_t wire_handle,
-        const FixedVec3 &position, int32_t heading_bam, int32_t pitch_bam, int32_t roll_bam) {
+        const FixedVec3 &position, int32_t heading_bam, int32_t pitch_bam, int32_t roll_bam,
+        uint32_t live_flags) {
     const auto it = std::lower_bound(wire_dynamic_proxies_.begin(), wire_dynamic_proxies_.end(),
             wire_handle, [](const WireDynamicCollisionProxy &proxy, uint16_t handle) {
                 return proxy.wire_handle < handle;
@@ -327,6 +329,7 @@ void CollisionWorld::set_wire_dynamic_proxy_live(uint16_t wire_handle,
     it->heading_bam = heading_bam;
     it->pitch_bam = pitch_bam;
     it->roll_bam = roll_bam;
+    it->live_flags = live_flags;
 }
 
 const WirePersonCollisionProxy *CollisionWorld::wire_person_proxy(uint16_t wire_handle) const {

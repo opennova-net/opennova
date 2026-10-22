@@ -361,6 +361,8 @@ private:
 	void refresh_wire_collision_proxies();
 	void sync_wire_collision_proxies_live();
 	void sync_wire_collision_proxy_live(const replication::ClientEntityState &row);
+	// The live Flags bits a row's proxy carries for the traces' skip (0x2000001).
+	uint32_t wire_proxy_live_flags(const replication::ClientEntityState &row);
 	void apply_gameplay_events();
     void apply_round_event(const replication::ClientRoundEvent &);
 

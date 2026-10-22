@@ -999,6 +999,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                                           static_cast<float>(broad_radius) / io::kFp16One)) {
                 continue;
             }
+            // Past the slot gate, the live Flags: a carried or minefield row is passed
+            // over [orig: Projectile_RaycastProximitySlots @0x4E5340 - the test @0x4E5767].
+            if ((proxy.live_flags & 0x02000001u) != 0) continue;
             if (profile_trace) trace_profile_.dynamic_survivors++;
             CollisionPolygonHit model_hit;
             const CollisionModel *proxy_model = model(proxy.model_id);
@@ -1323,6 +1326,10 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                                 io::kFp16One;
                 if (!round_broad_phase(p0f, p1f, sc, r)) continue;
             }
+            // Past the coarse gate, the live Flags: a carried or minefield row is passed
+            // over [orig: Physics_RaycastAgainstProximityList @0x4E4A30 - the test
+            //  @0x4E4C33].
+            if ((proxy.live_flags & 0x02000001u) != 0) continue;
             if (profile_trace) trace_profile_.person_survivors++;
             ProjectileHit eh;
             int32_t hit_distance = 0;

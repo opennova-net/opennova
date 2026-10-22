@@ -174,7 +174,7 @@ void test_the_projectile_pass_gates_on_the_previous_builds_copy() {
     Joiner j;
     j.collision.replace_wire_collision_proxies({person_at(5, 50)}, {}, kSelfH);
     j.collision.build_tick_tables(j.world);
-    j.collision.set_wire_person_proxy_live(kRemoteH, FixedVec3{5 * kQ, 0, 0}, false);
+    j.collision.set_wire_person_proxy_live(kRemoteH, FixedVec3{5 * kQ, 0, 0}, false, 0);
     j.world.before_proximity_build = [&j] {
         j.collision.replace_wire_collision_proxies({person_at(5, 0)}, {}, kSelfH);
     };
@@ -248,17 +248,71 @@ void test_a_dynamic_proxy_gates_on_the_copy_and_poses_the_live_mover() {
     CHECK(proxy != nullptr && proxy->live_position_q16.x == 12 * kQ);
     CHECK(trace_down_at(12 * kQ).hit_class == ProjectileHitClass::DynamicEntity);
     // The mover drove 8 u on since the build.
-    j.collision.set_wire_dynamic_proxy_live(kHullH, FixedVec3{20 * kQ, 0, 0}, 0, 0, 0);
+    j.collision.set_wire_dynamic_proxy_live(kHullH, FixedVec3{20 * kQ, 0, 0}, 0, 0, 0, 0);
     CHECK(!trace_down_at(12 * kQ).hit());
     CHECK(!trace_down_at(20 * kQ).hit());
     proxy = j.collision.wire_dynamic_proxy(kHullH);
     CHECK(proxy != nullptr && proxy->position_q16.x == 12 * kQ);
     // One unit on: the copy's reach still admits a ray 1.5 u from it, and the faces
     // posed at the live mover take it.
-    j.collision.set_wire_dynamic_proxy_live(kHullH, FixedVec3{13 * kQ, 0, 0}, 0, 0, 0);
+    j.collision.set_wire_dynamic_proxy_live(kHullH, FixedVec3{13 * kQ, 0, 0}, 0, 0, 0, 0);
     const ProjectileHit hit = trace_down_at(13 * kQ + kQ / 2);
     CHECK(hit.hit_class == ProjectileHitClass::DynamicEntity);
     CHECK(hit.surface_type == 7);
+}
+
+// V-ROLL-R's add-on (L5-s16): past the coarse gate both traces read the live entity's Flags
+// and pass over a carried (0x1) or minefield (0x2000000) row. The build skips a bit-0 row,
+// so the live test is what passes over a row that gained a bit after the build.
+// [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (`test [eax+24h], 2000001h`
+//  @0x4E4C33); Projectile_RaycastProximitySlots @0x4E5340 (the test @0x4E5767);
+//  Entity_BuildProximityLists_Pool01 @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4);
+//  Entity_InitHardpoints @0x4417D0 (`or [esi+24h], 2000000h` @0x441A23)]
+void test_a_row_flagged_since_the_build_is_passed_over() {
+    {
+        // A remote person on the rounds' path, carried since the build.
+        Joiner j;
+        j.collision.replace_wire_collision_proxies({person_at(5, 0)}, {}, kSelfH);
+        j.collision.build_tick_tables(j.world);
+        j.collision.set_wire_person_proxy_live(kRemoteH, FixedVec3{5 * kQ, 0, 0}, false,
+                                               kEntityFlagCarried);
+        j.fire();
+        j.world.run_logic_tick(/*is_authority=*/false);
+        CHECK(j.world.round_sim.impacts.empty());
+        j.collision.set_wire_person_proxy_live(kRemoteH, FixedVec3{5 * kQ, 0, 0}, false, 0);
+        j.fire();
+        j.world.run_logic_tick(/*is_authority=*/false);
+        CHECK(j.world.round_sim.impacts.size() == 1);
+    }
+    {
+        // A pool-1 row under a downward ray: struck clear, passed over minefield-marked or
+        // carried.
+        Joiner j;
+        const int32_t model_id = j.collision.add_model(quad_model());
+        WireDynamicCollisionProxy hull;
+        hull.wire_handle = kHullH;
+        hull.model_id = model_id;
+        hull.position_q16 = FixedVec3{12 * kQ, 0, 0};
+        hull.bound_radius_q16 = 3 * kQ;
+        j.collision.replace_wire_collision_proxies({}, {hull}, kSelfH);
+        j.collision.build_tick_tables(j.world);
+        const auto trace_down = [&j]() {
+            ProjectileTrace trace;
+            trace.start = FixedVec3{12 * kQ, 0, 3 * kQ};
+            trace.end = FixedVec3{12 * kQ, 0, -3 * kQ};
+            trace.owner = j.local;
+            trace.include_wire_proxies = true;
+            return j.collision.trace_projectile(j.world, trace);
+        };
+        const FixedVec3 at{12 * kQ, 0, 0};
+        CHECK(trace_down().hit_class == ProjectileHitClass::DynamicEntity);
+        j.collision.set_wire_dynamic_proxy_live(kHullH, at, 0, 0, 0, 0x02000000u);
+        CHECK(!trace_down().hit());
+        j.collision.set_wire_dynamic_proxy_live(kHullH, at, 0, 0, 0, kEntityFlagCarried);
+        CHECK(!trace_down().hit());
+        j.collision.set_wire_dynamic_proxy_live(kHullH, at, 0, 0, 0, 0);
+        CHECK(trace_down().hit_class == ProjectileHitClass::DynamicEntity);
+    }
 }
 
 } // namespace
@@ -269,6 +323,7 @@ int main() {
     test_a_row_spawned_since_the_build_misses_this_updates_projectiles();
     test_the_projectile_pass_gates_on_the_previous_builds_copy();
     test_a_dynamic_proxy_gates_on_the_copy_and_poses_the_live_mover();
+    test_a_row_flagged_since_the_build_is_passed_over();
     if (failures != 0) {
         std::printf("%d check(s) failed\n", failures);
         return 1;

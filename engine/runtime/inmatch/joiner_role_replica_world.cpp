@@ -1181,6 +1181,7 @@ void JoinerRole::refresh_wire_collision_proxies() {
 				// updated after the build carries its own
 				// (sync_wire_collision_proxies_live).
 				proxy.dead = (entity.rm_entity_flags & world::kEntityFlagDead) != 0;
+				proxy.live_flags = wire_proxy_live_flags(entity);
 				person_proxies.push_back(proxy);
 				continue;
 			}
@@ -1219,6 +1220,7 @@ void JoinerRole::refresh_wire_collision_proxies() {
 						world, world::EntityHandle{entity.handle}, entity.type_id,
 						kernel.wire_header_world))
 				proxy.registry_twin = twin->handle;
+			proxy.live_flags = wire_proxy_live_flags(entity);
 			dynamic_proxies.push_back(proxy);
 		}
 	}
@@ -1254,11 +1256,29 @@ void JoinerRole::sync_wire_collision_proxy_live(const replication::ClientEntityS
 	const world::FixedVec3 position{row.x, row.y, row.z};
 	if (row.cls == EntityClass::Player || row.cls == EntityClass::Infantry) {
 		collision->set_wire_person_proxy_live(row.handle, position,
-				(row.rm_entity_flags & world::kEntityFlagDead) != 0);
+				(row.rm_entity_flags & world::kEntityFlagDead) != 0, wire_proxy_live_flags(row));
 	} else if (wire_handle::pool(row.handle) == wire_handle::kPoolItem) {
 		collision->set_wire_dynamic_proxy_live(row.handle, position, row.heading_bam,
-				row.pitch_bam, row.roll_bam);
+				row.pitch_bam, row.roll_bam, wire_proxy_live_flags(row));
 	}
+}
+
+// The live Flags bits both proximity traces pass a row over on (0x2000001): the row's
+// Flags bit 0 (the wire's low byte, the bit the build itself skips), and a pool-1 row's
+// minefield mark, which its twin's lndm class init stamps (world::MinefieldSystem::
+// initialize) (D-NET-196).
+// [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (the test @0x4E4C33);
+//  Projectile_RaycastProximitySlots @0x4E5340 (the test @0x4E5767);
+//  Entity_BuildProximityLists_Pool01 @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4);
+//  Entity_InitHardpoints @0x4417D0 (the mark @0x441A23)]
+uint32_t JoinerRole::wire_proxy_live_flags(const replication::ClientEntityState &row) {
+	uint32_t flags = row.state_flags_known ? (row.state_flags & world::kEntityFlagCarried) : 0u;
+	if (wire_handle::pool(row.handle) == wire_handle::kPoolItem)
+		if (const world::Entity *twin = replication::replica_row_entity(&materializer_,
+					kernel_->world, world::EntityHandle{row.handle}, row.type_id,
+					kernel_->wire_header_world))
+			flags |= twin->engine_flags & 0x02000000u;
+	return flags;
 }
 
 // The World's pool-1 slot leg on a joiner (World::pool1_slot_leg, installed by the pump):

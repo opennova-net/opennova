@@ -205,7 +205,7 @@ void test_trace_gates_on_the_copy_and_walks_the_live_person() {
         j.collision.replace_wire_collision_proxies({proxy}, {}, kSelfH);
         j.collision.build_tick_tables(j.world);
         j.collision.set_wire_person_proxy_live(kRemoteH, FixedVec3{5 * kQ, 0, 0},
-                                               /*dead=*/false);
+                                               /*dead=*/false, /*live_flags=*/0);
         j.fire();
         CHECK(!j.world.round_sim.hit_record.has_round);
         CHECK(j.rows[kRemoteH].last_attacker == 0xFFFF);
@@ -215,7 +215,7 @@ void test_trace_gates_on_the_copy_and_walks_the_live_person() {
         Joiner j(/*self_team=*/1);
         j.remote(/*team=*/2);
         j.collision.set_wire_person_proxy_live(kRemoteH, FixedVec3{5 * kQ, 20 * kQ, 0},
-                                               /*dead=*/false);
+                                               /*dead=*/false, /*live_flags=*/0);
         j.fire();
         CHECK(!j.world.round_sim.hit_record.has_round);
         CHECK(j.rows[kRemoteH].last_attacker == 0xFFFF);
@@ -226,7 +226,7 @@ void test_trace_gates_on_the_copy_and_walks_the_live_person() {
         Joiner j(/*self_team=*/1);
         j.remote(/*team=*/2);
         j.collision.set_wire_person_proxy_live(kRemoteH, FixedVec3{5 * kQ, 0, 0},
-                                               /*dead=*/false);
+                                               /*dead=*/false, /*live_flags=*/0);
         j.fire();
         CHECK(j.world.round_sim.hit_record.has_round);
         CHECK(j.rows[kRemoteH].last_attacker == kSelfH);
