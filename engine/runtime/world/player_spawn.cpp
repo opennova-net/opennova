@@ -191,7 +191,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // damage trigger uses this bit—not local ownership—to bypass NPC move/group alerts.
     // [orig: OrganicClass_HandleEvent test victim Flags,100h @0x4073c8]
     seed.engine_flags |= kEntityFlagPlayer;
-    // entity+0x78: the owning connection's dcb (host loopback dcb / a joiner's 0x48-ack dcb). The
+    // entity+0x78: the owning connection's dcb (host loopback dcb / a joiner's connection's, its MI). The
     // 0x0C organic-spawn carries it so the client self-matches its own player. [orig: Server_PlayerAdd
     // @0x51cbc0 writes entity+0x78 = conn->connection_id; net-re §5.2b]
     seed.owner_connection_id = spawn.owner_connection_id;

@@ -77,12 +77,12 @@ struct HostAcceptEvent {
 	HostJoinerPose pose;                       // valid for PeerEnteredWorldStreaming / PeerSpawned
 	uint32_t self_id = 0;                      // valid for PeerEnteredWorldStreaming / PeerSpawned:
 	                                           // the joiner's own ConnectionId (NapiNPConnection's
-	                                           // connection_id / unk_18 = its dcb), learned from its
-	                                           // in-match 0x48 client-ack. The host MUST stamp this
-	                                           // into the joiner's 0x0C entity_flags (entity+0x78) or
-	                                           // the client's Player_FindLocalPlayerEntity self-scan
-	                                           // fails ("Could not find player dcb"). Witnessed:
-	                                           // working retail join ack==eFlags==3; a guess does not.
+	                                           // connection_id / unk_18 = its dcb): the create's
+	                                           // index the 0x82's MI carried (D-NET-713), never its
+	                                           // 0x48's body (D-NET-NEW-L1-36). The add stamps it
+	                                           // into the joiner's 0x0C entity_flags (entity+0x78),
+	                                           // which the client's Player_FindLocalPlayerEntity
+	                                           // self-scan matches against the MI it stored.
 	std::string peer_name;                     // valid for PeerEnteredWorldStreaming / PeerSpawned:
 	                                           // the joiner's game ClientAuth.NA callsign, streamed
 	                                           // back as the S2C 0x0C organic entity_name (the

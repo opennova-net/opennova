@@ -5080,6 +5080,11 @@ add_test(NAME npruntime_orphan_row_walks COMMAND npruntime_orphan_row_walks_test
 add_executable(npruntime_join_warmup_pose_test npruntime/join_warmup_pose_test.cpp)
 target_link_libraries(npruntime_join_warmup_pose_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_join_warmup_pose COMMAND npruntime_join_warmup_pose_test)
+# D-NET-NEW-L1-36: the host reads nothing from a joiner's C2S 0x48 (retail's handler a bare retn):
+# a 0x48 naming another id moves neither the connection's id nor the body's entity+0x78.
+add_executable(npruntime_host_client_ack_test npruntime/host_client_ack_test.cpp)
+target_link_libraries(npruntime_host_client_ack_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_host_client_ack COMMAND npruntime_host_client_ack_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

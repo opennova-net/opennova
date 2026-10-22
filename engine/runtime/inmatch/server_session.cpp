@@ -289,8 +289,8 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 				config.player_name.empty() ? "???" : config.player_name.substr(0, 63);
 		NapiNPConnection self;
 		self.player_name = name;
-		// The host knows its own ConnectionId locally, so latch self_id_seen (no 0x48 ack arrives
-		// for the loopback); the dcb itself is the twin's index, set at its create below.
+		// The host knows its own ConnectionId locally, so latch self_id_seen at its create; the
+		// dcb itself is the twin's index, set at its create below.
 		self.self_id_seen = true;
 		self.type = 2;          // client-side connection [orig: CNapiNPConnection_Create type 2]
 		self.phase = ConnectionPhase::New; // advanced by the host's own-player spawn flow (P3)

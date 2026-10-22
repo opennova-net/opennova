@@ -253,7 +253,7 @@ using PlayerRowFreeTicks = std::array<int32_t, 256>;
 // found it: `row` holds the row's own words (its body, slot, state word, burst cursors, slot
 // team, spectator latch, squad key, kit, the 1 Hz cooldown); its net-player words are never
 // read from the copy but through the live connection orphan_net_player finds by the net
-// player's identity `row` keeps (net_player_serial, which the 0x48's id re-stamp never moves).
+// player's identity `row` keeps (net_player_serial).
 // Once that connection leaves, retail's +0x1C names a freed net player and its later reads
 // through the row read freed memory; ours reads nothing there, a deliberate fix of a retail
 // bug (the maintainer, 2026-10-21, via main, Q7-36 (a)).

@@ -922,7 +922,9 @@ void JoinerConnection::on_server_auth(
 	conn_.connection_id = sa.mi;  // [orig: 0x82 MI TLV = the host-assigned dcb/ConnectionId; the
 	                              // client stores it on its own NapiNPConnection (+0x18,
 	                              // NapiNP_GetLocalConnectionId @0x4c6d40) and echoes it in the 0x48
-	                              // client-ack so the host stamps it into our 0x0C ownerConnectionId]
+	                              // client-ack, which the host never reads (its handler a bare retn,
+	                              // NapiNPServerMsg_0x048 @0x510F30): the host's add stamps our 0x0C
+	                              // ownerConnectionId from the same index]
 	// The host's CS block overlays this connection's cs_dir0 template: CLIENT-direction
 	// (byte 1) entries land in cs_dir0, the block this connection's pumps read — the reap
 	// (field 0), the teardown burst (1), the empty and active send intervals (4, 5), the

@@ -770,8 +770,9 @@ struct NapiNPConnection {
 	uint32_t admission_padding_y = 0;
 
 	// self_id (the joiner's own ConnectionId / dcb / unk_18) UNIFIES onto connection_id above
-	// (+0x18), the value Player_FindLocalPlayerEntity @0x4e0090 numeric-matches. LAN latches the
-	// host-assigned id after admission 0x02; a later 0x48 echo may restamp it (NovaWorld supplies it).
+	// (+0x18), the value Player_FindLocalPlayerEntity @0x4e0090 numeric-matches: the create's
+	// index, latched as seen at admission 0x02; nothing on the host reads the joiner's 0x48
+	// (D-NET-NEW-L1-36).
 	bool self_id_seen = false;             // true only once player admission has completed
 	// The spawn pump took the node off its pending list, ahead of its add: it walks it again
 	// only once a repeated C2S 0x02 lists it again, whether the add succeeded or failed

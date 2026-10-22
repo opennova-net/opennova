@@ -1239,31 +1239,12 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 	}
 	messages = std::move(semantic_messages);
 
-	// Learn the joiner's own ConnectionId (NapiNPConnection.unk_18 = its dcb, our connection_id)
-	// from its in-match 0x48 client-ack (a 4-byte LE u32). This is the value the client's
-	// Player_FindLocalPlayerEntity @0x4e0090 compares entity+0x78 against, so the host MUST stamp it
-	// into the joiner's 0x0C entity_flags — a guessed sequential id does NOT match (witnessed:
-	// capture2.pcapng ack=0x113F vs our guessed 3 -> crash; the working retail join had
-	// ack==eFlags==3). The ack arrives during the early handshake, before world streaming, so it's
-	// known by the time we stream the 0x0C.
-	for (const ProtocolMessage &m : messages) {
-		if (conn.admission_stage == GameAdmissionStage::Complete &&
-		    m.tag == c2s::CLIENT_ACK && m.payload.size() >= 4) {
-			conn.connection_id = static_cast<uint32_t>(m.payload[0]) |
-					(static_cast<uint32_t>(m.payload[1]) << 8) |
-					(static_cast<uint32_t>(m.payload[2]) << 16) |
-					(static_cast<uint32_t>(m.payload[3]) << 24);
-			conn.self_id_seen = true;
-			// On LAN the ack echoes the host-assigned dcb (no-op); on NovaWorld it carries the
-			// gate-assigned id. If the player was already spawned (World path) with the prior id,
-			// re-stamp entity+0x78 so the joiner still self-matches. [orig: the dcb the client's
-			// Player_FindLocalPlayerEntity @0x4e0090 matches is whatever it adopted as its own]
-			if (ctx.world != nullptr && conn.link.owned_entity.valid()) {
-				if (world::Entity *e = ctx.world->registry.get(conn.link.owned_entity))
-					e->owner_connection_id = conn.connection_id;
-			}
-		}
-	}
+	// A joiner's C2S 0x48 (the MI it stored, 4 bytes) is read by nothing on the host: retail's
+	// server handler is a bare `retn`. The connection's id stays the create's index the 0x82's MI
+	// carried, the one the add copied into the player's entity+0x78 (D-NET-NEW-L1-36).
+	// [orig: the server opcode row @0x82B9B8 -> NapiNPServerMsg_0x048 @0x510F30;
+	//  Server_BuildPlayerInfoAndAdd @0x51D560 - conn->connection_id @0x51D5CB..0x51D5DB;
+	//  Server_PlayerAdd @0x51CBC0 - the entity's ownerConnectionId @0x51D068]
 
 	// Produce the reactive §5.1 replies (handshake / server-info / mission-metadata / loadout /
 	// spawn-confirm) for this datagram's gameplay messages, and cache the joiner's pre-spawn 0x0C pose

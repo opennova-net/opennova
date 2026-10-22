@@ -59,7 +59,8 @@ struct PlayerSpawn {
     bool from_wire_record = false;
     uint16_t min_entity_slot = 0;
     // The owning connection's ConnectionId/dcb -> Entity::owner_connection_id (entity+0x78). The host's
-    // own player carries the host dcb (the loopback connection_id); a joiner carries its 0x48-ack dcb.
+    // own player carries the host dcb (the loopback connection_id); a joiner carries its connection's
+    // (the create's index, the 0x82's MI).
     // [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id]
     uint32_t owner_connection_id = 0;
     // The soldier class (5..9 MP personas; entity+0x294 playerClass). Default 8 (rifleman) — the class
