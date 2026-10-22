@@ -655,6 +655,7 @@ void test_a_borrowed_seat_detach_mounts_the_current_slot() {
 
 		CHECK(world.vehicles.detach(r.requester_h));
 		seen.clear();
+		pump(); // the transition stages the switch back, if any
 		for (int i = 0; i < 32 && local.weapon.usegun_switch != w::LocalUseGunSwitch::kNone; ++i)
 			pump();
 		for (int i = 0; i < 8; ++i) pump();
