@@ -366,6 +366,24 @@ void missing_map_loads_default_adm() {
 	CHECK(h.kernel->adm_id_for_runtime_type(46) == -1); // no map: none
 }
 
+// The boot's own spawn reads its bound row: the load step's traits sweep fills the row
+// table (world.tables.player, item_rows) ahead of the spawn step, as retail resolves every
+// def's rows once at Game_InitSubsystems, ahead of the mission start's round init. The
+// authored Player row's hp 120 is the spawn's ceiling (the seed's fallback is 100, and the
+// later sweep lifts no player body) and its org1 tag the row's class (D-NET-NEW-L4-14 (c)).
+// [orig: EntityDef_InitAllCallbacks @0x4A5A70, called @0x4A71D7; Game_StartMission
+//  @0x524360 - the Server_InitAllPlayerEntitiesForRound call @0x525BAF;
+//  Entity_SpawnFromAnimSlotProperty @0x43C390 - the class init called @0x43C4FE, the raise
+//  @0x43C557..0x43C56B]
+void boot_spawn_reads_its_bound_row(Assets &assets) {
+	Harness h(assets);
+	h.rows[0].hp = 120;
+	h.boot();
+	CHECK(h.kernel->world.tables.player.body_class == w::PlayerBodyClass::kOrganic);
+	CHECK(h.kernel->local.player() != nullptr);
+	CHECK(h.kernel->local.player()->health == 120);
+}
+
 } // namespace
 
 int main() {
@@ -378,6 +396,7 @@ int main() {
 		late_spawn_and_type_resolution(assets);
 		joiner_resolves_empty_registry(assets);
 		missing_map_loads_default_adm();
+		boot_spawn_reads_its_bound_row(assets);
 	} catch (const std::exception &error) {
 		std::fprintf(stderr, "FAIL: %s\n", error.what());
 		return 1;
