@@ -194,10 +194,15 @@ void ClientReplicaPipeline::advance_row_weapon_channel(ClientEntityState &es,
 }
 
 void ClientReplicaPipeline::select_row_weapon_channels(uint16_t self_handle, uint32_t tick) {
-	if (root_motion_ == nullptr) return;
 	for (ClientEntityState &es : state_.entities)
-		if (row_weapon_channel_runs(es, self_handle))
-			row_weapon_channel_select(es, weapon_table_, tick);
+		if (!es.rm_parked) select_row_weapon_channel(es, self_handle, tick);
+}
+
+void ClientReplicaPipeline::select_row_weapon_channel(ClientEntityState &es,
+		uint16_t self_handle, uint32_t tick) {
+	if (root_motion_ == nullptr) return;
+	if (row_weapon_channel_runs(es, self_handle))
+		row_weapon_channel_select(es, weapon_table_, tick);
 }
 
 bool ClientReplicaPipeline::stamp_row_emote(uint16_t handle, uint8_t emote) {

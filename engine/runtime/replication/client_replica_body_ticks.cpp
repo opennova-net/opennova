@@ -22,34 +22,37 @@ void ClientReplicaPipeline::tick_lean_decay() {
 }
 
 void ClientReplicaPipeline::tick_lean_ramp() {
-	for (ClientEntityState &es : state_.entities) {
-		// The on-foot ramp is the player body pass's (the NPC pass ramps none).
-		if (es.cls != EntityClass::Player) continue;
-		// A seated body's pass ends at the mounted site, ahead of the on-foot
-		// ramp: its passenger keys ramp there, ahead of its eye
-		// (tick_seated_body) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
-		// the site selector @0x4B637C..0x4B638F, the passenger ramp
-		// @0x4B6684..0x4B66C3, the eye @0x4B66D9..0x4B68FC].
-		if (es.carrier_handle != wire_handle::kInvalid && es.mount_bone != 0) continue;
-		// Its gates: a ladder contact or a chute (Flags 0x100020; a remote body's
-		// chute bit is the record's, whose low byte bar the dead bit lands on the
-		// row's Flags mirror), the prone latch with none of Flags 0x10A000 (a remote body's
-		// latch is the record's stance store, net_stance_bits bit 0), and the dead
-		// bit, which skips both keys [orig: Entity_UpdateInfantryPlayerBody
-		// @0x4B40E0 - `test eax, 100020h` @0x4B7DA2, the prone_local test
-		// @0x4B7DA9..0x4B7DAD (its derivation @0x4B416C..0x4B4183), the dead test
-		// @0x4B7DAF..0x4B7DB4; NetPacket_SerializePlayerState @0x4C09C0 - the
-		// remote Flags mask 0xFD @0x4C1307..0x4C1311, the stance stores
-		// @0x4C11FD..0x4C1242].
-		if ((es.rm_entity_flags & 0x100020u) != 0u) continue;
-		if ((es.net_stance_bits & 1u) != 0u && (es.rm_entity_flags & 0x10A000u) == 0u)
-			continue;
-		if ((es.rm_entity_flags & world::kEntityFlagDead) != 0u) continue;
-		if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
-			es.lean_angle = io::bam_sub(es.lean_angle, 0x3000000);
-		if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)
-			es.lean_angle = io::bam_add(es.lean_angle, 0x3000000);
-	}
+	for (ClientEntityState &es : state_.entities)
+		if (!es.rm_parked) lean_ramp_row(es);
+}
+
+void ClientReplicaPipeline::lean_ramp_row(ClientEntityState &es) {
+	// The on-foot ramp is the player body pass's (the NPC pass ramps none).
+	if (es.cls != EntityClass::Player) return;
+	// A seated body's pass ends at the mounted site, ahead of the on-foot
+	// ramp: its passenger keys ramp there, ahead of its eye
+	// (tick_seated_body) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+	// the site selector @0x4B637C..0x4B638F, the passenger ramp
+	// @0x4B6684..0x4B66C3, the eye @0x4B66D9..0x4B68FC].
+	if (es.carrier_handle != wire_handle::kInvalid && es.mount_bone != 0) return;
+	// Its gates: a ladder contact or a chute (Flags 0x100020; a remote body's
+	// chute bit is the record's, whose low byte bar the dead bit lands on the
+	// row's Flags mirror), the prone latch with none of Flags 0x10A000 (a remote body's
+	// latch is the record's stance store, net_stance_bits bit 0), and the dead
+	// bit, which skips both keys [orig: Entity_UpdateInfantryPlayerBody
+	// @0x4B40E0 - `test eax, 100020h` @0x4B7DA2, the prone_local test
+	// @0x4B7DA9..0x4B7DAD (its derivation @0x4B416C..0x4B4183), the dead test
+	// @0x4B7DAF..0x4B7DB4; NetPacket_SerializePlayerState @0x4C09C0 - the
+	// remote Flags mask 0xFD @0x4C1307..0x4C1311, the stance stores
+	// @0x4C11FD..0x4C1242].
+	if ((es.rm_entity_flags & 0x100020u) != 0u) return;
+	if ((es.net_stance_bits & 1u) != 0u && (es.rm_entity_flags & 0x10A000u) == 0u)
+		return;
+	if ((es.rm_entity_flags & world::kEntityFlagDead) != 0u) return;
+	if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
+		es.lean_angle = io::bam_sub(es.lean_angle, 0x3000000);
+	if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)
+		es.lean_angle = io::bam_add(es.lean_angle, 0x3000000);
 }
 
 // The remote arms-dip integrator: the exact block AiSystem::infantry_weapon_channel

@@ -803,6 +803,10 @@ struct ClientEntityState {
 	// @0x4B40E0 - the store @0x4B6D44, the read @0x4B6D5B].
 	int32_t rm_aim_word = 0;
 	bool rm_leg_seeded = false;
+	// Parked by the body walk past the own body's slot: the row's visit, its
+	// selection and its lean ramp wait for the after-self leg
+	// (ClientReplicaPipeline::tick_remote_motion_after_self, D-NET-196).
+	bool rm_parked = false;
 	// --- The secondary (upper-body weapon) AnimMap channel, advanced locally
 	// for every armed player row, as retail's client runs it for every player
 	// body: the wire carries no secondary state. The 16-tick selection with

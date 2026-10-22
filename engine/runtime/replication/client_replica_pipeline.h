@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 #include <variant>
 
@@ -135,7 +136,9 @@ public:
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the
 	//  eye @0x4B699F..0x4B6BAB, the ramp @0x4B7DBF / @0x4B7DD6]
 	void tick_lean_decay();
+	// Every visited row's ramp (a row the walk parked ramps after its visit).
 	void tick_lean_ramp();
+	void lean_ramp_row(ClientEntityState &es);
 	void tick_arms_dip();
 	// Wire handles whose compact record was dropped because its carrier could
 	// not be resolved (the retail bail queues a C2S 0x0F entity request); the
@@ -346,7 +349,15 @@ public:
 	//    all four families landed) and skipped here; the row-side chase remains
 	//    for traitless vehicles and lib-only embedders.
 	// No-op unless remote-motion mode is enabled.
+	// With the own-body split on (a joiner, whose own body serves its rings in the
+	// World's entity pass), the walk visits the rows through the own row's pool-0
+	// slot and parks the rest; tick_remote_motion_after_self visits them, with
+	// their selection and lean ramp, once that pass has run the own body. A parked
+	// half the embedder never finished finishes at the next tick's head.
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472]
 	void tick_remote_motion(uint16_t self_handle);
+	void tick_remote_motion_after_self();
+	void set_self_body_split(bool on) { self_body_split_ = on; }
 
 	// The S2C 0x70 table and its received flag. Retail's are process globals that
 	// no session or mission start touches (their writers are the 0x70 handler and
@@ -389,7 +400,9 @@ public:
 	// secondary @0x40B908 before the primary @0x40B94E; the selection
 	// @0x4b5d71..0x4b5ea3]
 	void advance_row_weapon_channel(ClientEntityState &es, uint16_t self_handle);
+	// Every visited row's selection (a row the walk parked waits for its visit).
 	void select_row_weapon_channels(uint16_t self_handle, uint32_t tick);
+	void select_row_weapon_channel(ClientEntityState &es, uint16_t self_handle, uint32_t tick);
 
 	// Recompose every carried row after its carrier's mover has completed. The
 	// ordinary library-only tick_remote_motion path calls this as its final
@@ -750,6 +763,10 @@ private:
 	// A seated player row's body pass (client_replica_motion.cpp): its primary
 	// channel, the seat carry, a passenger's lean keys and the mounted eye.
 	void tick_seated_body(ClientEntityState &es);
+	// One row's whole visit in tick_remote_motion's walk, and the walk's corpse
+	// erase (client_replica_motion.cpp).
+	void visit_remote_row(ClientEntityState &es, uint16_t self_handle, uint32_t rm_key);
+	void erase_expired_remote_rows();
 	void erase_entity_tree(uint16_t root_handle);
 	// Entity_DropCarriedObject over a person carrier's row: the carried flag
 	// leaves it and keeps the carrier's pose for the drop the client runs
@@ -789,6 +806,15 @@ private:
 	std::vector<ReplicaPeerSphere> contact_peer_scratch_;
 	// tick_remote_motion's walk order over state_.entities (reused capacity).
 	std::vector<size_t> walk_order_scratch_;
+	// The own-body split (set_self_body_split): the rows the walk parked past the
+	// own row's slot, in walk order, and the tick they wait in.
+	bool self_body_split_ = false;
+	std::vector<uint16_t> parked_rows_;
+	uint16_t parked_self_ = 0xFFFFu;
+	uint32_t parked_tick_ = 0;
+	// The walk's expired corpses (handle, the def names a decay), erased after
+	// each half's visits.
+	std::vector<std::pair<uint16_t, bool>> remote_motion_expired_;
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
 	ReplicaGroundProbe replica_ground_probe_;
 	ReplicaDefAttribResolver replica_def_attrib_resolver_;

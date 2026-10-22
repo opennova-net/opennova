@@ -438,8 +438,11 @@ void JoinerRole::resolve_row_adm_ids() {
 	infantry_adm_revision_seen_ = kernel.infantry_adm_revision();
 	// The first decoded row may have registered the first usable model map.
 	runtime->view().set_root_motion_source(kernel.root_motion.empty() ? nullptr : &kernel.root_motion);
-	// The rows serve their channels from the ring heads the World's bodies use (D-NET-196).
+	// The rows serve their channels from the ring heads the World's bodies use (D-NET-196),
+	// and the walk parks the rows past the own body's slot for the World's entity pass
+	// (pump: tick_remote_motion_after_self).
 	runtime->view().set_anim_variant_rings(&kernel.world.ai.anim_rings);
+	runtime->view().set_self_body_split(true);
 	// The rows' secondary selection reads the held record's hold kind.
 	runtime->view().set_weapon_table(&kernel.world.tables.weapons);
 }
@@ -872,6 +875,12 @@ void JoinerRole::pump() {
 			/*is_authority=*/false,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
+	// The replica rows past the own body's pool-0 slot take their visits now, after
+	// the World's entity pass ran the own body: retail's pool-0 walk updates every
+	// used slot in slot order, the local body at its own (D-NET-196).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472,
+	//  the +0x1C4 call @0x4C2472]
+	rt.view().tick_remote_motion_after_self();
 	lap.mark(devtools::Slot::SIM_CLIENT_WORLD);
 	// The door callback's C2S 0x1A requests this tick raised, queued in raise
 	// order for the next send boundary (world/doors.cpp carries the witness).

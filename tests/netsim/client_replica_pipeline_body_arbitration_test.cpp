@@ -856,6 +856,72 @@ void test_rows_serve_the_rings_in_slot_order() {
 			"slot 5 serves next: its secondary entry 0, its primary entry 2");
 }
 
+// D-NET-196 (L5-s11 row 3): the own body serves the shared ring heads at its own pool-0
+// slot. Retail's pool-0 walk updates every used slot in slot order with no local-player
+// case; ours serves the own body in the World's entity pass, so a joiner's walk visits
+// the rows through the own row's slot (3, then the own 4) and parks slot 5, with its
+// lean ramp, until the after-self leg runs it behind the own body. Over the three-entry
+// ring: slot 3 serves 2 and 1, the own body 0, slot 5 2 and 1. Slot 5 ahead of the own
+// body (today's order before the split) would have served 0 and 2.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472, the
+//  +0x1C4 call @0x4C2472; AnimMap_UpdateDualChannels @0x40B8C0, the secondary @0x40B908
+//  before the primary @0x40B94E]
+void test_own_body_serves_the_rings_at_its_slot() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	view.set_self_body_split(true);
+	RingBodySource src;
+	opennova::world::AnimVariantRings rings;
+	view.set_root_motion_source(&src);
+	view.set_anim_variant_rings(&rings);
+	static constexpr uint16_t kEarly = 0x0003;
+	static constexpr uint16_t kSelf = 0x0004;
+	static constexpr uint16_t kLate = 0x0005;
+	FrameUpdate fu;
+	fu.anchor_x = 100 << 16;
+	fu.anchor_y = 200 << 16;
+	fu.anchor_z = 10 << 16;
+	fu.flags2 = 0;
+	fu.carried_handle = 0xFFFF;
+	for (const uint16_t handle : {kLate, kSelf, kEarly}) {
+		view.state().upsert(handle).type_id = kPlayerType;
+		FrameUpdateRecord rec;
+		rec.handle = handle;
+		rec.type_id = kPlayerType;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.pos_x_compressed = network_compress_fixedpoint(1 << 16);
+		rec.player.pos_y_compressed = network_compress_fixedpoint(2 << 16);
+		rec.player.pos_z_compressed = network_compress_fixedpoint(0);
+		rec.player.yaw_byte = 0x40;
+		rec.player.anim_state_id = as::kIdle;
+		rec.player.anim_channel_ratio = 0;
+		fu.records.push_back(rec);
+	}
+	view.apply(0x0A, encode_frame_update(fu));
+	for (const uint16_t handle : {kLate, kSelf, kEarly}) view.state().find(handle)->rm_adm_id = 0;
+	view.state().find(kLate)->move_input =
+			static_cast<uint8_t>(world::Entity::kMoveOrderLeanLeft);
+	view.tick_remote_motion(kSelf);
+	view.tick_lean_ramp(); // the embedder's ramp after the walk (ClientRuntime)
+	const ns::ClientEntityState *early = view.state().find(kEarly);
+	const ns::ClientEntityState *late = view.state().find(kLate);
+	expect(early->wpn_variant == 2 && early->rm_state == as::kIdle && early->rm_variant == 1,
+			"slot 3 serves ahead of the own body: its secondary entry 2, its primary entry 1");
+	expect(late->wpn_playing < 0 && late->rm_state < 0 && late->lean_angle == 0,
+			"slot 5 waits past the own body's slot: no visit, no lean ramp yet");
+	// The World's entity pass: the own body's channel serves at its slot.
+	expect(rings.serve(&src, 0, as::kIdle) == 0, "the own body serves entry 0 at slot 4");
+	view.tick_remote_motion_after_self();
+	expect(late->wpn_playing == as::kIdle && late->wpn_variant == 2 &&
+					late->rm_state == as::kIdle && late->rm_variant == 1,
+			"slot 5 serves behind the own body: its secondary entry 2, its primary entry 1");
+	expect(late->lean_angle == -0x3000000, "slot 5's lean ramp closes its own visit");
+	view.tick_remote_motion_after_self();
+	expect(late->lean_angle == -0x3000000, "the after-self leg runs once per walk");
+}
+
 // D-NET-196 (V-ROLL's edge): a dead player row in the air tumbles where the conform
 // selector would decay it: the body pitch and Roll hold on three ticks of four, and
 // on the fourth they ease an eighth toward the tick-phase ramps a and b while the
@@ -896,6 +962,7 @@ int main() {
 	test_seated_row_scrubs_its_body_words();
 	test_row_channels_serve_the_shared_variant_rings();
 	test_rows_serve_the_rings_in_slot_order();
+	test_own_body_serves_the_rings_at_its_slot();
 	test_record_flags_land_on_the_mirror();
 	test_remote_lean_ramp_gates();
 	test_remote_body_conform_chases_the_slope();
