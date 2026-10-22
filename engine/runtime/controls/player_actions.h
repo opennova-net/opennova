@@ -109,8 +109,11 @@ struct PlayerActionPoll {
 	// medic rows and the weapon/seat/scope rows stay silent
 	// [orig: Input_IsBindingActiveForMode @0x497ea0].
 	bool death_screen = false;
-	// A menu screen (INGAME, WEAPON, CMAP) is up: retail runs no input frame
-	// under it, so the poll neither ages a latch nor dispatches. A USE hold
+	// A menu screen (INGAME, WEAPON, CMAP, VEHICLE, or DEATH with its exit
+	// confirmation's word down) is up: retail runs no input frame under it, so
+	// the poll neither ages a latch nor dispatches; DEATH and STAT under their
+	// pass-through word run the whole frame (world::pass_through_close_axis
+	// carries the key witness). A USE hold
 	// latched when the menu opened therefore ends on the first frame after
 	// the close, whose key-state reset reads the key up: the release edge's
 	// mount toggle runs then, unless a seat pick consumed the hold.

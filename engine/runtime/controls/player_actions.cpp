@@ -125,11 +125,12 @@ PlayerActions::PlayerActions() : rows_(std::size(kRows)) {}
 // USE ages before the action rows: LAST frame's hold governs digit swallowing,
 // including a digit arriving on the release frame. A fresh press clears the
 // consumed flag; a shell chord applies after that clear. Every input frame
-// ages the latch and runs the release edge, an inactive one too (the death
-// and stat screens run input frames); only a menu screen runs none
+// ages the latch and runs the release edge, one whose gameplay gate is down
+// too; the death and stat screens run whole input frames while their word
+// holds, and a menu screen with no pass-through word runs none
 // (PlayerActionPoll::menu_open).
-// [orig: Game_ProcessMainFrame @0x52661D and UI_TeardownScene's tail
-//  @0x54E695 (the DEATH / STAT gate dword_2551128), the two callers of
+// [orig: Game_ProcessMainFrame @0x52661D and UI_ProcessMenuScreenFrame's tail
+//  @0x54E695 (the DEATH / STAT word g_MenuInputPassThrough), the two callers of
 //  Input_ProcessFrame]
 // The special-key chain's digit arms, first open wins: the held-USE seat pick,
 // then the Emotes menu, then the Radio menu; a digit an arm takes never

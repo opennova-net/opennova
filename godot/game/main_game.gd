@@ -87,6 +87,9 @@ var _vehicle_menu_presenter: VehicleMenuPresenter
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
 var _command_map_presenter: CommandMapPresenter  # the commander map (cmap.mnu CMAP)
 var _end_round_presenter: EndRoundPresenter  # the MP end-of-round overlay + stat.mnu STAT
+# The key ring under a pass-through screen (DEATH, STAT): the key-downs wait
+# there for the input frame the screen's word lets run (ScreenKeyRing).
+var _screen_keys := ScreenKeyRing.new()
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload the profile only when the mounted game/expansion changes
 var _intro_tail_run := false  # the first menu start's profile save ran
@@ -532,6 +535,15 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
+	# Under a pass-through screen (death.mnu's DEATH, stat.mnu's STAT) the screen's
+	# hotkey scan has seen the key-down already (its presenter's key leg runs
+	# first), and the key waits in the key ring for the input frame the screen's
+	# word lets run, the Escape key's included (ScreenKeyRing carries the witness;
+	# _process drains it). The tools window's interact mode keeps the keyboard.
+	if (_state == State.DEPLOY or _state == State.END_ROUND) \
+			and (not is_dev_tools_open() or _dev_tools.is_game_playing()):
+		_screen_keys.push(key)
+		get_viewport().set_input_as_handled()
 
 
 # The workspace's shell policy. Interact owns the cursor and world click-pick;
@@ -1582,28 +1594,20 @@ func _on_camera_escape() -> void:
 	# hud_toggles.h hud_toggles_escape / hud_round_over_key).
 	if _end_flow.is_round_ended():
 		return
-	# Under the deploy screen (death.mnu's DEATH) the Escape key's action runs only
-	# in the update's pass-through input frame, after the screen's hotkey (LEAVE
-	# MISSION lowers the word, the confirmation's NO raises it;
-	# DeployScreenPresenter.handle_key), and with the screen open it never opens the
-	# in-game menu: a joiner parked at the pick leaves through LEAVE MISSION's YES
-	# (engine world::pass_through_close_axis carries the key witness).
-	var deploy_frame := _state == State.DEPLOY and _deploy_presenter != null \
-			and _deploy_presenter.is_input_pass_through()
-	var input_frame := _state == State.WORLD or deploy_frame
-	# The Escape key's action first resets the input (its Player_ResetLocalInput,
-	# ahead of its spawn gate; engine inmatch::Role::reset_local_input, D-NET-560).
-	# Its Scroll Lock turn-off goes out at the next frame's head (D-NET-563).
-	if input_frame and _world != null and _world.get_sim() != null:
-		if _world.get_sim().escape_input_reset() and _player_presenter != null:
-			_player_presenter.owe_scroll_lock_turn_off()
-	# Then the HUD's escape chain closes one open HUD window first; only with none
-	# open and no menu screen up does the in-game menu open.
-	if input_frame and _hud_presenter != null and _hud_presenter.handle_escape():
+	# Under a pass-through screen (death.mnu's DEATH, stat.mnu's STAT) the Escape
+	# key is the screen's key ring's: its action runs in the input frame the
+	# screen's word lets run, after the screen's hotkey (DEATH's LEAVE MISSION
+	# lowers the word, the confirmation's NO raises it), and with the screen open
+	# it never opens the in-game menu: a joiner parked at the pick leaves through
+	# LEAVE MISSION's YES (ScreenKeyRing and engine world::pass_through_close_axis
+	# carry the witness).
+	if _state == State.DEPLOY or _state == State.END_ROUND:
 		return
-	if _state == State.DEPLOY:
+	# Over live play the HUD's escape chain closes one open HUD window first; only
+	# with none open and no menu screen up does the in-game menu open.
+	if _state == State.WORLD and _run_escape_action():
 		return
-	if _state in [State.WORLD, State.END_ROUND]:
+	if _state == State.WORLD:
 		_pause()
 	elif _state == State.PAUSED or _state == State.ARMORY:
 		resume()
@@ -1611,6 +1615,85 @@ func _on_camera_escape() -> void:
 		_command_map_presenter.close()
 	elif _state == State.VEHICLE and _vehicle_menu_presenter != null:
 		_vehicle_menu_presenter.close()
+
+
+# The Escape key's action (the escape row's case 18): the input reset first (its
+# Player_ResetLocalInput, ahead of its spawn gate; engine
+# inmatch::Role::reset_local_input, D-NET-560), whose Scroll Lock turn-off goes out
+# at the next frame's head (D-NET-563); then the HUD's escape chain, which closes
+# one open HUD window (true) or runs its tail (false: the caller opens the in-game
+# menu only over live play, as the case's menu-screen gate does).
+func _run_escape_action() -> bool:
+	if _world != null and _world.get_sim() != null:
+		if _world.get_sim().escape_input_reset() and _player_presenter != null:
+			_player_presenter.owe_scroll_lock_turn_off()
+	return _hud_presenter != null and _hud_presenter.handle_escape()
+
+
+# Whether the open pass-through screen's word holds, so the update runs the input
+# frame under it: death.mnu's DEATH (its show raises the word, the exit
+# confirmation lowers it and the confirmation's NO raises it again) and stat.mnu's
+# STAT (raised for the whole screen). The frame's dead-player, deploy-overlay and
+# round-over gates are the action head's (engine world::pass_through_close_axis and
+# ScreenKeyRing carry the witness). The tools window's interact mode keeps the
+# input, as it does over live play.
+func _screen_input_frame() -> bool:
+	if _world_load_pending or (is_dev_tools_open() and not _dev_tools.is_game_playing()):
+		return false
+	if _state == State.DEPLOY:
+		return _deploy_presenter != null and _deploy_presenter.is_input_pass_through()
+	if _state == State.END_ROUND:
+		return _end_round_presenter != null and _end_round_presenter.is_input_pass_through()
+	return false
+
+
+# --- The pass-through screens' key ring legs (ScreenKeyRing.drain) -------------
+
+## An open chat line takes the ring's key (the keyboard pass's capture branch).
+func ring_chat_key(key: InputEventKey) -> bool:
+	if _hud_presenter == null or not _hud_presenter.is_chat_capturing():
+		return false
+	_hud_presenter.handle_chat_key(key)
+	return true
+
+
+## The special-key chain over the ring's key, its deploy leg queueing the pick
+## into the drain's events.
+func ring_special_key(key: InputEventKey, events: Array[int]) -> bool:
+	return _hud_presenter != null \
+			and _hud_presenter.handle_special_key(key, _ring_deploy_leg.bind(events))
+
+
+func _ring_deploy_leg(key: InputEventKey, events: Array[int]) -> bool:
+	if _state != State.DEPLOY or _deploy_presenter == null:
+		return false
+	var param := _deploy_presenter.deploy_key_param(key)
+	if param < 0:
+		return false
+	events.append(param)
+	return true
+
+
+## The escape row's event: the Escape action, never the in-game menu (a menu
+## screen is open).
+func ring_escape() -> void:
+	_run_escape_action()
+
+
+## The deploy keys' event 12: the pick.
+func ring_pick(param: int) -> void:
+	if _deploy_presenter != null:
+		_deploy_presenter.send_pick(param)
+
+
+## Whether the event just dispatched reset the input (its Input_ResetAllState):
+## the devices' reset runs now and the drain ends.
+func ring_reset_ran() -> bool:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim == null or not bool(sim.take_input_reset()):
+		return false
+	_reset_key_state()
+	return true
 
 
 ## The quit dialog's yes runs input action 3 inline: the Exit Mission tone, then the
@@ -1659,6 +1742,9 @@ func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
 ## (engine inmatch/session.h Role::reset_all_input_state carries the witness,
 ## UI_CloseMenuScreen @0x54E5E0 tail-calling Input_ResetAllState @0x54E63F).
 func _reset_screen_close_input() -> void:
+	# The reset's key-ring leg (Input_ResetKeyQueue) runs with the close: a
+	# pass-through screen's waiting keys never reach the world (ScreenKeyRing).
+	_screen_keys.clear()
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim != null:
 		sim.reset_all_input_state()
@@ -1669,8 +1755,10 @@ func _reset_screen_close_input() -> void:
 # Every menu screen's close resets the input state: a key held through it
 # reads up until its next key-down and dispatches no release, and a deferred
 # dispatch is dropped (engine controls::KeyStateReset and
-# PlayerActions::clear_key_press_latches carry the witness).
+# PlayerActions::clear_key_press_latches carry the witness); the key ring goes
+# with it (Input_ResetAllState's Input_ResetKeyQueue; ScreenKeyRing).
 func _reset_key_state() -> void:
+	_screen_keys.clear()
 	if _player_presenter != null:
 		_player_presenter.reset_input_state()
 	else:
@@ -1979,8 +2067,9 @@ func _process(delta: float) -> void:
 	_refresh_dev_tools_game_state()
 	# The chat line's keyboard capture for this frame's samplers (the witness
 	# rides ControlsModel.set_keyboard_captured).
-	ControlsBindings.model().set_keyboard_captured(_state == State.WORLD \
-			and _hud_presenter != null and _hud_presenter.is_chat_capturing())
+	ControlsBindings.model().set_keyboard_captured((_state == State.WORLD \
+			or _screen_input_frame()) and _hud_presenter != null \
+			and _hud_presenter.is_chat_capturing())
 	var stats_on: bool = _frame_phase_sampler.begin_shell_control()
 	var probe_enabled := _perf_probe.enabled
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
@@ -2039,24 +2128,37 @@ func _process(delta: float) -> void:
 	var reset_sim: Simulation = _world.get_sim()
 	if reset_sim != null and reset_sim.take_input_reset():
 		_reset_key_state()
+	# Under a pass-through screen whose word holds, the update's input frame drains
+	# the screen's key ring ahead of the frame's sample, so a key its special-key
+	# chain takes never reaches the rows (ScreenKeyRing carries the witness).
+	if _screen_input_frame():
+		_screen_keys.drain(self)
 	# The session banks the frame's measured elapsed wall time, not Godot's
 	# process delta, which Godot caps (GameWorld.take_frame_elapsed_seconds and
 	# engine world::TickAccumulator::bank carry the witness).
 	var frame_elapsed: float = _world.take_frame_elapsed_seconds()
 	var frame_input: MissionFrameInput
 	if _player_presenter != null:
-		var player_live := is_gameplay_input_active()
-		# No input frame runs under the INGAME (pause), WEAPON (armory) or CMAP
-		# (command map) screen (engine controls::PlayerActionPoll::menu_open
-		# carries the witness).
+		# The input frame runs over live play and, under a pass-through screen
+		# (death.mnu's DEATH, stat.mnu's STAT), while the screen's word holds: every
+		# action row then meets the action head's dead-player, deploy-overlay and
+		# round-over gates, and the death screen's binding scan. No input frame runs
+		# under the INGAME (pause), WEAPON (armory), CMAP (command map) or VEHICLE
+		# screen, nor under DEATH's exit confirmation (engine
+		# controls::PlayerActionPoll::menu_open carries the witness). Only live play
+		# captures the mouse.
 		frame_input = _player_presenter.before_world_tick(
-				frame_elapsed, player_live, player_live,
+				frame_elapsed, is_gameplay_input_active(),
+				is_gameplay_input_active() or _screen_input_frame(),
 				_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP
-						or _state == State.VEHICLE)
+						or _state == State.VEHICLE or (_state == State.DEPLOY
+								and not _deploy_presenter.is_input_pass_through()))
 		# The held USE row's armory arm took its open in that poll (engine
 		# controls::PlayerActions, through the sim's press latch); the shell
-		# opens what it names.
-		if _player_presenter.take_use_item_armory_request():
+		# opens what it names, over live play only: the screen open refuses while
+		# another menu screen is up (engine world::pass_through_close_axis carries
+		# the witness).
+		if _player_presenter.take_use_item_armory_request() and _state == State.WORLD:
 			_open_armory()
 		# The vehicle-loadout arm's open (engine controls::PlayerActions; the team
 		# gate in the router): vehicle.mnu VEHICLE over live play.
@@ -2086,7 +2188,7 @@ func _process(delta: float) -> void:
 	if _hud_presenter != null and not skip_hud \
 			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND,
 					State.COMMAND_MAP, State.VEHICLE]:
-		_hud_presenter.tick(is_gameplay_input_active())
+		_hud_presenter.tick(is_gameplay_input_active() or _screen_input_frame())
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
 	_maybe_open_death_menu()

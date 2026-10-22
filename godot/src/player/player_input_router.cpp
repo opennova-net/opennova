@@ -32,6 +32,9 @@ bool scroll_lock_device_turn_off() {
 	return key_lock_device::set(opennova::controls::kVkScroll, false);
 }
 
+// The held USE row's catalog row (useitem; its dispatch code is the action head's key).
+constexpr int kUseItemRow = 44;
+
 // The Num Lock state the process start found, which its exit puts back; the exit runs only
 // once the start leg ran.
 bool s_key_locks_started = false;
@@ -246,6 +249,11 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 		tick_spectating_ = begin_input_frame(rows_sim, p_logic_tick, tick_scripted_look_);
 		queue_row_sample();
 	}
+	// Under a menu screen no input frame runs, so nothing drains the key events:
+	// they wait, in order, for the close's reset (reset_input_state) or, under
+	// DEATH's exit confirmation, for the first input frame after its NO raises
+	// the word (the shell's ScreenKeyRing carries the witness).
+	if (frame_menu_open_) return;
 	// A later paused update of the same frame reads the state the frame left.
 	if (row_samples_.empty()) queue_row_sample();
 	// The drain dispatches every queued state in its order, so a press, its
@@ -381,10 +389,16 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	gate.scroll_lock_on =
 			input_override_.is_null() && !scroll_lock_turned_off_ && scroll_lock_device_on();
 	// The held USE row's arm through the sim's press latch (engine
-	// LocalPlayer::take_use_item_press).
+	// LocalPlayer::take_use_item_press), once its event passed the dispatcher's
+	// head by the row's flags: the deploy overlay, the round-over gate and the
+	// pause word drop it as the dead bit does, under a pass-through screen's
+	// input frame too (engine inmatch::Role::action_head_admits carries the
+	// witness). A dropped press arms nothing.
 	gate.take_use_item_arm = [&action_sim]() {
 		using Arm = opennova::controls::UseItemPressArm;
 		if (action_sim.is_null()) return Arm::kMountChain;
+		if (!action_sim->action_head_admits(opennova::controls::action_code(kUseItemRow)))
+			return Arm::kTaken;
 		switch (action_sim->take_use_item_press()) {
 			case Simulation::USE_ITEM_ARM_MOUNT_CHAIN: return Arm::kMountChain;
 			case Simulation::USE_ITEM_ARM_ARMORY: return Arm::kOpenArmory;

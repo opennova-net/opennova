@@ -27,6 +27,44 @@ const ZONE_ITEMS_FILE := "deploy_spawn_zone_items.def"
 var _overlay: Control = null
 
 
+# The shell's ring legs (MainGame's ring_* legs), trimmed to the deploy screen's:
+# the special-key chain is its deploy leg alone, the Escape action is counted and
+# runs its input reset, and the drain ends at the first reset the sim reports
+# (ScreenKeyRing carries the order; engine world::pass_through_close_axis the
+# witness).
+class DeployRingLegs:
+	extends RefCounted
+	var presenter = null
+	var sim: Simulation = null
+	var picks: Array[int] = []
+	var escapes := 0
+
+	func _init(p_presenter, p_sim: Simulation) -> void:
+		presenter = p_presenter
+		sim = p_sim
+
+	func ring_chat_key(_key: InputEventKey) -> bool:
+		return false
+
+	func ring_special_key(key: InputEventKey, events: Array[int]) -> bool:
+		var param: int = presenter.deploy_key_param(key)
+		if param < 0:
+			return false
+		events.append(param)
+		return true
+
+	func ring_escape() -> void:
+		escapes += 1
+		sim.escape_input_reset()
+
+	func ring_pick(param: int) -> void:
+		picks.append(param)
+		presenter.send_pick(param)
+
+	func ring_reset_ran() -> bool:
+		return bool(sim.take_input_reset())
+
+
 func before_each() -> void:
 	Strings.clear()
 	DeployMenuFixture.stage(self, TMP_DIR, STAGED_FIXTURES)
@@ -274,10 +312,38 @@ func _key_down(keycode: Key) -> InputEventKey:
 	return key
 
 
+# One key-down the way the shell takes it over the screen: the screen's hotkey
+# scan, the key into the ring (unless the hotkey closed the screen), then the
+# frame's input frame, which drains the ring only while the word holds.
+func _ring_key(presenter: DeployPresenter, ring: ScreenKeyRing, legs: DeployRingLegs,
+		keycode: Key) -> void:
+	var key := _key_down(keycode)
+	if presenter.handle_key(key):
+		return
+	ring.push(key)
+	_ring_frame(presenter, ring, legs)
+
+
+# Godot's global Input holds no key a case pressed, nor a modifier: nothing leaks
+# into a later script's rows (the cases here feed synthetic key events, the shell
+# case taps through Input and releases every key).
+func _assert_no_key_held() -> void:
+	for keycode in [KEY_ESCAPE, KEY_X, KEY_SPACE, KEY_ENTER, KEY_CTRL, KEY_SHIFT, KEY_ALT]:
+		assert_false(Input.is_key_pressed(keycode) or Input.is_physical_key_pressed(keycode),
+				"no key stays held: %d" % keycode)
+
+
+# The shell frame's head: the input frame drains the ring under the word.
+func _ring_frame(presenter: DeployPresenter, ring: ScreenKeyRing,
+		legs: DeployRingLegs) -> void:
+	if presenter.is_open() and presenter.is_input_pass_through():
+		ring.drain(legs)
+
+
 # The keys under DEATH (engine world::pass_through_close_axis carries the key
-# witness): the screen's hotkeys run first and the Escape
-# key is always left for the shell's escape leg, which runs the Escape action only
-# under the word and never opens the in-game menu over the screen. Before the
+# witness): the screen's hotkeys run first and the key itself, the Escape key's
+# included, is left for the shell's key ring, whose input frame runs the Escape
+# action only under the word and never opens the in-game menu over the screen. Before the
 # reveal the hidden shroud's LEAVE MISSION takes no key, so the word holds; once
 # revealed, Escape is LEAVE MISSION (the confirmation shows, the word drops, and
 # no input frame takes the deploy keys), then the confirmation's NO (the word
@@ -301,7 +367,7 @@ func test_death_hotkeys_take_escape_and_return_ahead_of_the_input_frame() -> voi
 	assert_true(driver.is_widget_shown(confirm), "LEAVE MISSION shows the confirmation")
 	assert_false(presenter.is_input_pass_through(), "and lowers the word")
 	assert_false(presenter.handle_key(_key_down(KEY_X)),
-			"no input frame runs under the confirmation: the deploy keys wait")
+			"the deploy keys wait in the shell's ring under the confirmation")
 	assert_true(presenter.is_open())
 	assert_false(presenter.handle_key(_key_down(KEY_ESCAPE)))
 	assert_false(driver.is_widget_shown(confirm), "the confirmation's NO hides it")
@@ -313,6 +379,186 @@ func test_death_hotkeys_take_escape_and_return_ahead_of_the_input_frame() -> voi
 	assert_false(presenter.is_open(), "YES closes the in-game screens")
 	assert_signal_emitted(presenter, "closed")
 	assert_signal_emitted(presenter, "exit_confirmed", "then asks the shell for the exit")
+
+
+# The keys under DEATH's exit confirmation (engine world::pass_through_close_axis
+# carries the witness): nothing resets the key ring while the word is down, so a
+# deploy key pressed under the confirmation reaches the first input frame after the
+# NO and sends its pick, a mouse NO's frame or an Escape NO's alike. Under the Escape
+# NO the X's event queues ahead of the NO's own Escape event, and the pick's input
+# reset drops it: no Escape action runs.
+func test_a_deploy_key_under_the_exit_confirmation_picks_after_the_no() -> void:
+	DeployMenuFixture.stage(self, TMP_DIR, STAGED_FIXTURES, true)
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	assert_true(presenter.open(), "a pending pick opens the screen")
+	await _await_refresh(pair)
+	var driver := presenter.get_menu_driver()
+	var ring := ScreenKeyRing.new()
+	var legs := DeployRingLegs.new(presenter, pair.joiner)
+	# LEAVE MISSION by mouse: the confirmation shows and the word drops.
+	driver.activate(driver.widget_id("HIDDEN_BACK"))
+	assert_false(presenter.is_input_pass_through(), "the confirmation lowers the word")
+	_ring_key(presenter, ring, legs, KEY_X)
+	assert_eq(ring.size(), 1, "the X waits in the ring under the confirmation")
+	assert_true(legs.picks.is_empty(), "no input frame runs while the word is down")
+	for _i in range(30):
+		pair.host.step()
+		pair.joiner.step()
+		OS.delay_msec(2)
+	assert_true(pair.joiner.is_join_deploy_pick_pending(), "so nothing reaches the host")
+	# The NO by Escape: its hotkey raises the word, and its key joins the ring
+	# behind the X.
+	_ring_key(presenter, ring, legs, KEY_ESCAPE)
+	assert_true(presenter.is_input_pass_through(), "the Escape NO raises the word")
+	assert_eq(ring.size(), 0, "the frame's input frame drained the ring")
+	assert_eq(legs.picks.size(), 1, "the waiting X queued its pick")
+	assert_eq(legs.escapes, 0, "and the pick's input reset dropped the NO's Escape event")
+	var released := false
+	for _i in range(800):
+		pair.host.step()
+		pair.joiner.step()
+		if not pair.joiner.is_join_deploy_pick_pending():
+			released = true
+			break
+		OS.delay_msec(2)
+	assert_true(released, "the held X's C2S 0x0E reaches the host, which releases the hold")
+	_assert_no_key_held()
+
+
+# The mouse NO's face: the X pressed under the confirmation waits for the frame
+# after a NO clicked with the mouse, then sends its pick.
+func test_a_deploy_key_under_the_exit_confirmation_picks_after_a_mouse_no() -> void:
+	DeployMenuFixture.stage(self, TMP_DIR, STAGED_FIXTURES, true)
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	assert_true(presenter.open(), "a pending pick opens the screen")
+	await _await_refresh(pair)
+	var driver := presenter.get_menu_driver()
+	var ring := ScreenKeyRing.new()
+	var legs := DeployRingLegs.new(presenter, pair.joiner)
+	driver.activate(driver.widget_id("HIDDEN_BACK"))
+	_ring_key(presenter, ring, legs, KEY_X)
+	assert_true(legs.picks.is_empty(), "the X waits under the confirmation")
+	driver.activate(driver.widget_id("CONFIRM_NO"))
+	assert_true(presenter.is_input_pass_through(), "the mouse NO raises the word")
+	_ring_frame(presenter, ring, legs)
+	assert_eq(legs.picks.size(), 1, "the next input frame sends the waiting X's pick")
+	assert_eq(legs.escapes, 0)
+	_assert_no_key_held()
+
+
+# The stale Escape's face: Escape is LEAVE MISSION's hotkey and its key still waits
+# in the ring, so after a NO clicked with the mouse the first input frame runs the
+# Escape action once (its case resets the input); two Escapes, LEAVE MISSION then
+# the NO, also run it once, the first one's reset dropping the second.
+func test_a_stale_leave_mission_escape_runs_the_escape_action_once() -> void:
+	DeployMenuFixture.stage(self, TMP_DIR, STAGED_FIXTURES, true)
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	assert_true(presenter.open(), "a pending pick opens the screen")
+	await _await_refresh(pair)
+	var driver := presenter.get_menu_driver()
+	var ring := ScreenKeyRing.new()
+	var legs := DeployRingLegs.new(presenter, pair.joiner)
+	_ring_key(presenter, ring, legs, KEY_ESCAPE)
+	assert_false(presenter.is_input_pass_through(), "Escape is LEAVE MISSION: the word drops")
+	assert_eq(ring.size(), 1, "and the Escape waits in the ring")
+	assert_eq(legs.escapes, 0, "no input frame took it")
+	driver.activate(driver.widget_id("CONFIRM_NO"))
+	_ring_frame(presenter, ring, legs)
+	assert_eq(legs.escapes, 1, "the mouse NO's frame runs the stale Escape's action once")
+	_ring_key(presenter, ring, legs, KEY_ESCAPE)
+	assert_false(presenter.is_input_pass_through(), "LEAVE MISSION again")
+	_ring_key(presenter, ring, legs, KEY_ESCAPE)
+	assert_true(presenter.is_input_pass_through(), "the Escape NO raises the word")
+	assert_eq(legs.escapes, 2, "the two Escapes run one action: its reset drops the other")
+	assert_true(legs.picks.is_empty())
+	assert_true(presenter.is_open())
+	_assert_no_key_held()
+
+
+# The shell leg (MainGame over its key ring): under DEATH's word the shell runs
+# the input frame, whose special-key chain takes the deploy keys; Escape there is
+# the ring's and never opens the in-game menu; under the confirmation a key waits
+# for the frame after the NO, where a stale LEAVE MISSION Escape's action resets
+# the input ahead of a waiting X, so only a later X picks. Every key is tapped
+# (pressed, then released), so none stays held.
+func test_the_shell_runs_the_death_screens_input_frame_over_its_key_ring() -> void:
+	DeployMenuFixture.stage(self, TMP_DIR, STAGED_FIXTURES, true)
+	var pair := _join_pair_with_pending_pick()
+	var shell: MainGame = await WorldFixture.boot_shell(self)
+	var shell_dir := WorldFixture.last_shell_dir()
+	if shell == null:
+		TestFs.remove_dir_recursive(shell_dir)
+		return
+	var loaded: bool = await WorldFixture.start_shell_mission(self, shell)
+	assert_true(loaded, "the minimal mission loads through the real front end")
+	if loaded:
+		await _shell_death_screen_keys(pair, shell)
+	_assert_no_key_held()
+	await WorldFixture.release_shell(self, shell)
+	TestFs.remove_dir_recursive(shell_dir)
+
+
+func _shell_death_screen_keys(pair: Dictionary, shell: MainGame) -> void:
+	var deploy_host := shell.get_deploy_presenter()
+	var view := PresenterFixture.FakeWorldView.new()
+	view.root = PresenterFixture.root_over(self, TMP_DIR)
+	view.sim_value = pair.joiner
+	deploy_host.setup(view, shell.get_node("HUD"))
+	assert_true(deploy_host.open(), "the shell's deploy screen opens over the owed pick")
+	await _await_refresh(pair)
+	await get_tree().process_frame
+	assert_eq(shell.shell_state_name(), "deploy")
+	var driver := deploy_host.get_menu_driver()
+	# Escape: LEAVE MISSION's hotkey, its key into the ring; never the in-game menu.
+	await _tap_key(KEY_ESCAPE)
+	assert_eq(shell.shell_state_name(), "deploy", "Escape opens no in-game menu over DEATH")
+	assert_false(deploy_host.is_input_pass_through(), "LEAVE MISSION lowered the word")
+	# X under the confirmation waits; the mouse NO's frame runs the stale Escape's
+	# action first, whose reset drops the X's pick.
+	await _tap_key(KEY_X)
+	driver.activate(driver.widget_id("CONFIRM_NO"))
+	assert_true(deploy_host.is_input_pass_through())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	for _i in range(40):
+		pair.host.step()
+		pair.joiner.step()
+		OS.delay_msec(2)
+	assert_true(pair.joiner.is_join_deploy_pick_pending(),
+			"the Escape action's reset dropped the waiting X's pick")
+	# Under the word a fresh X is the special-key chain's: its pick reaches the host.
+	await _tap_key(KEY_X)
+	var released := false
+	for _i in range(800):
+		pair.host.step()
+		pair.joiner.step()
+		if not pair.joiner.is_join_deploy_pick_pending():
+			released = true
+			break
+		OS.delay_msec(2)
+	assert_true(released, "the shell's input frame sent the X's C2S 0x0E")
+
+
+# One key tap through the process input path (the shell's _input and
+# _unhandled_key_input), with frames between the press and the release.
+func _tap_key(keycode: Key) -> void:
+	var down := InputEventKey.new()
+	down.keycode = keycode
+	down.physical_keycode = keycode
+	down.pressed = true
+	Input.parse_input_event(down)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var up := InputEventKey.new()
+	up.keycode = keycode
+	up.physical_keycode = keycode
+	up.pressed = false
+	Input.parse_input_event(up)
+	await get_tree().process_frame
+	await get_tree().process_frame
 
 
 # The MAP window (hud-re D-HUD-19): the presenter mounts the windowed map view
@@ -462,10 +708,11 @@ func test_initial_overlay_space_sends_default_spawn_selection() -> void:
 	watch_signals(presenter)
 	assert_true(presenter.open(), "the pending deploy UI opens")
 	assert_true(pair.joiner.is_join_deploy_pick_pending(), "a pick is owed")
-	var key := InputEventKey.new()
-	key.keycode = KEY_X
-	key.pressed = true
-	presenter.get_viewport().push_input(key)
+	var legs := DeployRingLegs.new(presenter, pair.joiner)
+	_ring_key(presenter, ScreenKeyRing.new(), legs, KEY_X)
+	assert_eq(legs.picks.size(), 1, "X queues one pick")
+	assert_eq(legs.picks[0] if not legs.picks.is_empty() else -1, 0,
+			"the default spawn's")
 	await get_tree().process_frame
 	assert_true(presenter.is_open(),
 			"with a pick owed, X never closes the screen ahead of the host's release")
@@ -484,10 +731,8 @@ func test_initial_overlay_space_sends_default_spawn_selection() -> void:
 	var overlay_presenter := _make_presenter(pair2.joiner)
 	watch_signals(overlay_presenter)
 	assert_true(overlay_presenter.open(), "the overlay opens without a pick")
-	var space := InputEventKey.new()
-	space.keycode = KEY_SPACE
-	space.pressed = true
-	overlay_presenter.get_viewport().push_input(space)
+	_ring_key(overlay_presenter, ScreenKeyRing.new(),
+			DeployRingLegs.new(overlay_presenter, pair2.joiner), KEY_SPACE)
 	await get_tree().process_frame
 	assert_false(overlay_presenter.is_open(),
 			"SPACE selects the default spawn and closes the initial overlay")
@@ -722,10 +967,7 @@ func test_the_listen_host_deploys_its_own_player_through_the_deploy_map() -> voi
 	assert_false(host.take_death_menu_open(false), "the open latch holds")
 	var presenter := _make_presenter(host)
 	assert_true(presenter.open(), "the overlay opens the host's deploy screen")
-	var space := InputEventKey.new()
-	space.keycode = KEY_SPACE
-	space.pressed = true
-	presenter.get_viewport().push_input(space)
+	_ring_key(presenter, ScreenKeyRing.new(), DeployRingLegs.new(presenter, host), KEY_SPACE)
 	await get_tree().process_frame
 	assert_false(presenter.is_open(), "SPACE sends the auto pick and closes the overlay")
 	var released := false
@@ -764,10 +1006,8 @@ func test_the_listen_host_deploys_its_own_player_through_the_deploy_map() -> voi
 	assert_true(host.is_local_player_dead(), "the expired hold redeploys nothing")
 	var death_presenter := _make_presenter(host)
 	assert_true(death_presenter.open(), "the death opens the host's deploy screen")
-	var x_key := InputEventKey.new()
-	x_key.keycode = KEY_X
-	x_key.pressed = true
-	death_presenter.get_viewport().push_input(x_key)
+	_ring_key(death_presenter, ScreenKeyRing.new(), DeployRingLegs.new(death_presenter, host),
+			KEY_X)
 	await get_tree().process_frame
 	assert_true(death_presenter.is_open(), "a death re-pick keeps the screen until the release")
 	var respawned := false

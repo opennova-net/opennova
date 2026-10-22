@@ -1057,9 +1057,13 @@ func handle_chat_key(key: InputEventKey) -> bool:
 ## One key-down over live play through the special-key chain (engine
 ## hud_toggles.h): the quit dialog's keys first; unless the dialog took the
 ## chain, the Tab board's page keys, then the status page's Enter / PgUp /
-## PgDn; then the help and briefing pages. A key a leg takes never reaches
-## the action rows (ControlsModel.consume_key_press); true = consumed.
-func handle_special_key(key: InputEventKey) -> bool:
+## PgDn; then the deploy keys (`deploy_leg`, the death screen's: it queues the
+## pick and answers whether it took the key); then the help and briefing pages.
+## A key a leg takes never reaches the action rows
+## (ControlsModel.consume_key_press); true = consumed. The deploy leg's place
+## in the chain is the engine's witness (hud_toggles.h HudDeployKeyInput and
+## world::pass_through_close_axis).
+func handle_special_key(key: InputEventKey, deploy_leg := Callable()) -> bool:
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim == null:
 		return false
@@ -1081,6 +1085,8 @@ func handle_special_key(key: InputEventKey) -> bool:
 		elif _toggles.server_status_page_key(vk, in_session, _authority(sim),
 				_mp_session_peer(sim)):
 			taken = true
+	if not taken and deploy_leg.is_valid() and deploy_leg.call(key):
+		taken = true
 	if not taken and page_key:
 		taken = handle_page_key(key.keycode == KEY_PAGEDOWN, false)
 	if taken:

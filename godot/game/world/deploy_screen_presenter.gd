@@ -224,36 +224,44 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 ## One key-down over the open screen, in the original's order (engine
 ## world::pass_through_close_axis carries the key witness): the menu's
-## keyboard hook runs the screen's hotkeys first (death.mnu's LEAVE MISSION and
-## the confirmation's NO on Escape, its YES on Return), whose click lands ahead
-## of the pass-through test; then, only while the word holds, the input frame
-## takes the key: the deploy keys here, the Escape key's action in the shell
-## (MainGame's escape leg). True when the key is taken here; an Escape never is,
-## so the shell's escape leg sees it.
+## keyboard hook runs the screen's hotkeys at once (death.mnu's LEAVE MISSION
+## and the confirmation's NO on Escape, its YES on Return), whose click lands
+## ahead of the pass-through test; the key itself waits in the shell's key ring
+## for the input frame the word lets run (ScreenKeyRing), the Escape key and a
+## key under the exit confirmation alike. True only when the hotkey closed the
+## screen (the confirmation's YES): the close resets the ring, so the key
+## reaches nothing else.
 func handle_key(key: InputEventKey) -> bool:
 	if not is_open() or key == null or not key.pressed or key.echo:
 		return false
-	var hotkey := _driver != null and _driver.handle_key_input(key)
-	if key.keycode == KEY_ESCAPE:
+	if _driver == null or not _driver.handle_key_input(key):
 		return false
-	if not is_open() or not _input_pass_through:
-		return hotkey
-	# The deploy keys (X, SPACE, a team zone's letter) queue the pick while the
-	# player is dead or the overlay is up: the engine's rule picks the event-12
-	# parameter (Simulation.deploy_key_pick). Like a list select, the initial
-	# overlay closes on the send and a death re-pick keeps the screen until the
-	# host releases the hold.
+	return not is_open()
+
+
+## The special-key chain's deploy leg over the open screen: the deploy keys (X,
+## SPACE, a team zone's letter) queue the pick (input event 12) while the player
+## is dead or the overlay is up, the engine's rule picking the event's parameter
+## (Simulation.deploy_key_pick). The parameter, or -1 when the key is not the
+## leg's.
+func deploy_key_param(key: InputEventKey) -> int:
+	var sim: Simulation = _view.sim() if _view != null else null
+	if not is_open() or key == null or sim == null:
+		return -1
+	# The handler compares Windows VK codes, which follow the key's label.
+	return int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
+
+
+## The queued pick's dispatch (case 12): like a list select, the initial overlay
+## closes on the send and a death re-pick keeps the screen until the host
+## releases the hold.
+func send_pick(param: int) -> void:
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
-		return hotkey
-	# The handler compares Windows VK codes, which follow the key's label.
-	var param := int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
-	if param < 0:
-		return hotkey
+		return
 	var initial_overlay := _initial_overlay(sim)
 	if sim.send_deployment_pick(param) and initial_overlay:
 		close()
-	return true
 
 
 func teardown() -> void:

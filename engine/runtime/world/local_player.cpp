@@ -752,8 +752,14 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	// word clears and MoveOrder keeps only its stance bits (the X axis word's
 	// clear rides the pack below). A menu screen open skips the input pass and
 	// this freeze with it, and the STAT and DEATH (deploy) screens run the
-	// pass without the freeze; the shell feeds no keys behind any of them, so
-	// the ungated freeze leaves the same empty word.
+	// pass without the freeze. The freeze here is ungated: under those two
+	// screens the shell feeds the frame's keys, but the action head drops every
+	// movement and look row there (the dead operand, the deploy overlay, the
+	// round-over gate), and the death screen's spectator, alive and with neither
+	// up, latches nothing there: the latch is a live body's USE press in an
+	// armory volume, which the key's release clears, and the death screen's
+	// binding scan never admits that row. So the word the freeze would clear is
+	// empty there.
 	// [orig: Game_ProcessMainFrame -- the menu test @0x52660D..0x526614,
 	//  Input_ProcessFrame @0x52661D, the block @0x526625..0x526679: the latch
 	//  test @0x526625, g_InputFlags = 0 @0x526632, MoveOrder (entity+0x12C)
