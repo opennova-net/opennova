@@ -102,8 +102,10 @@ void Simulation::install_item_catalog() {
 
 void Simulation::install_character_registry() {
 	if (!runtime_) return;
+	// A mounted table installs even when empty: its fallback packs 0, as retail's empty
+	// table does (engine ClientReplicaPipeline::resolve_player_net_id carries the witness).
 	runtime_->view().set_character_registry(
-			assets_.character_registry.empty() ? nullptr : &assets_.character_registry);
+			assets_.character_registry_mounted ? &assets_.character_registry : nullptr);
 }
 
 void Simulation::install_charattr_table() {
@@ -161,6 +163,7 @@ int Simulation::set_character_avatar_database(
 		const Ref<AvatarDatabase> &p_avatar_db) {
 	assets_.character_sex_rows.clear();
 	assets_.character_registry = opennova::inmatch::CharacterRegistry{};
+	assets_.character_registry_mounted = p_avatar_db.is_valid();
 	if (p_avatar_db.is_valid()) {
 		for (const AvatarDatabase::CharacterSexRow &row :
 				p_avatar_db->character_sex_rows())

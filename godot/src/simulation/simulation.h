@@ -508,8 +508,8 @@ private:
 	// Install the retained Avatars.def registry (assets_.character_registry) on
 	// runtime_'s view: a player row's NetId the table lacks takes its side's first
 	// combo (engine ClientReplicaPipeline::set_character_registry, D-NET-NEW-L2-27);
-	// none with no table mounted. Called from set_character_avatar_database, the
-	// boot's role hook, and enable_join.
+	// a mounted empty table installs too (it packs 0), none with no table mounted.
+	// Called from set_character_avatar_database, the boot's role hook, and enable_join.
 	void install_character_registry();
 	// Install the retained boot charattr table on the current Joiner runtime.
 	void install_charattr_table();

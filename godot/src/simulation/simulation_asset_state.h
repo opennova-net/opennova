@@ -71,6 +71,9 @@ struct SimulationAssetState {
 	// The same table's combos, which the host's player add validates each side's
 	// character id against (D-NET-137); empty without an Avatars.def.
 	opennova::inmatch::CharacterRegistry character_registry;
+	// An Avatars.def is mounted (loaded, empty or not): its registry, empty too, is the
+	// joiner's decode table (Simulation::install_character_registry).
+	bool character_registry_mounted = false;
 	// The installed script program. Held as a shared_ptr so it survives
 	// reset_world(); each (re)load re-applies it onto the fresh kernel
 	// WacSystem when the kernel's own layered load installed none.

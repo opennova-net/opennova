@@ -205,9 +205,11 @@ std::string lan_discovery_row_label(const std::string &server_name, const std::s
 //  enumerator+0x1C @0x4C9FCB, the removed callback +0x20 @0x4C9FE2; Nwu_HandleServerHello
 //  @0x626D20 - NapiNPEnumerator_FindSessionByAddress (the call @0x627667), the HK test
 //  @0x627917, String_ExactMatch over the SN @0x627928, the stamp in place @0x627E34;
-//  the replace NapiNPTimer_Destroy (the call @0x627941) -> NapiNPSession_Create (the
-//  call @0x627947), the new record's stamp @0x627BA6 and callback @0x627BAC..0x627BD4;
-//  NapiNPSession_Create @0x624540 - the id counter @0x624704..0x624710;
+//  a sender's first record NapiNPSession_Create (the call @0x62767E), its callback
+//  @0x6278D7..0x627903; the replace NapiNPTimer_Destroy (the call @0x627941) ->
+//  NapiNPSession_Create (the call @0x627947), stamped again @0x627BA6, its callback
+//  @0x627BAC..0x627BD4; NapiNPSession_Create @0x624540 - the stamp +0xB0C @0x6245AE,
+//  the id counter @0x624704..0x624710;
 //  NapiNPTimer_Destroy @0x621E50 - the removed callback @0x621E5D..0x621E6F;
 //  CNapiNetwork_OnSessionDiscovered @0x4C8470 - NetPacket_ValidateChannelType
 //  @0x4C84A3..0x4C84BA, the node by the record's id @0x4C84CB, alloc @0x4C84D5;

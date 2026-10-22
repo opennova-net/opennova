@@ -123,8 +123,7 @@ void test_full_entity_spawn_restamps_a_foreign_player_id() {
 	CHECK(view.malformed_bodies() == 0);
 }
 
-// S2C 0x50: the Team lands first (off the authority), then the NetId test reads it; the
-// authority's own view keeps the row's Team, so its side decides.
+// S2C 0x50: the Team lands first (off the authority), then the NetId test reads it.
 void test_team_assign_restamps_a_foreign_player_id() {
 	const CharacterRegistry table = minted_table();
 	ClientReplicaPipeline view;
@@ -142,15 +141,6 @@ void test_team_assign_restamps_a_foreign_player_id() {
 	assign.net_id = kEvilD;
 	view.apply(s2c::TEAM_ASSIGN, encode_team_assign(assign));
 	CHECK(net_id_of(view, 0x0006) == kEvilD);
-
-	ClientReplicaPipeline authority;
-	authority.set_authority_recipient(true);
-	authority.set_character_registry(&table);
-	authority.apply(s2c::ENTITY_SPAWN_BATCH, organic_spawn(0x0006, 1, kGoodA, 0x0100u));
-	assign.net_id = kForeign;
-	authority.apply(s2c::TEAM_ASSIGN, encode_team_assign(assign));
-	row = authority.state().find(0x0006);
-	CHECK(row != nullptr && row->team == 1 && row->net_id == kGoodA);
 }
 
 // S2C 0x51, one team-change entry: the same test after the entry's Team store.

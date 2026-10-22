@@ -199,10 +199,13 @@ void LanDiscoveryBrowser::drain_records() {
 }
 
 void LanDiscoveryBrowser::create_record(const PeerAddr &from, LanDiscoveryServer server) {
-	// [orig: NapiNPSession_Create @0x624540 - appended at the enumerator list's tail
-	//  @0x6246DA..0x624701, the id `if (counter++ == -1) counter = 1` @0x624704..0x62470A,
-	//  stored @0x624710; Nwu_HandleServerHello @0x626D20 - the stamp @0x627BA6, the
-	//  discovered callback while +0x25 is clear @0x627BAC..0x627BD4]
+	// [orig: NapiNPSession_Create @0x624540 - the stamp GetTickCount into +0xB0C
+	//  @0x6245AE, appended at the enumerator list's tail @0x6246DA..0x624701, the id
+	//  `if (counter++ == -1) counter = 1` @0x624704..0x62470A, stored @0x624710;
+	//  Nwu_HandleServerHello @0x626D20 - a sender's first record: the Create call
+	//  @0x62767E, the discovered callback while +0x25 is clear @0x6278D7..0x627903; a
+	//  replacement: the Create call @0x627947, stamped again @0x627BA6, the callback
+	//  @0x627BAC..0x627BD4]
 	Record record;
 	if (++record_ids_ == 0) record_ids_ = 1;
 	record.id = record_ids_;
