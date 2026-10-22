@@ -617,7 +617,9 @@ void MissionAudio::advance_dialog_tick() {
 		return;
 	}
 	sim->tick_dialog_queue(rendered,
-			[this](const opennova::audio::DialogLineRef &p_line) { return _load_dialog_line(p_line); },
+			[this](const opennova::audio::DialogLineRef &p_line, bool p_play) {
+				return _load_dialog_line(p_line, p_play);
+			},
 			[this](uint64_t p_voice) { return _dialog_voice_playing(p_voice); });
 }
 
@@ -678,11 +680,12 @@ AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const Ref<AudioStreamWAV> &
 
 // A line the dialog queue loads: its wave read and decoded through the VFS (a
 // missing .wav extension tolerated), what the game's wave loader records of it
-// for the line's hold (runtime/audio/dialog_queue dialog_clip_hold) and a voice of
-// the dialog channel at the wave's volume byte. The authority's leg (its chat
-// lines and the co-op broadcast) runs after it in the engine
-// (Simulation::tick_dialog_queue; docs/audio/lwf-dbf-sound-re.md D-SND-42).
-opennova::audio::DialogClip MissionAudio::_load_dialog_line(const opennova::audio::DialogLineRef &p_line) {
+// for the line's hold (runtime/audio/dialog_queue dialog_clip_hold) and, when the
+// engine's gate lets it play, a voice of the dialog channel at the wave's volume
+// byte. The authority's leg (its chat lines and the co-op broadcast) runs after it
+// in the engine (Simulation::tick_dialog_queue; docs/audio/lwf-dbf-sound-re.md D-SND-42).
+opennova::audio::DialogClip MissionAudio::_load_dialog_line(
+		const opennova::audio::DialogLineRef &p_line, bool p_play) {
 	opennova::audio::DialogClip clip;
 	if (!p_line.file.empty() && root_attached_ && resource_root_.is_valid()) {
 		const String name = opennova::to_gd(p_line.file).get_file();
@@ -697,6 +700,7 @@ opennova::audio::DialogClip MissionAudio::_load_dialog_line(const opennova::audi
 			clip.loaded = true;
 			clip.samples = decoded.loader_samples;
 			clip.pitch_q16 = decoded.loader_pitch_q16;
+			if (!p_play) return clip;
 			if (AudioStreamPlayer *voice = _spawn_dialog_voice(WavLoader::from_pcm(decoded), p_line.volume)) {
 				dialog_voice_id_ = ObjectID(voice->get_instance_id());
 				clip.voice = static_cast<uint64_t>(voice->get_instance_id());

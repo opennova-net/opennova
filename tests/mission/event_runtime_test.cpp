@@ -1750,7 +1750,7 @@ static void test_player_dialog_triggers() {
     // 48 ticks); one without loads none.
     std::vector<uint64_t> live;
     uint64_t next_voice = 1;
-    const auto load = [&](const audio::DialogLineRef &line) {
+    const auto load = [&](const audio::DialogLineRef &line, bool) {
         audio::DialogClip clip;
         if (line.file.empty()) return clip;
         clip.loaded = true;
@@ -1766,7 +1766,9 @@ static void test_player_dialog_triggers() {
         return false;
     };
     const auto dialog_ticks = [&](int n) {
-        for (int i = 0; i < n; ++i) w.script.dialog.tick(true, load, playing);
+        // The shipped DialogueLevel (Config_SetDefaults' 192): the lines play.
+        constexpr int32_t kDialogueLevel = 192;
+        for (int i = 0; i < n; ++i) w.script.dialog.tick(true, kDialogueLevel, load, playing);
     };
 
     CHECK(sys.evaluate_trigger_for_test(w, done));      // never played: no slot

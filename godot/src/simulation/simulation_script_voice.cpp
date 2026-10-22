@@ -1,6 +1,7 @@
 #include "simulation/simulation.h"
 #include "util/axes.h"
 
+#include <formats/gamecfg/game_cfg.h>  // gamecfg::defaults (DialogueLevel)
 #include <runtime/inmatch/host_role.h> // HostRole::dialog_line_loaded
 #include <runtime/mission/mission_kernel.h>
 
@@ -33,9 +34,15 @@ void Simulation::tick_dialog_queue(bool p_frame_rendered,
         const opennova::audio::DialogQueue::LoadLine &p_load,
         const opennova::audio::DialogQueue::VoicePlaying &p_playing) {
     if (!kernel_) return;
-    kernel_->world.script.dialog.tick(p_frame_rendered,
-            [this, &p_load](const opennova::audio::DialogLineRef &p_line) {
-                const opennova::audio::DialogClip clip = p_load(p_line);
+    // g_DialogueVolume: the process block's DialogueLevel, the word the frame stamps on
+    // the client runtime too (Simulation::begin_session_frame).
+    static const int32_t kDefaultDialogueLevel = opennova::gamecfg::defaults().dialogue_level;
+    const int32_t dialogue_volume = net_.game_config.is_valid()
+            ? net_.game_config->native().cfg().dialogue_level
+            : kDefaultDialogueLevel;
+    kernel_->world.script.dialog.tick(p_frame_rendered, dialogue_volume,
+            [this, &p_load](const opennova::audio::DialogLineRef &p_line, bool p_play) {
+                const opennova::audio::DialogClip clip = p_load(p_line, p_play);
                 if (host_role_ != nullptr) host_role_->dialog_line_loaded(p_line);
                 return clip;
             },

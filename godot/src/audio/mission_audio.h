@@ -246,9 +246,11 @@ private:
 	void _attach_under(Node3D *p_container);
 	void _free_voice_nodes();
 	std::vector<opennova::audio::DialogLineRef> _resolve_dialog_lines(int p_wav_id) const;
-	// The device half of a line's load: its wave on a new voice of the dialog
-	// channel, what the wave loader records of it, and the co-op report.
-	opennova::audio::DialogClip _load_dialog_line(const opennova::audio::DialogLineRef &p_line);
+	// The device half of a line's load: what the wave loader records of it, and with
+	// `p_play` its wave on a new voice of the dialog channel (the engine's gate,
+	// audio::DialogQueue::LoadLine).
+	opennova::audio::DialogClip _load_dialog_line(const opennova::audio::DialogLineRef &p_line,
+			bool p_play);
 	// A dialog voice of the queue's still plays.
 	bool _dialog_voice_playing(uint64_t p_voice) const;
 	// A dialog line's wave on a voice of the dialog channel, at the wave's volume byte.

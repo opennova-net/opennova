@@ -179,7 +179,8 @@ bool DialogQueue::enqueue(const std::string &dialog, std::vector<DialogLineRef> 
 }
 
 // [orig: Dialog_UpdatePlayback @ 0x44e470, the slot walk @ 0x44e4d8..0x44e634]
-void DialogQueue::tick(bool frame_rendered, const LoadLine &load, const VoicePlaying &playing) {
+void DialogQueue::tick(bool frame_rendered, int32_t dialogue_volume, const LoadLine &load,
+		const VoicePlaying &playing) {
 	constexpr uint32_t kDelayBit = 0x80000000u;
 	constexpr uint32_t kCount = 0x7FFFFFFFu;
 	size_t s = 0;
@@ -233,8 +234,15 @@ void DialogQueue::tick(bool frame_rendered, const LoadLine &load, const VoicePla
 		// Load the line (its wave on a new voice of the channel, which the shell
 		// reports to the co-op broadcast), then hold it [orig: @ 0x44e58b..0x44e5bf;
 		// Dialog_LoadAudioClip @ 0x44dcc0, the voice onto the stack @ 0x44de90..0x44deaf].
+		// The hold is the wave's whatever the gate; the play hook then refuses at a
+		// dialogue volume of 0, which starts no voice and stacks no handle, so the
+		// channel holds no other slot's next line (D-NET-285) [orig: Dialog_LoadAudioClip
+		// @ 0x44dcc0 - the hold @ 0x44dd87..0x44ddbf, the hook dword_A8A23C @ 0x44de50,
+		// its refusal @ 0x44de5b skipping @ 0x44de5d..0x44deaf;
+		// Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527560 (0 at g_DialogueVolume == 0
+		// @ 0x527567)].
 		const DialogLineRef line = slot.lines[slot.index];
-		const DialogClip clip = load(line);
+		const DialogClip clip = load(line, dialogue_volume != 0);
 		if (clip.voice != 0) voices_.push_back(clip.voice);
 		Slot &loaded = slots_[s];
 		loaded.index += 1;

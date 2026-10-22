@@ -184,9 +184,10 @@ public:
 		uint32_t timer = 0;
 		bool counting = false;
 	};
-	// The device's half of Dialog_LoadAudioClip: start the line's wave on a new
-	// voice of the dialog channel and say what loaded.
-	using LoadLine = std::function<DialogClip(const DialogLineRef &)>;
+	// The device's half of Dialog_LoadAudioClip: load the line's wave and say what
+	// loaded (the hold reads it whatever the gate), and when `play` start it on a new
+	// voice of the dialog channel; with `play` false nothing starts (voice 0).
+	using LoadLine = std::function<DialogClip(const DialogLineRef &, bool play)>;
 	// AudioChannel_ValidateHandle: the voice still plays.
 	using VoicePlaying = std::function<bool(uint64_t)>;
 
@@ -204,7 +205,10 @@ public:
 	bool enqueue(const std::string &dialog, std::vector<DialogLineRef> lines);
 	// One Dialog_UpdatePlayback tick. `frame_rendered`: a frame has rendered
 	// since the tick before, which starts a fresh hold's countdown.
-	void tick(bool frame_rendered, const LoadLine &load, const VoicePlaying &playing);
+	// `dialogue_volume`: the process's g_DialogueVolume (the cfg's DialogueLevel),
+	// whose 0 loads a line without playing it (D-NET-285).
+	void tick(bool frame_rendered, int32_t dialogue_volume, const LoadLine &load,
+			const VoicePlaying &playing);
 	// The PLYRDIALOG readers, keyed by the trigger's number, whose name is
 	// "dlg%.3d" of it. active: a slot holds the dialog (trigger sub 34
 	// PlayerDialogDone is its negation) [orig: Dialog_ExistsByIndex
