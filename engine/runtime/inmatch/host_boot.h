@@ -98,6 +98,11 @@ struct HostBootRequest {
 	// The map change's boot (inmatch/map_change.h): the host continues its
 	// kept session on the new kernel instead of starting one.
 	bool next_mission = false;
+	// The embedder runs its render device's mission inits after phase A (the game's effect
+	// world and warm): the host's load window leaves its render arm's pumps owed for the
+	// embedder's device stages (HostRole::render_arm_pumps), and phase B leaves the load
+	// end, which end_host_mission_load runs after them. A headless host runs both itself.
+	bool render_arm_deferred = false;
 	// The .til bytes when the embedder has them (a joiner's S2C 0x45 stream,
 	// which must never fall back to a same-named local file); unset = the
 	// boot reads <basename>.til loose-first.
@@ -150,6 +155,10 @@ struct HostBoot {
 	// change's create no session and keep Created.
 	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0)]
 	CreateSessionResult session_create = CreateSessionResult::Created;
+	// The request's render_arm_deferred on an authority boot, and the load end phase B left
+	// for end_host_mission_load (set where phase B would have run it).
+	bool load_end_deferred = false;
+	bool load_end_owed = false;
 	// The tables the boot read, for the embedder to retain.
 	mission::MissionText mission_text;
 	std::vector<uint8_t> terrain_til;
@@ -234,5 +243,10 @@ struct HostStartDevice {
 
 // Phase B. False with `error` when the session cannot leave its load.
 bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::string &error);
+
+// The load end phase B left (HostBootRequest::render_arm_deferred), after the embedder's
+// device stages: the render arm's pumps still owed, then the S2C 0x7B to every slot and the
+// spawn gate's clear (HostRole::finish_mission_load). A no-op when nothing is owed.
+void end_host_mission_load(HostBoot &boot);
 
 } // namespace opennova::inmatch

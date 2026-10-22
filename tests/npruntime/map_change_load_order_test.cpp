@@ -24,7 +24,11 @@
 //     terrain; the reload legs read during the terrain are answered at the next stage pump,
 //     before the next World stands; the first packet past the load is [0x75, 0x60, 0x7B]; the
 //     load pumps nine times past its head's first (the render arm's @0x5259EC skipped);
-//   - a playing listen host's: its head's pumps ahead of the terrain too, and ten window pumps.
+//   - a playing listen host's: its head's pumps ahead of the terrain too, and ten window pumps;
+//   - with the embedder's device stages deferred (the game's effect world and warm, which
+//     stand for retail's render inits): the render arm's pumps (two dedicated, three listen)
+//     and the load end run at those stages, so a reload leg that lands while they run is
+//     answered ahead of the 0x7B.
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
 #include <formats/def/def.h>
@@ -176,6 +180,9 @@ struct DedicatedHost {
 	std::unique_ptr<mission::MissionKernel> kernel;
 	RecordingSocket socket;
 	std::function<void()> at_terrain;
+	// The embedder's device stages between the phases (HostBootRequest::render_arm_deferred).
+	bool render_arm_deferred = false;
+	std::function<void()> device_stages;
 
 	inmatch::NapiNPServerCtx &ctx() { return role.state.host_owner.ctx; }
 
@@ -202,6 +209,7 @@ struct DedicatedHost {
 		r.host_cfg.socket_mode = inmatch::SocketMode::Lan;
 		r.host_cfg.serve_and_play = false;
 		r.next_mission = next_mission;
+		r.render_arm_deferred = render_arm_deferred;
 		r.boot_options.playable = false;
 		r.boot_options.mp_session = true;
 		r.boot_options.terrain = false;
@@ -224,6 +232,8 @@ struct DedicatedHost {
 			std::printf("boot: %s\n", error.c_str());
 			return false;
 		}
+		if (device_stages) device_stages();
+		inmatch::end_host_mission_load(boot);
 		return true;
 	}
 };
@@ -361,6 +371,8 @@ struct ListenHost {
 	def::DefItemsFile items{};
 	RecordingSocket socket;
 	std::function<void()> at_terrain;
+	bool render_arm_deferred = false;
+	std::function<void()> device_stages;
 
 	ListenHost() {
 		role.set_socket(&socket);
@@ -402,6 +414,7 @@ struct ListenHost {
 		r.host_cfg.socket_mode = inmatch::SocketMode::Lan;
 		r.host_cfg.serve_and_play = true;
 		r.next_mission = next_mission;
+		r.render_arm_deferred = render_arm_deferred;
 		r.boot_options.playable = true;
 		r.boot_options.mp_session = true;
 		r.boot_options.terrain = false;
@@ -423,6 +436,8 @@ struct ListenHost {
 			std::printf("listen boot: %s\n", error.c_str());
 			return false;
 		}
+		if (device_stages) device_stages();
+		inmatch::end_host_mission_load(boot);
 		return true;
 	}
 };
@@ -455,11 +470,138 @@ void test_listen_map_change_pumps_ten_through_the_load() {
 	CHECK(drains_at_terrain == 4);
 }
 
+// --------------------------------------------------------------------------
+// The render arm at the embedder's device stages (the game's effect world and warm).
+// --------------------------------------------------------------------------
+
+// Retail's last load pumps run between its render device's mission inits, the 0x7B after
+// them: Render_InitRenderingSubsystems @0x5259D1, @0x5259EC (an own client's only),
+// Render_InitTerrainSubsystems @0x5259FD, @0x525A5C, Render_InitMissionTextures @0x525A6E,
+// HUD_InitAllFonts @0x525A9A, @0x525AC5, then Server_BroadcastPlayerInfoToAll @0x526267. A
+// dedicated host's arm is the two after its skipped inits (the test @0x5259B4). With the
+// embedder's stages deferred, the boot's phases leave those two and the load end: a kept
+// joiner's reload legs that reach the socket while the stages run (after phase B) are read
+// at the arm's first pump, over the new World, and their replies still lead the 0x7B.
+void test_dedicated_render_arm_answers_a_leg_during_the_device_stages() {
+	auto host = std::make_unique<DedicatedHost>();
+	host->role.set_socket(&host->socket);
+	host->role.set_rotation(&host->rotation);
+	inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
+	CHECK(host->boot_current(/*next_mission=*/false));
+	host->ctx().mission_exit_reason = inmatch::kMissionExitMapCycle;
+	inmatch::FrameInput input;
+	input.delta_seconds = kFrame;
+	bool ended = false;
+	for (int f = 0; f < 16 && !ended; ++f) ended = host->session.advance(input).terminal();
+	CHECK(ended);
+	add_kept_joiner(*host, /*countdown=*/3);
+
+	std::vector<size_t> marks;
+	size_t read_at = kNoPump;
+	bool world_at_read = false;
+	bool legs_queued = false;
+	host->socket.on_drain = [&]() {
+		marks.push_back(host->socket.sent.size());
+		if (legs_queued && read_at == kNoPump) {
+			read_at = marks.size() - 1;
+			world_at_read = host->ctx().world != nullptr;
+		}
+	};
+	size_t pumps_at_stages = kNoPump;
+	int owed_at_stages = -1;
+	int owed_past_effects = -1;
+	uint8_t gate_at_stages = 0;
+	host->render_arm_deferred = true;
+	host->device_stages = [&]() {
+		pumps_at_stages = marks.size();
+		owed_at_stages = host->role.render_arm_pumps_owed();
+		gate_at_stages = host->ctx().net_spawn_suspended;
+		host->socket.inbound.push_back(reload_legs(host->ctx().server_info_transfer_id));
+		legs_queued = true;
+		host->role.pump_render_arm_ahead_of_textures();
+		owed_past_effects = host->role.render_arm_pumps_owed();
+	};
+	CHECK(inmatch::begin_host_map_change(host->role, host->catalog) ==
+			inmatch::MapChangeStep::NextMission);
+	CHECK(host->boot_current(/*next_mission=*/true));
+	const size_t load_pumps = marks.size();
+	// The phases ran the teardown's, the head's and seven of the window's nine; the stages
+	// ran the arm's first (@0x525A5C) and the load end its last (@0x525AC5).
+	CHECK(pumps_at_stages == 9);
+	CHECK(owed_at_stages == 2);
+	CHECK(owed_past_effects == 1);
+	CHECK(load_pumps == 11);
+	CHECK(host->role.render_arm_pumps_owed() == 0);
+	// Phase B left the load end: the spawn gate held through the stages.
+	CHECK(gate_at_stages == 1);
+	CHECK(host->ctx().net_spawn_suspended == 0);
+	CHECK(host->session.state() == inmatch::State::Running);
+	// The legs were read at the arm's first pump, the next World standing.
+	CHECK(read_at == 9);
+	CHECK(world_at_read);
+	for (int f = 0; f < 16; ++f) (void)host->session.advance(input);
+	const std::vector<SentPacket> to_kept = packets_to(host->socket, host->socket.peer, marks);
+	CHECK(to_kept.size() >= 2);
+	if (to_kept.size() >= 2) {
+		CHECK(to_kept[0].pump == 2);
+		CHECK(to_kept[0].tags == std::vector<uint8_t>{s2c::GAME_RESET});
+		// The legs' replies ahead of the load end's 0x7B.
+		CHECK(to_kept[1].pump >= load_pumps);
+		CHECK((to_kept[1].tags == std::vector<uint8_t>{s2c::SPECTATOR_FLAGS,
+				s2c::FILE_TRANSFER_CHUNK, s2c::FULL_PLAYER_INFO}));
+		if (to_kept[1].tags.size() != 3) {
+			std::printf("first packet past the deferred load:");
+			for (const uint8_t t : to_kept[1].tags) std::printf(" %02X", t);
+			std::printf("\n");
+		}
+	}
+}
+
+// A listen host's arm is three: two ahead of the textures (@0x5259EC, @0x525A5C), one after
+// (@0x525AC5); the window keeps its ten.
+void test_listen_render_arm_pumps_three_around_the_textures() {
+	auto host = std::make_unique<ListenHost>();
+	CHECK(host->boot_map(/*next_mission=*/false));
+	if (host->kernel == nullptr) return;
+	inmatch::NapiNPServerCtx &ctx = host->role.state.host_owner.ctx;
+	CHECK(inmatch::Server_ExecuteServerCommand(ctx, &host->kernel->world, "Cycle", "", {}).handled);
+	bool ended = false;
+	for (int f = 0; f < 4000 && !ended; ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		ended = host->session.advance(input).terminal();
+		host->kernel->world.out.discard_presentation();
+	}
+	CHECK(ended);
+	size_t drains = 0;
+	size_t drains_at_stages = kNoPump;
+	size_t drains_past_effects = kNoPump;
+	int owed_at_stages = -1;
+	host->socket.on_drain = [&drains]() { ++drains; };
+	host->render_arm_deferred = true;
+	host->device_stages = [&]() {
+		drains_at_stages = drains;
+		owed_at_stages = host->role.render_arm_pumps_owed();
+		host->role.pump_render_arm_ahead_of_textures();
+		drains_past_effects = drains;
+	};
+	CHECK(inmatch::begin_host_map_change(host->role, host->catalog) ==
+			inmatch::MapChangeStep::NextMission);
+	CHECK(host->boot_map(/*next_mission=*/true));
+	CHECK(drains_at_stages == 9);
+	CHECK(owed_at_stages == 3);
+	CHECK(drains_past_effects == 11);
+	CHECK(drains == 12);
+	CHECK(ctx.net_spawn_suspended == 0);
+}
+
 } // namespace
 
 int main() {
 	test_dedicated_map_change_spreads_its_pumps_through_the_load();
 	test_listen_map_change_pumps_ten_through_the_load();
+	test_dedicated_render_arm_answers_a_leg_during_the_device_stages();
+	test_listen_render_arm_pumps_three_around_the_textures();
 	if (failures != 0) {
 		std::printf("map_change_load_order: %d failure(s)\n", failures);
 		return 1;

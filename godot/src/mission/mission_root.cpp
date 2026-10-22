@@ -326,6 +326,8 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// are gone). Role bring-up ran above; presentation composition follows.
 	// The infantry .adm name is the boot's own default (no composition ever
 	// named one; the record's dead field went with it).
+	// The world's load runs the render arm and the load end at its device stages.
+	sim_->set_render_arm_deferred(options->get_mission_start_deferred());
 	const int64_t boot_err = sim_->boot_mission(
 			p_mission,
 			options->get_resource_root(),

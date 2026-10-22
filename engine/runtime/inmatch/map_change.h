@@ -40,11 +40,14 @@
 //   the boot's bring-up (HostRole::bring_up with HostBringup::next_mission):
 //     the new World configured for the kept session
 //     (configure_continued_session_world), the own client's view rebuilt,
-//     then the window's remaining pumps (5 with an own client, 4 dedicated).
+//     then the window's remaining pumps (5 with an own client, 4 dedicated), but
+//     the render arm's (3 / 2) when the game's device stages run them
+//     (HostRole::render_arm_pumps).
 //   after the kernel boot's PreMission pass and the round counters' reset,
 //     the round init over the kept slots
 //     (HostRole::init_round_after_premission -> init_all_player_entities_for_round).
-//   the boot's phase B ends with the load-end S2C 0x7B to every slot.
+//   the boot's phase B, or after the game's device stages end_host_mission_load,
+//     ends with the load-end S2C 0x7B to every slot.
 // The host pumps its socket at the witnessed points: the teardown's pump ahead
 // of the slot reset, then the load's with its spawn gate held (D-NET-116): its
 // first, then its window spread through the load as retail's is, so the 0x25s

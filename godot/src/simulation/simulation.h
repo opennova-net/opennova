@@ -241,6 +241,7 @@ private:
 	SimulationAssetState assets_;
 	opennova::inmatch::HostBoot host_boot_; // the load's two-phase boot (boot_mission -> start_mission)
 	bool restart_boot_ = false; // set_restart_boot: the single player's restart (boot_mission)
+	bool render_arm_deferred_ = false; // set_render_arm_deferred: the world's device stages
 	opennova::world::ScriptVoiceChannel::SetResolver voice_set_resolver_;
 	SimulationPresentState present_;
 	SimulationPlayerState player_;
@@ -593,6 +594,14 @@ public:
 			opennova::env::EnvironmentState *p_environment, const std::function<void()> &p_bind);
 	// An isolated mission root's start (no world load): the load ends, the mission start pending.
 	void finish_load_without_environment() { complete_session_load(); }
+	// The world's load runs its device stages after phase A (engine inmatch/host_boot.h
+	// HostBootRequest::render_arm_deferred): set ahead of boot_mission. The host's load window
+	// then leaves its render arm's pumps to those stages, and phase B its load end: the pumps
+	// ahead of the mission's textures, then the load end after them (HostRole::render_arm_pumps
+	// carries the witness). No-ops on a joiner or a load that owes neither.
+	void set_render_arm_deferred(bool p_deferred) { render_arm_deferred_ = p_deferred; }
+	void pump_host_render_arm_ahead_of_textures();
+	void end_host_mission_load();
 	// The precipitation drop pool's per-render update + compile for a camera
 	// (renderer/precipitation_frame.h carries the cites): the compiled frame the
 	// Precipitation node streams (drops, five floats per vertex, color, snow);

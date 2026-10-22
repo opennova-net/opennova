@@ -285,6 +285,15 @@ bool Simulation::start_mission(opennova::env::WeatherRuntime *p_weather,
 	return true;
 }
 
+void Simulation::pump_host_render_arm_ahead_of_textures() {
+	if (host_role_ != nullptr && host_boot_.kernel == kernel_.get())
+		host_role_->pump_render_arm_ahead_of_textures();
+}
+
+void Simulation::end_host_mission_load() {
+	if (host_boot_.kernel == kernel_.get()) opennova::inmatch::end_host_mission_load(host_boot_);
+}
+
 const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitation_frame(
 		const Vector3 &p_camera, const Vector3 &p_camera_right, const Vector3 &p_camera_up,
 		int p_terrain_light_rgb, int p_camera_mode) {
@@ -664,6 +673,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	request.session = &session_;
 	request.role = &active_role();
 	request.host = host_role_;
+	request.render_arm_deferred = render_arm_deferred_;
 	const uint32_t mission_game_type = opennova::game_type::for_mission_attribs(document.header.attrib_flags);
 	const bool next_mission = net_.map_change_pending && host_role_ != nullptr;
 	if (host_role_ != nullptr && is_host_listening()) {

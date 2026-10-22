@@ -420,14 +420,16 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	// through the load, so a remote's hello, connect and admission legs are answered
 	// inside the load; ours's session exists from here, ahead of the PreMission pass,
 	// where retail's last in-load pumps fall: all of the load's pumps run here, each
-	// stepping the connections' send clocks as retail's do (D-NET-116).
+	// stepping the connections' send clocks as retail's do (D-NET-116), but the render
+	// arm's when the embedder's device stages run them (render_arm_pumps).
 	// [orig: Server_PumpNetworkTransport @0x4FD960 from Game_StartMission @0x52589D /
 	//  @0x5258E5 / @0x525A5C / @0x525AC5, ahead of the EventTrigger_UpdateAllWithFlag2
 	//  call @0x525B86; the session create ahead of the load, CNapiGameSession_CreateSession
 	//  @0x4C97C0 from CNapiGameSession_BuildAndCreateSession @0x56997D (the PreMenu's
 	//  MultiPlayer_JoinSessionStateMachine @0x56A46A), before GameLoop_Init's
 	//  Game_StartMission call @0x526377]
-	pump_load(1 + load_window_pumps());
+	render_arm_pumps_owed_ = render_arm_deferred_ ? render_arm_pumps() : 0;
+	pump_load(1 + load_window_pumps() - render_arm_pumps_owed_);
 }
 
 // See host_role.h. The map change's next mission start up to its terrain, on the kept
@@ -530,8 +532,9 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	map_change.torn_down = false;
 	if (host_cfg.serve_and_play) make_client_runtime(host_cfg.config.game_type);
 	// Then the window's pumps the head and the stages left, over the new World, the spawn
-	// gate still held (D-NET-116).
-	pump_load(load_window_pumps() - window_pumps_run_);
+	// gate still held (D-NET-116), the render arm's left to an embedder's device stages.
+	render_arm_pumps_owed_ = render_arm_deferred_ ? render_arm_pumps() : 0;
+	pump_load(load_window_pumps() - render_arm_pumps_owed_ - window_pumps_run_);
 	next_mission_head_run_ = false;
 	window_pumps_run_ = 0;
 }
@@ -746,7 +749,25 @@ int HostRole::load_window_pumps() const {
 	return 9 + (state.host_owner.ctx.is_mp_session_peer != 0 ? 1 : 0);
 }
 
+// See host_role.h. The pumps at @0x525A5C and @0x525AC5, and an own client's at @0x5259EC.
+int HostRole::render_arm_pumps() const {
+	return 2 + (state.host_owner.ctx.is_mp_session_peer != 0 ? 1 : 0);
+}
+
+void HostRole::pump_render_arm_ahead_of_textures() {
+	const int ahead = render_arm_pumps_owed_ - 1;
+	if (ahead <= 0) return;
+	pump_load(ahead);
+	render_arm_pumps_owed_ -= ahead;
+}
+
 void HostRole::finish_mission_load() {
+	// The render arm's last pump, after the mission's textures, the fonts and the box
+	// texture [orig: Game_StartMission - Render_InitMissionTextures @0x525A6E,
+	//  HUD_InitAllFonts @0x525A9A, BoxTexture_LoadAndSetupUVRegions @0x525AC0,
+	//  Server_PumpNetworkTransport @0x525AC5], and any the embedder's stages left.
+	pump_load(render_arm_pumps_owed_);
+	render_arm_pumps_owed_ = 0;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	if (ctx.is_authority != 0) inmatch::Server_BroadcastPlayerInfoToAll(ctx);
 	ctx.net_spawn_suspended = 0;

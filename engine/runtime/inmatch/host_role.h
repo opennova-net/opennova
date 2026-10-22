@@ -124,6 +124,25 @@ public:
 	void pump_load(int count = 1);
 	// The load's pump count from the round-over clear to the PreMission pass.
 	int load_window_pumps() const;
+	// The window's render arm, its last pumps, which retail's mission start runs between its
+	// render device's mission inits: one after Render_InitRenderingSubsystems (an own
+	// client's only: the dedicated test skips that init, its pump and the terrain's), one
+	// after Render_InitTerrainSubsystems, one after Render_InitMissionTextures and the fonts.
+	// [orig: Game_StartMission - Render_InitRenderingSubsystems @0x5259D1,
+	//  Server_PumpNetworkTransport @0x5259EC, Render_InitTerrainSubsystems @0x5259FD (the
+	//  dedicated test @0x5259B4 skips the three), @0x525A5C, Render_InitMissionTextures
+	//  @0x525A6E, HUD_InitAllFonts @0x525A9A, BoxTexture_LoadAndSetupUVRegions @0x525AC0,
+	//  @0x525AC5]
+	int render_arm_pumps() const;
+	// An embedder that runs its render device's mission inits after the boot's phase A
+	// (HostBootRequest::render_arm_deferred): the bring-up's window leaves the render arm's
+	// pumps owed, for the embedder's device stages and the load end (finish_mission_load).
+	void set_render_arm_deferred(bool deferred) { render_arm_deferred_ = deferred; }
+	// The render arm's pumps ahead of the mission's textures: all the owed ones but the last
+	// (an own client's two, a dedicated host's one) [orig: Game_StartMission @0x5259EC,
+	//  @0x525A5C, ahead of Render_InitMissionTextures @0x525A6E].
+	void pump_render_arm_ahead_of_textures();
+	int render_arm_pumps_owed() const { return render_arm_pumps_owed_; }
 	// A map change's next mission start, its world-free head, ahead of the load's terrain:
 	// the file-transfer session and the report clocks, the mission text and the "Server"
 	// strings, the continued session (its streams rebuilt), the per-slot reset and the
@@ -175,11 +194,12 @@ public:
 	// installed with the client view), ahead of finish_mission_load
 	// [orig: Game_StartMission @0x526189..0x526255, ahead of @0x526267].
 	void send_own_mission_status();
-	// The mission load's end: on the authority the S2C 0x7B to every slot, then
-	// the load's spawn gate clears. No pump follows: the 0x7B leaves at the first
-	// tick's send pump. Phase B of the host boot runs it [orig: Game_StartMission
-	//  @0x52625F..0x526267, the clear @0x52631B; its last server pump @0x525AC5;
-	//  Server_TickUpdate's send pump @0x51E487].
+	// The mission load's end: the render arm's pumps still owed (the last one, after the
+	// mission's textures, @0x525AC5), then on the authority the S2C 0x7B to every slot, then
+	// the load's spawn gate clears. No pump follows: the 0x7B leaves at the first tick's send
+	// pump. Phase B of the host boot runs it, or the embedder after its device stages
+	// (end_host_mission_load) [orig: Game_StartMission @0x52625F..0x526267, the clear
+	//  @0x52631B; its last server pump @0x525AC5; Server_TickUpdate's send pump @0x51E487].
 	void finish_mission_load();
 	// The shell's items.def catalog for the HostClient's view (the wire class
 	// and the def facts of a type id); re-installed whenever the role rebuilds
@@ -305,6 +325,10 @@ private:
 	// the head and the stages ran ahead of the bring-up, which runs the rest.
 	bool next_mission_head_run_ = false;
 	int window_pumps_run_ = 0;
+	// The embedder runs the render arm (set_render_arm_deferred), and its pumps the bring-up
+	// left owed.
+	bool render_arm_deferred_ = false;
+	int render_arm_pumps_owed_ = 0;
 	opennova::IDatagramSocket *socket_ = nullptr;
 	HostRotation *rotation_ = nullptr;
 	std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog_;

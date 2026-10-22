@@ -173,6 +173,8 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	boot.terrain_til.clear();
 	boot.server_text = ServerTextTable{};
 	boot.item_catalog.reset();
+	boot.load_end_deferred = request.host != nullptr && request.render_arm_deferred;
+	boot.load_end_owed = false;
 	if (request.session == nullptr || request.role == nullptr || !request.fresh_kernel) {
 		error = "the host boot needs a session, a role and a fresh kernel";
 		return false;
@@ -360,6 +362,9 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		bringup.server_text = boot.server_text;
 		bringup.next_mission = request.next_mission;
 		request.host->stage_bringup(std::move(bringup));
+		// The bring-up's window leaves the render arm's pumps to an embedder that runs its
+		// render device's mission inits after this phase.
+		request.host->set_render_arm_deferred(request.render_arm_deferred);
 	}
 
 	// The kernel's ordered boot; the role's session comes up inside it, between
@@ -497,14 +502,23 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 
 	// The load end: the authority's S2C 0x7B to every slot, then the load's spawn
 	// gate clears (D-NET-116) [orig: Game_StartMission @0x52625F..0x526267, @0x52631B].
-	if (boot.host != nullptr) boot.host->finish_mission_load();
+	// An embedder with a render device runs it after its device stages, which hold the
+	// render arm's pumps (end_host_mission_load).
+	if (boot.host != nullptr && !boot.load_end_deferred) boot.host->finish_mission_load();
 	// The load ends with the mission start: the Game Loop reads its clock only
 	// after Game_StartMission returns (Session::complete_load carries it).
 	if (!boot.session->complete_load().applied()) {
 		error = "the session did not leave its load";
 		return false;
 	}
+	boot.load_end_owed = boot.host != nullptr && boot.load_end_deferred;
 	return true;
+}
+
+void end_host_mission_load(HostBoot &boot) {
+	if (boot.host == nullptr || !boot.load_end_owed) return;
+	boot.load_end_owed = false;
+	boot.host->finish_mission_load();
 }
 
 } // namespace opennova::inmatch

@@ -313,6 +313,9 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->span("effects");
 	start_effect_world();
 	timeline->end_span();
+	// A host's render arm: its load window's pumps ahead of the mission's textures, which the
+	// warm below stands for (engine HostRole::render_arm_pumps carries the witness).
+	if (challenge_sim.is_valid()) challenge_sim->pump_host_render_arm_ahead_of_textures();
 	// Warm the effect catalog while the loading screen still covers the frame:
 	// the first live spawn otherwise pays the deferred texture resolves + the
 	// renderer's first-draw pipeline compiles as a ~90 ms hitch on the player's
@@ -328,6 +331,9 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 					: PackedStringArray());
     route_script_effects(); // initial WAC/BMS descriptors survived the warm-scene reset
 	timeline->end_span();
+	// The load end past the textures: the render arm's last pump, then a host's S2C 0x7B and
+	// the spawn gate's clear (engine inmatch::end_host_mission_load).
+	if (challenge_sim.is_valid()) challenge_sim->end_host_mission_load();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_FINISH));
 	timeline->finish();
 	loaded_mission_file_ = p_bms_name;
