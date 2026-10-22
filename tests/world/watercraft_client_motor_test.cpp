@@ -157,6 +157,7 @@ void stage(w::Entity &boat, int32_t x, int32_t y, int32_t z,
 bool run_fast_boat_glides() {
 	Rig r;
 	make_rig(r);
+	test_common::brain_hull(r.world, r.boat);
 	w::Entity *boat = r.world.registry.get(r.boat);
 	if (!expect(boat != nullptr, "boat spawned")) return false;
 
@@ -203,6 +204,7 @@ bool run_fast_boat_glides() {
 bool run_abandoned_boat_coasts_to_rest() {
 	Rig r;
 	make_rig(r);
+	test_common::brain_hull(r.world, r.boat);
 	w::Entity *boat = r.world.registry.get(r.boat);
 	if (!expect(boat != nullptr, "boat spawned")) return false;
 	// One record at speed, then silence: after the 128-tick starvation edge the
@@ -233,6 +235,7 @@ bool run_abandoned_boat_coasts_to_rest() {
 bool run_steer_follows_received_register() {
 	Rig r;
 	make_rig(r);
+	test_common::brain_hull(r.world, r.boat);
 	w::Entity *boat = r.world.registry.get(r.boat);
 	if (!expect(boat != nullptr, "boat spawned")) return false;
 	set_afloat(*boat, r.traits, true);
@@ -874,6 +877,7 @@ bool run_platform_solve_settles_at_waterline() {
 	for (const Probe &pr : probes) {
 		Rig r;
 		make_rig(r);
+		test_common::brain_hull(r.world, r.boat);
 		// Zodiac-like hull: beam 2.0, length 5.0, keel/deck -0.5..1.0 (16.16).
 		set_zodiac_boxes(r.traits);
 		w::Entity *boat = r.world.registry.get(r.boat);
@@ -917,8 +921,11 @@ bool run_afloat_latch_controls_drag() {
 	// (no water-plane stand-in), here the default clear one.
 	Rig wet, landed, fallback;
 	make_rig(wet);
+	test_common::brain_hull(wet.world, wet.boat);
 	make_rig(landed);
+	test_common::brain_hull(landed.world, landed.boat);
 	make_rig(fallback);
+	test_common::brain_hull(fallback.world, fallback.boat);
 	set_zodiac_boxes(wet.traits);
 	set_zodiac_boxes(landed.traits);
 	w::Entity *wet_boat = wet.world.registry.get(wet.boat);
@@ -958,7 +965,9 @@ bool run_first_prediction_seeds_platform_state() {
 	// drag, producing the same velocity as an already-solved afloat hull.
 	Rig first, warm;
 	make_rig(first);
+	test_common::brain_hull(first.world, first.boat);
 	make_rig(warm);
+	test_common::brain_hull(warm.world, warm.boat);
 	set_zodiac_boxes(first.traits);
 	set_zodiac_boxes(warm.traits);
 	w::Entity *first_boat = first.world.registry.get(first.boat);
@@ -1165,6 +1174,7 @@ bool run_water_rudder_wraps_min_speed() {
 	// INT_MIN. Promoting before negation reverses the rudder-rate sign.
 	Rig r;
 	make_rig(r);
+	test_common::brain_hull(r.world, r.boat);
 	w::Entity *boat = r.world.registry.get(r.boat);
 	if (!expect(boat != nullptr, "min-speed boat spawned")) return false;
 	prime_prediction_tick(*boat, 0);
@@ -1185,6 +1195,7 @@ bool run_water_rudder_wraps_min_speed() {
 bool run_airborne_watercraft_preserves_yaw_rate() {
 	Rig r;
 	make_rig(r);
+	test_common::brain_hull(r.world, r.boat);
 	r.world.env.water_z = 0;
 	w::Entity *boat = r.world.registry.get(r.boat);
 	if (!expect(boat != nullptr, "airborne-rudder boat spawned")) return false;
@@ -1221,6 +1232,7 @@ bool run_prior_euler_drives_thrust_and_beach_stop() {
 	Rig pitched, level, capsized, upright;
 	for (Rig *r : {&pitched, &level, &capsized, &upright}) {
 		make_rig(*r);
+		test_common::brain_hull(r->world, r->boat);
 		set_zodiac_boxes(r->traits);
 		w::Entity *boat = r->world.registry.get(r->boat);
 		prime_prediction_tick(*boat, 8192, 6400);
@@ -1274,6 +1286,7 @@ bool run_platform_solve_precedes_yaw() {
 	Rig actual, staged, expected, wrong;
 	for (Rig *r : {&actual, &staged, &expected, &wrong}) {
 		make_rig(*r);
+		test_common::brain_hull(r->world, r->boat);
 		r->world.env.water_z = 0;
 		r->world.tables.terrain = &ramp.field;
 		w::Entity *boat = r->world.registry.get(r->boat);
@@ -1446,6 +1459,7 @@ bool run_ground_and_bike_local_driver_input_gate() {
 bool run_watercraft_local_driver_reconciliation_gate() {
 	Rig local;
 	make_rig(local);
+	test_common::brain_hull(local.world, local.boat);
 	local.traits.player_control = true;
 	// Retail-shaped: cbot defs author waterSpeed (+0x8EC) and no player_speed —
 	// the boat player leg reads waterSpeed at every command site.
@@ -1468,6 +1482,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 
 	Rig remote;
 	make_rig(remote);
+	test_common::brain_hull(remote.world, remote.boat);
 	remote.traits.player_control = true;
 	remote.traits.water_speed = 12000;
 	w::Entity *remote_boat = remote.world.registry.get(remote.boat);
@@ -1487,6 +1502,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 
 	Rig wrapped;
 	make_rig(wrapped);
+	test_common::brain_hull(wrapped.world, wrapped.boat);
 	wrapped.traits.player_control = true;
 	wrapped.traits.water_speed = std::numeric_limits<int32_t>::max();
 	w::Entity *wrapped_boat = wrapped.world.registry.get(wrapped.boat);
@@ -1569,6 +1585,7 @@ bool run_platform_roll_is_stable_and_gravity_witnessed() {
 	// @0x48EBD9], not the ground 324.
 	Rig r;
 	make_rig(r);
+	test_common::brain_hull(r.world, r.boat);
 	r.traits.box_y_lo = -(1 << 16); r.traits.box_y_hi = 1 << 16;
 	r.traits.box_x_lo = -(5 << 15); r.traits.box_x_hi = 5 << 15;
 	r.traits.box_z_lo = -(1 << 15); r.traits.box_z_hi = 1 << 16;
@@ -1603,6 +1620,7 @@ bool run_platform_roll_is_stable_and_gravity_witnessed() {
 	// After the airborne flag latches, slide_z must step by exactly -167.
 	Rig g;
 	make_rig(g);
+	test_common::brain_hull(g.world, g.boat);
 	g.traits.box_y_lo = r.traits.box_y_lo; g.traits.box_y_hi = r.traits.box_y_hi;
 	g.traits.box_x_lo = r.traits.box_x_lo; g.traits.box_x_hi = r.traits.box_x_hi;
 	g.traits.box_z_lo = r.traits.box_z_lo; g.traits.box_z_hi = r.traits.box_z_hi;
@@ -2100,8 +2118,10 @@ bool run_client_family_sound_dispatch_scope() {
 	const w::EntityHandle plane_h = spawn_vehicle(6102, 120.0f);
 	const w::EntityHandle ground_h = spawn_vehicle(6103, 140.0f);
 	const w::EntityHandle water_h = spawn_vehicle(6104, 160.0f);
-	// The cveh row's class init brained it: its client mover runs past its head.
+	// The cveh and cbot rows' class inits brained them: their client movers run
+	// past their heads.
 	test_common::brain_hull(world, ground_h);
+	test_common::brain_hull(world, water_h);
 
 	auto install_traits = [&](int item_id, w::VehicleFamily family,
 	                          int physics, const char *idle_set) {
@@ -2277,6 +2297,7 @@ bool run_authority_boat_parks_without_controller() {
 bool run_authority_capsize_drain_and_dead_skip() {
 	Rig r;
 	make_rig(r);
+	test_common::brain_hull(r.world, r.boat);
 	set_zodiac_boxes(r.traits);
 	r.traits.player_control = true;
 	w::Entity *boat = r.world.registry.get(r.boat);
@@ -2316,6 +2337,7 @@ bool run_authority_capsize_drain_and_dead_skip() {
 bool run_authority_player_drive_uses_waterspeed() {
 	Rig r;
 	make_rig(r);
+	test_common::brain_hull(r.world, r.boat);
 	set_zodiac_boxes(r.traits);
 	r.traits.player_control = true;
 	r.traits.water_speed = 5000;
@@ -2366,6 +2388,7 @@ bool run_authority_player_drive_uses_waterspeed() {
 bool run_submerged_driver_hands_to_ai_leg() {
 	Rig r;
 	make_rig(r);
+	test_common::brain_hull(r.world, r.boat);
 	set_zodiac_boxes(r.traits);
 	r.traits.player_control = true;
 	r.traits.water_speed = 5000;
@@ -2450,6 +2473,7 @@ bool run_trail_bank_tracks_motor_motion() {
 	for (bool authority : { false, true }) {
 		Rig r;
 		make_rig(r);
+		test_common::brain_hull(r.world, r.boat);
 		r.traits.player_control = authority;
 		for (int i = 0; i < 4; ++i) {
 			r.traits.trails[i].effect = "trail" + std::to_string(i + 1);
@@ -2472,8 +2496,9 @@ bool run_trail_bank_tracks_motor_motion() {
 		auto tick = [&](uint32_t t) {
 			r.world.logic_tick = t;
 			if (authority) {
-				// A brainless hull's AI arm leaves the registers as they stand.
-				boat->veh.cmd_speed = 16384;
+				// The NPC's AI arm commands the brain's out-speed and, with no
+				// route, holds the heading.
+				r.world.ai.for_handle(r.boat)->brain.f[w::AiBrain::kOutSpeed] = 16384;
 				boat->veh.steer_target_bam = 0;
 				r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
 			} else

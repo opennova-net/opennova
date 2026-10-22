@@ -2968,13 +2968,14 @@ void test_a_dead_hull_bails_to_its_tail() {
 // tail on both roles: the stamp lands and the matrix bit rises, and nothing between
 // them runs: no health cadence, no occupant block (its stuck reset), no input, no
 // motion, on a predicting client no chase, on a client row the chase does not run no
-// movement-sound fold. Its brained twin runs the same tick in full.
+// movement-sound fold. Its brained twin runs the same tick in full. Each role enters
+// through the pool-1 pass's own leg (VehicleSystem::update_motor).
 // [orig: cveh `mov edi, [esi+64h]` @0x48AF1A, `jz` @0x48AFA6 -> the tail
 //  @0x48D43E..0x48D451; ctan @0x488ACA, @0x488B56 -> @0x48AEB6; cbik @0x483FFA,
-//  @0x484086 -> @0x486A04]
+//  @0x484086 -> @0x486A04; cbot @0x48D499, @0x48D4EF -> @0x48EF50..0x48EF63]
 void test_a_brainless_hull_bails_at_its_head() {
-	for (const VehicleFamily family :
-			{ VehicleFamily::Ground, VehicleFamily::Tank, VehicleFamily::Bike }) {
+	for (const VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Tank,
+				 VehicleFamily::Bike, VehicleFamily::Watercraft }) {
 		for (const bool brained : { false, true }) {
 			// The authority: a seated driver's forward order on a hull with way on.
 			{
@@ -2996,7 +2997,7 @@ void test_a_brainless_hull_bails_at_its_head() {
 				const int32_t entry[3] = { veh.position.x.q16, veh.position.y.q16,
 					veh.position.z.q16 };
 				r->w.logic_tick = 28; // (28 + 36 * 1) & 63 == 0: the cadence's tick
-				r->w.vehicles.tick_motor(veh, t);
+				r->w.vehicles.update_motor(veh, /*is_authority=*/true);
 				CHECK(veh.saved_live_valid);
 				for (int axis = 0; axis < 3; ++axis)
 					CHECK(veh.saved_live_pos[axis] == entry[axis]);
@@ -3028,7 +3029,7 @@ void test_a_brainless_hull_bails_at_its_head() {
 				m.net_smooth_target[1] = entry[1];
 				m.net_smooth_target[2] = entry[2];
 				veh.engine_flags &= ~kEntityFlagMatrixBuilt;
-				r->w.vehicles.ground_client_tick(veh, t);
+				r->w.vehicles.update_motor(veh, /*is_authority=*/false);
 				CHECK(veh.saved_live_valid);
 				for (int axis = 0; axis < 3; ++axis)
 					CHECK(veh.saved_live_pos[axis] == entry[axis]);

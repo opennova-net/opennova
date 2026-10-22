@@ -1871,13 +1871,22 @@ void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &tra
 	World &world = world_;
 	Entity::VehicleMotorState &m = veh.veh;
 	if (!m.net_predicted) return;
-	update_engine_sound(veh, traits);
 	if (!m.yaw_seeded) {
 		// [orig: Entity_UpdateWatercraftPhysics @0x48D4B2 reads the row's Yaw,
 		//  unmoved = the spawn form, Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
 		m.yaw_bam = veh.heading;
 		m.yaw_seeded = true;
 	}
+	// A client row the class init never brained jumps from the stamp (the pass
+	// stamped it ahead of this call) to the matrix-build tail: no claimant edge,
+	// chase, motion or sound. [orig: Entity_UpdateWatercraftPhysics `mov ebp,
+	//  [esi+64h]` @0x48D499, the stamp @0x48D4AC..0x48D4E9, `jz` @0x48D4EF -> the
+	//  tail @0x48EF50..0x48EF63]
+	if (world.ai.for_handle(veh.handle) == nullptr) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
+	}
+	update_engine_sound(veh, traits);
 
 	vehicle_refresh_ground_link(world, veh, traits);
 	vehicle_follow_carrier(world, veh);
@@ -2145,6 +2154,15 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
         m.air_roll_bam = veh.roll_bam;
         m.yaw_seeded = true;
 	}
+	// A hull with no brain (+0x64) jumps from the stamp (the pass stamped it ahead
+	// of this call) to the matrix-build tail: no ground probe, carrier ride, health
+	// cadence, claimant edge, input, motion or sound fold (@0x48EEB4).
+	// [orig: Entity_UpdateWatercraftPhysics `mov ebp, [esi+64h]` @0x48D499, the
+	//  stamp @0x48D4AC..0x48D4E9, `jz` @0x48D4EF -> the tail @0x48EF50..0x48EF63]
+	if (world.ai.for_handle(veh.handle) == nullptr) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
+	}
 	vehicle_refresh_ground_link(world, veh, traits);
 	vehicle_follow_carrier(world, veh);
 	// The platform solve owns Z/attitude/afloat from the first tick; an authored
@@ -2261,7 +2279,10 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
 		VehicleTraits afloat = traits;
 		afloat.family = VehicleFamily::Watercraft;
 		watercraft_client_tick(veh, afloat);
-		update_ground_sound(veh, afloat, veh.health <= 0, false);
+		// The boat mover's fold call (@0x48EEB4) lies inside its brainless bail
+		// (@0x48D4EF -> @0x48EF50).
+		if (world_.ai.for_handle(veh.handle) != nullptr)
+			update_ground_sound(veh, afloat, veh.health <= 0, false);
 		return;
 	}
 	World &world = world_;

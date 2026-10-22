@@ -145,6 +145,7 @@ void test_a_model_less_boat_keeps_its_latch() {
 	world->registry.configure_pool(1, 4);
 	world->env.water_z = 20 << 16; // the hull sits under the water plane
 	const EntityHandle h = world->registry.spawn(1, hull(false));
+	test_common::brain_hull(*world, h); // the mover runs past its head
 	Entity &e = *world->registry.get(h);
 	VehicleTraits t;
 	t.physics = 1;
