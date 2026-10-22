@@ -202,8 +202,9 @@ func _vehicle_peer_mission() -> MissionData:
 	# decoded pool-1 wire row; their world poses must remain the same.
 	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101291,
 			Vector3(40, 30, 0), Vector3(10, 0, 20)))
-	# A synthetic cbot with non-zero authored attitude catches first-arm
-	# prediction accidentally replacing the retained spawn Euler with zero. It
+	# A synthetic cbot with a non-zero authored attitude; the authority's mission
+	# start settle fits it to the water plane, and the joiner's first arm must
+	# retain the attitude the authority streams, never its own zero. It
 	# sits beside the joiner start so the same real-UDP case can also exercise a
 	# local control-seat body following the final predicted carrier pose.
 	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 105008,
@@ -1830,10 +1831,11 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 		var joiner_boat: PackedFloat32Array = joiner_boat_record["snapshot"]
 		var host_boat_base := int(host_boat_record["base"])
 		var joiner_boat_base := int(joiner_boat_record["base"])
-		assert_ne(host_boat[host_boat_base + Simulation.PF_PITCH_DEG], 0.0,
-				"the authored watercraft pitch is non-zero")
-		assert_ne(host_boat[host_boat_base + Simulation.PF_ROLL_DEG], 0.0,
-				"the authored watercraft roll is non-zero")
+		# The mission start's settle wakes every PlayerControl row (Flags 0x40) and
+		# runs its mover once, so the afloat watercraft's platform solve fits the hull
+		# to the flat water plane: the authored attitude does not survive the load on
+		# the authority, and the joiner arms from whatever the authority holds
+		# [orig: Game_StartMission @0x525FFF (the 0x40 OR), the mover call @0x526010].
 		assert_almost_eq(
 				joiner_boat[joiner_boat_base + Simulation.PF_PITCH_DEG],
 				host_boat[host_boat_base + Simulation.PF_PITCH_DEG], 0.01,
