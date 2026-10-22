@@ -5229,6 +5229,11 @@ add_test(NAME body_trace COMMAND body_trace_test)
 add_executable(netsim_infantry_ground_carrier_test netsim/infantry_ground_carrier_test.cpp)
 target_link_libraries(netsim_infantry_ground_carrier_test PRIVATE opennova_runtime)
 add_test(NAME netsim_infantry_ground_carrier COMMAND netsim_infantry_ground_carrier_test)
+# The height mip chain's 64 x 64 level read bilinearly, the arty barrage's ground: the finest
+# cell's byte truncation, the max up the chain, the centring and the weights (D-NET-NEW-L4-23).
+add_executable(terrain_mip_max_test world/terrain_mip_max_test.cpp)
+target_link_libraries(terrain_mip_max_test PRIVATE opennova_runtime)
+add_test(NAME terrain_mip_max COMMAND terrain_mip_max_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

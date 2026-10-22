@@ -206,4 +206,65 @@ TerrainHeightGradient height_field_gradient_fixed(
 	        raw_at(x, y + 1) - raw_at(x, y - 1)};
 }
 
+namespace {
+
+// The mip build's 64 x 64 level entry's max byte for tile (tile_x, tile_z): the max over the
+// tile's eight by eight finest cells of each cell's byte, (max raw16 + 127) >> 7 kept as a
+// byte, over the texel rows and columns 2r..2r+2 of the 1024 atlas (wrapping). A test atlas
+// narrower than 1024 reads 0 past its side.
+// [orig: Terrain_BuildMipchain @0x6056D0 - the rows (row - 2, row - 1, row) & 0x3FF
+//  @0x605740..0x60575D, `add eax, 7Fh; sar eax, 7` and the byte store @0x60589B..0x6058A7; the
+//  coarser levels keep their children's max byte]
+int32_t mip64_max_byte(const TerrainHeightField &f, int tile_x, int tile_z) {
+	uint8_t level_max = 0;
+	for (int r = tile_z * 8; r < tile_z * 8 + 8; ++r) {
+		for (int c = tile_x * 8; c < tile_x * 8 + 8; ++c) {
+			int max_h = -1;
+			for (int dz = 0; dz < 3; ++dz) {
+				const int z = (2 * r + dz) & 0x3FF;
+				for (int dx = 0; dx < 3; ++dx) {
+					const int x = (2 * c + dx) & 0x3FF;
+					const int h = x < f.dim && z < f.dim
+							? f.heightmap[static_cast<std::size_t>(z) * f.dim + x] : 0;
+					if (h > max_h) max_h = h;
+				}
+			}
+			const uint8_t cell = static_cast<uint8_t>((max_h + 127) >> 7);
+			if (cell > level_max) level_max = cell;
+		}
+	}
+	return level_max;
+}
+
+} // namespace
+
+int32_t height_field_mip_max_bilinear_fixed(const TerrainHeightField &f, int32_t mission_x,
+		int32_t mission_y) {
+	if (!f.valid()) return 0;
+	// [orig: Foliage_SampleDensityBilinear @0x606200 - x - 0x100000 @0x60620D, -(y + 0x100000)
+	//  @0x606219, the shared grid routing @0x606220..0x606260, the empty cell's 0 @0x606264]
+	const int32_t centred_x = io::bam_sub(mission_x, 0x100000);
+	const int32_t centred_y = io::bam_add(mission_y, 0x100000);
+	const TerrainAtlasTexel texel = terrain_atlas_texel_at(
+			TerrainAtlasRouting{f.layout.sector_grid, f.layout.origin_x, f.layout.origin_y, f.wrap_x,
+					f.wrap_z},
+			centred_x, centred_y);
+	if (!texel.mapped) return 0;
+	const int32_t centred_z = io::bam_sub(0, centred_y);
+	// The weights, the tiles (the quadrant's +32 is the texel's +512 over 16) and their +1
+	// neighbours on the 64-tile side [orig: @0x606275 / @0x606280, @0x6062AF..0x6062C8].
+	const int32_t frac_x = io::bam_sar(centred_x, 12) & 0xFF;
+	const int32_t frac_z = io::bam_sar(centred_z, 12) & 0xFF;
+	const int tile_x = texel.x >> 4;
+	const int tile_z = texel.z >> 4;
+	const int next_x = (tile_x + 1) & 0x3F;
+	const int next_z = (tile_z + 1) & 0x3F;
+	// The four taps' byte+1 (the max) of the +0x14 level, weighted, summed, halved
+	// [orig: @0x606266; g_TerrainMipchainStorage +0x14 @0x6062CB].
+	return (frac_z * (256 - frac_x) * mip64_max_byte(f, tile_x, next_z) +
+	        (256 - frac_z) * (256 - frac_x) * mip64_max_byte(f, tile_x, tile_z) +
+	        frac_x * frac_z * mip64_max_byte(f, next_x, next_z) +
+	        frac_x * (256 - frac_z) * mip64_max_byte(f, next_x, tile_z)) >> 1;
+}
+
 } // namespace opennova::terrain

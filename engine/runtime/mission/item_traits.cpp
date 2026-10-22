@@ -183,6 +183,10 @@ void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
         for (const char *guided : {"rokt", "stng", "hlfr", "jvln", "arty"})
             guided_record = guided_record || strutil::iequals(def->ai_function, guided);
         row.guided_record = guided_record;
+        // And its def+0x148, the arty row's init alone of the item rows a body runs
+        // [orig: EntityDef_LookupClassCallbacks @0x407DC0 - @0x407E33..0x407E36; the arty
+        //  row @0x813318, ArtyClass_InitFromDef @0x443430].
+        row.arty_class_init = strutil::iequals(def->ai_function, "arty");
         const world::ThrowClass think = world::throw_class_from_tag(def->ai_function);
         if (think == world::ThrowClass::kSatchel || think == world::ThrowClass::kClaymore ||
                 think == world::ThrowClass::kAVMine)

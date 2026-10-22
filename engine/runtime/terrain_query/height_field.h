@@ -150,4 +150,21 @@ int32_t height_field_height_bilinear_fixed(const TerrainHeightField &f, int32_t 
 TerrainHeightGradient height_field_gradient_fixed(
 		const TerrainHeightField &f, int32_t mission_x, int32_t mission_y);
 
+// The height mip chain's 64 x 64 level, read bilinearly at a fixed-point (16.16) mission
+// position, in 16.16: the arty barrage's ground under a shell's spawn. Each 16-unit tile of
+// the atlas holds the mip build's max byte (half units) of the tile's eight by eight finest
+// cells, each cell's byte the max raw16 of its 3 x 3 texels plus 127, shifted down by 7 and
+// stored as a byte. The position, less 16 units on x and plus 16 on y, routes through the
+// shared sector routing; the tile (the texel over 16) and its +1 neighbours wrap at 64, the
+// weights are the low eight bits of the shifted words' 4096ths, and the weighted sum of the
+// four bytes, halved, is the height. 0 with no grid and on an empty cell.
+// [orig: Foliage_SampleDensityBilinear @0x606200 - the centring @0x60620D / @0x606219, the
+//  grid @0x606220..0x606260, the empty return @0x606264, the weights @0x606275 / @0x606280,
+//  the tiles @0x6062AF..0x6062C8, the taps and the sum @0x606266 (g_TerrainMipchainStorage
+//  +0x14 @0x6062CB); Terrain_BuildMipchain @0x6056D0 - the finest cell's rows @0x605740..
+//  0x60575D, its bytes @0x60589B..0x6058A7, the finest-first level list @0x6058EE, the
+//  stores @0x6059D0..0x6059DC (+0x14 the fourth level, 64 x 64)]
+int32_t height_field_mip_max_bilinear_fixed(const TerrainHeightField &f, int32_t mission_x,
+		int32_t mission_y);
+
 } // namespace opennova::terrain

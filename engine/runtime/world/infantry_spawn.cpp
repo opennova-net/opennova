@@ -325,6 +325,31 @@ void organic_init_body(World &world, AiEntity *body, Entity &entity, uint32_t dc
     ai.mirror_wire_anim(*body, world);
 }
 
+// The arty row's class init over a person body's words: it zeroes +0x2B8..+0x2C8, then stores
+// the tick in +0x2BC (the primary channel's request), 10 shells in +0x2C4 (the secondary's
+// deferred state), the +0x26C ammo row's +8 / +0xC words (max_age_ticks / arm_age_ticks) in
+// +0x2C0 (the pending death anim) / +0x2C8 (the secondary's state), and the ARTYRND row's index
+// (0 on a miss) in the byte +0x2B0 (the equipped weapon byte). On a person the +0x26C word is
+// the motor's advanced-launch store, the spawn memset's 0. The deploy reset rewrites +0x2B8,
+// +0x2BC and +0x2C8 and leaves the 10, which the barrage counts down (person_item_mover).
+// [orig: ArtyClass_InitFromDef @0x443430 - the row @0x443441, the zeroes @0x443449..0x443461,
+//  +0x2BC @0x44346D, +0x2C4 @0x443473, +0x2C0 @0x443480, +0x2C8 @0x44348E, AmmoDef_LookupByName
+//  @0x409870 (0 on a miss @0x4098AC) called @0x443494, +0x2B0 @0x44349C;
+//  Entity_ResetToSpawnState @0x4B9610 - +0x2B8 @0x4B96F1, +0x2BC @0x4B9708 / @0x4B9714, +0x2C8
+//  @0x4B972A]
+void arty_class_init(World &world, AiEntity &body, Entity &entity) {
+    auto &inf = body.inf;
+    const AmmoTableEntry *row = world.tables.ammo.by_index(inf.last_advanced_ammo);
+    inf.anim_pending = 0;
+    entity.net_anim_pending = 0;
+    inf.anim_state = static_cast<int>(world.logic_tick);
+    entity.death_anim_state = row != nullptr ? row->max_age_ticks : 0;
+    inf.wpn_deferred = 10;
+    inf.wpn_state = row != nullptr ? row->arm_age_ticks : 0;
+    const int artyrnd = world.tables.ammo.index_of("ARTYRND");
+    entity.equipped_adm_index = static_cast<uint8_t>(artyrnd < 0 ? 0 : artyrnd);
+}
+
 } // namespace
 
 // Initial org1 callback, after definition/ADM/collision resources are bound.
@@ -353,8 +378,17 @@ void player_body_class_init(World &world, Entity &entity) {
         organic_init_body(world, body, entity, 0u);
         return;
     }
-    case PlayerBodyClass::kItem:
+    case PlayerBodyClass::kItem: {
+        // Of the item rows' inits, the arty row's runs over the body's words (D-NET-NEW-L4-23
+        // (a)); the other rows with an init of their own are not run here.
+        // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - `mov eax, [ecx+148h]` @0x43C4F3,
+        //  the call @0x43C4FE]
+        if (!player_item_row(world, entity).arty_class_init) return;
+        AiEntity *body = world.ai.for_handle(entity.handle);
+        if (body == nullptr || !body->inf.active || entity.handle.pool() != 0) return;
+        arty_class_init(world, *body, entity);
         return;
+    }
     }
 }
 

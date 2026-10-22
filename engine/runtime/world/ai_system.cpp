@@ -3,6 +3,8 @@
 #include <runtime/world/ai.h>
 #include <runtime/devtools/tick_profile.h>
 #include <base/io/crt_ftol.h>
+#include <base/io/fixed.h>         // kQ22One (the barrage's Q22 table reads)
+#include <base/io/rotating_prng.h> // the barrage's ROL4 steps
 
 // The AI event queue and the AiSystem core: registration, per-entity rows, and the
 // tick that drives every handler above.
@@ -637,8 +639,8 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // only the guided class rows' serializer writes for group 6, the attach triple +0x2E4 / +0x2E8 /
 // +0x2EC (the legs' re-plant pair and the aim heading on a person; the spawn reset's Yaw words).
 // The person rows' serializers and the vehicles' return -1 off group 11 and every other row has
-// none, so no packet leaves. Its barrage leg opens on +0x2C4, which only the arty class init sets
-// on a body whose own update never runs (D-NET-NEW-L4-14 (a), narrowed).
+// none, so no packet leaves. Ahead of the send its barrage leg runs over the words the arty class
+// init stored at the spawn (player_body_class_init; D-NET-NEW-L4-23).
 // [orig: ArtyClass_UpdateBarrage @0x447140 - the zeroes @0x44714F..0x447163, the gate
 //  @0x447148 / @0x447185 / @0x447199 / @0x4471AE, the send @0x4472C9..0x4472D9;
 //  Entity_SendEffectPacket @0x445C40 - the serialize @0x445C6C, the -1 test @0x445C76, the send
@@ -659,7 +661,7 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 //  byte @0x4413A6, @0x4413B0, @0x441417; Entity_ResetToSpawnState @0x4B9610 - +0x2D4
 //  @0x4B96AA; Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8 / @0x4C0238]
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
-// narrowed): ewep's other legs, towr, nade, rock, schl, clym, arti, aflr, gflr, stng, arty's barrage,
+// narrowed): ewep's other legs, towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
 // pending word, and door's model callbacks.
 static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
@@ -705,8 +707,50 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
         update_elevator(world, body, e.inf.target_heading, e.inf.vel[2], body.veh.speed,
                 body.script_next_ssn);
         return true;
-    case PhysicsClass::Arty:
+    case PhysicsClass::Arty: {
+        // The barrage over the person's words (D-NET-NEW-L4-23 (b), (c)): +0x2BC the start tick,
+        // +0x2C4 the shells left, +0x2C8 the delay, the Roll word's third byte the phase, the
+        // Pitch word the ROL4 stream. Each 32nd tick past the delay it steps the stream twice,
+        // fires the round of the +0x2B0 index from the Position pushed out along the Yaw word
+        // less the second step shifted up 16, by 50 units times the first step's low 17 bits
+        // over 2^16, at the mip chain's ground plus 700 units, pitch word 0xC0000040, with the
+        // +0x170 link as shooter, and counts a shell down.
+        // [orig: ArtyClass_UpdateBarrage @0x447140 - +0x2BC @0x447148, the gate @0x44717D /
+        //  @0x447185 / @0x447192..0x44719F / @0x4471A5..0x4471AE, the steps @0x4471B4..0x4471E9,
+        //  the table index @0x447203..0x44721E, the radius @0x44723D..0x447260, X / Y
+        //  @0x447264..0x447288, Foliage_SampleDensityBilinear @0x606200 called @0x447290,
+        //  +0x2BC0000 @0x44729B, the block's pitch @0x4472B2, WeaponSlot_FireAndSpawnEffects @0x53F440 called
+        //  @0x4472BA (+0x170 @0x447295, +0x2B0 @0x4472A4), the count @0x4472C2]
+        const int32_t start = e.inf.anim_state;
         for (int axis = 0; axis < 3; ++axis) e.inf.vel[axis] = 0;
+        const uint32_t elapsed = world.logic_tick - static_cast<uint32_t>(start);
+        if (start != 0 && e.inf.wpn_deferred != 0 &&
+                static_cast<int32_t>(elapsed) > e.inf.wpn_state &&
+                ((elapsed ^ ((static_cast<uint32_t>(e.roll) >> 16) & 0xFFu)) & 0x1Fu) == 0) {
+            uint32_t state = static_cast<uint32_t>(e.pitch);
+            io::rotating_prng_next16(state);
+            const uint32_t step = state;
+            io::rotating_prng_next16(state);
+            e.pitch = static_cast<int32_t>(state);
+            body.pitch_bam = e.pitch;
+            const int index = io::bam_table_index(
+                    static_cast<uint32_t>(e.heading) - (state << 16) + 0x200000u);
+            const int64_t cos_q22 = static_cast<int64_t>(io::bam_table_cos(index) * io::kQ22One);
+            const int64_t sin_q22 = static_cast<int64_t>(io::bam_table_sin(index) * io::kQ22One);
+            const int32_t radius = static_cast<int32_t>(
+                    (int64_t{0x320000} * static_cast<int32_t>(step & 0x1FFFFu) + 0x8000) >> 16);
+            FixedVec3 origin = body.position.q16();
+            origin.x = io::bam_add(origin.x, static_cast<int32_t>((radius * cos_q22) >> 22));
+            origin.y = io::bam_add(origin.y, static_cast<int32_t>((radius * sin_q22) >> 22));
+            const int32_t ground = world.terrain != nullptr
+                    ? terrain::height_field_mip_max_bilinear_fixed(
+                              *world.terrain, origin.x, origin.y)
+                    : 0;
+            origin.z = io::bam_add(ground, 0x2BC0000);
+            world.round_sim.fire_npc_ammo(world, body.primary_occupant, origin, e.heading,
+                    static_cast<int32_t>(0xC0000040u), body.equipped_adm_index);
+            --e.inf.wpn_deferred;
+        }
         if (world.rules.mp_session && world.rules.logic_authority &&
                 player_item_row(world, body).guided_record) {
             GuidedUpdateEvent send;
@@ -719,6 +763,7 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
             world.out.entity_events.push_back(send);
         }
         return true;
+    }
     case PhysicsClass::Cveh:
     case PhysicsClass::Ctrn:
     case PhysicsClass::Catv:
@@ -744,7 +789,7 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // player-body update. The null row's stub is skipped, org0's and chld's are bare
     // returns, and a body bound to an item row runs that row's mover over its own words:
     // a vehicle, aircraft or genx row's, the rokt / hlfr / jvln rows' pending-word writes,
-    // psec's physics step, envs's and upfx's loop emitter, arty's velocity zeroes and session
+    // psec's physics step, envs's and upfx's loop emitter, arty's barrage and session
     // send (person_item_mover, the pool-0 walk's: a pool-1 slot's visit runs a row's vehicle
     // mover and drop motion in its own legs); the other item rows' movers are not run here
     // (D-NET-NEW-L4-14 (a), narrowed).

@@ -164,9 +164,10 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // - `mov eax, [ecx+148h]` @0x43C4F3, the call @0x43C4FE]: the player class's stores the
     // equipped default (D-NET-143) and resets the local body's lock tone (below); the organic
     // class's init stores neither, nor does a row with no init (the null row, brrl and the item
-    // rows whose def+0x148 is 0), the body keeping the spawn memset's 0 (D-NET-348). The item
-    // rows with an init of their own (some store +0x2B0: Entity_InitSquibFromDef @0x448D0F,
-    // Entity_InitFromWeaponDef @0x4422DA) are not run here yet (the L4-s11 row).
+    // rows whose def+0x148 is 0), the body keeping the spawn memset's 0 (D-NET-348). Of the item
+    // rows with an init of their own, the arty row's runs over the attached body
+    // (player_body_class_init, ArtyClass_InitFromDef @0x443430); the others (some store +0x2B0:
+    // Entity_InitSquibFromDef @0x448D0F, Entity_InitFromWeaponDef @0x4422DA) are not run.
     // [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B10D0..0x4B10DE, @0x4B1100..0x4B1116;
     //  Entity_InitOrganicAI @0x4BFCC0 (no +0x2B0 or lock-tone store); the memset @0x43C3FE]
     const bool player_class_init = row.body_class == PlayerBodyClass::kPlayer;

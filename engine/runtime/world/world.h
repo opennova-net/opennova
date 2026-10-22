@@ -516,6 +516,12 @@ struct PlayerTemplate {
     // [orig: g_EntityClassEventCallbackTable @0x813000 - the +0x14 word Entity_SerializeGuidedMissileState
     //  @0x447C50 in the rows @0x8132B8..0x813318; EntityDef_LookupClassCallbacks @0x407DC0]
     bool guided_record = false;
+    // Whether the row's class init (def+0x148, its ai_function row's +0xC word) is the arty
+    // row's, the one item class init a body bound to the row runs (player_body_class_init).
+    // [orig: g_EntityClassEventCallbackTable @0x813000 - the arty row @0x813318, its init
+    //  ArtyClass_InitFromDef @0x443430; EntityDef_LookupClassCallbacks @0x407DC0 -
+    //  @0x407E33..0x407E36]
+    bool arty_class_init = false;
     // A satchel, claymore or AV mine row's device think, which a body bound to it runs as
     // its class event (ThrowableSim::think_device_row_body); kNone for every other row.
     ThrowClass device_think = ThrowClass::kNone;

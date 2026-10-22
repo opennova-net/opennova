@@ -1462,6 +1462,145 @@ void test_an_arty_row_body_zeroes_its_velocity_and_sends_group_6() {
 	}
 }
 
+// The arty row's class init over a person body's words: +0x2B8 cleared, the tick in +0x2BC,
+// 10 shells in +0x2C4, the +0x26C ammo row's (a person's 0: row 0) +8 / +0xC words in +0x2C0 /
+// +0x2C8, the ARTYRND row's index in the byte +0x2B0 (0 when no row is named so). A brrl row's
+// body (an item row with no init) takes none of it.
+// [orig: ArtyClass_InitFromDef @0x443430 - the row @0x443441, +0x2BC @0x44346D, +0x2C4
+//  @0x443473, +0x2C0 @0x443480, +0x2C8 @0x44348E, +0x2B0 @0x44349C; AmmoDef_LookupByName
+//  @0x409870 - 0 on a miss @0x4098AC]
+void test_an_arty_row_body_takes_the_arty_init() {
+	struct Case {
+		uint8_t player_class;
+		bool artyrnd_row;
+	};
+	for (const Case c : {Case{kArty, true}, Case{kArty, false}, Case{kBrrl, true}}) {
+		Rig r;
+		w::AmmoTableEntry null_e;
+		null_e.name = "AT_NULL";
+		null_e.valid = true;
+		null_e.max_age_ticks = 186;
+		null_e.arm_age_ticks = 31;
+		r.world->tables.ammo.entries.push_back(null_e);
+		w::AmmoTableEntry other;
+		other.name = "AT_OTHER";
+		other.valid = true;
+		other.max_age_ticks = 62;
+		r.world->tables.ammo.entries.push_back(other);
+		w::AmmoTableEntry shell;
+		shell.name = c.artyrnd_row ? "ArtyRnd" : "MortarRnd";
+		shell.valid = true;
+		r.world->tables.ammo.entries.push_back(shell); // index 2
+		w::Entity *body = r.spawn_remote(c.player_class);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr);
+		if (ae == nullptr) continue;
+		CHECK(w::player_item_row(*r.world, *body).arty_class_init == (c.player_class == kArty));
+		ae->inf.anim_pending = 0x55;
+		body->net_anim_pending = 0x55;
+		ae->inf.wpn_deferred = 0;
+		r.world->logic_tick = 1234;
+		const uint8_t equipped_before = body->equipped_adm_index;
+		w::player_body_class_init(*r.world, *body);
+		if (c.player_class != kArty) {
+			CHECK(ae->inf.wpn_deferred != 10);
+			CHECK(body->equipped_adm_index == equipped_before);
+			continue;
+		}
+		CHECK(ae->inf.anim_pending == 0 && body->net_anim_pending == 0);
+		CHECK(ae->inf.anim_state == 1234);
+		CHECK(ae->inf.wpn_deferred == 10);
+		CHECK(ae->inf.wpn_state == 31);
+		CHECK(body->death_anim_state == 186);
+		CHECK(body->equipped_adm_index == (c.artyrnd_row ? 2 : 0));
+	}
+}
+
+// The arty row's barrage over the body's words. With the start tick 44 in +0x2BC, 10 shells in
+// +0x2C4, the delay 44 in +0x2C8 and the Roll word's third byte 7, tick 115 (71 past the start,
+// 71 & 0x1F == 7) fires: the Pitch word 0x12345678 steps to 0x4E81709A and 0xA06430E4 (the
+// word kept), the table index (0x40000000 - 0x30E40000 + 0x200000) >> 22 = 60 and the radius
+// (0x320000 * 0x1709A + 0x8000) >> 16 = 0x47FE14 push the Position (100, 200) to (0xA72B20,
+// 0xE1E8E4), with no terrain the ground 0 plus 700 units, the Yaw word and pitch 0xC0000040,
+// the +0x2B0 round, the +0x170 link as shooter, one shell counted down. Tick 114 (off the
+// phase), tick 83 (39 past: on the phase but within the delay) and an empty +0x2C4 do not fire.
+// The pinned words are the cited disassembly's arithmetic worked outside the port.
+// [orig: ArtyClass_UpdateBarrage @0x447140 - the gate @0x44717D..0x4471AE, the steps
+//  @0x4471B4..0x4471E9, the index @0x447203..0x44721E, the radius @0x44723D..0x447260, X / Y
+//  @0x447264..0x447288, +0x2BC0000 @0x44729B, the pitch @0x4472B2, the fire @0x4472BA, the
+//  count @0x4472C2; WeaponSlot_FireAndSpawnEffects @0x53F440]
+void test_an_arty_row_body_runs_the_barrage() {
+	struct Case {
+		uint32_t tick;
+		int32_t shells;
+		bool fires;
+	};
+	for (const Case c : {Case{115, 10, true}, Case{114, 10, false}, Case{83, 10, false},
+				Case{115, 0, false}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		w::AmmoTableEntry null_e;
+		null_e.name = "AT_NULL";
+		null_e.valid = true;
+		r.world->tables.ammo.entries.push_back(null_e);
+		w::AmmoTableEntry shell;
+		shell.name = "ARTYRND";
+		shell.valid = true;
+		shell.velocity = 300;
+		shell.max_age_ticks = 300;
+		shell.weight_in_grains = 875;
+		r.world->tables.ammo.entries.push_back(shell); // index 1
+		const w::Entity *other = r.spawn_remote(kPlyr);
+		const w::EntityHandle link = other != nullptr ? other->handle : w::EntityHandle{};
+		w::Entity *body = r.spawn_remote(kArty);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(link.valid() && ae != nullptr);
+		if (!link.valid() || ae == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		CHECK(w::body_move_row(*r.world, *ae, body) == w::PhysicsClass::Arty);
+		body->flags &= ~w::kEntityFlagCarried;
+		body->engine_flags &= ~w::kEntityFlagCarried;
+		body->primary_occupant = link;
+		body->equipped_adm_index = 1;
+		body->position.set_q16(w::FixedVec3{100 << 16, 200 << 16, 10 << 16});
+		ae->heading = 0x40000000;
+		ae->pitch = 0x12345678;
+		ae->roll = 0x00070000;
+		ae->inf.anim_state = 44;
+		ae->inf.wpn_state = 44;
+		ae->inf.wpn_deferred = c.shells;
+		r.world->rules.mp_session = false;
+		r.world->terrain = nullptr;
+		r.world->logic_tick = c.tick;
+		r.world->ai.update_organic(*ae, *r.world, c.tick);
+		if (!c.fires) {
+			CHECK(r.world->out.rounds.count == 0);
+			CHECK(ae->pitch == 0x12345678);
+			CHECK(ae->inf.wpn_deferred == c.shells);
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		CHECK(ae->pitch == static_cast<int32_t>(0xA06430E4u));
+		CHECK(body->pitch_bam == static_cast<int32_t>(0xA06430E4u));
+		CHECK(ae->inf.wpn_deferred == 9);
+		CHECK(r.world->out.rounds.count == 1);
+		if (r.world->out.rounds.count == 1) {
+			const w::RoundEvent &round = r.world->out.rounds.records[0];
+			CHECK(round.origin_x == 0xA72B20);
+			CHECK(round.origin_y == 0xE1E8E4);
+			CHECK(round.origin_z == 0x2BC0000);
+			CHECK(round.dir_yaw == 0x40000000);
+			CHECK(round.dir_pitch == static_cast<int32_t>(0xC0000040u));
+			CHECK(round.adm_index == 1);
+			CHECK(round.shooter_handle == link.packed);
+		}
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // A body bound to the psec row runs the physics step over its own words: the savedLivePose
 // stamp, then its velocity triple (+0x98 / +0x9C / +0xA0, the motor's) against the terrain
 // plus a quarter unit (no terrain here: 0x4000). Airborne it moves by the triple, falls 167,
@@ -1627,6 +1766,8 @@ int main() {
 	test_an_item_row_body_runs_its_movers_head();
 	test_an_envs_or_upfx_row_body_registers_its_loop();
 	test_an_arty_row_body_zeroes_its_velocity_and_sends_group_6();
+	test_an_arty_row_body_takes_the_arty_init();
+	test_an_arty_row_body_runs_the_barrage();
 	test_an_ele0_row_body_runs_the_elevator_mover();
 	test_an_upfx_row_body_runs_the_husk_leg();
 	test_a_psec_row_body_runs_the_physics_step();
