@@ -86,8 +86,13 @@ const ns::ClientMinimapOverlaySlot *find_slot(
 
 } // namespace
 
+// Every pipeline, runtime and kernel below lives on the heap: held by value,
+// MSVC Release coalesced them into one 0xEE558-byte main frame (953 KiB of
+// Windows' 1 MiB main-thread stack), leaving the session, HUD and heap calls
+// under it about 70 KiB.
 int main() {
-	ns::ClientReplicaPipeline view;
+	auto view_owner = std::make_unique<ns::ClientReplicaPipeline>();
+	ns::ClientReplicaPipeline &view = *view_owner;
 	auto &entity = view.state().upsert(0x2001);
 	entity.x = 10 << 16;
 	entity.y = -4 << 16;
@@ -206,7 +211,8 @@ int main() {
 			"designation query retains link geometry independently");
 	{
 		opennova::replication::LoopbackChannel channel;
-		opennova::inmatch::ClientRuntime runtime(channel);
+		auto runtime_owner = std::make_unique<opennova::inmatch::ClientRuntime>(channel);
+		opennova::inmatch::ClientRuntime &runtime = *runtime_owner;
 		runtime.state().upsert(0x2001).team = 1;
 		auto receive = [&](uint8_t type, uint16_t seconds) {
 			channel.host_send(opennova::s2c::MINIMAP_OVERLAY,
@@ -332,7 +338,8 @@ int main() {
 	// walk at all. [orig: Radar_UpdateContacts @0x59a9c9..0x59a9ce ->
 	// MapOverlay_UpdateTimers(d)]
 	{
-		ns::ClientReplicaPipeline aged;
+		auto aged_owner = std::make_unique<ns::ClientReplicaPipeline>();
+		ns::ClientReplicaPipeline &aged = *aged_owner;
 		auto &e = aged.state().upsert(0x2031);
 		e.cls = opennova::EntityClass::Vehicle;
 		aged.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2031, 10, 0x0A, 0));
@@ -386,7 +393,8 @@ int main() {
 	// [orig: HUD_RenderAllOverlays @0x5a817d -> Radar_UpdateContacts
 	//  @0x59a7e0 -> MapOverlay_UpdateTimers @0x59a9ce]
 	{
-		opennova::mission::MissionKernel kernel;
+		auto kernel_owner = std::make_unique<opennova::mission::MissionKernel>();
+		opennova::mission::MissionKernel &kernel = *kernel_owner;
 		opennova::world::World &w = kernel.world;
 		w.registry.configure_pool(0, 4);
 		opennova::world::Entity seed;
@@ -396,7 +404,8 @@ int main() {
 		w.ai.attach(self);
 		w.cached.local_player = self;
 		opennova::replication::LoopbackChannel channel;
-		opennova::inmatch::ClientRuntime runtime(channel);
+		auto runtime_owner = std::make_unique<opennova::inmatch::ClientRuntime>(channel);
+		opennova::inmatch::ClientRuntime &runtime = *runtime_owner;
 		auto &e = runtime.state().upsert(0x2041);
 		e.cls = opennova::EntityClass::Vehicle;
 		runtime.view().apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2041, 10, 0x0A, 0));
@@ -440,7 +449,8 @@ int main() {
 	//  -> Radar_UpdateContacts @0x5a817d -> MapOverlay_UpdateTimers @0x59a9ce;
 	//  the menu pause only outside a session, UI_OptionsScreenInit @0x554dcf]
 	{
-		opennova::mission::MissionKernel kernel;
+		auto kernel_owner = std::make_unique<opennova::mission::MissionKernel>();
+		opennova::mission::MissionKernel &kernel = *kernel_owner;
 		opennova::world::World &w = kernel.world;
 		w.registry.configure_pool(0, 4);
 		opennova::world::Entity seed;
@@ -450,7 +460,8 @@ int main() {
 		w.ai.attach(self);
 		w.cached.local_player = self;
 		opennova::replication::LoopbackChannel channel;
-		opennova::inmatch::ClientRuntime runtime(channel);
+		auto runtime_owner = std::make_unique<opennova::inmatch::ClientRuntime>(channel);
+		opennova::inmatch::ClientRuntime &runtime = *runtime_owner;
 		auto &e = runtime.state().upsert(0x2051);
 		e.cls = opennova::EntityClass::Vehicle;
 		runtime.view().apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2051, 10, 0x0A, 0));
@@ -494,7 +505,8 @@ int main() {
 	{
 		// A paused single-player session: the frame's pass still runs, no
 		// tick ran, nothing ages.
-		opennova::mission::MissionKernel kernel;
+		auto kernel_owner = std::make_unique<opennova::mission::MissionKernel>();
+		opennova::mission::MissionKernel &kernel = *kernel_owner;
 		opennova::world::World &w = kernel.world;
 		w.registry.configure_pool(0, 4);
 		opennova::world::Entity seed;
@@ -504,7 +516,8 @@ int main() {
 		w.ai.attach(self);
 		w.cached.local_player = self;
 		opennova::replication::LoopbackChannel channel;
-		opennova::inmatch::ClientRuntime runtime(channel);
+		auto runtime_owner = std::make_unique<opennova::inmatch::ClientRuntime>(channel);
+		opennova::inmatch::ClientRuntime &runtime = *runtime_owner;
 		auto &e = runtime.state().upsert(0x2052);
 		e.cls = opennova::EntityClass::Vehicle;
 		runtime.view().apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2052, 10, 0x0A, 0));
