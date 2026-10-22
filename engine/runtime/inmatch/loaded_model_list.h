@@ -88,8 +88,9 @@ private:
 // (the record's word, read signed), its Flags and its class [orig: NapiNPClientMsg_0x00C
 // @0x42E730 - the signed word @0x42E840, the item index @0x42E84A, Flags @0x42E91A,
 // playerClass @0x42E9D5;
-// NapiNPClientMsg_FullEntitySpawn @0x433780 - the signed word @0x433842, Flags @0x433B69,
-// playerClass @0x433BB5, the item index @0x433BD4].
+// NapiNPClientMsg_FullEntitySpawn @0x433780 - the word stored zero-extended @0x433842 and
+// read signed by the movsx @0x433B9A, Flags @0x433B69, playerClass @0x433BB5, the item index
+// @0x433BD4].
 struct PoolZeroBody {
 	int type_id = 0;
 	uint32_t flags = 0;

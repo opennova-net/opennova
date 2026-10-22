@@ -417,6 +417,66 @@ void test_the_joiner_pool0() {
 				own[0].name == "upl.3DI");
 }
 
+// A host's player bodies load their class's camouflage row only after the freeze (the round
+// init's call @0x525BAF, a join's spawn behind g_MissionRunning @0x51D043), so they never
+// reach the page. Ours spawn in the boot ahead of the list, and the reload's pool-0 leg walks
+// them: each is an MP class's (5..9), whose row the in-session leg loaded first, so the nodes
+// and the page are the same as with no body in pool 0 (D-NET-527).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the load @0x43C45F;
+//  Game_StartMission @0x524360 - the freeze @0x525A6E, Server_InitAllPlayerEntitiesForRound
+//  @0x525BAF, Game_SetMissionRunning(1) @0x525D58; Game_ReloadEntityModelsAndCallbacks
+//  @0x522830 - the MP classes @0x522865..0x5228e5]
+void test_the_hosts_player_bodies_add_no_node() {
+	std::vector<def::DefItemDef> rows;
+	rows.push_back(item(0, ""));
+	for (int cls = 5; cls <= 8; ++cls) rows.push_back(item(5100 + cls, "camo.3di"));
+	rows.push_back(item(5109, "camo9.3di"));
+	rows.push_back(item(6005, "ai.3di"));
+	def::DefItemsFile items{};
+	items.entries = rows.data();
+	items.count = rows.size();
+	inmatch::CharAttrTable charattr;
+	for (uint8_t cls = 5; cls <= 9; ++cls) {
+		charattr.table.rows[cls - 1].active = true;
+		charattr.table.rows[cls - 1].desert_cammo = 5100 + cls;
+	}
+	const auto build = [&](bool bodies) {
+		auto world = std::make_unique<world::World>();
+		for (int pool = 0; pool < 3; ++pool) world->registry.configure_pool(pool, 8);
+		world::Entity seed;
+		seed.item_id = 6005;
+		CHECK(world->registry.spawn(0, seed).valid());
+		if (bodies) {
+			for (uint8_t cls = 9; cls >= 5; --cls) {
+				world::Entity body;
+				body.item_id = 5100 + cls;
+				body.flags = world::kEntityFlagPlayer;
+				body.player_class = cls;
+				CHECK(world->registry.spawn(0, body).valid());
+			}
+		}
+		inmatch::MissionStartModelSources sources;
+		sources.model_loads = [](const std::string &file) {
+			return file == "camo.3DI" || file == "camo9.3DI" || file == "ai.3DI" || file == "upl.3DI";
+		};
+		sources.climate = bms::ClimateType::Desert;
+		sources.items = &items;
+		sources.charattr = &charattr;
+		sources.world = world.get();
+		return inmatch::build_mission_start_model_list(sources);
+	};
+	const inmatch::LoadedModelList without = build(false);
+	const inmatch::LoadedModelList with = build(true);
+	// Head first: upl.3di, the AI's row, class 9's file, the classes 5..8's one file.
+	const std::vector<inmatch::LoadedModelList::Node> nodes = with.nodes();
+	CHECK(nodes.size() == 4);
+	if (nodes.size() == 4)
+		CHECK(nodes[0].name == "upl.3DI" && nodes[1].name == "ai.3DI" &&
+				nodes[2].name == "camo9.3DI" && nodes[3].name == "camo.3DI");
+	CHECK(with.model_files() == without.model_files());
+	CHECK(with.freeze().size() == without.freeze().size());
+}
+
 // The retail page lengths for a 305-entry list (jox01 01TR): pages 50..250 full, page 300
 // holds five entries (24 bytes), past the end the header alone.
 void test_the_305_entry_pages() {
@@ -462,6 +522,7 @@ int main() {
 	test_the_mission_start_list();
 	test_the_special_event();
 	test_the_joiner_pool0();
+	test_the_hosts_player_bodies_add_no_node();
 	test_the_305_entry_pages();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

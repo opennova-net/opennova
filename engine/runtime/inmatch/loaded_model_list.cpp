@@ -356,7 +356,17 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 	for (const std::string &graphic :
 			terrain::terrain_foliage_graphics(read_file, src.terrain, src.environment))
 		if (!graphic.empty()) list.load_foliage(graphic);
-	// The freeze follows [orig: Render_InitMissionTextures @0x525a6e].
+	// The freeze follows [orig: Render_InitMissionTextures @0x525a6e]. The player bodies'
+	// spawns load their class's camouflage row only after it, so never onto the page: the
+	// round init's (the call @0x525BAF, reached only through the reload's block and, on the
+	// first load, the freeze's; no back edge returns to it) and a join's (its spawn arm runs
+	// only with g_MissionRunning, cleared @0x5245E3 and set @0x525D58) [orig:
+	// Entity_SpawnFromAnimSlotProperty @0x43C390 (the load @0x43C45F); Server_PlayerAdd
+	// @0x51CBC0 (the gate @0x51D043, the spawn @0x51D056); the frozen count's only writer the
+	// freeze @0x5b13d0 apart from the page's free @0x5b145a]. A host here walks the bodies its
+	// boot spawned ahead of this list; each is a session player of an MP class (5..9) whose
+	// camouflage row the in-session leg above loaded already, so the page and the node order
+	// are retail's.
 	return list;
 }
 
