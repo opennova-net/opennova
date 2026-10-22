@@ -118,9 +118,10 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
     // own airborne bit, read before the latch below clears it: a soldier who WADED
     // in and one who JUMPED in are heard differently. The 0x34 carries the body's
     // own position, the target just stored, not the plane (the local effect's).
-    // [orig: the afloat test `jnz` @0x4BFB87, the airborne test @0x4BFC24,
-    //  `lea eax, [esi+4]` @0x4BFC2B, Server_SendOverlayActionToAlive @0x4BFC40;
-    //  the effect at g_EnvWaterHeightFixed @0x4BFBC4..0x4BFBE3]
+    // [orig: Entity_UpdateInfantryAI @0x4B9910 - the afloat test `jnz` @0x4BFB87,
+    //  the airborne test @0x4BFC24, `lea eax, [esi+4]` @0x4BFC2B,
+    //  Server_SendOverlayActionToAlive called @0x4BFC40; the effect at
+    //  g_EnvWaterHeightFixed @0x4BFBC4..0x4BFBE3]
     if (!was_afloat) {
         world.out.water_crossings.add(e.self->position.x.q16, e.self->position.y.q16,
                                   e.self->position.z.q16,
