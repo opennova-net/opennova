@@ -90,6 +90,16 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 				"an unmodeled SUS1 is omitted instead of fabricated")
 		assert_false("mission" in row,
 				"retail discovery does not invent pre-auth mission metadata")
+		# A join from the row takes the listed session at its index, here its own; an
+		# index past the listed sessions names none (engine: lan_discovery.h join_session).
+		var join: LanServerRow = browser.get_join_row(0)
+		assert_not_null(join, "the row's index names the listed session")
+		if join != null:
+			assert_eq(join.host_ip, row.host_ip)
+			assert_eq(join.port, row.port)
+			assert_eq(join.host_key, row.host_key, "the join dials the record's HK")
+			assert_eq(join.client_index, row.client_index, "the join goes on with the browse's CI")
+		assert_null(browser.get_join_row(1), "no listed session at the next index")
 	browser.stop()
 	assert_false(browser.is_browsing())
 

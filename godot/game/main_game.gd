@@ -1258,6 +1258,17 @@ func end_join_enumerate() -> void:
 	_join_screen.close()
 
 
+## A join the join machine refuses before it dials: the join screen parks on `text`
+## with Cancel only, which runs `abort` (its error arm, then its state 9). False when
+## the screen cannot open.
+func show_join_refusal(text: String, abort: Callable) -> bool:
+	if not _join_screen.open(_root, self):
+		return false
+	_join_enumerate_abort = abort
+	_join_screen.show_failure(text)
+	return true
+
+
 ## The join machine's choice (its state 8): a discovered session whose flag word
 ## offers one opens pre.mnu's choice panels on the join screen; ACCEPT walks them
 ## and its commit hands the three controls to `committed`; BACK or Cancel runs

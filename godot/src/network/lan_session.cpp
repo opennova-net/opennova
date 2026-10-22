@@ -111,6 +111,7 @@ void LanSession::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
 	ClassDB::bind_method(D_METHOD("drain_records"), &LanSession::drain_records);
 	ClassDB::bind_method(D_METHOD("get_servers"), &LanSession::get_servers);
+	ClassDB::bind_method(D_METHOD("get_join_row", "index"), &LanSession::get_join_row);
 	ClassDB::bind_method(D_METHOD("is_browsing"), &LanSession::is_browsing);
 	ClassDB::bind_method(D_METHOD("get_client_index"), &LanSession::get_client_index);
 
@@ -271,6 +272,13 @@ void LanSession::stop() {
 
 TypedArray<LanServerRow> LanSession::get_servers() const {
 	return servers_.duplicate();
+}
+
+Ref<LanServerRow> LanSession::get_join_row(int index) const {
+	opennova::LanDiscoveryRow row;
+	if (index < 0 || !browser_.join_session(static_cast<size_t>(index), row))
+		return Ref<LanServerRow>();
+	return row_record(row, browser_.client_index());
 }
 
 void LanSession::_process(double delta) {

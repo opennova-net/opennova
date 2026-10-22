@@ -527,6 +527,10 @@ func test_lan_join_emits_selected_server() -> void:
 	driver.set_widget_items(lan_list, PackedStringArray(["biggy (1/4)"]))
 	# A single-click selection relays the row index through the driver's aggregate signal.
 	driver.select_row(lan_list, 0)
+	# The hand-published row has no session record behind it, so a session would refuse
+	# its join (test_a_row_with_no_listed_session_refuses_the_join): the session-less
+	# companion joins the row as listed, which pins the row's decode.
+	mp.set_lan_session(null)
 	_press(driver, "LAN_JOINGAME")
 	assert_signal_emitted(mp, "lan_join_requested")
 	var target: JoinTarget = get_signal_parameters(mp, "lan_join_requested")[0]
@@ -597,12 +601,40 @@ func test_appended_lan_row_keeps_the_selection() -> void:
 	_publish(session, [alpha, bravo, charlie])
 	assert_eq(driver.item_count(lan_list), 3, "the new host is appended")
 	assert_eq(driver.selected_row(lan_list), 1, "the highlighted row stays selected")
+	# Hand-published rows have no session records: the session-less companion joins the
+	# row as listed.
+	mp.set_lan_session(null)
 	_press(driver, "LAN_JOINGAME")
 	assert_signal_emitted(mp, "lan_join_requested",
 		"JOIN still joins the row the player selected after a host was appended")
 	if get_signal_emit_count(mp, "lan_join_requested") > 0:
 		var target: JoinTarget = get_signal_parameters(mp, "lan_join_requested")[0]
 		assert_eq(target.host_ip, "192.168.1.11", "the selected row, not the new one")
+
+
+# A join from a row takes the session's listed session at the row's index; a row whose
+# index names none (here a session whose browse holds no record) is refused before
+# anything is sent: no join request, the gameerr CVUNABLETOCREATE text instead (engine:
+# net/npwire/lan_discovery.h join_session; ctest lan_discovery).
+func test_a_row_with_no_listed_session_refuses_the_join() -> void:
+	var mp := MpMenuCompanion.new()
+	watch_signals(mp)
+	var driver := _make_lan_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
+	var session := LanSession.new()
+	autofree(session)
+	mp.set_lan_session(session)
+	_publish(session, [LanServerRow.make("gone", "192.168.1.10", 32768)])
+	var lan_list := driver.widget_id("LAN_GAME_LIST")
+	driver.select_row(lan_list, 0)
+	assert_null(session.get_join_row(0), "the browse holds no listed session")
+	_press(driver, "LAN_JOINGAME")
+	assert_signal_not_emitted(mp, "lan_join_requested", "the refused join dials nothing")
+	assert_signal_emitted(mp, "lan_join_refused")
+	if get_signal_emit_count(mp, "lan_join_refused") > 0:
+		var text: String = get_signal_parameters(mp, "lan_join_refused")[0]
+		assert_eq(text, Strings.lookup(Strings.TABLE_GAMEERR, "MP Errors", "CVUNABLETOCREATE"),
+				"the refusal reads gameerr's CVUNABLETOCREATE")
 
 
 func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> void:

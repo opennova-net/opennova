@@ -62,6 +62,7 @@ func setup(shell: MainGame, world: GameWorld, menu_shell: MenuShell, panel_layer
 func wire_menu_companions(mp_companion: MpMenuCompanion) -> void:
 	mp_companion.lan_host_start_requested.connect(_on_lan_host_start_requested)
 	mp_companion.lan_join_requested.connect(join_lan_server)
+	mp_companion.lan_join_refused.connect(refuse_lan_join)
 
 
 # --- Launch-flag entries (dev/probe/automation launches) -----------------------
@@ -220,6 +221,17 @@ func join_lan_server(target: JoinTarget) -> void:
 			_begin_join_choice(target)
 		_:
 			_start_lan_join(target)
+
+
+## A LAN row's join the join machine refuses before it dials (the row's index names
+## no listed session, engine: net/npwire/lan_discovery.h join_session): the join
+## screen shows `text` (CVUNABLETOCREATE) with Cancel only, which leaves to the menu as
+## the choice's Cancel does (retail's error arm, then its state 9).
+func refuse_lan_join(text: String) -> void:
+	_cancel_spectator_probe()
+	_join_choice_target = null
+	if _shell == null or not _shell.show_join_refusal(text, _cancel_join_role_choice):
+		_cancel_join_role_choice()
 
 
 # Complete the join only after the retail Player/Spectator decision has been

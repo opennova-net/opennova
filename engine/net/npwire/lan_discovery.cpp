@@ -215,6 +215,7 @@ void LanDiscoveryBrowser::create_record(const PeerAddr &from, LanDiscoveryServer
 	// [orig: Nwu_HandleServerHello @0x626D20 - Napi_CopyString(.., 0x40) @0x627172, into
 	//  the record's +0x1FC @0x627775]
 	record.name = server.server_name;
+	record.password_required = server.password_required;
 	record.stamp_s = browse_elapsed_s_;
 	// The discovered callback: a session whose P2 does not admit the browse's
 	// connect type takes no node (no row, no slot in the walk) and no line.
@@ -282,6 +283,28 @@ void LanDiscoveryBrowser::walk_rows() {
 	}
 }
 
+bool LanDiscoveryBrowser::join_session(size_t row, LanDiscoveryRow &out) const {
+	// The join walks the listed sessions to the row's index.
+	// [orig: UI_EnumerateAndJoinSession @0x569F50 - the walk @0x56A1AE..0x56A1D6;
+	//  UI_JoinSelectedSession @0x5699D0 - @0x569A4B..0x569A76]
+	size_t index = 0;
+	for (const Record &record : records_) {
+		if (!record.listed) continue;
+		if (index++ != row) continue;
+		// The node's copy as discovered; the dial's address, HK and SF are the record's.
+		// [orig: CNapiNPConnection_InitFromSession @0x626320 - @0x62639C / @0x6263A8 /
+		//  @0x6263AE..0x6263B7]
+		out.host_ip = peer_addr_ip_to_string(record.sender);
+		out.port = record.sender.port;
+		out.server = record.node;
+		out.server.host_key = record.host_key;
+		out.server.password_required = record.password_required;
+		out.record_id = record.id;
+		return true;
+	}
+	return false;
+}
+
 bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
 	announce_due = false;
 	if (!browsing_) return false;
@@ -315,12 +338,15 @@ void LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size, const P
 		return;
 	LanDiscoveryServer server;
 	if (!parse_lan_discovery_reply(*title_, data, size, client_index_, server)) return;
-	// The sender's record: the same HK and SN stamp it again in place with no callback;
-	// anything else replaces it.
+	// The sender's record: the same HK and SN refresh it and stamp it again in place with
+	// no callback (its node, the row's copy, is not refreshed); anything else replaces it.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the in-place copy @0x627BFA..0x627E24 (the
+	//  SF into +0x2C0 @0x627D12), the stamp @0x627E34]
 	for (size_t i = 0; i < records_.size(); ++i) {
 		Record &record = records_[i];
 		if (!(record.sender == from)) continue;
 		if (record.host_key == server.host_key && record.name == server.server_name) {
+			record.password_required = server.password_required;
 			record.stamp_s = browse_elapsed_s_;
 			return;
 		}

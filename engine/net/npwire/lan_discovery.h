@@ -308,20 +308,48 @@ public:
 
 	// The LAN list's rows in the order the walk appended them.
 	const std::vector<LanDiscoveryRow> &servers() const { return servers_; }
+	// The session a join from the list's row `row` takes: the join walks the listed
+	// sessions (the discovered callback's nodes, in their discovery order) to the row's
+	// index, not to the row's own record. A replaced or expired session's node is gone
+	// while its row stays, so a later row's index names the next listed session, and
+	// an index past the listed sessions names none: false, the join refused
+	// (CVUNABLETOCREATE) before anything is sent. `out` is the node's copy of the
+	// record as discovered (the type, the flag word, the expansion the join reads),
+	// with the address, HK and SF of the record itself, which the in-place leg keeps
+	// current (the 0x42's HK and its PW gate).
+	// [orig: UI_HandleLANGameListEvent @0x556C70 - the selected row's index
+	//  @0x556BF4..0x556C21 (LAN_JOINGAME's handler @0x556CE0 runs the same body,
+	//  @0x556CEA); UI_EnumerateAndJoinSession @0x569F50 - off the NovaWorld transport
+	//  (@0x569FD2) the count gate CNapiNetwork_GetDiscoveredSessionCount @0x4C6E70 (the
+	//  node list's count) @0x56A118 / @0x56A196, the node walk @0x56A1AE..0x56A1D6,
+	//  CVUNABLETOCREATE @0x56A1A2 / @0x56A1D8, the node's type, flag word and texts
+	//  @0x56A207..0x56A236; UI_JoinSelectedSession @0x5699D0 - the same walk
+	//  @0x569A4B..0x569A76 (none: CVUNABLETOCREATE @0x569A78),
+	//  CNapiNetwork_StartClientConnection (the call @0x569DED);
+	//  CNapiNetwork_StartClientConnection @0x4CA160 - the node's record by its id
+	//  (NapiNPEnumerator_FindTimerById, the call @0x4CA1EE; a node's record is always
+	//  there, the removed callback freeing the node, so its -1 @0x4CA1FC is not reached
+	//  from a row); CNapiNPConnection_InitFromSession @0x626320 - the record's HK
+	//  @0x62639C, SF
+	//  @0x6263A8 and address @0x6263AE..0x6263B7; NapiSession_AllocPlayerNode @0x4C7710 -
+	//  a node appended at the list's tail @0x4C780E..0x4C783B]
+	bool join_session(size_t row, LanDiscoveryRow &out) const;
 	// The enumerator's session records, listed or not.
 	size_t record_count() const { return records_.size(); }
 
 private:
 	// One session record: its id, its sender, the HK and SN the next 0x81 is
-	// compared with, its last stamp on the browse clock, and whether the discovered
-	// callback listed it (its node), with the node's copy of the record as discovered.
-	// (The in-place update's refreshed fields have no reader here: the row is the
-	// node's copy.)
+	// compared with, its SF (the join's PW gate), its last stamp on the browse clock,
+	// and whether the discovered callback listed it (its node), with the node's copy
+	// of the record as discovered. (The in-place update refreshes every field of the
+	// record; of those only the SF has a reader here, the join: the row is the node's
+	// copy.)
 	struct Record {
 		uint32_t id = 0;
 		PeerAddr sender{};
 		uint32_t host_key = 0;
 		std::string name; // the record's SN copy (+0x1FC)
+		bool password_required = false; // the record's SF bit 0 (+0x2C0)
 		double stamp_s = 0.0;
 		bool listed = false;
 		LanDiscoveryServer node;

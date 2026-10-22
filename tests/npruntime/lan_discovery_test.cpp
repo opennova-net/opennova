@@ -250,9 +250,9 @@ PeerAddr sender(const std::string &dotted, int port) {
                                  static_cast<uint16_t>(port));
 }
 
-// A game-server 0x81 carrying `hk` as its HK.
+// A game-server 0x81 carrying `hk` as its HK (and `sf` as its SF).
 std::vector<uint8_t> server_reply_hk(const std::string &name, uint32_t hk, uint32_t players = 1,
-                                     uint32_t flags = 0x904u) {
+                                     uint32_t flags = 0x904u, uint32_t sf = 0) {
     const ClientHello retail = make_title_client_hello(kJo, 0);
     ServerHello hello;
     hello.ci = kBrowseCi;
@@ -262,6 +262,7 @@ std::vector<uint8_t> server_reply_hk(const std::string &name, uint32_t hk, uint3
     hello.pv2 = retail.pv2;
     hello.sn = name;
     hello.hk = hk;
+    hello.sf = sf;
     hello.p1 = 2;
     hello.p2 = flags;
     hello.np = players;
@@ -689,6 +690,82 @@ void test_enumerate_and_join_browse_has_no_window() {
     CHECK(browse_ci == counter);
 }
 
+// L2-s16 FOUND 2: a join from the list's row takes the listed session at the row's
+// index (the discovered callback's nodes in their discovery order), not the row's own
+// record. A replaced session's node goes and its new one is appended, while its old row
+// stays: the old row's index then names the next listed session, and the last row's
+// index names none, a join the join machine refuses (CVUNABLETOCREATE) before anything
+// is sent. A session the channel filter drops has no node and takes no index. The join
+// dials the record's address with its HK and its SF, which the in-place leg keeps
+// current while the row keeps the node's copy.
+// [orig: UI_HandleLANGameListEvent @0x556C70 - the selected row's index @0x556BF4..0x556C21;
+//  UI_EnumerateAndJoinSession @0x569F50 - the count gate @0x56A196, the node walk
+//  @0x56A1AE..0x56A1D6, CVUNABLETOCREATE @0x56A1A2 / @0x56A1D8; UI_JoinSelectedSession
+//  @0x5699D0 - the walk @0x569A4B..0x569A76; CNapiNetwork_StartClientConnection @0x4CA160 -
+//  the record by the node's id (the call @0x4CA1EE); CNapiNPConnection_InitFromSession
+//  @0x626320 - HK @0x62639C, SF @0x6263A8; Nwu_HandleServerHello @0x626D20 - the in-place
+//  SF @0x627D12; NapiSession_AllocPlayerNode @0x4C7710 - the tail append @0x4C780E..0x4C783B]
+void test_a_row_joins_the_listed_session_at_its_index() {
+    opennova::LanDiscoveryBrowser b;
+    CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
+    const PeerAddr alpha_host = sender("10.0.0.1", 32768);
+    const PeerAddr nw_host = sender("10.0.0.2", 32768);
+    const PeerAddr bravo_host = sender("10.0.0.3", 32768);
+    const std::vector<uint8_t> alpha = server_reply_hk("Alpha", 0x11u);
+    const std::vector<uint8_t> nw = server_reply_hk("Nw", 0x22u, 1, 0x404u);
+    const std::vector<uint8_t> bravo = server_reply_hk("Bravo", 0x33u);
+    b.accept_reply(alpha.data(), alpha.size(), alpha_host);
+    b.accept_reply(nw.data(), nw.size(), nw_host);
+    b.accept_reply(bravo.data(), bravo.size(), bravo_host);
+    walk(b);
+    CHECK(b.servers().size() == 2);
+    LanDiscoveryRow join;
+    CHECK(b.join_session(0, join));
+    CHECK(join.host_ip == "10.0.0.1" && join.port == 32768 && join.server.host_key == 0x11u);
+    CHECK(join.record_id == 1);
+    // The filtered session takes no index: row 1 is Bravo's.
+    CHECK(b.join_session(1, join));
+    CHECK(join.host_ip == "10.0.0.3" && join.server.host_key == 0x33u && join.record_id == 3);
+    CHECK(!b.join_session(2, join));
+
+    // Alpha restarts (another HK): its record and node are replaced, the new node at the
+    // list's tail, and the walk appends its row beside the old one.
+    const std::vector<uint8_t> alpha_restarted = server_reply_hk("Alpha", 0x44u, 2);
+    b.accept_reply(alpha_restarted.data(), alpha_restarted.size(), alpha_host);
+    walk(b);
+    CHECK(b.servers().size() == 3);
+    if (b.servers().size() == 3) {
+        CHECK(b.servers()[0].record_id == 1 && b.servers()[0].server.host_key == 0x11u);
+        CHECK(b.servers()[2].record_id == 4 && b.servers()[2].server.host_key == 0x44u);
+    }
+    // Alpha's old row (row 0) now joins Bravo, the first listed session; row 1 (Bravo's)
+    // joins the restarted Alpha; row 2 names none.
+    CHECK(b.join_session(0, join));
+    CHECK(join.host_ip == "10.0.0.3" && join.server.server_name == "Bravo" && join.record_id == 3);
+    CHECK(b.join_session(1, join));
+    CHECK(join.host_ip == "10.0.0.1" && join.server.host_key == 0x44u && join.record_id == 4);
+    CHECK(join.server.current_players == 2);
+    CHECK(!b.join_session(2, join));
+
+    // Bravo's next 0x81 sets its SF under the same HK and SN: the record in place takes it
+    // (the join's PW gate), the row keeps the node's first copy.
+    const std::vector<uint8_t> bravo_locked = server_reply_hk("Bravo", 0x33u, 1, 0x904u, 1u);
+    b.accept_reply(bravo_locked.data(), bravo_locked.size(), bravo_host);
+    walk(b);
+    CHECK(b.servers().size() == 3);
+    if (b.servers().size() == 3) CHECK(!b.servers()[1].server.password_required);
+    CHECK(b.join_session(0, join));
+    CHECK(join.record_id == 3 && join.server.password_required);
+
+    // The records stay past the window's end, and with them the joins; a drain leaves the
+    // rows and no listed session, so every row's join is refused.
+    b.stop();
+    CHECK(b.join_session(1, join) && join.record_id == 4);
+    b.drain_records();
+    CHECK(b.servers().size() == 3);
+    CHECK(!b.join_session(0, join));
+}
+
 int main() {
     test_begin_validates_the_range_and_fixes_one_identity();
     test_each_port_gets_an_announce_naming_its_destination();
@@ -706,6 +783,7 @@ int main() {
     test_a_reannounce_due_on_the_last_frame_still_goes_out();
     test_proxy_rendezvous_leads_each_burst();
     test_enumerate_and_join_browse_has_no_window();
+    test_a_row_joins_the_listed_session_at_its_index();
     if (failures == 0) std::printf("lan_discovery_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

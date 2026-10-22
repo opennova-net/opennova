@@ -90,6 +90,11 @@ public:
 	// activation and a join's enumerate-and-join drain them, as a search does.
 	void drain_records() { browser_.drain_records(); }
 	TypedArray<LanServerRow> get_servers() const;
+	// The session a join from the list's row `index` takes: the listed session at the
+	// row's index, which a replaced session makes another than the row's own (engine:
+	// LanDiscoveryBrowser::join_session carries the witness). Null when none: the join
+	// is refused before anything is sent.
+	Ref<LanServerRow> get_join_row(int index) const;
 	bool is_browsing() const { return browser_.browsing(); }
 	// The browse's connection index (its 0x41s' CI); a join from one of its rows
 	// carries it (LanServerRow.client_index). 0 before the first browse.

@@ -21,6 +21,10 @@ extends MenuCompanion
 # The player chose to join the highlighted discovered LAN server. The payload is the
 # typed dial target decoded from the discovery row (JoinTarget.from_lan_row).
 signal lan_join_requested(target: JoinTarget)
+# The player chose to join a LAN row whose index names no listed session: the join
+# machine refuses it before anything is sent, with gameerr "MP Errors" CVUNABLETOCREATE
+# (`text`) on the join screen.
+signal lan_join_refused(text: String)
 # START_GAME on the host screen, with the co-op-minimal host request (see _read_host_config).
 signal lan_host_start_requested(config: HostSessionConfig)
 
@@ -198,7 +202,17 @@ func _on_list_activated(id: int, row: int) -> void:
 func _on_lan_join() -> void:
 	if _selected_server < 0 or _selected_server >= _servers.size():
 		return
-	var target := JoinTarget.from_lan_row(_servers[_selected_server])
+	# The join takes the listed session at the selected row's index, which after a
+	# replaced session is not the row's own, and is refused when the index names none
+	# (engine: net/npwire/lan_discovery.h join_session carries the witness). A
+	# session-less companion (the menu seam's harness) joins the row as listed.
+	var row: LanServerRow = _servers[_selected_server]
+	if _lan_session != null:
+		row = _lan_session.get_join_row(_selected_server)
+	if row == null:
+		lan_join_refused.emit(Strings.lookup(Strings.TABLE_GAMEERR, "MP Errors", "CVUNABLETOCREATE"))
+		return
+	var target := JoinTarget.from_lan_row(row)
 	# The join goes on with the search's socket (D-NET-NEW-R3-3); a search whose
 	# window closed has none, and the join opens the client arm's again.
 	if _lan_session != null:
