@@ -351,6 +351,8 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		// the empty string for any other def). [orig: NapiNPClientMsg_0x00D
 		//  @0x433320..0x43334A]
 		es.display_name = rec.entity_name;
+		// The AI slot's +156 name, the AI trailer's [orig: @0x433363..0x43337C].
+		es.spawn_ai_name = rec.ai_name;
 		// The 0x0D handler memsets the full slot and has no entity+124
 		// net-id field. Preserve retail's resulting zero, not ClientState's
 		// unknown/sentinel default.

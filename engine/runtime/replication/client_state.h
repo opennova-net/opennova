@@ -317,6 +317,12 @@ struct ClientEntityState {
 	// [orig: NapiNPClientMsg_0x00C @0x42E867..0x42E8EA; NapiNPClientMsg_0x00D
 	//  @0x433320..0x43334A; NapiNPClientMsg_FullEntitySpawn @0x433D37..0x433D61]
 	std::string display_name;
+	// The AI slot's +156 profile name a 0x0D AI trailer carries (an AIData def's
+	// slot, which the record allocates); the class init at the mission start
+	// loads the brain's profile by it. A 0x18 leaves the zeroed slot's empty
+	// name. [orig: NapiNPClientMsg_0x00D @0x433363..0x43337C;
+	//  Entity_InitVehicleAIFromDef @0x46879E]
+	std::string spawn_ai_name;
 	uint16_t net_id = 0xFFFF;
 	uint8_t spawn_tag = 0;
 	int32_t x = 0;                                // world i32 16.16 (decompressed

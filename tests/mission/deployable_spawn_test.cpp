@@ -12,6 +12,7 @@
 //  @0x51C7EF); Entity_SpawnDeployable @0x51C2B0 (@0x51C317..0x51C3CB, @0x51C42F, @0x51C454,
 //  @0x51C467..0x51C484, @0x51C492); Entity_CloneFromTemplateToPool1 @0x439830 (@0x439835)]
 #include "npruntime/conn_fixture.h"
+#include <formats/aip/aip.h>
 #include <formats/def/def.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_vehicle_spawn.h>
@@ -188,12 +189,79 @@ void test_a_bay_without_the_points_raises_its_spawn() {
 	CHECK(!n.request());
 }
 
+// The class init on a placed pool-1 row (the deployable's, a joiner's 0x0D / 0x18 row): an
+// AIData brain-class row takes its brain from the profile its AI slot's +156 name loads,
+// else the vehicle family's def default_aip, else helo1, the helicopter family going
+// straight to helo1; a row of any other def takes none; each brain takes the next
+// stagger phase. The profiles are the test's own, told apart by their aim_skill.
+// [orig: Entity_InitVehicleAIFromDef @0x4686C0 (the +156 name @0x46879E..0x4687A3, the
+//  def's default_aip @0x4687BC..0x4687C1, helo1 @0x4687D3, the stagger @0x46891C..0x468945);
+//  Entity_InitHelicopterAIFromDef @0x4683C0 (the +156 test @0x4684A4, helo1 @0x4684C9)]
+void test_the_class_init_names_its_profile() {
+	std::array<def::DefItemDef, 4> rows{};
+	rows[0].id = mission::kItemIdOffset + 1;
+	rows[0].type = 1;
+	for (std::size_t i = 1; i < rows.size(); ++i) {
+		rows[i].id = mission::kItemIdOffset + 1400 + static_cast<int>(i) - 1;
+		rows[i].type = 1;
+		rows[i].attrib = w::kItemAttribAIData;
+		std::strcpy(rows[i].ai_function, "cveh");
+		std::strcpy(rows[i].default_aip, "Def_Profile");
+	}
+	std::strcpy(rows[2].ai_function, "CHel");
+	rows[3].attrib = 0;
+	def::DefItemsFile items{rows.data(), rows.size()};
+	auto kernel = std::make_unique<mission::MissionKernel>();
+	kernel->set_items_table(&items);
+	for (int pool = 0; pool < 3; ++pool) kernel->world.registry.configure_pool(pool, 8);
+	kernel->resolve_item_traits([](int32_t) { return uint8_t{0}; });
+	const auto profile = [](int32_t aim_skill) {
+		aip::Profile p;
+		p.aim_skill = aim_skill;
+		return p;
+	};
+	kernel->ai_profiles = {{"wire_profile", profile(1)}, {"def_profile", profile(2)},
+			{"helo1", profile(3)}};
+	const auto place = [&](uint16_t item_id, const char *slot_name) {
+		w::Entity seed;
+		seed.kind = w::EntityKind::Item;
+		seed.item_id = item_id;
+		seed.has_item_def = true;
+		seed.heading = 0x12345678;
+		seed.team = 2;
+		seed.net_id = 77;
+		seed.ai_text_file = slot_name;
+		return kernel->world.registry.spawn(1, seed);
+	};
+	const w::EntityHandle named = place(1400, "Wire_Profile");
+	CHECK(kernel->init_item_class_brain(named));
+	const w::AiEntity *ai = kernel->world.ai.for_handle(named);
+	CHECK(ai != nullptr && ai->profile.accuracy == 1 && ai->team == 2 && ai->net_id == 77 &&
+			ai->heading == 0x12345678);
+	CHECK(kernel->world.registry.get(named)->spawn_phase == 0);
+	const w::EntityHandle unnamed = place(1400, "");
+	CHECK(kernel->init_item_class_brain(unnamed));
+	ai = kernel->world.ai.for_handle(unnamed);
+	CHECK(ai != nullptr && ai->profile.accuracy == 2);
+	CHECK(kernel->world.registry.get(unnamed)->spawn_phase == 1);
+	const w::EntityHandle helicopter = place(1401, "");
+	CHECK(kernel->init_item_class_brain(helicopter));
+	ai = kernel->world.ai.for_handle(helicopter);
+	CHECK(ai != nullptr && ai->profile.accuracy == 3);
+	CHECK(kernel->world.vehicle_ai_spawn_phase == 3);
+	const w::EntityHandle plain = place(1402, "Wire_Profile");
+	CHECK(!kernel->init_item_class_brain(plain));
+	CHECK(kernel->world.ai.for_handle(plain) == nullptr);
+	CHECK(kernel->world.vehicle_ai_spawn_phase == 3);
+}
+
 } // namespace
 
 int main() {
 	test_the_spawner_binds_the_template();
 	test_the_bay_spawns_at_its_userpoint_and_mounts_the_control_bone();
 	test_a_bay_without_the_points_raises_its_spawn();
+	test_the_class_init_names_its_profile();
 	if (failures == 0) std::printf("PASS deployable_spawn\n");
 	return failures == 0 ? 0 : 1;
 }

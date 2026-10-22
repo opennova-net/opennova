@@ -50,6 +50,55 @@ const aip::Profile *MissionKernel::find_or_load_ai_profile(const std::string &pr
 	return &ai_profiles.back().data;
 }
 
+// See mission_kernel.h. The def+0x148 class init of an AIData item whose ai_function row is
+// one of the five brain classes builds the brain: the profile its AI slot's +156 name loads,
+// else (the vehicle family) the def's own default_aip, else helo1, at the row's Yaw, team and
+// SSN, the allocator's seeds, then the brain's step countdown from the stagger counter.
+// [orig: Entity_InitVehicleAIFromDef @0x4686C0 (the AI slot test @0x46878D..0x468792, the
+//  brain test @0x468798, the +156 name @0x46879E..0x4687A3, the def's default_aip
+//  @0x4687BC..0x4687C1, helo1 @0x4687D3, Entity_InitVehicleAI called @0x4687FF, the stagger
+//  dword_B21F80 @0x46891C..0x468945); Entity_InitHelicopterAIFromDef @0x4683C0 (the +156
+//  test @0x4684A4, helo1 @0x4684C9); Entity_InitVehicleAI @0x460200 (the +0x64 store
+//  @0x460252)]
+bool MissionKernel::init_item_class_brain(world::EntityHandle handle) {
+	using namespace world;
+	const def::DefItemsFile *table = items_table();
+	Entity *entity = world.registry.get(handle);
+	if (table == nullptr || entity == nullptr) return false;
+	const def::DefItemDef *item =
+			mission::find_item_def(*table, int(entity->item_id) + kItemIdOffset);
+	if (item == nullptr || (item->attrib & kItemAttribAIData) == 0) return false;
+	const PromoteOptions::AiProfileDefaults defaults = ai_profile_defaults_fn()(entity->item_id);
+	if (!defaults.known) return false;
+	const auto lower = [](const std::string &text) {
+		std::string out;
+		for (const char c : text) out.push_back(c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c);
+		return out;
+	};
+	std::string name = lower(entity->ai_text_file);
+	if (name.empty() && !defaults.helicopter_init) name = lower(defaults.default_aip);
+	if (name.empty()) name = "helo1";
+	const aip::Profile *profile = find_or_load_ai_profile(name);
+	world.ai.release(handle);
+	const int index = world.ai.attach(handle);
+	AiEntity &ai = *world.ai.at(index);
+	ai.heading = entity->heading;
+	ai.team = static_cast<uint8_t>(entity->team);
+	ai.brain.f[AiBrain::kCurState] = 0;
+	ai.brain.f[AiBrain::kPendState] = 0;
+	ai.brain.f[AiBrain::kFallback] = 0;
+	ai.brain.f[AiBrain::kStep] = 16;
+	ai.profile.flags96 = 0;
+	ai.profile.flags100 = 0;
+	if (profile != nullptr) initialize_ai_profile(ai, *profile);
+	initialize_item_class_brain(ai, world, world.ai, profile, defaults.helicopter_init);
+	ai.net_id = entity->net_id;
+	ai.health = 100;
+	entity->spawn_phase = world.vehicle_ai_spawn_phase;
+	world.vehicle_ai_spawn_phase = (world.vehicle_ai_spawn_phase + 1) & 15;
+	return true;
+}
+
 world::EntityHandle MissionKernel::spawn_deployable(uint16_t item_id, uint8_t team,
 		const int32_t position[6]) {
 	using namespace world;
@@ -103,48 +152,18 @@ world::EntityHandle MissionKernel::spawn_deployable(uint16_t item_id, uint8_t te
 
 	// The AI slot of an AI-class def: the clone allocates it and copies the template's
 	// zeroed record, whose +156 holds the def's default_aip (sprintf'd from def +0x8B8, the
-	// 16 bytes the 172-byte copy carries); the def's class init then builds the brain from
-	// the profile that name loads, else helo1, at the template's Yaw. Only the five brain
-	// rows build one (the promote's predicate); the slot's owner and name are restored
-	// after the init.
+	// 16 bytes the 172-byte copy carries); the def's class init then builds the brain
+	// (init_item_class_brain). The slot's owner and name are restored after the init.
 	// [orig: Entity_CloneFromTemplateToPool1 @0x439830 (the attrib test @0x439869,
 	//  Entity_AllocateAISlot @0x40D2C0 (the call @0x43986C), the record copy @0x43988A);
-	//  the sprintf @0x51C3F1; the def+0x148 init callback @0x51C454..0x51C462;
-	//  Entity_InitHelicopterAIFromDef @0x4683C0 / Entity_InitVehicleAIFromDef @0x4686C0
-	//  (the +0x9C name tests @0x4684A4 / @0x4687A3, helo1 @0x4684C9); the owner and name
-	//  @0x51C467..0x51C484]
+	//  the sprintf @0x51C3F1; the def+0x148 init callback @0x51C454..0x51C462; the owner
+	//  and name @0x51C467..0x51C484]
 	if ((item->attrib & kItemAttribAIData) != 0) {
 		Entity &entity = *world.registry.get(handle);
 		size_t length = 0;
 		while (length < 16 && item->default_aip[length] != '\0') ++length;
 		entity.ai_text_file.assign(item->default_aip, length);
-		const PromoteOptions::AiProfileDefaults defaults = ai_profile_defaults_fn()(item_id);
-		if (defaults.known) {
-			std::string name;
-			for (size_t i = 0; i < length; ++i) {
-				const char c = item->default_aip[i];
-				name.push_back(c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c);
-			}
-			if (name.empty()) name = "helo1";
-			const aip::Profile *profile = find_or_load_ai_profile(name);
-			world.ai.release(handle);
-			const int index = world.ai.attach(handle);
-			AiEntity &ai = *world.ai.at(index);
-			ai.heading = position[3];
-			ai.team = team;
-			ai.brain.f[AiBrain::kCurState] = 0;
-			ai.brain.f[AiBrain::kPendState] = 0;
-			ai.brain.f[AiBrain::kFallback] = 0;
-			ai.brain.f[AiBrain::kStep] = 16;
-			ai.profile.flags96 = 0;
-			ai.profile.flags100 = 0;
-			if (profile != nullptr) initialize_ai_profile(ai, *profile);
-			initialize_item_class_brain(ai, world, world.ai, profile, defaults.helicopter_init);
-			ai.net_id = 12000;
-			ai.health = 100;
-			entity.spawn_phase = world.vehicle_ai_spawn_phase;
-			world.vehicle_ai_spawn_phase = (world.vehicle_ai_spawn_phase + 1) & 15;
-		}
+		init_item_class_brain(handle);
 	}
 	mission::resolve_ai_weapons(world, *table, handle, &assets());
 	// The bound sphere, the deployable bit, then the addeweap children, which copy the

@@ -502,6 +502,15 @@ public:
 	// is full. NapiNPServerCtx::deployable_spawner's installed body (HostRole).
 	// [orig: Entity_SpawnDeployable @0x51C2B0]
 	world::EntityHandle spawn_deployable(uint16_t item_id, uint8_t team, const int32_t position[6]);
+	// The def's class init on a pool-1 row: an AIData item whose ai_function row is one of
+	// the five brain classes (CHel, cpln, cveh, cbot, ctrn) takes its brain from the profile
+	// its AI slot's +156 name (Entity::ai_text_file) loads, else the vehicle family's def
+	// default_aip, else helo1; any other row takes none (false). The deployable's spawn and a
+	// joiner's 0x0D / 0x18 rows run it (the mission start's pool-1 init, the 0x18's own call).
+	// [orig: Entity_InitVehicleAIFromDef @0x4686C0; Entity_InitHelicopterAIFromDef @0x4683C0;
+	//  Entity_InitAllFromModels @0x40E460 (the pool-1 call @0x40E5D3);
+	//  NapiNPClientMsg_FullEntitySpawn @0x433780 (the call @0x433E82)]
+	bool init_item_class_brain(world::EntityHandle handle);
 
 	// world::IPoseProvider: the seat leg is the kernel's own; the muzzle and
 	// userpoint legs ride collision_pose (the sim-clock skeleton / PANM pose).

@@ -424,8 +424,12 @@ void JoinerRole::resolve_row_adm_ids() {
 // materializer.
 void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResult &sync) {
 	mission::MissionKernel &kernel = *kernel_;
-	for (const world::EntityLifetime lifetime : sync.retired)
+	for (const world::EntityLifetime lifetime : sync.retired) {
 		kernel.retire_replica_entity(lifetime);
+		// The destroyed row's brain goes with it [orig: Entity_Destroy @0x43E810 - the
+		//  brain record's memset @0x43E98E..0x43E995, +0x64 = 0 @0x43E99D].
+		kernel.world.ai.release(lifetime.handle);
+	}
 	// Zone/deploy lookup is a registry-derived cache. Any streamed topology
 	// change can add/remove an eligible zone and must invalidate it before UI
 	// or a C2S 0x0E pick consults the world.
@@ -441,6 +445,31 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	};
 	refresh_seats(sync.spawned);
 	refresh_seats(sync.updated);
+	// Each arriving pool-1 row takes its def's class init, in slot order: an AIData
+	// brain-class row its brain, from the profile its 0x0D AI trailer names (a 0x18
+	// row's zeroed slot names none). A 0x0D row takes it at the mission start's pool-1
+	// init, after the initial state, so before the world's first tick; a 0x18 row at
+	// the record's own call.
+	// [orig: Game_StartMission - NapiClient_WaitForGameStart called @0x524E29, the
+	//  Entity_InitAllFromModels call @0x52567F (the pool-1 class init @0x40E5D3);
+	//  NapiNPClientMsg_0x00D @0x432C40 (the AI slot @0x43332A, its +156 name
+	//  @0x433363..0x43337C); NapiNPClientMsg_FullEntitySpawn @0x433780 (the AI slot
+	//  @0x433D41, the class init @0x433E82)]
+	std::vector<world::EntityLifetime> arrived;
+	for (const world::EntityLifetime lifetime : sync.spawned)
+		if (lifetime.handle.pool() == 1) arrived.push_back(lifetime);
+	std::sort(arrived.begin(), arrived.end(),
+			[](const world::EntityLifetime &a, const world::EntityLifetime &b) {
+				return a.handle.packed < b.handle.packed;
+			});
+	for (const world::EntityLifetime lifetime : arrived) {
+		world::Entity *row = kernel.world.registry.get(lifetime);
+		const replication::ClientEntityState *wire =
+				runtime->state().find(lifetime.handle.packed);
+		if (row == nullptr || wire == nullptr) continue;
+		row->ai_text_file = wire->spawn_ai_name;
+		kernel.init_item_class_brain(lifetime.handle);
+	}
 	// The wire materializer deliberately does not fabricate seat
 	// definitions. Item/model resolution above installs them, then this
 	// idempotent fold projects the retained 0x0D mountHandles image by each

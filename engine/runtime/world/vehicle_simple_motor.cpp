@@ -340,9 +340,10 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 		} else if (boat) {
 			// The boat twin's block for its local driver: the stuck count rests; a
 			// driver without the player bit, or whose eye sits at or below the water
-			// plane, takes the boat leg over the client's brain words, which are zero
-			// (D-NET-433), the player arm otherwise, its client tail averaging the
-			// speed with the record's. Its parked test (no occupant, or the dead bit
+			// plane, takes the boat leg over the hull's client brain (the mission
+			// start's class init gives an AIData brain-class row one; a brainless
+			// row's words are zero, D-NET-433), the player arm otherwise, its client
+			// tail averaging the speed with the record's. Its parked test (no occupant, or the dead bit
 			// the tail above took) never holds for a local driver.
 			// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 - the parked test
 			//  @0x4704F0..0x470502, the stuck reset @0x470508, the player bit
@@ -351,8 +352,10 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 			if (controller->player_class == 0 ||
 					watercraft_driver_submerged(world_, *controller)) {
 				AiBrain client_words;
+				AiEntity *boat_brain = world_.ai.for_handle(e.handle);
 				VehicleDriveCmd cmd;
-				world_.ai.watercraft_ai_leg(world_, e, t, client_words, cmd);
+				world_.ai.watercraft_ai_leg(world_, e, t,
+						boat_brain != nullptr ? boat_brain->brain : client_words, cmd);
 				m.steer_target_bam = cmd.steer_target_bam;
 				m.cmd_speed = cmd.cmd_speed;
 			} else {
@@ -364,9 +367,10 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 			// client as on the authority: a parked hull (Flags 0x10000000; the
 			// dead bit took the tail above) takes the parked arm; else the stuck
 			// count rests, and a driver whose eye sits at or below the water plane
-			// takes the AI leg over the client's brain words, which are zero
-			// (D-NET-433), the player arm otherwise, its client tail averaging the
-			// speed with the record's.
+			// takes the AI leg over the hull's client brain (the mission start's class
+			// init gives an AIData brain-class row one; a brainless row's words are
+			// zero, D-NET-433), the player arm otherwise, its client tail averaging
+			// the speed with the record's.
 			// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100 - the local-occupant
 			//  gate @0x46E9EA..0x46E9F6, the parked test @0x46E9FC..0x46EA11 -> the
 			//  parked arm @0x46F09E..0x46F0C7, the stuck reset @0x46EA17, the player
@@ -391,7 +395,8 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 				if (controller->player_class == 0 ||
 						watercraft_driver_submerged(world_, *controller)) {
 					AiBrain client_words;
-					simple_ground_ai_leg(e, t, client_words);
+					simple_ground_ai_leg(e, t,
+							ground_brain != nullptr ? ground_brain->brain : client_words);
 				} else {
 					if (ground_brain != nullptr)
 						ground_brain->brain.f[AiBrain::kCurState] = 22;

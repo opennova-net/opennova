@@ -4,6 +4,7 @@
 // client attaches from its remote riders' records, and the 0x0D carrier an
 // addeweap child follows.
 
+#include <formats/aip/aip.h>
 #include <formats/def/def.h>
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
@@ -28,8 +29,10 @@
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
@@ -588,6 +591,84 @@ bool run_topology_resweep_keeps_initialized_words() {
 	return ok;
 }
 
+// A streamed 0x0D row of an AIData brain-class def takes its brain on the joiner, from the
+// profile its AI trailer names, as the mission start's pool-1 class init gives it there; a
+// row of any other def takes none, and the row's retirement frees the brain. The rows and
+// the profiles are the test's own (the profiles told apart by their aim_skill).
+// [orig: NapiNPClientMsg_0x00D @0x432C40 (the AI slot @0x43332A, its +156 name
+//  @0x433363..0x43337C); Game_StartMission - the Entity_InitAllFromModels call @0x52567F
+//  (the pool-1 class init @0x40E5D3); Entity_InitVehicleAIFromDef @0x4686C0 (the +156
+//  name @0x46879E..0x4687A3); Entity_Destroy @0x43E810 (@0x43E98E..0x43E99D)]
+bool run_streamed_ai_row_takes_its_brain() {
+	constexpr int32_t kBrainType = 1500;
+	constexpr int32_t kPlainType = 1501;
+	std::array<def::DefItemDef, 3> rows{};
+	rows[0].id = mission::kItemIdOffset + 1;
+	rows[0].type = 1;
+	rows[1].id = mission::kItemIdOffset + kBrainType;
+	rows[1].type = 1;
+	rows[1].attrib = w::kItemAttribAIData;
+	std::strcpy(rows[1].ai_function, "cveh");
+	rows[2].id = mission::kItemIdOffset + kPlainType;
+	rows[2].type = 1;
+	std::strcpy(rows[2].ai_function, "cveh");
+	def::DefItemsFile items{rows.data(), rows.size()};
+	Harness h;
+	h.kernel->wire_header_world = true;
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_item_traits([](int) -> uint8_t { return 0; });
+	aip::Profile wire_profile;
+	wire_profile.aim_skill = 1;
+	aip::Profile fallback;
+	fallback.aim_skill = 3;
+	h.kernel->ai_profiles = {{"wire_profile", wire_profile}, {"helo1", fallback}};
+	const auto stream = [&](uint16_t handle, int32_t type, bool ai_trailer) {
+		PoolSpawnBatch batch;
+		PoolSpawnRecord rec;
+		rec.slot_id = handle;
+		rec.item_type_id = static_cast<uint16_t>(type);
+		rec.pos_x = 30 * 65536;
+		rec.pos_y = 30 * 65536;
+		rec.pos_z = 2 * 65536;
+		rec.has_ai_trailer = ai_trailer;
+		if (ai_trailer) rec.ai_name = "Wire_Profile";
+		batch.records.push_back(rec);
+		batch.entity_count = 1;
+		h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
+		h.role.run_tick(h.input);
+	};
+	const w::EntityHandle brained{0x1005};
+	const w::EntityHandle plain{0x1006};
+	stream(brained.packed, kBrainType, true);
+	stream(plain.packed, kPlainType, false);
+	bool ok = true;
+	const replication::ClientEntityState *wire = h.role.runtime->state().find(brained.packed);
+	ok &= expect(wire != nullptr && wire->spawn_ai_name == "Wire_Profile",
+			"ai row: the decoded row keeps the AI trailer's name");
+	const w::Entity *row = h.kernel->world.registry.get(brained);
+	const w::AiEntity *ai = h.kernel->world.ai.for_handle(brained);
+	ok &= expect(row != nullptr && ai != nullptr && !ai->inf.active,
+			"ai row: the AIData brain-class row takes a brain");
+	ok &= expect(ai != nullptr && ai->profile.accuracy == 1,
+			"ai row: the brain's profile is the one the trailer names");
+	// The allocator seeds the staged target from the row's 0x0D pose, progress 0
+	// [orig: Entity_InitVehicleAI @0x460200 - @0x4602F9..0x460314, @0x460326].
+	ok &= expect(row != nullptr && row->veh.net_smooth_target[0] == 30 * 65536 &&
+					row->veh.net_smooth_target[1] == 30 * 65536 &&
+					row->veh.net_smooth_target[2] == 2 * 65536 &&
+					row->veh.net_interp_progress == 0,
+			"ai row: the class init stages the row's own pose");
+	ok &= expect(h.kernel->world.registry.get(plain) != nullptr &&
+					h.kernel->world.ai.for_handle(plain) == nullptr,
+			"ai row: a def without the AIData attrib takes none");
+	// A new lifetime at the slot (another type) retires the row and frees its brain.
+	stream(brained.packed, kPlainType, false);
+	ok &= expect(h.kernel->world.registry.get(brained) != nullptr &&
+					h.kernel->world.ai.for_handle(brained) == nullptr,
+			"ai row: the retired row's brain is freed with it");
+	return ok;
+}
+
 int main() {
 	bool ok = true;
 	ok &= run_record_tail_mirrors_flags_and_health();
@@ -600,6 +681,7 @@ int main() {
 	ok &= run_genx_row_rides_and_falls_on_its_own();
 	ok &= run_streamed_building_takes_its_armory_points();
 	ok &= run_topology_resweep_keeps_initialized_words();
+	ok &= run_streamed_ai_row_takes_its_brain();
 	if (!ok || failures != 0) {
 		std::fprintf(stderr, "joiner_vehicle_replica_test: %d failure(s)\n", failures);
 		return 1;

@@ -248,6 +248,19 @@ void initialize_item_class_brain(AiEntity &ae, World &world, AiSystem &ai,
 	// profile's priority words, and the shipped drivable-transport profiles author them
 	// zero — the same no-scan outcome, now via the witnessed path.)
 	initialize_vehicle_brain(ae, world, ae.heading);
+	// The allocator's smooth-target seed: the hull's staged target and heading are its own
+	// pose and the interpolation progress zero, so a client chase's first pass measures no
+	// distance and holds. (+0x244 / +0x248, the staged pitch and roll, have no hull reader
+	// here and are not carried.)
+	// [orig: Entity_InitVehicleAI @0x460200 - the pose reads @0x4602F0..0x4602F6, +0x234 /
+	//  +0x238 / +0x23C @0x4602F9..0x46030B, +0x240 (Yaw) @0x460314, +0x27C = 0 @0x460326]
+	if (Entity *hull = world.registry.get(ae.handle)) {
+		hull->veh.net_smooth_target[0] = hull->position.x.q16;
+		hull->veh.net_smooth_target[1] = hull->position.y.q16;
+		hull->veh.net_smooth_target[2] = hull->position.z.q16;
+		hull->veh.net_smooth_heading = hull->heading;
+		hull->veh.net_interp_progress = 0;
+	}
 }
 
 namespace {
