@@ -504,7 +504,7 @@ int main() {
 	// failure over the block's mpnovaworld quad (the non-authority's NovaWorld arm, random word
 	// included) and its mpipaddressstring; the session's close tears an open socket down with its
 	// line and writes nothing for a socket that is not open, a log that is off or no log.
-	// [orig: UI_ProcessLANSessionStateMachine @0x558E00 - SetTransportMode(4) @0x558EA3;
+	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - SetTransportMode(4) @0x558EA3;
 	//  UI_OnStartupScreenActivate @0x5557F0 - SetTransportMode(0) @0x55582B;
 	//  CNapiNetwork_SetTransportMode @0x4C8750 - @0x4C877B; CNapiNetwork_TearDownSocket
 	//  @0x4C4C90 - @0x4C4CE7]

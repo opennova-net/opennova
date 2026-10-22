@@ -283,26 +283,60 @@ func test_team_choice_alone_dials_without_a_prompt() -> void:
 
 # The NovaWorld lobby session survives the panel at the in-match handoff
 # (D-NET-220): the controller holds the panel's client until the joiner load
-# takes it, and an abandoned join (the role prompt cancelled) leaves the play
-# and frees it.
-func test_abandoned_novaworld_join_frees_the_held_session() -> void:
-	var layer := Control.new()
-	add_child_autofree(layer)
-	var controller := _controller(layer)
-	controller.open_novaworld_panel()
-	var panel := layer.get_node_or_null("NovaWorldPanel") as NovaWorldPanel
-	assert_not_null(panel, "the NovaWorld panel opens")
-	if panel == null:
-		return
-	var client := panel.client_for_test()
-	panel.join_in_match_requested.emit(_target(JoinTarget.FLAG_ALLOW_SPECTATORS))
-	assert_eq(client.get_parent(), controller,
-			"the panel's session moves to the controller instead of dying with the panel")
-	assert_true(controller.is_join_choice_pending(),
-			"the spectator host still asks for the join role")
-	JoinScreenFixture.press(_screen, "BACK")
-	await wait_frames(2)
-	assert_false(is_instance_valid(client), "an abandoned join frees the held session")
+# takes it. A join abandoned before its dial, at the choice's BACK or the
+# enumerate's abort, is the join machine's state 9: its destroy keeps a
+# NovaWorld join's transport, and the main menu it returns to re-enters the
+# NovaWorld menu, so the session goes back to the panel as a normal exit's does,
+# never stopped: its socket stays open and writes no NET TEARING DOWN SOCKET
+# line (engine: inmatch/host_config.h write_transport_socket_teardown_line
+# carries the witness). The harness has no join screen to press ABORT_CANCEL
+# on: an enumerate that cannot start (a target with no port) runs the same abort.
+func test_an_abandoned_novaworld_join_reenters_the_novaworld_menu_with_its_session() -> void:
+	var run_dir := OS.get_cache_dir().path_join("opennova_nw_abandon_run_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
+	for at_enumerate: bool in [false, true]:
+		var cause := "the enumerate's abort" if at_enumerate else "the choice's BACK"
+		var layer := Control.new()
+		add_child_autofree(layer)
+		var controller := _controller(layer)
+		controller.open_novaworld_panel(false)
+		var panel := layer.get_node_or_null("NovaWorldPanel") as NovaWorldPanel
+		assert_not_null(panel, "the NovaWorld panel opens")
+		if panel == null:
+			break
+		var session := NovaWorldClient.new()
+		panel.adopt_client(session)
+		session.host = "127.0.0.1"
+		session.gate_port = 1
+		session.start()
+		var pump: UdpPump = session.get_game_pump()
+		assert_true(pump != null and pump.is_open(), "the session socket is open")
+		var target := _target(JoinTarget.FLAG_ALLOW_SPECTATORS)
+		if at_enumerate:
+			target = JoinTarget.new()
+			target.host_ip = "127.0.0.1"
+			target.port = 0
+		target.network_type = JoinTarget.NETWORK_NOVAWORLD
+		panel.join_in_match_requested.emit(target)
+		if not at_enumerate:
+			assert_eq(session.get_parent(), controller,
+					"the panel's session moves to the controller instead of dying with the panel")
+			assert_true(controller.is_join_choice_pending(),
+					"the spectator host still asks for the join role")
+			JoinScreenFixture.press(_screen, "BACK")
+		assert_false(controller.is_join_choice_pending(), "%s abandons the join" % cause)
+		var reentered := session.get_parent() as NovaWorldPanel
+		assert_not_null(reentered, "%s re-enters the NovaWorld menu with the session" % cause)
+		if reentered != null:
+			assert_ne(reentered, panel, "a NovaWorld menu opened again after %s" % cause)
+			assert_eq(reentered.client_for_test(), session, "the panel holds the kept session")
+		assert_eq(session.get_state(), NovaWorldClient.STATE_GATE_PROBING,
+				"%s never stops the session" % cause)
+		assert_true(pump != null and pump.is_open(),
+				"its socket stays open after %s: no teardown, no line" % cause)
+		session.stop()
+	TestFs.remove_dir_recursive(run_dir)
 
 
 # The NovaWorld page's join launch saves the player profile, then game.cfg,

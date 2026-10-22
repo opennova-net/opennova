@@ -24,7 +24,8 @@ var _menu_visible_before_novaworld := false
 var _menu_key_input_before_novaworld := false
 var _novaworld_menu_state_captured := false
 # The NovaWorld session a resolved join or a granted host hands over, held from
-# the panel's dismissal until the load takes it (or the join is abandoned).
+# the panel's dismissal until the load takes it (or an abandoned join hands it back to the
+# NovaWorld menu).
 var _novaworld_client: NovaWorldClient
 # The match was entered from the NovaWorld menu: a normal exit returns there
 # (retail's g_ReturnToNovaWorldMenu, docs/net/novaworld-net-re.md).
@@ -402,11 +403,7 @@ func _abort_spectator_preflight() -> void:
 	LanSession.destroy_pre_dial_session(_spectator_probe_target != null
 			and _spectator_probe_target.network_type == JoinTarget.NETWORK_NOVAWORLD)
 	_cancel_spectator_probe()
-	_release_novaworld_client()
-	if _world != null:
-		_world.pre_game_cancelled()
-	if _menu_shell != null:
-		_menu_shell.show_menu()
+	_leave_abandoned_join()
 
 
 # The join machine's choice (its state 8, which a discovered word carrying any of
@@ -462,11 +459,23 @@ func _cancel_join_role_choice() -> void:
 		_shell.drain_lan_records()
 	LanSession.destroy_pre_dial_session(target != null
 			and target.network_type == JoinTarget.NETWORK_NOVAWORLD)
-	_release_novaworld_client()
+	_leave_abandoned_join()
+
+
+# State 9's tail after its FullDestroy (the game type zeroed: GameWorld.pre_game_cancelled): the
+# main menu. A join entered from the NovaWorld menu (its page's connect URL) leaves it again for
+# the NovaWorld menu with the session the destroy kept, as a normal exit from its match does: the
+# held session goes back to the panel, never stopped, so its socket stays open and writes no NET
+# TEARING DOWN SOCKET line (engine: inmatch/host_config.h write_transport_socket_teardown_line
+# carries the witness).
+func _leave_abandoned_join() -> void:
 	if _world != null:
 		_world.pre_game_cancelled()
 	if _menu_shell != null:
 		_menu_shell.show_menu()
+	var held := _novaworld_client
+	_novaworld_client = null
+	_enter_menu_with_novaworld_session(held)
 
 
 ## The local player's display callsign, carried by game ClientAuth.NA.
@@ -606,9 +615,9 @@ func _on_novaworld_join_requested(target: JoinTarget) -> void:
 ## shows the NovaWorld error dialog first, the session already reset with the world
 ## (the router's verdict, engine: inmatch/mission_exit.h).
 func return_from_mission(client: NovaWorldClient, error_exit: bool, error_text: String) -> void:
-	var reenter := _return_to_novaworld
-	_return_to_novaworld = false
 	if error_exit:
+		var reenter := _return_to_novaworld
+		_return_to_novaworld = false
 		if client != null:
 			client.stop()
 			client.queue_free()
@@ -616,6 +625,15 @@ func return_from_mission(client: NovaWorldClient, error_exit: bool, error_text: 
 		if _novaworld_panel != null:
 			_novaworld_panel.show_post_mission_error(error_text, reenter)
 		return
+	_enter_menu_with_novaworld_session(client)
+
+
+# The main menu's entry with the NovaWorld session a match's normal exit or an abandoned join
+# kept: a player who left from the NovaWorld menu re-enters it with the session; a stray session
+# is stopped.
+func _enter_menu_with_novaworld_session(client: NovaWorldClient) -> void:
+	var reenter := _return_to_novaworld
+	_return_to_novaworld = false
 	if client == null:
 		return
 	if not reenter:
@@ -660,7 +678,8 @@ func disconnect_at_exit() -> void:
 	_novaworld_client = null
 
 
-# An abandoned NovaWorld join leaves its play and the session.
+# The controller's teardown (or a new hold over an old one) ends a held session: it leaves its
+# play and goes.
 func _release_novaworld_client() -> void:
 	if _novaworld_client != null:
 		_novaworld_client.stop()

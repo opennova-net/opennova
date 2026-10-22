@@ -180,7 +180,7 @@ void write_transport_socket_open_lines(ConnectLog &log, const PeerAddr *bound, u
 // tests the network type, not the transport mode, and its InitNPConnection only the manager;
 // the session's sends go nowhere (SendTo answers -1 with no socket, and the Hello's caller
 // does not test it) and nothing arrives, so the connect ends as an unanswered one does.
-// [orig: UI_ProcessLANSessionStateMachine @0x558E00 - SetNetworkType(1) called @0x558E8C,
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - SetNetworkType(1) called @0x558E8C,
 //  SetConnectionMode(0) @0x558E97, SetTransportMode(4) @0x558EA3 (4 pushed @0x558E9C),
 //  CNapiGateManager_WaitForConnect @0x558EAD, ConnectToNovaWorld called @0x559156 (state 4);
 //  CNapiNetwork_SetTransportMode @0x4C8750 - the same mode's return @0x4C8766, the failure's
@@ -197,6 +197,24 @@ void write_novaworld_socket_open_lines(ConnectLog &log, const gamecfg::GameCfg &
 // exit sets mode 0 likewise; an open socket (modes 1..4) tears down with "NET TEARING DOWN
 // SOCKET" through ConnectLog::line (none once the log is off, none with no log). A failed open
 // already left mode 0, so a socket that is not open writes nothing.
+// A NovaWorld join abandoned before its dial (the enumerate's ABORT_CANCEL, the choice's BACK)
+// closes nothing and keeps the session: the join machine's state 9 destroys the game session,
+// which keeps the transport under the NovaWorld connect type, then pushes the main menu. The
+// NovaWorld page's connect URL left the main menu for the PreMenu on NW_MULTI_PLAYER, and the main
+// menu's exit set the return to the NovaWorld menu there, so the main menu's init re-enters the
+// NovaWorld menu (its STARTUP arm skips mode 0 on the same flag), whose state 1 leaves the
+// session's hosting and play and meets mode 4 already set: no line.
+// [orig: PreMenu_OnAbortCancel @0x568CA0 - PreMenu state 9 @0x568CB4;
+//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 9's CNapiGameSession_FullDestroy(-1)
+//  called @0x56A3E3, UI_NavHistoryPush(MainMenu) called @0x56A3F9;
+//  CNapiGameSession_FullDestroy @0x4C96A0 - the connect type 1 keep @0x4C9722;
+//  UI_DispatchScreenEvent @0x54E6A0 - CNapiGameSession_ConnectOrHost called @0x54F33B,
+//  UI_NavHistoryPush(PreMenu) called @0x54F371; Menu_TeardownShellAndCloseBinkVideos @0x54E430 -
+//  g_ReturnToNovaWorldMenu set on NW_MULTI_PLAYER @0x54E4E3..0x54E508;
+//  Menu_InitShellResources @0x552500 - the return arm @0x5526B3..0x5526C7, UI_EnterNovaWorldMenu
+//  called @0x5526C2; UI_EnterNovaWorldMenu @0x5588F0 - state 1 set @0x558949;
+//  UI_ProcessLANSessionStateMachine @0x558DE0 - CGameSession_StopHosting / StopPlaying called
+//  @0x558E76 / @0x558E80]
 // The LAN browse's socket (mode 2, the LAN screen's SEARCH) goes the same way: the main menu's
 // activation (the STARTUP screen, unless the post-mission return to the NovaWorld menu is set)
 // sets mode 0, and a LAN host's start sets mode 3, so the browse's open socket tears down with
