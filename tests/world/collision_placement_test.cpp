@@ -1,5 +1,5 @@
-// The collision placement and probe helpers (runtime/world/collision.h): the uniform item scale on
-// a placement's rotation (collision_matrix_scale_rotation [orig: @0x614210]), the placement from
+// The collision placement and probe helpers (runtime/world/collision.h): the scaled Euler builder
+// (collision_matrix_from_euler_scaled [orig: @0x614210]), the placement from
 // mission eulers (the Euler builder for every placement, pure yaw included [orig:
 // @ 0x613f40]), a local box placed (collision_matrix_box_bounds), the ground-settle tail's probe
 // origin ((z + 6143) & ~0x17FF [orig: Entity_MovementCollisionResolver @0x4B3D6E..0x4B3DA9]) and
@@ -31,15 +31,24 @@ bool near_fixed(int32_t a, int32_t b, int32_t slack = 64) { return std::abs(a - 
 
 int test_scale() {
 	const int32_t pos[3] = {fx(10), fx(20), fx(30)};
+	// A 0 scale is the unscaled builder.
 	const CollisionMatrix base = collision_matrix_from_euler(0x10000000, 0x01000000, 0x02000000, pos);
-	CollisionMatrix scaled = base;
-	collision_matrix_scale_rotation(scaled, 0);
-	TEST_EXPECT(same_matrix(scaled, base));
-	collision_matrix_scale_rotation(scaled, 0x20000); // x2
-	for (const int i : {0, 1, 2, 4, 5, 6, 8, 9, 10})
-		TEST_EXPECT(scaled.m[i] == static_cast<int32_t>((static_cast<int64_t>(base.m[i]) * 0x20000) >> 16));
-	for (const int i : {3, 7, 11, 12, 13, 14, 15}) TEST_EXPECT(scaled.m[i] == base.m[i]);
-	std::printf("scale: the nine rotation entries scaled, the translation kept, 0 unscaled\n");
+	TEST_EXPECT(same_matrix(
+			collision_matrix_from_euler_scaled(0x10000000, 0x01000000, 0x02000000, pos, 0), base));
+	// x1.5 with yaw, pitch and roll: the scale << 6 is the diagonal every stage multiplies
+	// through, so it nests inside each stage's truncations [orig:
+	// Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210 - `shl eax, 6`
+	// @0x614273, the roll stage @0x61427A..0x6142C0, the pitch stage @0x614346 / @0x6143FB, the yaw
+	// stage @0x6144CD..0x614612]. Scaling the unscaled build afterwards gave m[1] -2411807 and m[2]
+	// -24336. Every sine / cosine product sits 0.018 or more from an integer edge (Q3-11).
+	const CollisionMatrix scaled =
+			collision_matrix_from_euler_scaled(0x10000000, 0x01000000, 0x02000000, pos, 0x18000);
+	const int idx[9] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
+	const int32_t want[9] = {5810766, -2411806, -24335, 2406979, 5802615, -344235, 154404, 308622,
+		6281982};
+	for (int k = 0; k < 9; ++k) TEST_EXPECT(scaled.m[idx[k]] == want[k]);
+	TEST_EXPECT(scaled.m[3] == pos[0] && scaled.m[7] == pos[1] && scaled.m[11] == pos[2]);
+	std::printf("scale: the scaled builder's own truncations, the translation kept, 0 unscaled\n");
 	return 0;
 }
 
@@ -47,8 +56,8 @@ int test_placement() {
 	const int32_t pos[3] = {fx(1), fx(2), fx(3)};
 	// Pure yaw: the Euler builder too, scaled (D-NET-NEW-L6-10) [orig: BoneCallback_Simple
 	// @0x4E2600 -> Math_BuildFixedPointMatrixFromEulerAngles @0x613F40].
-	CollisionMatrix yaw = collision_matrix_from_euler(placed_heading_bam(30), 0, 0, pos);
-	collision_matrix_scale_rotation(yaw, 0x18000);
+	const CollisionMatrix yaw =
+			collision_matrix_from_euler_scaled(placed_heading_bam(30), 0, 0, pos, 0x18000);
 	TEST_EXPECT(same_matrix(collision_matrix_from_placement(placed_heading_bam(30), 0, 0, pos, 0x18000), yaw));
 	// Mission yaw 30 places heading 0x2AAA0000 (spawn_angle_bam(60)). The yaw stage's words are
 	// trunc(sin / cos(h * dbl_7C3608) * 2^22) [orig: @0x6140B2..0x6140CF]: sin 3632306.79 and

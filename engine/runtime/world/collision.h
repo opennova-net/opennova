@@ -283,16 +283,16 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
 // @0x43b56c..0x43b5bd; Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
 // @0x614210; Math_BuildFixedPointMatrixFromEulerAngles @0x613f40].
 CollisionMatrix entity_placement_matrix(const Entity &e);
-// The uniform item scale on a placement matrix: each of the nine rotation
-// entries times `scale_q16` (a 64-bit product >> 16), the translation kept;
-// 0 leaves the matrix unscaled. Retail's placement and pose matrices already
-// carry it, so the polygon walker selects the matching scaled inverse.
-// [orig: Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210:
-//  the scale rides the rotation diagonal]
-void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16);
+// The scaled placement matrix: the same three stages as collision_matrix_from_euler over the
+// diagonal scale << 6 (Q16 -> Q22), so the scale nests inside every stage's truncations; a 0
+// scale is the unscaled builder. Retail's placement and pose matrices carry it, so the polygon
+// walker selects the matching scaled inverse.
+// [orig: Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210]
+CollisionMatrix collision_matrix_from_euler_scaled(int32_t heading_bam, int32_t pitch_bam,
+		int32_t roll_bam, const int32_t pos[3], int32_t scale_q16);
 // The collision placement of an entity from its Yaw word (Entity::heading,
 // D-NET-NEW-L6-2), its pitch / roll degrees, its 16.16 position and its item
-// scale (collision_matrix_scale_rotation): the full Euler matrix for every
+// scale (collision_matrix_from_euler_scaled): the full Euler matrix for every
 // placement, a pure-yaw one included, with its exact x87 sine and cosine (the
 // quantized direction table is no part of it): a yaw off the table's 2^22 BAM
 // grid turns the shell with the visual, not up to 0.18 degrees off it

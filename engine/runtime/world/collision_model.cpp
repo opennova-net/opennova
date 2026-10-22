@@ -267,28 +267,18 @@ CollisionMatrix entity_placement_matrix(const Entity &e) {
     };
     int32_t euler[3];
     entity_live_euler_bam(e, euler);
-	CollisionMatrix m = collision_matrix_from_euler(euler[0], euler[1], euler[2], position);
-	collision_matrix_scale_rotation(m, e.uniform_scale_q16);
-	return m;
-}
-
-void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16) {
-    if (scale_q16 == 0) return;
-    constexpr int rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
-    for (int index : rotation_indices) {
-        m.m[index] = static_cast<int32_t>(
-                (static_cast<int64_t>(m.m[index]) * scale_q16) >> 16);
-    }
+	return collision_matrix_from_euler_scaled(euler[0], euler[1], euler[2], position,
+			e.uniform_scale_q16);
 }
 
 CollisionMatrix collision_matrix_from_placement(int32_t heading, int32_t pitch_bam,
                                                 int32_t roll_bam, const int32_t pos[3],
                                                 int32_t scale_q16) {
     // [orig: BoneCallback_Simple @0x4E2600 -> Math_BuildFixedPointMatrixFromEulerAngles
-    //  @0x613F40 (the call @0x4E2662), pure yaw included (D-NET-NEW-L6-10)]
-    CollisionMatrix m = collision_matrix_from_euler(heading, pitch_bam, roll_bam, pos);
-    collision_matrix_scale_rotation(m, scale_q16);
-    return m;
+    //  @0x613F40 (the call @0x4E2662), pure yaw included (D-NET-NEW-L6-10); a scaled entity
+    //  (+0x158, else its def's +0x1B8) -> Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
+    //  @0x614210 (the calls @0x4E2626 / @0x4E264D)]
+    return collision_matrix_from_euler_scaled(heading, pitch_bam, roll_bam, pos, scale_q16);
 }
 
 void collision_matrix_box_bounds(const CollisionMatrix &matrix, const int32_t local_box[6],
@@ -614,15 +604,15 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
     return out;
 }
 
-// The full placement matrix — Rz(heading)·Ry(-pitch)·Rx(roll), Q22 rows composed
-// with the original's per-product >>22 truncations and exact-zero stage skips.
-// [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, fed by the spawn
-// euler pack {[3] = (90 − yaw) BAM, [4] = pitch BAM, [5] = roll BAM}
-// (Entity_SpawnFromBMSRecord @ 0x40eb66); the entity's collision/bone matrices
-// carry this same orientation, so a rolled rock's collision shell leans WITH
-// its visual — the 00TRg through-shot root cause once statics kept yaw only.]
-CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_bam,
-                                            int32_t roll_bam, const int32_t pos[3]) {
+namespace {
+
+// Both builders' three stages over a diagonal: 2^22 for the unscaled builder, the scale << 6
+// for the scaled one, which multiplies its stages through the scaled diagonal, so a scale nests
+// inside each stage's truncations [orig: Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
+// @0x614210 - the diagonal `shl eax, 6` @0x614273 / @0x6142CC, the roll stage
+// @0x61427A..0x6142C0, the pitch stage's t0 products @0x614346 / @0x6143FB].
+CollisionMatrix euler_build(int32_t heading_bam, int32_t pitch_bam, int32_t roll_bam,
+		const int32_t pos[3], int32_t diag) {
     // [orig: `fld dbl_7C3608` @0x613F5D]
     static constexpr double kRadPerBam = io::kRadiansPerBamX87;
     static constexpr double kQ22 = io::kQ22One;
@@ -637,11 +627,11 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
     if (roll_bam != 0) {
         int32_t sr, cr;
         trig(roll_bam, sr, cr);
-        t[0] = 1 << 22;
-        t[5] = cr; t[6] = -sr;
-        t[9] = sr; t[10] = cr;
+        t[0] = diag;
+        t[5] = q(static_cast<int64_t>(diag) * cr); t[6] = q(static_cast<int64_t>(diag) * -sr);
+        t[9] = q(static_cast<int64_t>(diag) * sr); t[10] = t[5];
     } else {
-        t[0] = t[5] = t[10] = 1 << 22;
+        t[0] = t[5] = t[10] = diag;
     }
 
     int32_t p2[12]; // stage 2: RotY(pitch) applied [orig: @ 0x613fd7-0x614099]
@@ -649,12 +639,12 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
     if (pitch_bam != 0) {
         int32_t sp, cp;
         trig(pitch_bam, sp, cp);
-        p2[0] = cp;
+        p2[0] = q(static_cast<int64_t>(t[0]) * cp);
         p2[1] = q(static_cast<int64_t>(t[9]) * -sp);
         p2[2] = q(static_cast<int64_t>(t[10]) * -sp);
         p2[3] = 0;
         p2[4] = t[4]; p2[5] = t[5]; p2[6] = t[6]; p2[7] = 0;
-        p2[8] = sp;
+        p2[8] = q(static_cast<int64_t>(t[0]) * sp);
         p2[9] = q(static_cast<int64_t>(t[9]) * cp);
         p2[10] = q(static_cast<int64_t>(t[10]) * cp);
         p2[11] = 0;
@@ -680,6 +670,28 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
     out.m[3] = pos[0]; out.m[7] = pos[1]; out.m[11] = pos[2];
     out.m[12] = out.m[13] = out.m[14] = out.m[15] = 0;
     return out;
+}
+
+} // namespace
+
+// The full placement matrix — Rz(heading)·Ry(-pitch)·Rx(roll), Q22 rows composed
+// with the original's per-product >>22 truncations and exact-zero stage skips.
+// [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, fed by the spawn
+// euler pack {[3] = (90 − yaw) BAM, [4] = pitch BAM, [5] = roll BAM}
+// (Entity_SpawnFromBMSRecord @ 0x40eb66); the entity's collision/bone matrices
+// carry this same orientation, so a rolled rock's collision shell leans WITH
+// its visual — the 00TRg through-shot root cause once statics kept yaw only.]
+CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_bam,
+                                            int32_t roll_bam, const int32_t pos[3]) {
+    return euler_build(heading_bam, pitch_bam, roll_bam, pos, 1 << 22);
+}
+
+CollisionMatrix collision_matrix_from_euler_scaled(int32_t heading_bam, int32_t pitch_bam,
+		int32_t roll_bam, const int32_t pos[3], int32_t scale_q16) {
+    if (scale_q16 == 0)
+        return collision_matrix_from_euler(heading_bam, pitch_bam, roll_bam, pos);
+    return euler_build(heading_bam, pitch_bam, roll_bam, pos,
+            static_cast<int32_t>(static_cast<uint32_t>(scale_q16) << 6));
 }
 
 } // namespace opennova::world

@@ -675,9 +675,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				//  NapiNPClientMsg_EntityDeath @0x42EBDF]
 				const int32_t zero[3] = {};
 				// The entity's own Yaw / Pitch / Roll words (D-NET-NEW-L6-3).
-				CollisionMatrix attitude = collision_matrix_from_euler(
-						owned->heading, owned->pitch_bam, owned->roll_bam, zero);
-				collision_matrix_scale_rotation(attitude, owned->uniform_scale_q16);
+				const CollisionMatrix attitude = collision_matrix_from_euler_scaled(owned->heading,
+						owned->pitch_bam, owned->roll_bam, zero, owned->uniform_scale_q16);
 				const int32_t negated[3] = {io::bam_sub(0, (*origin)[0]),
 						io::bam_sub(0, (*origin)[1]), io::bam_sub(0, (*origin)[2])};
 				int32_t offset[3];
