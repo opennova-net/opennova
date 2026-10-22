@@ -204,6 +204,24 @@ class BindingSet {
   // 0 while the keyboard is captured (below).
   int pressed_key(int index, const std::function<bool(int)> &key_down) const;
 
+  // The catalog row one dequeued key event fires, or -1: the event's scan code
+  // (key_event_scan_code) against the modifier pass's first eligible row,
+  // else, for an event that pass left, the fallback's. `key_down` is the
+  // device's key state as the scan runs (the modifier words read it live, not
+  // the event's flag word). `fallback_signed`, when given, is set for a
+  // fallback fire whose queued id carries the sign bit (Shift held, or the
+  // row's flag 0x200). An OS auto-repeat is an event like any press, so a held
+  // key fires its row once per repeat. The open text line's take of the
+  // event (the capture branch) is the drain's, ahead of this scan.
+  // [orig: Input_ProcessKeyboardEvents @0x49d1f0 - per dequeued event
+  //  (Input_DequeueKeyEvent, the calls @0x49d2d2 / @0x49d4a0): the modifier
+  //  pass @0x49d327..0x49d3ac, its fire @0x49d42f and jump past the fallback
+  //  @0x49d437; the fallback @0x49d3ba..0x49d44a, the sign @0x49d452..0x49d470,
+  //  its fire @0x49d488; the capture branch @0x49d2e3 -> Chat_HandleInputChar
+  //  @0x49d498]
+  int event_row(int scan_code, const std::function<bool(int)> &key_down,
+                bool *fallback_signed = nullptr) const;
+
   // The key scan's two live gates, which the embedder sets at the head of
   // every input frame (each logic tick's) ahead of its polls: the death
   // screen (g_DeathScreenActive) selects the

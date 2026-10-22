@@ -5496,6 +5496,9 @@ add_test(NAME npruntime_join_gate_ping COMMAND npruntime_join_gate_ping_test)
 add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)
 target_link_libraries(inmatch_tick_input_source_test PRIVATE opennova_runtime)
 add_test(NAME inmatch_tick_input_source COMMAND inmatch_tick_input_source_test)
+add_executable(controls_key_event_queue_test controls/key_event_queue_test.cpp)
+target_link_libraries(controls_key_event_queue_test PRIVATE opennova_runtime)
+add_test(NAME controls_key_event_queue COMMAND controls_key_event_queue_test)
 
 # --- parity lane LP (proof) ---
 

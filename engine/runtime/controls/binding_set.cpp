@@ -436,6 +436,23 @@ int BindingSet::scan_first_row(int vk, bool modified,
   return -1;
 }
 
+int BindingSet::event_row(int scan_code, const std::function<bool(int)> &key_down,
+                          bool *fallback_signed) const {
+  if (fallback_signed != nullptr) *fallback_signed = false;
+  // [orig: Input_ProcessKeyboardEvents -- the modifier pass's fire @0x49d42f
+  //  jumps to the next event @0x49d437, past the fallback]
+  const int modified = scan_first_row(scan_code, true, key_down);
+  if (modified >= 0) return modified;
+  const int fallback = scan_first_row(scan_code, false, key_down);
+  if (fallback >= 0 && fallback_signed != nullptr) {
+    // [orig: @0x49d452..0x49d470 -- Shift's key state, or the row's 0x200]
+    std::size_t n = 0;
+    *fallback_signed =
+        key_down(16) || (catalog(&n)[fallback].flags & 0x200u) != 0;
+  }
+  return fallback;
+}
+
 int BindingSet::pressed_key(int index,
                             const std::function<bool(int)> &key_down) const {
   const BindingRecord *r = record(index);
