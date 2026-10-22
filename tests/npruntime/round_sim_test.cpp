@@ -1115,6 +1115,74 @@ bool test_spread_limit_keys_on_the_raw_prone_bit() {
 	              "the prone and hip limits draw apart");
 }
 
+// The recoil (+0x380 >> 8) and weight (+0x384 >> 7) accumulators join the
+// weapon ERROR only when the shooter's own def is a person (type 3); a player
+// with a weapon row and any other def, or none, takes the ERROR alone. Here
+// the ERROR row is zero, so that shooter's round flies on the descriptor's
+// angles. [orig: RoundData_SpawnRound @0x4EC0D0 - the def-type test
+// @0x4EC3F1..0x4EC3F8 skips the adds @0x4EC3FA..0x4EC40E]
+bool test_spread_adds_ride_the_person_def() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.rules.mpattrib = 0x4204u; // the out-of-session rules word: spread on
+	w::PlayerSpawn seed;
+	seed.net_id = 47;
+	seed.equipped_adm_index = 1;
+	const w::EntityHandle shooter = w::spawn_player(world, seed);
+	w::AiEntity *body = world.ai.for_handle(shooter);
+	w::Entity *entity = world.registry.get(shooter);
+	if (!expect(shooter.valid() && body != nullptr && entity != nullptr &&
+	                    entity->has_item_def && entity->item_type == 3,
+	            "def-gate player spawned with its person def"))
+		return false;
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	world.tables.weapons.entries.resize(2);
+	w::WeaponTableEntry &weapon = world.tables.weapons.entries[1];
+	weapon.valid = true; // every ERROR row and both limits zero
+	w::RoundSpawnParams params;
+	params.owner = shooter;
+	params.shooter_handle = shooter.packed;
+	params.ammo_index = 0;
+	params.adm_index = 1;
+	params.shot_seq = 13;
+	const int32_t kRecoil = 0x400000;  // >> 8 = 0x4000
+	const int32_t kWeight = 0x200000;  // >> 7 = 0x4000
+	auto fire = [&]() -> const w::LiveRound * {
+		world.round_sim.reset();
+		body->inf.recoil_pitch = kRecoil;
+		body->inf.weapon_weight_spread = kWeight;
+		const int slot = world.round_sim.spawn(world, params);
+		return slot >= 0 ? &world.round_sim.rounds[static_cast<size_t>(slot)] : nullptr;
+	};
+
+	const w::RandomSpreadOffset want =
+			w::weapon_calc_random_spread_offset(0x8000, 13, 0, false);
+	if (!expect(want.yaw_bam != 0 || want.pitch_bam != 0,
+	            "the summed accumulators draw a nonzero offset"))
+		return false;
+	const w::LiveRound *person = fire();
+	if (!expect(person != nullptr && person->yaw_bam == want.yaw_bam &&
+	                    person->pitch_bam == want.pitch_bam,
+	            "a person-def shooter's spread is ERROR + recoil >> 8 + weight >> 7"))
+		return false;
+
+	entity->item_type = 2;
+	const w::LiveRound *other = fire();
+	if (!expect(other != nullptr && other->yaw_bam == 0 && other->pitch_bam == 0,
+	            "a non-person def takes the ERROR alone: the descriptor's angles"))
+		return false;
+
+	entity->has_item_def = false;
+	entity->item_type = 3;
+	const w::LiveRound *defless = fire();
+	return expect(defless != nullptr && defless->yaw_bam == 0 && defless->pitch_bam == 0,
+	              "a def-less body takes the ERROR alone: the descriptor's angles");
+}
+
 struct DismembermentRig {
 	w::World world;
 	w::AiSystem &ai = world.ai;
@@ -1669,6 +1737,7 @@ int main() {
 	if (!test_unauthored_recoil_kicks_a_flying_round_only()) return 1;
 	if (!test_stance_row_forced_standing_mask()) return 1;
 	if (!test_spread_limit_keys_on_the_raw_prone_bit()) return 1;
+	if (!test_spread_adds_ride_the_person_def()) return 1;
 	if (!test_spawn_aimed_row_and_zero_elevation()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;
 	if (!test_person_hit_presentation_legs_run_on_every_hit()) return 1;

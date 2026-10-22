@@ -1088,14 +1088,12 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
             const int category = std::min<int>(source.stance_category, 2);
             const int row = vertical_spread ? 3 : category;
             int32_t spread = weapon->error_fp16[row];
-            if (source.recoil_pitch != nullptr) {
-                spread = io::bam_add(
-                        spread, io::bam_sar(*source.recoil_pitch, 8));
-            }
-            if (source.weapon_weight_spread != nullptr) {
-                spread = io::bam_add(
-                        spread, io::bam_sar(*source.weapon_weight_spread, 7));
-            }
+            // Only a person def adds the accumulators [orig: RoundData_SpawnRound
+            //  @0x4EC0D0 - the def-type test @0x4EC3F1..0x4EC3F8, the adds @0x4EC3FA..0x4EC40E].
+            if (source.person_with_item_def && source.recoil_pitch != nullptr)
+                spread = io::bam_add(spread, io::bam_sar(*source.recoil_pitch, 8));
+            if (source.person_with_item_def && source.weapon_weight_spread != nullptr)
+                spread = io::bam_add(spread, io::bam_sar(*source.weapon_weight_spread, 7));
             // The up/down limit keys on the raw prone bit, not the row: a
             // prone body whose row a mask bit or a mount overrode still takes
             // +0xD0 [orig: `cmp outZ, 0; jnz` @0x4EC44E, `cmp outX, 0; jnz`
