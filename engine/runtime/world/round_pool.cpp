@@ -1,11 +1,13 @@
 // The round pool's slot walks: its one allocator, and a client's S2C 0x59
 // found leg over every slot. The pool is 512 rounds of 780 bytes, each with its
-// activity byte; a release clears that byte and the life word and keeps every
-// other word, so a freed round reads as it last stood until the allocator's
-// cursor comes back to its slot.
+// activity byte; a release clears that byte, the life word and its effect
+// handles (the ring record, the glow) and keeps every other word, so a freed
+// round reads as it last stood until the allocator's cursor comes back to its
+// slot.
 // [orig: g_RoundPool @0xB7E1A8, the activity bytes g_RoundPoolActive @0xB7DFA0;
 //  CEntityManager_AllocateSlot @0x4EAAD0; Projectile_ReleaseEffects @0x4E8280
-//  (@0x4E8317 / @0x4E831E); Entity_SpawnOrUpdateFromSlotPacket @0x546770]
+//  (@0x4E8317 / @0x4E831E, the handles @0x4E82F2 / @0x4E8310);
+//  Entity_SpawnOrUpdateFromSlotPacket @0x546770]
 
 #include <runtime/world/round_sim.h>
 

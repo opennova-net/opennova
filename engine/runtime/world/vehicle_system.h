@@ -229,8 +229,18 @@ public:
     // vehicle uses its own embedded slot. An attached non-vehicle EWeap uses its
     // own slot until redirect_to_parent_slot is set, then its groundEntity's slot,
     // read with no check of that entity; no groundEntity resolves null.
-    // [orig: Entity_GetWeaponSlots @0x5460E0; NetPacket_WritePlayerState @0x4ffe18]
+    // [orig: Entity_GetWeaponSlots @0x5460E0]
     WeaponSlotState *resolve_mounted_ammo_slot(Entity &mount);
+    // The phase-8 mount-ammo record's slot: its writer and its reader each inline
+    // the route and, with the route bit set, repeat the setter's four groundEntity
+    // checks (designated_g_route_carrier); a failed check resolves no slot (the
+    // writer's zero words, the reader's ignored words).
+    // [orig: NetPacket_WritePlayerState @0x4FF6B0 (the route @0x4FFE18, the ground
+    //  checks @0x4FFE27..0x4FFE3F, the zero words @0x4FFE7F); NapiNPClientMsg_0x00A
+    //  @0x42FEC0 (the route @0x4304FD, the ground checks @0x43050C..0x430524, the
+    //  stores @0x43053D / @0x430541)]
+    const WeaponSlotState *resolve_phase8_ammo_slot(const Entity &mount) const;
+    WeaponSlotState *resolve_phase8_ammo_slot(Entity &mount);
     // An EWeap entity's reload: the routed slot and its def with the entity's own
     // slot and def (weapon_mount_slot_reload). False when the slot resolves to
     // nothing. [orig: WeaponSlot_ReloadAmmo @0x541720 -> Entity_GetWeaponSlots

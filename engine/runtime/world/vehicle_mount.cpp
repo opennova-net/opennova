@@ -183,11 +183,11 @@ bool VehicleSystem::bind_use_gun_slot(Entity &occupant, Entity &vehicle) {
 const WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(const Entity &mount) const {
     const World &world = world_;
     // Retail proves the item definition and the EWeap attrib before resolving
-    // ANY slot: the shared helper bails to NULL and the phase-8 writer emits
-    // the zero-word form when either is missing [orig: shared helper @0x5460E0
-    // (!itemDef -> 0; !(attrib & 0x20) -> 0); writer gate @0x4FFE0B]. A tool
-    // world that installs authored seat specs before the item database
-    // therefore resolves no slot until traits arrive.
+    // ANY slot: Entity_GetWeaponSlots bails to NULL and the phase-8 writer emits
+    // the zero-word form when either is missing [orig: Entity_GetWeaponSlots @0x5460E0
+    // (!itemDef -> 0; !(attrib & 0x20) -> 0); NetPacket_WritePlayerState @0x4FF6B0 (the gate
+    // @0x4FFE0B)]. A tool world that installs authored seat specs before the
+    // item database therefore resolves no slot until traits arrive.
     if (!mount.has_item_def ||
         (mount.item_attrib & kItemAttribEweap) == 0u)
         return nullptr;
@@ -220,6 +220,22 @@ WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(Entity &mount) {
     (void)world;
     return const_cast<WeaponSlotState *>(
             static_cast<const VehicleSystem *>(this)->resolve_mounted_ammo_slot(
+                    static_cast<const Entity &>(mount)));
+}
+
+const WeaponSlotState *VehicleSystem::resolve_phase8_ammo_slot(const Entity &mount) const {
+    // The route's groundEntity checks, which the shared helper never reads
+    // [orig: NetPacket_WritePlayerState @0x4FFE27..0x4FFE3F; NapiNPClientMsg_0x00A
+    //  @0x43050C..0x430524].
+    if (mount.primary_weapon_slot.redirect_to_parent_slot && mount.item_type != 1u &&
+            !designated_g_route_carrier(world_.registry.get(mount.ground_target)))
+        return nullptr;
+    return resolve_mounted_ammo_slot(mount);
+}
+
+WeaponSlotState *VehicleSystem::resolve_phase8_ammo_slot(Entity &mount) {
+    return const_cast<WeaponSlotState *>(
+            static_cast<const VehicleSystem *>(this)->resolve_phase8_ammo_slot(
                     static_cast<const Entity &>(mount)));
 }
 

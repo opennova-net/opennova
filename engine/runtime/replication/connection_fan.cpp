@@ -1417,9 +1417,12 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			if (own->mounted && own->mount_target.valid()) {
 				hs.mount_ammo.mount_handle = own->mount_target.packed;
 				hs.mount_ammo.has_mount = true;
+				// The writer's inline route repeats the setter's ground checks; a
+				// failed one writes the zero words [orig: NetPacket_WritePlayerState
+				//  @0x4FF6B0 - @0x4FFE18, @0x4FFE27..0x4FFE3F, @0x4FFE7F].
 				if (const world::Entity *mount = w.registry.get(own->mount_target)) {
 					if (const world::WeaponSlotState *slot =
-							w.vehicles.resolve_mounted_ammo_slot(*mount)) {
+							w.vehicles.resolve_phase8_ammo_slot(*mount)) {
 						hs.mount_ammo.clip = static_cast<uint16_t>(slot->clip);
 						hs.mount_ammo.reserve = static_cast<uint16_t>(slot->reserve);
 					}

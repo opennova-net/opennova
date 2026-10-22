@@ -2671,7 +2671,8 @@ void test_bms_mount_predicates() {
 // Retail's shared EWeap slot resolver uses the live MountSlot+0x5e bit 8 to
 // choose between an addeweap child's embedded slot and its groundEntity
 // carrier's vehicle slot. The authored G/C flags are capabilities, not this
-// mutable route bit. [orig: shared helper @0x5460e0; phase-8 writer @0x4ffe18]
+// mutable route bit. [orig: Entity_GetWeaponSlots @0x5460E0; NetPacket_WritePlayerState
+// @0x4FF6B0 (the route @0x4FFE18)]
 void test_mounted_ammo_slot_route() {
     World w;
     w.registry.configure_pool(1, 8);
@@ -2730,6 +2731,12 @@ void test_mounted_ammo_slot_route() {
     const Entity &const_child = *w.registry.get(child_h);
     CHECK(const_world.vehicles.resolve_mounted_ammo_slot(const_child) ==
           &w.registry.get(parent_h)->primary_weapon_slot);
+    // The phase-8 record's writer and reader take the same carrier slot: its
+    // groundEntity passes their ground checks.
+    CHECK(w.vehicles.resolve_phase8_ammo_slot(*live_child) ==
+          &w.registry.get(parent_h)->primary_weapon_slot);
+    CHECK(const_world.vehicles.resolve_phase8_ammo_slot(const_child) ==
+          &w.registry.get(parent_h)->primary_weapon_slot);
 
     // The similarly named attachment pointer is not a substitute for retail's
     // groundEntity relationship.
@@ -2752,6 +2759,11 @@ void test_mounted_ammo_slot_route() {
     CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) ==
           &w.registry.get(parent_h)->primary_weapon_slot);
     CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child)->clip == 13);
+    // The phase-8 record's writer and reader inline the route with the setter's
+    // four ground checks, so a defless ground neither writes nor takes the words.
+    // [orig: NetPacket_WritePlayerState @0x4FF6B0 - @0x4FFE27..0x4FFE3F, the zero
+    //  words @0x4FFE7F; NapiNPClientMsg_0x00A @0x42FEC0 - @0x43050C..0x430524]
+    CHECK(w.vehicles.resolve_phase8_ammo_slot(*live_child) == nullptr);
     live_child->emplacement_parent = EntityHandle{};
     live_child->emplacement_parent_spawn_id = 0;
     CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) ==

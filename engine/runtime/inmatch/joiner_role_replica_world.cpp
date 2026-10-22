@@ -761,8 +761,11 @@ void JoinerRole::apply_mounted_ammo_update() {
 	// the materializer has populated the exact packed slot.
 	if (mount == nullptr) return;
 
+	// The reader's inline route repeats the setter's ground checks; a failed one
+	// stores nothing [orig: NapiNPClientMsg_0x00A @0x42FEC0 - @0x4304FD,
+	//  @0x43050C..0x430524, the stores @0x43053D / @0x430541].
 	world::WeaponSlotState *slot =
-			world.vehicles.resolve_mounted_ammo_slot(*mount);
+			world.vehicles.resolve_phase8_ammo_slot(*mount);
 	if (slot != nullptr) {
 		// Retail stores both words in signed 16-bit MountSlot fields. Preserve the
 		// 0xffff sentinel as -1 rather than widening it to 65535.
