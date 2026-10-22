@@ -3012,15 +3012,13 @@ void test_ai_drive_leg() {
     b.f[AiBrain::kWpNode] = 0;
     b.f[AiBrain::kOutSpeed] = 40 * 293; // the SM mover's out-speed (PatrolSpeed 40)
 
-    // No controller: parked. [orig: @0x48c002-0x48c02d]
+    // No controller: the mover's occupant block takes the parked arm.
+    // [orig: @0x48c002-0x48c02d]
     {
-        VehicleDriveCmd cmd;
-        r.sys.vehicle_ai_drive(r.w, r.veh(), nullptr, t, cmd);
-        CHECK(!cmd.ai_drive);
+		const float x0 = r.veh().position.x;
+		r.w.vehicles.tick_motor(r.veh(), t);
         CHECK(b.f[AiBrain::kCurState] == 22);
 		CHECK(b.f[AiBrain::kPendState] == 16); // pending callback state is untouched
-		const float x0 = r.veh().position.x;
-		r.w.vehicles.tick_motor(r.veh(), t, &cmd);
         CHECK(std::abs(r.veh().position.x - x0) < 0.05f);
     }
 
@@ -3040,10 +3038,9 @@ void test_ai_drive_leg() {
     const float x0 = r.veh().position.x;
     bool drove = false;
     for (int i = 0; i < 300; ++i) {
-        VehicleDriveCmd cmd;
-        r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd);
-        drove = drove || cmd.ai_drive;
-        r.w.vehicles.tick_motor(r.veh(), t, &cmd);
+        // The mover runs the AI leg in place at its occupant block.
+        r.w.vehicles.tick_motor(r.veh(), t);
+        drove = drove || r.veh().veh.cmd_speed != 0;
         AiEntity *ve2 = r.sys.for_handle(r.veh_h);
         ve2->self->position.x.q16 = static_cast<int32_t>(r.veh().position.x * 65536.0f);
         ve2->self->position.y.q16 = static_cast<int32_t>(r.veh().position.y * 65536.0f);
@@ -3071,11 +3068,8 @@ void test_ai_drive_leg() {
     r.w.registry.get(nh)->alive = false;
     CHECK(r.w.vehicles.detach(nh)); // the death edge's detach
     {
-        VehicleDriveCmd cmd;
-        r.sys.vehicle_ai_drive(r.w, r.veh(), r.w.vehicles.resolve_controller(r.veh()), t, cmd);
-        CHECK(!cmd.ai_drive);
+        r.w.vehicles.tick_motor(r.veh(), t);
         CHECK(b.f[AiBrain::kCurState] == 22);
-        r.w.vehicles.tick_motor(r.veh(), t, &cmd);
         CHECK(r.veh().veh.cmd_speed == 0); // the parked hold, not the stale drive
     }
     // A live controller under a hull a script disabled (Flags 0x10000000) parks
@@ -3087,10 +3081,8 @@ void test_ai_drive_leg() {
     r.veh().flags |= kEntityFlagScriptDisabled;
     r.veh().veh.cmd_speed = 40 * 293;
     {
-        VehicleDriveCmd cmd;
-        r.sys.vehicle_ai_drive(r.w, r.veh(), r.w.vehicles.resolve_controller(r.veh()), t, cmd);
-        CHECK(!cmd.ai_drive);
-        r.w.vehicles.tick_motor(r.veh(), t, &cmd);
+        r.w.vehicles.tick_motor(r.veh(), t);
+        CHECK(b.f[AiBrain::kCurState] == 22);
         CHECK(r.veh().veh.cmd_speed == 0);
     }
     r.veh().flags &= ~kEntityFlagScriptDisabled;
@@ -3339,8 +3331,7 @@ void test_stuck_check() {
     npc.team = 1;
     const EntityHandle nh = r2.w.registry.spawn(0, npc);
     CHECK(r2.w.vehicles.process_attach(nh, r2.veh_h, 1));
-    VehicleDriveCmd cmd;
-    r2.w.vehicles.tick_motor(r2.veh(), t, &cmd);
+    r2.w.vehicles.tick_motor(r2.veh(), t);
     CHECK(r2.veh().veh.stuck_ticks == 0);
     // A joiner never runs the escalation (the count still climbs).
     r2.sys.is_authority = false;
@@ -3432,41 +3423,41 @@ void test_handbrake_latch() {
     CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
     Entity &drv = r.player();
     drv.net_move_input = 0x08; // moving forward
-    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t);
     CHECK(r.veh().veh.cmd_speed == t.player_speed);
     CHECK(r.veh().veh.handbrake_latched == 0);
     drv.net_move_input = 0x08 | 0x80; // + lean right = handbrake
-    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t);
     CHECK((r.veh().flags & 0x8u) != 0);
     CHECK(r.veh().veh.handbrake_latched == 1);
     CHECK(r.veh().veh.cmd_speed == 0);
     drv.net_move_input = 0x08;
-    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t);
     CHECK(r.veh().veh.handbrake_latched == 0);
     // The old latch still selects analog input on the release tick; digital
     // forward resumes on the following visit. [orig: @0x48B9D2..0x48B9E5]
     CHECK(r.veh().veh.cmd_speed == 0);
-    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t);
     CHECK(r.veh().veh.cmd_speed == t.player_speed);
     // A def without handBrake ignores the key.
     t.hand_brake = 0;
     drv.net_move_input = 0x08 | 0x80;
-    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t);
     CHECK(r.veh().veh.handbrake_latched == 0);
     CHECK(r.veh().veh.cmd_speed == t.player_speed);
     // The crashed byte stops the command regardless.
     r.veh().veh.crashed = 1;
     drv.net_move_input = 0x08;
-    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t);
     CHECK(r.veh().veh.cmd_speed == 0);
     r.veh().veh.crashed = 0;
     // The MoveOrder merge: a nonzero direction with the move bit latches the
     // free-look bit on the occupant's own word [orig: @0x48b847..0x48b897].
     drv.net_move_input = 0x08 | 0x01;
-    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t);
     CHECK((drv.net_move_input & 0x10u) != 0);
     drv.net_move_input = 0x08; // straight: no latch
-    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t);
     CHECK((drv.net_move_input & 0x10u) == 0);
 }
 
@@ -3525,15 +3516,20 @@ void test_zero_health_hull_keeps_its_driver_leg() {
         d.r.sys.vehicle_ai_drive(d.r.w, d.r.veh(), ctrl, d.t, cmd);
         CHECK(cmd.ai_drive && cmd.cmd_speed == 40 * 293);
         CHECK(d.brain().brain.f[AiBrain::kCurState] == 16);
-        d.r.w.vehicles.tick_motor(d.r.veh(), d.t, &cmd);
+        d.r.w.vehicles.tick_motor(d.r.veh(), d.t);
         CHECK(d.r.veh().veh.cmd_speed == 40 * 293);
+        CHECK(d.brain().brain.f[AiBrain::kCurState] == 16);
         d.r.veh().flags |= kEntityFlagDead;
         VehicleDriveCmd parked;
         d.r.sys.vehicle_ai_drive(d.r.w, d.r.veh(), ctrl, d.t, parked);
         CHECK(!parked.ai_drive);
         CHECK(d.brain().brain.f[AiBrain::kCurState] == 22);
-        d.r.w.vehicles.tick_motor(d.r.veh(), d.t, &parked);
+        // The dead hull's mover bails ahead of its input block: no AI leg, no state
+        // stamp, the registers keep their last values.
+        d.r.sys.for_handle(d.r.veh_h)->brain.f[AiBrain::kCurState] = 16;
+        d.r.w.vehicles.tick_motor(d.r.veh(), d.t);
         CHECK(d.r.veh().veh.cmd_speed == 40 * 293);
+        CHECK(d.brain().brain.f[AiBrain::kCurState] == 16);
     }
 }
 
@@ -4457,10 +4453,8 @@ void test_vehicle_hull_stops_at_building() {
 
     for (int i = 0; i < 950; ++i) {
         cw.build_tick_tables(r.w); // self-gated to the 17-tick cadence
-        VehicleDriveCmd cmd;
-        r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd);
 		stamp_saved_live_pose(r.veh());
-		r.w.vehicles.tick_motor(r.veh(), t, &cmd);
+		r.w.vehicles.tick_motor(r.veh(), t); // the AI leg runs in place
 		AiEntity *ve2 = r.sys.for_handle(r.veh_h);
         ve2->self->position.x.q16 = static_cast<int32_t>(r.veh().position.x * 65536.0f);
         ve2->self->position.y.q16 = static_cast<int32_t>(r.veh().position.y * 65536.0f);

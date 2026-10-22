@@ -263,28 +263,28 @@ public:
     // Entity_UpdateVehiclePhysics @0x48af00]
     Entity *resolve_controller(Entity &veh);
     // One tick of the ground-vehicle motor for `veh` (a pool-1 entity whose traits
-    // carry a non-zero `physics` selector, or any ctank/cbike row). Consumes the
-    // controlling occupant's replicated input (or the AI-driver command when the
-    // controller is an NPC), advances Entity::position / Entity::yaw and the
-    // persistent Entity::veh motor state. `prediction` skips only the role-gated
-    // input block: ground_client_tick has already staged the registers.
+    // carry a non-zero `physics` selector, or any ctank/cbike row). Its occupant
+    // block, after the head, takes the controlling occupant's replicated input or
+    // runs the AI-driver leg (AiSystem::vehicle_ai_drive) or the parked arm in
+    // place; it advances Entity::position / Entity::yaw and the persistent
+    // Entity::veh motor state. `prediction` skips only the role-gated input block:
+    // ground_client_tick has already staged the registers.
     // [orig: Entity_UpdateVehiclePhysics @0x48af00 — the drive core;
     // block-level cites inline]
-    void tick_motor(Entity &veh, const VehicleTraits &traits,
-            const VehicleDriveCmd *ai_cmd = nullptr, bool prediction = false);
+    void tick_motor(Entity &veh, const VehicleTraits &traits, bool prediction = false);
 	// Watercraft prediction runs the received-register chase, local-driver reconciliation and the
 	// full motor/platform solve. The shared state includes speed, steer, heave, pitch, roll,
 	// planing, water/air flags and wreck latches; authority-only damage remains gated.
 	// Witness sites: [orig: @0x48D480, @0x481870, @0x48ECE7, @0x45AEA0]
 	void watercraft_platform_solve(Entity &veh, const VehicleTraits &traits);
 	void watercraft_client_tick(Entity &veh, const VehicleTraits &traits);
-    // One AUTHORITY tick of the watercraft motor (the host-side cbot mover): the
-    // occupant/AI/parked input staging behind the witnessed gate, capsize damage,
-    // then the same steer/thrust/drag/contact/integration core the client subset
-    // runs. The AI command block comes from AiSystem::watercraft_ai_drive.
+    // One AUTHORITY tick of the watercraft motor (the host-side cbot mover): capsize
+    // damage, the occupant / AI / parked input block behind the witnessed gate (the
+    // AI leg AiSystem::watercraft_ai_drive run in place), then the same
+    // steer/thrust/drag/contact/integration core the client subset runs.
     // [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the authority path behind
     // the @0x48DF8C..0x48DFA2 input gate; witnessed 2026-08-06]
-    void tick_watercraft_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd = nullptr);
+    void tick_watercraft_motor(Entity &veh, const VehicleTraits &traits);
     // The GROUND/Bike prediction leg: shared chase + local-driver input or mirrored
     // remote registers driving tick_vehicle_motor's core with the input block bypassed;
     // the Bike family selects its witnessed gravity/contact/yaw deltas in that core.
@@ -393,8 +393,7 @@ public:
 	// Shared mover-head health cadence [orig: cveh @0x48AFFD, cbik @0x4840DD,
 	// ctan @0x488BAD, cbot @0x48D561, CHel/cpln @0x4903F4].
 	void tick_health(Entity &veh, const VehicleTraits &traits);
-	void tick_simple_motor(
-			Entity &, const VehicleTraits &, const VehicleDriveCmd *, bool prediction);
+	void tick_simple_motor(Entity &, const VehicleTraits &, bool prediction);
 	// The selector-zero ground mover's AI leg, run in place in the mover over the
 	// brain's words (a client's are zero): it writes the command registers
 	// (steer_target_bam, cmd_speed; steer_ramp_bam only in the boarders' hold) and

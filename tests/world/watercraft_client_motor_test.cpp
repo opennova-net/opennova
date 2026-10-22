@@ -2196,8 +2196,8 @@ bool run_authority_ai_boat_drives_afloat() {
 	make_rig(r);
 	set_zodiac_boxes(r.traits);
 	r.traits.player_control = true;
-	w::AiSystem sys;
-	sys.bind_registry(&r.world.registry);
+	// The mover runs the AI leg over the world's own brains.
+	w::AiSystem &sys = r.world.ai;
 	const int ai_idx = stage_boat_brain(r, sys, 30 * 293); // PatrolSpeed 30
 	w::AiBrain &b = sys.at(ai_idx)->brain;
 	w::Entity *drv = mount_ai_driver(r);
@@ -2210,10 +2210,9 @@ bool run_authority_ai_boat_drives_afloat() {
 	bool drove = false;
 	float max_dz = 0.0f;
 	for (int i = 0; i < 300; ++i) {
-		w::VehicleDriveCmd cmd;
-		sys.watercraft_ai_drive(r.world, *boat, ctrl, r.traits, cmd);
-		drove = drove || cmd.ai_drive;
-		r.world.vehicles.tick_watercraft_motor(*boat, r.traits, &cmd);
+		// The AI leg runs in place at the mover's occupant block.
+		r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
+		drove = drove || boat->veh.cmd_speed != 0;
 		w::AiEntity *ve = sys.for_handle(r.boat);
 		ve->self->position.x.q16 = static_cast<int32_t>(boat->position.x * 65536.0f);
 		ve->self->position.y.q16 = static_cast<int32_t>(boat->position.y * 65536.0f);
@@ -2221,7 +2220,7 @@ bool run_authority_ai_boat_drives_afloat() {
 		ve->heading = boat->veh.yaw_bam;
 		max_dz = std::max(max_dz, std::abs(boat->position.z - 10.0f));
 	}
-	ok &= expect(drove, "AI leg staged a drive command");
+	ok &= expect(drove, "AI leg wrote a drive command");
 	ok &= expect(b.f[w::AiBrain::kCurState] == 16, "state 16 held (22->16 handback)");
 	ok &= expect(boat->position.x - x0 > 10.0f, "boat drove toward the node");
 	ok &= expect(std::abs(boat->position.y - 200.0f) < 30.0f, "no runaway lateral drift");
@@ -2238,20 +2237,17 @@ bool run_authority_boat_parks_without_controller() {
 	make_rig(r);
 	set_zodiac_boxes(r.traits);
 	r.traits.player_control = true;
-	w::AiSystem sys;
-	sys.bind_registry(&r.world.registry);
+	w::AiSystem &sys = r.world.ai;
 	const int ai_idx = stage_boat_brain(r, sys, 30 * 293);
 	w::AiBrain &b = sys.at(ai_idx)->brain;
 	w::Entity *boat = r.world.registry.get(r.boat);
-	w::VehicleDriveCmd cmd;
 	const int32_t pending = b.f[w::AiBrain::kPendState];
-	sys.watercraft_ai_drive(r.world, *boat, nullptr, r.traits, cmd);
-	bool ok = expect(!cmd.ai_drive, "no drive command without a controller");
-	ok &= expect(b.f[w::AiBrain::kCurState] == 22 && b.f[w::AiBrain::kPendState] == pending,
-			"parked stamp preserves the pending transition");
 	const float x0 = boat->position.x;
+	// The mover's occupant block takes the parked arm.
 	for (int i = 0; i < 60; ++i)
-		r.world.vehicles.tick_watercraft_motor(*boat, r.traits, &cmd);
+		r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
+	bool ok = expect(b.f[w::AiBrain::kCurState] == 22 && b.f[w::AiBrain::kPendState] == pending,
+			"parked stamp preserves the pending transition");
 	ok &= expect(boat->veh.cmd_speed == 0, "parked hold zeroes the command");
 	ok &= expect(std::abs(boat->position.x - x0) < 0.5f, "parked boat stays put");
 	return ok;
@@ -2270,25 +2266,25 @@ bool run_authority_capsize_drain_and_dead_skip() {
 	// air_roll_bam (D-NET-NEW-L6-3).
 	boat->roll_bam = w::spawn_angle_bam(110);
 	boat->health = 1000;
-	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
 	bool ok = expect(boat->health == 1000, "client capsize does not drain health");
 	r.world.ai.is_authority = true;
 	boat->veh.air_roll_bam = 110 * 11930464;
-	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
 	ok &= expect(boat->health == 800, "authority capsized hull drained 200 hp");
 
 	boat->flags |= w::kEntityFlagDead;
 	const float x0 = boat->position.x;
 	const int hp0 = boat->health;
 	boat->veh.vel_x = 1 << 16; // would integrate if the dead skip failed
-	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
 	bool skipped = boat->health == hp0 && boat->position.x == x0;
 
 	// The real death path latches the dead bit on engine_flags (destruction.cpp
 	// Flags |= 6) — the skip reads the combined view, so it must hold there too.
 	boat->flags &= ~w::kEntityFlagDead;
 	boat->engine_flags |= w::kEntityFlagDead;
-	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
 	skipped = skipped && boat->health == hp0 && boat->position.x == x0;
 	ok &= expect(skipped, "dead hull skips input and integration (both flag fields)");
 	return ok;
@@ -2323,7 +2319,7 @@ bool run_authority_player_drive_uses_waterspeed() {
 	drv->net_move_input = 0x08u | 0x01u;
 	const float x0 = boat->position.x;
 	for (int i = 0; i < 300; ++i)
-		r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
+		r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
 	ok &= expect(boat->veh.cmd_speed == 5000,
 	             "player move commands waterSpeed, not the absent player_speed");
 	ok &= expect(boat->position.x - x0 > 5.0f, "player-driven boat moves");
@@ -2332,13 +2328,13 @@ bool run_authority_player_drive_uses_waterspeed() {
 	// no ground lean flag may appear.
 	drv->net_move_input = 0x40u;
 	boat->flags &= ~0x28u;
-	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
 	ok &= expect(boat->veh.cmd_speed == 5000, "bit6 throttles at waterSpeed");
 	ok &= expect((boat->flags & 0x20u) == 0, "bit6 writes no ground lean flag on a boat");
 
 	// bit7 forces cmd = waterSpeed with dir 7, skipping the move/analog split.
 	drv->net_move_input = 0x80u;
-	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
 	ok &= expect(boat->veh.cmd_speed == 5000, "bit7 forces the waterSpeed command");
 	ok &= expect((boat->flags & 0x8u) == 0, "bit7 writes no ground lean flag on a boat");
 	return ok;
@@ -2369,13 +2365,13 @@ bool run_submerged_driver_hands_to_ai_leg() {
 	drv->eye_offset_z = 1 << 16;
 	drv->position.z = static_cast<float>(r.world.env.water_z) / 65536.0f;
 	ok &= expect(!w::watercraft_driver_submerged(r.world, *drv), "eye above the plane");
-	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
 	ok &= expect(boat->veh.cmd_speed == 5000, "surfaced driver commands waterSpeed");
 	// Eye at/below the plane: the cut routes to the AI leg (none staged: hold).
 	boat->veh.cmd_speed = 0;
 	drv->position.z -= 1.0f;
 	ok &= expect(w::watercraft_driver_submerged(r.world, *drv), "eye at the plane is submerged");
-	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
 	ok &= expect(boat->veh.cmd_speed == 0, "submerged driver's input is cut");
 	// The compare is raw: an eye word of 0 tests the position alone.
 	// [orig: `add eax,[ecx+0Ch]; cmp eax, g_EnvWaterHeightFixed; jle` @0x48DFD3..0x48DFDF]
@@ -2393,7 +2389,7 @@ bool run_submerged_driver_hands_to_ai_leg() {
 }
 
 // The AI leg caps command at def waterSpeed and steers Yaw + delta with no
-// ground-style delta/8 term [orig: @0x48E260..0x48E279 / @0x48E3F0..0x48E3F5].
+// ground-style delta sar 3 term [orig: @0x48E260..0x48E279 / @0x48E3F0..0x48E3F5].
 bool run_authority_ai_leg_caps_at_waterspeed() {
 	Rig r;
 	make_rig(r);
@@ -2417,9 +2413,9 @@ bool run_authority_ai_leg_caps_at_waterspeed() {
 	ok &= expect(cmd.cmd_speed == 5000, "command capped at waterSpeed");
 	ok &= expect(b.f[w::AiBrain::kCurState] == 16, "22 -> 16 handback");
 	// Node dead ahead + aligned heading + zero velocity: budget refresh finds
-	// ~zero error, so steer == heading exactly (no delta/8 residue).
+	// ~zero error, so steer == heading exactly (no delta sar 3 residue).
 	ok &= expect(cmd.steer_target_bam == boat->veh.yaw_bam,
-	             "steer = heading + delta with no delta/8 term");
+	             "steer = heading + delta with no delta sar 3 term");
 	return ok;
 }
 
@@ -2453,16 +2449,16 @@ bool run_trail_bank_tracks_motor_motion() {
 				return false;
 			driver->player_class = 0;
 		}
-		w::VehicleDriveCmd command;
-		command.ai_drive = true;
-		command.cmd_speed = 16384;
 		r.world.out.fire_sounds.set_listener(boat->position);
 		stage(*boat, w::to_fixed(100.0f), w::to_fixed(200.0f), w::to_fixed(10.0f), 0, 16384, 0);
 		auto tick = [&](uint32_t t) {
 			r.world.logic_tick = t;
-			if (authority)
-				r.world.vehicles.tick_watercraft_motor(*boat, r.traits, &command);
-			else
+			if (authority) {
+				// A brainless hull's AI arm leaves the registers as they stand.
+				boat->veh.cmd_speed = 16384;
+				boat->veh.steer_target_bam = 0;
+				r.world.vehicles.tick_watercraft_motor(*boat, r.traits);
+			} else
 				r.world.vehicles.watercraft_client_tick(*boat, r.traits);
 		};
 		tick(1);

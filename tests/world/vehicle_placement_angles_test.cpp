@@ -97,7 +97,7 @@ void test_ground_seeds_read_the_spawn_form() {
 void test_simple_motor_seed_reads_the_spawn_form() {
     Rig r;
     const VehicleTraits t = motor_traits(VehicleFamily::Ground, 0);
-    r.w.vehicles.tick_simple_motor(r.veh(), t, nullptr, false);
+    r.w.vehicles.tick_simple_motor(r.veh(), t, false);
     CHECK(r.veh().saved_live_yaw == kHeading89);
     CHECK(r.veh().saved_live_pitch == kPitch10);
     CHECK(r.veh().saved_live_roll == kRollMinus3);

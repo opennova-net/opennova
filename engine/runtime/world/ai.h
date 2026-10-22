@@ -1135,7 +1135,7 @@ public:
     //    player_speed), re-resolve the waypoint target when the per-leg turn budget
     //    (brain[32]) is spent, clamp the bearing delta to the budget, damp speed 0.75x
     //    per ~30/60 deg of residual turn when turn_rate2<<6 < budget, steer = heading +
-    //    delta + delta/8, and fill `out` (ai_drive = true).
+    //    delta + (delta sar 3), and fill `out` (ai_drive = true).
     // The pool-1 collision-avoid brake, the minAI crew health clamp and the
     // wait-for-boarders stop are inline; the parked branch runs the stuck
     // escalation; the handbrake byte-973 latch and the crashed stop sit in
@@ -1150,7 +1150,7 @@ public:
     //  - an AI controller: 22->16 hand-back, cmd = min(brain outSpeed, water_speed),
     //    boat turn budget (|err|/denom) << 4 on the spent-budget refresh, +-budget
     //    delta clamp, 0.75x speed damps at 15/30/45 deg of residual turn, steer =
-    //    heading + delta (no delta/8 term), the slip counter-steer + its 4-tier
+    //    heading + delta (no delta sar 3 term), the slip counter-steer + its 4-tier
     //    speed damps, and the shared pool-1 avoid brake.
     // The minAI crew health clamp (@0x48E27F..0x48E2C7), the wait-for-boarders
     // stop (@0x48E75B..0x48E7EC) and the parked leg's stuck check
@@ -1158,6 +1158,14 @@ public:
     // brain[127] mirror stays an unmodeled slot (D-NET-161).
     void watercraft_ai_drive(World &world, Entity &veh, const Entity *controller,
                              const VehicleTraits &traits, VehicleDriveCmd &out);
+    // The boat AI leg over `brain`'s words (a client's are zero), the one body the
+    // cbot mover's and the selector-zero boat mover's legs share: the 22 -> 16
+    // hand-back, +0x21C from the target word, the command into `out`, the ramp only
+    // in the boarders' hold. watercraft_ai_drive runs it for an occupied live hull.
+    // [orig: Entity_UpdateWatercraftPhysics @0x48D480 (@0x48E247..0x48E7EC);
+    //  Vehicle_ProcessSelectorZeroBoat @0x46FA00 (@0x470795..0x470D4C)]
+    void watercraft_ai_leg(World &world, Entity &veh, const VehicleTraits &traits,
+                           AiBrain &brain, VehicleDriveCmd &out);
 
     // The CHel AI flight drive: stage this tick's flight commands (fwd/lat
     // cyclic, steer heading, target altitude, engine flag) into the aircraft

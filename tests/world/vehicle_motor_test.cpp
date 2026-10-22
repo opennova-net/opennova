@@ -886,11 +886,7 @@ void test_npc_claimant_registers_stationary_idle_sound() {
     r.mount();
     r.w.out.sound_emitters.clear(); // ignore mount-edge effects; inspect the motor tick
 
-    VehicleDriveCmd parked;
-    parked.ai_drive = true;
-    parked.steer_target_bam = 0;
-    parked.cmd_speed = 0;
-    r.w.vehicles.tick_motor(r.veh(), t, &parked);
+    r.w.vehicles.tick_motor(r.veh(), t); // a brainless hull: the registers hold at 0
 
     CHECK(r.w.out.sound_emitters.size() == 1);
     if (r.w.out.sound_emitters.size() == 1) {
@@ -944,9 +940,7 @@ void test_item_soundloop_override_wins_over_profile() {
     r.mount();
     r.w.out.sound_emitters.clear();
 
-    VehicleDriveCmd parked;
-    parked.ai_drive = true;
-    r.w.vehicles.tick_motor(r.veh(), t, &parked);
+    r.w.vehicles.tick_motor(r.veh(), t);
 
     CHECK(r.w.out.sound_emitters.size() == 1);
     if (r.w.out.sound_emitters.size() == 1) {
@@ -1750,11 +1744,11 @@ void test_engine_and_light_sound_edges() {
 	boat.w.vehicles.traits.set(boat.veh().item_id, t);
 	boat.mount();
 	boat.veh().flags |= 0x80u;
-	boat.w.vehicles.tick_watercraft_motor(boat.veh(), t, nullptr);
+	boat.w.vehicles.tick_watercraft_motor(boat.veh(), t);
 	CHECK(boat.w.out.slot_sounds.size() == 1);
 	CHECK(boat.w.out.slot_sounds[0].slot == opennova::audio::kSlotEngineStart);
 	boat.w.out.slot_sounds.clear();
-	boat.w.vehicles.tick_watercraft_motor(boat.veh(), t, nullptr);
+	boat.w.vehicles.tick_watercraft_motor(boat.veh(), t);
 	CHECK(boat.w.out.slot_sounds.empty());
 }
 
@@ -2902,16 +2896,16 @@ void test_watercraft_entry_reads_the_hull() {
     r.w.registry.get(r.drv_h)->player_class = 0; // an NPC controller: the AI leg
     CHECK(r.w.vehicles.process_attach(r.drv_h, r.veh_h, 1));
     CHECK(r.w.vehicles.resolve_controller(r.veh()) != nullptr);
-    VehicleDriveCmd drive;
-    drive.ai_drive = true;
-    drive.cmd_speed = 20 * 293;
-    drive.steer_target_bam = 0x10000000;
-    // A seated controller at zero health still takes the AI command.
+    // The hull's brain: the leg's command is its out-speed (no waypoint, no turn).
+    AiBrain &brain = r.w.ai.at(r.w.ai.attach(r.veh_h))->brain;
+    brain.f[AiBrain::kCurState] = 16;
+    brain.f[AiBrain::kOutSpeed] = 20 * 293;
+    // A seated controller at zero health still takes the AI leg.
     r.w.registry.get(r.drv_h)->health = 0;
     r.w.registry.get(r.drv_h)->alive = false;
     r.veh().veh.stuck_ticks = 9;
-    r.w.vehicles.tick_watercraft_motor(r.veh(), t, &drive);
-    CHECK(r.veh().veh.cmd_speed == drive.cmd_speed);
+    r.w.vehicles.tick_watercraft_motor(r.veh(), t);
+    CHECK(r.veh().veh.cmd_speed == 20 * 293);
     CHECK(r.veh().veh.stuck_ticks == 0);
     // (A dead hull never reaches the split: the mover bails to its tail first,
     // @0x48DDFA..0x48DDFE, so the split's own dead-bit test only matters within
@@ -3024,7 +3018,7 @@ void test_selector_zero_park_reads_the_hull_not_the_occupant() {
 // from the out-speed capped at playerSpeed, refreshes the spent turn budget
 // ((|Yaw - bearing| / ((+0x8C >> 15) + 32)) << 5), clamps the bearing delta to it,
 // damps the speed 0.75x per threshold the delta crosses and steers to
-// Yaw + delta + delta/8. A driverless hull takes the parked arm: the stuck count,
+// Yaw + delta + (delta sar 3). A driverless hull takes the parked arm: the stuck count,
 // state 22, the heading held and a zero command.
 // [orig: Vehicle_ProcessSelectorZeroGround @0x46E100: the health cadence
 //  @0x46E1C4..0x46E201 ahead of the AI leg @0x46ECB1..0x46F0D0 (the seeds
@@ -3086,6 +3080,69 @@ void test_selector_zero_ground_ai_leg_runs_in_the_mover() {
 		CHECK(veh.veh.steer_target_bam == -0x08000000);
 		CHECK(b.f[AiBrain::kWorkHeading] == -0x08000000);
 		CHECK(veh.veh.stuck_ticks == 0);
+	}
+}
+
+// Every family mover runs its occupant block in place, after its head: the health
+// cadence regenerates the hull first (2000 -> 2010), then the AI leg's crew cap
+// bleeds the undercrewed hull to criticalHp (a cap staged ahead of the head put the
+// hull in the critical band, whose cadence drained it the same pass: 285). The leg
+// hands state 22 back to 16; the boat leg seeds +0x21C from the target word. A
+// driverless hull takes the parked arm after the cadence: the regen stands, the
+// stuck count steps, state 22, a zero command.
+// [orig: the health cadence (cveh @0x48AFFD, ctan @0x488BAD, cbik @0x4840DD, cbot
+//  @0x48D561) ahead of the occupant blocks: cveh's AI leg @0x48BC12 (the crew cap
+//  @0x48BC4E..0x48BC94), parked arm @0x48C002; ctan @0x4897DB / @0x489BCE; cbik
+//  @0x484DB8 / @0x4851AE; cbot @0x48E247 (the seed @0x48E254, the cap
+//  @0x48E27F..0x48E2C7) / @0x48E7EE; Vehicle_ProcessSelectorZeroBoat @0x46FA00 (the
+//  leg @0x470795, the cap @0x4707CD..0x470810, the parked arm @0x470D4E..0x470D79)]
+void test_family_occupant_blocks_run_after_the_head() {
+	struct Case {
+		VehicleFamily family;
+		int32_t physics;
+	};
+	const Case cases[] = {{VehicleFamily::Ground, 1}, {VehicleFamily::Tank, 1},
+			{VehicleFamily::Bike, 1}, {VehicleFamily::Watercraft, 1},
+			{VehicleFamily::Watercraft, 0}};
+	for (const Case &c : cases) {
+		for (const bool driven : {true, false}) {
+			auto r = std::make_unique<Rig>();
+			if (driven) {
+				r->mount();
+				r->drv().player_class = 0; // an NPC driver: the AI leg
+			}
+			VehicleTraits t = buggy_traits();
+			t.family = c.family;
+			t.physics = c.physics;
+			t.water_speed = 40 * 293;
+			t.min_ai = 2; // the driver has no def: no counted crew, so the cap bleeds
+			t.critical_hp = 300;
+			t.critical_drain = 15;
+			t.non_critical_regen = 10;
+			r->w.vehicles.traits.set(r->veh().item_id, t);
+			r->w.ai.is_authority = true;
+			AiBrain &b = r->w.ai.at(r->w.ai.attach(r->veh_h))->brain;
+			b.f[AiBrain::kCurState] = 22;
+			b.f[AiBrain::kTargetRef] = 0x1234;
+			b.f[AiBrain::kOutSpeed] = t.player_speed + 1000;
+			Entity &veh = r->veh();
+			veh.veh.spawn_pose_valid = true; // spawned at the origin, far from its anchor
+			veh.health = 2000;
+			r->w.logic_tick = 32; // (32 + 36 * 200) & 63 == 0: the health cadence's tick
+			r->w.vehicles.update_motor(veh, true);
+			if (!driven) {
+				CHECK(veh.health == 2010); // the cadence's regen; no crew cap while parked
+				CHECK(b.f[AiBrain::kCurState] == 22);
+				CHECK(veh.veh.stuck_ticks == 1);
+				CHECK(veh.veh.cmd_speed == 0);
+				continue;
+			}
+			CHECK(veh.health == 300);
+			CHECK(b.f[AiBrain::kCurState] == 16);
+			CHECK(veh.veh.stuck_ticks == 0);
+			if (c.family == VehicleFamily::Watercraft)
+				CHECK(b.f[135] == 0x1234);
+		}
 	}
 }
 
@@ -3164,6 +3221,7 @@ int main() {
     test_a_dead_aircraft_bails_ahead_of_its_ai_block();
     test_selector_zero_park_reads_the_hull_not_the_occupant();
     test_selector_zero_ground_ai_leg_runs_in_the_mover();
+    test_family_occupant_blocks_run_after_the_head();
     test_client_local_driver_runs_the_occupant_block();
     test_bike_lean_at_speed_both_ways();
     test_local_controls_reach_first_carrier_tick();

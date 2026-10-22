@@ -536,10 +536,12 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     // The wait-for-boarders stop: a full stop while any live unmounted pool-0
     // body runs the boarding think toward THIS vehicle [orig: @0x48bf6f-0x48bff9;
     // ctan @0x489B38..0x489BCC — aiComp[132] = Yaw, [136] = 0, [137] = 0,
-    // Flags &= ~0x80; the motor zeroes the ramp for every AI command].
+    // Flags &= ~0x80]. The hold's [137] (+0x224, the ramp) is the leg's only ramp
+    // write.
     if (vehicle_waits_for_boarders(world, veh)) {
         out.steer_target_bam = heading;
         out.cmd_speed = 0;
+        veh.veh.steer_ramp_bam = 0;
         veh.flags &= ~0x80u;
     }
     // The handbrake byte-973 latch @0x48c03a and the crashed stop @0x48c086 sit
@@ -572,7 +574,16 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
         check_vehicle_stuck(world, veh);
         return; // out.ai_drive stays false
     }
+    watercraft_ai_leg(world, veh, traits, b, out);
+}
 
+// See ai.h — the boat AI leg, one body for the cbot mover and the selector-zero
+// boat mover, whose legs are the same instructions (the selector-zero twin
+// preloads its x87 constants; every load, store, branch and product matches).
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480 (@0x48E247..0x48E7EC);
+//  Vehicle_ProcessSelectorZeroBoat @0x46FA00 (@0x470795..0x470D4C)]
+void AiSystem::watercraft_ai_leg(World &world, Entity &veh, const VehicleTraits &traits,
+                                 AiBrain &b, VehicleDriveCmd &out) {
     // The 22 -> 16 hand-back at the AI-leg head [orig: @0x48E247..0x48E24D].
     if (b.f[AiBrain::kCurState] == 22) {
         b.f[AiBrain::kCurState] = 16;
@@ -582,9 +593,10 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
             ? veh.veh.yaw_bam
             : veh.heading;
 
-    // cmd = the SM mover's out-speed capped at def waterSpeed [orig:
-    // @0x48E260..0x48E279 — aiComp[136] = min(brain[128], waterSpeed)]. The
-    // aiComp[135] <- brain[127] target mirror (@0x48E254) is an unmodeled slot.
+    // cmd = the SM mover's out-speed capped at def waterSpeed, after the brain's
+    // target word seeds +0x21C [orig: @0x48E254..0x48E25A, @0x48E260..0x48E279 —
+    // aiComp[135] = brain[127], aiComp[136] = min(brain[128], waterSpeed)].
+    b.f[135] = b.f[AiBrain::kTargetRef];
     int32_t cmd_speed = b.f[AiBrain::kOutSpeed];
     if (cmd_speed > traits.water_speed) cmd_speed = traits.water_speed;
     // The minAI crew health clamp [orig: @0x48E27F..0x48E2C7 — the boat twin
@@ -595,7 +607,7 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     // @0x48E2D5..0x48E31C — refresh when brain[32] is spent and the waypoint
     // block is live; denom = (brain[35] >> 15) + 32].
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
-        ai_waypoint_update_target(b, ve->self->position.words().data(), nav);
+        ai_waypoint_update_target(b, veh.position.words().data(), nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
         const int32_t err = iabs32(io::bam_sub(heading, b.f[AiBrain::kWpBearing]));
         b.f[AiBrain::kAnimFlag] = (err / denom) << 4;
@@ -620,7 +632,7 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
             cmd_speed = static_cast<int32_t>((49152LL * cmd_speed + 0x8000) >> 16);
     }
 
-    // steer = heading + delta — the boat leg has NO delta/8 term
+    // steer = heading + delta — the boat leg has NO delta sar 3 term
     // [orig: @0x48E3F0..0x48E3F5].
     int32_t steer = io::bam_add(heading, delta);
 
@@ -669,10 +681,12 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     out.steer_target_bam = steer;
     // The wait-for-boarders stop: hold at cmd 0 while any live unmounted pool-0
     // AI runs boarding mode 125 toward THIS hull's id [orig: @0x48E75B..0x48E7EC
-    // — aiComp[132] = Yaw, [136] = 0, [137] = 0, Flags &= ~0x80].
+    // — aiComp[132] = Yaw, [136] = 0, [137] = 0, Flags &= ~0x80]. The hold's [137]
+    // (+0x224, the ramp) is the leg's only ramp write.
     if (vehicle_waits_for_boarders(world, veh)) {
         out.steer_target_bam = heading;
         out.cmd_speed = 0;
+        veh.veh.steer_ramp_bam = 0;
         veh.flags &= ~0x80u;
     }
 }

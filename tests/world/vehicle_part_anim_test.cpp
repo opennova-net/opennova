@@ -388,7 +388,7 @@ void test_watercraft_runs_no_rotor_machine() {
 	// The authority boat tick runs the part-anim exactly once.
 	t.physics = 1;
 	veh.veh.wheel_phase = 0;
-	r.w.vehicles.tick_watercraft_motor(veh, t, nullptr);
+	r.w.vehicles.tick_watercraft_motor(veh, t);
 	CHECK(veh.veh.wheel_phase == (veh.veh.cmd_speed << 13),
 			"one authority tick advances the phase by one step");
 }
@@ -452,7 +452,7 @@ void test_selector_zero_boat_runs_the_ground_machine() {
 		t.water_speed = t.player_speed;
 		r.w.vehicles.traits.set(r.veh().item_id, t);
 		r.mount();
-		for (int i = 0; i < 3; ++i) r.w.vehicles.tick_watercraft_motor(r.veh(), t, nullptr);
+		for (int i = 0; i < 3; ++i) r.w.vehicles.tick_watercraft_motor(r.veh(), t);
 		CHECK(r.veh().veh.part_spin.rate == 0 && r.veh().veh.part_spin.speed == 0,
 				"the full watercraft mover runs no rotor machine");
 	}

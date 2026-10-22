@@ -252,9 +252,9 @@ private:
 
 // The AI-driver command block, computed by the AI system from the vehicle's brain (the
 // witnessed leg lives inside the vehicle physics; our brain state is AiSystem-owned, so
-// the math runs there and the motor consumes the result — a structural seam, not a
-// behavioral one). [orig: Entity_UpdateVehiclePhysics @0x48af00 — parked stamp
-// @0x48c002-0x48c02d, AI-driver leg @0x48bc12-0x48c034]
+// the math runs there, called by each mover in place at its occupant block, which writes
+// the result into its registers). [orig: Entity_UpdateVehiclePhysics @0x48af00 — parked
+// stamp @0x48c002-0x48c02d, AI-driver leg @0x48bc12-0x48c034]
 struct VehicleDriveCmd {
     bool ai_drive = false;        // an AI controller is seated: consume the fields below
     int32_t steer_target_bam = 0; // [orig: aiComp[132] = Yaw + delta + (delta >> 3)]

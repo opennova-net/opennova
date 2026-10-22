@@ -478,23 +478,22 @@ static void vehicle_park_inputs(Entity &veh) {
 // of Entity_ProcessTrackedVehiclePhysics [orig: @0x47C1C0] — is declared in
 // vehicle_motor_detail.h and defined in vehicle_contact_solve.cpp.
 
-void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
-		const VehicleDriveCmd *ai_cmd, bool prediction) {
+void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, bool prediction) {
 	// [orig: Entity_DispatchPhysicsUpdate @0x48F010]
 	if (traits.amphibian && (veh.flags & 0x8000u) != 0) {
 		VehicleTraits afloat = traits;
 		afloat.family = VehicleFamily::Watercraft;
-		tick_watercraft_motor(veh, afloat, ai_cmd);
+		tick_watercraft_motor(veh, afloat);
 		return;
 	}
 	World &world = world_;
 	// Selector zero dispatches the cveh row to the simple motor. The ctank and
 	// cbike rows call their movers without testing the selector.
-	// [orig: Entity_DispatchPhysics_cveh @0x48EFC7; Entity_DispatchPhysics_ctank
+	// [orig: Entity_DispatchPhysics_cveh @0x48EFC0 (@0x48EFC7); Entity_DispatchPhysics_ctank
 	//  @0x48F000..0x48F007; Entity_DispatchPhysics_cbike @0x48EFF0..0x48EFF7]
 	if (traits.physics == 0 && traits.family != VehicleFamily::Tank &&
 			traits.family != VehicleFamily::Bike) {
-		tick_simple_motor(veh, traits, ai_cmd, false);
+		tick_simple_motor(veh, traits, false);
 		return;
 	}
 
@@ -589,32 +588,43 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 
     if (traits.player_control && !prediction) {
         // Zero health alone does not park: the driver's leg runs until the dying
-        // state's death transforms raise the dead bit.
+        // state's death transforms raise the dead bit. Every arm runs here, after the
+        // mover's head (the health cadence, the ground probe, the carrier ride), the
+        // parked arm's stuck count and the AI leg's crew cap, waypoint refresh and
+        // avoid walk included.
         // [orig: cveh @0x48B972..0x48B987; ctan @0x48954B..0x489560;
         //  cbik @0x484A98..0x484AAD]
+        AiEntity *brain = world.ai.for_handle(veh.handle);
+        VehicleDriveCmd cmd;
         if (occ == nullptr || vehicle_hull_parked(veh)) {
-			// Without a controller, steer holds the current heading and command speed decays
-			// through the family deceleration clamps. Parked/stuck state is handled by vehicle
-			// lifecycle.
-			// Witness sites: [orig: @0x48c002]
+			// The parked arm: steer holds the heading, the command and the ramp zero, the
+			// stuck escalation counts, the lights bit clears and the brain takes state 22
+			// (vehicle_ai_drive's parked arm).
+			// [orig: cveh @0x48C002..0x48C02D; ctan @0x489BCE..0x489BF9; cbik
+			//  @0x4851AE..0x4851D9]
 			vehicle_park_inputs(veh);
+			world.ai.vehicle_ai_drive(world, veh, occ, traits, cmd);
         } else if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
-			// A player driver whose eye (CameraOffset.z + Z) sits at or below the
-			// water plane drops to the AI leg like the boat twin [orig: `mov
-			// eax,[ecx+74h]; add eax,[ecx+0Ch]; cmp eax, g_EnvWaterHeightFixed;
-			// jle loc_48BC12` @0x48B9A0..0x48B9AC].
+			// A player driver (the occupant's Flags 0x100, cveh @0x48B993) whose eye
+			// (CameraOffset.z + Z) sits at or below the water plane drops to the AI leg
+			// like the boat twin [orig: `mov eax,[ecx+74h]; add eax,[ecx+0Ch]; cmp eax,
+			// g_EnvWaterHeightFixed; jle loc_48BC12` @0x48B9A0..0x48B9AC; ctan
+			// @0x489579..0x489585 -> @0x4897DB; cbik @0x484AC6..0x484AD2 -> @0x484DB8].
+			// The player arm parks the brain at state 22, so the route never advances
+			// under a human driver [orig: cveh @0x48B9CB; ctan @0x4895A6; cbik @0x484AED].
+			if (brain != nullptr) brain->brain.f[AiBrain::kCurState] = 22;
 			stage_player_vehicle_input(world_, veh, *occ, traits);
-		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
-			// An AI controller drives: consume the brain-computed command block
-            // (AiSystem::vehicle_ai_drive — the witnessed leg's steer/speed outputs).
-            // [orig: the AI-driver leg @0x48bc12-0x48c034 writes aiComp[132]/[136];
-            //  the ramp/dir state is the player path's only]
-            m.steer_target_bam = ai_cmd->steer_target_bam;
-            m.cmd_speed = ai_cmd->cmd_speed;
-            m.steer_ramp_bam = 0;
+		} else {
+			// The AI leg writes the command registers in place; it writes the ramp only
+			// in its boarders' hold.
+            // [orig: the AI-driver leg cveh @0x48BC12..0x48C000; ctan @0x4897DB..0x489BCC;
+            //  cbik @0x484DB8..0x4851AC]
+            world.ai.vehicle_ai_drive(world, veh, occ, traits, cmd);
+            if (cmd.ai_drive) {
+                m.steer_target_bam = cmd.steer_target_bam;
+                m.cmd_speed = cmd.cmd_speed;
+            }
 		}
-		// A live NON-player controller with no drive command holds the previous
-        // steer/speed targets.
         // Occupied and not parked: the driverless stuck count rests; a parked
         // hull (Flags 0x10000002) keeps counting under its occupant [orig:
         // `moveTimer = 0` after the parked test — cveh @0x48B98D, ctan @0x489566,
@@ -1832,7 +1842,7 @@ void stamp_saved_live_pose(Entity &e) {
 
 void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &traits) {
 	if (traits.physics == 0) {
-		tick_simple_motor(veh, traits, nullptr, true);
+		tick_simple_motor(veh, traits, true);
 		return;
 	}
 	World &world = world_;
@@ -2096,10 +2106,10 @@ static void watercraft_motor_core(World &world, Entity &veh,
 // motor, then apply the authority capsize drain.
 // Witness sites: [orig: @0x48DF7F, @0x48DFA2, @0x48D51F, @0x48D6DA, @0x48DACD, @0x48DE04,
 // @0x48DE7B, @0x48DFD3, @0x48DFDF, @0x48ECF5, @0x48D480]
-void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd) {
+void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &traits) {
     World &world = world_;
 	if (traits.physics == 0) {
-		tick_simple_motor(veh, traits, ai_cmd, false);
+		tick_simple_motor(veh, traits, false);
 		return;
 	}
 	Entity::VehicleMotorState &m = veh.veh;
@@ -2165,31 +2175,38 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
         Entity *occ = world.vehicles.resolve_controller(veh);
         const bool player_occupant =
                 occ != nullptr && occ->handle.pool() == 0 && occ->player_class != 0;
+        // Every arm runs here, after the mover's head (the carrier ride, the health
+        // cadence, the capsize drain).
+        AiEntity *brain = world.ai.for_handle(veh.handle);
+        VehicleDriveCmd cmd;
         if (occ == nullptr || ((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
             // Parked/no controller: hold heading, zero command and ramp, lights
-            // off. The state-22 stamp and the stuck escalation live with the
-            // brain in watercraft_ai_drive. [orig: @0x48E7EE..0x48E81E]
+            // off; watercraft_ai_drive's parked arm stamps state 22 and counts the
+            // stuck escalation. [orig: @0x48E7EE..0x48E81E]
             vehicle_park_inputs(veh);
+            world.ai.watercraft_ai_drive(world, veh, occ, traits, cmd);
         } else {
             // Occupied and not dead: the stuck count rests whatever the leg
             // [orig: `moveTimer = 0` @0x48DFC0].
             m.stuck_ticks = 0;
             if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
-                // The human-driver leg: 8-way keys + analog through waterSpeed, the
-                // boat bit6/bit7 overrides, the 45-deg ramp cap, walk/creep halving,
-                // lights [orig: @0x48DFE5..0x48E20F]. A player whose head is under
-                // the water plane routes to the AI leg instead [orig: the
-                // submerged-driver cut @0x48DFD3..0x48DFDF].
+                // The human-driver leg: state 22, then 8-way keys + analog through
+                // waterSpeed, the boat bit6/bit7 overrides, the 45-deg ramp cap,
+                // walk/creep halving, lights [orig: @0x48DFE5..0x48E20F, state 22
+                // @0x48DFF5]. A player whose head is under the water plane routes to
+                // the AI leg instead [orig: the submerged-driver cut
+                // @0x48DFD3..0x48DFDF].
+                if (brain != nullptr) brain->brain.f[AiBrain::kCurState] = 22;
                 stage_player_vehicle_input(world_, veh, *occ, traits);
-            } else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
-                // The AI-driver leg's outputs (AiSystem::watercraft_ai_drive)
-                // [orig: @0x48E247..0x48E756 writes aiComp[132]/[136]].
-                m.steer_target_bam = ai_cmd->steer_target_bam;
-                m.cmd_speed = ai_cmd->cmd_speed;
-                m.steer_ramp_bam = 0;
+            } else {
+                // The AI-driver leg writes the command registers in place, the ramp
+                // only in its boarders' hold [orig: @0x48E247..0x48E7EC].
+                world.ai.watercraft_ai_drive(world, veh, occ, traits, cmd);
+                if (cmd.ai_drive) {
+                    m.steer_target_bam = cmd.steer_target_bam;
+                    m.cmd_speed = cmd.cmd_speed;
+                }
             }
-            // A non-player controller with no drive command holds the previous
-            // targets.
         }
     }
 
@@ -2213,7 +2230,7 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
 	// @0x48F000..0x48F007, Entity_DispatchPhysics_cbike @0x48EFF0..0x48EFF7].
 	if (traits.physics == 0 && traits.family != VehicleFamily::Tank &&
 			traits.family != VehicleFamily::Bike) {
-		tick_simple_motor(veh, traits, nullptr, true);
+		tick_simple_motor(veh, traits, true);
 		return;
 	}
 	// [orig: Entity_DispatchPhysicsUpdate @0x48F010]
@@ -2276,7 +2293,7 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
     // [orig: ctan input gate @0x489522..0x489545 vs the ungated tail gates
     //  @0x48AAC4..0x48AADA and @0x48AD94..0x48AE3D; cveh @0x48B949..0x48B96C vs
     //  @0x48D38B..0x48D42B; cbik @0x486941..0x4869EA]
-    world.vehicles.tick_motor(veh, traits, nullptr, /*prediction=*/true);
+    world.vehicles.tick_motor(veh, traits, /*prediction=*/true);
 }
 
 } // namespace opennova::world
