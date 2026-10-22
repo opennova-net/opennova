@@ -495,6 +495,27 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// step, not the spawn gate.
 }
 
+namespace {
+
+// A remote add's send-state reset, past the slot's report clocks: with the slot's net player
+// bound, NapiNPServer_UpdateHoldoffTicks dictates the period again (its two settings updates
+// ride the spawn pump's block, build_spawn_pump_metadata) and zeroes the connection's
+// countdown, so the slot's send boundary opens on the add's own server tick, ahead of that
+// tick's boundary test and send pump, and its phase counts from the add (D-NET-NEW-L3-21). The
+// host's own arm jumps past it, and the round init's re-add runs no Server_PlayerAdd.
+// [orig: Server_PlayerAdd @0x51CBC0 - slot+28 = the net player @0x51CD4E,
+//  CNetPlayer_ResetSendState(slot, 8 or 4) @0x51CD6A / @0x51CD6F; CNetPlayer_ResetSendState
+//  @0x500B30 - the net-player test @0x500B3C, NapiNPServer_UpdateHoldoffTicks @0x500B59;
+//  NapiNPServer_UpdateHoldoffTicks @0x4C5F40 - CNapiNPConnection_ResetSendHoldoffCounter
+//  @0x4C5F8D / @0x4C5FD4; the add's tick: Server_TickUpdate - the receive pump @0x51D895, the
+//  spawn pump @0x51DBFD, the boundary test @0x51E3D6, the send pump @0x51E487]
+void reset_added_slot_send_holdoff(const NapiNPServerCtx &ctx, NapiNPConnection &conn) {
+	conn.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(ctx.config.effective_send_holdoff_ticks());
+	reset_s2c_send_holdoff_counter(conn);
+}
+
+} // namespace
+
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                  world::World &world, bool round_init) {
@@ -721,6 +742,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		// The remote add's report clocks (D-NET-NEW-L9-22) [orig: Server_PlayerAdd - @0x51CD1B /
 		//  @0x51CD26].
 		if (!is_host_own && !round_init) gate_slot_clocks_player_added(ctx, conn);
+		// Then its send-state reset, ahead of the body spawn too (below, D-NET-NEW-L3-21).
+		if (!is_host_own && !round_init) reset_added_slot_send_holdoff(ctx, conn);
 		// The remote arm's squad leg runs ahead of the body spawn, so a bodyless
 		// row files its node too [orig: @0x51CDE0..0x51CEEF, ahead of @0x51D056].
 		if (!is_host_own && !round_init) Server_FileSquadRegistryNode(ctx, conn);
@@ -859,6 +882,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// active byte @0x51CD14, CServerTick_Construct @0x51CD1B / @0x51CD26; the local arm's jump
 	// past them @0x51CC60].
 	if (!is_host_own && !round_init) gate_slot_clocks_player_added(ctx, conn);
+	// Then the slot's send-state reset re-phases its connection's send boundary
+	// (reset_added_slot_send_holdoff, D-NET-NEW-L3-21).
+	if (!is_host_own && !round_init) reset_added_slot_send_holdoff(ctx, conn);
 	// The remote add's squad leg, once the slot is active; the local arm and
 	// the round init's re-add file nothing (server_squad_registry.h).
 	// [orig: Server_PlayerAdd's remote arm, @0x51CDE0..0x51CEEF; its local arm

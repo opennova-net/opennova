@@ -5129,6 +5129,12 @@ add_test(NAME npruntime_map_change_load_order COMMAND npruntime_map_change_load_
 add_executable(frame_lock_test world/frame_lock_test.cpp)
 target_link_libraries(frame_lock_test PRIVATE opennova_runtime)
 add_test(NAME frame_lock COMMAND frame_lock_test)
+# A remote add's send-state reset: the added slot's send boundary opens on the add's tick,
+# its phase counted from the add; a round-init re-add keeps it (L3-s10, D-NET-NEW-L3-21).
+add_executable(npruntime_add_send_phase_test npruntime/add_send_phase_test.cpp)
+target_link_libraries(npruntime_add_send_phase_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_add_send_phase_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_add_send_phase COMMAND npruntime_add_send_phase_test)
 
 # --- parity lane L4 (spawn/death) ---
 # The player body's death edge raising the player-death transaction in the
