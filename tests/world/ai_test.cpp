@@ -239,8 +239,8 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     e.inf.last_events = 0x4; // the primary anim-fire event bit
     sys.infantry_fire_pass(e, *w, /*logic_tick=*/1);
     CHECK(w->round_sim.active_count == 1);
-    CHECK(near_f(w->round_sim.rounds[0].pos.x, 10.0f));
-    CHECK(near_f(w->round_sim.rounds[0].pos.z, 5.0f));
+    CHECK(near_f(w->round_sim.rounds[1].pos.x, 10.0f));
+    CHECK(near_f(w->round_sim.rounds[1].pos.z, 5.0f));
 
     // The provider resolves the posed launch point -> rounds spawn from it.
     FakeMuzzleProvider provider;
@@ -249,9 +249,9 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     e.inf.last_events = 0x4;
     sys.infantry_fire_pass(e, *w, 3);
     CHECK(w->round_sim.active_count == 2);
-    CHECK(near_f(w->round_sim.rounds[1].pos.x, 10.5f));
-    CHECK(near_f(w->round_sim.rounds[1].pos.y, 19.75f));
-    CHECK(near_f(w->round_sim.rounds[1].pos.z, 5.25f));
+    CHECK(near_f(w->round_sim.rounds[2].pos.x, 10.5f));
+    CHECK(near_f(w->round_sim.rounds[2].pos.y, 19.75f));
+    CHECK(near_f(w->round_sim.rounds[2].pos.z, 5.25f));
 
     // A provider that declines this handle -> the raw origin again (no stamp
     // survives between ticks; retail computes the point at every fire).
@@ -259,7 +259,7 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     e.inf.last_events = 0x4;
     sys.infantry_fire_pass(e, *w, 9);
     CHECK(w->round_sim.active_count == 3);
-    CHECK(near_f(w->round_sim.rounds[2].pos.z, 5.0f));
+    CHECK(near_f(w->round_sim.rounds[3].pos.z, 5.0f));
     w->pose_provider = nullptr;
 }
 

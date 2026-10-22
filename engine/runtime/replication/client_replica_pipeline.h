@@ -31,6 +31,7 @@ class AnimVariantRings;
 struct WeaponTable;
 struct LiveRound;
 struct HitRecord;
+struct DeployedRoundCopy;
 } // namespace opennova::world
 
 namespace opennova::terrain {
@@ -177,6 +178,12 @@ public:
     void set_guided_round_resolver(GuidedRoundResolver resolver) { guided_round_resolver_ = std::move(resolver); }
     // Fire synchronously at the receive boundary, before a following 0x44.
     void set_round_receiver(std::function<void(const ClientRoundEvent &)> receiver) { round_receiver_ = std::move(receiver); }
+    // The S2C 0x59 found leg over the embedder's round pool
+    // (world::RoundSim::match_deployed_item), run where the record lands; true
+    // when a slot matched. Unset, no slot matches.
+    using DeployedRoundWalk =
+            std::function<bool(const DeployedItemSpawn &, world::DeployedRoundCopy &)>;
+    void set_deployed_round_walk(DeployedRoundWalk walk) { deployed_round_walk_ = std::move(walk); }
 
 	// JOINER role only (net-re §5.38e, D-NET-196): switch the 0x0A fold from
 	// live-pose snap to smooth-target STAGING, and enable tick_remote_motion.
@@ -897,6 +904,7 @@ private:
 	std::vector<ClientRoundEvent> pending_round_events_;
     GuidedRoundResolver guided_round_resolver_;
     std::function<void(const ClientRoundEvent &)> round_receiver_;
+    DeployedRoundWalk deployed_round_walk_;
 	std::vector<ClientGameEvent> pending_game_events_;
 	std::vector<ClientChatLine> pending_chat_lines_;
 	std::vector<ClientGameText> pending_game_texts_;

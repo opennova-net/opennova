@@ -1,6 +1,6 @@
 // The authoritative round simulation — server-side flight, impact, damage, and death
 // detection for every fired round. [orig: the 512-slot round array @ 0xB7E1A8 (128 groups
-// x 4 sub-slots x 780 B, active-flag bytes @ 0xB7DFA0), ticked by
+// x 4 sub-slots x 780 B, active-flag bytes g_RoundPoolActive @ 0xB7DFA0), ticked by
 // Weapon_UpdateAllProjectiles @ 0x4EC020 -> Projectile_UpdatePhysics @ 0x4E9D70 from
 // Entity_UpdateAllEntities; spawned SYNCHRONOUSLY at fire time by RoundData_SpawnRound
 // @ 0x4EC0D0 (called inline from RoundData_AddRound @ 0x4FDB40 — the ring is only the
@@ -321,6 +321,11 @@ struct LiveRound {
     // @ 0x4ec79b -> Entity_InitFromItemDef]. The class/motor binding survives
     // a non-tracer cadence shot; only its separate visible-model pointer clears.
     int32_t item_type_id = 0;
+    // The round's +0x20 def word: set when the TrcrID leg bound the item through
+    // Entity_InitFromItemDef; the NoTracers leg stores item 0 and the no-TrcrID
+    // leg item 1, each with no def [orig: RoundData_SpawnRound @0x4EC7B4..0x4EC7B7,
+    //  @0x4EC7AE, @0x4EC7C1..0x4EC7CB; Entity_InitFromItemDef @0x49E577].
+    bool has_item_def = false;
     // Class bindings resolved from the item's ai_function/move_function tags
     // [orig: itemDef updateCallback -> +452, deathCallback -> +456].
     ThrowClass motor{};
@@ -341,6 +346,11 @@ struct LiveRound {
     // @0x447981..0x44799B, @0x447B9B..0x447BA5]. motor reads kNone then, and
     // this bit marks the follow.
     bool rest_follows_parent = false;
+    // The rest leg's null +452 (an unparented round), stored on every peer ahead
+    // of the authority test; a model init over a copy of the round reads it
+    // [orig: satchel @0x448A10, claymore @0x44799B; Entity_InitFromModel
+    //  @0x40E0DC].
+    bool update_nulled = false;
     // Armed at 2 ticks remaining above water; the expiry queues the kill zone
     // [orig: the runtime 0x1000 flag @ 0x444a29 consumed by the update head].
     bool det_at_expiry = false;
@@ -368,6 +378,14 @@ struct LiveRound {
     // Weapon_SpawnProjectileBurstWithSpread @0x4EBDCE..0x4EBDDC]
     bool indoors_word = false;
     bool indoors_flags = false;
+    // Two more bits of that +0x114 copy of the ammo flags: noage (0x4000), which
+    // a non-authority charge rest and a joiner's S2C 0x59 match clear, and
+    // Priority (0x800000), which keeps an occupied slot from the allocator's
+    // eviction [orig: RoundData_SpawnRound @0x4EC615; the pellet fans @0x4EBAF9 /
+    // @0x4EBDC6; the clears @0x448C1A / @0x447B9B / @0x546883;
+    // CEntityManager_AllocateSlot @0x4EAB4E].
+    bool noage = false;
+    bool priority = false;
     // A flare's heat word (+0x1A4): its TrcrID item's heatsig from the flare init,
     // decayed by its motor each tick [orig: the aflr row's init callback AflrClass_InitFromDef @0x4434B0 (the
     // store @0x4434EA), the gflr row's GflrClass_InitFromDef @0x443510 (@0x443554); Entity_UpdateShellBounce
@@ -376,6 +394,33 @@ struct LiveRound {
     // Its ProjectileTargetRing record (+0x29C), -1 for none [orig: Entity_UpdateShellBounce
     // @0x443E5F..0x443E7B; Projectile_ReleaseEffects @0x4E8280 (@0x4E82D1..0x4E82F2)].
     int32_t target_ring_slot = -1;
+};
+
+// A client's S2C 0x59 record as its found leg reads it: the friendly and enemy
+// item words (2, 3), the owner's wire handle (word 1) and the parent (word 5),
+// the World entity it names on this client.
+// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - @0x5467A5..0x5467D1]
+struct DeployedRoundQuery {
+    int32_t friendly_item = 0;
+    int32_t enemy_item = 0;
+    uint16_t owner_handle = 0xFFFF;
+    EntityHandle parent;
+    uint64_t parent_spawn_id = 0;
+};
+// The found leg's verdict and the device's words from its copy: any match
+// skips the not-found leg's init, and a match with a def is copied whole into
+// the device, the last in slot order winning; the copy's model init ORs the
+// matrix-built bit when the copied round's +452 was null.
+// [orig: @0x5468C1 (the flag), its test @0x546995; the def test @0x546853 /
+//  @0x546864, the copy @0x546871, Entity_InitFromModel @0x546873 ->
+//  @0x40E0DC..0x40E105]
+struct DeployedRoundCopy {
+    bool matched = false;
+    bool copied = false;
+    int32_t item_id = 0;    // the round's +0x1C
+    uint8_t team = 0xFF;    // its +0x162
+    uint32_t flags = 0;     // its Flags (the Indoors bit), the init's matrix-built bit
+    bool noage = false;     // its +0x114 noage bit
 };
 
 // Whether the round's +452 motor is bound (its TrcrID item's move row, or a guided
@@ -422,9 +467,10 @@ void round_target_origin(const World &world, int32_t slot, int32_t out[3]);
 
 // Retail keeps the selected TrcrID item/class bound independently of tracer
 // cadence (@0x4ec79b..0x4ec7b7), but clears the round+0x30 visible-model
-// pointer when this particular shot is not a tracer (@0x4ec900).
+// pointer when this particular shot is not a tracer (@0x4ec900); a round with
+// no def (item 0 or 1) never took a model (@0x4ec7c8).
 inline int32_t round_visible_item_id(const LiveRound &round) {
-    return round.tracer ? round.item_type_id : 0;
+    return round.tracer && round.has_item_def ? round.item_type_id : 0;
 }
 
 // A death the damage pass detected this tick — drained by the host session, which owns
@@ -815,6 +861,26 @@ public:
     // [orig: CEntityManager_AllocateSlot @0x4EAAD0 - the 0xFFFF test @0x4EAAD7,
     //  the counter @0x4EAAE8..0x4EAB04, the store @0x4EABD5]
     uint16_t allocate_round_id(uint16_t sequence_word);
+    // The pool's one allocation (world/round_pool.cpp): the id above, then the
+    // slot after the cursor, a live round there released unless its Priority bit
+    // holds it (the walk then moves on), the slot zeroed and stamped with the id.
+    // It never fails. The cursor starts at 0, so a process's first round takes
+    // slot 1, and no reset moves it.
+    // [orig: CEntityManager_AllocateSlot @0x4EAAD0 - the cursor g_RoundPoolCursor
+    //  @0x4EAADB / @0x4EAB1C..0x4EAB37, the Priority test @0x4EAB4E, the release
+    //  @0x4EAB70, the wrap @0x4EAB8E, @0x4EABB2, the memset @0x4EABC8, the id
+    //  @0x4EABD5]
+    int allocate_slot(World &world, uint16_t sequence_word);
+    // A client's S2C 0x59 found leg (world/round_pool.cpp): every slot in slot
+    // order, freed ones included (a release keeps a round's words), whose +0x1C
+    // is the friendly item (any owner), or the enemy item with the record's
+    // owner, takes the parent, a zero +0x2A8, loses noage and keeps one tick of
+    // life; DeployedRoundCopy is the device's copy.
+    // [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - the walk
+    //  @0x54680B..0x54698F, the predicate @0x546828..0x546840, +0x28
+    //  @0x546857, +0x2A8 @0x54685A, the noage clear @0x546883, +0x2AC = 1
+    //  @0x546892; Projectile_ReleaseEffects @0x4E8280 (@0x4E8317 / @0x4E831E)]
+    DeployedRoundCopy match_deployed_item(const DeployedRoundQuery &query);
     // The word a fire hands the pool when it carries no id of its own, so the pool
     // mints a fresh one from its one counter: the host's own fire, an AI gunner's
     // and a joiner's own. [orig: word_B7C670's .data 0xFFFF and the resets ahead of
@@ -845,7 +911,8 @@ public:
 
 private:
     uint64_t next_presentation_generation_ = 1;
-    uint32_t round_id_counter_ = 0; // [orig: dword_B7E1A4]
+    uint32_t round_id_counter_ = 0; // [orig: g_RoundIdCounter @0xB7E1A4]
+    int slot_cursor_ = 0;           // [orig: g_RoundPoolCursor @0xB7E1A0]
     uint16_t last_allocated_round_id_ = 0;
     bool spawn_allocated_ = false; // the last spawn allocated an id
     // Retail advances tracer cadence on each remote shooter's weapon slot. A

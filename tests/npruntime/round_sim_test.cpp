@@ -1666,8 +1666,8 @@ bool test_round_ids_share_the_pool_counter() {
 	ok &= expect(fire(0, w::RoundSim::kFreshRoundWord) == ((2u << 9) | 5u),
 			"round ids: a held word leaves the counter where it was");
 	ok &= expect(fire(3, w::RoundSim::kFreshRoundWord) == rs.rounds[0].shot_seq &&
-					rs.rounds[0].shot_seq == ((2u << 9) | 1u),
-			"round ids: an instantkillzone spawn hands the ring pool slot 0's id");
+					rs.rounds[0].shot_seq == 0,
+			"round ids: an instantkillzone spawn hands the ring pool slot 0's id, which the pool's first round never took");
 	ok &= expect(fire(0, w::RoundSim::kFreshRoundWord) == ((2u << 9) | 6u),
 			"round ids: the kill zone allocated nothing");
 	// A fan mints one id per pellet and hands the ring its last pellet's
@@ -1692,6 +1692,57 @@ bool test_round_ids_share_the_pool_counter() {
 		ok &= expect(joiner.round_sim.spawned_round_word() == uint16_t(0x0200u | n),
 				"round ids: a slot-1 joiner's shots are 0x0201, 0x0202, 0x0203");
 	}
+	return ok;
+}
+
+// The pool allocates the slot after its cursor, which starts at 0 and no reset
+// moves: a process's first round takes slot 1, a released slot keeps its words
+// until the cursor comes back to it, and a full pool releases the next slot's
+// round unless its Priority bit holds it, the walk then moving on.
+// [orig: CEntityManager_AllocateSlot @0x4EAAD0 - @0x4EAADB..0x4EAB37, the
+//  Priority test @0x4EAB4E, the release @0x4EAB70, the memset @0x4EABC8;
+//  Projectile_ReleaseEffects @0x4E8280 (@0x4E8317 / @0x4E831E);
+//  Projectile_InitDragTable @0x4E78D0 (no cursor store)]
+bool test_round_pool_allocates_after_its_cursor() {
+	auto world = std::make_unique<w::World>();
+	world->tables.ammo.entries.resize(2);
+	w::AmmoTableEntry &bullet = world->tables.ammo.entries[0];
+	bullet.valid = true;
+	bullet.velocity = 620;
+	bullet.max_age_ticks = 100;
+	w::AmmoTableEntry &held = world->tables.ammo.entries[1];
+	held = bullet;
+	held.flags = opennova::def::DEF_AMMO_FLAG_PRIORITY;
+	w::RoundSim &rs = world->round_sim;
+	const auto fire = [&](int32_t ammo) {
+		w::RoundSpawnParams p;
+		p.ammo_index = ammo;
+		p.no_weapon = true;
+		p.shot_seq = w::RoundSim::kFreshRoundWord;
+		return rs.spawn(*world, p);
+	};
+	bool ok = true;
+	const int first = fire(1);
+	const int second = fire(0);
+	ok &= expect(first == 1 && second == 2 && rs.rounds[1].priority && !rs.rounds[2].priority,
+			"round pool: the first round takes slot 1, the next slot 2");
+	const uint16_t second_id = rs.rounds[2].shot_seq;
+	rs.retire_round(rs.rounds[2]);
+	ok &= expect(fire(0) == 3 && !rs.rounds[2].active && rs.rounds[2].shot_seq == second_id &&
+					rs.rounds[2].ammo_index == 0,
+			"round pool: a released slot waits for the cursor, its words kept");
+	for (int n = 0; n < 508; ++n) fire(0); // slots 4..511
+	ok &= expect(fire(0) == 0, "round pool: the cursor wraps to slot 0");
+	ok &= expect(fire(0) == 2 && rs.rounds[1].active && rs.rounds[1].priority,
+			"round pool: the Priority round holds slot 1; the walk takes the free slot 2");
+	ok &= expect(rs.active_count == w::RoundSim::kCapacity,
+			"round pool: every slot holds a live round");
+	const uint64_t evicted = rs.rounds[3].presentation_generation;
+	ok &= expect(fire(0) == 3 && rs.active_count == w::RoundSim::kCapacity &&
+					rs.rounds[3].presentation_generation != evicted && rs.rounds[1].active,
+			"round pool: a full pool releases the next slot's round; the Priority round stays");
+	rs.reset();
+	ok &= expect(fire(0) == 4, "round pool: a reset leaves the cursor where it stood");
 	return ok;
 }
 
@@ -1734,6 +1785,7 @@ bool test_ammo_arm_word_follows_the_slot() {
 int main() {
 	if (!test_respawned_vehicle_takes_projectile_damage()) return 1;
 	if (!test_round_ids_share_the_pool_counter()) return 1;
+	if (!test_round_pool_allocates_after_its_cursor()) return 1;
 	if (!test_ammo_arm_word_follows_the_slot()) return 1;
 	if (!test_retail_random_spread_vectors()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
@@ -1973,7 +2025,7 @@ int main() {
 	dispatch_fire(roster[1], roster, world, fire_body(roster[1].fire_tick_floor + 1u, hb.packed, 5, 0, 0, muzzle_z, 0, 0));
 	if (!expect(world.round_sim.active_count == 1, "one live round after the fire")) return 1;
 	{
-		const w::LiveRound &r = world.round_sim.rounds[0];
+		const w::LiveRound &r = world.round_sim.rounds[1];
 		if (!expect(r.active && r.ammo_index == 1, "round bound to the resolved ammo"))
 			return 1;
 		const float speed = std::sqrt(r.vel.x * r.vel.x + r.vel.y * r.vel.y + r.vel.z * r.vel.z);
@@ -2816,7 +2868,15 @@ int main() {
 						.presentation_generation;
 		lifetime_sim.rounds[size_t(first_lifetime_slot)].active = false;
 		--lifetime_sim.active_count;
-		const int second_lifetime_slot = lifetime_sim.spawn(world, rp);
+		// The allocator's cursor comes back to a slot 512 allocations later
+		// [orig: CEntityManager_AllocateSlot @0x4EAB1C].
+		int second_lifetime_slot = -1;
+		for (int n = 0; n < w::RoundSim::kCapacity; ++n) {
+			second_lifetime_slot = lifetime_sim.spawn(world, rp);
+			if (n + 1 == w::RoundSim::kCapacity) break;
+			lifetime_sim.rounds[size_t(second_lifetime_slot)].active = false;
+			--lifetime_sim.active_count;
+		}
 		if (!expect(second_lifetime_slot == first_lifetime_slot &&
 		                    lifetime_sim.rounds[size_t(second_lifetime_slot)]
 		                                    .presentation_generation !=

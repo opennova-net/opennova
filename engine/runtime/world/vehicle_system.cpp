@@ -307,7 +307,8 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
             //  @0x48B53F, `jnz` @0x48B54C, the test @0x48B810..0x48B814; ctan
             //  @0x489108..0x489114, @0x4893E9..0x4893ED; cbik @0x484642..0x484648,
             //  @0x484936..0x48493A; cbot @0x48DB6B..0x48DB78, @0x48DDFA..0x48DDFE;
-            //  selector-zero ground @0x46E60E..0x46E61B, @0x46E89D..0x46E8A1]
+            //  selector-zero ground @0x46E60E..0x46E61B, @0x46E89D..0x46E8A1;
+            //  selector-zero boat @0x470398..0x47039C -> @0x471669]
             if (vehicle_family_uses_direct_air_mover(traits->family) ||
                     ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) {
                 veh->engine_flags |= kEntityFlagMatrixBuilt;

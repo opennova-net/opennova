@@ -539,6 +539,7 @@ add_library(opennova_runtime STATIC
     # --- parity lane L7 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/deployable_spawn.cpp # a vehicle bay's deployable (D-NET-332)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/projectile_target_ring.cpp # the flare rounds' target ring (D-NET-64)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/round_pool.cpp # the round pool's allocator and 0x59 found leg (D-ITEMDEF-32)
     # --- parity lane L8 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad_registry.cpp # the NovaWorld squad registry (D-NET-NEW-L8-2)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_devices.cpp # the log devices the server switches arm (game and serve)

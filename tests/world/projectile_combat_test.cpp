@@ -769,7 +769,7 @@ void test_body_armor_energy_and_impact_row() {
         // First loss: sqrt(620^2 - 200000000/875) -> 394 m/s.
         // Quantizing back to Q16/tick gives 393 for damage, then x1.25 -> 491.
         // The second loss consumes the remaining energy.
-        CHECK(r.world.round_sim.rounds[0].vel.x == 0.0f);
+        CHECK(r.world.round_sim.rounds[1].vel.x == 0.0f);
         CHECK(r.world.round_sim.impacts.size() == 2);
         if (r.world.round_sim.impacts.size() == 2) {
             CHECK(r.world.round_sim.impacts[0].effect_tag == 24);
@@ -837,7 +837,7 @@ void test_person_hit_applies_the_surface_drag_leg() {
         r.target_entity()->item_type = item_type;
         r.ammo().drag_fp16 = 0x10000; // a live coefficient; no body armor
         r.fire();
-        const Vec3 spawn_vel = r.world.round_sim.rounds[0].vel;
+        const Vec3 spawn_vel = r.world.round_sim.rounds[1].vel;
         r.world.round_sim.tick(r.world, nullptr);
         CHECK(r.world.round_sim.hits.size() == 1);
         FixedVec3 expected{to_fixed(spawn_vel.x), to_fixed(spawn_vel.y), to_fixed(spawn_vel.z)};
@@ -852,7 +852,7 @@ void test_person_hit_applies_the_surface_drag_leg() {
         } else {
             CHECK(recorded.x == to_fixed(spawn_vel.x));
         }
-        CHECK(r.world.round_sim.rounds[0].active);
+        CHECK(r.world.round_sim.rounds[1].active);
     }
 }
 

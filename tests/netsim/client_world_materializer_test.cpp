@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <optional>
@@ -471,18 +472,23 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 	const ns::ClientWorldSyncResult moved =
 			materializer.sync(pipeline.state(), world);
 	placed = world.registry.get(w::EntityHandle{spawn.slot_handle});
-	if (!expect(row != nullptr && row->spawn_revision == friendly_revision &&
-			moved.spawned.empty() && moved.retired.empty() &&
-			moved.updated.size() == 1 && placed != nullptr &&
-			placed->registry_spawn_id == friendly_lifetime &&
+	// With no round of its own to copy, every record runs the not-found leg,
+	// whose memset and item init write the whole slot: a fresh lifetime, a
+	// slot that held the device included.
+	// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546995 (the found test),
+	//  the memset @0x5469B2, the pick @0x5469DB]
+	if (!expect(row != nullptr && row->spawn_revision != friendly_revision &&
+			moved.spawned.size() == 1 && moved.retired.size() == 1 &&
+			moved.updated.empty() && placed != nullptr &&
+			placed->registry_spawn_id != friendly_lifetime &&
+			placed->item_id == spawn.friendly_item_id &&
 			placed->position.x == 12.0f && placed->position.y == -6.0f,
-			"a same-item 0x59 update mutates pose without replacing the lifetime"))
+			"a same-item 0x59 with no round to copy starts a fresh lifetime at its pose"))
 		return false;
+	const uint32_t moved_revision = row->spawn_revision;
 
-	// The team-variant pick runs only at FRESH SPAWN: retail's found/update
-	// path never touches the item id, so a later team change (or a re-send
-	// after one) leaves the materialized type and lifetime alone.
-	// [orig: the found path @0x546828..0x54697a; pick @0x5469db fresh only]
+	// The pick runs on every such record, so a re-send after a team change
+	// re-types the slot.
 	pipeline.apply_team_assign(owner_handle, 3);
 	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
 			nw::encode_deployed_item_spawn(spawn));
@@ -490,11 +496,11 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 	const ns::ClientWorldSyncResult hostile =
 			materializer.sync(pipeline.state(), world);
 	placed = world.registry.get(w::EntityHandle{spawn.slot_handle});
-	if (!expect(row != nullptr && row->type_id == spawn.friendly_item_id &&
-			row->spawn_revision == friendly_revision &&
-			hostile.retired.empty() && hostile.spawned.empty() &&
-			placed != nullptr && placed->registry_spawn_id == friendly_lifetime,
-			"a 0x59 update after a team change keeps the spawned type and lifetime"))
+	if (!expect(row != nullptr && row->type_id == spawn.enemy_item_id &&
+			row->spawn_revision != moved_revision &&
+			hostile.retired.size() == 1 && hostile.spawned.size() == 1 &&
+			placed != nullptr && placed->item_id == spawn.enemy_item_id,
+			"a 0x59 re-send after a team change takes the enemy variant"))
 		return false;
 
 	// A fresh spawn while the owner reads hostile picks the enemy variant.
@@ -562,6 +568,139 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 			world.registry.get(w::EntityHandle{spawn.slot_handle}) == nullptr &&
 			world.registry.get(w::EntityHandle{carrier.slot_id}) != nullptr,
 			"0x12 retires the placed device without removing its carrier");
+}
+
+// A joiner's S2C 0x59 walks its own round pool, freed slots included: a slot
+// whose item is the record's friendly item (any owner), or its enemy item with
+// the record's owner, matches; each match takes the parent and a zero +0x2A8,
+// loses noage and keeps one tick of life; the last match with a def is copied
+// into the device (its item, team, Flags, the model init's matrix-built bit for a
+// null +452, its noage bit), and any match skips the not-found leg's pick; only
+// def-less matches leave a slot with no device as it was.
+// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - the predicate
+//  @0x546828..0x546840, +0x28 @0x546857, +0x2A8 @0x54685A, the copy @0x546871,
+//  Entity_InitFromModel @0x546873 (@0x40E0DC..0x40E105), the noage clear
+//  @0x546883, +0x2AC = 1 @0x546892, the flag @0x5468C1, its test @0x546995;
+//  Projectile_ReleaseEffects @0x4E8280 (@0x4E8317 / @0x4E831E)]
+bool deployed_item_copies_its_last_matching_round() {
+	constexpr uint16_t viewer_handle = 0x0001;
+	constexpr uint16_t owner_handle = 0x0002; // the viewer's enemy
+	constexpr uint16_t other_handle = 0x0003;
+	constexpr uint16_t kFriendly = 0x0362;
+	constexpr uint16_t kEnemy = 0x0363;
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(1, 16);
+	ns::ClientReplicaPipeline pipeline;
+	ns::ClientEntityState &viewer = pipeline.state().upsert(viewer_handle);
+	viewer.team = 2;
+	viewer.team_known = true;
+	ns::ClientEntityState &owner = pipeline.state().upsert(owner_handle);
+	owner.team = 3;
+	owner.team_known = true;
+	pipeline.set_viewer_handle(viewer_handle);
+	pipeline.set_mp_attributes(0);
+	pipeline.set_deployed_round_walk(
+			[&world](const nw::DeployedItemSpawn &record, w::DeployedRoundCopy &out) {
+				w::DeployedRoundQuery query;
+				query.friendly_item = record.friendly_item_id;
+				query.enemy_item = record.enemy_item_id;
+				query.owner_handle = record.owner_handle;
+				out = world->round_sim.match_deployed_item(query);
+				return out.matched;
+			});
+	w::RoundSim &rs = world->round_sim;
+	// Slot 3: this client's own satchel, rested unparented (its +452 nulled, its
+	// noage cleared) and since released, its words kept.
+	w::LiveRound &own = rs.rounds[3];
+	own.item_type_id = kFriendly;
+	own.has_item_def = true;
+	own.shooter_handle = viewer_handle;
+	own.team = 2;
+	own.update_nulled = true;
+	own.indoors_flags = true;
+	own.age_ticks = 40;
+	own.max_age_ticks = 300;
+	own.mass_q16 = 0x1234;
+	// Slot 9: another owner's enemy-item round, which the owner gate passes over.
+	w::LiveRound &foreign = rs.rounds[9];
+	foreign.item_type_id = kEnemy;
+	foreign.has_item_def = true;
+	foreign.shooter_handle = other_handle;
+	foreign.team = 3;
+	foreign.noage = true;
+	foreign.max_age_ticks = INT32_MAX;
+
+	nw::DeployedItemSpawn spawn;
+	spawn.item_id = 0x0361;
+	spawn.owner_handle = owner_handle;
+	spawn.friendly_item_id = kFriendly;
+	spawn.enemy_item_id = kEnemy;
+	spawn.slot_handle = 0x1003;
+	spawn.pos_x = 10 * 65536;
+	spawn.pos_y = -4 * 65536;
+	spawn.pos_z = 3 * 65536;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM, nw::encode_deployed_item_spawn(spawn));
+	const ns::ClientEntityState *row = pipeline.state().find(spawn.slot_handle);
+	if (!expect(row != nullptr && row->type_id == kFriendly && row->team == 2 &&
+			row->spawn_entity_flags == (w::kEntityFlagIndoors | w::kEntityFlagMatrixBuilt) &&
+			!row->spawn_ammo_word_noage && row->x == spawn.pos_x,
+			"the enemy's device copies this client's own freed friendly round, not the enemy pick"))
+		return false;
+	if (!expect(!own.noage && own.max_age_ticks == 41 && own.mass_q16 == 0 && !own.active &&
+			foreign.noage && foreign.max_age_ticks == INT32_MAX,
+			"the matched round loses noage and keeps one tick of life; the other owner's is untouched"))
+		return false;
+	ns::ClientWorldMaterializer materializer;
+	materializer.sync(pipeline.state(), *world);
+	const w::Entity *device = world->registry.get(w::EntityHandle{spawn.slot_handle});
+	if (!expect(device != nullptr && device->item_id == kFriendly &&
+			(device->flags & w::kEntityFlagIndoors) != 0 &&
+			(device->engine_flags & w::kEntityFlagMatrixBuilt) != 0 && !device->ammo_word_noage,
+			"the copied device carries the round's Indoors bit, the matrix bit and no noage"))
+		return false;
+
+	// Slot 12: the owner's throw still in flight (noage, its motor's +452) matches
+	// later in slot order, so its copy wins over the freed friendly round's.
+	w::LiveRound &thrown = rs.rounds[12];
+	thrown.active = true;
+	thrown.item_type_id = kEnemy;
+	thrown.has_item_def = true;
+	thrown.shooter_handle = owner_handle;
+	thrown.team = 3;
+	thrown.noage = true;
+	thrown.age_ticks = 7;
+	thrown.max_age_ticks = INT32_MAX;
+	spawn.slot_handle = 0x1004;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM, nw::encode_deployed_item_spawn(spawn));
+	row = pipeline.state().find(spawn.slot_handle);
+	if (!expect(row != nullptr && row->type_id == kEnemy && row->team == 3 &&
+			row->spawn_entity_flags == 0 && row->spawn_ammo_word_noage &&
+			!thrown.noage && thrown.max_age_ticks == 8 && own.max_age_ticks == 41,
+			"the last matching round with a def is the device's copy; every match ages out"))
+		return false;
+
+	// Only a def-less round matches: no copy and no init, so a slot that holds no
+	// device stays without one.
+	w::LiveRound &bare = rs.rounds[20];
+	bare.item_type_id = 0x0400;
+	spawn.friendly_item_id = 0x0400;
+	spawn.enemy_item_id = 0x0401;
+	spawn.slot_handle = 0x1005;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM, nw::encode_deployed_item_spawn(spawn));
+	if (!expect(pipeline.state().find(spawn.slot_handle) == nullptr &&
+			bare.max_age_ticks == bare.age_ticks + 1,
+			"a def-less match skips the init and leaves the empty slot empty"))
+		return false;
+
+	// No match: the not-found leg's pick, the enemy variant for the enemy's device.
+	spawn.friendly_item_id = 0x0500;
+	spawn.enemy_item_id = 0x0501;
+	spawn.slot_handle = 0x1006;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM, nw::encode_deployed_item_spawn(spawn));
+	row = pipeline.state().find(spawn.slot_handle);
+	return expect(row != nullptr && row->type_id == 0x0501 && row->team == 3 &&
+			row->spawn_entity_flags == 0 && !row->spawn_ammo_word_noage,
+			"with no round of its own the device takes the not-found leg's pick");
 }
 
 bool decoded_world_stream_materializes_exact_rows() {
@@ -1544,6 +1683,7 @@ int main() {
 	if (!wire_target_authors_ground_separately_from_parent()) return 1;
 	if (!pool0_parent_never_aliases_the_native_body()) return 1;
 	if (!deployed_item_spawn_update_and_remove_materialize()) return 1;
+	if (!deployed_item_copies_its_last_matching_round()) return 1;
 	if (!entity_remove_detaches_children_in_place()) return 1;
 	if (!entity_remove_takes_the_eweap_refnum_group()) return 1;
 	if (!materialized_rows_join_their_refnum_group()) return 1;

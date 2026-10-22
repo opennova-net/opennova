@@ -838,14 +838,6 @@ int hit_record_death_anim_state(const HitRecord &record, int32_t victim_heading_
             death_cause::kBullet);
 }
 
-uint16_t RoundSim::allocate_round_id(uint16_t sequence_word) {
-    spawn_allocated_ = true;
-    if (sequence_word != 0xFFFFu) return last_allocated_round_id_ = sequence_word; // @0x4EAB12
-    round_id_counter_ = (round_id_counter_ + 1u) & 0x1FFu;           // @0x4EAAF5..0x4EAB04
-    return last_allocated_round_id_ = static_cast<uint16_t>(
-            (uint32_t(local_slot_id) << 9) | round_id_counter_);
-}
-
 void RoundSim::reset() noexcept {
 	rounds.assign(kCapacity, LiveRound{});
 	active_count = 0;
@@ -879,7 +871,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         // A row the table does not hold reads as retail's zeroed record: no flag
         // leg, so the allocation still takes its id [orig: g_AmmoDefTable
         //  + 276 * index @0x4EC146; CEntityManager_AllocateSlot @0x4EC388].
-        allocate_round_id(descriptor.shot_seq);
+        allocate_slot(world, descriptor.shot_seq);
         return -1;
     }
     // The descriptor's pitch takes the shooter's zero elevation ahead of every
@@ -1053,27 +1045,19 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         apply_round_recoil(*ammo, source);
         return first;
     }
-    // The allocation stamps the round's id, which seeds its spread below; it
-    // follows the shotgun leg and precedes everything else, so the legs below
-    // that fly nothing here still take their id [orig: RoundData_SpawnRound ->
-    // CEntityManager_AllocateSlot @0x4EC388, which never fails; the seed
-    // round+0x78 @0x4EC394].
-    const uint16_t round_id = allocate_round_id(params.shot_seq);
+    // The allocation takes the slot and stamps the round's id, which seeds its
+    // spread below; it follows the shotgun leg and precedes everything else, so
+    // the legs below that fly nothing here still take their id and their slot
+    // [orig: RoundData_SpawnRound -> CEntityManager_AllocateSlot @0x4EC388, which
+    // never fails; the seed round+0x78 @0x4EC394].
+    const int slot = allocate_slot(world, params.shot_seq);
+    const uint16_t round_id = rounds[static_cast<size_t>(slot)].shot_seq;
     // Null/non-ballistic ammo spawns nothing at this altitude: the Knife(1)/Medic(3)
     // kill zones are the immediate-raycast leaves [orig: kztype dispatch @0x4ec21f],
     // `hasitem` ammo places an item entity instead of flying.
     if (ammo->velocity <= 0) return -1;
     if (ammo->kztype == 1 || ammo->kztype == 3) return -1;
     if ((ammo->flags & kAmmoFlagHasItem) != 0) return -1;
-
-    int slot = -1;
-    for (int i = 0; i < kCapacity; ++i) {
-        if (!rounds[static_cast<size_t>(i)].active) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot < 0) return -1; // pool exhausted [orig: allocator scan @0xB7DFA0 flags]
 
     int32_t final_yaw = params.dir_yaw_bam;
     int32_t final_pitch = params.dir_pitch_bam;
@@ -1165,6 +1149,9 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     // noage rounds never expire on time [orig: flag 0x4000]; everything else uses the
     // ammo max_age (already in 62 Hz ticks).
     r.max_age_ticks = ((ammo->flags & kAmmoFlagNoAge) != 0) ? INT32_MAX : ammo->max_age_ticks;
+    // The +0x114 copy of the ammo flags [orig: @0x4EC615].
+    r.noage = (ammo->flags & kAmmoFlagNoAge) != 0;
+    r.priority = (ammo->flags & def::DEF_AMMO_FLAG_PRIORITY) != 0;
 
     // The tracer decision [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5]: every
     // tracer_rate-th round FROM THE FIRING WEAPON SLOT is a tracer — the counter is
@@ -1239,8 +1226,11 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.pitch_bam = final_pitch;
     const int32_t item_id = throwable_item_for_viewer(
             ammo->tracer_item_friendly, ammo->tracer_item_enemy, r.team, local_team);
-    if (item_id != 0 && (!no_tracers_rule || forcetracer)) {
+    if (item_id == 0) {
+        r.item_type_id = 1; // no TrcrID item: item 1, no def [orig: @0x4EC7C1]
+    } else if (!no_tracers_rule || forcetracer) {
         r.item_type_id = item_id;
+        r.has_item_def = true;
         const ThrowableClassRow *row = world.throwables.classes.get(item_id);
         if (row != nullptr) { r.motor = row->motor; r.think = row->think; r.move_row = row->move_row; }
         throwable_round_init(world, r, row);
@@ -1293,18 +1283,11 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         // ring [orig: CEntityManager_AllocateSlot from Weapon_SpawnProjectileBurst
         //  @0x4EB957 / ...WithSpread @0x4EBC10; the cursor returns @0x4EBB98 /
         //  @0x4EBE6D].
-        const uint16_t pellet_id = allocate_round_id(params.shot_seq);
+        const int slot = allocate_slot(world, params.shot_seq);
+        const uint16_t pellet_id = rounds[static_cast<size_t>(slot)].shot_seq;
         const int64_t pieslice = ammo.kz_pieslice_bam;
         const uint16_t r1 = world.throwables.fan_prng();
         const uint16_t r2 = world.throwables.fan_prng();
-        int slot = -1;
-        for (int i = 0; i < kCapacity; ++i) {
-            if (!rounds[static_cast<size_t>(i)].active) {
-                slot = i;
-                break;
-            }
-        }
-        if (slot < 0) continue;
         int32_t yaw;
         int32_t pitch;
         if (shotgun_spread) {
@@ -1340,6 +1323,9 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.prev_z_q16 = params.origin.z.q16; // [orig: the spawn's +0x80 copy @0x4ec655]
         r.vel.set_q16(launch_q16);
         r.max_age_ticks = ammo.max_age_ticks;
+        // The +0x114 copy [orig: @0x4EBAF9 / @0x4EBDC6].
+        r.noage = (ammo.flags & kAmmoFlagNoAge) != 0;
+        r.priority = (ammo.flags & def::DEF_AMMO_FLAG_PRIORITY) != 0;
         r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team)
                                       : params.shooter_team;
         r.tracer = false;

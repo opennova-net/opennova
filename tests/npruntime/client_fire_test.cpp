@@ -942,14 +942,14 @@ bool check_an_alt_round_takes_its_ammo_byte() {
 	dispatch_fire(conn, roster, world,
 			fire_body(shooter.packed, 0x01, 2, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0));
 	if (!expect(world.out.rounds.count == 1 && world.round_sim.active_count == 1 &&
-					world.round_sim.rounds[0].ammo_index == 2,
+					world.round_sim.rounds[1].ammo_index == 2,
 			"the alt round flies as ammo 2, its byte"))
 		return false;
 	// With no weapon the spawn takes the ammo's ERROR leg: a fire straight down +x
 	// leaves the axis. [orig: RoundData_SpawnRound @0x4EC38D..0x4EC4D2]
 	const w::RandomSpreadOffset spread =
 			w::weapon_calc_random_spread_offset(30 << 16, /*seed=*/1, 0, false);
-	const w::LiveRound &round = world.round_sim.rounds[0];
+	const w::LiveRound &round = world.round_sim.rounds[1];
 	if (!expect((spread.yaw_bam != 0 || spread.pitch_bam != 0) &&
 					(round.vel.y != 0.0f || round.vel.z != 0.0f),
 			"the weaponless alt round spreads by its ammo's ERROR"))
@@ -997,8 +997,8 @@ bool check_a_ffff_sequence_word_takes_a_fresh_id() {
 		return false;
 	const auto &ring = world.out.rounds.records;
 	if (!expect(ring[0].shot_seq == 1 && ring[1].shot_seq == 2 && ring[2].shot_seq == 0x0123 &&
-					world.round_sim.rounds[0].shot_seq == 1 &&
-					world.round_sim.rounds[1].shot_seq == 2,
+					world.round_sim.rounds[1].shot_seq == 1 &&
+					world.round_sim.rounds[2].shot_seq == 2,
 			"a 0xFFFF word takes the pool's fresh id; another stays"))
 		return false;
 	// A three-pellet fan allocates ids 3, 4 and 5; its ring takes the last pellet's
@@ -1195,7 +1195,7 @@ int main() {
 		if (!expect(it->second.clip == 29, "clip 30 -> 29 after one primary fire")) return 1;
 	}
 	{
-		const w::LiveRound &round = world.round_sim.rounds[0];
+		const w::LiveRound &round = world.round_sim.rounds[1];
 		const float speed =
 				std::sqrt(round.vel.x * round.vel.x + round.vel.y * round.vel.y +
 				          round.vel.z * round.vel.z);

@@ -1151,6 +1151,27 @@ void JoinerRole::wire_frame_providers() {
 	// @0x4B3D6E..0x4B3DA9]
     rt.view().set_round_receiver([this](const replication::ClientRoundEvent &ev) { apply_round_event(ev); });
     rt.view().set_guided_round_resolver([this](int16_t id) { return kernel_->world.round_sim.find_guided(id); });
+    // An S2C 0x59 walks this client's own round pool where it lands; the
+    // record's parent is the entity its handle names here.
+    // [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - the parent
+    //  @0x5467C3..0x5467F5, the walk @0x546820..0x54698F]
+    rt.view().set_deployed_round_walk(
+            [this](const DeployedItemSpawn &spawn, world::DeployedRoundCopy &out) {
+                world::World &w = kernel_->world;
+                world::DeployedRoundQuery query;
+                query.friendly_item = spawn.friendly_item_id;
+                query.enemy_item = spawn.enemy_item_id;
+                query.owner_handle = spawn.owner_handle;
+                const world::Entity *parent = spawn.parent_handle == self_wire_handle()
+                        ? w.registry.get(w.cached.local_player)
+                        : replica_world_entity(w, world::EntityHandle{spawn.parent_handle});
+                if (parent != nullptr) {
+                    query.parent = parent->handle;
+                    query.parent_spawn_id = parent->registry_spawn_id;
+                }
+                out = w.round_sim.match_deployed_item(query);
+                return out.matched;
+            });
     world.round_sim.guided_inputs_provider = [this](const world::LiveRound &round, world::GuidedInputs &in) {
         const auto *owner = runtime->state().find(round.shooter_handle);
         in.owner = in.owner || owner != nullptr;

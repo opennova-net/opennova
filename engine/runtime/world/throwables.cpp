@@ -999,6 +999,7 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
     // The Z word lifts by 0x1000, a word add (D-NET-507) [orig: `add edx, 1000h`
     //  / `mov [esi+0Ch], edx` @0x448A07..0x448A0D; claymore @0x447992..0x447998].
     if (!r.parent.valid()) r.pos.z.q16 = io::bam_add(r.pos.z.q16, 0x1000);
+    r.update_nulled = !r.parent.valid(); // [orig: @0x448A10; claymore @0x44799B]
     r.spin_yaw = 0;
     r.spin_pitch = 0;
     r.vel.z.q16 = 0;
@@ -1009,7 +1010,10 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
     }
     r.motor = ThrowClass::kNone;
     r.rest_follows_parent = r.parent.valid();
-    // The age word becomes 248 and the post-motor decrement takes one.
+    // The +0x114 noage bit clears and the age word becomes 248; the post-motor
+    // decrement takes one [orig: @0x448C1A / @0x448C24; claymore @0x447B9B /
+    // @0x447BA5].
+    r.noage = false;
     r.max_age_ticks = r.age_ticks + 248 - 1;
     return true;
 }
@@ -1334,7 +1338,7 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     //  Entity_ConvertRoundToPlacedEntity @0x5455B0 - the copy @0x5455D6, the
     //  round's clear @0x5455E2; Entity_BuildProximityListsFromPools @0x4B8EB0
     //  - @0x4B8FCA / @0x4B920A]
-    seed.ammo_word_noage = (ammo.flags & kAmmoFlagNoAge) != 0;
+    seed.ammo_word_noage = round.noage;
     if (const ThrowableClassRow *row = classes.get(item_id)) {
         seed.item_type_index = row->item_type_index; // the template's +0x1C
         // [orig: Entity_InitFromItemDef @ 0x49e550 — Health/Armor from the def]

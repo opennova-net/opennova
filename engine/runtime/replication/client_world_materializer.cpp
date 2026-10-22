@@ -69,6 +69,7 @@ world::Entity seed_from(const ClientEntityState &row) {
 			0x80u | 0x20u | 0x10u | 0x08u;
 	seed.flags = row.spawn_entity_flags & ~world::kEntityFlagMatrixBuilt;
 	seed.engine_flags = row.spawn_entity_flags & ~kMoverRuntimeBits;
+	seed.ammo_word_noage = row.spawn_ammo_word_noage;
 	seed.section_mask = row.spawn_section_mask;
 	seed.ammo_count = static_cast<uint8_t>(row.spawn_ammo_count & 0xFFu);
 	seed.location_index = row.spawn_location_index;

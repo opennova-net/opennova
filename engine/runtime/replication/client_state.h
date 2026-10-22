@@ -440,6 +440,10 @@ struct ClientEntityState {
 	// separate from the live compact state_flags byte: the 0x0D/0x10 dword is
 	// entity+36 in full, and truncating it loses Building/NoShadow/etc.
 	uint32_t spawn_entity_flags = 0;
+	// A 0x59 device copied from a round of this client's own pool takes that
+	// round's +0x114 noage bit (Entity::ammo_word_noage) [orig:
+	// Entity_SpawnOrUpdateFromSlotPacket @0x546871].
+	bool spawn_ammo_word_noage = false;
 	uint32_t spawn_section_mask = 0;
 	uint16_t spawn_ammo_count = 0;
 	// entity+0x280, a 2044's location index from the 0x20 record's 0x10 field
