@@ -42,6 +42,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h> // stop_unstopped_server (the shutdown's reset)
+#include <runtime/inmatch/punt_log.h>         // ConnectLog (the held hello's lines)
 #include <runtime/inmatch/remote_admin.h> // input_action_exit
 #include <runtime/inmatch/server_console.h> // inout_host_line
 #include <runtime/inmatch/server_files.h>   // NapiLog (_inout.txt)
@@ -939,6 +940,131 @@ void test_a_reaped_node_goes_before_the_next_nodes_legs() {
 
 } // namespace
 
+// D-NET-NEW-L1-26 (L1-s22 row 0): an error-arm exit holds the protocol's hello words with its
+// server: the identity, the start stamp and the 0x81's protocol fields as the live host wrote
+// them, so the held hello handler answers with the dead session's.
+// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204B0 (the protocol's fields, UT from +0x53C
+//  @0x62064F..0x620683); PostMenu_RouteMissionExit @0x568460 (the error arms skip the destroy)]
+void test_an_error_arm_holds_the_sessions_hello_words() {
+	auto host = std::make_unique<ListenHost>();
+	if (!host->boot()) {
+		++failures;
+		return;
+	}
+	const ServerHello live = inmatch::host_server_hello(host->ctx(),
+			make_title_client_hello(kJo, 0), PeerAddr{});
+	const uint32_t start = host->ctx().np_protocol.host_start_tick;
+	host->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld;
+	host->role->close();
+	const inmatch::UnstoppedServer &held = host->process->unstopped_server;
+	CHECK(held.running && held.identity == &kJo && held.host_start_tick == start);
+	CHECK(held.hello.sn == live.sn && held.hello.sn == "close");
+	CHECK(held.hello.hk == live.hk && held.hello.hk == host->ctx().np_protocol.host_key);
+	CHECK(held.hello.p1 == live.p1 && held.hello.p2 == live.p2 && held.hello.mp == live.mp);
+	CHECK(held.hello.sf == live.sf && held.hello.sus1 == live.sus1 &&
+			held.hello.sus2 == live.sus2);
+	CHECK(held.hello.pn == live.pn && held.hello.pv1 == live.pv1 && held.hello.pv3 == live.pv3);
+}
+
+// D-NET-NEW-L1-26 (L1-s22 row 0): the held protocol keeps host_running, and its hello handler
+// gates on that alone, never on is_authority, so a 0x41 from any source reaching the process's
+// socket (a LAN browser's probe at the port the browse rebound) takes the dead session's 0x81:
+// its protocol words as the exit left them, the browser's CI, address and external pair echoed,
+// UT against the start stamp, NP and NC the held nodes. The manager's lines follow the handler:
+// PROTOCOL for a PM-less probe; a PM-carrying hello is answered and tossed [4]; a hello of
+// another identity takes nothing and is tossed [4]. A process holding no server takes no 0x41.
+// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 - host_running @0x621454, +0x1F5 @0x621463,
+//  +0x1F6 @0x62146B, the PM bypass @0x6217C2, the identity gate @0x6217F1..0x6218B0, the send
+//  @0x6218FC, `return protocol_version == 0` @0x62190B; NapiNPProtocol_SendServerInfoPacket
+//  @0x6204B0 - NP +0x520 @0x6209D8, NC +0xED4 @0x620A4D, RIP / RPN @0x620A7D..0x620ABC;
+//  NapiNPManager_HandlePacket @0x622F10 - cb_on_dispatch @0x622FCD, cb_on_error(4) @0x622FF9]
+void test_a_held_server_answers_a_hello() {
+	MemoryFiles files;
+	inmatch::ConnectLog connect{files};
+	connect.set_clock([] { return std::string(); });
+	connect.start(inmatch::ConnectLogHeader{});
+	inmatch::ServerLogs logs;
+	logs.connect = &connect;
+
+	const PeerAddr kBrowser{0x0900000Au, 32768}; // 10.0.0.9, a LAN browser's socket
+	inmatch::UnstoppedServer server;
+	server.running = true;
+	server.session_name = "Held";
+	server.protocol_name = kJo.pn;
+	server.identity = &kJo;
+	server.host_start_tick = 1000;
+	server.hello.sn = "Held";
+	server.hello.hk = 0x1234ABCDu;
+	server.hello.mp = 16;
+	server.hello.p1 = 4;
+	server.hello.np = 7; // a stale count the answer replaces
+	server.hello.nc = 7;
+	server.hello.ut = 99;
+	server.nodes.push_back(held_node(kPeer, 0x11111111u));
+	server.nodes.push_back(held_node(PeerAddr{0x0100007Fu, 31002}, 0x22222222u));
+
+	ClientHello probe = make_title_client_hello(kJo, 5);
+	probe.eip = 0xFFFFFFFFu; // the browse's broadcast
+	probe.epn = 32768;
+	const std::vector<uint8_t> datagram =
+			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(probe));
+	CaptureSocket socket;
+	CHECK(inmatch::receive_unstopped_server(server, logs, socket, kBrowser, datagram.data(),
+			datagram.size(), 6000).taken);
+	CHECK(socket.sent.size() == 1);
+	if (socket.sent.size() == 1) {
+		CHECK(socket.sent[0].first == kBrowser);
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ServerHello reply;
+		CHECK(nw_decode_inbound(socket.sent[0].second.data(), socket.sent[0].second.size(),
+				opcode, body) && opcode == SESSION_OPCODE_SERVER_HELLO);
+		CHECK(parse_server_hello(body.data(), body.size(), reply));
+		CHECK(reply.ci == 5 && reply.rip == kBrowser.ip && reply.rpn == 32768);
+		CHECK(reply.eip == 0xFFFFFFFFu && reply.epn == 32768);
+		CHECK(reply.sn == "Held" && reply.hk == 0x1234ABCDu && reply.mp == 16 && reply.p1 == 4);
+		CHECK(reply.ut == 5000 && reply.np == 2 && reply.nc == 2);
+	}
+	const std::string taken_line = " FROM 10.0.0.9:32768 [" + std::string(kJo.pn) + "]";
+	const std::string tossed_line = " FROM 10.0.0.9:32768 [4]";
+	std::string text = files.files[inmatch::kConnectLogFile];
+	const std::size_t raw = text.find("NAPI GOT RAW ");
+	const std::size_t cooked = text.find("NAPI GOT COOKED ");
+	const std::size_t taken = text.find(taken_line);
+	CHECK(raw < cooked && cooked < taken && taken != std::string::npos);
+	CHECK(text.find(tossed_line) == std::string::npos);
+
+	// A PM-carrying hello (a peer host's announce) is answered and tossed.
+	ClientHello announce = make_title_client_hello(kJo, 6);
+	announce.pm = 1;
+	const std::vector<uint8_t> announced =
+			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(announce));
+	CHECK(inmatch::receive_unstopped_server(server, logs, socket, kBrowser, announced.data(),
+			announced.size(), 6000).taken);
+	CHECK(socket.sent.size() == 2);
+	text = files.files[inmatch::kConnectLogFile];
+	const std::size_t first_tossed = text.find(tossed_line);
+	CHECK(first_tossed != std::string::npos && first_tossed > taken);
+
+	// Another identity's PM-less hello takes nothing and is tossed.
+	ClientHello other = make_title_client_hello(kJo, 7);
+	other.pn = "OTHERPROTOCOL";
+	const std::vector<uint8_t> refused =
+			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(other));
+	CHECK(inmatch::receive_unstopped_server(server, logs, socket, kBrowser, refused.data(),
+			refused.size(), 6000).taken);
+	CHECK(socket.sent.size() == 2);
+	text = files.files[inmatch::kConnectLogFile];
+	CHECK(text.find(tossed_line, first_tossed + tossed_line.size()) != std::string::npos);
+
+	// No server held: the 0x41 is the caller's.
+	inmatch::UnstoppedServer none;
+	none.identity = &kJo;
+	CHECK(!inmatch::receive_unstopped_server(none, logs, socket, kBrowser, datagram.data(),
+			datagram.size(), 6000).taken);
+	CHECK(socket.sent.size() == 2);
+}
+
 int main() {
 	test_an_empty_latch_takes_the_leave_and_stops_the_server();
 	test_a_stale_kick_maps_the_leave_and_skips_the_stop();
@@ -956,6 +1082,8 @@ int main() {
 	test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_session();
 	test_the_browse_pump_steps_the_held_server();
 	test_a_reaped_node_goes_before_the_next_nodes_legs();
+	test_an_error_arm_holds_the_sessions_hello_words();
+	test_a_held_server_answers_a_hello();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }

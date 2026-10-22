@@ -1241,6 +1241,11 @@ void HostRole::close() {
 		const TitleIdentity *identity = ctx.np_protocol.identity;
 		unstopped.protocol_name =
 				identity != nullptr && identity->pn != nullptr ? identity->pn : "";
+		// The protocol's words the held hello handler answers from: its identity, its start
+		// stamp and the 0x81's protocol fields as they stand (receive_unstopped_server).
+		unstopped.identity = identity;
+		unstopped.host_start_tick = ctx.np_protocol.host_start_tick;
+		if (identity != nullptr) unstopped.hello = host_server_hello(ctx, ClientHello{}, PeerAddr{});
 		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (conn.type != NapiNPConnection::kTypeServerSide) continue;
 			UnstoppedNode node;

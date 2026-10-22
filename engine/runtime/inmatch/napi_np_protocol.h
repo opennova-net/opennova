@@ -184,6 +184,23 @@ void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain);
 // [orig: NapiNPProtocol_Pump @0x62A650 - the pending walk @0x62A6FD..0x62A793] (D-NET-NEW-L8-21)
 bool drain_own_goodbye(NapiNPServerCtx &ctx, OwnGoodbye drain);
 
+// The client probe (C2S NWU 0x47), the last client-side opcode of the manager's table
+// [orig: g_NPOpcodeHandlers @0x849D90, index 6; Nwu_HandleClientProbe @0x624280].
+inline constexpr uint8_t kClientProbeOpcode = 0x47;
+
+// The session legs the live host's handlers and the held server (unstopped_server.cpp) share,
+// defined with the handlers in napi_np_protocol.cpp: a node's 0x86 burst, the framing of its
+// records, and the resend list's, the ping's and the goodbye's legs past the connection gates.
+std::vector<std::vector<uint8_t>> host_goodbye_burst(bool host_running,
+		const NapiNPConnection &conn);
+std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
+		const std::vector<ProtocolMessage> &replies);
+bool resend_session_packets(NapiNPConnection &conn, const std::vector<uint8_t> &body,
+		bool &named, std::vector<std::vector<uint8_t>> &sends);
+bool answer_session_ping(NapiNPConnection &conn, const std::vector<uint8_t> &body,
+		uint32_t stamp_ms, uint32_t clock_ms, std::vector<std::vector<uint8_t>> &sends);
+bool latch_client_goodbye(NapiNPConnection &conn, const std::vector<uint8_t> &body);
+
 // The next session reset's StopServer over a server an error-arm exit left unstopped
 // (UnstoppedServer, napi_np_connection.h): each node takes the STOP record (the first latch
 // wins), its /INOUT removal line and its 0x86 burst over `socket` (null: none open, nothing on
@@ -221,6 +238,10 @@ void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &log
 // answers 0x85 over `socket` when it asks. `taken` is false for every other datagram (the
 // caller's own dispatch writes its lines); `net_quality_link_errors` carries the resend
 // list's outgoing flag (kNetQualityLinkErrorOutgoing) for the process's indicators.
+// A 0x41 from any source is the held protocol's too (its hello handler gates on host_running,
+// not on is_authority): its lines, and a hello the identity gate admits takes the held session's
+// 0x81 over `socket` (the protocol's words as the exit left them, the uptime at `now_ms`, NP
+// and NC the held nodes), its dispatch line PROTOCOL for a PM-less hello, else TOSSED [4].
 // (D-NET-NEW-L1-26)
 struct UnstoppedReceive {
 	bool taken = false;

@@ -525,6 +525,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
     # --- parity lane L1 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_state.cpp        # the per-slot 0x0A writer (split off server_tick.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/unstopped_server.cpp           # the held server's legs (split off napi_np_protocol.cpp)
     # --- parity lane L2 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loaded_model_list.cpp # the mission start's model-def list, the C2S 0x3D page (D-NET-527)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_console.cpp # the client's console command walk over the S2C 0x06 echo (D-NET-710)

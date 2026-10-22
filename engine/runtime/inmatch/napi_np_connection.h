@@ -998,6 +998,13 @@ struct UnstoppedServer {
 	std::vector<UnstoppedNode> nodes; // the server-side nodes, in list order
 	std::string session_name;         // the protocol's (+0x288), HOST STOPPED's
 	std::string protocol_name;        // the protocol's (+0xDC), the manager's PROTOCOL line's
+	// The protocol's identity (the hello's NVS / PN / PG / PV1 gate), its start stamp (+0x53C,
+	// the host clock's: the 0x81's UT while host_running holds) and the 0x81's protocol words as
+	// the exit left them (identity, HK, SN, SF, P1 / P2, MP, SUS1 / SUS2): a 0x41 from any source
+	// reaches the held protocol's hello handler (receive_unstopped_server).
+	const TitleIdentity *identity = nullptr;
+	uint32_t host_start_tick = 0;
+	ServerHello hello;
 	// The protocol's server-opcode queue (+0x22C, unbounded), which only a pump with flag bit 0
 	// drains: the LAN browse's and a join attempt's Pump(-1), never the joined match's flags 26.
 	std::vector<UnstoppedPacket> queue;
