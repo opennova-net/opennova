@@ -197,32 +197,24 @@ struct PlacedDevice {
 };
 
 // ----------------------------------------------------------------------------
-// Host-presentation events (drained per tick by the throwable present pass).
+// A conversion's S2C 0x59, queued at the motor's send into the entity pass's
+// call-order queue (WorldOutbox::entity_events): the satchel and claymore motors
+// send it right after the conversion, and the cap's S2C 0x12 follows it at once.
+// [orig: Entity_UpdateSatchelPhysics @0x4482A0 (the 0x59 @0x448BD5, the cap call
+//  @0x448BEC); Entity_UpdateClaymorePhysics @0x4472F0 (@0x447B56, @0x447B6D)]
 // ----------------------------------------------------------------------------
-struct ThrowableEvents {
-    struct DeviceSpawn {
-        uint16_t entity = 0xFFFF;  // packed registry handle
-        int32_t item_id = 0;       // base/fallback TrcrID (packet word 0)
-        uint16_t owner_handle = 0xFFFF;
-        int32_t item_friendly = 0; // the viewer picks by team [orig: S2C 0x59
-        int32_t item_enemy = 0;    //  carries both TrcrID words]
-        uint16_t parent_handle = 0xFFFF;
-        uint8_t team = 0xFF;
-        EntityPosition pos;        // the resting round's words (S2C 0x59)
-        int32_t yaw_bam = 0;
-        int32_t pitch_bam = 0;
-        int32_t roll_bam = 0;
-    };
-    struct DeviceRemove {
-        uint16_t entity = 0xFFFF;
-    };
-    std::vector<DeviceSpawn> spawns;
-    std::vector<DeviceRemove> removes;
-
-    void clear() {
-        spawns.clear();
-        removes.clear();
-    }
+struct DeviceSpawnEvent {
+    uint16_t entity = 0xFFFF;  // packed registry handle
+    int32_t item_id = 0;       // base/fallback TrcrID (packet word 0)
+    uint16_t owner_handle = 0xFFFF;
+    int32_t item_friendly = 0; // the viewer picks by team [orig: S2C 0x59
+    int32_t item_enemy = 0;    //  carries both TrcrID words]
+    uint16_t parent_handle = 0xFFFF;
+    uint8_t team = 0xFF;
+    EntityPosition pos;        // the resting round's words (S2C 0x59)
+    int32_t yaw_bam = 0;
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -235,7 +227,6 @@ public:
     static constexpr int kCapacity = 64;
 
     std::vector<PlacedDevice> devices;
-    ThrowableEvents events;
 
     // Host-fed class bindings for the TrcrID items (ai_function/move_function).
     ThrowableClassTable classes;
@@ -299,7 +290,6 @@ public:
 
     void reset() noexcept {
         devices.clear();
-        events.clear();
         fan_prng_state = 0x2B0749C1u;
     }
 

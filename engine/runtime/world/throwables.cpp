@@ -1421,23 +1421,34 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     d.think_delay_ticks = ammo.max_age_ticks;
     devices.push_back(d);
 
-    ThrowableEvents::DeviceSpawn ev;
-    ev.entity = handle.packed;
-    ev.item_id = item_id;
-    ev.owner_handle = d.owner_handle != EntityHandle::kInvalid
-                              ? d.owner_handle
-                              : d.owner.packed;
-    ev.item_friendly = d.item_friendly;
-    ev.item_enemy = d.item_enemy;
-    ev.parent_handle = d.parent.valid()
-                               ? d.parent.packed
-                               : EntityHandle::kInvalid;
-    ev.team = d.team;
-    ev.pos = d.pos;
-    ev.yaw_bam = d.yaw_bam;
-    ev.pitch_bam = d.pitch_bam;
-    ev.roll_bam = d.roll_bam;
-    events.spawns.push_back(ev);
+    // The motor's S2C 0x59 (mask 0x90) at its call, after the conversion and
+    // ahead of the cap, into the entity pass's call-order queue: the projectile
+    // walk's 0x59s and 0x12s interleave with its guided 0x44s round by round
+    // (D-NET-NEW-L7-14). The callers run on the authority alone; outside a
+    // session the send reaches nobody, so nothing is queued.
+    // [orig: Entity_UpdateSatchelPhysics @0x4482A0 - the conversion call
+    //  @0x448A3E, send_mask 90h @0x448BCB, the NapiNPServer_SendFiltered(0x59)
+    //  call @0x448BD5; Entity_UpdateClaymorePhysics @0x4472F0 - @0x447B4C,
+    //  @0x447B56]
+    if (world.rules.mp_session) {
+        DeviceSpawnEvent ev;
+        ev.entity = handle.packed;
+        ev.item_id = item_id;
+        ev.owner_handle = d.owner_handle != EntityHandle::kInvalid
+                                  ? d.owner_handle
+                                  : d.owner.packed;
+        ev.item_friendly = d.item_friendly;
+        ev.item_enemy = d.item_enemy;
+        ev.parent_handle = d.parent.valid()
+                                   ? d.parent.packed
+                                   : EntityHandle::kInvalid;
+        ev.team = d.team;
+        ev.pos = d.pos;
+        ev.yaw_bam = d.yaw_bam;
+        ev.pitch_bam = d.pitch_bam;
+        ev.roll_bam = d.roll_bam;
+        world.out.entity_events.push_back(ev);
+    }
     // Both authority conversion motors enforce the cap AFTER their 0x59
     // send; the MOTOR keys it (AT mines author move_function schl and ride
     // the satchel motor's max-3 call with their own def id). A device still
@@ -1445,8 +1456,9 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     // all-arming surplus persists -- the retail null no-op.
     // [orig: Server_EnforcePlacedDeviceCapByOwner @0x5119e0 -- owner +368 +
     //  itemDef+80 match, min over +684 seeded 0 with strict < @0x511a42-44,
-    //  count > max -> Server_RemoveEntityAndNotify @0x50a270 (null-safe);
-    //  satchel motor caller @0x448be6 max 3; claymore @0x447b67 max 4]
+    //  count > max -> Server_RemoveEntityAndNotify @0x50a270 (null-safe, the
+    //  call @0x511A53); satchel motor caller @0x448be6 max 3 (the call
+    //  @0x448BEC); claymore @0x447b67 max 4 (@0x447B6D)]
     if (round.motor == ThrowClass::kSatchel ||
         round.motor == ThrowClass::kAVMine)
         enforce_device_cap(world, devices.back(), 3);
@@ -1503,9 +1515,13 @@ void ThrowableSim::remove_device(World &world, PlacedDevice &device) {
         return;
     }
     device.active = false;
-    ThrowableEvents::DeviceRemove ev;
-    ev.entity = device.entity.packed;
-    events.removes.push_back(ev);
+    // The notifying removal's S2C 0x12 (mask 0x90) at its call, into the same
+    // call-order queue: the cap's right behind its conversion's 0x59 in the
+    // projectile walk, a pool-1 visit's in the pool-1 walk (D-NET-NEW-L7-14).
+    // [orig: Server_RemoveEntityAndNotify @0x50A270 - send_mask 90h @0x50A284,
+    //  the 0x12's NapiNPServer_SendFiltered call @0x50A2AC]
+    if (world.rules.mp_session)
+        world.out.entity_events.push_back(EntityRemoveEvent{device.entity.packed});
     world.registry.despawn(device.entity);
 }
 

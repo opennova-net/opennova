@@ -43,67 +43,6 @@ namespace opennova::inmatch {
 
 namespace {
 
-// Route placed-device lifetimes created or retired by this authoritative tick.
-// Retail's filtered send excludes the host itself (mask 0x90): the listen
-// client's native World already owns the row, while every remote client needs
-// the 0x59 spawn/update and the preceding-to-destroy 0x12 removal record.
-// [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 -> S2C 0x59;
-// Server_RemoveEntityAndNotify @0x50A270 -> S2C 0x12]
-static void send_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
-	if (!ctx.is_in_session) return;
-	auto fan_remote = [&](uint8_t tag, const std::vector<uint8_t> &body) {
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn) || conn.link.transport == nullptr ||
-					conn.link.mode == replication::TransportMode::Loopback)
-				continue;
-			conn.link.transport->host_send(tag, body);
-		}
-	};
-
-	for (const world::ThrowableEvents::DeviceSpawn &event :
-			world.throwables.events.spawns) {
-		DeployedItemSpawn spawn;
-		spawn.item_id = static_cast<uint16_t>(event.item_id);
-		spawn.owner_handle = event.owner_handle;
-		spawn.friendly_item_id = static_cast<uint16_t>(event.item_friendly);
-		spawn.enemy_item_id = static_cast<uint16_t>(event.item_enemy);
-		spawn.slot_handle = event.entity;
-		spawn.parent_handle = event.parent_handle;
-		// The resting round's Position words, raw (D-NET-507).
-		spawn.pos_x = event.pos.x.q16;
-		spawn.pos_y = event.pos.y.q16;
-		spawn.pos_z = event.pos.z.q16;
-		// Words 12/13/14 are the high halves of the resting round's
-		// entity+16/+20/+24 = the eulerZ/eulerX/eulerY triple (yaw heading,
-		// pitch, roll) — the same order every spawn record carries; the client
-		// stores them straight back into +16/+20/+24 [orig: the word reads
-		// [esi+12h]/[esi+16h]/[esi+1Ah] into record words 12/13/14,
-		// Entity_UpdateSatchelPhysics @0x448aeb..0x448b09 and
-		// Entity_UpdateClaymorePhysics @0x447a6c..0x447a8a;
-		// Entity_SpawnOrUpdateFromSlotPacket @0x5468cb..0x5468df].
-		spawn.angle_x = static_cast<uint16_t>(
-				static_cast<uint32_t>(event.yaw_bam) >> 16);
-		spawn.angle_y = static_cast<uint16_t>(
-				static_cast<uint32_t>(event.pitch_bam) >> 16);
-		spawn.angle_z = static_cast<uint16_t>(
-				static_cast<uint32_t>(event.roll_bam) >> 16);
-		fan_remote(s2c::DEPLOYED_ITEM, encode_deployed_item_spawn(spawn));
-	}
-	for (const world::ThrowableEvents::DeviceRemove &event :
-			world.throwables.events.removes) {
-		EntityRemove removal;
-		removal.entity_handle = event.entity;
-		fan_remote(s2c::ENTITY_REMOVE, encode_entity_remove(removal));
-	}
-}
-
-// The routed records are released: a frame whose entity update is held
-// produces none and must not re-send the last one's.
-void route_throwable_events(NapiNPServerCtx &ctx, world::World &world) {
-	send_throwable_events(ctx, world);
-	world.throwables.events.clear();
-}
-
 // Send the WAC commands the VM replicated this tick as S2C 0x23. A targeted
 // record (send_mask 0x20) reaches the one connected, not-dropped connection
 // whose active player slot owns the addressed entity, in-match or not; a
@@ -547,19 +486,21 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 
 // The records the entity update produces, routed at the head of the next
 // server tick: retail's entity update sends them inline after that frame's
-// send pump, so they lead the next frame's queue. The placed-device records,
-// the deaths and their tallies, the medic interactions the kill-zone pass
-// admitted (after the deaths it also produced), the match's gameplay events and
-// the water crossings. The guided motors' 0x44s ride the entity fan in the pass's
-// own order, ahead of this tick's 0x0A like every other inline send [orig:
-//  Entity_SendEffectPacket @0x445C40 from Weapon_UpdateAllProjectiles, called @0x4C223A].
+// send pump, so they lead the next frame's queue. The deaths and their tallies,
+// the medic interactions the kill-zone pass admitted (after the deaths it also
+// produced), the match's gameplay events and the water crossings. The guided
+// motors' 0x44s and the placed devices' 0x59s and 0x12s ride the entity fan in
+// the pass's own call order (the pool-1 walk's, then the projectile walk's round
+// by round), ahead of this tick's 0x0A like every other inline send [orig:
+//  Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C21E9, then
+//  Weapon_UpdateAllProjectiles @0x4C223A; Entity_SendEffectPacket @0x445C40;
+//  Entity_UpdateSatchelPhysics's 0x59 @0x448BD5 and cap @0x448BEC].
 // [orig: Game_ProcessMainFrame — the Entity_UpdateAllEntities call @0x52674B
 //  follows Server_TickUpdate's send pump @0x51E487; Projectile_ProcessExplosionQueue
 //  @0x4EADFC -> GameEvent_HandleMedicInteraction @0x4E6790 ->
 //  GameEvent_RevivePlayer @0x517CD0 / GameEvent_HealPlayer @0x50DE30]
 void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
 	Server_FanEntityEvents(ctx, world);
-	route_throwable_events(ctx, world);
 	// The designator rounds' marks and their mode-1 0x1E notices (D-NET-NEW-L3-4)
 	// [orig: RoundData_SpawnRound @0x4EC270 -> EntityTracker_RegisterOrUpdate @0x511580].
 	Server_RouteDesignationMarks(ctx.np_protocol.connection_list, ctx.designations, world);

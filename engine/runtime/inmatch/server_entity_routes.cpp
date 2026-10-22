@@ -45,15 +45,42 @@ void send_guided_update(NapiNPConnection &conn, const world::GuidedUpdateEvent &
     conn.link.transport->host_send(0x44, std::move(body), true, 0, false, retention);
 }
 
+// A placed device's S2C 0x59, the motor's send right after the conversion: the
+// resting round's Position words raw (D-NET-507), then words 12/13/14, the high
+// halves of the round's entity+16/+20/+24 (yaw, pitch, roll), which the client
+// stores straight back into +16/+20/+24.
+// [orig: Entity_UpdateSatchelPhysics @0x4482A0 - the words @0x448AD9..0x448B09, the
+//  send @0x448BD5; Entity_UpdateClaymorePhysics @0x4472F0 - @0x447A5A..0x447A8A,
+//  @0x447B56; Entity_SpawnOrUpdateFromSlotPacket @0x5468CB..0x5468DF]
+void send_device_spawn(NapiNPConnection &conn, const world::DeviceSpawnEvent &event) {
+    DeployedItemSpawn spawn;
+    spawn.item_id = static_cast<uint16_t>(event.item_id);
+    spawn.owner_handle = event.owner_handle;
+    spawn.friendly_item_id = static_cast<uint16_t>(event.item_friendly);
+    spawn.enemy_item_id = static_cast<uint16_t>(event.item_enemy);
+    spawn.slot_handle = event.entity;
+    spawn.parent_handle = event.parent_handle;
+    spawn.pos_x = event.pos.x.q16;
+    spawn.pos_y = event.pos.y.q16;
+    spawn.pos_z = event.pos.z.q16;
+    spawn.angle_x = static_cast<uint16_t>(static_cast<uint32_t>(event.yaw_bam) >> 16);
+    spawn.angle_y = static_cast<uint16_t>(static_cast<uint32_t>(event.pitch_bam) >> 16);
+    spawn.angle_z = static_cast<uint16_t>(static_cast<uint32_t>(event.roll_bam) >> 16);
+    conn.link.transport->host_send(s2c::DEPLOYED_ITEM, encode_deployed_item_spawn(spawn), true, 0);
+}
+
 } // namespace
 
 // Item callbacks' state packets, explosion effects, authoritative removals, the
-// guided motors' updates and the HUD relays, fanned and released.
+// guided motors' updates, the placed devices' spawns and the HUD relays, fanned
+// and released.
 void Server_FanEntityEvents(NapiNPServerCtx &ctx, world::World &world) {
-    // Item callbacks' state packets and authoritative removals: mask 0x90
-    // includes active remote slots regardless of health, excluding the local host.
+    // Item callbacks' state packets, authoritative removals and the device
+    // spawns, each in its call's order: mask 0x90 includes active remote slots
+    // regardless of health, excluding the local host.
     // [orig: Server_SendEntityStatePacket @0x509D70;
-    // Server_RemoveEntityAndNotify @0x50A270 -> NapiNPServer_SendFiltered @0x4C87E0]
+    // Server_RemoveEntityAndNotify @0x50A270 -> NapiNPServer_SendFiltered @0x4C87E0;
+    // the satchel motor's send_mask 90h @0x448BCB]
     if (ctx.is_in_session) {
         for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
             if (!active_player_recipient(conn) ||
@@ -90,6 +117,8 @@ void Server_FanEntityEvents(NapiNPServerCtx &ctx, world::World &world) {
                             encode_door_slot_action(row), true, 0);
                 } else if (const auto *guided = std::get_if<world::GuidedUpdateEvent>(&event)) {
                     send_guided_update(conn, *guided);
+                } else if (const auto *device = std::get_if<world::DeviceSpawnEvent>(&event)) {
+                    send_device_spawn(conn, *device);
                 }
             }
             // The HUD relays ride the same 0x90 mask: every active remote

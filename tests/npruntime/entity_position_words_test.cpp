@@ -784,8 +784,10 @@ int ground_sampler_takes_the_words() {
 }
 
 // The S2C 0x59 a placed device sends streams the resting round's Position words
-// raw, 21,000 units out with low bits set (D-NET-507). [orig:
-// Entity_ConvertRoundToPlacedEntity @0x5455B0 -> S2C 0x59; the record's words from
+// raw, 21,000 units out with low bits set (D-NET-507), queued in the entity pass's
+// call order (D-NET-NEW-L7-14). [orig: Entity_UpdateSatchelPhysics @0x4482A0 - the
+// conversion Entity_ConvertRoundToPlacedEntity @0x5455B0 called @0x448A3E, then the
+// S2C 0x59 @0x448BD5; the record's words from
 // the round's +4 / +8 / +0xC, Entity_UpdateSatchelPhysics - read @0x448AD9 /
 // @0x448AE4 / @0x448ADC, stored @0x448AE7 / @0x448AEF / @0x448AF7]
 int placed_device_spawn_streams_the_words() {
@@ -796,12 +798,12 @@ int placed_device_spawn_streams_the_words() {
 	spawn.position.set_q16({kAshJoinerX, kTdhHostY, 2 << 16});
 	spawn.team = 1;
 	const w::EntityHandle owner = w::spawn_remote_player(*world, spawn);
-	w::ThrowableEvents::DeviceSpawn event;
+	w::DeviceSpawnEvent event;
 	event.entity = 0x1003;
 	event.item_id = 0x0361;
 	event.owner_handle = owner.packed;
 	event.pos.set_q16({kAshTrailerX, kTdhHostY, kFarZ});
-	world->throwables.events.spawns.push_back(event);
+	world->out.entity_events.push_back(event);
 
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = world.get();

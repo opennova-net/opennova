@@ -241,8 +241,8 @@ bool run_placed_device_spawn_and_remove_fanout() {
 		return false;
 
 	// Seed two more same-owner/same-item rows directly, then make the next
-	// authoritative conversion enforce the cap. Direct-place events are cleared
-	// at the next tick head; only the new 0x59 and oldest-device 0x12 should fan.
+	// authoritative conversion enforce the cap; only the new 0x59 and the
+	// oldest device's 0x12 should fan, in that order.
 	world.throwables.devices.front().think_delay_ticks = -30;
 	for (int i = 0; i < 2; ++i) {
 		w::LiveRound extra;
@@ -260,7 +260,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 		world.throwables.devices.back().think_delay_ticks = -20 + i * 10;
 	}
 	// The two seeds stand for devices already on the wire.
-	world.throwables.events.clear();
+	world.out.entity_events.clear();
 	w::RoundSpawnParams cap_params = params;
 	cap_params.origin = {14.0f, 10.0f, 1.0f / 1024.0f};
 	cap_params.shot_seq = 0x5678;
@@ -282,6 +282,17 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	const std::vector<ns::Datagram> loop_remove = drain(loopback);
 	const auto owner_12 = tagged(owner_remove, s2c::ENTITY_REMOVE);
 	const auto observer_12 = tagged(observer_remove, s2c::ENTITY_REMOVE);
+	// The conversion's 0x59 leads, its cap's 0x12 follows at once, one queue in
+	// call order (D-NET-NEW-L7-14) [orig: Entity_UpdateSatchelPhysics @0x4482A0 -
+	//  the 0x59 @0x448BD5, the Server_EnforcePlacedDeviceCapByOwner call @0x448BEC].
+	std::vector<uint8_t> observer_order;
+	for (const ns::Datagram &d : observer_remove)
+		if (d.tag == s2c::DEPLOYED_ITEM || d.tag == s2c::ENTITY_REMOVE)
+			observer_order.push_back(d.tag);
+	if (!expect(observer_order ==
+			(std::vector<uint8_t>{s2c::DEPLOYED_ITEM, s2c::ENTITY_REMOVE}),
+			"the observer hears the 0x59 and then its cap's 0x12"))
+		return false;
 	if (!expect(owner_12.size() == 1 && observer_12.size() == 1 &&
 			tagged(owner_remove, s2c::DEPLOYED_ITEM).size() == 1 &&
 			tagged(observer_remove, s2c::DEPLOYED_ITEM).size() == 1 &&
@@ -370,7 +381,7 @@ bool run_owner_devices_live_until_the_deploy() {
 		world.throwables.update_device(world, device, nullptr, nullptr);
 	world.throwables.compact();
 	if (!expect(world.throwables.devices.size() == 2 && world.registry.get(satchel) != nullptr &&
-			world.registry.get(claymore) != nullptr && world.throwables.events.removes.empty(),
+			world.registry.get(claymore) != nullptr && queued_removals(world).empty(),
 			"a dead owner's devices stay armed through their visits"))
 		return false;
 
@@ -397,7 +408,9 @@ bool run_owner_devices_live_until_the_deploy() {
 	for (w::PlacedDevice &device : world.throwables.devices)
 		world.throwables.update_device(world, device, nullptr, nullptr);
 	world.throwables.compact();
-	if (!expect(world.throwables.devices.empty() && world.throwables.events.removes.empty(),
+	if (!expect(world.throwables.devices.empty() &&
+			queued_removals(world) ==
+					(std::vector<uint16_t>{satchel.packed, claymore.packed}),
 			"the swept records release silently, with no second removal"))
 		return false;
 

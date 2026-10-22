@@ -397,8 +397,6 @@ void World::update_all_entities(const TickContext &ctx) {
     ai.is_in_session = rules.mp_session;
     if (ai.collision != nullptr)
         ai.collision->local_player = cached.local_player; // blink accumulation target
-    // These presentation events describe only the current authoritative tick.
-    if (is_authority) throwables.events.clear();
 
     // The SP epilog screen runs a reduced pass: every pool-1 row's pose is
     // copied into its saved pose and only a row a player drives (its occupant
