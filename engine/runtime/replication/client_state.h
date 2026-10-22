@@ -344,10 +344,16 @@ struct ClientEntityState {
 	int32_t roll_bam = 0;
 	// Normalized raw bytes retained from the class-specific compact organic record.
 	// carrier_handle is PlayerCompactRecord::carrier_handle for players and
-	// InfantryCompactRecord::vehicle_slot_handle for infantry. For players it can
-	// also name a standing-on ground entity; mount_bone distinguishes an actual
-	// seat mount (retail detaches player bone 0). No new wire fields are introduced.
+	// InfantryCompactRecord::vehicle_slot_handle for infantry, kept for a seat
+	// (mount_bone != 0) alone: a bone-0 carrier is the standing-on ground entity
+	// (D-NET-224), which the compact apply lands in resolved_ground. No new wire
+	// fields are introduced.
 	uint16_t carrier_handle = 0xFFFF;
+	// A player record's carrier word as its read takes it, whatever the bone: the
+	// local player's fold resolves it into L's ground link (JoinerRole::fold_local_record).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the word @0x4C0E05..0x4C0E08,
+	//  its resolve @0x4C0F9C..0x4C106D (ebp, 0 @0x4C0FAB for 0xFFFF)]
+	uint16_t record_carrier = 0xFFFF;
 	uint8_t mount_bone = 0;                       // player vehicle_bone / infantry seat_bone_idx
 	uint8_t seat_type = 0;                        // player-only seat attribute; 0 for infantry
 	uint8_t pitch_byte = 0;                       // class-specific witnessed compact byte

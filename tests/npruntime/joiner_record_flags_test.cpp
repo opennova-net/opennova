@@ -366,6 +366,92 @@ bool run_the_edge_frame_ships_its_first_uplink() {
 			"edge frame: the frame that bears L ships its first 0x0C");
 }
 
+// D-NET-NEW-L2-37: the self record of a body standing on a building names the building
+// with seat bone 0 (the retail host echoes 0x2011 so on every record after a respawn into
+// Jungle Hut 2), and its fold lands that carrier as L's ground link: a bone-0 floor is
+// the ground link too, not only a seat's carrier. Between the idle resolves, whose skip
+// band runs no ground probe, nothing else writes the link, so the frame's C2S 0x0C names
+// the floor, the next frame keeps it, and only an 0xFFFF record nulls it.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the carrier word @0x4C0E05..0x4C0E08,
+//  its resolve into ebp @0x4C0F9C..0x4C106D (0 @0x4C0FAB for 0xFFFF), the store @0x4C1358;
+//  Entity_MovementCollisionResolver @0x4B2BD0 - the skip band's return @0x4B2CBC..0x4B2CF5]
+bool run_the_self_record_floor_holds_l_ground_link() {
+	Harness h;
+	w::World &world = h.kernel->world;
+	world.registry.configure_pool(2, 32);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, kSelf, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	if (!expect(h.role.local_spawned(), "floor: L spawned")) return false;
+	auto &self_row = h.role.runtime->state().upsert(kSelf);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	h.frame(0x00);
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr && local->alive, "floor: L alive")) return false;
+	// A building under L (its origin at L's feet), placed, and its replica row.
+	w::Entity floor;
+	floor.kind = w::EntityKind::Building;
+	floor.item_id = 0x04B3;
+	floor.has_item_def = true;
+	floor.spawn_origin = w::spawn_origin_pack(static_cast<uint32_t>(w::EntityKind::Building), 0);
+	floor.position = local->position;
+	floor.bound_radius = 8.0f;
+	const w::EntityHandle fh = world.registry.spawn(2, floor);
+	if (!expect(fh.valid() && fh.pool() == 2, "floor: the building took a pool-2 slot"))
+		return false;
+	auto &row = h.role.runtime->state().upsert(fh.packed);
+	row.type_id = static_cast<uint16_t>(floor.item_id);
+	row.cls = EntityClass::NoNetworkCallback;
+	row.x = floor.position.x.q16;
+	row.y = floor.position.y.q16;
+	row.z = floor.position.z.q16;
+	row.heading_known = true;
+
+	// The standing record: the building at bone 0, L at its origin.
+	PlayerCompactRecord standing;
+	standing.carrier_handle = fh.packed;
+	standing.vehicle_bone = 0;
+	std::size_t from = h.socket.datagrams.size();
+	h.frame(standing);
+	std::vector<PlayerExtendedUplink> ups = uplinks_since(h.socket, from);
+	local = h.kernel->local.player();
+	if (!expect(local != nullptr && !local->mounted && local->ground_target == fh,
+			"floor: the bone-0 record's building is L's ground link, L unmounted"))
+		return false;
+	if (!expect(!ups.empty() && ups.back().carrier_handle == fh.packed,
+			"floor: the frame's 0x0C names the building"))
+		return false;
+	// A frame with no record: nothing re-stores the link, and it holds.
+	from = h.socket.datagrams.size();
+	h.role.run_tick(h.input);
+	ups = uplinks_since(h.socket, from);
+	local = h.kernel->local.player();
+	if (!expect(local != nullptr && local->ground_target == fh,
+			"floor: a frame with no record keeps the link"))
+		return false;
+	if (!expect(ups.empty() || ups.back().carrier_handle == fh.packed,
+			"floor: a 0x0C of that frame still names the building"))
+		return false;
+	// The next record again: the fold re-stores the same link.
+	h.frame(standing);
+	local = h.kernel->local.player();
+	if (!expect(local != nullptr && local->ground_target == fh,
+			"floor: the next record keeps the link"))
+		return false;
+	// The host's 0xFFFF echo nulls it.
+	PlayerCompactRecord open;
+	open.carrier_handle = 0xFFFF;
+	open.pos_x_compressed = network_compress_fixedpoint(local->position.x.q16);
+	open.pos_y_compressed = network_compress_fixedpoint(local->position.y.q16);
+	open.pos_z_compressed = network_compress_fixedpoint(local->position.z.q16);
+	h.frame(open);
+	local = h.kernel->local.player();
+	return expect(local != nullptr && !local->ground_target.valid(),
+			"floor: an 0xFFFF record nulls the link");
+}
+
 } // namespace
 
 int main() {
@@ -374,6 +460,7 @@ int main() {
 	ok &= run_the_self_record_flags_ride_back_the_same_frame();
 	ok &= run_the_self_record_mount_edge_snaps_l();
 	ok &= run_the_self_record_echo_chases_l();
+	ok &= run_the_self_record_floor_holds_l_ground_link();
 	if (ok) std::printf("joiner_record_flags: ok\n");
 	return ok ? 0 : 1;
 }

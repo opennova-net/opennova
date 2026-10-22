@@ -1061,6 +1061,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// normalized row before class-specific assignment so dismounts and class changes
 		// cannot retain a stale carrier/bone selector from an earlier frame.
 		es.carrier_handle = wire_handle::kInvalid;
+		es.record_carrier = wire_handle::kInvalid;
 		es.mount_bone = 0;
 		es.seat_type = 0;
 		// Carrier identity and its resolved local pose form one atomic sample.
@@ -1149,6 +1150,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			cz = rec.player.pos_z_compressed;
 			es.carrier_handle = rec.player.vehicle_bone != 0
 					? rec.player.carrier_handle : wire_handle::kInvalid;
+			es.record_carrier = rec.player.carrier_handle;
 			es.mount_bone = rec.player.vehicle_bone;
 			es.seat_type = rec.player.seat_type;
 			es.pitch_byte = rec.player.pitch_byte;

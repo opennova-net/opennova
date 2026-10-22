@@ -350,7 +350,14 @@ void JoinerRole::fold_local_record() {
 	}
 	const int32_t sample[3] = {self->record_sample[0], self->record_sample[1],
 			self->record_sample[2]};
-	const uint16_t wire_carrier = self->carrier_handle;
+	// The record's carrier word whatever its bone: a floor or deck the host echoes with
+	// bone 0 is the ground link too, not only a seat's carrier (carrier_handle keeps the
+	// seat alone, D-NET-224), so a body standing on a building keeps it between its idle
+	// resolves, whose skip band runs no ground probe (D-NET-NEW-L2-37).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the word @0x4C0E05..0x4C0E08, its
+	//  resolve into ebp @0x4C0F9C..0x4C106D; Entity_MovementCollisionResolver @0x4B2BD0 -
+	//  the skip band's return @0x4B2CBC..0x4B2CF5 ahead of the settle tail]
+	const uint16_t wire_carrier = self->record_carrier;
 	sync_authoritative_mount();
 	if (edge) local->position.set_q16({sample[0], sample[1], sample[2]});
 	// The ground link last: a mounted body takes its mount's, any other the record's
