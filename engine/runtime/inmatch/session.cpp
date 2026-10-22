@@ -26,20 +26,6 @@ SessionError invalid_transition(const char *message) {
 	return {SessionErrorCode::InvalidTransition, message};
 }
 
-// One update's input-frame rows through the source: each pause row its drain
-// dispatches flips the word the action rows' head reads (a copy where case 25
-// returns before its flip), and a flip that leaves the word set shuts the audio
-// channels down, which the embedder's audio device runs
-// (WorldOutbox::audio_channels_shutdown; TickInputSource carries the witness).
-void drain_update_rows(TickInputSource &source, world::World &world, bool new_sample,
-		bool flips_apply) {
-	bool copy = world.rules.pause_word;
-	PauseRowWord pause;
-	pause.word = flips_apply ? &world.rules.pause_word : &copy;
-	source.run_update_rows(world.logic_tick, new_sample, pause);
-	if (flips_apply && pause.raised > 0) world.out.audio_channels_shutdown = true;
-}
-
 } // namespace
 
 Session::Session(Role &role) : role_(&role), kind_(role.kind()) {}
@@ -64,8 +50,10 @@ void Role::apply_input(const TickInput &input) {
 	// The update's records in queue order: the console's queued actions first, then the
 	// device passes' (the key scan's rows, the Respawn key and the medic call among them,
 	// in their key order), all ahead of the mouse-axis events, the toggles, the held rows
-	// and the deferred dispatches, which the frame applies below.
-	drain_input_events(input.source, (input.player.held_action_bits & HELD_MENU_OPEN) != 0);
+	// and the deferred dispatches, which the frame applies below. The session's updates
+	// drained already (TickInput::drained).
+	if (!input.drained)
+		drain_input_events(input.source, (input.player.held_action_bits & HELD_MENU_OPEN) != 0);
 	if (kernel.world.spectator.death_screen && runtime != nullptr) {
 		apply_death_screen_input(kernel, *runtime, joiner, input.player);
 		return;
@@ -264,7 +252,7 @@ void Role::store_mission_exit(int32_t reason) {
 	if (kernel_ != nullptr) kernel_->world.mission_exit_reason = reason;
 }
 
-void Role::drain_input_events(TickInputSource *source, bool menu_open) {
+void Role::drain_input_events(TickInputSource *source, bool menu_open, bool pause_flips) {
 	// [orig: Input_ProcessFrame @0x49D520 - the count test @0x49D599, Input_DequeueEvent
 	//  @0x49D5BA, Input_HandleActionBinding @0x49D5D8, the count test @0x49D5E0 / the loop
 	//  @0x49D5E7; Game_ProcessMainFrame @0x5263F0 - UI_IsMenuScreenOpen @0x52660D skips
@@ -274,8 +262,10 @@ void Role::drain_input_events(TickInputSource *source, bool menu_open) {
 	ClientRuntime *runtime = client_runtime();
 	if (kind() == RoleKind::Joiner && (runtime == nullptr || !runtime->in_game_loop())) return;
 	if (menu_open) return;
+	pause_flips_ = pause_flips;
 	controls::InputEventRecord record;
 	while (input_events_.pop(record)) dispatch_record(record, source);
+	pause_flips_ = false;
 }
 
 void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSource *source) {
@@ -322,6 +312,20 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	}
 	if (code == controls::action_code(kStandRow)) {
 		(void)request_stance(0);
+		return;
+	}
+	// The pause row (catalog row 70, code 25; the declaration carries the witness): past
+	// the head, out of a session, the flip and the audio stop; the debug transport's step
+	// flips no word of the session's (pause_flips_). The embedder then takes the record (its
+	// HUD's copy of the word, the key-queue reset), a device's and a console's alike.
+	constexpr int kPauseRow = 70;
+	if (code == controls::action_code(kPauseRow)) {
+		if (pause_flips_ && kind() == RoleKind::SinglePlayer && action_head_admits(code)) {
+			world::World &world = kernel_->world;
+			world.rules.pause_word = !world.rules.pause_word;
+			if (world.rules.pause_word) world.out.audio_channels_shutdown = true;
+		}
+		if (source != nullptr) source->dispatch_record(record);
 		return;
 	}
 	if (record.origin == controls::InputEventOrigin::Device) {
@@ -687,25 +691,20 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			if (kernel == nullptr) continue;
 			world::World &world = kernel->world;
 			world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
-			// The drain flips the word at each pause row it dispatches, the rows behind
-			// meeting the head with it; the update resumes when the drain leaves it
-			// down (TickInputSource carries the witness).
-			if (source != nullptr) drain_update_rows(*source, world, false, flips_apply);
-			const bool resumes = !world.rules.pause_word;
-			// The update's movement and action rows, behind its rows: they meet the
-			// head with the word as the drain left it, so a paused update's bit-0 rows
-			// drop and its other rows run, and the one-shots it leaves drop with it, as
-			// no tick consumes them; the resuming update's rows run unpaused (with no
-			// source, the frame's sample).
+			// The update's keyboard pass, then its sample (with no source, the frame's).
+			if (source != nullptr) source->run_update_rows(world.logic_tick, false);
 			InputPacket sample =
 					source != nullptr ? source->sample_tick(world.logic_tick) : input.player;
-			// The sample's records join the queue behind the console's (TickInputSource
-			// carries the witness); a paused update drains them here, its bit-0 rows meeting
-			// the head's pause gate; the resuming update's tick drains them
-			// (Role::apply_input).
+			// The sample's records join the queue behind the console's, and the drain
+			// dispatches them in order: each pause row flips the word, the records behind
+			// it meeting the head with it (a paused update's bit-0 rows drop, its other
+			// rows run, and the one-shots it leaves drop with it, as no tick consumes
+			// them); the update resumes when the drain leaves the word down
+			// (TickInputSource carries the witness).
 			if (source != nullptr) source->queue_records(role_->input_events());
-			if (!resumes) {
-				role_->drain_input_events(source, (sample.held_action_bits & HELD_MENU_OPEN) != 0);
+			role_->drain_input_events(
+					source, (sample.held_action_bits & HELD_MENU_OPEN) != 0, flips_apply);
+			if (world.rules.pause_word) {
 				run_paused_update_legs();
 				previous_ran = false;
 				continue;
@@ -720,6 +719,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			consume_one_shots = true;
 			TickInput tick_input = merged_tick_input(input, true);
 			tick_input.source = source;
+			tick_input.drained = true;
 			tick_input.head_stepped = true;
 			if (!menu_open) {
 				tick_input.player.look_delta_x += static_cast<float>(axis[0]);
@@ -743,17 +743,13 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			count_update_into_second();
 			continue;
 		}
-		// A running update's input frame: its keyboard pass and its talk and HUD
-		// rows, then its movement and action rows at the logic tick it runs as (the
-		// frame's first update's too, over the device state the frame's head
-		// stepped), which replace the held state with edges of their own to consume
+		// A running update's input frame: its keyboard pass, then its movement and
+		// action rows at the logic tick it runs as (the frame's first update's too, over
+		// the device state the frame's head stepped), which replace the held state with
+		// edges of their own to consume, then the drain of its records
 		// (TickInputSource carries the witness).
 		const bool new_sample = previous_ran && kernel != nullptr;
-		if (source != nullptr) drain_update_rows(*source, kernel->world, new_sample, flips_apply);
-		// The drain left the word raised (an odd count of pause rows): the frame's
-		// later events meet the action rows' head with it set.
-		const bool pauses = source != nullptr && kernel->world.rules.pause_word;
-		if (pauses) set_state(State::Paused);
+		if (source != nullptr) source->run_update_rows(kernel->world.logic_tick, new_sample);
 		if (source != nullptr) {
 			latch_packet(source->sample_tick(kernel->world.logic_tick));
 			source->queue_records(role_->input_events());
@@ -768,14 +764,23 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		const bool menu_open = (tick_input.player.held_action_bits & HELD_MENU_OPEN) != 0;
 		int32_t axis[2] = {};
 		step_mouse_pump(i, due, menu_open, axis);
+		// The update's drain, ahead of its body: a role tick's input prologue reads its
+		// outcome (TickInput::drained).
+		if (kernel != nullptr) {
+			role_->drain_input_events(source, menu_open, flips_apply);
+			tick_input.drained = true;
+		}
+		// The drain left the word raised (an odd count of pause rows): the records behind
+		// the flip met the action rows' head with it set, and the update runs paused.
+		const bool pauses = flips_apply && kernel != nullptr && kernel->world.rules.pause_word;
 		if (pauses) {
 			// The pausing update: the pending one-shots drop, as the action rows
 			// behind the pause row meet the head's pause gate (their bit 0) [orig:
 			// Input_HandleActionBinding @0x49AD40 (@0x49ADDD..0x49ADE8)]; the head's
 			// HUD counters stepped unpaused before the input frame, and the body runs
 			// paused: no role tick (no server tick, entity update or weapon walk),
-			// only the paused legs. Its drain runs as a paused update's does.
-			role_->drain_input_events(source, menu_open);
+			// only the paused legs.
+			set_state(State::Paused);
 			consume_pending_one_shots();
 			consume_one_shots = false;
 			world::World &world = kernel->world;

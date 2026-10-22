@@ -23,8 +23,9 @@ extends RefCounted
 ## keys) and the deploy leg queues its pick (event 12; under STAT too, a dead
 ## player's); a key the chain leaves is the binding scan's: the escape row's key
 ## queues its event (18), any other row's key its row event, which the player
-## input router dispatches once per event in the same update (a talk or HUD row's
-## behind the pass in its input frame, an action row's in its sample). The shell's
+## input router turns into one record per event in the update's sample (a talk,
+## HUD or pause row's among the action rows' in key order) for the update's
+## drain. The shell's
 ## pass runs at the head of each update's input frame (the router's
 ## run_update_rows), so a frame that runs no update keeps its keys. Then the
 ## queued events dispatch in order,

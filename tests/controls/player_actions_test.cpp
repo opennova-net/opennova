@@ -212,6 +212,38 @@ bool test_reload_medic_and_respawn_fire_on_their_events() {
 	return true;
 }
 
+// The talk, HUD and pause rows' key events are the embedder's records in key order with
+// the action rows' (D-CTRL-6, LI-s15): huddetail, Knife, pause, Primary queue as 19, 201,
+// 25, 203, so a pause key ahead of a weapon row flips the word the weapon row's head then
+// reads. The table's gates are the action rows' alone: with gameplay input down the
+// embedder's rows still queue.
+// [orig: Input_ProcessKeyboardEvents @0x49D1F0 (Input_QueueEvent per scanned key-down
+//  @0x49D42F / @0x49D488); Input_ProcessFrame @0x49D520 (the drain @0x49D599..0x49D5E7);
+//  Input_HandleActionBinding @0x49AD40 (case 25 @0x49B520)]
+bool test_embedder_rows_keep_the_key_order() {
+	PlayerActions actions;
+	QueuedKeys keys;
+	const int huddetail = code_of("huddetail");
+	const int pause = code_of("pause");
+	CHECK(huddetail == 19 && pause == 25);
+	PlayerActionPoll gate = kLive;
+	gate.embedder_row = [&](int code) { return code == huddetail || code == pause; };
+	gate.key_events = {key_row("huddetail", 0x75), key_row("Knife", '1'), key_row("pause", 0x13),
+			key_row("Primary", '3')};
+	auto frame = actions.poll(keys, gate);
+	CHECK(frame.requests.size() == 4 && frame.requests[0].action == Action::EmbedderRow &&
+			frame.requests[0].code == 19 && frame.requests[1].code == code_of("Knife") &&
+			frame.requests[2].action == Action::EmbedderRow && frame.requests[2].code == 25 &&
+			frame.requests[3].code == code_of("Primary"));
+	PlayerActionPoll inactive = gate;
+	inactive.active = false;
+	inactive.captured = false;
+	frame = actions.poll(keys, inactive);
+	CHECK(frame.requests.size() == 2 && frame.requests[0].code == 19 &&
+			frame.requests[1].code == 25);
+	return true;
+}
+
 // ToSpecial's press dispatches on its key-down's event (an OS repeat again), with
 // captured gameplay input; its release on the release pass's event, which has no
 // capture or mode gate (over a screen too); neither with no simulation. The
@@ -993,7 +1025,7 @@ int main() {
 			test_spectator_rows_edge_to_their_codes, test_key_state_reset,
 			test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen,
 			test_event_rows_fire_once_per_event, test_the_chain_takes_digit_events,
-			test_reload_medic_and_respawn_fire_on_their_events,
+			test_reload_medic_and_respawn_fire_on_their_events, test_embedder_rows_keep_the_key_order,
 			test_to_special_dispatches_its_key_events, test_spectator_rows_fire_on_their_events,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
 			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,

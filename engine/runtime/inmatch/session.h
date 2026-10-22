@@ -144,27 +144,27 @@ struct CameraSample {
 // run_update_rows, and its special-key legs (the round-over keys, the escape row's
 // in-game menu, a deploy pick) land in the update that reads them.
 // The session therefore calls run_update_rows at EVERY update it runs, the
-// paused ones included: the update's keyboard pass, then its talk and HUD rows,
-// the rows whose dispatch changes their own state at once (the HUD toggles, the
-// chat line). `new_sample` is true for a later update of a running frame, whose
-// device state is its own (the source steps its device to `logic_tick` first);
-// false for the frame's first update and each paused update, whose device state
-// the shell stepped at the frame's head. The update's sample_tick follows. The key
-// events the frames since the last update queued wait in order, a press, its
-// release and a new press each its own event, and the update's input frame
-// dispatches every one of them in that order: its keyboard pass first moves the
-// whole key ring into the action queue, and the drain then runs until that queue
-// is empty, so case 25's key-queue reset (the ring alone) drops nothing behind the
-// pause row. Each pause row the drain dispatches flips the single-player pause word
-// at once (its case returns before the flip in a session), and the rows behind it
-// meet the action rows' head with the word as it then stands: under the pause the
-// bit-0 rows drop, while the talk rows, the HUD rows, the radar zoom and a second
-// pause row still run, so a press, release and press of the pause key inside one
-// update pauses and resumes there. Each flip that leaves the word set also shuts
-// the audio channels down. The source calls `pause.flip()` at each pause-row
-// dispatch (PauseRowWord: the session's word when the flips apply, which the head
-// reads, and a copy otherwise), and the session applies the word the drain leaves,
-// and the audio stop, at that update (Session::run_updates).
+// paused ones included: the update's keyboard pass. `new_sample` is true for a
+// later update of a running frame, whose device state is its own (the source steps
+// its device to `logic_tick` first); false for the frame's first update and each
+// paused update, whose device state the shell stepped at the frame's head. The
+// update's sample_tick follows, then queue_records, then the update's drain
+// (Role::drain_input_events), which the session runs itself in every update ahead of
+// the update's body. The key events the frames since the last update queued wait in
+// order, a press, its release and a new press each its own event, and the update's
+// input frame dispatches every one of them in that order: its keyboard pass first
+// moves the whole key ring into the event queue (a talk, HUD or pause row's record
+// among the action rows' in key order), and the drain then runs until that queue is
+// empty, so case 25's key-queue reset (the ring alone) drops nothing behind the pause
+// row. Each pause row the drain dispatches flips the single-player pause word at once
+// (Role::dispatch_record; its case returns before the flip in a session), and the
+// records behind it meet the action rows' head with the word as it then stands: under
+// the pause the bit-0 rows drop, while the talk rows, the HUD rows, the radar zoom and
+// a second pause row still run, so a press, release and press of the pause key inside
+// one update pauses and resumes there. Each flip that leaves the word set also shuts
+// the audio channels down. The session reads the word the drain leaves at that update:
+// raised, the update runs paused from there; lowered under a pause, the update resumes
+// (Session::run_updates).
 // [orig: Game_MainLoop @0x52B630 (the drain @0x52BA08, the update call @0x52BA58);
 //  Game_ProcessMainFrame @0x5263F0 (Input_ProcessFrame @0x52661D under no menu
 //  screen, after the pause word's first test @0x5265A0); Input_ProcessFrame @0x49D520
@@ -178,22 +178,15 @@ struct CameraSample {
 //  Audio_ShutdownChannelsAndDeviceTable call @0x49B550; the head's pause gate
 //  @0x49ADDD..0x49ADE8); Input_ResetKeyQueue @0x760E00 (the ring's indices @0x760E02 /
 //  @0x760E07)]
-struct PauseRowWord {
-	bool *word = nullptr; // the word the action rows' head reads for the rows behind
-	int raised = 0;       // the flips that left it set, each an audio stop
-	void flip() {
-		*word = !*word;
-		if (*word) ++raised;
-	}
-};
 
-// The update's records. The sample's action rows (a scanned key-down's row, the
-// off-keyboard arms' press edges) are the event queue's records: the session hands the
-// role's queue to queue_records right after the update's sample, behind the records already
-// waiting there (the console's), and the update's drain (Role::drain_input_events) then
-// dispatches every record in order, handing each one whose arm the role does not own to
-// dispatch_record [orig: Input_ProcessFrame @0x49D520 (Input_ProcessPlayerFrame @0x49D58B
-//  appends, the drain @0x49D599..0x49D5E7, Input_HandleActionBinding @0x49D5D8)].
+// The update's records. The sample's rows (a scanned key-down's row, the talk, HUD and
+// pause rows' included, then the off-keyboard arms' press edges) are the event queue's
+// records: the session hands the role's queue to queue_records right after the update's
+// sample, behind the records already waiting there (the console's), and the update's drain
+// (Role::drain_input_events) then dispatches every record in order, handing each one whose
+// arm the role does not own, and the pause row's after its flip, to dispatch_record
+// [orig: Input_ProcessFrame @0x49D520 (Input_ProcessPlayerFrame @0x49D58B appends, the
+//  drain @0x49D599..0x49D5E7, Input_HandleActionBinding @0x49D5D8)].
 // The update's message pump queues the mouse wheel's records ahead of its input frame, so
 // the source queues them first: each whole notch's row (the 256 / 512 event onto the rows
 // bound to the wheel's 1024 / 2048 mask) with the arguments 0 and the Shift sign; a frame
@@ -209,10 +202,9 @@ class TickInputSource {
 public:
 	virtual ~TickInputSource() = default;
 	virtual InputPacket sample_tick(uint32_t logic_tick) = 0;
-	virtual void run_update_rows(uint32_t logic_tick, bool new_sample, PauseRowWord &pause) {
+	virtual void run_update_rows(uint32_t logic_tick, bool new_sample) {
 		(void)logic_tick;
 		(void)new_sample;
-		(void)pause;
 	}
 	virtual void queue_records(controls::InputEventQueue &records) { (void)records; }
 	virtual void dispatch_record(const controls::InputEventRecord &record) { (void)record; }
@@ -247,6 +239,10 @@ struct TickInput {
 	// The update's input source, which takes the drained records whose arm the role does
 	// not own (TickInputSource::dispatch_record); null with no device.
 	TickInputSource *source = nullptr;
+	// The session already ran this update's drain (Session::run_updates, whose pause
+	// decision reads the word the drain leaves), so the input prologue reads its outcome
+	// and drains nothing; false for a direct Role::apply_input, which drains itself.
+	bool drained = false;
 	// The count of the loaded-model list the host froze at its mission start,
 	// which the host wraps its S2C 0x68 cursor at (0 until a list froze)
 	// [orig: Server_SendLoadedModelPageRequest @0x511375 / @0x511391 reads
@@ -412,12 +408,14 @@ public:
 	// (ClientRuntime::set_console_action_sink), a device record to `source`
 	// (TickInputSource::dispatch_record). A joiner outside its game loop runs no input
 	// frame, nor does an update under a menu screen: the records wait (a screen's close
-	// resets them). Session::run_updates runs it in the paused and the pausing updates,
-	// apply_input in the updates that tick.
+	// resets them). Session::run_updates runs it in every update, ahead of the update's
+	// body, and apply_input when called on its own (TickInput::drained). `pause_flips`:
+	// the pause row's flip of the session's word applies (the session's main-loop
+	// updates; the debug transport's forced step applies none).
 	// [orig: Input_ProcessFrame @0x49D520 - the drain @0x49D599..0x49D5E7 ->
 	//  Input_HandleActionBinding @0x49D5D8; Game_ProcessMainFrame @0x5263F0 -
 	//  UI_IsMenuScreenOpen @0x52660D skips Input_ProcessFrame @0x52661D]
-	void drain_input_events(TickInputSource *source, bool menu_open);
+	void drain_input_events(TickInputSource *source, bool menu_open, bool pause_flips = false);
 	// The medic call past the session/entity gates: a dead local player with
 	// the cooldown at zero sends through the role and stamps the cooldown.
 	bool request_medic();
@@ -438,7 +436,17 @@ public:
 	// (send_stance_request). 0 stand / 1 crouch / 2 prone. True = sent.
 	bool request_stance(int stance);
 	// One drained record, dispatched by its code (drain_input_events): the arms the role
-	// owns, every other code to the embedder's leg its origin names.
+	// owns, every other code to the embedder's leg its origin names. The pause row (catalog
+	// row 70, code 25, flags 0x05000800: no bit 0, so it runs under the pause) is the role's
+	// past the head: out of a session its case flips the single-player pause word the head
+	// reads for the records behind it and, when the word is now set, shuts the audio
+	// channels down (WorldOutbox::audio_channels_shutdown); in a session it returns first.
+	// The record then goes to the embedder, whose HUD keeps its own copy of the word and
+	// whose device runs the case's key-queue reset.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 25 @0x49B520: the in-session return
+	//  @0x49B527, `xor dword_A87050, 1` @0x49B52D, g_QuitDialogOpen = 0 @0x49B534,
+	//  Input_ResetKeyQueue @0x49B53E, the word's test @0x49B543..0x49B54A ahead of
+	//  Audio_ShutdownChannelsAndDeviceTable @0x49B550]
 	void dispatch_record(const controls::InputEventRecord &record, TickInputSource *source);
 	// Player_ResetLocalInput, which the Respawn key (case 55) and the Escape key (case
 	// 18, ahead of its `!is_in_session && g_RoundOver` test; the embedder's escape runs it)
@@ -488,6 +496,8 @@ protected:
 	// A reset ran in this input frame's drain (Input_ResetAllState's queue memset): the
 	// frame's later events are gone, the held rows' with them (apply_input; D-NET-560).
 	bool input_queue_reset_ = false;
+	// The running drain's pause_flips (drain_input_events).
+	bool pause_flips_ = false;
 };
 
 // The held / pressed action bits of InputPacket, the retail action rows the

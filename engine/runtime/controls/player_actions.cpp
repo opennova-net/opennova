@@ -323,6 +323,10 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// it runs after it.
 	for (const KeyRowEvent &event : gate.key_events) {
 		if (event.release || chain_takes_key(event)) continue;
+		if (gate.embedder_row && gate.embedder_row(event.code)) {
+			frame.requests.push_back({Action::EmbedderRow, 0, event.code, event.sign});
+			continue;
+		}
 		if (event.code == medic_code) {
 			if (admitted("MedicReq"))
 				frame.requests.push_back({Action::MedicRequest, 0, medic_code, event.sign});

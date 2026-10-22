@@ -74,6 +74,9 @@ enum class PlayerAction {
 	// request_respawn, request_medic), past their own head gates there.
 	Respawn,
 	MedicRequest,
+	// A key event of a row whose arm the embedder owns (PlayerActionPoll::embedder_row:
+	// the talk, HUD and pause rows): its record, in key order with the action rows'.
+	EmbedderRow,
 };
 
 // The arm a frame's held USE takes, as the embedder's press latch decides it
@@ -172,6 +175,14 @@ struct PlayerActionPoll {
 	//  @0x49d5d8; Input_ProcessPlayerFrame @0x49d4c0 - the keyboard pass @0x49d4c6
 	//  ahead of the mouse and toggle passes @0x49d4d8 / @0x49d4de]
 	std::vector<KeyRowEvent> key_events;
+	// The codes of the rows among key_events whose arms the embedder owns (its talk, HUD
+	// and pause rows): each such key-down is a record in key order with the action rows'
+	// (PlayerAction::EmbedderRow), under none of this table's gates (the rows' own arms and
+	// the dispatcher's head gate them at the drain), a digit the special-key chain took
+	// excepted. Unset = none.
+	// [orig: Input_ProcessKeyboardEvents @0x49D1F0 (Input_QueueEvent per scanned key-down
+	//  @0x49D42F / @0x49D488); Input_ProcessFrame @0x49D520 (the drain @0x49D599..0x49D5E7)]
+	std::function<bool(int code)> embedder_row;
 };
 
 struct PlayerActionFrame {

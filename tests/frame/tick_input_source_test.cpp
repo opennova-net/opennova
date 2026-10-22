@@ -7,6 +7,7 @@
 // main frame's mouse pump (D-NET-NEW-LI-2), across the frames, an input reset and the
 // single-player pause, and a latched fire press's binding test at its
 // dispatch (D-NET-NEW-LI-3).
+#include <runtime/controls/controls.h> // action_code (the pause row's record)
 #include <runtime/devtools/scripted_input.h>
 #include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit record)
 #include <runtime/inmatch/session.h>
@@ -99,6 +100,17 @@ ScriptStep step(Kind kind, int64_t tick, int code = 0) {
 	s.tick = tick;
 	s.code = code;
 	return s;
+}
+
+// The local entity the action rows' head reads: the pause row's arm runs past it
+// (Role::dispatch_record).
+void spawn_local_player(TickRecorder &role) {
+	opennova::world::World &world = role.kernel.world;
+	world.registry.configure_pool(0, 8);
+	opennova::world::Entity seed;
+	seed.kind = opennova::world::EntityKind::Organic;
+	seed.alive = true;
+	world.cached.local_player = world.registry.spawn(0, seed);
 }
 
 bool load(Session &session) {
@@ -445,7 +457,7 @@ void test_rows_poll_once_per_update_and_never_in_a_no_update_frame() {
 			++samples;
 			return {};
 		}
-		void run_update_rows(uint32_t logic_tick, bool new_sample, PauseRowWord &) override {
+		void run_update_rows(uint32_t logic_tick, bool new_sample) override {
 			calls.emplace_back(logic_tick, new_sample);
 		}
 	};
@@ -508,13 +520,21 @@ void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
 		int queued = 0;           // keys the shell queued, not yet passed
 		int events = 0;           // the pass's action row events, not yet sampled
 		int rows_calls = 0;
-		int unpause_at_rows = -1; // the rows call whose pass lowers the pause word
-		void run_update_rows(uint32_t logic_tick, bool, PauseRowWord &pause) override {
+		int unpause_at_rows = -1; // the rows call whose pass queues the pause row's record
+		bool pause_due = false;
+		void run_update_rows(uint32_t logic_tick, bool) override {
 			calls.emplace_back('r', logic_tick);
 			// The keyboard pass: every queued key becomes its row's event.
 			events += queued;
 			queued = 0;
-			if (rows_calls++ == unpause_at_rows) pause.flip();
+			pause_due = rows_calls++ == unpause_at_rows;
+		}
+		// The pause row's record (catalog row 70, code 25), whose flip lowers the word.
+		void queue_records(opennova::controls::InputEventQueue &records) override {
+			if (pause_due)
+				(void)records.push({opennova::controls::action_code(70), 0, 0, 0, false,
+						opennova::controls::InputEventOrigin::Device});
+			pause_due = false;
 		}
 		InputPacket sample_tick(uint32_t logic_tick) override {
 			calls.emplace_back('s', logic_tick);
@@ -556,6 +576,7 @@ void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
 		KeyDevice device;
 		Session session(*role);
 		CHECK(load(session), "the session runs");
+		spawn_local_player(*role);
 		CHECK(session.pause().applied(), "the pause");
 		device.queued = 1;
 		device.unpause_at_rows = 1;
@@ -575,6 +596,7 @@ void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
 		KeyDevice device;
 		Session session(*role);
 		CHECK(load(session), "the session runs");
+		spawn_local_player(*role);
 		CHECK(session.pause().applied(), "the pause");
 		device.queued = 1;
 		device.unpause_at_rows = 0;

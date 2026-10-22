@@ -281,12 +281,16 @@ int main() {
 	{
 		struct PauseRow final : TickInputSource {
 			std::vector<std::pair<uint32_t, bool>> calls; // (logic tick, new sample)
-			int flip_at = -1;                              // the call whose pause row fires
+			int flip_at = -1;                              // the update whose pause row fires
 			InputPacket sample_tick(uint32_t) override { return {}; }
-			void run_update_rows(uint32_t logic_tick, bool new_sample,
-					PauseRowWord &pause) override {
+			void run_update_rows(uint32_t logic_tick, bool new_sample) override {
 				calls.emplace_back(logic_tick, new_sample);
-				if (static_cast<int>(calls.size()) - 1 == flip_at) pause.flip();
+			}
+			// The pause row's record (catalog row 70, code 25), the drain's to flip.
+			void queue_records(opennova::controls::InputEventQueue &records) override {
+				if (static_cast<int>(calls.size()) - 1 == flip_at)
+					(void)records.push({opennova::controls::action_code(70), 0, 0, 0, false,
+							opennova::controls::InputEventOrigin::Device});
 			}
 		};
 		auto target = std::make_unique<TickProbe>();
@@ -373,14 +377,15 @@ int main() {
 				"an unstepped head steps them at the tick")) return 1;
 	}
 
-	// Every row state an update's drain reads dispatches, the ones behind a pause row
-	// too: the keyboard pass has moved the whole key ring into the action queue before
-	// the drain runs, so case 25's ring reset drops nothing, and each pause row flips
-	// the word at once. A press, release and press of the pause key inside one update
-	// pauses and resumes there: the rows between meet the head with the word set (the
-	// weapon select drops, the radar zoom runs) and the update runs its tick unpaused.
-	// Each flip that leaves the word set shuts the audio channels down. In a session
-	// the row's case returns before its flip, so the head's word stays down.
+	// Every record an update's drain reads dispatches, the ones behind a pause row
+	// too: the keyboard pass has moved the whole key ring into the event queue before
+	// the drain runs, so case 25's ring reset drops nothing, and each pause row's record
+	// flips the word at once (Role::dispatch_record). A press, release and press of the
+	// pause key inside one update pauses and resumes there: the records between meet the
+	// head with the word set (the weapon select drops, the radar zoom runs) and the update
+	// runs its tick unpaused. Each flip that leaves the word set shuts the audio channels
+	// down. In a session the row's case returns before its flip, so the head's word stays
+	// down.
 	// [orig: Input_ProcessPlayerFrame @0x49D4C0 (the Input_ProcessKeyboardEvents
 	// call @0x49D4C6); Input_ProcessFrame @0x49D520 (the drain @0x49D599..0x49D5E7);
 	// Input_HandleActionBinding @0x49AD40 (case 25 @0x49B520: the in-session return
@@ -397,12 +402,20 @@ int main() {
 			bool zoom_between = false;  // the radar zoom's
 			InputPacket sample_tick(uint32_t) override { return {}; }
 			// The first update's queue: the pause row, the radar zoom, the pause row.
-			void run_update_rows(uint32_t, bool, PauseRowWord &pause) override {
+			void queue_records(opennova::controls::InputEventQueue &records) override {
 				if (calls++ != 0) return;
-				pause.flip();
+				const opennova::controls::InputEventRecord pause{opennova::controls::action_code(70),
+						0, 0, 0, false, opennova::controls::InputEventOrigin::Device};
+				(void)records.push(pause);
+				(void)records.push({zoom, 0, 0, 0, false,
+						opennova::controls::InputEventOrigin::Device});
+				(void)records.push(pause);
+			}
+			// The radar zoom's record reaches the source between the flips.
+			void dispatch_record(const opennova::controls::InputEventRecord &record) override {
+				if (record.code != zoom) return;
 				weapon_between = role->action_head_admits(weapon);
 				zoom_between = role->action_head_admits(zoom);
-				pause.flip();
 			}
 		};
 		auto target = std::make_unique<TickProbe>();
