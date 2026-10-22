@@ -568,11 +568,22 @@ bool ClientRuntime::begin_mission_reload() {
 	// (JoinerConnection's mission_started) [orig: g_RoundOver, cleared
 	// by Game_StartMission @0x524A1F]; the frame clock runs on.
 	const auto clock = view_.state().local_clock_ms;
+	// The connection-slot roster is the session's: only the S2C 0x04's slot-table
+	// reallocation renews it (one per join; a map change sends none), and only a 0x46
+	// removal or a 0x29 destroy clears a slot, so it outlives the reload. The next
+	// mission's 0x16 rows join names from it with no C2S 0x22 {slot, 0x1CF7} re-request.
+	// [orig: NapiNPClientMsg_SessionSlotConfig @0x425410 - PlayerSlotTable_Reallocate called
+	//  @0x4254B4; PlayerSlotTable_Reallocate @0x434B90 (its other caller
+	//  Server_InitPlayerSlotSystem, the call @0x4243F5); PlayerSlot_ClearAndUnlink @0x434730,
+	//  called from NapiNPClientMsg_DestroyEntityList @0x429794 and NapiNPClientMsg_PlayerSync
+	//  @0x431420; NapiNPClientMsg_PlayerList @0x42FAE0 - the re-request @0x42fc05..0x42fc3a]
+	auto roster = std::move(view_.state().roster);
 	// The S2C 0x70 table and its received flag are the process's
 	// (ClientProcessState), so the vehicle screen's poll reads the last reply
 	// across the reload.
 	view_.state() = replication::ClientState{};
 	view_.state().local_clock_ms = clock;
+	view_.state().roster = std::move(roster);
 	view_.state().spawn_success_gate = true;
 	view_.reset_minimap_overlays();
 	view_.drain_round_events();

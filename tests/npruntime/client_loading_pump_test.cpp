@@ -1146,6 +1146,40 @@ bool run_the_join_screen_follows_the_admission() {
 			"screen: the S2C 0x05 game start hands over to the loading screen");
 }
 
+// The connection-slot roster is the session's: a map change's reload keeps it (only the
+// S2C 0x04's slot-table reallocation renews it, and a map change sends none), so the next
+// mission's first 0x16 joins names from the slots the first mission bound and drops only a
+// row whose slot is unbound, the one that takes a C2S 0x22 {slot, 0x1CF7} re-request.
+// [orig: NapiNPClientMsg_SessionSlotConfig @0x425410 - PlayerSlotTable_Reallocate called
+//  @0x4254B4; NapiNPClientMsg_PlayerList @0x42FAE0 - the re-request @0x42fc05..0x42fc3a]
+bool run_the_roster_outlives_a_reload() {
+	Harness h;
+	if (!expect(drive_into_the_world_stream(h, 0), "roster: the world stream runs"))
+		return false;
+	PlayerReplicationState host_slot;
+	host_slot.player_slot = 0;
+	host_slot.entity_handle = 0x0001;
+	host_slot.player_name = "RosterHost";
+	(void)h.frame({make_protocol_message(0x46, encode_player_sync(host_slot))});
+	if (!expect(h.client.state().roster[0].bound, "roster: the 0x46 binds slot 0"))
+		return false;
+	(void)h.frame({make_protocol_message(0x1A, {})});
+	std::vector<uint8_t> world_state(23, 0);
+	(void)h.frame({make_protocol_message(0x0F, world_state)});
+	(void)h.frame();
+	if (!expect(h.client.begin_mission_reload(), "roster: the reload begins")) return false;
+	if (!expect(h.client.state().roster[0].bound &&
+	                    h.client.state().roster[0].name == "RosterHost",
+			"roster: slot 0 outlives the reload"))
+		return false;
+	(void)h.frame({make_protocol_message(0x16, player_list({{0, 1}, {1, 2}}))});
+	const auto &board = h.client.state().scoreboard;
+	return expect(board.rows.size() == 1 && board.rows[0].slot_id == 0 &&
+	                      board.rows[0].name == "RosterHost" &&
+	                      board.rows_dropped_unknown_slot == 1,
+			"roster: the next mission's list joins slot 0 and drops only the unbound slot 1");
+}
+
 int main() {
 	bool ok = true;
 	ok = run_admission_follows_the_retail_loading_loops() && ok;
@@ -1162,6 +1196,7 @@ int main() {
 	ok = run_the_joiner_mission_start_keeps_the_folded_round_clock() && ok;
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;
+	ok = run_the_roster_outlives_a_reload() && ok;
 	if (ok) std::printf("client_loading_pump_test: OK\n");
 	return ok ? 0 : 1;
 }
