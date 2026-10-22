@@ -2217,8 +2217,9 @@ void send_unstopped_header_only(NapiNPConnection &c, opennova::IDatagramSocket &
 // holds queued messages or owes an ACK, and prunes; 0x40 runs the state-1 arm, the send
 // intervals (host_session.cpp pump_send_interval_legs' two legs) and then the receive reap,
 // which leaves the node pending and ends its legs; 0x80 steps the flush counter, 0x100 prunes
-// and 0x200 reloads a zero holdoff. Then the protocol pump's pending walk: the PDESTME record
-// only where none is latched, the destroy's teardown, the node off the list.
+// and 0x200 reloads a zero holdoff. Right behind each node's legs, the protocol pump's pending
+// test: a pending node takes the PDESTME record only where none is latched, the destroy's
+// teardown, and leaves the list before the next node's legs run (V-ROLL-H on L1-s19 A2).
 // [orig: NapiNPProtocol_Pump(-1) from CNapiGameSession_InitTransportConnection @0x4CA14B,
 //  CNapiNetwork_PumpTransportAndProtocol @0x4C6E3D and CNapiNetwork_PumpAndCheckState @0x4C6EA2;
 //  CNapiNPConnection_PumpFlags @0x629780 - the type test @0x629788..0x62978F, the pending test
@@ -2232,13 +2233,15 @@ void send_unstopped_header_only(NapiNPConnection &c, opennova::IDatagramSocket &
 //  "", 0, "NP.C:PT:SERTMOUT"} @0x6293B7..0x6293E6, RequestDisconnect @0x62940A;
 //  CNapiNPConnection_PumpSendIntervals @0x628FD0 - the active leg @0x628FF1..0x629017, the
 //  empty leg @0x629041..0x629067, the build @0x62907B, the prune @0x629082, the stamp
-//  @0x629089; NapiNPProtocol_Pump @0x62A650 - the pending walk @0x62A6FD..0x62A793]
+//  @0x629089; NapiNPProtocol_Pump @0x62A650 - the walk's PumpFlags call @0x62A6F8, then that
+//  node's pending test @0x62A6FD, the latch only where none is @0x62A770, the destroy @0x62A793]
 void pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket &socket, uint32_t now_ms) {
 	if (!server.running) return;
-	for (UnstoppedNode &node : server.nodes) {
+	// One node's PumpFlags legs; the reap ends them.
+	const auto pump_legs = [&](UnstoppedNode &node) {
 		NapiNPConnection &c = node.conn;
-		if (c.type != NapiNPConnection::kTypeServerSide || c.pending_disconnect) continue;
+		if (c.type != NapiNPConnection::kTypeServerSide || c.pending_disconnect) return;
 		// 0x10: the holdoff.
 		if (c.s2c_send_holdoff_countdown > 0) --c.s2c_send_holdoff_countdown;
 		c.s2c_send_boundary_open = c.s2c_send_holdoff_countdown == 0;
@@ -2283,7 +2286,7 @@ void pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 			latch_disconnect_event(c, make_disconnect_event(1, 3, silent_ms,
 					static_cast<uint32_t>(c.timeouts.timeout_ms), "", 0, "NP.C:PT:SERTMOUT"));
 			c.pending_disconnect = true;
-			continue;
+			return;
 		}
 		// 0x80, 0x100, 0x200.
 		advance_session_send_flush_counter(c.seq);
@@ -2291,9 +2294,12 @@ void pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		if (c.s2c_send_holdoff_countdown == 0 && c.s2c_send_holdoff_dictated)
 			c.s2c_send_holdoff_countdown = c.s2c_send_holdoff_ticks;
 		c.s2c_send_boundary_open = c.s2c_send_holdoff_countdown == 0;
-	}
-	// The pending walk: each pending node's destroy, in list order.
+	};
+	// The protocol pump's walk: each node's legs, then at once, when the node is pending, its
+	// destroy, before the next node's legs run, so a node reaped ahead of a node that sends in
+	// the same pump bursts its 0x86 ahead of that node's packets.
 	for (auto it = server.nodes.begin(); it != server.nodes.end();) {
+		pump_legs(*it);
 		if (!it->conn.pending_disconnect) {
 			++it;
 			continue;

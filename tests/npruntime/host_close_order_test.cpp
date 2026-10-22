@@ -885,6 +885,53 @@ void test_the_browse_pump_steps_the_held_server() {
 	CHECK(!server.running && server.nodes.empty());
 }
 
+// D-NET-NEW-L1-26 (V-ROLL-H on L1-s19 A2): the protocol pump destroys a pending node right
+// behind that node's own legs, before the next node's run: a held node reaped ahead of a node
+// that sends in the same pump bursts its four 0x86 (after its interval keepalive) ahead of that
+// node's packet.
+// [orig: NapiNPProtocol_Pump @0x62A650 - CNapiNPConnection_PumpFlags called @0x62A6F8, then that
+//  node's pending test @0x62A6FD and CNapiNPConnection_Destroy called @0x62A793, then the next
+//  node; CNapiNPConnection_TeardownActiveConnection @0x6253C0 (the burst @0x6253EF..0x625424)]
+void test_a_reaped_node_goes_before_the_next_nodes_legs() {
+	MemoryFiles files;
+	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
+	inout.set_stamp_text([] { return std::string(); });
+	inout.set_enabled(true);
+	inmatch::ServerLogs logs;
+	logs.inout = &inout;
+	logs.inout_switch = true;
+
+	const PeerAddr kStale{0x0100007Fu, 31002};
+	inmatch::UnstoppedServer server;
+	server.running = true;
+	server.session_name = "Held";
+	server.nodes.push_back(held_node(kStale, 0x22222222u)); // ahead: silent since 1000 ms
+	server.nodes.push_back(held_node(kPeer, 0x11111111u));
+	server.nodes[1].conn.receive_stamp_ms = 60000; // heard at 60000 ms: kept
+	ProtocolMessage reset = make_protocol_message(s2c::GAME_RESET, {});
+	reset.reliable = false;
+	server.nodes[1].queued.push_back(reset);
+
+	CaptureSocket socket;
+	inmatch::pump_unstopped_server(server, logs, socket, 121001);
+	CHECK(server.nodes.size() == 1 && server.nodes[0].conn.peer == kPeer);
+	const std::vector<uint8_t> reaped = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(0x22222222u, make_disconnect_event(1, 3, 120001, 120000, "", 0,
+					"NP.C:PT:SERTMOUT")));
+	int reaps = 0;
+	std::size_t last_reap = socket.sent.size();
+	std::size_t first_kept = socket.sent.size();
+	for (std::size_t i = 0; i < socket.sent.size(); ++i) {
+		if (socket.sent[i].first == kStale && socket.sent[i].second == reaped) {
+			++reaps;
+			last_reap = i;
+		}
+		if (socket.sent[i].first == kPeer && first_kept == socket.sent.size()) first_kept = i;
+	}
+	CHECK(reaps == 4);
+	CHECK(first_kept < socket.sent.size() && last_reap < first_kept);
+}
+
 } // namespace
 
 int main() {
@@ -903,6 +950,7 @@ int main() {
 	test_close_routes_the_last_entity_pass_first();
 	test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_session();
 	test_the_browse_pump_steps_the_held_server();
+	test_a_reaped_node_goes_before_the_next_nodes_legs();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }
