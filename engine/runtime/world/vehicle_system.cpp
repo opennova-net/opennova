@@ -271,22 +271,21 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
                 world.vehicles.ground_client_tick(*veh, *traits);
                 return;
             }
-            // A brainless cveh / ctan / cbik / cbot row's mover jumps from its stamp
-            // to the matrix-build tail on the client as on the authority, so a row the
-            // chase does not run (wire-frozen or wrecked) folds no movement sound
-            // either: each mover's Entity_ProcessMovementSoundEffects calls sit inside
-            // the bailed span, and the tail holds only the matrix build and the Flags OR.
+            // A brainless row's ground, tank, bike, boat or selector-zero mover jumps
+            // from its stamp to the matrix-build tail on the client as on the authority,
+            // so a row the chase does not run (wire-frozen or wrecked) folds no movement
+            // sound either: each mover's Entity_ProcessMovementSoundEffects calls sit
+            // inside the bailed span, and the tail holds only the matrix build and the
+            // Flags OR.
             // [orig: cveh @0x48AFA6 -> @0x48D43E (the fold calls @0x48D1BF, @0x48D3F9;
             //  the tail @0x48D43E..0x48D451); ctan @0x488B56 -> @0x48AEB6 (@0x48AB20,
             //  @0x48AE08; the tail @0x48AEB6..0x48AEC9); cbik @0x484086 -> @0x486A04
             //  (@0x486769, @0x4869B5; the tail @0x486A04..0x486A17); cbot @0x48D4EF ->
-            //  @0x48EF50 (@0x48EEB4; the tail @0x48EF50..0x48EF63);
-            //  Entity_ProcessMovementSoundEffects @0x5294A0]
-            if ((((traits->family == VehicleFamily::Ground ||
-                                traits->family == VehicleFamily::Watercraft) &&
-                               traits->physics != 0) ||
-                        traits->family == VehicleFamily::Tank ||
-                        traits->family == VehicleFamily::Bike) &&
+            //  @0x48EF50 (@0x48EEB4; the tail @0x48EF50..0x48EF63); selector-zero ground
+            //  @0x46E165 -> @0x46F9B2 (@0x46F820, @0x46F96A; the tail @0x46F9B2..0x46F9C5);
+            //  selector-zero boat @0x46FA64 -> @0x471670 (@0x4700C0, @0x4715D2; the tail
+            //  @0x471670..0x471683); Entity_ProcessMovementSoundEffects @0x5294A0]
+            if (!vehicle_family_uses_direct_air_mover(traits->family) &&
                     world.ai.for_handle(h) == nullptr) {
                 veh->engine_flags |= kEntityFlagMatrixBuilt;
                 return;

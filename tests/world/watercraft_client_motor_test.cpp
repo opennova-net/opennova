@@ -2042,6 +2042,9 @@ bool run_physicsless_air_dispatches_directly() {
 	ground_seed.item_id = 6002;
 	ground_seed.position = {120.0f, 200.0f, 60.0f};
 	const w::EntityHandle ground_h = world.registry.spawn(1, ground_seed);
+	// The selector-zero ground row's class init brained it: its client mover runs past
+	// its head.
+	test_common::brain_hull(world, ground_h);
 
 	w::VehicleTraits air_traits;
 	air_traits.physics = 0;

@@ -294,6 +294,17 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 		m.yaw_seeded = true;
 	}
 	stamp_saved_live_pose(e);
+	// A hull with no brain (+0x64) jumps from the stamp to the matrix-build tail on
+	// both roles: no ground probe, carrier ride, health cadence, claimant edge,
+	// chase, input, motion or sound.
+	// [orig: Vehicle_ProcessSelectorZeroGround `mov ebx, [esi+64h]` @0x46E119, the
+	//  stamp @0x46E12D..0x46E15F, `jz` @0x46E165 -> the tail @0x46F9B2..0x46F9C5;
+	//  Vehicle_ProcessSelectorZeroBoat @0x46FA19, @0x46FA2C..0x46FA5E, `jz` @0x46FA64
+	//  -> @0x471670..0x471683]
+	if (world_.ai.for_handle(e.handle) == nullptr) {
+		e.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
+	}
 	vehicle_refresh_ground_link(world_, e, t);
 	vehicle_follow_carrier(world_, e);
 	tick_health(e, t);
@@ -341,21 +352,19 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 			// The boat twin's block for its local driver: the stuck count rests; a
 			// driver without the player bit, or whose eye sits at or below the water
 			// plane, takes the boat leg over the hull's client brain (the mission
-			// start's class init gives an AIData brain-class row one; a brainless
-			// row's words are zero, D-NET-433), the player arm otherwise, its client
-			// tail averaging the speed with the record's. Its parked test (no occupant, or the dead bit
-			// the tail above took) never holds for a local driver.
+			// start's class init gives an AIData brain-class row one; the head above
+			// took a brainless row), the player arm otherwise, its client tail
+			// averaging the speed with the record's. Its parked test (no occupant, or
+			// the dead bit the tail above took) never holds for a local driver.
 			// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 - the parked test
 			//  @0x4704F0..0x470502, the stuck reset @0x470508, the player bit
 			//  @0x47050E, the eye test @0x47051B..0x470527 -> the AI leg @0x470795]
 			m.stuck_ticks = 0;
 			if (controller->player_class == 0 ||
 					watercraft_driver_submerged(world_, *controller)) {
-				AiBrain client_words;
-				AiEntity *boat_brain = world_.ai.for_handle(e.handle);
 				VehicleDriveCmd cmd;
-				world_.ai.watercraft_ai_leg(world_, e, t,
-						boat_brain != nullptr ? boat_brain->brain : client_words, cmd);
+				world_.ai.watercraft_ai_leg(world_, e, t, world_.ai.for_handle(e.handle)->brain,
+						cmd);
 				m.steer_target_bam = cmd.steer_target_bam;
 				m.cmd_speed = cmd.cmd_speed;
 			} else {
@@ -368,9 +377,9 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 			// dead bit took the tail above) takes the parked arm; else the stuck
 			// count rests, and a driver whose eye sits at or below the water plane
 			// takes the AI leg over the hull's client brain (the mission start's class
-			// init gives an AIData brain-class row one; a brainless row's words are
-			// zero, D-NET-433), the player arm otherwise, its client tail averaging
-			// the speed with the record's.
+			// init gives an AIData brain-class row one; the head above took a
+			// brainless row), the player arm otherwise, its client tail averaging the
+			// speed with the record's.
 			// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100 - the local-occupant
 			//  gate @0x46E9EA..0x46E9F6, the parked test @0x46E9FC..0x46EA11 -> the
 			//  parked arm @0x46F09E..0x46F0C7, the stuck reset @0x46EA17, the player
@@ -382,24 +391,19 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 				m.steer_target_bam = m.yaw_bam;
 				m.cmd_speed = 0;
 				m.steer_ramp_bam = 0;
-				// The stuck check runs whatever the brain: off the authority it
-				// steps the count alone [orig: AI_CheckVehicleStuckState called
-				// @0x46F0B8; the step @0x4652A9, the authority return
-				// @0x4652AF..0x4652BC].
+				// Off the authority the stuck check steps the count alone [orig:
+				// AI_CheckVehicleStuckState called @0x46F0B8; the step @0x4652A9, the
+				// authority return @0x4652AF..0x4652BC].
 				world_.ai.check_vehicle_stuck(world_, e);
 				e.flags &= ~0x80u;
-				if (ground_brain != nullptr)
-					ground_brain->brain.f[AiBrain::kCurState] = 22;
+				ground_brain->brain.f[AiBrain::kCurState] = 22;
 			} else {
 				m.stuck_ticks = 0;
 				if (controller->player_class == 0 ||
 						watercraft_driver_submerged(world_, *controller)) {
-					AiBrain client_words;
-					simple_ground_ai_leg(e, t,
-							ground_brain != nullptr ? ground_brain->brain : client_words);
+					simple_ground_ai_leg(e, t, ground_brain->brain);
 				} else {
-					if (ground_brain != nullptr)
-						ground_brain->brain.f[AiBrain::kCurState] = 22;
+					ground_brain->brain.f[AiBrain::kCurState] = 22;
 					stage_player_vehicle_input(world_, e, *controller, t);
 					m.cmd_speed = io::bam_sar(io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
 				}
@@ -413,10 +417,8 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 		// [orig: Vehicle_ProcessSelectorZeroGround @0x46E9FC..0x46EA11 -> the parked
 		//  arm @0x46F09E..0x46F0C7; Vehicle_ProcessSelectorZeroBoat
 		//  @0x4704F0..0x470502 -> @0x470D4E]
-		// Both twins' blocks run in place after the head, their brain's words and all.
-		// Retail's ground mover reaches this block only with a brain (its head jumps
-		// a brainless hull to the matrix tail); ours' brainless rigs keep the command
-		// registers alone.
+		// Both twins' blocks run in place after the head, their brain's words and all:
+		// the head jumped a brainless hull to the matrix tail.
 		// [orig: Vehicle_ProcessSelectorZeroGround: the brain test @0x46E165 ->
 		//  @0x46F9B2; the PlayerControl gate @0x46E9D4..0x46E9DB, the authority /
 		//  local-occupant test @0x46E9E1..0x46E9F6; Vehicle_ProcessSelectorZeroBoat:
@@ -430,11 +432,9 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 			m.steer_target_bam = m.yaw_bam;
 			m.cmd_speed = 0;
 			m.steer_ramp_bam = 0;
-			if (brain != nullptr)
-				world_.ai.check_vehicle_stuck(world_, e);
+			world_.ai.check_vehicle_stuck(world_, e);
 			e.flags &= ~0x80u;
-			if (brain != nullptr)
-				brain->brain.f[AiBrain::kCurState] = 22;
+			brain->brain.f[AiBrain::kCurState] = 22;
 		} else {
 			// The occupied hull rests its stuck count ahead of the player test
 			// [orig: `mov dword ptr [esi+148h], 0` @0x46EA17 / @0x470508].
@@ -449,12 +449,11 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 				//  Vehicle_ProcessSelectorZeroBoat @0x47051B..0x470527 -> @0x470795].
 				// The player leg parks the brain at state 22 [orig: @0x46EA52 /
 				// @0x47053D].
-				if (brain != nullptr)
-					brain->brain.f[AiBrain::kCurState] = 22;
+				brain->brain.f[AiBrain::kCurState] = 22;
 				stage_player_vehicle_input(world_, e, *controller, t);
-			} else if (brain != nullptr && !boat) {
+			} else if (!boat) {
 				simple_ground_ai_leg(e, t, brain->brain);
-			} else if (brain != nullptr) {
+			} else {
 				// The boat leg is the cbot leg's instructions: the command registers
 				// in place, the ramp only in its boarders' hold.
 				// [orig: Vehicle_ProcessSelectorZeroBoat @0x470795..0x470D4C]

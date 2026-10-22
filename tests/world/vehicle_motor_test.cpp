@@ -719,38 +719,52 @@ void test_plat_terrain_probe_grazing_uses_wrapped_product() {
 
 void test_simple_motors_and_contact() {
 	World world;
+	world.registry.configure_pool(1, 8);
+	// Each hull carries the class init's brain: a brainless selector-zero hull's
+	// mover stops at its head (D-NET-433).
+	const auto hull = [&](const Entity &seed) -> Entity & {
+		const EntityHandle h = world.registry.spawn(1, seed);
+		test_common::brain_hull(world, h);
+		return *world.registry.get(h);
+	};
 	VehicleTraits t;
 	t.acceleration = 1;
 	t.deceleration = 1;
 	t.player_speed = 32000;
-	Entity e;
-	e.health = e.health_max = 10000;
-	e.veh.yaw_seeded = true;
-	e.veh.speed = 16000;
-	e.veh.cmd_speed = -16000;
-	e.position.z = 10.0f;
-	world.vehicles.tick_motor(e, t);
-	CHECK(e.veh.speed_accel == -1000);
-	CHECK(e.veh.speed == 15000);
-	CHECK(e.veh.slide_z == -167);
-	CHECK(to_fixed(e.position.z) == 655360 - 167);
-	CHECK(e.veh.wheel_phase == 15000 * 8192);
+	{
+		Entity seed;
+		seed.health = seed.health_max = 10000;
+		seed.veh.yaw_seeded = true;
+		seed.veh.speed = 16000;
+		seed.veh.cmd_speed = -16000;
+		seed.position.z = 10.0f;
+		Entity &e = hull(seed);
+		world.vehicles.tick_motor(e, t);
+		CHECK(e.veh.speed_accel == -1000);
+		CHECK(e.veh.speed == 15000);
+		CHECK(e.veh.slide_z == -167);
+		CHECK(to_fixed(e.position.z) == 655360 - 167);
+		CHECK(e.veh.wheel_phase == 15000 * 8192);
+	}
 
 	// A lateral Y mismatch alone does not trip the retail duplicated-X test.
-	e = Entity{};
-	e.health = e.health_max = 10000;
-	e.veh.yaw_seeded = true;
-	e.veh.cmd_speed = e.veh.speed = 1024;
-	e.veh.vel_x = 1024;
-	e.veh.vel_y = 100000;
-	t.slip_speed = 100;
-	world.vehicles.tick_motor(e, t);
-	CHECK(!e.veh.skid_sound_latched);
-	CHECK(e.veh.vel_y == 0);
-	e.veh.vel_x = 5000;
-	world.vehicles.tick_motor(e, t);
-	CHECK(e.veh.skid_sound_latched);
-	CHECK(e.veh.vel_x > 1024);
+	{
+		Entity seed;
+		seed.health = seed.health_max = 10000;
+		seed.veh.yaw_seeded = true;
+		seed.veh.cmd_speed = seed.veh.speed = 1024;
+		seed.veh.vel_x = 1024;
+		seed.veh.vel_y = 100000;
+		Entity &e = hull(seed);
+		t.slip_speed = 100;
+		world.vehicles.tick_motor(e, t);
+		CHECK(!e.veh.skid_sound_latched);
+		CHECK(e.veh.vel_y == 0);
+		e.veh.vel_x = 5000;
+		world.vehicles.tick_motor(e, t);
+		CHECK(e.veh.skid_sound_latched);
+		CHECK(e.veh.vel_x > 1024);
+	}
 
 	// On water, selector zero has its own heave wave and no vertical thrust.
 	t = VehicleTraits{};
@@ -758,28 +772,31 @@ void test_simple_motors_and_contact() {
 	t.acceleration = 64;
 	t.water_speed = 16384;
 	world.env.water_z = 100 * 65536;
-	e = Entity{};
-	e.health = e.health_max = 10000;
-	e.veh.yaw_seeded = true;
-	e.flags = 0x8000;
-	e.position.z = 100.0f;
-	e.veh.cmd_speed = 16384;
-	Entity remote = e;
-	remote.veh.net_predicted = true;
-	remote.veh.net_interp_progress = 20;
-	remote.veh.net_recv_speed = 16384;
-	world.vehicles.tick_watercraft_motor(e, t);
-	world.ai.is_authority = false;
-	world.vehicles.watercraft_client_tick(remote, t);
-	CHECK(e.veh.vel_x == 252);
-	CHECK(e.veh.slide_z == -512);
-	CHECK(e.veh.air_pitch_bam == 983040);
-	CHECK(e.veh.air_roll_bam == 0);
-	CHECK(e.veh.wheel_phase == 16384 * 8192);
-	CHECK(remote.veh.vel_x == e.veh.vel_x);
-	CHECK(remote.veh.slide_z == e.veh.slide_z);
-	CHECK(remote.veh.air_pitch_bam == e.veh.air_pitch_bam);
-	CHECK(remote.position.x == e.position.x && remote.position.z == e.position.z);
+	{
+		Entity seed;
+		seed.health = seed.health_max = 10000;
+		seed.veh.yaw_seeded = true;
+		seed.flags = 0x8000;
+		seed.position.z = 100.0f;
+		seed.veh.cmd_speed = 16384;
+		Entity &e = hull(seed);
+		seed.veh.net_predicted = true;
+		seed.veh.net_interp_progress = 20;
+		seed.veh.net_recv_speed = 16384;
+		Entity &remote = hull(seed);
+		world.vehicles.tick_watercraft_motor(e, t);
+		world.ai.is_authority = false;
+		world.vehicles.watercraft_client_tick(remote, t);
+		CHECK(e.veh.vel_x == 252);
+		CHECK(e.veh.slide_z == -512);
+		CHECK(e.veh.air_pitch_bam == 983040);
+		CHECK(e.veh.air_roll_bam == 0);
+		CHECK(e.veh.wheel_phase == 16384 * 8192);
+		CHECK(remote.veh.vel_x == e.veh.vel_x);
+		CHECK(remote.veh.slide_z == e.veh.slide_z);
+		CHECK(remote.veh.air_pitch_bam == e.veh.air_pitch_bam);
+		CHECK(remote.position.x == e.position.x && remote.position.z == e.position.z);
+	}
 
 	// Nonzero phases pin the wave's x87 formula [orig: Vehicle_ProcessSelectorZeroBoat
 	// @0x46FA00 (site @0x47115D..0x4711D9)]: P = (((x+y)>>10) + tick*4) * (1/256).
@@ -798,22 +815,20 @@ void test_simple_motors_and_contact() {
 	//   height = -1024 - ftol(-578.1939) = -446 -> slide_z = -223.
 	// Every truncated value sits >= 0.004 from an integer, beyond any libm ulp.
 	{
-		Entity wave;
-		wave.health = wave.health_max = 10000;
-		wave.veh.yaw_seeded = true;
-		wave.flags = 0x8000;
-		wave.position = { 2.0f, 0.0f, 100.0f };
+		Entity wave_seed;
+		wave_seed.health = wave_seed.health_max = 10000;
+		wave_seed.veh.yaw_seeded = true;
+		wave_seed.flags = 0x8000;
+		wave_seed.position = { 2.0f, 0.0f, 100.0f };
+		Entity &wave = hull(wave_seed);
 		world.logic_tick = 0;
 		world.vehicles.tick_watercraft_motor(wave, t);
 		CHECK(wave.veh.air_pitch_bam == 825755);
 		CHECK(wave.veh.air_roll_bam == 574211);
 		CHECK(wave.veh.slide_z == -145);
 
-		Entity wave_b;
-		wave_b.health = wave_b.health_max = 10000;
-		wave_b.veh.yaw_seeded = true;
-		wave_b.flags = 0x8000;
-		wave_b.position = { 0.0f, 0.0f, 100.0f };
+		wave_seed.position = { 0.0f, 0.0f, 100.0f };
+		Entity &wave_b = hull(wave_seed);
 		world.logic_tick = 24;
 		world.vehicles.tick_watercraft_motor(wave_b, t);
 		CHECK(wave_b.veh.air_pitch_bam == 893366);
@@ -825,12 +840,13 @@ void test_simple_motors_and_contact() {
 	// catv selects that boat path before its input/health/sound families.
 	t.family = VehicleFamily::Ground;
 	t.amphibian = true;
-	Entity amphibian;
-	amphibian.health = amphibian.health_max = 10000;
-	amphibian.flags = 0x8000;
-	amphibian.position.z = 100.0f;
-	amphibian.veh.yaw_seeded = true;
-	amphibian.veh.cmd_speed = 16384;
+	Entity amphibian_seed;
+	amphibian_seed.health = amphibian_seed.health_max = 10000;
+	amphibian_seed.flags = 0x8000;
+	amphibian_seed.position.z = 100.0f;
+	amphibian_seed.veh.yaw_seeded = true;
+	amphibian_seed.veh.cmd_speed = 16384;
+	Entity &amphibian = hull(amphibian_seed);
 	world.ai.is_authority = true;
 	world.vehicles.tick_motor(amphibian, t);
 	CHECK(amphibian.health == 10000);
@@ -846,7 +862,7 @@ void test_simple_motors_and_contact() {
 	t.foot_y_hi = 65536;
 	t.box_z_lo = -32768;
 	t.box_z_hi = 65536;
-	e = Entity{};
+	Entity e;
 	e.veh.slide_z = -167;
 	e.veh.spring_energy = 9000;
 	int32_t x = 0, y = 0, z = 655360 - 167;
@@ -2972,8 +2988,11 @@ void test_a_dead_hull_bails_to_its_tail() {
 // through the pool-1 pass's own leg (VehicleSystem::update_motor).
 // [orig: cveh `mov edi, [esi+64h]` @0x48AF1A, `jz` @0x48AFA6 -> the tail
 //  @0x48D43E..0x48D451; ctan @0x488ACA, @0x488B56 -> @0x48AEB6; cbik @0x483FFA,
-//  @0x484086 -> @0x486A04; cbot @0x48D499, @0x48D4EF -> @0x48EF50..0x48EF63]
+//  @0x484086 -> @0x486A04; cbot @0x48D499, @0x48D4EF -> @0x48EF50..0x48EF63; the
+//  selector-zero ground @0x46E119, @0x46E165 -> @0x46F9B2..0x46F9C5 and boat @0x46FA19,
+//  @0x46FA64 -> @0x471670..0x471683]
 void test_a_brainless_hull_bails_at_its_head() {
+	for (const int physics : { 1, 0 })
 	for (const VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Tank,
 				 VehicleFamily::Bike, VehicleFamily::Watercraft }) {
 		for (const bool brained : { false, true }) {
@@ -2982,6 +3001,7 @@ void test_a_brainless_hull_bails_at_its_head() {
 				auto r = std::make_unique<Rig>();
 				VehicleTraits t = buggy_traits();
 				t.family = family;
+				t.physics = physics;
 				t.critical_hp = 100;
 				t.non_critical_regen = 10;
 				r->w.vehicles.traits.set(r->veh().item_id, t);
@@ -3016,6 +3036,7 @@ void test_a_brainless_hull_bails_at_its_head() {
 				auto r = std::make_unique<Rig>();
 				VehicleTraits t = buggy_traits();
 				t.family = family;
+				t.physics = physics;
 				r->w.vehicles.traits.set(r->veh().item_id, t);
 				if (!brained) r->w.ai.release(r->veh_h);
 				r->w.ai.is_authority = false;
@@ -3043,6 +3064,7 @@ void test_a_brainless_hull_bails_at_its_head() {
 				auto r = std::make_unique<Rig>();
 				VehicleTraits t = buggy_traits();
 				t.family = family;
+				t.physics = physics;
 				t.sound_profile = "SP_Transport";
 				load_transport_sound_profile(r->w);
 				r->w.vehicles.traits.set(r->veh().item_id, t);
@@ -3053,7 +3075,10 @@ void test_a_brainless_hull_bails_at_its_head() {
 				r->w.out.sound_emitters.clear();
 				r->w.vehicles.update_motor(r->veh(), /*is_authority=*/false);
 				CHECK(r->veh().saved_live_valid);
-				CHECK(r->w.out.sound_emitters.empty() == !brained);
+				if (!brained)
+					CHECK(r->w.out.sound_emitters.empty());
+				else if (physics != 0)
+					CHECK(!r->w.out.sound_emitters.empty());
 				if (!brained)
 					CHECK((r->veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
 			}
