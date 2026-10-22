@@ -1572,6 +1572,10 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	mission.set_header_int("minutes_per_day", 60)
 
 	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
+	# The load's mission start (phase B, past the device stages) leaves the
+	# single-player session paused; the world plays it after that start.
+	assert_true(world.get_runtime().is_playing(),
+			"the load ends with the single-player session running")
 	var audio := world.get_mission_audio()
 	assert_not_null(audio)
 	if audio == null:

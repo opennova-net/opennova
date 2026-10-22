@@ -1145,9 +1145,6 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// A browsable listen host: register it with the NovaWorld gate (F1), if
 	// one was configured. No-op for single-player, joiners, and pure-LAN play.
 	drive_.on_runtime_started(opts, p_bms_name);
-	// The game starts running (tick() gates on is_playing, so the overlay's
-	// transport can pause/step a live mission).
-	runtime->play();
 	return OK;
 }
 
@@ -1155,7 +1152,8 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 // mission-start head (the render arm's last pump, the PreMission pass, the round init,
 // Player_InitPlayer), then the water plane the vehicle init grounds hulls against (07TR's
 // offshore LCACs otherwise settle on the seabed before crews board), the environment
-// boundary and the session's load end; then the local player's spawn kit.
+// boundary and the session's load end; then the local player's spawn kit, and the game
+// starts running.
 void GameWorld::run_mission_start() {
 	run_mission_start_environment_boundary();
 	// The player profile's saved weapon kits, loaded before ANY kit is applied
@@ -1164,6 +1162,10 @@ void GameWorld::run_mission_start() {
 	// [orig: Game_StartMission @ 0x525767-0x525836].
 	load_player_weapon_profile();
 	player_visuals_->apply_local_player_spawn_loadout();
+	// The game starts running past the session's load end, which leaves a single-player
+	// session paused (Simulation::start_mission): tick() gates on is_playing, so the
+	// overlay's transport can pause/step a live mission.
+	if (MissionRoot *runtime = get_runtime()) runtime->play();
 }
 
 // The player profile's current weapon.sav record onto the sim, again after the
