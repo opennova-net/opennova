@@ -148,10 +148,10 @@ void rebind_player_camouflage_row(World &world, Entity &body);
 
 // Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry entity of its class's
 // camouflage row (player_spawn.cpp player_spawn_row); (2/3)
-// item-template health init; (4) place Position/Yaw/Team; (5) entity_reset_to_spawn_state
-// (clear the entity+36 movement gate). Then mount the infantry motor as the LOCAL PLAYER
-// (inf.active + inf.is_local_player; input-ordered, no AI route) and publish
-// World::cached.local_player. Returns the spawn handle, or an invalid handle if pool 0 is
+// item-template health init; (4) place Position/Yaw/Team, then the class init; no
+// spawn-state reset, which the deploy runs (D-NET-NEW-L1-37). Then mount the infantry
+// motor as the LOCAL PLAYER (inf.active + inf.is_local_player; input-ordered, no AI
+// route) and publish World::cached.local_player. Returns the spawn handle, or an invalid handle if pool 0 is
 // full or the World has no AiSystem wired. [orig: net-re §5.2b/§5.38; ADR 0012]
 EntityHandle spawn_player(World &world, const PlayerSpawn &spawn);
 

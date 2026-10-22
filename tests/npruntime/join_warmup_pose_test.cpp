@@ -200,11 +200,30 @@ bool run_the_player_class_init_zeroes_pitch_and_roll() {
 			            "the player class init zeroes Pitch / Roll and their saved words"))
 				return false;
 		} else {
-			if (!expect(e->pitch_bam == kPitch10 && e->roll_bam == kRollMinus7,
+			// No class init and no spawn-state reset at the add: the words and the model
+			// init's stamp of them stand (D-NET-NEW-L1-37).
+			if (!expect(e->pitch_bam == kPitch10 && e->roll_bam == kRollMinus7 &&
+			                    e->saved_live_pitch == kPitch10 && e->saved_live_roll == kRollMinus7,
 			            "an item class row keeps the placed Pitch / Roll words")) return false;
 		}
 	}
 	return true;
+}
+
+// The add runs no spawn-state reset (the deploy and the teleports run it): the spawn backup
+// holds the memset's zeroes, and the body carries no dead bit for a reset to clear.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE, Flags |= 0x101
+//  @0x43C433 / @0x43C508, no Entity_ResetToSpawnState @0x4B9610 call (its callers include
+//  Server_DeployPlayer @0x517740, the call @0x517899); the reset's backup @0x4B9632..0x4B9662]
+bool run_the_add_runs_no_spawn_state_reset() {
+	Rig r;
+	if (!expect(r.body.valid(), "the add spawns the body")) return false;
+	const w::Entity &e = r.entity();
+	if (!expect(e.spawn_position.x.q16 == 0 && e.spawn_position.y.q16 == 0 &&
+	                    e.spawn_position.z.q16 == 0 && e.spawn_heading == 0 && e.spawn_flags == 0,
+	            "the add leaves the spawn backup at the memset's zeroes")) return false;
+	return expect((e.flags & w::kEntityFlagDead) == 0u && e.alive && e.health > 0,
+	              "the added body carries no dead bit");
 }
 
 // A pool-2 building on the body's own spot whose one volume of `type` has its -X face a quarter
@@ -343,6 +362,7 @@ int main() {
 	if (!run_the_join_warmup_reads_the_add_time_words()) ++failures;
 	if (!run_the_skip_test_reads_the_stamp()) ++failures;
 	if (!run_the_player_class_init_zeroes_pitch_and_roll()) ++failures;
+	if (!run_the_add_runs_no_spawn_state_reset()) ++failures;
 	if (!run_the_warmup_resolve_takes_the_player_bit()) ++failures;
 	if (!run_a_deck_marker_turns_through_the_transforms_fixed_point()) ++failures;
 	if (failures != 0) return 1;

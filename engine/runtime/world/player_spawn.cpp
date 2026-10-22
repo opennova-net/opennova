@@ -3,7 +3,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/ai.h>           // AiSystem, AiEntity
 #include <runtime/world/collision.h>
-#include <runtime/world/entity_spawn.h> // entity_reset_to_spawn_state
+#include <runtime/world/entity_spawn.h> // max_health_with_difficulty
 #include <runtime/world/geom.h>         // to_fixed
 #include <runtime/world/infantry.h>     // anim_state
 #include <runtime/world/local_player.h> // LocalPlayer::radar (the lock tone reset)
@@ -186,7 +186,11 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // area X"). [orig: the deploy leg @0x519fd0 — word entity+0x11C = 1]
     seed.group_id = 1;
     seed.alive = true;
-    seed.flags = 2u | 0x100u;   // movement gate + player classifier in the live/wire mirror
+    // The player classifier in the live/wire mirror; the memset leaves every other low bit 0
+    // (no dead bit: the add runs no spawn-state reset to clear one, D-NET-NEW-L1-37).
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE,
+    //  Flags |= 0x101 @0x43C433 / @0x43C508]
+    seed.flags = 0x100u;
     // Both local and remote player bodies carry the retail player classifier. The
     // damage trigger uses this bit—not local ownership—to bypass NPC move/group alerts.
     // [orig: OrganicClass_HandleEvent test victim Flags,100h @0x4073c8]
@@ -246,9 +250,13 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     if (indestructible) ent->health = 1; // the model init, ahead of the raises [orig: @0x40DCA6]
     if (retail_signed_i16(ent->health) < ceiling) ent->health = ceiling;
 
-    // §5.2b step 5: clear the entity+36 bit-1 movement gate + back up the spawn position.
-    // [orig: Entity_ResetToSpawnState @0x4B9610]
-    entity_reset_to_spawn_state(*ent, ceiling);
+    // The add runs no spawn-state reset: the spawn backup (+0x318..+0x330), the body attitude's
+    // +0x90 and Roll stay as the memset, the placement and the class init left them until the
+    // deploy's reset (Server_DeployPlayer @0x517740, the call @0x517899) or a teleport's
+    // (D-NET-NEW-L1-37). [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 calls no
+    //  Entity_ResetToSpawnState @0x4B9610 (its callers: the deploy, the teleports, the
+    //  infantry update, the two state readers); the add's Armor store @0x43C585]
+    ent->mana = ent->mana_max;
 
     // Mount the infantry motor — same motor as an NPC organic. The host's own player is ordered
     // from input and never AI-think/routed; a remote peer is snapped from the wire and the motor
