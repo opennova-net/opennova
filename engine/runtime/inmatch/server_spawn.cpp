@@ -1052,6 +1052,10 @@ static void orphan_player_row(NapiNPServerCtx &ctx, NapiNPConnection &conn) {
 	conn.assigned_team_valid = false;
 	conn.reply.player_slot_reserved = false;
 	conn.reply.spawn_metadata_pushed = false;
+	// The fresh row's live age (+0x184) is the memset's 0; the orphan keeps its own, so a
+	// later round init's re-add of this row restores no age it never ran.
+	// [orig: Server_PlayerAdd @0x51CBC0 - the row memset @0x51CD06]
+	conn.kept_play_ticks = 0;
 }
 
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !g_NetSpawnSuspended

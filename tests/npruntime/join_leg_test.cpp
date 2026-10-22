@@ -1101,6 +1101,27 @@ bool run_a_repeated_echo_adds_the_player_again() {
 	              "the next joiner's pick passes the orphaned row over");
 }
 
+// D-NET-NEW-L4-17 (V-ROLL-X's follow): a re-add's fresh row is memset like any new one, so its
+// live age (+0x184, the age the map change keeps for the round init's re-add) starts at 0, while
+// the orphaned row keeps the age it ran [orig: Server_PlayerAdd @0x51CBC0 - the row memset
+// @0x51CD06].
+bool run_a_re_added_row_starts_at_live_age_zero() {
+	JoinFixture f(/*with_existing=*/false);
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.reply.admission_metadata_pushed = true;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the pump adds the joiner")) return false;
+	constexpr uint32_t kAgeKeptAcrossAMapChange = 1500;
+	j.kept_play_ticks = kAgeKeptAcrossAMapChange;
+	j.spawn_queue_unlinked = false; // a repeated C2S 0x02 lists it again
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    f.ctx->orphaned_player_rows.size() == 1,
+	            "the re-add orphans the first row")) return false;
+	if (!expect(f.ctx->orphaned_player_rows[0].row.kept_play_ticks == kAgeKeptAcrossAMapChange,
+	            "the orphaned row keeps the age it ran")) return false;
+	return expect(f.joiner().kept_play_ticks == 0, "the fresh row's live age is the memset's 0");
+}
+
 // D-NET-NEW-L1-24 (V-ROLL on L1-s14's test note): the spawn pump's capacity counts an orphaned row
 // (its active byte and its net player stand), so with a session cap of 2 a re-added joiner's two
 // rows, the orphaned one and the current one, hold a third joiner on the pending list, rowless,
@@ -1606,6 +1627,7 @@ int main() {
 	if (!run_a_players_two_rows_interleave_frame_and_rtt()) ++failures;
 	if (!run_an_orphaned_row_runs_on_its_player_sync_track()) ++failures;
 	if (!run_an_orphaned_row_counts_against_the_session_cap()) ++failures;
+	if (!run_a_re_added_row_starts_at_live_age_zero()) ++failures;
 	if (!run_two_rows_of_one_player_step_in_slot_order()) ++failures;
 	if (!run_the_track_steps_after_the_scoreboard()) ++failures;
 	if (!run_a_frame_whose_round_ends_steps_no_track()) ++failures;
