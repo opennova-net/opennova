@@ -312,6 +312,7 @@ void vehicle_release_damage_effects(World &world, Entity &e);
 void vehicle_smoke_effect(World &world, Entity &e, bool release = false);
 void vehicle_crash_state(
 		World &world, Entity &e, const VehicleTraits &traits, const bool *contacts, int32_t up_z16);
+void vehicle_flush_sinks(World &world, Entity &e, int32_t up_z16, int32_t pz);
 void vehicle_expire_contact_wake(World &, Entity &);
 void vehicle_kill_crash_occupants(World &, Entity &);
 void vehicle_rebuild_rest_orientation(World &, Entity &, bool inverted);

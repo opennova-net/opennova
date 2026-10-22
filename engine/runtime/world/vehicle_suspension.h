@@ -80,6 +80,10 @@ inline constexpr float kSuspensionDisableRateNonAuthority = 1.75f;
 // select (their growth is the literal 250 / 100).
 inline constexpr float kSuspensionDtNormal = 0.75f;
 inline constexpr float kSuspensionDtCrashed = 3.0f;
+// The aircraft solve selects on +0x2F0 instead: 0.25 for a wreck at rest, else
+// the 0.75 above [orig: Entity_ProcessAircraftContactPhysics @0x47EF10, `cmp
+//  [esi+2F0h], 0` @0x47EF20, flt_7C333C @0x47EF2A / flt_7C3DC8 @0x47EF32].
+inline constexpr float kSuspensionDtWreck = 0.25f;
 inline constexpr int32_t kSinkGrowthPerTick = 250; // flt_7C6F7C
 inline constexpr int32_t kSinkGrowthTank = 250;    // [orig: @0x478510..0x47852b]
 inline constexpr int32_t kSinkGrowthBike = 100;    // [orig: @0x47ab36..0x47abdc]

@@ -327,13 +327,22 @@ public:
     //  free decay; the resolved `depth −= Δ` lifts the corner. `depth` is
     //  in/out; `corner_adj` receives the catch-up term.
     void suspension_grounded_loop(Entity &veh, const VehicleTraits &traits, int wheels, int32_t depth[4], const bool contact[4], int32_t growth, int32_t corner_adj[4]);
+    // 3a'. The aircraft's GROUNDED spring loop [orig: Entity_ProcessAircraftContactPhysics
+    //  @0x47EF10, the loop @0x4811A2..0x481447]: the tracked loop's impulse, settle
+    //  term and compress/oscillate arms, but its catch-up runs for a pad off the
+    //  ground unless the hull is crashed and moving (speed >= 32), only past one
+    //  growth step, and a diagonal pair in contact clears the hard-landing marker.
+    void suspension_air_grounded_loop(Entity &veh, const VehicleTraits &traits,
+			int32_t depth[4], const bool contact[4], int32_t growth, int32_t corner_adj[4]);
     // 3b. The AIRBORNE spring loop [orig: @0x47E283..0x47E344], gated on
     //  settle_2f0 == 0: energy > 0 → compress by the full 4095 step, else amp != 0
-    //  → free decay; then the catch-up under !crashed && !crash_request.
+    //  → free decay; then the catch-up under !crashed && !crash_request. The
+    //  aircraft's twin (latch_gated false) has neither gate [orig:
+    //  Entity_ProcessAircraftContactPhysics @0x47EF10, the loop @0x480E06..0x480EA8].
 	void suspension_tank_loop(Entity &veh, const VehicleTraits &traits, bool on_ground,
 			int32_t depth[4], const bool contact[4], int32_t corner_adj[4]);
 	void suspension_airborne_loop(Entity &veh, const VehicleTraits &traits, int wheels,
-			int32_t growth, int32_t corner_adj[4]);
+			int32_t growth, int32_t corner_adj[4], bool latch_gated = true);
 	// 3c. The bike's own airborne loop [orig: @0x47B401..0x47B4E6]: no settled or
 	//  crash gate; the corner droop (sink − 100) × −1.5 runs while fwd.z > −0x1000
 	//  or the flight is under 16 ticks, and the rear sink clears inside 500 of a

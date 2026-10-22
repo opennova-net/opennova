@@ -9,8 +9,8 @@
 // (heading 23855104, mission yaw 88), off the direction table's 2^22 BAM grid. The terrain
 // under both is flat at 42.0. Retail placed every collision shell through the exact Euler
 // builder [orig: BoneCallback_Simple @0x4E2600 -> Math_BuildFixedPointMatrixFromEulerAngles
-// @0x613F40; Entity_InitFromModel @0x40E0CC builds it once and sets Flags 0x20000
-// @0x40E105], which is what pushes the hull to these words. With the old table path, ours
+// @0x613F40; Entity_InitFromModel @0x40DC30 (the build @0x40E0CC) builds it once and sets
+// Flags 0x20000 @0x40E105], which is what pushes the hull to these words. With the old table path, ours
 // pushed it 3.4% too far.
 //
 // The oracle is retail's pool-1 words for 0x1010: LP-s7's class-C read of the retail 01TR

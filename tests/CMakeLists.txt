@@ -5380,6 +5380,11 @@ add_test(NAME probe_force_pass COMMAND probe_force_pass_test)
 add_executable(settle_static_contact_test world/settle_static_contact_test.cpp)
 target_link_libraries(settle_static_contact_test PRIVATE opennova_runtime)
 add_test(NAME settle_static_contact COMMAND settle_static_contact_test)
+# D-NET-NEW-L6-11: the aircraft solve's per-pad spring legs (the pad compression words on the
+# probes, the extend loop, the stability byte).
+add_executable(aircraft_spring_legs_test world/aircraft_spring_legs_test.cpp)
+target_link_libraries(aircraft_spring_legs_test PRIVATE opennova_runtime)
+add_test(NAME aircraft_spring_legs COMMAND aircraft_spring_legs_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the

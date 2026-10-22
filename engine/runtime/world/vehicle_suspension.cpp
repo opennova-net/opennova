@@ -270,26 +270,108 @@ void VehicleSystem::suspension_grounded_loop(Entity &veh, const VehicleTraits &t
 	}
 }
 
-void VehicleSystem::suspension_airborne_loop(Entity &veh, const VehicleTraits &traits, int wheels, int32_t growth, int32_t corner_adj[4]) {
+void VehicleSystem::suspension_airborne_loop(Entity &veh, const VehicleTraits &traits, int wheels, int32_t growth, int32_t corner_adj[4], bool latch_gated) {
     World &world = world_;
 	Entity::VehicleMotorState &m = veh.veh;
-	if (m.settle_2f0 != 0) return; // [orig: @0x47e283..0x47e28a]
+	if (latch_gated && m.settle_2f0 != 0) return; // [orig: @0x47e283..0x47e28a]
 	const int32_t travel = conform_travel_from_def(traits.spring_comp);
 	int32_t loose_shock = 0;
 	int32_t &shock = shock_field(world, veh, traits, loose_shock);
 	const bool no_contact[4] = {false, false, false, false};
 	for (int k = 0; k < wheels; ++k) {
 		ConformOscillator osc = load_osc(m.wheel_osc[k]);
+		// [orig: tracked @0x47e2c1 / @0x47e2d3; aircraft Suspension_CompressWheelQuadratic
+		//  @0x45CFB0 with dword_815180 >> 4 (the call @0x480E48) / Suspension_OscillateWheelFast
+		//  @0x45D110 (the call @0x480E5A)]
 		if (osc.energy > 0) {
 			(void)conform_spring_compress(osc, m.wheel_comp[k], m.spring_energy,
-			                              kSpringStepCap, travel, traits.spring); // [orig: @0x47e2c1]
+			                              kSpringStepCap, travel, traits.spring);
 		} else if (osc.amplitude != 0) {
 			(void)conform_spring_oscillate(osc, m.wheel_comp[k], m.spring_energy,
-			                               shock, traits.spring, m.slide_z); // [orig: @0x47e2d3]
+			                               shock, traits.spring, m.slide_z);
 		}
 		store_osc(m.wheel_osc[k], osc);
-		if (m.crashed == 0 && m.crash_request == 0)
+		// The aircraft's catch-up has no latch gate [orig: @0x480E62..0x480E90].
+		if (!latch_gated || (m.crashed == 0 && m.crash_request == 0))
 			catch_up(m, k, growth, /*grounded=*/false, no_contact, corner_adj);
+	}
+}
+
+void VehicleSystem::suspension_air_grounded_loop(Entity &veh, const VehicleTraits &traits,
+		int32_t depth[4], const bool contact[4], int32_t growth, int32_t corner_adj[4]) {
+	World &world = world_;
+	Entity::VehicleMotorState &m = veh.veh;
+	// No suspension def'd: the corners keep the raw depths [orig: `cmp [ebp+8FCh], 0; jnz`
+	//  @0x4811A5..0x4811AC -> the lift @0x481425..0x481427].
+	if (traits.spring == 0) return;
+	// minDepth over the four pads, 100000 init [orig: @0x481129..0x481183].
+	int32_t min_depth = 100000;
+	for (int k = 0; k < 4; ++k) min_depth = std::min(min_depth, depth[k]);
+	const int32_t travel = conform_travel_from_def(traits.spring_comp);
+	const int32_t thr = traits.spring_comp <= 10 ? kImpulseThresholdSoft
+	                                             : kImpulseThresholdHard; // [orig: @0x481268..0x481281]
+	int32_t loose_shock = 0;
+	int32_t &shock = shock_field(world, veh, traits, loose_shock);
+	for (int k = 0; k < 4; ++k) {
+		// A pad off the ground drops its corner by its sink beyond one growth step, unless
+		// the hull is crashed and still moving; a diagonal pair in contact clears the
+		// hard-landing marker, else a drop past -5000 while falling raises it. The
+		// entity+0x60 override freeze is never set here.
+		// [orig: @0x4811D2..0x481259: `cmp [esi+2ECh], 0; jz` / `cmp [esi+29Ch], 20h; jge`
+		//  @0x4811F7..0x481207, the excess test @0x481209, the corner add @0x48121C, the pair
+		//  test @0x481223..0x48123D, the marker @0x481248..0x481259]
+		if (!contact[k] && (m.crashed == 0 || m.speed < 32) && m.plat_acc[k] - growth > 0) {
+			const int32_t c = growth - m.plat_acc[k];
+			corner_adj[k] += c;
+			if ((contact[0] && contact[3]) || (contact[1] && contact[2]))
+				m.landing_2ee = 0;
+			else if (c < kHardLandingCatchupBelow && m.slide_z < 0)
+				m.landing_2ee = 1;
+		}
+		ConformOscillator osc = load_osc(m.wheel_osc[k]);
+		// The landing IMPULSE [orig: @0x481260..0x4812CB], else the settle term against
+		// WHEEL 0's amplitude (the unindexed `[esi+304h]` read @0x4812EA), capped at the
+		// step [orig: @0x4812DA..0x481343].
+		if (m.plat_acc[k] > thr && contact[k]) {
+			const int32_t a = std::abs(m.plat_acc[k]);
+			const int32_t sq = wrap_mul(wrap_mul(traits.mass, a), a);
+			osc.energy += conform_half_energy(sq);
+			if (osc.energy < 0) osc.energy = 0x1000000; // [orig: @0x4812B6..0x4812B8]
+			// `fild [ebx]; fmul flt_7C6F18` (1.25f) at the FPU's length [orig: @0x4812BE..0x4812CB].
+			m.spring_energy += static_cast<int32_t>(
+					static_cast<double>(osc.energy) * static_cast<double>(1.25f));
+		} else if (m.spring_energy <= 0) {
+			int32_t e = depth[k] - min_depth;
+			if (e > m.wheel_osc[0].amplitude) {
+				e -= m.wheel_osc[0].amplitude;
+				if (e > 0) {
+					if (e > kSpringStepCap) e = kSpringStepCap;
+					const int32_t sq = wrap_mul(wrap_mul(2 * traits.spring, e), e);
+					osc.energy += conform_half_energy(sq);
+				}
+			}
+		}
+		// Compress on stored energy, else free-decay on a live amplitude while every sink
+		// is under 2000; the wheel absorbs the step [orig: @0x481349..0x4813E5, `d_k -= delta`
+		// @0x4813E5; Suspension_CompressWheelQuadratic @0x45CFB0 (the calls @0x48138A /
+		// @0x48139E), Suspension_OscillateWheelFast @0x45D110 (the call @0x4813DD)].
+		int32_t delta = 0;
+		if (osc.energy > 0) {
+			const int32_t q = (2 * osc.energy) / (2 * traits.spring); // idiv @0x48135B
+			int32_t step = static_cast<int32_t>(std::sqrt(static_cast<double>(q)));
+			if (step <= 0) osc.energy = 0; // [orig: @0x48136C..0x48136E]
+			if (step > kSpringStepCap) step = kSpringStepCap;
+			delta = conform_spring_compress(osc, m.wheel_comp[k], m.spring_energy,
+			                                step, travel, traits.spring);
+		} else if (osc.amplitude != 0 && m.plat_acc[0] < kOscillateSinkCeiling &&
+		           m.plat_acc[1] < kOscillateSinkCeiling &&
+		           m.plat_acc[2] < kOscillateSinkCeiling &&
+		           m.plat_acc[3] < kOscillateSinkCeiling) {
+			delta = conform_spring_oscillate(osc, m.wheel_comp[k], m.spring_energy,
+			                                 shock, traits.spring, m.slide_z);
+		}
+		depth[k] -= delta;
+		store_osc(m.wheel_osc[k], osc);
 	}
 }
 

@@ -197,13 +197,20 @@ void vehicle_crash_state(
 		vehicle_rebuild_rest_orientation(world, e, false);
 	}
 	m.spring_energy = std::max(0, m.spring_energy);
-	// The tank solve has no such clear: its sinks change only at the crashed
-	// clear, the wreck latch, the diagonal reset and the contact tail.
-	// [orig: tank sink stores @0x47810D, @0x4785E6, @0x47902E, @0x47931F]
-	if (!boat && !bike && !tank &&
-			((m.wreck_2fc && up < 0) ||
-					((e.flags & kEntityFlagInAir) != 0 &&
-							e.position.z.q16 < world.env.water_z)))
-		clear_sinks();
+}
+
+// The aircraft and tracked solves flush the four sinks after their max-depth scans: a
+// wreck at rest that is inverted, or an airborne hull under the water word, reads +0x2F0
+// and the live Position.Z. The tank solve has no such clear: its sinks change only at
+// the crashed clear, the wreck latch, the diagonal reset and the contact tail.
+// [orig: aircraft `cmp [esi+2F0h], al` @0x480CEB, the up test @0x480CF3, Flags 0x2000
+//  @0x480CF9, `[esi+0Ch]` vs g_EnvWaterHeightFixed @0x480D02..0x480D0B, the stores
+//  @0x480D0D..0x480D1F; tracked @0x47E122..0x47E157; tank sink stores @0x47810D,
+//  @0x4785E6, @0x47902E, @0x47931F]
+void vehicle_flush_sinks(World &world, Entity &e, int32_t up_z16, int32_t pz) {
+	auto &m = e.veh;
+	if ((m.settle_2f0 && up_z16 < 0) ||
+			((e.flags & kEntityFlagInAir) != 0 && pz < world.env.water_z))
+		std::fill_n(m.plat_acc, 4, 0);
 }
 } // namespace opennova::world::detail
