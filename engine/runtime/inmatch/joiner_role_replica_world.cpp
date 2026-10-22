@@ -152,6 +152,22 @@ void JoinerRole::spawn_and_arm_local_player() {
 		// Server_InitAllPlayerEntitiesForRound @0x516B67).
 		// [orig: NapiNPClientMsg_0x00C @0x42E7F1]
 		if (world::Entity *body = world.registry.get(h)) body->group_id = 0;
+		// L's +0x154 is its own record's slot byte, whichever spawn built it (the 0x0C's
+		// store, the 0x18's). Its DcbId (+0x7C) is the plyr class init's 10000 + that byte
+		// (world::entity_dcb_id): the 0x18 runs the init after its store, and a 0x0C body,
+		// whose own init ran ahead of the store, takes it again at the mission start's
+		// re-init of every pool-0 row, ahead of Player_InitPlayer, where L is born
+		// (D-NET-NEW-L5-18).
+		// [orig: NapiNPClientMsg_0x00C @0x42E730 - Entity_InitFromItemDef @0x42E84D ahead of
+		//  the +0x154 store @0x42EA06; NapiNPClientMsg_FullEntitySpawn @0x433780 - the store
+		//  @0x433BBB ahead of the init call @0x433E82; Game_StartMission @0x524360 -
+		//  NapiClient_WaitForGameStart @0x524E29, Entity_InitAllFromModels @0x52567F (no
+		//  role gate), Player_InitPlayer @0x525BBC; Entity_InitAllFromModels @0x40E460 - the
+		//  pool-0 init callbacks @0x40E5DA..0x40E60B; PlayerClass_InitEntity @0x4B1060 -
+		//  10000 + [+0x154] @0x4B1149..0x4B1155]
+		if (world::Entity *body = world.registry.get(h))
+			if (const replication::ClientEntityState *row = rt.state().find(rt.self_handle()))
+				body->player_slot_id = row->spawn_byte_154;
 		// L is born after the boot's definition sweeps: bind its items.def row
 		// now, as the host's L was at boot (without it L kept the "default"
 		// sound profile, which authors no slots: no footsteps, foley, landings

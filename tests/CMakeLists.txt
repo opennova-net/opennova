@@ -5282,6 +5282,11 @@ add_test(NAME wire_proxy_table_age COMMAND wire_proxy_table_age_test)
 add_executable(netsim_joiner_pool1_interleave_test netsim/joiner_pool1_interleave_test.cpp)
 target_link_libraries(netsim_joiner_pool1_interleave_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME netsim_joiner_pool1_interleave COMMAND netsim_joiner_pool1_interleave_test)
+# D-NET-NEW-L5-18: a joiner's own body takes its spawn record's +0x154 slot byte, so its DcbId
+# reads 10000 + slot after a 0x0C (the mission start's re-init) or a 0x18.
+add_executable(npruntime_joiner_local_dcb_id_test npruntime/joiner_local_dcb_id_test.cpp)
+target_link_libraries(npruntime_joiner_local_dcb_id_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_joiner_local_dcb_id COMMAND npruntime_joiner_local_dcb_id_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a
