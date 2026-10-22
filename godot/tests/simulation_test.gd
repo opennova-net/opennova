@@ -1082,6 +1082,12 @@ func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
   graphic seatgun
   phrase_set 6
 end
+
+begin "Generic Soldier"
+  id 105311
+  type person
+  move_function org1
+end
 """)
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
@@ -2226,6 +2232,12 @@ func test_attach_labels_hide_occupied_and_out_of_range() -> void:
   type object
   graphic ctrlgun
 end
+
+begin "Driver"
+  id 102072
+  type person
+  move_function org1
+end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
@@ -2332,6 +2344,12 @@ func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
   attrib: PlayerControl
   type vehicle
   graphic carrier
+end
+
+begin "Driver"
+  id 102072
+  type person
+  move_function org1
 end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
@@ -2490,6 +2508,12 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
   type object
   graphic mount
   phrase_set 3
+end
+
+begin "Driver"
+  id 102072
+  type person
+  move_function org1
 end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))

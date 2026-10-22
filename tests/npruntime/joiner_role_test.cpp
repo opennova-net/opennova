@@ -2683,6 +2683,8 @@ bool run_redeploy_release_rebuilds_the_candidate_slices() {
 	defs[1].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
 	defs[1].type = 3;
 	defs[1].hp = 100;
+	// Retail's 105305 row moves on org2: the player body's update (D-NET-NEW-L4-14).
+	std::strcpy(defs[1].move_function, "org2");
 	def::DefItemsFile items{defs, 2};
 	h.kernel->set_items_table(&items);
 	h.kernel->resolve_collision_instances();

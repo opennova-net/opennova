@@ -81,7 +81,10 @@ struct Harness {
 			row.type = mission::kItemTypePerson;
 			row.hp = 100;
 			std::strcpy(row.ai_function, "org1");
+			std::strcpy(row.move_function, "org1"); // retail's org1 person rows move on org1
 		}
+		// The player's row moves on org2, as retail's 105305 does (D-NET-NEW-L4-14).
+		std::strcpy(rows[0].move_function, "org2");
 		map(0, "soldier"); // exercise the implicit .adm extension
 		map(1, "US01.ADM"); // case-insensitive registration
 		map(3, "missing.adm");
@@ -112,6 +115,7 @@ struct Harness {
 			document.organics[0].spawns = 2;
 			rows[5].type = 1;
 			rows[5].attrib = w::kItemAttribSpawnPoint;
+			rows[5].move_function[0] = '\0'; // a spawn-point item names no mover
 			bms::Entity zone{};
 			zone.type = bms::ItemType::Item; zone.type_id = 46; zone.id = 20;
 			zone.group_id = 7; zone.team = 2;
