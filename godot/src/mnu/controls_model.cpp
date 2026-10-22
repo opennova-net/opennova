@@ -230,6 +230,12 @@ void ControlsModel::key_down_event(int p_godot_key) {
 	key_reset_.key_down(vk_from_godot_key(p_godot_key));
 }
 
+int ControlsModel::event_code(int p_scan_code) const {
+	const auto key_down = [this](int vk) { return vk_down_(vk); };
+	const int row = bindings_.event_row(p_scan_code, key_down);
+	return row >= 0 ? opennova::controls::action_code(row) : -1;
+}
+
 void ControlsModel::consume_key_press(int p_vk) {
 	if (p_vk > 0 && p_vk < static_cast<int>(consumed_vks_.size())) consumed_vks_[p_vk] = true;
 }
@@ -529,6 +535,7 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::mouse_mask_from_godot_button);
 	ClassDB::bind_method(D_METHOD("consume_key_press", "vk"), &ControlsModel::consume_key_press);
 	ClassDB::bind_method(D_METHOD("is_vk_down", "vk"), &ControlsModel::is_vk_down);
+	ClassDB::bind_method(D_METHOD("event_code", "scan_code"), &ControlsModel::event_code);
 	ClassDB::bind_method(D_METHOD("reset_key_state"), &ControlsModel::reset_key_state);
 	ClassDB::bind_method(D_METHOD("key_down_event", "key"), &ControlsModel::key_down_event);
 	ClassDB::bind_static_method("ControlsModel",

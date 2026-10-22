@@ -227,7 +227,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## keyboard hook runs the screen's hotkeys at once (death.mnu's LEAVE MISSION
 ## and the confirmation's NO on Escape, its YES on Return), whose click lands
 ## ahead of the pass-through test; the key itself waits in the shell's key ring
-## for the input frame the word lets run (ScreenKeyRing), the Escape key and a
+## for the input frame the word lets run (KeyboardPass), the Escape key and a
 ## key under the exit confirmation alike. True only when the hotkey closed the
 ## screen (the confirmation's YES): the close resets the ring, so the key
 ## reaches nothing else.

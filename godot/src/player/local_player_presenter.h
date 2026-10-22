@@ -256,6 +256,12 @@ public:
 	bool take_use_item_vehicle_menu_request();
 	// A menu close's input reset (PlayerInputRouter::reset_input_state).
 	void reset_input_state();
+	// The device's key queue the router owns and the shell's key-down feed
+	// (PlayerInputRouter::key_events / push_key_event).
+	Ref<KeyEventQueue> get_key_events() { return input_router_.key_events(); }
+	void push_key_event(const Ref<InputEventKey> &p_event) {
+		input_router_.push_key_event(p_event);
+	}
 	// A pass-through screen's close: the next input frame takes the menu
 	// cursor's offset (PlayerInputRouter::close_pass_through_screen).
 	void close_pass_through_screen();

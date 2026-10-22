@@ -1,10 +1,5 @@
 #pragma once
 
-// STAGED, NOT WIRED (D-CTRL-6 slice 1, LI-s10): nothing feeds or drains this queue yet. Its
-// live owner is the next slice (D-CTRL-6 slice 2a/2b, LI-s11): godot::PlayerInputRouter
-// (godot/src/player/player_input_router.h) owns one queue through the KeyEventQueue binding,
-// the shell feeds it every key-down and each input frame's keyboard pass drains it.
-
 #include <array>
 #include <cstdint>
 
@@ -71,8 +66,28 @@ public:
 		return true;
 	}
 	bool empty() const { return read_ == write_; }
-	// Both indices to 0 [orig: Input_ResetKeyQueue @0x760e00..0x760e07].
+	// Both indices to 0 [orig: Input_ResetKeyQueue @0x760e00..0x760e07]. The embedder runs
+	// it at each of the original's resets its shell has: the whole input reset (a menu
+	// screen's close, the Escape row's and the pick's cases, every mission start, a
+	// joiner's at the end of its game-start wait, whose loop dequeues and drops each key
+	// but Escape), the pause row's case behind its flip, and the start-mission splash
+	// as it begins, whose exit test then dequeues the key that ended it. The game-mode
+	// push, the options and control-remap screens and the session connect waits reset it
+	// too, all ahead of the mission start's.
+	// [orig: Input_ResetAllState @0x497ED0 (the call @0x497ED0); Input_HandleActionBinding
+	//  @0x49AD40 (case 25: the flip @0x49B52D, the call @0x49B53E); Game_StartMission
+	//  @0x524360 (the joiner's wait: the call @0x526288, the dequeue @0x5262A2, Escape
+	//  @0x5262AB); Game_ShowStartMissionSplash @0x520820 (the call @0x52085B, the exit
+	//  test's dequeue @0x520905); UI_NavHistoryPush @0x52BB30; UI_OptionsScreenInit
+	//  @0x554800 (the call @0x554DDF); UI_ControlsRemapArmHandler @0x55D560 (the call
+	//  @0x55D5BE); CGameSession_WaitForNWUValidation @0x4D0F20 (the call @0x4D11F7);
+	//  CNapiGameSession_ConnectToNovaWorld @0x4D4640 (the call @0x4D4BCA);
+	//  CNapiGameSession_ConnectOrHost @0x4D4F10 (the call @0x4D54A1)]
 	void reset() { read_ = write_ = 0; }
+	// The slot the next push writes and the slot the next pop reads, for an embedder
+	// that keeps its device's own record of each queued message beside the slot.
+	int write_index() const { return write_; }
+	int read_index() const { return read_; }
 
 private:
 	std::array<KeyEvent, kCapacity> slots_{};

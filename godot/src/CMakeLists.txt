@@ -308,6 +308,7 @@ add_library(opennova_bindings OBJECT
     player/gameplay_camera.cpp
     player/local_player_presenter.cpp
     player/local_player_visuals.cpp
+    player/key_event_queue.cpp
     player/key_lock_device.cpp
     player/player_input_router.cpp
     player/player_move_intent.cpp

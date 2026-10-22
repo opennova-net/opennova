@@ -1274,6 +1274,9 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("take_use_item_vehicle_menu_request"),
 			&LocalPlayerPresenter::take_use_item_vehicle_menu_request);
 	ClassDB::bind_method(D_METHOD("reset_input_state"), &LocalPlayerPresenter::reset_input_state);
+	ClassDB::bind_method(D_METHOD("get_key_events"), &LocalPlayerPresenter::get_key_events);
+	ClassDB::bind_method(
+			D_METHOD("push_key_event", "event"), &LocalPlayerPresenter::push_key_event);
 	ClassDB::bind_method(D_METHOD("close_pass_through_screen"),
 			&LocalPlayerPresenter::close_pass_through_screen);
 	ClassDB::bind_method(D_METHOD("release_capture_for_screen"),

@@ -128,7 +128,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 ## One key-down over the open screen: the menu's keyboard hook runs stat.mnu's
 ## hotkeys at once (HIDDEN_BACK's confirmation, its NO and YES); the key itself
-## waits in the shell's key ring for the input frame (ScreenKeyRing; engine
+## waits in the shell's key ring for the input frame (KeyboardPass; engine
 ## world::pass_through_close_axis carries the key witness). True only when the
 ## hotkey closed the screen (the confirmation's YES), whose close resets the
 ## ring.

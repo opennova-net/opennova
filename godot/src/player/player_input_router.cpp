@@ -252,7 +252,7 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 	// Under a menu screen no input frame runs, so nothing drains the key events:
 	// they wait, in order, for the close's reset (reset_input_state) or, under
 	// DEATH's exit confirmation, for the first input frame after its NO raises
-	// the word (the shell's ScreenKeyRing carries the witness).
+	// the word (the shell's KeyboardPass carries the witness).
 	if (frame_menu_open_) return;
 	// A later paused update of the same frame reads the state the frame left.
 	if (row_samples_.empty()) queue_row_sample();
@@ -262,7 +262,11 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 	// head with it (engine inmatch::TickInputSource carries the witness).
 	for (const RowSample &sample : row_samples_) {
 		poll_talk_rows(rows_sim, sample.talk);
-		if (poll_hud_toggles(rows_sim, sample.hud)) r_pause.flip();
+		if (!poll_hud_toggles(rows_sim, sample.hud)) continue;
+		r_pause.flip();
+		// The pause row's case resets the key queue behind its flip (engine
+		// controls::KeyEventQueue::reset carries the witness).
+		key_events()->reset();
 	}
 	row_samples_.clear();
 }
@@ -526,12 +530,33 @@ bool PlayerInputRouter::take_vehicle_menu_request() {
 }
 
 void PlayerInputRouter::reset_input_state() {
+	// The reset's head: the key queue, then the key state (engine
+	// controls::KeyEventQueue::reset carries the witness).
+	key_events()->reset();
 	if (controls_.is_valid()) controls_->reset_key_state();
 	actions_.clear_key_press_latches();
 	// The key queue's reset drops the rows a no-update frame left waiting.
 	row_samples_.clear();
 	const Ref<Simulation> reset_sim = sim();
 	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
+}
+
+Ref<KeyEventQueue> PlayerInputRouter::key_events() {
+	if (key_events_.is_null()) key_events_.instantiate();
+	return key_events_;
+}
+
+void PlayerInputRouter::push_key_event(const Ref<InputEventKey> &p_event) {
+	if (p_event.is_null()) return;
+	// The key-down handler sets the key's state (the shell's key_down_event), then
+	// queues the message, whose Ctrl and Shift bits read the key state (with no binding
+	// model, the event's own; engine controls::KeyEventQueue and key_event_flag carry
+	// the witness).
+	const bool ctrl =
+			controls_.is_valid() ? controls_->is_vk_down(0x11) : p_event->is_ctrl_pressed();
+	const bool shift =
+			controls_.is_valid() ? controls_->is_vk_down(0x10) : p_event->is_shift_pressed();
+	key_events()->push_key(p_event, ctrl, shift);
 }
 
 void PlayerInputRouter::close_pass_through_screen() {

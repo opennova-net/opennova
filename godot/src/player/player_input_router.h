@@ -14,6 +14,7 @@
 #include "hud/hud_chat_entry.h"
 #include "hud/hud_toggles.h"
 #include "mnu/controls_model.h"
+#include "player/key_event_queue.h"
 #include "player/player_move_intent.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/inmatch_session_values.h"
@@ -109,10 +110,18 @@ public:
 	// (controls::PlayerAction::OpenVehicleMenu); reading clears it. The shell
 	// opens vehicle.mnu's VEHICLE screen.
 	bool take_vehicle_menu_request();
-	// A menu close's input reset: the key state (ControlsModel::reset_key_state),
-	// the key-press latch (controls::PlayerActions::clear_key_press_latches)
-	// and the deferred queue (Simulation::clear_deferred_input).
+	// A menu close's input reset: the key queue (KeyEventQueue::reset), the key
+	// state (ControlsModel::reset_key_state), the key-press latch
+	// (controls::PlayerActions::clear_key_press_latches) and the deferred queue
+	// (Simulation::clear_deferred_input).
 	void reset_input_state();
+	// The device's key queue, one per process: the shell feeds it every key-down in
+	// every state (push_key_event) and each input frame's keyboard pass drains it
+	// (the shell's KeyboardPass); every input reset the shell runs resets it.
+	Ref<KeyEventQueue> key_events();
+	// One key-down, an OS repeat included, into the queue with Ctrl and Shift as
+	// the key state holds them (KeyEventQueue::push_key).
+	void push_key_event(const Ref<InputEventKey> &p_event);
 	// A pass-through screen closed (death.mnu's DEATH, stat.mnu's STAT): its
 	// close's input frame takes the menu cursor's offset from the re-centre
 	// point as one update's axis input, read here from the cursor's
@@ -169,6 +178,7 @@ private:
 	std::vector<int64_t> hud_toggle_events_;
 	Ref<HudChatEntry> hud_chat_;
 	Ref<RtxtStringFile> chat_gametext_;
+	Ref<KeyEventQueue> key_events_;
 	opennova::controls::PlayerActions actions_;
 	bool armory_requested_ = false;
 	bool vehicle_menu_requested_ = false;

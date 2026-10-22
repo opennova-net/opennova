@@ -123,6 +123,11 @@ public:
 	void consume_key_press(int p_vk);
 	// A VK's held state as the samplers read it (a consumed press reads up).
 	bool is_vk_down(int p_vk) const { return vk_down_(p_vk); }
+	// The dispatch code of the binding row one dequeued key event fires, -1 for
+	// none: the scan over the event's key (KeyEventQueue::last_scan_code) under
+	// the key scan's live gates, the modifier words read from the key state now
+	// (engine BindingSet::event_row carries the witness).
+	int event_code(int p_scan_code) const;
 	// Whether a key bound to the token is down by the key state alone (the
 	// reset-aware device state; no scan gate, no keyboard capture, a
 	// special-key take included; engine controls::PlayerActionSource::keys_down
