@@ -1799,7 +1799,12 @@ void test_device_records_keep_the_walks_call_order() {
     CHECK(removal_a != nullptr && removal_a->handle == armed[0].packed);
     CHECK(spawn_b != nullptr && float(spawn_b->pos.x) > 22.0f);
     CHECK(removal_b != nullptr && removal_b->handle == armed[1].packed);
-    CHECK(rig.w.registry.get(armed[0]) == nullptr && rig.w.registry.get(armed[1]) == nullptr);
+    // The two oldest are gone and the newest armed one stays (a later conversion may
+    // take a freed slot, so the count is read from the device records).
+    int live = 0;
+    for (const PlacedDevice &d : rig.w.throwables.devices)
+        if (d.active) ++live;
+    CHECK(live == 3);
     CHECK(rig.w.registry.get(armed[2]) != nullptr);
 }
 
