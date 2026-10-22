@@ -174,10 +174,11 @@ void server_console_add(NapiNPServerCtx &ctx, const std::string &text, uint32_t 
 
 // Chat_ClearAllChannels on a host with no client: the raw CHAT ring and its
 // display buffer emptied, which every mission start does once its BMS has
-// loaded (the boot calls it; the other rings it zeroes are a client's).
+// loaded (the boot calls it; the other rings it zeroes are a client's), and a
+// first load again past its sixth server pump (a map change's bring-up calls it).
 // [orig: Chat_ClearAllChannels @0x497D30 (the raw ring 0xB3EA38 and the display
 //  buffer 0xB3FE3C, 0x1400 bytes each, @0x497D3E / @0x497D54), from
-//  Game_StartMission @0x524A10]
+//  Game_StartMission @0x524A10 and @0x52546D]
 void server_console_clear(NapiNPServerCtx &ctx);
 
 // Chat_DispatchToChannel on a host with no client: the channel picks the sink

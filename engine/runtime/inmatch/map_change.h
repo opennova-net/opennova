@@ -27,19 +27,34 @@
 //     map through the one host boot (inmatch/host_boot.h) with
 //     HostBootRequest::next_mission; RotationEnded: the embedder closes the
 //     session (HostRole::close: StopServer's goodbye).
-//   the boot's bring-up (HostRole::bring_up with HostBringup::next_mission)
-//     continues the kept session on the new World (host_session.h
-//     continue_host_session).
+//   the load's head, ahead of its terrain (HostRole::begin_next_mission_load:
+//     the game's world load runs it through host_boot.h's
+//     begin_next_host_mission_load, a headless host's phase A itself): the
+//     file-transfer session and the report clocks, the mission text, the kept
+//     session continued with its streams rebuilt (host_session.h
+//     continue_host_session), the per-slot reset, the chat rings' clear, then
+//     the window's first two pumps.
+//   the load's stage pumps (HostRole::pump_load_stage): after the terrain,
+//     after the mission's document, after the avatars and the environment
+//     clock, ahead of the objects.
+//   the boot's bring-up (HostRole::bring_up with HostBringup::next_mission):
+//     the new World configured for the kept session
+//     (configure_continued_session_world), the own client's view rebuilt,
+//     then the window's remaining pumps (5 with an own client, 4 dedicated).
 //   after the kernel boot's PreMission pass and the round counters' reset,
 //     the round init over the kept slots
 //     (HostRole::init_round_after_premission -> init_all_player_entities_for_round).
 //   the boot's phase B ends with the load-end S2C 0x7B to every slot.
 // The host pumps its socket at the witnessed points: the teardown's pump ahead
 // of the slot reset, then the load's with its spawn gate held (D-NET-116): its
-// first (the 0x25s leave there when the send clock allows), then its window
-// over the rebuilt streams after the per-slot reset, so a joiner reloading in
-// place is answered from its kept slot; the load end's 0x7B leaves at the first
-// tick.
+// first, then its window spread through the load as retail's is, so the 0x25s
+// leave at the first pump whose send clock is open (before the terrain when
+// the clock allows) and a joiner reloading in place is answered from its kept
+// slot at a later pump inside the load; its replies leave ahead of the load
+// end's 0x7B, which leaves at the first tick.
+// [orig: Game_StartMission @0x524360 - Server_PumpNetworkTransport @0x5245E8,
+//  @0x524A63, @0x524F76, @0x524F8C, @0x525256, @0x5253EA, @0x52589D, @0x5258E5,
+//  @0x5259EC (an own client's), @0x525A5C, @0x525AC5]
 
 #include <base/io/crt_rand.h>
 #include <runtime/mission/mission_catalog.h>

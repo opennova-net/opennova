@@ -881,6 +881,9 @@ void continue_host_session(HostOwner &owner, const HostConfig &cfg) {
 	// Every mission start resets g_NetQuality (D-NET-NEW-L8-24) [orig: Game_StartMission
 	// @0x524360 - CNetQuality_Reset @0x4C58C0 (the call @0x5243B4)].
 	hud::net_quality_reset(owner.ctx.net_quality_indicators, host_clock_ms(owner));
+}
+
+void configure_continued_session_world(HostOwner &owner, const HostConfig &cfg) {
 	configure_session_world(owner, cfg);
 }
 

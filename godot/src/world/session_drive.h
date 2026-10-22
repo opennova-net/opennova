@@ -138,6 +138,12 @@ public:
 	bool keep_session(MissionRoot *p_runtime);
 	bool has_kept_session() const { return kept_sim_.is_valid(); }
 	int load_next_host_mission(const String &p_bms_name);
+	// That load's head ahead of the world's terrain and its stage pumps at the terrain and
+	// ahead of the objects, on the kept session (Simulation::begin_next_host_mission_load,
+	// pump_host_load_stage); no-ops on any other load.
+	void begin_next_host_mission_load(const Ref<MissionData> &p_mission, const String &p_bms_name,
+			const Ref<ResourceRoot> &p_resource_root);
+	void pump_host_load_stage();
 	int reload_as_joiner();
 	// The NovaWorld session (a NovaWorldClient), handed over by the shell with a
 	// joiner or host load: retail keeps the NWU session playing or hosting

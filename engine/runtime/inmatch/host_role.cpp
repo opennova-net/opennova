@@ -430,23 +430,17 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	pump_load(1 + load_window_pumps());
 }
 
-// The map change's bring-up, inside the next mission's kernel boot where a
-// fresh session's starts: the kept session onto the new World (the context
-// keeps its connections; the per-mission tables, the streams and the rule
-// words are the next map's), the CRT stream carried over, the host's own
-// client view rebuilt over the cleared loopback, the per-slot reset, then a
-// pump of the rebuilt streams. The round init over the kept slots waits for
-// the PreMission pass (init_round_after_premission).
-// [orig: Game_StartMission's authority arm @0x524492..0x52452B, the stream
-//  rebuild @0x5247EB, the mission-data block @0x5248A7, the per-slot reset
-//  @0x5248BC, the round-over clear @0x524A1F, then the server pumps
-//  (Server_PumpNetworkTransport @0x4FD960) @0x524A63 .. @0x525AC5 ahead of the
-//  EventTrigger_UpdateAllWithFlag2 call @0x525B86; the two receives ahead of the
-//  block, the authority's client-protocol receive @0x524813 and the gate
-//  session's update @0x52481D, run no server handler]
-void HostRole::bring_up_next_mission(const HostBringup &bringup) {
-	mission::MissionKernel &kernel = *kernel_;
-	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
+// See host_role.h. The map change's next mission start up to its terrain, on the kept
+// session alone: the old World is gone (begin_host_map_change) and the next one does not
+// exist yet, so nothing here reads one. The load's pumps then run while it loads, where
+// retail's do: the reset's 0x25s leave at the first whose send clock is open, and a kept
+// joiner's reload legs (its C2S 0x48 / 0x47 / 0x33) are answered from its kept slot at the
+// next, ahead of the load end's S2C 0x7B.
+// [orig: Game_StartMission's authority arm @0x524492..0x52452B; the two receives ahead of
+//  the block, the authority's client-protocol receive @0x524813 and the gate session's
+//  update @0x52481D, run no server handler]
+void HostRole::begin_next_mission_load(HostBringup head) {
+	const inmatch::HostConfig &host_cfg = head.host_cfg;
 	if (host_cfg.client_process != nullptr) client_process_ = host_cfg.client_process;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	// [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6), as the
@@ -458,9 +452,64 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	ctx.tick_count_ms = inmatch::host_clock_ms(state.host_owner);
 	inmatch::gate_clocks_mission_start(ctx);
 	client_process_->file_transfer_session.start_mission();
+	// The own client's loopback starts the load empty; its view is rebuilt over it at the
+	// bring-up (bring_up_next_mission), so what the load's pumps send it reaches the new one.
+	state.host_loop.clear();
+	inmatch::set_server_text(ctx, head.server_text);
+	// The mission text [orig: Game_StartMission - TextResource_LoadMissionTextBin @0x5247CE].
+	ctx.mission_text_loaded = head.mission_text.loaded;
+	ctx.mission_briefing3 = head.mission_text.briefing3();
+	ctx.mission_briefing2 = head.mission_text.briefing2();
+	ctx.mission_text_title = head.mission_text.get_string("info", "title");
+	// The next mission's start sets the session title again, over a SetServerName's, the
+	// mount's override table answering first, ahead of the rebuilt mission-data block
+	// [orig: Game_ApplySessionSettingsToGlobals @0x552145..0x55219E;
+	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E983]. The integrity tables stay the
+	// previous mission's until the load's def loads rebuild them (bring_up_next_mission)
+	// [orig: Game_StartMission - AmmoDef_LoadAll @0x525495, WeaponDefs_LoadFile @0x5254BD].
+	head.host_cfg.text_override = head.mission_text.override_table.get();
+	head.host_cfg.config.integrity_sources = ctx.config.integrity_sources;
+	inmatch::continue_host_session(state.host_owner, head.host_cfg);
+	// The per-slot reset, after the mission-data block [orig: Game_StartMission
+	//  @0x5248AC..0x5248BC].
+	if (ctx.is_in_session != 0 && ctx.is_authority != 0)
+		inmatch::Server_ResetAllPlayerSlotFrameState(ctx);
+	// The chat rings start every mission empty: CHAT GET and the status page list none of
+	// the last map's lines [orig: Game_StartMission @0x524A10 -> Chat_ClearAllChannels
+	//  @0x497D30].
+	server_console_clear(ctx);
+	next_mission_head_run_ = true;
+	window_pumps_run_ = 0;
+	// Then the window's first pumps over the reset slots and the rebuilt streams, the spawn
+	// gate still held (D-NET-116), around the BMS header's second read [orig: Game_StartMission
+	//  - Server_PumpNetworkTransport @0x524A63, BMS_LoadAndValidateHeader @0x524F66,
+	//  Server_PumpNetworkTransport @0x524F76].
+	pump_load_stage();
+	pump_load_stage();
+}
+
+void HostRole::pump_load_stage() {
+	pump_load();
+	++window_pumps_run_;
+}
+
+// The map change's bring-up, inside the next mission's kernel boot where a
+// fresh session's starts, past the load's head and stages: the kept session onto
+// the new World (the context keeps its connections; the per-mission tables and the
+// rule words are the next map's), the CRT stream carried over, the def loads'
+// integrity tables, the host's own client view rebuilt over the loopback, then the
+// window's remaining pumps. The round init over the kept slots waits for the
+// PreMission pass (init_round_after_premission).
+// [orig: Game_StartMission - AmmoDef_LoadAll @0x525495, WeaponDefs_LoadFile @0x5254BD,
+//  Entity_InitAllFromModels @0x52567F, then the server pumps (Server_PumpNetworkTransport
+//  @0x4FD960) @0x52589D, @0x5258E5, @0x5259EC, @0x525A5C and @0x525AC5 ahead of the
+//  EventTrigger_UpdateAllWithFlag2 call @0x525B86]
+void HostRole::bring_up_next_mission(const HostBringup &bringup) {
+	mission::MissionKernel &kernel = *kernel_;
+	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	state.client_runtime.reset();
 	local_round_reset_seen_ = kernel.local.round_reset_revision;
-	state.host_loop.clear();
 	ctx.world = &kernel.world;
 	ctx.mission = &kernel.mission;
 	ctx.rotation = rotation_;
@@ -468,26 +517,23 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	apply_rule_words(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
 			host_cfg.title);
 	kernel.world.crt_rand = map_change.crt_rand;
-	inmatch::set_server_text(ctx, bringup.server_text);
 	ctx.terrain_til_data = bringup.terrain_til_data;
-	ctx.mission_text_loaded = bringup.mission_text.loaded;
-	ctx.mission_briefing3 = bringup.mission_text.briefing3();
-	ctx.mission_briefing2 = bringup.mission_text.briefing2();
-	ctx.mission_text_title = bringup.mission_text.get_string("info", "title");
 	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
-	// The next mission's start sets the session title again, over a SetServerName's, ahead
-	// of the rebuilt mission-data block [orig: Game_ApplySessionSettingsToGlobals
-	//  @0x552145..0x55219E; CNapiGameSession_InitRandomSeedOrRequest @0x51E983].
-	inmatch::continue_host_session(state.host_owner, host_cfg);
+	// A first load's second chat clear, past the stages' pumps, so a line a joiner sent
+	// while the map loaded is gone, then the def loads' integrity tables [orig:
+	// Game_StartMission - `is_first_load` (= !is_restart) @0x5243A6, its test @0x525425,
+	// Chat_ClearAllChannels @0x52546D, AmmoDef_LoadAll @0x525495, WeaponDefs_LoadFile
+	// @0x5254BD].
+	server_console_clear(ctx);
+	ctx.config.integrity_sources = host_cfg.config.integrity_sources;
+	inmatch::configure_continued_session_world(state.host_owner, host_cfg);
 	map_change.torn_down = false;
 	if (host_cfg.serve_and_play) make_client_runtime(host_cfg.config.game_type);
-	// The per-slot reset, after the mission-data block [orig: Game_StartMission
-	//  @0x5248AC..0x5248BC].
-	if (ctx.is_in_session != 0 && ctx.is_authority != 0)
-		inmatch::Server_ResetAllPlayerSlotFrameState(ctx);
-	// Then the load's pumps over the reset slots and the rebuilt streams, the spawn
-	// gate still held (D-NET-116) [orig: Game_StartMission @0x524A63 .. @0x525AC5].
-	pump_load(load_window_pumps());
+	// Then the window's pumps the head and the stages left, over the new World, the spawn
+	// gate still held (D-NET-116).
+	pump_load(load_window_pumps() - window_pumps_run_);
+	next_mission_head_run_ = false;
+	window_pumps_run_ = 0;
 }
 
 // The map change's round init, after the kernel boot's PreMission pass and

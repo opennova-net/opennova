@@ -1,15 +1,19 @@
 // Simulation — the map rotation (D-NET-331): the host screen's START seed over
-// the mounted mission catalog, the host's round-end map change and the
-// joiner's reload in place. The rotation, the router, the teardown's arms and
+// the mounted mission catalog, the host's round-end map change with its next
+// load's head and stage pumps, and the joiner's reload in place. The rotation, the router, the teardown's arms and
 // the reload legs are the engine's (inmatch/mission_rotation.h,
 // inmatch/map_change.h, JoinerConnection::begin_mission_reload); this TU only
 // feeds them the session's catalog and keeps the session across the world's
 // reload.
 #include "simulation/simulation_internal.h"
 
+#include <base/gameprofile/game_type.h> // game_type::for_mission_attribs (the head's session record)
 #include <base/io/strutil.h>
+#include <runtime/inmatch/host_boot.h> // begin_next_host_mission_load
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/map_change.h>
+#include <runtime/mission/mission_sidecars.h> // mission_base_name
+#include <runtime/mission/runtime_boot.h>     // boot_files_from_index
 
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
@@ -80,6 +84,43 @@ String Simulation::begin_host_map_change() {
 	// The next boot continues this session (boot_mission reads the latch).
 	net_.map_change_pending = true;
 	return opennova::to_gd(net_.rotation().list.map_file);
+}
+
+void Simulation::stage_next_mission_session_config(const opennova::bms::File &p_document) {
+	// The map change's next map: the session keeps its config, the rotation names the map
+	// and its mode (Game_StartMission's authority arm, inmatch/map_change.h).
+	net_.host_session_config.mission_file = net_.rotation().list.map_file;
+	net_.host_session_config.game_type = net_.rotation().list.map_game_type;
+	net_.host_session_config.mission_name = p_document.get_mission_name();
+	net_.host_session_config.spawn_names.clear();
+}
+
+// The head runs on the session the map change latched, over the next map's document as the
+// world parsed it, before the world's terrain: the session record boot_mission builds for it
+// (its mission file the runtime's, the file's name), the mount's text-override table and the
+// session's score.ini (engine inmatch/host_boot.h carries the witnesses).
+void Simulation::begin_next_host_mission_load(const Ref<MissionData> &p_mission,
+		const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file) {
+	namespace inmatch = opennova::inmatch;
+	if (!net_.map_change_pending || host_role_ == nullptr || !is_host_listening() ||
+			p_mission.is_null() || p_resource_root.is_null())
+		return;
+	const opennova::bms::File &document = p_mission->native_file();
+	stage_next_mission_session_config(document);
+	const std::string mission_file = opennova::to_std(p_mission_file.replace("\\", "/").get_file());
+	const PackedByteArray override_table = p_resource_root->get_expansion_override_table();
+	inmatch::begin_next_host_mission_load(*host_role_,
+			opennova::mission::boot_files_from_index(p_resource_root->native_index()),
+			opennova::mission::mission_base_name(mission_file),
+			std::vector<uint8_t>(override_table.ptr(), override_table.ptr() + override_table.size()),
+			host_session_cfg(opennova::game_type::for_mission_attribs(document.header.attrib_flags),
+					mission_file),
+			/*session_score_ini=*/true);
+}
+
+void Simulation::pump_host_load_stage() {
+	if (net_.map_change_pending && host_role_ != nullptr && host_role_->next_mission_load_begun())
+		host_role_->pump_load_stage();
 }
 
 bool Simulation::begin_joiner_reload() {

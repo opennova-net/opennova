@@ -245,8 +245,13 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
 		last_load_timeline_ = timeline;
 	} else {
+		// A host's map change starts the next mission ahead of its terrain, and pumps its
+		// session through the load's stages, as retail's load does (engine
+		// inmatch/map_change.h; HostRole::begin_next_mission_load / pump_load_stage).
+		drive_.begin_next_host_mission_load(p_mission, p_bms_name, p_resource_root);
 		const int head_error = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
 		if (head_error != OK) return head_error;
+		drive_.pump_host_load_stage(); // after the terrain
 	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_OBJECTS));
 
@@ -255,6 +260,10 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	start_mission_root();
 	// A join whose S2C 0x11 ran the head keeps that load's placer, the avatar models in it.
 	if (!head_loaded) placer_.unref();
+	// A host's map change: the stages after the mission's document and after the avatars
+	// and the clock, ahead of the objects.
+	drive_.pump_host_load_stage();
+	drive_.pump_host_load_stage();
 	place_mission_objects(p_mission);
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_RUNTIME));

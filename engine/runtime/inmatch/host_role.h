@@ -116,13 +116,37 @@ public:
 	// protocol's receive, its handlers and its send at the load's pump points,
 	// with the load's spawn gate set (NapiNPServerCtx::net_spawn_suspended,
 	// D-NET-116): a map change's teardown pump (the gate clear) and its load's first,
-	// then the load's window after each bring-up (load_window_pumps; a fresh session's
-	// first too) [orig: Server_PumpNetworkTransport @0x4FD960, called by
+	// then the load's window (load_window_pumps): a map change's from its load's head
+	// through its stages and its bring-up, a fresh session's all after its bring-up
+	// (with its first) [orig: Server_PumpNetworkTransport @0x4FD960, called by
 	//  Game_TeardownMission @0x522588 and Game_StartMission @0x5245E8 .. @0x525AC5]. `count` pumps back to back: each steps every
 	// connection's send clock, as each of retail's does (its receive's holdoff step).
 	void pump_load(int count = 1);
 	// The load's pump count from the round-over clear to the PreMission pass.
 	int load_window_pumps() const;
+	// A map change's next mission start, its world-free head, ahead of the load's terrain:
+	// the file-transfer session and the report clocks, the mission text and the "Server"
+	// strings, the continued session (its streams rebuilt), the per-slot reset and the
+	// console's clear, then the window's first two pumps, so the reset's 0x25s and a kept
+	// joiner's reload legs meet the load's pumps while it loads. `head` is the bring-up
+	// record as the boot builds it (its integrity tables the previous mission's until the
+	// load's def loads; HostBringup::next_mission). The embedder runs it, or phase A does
+	// when no one did. [orig: Game_StartMission @0x524360 - the add @0x5244B4 / the store
+	// @0x5244C6, CServerTick_SetState @0x5244A4 / @0x5244AF, TextResource_LoadMissionTextBin
+	// @0x5247CE, Game_SerializeMissionInfoToDataStream @0x5247EB,
+	// CNapiGameSession_InitRandomSeedOrRequest @0x5248A7, Server_ResetAllPlayerSlotFrameState
+	// @0x5248BC, Chat_ClearAllChannels @0x524A10, Server_PumpNetworkTransport @0x524A63 and
+	// @0x524F76]
+	void begin_next_mission_load(HostBringup head);
+	// One of the load's stage pumps between the head and the bring-up: after the terrain,
+	// after the mission's document, after the avatars and the environment clock.
+	// [orig: Game_StartMission - Server_PumpNetworkTransport @0x524F8C (after
+	//  Game_LoadTerrainDuringConnect @0x524F7C), @0x525256 (after Mission_LoadBMSFile
+	//  @0x524FFA), @0x5253EA (after Avatars_LoadComboModels @0x525267 and
+	//  CAIPathData_LoadAINFile @0x52534F)]
+	void pump_load_stage();
+	// The head ran for the load in hand (bring_up_next_mission spends it).
+	bool next_mission_load_begun() const { return next_mission_head_run_; }
 	// The map change's round init over the kept slots, which the host boot
 	// runs after the kernel boot's PreMission pass and the round counters
 	// (map_change.h) [orig: Game_StartMission @0x524360, the
@@ -277,6 +301,10 @@ private:
 	RoleKind kind_ = RoleKind::ListenHost;
 	HostBringup staged_bringup_;
 	CreateSessionResult session_create_ = CreateSessionResult::Created;
+	// A map change's load: its head ran (begin_next_mission_load), and the window's pumps
+	// the head and the stages ran ahead of the bring-up, which runs the rest.
+	bool next_mission_head_run_ = false;
+	int window_pumps_run_ = 0;
 	opennova::IDatagramSocket *socket_ = nullptr;
 	HostRotation *rotation_ = nullptr;
 	std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog_;

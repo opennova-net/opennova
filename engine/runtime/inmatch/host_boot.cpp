@@ -89,7 +89,38 @@ void load_environment_and_water(const mission::BootFileSource &files,
 	kernel.world.env.time_of_day_enum = boot.env_config.time_of_day_enum;
 }
 
+// The loose score.ini over the game type's default table, into the session
+// config before the bring-up: start_host_session copies the score values
+// and the FIELD rows into world.match. Retail opens it from the game
+// directory, never from a PFF.
+// [orig: the load gated on File_IsSingleFile("score.ini") @0x436ED0, a
+//  FindFirstFileA check on disk; GameType_CreateDefaultSettings @0x52DD00;
+//  ScoreConfig_LoadFile @0x52D8A0]
+void apply_session_score_ini(const mission::BootFileSource &files, GameConfig &config) {
+	// The table's fanfare pair first, the title's, which the file only replaces
+	// (GameType_CreateDefaultSettings, world::default_score_exp_fanfare).
+	config.exp_fanfare = world::default_score_exp_fanfare(config.title);
+	std::vector<uint8_t> score_bytes;
+	if (files.read_loose("score.ini", score_bytes) && !score_bytes.empty() &&
+			!load_session_score_config(config,
+					std::string_view(reinterpret_cast<const char *>(score_bytes.data()),
+							score_bytes.size())))
+		io::logf(io::LogLevel::kWarn, "host boot: score.ini rejected; the default table stands");
+}
+
 } // namespace
+
+void begin_next_host_mission_load(HostRole &host, const mission::BootFileSource &files,
+		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table,
+		HostConfig host_cfg, bool session_score_ini) {
+	if (session_score_ini) apply_session_score_ini(files, host_cfg.config);
+	HostBringup head;
+	head.mission_text = read_host_mission_text(files, mission_basename, text_override_table);
+	head.server_text = read_host_server_text(files, head.mission_text.override_table.get());
+	head.host_cfg = std::move(host_cfg);
+	head.next_mission = true;
+	host.begin_next_mission_load(std::move(head));
+}
 
 mission::MissionText read_host_mission_text(const mission::BootFileSource &files,
 		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table) {
@@ -165,24 +196,9 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	if (request.host != nullptr && host_cfg.logs.profile != nullptr)
 		(void)host_cfg.logs.profile->open(host_cfg.config.mission_file);
 
-	// The loose score.ini over the game type's default table, into the session
-	// config before the bring-up: start_host_session copies the score values
-	// and the FIELD rows into world.match. Retail opens it from the game
-	// directory, never from a PFF.
-	// [orig: the load gated on File_IsSingleFile("score.ini") @0x436ED0, a
-	//  FindFirstFileA check on disk; GameType_CreateDefaultSettings @0x52DD00;
-	//  ScoreConfig_LoadFile @0x52D8A0]
-	if (request.host != nullptr && request.session_score_ini) {
-		// The table's fanfare pair first, the title's, which the file only replaces
-		// (GameType_CreateDefaultSettings, world::default_score_exp_fanfare).
-		host_cfg.config.exp_fanfare = world::default_score_exp_fanfare(host_cfg.config.title);
-		std::vector<uint8_t> score_bytes;
-		if (files.read_loose("score.ini", score_bytes) && !score_bytes.empty() &&
-				!load_session_score_config(host_cfg.config,
-						std::string_view(reinterpret_cast<const char *>(score_bytes.data()),
-								score_bytes.size())))
-			io::logf(io::LogLevel::kWarn, "host boot: score.ini rejected; the default table stands");
-	}
+	// The loose score.ini into the session config (apply_session_score_ini).
+	if (request.host != nullptr && request.session_score_ini)
+		apply_session_score_ini(files, host_cfg.config);
 
 	// The host's character table, g_AvatarDefs, which a joiner's add validates its
 	// ids against (D-NET-137): the embedder's when it installed one, else the
@@ -237,6 +253,20 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	if (request.host != nullptr)
 		boot.server_text = read_host_server_text(files, boot.mission_text.override_table.get());
 
+	// A map change's load head, when the embedder ran none ahead of its own loads (a
+	// headless host): the start's world-free legs and the window's first pumps, then the
+	// load's stage pumps below (HostRole::begin_next_mission_load, pump_load_stage).
+	const bool stage_pumps = request.host != nullptr && request.next_mission &&
+			!request.host->next_mission_load_begun();
+	if (stage_pumps) {
+		HostBringup head;
+		head.host_cfg = host_cfg;
+		head.mission_text = boot.mission_text;
+		head.server_text = boot.server_text;
+		head.next_mission = true;
+		request.host->begin_next_mission_load(std::move(head));
+	}
+
 	if (!request.session->begin_load().applied()) {
 		error = "the session did not enter its load";
 		return false;
@@ -274,11 +304,12 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		install_class_attribute_flags(kernel.world, nullptr, boot.charattr);
 	}
 
-	// The chat rings start every mission empty, once its BMS has loaded: on a
-	// map change CHAT GET and the status page list none of the last map's lines.
+	// The chat rings start every mission empty, once its BMS has loaded; a map
+	// change's head cleared them (HostRole::begin_next_mission_load).
 	// [orig: Game_StartMission @0x524A10 -> Chat_ClearAllChannels @0x497D30; the
 	//  start's only earlier exit is the BMS load's failure @0x5247A7]
-	if (request.host != nullptr) server_console_clear(request.host->state.host_owner.ctx);
+	if (request.host != nullptr && !request.next_mission)
+		server_console_clear(request.host->state.host_owner.ctx);
 
 	// The terrain field (the embedder's parsed documents, else the kernel's
 	// file entry), the placed tiles over it and the tileset's .TSD table: the
@@ -297,6 +328,18 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	//  ahead of the Entity_InitAllFromModels call @0x52567F and the
 	//  EventTrigger_UpdateAllWithFlag2 call @0x525B86].
 	load_environment_and_water(files, kernel, boot);
+
+	// A map change's stage pumps the boot owes (stage_pumps above): after the terrain with
+	// its environment, after the mission's document, after the avatars and the environment
+	// clock, all ahead of the def loads and the objects [orig: Game_StartMission -
+	//  Game_LoadTerrainDuringConnect @0x524F7C, Server_PumpNetworkTransport @0x524F8C,
+	//  Mission_LoadBMSFile @0x524FFA, @0x525256, Avatars_LoadComboModels @0x525267, @0x5253EA,
+	//  AmmoDef_LoadAll @0x525495, Entity_InitAllFromModels @0x52567F].
+	if (stage_pumps) {
+		request.host->pump_load_stage();
+		request.host->pump_load_stage();
+		request.host->pump_load_stage();
+	}
 
 	// The anti-cheat challenge sources from this peer's own corpus, built as
 	// the mission load builds retail's ammo.def and weapon.def tables

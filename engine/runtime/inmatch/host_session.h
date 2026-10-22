@@ -220,18 +220,22 @@ struct HostConfig {
 // (server_session.h): no session stands and nothing past the create ran.
 CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg);
 
-// The map change's bring-up (net-re §5.70.6): the next mission inside the SAME
-// session. The owner keeps its context, its connections, their keys and
-// sequencing, its clock and its staged sends; the session config takes the
-// next map's identity, the session-variable stream and the mission-data
-// block rebuild with bumped transfer tokens, the round-end state clears, and
-// the new World (`owner.ctx.world`, set by the caller) is configured as a
-// fresh session's is. No player spawns here: the kept slots spawn after the
-// mission load (inmatch/map_change.h). [orig: Game_StartMission's authority
-// arm @0x524492..0x52452B, the stream rebuild @0x5247EB / its token
-// @0x5247F3, CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (the call
-// @0x5248A7)]
+// The map change's continue (net-re §5.70.6): the next mission inside the SAME
+// session, at its load's world-free head (HostRole::begin_next_mission_load). The
+// owner keeps its context, its connections, their keys and sequencing, its clock
+// and its staged sends; the session config takes the next map's identity, the
+// session-variable stream and the mission-data block rebuild with bumped transfer
+// tokens, and the round-end state clears. No World is read: the next one does not
+// exist yet. [orig: Game_StartMission's authority arm @0x524492..0x52452B, the
+// stream rebuild @0x5247EB / its token @0x5247F3,
+// CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (the call @0x5248A7)]
 void continue_host_session(HostOwner &owner, const HostConfig &cfg);
+
+// The continued session's rules onto the next mission's World (`owner.ctx.world`,
+// set by the caller once the load built it), configured as a fresh session's is.
+// No player spawns here: the kept slots spawn after the mission load
+// (inmatch/map_change.h).
+void configure_continued_session_world(HostOwner &owner, const HostConfig &cfg);
 
 // The host's network pump while it loads a mission, on an in-session authority
 // only: the receive drain with its handlers (a joiner's 0x33 / 0x37 / 0x47 / 0x48

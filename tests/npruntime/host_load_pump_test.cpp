@@ -21,7 +21,7 @@
 //   - a map change pumps at its teardown (the gate clear, the old World, ahead of the slot
 //     reset: Game_TeardownMission @0x522588), at its load's head (the gate set, no World
 //     yet), then the window's nine after the per-slot reset (the kept slot's ping word
-//     already zeroed), never after the 0x7B;
+//     already zeroed; the first five before the next World stands), never after the 0x7B;
 //   - the gate is clear once the load ends;
 //   - the reset's 0x25 to a kept remote leaves at the load pump its send countdown's
 //     residual names (the head for 1), ahead of the 0x7B, or with the 0x7B at the first
@@ -299,10 +299,13 @@ void test_fresh_load_pumps_its_session() {
 
 // A map change: the teardown's pump (the gate clear, the old World, ahead of the slot
 // reset), the next load's first (the gate set, the World gone), the window's nine after
-// the per-slot reset, none after the 0x7B; the gate is clear once the load ends.
+// the per-slot reset (the head's two and the three stages' before the objects, so before
+// the next World stands, then the bring-up's four), none after the 0x7B; the gate is clear
+// once the load ends.
 // [orig: Game_TeardownMission @0x522588 (ahead of the reset @0x52269B); Game_StartMission
 //  @0x524360 - the set @0x524398, Server_PumpNetworkTransport @0x5245E8, the per-slot reset
-//  @0x5248BC, the pumps @0x524A63 .. @0x525AC5, the 0x7B @0x526267, the clear @0x52631B;
+//  @0x5248BC, the pumps @0x524A63 .. @0x5253EA ahead of Entity_InitAllFromModels @0x52567F,
+//  then @0x52589D .. @0x525AC5, the 0x7B @0x526267, the clear @0x52631B;
 //  Server_ResetAllPlayerSlotFrameState @0x4FC320 (the ping word @0x4FC356)]
 void test_map_change_load_pumps_after_the_slot_reset() {
 	auto host = std::make_unique<Host>();
@@ -356,7 +359,9 @@ void test_map_change_load_pumps_after_the_slot_reset() {
 	CHECK(host->boot_current(/*next_mission=*/true));
 	CHECK(drains.size() == 11);
 	for (size_t i = 2; i < drains.size(); ++i) {
-		CHECK(drains[i].world);
+		// The head's two and the stages' three run before the next World stands, the
+		// bring-up's four over it.
+		CHECK(drains[i].world == (i >= 7));
 		CHECK(drains[i].gate == 1);
 		CHECK(drains[i].rtt_ms == 0);
 	}

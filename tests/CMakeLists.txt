@@ -5118,6 +5118,12 @@ add_test(NAME npruntime_player_state_writer COMMAND npruntime_player_state_write
 add_executable(netsim_priority_list_test netsim/priority_list_test.cpp)
 target_link_libraries(netsim_priority_list_test PRIVATE opennova_runtime)
 add_test(NAME netsim_priority_list COMMAND netsim_priority_list_test)
+# The map change's load order: the next mission start's pumps spread through the load,
+# the 0x25 ahead of the terrain, a reload's replies ahead of the 0x7B (L3-s8, x7 round).
+add_executable(npruntime_map_change_load_order_test npruntime/map_change_load_order_test.cpp)
+target_link_libraries(npruntime_map_change_load_order_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_map_change_load_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_map_change_load_order COMMAND npruntime_map_change_load_order_test)
 
 # --- parity lane L4 (spawn/death) ---
 # The player body's death edge raising the player-death transaction in the

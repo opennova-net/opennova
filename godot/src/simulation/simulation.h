@@ -545,6 +545,10 @@ private:
 	// in-memory loads, which stage it themselves (the file boot's engine phase A stages its own).
 	opennova::inmatch::HostConfig host_session_cfg(uint32_t p_game_type,
 			const std::string &p_sp_mission_file = std::string());
+	// The latched map change's session record for its next map (simulation_rotation.cpp):
+	// the rotation's file and mode, the document's name; the load's head and its boot both
+	// take it.
+	void stage_next_mission_session_config(const opennova::bms::File &p_document);
 	opennova::inmatch::HostBringup host_bringup();
 	// The per-frame host owner loop: the ONE inmatch::HostRole::run_tick over the kernel
 	// (drain -> pre-tick -> host_session_pump -> local pumps -> adm ground), with the
@@ -967,6 +971,13 @@ public:
 	// map change (the next map's file; empty when the rotation ended) and the joiner's reload.
 	String begin_host_map_change();
 	bool begin_joiner_reload();
+	// The latched map change's load (engine inmatch/host_boot.h begin_next_host_mission_load):
+	// its world-free head over the next map's document, ahead of the world's terrain, and
+	// one of the stage pumps the world runs at its terrain and ahead of its objects. Both
+	// are no-ops on any other load.
+	void begin_next_host_mission_load(const Ref<MissionData> &p_mission,
+			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
+	void pump_host_load_stage();
 	// The round-over leg of the special-key chain (inmatch::round_over_key): the
 	// hud_round_over bits for a Windows VK and the RESTART key (kArm once the
 	// round-over gate holds; a co-op session's RESTART / ESC store the role's exit).

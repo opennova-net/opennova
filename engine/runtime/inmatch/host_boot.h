@@ -28,7 +28,8 @@
 //
 // A map change (inmatch/map_change.h) boots the next map through the same
 // two phases with HostBootRequest::next_mission: the role's bring-up
-// continues the kept session instead of starting one.
+// continues the kept session instead of starting one, its load's head and
+// stage pumps run ahead of it (begin_next_host_mission_load).
 //
 // Retail's whole sequence is Game_StartMission @0x524360 inside the Game Loop
 // mode's initialize, which the loop's clock never banks (session.cpp carries
@@ -202,6 +203,18 @@ struct HostLoadingBand {
 HostLoadingBand host_loading_band(const mission::BootFileSource &files,
 		const std::string &mission_file, uint32_t game_type, bool game_type_auto,
 		const std::vector<uint8_t> &text_override_table);
+
+// A map change's load head (HostRole::begin_next_mission_load) for an embedder that
+// loads its terrain and objects ahead of phase A (the game's world load): the session
+// config with the loose score.ini when `session_score_ini` (as phase A reads it), the
+// mission text and the "Server" strings, read as phase A reads them. The embedder then
+// runs the load's three stage pumps (HostRole::pump_load_stage) at its own terrain and
+// ahead of its objects; phase A runs neither again. A headless host leaves both to
+// phase A, which runs the head after its text reads and the stages after its terrain
+// and environment.
+void begin_next_host_mission_load(HostRole &host, const mission::BootFileSource &files,
+		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table,
+		HostConfig host_cfg, bool session_score_ini);
 
 // Phase A. False with `error` when the session cannot enter its load, the
 // kernel boot fails, or the host's session create asks for the process exit
