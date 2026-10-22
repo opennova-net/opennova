@@ -107,31 +107,10 @@ private:
 // @0x62DF05, sprintf("%s:%ld") @0x62DF22; the port host-ordered by
 // CNapiUdpSocket_RecvFromWithFilter @0x62D189].
 //
-// The NAPI manager's five packet callbacks, installed on the game's manager
-// (ctx +0xE58, mgr +0x110..+0x120) only while the log is on [orig:
-// NapiLib_SetManagerCallbacks @0x4C6F50, @0x4C6F64..0x4C6FAC] and called from
-// its receive [orig: NapiNPManager_PumpReceive @0x623010; NapiNPManager_HandlePacket
-// @0x622F10]: every datagram the socket hands over (RAW, its socket length), the
-// unpacked packet (COOKED, the CRC-stripped length), the 0x1071 magic packet
-// (BAFFLE), a packet a protocol's opcode handler took (PROTOCOL, the protocol's
-// name, proto +0xDC) and a dropped one (TOSSED with its reason: 1 the receive
-// rate at 100 or more, 2 the receive-rate draw, 3 an unpack failure, 4 no
-// protocol took it).
-// [orig: Network_LogRawPacketReceived @0x4C43A0; Network_LogCookedPacketReceived
-//  @0x4C4440; Network_LogBaffledPacket @0x4C44E0; Network_LogNapiProtocolRecv
-//  @0x4C6100; Network_LogTossedPacket @0x4C4580]
-enum class NapiTossReason : int32_t {
-	RecvRateFull = 1,
-	RecvRateDraw = 2,
-	Unpack = 3,
-	NoProtocol = 4,
-};
-std::string napi_got_raw_text(int32_t bytes, const PeerAddr &from);
-std::string napi_got_cooked_text(int32_t bytes, const PeerAddr &from);
-std::string napi_got_baffle_text(int32_t bytes, const PeerAddr &from);
-std::string napi_got_protocol_text(int32_t bytes, const PeerAddr &from,
-		const std::string &protocol_name);
-std::string napi_tossed_text(int32_t bytes, const PeerAddr &from, NapiTossReason reason);
+// The NAPI manager's five packet callbacks' texts and the protocol's NET GOT are the wire
+// layer's: the LAN browse writes them too (net/npwire/nw_session_framing.h napi_got_raw_text
+// .. napi_tossed_text, net_got_text).
+//
 // The protocol's client-side callbacks (proto +0x26C / +0x270 / +0x274 / +0x27C /
 // +0x280 / +0x284); a host writes none of these: the server side's slots +0x2DC /
 // +0x2E0 / +0x2E4 / +0x2EC are empty stubs and +0x2F0 (byte_4C4680) only sets the
@@ -143,7 +122,6 @@ std::string napi_tossed_text(int32_t bytes, const PeerAddr &from, NapiTossReason
 //  Network_LogOutgoingPacketError @0x4C4920; the side tests
 //  CNapiNPConnection_SendSessionPacket @0x61EFCA..0x61EFE8 and
 //  CNapiNPConnection_ParseMessages @0x625D06..0x625D1A]
-std::string net_got_text(int32_t bytes, const PeerAddr &from, uint32_t opcode);
 std::string net_sending_text(int32_t bytes, const PeerAddr &to, uint32_t opcode, int32_t packet);
 std::string net_processing_text(int32_t bytes, const PeerAddr &from);
 std::string net_unknown_message_text(uint32_t message, int32_t bytes);

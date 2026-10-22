@@ -1571,24 +1571,6 @@ ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hel
 }
 
 // See header.
-bool napi_punkbuster_datagram(const uint8_t *raw, std::size_t len) {
-	if (raw == nullptr || len <= 7 || raw[0] != 0xFF) return false;
-	static const uint8_t kPrefix[] = {0xFF, 0xFF, 0xFF, 'P', 'B', '_'};
-	for (std::size_t i = 0; i < sizeof(kPrefix); ++i) {
-		uint8_t got = raw[1 + i];
-		if (got >= 'a' && got <= 'z') got = static_cast<uint8_t>(got - 'a' + 'A');
-		if (got != kPrefix[i]) return false;
-	}
-	return true;
-}
-
-// See header.
-bool napi_baffle_packet(const std::vector<uint8_t> &unpacked) {
-	return unpacked.size() >= 0x30 && unpacked[0] == 0x71 && unpacked[1] == 0x10 &&
-			unpacked[2] == 0x30 && unpacked[3] == 0x00;
-}
-
-// See header.
 void finish_manager_receive(NapiNPServerCtx &ctx) {
 	if (!ctx.connect_log_disable_queued) return;
 	ctx.connect_log_disable_queued = false;

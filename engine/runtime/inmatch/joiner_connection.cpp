@@ -19,7 +19,6 @@
 #include <base/vfs/vfs.h>
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 #include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the connect start's clear)
-#include <runtime/inmatch/napi_np_protocol.h> // the manager receive's set-asides
 
 #include <algorithm>
 #include <chrono>

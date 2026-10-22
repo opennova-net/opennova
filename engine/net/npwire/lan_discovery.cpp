@@ -330,14 +330,53 @@ bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
 	return open;
 }
 
-void LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size, const PeerAddr &from) {
+bool LanDiscoveryBrowser::hello_passes(const uint8_t *data, size_t size, const PeerAddr &from,
+		LanDiscoveryServer &out) const {
 	// A reply's source must be routable back: an unspecified address cannot be joined.
 	if (!browsing_ || title_ == nullptr || data == nullptr || size == 0 ||
 	    static_cast<int>(from.port) < port_min_ || static_cast<int>(from.port) > port_max_ ||
 	    from.ip == 0)
+		return false;
+	return parse_lan_discovery_reply(*title_, data, size, client_index_, out);
+}
+
+void LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size, const PeerAddr &from) {
+	if (title_ == nullptr || data == nullptr || size == 0) return;
+	connect_log(napi_got_raw_text(static_cast<int32_t>(size), from));
+	if (napi_punkbuster_datagram(data, size)) return;
+	std::vector<uint8_t> unpacked;
+	if (!nw_unpack_inbound(data, size, unpacked)) {
+		connect_log(napi_tossed_text(static_cast<int32_t>(size), from, NapiTossReason::Unpack));
 		return;
+	}
+	const int32_t unpacked_len = static_cast<int32_t>(unpacked.size());
+	connect_log(napi_got_cooked_text(unpacked_len, from));
+	if (napi_baffle_packet(unpacked)) {
+		connect_log(napi_got_baffle_text(unpacked_len, from));
+		return;
+	}
+	// The dispatch: the 0x81 handler's receive leg queues a reply that passes its gates.
 	LanDiscoveryServer server;
-	if (!parse_lan_discovery_reply(*title_, data, size, client_index_, server)) return;
+	const bool taken = hello_passes(data, size, from, server);
+	if (taken)
+		queue_.push_back(QueuedReply{from, std::vector<uint8_t>(data, data + size), unpacked_len});
+	connect_log(taken ? napi_got_protocol_text(unpacked_len, from,
+	                            title_->pn != nullptr ? title_->pn : "")
+	                  : napi_tossed_text(unpacked_len, from, NapiTossReason::NoProtocol));
+}
+
+void LanDiscoveryBrowser::pump_queue() {
+	std::vector<QueuedReply> queued;
+	queued.swap(queue_);
+	for (const QueuedReply &reply : queued) {
+		connect_log(net_got_text(reply.packet_bytes, reply.from, SESSION_OPCODE_SERVER_HELLO));
+		LanDiscoveryServer server;
+		if (hello_passes(reply.datagram.data(), reply.datagram.size(), reply.from, server))
+			record_reply(reply.from, std::move(server));
+	}
+}
+
+void LanDiscoveryBrowser::record_reply(const PeerAddr &from, LanDiscoveryServer server) {
 	// The sender's record: the same HK and SN refresh it and stamp it again in place with
 	// no callback (its node, the row's copy, is not refreshed); anything else replaces it.
 	// [orig: Nwu_HandleServerHello @0x626D20 - the in-place copy @0x627BFA..0x627E24 (the

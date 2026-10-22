@@ -191,8 +191,10 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	game_ = std::make_unique<UdpPumpGameSocket>(pump_);
 	// The start's protocol pump, ahead of the enumerator's first burst: its receive, then the
 	// held server's nodes, which the protocol's list holds ahead of the browse's connection
-	// (engine: inmatch::pump_unstopped_server, D-NET-NEW-L1-26).
+	// (engine: inmatch::pump_unstopped_server, D-NET-NEW-L1-26). The pump's queue pass reads the
+	// receive's queued replies ahead of the nodes' legs (engine: LanDiscoveryBrowser::pump_queue).
 	poll_replies();
+	browser_.pump_queue();
 	pump_held_server();
 
 	Error first_send_error = OK;
@@ -289,8 +291,10 @@ void LanSession::_process(double delta) {
 	// The frame in retail's order (engine: LanDiscoveryBrowser::advance): the replies,
 	// the re-announce and record expiry, the window's gate, then the list's walk; a
 	// re-announce due on the window's last frame still goes out. The frame's protocol pump
-	// steps the process's held server between the receive and the enumerator's sends.
+	// steps the process's held server between the receive and the enumerator's sends, its queue
+	// pass (the replies the receive queued: NET GOT and their records) ahead of the nodes' legs.
 	poll_replies();
+	browser_.pump_queue();
 	pump_held_server();
 	const size_t listed = browser_.servers().size();
 	bool announce_due = false;

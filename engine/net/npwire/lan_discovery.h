@@ -176,8 +176,8 @@ std::string lan_discovery_row_label(const std::string &server_name, const std::s
 // (the browsed port range, a usable source address, our CI, a retail-identity
 // 0x81), the enumerator's session records and the list's row walk. The embedder
 // owns the socket: it sends `burst()` on begin and whenever `advance` reports
-// an announce due, feeds every received datagram to `accept_reply`, and stops
-// when `advance` returns false. That socket is the client's one transport socket
+// an announce due, feeds every received datagram to `accept_reply` and then runs the
+// frame's `pump_queue`, and stops the enumerator when `advance` returns false. That socket is the client's one transport socket
 // for its network type, and the join from a discovered row goes on with it and
 // with the enumerator's connection (D-NET-NEW-R3-3): retail opens one transport
 // socket per mode and never re-opens it between the browse and the join, the join
@@ -302,9 +302,33 @@ public:
 	//  machine @0x6297C3]
 	bool advance(double delta_seconds, bool &announce_due);
 
-	// A datagram received from `from` while browsing: a reply the filter takes is its
-	// sender's session record (the class comment).
+	// The manager's receive of one datagram from the browse's socket, with its packet lines
+	// (napi_got_raw_text .. napi_tossed_text, through set_connect_log): RAW, PunkBuster's
+	// aside, the unpack (its failure TOSSED [3]), COOKED, the magic packet (BAFFLE; a client
+	// reflects none), then the dispatch. The game protocol's 0x81 handler takes a reply the
+	// filter passes while the enumerator runs and queues it for the protocol's pump
+	// (pump_queue): PROTOCOL with the protocol's name; anything else is TOSSED [4]. Nothing
+	// is written before a browse began.
+	// [orig: NapiNPManager_PumpReceive @0x623010 - cb_on_raw @0x623121, the PunkBuster arm
+	//  @0x6231A7..0x6231D9, cb_on_error(3) @0x623229, the cooked callback @0x623254,
+	//  HandlePacket @0x623284; NapiNPManager_HandlePacket @0x622F10 - the magic packet's
+	//  callback @0x622F53 and NapiNP_HandleMagicPacket (the call @0x622F62), the protocols'
+	//  DispatchOpcode @0x622F9B, cb_on_dispatch @0x622FCD, cb_on_error(4) @0x622FF9;
+	//  Nwu_HandleServerHello @0x626D20 - the CI's connection @0x627533 / @0x627541, the
+	//  enumerator running @0x627559, the identity @0x62758B..0x627643, the receive leg
+	//  (its last argument 0 @0x627650) queues to the protocol's server-opcode FIFO (+0x24C
+	//  @0x627F3F, NapiFifo_WritePacketAtomic the call @0x627F45) and returns the
+	//  enumerator's +0x25 @0x627F4A]
 	void accept_reply(const uint8_t *data, size_t size, const PeerAddr &from);
+	// The protocol pump's queue pass, after the frame's receive and ahead of its connections'
+	// legs: each queued reply in arrival order writes NET GOT (its length with the opcode),
+	// then runs the handler's queued leg, which passes the same gates again and is the
+	// sender's session record (the class comment).
+	// [orig: NapiNPProtocol_Pump @0x62A650 - NapiNPProtocol_PumpRecvQueues (the call
+	//  @0x62A6AC); NapiNPProtocol_PumpRecvQueues @0x6266A0 - the server-opcode pass (mask bit
+	//  1 @0x6267ED) over the FIFO +0x24C @0x62681C, NapiLog_OnRecv (proto +0x26C) @0x6268AA,
+	//  the handler with its last argument 1 @0x6268D0]
+	void pump_queue();
 
 	// The LAN list's rows in the order the walk appended them.
 	const std::vector<LanDiscoveryRow> &servers() const { return servers_; }
@@ -354,6 +378,18 @@ private:
 		bool listed = false;
 		LanDiscoveryServer node;
 	};
+	// A reply the 0x81 handler queued: its datagram, its sender, and its packet's length
+	// with the opcode (NET GOT's).
+	struct QueuedReply {
+		PeerAddr from{};
+		std::vector<uint8_t> datagram;
+		int32_t packet_bytes = 0;
+	};
+	// The 0x81 handler's gates, both legs: the browse running, the filter, the reply's CI
+	// and identity (parse_lan_discovery_reply).
+	bool hello_passes(const uint8_t *data, size_t size, const PeerAddr &from,
+			LanDiscoveryServer &out) const;
+	void record_reply(const PeerAddr &from, LanDiscoveryServer server);
 	void create_record(const PeerAddr &from, LanDiscoveryServer server);
 	void destroy_record(size_t index);
 	void expire_records();
@@ -361,6 +397,7 @@ private:
 	void connect_log(const std::string &text) const;
 
 	std::vector<Record> records_;
+	std::vector<QueuedReply> queue_;
 	std::vector<LanDiscoveryRow> servers_;
 	std::function<void(const std::string &)> connect_log_;
 	const TitleIdentity *title_ = nullptr;

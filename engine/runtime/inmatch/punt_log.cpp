@@ -205,37 +205,6 @@ std::string format_text(const char *format, ...) {
 
 } // namespace
 
-std::string napi_got_raw_text(int32_t bytes, const PeerAddr &from) {
-	return format_text("NAPI GOT RAW %ld BYTES FROM %s", static_cast<long>(bytes),
-			peer_addr_to_string(from).c_str());
-}
-
-std::string napi_got_cooked_text(int32_t bytes, const PeerAddr &from) {
-	return format_text("NAPI GOT COOKED %ld BYTES FROM %s", static_cast<long>(bytes),
-			peer_addr_to_string(from).c_str());
-}
-
-std::string napi_got_baffle_text(int32_t bytes, const PeerAddr &from) {
-	return format_text("NAPI GOT BAFFLE %ld BYTES FROM %s", static_cast<long>(bytes),
-			peer_addr_to_string(from).c_str());
-}
-
-std::string napi_got_protocol_text(int32_t bytes, const PeerAddr &from,
-		const std::string &protocol_name) {
-	return format_text("NAPI GOT PROTOCOL %ld BYTES FROM %s [%s]", static_cast<long>(bytes),
-			peer_addr_to_string(from).c_str(), protocol_name.c_str());
-}
-
-std::string napi_tossed_text(int32_t bytes, const PeerAddr &from, NapiTossReason reason) {
-	return format_text("NAPI TOSSED %ld BYTES FROM %s [%ld]", static_cast<long>(bytes),
-			peer_addr_to_string(from).c_str(), static_cast<long>(reason));
-}
-
-std::string net_got_text(int32_t bytes, const PeerAddr &from, uint32_t opcode) {
-	return format_text("NET GOT %ld BYTES FROM %s [0x%2.2lx]", static_cast<long>(bytes),
-			peer_addr_to_string(from).c_str(), static_cast<unsigned long>(opcode));
-}
-
 std::string net_sending_text(int32_t bytes, const PeerAddr &to, uint32_t opcode, int32_t packet) {
 	return format_text("NET SENDING %ld BYTES TO %s [0x%2.2lx, p#%ld]", static_cast<long>(bytes),
 			peer_addr_to_string(to).c_str(), static_cast<unsigned long>(opcode),

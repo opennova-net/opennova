@@ -1,5 +1,7 @@
 #pragma once
 
+#include <net/npwire/peer_addr.h> // the manager receive's packet lines
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -146,6 +148,49 @@ bool nw_decode_inbound(const uint8_t *raw, size_t raw_len,
 bool nw_unpack_inbound(const uint8_t *raw, size_t raw_len, std::vector<uint8_t> &unpacked_out);
 bool nw_split_unpacked(const std::vector<uint8_t> &unpacked, uint8_t &opcode_out,
                        std::vector<uint8_t> &body_out);
+
+// The NAPI manager receive's two set-asides, shared by the host's, the joiner's and the LAN
+// browse's receive: PunkBuster's datagrams (0xFF, then the "\xFF\xFF\xFFPB_" prefix
+// case-insensitively, more than 7 bytes), handed to the PunkBuster handler unpacked with no
+// packet line after RAW (ours runs no PunkBuster leg, D-NET-171) [orig:
+// NapiNPManager_PumpReceive @0x6231A7..0x6231D9; the prefix byte_7DFE30]; and the NAT magic
+// ("baffle") packet, the unpacked words 0x1071 and '0', 48 bytes or more [orig:
+// NapiNPManager_HandlePacket @0x622F1B..0x622F36; NapiNP_HandleMagicPacket @0x622E70].
+bool napi_punkbuster_datagram(const uint8_t *raw, std::size_t len);
+bool napi_baffle_packet(const std::vector<uint8_t> &unpacked);
+
+// The NAPI manager receive's packet lines in _connectlog.txt, each written as ConnectLog's
+// `"<time> : <text>"` while the log is on. An address is Napi_FormatAddress's "a.b.c.d:port"
+// (peer_addr_to_string).
+//
+// The manager's five packet callbacks, installed on the game's manager (ctx +0xE58, mgr
+// +0x110..+0x120) only while the log is on [orig: NapiLib_SetManagerCallbacks @0x4C6F50,
+// @0x4C6F64..0x4C6FAC] and called from its receive [orig: NapiNPManager_PumpReceive
+// @0x623010; NapiNPManager_HandlePacket @0x622F10]: every datagram the socket hands over
+// (RAW, its socket length), the unpacked packet (COOKED, the CRC-stripped length), the 0x1071
+// magic packet (BAFFLE), a packet a protocol's opcode handler took (PROTOCOL, the protocol's
+// name, proto +0xDC) and a dropped one (TOSSED with its reason: 1 the receive rate at 100 or
+// more, 2 the receive-rate draw, 3 an unpack failure, 4 no protocol took it).
+// [orig: Network_LogRawPacketReceived @0x4C43A0; Network_LogCookedPacketReceived
+//  @0x4C4440; Network_LogBaffledPacket @0x4C44E0; Network_LogNapiProtocolRecv
+//  @0x4C6100; Network_LogTossedPacket @0x4C4580]
+enum class NapiTossReason : int32_t {
+	RecvRateFull = 1,
+	RecvRateDraw = 2,
+	Unpack = 3,
+	NoProtocol = 4,
+};
+std::string napi_got_raw_text(int32_t bytes, const PeerAddr &from);
+std::string napi_got_cooked_text(int32_t bytes, const PeerAddr &from);
+std::string napi_got_baffle_text(int32_t bytes, const PeerAddr &from);
+std::string napi_got_protocol_text(int32_t bytes, const PeerAddr &from,
+		const std::string &protocol_name);
+std::string napi_tossed_text(int32_t bytes, const PeerAddr &from, NapiTossReason reason);
+// The protocol's receive callback for each packet its pump reads from a queue, ahead of the
+// handler's queued leg: NET GOT, the packet's length with its opcode, the opcode as two hex
+// digits [orig: NapiLog_OnRecv @0x4C46B0, installed at proto +0x26C by CNapiNetwork_Init
+// @0x4CA908..0x4CA9CD; NapiNPProtocol_PumpRecvQueues @0x6266A0 - the call @0x6268AA].
+std::string net_got_text(int32_t bytes, const PeerAddr &from, uint32_t opcode);
 
 // Encode an outbound reply: prepend `opcode`, NWU-encrypt the body part
 // (server-side encrypt is our nwu_decrypt), then NAPI envelope-wrap.

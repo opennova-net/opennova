@@ -6286,10 +6286,10 @@ bool run_the_session_key_closes_the_connect_log() {
 	session_key();
 	const std::string &text = files.files[inmatch::kConnectLogFile];
 	const std::string want =
-			"T : " + inmatch::napi_got_raw_text(static_cast<int32_t>(raw_bytes), PeerAddr{}) +
-			"\r\n" + "T : " + inmatch::napi_got_cooked_text(packet_bytes, PeerAddr{}) + "\r\n" +
-			"T : " + inmatch::napi_got_protocol_text(packet_bytes, PeerAddr{}, kJo.pn) + "\r\n" +
-			"T : " + inmatch::net_got_text(packet_bytes, PeerAddr{}, 0x83) + "\r\n" +
+			"T : " + napi_got_raw_text(static_cast<int32_t>(raw_bytes), PeerAddr{}) +
+			"\r\n" + "T : " + napi_got_cooked_text(packet_bytes, PeerAddr{}) + "\r\n" +
+			"T : " + napi_got_protocol_text(packet_bytes, PeerAddr{}, kJo.pn) + "\r\n" +
+			"T : " + net_got_text(packet_bytes, PeerAddr{}, 0x83) + "\r\n" +
 			"T : " + inmatch::net_processing_text(packet_bytes, PeerAddr{}) + "\r\n" +
 			"T : NET CLIENT DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.\r\n";
 	if (!expect(!log.enabled() && packet_bytes > 0 && text.substr(header_bytes) == want,

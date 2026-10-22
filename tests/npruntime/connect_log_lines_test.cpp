@@ -90,16 +90,16 @@ std::vector<std::string> log_lines(MemoryFiles &files) {
 
 void test_line_texts() {
 	const PeerAddr peer = peer_addr_from_octets({192, 168, 1, 20}, 3000);
-	CHECK(inmatch::napi_got_raw_text(512, peer) == "NAPI GOT RAW 512 BYTES FROM 192.168.1.20:3000");
-	CHECK(inmatch::napi_got_cooked_text(508, peer) ==
+	CHECK(napi_got_raw_text(512, peer) == "NAPI GOT RAW 512 BYTES FROM 192.168.1.20:3000");
+	CHECK(napi_got_cooked_text(508, peer) ==
 			"NAPI GOT COOKED 508 BYTES FROM 192.168.1.20:3000");
-	CHECK(inmatch::napi_got_baffle_text(48, peer) == "NAPI GOT BAFFLE 48 BYTES FROM 192.168.1.20:3000");
-	CHECK(inmatch::napi_got_protocol_text(508, peer, "jointops") ==
+	CHECK(napi_got_baffle_text(48, peer) == "NAPI GOT BAFFLE 48 BYTES FROM 192.168.1.20:3000");
+	CHECK(napi_got_protocol_text(508, peer, "jointops") ==
 			"NAPI GOT PROTOCOL 508 BYTES FROM 192.168.1.20:3000 [jointops]");
-	CHECK(inmatch::napi_tossed_text(9, peer, inmatch::NapiTossReason::Unpack) ==
+	CHECK(napi_tossed_text(9, peer, NapiTossReason::Unpack) ==
 			"NAPI TOSSED 9 BYTES FROM 192.168.1.20:3000 [3]");
-	CHECK(inmatch::net_got_text(40, peer, 0x83) == "NET GOT 40 BYTES FROM 192.168.1.20:3000 [0x83]");
-	CHECK(inmatch::net_got_text(40, peer, 0x8) == "NET GOT 40 BYTES FROM 192.168.1.20:3000 [0x08]");
+	CHECK(net_got_text(40, peer, 0x83) == "NET GOT 40 BYTES FROM 192.168.1.20:3000 [0x83]");
+	CHECK(net_got_text(40, peer, 0x8) == "NET GOT 40 BYTES FROM 192.168.1.20:3000 [0x08]");
 	CHECK(inmatch::net_sending_text(60, peer, 0x43, 7) ==
 			"NET SENDING 60 BYTES TO 192.168.1.20:3000 [0x43, p#7]");
 	CHECK(inmatch::net_processing_text(32, peer) == "NET PROCESSING 32 BYTES FROM 192.168.1.20:3000");

@@ -13,6 +13,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -276,22 +277,37 @@ void walk(LanDiscoveryBrowser &b) {
     b.advance(0.0, due);
 }
 
+// One datagram through the browse's frame head: the manager's receive (accept_reply), then
+// the protocol pump's queue pass (pump_queue), which records a queued reply.
+void reply(LanDiscoveryBrowser &b, const std::vector<uint8_t> &datagram, const PeerAddr &from) {
+    b.accept_reply(datagram.data(), datagram.size(), from);
+    b.pump_queue();
+}
+
+// A connect-log hook keeping only the session-record lines (the manager's packet lines and
+// NET GOT have their own case).
+std::function<void(const std::string &)> session_lines(std::vector<std::string> &lines) {
+    return [&lines](const std::string &text) {
+        if (text.rfind("NET SESSION", 0) == 0) lines.push_back(text);
+    };
+}
+
 void test_replies_are_filtered_and_listed_at_first_sighting() {
     opennova::LanDiscoveryBrowser b;
     CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32775, kLanConnectTypeLan));
     const std::vector<uint8_t> alpha = server_reply("Alpha", 3, 32);
     // Outside the browsed range, an unusable source, or a foreign packet: no record.
-    b.accept_reply(alpha.data(), alpha.size(), sender("192.168.1.10", 32776));
-    b.accept_reply(alpha.data(), alpha.size(), sender("0.0.0.0", 32768));
+    reply(b, alpha, sender("192.168.1.10", 32776));
+    reply(b, alpha, sender("0.0.0.0", 32768));
     const std::vector<uint8_t> junk = {1, 2, 3};
-    b.accept_reply(junk.data(), junk.size(), sender("192.168.1.10", 32768));
+    reply(b, junk, sender("192.168.1.10", 32768));
     const std::vector<uint8_t> stale = server_reply("Stale", 1, 8, 2, kBrowseCi ^ 0x100u);
-    b.accept_reply(stale.data(), stale.size(), sender("192.168.1.10", 32768));
+    reply(b, stale, sender("192.168.1.10", 32768));
     walk(b);
     CHECK(b.record_count() == 0);
     CHECK(b.servers().empty());
     // A first announce is a record, listed at the frame's walk.
-    b.accept_reply(alpha.data(), alpha.size(), sender("192.168.1.10", 32768));
+    reply(b, alpha, sender("192.168.1.10", 32768));
     CHECK(b.record_count() == 1);
     CHECK(b.servers().empty());
     walk(b);
@@ -305,13 +321,13 @@ void test_replies_are_filtered_and_listed_at_first_sighting() {
     CHECK(b.servers()[0].server.gametype == 2);
     CHECK(b.servers()[0].server.expansion == "revx02");
     // The same host re-announcing with the same HK and SN: its record in place.
-    b.accept_reply(alpha.data(), alpha.size(), sender("192.168.1.10", 32768));
+    reply(b, alpha, sender("192.168.1.10", 32768));
     // Live state moved (a player joined), the same HK and SN: the record is stamped in
     // place and the row keeps its first-sighting counts for the rest of the window.
     const std::vector<uint8_t> alpha4 = server_reply("Alpha", 4, 32);
     const std::vector<uint8_t> bravo = server_reply("Bravo", 0, 16, 5);
-    b.accept_reply(bravo.data(), bravo.size(), sender("192.168.1.11", 32768));
-    b.accept_reply(alpha4.data(), alpha4.size(), sender("192.168.1.10", 32768));
+    reply(b, bravo, sender("192.168.1.11", 32768));
+    reply(b, alpha4, sender("192.168.1.10", 32768));
     walk(b);
     CHECK(b.record_count() == 2);
     CHECK(b.servers().size() == 2);
@@ -321,12 +337,12 @@ void test_replies_are_filtered_and_listed_at_first_sighting() {
     CHECK(b.servers()[1].server.gametype == 5);
     CHECK(b.servers()[1].record_id == 2);
     // The same host on another port is another sender.
-    b.accept_reply(alpha.data(), alpha.size(), sender("192.168.1.10", 32769));
+    reply(b, alpha, sender("192.168.1.10", 32769));
     walk(b);
     CHECK(b.servers().size() == 3);
     // A stopped browser takes nothing; a new window starts empty.
     b.stop();
-    b.accept_reply(alpha.data(), alpha.size(), sender("192.168.1.10", 32770));
+    reply(b, alpha, sender("192.168.1.10", 32770));
     CHECK(b.record_count() == 3);
     CHECK(b.begin(kJo, 2, kBroadcast, 32768, 32775, kLanConnectTypeLan));
     CHECK(b.servers().empty());
@@ -341,7 +357,7 @@ void test_window_lists_at_most_thirty_two_hosts() {
     CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
     const std::vector<uint8_t> reply = server_reply("Many", 1, 8);
     for (int i = 1; i <= 40; ++i)
-        b.accept_reply(reply.data(), reply.size(), sender("10.0.0." + std::to_string(i), 32768));
+        reply(b, reply, sender("10.0.0." + std::to_string(i), 32768));
     walk(b);
     CHECK(b.record_count() == 40);
     CHECK(b.servers().size() == kLanBrowseMaxSessions);
@@ -363,25 +379,25 @@ void test_browse_admits_only_its_network_type() {
     const std::vector<uint8_t> bare_host = server_reply("Bare", 1, 8, 2, kBrowseCi, 0x0u);
     opennova::LanDiscoveryBrowser lan;
     CHECK(lan.begin(kJo, kBrowseCi, kBroadcast, 32768, 32775, kLanConnectTypeLan));
-    lan.accept_reply(nw_host.data(), nw_host.size(), sender("10.0.0.1", 32768));
-    lan.accept_reply(net_host.data(), net_host.size(), sender("10.0.0.2", 32768));
-    lan.accept_reply(lan_host.data(), lan_host.size(), sender("10.0.0.3", 32768));
-    lan.accept_reply(bare_host.data(), bare_host.size(), sender("10.0.0.4", 32768));
+    reply(lan, nw_host, sender("10.0.0.1", 32768));
+    reply(lan, net_host, sender("10.0.0.2", 32768));
+    reply(lan, lan_host, sender("10.0.0.3", 32768));
+    reply(lan, bare_host, sender("10.0.0.4", 32768));
     walk(lan);
     CHECK(lan.servers().size() == 2);
     CHECK(lan.servers()[0].host_ip == "10.0.0.3" && lan.servers()[1].host_ip == "10.0.0.4");
     opennova::LanDiscoveryBrowser nw;
     CHECK(nw.begin(kJo, kBrowseCi, kBroadcast, 32768, 32775, kLanConnectTypeNovaWorld));
-    nw.accept_reply(lan_host.data(), lan_host.size(), sender("10.0.0.3", 32768));
-    nw.accept_reply(nw_host.data(), nw_host.size(), sender("10.0.0.1", 32768));
+    reply(nw, lan_host, sender("10.0.0.3", 32768));
+    reply(nw, nw_host, sender("10.0.0.1", 32768));
     walk(nw);
     CHECK(nw.servers().size() == 1 && nw.servers()[0].host_ip == "10.0.0.1");
     // A filtered session takes no slot: 40 NovaWorld hosts on the LAN screen leave room.
     opennova::LanDiscoveryBrowser capped;
     CHECK(capped.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
     for (int i = 1; i <= 40; ++i)
-        capped.accept_reply(nw_host.data(), nw_host.size(), sender("10.1.0." + std::to_string(i), 32768));
-    capped.accept_reply(lan_host.data(), lan_host.size(), sender("10.2.0.1", 32768));
+        reply(capped, nw_host, sender("10.1.0." + std::to_string(i), 32768));
+    reply(capped, lan_host, sender("10.2.0.1", 32768));
     walk(capped);
     CHECK(capped.servers().size() == 1);
 }
@@ -402,13 +418,13 @@ void test_reply_without_sf_is_listed() {
     CHECK(!out.password_required);
     opennova::LanDiscoveryBrowser b;
     CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32775, kLanConnectTypeLan));
-    b.accept_reply(sf_less.data(), sf_less.size(), sender("192.168.1.20", 32768));
+    reply(b, sf_less, sender("192.168.1.20", 32768));
     walk(b);
     CHECK(b.servers().size() == 1);
     // P2 still gates it: an SF-less NovaWorld-transport host is not listed on the LAN screen.
     const std::vector<uint8_t> nw_sf_less =
             without_field(server_reply("NwNoFlags", 1, 8, 2, kBrowseCi, 0x404u), "SF");
-    b.accept_reply(nw_sf_less.data(), nw_sf_less.size(), sender("192.168.1.21", 32768));
+    reply(b, nw_sf_less, sender("192.168.1.21", 32768));
     walk(b);
     CHECK(b.servers().size() == 1);
 }
@@ -429,25 +445,25 @@ void test_reply_without_sf_is_listed() {
 void test_records_replace_in_place_and_write_their_lines() {
     std::vector<std::string> lines;
     opennova::LanDiscoveryBrowser b;
-    b.set_connect_log([&lines](const std::string &text) { lines.push_back(text); });
+    b.set_connect_log(session_lines(lines));
     CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32775, kLanConnectTypeLan));
     CHECK(lines.empty());
     const PeerAddr host = sender("192.168.1.20", 32768);
     const std::vector<uint8_t> first = server_reply_hk("Alpha", 0x11u);
-    b.accept_reply(first.data(), first.size(), host);
+    reply(b, first, host);
     walk(b);
     CHECK(lines.size() == 1);
     CHECK(!lines.empty() && lines[0] == "NET SESSION DISCOVERED AT 192.168.1.20:32768 [Alpha]");
     CHECK(b.servers().size() == 1 && b.servers()[0].record_id == 1);
     // The same HK and SN, another count: in place, no line.
     const std::vector<uint8_t> again = server_reply_hk("Alpha", 0x11u, 5);
-    b.accept_reply(again.data(), again.size(), host);
+    reply(b, again, host);
     CHECK(lines.size() == 1);
     CHECK(b.record_count() == 1);
     // Another HK (the host restarted): removed, then discovered again; the walk appends
     // the new record's row beside the old one.
     const std::vector<uint8_t> restarted = server_reply_hk("Alpha", 0x22u, 2);
-    b.accept_reply(restarted.data(), restarted.size(), host);
+    reply(b, restarted, host);
     CHECK(lines.size() == 3);
     if (lines.size() == 3) {
         CHECK(lines[1] == "NET SESSION AT 192.168.1.20:32768 [Alpha] HAS BEEN REMOVED.");
@@ -463,7 +479,7 @@ void test_records_replace_in_place_and_write_their_lines() {
     }
     // Another SN under the same HK replaces it too; the REMOVED line names the old SN.
     const std::vector<uint8_t> renamed = server_reply_hk("Bravo", 0x22u);
-    b.accept_reply(renamed.data(), renamed.size(), host);
+    reply(b, renamed, host);
     CHECK(lines.size() == 5);
     if (lines.size() == 5) {
         CHECK(lines[3] == "NET SESSION AT 192.168.1.20:32768 [Alpha] HAS BEEN REMOVED.");
@@ -477,8 +493,8 @@ void test_records_replace_in_place_and_write_their_lines() {
     const std::vector<uint8_t> la = server_reply_hk(long_a, 0x33u);
     const std::vector<uint8_t> lb = server_reply_hk(long_b, 0x33u);
     const PeerAddr other = sender("192.168.1.21", 32768);
-    b.accept_reply(la.data(), la.size(), other);
-    b.accept_reply(lb.data(), lb.size(), other);
+    reply(b, la, other);
+    reply(b, lb, other);
     CHECK(lines.size() == 6);
     if (lines.size() == 6)
         CHECK(lines[5] == "NET SESSION DISCOVERED AT 192.168.1.21:32768 [" + std::string(63, 'x') + "]");
@@ -492,9 +508,9 @@ void test_records_replace_in_place_and_write_their_lines() {
     const std::vector<uint8_t> nw = server_reply_hk("Nw", 0x44u, 1, 0x404u);
     const std::vector<uint8_t> nw_restarted = server_reply_hk("Nw", 0x45u, 1, 0x404u);
     const size_t rows = b.servers().size();
-    b.accept_reply(nw.data(), nw.size(), nw_host);
+    reply(b, nw, nw_host);
     CHECK(lines.empty());
-    b.accept_reply(nw_restarted.data(), nw_restarted.size(), nw_host);
+    reply(b, nw_restarted, nw_host);
     CHECK(lines.size() == 1);
     CHECK(!lines.empty() && lines[0] == "NET SESSION AT 192.168.1.30:32768 [Nw] HAS BEEN REMOVED.");
     walk(b);
@@ -512,18 +528,18 @@ void test_records_replace_in_place_and_write_their_lines() {
 void test_records_expire_after_thirty_seconds_while_browsing() {
     std::vector<std::string> lines;
     opennova::LanDiscoveryBrowser b;
-    b.set_connect_log([&lines](const std::string &text) { lines.push_back(text); });
+    b.set_connect_log(session_lines(lines));
     b.set_windowed(false);
     CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
     const PeerAddr alpha_host = sender("10.0.0.1", 32768);
     const PeerAddr bravo_host = sender("10.0.0.2", 32768);
     const std::vector<uint8_t> alpha = server_reply_hk("Alpha", 1u);
     const std::vector<uint8_t> bravo = server_reply_hk("Bravo", 2u);
-    b.accept_reply(alpha.data(), alpha.size(), alpha_host); // stamped at 0
-    b.accept_reply(bravo.data(), bravo.size(), bravo_host);
+    reply(b, alpha, alpha_host); // stamped at 0
+    reply(b, bravo, bravo_host);
     bool due = false;
     CHECK(b.advance(20.0, due));
-    b.accept_reply(bravo.data(), bravo.size(), bravo_host); // stamped again at 20 s
+    reply(b, bravo, bravo_host); // stamped again at 20 s
     CHECK(b.advance(10.0, due)); // 30 s since Alpha's stamp: not past it
     CHECK(b.record_count() == 2);
     CHECK(lines.size() == 2);
@@ -533,7 +549,7 @@ void test_records_expire_after_thirty_seconds_while_browsing() {
     if (lines.size() == 3) CHECK(lines[2] == "NET SESSION AT 10.0.0.1:32768 [Alpha] HAS BEEN REMOVED.");
     CHECK(b.servers().size() == 2); // Alpha's row stays
     // Alpha answers again: a new record, discovered again, and a new row beside its old one.
-    b.accept_reply(alpha.data(), alpha.size(), alpha_host);
+    reply(b, alpha, alpha_host);
     walk(b);
     CHECK(lines.size() == 4);
     CHECK(b.servers().size() == 3);
@@ -544,10 +560,10 @@ void test_records_expire_after_thirty_seconds_while_browsing() {
     // A windowed browse: its end stops the enumerator, and its records stay unexpired.
     lines.clear();
     opennova::LanDiscoveryBrowser w;
-    w.set_connect_log([&lines](const std::string &text) { lines.push_back(text); });
+    w.set_connect_log(session_lines(lines));
     CHECK(w.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
     CHECK(w.advance(1.0, due));
-    w.accept_reply(alpha.data(), alpha.size(), alpha_host); // stamped at 1 s
+    reply(w, alpha, alpha_host); // stamped at 1 s
     CHECK(!w.advance(29.5, due)); // the window ends at 30.5 s
     CHECK(w.servers().size() == 1); // the last frame's walk still lists it
     CHECK(!w.advance(60.0, due));
@@ -565,12 +581,12 @@ void test_records_expire_after_thirty_seconds_while_browsing() {
 void test_every_drain_writes_each_records_removed_line() {
     std::vector<std::string> lines;
     opennova::LanDiscoveryBrowser b;
-    b.set_connect_log([&lines](const std::string &text) { lines.push_back(text); });
+    b.set_connect_log(session_lines(lines));
     CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
     const std::vector<uint8_t> lan = server_reply_hk("Lan", 1u);
     const std::vector<uint8_t> nw = server_reply_hk("Nw", 2u, 1, 0x404u);
-    b.accept_reply(lan.data(), lan.size(), sender("10.0.0.1", 32768));
-    b.accept_reply(nw.data(), nw.size(), sender("10.0.0.2", 32768));
+    reply(b, lan, sender("10.0.0.1", 32768));
+    reply(b, nw, sender("10.0.0.2", 32768));
     walk(b);
     CHECK(b.servers().size() == 1);
     lines.clear();
@@ -584,7 +600,7 @@ void test_every_drain_writes_each_records_removed_line() {
     CHECK(b.record_count() == 0 && b.servers().empty());
     // A drain alone (the screen's activation, a join's enumerate) keeps the rows; a drain
     // with no records writes nothing.
-    b.accept_reply(lan.data(), lan.size(), sender("10.0.0.1", 32768));
+    reply(b, lan, sender("10.0.0.1", 32768));
     walk(b);
     b.stop();
     lines.clear();
@@ -714,9 +730,9 @@ void test_a_row_joins_the_listed_session_at_its_index() {
     const std::vector<uint8_t> alpha = server_reply_hk("Alpha", 0x11u);
     const std::vector<uint8_t> nw = server_reply_hk("Nw", 0x22u, 1, 0x404u);
     const std::vector<uint8_t> bravo = server_reply_hk("Bravo", 0x33u);
-    b.accept_reply(alpha.data(), alpha.size(), alpha_host);
-    b.accept_reply(nw.data(), nw.size(), nw_host);
-    b.accept_reply(bravo.data(), bravo.size(), bravo_host);
+    reply(b, alpha, alpha_host);
+    reply(b, nw, nw_host);
+    reply(b, bravo, bravo_host);
     walk(b);
     CHECK(b.servers().size() == 2);
     LanDiscoveryRow join;
@@ -731,7 +747,7 @@ void test_a_row_joins_the_listed_session_at_its_index() {
     // Alpha restarts (another HK): its record and node are replaced, the new node at the
     // list's tail, and the walk appends its row beside the old one.
     const std::vector<uint8_t> alpha_restarted = server_reply_hk("Alpha", 0x44u, 2);
-    b.accept_reply(alpha_restarted.data(), alpha_restarted.size(), alpha_host);
+    reply(b, alpha_restarted, alpha_host);
     walk(b);
     CHECK(b.servers().size() == 3);
     if (b.servers().size() == 3) {
@@ -750,7 +766,7 @@ void test_a_row_joins_the_listed_session_at_its_index() {
     // Bravo's next 0x81 sets its SF under the same HK and SN: the record in place takes it
     // (the join's PW gate), the row keeps the node's first copy.
     const std::vector<uint8_t> bravo_locked = server_reply_hk("Bravo", 0x33u, 1, 0x904u, 1u);
-    b.accept_reply(bravo_locked.data(), bravo_locked.size(), bravo_host);
+    reply(b, bravo_locked, bravo_host);
     walk(b);
     CHECK(b.servers().size() == 3);
     if (b.servers().size() == 3) CHECK(!b.servers()[1].server.password_required);
@@ -764,6 +780,77 @@ void test_a_row_joins_the_listed_session_at_its_index() {
     b.drain_records();
     CHECK(b.servers().size() == 3);
     CHECK(!b.join_session(0, join));
+}
+
+// D-NET-NEW-L8-8 (a): the browse's packet lines. Each datagram the browse's socket hands over
+// writes the manager's receive lines: RAW, then TOSSED [3] for a datagram that does not
+// unpack, else COOKED and the dispatch's line, PROTOCOL (the game protocol's name) for a 0x81
+// the hello handler queues, TOSSED [4] for anything it does not take (a foreign CI, another
+// opcode, any reply once the enumerator stopped). The protocol pump's queue pass then writes
+// each queued reply's NET GOT (its length with the opcode) ahead of its record's DISCOVERED
+// line; nothing is recorded before that pass.
+// [orig: NapiNPManager_PumpReceive @0x623010 - cb_on_raw @0x623121, cb_on_error(3) @0x623229,
+//  the cooked callback @0x623254; NapiNPManager_HandlePacket @0x622F10 - cb_on_dispatch
+//  @0x622FCD, cb_on_error(4) @0x622FF9; Nwu_HandleServerHello @0x626D20 - the CI @0x627541,
+//  the enumerator running @0x627559, the queue @0x627F45; NapiNPProtocol_PumpRecvQueues
+//  @0x6266A0 - NapiLog_OnRecv @0x6268AA ahead of the handler @0x6268D0]
+void test_each_datagram_writes_the_managers_lines_and_net_got() {
+    std::vector<std::string> lines;
+    opennova::LanDiscoveryBrowser b;
+    b.set_connect_log([&lines](const std::string &text) { lines.push_back(text); });
+    // Before a browse began there is no protocol: nothing is written.
+    const std::vector<uint8_t> alpha = server_reply_hk("Alpha", 0x11u);
+    const PeerAddr host = sender("10.0.0.1", 32768);
+    b.accept_reply(alpha.data(), alpha.size(), host);
+    CHECK(lines.empty());
+    CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
+    const std::vector<uint8_t> foreign = server_reply("Foreign", 1, 8, 2, kBrowseCi ^ 0x100u);
+    const std::vector<uint8_t> junk = {1, 2, 3};
+    const std::vector<uint8_t> probe = b.probe(32768); // a 0x41: no client handler takes it
+    const auto cooked = [](const std::vector<uint8_t> &datagram) {
+        std::vector<uint8_t> unpacked;
+        return nw_unpack_inbound(datagram.data(), datagram.size(), unpacked)
+                ? std::to_string(unpacked.size())
+                : std::string("?");
+    };
+    const std::string at = " BYTES FROM 10.0.0.1:32768";
+    b.accept_reply(alpha.data(), alpha.size(), host);
+    b.accept_reply(foreign.data(), foreign.size(), host);
+    b.accept_reply(junk.data(), junk.size(), host);
+    b.accept_reply(probe.data(), probe.size(), host);
+    CHECK(b.record_count() == 0); // queued, not yet recorded
+    const std::vector<std::string> received = {
+        "NAPI GOT RAW " + std::to_string(alpha.size()) + at,
+        "NAPI GOT COOKED " + cooked(alpha) + at,
+        "NAPI GOT PROTOCOL " + cooked(alpha) + at + " [" + std::string(kJo.pn) + "]",
+        "NAPI GOT RAW " + std::to_string(foreign.size()) + at,
+        "NAPI GOT COOKED " + cooked(foreign) + at,
+        "NAPI TOSSED " + cooked(foreign) + at + " [4]",
+        "NAPI GOT RAW 3" + at,
+        "NAPI TOSSED 3" + at + " [3]",
+        "NAPI GOT RAW " + std::to_string(probe.size()) + at,
+        "NAPI GOT COOKED " + cooked(probe) + at,
+        "NAPI TOSSED " + cooked(probe) + at + " [4]",
+    };
+    CHECK(lines == received);
+    lines.clear();
+    b.pump_queue();
+    CHECK(b.record_count() == 1);
+    const std::vector<std::string> pumped = {
+        "NET GOT " + cooked(alpha) + at + " [0x81]",
+        "NET SESSION DISCOVERED AT 10.0.0.1:32768 [Alpha]",
+    };
+    CHECK(lines == pumped);
+    // The queue is empty after its pass.
+    lines.clear();
+    b.pump_queue();
+    CHECK(lines.empty());
+    // Once the enumerator stopped, the hello handler takes nothing: TOSSED [4], no queue.
+    b.stop();
+    b.accept_reply(alpha.data(), alpha.size(), host);
+    b.pump_queue();
+    CHECK(lines.size() == 3);
+    if (lines.size() == 3) CHECK(lines[2] == "NAPI TOSSED " + cooked(alpha) + at + " [4]");
 }
 
 int main() {
@@ -784,6 +871,7 @@ int main() {
     test_proxy_rendezvous_leads_each_burst();
     test_enumerate_and_join_browse_has_no_window();
     test_a_row_joins_the_listed_session_at_its_index();
+    test_each_datagram_writes_the_managers_lines_and_net_got();
     if (failures == 0) std::printf("lan_discovery_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
