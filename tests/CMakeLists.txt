@@ -5542,6 +5542,11 @@ add_executable(npruntime_join_probe_words_test npruntime/join_probe_words_test.c
 target_link_libraries(npruntime_join_probe_words_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_join_probe_words_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_join_probe_words COMMAND npruntime_join_probe_words_test)
+# The host's GetTickCount readers on the process clock across a held logic tick (D-NET-NEW-L8-29..).
+add_executable(npruntime_host_process_clock_test npruntime/host_process_clock_test.cpp)
+target_link_libraries(npruntime_host_process_clock_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_process_clock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_process_clock COMMAND npruntime_host_process_clock_test)
 
 # --- parity lane L9 (NovaWorld) ---
 add_executable(npruntime_listing_baffle_key_test npruntime/listing_baffle_key_test.cpp)

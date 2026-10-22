@@ -625,8 +625,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						st.time_sync_previous_client_ms = client_ms;
 					} else {
 						st.time_sync_latest_client_ms = client_ms;
+						// GetTickCount, the process clock (D-NET-NEW-L8-29)
+						// [orig: NapiNPServerMsg_ValidateTimeSync @0x5022B4].
 						st.time_sync_current_host_ms =
-								io::host_milliseconds_for_logic_tick(now_tick);
+								world::authority_tick_count_ms(world, now_tick);
 						const bool round_ok = client_delta_fits_retail_time_window(
 								client_ms - st.time_sync_previous_client_ms,
 								st.time_sync_current_host_ms -

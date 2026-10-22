@@ -1667,4 +1667,11 @@ inline uint32_t authority_tick_count_ms(const World &world) {
                                : io::host_milliseconds_for_logic_tick(world.logic_tick);
 }
 
+// The same on a path that carries the host's own tick (the session dispatch): the bound
+// process clock, else the seam over `host_tick` (D-NET-NEW-L8-29).
+inline uint32_t authority_tick_count_ms(const World *world, uint32_t host_tick) {
+    return world != nullptr && world->tick_count_ms ? world->tick_count_ms()
+                                                    : io::host_milliseconds_for_logic_tick(host_tick);
+}
+
 } // namespace opennova::world

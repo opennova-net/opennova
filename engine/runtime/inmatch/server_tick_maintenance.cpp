@@ -502,8 +502,11 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 					{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)},
 					/*reliable=*/false);
 
-		const uint32_t host_ms =
-				io::host_milliseconds_for_logic_tick(world.logic_tick);
+		// The time-sync stamps are GetTickCount, the process clock the host binds (D-NET-NEW-L8-29)
+		// [orig: Server_RecordCaptureAndSendScore @0x507CA0 - GetTickCount @0x507CC2 into
+		//  +0x15F58 @0x507CC4 when zero, @0x507CDA into +0x15F5C @0x507CDC with the sequence's
+		//  add @0x507CD3].
+		const uint32_t host_ms = world::authority_tick_count_ms(world);
 		if (reply.time_sync_host_baseline_ms == 0)
 			reply.time_sync_host_baseline_ms = host_ms;
 		if (reply.time_sync_round_host_ms == 0) {
