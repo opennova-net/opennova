@@ -15,16 +15,6 @@
 
 namespace opennova::inmatch {
 
-namespace {
-
-// |v| as `cdq; xor; sub` leaves it: INT32_MIN stays itself.
-int32_t abs32(int32_t v) {
-	return static_cast<int32_t>((static_cast<uint32_t>(v) ^ static_cast<uint32_t>(v >> 31)) -
-			static_cast<uint32_t>(v >> 31));
-}
-
-} // namespace
-
 bool collect_takeover_status(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		hud::HudTakeoverFacts &out) {
 	out = hud::HudTakeoverFacts{};
@@ -45,14 +35,14 @@ bool collect_takeover_status(const RoleView &view, const world::SpawnZoneRegistr
 		if (zone == nullptr) continue;
 		const ClientRuntime::ZoneState::Entry &e = pair.second.entry;
 		// The 2-D length over the wrapped word deltas, the min against
-		// flt_7C19E0, ftol; the height's absolute word delta
-		// [orig: @0x537FC0..0x538001, @0x538003..0x53800E].
+		// flt_7C19E0, ftol; the height's absolute word delta (`cdq; xor; sub`,
+		// INT32_MIN stays itself) [orig: @0x537FC0..0x538001, @0x538003..0x53800E].
 		const double dx = static_cast<double>(io::bam_sub(zone->position.x.q16, tx));
 		const double dy = static_cast<double>(io::bam_sub(zone->position.y.q16, ty));
 		double length = std::sqrt(dx * dx + dy * dy);
 		if (!(length <= 2147418112.0)) length = 2147418112.0;
 		const int32_t horizontal = io::retail_ftol_sse2(length);
-		const int32_t height = abs32(io::bam_sub(zone->position.z.q16, tz));
+		const int32_t height = io::bam_abs(io::bam_sub(zone->position.z.q16, tz));
 		// Bit 0: a running entry [orig: @0x538017..0x53802F].
 		if (!(e.window_active || e.value_active)) continue;
 		if (e.value_active && e.value_target == e.value_limit) continue;

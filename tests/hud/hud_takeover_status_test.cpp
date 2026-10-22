@@ -97,9 +97,9 @@ void compose_cases() {
 	CHECK(!s.first_count && s.window_row && !s.second_bar);
 	CHECK(s.status == "!Taking over building PSP");
 	// Inside half the bound radius the distance floors at zero.
-	HudTakeoverFacts near = building_psp();
-	near.distance_q16 = 1 << 16;
-	CHECK(compose_takeover_status(near, 1, text).distance == "0m");
+	HudTakeoverFacts inside = building_psp();
+	inside.distance_q16 = 1 << 16;
+	CHECK(compose_takeover_status(inside, 1, text).distance == "0m");
 	// The def picks the line: a vehicle PSP, a plain spawn point, then the
 	// non-SpawnPoint defs [orig: @0x59B925..0x59B9D6].
 	HudTakeoverFacts f = building_psp();
