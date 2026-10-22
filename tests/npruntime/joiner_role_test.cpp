@@ -27,6 +27,9 @@
 #include <formats/mission/mission.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/mission/seat_spec_extract.h> // the def load's seat table (a 0x18 row's)
+#include <runtime/assets/asset_store.h>
+#include <base/resource_index/resource_index.h>
 
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/collision.h>
@@ -48,7 +51,9 @@
 
 #include <base/io/bam.h>
 
+#include "../common/file_io.h"
 #include "../common/hull_brain.h"
+#include "../common/test_paths.h"
 
 #include <chrono>
 #include <cmath>
@@ -3949,6 +3954,80 @@ bool run_the_settle_materializes_the_world_stream() {
 			"settle stream: the next update keeps the one placed row and its identity");
 }
 
+// A 0x18 row of a type the mission start's install never saw loads its def as the record
+// lands: the type's seat table joins the installed one and the row takes its seats, the
+// ones the def load's userpoint walk gives the type.
+// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - EntityDef_LoadModelsAndCallbacks called
+//  @0x433BFB; EntityDef_LoadModelsAndCallbacks @0x439F50 - the seat walk @0x43A47B..0x43A5CD]
+bool run_a_full_spawn_row_loads_its_def() {
+	const std::string synth =
+			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth";
+	if (test_io::is_lfs_pointer(test_io::read_file(synth + "/mount.3di"))) {
+		std::printf("[skip] fixtures/threedi/synth/mount.3di is an unpulled LFS pointer\n");
+		return true;
+	}
+	ResourceIndex index;
+	if (!expect(index.scan(synth, std::string(), VfsMountMode::LooseOnly),
+			    "0x18 def load: the synthetic model directory indexes"))
+		return false;
+	assets::AssetStore store{&index};
+	constexpr uint16_t kType = 5004;
+	const std::string text = "begin \"Seat Fixture Vehicle\"\r\n id 105004\r\n graphic mount\r\nend\r\n";
+	def::DefItemsFile items{};
+	if (!expect(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(text.data()),
+			            text.size(), &items) == 0,
+			    "0x18 def load: the authored row parses"))
+		return false;
+	// The seats the type's def load gives it, read off the same row and model.
+	mission::SeatSpecExtraction loaded;
+	mission::extract_item_seat_specs(items,
+			[&store](const std::string &graphic) { return store.model(graphic).get(); },
+			{int(kType) + mission::kItemIdOffset}, loaded);
+	const mission::ItemSeatSpec *expected = mission::item_seat_spec_for_type(loaded.specs, kType);
+	bool ok = expect(expected != nullptr && !expected->seats.empty(),
+			"0x18 def load: the mount graphic gives the type seats");
+
+	Harness h;
+	w::World &world = h.kernel->world;
+	h.kernel->wire_header_world = true;
+	world.registry.configure_pool(1, 16);
+	h.kernel->set_assets(&store);
+	h.kernel->set_items_table(&items);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	ok &= expect(mission::item_seat_spec_for_type(h.kernel->seat_specs, kType) == nullptr,
+			"0x18 def load: the mission start's table holds no row of the type");
+	const w::EntityHandle vehicle{0x1003};
+	FullEntitySpawnRecord rec;
+	rec.slot_id = vehicle.packed;
+	rec.item_type = 1;
+	rec.item_type_id = kType;
+	rec.pos_x = 12 << 16;
+	rec.pos_y = -30 << 16;
+	rec.pos_z = 2 << 16;
+	h.role.runtime->view().apply(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(rec));
+	h.role.run_tick(h.input);
+	const mission::ItemSeatSpec *installed =
+			mission::item_seat_spec_for_type(h.kernel->seat_specs, kType);
+	ok &= expect(installed != nullptr && expected != nullptr &&
+					installed->seats.size() == expected->seats.size(),
+			"0x18 def load: the type's seat table joins the installed one");
+	const w::Entity *row = world.registry.get(vehicle);
+	bool same_seats = row != nullptr && expected != nullptr &&
+			row->seats.size() == expected->seats.size();
+	for (size_t i = 0; same_seats && i < row->seats.size(); ++i)
+		same_seats = row->seats[i].type == expected->seats[i].type &&
+				row->seats[i].retail_slot == expected->seats[i].retail_slot &&
+				row->seats[i].bone_index == expected->seats[i].bone_index;
+	ok &= expect(same_seats, "0x18 def load: the row takes its def's seats");
+	h.kernel->set_items_table(nullptr);
+	h.kernel->set_assets(nullptr);
+	def::def_free_items(&items);
+	return ok;
+}
+
 } // namespace
 
 // A pool-1 shooter's round takes the Indoors bit retail's client keeps for the
@@ -4366,6 +4445,7 @@ int main() {
 	ok &= run_zoom_rule_follows_the_session_flags();
 	ok &= run_role_runtimes_step_the_process_report_count();
 	ok &= run_the_settle_materializes_the_world_stream();
+	ok &= run_a_full_spawn_row_loads_its_def();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

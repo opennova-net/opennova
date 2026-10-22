@@ -21,6 +21,7 @@
 
 #include <net/npwire/ingame_decode.h>    // kRoundEventFlag* (the fire-mode byte)
 #include <net/npwire/ingame_encode.h>    // the C2S 0x06 fired-round descriptor pose
+#include <net/npwire/ingame_message_id.h> // s2c::FULL_ENTITY_SPAWN (a 0x18 row's def load)
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 #include <net/title/title_identity.h>    // TitleIdentity::game_id (the rules' title)
 #include <net/novaworld/lobby_identity.h> // read_gate_metrics_locale (the join's PING)
@@ -556,6 +557,22 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	// or a C2S 0x0E pick consults the world.
 	++world_sync_serial_;
 	kernel.resweep_item_traits();
+	// A 0x18 row's def loads as its record lands, so a type new since the mission start
+	// takes its seat, mount and attachment table before the row is seated below; a def
+	// already loaded loads nothing. The rows streamed before the mission start took theirs
+	// at its pass over the live pool-1 and pool-2 slots: a header-only joiner's settle
+	// installs the table over every streamed row's type.
+	// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - EntityDef_LoadModelsAndCallbacks
+	//  called @0x433BFB; EntityDef_LoadModelsAndCallbacks @0x439F50 - the loaded test
+	//  @0x439F9C..0x439FB3; Game_ReloadEntityModelsAndCallbacks @0x522830 - the pool-1 call
+	//  @0x5229B8, the pool-2 call @0x522B16]
+	for (const world::EntityLifetime lifetime : sync.spawned) {
+		const replication::ClientEntityState *wire =
+				runtime->state().find(lifetime.handle.packed);
+		if (wire != nullptr && wire->spawn_tag == s2c::FULL_ENTITY_SPAWN &&
+				mission::item_seat_spec_for_type(kernel.seat_specs, wire->type_id) == nullptr)
+			kernel.merge_item_seat_specs(wire->type_id);
+	}
 	auto refresh_seats = [&](const std::vector<world::EntityLifetime> &rows) {
 		for (const world::EntityLifetime lifetime : rows) {
 			if (!mission::pool_takes_item_seat_spec(lifetime.handle.pool())) continue;

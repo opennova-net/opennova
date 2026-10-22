@@ -511,6 +511,13 @@ public:
 	//  Entity_InitAllFromModels @0x40E460 (the pool-1 call @0x40E5D3);
 	//  NapiNPClientMsg_FullEntitySpawn @0x433780 (the call @0x433E82)]
 	bool init_item_class_brain(world::EntityHandle handle);
+	// Every items.def row's seat, mount and attachment table is built at the def load in
+	// retail; ours builds a placed type's at the boot (a header-only joiner's at its mission
+	// start's settle, over every streamed row's type) and any other type's at its first
+	// runtime spawn (a teammate, a deployable, a joiner's 0x18 row), merged into seat_specs
+	// in type order.
+	// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50]
+	void merge_item_seat_specs(int32_t item_type);
 
 	// world::IPoseProvider: the seat leg is the kernel's own; the muzzle and
 	// userpoint legs ride collision_pose (the sim-clock skeleton / PANM pose).
@@ -570,11 +577,6 @@ private:
 	assets::AssetStore owned_assets_{&index};
 
 	BootFileSource files_;
-	// Every items.def row's seat, mount and attachment table is built at the def load in
-	// retail; ours builds a placed type's at the boot and any other type's at its first
-	// runtime spawn (a teammate, a deployable), merged into seat_specs in type order.
-	// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50]
-	void merge_item_seat_specs(int32_t item_type);
 	// The .aip row named `profile` (lowercase), loaded from the mission's files at its first
 	// use as AIProfile_LoadOrFind loads one; null when no file parses.
 	// [orig: AIProfile_LoadOrFind @0x45FD80]
