@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace opennova {
@@ -162,5 +163,64 @@ std::string gate_metrics_ping_text(const GateMetricsHost &host, std::string_view
 // [orig: Server_SendMetricsToGate - Crypto_EncryptBuffer @0x4FB35B, CNapiNetwork_SendUDPPacket
 //  @0x4FB37E; CNapiNetwork_SendUDPPacket @0x4C4D30 -> CNapiNPManager_SendTo(.., 1) @0x4C4D56]
 std::vector<uint8_t> gate_metrics_datagram(std::string_view text);
+
+// The process's ping manager as PING reads it: the NovaWorld browser's last sweep, one entry per
+// listed row in list order. A sweep's start frees the old entries and adds one pending entry per
+// row; a reply makes its entry answered with its round trip. Nothing else adds or frees entries
+// (the LAN browser adds none), so they outlive the menu and every session until the next sweep.
+// [orig: CNapiNetwork_Init @0x4CA4A0 - NapiPingManager_Create (the call @0x4CAC38) into
+//  g_NapiNPCtx.ping_manager (+0xE64 @0x4CAC42), handed to g_GameMenu +0x84 @0x5525F8;
+//  NapiGameList_StartPingSweep @0x63BCF0 (called by NapiGameList_ProcessEncryptedResponse
+//  @0x63DCFA and the menu script's action 9 @0x649AC3) - NapiConnection_PauseAndFreeEnumerators
+//  @0x63BD17, NapiPingEntry_Create per row @0x63BD61 (status 1 @0x63003D, the count @0x6300CC);
+//  CNapiNPConnection_HandlePingResponse @0x62FC20 - the round trip @0x62FC79, status 0 @0x62FC9C]
+struct GatePingManager {
+	struct Entry {
+		int64_t row_id = 0;
+		uint8_t ip[4] = {0, 0, 0, 0}; // +0x28: the row's address, octet 0 first
+		bool answered = false;        // status +0x24 == 0
+		int32_t ms = 0;               // +0x2C: the round trip
+	};
+	std::vector<Entry> entries;
+	// The embedder's id of the sweep the entries belong to; a superseded sweep's results drop.
+	int64_t sweep = 0;
+	// g_GatePingReportTick: the join's last PING stamp, 0 before the first; never reset.
+	// [orig: g_GatePingReportTick @0xA822AC - its only accesses @0x56A4EE / @0x56A506]
+	uint32_t report_tick = 0;
+
+	// A sweep's start over the rows' (row id, dotted address) pairs.
+	void start_sweep(int64_t sweep_id, const std::vector<std::pair<int64_t, std::string>> &rows);
+	// One row's result in ping_sweep.h's fold: a round trip (>= 0) answers the entry.
+	void apply_result(int64_t sweep_id, int64_t row_id, int folded);
+};
+
+// The one ping manager of the process (the game shell's NovaWorld browser feeds it).
+GatePingManager &process_gate_ping_manager();
+
+// PING's entries: the answered ones with a round trip >= 0, in list order, then shell-sorted on
+// the round trip (CPairList_ShellSort: ascending, Knuth's 3h + 1 gaps grown from count / 9; an
+// entry shifts past every earlier one whose round trip is not below its own, so equal round trips
+// do not keep list order).
+// [orig: Server_SendPingMetricsToGate @0x511BF0 - the walk @0x511E86..0x511EB3 (the status test
+//  @0x511E8E, the round trip's sign @0x511E97, CPairList_AddEntry @0x511E9F), CPairList_ShellSort
+//  (the call @0x511EBA); CPairList_ShellSort @0x526C00 - the first gap @0x526C08..0x526C27, the
+//  shift @0x526C70..0x526C9A (its stop @0x526C7B), the gap / 3 @0x526CC4..0x526CD6]
+std::vector<GateMetricsPingEntry> gate_ping_sorted_entries(const GatePingManager &manager);
+
+// The join's throttle ahead of PING: METPING's minutes above 0, then no report yet or more than
+// minutes x 60000 ms since the last (32-bit, unsigned); a due report stamps the clock.
+// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - g_GateMetPingMinutes @0x56A4DE (jle
+//  @0x56A4E6), GetTickCount @0x56A4E8, the stamp's test @0x56A4EE..0x56A4F6, imul 0xEA60
+//  @0x56A4F8, the unsigned test @0x56A500..0x56A504, the stamp @0x56A506]
+bool gate_ping_report_due(uint32_t &report_tick, int32_t met_ping_minutes, uint32_t now_ms);
+
+// PING's own gates and text, "" when nothing goes: no gate address, METPING under 1, or no entry
+// at all. Any entry lets it go; only the answered ones print ENTRY groups.
+// [orig: Server_SendPingMetricsToGate @0x511BF0 - g_GateAddress @0x511C0B, g_GateMetPingMinutes
+//  @0x511C17 (jl @0x511C1E), the manager @0x511C25, its entry count @0x511C33..0x511C39,
+//  Game_ReadCCBinFile @0x511CEC]
+std::string gate_ping_report_text(const GatePingManager &manager, uint32_t gate_address,
+                                  int32_t met_ping_minutes, const GateMetricsHost &host,
+                                  std::string_view cc_bin);
 
 } // namespace opennova

@@ -1,4 +1,5 @@
 #include <net/novaworld/gate_metrics.h>
+#include <net/novaworld/ping_sweep.h> // parse_ping_ipv4
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>
 
@@ -355,6 +356,91 @@ std::vector<uint8_t> gate_metrics_datagram(std::string_view text) {
 		return {};
 	packet.resize(packet_size);
 	return packet;
+}
+
+// [orig: NapiGameList_StartPingSweep @0x63BCF0 - the clear @0x63BD17, each row's
+//  Network_FormatIPAddressToString @0x63BD4F into NapiPingEntry_Create @0x63BD61; the entry's
+//  address resolved from that text (CNapiGateManager_ResolveHostAddress, the call @0x62F92C)]
+void GatePingManager::start_sweep(int64_t sweep_id,
+                                  const std::vector<std::pair<int64_t, std::string>> &rows) {
+	sweep = sweep_id;
+	entries.clear();
+	for (const auto &[row_id, dotted] : rows) {
+		Entry entry;
+		entry.row_id = row_id;
+		uint32_t addr = 0;
+		if (parse_ping_ipv4(dotted, addr)) {
+			for (int i = 0; i < 4; ++i) entry.ip[i] = static_cast<uint8_t>(addr >> (8 * i));
+		}
+		entries.push_back(entry);
+	}
+}
+
+// [orig: CNapiNPConnection_HandlePingResponse @0x62FC20 - +0x2C @0x62FC79, +0x24 = 0 @0x62FC9C;
+//  the failures' negative statuses (CNapiPingEntry_ProcessTick @0x62F900) answer nothing]
+void GatePingManager::apply_result(int64_t sweep_id, int64_t row_id, int folded) {
+	if (sweep_id != sweep) return;
+	for (Entry &entry : entries) {
+		if (entry.row_id != row_id) continue;
+		entry.answered = folded >= 0;
+		entry.ms = folded >= 0 ? folded : 0;
+	}
+}
+
+GatePingManager &process_gate_ping_manager() {
+	static GatePingManager manager;
+	return manager;
+}
+
+// [orig: Server_SendPingMetricsToGate @0x511BF0 - @0x511E86..0x511EB3; CPairList_ShellSort
+//  @0x526C00]
+std::vector<GateMetricsPingEntry> gate_ping_sorted_entries(const GatePingManager &manager) {
+	std::vector<GateMetricsPingEntry> pairs;
+	for (const GatePingManager::Entry &entry : manager.entries) {
+		if (!entry.answered || entry.ms < 0) continue;
+		GateMetricsPingEntry pair;
+		std::copy(entry.ip, entry.ip + 4, pair.ip);
+		pair.ms = entry.ms;
+		pairs.push_back(pair);
+	}
+	// CPairList_ShellSort over the 1-based slots 1..count.
+	const int count = static_cast<int>(pairs.size());
+	int gap = 1;
+	const int ninth = count / 9;
+	if (ninth >= 1) {
+		do gap = 3 * gap + 1;
+		while (gap <= ninth);
+	}
+	for (; gap > 0; gap /= 3) {
+		for (int i = gap + 1; i <= count; ++i) {
+			const GateMetricsPingEntry item = pairs[static_cast<size_t>(i - 1)];
+			int j = i;
+			while (j > gap && !(pairs[static_cast<size_t>(j - gap - 1)].ms < item.ms)) {
+				pairs[static_cast<size_t>(j - 1)] = pairs[static_cast<size_t>(j - gap - 1)];
+				j -= gap;
+			}
+			pairs[static_cast<size_t>(j - 1)] = item;
+		}
+	}
+	return pairs;
+}
+
+// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - @0x56A4DE..0x56A506]
+bool gate_ping_report_due(uint32_t &report_tick, int32_t met_ping_minutes, uint32_t now_ms) {
+	if (met_ping_minutes <= 0) return false;
+	if (report_tick != 0 &&
+	    now_ms - report_tick <= static_cast<uint32_t>(met_ping_minutes) * 60000u)
+		return false;
+	report_tick = now_ms;
+	return true;
+}
+
+// [orig: Server_SendPingMetricsToGate @0x511BF0 - @0x511C0B..0x511C4E]
+std::string gate_ping_report_text(const GatePingManager &manager, uint32_t gate_address,
+                                  int32_t met_ping_minutes, const GateMetricsHost &host,
+                                  std::string_view cc_bin) {
+	if (gate_address == 0 || met_ping_minutes < 1 || manager.entries.empty()) return {};
+	return gate_metrics_ping_text(host, cc_bin, gate_ping_sorted_entries(manager));
 }
 
 } // namespace opennova

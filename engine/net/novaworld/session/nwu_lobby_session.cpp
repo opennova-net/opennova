@@ -1249,4 +1249,25 @@ NwuLobbySession::GateMemory &process_gate_memory() {
 	return memory;
 }
 
+// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - @0x56A4DE..0x56A50B;
+//  Server_SendPingMetricsToGate @0x511BF0 - LABEL g_ServerLabel @0x511CDD, GV g_VersionText
+//  @0x511D50, g_IsDedicatedServer (METEXT) @0x511D58, the send @0x5120CE]
+void send_join_gate_ping_report(IDatagramSocket &socket, uint32_t now_ms,
+                                const NwuLobbySession::GateMemory &memory, GatePingManager &pings,
+                                GateMetricsHost host, std::string_view cc_bin) {
+	const GateResponse &gate = memory.response;
+	if (!gate_ping_report_due(pings.report_tick, gate.met_ping, now_ms)) return;
+	host.label = gate.met_label;
+	host.met_ext = gate.met_ext != 0;
+	const std::string text =
+			gate_ping_report_text(pings, memory.gate_address, gate.met_ping, host, cc_bin);
+	if (text.empty()) return;
+	const std::vector<uint8_t> dg = gate_metrics_datagram(text);
+	if (dg.empty()) return;
+	PeerAddr to;
+	to.ip = memory.gate_address;
+	to.port = static_cast<uint16_t>(gate.met_port);
+	socket.send_to(to, dg.data(), dg.size());
+}
+
 } // namespace opennova

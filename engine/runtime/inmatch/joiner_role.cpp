@@ -23,6 +23,11 @@
 #include <net/npwire/ingame_encode.h>    // the C2S 0x06 fired-round descriptor pose
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 #include <net/title/title_identity.h>    // TitleIdentity::game_id (the rules' title)
+#include <net/novaworld/lobby_identity.h> // read_gate_metrics_locale (the join's PING)
+#include <net/novaworld/nwu_lobby_session.h> // send_join_gate_ping_report, process_gate_memory
+
+#include <base/gameprofile/gameprofile.h> // the title's version text (the join's PING)
+#include <base/vfs/vfs.h>                 // vfs_country_code (the join's PING's CC.BIN)
 
 #include <base/io/fixed.h>               // kFp16OneD, fp16_16_to_float
 #include <base/io/perf_clock.h>          // perf_now_us (the frame's phase clocks)
@@ -228,8 +233,21 @@ void JoinerRole::poll_preload() {
 		if (link_errors != 0) runtime->raise_net_quality_link_errors(link_errors);
 	}
 	if (!first_send.empty()) send(first_send);
-	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_))
-		send(dg);
+	const std::vector<std::vector<uint8_t>> frame = runtime->Client_ProcessNetworkFrame(now_tick_);
+	// The join's connect succeeded: a NovaWorld join sends PING to the gate's metrics address
+	// over the join's socket ahead of the JOIN (D-NET-NEW-L9-22).
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - the NovaWorld test @0x56A4D6,
+	//  Server_SendPingMetricsToGate (the call @0x56A50B) ahead of the JOIN's queue @0x56A53F]
+	if (runtime->take_join_connected() && join_novaworld_ && socket_ != nullptr &&
+			title_ != nullptr) {
+		GateMetricsHost host;
+		host.version = gameprofile::gameprofile_by_id(title_->game_id)->version_text;
+		read_gate_metrics_locale(host.locale);
+		send_join_gate_ping_report(*socket_, static_cast<uint32_t>(runtime->join_clock_ms()),
+				process_gate_memory(), process_gate_ping_manager(), std::move(host),
+				vfs_country_code(runtime->expansion_version_root()));
+	}
+	for (const std::vector<uint8_t> &dg : frame) send(dg);
 	++now_tick_;
 }
 

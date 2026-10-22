@@ -1340,6 +1340,11 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 		// binding-supplied install root and the latched SUS2 name reads the same
 		// loose file at the same point in the exchange [orig: Expansion_SwitchTo
 		// @0x5688c0 -> Expansion_LoadAssets @0x4a4885; the JOIN write @0x42a2b4].
+		// The join's connect succeeded: a NovaWorld join's PING goes ahead of this JOIN
+		// (take_join_connected, D-NET-NEW-L9-22) [orig: MultiPlayer_JoinSessionStateMachine
+		//  @0x56A320 - UI_JoinSelectedSession's success @0x56A4CE, PING @0x56A50B, the JOIN
+		//  @0x56A524].
+		join_connected_ = true;
 		out.outbound.push_back(frame_inner_pending(
 				0x00, build_join_request(advertised_expansion_,
 						vfs_expansion_version_checksum(

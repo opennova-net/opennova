@@ -54,6 +54,26 @@ bool read_locale_identity(LobbyIdentityParams &out) {
 #endif
 }
 
+// [orig: Server_SendPingMetricsToGate @0x511BF0 - @0x511D88..0x511D8E, @0x511DE6..0x511DEC,
+//  @0x511E3D]
+bool read_gate_metrics_locale(GateMetricsLocale &out) {
+#ifdef _WIN32
+	char name[512]{};
+	const int country = GetLocaleInfoA(0x400, LOCALE_SENGCOUNTRY, name, static_cast<int>(sizeof(name)));
+	out.country_name = static_cast<signed char>(country) > 0 ? name : "";
+	name[0] = '\0';
+	const int language = GetLocaleInfoA(0x400, LOCALE_SENGLANGUAGE, name, static_cast<int>(sizeof(name)));
+	out.language = static_cast<signed char>(language) > 0 ? name : "";
+	TIME_ZONE_INFORMATION timezone{};
+	GetTimeZoneInformation(&timezone);
+	out.tz_bias = timezone.Bias;
+	return true;
+#else
+	(void)out;
+	return false;
+#endif
+}
+
 // [orig: CDKey_GenerateHardwareFingerprint @0x4a4a00 / _0 @0x4a4d00 — GetVolumeInformationA on the
 //  current drive, then GetAdaptersInfo's first Ethernet adapter address]
 bool read_retail_machine_inputs(RetailMachineInputs &out) {

@@ -5476,6 +5476,11 @@ add_executable(gate_metrics_reports_test npruntime/gate_metrics_reports_test.cpp
 target_link_libraries(gate_metrics_reports_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(gate_metrics_reports_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gate_metrics_reports COMMAND gate_metrics_reports_test)
+# The joiner's METPROTOCOL PING at its join's connect, over the process's ping manager
+# (D-NET-NEW-L9-22).
+add_executable(npruntime_join_gate_ping_test npruntime/join_gate_ping_test.cpp)
+target_link_libraries(npruntime_join_gate_ping_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_join_gate_ping COMMAND npruntime_join_gate_ping_test)
 
 # --- parity lane LI (input seam) ---
 add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)

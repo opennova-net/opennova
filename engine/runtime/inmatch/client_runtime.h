@@ -776,6 +776,14 @@ public:
 	void set_expansion_version_root(std::string game_root) {
 		if (joiner_) joiner_->set_expansion_version_root(std::move(game_root));
 	}
+	// That root, whose CC.BIN a NovaWorld join's PING reads ("" off a joiner).
+	std::string expansion_version_root() const {
+		return joiner_ != nullptr ? joiner_->expansion_version_root() : std::string();
+	}
+	// The join's connect edge, read once (JoinerConnection::take_join_connected). Joiner only.
+	bool take_join_connected() {
+		return role_ == Role::Joiner && joiner_ != nullptr && joiner_->take_join_connected();
+	}
 	// The .joi-recovered game-session APPID join token (JoinerConnection::set_app_id).
 	// Joiner only; "0" is the LAN default.
 	void set_app_id(std::string token) {

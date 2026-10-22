@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <net/novaworld/client_session.h>
+#include <net/novaworld/gate_metrics.h> // GatePingManager / GateMetricsHost (the joiner's PING)
 #include <net/novaworld/gate_response.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
@@ -462,5 +463,20 @@ private:
 // The process's one gate memory, for an embedder whose NovaWorld menu entries all share it as
 // retail's globals are shared (the game shell's NovaWorldClient; its menu's teardown forgets it).
 NwuLobbySession::GateMemory &process_gate_memory();
+
+// The joiner's PING at its join's connect, which the caller runs on a NovaWorld join alone: the
+// throttle over `memory`'s METPING and `pings`' stamp, then PING's own gates and text, encrypted
+// and enveloped (gate_metrics_datagram) to the gate address at METIPPORT over the join's socket,
+// retail's one manager socket. `host` carries the version text and the machine locale; its label
+// and METEXT are the gate reply's. The send is a plain sendto ahead of the 0x00 JOIN's queue.
+// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4: UI_JoinSelectedSession's
+//  success (the call @0x56A4C9, its test @0x56A4CE..0x56A4D0), the NovaWorld test @0x56A4D6, the
+//  throttle @0x56A4DE..0x56A506, Server_SendPingMetricsToGate (the call @0x56A50B), the 0x00
+//  JOIN's write and queue @0x56A510..0x56A53F; Server_SendPingMetricsToGate @0x511BF0 -
+//  Crypto_EncryptBuffer @0x5120AB, CNapiNetwork_SendUDPPacket(&ctx, g_GateAddress, g_GatePort,
+//  ..) @0x5120CE]
+void send_join_gate_ping_report(IDatagramSocket &socket, uint32_t now_ms,
+                                const NwuLobbySession::GateMemory &memory, GatePingManager &pings,
+                                GateMetricsHost host, std::string_view cc_bin);
 
 } // namespace opennova

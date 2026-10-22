@@ -10,10 +10,14 @@
 
 #include <net/napi/envelope.h>
 #include <net/novaworld/gate_metrics.h>
+#include <net/novaworld/nwu_lobby_session.h> // send_join_gate_ping_report
+#include <net/novaworld/ping_sweep.h>        // the fold's kPingFailed / kPingNeverAttempted
+#include <net/npwire/idatagram_socket.h>
 
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -224,6 +228,127 @@ void check_ping() {
 			"the capped PING still decodes");
 }
 
+// The ping manager the join's PING reads: a sweep's rows in list order, the answered ones
+// shell-sorted on the round trip. The order below is CPairList_ShellSort's, transcribed from its
+// disasm (12 rows: the first gap is 4 from 12 / 9 = 1, then 1; an entry shifts past every
+// earlier one whose round trip is not below its own, so equal round trips reorder).
+// [orig: Server_SendPingMetricsToGate @0x511BF0 - the walk @0x511E86..0x511EB3;
+//  CPairList_ShellSort @0x526C00 - the first gap @0x526C08..0x526C27, the stop @0x526C7B]
+void check_ping_manager() {
+	opennova::GatePingManager manager;
+	const int ms[12] = {40, 15, 40, 7, 15, 90, 40, 3, 15, 61, 7, 40};
+	std::vector<std::pair<int64_t, std::string>> rows;
+	for (int i = 0; i < 12; ++i) rows.emplace_back(100 + i, "10.0.0." + std::to_string(i + 1));
+	rows.emplace_back(200, "10.0.1.1");  // a row nothing answers
+	rows.emplace_back(201, "0.0.0.0");   // the unreported address, never attempted
+	manager.start_sweep(7, rows);
+	expect(manager.entries.size() == 14 && manager.entries[3].ip[0] == 10 &&
+			manager.entries[3].ip[3] == 4 && !manager.entries[3].answered,
+			"a sweep's start: one pending entry per row, the address octet 0 first");
+	for (int i = 0; i < 12; ++i) manager.apply_result(7, 100 + i, ms[i]);
+	manager.apply_result(7, 200, opennova::kPingFailed);
+	manager.apply_result(7, 201, opennova::kPingNeverAttempted);
+	manager.apply_result(6, 200, 5); // a superseded sweep's result drops
+	const std::vector<opennova::GateMetricsPingEntry> sorted =
+			opennova::gate_ping_sorted_entries(manager);
+	const int order[12] = {7, 3, 10, 4, 1, 8, 11, 2, 0, 6, 9, 5};
+	bool in_order = sorted.size() == 12;
+	for (size_t k = 0; in_order && k < 12; ++k)
+		in_order = sorted[k].ip[3] == order[k] + 1 && sorted[k].ms == ms[order[k]];
+	expect(in_order, "PING's entries: the answered rows in CPairList_ShellSort's order");
+	opennova::GatePingManager four;
+	four.start_sweep(1, {{1, "1.0.0.1"}, {2, "1.0.0.2"}, {3, "1.0.0.3"}, {4, "1.0.0.4"}});
+	four.apply_result(1, 1, 20);
+	four.apply_result(1, 2, 10);
+	four.apply_result(1, 3, 20);
+	four.apply_result(1, 4, 10);
+	const std::vector<opennova::GateMetricsPingEntry> small = opennova::gate_ping_sorted_entries(four);
+	expect(small.size() == 4 && small[0].ip[3] == 4 && small[1].ip[3] == 2 && small[2].ip[3] == 3 &&
+			small[3].ip[3] == 1, "under 9 entries the one gap 1: equal round trips reverse");
+	manager.start_sweep(8, {{300, "10.0.2.1"}});
+	expect(manager.entries.size() == 1 && !manager.entries[0].answered,
+			"the next sweep frees the old entries");
+}
+
+// The join's throttle and PING's own gates.
+// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - @0x56A4DE..0x56A506;
+//  Server_SendPingMetricsToGate @0x511BF0 - @0x511C0B..0x511C39]
+void check_ping_gates() {
+	uint32_t tick = 0;
+	expect(!opennova::gate_ping_report_due(tick, 0, 5000) && tick == 0, "METPING 0: no report");
+	expect(!opennova::gate_ping_report_due(tick, -3, 5000) && tick == 0, "METPING below 0: none");
+	expect(opennova::gate_ping_report_due(tick, 2, 5000) && tick == 5000, "the first report stamps");
+	expect(!opennova::gate_ping_report_due(tick, 2, 125000) && tick == 5000,
+			"exactly minutes x 60000 ms later: still throttled");
+	expect(opennova::gate_ping_report_due(tick, 2, 125001) && tick == 125001, "one ms more: due");
+	tick = 0xFFFFF000u;
+	expect(!opennova::gate_ping_report_due(tick, 1, 0x00001000u), "the elapsed time wraps unsigned");
+	tick = 0;
+	expect(opennova::gate_ping_report_due(tick, 1, 0) && tick == 0,
+			"a stamp of 0 reads as none at the next join");
+
+	opennova::GateMetricsHost host;
+	host.label = "jo";
+	host.version = "V1.7.5.7";
+	opennova::GatePingManager none;
+	expect(opennova::gate_ping_report_text(none, 0x0100007Fu, 5, host, "us").empty(),
+			"no entry at all: no PING");
+	opennova::GatePingManager pending;
+	pending.start_sweep(1, {{1, "10.0.0.1"}});
+	expect(opennova::gate_ping_report_text(pending, 0, 5, host, "us").empty(), "no gate address: none");
+	expect(opennova::gate_ping_report_text(pending, 0x0100007Fu, 0, host, "us").empty(),
+			"METPING under 1: none");
+	expect(opennova::gate_ping_report_text(pending, 0x0100007Fu, 5, host, "us") ==
+			"METPROTOCOL 1\r\nBLOCK \"PING\"\r\n\tLABEL \"jo\"\r\n\tGCC \"us\"\r\n"
+			"\tGV \"V1.7.5.7\"\r\nENDBLOCK\r\n",
+			"an entry nothing answered still lets PING go, with no ENTRY group");
+}
+
+class RecordingSocket final : public opennova::IDatagramSocket {
+public:
+	std::vector<std::pair<opennova::PeerAddr, std::vector<uint8_t>>> sent;
+	int recv_from(uint8_t *, std::size_t, opennova::PeerAddr &) override { return 0; }
+	void send_to(const opennova::PeerAddr &to, const uint8_t *data, std::size_t len) override {
+		sent.emplace_back(to, std::vector<uint8_t>(data, data + len));
+	}
+};
+
+// The joiner's sender: the throttle ahead of PING's gates (a report the gates stop still stamps),
+// the gate reply's METLABEL / METEXT, the datagram to the gate address at METIPPORT.
+// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - the stamp @0x56A506 ahead of the call
+//  @0x56A50B; Server_SendPingMetricsToGate @0x511BF0 - the send @0x5120CE]
+void check_join_ping_send() {
+	opennova::NwuLobbySession::GateMemory memory;
+	memory.response.met_label = "jo-metrics";
+	memory.response.met_ping = 5;
+	memory.response.met_port = 27000;
+	opennova::GatePingManager pings;
+	pings.start_sweep(1, {{1, "192.168.1.10"}, {2, "10.0.0.2"}});
+	pings.apply_result(1, 1, 45);
+	opennova::GateMetricsHost host;
+	host.version = "V1.7.5.7";
+	host.label = "ignored: the gate reply's label prints";
+	RecordingSocket socket;
+	opennova::send_join_gate_ping_report(socket, 1000, memory, pings, host, "us");
+	expect(socket.sent.empty() && pings.report_tick == 1000,
+			"no gate address: nothing sent, the throttle stamped all the same");
+	memory.gate_address = 0x0A00A8C0u; // 192.168.0.10
+	opennova::send_join_gate_ping_report(socket, 1000 + 300000, memory, pings, host, "us");
+	expect(socket.sent.empty(), "inside METPING's five minutes: no report");
+	opennova::send_join_gate_ping_report(socket, 1000 + 300001, memory, pings, host, "us");
+	std::vector<uint8_t> cipher;
+	opennova::GateMetricsReport report;
+	expect(socket.sent.size() == 1 && socket.sent[0].first.ip == 0x0A00A8C0u &&
+			socket.sent[0].first.port == 27000, "PING goes to the gate address at METIPPORT");
+	expect(!socket.sent.empty() && read_datagram(socket.sent[0].second, cipher, report) &&
+			report.block == "PING" && report.fields.size() == 3 &&
+			report.fields[0].value == "jo-metrics" && report.fields[1].value == "us" &&
+			report.fields[2].value == "V1.7.5.7" && report.entries.size() == 1 &&
+			report.entries[0].size() == 5 && report.entries[0][0].value == "192" &&
+			report.entries[0][4].value == "45",
+			"PING: the gate reply's LABEL, CC.BIN, GV, the one answered entry");
+}
+
 void check_server_tick() {
 	opennova::GateServerTick t;
 	t.mission_file = "dropped by the construct";
@@ -273,6 +398,9 @@ int main() {
 	check_player();
 	check_player_mission();
 	check_ping();
+	check_ping_manager();
+	check_ping_gates();
+	check_join_ping_send();
 	check_server_tick();
 	if (failures != 0) {
 		std::fprintf(stderr, "gate_metrics_encode: %d failure(s)\n", failures);

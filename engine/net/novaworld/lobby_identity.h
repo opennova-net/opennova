@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 
+#include <net/novaworld/gate_metrics.h> // GateMetricsLocale
 #include <net/novaworld/lobby_vars.h> // LobbyIdentityParams / RetailMachineInputs / LobbyMachineTokens
 
 namespace opennova {
@@ -17,6 +18,13 @@ namespace opennova {
 // [orig: CNapiSession_ReadLocaleInfo @0x4ce390 — GetLocaleInfoA LOCALE_SENGCOUNTRY /
 //  LOCALE_SENGLANGUAGE, GetTimeZoneInformation's Bias]
 bool read_locale_identity(LobbyIdentityParams &out);
+
+// The machine locale a METPROTOCOL reporter prints under the gate's METEXT, read at the report:
+// the user locale's English country and language names, each "" when its call's result is not
+// above 0 in its low byte, and the time zone's Bias.
+// [orig: Server_SendPingMetricsToGate @0x511BF0 - GetLocaleInfoA(0x400, 0x1002, .., 0x200)
+//  @0x511D88 (`test al, al` @0x511D8A), 0x1001 @0x511DE6, GetTimeZoneInformation @0x511E3D]
+bool read_gate_metrics_locale(GateMetricsLocale &out);
 
 // The volume and first-Ethernet-adapter inputs retail's NWPSSK / NWUSID derive from
 // (make_retail_machine_tokens).

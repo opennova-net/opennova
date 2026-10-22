@@ -729,6 +729,11 @@ public:
 	void set_expansion_version_root(std::string game_root) {
 		expansion_version_root_ = std::move(game_root);
 	}
+	const std::string &expansion_version_root() const { return expansion_version_root_; }
+	// The join's connect succeeded (the receive that queues the 0x00 JOIN): read once by the
+	// role, whose NovaWorld join sends PING ahead of the JOIN (D-NET-NEW-L9-22).
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - @0x56A4CE..0x56A50B]
+	bool take_join_connected() { return std::exchange(join_connected_, false); }
 	// The ClientAuth TZB: the OS time-zone bias in minutes (UTC = local + bias),
 	// sent only when nonzero; defaults to local_time_zone_bias_minutes().
 	void set_time_zone_bias(int32_t bias_minutes) { time_zone_bias_ = bias_minutes; }
@@ -1347,6 +1352,7 @@ private:
 	ProtocolReassemblyState s2c_reassembly_;
 	std::string advertised_expansion_; // ServerHello.SUS2, echoed as C2S JOIN EXP
 	std::string expansion_version_root_; // install root: the JOIN checksum (D-NET-166), CC.BIN (D-NET-296)
+	bool join_connected_ = false; // take_join_connected
 	int32_t time_zone_bias_ = local_time_zone_bias_minutes(); // ClientAuth TZB (D-NET-296)
 	std::string app_id_ = "0"; // ClientAuth APPID (decoded .joi CK); "0" = LAN default
 	std::vector<uint8_t> cd_cookie_; // 0x00 JOIN CD identity cookie (packed PUB* blob)

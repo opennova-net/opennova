@@ -30,6 +30,7 @@
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/connect_or_host.h>
+#include <net/novaworld/gate_metrics.h> // process_gate_ping_manager (the join's PING)
 #include <net/novaworld/gate_response.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/http_flow.h>
@@ -941,6 +942,9 @@ void NovaWorldClient::start_ping_sweep() {
 	for (const opennova::GsbServerEntry &entry : server_entries_) {
 		targets.emplace_back(static_cast<int64_t>(entry.rid), entry.ip);
 	}
+	// The process's ping manager takes the sweep's rows, which a NovaWorld join's PING
+	// reads (engine: net/novaworld/gate_metrics.h GatePingManager, D-NET-NEW-L9-22).
+	opennova::process_gate_ping_manager().start_sweep(ping_generation_, targets);
 	if (targets.empty()) {
 		emit_signal("server_pings_updated");
 		return;
@@ -952,10 +956,16 @@ void NovaWorldClient::start_ping_sweep() {
 }
 
 void NovaWorldClient::apply_ping_results(const Dictionary &results, int64_t generation) {
+	const Array rids = results.keys();
+	// The process's ping manager keeps its sweep's results whatever became of the list
+	// (a stopped session's included); a newer sweep's start drops them there.
+	for (int i = 0; i < rids.size(); ++i) {
+		opennova::process_gate_ping_manager().apply_result(generation,
+				static_cast<int64_t>(rids[i]), static_cast<int>(results[rids[i]]));
+	}
 	// A result of an older generation (its list was replaced or the session
 	// stopped while its deferred call was queued) is stale.
 	if (generation != ping_generation_) return;
-	const Array rids = results.keys();
 	for (int i = 0; i < rids.size(); ++i)
 		server_pings_[rids[i]] = results[rids[i]];
 	emit_signal("server_pings_updated");
