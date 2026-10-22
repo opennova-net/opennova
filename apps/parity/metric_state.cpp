@@ -348,6 +348,20 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 // ---------------------------------------------------------------------------
 // S2C 0x0A
 
+// The recipient's own entity: the handle its C2S 0x0C uplinks name (the modal one).
+bool own_handle(const RunFacts &run, uint32_t &handle) {
+	std::map<uint32_t, size_t> handles;
+	for (const wire::ParityUplinkState &state : run.trace.uplinks)
+		if (state.decoded && run.in_comparison(state.ts_ns))
+			++handles[state.handle];
+	if (handles.empty())
+		return false;
+	handle = std::max_element(handles.begin(), handles.end(), [](const auto &x, const auto &y) {
+		return x.second < y.second;
+	})->first;
+	return true;
+}
+
 std::vector<const wire::ParityFrameState *> steady_frames(const RunFacts &run) {
 	std::vector<const wire::ParityFrameState *> out;
 	for (const wire::ParityFrameState &state : run.trace.frames)
@@ -426,8 +440,27 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 	});
 	both("frame_local_state", "FRAME_LOCAL_STATE_MISMATCH",
 			[](const F &f) { return std::to_string(f.state_flag_byte); });
-	both("frame_health", "FRAME_HEADER_VALUES_MISMATCH",
-			[](const F &f) { return std::to_string(f.health); });
+	// A residual between a run's full health and death is a hit's draw: the damage is
+	// the round's impact speed times its weight / 875 [orig: Weapon_CalcImpactDamage
+	// @0x4EC920 (@0x4ECB2B)] times the zone's multiplier (the switch @0x4EC9BF: 1.25 for
+	// zones 0..4, 1.0 for 5..8), so where a round lands and how fast it arrives pick
+	// the value (frame.health_hit).
+	static_assert(has_normalization("frame.health_hit"));
+	auto full_health = [](const std::vector<const F *> &frames) {
+		int32_t full = 0;
+		for (const F *f : frames)
+			full = std::max(full, f->health);
+		return full;
+	};
+	auto health = [](const std::vector<const F *> &frames, int32_t full) {
+		std::set<std::string> out;
+		for (const F *f : frames)
+			out.insert(f->health == 0 || f->health == full ? std::to_string(f->health)
+														   : std::string("hit"));
+		return out;
+	};
+	set_metric(out, 'S', "frame_health", "FRAME_HEADER_VALUES_MISMATCH", health(a, full_health(a)),
+			health(b, full_health(b)));
 	both("frame_armor", "FRAME_HEADER_VALUES_MISMATCH",
 			[](const F &f) { return std::to_string(f.armor); });
 	both("frame_carried", "FRAME_HEADER_VALUES_MISMATCH",
@@ -452,19 +485,76 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 	both("frame_objective", "FRAME_OBJECTIVE_PHASE_MISMATCH", [](const F &f) {
 		return f.objective_present ? "1:" + join(f.objective, 4) : std::string("0");
 	});
-	both("frame_mount", "FRAME_PASSENGER_PHASE_MISMATCH", [](const F &f) {
-		if (!f.mount_present)
-			return std::string("0");
-		const bool bound = f.mount_handle != 0xFFFF;
-		return std::string(bound ? "bound:" : "none:") + (f.mount_bound ? "1:" : "0:") +
-				(bound ? std::to_string(f.mount_clip) + ":" + std::to_string(f.mount_reserve)
-					   : std::string("-:-"));
-	});
 	// The mounted-ammo record rides only the frame whose route nibble is 8
 	// [orig: NetPacket_WritePlayerState @0x4FF6B0 (the test @0x4FFD94..0x4FFD9A)],
-	// one in 16, so a window shorter than the cycle holds it by the counter's phase
-	// (frame.mount_phase).
+	// one in 16, and reads the body's mount word +0x16C (@0x4FFDA4; 0xFFFF when null,
+	// @0x4FFEC7), the word the recipient's own record names as its carrier with its
+	// attach bone (else the ground entity, bone 0) [orig: NetPacket_SerializePlayerState
+	// @0x4C09C0 (@0x4C0A00..0x4C0A08, @0x4C0A1A)]. Each record is keyed by the own
+	// record's carrier state in its frame, and a state compares when both runs carried a
+	// record in it or both stayed in it a full cycle: a shorter stay shows its record only
+	// when a nibble-8 frame falls inside it (frame.mount_phase).
 	static_assert(has_normalization("frame.mount_phase"));
+	{
+		struct MountFacts {
+			std::map<std::string, size_t> dwell; // each state's longest run of frames
+			std::map<std::string, std::set<std::string>> carried;
+			bool absent = false; // a frame without the record
+		};
+		auto facts = [](const RunFacts &run, const std::vector<const F *> &frames) {
+			MountFacts out;
+			uint32_t own = 0;
+			const bool known = own_handle(run, own);
+			std::map<int, const wire::ParityEntity *> self;
+			for (const wire::ParityEntity &e : run.trace.entities)
+				if (known && e.cls == 'P' && e.handle == own && run.in_steady(e.ts_ns))
+					self[e.frame] = &e;
+			std::string last;
+			size_t stay = 0;
+			for (const F *f : frames) {
+				const auto found = self.find(f->frame);
+				std::string state = "-";
+				if (found != self.end())
+					state = found->second->carrier == 0xFFFF
+							? std::string("none")
+							: "bound:" + std::to_string(found->second->carrier_bone);
+				stay = state == last ? stay + 1 : 1;
+				last = state;
+				out.dwell[state] = std::max(out.dwell[state], stay);
+				if (!f->mount_present) {
+					out.absent = true;
+					continue;
+				}
+				const bool bound = f->mount_handle != 0xFFFF;
+				out.carried[state].insert(std::string(bound ? "bound:" : "none:") +
+						(f->mount_bound ? "1:" : "0:") +
+						(bound ? std::to_string(f->mount_clip) + ":" +
+												std::to_string(f->mount_reserve)
+							   : std::string("-:-")));
+			}
+			return out;
+		};
+		auto keyed = [](const MountFacts &run, const MountFacts &other) {
+			std::set<std::string> out;
+			if (run.absent)
+				out.insert("0");
+			for (const auto &entry : run.carried) {
+				// A full route cycle: 16 frames.
+				const auto cycled = [&entry](const MountFacts &m) {
+					const auto d = m.dwell.find(entry.first);
+					return d != m.dwell.end() && d->second > size_t(kFrameFlags2RouteMask);
+				};
+				if (!other.carried.count(entry.first) && !(cycled(run) && cycled(other)))
+					continue;
+				for (const std::string &value : entry.second)
+					out.insert(entry.first + "/" + value);
+			}
+			return out;
+		};
+		const MountFacts fa = facts(rr, a), fb = facts(other, b);
+		set_metric(out, 'S', "frame_mount", "FRAME_PASSENGER_PHASE_MISMATCH", keyed(fa, fb),
+				keyed(fb, fa));
+	}
 	if (a.size() < kRouteCycle || b.size() < kRouteCycle) {
 		MetricValue &mount = out.back();
 		mount.comparable = false;
@@ -596,49 +686,79 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 	}
 }
 
-// The recipient's own entity: the handle its C2S 0x0C uplinks name (the modal one).
-bool own_handle(const RunFacts &run, uint32_t &handle) {
-	std::map<uint32_t, size_t> handles;
-	for (const wire::ParityUplinkState &state : run.trace.uplinks)
-		if (state.decoded && run.in_comparison(state.ts_ns))
-			++handles[state.handle];
-	if (handles.empty())
-		return false;
-	handle = std::max_element(handles.begin(), handles.end(), [](const auto &x, const auto &y) {
-		return x.second < y.second;
-	})->first;
-	return true;
-}
-
 // The anchor's own offset: the recipient's own record, decompressed, in 1/16 units.
 // Retail anchors every frame at the recipient's Position + CameraOffset
-// (Server_SendEntityStateToPlayer @0x517BEF..0x517C13), so its own record encodes
-// -CameraOffset (the standing eye: z -0xD001); positions in world units no longer
-// show where the anchor sits, this does.
+// [orig: Server_SendEntityStateToPlayer @0x517BA0 (@0x517BEF..0x517C13)], so its own record
+// encodes -CameraOffset (the standing eye: z -0xD001); positions in world units no longer
+// show where the anchor sits, this does. Between two rests the eye moves along one curve
+// a tick at a time (a death's fall, a hit's tilt decaying), and the recipient's frames
+// sample it at its own send cadence (the per-slot counter @0x517BE8): which points of a
+// curve a window holds is that phase. So a rest (the same offset in two or more
+// consecutive records) compares as its key, and the records between two rests as one
+// transition 'from>to'; a carrier-local record cuts the sequence, and a transition the
+// cut or the window's edge leaves open is not compared (frame.self_offset_rests).
 void compare_self_offset(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("state.position"));
-	auto offsets = [](const RunFacts &run, bool &known) {
+	static_assert(has_normalization("frame.self_offset_rests"));
+	using E = wire::ParityEntity;
+	auto offsets = [](const RunFacts &run, size_t &records) {
 		std::set<std::string> out;
+		records = 0;
 		uint32_t handle = 0;
-		known = own_handle(run, handle);
-		if (!known)
+		if (!own_handle(run, handle))
 			return out;
 		auto sixteenths = [](int32_t v) { return std::to_string(std::lround(double(v) / 4096.0)); };
-		for (const wire::ParityEntity &e : run.trace.entities)
-			if (e.cls == 'P' && e.handle == handle && !e.carrier_local && run.in_steady(e.ts_ns))
-				out.insert(sixteenths(e.offset_x) + "," + sixteenths(e.offset_y) + "," +
-						sixteenths(e.offset_z));
+		auto key = [&sixteenths](const E &e) {
+			return sixteenths(e.offset_x) + "," + sixteenths(e.offset_y) + "," +
+					sixteenths(e.offset_z);
+		};
+		auto same = [](const E &x, const E &y) {
+			return x.offset_x == y.offset_x && x.offset_y == y.offset_y && x.offset_z == y.offset_z;
+		};
+		std::vector<std::vector<const E *>> segments(1);
+		for (const E &e : run.trace.entities) {
+			if (e.cls != 'P' || e.handle != handle || !run.in_steady(e.ts_ns))
+				continue;
+			if (e.carrier_local) {
+				if (!segments.back().empty())
+					segments.emplace_back();
+				continue;
+			}
+			segments.back().push_back(&e);
+			++records;
+		}
+		for (const std::vector<const E *> &segment : segments) {
+			std::vector<std::pair<size_t, size_t>> rests; // first and last record of each
+			for (size_t i = 0; i < segment.size();) {
+				size_t j = i;
+				while (j + 1 < segment.size() && same(*segment[j + 1], *segment[i]))
+					++j;
+				if (j > i)
+					rests.emplace_back(i, j);
+				i = j + 1;
+			}
+			for (size_t r = 0; r < rests.size(); ++r) {
+				const std::string at = key(*segment[rests[r].first]);
+				out.insert(at);
+				if (r == 0)
+					continue;
+				const std::string from = key(*segment[rests[r - 1].first]);
+				if (from != at || rests[r].first > rests[r - 1].second + 1)
+					out.insert(from + ">" + at);
+			}
+		}
 		return out;
 	};
-	bool known_a = false, known_b = false;
-	const std::set<std::string> a = offsets(rr, known_a), b = offsets(other, known_b);
-	if (!known_a || a.empty())
+	size_t records_a = 0, records_b = 0;
+	const std::set<std::string> a = offsets(rr, records_a), b = offsets(other, records_b);
+	if (records_a == 0)
 		return;
 	MetricValue value = metric('S', "frame_self_offset", "", "FRAME_ANCHOR_OFFSET_MISMATCH");
 	value.subject = render_set(b);
 	value.reference = render_set(a);
-	value.detail = "the recipient's own record against the anchor, 1/16 units";
-	if (!known_b || b.empty()) {
+	value.detail = "the recipient's own record against the anchor, 1/16 units: its rests and "
+				   "the transitions between them";
+	if (records_b == 0) {
 		value.comparable = false;
 		value.detail = "the run's recipient record is not in its steady frames";
 	} else {

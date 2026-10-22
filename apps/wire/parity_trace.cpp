@@ -70,6 +70,7 @@ ParityEntity entity_record(const InGameMessage &message, uint64_t ts_ns, const F
 		case EntityClass::Player:
 			out.cls = 'P';
 			carrier = record.player.carrier_handle;
+			out.carrier_bone = record.player.vehicle_bone;
 			out.pos_x = record.player.pos_x_compressed;
 			out.pos_y = record.player.pos_y_compressed;
 			out.pos_z = record.player.pos_z_compressed;
@@ -115,6 +116,7 @@ ParityEntity entity_record(const InGameMessage &message, uint64_t ts_ns, const F
 	out.offset_x = network_decompress_fixedpoint(uint16_t(out.pos_x));
 	out.offset_y = network_decompress_fixedpoint(uint16_t(out.pos_y));
 	out.offset_z = network_decompress_fixedpoint(uint16_t(out.pos_z));
+	out.carrier = carrier;
 	out.carrier_local = carrier != 0xFFFF;
 	out.world_x = out.carrier_local ? out.offset_x : frame.anchor_x + out.offset_x;
 	out.world_y = out.carrier_local ? out.offset_y : frame.anchor_y + out.offset_y;

@@ -2643,6 +2643,117 @@ void test_frame_rules() {
 			"p90 is the nearest rank: two samples report the larger");
 }
 
+// The frame rows whose values a draw or a sampling phase picks, each judged by the rule
+// retail's own runs set: the mount record by the own carrier state it rides
+// (frame.mount_phase), the eye offset by its rests and transitions
+// (frame.self_offset_rests), the health by its full and dead values (frame.health_hit).
+void test_frame_draws() {
+	// Rewrites each steady frame (and the own record in it, handle 0x1000) of a scripted
+	// run through `f(index, frame, self)`, the index counting steady frames.
+	auto rewrite = [](wire::ParityTrace trace,
+						   const std::function<void(
+								   size_t, wire::ParityFrameState &, wire::ParityEntity &)> &f) {
+		std::map<int, wire::ParityEntity *> self;
+		for (wire::ParityEntity &e : trace.entities)
+			if (e.handle == 0x1000)
+				self[e.frame] = &e;
+		size_t index = 0;
+		for (wire::ParityFrameState &frame : trace.frames)
+			if (frame.ts_ns >= kSteadyStart && self.count(frame.frame))
+				f(index++, frame, *self[frame.frame]);
+		return trace;
+	};
+	{
+		// x6's drive: the turret stay is 10 frames; RR and RR-aa caught its nibble-8 frame,
+		// OR's stay fell between two. A stay shorter than the 16-frame cycle compares only
+		// when both runs carried a record in it.
+		auto turret = [&rewrite](uint32_t seed, uint32_t shift, uint32_t clip) {
+			return rewrite(scripted(seed),
+					[shift, clip](size_t i, wire::ParityFrameState &f, wire::ParityEntity &e) {
+						const bool mounted = i >= 40 && i < 50;
+						f.flags2 = uint32_t(i + shift) & 0xFFu;
+						f.mount_present = (f.flags2 & 0x0Fu) == 8u;
+						f.mount_handle = mounted ? 0x102E : 0xFFFF;
+						f.mount_bound = mounted;
+						f.mount_clip = mounted ? clip : 0;
+						f.mount_reserve = mounted ? 500 : 0;
+						e.carrier = mounted ? 0x102E : 0xFFFF;
+						e.carrier_bone = mounted ? 6 : 0;
+						e.carrier_local = mounted;
+					});
+		};
+		// Nibble 8 at steady frame 40 on RR and RR-aa (inside 40..49), at 37 and 53 on the
+		// subject.
+		const Case missed =
+				judge_case(turret(1, 0, 65535), turret(2, 0, 65535), turret(3, 3, 65535), "OR");
+		expect_row(missed, 'S', "frame_mount", "", "pass");
+		// The same stay caught with another record fails.
+		expect_row(judge_case(turret(1, 0, 65535), turret(2, 0, 65535), turret(3, 0, 7), "OR"), 'S',
+				"frame_mount", "", "fail", "FRAME_PASSENGER_PHASE_MISMATCH");
+		// A stay of a full cycle on both sides compares whether or not a run carried it.
+		auto seated = [&rewrite](uint32_t seed, bool carry) {
+			return rewrite(scripted(seed),
+					[carry](size_t i, wire::ParityFrameState &f, wire::ParityEntity &e) {
+						const bool mounted = i >= 40 && i < 70;
+						f.flags2 = uint32_t(i) & 0xFFu;
+						f.mount_present = (f.flags2 & 0x0Fu) == 8u && (carry || !mounted);
+						f.mount_handle = mounted ? 0x1002 : 0xFFFF;
+						f.mount_bound = mounted;
+						e.carrier = mounted ? 0x1002 : 0xFFFF;
+						e.carrier_bone = mounted ? 4 : 0;
+						e.carrier_local = mounted;
+					});
+		};
+		expect_row(judge_case(seated(1, true), seated(2, true), seated(3, false), "OR"), 'S',
+				"frame_mount", "", "fail", "FRAME_PASSENGER_PHASE_MISMATCH");
+	}
+	{
+		// x6's death eye: one curve sampled at another phase by each run, the rests and the
+		// transition between them shared; a tilt between two standing rests is its own
+		// transition (x6 hostkill OR before D-NET-518's roll fix).
+		static constexpr int32_t kStand = -0xD001, kDead = -9889;
+		auto dying = [&rewrite](uint32_t seed, int phase, bool tilt) {
+			return rewrite(scripted(seed),
+					[phase, tilt](size_t i, wire::ParityFrameState &, wire::ParityEntity &e) {
+						e.offset_x = e.offset_y = 0;
+						e.offset_z = kStand;
+						if (tilt && i == 60)
+							e.offset_x = 3840;
+						if (i >= 100 && i < 104) {
+							const int k = int(i - 100) * 3 + phase; // the tick each frame sampled
+							e.offset_z = kStand + (kDead - kStand) * (k + 1) / 13;
+						} else if (i >= 104) {
+							e.offset_z = kDead;
+						}
+					});
+		};
+		const Case phased =
+				judge_case(dying(1, 0, false), dying(2, 1, false), dying(3, 2, false), "OO");
+		expect_row(phased, 'S', "frame_self_offset", "", "pass");
+		const VerdictRow *row = find_row(phased.verdict.rows, 'S', "frame_self_offset");
+		check(row && row->value.reference == "{0,0,-13,0,0,-13>0,0,-2,0,0,-2}",
+				"the death compares as its rests and one transition (got " +
+						(row ? row->value.reference : std::string("no row")) + ")");
+		expect_row(judge_case(dying(1, 0, false), dying(2, 1, false), dying(3, 2, true), "OR"), 'S',
+				"frame_self_offset", "", "fail", "FRAME_ANCHOR_OFFSET_MISMATCH");
+	}
+	{
+		// x5's aikill: RR's first hit left 36, RR-aa's 8 (base 114 at zone 1.0 and 1.25).
+		auto hit = [&rewrite](uint32_t seed, int32_t full, int32_t residual) {
+			return rewrite(scripted(seed),
+					[full, residual](size_t i, wire::ParityFrameState &f, wire::ParityEntity &) {
+						f.health = i < 100 ? full : i < 150 ? residual : 0;
+					});
+		};
+		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), hit(3, 150, 36), "OO"), 'S',
+				"frame_health", "", "pass");
+		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), hit(3, 150, 0), "OO"), 'S',
+				"frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
+		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), hit(3, 120, 36), "OO"), 'S',
+				"frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
+	}
+}
+
 void test_steady_rules() {
 	{
 		// A steady packet groups as its record multiset, without the RTT replies its
@@ -2735,6 +2846,7 @@ int main() {
 	test_order_rules();
 	test_steady_rules();
 	test_frame_rules();
+	test_frame_draws();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return 1;

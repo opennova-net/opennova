@@ -168,6 +168,12 @@ struct ParityEntity {
 	int32_t offset_x = 0, offset_y = 0, offset_z = 0;
 	int32_t world_x = 0, world_y = 0, world_z = 0;
 	bool carrier_local = false;
+	// The record's carrier handle (0xFFFF none) and, for a player, its attach bone:
+	// the mount (+0x16C) with its bone (+0x157) when mounted, else the ground entity
+	// (+0x28) with bone 0 [orig: NetPacket_SerializePlayerState @0x4C09C0 (the select
+	// @0x4C0A00..0x4C0A08, the bone @0x4C0A1A)]. Not printed.
+	uint32_t carrier = 0xFFFF;
+	uint32_t carrier_bone = 0;
 };
 
 // The records in emission order, delivered as they are built.

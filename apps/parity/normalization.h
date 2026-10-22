@@ -558,7 +558,40 @@ inline constexpr Normalization kNormalizations[] = {
 			"(NetPacket_WritePlayerState @0x4FF6B0, the test @0x4FFD94..0x4FFD9A), one frame "
 			"in 16: a window shorter than the cycle holds it or not by the counter's phase "
 			"(x5's kick, five or six frames before the punt: RR {0, none} against RO's {0}), so "
-			"the mount set compares over a full cycle on both sides, as frame_flags2 does" },
+			"the mount set compares over a full cycle on both sides, as frame_flags2 does. The "
+			"record reads the body's mount word +0x16C (@0x4FFDA4, 0xFFFF when null @0x4FFEC7), "
+			"the word the recipient's own record names as its carrier with its attach bone, "
+			"else the ground entity at bone 0 (NetPacket_SerializePlayerState @0x4C09C0: "
+			"@0x4C0A00..0x4C0A08, @0x4C0A1A), so each record is keyed by the own record's "
+			"carrier state in its frame, and a state compares only when both runs carried a "
+			"record in it or both stayed in it a full cycle: a shorter stay shows its record "
+			"when a nibble-8 frame falls inside it. x6's drive turret stay is 10 frames on RR, "
+			"RR-aa and OR: RR (flags2 0x4F..0x58) and RR-aa (0x50..0x59) caught its 0x58 "
+			"frame, OR (0x4D..0x56) did not; x3 and x4's RR and RR-aa missed it where their "
+			"RO or OR caught it" },
+	{ "frame.self_offset_rests", MaskKind::Field, 'S', 0x00A, "own record offset", 0,
+			"the recipient's own record encodes -CameraOffset (Server_SendEntityStateToPlayer "
+			"@0x517BA0: the anchor @0x517BEF..0x517C13); between two rests the eye moves along "
+			"one curve a tick at a time (a death's fall, a hit's tilt decaying) that the "
+			"recipient's frames sample at its send cadence (the per-slot counter @0x517BE8), so "
+			"which points of a curve a window holds is the frame phase: x6's death curves are "
+			"one curve on RR, RR-aa, RO and OO at phases 8, 10, 11 and 0 ticks (L3-s6), and RR "
+			"against RR-aa stood 0.14 to 0.57 apart on the sampled points (selfnade 0.14, "
+			"permdeath and fragrespawn 0.44, hostkill 0.57). A rest (one offset in two or more "
+			"consecutive records) compares as its 1/16 key and the records between two rests "
+			"as one transition 'from>to'; a carrier-local record cuts the sequence, and a "
+			"transition a cut or the window's edge leaves open is not compared. A tilt between "
+			"two rests is its own transition; one that runs straight into a death is inside "
+			"the death's. x6's 01tr-coop-aikill corpse rests at z -3.21 sixteenths on RR and "
+			"-2.10 on RR-aa, the death's own draw, which the A/A carries" },
+	{ "frame.health_hit", MaskKind::Field, 'S', 0x00A, "health residual", 0,
+			"a hit's damage is the round's impact speed times its weight / 875 "
+			"(Weapon_CalcImpactDamage @0x4EC920, @0x4ECB2B) times its zone's multiplier (the "
+			"switch @0x4EC9BF: 1.25 for zones 0..4, 1.0 for 5..8), so a residual between a "
+			"run's full health and death is where the round landed and how fast it arrived: "
+			"x5's 01tr-coop-aikill RR read {0, 150, 36} against RR-aa's {0, 150, 8} (base 114 "
+			"at 1.0 and at 1.25), x1's RR-aa 7 (base 115 at 1.25). The full and dead values "
+			"compare exactly and a residual as 'hit'" },
 	{ "frame.env_tod", MaskKind::Field, 'S', 0x00A, "tod_fixed", 0,
 			"the time of day advances with the session clock: the env block compares the "
 			"weather fields" },
