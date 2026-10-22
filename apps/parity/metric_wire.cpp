@@ -176,20 +176,26 @@ bool seen_between(const RunFacts &run, char dir, uint16_t identity, uint64_t fro
 	return false;
 }
 
-// A run's join: its first C2S 0x0B, which the host runs through Server_OnPlayerJoin
+// A stream's join: the run's C2S 0x0B, which the host runs through Server_OnPlayerJoin
 // [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 (the call @0x51ABA1)], setting the
-// slot's state 6 [orig: Server_OnPlayerJoin @0x51A680 (the store @0x51A712)]; else the
-// first S2C 0x0F; 0 when neither (window.tag_stream_anchor).
-uint64_t join_anchor(const RunFacts &run) {
-	uint64_t join = 0, load = 0;
+// slot's state 6 [orig: Server_OnPlayerJoin @0x51A680 (the store @0x51A712)]: the last
+// one at or before the stream's first send `stream_first` (a rotation's joiner joins
+// each mission), else its first; else the first S2C 0x0F; 0 when neither
+// (window.tag_stream_anchor).
+uint64_t join_anchor(const RunFacts &run, uint64_t stream_first) {
+	uint64_t first_join = 0, stream_join = 0, load = 0;
 	for (const wire::ParityEvent &event : run.trace.events) {
 		const uint16_t identity = event_identity(event);
-		if (event.dir == 'C' && identity == 0x00B && (join == 0 || event.ts_ns < join))
-			join = event.ts_ns;
+		if (event.dir == 'C' && identity == 0x00B) {
+			if (first_join == 0 || event.ts_ns < first_join)
+				first_join = event.ts_ns;
+			if (event.ts_ns <= stream_first && event.ts_ns > stream_join)
+				stream_join = event.ts_ns;
+		}
 		if (event.dir == 'S' && identity == 0x00F && (load == 0 || event.ts_ns < load))
 			load = event.ts_ns;
 	}
-	return join != 0 ? join : load;
+	return stream_join != 0 ? stream_join : first_join != 0 ? first_join : load;
 }
 
 // The overlay buffer: 16 six-byte entries behind a count byte, flushed first when full
@@ -303,14 +309,14 @@ void compare_tags(
 			const double span_ms = end_b > first ? double(end_b - first) / 1e6 : 0.0;
 			cadence_count_metric(count, double(sa.count), cadence, double(sb.count), span_ms);
 		} else if (sa.count >= 20) {
-			// A stream counts from each run's join over the pair's shorter span from
-			// it, a timer-phase one too (its first send's phase costs one occurrence);
-			// a stream that reaches the joiner before its join keeps its own first
-			// (window.tag_stream_anchor).
+			// A stream counts from each run's join (on a rotation, the join of the mission
+			// the stream starts in) over the pair's shorter span from it, a timer-phase one
+			// too (its first send's phase costs one occurrence); a stream that reaches the
+			// joiner before its join keeps its own first (window.tag_stream_anchor).
 			static_assert(has_normalization("window.tag_stream_anchor"));
 			const uint64_t own_a = *std::min_element(sa.times.begin(), sa.times.end());
 			const uint64_t own_b = *std::min_element(sb.times.begin(), sb.times.end());
-			const uint64_t join_a = join_anchor(rr), join_b = join_anchor(other);
+			const uint64_t join_a = join_anchor(rr, own_a), join_b = join_anchor(other, own_b);
 			const bool joined = join_a != 0 && join_b != 0;
 			const uint64_t first_a = joined ? std::min(join_a, own_a) : own_a;
 			const uint64_t first_b = joined ? std::min(join_b, own_b) : own_b;

@@ -1593,6 +1593,30 @@ void test_integrity() {
 	}
 }
 
+// A rotation's joiner joins each mission, and a stream that starts in a later mission
+// counts from that mission's join (window.tag_stream_anchor): round's next-mission S2C
+// 0x6E opens at the joiner's second C2S 0x0B (x8 RR 0.9 s, OO 0.2 s after it), and OO's
+// second join came 10.8 s after RR's (our host's map-change load), so counted from the
+// first join OO read 30 against 37 where the stream itself runs at RR's rate.
+void test_stream_anchor_rotation() {
+	auto rotation = [](uint32_t seed, uint64_t second_join) {
+		wire::ParityTrace trace = scripted(seed);
+		splice(trace, 'C', 0x00B, second_join, bytes({ 1 }));
+		for (uint64_t ts = second_join + 500 * kMs; ts <= 20 * kSec; ts += 500 * kMs)
+			splice(trace, 'S', 0x06E, ts, bytes({ 0 }));
+		return trace;
+	};
+	const Case c = judge_case(rotation(1, 6 * kSec), rotation(2, 6 * kSec), rotation(3, 10 * kSec));
+	expect_row(c, 'S', "tag_count", "0x6e:0", "pass");
+	// The same stream opening 4 s after its own mission's join still counts short.
+	wire::ParityTrace slow = scripted(3);
+	splice(slow, 'C', 0x00B, 6 * kSec, bytes({ 1 }));
+	for (uint64_t ts = 10 * kSec; ts <= 20 * kSec; ts += 500 * kMs)
+		splice(slow, 'S', 0x06E, ts, bytes({ 0 }));
+	const Case late = judge_case(rotation(1, 6 * kSec), rotation(2, 6 * kSec), slow);
+	expect_row(late, 'S', "tag_count", "0x6e:0", "fail", "COUNT_MISMATCH");
+}
+
 // The auto-reload loop re-sends until the first echo lands (count.reload_echo): RR's 2
 // and RR-aa's 3 against a subject's 5 are the echo's latency against the loop. A lone
 // request passes only when its echo landed inside the longest entry spacing the
@@ -3078,6 +3102,7 @@ int main() {
 	test_pool_live_pose();
 	test_tag_window();
 	test_stream_anchor_and_burst_tail();
+	test_stream_anchor_rotation();
 	test_rotation_load_gap();
 	test_dead_joiner_uplink();
 	test_session_end();
