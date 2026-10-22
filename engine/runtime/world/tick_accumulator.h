@@ -93,7 +93,8 @@ public:
 	}
 
 	// Scale the smoothing history, the value the next frame's EMA reads: retail's
-	// one writer outside the main loop, called by the lose cine's edit fade
+	// one live writer outside the main loop (Game_ClearSmoothedFrameTime @0x52B620
+	// zeroes it too, but nothing calls it), called by the lose cine's edit fade
 	// (world::EpilogCine) from inside the drain's logic update, so the frame
 	// that called it keeps its ticks and the next frame banks against the
 	// scaled history. The word loads unsigned, multiplies by the float in x87
