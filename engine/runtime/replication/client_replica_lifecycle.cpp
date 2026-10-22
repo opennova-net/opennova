@@ -2,6 +2,7 @@
 
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/wire_handle.h>
+#include <runtime/inmatch/character_registry.h>
 #include <runtime/world/entity.h>
 
 #include <algorithm>
@@ -86,6 +87,12 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     row.target_handle = resolved_spawn_handle(rec.ground_entity_handle);
     row.carrier_handle = resolved_spawn_handle(rec.parent_entity_handle);
     row.resolved_ground = row.target_handle;
+    // A player's NetId the joiner's own avatar table lacks takes its Team side's first
+    // combo (D-NET-NEW-L2-27) [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the
+    //  Player test @0x433DB2, CAvatarDefs_HasPackedId @0x433DDD,
+    //  CAvatarDefs_PackFirstComboOfAlignment @0x433DFF, the store @0x433E07].
+    if ((rec.minimap_flags & world::kEntityFlagPlayer) != 0)
+        row.net_id = resolve_player_net_id(row.net_id, row.team);
     state_.mark_changed();
     refresh_carried_entities();
 }
@@ -257,10 +264,29 @@ void ClientReplicaPipeline::apply_player_identity(uint16_t handle, uint16_t net_
 	const world::EntityHandle h{handle};
 	if (!h.valid() || h.pool() >= world::kEntityPoolCount) return;
 	ClientEntityState &entity = state_.upsert(handle);
-	if (entity.net_id == net_id && entity.spawn_anim_slot == anim_slot) return;
-	entity.net_id = net_id;
+	// The NetId the avatar table lacks takes the first combo of the side the row's Team
+	// names, the Team the fold above stored (D-NET-NEW-L2-27) [orig:
+	//  NapiNPClientMsg_TeamAssign @0x431910 - CAvatarDefs_HasPackedId @0x431B4D, the store
+	//  @0x431B77; NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 - @0x431CB4, @0x431CDE].
+	const uint16_t stored = resolve_player_net_id(net_id, entity.team);
+	if (entity.net_id == stored && entity.spawn_anim_slot == anim_slot) return;
+	entity.net_id = stored;
 	entity.spawn_anim_slot = anim_slot;
 	state_.mark_changed();
+}
+
+// The client handlers' NetId test on a player entity: an id the joiner's own avatar
+// table holds stands; any other is replaced by the first combo of the alignment the
+// entity's Team picks (Team 1 the good side, every other Team the evil), which an empty
+// table packs as 0. No registry installed passes the id through.
+// [orig: CAvatarDefs_HasPackedId @0x57B140 (CAvatarDefs_FindComboByPackedId != 0
+//  @0x57B15A); the alignment `cmp byte ptr [entity+162h], 1` + setnz @0x42EAE4..0x42EAED;
+//  CAvatarDefs_PackFirstComboOfAlignment @0x57AD40]
+uint16_t ClientReplicaPipeline::resolve_player_net_id(uint16_t net_id, uint8_t team) const {
+	if (characters_ == nullptr || characters_->find_by_packed_id(net_id) != nullptr)
+		return net_id;
+	return characters_->first_character_id(
+			team != 1 ? avatars::AVATAR_ALIGN_EVIL : avatars::AVATAR_ALIGN_GOOD);
 }
 
 // One team-change list entry: the addressed slot takes the entry's team off

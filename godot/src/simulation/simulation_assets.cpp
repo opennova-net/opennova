@@ -100,6 +100,12 @@ void Simulation::install_item_catalog() {
 	if (runtime_) runtime_->view().set_item_catalog(assets_.item_replication_catalog);
 }
 
+void Simulation::install_character_registry() {
+	if (!runtime_) return;
+	runtime_->view().set_character_registry(
+			assets_.character_registry.empty() ? nullptr : &assets_.character_registry);
+}
+
 void Simulation::install_charattr_table() {
 	if (runtime_) runtime_->set_charattr_table(net_.charattr_table);
 	sync_class_attribute_flags();
@@ -162,6 +168,7 @@ int Simulation::set_character_avatar_database(
 					CharacterSexRow{row.character_id, row.female});
 		assets_.character_registry = p_avatar_db->character_registry();
 	}
+	install_character_registry();
 	apply_character_traits_to_world();
 	return static_cast<int>(assets_.character_sex_rows.size());
 }

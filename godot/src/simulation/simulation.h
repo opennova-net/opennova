@@ -505,6 +505,12 @@ private:
 	// it). A host role is constructed with the same catalog. Called from
 	// resolve_item_traits, the boot's role hook, and enable_join.
 	void install_item_catalog();
+	// Install the retained Avatars.def registry (assets_.character_registry) on
+	// runtime_'s view: a player row's NetId the table lacks takes its side's first
+	// combo (engine ClientReplicaPipeline::set_character_registry, D-NET-NEW-L2-27);
+	// none with no table mounted. Called from set_character_avatar_database, the
+	// boot's role hook, and enable_join.
+	void install_character_registry();
 	// Install the retained boot charattr table on the current Joiner runtime.
 	void install_charattr_table();
 	// Copy the per-class ATTRIBUTES words (and the latches S2C 0x42 carries)
@@ -1963,7 +1969,8 @@ public:
 	void resolve_item_traits(const Ref<class ItemDatabase> &p_item_db);
 
 	// Install the packed Avatars.def character-sex registry used by the
-	// portable sound-profile selector. Retained across reset_world; returns the
+	// portable sound-profile selector, and its combos on a joiner's decode view
+	// (install_character_registry). Retained across reset_world; returns the
 	// number of unique packed character ids installed.
 	int set_character_avatar_database(
 			const Ref<class AvatarDatabase> &p_avatar_db);

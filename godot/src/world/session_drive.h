@@ -186,8 +186,11 @@ private:
 	// One reset for the typed request staging, used by every session
 	// load-failure leg and reset().
 	void clear_pending_session();
+	// r_avatar_db, when given, takes the Avatars.def the profile was built over (null
+	// when none loaded).
 	Ref<CharacterJoinProfile> build_join_character_profile(
-			const Ref<ResourceRoot> &p_resource_root, const Ref<PlayerSpawnLoadout> &p_loadout);
+			const Ref<ResourceRoot> &p_resource_root, const Ref<PlayerSpawnLoadout> &p_loadout,
+			Ref<class AvatarDatabase> *r_avatar_db = nullptr);
 	// Point the joiner's resource root at the HOST's expansion (S2C 0x7B
 	// field 7, net-re 5.32) before any of the host's data is resolved through
 	// it. Returns false when the join has been failed and the driver must

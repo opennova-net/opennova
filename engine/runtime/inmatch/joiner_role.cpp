@@ -1576,8 +1576,9 @@ void JoinerRole::stamp_init_player_class(world::Entity &local) const {
 // selected) with the view and map resets, and the hidden bit cleared; then the
 // handler stores the message's animSlot and NetId on the entity, so L ends with the
 // 0x50's identity pair (D-NET-570). L that does not exist yet has its pair from the
-// spawn. The NetId's fallback for an id the avatar table lacks
-// (CAvatarDefs_HasPackedId) is not modeled: every stock host sends a table id.
+// spawn. The NetId is the self row's, which the pipeline's fold already restamped when
+// the joiner's avatar table lacks the wire id (ClientReplicaPipeline::resolve_player_net_id,
+// D-NET-NEW-L2-27).
 // [orig: NapiNPClientMsg_TeamAssign @0x431910 - the compare @0x431B0A, Player_InitPlayer(1)
 //  @0x431B14, animSlot @0x431B3A, NetId @0x431B46, the fallback @0x431B4D..0x431B77;
 //  Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, the class and avatar

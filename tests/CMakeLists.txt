@@ -5094,6 +5094,11 @@ add_test(NAME npruntime_client_console COMMAND npruntime_client_console_test)
 add_executable(controls_scroll_lock_auto_run_test controls/scroll_lock_auto_run_test.cpp)
 target_link_libraries(controls_scroll_lock_auto_run_test PRIVATE opennova_runtime)
 add_test(NAME controls_scroll_lock_auto_run COMMAND controls_scroll_lock_auto_run_test)
+# A player's NetId the joiner's avatar table lacks, restamped by the client folds
+# (D-NET-NEW-L2-27).
+add_executable(netsim_client_avatar_fallback_test netsim/client_avatar_fallback_test.cpp)
+target_link_libraries(netsim_client_avatar_fallback_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_client_avatar_fallback COMMAND netsim_client_avatar_fallback_test)
 
 # --- parity lane L3 (host tick) ---
 # The 0x0A writer's stores on the slot's body, slot by slot (D-NET-439, 461, 462).

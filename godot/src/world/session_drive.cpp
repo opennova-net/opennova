@@ -82,7 +82,8 @@ void SessionDrive::clear_pending_session() {
 // table, which keeps the record's voice override (engine
 // join_character_profile_without_table).
 Ref<CharacterJoinProfile> SessionDrive::build_join_character_profile(
-		const Ref<ResourceRoot> &p_resource_root, const Ref<PlayerSpawnLoadout> &p_loadout) {
+		const Ref<ResourceRoot> &p_resource_root, const Ref<PlayerSpawnLoadout> &p_loadout,
+		Ref<AvatarDatabase> *r_avatar_db) {
 	if (p_resource_root.is_null()) {
 		return Ref<CharacterJoinProfile>();
 	}
@@ -93,6 +94,7 @@ Ref<CharacterJoinProfile> SessionDrive::build_join_character_profile(
 				"SessionDrive: Avatars.def not loaded for LAN join profile (%s)", db->get_last_error()));
 		return AvatarDatabase::character_join_profile_without_table(p_loadout, true);
 	}
+	if (r_avatar_db != nullptr) *r_avatar_db = db;
 	// A join's session start runs in a session (the class clamp).
 	return db->character_join_profile_from_loadout(p_loadout, true);
 }
@@ -119,9 +121,14 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// network receive can deliver the 0x41 property clears or 0x39 challenge.
 	// A missing file deliberately leaves the inactive all-zero table.
 	join_preload_sim_->load_charattr(resource_root);
+	Ref<AvatarDatabase> avatar_db;
 	Ref<CharacterJoinProfile> join_profile = build_join_character_profile(
-			resource_root, world_->player_visuals_->spawn_loadout());
+			resource_root, world_->player_visuals_->spawn_loadout(), &avatar_db);
 	join_preload_sim_->set_join_character_profile(join_profile);
+	// Retail's g_AvatarDefs is loaded before any join: the joiner's decode view restamps a
+	// player's NetId its own table lacks from the first 0x0C on (engine
+	// ClientReplicaPipeline::set_character_registry, D-NET-NEW-L2-27).
+	join_preload_sim_->set_character_avatar_database(avatar_db);
 	// The APPID join token (decoded .joi CK) a NovaWorld host validates in
 	// ClientAuth (reject code 9), and the CD identity cookie (packed PUB*
 	// blob) it validates in the 0x00 JOIN (codes 23/24/25). Both empty/"0"

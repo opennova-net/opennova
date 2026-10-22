@@ -195,6 +195,12 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		es.spawn_sub_type = rec.sub_type;
 		es.mount_bone = rec.weapon_type;
 		if (in_pool_tables(rec.parent_handle)) es.carrier_handle = rec.parent_handle;
+		// Then a player's NetId the joiner's own avatar table lacks becomes the first
+		// combo of its Team's side (D-NET-NEW-L2-27) [orig: NapiNPClientMsg_0x00C
+		//  @0x42E730 - the Player test @0x42EAC5, CAvatarDefs_HasPackedId @0x42EADB,
+		//  CAvatarDefs_PackFirstComboOfAlignment @0x42EAFB, the store @0x42EB03].
+		if ((rec.minimap_flags & world::kEntityFlagPlayer) != 0)
+			es.net_id = resolve_player_net_id(es.net_id, es.team);
 		changed = true;
 	}
 	if (changed) state_.mark_changed();

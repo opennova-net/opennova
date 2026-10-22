@@ -828,6 +828,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_join_mission_start();
 	runtime_->set_discovered_session(net_.join_discovered_session); // the browse row's 0x81
 	install_item_catalog();
+	install_character_registry();
 	// The kind-derived world rules (no authority, an mp session) applied with
 	// the role install.
 	joiner_role_->reset_for_join();

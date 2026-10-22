@@ -364,8 +364,14 @@ int Simulation::get_local_player_character_id() const {
 		if (e) return static_cast<int>(e->minimap_net_id);
 	}
 	// A joiner that has learned its record but not yet materialized L (the
-	// deploy-screen hold, the challenge prewarm) reads the record itself.
+	// deploy-screen hold, the challenge prewarm) reads the word its 0x0C fold
+	// stored on the self row (restamped when the joiner's avatar table lacks the
+	// wire id, D-NET-NEW-L2-27), else the record itself.
 	if (is_joiner() && runtime_ && runtime_->has_self_handle()) {
+		const opennova::replication::ClientEntityState *self =
+				runtime_->state().find(runtime_->self_handle());
+		if (self != nullptr && self->cls == opennova::EntityClass::Player)
+			return static_cast<int>(self->net_id);
 		return static_cast<int>(runtime_->spawn_pose().net_id);
 	}
 	return 0;

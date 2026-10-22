@@ -591,6 +591,7 @@ std::function<void(bool)> Simulation::role_bringup_tail() {
 			push_joiner_loadout_kit();
 		}
 		install_item_catalog();
+		install_character_registry();
 	};
 }
 

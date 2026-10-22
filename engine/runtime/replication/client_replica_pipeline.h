@@ -20,6 +20,10 @@ namespace opennova {
 struct TitleIdentity; // net/title/title_identity.h
 }
 
+namespace opennova::inmatch {
+class CharacterRegistry; // runtime/inmatch/character_registry.h
+} // namespace opennova::inmatch
+
 namespace opennova::world {
 class IRootMotionSource;
 class AnimVariantRings;
@@ -417,9 +421,9 @@ public:
 	void apply_team_assign(uint16_t handle, uint8_t team);
 	// A player's identity pair (Flags & 0x100 rows): the NetId word the
 	// character-slot lookup keys its avatar on and the animSlot byte, as S2C
-	// 0x50 and 0x51 rebind them. An id the character registry does not hold
-	// stays raw here; the presentation resolves it to the per-side default the
-	// same way it resolves a 0x0C record's.
+	// 0x50 and 0x51 rebind them. An id the installed character registry does not
+	// hold becomes the first combo of the row's Team side (resolve_player_net_id,
+	// D-NET-NEW-L2-27).
 	// [orig: NapiNPClientMsg_TeamAssign @0x431b3a (animSlot) / @0x431b46
 	//  (NetId), the CAvatarDefs_HasPackedId fallback @0x431b4d..0x431b77, the
 	//  CharacterEntity rebind @0x431b8c..0x431b91]
@@ -502,6 +506,14 @@ public:
 	// A row's def as the client's handlers read it (entity+0x20): its wire
 	// type's catalog profile, or null without a catalog or a definition.
 	const ItemReplicationProfile *item_def(uint16_t type_id) const;
+	// Install the embedder's character registry (its mounted Avatars.def, retail's
+	// g_AvatarDefs, which exists before any join): a player row's NetId the table
+	// lacks is restamped as the client's handlers restamp it
+	// (resolve_player_net_id). The embedder keeps it alive; null (no table
+	// mounted) passes every id through.
+	void set_character_registry(const inmatch::CharacterRegistry *registry) {
+		characters_ = registry;
+	}
 
 	// Inject the embedder's .adm root-motion source (JOINER role): armed rows
 	// (rm_adm_id >= 0, stamped by the embedder) advance their own AnimMap
@@ -727,6 +739,8 @@ private:
 	// Whether a pool-0 handle is a player entity (the Flags 0x100 class bit):
 	// a decoded Player row, or the entity a bound roster slot drives.
 	bool is_player_entity(uint16_t handle) const;
+	// A player row's NetId as the client's handlers store it (client_replica_lifecycle.cpp).
+	uint16_t resolve_player_net_id(uint16_t net_id, uint8_t team) const;
 	void apply_formatted_game_text(const std::vector<uint8_t> &body); // 0x32 (join/leave lines)
 	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
@@ -782,7 +796,8 @@ private:
 	int32_t water_z_ = 0;
 	ItemClassResolver item_resolver_;                    // items.def table (authoritative)
 	std::shared_ptr<const ItemReplicationCatalog> item_catalog_; // the items.def def facts
-	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
+	const inmatch::CharacterRegistry *characters_ = nullptr; // the embedder's Avatars.def
+	std::function<EntityClass(uint16_t)> resolver_;     // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::vector<ClientRoundEvent> pending_round_events_;
     GuidedRoundResolver guided_round_resolver_;
