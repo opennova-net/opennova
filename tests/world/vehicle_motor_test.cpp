@@ -3079,9 +3079,57 @@ void test_a_brainless_hull_bails_at_its_head() {
 					CHECK(r->w.out.sound_emitters.empty());
 				else if (physics != 0)
 					CHECK(!r->w.out.sound_emitters.empty());
-				if (!brained)
-					CHECK((r->veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
+				// Brained or not, the visit ends at the mover's one exit, its tail.
+				CHECK((r->veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
 			}
+		}
+	}
+}
+
+// A client visit of a brained hull the chase does not run ends at the mover's
+// matrix-build tail, its one exit, as every visit does: a live ground, tank, bike
+// or boat hull folds its movement sound and takes Flags 0x20000; a dead one bails
+// to the tail at its dead test, ahead of the fold, so it registers no lane; an
+// aircraft (whose mover has no fold) takes the bit alone, dead or alive.
+// [orig: the tails and their one retn: cveh @0x48D43E..0x48D451 / @0x48D462, ctan
+//  @0x48AEB6..0x48AEC9 / @0x48AEDA, cbik @0x486A04..0x486A17 / @0x486A28, cbot
+//  @0x48EF50..0x48EF63 / @0x48EF73, selector-zero ground @0x46F9B2..0x46F9C5 /
+//  @0x46F9D5, boat @0x471670..0x471683 / @0x471693, aircraft @0x492753..0x492766 /
+//  @0x492776; the client legs into the dead tests: cveh @0x48B53F..0x48B54C ->
+//  @0x48B810..0x48B814, ctan @0x489108..0x489114 -> @0x4893E9..0x4893ED, cbik
+//  @0x484642..0x484648 -> @0x484936..0x48493A, cbot @0x48DB6B..0x48DB78 ->
+//  @0x48DDFA..0x48DDFE, selector-zero ground @0x46E60E..0x46E61B ->
+//  @0x46E89D..0x46E8A1]
+void test_a_client_visit_the_chase_skips_ends_at_its_tail() {
+	for (const int physics : { 1, 0 })
+	for (const VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Tank,
+				 VehicleFamily::Bike, VehicleFamily::Watercraft,
+				 VehicleFamily::Helicopter }) {
+		for (const bool dead : { false, true }) {
+			auto r = std::make_unique<Rig>();
+			VehicleTraits t = buggy_traits();
+			t.family = family;
+			t.physics = physics;
+			t.sound_profile = "SP_Transport";
+			load_transport_sound_profile(r->w);
+			r->w.vehicles.traits.set(r->veh().item_id, t);
+			r->mount();
+			r->w.ai.is_authority = false;
+			Entity &veh = r->veh();
+			CHECK(!veh.veh.net_predicted);
+			if (dead) {
+				veh.engine_flags |= kEntityFlagDead;
+				veh.health = 0;
+			}
+			veh.engine_flags &= ~kEntityFlagMatrixBuilt;
+			r->w.out.sound_emitters.clear();
+			r->w.vehicles.update_motor(veh, /*is_authority=*/false);
+			CHECK((veh.engine_flags & kEntityFlagMatrixBuilt) != 0);
+			const bool folds = !dead && family != VehicleFamily::Helicopter;
+			if (!folds)
+				CHECK(r->w.out.sound_emitters.empty());
+			else if (physics != 0)
+				CHECK(!r->w.out.sound_emitters.empty());
 		}
 	}
 }
@@ -3408,6 +3456,7 @@ int main() {
     test_watercraft_entry_reads_the_hull();
     test_a_dead_hull_bails_to_its_tail();
     test_a_brainless_hull_bails_at_its_head();
+    test_a_client_visit_the_chase_skips_ends_at_its_tail();
     test_a_dead_aircraft_bails_ahead_of_its_ai_block();
     test_selector_zero_park_reads_the_hull_not_the_occupant();
     test_selector_zero_ground_ai_leg_runs_in_the_mover();

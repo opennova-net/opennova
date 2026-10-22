@@ -368,12 +368,18 @@ bool run_unresolved_attachment_follows_its_target_carrier() {
 // D-NET-690: an addeweap child the joiner's world resolves runs the ewep class
 // update there, every frame, with no role gate: the update composes it from the
 // carrier at the anchor its subType names, and with no anchor copies the
-// carrier's root pose. Its 0x0D pose is only the spawn seed: the world row takes
-// it once and the decoded row reads the world's pose back, never a rigid
-// child-in-carrier offset.
+// carrier's root pose only while the carrier's matrix bit is clear. Its 0x0D pose
+// is only the spawn seed: the world row takes it once and the decoded row reads
+// the world's pose back, never a rigid child-in-carrier offset. The tank's client
+// mover runs to its matrix-build tail on every visit (it is not predicted: no
+// compact has landed), so the bit is current when the child poses and the
+// anchorless child keeps the seed. The copy itself is pinned on a stale carrier
+// in vehicle_mount (test_an_anchorless_child_copies_only_a_stale_carrier).
 // [orig: NapiNPClientMsg_0x00D +0x1C4 @0x43331A; Entity_UpdatePool1Slot
-//  @0x4B8E53; Entity_UpdateTransformAndTurret @0x440CA0, the root copy
-//  @0x441153..0x4411BC]
+//  @0x4B8E53; Entity_UpdateTransformAndTurret @0x440CA0, the gate
+//  @0x4410EA..0x4410F1, the root copy @0x441153..0x4411BC, the child's bit
+//  @0x4411C2; Entity_UpdateTankVehiclePhysics @0x488AB0, the tail
+//  @0x48AEB6..0x48AEC9 ahead of its one retn @0x48AEDA]
 bool run_resolved_attachment_runs_the_ewep_update() {
 	Harness h;
 	bool ok = true;
@@ -408,6 +414,9 @@ bool run_resolved_attachment_runs_the_ewep_update() {
 	row.heading_bam = w::bam_heading_from_mission_yaw_deg(30);
 	row.target_handle = h.tank.packed;
 	row.spawn_revision = 1;
+	const int32_t seed_x = row.x;
+	const int32_t seed_y = row.y;
+	const int32_t seed_z = row.z;
 	h.role.run_tick(h.input);
 	h.role.run_tick(h.input);
 	const w::Entity *live = world.registry.get(gun);
@@ -417,10 +426,16 @@ bool run_resolved_attachment_runs_the_ewep_update() {
 					after->world_class_update ==
 							replication::ClientEntityState::WorldClassUpdate::Ewep,
 			"ewep: the row is the world's class update's");
-	ok &= expect(live != nullptr && live->position.x.q16 == carrier.position.x.q16 &&
-					live->position.y.q16 == carrier.position.y.q16 &&
-					live->position.z.q16 == carrier.position.z.q16,
-			"ewep: the world row took the carrier's root pose, not the 0x0D offset");
+	ok &= expect(!carrier.veh.net_predicted &&
+					(carrier.engine_flags & w::kEntityFlagMatrixBuilt) != 0,
+			"ewep: the tank's unpredicted client mover ran to its matrix-build tail");
+	ok &= expect(live != nullptr && (live->engine_flags & w::kEntityFlagMatrixBuilt) != 0,
+			"ewep: the class update ran and set the child's own bit");
+	ok &= expect(live != nullptr && live->position.x.q16 == seed_x &&
+					live->position.y.q16 == seed_y && live->position.z.q16 == seed_z &&
+					live->position.x.q16 != carrier.position.x.q16,
+			"ewep: with the carrier's matrix current the anchorless child keeps the "
+			"seeded 0x0D pose, no root copy");
 	ok &= expect(after != nullptr && live != nullptr && after->x == live->position.x.q16 &&
 					after->y == live->position.y.q16 && after->z == live->position.z.q16 &&
 					after->heading_bam == live->veh.yaw_bam,
