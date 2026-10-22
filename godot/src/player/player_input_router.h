@@ -256,8 +256,8 @@ private:
 	// The last sample's action-row records, in order, until the session hands the role's
 	// event queue to queue_records.
 	std::vector<opennova::controls::InputEventRecord> sample_records_;
-	// The wheel notches' records since the last update's message pump (handle_input), in
-	// order, queued ahead of the sample's (queue_records).
+	// The wheel notches' and the mouse buttons' click records since the last update's
+	// message pump (handle_input), in order, queued ahead of the sample's (queue_records).
 	std::vector<opennova::controls::InputEventRecord> pump_records_;
 	// The device step of the frame's head or of a later update (run_update_rows): the
 	// look pixels and the death screen the update's sample_tick reads.

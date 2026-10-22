@@ -82,10 +82,16 @@ public:
 	// samples Godot Input here at the device seam, plus the attached scripted
 	// device's held tokens.
 	bool is_token_pressed(const String &p_token) const;
-	// The same, without the keyboard slots: the scripted device's hold, the held
-	// mouse-mask buttons and the joystick. A keyboard key fires its row through the
-	// key queue's events instead (the shell's KeyboardPass; D-CTRL-6).
+	// The same, without the keyboard slots and the mouse buttons: the scripted device's
+	// hold and the joystick. A keyboard key fires its row through the key queue's events
+	// (the shell's KeyboardPass), a mouse button's through its click records
+	// (mouse_click_code; D-CTRL-6).
 	bool is_token_held_off_keyboard(const String &p_token) const;
+	// The dispatch code a mouse button message's event queues (2 / 4 / 1024 left down /
+	// up / double click, 8 / 0x10 / 2048 right, 32 / 64 / 4096 middle), -1 for none, under
+	// the death screen's mode gate the key scan holds (engine BindingSet::mouse_click_action
+	// carries the witness).
+	int mouse_click_code(int p_event) const;
 	// The scenario driver's scripted input device (devtools/scripted_input.h)
 	// at this seam: a token it holds reads held like a keyboard slot, so an
 	// open chat line silences it the same way. Null detaches.
@@ -207,7 +213,7 @@ public:
 private:
 	// The physical key state by VK under the special-key takes.
 	bool vk_down_(int p_vk) const;
-	bool token_pressed_(const String &p_token, bool p_keyboard) const;
+	bool token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse = true) const;
 
 	opennova::controls::BindingSet bindings_;
 	opennova::controls::HelpScreen help_screen_;

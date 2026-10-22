@@ -262,6 +262,7 @@ class BindingSet {
     scan_death_screen_ = death_screen;
     scan_word_ = scan_word;
   }
+  bool scan_death_screen() const { return scan_death_screen_; }
 
   // Whether the record's fire RIGHT NOW carries the sign bit (bit 31 of the
   // queued binding id, which steps mousescale down): the keyboard fallback
@@ -305,6 +306,30 @@ class BindingSet {
   bool pressed_mouse(int index, uint16_t held_mask,
       const std::function<bool(int)> &key_down, bool dead = false) const;
   int mouse_event_action(uint16_t mask,
+      const std::function<bool(int)> &key_down, bool dead = false) const;
+  // The row a mouse button message's event queues (the click records, D-CTRL-6): the
+  // window procedure maps the messages onto events (left down 2 / up 4 / double click
+  // 1024, right 8 / 0x10 / 2048, middle 32 / 64 / 4096; the class's CS_DBLCLKS style sends
+  // a double click's second press as its own message), and the binding walk queues the
+  // first eligible row whose mouse word the event takes, on the walk's modifier order
+  // (mouse_event_action's): a button-down or double click takes its button's row (mouse
+  // word 1 / 2 / 16) unless the row is a held row (flag 4: the walk passes the seventh
+  // argument 0); a button-up takes the left or right button's row only with the release
+  // flag 0x400000, a held row's too; middle-up takes none. -1 = no row. The record carries
+  // the Shift sign or the row's 0x200 bit (@0x49919E..0x4991A4; fire_signed's mouse arm).
+  // The walk's head gate is dead in play: its word is the cine editor's open word, which
+  // only the editor's toggle raises and the escape case lowers [orig: Input_ProcessBindings
+  //  @0x4DDA50 (the gate @0x4DDA58..0x4DDA6F); CineEditor_Toggle @0x41AA20 (the store
+  //  @0x41AA4F); Input_HandleActionBinding @0x49AD40 (case 18's lowering
+  //  @0x49B313..0x49B323)].
+  // [orig: WinMain @0x763A80 (the class style 8, CS_DBLCLKS, @0x763AFC); Game_WindowProc
+  //  @0x7624C0 (Input_DispatchMouseEvent @0x762574); Input_DispatchMouseEvent @0x761470 (the
+  //  messages 0x201..0x209 onto the events @0x76151A..0x76156A); Input_ProcessBindings
+  //  @0x4DDA50 (event 1 leaves @0x4DDB09, the walk @0x4DDB15..0x4DDBF4, the arguments 0
+  //  @0x4DDB6D..0x4DDB78); Input_TryDispatchBindingByWeaponType @0x499180 (the flag-4 test
+  //  @0x4991A9..0x4991E1, the first switch @0x4991F7..0x4992B7, the second @0x4992C3..0x499327,
+  //  Input_QueueEvent @0x499251)]
+  int mouse_click_action(uint32_t event,
       const std::function<bool(int)> &key_down, bool dead = false) const;
 
   // Buttons 1..128 followed by four four-bit POV hats. The caller retains

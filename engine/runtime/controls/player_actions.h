@@ -34,10 +34,11 @@ public:
 	// ToSpecial handler reads its keys raw to tell its press from its release.
 	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
 	virtual bool keys_down(const char *token) const { return pressed(token); }
-	// The token held by an arm the key queue does not carry: the mouse buttons,
-	// the joystick and the scripted device's hold. A keyboard key fires an event
-	// row once per queued key event (PlayerActionPoll::key_events); these arms
-	// keep their press edges. A source with no key queue reads every arm here.
+	// The token held by an arm neither the key queue nor the click records carry: the
+	// joystick and the scripted device's hold. A keyboard key fires an event row once per
+	// queued key event (PlayerActionPoll::key_events), a mouse button once per click record
+	// (the embedder's, queued at its update's message pump); these arms keep their press
+	// edges. A source with no key queue reads every arm here.
 	virtual bool held_off_keyboard(const char *token) const { return pressed(token); }
 };
 

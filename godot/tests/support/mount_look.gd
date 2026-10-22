@@ -64,6 +64,9 @@ static func right_click(test: GutTest, sim: Simulation,
 		event.pressed = pressed
 		Input.parse_input_event(event)
 		Input.flush_buffered_events()
+		# The message reaches the router as the shell hands it over (its unhandled
+		# input): a click record its next update's pump queues (D-CTRL-6).
+		presenter.handle_input(event, true)
 		# The router samples the row in the update's input frame, inside the tick.
 		var world := presenter.world() as GameWorld
 		var camera := presenter.get_viewport().get_camera_3d()

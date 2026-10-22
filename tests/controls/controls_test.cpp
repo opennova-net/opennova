@@ -311,6 +311,32 @@ bool test_mouse_dispatch() {
   return true;
 }
 
+// D-CTRL-6 (LI-s15): a mouse button message's event takes its row by the dispatch's two
+// switches over the walk: a button-down or double click its button's row (a held row,
+// flag 4, skipped), a button-up only a row carrying 0x400000, middle-up none.
+// [orig: Input_DispatchMouseEvent @0x761470 (0x201..0x209 -> 2 / 4 / 1024, 8 / 0x10 /
+//  2048, 32 / 64 / 4096); Input_TryDispatchBindingByWeaponType @0x499180 (the flag-4 test
+//  @0x4991A9..0x4991E1, the switches @0x4991F7..0x499327)]
+bool test_mouse_click_dispatch() {
+  BindingSet set;
+  auto held = [](int) { return false; };
+  auto token = [&set](const char *name) { return set.index_of_token(name); };
+  CHECK(set.mouse_click_action(2, held) == token("attack_1"), "left down: attack_1");
+  CHECK(set.mouse_click_action(1024, held) == token("attack_1"), "a left double click is its button");
+  CHECK(set.mouse_click_action(4, held) == token("attack_1"), "left up: attack_1's release, 0x400000");
+  CHECK(set.mouse_click_action(8, held) == token("scope"), "right down: scope, FreeLook a held row");
+  CHECK(set.mouse_click_action(2048, held) == token("scope"), "a right double click is its button");
+  CHECK(set.mouse_click_action(0x10, held) == -1, "right up: no right-button row carries 0x400000");
+  CHECK(set.mouse_click_action(32, held) == token("Prone"), "middle down: prone");
+  CHECK(set.mouse_click_action(4096, held) == token("Prone"), "a middle double click is its button");
+  CHECK(set.mouse_click_action(64, held) == -1, "middle up takes none");
+  CHECK(set.mouse_click_action(1, held) == -1, "a move takes none");
+  CHECK(set.mouse_click_action(0x100, held) == token("cycleweaponP"), "the wheel's event");
+  CHECK(set.mouse_click_action(2, held, true) == token("IncSpectatorTarget"),
+      "the death screen's mode skips the fire row");
+  return true;
+}
+
 // An open chat line owns the keyboard, not the mouse [orig:
 // Input_ProcessPlayerFrame @0x49d4c0 -- the mouse pass gated only on the
 // playback file @0x49d4d5, the held keyboard pass behind !g_InputCaptureMode
@@ -932,6 +958,7 @@ int main() {
   RUN_TEST(test_build_rows_keyboard);
   RUN_TEST(test_build_rows_other_devices);
   RUN_TEST(test_mouse_dispatch);
+  RUN_TEST(test_mouse_click_dispatch);
   RUN_TEST(test_keyboard_capture_leaves_the_mouse_rows);
   RUN_TEST(test_joystick_pov_dispatch);
   RUN_TEST(test_binding_set_assignment);

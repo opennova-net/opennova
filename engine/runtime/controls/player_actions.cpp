@@ -354,11 +354,14 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		}
 	}
 	// The off-keyboard arms' press edges behind the keyboard pass's events (ToSpecial's
-	// arm both edges). A mouse arm's record is retail's message pump's, queued ahead of the
-	// key scan as the wheel's is; these stay behind the scan's records until the click
-	// records land (D-CTRL-6's next slice) [orig: Game_WindowProc @0x7624C0
-	//  (Input_DispatchMouseEvent @0x762574) -> Input_ProcessBindings @0x4DDA50 ->
-	//  Input_TryDispatchBindingByWeaponType @0x499180 (Input_QueueEvent @0x499251)].
+	// arm both edges): the joystick's and the scripted hold's, whose toggle pass runs behind
+	// the keyboard pass. A mouse arm is no edge here: its record is the message pump's click
+	// record, queued ahead of the key scan as the wheel's is (the embedder's;
+	// BindingSet::mouse_click_action) [orig: Input_ProcessPlayerFrame @0x49D4C0
+	//  (Input_ProcessKeyboardEvents @0x49D4C6 ahead of Input_ProcessToggleBindings
+	//  @0x49D4DE); Game_WindowProc @0x7624C0 (Input_DispatchMouseEvent @0x762574) ->
+	//  Input_ProcessBindings @0x4DDA50 -> Input_TryDispatchBindingByWeaponType @0x499180
+	//  (Input_QueueEvent @0x499251)].
 	if (reload_off) frame.requests.push_back({Action::Reload, 0, reload_code});
 	if ((to_special_off_press || to_special_off_release) &&
 			to_special_admits(to_special_off_release))
@@ -455,6 +458,11 @@ std::optional<PlayerActionRequest> player_action_request(const InputEventRecord 
 		if (request.action == Action::WaypointCycle && record.sign) request.value = -1;
 		return request;
 	}
+	// The death screen's spectator rows (codes 500..502; a mouse button's click record
+	// among them) [orig: Input_HandleActionBinding @0x49AD40 - cases 500 @0x49bd58, 501
+	//  @0x49bd67, 502 @0x49bd89].
+	if (record.code >= 500 && record.code <= 502)
+		return PlayerActionRequest{Action::Spectate, record.code, record.code, record.sign};
 	return std::nullopt;
 }
 

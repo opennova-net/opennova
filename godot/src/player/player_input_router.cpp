@@ -774,6 +774,29 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
         for (; notches < 0; ++notches) dispatch(MOUSE_BUTTON_WHEEL_DOWN);
         return true;
     }
+	// A mouse button's message is a click record its next update's pump queues, ahead of
+	// that update's keyboard pass: the row its event takes, with the Shift sign or the
+	// row's 0x200 bit; the click walk's head gate (the cine editor's open word) never closes
+	// in play (engine BindingSet::mouse_click_action carries the witness). The button's held
+	// state stays the sampler's (the fire, the held rows).
+	if (button != nullptr && controls_.is_valid()) {
+		int event = 0;
+		const bool down = button->is_pressed();
+		const bool twice = down && button->is_double_click();
+		switch (button->get_button_index()) {
+			case MOUSE_BUTTON_LEFT: event = twice ? 1024 : down ? 2 : 4; break;
+			case MOUSE_BUTTON_RIGHT: event = twice ? 2048 : down ? 8 : 0x10; break;
+			case MOUSE_BUTTON_MIDDLE: event = twice ? 4096 : down ? 32 : 64; break;
+			default: break;
+		}
+		const int code = event != 0 ? controls_->mouse_click_code(event) : -1;
+		const opennova::controls::ActionDef *def = opennova::controls::action_for_code(code);
+		if (code >= 0)
+			pump_records_.push_back({code, 0, 0, 0,
+					controls_->is_vk_down(0x10) || (def != nullptr && (def->flags & 0x200u) != 0),
+					opennova::controls::InputEventOrigin::Device});
+		return false;
+	}
 	InputEventMouseMotion *motion = Object::cast_to<InputEventMouseMotion>(p_event.ptr());
 	if (motion == nullptr) {
 		return false;

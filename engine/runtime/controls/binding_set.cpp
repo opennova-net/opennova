@@ -349,6 +349,43 @@ int BindingSet::mouse_event_action(uint16_t mask,
   return -1;
 }
 
+int BindingSet::mouse_click_action(uint32_t event,
+    const std::function<bool(int)> &key_down, bool dead) const {
+  // Input_TryDispatchBindingByWeaponType's two switches over the row's mouse word and flags.
+  const auto takes = [event](uint16_t word, uint32_t flags) {
+    const bool release_row = (flags & 0x400000u) != 0;
+    if ((flags & 4u) == 0) {
+      switch (event) {
+        case 2: case 1024: if (word == 1) return true; break;
+        case 8: case 2048: if (word == 2) return true; break;
+        case 32: case 4096: if (word == 16) return true; break;
+        default: break;
+      }
+    }
+    switch (event) {
+      case 4: return word == 1 && release_row;
+      case 0x10: return word == 2 && release_row;
+      case 0x100: return word == 1024;
+      case 0x200: return word == 2048;
+      default: return false;
+    }
+  };
+  std::size_t count = 0;
+  const ActionDef *cat = catalog(&count);
+  for (bool modified : {true, false}) {
+    for (std::size_t i = 0; i < records_.size(); ++i) {
+      const BindingRecord &r = records_[i];
+      if ((cat[i].modes & (dead ? 2u : 1u)) == 0 || !takes(r.mouse_mask, cat[i].flags)) continue;
+      const bool has_mod = r.primary_mod || r.secondary_mod || r.mouse_mod;
+      if (has_mod != modified) continue;
+      if (!modified || (r.primary_mod && key_down(r.primary_mod)) ||
+          (r.secondary_mod && key_down(r.secondary_mod)) ||
+          (r.mouse_mod && key_down(r.mouse_mod))) return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
 int BindingSet::action_index_for_row(int row) const {
   if (row < 0) {
     return -1;
