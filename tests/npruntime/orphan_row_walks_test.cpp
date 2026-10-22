@@ -296,6 +296,7 @@ void test_the_play_ticks_count_an_orphaned_row() {
 // @0x4C5373..0x4C540B, the gate @0x4C5376..0x4C5398, the ping term @0x4C5442..0x4C5471]
 void test_the_net_quality_walk_samples_an_orphaned_row() {
 	OrphanRig r;
+	r.ctx->config.max_players = 8; // an eight-row slot table
 	for (const w::EntityHandle body : {r.own_body, r.orphan_body})
 		r.world->match.player(body)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
 	for (uint32_t i = 0; i < 10; ++i) {
@@ -309,6 +310,40 @@ void test_the_net_quality_walk_samples_an_orphaned_row() {
 	CHECK(cursor == 1);
 	CHECK(r.ctx->host_quality_window.ping[cursor] == 51);
 	CHECK(r.ctx->host_quality_window.loss[cursor] == 1);
+}
+
+// The walk's count starts at the slot table's capacity and the ring's ten-sample loop leaves 10
+// in it at every sampled row, so the walk ends nine rows past the last sampled one: over a
+// 32-row table, the orphaned row at slot 2 (300 ms) and its net player's row at slot 12
+// (100 ms, ten past) sample the orphaned row alone, its 300 clamped 255, 255 * 255 / 1000 = 65;
+// at slot 11 (nine past) both, 51. A first sampled row deep in the table is reached (slots 20
+// and 29, and 20 alone with the other at 30), and the walk stops at the table's end (slots 30
+// and 31), where retail's reads on past g_PlayerSlots (the PERMANENT candidate note,
+// D-NET-NEW-L1-31).
+// [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the count from g_PlayerSlotCapacity @0x4C535B, the
+//  10 @0x4C53CC, `--count` @0x4C5400, `jg` @0x4C540B, the ping term @0x4C5442..0x4C5457]
+void test_the_net_quality_walk_ends_nine_rows_past_a_sampled_row() {
+	OrphanRig r;
+	r.ctx->config.max_players = 32; // a 32-row slot table
+	for (const w::EntityHandle body : {r.own_body, r.orphan_body})
+		r.world->match.player(body)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	for (uint32_t i = 0; i < 10; ++i) {
+		r.net_player().reply.rtt_ring[i] = 100;
+		r.orphan().reply.rtt_ring[i] = 300;
+	}
+	r.ctx->stats_avg_fps = 62;
+	const auto ping_with = [&r](uint8_t orphan_slot, uint8_t player_slot) {
+		r.orphan().reply.player_slot = orphan_slot;
+		r.net_player().reply.player_slot = player_slot;
+		r.ctx->net_quality_sample_countdown = 0;
+		inmatch::Server_SampleHostNetQuality(*r.ctx);
+		return r.ctx->host_quality_window.ping[r.ctx->host_quality_window.cursor];
+	};
+	CHECK(ping_with(2, 12) == 65);
+	CHECK(ping_with(2, 11) == 51);
+	CHECK(ping_with(20, 29) == 51);
+	CHECK(ping_with(20, 30) == 65);
+	CHECK(ping_with(30, 31) == 51);
 }
 
 // The orphaned row's body has been dead 360 periodic seconds: the walk's next second counts
@@ -536,6 +571,7 @@ int main() {
 	test_the_net_player_is_bound_by_identity();
 	test_the_play_ticks_count_an_orphaned_row();
 	test_the_net_quality_walk_samples_an_orphaned_row();
+	test_the_net_quality_walk_ends_nine_rows_past_a_sampled_row();
 	test_the_periodic_walk_takes_an_orphaned_row();
 	test_the_downed_resend_takes_an_orphaned_row();
 	test_the_integrity_family_takes_an_orphaned_row();

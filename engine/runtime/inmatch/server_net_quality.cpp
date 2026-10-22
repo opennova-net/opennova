@@ -1,6 +1,7 @@
 #include <runtime/inmatch/server_net_quality.h>
 
 #include <algorithm>
+#include <vector>
 
 #include <net/npwire/ingame_decode.h>   // kPlayerSyncHasQuality
 #include <net/npwire/ingame_encode.h>   // encode_player_sync
@@ -153,36 +154,53 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	// The send window's three inputs [orig: @0x4C531B..0x4C54C6].
 	uint32_t ping_sum = 0;
 	uint32_t active = 0;
-	// One slot row of the walk: the slot's active byte, not the local slot (+5), not a bot
-	// (+0x178E3), and its play ticks (slot+0x184) at least 1860; its own ten-sample ring's mean,
-	// summed as it stands: the 255 clamp is the average's, past the walk
-	// (net_quality_host_ping_metric).
+	// A slot row the walk samples: the slot's active byte, not the local slot (+5), not a bot
+	// (+0x178E3), and its play ticks (slot+0x184) at least 1860.
 	// [orig: CNetQuality_UpdateMetrics @0x4C5376..0x4C5398, `cmp [edi+17Fh],
 	//  744h` with edi = slot+5 @0x4C538E]
-	const auto sample_row = [&](const NapiNPConnection &conn) {
+	const auto eligible = [&](const NapiNPConnection &conn) {
 		const world::MatchPlayer *row =
 				ctx.world != nullptr ? ctx.world->match.player(conn.link.owned_entity)
 						: nullptr;
-		if (!is_in_match(conn) ||
-				conn.link.mode == replication::TransportMode::Loopback ||
-				row == nullptr ||
-				static_cast<int32_t>(row->play_ticks) <
-						static_cast<int32_t>(CONTROL_REQUEST_LIVE_GATE_TICKS))
-			return;
-		// [orig: the ring's sum over ten @0x4C53AA..0x4C53F7 added unclamped @0x4C53FA; the
-		//  clamp on the walk's average @0x4C5442..0x4C5448]
-		ping_sum += Server_PlayerAveragePingMs(conn);
-		++active;
+		return is_in_match(conn) && conn.link.mode != replication::TransportMode::Loopback &&
+				row != nullptr &&
+				static_cast<int32_t>(row->play_ticks) >=
+						static_cast<int32_t>(CONTROL_REQUEST_LIVE_GATE_TICKS);
 	};
 	// The walk is over the slot table, so an orphaned row (a row a repeated C2S 0x02's add left
 	// behind) is sampled as any row, with its own ring as the re-add left it: its net player's
-	// later samples land in the net player's current row (D-NET-NEW-L1-31). The sums take the
-	// rows in any order alike.
+	// later samples land in the net player's current row (D-NET-NEW-L1-31).
 	// [orig: CNetQuality_UpdateMetrics - g_PlayerSlots walked @0x4C5373..0x4C540B, stride 0x188E8
 	//  @0x4C5403; NapiNPServerMsg_HandlePingResponse @0x515070 - the slot through the net
 	//  player's +0xC0 @0x515093]
-	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) sample_row(conn);
-	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) sample_row(orphan.row);
+	const uint32_t capacity = ctx.config.total_player_slot_capacity();
+	std::vector<const NapiNPConnection *> by_slot(capacity, nullptr);
+	const auto place = [&](const NapiNPConnection &conn) {
+		if (conn.reply.player_slot < capacity && eligible(conn))
+			by_slot[conn.reply.player_slot] = &conn;
+	};
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) place(conn);
+	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) place(orphan.row);
+	// The walk's count starts at the slot table's capacity and steps down once per row, and the
+	// ring's ten-sample loop leaves 10 in it at every sampled row: the walk ends nine rows past
+	// the last sampled one, so a row ten or more past the previous sampled row is never reached.
+	// Each sampled row's ten-sample mean is summed as it stands; the 255 clamp is the average's,
+	// past the walk (net_quality_host_ping_metric). Past the table's end retail's walk reads on
+	// into the memory after g_PlayerSlots, which ours never does: it stops at the capacity
+	// (a PERMANENT candidate note, D-NET-NEW-L1-31).
+	// [orig: CNetQuality_UpdateMetrics - the count from g_PlayerSlotCapacity @0x4C535B, the
+	//  `count <= 0` exit @0x4C536D, the 10 @0x4C53CC, `--count` @0x4C5400, `jg` @0x4C540B; the
+	//  ring's sum over ten @0x4C53AA..0x4C53F7 added unclamped @0x4C53FA; the clamp on the
+	//  walk's average @0x4C5442..0x4C5448]
+	int32_t count = static_cast<int32_t>(capacity);
+	for (uint32_t slot = 0; count > 0 && slot < capacity; ++slot) {
+		if (const NapiNPConnection *conn = by_slot[slot]) {
+			ping_sum += Server_PlayerAveragePingMs(*conn);
+			++active;
+			count = 10;
+		}
+		--count;
+	}
 	// With no eligible slot the ping and loss samples are stored as 0, not the
 	// floor 1 [orig: LABEL_23 — `*(this + cursor + 17) = 0; *(this + cursor + 22) = 0`].
 	// The slots' loss counters (+0x1880C) have no writer but this walk's own zeroing, so an
