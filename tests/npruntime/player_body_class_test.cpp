@@ -1752,7 +1752,7 @@ void test_an_ewep_row_body_runs_the_ewep_legs() {
 //  @0x440D2A, the tick @0x440D37..0x440D41, the 0x0Fs @0x440DAB / @0x440E29, the tail
 //  @0x440E37]
 void test_an_ewep_row_body_asks_for_a_destroyed_ground() {
-	constexpr uint16_t kGround = 0x1003;
+	static constexpr uint16_t kGround = 0x1003;
 	struct Case {
 		uint32_t tick;
 		bool marked, authority, session, peer;
