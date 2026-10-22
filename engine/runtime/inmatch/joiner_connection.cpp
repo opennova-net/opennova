@@ -4,7 +4,7 @@
 #include <formats/mission/bms.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/flat_tlv.h>         // append_flat_tlv (the C2S 0x00 JOIN body)
-#include <net/npwire/lan_discovery.h>    // build_lan_discovery_probe, next_browse_connection_index
+#include <net/npwire/lan_discovery.h>    // build_lan_discovery_probe, next_browse_connection_index, the record lines
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h> // decode_cs_config_update

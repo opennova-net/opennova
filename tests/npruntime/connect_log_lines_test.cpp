@@ -17,6 +17,7 @@
 //  @0x62B750; NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF);
 //  CNapiNetwork_Init @0x4CA908..0x4CA9CD; Napi_FormatAddress @0x62DED0]
 #include <net/napi/envelope.h>
+#include <net/npwire/lan_discovery.h> // net_session_removed_text / net_session_discovered_text
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/peer_addr.h>
 #include <net/npwire/session_hello.h>
@@ -110,9 +111,9 @@ void test_line_texts() {
 			"NET CONNECTED TO SERVER 192.168.1.20:3000 [yourip=10.0.0.2:2302]");
 	CHECK(inmatch::net_disconnecting_from_server_text(peer, 1, 9, 0, 0, "", 0, "NP.C:SH:STOP") ==
 			"NET DISCONNECTING FROM SERVER 192.168.1.20:3000 [1,9,0,0,\"\",0,\"NP.C:SH:STOP\"]");
-	CHECK(inmatch::net_session_removed_text(peer, "Host") ==
+	CHECK(net_session_removed_text(peer, "Host") ==
 			"NET SESSION AT 192.168.1.20:3000 [Host] HAS BEEN REMOVED.");
-	CHECK(inmatch::net_session_discovered_text(peer, "Host") ==
+	CHECK(net_session_discovered_text(peer, "Host") ==
 			"NET SESSION DISCOVERED AT 192.168.1.20:3000 [Host]");
 }
 

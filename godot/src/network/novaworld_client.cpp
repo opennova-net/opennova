@@ -421,6 +421,10 @@ void NovaWorldClient::set_process_connect_log(opennova::inmatch::ConnectLog *log
 	g_process_connect_log = log;
 }
 
+opennova::inmatch::ConnectLog *NovaWorldClient::process_connect_log() {
+	return g_process_connect_log;
+}
+
 PackedByteArray NovaWorldClient::get_glsvss_request() const {
 	const std::string &request = lobby_.gate_response().glsvss_request;
 	PackedByteArray out;

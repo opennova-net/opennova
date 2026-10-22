@@ -1218,6 +1218,14 @@ func start_join_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
 		_on_world_load_failed("mission load handoff could not start")
 
 
+## The process has one enumerator, so a join's enumerate-and-join drains the LAN
+## screen's session records first, each writing its removed line (engine:
+## net/npwire/lan_discovery.h drain_records, D-NET-NEW-L8-8).
+func drain_lan_records() -> void:
+	if _lan_session != null:
+		_lan_session.drain_records()
+
+
 ## A join's enumerate-and-join: the join screen shows retail's PRE_ENUMSESSION
 ## line with ABORT_CANCEL while the browse runs (no time limit); Cancel runs
 ## `abort`, which leaves to the menu (engine: inmatch/pre_game_menu.h, D-NET-703).

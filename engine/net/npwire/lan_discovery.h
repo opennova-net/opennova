@@ -5,8 +5,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace opennova {
@@ -94,10 +94,11 @@ inline constexpr double kLanBrowseWindowSeconds = 30.0;
 // @0x6290c0 interval select; NapiNPSession_SendAnnouncePacket @0x61fa00 +37
 // player-count gate]
 inline constexpr double kLanAnnounceIntervalSeconds = 3.0;
-// The per-pump walk over the discovered sessions examines at most 32 entries,
-// so a browse window never lists more than 32 hosts.
+// The per-pump walk over the listed sessions examines at most 32 of them, and the
+// row table it appends to holds 32 rows (0x23D00 bytes of 0x11E8-byte rows).
 // [orig: UI_ProcessLANSessionStateMachine @0x558de0, the `session_count >= 32`
-// break @0x5593b5]
+// break @0x5593b5, the row stride 0x11E8 @0x5593db; UI_StartLANSessionSearch
+// @0x558300 - the table's memset(.., 0x23D00) @0x5583C1]
 inline constexpr size_t kLanBrowseMaxSessions = 32;
 
 // The network connect type a browse runs under (g_GameConfigState.networkConnectType):
@@ -125,12 +126,32 @@ struct LanBurstDatagram {
 	std::vector<uint8_t> bytes;
 };
 
-// One discovered host: the reply's source endpoint plus its projected hello.
+// One row of the LAN list: the session's address and the hello it was discovered
+// with, copied from its list node when the row was appended, and the key the row
+// table holds, the session record's id (a record replaced or expired leaves its row;
+// LanDiscoveryBrowser::advance's walk).
 struct LanDiscoveryRow {
 	std::string host_ip;
 	int port = 0;
 	LanDiscoveryServer server;
+	uint32_t record_id = 0;
 };
+
+// The browse's session-record lines in _connectlog.txt (each written as ConnectLog's
+// `"<time> : <text>"` while the log is on): the enumerator's removed and discovered
+// callbacks, with the record's address (Napi_FormatAddress's "a.b.c.d:port",
+// peer_addr_to_string) and its session name (the record's SN copy, +508).
+// [orig: CNapiNetwork_OnSessionRemoved @0x4C68C0 (Napi_FormatAddress @0x4C693D, the
+//  append @0x4C6975); CNapiNetwork_OnSessionDiscovered @0x4C8470 (Napi_FormatAddress
+//  @0x4C8631, the append @0x4C8663)]
+std::string net_session_removed_text(const PeerAddr &at, const std::string &session_name);
+std::string net_session_discovered_text(const PeerAddr &at, const std::string &session_name);
+
+// The browse's session-record lifetime: while the enumerator runs, a record no 0x81
+// has stamped for longer than this goes [orig: CNapiGameSession_InitTransportConnection
+// @0x4C9E10 - enumerator+0x18 = 0x7530 @0x4C9FB4; CNapiNPConnection_PumpStateMachine
+// @0x6292E0 - `now - stamp > lifetime` @0x62945E..0x629468].
+inline constexpr double kLanSessionRecordLifetimeSeconds = 30.0;
 
 // The LAN list's row text for a listed session, bytes in the host's code page:
 // "<name> - <expansion> (<players>/<max>)" when the session advertises an
@@ -147,20 +168,13 @@ struct LanDiscoveryRow {
 std::string lan_discovery_row_label(const std::string &server_name, const std::string &expansion,
 		int32_t players, int32_t max_players);
 
-enum class LanRowChange : uint8_t {
-	kNone = 0, // filtered, unparsable, or a repeat sighting of a listed host
-	kAdded,
-};
-
 // The LAN browse window over the retail game-server UDP range: one connection
 // identity per window (retail keeps its connection identity across the
 // enumerator's re-announce pumps, so every burst repeats the same bytes), one
 // announce per port carrying that port and the enumerate address as its EIP /
 // EPN, the 30-second window, the 3-second re-announce cadence, the reply filter
 // (the browsed port range, a usable source address, our CI, a retail-identity
-// 0x81), the 32-row cap, and first-sighting rows: retail's row table keys on
-// the session id and a repeat sighting adds and updates nothing, so a row
-// keeps the counts it was first seen with for the whole window. The embedder
+// 0x81), the enumerator's session records and the list's row walk. The embedder
 // owns the socket: it sends `burst()` on begin and whenever `advance` reports
 // an announce due, feeds every received datagram to `accept_reply`, and stops
 // when `advance` returns false. That socket is the client's one transport socket
@@ -174,10 +188,30 @@ enum class LanRowChange : uint8_t {
 //  the ctx's one client connection @0x4ca1c2, its enumerator stopped @0x4ca1d8 and
 //  the row found among its entries (NapiNPEnumerator_FindTimerById, the call @0x4CA1EE, its
 //  result stored @0x4ca1f8)]
-// [orig: UI_ProcessLANSessionStateMachine @0x558de0 — the key hit @0x5593c4
-//  falls through to the next node, the miss @0x5593e3 appends @0x5593fa..0x559521;
-//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the port walk
+// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the port walk
 //  @0x629241..0x629268, each announce to (enumerator+4, port)]
+//
+// The session records (D-NET-NEW-L8-8): every 0x81 the reply filter takes is the
+// enumerator's record for its sender. None yet: a new record (its id the next of the
+// enumerator's counter, stamped on the browse clock) and the discovered callback. The
+// same HK and SN: stamped again in place, no callback. Anything else: the record goes
+// (the removed callback) and a new one comes (the discovered callback). The discovered
+// callback lists a session (its list node, a copy of the record as discovered) only
+// when its P2 admits the browse's connect type, and only then writes NET SESSION
+// DISCOVERED; the removed callback frees the node if there is one and writes NET
+// SESSION .. HAS BEEN REMOVED whatever the channel. A record goes the same way when it
+// expires while the enumerator runs and at every drain (drain_records, begin).
+// [orig: CNapiGameSession_InitTransportConnection @0x4C9E10 - the discovered callback
+//  enumerator+0x1C @0x4C9FCB, the removed callback +0x20 @0x4C9FE2; Nwu_HandleServerHello
+//  @0x626D20 - NapiNPEnumerator_FindSessionByAddress (the call @0x627667), the HK test
+//  @0x627917, String_ExactMatch over the SN @0x627928, the stamp in place @0x627E34;
+//  the replace NapiNPTimer_Destroy (the call @0x627941) -> NapiNPSession_Create (the
+//  call @0x627947), the new record's stamp @0x627BA6 and callback @0x627BAC..0x627BD4;
+//  NapiNPSession_Create @0x624540 - the id counter @0x624704..0x624710;
+//  NapiNPTimer_Destroy @0x621E50 - the removed callback @0x621E5D..0x621E6F;
+//  CNapiNetwork_OnSessionDiscovered @0x4C8470 - NetPacket_ValidateChannelType
+//  @0x4C84A3..0x4C84BA, the node by the record's id @0x4C84CB, alloc @0x4C84D5;
+//  CNapiNetwork_OnSessionRemoved @0x4C68C0 - the node @0x4C68F8..0x4C690D]
 class LanDiscoveryBrowser {
 public:
 	// Begins a window under `connect_type` (kLanConnectType*): only a session whose
@@ -185,14 +219,35 @@ public:
 	// destination every announce goes to, in PeerAddr's packing (0xFFFFFFFF for the
 	// LAN broadcast, the resolved address on a direct browse; 0 writes no EIP).
 	// `title` is the identity the announces carry and the replies must match (complete,
-	// outliving the window). False (nothing changes) on an invalid port range or a zero
-	// client index.
-	// [orig: CNapiGameSession_InitTransportConnection @0x4c9e10 - -1 on a LAN browse
+	// outliving the window). The search drains the enumerator's records first
+	// (drain_records) and starts its row table empty. False (nothing changes) on an
+	// invalid port range or a zero client index.
+	// [orig: UI_StartLANSessionSearch @0x558300 - CNapiNetwork_DrainProtocolTimers
+	//  (the call @0x55830F), the row table cleared @0x5583C1 / @0x5583C9;
+	//  UI_EnumerateAndJoinSession @0x569F50 - the drain (the call @0x56A08C);
+	//  CNapiGameSession_InitTransportConnection @0x4c9e10 - -1 on a LAN browse
 	//  @0x4c9eab, the resolved address on a direct one @0x4c9eb5..0x4c9ec3, stored
 	//  to enumerator+4 @0x4c9f0b]
 	bool begin(const TitleIdentity &title, uint32_t client_index, uint32_t enumerate_ip,
 	           int port_min, int port_max, int connect_type);
+	// Stops the enumerator; its records and the rows stay (the window's end).
+	// [orig: UI_ProcessLANSessionStateMachine @0x558de0 -
+	//  CNapiNetwork_DrainPendingDataTransfers (the call @0x559341) stops the enumerator
+	//  alone]
 	void stop();
+	// Every session record goes, the enumerator's list from its head, each through the
+	// removed callback (its line); the rows stay. The search, the LAN screen's
+	// activation and the enumerate-and-join each drain first.
+	// [orig: CNapiNetwork_DrainProtocolTimers @0x4C6DE0 -> NapiNPEnumerator_DrainTimerList
+	//  @0x622140 (NapiNPTimer_Destroy over the head, the call @0x62215E); the callers
+	//  UI_StartLANSessionSearch @0x55830F, UI_InitLANMultiplayerScreen @0x5569C7,
+	//  UI_EnumerateAndJoinSession @0x56A08C]
+	void drain_records();
+	// The connect log's line writer: the embedder's _connectlog.txt, which writes while
+	// the log is on (ConnectLog::line); none writes nothing. Kept across begin/stop.
+	void set_connect_log(std::function<void(const std::string &)> line) {
+		connect_log_ = std::move(line);
+	}
 	// Whether the window expires (the LAN screen's 30-second search, the default).
 	// The join's enumerate-and-join runs without one: its loop ends only on the
 	// first discovered session or the player's abort (D-NET-703). Kept across
@@ -231,26 +286,58 @@ public:
 	//  @0x4ca160 - NapiTimer_Stop(enumerator) @0x4ca1d8 clears enumerator+44]
 	std::vector<LanBurstDatagram> burst() const;
 
-	// One outer frame: false once the window has expired (the browse is
-	// stopped; never for an unwindowed browse); `announce_due` is set when a
-	// re-announce burst falls due this frame (the announce clock restarts from
-	// zero, not from the overshoot).
+	// One outer frame after its replies (accept_reply), in retail's order: the
+	// protocol pump's re-announce (`announce_due`; the announce clock restarts from
+	// zero, not from the overshoot) and record expiry, then the window's gate, then the
+	// list's walk, which runs on the window's last frame too. False once the window has
+	// expired (the browse is stopped; never for an unwindowed browse); a re-announce due
+	// on that last frame is still reported.
+	// [orig: UI_ProcessLANSessionStateMachine @0x558de0 -
+	//  CNapiNetwork_PumpTransportAndProtocol (the call @0x559324), the gate @0x55933a,
+	//  the walk @0x559384..0x559546; CNapiNetwork_PumpTransportAndProtocol @0x4C6E00 -
+	//  the manager's receive @0x4C6E2B ahead of the protocol's pump @0x4C6E3D;
+	//  CNapiNPConnection_PumpFlags @0x629780 - the announce @0x6297B7 ahead of the state
+	//  machine @0x6297C3]
 	bool advance(double delta_seconds, bool &announce_due);
 
-	// A datagram received from (source_ip, source_port) while browsing.
-	LanRowChange accept_reply(const uint8_t *data, size_t size,
-	                          const std::string &source_ip, int source_port);
+	// A datagram received from `from` while browsing: a reply the filter takes is its
+	// sender's session record (the class comment).
+	void accept_reply(const uint8_t *data, size_t size, const PeerAddr &from);
 
-	// The discovered hosts in first-seen order.
+	// The LAN list's rows in the order the walk appended them.
 	const std::vector<LanDiscoveryRow> &servers() const { return servers_; }
+	// The enumerator's session records, listed or not.
+	size_t record_count() const { return records_.size(); }
 
 private:
+	// One session record: its id, its sender, the HK and SN the next 0x81 is
+	// compared with, its last stamp on the browse clock, and whether the discovered
+	// callback listed it (its node), with the node's copy of the record as discovered.
+	// (The in-place update's refreshed fields have no reader here: the row is the
+	// node's copy.)
+	struct Record {
+		uint32_t id = 0;
+		PeerAddr sender{};
+		uint32_t host_key = 0;
+		std::string name; // the record's SN copy (+0x1FC)
+		double stamp_s = 0.0;
+		bool listed = false;
+		LanDiscoveryServer node;
+	};
+	void create_record(const PeerAddr &from, LanDiscoveryServer server);
+	void destroy_record(size_t index);
+	void expire_records();
+	void walk_rows();
+	void connect_log(const std::string &text) const;
+
+	std::vector<Record> records_;
 	std::vector<LanDiscoveryRow> servers_;
-	std::unordered_map<std::string, size_t> index_by_endpoint_;
+	std::function<void(const std::string &)> connect_log_;
 	const TitleIdentity *title_ = nullptr;
 	ProxyRendezvousConfig proxy_{};
 	uint32_t client_index_ = 0;
 	uint32_t enumerate_ip_ = 0;
+	uint32_t record_ids_ = 0; // the enumerator's id counter (proto+92)
 	int connect_type_ = kLanConnectTypeLan;
 	int port_min_ = 0;
 	int port_max_ = 0;

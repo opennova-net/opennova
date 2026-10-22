@@ -71,8 +71,29 @@ func _wire(_file: String, _screen: String) -> void:
 		_driver.widget_value_changed.connect(_on_widget_value_changed)
 	if not _driver.list_activated.is_connected(_on_list_activated):
 		_driver.list_activated.connect(_on_list_activated)
+	if not _driver.screen_changed.is_connected(_on_screen_changed):
+		_driver.screen_changed.connect(_on_screen_changed)
 	_wire_lan_browser()
 	_wire_host_settings()
+	# The document opened on its screen: that screen's activation.
+	_on_screen_changed(_screen)
+
+
+# A screen's activation. The LAN screen's empties its game list and drains the
+# enumerator's session records, each writing its removed line to the process's
+# _connectlog.txt (engine: net/npwire/lan_discovery.h drain_records carries the
+# witness, D-NET-NEW-L8-8).
+func _on_screen_changed(screen_name: String) -> void:
+	if _driver == null or _driver.get_menu_file() != _wired_file:
+		return
+	if screen_name.nocasecmp_to("LAN_MULTI_PLAYER") != 0 or not _driver.has_widget("LAN_GAME_LIST"):
+		return
+	_servers = []
+	_selected_server = -1
+	_browse_error = ""
+	_refresh_lan_list()
+	if _lan_session != null:
+		_lan_session.drain_records()
 
 
 # --- LAN browser screen (LAN_MULTI_PLAYER) ------------------------------------

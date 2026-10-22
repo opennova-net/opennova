@@ -154,14 +154,12 @@ std::string net_outgoing_packet_error_text();
 std::string net_tearing_down_socket_text();
 // The client's session callbacks [orig: CNapiNetwork_OnConnectedToServer @0x4C62E0
 //  (@0x4C6348 / @0x4C6362); CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 (the
-//  record's ds, dc, dp1, dp2, dstr, dpc, ddstr, @0x4C6421); CNapiNetwork_OnSessionRemoved
-//  @0x4C68C0 (@0x4C693D); CNapiNetwork_OnSessionDiscovered @0x4C8470 (@0x4C8631); the
-//  session's name at +508]
+//  record's ds, dc, dp1, dp2, dstr, dpc, ddstr, @0x4C6421)]. The enumerator's two
+//  session-record lines are the wire layer's (net/npwire/lan_discovery.h
+//  net_session_removed_text / net_session_discovered_text).
 std::string net_connected_to_server_text(const PeerAddr &server, const PeerAddr &yours);
 std::string net_disconnecting_from_server_text(const PeerAddr &server, int32_t ds, int32_t dc,
 		int32_t dp1, int32_t dp2, const std::string &dstr, int32_t dpc, const std::string &ddstr);
-std::string net_session_removed_text(const PeerAddr &at, const std::string &session_name);
-std::string net_session_discovered_text(const PeerAddr &at, const std::string &session_name);
 
 // One _PUNT.TXT line, line ending excluded: with a slot
 // `"<time> : NN : \"<name>\" : <reason> : <details>"`, without one

@@ -279,6 +279,10 @@ func _begin_spectator_preflight(target: JoinTarget) -> void:
 	_spectator_probe_serial += 1
 	var serial := _spectator_probe_serial
 	_spectator_probe_target = target
+	# The enumerate drains the process's enumerator first: the LAN screen's records
+	# go, each with its removed line (engine: LanDiscoveryBrowser::drain_records).
+	if _shell != null:
+		_shell.drain_lan_records()
 	_spectator_probe = LanSession.new()
 	_spectator_probe.name = "SpectatorPreflight"
 	_spectator_probe.resource_root = _resource_root()

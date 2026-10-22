@@ -5,12 +5,14 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
+#include "network/novaworld_client.h"
 #include "resource_index/launch_flags.h"
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
 #include <net/novaworld/lobby_vars.h> // resolve_address_without_dns
 #include <runtime/inmatch/host_config.h> // transport_bind_ports / transport_bind_address
+#include <runtime/inmatch/punt_log.h> // ConnectLog
 #include <net/npwire/peer_addr.h>
 
 #include <array>
@@ -69,6 +71,12 @@ uint32_t enumerate_address(const String &p_target) {
 
 LanSession::LanSession() {
 	set_process(false);
+	// The enumerator's session-record lines write the process's _connectlog.txt (the game
+	// world's log device, on under `/CONNECTLOG`; engine: LanDiscoveryBrowser).
+	browser_.set_connect_log([](const std::string &text) {
+		if (opennova::inmatch::ConnectLog *log = NovaWorldClient::process_connect_log())
+			log->line(text);
+	});
 }
 
 LanSession::~LanSession() {
@@ -89,6 +97,7 @@ void LanSession::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &LanSession::set_resource_root);
 	ClassDB::bind_method(D_METHOD("get_resource_root"), &LanSession::get_resource_root);
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
+	ClassDB::bind_method(D_METHOD("drain_records"), &LanSession::drain_records);
 	ClassDB::bind_method(D_METHOD("get_servers"), &LanSession::get_servers);
 	ClassDB::bind_method(D_METHOD("is_browsing"), &LanSession::is_browsing);
 	ClassDB::bind_method(D_METHOD("get_client_index"), &LanSession::get_client_index);
@@ -252,34 +261,34 @@ void LanSession::_process(double delta) {
 		return;
 	}
 
+	// The frame in retail's order (engine: LanDiscoveryBrowser::advance): the replies,
+	// the re-announce and record expiry, the window's gate, then the list's walk; a
+	// re-announce due on the window's last frame still goes out.
 	poll_replies();
+	const size_t listed = browser_.servers().size();
 	bool announce_due = false;
-	if (!browser_.advance(delta, announce_due)) {
-		stop();
-		emit_signal("browse_finished");
-		return;
-	}
+	const bool open = browser_.advance(delta, announce_due);
 	// Transient send errors during a re-announce are dropped like retail's
 	// fire-and-forget pump.
 	if (announce_due) {
 		Error ignored_error = OK;
 		send_probe_burst(ignored_error);
 	}
+	if (browser_.servers().size() != listed) rebuild_rows();
+	if (!open) {
+		stop();
+		emit_signal("browse_finished");
+	}
 }
 
 void LanSession::poll_replies() {
-	bool changed = false;
 	uint8_t buf[4096];
 	while (game_ != nullptr) {
 		opennova::PeerAddr from{};
 		const int n = game_->recv_from(buf, sizeof(buf), from);
 		if (n <= 0) break;
-		if (browser_.accept_reply(buf, static_cast<size_t>(n),
-					opennova::peer_addr_ip_to_string(from), static_cast<int>(from.port)) !=
-				opennova::LanRowChange::kNone)
-			changed = true;
+		browser_.accept_reply(buf, static_cast<size_t>(n), from);
 	}
-	if (changed) rebuild_rows();
 }
 
 void LanSession::rebuild_rows() {

@@ -22,10 +22,11 @@ namespace godot {
 // LAN browser for the retail game-server UDP range. The engine's
 // LanDiscoveryBrowser (net/npwire/lan_discovery.h) owns the browse: the probe
 // identity, the 30-second window, the 3-second re-announce cadence, the reply
-// filter, the 32-row cap and the first-sighting rows. This node owns only the
+// filter, the session records and the list's row walk. This node owns only the
 // device legs (the transport socket, the LanServerRow shape) and the
 // MpMenuCompanion-facing signals (servers_changed per new row, browse_finished
-// at the window's end).
+// at the window's end). The browse's session-record lines go to the process's
+// _connectlog.txt (NovaWorldClient::process_connect_log, D-NET-NEW-L8-8).
 //
 // The transport is the client's one socket for the network type, which the
 // join from a row goes on with (D-NET-NEW-R3-3): retail opens one transport
@@ -80,8 +81,12 @@ public:
 	// stops and forgets it (nothing closes it here); null when the browse has none.
 	Ref<UdpPump> take_transport();
 	// Stop the enumerator and close the browse's own socket (an installed one stays
-	// open: it is its owner's).
+	// open: it is its owner's). The session records stay.
 	void stop();
+	// The enumerator's session records go, each writing its removed line to the
+	// process's _connectlog.txt (LanDiscoveryBrowser::drain_records): the LAN screen's
+	// activation and a join's enumerate-and-join drain them, as a search does.
+	void drain_records() { browser_.drain_records(); }
 	TypedArray<LanServerRow> get_servers() const;
 	bool is_browsing() const { return browser_.browsing(); }
 	// The browse's connection index (its 0x41s' CI); a join from one of its rows

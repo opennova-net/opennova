@@ -271,16 +271,6 @@ std::string net_disconnecting_from_server_text(const PeerAddr &server, int32_t d
 			ddstr.c_str());
 }
 
-std::string net_session_removed_text(const PeerAddr &at, const std::string &session_name) {
-	return format_text("NET SESSION AT %s [%s] HAS BEEN REMOVED.", peer_addr_to_string(at).c_str(),
-			session_name.c_str());
-}
-
-std::string net_session_discovered_text(const PeerAddr &at, const std::string &session_name) {
-	return format_text("NET SESSION DISCOVERED AT %s [%s]", peer_addr_to_string(at).c_str(),
-			session_name.c_str());
-}
-
 void PuntLog::arm_punt_log() {
 	files_.remove(kPuntFile);  // [orig: DeleteFileA @0x4a784a / @0x4a7880]
 	punt_armed_ = true;        // [orig: @0x4a7844 / @0x4a787a]

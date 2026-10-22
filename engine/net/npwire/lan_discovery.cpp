@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <utility>
 
 namespace opennova {
@@ -74,7 +75,7 @@ bool parse_lan_discovery_reply(const TitleIdentity &title, const uint8_t *data, 
 	//  @0x626d20 — PN @0x62758b, PG @0x627591..0x627620, PV1 @0x627639]
 	// No game-server field is required: an SF-less reply reads SF 0 and lists,
 	// the discovery callback gating the session on P2's channel type alone
-	// (LanDiscoveryBrowser::accept_reply). [orig: Nwu_HandleServerHello @0x626d20:
+	// (LanDiscoveryBrowser::create_record). [orig: Nwu_HandleServerHello @0x626d20:
 	//  SF zeroed @0x626eb7, loaded @0x62721a; CNapiNetwork_OnSessionDiscovered
 	//  @0x4c8470: the P2 gate @0x4c84a3..0x4c84ba, SF read @0x4c84f1]
 	if (!server_hello_matches_identity(hello, make_title_client_hello(title, 0))) return false;
@@ -98,17 +99,22 @@ bool parse_lan_discovery_reply(const TitleIdentity &title, const uint8_t *data, 
 
 namespace {
 
-// A reply's source must be routable back: an empty or unspecified address
-// cannot be joined.
-bool usable_address(const std::string &address) {
-	return !address.empty() && address != "0.0.0.0" && address != "::";
-}
-
-std::string endpoint_key(const std::string &address, int port) {
-	return address + ":" + std::to_string(port);
+// A %s stops at the string's first NUL.
+std::string c_text(const std::string &text) {
+	return text.substr(0, text.find('\0'));
 }
 
 } // namespace
+
+std::string net_session_removed_text(const PeerAddr &at, const std::string &session_name) {
+	return "NET SESSION AT " + peer_addr_to_string(at) + " [" + c_text(session_name) +
+	       "] HAS BEEN REMOVED.";
+}
+
+std::string net_session_discovered_text(const PeerAddr &at, const std::string &session_name) {
+	return "NET SESSION DISCOVERED AT " + peer_addr_to_string(at) + " [" + c_text(session_name) +
+	       "]";
+}
 
 uint32_t next_browse_connection_index() {
 	(void)next_connection_index(); // the screen's create, destroyed unsent
@@ -129,8 +135,9 @@ bool LanDiscoveryBrowser::begin(const TitleIdentity &title, uint32_t client_inde
                                 int connect_type) {
 	if (client_index == 0 || port_min < 1 || port_max > 65535 || port_min > port_max) return false;
 	stop();
+	// The search drains the enumerator's records, then empties its row table.
+	drain_records();
 	servers_.clear();
-	index_by_endpoint_.clear();
 	// One identity per browse window: retail keeps its connection identity
 	// across the enumerator's re-announce pumps, so every burst repeats the
 	// same probe bytes.
@@ -181,17 +188,102 @@ void LanDiscoveryBrowser::stop() {
 	announce_elapsed_s_ = 0.0;
 }
 
+void LanDiscoveryBrowser::connect_log(const std::string &text) const {
+	if (connect_log_) connect_log_(text);
+}
+
+void LanDiscoveryBrowser::drain_records() {
+	// [orig: NapiNPEnumerator_DrainTimerList @0x622140 - the head destroyed until none
+	//  is left, NapiNPTimer_Destroy (the call @0x62215E)]
+	while (!records_.empty()) destroy_record(0);
+}
+
+void LanDiscoveryBrowser::create_record(const PeerAddr &from, LanDiscoveryServer server) {
+	// [orig: NapiNPSession_Create @0x624540 - appended at the enumerator list's tail
+	//  @0x6246DA..0x624701, the id `if (counter++ == -1) counter = 1` @0x624704..0x62470A,
+	//  stored @0x624710; Nwu_HandleServerHello @0x626D20 - the stamp @0x627BA6, the
+	//  discovered callback while +0x25 is clear @0x627BAC..0x627BD4]
+	Record record;
+	if (++record_ids_ == 0) record_ids_ = 1;
+	record.id = record_ids_;
+	record.sender = from;
+	record.host_key = server.host_key;
+	// The record's SN is the reply's 64-byte copy (parse_server_hello's).
+	// [orig: Nwu_HandleServerHello @0x626D20 - Napi_CopyString(.., 0x40) @0x627172, into
+	//  the record's +0x1FC @0x627775]
+	record.name = server.server_name;
+	record.stamp_s = browse_elapsed_s_;
+	// The discovered callback: a session whose P2 does not admit the browse's
+	// connect type takes no node (no row, no slot in the walk) and no line.
+	// [orig: CNapiNetwork_OnSessionDiscovered @0x4C8470 - NetPacket_ValidateChannelType
+	//  @0x4C84A3..0x4C84BA, the node found by the record's id or allocated
+	//  @0x4C84CB..0x4C84EA, its copy of the record @0x4C84F1..0x4C8601 (the name from
+	//  the record's SN +508 @0x4C8511), the line @0x4C8617..0x4C8663]
+	record.listed = lan_session_admits_connect_type(connect_type_, server.server_flags);
+	if (record.listed) record.node = std::move(server);
+	records_.push_back(std::move(record));
+	if (records_.back().listed)
+		connect_log(net_session_discovered_text(records_.back().sender, records_.back().name));
+}
+
+void LanDiscoveryBrowser::destroy_record(size_t index) {
+	// The removed callback frees the record's node (its row stays: walk_rows), then
+	// writes its line whatever the session's channel.
+	// [orig: NapiNPTimer_Destroy @0x621E50 - the callback @0x621E5D..0x621E6F, the
+	//  unlink @0x621E76..0x621EBD; CNapiNetwork_OnSessionRemoved @0x4C68C0 - the node
+	//  @0x4C68F8..0x4C690D, the line @0x4C6926..0x4C6975]
+	const Record record = std::move(records_[index]);
+	records_.erase(records_.begin() + static_cast<std::ptrdiff_t>(index));
+	connect_log(net_session_removed_text(record.sender, record.name));
+}
+
+void LanDiscoveryBrowser::expire_records() {
+	// The connection's state-2 pump while the enumerator runs: from the list's head,
+	// every record whose last stamp is older than the lifetime goes.
+	// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 - state 2 @0x629414, the
+	//  enumerator's +0x2C @0x62941E, the lifetime +0x18 @0x629435 (+0x25 clear),
+	//  `now - stamp(+0xB0C) > lifetime` @0x62945E..0x629468, NapiNPTimer_Destroy
+	//  (the call @0x62946F)]
+	for (size_t i = 0; i < records_.size();) {
+		if (browse_elapsed_s_ - records_[i].stamp_s > kLanSessionRecordLifetimeSeconds)
+			destroy_record(i);
+		else
+			++i;
+	}
+}
+
+void LanDiscoveryBrowser::walk_rows() {
+	// The LAN list's walk over the listed sessions in their discovery order: at most 32
+	// examined; a session whose record id the row table holds is skipped, any other's
+	// row is appended from its node. A row is never removed in the window, so a
+	// replaced session lists again beside its old row. Retail appends without a bound on
+	// its 32-row table; ours stops at the table's 32 rows.
+	// [orig: UI_ProcessLANSessionStateMachine @0x558de0 - the node walk
+	//  @0x559384..0x559546 (the 32 break @0x5593B5, the step @0x559532..0x55953F), the key
+	//  compare @0x5593C1..0x5593E3 against the node's record id +0x14, the append
+	//  @0x5593FA..0x559524 (the key stored @0x559412, the count stepped @0x559521)]
+	size_t examined = 0;
+	for (const Record &record : records_) {
+		if (!record.listed) continue;
+		if (examined >= kLanBrowseMaxSessions) break;
+		++examined;
+		const bool keyed = std::any_of(servers_.begin(), servers_.end(),
+				[&record](const LanDiscoveryRow &row) { return row.record_id == record.id; });
+		if (keyed || servers_.size() >= kLanBrowseMaxSessions) continue;
+		LanDiscoveryRow row;
+		row.host_ip = peer_addr_ip_to_string(record.sender);
+		row.port = record.sender.port;
+		row.server = record.node;
+		row.record_id = record.id;
+		servers_.push_back(std::move(row));
+	}
+}
+
 bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
 	announce_due = false;
 	if (!browsing_) return false;
 	browse_elapsed_s_ += delta_seconds;
 	announce_elapsed_s_ += delta_seconds;
-	// Strictly greater: `GetTickCount() - search_start > 0x7530` @0x55933a; the
-	// enumerate-and-join's loop has no window (set_windowed).
-	if (windowed_ && browse_elapsed_s_ > kLanBrowseWindowSeconds) {
-		stop();
-		return false;
-	}
 	// A cold host that binds its port mid-window is only discoverable because
 	// the enumerator keeps announcing. The re-announce is due strictly after
 	// the interval [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 —
@@ -203,37 +295,36 @@ bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
 		announce_elapsed_s_ = 0.0;
 		announce_due = true;
 	}
-	return true;
+	expire_records();
+	// Strictly greater: `GetTickCount() - search_start > 0x7530` @0x55933a; the
+	// enumerate-and-join's loop has no window (set_windowed).
+	const bool open = !(windowed_ && browse_elapsed_s_ > kLanBrowseWindowSeconds);
+	if (!open) stop();
+	walk_rows();
+	return open;
 }
 
-LanRowChange LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size,
-                                               const std::string &source_ip,
-                                               int source_port) {
+void LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size, const PeerAddr &from) {
+	// A reply's source must be routable back: an unspecified address cannot be joined.
 	if (!browsing_ || title_ == nullptr || data == nullptr || size == 0 ||
-	    source_port < port_min_ || source_port > port_max_ || !usable_address(source_ip))
-		return LanRowChange::kNone;
+	    static_cast<int>(from.port) < port_min_ || static_cast<int>(from.port) > port_max_ ||
+	    from.ip == 0)
+		return;
 	LanDiscoveryServer server;
-	if (!parse_lan_discovery_reply(*title_, data, size, client_index_, server))
-		return LanRowChange::kNone;
-	// The discovery callback drops a session whose P2 does not admit the browse's
-	// network connect type before it ever becomes a session node, so it takes no
-	// row and no slot under the cap. [orig: CNapiNetwork_OnSessionDiscovered
-	//  @0x4c84a3..0x4c84ba -> NetPacket_ValidateChannelType @0x4c49b0]
-	if (!lan_session_admits_connect_type(connect_type_, server.server_flags))
-		return LanRowChange::kNone;
-	const std::string key = endpoint_key(source_ip, source_port);
-	// A listed host re-announcing: the row table hit adds and updates nothing
-	// (the row text was built at first sighting) @0x5593c4..0x5593e3.
-	if (index_by_endpoint_.count(key) != 0) return LanRowChange::kNone;
-	// The per-pump walk stops at 32 examined sessions @0x5593b5.
-	if (servers_.size() >= kLanBrowseMaxSessions) return LanRowChange::kNone;
-	index_by_endpoint_.emplace(key, servers_.size());
-	LanDiscoveryRow row;
-	row.host_ip = source_ip;
-	row.port = source_port;
-	row.server = std::move(server);
-	servers_.push_back(std::move(row));
-	return LanRowChange::kAdded;
+	if (!parse_lan_discovery_reply(*title_, data, size, client_index_, server)) return;
+	// The sender's record: the same HK and SN stamp it again in place with no callback;
+	// anything else replaces it.
+	for (size_t i = 0; i < records_.size(); ++i) {
+		Record &record = records_[i];
+		if (!(record.sender == from)) continue;
+		if (record.host_key == server.host_key && record.name == server.server_name) {
+			record.stamp_s = browse_elapsed_s_;
+			return;
+		}
+		destroy_record(i);
+		break;
+	}
+	create_record(from, std::move(server));
 }
 
 } // namespace opennova
