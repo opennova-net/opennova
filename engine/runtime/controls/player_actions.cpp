@@ -354,7 +354,11 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		}
 	}
 	// The off-keyboard arms' press edges behind the keyboard pass's events (ToSpecial's
-	// arm both edges).
+	// arm both edges). A mouse arm's record is retail's message pump's, queued ahead of the
+	// key scan as the wheel's is; these stay behind the scan's records until the click
+	// records land (D-CTRL-6's next slice) [orig: Game_WindowProc @0x7624C0
+	//  (Input_DispatchMouseEvent @0x762574) -> Input_ProcessBindings @0x4DDA50 ->
+	//  Input_TryDispatchBindingByWeaponType @0x499180 (Input_QueueEvent @0x499251)].
 	if (reload_off) frame.requests.push_back({Action::Reload, 0, reload_code});
 	if ((to_special_off_press || to_special_off_release) &&
 			to_special_admits(to_special_off_release))

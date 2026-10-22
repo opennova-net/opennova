@@ -758,6 +758,47 @@ void test_the_reload_record_meets_the_head_in_key_order() {
 	}
 }
 
+// D-CTRL-6 (LI-s15): each update reads the menu-screen bit at its own head. A screen the
+// first update's input frame opens (the escape row's INGAME) reaches the next update's
+// sample, which runs no input frame: its records wait in the queue (a screen's close resets
+// them), and nothing of the first update's is lost.
+// [orig: Game_ProcessMainFrame @0x5263F0 (UI_IsMenuScreenOpen @0x52660D ahead of
+//  Input_ProcessFrame @0x52661D, in every update); Input_HandleActionBinding @0x49AD40
+//  (UI_OpenMenuScreen("game.mnu", "INGAME") @0x49B3B6)]
+void test_a_menu_screen_an_update_opens_gates_the_frames_later_updates() {
+	using opennova::controls::InputEventOrigin;
+	using opennova::controls::InputEventQueue;
+	using opennova::controls::InputEventRecord;
+	struct MenuDevice final : TickInputSource {
+		int samples = 0;
+		std::vector<int32_t> dispatched;
+		InputPacket sample_tick(uint32_t) override {
+			InputPacket p;
+			// The first update's pass opened the screen: every later sample carries the bit.
+			if (samples++ > 0) p.held_action_bits = HELD_MENU_OPEN;
+			return p;
+		}
+		void queue_records(InputEventQueue &records) override {
+			(void)records.push({samples == 1 ? 201 : 203, 0, 0, 0, false, InputEventOrigin::Device});
+		}
+		void dispatch_record(const InputEventRecord &record) override {
+			dispatched.push_back(record.code);
+		}
+	};
+	auto role = std::make_unique<TickRecorder>();
+	MenuDevice device;
+	Session session(*role);
+	CHECK(load(session), "the session runs");
+	FrameInput three;
+	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	three.tick_source = &device;
+	CHECK(session.advance(three).ticks_run() == 3, "three updates");
+	CHECK(device.dispatched == std::vector<int32_t>({201}),
+			"only the first update's input frame dispatches");
+	CHECK(role->input_events().size() == 2,
+			"the later updates' records wait under the screen");
+}
+
 } // namespace
 
 int main() {
@@ -773,6 +814,7 @@ int main() {
 	test_the_keyboard_pass_runs_in_the_update_that_samples_it();
 	test_the_update_drains_its_records_in_queue_order();
 	test_the_reload_record_meets_the_head_in_key_order();
+	test_a_menu_screen_an_update_opens_gates_the_frames_later_updates();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

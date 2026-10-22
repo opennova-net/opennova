@@ -142,7 +142,13 @@ struct CameraSample {
 //  Input_ProcessMouseAxisBindings call @0x49D4D8 and the Input_ProcessToggleBindings
 //  call @0x49D4DE)], so the source runs the shell's keyboard pass at the head of
 // run_update_rows, and its special-key legs (the round-over keys, the escape row's
-// in-game menu, a deploy pick) land in the update that reads them.
+// in-game menu, a deploy pick) land in the update that reads them. Each update tests the
+// menu-screen bit at its own head, so a screen one update's input frame opens (the escape
+// row's INGAME) gates the frame's later updates, which run no input frame: the source
+// reads the shell's bit again at each run_update_rows [orig: Game_ProcessMainFrame
+//  @0x5263F0 (UI_IsMenuScreenOpen @0x52660D ahead of Input_ProcessFrame @0x52661D, in every
+//  update); Input_HandleActionBinding @0x49AD40 (UI_OpenMenuScreen("game.mnu", "INGAME")
+//  @0x49B3B6)].
 // The session therefore calls run_update_rows at EVERY update it runs, the
 // paused ones included: the update's keyboard pass. `new_sample` is true for a
 // later update of a running frame, whose device state is its own (the source steps
@@ -197,7 +203,7 @@ struct CameraSample {
 //  Input_DispatchMouseEvent @0x761470 (the callbacks' 256 / 512 events @0x76158F /
 //  @0x7615C0); Input_ProcessBindings @0x4DDA50 (the arguments 0 @0x4DDB6D..0x4DDB78);
 //  Input_TryDispatchBindingByWeaponType @0x499180 (the sign @0x49919E..0x4991A4, the wheel
-//  rows @0x4992FE..0x499327, Input_QueueEvent @0x499238)].
+//  rows @0x4992FE..0x499327, the queue @0x499238..0x499251 (Input_QueueEvent @0x499251))].
 class TickInputSource {
 public:
 	virtual ~TickInputSource() = default;
@@ -427,6 +433,11 @@ public:
 	//  @0x49D599..0x49D5E7 -> Input_HandleActionBinding @0x49D5D8; Input_FlushDeferredEvents
 	//  @0x497AC0; Game_ProcessMainFrame @0x5263F0 - UI_IsMenuScreenOpen @0x52660D skips
 	//  Input_ProcessFrame @0x52661D]
+	// Whether this role runs an input frame at all: a joiner outside its game loop runs
+	// none (its join screen, its mission start's load and final wait run no main frame),
+	// so its update's device records are dropped rather than queued and nothing drains
+	// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5].
+	bool input_frame_runs();
 	void drain_input_events(TickInputSource *source, uint32_t held_action_bits,
 			bool pause_flips = false);
 	// The medic call past the session/entity gates: a dead local player with
@@ -643,6 +654,9 @@ private:
 	// tick. `transport`: the debug transport's forced step (step_once, drive_one),
 	// whose updates run the role's tick whatever the state and apply no flip.
 	FrameOutcome run_updates(int32_t due, const FrameInput &input, bool transport);
+	// The update's device records into the role's queue, or dropped where the role runs
+	// no input frame (Role::input_frame_runs).
+	void queue_update_records(TickInputSource &source);
 	TickOutcome run_one_tick(const TickInput &input);
 	void step_cine_render_frame();
 	// The legs a paused update runs past the pause word's tests, in its order (the

@@ -328,6 +328,10 @@ func _ready() -> void:
 	# update (PlayerInputRouter::run_update_rows), so a frame that runs no update keeps
 	# its keys (engine inmatch::TickInputSource carries the witness).
 	_player_presenter.set_keyboard_pass(_run_keyboard_pass)
+	# The menu-screen bit, read again at each update's input-frame head: a screen one
+	# update's keyboard pass opens (the escape row's INGAME) gates the frame's later
+	# updates (PlayerInputRouter::set_menu_screen_probe).
+	_player_presenter.set_menu_screen_probe(_input_frame_menu_open)
 	# The console's SAVEKEYS dumps the live binding table (GameWorld.set_controls_model).
 	_world.set_controls_model(ControlsBindings.model())
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
@@ -1739,6 +1743,17 @@ func _run_keyboard_pass() -> void:
 		_keys.drain(self)
 
 
+## A menu screen with no input frame is up: INGAME (the pause), WEAPON (the
+## armory), CMAP (the command map), VEHICLE, or the deploy screen that does not
+## pass input through. The frame head reads it, and the player input router reads
+## it again at each update's input-frame head, so a screen one update's keyboard
+## pass opens (the escape row's INGAME) gates the frame's later updates.
+func _input_frame_menu_open() -> bool:
+	return (_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP
+			or _state == State.VEHICLE or (_state == State.DEPLOY
+					and not _deploy_presenter.is_input_pass_through()))
+
+
 ## An open chat line takes the queue's key (the keyboard pass's capture branch);
 ## a key that closes the line hands the keyboard back to the frame's samplers at
 ## once, as the capture word does.
@@ -2282,9 +2297,7 @@ func _process(delta: float) -> void:
 		frame_input = _player_presenter.before_world_tick(
 				frame_elapsed, is_gameplay_input_active(),
 				is_gameplay_input_active() or _screen_input_frame(),
-				_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP
-						or _state == State.VEHICLE or (_state == State.DEPLOY
-								and not _deploy_presenter.is_input_pass_through()))
+				_input_frame_menu_open())
 	else:
 		frame_input = MissionFrameInput.new()
 		frame_input.delta_seconds = frame_elapsed

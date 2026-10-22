@@ -222,6 +222,11 @@ void Role::store_mission_exit(int32_t reason) {
 	if (kernel_ != nullptr) kernel_->world.mission_exit_reason = reason;
 }
 
+bool Role::input_frame_runs() {
+	const ClientRuntime *runtime = client_runtime();
+	return kind() != RoleKind::Joiner || (runtime != nullptr && runtime->in_game_loop());
+}
+
 void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits,
 		bool pause_flips) {
 	// [orig: Input_ProcessFrame @0x49D520 - the count test @0x49D599, Input_DequeueEvent
@@ -230,8 +235,7 @@ void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits
 	//  Input_ProcessFrame @0x52661D; Game_StartMission @0x524360 - the final wait
 	//  @0x526295..0x5262E5 runs no main frame]
 	input_queue_reset_ = false;
-	ClientRuntime *runtime = client_runtime();
-	if (kind() == RoleKind::Joiner && (runtime == nullptr || !runtime->in_game_loop())) return;
+	if (!input_frame_runs()) return;
 	if ((held_action_bits & HELD_MENU_OPEN) != 0) return;
 	pause_flips_ = pause_flips;
 	to_special_held_ = (held_action_bits & HELD_TO_SPECIAL) != 0;
@@ -719,7 +723,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			// rows run, and the one-shots it leaves drop with it, as no tick consumes
 			// them); the update resumes when the drain leaves the word down
 			// (TickInputSource carries the witness).
-			if (source != nullptr) source->queue_records(role_->input_events());
+			if (source != nullptr) queue_update_records(*source);
 			role_->drain_input_events(source, sample.held_action_bits, flips_apply);
 			if (world.rules.pause_word) {
 				run_paused_update_legs();
@@ -769,7 +773,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		if (source != nullptr) source->run_update_rows(kernel->world.logic_tick, new_sample);
 		if (source != nullptr) {
 			latch_packet(source->sample_tick(kernel->world.logic_tick));
-			source->queue_records(role_->input_events());
+			queue_update_records(*source);
 			consume_one_shots = true;
 		}
 		TickInput tick_input = merged_tick_input(input, consume_one_shots);
@@ -845,6 +849,15 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 	out.perf.tick_us = now_us() - tick_start;
 	out.perf.ticks = out.ticks_run();
 	return out;
+}
+
+void Session::queue_update_records(TickInputSource &source) {
+	if (role_->input_frame_runs()) {
+		source.queue_records(role_->input_events());
+		return;
+	}
+	controls::InputEventQueue dropped;
+	source.queue_records(dropped);
 }
 
 // One fixed tick: the shared input prologue through the role, the role's

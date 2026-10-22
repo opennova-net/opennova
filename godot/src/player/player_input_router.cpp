@@ -325,6 +325,13 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 		tick_spectating_ = begin_input_frame(rows_sim, p_logic_tick, tick_scripted_look_);
 		queue_row_sample();
 	}
+	// The menu-screen bit at this update's head: a screen an earlier update's keyboard
+	// pass opened (the escape row's INGAME) gates this one; every such screen holds a
+	// shell state whose gameplay word reads down (set_menu_screen_probe).
+	if (menu_screen_probe_.is_valid() && bool(menu_screen_probe_.call())) {
+		frame_menu_open_ = true;
+		frame_gameplay_input_active_ = false;
+	}
 	// Under a menu screen no input frame runs, so nothing drains the key events:
 	// they wait, in order, for the close's reset (reset_input_state) or, under
 	// DEATH's exit confirmation, for the first input frame after its NO raises

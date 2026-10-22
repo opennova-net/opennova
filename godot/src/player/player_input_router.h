@@ -99,6 +99,13 @@ public:
 	// it decides itself whether its shell state drains the keys. Kept across a
 	// teardown, as the shell installs it once.
 	void set_keyboard_pass(const Callable &p_pass) { keyboard_pass_ = p_pass; }
+	// The shell's menu-screen bit (a screen with no input frame: INGAME, WEAPON, CMAP,
+	// VEHICLE, DEATH's exit confirmation), read again at each update's input-frame head:
+	// a screen one update's keyboard pass opens (the escape row's INGAME) gates the
+	// frame's later updates, which run no input frame (engine inmatch::TickInputSource
+	// carries the witness). Kept across a teardown, as the shell installs it once; unset,
+	// the frame head's read holds for the frame.
+	void set_menu_screen_probe(const Callable &p_probe) { menu_screen_probe_ = p_probe; }
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	// Drop the trigger latches (the presenter's reset-state path). The
@@ -256,8 +263,10 @@ private:
 	// look pixels and the death screen the update's sample_tick reads.
 	Vector2 tick_scripted_look_;
 	bool tick_spectating_ = false;
-	// The shell's keyboard pass (set_keyboard_pass).
+	// The shell's keyboard pass (set_keyboard_pass) and menu-screen bit
+	// (set_menu_screen_probe).
 	Callable keyboard_pass_;
+	Callable menu_screen_probe_;
 	// This display frame sent the Scroll Lock turn-off (D-NET-563): the keyboard state reads
 	// it only once the window's messages are read, so the frame's later samples read the word
 	// off and send no second one.
