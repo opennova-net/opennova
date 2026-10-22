@@ -5,6 +5,8 @@
 #include "simulation/simulation_internal.h"
 #include "simulation/tick_sink.h"
 
+#include <formats/gamecfg/game_cfg.h>
+
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
@@ -263,6 +265,14 @@ opennova::inmatch::FrameInput Simulation::begin_session_frame(
 				input.camera.position[1], input.camera.position[2]));
 	}
 	input.loaded_model_list_count = net_.loaded_model_list_count;
+	// g_DialogueVolume, the client's dialog-line gate: the process block's DialogueLevel,
+	// which the options write with the word (engine: ClientRuntime::set_dialogue_volume).
+	if (runtime_ != nullptr) {
+		static const int32_t kDefaultDialogueLevel = opennova::gamecfg::defaults().dialogue_level;
+		runtime_->set_dialogue_volume(net_.game_config.is_valid()
+						? net_.game_config->native().cfg().dialogue_level
+						: kDefaultDialogueLevel);
+	}
 	return input;
 }
 

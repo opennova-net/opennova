@@ -299,34 +299,37 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             if (const world::Entity *entity = world.registry.get(handle))
                 world.doors.apply_wire_row(*entity, door->number, door->state);
         } else if (const auto *dialog = std::get_if<replication::DialogLineCommand>(&request)) {
-            // The line goes to the presentation as a typed order with the local
-            // player's class, the clip's locale. [orig: NapiNPClientMsg_0x028
+            // The local player's class is the clip's locale. [orig: NapiNPClientMsg_0x028
             //  @0x425b88..0x425b94]
             const world::Entity *local = world.registry.get(world.cached.local_player);
             const int32_t player_class =
                     local != nullptr ? static_cast<int32_t>(local->player_class) : 0;
-            world.out.dialog_lines.push_back({dialog->dialog_name, dialog->line, player_class});
-            // The line's chat legs: with no clip, "EX Cannot load audio: <def
-            // name>" on the SYSTEM ring in -56798 (0xFFFF2222); then the
-            // subtitle on the CHAT ring in -1 (white), both 930 ticks. The
-            // master-volume gate before the subtitle is the shell's.
-            // [orig: Dialog_LoadAudioClipLocalized @0x44DFD1..0x44DFF8
-            //  (Chat_AddMessageChannel2(msg, -56798, 930)), the subtitle
-            //  @0x44E144..0x44E150 -> Chat_AddSystemMessageIfValid @0x5275B0 ->
+            // The line's legs in the load's order: with no clip, "EX Cannot load audio: <def
+            // name>" on the SYSTEM ring in -56798 (0xFFFF2222), 930 ticks; then the master-volume
+            // gate: with g_DialogueVolume 0 nothing plays and no subtitle posts; past it the play
+            // (the typed order the presentation plays) and the subtitle on the CHAT ring in -1
+            // (white), 930 ticks.
+            // [orig: Dialog_LoadAudioClipLocalized @0x44DEF0 - the missing wave @0x44DFD1..0x44DFF8
+            //  (Chat_AddMessageChannel2(msg, -56798, 930)), the gate's call through dword_A8A23C
+            //  @0x44E0D7 and its test @0x44E0E2 (Dialog_ApplyDialogueVolumeAndPlayFactor
+            //  @0x527560, 0 at g_DialogueVolume 0 @0x527567), the play @0x44E0E4..0x44E136, the
+            //  subtitle @0x44E144..0x44E150 -> Chat_AddSystemMessageIfValid @0x5275B0 ->
             //  Chat_AddMessageChannel1(msg, -1, 930) @0x5275D5]
+            audio::DialogLinePlayback resolved;
             if (world.tables.dialog_bank != nullptr) {
-                const audio::DialogLinePlayback resolved = audio::resolve_dialog_line(
-                        world.tables.dialog_bank, world.tables.dialog_sounds,
-                        world.tables.text_override, world.tables.mission_text,
-                        dialog->dialog_name, dialog->line,
+                resolved = audio::resolve_dialog_line(world.tables.dialog_bank,
+                        world.tables.dialog_sounds, world.tables.text_override,
+                        world.tables.mission_text, dialog->dialog_name, dialog->line,
                         player_class);
                 if (resolved.line_found && resolved.file.empty())
                     pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
                             0xFFFF2222u, "EX Cannot load audio: " + resolved.wave, false});
-                if (resolved.line_found && !resolved.text.empty())
-                    pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::Chat,
-                            0xFFFFFFFFu, resolved.text, false});
             }
+            if (dialogue_volume_ == 0) continue;
+            world.out.dialog_lines.push_back({dialog->dialog_name, dialog->line, player_class});
+            if (resolved.line_found && !resolved.text.empty())
+                pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::Chat,
+                        0xFFFFFFFFu, resolved.text, false});
         } else if (const auto *flash = std::get_if<replication::LightningTimerCommand>(&request)) {
             // [orig: NapiNPClientMsg_HandleTextCommand SETFLASH1 @0x429eea /
             //  @0x429ef5 -> g_EnvLightningTimerA]
@@ -488,6 +491,10 @@ void ClientRuntime::post_authority_dialog_line(const world::World &world,
 	if (line.file.empty())
 		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System, 0xFFFF2222u,
 				"EX Cannot load audio: " + line.wave, false});
+	// The master-volume gate: with g_DialogueVolume 0 no subtitle posts [orig: the call through
+	// dword_A8A23C @0x44DE50, its test @0x44DE5B; Dialog_ApplyDialogueVolumeAndPlayFactor
+	// @0x527560 - 0 @0x527567..0x527569].
+	if (dialogue_volume_ == 0) return;
 	// The subtitle: the line of the loaded bank the queue's line names, its [Mission Dialog]
 	// entry first (audio::dialog_line_text). [orig: @0x44DDCD..0x44DE3C, @0x44DEC9]
 	const audio::DialogLinePlayback resolved = audio::resolve_dialog_line(world.tables.dialog_bank,

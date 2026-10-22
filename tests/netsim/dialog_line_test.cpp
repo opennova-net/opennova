@@ -69,6 +69,7 @@ void test_effect_pass() {
 	local.player_class = 3;
 	world->cached.local_player = world->registry.spawn(0, local);
 	inmatch::ClientRuntime runtime("DialogLine");
+	runtime.set_dialogue_volume(192); // the cfg defaults' DialogueLevel
 	runtime.view().apply(s2c::DIALOG_LINE, line_body("dlg007", 1));
 	runtime.apply_received_effects(*world);
 	CHECK(world->out.dialog_lines.size() == 1);
@@ -126,6 +127,7 @@ void test_chat_legs() {
 	world->tables.mission_text = &text;
 
 	inmatch::ClientRuntime runtime("DialogText");
+	runtime.set_dialogue_volume(192);
 	const auto play = [&](const char *name, int16_t line) {
 		runtime.view().apply(s2c::DIALOG_LINE, line_body(name, line));
 		runtime.apply_received_effects(*world);
@@ -145,6 +147,24 @@ void test_chat_legs() {
 		CHECK(posts[0].order < posts[1].order);
 	}
 	CHECK(play("dlg999", 0).empty());
+	// D-NET-285, the master-volume gate: with the dialogue volume at 0 the missing wave's line
+	// still posts (it precedes the gate), but nothing plays and no subtitle posts.
+	// [orig: Dialog_LoadAudioClipLocalized @0x44DEF0 - @0x44DFD1..0x44DFF8 ahead of the gate's
+	//  call @0x44E0D7 and test @0x44E0E2; Dialog_ApplyDialogueVolumeAndPlayFactor @0x527560 -
+	//  0 at g_DialogueVolume 0 @0x527567]
+	world->out.discard_presentation();
+	runtime.set_dialogue_volume(0);
+	posts = play("dlg012", 1);
+	CHECK(posts.size() == 1);
+	if (posts.size() == 1)
+		CHECK(posts[0].sink == hud::ChatSink::System &&
+				posts[0].text == "EX Cannot load audio: MISSING");
+	CHECK(play("dlg012", 0).empty());
+	CHECK(world->out.dialog_lines.empty());
+	// Any nonzero volume passes it.
+	runtime.set_dialogue_volume(1);
+	posts = play("dlg012", 0);
+	CHECK(posts.size() == 1 && world->out.dialog_lines.size() == 1);
 	world->tables.dialog_bank = nullptr;
 	CHECK(play("dlg012", 1).empty());
 }
@@ -218,12 +238,13 @@ void test_authority_load() {
 	list.push_back(conn_fixture::make_conn(2, 2, &local_wire, ns::TransportMode::Loopback,
 			w::EntityHandle{}, true));
 	inmatch::ClientRuntime own("ListenHost");
+	own.set_dialogue_volume(192);
 	audio::DialogLineRef ref;
 	ref.wave = "MISSING";
 	ref.dialog_name = "dlg012";
 	ref.line = 0;
 	inmatch::authority_dialog_line_loaded(ctx, &own, *world, ref);
-	const std::vector<hud::FeedPost> posts = own.drain_ring_posts();
+	std::vector<hud::FeedPost> posts = own.drain_ring_posts();
 	CHECK(posts.size() == 2);
 	if (posts.size() == 2) {
 		CHECK(posts[0].sink == hud::ChatSink::System && posts[0].argb == 0xFFFF2222u &&
@@ -235,6 +256,15 @@ void test_authority_load() {
 	CHECK(remote_wire.client_recv(d) && d.tag == s2c::DIALOG_LINE &&
 			d.body == (std::vector<uint8_t>{'d', 'l', 'g', '0', '1', '2', 0x00, 0x00, 0x00}));
 	CHECK(!local_wire.client_recv(d));
+	// D-NET-285: the master-volume gate holds back the authority's own subtitle (the missing
+	// wave's line precedes it); the send does not depend on it [orig: Dialog_LoadAudioClip
+	// @0x44DD74 ahead of the gate @0x44DE50..0x44DE5B; Dialog_UpdatePlayback @0x44E599 then
+	// the send @0x44E5A5].
+	own.set_dialogue_volume(0);
+	inmatch::authority_dialog_line_loaded(ctx, &own, *world, ref);
+	posts = own.drain_ring_posts();
+	CHECK(posts.size() == 1 && posts[0].sink == hud::ChatSink::System);
+	CHECK(remote_wire.client_recv(d) && d.tag == s2c::DIALOG_LINE);
 	// A Serve Only host has no client of its own: the line goes out all the same.
 	inmatch::authority_dialog_line_loaded(ctx, nullptr, *world, ref);
 	CHECK(remote_wire.client_recv(d) && d.tag == s2c::DIALOG_LINE);

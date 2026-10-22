@@ -707,13 +707,24 @@ public:
 	// colour (a dialog line's "EX Cannot load audio" and subtitle), drained
 	// with the other feed lanes once per frame.
 	std::vector<hud::FeedPost> drain_ring_posts();
+	// g_DialogueVolume, the master-volume gate a dialog line's play and subtitle pass: the
+	// cfg's DialogueLevel (+0x1E4), which the session settings' apply copies at every
+	// session create, join and mission start and the in-game options' apply writes with
+	// the cfg word; the shell stamps the process block's word ahead of each frame. 0
+	// (the process's zeroed global) until stamped.
+	// [orig: g_DialogueVolume @0x24D20C8 - Game_ApplySessionSettingsToGlobals @0x5515A2
+	//  (called @0x524662, @0x5695B8, @0x569B07), UI_IngameOptionsDialogEventHandler
+	//  @0x554F7E..0x554F83; the gate Dialog_ApplyDialogueVolumeAndPlayFactor @0x527560
+	//  (0 @0x527567..0x527569)]
+	void set_dialogue_volume(int32_t level) { dialogue_volume_ = level; }
 	// The authority's own playback of a dialog line its queue loads (the listen host's or single
 	// player's client): with no wave of the line's name in the dialog bank's sounds, "EX Cannot
 	// load audio: <name>" on the SYSTEM ring in 0xFFFF2222; then the line's subtitle on the CHAT
-	// ring in white, both 930 ticks, as the joiner's leg posts them.
+	// ring in white, both 930 ticks, as the joiner's leg posts them; the subtitle only past the
+	// master-volume gate (set_dialogue_volume), the missing wave's line ahead of it.
 	// [orig: Dialog_LoadAudioClip @0x44DCC0 - the missing wave @0x44DD5D..0x44DD74
-	//  (Chat_AddMessageChannel2(msg, -56798, 930)), the subtitle @0x44DDCD..0x44DE3C and its
-	//  hook @0x44DEC9 (Chat_AddSystemMessageIfValid)]
+	//  (Chat_AddMessageChannel2(msg, -56798, 930)), the subtitle @0x44DDCD..0x44DE3C, the gate
+	//  @0x44DE50..0x44DE5B and its hook @0x44DEC9 (Chat_AddSystemMessageIfValid)]
 	void post_authority_dialog_line(const world::World &world, const audio::DialogLineRef &line);
 	// THE CMAP SCREEN'S OWN LEGS (client_squad.cpp): the world halves
 	// (world/user_waypoints.h) plus their sends — the placed waypoint's C2S
@@ -1346,6 +1357,7 @@ private:
 	hud::NetQualityIndicators net_indicators_;
 	hud::NovaWorldLinkFacts novaworld_link_;
 	int32_t mission_exit_reason_ = 0;                    // [orig: g_MissionExitReason]
+	int32_t dialogue_volume_ = 0;                        // [orig: g_DialogueVolume @0x24D20C8]
 	// The client (RECEIVE) window of the CNetQuality object and its inputs
 	// [orig: CNetQuality_UpdateMetrics @0x4C52C0, the `is_mp_session_peer &&
 	//  !is_authority` half]. The host (SEND) window lives with the host's tick.
