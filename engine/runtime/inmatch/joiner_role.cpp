@@ -388,28 +388,45 @@ void JoinerRole::collect_hostile_mounts(const world::Entity &requester,
 bool JoinerRole::queue_mount_toggle() {
 	if (!kernel_ || !runtime) return false;
 	world::World &world = kernel_->world;
+	// The USE readout's scan record (an instrument, no behaviour: world/use_press_trace.h).
+	using Outcome = world::UseToggleOutcome;
+	world::UsePressRecord trace = kernel_->local.use_press_record(world::UsePressEvent::kToggleScan);
+	const auto note = [this, &trace](Outcome outcome, bool queued) {
+		trace.outcome = outcome;
+		kernel_->local.use_trace.append(trace);
+		return queued;
+	};
 	// No dead test: the USE press's dispatcher dropped a dead player's
 	// (LocalPlayer::take_use_item_press) [orig: Entity_ToggleVehicleMount @0x436950].
 	const world::Entity *player = kernel_->local.player();
-	if (player == nullptr) return false;
+	if (player == nullptr) return note(Outcome::kNoPlayer, false);
 	if (player->mounted && world.script.wac_values.seatbelt != 0)
-		return false;
+		return note(Outcome::kSeatbelt, false);
 	world::VehicleSeatSelection hit;
 	// Mounted Use first scans for an alternative seat, then falls back to
 	// detach. Both relations wait for the host echo; only the attach request's
 	// yaw leg edits L here. [orig: Entity_ToggleVehicleMount @0x4369AC..0x4369C7]
-	if (!world.vehicles.find_mount_toggle_candidate(*player, hit, this))
-		return player->mounted &&
-				runtime->queue_vehicle_detach(player->mount_target.packed);
+	trace.candidate = world.vehicles.find_mount_toggle_candidate(*player, hit, this);
+	if (!trace.candidate) {
+		if (!player->mounted) return note(Outcome::kNoCandidate, false);
+		const bool detach = runtime->queue_vehicle_detach(player->mount_target.packed);
+		return note(detach ? Outcome::kDetachQueued : Outcome::kDetachRefused, detach);
+	}
+	trace.vehicle = hit.vehicle.packed;
+	trace.seat_index = static_cast<int16_t>(hit.seat_index);
 	const world::Entity *vehicle = world.registry.get(hit.vehicle);
 	if (vehicle == nullptr || hit.seat_index < 0 ||
-			hit.seat_index >= static_cast<int>(vehicle->seats.size())) return false;
+			hit.seat_index >= static_cast<int>(vehicle->seats.size()))
+		return note(Outcome::kBadSeat, false);
 	const uint8_t bone = vehicle->seats[static_cast<size_t>(hit.seat_index)].bone_index;
+	trace.bone = bone;
 	// The request turns L to the seat before it queues the 0x26; the host's
 	// confirm writes no yaw. [orig: Entity_RequestVehicleAttach @0x43655F..0x4365CE
 	//  ahead of the queue @0x436602]
 	world.vehicles.request_attach_heading(player->handle, hit);
-	return runtime->queue_vehicle_attach(hit.vehicle.packed, bone);
+	trace.attach_sent_before = runtime->attach_requests_sent();
+	const bool attach = runtime->queue_vehicle_attach(hit.vehicle.packed, bone);
+	return note(attach ? Outcome::kAttachQueued : Outcome::kAttachRefused, attach);
 }
 
 // [orig: Entity_FindAvailableSeat @0x436790 -> Entity_RequestVehicleAttach @0x436602]

@@ -1,0 +1,297 @@
+// The USE readout (world/use_press_trace.h): a debug instrument for the drive scenario's seat
+// question (the use_press_trace probe, Simulation::debug_use_press_trace). Each producer
+// records what it met, and the instrument changes nothing:
+// - the press: each run of case 0xB1 (LocalPlayer::take_use_item_press). The arm it took,
+//   the local body's Flags masked to 0x800 / 0x400000 / 0x200 in our two words, its mount,
+//   and the active slot's current / next action.
+// - the release's toggle gate (LocalPlayer::mount_toggle_allowed), its answer and the slot
+//   it read.
+// - a joiner's seat scan and request (JoinerRole::queue_mount_toggle). The candidate and
+//   its pick, the outcome, and the runtime's framed-0x26 count at queue time. The count
+//   (ClientRuntime::attach_requests_sent) rises once the next send build frames the 0x26.
+// The arms and gates themselves are pinned elsewhere (local_player_view, use_item_dead_drop,
+// inmatch_joiner_role).
+
+#include <net/npwire/idatagram_socket.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_keys.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
+#include <base/io/bam.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/joiner_role.h>
+#include <runtime/mission/mission_kernel.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/local_player.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/use_press_trace.h>
+#include <runtime/world/weapon_fsm.h>
+#include <runtime/world/world.h>
+
+#include <cmath>
+#include <cstdio>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace {
+
+using namespace opennova;
+namespace inmatch = opennova::inmatch;
+namespace w = opennova::world;
+
+int failures = 0;
+#define CHECK(c)                                                                               \
+	do {                                                                                       \
+		if (!(c)) {                                                                            \
+			std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c);                           \
+			++failures;                                                                        \
+		}                                                                                      \
+	} while (0)
+
+// A bare world with the local player's body (use_item_dead_drop's rig).
+struct Rig {
+	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	w::World &world = *wp;
+	std::unique_ptr<w::LocalPlayer> local = std::make_unique<w::LocalPlayer>(world);
+	w::EntityHandle player;
+	Rig() {
+		world.registry.configure_pool(0, 4);
+		world.local_player_state = local.get();
+		w::PlayerSpawn spawn;
+		spawn.net_id = 0xFFF0;
+		player = w::spawn_player(world, spawn);
+	}
+	w::Entity &body() { return *world.registry.get(player); }
+	w::UsePressRecord last() const {
+		const std::vector<w::UsePressRecord> held = local->use_trace.since(0);
+		return held.empty() ? w::UsePressRecord{} : held.back();
+	}
+};
+
+void test_a_press_records_its_arm_and_the_bodys_words() {
+	Rig r;
+	r.world.logic_tick = 77;
+	r.local->weapon.slot.current = w::weapon_action::kRecoil;
+	r.local->weapon.slot.next = w::weapon_action::kIdle;
+	CHECK(r.local->take_use_item_press() == w::UseItemArm::kMountChain);
+	w::UsePressRecord rec = r.last();
+	CHECK(rec.seq == 0 && r.local->use_trace.next_seq() == 1);
+	CHECK(rec.event == w::UsePressEvent::kPress && rec.arm == w::UseItemArm::kMountChain);
+	CHECK(rec.logic_tick == 77);
+	CHECK(rec.has_player && !rec.mounted && rec.flags == 0 && rec.engine_flags == 0);
+	CHECK(rec.has_slot && rec.slot_current == w::weapon_action::kRecoil &&
+			rec.slot_next == w::weapon_action::kIdle);
+	CHECK(rec.outcome == w::UseToggleOutcome::kNone);
+
+	// The type-6 volume touch takes the armory arm; the mask keeps it and drops the rest of
+	// the word (the binoculars bit here). A second press is refused by the latch.
+	r.body().flags |= w::kEntityFlagArmoryZone | w::kEntityFlagBinoculars;
+	CHECK(r.local->take_use_item_press() == w::UseItemArm::kArmory);
+	rec = r.last();
+	CHECK(rec.seq == 1 && rec.arm == w::UseItemArm::kArmory);
+	CHECK(rec.flags == w::kEntityFlagArmoryZone && rec.engine_flags == 0);
+	CHECK(r.local->take_use_item_press() == w::UseItemArm::kArmoryRefused);
+	CHECK(r.last().seq == 2 && r.last().arm == w::UseItemArm::kArmoryRefused);
+	r.local->release_use_item_key(false);
+
+	// The type-11 touch on the engine word takes the vehicle-loadout arm; the queued-mount
+	// bit rides along in the flags word.
+	r.body().flags &= ~(w::kEntityFlagArmoryZone | w::kEntityFlagBinoculars);
+	r.body().flags |= w::kEntityFlagQueuedMount;
+	r.body().engine_flags |= w::kEntityFlagVehicleLoadoutZone;
+	CHECK(r.local->take_use_item_press() == w::UseItemArm::kVehicleLoadout);
+	rec = r.last();
+	CHECK(rec.arm == w::UseItemArm::kVehicleLoadout);
+	CHECK(rec.flags == w::kEntityFlagQueuedMount &&
+			rec.engine_flags == w::kEntityFlagVehicleLoadoutZone);
+
+	// A dead player's press is dropped, and the record says so.
+	r.body().flags |= w::kEntityFlagDead;
+	CHECK(r.local->take_use_item_press() == w::UseItemArm::kDropped);
+	CHECK(r.last().arm == w::UseItemArm::kDropped && r.last().seq == 4);
+}
+
+void test_the_toggle_gate_records_its_answer() {
+	Rig r;
+	r.local->weapon.slot.current = w::weapon_action::kReload;
+	r.local->weapon.slot.next = w::weapon_action::kIdle;
+	CHECK(!r.local->mount_toggle_allowed());
+	w::UsePressRecord rec = r.last();
+	CHECK(rec.event == w::UsePressEvent::kToggleGate && !rec.allowed);
+	CHECK(rec.has_slot && rec.slot_current == w::weapon_action::kReload);
+	r.local->weapon.slot.current = w::weapon_action::kIdle;
+	CHECK(r.local->mount_toggle_allowed());
+	rec = r.last();
+	CHECK(rec.event == w::UsePressEvent::kToggleGate && rec.allowed && rec.seq == 1);
+}
+
+// The ring keeps the last kCapacity records; since() reads from the oldest it holds.
+void test_the_ring_keeps_the_last_records() {
+	w::UsePressTrace trace;
+	for (uint32_t i = 0; i < w::UsePressTrace::kCapacity + 3; ++i) {
+		w::UsePressRecord rec;
+		rec.logic_tick = i;
+		trace.append(rec);
+	}
+	CHECK(trace.next_seq() == w::UsePressTrace::kCapacity + 3);
+	CHECK(trace.oldest_seq() == 3);
+	const std::vector<w::UsePressRecord> all = trace.since(0);
+	CHECK(all.size() == w::UsePressTrace::kCapacity);
+	CHECK(!all.empty() && all.front().seq == 3 && all.front().logic_tick == 3);
+	CHECK(!all.empty() && all.back().seq == w::UsePressTrace::kCapacity + 2);
+	CHECK(trace.since(trace.next_seq()).empty());
+	CHECK(trace.since(trace.next_seq() - 1).size() == 1);
+}
+
+// --- the joiner's scan (joiner_role_test's harness) ---
+
+const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const std::string kClientScrk = "CLIENT-BRIDGE-SCRK";
+const std::string kServerScrk = "SERVER-BRIDGE-SCRK";
+constexpr uint32_t kClientKey = 0x0000BEEFu;
+constexpr uint32_t kSessionId = 0x0FE0E112u;
+
+class CountingSocket final : public opennova::IDatagramSocket {
+public:
+	std::vector<std::vector<uint8_t>> datagrams;
+	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
+	void send_to(const PeerAddr &, const uint8_t *data, std::size_t size) override {
+		datagrams.emplace_back(data, data + size);
+	}
+	int count(uint8_t tag) const {
+		int n = 0;
+		for (const auto &dg : datagrams) {
+			uint8_t opcode = 0;
+			std::vector<uint8_t> body;
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!nw_decode_inbound(dg.data(), dg.size(), opcode, body) ||
+					opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
+					!decode_protocol_packet_plaintext(body.data(), body.size(), kClientScrk,
+							header, messages)) continue;
+			for (const auto &msg : messages)
+				if (msg.tag == tag) ++n;
+		}
+		return n;
+	}
+};
+
+struct Harness {
+	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	inmatch::JoinerRole role;
+	CountingSocket socket;
+	inmatch::TickInput input;
+	Harness() {
+		kernel->world.registry.configure_pool(0, 16);
+		role.bind(*kernel);
+		role.set_socket(&socket, PeerAddr{});
+		role.set_title(&kJo);
+		role.create_runtime("BridgeJoiner", inmatch::JoinRole::Player, "", "");
+		role.kit_seams.apply_authoritative = [] {};
+		role.kit_seams.reseed_on_side_change = [] { return false; };
+		role.kit_seams.push = [] {};
+	}
+};
+
+// The seat scan aims from the eye at the seat point (joiner_role_test's look_at).
+void look_at(w::World &world, w::EntityHandle player_h, float tx, float ty, float tz) {
+	w::Entity *player = world.registry.get(player_h);
+	if (player == nullptr) return;
+	const double dx = double(tx) - player->position.x - player->eye_offset_x / 65536.0;
+	const double dy = double(ty) - player->position.y - player->eye_offset_y / 65536.0;
+	const double dz = double(tz) + 0.1875 - player->position.z - player->eye_offset_z / 65536.0;
+	const double heading = std::atan2(dy, dx);
+	const double pitch = std::atan2(dz, std::hypot(dx, dy));
+	player->heading = w::placed_heading_bam(
+			int16_t(std::lround(90.0 - heading * 180.0 / 3.14159265358979323846)));
+	player->pitch_bam = int32_t(pitch * opennova::io::kBamPerRadian);
+	if (w::AiEntity *body = world.ai.for_handle(player_h)) {
+		body->heading = int32_t(heading * opennova::io::kBamPerRadian);
+		body->pitch = int32_t(pitch * opennova::io::kBamPerRadian);
+	}
+}
+
+void test_a_joiner_scan_records_its_pick_and_the_0x26_leaving() {
+	Harness h;
+	w::World &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	world.load_systems();
+	h.role.poll_preload();
+	constexpr uint16_t self_handle = 0x0005;
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
+			self_handle, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	w::Entity *local = h.kernel->local.player();
+	CHECK(local != nullptr);
+	if (local == nullptr) return;
+	// A passenger seat a step away, faced (the D-NET-421 rig).
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
+	vehicle.position = local->position;
+	vehicle.position.x += 1.0f;
+	vehicle.health = vehicle.health_max = 100;
+	vehicle.team = local->team;
+	w::Seat seat;
+	seat.type = w::SeatType::Passenger;
+	seat.bone_index = 2;
+	seat.retail_slot = 0;
+	seat.source_name = "sitex00";
+	vehicle.seats.push_back(seat);
+	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
+	look_at(world, local->handle, vehicle.position.x, vehicle.position.y, vehicle.position.z);
+	h.socket.datagrams.clear();
+
+	// The release's path on a joiner: the gate, then the scan and the request
+	// (Simulation::local_player_toggle_mount).
+	const uint32_t from = h.kernel->local.use_trace.next_seq();
+	CHECK(h.kernel->local.mount_toggle_allowed());
+	CHECK(h.role.queue_mount_toggle());
+	std::vector<w::UsePressRecord> held = h.kernel->local.use_trace.since(from);
+	CHECK(held.size() == 2);
+	if (held.size() != 2) return;
+	CHECK(held[0].event == w::UsePressEvent::kToggleGate && held[0].allowed);
+	const w::UsePressRecord &scan = held[1];
+	CHECK(scan.event == w::UsePressEvent::kToggleScan);
+	CHECK(scan.logic_tick == world.logic_tick);
+	CHECK(scan.has_player && !scan.mounted);
+	CHECK(scan.candidate && scan.vehicle == vh.packed && scan.seat_index == 0 && scan.bone == 2);
+	CHECK(scan.outcome == w::UseToggleOutcome::kAttachQueued);
+	CHECK(scan.attach_sent_before == 0);
+	// Queued, not yet framed: the count rises at the next send build, with the 0x26 on the
+	// wire.
+	CHECK(h.role.runtime->attach_requests_sent() == 0);
+	h.role.run_tick(h.input);
+	CHECK(h.socket.count(c2s::VEHICLE_ATTACH_REQUEST) == 1);
+	CHECK(h.role.runtime->attach_requests_sent() == 1);
+
+	// No carrier in reach on foot: no candidate, nothing queued.
+	world.registry.get(vh)->position.x += 500.0f;
+	CHECK(!h.role.queue_mount_toggle());
+	const w::UsePressRecord none = h.kernel->local.use_trace.since(0).back();
+	CHECK(none.event == w::UsePressEvent::kToggleScan && !none.candidate);
+	CHECK(none.outcome == w::UseToggleOutcome::kNoCandidate && none.vehicle == 0xFFFFu);
+	h.role.run_tick(h.input);
+	CHECK(h.role.runtime->attach_requests_sent() == 1);
+}
+
+} // namespace
+
+int main() {
+	test_a_press_records_its_arm_and_the_bodys_words();
+	test_the_toggle_gate_records_its_answer();
+	test_the_ring_keeps_the_last_records();
+	test_a_joiner_scan_records_its_pick_and_the_0x26_leaving();
+	if (failures != 0) {
+		std::printf("%d check(s) failed\n", failures);
+		return 1;
+	}
+	std::printf("use_press_trace: ok\n");
+	return 0;
+}

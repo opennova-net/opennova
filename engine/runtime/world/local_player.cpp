@@ -104,15 +104,38 @@ UseItemArm LocalPlayer::take_use_item_press() {
 	//  before KeyBinding_SortBySequentialId); the hold Input_HandleActionBinding_0
 	//  @0x4E0B5E..0x4E0B71; Entity_ToggleVehicleMount @0x436950, Entity_FindAvailableSeat
 	//  @0x436790: no dead test]
-	if (action_dispatch_drops()) return UseItemArm::kDropped;
+	if (action_dispatch_drops()) return note_use_press(UseItemArm::kDropped);
 	const UseItemArm arm = w::local_player_use_item_arm(world_, view_session_inputs);
-	if (arm != UseItemArm::kArmory && arm != UseItemArm::kArmoryRefused) return arm;
+	if (arm != UseItemArm::kArmory && arm != UseItemArm::kArmoryRefused)
+		return note_use_press(arm);
 	// A latched press does nothing; an unlatched one latches before the
 	// countdown test. [orig: Input_HandleActionBinding_0 the latch test
 	// @0x4E0B12..0x4E0B19 (to done), the set @0x4E0B21]
-	if (armory_press_latched) return UseItemArm::kArmoryRefused;
+	if (armory_press_latched) return note_use_press(UseItemArm::kArmoryRefused);
 	armory_press_latched = true;
+	return note_use_press(arm);
+}
+
+w::UsePressRecord LocalPlayer::use_press_record(w::UsePressEvent event) const {
+	w::UsePressRecord record;
+	record.event = event;
+	record.logic_tick = world_.logic_tick;
+	w::use_press_fill_body(record, player(), w::active_local_weapon_slot(world_, weapon));
+	return record;
+}
+
+UseItemArm LocalPlayer::note_use_press(UseItemArm arm) {
+	w::UsePressRecord record = use_press_record(w::UsePressEvent::kPress);
+	record.arm = arm;
+	use_trace.append(record);
 	return arm;
+}
+
+bool LocalPlayer::note_use_toggle_gate(bool allowed) {
+	w::UsePressRecord record = use_press_record(w::UsePressEvent::kToggleGate);
+	record.allowed = allowed;
+	use_trace.append(record);
+	return allowed;
 }
 
 void LocalPlayer::release_use_item_key(bool system_key_up) {
@@ -382,11 +405,11 @@ bool LocalPlayer::mount_toggle_allowed() {
 	// No dead test: the press's dispatcher dropped a dead player's (take_use_item_press)
 	// [orig: Entity_ToggleVehicleMount @0x436950].
 	const w::Entity *toggle_player = player();
-	if (toggle_player == nullptr) return false;
+	if (toggle_player == nullptr) return note_use_toggle_gate(false);
 	w::sync_local_usegun_weapon_transition(world, weapon);
 	const w::WeaponSlotState *active_slot = w::active_local_weapon_slot(world, weapon);
-	return active_slot == nullptr ||
-			w::weapon_state_allows_mount_toggle(active_slot->current, active_slot->next);
+	return note_use_toggle_gate(active_slot == nullptr ||
+			w::weapon_state_allows_mount_toggle(active_slot->current, active_slot->next));
 }
 
 bool LocalPlayer::toggle_mount() {

@@ -4,6 +4,7 @@
 #include "simulation/simulation_internal.h"
 #include "simulation/fp_viewmodel_spec.h"
 #include "simulation/player_inventory.h"
+#include "simulation/use_press_row.h"
 #include "simulation/weapon_kit_entry.h"
 #include "player/player_profiles.h"
 #include "resource_index/launch_flags.h" // the /noreload flag the session copy reads
@@ -51,6 +52,28 @@ Simulation::UseItemArm Simulation::local_player_use_item_arm() const {
 Simulation::UseItemArm Simulation::take_use_item_press() {
 	if (!kernel_) return USE_ITEM_ARM_MOUNT_CHAIN;
 	return static_cast<UseItemArm>(kernel_->local.take_use_item_press());
+}
+
+TypedArray<UsePressRow> Simulation::debug_use_press_trace(int64_t p_from_seq) const {
+	TypedArray<UsePressRow> rows;
+	if (!kernel_) return rows;
+	const uint32_t from = static_cast<uint32_t>(
+			std::clamp<int64_t>(p_from_seq, 0, static_cast<int64_t>(UINT32_MAX)));
+	for (const opennova::world::UsePressRecord &record : kernel_->local.use_trace.since(from)) {
+		Ref<UsePressRow> row;
+		row.instantiate();
+		row->assign(record);
+		rows.push_back(row);
+	}
+	return rows;
+}
+
+int64_t Simulation::debug_use_press_next_seq() const {
+	return kernel_ ? static_cast<int64_t>(kernel_->local.use_trace.next_seq()) : 0;
+}
+
+int64_t Simulation::debug_attach_requests_sent() const {
+	return runtime_ != nullptr ? static_cast<int64_t>(runtime_->attach_requests_sent()) : 0;
 }
 
 void Simulation::release_use_item_key(bool p_system_key_up) {

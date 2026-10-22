@@ -692,4 +692,17 @@ static func _build_definitions() -> Array[ProbeDef]:
 				NET + "stage_slot_probe.gd", {
 					"staging": { "type": "array", "minItems": 1, "items": { "type": "object" } },
 				}, ["staging"], false, true, 60_000),
+		ProbeDef.make("use_press_trace",
+				"The USE readout (Simulation.debug_use_press_trace): the engine's last 64 USE "
+				+ "records from `from_seq`. Each press: the arm it took, the local body's Flags "
+				+ "& 0x800 / 0x400000 / 0x200, its mount, the active slot's current / next "
+				+ "action. Each release's toggle gate. Each joiner seat scan: the candidate, "
+				+ "its pick and whether the 0x26 queued, with the runtime's framed-0x26 count "
+				+ "to show it left. `watch_ms` keeps polling each frame; an instrument that "
+				+ "changes nothing.",
+				NET + "use_press_trace_probe.gd", {
+					"from_seq": { "type": "integer", "minimum": 0, "default": 0 },
+					"watch_ms": { "type": "integer", "minimum": 0, "maximum": 590_000,
+							"default": 0 },
+				}, [], false, true, 600_000),
 	]

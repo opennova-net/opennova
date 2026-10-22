@@ -635,6 +635,9 @@ public:
 	// ordinary compact player echo; this only queues the reliable C2S 0x16.
 	bool queue_mounted_weapon_slot_selection(bool use_parent_slot);
 	bool queue_vehicle_attach(uint16_t vehicle_handle, uint8_t model_bone_index);
+	// The USE readout's send leg (an instrument, no behaviour: world/use_press_trace.h): the
+	// C2S 0x26 requests this runtime's send builds framed, since its creation.
+	uint32_t attach_requests_sent() const { return attach_requests_sent_; }
 	bool queue_vehicle_detach(uint16_t vehicle_handle);
 	// Entity_SendDetachPacket itself: the reliable C2S 0x27 [self][target][2 B],
 	// gated only on the target (the plyr class callback's seat leave; the mount
@@ -1244,6 +1247,7 @@ private:
 	// [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 -> CNapiNPConnection_QueueMessage
 	//  @0x628640, one outgoing list per connection]
 	std::deque<ProtocolMessage> send_queue_;
+	uint32_t attach_requests_sent_ = 0; // the USE readout's count (attach_requests_sent)
 	// S2C 0x49 handlers run inside the receive pump. Preserve their decoded
 	// notifications for the embedding simulation after applying the remote-Person
 	// handler side effect before this frame's body tick.

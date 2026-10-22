@@ -2093,6 +2093,9 @@ void ClientRuntime::build_send_boundary(std::vector<std::vector<uint8_t>> &outbo
 	} else {
 		framed.unbuilt = std::move(send_messages);
 	}
+	// The USE readout counts the 0x26 requests this build framed (an instrument).
+	for (std::size_t i = 0; i < framed.framed_count; ++i)
+		if (send_messages[i].tag == c2s::VEHICLE_ATTACH_REQUEST) ++attach_requests_sent_;
 	for (std::vector<uint8_t> &datagram : framed.datagrams)
 		outbound.push_back(std::move(datagram));
 	if (framed.frame_failed) {

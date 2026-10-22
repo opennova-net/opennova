@@ -17,6 +17,7 @@
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/radar_contacts.h>
+#include <runtime/world/use_press_trace.h>
 #include <runtime/world/vehicle_attach.h>
 
 #include <cstdint>
@@ -228,6 +229,11 @@ public:
     // transition synced, then the weapon-busy gate (no EquippedSlot passes)
     // [orig: Entity_ToggleVehicleMount @0x436958..0x436977].
     bool mount_toggle_allowed();
+    // The USE readout (an instrument, no behaviour; world/use_press_trace.h): the press and
+    // the toggle gate append here, a joiner's seat scan too (JoinerRole::queue_mount_toggle).
+    UsePressTrace use_trace;
+    // A record of `event` at this logic tick over the local body and its active slot.
+    UsePressRecord use_press_record(UsePressEvent event) const;
     // Numbered seat keys share the panel's list and their own idle/overheat
     // gate; a joiner uses the query then waits for the authority's reply.
     bool find_numbered_seat(int index, VehicleSeatSelection &out,
@@ -379,6 +385,10 @@ public:
     void sync_local_mounted_input_heading();
 
 private:
+    // The readout's press and toggle-gate records; each returns its argument.
+    UseItemArm note_use_press(UseItemArm arm);
+    bool note_use_toggle_gate(bool allowed);
+
     World &world_;
     float look_accum_x_ = 0.0f;
     float look_accum_y_ = 0.0f;

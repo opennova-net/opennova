@@ -90,6 +90,7 @@ class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weap
 class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
+class UsePressRow;          // one USE readout record (simulation/use_press_row.h)
 class PlayerProfiles; // the player profile's records (player/player_profiles.h)
 class EnvironmentSnapshot;  // the F3 Environment record as a typed read (simulation/environment_snapshot.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
@@ -2230,6 +2231,13 @@ public:
 	// arm through the armory press latch, which an armory press sets and a
 	// latched one leaves refused; the mount chain without a kernel.
 	UseItemArm take_use_item_press();
+	// The USE readout (a debug instrument; engine world/use_press_trace.h, the use_press_trace
+	// probe): the held press, toggle-gate and seat-scan records with seq >= p_from_seq, oldest
+	// first (none without a kernel); the seq the next record takes; and the role's client
+	// runtime's framed C2S 0x26 count (0 without one).
+	TypedArray<UsePressRow> debug_use_press_trace(int64_t p_from_seq) const;
+	int64_t debug_use_press_next_seq() const;
+	int64_t debug_attach_requests_sent() const;
 	// A useitem key's release clears the press latch (engine
 	// LocalPlayer::release_use_item_key).
 	void release_use_item_key(bool p_system_key_up);

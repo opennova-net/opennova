@@ -5246,6 +5246,11 @@ add_test(NAME netsim_client_replica_pipeline_ride_link COMMAND netsim_client_rep
 add_executable(player_body_capsule_eye_test world/player_body_capsule_eye_test.cpp)
 target_link_libraries(player_body_capsule_eye_test PRIVATE opennova_runtime)
 add_test(NAME player_body_capsule_eye COMMAND player_body_capsule_eye_test)
+# The USE readout (world/use_press_trace.h, the use_press_trace probe): the press's arm and
+# body words, the toggle gate, a joiner's seat scan and the framed 0x26 count.
+add_executable(npruntime_use_press_trace_test npruntime/use_press_trace_test.cpp)
+target_link_libraries(npruntime_use_press_trace_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_use_press_trace COMMAND npruntime_use_press_trace_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a
