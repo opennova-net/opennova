@@ -418,6 +418,28 @@ static uint8_t borrowed_slot_adm(World &world, Entity &gun) {
 	return carrier != nullptr ? carrier->primary_weapon_slot_adm : uint8_t{0xFF};
 }
 
+// The adm byte a local fire names: the firing slot's def, looked up by its name; only a
+// slot with no def takes its owner's AdmDef byte (+0x2B0). The firing slot is the
+// EquippedSlot the weapon walk runs (active_local_weapon_slot): a borrow's slot (the
+// gun's own, or its carrier's on a designated-G route, whose def a route switch never
+// stamps into the byte, D-WPN-52), else the personal slot, which holds the installed def.
+// [orig: WeaponAction_Fire @0x542B10 - the slot's def test @0x542C1C..0x542C21,
+//  AdmDef_FindIndexByName(def + 0x14) @0x542C23..0x542C2F, the +0x2B0 fallback
+//  @0x542C35..0x542C3F, the byte pushed as weaponFlags @0x542C55 to
+//  Entity_FireWeaponAndSendPacket @0x542C5E]
+uint8_t local_weapon_fire_adm(World &world, const LocalPlayerWeapon &w, const Entity &shooter) {
+	if (w.usegun_slot_active && w.usegun_mount.valid()) {
+		if (Entity *gun = world.registry.get(w.usegun_mount)) {
+			if (world.vehicles.resolve_mounted_ammo_slot(*gun) != nullptr) {
+				const uint8_t slot_adm = borrowed_slot_adm(world, *gun);
+				return slot_adm != 0xFF ? slot_adm : shooter.equipped_adm_index;
+			}
+		}
+	}
+	if (w.def_name.empty()) return shooter.equipped_adm_index;
+	return static_cast<uint8_t>(world.tables.weapons.index_of(w.def_name.c_str()));
+}
+
 void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun) {
 	Entity *player = world.registry.get(world.cached.local_player);
 	if (player == nullptr) return;
@@ -1573,7 +1595,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// RoundData_AddRound @ 0x4fdb40 inline RoundData_SpawnRound @ 0x4ec0d0]
 		Entity *shooter = world.registry.get(world.cached.local_player);
 		if (shooter != nullptr && p != nullptr) {
-			const uint8_t adm_index = shooter->equipped_adm_index;
+			// The firing slot's def names the round's and the C2S 0x06's adm.
+			// [orig: WeaponAction_Fire @0x542B10 - @0x542C1C..0x542C3F]
+			const uint8_t adm_index = local_weapon_fire_adm(world, w, *shooter);
 			const WeaponTableEntry *adm = world.tables.weapons.by_index(adm_index);
 			if (adm != nullptr && adm->ammo_index >= 0) {
                 int32_t pose[6];

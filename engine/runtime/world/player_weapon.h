@@ -322,6 +322,11 @@ WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w);
 const WeaponSlotState *active_local_weapon_slot(const World &world,
                                                const LocalPlayerWeapon &w);
 
+// The adm byte a local fire names (the round's adm and the C2S 0x06 off7): the
+// firing slot's def by name, the shooter's AdmDef byte (+0x2B0) for a slot with no
+// def. [orig: WeaponAction_Fire @0x542B10 - @0x542C1C..0x542C3F]
+uint8_t local_weapon_fire_adm(World &world, const LocalPlayerWeapon &w, const Entity &shooter);
+
 // g_LocalPlayerEntity->Pitch = 0, shared by the AbsorbPitch mount stamp and
 // the scope-up leg. [orig: @0x4DFAB7; @0x4DF314]
 void local_player_level_pitch(World &world);

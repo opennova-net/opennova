@@ -1167,6 +1167,14 @@ void test_binoculars_survive_all_but_the_camera_reset() {
                 r.w.registry.get(carrier_h)->primary_weapon_slot_adm);
         CHECK(local.weapon.events.size() == events_before + 1 &&
                 local.weapon.events.back().switch_to_weapon == "WPN_HULL");
+        // A fire on the route names the carrier slot's def, for the round's adm and the
+        // C2S 0x06 off7 alike, while the AdmDef byte keeps what the borrow stamped.
+        // [orig: WeaponAction_Fire @0x542B10 - the slot's def @0x542C1C..0x542C2F, the
+        //  +0x2B0 fallback for a def-less slot @0x542C35..0x542C3F, pushed @0x542C55]
+        const uint8_t hull_adm =
+                static_cast<uint8_t>(r.w.tables.weapons.index_of("WPN_HULL"));
+        CHECK(local_weapon_fire_adm(r.w, local.weapon, r.player()) == hull_adm);
+        CHECK(r.player().equipped_adm_index != hull_adm);
         CHECK(local.view.binoculars_requested && local.weapon.nvg_scope_restore);
         CHECK(r.w.weather.core.scalar_channels.camera_fov_target_fp == (20 << 16));
         r.w.local_player_state = nullptr;
