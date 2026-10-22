@@ -3001,6 +3001,36 @@ void test_frame_draws() {
 						(row ? row->value.reference : std::string("no row")) + ")");
 		expect_row(judge_case(dying(1, 0, false), dying(2, 1, false), dying(3, 2, true), "OR"), 'S',
 				"frame_self_offset", "", "fail", "FRAME_ANCHOR_OFFSET_MISMATCH");
+		// x8's aikill: each death drew its own clip (the own record's anim state, state_b's
+		// high bits: RR 196, RR-aa 198, OO 216) and rested at that clip's eye (-9217 on RR and
+		// RR-aa, -8193 then -13153 on OO). A rest in a clip only one run plays is 'drawn'.
+		auto clipped = [&rewrite](uint32_t seed, uint32_t clip, int32_t first, int32_t last) {
+			return rewrite(scripted(seed),
+					[clip, first, last](size_t i, wire::ParityFrameState &, wire::ParityEntity &e) {
+						e.offset_x = e.offset_y = 0;
+						e.offset_z = kStand;
+						e.state_b = (44u << 8) | 9u;
+						if (i < 100)
+							return;
+						e.state_b = (clip << 8) | 9u;
+						if (i < 104)
+							e.offset_z = kStand + (first - kStand) * int32_t(i - 99) / 5;
+						else
+							e.offset_z = i < 120 ? first : last;
+					});
+		};
+		const Case drawn = judge_case(clipped(1, 196, -9217, -9217), clipped(2, 198, -9217, -9217),
+				clipped(3, 216, -8193, -13153), "OO");
+		expect_row(drawn, 'S', "frame_self_offset", "", "pass");
+		const VerdictRow *drawn_row = find_row(drawn.verdict.rows, 'S', "frame_self_offset");
+		check(drawn_row && drawn_row->aa_distance == 0.0 &&
+						drawn_row->value.subject == "{0,0,-13,0,0,-13>drawn,drawn}",
+				"two death clips' rests compare as drawn (got " +
+						(drawn_row ? drawn_row->value.subject : std::string("no row")) + ")");
+		// The clip RR played, resting elsewhere, compares by value.
+		expect_row(judge_case(clipped(1, 196, -9217, -9217), clipped(2, 198, -9217, -9217),
+						   clipped(3, 196, -13153, -13153), "OO"),
+				'S', "frame_self_offset", "", "fail", "FRAME_ANCHOR_OFFSET_MISMATCH");
 	}
 	{
 		// x5's aikill: RR's first hit left 36, RR-aa's 8 (base 114 at zone 1.0 and 1.25).
@@ -3012,8 +3042,15 @@ void test_frame_draws() {
 		};
 		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), hit(3, 150, 36), "OO"), 'S',
 				"frame_health", "", "pass");
+		// x8's aikill OR: 150 straight to 0 between two consecutive frames, the hit and the
+		// kill inside one frame step: no residual to compare.
 		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), hit(3, 150, 0), "OO"), 'S',
-				"frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
+				"frame_health", "", "pass");
+		// A run that never dies still misses the dead value.
+		auto alive = rewrite(scripted(3),
+				[](size_t, wire::ParityFrameState &f, wire::ParityEntity &) { f.health = 150; });
+		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), alive, "OO"), 'S', "frame_health", "",
+				"fail", "FRAME_HEADER_VALUES_MISMATCH");
 		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), hit(3, 120, 36), "OO"), 'S',
 				"frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
 	}
@@ -3051,7 +3088,68 @@ void test_frame_draws() {
 		expect_row(judge_case(countdown(1, 40, 0, 5), countdown(2, 40, 0, 5),
 						   countdown(3, 40, 0, 7), "OO"),
 				'S', "frame_weapon", "", "fail", "FRAME_WEAPON_PHASE_MISMATCH");
+		// x8's swap: the team change starts +0x168 and +0x16C (weapon[1], weapon[3]) at 60 and
+		// the re-arm a second or less later +0x164 (weapon[4]) at 30, the per-slot pass between
+		// the two accepts or not: RR (60, 60, 30) and RR-aa a second later (59, 59, 29) stand 30
+		// apart, OR (59, 59, 30) 29 apart.
+		auto swap = [&rewrite](uint32_t seed, uint32_t skipped, uint32_t apart) {
+			return rewrite(scripted(seed),
+					[skipped, apart](size_t i, wire::ParityFrameState &f, wire::ParityEntity &) {
+						if (!f.weapon_present)
+							return;
+						f.weapon[1] = f.weapon[3] = f.weapon[4] = 0;
+						if (i < 40)
+							return;
+						const uint32_t step = uint32_t(i - 40) / 8 + skipped;
+						f.weapon[1] = f.weapon[3] = step < 60 ? 60 - step : 0;
+						f.weapon[4] = step + apart < 60 ? 60 - apart - step : 0;
+					});
+		};
+		const Case passed = judge_case(swap(1, 0, 30), swap(2, 1, 30), swap(3, 1, 29), "OR");
+		const VerdictRow *swap_row = find_row(passed.verdict.rows, 'S', "frame_weapon");
+		check(swap_row && swap_row->aa_distance == 0.0,
+				"a countdown pair started a second later is no A/A distance");
+		expect_row(passed, 'S', "frame_weapon", "", "pass");
+		// Three seconds apart is no pass between two accepts.
+		expect_row(judge_case(swap(1, 0, 30), swap(2, 1, 30), swap(3, 1, 27), "OR"), 'S',
+				"frame_weapon", "", "fail", "FRAME_WEAPON_PHASE_MISMATCH");
 	}
+}
+
+// x8's 01tr-coop: a parked vehicle's records carry its offset from the moving anchor rounded to
+// the compressed step (state.position_quantum), so its world position wobbles inside one step
+// and is no motion; a vehicle that drives further than its step still compares.
+void test_position_quantum() {
+	// The vehicle record (handle 0x2003) at world x 4000 + speed * k for its k-th record.
+	auto vehicle = [](uint32_t seed, int32_t speed) {
+		wire::ParityTrace trace = scripted(seed);
+		std::map<int, const wire::ParityFrameState *> frames;
+		for (const wire::ParityFrameState &f : trace.frames)
+			frames[f.frame] = &f;
+		int32_t k = 0;
+		for (wire::ParityEntity &e : trace.entities) {
+			if (e.cls != 'V')
+				continue;
+			const wire::ParityFrameState &f = *frames.at(e.frame);
+			e.pos_x = network_compress_fixedpoint(4000 * 65536 + speed * k++ - f.anchor_x);
+			e.pos_y = network_compress_fixedpoint(2100 * 65536 - f.anchor_y);
+			e.pos_z = network_compress_fixedpoint(50 * 65536 - f.anchor_z);
+			place(e, f);
+		}
+		return trace;
+	};
+	{
+		const Case parked = judge_case(vehicle(1, 0), vehicle(2, 0), vehicle(3, 0), "OO");
+		for (const char *row : { "entity_V_position_range_p90",
+					 "entity_V_position_displacement_p90", "entity_V_position_step_p90" })
+			check(find_row(parked.verdict.rows, 'S', row) == nullptr,
+					std::string("a parked vehicle has no ") + row);
+	}
+	constexpr int32_t kDrive = 8 * 65536; // 8 units a record, beyond the 2-unit step
+	expect_row(judge_case(vehicle(1, kDrive), vehicle(2, kDrive), vehicle(3, kDrive), "OO"), 'S',
+			"entity_V_position_displacement_p90", "", "pass");
+	expect_row(judge_case(vehicle(1, kDrive), vehicle(2, kDrive), vehicle(3, 0), "OO"), 'S',
+			"entity_V_position_displacement_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
 }
 
 void test_steady_rules() {
@@ -3179,6 +3277,7 @@ int main() {
 	test_steady_rules();
 	test_frame_rules();
 	test_frame_draws();
+	test_position_quantum();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return 1;

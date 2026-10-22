@@ -13,7 +13,8 @@
 //   dynamic vectors    origin-normalized range, displacement and step p90
 //                      (nearest rank) within 1/8x..8x of RR, each sequence past a
 //                      lone transient lead and short of a lone tail, entity positions in
-//                      world units, uplink positions one sequence per carrier frame;
+//                      world units (a move within the records' compressed steps none),
+//                      uplink positions one sequence per carrier frame;
 //                      priority scores' per-slot median likewise;
 //                      initial position/anchor within 64 units
 // Session-local handles reduce to none/bound (normalization.h).
@@ -31,6 +32,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -83,6 +85,7 @@ template <typename T> std::string join(const T *values, size_t count) {
 struct Sample {
 	std::string group;
 	std::vector<double> axes;
+	std::vector<double> quantum; // per axis, a compact record's step (empty: exact values)
 };
 
 struct VectorStats {
@@ -121,6 +124,29 @@ std::pair<size_t, size_t> sequence_span(const std::vector<T> &seq, Same same) {
 	return { begin, end };
 }
 
+// Two samples' delta on one axis. A compact record carries its offset from the anchor
+// rounded to the nearest step of 16 << shift [orig: Network_CompressFixedPoint @0x4C2780 (the
+// rounding add of 8 << shift @0x4C2790..0x4C27B3, the 12-bit mantissa @0x4C27C6)], so it
+// decodes to within half its step of the position it carried, and a delta within the two
+// samples' half steps is none (state.position_quantum).
+double axis_delta(const Sample &x, const Sample &y, size_t a, double modulus) {
+	static_assert(has_normalization("state.position_quantum"));
+	const double delta = wrapped(x.axes[a] - y.axes[a], modulus);
+	if (!x.quantum.empty() && !y.quantum.empty() &&
+			std::fabs(delta) <= (x.quantum[a] + y.quantum[a]) / 2.0)
+		return 0.0;
+	return delta;
+}
+
+bool same_sample(const Sample &x, const Sample &y, double modulus) {
+	if (x.quantum.empty() || y.quantum.empty())
+		return x.axes == y.axes;
+	for (size_t a = 0; a < x.axes.size(); ++a)
+		if (axis_delta(x, y, a, modulus) != 0.0)
+			return false;
+	return true;
+}
+
 // `samples` in capture order.
 VectorStats vector_stats(const std::vector<Sample> &samples, double modulus) {
 	VectorStats stats;
@@ -131,7 +157,9 @@ VectorStats vector_stats(const std::vector<Sample> &samples, double modulus) {
 	std::vector<double> ranges, displacements, steps;
 	for (const auto &group : groups) {
 		const std::pair<size_t, size_t> span = sequence_span(group.second,
-				[](const Sample *x, const Sample *y) { return x->axes == y->axes; });
+				[modulus](const Sample *x, const Sample *y) {
+					return same_sample(*x, *y, modulus);
+				});
 		const std::vector<const Sample *> seq(group.second.begin() + std::ptrdiff_t(span.first),
 				group.second.begin() + std::ptrdiff_t(span.second));
 		if (group.first == samples.front().group)
@@ -143,12 +171,12 @@ VectorStats vector_stats(const std::vector<Sample> &samples, double modulus) {
 		for (size_t i = 0; i < seq.size(); ++i) {
 			double displacement = 0.0, step = 0.0;
 			for (size_t a = 0; a < axes; ++a) {
-				const double from_origin = wrapped(seq[i]->axes[a] - seq.front()->axes[a], modulus);
+				const double from_origin = axis_delta(*seq[i], *seq.front(), a, modulus);
 				displacement += std::fabs(from_origin);
 				lo[a] = std::min(lo[a], from_origin);
 				hi[a] = std::max(hi[a], from_origin);
 				if (i > 0)
-					step += std::fabs(wrapped(seq[i]->axes[a] - seq[i - 1]->axes[a], modulus));
+					step += std::fabs(axis_delta(*seq[i], *seq[i - 1], a, modulus));
 			}
 			displacements.push_back(displacement);
 			if (step > 0.0)
@@ -497,7 +525,13 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 	// 13..14; the def flag 0x200's seat path @0x4EC968..0x4EC994: 6.0 for seat types 2, 3,
 	// 6 and 7), then on a type-3 target the shooter's 0.9 or 1.1 (@0x4ECB5A / @0x4ECB66)
 	// and the ammo def's clamp (@0x4ECB77..0x4ECB91), so where a round lands and how fast
-	// it arrives pick the value (frame.health_hit).
+	// it arrives pick the value. The frame's tail carries the body's Health word as it stands at
+	// the send [orig: NetPacket_WritePlayerState @0x4FF6B0 (the read @0x4FFD56, the store
+	// @0x4FFD6A)] and the frames go out at the recipient's own cadence [orig:
+	// Server_SendEntityStateToPlayer @0x517BA0 (the per-slot counter @0x517BE8)], so a kill
+	// from full, or a hit and the kill inside one frame step, shows no residual: a run whose
+	// health falls from full straight to 0 between two consecutive frames takes the residual
+	// out of both sets (frame.health_hit).
 	static_assert(has_normalization("frame.health_hit"));
 	auto full_health = [](const std::vector<const F *> &frames) {
 		int32_t full = 0;
@@ -512,8 +546,21 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 														   : std::string("hit"));
 		return out;
 	};
-	set_metric(out, 'S', "frame_health", "FRAME_HEADER_VALUES_MISMATCH", health(a, full_health(a)),
-			health(b, full_health(b)));
+	auto straight_death = [](const std::vector<const F *> &frames, int32_t full) {
+		for (size_t i = 1; i < frames.size(); ++i)
+			if (full > 0 && frames[i - 1]->health == full && frames[i]->health == 0)
+				return true;
+		return false;
+	};
+	{
+		const int32_t full_a = full_health(a), full_b = full_health(b);
+		std::set<std::string> ha = health(a, full_a), hb = health(b, full_b);
+		if (straight_death(a, full_a) || straight_death(b, full_b)) {
+			ha.erase("hit");
+			hb.erase("hit");
+		}
+		set_metric(out, 'S', "frame_health", "FRAME_HEADER_VALUES_MISMATCH", ha, hb);
+	}
 	both("frame_armor", "FRAME_HEADER_VALUES_MISMATCH",
 			[](const F &f) { return std::to_string(f.armor); });
 	both("frame_carried", "FRAME_HEADER_VALUES_MISMATCH",
@@ -521,11 +568,19 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 	// The weapon block rides one frame in four [orig: NetPacket_WritePlayerState @0x4FF6B0
 	// (the phase test @0x4FF81B)], and its slot bytes +0x168, +0x170, +0x16C and +0x164
 	// (weapon[1..4], written @0x4FF845, @0x4FF876, @0x4FF8A1, @0x4FF8BB) are counters the
-	// host steps down once a second [orig: Server_TickUpdate @0x51D7E0 (the per-slot pass
-	// @0x51DFBA..0x51E011)]. A countdown's first sample is its first second or the next (its
-	// start against the block's phase), and one the window cuts ends where the window does:
-	// each countdown compares over the values both runs' samples cover, a sample that
-	// leaves it taking its frame's whole block (frame.weapon_countdown).
+	// host steps down in one per-slot pass once a second [orig: Server_TickUpdate @0x51D7E0
+	// (the per-slot pass @0x51DFBA..0x51E022)]. A countdown's first sample is its first
+	// second or the next (its start against the block's phase), and one the window cuts ends
+	// where the window does: each countdown compares over the values both runs' samples
+	// cover, a sample that leaves it taking its slot's value out. Two countdowns two accepts
+	// start step in that one pass, so their offset is the starts' difference less the passes
+	// between the accepts: the team change's 60s [orig: NapiNPServerMsg_0x04D_ChangeTeam
+	// @0x518F70 (the stores @0x51906B, @0x519076)] and the re-arm's 30 a second or less later
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515790 (the store @0x515BA6)] stand 30 or
+	// 29 apart. So a block renders as its shape (each countdown slot running or not), each
+	// kept slot's value and each two kept slots' offset, and a run's offset one from RR's,
+	// where RR's own is not the run's, is RR's: the one pass between two accepts
+	// (frame.weapon_countdown).
 	static_assert(has_normalization("frame.weapon_countdown"));
 	{
 		struct Countdown {
@@ -560,7 +615,7 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 			return out;
 		};
 		const std::vector<const F *> wa = blocks(a), wb = blocks(b);
-		std::set<const F *> dropped;
+		std::set<std::pair<const F *, size_t>> dropped; // a block's slot left out
 		for (size_t slot = 1; slot <= 4; ++slot) {
 			const std::vector<Countdown> ca = countdowns(wa, slot), cb = countdowns(wb, slot);
 			if (ca.size() != cb.size())
@@ -581,23 +636,60 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 									const std::vector<const F *> &w, const Countdown &c) {
 					for (size_t i = c.first; i <= c.last; ++i)
 						if (w[i]->weapon[slot] > hi || w[i]->weapon[slot] < lo)
-							dropped.insert(w[i]);
+							dropped.insert({ w[i], slot });
 				};
 				drop(wa, x);
 				drop(wb, y);
 			}
 		}
+		struct Rendered {
+			std::set<std::string> keys;
+			std::set<std::tuple<size_t, size_t, int64_t>> offsets; // slot, slot, value apart
+		};
 		auto rendered = [&dropped](const std::vector<const F *> &frames) {
-			std::set<std::string> out;
-			for (const F *f : frames)
-				if (!dropped.count(f))
-					out.insert(f->weapon_present ? "1:" + join(f->weapon, 7) + "," +
-											std::to_string(f->weapon_uniform_team_mask)
-												 : std::string("0"));
+			Rendered out;
+			for (const F *f : frames) {
+				if (!f->weapon_present) {
+					out.keys.insert("0");
+					continue;
+				}
+				std::string shape = "1:" + std::to_string(f->weapon[0]);
+				for (size_t s = 1; s < 7; ++s)
+					shape += "," +
+							(s <= 4 && f->weapon[s] != 0 ? std::string("c")
+														 : std::to_string(f->weapon[s]));
+				out.keys.insert(shape + "," + std::to_string(f->weapon_uniform_team_mask));
+				std::vector<size_t> kept;
+				for (size_t s = 1; s <= 4; ++s)
+					if (f->weapon[s] != 0 && !dropped.count({ f, s })) {
+						kept.push_back(s);
+						out.keys.insert(
+								"w" + std::to_string(s) + ":" + std::to_string(f->weapon[s]));
+					}
+				for (size_t i = 0; i < kept.size(); ++i)
+					for (size_t j = i + 1; j < kept.size(); ++j)
+						out.offsets.insert({ kept[i], kept[j],
+								int64_t(f->weapon[kept[i]]) - int64_t(f->weapon[kept[j]]) });
+			}
 			return out;
 		};
-		set_metric(
-				out, 'S', "frame_weapon", "FRAME_WEAPON_PHASE_MISMATCH", rendered(a), rendered(b));
+		auto offset_key = [](size_t s, size_t t, int64_t apart) {
+			return "w" + std::to_string(s) + "-w" + std::to_string(t) + ":" + std::to_string(apart);
+		};
+		Rendered ra = rendered(a), rb = rendered(b);
+		for (const auto &[s, t, apart] : ra.offsets)
+			ra.keys.insert(offset_key(s, t, apart));
+		for (const auto &[s, t, apart] : rb.offsets) {
+			int64_t shown = apart;
+			if (!ra.offsets.count({ s, t, apart })) {
+				if (ra.offsets.count({ s, t, apart - 1 }))
+					shown = apart - 1;
+				else if (ra.offsets.count({ s, t, apart + 1 }))
+					shown = apart + 1;
+			}
+			rb.keys.insert(offset_key(s, t, shown));
+		}
+		set_metric(out, 'S', "frame_weapon", "FRAME_WEAPON_PHASE_MISMATCH", ra.keys, rb.keys);
 	}
 	// breathtime and fallmps; the fps and CPU bytes are machine-load measurements.
 	both("frame_timer", "FRAME_TIMER_PHASE_MISMATCH", [](const F &f) {
@@ -799,10 +891,15 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 			for (const E *e : entities) {
 				Sample sample;
 				sample.group = std::to_string(e->handle);
-				if (orientation)
+				if (orientation) {
 					sample.axes = { double(e->orient_a), double(e->orient_b) };
-				else
+				} else {
+					// Each axis's step: 16 << ((code & 0x0E) | 1) [orig: Network_CompressFixedPoint
+					// @0x4C2780 (the shift @0x4C27A0..0x4C27AC, stored & 0x0E @0x4C27B5)].
+					auto step = [](uint32_t code) { return double(16u << ((code & 0x0Eu) | 1u)); };
 					sample.axes = { double(e->world_x), double(e->world_y), double(e->world_z) };
+					sample.quantum = { step(e->pos_x), step(e->pos_y), step(e->pos_z) };
+				}
 				out.push_back(sample);
 			}
 			return out;
@@ -825,17 +922,46 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 // curve a window holds is that phase. So a rest (the same offset in two or more
 // consecutive records) compares as its key, and the records between two rests as one
 // transition 'from>to'; a carrier-local record cuts the sequence, and a transition the
-// cut or the window's edge leaves open is not compared (frame.self_offset_rests).
+// cut or the window's edge leaves open is not compared. A dead body's eye is its death
+// clip's: the clip is the killing round's hit section and approach quadrant [orig:
+// OrganicClass_HandleEvent @0x407310 (the quadrant @0x407478, Entity_ComputeAnimSlotIndex
+// @0x43A690 called @0x40747E, the store @0x407483)] and the eye the clip's capsule extent,
+// at most 0xD000 [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B6984..0x4B6997)].
+// So a rest none of whose records plays a clip the other run's own record plays is that
+// hit's draw: it compares as 'drawn', and two drawn rests make no transition
+// (frame.self_offset_rests).
 void compare_self_offset(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("state.position"));
 	static_assert(has_normalization("frame.self_offset_rests"));
 	using E = wire::ParityEntity;
-	auto offsets = [](const RunFacts &run, size_t &records) {
-		std::set<std::string> out;
-		records = 0;
+	// The own record's clip: its anim state id (the player record's state_b high bits).
+	auto clip = [](const E &e) { return e.state_b >> 8; };
+	struct Own {
+		std::vector<std::vector<const E *>> segments = std::vector<std::vector<const E *>>(1);
+		std::set<uint32_t> clips;
+		size_t records = 0;
+	};
+	auto own_records = [&clip](const RunFacts &run) {
+		Own out;
 		uint32_t handle = 0;
 		if (!own_handle(run, handle))
 			return out;
+		for (const E &e : run.trace.entities) {
+			if (e.cls != 'P' || e.handle != handle || !run.in_steady(e.ts_ns))
+				continue;
+			if (e.carrier_local) {
+				if (!out.segments.back().empty())
+					out.segments.emplace_back();
+				continue;
+			}
+			out.segments.back().push_back(&e);
+			out.clips.insert(clip(e));
+			++out.records;
+		}
+		return out;
+	};
+	auto offsets = [&clip](const Own &run, const Own &other) {
+		std::set<std::string> out;
 		auto sixteenths = [](int32_t v) { return std::to_string(std::lround(double(v) / 4096.0)); };
 		auto key = [&sixteenths](const E &e) {
 			return sixteenths(e.offset_x) + "," + sixteenths(e.offset_y) + "," +
@@ -844,19 +970,7 @@ void compare_self_offset(const RunFacts &rr, const RunFacts &other, std::vector<
 		auto same = [](const E &x, const E &y) {
 			return x.offset_x == y.offset_x && x.offset_y == y.offset_y && x.offset_z == y.offset_z;
 		};
-		std::vector<std::vector<const E *>> segments(1);
-		for (const E &e : run.trace.entities) {
-			if (e.cls != 'P' || e.handle != handle || !run.in_steady(e.ts_ns))
-				continue;
-			if (e.carrier_local) {
-				if (!segments.back().empty())
-					segments.emplace_back();
-				continue;
-			}
-			segments.back().push_back(&e);
-			++records;
-		}
-		for (const std::vector<const E *> &segment : segments) {
+		for (const std::vector<const E *> &segment : run.segments) {
 			std::vector<std::pair<size_t, size_t>> rests; // first and last record of each
 			for (size_t i = 0; i < segment.size();) {
 				size_t j = i;
@@ -866,28 +980,38 @@ void compare_self_offset(const RunFacts &rr, const RunFacts &other, std::vector<
 					rests.emplace_back(i, j);
 				i = j + 1;
 			}
+			auto drawn = [&](const std::pair<size_t, size_t> &rest) {
+				for (size_t i = rest.first; i <= rest.second; ++i)
+					if (other.clips.count(clip(*segment[i])))
+						return false;
+				return true;
+			};
 			for (size_t r = 0; r < rests.size(); ++r) {
-				const std::string at = key(*segment[rests[r].first]);
+				const bool drawn_at = drawn(rests[r]);
+				const std::string at = drawn_at ? "drawn" : key(*segment[rests[r].first]);
 				out.insert(at);
 				if (r == 0)
 					continue;
-				const std::string from = key(*segment[rests[r - 1].first]);
+				const bool drawn_from = drawn(rests[r - 1]);
+				if (drawn_from && drawn_at)
+					continue;
+				const std::string from = drawn_from ? "drawn" : key(*segment[rests[r - 1].first]);
 				if (from != at || rests[r].first > rests[r - 1].second + 1)
 					out.insert(from + ">" + at);
 			}
 		}
 		return out;
 	};
-	size_t records_a = 0, records_b = 0;
-	const std::set<std::string> a = offsets(rr, records_a), b = offsets(other, records_b);
-	if (records_a == 0)
+	const Own own_a = own_records(rr), own_b = own_records(other);
+	if (own_a.records == 0)
 		return;
 	MetricValue value = metric('S', "frame_self_offset", "", "FRAME_ANCHOR_OFFSET_MISMATCH");
+	const std::set<std::string> a = offsets(own_a, own_b), b = offsets(own_b, own_a);
 	value.subject = render_set(b);
 	value.reference = render_set(a);
 	value.detail = "the recipient's own record against the anchor, 1/16 units: its rests and "
-				   "the transitions between them";
-	if (records_b == 0) {
+				   "the transitions between them, a rest in a clip only one run plays 'drawn'";
+	if (own_b.records == 0) {
 		value.comparable = false;
 		value.detail = "the run's recipient record is not in its steady frames";
 	} else {
