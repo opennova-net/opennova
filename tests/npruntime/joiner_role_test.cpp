@@ -1808,8 +1808,10 @@ bool run_local_replica_turret_channel() {
 // D-NET-NEW-L3-15's joiner leg: the self record's route byte on a designated-G EWeap
 // stores the mount's route bit (and L's EquippedSlot) alone. L's AdmDef byte (+0x2B0),
 // which its next C2S 0x0C echoes, keeps its word; ours stamped the route's weapon there.
-// The gun here has no seat at the record's bone, so L stays on foot and only the route
-// leg runs.
+// The gun here has no seat at the record's bone, so L stays on foot. Retail's legs need L's
+// parent and run for no on-foot L (@0x4C1346, @0x4C1367); ours still key them on the
+// record's carrier (D-NET-NEW-L2-34, NARROWED), so the case pins only that no leg stamps L's
+// byte, whichever runs.
 // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the route legs @0x4C135B..0x4C13F8:
 //  byte 1 @0x4C1390 / @0x4C139D, byte 2 @0x4C13EB / @0x4C13F8, no +0x2B0 store]
 bool run_the_route_apply_keeps_ls_adm_byte() {
@@ -1851,12 +1853,7 @@ bool run_the_route_apply_keeps_ls_adm_byte() {
 	self.mount_bone = 1;
 	self.seat_type = 1; // the child's own MountSlot
 	h.role.run_tick(h.input);
-	const w::Entity *mount = world.registry.get(gun_h);
 	local = h.kernel->local.player();
-	if (!expect(mount != nullptr && mount->primary_weapon_slot_adm == 2 &&
-					!mount->primary_weapon_slot.redirect_to_parent_slot,
-			"route apply: byte 1 validated the gun and selected its own slot"))
-		return false;
 	return expect(local != nullptr && !local->mounted && local->equipped_adm_index == 1,
 			"route apply: L's AdmDef byte keeps its word");
 }
