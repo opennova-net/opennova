@@ -14,6 +14,7 @@
 #include <runtime/inmatch/server_spawn.h>            // the spawn pump, the 0x51 converts, the free-row ticks
 #include <runtime/inmatch/server_squad_registry.h>   // the board rows' squad tags
 #include <runtime/inmatch/server_tick_maintenance.h> // the per-tick and periodic-second maintenance legs
+#include <runtime/mission/mission_kernel.h>          // the teardown's PostMission sweep
 
 #include <algorithm>
 #include <cstdint>
@@ -490,6 +491,15 @@ void Server_ProcessRoundEnd(NapiNPServerCtx &ctx, world::World &world,
 		int32_t winning_team) {
 	world.process_round_end(winning_team);
 	announce_round_end(ctx, world);
+}
+
+// See server_tick.h.
+void Server_RunPostMissionSweep(NapiNPServerCtx &ctx, mission::MissionKernel &kernel) {
+	ScriptPassSends sends(ctx);
+	world::IScriptPassSends *const held = kernel.world.script_pass_sends;
+	kernel.world.script_pass_sends = &sends;
+	kernel.run_post_mission_events(/*is_authority=*/true);
+	kernel.world.script_pass_sends = held;
 }
 std::vector<uint8_t> Server_RerollPlayerTickSeed(
 		NapiNPConnection &connection, uint32_t frame_clock) {

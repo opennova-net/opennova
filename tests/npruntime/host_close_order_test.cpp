@@ -48,6 +48,7 @@
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/mission/mission_kernel.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -341,14 +342,18 @@ void test_close_sweeps_post_mission_then_queues_each_slots_reset(int32_t exit_re
 	opennova::bms::Event post{};
 	post.flags = opennova::bms::EventFlags::PostMission;
 	post.action_index = 0;
-	post.action_count = 1;
+	post.action_count = 2;
 	opennova::bms::Action increment{};
 	increment.action_type = opennova::bms::ActionType::MisvarChange;
 	increment.action_sub_type =
 			static_cast<int32_t>(opennova::bms::MissionVariableActionSubType::Increment);
 	increment.param1 = 9;
+	// A sub-goal lost mid-round: its chat line relays to the joiners at its call.
+	opennova::bms::Action lost{};
+	lost.action_type = opennova::bms::ActionType::SubGoalLost;
+	lost.param1 = 1;
 	mission.events = {post};
-	mission.actions = {increment};
+	mission.actions = {increment, lost};
 	auto host = std::make_unique<ListenHost>();
 	if (!host->boot(mission)) {
 		++failures;
@@ -362,6 +367,7 @@ void test_close_sweeps_post_mission_then_queues_each_slots_reset(int32_t exit_re
 	synced.client_scrk = "CLIENT-CLOSE-SCRK";
 	synced.server_scrk = server_scrk;
 	synced.slot_state = inmatch::PlayerSlotState::Joined;
+	synced.burst.spawned = true; // in the match: the relay's 0x90 fan takes it
 	ns::UdpSessionTransport added_wire{ns::UdpSessionTransport::Role::Host};
 	const PeerAddr added_peer{0x0100007Fu, 31001};
 	inmatch::NapiNPConnection added;
@@ -393,7 +399,19 @@ void test_close_sweeps_post_mission_then_queues_each_slots_reset(int32_t exit_re
 		if (to == kPeer && bytes == stop) ++stops;
 	CHECK(wire_resets(host->socket, kPeer, server_scrk) == 0);
 	CHECK(wire_resets(host->socket, added_peer, "SERVER-ADDED-SCRK") == 0);
-	CHECK(queued_resets(host->remote) == 1 && queued_resets(added_wire) == 0);
+	// The sweep's relay queued at its action's call, ahead of the walk's 0x25 [orig:
+	//  EventAction_Dispatch - GameMsg_AddChatLineAndRelay called @0x454632;
+	//  Server_BroadcastEntityActionPacket @0x5080D0 - SendFiltered(0x3F) called @0x508199].
+	std::vector<uint8_t> queued;
+	ns::Datagram staged;
+	while (host->remote.pop_outbound(staged)) queued.push_back(staged.tag);
+	const auto at = [&queued](uint8_t tag) {
+		return std::find(queued.begin(), queued.end(), tag) - queued.begin();
+	};
+	CHECK(std::count(queued.begin(), queued.end(), s2c::GAME_RESET) == 1);
+	CHECK(std::count(queued.begin(), queued.end(), s2c::OBJECTIVE_NOTIFICATION) == 1);
+	CHECK(at(s2c::OBJECTIVE_NOTIFICATION) < at(s2c::GAME_RESET));
+	CHECK(queued_resets(added_wire) == 0);
 	bool kept = false;
 	for (const inmatch::NapiNPConnection &conn : host->ctx().np_protocol.connection_list)
 		if (conn.peer == kPeer) kept = true;
@@ -592,6 +610,59 @@ void test_the_remapped_exit_reads_the_own_client_record() {
 	CHECK(inmatch::disconnect_reason_key(nullptr).key == "ERR1");
 }
 
+// The last frame's entity pass queued its records at their calls in retail, ahead of the
+// teardown, whose pump sends them; ours raises them for the next tick's head, so the close
+// routes them first: a relay the pass raised reaches the in-match joiner at the close.
+// [orig: Game_ProcessMainFrame - Entity_UpdateAllEntities called @0x52674B ahead of the exit
+//  tests @0x526806; Game_TeardownMission - Server_PumpNetworkTransport called @0x522588;
+//  Server_BroadcastEntityActionPacket @0x5080D0 - SendFiltered(0x3F) called @0x508199]
+void test_close_routes_the_last_entity_pass_first() {
+	auto host = std::make_unique<ListenHost>();
+	if (!host->boot()) {
+		++failures;
+		return;
+	}
+	const std::string server_scrk = "SERVER-PASS-SCRK";
+	inmatch::NapiNPConnection &joiner = host->ctx().np_protocol.connection_list.back();
+	joiner.client_ck = 0x31415926u;
+	joiner.server_sk = 0x27182818u;
+	joiner.client_scrk = "CLIENT-PASS-SCRK";
+	joiner.server_scrk = server_scrk;
+	joiner.slot_state = inmatch::PlayerSlotState::Joined;
+	joiner.burst.spawned = true;
+	opennova::world::HudRelay relay;
+	relay.kind = 1;
+	relay.team = 1;
+	relay.key = "STRLOSEMSG001";
+	host->kernel->world.out.hud_relays.push_back(relay);
+	host->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld; // the node stays
+	host->role->close();
+	CHECK(host->kernel->world.out.hud_relays.empty());
+	// Wherever the teardown's pump left it: on the wire, in the node's pending messages, or
+	// still on its transport.
+	int relays = 0;
+	for (const auto &[to, bytes] : host->socket.sent) {
+		if (!(to == kPeer)) continue;
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!nw_decode_inbound(bytes.data(), bytes.size(), opcode, body) ||
+				opcode != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE)
+			continue;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_protocol_packet_plaintext(body.data(), body.size(), server_scrk, header, messages))
+			continue;
+		for (const ProtocolMessage &m : messages)
+			relays += m.tag == s2c::OBJECTIVE_NOTIFICATION ? 1 : 0;
+	}
+	for (const ProtocolMessage &m : host->role->state.host_owner.pending_session_messages[kPeer])
+		relays += m.tag == s2c::OBJECTIVE_NOTIFICATION ? 1 : 0;
+	ns::Datagram staged;
+	while (host->remote.pop_outbound(staged))
+		relays += staged.tag == s2c::OBJECTIVE_NOTIFICATION ? 1 : 0;
+	CHECK(relays >= 1);
+}
+
 // The destroy arm stops the server itself: nothing is left for a later reset.
 void test_the_destroy_arm_leaves_no_server() {
 	inmatch::ClientProcessState process;
@@ -621,6 +692,7 @@ int main() {
 	test_the_process_shutdown_stops_a_held_server_without_a_socket();
 	test_the_destroy_arm_leaves_no_server();
 	test_the_remapped_exit_reads_the_own_client_record();
+	test_close_routes_the_last_entity_pass_first();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }

@@ -255,6 +255,9 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	// [orig: Game_TeardownMission - Entity_Destroy over pools 0, 1 and 2 @0x52236F / @0x52239A /
 	//  @0x5223C0, ahead of CServerLog_CloseAndFree @0x5223F0, the swap arm @0x522435..0x522520
 	//  and Server_PumpNetworkTransport @0x522588]
+	// The last frame's entity pass's records first: retail queued them at their calls, ahead of
+	// the teardown (HostRole::close carries the witness).
+	if (kernel != nullptr && ctx.is_authority != 0) route_entity_pass_records(ctx, kernel->world);
 	if (kernel != nullptr) {
 		kernel->destroy_mission_pools();
 		route_teardown_drops(ctx, kernel->world);
@@ -284,7 +287,7 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	//  EventTrigger_UpdateAllWithFlag4 @0x52266C and the reset @0x52269B].
 	role.pump_load();
 	if (kernel != nullptr) {
-		kernel->run_post_mission_events(/*is_authority=*/true);
+		Server_RunPostMissionSweep(ctx, *kernel); // its actions send at their calls
 		role.map_change.crt_rand = kernel->world.crt_rand;
 	}
 	role.map_change.torn_down = true;

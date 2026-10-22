@@ -1127,6 +1127,14 @@ void HostRole::close() {
 	// pools 0, 1 and 2 @0x52236F / @0x52239A / @0x5223C0]. A map change's teardown already
 	// ran it, its pump and its PostMission sweep on this kernel (map_change.h).
 	const bool tear_down = kernel_ != nullptr && !map_change.torn_down;
+	// The last frame's entity pass queued its records at their calls, so they lead the
+	// teardown's destroys and its pump, which sends them; ours raised them for the next tick's
+	// head, which never comes: they are routed first.
+	// [orig: Game_ProcessMainFrame - Entity_UpdateAllEntities called @0x52674B ahead of the
+	//  exit tests @0x526806; Game_TeardownMission - Entity_Destroy @0x52236F, then
+	//  Server_PumpNetworkTransport called @0x522588]
+	if (tear_down && ctx.is_authority != 0 && kernel_->world.rules.mp_session)
+		route_entity_pass_records(ctx, kernel_->world);
 	if (tear_down) {
 		kernel_->destroy_mission_pools();
 		// A carrier's destroy drops its flag, whose 0x2F state is queued at the destroy on an
@@ -1150,7 +1158,7 @@ void HostRole::close() {
 	// Then the authority's one-shot PostMission sweep over the destroyed pools, ahead of the
 	// per-slot 0x25 walk below [orig: Game_TeardownMission — EventTrigger_UpdateAllWithFlag4
 	// call @0x52266C precedes Server_DisconnectAndResetAllPlayerSlots @0x52269B].
-	if (tear_down) kernel_->run_post_mission_events(/*is_authority=*/true);
+	if (tear_down) Server_RunPostMissionSweep(ctx, *kernel_); // its actions send at their calls
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide || conn.link.transport == nullptr)
 			continue;

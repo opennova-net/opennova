@@ -9,6 +9,10 @@
 
 #include <runtime/inmatch/napi_np_server_ctx.h> // NapiNPServerCtx
 
+namespace opennova::mission {
+class MissionKernel;
+}
+
 namespace opennova::inmatch {
 
 // One explicit global countdown: reset 0 emits at the next boundary, reload
@@ -82,6 +86,17 @@ void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world);
 // [orig: Server_RemoveEntityAndNotify @0x50A270 -> Entity_Destroy @0x50A2C4 ->
 //  Entity_DropCarriedObject @0x439DF0 (Server_SendDestructibleDeathPacket called @0x439F34)]
 void route_match_objective_records(NapiNPServerCtx &ctx, world::World &world);
+
+// The mission teardown's one-shot PostMission sweep on the authority, run as the tick's script
+// pass runs its actions: each action's records go out at its call (a SubGoalWon / Lost's chat
+// relay, a Win's round end), queued ahead of the slot reset's 0x25s, so a map change's next
+// load sends them first and an exit's destroy drains them unsent.
+// [orig: Game_TeardownMission - EventTrigger_UpdateAllWithFlag4 called @0x52266C ahead of
+//  Server_DisconnectAndResetAllPlayerSlots called @0x52269B; EventTrigger_UpdateAllWithFlag4
+//  @0x454E00 - the flag-4 test @0x454E15, EventTrigger_UpdateEntry called @0x454E18;
+//  EventAction_Dispatch @0x4542E0 - GameMsg_AddChatLineAndRelay called @0x454578 / @0x454632,
+//  Server_ProcessRoundEnd called @0x45447B / @0x454495 / @0x4544AF]
+void Server_RunPostMissionSweep(NapiNPServerCtx &ctx, mission::MissionKernel &kernel);
 
 // The frame update's per-slot walk order: the connections by their player slot, the slot
 // table's order, never the join order (ties keep the list's order), so each slot's 0x0A
