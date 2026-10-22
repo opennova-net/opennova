@@ -265,6 +265,11 @@ opennova::inmatch::FrameInput Simulation::begin_session_frame(
 				input.camera.position[1], input.camera.position[2]));
 	}
 	input.loaded_model_list_count = net_.loaded_model_list_count;
+	// The main loop's frame lock: the process block's lock_framerate, read every frame as
+	// retail's loop reads the word (engine world::TickAccumulator::bank carries the witness);
+	// a simulation with no process block (a test's, a tool's) runs no lock.
+	input.frame_lock = net_.game_config.is_valid() &&
+			net_.game_config->native().cfg().lock_framerate != 0;
 	// g_DialogueVolume, the client's dialog-line gate: the process block's DialogueLevel,
 	// which the options write with the word (engine: ClientRuntime::set_dialogue_volume).
 	if (runtime_ != nullptr) {

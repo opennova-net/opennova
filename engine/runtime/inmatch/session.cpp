@@ -4,11 +4,14 @@
 #include <runtime/controls/controls.h> // action_code (the console's by-code dispatch)
 #include <runtime/hud/hud_frame.h> // HudFrameCompiler::kRadarGate*
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/host_session.h> // host_monotonic_milliseconds (the frame lock clock)
 #include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit row's exit)
 #include <runtime/inmatch/role_feeds.h> // step_hud_radar
 #include <runtime/inmatch/spectator_session.h>
 #include <runtime/mission/mission_kernel.h>
 
+#include <chrono>
+#include <thread>
 #include <utility>
 
 namespace opennova::inmatch {
@@ -26,7 +29,33 @@ SessionError invalid_transition(const char *message) {
 	return {SessionErrorCode::InvalidTransition, message};
 }
 
+// The frame lock's platform primitives: a 1 ms sleep (retail's Sleep(1)) and the steady
+// millisecond clock the shell's frame stamp reads (retail's GetTickCount).
+class SteadyFrameLockClock final : public world::FrameLockClock {
+public:
+	void sleep_one_ms() override { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+	uint32_t now_ms() override { return host_monotonic_milliseconds(); }
+};
+
+world::FrameLockClock &steady_frame_lock_clock() {
+	static SteadyFrameLockClock clock;
+	return clock;
+}
+
 } // namespace
+
+void Session::set_frame_lock_clock(world::FrameLockClock *clock) { frame_lock_clock_ = clock; }
+
+int32_t Session::bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms) {
+	lock_stamp_ms = 0;
+	if (!input.frame_lock || input.frame_stamp_ms == 0) return accumulator_.bank(elapsed);
+	world::FrameLock lock;
+	lock.clock = frame_lock_clock_ != nullptr ? frame_lock_clock_ : &steady_frame_lock_clock();
+	lock.stamp_ms = input.frame_stamp_ms;
+	const int32_t due = accumulator_.bank(elapsed, &lock);
+	if (lock.sleeps > 0) lock_stamp_ms = lock.stamp_ms;
+	return due;
+}
 
 Session::Session(Role &role) : role_(&role), kind_(role.kind()) {}
 
@@ -1002,7 +1031,8 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		// there) until an update's pause row lowers the word (run_updates). The frame
 		// then renders and runs its HUD pass, where the menu pause keeps the lock
 		// tone unregistered.
-		const int32_t due = accumulator_.bank(input.delta_seconds);
+		uint32_t lock_stamp_ms = 0;
+		const int32_t due = bank_frame(input.delta_seconds, input, lock_stamp_ms);
 		// The mouse pump heads every main frame, ahead of the pause word's test, so its
 		// words hold what the paused frames pumped: the paused frame's cursor waits for
 		// its first update as a running frame's does, and no input frame consumes the
@@ -1014,6 +1044,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		pending_input_.cursor_dx += input.player.cursor_dx;
 		pending_input_.cursor_dy += input.player.cursor_dy;
 		out = run_updates(due, input, /*transport=*/false);
+		out.frame_stamp_ms = lock_stamp_ms;
 		// A frame whose updates all stayed paused ran no tick.
 		if (out.ticks.empty() && !out.terminal()) out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
@@ -1033,14 +1064,18 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// The frame's start stamp, in whole milliseconds like GetTickCount
 	// [orig: Game_MainLoop @0x52b798 / @0x52b7ae (after the frame lock
 	//  @0x52b8d7)].
-	const int64_t frame_start_ms = now_us() / 1000;
+	int64_t frame_start_ms = now_us() / 1000;
 	// A mission-start frame re-based the clock once it had rendered, so this
 	// frame banks only the time since that render [orig: Game_MainLoop
 	// @0x52bac8..0x52bad2].
 	const double elapsed = rebase_clock_ && input.since_render_seconds >= 0.0
 			? input.since_render_seconds : input.delta_seconds;
 	rebase_clock_ = false;
-	const int32_t due = accumulator_.bank(elapsed);
+	uint32_t lock_stamp_ms = 0;
+	const int32_t due = bank_frame(elapsed, input, lock_stamp_ms);
+	// A lock that slept restamped the frame's start, which the CPU share measures its
+	// work from [orig: Game_MainLoop @0x52B8D7, the share's read @0x52BA9B..0x52BAA1].
+	if (lock_stamp_ms != 0) frame_start_ms = now_us() / 1000;
 	// The FR counter is published before the drain runs this frame's ticks
 	// [orig: Game_MainLoop g_StatsAvgFps store @0x52B98F, drain @0x52BA08].
 	if (role_ != nullptr) {
@@ -1048,6 +1083,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		role_->observe_cpu_share(accumulator_.cpu_percent());
 	}
 	out = run_updates(due, input, /*transport=*/false);
+	out.frame_stamp_ms = lock_stamp_ms;
 	// The CPU share's inputs: this frame's work from its start stamp to the
 	// end of the drain, and the updates the drain ran, a paused one too [orig:
 	// @0x52ba4f; @0x52ba9b..0x52baa1].

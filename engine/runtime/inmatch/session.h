@@ -231,6 +231,13 @@ struct FrameInput {
 	TickInputSource *tick_source = nullptr;
 	// The host's frozen loaded-model list count (TickInput::loaded_model_list_count).
 	uint32_t loaded_model_list_count = 0;
+	// The main loop's frame lock: the process's game.cfg lock_framerate word, which the
+	// loop reads every frame [orig: Game_MainLoop @0x52B860], and the frame's start stamp
+	// in the lock clock's milliseconds (the embedder's frame clock; 0 = no live frame,
+	// which never locks: a probe's or a test's direct frame banks only its delta).
+	// world::TickAccumulator::bank carries the witness.
+	bool frame_lock = false;
+	uint32_t frame_stamp_ms = 0;
 };
 
 struct TickInput {
@@ -305,6 +312,9 @@ struct FrameOutcome {
 	std::vector<TickOutcome> ticks;
 	FramePerf perf;
 	SessionError error;
+	// The frame lock's last clock read when it slept (0 = it did not): the stamp the
+	// embedder's next frame measures its elapsed from [orig: Game_MainLoop @0x52B8DB].
+	uint32_t frame_stamp_ms = 0;
 
 	int32_t ticks_run() const { return static_cast<int32_t>(ticks.size()); }
 	bool terminal() const {
@@ -562,6 +572,9 @@ public:
 	RoleKind kind() const { return kind_; }
 	Role *role() const { return role_; }
 	void set_tick_observer(TickObserver *observer) { observer_ = observer; }
+	// The frame lock's clock (FrameInput::frame_lock): the steady millisecond clock and a
+	// 1 ms sleep unless a test hands its own.
+	void set_frame_lock_clock(world::FrameLockClock *clock);
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
 	// The main loop's frame statistics the authority's status page shows:
@@ -679,6 +692,10 @@ private:
 	TickObserver *observer_ = nullptr;
 	State state_ = State::Unloaded;
 	world::TickAccumulator accumulator_;
+	world::FrameLockClock *frame_lock_clock_ = nullptr; // null = the steady one
+	// The frame's bank with its lock when the input asks for one (live frames only): the
+	// ticks due; `lock_stamp_ms` the lock's last read when it slept, else 0.
+	int32_t bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms);
 	// The mission-start frames still to draw (dword_24C1174) and whether the
 	// last one re-based the clock after its render (dword_24E1F30).
 	static constexpr int32_t kStartRebaseFrames = 3;

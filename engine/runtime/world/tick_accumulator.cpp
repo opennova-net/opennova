@@ -4,7 +4,7 @@
 
 namespace opennova::world {
 
-int TickAccumulator::bank(double delta) {
+int TickAccumulator::bank(double delta, FrameLock *lock) {
 	// GetTickCount is a millisecond clock; keep the sub-unit remainder so a
 	// steady sub-millisecond frame stream still conserves time.
 	const double units = delta * 1000.0 * kUnitsPerMs + carry_;
@@ -20,6 +20,22 @@ int TickAccumulator::bank(double delta) {
 		bank_ = kBankClampUnits;
 	}
 	smoothed_ = bank_;
+
+	// The frame lock, after the history's store: 1 ms sleeps, each adding the
+	// milliseconds since the last stamp, until 16 ms stand banked or 500 ran
+	// [orig: @0x52B860..0x52B8DF].
+	if (lock != nullptr && lock->clock != nullptr) {
+		int sleeps = 0;
+		while (bank_ < kFrameLockUnits) {
+			if (sleeps >= kFrameLockMaxSleeps) break;
+			lock->clock->sleep_one_ms();
+			const uint32_t now = lock->clock->now_ms();
+			bank_ += kUnitsPerMs * static_cast<int32_t>(now - lock->stamp_ms);
+			lock->stamp_ms = now;
+			++sleeps;
+		}
+		lock->sleeps = sleeps;
+	}
 
 	// The FR counter: count the frame and sum its smoothed bank; a full window
 	// publishes frames * 16000 / sum (unsigned) and restarts both counters

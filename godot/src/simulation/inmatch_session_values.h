@@ -48,6 +48,9 @@ public:
 	opennova::inmatch::TickInputSource *tick_source() const;
 	void set_delta_seconds(double p_delta);
 	double get_delta_seconds() const;
+	// The live frame's start stamp, the frame lock's (engine inmatch::FrameInput::
+	// frame_stamp_ms); C++ only, the world's session leg sets it.
+	void set_frame_stamp_ms(uint32_t p_stamp_ms) { value_.frame_stamp_ms = p_stamp_ms; }
 	// Seconds since the previous frame's render finished (negative: unsampled).
 	void set_since_render_seconds(double p_seconds);
 	double get_since_render_seconds() const;
@@ -108,6 +111,7 @@ private:
 	int32_t ticks_run_ = 0;
 	int64_t tick_us_ = 0;
 	String error_;
+	uint32_t frame_stamp_ms_ = 0;
 
 protected:
 	static void _bind_methods();
@@ -120,6 +124,9 @@ public:
 	String get_error() const { return error_; }
 	bool is_terminal() const;
 	bool did_tick() const { return ticks_run_ > 0; }
+	// The frame lock's last clock read when it slept, else 0 (engine inmatch::FrameOutcome::
+	// frame_stamp_ms); C++ only.
+	uint32_t get_frame_stamp_ms() const { return frame_stamp_ms_; }
 
 	void assign(const opennova::inmatch::FrameOutcome &p_value);
 };

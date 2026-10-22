@@ -16,6 +16,24 @@ constexpr int32_t ticks_from_ms(int64_t ms) {
     return static_cast<int32_t>(ms / io::kTickMs);
 }
 
+// The frame lock's platform seam: retail's Sleep(1) and its GetTickCount read
+// (the embedder's millisecond clock, the one its frame stamp reads).
+class FrameLockClock {
+public:
+	virtual ~FrameLockClock() = default;
+	virtual void sleep_one_ms() = 0;
+	virtual uint32_t now_ms() = 0;
+};
+
+// One frame's lock (game.cfg lock_framerate set): the clock, and the frame's
+// start stamp in its milliseconds, which each sleep's read replaces (the lock's
+// last read is the stamp the next frame banks from). `sleeps` is what it slept.
+struct FrameLock {
+	FrameLockClock *clock = nullptr;
+	uint32_t stamp_ms = 0;
+	int sleeps = 0;
+};
+
 // The fixed-62.5 Hz real-time accumulator: retail's frame-time bank, the one
 // the game (Simulation) banks through. Its 7/8 EMA low-pass filters the banked time, so a long frame's
 // backlog is paid back over the next frames instead of as one burst of
@@ -66,7 +84,19 @@ public:
 	// headless server's steady clock), never an engine step capped below it
 	// (D-NET-NEW-LI-6) [orig: Game_MainLoop @0x52B630 (the elapsed GetTickCount()
 	//  - the previous stamp @0x52B798..0x52B7A4, the stamp the next frame
-	//  subtracts @0x52B7B4)]. The embedder's stamp restarts at a mission start
+	//  subtracts @0x52B7B4)]. With a `lock` (game.cfg lock_framerate set, the
+	// config's default 1 [orig: Config_SetDefaults @0x54D12F]) a frame that
+	// banked under 16 ms after the smoothing sleeps 1 ms at a time, each sleep
+	// adding the milliseconds since the last stamp, until 16 ms stand banked or
+	// 500 sleeps ran; the smoothing history keeps the value the EMA stored, the
+	// FR counter and the drain take the locked bank, and the lock's last read is
+	// the next frame's stamp (FrameLock::stamp_ms) [orig: Game_MainLoop - the
+	// word read @0x52B860 ahead of the history's store @0x52B866, g_FrameLockActive
+	// @0x52B876, the unsigned test @0x52B8A4..0x52B8A6, the 500 cap @0x52B8A8..0x52B8AE, Sleep(1)
+	// @0x52B8B2, the add @0x52B8B8..0x52B8D0, the restamps @0x52B8D7 / @0x52B8DB,
+	// the loop test @0x52B8DF; the cine fixed step's skip @0x52B89D is not
+	// modeled, as the drain's]. The embedder's
+	// stamp restarts at a mission start
 	// (the shell zeroes it when a mission's world unloads): the mission start is
 	// the game mode's initialize, after which the loop re-reads its clock, so the
 	// first frame never banks the gap since the previous mission [orig:
@@ -74,7 +104,12 @@ public:
 	// @0x561E80..0x561E85); GameLoop_Init @0x526370 (the Game_StartMission call
 	// @0x526377); Game_MainLoop @0x52B630 (the initialize @0x52B70D, GetTickCount
 	// @0x52B75C into the stamp @0x52B766)].
-	int bank(double delta);
+	int bank(double delta, FrameLock *lock = nullptr);
+
+	// The lock's bank floor, 16 ms (`shl eax, 8` @0x52B89F), and its sleep cap
+	// (`cmp edi, 1F4h` @0x52B8A8).
+	static constexpr int32_t kFrameLockUnits = 16 * kUnitsPerMs;
+	static constexpr int kFrameLockMaxSleeps = 500;
 
 	// Discard banked wall-clock, the smoothing history and the FR counter
 	// (Play/Step/Stop transitions, the mode-init reset @0x52B715..0x52B757), so

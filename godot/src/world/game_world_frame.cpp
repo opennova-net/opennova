@@ -406,7 +406,13 @@ GameWorld::LegResult GameWorld::leg_session(FrameContext &r_ctx) {
 		return kLegSkipped;
 	}
 	const int64_t runtime_start = frame_timing_ ? now_us() : 0;
+	// A live frame's start stamp for the session's frame lock, whose last read (when it
+	// slept) is the stamp the next frame measures from (engine world::TickAccumulator::bank
+	// carries the witness).
+	if (r_ctx.input.is_valid()) r_ctx.input->set_frame_stamp_ms(frame_clock_ms_);
 	r_ctx.outcome = presentation->advance_session_frame(r_ctx.input);
+	if (r_ctx.outcome.is_valid() && r_ctx.outcome->get_frame_stamp_ms() != 0)
+		frame_clock_ms_ = r_ctx.outcome->get_frame_stamp_ms();
 	if (frame_timing_) {
 		perf_runtime_us_ = now_us() - runtime_start;
 	}

@@ -5124,6 +5124,11 @@ add_executable(npruntime_map_change_load_order_test npruntime/map_change_load_or
 target_link_libraries(npruntime_map_change_load_order_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_map_change_load_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_map_change_load_order COMMAND npruntime_map_change_load_order_test)
+# The main loop's frame lock (game.cfg lock_framerate): a short frame sleeps until 16 ms
+# stand banked, the history pre-lock, the FR counter on the locked bank (L3-s9).
+add_executable(frame_lock_test world/frame_lock_test.cpp)
+target_link_libraries(frame_lock_test PRIVATE opennova_runtime)
+add_test(NAME frame_lock COMMAND frame_lock_test)
 
 # --- parity lane L4 (spawn/death) ---
 # The player body's death edge raising the player-death transaction in the

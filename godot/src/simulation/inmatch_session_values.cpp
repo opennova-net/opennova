@@ -175,6 +175,7 @@ void MissionFrameOutcome::assign(const opennova::inmatch::FrameOutcome &p_value)
 	ticks_run_ = static_cast<int32_t>(p_value.ticks.size());
 	tick_us_ = p_value.perf.tick_us;
 	error_ = opennova::to_gd(p_value.error.message);
+	frame_stamp_ms_ = p_value.frame_stamp_ms;
 }
 
 } // namespace godot
