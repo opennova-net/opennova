@@ -5587,6 +5587,9 @@ add_test(NAME controls_input_event_queue COMMAND controls_input_event_queue_test
 add_executable(power_throw_windup_test world/power_throw_windup_test.cpp)
 target_link_libraries(power_throw_windup_test PRIVATE opennova_runtime)
 add_test(NAME power_throw_windup COMMAND power_throw_windup_test)
+add_executable(reload_at_dispatch_test world/reload_at_dispatch_test.cpp)
+target_link_libraries(reload_at_dispatch_test PRIVATE opennova_runtime)
+add_test(NAME reload_at_dispatch COMMAND reload_at_dispatch_test)
 
 # --- parity lane R3L (R3-lite replay) ---
 # R3-lite: the retail capture run_20260426_120859's S2C stream replayed into a seeded joiner

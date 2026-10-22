@@ -338,16 +338,16 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 		return;
 	}
 	// The reload row (catalog row 47 magazine, code 211 = 0xD3, flags 0x0C000801) past the
-	// head: the weapon pump's reload latch, whose request the pump makes on its slot under
-	// the case's full-magazine and reserve gates (world::weapon_fsm_reload_allowed). A second
-	// record in the same input frame finds the latch set, as retail's second request finds
-	// the reload's 4 stored.
-	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0xD3 -> WeaponSlot_RequestReload
-	//  @0x53F110 (the next action's test @0x53F11E..0x53F12D, the store @0x53F12F)]
+	// head: the case's request on the slot equipped at this dispatch, under its binocular,
+	// full-magazine and pool gates (world::local_weapon_request_reload), so it queues RELOAD
+	// ahead of the switch or fire records behind it in the drain. A second record in the same
+	// input frame finds the reload's 4 stored and queues nothing.
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0xD3 @0x4E1278..0x4E12F3 ->
+	//  WeaponSlot_RequestReload @0x53F110 (the next action's test @0x53F11E..0x53F12D, the
+	//  store @0x53F12F)]
 	constexpr int kReloadRow = 47;
 	if (code == controls::action_code(kReloadRow)) {
-		if (action_head_admits(code))
-			kernel_->local.set_weapon_input(kernel_->local.weapon.fire_held, false, true);
+		if (action_head_admits(code)) (void)kernel_->local.request_reload();
 		return;
 	}
 	// ToSpecial (catalog row 37, code 220 = 0xDC, flags 0x8C000801) past the head (a dead

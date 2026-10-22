@@ -401,6 +401,11 @@ void LocalPlayer::left_button_down() {
 	w::local_weapon_left_button_down(world_, weapon, view);
 }
 
+bool LocalPlayer::request_reload() {
+	return w::local_weapon_request_reload(world_, weapon, view,
+			inventory_valid ? &inventory : nullptr);
+}
+
 void LocalPlayer::clear_deferred_input() {
 	to_special_queued = 0;
 }

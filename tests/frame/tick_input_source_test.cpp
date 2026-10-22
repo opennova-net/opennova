@@ -712,12 +712,13 @@ void test_the_update_drains_its_records_in_queue_order() {
 	}
 }
 
-// D-CTRL-6 (LI-s15): the reload row is a record of the update's drain, its arm the role's
-// past the head: a reload ahead of the pause row latches the weapon pump's reload; one
-// behind it meets the head's pause gate (flags 0x0C000801, bit 0) and drops. ToSpecial's
-// deferred dispatch is queued again behind the update's records and meets the same gate.
-// [orig: Input_HandleActionBinding_0 @0x4E0420 (case 0xD3 -> WeaponSlot_RequestReload
-//  @0x53F110); Input_HandleActionBinding @0x49AD40 (case 25 @0x49B520, the pause gate
+// D-CTRL-6 (LI-s15, LI-s16): the reload row is a record of the update's drain, its arm the
+// role's past the head: a reload ahead of the pause row requests the reload on the equipped
+// slot at its dispatch (its next action RELOAD); one behind it meets the head's pause gate
+// (flags 0x0C000801, bit 0) and drops. ToSpecial's deferred dispatch is queued again behind
+// the update's records and meets the same gate.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 (case 0xD3 @0x4E1278..0x4E12F3 ->
+//  WeaponSlot_RequestReload @0x53F110); Input_HandleActionBinding @0x49AD40 (case 25 @0x49B520, the pause gate
 //  @0x49ADDD..0x49ADE8); Input_ProcessFrame @0x49D520 (Input_FlushDeferredEvents @0x49D591)]
 void test_the_reload_record_meets_the_head_in_key_order() {
 	using opennova::controls::InputEventOrigin;
@@ -740,6 +741,13 @@ void test_the_reload_record_meets_the_head_in_key_order() {
 		auto role = std::make_unique<TickRecorder>();
 		spawn_local_player(*role);
 		role->kernel.local.to_special_queued = 1; // a deferred ToSpecial dispatch
+		// An equipped weapon the case can reload: a magazine short of its capacity, a pool.
+		opennova::world::LocalPlayerWeapon &weapon = role->kernel.local.weapon;
+		weapon.active = true;
+		weapon.def.clip_capacity = 30;
+		weapon.slot.clip = 12;
+		weapon.slot.reserve = 60;
+		role->kernel.world.registry.get(role->kernel.world.cached.local_player)->health = 100;
 		Queue device;
 		device.codes = reload_first ? std::vector<int32_t>{reload, pause}
 		                            : std::vector<int32_t>{pause, reload};
@@ -750,9 +758,10 @@ void test_the_reload_record_meets_the_head_in_key_order() {
 		three.tick_source = &device;
 		CHECK(session.advance(three).ticks_run() == 0 && session.state() == State::Paused,
 				"the first update's pause row pauses it");
-		CHECK(role->kernel.local.weapon.reload_pressed == reload_first,
-				reload_first ? "the reload ahead of the pause row latches"
+		CHECK((weapon.slot.next == opennova::world::weapon_action::kReload) == reload_first,
+				reload_first ? "the reload ahead of the pause row requests it on the slot"
 				             : "the reload behind the pause row drops at the head");
+		CHECK(!weapon.reload_pressed, "no pump latch: the request is the dispatch's");
 		CHECK(role->kernel.local.to_special_queued == 0,
 				"the input frame's flush moved the deferred ToSpecial into the event queue");
 	}

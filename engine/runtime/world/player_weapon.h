@@ -530,6 +530,19 @@ void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
 //  @0x4DDAF6 / @0x4DDAFE); Input_DispatchMouseEvent @0x761470]
 void local_weapon_left_button_down(const World &world, LocalPlayerWeapon &w,
                                    const PlayerViewState &view);
+// The reload row's arm at its record's dispatch (inmatch::Role::dispatch_record), on the
+// slot equipped then: with the binocular view down and an equipped weapon (under the pump's
+// own input block), a magazine short of its capacity and a pool that is not 0 (read through
+// the player's seat as the pump reads them) request the reload, which takes the slot's next
+// action only from IDLE, EMPTYIDLE or OVERHEATED (weapon_fsm_request_reload). So a reload
+// ahead of a switch or a fire in the same drain queues RELOAD before they queue theirs.
+// True = requested. A sourceless frame's reload latch stays the pump's (reload_pressed).
+// [orig: Input_HandleActionBinding_0 case 0xD3 @0x4E1278..0x4E12F3 (the binocular test
+//  @0x4E1278, the EquippedSlot @0x4E128B, its def @0x4E1296, the pool @0x4E12A7, the shared
+//  loaded rounds @0x4E12C6, the capacity test @0x4E12D7, the pool test @0x4E12E0,
+//  WeaponSlot_RequestReload @0x4E12E9); WeaponSlot_RequestReload @0x53F110]
+bool local_weapon_request_reload(World &world, LocalPlayerWeapon &w,
+                                 const PlayerViewState &view, WeaponInventory *inventory);
 
 // Why the pump would drop this tick's weapon input, if it would. The pump's
 // own gate (dead, a pending UseGun switch, a Controller/Driver seat) evaluated

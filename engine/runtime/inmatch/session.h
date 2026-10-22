@@ -425,7 +425,7 @@ public:
 	// reads empty, so a reset inside a dispatch (Player_ResetLocalInput's, the deploy pick's
 	// Input_ResetAllState) ends it. The arms the role owns run here: the quit row's exit,
 	// the Respawn key (55), the medic call (217), the stance selects (169 / 170 / 172), the
-	// pause row (25), the reload row (211: the weapon pump's reload latch), ToSpecial
+	// pause row (25), the reload row (211: the request on the slot equipped then), ToSpecial
 	// (220: one dispatch with the keys' state, a deferral kept for the next input frame) and
 	// the fire row (149: the binding's live test, the press leg's fire request).
 	// Every other record goes to the embedder: a console record to the console sink

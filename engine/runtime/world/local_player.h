@@ -211,6 +211,8 @@ public:
     // The left mouse button's down at the update's message pump: the PowerThrow windup
     // test it owes the weapon pump (world::local_weapon_left_button_down).
     void left_button_down();
+    // The reload row's arm at its record's dispatch (world::local_weapon_request_reload).
+    bool request_reload();
     // The ToSpecial action (input case 220): each press or release edge of its
     // keys queues one dispatch, and dispatch_to_special runs the queue with the
     // keys' live state, keeping a deferred dispatch (and those behind it) for

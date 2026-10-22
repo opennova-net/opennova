@@ -1473,6 +1473,22 @@ void read_personal_bucket(const World &world, WeaponSlotState &slot,
 
 } // namespace
 
+bool local_weapon_request_reload(World &world, LocalPlayerWeapon &w,
+		const PlayerViewState &view, WeaponInventory *inventory) {
+	// [orig: Input_HandleActionBinding_0 case 0xD3 @0x4E1278..0x4E12F3; the declaration
+	//  carries the gates]
+	if (view.binoculars_view_active || !w.active) return false;
+	if (local_weapon_input_block(world, w) != LocalWeaponInputBlock::kNone) return false;
+	WeaponSlotState &slot = *active_local_weapon_slot(world, w);
+	const Entity *player = world.registry.get(world.cached.local_player);
+	if (inventory != nullptr && !w.usegun_slot_active)
+		read_personal_bucket(world, slot, *inventory,
+				player != nullptr ? entity_ammo_seat(world, *player) : WeaponAmmoSeat{});
+	if (!weapon_fsm_reload_allowed(w.def, slot)) return false;
+	weapon_fsm_request_reload(slot);
+	return true;
+}
+
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		LocalWeaponPumpIO &io) {
 	io.map_command = 0;
