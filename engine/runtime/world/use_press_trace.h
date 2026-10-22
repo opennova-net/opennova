@@ -86,6 +86,16 @@ struct UseScanWatch {
     int32_t eye_q16[3] = {};   // Position + CameraOffset
     int32_t view_heading = 0;  // the Yaw / Pitch words the cone subtracts
     int32_t view_pitch = 0;
+    // The watched entity's seat source on a joiner (inmatch::JoinerRole::queue_mount_toggle,
+    // read ahead of the scan): its type word, the installed per-type seat table's row count,
+    // that type's row's seat count (-1: the table holds no row for it), and whether the
+    // registry row is the materializer's own lifetime of its decoded row (-1: not read).
+    // Retail's scan reads the candidate def's own seat table
+    // [orig: Entity_FindNearestSeatOrArmory @0x435D50 - itemDef->seatBoneIndex @0x435F37].
+    uint16_t type_id = 0;
+    int16_t spec_rows = -1;
+    int8_t spec_seats = -1;
+    int8_t owned = -1;
 };
 
 // The Flags bits the press's arm and the toggle's queued-mount arm key on: the type-11

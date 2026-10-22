@@ -22,6 +22,10 @@ extends GameProbe
 ##   the furthest seat's `scan_seat_index` / `scan_bone`, its point (`scan_point_q16`),
 ##   `scan_reach_q16` (against 0x40000) and `scan_aim_bam` (against the cone), and the
 ##   eye and view words the scan used (`scan_eye_q16`, `scan_view_heading` / `_pitch`).
+##   A joiner's watch also names the watched entity's seat source, read ahead of the
+##   scan: its type (`scan_type_id`), the installed seat table's row count
+##   (`scan_spec_rows`), that type's row's seat count (`scan_spec_seats`, -1 no row), and
+##   whether the materializer owns the registry row (`scan_owned`, -1 not read).
 ##
 ## `from_seq` picks the first record; `watch_ms` > 0 keeps polling each frame for that
 ## long and logs each record as it lands. The records also go to use_press_trace.json
@@ -135,4 +139,7 @@ func _line(row: Dictionary) -> String:
 			line += " scan_gate=%s seats=%d seat=%d bone=%d reach=%d aim=%d" % [
 					String(row.scan_gate), int(row.scan_seats), int(row.scan_seat_index),
 					int(row.scan_bone), int(row.scan_reach_q16), int(row.scan_aim_bam)]
+			line += " type=0x%04x spec_rows=%d spec_seats=%d owned=%d" % [
+					int(row.scan_type_id), int(row.scan_spec_rows), int(row.scan_spec_seats),
+					int(row.scan_owned)]
 	return line

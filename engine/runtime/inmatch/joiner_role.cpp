@@ -439,6 +439,21 @@ bool JoinerRole::queue_mount_toggle() {
 	// yaw leg edits L here. [orig: Entity_ToggleVehicleMount @0x4369AC..0x4369C7]
 	// A watched entity takes the gate the scan stopped it at (the readout's scan watch).
 	trace.scan.entity = trace.watch;
+	// The watched entity's seat source: its type's row in the installed table and whether
+	// the materializer owns the registry row (the readout's scan watch).
+	if (const world::Entity *watched = trace.watch != 0xFFFFu
+					? world.registry.get(world::EntityHandle{trace.watch})
+					: nullptr) {
+		trace.scan.type_id = static_cast<uint16_t>(watched->item_id);
+		trace.scan.spec_rows = static_cast<int16_t>(
+				std::min<size_t>(kernel_->seat_specs.size(), 0x7FFF));
+		const mission::ItemSeatSpec *spec =
+				mission::item_seat_spec_for_type(kernel_->seat_specs, trace.scan.type_id);
+		trace.scan.spec_seats = spec != nullptr
+				? static_cast<int8_t>(std::min<size_t>(spec->seats.size(), 127))
+				: int8_t{-1};
+		trace.scan.owned = materializer_.owned(world, watched->handle) == watched ? 1 : 0;
+	}
 	trace.candidate = world.vehicles.find_mount_toggle_candidate(
 			*player, hit, this, trace.watch != 0xFFFFu ? &trace.scan : nullptr);
 	if (!trace.candidate) {

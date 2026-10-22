@@ -344,6 +344,11 @@ void test_a_joiner_scan_records_its_pick_and_the_0x26_leaving() {
 	CHECK(scan.scan.eye_q16[0] == local->position.x.q16 + local->eye_offset_x);
 	CHECK(scan.scan.eye_q16[2] == local->position.z.q16 + local->eye_offset_z);
 	CHECK(scan.scan.view_heading == view_heading && scan.scan.view_pitch == view_pitch);
+	// The watched entity's seat source, read ahead of the scan: this rig's carrier carries
+	// its seats by hand, its type has no row in the empty installed table, and the
+	// materializer does not own a row spawned straight into the registry.
+	CHECK(scan.scan.type_id == 0 && scan.scan.spec_rows == 0 && scan.scan.spec_seats == -1);
+	CHECK(scan.scan.owned == 0);
 	// Queued, not yet framed: the count rises at the next send build, with the 0x26 on the
 	// wire.
 	CHECK(h.role.runtime->attach_requests_sent() == 0);
@@ -351,8 +356,14 @@ void test_a_joiner_scan_records_its_pick_and_the_0x26_leaving() {
 	CHECK(h.socket.count(c2s::VEHICLE_ATTACH_REQUEST) == 1);
 	CHECK(h.role.runtime->attach_requests_sent() == 1);
 
-	// No carrier in reach on foot: no candidate, nothing queued.
+	// No carrier in reach on foot: no candidate, nothing queued. The carrier now carries a
+	// type word whose row the installed table holds, with its one seat.
 	world.registry.get(vh)->position.x += 500.0f;
+	world.registry.get(vh)->item_id = 0x058B;
+	mission::ItemSeatSpec spec;
+	spec.type_id = 0x058B;
+	spec.seats.push_back(seat);
+	h.kernel->seat_specs.push_back(spec);
 	CHECK(!h.role.queue_mount_toggle());
 	const w::UsePressRecord none = h.kernel->local.use_trace.since(0).back();
 	CHECK(none.event == w::UsePressEvent::kToggleScan && !none.candidate);
@@ -361,6 +372,8 @@ void test_a_joiner_scan_records_its_pick_and_the_0x26_leaving() {
 	CHECK(none.scan.gate == w::UseScanGate::kReach && none.scan.seat_index == 0);
 	CHECK(none.scan.reach_q16 > 0x40000);
 	CHECK(none.scan.point_q16[0] > local->position.x.q16 + 499 * 65536);
+	CHECK(none.scan.type_id == 0x058B && none.scan.spec_rows == 1 && none.scan.spec_seats == 1);
+	CHECK(none.scan.owned == 0);
 	h.role.run_tick(h.input);
 	CHECK(h.role.runtime->attach_requests_sent() == 1);
 }

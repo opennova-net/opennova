@@ -61,6 +61,10 @@ Dictionary UsePressRow::to_json_value() const {
 	out["scan_eye_q16"] = q16_triple(value_.scan.eye_q16);
 	out["scan_view_heading"] = get_scan_view_heading();
 	out["scan_view_pitch"] = get_scan_view_pitch();
+	out["scan_type_id"] = get_scan_type_id();
+	out["scan_spec_rows"] = get_scan_spec_rows();
+	out["scan_spec_seats"] = get_scan_spec_seats();
+	out["scan_owned"] = get_scan_owned();
 	return out;
 }
 
@@ -99,5 +103,9 @@ void UsePressRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_aim_bam)
 	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_view_heading)
 	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_view_pitch)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_type_id)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_spec_rows)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_spec_seats)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_owned)
 	ClassDB::bind_method(D_METHOD("to_json_value"), &UsePressRow::to_json_value);
 }

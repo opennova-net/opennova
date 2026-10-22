@@ -60,6 +60,10 @@ public:
 	int64_t get_scan_aim_bam() const { return value_.scan.aim_bam; }
 	int64_t get_scan_view_heading() const { return value_.scan.view_heading; }
 	int64_t get_scan_view_pitch() const { return value_.scan.view_pitch; }
+	int get_scan_type_id() const { return value_.scan.type_id; }
+	int get_scan_spec_rows() const { return value_.scan.spec_rows; }
+	int get_scan_spec_seats() const { return value_.scan.spec_seats; }
+	int get_scan_owned() const { return value_.scan.owned; }
 
 	Dictionary to_json_value() const;
 };
