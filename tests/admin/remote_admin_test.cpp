@@ -483,9 +483,12 @@ void test_joiner_console() {
 // [orig: PostMenu_RouteMissionExit @0x568460 - reason 2 @0x56846F..0x5684A7, the error arms
 //  @0x5684A8..0x5685BD -> loc_5686DA..0x568715, the destroy @0x568683 reached from @0x5684AB
 //  (reason 1), @0x5685C2..0x5685D6 and @0x56864F (the rotation's end);
-//  CNapiGameSession_FullDestroy @0x4C96A0 (g_GameType = 0 @0x4C977A);
+//  CNapiGameSession_FullDestroy @0x4C96A0 (ebp zeroed @0x4C96ED, g_GameType = 0 @0x4C977A);
 //  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 (DPC 36..45 -> reasons 9..18);
-//  PreMenu_OnAbortCancel @0x568CB4 (state 9) -> MultiPlayer_JoinSessionStateMachine @0x56A3E3;
+//  PreMenu_OnAbortCancel @0x568CB4 (state 9) and UI_PreGameMenuStateMachine's BACK arm
+//  @0x568B57..0x568B61 (state 9) -> MultiPlayer_JoinSessionStateMachine @0x56A3E3;
+//  UI_EnumerateAndJoinSession @0x56A207 (the row's type copied ahead of the choice, which the
+//  destroy zeroes too);
 //  GameType_GetAbbreviation @0x520FD0 (the STROVER29 arm @0x5211A2..0x5211B2)]
 void test_session_destroy_routes() {
 	inmatch::RemoteAdminConsoles consoles;
@@ -529,7 +532,9 @@ void test_session_destroy_routes() {
 		expect(menus_after(reason).find(kept) != std::string::npos, "the reset and error arms keep it");
 	for (const int32_t reason : {3, 4})
 		expect(menus_after(reason).find(zero) != std::string::npos, "the rotation's end and the rest destroy");
-	// A kept game type, then the pre-game menu's cancel of the next join: its cleanup destroys.
+	// A kept game type (A6's kick), then the pre-game menu's cancel of the next join (A7's BACK
+	// or ABORT_CANCEL; ours: NetSessionController._cancel_join_role_choice ->
+	// GameWorld.pre_game_cancelled -> session_destroyed): its cleanup destroys.
 	expect(menus_after(kicked).find(kept) != std::string::npos, "kept again");
 	consoles.session_destroyed();
 	expect(consoles.status_report().find(zero) != std::string::npos, "the pre-game cancel zeroes it");
