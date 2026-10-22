@@ -13,7 +13,8 @@
 //   dynamic vectors    origin-normalized range, displacement and step p90
 //                      (nearest rank) within 1/8x..8x of RR, each sequence from its
 //                      first sample past a lone transient lead, entity positions in
-//                      world units; priority scores' per-slot median likewise;
+//                      world units, uplink positions one sequence per carrier frame;
+//                      priority scores' per-slot median likewise;
 //                      initial position/anchor within 64 units
 // Session-local handles reduce to none/bound (normalization.h).
 
@@ -357,6 +358,11 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 		std::vector<Sample> out;
 		for (const U *s : states) {
 			Sample sample;
+			// The position and heading go out relative to the carrier word's pose: each
+			// carrier's uplinks are one sequence, and no step spans two frames of reference
+			// (uplink.carrier).
+			if (which != 2)
+				sample.group = std::to_string(s->carrier);
 			if (which == 0)
 				sample.axes = { double(s->pos_x), double(s->pos_y), double(s->pos_z) };
 			else if (which == 1)

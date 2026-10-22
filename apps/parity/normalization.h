@@ -549,7 +549,11 @@ inline constexpr Normalization kNormalizations[] = {
 			"back to world @0x4C1DE1), so each change is a change of the position's frame of "
 			"reference: x7's fragrespawn RR, RR-aa and OR change it once (none to the hut "
 			"0x2011 at the respawn), where a joiner whose link flips each record sends "
-			"positions in two frames" },
+			"positions in two frames. The heading word follows the position (@0x4C19D4) and "
+			"the host's apply adds the carrier's pose back to both, so the uplink's position "
+			"and orientation sequences run per carrier word and no step spans a frame change: "
+			"x8's fragrespawn RR-aa and OR ranked the respawn's jump into the hut's frame as "
+			"their p90 step (3885822, 3895546) against RR's motion step (102143)" },
 	{ "uplink.priority_handle", MaskKind::Field, 'C', 0x00C, "priority_handle", 0,
 			"priority handles are session-local: compared as occupied/empty" },
 	{ "uplink.priority_score", MaskKind::Field, 'C', 0x00C, "priority_score", 0,

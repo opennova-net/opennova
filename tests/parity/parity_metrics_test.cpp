@@ -1710,6 +1710,35 @@ void test_state() {
 		expect_row(flips, 'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
 	}
 	{
+		// A step across a carrier change is no motion: each carrier's uplinks are one
+		// sequence. x8's fragrespawn RR-aa and OR carried the respawn's jump from world into
+		// the hut's frame as their p90 step (3885822 / 3895546) where RR's ranked a motion
+		// step (102143), so OR failed on a frame change.
+		auto settle = [](uint32_t seed, int hut_x, bool jump_ranks) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			for (size_t i = 0; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				const bool hut = i >= half;
+				const int moved = hut ? std::min(int(i - half), 8) : 0;
+				u.carrier = hut ? 0x2011 : 0xFFFF;
+				u.pos_x = hut ? int32_t(hut_x * 65536 + moved * 32768) : int32_t(1000 * 65536);
+				u.pos_y = hut ? int32_t(-3 * 65536) : int32_t(2000 * 65536);
+				u.pos_z = hut ? 65536 : 50 * 65536;
+			}
+			// One more motion step ahead of the respawn moves the p90's rank off the jump.
+			if (!jump_ranks)
+				trace.uplinks[half / 2].pos_x += 65536;
+			return trace;
+		};
+		// The subject's jump is one unit longer than RR-aa's, as OR's was: across frames it
+		// ranked past the A/A widening.
+		const Case c = judge_case(settle(1, 2, false), settle(2, 2, true), settle(3, 1, true));
+		expect_row(c, 'C', "uplink_position_step_p90", "", "pass");
+		const VerdictRow *aa = find_row(c.verdict.aa, 'C', "uplink_position_step_p90", "");
+		check(aa != nullptr && aa->status == "pass", "the frame change widens no A/A");
+	}
+	{
 		// Session-local handles: another carrier/priority handle number is the same state.
 		wire::ParityTrace subject = scripted(3);
 		for (wire::ParityUplinkState &u : subject.uplinks)
