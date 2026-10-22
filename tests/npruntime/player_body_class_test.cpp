@@ -996,6 +996,71 @@ void test_the_walk_skips_a_null_row_body_whole() {
 	}
 }
 
+// A body bound to a vehicle or aircraft row runs that row's mover over its own words: each loads
+// the brain word (+0x64), which a person's class init never fills, stamps the six savedLivePose
+// words from the body's Position and Yaw / Pitch / Roll words and jumps to its matrix-build tail
+// (Flags 0x20000), with no AI or player-body update after it; the chld row's mover is a bare
+// return (D-NET-NEW-L4-14 (a)).
+// [orig: Entity_UpdateVehiclePhysics @0x48AF00 - @0x48AF1A, @0x48AF74..0x48AFA0, @0x48AFA6 ->
+//  @0x48D43E..0x48D451; Vehicle_ProcessSelectorZeroGround @0x46E100 - @0x46E119,
+//  @0x46E12D..0x46E15F, @0x46E165 -> @0x46F9B2..0x46F9C5; Entity_UpdateTankVehiclePhysics
+//  @0x488AB0 - @0x488B56 -> @0x48AEB6..0x48AEC9; Entity_UpdateLightVehiclePhysics @0x483FE0 -
+//  @0x484086 -> @0x486A04..0x486A17; Entity_UpdateWatercraftPhysics @0x48D480 - @0x48D4EF ->
+//  @0x48EF50..0x48EF63; Vehicle_ProcessSelectorZeroBoat @0x46FA00 - @0x46FA64 ->
+//  @0x471670..0x471683; Entity_UpdateAircraftPhysics @0x490310 - @0x490371 ->
+//  @0x492753..0x492766; nullsub_82 @0x45D540]
+void test_a_vehicle_row_body_runs_its_movers_person_path() {
+	struct Case {
+		w::PhysicsClass row;
+		bool ran;
+	};
+	using P = w::PhysicsClass;
+	for (const Case c : {Case{P::Cveh, true}, Case{P::Ctrn, true}, Case{P::Catv, true},
+				Case{P::Ctank, true}, Case{P::Cbike, true}, Case{P::Cbot, true},
+				Case{P::Cpln, true}, Case{P::Chel, true}, Case{P::Chld, false}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		w::Entity *body = r.spawn_remote(kPlyr);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr && body->item_type_index > 0);
+		if (ae == nullptr || body->item_type_index <= 0) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		// The test's own row: the plyr person bound to the case's move function.
+		r.world->tables.item_rows[static_cast<size_t>(body->item_type_index)].move_row = c.row;
+		CHECK(w::body_move_row(*r.world, *ae, body) == c.row);
+		body->flags &= ~(w::kEntityFlagCarried | w::kEntityFlagMatrixBuilt);
+		body->engine_flags &= ~(w::kEntityFlagCarried | w::kEntityFlagMatrixBuilt);
+		body->net_move_input = 0x08;
+		body->heading = 0x12340000;
+		body->pitch_bam = 0x00560000;
+		body->roll_bam = -0x00780000;
+		body->saved_live_valid = false;
+		body->saved_live_yaw = 0x01000000;
+		body->saved_live_pitch = 0x00200000;
+		body->saved_live_roll = 0x05B05B00;
+		const int32_t entry[3] = {body->position.x.q16, body->position.y.q16,
+				body->position.z.q16};
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		const w::Entity *after = r.world->registry.get(ae->handle);
+		CHECK(after != nullptr && after->saved_live_valid == c.ran);
+		if (after != nullptr) {
+			const bool matrix = ((after->flags | after->engine_flags) & w::kEntityFlagMatrixBuilt) != 0;
+			CHECK(matrix == c.ran);
+			CHECK(after->saved_live_yaw == (c.ran ? 0x12340000 : 0x01000000));
+			CHECK(after->saved_live_pitch == (c.ran ? 0x00560000 : 0x00200000));
+			CHECK(after->saved_live_roll == (c.ran ? -0x00780000 : 0x05B05B00));
+			if (c.ran)
+				for (int axis = 0; axis < 3; ++axis)
+					CHECK(after->saved_live_pos[axis] == entry[axis]);
+		}
+		CHECK(!ae->inf.player_moving); // no player-body update decoded the MoveOrder
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // The spawn's class init by the bound row (def+0x148): an org0 row's player body takes
 // Entity_InitOrganicAI, its legs as a placed person's: the anim pick (the player body's AI slot
 // reads zeros: no route, idle 43; the PERMANENT Q8-1 (a) reading of a slot retail would fault
@@ -1089,6 +1154,7 @@ int main() {
 	test_the_placement_warm_up_counts_by_the_dcb_id();
 	test_the_update_follows_the_rows_move_function();
 	test_the_walk_skips_a_null_row_body_whole();
+	test_a_vehicle_row_body_runs_its_movers_person_path();
 	test_an_org_rows_player_body_takes_the_organic_init();
 	test_a_player_bodys_dcb_id_is_its_class_inits();
 	if (failures != 0) {
