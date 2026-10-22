@@ -1,6 +1,6 @@
 // The collision placement and probe helpers (runtime/world/collision.h): the uniform item scale on
 // a placement's rotation (collision_matrix_scale_rotation [orig: @0x614210]), the placement from
-// mission eulers (the heading table path for pure yaw, the Euler builder with pitch or roll [orig:
+// mission eulers (the Euler builder for every placement, pure yaw included [orig:
 // @ 0x613f40]), a local box placed (collision_matrix_box_bounds), the ground-settle tail's probe
 // origin ((z + 6143) & ~0x17FF [orig: Entity_MovementCollisionResolver @0x4B3D6E..0x4B3DA9]) and
 // the terrain height under a column (terrain_column_height).
@@ -45,10 +45,23 @@ int test_scale() {
 
 int test_placement() {
 	const int32_t pos[3] = {fx(1), fx(2), fx(3)};
-	// Pure yaw: the heading table path, scaled.
-	CollisionMatrix yaw = collision_matrix_from_heading(placed_heading_bam(30), pos);
+	// Pure yaw: the Euler builder too, scaled (D-NET-NEW-L6-10) [orig: BoneCallback_Simple
+	// @0x4E2600 -> Math_BuildFixedPointMatrixFromEulerAngles @0x613F40].
+	CollisionMatrix yaw = collision_matrix_from_euler(placed_heading_bam(30), 0, 0, pos);
 	collision_matrix_scale_rotation(yaw, 0x18000);
 	TEST_EXPECT(same_matrix(collision_matrix_from_placement(placed_heading_bam(30), 0, 0, pos, 0x18000), yaw));
+	// Mission yaw 30 places heading 0x2AAA0000 (spawn_angle_bam(60)). The yaw stage's words are
+	// trunc(sin / cos(h * dbl_7C3608) * 2^22) [orig: @0x6140B2..0x6140CF]: sin 3632306.79 and
+	// cos 2097268.09 truncate to 3632306 / 2097268 (each clear of an integer edge, Q3-11). The
+	// direction table's entry (h + 0x200000) >> 22 = 171 sits 0.12 degrees off that heading,
+	// so the old pure-yaw table path placed the shell off the visual.
+	const CollisionMatrix placed = collision_matrix_from_placement(placed_heading_bam(30), 0, 0, pos, 0);
+	TEST_EXPECT(placed_heading_bam(30) == 0x2AAA0000);
+	TEST_EXPECT(placed.m[0] == 2097268 && placed.m[1] == -3632306 && placed.m[2] == 0);
+	TEST_EXPECT(placed.m[4] == 3632306 && placed.m[5] == 2097268 && placed.m[6] == 0);
+	TEST_EXPECT(placed.m[8] == 0 && placed.m[9] == 0 && placed.m[10] == 0x400000);
+	TEST_EXPECT(placed.m[3] == pos[0] && placed.m[7] == pos[1] && placed.m[11] == pos[2]);
+	TEST_EXPECT(!same_matrix(placed, collision_matrix_from_heading(placed_heading_bam(30), pos)));
 	// Pitch or roll authored: the Euler builder over the Pitch / Roll words (D-NET-NEW-L6-3).
 	const CollisionMatrix tilted = collision_matrix_from_euler(placed_heading_bam(30),
 	                                                           spawn_angle_bam(5), 0, pos);
@@ -56,7 +69,7 @@ int test_placement() {
 	const CollisionMatrix rolled = collision_matrix_from_euler(placed_heading_bam(0),
 	                                                           0, spawn_angle_bam(-7), pos);
 	TEST_EXPECT(same_matrix(collision_matrix_from_placement(placed_heading_bam(0), 0, spawn_angle_bam(-7), pos, 0), rolled));
-	std::printf("placement: the heading path for pure yaw, the Euler builder with pitch or roll\n");
+	std::printf("placement: the Euler builder for pure yaw and with pitch or roll\n");
 	return 0;
 }
 

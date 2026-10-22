@@ -248,9 +248,11 @@ struct CollisionMatrix {
     bool invert_uniform_scale_into(CollisionMatrix &out, int32_t scale_q16) const;
 };
 
-// Build the quantized yaw-only entity matrix (heading in BAM32, translation
-// 16.16). Pure-yaw placements retain this exact table path; target_view uses
-// the full-Euler builder when needed and layers callback section poses above it.
+// Build the quantized yaw-only matrix (heading in BAM32 through the direction
+// table, translation 16.16): the test fixtures', the editor range preview's and
+// the minimap outline's matrix.
+// No entity placement uses it: target_view places through
+// collision_matrix_from_placement (D-NET-NEW-L6-10).
 CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t pos[3]);
 
 // The FULL placement matrix Rz(heading)·Ry(-pitch)·Rx(roll) for statics authored
@@ -290,11 +292,14 @@ CollisionMatrix entity_placement_matrix(const Entity &e);
 void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16);
 // The collision placement of an entity from its Yaw word (Entity::heading,
 // D-NET-NEW-L6-2), its pitch / roll degrees, its 16.16 position and its item
-// scale (collision_matrix_scale_rotation): a pure-yaw
-// placement keeps the quantized-table heading path bit-for-bit, and one
-// authored with pitch or roll (a rock seated on a slope) takes the full Euler
-// matrix so the shell leans with the visual. [orig: the entity orientation
-// matrix @ 0x613f40 serves every collision query]
+// scale (collision_matrix_scale_rotation): the full Euler matrix for every
+// placement, a pure-yaw one included, with its exact x87 sine and cosine (the
+// quantized direction table is no part of it): a yaw off the table's 2^22 BAM
+// grid turns the shell with the visual, not up to 0.18 degrees off it
+// (D-NET-NEW-L6-10). [orig: BoneCallback_Simple @0x4E2600 (the build @0x4E2662)
+// and BoneCallback_Generic @0x4E26D0 (@0x4E2745) call
+// Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 on every unscaled
+// placement, whose yaw stage @0x6140B2..0x6141DA runs fsin / fcos]
 CollisionMatrix collision_matrix_from_placement(int32_t heading, int32_t pitch_bam,
                                                 int32_t roll_bam, const int32_t pos[3],
                                                 int32_t scale_q16);
@@ -1895,7 +1900,7 @@ public:
 
     // Read-only world-space geometry snapshot for an embedder collision debug view.
     // Each instance's volumes are transformed through the SAME target_view /
-    // collision_matrix_from_heading path every query uses, so what the host
+    // collision_matrix_from_placement path every query uses, so what the host
     // draws is exactly what the resolver tests. Corner order: index bit 0 = max
     // x, bit 1 = max y, bit 2 = max z (mission space, 16.16). `range` > 0 keeps
     // only instances whose entity position is within it (per-axis box) of

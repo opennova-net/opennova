@@ -1002,14 +1002,11 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 // The decoded pose mirrors the retail client entity fields the
                 // placement matrix reads: live coarse heading (entity+16 high
                 // byte) plus the retained spawn/dead pitch/roll samples
-                // (entity+20/+24) [orig: the placement matrix @ 0x613f40].
-                CollisionMatrix world_mat =
-                    (proxy.pitch_bam != 0 || proxy.roll_bam != 0)
-                        ? collision_matrix_from_euler(proxy.heading_bam,
-                                                      proxy.pitch_bam,
-                                                      proxy.roll_bam, pos)
-                        : collision_matrix_from_heading(proxy.heading_bam, pos);
-                collision_matrix_scale_rotation(world_mat, proxy.uniform_scale_q16);
+                // (entity+20/+24), pure yaw included (D-NET-NEW-L6-10)
+                // [orig: the placement matrix @ 0x613f40].
+                const CollisionMatrix world_mat = collision_matrix_from_placement(
+                        proxy.heading_bam, proxy.pitch_bam, proxy.roll_bam, pos,
+                        proxy.uniform_scale_q16);
                 std::vector<CollisionMatrix> proxy_matrices(
                     proxy_model->sections.size(), world_mat);
                 CollisionTargetView view;

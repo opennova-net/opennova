@@ -1167,7 +1167,7 @@ std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         // The SAME per-instance view every query goes through: entity pose ->
-        // collision_matrix_from_heading (quantized dir table) per section.
+        // collision_matrix_from_placement per section.
         const CollisionTargetView *tv = target_view(world, h, view, mats);
         if (tv == nullptr) continue;
         if (range > 0 && anchor != nullptr &&

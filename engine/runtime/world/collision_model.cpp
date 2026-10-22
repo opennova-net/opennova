@@ -284,9 +284,9 @@ void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16) {
 CollisionMatrix collision_matrix_from_placement(int32_t heading, int32_t pitch_bam,
                                                 int32_t roll_bam, const int32_t pos[3],
                                                 int32_t scale_q16) {
-    CollisionMatrix m = (pitch_bam != 0 || roll_bam != 0)
-            ? collision_matrix_from_euler(heading, pitch_bam, roll_bam, pos)
-            : collision_matrix_from_heading(heading, pos);
+    // [orig: BoneCallback_Simple @0x4E2600 -> Math_BuildFixedPointMatrixFromEulerAngles
+    //  @0x613F40 (the call @0x4E2662), pure yaw included (D-NET-NEW-L6-10)]
+    CollisionMatrix m = collision_matrix_from_euler(heading, pitch_bam, roll_bam, pos);
     collision_matrix_scale_rotation(m, scale_q16);
     return m;
 }
