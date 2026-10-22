@@ -9,7 +9,9 @@
 // [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
 //  proximity build @0x4C240A, the pool-0 walk @0x4C2426..0x4C2472;
 //  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the site selector on the mount word +0x16C
-//  @0x4B637C..0x4B638F, the Entity_AttachToBoneAndUpdateTransform call @0x4B63C7]
+//  @0x4B637C..0x4B638F, the kind-3 Entity_AttachToBoneAndUpdateTransform call @0x4B63C7,
+//  every other kind's bone pose through the branch @0x4B64EF to the
+//  Entity_GetBoneTransformAndOrientation call @0x4B6510]
 
 #include <runtime/replication/client_replica_pipeline.h>
 

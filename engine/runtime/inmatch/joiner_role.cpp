@@ -506,6 +506,9 @@ void JoinerRole::resolve_row_adm_ids() {
 	// (pump: tick_remote_motion_after_self).
 	runtime->view().set_anim_variant_rings(&kernel.world.ai.anim_rings);
 	runtime->view().set_self_body_split(true);
+	// The pool-1 rows take their visits at their own slots of the World's pool-1 walk
+	// (pump: World::pool1_slot_leg, D-NET-196).
+	runtime->view().set_pool1_interleave(true);
 	// The rows' secondary selection reads the held record's hold kind.
 	runtime->view().set_weapon_table(&kernel.world.tables.weapons);
 }
@@ -971,15 +974,25 @@ void JoinerRole::pump() {
 	// The decoded rows join the entity update's proximity build, after its pool-1 walk
 	// and its projectile pass: the World movers' poses first reach their rows, as the
 	// build reads the movers' live entities, then the proxies are rebuilt from the rows
-	// (D-NET-196). The after-tick mirror below still covers a tick whose entity update
-	// is not admitted.
+	// (D-NET-196). A decoded pool-1 row at a slot past the World's pool-1 capacity, which
+	// the walk never reached, takes its slot visit first. The after-tick mirror below
+	// still covers a tick whose entity update is not admitted.
 	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9,
 	//  the Weapon_UpdateAllProjectiles call @0x4C223A, the Entity_BuildProximityLists_Pool01
 	//  call @0x4C240A; Entity_BuildProximityLists_Pool01 @0x4B9340 (the pool-1 copies
 	//  @0x4B9389..0x4B93A7)]
-	world.before_proximity_build = [this] {
+	world.before_proximity_build = [this, &rt] {
+		for (const uint16_t handle : rt.view().unvisited_pool1_rows())
+			visit_replica_pool1_slot(world::EntityHandle{handle});
 		mirror_predicted_vehicles();
 		refresh_wire_collision_proxies();
+	};
+	// The replica pool-1 rows take their visits at their own slots of the World's pool-1
+	// walk, interleaved with the World's movers in slot order (visit_replica_pool1_slot,
+	// D-NET-196).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9]
+	world.pool1_slot_leg = [this](world::EntityHandle handle) {
+		visit_replica_pool1_slot(handle);
 	};
 	// The tick's own phases land on the SIM_WORLD_* / SIM_UPDATE_* rows inside run_logic_tick.
 	world.run_logic_tick(
@@ -988,6 +1001,7 @@ void JoinerRole::pump() {
 			                : world::TickPhase::Gameplay);
 	world.before_proximity_build = nullptr;
 	world.before_pool0_walk = nullptr;
+	world.pool1_slot_leg = nullptr;
 	// The replica rows past the own body's pool-0 slot take their visits now, after
 	// the World's entity pass ran the own body: retail's pool-0 walk updates every
 	// used slot in slot order, the local body at its own (D-NET-196). A middle half

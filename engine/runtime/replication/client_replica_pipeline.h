@@ -378,6 +378,25 @@ public:
 	void tick_remote_motion_through_self();
 	void tick_remote_motion_after_self();
 	void set_self_body_split(bool on) { self_body_split_ = on; }
+	// The pool-1 interleave (a joiner, whose World walks pool 1 by slot): the walk parks
+	// every pool-1 row too, and each takes its visit at its own slot of the World's pool-1
+	// walk (the embedder's World::pool1_slot_leg calls visit_pool1_row), interleaved with
+	// the World's movers in slot order. A compact-carried pool-1 row (a hull on a deck)
+	// follows its carrier as it stands at the head of its own visit. A pool-1 row the
+	// World's walk never reached the embedder visits as the walk ends
+	// (unvisited_pool1_rows); one still parked then visits ahead of the parked pool-0 rows
+	// (tick_remote_motion_through_self, or after_self where that never ran) (D-NET-196).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+	//  Entity_UpdatePool1Slot calls @0x4C21B9 / @0x4C21D0 / @0x4C21E0 / @0x4C21E9;
+	//  Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C4 mover @0x4B8E41..0x4B8E53]
+	void set_pool1_interleave(bool on) { pool1_interleave_ = on; }
+	// One parked pool-1 row's visit; the row, or null where the handle names no row the
+	// walk parked (a World mover's row returns too: the World's mover moved it, its
+	// visit returns at the mover test). A second call for the same row this tick is null.
+	ClientEntityState *visit_pool1_row(uint16_t handle);
+	// The parked pool-1 rows no slot leg has visited yet (slots past the World's pool-1
+	// capacity), in walk order: the embedder visits them as the walk ends.
+	std::vector<uint16_t> unvisited_pool1_rows() const;
 	// The walk's order key (pool 1, pool 0, then the higher pools, each by slot) and
 	// the split's line: the own row's key when the walk parks the rows past it,
 	// else no line (UINT32_MAX).
@@ -842,6 +861,14 @@ private:
 	std::vector<uint16_t> parked_rows_;
 	uint16_t parked_self_ = 0xFFFFu;
 	uint32_t parked_tick_ = 0;
+	// The pool-1 interleave (set_pool1_interleave): the pool-1 rows the walk parked, in
+	// walk order, and each one's index in state_.entities when parked (re-checked
+	// against its handle at its visit).
+	bool pool1_interleave_ = false;
+	std::vector<uint16_t> pool1_rows_;
+	std::unordered_map<uint16_t, size_t> pool1_parked_;
+	// The pool-1 rows the World's walk never reached, ahead of the parked pool-0 rows.
+	void finish_pool1_rows();
 	// The walk's expired corpses (handle, the def names a decay), erased after
 	// each half's visits.
 	std::vector<std::pair<uint16_t, bool>> remote_motion_expired_;

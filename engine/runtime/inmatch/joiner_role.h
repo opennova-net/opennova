@@ -198,6 +198,10 @@ public:
 	// materializer's owned rows; full-BMS joins read the promoted registry row
 	// (spawn-origin gated).
 	world::Entity *replica_world_entity(world::World &world, world::EntityHandle handle);
+	// The World's pool-1 slot leg (World::pool1_slot_leg, installed by the pump): the
+	// slot's decoded row takes its visit there, then its twin's pose or its twin the
+	// row's, then its proxy's live words (D-NET-196; joiner_role_replica_world.cpp).
+	void visit_replica_pool1_slot(world::EntityHandle handle);
 
 	// The JOINER's per-frame clock (the host uses HostOwner::now_tick). The
 	// preload frame shares it, so it advances there too.
@@ -349,11 +353,14 @@ private:
 	void sync_authoritative_mount();
 	void apply_mounted_ammo_update();
 	void mirror_mission_entities();
+	void mirror_mission_entity(replication::ClientEntityState &es);
 	void mirror_predicted_vehicles();
+	void mirror_predicted_vehicle(replication::ClientEntityState &es);
 	// The decoded rows' collision proxies, rebuilt at the World's proximity build
 	// (World::before_proximity_build), and their live words between builds.
 	void refresh_wire_collision_proxies();
 	void sync_wire_collision_proxies_live();
+	void sync_wire_collision_proxy_live(const replication::ClientEntityState &row);
 	void apply_gameplay_events();
     void apply_round_event(const replication::ClientRoundEvent &);
 

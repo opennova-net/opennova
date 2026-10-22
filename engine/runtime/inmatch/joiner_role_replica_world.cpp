@@ -796,304 +796,302 @@ replication::ClientEntityState::WorldClassUpdate world_class_update_for(
 } // namespace
 
 void JoinerRole::mirror_mission_entities() {
-	mission::MissionKernel &kernel = *kernel_;
-	world::World &world = kernel.world;
-	world::LocalPlayer &lp = kernel.local;
-	ClientRuntime &rt = *runtime;
-	for (replication::ClientEntityState &es : rt.state().entities) {
-		const world::EntityHandle h{es.handle};
-		const int pool = h.pool();
-		if (pool < 1 || pool > 3) continue;
-		world::Entity *local = replica_world_entity(world, h);
-		if (local == nullptr ||
-				static_cast<uint16_t>(local->item_id) != es.type_id)
-			continue;
-		// A flag's pose is the client's own between S2C 0x2F states: the
-		// materializer lands each state on the registry row and the drop's
-		// fall and ride move it after, so the presented row follows the
-		// registry row here, not the other way round.
-		// [orig: NapiNPClientMsg_0x02F @0x430E10, the one client writer of a
-		//  flag's pose]
-		if (kernel_->wire_header_world && replication::is_carry_objective(es.type_id)) {
-			es.x = local->position.x.q16;
-			es.y = local->position.y.q16;
-			es.z = local->position.z.q16;
-			if (local->veh.yaw_seeded) {
-				es.heading_bam = local->veh.yaw_bam;
-				es.pitch_bam = local->veh.air_pitch_bam;
-				es.roll_bam = local->veh.air_roll_bam;
-			}
-			continue;
+	for (replication::ClientEntityState &es : runtime->state().entities) mirror_mission_entity(es);
+}
+
+void JoinerRole::mirror_mission_entity(replication::ClientEntityState &es) {
+	world::World &world = kernel_->world;
+	const world::EntityHandle h{es.handle};
+	const int pool = h.pool();
+	if (pool < 1 || pool > 3) return;
+	world::Entity *local = replica_world_entity(world, h);
+	if (local == nullptr ||
+			static_cast<uint16_t>(local->item_id) != es.type_id)
+		return;
+	// A flag's pose is the client's own between S2C 0x2F states: the
+	// materializer lands each state on the registry row and the drop's
+	// fall and ride move it after, so the presented row follows the
+	// registry row here, not the other way round.
+	// [orig: NapiNPClientMsg_0x02F @0x430E10, the one client writer of a
+	//  flag's pose]
+	if (kernel_->wire_header_world && replication::is_carry_objective(es.type_id)) {
+		es.x = local->position.x.q16;
+		es.y = local->position.y.q16;
+		es.z = local->position.z.q16;
+		if (local->veh.yaw_seeded) {
+			es.heading_bam = local->veh.yaw_bam;
+			es.pitch_bam = local->veh.air_pitch_bam;
+			es.roll_bam = local->veh.air_roll_bam;
 		}
-		// A row no compact writes runs the def's move function as its update,
-		// with no role gate, and nothing on the wire writes its pose after the
-		// 0x0D: where the world runs that update (the ewep compose at the
-		// subType's anchor, the genx ride and fall), the 0x0D's pose seeds the
-		// world row once per spawn and the row reads the world's pose back
-		// from then on (D-NET-690).
-		// [orig: NapiNPClientMsg_0x00D @0x432C40 -- Position @0x432D8F..0x432DB6,
-		//  the euler words @0x432DCA..0x432DF8, def+0x158 -> +0x1C4 @0x43331A;
-		//  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
-		es.world_class_update = world_class_update_for(es, *local);
-		if (es.world_class_update !=
-				replication::ClientEntityState::WorldClassUpdate::None) {
-			if (es.world_seeded_spawn_revision != es.spawn_revision) {
-				es.world_seeded_spawn_revision = es.spawn_revision;
-				local->position.set_q16({es.x, es.y, es.z});
-				local->veh.yaw_seeded = true;
-				local->veh.yaw_bam = es.heading_bam;
-				local->veh.air_pitch_bam = es.pitch_bam;
-				local->veh.air_roll_bam = es.roll_bam;
-				local->heading = es.heading_bam; // the wire's Yaw word (D-NET-NEW-L6-2)
-				local->pitch_bam = es.pitch_bam;
-				local->roll_bam = es.roll_bam;
-				if (es.team_known) local->team = es.team;
-				continue;
-			}
-			es.x = local->position.x.q16;
-			es.y = local->position.y.q16;
-			es.z = local->position.z.q16;
-			if (local->veh.yaw_seeded) {
-				es.heading_bam = local->veh.yaw_bam;
-				es.pitch_bam = local->veh.air_pitch_bam;
-				es.roll_bam = local->veh.air_roll_bam;
-				es.yaw_byte = static_cast<uint8_t>(static_cast<uint32_t>(es.heading_bam) >> 24);
-			}
-			// The class update's Flags bits: the ewep hide of a dead hull's
-			// children and its clear on a live vehicle carrier.
-			// [orig: Entity_UpdateTransformAndTurret @0x440CDD, @0x440EB3]
-			constexpr uint8_t kClassBits = static_cast<uint8_t>(world::kEntityFlagCarried |
-					world::kEntityFlagDead | world::kEntityFlagHusk);
-			es.state_flags = static_cast<uint8_t>((es.state_flags & ~kClassBits) |
-					(local->flags & kClassBits));
-			continue;
+		return;
+	}
+	// A row no compact writes runs the def's move function as its update,
+	// with no role gate, and nothing on the wire writes its pose after the
+	// 0x0D: where the world runs that update (the ewep compose at the
+	// subType's anchor, the genx ride and fall), the 0x0D's pose seeds the
+	// world row once per spawn and the row reads the world's pose back
+	// from then on (D-NET-690).
+	// [orig: NapiNPClientMsg_0x00D @0x432C40 -- Position @0x432D8F..0x432DB6,
+	//  the euler words @0x432DCA..0x432DF8, def+0x158 -> +0x1C4 @0x43331A;
+	//  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
+	es.world_class_update = world_class_update_for(es, *local);
+	if (es.world_class_update !=
+			replication::ClientEntityState::WorldClassUpdate::None) {
+		if (es.world_seeded_spawn_revision != es.spawn_revision) {
+			es.world_seeded_spawn_revision = es.spawn_revision;
+			local->position.set_q16({es.x, es.y, es.z});
+			local->veh.yaw_seeded = true;
+			local->veh.yaw_bam = es.heading_bam;
+			local->veh.air_pitch_bam = es.pitch_bam;
+			local->veh.air_roll_bam = es.roll_bam;
+			local->heading = es.heading_bam; // the wire's Yaw word (D-NET-NEW-L6-2)
+			local->pitch_bam = es.pitch_bam;
+			local->roll_bam = es.roll_bam;
+			if (es.team_known) local->team = es.team;
+			return;
 		}
-		// Pools 1..3 are live client rows, not just presentation records. Keep
-		// every world-side collision/seat consumer on the same full wire pose.
-		const world::Entity *attachment_parent =
-				local->emplacement_parent.valid()
-				? world.registry.get(local->emplacement_parent)
-				: nullptr;
-		const uint16_t followed_carrier = replication::persistent_carrier_handle(es);
-		const bool unresolved_persistent_attachment =
-				es.parent_pose_valid && followed_carrier != 0xFFFFu &&
-				!local->emplacement_pose_metadata_resolved &&
-				local->emplacement_parent.packed == followed_carrier &&
-				attachment_parent != nullptr &&
-				attachment_parent->registry_spawn_id ==
-						local->emplacement_parent_spawn_id;
-		// A 0x0D zero heading is omitted on the wire after retail memset, so
-		// heading_known remains false. Persistent parent recomposition still owns
-		// an exact heading_bam; mirror it for unresolved children whose rigid wire
-		// pose is the world-consumer source of truth.
-		if (es.heading_known || unresolved_persistent_attachment)
-			local->heading = es.heading_bam;
-		local->pitch_bam = es.pitch_bam;
-		local->roll_bam = es.roll_bam;
-		if (es.team_known) local->team = es.team;
-		// Watercraft prediction (§5.38e B-facet, D-NET-196): a placed cbot
-		// vehicle's motion is owned by the WORLD-side client mover — stage the
-		// latest wire sample + registers on a fresh compact and let
-		// watercraft_client_tick chase + predict; the row is mirrored BACK
-		// after the tick (mirror_predicted_vehicles).
-		if (pool == 1 && es.cls == EntityClass::Vehicle) {
-			const world::VehicleTraits *traits =
-					world.vehicles.traits.get(local->item_id);
-			if (traits != nullptr) {
-				es.net_world_mover = true;
-				// The row-side fallback chase selects its constant set by
-				// family; only the sim resolves families (client_state.h note).
-				es.net_air_family = traits->family ==
-								world::VehicleFamily::Helicopter ||
-						traits->family == world::VehicleFamily::Plane;
-				world::Entity::VehicleMotorState &m = local->veh;
-				// The reader's tail on each accepted record: the destroyed bit
-				// snaps a client row that is not dead yet and kills it through
-				// Entity_KillBySlotId(slot, 0, 0) while its Health word is
-				// nonzero; Flags bits 0/3/4/5/7 then follow the wire (1/2/6 stay
-				// the client's own) and the record's health word lands, zero for
-				// the dead-pose form or a kill.
-				// [orig: Entity_SerializeVehicleState @0x460560 — kill edge
-				//  @0x460A1A..0x460AE2, Flags @0x460AEA..0x460AFC, Health store
-				//  @0x460AF1..0x460AFF; the short form's zero @0x460688]
-				if (es.state_flags_known && es.compact_revision != m.net_seen_revision) {
-					int16_t health_word = static_cast<int16_t>(es.health_word);
-					if ((es.state_flags & world::kEntityFlagDead) != 0u &&
-							((local->flags | local->engine_flags) &
-									world::kEntityFlagDead) == 0u) {
-						local->position.x.q16 = es.x;
-						local->position.y.q16 = es.y;
-						local->position.z.q16 = es.z;
-						if (m.yaw_seeded) m.yaw_bam = es.heading_bam;
-						local->heading = es.heading_bam;
-						if (local->health != 0) {
-							health_word = 0;
-							world::apply_item_state_event(world, *local, 0);
-						}
-					}
-					const uint32_t wire_flags = es.state_flags;
-					local->flags ^= (local->flags ^ wire_flags) & 0xB9u;
-					local->engine_flags ^= (local->engine_flags ^ wire_flags) & 0xB9u;
-					local->health = health_word;
-				}
-				// The mover freezes on the dead-pose/wreck form alone: the row
-				// keeps its snapped wire pose (wreck eulers included) and the
-				// mirror-back below yields via net_predicted [orig: the dead-pose
-				// short form's frozen live stores @0x460930..0x460A50]. D-NET-66:
-				// death stays a snap. Wire bit0 is not a vehicle freeze: no
-				// vehicle mover tests it and the pool-1 update calls the mover
-				// ungated [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53].
-				// A carried record is not a freeze either, whatever its carrier
-				// (a pool-1 deck, or the static a bridge, roof or ramp
-				// resolves to): the reader composes it into a world sample,
-				// stages that and lands the carrier as groundEntity, and the
-				// family mover predicts from the sample while its carrier block
-				// rides the ground link [orig: Entity_TransformLocalToWorld
-				// @0x4608ce -> the staging @0x4607cd..0x4607fb, groundEntity
-				// @0x460802; the not-driven leg @0x48B7F0; the carrier blocks
-				// (vehicle_follow_carrier)].
-				const bool wire_frozen = es.state_flags_known &&
-						(es.state_flags & replication::kVehicleFlagDeadPose) != 0u;
-				if (wire_frozen) {
-					// The row holds its snapped/followed pose; the registry
-					// entity adopts it below like any un-predicted row so
-					// occlusion/collision see the wreck where it rests. The
-					// platform/motor transients die with the freeze so a
-					// respawned or re-staged hull never inherits stale bob
-					// phase, accumulators, or vertical velocity.
-					m.net_predicted = false;
-					m.net_seen_revision = es.compact_revision;
-					// The motor's speed registers are transients too: the
-					// client pass still runs the movement-sound tail for a
-					// frozen row [world/ai_system.cpp fallback branch ->
-					// update_ground_vehicle_sound], which reads veh.speed
-					// directly, so a row frozen mid-motion would keep playing
-					// its moving engine lane (and hold a reverse latch) on
-					// state nothing advances any more.
-					m.speed = 0;
-					m.speed_accel = 0;
-					m.cmd_speed = 0;
-					m.slide_z = 0;
-					// The yaw rate and the tank's pivot latch as well: the frozen
-					// row's fold would otherwise keep re-registering the fourth
-					// loop from a latch the traction tail can no longer clear.
-					m.wheel_rate_bam = 0;
-					m.pivot_sound_latched = false;
-					m.pivot_sound_prev_rate = 0;
-					es.vehicle_vertical_velocity_pending = false;
-					m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
-							m.plat_acc[3] = 0;
-					m.plat_at_rest = false;
-					m.plat_porpoise = false;
-					m.plat_planing = false;
-					m.plat_bob_phase = 0.0f;
+		es.x = local->position.x.q16;
+		es.y = local->position.y.q16;
+		es.z = local->position.z.q16;
+		if (local->veh.yaw_seeded) {
+			es.heading_bam = local->veh.yaw_bam;
+			es.pitch_bam = local->veh.air_pitch_bam;
+			es.roll_bam = local->veh.air_roll_bam;
+			es.yaw_byte = static_cast<uint8_t>(static_cast<uint32_t>(es.heading_bam) >> 24);
+		}
+		// The class update's Flags bits: the ewep hide of a dead hull's
+		// children and its clear on a live vehicle carrier.
+		// [orig: Entity_UpdateTransformAndTurret @0x440CDD, @0x440EB3]
+		constexpr uint8_t kClassBits = static_cast<uint8_t>(world::kEntityFlagCarried |
+				world::kEntityFlagDead | world::kEntityFlagHusk);
+		es.state_flags = static_cast<uint8_t>((es.state_flags & ~kClassBits) |
+				(local->flags & kClassBits));
+		return;
+	}
+	// Pools 1..3 are live client rows, not just presentation records. Keep
+	// every world-side collision/seat consumer on the same full wire pose.
+	const world::Entity *attachment_parent =
+			local->emplacement_parent.valid()
+			? world.registry.get(local->emplacement_parent)
+			: nullptr;
+	const uint16_t followed_carrier = replication::persistent_carrier_handle(es);
+	const bool unresolved_persistent_attachment =
+			es.parent_pose_valid && followed_carrier != 0xFFFFu &&
+			!local->emplacement_pose_metadata_resolved &&
+			local->emplacement_parent.packed == followed_carrier &&
+			attachment_parent != nullptr &&
+			attachment_parent->registry_spawn_id ==
+					local->emplacement_parent_spawn_id;
+	// A 0x0D zero heading is omitted on the wire after retail memset, so
+	// heading_known remains false. Persistent parent recomposition still owns
+	// an exact heading_bam; mirror it for unresolved children whose rigid wire
+	// pose is the world-consumer source of truth.
+	if (es.heading_known || unresolved_persistent_attachment)
+		local->heading = es.heading_bam;
+	local->pitch_bam = es.pitch_bam;
+	local->roll_bam = es.roll_bam;
+	if (es.team_known) local->team = es.team;
+	// Watercraft prediction (§5.38e B-facet, D-NET-196): a placed cbot
+	// vehicle's motion is owned by the WORLD-side client mover — stage the
+	// latest wire sample + registers on a fresh compact and let
+	// watercraft_client_tick chase + predict; the row is mirrored BACK
+	// after the tick (mirror_predicted_vehicles).
+	if (pool == 1 && es.cls == EntityClass::Vehicle) {
+		const world::VehicleTraits *traits =
+				world.vehicles.traits.get(local->item_id);
+		if (traits != nullptr) {
+			es.net_world_mover = true;
+			// The row-side fallback chase selects its constant set by
+			// family; only the sim resolves families (client_state.h note).
+			es.net_air_family = traits->family ==
+							world::VehicleFamily::Helicopter ||
+					traits->family == world::VehicleFamily::Plane;
+			world::Entity::VehicleMotorState &m = local->veh;
+			// The reader's tail on each accepted record: the destroyed bit
+			// snaps a client row that is not dead yet and kills it through
+			// Entity_KillBySlotId(slot, 0, 0) while its Health word is
+			// nonzero; Flags bits 0/3/4/5/7 then follow the wire (1/2/6 stay
+			// the client's own) and the record's health word lands, zero for
+			// the dead-pose form or a kill.
+			// [orig: Entity_SerializeVehicleState @0x460560 — kill edge
+			//  @0x460A1A..0x460AE2, Flags @0x460AEA..0x460AFC, Health store
+			//  @0x460AF1..0x460AFF; the short form's zero @0x460688]
+			if (es.state_flags_known && es.compact_revision != m.net_seen_revision) {
+				int16_t health_word = static_cast<int16_t>(es.health_word);
+				if ((es.state_flags & world::kEntityFlagDead) != 0u &&
+						((local->flags | local->engine_flags) &
+								world::kEntityFlagDead) == 0u) {
 					local->position.x.q16 = es.x;
 					local->position.y.q16 = es.y;
 					local->position.z.q16 = es.z;
-					continue;
-				}
-				if (es.compact_revision != m.net_seen_revision) {
-					const bool prediction_arming = !m.net_predicted;
-					m.net_seen_revision = es.compact_revision;
-					// Every live record lands its carrier as the ground link, or
-					// null for the 0xFFFF form; the mover's own ground refresh
-					// rewrites it every eighth tick [orig: Entity_SerializeVehicleState
-					// @0x460802 (esi = the carrier, 0 @0x4607AF)].
-					const world::Entity *record_carrier =
-							es.carrier_handle != 0xFFFFu
-									? replica_world_entity(world,
-											  world::EntityHandle{es.carrier_handle})
-									: nullptr;
-					local->ground_target = record_carrier != nullptr
-							? record_carrier->handle
-							: world::EntityHandle{};
-					// The fold live-snapped the row to the wire sample (rows
-					// whose first compact landed before this flag flipped stage
-					// their pre-compact pose for one record — self-corrected by
-					// the next fold's live snap); that sample is the staged
-					// target [orig: the mode-2 staging].
-					m.net_smooth_target[0] = es.x;
-					m.net_smooth_target[1] = es.y;
-					m.net_smooth_target[2] = es.z;
-					m.net_smooth_heading = es.heading_bam;
-					m.net_recv_speed = es.vehicle_speed_reg;
-					m.net_recv_steer_bam = es.vehicle_steer_bam;
-					m.net_recv_lat = es.vehicle_lat_reg;
-					// entity+0xA0 vertical velocity: every live record the
-					// wire-dead gate admitted re-lands the family prediction's
-					// slide_z [orig: the mode-2 store @0x46091e].
-					if (es.vehicle_vertical_velocity_pending) {
-						m.slide_z = es.vehicle_vertical_velocity;
-						es.vehicle_vertical_velocity_pending = false;
+					if (m.yaw_seeded) m.yaw_bam = es.heading_bam;
+					local->heading = es.heading_bam;
+					if (local->health != 0) {
+						health_word = 0;
+						world::apply_item_state_event(world, *local, 0);
 					}
-					// The replicated engine/collective bit [orig: Flags 0x80,
-					// air families].
-					m.net_engine_on = (es.state_flags & 0x80u) != 0u;
-					m.net_interp_progress = 0;
-					// Live vehicle compacts omit Euler X/Y. Seed the client mover's
-					// attitude exactly once when prediction arms from the retained
-					// spawn/dead-pose row; re-seeding on every live compact would
-					// erase the platform/aero solve performed between records.
-					if (prediction_arming) {
-						m.air_pitch_bam = es.pitch_bam;
-						m.air_roll_bam = es.roll_bam;
-						m.plat_solve_valid = false;
-						// Promotion seam (no retail equivalent — retail's contact
-						// solve runs from entity existence, so Flags 0x2000 is
-						// always current): seed an arming Air-family row airborne
-						// so its first predicted tick runs the aero block, not
-						// the grounded sheds. The tick-tail solve reproduces the
-						// true state one tick later either way.
-						if (traits->family == world::VehicleFamily::Helicopter ||
-								traits->family == world::VehicleFamily::Plane)
-							local->flags |= world::kEntityFlagInAir;
-					}
-					m.net_predicted = true;
 				}
-				continue; // the world mover owns the registry position now
+				const uint32_t wire_flags = es.state_flags;
+				local->flags ^= (local->flags ^ wire_flags) & 0xB9u;
+				local->engine_flags ^= (local->engine_flags ^ wire_flags) & 0xB9u;
+				local->health = health_word;
 			}
+			// The mover freezes on the dead-pose/wreck form alone: the row
+			// keeps its snapped wire pose (wreck eulers included) and the
+			// mirror-back below yields via net_predicted [orig: the dead-pose
+			// short form's frozen live stores @0x460930..0x460A50]. D-NET-66:
+			// death stays a snap. Wire bit0 is not a vehicle freeze: no
+			// vehicle mover tests it and the pool-1 update calls the mover
+			// ungated [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53].
+			// A carried record is not a freeze either, whatever its carrier
+			// (a pool-1 deck, or the static a bridge, roof or ramp
+			// resolves to): the reader composes it into a world sample,
+			// stages that and lands the carrier as groundEntity, and the
+			// family mover predicts from the sample while its carrier block
+			// rides the ground link [orig: Entity_TransformLocalToWorld
+			// @0x4608ce -> the staging @0x4607cd..0x4607fb, groundEntity
+			// @0x460802; the not-driven leg @0x48B7F0; the carrier blocks
+			// (vehicle_follow_carrier)].
+			const bool wire_frozen = es.state_flags_known &&
+					(es.state_flags & replication::kVehicleFlagDeadPose) != 0u;
+			if (wire_frozen) {
+				// The row holds its snapped/followed pose; the registry
+				// entity adopts it below like any un-predicted row so
+				// occlusion/collision see the wreck where it rests. The
+				// platform/motor transients die with the freeze so a
+				// respawned or re-staged hull never inherits stale bob
+				// phase, accumulators, or vertical velocity.
+				m.net_predicted = false;
+				m.net_seen_revision = es.compact_revision;
+				// The motor's speed registers are transients too: the
+				// client pass still runs the movement-sound tail for a
+				// frozen row [world/ai_system.cpp fallback branch ->
+				// update_ground_vehicle_sound], which reads veh.speed
+				// directly, so a row frozen mid-motion would keep playing
+				// its moving engine lane (and hold a reverse latch) on
+				// state nothing advances any more.
+				m.speed = 0;
+				m.speed_accel = 0;
+				m.cmd_speed = 0;
+				m.slide_z = 0;
+				// The yaw rate and the tank's pivot latch as well: the frozen
+				// row's fold would otherwise keep re-registering the fourth
+				// loop from a latch the traction tail can no longer clear.
+				m.wheel_rate_bam = 0;
+				m.pivot_sound_latched = false;
+				m.pivot_sound_prev_rate = 0;
+				es.vehicle_vertical_velocity_pending = false;
+				m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
+						m.plat_acc[3] = 0;
+				m.plat_at_rest = false;
+				m.plat_porpoise = false;
+				m.plat_planing = false;
+				m.plat_bob_phase = 0.0f;
+				local->position.x.q16 = es.x;
+				local->position.y.q16 = es.y;
+				local->position.z.q16 = es.z;
+				return;
+			}
+			if (es.compact_revision != m.net_seen_revision) {
+				const bool prediction_arming = !m.net_predicted;
+				m.net_seen_revision = es.compact_revision;
+				// Every live record lands its carrier as the ground link, or
+				// null for the 0xFFFF form; the mover's own ground refresh
+				// rewrites it every eighth tick [orig: Entity_SerializeVehicleState
+				// @0x460802 (esi = the carrier, 0 @0x4607AF)].
+				const world::Entity *record_carrier =
+						es.carrier_handle != 0xFFFFu
+								? replica_world_entity(world,
+										  world::EntityHandle{es.carrier_handle})
+								: nullptr;
+				local->ground_target = record_carrier != nullptr
+						? record_carrier->handle
+						: world::EntityHandle{};
+				// The fold live-snapped the row to the wire sample (rows
+				// whose first compact landed before this flag flipped stage
+				// their pre-compact pose for one record — self-corrected by
+				// the next fold's live snap); that sample is the staged
+				// target [orig: the mode-2 staging].
+				m.net_smooth_target[0] = es.x;
+				m.net_smooth_target[1] = es.y;
+				m.net_smooth_target[2] = es.z;
+				m.net_smooth_heading = es.heading_bam;
+				m.net_recv_speed = es.vehicle_speed_reg;
+				m.net_recv_steer_bam = es.vehicle_steer_bam;
+				m.net_recv_lat = es.vehicle_lat_reg;
+				// entity+0xA0 vertical velocity: every live record the
+				// wire-dead gate admitted re-lands the family prediction's
+				// slide_z [orig: the mode-2 store @0x46091e].
+				if (es.vehicle_vertical_velocity_pending) {
+					m.slide_z = es.vehicle_vertical_velocity;
+					es.vehicle_vertical_velocity_pending = false;
+				}
+				// The replicated engine/collective bit [orig: Flags 0x80,
+				// air families].
+				m.net_engine_on = (es.state_flags & 0x80u) != 0u;
+				m.net_interp_progress = 0;
+				// Live vehicle compacts omit Euler X/Y. Seed the client mover's
+				// attitude exactly once when prediction arms from the retained
+				// spawn/dead-pose row; re-seeding on every live compact would
+				// erase the platform/aero solve performed between records.
+				if (prediction_arming) {
+					m.air_pitch_bam = es.pitch_bam;
+					m.air_roll_bam = es.roll_bam;
+					m.plat_solve_valid = false;
+					// Promotion seam (no retail equivalent — retail's contact
+					// solve runs from entity existence, so Flags 0x2000 is
+					// always current): seed an arming Air-family row airborne
+					// so its first predicted tick runs the aero block, not
+					// the grounded sheds. The tick-tail solve reproduces the
+					// true state one tick later either way.
+					if (traits->family == world::VehicleFamily::Helicopter ||
+							traits->family == world::VehicleFamily::Plane)
+						local->flags |= world::kEntityFlagInAir;
+				}
+				m.net_predicted = true;
+			}
+			return; // the world mover owns the registry position now
 		}
-		local->position.x.q16 = es.x;
-		local->position.y.q16 = es.y;
-		local->position.z.q16 = es.z;
 	}
+	local->position.x.q16 = es.x;
+	local->position.y.q16 = es.y;
+	local->position.z.q16 = es.z;
 }
 
 // The world->view half of the watercraft prediction: after the tick, the
 // predicted registry pose becomes the presented row pose (present reads the
 // client replicas, ADR 0011). Heading gains the mover's full BAM precision.
 void JoinerRole::mirror_predicted_vehicles() {
-	mission::MissionKernel &kernel = *kernel_;
-	world::World &world = kernel.world;
-	world::LocalPlayer &lp = kernel.local;
-	ClientRuntime &rt = *runtime;
-	for (replication::ClientEntityState &es : rt.state().entities) {
-		if (!es.net_world_mover) continue;
-		const world::EntityHandle h{es.handle};
-		world::Entity *local = replica_world_entity(world, h);
-		if (local == nullptr || !local->veh.net_predicted) continue;
-		es.x = local->position.x.q16;
-		es.y = local->position.y.q16;
-		es.z = local->position.z.q16;
-		es.heading_bam = local->veh.yaw_bam;
-		local->heading = local->veh.yaw_bam;
-		// Every family mover owns live attitude now: air/water solves plus the
-		// ground/bike wheeled contact solve (Entity_ProcessTrackedVehiclePhysics
-		// @0x47C1C0 client subset). Publish zero too: level is a real solved
-		// pose, not a validity sentinel. A boxless ground row's motor never
-		// advances the seeded wire attitude, so the mirror is stable there.
-		const world::VehicleTraits *traits =
-				world.vehicles.traits.get(local->item_id);
-		const bool owns_attitude = traits != nullptr;
-		if (owns_attitude) {
-			es.pitch_bam = local->veh.air_pitch_bam;
-			es.roll_bam = local->veh.air_roll_bam;
-			// Mounted-pose and bone consumers read Entity pitch/roll, not the
-			// motor registers. Keep the exact-handle materialized carrier coherent before
-			// the post-mover attachment phase below.
-			local->pitch_bam = local->veh.air_pitch_bam;
-			local->roll_bam = local->veh.air_roll_bam;
-		}
+	for (replication::ClientEntityState &es : runtime->state().entities)
+		if (es.net_world_mover) mirror_predicted_vehicle(es);
+}
+
+void JoinerRole::mirror_predicted_vehicle(replication::ClientEntityState &es) {
+	world::World &world = kernel_->world;
+	const world::EntityHandle h{es.handle};
+	world::Entity *local = replica_world_entity(world, h);
+	if (local == nullptr || !local->veh.net_predicted) return;
+	es.x = local->position.x.q16;
+	es.y = local->position.y.q16;
+	es.z = local->position.z.q16;
+	es.heading_bam = local->veh.yaw_bam;
+	local->heading = local->veh.yaw_bam;
+	// Every family mover owns live attitude now: air/water solves plus the
+	// ground/bike wheeled contact solve (Entity_ProcessTrackedVehiclePhysics
+	// @0x47C1C0 client subset). Publish zero too: level is a real solved
+	// pose, not a validity sentinel. A boxless ground row's motor never
+	// advances the seeded wire attitude, so the mirror is stable there.
+	const world::VehicleTraits *traits =
+			world.vehicles.traits.get(local->item_id);
+	const bool owns_attitude = traits != nullptr;
+	if (owns_attitude) {
+		es.pitch_bam = local->veh.air_pitch_bam;
+		es.roll_bam = local->veh.air_roll_bam;
+		// Mounted-pose and bone consumers read Entity pitch/roll, not the
+		// motor registers. Keep the exact-handle materialized carrier coherent before
+		// the post-mover attachment phase below.
+		local->pitch_bam = local->veh.air_pitch_bam;
+		local->roll_bam = local->veh.air_roll_bam;
 	}
 }
 
@@ -1229,18 +1227,44 @@ void JoinerRole::refresh_wire_collision_proxies() {
 //  @0x4E5340 (g_DynProxEntity @0x4E5760, the Physics_RaycastAgainstBoneCollision call
 //  @0x4E578D)]
 void JoinerRole::sync_wire_collision_proxies_live() {
-	world::World &world = kernel_->world;
-	if (world.ai.collision == nullptr) return;
-	for (const replication::ClientEntityState &row : runtime->state().entities) {
-		const world::FixedVec3 position{row.x, row.y, row.z};
-		if (row.cls == EntityClass::Player || row.cls == EntityClass::Infantry) {
-			world.ai.collision->set_wire_person_proxy_live(row.handle, position,
-					(row.rm_entity_flags & world::kEntityFlagDead) != 0);
-		} else if (wire_handle::pool(row.handle) == wire_handle::kPoolItem) {
-			world.ai.collision->set_wire_dynamic_proxy_live(row.handle, position,
-					row.heading_bam, row.pitch_bam, row.roll_bam);
-		}
+	if (kernel_->world.ai.collision == nullptr) return;
+	for (const replication::ClientEntityState &row : runtime->state().entities)
+		sync_wire_collision_proxy_live(row);
+}
+
+void JoinerRole::sync_wire_collision_proxy_live(const replication::ClientEntityState &row) {
+	world::CollisionWorld *collision = kernel_->world.ai.collision;
+	if (collision == nullptr) return;
+	const world::FixedVec3 position{row.x, row.y, row.z};
+	if (row.cls == EntityClass::Player || row.cls == EntityClass::Infantry) {
+		collision->set_wire_person_proxy_live(row.handle, position,
+				(row.rm_entity_flags & world::kEntityFlagDead) != 0);
+	} else if (wire_handle::pool(row.handle) == wire_handle::kPoolItem) {
+		collision->set_wire_dynamic_proxy_live(row.handle, position, row.heading_bam,
+				row.pitch_bam, row.roll_bam);
 	}
+}
+
+// The World's pool-1 slot leg on a joiner (World::pool1_slot_leg, installed by the pump):
+// the slot's decoded row takes its visit at its own slot, right after the World's mover
+// ran there, interleaved with the World's movers in slot order. A row the World's mover
+// predicts takes its twin's pose (mirror_predicted_vehicle), any other row's twin takes
+// the row's pose (mirror_mission_entity: a chased hull's chase, a deck rider's follow);
+// then its proxy's live words, which the projectile pass after the walk reads past its
+// slot gate on the previous build's copy (D-NET-196).
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+//  Entity_UpdatePool1Slot calls @0x4C21B9 / @0x4C21D0 / @0x4C21E0 / @0x4C21E9, the
+//  Weapon_UpdateAllProjectiles call @0x4C223A; Entity_UpdatePool1Slot @0x4B8DD0 - the
+//  +0x1C4 mover @0x4B8E41..0x4B8E53; Projectile_RaycastProximitySlots @0x4E5340
+//  (g_DynProxEntity @0x4E5760)]
+void JoinerRole::visit_replica_pool1_slot(world::EntityHandle handle) {
+	replication::ClientEntityState *row = runtime->view().visit_pool1_row(handle.packed);
+	if (row == nullptr) return;
+	if (row->net_world_mover)
+		mirror_predicted_vehicle(*row);
+	else
+		mirror_mission_entity(*row);
+	sync_wire_collision_proxy_live(*row);
 }
 
 } // namespace opennova::inmatch

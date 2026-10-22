@@ -105,6 +105,44 @@ void test_the_build_leg_runs_ahead_of_the_pool0_leg() {
     CHECK(order.size() == 2 && order[0] == 1 && order[1] == 2);
 }
 
+// The pool-1 slot leg (L5-s16, design (c)): the walk calls it at every pool-1 slot in slot
+// order, a slot the registry holds no row at included, a row's ground chain visited
+// first (the chain's slot then takes no second call), and every call ahead of the
+// proximity build's leg, so ahead of the projectile pass between them. Each row's call
+// comes as its +0x1C4 legs end: a falling dropped object (a genx row's class motion)
+// has taken this tick's step when its leg reads it.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the walk @0x4C2158..0x4C21E9 (the
+//  Entity_UpdatePool1Slot calls @0x4C21B9 / @0x4C21D0 / @0x4C21E0 / @0x4C21E9), the
+//  Weapon_UpdateAllProjectiles call @0x4C223A, the proximity build @0x4C240A;
+//  Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C4 call @0x4B8E41..0x4B8E53]
+void test_the_pool1_slot_leg_runs_at_each_slot_in_slot_order() {
+    Joiner j;
+    j.world.registry.configure_pool(1, 4);
+    Entity item;
+    item.kind = EntityKind::Item;
+    item.position = {40.0f, 40.0f, 20.0f};
+    Entity falling = item;
+    falling.drop_motion = DropMotion::Fall;
+    falling.veh.vel_x = kQ; // one unit a tick along +x, well above the ground
+    CHECK(j.world.registry.spawn_at(EntityHandle{0x1001}, falling) == EntityHandle{0x1001});
+    Entity rider = item;
+    rider.ground_target = EntityHandle{0x1003}; // the slot past it carries it
+    CHECK(j.world.registry.spawn_at(EntityHandle{0x1002}, rider) == EntityHandle{0x1002});
+    CHECK(j.world.registry.spawn_at(EntityHandle{0x1003}, item) == EntityHandle{0x1003});
+    std::vector<uint16_t> order;
+    int32_t falling_x_at_leg = 0;
+    j.world.pool1_slot_leg = [&](EntityHandle handle) {
+        order.push_back(handle.packed);
+        if (handle.packed == 0x1001)
+            falling_x_at_leg = j.world.registry.get(handle)->position.x.q16;
+    };
+    j.world.before_proximity_build = [&order] { order.push_back(0xFFFF); };
+    j.world.run_logic_tick(/*is_authority=*/false);
+    const std::vector<uint16_t> expected = {0x1000, 0x1001, 0x1003, 0x1002, 0xFFFF};
+    CHECK(order == expected);
+    CHECK(falling_x_at_leg == 41 * kQ);
+}
+
 // A remote person the receive spawned since the last build: this update's projectile
 // pass flies a round straight through where it stands and finds no table row for it;
 // the build after the pass adds it, and the next update's round strikes it.
@@ -227,6 +265,7 @@ void test_a_dynamic_proxy_gates_on_the_copy_and_poses_the_live_mover() {
 
 int main() {
     test_the_build_leg_runs_ahead_of_the_pool0_leg();
+    test_the_pool1_slot_leg_runs_at_each_slot_in_slot_order();
     test_a_row_spawned_since_the_build_misses_this_updates_projectiles();
     test_the_projectile_pass_gates_on_the_previous_builds_copy();
     test_a_dynamic_proxy_gates_on_the_copy_and_poses_the_live_mover();

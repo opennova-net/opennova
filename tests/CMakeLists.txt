@@ -5277,6 +5277,11 @@ add_test(NAME netsim_client_replica_rider_middle_leg COMMAND netsim_client_repli
 add_executable(wire_proxy_table_age_test world/wire_proxy_table_age_test.cpp)
 target_link_libraries(wire_proxy_table_age_test PRIVATE opennova_runtime)
 add_test(NAME wire_proxy_table_age COMMAND wire_proxy_table_age_test)
+# D-NET-196 design (c): a joiner's decoded pool-1 rows take their visits at their own slots
+# of the World's pool-1 walk, interleaved with the World's movers in slot order.
+add_executable(netsim_joiner_pool1_interleave_test netsim/joiner_pool1_interleave_test.cpp)
+target_link_libraries(netsim_joiner_pool1_interleave_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_joiner_pool1_interleave COMMAND netsim_joiner_pool1_interleave_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

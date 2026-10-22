@@ -1646,7 +1646,11 @@ uint32_t ClientReplicaPipeline::remote_walk_split_key(uint16_t self_handle) cons
 // [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
 //  Weapon_UpdateAllProjectiles call @0x4C223A, the proximity build @0x4C240A, the pool-0
 //  walk @0x4C2426..0x4C2472]
+// Under the pool-1 interleave it parks from pool 1's first slot: every pool-1 row updates
+// at its own slot of the World's pool-1 walk (D-NET-196).
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9]
 uint32_t ClientReplicaPipeline::remote_walk_park_key(uint16_t self_handle) const {
+	if (pool1_interleave_ && remote_motion_mode_) return remote_walk_key(0x1000u);
 	return remote_walk_split_key(self_handle) == UINT32_MAX ? UINT32_MAX
 	                                                        : remote_walk_key(0x0000u);
 }
@@ -1723,9 +1727,16 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	}
 	parked_self_ = self_handle;
 	parked_tick_ = rm_key;
+	// Under the pool-1 interleave the pool-1 rows wait for their slots in the World's
+	// pool-1 walk (visit_pool1_row), the rest for the pool-0 halves (D-NET-196).
 	for (size_t k = through; k < walk.size(); ++k) {
 		ClientEntityState &parked = state_.entities[walk[k]];
 		parked.rm_parked = true;
+		if (pool1_interleave_ && (parked.handle >> 12u) == 1u) {
+			pool1_rows_.push_back(parked.handle);
+			pool1_parked_[parked.handle] = walk[k];
+			continue;
+		}
 		(remote_walk_key(parked.handle) <= split ? middle_rows_ : parked_rows_)
 				.push_back(parked.handle);
 	}
@@ -1742,6 +1753,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 }
 
 void ClientReplicaPipeline::tick_remote_motion_through_self() {
+	finish_pool1_rows();
 	if (middle_rows_.empty()) return;
 	std::vector<uint16_t> rows;
 	rows.swap(middle_rows_);
@@ -1755,6 +1767,46 @@ void ClientReplicaPipeline::tick_remote_motion_after_self() {
 	std::vector<uint16_t> rows;
 	rows.swap(parked_rows_);
 	visit_parked_rows(rows);
+}
+
+// A pool-1 row's visit at its own slot of the World's pool-1 walk: its carrier follow
+// opens it, then its body visit, as the parked pool-0 rows' (visit_parked_rows); a hull
+// on a deck reads its carrier as it stands at this slot, a carrier the walk visited
+// first (a lower slot, or the World's ground chain ahead of the row) moved this tick
+// (D-NET-196). [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk
+// @0x4C2158..0x4C21E9, the Entity_UpdatePool1Slot calls @0x4C21B9 / @0x4C21D0 /
+// @0x4C21E0 / @0x4C21E9]
+ClientEntityState *ClientReplicaPipeline::visit_pool1_row(uint16_t handle) {
+	const auto parked = pool1_parked_.find(handle);
+	if (parked == pool1_parked_.end()) return nullptr;
+	const size_t index = parked->second;
+	pool1_parked_.erase(parked);
+	ClientEntityState *es = index < state_.entities.size() &&
+					state_.entities[index].handle == handle
+			? &state_.entities[index]
+			: state_.find(handle);
+	if (es == nullptr || !es->rm_parked) return nullptr;
+	es->rm_parked = false;
+	if (follows_carrier_seat(*es)) follow_carrier_seat(*es, state_.find(es->carrier_handle));
+	// A pool-1 row is no organic: its visit takes no lean, dip or ramp and expires no
+	// corpse, so the World's walk keeps every row it may read.
+	visit_remote_row(*es, parked_self_, parked_tick_);
+	select_row_weapon_channel(*es, parked_self_, parked_tick_);
+	return es;
+}
+
+std::vector<uint16_t> ClientReplicaPipeline::unvisited_pool1_rows() const {
+	std::vector<uint16_t> rows;
+	for (const uint16_t handle : pool1_rows_)
+		if (pool1_parked_.count(handle) != 0) rows.push_back(handle);
+	return rows;
+}
+
+void ClientReplicaPipeline::finish_pool1_rows() {
+	if (pool1_rows_.empty()) return;
+	std::vector<uint16_t> rows;
+	rows.swap(pool1_rows_);
+	for (const uint16_t handle : rows) visit_pool1_row(handle);
 }
 
 void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
@@ -1778,9 +1830,10 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
 		lean_decay_row(es);
 		arms_dip_row(es);
 		// A compact-carried row's own update poses it on its carrier as the carrier
-		// stands now: the pool-1 walk ahead of the pool-0 walk moved it this tick (a
-		// chased hull in ClientRuntime's leg, a World mover in the World's walk, mirrored
-		// onto its row ahead of this leg). Nothing ahead of the mounted site reads the
+		// stands now: the pool-1 walk ahead of the pool-0 walk moved it this tick (at its
+		// own slot of the World's walk under the pool-1 interleave, a chased hull's chase
+		// or a World mover's pose mirrored onto its row there; in ClientRuntime's leg
+		// without it). Nothing ahead of the mounted site reads the
 		// body's pose (the channel, the ride link), and the site's eye reads it after the
 		// attach, so the follow opens the visit. ClientRuntime's leg passed over the
 		// parked row (refresh_carried_entities), so until here it held the pose its last
@@ -1788,7 +1841,9 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
 		// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9
 		//  ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
 		//  @0x4B40E0 - the site selector on the mount word +0x16C @0x4B637C..0x4B638F, the
-		//  Entity_AttachToBoneAndUpdateTransform call @0x4B63C7 ahead of the eye restamp]
+		//  kind-3 Entity_AttachToBoneAndUpdateTransform call @0x4B63C7, every other kind's
+		//  bone pose through the branch @0x4B64EF to the Entity_GetBoneTransformAndOrientation
+		//  call @0x4B6510, ahead of the eye restamp]
 		if (follows_carrier_seat(es)) {
 			const auto carrier = row_by_handle.find(es.carrier_handle);
 			follow_carrier_seat(es, carrier == row_by_handle.end()

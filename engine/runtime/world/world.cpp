@@ -384,6 +384,13 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // carry objects), or a genx def's own ride.
     if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
     if ((e = live()) == nullptr) return;
+    // The +0x1C4 call ends here, whichever class leg it took: a joiner's decoded row
+    // takes its visit at this slot (D-NET-196). [orig: Entity_UpdatePool1Slot
+    //  @0x4B8E41..0x4B8E53, the return @0x4B8E55]
+    if (pool1_slot_leg) {
+        pool1_slot_leg(handle);
+        if ((e = live()) == nullptr) return;
+    }
     // A mounted non-organic brain re-poses on its seat after the mover ran.
     if (brain != nullptr && ctx.is_authority && brain->brain.f[AiBrain::kOwner] != 0)
         ai.refresh_mounted_pose(*brain, *this);
@@ -455,7 +462,12 @@ void World::update_all_entities(const TickContext &ctx) {
     for (size_t slot = 0; slot < pool1; ++slot) {
         const EntityHandle handle = EntityHandle::make(1, static_cast<int>(slot));
         Entity *row = registry.get(handle);
-        if (row == nullptr || row->pool1_visited) continue;
+        if (row == nullptr) {
+            // A decoded row with no registry row visits at its own slot (D-NET-196).
+            if (pool1_slot_leg) pool1_slot_leg(handle);
+            continue;
+        }
+        if (row->pool1_visited) continue;
         if (Entity *p1 = unvisited_parent(row)) {
             if (Entity *p2 = unvisited_parent(p1)) {
                 if (Entity *p3 = unvisited_parent(p2)) update_pool1_slot(*p3, ctx);

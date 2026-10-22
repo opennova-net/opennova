@@ -1348,6 +1348,18 @@ public:
     // on every other peer. [orig: Entity_UpdateAllEntities @0x4C2100 - the proximity
     // build @0x4C240A, the pool-0 walk @0x4C2426..0x4C2472]
     std::function<void()> before_pool0_walk;
+    // The embedder's leg at each pool-1 slot of the walk, its handle the slot's: a
+    // joiner's decoded pool-1 row takes its visit there, at its own slot in slot order
+    // (D-NET-196). update_pool1_slot calls it as the slot's +0x1C4 legs end (the vehicle
+    // mover, which returns at once for a traitless row, the ewep class update, the item
+    // callbacks, the drop motion), so a chased hull's chase runs at its mover's position
+    // and a World mover's pose, or an ewep or genx row's class update, reaches its row
+    // right after it; a slot the registry holds no row at calls it in the walk. Empty on
+    // every other peer. [orig:
+    // Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+    // Entity_UpdatePool1Slot calls @0x4C21B9 / @0x4C21D0 / @0x4C21E0 / @0x4C21E9;
+    // Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C4 mover @0x4B8E41..0x4B8E53]
+    std::function<void(EntityHandle)> pool1_slot_leg;
 
     // May the mission script advance this tick? Retail wraps its WAC tick, the
     // idle-timer sweep and the BMS event pump in ONE condition, and the half that
