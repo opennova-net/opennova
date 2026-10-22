@@ -133,7 +133,7 @@ struct LanBurstDatagram {
 // One row of the LAN list: the session's address and the hello it was discovered
 // with, copied from its list node when the row was appended, and the key the row
 // table holds, the session record's id (a record replaced or expired leaves its row;
-// LanDiscoveryBrowser::advance's walk).
+// LanDiscoveryBrowser::end_frame's walk).
 struct LanDiscoveryRow {
 	std::string host_ip;
 	int port = 0;
@@ -179,12 +179,13 @@ std::string lan_discovery_row_label(const std::string &server_name, const std::s
 // EPN, the 30-second window, the 3-second re-announce cadence, the reply filter
 // (the browsed port range, a usable source address, our CI, a retail-identity
 // 0x81), the enumerator's session records and the list's row walk. The embedder
-// owns the socket: it sends `burst()` on begin and whenever `advance` reports
-// an announce due, feeds every received datagram to `accept_reply` and then runs the
-// frame's `pump_queue`, and stops the enumerator when `advance` returns false. That socket is the client's one transport socket
-// for its network type, and the join from a discovered row goes on with it and
-// with the enumerator's connection (D-NET-NEW-R3-3): retail opens one transport
-// socket per mode and never re-opens it between the browse and the join, the join
+// owns the socket: it sends `burst()` on begin, runs each outer frame through `frame`
+// (its legs: a due re-announce's burst, every received datagram to `accept_reply`, the
+// held server's walk), and stops the enumerator when `frame` returns false. That socket
+// is the client's one transport socket for its network type, and the join from a
+// discovered row goes on with it and with the enumerator's connection (D-NET-NEW-R3-3):
+// retail opens one transport socket per mode and never re-opens it between the browse and
+// the join, the join
 // takes the ctx's one client connection, and the NovaWorld lobby protocol rides the
 // same manager and socket (net/npwire/datagram_demux.h).
 // [orig: CNapiNetwork_SetTransportMode @0x4c8750 - the same mode returns at once
@@ -296,9 +297,9 @@ public:
 	const ProxyRendezvousConfig &proxy() const { return proxy_; }
 	// One burst of the enumerator pump, in send order: with all six proxy fields
 	// set, the 48-byte rendezvous to the game node first, then one announce per
-	// port of the range. The embedder sends a burst on begin and whenever
-	// `advance` reports an announce due; a join from a row stops the enumerator,
-	// so no rendezvous follows it (D-NET-712).
+	// port of the range. The embedder sends a burst on begin and whenever a frame's
+	// re-announce falls due (`frame`'s send_burst leg); a join from a row stops the
+	// enumerator, so no rendezvous follows it (D-NET-712).
 	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the enumerator
 	//  gate @0x6290e3 (enumerator+44), the six-field gate @0x629122..0x62914f,
 	//  CNapiNPConnection_SendPingPacket @0x61F8C0 called @0x629159 ahead of the
@@ -306,19 +307,46 @@ public:
 	//  @0x4ca160 - NapiTimer_Stop(enumerator) @0x4ca1d8 clears enumerator+44]
 	std::vector<LanBurstDatagram> burst() const;
 
-	// One outer frame after its replies (accept_reply), in retail's order: the
-	// protocol pump's re-announce (`announce_due`; the announce clock restarts from
-	// zero, not from the overshoot) and record expiry, then the window's gate, then the
-	// list's walk, which runs on the window's last frame too. False once the window has
-	// expired (the browse is stopped; never for an unwindowed browse); a re-announce due
-	// on that last frame is still reported.
-	// [orig: UI_ProcessLANSessionStateMachine @0x558de0 -
-	//  CNapiNetwork_PumpTransportAndProtocol (the call @0x559324), the gate @0x55933a,
-	//  the walk @0x559384..0x559546; CNapiNetwork_PumpTransportAndProtocol @0x4C6E00 -
-	//  the manager's receive @0x4C6E2B ahead of the protocol's pump @0x4C6E3D;
-	//  CNapiNPConnection_PumpFlags @0x629780 - the announce @0x6297B7 ahead of the state
-	//  machine @0x6297C3]
-	bool advance(double delta_seconds, bool &announce_due);
+	// One outer frame's embedder legs: the burst of a due re-announce (the embedder sends
+	// `burst()`), the receive (every datagram the socket holds, each to accept_reply) and
+	// the protocol pump's walk over the process's held server. An empty leg does nothing.
+	struct FrameLegs {
+		std::function<void()> send_burst;
+		std::function<void()> receive;
+		std::function<void()> held_walk;
+	};
+	// One outer frame of the browse while the enumerator runs, in retail's order. Every leg
+	// reads the frame's one tick (a reply's record stamp, the re-announce test, the record
+	// expiry, the window's gate), which advances by `delta_seconds` first. The browse
+	// connection's protocol-pump legs are the re-announce test (due: `legs.send_burst`; the
+	// announce clock restarts from zero, not from the overshoot) and then the connection's
+	// state machine, whose state 2 expires the records. The LAN screen's search (the windowed
+	// browse) runs them at its menu frame's top, in the client protocol's send pump (flags
+	// 0x2E2: the type-2 browse connection's 0x20 and 0x40 legs, and no held node, whose type
+	// is 1): a due re-announce leaves ahead of the frame's replies, their packet and NET GOT
+	// lines and the held server's datagrams, and a record that expires goes ahead of a reply
+	// the same frame reads, which then makes a new record; that frame's Pump(-1) walk finds
+	// the interval restarted. The enumerate-and-join's loop (the unwindowed browse) runs no
+	// such pump: its Pump(-1) reaches the browse connection after the receive, the queue pass
+	// and the held server's nodes, which the protocol's list holds ahead of it. Between them
+	// the receive (`legs.receive`), its queue pass (pump_queue) and the held server's walk
+	// (`legs.held_walk`). Then the window's gate and the list's walk, which runs on the
+	// window's last frame too: a re-announce due on that frame still goes out. False once the
+	// window has expired (the browse is stopped; never for an unwindowed browse), and false
+	// with nothing run once the enumerator stopped.
+	// [orig: Menu_UpdateFrame @0x5528A0 - UI_ProcessLANSessionStateMachine's one call
+	//  @0x5528ED; UI_ProcessLANSessionStateMachine @0x558DE0 -
+	//  CNapiNetwork_PumpClientProtocolRecv called @0x558E04, CNapiNetwork_PumpClientProtocolSend
+	//  called @0x558E0E, the searching test @0x559312, CNapiNetwork_PumpTransportAndProtocol
+	//  called @0x559324, the gate @0x55933a, the walk @0x559384..0x559546;
+	//  CNapiNetwork_PumpClientProtocolSend @0x4C5000 - `push 2E2h` @0x4C500B, NapiNPProtocol_Pump
+	//  called @0x4C5010; CNapiNetwork_PumpTransportAndProtocol @0x4C6E00 - the manager's receive
+	//  @0x4C6E2B ahead of the protocol's Pump(-1) @0x4C6E3D; UI_EnumerateAndJoinSession
+	//  @0x569F50 - the loop's PumpTransportAndProtocol alone @0x56A0D5;
+	//  CNapiNPConnection_PumpFlags @0x629780 - the type test @0x629788..0x62978F, the 0x20 leg
+	//  CNapiNPConnection_PumpEnumeratorAndSend (the call @0x6297B7) ahead of the 0x40 leg
+	//  CNapiNPConnection_PumpStateMachine (the call @0x6297C3)]
+	bool frame(double delta_seconds, const FrameLegs &legs);
 
 	// The manager's receive of one datagram from the browse's socket, with its packet lines
 	// (napi_got_raw_text .. napi_tossed_text, through set_connect_log): RAW, PunkBuster's
@@ -412,6 +440,15 @@ private:
 	void create_record(const PeerAddr &from, LanDiscoveryServer server);
 	void destroy_record(size_t index);
 	void expire_records();
+	// The browse connection's protocol-pump legs (frame): the re-announce test (true: due),
+	// then the state machine's record expiry.
+	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the running gate
+	//  (enumerator+44), the interval test @0x629119, the restamp @0x62911F;
+	//  CNapiNPConnection_PumpStateMachine @0x6292E0 - state 2 @0x629414, the running gate
+	//  @0x62941E]
+	bool pump_enumerator();
+	// The frame's end: the window's gate, then the list's walk.
+	bool end_frame();
 	void walk_rows();
 	void connect_log(const std::string &text) const;
 

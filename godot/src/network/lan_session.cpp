@@ -340,23 +340,23 @@ void LanSession::_process(double delta) {
 		return;
 	}
 
-	// The frame in retail's order (engine: LanDiscoveryBrowser::advance): the replies,
-	// the re-announce and record expiry, the window's gate, then the list's walk; a
-	// re-announce due on the window's last frame still goes out. The frame's protocol pump
-	// steps the process's held server between the receive and the enumerator's sends, its queue
-	// pass (the replies the receive queued: NET GOT and their records) ahead of the nodes' legs.
-	poll_replies();
-	browser_.pump_queue();
-	pump_held_server();
+	// The frame in retail's order (engine: LanDiscoveryBrowser::frame carries the witness):
+	// the LAN screen's search pumps the browse connection's legs (a due re-announce's burst,
+	// then the record expiry) at the frame's top, the enumerate-and-join after the held
+	// server's walk. Between them, the receive, its queue pass (the replies it queued: NET GOT
+	// and their records) and the held server's nodes. Then the window's gate and the list's
+	// walk; a re-announce due on the window's last frame still goes out.
 	const size_t listed = browser_.servers().size();
-	bool announce_due = false;
-	const bool open = browser_.advance(delta, announce_due);
-	// Transient send errors during a re-announce are dropped like retail's
-	// fire-and-forget pump.
-	if (announce_due) {
+	opennova::LanDiscoveryBrowser::FrameLegs legs;
+	// Transient send errors during a re-announce are dropped like retail's fire-and-forget
+	// pump.
+	legs.send_burst = [this] {
 		Error ignored_error = OK;
 		send_probe_burst(ignored_error);
-	}
+	};
+	legs.receive = [this] { poll_replies(); };
+	legs.held_walk = [this] { pump_held_server(); };
+	const bool open = browser_.frame(delta, legs);
 	if (browser_.servers().size() != listed) rebuild_rows();
 	// The window's end stops the enumerator alone: the transport stays open until the
 	// mode changes, and a join from a row goes on with it (engine: LanDiscoveryBrowser::stop

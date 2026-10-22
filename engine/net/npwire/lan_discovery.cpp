@@ -313,11 +313,28 @@ bool LanDiscoveryBrowser::join_session(size_t row, LanDiscoveryRow &out) const {
 	return false;
 }
 
-bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
-	announce_due = false;
+bool LanDiscoveryBrowser::frame(double delta_seconds, const FrameLegs &legs) {
 	if (!browsing_) return false;
 	browse_elapsed_s_ += delta_seconds;
 	announce_elapsed_s_ += delta_seconds;
+	const auto enumerator = [&] {
+		if (pump_enumerator() && legs.send_burst) legs.send_burst();
+	};
+	// The LAN screen's client send pump leads its menu frame [orig:
+	//  UI_ProcessLANSessionStateMachine @0x558DE0 - @0x558E0E ahead of @0x559324].
+	if (windowed_) enumerator();
+	// The receive, then the Pump(-1)'s queue pass and walk [orig:
+	//  CNapiNetwork_PumpTransportAndProtocol @0x4C6E00 - @0x4C6E2B, @0x4C6E3D].
+	if (legs.receive) legs.receive();
+	pump_queue();
+	if (legs.held_walk) legs.held_walk();
+	// The enumerate-and-join's Pump(-1) reaches the browse connection after the held nodes.
+	if (!windowed_) enumerator();
+	return end_frame();
+}
+
+bool LanDiscoveryBrowser::pump_enumerator() {
+	if (!browsing_) return false;
 	// A cold host that binds its port mid-window is only discoverable because
 	// the enumerator keeps announcing. The re-announce is due strictly after
 	// the interval [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 —
@@ -325,11 +342,19 @@ bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
 	// browse sets to 3000: CNapiGameSession_InitTransportConnection @0x4c9f9d), the last
 	// send read @0x629108, `!last_send || tick_count - last_send_tick > interval`
 	// @0x629119, the restamp @0x62911f].
+	bool announce_due = false;
 	if (announce_elapsed_s_ > kLanAnnounceIntervalSeconds) {
 		announce_elapsed_s_ = 0.0;
 		announce_due = true;
 	}
+	// The 0x40 leg after the 0x20 leg [orig: CNapiNPConnection_PumpFlags @0x629780 -
+	//  @0x6297B7, @0x6297C3].
 	expire_records();
+	return announce_due;
+}
+
+bool LanDiscoveryBrowser::end_frame() {
+	if (!browsing_) return false;
 	// Strictly greater: `GetTickCount() - search_start > 0x7530` @0x55933a; the
 	// enumerate-and-join's loop has no window (set_windowed).
 	const bool open = !(windowed_ && browse_elapsed_s_ > kLanBrowseWindowSeconds);

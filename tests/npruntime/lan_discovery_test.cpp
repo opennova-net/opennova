@@ -84,6 +84,15 @@ std::vector<uint8_t> without_field(const std::vector<uint8_t> &datagram, std::st
     return nw_encode_outbound(opcode, kept);
 }
 
+// One frame with nothing received between its legs (LanDiscoveryBrowser::frame): `due` is
+// whether its re-announce fell due.
+bool run_frame(LanDiscoveryBrowser &b, double dt, bool &due) {
+    due = false;
+    LanDiscoveryBrowser::FrameLegs legs;
+    legs.send_burst = [&due] { due = true; };
+    return b.frame(dt, legs);
+}
+
 void test_begin_validates_the_range_and_fixes_one_identity() {
     opennova::LanDiscoveryBrowser b;
     CHECK(!b.begin(kJo, 7, kBroadcast, 0, 100, kLanConnectTypeLan));
@@ -97,7 +106,7 @@ void test_begin_validates_the_range_and_fixes_one_identity() {
     CHECK(!b.probe(kRetailLanPortMin).empty());
     const std::vector<uint8_t> first = b.probe(kRetailLanPortMin);
     bool due = false;
-    b.advance(1.0, due);
+    run_frame(b, 1.0, due);
     CHECK(b.probe(kRetailLanPortMin) == first); // the identity holds across the window
     CHECK(b.probe(kRetailLanPortMin) ==
           opennova::build_lan_discovery_probe(kJo, 7, kBroadcast, kRetailLanPortMin));
@@ -170,7 +179,7 @@ void test_window_and_announce_cadence() {
     int frames = 0;
     // 64 fps frames (1/64 s is exact in binary, so the sums are too): the window
     // closes once elapsed EXCEEDS 30 s, a re-announce falls due strictly AFTER 3 s.
-    while (b.advance(1.0 / 64.0, due)) {
+    while (run_frame(b, 1.0 / 64.0, due)) {
         ++frames;
         if (due) ++announces;
     }
@@ -180,8 +189,8 @@ void test_window_and_announce_cadence() {
     // tenth would land at frame 1930, past the window: nine.
     // [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 — `> interval`]
     CHECK(announces == 9);
-    // Once stopped, advance keeps saying so and never re-announces.
-    CHECK(!b.advance(1.0, due));
+    // Once stopped, a frame keeps saying so and never re-announces.
+    CHECK(!run_frame(b, 1.0, due));
     CHECK(!due);
 }
 
@@ -189,9 +198,9 @@ void test_window_boundary_is_strictly_greater_than_thirty_seconds() {
     opennova::LanDiscoveryBrowser b;
     CHECK(b.begin(kJo, 1, kBroadcast, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     bool due = false;
-    CHECK(b.advance(30.0, due)); // exactly 30000 ms: `> 0x7530` is false, still browsing
+    CHECK(run_frame(b, 30.0, due)); // exactly 30000 ms: `> 0x7530` is false, still browsing
     CHECK(b.browsing());
-    CHECK(!b.advance(0.001, due));
+    CHECK(!run_frame(b, 0.001, due));
     CHECK(!b.browsing());
 }
 
@@ -199,13 +208,13 @@ void test_announce_clock_restarts_from_zero_not_the_overshoot() {
     opennova::LanDiscoveryBrowser b;
     CHECK(b.begin(kJo, 1, kBroadcast, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     bool due = false;
-    CHECK(b.advance(2.9, due));
+    CHECK(run_frame(b, 2.9, due));
     CHECK(!due);
-    CHECK(b.advance(0.5, due)); // 3.4 s: due, clock restarts at 0 (not 0.4)
+    CHECK(run_frame(b, 0.5, due)); // 3.4 s: due, clock restarts at 0 (not 0.4)
     CHECK(due);
-    CHECK(b.advance(2.9, due));
+    CHECK(run_frame(b, 2.9, due));
     CHECK(!due);
-    CHECK(b.advance(0.2, due)); // 3.1 s since the restart
+    CHECK(run_frame(b, 0.2, due)); // 3.1 s since the restart
     CHECK(due);
 }
 
@@ -271,10 +280,10 @@ std::vector<uint8_t> server_reply_hk(const std::string &name, uint32_t hk, uint3
     return nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(hello));
 }
 
-// The frame's walk (advance with no time passing): the rows the frame appends.
+// The frame's walk (a frame with no time passing): the rows the frame appends.
 void walk(LanDiscoveryBrowser &b) {
     bool due = false;
-    b.advance(0.0, due);
+    run_frame(b, 0.0, due);
 }
 
 // One datagram through the browse's frame head: the manager's receive (accept_reply), then
@@ -557,12 +566,12 @@ void test_records_expire_after_thirty_seconds_while_browsing() {
     reply(b, alpha, alpha_host); // stamped at 0
     reply(b, bravo, bravo_host);
     bool due = false;
-    CHECK(b.advance(20.0, due));
+    CHECK(run_frame(b, 20.0, due));
     reply(b, bravo, bravo_host); // stamped again at 20 s
-    CHECK(b.advance(10.0, due)); // 30 s since Alpha's stamp: not past it
+    CHECK(run_frame(b, 10.0, due)); // 30 s since Alpha's stamp: not past it
     CHECK(b.record_count() == 2);
     CHECK(lines.size() == 2);
-    CHECK(b.advance(0.001, due)); // past it: Alpha goes, Bravo stays
+    CHECK(run_frame(b, 0.001, due)); // past it: Alpha goes, Bravo stays
     CHECK(b.record_count() == 1);
     CHECK(lines.size() == 3);
     if (lines.size() == 3) CHECK(lines[2] == "NET SESSION AT 10.0.0.1:32768 [Alpha] HAS BEEN REMOVED.");
@@ -581,11 +590,11 @@ void test_records_expire_after_thirty_seconds_while_browsing() {
     opennova::LanDiscoveryBrowser w;
     w.set_connect_log(session_lines(lines));
     CHECK(w.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
-    CHECK(w.advance(1.0, due));
+    CHECK(run_frame(w, 1.0, due));
     reply(w, alpha, alpha_host); // stamped at 1 s
-    CHECK(!w.advance(29.5, due)); // the window ends at 30.5 s
+    CHECK(!run_frame(w, 29.5, due)); // the window ends at 30.5 s
     CHECK(w.servers().size() == 1); // the last frame's walk still lists it
-    CHECK(!w.advance(60.0, due));
+    CHECK(!run_frame(w, 60.0, due));
     CHECK(w.record_count() == 1);
     CHECK(lines.size() == 1); // DISCOVERED only: no expiry once stopped
 }
@@ -639,8 +648,8 @@ void test_a_reannounce_due_on_the_last_frame_still_goes_out() {
     opennova::LanDiscoveryBrowser b;
     CHECK(b.begin(kJo, 1, kBroadcast, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     bool due = false;
-    CHECK(b.advance(27.5, due) && due); // re-announced at 27.5 s
-    CHECK(!b.advance(3.5, due));        // 31 s: the window ends this frame
+    CHECK(run_frame(b, 27.5, due) && due); // re-announced at 27.5 s
+    CHECK(!run_frame(b, 3.5, due));        // 31 s: the window ends this frame
     CHECK(due);                         // 3.5 s since the last announce
     CHECK(!b.browsing());
 }
@@ -683,7 +692,7 @@ void test_proxy_rendezvous_leads_each_burst() {
     CHECK(!burst[2].rendezvous && burst[2].port == 32769 && burst[2].bytes == b.probe(32769));
     // The re-announce burst repeats the same order.
     bool due = false;
-    CHECK(b.advance(3.001, due) && due);
+    CHECK(run_frame(b, 3.001, due) && due);
     CHECK(b.burst().size() == 3 && b.burst()[0].rendezvous);
 
     // Any field missing: announces alone.
@@ -710,7 +719,7 @@ void test_enumerate_and_join_browse_has_no_window() {
     int bursts = 0;
     bool due = false;
     for (int i = 0; i < 1000; ++i) { // 100 s at 0.1 s frames
-        CHECK(b.advance(0.1, due));
+        CHECK(run_frame(b, 0.1, due));
         if (due) ++bursts;
     }
     CHECK(b.browsing());
@@ -906,6 +915,74 @@ void test_a_join_hands_its_browse_records_to_the_process_enumerator() {
     CHECK(probe_lines.empty());
 }
 
+// The LAN screen's search frame pumps the browse connection's legs at its top: a due
+// re-announce leaves ahead of the frame's receive and the held server's walk. The
+// enumerate-and-join's loop (the unwindowed browse) reaches them in its Pump(-1) walk, after
+// the receive, the queue pass and the held server's nodes.
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - CNapiNetwork_PumpClientProtocolSend
+//  called @0x558E0E ahead of CNapiNetwork_PumpTransportAndProtocol called @0x559324;
+//  CNapiNetwork_PumpClientProtocolSend @0x4C5000 - `push 2E2h` @0x4C500B;
+//  CNapiNPConnection_PumpFlags @0x629780 - the type test @0x629788..0x62978F, the 0x20 leg
+//  @0x6297B7; UI_EnumerateAndJoinSession @0x569F50 - the loop's
+//  CNapiNetwork_PumpTransportAndProtocol alone @0x56A0D5]
+void test_the_search_frame_announces_ahead_of_its_receive() {
+    for (const bool windowed : {true, false}) {
+        LanDiscoveryBrowser b;
+        b.set_windowed(windowed);
+        CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
+        std::vector<std::string> order;
+        LanDiscoveryBrowser::FrameLegs legs;
+        legs.send_burst = [&order] { order.push_back("announce"); };
+        legs.receive = [&order] { order.push_back("receive"); };
+        legs.held_walk = [&order] { order.push_back("held"); };
+        // 1 s in: no re-announce yet.
+        CHECK(b.frame(1.0, legs));
+        CHECK((order == std::vector<std::string>{"receive", "held"}));
+        order.clear();
+        // 3.5 s in: the re-announce falls due.
+        CHECK(b.frame(2.5, legs));
+        const std::vector<std::string> expected = windowed
+                ? std::vector<std::string>{"announce", "receive", "held"}
+                : std::vector<std::string>{"receive", "held", "announce"};
+        CHECK(order == expected);
+    }
+}
+
+// The search frame's record expiry runs in the same top pump (the connection's state
+// machine, the 0x40 leg after the 0x20 leg), so a record whose lifetime passes goes ahead of
+// the reply the same frame reads from its host, which then makes a new record: REMOVED, then
+// DISCOVERED. The enumerate-and-join's frame reads the reply first and refreshes the record
+// in place, and the expiry finds it fresh.
+// [orig: CNapiNPConnection_PumpFlags @0x629780 - CNapiNPConnection_PumpStateMachine (the call
+//  @0x6297C3) after the 0x20 leg @0x6297B7; CNapiNPConnection_PumpStateMachine @0x6292E0 -
+//  state 2 @0x629414, the running gate @0x62941E; Nwu_HandleServerHello @0x626D20 - the
+//  in-place copy @0x627BFA..0x627E24, the stamp @0x627E34]
+void test_a_search_frame_expires_a_record_ahead_of_its_reply() {
+    for (const bool windowed : {true, false}) {
+        std::vector<std::string> lines;
+        LanDiscoveryBrowser b;
+        b.set_connect_log(session_lines(lines));
+        b.set_windowed(windowed);
+        CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
+        const PeerAddr host = sender("10.0.0.1", 32768);
+        const std::vector<uint8_t> alpha = server_reply_hk("Alpha", 1u);
+        reply(b, alpha, host); // stamped at 0
+        LanDiscoveryBrowser::FrameLegs legs;
+        legs.receive = [&b, &alpha, &host] {
+            b.accept_reply(alpha.data(), alpha.size(), host);
+        };
+        // 30.001 s since the stamp: past the lifetime this frame.
+        b.frame(30.001, legs);
+        const std::string discovered = "NET SESSION DISCOVERED AT 10.0.0.1:32768 [Alpha]";
+        const std::string removed = "NET SESSION AT 10.0.0.1:32768 [Alpha] HAS BEEN REMOVED.";
+        const std::vector<std::string> expected = windowed
+                ? std::vector<std::string>{discovered, removed, discovered}
+                : std::vector<std::string>{discovered};
+        CHECK(lines == expected);
+        CHECK(b.record_count() == 1);
+    }
+}
+
 int main() {
     test_begin_validates_the_range_and_fixes_one_identity();
     test_each_port_gets_an_announce_naming_its_destination();
@@ -926,6 +1003,8 @@ int main() {
     test_a_row_joins_the_listed_session_at_its_index();
     test_each_datagram_writes_the_managers_lines_and_net_got();
     test_a_join_hands_its_browse_records_to_the_process_enumerator();
+    test_the_search_frame_announces_ahead_of_its_receive();
+    test_a_search_frame_expires_a_record_ahead_of_its_reply();
     if (failures == 0) std::printf("lan_discovery_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
