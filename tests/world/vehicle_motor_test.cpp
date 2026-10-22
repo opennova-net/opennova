@@ -3190,8 +3190,10 @@ void test_client_local_driver_runs_the_occupant_block() {
 			CHECK(m.cmd_speed == 0);
 			CHECK(m.steer_ramp_bam == 0);
 			CHECK((veh.flags & 0x80u) == 0);
-			// A brainless rig skips the stuck check, as the authority arm does.
-			CHECK(m.stuck_ticks == 5);
+			// The stuck check runs on the client too and steps the count alone
+			// (AI_CheckVehicleStuckState @0x4652A9, its authority return
+			// @0x4652AF..0x4652BC).
+			CHECK(m.stuck_ticks == 6);
 			break;
 		case Case::Submerged:
 			// The leg's seeds are the zero words; the zero budget clamps the
@@ -3215,6 +3217,54 @@ void test_client_local_driver_runs_the_occupant_block() {
 	}
 }
 
+// The selector-zero boat's client block for the hull its local player drives: the
+// stuck count rests; a driver whose eye sits at or below the water plane takes the
+// boat leg over the client's brain words, which are zero (a zero target word, a
+// zero out-speed, no waypoint type, so the command is 0 and the steer holds the
+// Yaw); a driver above water takes the player arm, its client tail averaging the
+// staged speed with the record's. The record's words do not reach the local
+// driver's hull.
+// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 - the local-occupant gate
+//  @0x4704D6..0x4704EA, the parked test @0x4704F0..0x470502, the stuck reset @0x470508,
+//  the player bit @0x47050E, the eye test @0x47051B..0x470527 -> the leg @0x470795]
+void test_client_local_boat_driver_runs_its_block() {
+	for (const bool submerged : {true, false}) {
+		auto r = std::make_unique<Rig>();
+		VehicleTraits t = buggy_traits();
+		t.family = VehicleFamily::Watercraft;
+		t.physics = 0;
+		t.water_speed = 40 * 293;
+		r->w.vehicles.traits.set(r->veh().item_id, t);
+		r->mount();
+		r->w.ai.is_authority = false;
+		r->w.cached.local_player = r->drv_h;
+		Entity &veh = r->veh();
+		auto &m = veh.veh;
+		m.net_predicted = true;
+		m.yaw_seeded = true;
+		m.yaw_bam = veh.heading;
+		m.net_recv_speed = 20000;
+		m.net_recv_steer_bam = 0x12345678;
+		m.stuck_ticks = 5;
+		veh.flags |= 0x80u;
+		r->w.env.water_z = submerged ? (100 << 16) : -(1 << 16);
+		r->w.vehicles.watercraft_client_tick(veh, t);
+		CHECK(m.stuck_ticks == 0);
+		CHECK(m.steer_target_bam != m.net_recv_steer_bam);
+		if (submerged) {
+			// The leg writes no Flags 0x80 (only the boarders' hold clears it).
+			CHECK(m.cmd_speed == 0);
+			CHECK((veh.flags & 0x80u) != 0);
+		} else {
+			// No keys and no analog axis: the staged command is 0, the tail
+			// averages it with the record's 20000, and the sprint bit's absence
+			// clears Flags 0x80.
+			CHECK(m.cmd_speed == 10000);
+			CHECK((veh.flags & 0x80u) == 0);
+		}
+	}
+}
+
 int main() {
     test_watercraft_entry_reads_the_hull();
     test_a_dead_hull_bails_to_its_tail();
@@ -3223,6 +3273,7 @@ int main() {
     test_selector_zero_ground_ai_leg_runs_in_the_mover();
     test_family_occupant_blocks_run_after_the_head();
     test_client_local_driver_runs_the_occupant_block();
+    test_client_local_boat_driver_runs_its_block();
     test_bike_lean_at_speed_both_ways();
     test_local_controls_reach_first_carrier_tick();
     test_mount_and_dismount_clear_the_local_stance_latches();

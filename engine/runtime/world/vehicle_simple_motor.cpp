@@ -338,16 +338,27 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 			m.cmd_speed = m.net_recv_speed;
 			m.steer_target_bam = m.net_recv_steer_bam;
 		} else if (boat) {
-			// The boat twin's block for its local driver: the stuck count rests,
-			// then the player arm, whose client tail averages the speed with the
-			// record's. A submerged driver's AI leg is the boat leg
-			// (AiSystem::watercraft_ai_leg, in place on the authority), which this
-			// client arm does not run yet (D-NET-NEW-L5-10).
-			// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 - the stuck reset
-			//  @0x470508, the eye test @0x47051B..0x470527 -> the AI leg @0x470795]
+			// The boat twin's block for its local driver: the stuck count rests; a
+			// driver without the player bit, or whose eye sits at or below the water
+			// plane, takes the boat leg over the client's brain words, which are zero
+			// (D-NET-433), the player arm otherwise, its client tail averaging the
+			// speed with the record's. Its parked test (no occupant, or the dead bit
+			// the tail above took) never holds for a local driver.
+			// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 - the parked test
+			//  @0x4704F0..0x470502, the stuck reset @0x470508, the player bit
+			//  @0x47050E, the eye test @0x47051B..0x470527 -> the AI leg @0x470795]
 			m.stuck_ticks = 0;
-			stage_player_vehicle_input(world_, e, *controller, t);
-			m.cmd_speed = io::bam_sar(io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+			if (controller->player_class == 0 ||
+					watercraft_driver_submerged(world_, *controller)) {
+				AiBrain client_words;
+				VehicleDriveCmd cmd;
+				world_.ai.watercraft_ai_leg(world_, e, t, client_words, cmd);
+				m.steer_target_bam = cmd.steer_target_bam;
+				m.cmd_speed = cmd.cmd_speed;
+			} else {
+				stage_player_vehicle_input(world_, e, *controller, t);
+				m.cmd_speed = io::bam_sar(io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+			}
 		} else {
 			// The hull the local player drives runs the occupant block on the
 			// client as on the authority: a parked hull (Flags 0x10000000; the
@@ -367,8 +378,11 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 				m.steer_target_bam = m.yaw_bam;
 				m.cmd_speed = 0;
 				m.steer_ramp_bam = 0;
-				if (ground_brain != nullptr)
-					world_.ai.check_vehicle_stuck(world_, e);
+				// The stuck check runs whatever the brain: off the authority it
+				// steps the count alone [orig: AI_CheckVehicleStuckState called
+				// @0x46F0B8; the step @0x4652A9, the authority return
+				// @0x4652AF..0x4652BC].
+				world_.ai.check_vehicle_stuck(world_, e);
 				e.flags &= ~0x80u;
 				if (ground_brain != nullptr)
 					ground_brain->brain.f[AiBrain::kCurState] = 22;
