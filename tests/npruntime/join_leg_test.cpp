@@ -1095,6 +1095,39 @@ bool run_a_repeated_echo_adds_the_player_again() {
 	              "the next joiner's pick passes the orphaned row over");
 }
 
+// D-NET-NEW-L1-24 (V-ROLL on L1-s14's test note): the spawn pump's capacity counts an orphaned row
+// (its active byte and its net player stand), so with a session cap of 2 a re-added joiner's two
+// rows, the orphaned one and the current one, hold a third joiner on the pending list, rowless,
+// where the connections' rows alone (one) would admit it.
+// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - the cap `cmp eax, [ecx+0F28h]`
+//  @0x4C8E13; Server_CountAlivePlayers @0x4FD770 - the active byte @0x4FD785, the net player
+//  +0x1C @0x4FD78B]
+bool run_an_orphaned_row_counts_against_the_session_cap() {
+	JoinFixture f(/*with_existing=*/false);
+	f.ctx->config.max_players = 2;
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.reply.admission_metadata_pushed = true;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the pump adds the joiner")) return false;
+	j.spawn_queue_unlinked = false; // a repeated C2S 0x02 lists it again
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    f.ctx->orphaned_player_rows.size() == 1,
+	            "the re-add orphans the first row")) return false;
+	inmatch::NapiNPConnection &next = f.ctx->np_protocol.connection_list.emplace_back();
+	next.type = inmatch::NapiNPConnection::kTypeServerSide;
+	next.peer = opennova::PeerAddr{0x0100007Fu, 30003};
+	next.connection_id = inmatch::kFirstJoinerDcb + 2;
+	next.phase = inmatch::ConnectionPhase::Joined;
+	next.admission_stage = inmatch::GameAdmissionStage::Complete;
+	next.self_id_seen = true;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 0,
+	            "the orphaned row and the current row fill the cap of 2")) return false;
+	const inmatch::NapiNPConnection &held = f.ctx->np_protocol.connection_list.back();
+	return expect(held.phase == inmatch::ConnectionPhase::Joined && !held.spawn_queue_unlinked &&
+	                      !held.link.owned_entity.valid(),
+	              "the third joiner is held on the pending list with no row");
+}
+
 // D-NET-NEW-L1-24 (the orphaned row's other walks): the 0x16's slot walk takes an orphaned row as
 // any other: a re-add that found the first row in the match (state 6) leaves it a 0x16 row with its
 // slot and team, and it counts in the trailer's in-game count (every active row).
@@ -1504,6 +1537,7 @@ int main() {
 	if (!run_an_orphaned_row_takes_its_own_frame_rtt_and_list()) ++failures;
 	if (!run_a_players_two_rows_interleave_frame_and_rtt()) ++failures;
 	if (!run_an_orphaned_row_runs_on_its_player_sync_track()) ++failures;
+	if (!run_an_orphaned_row_counts_against_the_session_cap()) ++failures;
 	if (!run_two_rows_of_one_player_step_in_slot_order()) ++failures;
 	if (!run_the_track_steps_after_the_scoreboard()) ++failures;
 	if (!run_a_frame_whose_round_ends_steps_no_track()) ++failures;
