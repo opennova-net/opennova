@@ -513,6 +513,8 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	state.client_runtime.reset();
 	local_round_reset_seen_ = kernel.local.round_reset_revision;
 	ctx.world = &kernel.world;
+	// The next mission's World stamps on the session's process clock (D-NET-NEW-L8-28).
+	kernel.world.tick_count_ms = ctx.process_clock_ms;
 	ctx.mission = &kernel.mission;
 	ctx.rotation = rotation_;
 	ctx.host_client = nullptr;

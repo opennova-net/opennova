@@ -768,6 +768,9 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 	// it: the status report's UP-TIME, the S2C 0x58's uptime, the 0x81's UT and the S2C 0x02
 	// probe read it (host_tick_count_ms; D-NET-NEW-L8-27).
 	owner.ctx.process_clock_ms = cfg.clock_ms;
+	// And the World's, which the 0x26 sender's entity+560 stamp and the S2C 0x19 / 0x1A / 0x0F
+	// stamps read (world::authority_tick_count_ms; D-NET-NEW-L8-28).
+	if (owner.ctx.world != nullptr) owner.ctx.world->tick_count_ms = cfg.clock_ms;
 	// The process's log devices and the socket address, ahead of the session
 	// create whose server start logs HOST STARTED and whose round init clears
 	// the punt table.

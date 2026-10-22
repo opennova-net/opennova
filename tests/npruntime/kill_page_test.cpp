@@ -181,6 +181,66 @@ void test_host_request() {
 	CHECK(request(stamp, stamp, 0).empty());
 }
 
+// D-NET-NEW-L8-28: entity+560 and the S2C 0x19 stamp read the process clock the host binds
+// (World::tick_count_ms), not the logic tick: across a held tick (a load, a held start) the
+// clock still advances, so two 0x26 sends a second apart carry two stamps and the joiner's
+// echoed window still retires exactly the rows sent inside it.
+// [orig: Server_SendEntityStatePacket @0x509D70 - GetTickCount, entity+0x230 @0x509D7A;
+//  NetPacket_WriteTimestampB @0x5046F0 - GetTickCount @0x5046FD;
+//  NetSync_IsEntityEligibleInWindow @0x507AA0]
+void test_stamps_read_the_process_clock() {
+	auto heap = make_world();
+	w::World &world = *heap;
+	world.rules.logic_authority = true;
+	world.rules.mp_session = true;
+	world.logic_tick = 620; // held: no tick runs below
+	uint32_t clock = 50000;
+	world.tick_count_ms = [&clock] { return clock; };
+	const w::EntityHandle first = spawn_row(world, 1, 0x2u, 100, 0);
+	const w::EntityHandle second = spawn_row(world, 1, 0x2u, 100, 0);
+	w::emit_item_state(world, *world.registry.get(first), 0);
+	clock += 1000;
+	w::emit_item_state(world, *world.registry.get(second), 0);
+	CHECK(world.registry.get(first)->last_state_sent_ms == 50000u);
+	CHECK(world.registry.get(second)->last_state_sent_ms == 51000u);
+	world.out.entity_events.clear();
+
+	ns::LoopbackChannel wire;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	ctx.is_in_session = 1;
+	ctx.world = &world;
+	ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(1, 1, &wire,
+			ns::TransportMode::Client, w::EntityHandle{}, true));
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
+	const auto send = [&](uint8_t tag, std::vector<uint8_t> body) {
+		return inmatch::dispatch_session_replies(ctx.config, conn,
+				{make_protocol_message(tag, std::move(body))}, 7, ctx.np_protocol.connection_list,
+				&world, inputs);
+	};
+	std::vector<ProtocolMessage> replies = send(c2s::SPAWN_MENU_REQUEST, {});
+	CHECK(replies.size() == 1 && replies[0].tag == s2c::SPAWN_ACK_TIMESTAMP);
+	if (replies.size() == 1)
+		CHECK(replies[0].payload == std::vector<uint8_t>({0x38, 0xC7, 0x00, 0x00})); // 51000
+	const auto request = [&](uint32_t lo, uint32_t hi) {
+		std::vector<uint8_t> b;
+		for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>(lo >> (8 * i)));
+		for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>(hi >> (8 * i)));
+		b.push_back(0);
+		b.push_back(0);
+		return send(c2s::LOADOUT_REQUEST, b);
+	};
+	replies = request(50001u, 51000u); // the second send alone
+	CHECK(replies.size() == 1 && replies[0].tag == s2c::KILL_BY_SLOT);
+	if (replies.size() == 1)
+		CHECK(words(replies[0].payload) == std::vector<uint16_t>({0xFFFF, second.packed}));
+	replies = request(50000u, 50000u); // the first alone
+	CHECK(replies.size() == 1 &&
+			words(replies[0].payload) == std::vector<uint16_t>({0xFFFF, first.packed}));
+}
+
 } // namespace
 
 int main() {
@@ -188,6 +248,7 @@ int main() {
 	test_page_cap();
 	test_walk_ends_at_the_used_count();
 	test_host_request();
+	test_stamps_read_the_process_clock();
 	std::printf("npruntime_kill_page: %d failures\n", failures);
 	return failures ? 1 : 0;
 }

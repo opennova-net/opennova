@@ -152,15 +152,16 @@ std::vector<uint8_t> serialize_class_allow_mask(uint16_t class_allow_mask) {
 }
 
 // The host's GetTickCount: the S2C 0x19 / 0x1A / 0x0F stamps a joiner echoes
-// back as its C2S 0x28 kill-page window, in the domain the 0x26 sender stamps
-// entity+560 with (the world's logic tick through the deterministic seam; the
-// connection clock only on the World-less unit path).
+// back as its C2S 0x28 kill-page window, the clock the 0x26 sender stamps
+// entity+560 with (world::authority_tick_count_ms: the process clock the host
+// binds, else the logic-tick seam; the connection clock only on the World-less
+// unit path) (D-NET-NEW-L8-28).
 // [orig: NetPacket_WriteTimestamp @0x5046C0 / NetPacket_WriteTimestampB
 //  @0x5046F0 / NetPacket_WriteWorldStateLoad0x0F @0x502D27 — GetTickCount();
 //  Server_SendEntityStatePacket @0x509D7A]
 uint32_t host_tick_count(const NapiNPServerCtx &ctx, uint32_t now_tick) {
-	return io::host_milliseconds_for_logic_tick(
-			ctx.world != nullptr ? ctx.world->logic_tick : now_tick);
+	return ctx.world != nullptr ? world::authority_tick_count_ms(*ctx.world)
+	                            : io::host_milliseconds_for_logic_tick(now_tick);
 }
 
 // [orig: NetPacket_WriteTimestamp @0x5046c0] S2C 0x1A: the 4-byte GetTickCount.

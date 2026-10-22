@@ -954,11 +954,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// g_ClientDeployHold (the deploy gate) via NapiClient_WaitForGameStart @0x42cc10,
 				// re-blocking deploy after 0x0F cleared it. The 0x16 pushes are proactive
 				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
-				// The body is the host's GetTickCount, the 0x28 window's floor.
-				// [orig: NetPacket_WriteTimestampB @0x5046f0 -> S2C 0x19 @0x5132f1]
+				// The body is the host's GetTickCount, the 0x28 window's floor, on the
+				// clock the 0x26 sender stamps entity+560 with (D-NET-NEW-L8-28).
+				// [orig: NetPacket_WriteTimestampB @0x5046f0 (GetTickCount @0x5046FD)
+				//  -> S2C 0x19 @0x5132f1]
 				replies.push_back(make_protocol_message(s2c::SPAWN_ACK_TIMESTAMP,
-						build_tag1a_tick(io::host_milliseconds_for_logic_tick(
-								world != nullptr ? world->logic_tick : now_tick))));
+						build_tag1a_tick(world != nullptr
+										? world::authority_tick_count_ms(*world)
+										: io::host_milliseconds_for_logic_tick(now_tick))));
 				break;
 			case c2s::TEAM_SPAWN_ACK: { // team/spawn ack [u16 team_change_index] — NO reply on a plain join.
 				// [orig: NapiNPServerMsg_0x029 @0x514F10] replies S2C 0x51 ONLY when the index

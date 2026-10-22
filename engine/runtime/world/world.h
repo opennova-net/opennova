@@ -22,6 +22,7 @@
 #include <runtime/audio/oneshot_play.h> // kListenerView*
 #include <runtime/audio/sound_profile.h>
 #include <base/io/crt_rand.h>
+#include <base/io/tick_rate.h> // host_milliseconds_for_logic_tick (authority_tick_count_ms's seam)
 #include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>
@@ -1383,6 +1384,14 @@ public:
     // readers run off the authority only). [orig: Entity_Destroy @0x43E810 - the memset
     // @0x43EA70, the mark @0x43EA7F; read by Entity_UpdateTransformAndTurret @0x440D2A]
     std::function<bool(uint16_t wire_handle)> destroyed_mark;
+    // The authority's GetTickCount: the process clock its host binds (HostConfig::clock_ms, at
+    // the session start and at each next mission's bind); empty is the deterministic logic-tick
+    // seam (authority_tick_count_ms). The 0x26 sender's entity+560 stamp reads it, and so do
+    // the S2C 0x19 / 0x1A / 0x0F stamps a joiner echoes as its C2S 0x28 kill-page window, so a
+    // load or a held start counts on both sides of the window (D-NET-NEW-L8-28).
+    // [orig: Server_SendEntityStatePacket @0x509D70 - GetTickCount, stored to entity+0x230
+    //  @0x509D7A]
+    std::function<uint32_t()> tick_count_ms;
 
     // May the mission script advance this tick? Retail wraps its WAC tick, the
     // idle-timer sweep and the BMS event pump in ONE condition, and the half that
@@ -1650,5 +1659,12 @@ void count_mission_units(World &world);
 // [orig: Score_CountMissionSubgoalsAndUnits @0x509dc2..0x509dd1 scanning byte_A7628C — the header
 //  win-condition text ids; dword_C8468C]
 int32_t count_defined_subgoals(const World &world);
+
+// The authority's GetTickCount: the bound process clock (World::tick_count_ms), else the
+// deterministic seam over the logic tick a clockless test runs on (D-NET-NEW-L8-28).
+inline uint32_t authority_tick_count_ms(const World &world) {
+    return world.tick_count_ms ? world.tick_count_ms()
+                               : io::host_milliseconds_for_logic_tick(world.logic_tick);
+}
 
 } // namespace opennova::world
