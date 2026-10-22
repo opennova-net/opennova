@@ -1776,10 +1776,19 @@ void step_initial_state_row(NapiNPServerCtx &ctx, NapiNPConnection &row,
 	//  (send_mask 0x20 @0x51BC40 .. @0x51C10E), CNetPlayer_SetGameState(9) on the row's +0x1C
 	//  called @0x51BED7 / @0x51C11C, the row's state 5 @0x51BEF3 / 3 @0x51C134]
 	if (net_player->link.transport == nullptr || net_player->host_disconnect_sent) return;
-	// The backlog gate and the game state are the net player's words.
+	// The backlog gate, the game state and the report clocks its change moves are the net
+	// player's words: the state change reads its row from the net player's +0xC0, which the
+	// re-add rebound to the player's current row, so the tail's state 9 puts that row's two
+	// clocks in phase 1 and leaves the orphaned row's alone (D-NET-NEW-L9-22).
+	// [orig: CNetPlayer_SetGameState @0x4C4060 - the net player's state @0x4C4074, the row
+	//  +0xC0 @0x4C4084; Server_PlayerAdd @0x51CBC0 - the rebind @0x51CD51]
 	row.seq.retained_outbound_message_count = net_player->seq.retained_outbound_message_count;
 	row.burst.game_state = net_player->burst.game_state;
+	std::swap(row.gate_tick, net_player->gate_tick);
+	std::swap(row.gate_mission_tick, net_player->gate_mission_tick);
 	InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, row, now_tick);
+	std::swap(row.gate_tick, net_player->gate_tick);
+	std::swap(row.gate_mission_tick, net_player->gate_mission_tick);
 	net_player->burst.game_state = row.burst.game_state;
 	ship_burst_messages(*net_player, step.messages, outbound);
 }

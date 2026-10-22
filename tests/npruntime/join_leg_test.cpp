@@ -1235,11 +1235,14 @@ bool run_a_players_two_rows_interleave_frame_and_rtt() {
 // leaves the orphaned row in state 2, and the per-slot block runs its track on: a step per
 // boundary to its net player (0x2C first, the tail through the 0x11), the tail setting the net
 // player's game state 9 and parking the row in state 3, where no request of the player's
-// reaches it. The fresh row waits for its own C2S 0x09.
+// reaches it. The fresh row waits for its own C2S 0x09. The state change moves the report
+// clocks of the row the net player's +0xC0 names, the fresh row the re-add rebound it to: its
+// two clocks enter phase 1 and the orphaned row's stay put (D-NET-NEW-L9-22).
 // [orig: Server_TickUpdate's per-slot block - the row's +0x1C @0x51E3AA, the pump call
 //  @0x51E3E4; Server_SendPlayerSlotStateFrame @0x51BBA0 - the 0x2C @0x51BF5D..0x51C002, the
 //  0x11 @0x51C10E, CNetPlayer_SetGameState(9) on the row's +0x1C called @0x51C11C, state 3
-//  @0x51C134]
+//  @0x51C134; CNetPlayer_SetGameState @0x4C4060 - the row +0xC0 @0x4C4084, phase 1
+//  @0x4C41BD / @0x4C41CA; Server_PlayerAdd's rebind @0x51CD51]
 bool run_an_orphaned_row_runs_on_its_player_sync_track() {
 	JoinFixture f(/*with_existing=*/false);
 	inmatch::NapiNPConnection &j = f.joiner();
@@ -1255,6 +1258,12 @@ bool run_an_orphaned_row_runs_on_its_player_sync_track() {
 	            "the re-add orphans the row in its player-sync track")) return false;
 	(void)JoinFixture::drain(f.joiner_transport);
 	f.joiner().burst.game_state = 7; // the 0x02's listing state (NapiNPServerMsg_0x002 @0x51319C)
+	const uint32_t orphan_phase = f.ctx->orphaned_player_rows[0].row.gate_tick.state;
+	const uint32_t orphan_mission_phase =
+			f.ctx->orphaned_player_rows[0].row.gate_mission_tick.state;
+	if (!expect(f.joiner().gate_tick.state == 0 && f.joiner().gate_mission_tick.state == 0 &&
+	                    orphan_phase != 1 && orphan_mission_phase != 1,
+	            "no row's clocks are in phase 1 ahead of the tail")) return false;
 	std::vector<uint8_t> tags;
 	for (int i = 0; i < 40; ++i) {
 		const std::vector<uint8_t> step = f.pump();
@@ -1268,8 +1277,14 @@ bool run_an_orphaned_row_runs_on_its_player_sync_track() {
 	                      f.ctx->orphaned_player_rows[0].row.slot_state ==
 	                              inmatch::PlayerSlotState::AwaitWorldRequest &&
 	                      f.joiner().slot_state == inmatch::PlayerSlotState::Added &&
-	                      f.joiner().burst.game_state == 9,
-	              "the orphaned row's track reaches its net player and parks in state 3");
+	                      f.joiner().burst.game_state == 9 &&
+	                      f.joiner().gate_tick.state == 1 &&
+	                      f.joiner().gate_mission_tick.state == 1 &&
+	                      f.ctx->orphaned_player_rows[0].row.gate_tick.state == orphan_phase &&
+	                      f.ctx->orphaned_player_rows[0].row.gate_mission_tick.state ==
+	                              orphan_mission_phase,
+	              "the orphaned row's track reaches its net player and parks in state 3; "
+	              "the state 9 moves the net player's current row's clocks");
 }
 
 // D-NET-NEW-L1-24 (L1-s18): a net player's own row and its orphaned row both in the
