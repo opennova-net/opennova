@@ -368,7 +368,8 @@ struct ListenHost {
 				"begin \"default\"\r\nend\r\n"
 				"begin \"SP_Host\"\r\n     SSLFootGND     T_DIRT_L\r\nend\r\n";
 		rows.resize(2);
-		rows[0].id = static_cast<int>(world::kPlayerInfantryTypeId) + static_cast<int>(mission::kItemIdOffset);
+		rows[0].id = static_cast<int>(world::kPlayerInfantryTypeId) +
+				static_cast<int>(mission::kItemIdOffset);
 		rows[0].hp = 150;
 		std::snprintf(rows[0].sound_profile, sizeof(rows[0].sound_profile), "SP_Host");
 		rows[1].id = 164 + static_cast<int>(mission::kItemIdOffset);

@@ -718,7 +718,8 @@ int SessionDrive::load_next_host_mission(const String &p_bms_name) {
 
 void SessionDrive::begin_next_host_mission_load(const Ref<MissionData> &p_mission,
 		const String &p_bms_name, const Ref<ResourceRoot> &p_resource_root) {
-	if (kept_sim_.is_valid()) kept_sim_->begin_next_host_mission_load(p_mission, p_resource_root, p_bms_name);
+	if (kept_sim_.is_valid())
+		kept_sim_->begin_next_host_mission_load(p_mission, p_resource_root, p_bms_name);
 }
 
 void SessionDrive::pump_host_load_stage() {
