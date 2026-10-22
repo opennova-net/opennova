@@ -332,6 +332,13 @@ bool test_mouse_click_dispatch() {
   CHECK(set.mouse_click_action(64, held) == -1, "middle up takes none");
   CHECK(set.mouse_click_action(1, held) == -1, "a move takes none");
   CHECK(set.mouse_click_action(0x100, held) == token("cycleweaponP"), "the wheel's event");
+  CHECK(set.mouse_click_action(0x200, held) == token("cycleweaponN"), "the wheel's down event");
+  // The second switch takes a held row's wheel word too (no flag-4 test there): a held row
+  // bound to the wheel takes the notch ahead of the later rows in the walk.
+  set.assign_mouse(token("move_forward"), kMouseWheelUp);
+  CHECK(set.mouse_click_action(0x100, held) == token("move_forward"),
+      "a held row on the wheel takes its notch [orig: @0x4992C3..0x49930A]");
+  set.assign_mouse(token("move_forward"), 0);
   CHECK(set.mouse_click_action(2, held, true) == token("IncSpectatorTarget"),
       "the death screen's mode skips the fire row");
   return true;

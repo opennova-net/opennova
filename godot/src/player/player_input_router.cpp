@@ -802,18 +802,13 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
                 : opennova::controls::kWheelDelta;
         int notches = wheel_.feed(
                 button->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? units : -units);
-        // Each notch's row is a record the next update's message pump queues, ahead of
-        // that update's keyboard pass, and its drain dispatches (queue_records; engine
-        // controls::WheelRemainder and inmatch::TickInputSource carry the witness).
-        const auto dispatch = [&](MouseButton p_wheel) {
-            const String token = controls_->mouse_event_token(p_wheel);
-            if (const auto request = opennova::controls::player_wheel_action(token.utf8().get_data()))
-                pump_records_.push_back({request->code, 0, 0, 0,
-                        controls_->is_token_fire_signed(token),
-                        opennova::controls::InputEventOrigin::Device});
-        };
-        for (; notches > 0; --notches) dispatch(MOUSE_BUTTON_WHEEL_UP);
-        for (; notches < 0; ++notches) dispatch(MOUSE_BUTTON_WHEEL_DOWN);
+        // Each notch is the wheel's event (256 up, 512 down), whose row the binding walk
+        // takes as a button's (a held row's included) and the next update's message pump
+        // queues as a record, ahead of that update's keyboard pass, for its drain
+        // (queue_records; engine controls::WheelRemainder, BindingSet::mouse_click_action
+        // and inmatch::TickInputSource carry the witness).
+        for (; notches > 0; --notches) queue_mouse_event_record(0x100);
+        for (; notches < 0; ++notches) queue_mouse_event_record(0x200);
         return true;
     }
 	// A mouse button's message is a click record its next update's pump queues, ahead of
@@ -831,12 +826,7 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
 			case MOUSE_BUTTON_MIDDLE: event = twice ? 4096 : down ? 32 : 64; break;
 			default: break;
 		}
-		const int code = event != 0 ? controls_->mouse_click_code(event) : -1;
-		const opennova::controls::ActionDef *def = opennova::controls::action_for_code(code);
-		if (code >= 0)
-			pump_records_.push_back({code, 0, 0, 0,
-					controls_->is_vk_down(0x10) || (def != nullptr && (def->flags & 0x200u) != 0),
-					opennova::controls::InputEventOrigin::Device});
+		if (event != 0) queue_mouse_event_record(event);
 		return false;
 	}
 	InputEventMouseMotion *motion = Object::cast_to<InputEventMouseMotion>(p_event.ptr());
@@ -845,6 +835,17 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
 	}
 	look_delta_ += motion->get_relative();
 	return true;
+}
+
+void PlayerInputRouter::queue_mouse_event_record(int p_event) {
+	// The row the binding walk takes for the event, with the Shift sign or the row's 0x200
+	// bit (engine BindingSet::mouse_click_action carries the witness).
+	const int code = controls_->mouse_click_code(p_event);
+	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(code);
+	if (code >= 0)
+		pump_records_.push_back({code, 0, 0, 0,
+				controls_->is_vk_down(0x10) || (def != nullptr && (def->flags & 0x200u) != 0),
+				opennova::controls::InputEventOrigin::Device});
 }
 
 void PlayerInputRouter::reset() {

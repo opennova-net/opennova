@@ -13,7 +13,6 @@ enum RowFlags {
 	CaptureLatch = 1, // trigger latch sees the gated state, unlike event rows
 	Reset = 2,
 	NeedsSimulation = 4, // scope-zero latches freeze while no sim exists
-	Wheel = 8,
 };
 
 struct ActionRow {
@@ -61,16 +60,16 @@ const ActionRow kRows[] = {
 	// magnification. [orig: Input_HandleActionBinding_0 @ 0x4E0420, calls
 	// @ 0x4E1341 / @ 0x4E13A4; Player_CycleWeaponSlot `add edi,ebp` @ 0x4DFEF6]
 	// docs/world/tank-parity-re.md (D-CTRL-5).
-	{"cycleweaponP", {Action::WeaponCycle, 1}, Gate::Captured, Wheel},
-	{"cycleweaponN", {Action::WeaponCycle, -1}, Gate::Captured, Wheel},
+	{"cycleweaponP", {Action::WeaponCycle, 1}, Gate::Captured},
+	{"cycleweaponN", {Action::WeaponCycle, -1}, Gate::Captured},
 	// Three-key SELECT: the sim owns mutual exclusion and ForceCrouch refusal.
 	// [orig: input cases 170/169/172 @0x4e0df3/@0x4e0d77/@0x4e0e3e ->
 	//  NapiNPServerMsg_HandleStanceChange @0x501c60]
-	{"Stand", {Action::Stance, 0}, Gate::Active, Reset | Wheel},
-	{"Crouch", {Action::Stance, 1}, Gate::Active, Reset | Wheel},
-	{"Prone", {Action::Stance, 2}, Gate::Active, Reset | Wheel},
-	{"ScopeZeroDec", {Action::ScopeZero, -1}, Gate::Active, Reset | NeedsSimulation | Wheel},
-	{"ScopeZeroInc", {Action::ScopeZero, 1}, Gate::Active, Reset | NeedsSimulation | Wheel},
+	{"Stand", {Action::Stance, 0}, Gate::Active, Reset},
+	{"Crouch", {Action::Stance, 1}, Gate::Active, Reset},
+	{"Prone", {Action::Stance, 2}, Gate::Active, Reset},
+	{"ScopeZeroDec", {Action::ScopeZero, -1}, Gate::Active, Reset | NeedsSimulation},
+	{"ScopeZeroInc", {Action::ScopeZero, 1}, Gate::Active, Reset | NeedsSimulation},
 	// Radarout grows the world extent (x1.15 toward 0x100000), radarin shrinks
 	// it (x0.85 toward 4096). The simulation owns those steps. The HUD's code
 	// 19 declutter row stays in its separate poll (D-CTRL-4).
@@ -474,17 +473,6 @@ std::optional<PlayerActionRequest> player_action_request(const InputEventRecord 
 	//  @0x49bd67, 502 @0x49bd89].
 	if (record.code >= 500 && record.code <= 502)
 		return PlayerActionRequest{Action::Spectate, record.code, record.code, record.sign};
-	return std::nullopt;
-}
-
-std::optional<PlayerActionRequest> player_wheel_action(std::string_view token) {
-	for (const auto &row : kRows) {
-		if (!(row.flags & Wheel) || token != row.token) continue;
-		// A wheel notch queues the row's event like its key does.
-		PlayerActionRequest request = row.request;
-		request.code = row_code(row.token);
-		return request;
-	}
 	return std::nullopt;
 }
 

@@ -275,7 +275,10 @@ struct PlayerActionFrame {
 // message's signed delta (WHEEL_DELTA 120 per notch, positive away from the
 // user) joins a persistent remainder, and every whole +120 dispatches one
 // wheel-up event (the 0x400 binding mask) while every whole -120 dispatches one
-// wheel-down event (0x800); the rest carries into the next message.
+// wheel-down event (0x800); the rest carries into the next message. Each event
+// walks the bindings as a mouse button's does (BindingSet::mouse_click_action's
+// second switch, a held row's mouse word included), and the row it takes is a
+// record of the update's drain like a key's, past the head there.
 // [orig: Input_DispatchMouseEvent @ 0x761470 -- `sar eax,10h` / `add eax,
 //  g_MouseState.wheelRemainder` @ 0x7614AB..0x7614AE, the +120 walk firing
 //  event 0x100 @ 0x761575..0x7615AA, the -120 walk firing 0x200
@@ -410,10 +413,5 @@ private:
 	void sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,
 			PlayerActionFrame &frame);
 };
-
-// Only the seven currently routed wheel actions. The host admits a pressed
-// wheel event with active gameplay, a player and a simulation; wheel events
-// neither require mouse capture nor advance the polled key latches.
-std::optional<PlayerActionRequest> player_wheel_action(std::string_view token);
 
 } // namespace opennova::controls

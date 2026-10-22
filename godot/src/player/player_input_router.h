@@ -221,6 +221,9 @@ private:
 	// through the key queue's events.
 	int hud_rows_down() const;
 	int talk_rows_down() const;
+	// A mouse event's record (a button's down, up or double click, a wheel notch's 256 / 512)
+	// for the next update's message pump: the row the binding walk takes, if any.
+	void queue_mouse_event_record(int p_event);
 	void read_input_state(bool &r_forward, bool &r_back, bool &r_left, bool &r_right,
 			bool &r_lean_left, bool &r_lean_right, bool &r_jump) const;
 

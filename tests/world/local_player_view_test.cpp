@@ -2068,10 +2068,14 @@ void test_default_wheel_binding_zooms_in_away_from_the_player() {
     std::size_t count = 0;
     const auto *rows = catalog(&count);
     const auto step = [&](uint16_t wheel, int expected) {
-        const int index = bindings.mouse_event_action(wheel, [](int) { return false; });
+        // The wheel's event (256 up, 512 down) takes its row by the binding walk; its record
+        // names the row's request (BindingSet::mouse_click_action, player_action_request).
+        const int index = bindings.mouse_click_action(wheel == kMouseWheelUp ? 0x100u : 0x200u,
+                [](int) { return false; });
         CHECK(index >= 0 && static_cast<std::size_t>(index) < count);
         if (index < 0 || static_cast<std::size_t>(index) >= count) return;
-        const auto request = player_wheel_action(rows[index].token);
+        const auto request = player_action_request(InputEventRecord{
+                action_code(rows[index].id), 0, 0, 0, false, InputEventOrigin::Device});
         CHECK(request && request->action == PlayerAction::WeaponCycle);
         if (!request) return;
         CHECK(local_player_weapon_cycle_route(lw.w, weapon, view, limits, request->value) == WeaponCycleRoute::kZoomStep);

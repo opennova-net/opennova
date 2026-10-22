@@ -715,22 +715,6 @@ bool test_respawn_edges_on_ctrl_r() {
 	return true;
 }
 
-bool test_wheel_subset_and_repeated_events() {
-	struct WheelCase { const char *token; Action action; int value; };
-	for (const auto &row : {WheelCase{"cycleweaponP", Action::WeaponCycle, 1},
-			{"cycleweaponN", Action::WeaponCycle, -1}, {"ScopeZeroDec", Action::ScopeZero, -1},
-			{"ScopeZeroInc", Action::ScopeZero, 1}, {"Prone", Action::Stance, 2},
-			{"Crouch", Action::Stance, 1}, {"Stand", Action::Stance, 0}}) {
-		for (int event = 0; event < 2; ++event) {
-			const auto request = player_wheel_action(row.token);
-			CHECK(request && request->action == row.action && request->value == row.value);
-		}
-	}
-	for (const char *token : {"", "unknown", "scope", "attack_1", "Knife", "seat1", "radarout",
-			"map_toggle", "MedicReq", "useitem", "stand"}) CHECK(!player_wheel_action(token));
-	return true;
-}
-
 // A binding row's key or wheel event names its row's dispatch code, which the dispatcher's
 // head gates by that row's flags (V-L2-s8, D-NET-710): seat1 (row 17) 182, scope (row 105) 6,
 // cycleweaponP (row 39) 212; the held-USE digit's seat pick and the USE release's mount toggle
@@ -754,8 +738,11 @@ bool test_key_rows_carry_their_dispatch_codes() {
 		const PlayerActionFrame frame = actions.poll(keys, kLive);
 		CHECK(requests_are(frame, {{Action::ToggleScope}}) && frame.requests[0].code == 6);
 	}
-	const auto wheel = player_wheel_action("cycleweaponP");
-	CHECK(wheel && wheel->code == 212);
+	// The wheel's record names the row the walk took (BindingSet::mouse_click_action): its
+	// code maps back to the row's request.
+	const auto wheel = player_action_request(InputEventRecord{212, 0, 0, 0, false,
+			InputEventOrigin::Device});
+	CHECK(wheel && wheel->action == Action::WeaponCycle && wheel->value == 1 && wheel->code == 212);
 	{
 		PlayerActions actions;
 		Keys keys;
@@ -1092,7 +1079,7 @@ int main() {
 			test_use_release_digit_priority_and_no_sim_consumption,
 			test_shell_consume_and_overlay_cancel, test_use_swallows_only_digit_event_rows,
 			test_live_binding_modifier_remap_and_use_stream,
-			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,
+			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint,
 			test_wheel_remainder_dispatches_whole_notches,
 			test_spectator_rows_edge_to_their_codes, test_key_state_reset,
 			test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen,
