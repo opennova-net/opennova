@@ -442,9 +442,12 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 			[](const F &f) { return std::to_string(f.state_flag_byte); });
 	// A residual between a run's full health and death is a hit's draw: the damage is
 	// the round's impact speed times its weight / 875 [orig: Weapon_CalcImpactDamage
-	// @0x4EC920 (@0x4ECB2B)] times the zone's multiplier (the switch @0x4EC9BF: 1.25 for
-	// zones 0..4, 1.0 for 5..8), so where a round lands and how fast it arrives pick
-	// the value (frame.health_hit).
+	// @0x4EC920 (@0x4ECB2B)] times the zone's multiplier (on a type-3 target the switch
+	// @0x4EC9BF: 1.25 for zones 0..4, 1.0 for 5..8, 0.5 for 9..12 and 15..18, 3.0 for
+	// 13..14; the def flag 0x200's seat path @0x4EC968..0x4EC994: 6.0 for seat types 2, 3,
+	// 6 and 7), then on a type-3 target the shooter's 0.9 or 1.1 (@0x4ECB5A / @0x4ECB66)
+	// and the ammo def's clamp (@0x4ECB77..0x4ECB91), so where a round lands and how fast
+	// it arrives pick the value (frame.health_hit).
 	static_assert(has_normalization("frame.health_hit"));
 	auto full_health = [](const std::vector<const F *> &frames) {
 		int32_t full = 0;
@@ -471,8 +474,8 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 	// host steps down once a second [orig: Server_TickUpdate @0x51D7E0 (the per-slot pass
 	// @0x51DFBA..0x51E011)]. A countdown's first sample is its first second or the next (its
 	// start against the block's phase), and one the window cuts ends where the window does:
-	// each countdown compares over the values both runs' samples cover
-	// (frame.weapon_countdown).
+	// each countdown compares over the values both runs' samples cover, a sample that
+	// leaves it taking its frame's whole block (frame.weapon_countdown).
 	static_assert(has_normalization("frame.weapon_countdown"));
 	{
 		struct Countdown {

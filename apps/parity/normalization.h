@@ -586,9 +586,18 @@ inline constexpr Normalization kNormalizations[] = {
 			"-2.10 on RR-aa, the death's own draw, which the A/A carries" },
 	{ "frame.health_hit", MaskKind::Field, 'S', 0x00A, "health residual", 0,
 			"a hit's damage is the round's impact speed times its weight / 875 "
-			"(Weapon_CalcImpactDamage @0x4EC920, @0x4ECB2B) times its zone's multiplier (the "
-			"switch @0x4EC9BF: 1.25 for zones 0..4, 1.0 for 5..8), so a residual between a "
-			"run's full health and death is where the round landed and how fast it arrived: "
+			"(Weapon_CalcImpactDamage @0x4EC920, @0x4ECB2B) times its zone's multiplier: on a "
+			"type-3 target the switch @0x4EC9BF gives 1.25 for zones 0..4 (flt_7C6F18), 1.0 for "
+			"5..8, 0.5 for 9..12 and 15..18 (flt_7C3B94, @0x4EC9F1) and 3.0 for 13..14 "
+			"(flt_7C6F80, @0x4EC9CD) with the target's +0x2C flag 0x800 (@0x4EC9C6); a type-3 "
+			"target whose def carries flag 0x200 (@0x4EC968) takes the seat path instead, 6.0 "
+			"for the hit's seat types 2, 3, 6 and 7 (flt_7CD510, @0x4EC977..0x4EC98E) with the "
+			"same flag (@0x4EC994), else 1.0, as every other target. On a type-3 target the "
+			"shooter's byte (+0x15E58 at the round's +0x26C, @0x4ECA1E..0x4ECA24) then scales "
+			"the damage by 0.9 for 1 (flt_7C459C, @0x4ECB66) or 1.1 for 2 (flt_7CD50C, "
+			"@0x4ECB5A), and the ammo def's minimum and positive maximum clamp it "
+			"(@0x4ECB77..0x4ECB91), so a residual between a run's full health and death is "
+			"where the round landed and how fast it arrived: "
 			"x5's 01tr-coop-aikill RR read {0, 150, 36} against RR-aa's {0, 150, 8} (base 114 "
 			"at 1.0 and at 1.25), x1's RR-aa 7 (base 115 at 1.25). The full and dead values "
 			"compare exactly and a residual as 'hit'" },
@@ -602,7 +611,9 @@ inline constexpr Normalization kNormalizations[] = {
 			"next, by its start against the block's phase, and a countdown the window cuts ends "
 			"where the window does. Each countdown compares over the values both runs cover: a "
 			"top one second higher (or one running when the window opened) and a bottom below "
-			"the other's window-cut end leave the set. x6 retail: hostkill RR first sampled "
+			"the other's window-cut end leave the set, and a sample that leaves it takes its "
+			"frame's whole weapon block with it, so the other weapon fields of those one or "
+			"two edge frames go uncompared. x6 retail: hostkill RR first sampled "
 			"(5, 120) and RR-aa (4, 119), their window-cut ends 79 and 78; selfnade RR's +0x168 "
 			"countdown first read 5, RR-aa's 4; swap RR 59 against RR-aa 60" },
 	{ "frame.env_tod", MaskKind::Field, 'S', 0x00A, "tod_fixed", 0,
