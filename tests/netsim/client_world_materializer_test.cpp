@@ -430,10 +430,13 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 			nw::encode_deployed_item_spawn(spawn));
 
 	const ns::ClientEntityState *row = pipeline.state().find(spawn.slot_handle);
+	// The owner's team picks the variant; the device's own team byte is the
+	// memset's 0, which neither init writes (D-NET-NEW-L7-20) [orig: the memset
+	// @0x5469B2; Entity_InitFromItemDef @0x49E550].
 	if (!expect(row != nullptr && row->type_id == spawn.friendly_item_id &&
 			row->spawn_tag == nw::s2c::DEPLOYED_ITEM &&
 			row->target_handle == carrier.slot_id &&
-			row->parent_handle == 0xFFFFu && row->team_known && row->team == 2 &&
+			row->parent_handle == 0xFFFFu && row->team_known && row->team == 0 &&
 			row->x == spawn.pos_x && row->y == spawn.pos_y &&
 			row->z == spawn.pos_z &&
 			// angle words = entity+16/+20/+24 high halves = yaw/pitch/roll
@@ -692,13 +695,14 @@ bool deployed_item_copies_its_last_matching_round() {
 			"a def-less match skips the init and leaves the empty slot empty"))
 		return false;
 
-	// No match: the not-found leg's pick, the enemy variant for the enemy's device.
+	// No match: the not-found leg's pick, the enemy variant for the enemy's device,
+	// whose own team byte stays the memset's 0 (D-NET-NEW-L7-20).
 	spawn.friendly_item_id = 0x0500;
 	spawn.enemy_item_id = 0x0501;
 	spawn.slot_handle = 0x1006;
 	pipeline.apply(nw::s2c::DEPLOYED_ITEM, nw::encode_deployed_item_spawn(spawn));
 	row = pipeline.state().find(spawn.slot_handle);
-	return expect(row != nullptr && row->type_id == 0x0501 && row->team == 3 &&
+	return expect(row != nullptr && row->type_id == 0x0501 && row->team == 0 &&
 			row->spawn_entity_flags == 0 && !row->spawn_ammo_word_noage,
 			"with no round of its own the device takes the not-found leg's pick");
 }

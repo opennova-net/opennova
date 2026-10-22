@@ -154,12 +154,18 @@ void ClientReplicaPipeline::apply_deployed_item(
 		// The copy carries its round's team byte [orig: @0x546871 (+0x162)].
 		row.team = copy.team;
 		row.team_known = true;
-	} else if (owner_team_known) {
-		row.team = owner_team;
-		row.team_known = true;
 	} else {
-		row.team = 0xFF;
-		row.team_known = false;
+		// The not-found leg memsets the slot and nothing it runs after writes +0x162:
+		// the item init's callback for the device rows writes the spin words alone and
+		// the model init no team, so the device's team byte is 0 whatever the owner's
+		// (whose byte only picks the variant above) (D-NET-NEW-L7-20).
+		// [orig: the memset @0x5469B2; Entity_InitFromItemDef @0x49E550 (the call
+		//  @0x546A15, its callback tail-call @0x49E5D5..0x49E5EA);
+		//  Entity_InitThrowableSpin_Satchel @0x4435C0, Entity_InitThrowableSpin_Claymore
+		//  @0x4435E0, Entity_InitThrowableSpin_AVMine @0x443610; Entity_InitFromModel
+		//  @0x40DC30 (the call @0x546A3C)]
+		row.team = 0;
+		row.team_known = true;
 	}
 	++state_.world_stream_revision;
 	state_.mark_changed();
