@@ -275,7 +275,12 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 									non_team_header),
 							non_team_header));
 		}
-		if (net_player != nullptr) net_player->burst.game_state = 11;
+		if (net_player != nullptr) {
+			// Its row's report clocks into phase 4 (D-NET-NEW-L9-22) [orig: CNetPlayer_SetGameState
+			//  @0x4C4060 - @0x4C4257 / @0x4C4264].
+			gate_slot_clocks_game_state(*net_player, 11, ctx.tick_count_ms, 0);
+			net_player->burst.game_state = 11;
+		}
 		// Leaving game state 10, then slot state 6 (the loop's only slots), disarms the
 		// round-event watermark, and the slot enters state 7 (NEW-L1-8)
 		// [orig: Server_ProcessRoundEnd - the slot test @0x516730..0x516740,
@@ -1198,6 +1203,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	if (world.rules.mp_session && (round_was_announced || round_ended_at_retail_linger_phase) &&
 			ctx.round_end_linger_ticks > 0) {
 		--ctx.round_end_linger_ticks;
+		// The expiry's METPROTOCOL SERVERMISSION and per-slot PLAYERMISSION reports and the
+		// mission clocks constructed again, ahead of the exit's store (D-NET-NEW-L9-22; the
+		// linger-expiry block @0x51D9D4..0x51DB45, not the tail per-slot walk).
+		// [orig: Server_TickUpdate - Server_SendMissionMetrics called @0x51DA5A, the slot walk
+		//  @0x51DAD0..0x51DB45 (Server_SendPlayerMissionMetrics called @0x51DB1F), the reason
+		//  @0x51DB47]
+		if (ctx.round_end_linger_ticks == 0) Server_ReportLingerExpiry(ctx);
 		if (ctx.round_end_linger_ticks == 0 && ctx.mission_exit_reason == kMissionExitNone) {
 			const bool last_game = ctx.rotation != nullptr && ctx.rotation->last_game;
 			ctx.mission_exit_reason = ctx.config.replay_enabled != 0 && !last_game

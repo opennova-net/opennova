@@ -5460,6 +5460,12 @@ add_test(NAME npruntime_listing_baffle_key COMMAND npruntime_listing_baffle_key_
 add_executable(gate_metrics_encode_test novaworld/gate_metrics_encode_test.cpp)
 target_link_libraries(gate_metrics_encode_test PRIVATE opennova_net)
 add_test(NAME gate_metrics_encode COMMAND gate_metrics_encode_test)
+# The METPROTOCOL report clocks' writers and the SERVER / PLAYER / SERVERMISSION /
+# PLAYERMISSION senders on the host context (D-NET-NEW-L9-22).
+add_executable(gate_metrics_reports_test npruntime/gate_metrics_reports_test.cpp)
+target_link_libraries(gate_metrics_reports_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(gate_metrics_reports_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gate_metrics_reports COMMAND gate_metrics_reports_test)
 
 # --- parity lane LI (input seam) ---
 add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)

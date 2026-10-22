@@ -1,4 +1,5 @@
 #include <runtime/inmatch/host_session.h>
+#include <base/vfs/vfs.h> // vfs_country_code (the report clocks' CC.BIN)
 #include <runtime/devtools/tick_profile.h>
 #include <base/io/tick_rate.h>
 
@@ -245,6 +246,7 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 	auto &pending_session_messages = owner.pending_session_messages;
 	// The receive stamps its connections with the host clock (D-NET-256).
 	owner.ctx.np_protocol.receive_clock_ms = host_clock_ms(owner);
+	owner.ctx.tick_count_ms = owner.ctx.np_protocol.receive_clock_ms; // the report clocks'
 	// One handled datagram's (or replayed packet's) output, consumed in place.
 	auto consume = [&](const PeerAddr &peer, HandleResult &r) {
 		// Same-address replacement reports PeerGoodbye for the OLD occupant after
@@ -357,6 +359,8 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	// Server_TickUpdate @0x51E109 GetTickCount delta vs 0x57E40]
 	owner.ctx.np_protocol.host_run_duration_ms = static_cast<uint32_t>(
 			static_cast<uint64_t>(now) * uint64_t(io::kTickMs));
+	// The METPROTOCOL report clocks read the host clock (D-NET-NEW-L9-22).
+	owner.ctx.tick_count_ms = host_clock_ms(owner);
 	auto &pending_session_messages = owner.pending_session_messages;
 
 	// (0) The previous frame's entity update sent inline, after that frame's send pump: its
@@ -791,6 +795,11 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			owner.ctx, cfg.config, startup,
 			cfg.serve_and_play ? owner.host_loopback : nullptr);
 	if (created == CreateSessionResult::ProcessExit) return created;
+	// The create constructs the METPROTOCOL report clocks over the install's CC.BIN, ahead of its
+	// CNetQuality reset (D-NET-NEW-L9-22) [orig: CNapiGameSession_CreateSession @0x4C97C0 -
+	//  CServerTick_Construct @0x4C9CE8 / @0x4C9CF2].
+	owner.ctx.tick_count_ms = host_clock_ms(owner);
+	gate_clocks_session_create(owner.ctx, vfs_country_code(cfg.game_root));
 	// The create resets g_NetQuality, the flag cooldown stamped with the clock: a Serve Only
 	// host's lives on its context (D-NET-NEW-L8-24) [orig: CNapiGameSession_CreateSession
 	// @0x4C97C0 - CNetQuality_Reset @0x4C58C0 (the call @0x4C9CFC)].

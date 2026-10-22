@@ -13,6 +13,7 @@
 #include <runtime/inmatch/character_registry.h> // the host's Avatars.def combos (g_AvatarDefs)
 #include <runtime/inmatch/chat_flood.h>        // the console chat's flood table
 #include <runtime/inmatch/file_transfer_session.h> // the process's S2C 0x02 probe words
+#include <runtime/inmatch/gate_metrics_reports.h> // the METPROTOCOL clocks and sink
 #include <runtime/inmatch/game_config.h>       // inmatch::GameConfig — the ONE consolidated server-state config
 #include <runtime/inmatch/mission_exit.h>      // ProcessDisconnectLatch (the own client's callback)
 #include <runtime/inmatch/napi_np_connection.h>
@@ -330,6 +331,16 @@ struct NapiNPServerCtx {
 	// [orig: Server_ToggleJoinLock @0x50D750 (the call @0x50D762); Server_TickUpdate @0x51D7E0
 	//  (the call @0x51D943); Lobby_UpdateServerInfo @0x4FE8C0 (the gates @0x4FE8D8..0x4FE8FA)]
 	std::function<void()> on_update_server_info;
+	// The METPROTOCOL gate reports (gate_metrics_reports.h, D-NET-NEW-L9-22): the process's two
+	// phase clocks, the install's CC.BIN their constructs copy (the session create reads it), the
+	// clocks' GetTickCount (the owner's host clock, host_clock_ms, stamped at each pump's head, the
+	// session create and the mission start's legs) and the NovaWorld embedder's sink (unset: no
+	// report). [orig: g_ProcessServerTick @0xC87020; g_MissionServerTick @0xC87598;
+	//  Server_InitServerTicks @0x5018C0 - Game_ReadCCBinFile @0x5018E8]
+	GateMetricsClocks gate_clocks;
+	std::string cc_bin;
+	uint32_t tick_count_ms = 0;
+	GateMetricsSink gate_metrics;
 	ServerBanLists bans;
 	// The squad registry (server_squad_registry.h): the remote add files a node for a joiner
 	// with a nonzero squad id and the disconnect of a squad's last slot frees it; a LAN

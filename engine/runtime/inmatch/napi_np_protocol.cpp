@@ -344,6 +344,11 @@ void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving) {
 	const world::EntityHandle owned_entity = leaving.link.owned_entity;
 	const uint8_t player_slot = leaving.reply.player_slot;
 	if (had_player) {
+		// A slot not the local one stops its report clock and sends the METPROTOCOL PLAYER report,
+		// ahead of the leave's sends (D-NET-NEW-L9-22).
+		// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - CServerTick_SetState(0) @0x51B690,
+		//  Server_SendPlayerMetricsToGate @0x51B696, ahead of the sends from @0x51B69B]
+		Server_ReportPlayerLeave(ctx, leaving);
 		// The leave line first, while the leaver's entity still stands
 		// [orig: Server_HandlePlayerDisconnect @0x51b6d3, before the teardown
 		// @0x51b809..0x51b82e].
@@ -953,6 +958,8 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// witnessed latch point. [orig: NapiNetConfig_LoadFromConnTags @0x4c7260;
 	// the entry+55 latch @0x512aa0]
 	conn.join_environment = game_environment;
+	// The ClientAuth strings the METPROTOCOL player reports print (D-NET-NEW-L9-22).
+	conn.gate_player = parse_client_gate_metrics_player(auth);
 	conn.join_spectator_request = join_role.spectator ? 1 : 0;
 	conn.join_spectator_password = join_role.spectator_password;
 	conn.join_password = join_role.join_password;

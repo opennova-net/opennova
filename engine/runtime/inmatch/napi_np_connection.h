@@ -16,6 +16,7 @@
 #include <net/npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
 #include <net/npwire/session_hello.h>    // opennova::DisconnectEvent (the latched disconnect record)
 #include <net/novaworld/join_identity.h> // JoinCookiePairs / JoinAccount (the CD cookie and its account fields)
+#include <net/novaworld/gate_metrics.h> // GateServerTick / GateMetricsPlayer (the slot's METPROTOCOL clocks)
 #include <net/novacrypto/cdkey.h> // cdkey::WireKeys (the JOIN's CD-key ids, DFX2-13)
 
 namespace opennova::inmatch {
@@ -593,6 +594,14 @@ struct NapiNPConnection {
 	// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 (JSR -> ci1, JSPP);
 	// the entry+55 latch in NapiNPServer_HandlePlayerJoinMessage @0x512aa0]
 	ClientGameEnvironment join_environment;
+	// The ClientAuth strings the METPROTOCOL player reports print (VERSIONSTRING, COUNTRYCODE, CNT,
+	// LNG, TZB), stored with the tag list at the 0x42, and the slot's two phase clocks: PLAYER's
+	// (+0x17D20) and PLAYERMISSION's (+0x18294) (runtime/inmatch/gate_metrics_reports.h,
+	// D-NET-NEW-L9-22). [orig: NapiNetConfig_LoadFromConnTags @0x4C7260; Server_PlayerAdd
+	//  @0x51CD1B / @0x51CD26]
+	GateMetricsPlayer gate_player;
+	GateServerTick gate_tick;
+	GateServerTick gate_mission_tick;
 	uint8_t join_spectator_request = 0;
 	std::string join_spectator_password;
 	std::string join_password; // ClientAuth JSP, shared side/squad credential (not numeric FID)

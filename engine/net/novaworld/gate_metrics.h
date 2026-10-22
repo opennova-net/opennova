@@ -160,7 +160,7 @@ std::string gate_metrics_ping_text(const GateMetricsHost &host, std::string_view
 // Crypto_EncryptBuffer under "1010101" (the NapiNP ADD chain, our nwu_decrypt), then the NAPI CRC
 // envelope CNapiNPManager_SendTo's encrypt flag applies. Empty when the envelope fails.
 // [orig: Server_SendMetricsToGate - Crypto_EncryptBuffer @0x4FB35B, CNapiNetwork_SendUDPPacket
-//  @0x4FB37E; CNapiNetwork_SendUDPPacket @0x4C4D30 -> CNapiNPManager_SendTo(.., 1) @0x4C4D65]
+//  @0x4FB37E; CNapiNetwork_SendUDPPacket @0x4C4D30 -> CNapiNPManager_SendTo(.., 1) @0x4C4D56]
 std::vector<uint8_t> gate_metrics_datagram(std::string_view text);
 
 } // namespace opennova

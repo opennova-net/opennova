@@ -740,6 +740,9 @@ void dispatch_player_sync_request(NapiNPConnection &conn) {
 	// Leaving game state 10 or slot state 6 disarms the round-event watermark
 	// [orig: CNetPlayer_SetGameState @0x4C4135].
 	if (conn.burst.game_state == 10) conn.link.round_watermark = 0;
+	// Its row's report clocks into phase 1, at the record's receive (D-NET-NEW-L9-22)
+	// [orig: CNetPlayer_SetGameState @0x4C4060 - @0x4C41BD / @0x4C41CA].
+	gate_slot_clocks_game_state(conn, 9, conn.receive_stamp_ms, 0);
 	conn.burst.game_state = 9;
 	if (conn.slot_state == PlayerSlotState::PlayerSync) return;
 	if (conn.slot_state == PlayerSlotState::Joined) conn.link.round_watermark = 0;

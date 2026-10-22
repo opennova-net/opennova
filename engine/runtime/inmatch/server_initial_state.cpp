@@ -425,6 +425,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				s2c::CLASS_ALLOW_MASK, serialize_class_allow_mask(ctx.config.class_allow_mask)});
 		step.messages.push_back(
 				InitialStateMessage{s2c::DISCONNECT_UNLOCK, {}});
+		// Its row's report clocks into phase 1 (D-NET-NEW-L9-22) [orig: CNetPlayer_SetGameState @0x4C4060 - @0x4C41BD / @0x4C41CA].
+		gate_slot_clocks_game_state(conn, 9, ctx.tick_count_ms, 0);
 		b.game_state = 9;
 		conn.slot_state = PlayerSlotState::AwaitWorldRequest;
 		b.player_sync_subphase = InitialStateBurst::kSyncDone;
@@ -650,6 +652,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			// waits for the joiner's C2S 0x0B (Server_OnPlayerJoin).
 			// [orig: Server_SendPlayerSlotStateFrame case 7 - CNetPlayer_SetGameState(.., 9)
 			//  @0x51BED7, slot state 5 @0x51BEF3]
+			gate_slot_clocks_game_state(conn, 9, ctx.tick_count_ms, 0); // D-NET-NEW-L9-22
 			b.game_state = 9;
 			conn.slot_state = PlayerSlotState::AwaitJoin;
 		} else {
@@ -726,6 +729,9 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// (NEW-L1-8) [orig: CNetPlayer_SetGameState @0x4C4225..0x4C422D].
 	st.frontier_hint_pending = true;
 	st.capture_nag_held = false;
+	// Its row's report clocks into phase 2 while the pre-round delay runs, else 3
+	// (D-NET-NEW-L9-22) [orig: CNetPlayer_SetGameState @0x4C4060 - @0x4C41F2..0x4C420E].
+	gate_slot_clocks_game_state(conn, 10, ctx.tick_count_ms, world.preround_delay_seconds);
 	conn.burst.game_state = 10;
 	conn.link.round_watermark = world.out.rounds.frame_clock - 1;
 	if (conn.slot_state != PlayerSlotState::Joined) {
@@ -944,6 +950,9 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 						non_team_header)});
 		// Leaving game state 10, then slot state 6, disarms the watermark
 		// [orig: CNetPlayer_SetGameState @0x4C4135 from @0x51AA44; @0x51AA54..0x51AA56].
+		// Its row's report clocks into phase 4 (D-NET-NEW-L9-22) [orig: CNetPlayer_SetGameState
+		//  @0x4C4060 - @0x4C4257 / @0x4C4264].
+		gate_slot_clocks_game_state(conn, 11, ctx.tick_count_ms, 0);
 		conn.burst.game_state = 11;
 		conn.link.round_watermark = 0;
 		if (conn.slot_state != PlayerSlotState::RoundOver)
@@ -1038,6 +1047,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 			// from the shared in-process loading loop [orig: NapiClient_WaitForGameStart
 			// @0x42cc10] — so the type-2 loopback applies the handler's advance inline.
 			if (is_remote) break;
+			gate_slot_clocks_game_state(conn, 9, ctx.tick_count_ms, 0); // D-NET-NEW-L9-22
 			b.game_state = 9;         // [orig: CNetPlayer_SetGameState(.., 9) @0x513295]
 			conn.slot_state = PlayerSlotState::WorldStream; // [orig: @0x5132b1]
 			b.world_stream_phase = InitialStateBurst::kStreamInit; // [orig: @0x5132f6]

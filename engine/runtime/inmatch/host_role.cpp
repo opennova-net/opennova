@@ -327,6 +327,8 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	host_cfg.session_seed_id = state.session_seed_id;
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	// The authority's mission start sets the report clocks loading (D-NET-NEW-L9-22).
+	inmatch::gate_clocks_mission_start(state.host_owner.ctx);
 	keep_round_state_init_tick();
 	fill_spawn_buffer_out_of_session();
 	install_spawned_body_bind();
@@ -385,6 +387,10 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E983].
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	// The mission start that follows the create sets both report clocks loading
+	// (D-NET-NEW-L9-22) [orig: Game_StartMission @0x524360 - CServerTick_SetState(1) @0x5244A4 /
+	//  @0x5244AF, after the create's constructs].
+	inmatch::gate_clocks_mission_start(ctx);
 	keep_round_state_init_tick();
 	fill_spawn_buffer_out_of_session();
 	install_spawned_body_bind();
@@ -431,6 +437,10 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	//  bring-up's]
 	ctx.file_transfer_session = &client_process_->file_transfer_session;
 	ctx.client_disconnect_latch = &client_process_->disconnect_latch;
+	// The report clocks loading, just ahead of the add (D-NET-NEW-L9-22) [orig: Game_StartMission
+	//  - CServerTick_SetState(1) @0x5244A4 / @0x5244AF].
+	ctx.tick_count_ms = inmatch::host_clock_ms(state.host_owner);
+	inmatch::gate_clocks_mission_start(ctx);
 	client_process_->file_transfer_session.start_mission();
 	state.client_runtime.reset();
 	local_round_reset_seen_ = kernel.local.round_reset_revision;
@@ -1209,7 +1219,8 @@ void HostRole::close() {
 	//  @0x4C96E2)]
 	const int32_t exit_reason = ctx.mission_exit_reason != 0 ? ctx.mission_exit_reason
 			: kernel_ != nullptr ? kernel_->world.mission_exit_reason : 0;
-	if (route_mission_exit(exit_reason, /*novaworld=*/false).error != PostMissionError::None) {
+	const PostMissionRoute route = route_mission_exit(exit_reason, /*novaworld=*/false);
+	if (route.error != PostMissionError::None) {
 		// The unstopped server outlives the session in the process (ctx+0x68 and the protocol's
 		// list are g_NapiNPCtx's): the browse's and a join's pumps step it
 		// (pump_unstopped_server) and the next session reset stops it (stop_unstopped_server).
@@ -1251,6 +1262,16 @@ void HostRole::close() {
 			unstopped.nodes.push_back(std::move(node));
 		}
 		return;
+	}
+	// The destroy arm runs Server_EndMissionSession ahead of the destroy: on the authority, the
+	// METPROTOCOL SERVER report and the report clocks' reset, so the players the stop below
+	// removes report GCC "" (D-NET-NEW-L9-22).
+	// [orig: PostMenu_RouteMissionExit @0x568460 - Server_EndMissionSession called @0x568672,
+	//  CNapiGameSession_FullDestroy called @0x568683; Server_EndMissionSession @0x51E850 -
+	//  is_authority @0x51E865, Server_ProcessPeriodicTimerUpdate called @0x51E867]
+	if (route.destroys_session && ctx.is_authority != 0) {
+		ctx.tick_count_ms = inmatch::host_clock_ms(state.host_owner);
+		inmatch::Server_ProcessPeriodicTimerUpdate(ctx);
 	}
 	// NapiNPProtocol_StopServer: latch STOP and destroy every server-side node in
 	// list order; the burst rides the socket directly, like retail's SendTo.

@@ -717,9 +717,15 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		if (!bodyless_name.empty()) conn.reply.player_name = bodyless_name;
 		conn.phase = ConnectionPhase::PlayerAdded;
 		conn.reply.player_slot_reserved = false;
+		// The remote add's report clocks (D-NET-NEW-L9-22) [orig: Server_PlayerAdd - @0x51CD1B /
+		//  @0x51CD26].
+		if (!is_host_own && !round_init) gate_slot_clocks_player_added(ctx, conn);
 		// The remote arm's squad leg runs ahead of the body spawn, so a bodyless
 		// row files its node too [orig: @0x51CDE0..0x51CEEF, ahead of @0x51D056].
 		if (!is_host_own && !round_init) Server_FileSquadRegistryNode(ctx, conn);
+		// The add's high marks on the process report clocks, its body's stores aside
+		// (D-NET-NEW-L9-22) [orig: Server_PlayerAdd @0x51D2EE / @0x51D2F8].
+		if (!is_host_own && !round_init) gate_clocks_player_added_marks(ctx);
 		return h;
 	}
 	// The body binds its items.def row at its spawn: a mid-match join's and a
@@ -847,6 +853,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	conn.reply.player_slot_reserved = false;
+	// The remote add constructs the row's two report clocks once it is active; the local arm
+	// and the round init's re-add construct none (D-NET-NEW-L9-22) [orig: Server_PlayerAdd - the
+	// active byte @0x51CD14, CServerTick_Construct @0x51CD1B / @0x51CD26; the local arm's jump
+	// past them @0x51CC60].
+	if (!is_host_own && !round_init) gate_slot_clocks_player_added(ctx, conn);
 	// The remote add's squad leg, once the slot is active; the local arm and
 	// the round init's re-add file nothing (server_squad_registry.h).
 	// [orig: Server_PlayerAdd's remote arm, @0x51CDE0..0x51CEEF; its local arm
@@ -857,6 +868,10 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// (HostRole's mission-start end) [orig: Server_PlayerAdd
 	//  @0x51d2fd..0x51d30f -> CServerLog_WritePlayerNameRecord; the local arm
 	//  @0x51CC29 -> `jmp loc_51D314` @0x51CC60].
+	// Ahead of it the add raises the process report clocks' high marks over the slots, its own
+	// team counted (D-NET-NEW-L9-22) [orig: Server_PlayerAdd - CServerTick_UpdateMaxPlayerCounts
+	//  @0x51D2EE / @0x51D2F8].
+	if (!is_host_own && !round_init) gate_clocks_player_added_marks(ctx);
 	if (ctx.logs.profile != nullptr && !is_host_own) {
 		if (const world::Entity *added = world.registry.get(h)) ctx.logs.profile->write_player(*added);
 	}

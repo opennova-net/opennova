@@ -435,6 +435,13 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 			device.bind_render ? device.bind_render : no_render_bind,
 			[&kernel] { (void)kernel.complete_mission_start(); });
 
+	// Past the load the authority's report clocks wait to begin while the pre-round delay runs,
+	// else play (D-NET-NEW-L9-22) [orig: Game_StartMission - @0x525E19..0x525E4D].
+	if (boot.host != nullptr) {
+		NapiNPServerCtx &clock_ctx = boot.host->state.host_owner.ctx;
+		clock_ctx.tick_count_ms = host_clock_ms(boot.host->state.host_owner);
+		gate_clocks_mission_loaded(clock_ctx, kernel.world.preround_delay_seconds);
+	}
 	// The /PROFILE roster of the started mission's pool 0, at the start's
 	// tail [orig: Game_StartMission @0x526135..0x52617b, after
 	//  SpawnWaveList_BuildFromMission @0x526130]. A host with its own client

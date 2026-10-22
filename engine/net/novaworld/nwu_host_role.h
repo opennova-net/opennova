@@ -99,6 +99,12 @@ public:
 	//  gates @0x524908..0x524926 (is_in_session, is_authority, the NovaWorld network type,
 	//  g_SessionRoundCount == 0), Server_SendMetricsToGate @0x4FB0A0 (the call @0x524928)]
 	void publish_mission_start(int32_t session_round_count);
+	// The strings every METPROTOCOL report prints, as the registration and the gate reply stand
+	// now: the hosted match's report sink reads them (inmatch/gate_metrics_reports.h).
+	GateMetricsHost metrics_host() const { return gate_metrics_host(host_cfg()); }
+	// One report's text to the gate's metrics address over the hosting session
+	// (NwuLobbySession::send_gate_metrics: nothing while no gate address resolved).
+	void send_gate_metrics(std::string_view text) { lobby_.send_gate_metrics(text); }
 	// The server-info update outside the mission start: the hosted match's 0x744 refresh's and
 	// the join lock's toggle's (inmatch::run_server_info_refresh / Server_ToggleJoinLock through
 	// its embedder's on_update_server_info hook): the Host list's columns into the session's

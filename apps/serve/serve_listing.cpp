@@ -34,6 +34,15 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 	ctx.on_update_server_info = [this]() {
 		if (lister_ != nullptr) lister_->host_role().update_server_info();
 	};
+	// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
+	// registration's and the gate reply's (inmatch/gate_metrics_reports.h, D-NET-NEW-L9-22).
+	ctx.gate_metrics.host = [this]() {
+		return lister_ != nullptr ? lister_->host_role().metrics_host() : GateMetricsHost{};
+	};
+	ctx.gate_metrics.game_text = seams_.gametext;
+	ctx.gate_metrics.send = [this](const std::string &text) {
+		if (lister_ != nullptr) lister_->host_role().send_gate_metrics(text);
+	};
 	sync_session();
 }
 
@@ -42,6 +51,7 @@ void ServeListing::unbind() {
 		inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
 		ctx.on_player_enter_request = nullptr;
 		ctx.on_update_server_info = nullptr;
+		ctx.gate_metrics = inmatch::GateMetricsSink{};
 		ctx.novaworld_join_tickets_armed = false;
 		ctx.novaworld_gsid.clear();
 		ctx.novaworld_app_id = 0;

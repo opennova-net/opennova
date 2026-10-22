@@ -942,6 +942,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// our tick loop skips spawned connections, so the mid-game re-stream stays an
 				// open divergence (see the D-NET-150 record).
 				if (!conn.burst.spawned && conn.slot_state != PlayerSlotState::Free) {
+					// The report clocks at the record's receive (D-NET-NEW-L9-22).
+					gate_slot_clocks_game_state(conn, 9, conn.receive_stamp_ms, 0);
 					conn.burst.game_state = 9;              // [orig: @0x513295]
 					if (conn.slot_state != PlayerSlotState::WorldStream)
 						conn.slot_state = PlayerSlotState::WorldStream; // [orig: @0x5132a0/@0x5132b1]

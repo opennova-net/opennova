@@ -1027,6 +1027,21 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 			if (live != nullptr)
 				live->host_role().update_server_info();
 		};
+		// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
+		// registration's and the gate reply's (engine: inmatch/gate_metrics_reports.h,
+		// D-NET-NEW-L9-22).
+		ctx->gate_metrics.host = [columns_client_id]() {
+			NovaWorldClient *live =
+					Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(columns_client_id));
+			return live != nullptr ? live->host_role().metrics_host() : opennova::GateMetricsHost{};
+		};
+		ctx->gate_metrics.game_text = game_text_lookup(client->get_gametext());
+		ctx->gate_metrics.send = [columns_client_id](const std::string &p_text) {
+			NovaWorldClient *live =
+					Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(columns_client_id));
+			if (live != nullptr)
+				live->host_role().send_gate_metrics(p_text);
+		};
 	}
 	const std::string login_pcid = client->get_login_pcid();
 	sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(),
@@ -1099,8 +1114,10 @@ void SessionDrive::unbind_nw_host() {
 	// to a session it is leaving.
 	Ref<Simulation> sim = world_->get_sim();
 	if (sim.is_valid()) {
-		if (opennova::inmatch::NapiNPServerCtx *ctx = sim->host_ctx())
+		if (opennova::inmatch::NapiNPServerCtx *ctx = sim->host_ctx()) {
 			ctx->on_update_server_info = nullptr;
+			ctx->gate_metrics = opennova::inmatch::GateMetricsSink{};
+		}
 		sim->set_novaworld_join_tickets(false, Simulation::PlayerEnterRequestHook());
 		sim->set_novaworld_registration(String(), 0, String());
 	}
