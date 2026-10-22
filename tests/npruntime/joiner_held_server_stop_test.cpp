@@ -470,10 +470,13 @@ void test_a_held_joiners_ping_and_goodbye_at_the_attempt() {
 
 	const std::string text = t.connect_text();
 	const std::size_t raw = text.find("NAPI GOT RAW ");
-	const std::size_t ping_taken = text.find(" FROM 127.0.0.1:31000 [PN]");
+	const std::string taken_line = " FROM 127.0.0.1:31000 [PN]";
+	const std::size_t ping_taken = text.find(taken_line);
 	const std::size_t tossed = text.find(" FROM 127.0.0.1:31000 [4]");
-	const std::size_t goodbye_taken =
-			ping_taken == std::string::npos ? ping_taken : text.find(" [PN]", ping_taken + 1);
+	// The goodbye's PROTOCOL line is the next taken line past the ping's whole line.
+	const std::size_t goodbye_taken = ping_taken == std::string::npos
+			? ping_taken
+			: text.find(taken_line, ping_taken + taken_line.size());
 	CHECK(raw != std::string::npos && text.find("NAPI GOT COOKED ") != std::string::npos);
 	CHECK(raw < ping_taken && ping_taken < tossed && tossed < goodbye_taken &&
 			goodbye_taken != std::string::npos);
