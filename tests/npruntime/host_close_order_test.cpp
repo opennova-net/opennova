@@ -812,7 +812,11 @@ void test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_sessi
 				if (reports.size() == 1) {
 					CHECK(reports[0].first.find("BLOCK \"PLAYER\"\r\n") != std::string::npos);
 					CHECK(reports[0].first.find("\tGCC \"\"\r\n") != std::string::npos);
-					CHECK(reports[0].second == 1); // after the slot's removal
+					// After the joiner's removal, the twin's ahead of it: the twin is the host's
+					// own slot, whose teardown returns at its local test before the PLAYER leg
+					// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the NovaWorld leg
+					//  @0x51B5F3, the local byte @0x51B606, the return @0x51B621].
+					CHECK(reports[0].second == (twin_added ? 2u : 1u));
 				}
 			} else {
 				CHECK(reports.empty());
