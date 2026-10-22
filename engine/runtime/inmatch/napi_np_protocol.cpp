@@ -873,7 +873,7 @@ void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage
 // NOTE (D-NET-114, host self-stream): the host's OWN type-2 loopback runs the §5.2a burst too — this
 // is FAITHFUL (the original's Server_OnPlayerJoin @0x51a680 runs for the host's own join, not just
 // remote joiners), so we do not suppress it here. But its PeerSpawned carries self_id == the host dcb
-// (kHostPlayerDcb): the event CONSUMER (the binding / ClientRuntime) must recognize self_id == its own
+// (its self-join twin's index, D-NET-713): the event CONSUMER (the binding / ClientRuntime) must recognize self_id == its own
 // connection id and NOT admit a duplicate "ghost" host avatar — the host's local player is already
 // World::cached.local_player. (Self-filter belongs at the consumer, where the local connection id is
 // known; surfacing it here keeps the libs layer a faithful, consumer-agnostic event source.)
@@ -1032,15 +1032,19 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 
 	// Retail creates the server-side node here, past the protocol's own gates and the
-	// retransmit, ahead of the validate callback, and the create steps the protocol's
-	// connection counter, so a 0x42 the lock, the ban or the capacity then refuses still steps
-	// it (the refused node is destroyed in the same handler). Ours keeps no server-side
-	// index; only the counter moves. (D-NET-713)
+	// retransmit, ahead of the validate callback, and the create steps the process's
+	// connection counter into the node's index, so a 0x42 the lock, the ban or the capacity
+	// then refuses still steps it (the refused node is destroyed in the same handler). An
+	// accepted node's index is its dcb: the state change makes it connection_id, the 0x82's
+	// MI, the joiner's 0x48 echo and its player's entity+0x78. A process that browsed, joined
+	// or hosted before numbers its joiners from where those creates left the counter.
+	// (D-NET-713)
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - the pre-create gates
 	//  @0x62BDAE..0x62BE8F, the lookup @0x62BEBA, the retransmit @0x62BEE6..0x62BEF1, the create
 	//  @0x62BF06 ahead of the validate callback @0x62C0B1; CNapiNPConnection_Create - the step
-	//  @0x62B282..0x62B296]
-	(void)next_connection_index();
+	//  @0x62B282..0x62B296; CNapiNPConnection_OnStateChange @0x626060 - connection_id
+	//  @0x626199..0x62619C]
+	const uint32_t connection_id = next_connection_index();
 	// The created node's keys come at the create too, ahead of the validate callback, so a
 	// refused 0x42 has drawn them from the manager's PRNG as well. R2: the server SK and then
 	// its SCRK from the manager's PRNG (D-NET-524), unless a deterministic source is forced
@@ -1089,15 +1093,13 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
-	// [orig: CNapiNPConnection_Create @0x62acb0 — conn.connection_id (the dcb) = ++protocol[947],
-	// wrapping 0 -> 1]. On a LAN listen host the host ASSIGNS the dcb (it does not learn it from the
-	// client) and advertises it in ServerAuth.MI. It becomes spawn-eligible only after the final
-	// admission 0x02; the bundled client later echoes it in 0x48. On NovaWorld the gate-assigned id
-	// arrives via that 0x48 and overrides this host provisional value -- retail's Create assigns
-	// the provisional `++protocol[947]` on BOTH network types (no transport-mode gate @0x62acb0),
-	// so the provisional-then-override shape is the port, not a placeholder.
-	const uint32_t connection_id = ctx.np_protocol.next_connection_id++;
-	if (ctx.np_protocol.next_connection_id == 0) ctx.np_protocol.next_connection_id = 1; // wrap 0 -> 1
+	// The node takes the create's index as its dcb (above). On a LAN listen host the host ASSIGNS
+	// the dcb (it does not learn it from the client) and advertises it in ServerAuth.MI. It
+	// becomes spawn-eligible only after the final admission 0x02; the bundled client later echoes
+	// it in 0x48. On NovaWorld the gate-assigned id arrives via that 0x48 and overrides this host
+	// provisional value -- retail's Create assigns the provisional index on BOTH network types (no
+	// transport-mode gate @0x62acb0), so the provisional-then-override shape is the port, not a
+	// placeholder.
 	const bool negotiated = fill_joined_node(conn, auth, peer, *identity, connection_id,
 			server_keys, ctx.np_protocol.receive_clock_ms);
 	// The connection is up: the new-connection callback turns the _connectlog.txt debug log

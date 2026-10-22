@@ -61,7 +61,7 @@ void make_world(w::World &world) {
 	world.registry.spawn(3, start);
 }
 
-const w::Entity *pool0_player(const w::World &world, uint16_t want_dcb) {
+const w::Entity *pool0_player(const w::World &world, uint32_t want_dcb) {
 	const w::Entity *found = nullptr;
 	world.registry.for_each([&](const w::Entity &e) {
 		if (e.handle.pool() == 0 && e.owner_connection_id == want_dcb) found = &e;
@@ -92,6 +92,11 @@ int main() {
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        /*host_key=*/0, &loopback, listen_settings);
 	ctx.world = &world;
+	// The own player's dcb is its self-join twin's index, the process counter's step after the
+	// own client's (2 in a fresh process); a joiner's node takes the counter's next (D-NET-713).
+	const uint32_t host_dcb = inmatch::test::own_dcb(ctx);
+	if (!expect(host_dcb != 0 && host_dcb == ctx.np_protocol.connection_list.front().client_ci + 1,
+	            "the host's own dcb is its twin's index, the step after its own client's")) return 1;
 
 	// --- §5.2a step 1-2: spawn the host's OWN player (the type-2 loopback). ---
 	inmatch::Server_InitNewRoundState(ctx);
@@ -102,8 +107,8 @@ int main() {
 	const w::Entity *host = world.registry.get(world.cached.local_player);
 	if (!expect(host != nullptr, "host player entity resolvable")) return 1;
 	if (!expect(host->item_id == w::kPlayerInfantryTypeId, "host player is 0x14B9 infantry")) return 1;
-	if (!expect(host->owner_connection_id == inmatch::kHostPlayerDcb,
-	            "host player entity+0x78 == kHostPlayerDcb (2), NOT 0")) return 1;
+	if (!expect(host->owner_connection_id == host_dcb,
+	            "host player entity+0x78 == the host's own dcb, NOT 0")) return 1;
 	if (!expect(host->handle.slot() >= inmatch::kRetailPlayerMinEntitySlot,
 	            "host player lands at/after the retail player slot")) return 1;
 	if (!expect(host->position.x == 123.0f && host->position.y == 456.0f,
@@ -113,10 +118,11 @@ int main() {
 	            "re-running ProcessPendingPlayerSpawns is idempotent")) return 1;
 
 	// --- A remote joiner reaches the accepted phase: it spawns as a REMOTE peer, host untouched. ---
+	const uint32_t joiner_dcb = opennova::next_connection_index();
 	{
 		inmatch::NapiNPConnection joiner;
 		joiner.type = 1;                       // server-side view of a remote client
-		joiner.connection_id = inmatch::kFirstJoinerDcb; // 3, the host-assigned dcb
+		joiner.connection_id = joiner_dcb;     // the host-assigned dcb
 		joiner.self_id_seen = true;            // accepted (post-0x42 / 0x48)
 		joiner.phase = inmatch::ConnectionPhase::Joined;
 		ctx.np_protocol.connection_list.push_back(joiner);
@@ -127,9 +133,9 @@ int main() {
 	if (!expect(world.cached.local_player == host_handle_before,
 	            "the joiner did NOT republish cached.local_player (host keeps its own)")) return 1;
 
-	const w::Entity *joiner_ent = pool0_player(world, inmatch::kFirstJoinerDcb);
-	if (!expect(joiner_ent != nullptr && joiner_ent->owner_connection_id == inmatch::kFirstJoinerDcb,
-	            "joiner player entity+0x78 == its dcb (3)")) return 1;
+	const w::Entity *joiner_ent = pool0_player(world, joiner_dcb);
+	if (!expect(joiner_ent != nullptr && joiner_ent->owner_connection_id == joiner_dcb,
+	            "joiner player entity+0x78 == its dcb")) return 1;
 	if (!expect(joiner_ent->handle != world.cached.local_player,
 	            "joiner is a distinct pool-0 entity from the host")) return 1;
 	// The add mirrors the slot's reserved team byte (+416) onto its roster row
@@ -196,10 +202,11 @@ int main() {
 				world.match.player(joiner_handle)->slot_team == 1,
 				"a team change back stamps it again")) return 1;
 	}
+	const uint32_t spectator_dcb = opennova::next_connection_index();
 	{
 		inmatch::NapiNPConnection joining_spectator;
 		joining_spectator.type = 1;
-		joining_spectator.connection_id = inmatch::kFirstJoinerDcb + 1;
+		joining_spectator.connection_id = spectator_dcb;
 		joining_spectator.self_id_seen = true;
 		joining_spectator.phase = inmatch::ConnectionPhase::Joined;
 		joining_spectator.link.spectator = true;
@@ -209,7 +216,7 @@ int main() {
 			inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
 			"a newly admitted spectator receives its hidden player record")) return 1;
 	const w::Entity *joining_spectator =
-			pool0_player(world, inmatch::kFirstJoinerDcb + 1);
+			pool0_player(world, spectator_dcb);
 	if (!expect(
 			joining_spectator != nullptr && joining_spectator->team == 0 &&
 			(joining_spectator->flags & 1u) != 0 &&
@@ -222,11 +229,11 @@ int main() {
 	const opennova::OrganicSpawnBatch batch = ns::build_pool0_organic_batch(world);
 	bool saw_host = false, saw_joiner = false;
 	for (const opennova::OrganicSpawnRecord &r : batch.records) {
-		if (r.owner_connection_id == inmatch::kHostPlayerDcb) saw_host = true;
-		if (r.owner_connection_id == inmatch::kFirstJoinerDcb) saw_joiner = true;
+		if (r.owner_connection_id == host_dcb) saw_host = true;
+		if (r.owner_connection_id == joiner_dcb) saw_joiner = true;
 	}
 	if (!expect(saw_host && saw_joiner,
-	            "build_pool0_organic_batch stamps owner_connection_id from owner_connection_id (host 2 + joiner 3)")) return 1;
+	            "build_pool0_organic_batch stamps owner_connection_id from owner_connection_id (host + joiner)")) return 1;
 	// Each player's record carries its own roster slot id at entity+0x154,
 	// the byte a client's squad legs read as its own slot [orig:
 	// Server_PlayerAdd @0x51d087..0x51d08b; NetPacket_SerializeEntityStatesToBuffer
@@ -585,7 +592,13 @@ int main() {
 		host_conn.char_vars.avatar[0] = 3;
 		host_conn.char_vars.avatar[1] = 9;
 
-		// Host own player first (team 1 by autobalance).
+		// Host own player first (team 1 by autobalance). A later session in this process: its own
+		// dcb runs on from the earlier ones' (D-NET-713), and each joiner's node takes the next.
+		const uint32_t chost_dcb = inmatch::test::own_dcb(cctx);
+		const uint32_t cjoin_dcb = opennova::next_connection_index();
+		const uint32_t cbare_dcb = opennova::next_connection_index();
+		const uint32_t cspec_dcb = opennova::next_connection_index();
+		const uint32_t cnext_dcb = opennova::next_connection_index();
 		inmatch::Server_InitNewRoundState(cctx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: host spawned")) return 1;
 
@@ -593,7 +606,7 @@ int main() {
 		{
 			inmatch::NapiNPConnection joiner;
 			joiner.type = 1;
-			joiner.connection_id = inmatch::kFirstJoinerDcb;
+			joiner.connection_id = cjoin_dcb;
 			joiner.self_id_seen = true;
 			joiner.phase = inmatch::ConnectionPhase::Joined;
 			joiner.char_vars.char_id[0] = 0x0200;
@@ -607,8 +620,8 @@ int main() {
 		}
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: joiner spawned")) return 1;
 
-		const w::Entity *chost = pool0_player(cw, inmatch::kHostPlayerDcb);
-		const w::Entity *cjoin = pool0_player(cw, inmatch::kFirstJoinerDcb);
+		const w::Entity *chost = pool0_player(cw, chost_dcb);
+		const w::Entity *cjoin = pool0_player(cw, cjoin_dcb);
 		if (!expect(chost != nullptr && cjoin != nullptr, "char-stamp: both players resolvable")) return 1;
 		if (!expect(chost->team == 1 && cjoin->team == 2, "char-stamp: host team 1, joiner team 2")) return 1;
 		if (!expect(chost->anim_slot == 3, "host animSlot = selected side-A avatar")) return 1;
@@ -624,9 +637,9 @@ int main() {
 		const opennova::OrganicSpawnBatch cbatch = ns::build_pool0_organic_batch(cw);
 		bool host_rec_ok = false, join_rec_ok = false;
 		for (const opennova::OrganicSpawnRecord &r : cbatch.records) {
-			if (r.owner_connection_id == inmatch::kHostPlayerDcb)
+			if (r.owner_connection_id == chost_dcb)
 				host_rec_ok = (r.anim_slot == 3 && r.net_id == 0x0400);
-			if (r.owner_connection_id == inmatch::kFirstJoinerDcb)
+			if (r.owner_connection_id == cjoin_dcb)
 				join_rec_ok = (r.anim_slot == 4 && r.net_id == 0x8207 && r.player_class == 5);
 		}
 		if (!expect(host_rec_ok, "0x0C host record echoes the selected local character")) return 1;
@@ -638,13 +651,13 @@ int main() {
 		{
 			inmatch::NapiNPConnection bare;
 			bare.type = 1;
-			bare.connection_id = inmatch::kFirstJoinerDcb + 1;
+			bare.connection_id = cbare_dcb;
 			bare.self_id_seen = true;
 			bare.phase = inmatch::ConnectionPhase::Joined;
 			cctx.np_protocol.connection_list.push_back(bare);
 		}
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: bare joiner spawned")) return 1;
-		const w::Entity *cbare = pool0_player(cw, inmatch::kFirstJoinerDcb + 1);
+		const w::Entity *cbare = pool0_player(cw, cbare_dcb);
 		if (!expect(cbare != nullptr && cbare->anim_slot == 0,
 		            "var-less joiner: animSlot 0 (tag absent)")) return 1;
 		const uint16_t side_default = cbare->team == 2 ? 0x8207 : 0x0200;
@@ -653,7 +666,7 @@ int main() {
 		if (!expect(cbare->player_class == 8, "var-less joiner: playerClass defaults 8 in-session")) return 1;
 		const opennova::OrganicSpawnBatch bbatch = ns::build_pool0_organic_batch(cw);
 		for (const opennova::OrganicSpawnRecord &r : bbatch.records) {
-			if (r.owner_connection_id == inmatch::kFirstJoinerDcb + 1) {
+			if (r.owner_connection_id == cbare_dcb) {
 				if (!expect(r.net_id == side_default, "var-less joiner streams its re-resolved id")) return 1;
 			}
 		}
@@ -665,7 +678,7 @@ int main() {
 			cctx.is_in_session = 1;
 			inmatch::NapiNPConnection spec;
 			spec.type = 1;
-			spec.connection_id = inmatch::kFirstJoinerDcb + 2;
+			spec.connection_id = cspec_dcb;
 			spec.self_id_seen = true;
 			spec.phase = inmatch::ConnectionPhase::Joined;
 			spec.link.spectator = true;
@@ -680,7 +693,7 @@ int main() {
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1,
 		            "char-stamp: spectator spawned")) return 1;
 		const inmatch::NapiNPConnection &spec_conn = cctx.np_protocol.connection_list.back();
-		const w::Entity *cspec = pool0_player(cw, inmatch::kFirstJoinerDcb + 2);
+		const w::Entity *cspec = pool0_player(cw, cspec_dcb);
 		if (!expect(spec_conn.assigned_team_valid && spec_conn.assigned_team == 0,
 		            "a session spectator's slot team is 0")) return 1;
 		if (!expect(cspec != nullptr && cspec->anim_slot == 4 && cspec->minimap_net_id == 0x8207,
@@ -692,11 +705,11 @@ int main() {
 		// joiner balances to team 2; a body walk would have counted 1 against 2 and said 1.
 		// [orig: Server_AssignPlayerTeam @0x4FE5BD..0x4FE5DE, @0x4FE619]
 		if (!expect(chost != nullptr, "char-stamp: host body")) return 1;
-		const_cast<w::Entity *>(pool0_player(cw, inmatch::kHostPlayerDcb))->team = 2;
+		const_cast<w::Entity *>(pool0_player(cw, chost_dcb))->team = 2;
 		{
 			inmatch::NapiNPConnection next;
 			next.type = 1;
-			next.connection_id = inmatch::kFirstJoinerDcb + 3;
+			next.connection_id = cnext_dcb;
 			next.self_id_seen = true;
 			next.phase = inmatch::ConnectionPhase::Joined;
 			next.char_vars.team_request = 0xFF;
@@ -731,12 +744,14 @@ int main() {
 		inmatch::NapiNPConnection &own = ectx.np_protocol.connection_list.front();
 		own.char_vars.char_id[0] = 0x0400;
 		own.char_vars.char_id[1] = 0x8407;
+		const uint32_t own_dcb = inmatch::test::own_dcb(ectx);
+		const uint32_t ejoin_dcb = opennova::next_connection_index();
 		inmatch::Server_InitNewRoundState(ectx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ectx, ew) == 1, "own-add: host spawned")) return 1;
 		{
 			inmatch::NapiNPConnection joiner;
 			joiner.type = 1;
-			joiner.connection_id = inmatch::kFirstJoinerDcb;
+			joiner.connection_id = ejoin_dcb;
 			joiner.self_id_seen = true;
 			joiner.phase = inmatch::ConnectionPhase::Joined;
 			joiner.char_vars.char_id[0] = 0x0200;
@@ -744,8 +759,8 @@ int main() {
 			ectx.np_protocol.connection_list.push_back(joiner);
 		}
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ectx, ew) == 1, "own-add: joiner spawned")) return 1;
-		const w::Entity *own_body = pool0_player(ew, inmatch::kHostPlayerDcb);
-		const w::Entity *joiner_body = pool0_player(ew, inmatch::kFirstJoinerDcb);
+		const w::Entity *own_body = pool0_player(ew, own_dcb);
+		const w::Entity *joiner_body = pool0_player(ew, ejoin_dcb);
 		if (!expect(own_body != nullptr && own_body->team == 1 && own_body->minimap_net_id == 0x0400,
 		            "the host's own add keeps its profile's id")) return 1;
 		if (!expect(joiner_body != nullptr && joiner_body->minimap_net_id == 0,

@@ -188,7 +188,7 @@ void remote_slot_class_at_round_init() {
 	for (uint32_t i = 0; i < 2; ++i) {
 		inmatch::NapiNPConnection joining;
 		joining.type = inmatch::NapiNPConnection::kTypeServerSide;
-		joining.connection_id = inmatch::kFirstJoinerDcb + i;
+		joining.connection_id = opennova::next_connection_index(); // a create's (D-NET-713)
 		joining.self_id_seen = true;
 		joining.phase = inmatch::ConnectionPhase::Joined;
 		joining.char_vars.char_class[0] = 8;

@@ -327,8 +327,10 @@ int main_impl() {
 		            "0x0C body decodes")) return 1;
 		bool host_dcb = false;
 		for (const auto &r : batch.records)
-			if (r.item_type_id == 0x14B9 && r.owner_connection_id == inmatch::kHostPlayerDcb) host_dcb = true;
-		if (!expect(host_dcb, "0x0C carries the host player (0x14B9) with entity+0x78 == dcb 2")) return 1;
+			if (r.item_type_id == 0x14B9 && r.owner_connection_id == inmatch::test::own_dcb(ctx))
+				host_dcb = true;
+		if (!expect(inmatch::test::own_dcb(ctx) != 0 && host_dcb,
+		            "0x0C carries the host player (0x14B9) with entity+0x78 == its twin's dcb")) return 1;
 	}
 
 	// (2) 0x20 decodes + carries the spawn marker.
@@ -470,7 +472,7 @@ int main_impl() {
 		for (const inmatch::TickOut &to : outs) {
 			for (const inmatch::HostAcceptEvent &ev : to.events) {
 				if (ev.kind == inmatch::HostAcceptEvent::Kind::PeerEnteredWorldStreaming) {
-					if (!expect(ev.self_id == inmatch::kHostPlayerDcb, "F3 self_id == host dcb")) return 1;
+					if (!expect(ev.self_id == inmatch::test::own_dcb(ctx2), "F3 self_id == host dcb")) return 1;
 					if (!expect(ev.pose.pitch == kLookPitchHigh,
 					            "F3 world-path pose pitch == AiEntity BAM32 high word")) return 1;
 					// The spawn marker's yaw 0 placement heading's high half, 0x4000

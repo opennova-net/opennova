@@ -12,6 +12,8 @@
 
 #include <runtime/inmatch/session_transport.h>
 
+#include <net/npwire/nw_session_framing.h> // next_connection_index (a fixture node's dcb, D-NET-713)
+
 #include "fresh_profile_oracle.h"
 
 #include <base/gameprofile/gameprofile.h>
@@ -39,6 +41,15 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
 	for (NapiNPConnection &connection : ctx.np_protocol.connection_list) {
 		if (connection.type == 2) connection.char_vars = stock_fresh_profile_character_vars();
 	}
+}
+
+// The listen host's own player's dcb: its self-join twin's index from the process's connection
+// counter, which a session create steps twice (own client, twin) and never resets, so a fresh
+// process's first host reads 2 and a later one more (D-NET-713); 0 with no own connection.
+inline uint32_t own_dcb(const NapiNPServerCtx &ctx) {
+	for (const NapiNPConnection &connection : ctx.np_protocol.connection_list)
+		if (connection.type == NapiNPConnection::kTypeClientSide) return connection.connection_id;
+	return 0;
 }
 
 // The stock-config form: GameConfig's defaults, except the cap. Its default of 1 is a single

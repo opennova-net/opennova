@@ -118,13 +118,19 @@ struct NapiNPProtocol {
 	// [orig: CNapiNPConnection_ParseMessages @0x625D54; Nwu_HandlePing @0x623C56]
 	uint32_t receive_clock_ms = 0;
 
-	// [orig +0xECC: protocol[947]] Monotonic, non-zero connection-id source. CNapiNPConnection_Create
-	// @0x62acb0 stamps each new connection's dcb (connection_id, +0x18) from ++protocol[947] (wrapping
-	// 0 -> 1). On a LAN listen host the host ASSIGNS this dcb, ships it in the 0x82 ServerAuth MI TLV
-	// [orig: CNapiNPConnection_SendSessionInit @0x620ef0], and stamps it into the joiner's 0x0C
-	// ownerConnectionId so the client's Player_FindLocalPlayerEntity @0x4e0090 numeric self-match
-	// (entity+0x78 == NapiNP_GetLocalConnectionId @0x4c6d40) succeeds.
-	uint32_t next_connection_id = 1;
+	// +0xECC (protocol[947]), the dcb source, is not this protocol's word in ours: retail's game
+	// protocol is created once per process and zeroes it there, so it is the process's connection
+	// counter, next_connection_index (net/npwire/nw_session_framing.h), which no session resets.
+	// CNapiNPConnection_Create steps it into each new connection (+0x14) and the state change
+	// copies that to connection_id (+0x18): the dcb a LAN listen host ASSIGNS, ships in the 0x82
+	// ServerAuth MI TLV and stamps into the joiner's 0x0C ownerConnectionId so the client's
+	// Player_FindLocalPlayerEntity @0x4e0090 numeric self-match (entity+0x78 ==
+	// NapiNP_GetLocalConnectionId @0x4c6d40) succeeds (D-NET-713).
+	// [orig: NapiNPProtocol_Create @0x625730 - +0xECC zeroed @0x625A81, its game-protocol call
+	//  CNapiNetwork_Init @0x4CA6CC (once, Game_ParseCommandLineAndInit @0x4A7346), destroyed only
+	//  by NapiLib_Shutdown @0x4C95F8; CNapiNPConnection_Create @0x62acb0 - @0x62B282..0x62B296;
+	//  CNapiNPConnection_OnStateChange @0x626060 - @0x626199..0x62619C;
+	//  CNapiNPConnection_SendSessionInit @0x620ef0 - MI = +0x18 @0x620FD4..0x620FE8]
 
 	// [orig +0x288] the session/server name ("HOST STARTED \"%s\"" log; lobby-visible).
 	std::string session_name;

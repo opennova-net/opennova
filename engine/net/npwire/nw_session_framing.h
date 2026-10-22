@@ -122,15 +122,19 @@ uint32_t make_session_key(const std::function<uint32_t()> &draw = {});
 // no row enumerates on its own connection, created the same way. The host's creates step it
 // too (D-NET-713): each 0x42 that passes the protocol's gates at its server-side create (a
 // lock, ban or capacity refusal after it included), and twice at a listen host's session
-// create (its own client and its self-join's server-side node). A server-side index never
-// reaches the wire (the 0x82 echoes the client's CI); a later client connection in the
-// same process numbers from where the host left the counter.
+// create (its own client and its self-join's server-side node). A server-side node's index
+// is its dcb, which its state change makes its connection_id: the 0x82's MI (the CI it
+// echoes is the client's), the joiner's 0x48 echo and its player's entity+0x78, a listen
+// host's own player taking its self-join twin's. A later connection in the same process,
+// client side or server side, numbers from where the earlier creates left the counter.
 // [orig: CNapiNPConnection_Create @0x62acb0 - `add [esi+0ECCh], edx` @0x62b282 on both
 //  arms (the type test @0x62b1d1..0x62b1d5), the 0 -> 1 wrap @0x62b288..0x62b28a,
 //  conn+0x14 @0x62b296; a type-2 connection's enumerator is created with it @0x62b1dc;
 //  the creates: type 2 @0x4c9b9c / @0x4c9d9c, type 1 in NapiNPProtocol_HandleClientJoin
-//  @0x62bf06; CNapiNPConnection_SendSessionInit's CI is the client's, conn+0x154
-//  @0x620fa7; CNapiNetwork_StartClientConnection @0x4ca160 ->
+//  @0x62bf06; CNapiNPConnection_OnStateChange @0x626060 - connection_id from conn+0x14
+//  @0x626199..0x62619c; CNapiNPConnection_SendSessionInit's CI is the client's, conn+0x154
+//  @0x620fa7, its MI the node's connection_id @0x620fd4..0x620fe8;
+//  CNapiNetwork_StartClientConnection @0x4ca160 ->
 //  CNapiNPConnection_InitFromSession @0x626320 on the enumerator's connection]
 uint32_t advance_connection_index(uint32_t &counter);
 uint32_t next_connection_index();

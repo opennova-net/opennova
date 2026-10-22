@@ -16,6 +16,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
+#include <net/npwire/nw_session_framing.h> // next_connection_index (a synthetic node's dcb)
 #include <net/npwire/protocol_message.h> // make_protocol_message (a transport-less join's replies)
 #include <net/title/title_identity.h>  // title_in_match (the join's state byte, DFX2-11)
 #include <runtime/inmatch/punt_log.h>     // the punt table the round init clears
@@ -1200,7 +1201,9 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 			break;
 		}
 	}
-	const uint32_t conn_id = conn ? conn->connection_id : ctx.np_protocol.next_connection_id;
+	// A new node's dcb is the create's index from the process's connection counter, as a
+	// join's is (D-NET-713) [orig: CNapiNPConnection_Create @0x62ACB0 - @0x62B282..0x62B296].
+	const uint32_t conn_id = conn ? conn->connection_id : next_connection_index();
 
 	world::PlayerSpawn spawn = spawn_in;
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
@@ -1216,7 +1219,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 		NapiNPConnection c;
 		c.peer = peer;
 		c.type = 1; // server-side view of a remote client
-		c.connection_id = ctx.np_protocol.next_connection_id++;
+		c.connection_id = conn_id;
 		c.self_id_seen = true;
 		// Period stored only; the countdown arms at the admission dictation
 		// (see find_or_create_connection).

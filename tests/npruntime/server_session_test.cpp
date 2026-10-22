@@ -820,8 +820,16 @@ bool check_create_session_mpreset_exit() {
 }
 
 // Connection residency changes only at the true session boundary. Reusing a
-// context must discard every role from the prior session, install exactly the
-// new role set, and restart remote connection ids from the retail joiner base.
+// context must discard every role from the prior session and install exactly the
+// new role set. The dcbs do NOT restart: retail's game protocol is created once per
+// process and its connection counter (+0xECC) runs across every session, so a
+// second session in one process gives its own player the next pair's twin index,
+// and a dedicated create, with no own pair, steps nothing (D-NET-713).
+// [orig: NapiNPProtocol_Create @0x625730 - +0xECC zeroed @0x625A81, called once by
+//  CNapiNetwork_Init @0x4CA6CC; CNapiGameSession_CreateSession @0x4C97C0 - the own
+//  client's create @0x4C9B9C; NapiNPProtocol_HandleClientJoin @0x62B750 - the twin's
+//  @0x62BF06; CNapiNPConnection_Create @0x62ACB0 - the step @0x62B282..0x62B296;
+//  CNapiNPConnection_OnStateChange @0x626060 - connection_id @0x626199..0x62619C]
 bool check_create_session_replaces_connection_role_set() {
 	opennova::replication::LoopbackChannel first_local;
 	opennova::replication::LoopbackChannel replacement_local;
@@ -833,13 +841,18 @@ bool check_create_session_replaces_connection_role_set() {
 	settings.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
 	startup.title = &kJo;
+	const uint32_t before = opennova::next_connection_index();
 	opennova::inmatch::create_session(ctx, settings, startup, &first_local);
+	if (!expect(ctx.np_protocol.connection_list.size() == 1 &&
+	                    ctx.np_protocol.connection_list.front().client_ci == before + 1 &&
+	                    ctx.np_protocol.connection_list.front().connection_id == before + 2,
+	            "the own client takes the next index and the own player its twin's"))
+		return false;
 
 	opennova::inmatch::NapiNPConnection remote;
 	remote.type = opennova::inmatch::NapiNPConnection::kTypeServerSide;
-	remote.connection_id = opennova::inmatch::kFirstJoinerDcb + 9;
+	remote.connection_id = before + 3;
 	ctx.np_protocol.connection_list.push_back(remote);
-	ctx.np_protocol.next_connection_id = 77;
 
 	opennova::inmatch::create_session(ctx, settings, startup, &replacement_local);
 	if (!expect(ctx.np_protocol.connection_list.size() == 1,
@@ -850,22 +863,19 @@ bool check_create_session_replaces_connection_role_set() {
 	if (!expect(
 				replacement.type ==
 						opennova::inmatch::NapiNPConnection::kTypeClientSide &&
-					replacement.connection_id == opennova::inmatch::kHostPlayerDcb &&
-					replacement.link.transport == &replacement_local &&
-					ctx.np_protocol.next_connection_id ==
-						opennova::inmatch::kFirstJoinerDcb,
+					replacement.link.transport == &replacement_local,
 				"replacement session drops stale roles and installs its own loopback"))
+		return false;
+	if (!expect(replacement.client_ci == before + 3 && replacement.connection_id == before + 4,
+	            "a second session in one process numbers its own pair on from the first's"))
 		return false;
 
 	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Lan);
-	ctx.np_protocol.next_connection_id = 88;
 	opennova::inmatch::create_session(ctx, settings, startup, nullptr);
-	return expect(
-			ctx.np_protocol.connection_list.empty() &&
-					ctx.np_protocol.next_connection_id ==
-						opennova::inmatch::kFirstJoinerDcb,
-			"dedicated replacement clears the prior loopback and resets joiner ids");
+	return expect(ctx.np_protocol.connection_list.empty() &&
+	                      opennova::next_connection_index() == before + 5,
+	              "dedicated replacement clears the prior loopback and steps no index");
 }
 
 // A listen host has no ClientAuth upload. Its resolved PLAYER_INFO fields must

@@ -22,13 +22,22 @@
 
 namespace opennova::inmatch {
 
-// dcb (ConnectionId) reservation on a LAN listen server. The host's loopback client consumes
-// ConnectionId 0/1; the host's own PLAYER is dcb 2; remote joiners are assigned from 3 up. A
-// 0x14B9 organic with entity+0x78 == 0 is the dedicated-server reservation, which makes a joining
-// client keep no player entity for that slot and flood C2S 0x0F → 0xC9 disconnect — so the host
-// player MUST carry a non-zero dcb. Wire-proven by the golden host_and_join_lan.pcapng (host player
-// eFlags=2, first joiner 3, AI 0). [orig: NapiNP_GetLocalConnectionId @0x4c6d40; Server_PlayerAdd
-// @0x51cbc0 writes entity+0x78 = conn->connection_id; net-re §5.2a/§5.2b]
+// The dcbs (ConnectionIds) a FRESH process's first listen host assigns, the golden
+// host_and_join_lan.pcapng's (host player eFlags=2, first joiner 3, AI 0): its own client takes
+// the protocol's connection index 1, its self-join's server-side twin 2, whose id the own client
+// latches from the twin's 0x82 MI and the host's own player carries at entity+0x78, and its first
+// joiner's node 3. The runtime assigns every dcb from the process's connection counter
+// (next_connection_index, D-NET-713), which every connection the process creates steps, a LAN
+// browse's and a join's included, so a process that browsed, joined or hosted before numbers
+// higher. These name the fresh process's values for fixtures and oracles; no runtime path reads
+// them. A 0x14B9 organic with entity+0x78 == 0 is the dedicated-server reservation (a joining
+// client keeps no player entity for that slot and floods C2S 0x0F → 0xC9 disconnect); the
+// counter never yields 0 (its 0 -> 1 wrap).
+// [orig: CNapiNPConnection_Create @0x62ACB0 - the step @0x62B282..0x62B296;
+//  CNapiNPConnection_OnStateChange @0x626060 - connection_id from it @0x626199..0x62619C;
+//  NapiNP_HandleServerJoinResponse @0x629840 - the own client's connection_id = MI @0x629D50;
+//  NapiNP_GetLocalConnectionId @0x4c6d40; Server_PlayerAdd @0x51cbc0 writes entity+0x78 =
+//  conn->connection_id; net-re §5.2a/§5.2b]
 inline constexpr uint32_t kHostPlayerDcb = 2;
 inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 

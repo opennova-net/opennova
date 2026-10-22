@@ -166,9 +166,9 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	if (config.multiplayer_reset != 0) return CreateSessionResult::ProcessExit;
 	// A new session owns a new connection table. Clear both remote server-side
 	// peers and any prior local client before installing this session's role set;
-	// no live-update API is allowed to mutate connection residency mid-match.
+	// no live-update API is allowed to mutate connection residency mid-match. The
+	// connection counter the dcbs come from is the process's and runs on (D-NET-713).
 	ctx.np_protocol.connection_list.clear();
-	ctx.np_protocol.next_connection_id = kFirstJoinerDcb;
 	// The previous session's reset freed the squad registry with the slot table
 	// [orig: CNapiGameSession_ResetActiveSession -> Server_ReleaseSessionTables (the call
 	//  @0x4C8AAC) -> CDynBuffer_Clear(&g_SpawnWaveList.field_C) @0x51B505].
@@ -289,11 +289,8 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 				config.player_name.empty() ? "???" : config.player_name.substr(0, 63);
 		NapiNPConnection self;
 		self.player_name = name;
-		// The host's own player dcb (entity+0x78). NOT 0 — dcb 0 is the dedicated-server reservation
-		// that makes the joining client drop the player slot and flood C2S 0x0F (see kHostPlayerDcb).
-		// The host knows its own ConnectionId locally, so latch self_id_seen (no 0x48 ack arrives for
-		// the loopback). Joiners are assigned from kFirstJoinerDcb up so they never collide with it.
-		self.connection_id = kHostPlayerDcb;
+		// The host knows its own ConnectionId locally, so latch self_id_seen (no 0x48 ack arrives
+		// for the loopback); the dcb itself is the twin's index, set at its create below.
 		self.self_id_seen = true;
 		self.type = 2;          // client-side connection [orig: CNapiNPConnection_Create type 2]
 		self.phase = ConnectionPhase::New; // advanced by the host's own-player spawn flow (P3)
@@ -304,11 +301,22 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		self.client_ci = own_index;
 		self.client_ck = own_keys.key;
 		self.client_scrk = own_keys.scrk;
-		// Retail's self-join creates two connections on the game protocol, each stepping its
-		// connection counter: the host's own client (type 2) above, then the server-side node
-		// its own 0x42 creates (type 1). (D-NET-713)
-		// [orig: CNapiNPConnection_Create @0x62ACB0 - the step @0x62B282..0x62B296]
-		(void)next_connection_index();
+		// Retail's self-join creates two connections on the game protocol, each stepping the
+		// process's connection counter: the host's own client (type 2) above, then the
+		// server-side twin its own 0x42 creates (type 1). The twin's index is the pair's dcb: its
+		// state change makes it the twin's connection_id, the twin's 0x82 carries it as MI, the
+		// own client latches it as its own (the local id the client's self-match reads) and the
+		// new-connection callback's player, the host's own, carries it at entity+0x78, so a fresh
+		// process's own player is dcb 2 and one that browsed, joined or hosted before numbers
+		// higher. Never 0, the dedicated-server reservation (the counter's 0 -> 1 wrap). (D-NET-713)
+		// [orig: CNapiNPConnection_Create @0x62ACB0 - the step @0x62B282..0x62B296;
+		//  NapiNPProtocol_HandleClientJoin @0x62B750 - the twin's create @0x62BF06;
+		//  CNapiNPConnection_OnStateChange @0x626060 - connection_id @0x626199..0x62619C;
+		//  CNapiNPConnection_SendSessionInit @0x620EF0 - MI @0x620FD4..0x620FE8;
+		//  NapiNP_HandleServerJoinResponse @0x629840 - the own client's connection_id = MI
+		//  @0x629D50; NapiNP_GetLocalConnectionId @0x4C6D40; NapiNPServer_HandleNewConnection
+		//  @0x4C8040 - the player's id @0x4C80B9]
+		self.connection_id = next_connection_index();
 		if (ctx.server_key_mint.forced) {
 			self.server_sk = ctx.server_key_mint.server_sk;
 			self.server_scrk = ctx.server_key_mint.server_scrk;

@@ -4587,10 +4587,13 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	peer_link.transport = std::make_unique<ns::UdpSessionTransport>(
 			ns::UdpSessionTransport::Role::Host);
 
+	// The node's dcb as its join's create takes it: the process's next connection index
+	// (D-NET-713).
+	const uint32_t late_dcb = next_connection_index();
 	inmatch::NapiNPConnection conn;
 	conn.peer = peer;
 	conn.type = 1;
-	conn.connection_id = inmatch::kFirstJoinerDcb;
+	conn.connection_id = late_dcb;
 	conn.player_name = "LateJoiner";
 	conn.self_id_seen = true;
 	conn.phase = inmatch::ConnectionPhase::PendingSpawn;
@@ -4598,7 +4601,6 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	conn.link.mode = ns::TransportMode::Client;
 	conn.burst.entity_batch_count = 1;
 	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
-	owner.ctx.np_protocol.next_connection_id = inmatch::kFirstJoinerDcb + 1;
 	// The fixture starts on the boundary after its already-pushed roster. Initial
 	// world records intentionally cannot share the roster's send tick.
 	owner.now_tick = 1;
@@ -4613,7 +4615,7 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	bool bound_before_update = false;
 	owner.ctx.bind_spawned_body = [&](w::EntityHandle body) {
 		if (world.registry.get(body) == nullptr ||
-				world.registry.get(body)->owner_connection_id != inmatch::kFirstJoinerDcb)
+				world.registry.get(body)->owner_connection_id != late_dcb)
 			return;
 		bound_live = true;
 		bound_ai = ai.for_handle(body) != nullptr;
