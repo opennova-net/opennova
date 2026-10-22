@@ -542,7 +542,8 @@ bool run_streamed_building_takes_its_armory_points() {
 bool run_topology_resweep_keeps_initialized_words() {
 	constexpr int32_t kShedType = 1700;
 	static constexpr char kItems[] =
-			"begin \"Resweep Player\"\r\n id 105305\r\n type person\r\n hp 150\r\n mana 5\r\nend\r\n"
+			"begin \"Resweep Player\"\r\n id 105305\r\n type person\r\n hp 150\r\n mana 5\r\n"
+			" move_function org2\r\nend\r\n"
 			"begin \"Resweep Shed\"\r\n id 101700\r\n type building\r\n hp 300\r\n mana 7\r\nend\r\n";
 	def::DefItemsFile items = {};
 	if (!expect(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),

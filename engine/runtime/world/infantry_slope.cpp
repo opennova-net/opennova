@@ -42,7 +42,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
     // included), org1 is the NPC/AI updater's leg. The selector is witnessed
     // identical in both, but the cadence, slope math, chase rates, thresholds, and
     // slide impulses are NOT interchangeable — never collapse the legs.
-    const bool org2 = infantry_org2_body(e, world.registry.get(e.handle));
+    const bool org2 = infantry_org2_body(world, e, world.registry.get(e.handle));
     if (!org2 && (key & 7u) != 0) return; // org1 runs on the entity's 8-tick phase
 
     // Org1 reads "dead" off the Flags word its death edge latches, not health.

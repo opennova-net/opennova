@@ -65,6 +65,18 @@ void warm_up_player_body(World &world, Entity &e);
 //  call @0x49E5EA]
 void player_class_init_animation(World &world, Entity &e);
 
+// The class init a player body's spawn calls, its bound row's (def+0x148, by the row's
+// ai_function): the plyr row's player_class_init_animation; the org0 / org1 rows'
+// Entity_InitOrganicAI over the player body, every leg initialize_organic_ai runs for a
+// placed person (the backups, the anim pick over its AI slot, the warm-up by its DcbId,
+// which the organic init leaves at the spawn's 0, the aim anchor, the respawn-zone search);
+// the other rows' inits are not person inits and none runs here. The authority's spawn calls
+// it after the registration (D-NET-NEW-L4-14).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the init @0x43C4F0..0x43C4FE;
+//  g_EntityClassEventCallbackTable @0x813000 - org0 @0x813018, org1 @0x813030, plyr
+//  @0x813048; Entity_InitOrganicAI @0x4BFCC0; PlayerClass_InitEntity @0x4B1060]
+void player_body_class_init(World &world, Entity &e);
+
 // What the organic init reads to choose the body state a person starts in: its definition
 // callback, which both person classes run (the org0 and org1 rows of the event-callback table
 // name it as their second function) [orig: g_EntityClassEventCallbackTable @0x813000, its rows

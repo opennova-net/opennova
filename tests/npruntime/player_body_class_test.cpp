@@ -56,14 +56,17 @@ static int failures = 0;
 
 namespace {
 
-// Row 0 the "Null" marker; then a plyr person (5305), an org0 person (5311), a person with no
-// ai_function (5320: the null row), a brrl person (5321), an ele0 person (5322), a nade
+// Row 0 the "Null" marker; then a plyr person (5305, move function org2), an org0 person (5311,
+// move function org1), a person with no ai_function (5320: the null row; no move function, the
+// null physics row too), a brrl person (5321), an ele0 person (5322), a nade
 // person (5323: the row with no event callback), a schl person (5324, the one row with a
 // nonzero `score` word) and a clym person (5325).
 const char kItems[] =
 		"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
-		"begin \"Player\"\r\n id 105305\r\n type person\r\n hp 150\r\n ai_function plyr\r\nend\r\n"
-		"begin \"Soldier\"\r\n id 105311\r\n type person\r\n hp 100\r\n ai_function org0\r\nend\r\n"
+		"begin \"Player\"\r\n id 105305\r\n type person\r\n hp 150\r\n ai_function plyr\r\n"
+		" move_function org2\r\nend\r\n"
+		"begin \"Soldier\"\r\n id 105311\r\n type person\r\n hp 100\r\n ai_function org0\r\n"
+		" move_function org1\r\nend\r\n"
 		"begin \"Classless\"\r\n id 105320\r\n type person\r\n hp 100\r\nend\r\n"
 		"begin \"Barrel man\"\r\n id 105321\r\n type person\r\n hp 100\r\n ai_function brrl\r\nend\r\n"
 		"begin \"Lift man\"\r\n id 105322\r\n type person\r\n hp 100\r\n ai_function ele0\r\nend\r\n"
@@ -890,6 +893,100 @@ void test_the_placement_warm_up_counts_by_the_dcb_id() {
 	}
 }
 
+// The entity update calls a body's +0x1C4, its bound row's move function (def+0x158, the spawn's
+// copy): the plyr row's org2 runs the player-body update (its MoveOrder decoded at the head, the
+// savedLivePose stamped), the org0 class row's org1 the AI update (the stamp, no MoveOrder read),
+// and a row naming none binds the null row, whose stub the walk skips: nothing runs. A World with
+// no items rows binds a player body the seed's row (org2) and any other body org1.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the read @0x4C2460, the nullsub_2 compare
+//  @0x4C2466..0x4C246B, the null test @0x4C246F, the call @0x4C2472;
+//  Entity_SpawnFromAnimSlotProperty @0x43C390 - @0x43C440, the store @0x43C453;
+//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - MoveOrder @0x4B414B, the stamp
+//  @0x4B4187..0x4B419C; Entity_UpdateInfantryAI @0x4B9910 - the stamp @0x4B9A53..0x4B9A6E]
+void test_the_update_follows_the_rows_move_function() {
+	struct Case {
+		uint8_t player_class;
+		w::PhysicsClass row;
+		bool ran;
+		bool moving;
+	};
+	for (const Case c : {Case{kPlyr, w::PhysicsClass::Org2, true, true},
+				Case{kOrg, w::PhysicsClass::Org1, true, false},
+				Case{kNull, w::PhysicsClass::Null, false, false}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		w::Entity *body = r.spawn_remote(c.player_class);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr);
+		if (ae == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		CHECK(w::body_move_row(*r.world, *ae, body) == c.row);
+		// The join's placement clears the add's hidden bit [orig: Server_OnPlayerJoin
+		//  @0x51A7DA]; the uplink's MoveOrder says moving.
+		body->flags &= ~w::kEntityFlagCarried;
+		body->engine_flags &= ~w::kEntityFlagCarried;
+		body->net_move_input = 0x08;
+		body->saved_live_valid = false;
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		const w::Entity *after = r.world->registry.get(ae->handle);
+		CHECK(after != nullptr && after->saved_live_valid == c.ran);
+		CHECK(ae->inf.player_moving == c.moving);
+		r.world->ai.root_motion = nullptr;
+	}
+	// A World with no items rows.
+	std::unique_ptr<w::World> bare = std::make_unique<w::World>();
+	w::AiEntity e{};
+	w::Entity person{};
+	CHECK(w::body_move_row(*bare, e, &person) == w::PhysicsClass::Org1);
+	person.flags = w::kEntityFlagPlayer;
+	CHECK(w::body_move_row(*bare, e, &person) == w::PhysicsClass::Org2);
+}
+
+// The spawn's class init by the bound row (def+0x148): an org0 row's player body takes
+// Entity_InitOrganicAI, its legs as a placed person's: the anim pick (the player body's AI slot
+// reads zeros: no route, idle 43; the PERMANENT Q8-1 (a) reading of a slot retail would fault
+// on), the warm-up by its DcbId (+0x7C, the spawn memset's 0: 10 dual updates and the final one
+// for an unparented body) and the aim anchor 3 units along the Yaw word off savedLivePose; the
+// plyr row's PlayerClass_InitEntity warms up by +0x78 alone (10 updates for connection 0) and
+// stores no aim anchor; an item row's body runs neither.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the init @0x43C4F0..0x43C4FE;
+//  g_EntityClassEventCallbackTable @0x813000 - org0 @0x813018 (its init 0x4BFCC0), plyr
+//  @0x813048 (0x4B1060); Entity_InitOrganicAI @0x4BFCC0 - the route test @0x4BFFA0, the
+//  reserved routes @0x4BFFF9 / @0x4C000C, the warm-up call @0x4C01C8, the aim anchor
+//  @0x4C01CD..0x4C024E; Entity_WarmUpOrganicAnimation @0x4B8B20 - @0x4B8B3F, the final
+//  update @0x4B8BC1]
+void test_an_org_rows_player_body_takes_the_organic_init() {
+	struct Case {
+		uint8_t player_class;
+		int32_t updates;
+		bool anchored;
+	};
+	for (const Case c : {Case{kOrg, 11, true}, Case{kPlyr, 10, false}, Case{kBrrl, 0, false}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		w::Entity *body = r.spawn_remote(c.player_class);
+		CHECK(body != nullptr);
+		if (body == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		w::player_body_class_init(*r.world, *body);
+		const w::AiEntity *ae = r.world->ai.for_handle(body->handle);
+		CHECK(ae != nullptr);
+		if (ae != nullptr) {
+			CHECK(ae->inf.clip_phase == c.updates);
+			if (c.updates != 0) CHECK(ae->inf.anim_state == w::anim_state::kIdle);
+			const bool anchored = ae->inf.aim_point[0] != 0 || ae->inf.aim_point[1] != 0;
+			CHECK(anchored == c.anchored);
+		}
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 } // namespace
 
 int main() {
@@ -908,6 +1005,8 @@ int main() {
 	test_a_device_rows_body_runs_the_device_think();
 	test_the_plyr_class_init_warms_up_its_channels();
 	test_the_placement_warm_up_counts_by_the_dcb_id();
+	test_the_update_follows_the_rows_move_function();
+	test_an_org_rows_player_body_takes_the_organic_init();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

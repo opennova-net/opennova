@@ -228,7 +228,12 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
     if (world.ai.collision != nullptr) world.ai.collision->build_tick_tables(world);
     lap.mark(devtools::Slot::SIM_UPDATE_PROXIMITY);
-    // The pool-0 walk in slot order: each organic row's +0x1C4 body update.
+    // The pool-0 walk in slot order: each organic row's +0x1C4 body update, its bound
+    // row's move function. A body on the null row is skipped whole, its tail with it; any
+    // other row's runs the update (org0's a bare return), then the tail.
+    // [orig: Entity_UpdateAllEntities @0x4C2100 - the read @0x4C2460, the nullsub_2
+    //  compare @0x4C2466..0x4C246B and the null test @0x4C246F to the next slot, the call
+    //  @0x4C2472, the tail from @0x4C2477]
     const size_t pool0 = world.registry.pool_capacity(0);
     for (size_t slot = 0; slot < pool0; ++slot) {
         const Entity *row = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
@@ -236,6 +241,7 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
         AiEntity *body = world.ai.for_handle(row->handle);
         if (body == nullptr || body->brain.f[AiBrain::kOwner] == 0 || !body->inf.active)
             continue;
+        if (body_move_row(world, *body, row) == PhysicsClass::Null) continue;
         world.ai.update_organic(*body, world, ctx.logic_tick);
         if (const Entity *live =
                     world.registry.get(EntityHandle::make(0, static_cast<int>(slot))))

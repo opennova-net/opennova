@@ -33,6 +33,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/organic_fire.h>
+#include <runtime/world/physics_class_table.h>
 #include <runtime/world/system.h>
 
 namespace opennova::terrain {
@@ -581,6 +582,23 @@ struct AiCandidate {
 //  @0x4B444A..0x4B4640, @0x4B464F..0x4B4670]
 bool player_body_network_chase(AiEntity &e, Entity &body, bool authority, bool local);
 
+// The physics row a body's +0x1C4 update holds: its bound items row's move function
+// (PlayerTemplate::move_row, through player_item_row). The entity update's pool walks call
+// it for every body whose row is not the null row, whose stub they skip whole: org1 runs the
+// AI update, org2 the player-body update, org0's is a bare return. Test plumbing, not retail
+// behaviour (retail always loads items.def and charattr.def): a player body (the local one, a
+// remote peer, a Player-flag body) that spawned from the seed (player_spawn_row's harness
+// case: a World with no items rows or whose peer read no charattr.def) runs the seed's row,
+// and in a World with no items rows every other body runs org1.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - @0x43C440, the store @0x43C453;
+//  Entity_UpdateAllEntities @0x4C2100 - the read @0x4C2460, the nullsub_2 compare
+//  @0x4C2466..0x4C246B, the null test @0x4C246F, the call @0x4C2472;
+//  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53; g_EntityClassPhysicsTable rows org0
+//  @0x82AC1C -> Entity_UpdateOrg0Movement @0x4AFF60 (a bare retn), org1 @0x82AC28 ->
+//  Entity_UpdateInfantryAI @0x4B9910, org2 @0x82AC34 -> Entity_UpdateInfantryPlayerBody
+//  @0x4B40E0, null @0x82ABC8 -> nullsub_2 @0x4A8070]
+PhysicsClass body_move_row(const World &world, const AiEntity &body, const Entity *entity);
+
 class AiSystem; // fwd
 
 // AIEvent ring entry: 5 dwords. [orig: dword_AE0778 ring, AIEvent_QueueEntry.]
@@ -817,8 +835,9 @@ public:
     //  @0x813378 cveh / @0x813390 cbot / @0x8133a8 cpln / @0x8133c0 ctrn,
     //  resolved by EntityDef_InitAllCallbacks @0x4a5aae]
     void think_brain(AiEntity &e, World &world);
-    // One pool-0 row's +0x1C4 body update: the org1 motor (or the joiner's
-    // presentation leg for a wire-owned peer).
+    // One pool-0 row's +0x1C4 body update, its bound row's move function
+    // (body_move_row): org1 the AI motor, org2 the player body (or the joiner's
+    // presentation leg for a wire-owned peer); any other row runs nothing here.
     // [orig: Entity_UpdateAllEntities @0x4C2460..0x4C2474 (`call eax`);
     //  g_EntityClassPhysicsTable row "org1" -> Entity_UpdateInfantryAI @0x4b9910]
     void update_organic(AiEntity &e, World &world, uint32_t logic_tick);

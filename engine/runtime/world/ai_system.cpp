@@ -564,6 +564,13 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
     const devtools::ProfileScope entity_scope(world.profile, devtools::Slot::SIM_AI_INFANTRY);
     if (motor_suspended) return;
+    // The body's +0x1C4 is its bound row's move function: org1 the AI update, org2 the
+    // player-body update. The null row's stub is skipped, org0's is a bare return, and a
+    // body bound to an item row runs that row's mover, which no person body here carries
+    // (D-NET-NEW-L4-14). [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472;
+    //  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53; Entity_UpdateOrg0Movement @0x4AFF60]
+    const PhysicsClass move_row = body_move_row(world, e, motor_entity);
+    if (move_row != PhysicsClass::Org1 && move_row != PhysicsClass::Org2) return;
     // Joiners retain seat-follow presentation for wire-owned peers. The
     // authority continues into the remote org2 animation/collision tail:
     // mounted contact callbacks remain live while model push is suppressed.

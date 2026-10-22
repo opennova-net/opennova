@@ -84,6 +84,7 @@ const _ITEMS_PLAYER_ROW := """begin "Player #1, Multiplayer"
   id 105305
   type person
   hp 100
+  move_function org2
 end
 """
 
@@ -1894,6 +1895,7 @@ end
 begin "Driver"
   id 102072
   type person
+  move_function org1
 end
 """)
 	var sndprof_path := fixture_dir.path_join("SndProf.def")

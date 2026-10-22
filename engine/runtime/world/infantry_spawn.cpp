@@ -233,14 +233,13 @@ OrganicSpawnBody organic_spawn_pose(const OrganicSpawnFacts &facts, uint32_t net
     return out;
 }
 
-// Initial org1 callback, after definition/ADM/collision resources are bound.
-// Respawn uses the separate 12-step callback below. [orig: @0x4BFCC0]
-void initialize_organic_ai(World &world, Entity &entity) {
+namespace {
+
+// The organic init's legs over a pool-0 body holding its motor (initialize_organic_ai's for a
+// placed person, player_body_class_init's for a player body bound to an org row).
+// [orig: Entity_InitOrganicAI @0x4BFCC0]
+void organic_init_body(World &world, AiEntity *body, Entity &entity, uint32_t dcb_id) {
     AiSystem &ai = world.ai;
-    AiEntity *body = ai.for_handle(entity.handle);
-    if (body == nullptr || !body->inf.active || entity.handle.pool() != 0 ||
-            body->inf.is_local_player || body->net_is_remote_peer ||
-            ((entity.flags | entity.engine_flags) & kEntityFlagPlayer) != 0) return;
     auto &inf = body->inf;
     const uint32_t flags = entity.flags | entity.engine_flags;
     entity.spawn_position = entity.position;
@@ -264,6 +263,11 @@ void initialize_organic_ai(World &world, Entity &entity) {
     inf.magazine = static_cast<int16_t>(body->profile.clip_size);
 
     OrganicSpawnFacts facts;
+    // A body with no aidata reads no route here (a slot of zeros: a player body's AI slot is
+    // ours' zeroed one): retail reads the null slot and faults (PERMANENT, ratified 2026-10-21,
+    // Q8-1 (a): a deliberate fix of a retail crash, authored data only).
+    // [orig: Entity_InitOrganicAI @0x4BFCC0 - @0x4BFFF9 / @0x4C000C, the null test only at
+    //  @0x4BFFA0]
     facts.route = body->slot.f[35] != 0;
     facts.route_channel = body->slot.f[37];
     facts.flags = flags;
@@ -278,7 +282,7 @@ void initialize_organic_ai(World &world, Entity &entity) {
 
     // Entity_WarmUpOrganicAnimation @0x4B8B20: secondary then primary,
     // net-ID permutation, vertical root motion only, one final ground solve.
-    warm_up_organic_body(world, ai, entity, *body, uint32_t(body->net_id));
+    warm_up_organic_body(world, ai, entity, *body, dcb_id);
     // The source is savedLivePose, deliberately not the grounded position; the
     // offset is 3 u along the heading in the Q22 trig of retail's
     // radians-per-BAM double. [orig: Entity_InitOrganicAI @0x4C01CD..0x4C022C,
@@ -310,6 +314,39 @@ void initialize_organic_ai(World &world, Entity &entity) {
         }
     }
     ai.mirror_wire_anim(*body, world);
+}
+
+} // namespace
+
+// Initial org1 callback, after definition/ADM/collision resources are bound.
+// Respawn uses the separate 12-step callback below. [orig: @0x4BFCC0]
+void initialize_organic_ai(World &world, Entity &entity) {
+    AiEntity *body = world.ai.for_handle(entity.handle);
+    if (body == nullptr || !body->inf.active || entity.handle.pool() != 0 ||
+            body->inf.is_local_player || body->net_is_remote_peer ||
+            ((entity.flags | entity.engine_flags) & kEntityFlagPlayer) != 0) return;
+    organic_init_body(world, body, entity, uint32_t(body->net_id));
+}
+
+// See entity_spawn.h.
+void player_body_class_init(World &world, Entity &entity) {
+    switch (player_item_row(world, entity).body_class) {
+    case PlayerBodyClass::kPlayer:
+        player_class_init_animation(world, entity);
+        return;
+    case PlayerBodyClass::kOrganic: {
+        AiEntity *body = world.ai.for_handle(entity.handle);
+        if (body == nullptr || !body->inf.active || entity.handle.pool() != 0) return;
+        // The warm-up counts by the DcbId (+0x7C), which the organic init writes none of: a
+        // player body's stays the spawn memset's 0 (the plyr init alone stamps it).
+        // [orig: Entity_WarmUpOrganicAnimation @0x4B8B20 - `mov eax, [esi+7Ch]` @0x4B8B3F;
+        //  Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE]
+        organic_init_body(world, body, entity, 0u);
+        return;
+    }
+    case PlayerBodyClass::kItem:
+        return;
+    }
 }
 
 void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {

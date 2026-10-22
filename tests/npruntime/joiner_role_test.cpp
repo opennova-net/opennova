@@ -2904,9 +2904,9 @@ bool run_respawn_key_before_the_first_tail() {
 bool run_the_self_record_rebinds_ls_camouflage_row() {
 	static const char kItems[] =
 			"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
-			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n type person\r\n hp 150\r\nend\r\n"
-			"begin \"Player #1, Single player\"\r\n id 105310\r\n type person\r\n hp 120\r\nend\r\n"
-			"begin \"Generic Soldier\"\r\n id 105311\r\n type person\r\n hp 100\r\nend\r\n";
+			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n type person\r\n hp 150\r\n move_function org2\r\nend\r\n"
+			"begin \"Player #1, Single player\"\r\n id 105310\r\n type person\r\n hp 120\r\n move_function org2\r\nend\r\n"
+			"begin \"Generic Soldier\"\r\n id 105311\r\n type person\r\n hp 100\r\n move_function org2\r\nend\r\n";
 	static const char kCharattr[] =
 		"[CHARACTER1]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
 		"[CHARACTER2]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
@@ -2988,9 +2988,11 @@ bool run_a_remote_record_repicks_its_rows_camouflage_row() {
 	// The camouflage rows are plyr rows (a player body's class row).
 	static const char kItems[] =
 			"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
-			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n ai_function plyr\r\n type person\r\n hp 150\r\nend\r\n"
-			"begin \"Player #1, Single player\"\r\n id 105310\r\n type person\r\n hp 120\r\nend\r\n"
-			"begin \"Generic Soldier\"\r\n id 105311\r\n ai_function plyr\r\n type person\r\n hp 100\r\nend\r\n";
+			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n ai_function plyr\r\n type person\r\n hp 150\r\n"
+			" move_function org2\r\nend\r\n"
+			"begin \"Player #1, Single player\"\r\n id 105310\r\n type person\r\n hp 120\r\n move_function org2\r\nend\r\n"
+			"begin \"Generic Soldier\"\r\n id 105311\r\n ai_function plyr\r\n type person\r\n hp 100\r\n"
+			" move_function org2\r\nend\r\n";
 	static const char kCharattr[] =
 		"[CHARACTER1]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
 		"[CHARACTER2]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"

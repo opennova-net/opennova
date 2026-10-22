@@ -33,6 +33,7 @@
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/player_spawn.h> // player_item_row (the bound row's move function)
 #include <runtime/world/player_view.h> // player_view_floor_eye_to_terrain (the on-foot local eye leg)
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h> // registry.get for the local-player AiEntity->Entity mirror
@@ -752,10 +753,23 @@ static void infantry_org2_view_tick(AiEntity &e, const Entity *tick_entity, uint
     if (local) e.pitch = inf.look_pitch;
 }
 
+// See the ai.h declaration.
+PhysicsClass body_move_row(const World &world, const AiEntity &e, const Entity *ent) {
+    const bool player_body = e.inf.is_local_player || e.net_is_remote_peer ||
+            (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0);
+    // Test plumbing, not retail behaviour (retail always loads items.def and charattr.def):
+    // a player spawned from the seed (player_spawn_row's harness case, no items rows or no
+    // charattr.def read) runs the seed's row, and a World with no items rows runs every
+    // other body org1.
+    if (world.tables.item_rows.empty() || ent == nullptr)
+        return player_body ? world.tables.player.move_row : PhysicsClass::Org1;
+    if (player_body && !world.tables.class_cammo_installed) return world.tables.player.move_row;
+    return player_item_row(world, *ent).move_row;
+}
+
 // See infantry_internal.h.
-bool infantry_org2_body(const AiEntity &e, const Entity *ent) {
-    return e.inf.is_local_player || e.net_is_remote_peer ||
-           (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0);
+bool infantry_org2_body(const World &world, const AiEntity &e, const Entity *ent) {
+    return body_move_row(world, e, ent) == PhysicsClass::Org2;
 }
 
 // See the ai.h declaration. The player-body update's network chase: on the authority
@@ -910,7 +924,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // update runs every player body, the local one and every remote one alike;
     // its few local-player legs test the body against g_LocalPlayerEntity.
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 vs org1 @0x4B9910]
-    const bool npc_body = !infantry_org2_body(e, tick_entity);
+    const bool npc_body = !infantry_org2_body(world, e, tick_entity);
     const bool local = e.inf.is_local_player;
     // A wire-owned body on a client stays outside this mover: the joiner's
     // replica motion owns it (the client leg of the chase for a body not the local
@@ -2146,7 +2160,7 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
     InfantryState &inf = e.inf;
     // The capsule legs are the player body's (org2: every player body, the local
     // one when its head sample is lost) or the NPC's (org1).
-    const bool org2 = infantry_org2_body(e, world.registry.get(e.handle));
+    const bool org2 = infantry_org2_body(world, e, world.registry.get(e.handle));
     int32_t head_world[3] = {};
     if (inf.is_local_player && world.pose_provider != nullptr &&
             world.pose_provider->resolve_skeletal_anchor(

@@ -122,6 +122,10 @@ namespace {
 // 0xc5d0b62b98fd422f, the value CI printed on push 137 (run 39686345393). It is
 // this deterministic stream's own value (a self-consistency pin, not a retail
 // value).
+// A body's update is its bound row's move function (D-NET-NEW-L4-14: a row naming
+// none binds the null row, which no update runs), so the people's row names org1 and
+// the player's org2: the updates they ran by the Player bit before, and the chain
+// does not move.
 constexpr uint64_t kSyntheticDigest = 0xc5d0b62b98fd422fULL;
 constexpr int kSyntheticTicks = 240;
 
@@ -210,9 +214,10 @@ using test_mission::synthetic_mission;
 constexpr int kPeopleTypeId = 2001; // items.def 102001
 constexpr const char *kPeopleItems =
 		"begin \"Null\"\r\nid 100000\r\ntype marker\r\nend\r\n"
-		"begin \"Synthetic soldier\"\r\nid 102001\r\ntype person\r\nanim_def soldier\r\nend\r\n"
+		"begin \"Synthetic soldier\"\r\nid 102001\r\ntype person\r\nanim_def soldier\r\n"
+		"move_function org1\r\nend\r\n"
 		"begin \"Player #1, Multiplayer\"\r\n"
-		"id 105305\r\ntype person\r\nanim_def soldier\r\nend\r\n";
+		"id 105305\r\ntype person\r\nanim_def soldier\r\nmove_function org2\r\nend\r\n";
 
 struct PeopleClips final : FileSource {
 	std::map<std::string, std::vector<uint8_t>> files; // by lower-case name

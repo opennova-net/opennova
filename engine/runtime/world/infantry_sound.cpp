@@ -87,7 +87,7 @@ void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logi
     InfantryState &inf = e.inf;
     // Opposite tick halves: the NPC updater consumes on ODD ticks, every player
     // body on EVEN (anim_sound_tick, witnessed at its declaration).
-    if (!anim_sound_tick(logic_tick, infantry_org2_body(e, world.registry.get(e.handle)))) return;
+    if (!anim_sound_tick(logic_tick, infantry_org2_body(world, e, world.registry.get(e.handle)))) return;
     const uint32_t ev = inf.last_events;
     if (ev == 0) return; // [orig: org1 whole-block skip @0x4bf161-0x4bf163]
 

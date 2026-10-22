@@ -15,11 +15,10 @@ namespace opennova::world {
 // infantry.cpp, shared with infantry_combat.cpp and infantry_board.cpp.
 // The motor-head channel update in infantry_animation.cpp owns gait inserts.
 int32_t bearing_to(int32_t dx, int32_t dy);
-// Whether the player-body (org2) update runs this body: the local player, a remote
-// player (its read-apply marked it, or its Flags carry the player classifier before
-// its first uplink); every other organic runs the org1 update.
+// Whether the player-body (org2) update runs this body: its bound row's move function is
+// org2 (body_move_row, ai.h); a body the walks run is otherwise on org1.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 vs Entity_UpdateInfantryAI @0x4B9910]
-bool infantry_org2_body(const AiEntity &e, const Entity *ent);
+bool infantry_org2_body(const World &world, const AiEntity &e, const Entity *ent);
 void commit_body_state(InfantryState &inf, int resolved);
 void commit_player_body_state(InfantryState &inf, int resolved,
                               const IRootMotionSource *root_motion, bool wash);

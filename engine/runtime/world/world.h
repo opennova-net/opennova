@@ -512,6 +512,13 @@ struct PlayerTemplate {
     // A satchel, claymore or AV mine row's device think, which a body bound to it runs as
     // its class event (ThrowableSim::think_device_row_body); kNone for every other row.
     ThrowClass device_think = ThrowClass::kNone;
+    // The physics row the row's move_function binds (def+0x158), the update a body bound
+    // to it runs from the entity update's pool walks (world::body_move_row); the harness
+    // seed's is the stock player rows' org2.
+    // [orig: EntityDef_InitAllCallbacks @0x4A5A70 - EntityDef_LookupPhysicsCallback called
+    //  @0x4A5B41; Entity_SpawnFromAnimSlotProperty @0x43C390 - `mov edx, [edi+158h]`
+    //  @0x43C440, the +0x1C4 store @0x43C453]
+    PhysicsClass move_row = PhysicsClass::Org2;
 };
 
 // The per-mission tables the embedder feeds once (the def files, the terrain
