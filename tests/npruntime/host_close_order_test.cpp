@@ -48,6 +48,7 @@
 #include <runtime/inmatch/server_files.h>   // NapiLog (_inout.txt)
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/world/player_spawn.h> // spawn_remote_player (the flag carrier)
 
 #include <algorithm>
 #include <cstdio>
@@ -639,10 +640,13 @@ void test_the_remapped_exit_reads_the_own_client_record() {
 
 // The last frame's entity pass queued its records at their calls in retail, ahead of the
 // teardown, whose pump sends them; ours raises them for the next tick's head, so the close
-// routes them first: a relay the pass raised reaches the in-match joiner at the close.
+// routes them first: a relay the pass raised reaches the in-match joiner at the close, ahead of
+// the teardown's own records: a flag carrier's destroy queues its flag's 0x2F at the destroy
+// (D-NET-NEW-L1-25), behind the relay on the joiner's queue.
 // [orig: Game_ProcessMainFrame - Entity_UpdateAllEntities called @0x52674B ahead of the exit
-//  tests @0x526806; Game_TeardownMission - Server_PumpNetworkTransport called @0x522588;
-//  Server_BroadcastEntityActionPacket @0x5080D0 - SendFiltered(0x3F) called @0x508199]
+//  tests @0x526806; Game_TeardownMission - Entity_Destroy @0x52236F, then
+//  Server_PumpNetworkTransport called @0x522588; Server_BroadcastEntityActionPacket @0x5080D0 -
+//  SendFiltered(0x3F) called @0x508199]
 void test_close_routes_the_last_entity_pass_first() {
 	auto host = std::make_unique<ListenHost>();
 	if (!host->boot()) {
@@ -662,6 +666,26 @@ void test_close_routes_the_last_entity_pass_first() {
 	relay.team = 1;
 	relay.key = "STRLOSEMSG001";
 	host->kernel->world.out.hud_relays.push_back(relay);
+	// A person carrying a flag (a pool-1 item its mounted child names): the teardown's destroy
+	// drops it and queues its 0x2F.
+	opennova::world::World &world = host->kernel->world;
+	opennova::world::PlayerSpawn carrier_spawn;
+	carrier_spawn.position = {22.0f, 20.0f, 0.0f};
+	carrier_spawn.net_id = 0xFFF1;
+	carrier_spawn.team = 1;
+	const opennova::world::EntityHandle carrier =
+			opennova::world::spawn_remote_player(world, carrier_spawn);
+	opennova::world::Entity flag_row;
+	flag_row.kind = opennova::world::EntityKind::Item;
+	flag_row.item_id = 4091;
+	flag_row.has_item_def = true;
+	flag_row.alive = true;
+	const opennova::world::EntityHandle flag = world.registry.spawn(1, flag_row);
+	CHECK(carrier.valid() && flag.valid());
+	if (carrier.valid() && flag.valid()) {
+		world.registry.get(carrier)->mounted_child = flag;
+		world.registry.get(flag)->primary_occupant = carrier;
+	}
 	host->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld; // the node stays
 	host->role->close();
 	CHECK(host->kernel->world.out.hud_relays.empty());
@@ -691,6 +715,36 @@ void test_close_routes_the_last_entity_pass_first() {
 	while (host->remote.pop_outbound(staged))
 		relays += staged.tag == s2c::OBJECTIVE_NOTIFICATION ? 1 : 0;
 	CHECK(relays >= 1);
+
+	// The joiner's records in queue order: what the teardown's pump sent, then the packets the
+	// held node keeps framed, then its unbuilt queue (pending messages ahead of its transport's).
+	std::vector<uint8_t> order;
+	const auto take_packet = [&order, &server_scrk](const std::vector<uint8_t> &bytes) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!nw_decode_inbound(bytes.data(), bytes.size(), opcode, body) ||
+				opcode != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE)
+			return;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_protocol_packet_plaintext(body.data(), body.size(), server_scrk, header,
+				messages))
+			return;
+		for (const ProtocolMessage &m : messages) order.push_back(m.tag);
+	};
+	for (const auto &[to, bytes] : host->socket.sent)
+		if (to == kPeer) take_packet(bytes);
+	for (const inmatch::UnstoppedNode &node : host->process->unstopped_server.nodes) {
+		if (!(node.conn.peer == kPeer)) continue;
+		for (const std::vector<uint8_t> &bytes : node.staged) take_packet(bytes);
+		for (const ProtocolMessage &m : node.queued) order.push_back(m.tag);
+	}
+	const auto first = [&order](uint8_t tag) {
+		return std::find(order.begin(), order.end(), tag) - order.begin();
+	};
+	const auto end = static_cast<std::ptrdiff_t>(order.size());
+	CHECK(first(s2c::OBJECTIVE_NOTIFICATION) < end && first(s2c::OBJECTIVE_ENTITY_STATE) < end);
+	CHECK(first(s2c::OBJECTIVE_NOTIFICATION) < first(s2c::OBJECTIVE_ENTITY_STATE));
 }
 
 // The destroy arm stops the server itself: nothing is left for a later reset.
