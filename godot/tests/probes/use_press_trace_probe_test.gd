@@ -63,6 +63,7 @@ func test_a_press_and_its_toggle_gate_reach_the_readout() -> void:
 	assert_eq(gate.event, "toggle_gate")
 	assert_true(gate.allowed, "an idle slot passes the weapon-busy gate")
 	assert_eq(gate.outcome, "none", "the single player runs no joiner scan")
+	assert_eq(gate.scan_gate, "none", "and so no scan watch")
 	var json: Dictionary = gate.to_json_value()
 	assert_eq(String(json.event), "toggle_gate", "the probe's JSON edge carries the row")
 	assert_eq(int(json.seq), from + 1)

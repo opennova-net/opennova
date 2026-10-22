@@ -17,6 +17,11 @@ extends GameProbe
 ##   `outcome` (attach_queued, attach_refused, no_candidate, detach_queued, ...).
 ##   `attach_sent_before` is the runtime's framed-0x26 count when the request queued.
 ##   A readout whose `attach_requests_sent` exceeds it shows the 0x26 left.
+##   With a watch, `scan_gate` names the gate the scan stopped the watched entity at
+##   (not_walked, no_seats, rejected, occupied, reach, cone, los, outscored, picked), with
+##   the furthest seat's `scan_seat_index` / `scan_bone`, its point (`scan_point_q16`),
+##   `scan_reach_q16` (against 0x40000) and `scan_aim_bam` (against the cone), and the
+##   eye and view words the scan used (`scan_eye_q16`, `scan_view_heading` / `_pitch`).
 ##
 ## `from_seq` picks the first record; `watch_ms` > 0 keeps polling each frame for that
 ## long and logs each record as it lands. The records also go to use_press_trace.json
@@ -126,4 +131,8 @@ func _line(row: Dictionary) -> String:
 				str(row.watch_present), int(row.watch_flags), int(row.watch_engine_flags)]
 		line += " table=%s radius=%d slice=%s/%d" % [str(row.watch_in_table),
 				int(row.watch_table_radius_q16), str(row.watch_in_slice), int(row.slice_count)]
+		if String(row.event) == "toggle_scan":
+			line += " scan_gate=%s seats=%d seat=%d bone=%d reach=%d aim=%d" % [
+					String(row.scan_gate), int(row.scan_seats), int(row.scan_seat_index),
+					int(row.scan_bone), int(row.scan_reach_q16), int(row.scan_aim_bam)]
 	return line

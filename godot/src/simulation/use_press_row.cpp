@@ -2,6 +2,8 @@
 
 #include "util/record_bind.h"
 
+#include <godot_cpp/variant/array.hpp>
+
 using namespace godot;
 namespace w = opennova::world;
 
@@ -11,6 +13,14 @@ String UsePressRow::get_arm() const { return String(w::use_item_arm_name(value_.
 
 String UsePressRow::get_outcome() const {
 	return String(w::use_toggle_outcome_name(value_.outcome));
+}
+
+String UsePressRow::get_scan_gate() const { return String(w::use_scan_gate_name(value_.scan.gate)); }
+
+static Array q16_triple(const int32_t (&words)[3]) {
+	Array out;
+	for (const int32_t word : words) out.push_back(word);
+	return out;
 }
 
 Dictionary UsePressRow::to_json_value() const {
@@ -41,6 +51,16 @@ Dictionary UsePressRow::to_json_value() const {
 	out["watch_table_radius_q16"] = get_watch_table_radius_q16();
 	out["watch_in_slice"] = get_watch_in_slice();
 	out["slice_count"] = get_slice_count();
+	out["scan_gate"] = get_scan_gate();
+	out["scan_seats"] = get_scan_seats();
+	out["scan_seat_index"] = get_scan_seat_index();
+	out["scan_bone"] = get_scan_bone();
+	out["scan_reach_q16"] = get_scan_reach_q16();
+	out["scan_aim_bam"] = get_scan_aim_bam();
+	out["scan_point_q16"] = q16_triple(value_.scan.point_q16);
+	out["scan_eye_q16"] = q16_triple(value_.scan.eye_q16);
+	out["scan_view_heading"] = get_scan_view_heading();
+	out["scan_view_pitch"] = get_scan_view_pitch();
 	return out;
 }
 
@@ -71,5 +91,13 @@ void UsePressRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, watch_table_radius_q16)
 	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::BOOL, watch_in_slice)
 	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, slice_count)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::STRING, scan_gate)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_seats)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_seat_index)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_bone)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_reach_q16)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_aim_bam)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_view_heading)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, scan_view_pitch)
 	ClassDB::bind_method(D_METHOD("to_json_value"), &UsePressRow::to_json_value);
 }

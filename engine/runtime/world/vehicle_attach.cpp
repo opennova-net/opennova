@@ -13,6 +13,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h> // max_health_with_difficulty
 #include <runtime/world/local_player.h> // the local player: stance latches, camera reset, detach mount
+#include <runtime/world/use_press_trace.h> // the USE readout's scan watch (an instrument)
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/vehicle_panel_feed.h>
 #include <runtime/world/world.h>
@@ -1054,7 +1055,8 @@ void for_each_scan_candidate(World &world, const Entity &player, Fn &&fn) {
 static bool find_nearest_free_seat_impl(World &world, const Entity &player,
                                         VehicleSeatSelection &out, bool armory_mode,
                                         const HostileMountIndex &hostile_mounts,
-                                        const VehicleOccupancySource *source) {
+                                        const VehicleOccupancySource *source,
+                                        UseScanWatch *watch = nullptr) {
     // The aim cone, verbatim [orig: @0x435d90 maxDistance = 0x3FFFFFC0, the mounted
     // override @0x435d9a = 0x38E38E0]. Both are BAM32 look-offset radii, not
     // distances: 0x3FFFFFC0 is a hair under 90 deg for a standing player, 0x38E38E0
@@ -1093,6 +1095,44 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
 	int32_t best_score = 0x7FFFFFFF; // [orig: v60 init]
     bool found = false;
 
+    // The USE readout's watch (an instrument, no behaviour: use_press_trace.h): the gate the
+    // scan stopped the watched entity at, keeping the seat that got furthest (on a tie the
+    // nearer one, past every gate the lower score, as the pick compares).
+    if (watch != nullptr) {
+        watch->gate = UseScanGate::kNotWalked;
+        watch->eye_q16[0] = eye_x;
+        watch->eye_q16[1] = eye_y;
+        watch->eye_q16[2] = eye_z;
+        watch->view_heading = view_heading;
+        watch->view_pitch = view_pitch;
+    }
+    const auto watched = [watch](const Entity &cand) {
+        return watch != nullptr && cand.handle.packed == watch->entity;
+    };
+    const auto note_watch = [&](const Entity &cand, UseScanGate gate, int index,
+                                    const EntityPosition *sp, int32_t d3, int32_t aim) {
+        const bool seat_noted = watch->seat_index >= 0;
+        if (gate < watch->gate) return;
+        if (gate == watch->gate && seat_noted) {
+            if (sp == nullptr) return;
+            const bool better = gate == UseScanGate::kOutscored
+                    ? d3 + (aim >> 9) < watch->reach_q16 + (watch->aim_bam >> 9)
+                    : d3 < watch->reach_q16;
+            if (!better) return;
+        }
+        watch->gate = gate;
+        if (index < 0) return;
+        watch->seat_index = static_cast<int8_t>(index);
+        watch->bone = !armory_mode && index < static_cast<int>(cand.seats.size())
+                ? cand.seats[static_cast<size_t>(index)].bone_index : 0;
+        if (sp == nullptr) return;
+        watch->reach_q16 = d3;
+        watch->aim_bam = aim;
+        watch->point_q16[0] = sp->x.q16;
+        watch->point_q16[1] = sp->y.q16;
+        watch->point_q16[2] = sp->z.q16;
+    };
+
     // One candidate point [orig: the shared score/gate block @0x435fe7..0x4361c2 (seats) =
     // @0x43624d..0x436417 (armory points)]. Returns true when it becomes the best hit.
     // The candidate point's words less the eye's, the Z biased +0x3000 (D-NET-507).
@@ -1123,10 +1163,20 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
         // Score = 3D reach + aim/512 [orig: @0x43610c..0x436111]; the reach gate is
         // 4.0 u @0x436113 and the cone gate @0x43611f..0x436123.
         const int32_t score = d3 + (aim >> 9);
-        if (d3 > 0x40000 || aim > max_aim_bam) return;
+        const bool watch_this = watched(cand);
+        if (d3 > 0x40000 || aim > max_aim_bam) {
+            if (watch_this)
+                note_watch(cand, d3 > 0x40000 ? UseScanGate::kReach : UseScanGate::kCone, index,
+                        &sp, d3, aim);
+            return;
+        }
         // The LOS gate, then the best-score compare [orig: the LOS call
         // @0x436183, `cmp ebx, [esp+0A0h+var_74]` @0x43618F].
-        if (!point_los_clear(world, player, cand, sp)) return;
+        if (!point_los_clear(world, player, cand, sp)) {
+            if (watch_this) note_watch(cand, UseScanGate::kLos, index, &sp, d3, aim);
+            return;
+        }
+        if (watch_this) note_watch(cand, UseScanGate::kOutscored, index, &sp, d3, aim);
         if (score >= best_score) return;
         best_score = score;
         out.vehicle = cand.handle;
@@ -1142,16 +1192,25 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     // 4.0 u gate but ran O(world) per frame. Hostile occupancy is indexed once
     // per query above so its witnessed pool-0 scan is not multiplied here.
     for_each_scan_candidate(world, player, [&](const Entity &cand) {
-        if (!candidate_relevant_for_mode(cand, armory_mode)) return;
-		if (scan_entity_rejected(world, cand, player, hostile_mounts, false))
+        const bool watch_this = watched(cand);
+        if (!candidate_relevant_for_mode(cand, armory_mode)) {
+            if (watch_this) note_watch(cand, UseScanGate::kNoSeats, -1, nullptr, 0, 0);
+            return;
+        }
+		if (scan_entity_rejected(world, cand, player, hostile_mounts, false)) {
+            if (watch_this) note_watch(cand, UseScanGate::kRejected, -1, nullptr, 0, 0);
 			return;
+        }
 		if (!armory_mode) {
+            if (watch_this) watch->seats = static_cast<int8_t>(cand.seats.size());
             // [orig: the searchMode-0 seat loop @0x435f1e]
             for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
                 const Seat &s = cand.seats[i];
                 if (s.type == SeatType::None) continue; // [orig: boneIdx == 0 skip]
-                if (vehicle_seat_occupancy(world, cand, s, player.handle, source).occupied)
+                if (vehicle_seat_occupancy(world, cand, s, player.handle, source).occupied) {
+                    if (watch_this) note_watch(cand, UseScanGate::kOccupied, i, nullptr, 0, 0);
                     continue; // [orig: mountHandles != 0xFFFF]
+                }
                 consider(cand, seat_world_pos(world, cand, s), i, s.type);
             }
             return;
@@ -1162,6 +1221,8 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
             consider(cand, local_point_world_pos(cand, cand.armory_points[i]), i,
                      SeatType::ArmoryPoint);
     });
+    if (watch != nullptr && found && out.vehicle.packed == watch->entity)
+        watch->gate = UseScanGate::kPicked;
     return found;
 }
 
@@ -1292,7 +1353,7 @@ bool weapon_state_allows_mount_toggle(int32_t current_action, int32_t next_actio
             next_action == weapon_action::kOverheated;
 }
 
-bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source) {
+bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source, UseScanWatch *watch) {
     World &world = world_;
     // The candidate-PREVIEW form of player_toggle_mount's unmounted search (a
     // joiner picks its request target without mutating L): the same two arms
@@ -1305,7 +1366,9 @@ bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSea
                 find_best_vehicle_seat(
                         world, ground->handle, player.handle, r_hit, SeatSelectionMode::Any, source);
     }
-    return world.vehicles.find_nearest_free_seat(player, r_hit, false, source);
+    const HostileMountIndex hostile_mounts(world, player, nullptr, source);
+    return find_nearest_free_seat_impl(
+            world, player, r_hit, false, hostile_mounts, source, watch);
 }
 
 } // namespace opennova::world

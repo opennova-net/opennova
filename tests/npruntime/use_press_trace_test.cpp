@@ -304,6 +304,8 @@ void test_a_joiner_scan_records_its_pick_and_the_0x26_leaving() {
 	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
 	look_at(world, local->handle, vehicle.position.x, vehicle.position.y, vehicle.position.z);
 	h.socket.datagrams.clear();
+	// The scan's watch rides the scan record (UseScanWatch).
+	h.kernel->local.use_trace.watch = vh.packed;
 
 	// The release's path on a joiner: the gate, then the scan and the request
 	// (Simulation::local_player_toggle_mount).
@@ -321,6 +323,17 @@ void test_a_joiner_scan_records_its_pick_and_the_0x26_leaving() {
 	CHECK(scan.candidate && scan.vehicle == vh.packed && scan.seat_index == 0 && scan.bone == 2);
 	CHECK(scan.outcome == w::UseToggleOutcome::kAttachQueued);
 	CHECK(scan.attach_sent_before == 0);
+	// The watched carrier was picked: its one seat, the reach inside 4.0 u, and the eye
+	// Position + CameraOffset and the body's view words the scan read.
+	// [orig: Entity_FindNearestSeatOrArmory @0x435D50 - the eye @0x436010..0x436041, the
+	//  reach gate @0x436113, the Yaw / Pitch subtractions @0x4360B6 / @0x4360C6]
+	CHECK(scan.scan.entity == vh.packed && scan.scan.gate == w::UseScanGate::kPicked);
+	CHECK(scan.scan.seats == 1 && scan.scan.seat_index == 0 && scan.scan.bone == 2);
+	CHECK(scan.scan.reach_q16 > 0 && scan.scan.reach_q16 <= 0x40000);
+	CHECK(scan.scan.eye_q16[0] == local->position.x.q16 + local->eye_offset_x);
+	CHECK(scan.scan.eye_q16[2] == local->position.z.q16 + local->eye_offset_z);
+	if (const w::AiEntity *body = world.ai.for_handle(local->handle))
+		CHECK(scan.scan.view_heading == body->heading && scan.scan.view_pitch == body->pitch);
 	// Queued, not yet framed: the count rises at the next send build, with the 0x26 on the
 	// wire.
 	CHECK(h.role.runtime->attach_requests_sent() == 0);
@@ -334,6 +347,10 @@ void test_a_joiner_scan_records_its_pick_and_the_0x26_leaving() {
 	const w::UsePressRecord none = h.kernel->local.use_trace.since(0).back();
 	CHECK(none.event == w::UsePressEvent::kToggleScan && !none.candidate);
 	CHECK(none.outcome == w::UseToggleOutcome::kNoCandidate && none.vehicle == 0xFFFFu);
+	// The watch names the gate that stopped it: its seat lies past the 4.0 u reach.
+	CHECK(none.scan.gate == w::UseScanGate::kReach && none.scan.seat_index == 0);
+	CHECK(none.scan.reach_q16 > 0x40000);
+	CHECK(none.scan.point_q16[0] > local->position.x.q16 + 499 * 65536);
 	h.role.run_tick(h.input);
 	CHECK(h.role.runtime->attach_requests_sent() == 1);
 }

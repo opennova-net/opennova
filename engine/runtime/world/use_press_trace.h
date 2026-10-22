@@ -10,6 +10,8 @@
 //   records the gate's answer and the slot's actions as the gate read them.
 // - kToggleScan: a joiner's seat scan and request (inmatch::JoinerRole::queue_mount_toggle).
 //   It records find_mount_toggle_candidate's answer and pick, and how the request ended.
+//   With a watch it also records the gate the scan stopped the watched entity at, with the
+//   seat point, reach, aim, eye and view words that gate read (UseScanWatch).
 //   For a queued 0x26 it also records the runtime's framed-0x26 count at queue time
 //   (inmatch::ClientRuntime::attach_requests_sent), so a later readout of that count shows
 //   whether the request left.
@@ -48,6 +50,42 @@ enum class UseToggleOutcome : uint8_t {
     kBadSeat,       // the candidate's seat does not resolve on its carrier
     kAttachQueued,  // the 0x26 queued
     kAttachRefused, // queue_vehicle_attach refused
+};
+
+// How the seat scan left the watched entity (kToggleScan): the furthest gate any of its
+// seats reached, in the scan's own order. The scan keeps the seat that got furthest (the
+// nearer one on a tie) and reports its numbers.
+// [orig: Entity_FindNearestSeatOrArmory @0x435D50 - the proximity walk @0x435E28, the
+//  per-entity rejects @0x435E2B..0x435EA1, the seat loop @0x435F1E (mountHandles @0x435F37),
+//  the reach and cone gates @0x436113..0x436123, the LOS call @0x436183, the best-score
+//  compare @0x436193]
+enum class UseScanGate : uint8_t {
+    kNone = 0,  // not a scan record, or the queued-mount arm ran instead of the scan
+    kNotWalked, // the scan's candidate walk never reached it
+    kNoSeats,   // it offers no seat
+    kRejected,  // the per-entity reject set (dead, no ItemDef, no model, an enemy rider)
+    kOccupied,  // every seat it offers is held
+    kReach,     // its seat lies past the 4.0 u reach from the eye
+    kCone,      // ... inside the reach, outside the look cone
+    kLos,       // ... inside both, the line of sight blocked
+    kOutscored, // it passed every gate and another point scored lower
+    kPicked,    // the scan picked it
+};
+
+// The scan's view of the watched entity (one per scan, UsePressRecord::scan below): the
+// gate, and the furthest seat's point, reach and aim with the eye and view the scan used.
+struct UseScanWatch {
+    uint16_t entity = 0xFFFFu; // in: the watched registry handle
+    UseScanGate gate = UseScanGate::kNone;
+    int8_t seats = -1;         // the seats it offers (-1: not walked or rejected first)
+    int8_t seat_index = -1;    // the furthest seat
+    uint8_t bone = 0;
+    int32_t reach_q16 = 0;     // the eye-to-point length the reach gate reads
+    int32_t aim_bam = 0;       // the look-offset magnitude the cone gate reads
+    int32_t point_q16[3] = {}; // the seat point, before the +0x3000 bias
+    int32_t eye_q16[3] = {};   // Position + CameraOffset
+    int32_t view_heading = 0;  // the Yaw / Pitch words the cone subtracts
+    int32_t view_pitch = 0;
 };
 
 // The Flags bits the press's arm and the toggle's queued-mount arm key on: the type-11
@@ -89,6 +127,8 @@ struct UsePressRecord {
     int32_t watch_table_radius_q16 = 0;
     bool watch_in_slice = false;
     int32_t slice_count = -1; // the local body's candidate slice; -1 no slice
+    // kToggleScan with a watch: how the seat scan left the watched entity.
+    UseScanWatch scan;
 };
 
 // The last kCapacity records; seq counts every record appended.
@@ -166,6 +206,22 @@ inline const char *use_toggle_outcome_name(UseToggleOutcome outcome) {
         case UseToggleOutcome::kBadSeat: return "bad_seat";
         case UseToggleOutcome::kAttachQueued: return "attach_queued";
         case UseToggleOutcome::kAttachRefused: return "attach_refused";
+    }
+    return "unknown";
+}
+
+inline const char *use_scan_gate_name(UseScanGate gate) {
+    switch (gate) {
+        case UseScanGate::kNone: return "none";
+        case UseScanGate::kNotWalked: return "not_walked";
+        case UseScanGate::kNoSeats: return "no_seats";
+        case UseScanGate::kRejected: return "rejected";
+        case UseScanGate::kOccupied: return "occupied";
+        case UseScanGate::kReach: return "reach";
+        case UseScanGate::kCone: return "cone";
+        case UseScanGate::kLos: return "los";
+        case UseScanGate::kOutscored: return "outscored";
+        case UseScanGate::kPicked: return "picked";
     }
     return "unknown";
 }

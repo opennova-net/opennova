@@ -437,7 +437,10 @@ bool JoinerRole::queue_mount_toggle() {
 	// Mounted Use first scans for an alternative seat, then falls back to
 	// detach. Both relations wait for the host echo; only the attach request's
 	// yaw leg edits L here. [orig: Entity_ToggleVehicleMount @0x4369AC..0x4369C7]
-	trace.candidate = world.vehicles.find_mount_toggle_candidate(*player, hit, this);
+	// A watched entity takes the gate the scan stopped it at (the readout's scan watch).
+	trace.scan.entity = trace.watch;
+	trace.candidate = world.vehicles.find_mount_toggle_candidate(
+			*player, hit, this, trace.watch != 0xFFFFu ? &trace.scan : nullptr);
 	if (!trace.candidate) {
 		if (!player->mounted) return note(Outcome::kNoCandidate, false);
 		const bool detach = runtime->queue_vehicle_detach(player->mount_target.packed);

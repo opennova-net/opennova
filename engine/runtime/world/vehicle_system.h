@@ -22,6 +22,7 @@ namespace opennova::world {
 
 class World;
 struct AiBrain;
+struct UseScanWatch;
 struct WeaponTableEntry;
 
 class VehicleSystem {
@@ -151,8 +152,9 @@ public:
     // carrying the queued Co-op mount latch (Flags 0x200) reports the best free
     // seat of its groundEntity carrier or nothing; otherwise the
     // nearest-free-seat scan above (seats mode). [orig: Entity_TryEnterNearestVehicle
-    // @0x4368CF..0x43691A]
-    bool find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source = nullptr);
+    // @0x4368CF..0x43691A]. A non-null `watch` (the USE readout, use_press_trace.h) takes the
+    // gate the scan stopped its entity at; it changes nothing the scan decides.
+    bool find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source = nullptr, UseScanWatch *watch = nullptr);
     // The floating seat/armory label list for the local player, a structural translation of
     // the selection half of [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3290]:
     //  - no nearest scan hit -> no labels at all [orig: the Entity_FindNearestSeatOrArmory

@@ -52,6 +52,14 @@ public:
 	int64_t get_watch_table_radius_q16() const { return value_.watch_table_radius_q16; }
 	bool get_watch_in_slice() const { return value_.watch_in_slice; }
 	int get_slice_count() const { return value_.slice_count; }
+	String get_scan_gate() const;
+	int get_scan_seats() const { return value_.scan.seats; }
+	int get_scan_seat_index() const { return value_.scan.seat_index; }
+	int get_scan_bone() const { return value_.scan.bone; }
+	int64_t get_scan_reach_q16() const { return value_.scan.reach_q16; }
+	int64_t get_scan_aim_bam() const { return value_.scan.aim_bam; }
+	int64_t get_scan_view_heading() const { return value_.scan.view_heading; }
+	int64_t get_scan_view_pitch() const { return value_.scan.view_pitch; }
 
 	Dictionary to_json_value() const;
 };
