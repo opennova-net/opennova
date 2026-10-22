@@ -1182,9 +1182,16 @@ void test_round_slot_reuse_clears_throwable_state() {
     auto &ammo = rig.w.tables.ammo.entries[kAmmoGrenade];
     ammo.max_age_ticks = 4;
     const int thrown = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 50}, 0, 0);
-    CHECK(thrown == 0);
+    CHECK(thrown == 1); // a fresh pool's first round: the slot after the cursor's 0
     rig.tick(6);
     CHECK(!rig.w.round_sim.rounds[size_t(thrown)].active);
+    // The allocator takes the slot after its cursor, so the released slot comes
+    // back only once the cursor has walked the pool round to the slot before it.
+    // [orig: CEntityManager_AllocateSlot @0x4EAAD0 (the cursor @0x4EAB1C..0x4EAB37)]
+    const int before = (thrown + RoundSim::kCapacity - 1) % RoundSim::kCapacity;
+    for (int n = 0; n < RoundSim::kCapacity &&
+            rig.w.round_sim.allocate_slot(rig.w, RoundSim::kFreshRoundWord) != before; ++n) {
+    }
 
     rig.w.explosions.queue.clear();
     rig.w.round_sim.impacts.clear();
@@ -1195,7 +1202,8 @@ void test_round_slot_reuse_clears_throwable_state() {
     const int ballistic = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 50}, 0, 0);
     CHECK(ballistic == thrown);
     const LiveRound &reused = rig.w.round_sim.rounds[size_t(ballistic)];
-    CHECK(reused.item_type_id == 0);
+    // No TrcrID item: item 1 with no def [orig: RoundData_SpawnRound @0x4EC7C1 / @0x4EC7CB].
+    CHECK(reused.item_type_id == 1 && !reused.has_item_def);
     CHECK(reused.motor == ThrowClass::kNone);
     CHECK(reused.think == ThrowClass::kNone);
     CHECK(reused.spin_yaw == 0);
@@ -1284,10 +1292,14 @@ void test_a_noage_device_is_no_slice_candidate() {
     const AmmoTableEntry &noage = rig.w.tables.ammo.entries[kAmmoSatchel];
     AmmoTableEntry aging = noage;
     aging.flags &= ~kNoAge;
-    CHECK(rig.w.throwables.place_from_round(rig.w, make_satchel_round(rig, Vec3{51, 50, 0}),
-                                            noage));
-    CHECK(rig.w.throwables.place_from_round(rig.w, make_satchel_round(rig, Vec3{49, 50, 0}),
-                                            aging));
+    // Each round carries the noage bit its ammo's spawn stored at +0x114, which
+    // the conversion copies [orig: RoundData_SpawnRound @0x4EC615].
+    LiveRound kept_round = make_satchel_round(rig, Vec3{51, 50, 0});
+    kept_round.noage = (noage.flags & kNoAge) != 0;
+    LiveRound aging_round = make_satchel_round(rig, Vec3{49, 50, 0});
+    aging_round.noage = (aging.flags & kNoAge) != 0;
+    CHECK(rig.w.throwables.place_from_round(rig.w, kept_round, noage));
+    CHECK(rig.w.throwables.place_from_round(rig.w, aging_round, aging));
     CHECK(rig.w.throwables.devices.size() == 2);
     if (rig.w.throwables.devices.size() < 2) return;
     const EntityHandle kept_out = rig.w.throwables.devices[0].entity;

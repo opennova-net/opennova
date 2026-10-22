@@ -145,6 +145,14 @@ struct Rig {
         p.ammo_index = ammo;
         return w.round_sim.spawn(w, p);
     }
+    // Fresh rounds allocated until the pool's cursor rests on `slot`, as the process's
+    // other allocations move it, so the next spawn takes the slot after it.
+    // [orig: CEntityManager_AllocateSlot @0x4EAAD0 (the cursor @0x4EAB1C..0x4EAB37)]
+    void walk_cursor_to(int slot) {
+        for (int n = 0; n < RoundSim::kCapacity &&
+                w.round_sim.allocate_slot(w, RoundSim::kFreshRoundWord) != slot; ++n) {
+        }
+    }
     // Two ring records: the first lands in slot 1, which [0, count) reads once a second exists.
     void ring_pair(int seen, int other) {
         ProjectileTargetRing &ring = w.round_sim.target_ring;
@@ -397,23 +405,24 @@ void test_the_target_word() {
 void test_the_launch_holds_a_flare() {
     Rig rig;
     const EntityHandle shooter = rig.add_stinger();
+    // A fresh pool's first round takes the slot after the cursor's 0.
     const int a = rig.fire();
     const int b = rig.fire();
-    CHECK(a == 0 && b == 1);
-    if (a != 0 || b != 1) return;
+    CHECK(a == 1 && b == 2);
+    if (a != 1 || b != 2) return;
     rig.round(a).pos.set_q16({150 << 16, 50 << 16, 30 << 16});
     rig.round(b).pos.set_q16({-150 << 16, 50 << 16, 30 << 16}); // behind: outside the bore
     rig.ring_pair(a, b);
     const int m = rig.fire_from(shooter, kAmmoStinger);
-    CHECK(m == 2);
-    if (m != 2) return;
+    CHECK(m == 3);
+    if (m != 3) return;
     LiveRound &missile = rig.round(m);
     CHECK(missile.guided_family == GuidedFamily::Stinger);
     const AiEntity &body = *rig.w.ai.for_handle(shooter);
     CHECK(body.slot.f[3] == -(a + 1));
     CHECK(rig.w.registry.get(shooter)->last_fire_target == TargetRef::of_round(a));
     CHECK(missile.guided.target == 0xFFFF && missile.guided.target_round == a);
-    rig.tick(); // the first tick: the owner's word, flag 2; the flare moved first (slot 0)
+    rig.tick(); // the first tick: the owner's word, flag 2; the flare moved first (slot 1)
     CHECK((missile.guided.flags & 2) != 0 && missile.guided.target_round == a);
     CHECK(same_pos(missile.guided.steer, rig.round(a)));
     rig.tick();
@@ -430,7 +439,9 @@ void test_the_launch_holds_a_flare() {
     CHECK((missile.guided.flags & 2) != 0 && missile.guided.target_round == a);
     CHECK(missile.guided.steer[0] == frozen[0] && missile.guided.steer[1] == frozen[1] &&
           missile.guided.steer[2] == frozen[2]);
-    // A bullet takes the slot: Health 0, the target goes.
+    // A bullet takes the slot once the cursor comes back round to it: Health 0, the
+    // target goes.
+    rig.walk_cursor_to(a - 1);
     CHECK(rig.fire_from(shooter, kAmmoBullet) == a);
     rig.tick();
     CHECK((missile.guided.flags & 2) == 0 && missile.guided.target_round == -1);
@@ -461,8 +472,8 @@ void test_a_dead_target_gives_way_to_a_ground_flare() {
     hot.position.set_q16({250 << 16, 50 << 16, 30 << 16});
     const EntityHandle target = rig.w.registry.spawn(1, hot);
     const int m = rig.fire_from(shooter, kAmmoStinger);
-    CHECK(m == 0);
-    if (m != 0) return;
+    CHECK(m == 1); // a fresh pool's first round: the slot after the cursor's 0
+    if (m != 1) return;
     LiveRound &missile = rig.round(m);
     CHECK(missile.guided.target == target.packed && missile.guided.target_round == -1);
     rig.tick();
@@ -472,8 +483,8 @@ void test_a_dead_target_gives_way_to_a_ground_flare() {
     rig.w.tables.ammo.entries[kAmmoFlare].tracer_item_friendly = kItemGroundFlare;
     const int g = rig.fire();
     const int b = rig.fire();
-    CHECK(g == 1 && b == 2);
-    if (g != 1 || b != 2) return;
+    CHECK(g == 2 && b == 3);
+    if (g != 2 || b != 3) return;
     rig.round(g).pos.set_q16({150 << 16, 50 << 16, 30 << 16});
     rig.round(b).pos.set_q16({-150 << 16, 50 << 16, 30 << 16});
     rig.ring_pair(g, b);
@@ -481,7 +492,7 @@ void test_a_dead_target_gives_way_to_a_ground_flare() {
     rig.w.out.entity_events.clear();
     const int32_t at[3] = {rig.round(g).pos.x.q16, rig.round(g).pos.y.q16, rig.round(g).pos.z.q16};
     const int32_t held[3] = {missile.guided.steer[0], missile.guided.steer[1], missile.guided.steer[2]};
-    rig.tick(); // the missile (slot 0) ticks ahead of the flare
+    rig.tick(); // the missile (slot 1) ticks ahead of the flare
     CHECK(missile.guided.target == 0xFFFF && missile.guided.target_round == g);
     CHECK((missile.guided.flags & 2) != 0 && missile.guided.timer == 62);
     CHECK(missile.guided.steer[0] == at[0] && missile.guided.steer[1] == at[1] &&
@@ -529,8 +540,8 @@ void test_the_proximity_notice_reaches_the_brain() {
         brain.profile.flags96 = 0x10;
         brain.brain.f[AiBrain::kCurState] = 16;
         const int m = rig.fire_from(shooter, kAmmoStinger);
-        CHECK(m == 0);
-        if (m != 0) return;
+        CHECK(m == 1); // a fresh pool's first round: the slot after the cursor's 0
+        if (m != 1) return;
         CHECK(rig.round(m).guided.target == target.packed);
         rig.w.ai.events.clear();
         rig.tick();

@@ -98,7 +98,9 @@ static void test_event_order_pose_and_magazine() {
         CHECK(event.origin_z == points[i] * 131072 + 13);
         // Entity angles, not the aim solution, recoil, or attachment's Euler.
         CHECK(event.dir_yaw == f.body().heading && event.dir_pitch == f.body().pitch);
-        CHECK(f.world.round_sim.rounds[i].ammo_index == ids[i]);
+        // A fresh pool's rounds take the slots after the cursor's 0 in fire order
+        // [orig: CEntityManager_AllocateSlot @0x4EAAD0 (the cursor @0x4EAB1C..0x4EAB37)].
+        CHECK(f.world.round_sim.rounds[size_t(i) + 1].ammo_index == ids[i]);
     }
     CHECK(f.body().inf.magazine == 4);
     CHECK(f.body().inf.last_advanced_ammo == 3);

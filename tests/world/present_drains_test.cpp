@@ -90,6 +90,10 @@ void test_throwable_rows() {
 	r5.active = true;
 	r5.tracer = true;
 	r5.item_type_id = 42;
+	// A TrcrID item's round carries its def; only a def'd item shows
+	// [orig: RoundData_SpawnRound @0x4EC0D0 - the no-TrcrID leg's def-less item 1
+	//  @0x4EC7C1].
+	r5.has_item_def = true;
 	r5.presentation_generation = 7;
 	r5.ammo_index = 1;
 	r5.pos = {1.0f, 2.0f, 3.0f};
