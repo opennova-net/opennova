@@ -756,7 +756,9 @@ void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z
     // (the +0x98 velocity pointer it passes is not carried) [orig: @0x4A21AD..0x4A21F2 ->
     //  SoundEmitter_RegisterSetLayers(def+0x82C)]. Retail reads the set with no null test
     //  [orig: SoundEmitter_RegisterSetLayers @0x528340 - `cmp [ebp+24h], ebx` @0x528381], so a
-    // def with no first loop faults there; ours registers none (D-NET-NEW-L4-24).
+    // def with no first loop faults there on a session peer; ours registers none, a deliberate
+    // fix of a retail crash (D-NET-NEW-L4-24, PERMANENT: ratified by the maintainer, Q15-1 (a),
+    // 2026-10-22).
     const std::string &loop = traits->regional_loops[0];
     if (loop.empty()) return;
     SoundEmitterEvent sound;
