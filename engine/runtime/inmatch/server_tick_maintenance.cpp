@@ -966,9 +966,12 @@ void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world) {
 				conn.link.respawn_pending &&
 				!conn.link.spectator &&
 				reply.state6_entry_host_ms_valid;
+		// GetTickCount against the state-6 stamp, the process clock, so a host load counts
+		// (D-NET-NEW-L8-35) [orig: Server_TickUpdate - GetTickCount @0x51E0FB, the stamp
+		//  @0x51E0FD, `sub` @0x51E107, 0x57E40 @0x51E109].
 		if (join_deploy_idle_gate &&
-				static_cast<uint32_t>(ctx.np_protocol.host_run_duration_ms -
-						reply.state6_entry_host_ms) > kJoinDeployIdleLimitMs)
+				static_cast<uint32_t>(host_tick_count_ms(ctx) - reply.state6_entry_host_ms) >
+						kJoinDeployIdleLimitMs)
 			stage_host_punt(*net_player, kPuntJoinDeployIdle);
 		if (dead && reply.dead_live_seconds > kDeadLiveSecondLimit &&
 				!ctx.config.permanent_death &&

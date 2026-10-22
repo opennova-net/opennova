@@ -746,7 +746,9 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		PlayerSlot_ResetNetworkState(world, conn, now_tick); // [orig: @0x51A72B] (D-NET-532)
 		conn.link.armory_reuse_seconds = 0;                // +356 [orig: @0x51A752]
 		st.rtt_request_countdown = 0;                      // +89816 [orig: @0x51A758]
-		st.state6_entry_host_ms = ctx.np_protocol.host_run_duration_ms; // +100580 [orig: @0x51A770]
+		// The state-6 entry's GetTickCount, the process clock the deploy-idle punt measures
+		// (D-NET-NEW-L8-35) [orig: GetTickCount @0x51A76A, +100580 @0x51A770]
+		st.state6_entry_host_ms = host_tick_count_ms(ctx);
 		st.state6_entry_host_ms_valid = true;
 		// The entry also zeroes +452 and +448 (as PlayerSlot_SetState's does), which nothing
 		// in the image sets otherwise; their readers reach no wire: +448 feeds the host's own

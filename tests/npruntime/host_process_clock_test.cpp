@@ -7,8 +7,10 @@
 // process clock passes.
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
+#include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/replication/connection.h>
@@ -283,6 +285,66 @@ void test_ticket_wait_reads_the_process_clock() {
 	       "past 120 s from the request the state-4 joiner is reaped");
 }
 
+// D-NET-NEW-L8-35: the deploy-idle punt (t35) measures GetTickCount against the state-6 entry's
+// GetTickCount stamp. A joiner added and joined at 70000, held for deployment: with the logic tick
+// and the run clock held, exactly 360000 ms of clock later the periodic walk keeps it, and the next
+// millisecond punts it t35 (on the run clock it would never be punted).
+// [orig: Server_OnPlayerJoin @0x51A680 - GetTickCount @0x51A76A, +0x188E4 @0x51A770;
+//  Server_TickUpdate - the hold @0x51E0F2, GetTickCount @0x51E0FB, the stamp @0x51E0FD, 0x57E40
+//  @0x51E109, the punt @0x51E13D]
+void test_deploy_idle_reads_the_process_clock() {
+	auto ctx_owner = std::make_unique<inmatch::NapiNPServerCtx>();
+	auto world_owner = std::make_unique<w::World>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_owner;
+	w::World &world = *world_owner;
+	uint32_t clock = 70000;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	ctx.is_in_session = 1;
+	ctx.config.max_players = 4;
+	ctx.network_quality_broadcast_countdown = 100;
+	ctx.process_clock_ms = [&clock] { return clock; };
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(2, 8);
+	world.registry.configure_pool(3, 8);
+	world.tick_count_ms = [&clock] { return clock; };
+	w::Entity zone;
+	zone.kind = w::EntityKind::Building;
+	zone.item_id = 0x0500;
+	zone.is_spawn_point = true;
+	zone.alive = true;
+	zone.team = 1;
+	(void)world.registry.spawn(2, zone);
+	ctx.world = &world;
+	ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection joiner;
+	joiner.peer = {0x0100007Fu, 34035};
+	joiner.type = inmatch::NapiNPConnection::kTypeServerSide;
+	joiner.connection_id = inmatch::kFirstJoinerDcb;
+	joiner.link.mode = ns::TransportMode::Client;
+	joiner.link.transport = &transport;
+	joiner.player_name = "IdleJoiner";
+	ctx.np_protocol.connection_list.push_back(std::move(joiner));
+	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
+	(void)inmatch::Server_BuildPlayerInfoAndAdd(ctx, live, world, /*round_init=*/false);
+	(void)inmatch::Server_OnPlayerJoin(ctx, live, 1, {0, 0});
+	expect(live.link.respawn_pending && live.reply.state6_entry_host_ms_valid &&
+	               live.reply.state6_entry_host_ms == 70000u,
+	       "the join stamps the state-6 entry on the process clock");
+	auto tick_second = [&] {
+		do {
+			inmatch::Server_TickUpdate(ctx);
+		} while (!world.match.periodic_second());
+	};
+	clock = 70000u + 360000u; // the logic tick and the run clock hold
+	tick_second();
+	expect(!live.host_disconnect_sent, "exactly six minutes of clock keeps the held joiner");
+	clock += 1u;
+	tick_second();
+	expect(live.host_disconnect_sent && live.host_disconnect_mismatch_type == 35,
+	       "the next millisecond of clock punts it t35");
+}
+
 } // namespace
 
 int main() {
@@ -292,6 +354,7 @@ int main() {
 	test_chat_stamp_reads_the_process_clock();
 	test_team_change_reads_the_process_clock();
 	test_ticket_wait_reads_the_process_clock();
+	test_deploy_idle_reads_the_process_clock();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "npruntime_host_process_clock: %d failure(s)\n", g_failures);
 		return 1;
