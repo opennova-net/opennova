@@ -218,9 +218,7 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 		}
 	}
 	vehicle_crush_damage(world, veh, traits, d + 4, basis.q22.m[10] >> 6);
-	const bool contacts[7] = { d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0, d[4] != 0, d[5] != 0,
-		d[6] != 0 };
-	vehicle_crash_state(world, veh, traits, contacts, basis.q22.m[10] >> 6);
+	vehicle_crash_state(world, veh, traits, d, basis.q22.m[10] >> 6);
 	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	const int32_t up_z16 = basis.q22.m[10] >> 6;
 
@@ -574,7 +572,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
                                   /*latch_gated=*/true,
                                   !m.grounded && sinks_zero && up_z16 < 0);
 	vehicle_crush_damage(world, veh, traits, d + 4, up_z16);
-	vehicle_crash_state(world, veh, traits, pad_contact, up_z16);
+	vehicle_crash_state(world, veh, traits, d, up_z16);
 	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	up_z16 = basis.q22.m[10] >> 6;
 	// The deepest force record. [orig: Entity_ProcessTrackedVehiclePhysics @ 0x47E09F..0x47E107

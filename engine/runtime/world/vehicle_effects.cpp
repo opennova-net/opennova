@@ -126,15 +126,29 @@ void vehicle_health_effects(World &world, Entity &e, const VehicleTraits &t, boo
 // The contact latches own wreck-rest burning, independently of the 64-tick
 // critical-health band. Call before the fit selection: after the sink growth in
 // every family but the tank, whose block precedes its growth.
-// [orig: ground @0x47DC68..0x47DF79; tank @0x4780CD..0x478381 (growth @0x478510);
-// bike @0x47AC46..0x47AD65; air @0x4807C6..0x480BC7;
+// The aircraft and tracked solves pass their contact copy (seven depths): a crashed, frozen
+// (+0x2EF) hull with a diagonal pad pair down, or its middle spine probe pressed (> 0: the
+// aircraft's probe 6, the tracked's probe 5, each solve's L/2 station), latches +0x2FC, clears
+// its sinks, its chassis state and the +0x364 cue dword. The aircraft also drops its crash pair
+// (+0x2EF, +0x2EC) there and has no miss arm; the tracked keeps the pair and clears +0x2FC on a
+// miss. The authority parks an aircraft while crashed and unparks it once neither crashed nor
+// wrecked (+0x2F0); the tracked parks while crashed or wrecked and unparks only when +0x2FC is
+// clear too. The aircraft's inverted-rebuild gate does not read +0x2FC.
+// [orig: ground @0x47DC68..0x47DF79 (the latch @0x47DC56..0x47DD04, `cmp [esp+..+var_248], ecx;
+//  jle` @0x47DC86, the +0x364 clear @0x47DCFC, the miss clear @0x47DD04; the park @0x47DD30..0x47DD4C,
+//  the unpark @0x47DD81..0x47DDA4; the rebuild gate @0x47DF79..0x47DFA2);
+// tank @0x4780CD..0x478381 (growth @0x478510); bike @0x47AC46..0x47AD65;
+// air @0x4807C6..0x480BC7 (the latch @0x4807C6..0x48087C, `cmp [esp+..+var_1D8], ecx; jle`
+//  @0x4807F6, the pair clear @0x48082B..0x480831, the +0x364 clear @0x48087C; the park
+//  @0x4808A8..0x4808BC, the unpark @0x4808ED..0x480907; the rebuild gate @0x480AE0..0x480AFC);
 // boat @0x483474..0x48367D]
 void vehicle_crash_state(
-		World &world, Entity &e, const VehicleTraits &t, const bool *contacts, int32_t up) {
+		World &world, Entity &e, const VehicleTraits &t, const int32_t *depths, int32_t up) {
 	auto &m = e.veh;
 	const bool boat = t.family == VehicleFamily::Watercraft;
 	const bool tank = t.family == VehicleFamily::Tank;
 	const bool bike = t.family == VehicleFamily::Bike;
+	const bool air = vehicle_family_uses_direct_air_mover(t.family);
 	const bool authority = world.ai.is_authority;
 	const auto clear_sinks = [&] { std::fill_n(m.plat_acc, 4, 0); };
 	if (boat) {
@@ -146,23 +160,28 @@ void vehicle_crash_state(
 				set_parked(e, false);
 		}
 	} else {
-		if (!tank && !bike && m.crashed && m.byte_2ef && contacts != nullptr) {
-			if ((contacts[0] && contacts[2]) || (contacts[1] && contacts[3]) || contacts[6]) {
+		if (!tank && !bike && m.crashed && m.byte_2ef && depths != nullptr) {
+			const int32_t spine = depths[air ? 6 : 5];
+			if ((depths[0] != 0 && depths[2] != 0) || (depths[1] != 0 && depths[3] != 0) ||
+					spine > 0) {
 				m.wreck_2fc = 1;
 				clear_sinks();
+				if (air)
+					m.byte_2ef = m.crashed = 0;
 				vehicle_clear_chassis(m);
-				m.byte_2ef = m.crashed = 0;
-			} else
+				m.plat_at_rest = m.plat_porpoise = false;
+			} else if (!air) {
 				m.wreck_2fc = 0;
+			}
 		}
 		if (!bike && m.wreck_2fc && m.speed < 32 && !m.settle_2f0)
 			m.settle_2f0 = 1;
-		if (!tank && !bike && authority)
-			set_parked(e,
-					m.crashed || m.settle_2f0 ||
-							(t.family == VehicleFamily::Ground && m.wreck_2fc));
+		if (!tank && !bike && authority && (m.crashed || (!air && m.settle_2f0)))
+			set_parked(e, true);
 		if (!bike && m.crashed && !m.settle_2f0 && m.speed > 32)
 			clear_sinks();
+		if (!tank && !bike && authority && !m.crashed && !m.settle_2f0 && (air || !m.wreck_2fc))
+			set_parked(e, false);
 	}
 	if (e.health > 0 && m.settle_2f0) {
 		if (!m.damage_smoke_active) {
@@ -192,7 +211,7 @@ void vehicle_crash_state(
 			vehicle_rebuild_rest_orientation(world, e, true);
 		else if ((e.flags & 0x10u) == 0 && up < 0)
 			vehicle_rebuild_rest_orientation(world, e, false);
-	} else if (!bike && !m.crashed && !m.wreck_2fc && up < 0 && (e.flags & 0x10u) == 0 &&
+	} else if (!bike && !m.crashed && (air || !m.wreck_2fc) && up < 0 && (e.flags & 0x10u) == 0 &&
 			(!tank || (!authority && !m.byte_2ef))) {
 		vehicle_rebuild_rest_orientation(world, e, false);
 	}

@@ -1,10 +1,15 @@
-// The tracked contact solve's extend-loop and respawn legs (D-NET-NEW-L6-16).
+// The tracked contact solve's extend-loop and respawn legs (D-NET-NEW-L6-16) and the aircraft and
+// tracked crash-state latch (D-NET-NEW-L6-17).
 // - The extend loop resets every oscillator's remaining range to 0xFFFF, after the pad quad's
 //   chassis-force clear. [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the quad
 //   @0x47DAE2 and Entity_ClearSuspensionForces @0x47DAF2; the reset @0x47DB70]
 // - A pad pair down on the contact copy (0+2 or 1+3) raises +0x2F1 unless the hull is
 //   wreck-settled. [orig: @0x47E15D..0x47E184]
 // - The client crash window runs in the grounded arm only. [orig: @0x47E791..0x47E7F5]
+// - The crash-state latch reads each solve's own middle spine probe (> 0), and the two families
+//   differ in the pair clear, the miss arm, the park terms and the rebuild gate.
+//   [orig: tracked @0x47DC56..0x47DD04, @0x47DD30..0x47DDA4, @0x47DF79..0x47DFA2; aircraft
+//   @0x4807C6..0x48087C, @0x4808A8..0x480907, @0x480AE0..0x480AFC]
 // The hull is item 1294's box (the 01TR truck) on a flat 42.0 field.
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/entity.h>
@@ -130,12 +135,91 @@ void test_the_client_window_runs_only_grounded() {
 	CHECK(rig->e().veh.airborne_stamp_2f8 == 0);
 }
 
+// The crash-state latch, called as each solve calls it (its contact copy, upright).
+void test_the_crash_latch_per_family() {
+	VehicleTraits tracked = truck();
+	VehicleTraits air = truck();
+	air.family = VehicleFamily::Helicopter;
+	const int32_t up = 0x4000;
+	const auto crashed_hull = [](Rig &rig) -> Entity & {
+		Entity &v = rig.e();
+		v.health = 0; // no wreck-rest burning
+		v.veh.crashed = 1;
+		v.veh.byte_2ef = 1;
+		v.veh.speed = 100;
+		v.veh.plat_acc[0] = 300;
+		v.veh.plat_at_rest = true;
+		return v;
+	};
+	{
+		// The tracked middle spine is probe 5: it latches +0x2FC and keeps the crash pair.
+		auto rig = std::make_unique<Rig>(false);
+		Entity &v = crashed_hull(*rig);
+		const int32_t depths[7] = { 0, 0, 0, 0, 0, 7, 0 };
+		detail::vehicle_crash_state(rig->world, v, tracked, depths, up);
+		CHECK(v.veh.wreck_2fc == 1);
+		CHECK(v.veh.crashed == 1 && v.veh.byte_2ef == 1);
+		CHECK(v.veh.plat_acc[0] == 0);
+		CHECK(!v.veh.plat_at_rest);
+	}
+	{
+		// Probe 6 is the tracked solve's rear spine: a miss, which clears +0x2FC.
+		auto rig = std::make_unique<Rig>(false);
+		Entity &v = crashed_hull(*rig);
+		v.veh.wreck_2fc = 1;
+		const int32_t depths[7] = { 0, 0, 0, 0, 0, 0, 7 };
+		detail::vehicle_crash_state(rig->world, v, tracked, depths, up);
+		CHECK(v.veh.wreck_2fc == 0);
+		CHECK(v.veh.plat_at_rest);
+	}
+	{
+		// The aircraft's middle spine is probe 6: it latches and drops the crash pair.
+		auto rig = std::make_unique<Rig>(false);
+		Entity &v = crashed_hull(*rig);
+		const int32_t depths[7] = { 0, 0, 0, 0, 0, 0, 7 };
+		detail::vehicle_crash_state(rig->world, v, air, depths, up);
+		CHECK(v.veh.wreck_2fc == 1);
+		CHECK(v.veh.crashed == 0 && v.veh.byte_2ef == 0);
+	}
+	{
+		// A negative spine depth is no contact, and the aircraft has no miss arm.
+		auto rig = std::make_unique<Rig>(false);
+		Entity &v = crashed_hull(*rig);
+		v.veh.wreck_2fc = 1;
+		const int32_t depths[7] = { 0, 0, 0, 0, 0, 0, -7 };
+		detail::vehicle_crash_state(rig->world, v, air, depths, up);
+		CHECK(v.veh.wreck_2fc == 1);
+		CHECK(v.veh.crashed == 1);
+	}
+	{
+		// The tracked authority leaves the park bit alone on +0x2FC alone (moving: no +0x2F0).
+		auto rig = std::make_unique<Rig>(true);
+		Entity &v = rig->e();
+		v.health = 0;
+		v.veh.wreck_2fc = 1;
+		v.veh.speed = 100;
+		detail::vehicle_crash_state(rig->world, v, tracked, nullptr, up);
+		CHECK((v.flags & kEntityFlagSuspensionCrashed) == 0);
+	}
+	{
+		// The aircraft authority parks only while crashed and unparks only once neither crashed
+		// nor wrecked: a wreck at rest (+0x2F0) that is not crashed keeps the bit as it stood.
+		auto rig = std::make_unique<Rig>(true);
+		Entity &v = rig->e();
+		v.health = 0;
+		v.veh.settle_2f0 = 1;
+		detail::vehicle_crash_state(rig->world, v, air, nullptr, up);
+		CHECK((v.flags & kEntityFlagSuspensionCrashed) == 0);
+	}
+}
+
 } // namespace
 
 int main() {
 	test_the_extend_loop_resets_every_range();
 	test_a_pad_pair_marks_the_hull_respawned();
 	test_the_client_window_runs_only_grounded();
+	test_the_crash_latch_per_family();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

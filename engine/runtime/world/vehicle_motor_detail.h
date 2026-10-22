@@ -322,8 +322,10 @@ inline void plat_water_flag(World &world, Entity &veh, const VehicleTraits &trai
 void vehicle_health_effects(World &world, Entity &e, const VehicleTraits &traits, bool critical);
 void vehicle_release_damage_effects(World &world, Entity &e);
 void vehicle_smoke_effect(World &world, Entity &e, bool release = false);
+// `depths` is the aircraft's or tracked solve's contact copy (seven depths); the other families
+// pass none.
 void vehicle_crash_state(
-		World &world, Entity &e, const VehicleTraits &traits, const bool *contacts, int32_t up_z16);
+		World &world, Entity &e, const VehicleTraits &traits, const int32_t *depths, int32_t up_z16);
 void vehicle_flush_sinks(World &world, Entity &e, int32_t up_z16, int32_t pz);
 void vehicle_expire_contact_wake(World &, Entity &);
 void vehicle_kill_crash_occupants(World &, Entity &);
