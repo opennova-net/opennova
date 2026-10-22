@@ -296,6 +296,12 @@ bool test_spectator_rows_fire_on_their_events() {
 	auto requests = actions.poll_spectator(keys, true, events);
 	CHECK(requests.size() == 3 && requests[0].action == Action::Spectate &&
 			requests[0].value == 502 && requests[1].value == 500 && requests[2].value == 502);
+	// Each is a record of the update's drain by its code, which maps back to its request
+	// (LI-s15).
+	CHECK(requests[0].code == 502 && requests[1].code == 500 && requests[2].code == 502);
+	const auto back = player_action_request(InputEventRecord{501, 0, 0, 0, false,
+			InputEventOrigin::Device});
+	CHECK(back && back->action == Action::Spectate && back->value == 501 && back->code == 501);
 	CHECK(actions.poll_spectator(keys, true).empty());
 	CHECK(actions.poll_spectator(keys, false, events).empty());
 	return true;

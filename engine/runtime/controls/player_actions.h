@@ -330,7 +330,8 @@ public:
 	// scan admits them only while the death screen is up, so the embedder
 	// polls them there while gameplay input is active: one request per queued
 	// key event in `events` (the poll's key_events), in their order, then the
-	// press edges of the rows' off-keyboard arms.
+	// press edges of the rows' off-keyboard arms. Each carries its code, a record of the
+	// update's drain (player_action_request maps it back).
 	// [orig: Input_IsBindingActiveForMode @0x497ea0 — row +8 bit 2 on the
 	//  death screen; rows @0x818810 / @0x81887C / @0x8188E8 -> codes 500..502]
 	std::vector<PlayerActionRequest> poll_spectator(const PlayerActionSource &source, bool active,

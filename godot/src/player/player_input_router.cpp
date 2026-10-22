@@ -612,11 +612,14 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 		}
 		if (action_sim.is_valid()) apply_player_action(*action_sim.ptr(), request);
 	}
-	// The death screen's own rows (the spectate sub-mode and target).
+	// The death screen's own rows (the spectate sub-mode and target): records of the
+	// update's drain behind the sample's other rows, each past the dispatcher's head at its
+	// dispatch (dispatch_record, engine controls::player_action_request).
 	if (p_spectating && action_sim.is_valid()) {
 		for (const auto &request : actions_.poll_spectator(GodotActionSource(controls_),
 					 active, gate.key_events))
-			apply_player_action(*action_sim.ptr(), request);
+			sample_records_.push_back({request.code, 0, 0, 0, request.sign,
+					opennova::controls::InputEventOrigin::Device});
 	}
 }
 

@@ -410,12 +410,13 @@ std::vector<PlayerActionRequest> PlayerActions::poll_spectator(const PlayerActio
 	for (const KeyRowEvent &event : events) {
 		if (event.release || !active || chain_takes_key(event)) continue;
 		for (const auto &row : kSpectatorRows)
-			if (event.code == row.code) out.push_back({Action::Spectate, row.code});
+			if (event.code == row.code)
+				out.push_back({Action::Spectate, row.code, row.code, event.sign});
 	}
 	for (std::size_t i = 0; i < std::size(kSpectatorRows); ++i) {
 		const bool down = source.held_off_keyboard(kSpectatorRows[i].token);
 		if (world::latched_key_edge(down, active, spectator_was_down_[i]))
-			out.push_back({Action::Spectate, kSpectatorRows[i].code});
+			out.push_back({Action::Spectate, kSpectatorRows[i].code, kSpectatorRows[i].code});
 	}
 	return out;
 }
