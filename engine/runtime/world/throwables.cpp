@@ -1230,9 +1230,11 @@ void throwable_round_init(World &world, LiveRound &r, const ThrowableClassRow *r
     // The item's init callback is its ai_function row's (def+0x148): only the nade, schl and
     // vmne rows spin the round, 1 deg/tick on all three words; the clym row zeroes them and
     // stores 1 into +0x2A8 (the word the spawn's mass took); a row with no init leaves the
-    // allocation's zeroes; the guided rows' inits are init_guided's.
+    // allocation's zeroes, as does the rokt and hlfr rows' init (a memset of +0x2B8..+0x30B);
+    // the guided rows' inits are init_guided's.
     // [orig: Entity_InitFromItemDef @0x49E550 (the tail-call @0x49E5D5..0x49E5EA); the event
-    //  rows @0x813138 / @0x813150 / @0x813168 / @0x813180; Entity_InitThrowableSpin_Nade
+    //  rows @0x813138 / @0x813150 / @0x813168 / @0x813180; RoktClass_InitFromDef @0x443410
+    //  (the memset @0x443414..0x44341E); Entity_InitThrowableSpin_Nade
     //  @0x4435A0, Entity_InitThrowableSpin_Satchel @0x4435C0, Entity_InitThrowableSpin_AVMine
     //  @0x443610, Entity_InitThrowableSpin_Claymore @0x4435E0 (@0x4435F8);
     //  CEntityManager_AllocateSlot @0x4EAAD0 (the memset @0x4EABC8); RoundData_SpawnRound

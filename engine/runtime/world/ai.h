@@ -1122,8 +1122,9 @@ public:
     // boarding commands retain slot[38]. [orig: @0x407EA0]
     int32_t nearest_route_node(const AiEntity &e, uint32_t list) const;
 
-    // The vehicle-physics input staging for a PlayerControl vehicle without a live PLAYER
-    // controller, shared by the cveh and ctan movers whose legs are instruction-equivalent
+    // The vehicle-physics AI / parked leg for a PlayerControl vehicle without a live PLAYER
+    // controller, run in place by the movers' occupant block (VehicleSystem::tick_motor),
+    // shared by the cveh and ctan movers whose legs are instruction-equivalent
     // [orig: Entity_UpdateVehiclePhysics @0x48af00 — the parked stamp @0x48c002-0x48c02d
     // and the AI-driver leg @0x48bc12-0x48c034 (2026-07-16 witness);
     // Entity_UpdateTankVehiclePhysics @0x488AB0 — AI leg @0x4897DB..0x489C00, parked

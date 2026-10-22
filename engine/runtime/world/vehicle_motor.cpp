@@ -69,8 +69,8 @@ void VehicleSystem::tick_health(Entity &veh, const VehicleTraits &traits) {
 		const bool air = vehicle_family_uses_direct_air_mover(traits.family);
 		// The 0 -> PRETTY stamp sits at the mover HEAD in retail [orig: ground
 		// @0x48afac..0x48afb2, aircraft @0x490377..0x49037d], ahead of the
-		// occupant/AI-driver block; the authority pass hoists it into
-		// vehicle_system.cpp with the drive staging, so this twin only lands
+		// occupant/AI-driver block; the authority pass runs it in
+		// VehicleSystem::update_motor ahead of the mover, so this twin only lands
 		// for callers that enter the motor directly.
 		if (b.f[AiBrain::kCurState] == 0)
 			b.f[AiBrain::kCurState] = air ? 14 : 22;
