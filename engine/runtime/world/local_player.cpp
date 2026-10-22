@@ -890,6 +890,14 @@ void LocalPlayer::respawn_init(bool rebuild_kit) {
     hud_map_control.reset_spawn();
 }
 
+void LocalPlayer::round_end_view_clear() {
+    // [orig: Server_ProcessRoundEnd @0x5168EA..0x5168FC]
+    view.binoculars_view_active = false; // g_BinocularsViewActive
+    view.binoculars_requested = false;   // g_BinocularsToggle
+    hud_map_control.mode = 0;            // g_MapOverlayMode
+    w::player_view_clear_scope_promoted(view); // g_WeaponScopeActive, the bare write
+}
+
 void LocalPlayer::reset_for_new_round() {
     // Round init clears the world's dialog table, its first statement and again
     // after the overlay reset; the second finds it empty

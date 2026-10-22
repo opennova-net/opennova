@@ -136,6 +136,10 @@ public:
 		// CMD leave on its connection, CMD through its console sender. RemoteAdminConsoles::bind
 		// sets it from its binding.
 		ClientRuntime *host_client = nullptr;
+		// A joiner's world (its binding's; null on every other role): the cycle tail's own round
+		// end over the joiner's zones and team records, and its local view. RemoteAdminConsoles::bind
+		// sets it from its binding.
+		world::World *joiner_world = nullptr;
 		// A gametext string (GameText_GetString(section, key): the mount's override table first,
 		// D-NET-675); "" when absent. [orig: GameType_GetAbbreviation @0x520FD0;
 		//  GameText_GetString @0x51EBD0]

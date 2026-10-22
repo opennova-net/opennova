@@ -7,6 +7,7 @@
 #include <runtime/inmatch/server_console.h> // Server_SendConsoleChat, the CHAT ring
 #include <runtime/inmatch/server_initial_state.h> // build_server_config_flags
 #include <runtime/inmatch/server_tick.h> // Server_ProcessRoundEnd
+#include <runtime/world/local_player.h> // LocalPlayer::round_end_view_clear
 #include <runtime/world/world.h>
 
 #include <base/gameprofile/game_type.h>
@@ -481,12 +482,73 @@ std::string AdminConsole::rotation_lines(bool query_fillers) const {
 	return out;
 }
 
+namespace {
+
+// A joiner's own Server_ProcessRoundEnd(0), the cycle tail's. Over its empty slot table it scores
+// nobody and sends nothing; its board build rebuilds the end-round words its overlay reads, which
+// its round-over latch then draws (HUD_DrawOverlayPanels' g_RoundOver arm, the transition's first
+// pass; the STAT arm waits on g_ScoreboardDirty, which no build writes): the winner 0, the two team
+// words, the draw flag, rows 0..2 cleared (the memset; no row is built). The team words count the
+// zone chain's zones by the team byte the joiner holds (A&S, C&C), else read its team records'
+// primary field (the joiner world's Match records). A team type's draw is the words' equality; any
+// other type's, with no row, stays 1. The player index (the 0x1D's own byte) is not the build's.
+// Then the latch and the local view's four words. g_MissionRunning's 0 has no reader on a joiner
+// (its readers Server_ClientFiredRound, Server_SendPlayerSlotStateFrame and Server_PlayerAdd run
+// on the authority alone), so nothing models it.
+// [orig: Server_ProcessRoundEnd @0x5164F0 (g_MissionRunning @0x5164FC, the board build call
+//  @0x516590, g_RoundOver @0x5168E4, the view words @0x5168EA..0x5168FC);
+//  Server_BuildEndOfRoundScoreboard @0x508F30 (the memset @0x508F3F, the winner @0x508F77, the
+//  zone counts @0x508FBF..0x508FD7, the team records' primaries @0x508FA7 / @0x508FB8, @0x508FE0,
+//  the rowless draw @0x50909D / @0x509270, the team draw @0x5092AD, g_EndRoundDrawFlag @0x5092B2);
+//  CTeamSlotManager_CountByTeam @0x4A2A40 (the team byte @0x4A2A96); HUD_DrawOverlayPanels
+//  @0x5C0060 (UI_ProcessEndRoundScreenTransition @0x5C0072)]
+void joiner_round_end(ClientRuntime &client, world::World *world) {
+	replication::ClientState &state = client.state();
+	const uint32_t type = client.game_type();
+	int32_t scores[2] = {0, 0};
+	if (world != nullptr) {
+		if (type == game_type::kAdvanceAndSecure || type == game_type::kConquerAndControl) {
+			for (const world::EntityHandle handle : world->zones.chain.zones) {
+				const world::Entity *zone = world->registry.get(handle);
+				if (zone == nullptr) continue;
+				// The zone's team byte as this joiner holds it (role_feeds' zone_team_byte).
+				const replication::ClientEntityState *row = state.find(zone->handle.packed);
+				const uint8_t team = row != nullptr && row->team_known ? row->team : zone->team;
+				if (team == 1)
+					++scores[0];
+				else if (team == 2)
+					++scores[1];
+			}
+		} else {
+			scores[0] = world->match.team_primary_score(1);
+			scores[1] = world->match.team_primary_score(2);
+		}
+	}
+	EndRoundHeader &header = state.end_round.header;
+	header.winner_team = 0;
+	header.team_score_0 = static_cast<int16_t>(scores[0]);
+	header.team_score_1 = static_cast<int16_t>(scores[1]);
+	header.draw = game_type::is_team(type) ? static_cast<uint8_t>(scores[0] == scores[1]) : uint8_t{1};
+	for (int i = 0; i < 3; ++i) {
+		header.player_names[i].clear();
+		header.player_scores[i] = 0;
+	}
+	state.end_round.header_known = true;
+	state.spawn_success_gate = true;
+	state.mark_changed();
+	if (world != nullptr && world->local_player_state != nullptr)
+		world->local_player_state->round_end_view_clear();
+}
+
+} // namespace
+
 // The round end with no winner, run inline (its 0x61 / 0x1D go out here), then the
 // 620-tick linger stored over the round end's, unconditionally, in the Game Loop, else
 // the refusal (D-NET-NEW-L1-16). The Game Loop test alone gates it, so a joiner's console
-// cycles too: its own round end runs over its empty slot table and raises its process's
-// round-over latch and linger, which its client frame then counts down (the joiner's
-// MISSION CYCLE leaves on exit 4 after 620 ticks; GOTO MENUSTATE's quit leaves first).
+// cycles too: its own round end (joiner_round_end) runs over its empty slot table, rebuilds its
+// board words, raises its process's round-over latch, clears its view's words and stores the
+// linger, which its client frame then counts down (the joiner's MISSION CYCLE shows the overlay
+// and leaves on exit 4 after 620 ticks; GOTO MENUSTATE's quit leaves first).
 // [orig: CAdminServer_HandleMissionCommand @0x4065E7..0x40662A (Server_ProcessRoundEnd(0)
 //  @0x40660B, the store @0x40661F); CAdminServer_HandleGotoCommand @0x404A74..0x404AAF
 //  (UI_GetCurrentGameMode() == &g_GameModeGameLoop @0x404A7E, @0x404A95, the store
@@ -501,9 +563,8 @@ void AdminConsole::cycle_tail(std::vector<std::string> &replies) {
 		Server_ProcessRoundEnd(ctx_, *ctx_.world, 0);
 		ctx_.round_end_linger_ticks = kCycleLingerTicks;
 	} else if (seams_.host_client != nullptr) {
-		replication::ClientState &state = seams_.host_client->state();
-		state.spawn_success_gate = true;
-		state.end_round_linger_ticks = static_cast<int32_t>(kCycleLingerTicks);
+		joiner_round_end(*seams_.host_client, seams_.joiner_world);
+		seams_.host_client->state().end_round_linger_ticks = static_cast<int32_t>(kCycleLingerTicks);
 	}
 	replies.emplace_back(kCycling);
 }

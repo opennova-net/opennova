@@ -38,6 +38,7 @@
 #include <runtime/inmatch/server_tick.h> // Server_TickUpdate
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/mission/runtime_boot.h> // BootFileSource
+#include <runtime/world/local_player.h> // the round end's view words
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
@@ -585,13 +586,35 @@ void test_menus_game_text() {
 	expect(!inmatch::process_game_text(bare, nullptr), "no gametext in the mount: no seam");
 }
 
+// The local view's four words the round end clears, raised (and the body pose's raise, which it
+// keeps). [orig: Server_ProcessRoundEnd @0x5168EA..0x5168FC]
+void raise_view_words(world::LocalPlayer &local) {
+	local.view.binoculars_view_active = true;
+	local.view.binoculars_requested = true;
+	local.view.binoculars_raised = true;
+	local.view.scope_settled = true;
+	local.hud_map_control.mode = 3;
+}
+
+bool view_words_cleared(const world::LocalPlayer &local) {
+	return !local.view.binoculars_view_active && !local.view.binoculars_requested &&
+	       !local.view.scope_settled && local.hud_map_control.mode == 0 &&
+	       local.view.binoculars_raised;
+}
+
 // A joiner's MISSION CYCLE: the cycle tail is gated on the Game Loop alone, so a joiner's console
-// cycles too. Its own round end runs over its empty slot table (nothing to send) and raises its
-// round-over latch, and the cycle stores the 620 linger over the round end's 2790, which the
+// cycles too. Its own round end runs over its empty slot table (nothing to send): its board build
+// rewrites the end-round words its overlay reads (the winner 0; a Team Deathmatch's team words from
+// its team records, which nothing on a joiner scored, 0 and 0, so a draw; rows 0..2 cleared; the
+// 0x1D's own player index kept), raises its round-over latch, which draws the overlay, and clears
+// its view's four words; the cycle stores the 620 linger over the round end's 2790, which the
 // joiner's client frame counts down into exit 4. In the menus it is refused.
 // [orig: CAdminServer_HandleMissionCommand @0x4065E7..0x40662A (Server_ProcessRoundEnd(0)
-//  @0x40660B, the store @0x40661F); Server_ProcessRoundEnd @0x5164F0 (the 2790 @0x5166C4,
-//  g_RoundOver @0x5168E4); Client_ProcessNetworkFrame @0x42C3AB..0x42C3D3]
+//  @0x40660B, the store @0x40661F); Server_ProcessRoundEnd @0x5164F0 (the board build call
+//  @0x516590, the 2790 @0x5166C4, g_RoundOver @0x5168E4, the view words @0x5168EA..0x5168FC);
+//  Server_BuildEndOfRoundScoreboard @0x508F30 (the memset @0x508F3F, the winner @0x508F77, the
+//  team records @0x508FA7 / @0x508FB8, the team draw @0x5092AD); HUD_DrawOverlayPanels @0x5C0060
+//  (@0x5C0072); Client_ProcessNetworkFrame @0x42C3AB..0x42C3D3]
 void test_joiner_cycle() {
 	inmatch::RemoteAdminConsoles consoles;
 	gamecfg::GameCfg block = gamecfg::defaults();
@@ -602,8 +625,22 @@ void test_joiner_cycle() {
 	client.seed_session(0x41444D4Eu, 1u, "CLIENT-CYCLE-SCRK", "SERVER-CYCLE-SCRK", 1, 0, 0x0002,
 	                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
 	                    /*replay_mode=*/false);
+	auto world = std::make_unique<world::World>();
+	auto local = std::make_unique<world::LocalPlayer>(*world);
+	world->local_player_state = local.get();
+	raise_view_words(*local);
+	// A stale header in the words (the build's memset clears the rows; the player index is the
+	// 0x1D's own byte, which the build leaves).
+	EndRoundHeader &stale = client.state().end_round.header;
+	stale.winner_team = 2;
+	stale.team_score_0 = 7;
+	stale.team_score_1 = 3;
+	stale.player_index = 4;
+	stale.player_names[0] = "Ann";
+	stale.player_scores[0] = 9;
 	inmatch::RemoteAdminBinding joined;
 	joined.client = &client;
+	joined.world = world.get();
 	joined.session = 1;
 	consoles.bind(joined, seams);
 	const AdminSession admin{"boss", 0xFFFFFFFFu};
@@ -614,13 +651,99 @@ void test_joiner_cycle() {
 	};
 	consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
 	expect_eq(line("MISSION CYCLE"), "ERROR - Must be in Game State to cycle server.", "a joiner's CYCLE outside");
-	expect(!client.state().spawn_success_gate && client.state().end_round_linger_ticks == 0,
+	expect(!client.state().spawn_success_gate && client.state().end_round_linger_ticks == 0 &&
+	               !client.state().end_round.header_known && local->view.binoculars_view_active,
 	       "refused: the joiner's words untouched");
 	consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
 	expect_eq(line("MISSION CYCLE"), "OK - Server is cycling...", "a joiner's CYCLE in the Game Loop");
 	expect(client.state().spawn_success_gate && client.state().end_round_linger_ticks == 620,
 	       "the joiner's round-over latch and the 620 linger");
+	const replication::ClientEndRoundStats &er = client.state().end_round;
+	expect(er.header_known && er.header_updates == 0, "the build's words, no 0x1D landed");
+	expect(er.header.winner_team == 0 && er.header.team_score_0 == 0 && er.header.team_score_1 == 0 &&
+	               er.header.draw == 1,
+	       "the winner 0, the team records' 0 and 0, a team draw");
+	expect(er.header.player_names[0].empty() && er.header.player_scores[0] == 0 &&
+	               er.header.player_index == 4,
+	       "rows cleared; the 0x1D's player index kept");
+	const inmatch::EndRoundSessionState shown = inmatch::end_round_session_state(
+			inmatch::RoleView{nullptr, &client, nullptr, true});
+	expect(shown.header_known && shown.winner == 0 && shown.draw,
+	       "the overlay announces the build's words");
+	expect(view_words_cleared(*local), "the joiner's four view words cleared, the body pose kept");
 	expect(client.mission_exit_reason() == inmatch::kMissionExitNone, "no exit until the linger runs out");
+}
+
+// An A&S joiner's cycle: the board build's team words count the zone chain's zones by the team
+// byte each zone carries on the joiner (a received record's over the mission's), 2 for team 1
+// and 1 for team 2: no draw. [orig: Server_BuildEndOfRoundScoreboard @0x508F30 (the game type
+// test @0x508F8D, the counts @0x508FBF..0x508FE0, the team draw @0x5092AD);
+// CTeamSlotManager_CountByTeam @0x4A2A40 (the entity+354 team byte @0x4A2A96)]
+void test_joiner_cycle_zones() {
+	inmatch::RemoteAdminConsoles consoles;
+	gamecfg::GameCfg block = gamecfg::defaults();
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &block;
+	uint64_t now = 1000;
+	inmatch::ClientRuntime client("ZoneJoiner", [&now] { return now; });
+	client.seed_session(0x41444D4Eu, 1u, "CLIENT-ZONE-SCRK", "SERVER-ZONE-SCRK", 1, 0, 0x0002,
+	                    world::kPlayerInfantryTypeId, game_type::kAdvanceAndSecure, 0x00100000u,
+	                    /*replay_mode=*/false);
+	auto world = std::make_unique<world::World>();
+	world->registry.configure_pool(1, 4);
+	world::Entity zone;
+	zone.kind = world::EntityKind::Item;
+	zone.team = 2;
+	zone.zone_number = 1;
+	const world::EntityHandle taken = world->registry.spawn(1, zone); // the mission's 2, received 1
+	zone.zone_number = 2;
+	world->zones.chain.zones.push_back(taken);
+	world->zones.chain.zones.push_back(world->registry.spawn(1, zone)); // 2, no record
+	zone.team = 1;
+	zone.zone_number = 3;
+	world->zones.chain.zones.push_back(world->registry.spawn(1, zone)); // 1, no record
+	replication::ClientEntityState &row = client.state().upsert(taken.packed);
+	row.team = 1;
+	row.team_known = true;
+	inmatch::RemoteAdminBinding joined;
+	joined.client = &client;
+	joined.world = world.get();
+	joined.session = 1;
+	consoles.bind(joined, seams);
+	consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
+	std::vector<std::string> replies;
+	(void)consoles.dispatch(AdminSession{"boss", 0xFFFFFFFFu}, "MISSION CYCLE", replies);
+	const EndRoundHeader &header = client.state().end_round.header;
+	expect(header.team_score_0 == 2 && header.team_score_1 == 1 && header.draw == 0 &&
+	               header.winner_team == 0,
+	       "the zones the joiner holds: 2 for team 1, 1 for team 2, no draw");
+}
+
+// The authority's own round end clears its local view's four words too (single player and a
+// session host alike), ahead of the single-player tail. [orig: Server_ProcessRoundEnd @0x5164F0
+// (g_RoundOver @0x5168E4, the view words @0x5168EA..0x5168FC, the SP tail @0x51691D)]
+void test_authority_round_end_view() {
+	for (const bool session : {false, true}) {
+		auto world = std::make_unique<world::World>();
+		world->registry.configure_pool(0, 8);
+		world->rules.mp_session = session;
+		auto local = std::make_unique<world::LocalPlayer>(*world);
+		world->local_player_state = local.get();
+		raise_view_words(*local);
+		auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+		ctx->world = world.get();
+		ctx->is_authority = 1;
+		ctx->is_in_session = 1;
+		gamecfg::GameCfg block = gamecfg::defaults();
+		inmatch::AdminConsole::Seams seams;
+		seams.config_block = &block;
+		inmatch::AdminConsole console(*ctx, std::move(seams));
+		console.set_scene(inmatch::AdminScene::GameLoop);
+		std::vector<std::string> replies;
+		(void)console.dispatch(AdminSession{"boss", 0xFFFFFFFFu}, "MISSION CYCLE", replies);
+		expect(world->match.outcome().ended, "the authority's round ends");
+		expect(view_words_cleared(*local), "the authority's four view words cleared, the body pose kept");
+	}
 }
 
 // A listen host's console is a peer over its host context: CMD leaves through its own client
@@ -954,6 +1077,8 @@ int main() {
 	test_session_destroy_routes();
 	test_menus_game_text();
 	test_joiner_cycle();
+	test_joiner_cycle_zones();
+	test_authority_round_end_view();
 	test_listen_host_and_single_player();
 	test_single_player_cycle();
 	test_idle_frame_exit();

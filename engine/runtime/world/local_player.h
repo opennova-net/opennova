@@ -356,6 +356,12 @@ public:
     // Retains NVG, camera-shake filters, map zoom, and physical held keys.
     // [orig: Game_InitNewRound @0x422740]
     void reset_for_new_round();
+    // The round end's four view words, cleared on every role's own round end (the authority's,
+    // a joiner's admin cycle): the binocular view, the raw binocular toggle, the map overlay
+    // mode and the promoted scope byte; nothing else of the view is touched.
+    // [orig: Server_ProcessRoundEnd @0x5164F0 - g_BinocularsViewActive @0x5168EA,
+    //  g_BinocularsToggle @0x5168F0, g_MapOverlayMode @0x5168F6, g_WeaponScopeActive @0x5168FC]
+    void round_end_view_clear();
     // The respawn's Player_InitPlayer resets, in order: with `rebuild_kit` the
     // weapon leg (local_loadout_rebuild with the spawn-default select), then the
     // view effects (local_player_view_reset: both cleared, NVG seeded from the

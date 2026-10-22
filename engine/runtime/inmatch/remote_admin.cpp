@@ -161,6 +161,8 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 		ctx = &joined_;
 	}
 	seams.host_client = binding.client;
+	seams.joiner_world =
+			binding.host == nullptr && binding.client != nullptr ? binding.world : nullptr;
 	// Input action 3 (input_action_exit) [orig: Input_HandleActionBinding case 3 @0x49AF26,
 	//  @0x49AF38..0x49AF42].
 	if (binding.host != nullptr || binding.joiner != nullptr || binding.world != nullptr)

@@ -803,6 +803,9 @@ void World::process_round_end(int32_t winning_team) {
     // shuts the audio channels down after its own dialog reset. The embedder's
     // audio device runs both stops (WorldOutbox::dialog_line_stop,
     // WorldOutbox::audio_channels_shutdown).
+    // Past the latch, every role's round end clears the local view's four words, the SP tail
+    // after them [orig: Server_ProcessRoundEnd @0x5168E4 (the latch), @0x5168EA..0x5168FC].
+    if (local_player_state != nullptr) local_player_state->round_end_view_clear();
     if (!rules.mp_session) {
         // [orig: DialogAudio_PlayNextChunkOrStop(0) @0x51694B]
         out.dialog_line_stop = true;
