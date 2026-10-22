@@ -237,7 +237,7 @@ int main() {
 	//  @0x4fe989..0x4fe9d0]
 	live_name = "Engine Driver Started";
 	live_mission = "ASH_G12A";
-	role.publish_mission_start();
+	role.publish_mission_start(/*session_round_count=*/1);
 	expect(tick_until([&] { return row("Engine Driver Started"); }, 100),
 			"the mission start's update carries a changed column at once");
 	expect(host_var("Engine Driver Started", "MissionName") == "ASH_G12A",
@@ -319,7 +319,7 @@ int main() {
 	// its notices held, so the role sees no result until they are handed over.
 	// [orig: CPlayerManager_RebuildLists @0x4d4590 (the state-6 test @0x4d4593)]
 	live_name = "Engine Driver Rehosted";
-	role.publish_mission_start();
+	role.publish_mission_start(/*session_round_count=*/1);
 	std::vector<opennova::ClientSession::Notice> held;
 	auto tick_holding = [&]() {
 		now += 10;

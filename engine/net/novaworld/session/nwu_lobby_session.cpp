@@ -2,6 +2,7 @@
 
 #include <net/napi/envelope.h>
 #include <net/napi/session.h>
+#include <net/novaworld/gate_metrics.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/lobby_identity.h> // read_exe_basename
 #include <net/novaworld/lobby_vars.h> // parse_host_and_port
@@ -310,6 +311,7 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	}
 	kept.response_kept = false;
 	kept.response = GateResponse{};
+	kept.gate_address = 0; // [orig: CMissionInfo_Init @0x4CE5D0 - +0x8C @0x4CE5F7]
 	kept.gate_host = gate_host;
 	kept.gate_port = gate_port;
 	log_gate_service_start();
@@ -858,6 +860,12 @@ void NwuLobbySession::poll_gate() {
 				return;
 			}
 		}
+		// The success tail resolves the metrics gate first: the METIPADDRESS string, with DNS on,
+		// when the address, METIPPORT and METLABEL are all set (GateMemory::gate_address).
+		// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CF6B8..0x4CF6E2]
+		if (!kept.response.met_ip.empty() && kept.response.met_port != 0 &&
+				!kept.response.met_label.empty())
+			kept.gate_address = resolve_address(kept.response.met_ip);
 		// The response's success tail: its USEJUNCTION / CLEARJUNCTION take the command line's
 		// overrides, a set USEJUNCTION empties the menu's JUNCTIONCODE (and sets the web lobby
 		// form's USEJUNCTION, which nothing here reads), and the gate's info stands.
@@ -1150,6 +1158,17 @@ void NwuLobbySession::send_datagram(const PeerAddr &to, const std::vector<uint8_
 void NwuLobbySession::send_to(const PeerAddr &to, const std::vector<uint8_t> &dg) {
 	if (session_socket_ == nullptr || dg.empty() || to.port == 0) return;
 	session_socket_->send_to(to, dg.data(), dg.size());
+}
+
+// [orig: Server_SendMetricsToGate @0x4FB0A0 - g_GateAddress @0x4FB0D4, the send @0x4FB37E;
+//  NapiSocket_SendTo's htons over g_GatePort]
+void NwuLobbySession::send_gate_metrics(std::string_view text) {
+	const GateMemory &kept = memory();
+	if (kept.gate_address == 0) return;
+	PeerAddr to;
+	to.ip = kept.gate_address;
+	to.port = static_cast<uint16_t>(kept.response.met_port);
+	send_to(to, gate_metrics_datagram(text));
 }
 
 void NwuLobbySession::flush() {

@@ -1,7 +1,9 @@
 #include <net/novaworld/nwu_host_role.h>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/log.h>
 #include <net/novaworld/connect_or_host.h> // ConnectOrHost's lines
+#include <net/novaworld/gate_metrics.h>
 #include <net/novaworld/lobby_update.h>
 #include <net/npwire/peer_addr.h>
 #include <net/title/title_identity.h>
@@ -112,10 +114,32 @@ void NwuHostRole::update_server_info() {
 // The mission start runs its update only on a NovaWorld authority in session; while the request
 // is out the marks stay and the first refresh in state 6 carries the whole lists.
 // [orig: Game_StartMission @0x5248c6..0x5248dc (the NovaWorld session gates)]
-void NwuHostRole::publish_mission_start() {
+void NwuHostRole::publish_mission_start(int32_t session_round_count) {
 	if (phase_ == Phase::Idle)
 		return;
 	republish_lists();
+	// The first mission's ID report. [orig: Game_StartMission - @0x524908..0x524928]
+	if (session_round_count != 0)
+		return;
+	const HostRegistration cfg = host_cfg();
+	lobby_.send_gate_metrics(gate_metrics_id_text(gate_metrics_host(cfg), cfg.gcc));
+}
+
+// The strings every reporter prints: the gate reply's METLABEL and LOBBYNAME, the version
+// text, and the METEXT that gates the machine locale's rows.
+// [orig: g_ServerLabel (METLABEL, CNapiGateManager_ProcessResponse @0x4CF26D), g_LobbyName
+//  (LOBBYNAME @0x4CF1D8), g_VersionText, g_IsDedicatedServer (METEXT @0x4CF2C1)]
+GateMetricsHost NwuHostRole::gate_metrics_host(const HostRegistration &cfg) const {
+	const GateResponse &gate = lobby_.gate_response();
+	GateMetricsHost host;
+	host.label = gate.met_label;
+	host.lobby = gate.lobby_name;
+	host.version = cfg.version;
+	host.met_ext = gate.met_ext != 0;
+	host.locale.country_name = cfg.country_name;
+	host.locale.language = cfg.language;
+	host.locale.tz_bias = cfg.tz_bias;
+	return host;
 }
 
 // Retail marks every var of both lists changed, runs the server-info update (whose tail,
@@ -381,6 +405,13 @@ HostRegistration NwuHostRole::host_cfg() const {
 		cfg.ver1 = title->ver1;
 		cfg.ver2 = title->ver2;
 		cfg.category_var = title->host_category_var;
+		// GV / Version, and every METPROTOCOL report's GV: g_VersionText, the boot's
+		// "V%i.%i.%i.%i" over the build's four numbers (GameProfile::version_text).
+		// [orig: Game_ParseCommandLineAndInit - the "V%i.%i.%i.%i" sprintf over 1, 7, 5, 7 into
+		//  g_VersionText @0x4A7D90; Lobby_UpdateServerInfo @0x4FF2B2 / @0x4FF2C8]
+		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_id(title->game_id);
+		if (profile != nullptr && profile->version_text != nullptr)
+			cfg.version = profile->version_text;
 	}
 	cfg.uptime_ms = phase_ == Phase::Hosting ? lobby_.clock_ms() - hosting_started_ms_ : 0u;
 	return cfg;

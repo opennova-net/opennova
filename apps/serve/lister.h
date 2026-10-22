@@ -84,9 +84,11 @@ public:
 	void disconnect();
 	// The mission start's server-info update: the source's columns and roster at once, then both
 	// lists in full (NwuHostRole::publish_mission_start). The embedder runs it at each mission
-	// start; the host result publishes nothing (D-NET-465). Nothing while not hosting.
-	// [orig: Game_StartMission @0x5248c6..0x524903]
-	void publish_server_info();
+	// start; the host result publishes nothing (D-NET-465). Nothing while not hosting. The
+	// session's first mission (`session_round_count` 0) then sends the gate its METPROTOCOL ID
+	// report (D-NET-NEW-L9-22).
+	// [orig: Game_StartMission @0x5248c6..0x524928]
+	void publish_server_info(int32_t session_round_count);
 
 	int exit_code() const { return exit_code_; }
 	// The gate socket's bound port (0 before start): the probe's source port.

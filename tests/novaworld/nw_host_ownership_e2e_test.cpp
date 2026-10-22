@@ -143,7 +143,7 @@ struct ListerRun {
 			const bool running = lister.tick(now);
 			if (running && !mission_started && lister.hosting()) {
 				mission_started = true;
-				lister.publish_server_info();
+				lister.publish_server_info(/*session_round_count=*/0);
 			}
 			if (each) each();
 			if (!running) break;

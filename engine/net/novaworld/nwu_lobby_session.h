@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -154,6 +155,13 @@ public:
 		std::string gate_host;
 		uint16_t gate_port = 0;
 		bool in_use = false;        // dword_B5FD2C
+		// g_GateAddress (the gate info's +0x8C): the METPROTOCOL reporters' destination, zeroed
+		// with the response at a fresh probe and resolved (DNS on) at a reply's success tail when
+		// its METIPADDRESS, METIPPORT and METLABEL are all set; 0 sends no report.
+		// [orig: CMissionInfo_Init @0x4CE5D0 - +0x8C @0x4CE5F7; CNapiGateManager_ProcessResponse
+		//  @0x4CED20 - the three tests @0x4CF6B8..0x4CF6D1, Napi_ResolveAddress(.., 1) @0x4CF6DA,
+		//  the store @0x4CF6E2]
+		uint32_t gate_address = 0;
 		int32_t use_junction = 0;   // dword_B5FD38
 		int32_t clear_junction = 0; // dword_B5FD3C
 		// The menu form's JUNCTIONCODE (set_junction_code).
@@ -262,6 +270,15 @@ public:
 	// gate's POSTIPADDRESS:POSTIPPORT, retail's plain sendto on the NP manager's socket outside
 	// the NP session. [orig: CNapiNetwork_SendUDPPacket -> CNapiNPManager_SendTo @0x61ec20]
 	void send_to(const PeerAddr &to, const std::vector<uint8_t> &dg);
+	// One METPROTOCOL report (gate_metrics.h's text) to the gate's metrics address over the
+	// session socket: encrypted under "1010101" and enveloped (gate_metrics_datagram), sent to
+	// the gate address at METIPPORT (its low 16 bits), nothing while no gate address resolved.
+	// The caller holds the reporter's in-session test; the session being NovaWorld's is this
+	// driver's. [orig: Server_SendMetricsToGate @0x4FB0A0 - the gates @0x4FB0DA (is_in_session,
+	//  the NovaWorld network type, g_GateAddress), CNapiNetwork_SendUDPPacket(&ctx,
+	//  g_GateAddress, g_GatePort, ..) @0x4FB37E]
+	void send_gate_metrics(std::string_view text);
+	uint32_t gate_address() const { return memory().gate_address; }
 
 	// Whether this session's protocol takes `data` from `from` when the session socket is shared
 	// with the game's protocol (DatagramDemux's claim): a server-direction opcode (0x81..0x87, the

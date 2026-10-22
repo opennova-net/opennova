@@ -95,8 +95,12 @@ struct HostRegistration {
 	uint32_t pcid_key = 0;                    // PCIDKey (the SessionIdRing's current key)
 	uint32_t game_server_baffle_key = 0;      // GameServerBaffleKey (g_GameServerBaffleKey)
 	int bb_mode = 0;                          // BBMode (dword_24D21A4)
-	std::string gcc;                          // GCC (byte_C87044)
-	std::string version;                      // GV and Version (g_VersionText)
+	// GCC (byte_C87044): the install's CC.BIN, as the session's create reads it into the process
+	// tick; the embedder sets it, and the first mission's METPROTOCOL ID report prints it too.
+	// [orig: Server_InitServerTicks @0x5018C0 - Game_ReadCCBinFile @0x5018E8]
+	std::string gcc;
+	// GV and Version (g_VersionText): NwuHostRole sets it from the title's version text.
+	std::string version;
 	// The gate reply's METEXT (g_IsDedicatedServer, a misnomer: its one writer is the gate parse):
 	// set, the Host list carries the CountryName / Lang / TZB trio, whatever the dedicated mode
 	// (D-NET-347). NwuHostRole sets it from the session's gate response; the trio's values are the

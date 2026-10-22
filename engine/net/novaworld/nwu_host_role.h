@@ -8,6 +8,7 @@
 
 #include <net/napi/session.h>          // ServerCommand
 #include <net/novaworld/client_session.h>
+#include <net/novaworld/gate_metrics.h> // GateMetricsHost
 #include <net/novaworld/lobby_vars.h>   // HostRegistration / HostLobbyText / HostPlayerSlot
 #include <net/novaworld/nwu_lobby_session.h>
 
@@ -89,9 +90,15 @@ public:
 	// with the whole Host list and PlayerList); the cookie-key ring is left alone. A fresh host's
 	// first full Host list, its HostKey included, goes out here: its host result publishes
 	// nothing (handle_host_result, D-NET-465). The embedder runs it at every mission start.
+	// Then, at the session's first mission (`session_round_count`, the rotation's round count,
+	// is 0), the gate's METPROTOCOL "ID" report: LABEL (METLABEL), GCC (the registration's
+	// CC.BIN value), GV (the version text) and, under the gate's METEXT, the machine locale, sent
+	// to the gate's metrics address (NwuLobbySession::send_gate_metrics).
 	// [orig: Game_StartMission @0x5248c6..0x524903 — the marks @0x5248e4 / @0x5248ef,
-	//  Lobby_UpdateServerInfo @0x5248f5, CPlayerManager_RebuildLists(1) @0x524903]
-	void publish_mission_start();
+	//  Lobby_UpdateServerInfo @0x5248f5, CPlayerManager_RebuildLists(1) @0x524903; the ID's
+	//  gates @0x524908..0x524926 (is_in_session, is_authority, the NovaWorld network type,
+	//  g_SessionRoundCount == 0), Server_SendMetricsToGate @0x4FB0A0 (the call @0x524928)]
+	void publish_mission_start(int32_t session_round_count);
 	// The server-info update outside the mission start: the hosted match's 0x744 refresh's and
 	// the join lock's toggle's (inmatch::run_server_info_refresh / Server_ToggleJoinLock through
 	// its embedder's on_update_server_info hook): the Host list's columns into the session's
@@ -159,6 +166,7 @@ private:
 	// with no session leaves the last live columns standing.
 	void read_columns();
 	HostRegistration host_cfg() const;
+	GateMetricsHost gate_metrics_host(const HostRegistration &cfg) const;
 	void send_host_request(uint32_t currently_hosting);
 	void handle_host_result(const ClientSession::Notice &notice);
 	// Both lists marked changed, the server-info update, then in state 6 the full lists and the

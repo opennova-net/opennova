@@ -317,7 +317,9 @@ bool Server::start_session(std::string &error) {
 void Server::bind_listing() {
 	listing_->set_base(listing_columns());
 	listing_->bind(*role_, *kernel_, *lister_);
-	lister_->publish_server_info();
+	// The first mission's METPROTOCOL ID report rides it (g_SessionRoundCount == 0,
+	// D-NET-NEW-L9-22). [orig: Game_StartMission @0x524908..0x524928]
+	lister_->publish_server_info(rotation_.round_count);
 }
 
 // Game_Run's read, before the mount: no weapon table yet (every avail_wpn
@@ -771,6 +773,9 @@ HostRegistration Server::listing_columns() const {
 	r.allow_ping = config_.cfg().ping != 0;
 	r.send_player_list = config_.cfg().sendplayerlist != 0;
 	r.country = config_.cfg().country;
+	// GCC, and the first mission's METPROTOCOL ID report's: the install's CC.BIN (D-NET-NEW-L9-22).
+	// [orig: Server_InitServerTicks @0x5018C0 - Game_ReadCCBinFile @0x5018E8 into byte_C87044]
+	r.gcc = vfs_country_code(options_.resource_dir);
 	r.expansion = index_.mounted_expansion();
 	r.tracers = (config.mp_attributes & inmatch::GameConfig::kMpAttribNoTracers) == 0;
 	r.game_type = game_text(have_gametext_ ? &gametext_ : nullptr, "GateTypeAbbrev",

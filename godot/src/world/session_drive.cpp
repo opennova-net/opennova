@@ -8,9 +8,11 @@
 #include "mission/mission_data.h"
 #include "mission/mission_root.h"
 #include "network/novaworld_client.h"
+#include <base/vfs/vfs.h> // vfs_country_code (the listing's GCC)
 #include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/mission_exit.h> // the post-mission router
+#include <runtime/inmatch/mission_rotation.h> // HostRotation::round_count (the ID report's first mission)
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_info.h> // read_session_listing_columns (the listing's columns)
 #include "object/avatar_database.h"
@@ -988,7 +990,15 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	// clears it. [orig: Lobby_UpdateServerInfo @0x4FE8C0]
 	const ObjectID world_id = ObjectID(world_->get_instance_id());
 	const ObjectID columns_client_id = nw_client_id_;
-	host.set_column_source([world_id, columns_client_id](opennova::HostRegistration &r) {
+	// The listing's GCC and the first mission's METPROTOCOL ID report: the install's CC.BIN
+	// (engine: HostRegistration::gcc, NwuHostRole::publish_mission_start; D-NET-NEW-L9-22).
+	std::string country_code;
+	if (p_opts.is_valid() && p_opts->get_resource_root().is_valid()) {
+		country_code = opennova::vfs_country_code(
+				opennova::to_std(p_opts->get_resource_root()->get_root_dir()));
+	}
+	host.set_column_source([world_id, columns_client_id, country_code](
+								   opennova::HostRegistration &r) {
 		GameWorld *live_world = Object::cast_to<GameWorld>(ObjectDB::get_instance(world_id));
 		NovaWorldClient *live_client =
 				Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(columns_client_id));
@@ -1000,6 +1010,7 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		// last live read stands.
 		if (ctx == nullptr)
 			return false;
+		r.gcc = country_code;
 		opennova::inmatch::read_session_listing_columns(r, *ctx,
 				game_text_lookup(live_client != nullptr ? live_client->get_gametext()
 														: Ref<RtxtStringFile>()));
@@ -1066,7 +1077,12 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	// included (NwuHostRole::publish_mission_start, which carries Game_StartMission's cite):
 	// both lists whole, the columns the started mission's. A fresh host's first full Host list,
 	// its HostKey included, is this one, since its host result publishes nothing (D-NET-465).
-	host.publish_mission_start();
+	// The session's first mission (the rotation's round count 0) then sends the gate its
+	// METPROTOCOL ID report (D-NET-NEW-L9-22).
+	const opennova::inmatch::NapiNPServerCtx *round_ctx = sim->host_ctx();
+	host.publish_mission_start(round_ctx != nullptr && round_ctx->rotation != nullptr
+					? round_ctx->rotation->round_count
+					: 0);
 }
 
 void SessionDrive::unbind_nw_host() {

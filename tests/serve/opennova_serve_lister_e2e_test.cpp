@@ -206,7 +206,7 @@ int main() {
 			"the host result publishes nothing");
 
 	// The mission start: the whole Host list and the roster at once.
-	lister.publish_server_info();
+	lister.publish_server_info(/*session_round_count=*/0);
 	expect(tick_until([&] { return host_var("Lister E2E", "MissionName") == "ASH_G11A"; }, 300),
 			"the mission start's update publishes the whole Host list");
 	expect(tick_until(

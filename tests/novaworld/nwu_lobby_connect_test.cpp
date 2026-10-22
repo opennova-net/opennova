@@ -123,6 +123,8 @@ struct Rig {
 	// The first connect's validated hook: how many times, and the log's size when it ran.
 	int validated = 0;
 	std::size_t validated_at_log = 0;
+	// The gate's reply body start() hands the gate socket.
+	std::string gate_body = "VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n";
 	NwuLobbySession lobby;
 
 	explicit Rig(bool command_line_host = false)
@@ -169,8 +171,7 @@ struct Rig {
 	void start(uint32_t at) {
 		lobby.open(gate, session);
 		lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
-		gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT },
-				gate_reply("VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n") });
+		gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(gate_body) });
 		for (uint32_t t = at - 3; t <= at + 1; ++t)
 			lobby.tick(t);
 	}
@@ -1838,6 +1839,81 @@ void check_host_player_add_sends_update() {
 	rig.lobby.close();
 }
 
+// D-NET-NEW-L9-22: the session's first mission sends the gate its METPROTOCOL ID report, after
+// the mission start's list update, to the reply's METIPADDRESS:METIPPORT over the session socket;
+// a later mission sends none, and a reply missing METLABEL resolves no gate address, so nothing
+// goes. [orig: CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CF6B8..0x4CF6E2; Game_StartMission
+//  @0x524908..0x524928; Server_SendMetricsToGate @0x4FB0A0]
+void check_mission_start_id_report() {
+	const PeerAddr metrics_gate{ 0x0100007Fu, 27999 };
+	const std::string met = "VAR \"LOBBYNAME\" \"jop_2_consumer\"\r\n"
+			"VAR \"METIPADDRESS\" \"127.0.0.1\"\r\nVAR \"METIPPORT\" \"27999\"\r\n";
+	for (const bool labelled : { true, false }) {
+		Rig rig;
+		rig.gate_body = "VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n" + met +
+				(labelled ? "VAR \"METLABEL\" \"gate-label\"\r\nVAR \"METEXT\" \"1\"\r\n" : "");
+		const std::vector<uint8_t> auth = bring_to_verify(rig);
+		CHECK(!auth.empty());
+		if (auth.empty())
+			return;
+		CHECK(rig.lobby.gate_address() == (labelled ? 0x0100007Fu : 0u));
+		log_in(rig, auth);
+		NwuHostRole role(rig.lobby, NwuHostRole::Hooks{});
+		HostRegistration reg;
+		reg.server_name = "Metrics Srv";
+		reg.gcc = "us";
+		reg.country_name = "United States";
+		reg.language = "English";
+		reg.tz_bias = 300;
+		CHECK(role.request(reg));
+		rig.lobby.tick(310);
+		rig.session.inbound.push_back({ kServer,
+				server_statement_to(auth, "ServerHostResult", { { "Success", "1" } }, 2) });
+		rig.lobby.tick(320);
+		if (ClientSession *session = rig.lobby.session())
+			for (const auto &notice : session->take_notices())
+				role.handle_notice(notice);
+		auto gate_reports = [&rig, metrics_gate](std::size_t from) {
+			std::vector<std::vector<uint8_t>> out;
+			for (std::size_t i = from; i < rig.session.sent.size(); ++i)
+				if (rig.session.sent[i].first == metrics_gate)
+					out.push_back(rig.session.sent[i].second);
+			return out;
+		};
+		std::size_t before = rig.session.sent.size();
+		role.publish_mission_start(/*session_round_count=*/1);
+		CHECK(gate_reports(before).empty());
+		before = rig.session.sent.size();
+		role.publish_mission_start(/*session_round_count=*/0);
+		const std::vector<std::vector<uint8_t>> reports = gate_reports(before);
+		if (!labelled) {
+			CHECK(reports.empty());
+			rig.lobby.close();
+			continue;
+		}
+		CHECK(reports.size() == 1);
+		if (reports.size() != 1)
+			return;
+		// The ID report is the call's last send.
+		CHECK(rig.session.sent.back().first == metrics_gate);
+		std::vector<uint8_t> inner(reports[0].size());
+		std::size_t inner_size = 0;
+		CHECK(napi_envelope_decode(reports[0].data(), reports[0].size(), inner.data(), inner.size(),
+				&inner_size) == 0);
+		inner.resize(inner_size);
+		std::string plain(inner.begin(), inner.end());
+		nwu_encrypt(reinterpret_cast<uint8_t *>(plain.data()), plain.size(), "1010101");
+		// GV is the session title's own version text (JO's "V1.7.5.7"), never a literal of ours.
+		// [orig: Game_ParseCommandLineAndInit - g_VersionText @0x4A7D90]
+		const std::string version = gameprofile::gameprofile_by_id(kJo.game_id)->version_text;
+		CHECK(version == "V1.7.5.7");
+		CHECK(plain == "METPROTOCOL 1\r\nBLOCK \"ID\"\r\n\tLABEL \"gate-label\"\r\n\tGCC \"us\"\r\n"
+				"\tGV \"" + version + "\"\r\n\tCOUNTRYNAME \"United States\"\r\n"
+				"\tLANG \"English\"\r\n\tTZB 300\r\nENDBLOCK\r\n");
+		rig.lobby.close();
+	}
+}
+
 // The first connect's sends ride the frame's head pump: after the receive and ahead of the
 // periodic update's give-up tests and the menu state's work. So a 0x41 re-announce that falls due
 // in an ESC's frame goes before the ESC stops the probe, and a 0x42 that falls due in the
@@ -1923,6 +1999,7 @@ int main() {
 	check_head_pump_resends();
 	check_first_join_timing();
 	check_host_player_add_sends_update();
+	check_mission_start_id_report();
 	check_connect_or_host_lines();
 	check_escape_legs();
 	check_connect_validated();

@@ -255,10 +255,10 @@ bool Lister::tick(uint32_t now_ms) {
 	return phase_ != Phase::Done;
 }
 
-void Lister::publish_server_info() {
+void Lister::publish_server_info(int32_t session_round_count) {
 	if (phase_ != Phase::Hosting || ending_) return;
 	refresh_listing(true);
-	role_.publish_mission_start();
+	role_.publish_mission_start(session_round_count);
 }
 
 void Lister::stop() {

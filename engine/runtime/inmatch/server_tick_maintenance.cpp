@@ -1007,8 +1007,8 @@ void emit_network_quality_boundary(NapiNPServerCtx &ctx) {
 // [orig: the weapon index dword_24E2ED8, its list dword_24E1F38 and count dword_24E3E80 (xrefs:
 //  CPlayerStats_InitWeaponTracking @0x52BF60, CPlayerStats_ResetAllArrays @0x52C4C0,
 //  CPlayerStats_RecordEvent @0x52C8E0 only); Score_AccumulateKillByEntityType
-//  @0x4FA300 / Score_AccumulateKillWithWeaponStats @0x4FA3B0 into dword_C87020 and
-//  dword_C87598 (GameEvent_PlayerDeath @0x516F14 / @0x51713D), whose rows the SERVER
+//  @0x4FA300 / Score_AccumulateKillWithWeaponStats @0x4FA3B0 into g_ProcessServerTick and
+//  g_MissionServerTick (GameEvent_PlayerDeath @0x516F14 / @0x51713D), whose rows the SERVER
 //  and SERVERMISSION reporters never print (Server_SendServerMetricsToGate @0x4FA4B0,
 //  Server_SendMissionMetrics @0x4FB3A0)]
 // [orig: Server_TickUpdate @0x51D94B..0x51D9A3 -- the active byte @0x51D960,
