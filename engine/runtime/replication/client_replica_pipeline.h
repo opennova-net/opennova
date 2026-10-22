@@ -136,9 +136,10 @@ public:
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the
 	//  eye @0x4B699F..0x4B6BAB, the ramp @0x4B7DBF / @0x4B7DD6]
 	// The decay and the arms dip (with the torso roll) take the walk's own-body
-	// split (tick_remote_motion's self_handle): a row the walk will park past the
-	// own body's slot takes them in tick_remote_motion_after_self, ahead of its
-	// visit, as retail runs them inside each body's own update (D-NET-196).
+	// split (tick_remote_motion's self_handle): a row the walk will park (every
+	// pool-0 row and those after) takes them in its own visit, ahead of it, in
+	// tick_remote_motion_through_self or tick_remote_motion_after_self, as retail
+	// runs them inside each body's own update (D-NET-196).
 	void tick_lean_decay(uint16_t self_handle = 0xFFFFu);
 	void lean_decay_row(ClientEntityState &es);
 	// Every visited row's ramp (a row the walk parked ramps after its visit).
@@ -356,17 +357,25 @@ public:
 	//    for traitless vehicles and lib-only embedders.
 	// No-op unless remote-motion mode is enabled.
 	// With the own-body split on (a joiner, whose own body serves its rings in the
-	// World's entity pass), the walk visits the rows through the own row's pool-0
-	// slot and parks the rest; tick_remote_motion_after_self visits them, each with
-	// its lean decay and arms dip ahead of the visit and its selection and lean
-	// ramp after it, once that pass has run the own body. Until then the World
-	// tick's readers of a parked row (the round pass's guided inputs, wire actor and
-	// person body, the bone raycast's pose) see it as its last tick left it, as
-	// retail's projectile pass sees a higher pool-0 body. A parked half the embedder
-	// never finished finishes at the next tick's head.
-	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472,
-	//  Weapon_UpdateAllProjectiles @0x4C223A ahead of it]
+	// World's entity pass), the walk visits the pool-1 rows and parks every pool-0
+	// row (and the higher pools'), in two halves:
+	// - the rows through the own row's slot, which tick_remote_motion_through_self
+	//   visits from the World's entity pass, after its proximity build and ahead of
+	//   its pool-0 walk (the embedder's World::before_pool0_walk);
+	// - the rest, which tick_remote_motion_after_self visits once that walk ran the
+	//   own body.
+	// Each parked row takes its lean decay and arms dip ahead of its visit and its
+	// selection and lean ramp after it. Until its visit, the World tick's readers of a
+	// parked row (the round pass's guided inputs, wire actor and person body, the bone
+	// raycast's pose) see it as its last tick left it, as retail's pool-1 walk and
+	// projectile pass see every pool-0 body. after_self first finishes a middle half
+	// the embedder never ran, and a parked half left over finishes at the next tick's
+	// head.
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+	//  Weapon_UpdateAllProjectiles call @0x4C223A, the proximity build @0x4C240A, the
+	//  pool-0 walk @0x4C2426..0x4C2472]
 	void tick_remote_motion(uint16_t self_handle);
+	void tick_remote_motion_through_self();
 	void tick_remote_motion_after_self();
 	void set_self_body_split(bool on) { self_body_split_ = on; }
 	// The walk's order key (pool 1, pool 0, then the higher pools, each by slot) and
@@ -374,6 +383,9 @@ public:
 	// else no line (UINT32_MAX).
 	static uint32_t remote_walk_key(uint16_t handle);
 	uint32_t remote_walk_split_key(uint16_t self_handle) const;
+	// The first key the walk parks: pool 0's slot 0 under the split, else none
+	// (UINT32_MAX).
+	uint32_t remote_walk_park_key(uint16_t self_handle) const;
 
 	// The S2C 0x70 table and its received flag. Retail's are process globals that
 	// no session or mission start touches (their writers are the 0x70 handler and
@@ -822,15 +834,19 @@ private:
 	std::vector<ReplicaPeerSphere> contact_peer_scratch_;
 	// tick_remote_motion's walk order over state_.entities (reused capacity).
 	std::vector<size_t> walk_order_scratch_;
-	// The own-body split (set_self_body_split): the rows the walk parked past the
-	// own row's slot, in walk order, and the tick they wait in.
+	// The own-body split (set_self_body_split): the rows the walk parked through the
+	// own row's slot (middle_rows_) and past it (parked_rows_), each in walk order,
+	// and the tick they wait in.
 	bool self_body_split_ = false;
+	std::vector<uint16_t> middle_rows_;
 	std::vector<uint16_t> parked_rows_;
 	uint16_t parked_self_ = 0xFFFFu;
 	uint32_t parked_tick_ = 0;
 	// The walk's expired corpses (handle, the def names a decay), erased after
 	// each half's visits.
 	std::vector<std::pair<uint16_t, bool>> remote_motion_expired_;
+	// One parked half's visits (tick_remote_motion_through_self / _after_self).
+	void visit_parked_rows(std::vector<uint16_t> &rows);
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
 	ReplicaGroundProbe replica_ground_probe_;
 	ReplicaDefAttribResolver replica_def_attrib_resolver_;

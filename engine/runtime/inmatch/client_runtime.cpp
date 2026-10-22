@@ -1712,8 +1712,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// [orig: Game_ProcessMainFrame @0x5263F0 - the pause test @0x5265A0, `add
 	//  g_CurrentTick, ebx` @0x5265B4, the entity gates @0x52672C..0x526742]
 	if (main_frame && entity_update_skipped) view_.step_frame_tick();
-	// The walk's own body: a joiner's rows past its pool-0 slot take their body legs
-	// after the World's entity pass (tick_remote_motion_after_self, D-NET-196).
+	// The walk's own body: a joiner's pool-0 rows take their body legs in the World's
+	// entity pass, those through its own slot ahead of the pool-0 walk
+	// (tick_remote_motion_through_self), the rest after it (tick_remote_motion_after_self,
+	// D-NET-196).
 	const uint16_t rm_self = joiner_ != nullptr && joiner_->has_self_handle()
 			? joiner_->self_handle()
 			: 0xFFFFu;

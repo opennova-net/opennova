@@ -427,7 +427,10 @@ void JoinerRole::apply_authoritative_health() {
 					const int32_t pitch =
 							static_cast<int32_t>(
 									static_cast<uint32_t>(self->pitch_byte) << 24);
-					local->position.set_q16({self->x, self->y, self->z}); // the record's words (D-NET-507)
+					// The record's words (D-NET-507): the own row's chase runs in the World's
+					// entity pass, after this (D-NET-196).
+					local->position.set_q16({self->record_sample[0], self->record_sample[1],
+							self->record_sample[2]});
 					local->heading = heading;
 					local->pitch_bam = pitch;
 					local->roll_bam = 0;
@@ -450,9 +453,9 @@ void JoinerRole::apply_authoritative_health() {
 					local_ai->health = health;
 					local_ai->vel_x = 0;
 					local_ai->vel_y = 0;
-					local_ai->net_smooth_target[0] = self->x;
-					local_ai->net_smooth_target[1] = self->y;
-					local_ai->net_smooth_target[2] = self->z;
+					local_ai->net_smooth_target[0] = self->record_sample[0];
+					local_ai->net_smooth_target[1] = self->record_sample[1];
+					local_ai->net_smooth_target[2] = self->record_sample[2];
 					local_ai->net_smooth_heading = heading;
 					local_ai->net_smooth_pitch = pitch;
 					local_ai->net_interp_progress = 0;

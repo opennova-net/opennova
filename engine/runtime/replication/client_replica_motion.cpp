@@ -1641,6 +1641,16 @@ uint32_t ClientReplicaPipeline::remote_walk_split_key(uint16_t self_handle) cons
 	return remote_walk_key(self_handle);
 }
 
+// Under the split the walk parks from pool 0's first slot: every pool-0 body updates
+// after the pool-1 walk, the projectiles and the proximity build.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+//  Weapon_UpdateAllProjectiles call @0x4C223A, the proximity build @0x4C240A, the pool-0
+//  walk @0x4C2426..0x4C2472]
+uint32_t ClientReplicaPipeline::remote_walk_park_key(uint16_t self_handle) const {
+	return remote_walk_split_key(self_handle) == UINT32_MAX ? UINT32_MAX
+	                                                        : remote_walk_key(0x0000u);
+}
+
 void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
 	// A half the last tick parked finishes before this tick opens.
@@ -1692,19 +1702,21 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		return remote_walk_key(state_.entities[a].handle) <
 				remote_walk_key(state_.entities[b].handle);
 	});
-	// The own body's slot splits the walk: retail's pool-0 walk calls every used
-	// slot's class update in slot order with no local-player case, so the local
-	// body serves the shared ring heads at its own slot. Ours serves it in the
-	// World's entity pass, so a joiner's walk (self_body_split_) visits the rows
-	// through the own row's slot here and parks the rest, with their lean decay,
-	// arms dip, selection and lean ramp, for tick_remote_motion_after_self once
-	// that pass has run (D-NET-196).
-	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472,
-	//  the +0x1C4 call @0x4C2472]
+	// The own body splits the walk: retail's pool-0 walk calls every used slot's
+	// class update in slot order with no local-player case, after the pool-1 walk,
+	// the projectiles and the proximity build, so the local body serves the shared
+	// ring heads at its own slot. Ours serves it in the World's entity pass, so a
+	// joiner's walk (self_body_split_) visits the pool-1 rows here and parks every
+	// pool-0 row, with its lean decay, arms dip, selection and lean ramp: the rows
+	// through the own row's slot for tick_remote_motion_through_self, ahead of the
+	// World's pool-0 walk, the rest for tick_remote_motion_after_self (D-NET-196).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the proximity build @0x4C240A, the
+	//  pool-0 walk @0x4C2426..0x4C2472, the +0x1C4 call @0x4C2472]
 	const uint32_t split = remote_walk_split_key(self_handle);
+	const uint32_t park = remote_walk_park_key(self_handle);
 	size_t through = walk.size();
 	for (size_t k = 0; k < walk.size(); ++k) {
-		if (remote_walk_key(state_.entities[walk[k]].handle) > split) {
+		if (remote_walk_key(state_.entities[walk[k]].handle) >= park) {
 			through = k;
 			break;
 		}
@@ -1714,7 +1726,8 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	for (size_t k = through; k < walk.size(); ++k) {
 		ClientEntityState &parked = state_.entities[walk[k]];
 		parked.rm_parked = true;
-		parked_rows_.push_back(parked.handle);
+		(remote_walk_key(parked.handle) <= split ? middle_rows_ : parked_rows_)
+				.push_back(parked.handle);
 	}
 	remote_motion_expired_.clear();
 	for (size_t k = 0; k < through; ++k)
@@ -1728,10 +1741,23 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	select_row_weapon_channels(self_handle, rm_key);
 }
 
+void ClientReplicaPipeline::tick_remote_motion_through_self() {
+	if (middle_rows_.empty()) return;
+	std::vector<uint16_t> rows;
+	rows.swap(middle_rows_);
+	visit_parked_rows(rows);
+}
+
 void ClientReplicaPipeline::tick_remote_motion_after_self() {
+	// A middle half the embedder never ran keeps the walk's order.
+	tick_remote_motion_through_self();
 	if (parked_rows_.empty()) return;
 	std::vector<uint16_t> rows;
 	rows.swap(parked_rows_);
+	visit_parked_rows(rows);
+}
+
+void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
 	// The rows may have moved in the vector since the walk parked them (the first
 	// half's erase): find each by handle, in the walk's order.
 	std::unordered_map<uint16_t, size_t> row_by_handle;

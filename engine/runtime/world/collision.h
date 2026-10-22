@@ -1287,6 +1287,14 @@ public:
     // it (0 when no proxy names the handle): a client's remote person is a
     // replica row, never a registry entity.
     int32_t wire_person_bound_radius_q16(uint16_t wire_handle) const;
+    // A decoded person's update moved it after the tick's snapshot: its proxy takes
+    // the new position (a handle no proxy names is ignored), which the next
+    // repulsion and trace re-read, as retail's resolver re-reads a candidate's live
+    // Position from the table built before the walk (D-NET-196).
+    // [orig: Entity_MovementCollisionResolver @0x4B3B93..0x4B3B99]
+    void set_wire_person_proxy_position(uint16_t wire_handle, const FixedVec3 &position);
+    // The decoded person's current proxy (null when none names the handle).
+    const WirePersonCollisionProxy *wire_person_proxy(uint16_t wire_handle) const;
     // The decoded pool-1 mover's current proxy (null when none names the
     // handle): the pose and the verified registry twin every trace reads.
     const WireDynamicCollisionProxy *wire_dynamic_proxy(uint16_t wire_handle) const;

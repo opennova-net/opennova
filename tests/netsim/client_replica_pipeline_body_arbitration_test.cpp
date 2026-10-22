@@ -856,16 +856,17 @@ void test_rows_serve_the_rings_in_slot_order() {
 			"slot 5 serves next: its secondary entry 0, its primary entry 2");
 }
 
-// D-NET-196 (L5-s11 row 3): the own body serves the shared ring heads at its own pool-0
-// slot. Retail's pool-0 walk updates every used slot in slot order with no local-player
-// case; ours serves the own body in the World's entity pass, so a joiner's walk visits
-// the rows through the own row's slot (3, then the own 4) and parks slot 5, with its
-// lean ramp, until the after-self leg runs it behind the own body. Over the three-entry
-// ring: slot 3 serves 2 and 1, the own body 0, slot 5 2 and 1. Slot 5 ahead of the own
-// body (today's order before the split) would have served 0 and 2.
-// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472, the
-//  +0x1C4 call @0x4C2472; AnimMap_UpdateDualChannels @0x40B8C0, the secondary @0x40B908
-//  before the primary @0x40B94E]
+// D-NET-196 (L5-s11 row 3, L5-s13 row 2): the own body serves the shared ring heads at
+// its own pool-0 slot. Retail's pool-0 walk updates every used slot in slot order with no
+// local-player case, after the pool-1 walk, the projectiles and the proximity build; ours
+// serves the own body in the World's entity pass. So a joiner's walk parks every pool-0
+// row: the rows through the own row's slot (3, then the own 4) for the middle leg, ahead
+// of the World's pool-0 walk, and slot 5, with its lean ramp, for the after-self leg
+// behind the own body. Over the three-entry ring: slot 3 serves 2 and 1, the own body 0,
+// slot 5 2 and 1. Slot 5 ahead of the own body would have served 0 and 2.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the proximity build @0x4C240A, the pool-0
+//  walk @0x4C2426..0x4C2472, the +0x1C4 call @0x4C2472; AnimMap_UpdateDualChannels
+//  @0x40B8C0, the secondary @0x40B908 before the primary @0x40B94E]
 void test_own_body_serves_the_rings_at_its_slot() {
 	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver(&classify);
@@ -907,11 +908,17 @@ void test_own_body_serves_the_rings_at_its_slot() {
 	view.tick_lean_ramp(); // the embedder's ramp after the walk (ClientRuntime)
 	const ns::ClientEntityState *early = view.state().find(kEarly);
 	const ns::ClientEntityState *late = view.state().find(kLate);
-	expect(early->wpn_variant == 2 && early->rm_state == as::kIdle && early->rm_variant == 1,
-			"slot 3 serves ahead of the own body: its secondary entry 2, its primary entry 1");
+	expect(early->wpn_playing < 0 && early->rm_state < 0,
+			"slot 3 waits for the World's entity pass: no visit in the client net frame");
 	expect(late->wpn_playing < 0 && late->rm_state < 0 && late->lean_angle == 0,
 			"slot 5 waits past the own body's slot: no visit, no lean ramp yet");
-	// The World's entity pass: the own body's channel serves at its slot.
+	// The World's entity pass: the middle leg ahead of its pool-0 walk, then the own
+	// body's channel at its slot.
+	view.tick_remote_motion_through_self();
+	expect(early->wpn_variant == 2 && early->rm_state == as::kIdle && early->rm_variant == 1,
+			"slot 3 serves ahead of the own body: its secondary entry 2, its primary entry 1");
+	expect(late->wpn_playing < 0 && late->rm_state < 0,
+			"the middle leg stops at the own row's slot");
 	expect(rings.serve(&src, 0, as::kIdle) == 0, "the own body serves entry 0 at slot 4");
 	view.tick_remote_motion_after_self();
 	expect(late->wpn_playing == as::kIdle && late->wpn_variant == 2 &&
@@ -922,15 +929,15 @@ void test_own_body_serves_the_rings_at_its_slot() {
 	expect(late->lean_angle == -0x3000000, "the after-self leg runs once per walk");
 }
 
-// D-NET-196 (V-ROLL-K, L5-s12 row 0): a row parked past the own body's slot keeps its
-// lean, its kick, its dip window and its torso roll until its own visit. Retail runs
-// the decay, the dip and the roll inside each body's update, so the World legs ahead
-// of the pool-0 walk (the projectile pass, the bone raycast's pose) read a higher body
-// as its last frame left it. Rows 3, the own 4 and 5 lean, kick and roll alike: slot 3
-// takes the legs ahead of the walk, slot 5 none until the after-self leg, where it
-// takes the same steps ahead of its visit.
-// [orig: Entity_UpdateAllEntities @0x4C2100 - Weapon_UpdateAllProjectiles @0x4C223A
-//  ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
+// D-NET-196 (V-ROLL-K, L5-s12 row 0; L5-s13 row 2): a parked pool-0 row keeps its lean,
+// its kick, its dip window and its torso roll until its own visit. Retail runs the
+// decay, the dip and the roll inside each body's update, so the World legs ahead of the
+// pool-0 walk (the projectile pass, the bone raycast's pose) read every pool-0 body as
+// its last frame left it. Rows 3, the own 4 and 5 lean, kick and roll alike: none takes
+// the legs in the client net frame; slot 3 takes them in the middle leg ahead of its
+// visit, slot 5 in the after-self leg ahead of its.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the Weapon_UpdateAllProjectiles call
+//  @0x4C223A ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
 //  @0x4B40E0 - the decay @0x4B5C97..0x4B5CA5, the dip @0x4B5CAB..0x4B5CE7, the torso
 //  roll @0x4B5CFF..0x4B5D67]
 void test_parked_row_keeps_its_body_legs_until_its_visit() {
@@ -991,12 +998,18 @@ void test_parked_row_keeps_its_body_legs_until_its_visit() {
 	const int32_t kick_dropped = kKick - 0x2800000;
 	const int32_t kick_eased = kick_dropped - ((kick_dropped + 4) >> 3);
 	const int32_t torso_chased = kTorso + ((early_roll - kTorso + 8) >> 4);
+	for (const ns::ClientEntityState *row : {early, late})
+		expect(row->lean_angle == kLean && row->pitch_kick_accum == kKick &&
+						row->arms_dip_ticks == 6 && row->torso_roll == kTorso,
+				"a parked pool-0 row keeps its lean, kick, window and torso roll in the "
+				"client net frame");
+	view.tick_remote_motion_through_self();
 	expect(early->lean_angle == 0x0F000000 && early->pitch_kick_accum == kick_eased &&
 					early->arms_dip_ticks == 4 && early->torso_roll == torso_chased,
-			"slot 3 takes its decay, dip and torso roll ahead of the own body");
+			"slot 3 takes its decay, dip and torso roll in the middle leg, ahead of the own body");
 	expect(late->lean_angle == kLean && late->pitch_kick_accum == kKick &&
 					late->arms_dip_ticks == 6 && late->torso_roll == kTorso,
-			"slot 5, parked, keeps its lean, kick, window and torso roll between the halves");
+			"slot 5, parked, keeps its lean, kick, window and torso roll between the legs");
 	const int32_t late_roll = late->roll_bam;
 	view.tick_remote_motion_after_self();
 	expect(late->lean_angle == 0x0F000000 && late->pitch_kick_accum == kick_eased &&

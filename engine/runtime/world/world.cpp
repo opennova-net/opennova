@@ -228,6 +228,9 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
     if (world.ai.collision != nullptr) world.ai.collision->build_tick_tables(world);
     lap.mark(devtools::Slot::SIM_UPDATE_PROXIMITY);
+    // A joiner's replica pool-0 rows through its own body's slot: they update ahead
+    // of the own body, as the pool-0 walk reaches their slots first (D-NET-196).
+    if (world.before_pool0_walk) world.before_pool0_walk();
     // The pool-0 walk in slot order: each organic row's +0x1C4 body update, its bound
     // row's move function. A body on the null row is skipped whole, its tail with it; any
     // other row's runs the update (org0's a bare return), then the tail.

@@ -285,6 +285,24 @@ void CollisionWorld::replace_wire_collision_proxies(
     wire_local_player_handle_ = local_player_wire_handle;
 }
 
+void CollisionWorld::set_wire_person_proxy_position(uint16_t wire_handle,
+        const FixedVec3 &position) {
+    const auto it = std::lower_bound(wire_person_proxies_.begin(), wire_person_proxies_.end(),
+            wire_handle, [](const WirePersonCollisionProxy &proxy, uint16_t handle) {
+                return proxy.wire_handle < handle;
+            });
+    if (it != wire_person_proxies_.end() && it->wire_handle == wire_handle)
+        it->position_q16 = position;
+}
+
+const WirePersonCollisionProxy *CollisionWorld::wire_person_proxy(uint16_t wire_handle) const {
+    const auto it = std::lower_bound(wire_person_proxies_.begin(), wire_person_proxies_.end(),
+            wire_handle, [](const WirePersonCollisionProxy &proxy, uint16_t handle) {
+                return proxy.wire_handle < handle;
+            });
+    return it != wire_person_proxies_.end() && it->wire_handle == wire_handle ? &*it : nullptr;
+}
+
 int32_t CollisionWorld::wire_person_bound_radius_q16(uint16_t wire_handle) const {
     const auto it = std::lower_bound(wire_person_proxies_.begin(), wire_person_proxies_.end(),
             wire_handle, [](const WirePersonCollisionProxy &proxy, uint16_t handle) {

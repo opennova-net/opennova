@@ -928,14 +928,31 @@ void JoinerRole::pump() {
 	if (rt.mp_attributes_revision() != mp_attributes_revision_seen_) stamp_mission_rules();
     materializer_.fill_minefield_actors(rt.state(), self_wire_handle(), world.minefields.remote_actors);
 	stamp_spectator_motor(kernel, runtime.get(), /*joiner=*/true); // this frame's receive folded
+	// The replica pool-0 rows through the own body's slot take their visits inside the
+	// World's entity pass, after its proximity build and ahead of its pool-0 walk. Each
+	// visited person's proxy then takes its moved position, which the own body's
+	// repulsion re-reads from the table built before the walk (D-NET-196).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the proximity build @0x4C240A, the
+	//  pool-0 walk @0x4C2426..0x4C2472; Entity_MovementCollisionResolver
+	//  @0x4B3B93..0x4B3B99]
+	world.before_pool0_walk = [&world, &rt] {
+		rt.view().tick_remote_motion_through_self();
+		if (world.ai.collision == nullptr) return;
+		for (const replication::ClientEntityState &row : rt.state().entities)
+			if (row.cls == EntityClass::Player || row.cls == EntityClass::Infantry)
+				world.ai.collision->set_wire_person_proxy_position(
+						row.handle, world::FixedVec3{row.x, row.y, row.z});
+	};
 	// The tick's own phases land on the SIM_WORLD_* / SIM_UPDATE_* rows inside run_logic_tick.
 	world.run_logic_tick(
 			/*is_authority=*/false,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
+	world.before_pool0_walk = nullptr;
 	// The replica rows past the own body's pool-0 slot take their visits now, after
 	// the World's entity pass ran the own body: retail's pool-0 walk updates every
-	// used slot in slot order, the local body at its own (D-NET-196).
+	// used slot in slot order, the local body at its own (D-NET-196). A middle half
+	// the entity pass did not run (a skipped update) goes first.
 	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472,
 	//  the +0x1C4 call @0x4C2472]
 	rt.view().tick_remote_motion_after_self();

@@ -12,19 +12,19 @@
 
 namespace opennova::replication {
 
-// A row the walk will park past the own body's slot keeps its lean, its kick and
-// its torso roll until its own visit: retail runs the decay, the dip and the roll
-// inside each body's update, so the legs ahead of the pool-0 walk (the projectile
-// pass among them) see a higher body as its last frame left it.
-// tick_remote_motion_after_self runs them ahead of the parked row's visit (D-NET-196).
-// [orig: Entity_UpdateAllEntities @0x4C2100 - Weapon_UpdateAllProjectiles @0x4C223A
-//  ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
+// A row the walk will park (every pool-0 row under the own-body split) keeps its
+// lean, its kick and its torso roll until its own visit: retail runs the decay, the
+// dip and the roll inside each body's update, so the legs ahead of the pool-0 walk
+// (the projectile pass among them) see the body as its last frame left it. The
+// parked halves' visits run them ahead of the row's visit (D-NET-196).
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the Weapon_UpdateAllProjectiles call
+//  @0x4C223A ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
 //  @0x4B40E0 - the decay @0x4B5C97..0x4B5CA5, the dip @0x4B5CAB..0x4B5CE7, the torso
 //  roll @0x4B5CFF..0x4B5D67]
 void ClientReplicaPipeline::tick_lean_decay(uint16_t self_handle) {
-	const uint32_t split = remote_walk_split_key(self_handle);
+	const uint32_t park = remote_walk_park_key(self_handle);
 	for (ClientEntityState &es : state_.entities)
-		if (remote_walk_key(es.handle) <= split) lean_decay_row(es);
+		if (remote_walk_key(es.handle) < park) lean_decay_row(es);
 }
 
 void ClientReplicaPipeline::lean_decay_row(ClientEntityState &es) {
@@ -72,9 +72,9 @@ void ClientReplicaPipeline::lean_ramp_row(ClientEntityState &es) {
 // decrements in BOTH branches -- twice per tick -- so an 80 stamp dips for 40 ticks.
 // [orig: @0x4b5cab..0x4b5ce7]
 void ClientReplicaPipeline::tick_arms_dip(uint16_t self_handle) {
-	const uint32_t split = remote_walk_split_key(self_handle);
+	const uint32_t park = remote_walk_park_key(self_handle);
 	for (ClientEntityState &es : state_.entities)
-		if (remote_walk_key(es.handle) <= split) arms_dip_row(es);
+		if (remote_walk_key(es.handle) < park) arms_dip_row(es);
 }
 
 void ClientReplicaPipeline::arms_dip_row(ClientEntityState &es) {

@@ -5256,6 +5256,11 @@ add_test(NAME npruntime_use_press_trace COMMAND npruntime_use_press_trace_test)
 add_executable(npruntime_medic_reviving_latch_test npruntime/medic_reviving_latch_test.cpp)
 target_link_libraries(npruntime_medic_reviving_latch_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_medic_reviving_latch COMMAND npruntime_medic_reviving_latch_test)
+# D-NET-196: a joiner's replica pool-0 rows through its own slot update inside the World's
+# entity pass, ahead of the own body, their person proxies taking the moved positions.
+add_executable(netsim_joiner_replica_middle_leg_test netsim/joiner_replica_middle_leg_test.cpp)
+target_link_libraries(netsim_joiner_replica_middle_leg_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_joiner_replica_middle_leg COMMAND netsim_joiner_replica_middle_leg_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

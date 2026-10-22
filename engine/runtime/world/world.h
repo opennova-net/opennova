@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <runtime/world/mission_diagnostics.h>
 #include <string>
@@ -1327,6 +1328,12 @@ public:
     // it. [orig: g_EntityUpdateCounter, `add g_EntityUpdateCounter,esi` in
     //  Entity_UpdateAllEntities @0x4C2639]
     uint32_t entity_update_counter = 0;
+    // The embedder's leg between the entity update's proximity build and its pool-0
+    // walk: a joiner's replica pool-0 rows through its own body's slot take their
+    // updates there, so the own body's update re-reads them moved (D-NET-196). Empty
+    // on every other peer. [orig: Entity_UpdateAllEntities @0x4C2100 - the proximity
+    // build @0x4C240A, the pool-0 walk @0x4C2426..0x4C2472]
+    std::function<void()> before_pool0_walk;
 
     // May the mission script advance this tick? Retail wraps its WAC tick, the
     // idle-timer sweep and the BMS event pump in ONE condition, and the half that
