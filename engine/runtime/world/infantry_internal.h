@@ -125,5 +125,8 @@ bool infantry_dual_update(InfantryState &inf, IRootMotionSource *source, AnimVar
 void begin_body_transition_with_insert(InfantryState &inf, int resolved,
                                        const IRootMotionSource *root_motion,
                                        AnimVariantRings *rings);
+// The 0x0A player record's anim ratio byte over the body's primary channel, after this
+// tick's advance. Defined in infantry_wire.cpp.
+uint8_t wire_anim_ratio(const InfantryState &inf, const IRootMotionSource *source);
 
 } // namespace opennova::world

@@ -351,6 +351,18 @@ bool AdmRootMotion::clip_wraps_at(int adm_id, int state_id, int variant,
 	return track != nullptr && track->clock.wrapped_at(phase_ticks);
 }
 
+bool AdmRootMotion::clip_clock_at(int adm_id, int state_id, int variant,
+								  int32_t phase_ticks, int32_t armed_boundary,
+								  float &time, float &delta) const {
+	// [orig: AnimChannel_AdvancePlayback @0x40B140 - t (+4) and the step (+8) of
+	//  the sub-channel, the armed park @0x40B1A2..0x40B1B1]
+	const Track *track = resolve_track(adm_id, state_id, variant);
+	if (track == nullptr) return false;
+	time = track->clock.normalized_at(phase_ticks, armed_boundary);
+	delta = track->clock.delta();
+	return true;
+}
+
 bool AdmRootMotion::clip_loops(int adm_id, int state_id, int variant) const {
 	// The served clip's own loop bit, the flag word the retail channel copies
 	// from that clip at init and wraps on [orig: AnimChannel_InitFromData

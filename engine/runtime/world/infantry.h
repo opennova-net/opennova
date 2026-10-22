@@ -436,6 +436,17 @@ public:
         return phase_ticks > 0 && clip_loops(adm_id, state_id, variant) &&
                clip_boundary_after(adm_id, state_id, phase_ticks - 1, variant) == phase_ticks;
     }
+    // The served entry's channel clock at `phase_ticks` (armed_boundary as for
+    // advance_armed): its normalized time t, wrapped on a loop and parked at
+    // 0.99999 on a one-shot's end or the armed boundary, and the float step it
+    // adds a tick. False for a provider without the retail channel clock.
+    // [orig: AnimChannel_AdvancePlayback @0x40B140 - t at the sub-channel's +4,
+    //  the step at +8]
+    virtual bool clip_clock_at(int /*adm_id*/, int /*state_id*/, int /*variant*/,
+                               int32_t /*phase_ticks*/, int32_t /*armed_boundary*/,
+                               float & /*time*/, float & /*delta*/) const {
+        return false;
+    }
 
 };
 

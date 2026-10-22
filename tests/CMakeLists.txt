@@ -5250,6 +5250,12 @@ add_test(NAME netsim_infantry_ground_carrier COMMAND netsim_infantry_ground_carr
 add_executable(terrain_mip_max_test world/terrain_mip_max_test.cpp)
 target_link_libraries(terrain_mip_max_test PRIVATE opennova_runtime)
 add_test(NAME terrain_mip_max COMMAND terrain_mip_max_test)
+# The 0x0A player record's anim ratio byte: the playing channel's float t over its step (a
+# loop restarts it every pass, a one-shot holds it), a fade's weight over its step, 255 cap.
+add_executable(anim_wire_ratio_test anim/wire_anim_ratio_test.cpp)
+target_link_libraries(anim_wire_ratio_test PRIVATE opennova_runtime)
+target_include_directories(anim_wire_ratio_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_wire_ratio COMMAND anim_wire_ratio_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same
