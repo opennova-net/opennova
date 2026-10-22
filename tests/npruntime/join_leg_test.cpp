@@ -1054,7 +1054,25 @@ bool run_a_repeated_echo_adds_the_player_again() {
 	                    j.burst.game_state == 8 && j.slot_state == inmatch::PlayerSlotState::Added &&
 	                    j.spawn_queue_unlinked,
 	            "a fresh row and body, game state 8, slot state 1, off the list")) return false;
-	const std::vector<uint8_t> tags = JoinFixture::drain(f.joiner_transport);
+	std::vector<ns::Datagram> burst;
+	for (ns::Datagram d; f.joiner_transport.pop_outbound(d);) burst.push_back(d);
+	const std::vector<uint8_t> tags = tags_of(burst);
+	// The re-add sends the send-state reset's two settings updates again, byte 0 first, each
+	// the holdoff's field (mask 8): every Server_PlayerAdd resets the bound net player's send
+	// state, a repeated 0x02's re-add included.
+	// [orig: Server_PlayerAdd @0x51CBC0 - CNetPlayer_ResetSendState @0x51CD6F;
+	//  CNetPlayer_ResetSendState @0x500B30 - NapiNPServer_UpdateHoldoffTicks @0x500B59;
+	//  NapiNPServer_UpdateHoldoffTicks @0x4C5F40 - SendConfigUpdateIfEnabled (1, 8) @0x4C5FC0
+	//  then (0, 8) @0x4C5FCB; CNapiNPConnection_SendConfigUpdate @0x6286E0 - payload[0] =
+	//  (direction == 0)]
+	const auto settings = [&](std::size_t i, uint8_t first) {
+		return i < burst.size() &&
+		       (burst[i].protocol_flags_raw & opennova::PROTOCOL_MSG_FLAG_SETTINGS_UPDATE) != 0 &&
+		       burst[i].tag == opennova::hightag::CS_CONFIG_UPDATE && burst[i].body.size() >= 2 &&
+		       burst[i].body[0] == first && burst[i].body[1] == 0x08;
+	};
+	if (!expect(settings(1, 0) && settings(2, 1),
+	            "the re-add's two settings updates follow its 0x03")) return false;
 	auto at = [&](uint8_t tag) {
 		for (std::size_t i = 0; i < tags.size(); ++i)
 			if (tags[i] == tag) return i;
