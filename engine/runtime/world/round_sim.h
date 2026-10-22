@@ -871,6 +871,16 @@ public:
     //  @0x4EAB70, the wrap @0x4EAB8E, @0x4EABB2, the memset @0x4EABC8, the id
     //  @0x4EABD5]
     int allocate_slot(World &world, uint16_t sequence_word);
+    // The pool's two process words, which a rebuilt kernel takes from the one it
+    // replaces (MissionKernel::carry_across_load_from): only the allocator writes
+    // them, and the mission start's memsets end at the activity bytes, short of both.
+    // [orig: g_RoundPoolCursor @0xB7E1A0 and g_RoundIdCounter @0xB7E1A4, written only
+    //  by CEntityManager_AllocateSlot @0x4EAAD0; Projectile_InitDragTable @0x4E78D0
+    //  (the activity bytes' memset of 0x200 from g_RoundPoolActive @0x4E7911..0x4E791C)]
+    void carry_process_words_from(const RoundSim &previous) noexcept {
+        round_id_counter_ = previous.round_id_counter_;
+        slot_cursor_ = previous.slot_cursor_;
+    }
     // A client's S2C 0x59 found leg (world/round_pool.cpp): every slot in slot
     // order, freed ones included (a release keeps a round's words), whose +0x1C
     // is the friendly item (any owner), or the enemy item with the record's

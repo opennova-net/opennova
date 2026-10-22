@@ -920,6 +920,11 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	// [orig: g_EntityUpdateCounter, whose one writer is
 	// Entity_UpdateAllEntities @0x4C2639]
 	world.entity_update_counter = previous.world.entity_update_counter;
+	// The round pool's cursor and id counter: the next mission's first round takes
+	// the slot after the last one's and mints the next id (D-NET-NEW-L7-18)
+	// [orig: g_RoundPoolCursor @0xB7E1A0 / g_RoundIdCounter @0xB7E1A4, written only by
+	//  CEntityManager_AllocateSlot @0x4EAAD0]
+	world.round_sim.carry_process_words_from(previous.world.round_sim);
 	// [orig: g_ServerNumPlayers @0xC8FC54, a process global whose one writer is
 	//  Server_CountActivePlayers @0x4FD900 (the store @0x4FD94B), each periodic second:
 	//  the next mission reads the last count until its first recount]

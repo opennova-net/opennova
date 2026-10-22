@@ -529,6 +529,36 @@ int main() {
 		CHECK(second->world.server_num_players == 3);
 	}
 
+	// --- the round pool's cursor and id counter across kernels --------------------
+	// Both are process words only the allocator writes; the mission start's memsets
+	// end at the activity bytes, short of them, so the next mission's first round
+	// takes the slot after the previous mission's last and mints the next id (its
+	// shot_seq on the wire): the local player's slot id over nine bits, the counter
+	// under them. A kernel that carried nothing starts a process's pool.
+	// [orig: CEntityManager_AllocateSlot @0x4EAAD0 (the slot id @0x4EAAED, the counter
+	//  @0x4EAAE8..0x4EAB04, the cursor @0x4EAB1C..0x4EAB37); Projectile_InitDragTable
+	//  @0x4E78D0 (the activity bytes' memset @0x4E7911..0x4E791C)] (D-NET-NEW-L7-18)
+	{
+		constexpr uint8_t kSlotId = 2; // a joiner's own S2C 0x04 slot
+		auto first = std::make_unique<ms::MissionKernel>();
+		w::RoundSim &left = first->world.round_sim;
+		left.local_slot_id = kSlotId;
+		CHECK(left.allocate_slot(first->world, w::RoundSim::kFreshRoundWord) == 1);
+		CHECK(left.allocate_slot(first->world, w::RoundSim::kFreshRoundWord) == 2);
+		CHECK(left.rounds[2].shot_seq == ((kSlotId << 9) | 2));
+		auto second = std::make_unique<ms::MissionKernel>();
+		second->carry_across_load_from(*first);
+		w::RoundSim &next = second->world.round_sim;
+		next.local_slot_id = kSlotId;
+		CHECK(next.allocate_slot(second->world, w::RoundSim::kFreshRoundWord) == 3);
+		CHECK(next.rounds[3].shot_seq == ((kSlotId << 9) | 3));
+		auto fresh = std::make_unique<ms::MissionKernel>();
+		w::RoundSim &own = fresh->world.round_sim;
+		own.local_slot_id = kSlotId;
+		CHECK(own.allocate_slot(fresh->world, w::RoundSim::kFreshRoundWord) == 1);
+		CHECK(own.rounds[1].shot_seq == ((kSlotId << 9) | 1));
+	}
+
 	// --- the no-session objective relay ------------------------------------------
 	// The bare tick has no connection for the S2C 0x3F relay, so the queue is
 	// released while the local chat effect stays. [orig:
