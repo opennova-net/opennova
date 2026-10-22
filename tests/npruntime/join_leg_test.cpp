@@ -42,6 +42,7 @@
 
 #include "host_test_setup.h"
 
+#include <base/gameprofile/game_type.h> // kTeamDeathmatch (the balance hold's team game)
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <net/npwire/ingame_decode.h>
@@ -98,7 +99,8 @@ struct JoinFixture {
 	uint32_t tick = 1;
 
 	// `with_existing`: an already-joined client ahead of the joiner on the connection list.
-	explicit JoinFixture(bool with_existing) {
+	// `settings`: the session's settings (null: a cap of 4 and the defaults).
+	explicit JoinFixture(bool with_existing, const inmatch::GameConfig *settings = nullptr) {
 		// A session host: remote joiners join only a session, and the join's placement
 		// runs in one (D-NET-NEW-L1-19).
 		world->rules.mp_session = true;
@@ -117,6 +119,7 @@ struct JoinFixture {
 
 		inmatch::GameConfig config;
 		config.max_players = 4;
+		if (settings != nullptr) config = *settings;
 		inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Socketless, /*host_key=*/0, nullptr, config);
 		ctx->world = world.get();
@@ -1133,6 +1136,60 @@ bool run_an_orphaned_row_counts_against_the_session_cap() {
 	              "the third joiner is held on the pending list with no row");
 }
 
+// D-NET-NEW-L1-24 (the pin owed since L1-s22): the balance-join hold counts an orphaned row on
+// its slot team. Server_CountPlayersOnTeam walks the slots, an active one with a net player
+// counting on its slot team, so a re-added joiner's two rows on side A both count there. In a
+// team game whose side password arms the BuildFlags nibble, with balance_join on, a side-B player
+// and the re-added joiner's two side-A rows (2 vs 1) hold a third joiner requesting side A (3 vs 1
+// is past max(1, ceil(1 * 0.5)) = 1); its connections alone (1 vs 1, then 2 vs 1) would admit it.
+// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - the BuildFlags nibble @0x4C8E89,
+//  the balance gate @0x4C8F0A, the counts `push 0` @0x4C8F10 / `push 1` @0x4C8F17, the ceil
+//  @0x4C8F41..0x4C8F53, the compare @0x4C8F74; Server_CountPlayersOnTeam @0x501630 - the active
+//  byte @0x501650, the net player @0x501656, g_RotationSideTeam0[index] @0x50165E, the slot team
+//  @0x501664]
+bool run_an_orphaned_row_counts_on_its_side_in_the_balance_hold() {
+	inmatch::GameConfig settings;
+	settings.max_players = 8;
+	settings.game_type = opennova::game_type::kTeamDeathmatch;
+	settings.side_b_password = "bravo"; // arms the team-mode BuildFlags nibble
+	settings.balance_join = true;
+	settings.balance_join_percent = 0.5f;
+	JoinFixture f(/*with_existing=*/true, &settings);
+	if (!expect((f.ctx->np_protocol.build_flags & 0xF0u) != 0,
+	            "the side password arms the team-mode BuildFlags nibble")) return false;
+	inmatch::NapiNPConnection &existing = f.ctx->np_protocol.connection_list.front();
+	existing.assigned_team_valid = true;
+	existing.assigned_team = 2; // side B
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.char_vars.team_request = 0; // side A
+	j.reply.admission_metadata_pushed = true;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    j.assigned_team_valid && j.assigned_team == 1,
+	            "the joiner's side-A request is admitted (1 vs 1)")) return false;
+	j.spawn_queue_unlinked = false; // a repeated C2S 0x02 lists it again
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    f.ctx->orphaned_player_rows.size() == 1 &&
+	                    f.ctx->orphaned_player_rows[0].row.assigned_team_valid &&
+	                    f.ctx->orphaned_player_rows[0].row.assigned_team == 1 &&
+	                    j.assigned_team_valid && j.assigned_team == 1,
+	            "the re-add (2 vs 1) orphans the first side-A row")) return false;
+	inmatch::NapiNPConnection &next = f.ctx->np_protocol.connection_list.emplace_back();
+	next.type = inmatch::NapiNPConnection::kTypeServerSide;
+	next.peer = opennova::PeerAddr{0x0100007Fu, 30003};
+	next.connection_id = inmatch::kFirstJoinerDcb + 2;
+	next.phase = inmatch::ConnectionPhase::Joined;
+	next.admission_stage = inmatch::GameAdmissionStage::Complete;
+	next.self_id_seen = true;
+	next.char_vars.team_request = 0; // side A
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 0,
+	            "the orphaned row and the current row on side A hold a third side-A request"))
+		return false;
+	const inmatch::NapiNPConnection &held = f.ctx->np_protocol.connection_list.back();
+	return expect(held.phase == inmatch::ConnectionPhase::Joined && !held.spawn_queue_unlinked &&
+	                      !held.link.owned_entity.valid() && held.reply.admission_hold_nag_pending,
+	              "the third joiner is held on the pending list, nagged, with no row");
+}
+
 // D-NET-NEW-L1-24 (the orphaned row's other walks): the 0x16's slot walk takes an orphaned row as
 // any other: a re-add that found the first row in the match (state 6) leaves it a 0x16 row with its
 // slot and team, and it counts in the trailer's in-game count (every active row).
@@ -1539,6 +1596,7 @@ int main() {
 	if (!run_the_add_queues_its_records_ahead_of_a_later_list()) ++failures;
 	if (!run_a_repeated_echo_adds_the_player_again()) ++failures;
 	if (!run_an_orphaned_row_is_a_player_list_row()) ++failures;
+	if (!run_an_orphaned_row_counts_on_its_side_in_the_balance_hold()) ++failures;
 	if (!run_an_orphaned_row_takes_its_own_frame_rtt_and_list()) ++failures;
 	if (!run_a_players_two_rows_interleave_frame_and_rtt()) ++failures;
 	if (!run_an_orphaned_row_runs_on_its_player_sync_track()) ++failures;
