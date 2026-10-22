@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { budgetState, costMoney, monthName, periodLabel, serviceLabel, topServices } from './costView';
-import { costs } from '../test/costFixtures';
+import { budgetState, costMoney, monthName, periodLabel, serviceLabel, topServices, worstCostBudget } from './costView';
+import { combinedCosts, costs } from '../test/costFixtures';
 
 describe('the costs view', () => {
   it('writes amounts as a bill reads them, whole dollars from a hundred', () => {
@@ -41,5 +41,26 @@ describe('the costs view', () => {
       detail: '$251 spent, 100% of the $250 budget.',
     });
     expect(budgetState(costs({ budget: null }))).toBeNull();
+  });
+
+  it('never compares spending and budget amounts in different currencies', () => {
+    const value = costs();
+    value.budget!.currency = 'EUR';
+    expect(budgetState(value)).toBeNull();
+  });
+
+  it('names the worst readable account budget, using only that account forecast fallback', () => {
+    const value = combinedCosts();
+    value.accounts[0].month_to_date_cents = 20500;
+    value.accounts[1].forecast_cents = null;
+    value.accounts[1].budget!.forecast_cents = 12000;
+    expect(worstCostBudget(value)).toMatchObject({ tone: 'warn', accountLabel: 'Production' });
+    value.accounts[1].month_to_date_cents = 11000;
+    expect(worstCostBudget(value)).toMatchObject({ tone: 'bad', accountLabel: 'CI' });
+    value.error = 'CI: unavailable';
+    value.accounts[1].error = 'unavailable';
+    expect(worstCostBudget(value)).toMatchObject({ tone: 'warn', accountLabel: 'Production' });
+    value.accounts[0].error = 'unavailable';
+    expect(worstCostBudget(value)).toBeNull();
   });
 });

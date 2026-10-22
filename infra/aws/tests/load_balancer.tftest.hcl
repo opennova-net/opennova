@@ -301,6 +301,7 @@ override_resource {
 variables {
   deployment                = "prod"
   aws_account_id            = "123456789012"
+  aws_account_id_ci         = "444444444444"
   region                    = "us-east-1"
   db_master_password        = "0123456789abcdef0123456789abcdef"
   cache_auth_token          = "fedcba9876543210fedcba9876543210"

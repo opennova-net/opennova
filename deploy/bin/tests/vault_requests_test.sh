@@ -89,7 +89,8 @@ make_vault() {
   mkitem app-staging SERVER admin_api_token=SECRETVALUEadminapistaging database_password=SECRETVALUEdbstaging \
     redis_password=SECRETVALUEredisstaging edge_auth_secret=SECRETVALUEedgestaging \
     edge_auth_secret_previous=SECRETVALUEedgepreviousstaging
-  mkitem app-prod SERVER edge_auth_secret=SECRETVALUEedgeprod
+  mkitem app-prod SERVER edge_auth_secret=SECRETVALUEedgeprod redis_password=SECRETVALUEredisprod
+  mkitem rds-prod SECURE_NOTE master_password=SECRETVALUEmasterprod
   mkitem rds-staging SECURE_NOTE master_password=SECRETVALUEmasterstaging
   mkitem cloudflare API_CREDENTIAL api_token=SECRETVALUEcloudflare zone_id=0123456789abcdef0123456789abcdef \
     domain=example.org
@@ -438,6 +439,13 @@ expect_requests "--deployment staging infra apply" 6 --deployment staging infra 
 [ "$(grep -cE -- ' (plan|apply) ' "$STUB_TF_CALLS")" -eq 2 ] \
   && pass "infra apply's plan and apply both run on the one read of each item" || fail "infra apply's terraform runs: $(cat "$STUB_TF_CALLS")"
 expect_tf_var TF_VAR_db_master_password rds-staging master_password
+expect_requests "--deployment prod infra plan" 7 --deployment prod infra plan
+expect_tf_var TF_VAR_aws_account_id_ci aws-ci account_id
+expect_requests "--deployment prod infra apply" 7 --deployment prod infra apply --yes
+expect_tf_var TF_VAR_aws_account_id_ci aws-ci account_id
+expect_requests "staging remains independent of CI billing" 6 --deployment staging infra plan
+[ -z "$(cat "$STUB_TF_ENV/TF_VAR_aws_account_id_ci" 2>/dev/null)" ] \
+  && pass "staging clears CI's account id" || fail "staging received CI's account id"
 expect_requests "--deployment staging secrets check" 9 --deployment staging secrets check
 expect_requests "--deployment staging secrets sync" 3 --deployment staging secrets sync
 matched=0
@@ -592,6 +600,23 @@ expect_stop() {
     pass "$name"
   fi
 }
+fresh_run
+fixture_drop aws-ci account_id
+expect_stop "missing CI account blocks prod's plan" "has no field 'account_id'" --deployment prod infra plan
+grep -q ' plan ' "$STUB_TF_CALLS" && fail "terraform planned without CI's account" || pass "missing CI account stops before plan"
+fresh_run
+fixture_set aws-ci account_id REPLACE_ME
+expect_stop "invalid CI account blocks prod's plan" "aws-ci/account_id must be a 12-digit account id" --deployment prod infra plan
+fresh_run
+fixture_set aws-ci account_id 111111111111
+expect_stop "CI cannot be prod's own account" "aws-ci/account_id must differ from aws-prod/account_id" --deployment prod infra plan
+fresh_run
+fixture_drop aws-ci
+RUN_KEEP=1 run_main --deployment staging infra plan
+[ "$RUN_RC" -eq 0 ] && pass "staging plans without a CI vault item" || fail "staging needed CI: $RUN_OUT"
+fresh_run
+fixture_drop aws-ci account_id
+expect_stop "prod secrets check checks CI billing" "CI billing account    FAILED:" --deployment prod secrets check
 fresh_run
 fixture_drop cloudflare zone_id
 expect_stop "a template's missing field stops terraform before it runs" \

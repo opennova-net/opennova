@@ -14,7 +14,9 @@
 # its boundary allows.
 #
 # A policy file is a template (account_id, region); IAM counts a managed
-# policy's characters without white space, at most 6,144 (tests/ check each).
+# policy's characters without white space, at most 6,144 (tests/ check each,
+# including longer region names). Optional Sid labels are omitted from some
+# common-boundary statements to leave room without changing any permissions.
 
 locals {
   policy_dir      = "${path.module}/../../aws/iam"
@@ -24,7 +26,14 @@ locals {
   deploy_policy_documents = {
     for p in local.deploy_policies : p => jsonencode(jsondecode(templatefile("${local.policy_dir}/opennova-deploy-${p}.json", local.policy_vars)))
   }
-  boundary_document         = jsonencode(jsondecode(templatefile("${local.policy_dir}/opennova-role-boundary.json", local.policy_vars)))
+  # Keep the common boundary local to its account. Prod alone adds the exact
+  # CI billing role; the web task's own policy grants the matching assumption.
+  base_boundary = jsondecode(templatefile("${local.policy_dir}/opennova-role-boundary.json", local.policy_vars))
+  boundary_document = jsonencode(merge(local.base_boundary, {
+    Statement = concat(local.base_boundary.Statement, var.cost_reader_role_arn == "" ? [] : [{
+      Sid = "AssumeCiCosts", Effect = "Allow", Action = "sts:AssumeRole", Resource = var.cost_reader_role_arn
+    }])
+  }))
   machine_boundary_document = jsonencode(jsondecode(templatefile("${local.policy_dir}/opennova-machine-boundary.json", local.policy_vars)))
 }
 

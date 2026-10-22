@@ -1,10 +1,10 @@
-// The deployment's AWS bill this month (GET /api/admin/costs, cost_routes.h).
+// The configured AWS accounts' bill this month (GET /api/admin/costs, cost_routes.h).
 // Answers an AdminResult (admin.ts); a reply missing what the page needs reads
 // as malformed rather than as made-up numbers.
 
 import { adminClient } from './client';
 import { adminCall, type AdminResult } from './admin';
-import type { CostBudget, CostDay, CostLine, Costs } from '../types/costs';
+import type { CostAccount, CostBudget, CostDay, CostLine, Costs } from '../types/costs';
 
 type Fields = Record<string, unknown>;
 
@@ -34,6 +34,21 @@ function pickBudget(v: unknown): CostBudget | null {
   };
 }
 
+function pickAccount(v: unknown): CostAccount | null {
+  if (!isObject(v) || typeof v.id !== 'string' || !v.id || typeof v.label !== 'string' || !v.label || !isCents(v.month_to_date_cents)) return null;
+  return {
+    id: v.id,
+    label: v.label,
+    currency: typeof v.currency === 'string' && v.currency ? v.currency : 'USD',
+    error: textOrNull(v.error),
+    month_to_date_cents: v.month_to_date_cents,
+    forecast_cents: centsOrNull(v.forecast_cents),
+    forecast_error: textOrNull(v.forecast_error),
+    budget: v.budget === null || v.budget === undefined ? null : pickBudget(v.budget),
+    budget_error: textOrNull(v.budget_error),
+  };
+}
+
 function pickList<T>(v: unknown, pick: (item: unknown) => T | null): T[] | null {
   if (!Array.isArray(v)) return [];
   const out: T[] = [];
@@ -49,7 +64,9 @@ export function pickCosts(v: unknown): Costs | null {
   if (!isObject(v) || typeof v.available !== 'boolean' || !isCents(v.month_to_date_cents)) return null;
   const byService = pickList(v.by_service, pickLine);
   const days = pickList(v.days, pickDay);
-  if (byService === null || days === null) return null;
+  if (v.accounts !== undefined && !Array.isArray(v.accounts)) return null;
+  const accounts = pickList(v.accounts, pickAccount);
+  if (byService === null || days === null || accounts === null) return null;
   const month =
     isObject(v.month) && typeof v.month.start === 'string' && typeof v.month.end === 'string'
       ? { start: v.month.start, end: v.month.end }
@@ -70,6 +87,7 @@ export function pickCosts(v: unknown): Costs | null {
     days,
     budget: v.budget === null || v.budget === undefined ? null : pickBudget(v.budget),
     budget_error: textOrNull(v.budget_error),
+    accounts,
   };
 }
 

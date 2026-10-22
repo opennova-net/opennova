@@ -11,7 +11,7 @@ with the account's id and region from the vault.
 | --- | --- | --- |
 | `opennova-org.json` | the IAM user `opennova-org` in the management account | the management account's administrator, by hand (below) |
 | `opennova-deploy-network.json`, `-compute`, `-ecs`, `-iam`, `-data`, `-observability` | the IAM user `opennova-deploy` in each member account | the org stack (`infra/org`), as managed policies |
-| `opennova-role-boundary.json` | every role `infra/aws` makes in a member account but the machines' two (permissions boundary), and the GitHub deploy role | the org stack |
+| `opennova-role-boundary.json` | every role `infra/aws` makes in a member account but the machines' two (permissions boundary), and the GitHub deploy role; org appends the exact CI billing reader ARN to prod's boundary alone | the org stack |
 | `opennova-machine-boundary.json` | the machines' instance role and hostd's task role (permissions boundary) | the org stack |
 
 ## opennova-org
@@ -181,6 +181,25 @@ AccessDenied naming the action):
   `ce:GetCostForecast` (no resource scoping exists for them) on Cost Explorer's global
   endpoint, and `budgets:ViewBudget` on the deployment's monthly cost budget's ARN, each
   under the role boundary.
+
+Prod's costs view also includes CI's whole account. The org stack owns
+`opennova-ci-cost-read` in CI (`infra/org/costs.tf`), trusted by prod account root
+with an exact `aws:PrincipalArn` condition for `opennova-prod-web`. Its only
+permissions are `ce:GetCostAndUsage` and `ce:GetCostForecast` for its account,
+and `budgets:ViewBudget` on `opennova-ci-monthly-cost`. Prod web's own policy and
+its boundary both permit
+`sts:AssumeRole` on that exact CI role ARN. The shared boundary template stays
+account-local; `infra/org/account/deploy.tf` appends this exception only for prod
+(still below IAM's 6,144-character limit in longer regions such as
+`ap-southeast-5`; optional statement labels are omitted to save space without
+changing permissions). Staging's boundary and task policies
+grant no cross-account assumption. No management-account role or long-lived
+credential is given to web.
+
+Apply org first, then prod infrastructure, then roll web onto the new task
+definition. Verify the first CI read under both sides of this trust and the
+management account's linked-account Cost Explorer setting. The CI budget stays
+owned by `infra/ci`; reading it requires no change to the runners or cache.
 
 Verified: the attention list's alarms, web's `cloudwatch:DescribeAlarms` with
 `AlarmNamePrefix`. IAM judges the listing against `alarm:*` whatever its prefix, and refused

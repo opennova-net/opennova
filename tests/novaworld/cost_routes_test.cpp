@@ -53,6 +53,8 @@ constexpr int64_t kNow = 1792411230;
 struct Harness {
 	uint16_t local_port = 0;
 	uint16_t cloud_port = 0;
+	uint16_t combined_port = 0;
+	uint16_t partial_port = 0;
 	infra_stub::AwsStub *aws = nullptr;
 
 	net::HttpReply get(uint16_t port, const std::string &path, bool admin = true) const {
@@ -166,6 +168,38 @@ int test_deployment(Harness &h) {
 	return 0;
 }
 
+int test_combined(Harness &h) {
+	TEST_EXPECT(h.get(h.combined_port, "/api/admin/costs", false).code == 401);
+	const auto reply = h.get(h.combined_port, "/api/admin/costs");
+	const auto json = json_of(reply, 200);
+	TEST_EXPECT(json && is_null(json["error"]) && is_null(json["budget"]) &&
+			json["month_to_date_cents"].i() == 1550 && json["forecast_cents"].i() == 20900);
+	TEST_EXPECT(json["by_service"][0]["cents"].i() == 1400 && json["days"][0]["cents"].i() == 900);
+	const auto &accounts = json["accounts"];
+	TEST_EXPECT(accounts.size() == 2 && str(accounts[0]["label"]) == "Production" &&
+			str(accounts[1]["label"]) == "CI" && str(accounts[1]["id"]) == "ci");
+	for (const auto &account : accounts) {
+		TEST_EXPECT(is_null(account["error"]) && account["month_to_date_cents"].i() == 775 &&
+				account["budget"]["limit_cents"].i() == 25000);
+	}
+	for (const char *secret : { infra_stub::kSecret, infra_stub::kToken, infra_stub::kKeyId,
+				 "ci-secret", "ci-token", "ASIACICOSTKEY", "opennova-ci-cost-read" })
+		TEST_EXPECT(!contains(body_text(reply), secret));
+	return 0;
+}
+
+int test_partial(Harness &h) {
+	const auto json = json_of(h.get(h.partial_port, "/api/admin/costs"), 200);
+	TEST_EXPECT(json && contains(str(json["error"]), "CI:") &&
+			json["month_to_date_cents"].i() == 0 && is_null(json["forecast_cents"]) &&
+			json["by_service"].size() == 0 && json["days"].size() == 0);
+	const auto &accounts = json["accounts"];
+	TEST_EXPECT(accounts.size() == 2 && is_null(accounts[0]["error"]) &&
+			accounts[0]["month_to_date_cents"].i() == 775 && !is_null(accounts[0]["budget"]) &&
+			contains(str(accounts[1]["error"]), "AccessDenied"));
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -199,6 +233,25 @@ int main(int argc, char **argv) {
 		cloud_config.aws.scratch_dir = scratch.root();
 		cloud_config.budget_arn = "arn:aws:budgets::123456789012:budget/opennova-prod-monthly-cost";
 		infra::CostStore cloud_costs(aws, cloud_config, [] { return kNow * 1000; });
+		infra_stub::AwsStub combined_aws;
+		combined_aws.replies = cost_replies();
+		combined_aws.replies["sts AssumeRole"] = infra_stub::answer(200,
+				"<AssumeRoleResponse><AssumeRoleResult><Credentials>"
+				"<AccessKeyId>ASIACICOSTKEY</AccessKeyId><SecretAccessKey>ci-secret</"
+				"SecretAccessKey>"
+				"<SessionToken>ci-token</SessionToken><Expiration>2026-10-19T12:15:30Z</Expiration>"
+				"</Credentials></AssumeRoleResult></AssumeRoleResponse>");
+		infra::CostConfig combined_config = cloud_config;
+		combined_config.ci_role_arn = "arn:aws:iam::444444444444:role/opennova-ci-cost-read";
+		combined_config.ci_budget_arn =
+				"arn:aws:budgets::444444444444:budget/opennova-ci-monthly-cost";
+		infra::CostStore combined_costs(combined_aws, combined_config, [] { return kNow * 1000; });
+		infra_stub::AwsStub partial_aws;
+		partial_aws.replies = cost_replies();
+		partial_aws.replies["sts AssumeRole"] = infra_stub::answer(403,
+				"<ErrorResponse><Error><Code>AccessDenied</Code><Message>CI "
+				"denied</Message></Error></ErrorResponse>");
+		infra::CostStore partial_costs(partial_aws, combined_config, [] { return kNow * 1000; });
 
 		nws::HttpListener local(pool, redis.pool());
 		local.set_cost_store(&local_costs);
@@ -206,10 +259,18 @@ int main(int argc, char **argv) {
 		nws::HttpListener cloud(pool, redis.pool());
 		cloud.set_cost_store(&cloud_costs);
 		TEST_EXPECT(cloud.start(config));
+		nws::HttpListener combined_listener(pool, redis.pool());
+		combined_listener.set_cost_store(&combined_costs);
+		TEST_EXPECT(combined_listener.start(config));
+		nws::HttpListener partial_listener(pool, redis.pool());
+		partial_listener.set_cost_store(&partial_costs);
+		TEST_EXPECT(partial_listener.start(config));
 
 		Harness harness;
 		harness.local_port = local.bound_port();
 		harness.cloud_port = cloud.bound_port();
+		harness.combined_port = combined_listener.bound_port();
+		harness.partial_port = partial_listener.bound_port();
 		harness.aws = &aws;
 
 		rc = 0;
@@ -221,6 +282,8 @@ int main(int argc, char **argv) {
 			{ "refusals", test_refusals },
 			{ "local", test_local },
 			{ "deployment", test_deployment },
+			{ "combined", test_combined },
+			{ "partial", test_partial },
 		};
 		for (const Case &c : cases) {
 			std::printf("-- %s\n", c.name);

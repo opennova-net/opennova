@@ -1,6 +1,5 @@
-// The deployment's AWS bill this month as GET /api/admin/costs answers it
-// (apps/novaworld_web/infra/cost_routes.h): what its account is charged, from
-// Cost Explorer and its monthly budget, read by web at most every 6 hours.
+// The configured AWS accounts' bill this month as GET /api/admin/costs answers
+// it (apps/novaworld_web/infra/cost_routes.h), read at most every 6 hours.
 // Amounts are cents of `currency`; dates are YYYY-MM-DD in UTC.
 
 export interface CostLine {
@@ -23,11 +22,24 @@ export interface CostBudget {
   forecast_cents: number | null;
 }
 
+export interface CostAccount {
+  id: string;
+  label: string;
+  currency: string;
+  // A failed account has no usable amounts; never display its zero as spend.
+  error: string | null;
+  month_to_date_cents: number;
+  forecast_cents: number | null;
+  forecast_error: string | null;
+  budget: CostBudget | null;
+  budget_error: string | null;
+}
+
 export interface Costs {
   // False where AWS is not read (the local stack); `unavailable` says why.
   available: boolean;
   unavailable: string | null;
-  // Why Cost Explorer's read failed; null when it did not.
+  // Why the combined read failed; null only when every account was read.
   error: string | null;
   // When web read AWS (ISO 8601); null when it never did.
   read_at: string | null;
@@ -49,4 +61,7 @@ export interface Costs {
   days: CostDay[];
   budget: CostBudget | null;
   budget_error: string | null;
+  // Account budgets are separate; the combined bill has no aggregate budget.
+  // Empty for older servers and the local stack.
+  accounts: CostAccount[];
 }

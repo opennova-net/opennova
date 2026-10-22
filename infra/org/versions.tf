@@ -13,8 +13,9 @@
 #   accounts.tf      each deployment account's baseline (account/: its state
 #                    bucket, the role boundary, the deploy user, its policies
 #                    and key, the GitHub deploy role); the ci account, which
-#                    holds the CI runners alone, has none (infra/ci makes
-#                    what it holds)
+#                    holds the CI runners alone, has the billing reader
+#                    (costs.tf; infra/ci makes the runners and their budget)
+#   costs.tf         CI's billing-only role trusted by prod's web task
 #   identity_center.tf  the maintainer's console access to the member accounts
 #                    (IAM Identity Center: two permission sets, one user)
 #   outputs.tf       what the toolbox writes back to the vault
@@ -93,5 +94,17 @@ provider "aws" {
     tags = {
       "opennova:deployment" = "opennova-staging"
     }
+  }
+}
+
+# IAM is global; this provider manages CI's billing reader alone.
+provider "aws" {
+  alias               = "ci"
+  region              = var.region
+  allowed_account_ids = [var.aws_account_id_ci]
+
+  assume_role {
+    role_arn     = "arn:aws:iam::${var.aws_account_id_ci}:role/OrganizationAccountAccessRole"
+    session_name = "opennova-org"
   }
 }

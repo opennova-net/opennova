@@ -5,8 +5,9 @@
 # outside the toolbox's tmpfs. Edit the vault, not this file. The AWS credentials are the deployment's deploy user's, which the
 # toolbox puts in the environment before it runs terraform
 # (deploy/env/aws.env.tpl), and the account, region and prod's gate address
-# come from the same vault item, aws-<deployment>. The
-# toolbox fills in @VAULT@ (OP_VAULT, default OpenNova-Deploy), @APP_ITEM@
+# come from the same vault item, aws-<deployment>. Prod also resolves
+# aws-ci/account_id in tf_op for its admin's CI billing read; staging does not.
+# The toolbox fills in @VAULT@ (OP_VAULT, default OpenNova-Deploy), @APP_ITEM@
 # (app-<deployment>) and @RDS_ITEM@ (rds-<deployment>; `secrets init` makes
 # both). The database's master password is write-only in Terraform: it never
 # enters the state.

@@ -1034,12 +1034,22 @@ a second).
 ### AWS costs
 
 `GET /api/admin/costs` (admin; `Cache-Control: no-store`; `infra/cost_routes.*`) answers
-what the deployment's AWS account is charged this month (the account holds the deployment
-alone, so its bill is the deployment's): `{"available", "unavailable", "error", "read_at",
+what the deployment's AWS account is charged this month, plus CI in production:
+`{"available", "unavailable", "error", "read_at",
 "currency", "month": {"start", "end"}, "through", "estimated", "month_to_date_cents",
 "forecast_cents", "forecast_error", "by_service": [{"service", "cents"}], "days": [{"date",
 "cents"}], "budget": {"name", "currency", "limit_cents", "actual_cents", "forecast_cents"},
-"budget_error"}`, amounts in cents. The store (`infra/cost_store.*`) reads Cost Explorer's
+"budget_error", "accounts": [{"id", "label", "currency", "error", "month_to_date_cents",
+"forecast_cents", "forecast_error", "budget", "budget_error"}]}`, amounts in cents.
+Production supplies `ONNET_INFRA_CI_COST_ROLE` and `ONNET_INFRA_CI_BUDGET`: web assumes
+the CI account's cost-only role through regional STS, then reads its whole AWS bill
+(EC2 runners, S3 cache, the control plane and other CI charges). Staging stays local to
+its account. The combined total and service/day charts require successful usage reads
+from both accounts, and the combined forecast requires both Cost Explorer forecasts.
+On a usage failure, `error` names the account and aggregate figures are withheld;
+successful account summaries remain readable. Each account keeps its own budget;
+the top-level `budget` is null when combining accounts. No role ARN or credential is
+returned. The store (`infra/cost_store.*`) reads Cost Explorer's
 global endpoint (`ce.us-east-1.amazonaws.com`, signed for us-east-1 whatever
 `ONNET_INFRA_REGION` says): `GetCostAndUsage` of the month so far (its first day, UTC,
 through today) by day and by AWS service, the unblended cost, every page of it; and
@@ -1049,8 +1059,11 @@ AWS's words in `forecast_error`, while the account has too little history). With
 `ONNET_INFRA_BUDGET` it reads the budget too (Budgets' `DescribeBudget` on
 `budgets.amazonaws.com`): its limit and AWS Budgets' own spend and forecast. Cost Explorer
 charges $0.01 a request and refreshes its figures a few times a day, up to a day behind, so
-a read is kept 6 hours (two Cost Explorer requests: about $0.08 a day at most) and a failed
-one 10 minutes, one read at a time. Without a task role (the local stack) nothing is read:
+a successful usage snapshot is kept 6 hours (normally two Cost Explorer requests per
+account per refresh) and a failed one 10 minutes, one read at a time; a new UTC month
+invalidates the cache. Refreshes have a shared 45-second deadline, and exhausted
+pagination, malformed usage and mixed currencies are reported instead of partial
+totals. Without a task role (the local stack) nothing is read:
 `available` is false and `unavailable` says why. Web's task role holds the reads
 (`infra/aws/programs.tf`, `infra_read`: `ce:GetCostAndUsage` and `ce:GetCostForecast`,
 which take no resource, and `budgets:ViewBudget` on the budget's ARN). An admin's reads come

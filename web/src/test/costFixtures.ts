@@ -2,7 +2,7 @@
 // deployment's October to the 19th, $41.25 so far, a $117.20 forecast against a
 // $250 budget, read at a fixed time (two calls give equal fixtures).
 
-import type { Costs } from '../types/costs';
+import type { CostAccount, Costs } from '../types/costs';
 
 export function costs(overrides: Partial<Costs> = {}): Costs {
   return {
@@ -30,8 +30,38 @@ export function costs(overrides: Partial<Costs> = {}): Costs {
     })),
     budget: { name: 'opennova-prod-monthly-cost', currency: 'USD', limit_cents: 25000, actual_cents: 4100, forecast_cents: 11800 },
     budget_error: null,
+    accounts: [],
     ...overrides,
   };
+}
+
+export function combinedCosts(overrides: Partial<Costs> = {}): Costs {
+  const production = costs();
+  const accounts: CostAccount[] = [
+    {
+      id: 'prod', label: 'Production', currency: 'USD', error: null,
+      month_to_date_cents: production.month_to_date_cents, forecast_cents: production.forecast_cents,
+      forecast_error: null, budget: production.budget, budget_error: null,
+    },
+    {
+      id: 'ci', label: 'CI', currency: 'USD', error: null,
+      month_to_date_cents: 2500, forecast_cents: 7500, forecast_error: null,
+      budget: { name: 'opennova-ci-monthly-cost', currency: 'USD', limit_cents: 10000, actual_cents: 2500, forecast_cents: 7500 },
+      budget_error: null,
+    },
+  ];
+  return costs({
+    month_to_date_cents: 6625,
+    forecast_cents: 19220,
+    by_service: [
+      { service: 'Amazon Elastic Compute Cloud - Compute', cents: 2400 },
+      ...production.by_service.map((line) => line.service === 'Amazon Simple Storage Service' ? { ...line, cents: line.cents + 100 } : line),
+    ],
+    days: production.days.map((day, i) => ({ ...day, cents: day.cents + (i === 0 ? 2500 : 0) })),
+    budget: null,
+    accounts,
+    ...overrides,
+  });
 }
 
 // The local stack's: nothing read.

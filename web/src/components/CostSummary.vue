@@ -1,11 +1,12 @@
 <template>
   <div class="cost-summary space-y-6">
+    <p v-if="multipleAccounts" class="cost-scope text-sm font-semibold text-ink">{{ scope }} · Combined AWS costs</p>
     <div v-if="!costs.available" class="cost-unavailable space-y-1 rounded-panel border border-border bg-panel p-4 text-sm">
       <p class="font-semibold text-ink">AWS costs are not read on this stack.</p>
       <p v-if="costs.unavailable" class="text-ink-muted">{{ costs.unavailable }}.</p>
     </div>
     <p v-else-if="costs.error" class="cost-error rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-      AWS costs could not be read: {{ costs.error }}
+      {{ multipleAccounts ? 'Combined total unavailable' : 'AWS costs could not be read' }}: {{ costs.error }}
     </p>
 
     <template v-else>
@@ -35,11 +36,14 @@
           <span><span class="font-semibold text-ink">Line:</span> the budget</span>
         </p>
       </div>
-      <p v-else-if="costs.budget_error" class="cost-budget-error rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
+      <p v-else-if="!multipleAccounts && costs.budget_error" class="cost-budget-error rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
         The budget could not be read: {{ costs.budget_error }}
       </p>
+      <p v-else-if="!multipleAccounts && costs.budget && costs.budget.currency.toUpperCase() !== costs.currency.toUpperCase()" class="text-sm text-ink-muted">
+        Spending and budget use different currencies, so they cannot be compared.
+      </p>
 
-      <dl class="cost-tiles grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
+      <dl class="cost-tiles grid grid-cols-1 gap-3" :class="multipleAccounts ? 'min-[420px]:grid-cols-2' : 'min-[420px]:grid-cols-3'">
         <StatTile label="Spent so far" :value="money(costs.month_to_date_cents)" :detail="period ? `${period}, UTC` : undefined" />
         <StatTile
           :label="month ? `Forecast for ${month}` : 'Forecast for the month'"
@@ -48,8 +52,9 @@
           :detail="forecastDetail"
         />
         <StatTile
+          v-if="!multipleAccounts"
           label="Monthly budget"
-          :value="costs.budget ? money(costs.budget.limit_cents) : 'None read'"
+          :value="costs.budget ? costMoney(costs.budget.limit_cents, costs.budget.currency) : 'None read'"
           :detail="budgetDetail"
         />
       </dl>
@@ -83,27 +88,59 @@
         </p>
       </section>
 
-      <p class="cost-read text-xs text-ink-muted">
-        <template v-if="costs.read_at">Read from AWS <RelativeTime :value="costs.read_at" :now="now" />, at most every 6 hours (each Cost Explorer request costs $0.01). </template>
-        Cost Explorer's figures run up to a day behind<template v-if="costs.estimated"> and stay estimates until AWS closes the month</template>.
-      </p>
     </template>
+
+    <section v-if="multipleAccounts && costs.available" class="cost-accounts space-y-3" :aria-labelledby="`${idBase}-accounts`">
+      <component :is="`h${headingLevel}`" :id="`${idBase}-accounts`" class="text-lg font-semibold text-ink">By account</component>
+      <p class="text-sm text-ink-muted">Each account is compared with its own monthly budget.</p>
+      <article v-for="account in accounts" :key="account.id" class="cost-account space-y-3 rounded-panel border border-border bg-panel p-4">
+        <component :is="`h${headingLevel + 1}`" class="font-semibold text-ink">{{ account.label }}</component>
+        <p v-if="account.error" class="cost-account-error text-sm text-danger">Costs could not be read: {{ account.error }}</p>
+        <template v-else>
+          <p v-if="account.state" class="cost-account-budget-state flex flex-wrap items-center gap-2 text-sm">
+            <span :class="toneBadgeClass(account.state.tone)">{{ account.state.label }}</span>
+            <span class="text-ink">{{ account.state.detail }}</span>
+          </p>
+          <p v-else-if="account.budget_error" class="cost-account-budget-error text-sm text-warn">The budget could not be read: {{ account.budget_error }}</p>
+          <p v-else-if="account.budget && account.budget.currency.toUpperCase() !== account.currency.toUpperCase()" class="text-sm text-ink-muted">
+            Spending and budget use different currencies, so they cannot be compared.
+          </p>
+          <dl class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
+            <StatTile label="Spent so far" :value="costMoney(account.month_to_date_cents, account.currency)" />
+            <StatTile
+              :label="month ? `Forecast for ${month}` : 'Forecast for the month'"
+              :value="account.forecast_cents === null ? 'None yet' : costMoney(account.forecast_cents, account.currency)"
+              :approximate="account.forecast_cents !== null"
+              :detail="account.forecast_cents === null ? (account.forecast_error ? `AWS gave none: ${account.forecast_error}` : 'AWS gave none') : undefined"
+            />
+            <StatTile
+              label="Monthly budget"
+              :value="account.budget ? costMoney(account.budget.limit_cents, account.budget.currency) : 'None read'"
+              :detail="budgetDescription(account)"
+            />
+          </dl>
+        </template>
+      </article>
+    </section>
+
+    <p v-if="costs.available && (costs.read_at || !costs.error)" class="cost-read text-xs text-ink-muted">
+      <template v-if="costs.read_at">Read from AWS <RelativeTime :value="costs.read_at" :now="now" />. </template>
+      Successful reads are kept for up to 6 hours; failed reads are retried after 10 minutes. Each Cost Explorer request costs $0.01.
+      Cost Explorer's figures run up to a day behind<template v-if="costs.estimated"> and stay estimates until AWS closes the month</template>.
+    </p>
   </div>
 </template>
 
 <script setup lang="ts">
-// The deployment's AWS bill this month (GET /api/admin/costs, fetched by the
-// page that shows it): where the month stands against the budget first, as a
-// badge in words and colour with a meter (spent, the forecast, the budget's
-// line, named beside it), then the month so far, the month's forecast and the
-// budget as tiles, the largest AWS services with a bar each and the rest added
-// up, the spend per day, and when web read it. Where AWS is not read (the
-// local stack) or the read failed, it says so and shows no number.
+// The configured accounts' AWS bill this month. Multiple accounts share
+// combined totals and charts, with a separate budget for each account. Failed
+// usage reads hide the combined totals but leave readable account details.
+// A single account keeps its budget meter and three summary tiles.
 import { computed } from 'vue';
 import RelativeTime from './RelativeTime.vue';
 import Sparkline from './charts/Sparkline.vue';
 import StatTile from './charts/StatTile.vue';
-import type { Costs } from '../types/costs';
+import type { CostAccount, Costs } from '../types/costs';
 import { budgetState, costMoney, monthName, periodLabel, serviceLabel, topServices } from '../utils/costView';
 import { toneBadgeClass, type Tone } from '../utils/infraView';
 
@@ -136,7 +173,10 @@ function money(cents: number): string {
   return costMoney(cents, props.costs.currency);
 }
 
-const state = computed(() => budgetState(props.costs));
+const multipleAccounts = computed(() => props.costs.accounts.length > 1);
+const scope = computed(() => props.costs.accounts.map((account) => account.label).join(' + '));
+const accounts = computed(() => props.costs.accounts.map((account) => ({ ...account, state: account.error ? null : budgetState(account) })));
+const state = computed(() => multipleAccounts.value ? null : budgetState(props.costs));
 const month = computed(() => monthName(props.costs.month?.start ?? null));
 const period = computed(() => periodLabel(props.costs));
 const services = computed(() => topServices(props.costs.by_service, props.shown));
@@ -159,12 +199,14 @@ const forecastDetail = computed(() => {
   return props.costs.forecast_error ? `AWS gave none: ${props.costs.forecast_error}` : 'AWS gave none';
 });
 
-const budgetDetail = computed(() => {
-  const b = props.costs.budget;
-  if (!b) return props.costs.budget_error ? 'It could not be read' : 'No budget is named here';
-  if (b.actual_cents !== null) return `AWS Budgets counts ${money(b.actual_cents)} spent`;
+function budgetDescription(costs: Pick<CostAccount, 'budget' | 'budget_error'>): string {
+  const b = costs.budget;
+  if (!b) return costs.budget_error ? 'It could not be read' : 'No budget is named here';
+  if (b.actual_cents !== null) return `AWS Budgets counts ${costMoney(b.actual_cents, b.currency)} spent`;
   return b.name;
-});
+}
+
+const budgetDetail = computed(() => budgetDescription(props.costs));
 
 // The meter's three marks as shares of its width: the budget's line inside it
 // even when the month passes it.

@@ -10,7 +10,7 @@ import { fetchFleetStats } from '../../api/hostedStats';
 import { fetchJobsOverview } from '../../api/jobs';
 import { adminBilling, fleetResponse } from '../../test/adminFixtures';
 import { tiersResponse } from '../../test/billingFixtures';
-import { costs, localCosts } from '../../test/costFixtures';
+import { combinedCosts, costs, localCosts } from '../../test/costFixtures';
 import { overview } from '../../test/jobsFixtures';
 import { serverStats } from '../../test/statsFixtures';
 import { attention } from '../../test/usageFixtures';
@@ -206,7 +206,7 @@ describe('OverviewSection', () => {
       const links = area(page, a.label).findAll('ul a').map((l) => [l.text(), l.attributes('href')]);
       expect(links).toEqual(a.sections.map((s) => [s.label, s.to]));
     }
-    expect(area(page, 'People and money').text()).toContain("The month's AWS bill against the budget");
+    expect(area(page, 'People and money').text()).toContain("The month's AWS bill and account budgets");
   });
 
   it('marks maintenance, and an AWS bill near the budget', async () => {
@@ -218,6 +218,41 @@ describe('OverviewSection', () => {
     expect(figure(page, 'NovaWorld', 'Sign-in')).toContain('Game clients cannot sign in');
     expect(area(page, 'People and money').get('.overview-area-status').text()).toBe('Near the AWS budget');
     expect(figure(page, 'People and money', 'AWS this month')).toContain("About $260 by the month's end, 104% of the $250 budget.");
+  });
+
+  it('shows the combined AWS figure and names the account with the worst budget warning', async () => {
+    const value = combinedCosts();
+    value.accounts[1].month_to_date_cents = 11000;
+    value.accounts[1].forecast_cents = 12000;
+    value.month_to_date_cents = value.accounts[0].month_to_date_cents + 11000;
+    aws.mockResolvedValue({ ok: true, value });
+    const page = await mountOverview();
+    expect(figure(page, 'People and money', 'AWS this month')).toContain('$151 so far');
+    expect(figure(page, 'People and money', 'AWS this month')).toContain('Production + CI. CI:');
+    expect(figure(page, 'People and money', 'AWS this month')).toContain('110% of the $100 budget');
+    expect(area(page, 'People and money').get('.overview-area-status').text()).toBe('CI over its AWS budget');
+  });
+
+  it('shows the combined forecast without comparing it to one account budget', async () => {
+    aws.mockResolvedValue({ ok: true, value: combinedCosts() });
+    const page = await mountOverview();
+    const text = figure(page, 'People and money', 'AWS this month');
+    expect(text).toContain('$66.25 so far');
+    expect(text).toContain("Production + CI. About $192 by the month's end");
+    expect(text).not.toContain('of the');
+  });
+
+  it('withholds an incomplete total and retains a readable account budget warning', async () => {
+    const value = combinedCosts({ error: 'CI: AccessDeniedException' });
+    value.accounts[1].error = 'AccessDeniedException';
+    value.accounts[0].month_to_date_cents = 30000;
+    aws.mockResolvedValue({ ok: true, value });
+    const page = await mountOverview();
+    const text = figure(page, 'People and money', 'AWS this month');
+    expect(text).toContain('Unknown');
+    expect(text).toContain('Combined total unavailable: CI: AccessDeniedException');
+    expect(text).not.toContain('$66.25');
+    expect(area(page, 'People and money').get('.overview-area-status').text()).toBe('Production over its AWS budget');
   });
 
   it('names a read that failed, and leaves the rest', async () => {
