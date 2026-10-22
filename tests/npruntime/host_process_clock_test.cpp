@@ -134,11 +134,33 @@ void test_rtt_reads_the_process_clock() {
 	expect(host.conn().reply.rtt_ms == 300u, "the return leg measures 300 ms on the clock");
 }
 
+// D-NET-NEW-L8-31: the server-info refresh advances the cookie-key ring with GetTickCount plus
+// the CRT stream's next draw. Two hosts alike but for a clock 1000 ms apart (the logic tick the
+// same) mint keys 1000 apart at the round's first refresh (on the seam they would be equal).
+// [orig: Server_TickUpdate - CSessionIdRing_AdvanceAndGenerate called @0x51D93D;
+//  CSessionIdRing_AdvanceAndGenerate @0x4DBB80 - GetTickCount @0x4DBB97, rand @0x4DBB9F, the
+//  key @0x4DBBA4..0x4DBBB5]
+void test_cookie_ring_reads_the_process_clock() {
+	ClockHost early;
+	ClockHost late;
+	late.clock += 1000u;
+	const uint32_t index = early.ctx.cookie_key_table.index;
+	inmatch::Server_TickUpdate(early.ctx);
+	inmatch::Server_TickUpdate(late.ctx);
+	expect(early.ctx.cookie_key_table.index != index &&
+	               early.ctx.cookie_key_table.index == late.ctx.cookie_key_table.index,
+	       "the round's first server tick advances the ring");
+	expect(((late.ctx.cookie_key_table.current() - early.ctx.cookie_key_table.current()) &
+	                0xFFFFFFu) == 1000u,
+	       "the new key carries the process clock");
+}
+
 } // namespace
 
 int main() {
 	test_time_sync_reads_the_process_clock();
 	test_rtt_reads_the_process_clock();
+	test_cookie_ring_reads_the_process_clock();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "npruntime_host_process_clock: %d failure(s)\n", g_failures);
 		return 1;

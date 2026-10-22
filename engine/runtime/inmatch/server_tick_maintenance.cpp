@@ -13,7 +13,6 @@
 #include <base/gameprofile/game_type.h>        // the CTF / FlagBall / Flag Me carry-limit modes
 #include <base/io/le.h>                        // append_u32_le
 #include <base/io/strutil.h>                   // iequals (the JOINTICKET key lookup)
-#include <base/io/tick_rate.h>                  // host_milliseconds_for_logic_tick (the refresh's tick)
 #include <net/napi/session.h>                   // SESSION_HOST_INFO_REFRESH_TICKS
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -739,9 +738,9 @@ void emit_row_rtt(NapiNPServerCtx &ctx, const world::World &world, NapiNPConnect
 }
 
 // The server-info refresh: the countdown steps down once a server tick; at zero or below it
-// reloads 0x744 ticks, advances the cookie-key ring (GetTickCount, the authoritative tick's
-// deterministic seam, plus the session CRT stream's next draw; on every authority, a LAN host's
-// included) and runs the server-info update, which only a NovaWorld host's embedder hooks
+// reloads 0x744 ticks, advances the cookie-key ring (GetTickCount, the process clock the host
+// binds on the World, D-NET-NEW-L8-31, plus the session CRT stream's next draw; on every
+// authority, a LAN host's included) and runs the server-info update, which only a NovaWorld host's embedder hooks
 // (on_update_server_info: retail's update returns outside a NovaWorld session). The round init
 // cleared the countdown, so a round's first server tick refreshes.
 // [orig: Server_TickUpdate @0x51D7E0 - the decrement @0x51D91D..0x51D927, `jg` @0x51D92C, the
@@ -752,7 +751,7 @@ void emit_row_rtt(NapiNPServerCtx &ctx, const world::World &world, NapiNPConnect
 void run_server_info_refresh(NapiNPServerCtx &ctx, world::World &world) {
 	if (--ctx.server_info_update_timer > 0) return;
 	ctx.server_info_update_timer = static_cast<int32_t>(SESSION_HOST_INFO_REFRESH_TICKS);
-	ctx.cookie_key_table.advance(io::host_milliseconds_for_logic_tick(world.logic_tick),
+	ctx.cookie_key_table.advance(world::authority_tick_count_ms(world),
 			static_cast<int>(world.crt_rand.next()));
 	if (ctx.on_update_server_info)
 		ctx.on_update_server_info();
