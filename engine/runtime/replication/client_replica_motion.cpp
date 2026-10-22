@@ -1777,6 +1777,23 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
 		es.rm_parked = false;
 		lean_decay_row(es);
 		arms_dip_row(es);
+		// A compact-carried row's own update poses it on its carrier as the carrier
+		// stands now: the pool-1 walk ahead of the pool-0 walk moved it this tick (a
+		// chased hull in ClientRuntime's leg, a World mover in the World's walk, mirrored
+		// onto its row ahead of this leg). Nothing ahead of the mounted site reads the
+		// body's pose (the channel, the ride link), and the site's eye reads it after the
+		// attach, so the follow opens the visit. ClientRuntime's leg passed over the
+		// parked row (refresh_carried_entities), so until here it held the pose its last
+		// tick left, as retail's table copies it (D-NET-196).
+		// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9
+		//  ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
+		//  @0x4B40E0 - the site selector on the mount word +0x16C @0x4B637C..0x4B638F, the
+		//  Entity_AttachToBoneAndUpdateTransform call @0x4B63C7 ahead of the eye restamp]
+		if (follows_carrier_seat(es)) {
+			const auto carrier = row_by_handle.find(es.carrier_handle);
+			follow_carrier_seat(es, carrier == row_by_handle.end()
+					? nullptr : &state_.entities[carrier->second]);
+		}
 		visit_remote_row(es, parked_self_, parked_tick_);
 	}
 	// Each parked row's selection and lean ramp close its own visit, as the

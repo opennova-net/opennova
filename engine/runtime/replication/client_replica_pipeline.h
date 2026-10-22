@@ -847,6 +847,13 @@ private:
 	std::vector<std::pair<uint16_t, bool>> remote_motion_expired_;
 	// One parked half's visits (tick_remote_motion_through_self / _after_self).
 	void visit_parked_rows(std::vector<uint16_t> &rows);
+	// A compact-carried row that follows its carrier between records: a resolved
+	// seat-local sample on a carrier, except a world-mover vehicle, which the
+	// embedding sim predicts (its row publishes the mirrored pose).
+	static bool follows_carrier_seat(const ClientEntityState &child);
+	// One such row's follow: its pose from its carrier row's live pose and its
+	// seat-local sample; a carrier row that is gone invalidates the sample.
+	static void follow_carrier_seat(ClientEntityState &child, const ClientEntityState *carrier);
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
 	ReplicaGroundProbe replica_ground_probe_;
 	ReplicaDefAttribResolver replica_def_attrib_resolver_;

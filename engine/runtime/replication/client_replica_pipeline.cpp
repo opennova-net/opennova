@@ -404,6 +404,47 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	if (changed) state_.mark_changed();
 }
 
+bool ClientReplicaPipeline::follows_carrier_seat(const ClientEntityState &child) {
+	// A world-mover VEHICLE is predicted by the embedding sim from the
+	// composed record sample whatever its carrier (a pool-1 deck, or
+	// the static a bridge/roof/ramp resolves to), its mover riding the
+	// carrier as its ground link; its row publishes the mirrored
+	// predicted pose, so the per-tick recompose must not drag it back
+	// to the record's sample between records. [orig:
+	// Entity_SerializeVehicleState stages the composed sample and lands
+	// groundEntity @0x4607cd..0x460802; no rigid re-attach]. A
+	// dead-pose wreck on a pool-1 deck keeps the seat-follow: the
+	// mover is frozen for it (JoinerRole) and the dead-pose form's
+	// carrier handling is not re-witnessed here.
+	const bool dead_pose = child.state_flags_known &&
+			(child.state_flags & kVehicleFlagDeadPose) != 0u;
+	const bool world_predicted = child.cls == EntityClass::Vehicle &&
+			child.net_world_mover &&
+			child.carrier_handle != wire_handle::kInvalid &&
+			(!dead_pose || world::EntityHandle{child.carrier_handle}.pool() != 1);
+	return child.net_seat_valid && child.carrier_handle != wire_handle::kInvalid &&
+			!world_predicted;
+}
+
+void ClientReplicaPipeline::follow_carrier_seat(ClientEntityState &child,
+		const ClientEntityState *carrier) {
+	if (carrier == nullptr) {
+		child.net_seat_valid = false;
+		return;
+	}
+	const WorldPose posed = network_transform_local_to_world(
+			child.net_seat_local[0], child.net_seat_local[1],
+			child.net_seat_local[2], carrier->x, carrier->y,
+			carrier->z, static_cast<uint32_t>(carrier->heading_bam),
+			static_cast<uint32_t>(carrier->pitch_bam),
+			static_cast<uint32_t>(carrier->roll_bam));
+	child.x = posed.x;
+	child.y = posed.y;
+	child.z = posed.z;
+	child.heading_bam = io::bam_add(carrier->heading_bam, child.net_seat_local_heading_bam);
+	child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
+}
+
 void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 	std::vector<uint16_t> sweep_destroyed;
 	// ClientState intentionally keeps its decoded rows public, so its general
@@ -471,44 +512,13 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 			// Compact-carried player/infantry/vehicle rows retain the latest
 			// successfully resolved local sample. A missing carrier invalidates
 			// the sample rather than leaving an offset that could attach to a
-			// later handle reuse.
-			// A world-mover VEHICLE is predicted by the embedding sim from the
-			// composed record sample whatever its carrier (a pool-1 deck, or
-			// the static a bridge/roof/ramp resolves to), its mover riding the
-			// carrier as its ground link; its row publishes the mirrored
-			// predicted pose, so the per-tick recompose must not drag it back
-			// to the record's sample between records. [orig:
-			// Entity_SerializeVehicleState stages the composed sample and lands
-			// groundEntity @0x4607cd..0x460802; no rigid re-attach]. A
-			// dead-pose wreck on a pool-1 deck keeps the seat-follow: the
-			// mover is frozen for it (JoinerRole) and the dead-pose form's
-			// carrier handling is not re-witnessed here.
-			const bool dead_pose = child.state_flags_known &&
-					(child.state_flags & kVehicleFlagDeadPose) != 0u;
-			const bool world_predicted = child.cls == EntityClass::Vehicle &&
-					child.net_world_mover &&
-					child.carrier_handle != wire_handle::kInvalid &&
-					(!dead_pose || world::EntityHandle{child.carrier_handle}.pool() != 1);
-			if (child.net_seat_valid && child.carrier_handle != wire_handle::kInvalid &&
-					!world_predicted) {
-				const ClientEntityState *carrier = find_row(child.carrier_handle);
-				if (carrier == nullptr) {
-					child.net_seat_valid = false;
-				} else {
-					const WorldPose posed = network_transform_local_to_world(
-							child.net_seat_local[0], child.net_seat_local[1],
-							child.net_seat_local[2], carrier->x, carrier->y,
-							carrier->z, static_cast<uint32_t>(carrier->heading_bam),
-							static_cast<uint32_t>(carrier->pitch_bam),
-							static_cast<uint32_t>(carrier->roll_bam));
-					child.x = posed.x;
-					child.y = posed.y;
-					child.z = posed.z;
-					child.heading_bam = io::bam_add(
-							carrier->heading_bam, child.net_seat_local_heading_bam);
-					child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
-				}
-			}
+			// later handle reuse (follows_carrier_seat / follow_carrier_seat).
+			// A row the walk parked takes its carrier at its own visit instead,
+			// as a pool-0 rider's own update poses it at its mounted site in the
+			// pool-0 walk (visit_parked_rows, D-NET-196); until then it keeps
+			// the pose its last tick left.
+			if (!child.rm_parked && follows_carrier_seat(child))
+				follow_carrier_seat(child, find_row(child.carrier_handle));
 
 			if (persistent_carrier[child_index] == wire_handle::kInvalid) continue;
 			// Only the addeweap/no-callback family rides this persistent
