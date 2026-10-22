@@ -72,7 +72,8 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             if ((flags & kEntityFlagPlayer) != 0 && world.match.outcome().ended) continue;
             // The selector words match the candidate's DcbId (+0x7C, entity_dcb_id), a
             // player's 10000 + slot. [orig: Entity_FindTargets `cmp eax, [esi+7Ch]`
-            //  @0x53A791 / @0x53A7C3; Entity_ValidateWeaponTarget @0x53A4C0;
+            //  @0x53A791 / @0x53A7C3 (pool 0), @0x53A99F / @0x53A9D1 (pool 1),
+            //  @0x53AB96 / @0x53ABD0 (pool 2); Entity_ValidateWeaponTarget @0x53A4C0;
             //  Weapon_CalcDamageByType @0x53944C]
             const int32_t dcb_id = entity_dcb_id(world, *c);
             const bool selected = self->target_selectors.admits_team(dcb_id, c->group_id);

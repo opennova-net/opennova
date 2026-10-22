@@ -215,7 +215,7 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
             //  @0x4BE38C..0x4BE39F]
             const int32_t candidate_dcb_id = candidate_body != nullptr
                     ? body_dcb_id(world, *candidate_body, &candidate)
-                    : candidate.net_id;
+                    : entity_dcb_id(world, candidate);
             score += static_cast<int32_t>((uint32_t(body_dcb_id(world, e, body)) + (key >> 8) -
                     uint32_t(candidate_dcb_id)) & 7u);
             if (score > best_score && score >= 4 &&

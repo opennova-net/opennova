@@ -619,7 +619,8 @@ int32_t body_dcb_id(const World &world, const AiEntity &body, const Entity *enti
 // and the projectile hit's shot relations. A player's 10000 + slot fails every relation
 // setter's `< 0x80` row guard.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - self @0x4BE42C / @0x4BE456, target @0x4BE43C /
-//  @0x4BE453; Entity_FindTargets @0x53A610 - @0x53A791 / @0x53A7C3;
+//  @0x4BE453; Entity_FindTargets @0x53A610 - @0x53A791 / @0x53A7C3, its pool-1 / pool-2 twins
+//  @0x53A99F / @0x53A9D1 / @0x53AB96 / @0x53ABD0;
 //  Entity_ValidateWeaponTarget @0x53A400 - @0x53A4C0; Weapon_CalcDamageByType @0x539140 -
 //  @0x53944C; Entity_ComputeWeaponFireOrigin @0x43B4B0 - @0x43B4C2;
 //  AI_HandleEvent_HelicopterCombatD @0x467730 - self @0x4677BF / @0x4677DD / @0x46788F /
@@ -993,7 +994,8 @@ public:
 	void clear_entity_references(World &world, EntityHandle removed);
 
 	// The 8 relation-matrix writes of acquisition/fire: the sees quad + the targeted quad,
-	// in the witnessed order/keys (group = Entity::group_id +0x11C, single = net_id +0x7C).
+	// in the witnessed order/keys (group = Entity::group_id +0x11C, single = the DcbId +0x7C,
+	// entity_dcb_id).
 	// [orig: @0x4677b3..0x4678b2 / @0x4b0a6f..0x4b0ae2; matrix identity via the setter
 	// bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
 	void apply_engage_relations(World &world, const Entity &self, const Entity &target);
