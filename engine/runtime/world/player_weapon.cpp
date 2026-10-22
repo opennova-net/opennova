@@ -1178,6 +1178,7 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.action_end_serial = 0;
 	w.action_finished = -1;
 	w.fire_held = w.fire_pressed = w.reload_pressed = false;
+	w.power_throw_left_down = false;
 	// A cross-category non-ForceScoped mount resets the target, not its current.
 	// [orig: Player_MountWeaponSlot @0x4DFB44..0x4DFB66]
 	const int old_index = world.tables.weapons.index_of(w.def_name.c_str());
@@ -1216,6 +1217,7 @@ void local_weapon_clear(LocalPlayerWeapon &w, PlayerViewState &view) {
 	w.fire_held = false;
 	w.fire_pressed = false;
 	w.reload_pressed = false;
+	w.power_throw_left_down = false;
 	fp_channel_reset(w);
 	player_view_scope_reset(view);
 	w.attack_kind = 0;
@@ -1282,6 +1284,16 @@ void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
 	w.fire_held = fire_held;
 	w.fire_pressed = w.fire_pressed || fire_pressed; // latch until consumed
 	w.reload_pressed = w.reload_pressed || reload_pressed;
+}
+
+void local_weapon_left_button_down(const World &world, LocalPlayerWeapon &w,
+		const PlayerViewState &view) {
+	// [orig: Input_ProcessBindings @0x4DDA88..0x4DDAFE; the declaration carries the gates]
+	if (view.binoculars_view_active || !w.active) return;
+	const Entity *player = world.registry.get(world.cached.local_player);
+	if (player == nullptr) return;
+	if (player->mounted && is_vehicle_control_seat(player->mount_type)) return;
+	w.power_throw_left_down = true;
 }
 
 // One 62.5 Hz pump of the local player's slot, after the world logic tick. The
@@ -1482,6 +1494,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		w.pending_throw_charge = 0;
 		w.fire_pressed = false;
 		w.reload_pressed = false;
+		w.power_throw_left_down = false;
 		return;
 	}
 	// Capture the outgoing slot identity. A switch completion below changes the
@@ -1507,35 +1520,50 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// @ 0x4e08fd (def Flags sign bit 0x80000000, fireable + ammo ->
 	// g_FireChargeStartTick = tick), release @ 0x4e07e9 -> WeaponSlot_RequestFire
 	// with the computed charge; world-wac-ai-re §27.]
+	// The windup starts at two events and never on a held tick: the left button's down
+	// (local_weapon_left_button_down) restarts it, or clears it on a slot that cannot fire;
+	// the fire row's press (the press latch, a key's: inmatch::Role::dispatch_record) starts
+	// one only when none runs. A press that met a slot it could not fire therefore starts
+	// none for as long as it is held, and its release throws nothing.
+	// [orig: Input_ProcessBindings @0x4DDA88..0x4DDAFE (the left-down's stores @0x4DDAF6 /
+	//  @0x4DDAFE); Input_HandleActionBinding_0 case 0x95 - the press leg's PowerThrow gate
+	//  @0x4E08FD..0x4E095C (start == 0 @0x4E0915, the store @0x4E0947, the clear @0x4E0954)]
+	// The pump's tick reading (logic_tick after the world tick) is the one its release and
+	// the HUD meter read, so a start written here and a hold measured here stay in step.
 	bool power_throw_release = false;
 	if ((w.def.flags & weapon_flag::kPowerThrow) != 0) {
+		// The windup refuses while a switch action runs OR is queued — the
+		// press gate's fireable term, not just the current action [orig: the
+		// fireable check @ 0x4e08fd]. Without the queued/deferred legs a
+		// press landing inside the draw-in latched a windup whose release
+		// the FSM then refused, leaking the charge byte onto a later shot.
+		const bool fireable =
+				active_slot.current == weapon_action::kIdle &&
+				active_slot.next == weapon_action::kIdle &&
+				!w.switch_in_flight && w.switch_deferred_action < 0;
+		const bool has_ammo =
+				active_slot.clip > 0 || w.def.clip_capacity < 0;
+		const uint32_t windup = fireable && has_ammo ? world.logic_tick : 0u;
 		if (!accept_weapon_input) {
 			w.power_throw_start_tick = 0;
 			w.pending_throw_charge = 0;
-		} else if (w.fire_held || w.fire_pressed) {
-			// The windup refuses while a switch action runs OR is queued — the
-			// press gate's fireable term, not just the current action [orig: the
-			// fireable check @ 0x4e08fd]. Without the queued/deferred legs a
-			// press landing inside the draw-in latched a windup whose release
-			// the FSM then refused, leaking the charge byte onto a later shot.
-			const bool fireable =
-					active_slot.current == weapon_action::kIdle &&
-					active_slot.next == weapon_action::kIdle &&
-					!w.switch_in_flight && w.switch_deferred_action < 0;
-			const bool has_ammo =
-					active_slot.clip > 0 || w.def.clip_capacity < 0;
-			if (w.power_throw_start_tick == 0 && fireable && has_ammo)
-				w.power_throw_start_tick = world.logic_tick;
-			in.fire_held = false;
-			in.fire_pressed = false;
-		} else if (w.power_throw_start_tick != 0) {
-			const int32_t held = static_cast<int32_t>(
-					world.logic_tick - w.power_throw_start_tick);
-			w.pending_throw_charge = power_throw_charge_from_hold(held);
-			w.power_throw_start_tick = 0;
-			in.fire_pressed = true;
-			in.fire_held = false;
-			power_throw_release = true;
+		} else {
+			if (w.power_throw_left_down)
+				w.power_throw_start_tick = windup;
+			else if (w.fire_pressed && w.power_throw_start_tick == 0)
+				w.power_throw_start_tick = windup;
+			if (w.fire_held || w.fire_pressed) {
+				in.fire_held = false;
+				in.fire_pressed = false;
+			} else if (w.power_throw_start_tick != 0) {
+				const int32_t held = static_cast<int32_t>(
+						world.logic_tick - w.power_throw_start_tick);
+				w.pending_throw_charge = power_throw_charge_from_hold(held);
+				w.power_throw_start_tick = 0;
+				in.fire_pressed = true;
+				in.fire_held = false;
+				power_throw_release = true;
+			}
 		}
 	} else {
 		w.power_throw_start_tick = 0;
@@ -1610,6 +1638,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	}
 	w.fire_pressed = false; // edges consume on the first tick of the frame
 	w.reload_pressed = false;
+	w.power_throw_left_down = false;
 	WeaponPresentationEvent pending;
 	pending.tick = world.logic_tick;
 	bool has_presentation_event = false;

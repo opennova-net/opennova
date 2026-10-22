@@ -208,6 +208,9 @@ public:
     // no local player.
     bool apply_pose(const int32_t (&position_q16)[3], int32_t heading_bam, int32_t pitch_bam);
     void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
+    // The left mouse button's down at the update's message pump: the PowerThrow windup
+    // test it owes the weapon pump (world::local_weapon_left_button_down).
+    void left_button_down();
     // The ToSpecial action (input case 220): each press or release edge of its
     // keys queues one dispatch, and dispatch_to_special runs the queue with the
     // keys' live state, keeping a deferred dispatch (and those behind it) for

@@ -1318,6 +1318,10 @@ public:
 	// gate runs sim-side) (engine: runtime/world/local_player_view.cpp).
 	void set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
 	                                   bool p_reload_pressed);
+	// The left mouse button's down at an update's message pump: the PowerThrow windup test
+	// it owes the weapon pump (engine world::local_weapon_left_button_down carries the
+	// witness). C++ only: the player input router's.
+	void local_player_left_button_down();
 	// The dispatcher's head for a binding row's event by its dispatch code (engine:
 	// inmatch::Role::action_head_admits); with no bound role it admits, and the
 	// seam's own gates decide.

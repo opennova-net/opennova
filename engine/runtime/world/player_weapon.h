@@ -140,6 +140,9 @@ struct LocalPlayerWeapon {
     bool reload_pressed = false;
     uint32_t power_throw_start_tick = 0;
     uint8_t pending_throw_charge = 0;
+    // A left button's down at this update's message pump owes the pump its PowerThrow
+    // windup test (local_weapon_left_button_down); consumed with the press latch.
+    bool power_throw_left_down = false;
 
     uint32_t play_serial = 0;
     // The FP animadm channel (WeaponDef+0x174), in retail's two halves. The
@@ -513,6 +516,20 @@ bool local_held_weapon_visible(const World &world, const Entity &entity,
 void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
                             bool fire_held, bool fire_pressed,
                             bool reload_pressed);
+// The left mouse button's down (the message's event 2; a double click's 1024 runs none),
+// at the update's message pump ahead of its input frame, whatever row the button binds:
+// with the binocular view down, a local entity, an equipped weapon and a seat that is no
+// Controller or Driver seat, the pump's next tick runs the PowerThrow windup test, which
+// restarts the windup on a slot that can fire with ammo and clears it otherwise (a def
+// without the PowerThrow flag clears it too). The fire row's press leg starts a windup
+// only from the keyboard and only when none runs (inmatch::Role::dispatch_record).
+// [orig: Input_ProcessBindings @0x4DDA50 - the event-2 leg @0x4DDA88..0x4DDAFE (the
+//  binocular test @0x4DDA90, g_LocalPlayerEntity @0x4DDA99, the EquippedSlot @0x4DDAA3,
+//  parentSlot 2 / 5 @0x4DDAB3, the def @0x4DDABA, its sign bit @0x4DDABF,
+//  WeaponSlot_CanFireInCurrentState and WeaponSlot_HasAmmoAvailable, the stores
+//  @0x4DDAF6 / @0x4DDAFE); Input_DispatchMouseEvent @0x761470]
+void local_weapon_left_button_down(const World &world, LocalPlayerWeapon &w,
+                                   const PlayerViewState &view);
 
 // Why the pump would drop this tick's weapon input, if it would. The pump's
 // own gate (dead, a pending UseGun switch, a Controller/Driver seat) evaluated

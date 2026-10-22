@@ -129,6 +129,11 @@ void MissionFrameInput::set_to_special_held(bool p_held) {
 			(p_held ? HELD_TO_SPECIAL : 0u);
 }
 
+void MissionFrameInput::set_fire_keys_held(bool p_held) {
+	value_.player.held_action_bits = (value_.player.held_action_bits & ~HELD_FIRE_KEYS) |
+			(p_held ? HELD_FIRE_KEYS : 0u);
+}
+
 void MissionFrameInput::set_menu_open(bool p_open) {
 	value_.player.held_action_bits = (value_.player.held_action_bits & ~HELD_MENU_OPEN) |
 			(p_open ? HELD_MENU_OPEN : 0u);

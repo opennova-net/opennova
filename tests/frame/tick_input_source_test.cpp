@@ -859,20 +859,23 @@ void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
 // a press's or a release's) is the role's arm past the head: the case drops it whole under a
 // cease fire, then tests the binding live at its dispatch (the update's sample, HELD_FIRE):
 // held, the press leg latches the weapon pump's fire request; up (a click whose button came
-// up before its update), the release leg latches none (D-NET-NEW-LI-3).
+// up before its update), the release leg latches none (D-NET-NEW-LI-3). A PowerThrow def's
+// press leg requests no fire: it latches the press (its windup test) only from the keyboard
+// (HELD_FIRE_KEYS), never from a mouse's or a joystick's binding.
 // [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95: g_InCeaseFire @0x4E07C2,
 //  Input_IsBindingActive(0x95) @0x4E07D9, the release leg @0x4E07E9, the press leg
-//  @0x4E08DC]
+//  @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device test @0x4E090B)]
 void test_the_fire_record_tests_its_binding_live() {
 	using opennova::controls::InputEventOrigin;
 	using opennova::controls::InputEventQueue;
 	CHECK(opennova::controls::action_code(43) == 149, "attack_1's code");
 	struct FireDevice final : TickInputSource {
 		bool held = false;
+		bool keys = false;
 		bool queued = false;
 		InputPacket sample_tick(uint32_t) override {
 			InputPacket p;
-			p.held_action_bits = held ? HELD_FIRE : 0u;
+			p.held_action_bits = (held ? HELD_FIRE : 0u) | (keys ? HELD_FIRE_KEYS : 0u);
 			return p;
 		}
 		void queue_records(InputEventQueue &records) override {
@@ -897,6 +900,23 @@ void test_the_fire_record_tests_its_binding_live() {
 				face == 0   ? "a held binding's record latches the fire request"
 				: face == 1 ? "a binding that reads up takes the release leg: no request"
 				            : "a cease fire drops the record whole");
+	}
+	for (const bool keys : {false, true}) { // a PowerThrow def: the mouse's binding; a key's
+		auto role = std::make_unique<TickRecorder>();
+		spawn_local_player(*role);
+		role->kernel.local.weapon.def.flags = opennova::world::weapon_flag::kPowerThrow;
+		FireDevice device;
+		device.held = true;
+		device.keys = keys;
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		FrameInput three;
+		three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 3, "three updates");
+		CHECK(role->kernel.local.weapon.fire_pressed == keys,
+				keys ? "a PowerThrow's key press latches its windup test"
+				     : "a PowerThrow's mouse press latches none: its left-down owns the windup");
 	}
 }
 

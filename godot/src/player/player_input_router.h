@@ -276,6 +276,9 @@ private:
 	// The wheel notches' and the mouse buttons' click records since the last update's
 	// message pump (handle_input), in order, queued ahead of the sample's (queue_records).
 	std::vector<opennova::controls::InputEventRecord> pump_records_;
+	// A left button's down since the last update's message pump (or the scripted fire hold's
+	// press): its PowerThrow windup test runs at that pump (queue_records).
+	bool left_down_owed_ = false;
 	// The device step of the frame's head or of a later update (run_update_rows): the
 	// look pixels and the death screen the update's sample_tick reads.
 	Vector2 tick_scripted_look_;

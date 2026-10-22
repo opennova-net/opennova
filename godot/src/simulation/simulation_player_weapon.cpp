@@ -262,6 +262,10 @@ void Simulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pre
 			p_fire_held || player_.debug_weapon_fire_held, p_fire_pressed, p_reload_pressed);
 }
 
+void Simulation::local_player_left_button_down() {
+	if (kernel_) kernel_->local.left_button_down();
+}
+
 Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
 	Ref<PlayerWeaponView> out;
 	out.instantiate();

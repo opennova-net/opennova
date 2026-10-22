@@ -537,6 +537,7 @@ protected:
 	bool pause_flips_ = false;
 	bool to_special_held_ = false;
 	bool fire_held_ = false;
+	bool fire_keys_held_ = false;
 };
 
 // The held / pressed action bits of InputPacket, the retail action rows the
@@ -553,6 +554,11 @@ enum HeldAction : uint32_t {
 	// [orig: Game_ProcessMainFrame @0x52660D / @0x52661D; Input_ProcessFrame ->
 	//  Input_FlushDeferredEvents @0x49D591, its one caller].
 	HELD_MENU_OPEN = 1u << 2,
+	// A key slot of the fire row is down (Input_IsBindingActive's keyboard leg, device 1):
+	// the fire row's press leg starts a PowerThrow windup only from the keyboard
+	// (Role::dispatch_record) [orig: Input_IsBindingActive @0x498320 (the key slots
+	//  @0x498348); Input_HandleActionBinding_0 case 0x95 - the device test @0x4E090B].
+	HELD_FIRE_KEYS = 1u << 3,
 };
 // The Respawn key (code 55), the medic call (code 217), the reload row (code 211) and
 // ToSpecial (code 220) are records the update's drain dispatches in queue order

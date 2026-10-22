@@ -269,6 +269,7 @@ void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits
 	pause_flips_ = pause_flips;
 	to_special_held_ = (held_action_bits & HELD_TO_SPECIAL) != 0;
 	fire_held_ = (held_action_bits & HELD_FIRE) != 0;
+	fire_keys_held_ = (held_action_bits & HELD_FIRE_KEYS) != 0;
 	// Input_FlushDeferredEvents: each deferred dispatch (ToSpecial's, kept by a reload or a
 	// draw in progress) is queued again behind the update's records, its third argument the
 	// deferred marker 0xFFFFEEEE, under the queue's cap, the deferred queue emptied; it
@@ -371,15 +372,20 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// binding live (the update's sample, HELD_FIRE). Held, the press leg latches the weapon
 	// pump's fire request (a PowerThrow's windup among it); up, the release leg, whose
 	// PowerThrow throw the pump runs from the hold's end. So a click whose button came up
-	// before its record's update fires nothing (D-NET-NEW-LI-3).
+	// before its record's update fires nothing (D-NET-NEW-LI-3). A PowerThrow def's press leg
+	// requests no fire: it starts the windup only when the binding's device is the keyboard
+	// (HELD_FIRE_KEYS), a mouse press's windup being its left-down's
+	// (world::local_weapon_left_button_down), a joystick's none.
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95: g_BinocularsViewActive
 	//  @0x4E07B5, g_InCeaseFire @0x4E07C2, Input_IsBindingActive(0x95) @0x4E07D9, the release
-	//  leg @0x4E07E9, the press leg @0x4E08DC]
+	//  leg @0x4E07E9, the press leg @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device
+	//  test @0x4E090B)]
 	constexpr int kFireRow = 43;
 	if (code == controls::action_code(kFireRow)) {
 		world::LocalPlayer &local = kernel_->local;
 		if (action_head_admits(code) && !local.view.binoculars_view_active &&
-				!kernel_->world.rules.cease_fire && fire_held_)
+				!kernel_->world.rules.cease_fire && fire_held_ &&
+				((local.weapon.def.flags & world::weapon_flag::kPowerThrow) == 0 || fire_keys_held_))
 			local.set_weapon_input(true, true, false);
 		return;
 	}

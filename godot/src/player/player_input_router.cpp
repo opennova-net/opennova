@@ -62,6 +62,9 @@ public:
 	bool keys_down(const char *p_token) const override {
 		return pressed(p_token) || (controls_.is_valid() && controls_->is_token_key_down(p_token));
 	}
+	bool key_slots_down(const char *p_token) const override {
+		return controls_.is_valid() && controls_->is_token_key_down(p_token);
+	}
 	// A keyboard key fires its row through the key queue's events (the shell's
 	// KeyboardPass); the mouse, joystick and scripted arms here.
 	bool held_off_keyboard(const char *p_token) const override {
@@ -376,6 +379,14 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 }
 
 void PlayerInputRouter::queue_records(opennova::controls::InputEventQueue &r_records) {
+	// The update's message pump: a left button's down runs its PowerThrow windup test ahead
+	// of the input frame's records (engine world::local_weapon_left_button_down carries the
+	// witness).
+	if (left_down_owed_) {
+		left_down_owed_ = false;
+		const Ref<Simulation> pump_sim = sim();
+		if (pump_sim.is_valid()) pump_sim->local_player_left_button_down();
+	}
 	// Behind the records already waiting (the console's): the message pump's wheel records,
 	// the talk and HUD rows' off-keyboard edges, then the sample's rows (its key events in
 	// key order, then the action rows' off-keyboard edges); the queue's cap drops the rest.
@@ -607,6 +618,10 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	// the fire, reload and ToSpecial rows are records (engine inmatch::Role::dispatch_record
 	// carries the witness).
 	p_input->set_weapon_input(actions.fire_held, false, false);
+	p_input->set_fire_keys_held(actions.fire_keys_held);
+	// The scripted fire hold stands for its mouse button: its press owes the left button's
+	// down (engine controls::PlayerActionFrame::fire_off_press carries the witness).
+	if (actions.fire_off_press) left_down_owed_ = true;
 	p_input->set_to_special_held(actions.to_special_held);
 	p_input->set_menu_open(frame_menu_open_);
 	for (const auto &request : actions.requests) {
@@ -745,6 +760,7 @@ void PlayerInputRouter::reset_input_state() {
 	action_events_.clear();
 	sample_records_.clear();
 	pump_records_.clear();
+	left_down_owed_ = false;
 	const Ref<Simulation> reset_sim = sim();
 	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
 }
@@ -821,7 +837,12 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
 		const bool down = button->is_pressed();
 		const bool twice = down && button->is_double_click();
 		switch (button->get_button_index()) {
-			case MOUSE_BUTTON_LEFT: event = twice ? 1024 : down ? 2 : 4; break;
+			case MOUSE_BUTTON_LEFT:
+				event = twice ? 1024 : down ? 2 : 4;
+				// The left button's down (event 2, not a double click's 1024) owes its
+				// PowerThrow windup test to the next update's message pump.
+				if (event == 2) left_down_owed_ = true;
+				break;
 			case MOUSE_BUTTON_RIGHT: event = twice ? 2048 : down ? 8 : 0x10; break;
 			case MOUSE_BUTTON_MIDDLE: event = twice ? 4096 : down ? 32 : 64; break;
 			default: break;

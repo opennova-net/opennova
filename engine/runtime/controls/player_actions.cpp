@@ -208,6 +208,8 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	const bool fire_off_press = fire_off && !fire_off_down_;
 	const bool fire_off_release = !fire_off && fire_off_down_ && !gate.keyboard_captured;
 	fire_off_down_ = fire_off;
+	frame.fire_keys_held = source.key_slots_down("attack_1");
+	frame.fire_off_press = fire_off_press;
 	// The event rows fire once per queued key event (an OS repeat included), in
 	// the queue's order; their mouse, joystick and scripted arms on their press
 	// edges, after the keyboard pass's events (held_off_keyboard). A key the special-key

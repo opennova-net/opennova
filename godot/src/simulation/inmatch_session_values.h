@@ -25,6 +25,7 @@ public:
 		HELD_TO_SPECIAL = opennova::inmatch::HELD_TO_SPECIAL,
 		// The menu-open bit the session reads (D-MNU-72).
 		HELD_MENU_OPEN = opennova::inmatch::HELD_MENU_OPEN,
+		HELD_FIRE_KEYS = opennova::inmatch::HELD_FIRE_KEYS,
 	};
 	enum PressedAction {
 		PRESSED_FIRE = opennova::inmatch::PRESSED_FIRE,
@@ -72,6 +73,8 @@ public:
 	// The ToSpecial keys' live state after set_weapon_input, which its records' dispatch
 	// reads (opennova::inmatch::HELD_TO_SPECIAL).
 	void set_to_special_held(bool p_held);
+	// The fire row's key slots down after set_weapon_input (opennova::inmatch::HELD_FIRE_KEYS).
+	void set_fire_keys_held(bool p_held);
 	// A menu screen is up, under which no input frame runs
 	// (opennova::inmatch::HELD_MENU_OPEN).
 	void set_menu_open(bool p_open);

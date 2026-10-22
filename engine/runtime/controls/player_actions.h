@@ -32,6 +32,13 @@ public:
 	// ToSpecial handler reads its keys raw to tell its press from its release.
 	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
 	virtual bool keys_down(const char *token) const { return pressed(token); }
+	// Whether a key slot of the token's row is down by the key state alone (no mouse, no
+	// joystick): Input_IsBindingActive's keyboard leg, which it tests first.
+	// [orig: Input_IsBindingActive @0x498320 - the key slots @0x498348]
+	virtual bool key_slots_down(const char *token) const {
+		(void)token;
+		return false;
+	}
 	// The token held by an arm neither the key queue nor the click records carry: the
 	// joystick and the scripted device's hold. A keyboard key fires an event row once per
 	// queued key event (PlayerActionPoll::key_events), a mouse button once per click record
@@ -216,6 +223,16 @@ struct PlayerActionFrame {
 	//  @0x498348, the mouse wParam @0x49836E, the joystick @0x4983A0); Input_ProcessKeyboardEvents
 	//  @0x49D1F0 (the release pass @0x49D249..0x49D2B9, the press @0x49D42F)]
 	bool fire_held = false;
+	// The fire row's key slots down by the key state (Input_IsBindingActive's keyboard leg,
+	// device 1): a PowerThrow's press leg starts its windup only from the keyboard.
+	// [orig: Input_IsBindingActive @0x498320 (the key slots @0x498348, device 1 @0x498355);
+	//  Input_HandleActionBinding_0 case 0x95 - the device test @0x4E090B]
+	bool fire_keys_held = false;
+	// The fire row's off-keyboard arm pressed this poll (PlayerActionSource::held_off_keyboard:
+	// the scripted device's hold, which stands for the mouse button its row binds): the
+	// embedder owes the left button's down its PowerThrow windup test, as a real click's
+	// message does (world::local_weapon_left_button_down carries the witness).
+	bool fire_off_press = false;
 	// The reload (catalog row 47 magazine, code 211 = 0xD3) and ToSpecial (row 37, default
 	// F, code 220 = 0xDC) rows are records in `requests` (PlayerAction::Reload / ToSpecial),
 	// one per event in key order with the action rows', whose arms the role owns
