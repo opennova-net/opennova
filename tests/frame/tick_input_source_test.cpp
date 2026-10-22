@@ -896,6 +896,10 @@ void test_the_fire_record_tests_its_binding_live() {
 	for (const int face : {0, 1, 2}) { // held; up; held under a cease fire
 		auto role = std::make_unique<TickRecorder>();
 		spawn_local_player(*role);
+		// An equipped weapon on a live body: the press leg reads the slot
+		// (world::local_weapon_press_fire).
+		role->kernel.local.weapon.active = true;
+		role->kernel.world.registry.get(role->kernel.world.cached.local_player)->health = 100;
 		role->kernel.world.rules.cease_fire = face == 2;
 		FireDevice device;
 		device.held = face != 1;
@@ -905,8 +909,9 @@ void test_the_fire_record_tests_its_binding_live() {
 		three.delta_seconds = TickAccumulator::kTickDt * 3.0;
 		three.tick_source = &device;
 		CHECK(session.advance(three).ticks_run() == 3, "three updates");
-		CHECK(role->kernel.local.weapon.fire_pressed == (face == 0),
-				face == 0   ? "a held binding's record latches the fire request"
+		CHECK(role->kernel.local.weapon.fire_pressed == (face == 0) &&
+						role->kernel.local.weapon.fire_press_dispatched == (face == 0),
+				face == 0   ? "a held binding's record latches the fire request past its press leg"
 				: face == 1 ? "a binding that reads up takes the release leg: no request"
 				            : "a cease fire drops the record whole");
 	}

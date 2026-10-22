@@ -934,7 +934,8 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
     if (in.reload_pressed) weapon_fsm_request_reload(slot);
     const bool fire_request = in.fire_pressed || (slot.refire_queued && in.fire_held);
     slot.refire_queued = false; // consumed (RequestFire may re-queue it mid-FIRE)
-    if (fire_request) weapon_fsm_request_fire(def, slot);
+    if (fire_request && weapon_fsm_request_fire(def, slot) && in.fire_dry)
+        slot.next = weapon_action::kEmpty; // [orig: @0x4E0A1E]
 
     // --- the pump tail [orig: WeaponAction_ProcessFrame @ 0x541262..0x5414ac] -----
 

@@ -1179,6 +1179,7 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.action_finished = -1;
 	w.fire_held = w.fire_pressed = w.reload_pressed = false;
 	w.power_throw_left_down = false;
+	w.fire_press_dispatched = w.fire_press_dry = false;
 	// A cross-category non-ForceScoped mount resets the target, not its current.
 	// [orig: Player_MountWeaponSlot @0x4DFB44..0x4DFB66]
 	const int old_index = world.tables.weapons.index_of(w.def_name.c_str());
@@ -1218,6 +1219,7 @@ void local_weapon_clear(LocalPlayerWeapon &w, PlayerViewState &view) {
 	w.fire_pressed = false;
 	w.reload_pressed = false;
 	w.power_throw_left_down = false;
+	w.fire_press_dispatched = w.fire_press_dry = false;
 	fp_channel_reset(w);
 	player_view_scope_reset(view);
 	w.attack_kind = 0;
@@ -1279,6 +1281,7 @@ void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
 		w.fire_held = false;
 		w.fire_pressed = false;
 		w.reload_pressed = false;
+		w.fire_press_dispatched = w.fire_press_dry = false;
 		return;
 	}
 	w.fire_held = fire_held;
@@ -1489,6 +1492,31 @@ bool local_weapon_request_reload(World &world, LocalPlayerWeapon &w,
 	return true;
 }
 
+bool local_weapon_press_fire(World &world, LocalPlayerWeapon &w, const PlayerViewState &view) {
+	// [orig: Input_HandleActionBinding_0 case 0x95's press leg @0x4E08DC..0x4E0A1E; the
+	//  declaration carries the order]
+	if (view.binoculars_view_active || !w.active) return false; // no EquippedSlot @0x4E08EC
+	bool slot_has_def = false;
+	const uint8_t slot_adm = local_equipped_slot_def_adm(world, w, slot_has_def);
+	const WeaponTableEntry *def = slot_has_def ? world.tables.weapons.by_index(slot_adm) : nullptr;
+	if (def != nullptr && !world.script.weapon_input.record_fire_request(def->category))
+		return false; // @0x4E0968 / @0x4E0976
+	if ((w.def.flags & weapon_flag::kOnlyFireScoped) != 0 &&
+			(!local_player_scope_view_visible(world, w, view) || view.camera_mode != 0))
+		return false; // @0x4E098D / @0x4E09A0
+	bool dry = false;
+	if ((w.def.flags & weapon_flag::kOnlyFireLocked) != 0) {
+		const Entity *player = world.registry.get(world.cached.local_player);
+		const AiEntity *body = player != nullptr ? world.ai.for_handle(player->handle) : nullptr;
+		dry = body == nullptr || (body->slot.f[2] & 1) == 0; // @0x4E09BD..0x4E09C9
+	}
+	if (local_weapon_input_block(world, w) != LocalWeaponInputBlock::kNone) return false;
+	local_weapon_set_input(w, view, true, true, false);
+	w.fire_press_dispatched = true;
+	w.fire_press_dry = dry;
+	return true;
+}
+
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		LocalWeaponPumpIO &io) {
 	io.map_command = 0;
@@ -1511,6 +1539,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		w.fire_pressed = false;
 		w.reload_pressed = false;
 		w.power_throw_left_down = false;
+		w.fire_press_dispatched = w.fire_press_dry = false;
 		return;
 	}
 	// Capture the outgoing slot identity. A switch completion below changes the
@@ -1591,7 +1620,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// (weapon_fsm_tick drops it otherwise).
 		// [orig: Input_HandleActionBinding_0 @0x4E0420 (Input_IsBindingActive(149)
 		//  @0x4E07D9 ahead of the gate @0x4E0968..0x4E097B)]
-		if (player_alive && (w.fire_pressed || (active_slot.refire_queued && in.fire_held))) {
+		// A press dispatched through case 0x95's press leg at its record passed the gate
+		// there (local_weapon_press_fire); a sourceless press and the deferred refire meet it
+		// here.
+		const bool undispatched_press = w.fire_pressed && !w.fire_press_dispatched;
+		const bool refire = !w.fire_pressed && active_slot.refire_queued && in.fire_held;
+		if (player_alive && (undispatched_press || refire)) {
 			// The gate reads the EquippedSlot's def, not the AdmDef byte.
 			// [orig: Input_HandleActionBinding_0 @0x4E0420 - the EquippedSlot
 			//  @0x4E08DC..0x4E08E2, its def @0x4E08F2, the def's Type @0x4E0961]
@@ -1609,6 +1643,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// magazine or an empty reserve [orig: input case 0xD3 @ 0x4e0420].
 	in.reload_pressed = accept_weapon_input && w.reload_pressed &&
 			weapon_fsm_reload_allowed(w.def, active_slot);
+	// OnlyFireLocked with no lock at the press's dispatch: its accepted request is the dry
+	// click [orig: @0x4E0A16..0x4E0A1E].
+	in.fire_dry = in.fire_pressed && w.fire_press_dry;
 	in.is_local = true;
 	in.is_authority = io.is_authority; // the joiner defers the refill to the §5.58 round-trip
 	in.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
@@ -1655,6 +1692,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	w.fire_pressed = false; // edges consume on the first tick of the frame
 	w.reload_pressed = false;
 	w.power_throw_left_down = false;
+	w.fire_press_dispatched = w.fire_press_dry = false;
 	WeaponPresentationEvent pending;
 	pending.tick = world.logic_tick;
 	bool has_presentation_event = false;

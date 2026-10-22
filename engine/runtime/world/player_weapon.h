@@ -36,6 +36,8 @@ enum : int32_t {
     kNoClipsNoDraw = 0x00000010,
     kBurst = 0x00000020,
     kAuto = 0x00000100,
+    kOnlyFireScoped = 0x00004000,
+    kOnlyFireLocked = 0x10000000,
     kPowerThrow = static_cast<int32_t>(0x80000000u),
 };
 } // namespace weapon_flag
@@ -143,6 +145,12 @@ struct LocalPlayerWeapon {
     // A left button's down at this update's message pump owes the pump its PowerThrow
     // windup test (local_weapon_left_button_down); consumed with the press latch.
     bool power_throw_left_down = false;
+    // The latched press passed case 0x95's press-leg gates at its record
+    // (local_weapon_press_fire): the pump requests it with no WAC gate of its own; and
+    // whether an accepted request becomes the dry click (OnlyFireLocked with no lock).
+    // Both are consumed with the press latch.
+    bool fire_press_dispatched = false;
+    bool fire_press_dry = false;
 
     uint32_t play_serial = 0;
     // The FP animadm channel (WeaponDef+0x174), in retail's two halves. The
@@ -543,6 +551,29 @@ void local_weapon_left_button_down(const World &world, LocalPlayerWeapon &w,
 //  WeaponSlot_RequestReload @0x4E12E9); WeaponSlot_RequestReload @0x53F110]
 bool local_weapon_request_reload(World &world, LocalPlayerWeapon &w,
                                  const PlayerViewState &view, WeaponInventory *inventory);
+// The fire row's press leg at its record's dispatch (inmatch::Role::dispatch_record) for a
+// def without the PowerThrow flag, in the case's order, with an equipped weapon:
+// - the mission script's latch for the EquippedSlot def's type (WAC weaponfired) is set,
+//   and a type the script blocks (BlockFire) refuses the press;
+// - an OnlyFireScoped def refuses unless the optical view is visible in first person;
+// - an OnlyFireLocked def with no lock (the player's aim runtime's +8 bit 0) turns an
+//   accepted request into the dry click (WeaponFsmInputs::fire_dry);
+// - a Driver seat, or a Controller seat on a carrier that is no EWeap, refuses (the pump's
+//   input block, LocalWeaponInputBlock).
+// Passing them latches the press, which the pump requests (WeaponSlot_RequestFire, which
+// takes the slot by its current action whatever the order against a reload) with no WAC
+// gate of its own; a sourceless frame's press keeps the pump's gate. True = latched.
+// So the script's same-update pass sees the press, and a BlockFire it sets there refuses
+// no press dispatched ahead of it.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95's press leg: the EquippedSlot
+//  @0x4E08DC..0x4E08EC, the WAC latch dword_C6EA44[type] @0x4E0961..0x4E0968 and the
+//  BlockFire test dword_C6EA6C @0x4E096F..0x4E0976, OnlyFireScoped (0x4000) @0x4E097C..0x4E098B
+//  -> Player_IsOpticalViewVisible @0x4E098D, g_CameraMode @0x4E099A, OnlyFireLocked
+//  (0x10000000) @0x4E09AC..0x4E09BB, the aim runtime's lock bit @0x4E09BD..0x4E09C9, the
+//  seats @0x4E09CB..0x4E09FF (Driver @0x4E09DE, Controller's EWeap @0x4E09F5),
+//  Player_RequestPrimaryFire @0x4E0A06, nextAction = 5 @0x4E0A1E; Player_RequestPrimaryFire
+//  @0x5414C0 -> WeaponSlot_RequestFire(slot, 149, 0) @0x5414D4]
+bool local_weapon_press_fire(World &world, LocalPlayerWeapon &w, const PlayerViewState &view);
 
 // Why the pump would drop this tick's weapon input, if it would. The pump's
 // own gate (dead, a pending UseGun switch, a Controller/Driver seat) evaluated

@@ -373,6 +373,10 @@ struct WeaponFsmInputs {
                                 // chain, never a per-tick re-request
                                 // [orig: Input_IsBindingActive(149) @ 0x542e7f]
     bool reload_pressed = false; // the reload-key edge (case 0xD3 gates applied by caller)
+    // An OnlyFireLocked press with no lock: an accepted fire request becomes the dry click
+    // (the next action EMPTY) [orig: Input_HandleActionBinding_0 case 0x95 - nextAction = 5
+    // @0x4E0A1E behind Player_RequestPrimaryFire @0x4E0A06].
+    bool fire_dry = false;
     bool owner_present = true; // MountSlot+36; ownerless embedded slots still cool down
     bool is_local = true;        // owner == g_LocalPlayerEntity paths
     bool is_authority = true;    // listen-host/SP: reload requests apply immediately

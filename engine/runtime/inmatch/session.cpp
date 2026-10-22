@@ -380,12 +380,17 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	//  @0x4E07B5, g_InCeaseFire @0x4E07C2, Input_IsBindingActive(0x95) @0x4E07D9, the release
 	//  leg @0x4E07E9, the press leg @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device
 	//  test @0x4E090B)]
+	// An ordinary def's press leg runs its own gates there (world::local_weapon_press_fire:
+	// the WAC latch and BlockFire, OnlyFireScoped, OnlyFireLocked's dry click, the seats).
 	constexpr int kFireRow = 43;
 	if (code == controls::action_code(kFireRow)) {
 		world::LocalPlayer &local = kernel_->local;
-		if (action_head_admits(code) && !local.view.binoculars_view_active &&
-				!kernel_->world.rules.cease_fire && fire_held_ &&
-				((local.weapon.def.flags & world::weapon_flag::kPowerThrow) == 0 || fire_keys_held_))
+		if (!action_head_admits(code) || local.view.binoculars_view_active ||
+				kernel_->world.rules.cease_fire || !fire_held_)
+			return;
+		if ((local.weapon.def.flags & world::weapon_flag::kPowerThrow) == 0)
+			(void)local.press_fire();
+		else if (fire_keys_held_)
 			local.set_weapon_input(true, true, false);
 		return;
 	}

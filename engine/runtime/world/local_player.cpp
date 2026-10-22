@@ -401,6 +401,10 @@ void LocalPlayer::left_button_down() {
 	w::local_weapon_left_button_down(world_, weapon, view);
 }
 
+bool LocalPlayer::press_fire() {
+	return w::local_weapon_press_fire(world_, weapon, view);
+}
+
 bool LocalPlayer::request_reload() {
 	return w::local_weapon_request_reload(world_, weapon, view,
 			inventory_valid ? &inventory : nullptr);

@@ -213,6 +213,8 @@ public:
     void left_button_down();
     // The reload row's arm at its record's dispatch (world::local_weapon_request_reload).
     bool request_reload();
+    // The fire row's press leg at its record's dispatch (world::local_weapon_press_fire).
+    bool press_fire();
     // The ToSpecial action (input case 220): each press or release edge of its
     // keys queues one dispatch, and dispatch_to_special runs the queue with the
     // keys' live state, keeping a deferred dispatch (and those behind it) for
