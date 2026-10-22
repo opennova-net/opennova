@@ -171,7 +171,7 @@ void JoinerRole::push_mission_start_end() {
 // server-opcode queue stays unread until the next browse or join attempt. A resend list's
 // outgoing link flag reaches the process's indicators (D-NET-NEW-L1-26;
 // receive_unstopped_server carries the witness).
-// [orig: NapiNPManager_HandlePacket @0x622F10 - DispatchOpcode called @0x622F9B;
+// [orig: NapiNPManager_HandlePacket @0x622F10 - DispatchOpcode called @0x622F96;
 //  NapiNPProtocol_HandleSessionPacket @0x626A00 - the type-1 arm's FindConnection(1, sender)
 //  called @0x626AC5, the queue store @0x626C8C (pool_client, +0x22C);
 //  CNapiNetwork_PumpClientProtocolRecv @0x4C4FE0 - `push 1Ah` @0x4C4FEB;

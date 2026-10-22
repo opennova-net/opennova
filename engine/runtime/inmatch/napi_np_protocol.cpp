@@ -2149,9 +2149,9 @@ void admit_unstopped_packet(NapiNPConnection &conn, const SessionDeframeAdmissio
 // the node. The protocol's processing and drop bytes are written only zero.
 // [orig: NapiNPManager_PumpReceive @0x623010 - cb_on_raw @0x623121, cb_on_packet @0x623254,
 //  HandlePacket called @0x623284; NapiNPManager_HandlePacket @0x622F10 - DispatchOpcode called
-//  @0x622F9B, cb_on_dispatch @0x622FCD, cb_on_error(4) @0x622FF9; NapiNPProtocol_DispatchOpcode
-//  @0x622B40 - g_NPOpcodeHandlers @0x849D90 walked, the handler called with last argument 0
-//  @0x622BD3; NapiNPProtocol_HandleSessionPacket @0x626A00 - the type-1 arm
+//  @0x622F96 with last argument 0, cb_on_dispatch @0x622FCD, cb_on_error(4) @0x622FF9;
+//  NapiNPProtocol_DispatchOpcode @0x622B40 - g_NPOpcodeHandlers @0x849D90 walked, the handler
+//  called @0x622BFE; NapiNPProtocol_HandleSessionPacket @0x626A00 - the type-1 arm
 //  @0x626A96..0x626AA8, FindConnection called @0x626AC5, the gates @0x626B01 (conn_flag0
 //  only with has_seq), the key @0x626B72, the queue @0x626C8C; Nwu_HandleDisconnect @0x623CE0 -
 //  FindConnection(1) called @0x623D89, the gates @0x623DF2, the key @0x623E74, the type-1 queue
