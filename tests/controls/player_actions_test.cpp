@@ -154,9 +154,9 @@ bool test_the_chain_takes_digit_events() {
 // Reload, MedicReq and Respawn fire on their key events under their gates
 // (reload captured, respawn with gameplay input live, medic always), their held
 // keyboard keys firing nothing more; their off-keyboard arms keep their edges.
-// [orig: Input_HandleActionBinding case 0xD3 (reload) @0x4e0420, case 217
-//  @0x49b4b4 (MedicReq), case 55 @0x49B20B (respawn); the press scan's queue
-//  @0x49d42f / @0x49d488]
+// [orig: Input_HandleActionBinding_0 @0x4E0420 (case 0xD3, reload);
+//  Input_HandleActionBinding @0x49AD40 (case 217 @0x49b4b4 MedicReq, case 55 @0x49B20B
+//  respawn); the press scan's queue @0x49d42f / @0x49d488]
 bool test_reload_medic_and_respawn_fire_on_their_events() {
 	PlayerActions actions;
 	QueuedKeys keys;

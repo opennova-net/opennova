@@ -158,6 +158,20 @@ struct PlayerActionPoll {
 struct PlayerActionFrame {
 	bool fire_held = false;
 	bool fire_edge = false;
+	// The reload, MedicReq, Respawn and ToSpecial rows reach the session as one edge
+	// per sample. Retail dispatches every record, but a second one in the same input
+	// frame changes nothing: the reload request takes only a next action of 0, 1 or
+	// 11 and stores the reload's 4, the medic call's cooldown
+	// latches, the Respawn case's Player_ResetLocalInput memsets the event queue ahead
+	// of its 0x41 (a local entity with a def), which ends the drain, and ToSpecial's
+	// second press or release is a no-op. These edges dispatch in the session's tick
+	// prologue, behind the sample's row requests: their order against those rows is
+	// D-CTRL-6's next row (one event record queue per input frame).
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 (case 0xD3 -> WeaponSlot_RequestReload
+	//  @0x53F110, the next action's test @0x53F11E..0x53F12D, the store @0x53F12F);
+	//  Input_HandleActionBinding @0x49AD40 (case 55: Player_ResetLocalInput @0x49B20B ahead of
+	//  NetPacket_SendRequestRespawn @0x49B22A); Player_ResetLocalInput @0x4B2B80 (the entity
+	//  and def tests @0x4B2B85..0x4B2B8D, Input_ResetAllState @0x4B2B99)]
 	bool reload_edge = false;
 	bool medic_edge = false;
 	// ToSpecial (catalog row 37, default F, dispatch 220): its keys' live state
@@ -321,7 +335,12 @@ private:
 	// A key event the special-key chain took ahead of the binding scan: a digit
 	// while the USE hold (the hold the last poll latched) or an open Emotes / Radio
 	// menu holds the chain, whose arm picks the seat or the menu entry from the
-	// digit's key state (sample_use), so no row fires for its event.
+	// digit's key state (sample_use), so no row fires for its event. The menus are
+	// read as the sample found them: retail's arm runs per dequeued key and its pick
+	// closes the menu at once, so a second digit in the same input frame reaches the
+	// scan (D-CTRL-6's next row: the digit arms per key event in the keyboard pass)
+	// [orig: Input_HandleSpecialKeys @0x49C5C0 - the Emotes pick's send @0x49C752 and
+	//  the word's clear @0x49C75C, the Radio pick's @0x49C79E / @0x49C7A8].
 	bool chain_takes_key(const KeyRowEvent &event) const;
 };
 
