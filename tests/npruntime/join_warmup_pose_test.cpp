@@ -1,7 +1,8 @@
-// npruntime_join_warmup_pose: the join's warm-up resolve over the words the add left (net parity
-// lane L1, D-NET-503's late-join residue). A retail joiner joining our host after another player
-// takes TDH_I3A's 6003 start marker beside two buildings, where the warm-up's resolver pushes its
-// body before the S2C 0x0F carries it; our push differed by one unit on X and Y. The resolver
+// npruntime_join_warmup_pose: the join's placement and warm-up over the words the add left (net
+// parity lane L1, D-NET-503's late-join residue). A retail joiner joining our host after another
+// player takes TDH_I3A's 6003 start marker 13, a deck marker on a dock slab; our placement put it
+// one unit off on X and Y, through the marker's parent transform (the last case below; the
+// warm-up's resolve pushes it nowhere there, an offline probe on the mission showed). The resolver
 // reads two of the body's words as the add left them, since a hidden body runs no mover until its
 // join:
 //   - savedLivePose (+0x80..+0x88), which the add's model init stamps from the placed words and
@@ -19,7 +20,9 @@
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
+#include <base/gameprofile/game_type.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -279,6 +282,59 @@ bool run_the_warmup_resolve_takes_the_player_bit() {
 	return expect(x[1][0] == 8 * kOne, "a body without the player bit passes the CP volume");
 }
 
+// A start marker on a deck (a parent its load moved it into the frame of) is placed back in
+// world space through Entity_TransformLocalToWorld's own fixed point: each sine / cosine the x87's
+// of the parent's word through dbl_7C3608, times 2^22, truncated, each product floored by its
+// own >> 22, roll, then pitch, then yaw, then the parent's position. A composed matrix's rounded
+// sums put the marker one unit off: x8's tdh-i3a-tdm-late late joiner on TDH_I3A's 6003 marker
+// 13 (local words (-46052, 65102, 141312) on the dock slab at (0x1052CD, 0xFBC1DA52, 0x109D00),
+// Yaw word 0x40000000) landed at (0xF5481, 0xFBC1266B) on our host, where retail's JO:CA host
+// placed it at (0xF5482, 0xFBC1266A). That case's sine sits 0.005 below a whole 2^-22, an edge a
+// 24-bit x87 crosses, so the pin turns the same marker on a parent whose words keep every
+// truncation clear of its edge (Yaw 0x0E380000, 20 degrees: sine 1434242.54, cosine 3941463.48;
+// Pitch 0x071C0000 and Roll 0xFB060000 for the full chain), the words worked from the
+// transform's arithmetic.
+// [orig: Entity_FindBestSpawnPoint @0x50CCC0 - the call @0x50CF0F; Entity_TransformLocalToWorld
+//  @0x43BD00]
+bool run_a_deck_marker_turns_through_the_transforms_fixed_point() {
+	struct Case {
+		int32_t pitch, roll;
+		int32_t x, y, z;
+	};
+	for (const Case c : {Case{0, 0, 1004236, -71136313, 1230080},
+	                     Case{0x071C0000, static_cast<int32_t>(0xFB060000u), 977582, -71128207,
+	                          1211088}}) {
+		auto world = std::make_unique<w::World>();
+		world->registry.configure_pool(2, 4);
+		world->registry.configure_pool(3, 4);
+		w::Entity deck;
+		deck.kind = w::EntityKind::Building;
+		deck.position.set_q16({0x1052CD, static_cast<int32_t>(0xFBC1DA52u), 0x109D00});
+		deck.heading = 0x0E380000;
+		deck.pitch_bam = c.pitch;
+		deck.roll_bam = c.roll;
+		deck.alive = true;
+		const w::EntityHandle deck_h = world->registry.spawn(2, deck);
+		w::Entity marker;
+		marker.kind = w::EntityKind::Marker;
+		marker.item_id = 6003;
+		marker.has_item_def = true;
+		marker.position.set_q16({-46052, 65102, 141312});
+		marker.heading = 0x10000000;
+		marker.ground_target = deck_h;
+		(void)world->registry.spawn(3, marker);
+		const w::SpawnPointResult r = w::resolve_player_spawn_pose(*world, w::EntityHandle{},
+				w::EntityHandle{}, 0, 1, opennova::game_type::kTeamDeathmatch);
+		if (!expect(r.found && r.position.x.q16 == c.x && r.position.y.q16 == c.y &&
+		                    r.position.z.q16 == c.z,
+		            "the marker's local words turn through the transform's fixed point"))
+			return false;
+		if (!expect(r.heading_bam == 0x1E380000,
+		            "the heading word is the marker's plus the parent's")) return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -288,6 +344,7 @@ int main() {
 	if (!run_the_skip_test_reads_the_stamp()) ++failures;
 	if (!run_the_player_class_init_zeroes_pitch_and_roll()) ++failures;
 	if (!run_the_warmup_resolve_takes_the_player_bit()) ++failures;
+	if (!run_a_deck_marker_turns_through_the_transforms_fixed_point()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

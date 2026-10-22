@@ -303,6 +303,14 @@ uint32_t vehicle_trail_magnitude_q16(int32_t signed_speed) noexcept;
 void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
                         int32_t &pitch, int32_t &roll);
 
+// A pose held in a reference's frame turned into world space, in place: the position rotated by
+// the reference's Roll (about X), then Pitch (about Y), then Yaw (about Z) in 22-bit fixed point
+// (each sine / cosine the x87's of the word through dbl_7C3608, times 2^22, truncated; each
+// product floored by its own >> 22), then the reference's position added; the Yaw word gains the
+// reference's, the Pitch / Roll words stay the pose's. `ref` is the reference's position and its
+// Yaw / Pitch / Roll words. [orig: Entity_TransformLocalToWorld @0x43BD00]
+void entity_transform_local_to_world(const int32_t ref[6], int32_t pose[6]);
+
 // Stamp the mover-entry savedLivePose from the same reader [orig: the
 // per-mover prologue stamps of +0x80..+0x94].
 void stamp_saved_live_pose(Entity &e);

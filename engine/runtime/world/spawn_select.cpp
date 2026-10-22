@@ -11,6 +11,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h> // Entity
 #include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue
+#include <runtime/world/vehicle_motor.h> // entity_transform_local_to_world
 #include <base/gameprofile/game_type.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
@@ -55,27 +56,29 @@ SpawnPointResult marker_pose(const World &world, const Entity &marker) {
     if (parent == nullptr)
         return out;
 
-    // The parent's own +0x10..+0x18 words turn the marker's local position
-    // and add to its heading. [orig: Entity_TransformLocalToWorld @0x43BD00,
-    //  refEntity[3..5] @0x43BD22..0x43BD64]
+    // The parent's position and its own +0x10..+0x18 words turn the marker's
+    // local position, in the transform's own fixed point: truncated x87
+    // sines / cosines and a floor per product, roll, then pitch, then yaw,
+    // never a composed matrix's rounded sums (a deck marker on a dock slab at
+    // mission yaw 0 lands one unit off on X and Y through the matrix). The
+    // heading word is the two words' sum, wrapping; the marker's own pitch and
+    // roll stay. [orig: Entity_FindBestSpawnPoint @0x50CCC0 - the calls
+    //  @0x50CDC2 (each candidate's score) / @0x50CF0F (the winner);
+    //  Server_PositionPlayerForSpawn @0x50CF60 - the 6007 scatter @0x50D146, the
+    //  Co-op marker arm @0x50D416; Entity_TransformLocalToWorld @0x43BD00,
+    //  refEntity[3..5] @0x43BD22..0x43BD64, the heading add @0x43BE7E]
     int32_t parent_words[3];
     entity_orientation_words(*parent, parent_words);
-    const int32_t parent_position[3] = {
-        parent->position.x.q16, parent->position.y.q16,
-        parent->position.z.q16};
-    const CollisionMatrix parent_pose = collision_matrix_from_euler(
-        parent_words[0], parent_words[1], parent_words[2], parent_position);
-    const int32_t local[3] = {
-        marker.position.x.q16, marker.position.y.q16,
-        marker.position.z.q16};
-    int32_t transformed[3] = {};
-    parent_pose.transform_point(local, transformed);
+    const int32_t ref[6] = {
+        parent->position.x.q16, parent->position.y.q16, parent->position.z.q16,
+        parent_words[0], parent_words[1], parent_words[2]};
+    int32_t pose[6] = {
+        marker.position.x.q16, marker.position.y.q16, marker.position.z.q16,
+        out.heading_bam, out.pitch_bam, out.roll_bam};
+    entity_transform_local_to_world(ref, pose);
     // The transformed words are the pose's position words (D-NET-507).
-    out.position.set_q16({transformed[0], transformed[1], transformed[2]});
-    // Entity_TransformLocalToWorld adds heading while retaining the marker's
-    // local pitch and roll: the heading word is the two words' sum, wrapping.
-    // [orig: @0x43BE7E]
-    out.heading_bam = io::bam_add(parent_words[0], out.heading_bam);
+    out.position.set_q16({pose[0], pose[1], pose[2]});
+    out.heading_bam = pose[3];
     return out;
 }
 

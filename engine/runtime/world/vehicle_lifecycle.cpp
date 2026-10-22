@@ -48,6 +48,22 @@ void transform_world_to_local(const int32_t parent[6], int32_t pose[6]) {
 	pose[2] = bam_add(mul22(ty, t.s[2]), mul22(tz, t.c[2]));
 	pose[3] = bam_sub(pose[3], parent[3]);
 }
+} // namespace
+
+// See vehicle_motor.h. [orig: Entity_TransformLocalToWorld @0x43BD00]
+void entity_transform_local_to_world(const int32_t ref[6], int32_t pose[6]) {
+	const Trig t(ref);
+	const int32_t ry = bam_sub(mul22(pose[1], t.c[2]), mul22(pose[2], t.s[2]));
+	const int32_t rz = bam_add(mul22(pose[1], t.s[2]), mul22(pose[2], t.c[2]));
+	const int32_t px = bam_sub(mul22(pose[0], t.c[1]), mul22(rz, t.s[1]));
+	const int32_t pz = bam_add(mul22(pose[0], t.s[1]), mul22(rz, t.c[1]));
+	pose[0] = bam_add(ref[0], bam_sub(mul22(px, t.c[0]), mul22(ry, t.s[0])));
+	pose[1] = bam_add(ref[1], bam_add(mul22(px, t.s[0]), mul22(ry, t.c[0])));
+	pose[2] = bam_add(ref[2], pz);
+	pose[3] = bam_add(pose[3], ref[3]);
+}
+
+namespace {
 void write_pose(Entity &e, const int32_t pose[6]) {
 	e.position.set_q16({pose[0], pose[1], pose[2]});
 	e.veh.yaw_seeded = true;
@@ -117,15 +133,7 @@ bool VehicleSystem::resolve_spawn_pose(const Entity &e, int32_t pose[6]) const {
 			return false;
 		int32_t parent[6];
 		read_pose(*support, parent);
-		const Trig t(parent);
-		const int32_t ry = bam_sub(mul22(pose[1], t.c[2]), mul22(pose[2], t.s[2]));
-		const int32_t rz = bam_add(mul22(pose[1], t.s[2]), mul22(pose[2], t.c[2]));
-		const int32_t px = bam_sub(mul22(pose[0], t.c[1]), mul22(rz, t.s[1]));
-		const int32_t pz = bam_add(mul22(pose[0], t.s[1]), mul22(rz, t.c[1]));
-		pose[0] = bam_add(parent[0], bam_sub(mul22(px, t.c[0]), mul22(ry, t.s[0])));
-		pose[1] = bam_add(parent[1], bam_add(mul22(px, t.s[0]), mul22(ry, t.c[0])));
-		pose[2] = bam_add(parent[2], pz);
-		pose[3] = bam_add(pose[3], parent[3]);
+		entity_transform_local_to_world(parent, pose);
 	}
 	return true;
 }
