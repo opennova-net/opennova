@@ -248,6 +248,24 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket *socket, const PeerAddr *local_address,
 		const std::function<void(NapiNPConnection &slot)> &player_removed = {});
 
+// The browse's or a join's connection create over a held own pair (UnstoppedServer::own_client
+// and its twin, the first node, at address 0): the create destroys the session connection it
+// finds first, which after an error-arm exit is the held listen host's own client. The client
+// latches {2, 2, 0, 0, "N.C:CSSAC", 0, ""} if no record is latched, writes its /INOUT CLIENT
+// removal line, sends its 0x46s into the manager's loopback (no wire), and its disconnected
+// callback hands the process latch `latch` its record, first wins (null: none); the twin takes
+// that 0x46 through the loopback, latching the client's record, and goes pending, so the next
+// pump_unstopped_server destroys it (its SERVER line, no wire). The own pair is gone from the
+// held server's 0x81 counts from then on. Nothing when no own client is held.
+// (D-NET-NEW-L1-26)
+// [orig: CNapiGameSession_CreateServerConnection @0x4C9D30 - the +0xE60 test @0x4C9D6B,
+//  CNapiNetwork_DisconnectActiveConnection(.., "N.C:CSSAC") called @0x4C9D77, its
+//  CNapiNPConnection_Destroy @0x4C9D7D; the callers UI_StartLANSessionSearch @0x55836E /
+//  @0x55837E, UI_EnumerateAndJoinSession @0x56A011, CNapiGameSession_InitTransportConnection
+//  @0x4C9E16]
+void release_unstopped_own_client(UnstoppedServer &server, const ServerLogs &logs,
+		ProcessDisconnectLatch *latch);
+
 // A held node's destroy (the stop's and the held pump's reap): its /INOUT removal line with the
 // latched record, then its 0x86 burst over `socket` (null: none open, nothing on the wire).
 void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &logs,

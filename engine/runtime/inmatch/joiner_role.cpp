@@ -211,6 +211,11 @@ void JoinerRole::poll_preload() {
 	//  NapiNPProtocol_Pump(-1) @0x4CA14B]
 	std::vector<uint8_t> first_send;
 	if (!started_) {
+		// The attempt's connection create releases a held own client first (D-NET-NEW-L1-26;
+		// release_unstopped_own_client carries the witness).
+		if (client_process_ != nullptr)
+			release_unstopped_own_client(client_process_->unstopped_server, server_logs_,
+					&client_process_->disconnect_latch);
 		first_send = runtime->start();
 		started_ = true;
 	}
@@ -1474,6 +1479,10 @@ void JoinerRole::wire_frame_providers() {
 // ClientHello once (Idle -> Hello) the first armed frame.
 void JoinerRole::send_hello_once() {
 	if (!started_) {
+		// The attempt's connection create releases a held own client first (D-NET-NEW-L1-26).
+		if (client_process_ != nullptr)
+			release_unstopped_own_client(client_process_->unstopped_server, server_logs_,
+					&client_process_->disconnect_latch);
 		const std::vector<uint8_t> hello = runtime->start();
 		if (!hello.empty()) send(hello);
 		started_ = true;

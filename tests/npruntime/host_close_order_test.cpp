@@ -1478,6 +1478,102 @@ void test_a_held_node_takes_a_retransmitted_join() {
 	CHECK(removed != std::string::npos && added != std::string::npos && removed < added);
 }
 
+// D-NET-NEW-L1-26 (L1-s23 row 1): the browse's (or a join's) connection create destroys the
+// session connection it finds, which after an error-arm exit is the held listen host's own
+// client. It latches {2, 2, 0, 0, "N.C:CSSAC", 0, ""} and writes its CLIENT removal line; its
+// callback hands the process latch that record (first wins: a stale one stays), which maps no
+// exit; its 0x46 reaches the twin through the loopback, so the twin goes pending with the
+// client's record and the browse's pump destroys it (its SERVER line, nothing on the wire). The
+// held server's 0x81 then counts the remote node alone, and the next reset has no own pair.
+// [orig: CNapiGameSession_CreateServerConnection @0x4C9D30 - the +0xE60 test @0x4C9D6B,
+//  CNapiNetwork_DisconnectActiveConnection called @0x4C9D77, the destroy @0x4C9D7D;
+//  UI_StartLANSessionSearch @0x558300 - the create @0x55836E / @0x55837E;
+//  CNapiNetwork_DisconnectActiveConnection @0x4C9140 - dc 2 @0x4C91EF, the text @0x4C91FF, the
+//  latch @0x4C922D..0x4C923E; CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the line
+//  @0x6253D2, the client callback @0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 -
+//  the latch @0x4C6535..0x4C6559, the reason test @0x4C6571; Nwu_HandleDisconnect @0x623CE0 -
+//  the latch @0x6240A8..0x6240BA, RequestDisconnect called @0x6240C4; NapiNPProtocol_Pump
+//  @0x62A650 - the pending walk @0x62A6FD..0x62A793]
+void test_a_browse_start_releases_the_held_own_pair() {
+	auto host = std::make_unique<ListenHost>();
+	if (!host->boot()) {
+		++failures;
+		return;
+	}
+	host->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld;
+	host->role->close();
+	inmatch::UnstoppedServer &held = host->process->unstopped_server;
+	CHECK(held.own_client.has_value() && held.nodes.size() == 2 && held.nodes[0].conn.peer.ip == 0);
+	CHECK(!host->process->disconnect_latch.valid);
+
+	MemoryFiles files;
+	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
+	inout.set_stamp_text([] { return std::string(); });
+	inout.set_enabled(true);
+	inmatch::ServerLogs logs;
+	logs.inout = &inout;
+	logs.inout_switch = true;
+
+	inmatch::release_unstopped_own_client(held, logs, &host->process->disconnect_latch);
+	CHECK(!held.own_client.has_value());
+	const inmatch::ProcessDisconnectLatch &latch = host->process->disconnect_latch;
+	CHECK(latch.valid && latch.event.ds == 2 && latch.event.dc == 2 && latch.event.dpc == 0 &&
+			latch.event.dstr == "N.C:CSSAC");
+	CHECK(latch.exit_reason() == inmatch::kMissionExitNone);
+	CHECK(held.nodes.size() == 2 && held.nodes[0].conn.pending_disconnect &&
+			held.nodes[0].conn.disconnect_event_valid &&
+			held.nodes[0].conn.disconnect_event.dstr == "N.C:CSSAC");
+
+	// The browse's pump destroys the twin: its SERVER line after the client's, no datagram.
+	CaptureSocket socket;
+	inmatch::pump_unstopped_server(held, logs, socket, 6000);
+	CHECK(held.nodes.size() == 1 && held.nodes[0].conn.peer == kPeer);
+	for (const auto &[to, bytes] : socket.sent) CHECK(to.ip != 0);
+	const std::string text = files.files[inmatch::kInoutLogFileName] + inout.pending();
+	const std::size_t client_line = text.find("CLIENT PLAYER REMOVED");
+	const std::size_t server_line = text.find("SERVER PLAYER REMOVED");
+	CHECK(client_line != std::string::npos && server_line != std::string::npos &&
+			client_line < server_line);
+	CHECK(text.find("\"N.C:CSSAC\"", server_line) != std::string::npos);
+
+	// The held 0x81 counts the remote node alone.
+	const std::vector<uint8_t> probe = nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
+			client_hello_to_bytes(make_title_client_hello(kJo, 5)));
+	CaptureSocket browser;
+	CHECK(inmatch::receive_unstopped_server(held, logs, browser, kStock, probe.data(),
+			probe.size(), 6016).taken);
+	ServerHello hello;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	CHECK(browser.sent.size() == 1 &&
+			nw_decode_inbound(browser.sent[0].second.data(), browser.sent[0].second.size(), opcode,
+					body) &&
+			parse_server_hello(body.data(), body.size(), hello));
+	CHECK(hello.np == 1 && hello.nc == 1);
+
+	// A second create finds nothing to release; the reset then writes no CLIENT line.
+	inmatch::release_unstopped_own_client(held, logs, &host->process->disconnect_latch);
+	inmatch::stop_unstopped_server(held, logs, nullptr, nullptr);
+	const std::string after = files.files[inmatch::kInoutLogFileName] + inout.pending();
+	CHECK(after.find("CLIENT PLAYER REMOVED", client_line + 1) == std::string::npos);
+	CHECK(!held.running && held.nodes.empty());
+
+	// A latch already holding a record (a kicked joiner's) keeps it.
+	auto stale = std::make_unique<ListenHost>();
+	if (!stale->boot()) {
+		++failures;
+		return;
+	}
+	stale->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld;
+	stale->role->close();
+	stale->process->disconnect_latch.latch(make_disconnect_event(2, 2, 0, 0, "", 35, ""));
+	inmatch::release_unstopped_own_client(stale->process->unstopped_server, inmatch::ServerLogs{},
+			&stale->process->disconnect_latch);
+	CHECK(stale->process->disconnect_latch.event.dpc == 35 &&
+			stale->process->disconnect_latch.event.dstr.empty());
+	CHECK(!stale->process->unstopped_server.own_client.has_value());
+}
+
 int main() {
 	test_an_empty_latch_takes_the_leave_and_stops_the_server();
 	test_a_stale_kick_maps_the_leave_and_skips_the_stop();
@@ -1500,6 +1596,7 @@ int main() {
 	test_a_held_server_admits_a_stock_join();
 	test_a_held_server_refuses_a_join();
 	test_a_held_node_takes_a_retransmitted_join();
+	test_a_browse_start_releases_the_held_own_pair();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }

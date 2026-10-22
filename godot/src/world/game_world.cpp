@@ -90,7 +90,8 @@ void GameWorld::_ready() {
 		NovaWorldClient::set_process_server_logs(&logs);
 		// The LAN browse's protocol pump steps the server an error-arm exit left held
 		// (LanSession::set_process_held_server, D-NET-NEW-L1-26).
-		LanSession::set_process_held_server(&client_process_.unstopped_server, &logs);
+		LanSession::set_process_held_server(&client_process_.unstopped_server,
+				&client_process_.disconnect_latch, &logs);
 	}
 	// The world's own process step exists for exactly one thing: the joiner
 	// preload wait the session drive steps (switched on by load_as_joiner,
@@ -210,7 +211,7 @@ void GameWorld::_notification(int p_what) {
 		}
 		NovaWorldClient::set_process_connect_log(nullptr);
 		NovaWorldClient::set_process_server_logs(nullptr);
-		LanSession::set_process_held_server(nullptr, nullptr);
+		LanSession::set_process_held_server(nullptr, nullptr, nullptr);
 		return;
 	}
 	if (p_what != NOTIFICATION_VISIBILITY_CHANGED || !is_node_ready()) {

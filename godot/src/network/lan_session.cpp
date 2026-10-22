@@ -30,6 +30,7 @@ constexpr const char *DEFAULT_BROADCAST = "255.255.255.255";
 
 // The process's held server and its log devices (LanSession::set_process_held_server).
 opennova::inmatch::UnstoppedServer *g_held_server = nullptr;
+opennova::inmatch::ProcessDisconnectLatch *g_held_server_latch = nullptr;
 opennova::inmatch::ServerLogs g_held_server_logs;
 // The browse standing for the process's one enumerator (LanSession::set_process_enumerator).
 LanSession *g_process_enumerator = nullptr;
@@ -78,8 +79,10 @@ uint32_t enumerate_address(const String &p_target) {
 } // namespace
 
 void LanSession::set_process_held_server(opennova::inmatch::UnstoppedServer *p_server,
+		opennova::inmatch::ProcessDisconnectLatch *p_latch,
 		const opennova::inmatch::ServerLogs *p_logs) {
 	g_held_server = p_server;
+	g_held_server_latch = p_latch;
 	g_held_server_logs = p_logs != nullptr ? *p_logs : opennova::inmatch::ServerLogs{};
 }
 
@@ -241,6 +244,11 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	// The game protocol reads the socket while the enumerator runs (a NovaWorld
 	// session's datagrams stay its own: the pump's demux).
 	game_ = std::make_unique<UdpPumpGameSocket>(pump_);
+	// The start's connection create releases a held own client first, its twin then going at the
+	// pump below (engine: inmatch::release_unstopped_own_client, D-NET-NEW-L1-26).
+	if (g_held_server != nullptr)
+		opennova::inmatch::release_unstopped_own_client(*g_held_server, g_held_server_logs,
+				g_held_server_latch);
 	// The start's protocol pump, ahead of the enumerator's first burst: its receive, then the
 	// held server's nodes, which the protocol's list holds ahead of the browse's connection
 	// (engine: inmatch::pump_unstopped_server, D-NET-NEW-L1-26). The pump's queue pass reads the

@@ -63,9 +63,16 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket *socket, const PeerAddr *local_address,
 		const std::function<void(NapiNPConnection &slot)> &player_removed) {
 	if (!server.running) return;
-	// A held own pair: the reset destroys the session's own client connection first, its
+	// A held own pair (one no browse or join start released, release_unstopped_own_client): the
+	// reset destroys the session's own client connection first, its
 	// removal line with the record it holds (latched or not); its 0x46 goes to the manager's
-	// loopback. The stop's walk then takes its twin, the first node, as any node. The line's
+	// loopback. The stop's walk then takes its twin, the first node, as any node. Its client
+	// callback's process latch write and switch reach nothing here: a host's reset precedes its
+	// mission start, which clears the exit reason and the input queue, a later own leave's record
+	// (CIDEMIS) maps nothing as the held record does, and a join clears the latch at its connect
+	// start [orig: Game_StartMission @0x524360 - g_MissionExitReason cleared @0x525B16,
+	// Input_ResetAllState called @0x525C66; CNapiNetwork_StartClientConnection @0x4CA160 - the
+	// latch's memset @0x4CA1A6..0x4CA1B4]. The line's
 	// gate, the active byte +0x28, holds for every held own client: a session's create
 	// succeeds only once its own connection reached state 5, whose state change sets the byte,
 	// and only a teardown clears it.
@@ -105,6 +112,47 @@ void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &log
 	if (socket == nullptr || conn.peer.ip == 0) return;
 	for (const std::vector<uint8_t> &datagram : host_goodbye_burst(/*host_running=*/true, conn))
 		socket->send_to(conn.peer, datagram.data(), datagram.size());
+}
+
+// The create's DisconnectActiveConnection over the held own client (its active byte set: the
+// session's create reached state 5), then its destroy: the record {role 2 (a client), 2, 0, 0,
+// "N.C:CSSAC", 0, ""} latched only where none is, the request, then the teardown's state-5 arm:
+// the CLIENT removal line, the 0x46s to address 0 (the manager's loopback FIFO, no wire), and the
+// client callback, whose process latch keeps the first record (the switch over a 2-class record
+// with reason 0 does nothing). Its NET DISCONNECTING line needs the connect log, which this
+// host's own new connection turned off at its session create, so it is never written here.
+// The loopback's 0x46s reach the twin at the next manager receive (drained ahead of the socket):
+// its handler latches the client's record on it only where none is and requests its disconnect,
+// and the protocol pump's pending walk destroys it.
+// [orig: CNapiNetwork_DisconnectActiveConnection @0x4C9140 - conn_flag0 tested, the role (1 for
+//  a server-side node @0x4C91CF, else 2 for a client), dc 2 @0x4C91EF, the text @0x4C91FF,
+//  latched-if-invalid @0x4C922D..0x4C923E,
+//  RequestDisconnect @0x4C924A; CNapiGameSession_CreateServerConnection @0x4C9D30 - the destroy
+//  @0x4C9D7D; CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the line @0x6253D2, the
+//  state-5 burst @0x6254BF..0x6254D3, the client callback @0x6254E7;
+//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the connect log's test ahead of
+//  @0x4C6486, the latch @0x4C6535..0x4C6559, the switch's `dc == 2` @0x4C6563 and reason test
+//  @0x4C6571; NapiNPServer_HandleNewConnection @0x4C8040 - g_ConnectLogEnabled cleared
+//  @0x4C80AF; CNapiNPManager_SendTo @0x61EC20 - the address test @0x61EC59, the FIFO's write
+//  called @0x61ECC6; Nwu_HandleDisconnect @0x623CE0 - the latch @0x6240A8..0x6240BA,
+//  RequestDisconnect called @0x6240C4; NapiNPProtocol_Pump @0x62A650 - the pending walk
+//  @0x62A6FD..0x62A793]
+void release_unstopped_own_client(UnstoppedServer &server, const ServerLogs &logs,
+		ProcessDisconnectLatch *latch) {
+	if (!server.own_client) return;
+	NapiNPConnection &own = *server.own_client;
+	latch_disconnect_event(own, make_disconnect_event(2, 2, 0, 0, "N.C:CSSAC", 0, ""));
+	write_inout_line(logs,
+			inout_player_removed_line(own, NapiNPConnection::kTypeClientSide));
+	const DisconnectEvent record = own.disconnect_event;
+	if (latch != nullptr) latch->latch(record);
+	for (UnstoppedNode &node : server.nodes) {
+		if (node.conn.peer.ip != 0) continue; // the twin, the own client's server-side node
+		latch_disconnect_event(node.conn, record);
+		node.conn.pending_disconnect = true;
+		break;
+	}
+	server.own_client.reset();
 }
 
 namespace {

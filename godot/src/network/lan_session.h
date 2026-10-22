@@ -2,6 +2,7 @@
 
 #include <net/npwire/lan_discovery.h>
 #include <net/npwire/net_ports.h>
+#include <runtime/inmatch/mission_exit.h>       // ProcessDisconnectLatch (the process's client latch)
 #include <runtime/inmatch/napi_np_connection.h> // UnstoppedServer (the process's held server)
 #include <runtime/inmatch/server_files.h>       // ServerLogs
 
@@ -130,8 +131,11 @@ public:
 	// node's joiner's datagrams reach its socket leg, the queued ones the pump's queue pass),
 	// then its nodes' legs ahead of the browse's own sends
 	// (engine: inmatch::receive_unstopped_server / pump_unstopped_server carry the witness,
-	// D-NET-NEW-L1-26). Null: none.
+	// D-NET-NEW-L1-26). The browse's start releases a held own client first, its record into
+	// the process's client latch `p_latch` (engine: inmatch::release_unstopped_own_client).
+	// Null: none.
 	static void set_process_held_server(opennova::inmatch::UnstoppedServer *p_server,
+			opennova::inmatch::ProcessDisconnectLatch *p_latch,
 			const opennova::inmatch::ServerLogs *p_logs);
 
 	void _ready() override;

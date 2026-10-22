@@ -1007,8 +1007,9 @@ struct UnstoppedServer {
 	uint32_t host_start_tick = 0;
 	ServerHello hello;
 	// A listen host's own client connection (+0xE60, type 2), held with its twin (the first node,
-	// at address 0) when the exit was not the own leave: the next reset destroys it ahead of the
-	// stop's walk. Its sends and its twin's go to the manager's loopback, never the socket.
+	// at address 0) when the exit was not the own leave: the next browse's or join's connection
+	// create destroys it (release_unstopped_own_client), else the next reset, ahead of the stop's
+	// walk. Its sends and its twin's go to the manager's loopback, never the socket.
 	std::optional<NapiNPConnection> own_client;
 	// The protocol's server-opcode queue (+0x22C, unbounded), which only a pump with flag bit 0
 	// drains: the LAN browse's and a join attempt's Pump(-1), never the joined match's flags 26.
