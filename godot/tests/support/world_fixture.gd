@@ -402,3 +402,32 @@ static func release_shell(test: GutTest, shell: MainGame) -> void:
 		shell.queue_free()
 	await test.get_tree().process_frame
 	MusicService.stop_context()
+
+
+## Release every key Godot's Input singleton still reports held. A scripted
+## input device replays its presses into Input as real key events
+## (ControlsModel.advance_scripted_input), and only its own later steps release
+## them: a test that ends mid-script, or cancels or detaches its device (a
+## cancel clears the held set the release diff reads), leaves the keys held for
+## every later test of the same GUT process (push 144's red: a held Ctrl+F6
+## turned tank_parity_test's wheel-up into the Ctrl-modified binding). Every
+## scripted-input user calls it in its teardown. Test support only.
+static func release_held_keys() -> void:
+	var released := false
+	var codes: Array[int] = []
+	for code in range(KEY_SPACE, 256):
+		codes.append(code)
+	for code in range(KEY_SPECIAL + 1, KEY_SPECIAL + 256):
+		codes.append(code)
+	for code in codes:
+		var key := code as Key
+		if not Input.is_key_pressed(key) and not Input.is_physical_key_pressed(key):
+			continue
+		var event := InputEventKey.new()
+		event.keycode = key
+		event.physical_keycode = key
+		event.pressed = false
+		Input.parse_input_event(event)
+		released = true
+	if released:
+		Input.flush_buffered_events()

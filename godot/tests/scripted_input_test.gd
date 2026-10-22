@@ -18,6 +18,7 @@ var _presenter: LocalPlayerPresenter
 
 
 func after_each() -> void:
+	WorldFixture.release_held_keys()
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	if _presenter != null:
 		_presenter.teardown()
@@ -166,6 +167,32 @@ func test_the_seam_replays_scripted_holds_as_bound_key_events() -> void:
 	model.advance_scripted_input(24)
 	model.set_scripted_input(null)
 	assert_null(model.get_scripted_input(), "null detaches")
+
+
+# A device cancelled and detached mid-press leaves the keys it replayed held
+# (the cancel clears the held set the release diff reads), and the next test of
+# the same process would read them: the teardown helper every scripted-input
+# user calls releases them (push 144's red was a held Ctrl+F6).
+func test_a_cancelled_press_leaves_its_keys_until_the_teardown_releases_them() -> void:
+	var model := ControlsModel.new()
+	var driver := ScriptedInput.new()
+	assert_eq(driver.load_steps([
+		{"tick": 0, "press": 182},
+		{"tick": 4, "end": true},
+	]), OK, driver.get_error())
+	model.set_scripted_input(driver)
+	assert_true(driver.start())
+	model.advance_scripted_input(30)
+	assert_true(Input.is_key_pressed(KEY_CTRL) and Input.is_key_pressed(KEY_1),
+			"seat1's press holds Ctrl+1")
+	driver.cancel()
+	model.advance_scripted_input(31)
+	model.set_scripted_input(null)
+	assert_true(Input.is_key_pressed(KEY_CTRL) and Input.is_key_pressed(KEY_1),
+			"nothing released the keys the cancelled device replayed")
+	WorldFixture.release_held_keys()
+	assert_false(Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_1),
+			"the teardown released both keys")
 
 
 # A char step types its character as a keystroke in the input frame it

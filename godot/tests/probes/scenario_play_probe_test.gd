@@ -24,6 +24,7 @@ func after_each() -> void:
 	if attached != null:
 		attached.cancel()
 	ControlsBindings.model().set_scripted_input(null)
+	WorldFixture.release_held_keys()
 	await WorldFixture.release_shell(self, _shell)
 	_shell = null
 	if not _temp_dir.is_empty():
