@@ -384,6 +384,9 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // carry objects), or a genx def's own ride.
     if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
     if ((e = live()) == nullptr) return;
+    // An ele0 def's own mover [orig: Entity_UpdateFallAndLandState @0x4A20E0 through
+    //  @0x4B8E53].
+    if (e->elevator_motion) update_item_elevator(*this, *e);
     // The +0x1C4 call ends here, whichever class leg it took: a joiner's decoded row
     // takes its visit at this slot (D-NET-196). [orig: Entity_UpdatePool1Slot
     //  @0x4B8E41..0x4B8E53, the return @0x4B8E55]

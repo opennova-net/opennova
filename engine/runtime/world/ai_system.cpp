@@ -620,6 +620,12 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // [orig: Entity_UpdatePhysicsStep @0x53BE10 - the stamp @0x53BE1E..0x53BE4D, the +0xA0 read
 //  @0x53BE58, the +0x270 test @0x53BE81; Entity_ResetToSpawnState @0x4B9610 - the zeroed
 //  +0x98..+0xA8 @0x4B9668..0x4B9686; PlayerClass_InitEntity @0x4B1060]
+// The ele0 row's mover (update_elevator) runs over a person's words: its lift the +0x1A8 word
+// (InfantryState::target_heading, the spawn reset's Yaw word), its vertical step +0xA0 the
+// motor's, its state +0x29C and previous state +0x2A0 the spawn memset's 0 on a player body
+// (Entity::veh.speed, Entity::script_next_ssn); the body's +0x28 ground entity the resolver's.
+// [orig: Entity_UpdateFallAndLandState @0x4A20E0 - +0x29C @0x4A2116, +0x1A8 @0x4A2124, +0xA0
+//  @0x4A2133, +0x2A0 @0x4A2187; Entity_ResetToSpawnState @0x4B9610 - +0x1A8 @0x4B9692]
 // The arty row's mover zeroes the velocity triple (the motor's), then on the session's
 // authority sends S2C 0x44 group 6 (Entity_SendEffectPacket, 0x136, msgClass 1): the +0x170
 // link's handle (0xFFFF with none), the +0x78 word, then the def+0x164 serializer's body, which
@@ -640,7 +646,7 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 //  the -1 @0x460B3C; Entity_ResetToSpawnState @0x4B9610 - +0x2EC / +0x2E4 / +0x2E8
 //  @0x4B9698..0x4B96A4; ArtyClass_InitFromDef @0x443430 - +0x2C4 = 10 @0x443473]
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
-// narrowed): ewep, ele0, towr, nade, rock, schl, clym, arti, aflr, gflr, stng, arty's barrage,
+// narrowed): ewep, towr, nade, rock, schl, clym, arti, aflr, gflr, stng, arty's barrage,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
 // pending word, upfx's swap-fade leg, and door's model callbacks.
 static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
@@ -677,6 +683,10 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
     }
     case PhysicsClass::Door:
     case PhysicsClass::Squib:
+        return true;
+    case PhysicsClass::Ele0:
+        update_elevator(world, body, e.inf.target_heading, e.inf.vel[2], body.veh.speed,
+                body.script_next_ssn);
         return true;
     case PhysicsClass::Arty:
         for (int axis = 0; axis < 3; ++axis) e.inf.vel[axis] = 0;

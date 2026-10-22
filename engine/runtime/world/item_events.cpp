@@ -4,10 +4,13 @@
 #include <runtime/world/world.h>
 #include <runtime/world/collision.h>
 #include <base/io/bam.h>
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/vehicle_motor.h>
 #include <runtime/terrain_query/height_field.h>
+#include <cstdio>
 #include <cstring>
 #include <algorithm>
 #include <iterator>
@@ -715,6 +718,67 @@ void update_item_ambient_sound(World &world, const Entity &entity) {
     world.out.sound_emitters.publish(std::move(sound));
 }
 
+// [orig: Entity_UpdateFallAndLandState @0x4A20E0]
+void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z, int32_t &state,
+        int32_t &prev_state) {
+    // The savedLivePose stamp from the Position and Yaw / Pitch / Roll words
+    // [orig: @0x4A20E8..0x4A2141].
+    stamp_saved_live_pose(entity);
+    // The step from the state word into the lift, Z and the vertical step
+    // [orig: `shl eax, 0Ah; add eax, 0FFFFFC00h` @0x4A2116..0x4A211F, @0x4A2124 / @0x4A212A /
+    //  @0x4A2133].
+    const int32_t step = io::bam_add(int32_t(uint32_t(state) << 10), -0x400);
+    lift = io::bam_add(lift, step);
+    entity.position.z.q16 = io::bam_add(entity.position.z.q16, step);
+    vel_z = step;
+    // Stopped, lowering while the lift is above 0; raising below 8 units while the +0x28
+    // ground entity's own +0x28 is this one [orig: @0x4A2147..0x4A2154, @0x4A215E..0x4A217B].
+    state = lift > 0 ? 0 : 1;
+    if (const Entity *ground = world.registry.get(entity.ground_target);
+            ground != nullptr && ground->ground_target == entity.handle)
+        state = lift >= 0x80000 ? 1 : 2;
+    if (state == prev_state) return; // [orig: @0x4A2187..0x4A218D]
+    prev_state = state;              // [orig: @0x4A2191]
+    const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
+    if (traits == nullptr) return;
+    // The stop's cue, the def's door-open set at the Position words [orig: @0x4A2197..0x4A21A5
+    //  -> Sound_PlayWithDistanceAttenuation(def+0x848)].
+    if (state == 1 && !traits->door_open_set.empty()) {
+        SoundSlotEvent cue;
+        cue.source_handle = entity.handle.packed;
+        cue.pos[0] = entity.position.x.q16;
+        cue.pos[1] = entity.position.y.q16;
+        cue.pos[2] = entity.position.z.q16;
+        std::snprintf(cue.set_name, sizeof(cue.set_name), "%s", traits->door_open_set.c_str());
+        world.out.slot_sounds.push_back(cue);
+    }
+    // The def's first loop at the Position words, lane 0, 10 ticks, pitch 1.0, full volume
+    // (the +0x98 velocity pointer it passes is not carried) [orig: @0x4A21AD..0x4A21F2 ->
+    //  SoundEmitter_RegisterSetLayers(def+0x82C)]. Retail reads the set with no null test
+    //  [orig: SoundEmitter_RegisterSetLayers @0x528340 - `cmp [ebp+24h], ebx` @0x528381], so a
+    // def with no first loop faults there; ours registers none (D-NET-NEW-L4-24).
+    const std::string &loop = traits->regional_loops[0];
+    if (loop.empty()) return;
+    SoundEmitterEvent sound;
+    sound.source_spawn_id = entity.registry_spawn_id;
+    sound.source_handle = entity.handle.packed;
+    sound.source_bms_id = entity.bms_id;
+    sound.emitted_tick = world.logic_tick;
+    sound.pos = {entity.position.x.q16 / io::kFp16One, entity.position.y.q16 / io::kFp16One,
+            entity.position.z.q16 / io::kFp16One};
+    sound.lifetime_ticks = 10;
+    sound.pitch_q16 = 65536;
+    sound.volume_q8_8 = 0xFFFF;
+    sound.lane = 0;
+    sound.set_name = loop;
+    world.out.sound_emitters.publish(std::move(sound));
+}
+
+void update_item_elevator(World &world, Entity &entity) {
+    update_elevator(world, entity, entity.elevator_lift, entity.veh.slide_z, entity.veh.speed,
+            entity.script_next_ssn);
+}
+
 // The client's kill of one slot, run by the S2C 0x26 kill-sync (its section
 // word) and by the vehicle compact record's destroyed-bit edge (section 0).
 // Past the +0x1C gate Health is zeroed whether or not the row is already dead;
@@ -989,6 +1053,11 @@ void tick_item_event_pool(World &world, int pool) {
         if (entity != nullptr && entity->registry_spawn_id == lifetime &&
                 entity->drop_motion != DropMotion::None)
             update_dropped_object(world, *entity);
+        // An ele0 def's own mover, on the same cohort [orig: Entity_UpdateFallAndLandState
+        //  @0x4A20E0 through @0x4C22E7 / @0x4C2393].
+        entity = world.registry.get(handle);
+        if (entity != nullptr && entity->registry_spawn_id == lifetime && entity->elevator_motion)
+            update_item_elevator(world, *entity);
     }
 }
 

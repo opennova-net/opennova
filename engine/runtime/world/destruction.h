@@ -225,6 +225,11 @@ struct ItemDeathTraits {
     int32_t particlefx_direction_q16[3] = {};
     std::array<RegionalItemSound, 4> regional_sounds;
     std::array<std::string, 4> regional_loops;
+    // def+0x848, the door-open set: the profile's slot 9, the def's door_open_sound over it
+    // (empty: none resolved). The ele0 mover's start cue plays it.
+    // [orig: ItemDef_ResolveAllResources @0x49E5F0 - the profile copies @0x49E62D / @0x49E74A,
+    //  the name's resolve @0x49E883..0x49E89A]
+    std::string door_open_set;
     bool has_sound_point = false;
     Vec3 sound_point; // intact-model SOUND userpoint, mission-local axes
     bool static_death = false;  // attrib2 & 0x100; generic death motion freezes
@@ -739,6 +744,15 @@ inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
 }
 void update_item_destroy_fade(World &world, Entity &entity);
 void update_item_ambient_sound(World &world, const Entity &entity);
+// The ele0 row's mover over an entity's words (the caller passes the words its kind keeps them
+// in): the savedLivePose stamp, the step (state << 10) - 0x400 into the lift, Z and the vertical
+// step, the next state (0 while the lift is above 0, else 1; 2 below 8 units while the +0x28
+// ground entity stands on this one), and on a change of state the def's door-open set (to 1
+// only) and its first loop. [orig: Entity_UpdateFallAndLandState @0x4A20E0]
+void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z, int32_t &state,
+		int32_t &prev_state);
+// An item on the ele0 row: update_elevator over its own words.
+void update_item_elevator(World &world, Entity &entity);
 void squib_event(World &world, Entity &entity, int phase);
 void tick_squib(World &world, Entity &entity);
 

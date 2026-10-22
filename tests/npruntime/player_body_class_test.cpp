@@ -1267,6 +1267,74 @@ void test_an_envs_or_upfx_row_body_registers_its_loop() {
 	}
 }
 
+// A body bound to the ele0 row runs the elevator mover over its own words: its lift the +0x1A8
+// word (InfantryState::target_heading), its vertical step the motor's +0xA0, its state +0x29C and
+// previous state +0x2A0 a player body's 0s. Above 0 it lowers by 0x400 a visit with no change;
+// at 0 it stops (the state change: the def's door-open set and its first loop); a body whose
+// +0x28 ground entity stands on it raises (state 2, the loop alone). No player-body update follows.
+// [orig: Entity_UpdateFallAndLandState @0x4A20E0 - @0x4A2116..0x4A2133, @0x4A2147..0x4A217B,
+//  @0x4A2187..0x4A21F2]
+void test_an_ele0_row_body_runs_the_elevator_mover() {
+	Clips clips;
+	Rig r;
+	r.world->ai.root_motion = &clips;
+	const w::Entity *other = r.spawn_remote(kPlyr);
+	const w::EntityHandle rider = other != nullptr ? other->handle : w::EntityHandle{};
+	w::Entity *body = r.spawn_remote(kPlyr);
+	w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+	w::ItemDeathTraits *traits =
+			body != nullptr ? r.world->tables.item_death_traits.get_mutable(body->item_id) : nullptr;
+	CHECK(rider.valid() && ae != nullptr && traits != nullptr && body->item_type_index > 0);
+	if (!rider.valid() || ae == nullptr || traits == nullptr || body->item_type_index <= 0) {
+		r.world->ai.root_motion = nullptr;
+		return;
+	}
+	r.world->tables.item_rows[static_cast<size_t>(body->item_type_index)].move_row =
+			w::PhysicsClass::Ele0;
+	CHECK(w::body_move_row(*r.world, *ae, body) == w::PhysicsClass::Ele0);
+	traits->regional_loops[0] = "Lift";
+	traits->door_open_set = "Clunk";
+	body->flags &= ~w::kEntityFlagCarried;
+	body->engine_flags &= ~w::kEntityFlagCarried;
+	body->net_move_input = 0x08;
+	body->ground_target = {};
+	body->veh.speed = 0;
+	body->script_next_ssn = 0;
+	body->saved_live_valid = false;
+	body->position.set_q16({5 << 16, 6 << 16, 20 << 16});
+	ae->inf.target_heading = 0x800;
+	ae->inf.vel[2] = 0x1234;
+	r.world->out.slot_sounds.clear();
+	r.world->out.sound_emitters.clear();
+	// Lowering: 0x800 -> 0x400, still above 0, no change.
+	r.world->ai.update_organic(*ae, *r.world, 1);
+	CHECK(body->saved_live_valid && body->saved_live_pos[2] == 20 << 16);
+	CHECK(ae->inf.target_heading == 0x400 && ae->inf.vel[2] == -0x400);
+	CHECK(body->position.z.q16 == (20 << 16) - 0x400);
+	CHECK(body->veh.speed == 0 && body->script_next_ssn == 0);
+	CHECK(r.world->out.slot_sounds.empty() && r.world->out.sound_emitters.empty());
+	// At 0 it stops: the cue and the loop.
+	r.world->ai.update_organic(*ae, *r.world, 2);
+	CHECK(ae->inf.target_heading == 0 && body->position.z.q16 == (20 << 16) - 0x800);
+	CHECK(body->veh.speed == 1 && body->script_next_ssn == 1);
+	CHECK(r.world->out.slot_sounds.size() == 1 &&
+			std::string(r.world->out.slot_sounds[0].set_name) == "Clunk");
+	CHECK(r.world->out.sound_emitters.size() == 1 &&
+			r.world->out.sound_emitters[0].set_name == "Lift");
+	// A rider: the body's ground entity stands on it, so it raises (the loop alone).
+	r.world->registry.get(rider)->ground_target = body->handle;
+	body->ground_target = rider;
+	r.world->out.slot_sounds.clear();
+	r.world->out.sound_emitters.clear();
+	r.world->ai.update_organic(*ae, *r.world, 3);
+	CHECK(body->veh.speed == 2 && body->script_next_ssn == 2 && ae->inf.vel[2] == 0);
+	CHECK(r.world->out.slot_sounds.empty() && r.world->out.sound_emitters.size() == 1);
+	r.world->ai.update_organic(*ae, *r.world, 4);
+	CHECK(ae->inf.vel[2] == 0x400 && body->position.z.q16 == (20 << 16) - 0x400);
+	CHECK(!ae->inf.player_moving);
+	r.world->ai.root_motion = nullptr;
+}
+
 // A body bound to the arty row zeroes its velocity triple on every visit, then on the session's
 // authority sends S2C 0x44 group 6 when its def's network callback is the guided serializer (an
 // arty / rokt / stng / hlfr / jvln ai_function): the +0x170 link's handle (0xFFFF with none),
@@ -1502,6 +1570,7 @@ int main() {
 	test_an_item_row_body_runs_its_movers_head();
 	test_an_envs_or_upfx_row_body_registers_its_loop();
 	test_an_arty_row_body_zeroes_its_velocity_and_sends_group_6();
+	test_an_ele0_row_body_runs_the_elevator_mover();
 	test_a_psec_row_body_runs_the_physics_step();
 	test_an_org_rows_player_body_takes_the_organic_init();
 	test_a_player_bodys_dcb_id_is_its_class_inits();

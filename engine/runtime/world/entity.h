@@ -427,6 +427,13 @@ struct Entity {
     bool door_initialized = false;
     bool door_event = false;
     bool door_motion = false;
+    // The ele0 row's mover (def+0x158) and its lift +0x1A8 on an item (the sum of its steps).
+    // Its other words are the ones the spawn writes: the state +0x29C (0 lowering, 1 stopped,
+    // 2 raising) veh.speed, the previous state +0x2A0 script_next_ssn, the vertical step +0xA0
+    // veh.slide_z. [orig: Entity_UpdateFallAndLandState @0x4A20E0; g_EntityClassPhysicsTable
+    //  @0x82ABC8 (the ele0 row @0x82ABEC)]
+    bool elevator_motion = false;
+    int32_t elevator_lift = 0;
     uint32_t door_touch_mask = 0;
     char door_open_sound[25] = {};
     char door_close_sound[25] = {};

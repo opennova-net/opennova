@@ -45,10 +45,15 @@ void bind_regional_sounds(world::World &world, const DefItemDef &def,
         shot.base_ticks = def.shot_delay_ticks[region][0];
         shot.range_ticks = def.shot_delay_ticks[region][1];
     }
+    traits.door_open_set.clear();
     for (const char *profile_name : {def.sound_profile, def.sound_profile_female}) {
         if (*profile_name == 0) continue;
         const auto *profile = world.tables.sound_profiles.find(profile_name);
         if (profile == nullptr || sets == nullptr) continue;
+        // def+0x848 from the profile's slot 9 [orig: ItemDef_ResolveAllResources @0x49E5F0 -
+        //  @0x49E62D / @0x49E74A]
+        if (sets->has(profile->set_names[audio::kSlotDoorOpen]))
+            traits.door_open_set = profile->set_names[audio::kSlotDoorOpen];
         for (int region = 0; region < 4; ++region) {
             if (sets->has(profile->set_names[region]))
                 traits.regional_loops[region] = profile->set_names[region];
@@ -69,6 +74,10 @@ void bind_regional_sounds(world::World &world, const DefItemDef &def,
         traits.regional_sounds[region].name =
                 sets != nullptr && sets->has(names[region]) ? names[region] : "";
     }
+    // The def's door_open_sound name over the profile's [orig: @0x49E883..0x49E89A].
+    if (def.door_open_sound[0])
+        traits.door_open_set = sets != nullptr && sets->has(def.door_open_sound) ?
+                def.door_open_sound : "";
 }
 
 // The by-id view over the parsed file: an id resolves to its FIRST row in
@@ -620,6 +629,11 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->door_event = !e->section_clone && def != nullptr &&
                 strutil::iequals(def->ai_function, "door");
         e->door_motion = !e->section_clone && move_row == world::PhysicsClass::Door;
+        // An item's ele0 mover (a pool-0 body runs its row through person_item_mover).
+        // [orig: g_EntityClassPhysicsTable @0x82ABC8 - the ele0 row @0x82ABEC ->
+        //  Entity_UpdateFallAndLandState @0x4A20E0]
+        e->elevator_motion = !e->section_clone && e->handle.pool() != 0 &&
+                move_row == world::PhysicsClass::Ele0;
         // Every def carries its two +0x6F3/+0x70B sound names; the door
         // commands play them, and so does the drop of a carried object off
         // its carrier (world::drop_object_from_carrier).
