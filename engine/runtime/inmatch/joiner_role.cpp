@@ -163,13 +163,20 @@ void JoinerRole::push_mission_start_end() {
 
 // Drain every datagram pending on the socket into the runtime's recv fold
 // (the witnessed poll-before-logic order [orig: Game_ProcessMainFrame
-// @0x5263f0]). A datagram from another source that a node of the process's held server takes
-// (a server an earlier error-arm exit left unstopped, ClientProcessState::unstopped_server) goes
-// to that node: every receive pump's queue pass dispatches by the source, so a held type-1
-// node's joiner's 0x43 reaches its node whatever the pump's other flags (D-NET-NEW-L1-26).
-// [orig: NapiNPProtocol_Pump @0x62A650 - flag 8's PumpRecvQueues called @0x62A6AC;
+// @0x5263f0]). A held node's joiner's datagram (a server an earlier error-arm exit left
+// unstopped, ClientProcessState::unstopped_server) goes to that node's socket leg: every socket
+// of the process reads into the one manager, whose opcode dispatch finds the node by the
+// source, whatever the pump's flags; its queued 0x43s and 0x46s wait for a Pump(-1): the joined
+// match's receive pump runs flags 0x1A and its send pump 0x2E2, neither with bit 0, so the
+// server-opcode queue stays unread until the next browse or join attempt. A resend list's
+// outgoing link flag reaches the process's indicators (D-NET-NEW-L1-26;
+// receive_unstopped_server carries the witness).
+// [orig: NapiNPManager_HandlePacket @0x622F10 - DispatchOpcode called @0x622F9B;
 //  NapiNPProtocol_HandleSessionPacket @0x626A00 - the type-1 arm's FindConnection(1, sender)
-//  called @0x626AC5]
+//  called @0x626AC5, the queue store @0x626C8C (pool_client, +0x22C);
+//  CNapiNetwork_PumpClientProtocolRecv @0x4C4FE0 - `push 1Ah` @0x4C4FEB;
+//  CNapiNetwork_PumpClientProtocolSend @0x4C5000 - `push 2E2h` @0x4C500B;
+//  NapiNPProtocol_PumpRecvQueues @0x6266A0 - the bit-0 test @0x6266C5 ahead of the +0x22C read]
 void JoinerRole::deposit_inbound() {
 	if (socket_ == nullptr || !runtime) return;
 	uint8_t buf[4096];
@@ -177,18 +184,31 @@ void JoinerRole::deposit_inbound() {
 		PeerAddr from{};
 		const int n = socket_->recv_from(buf, sizeof(buf), from);
 		if (n <= 0) break;
-		if (client_process_ != nullptr && !(from == host_addr_) &&
-				receive_unstopped_server(client_process_->unstopped_server, from, buf,
-						static_cast<std::size_t>(n),
-						static_cast<uint32_t>(runtime->join_clock_ms())))
-			continue;
+		if (client_process_ != nullptr && !(from == host_addr_)) {
+			const UnstoppedReceive held = receive_unstopped_server(
+					client_process_->unstopped_server, server_logs_, *socket_, from, buf,
+					static_cast<std::size_t>(n), static_cast<uint32_t>(runtime->join_clock_ms()));
+			if (held.net_quality_link_errors != 0)
+				runtime->raise_net_quality_link_errors(held.net_quality_link_errors);
+			if (held.taken) continue;
+		}
 		runtime->receive(buf, static_cast<std::size_t>(n));
 	}
 }
 
 void JoinerRole::poll_preload() {
 	if (!runtime) return;
-	send_hello_once();
+	// The join's own connection exists from the attempt's start, ahead of its first receive;
+	// its first send (the enumerate's 0x41, or the join's request) leaves from its own pump legs,
+	// behind the held nodes'.
+	// [orig: CNapiGameSession_InitTransportConnection @0x4C9E10 - CreateServerConnection called
+	//  @0x4C9E16, the enumerator's NapiTimer_Start @0x4CA127, NapiNPManager_Pump @0x4CA139, then
+	//  NapiNPProtocol_Pump(-1) @0x4CA14B]
+	std::vector<uint8_t> first_send;
+	if (!started_) {
+		first_send = runtime->start();
+		started_ = true;
+	}
 	deposit_inbound();
 	// A join attempt's protocol pump is Pump(-1), the enumerate-and-join's loop (the Hello
 	// phase) and the connect's (the Auth phase, through the pass whose receive takes the
@@ -202,9 +222,12 @@ void JoinerRole::poll_preload() {
 	//  @0x4C6EA2; CNapiNPConnection_Create - the tail link @0x62B17D..0x62B18A]
 	if (client_process_ != nullptr && socket_ != nullptr &&
 			(runtime->phase() == JoinerConnection::Phase::Hello ||
-			 runtime->phase() == JoinerConnection::Phase::Auth))
-		pump_unstopped_server(client_process_->unstopped_server, server_logs_, *socket_,
-				static_cast<uint32_t>(runtime->join_clock_ms()));
+			 runtime->phase() == JoinerConnection::Phase::Auth)) {
+		const uint32_t link_errors = pump_unstopped_server(client_process_->unstopped_server,
+				server_logs_, *socket_, static_cast<uint32_t>(runtime->join_clock_ms()));
+		if (link_errors != 0) runtime->raise_net_quality_link_errors(link_errors);
+	}
+	if (!first_send.empty()) send(first_send);
 	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_))
 		send(dg);
 	++now_tick_;

@@ -964,9 +964,10 @@ inline bool active_player_recipient(const NapiNPConnection &conn) {
 // past the socket's close until the next session reset's StopServer, which gates on
 // host_running alone, stops them (stop_unstopped_server, napi_np_protocol.h). The process
 // holds it (ClientProcessState). In between, the LAN browse's and a join's protocol pumps step
-// the held nodes over their socket (host_session.h pump_unstopped_server: the queued sends,
-// the send intervals, the receive-timeout reap), and a joiner's datagram that socket reads
-// reaches its node (napi_np_protocol.h receive_unstopped_server) (D-NET-NEW-L1-26).
+// the held nodes over their socket (napi_np_protocol.h pump_unstopped_server: the queue pass,
+// the queued sends, the send intervals, the receive-timeout reap), and a joiner's datagram
+// any socket of the process reads reaches its node's socket leg (napi_np_protocol.h
+// receive_unstopped_server) (D-NET-NEW-L1-26).
 // [orig: PostMenu_RouteMissionExit @0x568460 - the error arms' loc_5686DA, no FullDestroy;
 //  CNapiGameSession_ResetActiveSession @0x4C8A70 - StopServer called @0x4C8AA1 whatever
 //  +0x68 holds, +0x68 cleared @0x4C8AC0; NapiNPProtocol_StopServer @0x62A820 - host_running
@@ -983,10 +984,23 @@ struct UnstoppedNode {
 	std::vector<std::vector<uint8_t>> staged; // framed, not yet sent (they own lower sequences)
 	std::vector<ProtocolMessage> queued;      // not yet built, in queue order
 };
+// One datagram a held node's socket leg queued for the protocol pump's queue pass: a 0x43 or a
+// 0x46 whose key the leg matched, its source, opcode and NWU-decrypted body.
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the queue @0x626C8C (pool_client, proto
+//  +0x22C); Nwu_HandleDisconnect @0x623CE0 - the type-1 queue @0x624125]
+struct UnstoppedPacket {
+	PeerAddr from;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+};
 struct UnstoppedServer {
 	bool running = false;
 	std::vector<UnstoppedNode> nodes; // the server-side nodes, in list order
 	std::string session_name;         // the protocol's (+0x288), HOST STOPPED's
+	std::string protocol_name;        // the protocol's (+0xDC), the manager's PROTOCOL line's
+	// The protocol's server-opcode queue (+0x22C, unbounded), which only a pump with flag bit 0
+	// drains: the LAN browse's and a join attempt's Pump(-1), never the joined match's flags 26.
+	std::vector<UnstoppedPacket> queue;
 };
 
 } // namespace opennova::inmatch

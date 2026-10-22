@@ -1345,16 +1345,14 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 // immediate_outbound), and neither moves the send boundary nor the send-interval clock.
 // [orig: NapiNP_HandleResendList @0x623800; SendSessionPacket @0x61EDD0, called @0x6239b6;
 //  SendSessionPacket stamps only conn->last_send_tick, not BuildOutgoingPackets' +0x638]
-void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
-		const std::vector<uint8_t> &body, HandleResult &out) {
-	NapiNPConnection *conn = find_connection(ctx, peer);
-	if (conn == nullptr || conn->server_scrk.empty()) return;
-
+// NapiNP_HandleResendList past its connection gates, over one node: the key test, then each
+// requested packet reframed into `sends`. False when the key (or the body) refuses the list.
+// `named` reports a nonzero requested dword, which arms the server callback.
+bool resend_session_packets(NapiNPConnection &conn, const std::vector<uint8_t> &body,
+		bool &named, std::vector<std::vector<uint8_t>> &sends) {
 	std::vector<uint32_t> requested;
-	if (!decode_session_resend_list(
-			body.data(), body.size(), conn->server_sk, requested)) {
-		return;
-	}
+	if (!decode_session_resend_list(body.data(), body.size(), conn.server_sk, requested))
+		return false;
 	// A resend list is not receive activity: the handler reads GetTickCount and discards it,
 	// leaving the reap clock alone [orig: NapiNP_HandleResendList @0x623800 @0x62395f].
 	// The backoff callback (cb_server_6 = NapiNPServer_OnResendListCallback @0x4c62a0 -> slot+89876 = 1, the
@@ -1363,28 +1361,56 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// [orig: NapiNP_HandleResendList @0x6239aa sets the latch on the nonzero
 	//  path only; @0x6239ef gates the callback on it; @0x623974 returns before
 	//  the loop on a key-only body]
-	// The same callback raises the outgoing link error of the host's own
-	// connection indicators [orig: NapiNPServer_OnResendListCallback @0x4c62c0..0x4c62d5 — the
-	// g_NetQuality flag-1 store behind the cooldown test].
-	if (std::any_of(requested.begin(), requested.end(),
-			[](uint32_t sequence) { return sequence != 0; })) {
-		conn->link.nak_backoff_pending = true;
-		ctx.net_quality_link_errors |= kNetQualityLinkErrorOutgoing;
-	}
+	named = std::any_of(requested.begin(), requested.end(),
+			[](uint32_t sequence) { return sequence != 0; });
+	if (named) conn.link.nak_backoff_pending = true;
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
-				? conn->seq.next_outbound_seq
+				? conn.seq.next_outbound_seq
 				: requested_sequence;
 		std::vector<uint8_t> session_body;
 		if (!frame_session_packet_for_sequence(
-				conn->seq,
-				SessionCrypto{conn->server_scrk, {}, conn->client_ck},
+				conn.seq,
+				SessionCrypto{conn.server_scrk, {}, conn.client_ck},
 				sequence, session_body)) {
 			continue;
 		}
-		out.immediate_outbound.push_back(nw_encode_outbound(
+		sends.push_back(nw_encode_outbound(
 				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(session_body)));
 	}
+	return true;
+}
+
+void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
+		const std::vector<uint8_t> &body, HandleResult &out) {
+	NapiNPConnection *conn = find_connection(ctx, peer);
+	if (conn == nullptr || conn->server_scrk.empty()) return;
+	bool named = false;
+	if (!resend_session_packets(*conn, body, named, out.immediate_outbound)) return;
+	// The same callback raises the outgoing link error of the host's own
+	// connection indicators [orig: NapiNPServer_OnResendListCallback @0x4c62c0..0x4c62d5 — the
+	// g_NetQuality flag-1 store behind the cooldown test].
+	if (named) ctx.net_quality_link_errors |= kNetQualityLinkErrorOutgoing;
+}
+
+// Nwu_HandlePing past its connection gates, over one node: the key test, the receive stamp at
+// `stamp_ms`, then the 0x85 answer into `sends` (WR set) or the RTT against `clock_ms` (WR
+// clear). False when the key (or the body) refuses the ping.
+bool answer_session_ping(NapiNPConnection &conn, const std::vector<uint8_t> &body,
+		uint32_t stamp_ms, uint32_t clock_ms, std::vector<std::vector<uint8_t>> &sends) {
+	SessionPingBody ping;
+	if (!parse_session_ping_body(body.data(), body.size(), ping)) return false;
+	if (ping.receiver_local_key != conn.server_sk) return false;
+	conn.receive_inactive_ms = 0;
+	conn.receive_stamp_ms = stamp_ms;
+	if (ping.wants_reply) {
+		sends.push_back(nw_encode_outbound(SESSION_OPCODE_SERVER_PING,
+				build_session_ping_body(conn.client_ck, /*wants_reply=*/false,
+						ping.timestamp_ms)));
+	} else {
+		conn.session_ping_rtt_ms = clock_ms - ping.timestamp_ms;
+	}
+	return true;
 }
 
 // 0x45 ClientPing -> 0x85 ServerPing (WR set) or an RTT sample (WR clear). The
@@ -1399,19 +1425,32 @@ void handle_client_ping(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	if (conn == nullptr || conn->type != NapiNPConnection::kTypeServerSide ||
 			conn->phase < ConnectionPhase::Joined)
 		return;
-	SessionPingBody ping;
-	if (!parse_session_ping_body(body.data(), body.size(), ping)) return;
-	if (ping.receiver_local_key != conn->server_sk) return;
-	conn->receive_inactive_ms = 0;
-	conn->receive_stamp_ms = ctx.np_protocol.receive_clock_ms;
-	if (ping.wants_reply) {
-		out.outbound.push_back(nw_encode_outbound(SESSION_OPCODE_SERVER_PING,
-				build_session_ping_body(conn->client_ck, /*wants_reply=*/false,
-						ping.timestamp_ms)));
-	} else {
-		conn->session_ping_rtt_ms =
-				ctx.np_protocol.host_run_duration_ms - ping.timestamp_ms;
-	}
+	(void)answer_session_ping(*conn, body, ctx.np_protocol.receive_clock_ms,
+			ctx.np_protocol.host_run_duration_ms, out.outbound);
+}
+
+// Nwu_HandleDisconnect's queued leg over one node: the key test, then the client's record
+// (DC/DP1/DP2/DSTR/DPC/DDSTR; DS read and discarded) latched with the PEER's role 2 if nothing
+// is latched yet. An empty TLV run (ReadTLV fails first) still latches zeros. False when the
+// key refuses it.
+// [orig: Nwu_HandleDisconnect @0x623CE0 — TLV walk @0x623eb2..0x623fbd, the type-1 record
+//  {[1]=2 @0x624005, DC/DP1/DP2 @0x62400d..0x624015, DSTR->128 @0x624019, DPC @0x624090,
+//  DDSTR->32 @0x624097}, latch @0x6240a8..0x6240ba]
+bool latch_client_goodbye(NapiNPConnection &conn, const std::vector<uint8_t> &body) {
+	if (body.size() < 4) return false;
+	const uint32_t receiver_local_key =
+			static_cast<uint32_t>(body[0]) |
+			(static_cast<uint32_t>(body[1]) << 8) |
+			(static_cast<uint32_t>(body[2]) << 16) |
+			(static_cast<uint32_t>(body[3]) << 24);
+	// A delayed goodbye from the prior occupant of this endpoint must not destroy its replacement.
+	// [orig: CNapiNPConnection_SendDisconnectPacket @0x61F2A0 / Nwu_HandleClientGoodbye @0x624250]
+	if (receiver_local_key != conn.server_sk) return false;
+	DisconnectEvent received;
+	(void)parse_disconnect_event(body.data() + 4, body.size() - 4, received);
+	latch_disconnect_event(conn, make_disconnect_event(2, received.dc, received.dp1,
+			received.dp2, received.dstr, received.dpc, received.ddstr));
+	return true;
 }
 
 // 0x46 ClientGoodbye. [orig: Nwu_HandleClientGoodbye @0x624250]
@@ -1429,25 +1468,11 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// spawn-token return (@0x51b661..0x51b67a). The 120-second receive-timeout sweep uses
 	// this same teardown path.
 	NapiNPConnection *conn = find_connection(ctx, peer);
-	if (conn == nullptr || conn->type != NapiNPConnection::kTypeServerSide || body.size() < 4) return;
-	const uint32_t receiver_local_key =
-			static_cast<uint32_t>(body[0]) |
-			(static_cast<uint32_t>(body[1]) << 8) |
-			(static_cast<uint32_t>(body[2]) << 16) |
-			(static_cast<uint32_t>(body[3]) << 24);
-	// A delayed goodbye from the prior occupant of this endpoint must not destroy its replacement.
-	// [orig: CNapiNPConnection_SendDisconnectPacket @0x61F2A0 / Nwu_HandleClientGoodbye @0x624250]
-	if (receiver_local_key != conn->server_sk) return;
-	// The client's record (DC/DP1/DP2/DSTR/DPC/DDSTR; DS read and discarded) is latched with the
-	// PEER's role 2 if nothing is latched yet, then RequestDisconnect -> the destroy echoes it
-	// back in the 0x86 burst. An empty TLV run (ReadTLV fails first) still latches zeros.
-	// [orig: Nwu_HandleDisconnect @0x623CE0 — TLV walk @0x623eb2..0x623fbd, the type-1 record
-	//  {[1]=2 @0x624005, DC/DP1/DP2 @0x62400d..0x624015, DSTR->128 @0x624019, DPC @0x624090,
-	//  DDSTR->32 @0x624097}, latch @0x6240a8..0x6240ba, RequestDisconnect @0x6240c4]
-	DisconnectEvent received;
-	(void)parse_disconnect_event(body.data() + 4, body.size() - 4, received);
-	latch_disconnect_event(*conn, make_disconnect_event(2, received.dc, received.dp1,
-			received.dp2, received.dstr, received.dpc, received.ddstr));
+	if (conn == nullptr || conn->type != NapiNPConnection::kTypeServerSide) return;
+	// The client's record latched (latch_client_goodbye), then RequestDisconnect -> the destroy
+	// echoes it back in the 0x86 burst [orig: Nwu_HandleDisconnect @0x623CE0 -
+	// RequestDisconnect @0x6240c4].
+	if (!latch_client_goodbye(*conn, body)) return;
 	if (!teardown_connection(ctx, peer, &out.outbound)) return;
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerGoodbye;
@@ -2071,60 +2096,122 @@ void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &log
 		socket->send_to(conn.peer, datagram.data(), datagram.size());
 }
 
-// A receive pump's dispatch over a held server (the LAN browse's, a join attempt's, the joined
-// match's: every pump with flag 8 runs the queue pass): a joiner's 0x43 finds its node by the
-// sender's address and port, as at the host's own socket (the protocol's processing byte the
-// leg tests, +0x1F5, is written only zero, by the protocol's create). An in-order packet, and
-// each queued successor it makes contiguous, is parsed: the receive stamp the reap measures,
-// the peer's ACK over the node's sent list and the ACK the node now owes. The records' own
-// handlers are not run here (the server's message handlers with no mission; NARROWED), nor
-// the missing-sequence request, the ping, resend-list and goodbye legs.
-// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the +0x1F5 test @0x626A76,
-//  FindConnection(proto, 1, sender) @0x626A96..0x626AC5, the in-order leg @0x626BEB ->
-//  CNapiNPConnection_ParseMessages @0x625BC0 (the stamp @0x625D54, the ack sweep
-//  @0x625D90..0x625DA2); NapiNPProtocol_FindConnection @0x622750 (type, address and port);
-//  NapiNPProtocol_Create @0x625730 - the +0x1F5 store @0x625846; NapiNPProtocol_PumpRecvQueues
-//  @0x6266A0 - the connection walk's ParseMessages @0x62696B]
-bool receive_unstopped_server(UnstoppedServer &server, const PeerAddr &from,
-		const uint8_t *raw, std::size_t len, uint32_t now_ms) {
-	if (!server.running || raw == nullptr || len == 0) return false;
-	NapiNPConnection *node = nullptr;
-	for (UnstoppedNode &held : server.nodes) {
-		if (held.conn.peer == from) {
-			node = &held.conn;
-			break;
-		}
-	}
-	if (node == nullptr || node->phase < ConnectionPhase::Joined) return false;
+namespace {
+
+void held_connect_log_line(const ServerLogs &logs, const std::string &text) {
+	if (logs.connect != nullptr) logs.connect->line(text);
+}
+
+// NapiNPProtocol_FindConnection(1, sender) over the held nodes: type, address and port.
+// [orig: NapiNPProtocol_FindConnection @0x622750]
+UnstoppedNode *find_unstopped_node(UnstoppedServer &server, const PeerAddr &from) {
+	for (UnstoppedNode &node : server.nodes)
+		if (node.conn.peer == from) return &node;
+	return nullptr;
+}
+
+// CNapiNPConnection_ParseMessages over what one admission took for a held node: the receive
+// stamp the reap measures, the peer's ACK over the node's sent list and the ACK the node now
+// owes. Each record reaches DispatchMessage, whose game handler returns at once: every handler
+// of the server table opens on is_authority (or g_RoundOver, then is_authority), which the
+// router's error arm cleared (SetConnectionMode(0)) and no browse or join sets again; the
+// unknown-tag callback is a bare return and the pre-handler slot is empty.
+// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - the stamp @0x625D54, the ack sweep
+//  @0x625D90..0x625DA2, has_pending_out @0x625DFF, DispatchMessage called @0x625EF1;
+//  CNapiNPConnection_DispatchMessage @0x622570 - the pre-handler +0x2E8 @0x6226B1 (unset by
+//  CNapiNetwork_Init @0x4CA4A0, @0x4CA902..0x4CA9CD), the handler called @0x6226EF, the unknown-tag
+//  callback +0x2EC @0x622703 (byte_4C4670, nop / retn); g_NPMsgInfoServer @0x82B5D8 (each
+//  handler's `cmp g_NapiNPCtx.is_authority, 0` at its head, e.g. NapiNPServerMsg_UpdateAck
+//  @0x5024B0, NapiNPServerMsg_0x00C @0x501C30; Server_ProcessClientRequestRespawn @0x519AF0 -
+//  g_RoundOver @0x519B00, is_authority @0x519B0C); PostMenu_RouteMissionExit @0x568460 -
+//  CGameSession_SetConnectionMode(0) called @0x5686ED; CGameSession_SetConnectionMode @0x4C49F0
+//  - mode 0 stores is_authority 0 @0x4C4A2E]
+void admit_unstopped_packet(NapiNPConnection &conn, const SessionDeframeAdmission &admission,
+		uint32_t now_ms) {
+	if (!admission.admitted) return;
+	conn.receive_inactive_ms = 0;
+	conn.receive_stamp_ms = now_ms;
+	for (const SessionDeframeAdmission::Packet &packet : admission.packets)
+		if (!packet.messages.empty()) conn.session_ack_owed = true;
+	if (admission.max_ack_count > conn.peer_acked_seq)
+		conn.peer_acked_seq = admission.max_ack_count;
+	acknowledge_session_packets(conn.seq, admission.max_ack_count);
+}
+
+} // namespace
+
+// The manager's read of a held node's datagram. The manager writes RAW, COOKED and its dispatch
+// line around the opcode handler as for any datagram (the connect log the host's first new
+// connection turned off writes none of them). The server opcodes' socket legs find the node by
+// the sender: a 0x43 needs only the node and its key (the active byte is the queued leg's), and
+// is queued for the pump's server-opcode pass; a 0x46 the same; a resend list and a ping need
+// the active node and act at once over the socket the manager read from; the probe is taken for
+// the node. The protocol's processing and drop bytes are written only zero.
+// [orig: NapiNPManager_PumpReceive @0x623010 - cb_on_raw @0x623121, cb_on_packet @0x623254,
+//  HandlePacket called @0x623284; NapiNPManager_HandlePacket @0x622F10 - DispatchOpcode called
+//  @0x622F9B, cb_on_dispatch @0x622FCD, cb_on_error(4) @0x622FF9; NapiNPProtocol_DispatchOpcode
+//  @0x622B40 - g_NPOpcodeHandlers @0x849D90 walked, the handler called with last argument 0
+//  @0x622BD3; NapiNPProtocol_HandleSessionPacket @0x626A00 - the type-1 arm
+//  @0x626A96..0x626AA8, FindConnection called @0x626AC5, the gates @0x626B01 (conn_flag0
+//  only with has_seq), the key @0x626B72, the queue @0x626C8C; Nwu_HandleDisconnect @0x623CE0 -
+//  FindConnection(1) called @0x623D89, the gates @0x623DF2, the key @0x623E74, the type-1 queue
+//  @0x624125; NapiNP_HandleResendList @0x623800 -
+//  @0x6238EA, the key @0x623959, SendSessionPacket called @0x6239B6, cb_server_6 @0x623A0E
+//  (NapiNPServer_OnResendListCallback @0x4C62A0 - the g_NetQuality flag-1 store @0x4C62CE);
+//  Nwu_HandlePing @0x623A70 - @0x623B55, the key @0x623BC2, the stamp @0x623C56, SendPing
+//  called @0x623C6F; Nwu_HandleClientProbe @0x624280; NapiNPProtocol_Create @0x625730 - the
+//  +0x1F5 store @0x625846; NapiNPServer_HandleNewConnection @0x4C8040 - g_ConnectLogEnabled
+//  cleared @0x4C80AF, set again only by Game_ParseCommandLineAndInit @0x4A74AF / @0x4A74C9]
+UnstoppedReceive receive_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
+		opennova::IDatagramSocket &socket, const PeerAddr &from, const uint8_t *raw,
+		std::size_t len, uint32_t now_ms) {
+	UnstoppedReceive out;
+	if (!server.running || raw == nullptr || len == 0) return out;
+	UnstoppedNode *node = find_unstopped_node(server, from);
+	if (node == nullptr || napi_punkbuster_datagram(raw, len)) return out;
 	std::vector<uint8_t> unpacked;
-	if (!nw_unpack_inbound(raw, len, unpacked)) return false;
+	if (!nw_unpack_inbound(raw, len, unpacked) || napi_baffle_packet(unpacked)) return out;
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
-	if (!nw_split_unpacked(unpacked, opcode, body) ||
-			opcode != SESSION_OPCODE_PROTOCOL_MESSAGE)
-		return false;
-	NapiNPConnection &conn = *node;
-	ProtocolPacketHeader hdr;
-	std::vector<ProtocolMessage> flat;
-	SessionDeframeAdmission admission;
-	if (!deframe_session_packet(conn.seq,
-			SessionCrypto{{}, conn.client_scrk, 0, conn.server_sk}, body.data(), body.size(),
-			hdr, flat, &admission, /*drain_queued_successors=*/false))
-		return true;
-	for (;;) {
-		if (admission.admitted) {
-			conn.receive_inactive_ms = 0;
-			conn.receive_stamp_ms = now_ms;
-			for (const SessionDeframeAdmission::Packet &packet : admission.packets)
-				if (!packet.messages.empty()) conn.session_ack_owed = true;
-			if (admission.max_ack_count > conn.peer_acked_seq)
-				conn.peer_acked_seq = admission.max_ack_count;
-			acknowledge_session_packets(conn.seq, admission.max_ack_count);
+	if (!nw_split_unpacked(unpacked, opcode, body) || opcode < SESSION_OPCODE_PROTOCOL_MESSAGE ||
+			opcode > kClientProbeOpcode)
+		return out;
+	out.taken = true;
+	const int32_t unpacked_len = static_cast<int32_t>(unpacked.size());
+	held_connect_log_line(logs, napi_got_raw_text(static_cast<int32_t>(len), from));
+	held_connect_log_line(logs, napi_got_cooked_text(unpacked_len, from));
+	NapiNPConnection &conn = node->conn;
+	const bool active = conn.phase >= ConnectionPhase::Joined;
+	const bool keyed = body.size() >= 4 && io::read_u32_le(body.data()) == conn.server_sk;
+	bool handled = false;
+	std::vector<std::vector<uint8_t>> sends;
+	switch (opcode) {
+	case SESSION_OPCODE_PROTOCOL_MESSAGE:
+	case SESSION_OPCODE_CLIENT_GOODBYE:
+		if (keyed) {
+			server.queue.push_back(UnstoppedPacket{from, opcode, std::move(body)});
+			handled = true;
 		}
-		admission = SessionDeframeAdmission{};
-		if (!take_ready_session_packet(conn.seq, admission)) break;
+		break;
+	case SESSION_OPCODE_CLIENT_RESEND_LIST: {
+		bool named = false;
+		handled = active && resend_session_packets(conn, body, named, sends);
+		if (named) out.net_quality_link_errors |= kNetQualityLinkErrorOutgoing;
+		break;
 	}
-	return true;
+	case SESSION_OPCODE_CLIENT_PING:
+		handled = active && answer_session_ping(conn, body, now_ms, now_ms, sends);
+		break;
+	default: // the client probe: taken for the node
+		handled = true;
+		break;
+	}
+	for (const std::vector<uint8_t> &datagram : sends)
+		socket.send_to(from, datagram.data(), datagram.size());
+	held_connect_log_line(logs, handled
+			? napi_got_protocol_text(unpacked_len, from, server.protocol_name)
+			: napi_tossed_text(unpacked_len, from, NapiTossReason::NoProtocol));
+	return out;
 }
 
 namespace {
@@ -2225,9 +2312,63 @@ void send_unstopped_header_only(NapiNPConnection &c, opennova::IDatagramSocket &
 //  empty leg @0x629041..0x629067, the build @0x62907B, the prune @0x629082, the stamp
 //  @0x629089; NapiNPProtocol_Pump @0x62A650 - the walk's PumpFlags call @0x62A6F8, then that
 //  node's pending test @0x62A6FD, the latch only where none is @0x62A770, the destroy @0x62A793]
-void pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
+uint32_t pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket &socket, uint32_t now_ms) {
-	if (!server.running) return;
+	uint32_t link_errors = 0;
+	if (!server.running) return link_errors;
+	// Flag 8's receive first. Its server-opcode pass, in arrival order: each queued packet's
+	// handler again, its last argument 1, now needing the node active (conn_flag0): a 0x43 takes
+	// the in-order leg (a future one waits on the node's ordered queue and latches the
+	// missing-sequence check; a stale one is dropped), a 0x46 latches the client's record and
+	// requests the node's disconnect. A packet whose node a destroy took finds none.
+	// [orig: NapiNPProtocol_Pump @0x62A650 - PumpRecvQueues called @0x62A6AC;
+	//  NapiNPProtocol_PumpRecvQueues @0x6266A0 - mask bit 0 @0x6266C5, the +0x22C queue read
+	//  @0x6266FB, the handler called with 1 @0x6267AD; NapiNPProtocol_HandleSessionPacket @0x626A00
+	//  - the in-order leg @0x626BEB, the future leg @0x626C0C..0x626C3A; Nwu_HandleDisconnect
+	//  @0x623CE0 - the latch @0x6240A8..0x6240BA, RequestDisconnect called @0x6240C4]
+	std::vector<UnstoppedPacket> queued = std::move(server.queue);
+	server.queue.clear();
+	for (UnstoppedPacket &packet : queued) {
+		UnstoppedNode *node = find_unstopped_node(server, packet.from);
+		if (node == nullptr || node->conn.phase < ConnectionPhase::Joined) continue;
+		NapiNPConnection &conn = node->conn;
+		if (packet.opcode == SESSION_OPCODE_CLIENT_GOODBYE) {
+			if (latch_client_goodbye(conn, packet.body)) conn.pending_disconnect = true;
+			continue;
+		}
+		ProtocolPacketHeader hdr;
+		std::vector<ProtocolMessage> flat;
+		SessionDeframeAdmission admission;
+		if (deframe_session_packet(conn.seq,
+				SessionCrypto{{}, conn.client_scrk, 0, conn.server_sk}, packet.body.data(),
+				packet.body.size(), hdr, flat, &admission, /*drain_queued_successors=*/false))
+			admit_unstopped_packet(conn, admission, now_ms);
+	}
+	// Then its connection walk, in list order: each node's queued successors whose gap closed,
+	// then, latched with its ordered queue still nonempty, its missing-sequence request (the
+	// 0x84) over `socket`; a request naming a sequence raises the incoming link flag.
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the walk @0x626910..0x6269E8, the head
+	//  test @0x626960, ParseMessages called @0x62696B, the latch @0x6269BB,
+	//  CNapiNPConnection_SendMissingSeqList called @0x6269CE, cleared @0x6269D6]
+	for (UnstoppedNode &node : server.nodes) {
+		NapiNPConnection &conn = node.conn;
+		SessionDeframeAdmission admission;
+		while (take_ready_session_packet(conn.seq, admission))
+			admit_unstopped_packet(conn, admission, now_ms);
+		if (!conn.seq.missing_request_pending) continue;
+		conn.seq.missing_request_pending = false;
+		if (conn.seq.queued_inbound.empty()) continue;
+		const std::vector<uint32_t> missing =
+				build_session_missing_sequence_list(conn.seq, false);
+		std::vector<uint8_t> missing_body;
+		if (!encode_session_resend_list(conn.client_ck, missing, missing_body)) continue;
+		const std::vector<uint8_t> request =
+				nw_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, std::move(missing_body));
+		socket.send_to(conn.peer, request.data(), request.size());
+		if (std::any_of(missing.begin(), missing.end(),
+				[](uint32_t sequence) { return sequence != 0; }))
+			link_errors |= kNetQualityLinkErrorIncoming;
+	}
 	// One node's PumpFlags legs; the reap ends them.
 	const auto pump_legs = [&](UnstoppedNode &node) {
 		NapiNPConnection &c = node.conn;
@@ -2299,6 +2440,7 @@ void pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		teardown_unstopped_node(it->conn, logs, &socket);
 		it = server.nodes.erase(it);
 	}
+	return link_errors;
 }
 
 std::size_t connection_count(const NapiNPServerCtx &ctx) {

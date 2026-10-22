@@ -112,7 +112,8 @@ public:
 	// The process's held server (the game world's ClientProcessState::unstopped_server, a
 	// server an error-arm exit left unstopped) and the log devices its lines go to: the
 	// browse's protocol pump steps it over the browse's socket, its receive first (a held
-	// node's joiner's datagrams), then its nodes' legs ahead of the browse's own sends
+	// node's joiner's datagrams reach its socket leg, the queued ones the pump's queue pass),
+	// then its nodes' legs ahead of the browse's own sends
 	// (engine: inmatch::receive_unstopped_server / pump_unstopped_server carry the witness,
 	// D-NET-NEW-L1-26). Null: none.
 	static void set_process_held_server(opennova::inmatch::UnstoppedServer *p_server,

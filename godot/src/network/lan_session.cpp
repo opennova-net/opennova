@@ -341,11 +341,14 @@ void LanSession::poll_replies() {
 		opennova::PeerAddr from{};
 		const int n = game_->recv_from(buf, sizeof(buf), from);
 		if (n <= 0) break;
-		// A held node's joiner's datagram reaches its node (the protocol's dispatch by the
-		// source; engine: inmatch::receive_unstopped_server); the rest are the enumerator's.
+		// A held node's joiner's datagram reaches its node's socket leg (the manager's dispatch
+		// by the source; engine: inmatch::receive_unstopped_server); the rest are the
+		// enumerator's.
 		if (g_held_server != nullptr &&
-				opennova::inmatch::receive_unstopped_server(*g_held_server, from, buf,
-						static_cast<std::size_t>(n), opennova::inmatch::host_monotonic_milliseconds()))
+				opennova::inmatch::receive_unstopped_server(*g_held_server, g_held_server_logs,
+						*game_, from, buf, static_cast<std::size_t>(n),
+						opennova::inmatch::host_monotonic_milliseconds())
+						.taken)
 			continue;
 		browser_.accept_reply(buf, static_cast<size_t>(n), from);
 	}
@@ -353,7 +356,8 @@ void LanSession::poll_replies() {
 
 void LanSession::pump_held_server() {
 	if (g_held_server == nullptr || game_ == nullptr) return;
-	opennova::inmatch::pump_unstopped_server(*g_held_server, g_held_server_logs, *game_,
+	// Its 0x84's incoming link flag has no indicator to reach outside a match.
+	(void)opennova::inmatch::pump_unstopped_server(*g_held_server, g_held_server_logs, *game_,
 			opennova::inmatch::host_monotonic_milliseconds());
 }
 

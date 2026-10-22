@@ -782,8 +782,9 @@ inmatch::UnstoppedNode held_node(const PeerAddr &peer, uint32_t client_ck) {
 // steps each held node through PumpFlags' legs over the pump's socket:
 //   - the first pump with a zero holdoff builds the node's queue: its 0x25 leaves in one S2C
 //     0x83 over the node's own keys, and nothing else goes;
-//   - a joiner's 0x43 that socket reads stamps its node's receive (a header-only keepalive
-//     counts); a datagram from no held node's address is not taken;
+//   - a joiner's 0x43 that socket reads is queued by its node's socket leg, and the pump's
+//     queue pass stamps its node's receive (a header-only keepalive counts); a datagram from
+//     no held node's address is not taken;
 //   - past cs_dir0's timeout (120000 ms) since its last receive the node is reaped: the send
 //     interval's keepalive first, then its removal line with {1, 3, elapsed, timeout, "", 0,
 //     "NP.C:PT:SERTMOUT"} and its four 0x86 echoing that record, and it leaves the held list;
@@ -835,7 +836,8 @@ void test_the_browse_pump_steps_the_held_server() {
 	}
 	CHECK(server.nodes.size() == 2 && server.nodes[0].queued.empty());
 
-	// The fresh node's joiner sends a keepalive at 60000 ms: its node's receive moves.
+	// The fresh node's joiner sends a keepalive at 60000 ms: the socket leg queues it, and the
+	// pump's queue pass in that frame moves its node's receive.
 	SessionSequencing joiner;
 	std::vector<uint8_t> keepalive_body;
 	CHECK(frame_session_packet(joiner,
@@ -843,11 +845,14 @@ void test_the_browse_pump_steps_the_held_server() {
 			{}, keepalive_body));
 	const std::vector<uint8_t> keepalive =
 			nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(keepalive_body));
-	CHECK(inmatch::receive_unstopped_server(server, kPeer, keepalive.data(), keepalive.size(),
-			60000));
+	CHECK(inmatch::receive_unstopped_server(server, logs, socket, kPeer, keepalive.data(),
+			keepalive.size(), 60000).taken);
+	CHECK(server.queue.size() == 1 && server.nodes[0].conn.receive_stamp_ms == 1000);
+	CHECK(!inmatch::receive_unstopped_server(server, logs, socket, PeerAddr{0x0100007Fu, 40000},
+			keepalive.data(), keepalive.size(), 60000).taken);
+	inmatch::pump_unstopped_server(server, logs, socket, 60000);
+	CHECK(server.queue.empty());
 	CHECK(server.nodes[0].conn.receive_stamp_ms == 60000);
-	CHECK(!inmatch::receive_unstopped_server(server, PeerAddr{0x0100007Fu, 40000},
-			keepalive.data(), keepalive.size(), 60000));
 	CHECK(server.nodes[1].conn.receive_stamp_ms == 1000);
 
 	// At 121001 ms the stale node (last receive at 1000) is reaped; the fresh one is kept.

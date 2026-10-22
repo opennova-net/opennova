@@ -209,29 +209,49 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &logs,
 		opennova::IDatagramSocket *socket);
 
-// One datagram a receive pump of the process's socket read from `from` (the LAN browse's, a
-// join's, the joined match's: every receive pump's queue pass dispatches by the source): a held
-// node's joiner's 0x43 is parsed at the transport (the receive stamp the reap measures, the
-// peer's ACK, the ACK owed) at `now_ms`, the host clock's (host_monotonic_milliseconds). True
-// when a held node took it. (D-NET-NEW-L1-26)
-bool receive_unstopped_server(UnstoppedServer &server, const PeerAddr &from,
-		const uint8_t *raw, std::size_t len, uint32_t now_ms);
+// The manager's read of one datagram from `from` over a held server (the LAN browse's socket, a
+// join's, the joined match's: every socket of the process reads into the one manager, whose
+// opcode dispatch finds a held node by the source). A held node's datagram of the server
+// opcodes 0x43..0x47 is the held server's: the manager's lines through logs.connect (RAW,
+// COOKED, then PROTOCOL or TOSSED [4] by the handler's result; the connect log is off for the
+// process once a host took its first connection, so these write only under a log still on),
+// then the socket leg at `now_ms` (the host clock's, host_monotonic_milliseconds): a 0x43 or a
+// 0x46 whose key is the node's is queued for the next queue pass (UnstoppedServer::queue); a
+// resend list resends its packets over `socket` at once; a ping stamps the node's receive and
+// answers 0x85 over `socket` when it asks. `taken` is false for every other datagram (the
+// caller's own dispatch writes its lines); `net_quality_link_errors` carries the resend
+// list's outgoing flag (kNetQualityLinkErrorOutgoing) for the process's indicators.
+// (D-NET-NEW-L1-26)
+struct UnstoppedReceive {
+	bool taken = false;
+	uint32_t net_quality_link_errors = 0;
+};
+UnstoppedReceive receive_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
+		opennova::IDatagramSocket &socket, const PeerAddr &from, const uint8_t *raw,
+		std::size_t len, uint32_t now_ms);
 
-// The LAN browse's and a join's protocol pump over a held server, NapiNPProtocol_Pump(-1): every
-// held node, in list order, takes PumpFlags' legs at `now_ms` (the host clock's,
-// host_monotonic_milliseconds): its holdoff step; at a zero holdoff the build of its queue (the
-// packets framed before the exit, then the messages not yet built: the teardown's 0x25s, or a
-// header-only packet when an ACK is owed) over `socket`; its send intervals (the keepalive and
-// the retained-records rebuild); the receive-timeout reap past cs_dir0's timeout since its last
-// receive ("NP.C:PT:SERTMOUT", latched if none is); the flush counter, the prune and the
-// holdoff's reload. Right behind each node's legs, before the next node's, the protocol pump's
-// pending test destroys a reaped node: teardown_unstopped_node over `socket`, and the node
-// leaves the held list, so the next reset's StopServer stops only the nodes still held. Nothing
-// when no server is held. A held node's slot teardown reaches no handler: the browse's
-// connection mode clears is_authority. The callers: the LAN browse's start and frames
-// (godot/src/network/lan_session.cpp) and a join attempt's enumerate and connect frames
-// (JoinerRole::poll_preload), each after its receive. (D-NET-NEW-L1-26)
-void pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
+// The LAN browse's and a join's protocol pump over a held server, NapiNPProtocol_Pump(-1), at
+// `now_ms` (the host clock's, host_monotonic_milliseconds). First the receive's queue pass, in
+// arrival order: a queued 0x43 of an active node is parsed (in order: the receive stamp the reap
+// measures, the peer's ACK, the ACK owed; a future packet waits on the node's ordered queue and
+// latches the missing-sequence check; the records reach no handler: every handler of the
+// server table returns at is_authority, which the router's error arm cleared), a queued 0x46
+// latches its record and leaves its node pending; then each node in list order replays its
+// ready successors and, latched with its ordered queue still nonempty, sends its 0x84 over
+// `socket`. Then every held node, in list order, takes PumpFlags' legs: its holdoff step; at a
+// zero holdoff the build of its queue (the packets framed before the exit, then the messages
+// not yet built: the teardown's 0x25s, or a header-only packet when an ACK is owed) over
+// `socket`; its send intervals (the keepalive and the retained-records rebuild); the
+// receive-timeout reap past cs_dir0's timeout since its last receive ("NP.C:PT:SERTMOUT",
+// latched if none is); the flush counter, the prune and the holdoff's reload. Right behind each
+// node's legs, before the next node's, the protocol pump's pending test destroys a pending node
+// (a reap's, a goodbye's): teardown_unstopped_node over `socket`, and the node leaves the held
+// list, so the next reset's StopServer stops only the nodes still held. Nothing when no server
+// is held. A held node's slot teardown reaches no handler (is_authority). The callers: the LAN
+// browse's start and frames (godot/src/network/lan_session.cpp) and a join attempt's enumerate
+// and connect frames (JoinerRole::poll_preload), each after its receive. Returns the 0x84's
+// incoming flag (kNetQualityLinkErrorIncoming) when one named a sequence. (D-NET-NEW-L1-26)
+uint32_t pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket &socket, uint32_t now_ms);
 
 // Finalize one host socket receive batch. Future packets latch a missing-sequence check while

@@ -1236,6 +1236,11 @@ void HostRole::close() {
 		unstopped = UnstoppedServer{};
 		unstopped.running = ctx.np_protocol.host_running != 0;
 		unstopped.session_name = ctx.np_protocol.session_name;
+		// The one game protocol's name, which the manager's PROTOCOL line prints for a held
+		// node's datagram (receive_unstopped_server).
+		const TitleIdentity *identity = ctx.np_protocol.identity;
+		unstopped.protocol_name =
+				identity != nullptr && identity->pn != nullptr ? identity->pn : "";
 		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (conn.type != NapiNPConnection::kTypeServerSide) continue;
 			UnstoppedNode node;
