@@ -29,6 +29,7 @@ does not hash-bind binaries, retail trees or a corpus.
 | `parity-attribution.json` | The verdict-row to D-NET attribution table (`opennova.parity-attribution.v1`), transcribed from `docs/net/lan-parity-verdict.md`. |
 | `parity-cases.json` | The tracked parity case table (`opennova.parity-cases.v1`). |
 | `compare_scenario.py` | Check scenario runs against their expectations and against the RR reference. |
+| `admin_client.py` | The remote-admin protocol's client half (stdlib): the plaintext `query` status, or a login and commands, as JSON (the runner's pre-join mission cycle; the admin exercise). |
 | `wait_parity_wire_ready.ps1` | Wait for and validate the topology's live wire-ready state. |
 
 Shared process and path helpers live in `lib.ps1` (which dot-sources the
@@ -413,14 +414,21 @@ so the default suite is unchanged. An extension case may add:
   the key a retail joiner never stands and the `in_match` wait times out (x5's
   `cp04-objcoop-revive` RR and RR-aa; `cp04-objcoop-deploy` holds on purpose).
   The summary records it (`deploy_zones`).
-- `serve_only`: the retail host runs as retail's Serve Only server
-  (`-ServeOnly`; `onhook_host_lan` `serve_only`, connection mode 1; the
-  summary's `host_kind` is `serve_only`). Its console runs BAN and PUNT
-  directly, as an authority that is not a session peer
-  (`Client_ProcessConsoleCommand @0x520F63`). No case sets it today: the kick
-  case stages a listen host's `SERVER PUNT ALL`, which reaches the same PUNT
-  (the `kick` row below). A retail host only: the runner does not host
-  `opennova-serve` yet, so OR and OO refuse it.
+- `serve_only`: the host serves only (`-ServeOnly`; the summary's `host_kind`
+  is `serve_only`). A retail host runs as retail's Serve Only server
+  (`onhook_host_lan` `serve_only`, connection mode 1); its console runs BAN and
+  PUNT directly, as an authority that is not a session peer
+  (`Client_ProcessConsoleCommand @0x520F63`). The OpenNova host (OR, OO) is the
+  game's own `--lan-host`, which serves only when its `game.cfg` server type
+  says so (serve and play iff `dedicated` is 0), so the cell writes the SERVER
+  copy's `dedicated` = 1 (a `server_game_cfg_overrides` entry, restored after);
+  its readiness takes a loaded world hosting on the port with no own player.
+  The window's end saves the host's frame: the retail host's
+  (`retail-frame.png`) and ours (`opennova-host-frame.png`, the summary's
+  `opennova_host_screenshot`), the dedicated host's round-end overlay when the
+  window ends in a round's linger. No tracked case sets it: the kick case
+  stages a listen host's `SERVER PUNT ALL`, which reaches the same PUNT (the
+  `kick` row below).
 - `late_joiner`: E3's second joiner (`-LateJoiner`). It is the first joiner's
   kind and joins during the steady window, after the first joiner's scripted
   input. In RR and OR it is retail (`onhook_join_lan`, callsign `ParityLate`,
@@ -432,6 +440,24 @@ so the default suite is unchanged. An extension case may add:
   --evidence late` (each run's late-joiner capture bound to that port, its steady
   window from its readiness to the cell's steady end) into
   `<case>.late.verdict.json`.
+- `pre_join_mission_cycle`: the join comes after the host's second mission
+  start (`-PreJoinMissionCycle`; L8's admin exercise A13 with n >= 2, the S2C
+  0x02 probe's word 1 counting the authority's mission starts). The cell arms
+  the host's remote-admin console (the SERVER copy's `game.cfg`
+  `remote_admin_port` = `-HostAdminPort`, 4321 by default, as a
+  `server_game_cfg_overrides` entry, and an `admin.cfg` there with one
+  full-rights user, 127.* only; the restore takes both back), sends `MISSION
+  CYCLE` through `admin_client.py` once the host is up (the round ends with no
+  winner and lingers 620 ticks), and starts the joiner once the host's logic
+  tick has restarted (or the host was seen loading) and run 310 ticks with its
+  own player standing again: a retail host's tick through
+  `onhook_pool_entities`, ours through `game_state`. Every topology; an RR cell
+  launches its host and joiner one by one, so the case plays no input
+  exercise. After a cycle a retail host names the map in its S2C 0x7B as its
+  rotation entry spells it (`TDH_I3A.BMS`), so the wire-readiness gate takes
+  the map file in any letter case. The summary's `pre_join_mission_cycle`
+  records the host's QUERY before and after, the cycle's exchange and the
+  ticks it watched.
 - `topologies`: the cells the case has (default all five; RR and RR-aa always).
   The other cells report `not_applicable` and are not counted as missing.
 - `note`: free text for the reader (what the case cannot exercise and why);

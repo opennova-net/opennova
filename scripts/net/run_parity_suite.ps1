@@ -159,10 +159,15 @@ function Get-CaseHostPlayerClass { param($Case) return [int] (Get-CaseField $Cas
 # deploy screen; an in_match auto_deploy case deploys its retail roles with
 # onHook's deploy (run_parity_topology.ps1 -DeployZones).
 function Get-CaseDeployZones { param($Case) return [bool] (Get-CaseField $Case "deploy_zones" $false) }
-# serve_only: the retail host as retail's Serve Only server, whose console
-# runs PUNT (run_parity_topology.ps1 -ServeOnly); retail hosts only. No case
-# sets it (E4's kick stages a listen host's SERVER PUNT ALL).
+# serve_only: the host serves only (run_parity_topology.ps1 -ServeOnly): a
+# retail host as retail's Serve Only server, ours from the SERVER copy's
+# game.cfg `dedicated` = 1. No tracked case sets it (E4's kick stages a listen
+# host's SERVER PUNT ALL); the admin pass's round-end overlay cells do.
 function Get-CaseServeOnly { param($Case) return [bool] (Get-CaseField $Case "serve_only" $false) }
+# pre_join_mission_cycle: the host's admin console cycles its mission once
+# before the joiner starts, so the join is the host's second mission start's
+# (run_parity_topology.ps1 -PreJoinMissionCycle); every topology.
+function Get-CasePreJoinMissionCycle { param($Case) return [bool] (Get-CaseField $Case "pre_join_mission_cycle" $false) }
 function Get-CaseTopologies {
     param($Case)
     return @(Get-CaseField $Case "topologies" @("RR", "RR-aa", "RO", "OR", "OO"))
@@ -262,6 +267,15 @@ function Read-ParityCases {
                 $case.serve_only -isnot [bool]) {
             throw "Parity case '$($case.id)': serve_only is true or false"
         }
+        if ($case.PSObject.Properties.Name -contains "pre_join_mission_cycle" -and
+                $case.pre_join_mission_cycle -isnot [bool]) {
+            throw "Parity case '$($case.id)': pre_join_mission_cycle is true or false"
+        }
+        # The cycle's RR launches its host and joiner one by one, a path with no
+        # input exercise.
+        if ((Get-CasePreJoinMissionCycle $case) -and [bool] $case.exercise_input) {
+            throw "Parity case '$($case.id)': a pre_join_mission_cycle case plays no input exercise"
+        }
         if ($case.PSObject.Properties.Name -contains "deploy_zones" -and
                 $case.deploy_zones -isnot [bool]) {
             throw "Parity case '$($case.id)': deploy_zones is true or false"
@@ -298,10 +312,6 @@ function Read-ParityCases {
         # The host's class is written for a retail host (run_parity_topology.ps1).
         if ($class -ne 0 -and @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
             throw "Parity case '$($case.id)': a host_player_class case runs RR, RR-aa and RO only"
-        }
-        # The runner wires a retail Serve Only host only (run_parity_topology.ps1).
-        if ((Get-CaseServeOnly $case) -and @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
-            throw "Parity case '$($case.id)': a serve_only case runs RR, RR-aa and RO only"
         }
         # The runner wires a retail late joiner only (run_parity_topology.ps1).
         if ((Get-CaseLateJoiner $case) -and
@@ -352,6 +362,7 @@ function Get-CellArguments {
     if ($class -ne 0) { $arguments += @("-HostPlayerClass", [string] $class) }
     if (Get-CaseDeployZones $Case) { $arguments += "-DeployZones" }
     if (Get-CaseServeOnly $Case) { $arguments += "-ServeOnly" }
+    if (Get-CasePreJoinMissionCycle $Case) { $arguments += "-PreJoinMissionCycle" }
     if (Get-CaseLateJoiner $Case) { $arguments += "-LateJoiner" }
     if ($AllowDirtyRepo) { $arguments += "-AllowDirtyRepo" }
     return $arguments
@@ -446,6 +457,10 @@ function Get-ReferenceMismatches {
     $recordedServeOnly = ($fields -contains "host_kind") -and [string] $Summary.host_kind -eq "serve_only"
     if ($recordedServeOnly -ne (Get-CaseServeOnly $Case)) {
         $reasons.Add("serve_only $recordedServeOnly is not $(Get-CaseServeOnly $Case)")
+    }
+    $recordedCycle = ($fields -contains "pre_join_mission_cycle") -and ($null -ne $Summary.pre_join_mission_cycle)
+    if ($recordedCycle -ne (Get-CasePreJoinMissionCycle $Case)) {
+        $reasons.Add("pre_join_mission_cycle $recordedCycle is not $(Get-CasePreJoinMissionCycle $Case)")
     }
     $recordedLate = ($fields -contains "late_joiner") -and ($null -ne $Summary.late_joiner)
     if ($recordedLate -ne (Get-CaseLateJoiner $Case)) {

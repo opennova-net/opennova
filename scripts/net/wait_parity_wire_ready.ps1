@@ -551,7 +551,12 @@ function Test-SessionWireReadiness {
                 "'$($Expected.mission_display_name)', observed '$($info.mission)'.")
         }
         $advertisedMissions.Add([string] $info.mission)
-        Assert-OrdinalEqual $info.map $Expected.map 'S2C 0x7B map'
+        # The map file in any letter case: a retail host's mission after a
+        # cycle names it as its rotation entry spells it (TDH_I3A.BMS for a
+        # TDH_I3A.bms first start; LP-s7's pre-join cycle cells), the same file.
+        if (-not $info.map.Equals($Expected.map, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "S2C 0x7B map mismatch: expected '$($Expected.map)' in any letter case, observed '$($info.map)'."
+        }
         Assert-OrdinalEqual $info.expansion $Expected.expansion 'S2C 0x7B expansion'
         if ([uint32]$info.game_type -ne [uint32]$Expected.game_type) {
             throw "S2C 0x7B game type mismatch: expected $($Expected.game_type), observed $($info.game_type)."

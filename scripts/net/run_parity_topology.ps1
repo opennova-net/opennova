@@ -104,6 +104,21 @@ param(
     [ValidateSet(0, 5, 6, 7, 8, 9)]
     [int] $HostPlayerClass = 0,
 
+    # A join after the host's second mission start (L8's admin exercise A13
+    # with n >= 2: the S2C 0x02 probe's word 1 counts the authority's mission
+    # starts). The host's remote-admin console is armed for the cell (the
+    # SERVER copy's game.cfg remote_admin_port = -HostAdminPort and an
+    # admin.cfg there with one full-rights user, 127.* only; both host kinds
+    # read them there, and the cell's restore takes both files back). Once the
+    # host is up, the runner sends MISSION CYCLE, which ends the round with no
+    # winner and lingers 620 ticks before the next mission (engine
+    # inmatch/admin_console.cpp cycle_tail); the joiner starts once the host's
+    # logic tick has restarted and run past 310 ticks with its own player
+    # standing again. Every topology.
+    [switch] $PreJoinMissionCycle,
+    [ValidateRange(1, 65535)]
+    [int] $HostAdminPort = 4321,
+
     # The retail host as retail's Serve Only (dedicated) server
     # (onhook_host_lan serve_only, connection mode 1). Its console line runs
     # the BAN / PUNT verbs only on an authority that is not a session peer
@@ -111,9 +126,13 @@ param(
     # @0x520F63)]; a listen host is a peer and queues the line to its own server
     # as C2S 0x04 [orig: @0x520EFE..0x520F29], whose handler runs NETLOG and STAT
     # only [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0] and echoes the
-    # rest, so E4's kick stages a listen host's SERVER PUNT ALL instead and no
-    # case sets this. A retail host only: the OpenNova Serve Only host
-    # (opennova-serve) is not wired, so OR and OO refuse it.
+    # rest, so E4's kick stages a listen host's SERVER PUNT ALL instead. The
+    # OpenNova host (OR, OO) serves only when its game.cfg's server type says so
+    # (host_screen_from_block: serve and play iff `dedicated` is 0), so the cell
+    # writes the SERVER copy's `dedicated` = 1 (restored after); its readiness
+    # takes a loaded world hosting on the port with no own player, and the
+    # window's end saves its frame (opennova-host-frame.png) beside the retail
+    # host's (retail-frame.png): the dedicated host's round-end overlay.
     [switch] $ServeOnly,
 
     # The pinned SHA-256 of the SERVER copy's game.cfg (the case table's
@@ -409,9 +428,6 @@ foreach ($entry in $RotationList) {
 }
 if ($HostPlayerClass -ne 0 -and $Topology -in @("OR", "OO")) {
     throw "-HostPlayerClass needs a retail host (RR or RO): the OpenNova listen host's class from weapon.sav is unchecked."
-}
-if ($ServeOnly -and $Topology -in @("OR", "OO")) {
-    throw "-ServeOnly needs a retail host (RR or RO): the OpenNova Serve Only host (opennova-serve) is not wired."
 }
 if ($LateJoiner -and $Topology -in @("RO", "OO")) {
     throw "-LateJoiner needs a retail joiner (RR or OR): an OpenNova late joiner is not wired yet."
@@ -727,6 +743,7 @@ $script:EvidencePerspective = ""
 $script:EvidenceRole = ""
 $script:EvidenceInstanceId = ""
 $script:Screenshot = ""
+$script:OpenNovaHostScreenshot = ""
 $script:Acceptance = $null
 $script:StopEvidence = @()
 $script:CleanupFailure = ""
@@ -1542,7 +1559,7 @@ function Get-BytesSha256([byte[]] $Bytes) {
 }
 
 function Save-ServerCopyFiles {
-    $relative = @("game.cfg", "player.sav", "weapon.sav")
+    $relative = @("game.cfg", "player.sav", "weapon.sav", "admin.cfg")
     if ($Expansion) { $relative += (Join-Path (Join-Path "expansion" $Expansion) "weapon.sav") }
     $script:ServerCopyFiles = @(foreach ($rel in $relative) {
         $path = Join-Path $ServerDir $rel
@@ -1681,6 +1698,159 @@ function Set-ServerHostPlayerClass {
     $entry.effective_sha256 = $script:ServerPlayerClassOverride.effective_sha256
     [IO.File]::WriteAllBytes($entry.path, $bytes)
     Write-Host "PARITY_RUN_NOTE SERVER $rel record $slot class $($original -join '/') -> $HostPlayerClass for this cell"
+}
+
+# -PreJoinMissionCycle: the host's admin console for the cell, its MISSION
+# CYCLE, and the wait for the next mission (the param's comment). The witness
+# rides the summary's pre_join_mission_cycle.
+$script:HostAdminUser = "parity"
+$script:HostAdminPassword = "parity"
+$script:PreJoinCycleWitness = $null
+$AdminClientScript = Join-Path $Repo "scripts\net\admin_client.py"
+
+function Enable-HostAdminConsole {
+    Set-ServerGameCfgValue -Key "remote_admin_port" -Value $HostAdminPort
+    $entry = $script:ServerCopyFiles | Where-Object { $_.file -eq "admin.cfg" }
+    $text = "// run_parity_topology.ps1 -PreJoinMissionCycle: the host's admin console for one cell; its restore takes this file back`r`n" +
+        "ip_restrict = 127.*`r`n$($script:HostAdminUser) $($script:HostAdminPassword) FFFFFFFF`r`n"
+    $bytes = [Text.Encoding]::ASCII.GetBytes($text)
+    $entry.effective_sha256 = Get-BytesSha256 $bytes
+    [IO.File]::WriteAllBytes($entry.path, $bytes)
+    Write-Host "PARITY_RUN_NOTE SERVER admin.cfg: one full-rights user, 127.* only, for this cell"
+}
+
+function Invoke-HostAdmin {
+    param([Parameter(Mandatory = $true)] [string[]] $Arguments)
+    $lines = @(& python -I $AdminClientScript @Arguments)
+    return ($lines -join "`n") | ConvertFrom-Json
+}
+
+# The plaintext QUERY's status on the host's console, or $null while it does
+# not answer (a host in its mission load).
+function Get-HostAdminStatus {
+    $reply = Invoke-HostAdmin -Arguments @("query", "127.0.0.1", [string] $HostAdminPort, "--timeout", "5")
+    if ($reply.PSObject.Properties.Name -contains "error") { return $null }
+    $text = (@($reply.replies) | Where-Object { $_.PSObject.Properties.Name -contains "text" } |
+        ForEach-Object { [string] $_.text }) -join ""
+    if (-not $text) { return $null }
+    return [pscustomobject][ordered]@{ utc = [DateTime]::UtcNow.ToString("o"); text = $text }
+}
+
+# One look at the host: its logic tick (a retail host's through
+# onhook_pool_entities, the tick its frame callback observed; ours through
+# game_state's runtime), whether it is loading a mission, and whether it
+# stands in a mission with its own player. A read that fails (a host in its
+# mission load) leaves the tick $null.
+function Get-HostCycleSample {
+    param([string] $RetailHostInstanceId = "")
+    $sample = [ordered]@{ utc = [DateTime]::UtcNow.ToString("o"); tick = $null; loading = $false; ready = $false }
+    try {
+        if ($RetailHostInstanceId) {
+            $result = Invoke-OnHookTool -Name "onhook_pool_entities" -AllowError -Arguments @{
+                instance_id = $RetailHostInstanceId
+                pool = 0
+                max = 1
+            }
+            if (-not $result.isError) {
+                $pool = Get-StructuredResult $result
+                if ($pool.PSObject.Properties.Name -contains "logic_tick") { $sample.tick = [long] $pool.logic_tick }
+            }
+            $instance = @((Get-StructuredResult (Invoke-OnHookTool -Name "onhook_instances")).instances) |
+                Where-Object { [string] $_.instance_id -eq $RetailHostInstanceId } | Select-Object -First 1
+            if ($instance) {
+                $sample.loading = [string] $instance.run_state.phase -ne "in_match"
+                $sample.ready = [string] $instance.run_state.phase -eq "in_match" -and [bool] $instance.run_state.local_player
+            }
+        }
+        else {
+            $state = Get-OpenNovaHostState
+            if ($state.runtime.PSObject.Properties.Name -contains "logic_tick") { $sample.tick = [long] $state.runtime.logic_tick }
+            $sample.loading = [bool] $state.shell.world_loading
+            $sample.ready = [bool] $state.shell.world_loaded -and [bool] $state.player.present
+        }
+    }
+    catch {
+        Write-Host "PARITY_RUN_NOTE pre-join cycle: the host read failed: $($_.Exception.Message)"
+    }
+    return [pscustomobject] $sample
+}
+
+function Invoke-PreJoinMissionCycle {
+    param([int] $RetailHostProcessId = 0, [int] $TimeoutSeconds = 240)
+    if (-not $PreJoinMissionCycle) { return }
+    $retailInstanceId = ""
+    if ($RetailHostProcessId -ne 0) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(60)
+        while (-not $retailInstanceId) {
+            $instance = @((Get-StructuredResult (Invoke-OnHookTool -Name "onhook_instances")).instances) |
+                Where-Object { [int] $_.pid -eq $RetailHostProcessId } | Select-Object -First 1
+            if ($instance) { $retailInstanceId = [string] $instance.instance_id; break }
+            if ([DateTime]::UtcNow -ge $deadline) { throw "Pre-join cycle: no onHook instance for the retail host PID $RetailHostProcessId" }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    $witness = [ordered]@{
+        admin_port = $HostAdminPort
+        host = $(if ($RetailHostProcessId -ne 0) { "retail" } else { "opennova" })
+        status_before = $null
+        tick_before = $null
+        cycle = $null
+        ticks = [System.Collections.Generic.List[object]]::new()
+        restart_seen_utc = $null
+        ready_utc = $null
+        status_after = $null
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    while (-not $witness.status_before) {
+        $witness.status_before = Get-HostAdminStatus
+        if ($witness.status_before) { break }
+        if ([DateTime]::UtcNow -ge $deadline) { throw "Pre-join cycle: the host's admin console on TCP $HostAdminPort never answered QUERY" }
+        Start-Sleep -Seconds 1
+    }
+    $before = Get-HostCycleSample -RetailHostInstanceId $retailInstanceId
+    $witness.tick_before = $before.tick
+    if ($null -eq $before.tick -or -not $before.ready) {
+        throw "Pre-join cycle: the host is not in its first mission before the cycle: $($before | ConvertTo-Json -Compress)"
+    }
+    $cycle = Invoke-HostAdmin -Arguments @("run", "127.0.0.1", [string] $HostAdminPort,
+        $script:HostAdminUser, $script:HostAdminPassword, "MISSION CYCLE")
+    $witness.cycle = $cycle
+    $replies = @()
+    if ($cycle.PSObject.Properties.Name -contains "steps") {
+        $replies = @($cycle.steps | ForEach-Object { @($_.replies) } |
+            Where-Object { $_.PSObject.Properties.Name -contains "text" } | ForEach-Object { [string] $_.text })
+    }
+    if ($replies -notcontains "OK - Server is cycling...") {
+        throw "Pre-join cycle: MISSION CYCLE was not taken: $($cycle | ConvertTo-Json -Depth 6 -Compress)"
+    }
+    Write-Host "PARITY_RUN_NOTE pre-join cycle: MISSION CYCLE taken at host tick $($witness.tick_before)"
+    # The restart: the host's tick falls back, or it is seen loading. The
+    # joiner then waits for the host's own player and 310 ticks (5 s) of the
+    # next mission, past the 62nd server tick the probe's word 1 counts from.
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $last = [long] $witness.tick_before
+    $restartAt = $null
+    while (-not $witness.ready_utc) {
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Pre-join cycle: the host's next mission did not run within $TimeoutSeconds s (restart seen: $([bool] $witness.restart_seen_utc))"
+        }
+        Start-Sleep -Milliseconds 500
+        $sample = Get-HostCycleSample -RetailHostInstanceId $retailInstanceId
+        $witness.ticks.Add($sample)
+        if (-not $witness.restart_seen_utc -and
+                ($sample.loading -or ($null -ne $sample.tick -and $sample.tick -lt $last))) {
+            $witness.restart_seen_utc = $sample.utc
+            $restartAt = [DateTime]::UtcNow
+        }
+        if ($null -ne $sample.tick) { $last = $sample.tick }
+        if ($restartAt -and $sample.ready -and -not $sample.loading -and $null -ne $sample.tick -and
+                $sample.tick -ge 310 -and ([DateTime]::UtcNow - $restartAt).TotalSeconds -ge 5) {
+            $witness.ready_utc = $sample.utc
+        }
+    }
+    $witness.status_after = Get-HostAdminStatus
+    $script:PreJoinCycleWitness = [pscustomobject] $witness
+    Write-Host "PARITY_RUN_NOTE pre-join cycle: the next mission runs (restart $($witness.restart_seen_utc), ready $($witness.ready_utc)); the joiner starts"
 }
 
 function Wait-UntilSteadyDeadline {
@@ -2500,6 +2670,21 @@ function Wait-ParityWireReady {
     return $script:WireReadyWitness
 }
 
+# A Serve Only cell's OpenNova host frame at the window's end (the dedicated
+# host's round-end overlay when the window ends in the round's linger), from
+# the game MCP's game_screenshot.
+function Save-OpenNovaHostScreenshot {
+    $result = Invoke-GameTool -Port $HostMcpPort -Name "game_screenshot" -Arguments @{
+        format = "png"
+        max_dim = 4096
+    }
+    $image = @($result.content | Where-Object { $_.type -eq "image" }) | Select-Object -First 1
+    if (-not $image) { throw "game_screenshot returned no image from the OpenNova host" }
+    $path = Join-Path $RunRoot "opennova-host-frame.png"
+    [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String([string] $image.data))
+    $script:OpenNovaHostScreenshot = $path
+}
+
 function Save-RetailScreenshot {
     param([Parameter(Mandatory = $true)] [string] $InstanceId)
     $path = Join-Path $RunRoot "retail-frame.png"
@@ -2753,8 +2938,9 @@ function Wait-OpenNovaHostLoaded {
         if ($state.runtime.PSObject.Properties['network']) { $network = $state.runtime.network }
         # The boot is complete once the host's own player has spawned (the
         # listen server auto-spawns it at the end of the mission boot); the
-        # world node exists earlier, while the load still runs.
-        if ([bool] $state.shell.world_loaded -and [bool] $state.player.present -and $network -and
+        # world node exists earlier, while the load still runs. A Serve Only
+        # host has no own player: its loaded world hosting on the port.
+        if ([bool] $state.shell.world_loaded -and ($ServeOnly -or [bool] $state.player.present) -and $network -and
                 [string] $network.role -eq "host" -and [int] $network.port -eq $Port) {
             return $state
         }
@@ -2915,6 +3101,8 @@ try {
     if ($TimeLimitMinutes -gt 0) { Set-ServerGameCfgValue -Key "time_limit" -Value $TimeLimitMinutes }
     if ($PermanentDeath) { Set-ServerGameCfgValue -Key "mp_permanent_death" -Value 1 }
     if ($HostPlayerClass -ne 0) { Set-ServerHostPlayerClass }
+    if ($PreJoinMissionCycle) { Enable-HostAdminConsole }
+    if ($ServeOnly -and $Topology -in @("OR", "OO")) { Set-ServerGameCfgValue -Key "dedicated" -Value 1 }
     Start-OnHookMcp
 
     # Exercise the tracked capture wrapper used by the runbook so every suite
@@ -2937,9 +3125,11 @@ try {
     switch ($Topology) {
         "RR" {
             # onhook_run_lan_pair takes no serve_only: a Serve Only RR launches its
-            # host (onhook_host_lan serve_only) and its joiner one by one.
-            if ($ReadinessMode -eq "deploy_hold" -or $ServeOnly) {
+            # host (onhook_host_lan serve_only) and its joiner one by one, as
+            # does a cell whose host cycles its mission before the join.
+            if ($ReadinessMode -eq "deploy_hold" -or $ServeOnly -or $PreJoinMissionCycle) {
                 $retailHost = Start-RetailHostExact
+                Invoke-PreJoinMissionCycle -RetailHostProcessId $script:RetailHostProcess.Id
                 $retailJoiner = Start-RetailJoinerExact
                 $hostInstance = Wait-RetailProcessForPeer `
                     -ProcessId $script:RetailHostProcess.Id -Role host
@@ -2989,6 +3179,9 @@ try {
                 }
                 Complete-RetailLateJoiner
                 Complete-SteadyWindow
+                # A Serve Only host's frame: its round-end overlay when the
+                # window ends in the round's linger.
+                if ($ServeOnly) { Save-RetailScreenshot -InstanceId $hostInstanceId }
                 Stop-RetailProcessCapture -InstanceId ([string] $retailJoiner.instance_id) `
                     -RunLabel "$RunId-joiner"
                 Stop-RetailProcessCapture -InstanceId $hostInstanceId `
@@ -3087,6 +3280,7 @@ try {
                 $script:EvidenceCapture = [string] $retailHost.capture_path
                 $script:EvidencePerspective = "retail-host"
                 $script:EvidenceRole = "host"
+                Invoke-PreJoinMissionCycle -RetailHostProcessId $script:RetailHostProcess.Id
                 Start-OpenNovaJoinerExact
                 $hostInstance = Wait-RetailProcessForPeer `
                     -ProcessId $script:RetailHostProcess.Id -Role host
@@ -3160,6 +3354,7 @@ try {
             $script:EvidencePerspective = "retail-host"
             $script:EvidenceRole = "host"
             $script:EvidenceInstanceId = [string] $retailHost.instance_id
+            Invoke-PreJoinMissionCycle -RetailHostProcessId ([int] $retailHost.pid)
             Start-OpenNovaJoinerExact
             $retailAcceptance = Wait-RetailRunForPeer -OwnedRunId ([string] $retailHost.run_id) -ServeOnlyHost:$ServeOnly
             $joinerAcceptance = Wait-OpenNovaJoinerReady
@@ -3214,6 +3409,7 @@ try {
         }
         "OR" {
             Start-OpenNovaHostExact
+            Invoke-PreJoinMissionCycle
             $joinerDir = Join-Path $RunRoot "joiner"
             New-Item -ItemType Directory -Path $joinerDir -Force | Out-Null
             $retailJoinLaunch = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_join_lan" -Arguments @{
@@ -3346,6 +3542,7 @@ try {
                 if ($ReadinessMode -eq "in_match") {
                     Save-RetailScreenshot -InstanceId $script:RetailInstanceId
                 }
+                if ($ServeOnly) { Save-OpenNovaHostScreenshot }
             }
             if ($script:RetailInstanceId) {
                 Stop-RetailProcessCapture -InstanceId $script:RetailInstanceId `
@@ -3359,6 +3556,7 @@ try {
         }
         "OO" {
             Start-OpenNovaHostExact
+            Invoke-PreJoinMissionCycle
             Start-OpenNovaJoinerExact
             $joinerAcceptance = Wait-OpenNovaJoinerReady
             $initialJoinerAcceptance = $joinerAcceptance
@@ -3418,6 +3616,7 @@ try {
                 opennova_joiner = $joinerAcceptance
             }
             Complete-SteadyWindow
+            if ($ServeOnly) { Save-OpenNovaHostScreenshot }
             $stoppedJoiner = $script:OpenNovaJoiner
             $stoppedHost = $script:OpenNovaHost
             $null = Stop-OpenNovaJoinerCooperatively
@@ -3652,6 +3851,10 @@ $summary = [pscustomobject]@{
     deploy_zones = [bool] $DeployZones
     server_game_cfg_overrides = @($script:ServerGameCfgOverrides)
     server_player_class_override = $script:ServerPlayerClassOverride
+    # -PreJoinMissionCycle: the host's QUERY before and after, the MISSION
+    # CYCLE exchange, the host's ticks until its next mission ran ($null when
+    # the cell joined the host's first mission).
+    pre_join_mission_cycle = $script:PreJoinCycleWitness
     # The SERVER copy's mutable files: each one's start hash (game.cfg's is
     # the case table's pin), whether the cell's processes wrote it, and the
     # restore of its start bytes.
@@ -3695,6 +3898,8 @@ $summary = [pscustomobject]@{
     evidence_role = $script:EvidenceRole
     evidence_instance_id = $script:EvidenceInstanceId
     screenshot = $script:Screenshot
+    # A Serve Only cell's OpenNova host frame at the window's end.
+    opennova_host_screenshot = $script:OpenNovaHostScreenshot
     acceptance = $script:Acceptance
     opennova_launch_proofs = [pscustomobject] $script:OpenNovaLaunchProofs
     direct_runtime_launch = [bool] $AllowDirectRuntime
