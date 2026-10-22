@@ -1046,10 +1046,10 @@ struct PrecipitationFloorContext {
 int32_t precipitation_terrain_height(void *ctx, int32_t x, int32_t y) {
 	MissionKernel *kernel = static_cast<PrecipitationFloorContext *>(ctx)->kernel;
 	if (!kernel->has_terrain()) return 0;
-	// [orig: Terrain_SampleHeightBilinear @ 0x6067b0] over the mission frame.
-	const float h = kernel->ground_height(static_cast<float>(x) / 65536.0f,
-			static_cast<float>(y) / 65536.0f);
-	return static_cast<int32_t>(h * 65536.0f);
+	// The sampler takes the slot's X / Y words and returns its height word
+	// (D-NET-507) [orig: WeatherParticle_UpdatePositions @0x5DEC40 (the
+	// Terrain_SampleHeightBilinear call @0x5DED75, the store @0x5DED85)].
+	return terrain::height_field_height_bilinear_fixed(kernel->terrain_store.height_field(), x, y);
 }
 
 bool precipitation_entity_hit(void *ctx, int32_t x, int32_t y, int32_t z_top,

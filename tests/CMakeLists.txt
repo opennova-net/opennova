@@ -5329,6 +5329,10 @@ add_test(NAME glass_leg COMMAND glass_leg_test)
 add_executable(suspension_precision_test world/suspension_precision_test.cpp)
 target_link_libraries(suspension_precision_test PRIVATE opennova_runtime)
 add_test(NAME suspension_precision COMMAND suspension_precision_test)
+# D-NET-507: the precipitation pool's terrain floor is the bilinear sampler over the slot's words.
+add_executable(precipitation_floor_test mission/precipitation_floor_test.cpp)
+target_link_libraries(precipitation_floor_test PRIVATE opennova_runtime)
+add_test(NAME precipitation_floor COMMAND precipitation_floor_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the

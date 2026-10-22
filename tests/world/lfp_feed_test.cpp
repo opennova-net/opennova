@@ -99,6 +99,27 @@ int main() {
     w.registry.get(vh)->position = {50.0f, 0.0f, 10.0f + 36.0f};
     build_lfp_zones(w, reg, *w.registry.get(vh), 1, timer, flags, rows);
     CHECK(rows.size() == 2 && !rows[0].in_cylinder);
+    // The Z test reads the Position words' delta (D-NET-507) [orig:
+    // HUD_DrawZoneMarker @0x5986F0 (the Z test @0x5987D1..0x598810)]. The viewer stands on zone A's
+    // X / Y words at Z word 19088745 (291.27 u, whose float view rounds down
+    // to 19088744), the zone at 16794984 (exact as a float): the words lie
+    // 2293761 apart, one past half the 70 u radius (2293760), so the viewer
+    // is out, where the float views' delta reads the half exactly and let it
+    // in. Integer words only, so every x87 length agrees (Q3-11).
+    {
+        Entity *v = w.registry.get(vh);
+        Entity *a = w.registry.get(za);
+        v->position.x.q16 = a->position.x.q16;
+        v->position.y.q16 = a->position.y.q16;
+        v->position.z.q16 = 19088745;
+        a->position.z.q16 = 16794984;
+        build_lfp_zones(w, reg, *v, 1, timer, flags, rows);
+        CHECK(rows.size() == 2 && !rows[0].in_cylinder);
+        // One word nearer is inside: the half radius itself passes.
+        v->position.z.q16 = 19088744;
+        build_lfp_zones(w, reg, *v, 1, timer, flags, rows);
+        CHECK(rows.size() == 2 && rows[0].in_cylinder);
+    }
     (void)zb;
 
     if (failures != 0) {

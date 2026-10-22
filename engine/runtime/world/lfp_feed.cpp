@@ -7,17 +7,19 @@
 #include <cmath>
 #include <cstdint>
 
-#include <base/io/fixed.h>
+#include <base/io/bam.h>
 
 namespace opennova::world {
 
 namespace {
 
-// sqrt(dx^2 + dy^2) in Q16, saturated like the retail float chain
-// [orig: @0x5987aa..0x5987cf — fild/fmul/fsqrt against flt_7C19E0 = 2147418112.0].
-int32_t dist2d_q16(const Vec3 &a, const Vec3 &b) {
-    const double dx = (static_cast<double>(a.x) - static_cast<double>(b.x)) * 65536.0;
-    const double dy = (static_cast<double>(a.y) - static_cast<double>(b.y)) * 65536.0;
+// sqrt(dx^2 + dy^2) in Q16 over the Position words' 32-bit deltas, saturated
+// like the retail float chain (D-NET-507) [orig: HUD_DrawZoneMarker @0x5986F0 (the
+// X / Y word deltas @0x59879F / @0x59879C, fild/fmul/fsqrt @0x5987AA..0x5987BA, the min
+// against flt_7C19E0 = 2147418112.0 @0x5987BC..0x5987CF, _ftol2_sse @0x5987F7)].
+int32_t dist2d_q16(const EntityPosition &a, const EntityPosition &b) {
+    const double dx = static_cast<double>(io::bam_sub(a.x.q16, b.x.q16));
+    const double dy = static_cast<double>(io::bam_sub(a.y.q16, b.y.q16));
     double d = std::sqrt(dx * dx + dy * dy);
     if (d > 2147418112.0) d = 2147418112.0;
     return static_cast<int32_t>(d);
@@ -54,11 +56,12 @@ void build_lfp_zones(const World &world, const SpawnZoneRegistry &registry,
             row.count_other = t.count_other;
         }
         row.capture_flags = capture_flags ? capture_flags(zone->handle) : 0;
-        // The viewer's 2D distance and the cylinder test
-        // [orig: @0x59879f..0x598810 — Position.X/Y deltas, fsqrt, the
-        //  +0x15E radius << 16, |dz| against its half].
+        // The viewer's 2D distance and the cylinder test: the Z word delta's
+        // magnitude against half the +0x15E radius << 16
+        // [orig: HUD_DrawZoneMarker @0x5986F0 (the delta @0x5987D4, cdq / xor /
+        //  sub, the radius @0x5987D7 / @0x5987F4, the half @0x598805..0x59880A)].
         const int32_t d2 = dist2d_q16(local.position, zone->position);
-        const int32_t dz = io::q16_from_float(local.position.z - zone->position.z);
+        const int32_t dz = io::bam_sub(local.position.z.q16, zone->position.z.q16);
         row.in_cylinder = hud::lfp_in_cylinder(d2, dz, zone->zone_radius);
         // The distance label subtracts the zone entity's own bound radius —
         // `*(*EntryById)`: entry[0] is the zone entity, +0 its bound radius

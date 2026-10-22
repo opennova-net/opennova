@@ -5903,7 +5903,9 @@ void test_projectile_trace_world_ordering() {
     CHECK(hit.hit_class == ProjectileHitClass::Terrain);
     CHECK(!hit.geometry_entity.valid());
     CHECK(std::abs(hit.position_q16.z) < fx(0.02));
-    CHECK(hit.normal_q16.z > fx(0.99));
+    // The terrain leg computes no normal [orig: Projectile_UpdatePhysics
+    // @0x4E9D70 (@0x4EA3A9..0x4EA4B3)]: a terrain hit carries a zero one (D-NET-507).
+    CHECK(hit.normal_q16.x == 0 && hit.normal_q16.y == 0 && hit.normal_q16.z == 0);
 
     down.ammo_flags = 0x80u;
     CHECK(!cw.trace_projectile(world, down).hit());

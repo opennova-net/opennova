@@ -982,12 +982,13 @@ void LocalPlayer::reset_for_new_round() {
     view.chase_distance_q16 = w::kTpDistanceQ16;
     view.chase_orbit_yaw = 0;
     view.chase_orbit_pitch = 0;
+    // The new track's anchor takes the entity's Position words as they are
+    // (D-NET-507) [orig: Camera_ResetToLocalPlayer @0x4A3D30 (the call @0x4A3D42)
+    // -> Camera_SetTrackedEntity @0x4391D0 (the anchor stores @0x439227..0x43923B)].
     view.tp_anchor_valid = true;
     for (int axis = 0; axis < 3; ++axis) {
-        const float pos = axis == 0 ? local->position.x :
-                axis == 1 ? local->position.y : local->position.z;
-        view.tp_anchor[axis] = pos;
-        view.tp_anchor_q16[axis] = to_fixed(pos);
+        view.tp_anchor_q16[axis] = local->position.word(axis);
+        view.tp_anchor[axis] = static_cast<float>(from_fixed(view.tp_anchor_q16[axis]));
         view.lookahead_q16[axis] = 0;
     }
     world_.cached.sound_listener_view_flags = audio::kListenerViewFirstPerson;

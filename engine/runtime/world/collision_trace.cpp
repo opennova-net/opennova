@@ -591,24 +591,11 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             th.hit_class = ProjectileHitClass::Terrain;
             th.t_q16 = t_for_distance(distance);
             th.position_q16 = FixedVec3{hit[0], hit[1], hit[2]};
-
-            // Local bilinear gradient in engine axes. This is presentation
-            // metadata; the fixed refined hit point remains authoritative.
-            const float wx = static_cast<float>(hit[0]) / io::kFp16One;
-            const float wy = static_cast<float>(hit[1]) / io::kFp16One;
-            const float hx0 = terrain::height_field_height_mission_bilinear(*terrain, wx - 1.0f, wy);
-            const float hx1 = terrain::height_field_height_mission_bilinear(*terrain, wx + 1.0f, wy);
-            const float hy0 = terrain::height_field_height_mission_bilinear(*terrain, wx, wy - 1.0f);
-            const float hy1 = terrain::height_field_height_mission_bilinear(*terrain, wx, wy + 1.0f);
-            double nx = -0.5 * static_cast<double>(hx1 - hx0);
-            double ny = -0.5 * static_cast<double>(hy1 - hy0);
-            double nz = 1.0;
-            const double nl = std::sqrt(nx * nx + ny * ny + nz * nz);
-            th.normal_q16 = FixedVec3{
-                static_cast<int32_t>(nx * io::kFp16OneD / nl),
-                static_cast<int32_t>(ny * io::kFp16OneD / nl),
-                static_cast<int32_t>(nz * io::kFp16OneD / nl),
-            };
+            // The terrain leg keeps the hit's distance and class 0 and
+            // computes no normal, so a terrain hit carries none (zero): the
+            // terrain impact reads the point and the charmap alone (D-NET-507).
+            // [orig: Projectile_UpdatePhysics @0x4E9D70 - the raycast
+            //  @0x4EA3A9, the distance @0x4EA3BA..0x4EA4AF, class 0 @0x4EA4B3]
             consider(th, distance);
         }
     }
