@@ -29,6 +29,8 @@
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
 
+#include "../common/hull_brain.h"
+
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -117,6 +119,10 @@ struct Harness {
 		driver.retail_slot = 8;
 		seed.seats.push_back(driver);
 		tank = kernel->world.registry.spawn(1, seed);
+		// A drivable tank row (AIData, ai_function cveh) takes its brain from the
+		// class init on the joiner as on the host (D-NET-433 part A); a brainless
+		// hull's client mover would stop at its head.
+		test_common::brain_hull(kernel->world, tank);
 		replication::ClientEntityState &row = role.runtime->state().upsert(tank.packed);
 		row.type_id = static_cast<uint16_t>(kTankType);
 		row.cls = EntityClass::Vehicle;

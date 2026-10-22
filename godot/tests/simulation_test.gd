@@ -1877,11 +1877,16 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 	# extraction supplies the seat table the Dictionary seam used to fake.
 	var fixture_dir := _native_fixture_dir()
 	_copy_fixture(fixture_dir, "res://../fixtures/threedi/synth/carrier.3di", "carrier.3di")
+	# The shipped truck row's AIData cveh class init brains the hull; a brainless
+	# hull's mover stops at its head, idle fold included (D-NET-433)
+	# [orig: Entity_UpdateVehiclePhysics @0x48AF00 (`jz` @0x48AFA6 -> @0x48D43E)].
 	var item_db := _item_db_from_text(fixture_dir, """begin "Drivable Transport Truck"
   id 101294
   type vehicle
   graphic carrier
-  attrib: PlayerControl
+  attrib: AIData PlayerControl
+  ai_function cveh
+  move_function cveh
   physics 1
   hp 3000
   player_speed 60

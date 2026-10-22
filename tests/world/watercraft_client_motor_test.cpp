@@ -2555,6 +2555,11 @@ bool run_amphibian_selects_water_mover_on_both_roles() {
 		w::Entity *driver = mount_prediction_driver(r, /*is_local=*/false);
 		if (!expect(driver != nullptr, "amphibian driver mounted")) return false;
 		driver->position = vehicle->position;
+		// A seated eye above the plane (the body's CameraOffset): an eye at or below
+		// it cuts the player's input to the brain's AI leg, whose fresh out-speed is
+		// zero [orig: Entity_UpdateWatercraftPhysics @0x48DFD3..0x48DFDF; cveh
+		// @0x48B9A0..0x48B9AC].
+		driver->eye_offset_z = 1 << 16;
 		driver->net_move_input = 0x08; // move bit, dir 0 = forward
 		vehicle->flags |= 0x8000u;
 		vehicle->health = vehicle->health_max = 1000;
