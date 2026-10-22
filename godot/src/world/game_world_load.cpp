@@ -840,16 +840,26 @@ bool GameWorld::settle_join_wire_assets() {
 		join_wire_assets_failed_ = true;
 		return false;
 	}
+	// The settle's own timeline (an instrument: its line prints under --verbose beside the
+	// load's), the rest of the joiner's 0x1A -> C 0x2F window after load_mission_internal.
+	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Join settle %s", loaded_mission_file_));
+	timeline->span("streamed_objects");
 	place_streamed_mission_objects(sim);
+	timeline->end_span();
+	timeline->span("model_list");
 	player_visuals_->prewarm_loaded_model_challenge_definitions();
 	sim->finalize_loaded_model_challenge_snapshot();
+	timeline->end_span();
 	// The joiner's mission start models, its list known now: built and freed undrawn (the
 	// load's forced frames ran before the stream landed), so a death's husk swap finds its
 	// data, meshes, textures and shaders built (D-NET-NEW-L5-8).
+	timeline->span("model_warm");
 	if (Node3D *model_warm = build_model_warm(sim->get_mission_start_model_files(), Vector3())) {
 		model_warm->set_visible(false);
 		model_warm->queue_free();
 	}
+	timeline->end_span();
+	timeline->finish();
 	join_wire_assets_pending_ = false;
 	return true;
 }
