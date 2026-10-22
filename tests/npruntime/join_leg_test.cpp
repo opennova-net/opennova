@@ -1099,11 +1099,16 @@ bool run_a_repeated_echo_adds_the_player_again() {
 // (its active byte and its net player stand), so with a session cap of 2 a re-added joiner's two
 // rows, the orphaned one and the current one, hold a third joiner on the pending list, rowless,
 // where the connections' rows alone (one) would admit it.
+// The fixture's host-only host is a dedicated host: its own row is active with no net player,
+// so it never counts, and its table carries that slot past the cap (GameConfig::player_slot_limit),
+// three rows for a cap of 2: the host's, then the joiner's two. (A cap of 2 on a table of 2 rows
+// left the re-add no free row, so it failed at the pick, not at the cap.)
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - the cap `cmp eax, [ecx+0F28h]`
-//  @0x4C8E13; Server_CountAlivePlayers @0x4FD770 - the active byte @0x4FD785, the net player
-//  +0x1C @0x4FD78B]
+//  @0x4C8E13 (`jge` @0x4C8E19: no add); Server_CountAlivePlayers @0x4FD770 - the walk over
+//  g_PlayerSlotCapacity rows, the active byte @0x4FD785, the net player +0x1C @0x4FD78B]
 bool run_an_orphaned_row_counts_against_the_session_cap() {
 	JoinFixture f(/*with_existing=*/false);
+	f.ctx->config.dedicated_server = true;
 	f.ctx->config.max_players = 2;
 	inmatch::NapiNPConnection &j = f.joiner();
 	j.reply.admission_metadata_pushed = true;

@@ -1163,7 +1163,7 @@ void HostRole::close() {
 	// teardown's destroys and its pump, which sends them; ours raised them for the next tick's
 	// head, which never comes: they are routed first.
 	// [orig: Game_ProcessMainFrame - Entity_UpdateAllEntities called @0x52674B ahead of the
-	//  exit tests @0x526806; Game_TeardownMission - Entity_Destroy @0x52236F, then
+	//  exit tests @0x526806; Game_TeardownMission - the Entity_Destroy call @0x52236F, then
 	//  Server_PumpNetworkTransport called @0x522588]
 	if (tear_down && ctx.is_authority != 0 && kernel_->world.rules.mp_session)
 		route_entity_pass_records(ctx, kernel_->world);

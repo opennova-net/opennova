@@ -644,7 +644,7 @@ void test_the_remapped_exit_reads_the_own_client_record() {
 // the teardown's own records: a flag carrier's destroy queues its flag's 0x2F at the destroy
 // (D-NET-NEW-L1-25), behind the relay on the joiner's queue.
 // [orig: Game_ProcessMainFrame - Entity_UpdateAllEntities called @0x52674B ahead of the exit
-//  tests @0x526806; Game_TeardownMission - Entity_Destroy @0x52236F, then
+//  tests @0x526806; Game_TeardownMission - the Entity_Destroy call @0x52236F, then
 //  Server_PumpNetworkTransport called @0x522588; Server_BroadcastEntityActionPacket @0x5080D0 -
 //  SendFiltered(0x3F) called @0x508199]
 void test_close_routes_the_last_entity_pass_first() {

@@ -91,8 +91,8 @@ void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &log
 		opennova::IDatagramSocket *socket) {
 	write_inout_line(logs, inout_player_removed_line(conn));
 	// The own pair's twin, at address 0, bursts into the manager's loopback, not the socket
-	// [orig: CNapiNPManager_SendTo @0x61EC20 - the address test @0x61EC59, the loopback FIFO
-	//  @0x61ECCD].
+	// [orig: CNapiNPManager_SendTo @0x61EC20 - the address test @0x61EC59, the loopback FIFO's
+	//  NapiFifo_WritePacketAtomic call @0x61ECC6].
 	if (socket == nullptr || conn.peer.ip == 0) return;
 	for (const std::vector<uint8_t> &datagram : host_goodbye_burst(/*host_running=*/true, conn))
 		socket->send_to(conn.peer, datagram.data(), datagram.size());
@@ -431,7 +431,8 @@ uint32_t pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		if (c.type != NapiNPConnection::kTypeServerSide || c.pending_disconnect) return;
 		// The own pair's twin (address 0): its builds, keepalives and requests go to the
 		// manager's loopback for the held own client, never the socket, and its reap reads the
-		// address word 0 [orig: CNapiNPManager_SendTo @0x61EC20 - @0x61EC59, the FIFO @0x61ECCD;
+		// address word 0 [orig: CNapiNPManager_SendTo @0x61EC20 - @0x61EC59, the FIFO's write
+		//  called @0x61ECC6;
 		//  CNapiNPConnection_PumpStateMachine - the address word +0x30 @0x629352].
 		if (c.peer.ip == 0) return;
 		// 0x10: the holdoff.
