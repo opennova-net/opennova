@@ -8,7 +8,8 @@
 //                                    and four reseeds; no ring scar;
 //   a repeat hit on that point:      3 words (the two gates and the rule's texture), no reseed;
 //   a miss on the model:             8 words (two per GLASS row), then the ring scar's 2;
-//   scar_type 2 on a miss:           4 words (id 2 spans one texture), no ring scar.
+//   scar_type 2 on a miss:           4 words (id 2 spans one texture), no ring scar;
+//   a window point on a skinned model: 2 words (the two gates), no decal, no ring scar.
 // The rolls pass at or under the main column's ftol(p * 100): 100, 10, 20, 33.
 // [orig: Impact_SpawnGlassEffectsOrScar @0x5CF1B0; Terrain_SpawnSurfaceEffectsAtUserPoints
 //  @0x5CEA90; Scar_ProjectDecalOntoEntity @0x5CE4A0; Scar_HasProjectedDecalAt @0x5CC700;
@@ -219,12 +220,38 @@ void test_a_model_without_a_row() {
 	CHECK(words_since(world, s0).size() == 2, "with only the ring's two words");
 }
 
+// A model whose LOD-0 render model is skinned (GHDR mesh type 2) or absent refuses the decal:
+// the window point still counts, so the impact ends with no ring scar, but only the leg's two
+// texture gates draw; no node, no roll, no reseed.
+// [orig: Scar_ProjectDecalOntoEntity @0x5CE517..0x5CE526; the count @0x5CEC6B ahead of the
+//  call @0x5CECBD, the rolls only on its 1 @0x5CECC5]
+void test_a_skinned_model() {
+	Rig rig;
+	build(rig);
+	World &world = *rig.world;
+	ItemDeathTraits skinned = *world.tables.item_death_traits.get(kWindowItem);
+	skinned.graphic_lod0_refuses_decal = true;
+	world.tables.item_death_traits.set(kWindowItem, skinned);
+	const Entity &building = *world.registry.get(rig.building);
+	const uint32_t crt_before = crt::crt_rand_state();
+	const uint32_t s0 = world.prng16_state;
+	CHECK(scar_add_entry(world, rig.hit, building, 1),
+			"a window point on a skinned model still ends the impact");
+	CHECK(words_since(world, s0).size() == 2, "with only the two texture gates' words");
+	CHECK(crt::crt_rand_state() == crt_before, "no reseed");
+	CHECK(world.out.vehicle_effects.empty(), "no effect");
+	CHECK(world.out.scars.world_ring().cursor == 0, "no ring scar");
+	CHECK(world.out.scars.find_decals(rig.building, building.registry_spawn_id) == nullptr,
+			"no decal list");
+}
+
 } // namespace
 
 int main() {
 	test_the_table_and_the_rolls();
 	test_a_window_point();
 	test_a_model_without_a_row();
+	test_a_skinned_model();
 	if (failures == 0) std::printf("glass_leg: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -157,6 +157,19 @@ static void model_user_points(const Threedi3di3 &model, std::vector<world::Model
 	}
 }
 
+// Whether the GLASS leg's decal gate refuses a loaded model: its LOD-0 render model (the
+// runtime model's +0x20) is absent, which a GHDR LOD count of none leaves, or carries +0x10
+// bit 0, which every render LOD of a skinned model (GHDR mesh type 2) carries.
+// [orig: ThreediGp_LoadModel @0x5B6160 returns def+4 (@0x5B6273), so +0x20 is def+0x24;
+//  ThreediGp_LoadFromFile @0x5B5780 - the GHDR LOD count to def+0x14 @0x5B597B, none skips the
+//  loads @0x5B5B82 and zeroes the slots @0x5B5BC6, LOD 0's render model stored to def+0x24 (the
+//  lea @0x5B5B84, the store @0x5B5B94); mesh type 2 -> def+0xF0 = 3 @0x5B5903..0x5B5922;
+//  GPM_LoadRenderModel @0x5B5000 sets the render model's +0x10 bit 0 under def+0xF0 == 3
+//  @0x5B50BA..0x5B50C3. A model with no RLOD does not load here.]
+static bool lod0_refuses_decal(const Threedi3di3 &model) {
+	return model.header.lod_count_decl <= 0 || model.header.mesh_type == THREEDI_MESH_SKINNED;
+}
+
 static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
 		const Threedi3di3 &model, world::Entity &e) {
 	static constexpr int kSlotDefBase[4] = {3, 0, 9, 6};
@@ -350,6 +363,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				}
 				traits->graphic_name = model->header.name;
 				model_user_points(*model, traits->graphic_userpoints);
+				traits->graphic_lod0_refuses_decal = lod0_refuses_decal(*model);
 				traits->model_radius_q16 = world::model_bound_radius_q16_from_3di(*model);
 				// GPM+24/+28 remain zero in the retail 3DI3 load path. These
 				// legacy fields are distinct from CMDL's XY/Z radii.
@@ -618,6 +632,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				t->husk_name = first_husk_m3 != nullptr ? std::string(first_husk_m3->header.name) : std::string();
 				t->husk_userpoints.clear();
 				if (first_husk_m3 != nullptr) model_user_points(*first_husk_m3, t->husk_userpoints);
+				t->husk_lod0_refuses_decal =
+						first_husk_m3 != nullptr && lod0_refuses_decal(*first_husk_m3);
 				t->husk_model_loaded =
 						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
 				// The PIECE model — huskFinal first [orig: @ 0x4934af

@@ -300,6 +300,11 @@ bool scar_project_decal_onto_entity(World &world, const Entity &entity, const Pr
 	const bool husk = (entity.engine_flags & kEntityFlagHusk) != 0u && traits != nullptr &&
 			traits->primary_husk_loaded;
 	if (!husk && !entity.has_graphic_model) return false;
+	// The model's LOD-0 render model, present and not skinned ((+0x20) non-null, its +0x10
+	// bit 0 clear) [orig: @0x5CE517..0x5CE526].
+	if (traits != nullptr &&
+			(husk ? traits->husk_lod0_refuses_decal : traits->graphic_lod0_refuses_decal))
+		return false;
 	// The struck section and face, and the face's no-scar flag [orig:
 	// @0x5CE540..0x5CE5A2, the gates Scar_AddEntry shares].
 	if (hit.section_index < 0 || hit.face_index < 0) return false;

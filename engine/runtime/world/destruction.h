@@ -202,6 +202,12 @@ struct ItemDeathTraits {
     std::vector<ModelUserPoint> graphic_userpoints;
     std::string husk_name;
     std::vector<ModelUserPoint> husk_userpoints;
+    // Each model's LOD-0 render model (the runtime model's +0x20) is absent or carries +0x10
+    // bit 0 (a skinned model, GHDR mesh type 2), so the leg projects no decal onto it
+    // (collision_resolve.cpp's lod0_refuses_decal) [orig: Scar_ProjectDecalOntoEntity
+    //  @0x5CE517..0x5CE526].
+    bool graphic_lod0_refuses_decal = false;
+    bool husk_lod0_refuses_decal = false;
     std::string particlefx;
     bool has_particlefx_point = false;
     int32_t particlefx_point_q16[3] = {};
