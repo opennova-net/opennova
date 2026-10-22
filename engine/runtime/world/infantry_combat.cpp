@@ -30,16 +30,14 @@ namespace {
 
 // Infantry's context-7/8/9 target walk. Range/FOV validation, target policy,
 // bounded stable scoring and final LOS follow the shared retail target query.
+// `team` is the scanner's Team byte as the scan reads it [orig: Entity_FindNearestThreat
+// @0x4B09C8].
 // [orig: Entity_FindNearestThreat @0x4B0990 -> Entity_FindTargets @0x53A610]
 EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity &e,
-                                          int32_t range) {
+                                          uint8_t team, int32_t range) {
     const Entity *self = world.registry.get(e.handle);
     if (self == nullptr || (e.slot.f[1] & 1) != 0) return {};
     const bool scanner_berserk = (e.slot.f[1] & 0x200) != 0;
-    // A coward (AiSlot[1] & 8) with no team scans as team 2: the think swaps
-    // the team byte around the scan [orig: Entity_UpdateInfantryAI
-    // @0x4BBEB5..0x4BBEC3, restored @0x4BBED8].
-    const uint8_t team = (e.team == 0 && (e.slot.f[1] & 8) != 0) ? uint8_t(2) : e.team;
     // [orig: scanner-team setup @0x4B0A02]
     if (team == 0 && !scanner_berserk) return {};
     const uint32_t self_flags = self->flags | self->engine_flags;
@@ -260,6 +258,21 @@ void lead_target(const Entity &target, const int32_t target_pos[3], const int32_
 
 } // namespace
 
+// See infantry_internal.h.
+EntityHandle infantry_find_nearest_threat(AiSystem &sys, World &world, AiEntity &e, uint8_t team,
+                                          int32_t range) {
+    const EntityHandle found = infantry_scan_nearest_threat(sys, world, e, team, range);
+    // The authority's relation quads ride the hit, inside the scan, with the scanner as self
+    // [orig: Entity_FindNearestThreat @0x4B0990 - the hit test @0x4B0A4C, the is_authority
+    //  test @0x4B0A59, the quads @0x4B0A6F..0x4B0AE2].
+    if (found.valid() && sys.is_authority) {
+        const Entity *self = world.registry.get(e.handle);
+        const Entity *target = world.registry.get(found);
+        if (self != nullptr && target != nullptr) sys.apply_engage_relations(world, *self, *target);
+    }
+    return found;
+}
+
 // The entity LOS [orig: Entity_CheckLineOfSightTerrainAndEntities @0x53B130]
 // over the shared collision world, or its terrain leg alone when the embedder
 // wired no model world.
@@ -309,8 +322,14 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         if (phase == 0) staged = range;
         else if (phase == 2) staged = std::max(io::bam_sar(range, 1), std::min(range, 0x60000));
 
-        EntityHandle found = infantry_scan_nearest_threat(*this, world, e, staged);
-        const bool scan_hit = found.valid();
+        // A coward (AiSlot[1] & 8) with no team scans as team 2: the think swaps
+        // the team byte around the scan [orig: Entity_UpdateInfantryAI
+        // @0x4BBEB5..0x4BBEC3, restored @0x4BBED8].
+        const uint8_t scan_team =
+                (e.team == 0 && (slot.f[1] & 8) != 0) ? uint8_t(2) : e.team;
+        // The scan's authority relation quads ride its hit alone, so neither the
+        // re-committed held target nor the lastAttacker fallback below reaches them.
+        EntityHandle found = infantry_find_nearest_threat(*this, world, e, scan_team, staged);
 
         // A short-phase miss KEEPS the held target, dead or alive: on phases 1-3
         // the empty result re-commits slot[3] itself [orig: `test ebp,ebp; jz`
@@ -358,12 +377,6 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             slot.f[3] = static_cast<int32_t>(found.packed) + 1; // raw slot[3] write
                                                                 // [orig: @0x4BBF85 —
                                                                 // no refcount here]
-            // The authority relation quads ride the scan HIT alone [orig: the
-            // Entity_FindNearestThreat authority block @0x4b0a6f..0x4b0ae2 --
-            // inside the scan, so neither the re-committed held target nor
-            // the lastAttacker fallback reaches it].
-            if (is_authority && scan_hit && self_entity != nullptr)
-                apply_engage_relations(world, *self_entity, *t);
         } else {
             inf.same_target_ticks = 0;
             inf.combat_target = EntityHandle{};

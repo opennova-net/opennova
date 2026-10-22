@@ -45,8 +45,8 @@ void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic
     // Deferred promotion and playback already ran at the motor head through
     // AnimMap_UpdateDualChannels @0x40b8c0, ahead of this gate. Retail's slow pass carries much more than the weapon channel (the
     // slot timer, threat scan, damage and the music gamescript block, @0x4b5d77..
-    // @0x4b637b); this ports the weapon-channel tenant and the ride link that
-    // follows its commit.
+    // @0x4b637b); this ports the weapon-channel tenant, the ride link that
+    // follows its commit, and the local player's threat scan.
     if ((logic_tick & 0xFu) == 0u) {
         // The hold kind is re-read from the ADM table EVERY selection pass, keyed by
         // this entity's OWN equipped index — the original keeps no per-player copy
@@ -65,6 +65,21 @@ void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic
         // The org2 twin of the org1 ride link, right after the hold-state commit.
         // [orig: Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
         if (Entity *body = world.registry.get(e.handle)) infantry_ride_link(world, *body);
+        // The local player's live body scans for the nearest threat at the current fog
+        // distance (Entity_FindNearestThreat over the player: on the authority the hit's
+        // sees and targeted group quads with the player as self, its single rows failing the
+        // setters' < 0x80 guard on its DcbId); the hit's distance and targets-me words feed the
+        // music gamescript's Var5 / Var6, unpumped here (music_vars.cpp). The spawn always
+        // stores a def pointer, so the def test never fails for a player body.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the live test @0x4B5F33, the
+        //  local test @0x4B6234, the def test @0x4B6240, g_EnvFogDistCurrent @0x4B6246, the
+        //  call @0x4B624D, Var5 / Var6 @0x4B62A9 / @0x4B62C9;
+        //  Entity_SpawnFromAnimSlotProperty @0x43C390 - the def store @0x43C429]
+        const Entity *body = world.registry.get(e.handle);
+        if (e.handle == world.cached.local_player && body != nullptr &&
+                retail_signed_i16(body->health) > 0)
+            infantry_find_nearest_threat(*this, world, e, body->team,
+                                         world.weather.fog_current_q16());
     }
 
 }

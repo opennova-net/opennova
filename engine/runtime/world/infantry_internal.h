@@ -43,6 +43,15 @@ bool infantry_drag_corpse(AiEntity &, World &);
 // (scan every 256 ticks, or every 32 while the entity is the scripted voice
 // speaker). [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BE7FD]
 void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t key);
+// Entity_FindNearestThreat over `e`: the context-7/8/9 target walk at `range` (16.16) as the
+// scanner's Team byte `team` reads it, then on the authority the hit's sees and targeted quads
+// with the scanner as self. The org1 think's perception and the local player's slow pass call
+// it. Defined in infantry_combat.cpp.
+// [orig: Entity_FindNearestThreat @0x4B0990 - the walk Entity_FindTargets @0x4B0A40, the quads
+//  @0x4B0A6F..0x4B0AE2; the calls Entity_UpdateInfantryAI @0x4BBECC,
+//  Entity_UpdateInfantryPlayerBody @0x4B624D]
+EntityHandle infantry_find_nearest_threat(AiSystem &ai, World &world, AiEntity &e, uint8_t team,
+                                          int32_t range);
 // The org1 heading chase every tick of a body not mounted at its head: the body
 // heading a quarter of the way to the target (clamped), the legs re-planted and
 // chased, the look toward the aim. Defined in infantry.cpp; the still body's tick
