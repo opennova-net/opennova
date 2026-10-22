@@ -663,7 +663,8 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // The rest of the ewep mover runs over the person's words (person_ewep_mover), save the legs
 // that need a word ours does not yet home on a person (D-NET-NEW-L4-14 (a), narrowed): the
 // anchor byte's refill from the ground def's slot table, the joiner's destroy of its own body
-// behind its C2S 0x0F pair, the anchored bone attach, and the +0x170 occupant's clamp or detach.
+// behind its C2S 0x0F pair, the anchored bone attach, and a riding +0x170 occupant's turret
+// window (garbage-pointer limits, the Q16-1 (a) class) with the HUD_COM2GUN leg behind it.
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
 // narrowed): towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
@@ -694,6 +695,19 @@ static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
 //  @0x441151..0x4411BC, `or [ebp+24h], 20000h` @0x4411C2, the gate @0x4411C9, the countdown
 //  @0x4413FE..0x44140E, the coast @0x44142B..0x441447; Entity_ResetToSpawnState @0x4B9610 -
 //  the backup @0x4B9632..0x4B9644, +0x2D4 @0x4B96AA]
+// Whether a link names a slot that holds no row, which retail's pointer reads as the zeroed
+// entity the shared destroy left there (it zeroes the slot and clears no other entity's link to
+// it). On the host (and in single player) the registry holds every row, so a vacant slot is that
+// zeroed one; a joiner's decoded rows live outside it, so there only a slot the destroy marked
+// is known zeroed.
+// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70 over +0..+0x2B4, the +0x154 and +0x219
+//  stores @0x43EA78..0x43EA7F, Entity_ClearAllReferences @0x465670 (the call @0x43E921; it
+//  clears AI targets alone, never a +0x28 or +0x170 link)]
+static bool link_reads_zeroed_slot(const World &world, EntityHandle link) {
+    return link.valid() && world.registry.get(link) == nullptr &&
+            (!world.destroyed_mark || world.destroyed_mark(link.packed));
+}
+
 static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
     Entity *ground = world.registry.get(body.ground_target);
     if (emplaced_carrier_is_dead_hull(ground)) {
@@ -721,20 +735,14 @@ static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
         world.out.entity_info_requests.push_back(body.handle);
         return;
     }
-    // The link is a pointer into the ground's slot, and the shared destroy zeroes the slot without
-    // clearing it: a link to a slot that holds no row reads a zeroed entity. On the host (and in
-    // single player) the registry holds every row, so a vacant slot is that zeroed one; a joiner's
-    // decoded rows live outside it, so there only a slot the destroy marked is known zeroed. A
-    // zeroed ground has no def, no model and a clear matrix bit: no vehicle leg, no anchor, and the
-    // root copy gives the body its zero words, Position (0, 0, 0), Yaw / Pitch / Roll 0 and a zero
-    // savedLivePose (its own matrix built from the zero angles first).
-    // [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70 over +0..+0x2B4, the +0x154 and
-    //  +0x219 stores @0x43EA78..0x43EA7F, Entity_ClearAllReferences @0x465670 (the call @0x43E921;
-    //  it clears AI targets alone, never a +0x28 link); Entity_UpdateTransformAndTurret @0x440CA0 -
-    //  the def null tests @0x440CCD / @0x440EA9, the model @0x440F04..0x440F09, the matrix bit
-    //  @0x4410EA, Math_BuildFixedPointMatrixFromEulerAngles @0x441149, the copy @0x441151..0x4411BC]
-    const bool zeroed_ground = ground == nullptr && body.ground_target.valid() &&
-            (!world.destroyed_mark || world.destroyed_mark(body.ground_target.packed));
+    // A ground link to a destroyed slot reads a zeroed ground (link_reads_zeroed_slot): no def, no
+    // model and a clear matrix bit, so no vehicle leg and no anchor, and the root copy gives the
+    // body its zero words, Position (0, 0, 0), Yaw / Pitch / Roll 0 and a zero savedLivePose (the
+    // ground's matrix built from the zero angles first).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the def null tests @0x440CCD /
+    //  @0x440EA9, the model @0x440F04..0x440F09, the matrix bit @0x4410EA,
+    //  Math_BuildFixedPointMatrixFromEulerAngles @0x441149, the copy @0x441151..0x4411BC]
+    const bool zeroed_ground = ground == nullptr && link_reads_zeroed_slot(world, body.ground_target);
     const int32_t def_word = e.inf.leg_yaw[0];
     if (zeroed_ground) {
         if (def_word == 0) return;
@@ -783,6 +791,27 @@ static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
         body.engine_flags |= kEntityFlagMatrixBuilt;
     }
     if (def_word == 0) return;
+    // The +0x170 link's leg. A linked entity that does not ride the body (its +0x16C mount link
+    // names another, or its slot reads zeroed) is let go: the link clears, the +0x1A2 word takes
+    // 0xFFFF and a nonzero +0x2B4 takes 7. On a person neither word has a reader, and +0x2B4 holds
+    // the spawn's 0 (no person update, record writer, reset or init touches either), so the
+    // clear is the leg. While the link holds, the +0x2AC clock takes 1. One riding the body takes
+    // the turret window over the body's +0x322 / +0x324 words, whose limits read the body's
+    // +0x2D4 word (the Yaw) as a weapon def, or its +0x2EC word as a slot pointer: garbage-pointer
+    // reads over a person, the Q16-1 (a) class, which ours does not run; the local player's
+    // HUD_COM2GUN leg behind them stays narrowed with them (D-NET-NEW-L4-14 (a)).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the link @0x4411D1, `cmp [eax+16Ch], ebp`
+    //  @0x4411E4, Entity_GetWeaponTurretLimits @0x540D70 (the call @0x441228; slot +0x20 / +0x38
+    //  @0x540DB5..0x540E58), the COM2GUN leg @0x4412B6..0x441364, the let-go @0x441366..0x441380,
+    //  +0x2AC @0x44138A..0x441393; Entity_SpawnFromAnimSlotProperty @0x43C390 - +0x2B4 = 0
+    //  @0x43C518]
+    if (body.primary_occupant.valid()) {
+        const Entity *rider = world.registry.get(body.primary_occupant);
+        const bool rides_body = rider != nullptr && rider->mount_target == body.handle;
+        if (!rides_body && (rider != nullptr || link_reads_zeroed_slot(world, body.primary_occupant)))
+            body.primary_occupant = {};
+        if (body.primary_occupant.valid()) body.spawn_phase = 1;
+    }
     uint32_t anchor_x = static_cast<uint32_t>(e.inf.aim_point[0]);
     uint32_t backup_x = static_cast<uint32_t>(body.spawn_position.x.q16);
     if ((anchor_x >> 24) != 0) {

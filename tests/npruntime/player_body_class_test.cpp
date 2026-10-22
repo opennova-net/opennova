@@ -1866,6 +1866,58 @@ void test_an_ewep_row_body_over_a_zeroed_ground() {
 	}
 }
 
+// The ewep row's +0x170 leg over a person body: a linked entity that does not ride the body (its
+// mount link names another, or its slot holds no row on the host) is let go, the link cleared;
+// one riding the body keeps it, and the +0x2AC clock (spawn_phase) takes 1 while the link holds.
+// A zero +0x2D4 word ends the update before the leg.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the link @0x4411D1, the ride test
+//  @0x4411E4, the let-go @0x441366..0x44136D, +0x2AC @0x44138A..0x441393]
+void test_an_ewep_row_body_lets_go_of_a_rider_off_it() {
+	enum class Link { kElsewhere, kOnBody, kVacant };
+	struct Case {
+		Link link;
+		bool zero_word;
+		bool kept;
+	};
+	for (const Case c : {Case{Link::kElsewhere, false, false}, Case{Link::kOnBody, false, true},
+				Case{Link::kVacant, false, false}, Case{Link::kElsewhere, true, true}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		r.world->registry.configure_pool(1, 8);
+		w::Entity *body = r.spawn_remote(kEwep);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr);
+		if (ae == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		const w::EntityHandle self = body->handle;
+		w::EntityHandle linked{0x1006};
+		if (c.link != Link::kVacant) {
+			w::Entity seed;
+			seed.alive = true;
+			seed.mounted = c.link == Link::kOnBody;
+			seed.mount_target = c.link == Link::kOnBody ? self : w::EntityHandle{0x1007};
+			linked = r.world->registry.spawn(1, seed);
+			body = r.world->registry.get(self);
+		}
+		CHECK(linked.valid() && body != nullptr);
+		if (!linked.valid() || body == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		body->ground_target = w::EntityHandle{};
+		body->primary_occupant = linked;
+		body->spawn_phase = 40;
+		ae->inf.leg_yaw[0] = c.zero_word ? 0 : 0x40000000;
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		CHECK(body->primary_occupant == (c.kept ? linked : w::EntityHandle{}));
+		CHECK(body->spawn_phase == (c.kept && !c.zero_word ? 1 : 40));
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // A body bound to the psec row runs the physics step over its own words: the savedLivePose
 // stamp, then its velocity triple (+0x98 / +0x9C / +0xA0, the motor's) against the terrain
 // plus a quarter unit (no terrain here: 0x4000). Airborne it moves by the triple, falls 167,
@@ -2036,6 +2088,7 @@ int main() {
 	test_an_ewep_row_body_runs_the_ewep_legs();
 	test_an_ewep_row_body_asks_for_a_destroyed_ground();
 	test_an_ewep_row_body_over_a_zeroed_ground();
+	test_an_ewep_row_body_lets_go_of_a_rider_off_it();
 	test_an_ele0_row_body_runs_the_elevator_mover();
 	test_an_upfx_row_body_runs_the_husk_leg();
 	test_a_psec_row_body_runs_the_physics_step();
