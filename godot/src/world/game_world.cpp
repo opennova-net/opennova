@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/node_path.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "network/lan_session.h" // the browse's held-server pump
 #include "network/net_session_policy.h"
 #include "resource_index/launch_flags.h" // the server log switches
 #include "resource_index/resource_root.h" // session_title (the connect log header)
@@ -87,6 +88,9 @@ void GameWorld::_ready() {
 		// The NovaWorld session's _inout.txt line under `/INOUT` (D-NET-NEW-L8-8).
 		const opennova::inmatch::ServerLogs logs = log_devices_->logs();
 		NovaWorldClient::set_process_server_logs(&logs);
+		// The LAN browse's protocol pump steps the server an error-arm exit left held
+		// (LanSession::set_process_held_server, D-NET-NEW-L1-26).
+		LanSession::set_process_held_server(&client_process_.unstopped_server, &logs);
 	}
 	// The world's own process step exists for exactly one thing: the joiner
 	// preload wait the session drive steps (switched on by load_as_joiner,
@@ -202,6 +206,7 @@ void GameWorld::_notification(int p_what) {
 		}
 		NovaWorldClient::set_process_connect_log(nullptr);
 		NovaWorldClient::set_process_server_logs(nullptr);
+		LanSession::set_process_held_server(nullptr, nullptr);
 		return;
 	}
 	if (p_what != NOTIFICATION_VISIBILITY_CHANGED || !is_node_ready()) {

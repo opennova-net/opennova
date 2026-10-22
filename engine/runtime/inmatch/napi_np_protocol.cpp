@@ -2082,7 +2082,8 @@ void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &log
 		socket->send_to(conn.peer, datagram.data(), datagram.size());
 }
 
-// The browse socket's receive over a held server: a joiner's 0x43 finds its node by the
+// A receive pump's dispatch over a held server (the LAN browse's, a join attempt's, the joined
+// match's: every pump with flag 8 runs the queue pass): a joiner's 0x43 finds its node by the
 // sender's address and port, as at the host's own socket (the protocol's processing byte the
 // leg tests, +0x1F5, is written only zero, by the protocol's create). An in-order packet, and
 // each queued successor it makes contiguous, is parsed: the receive stamp the reap measures,

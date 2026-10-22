@@ -12,6 +12,8 @@
 
 #include <net/novaworld/lobby_vars.h> // resolve_address_without_dns
 #include <runtime/inmatch/host_config.h> // transport_bind_ports / transport_bind_address
+#include <runtime/inmatch/host_session.h> // host_monotonic_milliseconds (the held server's clock)
+#include <runtime/inmatch/napi_np_protocol.h> // receive_unstopped_server / pump_unstopped_server
 #include <runtime/inmatch/punt_log.h> // ConnectLog
 #include <net/npwire/peer_addr.h>
 
@@ -25,6 +27,10 @@ namespace godot {
 namespace {
 
 constexpr const char *DEFAULT_BROADCAST = "255.255.255.255";
+
+// The process's held server and its log devices (LanSession::set_process_held_server).
+opennova::inmatch::UnstoppedServer *g_held_server = nullptr;
+opennova::inmatch::ServerLogs g_held_server_logs;
 
 Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row, uint32_t client_index) {
 	// Retail hosts advertise the typed server name in the host's single-byte
@@ -68,6 +74,12 @@ uint32_t enumerate_address(const String &p_target) {
 }
 
 } // namespace
+
+void LanSession::set_process_held_server(opennova::inmatch::UnstoppedServer *p_server,
+		const opennova::inmatch::ServerLogs *p_logs) {
+	g_held_server = p_server;
+	g_held_server_logs = p_logs != nullptr ? *p_logs : opennova::inmatch::ServerLogs{};
+}
 
 LanSession::LanSession() {
 	set_process(false);
@@ -176,6 +188,11 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	// The game protocol reads the socket while the enumerator runs (a NovaWorld
 	// session's datagrams stay its own: the pump's demux).
 	game_ = std::make_unique<UdpPumpGameSocket>(pump_);
+	// The start's protocol pump, ahead of the enumerator's first burst: its receive, then the
+	// held server's nodes, which the protocol's list holds ahead of the browse's connection
+	// (engine: inmatch::pump_unstopped_server, D-NET-NEW-L1-26).
+	poll_replies();
+	pump_held_server();
 
 	Error first_send_error = OK;
 	const int sent = send_probe_burst(first_send_error);
@@ -263,8 +280,10 @@ void LanSession::_process(double delta) {
 
 	// The frame in retail's order (engine: LanDiscoveryBrowser::advance): the replies,
 	// the re-announce and record expiry, the window's gate, then the list's walk; a
-	// re-announce due on the window's last frame still goes out.
+	// re-announce due on the window's last frame still goes out. The frame's protocol pump
+	// steps the process's held server between the receive and the enumerator's sends.
 	poll_replies();
+	pump_held_server();
 	const size_t listed = browser_.servers().size();
 	bool announce_due = false;
 	const bool open = browser_.advance(delta, announce_due);
@@ -287,8 +306,20 @@ void LanSession::poll_replies() {
 		opennova::PeerAddr from{};
 		const int n = game_->recv_from(buf, sizeof(buf), from);
 		if (n <= 0) break;
+		// A held node's joiner's datagram reaches its node (the protocol's dispatch by the
+		// source; engine: inmatch::receive_unstopped_server); the rest are the enumerator's.
+		if (g_held_server != nullptr &&
+				opennova::inmatch::receive_unstopped_server(*g_held_server, from, buf,
+						static_cast<std::size_t>(n), opennova::inmatch::host_monotonic_milliseconds()))
+			continue;
 		browser_.accept_reply(buf, static_cast<size_t>(n), from);
 	}
+}
+
+void LanSession::pump_held_server() {
+	if (g_held_server == nullptr || game_ == nullptr) return;
+	opennova::inmatch::pump_unstopped_server(*g_held_server, g_held_server_logs, *game_,
+			opennova::inmatch::host_monotonic_milliseconds());
 }
 
 void LanSession::rebuild_rows() {

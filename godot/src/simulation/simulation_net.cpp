@@ -785,8 +785,12 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 			return false;
 		}
 		net_.pump = net_.join_transport;
-		net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(
-				std::make_unique<UdpPumpGameSocket>(net_.pump, host));
+		// A node of the process's held server reads its joiner's datagrams there too
+		// (engine: inmatch::JoinerRole::deposit_inbound, D-NET-NEW-L1-26).
+		auto join_socket = std::make_unique<UdpPumpGameSocket>(net_.pump, host);
+		if (net_.client_process != nullptr)
+			join_socket->set_held_server(&net_.client_process->unstopped_server);
+		net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(std::move(join_socket));
 		joiner_role_->set_socket(net_.pump_socket.get(), host);
 	} else {
 		if (net_.pump.is_null()) net_.pump.instantiate();

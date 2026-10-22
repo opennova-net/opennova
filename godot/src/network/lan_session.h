@@ -2,6 +2,8 @@
 
 #include <net/npwire/lan_discovery.h>
 #include <net/npwire/net_ports.h>
+#include <runtime/inmatch/napi_np_connection.h> // UnstoppedServer (the process's held server)
+#include <runtime/inmatch/server_files.h>       // ServerLogs
 
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -93,6 +95,15 @@ public:
 	// carries it (LanServerRow.client_index). 0 before the first browse.
 	int64_t get_client_index() const { return static_cast<int64_t>(browser_.client_index()); }
 
+	// The process's held server (the game world's ClientProcessState::unstopped_server, a
+	// server an error-arm exit left unstopped) and the log devices its lines go to: the
+	// browse's protocol pump steps it over the browse's socket, its receive first (a held
+	// node's joiner's datagrams), then its nodes' legs ahead of the browse's own sends
+	// (engine: inmatch::receive_unstopped_server / pump_unstopped_server carry the witness,
+	// D-NET-NEW-L1-26). Null: none.
+	static void set_process_held_server(opennova::inmatch::UnstoppedServer *p_server,
+			const opennova::inmatch::ServerLogs *p_logs);
+
 	void _ready() override;
 	void _process(double delta) override;
 
@@ -101,6 +112,8 @@ protected:
 
 private:
 	void poll_replies();
+	// The walk of the browse's protocol pump over the process's held server.
+	void pump_held_server();
 	int send_probe_burst(Error &first_send_error);
 	void rebuild_rows();
 	void emit_error(const String &message);

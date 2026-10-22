@@ -219,10 +219,11 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &logs,
 		opennova::IDatagramSocket *socket);
 
-// One datagram the socket of a pump that steps a held server (the LAN browse's, a join's) read
-// from `from`: a held node's joiner's 0x43 is parsed at the transport (the receive stamp the
-// reap measures, the peer's ACK, the ACK owed) at `now_ms`, the host clock's
-// (host_monotonic_milliseconds). True when a held node took it. (D-NET-NEW-L1-26)
+// One datagram a receive pump of the process's socket read from `from` (the LAN browse's, a
+// join's, the joined match's: every receive pump's queue pass dispatches by the source): a held
+// node's joiner's 0x43 is parsed at the transport (the receive stamp the reap measures, the
+// peer's ACK, the ACK owed) at `now_ms`, the host clock's (host_monotonic_milliseconds). True
+// when a held node took it. (D-NET-NEW-L1-26)
 bool receive_unstopped_server(UnstoppedServer &server, const PeerAddr &from,
 		const uint8_t *raw, std::size_t len, uint32_t now_ms);
 
@@ -233,11 +234,13 @@ bool receive_unstopped_server(UnstoppedServer &server, const PeerAddr &from,
 // header-only packet when an ACK is owed) over `socket`; its send intervals (the keepalive and
 // the retained-records rebuild); the receive-timeout reap past cs_dir0's timeout since its last
 // receive ("NP.C:PT:SERTMOUT", latched if none is); the flush counter, the prune and the
-// holdoff's reload. Then the protocol pump's pending walk destroys each reaped node:
-// teardown_unstopped_node over `socket`, and the node leaves the held list, so the next reset's
-// StopServer stops only the nodes still held. Nothing when no server is held. A held node's
-// slot teardown reaches no handler: the browse's connection mode clears is_authority.
-// (D-NET-NEW-L1-26)
+// holdoff's reload. Right behind each node's legs, before the next node's, the protocol pump's
+// pending test destroys a reaped node: teardown_unstopped_node over `socket`, and the node
+// leaves the held list, so the next reset's StopServer stops only the nodes still held. Nothing
+// when no server is held. A held node's slot teardown reaches no handler: the browse's
+// connection mode clears is_authority. The callers: the LAN browse's start and frames
+// (godot/src/network/lan_session.cpp) and a join attempt's enumerate and connect frames
+// (JoinerRole::poll_preload), each after its receive. (D-NET-NEW-L1-26)
 void pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket &socket, uint32_t now_ms);
 

@@ -16,6 +16,7 @@
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/peer_addr.h>
+#include <net/npwire/protocol_message.h> // frame_session_packet (the held joiner's keepalive)
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/title/title_identity.h>
@@ -28,8 +29,10 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/player_spawn.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -70,6 +73,23 @@ public:
 struct CaptureSocket final : IDatagramSocket {
 	std::vector<std::pair<PeerAddr, std::vector<uint8_t>>> sent;
 	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
+	void send_to(const PeerAddr &to, const uint8_t *data, std::size_t len) override {
+		sent.emplace_back(to, std::vector<uint8_t>(data, data + len));
+	}
+};
+
+// A socket that also delivers queued datagrams, each from its source.
+struct QueueSocket final : IDatagramSocket {
+	std::vector<std::pair<PeerAddr, std::vector<uint8_t>>> sent;
+	std::deque<std::pair<PeerAddr, std::vector<uint8_t>>> inbound;
+	int recv_from(uint8_t *buf, std::size_t cap, PeerAddr &from) override {
+		if (inbound.empty() || inbound.front().second.size() > cap) return 0;
+		from = inbound.front().first;
+		const std::vector<uint8_t> bytes = std::move(inbound.front().second);
+		inbound.pop_front();
+		std::copy(bytes.begin(), bytes.end(), buf);
+		return static_cast<int>(bytes.size());
+	}
 	void send_to(const PeerAddr &to, const uint8_t *data, std::size_t len) override {
 		sent.emplace_back(to, std::vector<uint8_t>(data, data + len));
 	}
@@ -118,6 +138,9 @@ Outcome close_with_a_held_server(int32_t reason) {
 	role.kit_seams.reseed_on_side_change = [] { return false; };
 	role.kit_seams.push = [] {};
 	role.create_runtime("HeldStopJoiner", inmatch::JoinRole::Player, "", "");
+	// Its joiner was heard just now: the join attempt's pump keeps it (no reap).
+	process.unstopped_server.nodes[0].conn.receive_stamp_ms =
+			static_cast<uint32_t>(role.runtime->join_clock_ms());
 	inmatch::TickInput input;
 	role.poll_preload();
 	role.runtime->seed_session(0x0FE0E112u, 0x0000BEEFu, "CLIENT-HELD-SCRK", "SERVER-HELD-SCRK",
@@ -175,11 +198,99 @@ void test_an_error_arm_keeps_the_server_held() {
 	CHECK(out.inout.find("PLAYER REMOVED") == std::string::npos);
 }
 
+// The join attempt's protocol pump is Pump(-1): it receives first, a held node's joiner's 0x43
+// from its own source reaching that node (the receive stamp moves), then walks the held nodes
+// ahead of the join's own connection, so a node its joiner left silent past cs_dir0's timeout
+// (120000 ms) is reaped over the join's socket: its four 0x86 echoing the SERTMOUT record and
+// its /INOUT removal line, the node off the held list (D-NET-NEW-L1-26, the join leg).
+// [orig: UI_JoinSelectedSession - CNapiNetwork_PumpAndCheckState called @0x569E60;
+//  CNapiNetwork_PumpAndCheckState @0x4C6E80 - NapiNPProtocol_Pump(-1) called @0x4C6EA2;
+//  NapiNPProtocol_Pump @0x62A650 - PumpRecvQueues called @0x62A6AC, the walk's PumpFlags
+//  called @0x62A6F8, the destroy @0x62A793; NapiNPProtocol_HandleSessionPacket @0x626A00 -
+//  FindConnection(1, sender) called @0x626AC5]
+void test_the_join_attempts_pump_steps_the_held_server() {
+	MemoryFiles files;
+	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
+	inout.set_stamp_text([] { return std::string(); });
+	inout.set_enabled(true);
+	inmatch::ServerLogs logs;
+	logs.inout = &inout;
+	logs.inout_switch = true;
+
+	const PeerAddr kSilent{0x0100007Fu, 31001};
+	inmatch::ClientProcessState process;
+	process.unstopped_server.running = true;
+	process.unstopped_server.session_name = "Held";
+	for (const PeerAddr &peer : {kHeld, kSilent}) {
+		inmatch::NapiNPConnection held;
+		held.type = inmatch::NapiNPConnection::kTypeServerSide;
+		held.phase = inmatch::ConnectionPhase::Joined;
+		held.peer = peer;
+		held.client_ck = peer == kHeld ? kHeldCk : 0x22222222u;
+		held.server_scrk = "SERVERHELDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD";
+		held.client_scrk = "CLIENTHELDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD";
+		held.server_sk = 0x0BADF00Du;
+		process.unstopped_server.nodes.push_back(inmatch::UnstoppedNode{held, {}, {}});
+	}
+
+	auto kernel = std::make_unique<mission::MissionKernel>();
+	kernel->world.registry.configure_pool(0, 16);
+	QueueSocket socket;
+	inmatch::JoinerRole role;
+	role.bind(*kernel);
+	role.set_socket(&socket, kHost);
+	role.set_title(&kJo);
+	role.use_process_state(&process);
+	role.set_server_logs(logs);
+	role.kit_seams.apply_authoritative = [] {};
+	role.kit_seams.reseed_on_side_change = [] { return false; };
+	role.kit_seams.push = [] {};
+	role.create_runtime("HeldPumpJoiner", inmatch::JoinRole::Player, "", "");
+	const uint32_t now = static_cast<uint32_t>(role.runtime->join_clock_ms());
+	// Both joiners last heard 120001 ms ago, both nodes' last sends then too.
+	for (inmatch::UnstoppedNode &node : process.unstopped_server.nodes) {
+		node.conn.receive_stamp_ms = now - 120001u;
+		node.conn.last_session_send_ms = now - 120001u;
+	}
+	// kHeld's joiner sends a keepalive the join's socket reads ahead of the pump's walk.
+	SessionSequencing joiner;
+	std::vector<uint8_t> keepalive_body;
+	CHECK(frame_session_packet(joiner,
+			SessionCrypto{process.unstopped_server.nodes[0].conn.client_scrk, {},
+					process.unstopped_server.nodes[0].conn.server_sk},
+			{}, keepalive_body));
+	socket.inbound.emplace_back(kHeld,
+			nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(keepalive_body)));
+
+	role.poll_preload(); // the hello, then the attempt's pump
+	CHECK(role.runtime->phase() == inmatch::JoinerConnection::Phase::Hello);
+	CHECK(process.unstopped_server.running);
+	CHECK(process.unstopped_server.nodes.size() == 1);
+	if (process.unstopped_server.nodes.size() == 1) {
+		CHECK(process.unstopped_server.nodes[0].conn.peer == kHeld);
+		CHECK(process.unstopped_server.nodes[0].conn.receive_stamp_ms - now < 120000u);
+	}
+	int goodbyes = 0;
+	for (const auto &[to, bytes] : socket.sent) {
+		if (!(to == kSilent)) continue;
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (nw_decode_inbound(bytes.data(), bytes.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_SERVER_GOODBYE)
+			++goodbyes;
+	}
+	CHECK(goodbyes == 4);
+	const std::string text = files.files[inmatch::kInoutLogFileName] + inout.pending();
+	CHECK(text.find("127.0.0.1:31001 : SERVER PLAYER REMOVED") != std::string::npos);
+	CHECK(text.find("NP.C:PT:SERTMOUT") != std::string::npos);
+}
+
 } // namespace
 
 int main() {
 	test_a_session_reset_stops_the_held_server_after_the_leave();
 	test_an_error_arm_keeps_the_server_held();
+	test_the_join_attempts_pump_steps_the_held_server();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

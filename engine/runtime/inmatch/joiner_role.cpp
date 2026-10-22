@@ -10,7 +10,7 @@
 #include <runtime/inmatch/client_weapon_replay.h>
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/mission_exit.h> // kMissionExitQuit (input action 3)
-#include <runtime/inmatch/napi_np_protocol.h> // stop_unstopped_server (the FullDestroy's reset)
+#include <runtime/inmatch/napi_np_protocol.h> // stop / receive / pump_unstopped_server (the held server)
 
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/charattr_table.h>
@@ -163,7 +163,13 @@ void JoinerRole::push_mission_start_end() {
 
 // Drain every datagram pending on the socket into the runtime's recv fold
 // (the witnessed poll-before-logic order [orig: Game_ProcessMainFrame
-// @0x5263f0]).
+// @0x5263f0]). A datagram from another source that a node of the process's held server takes
+// (a server an earlier error-arm exit left unstopped, ClientProcessState::unstopped_server) goes
+// to that node: every receive pump's queue pass dispatches by the source, so a held type-1
+// node's joiner's 0x43 reaches its node whatever the pump's other flags (D-NET-NEW-L1-26).
+// [orig: NapiNPProtocol_Pump @0x62A650 - flag 8's PumpRecvQueues called @0x62A6AC;
+//  NapiNPProtocol_HandleSessionPacket @0x626A00 - the type-1 arm's FindConnection(1, sender)
+//  called @0x626AC5]
 void JoinerRole::deposit_inbound() {
 	if (socket_ == nullptr || !runtime) return;
 	uint8_t buf[4096];
@@ -171,6 +177,11 @@ void JoinerRole::deposit_inbound() {
 		PeerAddr from{};
 		const int n = socket_->recv_from(buf, sizeof(buf), from);
 		if (n <= 0) break;
+		if (client_process_ != nullptr && !(from == host_addr_) &&
+				receive_unstopped_server(client_process_->unstopped_server, from, buf,
+						static_cast<std::size_t>(n),
+						static_cast<uint32_t>(runtime->join_clock_ms())))
+			continue;
 		runtime->receive(buf, static_cast<std::size_t>(n));
 	}
 }
@@ -179,6 +190,21 @@ void JoinerRole::poll_preload() {
 	if (!runtime) return;
 	send_hello_once();
 	deposit_inbound();
+	// A join attempt's protocol pump is Pump(-1), the enumerate-and-join's loop (the Hello
+	// phase) and the connect's (the Auth phase, through the pass whose receive takes the
+	// ServerAuth): after its receive it walks the protocol's connections in list order, the
+	// held server's nodes ahead of the join's own, so they take PumpFlags' legs over the join's
+	// socket first; the pumps after the connect run the client's flags, which no type-1 node
+	// passes (D-NET-NEW-L1-26; pump_unstopped_server carries the legs' witness).
+	// [orig: UI_EnumerateAndJoinSession @0x569F50 - CNapiNetwork_PumpTransportAndProtocol called
+	//  @0x56A0D5; UI_JoinSelectedSession - CNapiNetwork_PumpAndCheckState called @0x569E60 /
+	//  @0x569E96; CNapiNetwork_PumpAndCheckState @0x4C6E80 - NapiNPProtocol_Pump(-1) called
+	//  @0x4C6EA2; CNapiNPConnection_Create - the tail link @0x62B17D..0x62B18A]
+	if (client_process_ != nullptr && socket_ != nullptr &&
+			(runtime->phase() == JoinerConnection::Phase::Hello ||
+			 runtime->phase() == JoinerConnection::Phase::Auth))
+		pump_unstopped_server(client_process_->unstopped_server, server_logs_, *socket_,
+				static_cast<uint32_t>(runtime->join_clock_ms()));
 	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_))
 		send(dg);
 	++now_tick_;

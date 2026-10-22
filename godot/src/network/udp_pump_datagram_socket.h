@@ -5,6 +5,7 @@
 
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
+#include <runtime/inmatch/napi_np_connection.h> // UnstoppedServer (the process's held server)
 
 #include <algorithm>
 #include <cstddef>
@@ -58,8 +59,11 @@ private:
 // A joiner's connection on the shared socket reads only its peer's datagrams
 // (`peer`, nonzero): the game protocol resolves a client connection by the
 // datagram's source address and port, and a datagram from elsewhere reaches
-// none (engine: net/npwire/datagram_demux.h carries the witness). A host's (no
-// peer) reads every source.
+// none (engine: net/npwire/datagram_demux.h carries the witness), but a node of
+// the process's held server (set_held_server: a server an earlier error-arm exit
+// left unstopped) whose address it is, which the joiner role hands it (engine:
+// inmatch::JoinerRole::deposit_inbound, D-NET-NEW-L1-26). A host's (no peer)
+// reads every source.
 class UdpPumpGameSocket : public opennova::IDatagramSocket {
 public:
 	explicit UdpPumpGameSocket(const Ref<UdpPump> &pump, const opennova::PeerAddr &peer = {})
@@ -70,11 +74,15 @@ public:
 		if (pump_.is_valid()) pump_->demux().set_game_attached(false);
 	}
 
+	// The process's held server whose nodes' sources a joiner's connection also reads
+	// (null: none).
+	void set_held_server(const opennova::inmatch::UnstoppedServer *p_held) { held_ = p_held; }
+
 	int recv_from(uint8_t *buf, std::size_t cap, opennova::PeerAddr &from) override {
 		if (pump_.is_null() || !pump_->is_open()) return 0;
 		for (;;) {
 			const int n = pump_->demux().game().recv_from(buf, cap, from);
-			if (n <= 0 || peer_.port == 0 || from == peer_) return n;
+			if (n <= 0 || peer_.port == 0 || from == peer_ || held_source(from)) return n;
 		}
 	}
 
@@ -84,8 +92,16 @@ public:
 	}
 
 private:
+	bool held_source(const opennova::PeerAddr &from) const {
+		if (held_ == nullptr || !held_->running) return false;
+		for (const opennova::inmatch::UnstoppedNode &node : held_->nodes)
+			if (node.conn.peer == from) return true;
+		return false;
+	}
+
 	Ref<UdpPump> pump_;
 	opennova::PeerAddr peer_{};
+	const opennova::inmatch::UnstoppedServer *held_ = nullptr;
 };
 
 } // namespace godot
