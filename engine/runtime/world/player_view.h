@@ -53,12 +53,13 @@ constexpr int32_t kNvgGainMin = 0;
 constexpr int32_t kNvgGainMax = 4;
 // The first-person eye pull-back along the full view rotation: -0x3000 on the
 // view-frame FORWARD axis [orig: Math_FixedPointTransformPoint22 of
-// (-0x3000, 0, 0) added onto g_ViewPosX/Y @ 0x438001..0x438031].
-constexpr float kFpEyePullback = 0.1875f;
+// (-0x3000, 0, 0) stored into g_ViewPosX..Z @ 0x438001..0x438031].
+constexpr int32_t kFpEyePullbackQ16 = 0x3000;
 // The CameraOffset floor and the non-person eye bump.
 // [orig: the 0x2000 floor @ 0x4b6b98; the +0x10000 bump @ 0x437e8f]
 constexpr float kEyeMinAbovePosition = 0.125f;
-constexpr float kNonPersonEyeBump = 1.0f;
+constexpr int32_t kNonPersonEyeBumpQ16 = 0x10000;
+constexpr float kNonPersonEyeBump = static_cast<float>(kNonPersonEyeBumpQ16) / 65536.0f;
 // The head-bone eye's terrain floor (the D-INF-18 residual, ported): the probe
 // offset (0x4000 = 0.25 u) and the per-sample clearance (0x1000 = 0.0625 u).
 // [orig: Entity_UpdateInfantryPlayerBody @ 0x4b6c23 / @ 0x4b6c2d]
@@ -75,9 +76,8 @@ constexpr float kAimProjectRange = 1000.0f;
 //  orbit zeroed @ 0x4a3d56/5b); nudge R*(0x2000,0x2000,0x2000) @ 0x43818a;
 //  0.25u march steps @ 0x438243, gate @ 0x4381e9]
 constexpr int32_t kTpDistanceQ16 = 0x10000;
-constexpr float kTpPivotNudge = 0.125f;
-constexpr float kTpMarchStep = 0.25f;
-constexpr float kTpMarchGate = 8.0f;
+constexpr int32_t kTpPivotNudgeQ16 = 0x2000;
+constexpr int32_t kTpMarchGateQ16 = 0x80000;
 // weapon.def `pos`/`tpos` file unit -> world units [orig: the parser stores
 // atof(str) * 256 (flt_7D1D70 @ 0x544770) and the camera ftol's it onto the
 // 16.16 view position — the net world offset is file_value / 256].
@@ -141,7 +141,7 @@ struct MountedCameraInput {
     bool aircraft = false;                  // unit_type 3/4 [orig: @0x43861D]
     // The water plane every chase eye clears, on foot as well as mounted
     // [orig: g_EnvWaterHeightFixed + 0x4000 @0x438409..0x43841E].
-    float water_z = 0.0f;                   // g_EnvWaterHeightFixed, units
+    int32_t water_q16 = 0;                  // g_EnvWaterHeightFixed, 16.16
 };
 
 // THE FIRST-PERSON CAMERA SHAKE. A single counter drives an angular jitter on
@@ -902,13 +902,14 @@ float player_view_fp_pitch_recoil_deg(int32_t recoil_pitch_bam);
 //  g_ViewRotRoll = entity+0x2DC + (entity+0xB0 >> 2)]
 float player_view_fp_roll_deg(int32_t torso_roll_bam, int32_t lean_bam);
 
-// The chase camera's collision-march NO-COLLISION landing [orig:
-// @ 0x438213..0x43832e]: under 8.0u the eye marches back in 0.25u steps for
-// stepIndex 1..numSteps-1 (numSteps = floor(dist/0.25)) and stays on the LAST
-// step — never the full distance (numSteps <= 1 leaves the eye at the pivot
-// @ 0x43821f). The per-step bone-collision FORCES (the obstruction pull-in)
-// stay a tracked deferral (net-re §5.39).
-float player_view_tp_effective_distance(float distance);
+// The chase camera's collision-march NO-COLLISION landing, 16.16 [orig:
+// @ 0x438213..0x43832e]: under 8.0u (0x80000) the eye marches back in 0.25u
+// steps for stepIndex 1..numSteps-1 (numSteps = dist >> 14) and stays on the
+// LAST step, (numSteps - 1) * 0x4000 behind the pivot, never the full
+// distance (numSteps <= 1 leaves the eye at the pivot @ 0x43821f). The
+// per-step bone-collision FORCES (the obstruction pull-in) stay a tracked
+// deferral (net-re §5.39).
+int32_t player_view_tp_effective_distance(int32_t distance_q16);
 
 // Advance the three filters from ONE weather-PRNG word and return the BAM32
 // deltas to add to the FP view rotation. A zero counter produces nothing and
@@ -956,54 +957,73 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
                                       bool indoors, float eye[3]);
 
 // The camera legs of one Camera_ComputeThirdPersonView call that need no
-// world lookup, mission space — the witnessed pose math; the presenting shell
-// converts frames and stamps the Camera3D node. The mode-0 carrier legs and
-// the ground-entity leg run before this (local_player_camera_compose,
-// world/local_player_view.h). `anchor_eye` is live Position + the motor's
-// CameraOffset; pass valid=false for a non-person entity. `aim_yaw/pitch_deg`
-// are the body's aim angles and `entity_roll_deg` its own Roll word.
-// `terrain` + `indoors` feed the chase clearances; the motor already floors
-// the on-foot head. `march_candidates` is the entity's proximity-candidate
-// count being non-zero (the chase march's gate). Advances the composition's
-// own state: the person leg clears the ground-entity lift and the mounted
-// chase eases the look-ahead.
+// world lookup. The call composes the view in WORDS, as retail does: the
+// g_ViewPos 16.16 words and the g_ViewRot BAM words; the float mirror is the
+// presenting shell's (it converts frames and stamps the Camera3D node). The
+// mode-0 carrier legs and the ground-entity leg run before this
+// (local_player_camera_compose, world/local_player_view.h). `anchor_eye_q16`
+// is Position + the motor's CameraOffset (the integer adds @0x437FA2..0x437FB7);
+// pass valid=false for a non-person entity. `yaw_bam` / `pitch_bam` are the
+// tracked entity's Yaw (+0x10) and Pitch (+0x14) words and `entity_roll_bam`
+// its Roll (+0x18). `terrain` + `indoors` feed the chase clearances; the motor
+// already floors the on-foot head. `march_candidates` is the entity's
+// proximity-candidate count being non-zero (the chase march's gate). Advances
+// the composition's own state: the person leg clears the ground-entity lift
+// and the mounted chase eases the look-ahead.
 // First person [orig: Camera_ComputeThirdPersonView @ 0x437d10 mode 0, the
-// person leg @ 0x437f9c..0x438031]: eye = the floored anchor pulled back
-// kFpEyePullback along the view forward; pitch adds the doubled recoil;
-// roll = torsoRoll + lean/4. A non-person entity takes the +1.0 bump over
-// Position under its own rotation triple instead [orig: @0x437E89..0x437E99].
-// Third person [orig: mode 1 @ 0x4380E4..0x438650 and the look-at
-// @0x4387DF..0x43892D]: the anchor-translated view matrix places the eye
-// `distance` back (or on the collision march's landing) and the pivot nudge
-// R*(nudge,nudge,nudge) is the look-at target; the clearances apply to every
-// chase eye; roll 0. Mounted (`v.mount.control_seat`) [orig: the mounted arm
-// of mode 1 — yaw @0x438138..0x43814A, pitch @0x438150, distance
-// @0x438121..0x438136, the slope march @0x43846E..0x438619, the aircraft
-// drop @0x43861D..0x43864C, the look-ahead @0x438811..0x4388AF]: the eye sits
-// mount_distance(r) behind the eased mounted anchor along the quarter-damped
-// look yaw at the fixed downward pitch, is floored by the clearances and the
-// slope raise, dropped r/2 on an aircraft, and the final angles look at the
-// pivot plus the eased look-ahead (world/tp_camera_mount.h carries the
-// constants).
+// person leg @ 0x437f9c..0x438031]: pitch adds the doubled recoil
+// (@0x437FBD..0x437FC7), roll = torsoRoll + (lean sar 2) (@0x437FCD..0x437FE6);
+// the euler matrix over the eye and that rotation (@0x437FEC) carries
+// (-0x3000, 0, 0) to the eye (@0x438001..0x438031). A non-person entity takes
+// the +0x10000 bump over Position under its own rotation triple instead
+// [orig: @0x437E89..0x437E99; the triple @0x437D6F..0x437D9B].
+// Third person [orig: mode 1 @ 0x4380E4..0x438681 and the look-at
+// @0x4387DF..0x438933]: the euler matrix over the anchor words and the seed
+// angles (@0x438155..0x438179) carries (0x2000, 0x2000, 0x2000) to the pivot
+// (@0x43817E..0x4381A4), the pivot REPLACES the matrix translation
+// (@0x4381B9..0x4381C4), and the eye is that matrix's image of (-distance, 0,
+// 0) (@0x4383E0..0x4383FB) or of the march landing; the clearances apply to
+// every chase eye; the look-at from the eye to the pivot is ftol(fpatan *
+// dbl_7C19D8) for the yaw, and for the pitch over the Q22 table horizontal
+// (@0x4388B5..0x43892D); roll 0. Mounted (`v.mount.control_seat`) [orig: the
+// mounted arm of mode 1, yaw @0x438138..0x43814A, pitch @0x438150, distance
+// @0x438121..0x438136, the slope march @0x43846E..0x438619, the aircraft drop
+// @0x43861D..0x43864C, the look-ahead @0x438811..0x4388AF]: the eye sits
+// mount_distance_q16(r) behind the pivot along the quarter-damped look yaw at
+// the fixed downward pitch, is floored by the clearances and the slope raise,
+// dropped r/2 on an aircraft, and the final angles look at the pivot plus the
+// eased look-ahead (world/tp_camera_mount.h carries the legs).
 // Mode 4 [orig: the lerp @0x4389eb..0x438b49]: the death camera's FROM/TO
-// poses lerped against `v.view_tick` (world/death_camera.h), converted
-// through world/angle.h; roll rides the same lerp.
+// poses lerped against `v.view_tick` (world/death_camera.h); roll rides the
+// same lerp.
 struct PlayerCameraPose {
+    // The view words the call leaves for every reader until the next call
+    // [orig: g_ViewPosX..Z @0xA890D4..0xA890DC; g_ViewRotYaw / Pitch / Roll
+    //  @0xA890E0..0xA890E8, the yaw the BAM heading].
+    int32_t pos_q16[3] = {0, 0, 0};
+    int32_t yaw_bam = 0;
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
+    // The presentation mirror of the words (player_camera_pose_present): the
+    // shell's read, which the main scene's optics adjust per rendered frame.
     float eye[3] = {0.0f, 0.0f, 0.0f}; // mission units
     float yaw_deg = 0.0f;              // mission-euler view angles
     float pitch_deg = 0.0f;
     float roll_deg = 0.0f;
     bool third_person = false;
 };
+// Refresh the float mirror from the words: the eye's 16.16 views, the mission
+// yaw (90 - heading) and the pitch / roll degrees.
+void player_camera_pose_present(PlayerCameraPose &pose);
 void player_view_compose_camera(PlayerViewState &v,
-                                const float position[3],
-                                const float anchor_eye[3], bool anchor_valid,
+                                const int32_t position_q16[3],
+                                const int32_t anchor_eye_q16[3], bool anchor_valid,
                                 const terrain::TerrainHeightField *terrain,
                                 bool indoors,
-                                float aim_yaw_deg, float aim_pitch_deg,
+                                int32_t yaw_bam, int32_t pitch_bam,
                                 int32_t recoil_pitch_bam,
                                 int32_t torso_roll_bam, int32_t lean_bam,
-                                bool march_candidates, float entity_roll_deg,
+                                bool march_candidates, int32_t entity_roll_bam,
                                 PlayerCameraPose &out);
 
 } // namespace opennova::world

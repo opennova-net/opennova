@@ -473,8 +473,19 @@ void test_shake_turns_the_bam_heading() {
     camera_shake_sample(step, lw.w.weather.core.oscillator.prng, d_yaw, d_pitch, d_roll);
     CHECK(d_yaw != 0 && d_pitch != 0 && d_roll != 0);
     local_player_view_frame(&lw.w, w, v, t, shaken);
+    // The deltas land on the view's BAM words (g_ViewRot), as the adds do.
+    CHECK(shaken.camera.yaw_bam == static_cast<int32_t>(static_cast<uint32_t>(base.camera.yaw_bam) +
+                                                        static_cast<uint32_t>(d_yaw)));
+    CHECK(shaken.camera.pitch_bam == base.camera.pitch_bam + d_pitch);
+    CHECK(shaken.camera.roll_bam == base.camera.roll_bam + d_roll);
+    // The mission yaw mirror (90 - heading, kept in [0, 360)) takes the yaw
+    // delta negated.
     const double deg = 360.0 / 4294967296.0;
-    CHECK(std::fabs(shaken.camera.yaw_deg - (base.camera.yaw_deg - float(d_yaw * deg))) < 1e-4f);
+    double yaw_step = static_cast<double>(shaken.camera.yaw_deg) -
+            (static_cast<double>(base.camera.yaw_deg) - d_yaw * deg);
+    if (yaw_step > 180.0) yaw_step -= 360.0;
+    if (yaw_step < -180.0) yaw_step += 360.0;
+    CHECK(std::fabs(yaw_step) < 1e-4);
     CHECK(std::fabs(shaken.camera.pitch_deg - (base.camera.pitch_deg + float(d_pitch * deg))) < 1e-4f);
     CHECK(std::fabs(shaken.camera.roll_deg - (base.camera.roll_deg + float(d_roll * deg))) < 1e-4f);
     CHECK(v.shake.yaw == step.yaw && v.shake.pitch == step.pitch && v.shake.roll == step.roll);

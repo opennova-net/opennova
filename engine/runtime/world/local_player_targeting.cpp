@@ -204,8 +204,7 @@ void LocalPlayer::update_aim_target() {
             if (e->mounted && e->mount_type == SeatType::Controller) fire[4] = 0;
             collision_matrix_from_euler(fire[3], fire[4], fire[5], fire)
                     .transform_point(forward, endpoint);
-            for (int i = 0; i < 3; ++i)
-                origin[i] = static_cast<int32_t>(view_tracker.composed.eye[i] * 65536.0f);
+            for (int i = 0; i < 3; ++i) origin[i] = view_tracker.composed.pos_q16[i];
         } else {
             int32_t yaw = fire[3], pitch = fire[4], roll = fire[5];
             // The weapon-view offsets: the scope-zero elevation comes back OUT

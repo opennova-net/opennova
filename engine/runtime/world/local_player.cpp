@@ -317,18 +317,17 @@ void LocalPlayer::place_on_composed_view() {
 	w::PlayerCameraPose pose;
 	bool mounted_camera = false;
 	if (!w::local_player_camera_compose(world, view, view_tracker, pose, mounted_camera)) return;
-	// [orig: Spectator_CycleMode @0x52b087..0x52b0b7 — g_ViewPos less CameraOffset
-	//  (+0x6C..+0x74)]
+	// The view words, copied as they are (D-NET-507 (5)): g_ViewPos less
+	// CameraOffset (+0x6C..+0x74) [orig: Spectator_CycleMode
+	// @0x52b087..0x52b0b7, after its compose @0x52B082].
 	const int32_t offset[3] = {e->eye_offset_x, e->eye_offset_y, e->eye_offset_z};
 	for (int axis = 0; axis < 3; ++axis)
-		p->self->position.word(axis) = io::bam_sub(w::to_fixed(pose.eye[axis]), offset[axis]);
-	// [orig: Spectator_CycleMode @0x52b0ba..0x52b0ee — Yaw and g_LocalPlayerLookYaw = g_ViewRotYaw,
-	//  Pitch, Roll]. The port's view words are the composed mission angles.
-	const int32_t heading = w::bam_heading_from_mission_yaw_deg(pose.yaw_deg);
-	const int32_t pitch = static_cast<int32_t>(
-			std::lround(static_cast<double>(pose.pitch_deg) / w::kDegreesPerBam));
-	const int32_t roll = static_cast<int32_t>(
-			std::lround(static_cast<double>(pose.roll_deg) / w::kDegreesPerBam));
+		p->self->position.word(axis) = io::bam_sub(pose.pos_q16[axis], offset[axis]);
+	// [orig: Spectator_CycleMode @0x52b0ba..0x52b0ee: Yaw and g_LocalPlayerLookYaw =
+	//  g_ViewRotYaw, Pitch = g_ViewRotPitch, Roll = g_ViewRotRoll]
+	const int32_t heading = pose.yaw_bam;
+	const int32_t pitch = pose.pitch_bam;
+	const int32_t roll = pose.roll_bam;
 	p->heading = heading;
 	p->pitch = pitch;
 	p->roll = roll;

@@ -275,10 +275,10 @@ void test_camera_leg_aims_the_fire_pose_from_the_composed_eye() {
     const int32_t forward[3] = {1000 << 16, 0, 0};
     int32_t endpoint[3];
     collision_matrix_from_euler(fire[3], fire[4], fire[5], fire).transform_point(forward, endpoint);
-    // The last composed eye sits 47 u above the player.
-    local.view_tracker.composed.eye[0] = 10.0f;
-    local.view_tracker.composed.eye[1] = 20.0f;
-    local.view_tracker.composed.eye[2] = 50.0f;
+    // The last composed eye (the g_ViewPos words) sits 47 u above the player.
+    local.view_tracker.composed.pos_q16[0] = 10 << 16;
+    local.view_tracker.composed.pos_q16[1] = 20 << 16;
+    local.view_tracker.composed.pos_q16[2] = 50 << 16;
     local.view_tracker.composed_valid = true;
     lw.w.logic_tick = 16;
     local.update_aim_target();
@@ -376,8 +376,7 @@ void test_aim_ray_names_a_remote_persons_proxy() {
     int32_t fire[6];
     local_weapon_fire_pose(lw.w, local.weapon, local.weapon.slot.clip, false, fire);
     // The composed eye on the fire pose: the ray runs down the fire heading.
-    for (int i = 0; i < 3; ++i)
-        local.view_tracker.composed.eye[i] = static_cast<float>(fire[i]) / 65536.0f;
+    for (int i = 0; i < 3; ++i) local.view_tracker.composed.pos_q16[i] = fire[i];
     local.view_tracker.composed_valid = true;
     int32_t ahead[3];
     const int32_t forward[3] = {100 << 16, 0, 0};

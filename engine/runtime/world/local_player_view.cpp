@@ -689,7 +689,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     // effective-mode refresh below.
     MountedCameraInput mount;
     // Every chase eye clears the water plane [orig: @0x438409..0x43841E].
-    mount.water_z = static_cast<float>(world->env.water_z) / 65536.0f;
+    mount.water_q16 = world->env.water_z;
     const Entity *carrier = e->mounted ? world->registry.get(e->mount_target) : nullptr;
     if (carrier != nullptr && is_vehicle_control_seat(e->mount_type)) {
         int32_t pitch_bam = 0, roll_bam = 0;
@@ -702,7 +702,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
         // Math_TransformPointFixedPoint22 @0x412E90 over parentMatrix(+0xB4),
         // called @0x438855].
         const int32_t zero[3] = {0, 0, 0};
-        const int32_t ahead[3] = {to_fixed(kMountLookaheadDistance), 0, 0};
+        const int32_t ahead[3] = {kMountLookaheadQ16, 0, 0};
         collision_matrix_from_euler(mount.carrier_yaw_bam, pitch_bam, roll_bam, zero)
                 .rotate_point(ahead, mount.lookahead_target_q16);
         mount.bound_radius = carrier->bound_radius;
@@ -1190,12 +1190,12 @@ bool compose_ground_leg(World &world, const AiEntity &p, const Entity &e,
     for (int i = 0; i < 3; ++i) {
         const int32_t lift = static_cast<int32_t>(
                 (static_cast<int64_t>(up[i]) * v.ground_leg_lift_q16 + 0x8000) >> 16);
-        out.eye[i] = static_cast<float>(from_fixed(io::bam_add(p.self->position.word(i), lift)));
+        out.pos_q16[i] = io::bam_add(p.self->position.word(i), lift);
     }
     // The rotation stays the entity's own triple [orig: @0x437D86..0x437D9B].
-    out.yaw_deg = static_cast<float>(mission_yaw_deg_from_bam_heading(p.heading));
-    out.pitch_deg = static_cast<float>(static_cast<double>(p.pitch) * kDegreesPerBam);
-    out.roll_deg = static_cast<float>(static_cast<double>(p.roll) * kDegreesPerBam);
+    out.yaw_bam = p.heading;
+    out.pitch_bam = p.pitch;
+    out.roll_bam = p.roll;
     out.third_person = false;
     return true;
 }
@@ -1280,10 +1280,8 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
     const bool row_target = (v.camera_tracked & kCameraTrackedTargetKey) != 0 &&
             !world.rules.logic_authority && spectate.has_target &&
             !spectate.target_entity.valid();
-    // Compose from the body aim. The rendered view adds optical offsets
-    // afterwards (LocalPlayer::present_view_frame).
-    const float aim_yaw = static_cast<float>(mission_yaw_deg_from_bam_heading(p->heading));
-    const float aim_pitch = static_cast<float>(static_cast<double>(p->pitch) * kDegreesPerBam);
+    // Compose from the tracked entity's Yaw / Pitch / Roll words. The rendered
+    // view adds optical offsets afterwards (LocalPlayer::present_view_frame).
     int32_t mounted[6];
     // A seated decoded target's carrier legs stand in for the local entity's
     // (row_target_mounted_camera).
@@ -1294,48 +1292,43 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
     if (mounted_leg) {
         // A seated first-person view belongs to the carrier: its
         // virtual-display camera callback, or the gun's posed CAMERA
-        // userpoint [orig: Camera_ComputeThirdPersonView mode 0
-        //  @0x437DAC..0x437EAD].
-        out.eye[0] = static_cast<float>(from_fixed(mounted[0]));
-        out.eye[1] = static_cast<float>(from_fixed(mounted[1]));
-        out.eye[2] = static_cast<float>(from_fixed(mounted[2]));
-        out.yaw_deg = static_cast<float>(mission_yaw_deg_from_bam_heading(mounted[3]));
-        out.pitch_deg = static_cast<float>(static_cast<double>(mounted[4]) * kDegreesPerBam);
-        out.roll_deg = static_cast<float>(static_cast<double>(mounted[5]) * kDegreesPerBam);
+        // userpoint, words as the callbacks write them [orig:
+        //  Camera_ComputeThirdPersonView mode 0 @0x437DAC..0x437EAD].
+        for (int i = 0; i < 3; ++i) out.pos_q16[i] = mounted[i];
+        out.yaw_bam = mounted[3];
+        out.pitch_bam = mounted[4];
+        out.roll_bam = mounted[5];
         mounted_camera = true;
     } else if (!(v.camera_mode == 0 && p->inf.active && compose_ground_leg(world, *p, *e, v, out))) {
-        const float position[3] = {e->position.x, e->position.y, e->position.z};
+        const int32_t position[3] = {e->position.x.q16, e->position.y.q16, e->position.z.q16};
         // CameraOffset already includes the current motor's posed head and
         // its on-foot terrain floor. Re-anchor it after the motor's
-        // translation. [orig: Camera_ComputeThirdPersonView @0x437FA5..0x437FB7]
-        Vec3 current_eye = player_eye_position(*e);
-        if (row_target) {
-            current_eye = {e->position.x + static_cast<float>(spectate.target_eye[0]) / 65536.0f,
-                           e->position.y + static_cast<float>(spectate.target_eye[1]) / 65536.0f,
-                           e->position.z + static_cast<float>(spectate.target_eye[2]) / 65536.0f};
-        }
-        const float anchor_eye[3] = {current_eye.x, current_eye.y, current_eye.z};
+        // translation: the integer adds onto the Position words [orig:
+        // Camera_ComputeThirdPersonView @0x437FA2..0x437FB7].
+        const int32_t offset[3] = {row_target ? spectate.target_eye[0] : e->eye_offset_x,
+                                   row_target ? spectate.target_eye[1] : e->eye_offset_y,
+                                   row_target ? spectate.target_eye[2] : e->eye_offset_z};
+        const int32_t anchor_eye[3] = {io::bam_add(position[0], offset[0]),
+                                       io::bam_add(position[1], offset[1]),
+                                       io::bam_add(position[2], offset[2])};
         // The chase march runs only with proximity candidates at hand
         // [orig: the entity +0x1C0 count @0x4381CB].
         const bool march_candidates =
                 world.collision != nullptr && world.collision->candidate_count(e->handle) > 0;
         player_view_compose_camera(v, position, anchor_eye, p->inf.active, world.ai.terrain,
-                                   (e->flags & kEntityFlagIndoors) != 0, aim_yaw, aim_pitch,
+                                   (e->flags & kEntityFlagIndoors) != 0, p->heading, p->pitch,
                                    row_target ? spectate.target_recoil : p->inf.recoil_pitch,
                                    row_target ? spectate.target_torso_roll : p->inf.torso_roll,
                                    row_target ? spectate.target_lean : p->inf.lean_angle,
-                                   march_candidates,
-                                   static_cast<float>(static_cast<double>(p->roll) * kDegreesPerBam),
-                                   out);
+                                   march_candidates, p->roll, out);
     }
     // This call's shake. First person advances the three IIR filters from the
     // current weather PRNG word (unchanged between ticks) [orig: the mode-0
     // block @0x43803C..0x4380DF, the >> 6 applies @0x4380B0..0x4380D9]; the
     // chase applies the STATELESS sin/cos chain over the raw counter and the
     // engine tick [orig: the mode-1 block @0x438939..0x4389E5]; the mode-4
-    // lerp takes neither. Both add to the BAM HEADING (`add g_ViewRotYaw`
-    // @0x4380D9 / @0x43898B), so the mission yaw (90 - heading) takes the
-    // negated delta.
+    // lerp takes neither. Each adds onto the view's BAM words (`add
+    // g_ViewRotYaw` @0x4380D9 / @0x43898B).
     int32_t d_yaw = 0;
     int32_t d_pitch = 0;
     int32_t d_roll = 0;
@@ -1345,10 +1338,10 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
         camera_shake_sample_chase(v.shake, world.weather.core.oscillator.prng, world.logic_tick,
                                   d_yaw, d_pitch, d_roll);
     }
-    constexpr float kDegPerBam = static_cast<float>(kDegreesPerBam);
-    out.yaw_deg -= static_cast<float>(d_yaw) * kDegPerBam;
-    out.pitch_deg += static_cast<float>(d_pitch) * kDegPerBam;
-    out.roll_deg += static_cast<float>(d_roll) * kDegPerBam;
+    out.yaw_bam = io::bam_add(out.yaw_bam, d_yaw);
+    out.pitch_bam = io::bam_add(out.pitch_bam, d_pitch);
+    out.roll_bam = io::bam_add(out.roll_bam, d_roll);
+    player_camera_pose_present(out);
     // The call leaves its view in g_view_pos / g_view_rot for every reader
     // until the next call.
     t.composed = out;

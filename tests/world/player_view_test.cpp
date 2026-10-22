@@ -6,14 +6,20 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
 #include <cstring>
+#include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <formats/def/def.h>
 #include <runtime/world/player_weapon.h>
 
 #include <runtime/renderer/aspect_ratio.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/dir_table.h>
+#include <runtime/world/geom.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/tp_camera_mount.h>
 #include <runtime/world/weapon_fsm.h>
@@ -975,62 +981,122 @@ bool near_eq(float a, float b, float eps) {
     return std::fabs(a - b) <= eps;
 }
 
-// The march landing table [orig: @ 0x438213..0x43832e]: the reset distance 1.0
-// lands 0.75u back; a sub-half-metre distance stays at the pivot; the gate
-// passes >= 8.0 through untouched.
+// The march landing table in words [orig: @ 0x438213..0x43832e]: the reset
+// distance 1.0 lands 0.75u back; a sub-half-unit distance stays at the pivot;
+// the gate passes >= 8.0 through untouched.
 void test_tp_effective_distance_march() {
-    CHECK(player_view_tp_effective_distance(1.0f) == 0.75f);
-    CHECK(player_view_tp_effective_distance(0.3f) == 0.0f);
-    CHECK(player_view_tp_effective_distance(0.5f) == 0.25f);
-    CHECK(player_view_tp_effective_distance(8.0f) == 8.0f);
-    CHECK(player_view_tp_effective_distance(512.0f) == 512.0f);
+    CHECK(player_view_tp_effective_distance(0x10000) == 0xC000);
+    CHECK(player_view_tp_effective_distance(0x4CCC) == 0);   // 0.3: one step
+    CHECK(player_view_tp_effective_distance(0x8000) == 0x4000);
+    CHECK(player_view_tp_effective_distance(7 * 0x10000) == 27 * 0x4000);
+    CHECK(player_view_tp_effective_distance(0x80000) == 0x80000);
+    CHECK(player_view_tp_effective_distance(512 * 0x10000) == 512 * 0x10000);
 }
 
-// The FP leg: the doubled recoil, the torso+lean/4 roll, the motor eye,
-// and the 0.1875 pull-back along the (recoiled) forward.
+// The word form of a mission-unit triple (the test rigs' float inputs).
+void to_words(const float in[3], int32_t out[3]) {
+    for (int i = 0; i < 3; ++i) out[i] = to_fixed(in[i]);
+}
+
+bool same3(const int32_t a[3], const int32_t b[3]) {
+    return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
+}
+
+// The cited chase sequence [orig: Camera_ComputeThirdPersonView
+// @0x438155..0x4383FB]: the euler matrix over the anchor and the seed angles,
+// roll 0; the pivot its image of (0x2000, 0x2000, 0x2000); the pivot stored as
+// the matrix translation (@0x4381B9..0x4381C4); the eye the image of
+// (-back, 0, 0).
+void chase_eye_words(int32_t yaw, int32_t pitch, const int32_t anchor[3], int32_t back,
+                     int32_t pivot[3], int32_t eye[3]) {
+    CollisionMatrix m = collision_matrix_from_euler(yaw, pitch, 0, anchor);
+    const int32_t nudge[3] = {0x2000, 0x2000, 0x2000};
+    m.transform_point(nudge, pivot);
+    m.m[3] = pivot[0];
+    m.m[7] = pivot[1];
+    m.m[11] = pivot[2];
+    const int32_t local[3] = {-back, 0, 0};
+    m.transform_point(local, eye);
+}
+
+// The cited look-at [orig: @0x4388B5..0x43892D]: yaw = ftol(fpatan(dy, dx) *
+// dbl_7C19D8); the horizontal dx * cos + dy * sin from the Q22 table at
+// (yaw + 0x200000) >> 22, each product >> 22; pitch = ftol(fpatan(dz,
+// horizontal) * dbl_7C19D8).
+void chase_look_at_words(const int32_t delta[3], int32_t &yaw, int32_t &pitch) {
+    namespace io = opennova::io;
+    yaw = io::retail_ftol_sse2(
+            std::atan2(static_cast<double>(delta[1]), static_cast<double>(delta[0])) *
+            io::kBamPerRadian);
+    int32_t c = 0;
+    int32_t s = 0;
+    quantized_dir(yaw, c, s);
+    const int32_t h = io::bam_add(static_cast<int32_t>((static_cast<int64_t>(delta[0]) * c) >> 22),
+                                  static_cast<int32_t>((static_cast<int64_t>(delta[1]) * s) >> 22));
+    pitch = io::retail_ftol_sse2(
+            std::atan2(static_cast<double>(delta[2]), static_cast<double>(h)) * io::kBamPerRadian);
+}
+
+// The FP leg in words [orig: @0x437F9C..0x438031]: pitch adds the doubled
+// recoil, roll = torso + (lean sar 2), and the euler matrix over the eye
+// carries (-0x3000, 0, 0) to it.
 void test_compose_camera_first_person() {
     PlayerViewState v;
-    const float position[3] = {10.0f, 20.0f, 5.0f};
-    const float anchor[3] = {10.0f, 20.0f, 6.6f};
-    PlayerCameraPose pose;
-    // recoil 1 deg (BAM), torso roll 2 deg, lean 4 deg -> roll 2 + 1 = 3 deg.
+    const int32_t position[3] = {10 << 16, 20 << 16, 5 << 16};
+    const int32_t anchor[3] = {10 << 16, 20 << 16, to_fixed(6.6f)};
     const int32_t deg_bam = 11930465; // 2^32 / 360, rounded
+    PlayerCameraPose pose;
+    // Heading 0, pitch 0, no recoil: the forward column is (1, 0, 0) whatever
+    // the roll, so the pull-back is exactly -0x3000 on x.
     player_view_compose_camera(v, position, anchor, true, nullptr, false,
-            90.0f, 0.0f, deg_bam, 2 * deg_bam, 4 * deg_bam, false, 0.0f, pose);
+            0, 0, 0, 2 * deg_bam, 4 * deg_bam, false, 0, pose);
     CHECK(!pose.third_person);
+    CHECK(pose.yaw_bam == 0 && pose.pitch_bam == 0);
+    CHECK(pose.roll_bam == 3 * deg_bam); // torso 2 + (lean 4 sar 2)
+    CHECK(pose.pos_q16[0] == anchor[0] - 0x3000);
+    CHECK(pose.pos_q16[1] == anchor[1] && pose.pos_q16[2] == anchor[2]);
+    // The float mirror: heading 0 is mission yaw 90.
     CHECK(near_eq(pose.yaw_deg, 90.0f));
-    CHECK(near_eq(pose.pitch_deg, 2.0f, 0.01f)); // twice the 1-deg accumulator
-    CHECK(near_eq(pose.roll_deg, 3.0f, 0.01f));  // torso 2 + lean 4 / 4
-    // yaw 90: mission forward ~= (+cos(pitch)*1, ~0, sin(pitch)); the eye pulls
-    // 0.1875 BACK along it from the anchor.
-    CHECK(near_eq(pose.eye[0], anchor[0] - 0.1875f * std::cos(2.0f * 3.14159265f / 180.0f), 0.001f));
-    CHECK(near_eq(pose.eye[2], anchor[2] - 0.1875f * std::sin(2.0f * 3.14159265f / 180.0f), 0.001f));
+    CHECK(near_eq(pose.roll_deg, 3.0f, 0.01f));
+    CHECK(near_eq(pose.eye[0], 10.0f - 0.1875f, 0.0001f));
+
+    // A 1-degree recoil doubles onto the pitch word; the eye pulls back along
+    // the pitched forward (0x3000 cos 2, 0, 0x3000 sin 2), within the builder's
+    // truncated trig.
+    player_view_compose_camera(v, position, anchor, true, nullptr, false,
+            0, 0, deg_bam, 0, 0, false, 0, pose);
+    CHECK(pose.pitch_bam == 2 * deg_bam && pose.roll_bam == 0);
+    const double two = 2.0 * 3.14159265358979323846 / 180.0;
+    CHECK(std::abs(pose.pos_q16[0] - (anchor[0] - static_cast<int32_t>(0x3000 * std::cos(two)))) <= 2);
+    CHECK(pose.pos_q16[1] == anchor[1]);
+    CHECK(std::abs(pose.pos_q16[2] - (anchor[2] - static_cast<int32_t>(0x3000 * std::sin(two)))) <= 2);
 
     // The exact motor eye passes through without the capsule fallback floor.
-    const float low_anchor[3] = {10.0f, 20.0f, 5.0f};
+    const int32_t low_anchor[3] = {10 << 16, 20 << 16, 5 << 16};
     player_view_compose_camera(v, position, low_anchor, true, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(near_eq(pose.eye[2], 5.0f, 0.001f));
+            0, 0, 0, 0, 0, false, 0, pose);
+    CHECK(pose.pos_q16[2] == 5 << 16);
 
-    // No anchor: the non-person +1.0 bump over position under the entity's
-    // own rotation triple, then straight to the tail — no pull-back, no
-    // recoil doubling, no torso/lean roll [orig: @ 0x437e8f, the jump to the
-    // shake @0x437E99; the triple @0x437D86..0x437D9B].
+    // No anchor: the non-person +0x10000 bump over Position under the
+    // entity's own rotation triple, then straight to the tail: no pull-back,
+    // no recoil doubling, no torso/lean roll [orig: @ 0x437e8f, the jump to
+    // the shake @0x437E99; the triple @0x437D6F..0x437D9B].
     player_view_compose_camera(v, position, position, false, nullptr, false,
-            0.0f, 0.0f, deg_bam, 2 * deg_bam, 4 * deg_bam, false, 3.5f, pose);
-    CHECK(near_eq(pose.eye[0], 10.0f, 0.001f));
-    CHECK(near_eq(pose.eye[1], 20.0f, 0.001f));
-    CHECK(near_eq(pose.eye[2], 6.0f, 0.001f));
-    CHECK(near_eq(pose.pitch_deg, 0.0f, 0.001f));
-    CHECK(near_eq(pose.roll_deg, 3.5f, 0.001f));
+            5 * deg_bam, 6 * deg_bam, deg_bam, 2 * deg_bam, 4 * deg_bam, false, 7 * deg_bam, pose);
+    CHECK(pose.pos_q16[0] == position[0] && pose.pos_q16[1] == position[1]);
+    CHECK(pose.pos_q16[2] == position[2] + 0x10000);
+    CHECK(pose.yaw_bam == 5 * deg_bam && pose.pitch_bam == 6 * deg_bam);
+    CHECK(pose.roll_bam == 7 * deg_bam);
 }
 
 // The D-INF-18 terrain floor [orig: Entity_UpdateInfantryPlayerBody
 // @ 0x4b6c08..0x4b6ca4]: five bilinear samples (eye column + 0.25u along each
-// ground axis), each + 0.0625, max-folded into a floor on the head-bone eye Z —
-// skipped indoors, and never applied on the non-person bump path.
+// ground axis), each + 0.0625, max-folded into a floor on the head-bone eye Z,
+// skipped indoors, and never applied on the non-person bump path. The compose
+// carries the floored eye's Z word through (heading 0, pitch 0: the pull-back
+// rides X only).
 void test_compose_camera_terrain_floor() {
-    // A flat 512x512 identity atlas at 8.0 world units (raw16 = units * 256) —
+    // A flat 512x512 identity atlas at 8.0 world units (raw16 = units * 256),
     // the tests/world/ground_height_test.cpp wiring: all sector cells id 1, so
     // world (x, z) indexes the atlas directly and one texel is one world unit.
     constexpr int kDim = 512;
@@ -1046,221 +1112,255 @@ void test_compose_camera_terrain_floor() {
     PlayerViewState v;
     // Mission y = -4 samples atlas z = +4 (the engine-y -> atlas-z negation).
     const float position[3] = {100.0f, -4.0f, 5.0f};
+    int32_t position_q16[3];
+    to_words(position, position_q16);
     float anchor[3] = {100.0f, -4.0f, 6.6f}; // below terrain 8.0
+    int32_t anchor_q16[3];
     PlayerCameraPose pose;
     player_view_floor_eye_to_terrain(&field, false, anchor);
-    player_view_compose_camera(v, position, anchor, true, &field, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    // yaw 0 pitch 0: fwd = (0, 1, 0); the pull-back rides Y, the Z is the
-    // floored eye = 8.0 + 0.0625.
+    to_words(anchor, anchor_q16);
+    player_view_compose_camera(v, position_q16, anchor_q16, true, &field, false,
+            0, 0, 0, 0, 0, false, 0, pose);
     CHECK(near_eq(pose.eye[2], 8.0625f, 0.001f));
 
     anchor[2] = 6.6f;
     player_view_floor_eye_to_terrain(&field, true, anchor);
+    to_words(anchor, anchor_q16);
     // INDOORS skips the floor [orig: the Flags & 0x800000 gate @ 0x4b6c08].
-    player_view_compose_camera(v, position, anchor, true, &field, true,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
+    player_view_compose_camera(v, position_q16, anchor_q16, true, &field, true,
+            0, 0, 0, 0, 0, false, 0, pose);
     CHECK(near_eq(pose.eye[2], 6.6f, 0.001f));
 
     // An eye already above the floored height passes through untouched.
     const float high_anchor[3] = {100.0f, -4.0f, 9.5f};
-    player_view_compose_camera(v, position, high_anchor, true, &field, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(near_eq(pose.eye[2], 9.5f, 0.001f));
+    int32_t high_q16[3];
+    to_words(high_anchor, high_q16);
+    player_view_compose_camera(v, position_q16, high_q16, true, &field, false,
+            0, 0, 0, 0, 0, false, 0, pose);
+    CHECK(pose.pos_q16[2] == high_q16[2]);
 
     // The non-person bump path has no terrain leg [orig: the fallback branch
     // @ 0x4b6b92 stores its offset with only the 0x2000 floor].
-    player_view_compose_camera(v, position, position, false, &field, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(near_eq(pose.eye[2], 6.0f, 0.001f));
+    player_view_compose_camera(v, position_q16, position_q16, false, &field, false,
+            0, 0, 0, 0, 0, false, 0, pose);
+    CHECK(pose.pos_q16[2] == position_q16[2] + 0x10000);
 
     // The neighbor probes: a ridge one column to +X raises the floor through
-    // the +0.25 probe's bilinear tap — the max fold over the five samples.
+    // the +0.25 probe's bilinear tap, the max fold over the five samples.
     // Column x=101 at 24.0u: probe x=100.25 -> 8 + (24-8)*0.25 = 12.0.
     for (int z = 0; z < kDim; ++z) heightmap[z * kDim + 101] = 24 * 256;
     player_view_floor_eye_to_terrain(&field, false, anchor);
-    player_view_compose_camera(v, position, anchor, true, &field, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
+    to_words(anchor, anchor_q16);
+    player_view_compose_camera(v, position_q16, anchor_q16, true, &field, false,
+            0, 0, 0, 0, 0, false, 0, pose);
     CHECK(near_eq(pose.eye[2], 12.0625f, 0.001f));
 }
 
-// The chase's final look-at: mission yaw (clockwise from +Y, [0, 360)) and
-// pitch from the eye to the target [orig: fpatan @0x4388BD / @0x43891B].
-void chase_look_at(const float eye[3], const float target[3], float &yaw_deg, float &pitch_deg) {
-    const double tx = static_cast<double>(target[0]) - eye[0];
-    const double ty = static_cast<double>(target[1]) - eye[1];
-    const double tz = static_cast<double>(target[2]) - eye[2];
-    const double to_deg = 180.0 / 3.14159265358979323846;
-    double yaw = std::atan2(tx, ty) * to_deg;
-    if (yaw < 0.0) yaw += 360.0;
-    yaw_deg = static_cast<float>(yaw);
-    pitch_deg = static_cast<float>(std::atan2(tz, std::sqrt(tx * tx + ty * ty)) * to_deg);
-}
-
-// The TP leg [orig: Camera_ComputeThirdPersonView @0x437D10 — the anchor-
-// translated view matrix @0x438179, the pivot @0x43817E..0x4381D9, the eye
-// @0x4383E0..0x4383FB, the march gates @0x4381CB / @0x4381E3 and its no-force
-// exit @0x438334..0x438341, the look-at @0x4387DF..0x43892D]: the chased
-// anchor wins over the live eye; the eye backs off the ANCHOR (the
-// march-landed 0.75 only with proximity candidates at hand, else the full
-// 1.0); the pivot nudged 0.125 along forward+left+up is the LOOK-AT TARGET,
-// never the eye, so the view turns left and up off the seed; roll stays 0
-// and the recoil doubling does NOT apply.
+// The TP leg [orig: Camera_ComputeThirdPersonView @0x437D10, the euler build
+// @0x438179, the pivot @0x43817E..0x4381A4, the pivot as the translation
+// @0x4381B9..0x4381C4, the eye @0x4383E0..0x4383FB, the march gates @0x4381CB
+// / @0x4381E3 and its no-force exit @0x438334..0x438341, the look-at
+// @0x4387DF..0x43892D]: the chased anchor wins over the live eye; the eye
+// backs off the PIVOT, never the anchor (the march-landed 0.75 only with
+// proximity candidates at hand, else the full 1.0); the pivot is the look-at
+// target; roll stays 0 and the recoil doubling does NOT apply.
 void test_compose_camera_third_person() {
     PlayerViewState v;
     v.third_person = true;
     v.tp_anchor_valid = true;
-    v.tp_anchor[0] = 1.0f;
-    v.tp_anchor[1] = 2.0f;
-    v.tp_anchor[2] = 3.0f;
-    const float position[3] = {0.0f, 0.0f, 0.0f};
-    const float anchor[3] = {9.0f, 9.0f, 9.0f}; // must be ignored
+    v.tp_anchor_q16[0] = 1 << 16;
+    v.tp_anchor_q16[1] = 2 << 16;
+    v.tp_anchor_q16[2] = 3 << 16;
+    const int32_t position[3] = {0, 0, 0};
+    const int32_t anchor[3] = {9 << 16, 9 << 16, 9 << 16}; // must be ignored
     const int32_t deg_bam = 11930465;
-    // yaw 0 pitch 0: mission fwd = (0, 1, 0), left = (-1, 0, 0), up = (0, 0, 1).
-    const float pivot[3] = {1.0f - 0.125f, 2.0f + 0.125f, 3.0f + 0.125f};
     for (const bool candidates : {false, true}) {
         PlayerCameraPose pose;
+        // Heading 0, pitch 0: the euler matrix is the identity, so the pivot
+        // is the anchor + 0x2000 per axis exactly and the eye sits `back`
+        // behind the PIVOT on X.
         player_view_compose_camera(v, position, anchor, true, nullptr, false,
-                0.0f, 0.0f,
-                deg_bam /* recoil must not leak into TP */, deg_bam, deg_bam, candidates, 0.0f,
-                pose);
+                0, 0, deg_bam /* recoil must not leak into TP */, deg_bam, deg_bam,
+                candidates, 0, pose);
         CHECK(pose.third_person);
-        CHECK(pose.roll_deg == 0.0f);
-        const float back = candidates ? 0.75f : 1.0f; // the play reset's 1.0
-        CHECK(near_eq(pose.eye[0], 1.0f));
-        CHECK(near_eq(pose.eye[1], 2.0f - back));
-        CHECK(near_eq(pose.eye[2], 3.0f));
-        float yaw = 0.0f, pitch = 0.0f;
-        chase_look_at(pose.eye, pivot, yaw, pitch);
-        CHECK(near_eq(pose.yaw_deg, yaw, 1e-4f));
-        CHECK(near_eq(pose.pitch_deg, pitch, 1e-4f));
-        CHECK(pose.yaw_deg > 270.0f && pose.pitch_deg > 1.0f);
+        CHECK(pose.roll_bam == 0);
+        const int32_t back = candidates ? 0xC000 : 0x10000; // the play reset's 1.0
+        CHECK(pose.pos_q16[0] == (1 << 16) + 0x2000 - back);
+        CHECK(pose.pos_q16[1] == (2 << 16) + 0x2000);
+        CHECK(pose.pos_q16[2] == (3 << 16) + 0x2000);
+        // From there the pivot lies dead ahead and level: atan2(0, back) twice.
+        CHECK(pose.yaw_bam == 0 && pose.pitch_bam == 0);
+        CHECK(near_eq(pose.yaw_deg, 90.0f) && pose.pitch_deg == 0.0f);
     }
+    // A seeded orbit (90 degrees of yaw, 5.625 up): the same sequence through
+    // the builder's truncated trig, and the look-at from the eye to the pivot.
+    v.chase_orbit_yaw = 0x40000000;
+    v.chase_orbit_pitch = kTpTrackedOrbitPitchBam;
+    v.chase_distance_q16 = kTpTrackedDistanceQ16;
+    PlayerCameraPose pose;
+    player_view_compose_camera(v, position, anchor, true, nullptr, false,
+            0x10000000, 0, 0, 0, 0, false, 0, pose);
+    int32_t pivot[3];
+    int32_t eye[3];
+    chase_eye_words(0x50000000, kTpTrackedOrbitPitchBam, v.tp_anchor_q16, kTpTrackedDistanceQ16,
+                    pivot, eye);
+    CHECK(same3(pose.pos_q16, eye));
+    const int32_t delta[3] = {pivot[0] - eye[0], pivot[1] - eye[1], pivot[2] - eye[2]};
+    int32_t yaw = 0;
+    int32_t pitch = 0;
+    chase_look_at_words(delta, yaw, pitch);
+    CHECK(pose.yaw_bam == yaw && pose.pitch_bam == pitch);
+    // The eye sits 3.0 behind the pivot along the seed (heading 112.5,
+    // pitched 5.625 up), so it sits BELOW the pivot and the look-at runs back
+    // up that seed: retail's "camera slightly below the head" framing.
+    CHECK(std::abs(pose.yaw_bam - 0x50000000) < 0x01000000);
+    CHECK(std::abs(pose.pitch_bam - kTpTrackedOrbitPitchBam) < 0x00400000);
 }
 
-// THE MOUNTED LEG [orig: the mount-state 2/5 arm of mode 1 — the lift
+// THE MOUNTED LEG [orig: the mount-state 2/5 arm of mode 1: the lift
 // @0x437B1F..0x437B4B, the ease @0x437C56..0x437C79, the distance
 // @0x438121..0x438136, the quarter yaw @0x438138..0x43814A, the pitch
 // @0x438150, the clearances @0x438409..0x438456, the slope march
 // @0x43846E..0x438619, the aircraft drop @0x43861D..0x43864C].
+constexpr int32_t kCarrierHeading = 0x40000000; // mission yaw 0 (+Y)
+
 PlayerViewState mounted_state(float bound_radius, float carrier_z = 10.0f) {
     PlayerViewState v;
     v.third_person = true;
     v.mount.control_seat = true;
     v.mount.carrier_pos_q16[0] = 0;
     v.mount.carrier_pos_q16[1] = 0;
-    v.mount.carrier_pos_q16[2] = static_cast<int32_t>(carrier_z * 65536.0f);
-    v.mount.carrier_yaw_bam = bam_heading_from_mission_yaw_deg(0.0); // mission yaw 0
+    v.mount.carrier_pos_q16[2] = to_fixed(carrier_z);
+    v.mount.carrier_yaw_bam = kCarrierHeading;
     v.mount.bound_radius = bound_radius;
-    v.mount.water_z = -1000.0f;
-    // A level carrier at mission yaw 0 (= +Y): its matrix x (6, 0, 0).
+    v.mount.water_q16 = -1000 * 0x10000;
+    // A level carrier facing +Y: its matrix x (6, 0, 0).
     v.mount.lookahead_target_q16[0] = 0;
     v.mount.lookahead_target_q16[1] = 6 * 0x10000;
     v.mount.lookahead_target_q16[2] = 0;
     // The anchor and the look-ahead as the composes would have settled them:
     // carrier + lift, and the carrier's forward x 6.
     v.tp_anchor_valid = true;
-    v.tp_anchor[0] = 0.0f;
-    v.tp_anchor[1] = 0.0f;
-    v.tp_anchor[2] = carrier_z + mount_anchor_lift(bound_radius);
-    for (int i = 0; i < 3; ++i)
-        v.tp_anchor_q16[i] = static_cast<int32_t>(v.tp_anchor[i] * 65536.0f);
+    v.tp_anchor_q16[0] = 0;
+    v.tp_anchor_q16[1] = 0;
+    v.tp_anchor_q16[2] = v.mount.carrier_pos_q16[2] + mount_anchor_lift_q16(v.mount.bound_radius.q16);
+    for (int i = 0; i < 3; ++i) v.tp_anchor[i] = static_cast<float>(from_fixed(v.tp_anchor_q16[i]));
     v.lookahead_q16[0] = 0;
     v.lookahead_q16[1] = 6 * 0x10000;
     v.lookahead_q16[2] = 0;
     return v;
 }
 
-void test_compose_camera_mounted() {
-    const float position[3] = {0.0f, 0.0f, 10.0f};
-    const float no_anchor[3] = {0.0f, 0.0f, 0.0f};
-    PlayerCameraPose pose;
+// The mounted expectation by the cited sequence: the chase eye from the
+// anchor words, the look-at at the pivot plus the (settled) look-ahead.
+void mounted_expect(const PlayerViewState &v, int32_t rider_yaw, int32_t back, int32_t eye[3],
+                    int32_t &yaw, int32_t &pitch) {
+    int32_t pivot[3];
+    chase_eye_words(mount_look_yaw_bam(v.mount.carrier_yaw_bam, rider_yaw), kMountPitchBam,
+                    v.tp_anchor_q16, back, pivot, eye);
+    const int32_t delta[3] = {pivot[0] - eye[0] + v.lookahead_q16[0],
+                              pivot[1] - eye[1] + v.lookahead_q16[1],
+                              pivot[2] - eye[2] + v.lookahead_q16[2]};
+    chase_look_at_words(delta, yaw, pitch);
+}
 
-    // r = 4: lift 1.5 (above the 1.0 floor), distance 1 + 1.5 * 4 = 7.
+void test_compose_camera_mounted() {
+    const int32_t position[3] = {0, 0, 10 << 16};
+    const int32_t no_anchor[3] = {0, 0, 0};
+    PlayerCameraPose pose;
+    int32_t eye[3];
+    int32_t yaw = 0;
+    int32_t pitch = 0;
+
+    // r = 4: lift 1.5 (above the 1.0 floor), distance 0x10000 - ftol(4 * -1.5) = 7.0.
     PlayerViewState v = mounted_state(4.0f);
+    CHECK(mount_distance_q16(v.mount.bound_radius.q16) == 7 << 16);
     player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
+            kCarrierHeading, 0, 0, 0, 0, false, 0, pose);
     CHECK(pose.third_person);
-    CHECK(pose.roll_deg == 0.0f);
-    // Looking straight ahead: the eye sits 7 u behind the anchor along the
-    // -11.25-degree forward (yaw 0 -> mission fwd = (0, cos p, sin p)).
+    CHECK(pose.roll_bam == 0);
+    mounted_expect(v, kCarrierHeading, 7 << 16, eye, yaw, pitch);
+    CHECK(same3(pose.pos_q16, eye));
+    CHECK(pose.yaw_bam == yaw && pose.pitch_bam == pitch);
+    // The geometry: 7 u behind the PIVOT along the -11.25-degree forward
+    // (mission fwd (0, cos p, sin p)), the pivot the anchor (0, 0, 11.5)
+    // nudged 0.125 along forward + left (-1, 0, 0) + up (0, -sin p, cos p).
     const float p = -11.25f * 3.14159265f / 180.0f;
-    CHECK(near_eq(pose.eye[0], 0.0f, 0.001f));
-    CHECK(near_eq(pose.eye[1], -7.0f * std::cos(p), 0.001f));
-    CHECK(near_eq(pose.eye[2], 11.5f - 7.0f * std::sin(p), 0.001f));
-    // The final angles look at the PIVOT — the anchor nudged 0.125 along
-    // forward (0, cos p, sin p) + left (-1, 0, 0) + up (0, -sin p, cos p) —
-    // plus the look-ahead (6 u along the carrier's forward): the view turns
-    // a little left of the carrier heading and looks DOWN at the point.
-    // [orig: the pivot @0x43817E..0x4381D9 is the look-at target; the
-    //  look-ahead rides it @0x43887B..0x4388A0]
-    {
-        const float target[3] = {-0.125f,
-                0.125f * (std::cos(p) - std::sin(p)) + 6.0f,
-                11.5f + 0.125f * (std::sin(p) + std::cos(p))};
-        float yaw = 0.0f, pitch = 0.0f;
-        chase_look_at(pose.eye, target, yaw, pitch);
-        CHECK(near_eq(pose.yaw_deg, yaw, 1e-3f));
-        CHECK(near_eq(pose.pitch_deg, pitch, 1e-3f));
-        CHECK(pose.yaw_deg > 359.0f && pose.yaw_deg < 359.9f);
-        CHECK(pose.pitch_deg < 0.0f);
-    }
+    CHECK(near_eq(pose.eye[0], -0.125f, 0.001f));
+    CHECK(near_eq(pose.eye[1], 0.125f * (std::cos(p) - std::sin(p)) - 7.0f * std::cos(p), 0.002f));
+    CHECK(near_eq(pose.eye[2], 11.5f + 0.125f * (std::sin(p) + std::cos(p)) - 7.0f * std::sin(p),
+                  0.002f));
+    // The eye shares the pivot's lateral nudge, so the look-at to the pivot
+    // plus the look-ahead runs straight down the carrier heading, and DOWN.
+    CHECK(near_eq(pose.yaw_deg, 0.0f, 0.01f) || near_eq(pose.yaw_deg, 360.0f, 0.01f));
+    CHECK(pose.pitch_bam < 0);
+
     // The collision march lands a 7 u chase 6.75 u back with proximity
     // candidates at hand; a tank-sized radius (8.5 u, past the 8.0 gate)
     // never marches [orig: @0x4381CB / @0x4381E3, landing @0x438334..0x438341].
     player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, true, 0.0f, pose);
-    CHECK(near_eq(pose.eye[1], -6.75f * std::cos(p), 0.001f));
+            kCarrierHeading, 0, 0, 0, 0, true, 0, pose);
+    mounted_expect(v, kCarrierHeading, 27 * 0x4000, eye, yaw, pitch);
+    CHECK(same3(pose.pos_q16, eye));
     PlayerViewState tank = mounted_state(5.0f);
+    CHECK(mount_distance_q16(tank.mount.bound_radius.q16) == 0x88000);
     player_view_compose_camera(tank, position, no_anchor, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, true, 0.0f, pose);
-    CHECK(near_eq(pose.eye[1], -8.5f * std::cos(p), 0.001f));
+            kCarrierHeading, 0, 0, 0, 0, true, 0, pose);
+    mounted_expect(tank, kCarrierHeading, 0x88000, eye, yaw, pitch);
+    CHECK(same3(pose.pos_q16, eye));
 
     // The lift floor: r = 1 lifts 1.0, not 0.375; distance 2.5.
     PlayerViewState small = mounted_state(1.0f);
+    CHECK(small.tp_anchor_q16[2] == 11 << 16);
     player_view_compose_camera(small, position, no_anchor, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(near_eq(pose.eye[1], -2.5f * std::cos(p), 0.001f));
-    CHECK(near_eq(pose.eye[2], 11.0f - 2.5f * std::sin(p), 0.001f));
+            kCarrierHeading, 0, 0, 0, 0, false, 0, pose);
+    mounted_expect(small, kCarrierHeading, 0x28000, eye, yaw, pitch);
+    CHECK(same3(pose.pos_q16, eye));
 
-    // The QUARTER look yaw: a 40-degree look offset orbits the EYE 10 degrees
-    // around the anchor (the eye sits 7 u back along the damped yaw); the
-    // final yaw is the look-at from there to the carrier-forward point, which
-    // lands between the carrier heading and the damped orbit.
+    // The QUARTER look yaw: a rider looking 40 degrees off the hull orbits the
+    // EYE 10 degrees around the anchor (the seed yaw is the carrier's plus the
+    // offset sar 2); the final yaw is the look-at from there to the
+    // carrier-forward point, between the carrier heading and the orbit.
+    const int32_t forty = bam_from_degrees_wrapped(40.0);
+    const int32_t rider_left = kCarrierHeading - forty; // mission yaw +40
     player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
-            40.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    const float ten = 10.0f * 3.14159265f / 180.0f;
-    CHECK(near_eq(pose.eye[0], -7.0f * std::sin(ten) * std::cos(p), 0.002f));
-    CHECK(near_eq(pose.eye[1], -7.0f * std::cos(ten) * std::cos(p), 0.002f));
+            rider_left, 0, 0, 0, 0, false, 0, pose);
+    mounted_expect(v, rider_left, 7 << 16, eye, yaw, pitch);
+    CHECK(same3(pose.pos_q16, eye) && pose.yaw_bam == yaw && pose.pitch_bam == pitch);
+    CHECK(pose.eye[0] < -1.0f);
     CHECK(pose.yaw_deg > 0.5f && pose.yaw_deg < 10.0f);
     // ... and it is symmetric.
+    const int32_t rider_right = kCarrierHeading + forty;
     player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
-            -40.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(near_eq(pose.eye[0], 7.0f * std::sin(ten) * std::cos(p), 0.002f));
+            rider_right, 0, 0, 0, 0, false, 0, pose);
+    mounted_expect(v, rider_right, 7 << 16, eye, yaw, pitch);
+    CHECK(same3(pose.pos_q16, eye) && pose.yaw_bam == yaw);
+    CHECK(pose.eye[0] > 0.75f);
     CHECK(pose.yaw_deg > 350.0f && pose.yaw_deg < 359.5f);
 
-    // The AIRCRAFT drop: half the radius off the eye.
+    // The AIRCRAFT drop: the radius sar 1 off the eye word.
     PlayerViewState air = mounted_state(4.0f);
     air.mount.aircraft = true;
     PlayerCameraPose air_pose;
     player_view_compose_camera(air, position, no_anchor, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, air_pose);
+            kCarrierHeading, 0, 0, 0, 0, false, 0, air_pose);
     player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(near_eq(air_pose.eye[2], pose.eye[2] - 2.0f, 0.001f));
+            kCarrierHeading, 0, 0, 0, 0, false, 0, pose);
+    CHECK(air_pose.pos_q16[2] == pose.pos_q16[2] - 0x20000);
+    CHECK(air_pose.pos_q16[0] == pose.pos_q16[0] && air_pose.pos_q16[1] == pose.pos_q16[1]);
 
     // The water floor's polarity: with the water at 100 an entity ABOVE it
     // (position z 200) gets the eye raised to 100.25, a submerged one keeps
     // its underwater eye.
     PlayerViewState wet = mounted_state(4.0f);
-    wet.mount.water_z = 100.0f;
-    const float above[3] = {0.0f, 0.0f, 200.0f};
+    wet.mount.water_q16 = 100 << 16;
+    const int32_t above[3] = {0, 0, 200 << 16};
     player_view_compose_camera(wet, above, no_anchor, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(near_eq(pose.eye[2], 100.25f, 0.001f));
+            kCarrierHeading, 0, 0, 0, 0, false, 0, pose);
+    CHECK(pose.pos_q16[2] == (100 << 16) + 0x4000);
     player_view_compose_camera(wet, position /* z 10, submerged */, no_anchor, false,
-            nullptr, false, 0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(pose.eye[2] < 100.0f);
+            nullptr, false, kCarrierHeading, 0, 0, 0, 0, false, 0, pose);
+    CHECK(pose.pos_q16[2] < 100 << 16);
 }
 
 // The mounted terrain legs: the +0.25 floor and the slope raise over a ramp.
@@ -1275,35 +1375,41 @@ void test_compose_camera_mounted_terrain() {
     field.layout.origin_x = 0;
     field.layout.origin_y = 0;
 
-    // The carrier at (100, -100, 10): the anchor is 11.5, the eye ~12.9.
+    // The carrier at (100, -100, 10): the anchor is 11.5, the eye ~13.
     PlayerViewState v = mounted_state(4.0f);
     v.mount.carrier_pos_q16[0] = 100 * 0x10000;
     v.mount.carrier_pos_q16[1] = -100 * 0x10000;
-    v.tp_anchor[0] = 100.0f;
-    v.tp_anchor[1] = -100.0f;
-    const float position[3] = {100.0f, -100.0f, 10.0f};
-    const float no_anchor[3] = {0.0f, 0.0f, 0.0f};
+    v.tp_anchor_q16[0] = 100 * 0x10000;
+    v.tp_anchor_q16[1] = -100 * 0x10000;
+    const int32_t position[3] = {100 * 0x10000, -100 * 0x10000, 10 * 0x10000};
+    const int32_t no_anchor[3] = {0, 0, 0};
+    PlayerCameraPose bare;
+    player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
+            kCarrierHeading, 0, 0, 0, 0, false, 0, bare);
     PlayerCameraPose flat;
     player_view_compose_camera(v, position, no_anchor, false, &field, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, flat);
+            kCarrierHeading, 0, 0, 0, 0, false, 0, flat);
     // Flat ground far below: the terrain floor does not move the eye, but the
-    // slope raise's 0.333-per-unit margin ALWAYS applies (the running max is
-    // seeded at 0.0, so a downhill run never lowers it): the eye is floored at
-    // anchor + 0.333 * the horizontal distance.
-    const float p = -11.25f * 3.14159265f / 180.0f;
-    const float horizontal = 7.0f * std::cos(p);
-    const float raw_z = 11.5f - 7.0f * std::sin(p);
-    const float margin_floor = 11.5f + horizontal * 0.333f;
-    CHECK(margin_floor > raw_z);
-    CHECK(near_eq(flat.eye[2], margin_floor, 0.002f));
+    // slope raise's 0.333f margin ALWAYS applies (the running max is seeded
+    // at 0.0, so a downhill run never lowers it): the eye is floored at
+    // anchor + ftol(ftol(L) * 0.333f), L the eye's horizontal reach from the
+    // anchor [orig: @0x4385F8..0x438619].
+    CHECK(flat.pos_q16[0] == bare.pos_q16[0] && flat.pos_q16[1] == bare.pos_q16[1]);
+    const double dx = static_cast<double>(bare.pos_q16[0] - v.tp_anchor_q16[0]);
+    const double dy = static_cast<double>(bare.pos_q16[1] - v.tp_anchor_q16[1]);
+    const int32_t reach = static_cast<int32_t>(std::sqrt(dx * dx + dy * dy));
+    const int32_t margin_floor = v.tp_anchor_q16[2] +
+            static_cast<int32_t>(static_cast<double>(reach) * static_cast<double>(0.333f));
+    CHECK(margin_floor > bare.pos_q16[2]);
+    CHECK(flat.pos_q16[2] == margin_floor);
 
     // Ground just above the eye: the terrain floor (+0.25) and the slope
     // raise both apply and the eye ends above the ground.
     for (auto &h : heightmap) h = 13 * 256;
     PlayerCameraPose raised;
     player_view_compose_camera(v, position, no_anchor, false, &field, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, raised);
-    CHECK(raised.eye[2] >= 13.25f);
+            kCarrierHeading, 0, 0, 0, 0, false, 0, raised);
+    CHECK(raised.pos_q16[2] >= (13 << 16) + 0x4000);
 
     // A ramp rising steeply BEHIND the carrier (the eye side, mission -y =
     // atlas +z) raises the eye above the flat result.
@@ -1313,8 +1419,8 @@ void test_compose_camera_mounted_terrain() {
                     (8 * 256) + (z > 100 ? (z - 100) * 512 : 0));
     PlayerCameraPose ramp;
     player_view_compose_camera(v, position, no_anchor, false, &field, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, ramp);
-    CHECK(ramp.eye[2] > flat.eye[2] + 1.0f);
+            kCarrierHeading, 0, 0, 0, 0, false, 0, ramp);
+    CHECK(ramp.pos_q16[2] > flat.pos_q16[2] + 0x10000);
 }
 
 // The mounted anchor ease in 16.16: a sixteenth per tick on x/y and a
@@ -1351,7 +1457,7 @@ void test_tick_mounted_anchor_ease() {
 
 // THE LOOK-AHEAD EASE belongs to every compose of the mounted chase: each
 // call steps it a thirty-second per axis toward the carrier matrix x (6, 0,
-// 0) — a pitched hull's target climbs with it — so the per-quantum and the
+// 0) (a pitched hull's target climbs with it), so the per-quantum and the
 // per-frame composes both advance it, and a higher frame rate eases faster.
 // [orig: g_CameraLookaheadX..Z @0x43885A..0x4388AF inside
 //  Camera_ComputeThirdPersonView @0x437D10, called per quantum @0x526781 and
@@ -1359,26 +1465,26 @@ void test_tick_mounted_anchor_ease() {
 void test_mounted_lookahead_eases_on_every_compose() {
     PlayerViewState v = mounted_state(5.0f);
     for (int i = 0; i < 3; ++i) v.lookahead_q16[i] = 0;
-    // A hull pitched 10 degrees up: (6 cos 10, 0, 6 sin 10) turned to yaw 0.
+    // A hull pitched 10 degrees up: (6 cos 10, 0, 6 sin 10) turned to +Y.
     v.mount.lookahead_target_q16[0] = 0;
     v.mount.lookahead_target_q16[1] = 387242;
     v.mount.lookahead_target_q16[2] = 68280;
-    const float position[3] = {0.0f, 0.0f, 10.0f};
-    const float no_anchor[3] = {0.0f, 0.0f, 0.0f};
+    const int32_t position[3] = {0, 0, 10 << 16};
+    const int32_t no_anchor[3] = {0, 0, 0};
     int32_t expected[3] = {0, 0, 0};
     PlayerCameraPose pose;
-    float last_pitch = 0.0f;
+    int32_t last_pitch = 0;
     for (int call = 0; call < 4; ++call) {
         player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
-                0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
+                kCarrierHeading, 0, 0, 0, 0, false, 0, pose);
         for (int i = 0; i < 3; ++i)
             expected[i] += (v.mount.lookahead_target_q16[i] - expected[i] + 16) >> 5;
         CHECK(v.lookahead_q16[0] == expected[0]);
         CHECK(v.lookahead_q16[1] == expected[1]);
         CHECK(v.lookahead_q16[2] == expected[2]);
         // The look-at follows the eased point up the hull's slope.
-        if (call > 0) CHECK(pose.pitch_deg > last_pitch);
-        last_pitch = pose.pitch_deg;
+        if (call > 0) CHECK(pose.pitch_bam > last_pitch);
+        last_pitch = pose.pitch_bam;
     }
     CHECK(v.lookahead_q16[2] > 0);
 }
