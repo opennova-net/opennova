@@ -36,6 +36,7 @@ struct FixtureMessage {
 struct FixtureBundle {
 	std::string label;
 	std::string role; // "server" (S2C) or "client" (C2S)
+	uint64_t ts_us = 0; // the header's capture timestamp, microseconds
 	std::vector<FixtureMessage> messages;
 };
 
@@ -78,6 +79,8 @@ inline bool load_nwmsg(const std::string &path, std::vector<FixtureBundle> &out,
 				err = "bad bundle role '" + current.role + "' in " + path;
 				return false;
 			}
+			std::string enc, key;
+			ls >> enc >> key >> current.ts_us; // 0 when the header carries none
 			in_bundle = true;
 		} else if (word == "msg") {
 			if (!in_bundle) {

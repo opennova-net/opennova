@@ -116,28 +116,8 @@ std::vector<uint8_t> encode_test_player_list(
 	return encode_player_list(frame);
 }
 
-std::vector<uint8_t> frame_server_session(SessionSequencing &seq,
-		const std::string &server_scrk, uint32_t client_key,
-		const std::vector<ProtocolMessage> &messages) {
-	std::vector<uint8_t> body;
-	if (!frame_session_packet(
-			seq, SessionCrypto{server_scrk, {}, client_key}, messages, body)) {
-		return {};
-	}
-	return nw_encode_outbound(
-			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
-}
-
-bool decode_client_session(const std::vector<uint8_t> &datagram,
-		const std::string &client_scrk, ProtocolPacketHeader &header,
-		std::vector<ProtocolMessage> &messages) {
-	uint8_t opcode = 0;
-	std::vector<uint8_t> body;
-	return nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
-			opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
-			decode_protocol_packet_plaintext(
-					body.data(), body.size(), client_scrk, header, messages);
-}
+using conn_fixture::decode_client_session;
+using conn_fixture::frame_server_session;
 
 const std::vector<uint8_t> &retail_join_request() {
 	static const std::vector<uint8_t> body = {
