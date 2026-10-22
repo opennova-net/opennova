@@ -1170,7 +1170,8 @@ void test_binoculars_survive_all_but_the_camera_reset() {
         CHECK(local.weapon.events.size() == events_before + 1 &&
                 local.weapon.events.back().switch_to_weapon == "WPN_HULL");
         // A fire on the route names the carrier slot's def, for the round's adm and the
-        // C2S 0x06 off7 alike, while the AdmDef byte keeps what the borrow stamped.
+        // C2S 0x06 off7 alike, while the AdmDef byte keeps its word (this unarmed
+        // player's attach took the direct leg, which stamps none: D-WPN-52).
         // [orig: WeaponAction_Fire @0x542B10 - the slot's def @0x542C1C..0x542C2F, the
         //  +0x2B0 fallback for a def-less slot @0x542C35..0x542C3F, pushed @0x542C55]
         const uint8_t hull_adm =

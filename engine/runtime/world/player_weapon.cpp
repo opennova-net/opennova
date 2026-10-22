@@ -306,6 +306,21 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		//  Player_ResetCameraAndMovementState call @0x546ba4); the route leg's
 		//  EquippedSlot stores NetPacket_SerializePlayerState @0x4c139d / @0x4c13f8,
 		//  NapiNPServerMsg_HandleWeaponToggle @0x511b08 / @0x511b38]
+		// An attach while L holds no EquippedSlot (a kit with no selectable slot)
+		// takes the direct leg: +0x308 = the null slot and the EquippedSlot = the
+		// gun's slot at once, with no mount, no switch and no AdmDef (+0x2B0) stamp;
+		// the first-person model follows the slot's def. A later seat detach finds
+		// no slot to restore (local_weapon_detach_mount) (D-WPN-52).
+		// [orig: Entity_AttachToUseGunSlot @0x546B80 - the null EquippedSlot test
+		//  @0x546C23..0x546C25, +0x308 = the null slot @0x546C15 / @0x546C48, the
+		//  EquippedSlot @0x546C42..0x546C4E; Entity_AttachToVehicleSlot @0x4946D0 -
+		//  @0x49481D..0x494825, @0x494867..0x494898]
+		if (!w.usegun_slot_active && world.local_player_state != nullptr &&
+				!world.local_player_state->equipped_slot_held()) {
+			local_usegun_store_equipped_slot(world, w, p_mount);
+			w.usegun_saved_adm = 0xFF;
+			return;
+		}
 		// The personal def the switch-out leaves: the AdmDef byte, which the
 		// attach left as the last switch completion stamped it.
 		if (!w.usegun_slot_active)
@@ -608,7 +623,17 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 					? table.by_index(static_cast<uint8_t>(current->adm_index))
 					: nullptr;
 		}
-		if (target == nullptr) return; // the target's def [orig: @0x4dfa53..0x4dfa58]
+		if (target == nullptr) {
+			// The mount returns at once on the target's def [orig: @0x4dfa53..0x4dfa58]
+			// and the detach writes no local player's EquippedSlot, so a borrow whose
+			// attach saved no slot (the direct leg, D-WPN-52) stays the EquippedSlot:
+			// the player leaves holding the gun's slot on foot, as after a refused
+			// attach (D-NET-420). [orig: Entity_DetachFromVehicle @0x4355F0 - the
+			// non-local restore @0x435669..0x435687 skipped for the local player]
+			if (w.usegun_slot_active && w.usegun_switch == LocalUseGunSwitch::kNone)
+				w.usegun_on_foot = true;
+			return;
+		}
 	}
 	w.nvg_scope_restore = false; // [orig: dword_B76554 = 0 @0x4dfb75]
 }

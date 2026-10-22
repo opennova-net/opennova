@@ -286,6 +286,72 @@ void test_the_local_player_holds_a_refused_gun_on_foot() {
 	world.local_player_state = nullptr;
 }
 
+// D-WPN-52's unarmed attach: a local player holding no EquippedSlot (a kit with no
+// selectable slot: the spawn's select found none) takes the attach's direct leg on a
+// UseGun seat (in a session, which admits it) and on an EWeap carrier's ctrlx seat
+// alike. +0x308 takes the null slot and the EquippedSlot the gun's slot at once: no
+// mount, so no switch on either slot, and no AdmDef byte stamp; the first-person model
+// follows the slot's def. The seat detach then mounts the current slot word's slot,
+// which holds no def, so the mount returns at once and the player leaves holding the
+// gun's slot on foot.
+// [orig: Entity_AttachToUseGunSlot @0x546B80 (the null test @0x546C23..0x546C25, the
+//  direct leg @0x546C42..0x546C4E, +0x308 @0x546C15 / @0x546C48);
+//  Entity_AttachToVehicleSlot @0x4946D0 (@0x49481D..0x494825, @0x494867..0x494898);
+//  Entity_DetachFromVehicle @0x4355F0 (the fallback @0x435650..0x435658, the mount
+//  @0x43565F, no local restore @0x435669..0x43566F); Player_MountWeaponSlot @0x4DFA40
+//  (the target def @0x4DFA53..0x4DFA58)]
+void test_an_unarmed_attach_takes_the_direct_leg() {
+	for (const bool use_gun : {true, false}) {
+		Rig r;
+		w::World &world = r.world;
+		world.rules.mp_session = true;
+		world.cached.local_player = r.requester_h;
+		w::LocalPlayer local(world);
+		world.local_player_state = &local;
+		// The spawn's rebuild over an empty kit: the select finds no slot.
+		local.loadout.spawn_kit().clear();
+		w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
+				local.inventory_valid, /*select_spawn_default=*/true);
+		CHECK(local.inventory_valid && !local.equipped_slot_held());
+		const uint8_t adm_before = r.requester().equipped_adm_index;
+		const int seat = use_gun ? r.use_gun_index() : 0;
+		CHECK(r.attach(r.requester_h, seat));
+		CHECK(r.requester().mounted && r.requester().use_gun_slot_swapped);
+		w::sync_local_usegun_weapon_transition(world, local.weapon);
+		const w::LocalPlayerWeapon &weapon = local.weapon;
+		CHECK(weapon.usegun_slot_active && !weapon.usegun_on_foot);
+		CHECK(weapon.usegun_mount == r.gun_h && weapon.usegun_weapon_adm == kGunAdm);
+		CHECK(weapon.usegun_switch == w::LocalUseGunSwitch::kNone &&
+				weapon.usegun_switch_action == -1);
+		CHECK(weapon.usegun_saved_adm == 0xFF);
+		CHECK(local.inventory.selected_combo == -1 &&
+				local.inventory.selected_mount == w::EntityHandle::kInvalid);
+		CHECK(r.requester().equipped_adm_index == adm_before);
+		CHECK(r.gun().primary_weapon_slot.current != w::weapon_action::kSwitchTo &&
+				r.gun().primary_weapon_slot.next != w::weapon_action::kSwitchTo);
+		CHECK(!weapon.events.empty() && weapon.events.back().switch_to_weapon == "WPN_MINIGUN" &&
+				weapon.events.back().preserve_slot_state);
+		CHECK(local.equipped_slot_held());
+
+		// The shell installs the gun's def; the detach finds no slot to mount.
+		w::WeaponInstallData data;
+		data.name = "WPN_MINIGUN";
+		data.clipsize = world.tables.weapons.entries[kGunAdm].clipsize;
+		data.table_baked = true;
+		w::local_weapon_install(world, local.weapon, data, true, false, &local.inventory,
+				local.view);
+		CHECK(local.weapon.active);
+		CHECK(world.vehicles.detach(r.requester_h));
+		CHECK(!r.requester().mounted);
+		w::sync_local_usegun_weapon_transition(world, local.weapon);
+		CHECK(weapon.usegun_slot_active && weapon.usegun_on_foot);
+		CHECK(weapon.usegun_mount == r.gun_h);
+		CHECK(weapon.usegun_switch == w::LocalUseGunSwitch::kNone);
+		CHECK(r.requester().equipped_adm_index == adm_before);
+		world.local_player_state = nullptr;
+	}
+}
+
 // The real pump ends that hold: a category key mounts the personal slot over the gun's
 // (the EquippedSlot's def, category 9, against the rifle's 3: SWITCHFROM queued on the
 // gun's slot), and its completion stores g_PendingWeaponSlot as the EquippedSlot and
@@ -721,6 +787,7 @@ int main() {
 	test_a_lone_guns_gunner_refuses_at_the_seat_first();
 	test_a_seat_detach_points_the_slot_at_the_saved_one();
 	test_the_local_player_holds_a_refused_gun_on_foot();
+	test_an_unarmed_attach_takes_the_direct_leg();
 	test_a_weapon_key_ends_a_slot_held_on_foot();
 	test_a_ctrlx_seat_saves_a_gun_held_on_foot();
 	test_the_walk_relays_an_authority_reload();
