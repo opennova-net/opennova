@@ -380,10 +380,9 @@ WorldRecords world_records(uint16_t identity, const std::vector<std::string> &ra
 	return out;
 }
 
-// The first field two records differ in ("" when they match); every differing
-// field's name lands in `names`.
-std::string first_difference(const Fields &a, const Fields &b, std::set<std::string> &names) {
-	std::string first;
+// Every field two records differ in, "name RR vs run" each, appended to `what`
+// after ", "; every differing field's name lands in `names`.
+void differences(const Fields &a, const Fields &b, std::set<std::string> &names, std::string &what) {
 	for (size_t i = 0; i < std::max(a.size(), b.size()); ++i) {
 		const char *name = i < a.size() ? a[i].first : b[i].first;
 		const std::string x = i < a.size() ? a[i].second : "-";
@@ -391,10 +390,8 @@ std::string first_difference(const Fields &a, const Fields &b, std::set<std::str
 		if (x == y)
 			continue;
 		names.insert(name);
-		if (first.empty())
-			first = std::string(name) + " " + x + " vs " + y;
+		what += (what.empty() ? "" : ", ") + std::string(name) + " " + x + " vs " + y;
 	}
-	return first;
 }
 
 MetricValue compare_records(char dir, uint16_t identity, const std::vector<std::string> &raw_a,
@@ -416,25 +413,22 @@ MetricValue compare_records(char dir, uint16_t identity, const std::vector<std::
 			what = fa == a.end() ? "RR has none" : "the run has none";
 			names.insert("slot");
 		} else {
-			what = first_difference(fa->second.fields, fb->second.fields, names);
-			if (!fa->second.live) {
-				const std::string pose = first_difference(fa->second.pose, fb->second.pose, names);
-				what = what.empty() ? pose : what;
-			}
-			if (!fa->second.self_live) {
-				const std::string state = first_difference(fa->second.state, fb->second.state, names);
-				what = what.empty() ? state : what;
-			}
+			differences(fa->second.fields, fb->second.fields, names, what);
+			if (!fa->second.live)
+				differences(fa->second.pose, fb->second.pose, names, what);
+			if (!fa->second.self_live)
+				differences(fa->second.state, fb->second.state, names, what);
 		}
 		if (what.empty())
 			continue;
 		for (const std::string &name : names)
 			++by_field[name];
-		if (++differing <= 3) {
-			char head[24];
-			std::snprintf(head, sizeof(head), "slot 0x%04x: ", unsigned(slot));
-			examples += (examples.empty() ? "" : "; ") + std::string(head) + what;
-		}
+		++differing;
+		// Every differing slot with every field it differs in (a fix lane reads
+		// the slot list, not a sample of it).
+		char head[24];
+		std::snprintf(head, sizeof(head), "slot 0x%04x: ", unsigned(slot));
+		examples += (examples.empty() ? "" : "; ") + std::string(head) + what;
 	}
 	std::string fields;
 	for (const auto &entry : by_field)

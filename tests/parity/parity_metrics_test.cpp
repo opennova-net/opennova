@@ -2392,6 +2392,33 @@ void test_pool_live_pose() {
 		const VerdictRow *row = find_row(c.verdict.rows, 'S', "initial_records", "0x0d:0");
 		check(row && row->status == "fail", std::string("0x0D: ") + change.first + " compares");
 	}
+	{
+		// The detail names every differing slot, each with every field it differs in
+		// (a fix lane reads the whole list, LX-s17): four slots here, past the old
+		// three-slot sample, the parked vehicle in its pose and its contact bit.
+		Pose four = live;
+		four.parked = 1;
+		four.parked_airborne = true;
+		four.on_parked = 1;
+		four.hull_team = 2;
+		four.on_hull_moved = true;
+		const Case c = judge_case(with(1, live), with(2, live), with(3, four));
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "initial_records", "0x0d:0");
+		check(row && row->status == "fail" && row->value.distance == 4.0,
+				"0x0D: four slots differ" + (row ? " (" + row->value.detail + ")" : std::string()));
+		if (row) {
+			const std::string &detail = row->value.detail;
+			for (const char *slot : { "slot 0x1000: ", "slot 0x1003: ", "slot 0x1004: ", "slot 0x1005: " })
+				check(detail.find(slot) != std::string::npos,
+						std::string("0x0D detail lists ") + slot + "(" + detail + ")");
+			const size_t parked = detail.find("slot 0x1000: ");
+			const size_t next = detail.find("; ", parked);
+			const std::string entry = detail.substr(parked, next - parked);
+			check(entry.find(", y ") != std::string::npos && entry.find(", euler_y ") != std::string::npos &&
+							entry.find(", in_air ") != std::string::npos,
+					"0x0D detail names every field a slot differs in (" + entry + ")");
+		}
+	}
 }
 
 void test_reply_rules() {
