@@ -13,6 +13,7 @@
 //  NetPacket_WriteEntityIndexList @0x42d950]
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/loaded_model_list.h>
+#include <runtime/replication/client_state.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
@@ -311,6 +312,111 @@ void test_the_special_event() {
 			nodes[2].name == "cargo.3DI");
 }
 
+// A wire-header joiner's pool 0 is its replica's: a retail joiner receives the host's stream
+// inside NapiClient_WaitForGameStart, every person a 0x0C record (the item index, Flags and
+// class stored, no model loaded), so the reload's pool-0 leg loads them, in slot order, a
+// player at its class's camouflage, a slot whose item index is 0 skipped. Its World's pool 0
+// (its own body alone, at any slot) is not walked (D-NET-527).
+// [orig: NapiNPClientMsg_0x00C @0x42E730 - @0x42E84A, @0x42E91A, @0x42E9D5;
+//  Game_StartMission @0x524360 - the wait @0x524E29; Game_ReloadEntityModelsAndCallbacks
+//  @0x522830 - the index test @0x522C2F, the player test @0x522C52, the re-resolve
+//  @0x522c59..0x522c9d, the load @0x522CB1]
+void test_the_joiner_pool0() {
+	std::vector<def::DefItemDef> rows;
+	rows.push_back(item(0, ""));
+	rows.push_back(item(5101, "sol5.3di"));  // class 5's camouflage (one of the MP classes)
+	rows.push_back(item(5103, "sol3.3di"));  // class 3's: only a player of class 3 loads it
+	rows.push_back(item(5305, "player.3di")); // the players' own item: re-resolved, never loaded
+	def::DefItemDef ai = item(6005, "ai.3di");
+	std::strcpy(ai.husk, "aiXA"); // the "xb" final husk follows the lower-cased husk
+	rows.push_back(ai);
+	def::DefItemDef ai2 = item(6006, "ai2.3di");
+	std::strcpy(ai2.graphic_enemy, "ai2_e.3di");
+	rows.push_back(ai2);
+	rows.push_back(item(6001, "crate.3di"));
+	rows.push_back(item(6007, "own.3di")); // the World's pool-0 body only
+	def::DefItemsFile items{};
+	items.entries = rows.data();
+	items.count = rows.size();
+
+	inmatch::CharAttrTable charattr;
+	charattr.table.rows[5 - 1].active = true;
+	charattr.table.rows[5 - 1].jungle_cammo = 5101;
+	charattr.table.rows[3 - 1].active = true;
+	charattr.table.rows[3 - 1].jungle_cammo = 5103;
+
+	auto world = std::make_unique<world::World>();
+	for (int pool = 0; pool < 3; ++pool) world->registry.configure_pool(pool, 8);
+	world::Entity seed;
+	seed.item_id = 6001;
+	CHECK(world->registry.spawn(1, seed).valid());
+	seed.item_id = 6007;
+	CHECK(world->registry.spawn(0, seed).valid());
+
+	// The replica, its rows in fold order (not slot order): a pool-1 row, the AI at slot 2,
+	// the host's player at slot 0 (class 3), the AI at slot 1, the joiner's own body at slot
+	// 3 (class 5), a row only a team fold made (type 0), a type word with no row, and the
+	// word 0xFFFF read signed.
+	auto state = std::make_unique<replication::ClientState>();
+	const auto add = [&](uint16_t handle, uint16_t type_id, uint32_t flags, uint8_t cls) {
+		replication::ClientEntityState row;
+		row.handle = handle;
+		row.type_id = type_id;
+		row.rm_entity_flags = flags;
+		row.spawn_player_class = cls;
+		state->entities.push_back(row);
+	};
+	add(0x1000, 6001, 0, 0);
+	add(0x0002, 6006, 0, 0);
+	add(0x0000, 5305, world::kEntityFlagPlayer, 3);
+	add(0x0001, 6005, 0, 0);
+	add(0x0003, 5305, world::kEntityFlagPlayer, 5);
+	add(0x0004, 0, 0, 0);
+	add(0x0007, 4242, 0, 0);
+	add(0x0006, 0xFFFF, 0, 0);
+	const std::vector<inmatch::PoolZeroBody> bodies = inmatch::replica_pool0_bodies(*state);
+	CHECK(bodies.size() == 7);
+	if (bodies.size() != 7) return;
+	CHECK(bodies[0].type_id == 5305 && bodies[0].player_class == 3 &&
+			bodies[0].flags == world::kEntityFlagPlayer);
+	CHECK(bodies[1].type_id == 6005 && bodies[2].type_id == 6006);
+	CHECK(bodies[3].type_id == 5305 && bodies[3].player_class == 5);
+	CHECK(bodies[4].type_id == 0 && bodies[5].type_id == -1 && bodies[6].type_id == 4242);
+
+	const std::set<std::string> loadable = {"sol5.3di", "sol3.3di", "ai.3di", "aixa.3di",
+			"aixb.3di", "ai2.3di", "ai2_e.3di", "crate.3di", "own.3di", "upl.3di", "player.3di"};
+	inmatch::MissionStartModelSources sources;
+	sources.model_loads = [&](const std::string &file) { return loadable.count(lower(file)) != 0; };
+	sources.climate = bms::ClimateType::Jungle;
+	sources.items = &items;
+	sources.charattr = &charattr;
+	sources.world = world.get();
+	sources.pool0 = &bodies;
+	const std::vector<inmatch::LoadedModelList::Node> joiner =
+			inmatch::build_mission_start_model_list(sources).nodes();
+	// Creation order: the MP classes' camouflage, pool 1, then pool 0 in slot order (the
+	// host's class 3 camouflage, the AI's row with its husk family, the second AI's row with
+	// its enemy graphic; the joiner's own class 5 found loaded), then upl.3di.
+	const char *created[] = {"sol5.3DI", "crate.3DI", "sol3.3DI", "ai.3DI", "aiXA.3DI",
+			"aixb.3DI", "ai2.3DI", "ai2_e.3DI", "upl.3DI"};
+	const size_t created_count = sizeof(created) / sizeof(created[0]);
+	CHECK(joiner.size() == created_count);
+	for (size_t i = 0; i < joiner.size() && i < created_count; ++i) {
+		const std::string &name = joiner[joiner.size() - 1 - i].name;
+		CHECK(name == created[i]);
+		if (name != created[i]) std::printf("  node %zu: %s, expected %s\n", i, name.c_str(), created[i]);
+	}
+
+	// Without the replica (a host, a full-BMS join) the leg walks the World's pool 0.
+	sources.pool0 = nullptr;
+	const std::vector<inmatch::LoadedModelList::Node> own =
+			inmatch::build_mission_start_model_list(sources).nodes();
+	CHECK(own.size() == 4);
+	if (own.size() == 4)
+		CHECK(own[3].name == "sol5.3DI" && own[2].name == "crate.3DI" && own[1].name == "own.3DI" &&
+				own[0].name == "upl.3DI");
+}
+
 // The retail page lengths for a 305-entry list (jox01 01TR): pages 50..250 full, page 300
 // holds five entries (24 bytes), past the end the header alone.
 void test_the_305_entry_pages() {
@@ -355,6 +461,7 @@ int main() {
 	test_the_readout_entries();
 	test_the_mission_start_list();
 	test_the_special_event();
+	test_the_joiner_pool0();
 	test_the_305_entry_pages();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

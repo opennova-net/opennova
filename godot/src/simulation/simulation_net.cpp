@@ -949,8 +949,8 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 	// The page the C2S 0x3D answers from is the model-def list the mission start's loads
 	// built, computed from the mount and the tables as retail's loads run, not from what
 	// this shell happened to render (D-NET-527; engine: inmatch/loaded_model_list.h). A
-	// joiner loads no mission body, so it has no special event; a Serve Only host loads no
-	// foliage.
+	// joiner loads no mission body, so it has no special event, and its pool 0 is its
+	// replica's; a Serve Only host loads no foliage.
 	namespace inmatch = opennova::inmatch;
 	std::vector<uint32_t> page;
 	net_.mission_start_model_files.clear();
@@ -960,7 +960,8 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 				opennova::mission::boot_files_from_index(assets_.root->native_index());
 		const inmatch::LoadedModelList list = inmatch::mission_start_model_list(*kernel_, files,
 				&net_.charattr_table, !is_joiner(),
-				/*dedicated=*/!is_joiner() && !net_.host_serve_and_play);
+				/*dedicated=*/!is_joiner() && !net_.host_serve_and_play,
+				is_joiner() && runtime_ != nullptr ? &runtime_->state() : nullptr);
 		page = list.freeze();
 		net_.mission_start_model_files = list.model_files();
 		net_.mission_start_model_entries = inmatch::loaded_model_list_entries(list);

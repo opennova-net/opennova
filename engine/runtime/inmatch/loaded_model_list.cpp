@@ -1,6 +1,7 @@
 #include <runtime/inmatch/loaded_model_list.h>
 
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/replication/client_state.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/entity.h>
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <cctype>
 #include <string_view>
+#include <utility>
 
 namespace opennova::inmatch {
 
@@ -132,6 +134,24 @@ std::vector<LoadedModelList::Node> LoadedModelList::nodes() const {
 	return std::vector<Node>(created_.rbegin(), created_.rend());
 }
 
+std::vector<PoolZeroBody> replica_pool0_bodies(const replication::ClientState &state) {
+	std::vector<std::pair<uint16_t, PoolZeroBody>> slots;
+	for (const replication::ClientEntityState &row : state.entities) {
+		if ((row.handle >> 12) != 0) continue;
+		PoolZeroBody body;
+		body.type_id = static_cast<int16_t>(row.type_id);
+		body.flags = row.rm_entity_flags;
+		body.player_class = row.spawn_player_class;
+		slots.emplace_back(static_cast<uint16_t>(row.handle & 0x0FFFu), body);
+	}
+	std::stable_sort(slots.begin(), slots.end(),
+			[](const auto &a, const auto &b) { return a.first < b.first; });
+	std::vector<PoolZeroBody> out;
+	out.reserve(slots.size());
+	for (const auto &slot : slots) out.push_back(slot.second);
+	return out;
+}
+
 bool mission_has_special_event(const bms::File &mission) {
 	for (const bms::Event &event : mission.events) {
 		for (int k = 0; k < event.action_count; ++k) {
@@ -183,7 +203,12 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 		avatars::avatars_free(&file);
 	}
 
-	// (2) The world stream landed: no model load [orig: NapiClient_WaitForGameStart @0x524e29].
+	// (2) The world stream lands: its 0x0C / 0x10 / 0x0D / 0x20 records store each slot's item
+	// index and load no model; the reload below loads their rows (a joiner's pool 0 from its
+	// replica) [orig: NapiClient_WaitForGameStart @0x524e29; NapiNPClientMsg_0x00C @0x42E84A].
+	// A 0x18 landing in the wait loads its row at once (NapiNPClientMsg_FullEntitySpawn @0x433BFB);
+	// the reload walks a pool 0..2 slot again, so for one still standing only the node order
+	// differs, not the page.
 	// (3) Every ammo row's friendly and foe tracer items [orig: AmmoDef_LoadAll @0x40b0b0
 	//  (@0x525495) -> AmmoDef_LoadTracerItemModels @0x4098c0 - the row's +16 @0x4098e0 and +20
 	//  @0x4098ef, each when nonzero, to g_AmmoDefCapacity @0x409906].
@@ -232,20 +257,31 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 	items.load_type(1424);
 	// Pools 1, 2 and 0 in slot order, each entity of a row; a player (Flags 0x100) at its
 	// class's camouflage item [orig: pool 1 @0x522967..0x5229b8, pool 2 @0x522ac6..0x522b16,
-	// pool 0 @0x522c0c..0x522cad (the player re-resolve @0x522c59..0x522c9d)].
-	if (src.world != nullptr) {
-		for (const int pool : {1, 2, 0}) {
-			src.world->registry.for_each_in_pool(pool, [&](const world::Entity &e) {
-				int index = find_index_by_type_id(src.items, e.item_id);
-				if (index == 0) return;
-				if (pool == 0 && (e.flags & world::kEntityFlagPlayer) != 0)
-					index = find_index_by_type_id(src.items,
-							src.charattr != nullptr
-									? charattr_cammo_type_id(*src.charattr, e.player_class, camo)
-									: 0);
-				items.load(index);
-			});
+	// pool 0 @0x522c0c..0x522cad (the slot's item index test @0x522C2F, the player re-resolve
+	// @0x522c59..0x522c9d, the load @0x522CB1)]. A wire-header joiner's pool 0 is its replica's
+	// (MissionStartModelSources::pool0).
+	const auto reload = [&](bool pool0, int type_id, uint32_t flags, uint8_t player_class) {
+		int index = find_index_by_type_id(src.items, type_id);
+		if (index == 0) return;
+		if (pool0 && (flags & world::kEntityFlagPlayer) != 0)
+			index = find_index_by_type_id(src.items,
+					src.charattr != nullptr
+							? charattr_cammo_type_id(*src.charattr, player_class, camo)
+							: 0);
+		items.load(index);
+	};
+	for (const int pool : {1, 2, 0}) {
+		if (pool == 0 && src.pool0 != nullptr) {
+			for (const PoolZeroBody &body : *src.pool0)
+				reload(true, body.type_id, body.flags, body.player_class);
+			continue;
 		}
+		if (src.world == nullptr) continue;
+		src.world->registry.for_each_in_pool(pool, [&](const world::Entity &e) {
+			reload(pool == 0, e.item_id, e.flags, e.player_class);
+		});
+	}
+	if (src.world != nullptr) {
 		// Each pool-2 vehicle bay (its row's attrib2 bit 0): every item group its spawn mask
 		// selects whose item is set, that item and each of its four attachment slots that
 		// names a userpoint [orig: @0x522dc9..0x522eb0 - the bay test @0x522e0a, the mask
@@ -348,7 +384,7 @@ std::vector<uint32_t> mission_start_model_page(const mission::MissionKernel &ker
 
 LoadedModelList mission_start_model_list(const mission::MissionKernel &kernel,
 		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority,
-		bool dedicated) {
+		bool dedicated, const replication::ClientState *replica) {
 	const mission::MissionInfo info = mission::mission_info(kernel.mission);
 	MissionStartModelSources sources;
 	sources.files = &files;
@@ -365,6 +401,11 @@ LoadedModelList mission_start_model_list(const mission::MissionKernel &kernel,
 	sources.in_session = kernel.world.rules.mp_session;
 	sources.special_event = authority && mission_has_special_event(kernel.mission);
 	sources.foliage = !dedicated;
+	std::vector<PoolZeroBody> pool0;
+	if (replica != nullptr && kernel.wire_header_world) {
+		pool0 = replica_pool0_bodies(*replica);
+		sources.pool0 = &pool0;
+	}
 	return build_mission_start_model_list(sources);
 }
 

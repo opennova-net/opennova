@@ -32,6 +32,9 @@ class World;
 namespace opennova::mission {
 class MissionKernel;
 } // namespace opennova::mission
+namespace opennova::replication {
+struct ClientState;
+} // namespace opennova::replication
 
 namespace opennova::inmatch {
 
@@ -81,6 +84,27 @@ private:
 	std::vector<Node> created_; // creation order; the list's head is the back
 };
 
+// One pool-0 slot as the reload's pool-0 leg reads it: the item type id its spawn record named
+// (the record's word, read signed), its Flags and its class [orig: NapiNPClientMsg_0x00C
+// @0x42E730 - the signed word @0x42E840, the item index @0x42E84A, Flags @0x42E91A,
+// playerClass @0x42E9D5;
+// NapiNPClientMsg_FullEntitySpawn @0x433780 - the signed word @0x433842, Flags @0x433B69,
+// playerClass @0x433BB5, the item index @0x433BD4].
+struct PoolZeroBody {
+	int type_id = 0;
+	uint32_t flags = 0;
+	uint8_t player_class = 0;
+};
+
+// A joiner's pool 0 in slot order, from its replica: the persons its stream's spawn records
+// built (every S2C 0x0C, a 0x18), its own body among them. A retail joiner's mission start
+// receives that stream inside NapiClient_WaitForGameStart, ahead of the reload, so the reload's
+// pool-0 leg walks them [orig: Game_StartMission @0x524360 - NapiClient_WaitForGameStart
+// @0x524E29 (its receive pumps @0x42CC7E..0x42CC92) ahead of Game_ReloadEntityModelsAndCallbacks
+// @0x52550E]. A slot no spawn record filled (a row only a team or identity fold made) has type
+// id 0, which the leg skips.
+std::vector<PoolZeroBody> replica_pool0_bodies(const replication::ClientState &state);
+
 // What Game_StartMission loads models from between its teardown and the freeze.
 struct MissionStartModelSources {
 	// The mount: Avatars.def, hudfx.def and the mission's .trn and .env.
@@ -99,6 +123,10 @@ struct MissionStartModelSources {
 	const CharAttrTable *charattr = nullptr;
 	// The world at the load (a joiner's: its world stream landed).
 	const world::World *world = nullptr;
+	// A wire-header joiner's pool 0 (replica_pool0_bodies): the reload's pool-0 leg walks it
+	// in place of the world's pool 0, which on such a joiner holds only its own body. Null:
+	// the world's pool 0.
+	const std::vector<PoolZeroBody> *pool0 = nullptr;
 	// In a session the MP classes' camouflage items load; out of one, team 1's class's.
 	bool in_session = true;
 	uint8_t team1_class = 0;
@@ -139,10 +167,11 @@ std::vector<uint32_t> mission_start_model_page(const mission::MissionKernel &ker
 // The list that page freezes, from the same sources: its model_files() are what the shell
 // builds at the load, every listed item row's husk family among them [orig:
 // EntityDef_LoadModelsAndCallbacks @0x439F50 - husk @0x43A0B6, the "xb" final husk @0x43A1C8,
-// huskfinal @0x43A245 / @0x43A26E, huskshadow @0x43A38A].
+// huskfinal @0x43A245 / @0x43A26E, huskshadow @0x43A38A]. A wire-header joiner passes its
+// `replica`, whose pool 0 the reload walks (MissionStartModelSources::pool0).
 LoadedModelList mission_start_model_list(const mission::MissionKernel &kernel,
 		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority,
-		bool dedicated);
+		bool dedicated, const replication::ClientState *replica = nullptr);
 
 // One node of a frozen list as the model-list readout reports it (a debug instrument with no
 // behaviour: the model_list_dump probe, Simulation::debug_mission_start_model_nodes): its
