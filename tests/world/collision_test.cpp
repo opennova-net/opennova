@@ -2870,6 +2870,46 @@ void test_replica_resolve_candidates_ground_and_peers() {
         }
         CHECK(ever_skipped);
     }
+
+    // (g) The row's savedLivePose stamp is the skip test's previous pose (V-ROLL-Z on
+    // D-NET-503): retail's remote row is a pool entity its mover stamps at entry, and
+    // the resolver's skip test reads that stamp, not where the last resolve ended.
+    // Two idle rows walk into the skip band together; at the twelfth resolve one
+    // row's stamp sits 300 units along X from its pose (a fold or snap between its
+    // last resolve and this mover entry), past the 200-unit leg, so it takes the full
+    // update where the other skips. [orig: Entity_UpdateInfantryPlayerBody
+    // @0x4B4190..0x4B419C, the call @0x4B7CF4; Entity_MovementCollisionResolver
+    // @0x4B2BD0 - the skip test's X leg @0x4B2C72..0x4B2C82]
+    {
+        CollisionWorld::ResolveState state_a, state_b;
+        int32_t pos_a[3] = {fx(48.0), fx(48.0), fx(1.0)};
+        int32_t pos_b[3] = {fx(52.0), fx(48.0), fx(1.0)};
+        int32_t vel[2] = {0, 0};
+        EntityHandle ground;
+        uint32_t flags_a = 0, flags_b = 0;
+        int32_t last_vel_z_a = -1, last_vel_z_b = -1;
+        for (int i = 0; i < 12; ++i) {
+            rig.world.entity_update_counter = static_cast<uint32_t>(i + 1);
+            const uint32_t tick = static_cast<uint32_t>(i + 1);
+            // The mover's entry stamp: the pose the row stands at as its visit starts.
+            const int32_t stamp_a[3] = {pos_a[0], pos_a[1], pos_a[2]};
+            int32_t stamp_b[3] = {pos_b[0], pos_b[1], pos_b[2]};
+            if (i == 11) stamp_b[0] -= 300;
+            int32_t vel_z_a = -100, vel_z_b = -100;
+            rig.cw.resolve_replica(rig.world, state_a, pos_a, vel, vel_z_a, fx(0.4),
+                                   fx(1.8), fx(1.0), true, tick, 43, 0u, nullptr, 0, 0xFFFF,
+                                   &flags_a, &ground, stamp_a);
+            rig.cw.resolve_replica(rig.world, state_b, pos_b, vel, vel_z_b, fx(0.4),
+                                   fx(1.8), fx(1.0), true, tick, 43, 0u, nullptr, 0, 0xFFFF,
+                                   &flags_b, &ground, stamp_b);
+            last_vel_z_a = vel_z_a;
+            last_vel_z_b = vel_z_b;
+            if (i < 11) CHECK(vel_z_a == -100 && vel_z_b == -100); // counters 1..11
+        }
+        CHECK(last_vel_z_a == 0);    // the skip band reverts and zeroes
+        CHECK(last_vel_z_b == -100); // the stamp's X leg forced the full update
+        CHECK(state_b.skip_counter == 0 && state_a.skip_counter == 12);
+    }
 }
 
 // ---------------------------------------------------------------------------

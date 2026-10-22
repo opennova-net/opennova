@@ -984,6 +984,19 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		q.peers = peers;
 		q.peer_count = peer_count;
 		q.entity_flags = es.rm_entity_flags;
+		// The stamp this visit's recapture took at the mover's entry, and a player
+		// row's eye its body update restamped above; the resolver reads both off the
+		// row as retail's reads the remote entity's own words.
+		// [orig: Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C (the stamp), the
+		//  call @0x4B7CF4; Entity_UpdateInfantryAI @0x4B9A53..0x4B9A6E;
+		//  Entity_MovementCollisionResolver @0x4B2EE2..0x4B2EFB (CameraOffset)]
+		for (int axis = 0; axis < 3; ++axis) {
+			q.saved_live_pos[axis] = es.net_saved_live_pose[axis];
+			q.eye_offset[axis] = es.eye_offset[axis];
+		}
+		q.has_saved_live = true;
+		// The own row's eye is the World body's (LocalPlayer), never restamped here.
+		q.has_eye = es.cls == EntityClass::Player && !is_self;
 		const int32_t clearance = (*resolver)(q);
 		es.x = q.pos[0];
 		es.y = q.pos[1];

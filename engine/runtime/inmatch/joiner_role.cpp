@@ -1492,7 +1492,9 @@ void JoinerRole::wire_frame_providers() {
 							q.source_bound_radius_q16, q.is_player_class,
 							q.tick, q.anim_state_id, q.anim_state_flags,
 							peers.data(), static_cast<int32_t>(peers.size()),
-							q.row_handle, &q.entity_flags, &ground);
+							q.row_handle, &q.entity_flags, &ground,
+							q.has_saved_live ? q.saved_live_pos : nullptr,
+							q.has_eye ? q.eye_offset : nullptr);
 					// A remote player's powerup contact runs the pickup on this
 					// peer's copy of the row, for a transient copy of the body at
 					// the pose the resolve read (its integrated position): the

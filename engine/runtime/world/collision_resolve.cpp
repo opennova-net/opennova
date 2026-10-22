@@ -50,18 +50,22 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // displacement read is the source's savedLivePose (+0x80..+0x88): the mover's entry
     // stamp, or the model init's at a spawn, which the join and deploy placements leave as
     // they stand (a hidden body runs no mover), so their warm-up gates on the add's
-    // placement (D-NET-503). A stamped registry row reads its own words. The stand-in is
-    // the replica seam's: retail's remote row is a pool entity its mover stamps, where
-    // ours is a decoded row with no registry entity, so its last resolve stands in; a
-    // registry row no model init stamped (a harness row) takes the same.
+    // placement (D-NET-503). A stamped registry row reads its own words. Retail's remote
+    // row is a pool entity its mover stamps at entry, before its chase, ride and
+    // integrate (no authority gate on either org mover's stamp); ours is a decoded row
+    // whose visit takes the same stamp (ClientEntityState::net_saved_live_pose), which
+    // resolve_replica stages here. The last resolve's end pose stands in only for a
+    // row no mover or model init stamped (a harness row).
     // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the skip test @0x4B2C72, the
     //  victim delta @0x4B3827 / @0x4B382D; Entity_ComputeBoneCollisionForce @0x4AE150 -
     //  the source's savedLivePose @0x4AE3AC; the stamps Entity_InitFromModel @0x40E14D..0x40E169,
-    //  Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C; a remote row's org2 resolve,
-    //  Entity_UpdateInfantryPlayerBody's call @0x4B7CF4]
+    //  Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C, Entity_UpdateInfantryAI
+    //  @0x4B9A53..0x4B9A6E (ahead of its is_authority gate @0x4B9A74); a remote row's org2
+    //  resolve, Entity_UpdateInfantryPlayerBody's call @0x4B7CF4]
     // (The resolver writes none of the three words, so one read serves all three sites.)
-    const int32_t *saved_source =
-            ent != nullptr && ent->saved_live_valid ? ent->saved_live_pos : state.prev_pos;
+    const int32_t *saved_source = ent != nullptr && ent->saved_live_valid ? ent->saved_live_pos
+            : replica_saved_live_ != nullptr                              ? replica_saved_live_
+                                                                          : state.prev_pos;
     const int32_t saved_live[3] = {saved_source[0], saved_source[1], saved_source[2]};
 
     // Idle skip-throttle. [orig: @ 0x4b2c3d-0x4b2cba — full update when the anim
@@ -1026,7 +1030,9 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
                                         bool is_player_class, uint32_t tick, int32_t anim_state_id,
                                         uint32_t anim_state_flags, const ReplicaPeer *peers,
                                         int32_t peer_count, uint16_t exclude_handle,
-                                        uint32_t *entity_flags, EntityHandle *out_ground) {
+                                        uint32_t *entity_flags, EntityHandle *out_ground,
+                                        const int32_t *saved_live_pos,
+                                        const int32_t *eye_offset) {
     // The row's candidate slice. Retail refreshes every pool-0 entity's slice
     // on the 17-tick edge — the client's wire-built persons included — and the
     // movement resolver walks that slice, up to 16 ticks stale by design
@@ -1052,18 +1058,22 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     stage_replica_peer_index(peers, peer_count, tick);
     replica_source_bound_radius_q16_ = source_bound_radius_q16;
     replica_flags_ = entity_flags;
+    replica_saved_live_ = saved_live_pos;
     int16_t health_dummy = 100; // damage legs are authority-gated off anyway
     const EntityHandle replica_key; // kInvalid — pool 15 slot 4095, never allocated
+    // The row's own CameraOffset is the eye point, as retail's resolver reads the
+    // remote entity's [orig: @0x4B2EE2..0x4B2EFB].
     const int32_t clearance = resolve_entity(
         world, replica_key, state, pos, vel_xy, vel_z, capsule_bottom,
         capsule_top, /*heading=*/0, /*body_pitch=*/0, is_player_class,
         /*is_authority=*/false, tick, anim_state_id, anim_state_flags,
-        health_dummy, out_ground);
+        health_dummy, out_ground, /*ladder_io=*/nullptr, eye_offset);
     replica_peers_ = nullptr;
     replica_peer_count_ = 0;
     replica_exclude_handle_ = 0xFFFF;
     replica_source_bound_radius_q16_ = 0;
     replica_flags_ = nullptr;
+    replica_saved_live_ = nullptr;
     unstage_replica_candidates(arena_mark);
     return clearance;
 }

@@ -110,6 +110,12 @@ struct ResolverCapture {
 	uint16_t ground = 0xFFFF;
 	uint32_t last_flags_in = 0; // the row's flags mirror as the resolve sees it
 	uint32_t or_flags = 0;      // latched into the echo (the fake latch site)
+	// Row A's savedLivePose stamp and eye as its query carried them.
+	bool a_has_saved = false;
+	int32_t a_saved[3] = {};
+	int32_t a_pos[3] = {};
+	bool a_has_eye = false;
+	int32_t a_eye[3] = {};
 };
 
 } // namespace
@@ -143,6 +149,15 @@ int main() {
 					cap.peer_radii.push_back(q.peers[i].radius);
 				}
 				cap.last_flags_in = q.entity_flags;
+				if (q.row_handle == kRowA) {
+					cap.a_has_saved = q.has_saved_live;
+					cap.a_has_eye = q.has_eye;
+					for (int axis = 0; axis < 3; ++axis) {
+						cap.a_saved[axis] = q.saved_live_pos[axis];
+						cap.a_pos[axis] = q.pos[axis];
+						cap.a_eye[axis] = q.eye_offset[axis];
+					}
+				}
 				q.entity_flags |= cap.or_flags;
 				q.out_ground = cap.ground;
 				return cap.return_clearance;
@@ -188,6 +203,22 @@ int main() {
 	             "every replica peer sphere carries its authored bound");
 	ok &= expect(row_a->z == az - 208,
 	             "a positive clearance leaves the integrated fall in place");
+	// The query carries the row's savedLivePose, the stamp its visit took at the
+	// mover's entry ahead of the chase and the integrate, which the resolver reads
+	// where retail's reads the remote entity's +0x80..+0x88; and the player row's
+	// CameraOffset its body update restamped, the resolver's eye point (V-ROLL-Z on
+	// D-NET-503). [orig: Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C, the
+	// call @0x4B7CF4; Entity_MovementCollisionResolver @0x4B2EE2..0x4B2EFB]
+	ok &= expect(cap.a_has_saved && cap.a_saved[0] == row_a->net_saved_live_pose[0] &&
+	             cap.a_saved[1] == row_a->net_saved_live_pose[1] &&
+	             cap.a_saved[2] == row_a->net_saved_live_pose[2],
+	             "the query carries the row's entry stamp");
+	ok &= expect(cap.a_saved[2] != cap.a_pos[2],
+	             "the stamp precedes the integrate: it is not the pose the resolve starts at");
+	ok &= expect(cap.a_has_eye && cap.a_eye[0] == row_a->eye_offset[0] &&
+	             cap.a_eye[1] == row_a->eye_offset[1] &&
+	             cap.a_eye[2] == row_a->eye_offset[2] && cap.a_eye[2] > 0,
+	             "a player row's query carries its restamped eye");
 
 	// --- Tick 2: a landing return (clearance -0x1200) lifts the row by the
 	// clearance, zeroes the vertical velocity, and stores the ground hit.

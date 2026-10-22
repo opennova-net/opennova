@@ -1688,8 +1688,9 @@ public:
     std::vector<ReplicaPowerupContact> take_replica_powerup_contacts();
 
     struct ResolveState {
-        // The replica seam's savedLivePose stand-in (updated per resolve); a stamped
-        // registry source reads its own Entity::saved_live_pos (resolve_entity).
+        // The savedLivePose stand-in for a source no mover stamped (updated per
+        // resolve): a stamped registry source reads its own Entity::saved_live_pos,
+        // a decoded row the stamp resolve_replica stages (resolve_entity).
         int32_t prev_pos[3] = {};
         bool prev_valid = false;
         uint8_t skip_counter = 0;   // [orig: entity pad_370[3] idle throttle]
@@ -1754,6 +1755,14 @@ public:
     // the dead/hidden and parachute bits gate/widen repulsion
     // [orig: @ 0x4b3aac/0x4b3aba], and the ground probe's terrain clamp is
     // skipped while Indoors [orig: the Flags & 0x800000 gate @ 0x413785].
+    // saved_live_pos (optional) is the row's savedLivePose, its mover's entry stamp,
+    // which the resolver's skip test, plane gating and victim delta read where they
+    // read a registry row's own words; without it the last resolve's end pose stands
+    // in (an unstamped harness row). eye_offset (optional) is the row's CameraOffset
+    // as its mover stored it; without it the resolver derives the org1 eye.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C, the call @0x4B7CF4;
+    //  Entity_UpdateInfantryAI @0x4B9A53..0x4B9A6E; Entity_MovementCollisionResolver
+    //  @0x4B2BD0 - the eye @0x4B2EE2..0x4B2EFB]
     int32_t resolve_replica(World &world, ResolveState &state, int32_t pos[3],
                             int32_t vel_xy[2], int32_t &vel_z,
                             int32_t capsule_bottom, int32_t capsule_top,
@@ -1761,7 +1770,9 @@ public:
                             bool is_player_class, uint32_t tick, int32_t anim_state_id,
                             uint32_t anim_state_flags, const ReplicaPeer *peers,
                             int32_t peer_count, uint16_t exclude_handle,
-                            uint32_t *entity_flags, EntityHandle *out_ground);
+                            uint32_t *entity_flags, EntityHandle *out_ground,
+                            const int32_t *saved_live_pos = nullptr,
+                            const int32_t *eye_offset = nullptr);
     // A wire replica row's ground column (raycast_ground) through the same
     // candidate slice its resolve reads (resolve_replica's staging), the row's
     // Flags mirror gating the terrain clamp. The player body's slope conform
@@ -2222,6 +2233,9 @@ private:
     // resolver's flag latch sites and the ground probe's indoors gate read and
     // write it exactly where they read and write ent->flags on a registry row.
     uint32_t *replica_flags_ = nullptr;
+    // Staged like replica_flags_: the calling row's savedLivePose, which
+    // resolve_entity reads where it reads a registry row's own words.
+    const int32_t *replica_saved_live_ = nullptr;
     // resolve_replica's candidate staging under the reserved invalid key, which
     // raycast_ground_replica shares; unstage drops it and the scratch arena tail.
     size_t stage_replica_candidates(const int32_t pos[3], int32_t source_bound_radius_q16,

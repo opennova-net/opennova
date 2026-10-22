@@ -229,6 +229,18 @@ public:
 		                              // sites read/write it as they do
 		                              // ent->flags on a registry row
 		uint16_t out_ground = 0xFFFF; // ground-probe hit (wire handle)
+		// The row's savedLivePose (+0x80..+0x88): its mover's entry stamp
+		// (net_saved_live_pose), which the resolver's skip test, plane gating and
+		// victim delta read [orig: Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C;
+		// Entity_UpdateInfantryAI @0x4B9A53..0x4B9A6E].
+		int32_t saved_live_pos[3] = {};
+		bool has_saved_live = false;
+		// The row's CameraOffset (+0x6C..+0x74) as its mover stored it, the resolver's
+		// eye point [orig: Entity_MovementCollisionResolver @0x4B2EE2..0x4B2EFB]: a
+		// player row's (eye_offset, the body update's non-local arm); none for an
+		// NPC row, whose eye the resolver derives (the org1 restamp at a rest lean).
+		int32_t eye_offset[3] = {};
+		bool has_eye = false;
 	};
 	using ReplicaContactResolver = std::function<int32_t(ReplicaContactQuery &)>;
 	void set_replica_contact_resolver(ReplicaContactResolver resolver) {
