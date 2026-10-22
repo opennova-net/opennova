@@ -1698,6 +1698,31 @@ void test_milestones_and_rates() {
 		const Case c = judge_case(scripted(1), scripted(2), subject);
 		expect_row(c, 'S', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
 	}
+	{
+		// The joiner sends while alive (window.alive_span): killed 4 s into the window on
+		// the reference and 7 s on the subject, its uplinks run at one rate.
+		auto killed = [](uint32_t seed, uint64_t at) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<wire::ParityUplinkState> alive;
+			for (const wire::ParityUplinkState &u : trace.uplinks)
+				if (u.ts_ns < at)
+					alive.push_back(u);
+			trace.uplinks = std::move(alive);
+			splice(trace, 'S', 0x013, at, bytes({ 0x00, 0x10, 0x00, 0x00 }));
+			return trace;
+		};
+		const Case c = judge_case(killed(1, 9 * kSec), killed(2, 9 * kSec), killed(3, 12 * kSec));
+		expect_row(c, 'C', "gameplay_cadence", "", "pass");
+		// A joiner that stops sending while alive still reads short.
+		wire::ParityTrace quiet = scripted(3);
+		std::vector<wire::ParityUplinkState> early;
+		for (const wire::ParityUplinkState &u : quiet.uplinks)
+			if (u.ts_ns < 12 * kSec)
+				early.push_back(u);
+		quiet.uplinks = std::move(early);
+		const Case q = judge_case(killed(1, 9 * kSec), killed(2, 9 * kSec), quiet);
+		expect_row(q, 'C', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
+	}
 }
 
 void test_state() {

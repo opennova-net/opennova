@@ -1429,6 +1429,46 @@ void compare_milestones(const RunFacts &rr, const RunFacts &other, std::vector<M
 	out.push_back(order);
 }
 
+// The steady window's time a run's joiner lay dead through `end`: from each S2C 0x13
+// naming its body (the modal uplink handle) to its next uplink, else to `end`. The 0x13
+// zeroes the body's Health [orig: NapiNPClientMsg_EntityDeath @0x42EB50 (the store
+// @0x42EBD6)] and the uplink builder refuses a Health of 0 [orig:
+// Player_BuildTag0CInputBody @0x42A550 (@0x42A58F)] until the respawn's body sends
+// (window.alive_span).
+uint64_t dead_span_ns(const RunFacts &run, uint64_t end) {
+	static_assert(has_normalization("window.alive_span"));
+	std::map<uint32_t, size_t> handles;
+	std::vector<uint64_t> sends;
+	for (const wire::ParityUplinkState &state : run.trace.uplinks) {
+		if (!state.decoded || !run.in_steady(state.ts_ns) || state.ts_ns > end)
+			continue;
+		++handles[state.handle & 0xFFFFu];
+		sends.push_back(state.ts_ns);
+	}
+	if (handles.empty())
+		return 0;
+	uint32_t own = 0;
+	size_t most = 0;
+	for (const auto &entry : handles)
+		if (entry.second > most) {
+			own = entry.first;
+			most = entry.second;
+		}
+	std::sort(sends.begin(), sends.end());
+	uint64_t dead = 0, resumed = 0;
+	for (const wire::ParityEvent &event : run.trace.events) {
+		if (event.dir != 'S' || event_identity(event) != 0x013 || event.body.size() < 2 ||
+				!run.in_steady(event.ts_ns) || event.ts_ns > end || event.ts_ns < resumed)
+			continue;
+		if (uint32_t(event.body[0] | (event.body[1] << 8)) != own)
+			continue;
+		const auto next = std::upper_bound(sends.begin(), sends.end(), event.ts_ns);
+		resumed = next != sends.end() ? *next : end;
+		dead += resumed - event.ts_ns;
+	}
+	return dead;
+}
+
 void compare_rates(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
 	// A run whose scenario ends the joiner's session counts its covered play over
@@ -1457,6 +1497,10 @@ void compare_rates(
 				samples += state.decoded && run.in_steady(state.ts_ns) && state.ts_ns <= end
 						? 1.0
 						: 0.0;
+			// The joiner's uplinks per second alive (window.alive_span).
+			const double alive = seconds(run, end) - double(dead_span_ns(run, end)) / 1e9;
+			if (alive > 0.0)
+				return samples / alive;
 		} else {
 			for (const wire::ParityFrameState &state : run.trace.frames)
 				samples += state.decoded && run.in_steady(state.ts_ns) && state.ts_ns <= end
@@ -1479,7 +1523,7 @@ void compare_rates(
 	cadence.floor = 0.20;
 	cadence.subject = render_number(std::round(gb * 10) / 10) + "/s";
 	cadence.reference = render_number(std::round(ga * 10) / 10) + "/s";
-	cadence.detail = dir == 'C' ? "decoded C2S 0x0C uplinks per steady second"
+	cadence.detail = dir == 'C' ? "decoded C2S 0x0C uplinks per steady second the joiner lived"
 								: "decoded S2C 0x0A frames per steady second";
 	out.push_back(cadence);
 }

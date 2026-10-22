@@ -505,6 +505,17 @@ inline constexpr Normalization kNormalizations[] = {
 			"the joiner's first 0x48 after it, the first 0x7B and 0x0B after the 0x25, the "
 			"first 0x0A after that header; presence and order are two rows, each against "
 			"its own A/A" },
+	{ "window.alive_span", MaskKind::Field, 'C', 0x00C, "uplink cadence span", 0,
+			"a joiner sends no C2S 0x0C while dead: the S2C 0x13 naming its body zeroes its "
+			"Health (NapiNPClientMsg_EntityDeath @0x42EB50, the store @0x42EBD6) and the uplink"
+			" builder refuses a Health of 0 (Player_BuildTag0CInputBody @0x42A550, @0x42A58F) "
+			"until the respawn's body sends, so the C gameplay_cadence counts uplinks per "
+			"second the joiner lived: the steady window less the time from each 0x13 naming the"
+			" modal uplink handle to its next uplink (else the coverage end). x8's aikill: the "
+			"retail host's NPC killed the joiner 1.370 s into the window on RR and 2.419 s on "
+			"RO (its own aim variance: the 0x52 killer position differs, S 0x81 scored 5 "
+			"against 10), 7 against 15 uplinks at the same alive rate (one per 0.19 / 0.18 s), "
+			"and the window's rate read 0.1 against 0.2 /s" },
 	{ "window.session_end", MaskKind::Field, 'B', 0x103, "a scenario's own disconnect", 0,
 			"a scenario whose play ends the joiner's session (its ends_joiner_session, E4's "
 			"kick: a listen host's SERVER PUNT ALL) has the host queue the joiner the "
