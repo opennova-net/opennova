@@ -1432,6 +1432,10 @@ bool run_guided_fire_preserves_selected_target() {
     size_t consumed = 0;
     if (!expect(decode_client_fired_round(message.payload.data(),message.payload.size(),fire,consumed)
         && fire.target_handle == target,"guided: C2S fire retains selected target")) return false;
+    // off32 is L's entity+0x160 word, its class init's 3, not the fired weapon's ammo row
+    // (1 here) (D-WPN-8) [orig: Entity_FireWeaponAndSendPacket @0x42C01A;
+    //  PlayerClass_InitEntity @0x4B1105].
+    if (!expect(fire.extra_byte1 == 3,"guided: off32 is L's entity+0x160 word")) return false;
     for (const auto &round : world.round_sim.rounds) {
         if (round.guided_family == w::GuidedFamily::Javelin)
             return expect(round.active && round.guided.target == target,
@@ -1453,14 +1457,16 @@ bool run_guided_fire_preserves_selected_target() {
 // 0x42bdf9] with can_fire = Player_IsOpticalViewVisible() = 0 for a seated pilot
 // (parentSlot 2/5 @0x5cf7a8..0x5cf7b6), and weaponActive 0 returns the default
 // 12 [orig: @0x422fd1/@0x422fd5]. Expected bytes derived by hand from those
-// legs: off6 = 1, off7 = the flare index, off32 = the handheld's ammo-def index
-// (the retail capture's 0x03 beside adm 69, net-re 5.66 seeds the row),
+// legs: off6 = 1, off7 = the flare index, off32 = the pilot's entity+0x160 word,
+// its class init's 3 whatever the handheld's ammo row (D-WPN-8: every retail
+// joiner's 0x03) [orig: PlayerClass_InitEntity @0x4B1105],
 // off33 = 12, off34 = 0, off28 = 0xFFFF (no AI runtime target). The yaw/pitch
 // words are (bam + 0x8000) >> 16 [orig: @0x42a6e1/@0x42a6fb].
 bool run_flare_descriptor_carries_the_pilot_handheld() {
 	Harness h;
 	constexpr int16_t kHandheldAdm = 69; // WPN_M4AUTO-shaped row
-	constexpr int32_t kHandheldAmmo = 3; // its ammo-def index (the captured off32)
+	constexpr int32_t kHandheldAmmo = 0x13; // its ammo row: never the off32
+	constexpr uint8_t kPilotWord = 3;       // the class init's entity+0x160 (the captured off32)
 	constexpr uint8_t kFlareAmmo = 41;   // the FLARE ammo-def index; carried verbatim
 	h.role.kit_seams.apply_authoritative = [&h, kHandheldAdm] {
 		h.seams.push_back("loadout");
@@ -1513,8 +1519,8 @@ bool run_flare_descriptor_carries_the_pilot_handheld() {
 	ok &= expect(r.shooter_handle == 0x0005, "flare: the shooter is the pilot's wire handle");
 	ok &= expect(r.fire_flags == 1, "flare: off6 = targetId 1 (the ammo-def arm)");
 	ok &= expect(r.adm_index == kFlareAmmo, "flare: off7 = the flare's ammo-def index");
-	ok &= expect(r.extra_byte1 == kHandheldAmmo,
-			"flare: off32 = the pilot's handheld ammo-def index (entity+0x160), not the flare's");
+	ok &= expect(r.extra_byte1 == kPilotWord,
+			"flare: off32 = the pilot's entity+0x160 word, not the flare's or the handheld's row");
 	ok &= expect(r.extra_byte2 == 12,
 			"flare: off33 = Weapon_GetScopeZoomLevel(0, 12) = 12 for a seated pilot");
 	ok &= expect(r.misc_byte == 0, "flare: off34 = weaponSlot 0");
@@ -1797,6 +1803,62 @@ bool run_local_replica_turret_channel() {
    "local joiner forwards the world barrel phase without a wire field")) return false;
  return expect(h.kernel->local.input.look_heading == 0x3FFF7FC0,
    "local joiner input is tethered within ninety degrees of the gun");
+}
+
+// D-NET-NEW-L3-15's joiner leg: the self record's route byte on a designated-G EWeap
+// stores the mount's route bit (and L's EquippedSlot) alone. L's AdmDef byte (+0x2B0),
+// which its next C2S 0x0C echoes, keeps its word; ours stamped the route's weapon there.
+// The gun here has no seat at the record's bone, so L stays on foot and only the route
+// leg runs.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the route legs @0x4C135B..0x4C13F8:
+//  byte 1 @0x4C1390 / @0x4C139D, byte 2 @0x4C13EB / @0x4C13F8, no +0x2B0 store]
+bool run_the_route_apply_keeps_ls_adm_byte() {
+	Harness h;
+	auto &world = h.kernel->world;
+	world.registry.configure_pool(1, 4);
+	world.load_systems();
+	world.tables.weapons.entries.resize(3);
+	w::WeaponTableEntry &gun_weapon = world.tables.weapons.entries[2];
+	gun_weapon.valid = true;
+	gun_weapon.name = "WPN_GUN";
+	h.role.poll_preload();
+	constexpr uint16_t self_handle = 5;
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, self_handle, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr, "route apply: L spawned")) return false;
+	local->equipped_adm_index = 1;
+	w::Entity gun;
+	gun.kind = w::EntityKind::Item;
+	gun.has_item_def = true;
+	gun.has_graphic_model = true;
+	gun.item_id = 124;
+	gun.spawn_origin = 1u << 24;
+	gun.item_type = 2;
+	gun.item_attrib = w::kItemAttribEweap;
+	gun.emplacement_attachment_flags = 0x02;
+	gun.primary_weapon = "WPN_GUN";
+	gun.health = 100;
+	const w::EntityHandle gun_h = world.registry.spawn(1, gun);
+	auto &state = h.role.runtime->state();
+	auto &row = state.upsert(gun_h.packed);
+	row.type_id = 124;
+	row.cls = EntityClass::NoNetworkCallback;
+	auto &self = state.upsert(self_handle);
+	self.cls = EntityClass::Player;
+	self.carrier_handle = gun_h.packed;
+	self.mount_bone = 1;
+	self.seat_type = 1; // the child's own MountSlot
+	h.role.run_tick(h.input);
+	const w::Entity *mount = world.registry.get(gun_h);
+	local = h.kernel->local.player();
+	if (!expect(mount != nullptr && mount->primary_weapon_slot_adm == 2 &&
+					!mount->primary_weapon_slot.redirect_to_parent_slot,
+			"route apply: byte 1 validated the gun and selected its own slot"))
+		return false;
+	return expect(local != nullptr && !local->mounted && local->equipped_adm_index == 1,
+			"route apply: L's AdmDef byte keeps its word");
 }
 
 // Every in-match pump stamps World::rules from the joiner's session: the
@@ -4129,6 +4191,7 @@ int main() {
 	if (!run_received_loadout_policy_and_sounds()) return 1;
 	if (!run_received_reload_refills_an_eweap_entity()) return 1;
 	bool ok = true;
+	ok &= run_the_route_apply_keeps_ls_adm_byte();
 	ok &= run_pre_match_frame();
 	ok &= run_preload_frame();
 	ok &= run_in_match_spawn_edge();

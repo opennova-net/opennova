@@ -871,6 +871,17 @@ struct Entity {
 	// to the WPN_M4AUTO table index [orig: PlayerClass_InitEntity @0x4B1116 resolves by name].
 	// (D-NET-143)
 	uint8_t equipped_adm_index = 0xFF;
+	// The ammo-def word (entity+0x160) the C2S 0x06 writer reads off its shooter, whose low
+	// byte rides off32. Its writers: the player class init's 3, an EWeap row's slot init (its
+	// def's word), a non-player's detach (0) and the host's store of a client's byte. No
+	// weapon switch or grant writes it, so a player's body sends 3 whatever it carries (every
+	// retail joiner's 0x03, D-WPN-8).
+	// [orig: Entity_FireWeaponAndSendPacket @0x42BD80 - the read @0x42C01A, the shooter
+	//  @0x42C047 -> NetPacket_WriteEntityPositionUpdate's byte @0x42A7DA; PlayerClass_InitEntity
+	//  @0x4B1105; WeaponSlot_InitFromEntityDef @0x54673B, from Entity_InitInfantryBoneData's
+	//  attrib-0x20 leg @0x49016D..0x49017B; Entity_DetachFromVehicle @0x4356A3;
+	//  Server_ClientFiredRound @0x50BD48]
+	int16_t ammo_def_word = 0;
     // The occupant's seat borrows its carrier's embedded slot (a UseGun seat, an EWeap
     // carrier's ctrlx). Neither attach writes the AdmDef byte (+0x2B0): the local
     // player's switch completion stamps it, a remote player's uplink and fire carry

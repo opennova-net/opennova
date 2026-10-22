@@ -263,12 +263,13 @@ void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle, bool is_lo
                       occupant.mount_type == SeatType::Controller))
         occupant.equipped_slot = occupant.selected_slot;
     // Then any non-player leaving its parent, whatever the seat, drops its
-    // EquippedSlot and zeroes its AdmDef byte.
+    // EquippedSlot and zeroes its AdmDef byte and its ammo-def word.
     // [orig: Entity_DetachFromVehicle Flags 0x100 test @0x43568D, EquippedSlot
-    //  @0x435696, the byte @0x43569C]
+    //  @0x435696, the byte @0x43569C, +0x160 @0x4356A3 (edx 0 from @0x435667)]
     if (!is_player) {
         occupant.equipped_slot = {};
         occupant.equipped_adm_index = 0;
+        occupant.ammo_def_word = 0;
     }
 }
 

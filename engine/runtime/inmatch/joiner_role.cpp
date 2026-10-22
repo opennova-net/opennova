@@ -601,8 +601,13 @@ void JoinerRole::tick_local_weapon() {
 	world::local_weapon_pump_tick(kernel.world, lp.weapon, io);
 	lp.hud_map_control.weapon_command(io.map_command);
 	std::vector<world::LocalWeaponFiredWire> fires;
-	if (io.fired.valid)
+	// Each descriptor's shooter's entity+0x160 word (its off32), beside it.
+	std::vector<int16_t> shooter_words;
+	if (io.fired.valid) {
 		fires.push_back(io.fired);
+		const world::Entity *local = kernel.world.registry.get(kernel.world.cached.local_player);
+		shooter_words.push_back(local != nullptr ? local->ammo_def_word : int16_t{0});
+	}
 	// Countermeasures use the same sequence and descriptor path as the local
 	// weapon. Their launch effects already ran at the vehicle input boundary.
 	// The SHOOTER is the vehicle's occupantEntity — the pilot — not the
@@ -624,18 +629,14 @@ void JoinerRole::tick_local_weapon() {
 		world::LocalWeaponFiredWire fired;
 		fired.valid = true;
 		fired.shot_seq = kernel.world.round_sim.spawned_round_word();
-		// The descriptor's off32 is the PILOT's entity+0x160 — his handheld
-		// ammo-def index, the same source the on-foot pump reads (the equipped
-		// adm's ammo row) — NOT the flare's: the writer's flags byte is
-		// *(WORD*)(shooterEntity+352) [orig: @0x42c01a..0x42c052 -> off32
-		// @0x42a7da]. The flare's ammo-def index travels only as the adm byte
-		// (weaponFlags -> off7 @0x42a69b) under targetId 1 (off6 @0x42a68a,
+		// The descriptor's off32 is the PILOT's entity+0x160 word, the same
+		// source the on-foot fire reads below, NOT the flare's: the writer's
+		// flags byte is *(WORD*)(shooterEntity+352) [orig: @0x42c01a..0x42c052
+		// -> off32 @0x42a7da]. The flare's ammo-def index travels only as the adm
+		// byte (weaponFlags -> off7 @0x42a69b) under targetId 1 (off6 @0x42a68a,
 		// the ammo-def arm).
 		const world::Entity *shooter = kernel.world.registry.get(params.owner);
-		const world::WeaponTableEntry *handheld = shooter != nullptr
-				? kernel.world.tables.weapons.by_index(shooter->equipped_adm_index)
-				: nullptr;
-		fired.ammo_index = handheld != nullptr ? handheld->ammo_index : -1;
+		shooter_words.push_back(shooter != nullptr ? shooter->ammo_def_word : int16_t{0});
 		fired.adm_index = params.adm_index;
 		fired.round.origin_x = params.origin.x.q16;
 		fired.round.origin_y = params.origin.y.q16;
@@ -657,7 +658,8 @@ void JoinerRole::tick_local_weapon() {
 		fires.push_back(fired);
 	}
 	kernel.world.out.source_fires.clear();
-	for (const auto &fired : fires) {
+	for (std::size_t fire_index = 0; fire_index < fires.size(); ++fire_index) {
+		const world::LocalWeaponFiredWire &fired = fires[fire_index];
 		// The client-side half of Entity_FireWeaponAndSendPacket: the pump
 		// predicted the round; queue the fixed C2S 0x06 descriptor. The pose
 		// helper writes full XYZ, rounded Yaw/Pitch high words, and retail's
@@ -692,18 +694,16 @@ void JoinerRole::tick_local_weapon() {
 		// reacting to our shots; that was WRONG, and the symptom survived this
 		// fix. The actual mechanism is D-NET-184 and is not packet-driven.
 		fire.hit_part = fired.shot_seq;
-		// entity+0x160 — the shooter's current AMMO-DEFINITION index, a u16 index
-		// into g_AmmoDefTable (stride 276). The host stores it onto the remote
-		// shooter's entity [orig: the send-side read Entity_FireWeaponAndSendPacket
-		// @0x42C01A; the equip-time source WeaponSlot_InitFromEntityDef @0x54673B
-		// copies admEntry[1]'s low word; retail seeds 3 beside the WPN_M4AUTO
-		// default in PlayerClass_InitEntity @0x4B1105, which is why a retail
-		// client was captured sending 0x03]. Only the LOW BYTE crosses the wire —
-		// the writer's parameter is a char @0x42a7da and the receiver reads one
-		// byte @0x51347d — so indices >= 256 are untransmittable by design.
-		// We shipped 0 here until 2026-07-26 (D-WPN-8).
-		fire.extra_byte1 =
-				fired.ammo_index >= 0 ? static_cast<uint8_t>(fired.ammo_index) : uint8_t(0);
+		// off32: the shooter's entity+0x160 word (world::Entity::ammo_def_word), read
+		// off the shooter at the fire. A player's body holds its class init's 3 (no
+		// weapon switch or grant writes the word), so every retail joiner sends 0x03
+		// whatever it fires; ours sent the fired weapon's ammo row (0x13 in x6). Only
+		// the LOW BYTE crosses the wire: the writer's parameter is a char and the
+		// receiver reads one byte (D-WPN-8).
+		// [orig: Entity_FireWeaponAndSendPacket @0x42BD80 - `movsx edx, word ptr
+		//  [edi+160h]` @0x42C01A, the shooter @0x42C047 -> NetPacket_WriteEntityPositionUpdate
+		//  @0x42A7DA; PlayerClass_InitEntity @0x4B1105; the receiver's byte @0x51347D]
+		fire.extra_byte1 = static_cast<uint8_t>(shooter_words[fire_index]);
 		fire.extra_byte2 = fired.round.subtype;
 		fire.misc_byte = fired.charge;
 		const std::array<int32_t, 5> fire_pose = {

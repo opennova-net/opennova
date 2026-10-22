@@ -659,8 +659,12 @@ void JoinerRole::sync_authoritative_mount() {
 	// A designated-G EWeap uses the compact player's seat_type as an
 	// authoritative selected-MountSlot echo: 1 = child slot, 2 = the validated
 	// groundEntity vehicle slot. Apply this even when the carrier+bone relation
-	// is unchanged; action 6 commonly changes only this byte.
-	// [orig: client player compact apply @0x4c1353 route legs]
+	// is unchanged; action 6 commonly changes only this byte. Each leg stores the
+	// mount's route bit and L's EquippedSlot alone, never L's AdmDef byte (+0x2B0),
+	// which the next C2S 0x0C echoes (D-NET-NEW-L3-15's joiner leg).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the route legs
+	//  @0x4C135B..0x4C13F8: byte 1 `and byte [esi+312h], 0F7h` @0x4C1390 and +0x118
+	//  @0x4C139D, byte 2 `or byte [esi+312h], 8` @0x4C13EB and +0x118 @0x4C13F8]
 	bool route_changed = false;
 	if (wire_mounted && (self->seat_type == 1u || self->seat_type == 2u)) {
 		world::Entity *mount = replica_world_entity(
@@ -674,7 +678,6 @@ void JoinerRole::sync_authoritative_mount() {
 					(mount->item_attrib & world::kItemAttribEweap) != 0u &&
 					(mount->emplacement_attachment_flags & 0x02u) != 0u &&
 					world.vehicles.prepare_weapon_slot(*mount);
-			uint8_t equipped_adm = mount->primary_weapon_slot_adm;
 			if (route_valid && self->seat_type == 2u && mount->ground_target.valid() &&
 					mount->emplacement_parent == mount->ground_target &&
 					mount->emplacement_parent_spawn_id != 0) {
@@ -686,20 +689,15 @@ void JoinerRole::sync_authoritative_mount() {
 						parent->has_item_def && parent->item_type == 1u &&
 						(parent->item_attrib & world::kItemAttribEweap) != 0u &&
 						world.vehicles.prepare_weapon_slot(*parent);
-				if (route_valid)
-					equipped_adm = parent->primary_weapon_slot_adm;
 			} else if (self->seat_type == 2u) {
 				route_valid = false;
 			}
 			if (route_valid) {
 				const bool select_parent = self->seat_type == 2u;
 				route_changed =
-						mount->primary_weapon_slot.redirect_to_parent_slot !=
-								select_parent ||
-						local->equipped_adm_index != equipped_adm;
+						mount->primary_weapon_slot.redirect_to_parent_slot != select_parent;
 				mount->primary_weapon_slot.redirect_to_parent_slot =
 						select_parent;
-				local->equipped_adm_index = equipped_adm;
 			}
 		}
 	}

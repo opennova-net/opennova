@@ -171,6 +171,10 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     //  Entity_InitOrganicAI @0x4BFCC0 (no +0x2B0 or lock-tone store); the memset @0x43C3FE]
     const bool player_class_init = row.body_class == PlayerBodyClass::kPlayer;
     seed.equipped_adm_index = player_class_init ? spawn.equipped_adm_index : uint8_t{0};
+    // The same init stores the ammo-def word 3 ahead of the default's lookup [orig:
+    //  PlayerClass_InitEntity @0x4B1060 - `mov word ptr [esi+160h], 3` @0x4B1105].
+    constexpr int16_t kPlayerClassAmmoDefWord = 3;
+    seed.ammo_def_word = player_class_init ? kPlayerClassAmmoDefWord : int16_t{0};
     // entity+0x374 character selector + entity+0x15C wire NetId, picked per assigned team from
     // the joiner's 0x42 join vars by the inmatch add. [orig: Server_PlayerAdd @0x51cbc0
     // @0x51d0b1 / slot+440; D-NET-146]
