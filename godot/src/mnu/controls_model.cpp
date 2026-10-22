@@ -236,8 +236,14 @@ void ControlsModel::key_down_event(int p_godot_key) {
 
 int ControlsModel::event_code(int p_scan_code) const {
 	const auto key_down = [this](int vk) { return vk_down_(vk); };
-	const int row = bindings_.event_row(p_scan_code, key_down);
-	return row >= 0 ? opennova::controls::action_code(row) : -1;
+	// The scan names a catalog index; its dispatch code is the row id's (the port's
+	// catalog leaves row 66 out, so an index past it is not its id).
+	const int index = bindings_.event_row(p_scan_code, key_down);
+	std::size_t count = 0;
+	const opennova::controls::ActionDef *rows = opennova::controls::catalog(&count);
+	return index >= 0 && static_cast<std::size_t>(index) < count
+			? opennova::controls::action_code(rows[index].id)
+			: -1;
 }
 
 bool ControlsModel::event_signed(int p_scan_code) const {

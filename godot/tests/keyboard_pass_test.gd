@@ -207,11 +207,17 @@ func test_128_unread_key_downs_read_as_an_empty_queue() -> void:
 
 # The binding scan over a dequeued key (engine BindingSet::event_row): Escape fires
 # the escape row (code 18), a bare F6 huddetail (code 19), under the default table.
+# The code is the row id's, not the catalog index's: the port's catalog leaves row
+# 66 out, so every row past it (escape 67, ShowFriendly 100, AudioEmote 101, NVG
+# 104) sits one index below its id.
 func test_the_binding_scan_names_the_row_a_key_fires() -> void:
 	var model := ControlsModel.new()
 	model.restore_defaults()
 	assert_eq(model.event_code(0x1B), KeyboardPass.ESCAPE_CODE)
 	assert_eq(model.event_code(0x75), 19, "a bare F6 fires huddetail")
+	assert_eq(model.event_code(0x4B), 30, "K fires ShowFriendly")
+	assert_eq(model.event_code(0x78), 33, "F9 fires AudioEmote")
+	assert_eq(model.event_code(0x4E), 41, "N fires NVG")
 
 
 # The input router owns one queue per process: the shell's key-downs join it and
