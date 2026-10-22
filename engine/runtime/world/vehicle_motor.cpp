@@ -1326,10 +1326,21 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matr
     q16_cross(a, b, raw);   q16_normalize(raw, n2); // set 2 recomputes set 1
     q16_cross(e3, b, raw);  q16_normalize(raw, n3);
     q16_cross(e3, f4, raw); q16_normalize(raw, n4);
+    // Set 1's edge is normalized a second time after its normal, and the forward sum reads that
+    // copy beside set 2's once-normalized one [orig: Entity_ProcessWheeledVehicleSuspension
+    // @0x46B140 - the second normalize @0x46BB96..0x46BBE6, the sum's read @0x46C29D;
+    // Entity_ComputeSuspensionOrientation @0x46C8E0 @0x46CB4C..0x46CBA9 / @0x46DAFF;
+    // Entity_ComputeSuspensionAndOrientation @0x4698A0 @0x46A453..0x46A469 / @0x46AB10;
+    // Vehicle_ComputeAveragedOrientation @0x459A50 @0x459DB9..0x459E05 / @0x45A42B].
+    int32_t a2[3];
+    {
+        const int64_t once[3] = { a[0], a[1], a[2] };
+        q16_normalize(once, a2);
+    }
     int64_t up_s[3], fwd_s[3], side_s[3];
     for (int i = 0; i < 3; ++i) {
         up_s[i] = int64_t(n1[i]) + n2[i] + n3[i] + n4[i];
-        fwd_s[i] = 2 * int64_t(e3[i]) + 2 * int64_t(a[i]); // e4+e3+a+e2
+        fwd_s[i] = 2 * int64_t(e3[i]) + int64_t(a2[i]) + int64_t(a[i]); // e4+e3+a2+e2
         side_s[i] = int64_t(f4[i]) + 3 * int64_t(b[i]);    // f4+f3+b+f2
     }
     // `each *= 0.25` through the float constant, ftol'd back [orig:

@@ -413,6 +413,29 @@ void vehicle_apply_chassis(World &world, Entity &e, CollisionMatrix &matrix) {
 			matrix.m[4 * row + col] = bam_shl_wrap(v[row], 6);
 	}
 }
+// Corner k is the origin plus two products, each rounded on its own:
+// (+/-length/2 * (row0 >> 6) + 0x8000) >> 16 and (+/-width/2 * (row1 >> 6) + 0x8000) >> 16, row 0
+// the forward words m[0] / m[4] / m[8] and row 1 the side words m[1] / m[5] / m[9], each `sar 6`.
+// So the corner is not the Q22 matrix applied to the corner point. The halves are
+// ftol(span * 0.5f) and ftol(span * -0.5f), truncated toward zero.
+// [orig: Entity_ComputeBoundingQuad @0x45B6E0 - the halves @0x45B8E4..0x45B8FC, @0x45B9A8,
+//  @0x45BA40..0x45BA86 (flt_7C59B0 = -0.5f), @0x45BC83; c0 @0x45BA6E..0x45BA7E, c1
+//  @0x45BBD2..0x45BBE4, c2 @0x45BD36..0x45BD48, c3 @0x45BE93..0x45BE9F. The callers pass row 1
+//  (CWnd_HitTest @0x6137D0, the row-1 extractor) as its right axis with the width and row 0
+//  (Math_ExtractRow0FromFixedPoint22 @0x613770) as its up axis with the length, e.g.
+//  Entity_ProcessTrackedVehiclePhysics @0x47DA5C..0x47DAE2]
+void vehicle_bounding_quad(const CollisionMatrix &matrix, int32_t width, int32_t length,
+		int32_t x, int32_t y, int32_t z, int32_t out[4][3]) {
+	const int32_t half_width = width / 2, half_length = length / 2;
+	const int32_t forward[4] = { half_length, half_length, -half_length, -half_length };
+	const int32_t side[4] = { half_width, -half_width, -half_width, half_width };
+	const int32_t origin[3] = { x, y, z };
+	for (int k = 0; k < 4; ++k)
+		for (int i = 0; i < 3; ++i)
+			out[k][i] = io::bam_add(io::bam_add(origin[i],
+					retail_q16_mul_rhu(forward[k], matrix.m[4 * i] >> 6)),
+					retail_q16_mul_rhu(side[k], matrix.m[4 * i + 1] >> 6));
+}
 // Shared settled/airborne suspension state machine. Contact records retain
 // all seven probes: the slow inverted path also reads spine slots 4 and 6.
 // [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140;
@@ -458,19 +481,9 @@ bool vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], cons
 			// [orig: spans @0x469B93..0x469BA5 (tank) / @0x46B449..0x46B462
 			//  (tracked); Entity_ComputeBoundingQuad @0x45B6E0 halves both
 			//  @0x45B8E4..0x45B9A3; calls @0x469D54/@0x469F65, @0x46B50F/@0x46B6D6]
-			if (const auto *traits = world.vehicles.traits.get(e.item_id)) {
-				const int32_t hx = (traits->box_x_hi - traits->box_x_lo) >> 1;
-				const int32_t hy = (traits->box_y_hi - traits->box_y_lo) >> 1;
-				const int32_t local[4][3] = { { hx, hy, 0 }, { hx, -hy, 0 }, { -hx, -hy, 0 },
-					{ -hx, hy, 0 } };
-				for (int k = 0; k < 4; ++k) {
-					int32_t rotated[3];
-					matrix.rotate_point(local[k], rotated);
-					corners[k][0] = io::bam_add(px, rotated[0]);
-					corners[k][1] = io::bam_add(py, rotated[1]);
-					corners[k][2] = io::bam_add(pz, rotated[2]);
-				}
-			}
+			if (const auto *traits = world.vehicles.traits.get(e.item_id))
+				vehicle_bounding_quad(matrix, traits->box_y_hi - traits->box_y_lo,
+						traits->box_x_hi - traits->box_x_lo, px, py, pz, corners);
 			vehicle_clear_chassis(m);
 			const auto force = [&](int k, int32_t rate, const int32_t direction[3]) {
 				auto &f = m.chassis_forces[k];

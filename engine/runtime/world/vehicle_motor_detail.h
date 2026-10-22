@@ -347,6 +347,11 @@ inline void vehicle_axes_to_euler(const int32_t forward[3], const int32_t side[3
 }
 
 void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matrix = nullptr);
+// The non-square bounding quad over a width (along the side row) and a length (along the
+// forward row), each halved inside: c0 (+f, +s), c1 (+f, -s), c2 (-f, -s), c3 (-f, +s).
+// [orig: Entity_ComputeBoundingQuad @0x45B6E0, the non-square arm]
+void vehicle_bounding_quad(const CollisionMatrix &matrix, int32_t width, int32_t length,
+		int32_t x, int32_t y, int32_t z, int32_t out[4][3]);
 bool vehicle_suspension_fit(World &, Entity &, int32_t corners[4][3], const bool *contacts,
 		PlatFit &, int32_t px, int32_t py, int32_t pz, bool tank = false);
 void vehicle_boat_suspension_fit(World &, Entity &, const VehicleTraits &, int32_t corners[4][3],

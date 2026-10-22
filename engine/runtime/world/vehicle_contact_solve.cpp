@@ -159,17 +159,10 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 			pz = io::bam_add(pz, depth);
 			veh.flags &= ~kEntityFlagInAir;
 		} else veh.flags |= kEntityFlagInAir;
+		// The pad quad, corner k over pad k [orig: Entity_ComputeBoundingQuad @0x45B6E0, the
+		//  calls @0x480665 / @0x4806D7 with row 1 and the width, row 0 and the length].
 		int32_t corners[4][3];
-		const int32_t hx = half_h >> 1, hy = half_w >> 1;
-		const int32_t local[4][3] = { { hx, -hy, 0 }, { hx, hy, 0 }, { -hx, -hy, 0 },
-			{ -hx, hy, 0 } };
-		for (int k = 0; k < 4; ++k) {
-			int32_t rotated[3];
-			basis.q22.rotate_point(local[k], rotated);
-			corners[k][0] = io::bam_add(px, rotated[0]);
-			corners[k][1] = io::bam_add(py, rotated[1]);
-			corners[k][2] = io::bam_add(pz, rotated[2]);
-		}
+		vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, corners);
 		PlatFit fit;
 		vehicle_suspension_fit(world, veh, corners, nullptr, fit, px, py, pz);
 		m.air_pitch_bam = fit.pitch_bam;
@@ -180,22 +173,14 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	}
     // §6.12 GROUNDED: the flag clears unconditionally [orig: @0x4810EB].
     veh.flags &= ~kEntityFlagInAir;
-	// Fit the pad rectangle through the Q22 chassis basis and each resolved spring lift.
-	// Witness sites: [orig: @0x4805B4, @0x481425, @0x481427]
+	// Fit the pad quad, corner k over pad k (+f+s, +f-s, -f-s, -f+s, the probes' order) and
+	// lifted by pad k's resolved spring depth.
+	// Witness sites: [orig: Entity_ComputeBoundingQuad @0x45B6E0, the call @0x4806D7; @0x4805B4,
+	//  the lift `dest[k].z += depth[k]` @0x481425..0x481427]
 	int32_t c[4][3];
-	{
-        const int32_t hw2 = half_w >> 1, hh2 = half_h >> 1;
-        const int32_t corner_model[4][3] = {
-            {+hh2, -hw2, 0}, {+hh2, +hw2, 0}, {-hh2, -hw2, 0}, {-hh2, +hw2, 0},
-        };
-        for (int k = 0; k < 4; ++k) {
-            int32_t rotated[3];
-            basis.q22.rotate_point(corner_model[k], rotated);
-            c[k][0] = px + rotated[0];
-            c[k][1] = py + rotated[1];
-            c[k][2] = pz + rotated[2] + d[k];
-        }
-    }
+	vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, c);
+	for (int k = 0; k < 4; ++k)
+		c[k][2] = io::bam_add(c[k][2], d[k]);
     PlatFit fit;
 	vehicle_suspension_fit(world, veh, c, nullptr, fit, px, py, pz);
 	// Conform writes pitch and roll; the parked arm also adopts yaw. The mover integrates the
@@ -451,17 +436,9 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 		// Witness sites: [orig: @0x47E57B, @0x47E5E6, @0x47E283]
 		world.vehicles.suspension_airborne_loop(veh, traits, 4, sink_growth, corner_adj);
 		veh.flags |= kEntityFlagInAir;
+		// The pad quad [orig: Entity_ComputeBoundingQuad @0x45B6E0, the call @0x47DB54].
 		int32_t corners[4][3];
-		const int32_t hx = half_h >> 1, hy = half_w >> 1;
-		const int32_t local[4][3] = { { hx, hy, 0 }, { hx, -hy, 0 }, { -hx, -hy, 0 },
-			{ -hx, hy, 0 } };
-		for (int k = 0; k < 4; ++k) {
-			int32_t rotated[3];
-			basis.q22.rotate_point(local[k], rotated);
-			corners[k][0] = io::bam_add(px, rotated[0]);
-			corners[k][1] = io::bam_add(py, rotated[1]);
-			corners[k][2] = io::bam_add(pz, rotated[2]);
-		}
+		vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, corners);
 		PlatFit fit;
 		vehicle_suspension_fit(world, veh, corners, nullptr, fit, px, py, pz);
 		m.air_pitch_bam = fit.pitch_bam;
@@ -487,22 +464,13 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // The pad-rectangle bounding quad, in the witnessed winding — corner k
     // sits over pad k, so the identity d_k lift pairing is geometric here
     // [orig: Entity_ComputeBoundingQuad @0x45B6E0 non-square arm, called
-    // @0x47DAE2/@0x47DB54: c0=(+f,+s), c1=(+f,-s), c2=(-f,-s), c3=(-f,+s);
+    // @0x47DAE2/@0x47DB54: c0=(+f,+s), c1=(+f,-s), c2=(-f,-s), c3=(-f,+s), each
+    // corner the origin plus two separately rounded Q16 row products;
     // corner_z[k] += the resolved d_k @0x47EC05 and the catch-up term @0x47E9EF].
     int32_t c[4][3];
-    {
-        const int32_t hw2 = half_w >> 1, hh2 = half_h >> 1;
-        const int32_t corner_model[4][3] = {
-            {+hh2, +hw2, 0}, {+hh2, -hw2, 0}, {-hh2, -hw2, 0}, {-hh2, +hw2, 0},
-        };
-        for (int k = 0; k < 4; ++k) {
-            int32_t rotated[3];
-            basis.q22.rotate_point(corner_model[k], rotated);
-            c[k][0] = px + rotated[0];
-            c[k][1] = py + rotated[1];
-            c[k][2] = pz + rotated[2] + d[k] + corner_adj[k];
-        }
-    }
+    vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, c);
+    for (int k = 0; k < 4; ++k)
+        c[k][2] = io::bam_add(io::bam_add(c[k][2], d[k]), corner_adj[k]);
     PlatFit fit;
 	vehicle_suspension_fit(world, veh, c, pad_contact, fit, px, py, pz);
 	// Conform always adopts pitch and roll; crash state also adopts yaw.
@@ -806,19 +774,10 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	//  crash state @0x4780CD..0x478381; growth @0x478510]
 	vehicle_landing_damage(world, veh, traits, averaged, 7, up_z16);
 	// The corner quad at the current position and attitude: the footprint
-	// halves along forward and side.
+	// halves along forward and side, each a separately rounded Q16 row product.
+	// [orig: Entity_ComputeBoundingQuad @0x45B6E0, row 1 / row 0 @0x477F19..0x477F3D]
 	const auto corner_quad = [&](int32_t (&quad)[4][3]) {
-        const int32_t hw2 = half_w >> 1, hh2 = half_h >> 1;
-        const int32_t corner_model[4][3] = {
-            {+hh2, +hw2, 0}, {+hh2, -hw2, 0}, {-hh2, -hw2, 0}, {-hh2, +hw2, 0},
-        };
-        for (int k = 0; k < 4; ++k) {
-            int32_t rotated[3];
-            basis.q22.rotate_point(corner_model[k], rotated);
-            quad[k][0] = io::bam_add(px, rotated[0]);
-            quad[k][1] = io::bam_add(py, rotated[1]);
-            quad[k][2] = io::bam_add(pz, rotated[2]);
-        }
+		vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, quad);
 	};
 	// The landing pass consumes any queued wheel force at the current quad.
 	// [orig: Entity_ComputeBoundingQuad call @0x477FA6, Entity_ClearSuspensionForces

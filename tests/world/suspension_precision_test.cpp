@@ -5,7 +5,9 @@
 // and the 24-bit word differs from the 53 / 64-bit one at a one-word edge (spring_comp 0 / 20,
 // flip 50 / 100) or where 24 bits cannot hold a product's integer part (the half of 201228300).
 // So every pin here sits clear of those: each value is the same at 24, 53 and 64 bits. The
-// 53-bit words at the edges are recorded in the D-NET-515 entry, not pinned.
+// 53-bit words at the edges are recorded in the D-NET-515 entry, not pinned. The rest fit's
+// geometry is pinned the same way: the corner quad's separately rounded row products and the
+// forward sum's twice-normalized edge.
 // [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - dword_815184 = ftol(fild((100 -
 //  spring_comp) * 0xFFFF) * flt_7C56A8 (0.01f)) @0x47C51F..0x47C544; the landing impulse
 //  `fild; fmul flt_7C3B94` (0.5f) @0x47EA86..0x47EA90 and `fild; fmul flt_7C6F18` (1.25f)
@@ -14,6 +16,7 @@
 
 #include <runtime/world/ground_conform.h>
 #include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_motor_detail.h>
 #include <runtime/world/vehicle_suspension.h>
 
 #include <cstdint>
@@ -60,12 +63,58 @@ void test_the_flip_bound() {
 	CHECK(vehicle_flip_threshold_q16(t) == 6553, "flip 10 bounds at 6553");
 }
 
+// The fit's corner quad: corner k is the origin plus the forward row (the Q22 row >> 6) times
+// +/- half the length and the side row times +/- half the width, each product rounded on its own
+// (integer words, the same at every length; the halves ftol(span * +/-0.5f) are exact).
+// Corner 0's x: forward 3632377 >> 6 = 56755, side -2097130 >> 6 = -32768; the halves 163840 and
+// 98304 (196609 * 0.5 = 98304.5 truncated); (163840 * 56755 + 0x8000) >> 16 = 141888 and
+// (98304 * -32768 + 0x8000) >> 16 = -49152; so 6553600 + 141888 - 49152 = 6646336. The Q22 matrix
+// applied to the corner point, ours before, gave 6646338.
+// [orig: Entity_ComputeBoundingQuad @0x45B6E0, the non-square arm @0x45B8E4..0x45BE9F]
+void test_the_bounding_quad() {
+	CollisionMatrix m;
+	const int32_t words[12] = { 3632377, -2097130, 41, 0, 2097185, 3632311, -73373, 0, -41, 73400,
+		4193665, 0 };
+	for (int i = 0; i < 12; ++i) m.m[i] = words[i];
+	int32_t quad[4][3];
+	detail::vehicle_bounding_quad(m, 196609, 327680, 100 << 16, 200 << 16, 10 << 16, quad);
+	const int32_t expected[4][3] = { { 6646336, 13274251, 657077 },
+		{ 6744640, 13103989, 653639 }, { 6460865, 12940149, 653644 },
+		{ 6362561, 13110411, 657082 } };
+	for (int k = 0; k < 4; ++k)
+		for (int i = 0; i < 3; ++i)
+			CHECK(quad[k][i] == expected[k][i], "the quad corner is the two rounded row products");
+}
+
+// The plat fit's forward sum reads set 1's edge normalized twice beside set 2's once-normalized
+// copy. A one-word change of an even sum never moves its quarter unless the sum's sign differs
+// from the edge's, so the pin is a crossed quad whose edges c0 - c3 and c1 - c2 oppose: set 1's
+// edge (55595, 21992, 26839) normalizes again to (55596, 21992, 26839), c1 - c2 to
+// (-55597, -21991, -26838); the sum 2 * e3 + a + a2 = (-3, 2, 2) quarters to (0, 0, 0), where
+// 2 * e3 + 2 * a = (-4, 2, 2) quartered to (-1, 0, 0) and normalized to (-65536, 0, 0). The side
+// axis (17090, 63201, 2915) is untouched. Every word is the same at 24, 53 and 64 bits (exact
+// rational x87 emulation of the normalize, the quarter and _ftol2_sse).
+// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140 - the second normalize
+//  @0x46BB96..0x46BBE6, the forward sum @0x46C29D..0x46C3C6, the quarter flt_7C333C @0x46C3C0]
+void test_the_fit_reads_the_edge_normalized_twice() {
+	const int32_t c[4][3] = { { 112911, 44666, 54510 }, { -130568, -206659, -48375 },
+		{ -17654, -161995, 6132 }, { 0, 0, 0 } };
+	detail::PlatFit fit;
+	CollisionMatrix m;
+	detail::plat_fit_corners(c, fit, &m);
+	CHECK(m.m[0] == 0 && m.m[4] == 0 && m.m[8] == 0, "the forward axis quarters to zero");
+	CHECK(m.m[1] == 17090 * 64 && m.m[5] == 63201 * 64 && m.m[9] == 2915 * 64,
+			"the side axis is untouched");
+}
+
 } // namespace
 
 int main() {
 	test_the_locked_share();
 	test_half_energy();
 	test_the_flip_bound();
+	test_the_bounding_quad();
+	test_the_fit_reads_the_edge_normalized_twice();
 	if (failures == 0) std::printf("suspension_precision: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
