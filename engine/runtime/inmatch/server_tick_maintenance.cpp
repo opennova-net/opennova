@@ -1009,7 +1009,7 @@ void emit_network_quality_boundary(NapiNPServerCtx &ctx) {
 //  CPlayerStats_RecordEvent @0x52C8E0 only); Score_AccumulateKillByEntityType
 //  @0x4FA300 / Score_AccumulateKillWithWeaponStats @0x4FA3B0 into dword_C87020 and
 //  dword_C87598 (GameEvent_PlayerDeath @0x516F14 / @0x51713D), whose rows the SERVER
-//  and SERVERMISSION reporters never print (Score_RecordEvent @0x4FA4B0,
+//  and SERVERMISSION reporters never print (Server_SendServerMetricsToGate @0x4FA4B0,
 //  Server_SendMissionMetrics @0x4FB3A0)]
 // [orig: Server_TickUpdate @0x51D94B..0x51D9A3 -- the active byte @0x51D960,
 //  state 6 @0x51D966, the entity @0x51D96B..0x51D96F, `test byte ptr

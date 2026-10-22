@@ -8,7 +8,7 @@
 namespace opennova {
 
 bool gate_metrics_decode(const uint8_t *data, size_t size, GateMetricsReport &report) {
-	// [orig: Score_RecordEvent @0x4FA4B0; Server_SendPlayerMetricsToGate @0x4FAA30;
+	// [orig: Server_SendServerMetricsToGate @0x4FA4B0; Server_SendPlayerMetricsToGate @0x4FAA30;
 	// Server_SendMetricsToGate @0x4FB0A0; Server_SendMissionMetrics @0x4FB3A0;
 	// Server_SendPlayerMissionMetrics @0x4FB8F0; Server_SendPingMetricsToGate @0x511BF0]
 	// Reporters encrypt strlen bytes (no trailing NUL) with "1010101".
