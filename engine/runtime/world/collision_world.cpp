@@ -289,19 +289,26 @@ void CollisionWorld::replace_wire_collision_proxies(
            const WireDynamicCollisionProxy &b) {
             return a.wire_handle < b.wire_handle;
         });
+    // The build copies each person's Position while its entity holds the same
+    // words: the live position starts as the copy.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 (the copies
+    //  @0x4B93F5..0x4B9409, the entity pointer @0x4B9410)]
+    for (WirePersonCollisionProxy &person : persons)
+        person.live_position_q16 = person.position_q16;
     wire_person_proxies_ = std::move(persons);
     wire_dynamic_proxies_ = std::move(dynamics);
     wire_local_player_handle_ = local_player_wire_handle;
 }
 
-void CollisionWorld::set_wire_person_proxy_position(uint16_t wire_handle,
-        const FixedVec3 &position) {
+void CollisionWorld::set_wire_person_proxy_live(uint16_t wire_handle,
+        const FixedVec3 &position, bool dead) {
     const auto it = std::lower_bound(wire_person_proxies_.begin(), wire_person_proxies_.end(),
             wire_handle, [](const WirePersonCollisionProxy &proxy, uint16_t handle) {
                 return proxy.wire_handle < handle;
             });
-    if (it != wire_person_proxies_.end() && it->wire_handle == wire_handle)
-        it->position_q16 = position;
+    if (it == wire_person_proxies_.end() || it->wire_handle != wire_handle) return;
+    it->live_position_q16 = position;
+    it->dead = dead;
 }
 
 const WirePersonCollisionProxy *CollisionWorld::wire_person_proxy(uint16_t wire_handle) const {

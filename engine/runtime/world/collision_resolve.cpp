@@ -765,17 +765,23 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         };
         // A joiner's remote person is a pool-0 entity of the client's own,
         // built from the 0x0C at its wire slot, so it is a row of the same
-        // table: its decoded position (the live one), its model's boundRadius,
-        // and its folded dead bit. [orig: NapiNPClientMsg_0x00C @ 0x42E730
+        // table: the reach gate on the table's copy of its Position, then its
+        // live dead bit and its live Position for the push (the proxy's
+        // build-time copy and the live words its update leaves), with its
+        // model's boundRadius. [orig: NapiNPClientMsg_0x00C @ 0x42E730
         //  creates it; Entity_BuildProximityLists_Pool01 @ 0x4b93d0-0x4b9419
         //  walks pool 0 on every peer, from Entity_UpdateAllEntities
-        //  @ 0x4c240a]
+        //  @ 0x4c240a; Entity_MovementCollisionResolver @0x4B2BD0 (the reach
+        //  gate on g_PersonProxX/Y/Z @0x4B3AF6..0x4B3B74, the dead skip
+        //  @0x4B3B89..0x4B3B8D, the live reads @0x4B3B93..0x4B3B99)]
         const auto proxy_push = [&](const WirePersonCollisionProxy &proxy) {
-            if (proxy.dead) return;
             const int32_t threshold = 30 * (my_radius + proxy.bound_radius_q16) / 100;
-            const int32_t live[3] = {proxy.position_q16.x, proxy.position_q16.y,
-                                     proxy.position_q16.z};
-            if (!in_reach(live[0], live[1], live[2], threshold)) return;
+            if (!in_reach(proxy.position_q16.x, proxy.position_q16.y,
+                          proxy.position_q16.z, threshold))
+                return;
+            if (proxy.dead) return;
+            const int32_t live[3] = {proxy.live_position_q16.x, proxy.live_position_q16.y,
+                                     proxy.live_position_q16.z};
             push_away(live, threshold);
         };
         if (ent == nullptr || wire_person_proxies_.empty()) {

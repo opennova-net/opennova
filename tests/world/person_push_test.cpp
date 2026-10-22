@@ -12,6 +12,12 @@
 //  @0x4B3C04..0x4B3C0C, X @0x4B3C31, Y @0x4B3C40;
 //  Entity_BuildProximityLists_Pool01 -- entity+0 @0x4B93EB, the pool-0 walk
 //  @0x4B93D0..0x4B9419; Math_BuildSinTable @0x613050]
+// A joiner's remote person below the own slot updates after the table is built
+// (D-NET-196): the reach gate reads the table's copy, the dead skip and the push
+// the live person [orig: Entity_MovementCollisionResolver @0x4B2BD0 -- the
+// reach gate on g_PersonProxX/Y/Z @0x4B3AF6..0x4B3B74, g_PersonProxEntity
+// @0x4B3B7A, the dead skip @0x4B3B89..0x4B3B8D, the live reads
+// @0x4B3B93..0x4B3B99].
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/dir_table.h>
@@ -155,11 +161,67 @@ void test_a_joiners_body_pushes_away_from_a_remote_person() {
 	}
 }
 
+// A remote person whose update ran after the table was built (it sits below
+// the own slot): the own body's resolve gates it on the table's copy, then
+// reads its live dead bit and its live Position. Values sit clear of every
+// one-word edge: the copy and the live words differ by 0.875 u against a 0.6 u
+// threshold, and the live push is axis-aligned.
+void test_a_joiners_resolve_gates_on_the_copy_and_reads_the_live_person() {
+	struct Case {
+		double copy_x, copy_y; // the table's copy (the build)
+		double live_x, live_y; // the live words (the person's own update)
+		bool dead;             // the live dead bit
+	};
+	const auto run = [](const Case &c, int32_t out[2]) {
+		Rig rig;
+		const EntityHandle local = rig.person(10.125, 10.125, 1.0f);
+		rig.world.cached.local_player = local;
+		WirePersonCollisionProxy remote;
+		remote.wire_handle = 0x0058;
+		remote.position_q16 = FixedVec3{fx(c.copy_x), fx(c.copy_y), 0};
+		remote.bound_radius_q16 = 65536;
+		remote.player = true;
+		rig.cw.replace_wire_collision_proxies({remote}, {}, /*local_player_wire_handle=*/0x0059);
+		rig.rebuild();
+		const WirePersonCollisionProxy *built = rig.cw.wire_person_proxy(0x0058);
+		CHECK(built != nullptr && built->live_position_q16.x == fx(c.copy_x) &&
+				built->live_position_q16.y == fx(c.copy_y) && !built->dead);
+		rig.cw.set_wire_person_proxy_live(0x0058, FixedVec3{fx(c.live_x), fx(c.live_y), 0},
+				c.dead);
+		rig.resolve(local, out);
+	};
+	int32_t out[2];
+	// It died in its own update this tick, overlapping the own body: no push.
+	run({10.0, 10.0, 10.0, 10.0, /*dead=*/true}, out);
+	CHECK(out[0] == fx(10.125) && out[1] == fx(10.125));
+	// Its copy is out of reach (0.875 u on x) and its live Position moved into
+	// the overlap: the gate rejects it on the copy, no push.
+	run({11.0, 10.125, 10.0, 10.0, /*dead=*/false}, out);
+	CHECK(out[0] == fx(10.125) && out[1] == fx(10.125));
+	// Its copy is in reach and its live Position moved level with the own body
+	// on y: the push runs from the live Position, along +x only (the index's
+	// (0x200000 - 0) >> 22 = 0 entry).
+	run({10.0, 10.0, 10.0, 10.125, /*dead=*/false}, out);
+	const int32_t threshold = 30 * (65536 + 65536) / 100;
+	const int32_t amount = (threshold - fx(0.125)) >> 2;
+	const DirTable &t = dir_table();
+	CHECK(out[0] == fx(10.125) +
+			static_cast<int32_t>((static_cast<int64_t>(amount) * t.sin22[256]) >> 22));
+	CHECK(out[1] == fx(10.125) +
+			static_cast<int32_t>((static_cast<int64_t>(amount) * t.sin22[0]) >> 22));
+	CHECK(out[0] > fx(10.125));
+	// Its copy is in reach and its live Position moved out of it (0.875 u on
+	// x): the live distance rejects it, no push.
+	run({10.0, 10.0, 11.0, 10.125, /*dead=*/false}, out);
+	CHECK(out[0] == fx(10.125) && out[1] == fx(10.125));
+}
+
 } // namespace
 
 int main() {
 	test_two_bodies_push_apart_on_both_axes();
 	test_a_joiners_body_pushes_away_from_a_remote_person();
+	test_a_joiners_resolve_gates_on_the_copy_and_reads_the_live_person();
 	if (failures == 0) std::printf("person_push: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

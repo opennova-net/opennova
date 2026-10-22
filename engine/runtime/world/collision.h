@@ -823,6 +823,13 @@ struct ResolvedCollisionShape {
 // Projectile traces and per-draw sun visibility share this one typed row.
 struct WirePersonCollisionProxy {
     uint16_t wire_handle = 0xFFFF;
+    // The table's copy of the person's Position, taken when the table is built
+    // ahead of the tick's pool-0 walk: the coarse gates read it, the movement
+    // resolver's reach box and planar length and the person trace's broad phase.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 (the copies
+    //  @0x4B93F5..0x4B9409); Entity_MovementCollisionResolver @0x4B2BD0 (the
+    //  reach gate @0x4B3AF6..0x4B3B74); Physics_RaycastAgainstProximityList
+    //  @0x4E4A30 (the coarse gate @0x4E4AB4..0x4E4C26)]
     FixedVec3 position_q16;
     int32_t bound_radius_q16 = 0;
     int32_t uniform_scale_q16 = 0;
@@ -836,10 +843,24 @@ struct WirePersonCollisionProxy {
     bool player = false;
     bool mounted = false;
     bool moving = false;
-    // The row's Flags dead bit (0x02): the person repulsion passes over a
-    // dead peer, a trace does not.
-    // [orig: Entity_MovementCollisionResolver, the +36 & 2 skip @ 0x4b3b8d]
+    // The person's LIVE Flags dead bit (0x02): the table keeps no copy, so the
+    // movement resolver re-reads the entity's own word past the reach gate and
+    // passes over a dead peer; a trace does not test it. A body below the own
+    // slot that dies in its own update this tick is skipped by the own body's
+    // resolve after it (set_wire_person_proxy_live).
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (g_PersonProxEntity
+    //  @0x4B3B7A, the +0x24 & 2 skip @0x4B3B89..0x4B3B8D);
+    //  Entity_UpdateInfantryPlayerBody @0x4B40E0 (the death gate @0x4B4BF1)]
     bool dead = false;
+    // The person's LIVE Position: the movement resolver's push and the trace's
+    // bone walk read the entity, not the table's copy. The table build seeds it
+    // from position_q16 (replace_wire_collision_proxies); a person's update
+    // after the build moves it.
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (the live reads
+    //  @0x4B3B93..0x4B3B99); Physics_RaycastAgainstProximityList @0x4E4A30
+    //  (Physics_RaycastAgainstBoneSections on g_PersonProxEntity, the call
+    //  @0x4E4C59)]
+    FixedVec3 live_position_q16;
 };
 
 // One decoded pool-1 mover (vehicle, emplacement, runtime item) projected into
@@ -1287,12 +1308,16 @@ public:
     // it (0 when no proxy names the handle): a client's remote person is a
     // replica row, never a registry entity.
     int32_t wire_person_bound_radius_q16(uint16_t wire_handle) const;
-    // A decoded person's update moved it after the tick's snapshot: its proxy takes
-    // the new position (a handle no proxy names is ignored), which the next
-    // repulsion and trace re-read, as retail's resolver re-reads a candidate's live
-    // Position from the table built before the walk (D-NET-196).
-    // [orig: Entity_MovementCollisionResolver @0x4B3B93..0x4B3B99]
-    void set_wire_person_proxy_position(uint16_t wire_handle, const FixedVec3 &position);
+    // A decoded person's update ran after the table was built: its proxy takes the
+    // person's live Position and dead bit (a handle no proxy names is ignored), which
+    // the next repulsion's dead skip and push and the next trace's bone walk re-read
+    // through the table's entity pointer; the table's copy, which the coarse gates
+    // read, stays as built (D-NET-196).
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (the reach gate on the copy
+    //  @0x4B3AF6..0x4B3B74, the live dead skip @0x4B3B89..0x4B3B8D, the live reads
+    //  @0x4B3B93..0x4B3B99)]
+    void set_wire_person_proxy_live(uint16_t wire_handle, const FixedVec3 &position,
+                                    bool dead);
     // The decoded person's current proxy (null when none names the handle).
     const WirePersonCollisionProxy *wire_person_proxy(uint16_t wire_handle) const;
     // The decoded pool-1 mover's current proxy (null when none names the

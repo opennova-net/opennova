@@ -1300,6 +1300,12 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             if ((trace.ammo_flags & 4u) == 0 &&
                 proxy.wire_handle == trace.shooter_wire_handle)
                 continue;
+            // The broad phase reads the table's copy of the person's
+            // Position; the bone walk below reads the live person.
+            // [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (the coarse
+            //  gate on g_PersonProxY/X/Z @0x4E4AB4..0x4E4C26, then
+            //  g_PersonProxEntity @0x4E4C2C into Physics_RaycastAgainstBoneSections,
+            //  the call @0x4E4C59)]
             {
                 const float sc[3] = {
                     static_cast<float>(proxy.position_q16.x) / io::kFp16One,
@@ -1333,9 +1339,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 proxy.model_id >= 0 ? model(proxy.model_id) : nullptr;
             if (person_model != nullptr && person_model->valid() &&
                 pose_provider_ != nullptr) {
-                const int32_t proxy_pos[3] = {proxy.position_q16.x,
-                                              proxy.position_q16.y,
-                                              proxy.position_q16.z};
+                const int32_t proxy_pos[3] = {proxy.live_position_q16.x,
+                                              proxy.live_position_q16.y,
+                                              proxy.live_position_q16.z};
                 const CollisionMatrix proxy_world =
                     collision_matrix_from_euler(0, 0, 0, proxy_pos);
                 std::vector<CollisionMatrix> mats;
@@ -1352,7 +1358,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                     continue;
             }
             if (!live_pose &&
-                !trace_torso_fallback(proxy.position_q16,
+                !trace_torso_fallback(proxy.live_position_q16,
                                       proxy.uniform_scale_q16, eh, hit_distance))
                 continue;
             eh.victim_bound_radius_q16 = person_park_radius(proxy.bound_radius_q16);

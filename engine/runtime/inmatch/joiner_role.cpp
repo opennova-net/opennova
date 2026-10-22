@@ -927,18 +927,21 @@ void JoinerRole::pump() {
 	stamp_spectator_motor(kernel, runtime.get(), /*joiner=*/true); // this frame's receive folded
 	// The replica pool-0 rows through the own body's slot take their visits inside the
 	// World's entity pass, after its proximity build and ahead of its pool-0 walk. Each
-	// visited person's proxy then takes its moved position, which the own body's
-	// repulsion re-reads from the table built before the walk (D-NET-196).
+	// visited person's proxy then takes its live Position and its live dead bit (a death
+	// edge the visit latched), which the own body's resolver re-reads through the table's
+	// entity pointer past the reach gate on the table's copy (D-NET-196).
 	// [orig: Entity_UpdateAllEntities @0x4C2100 - the proximity build @0x4C240A, the
-	//  pool-0 walk @0x4C2426..0x4C2472; Entity_MovementCollisionResolver
-	//  @0x4B3B93..0x4B3B99]
+	//  pool-0 walk @0x4C2426..0x4C2472; Entity_MovementCollisionResolver @0x4B2BD0 (the
+	//  dead skip @0x4B3B89..0x4B3B8D, the live reads @0x4B3B93..0x4B3B99);
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 (the death gate @0x4B4BF1)]
 	world.before_pool0_walk = [&world, &rt] {
 		rt.view().tick_remote_motion_through_self();
 		if (world.ai.collision == nullptr) return;
 		for (const replication::ClientEntityState &row : rt.state().entities)
 			if (row.cls == EntityClass::Player || row.cls == EntityClass::Infantry)
-				world.ai.collision->set_wire_person_proxy_position(
-						row.handle, world::FixedVec3{row.x, row.y, row.z});
+				world.ai.collision->set_wire_person_proxy_live(row.handle,
+						world::FixedVec3{row.x, row.y, row.z},
+						(row.rm_entity_flags & world::kEntityFlagDead) != 0);
 	};
 	// The tick's own phases land on the SIM_WORLD_* / SIM_UPDATE_* rows inside run_logic_tick.
 	world.run_logic_tick(
