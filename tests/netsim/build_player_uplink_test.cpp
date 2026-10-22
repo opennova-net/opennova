@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <vector>
 
 namespace {
@@ -215,6 +216,109 @@ bool run_interest_person_los_takes_the_entity_leg() {
 		if (!expect(up.priority_handle_0 == 0x0000 && up.priority_score_0 == want,
 				indoors ? "two indoor ends skip the terrain ray"
 				        : "a buried remote person is still behind the ground")) {
+			std::fprintf(stderr, "  got %04x/%u\n", up.priority_handle_0, up.priority_score_0);
+			ok = false;
+		}
+	}
+	return ok;
+}
+
+// A solid (type-1) box [(-hx,-hy,0)..(hx,hy,height)] in section-local space:
+// six outward Q14 planes, dist = -face offset.
+w::CollisionModel box_model(double hx, double hy, double height) {
+	w::CollisionModel m;
+	const auto plane = [&](int nx, int ny, int nz, double d) {
+		w::CollisionPlane p;
+		p.nx = static_cast<int16_t>(nx);
+		p.ny = static_cast<int16_t>(ny);
+		p.nz = static_cast<int16_t>(nz);
+		p.dist = w::to_fixed(d);
+		m.planes.push_back(p);
+	};
+	plane(16384, 0, 0, -hx);
+	plane(-16384, 0, 0, -hx);
+	plane(0, 16384, 0, -hy);
+	plane(0, -16384, 0, -hy);
+	plane(0, 0, 16384, -height);
+	plane(0, 0, -16384, 0.0);
+	w::CollisionVolume v;
+	v.type = 1;
+	v.min_x = w::to_fixed(-hx);
+	v.max_x = w::to_fixed(hx);
+	v.min_y = w::to_fixed(-hy);
+	v.max_y = w::to_fixed(hy);
+	v.min_z = 0;
+	v.max_z = w::to_fixed(height);
+	v.plane_start = 0;
+	v.plane_count = 6;
+	m.volumes.push_back(v);
+	w::CollisionSection s;
+	s.volume_start = 0;
+	s.volume_count = 1;
+	m.sections.push_back(s);
+	return m;
+}
+
+// The key's LOS runs Entity_CheckLineOfSightTerrainAndEntities with allTypes 0,
+// whose entity leg walks the player's candidate slice and tests a candidate
+// only when its own items.def type is Building (5). A pool-2 decoration (type 2:
+// a sandbag wall, a crate) between the player and a remote person never blocks,
+// though every pool-2 row is a BMS building record. The x8 aikill setup pose
+// stands 1.7 units from a sandbag wall on the rays to two AI (handles 6 and 25):
+// the retail joiner keeps their LOS +100. A wall 2 units ahead, a remote enemy
+// Player 10 units ahead at the same height, in view at 600: 1114 + 2 * (256 +
+// 25 * (1 + 2 * (los + 1) + 1)) + 200 = 2126 with LOS, 2026 behind a Building.
+// [orig: Server_BuildEntityPriorityListForPlayer @0x50DF20 - the LOS call
+//  @0x50E179; Entity_CheckLineOfSightTerrainAndEntities @0x53B130 - the entity
+//  leg @0x53B17B; Physics_RaycastFindCollisionEntity @0x539A70 - the candidate's
+//  itemDef @0x539B7E, `cmp dword ptr [edx+5Ch], 5` @0x539B9E]
+bool run_interest_person_los_passes_a_decoration() {
+	bool ok = true;
+	for (const uint8_t def_type : {uint8_t{2}, uint8_t{5}}) {
+		auto world = std::make_unique<w::World>();
+		world->registry.configure_pool(0, 4);
+		world->registry.configure_pool(2, 4);
+		auto collision = std::make_unique<w::CollisionWorld>();
+		world->collision = collision.get();
+		world->weather.core.scalar_channels.fog_dist_fp = 600 << 16;
+		w::Entity self{};
+		self.kind = w::EntityKind::Organic;
+		self.alive = true;
+		self.team = 1;
+		self.item_type_index = 1; // a pool-0 slice source needs its +0x1C word
+		self.position = w::Vec3{0.0f, 0.0f, 1.5f};
+		const w::EntityHandle self_h = world->registry.spawn(0, self);
+		w::Entity wall{};
+		wall.kind = w::EntityKind::Building; // every pool-2 row's record family
+		wall.alive = true;
+		wall.has_item_def = true;
+		wall.item_type = def_type;
+		wall.heading = w::placed_heading_bam(90);
+		wall.position = w::Vec3{2.0f, 0.0f, 0.0f};
+		const w::EntityHandle wall_h = world->registry.spawn(2, wall);
+		collision->assign_entity(wall_h, collision->add_model(box_model(0.5, 0.5, 3.0)));
+		// The candidate slices rebuild on the 17th tick table build.
+		for (int i = 0; i < 17; ++i) collision->build_tick_tables(*world);
+
+		ns::ClientState replica;
+		ns::ClientEntityState person;
+		person.handle = 0x0000;
+		person.cls = nw::EntityClass::Player;
+		person.team = 2;
+		person.team_known = true;
+		person.x = w::to_fixed(10.0);
+		person.z = w::to_fixed(1.5);
+		replica.entities.push_back(person);
+		w::AiEntity body{};
+		ns::UplinkClientInputs inputs;
+		inputs.replica = &replica;
+		inputs.self_wire_handle = 0x0002;
+		const nw::PlayerExtendedUplink up =
+				ns::build_player_uplink(*world, *world->registry.get(self_h), body, inputs);
+		const uint16_t want = def_type == 5 ? 2026 : 2126;
+		if (!expect(up.priority_handle_0 == 0x0000 && up.priority_score_0 == want,
+				def_type == 5 ? "a Building-type def blocks the key's LOS"
+				              : "a decoration never blocks the key's LOS")) {
 			std::fprintf(stderr, "  got %04x/%u\n", up.priority_handle_0, up.priority_score_0);
 			ok = false;
 		}
@@ -976,5 +1080,6 @@ int main() {
 	ok = run_hud_cursor_names_a_remote_person() && ok;
 	ok = run_mounted_echo_names_the_seat_ground_link() && ok;
 	ok = run_interest_person_los_takes_the_entity_leg() && ok;
+	ok = run_interest_person_los_passes_a_decoration() && ok;
 	return ok ? 0 : 1;
 }

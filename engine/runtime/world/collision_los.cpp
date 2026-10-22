@@ -693,8 +693,12 @@ bool CollisionWorld::entity_los_clear_impl(World &world, EntityHandle listener,
 			// The 0x8000000 skip is sound-only: the walker's includeFlagged arg
 			// is the caller's allTypes [orig: push ebp @0x539ba4 -> @0x5387ac..0x5387b4].
             if (!all_types && (ce->engine_flags & kEntityFlagNoTarget) != 0) continue;
-			if (!all_types && ce->kind != EntityKind::Building)
-				continue; // [orig: itemDef+92 == 5]
+			// With allTypes clear only a Building-type def blocks: the candidate's own
+			// items.def type (ItemDef+0x5C == 5), not its record family, so a pool-2
+			// decoration (sandbags, crates, tyres: type 2) never blocks (D-NET-NEW-L2-41)
+			// [orig: Physics_RaycastFindCollisionEntity @0x539A70 - the candidate's itemDef
+			//  @0x539B7E, `test ebp, ebp` @0x539B9A, `cmp dword ptr [edx+5Ch], 5` @0x539B9E].
+			if (!all_types && !building_def_row(*ce)) continue;
 			// Candidates standing on the listener/source are excluded (one
             // level). [orig: the +0x28 groundEntity checks @ 0x538843-0x538877]
             if (ce->ground_target == listener) continue;
