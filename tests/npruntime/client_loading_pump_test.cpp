@@ -963,6 +963,32 @@ bool run_the_release_frame_bears_l_and_ships_its_uplink() {
 			"release frame: the first 0x0C carries the 0x0F's position");
 }
 
+// D-NET-NEW-L2-36: the final wait for the S2C 0x0F is the mission start's last loop, inside
+// the Game Loop mode's initialize; the role's tick that leaves it reports the initialize's end
+// once (Role::take_final_wait_end), so the session's bank and re-based frames start there.
+// [orig: Game_StartMission @0x524360 - dword_24C1174 = 3 @0x525E1F, the final wait
+//  @0x526295..0x5262E5; GameLoop_Init @0x526370 (the call @0x526377); Game_MainLoop
+//  @0x52B70F..0x52B757, @0x52B766]
+bool run_the_final_wait_end_ends_the_mode_init() {
+	RoleHarness h;
+	if (!expect(drive_to_the_final_wait(h, 0, {self_spawn_record()}),
+			"final wait end: the final wait runs"))
+		return false;
+	(void)h.frame();
+	if (!expect(!h.role.take_final_wait_end(), "final wait end: the wait's passes end nothing"))
+		return false;
+	std::vector<uint8_t> world_state(23 + kWorldStateAmmoPoolCount * 4 + 4, 0);
+	(void)h.frame({first_grant(), make_protocol_message(0x0F, world_state)});
+	if (!expect(h.client.in_game_loop() && h.role.take_final_wait_end(),
+			"final wait end: the 0x0F's tick ends the initialize"))
+		return false;
+	if (!expect(!h.role.take_final_wait_end(), "final wait end: reported once"))
+		return false;
+	(void)h.frame();
+	return expect(!h.role.take_final_wait_end(),
+			"final wait end: the game loop's ticks end nothing");
+}
+
 // The main frame's 62-frame quality fold steps in the game loop's frames alone and starts
 // from the mission start's zero: no fold runs in the join's waits (a host scalar landing
 // there moves no level), the first game-loop frame folds at once, the next fold is 62
@@ -1496,6 +1522,7 @@ int main() {
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
 	ok = run_a_bodyless_joiner_pings() && ok;
 	ok = run_the_release_frame_bears_l_and_ships_its_uplink() && ok;
+	ok = run_the_final_wait_end_ends_the_mode_init() && ok;
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
 	ok = run_the_net_readout_records_each_frame() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;

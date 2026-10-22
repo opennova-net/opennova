@@ -151,6 +151,13 @@ public:
 	bool send_medic_request() override { return runtime && runtime->queue_medic_request(); }
 	bool send_respawn_request() override { return runtime && runtime->queue_respawn_request(); }
 	void run_tick(const TickInput &input) override;
+	// The update whose receive ended the mission start's final wait (the S2C 0x0F, or the
+	// ESC that leaves it), once: the Game Loop mode's initialize returns there.
+	bool take_final_wait_end() override {
+		const bool ended = final_wait_end_;
+		final_wait_end_ = false;
+		return ended;
+	}
 	bool session_lost(SessionError &error) const override;
 	bool reset_to_baseline(SessionError &error) override;
 	void close() override;
@@ -408,6 +415,8 @@ private:
 	bool join_novaworld_ = false; // set_join_novaworld: FullDestroy keeps the transport
 	std::function<void()> enumerator_drain_; // set_enumerator_drain
 	bool local_spawned_ = false; // L spawned at reached_in_match (one-shot guard)
+	bool final_wait_seen_ = false; // the last tick ended inside the final wait
+	bool final_wait_end_ = false;  // take_final_wait_end's one-shot
 	bool wire_world_static_initialized_ = false;
 	uint64_t wire_world_topology_revision_seen_ = ~uint64_t{0};
 	uint64_t wire_world_stream_revision_seen_ = ~uint64_t{0};

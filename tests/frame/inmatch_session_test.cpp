@@ -69,6 +69,13 @@ struct TickProbe final : Role {
 	void observe_frame_rate(int32_t fps) override { frame_rates.push_back(fps); }
 	std::vector<uint32_t> profile_ticks; // the logic tick each /PROFILE frame leg saw
 	void write_profile_frame() override { profile_ticks.push_back(kernel.world.logic_tick); }
+	// The update count at which a joiner's final wait ends (0: never), once.
+	size_t final_wait_end_after = 0;
+	bool take_final_wait_end() override {
+		if (final_wait_end_after == 0 || inputs.size() != final_wait_end_after) return false;
+		final_wait_end_after = 0;
+		return true;
+	}
 };
 
 bool load(Session &session) {
@@ -235,6 +242,46 @@ int main() {
 		unsampled.delta_seconds = TickAccumulator::kTickDt * 3.0;
 		if (!expect(session.advance(unsampled).ticks_run() == 1,
 				"no render sample: the frame delta banks")) return 1;
+	}
+
+	// A joiner's mission start ends at its final wait for the S2C 0x0F, not at the load:
+	// the update that leaves the wait ends the mode's initialize, so the frame drains no
+	// further update, the main loop resets its bank, smoothing and phase, and the three
+	// frames drawn after it bank only the time since their render. A hitch frame there
+	// fast-forwards nothing (D-NET-NEW-L2-36) [orig: Game_StartMission @0x525E1F, the
+	// final wait @0x526295..0x5262E5; Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E;
+	// Game_MainLoop @0x52B70F..0x52B757, @0x52B766].
+	{
+		TickProbe target;
+		Session session(target);
+		if (!load(session)) return 1;
+		FrameInput wait;
+		wait.delta_seconds = TickAccumulator::kTickDt * 10.0;
+		wait.since_render_seconds = 0.0;
+		// The load's re-based frames are spent while the joiner still waits.
+		for (int frame = 0; frame < 4; ++frame) (void)session.advance(wait);
+		// The 0x0F lands in the first update of a 1 s frame: of the clamped bank's 32
+		// updates, the others never run.
+		FrameInput hitch;
+		hitch.delta_seconds = 1.0;
+		target.final_wait_end_after = target.inputs.size() + 1;
+		if (!expect(session.advance(hitch).ticks_run() == 1,
+				"final wait: the update that leaves it is the frame's last")) return 1;
+		// No fast-forward: the first frame and the three drawn after the wait bank only
+		// the time since their render (here none), against no smoothing history.
+		FrameInput drawn;
+		drawn.delta_seconds = 1.0;
+		drawn.since_render_seconds = 0.0;
+		for (int frame = 0; frame < 4; ++frame) {
+			if (!expect(session.advance(drawn).ticks_run() == 0,
+					"final wait: the frames after it bank no hitch")) return 1;
+		}
+		// The full 160 ms banks again over the seed-only history: (7 * 16 + 2576 + 4) >> 3 =
+		// 336 units, 5 quanta from phase 0, 2 ticks.
+		FrameInput full;
+		full.delta_seconds = TickAccumulator::kTickDt * 10.0;
+		if (!expect(session.advance(full).ticks_run() == 2,
+				"final wait: the main loop banks from a fresh history")) return 1;
 	}
 
 	// Pause, a manual step and a reset keep the bank and its smoothing history

@@ -798,6 +798,14 @@ void JoinerRole::run_tick(const TickInput &) {
 			kernel.world.rules.mp_session);
 	wire_leg_start_us_ = static_cast<int64_t>(io::perf_now_us());
 	pump();
+	// The final wait for the S2C 0x0F is the mission start's last loop, inside the Game
+	// Loop mode's initialize: the tick that leaves it (the 0x0F's receive, or the ESC
+	// taken since the last tick) ends that initialize (Session::advance carries the
+	// witness). [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5,
+	//  its exits @0x5262DF / @0x5262E9; GameLoop_Init @0x526370 (the call @0x526377)]
+	const bool waiting = runtime->in_final_wait();
+	if (final_wait_seen_ && !waiting && runtime->in_game_loop()) final_wait_end_ = true;
+	final_wait_seen_ = waiting;
 	// A link the connection lost with no exit reason (the silence reap, a record outside the
 	// description class) leaves only g_LoadingTimeoutFlag; the HUD's overlay pass then runs
 	// input action 3 once the round-over gate is up: exit reason 1 and the action's Exit
@@ -2043,6 +2051,8 @@ void JoinerRole::reset_for_join() {
 	// correction).
 	started_ = false;
 	local_spawned_ = false;
+	final_wait_seen_ = false;
+	final_wait_end_ = false;
 	deployment_release_revision_seen_ = 0;
 	local_resubmit_revision_seen_ = 0;
 	mounted_ammo_revision_seen_ = 0;

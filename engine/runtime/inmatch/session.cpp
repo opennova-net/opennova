@@ -816,6 +816,12 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		}
 		// The transport's forced step is no main-loop update.
 		if (!transport) count_update_into_second();
+		// A joiner's final wait ended in this update: the mode's initialize returns,
+		// and what this frame banked is never drained (Session::advance resets it).
+		if (role_->take_final_wait_end()) {
+			final_wait_ended_ = true;
+			break;
+		}
 	}
 	if (transport && kernel != nullptr) kernel->world.rules.pause_word = state_ == State::Paused;
 	out.state = state_;
@@ -1025,6 +1031,21 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// @0x5caeff..0x5caf0e].
 	if (start_rebase_frames_ > 0) {
 		--start_rebase_frames_;
+		rebase_clock_ = true;
+	}
+	// A joiner's mission start ends at its final wait, not at the load: the start arms
+	// its three frames ahead of that wait, which renders nothing, so they are the first
+	// three drawn after the S2C 0x0F; the mode's initialize returns only then, and the
+	// main loop resets its bank, smoothing and phase and reads its clock after it. The
+	// frames that drew the wait (ours do) bank nothing of what follows.
+	// [orig: Game_StartMission @0x524360 - dword_24C1174 = 3 @0x525E1F, the final wait
+	//  @0x526295..0x5262E5 (no render); Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E;
+	//  Game_MainLoop @0x52B630 - the mode-init reset @0x52B70F..0x52B757 (the smoothing
+	//  @0x52B71B), the clock read @0x52B766]
+	if (final_wait_ended_) {
+		final_wait_ended_ = false;
+		accumulator_.reset();
+		start_rebase_frames_ = kStartRebaseFrames;
 		rebase_clock_ = true;
 	}
 	last_perf_ = out.perf;

@@ -1034,6 +1034,8 @@ public:
 	// The final wait's ESC: it leaves the wait for the game loop and does nothing else
 	// (JoinerConnection::cancel_final_wait carries the witness); false outside the wait.
 	bool cancel_final_wait() { return joiner_ != nullptr && joiner_->cancel_final_wait(); }
+	// The mission start's final wait for the S2C 0x0F (JoinerConnection::in_final_wait).
+	bool in_final_wait() const { return joiner_ && joiner_->in_final_wait(); }
 	bool in_mission_start() const { return joiner_ && joiner_->in_mission_start(); }
 	bool in_pre_game() const { return joiner_ && joiner_->in_pre_game(); }
 	// ABORT's destroy reason (JoinerConnection::pre_game_cancel_reason carries the witness).

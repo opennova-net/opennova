@@ -390,6 +390,11 @@ public:
 	// rebuilt every bring-up and carries no embedder inputs, so it reports
 	// false.
 	virtual bool bring_up() { return false; }
+	// Once, true when this update ended a joiner's mission start: its final wait for the
+	// S2C 0x0F, the last loop of the Game Loop mode's initialize, so the main loop's
+	// first frame follows (Session::advance carries the witness). Every other role's
+	// mission start ends at the load's (Session::complete_load).
+	virtual bool take_final_wait_end() { return false; }
 
 	// The frame's input onto the local player, shared by every role: the update's drain
 	// (drain_input_events, with the tick's source), then the movement keys, mouse look and
@@ -653,6 +658,8 @@ private:
 	static constexpr int32_t kStartRebaseFrames = 3;
 	int32_t start_rebase_frames_ = 0;
 	bool rebase_clock_ = false;
+	// A joiner's final wait ended in this frame's drain (Role::take_final_wait_end).
+	bool final_wait_ended_ = false;
 	// [orig: dword_24D6130 (the 62-update countdown), dword_24C1938 (frames
 	//  rendered since), dword_24C193C (the published count) — process-lifetime
 	//  words nothing else resets]
