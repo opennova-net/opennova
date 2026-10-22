@@ -9,8 +9,10 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/minimap_overlays.h> // entity_display_name
+#include <runtime/inmatch/mission_exit.h> // kMissionExitRoundOver / kMissionExitQuit
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h> // host_session_vars
+#include <runtime/inmatch/session.h> // Role::store_mission_exit
 #include <runtime/inmatch/session_status.h> // the authority's own 0x58 report
 #include <runtime/hud/hud_toggles.h> // hud_deploy_key_pick
 #include <runtime/hud/session_rules_text.h>
@@ -86,7 +88,7 @@ int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones,
 	return hud::hud_deploy_key_pick(in);
 }
 
-uint32_t round_over_key(const RoleView &view, int vk, int restart_vk) {
+uint32_t round_over_key(const RoleView &view, Role &role, int vk, int restart_vk) {
 	if (view.kernel == nullptr) return 0;
 	world::World &w = view.kernel->world;
 	// The leg runs only behind the round-over gate: the authority's round end,
@@ -102,12 +104,20 @@ uint32_t round_over_key(const RoleView &view, int vk, int restart_vk) {
 	in.in_session = w.rules.mp_session; // g_NapiNPCtx.is_in_session
 	in.game_type = w.match.rules().game_type;
 	const uint32_t bits = hud::hud_round_over_key(in);
-	// The world halves of the SP arm; the co-op in-session arm's exits are
-	// not wired (interface/hud-re.md D-HUD-45).
+	// The world halves of the SP arm.
 	if (!in.in_session) {
 		if ((bits & hud::hud_round_over::kRestart) != 0) w.round_over_restart();
 		if ((bits & hud::hud_round_over::kExit) != 0) w.round_over_exit();
+		return bits;
 	}
+	// The co-op session arm stores the same reasons on the role's
+	// g_MissionExitReason; the epilog word the RESTART clears first is the SP
+	// cine's, never raised in a session.
+	// [orig: Input_HandleSpecialKeys @0x49c5c0 (RESTART: g_MissionExitReason = 4 @0x49c8ad)]
+	if ((bits & hud::hud_round_over::kRestart) != 0)
+		role.store_mission_exit(kMissionExitRoundOver);
+	// [orig: Input_HandleSpecialKeys @0x49c5c0 (ESC: g_MissionExitReason = 1 @0x49c8e2)]
+	if ((bits & hud::hud_round_over::kExit) != 0) role.store_mission_exit(kMissionExitQuit);
 	return bits;
 }
 

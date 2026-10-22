@@ -12,8 +12,9 @@ extends RefCounted
 ## UI_OpenMenuScreen like DEATH).
 ## One drain is the input frame's keyboard pass and then its event drain, in
 ## the original's order: an open chat line takes each key; otherwise the
-## special-key chain runs its inline legs (the quit dialog's keys, the page
-## keys) and the deploy leg queues its pick (event 12); a key the chain leaves
+## special-key chain runs its inline legs (the quit dialog's keys, the
+## round-over leg's, the page keys) and the deploy leg queues its pick (event
+## 12; under STAT too, a dead player's); a key the chain leaves
 ## is the binding scan's, where the Escape key queues the escape row's event
 ## (18). Then the queued events dispatch in order, and the first whose case
 ## resets the input (12's and 18's Input_ResetAllState memset the event queue)
@@ -27,7 +28,9 @@ extends RefCounted
 ##   ring_chat_key(key) -> bool        an open chat line took the key
 ##   ring_special_key(key, events) -> bool
 ##                                      the special-key chain took the key; its
-##                                      deploy leg appends the pick's param
+##                                      event-12 picks (the deploy leg's, a
+##                                      co-op round-over RESTART's) append
+##                                      their params
 ##   ring_escape()                      the Escape action (case 18)
 ##   ring_pick(param)                   the deploy pick (case 12)
 ##   ring_reset_ran() -> bool           the case just run reset the input (the

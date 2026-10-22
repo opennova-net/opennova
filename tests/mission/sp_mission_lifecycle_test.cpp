@@ -406,9 +406,10 @@ int main() {
 		// --- the round-over keys (behind the gate the round end raised) ---
 		const im::RoleView view = m.view();
 		namespace k = hud::hud_round_over;
-		CHECK(im::round_over_key(view, 'X', 'R') == k::kConsumed);
+		CHECK(im::round_over_key(view, *m.role, 'X', 'R') == (k::kArm | k::kConsumed));
 		CHECK(world.mission_exit_reason == 0);
-		CHECK(im::round_over_key(view, 'R', 'R') == (k::kConsumed | k::kRestart));
+		CHECK(im::round_over_key(view, *m.role, 'R', 'R') ==
+				(k::kArm | k::kConsumed | k::kRestart));
 		CHECK(!cine.screen_active);
 		CHECK(world.mission_exit_reason == 4);
 		CHECK(im::main_frame_exit(world.mission_exit_reason, false, true) ==
@@ -468,20 +469,59 @@ int main() {
 		const im::RoleView view = m.view();
 		namespace k = hud::hud_round_over;
 		// Before the round ends the leg is not reached.
-		CHECK(im::round_over_key(view, 27, 'R') == 0);
+		CHECK(im::round_over_key(view, *m.role, 27, 'R') == 0);
 		m.world().process_round_end(2);
-		CHECK(im::round_over_key(view, 27, 'R') == (k::kConsumed | k::kExit));
+		CHECK(im::round_over_key(view, *m.role, 27, 'R') == (k::kArm | k::kConsumed | k::kExit));
 		CHECK(m.world().mission_exit_reason == 1);
-		// The pure rule: a session takes nothing, the co-op game type every key.
+		// The pure rule: a session's board arm takes PgUp / PgDn alone and lets
+		// every other key, ADVANCED's 'A' included, go on to the chain's tail; the
+		// co-op game type takes every key [orig: Input_HandleSpecialKeys
+		// @0x49c7d5..0x49c8e2].
 		hud::HudRoundOverKeyInput in;
 		in.vk = 'R';
 		in.in_session = true;
 		in.game_type = 0x10000; // TDM
-		CHECK(hud::hud_round_over_key(in) == 0);
+		CHECK(hud::hud_round_over_key(in) == k::kArm);
+		in.vk = 0x21; // VK_PRIOR [orig: @0x49c802]
+		CHECK(hud::hud_round_over_key(in) == (k::kArm | k::kConsumed));
+		in.vk = 0x22; // VK_NEXT [orig: @0x49c82c]
+		CHECK(hud::hud_round_over_key(in) == (k::kArm | k::kConsumed));
+		in.vk = 'A'; // ADVANCED [orig: @0x49c859 -> the tail @0x49c864]
+		CHECK(hud::hud_round_over_key(in) == k::kArm);
+		in.vk = 27; // ESC: the binding scan's [orig: @0x49c859 -> the tail]
+		CHECK(hud::hud_round_over_key(in) == k::kArm);
+		in.vk = 'R';
 		in.game_type = 0x10020; // co-op
-		CHECK(hud::hud_round_over_key(in) == (k::kConsumed | k::kRestart));
-		in.game_type = 0x30020; // co-op with bit 0x20000
-		CHECK(hud::hud_round_over_key(in) == 0);
+		CHECK(hud::hud_round_over_key(in) == (k::kArm | k::kConsumed | k::kRestart));
+		in.vk = 0x21; // co-op: the page keys are taken with every other key [orig: @0x49c8d5]
+		CHECK(hud::hud_round_over_key(in) == (k::kArm | k::kConsumed));
+		in.vk = 'R';
+		in.game_type = 0x30020; // co-op with bit 0x20000: the board arm
+		CHECK(hud::hud_round_over_key(in) == k::kArm);
+		// In a session the leg's exits are the role's: a co-op session's ESC and
+		// RESTART store 1 and 4 on the role's g_MissionExitReason (the listen
+		// host's world here), and the board arm stores nothing [orig:
+		// Input_HandleSpecialKeys @0x49c8e2 / @0x49c8ad; the session test
+		// @0x49c7d5..0x49c7fd].
+		{
+			SpMission c;
+			CHECK(c.boot(files, false));
+			c.world().process_round_end(2);
+			c.world().rules.mp_session = true;
+			c.world().match.live_rules().game_type = 0x10000; // TDM: the board arm
+			CHECK(im::round_over_key(c.view(), *c.role, 27, 'R') == k::kArm);
+			CHECK(im::round_over_key(c.view(), *c.role, 0x22, 'R') == (k::kArm | k::kConsumed));
+			CHECK(c.world().mission_exit_reason == 0);
+			c.world().match.live_rules().game_type = 0x10020; // co-op
+			CHECK(im::round_over_key(c.view(), *c.role, 'X', 'R') == (k::kArm | k::kConsumed));
+			CHECK(c.world().mission_exit_reason == 0);
+			CHECK(im::round_over_key(c.view(), *c.role, 27, 'R') ==
+					(k::kArm | k::kConsumed | k::kExit));
+			CHECK(c.world().mission_exit_reason == 1);
+			CHECK(im::round_over_key(c.view(), *c.role, 'R', 'R') ==
+					(k::kArm | k::kConsumed | k::kRestart));
+			CHECK(c.world().mission_exit_reason == 4);
+		}
 		// The main frame's router [orig: @0x526806..0x526867].
 		CHECK(im::main_frame_exit(0, false, true) == im::MainFrameExit::None);
 		CHECK(im::main_frame_exit(8, false, true) == im::MainFrameExit::GameLoop);
@@ -527,8 +567,9 @@ int main() {
 		played->world().process_round_end(1);
 		played->frames(120); // into the score screen
 		CHECK(played->world().epilog_screen_active());
-		CHECK(im::round_over_key(played->view(), 'R', 'R') ==
-				(hud::hud_round_over::kConsumed | hud::hud_round_over::kRestart));
+		CHECK(im::round_over_key(played->view(), *played->role, 'R', 'R') ==
+				(hud::hud_round_over::kArm | hud::hud_round_over::kConsumed |
+						hud::hud_round_over::kRestart));
 		CHECK(played->frame().status == im::FrameStatus::SessionLost);
 		CHECK(im::main_frame_exit(played->world().mission_exit_reason, false, true) ==
 				im::MainFrameExit::RestartRoundSP);

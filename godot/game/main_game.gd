@@ -520,10 +520,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 	# The special-key chain takes its keys before the action rows see them:
-	# the quit dialog's, the page keys (the Tab board, the status page, help,
-	# the briefing) and the status page's Enter.
+	# the quit dialog's, a session's round-over keys, the page keys (the Tab
+	# board, the status page, help, the briefing), the status page's Enter and
+	# the deploy keys, whose pick goes out at once (a dead player with no
+	# screen up: the round end's teardown closed DEATH before STAT opens).
 	if is_gameplay_input_active() and _hud_presenter != null \
-			and _hud_presenter.handle_special_key(key):
+			and _hud_presenter.handle_special_key(key, _deploy_key_param, ring_pick):
 		get_viewport().set_input_as_handled()
 		return
 	if key.keycode == PICK_KEY and key.shift_pressed and _world != null \
@@ -1679,21 +1681,20 @@ func ring_chat_key(key: InputEventKey) -> bool:
 	return true
 
 
-## The special-key chain over the ring's key, its deploy leg queueing the pick
-## into the drain's events.
+## The special-key chain over the ring's key, its event-12 picks (the deploy
+## keys', a co-op round-over RESTART's) queued into the drain's events. The
+## deploy keys' test is the engine's (dead, or the deploy overlay up), not the
+## deploy screen's: under stat.mnu's STAT a dead player's deploy key queues its
+## pick as under DEATH (engine hud_toggles.h HudDeployKeyInput and
+## hud_round_over_key carry the witness).
 func ring_special_key(key: InputEventKey, events: Array[int]) -> bool:
-	return _hud_presenter != null \
-			and _hud_presenter.handle_special_key(key, _ring_deploy_leg.bind(events))
+	return _hud_presenter != null and _hud_presenter.handle_special_key(key,
+			_deploy_key_param, func(param: int) -> void: events.append(param))
 
 
-func _ring_deploy_leg(key: InputEventKey, events: Array[int]) -> bool:
-	if _state != State.DEPLOY or _deploy_presenter == null:
-		return false
-	var param := _deploy_presenter.deploy_key_param(key)
-	if param < 0:
-		return false
-	events.append(param)
-	return true
+## A key's deploy pick parameter by the engine's rule, -1 when not taken.
+func _deploy_key_param(key: InputEventKey) -> int:
+	return _deploy_presenter.deploy_key_param(key) if _deploy_presenter != null else -1
 
 
 ## The escape row's event: the Escape action, never the in-game menu (a menu
@@ -1702,7 +1703,8 @@ func ring_escape() -> void:
 	_run_escape_action()
 
 
-## The deploy keys' event 12: the pick.
+## Input event 12: the pick (the deploy keys', a co-op round-over RESTART's),
+## with or without the deploy screen open.
 func ring_pick(param: int) -> void:
 	if _deploy_presenter != null:
 		_deploy_presenter.send_pick(param)

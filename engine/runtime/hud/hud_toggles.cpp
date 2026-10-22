@@ -455,10 +455,16 @@ uint32_t hud_round_over_key(const HudRoundOverKeyInput &in) {
 	// [orig: @0x49c7d5..0x49c7fd — out of a session, or the co-op game type
 	//  0x10020 (bit 0x20000 masked) without bit 0x20000]
 	const bool coop = (in.game_type & 0xFFFDFFFFu) == 0x10020u && (in.game_type & 0x20000u) == 0;
-	if (in.in_session && !coop) return 0;
-	if (in.vk == in.restart_vk) return kConsumed | kRestart; // [orig: @0x49c871]
-	if (in.vk == 27) return kConsumed | kExit;                // [orig: @0x49c8da / @0x49c8e2]
-	return kConsumed;                                         // [orig: @0x49c8d5]
+	if (in.in_session && !coop) {
+		// The end-of-round board's arm: PgUp / PgDn scroll it and are taken;
+		// ADVANCED flips its word and goes on, as every other key does
+		// [orig: @0x49c802 / @0x49c82c; @0x49c859 -> the tail @0x49c9c9].
+		if (in.vk == 0x21 || in.vk == 0x22) return kArm | kConsumed;
+		return kArm;
+	}
+	if (in.vk == in.restart_vk) return kArm | kConsumed | kRestart; // [orig: @0x49c871]
+	if (in.vk == 27) return kArm | kConsumed | kExit;               // [orig: @0x49c8da / @0x49c8e2]
+	return kArm | kConsumed;                                        // [orig: @0x49c8d5]
 }
 
 uint32_t hud_toggles_cine_start(HudToggleState &s, bool in_session) {

@@ -70,6 +70,7 @@ public:
 		ROUND_OVER_CONSUMED = opennova::hud::hud_round_over::kConsumed,
 		ROUND_OVER_RESTART = opennova::hud::hud_round_over::kRestart,
 		ROUND_OVER_EXIT = opennova::hud::hud_round_over::kExit,
+		ROUND_OVER_ARM = opennova::hud::hud_round_over::kArm,
 	};
 	// The polled catalog rows, one bit each (engine HudToggleRow).
 	enum Row {

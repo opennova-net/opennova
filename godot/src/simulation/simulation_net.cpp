@@ -1143,7 +1143,8 @@ int Simulation::get_mission_exit_reason() const {
 
 int Simulation::round_over_key(int p_vk, int p_restart_vk) {
 	if (!kernel_) return 0;
-	return static_cast<int>(opennova::inmatch::round_over_key(role_view(), p_vk, p_restart_vk));
+	return static_cast<int>(
+			opennova::inmatch::round_over_key(role_view(), active_role(), p_vk, p_restart_vk));
 }
 
 bool Simulation::ingame_restart() {

@@ -948,7 +948,8 @@ public:
 	String begin_host_map_change();
 	bool begin_joiner_reload();
 	// The round-over leg of the special-key chain (inmatch::round_over_key): the
-	// hud_round_over bits for a Windows VK and the RESTART key.
+	// hud_round_over bits for a Windows VK and the RESTART key (kArm once the
+	// round-over gate holds; a co-op session's RESTART / ESC store the role's exit).
 	int round_over_key(int p_vk, int p_restart_vk);
 	// The in-game menu's RESTART (World::ingame_restart_command): false in a session.
 	bool ingame_restart();

@@ -478,6 +478,37 @@ func test_a_stale_leave_mission_escape_runs_the_escape_action_once() -> void:
 	_assert_no_key_held()
 
 
+# STAT's face (V-ROLL-J on D-NET-NEW-LI-11): under stat.mnu's STAT the round
+# end's teardown has closed DEATH, and the special-key chain's deploy test is
+# the engine's (in a session, the local player dead or the overlay up), not the
+# screen's, so a dead player's X in STAT's input frame queues event 12 and its
+# C2S 0x0E reaches the host [orig: Input_HandleSpecialKeys @0x49c9cf..0x49ca73,
+# reached past the round-over leg's board arm @0x49c859; engine hud_toggles.h
+# HudDeployKeyInput / hud_round_over_key carry the witness].
+func test_a_dead_players_deploy_key_picks_with_the_deploy_screen_closed() -> void:
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	assert_false(presenter.is_open(), "no deploy screen is up (STAT's teardown closed it)")
+	var ring := ScreenKeyRing.new()
+	var legs := DeployRingLegs.new(presenter, pair.joiner)
+	ring.push(_key_down(KEY_X))
+	# STAT's word holds for the whole screen: its input frame drains the ring.
+	ring.drain(legs)
+	assert_eq(legs.picks.size(), 1, "the dead player's X queued one pick")
+	assert_eq(legs.picks[0] if not legs.picks.is_empty() else -1, 0, "the Default Spawn's")
+	assert_false(presenter.is_open(), "the pick opens no screen")
+	var released := false
+	for _i in range(800):
+		pair.host.step()
+		pair.joiner.step()
+		if not pair.joiner.is_join_deploy_pick_pending():
+			released = true
+			break
+		OS.delay_msec(2)
+	assert_true(released, "the X's C2S 0x0E reaches the host, which releases the hold")
+	_assert_no_key_held()
+
+
 # The shell leg (MainGame over its key ring): under DEATH's word the shell runs
 # the input frame, whose special-key chain takes the deploy keys; Escape there is
 # the ring's and never opens the in-game menu; under the confirmation a key waits
@@ -546,6 +577,40 @@ func _shell_death_screen_keys(pair: Dictionary, shell: MainGame) -> void:
 			break
 		OS.delay_msec(2)
 	assert_true(released, "the shell's input frame sent the X's C2S 0x0E")
+	# STAT's face over the live chain: after a second death the screen is closed
+	# the way the round end's teardown closes it ahead of STAT (the shell's own
+	# mission raises no DEATH again), so the dead player's X runs through the
+	# shell's live special-key chain, whose deploy leg is the engine's rule, not
+	# the screen's: its pick reaches the host.
+	assert_eq(pair.host.debug_kill_player_entity(pair.joiner.get_joiner_self_handle()), OK,
+			"the host queued a second death")
+	var pending := false
+	for _i in range(240):
+		pair.host.step()
+		pair.joiner.step()
+		if pair.joiner.is_join_deploy_pick_pending():
+			pending = true
+			break
+		OS.delay_msec(2)
+	assert_true(pending, "the second death holds the pick again")
+	# Past the death-within-620-ticks pick penalty (see _join_pair_with_pending_pick).
+	for _i in range(260):
+		pair.host.step()
+		pair.joiner.step()
+	deploy_host.close()  # as EndRoundPresenter's announcement teardown closes it
+	await get_tree().process_frame
+	assert_false(deploy_host.is_open(), "no deploy screen is up")
+	assert_eq(shell.shell_state_name(), "world", "the shell is back over live play")
+	await _tap_key(KEY_X)
+	released = false
+	for _i in range(800):
+		pair.host.step()
+		pair.joiner.step()
+		if not pair.joiner.is_join_deploy_pick_pending():
+			released = true
+			break
+		OS.delay_msec(2)
+	assert_true(released, "the dead player's X with no screen up sent its C2S 0x0E")
 
 
 # One key tap through the process input path (the shell's _input and

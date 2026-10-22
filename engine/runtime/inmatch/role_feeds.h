@@ -48,6 +48,7 @@ class ClientWorldMaterializer;
 namespace opennova::inmatch {
 
 class ClientRuntime;
+class Role;
 struct NapiNPServerCtx;
 
 // What a feed reads of the running role.
@@ -110,10 +111,18 @@ int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones,
 // The round-over leg of the special-key handler over this role (the rule and
 // its witness are hud::hud_round_over_key): behind the round-over gate, out of
 // a session, the RESTART key takes the world's restart half
-// (World::round_over_restart) and ESC its exit (World::round_over_exit).
-// Returns the hud_round_over bits (0 before the round ends); the embedder
-// runs the RESTART arm's splash re-run when the bits carry kRestart.
-uint32_t round_over_key(const RoleView &view, int vk, int restart_vk);
+// (World::round_over_restart) and ESC its exit (World::round_over_exit); in a
+// co-op session the same two keys store their exit reasons, 4 and 1, on the
+// role's g_MissionExitReason (Role::store_mission_exit: the listen host's
+// world, a joiner's runtime), which the main frame's router reads after the
+// update (main_frame_exit: a joiner's 4 is the Game Loop, the authority's the
+// Post Menu). Returns the hud_round_over bits (0 before the round ends); the
+// embedder runs the RESTART arm's splash re-run (out of a session) and queues
+// its input event 12 when the bits carry kRestart.
+// [orig: Input_HandleSpecialKeys @0x49c5c0 - Input_QueueEvent(12) @0x49c8a3,
+//  g_MissionExitReason = 4 @0x49c8ad, = 1 @0x49c8e2; Game_ProcessMainFrame
+//  @0x526822..0x526867]
+uint32_t round_over_key(const RoleView &view, Role &role, int vk, int restart_vk);
 
 // [orig: the S2C 0x1D landing NapiNPClientMsg_0x01D @0x430840 —
 //  g_RoundOver, g_EndRoundWinnerTeam, g_ScoreTeamScore0/1,

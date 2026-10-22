@@ -1054,23 +1054,31 @@ func handle_chat_key(key: InputEventKey) -> bool:
 	return true
 
 
-## One key-down over live play through the special-key chain (engine
-## hud_toggles.h): the quit dialog's keys first; unless the dialog took the
-## chain, the Tab board's page keys, then the status page's Enter / PgUp /
-## PgDn; then the deploy keys (`deploy_leg`, the death screen's: it queues the
-## pick and answers whether it took the key); then the help and briefing pages.
-## A key a leg takes never reaches the action rows
-## (ControlsModel.consume_key_press); true = consumed. The deploy leg's place
-## in the chain is the engine's witness (hud_toggles.h HudDeployKeyInput and
+## One key-down through the special-key chain (engine hud_toggles.h), over
+## live play and in a pass-through screen's input frame: the quit dialog's keys
+## first; unless the dialog took the chain or an Emotes / Radio menu is open
+## (their digits are PlayerActions'), the round-over leg once the round-over
+## gate holds (Simulation.round_over_key: a session's end-of-round board takes
+## PgUp / PgDn, a co-op session or single player every key, its RESTART
+## queueing input event 12), else the Tab board's page keys and then the
+## status page's Enter / PgUp / PgDn; then the deploy keys: `deploy_param`
+## gives a key's event-12 parameter (the engine's rule: in a session, the
+## local player dead or the deploy overlay up; -1 when not taken) and
+## `queue_pick` queues the pick, with or without the deploy screen open; then
+## the help and briefing pages. A key a leg takes never reaches the action
+## rows (ControlsModel.consume_key_press); true = consumed. The legs' order is
+## the engine's witness (hud_toggles.h hud_round_over_key, HudDeployKeyInput;
 ## world::pass_through_close_axis).
-func handle_special_key(key: InputEventKey, deploy_leg := Callable()) -> bool:
+func handle_special_key(key: InputEventKey, deploy_param := Callable(),
+		queue_pick := Callable()) -> bool:
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim == null:
 		return false
 	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
 	var in_session := sim.is_mp_session()
+	var restart_vk := _key_press_vk("STRKEYPRESS_RESTART", "R")
 	var bits := _toggles.quit_dialog_key(vk, in_session, _key_press_vk("STRKEYPRESS_YES", "Y"),
-			_key_press_vk("STRKEYPRESS_NO", "N"), _key_press_vk("STRKEYPRESS_RESTART", "R"))
+			_key_press_vk("STRKEYPRESS_NO", "N"), restart_vk)
 	if bits & HudToggles.SPECIAL_KEY_QUIT_CONFIRMED:
 		quit_confirmed.emit()
 	if bits & HudToggles.SPECIAL_KEY_CONSUMED:
@@ -1078,15 +1086,28 @@ func handle_special_key(key: InputEventKey, deploy_leg := Callable()) -> bool:
 		return true
 	var page_key := key.keycode == KEY_PAGEUP or key.keycode == KEY_PAGEDOWN
 	var taken := false
-	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0:
-		if page_key and _game_hud != null and _game_hud.scoreboard_page_key(
+	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0 and not _toggles.is_emotes_menu_open() \
+			and not _toggles.is_radio_menu_open():
+		var round_over := int(sim.round_over_key(vk, restart_vk))
+		if round_over & HudToggles.ROUND_OVER_ARM:
+			# The RESTART arm queues event 12 (a session's pick); the restart's
+			# exit and ESC's are the role's, stored by the engine.
+			if (round_over & HudToggles.ROUND_OVER_RESTART) and queue_pick.is_valid():
+				queue_pick.call(0)
+			if round_over & HudToggles.ROUND_OVER_CONSUMED:
+				ControlsBindings.model().consume_key_press(vk)
+				return true
+		elif page_key and _game_hud != null and _game_hud.scoreboard_page_key(
 				key.keycode == KEY_PAGEDOWN, in_session, _toggles.is_scoreboard_open()):
 			taken = true
 		elif _toggles.server_status_page_key(vk, in_session, _authority(sim),
 				_mp_session_peer(sim)):
 			taken = true
-	if not taken and deploy_leg.is_valid() and deploy_leg.call(key):
-		taken = true
+	if not taken and deploy_param.is_valid() and queue_pick.is_valid():
+		var param := int(deploy_param.call(key))
+		if param >= 0:
+			queue_pick.call(param)
+			taken = true
 	if not taken and page_key:
 		taken = handle_page_key(key.keycode == KEY_PAGEDOWN, false)
 	if taken:
