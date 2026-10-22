@@ -559,13 +559,13 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
         process_air_state_machine(e, world, 0);
 }
 
-// A person body bound to a vehicle or aircraft row runs that row's mover over its own words.
-// Each loads the brain word (+0x64) at its head, which a person's class init never fills, stamps
-// the savedLivePose words from the body's Position and Yaw / Pitch / Roll words, and on the null
-// brain jumps to its matrix-build tail (the matrix of +4 into +0xB4, Flags |= 0x20000): no ground
-// probe, carrier ride, health cadence, input, motion or sound. Every mover a row's dispatcher
-// selects takes that path, whatever the def's +0x8DC selector or the afloat bit picks. True when
-// `row` is one of them (the body ran its mover).
+// A person body bound to a vehicle, aircraft or genx row runs that row's mover over its own
+// words; true when `row` is one of them (the body ran its mover). A vehicle or aircraft mover
+// loads the brain word (+0x64) at its head, which a person's class init never fills, stamps the
+// savedLivePose words from the body's Position and Yaw / Pitch / Roll words, and on the null brain
+// jumps to its matrix-build tail (the matrix of +4 into +0xB4, Flags |= 0x20000): no ground probe,
+// carrier ride, health cadence, input, motion or sound. Every mover a row's dispatcher selects
+// takes that path, whatever the def's +0x8DC selector or the afloat bit picks.
 // [orig: Entity_DispatchPhysics_cveh @0x48EFC0 (the +0x8DC select @0x48EFC7) and
 //  Entity_DispatchPhysics_ctrn @0x48F060 -> Entity_UpdateVehiclePhysics @0x48AF00 (`mov edi,
 //  [esi+64h]` @0x48AF1A, the stamp @0x48AF74..0x48AFA0, `jz` @0x48AFA6 -> the tail
@@ -582,8 +582,17 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 //  @0x46FA64 -> @0x471670..0x471683); cpln j_Entity_UpdateAircraftPhysics @0x45D6F0 and CHel
 //  -> Entity_UpdateAircraftPhysics @0x490310 (`mov ebx, [esi+64h]` @0x49032C, the stamp
 //  @0x490337..0x49036B, `jz` @0x490371 -> @0x492753..0x492766)]
-static bool person_vehicle_mover(PhysicsClass row, Entity &body) {
+// The genx row's mover is the parent follow over the body's own words: the spawn stored it as
+// the body's +0x1C4, which the drop motion models (a re-fall replaces it), so the body runs its
+// installed drop motion, the ride on its +0x28 ground entity (update_dropped_object).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the +0x1C4 store @0x43C453;
+//  Entity_UpdateParentTransform @0x4A88B0 - the def+0x8DC gate @0x4A88BB, the stamp
+//  @0x4A88D5..0x4A8902, the +0x28 read @0x4A88F1]
+static bool person_item_mover(World &world, PhysicsClass row, Entity &body) {
     switch (row) {
+    case PhysicsClass::Genx:
+        update_dropped_object(world, body);
+        return true;
     case PhysicsClass::Cveh:
     case PhysicsClass::Ctrn:
     case PhysicsClass::Catv:
@@ -608,13 +617,15 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // The body's +0x1C4 is its bound row's move function: org1 the AI update, org2 the
     // player-body update. The null row's stub is skipped, org0's and chld's are bare
     // returns, and a body bound to an item row runs that row's mover over its own words:
-    // a vehicle or aircraft row's (person_vehicle_mover); the other item rows' movers are
-    // not run here (D-NET-NEW-L4-14 (a), narrowed). [orig: Entity_UpdateAllEntities
-    //  @0x4C2466..0x4C2472; Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53;
-    //  Entity_UpdateOrg0Movement @0x4AFF60; the chld row's nullsub_82 @0x45D540]
+    // a vehicle, aircraft or genx row's (person_item_mover, the pool-0 walk's: a pool-1
+    // slot's visit runs a row's vehicle mover and drop motion in its own legs); the other
+    // item rows' movers are not run here (D-NET-NEW-L4-14 (a), narrowed).
+    // [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472; Entity_UpdatePool1Slot
+    //  @0x4B8E41..0x4B8E53; Entity_UpdateOrg0Movement @0x4AFF60; the chld row's nullsub_82
+    //  @0x45D540]
     const PhysicsClass move_row = body_move_row(world, e, motor_entity);
-    if (Entity *body = world.registry.get(e.handle);
-            body != nullptr && person_vehicle_mover(move_row, *body))
+    if (Entity *body = world.registry.get(e.handle); body != nullptr &&
+            e.handle.pool() == 0 && person_item_mover(world, move_row, *body))
         return;
     if (move_row != PhysicsClass::Org1 && move_row != PhysicsClass::Org2) return;
     // Joiners retain seat-follow presentation for wire-owned peers. The

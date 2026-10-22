@@ -60,7 +60,7 @@ namespace {
 // move function org1), a person with no ai_function (5320: the null row; no move function, the
 // null physics row too), a brrl person (5321), an ele0 person (5322), a nade
 // person (5323: the row with no event callback), a schl person (5324, the one row with a
-// nonzero `score` word) and a clym person (5325).
+// nonzero `score` word), a clym person (5325) and a plyr person moved by the genx row (5326).
 const char kItems[] =
 		"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
 		"begin \"Player\"\r\n id 105305\r\n type person\r\n hp 150\r\n ai_function plyr\r\n"
@@ -73,7 +73,9 @@ const char kItems[] =
 		"begin \"Grenade man\"\r\n id 105323\r\n type person\r\n hp 100\r\n ai_function nade\r\nend\r\n"
 		"begin \"Satchel man\"\r\n id 105324\r\n type person\r\n hp 100\r\n score 25\r\n"
 		" ai_function schl\r\nend\r\n"
-		"begin \"Claymore man\"\r\n id 105325\r\n type person\r\n hp 100\r\n ai_function clym\r\nend\r\n";
+		"begin \"Claymore man\"\r\n id 105325\r\n type person\r\n hp 100\r\n ai_function clym\r\nend\r\n"
+		"begin \"Rider man\"\r\n id 105326\r\n type person\r\n hp 100\r\n ai_function plyr\r\n"
+		" move_function genx\r\nend\r\n";
 
 // Class 5 the plyr row, 6 the org0 row, 7 the classless row, 8 the brrl row, 9 the ele0 row
 // (classes 1..4 the plyr row: the load reads CHARACTER1 on until the first missing section).
@@ -89,10 +91,11 @@ const char kCharattr[] =
 		"[CHARACTER9]\r\nJUNGLE_CAMMO\t= 5322\r\nDESERT_CAMMO\t= 5322\r\nARCTIC_CAMMO\t= 5322\r\n"
 		"[CHARACTER10]\r\nJUNGLE_CAMMO\t= 5323\r\nDESERT_CAMMO\t= 5323\r\nARCTIC_CAMMO\t= 5323\r\n"
 		"[CHARACTER11]\r\nJUNGLE_CAMMO\t= 5324\r\nDESERT_CAMMO\t= 5324\r\nARCTIC_CAMMO\t= 5324\r\n"
-		"[CHARACTER12]\r\nJUNGLE_CAMMO\t= 5325\r\nDESERT_CAMMO\t= 5325\r\nARCTIC_CAMMO\t= 5325\r\n";
+		"[CHARACTER12]\r\nJUNGLE_CAMMO\t= 5325\r\nDESERT_CAMMO\t= 5325\r\nARCTIC_CAMMO\t= 5325\r\n"
+		"[CHARACTER13]\r\nJUNGLE_CAMMO\t= 5326\r\nDESERT_CAMMO\t= 5326\r\nARCTIC_CAMMO\t= 5326\r\n";
 
 constexpr uint8_t kPlyr = 5, kOrg = 6, kNull = 7, kBrrl = 8, kEle0 = 9, kNade = 10, kSchl = 11,
-		kClym = 12;
+		kClym = 12, kGenx = 13;
 constexpr uint8_t kEquipped = 3;
 
 struct Rig {
@@ -1061,6 +1064,68 @@ void test_a_vehicle_row_body_runs_its_movers_person_path() {
 	}
 }
 
+// A body bound to the genx row runs the parent follow over its own words: the spawn stored the
+// row's callback as its +0x1C4 (ours: the sweep installs the ride drop motion), which stamps the
+// savedLivePose words and moves the body by its +0x28 ground entity's per-tick delta, with no
+// player-body update after it.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the +0x1C4 store @0x43C453;
+//  Entity_UpdateParentTransform @0x4A88B0 - the stamp @0x4A88D5..0x4A8902, the +0x28 read
+//  @0x4A88F1; Entity_InterpolateFromParentDelta @0x4A8D60 - the translation @0x4A8E0F..0x4A8E18]
+void test_a_genx_row_body_rides_its_ground_entity() {
+	Clips clips;
+	Rig r;
+	r.world->ai.root_motion = &clips;
+	r.world->registry.configure_pool(1, 4);
+	w::Entity *body = r.spawn_remote(kGenx);
+	w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+	CHECK(ae != nullptr);
+	if (ae == nullptr) {
+		r.world->ai.root_motion = nullptr;
+		return;
+	}
+	CHECK(w::body_move_row(*r.world, *ae, body) == w::PhysicsClass::Genx);
+	CHECK(body->drop_motion == w::DropMotion::Ride);
+	// The ground entity moved 3 units along X since its last stamp, its attitude unchanged.
+	w::Entity ground_seed;
+	ground_seed.alive = true;
+	ground_seed.position.set_q16({10 << 16, 20 << 16, 0});
+	const w::EntityHandle ground = r.world->registry.spawn(1, ground_seed);
+	w::Entity *carrier = r.world->registry.get(ground);
+	CHECK(carrier != nullptr);
+	if (carrier == nullptr) {
+		r.world->ai.root_motion = nullptr;
+		return;
+	}
+	carrier->saved_live_pos[0] = 7 << 16;
+	carrier->saved_live_pos[1] = 20 << 16;
+	carrier->saved_live_pos[2] = 0;
+	carrier->saved_live_yaw = carrier->heading;
+	carrier->saved_live_pitch = carrier->pitch_bam;
+	carrier->saved_live_roll = carrier->roll_bam;
+	carrier->saved_live_valid = true;
+	body = r.world->registry.get(ae->handle);
+	body->flags &= ~w::kEntityFlagCarried;
+	body->engine_flags &= ~w::kEntityFlagCarried;
+	body->net_move_input = 0x08;
+	body->ground_target = ground;
+	body->saved_live_valid = false;
+	const int32_t entry[3] = {body->position.x.q16, body->position.y.q16,
+			body->position.z.q16};
+	r.world->ai.update_organic(*ae, *r.world, 1);
+	const w::Entity *after = r.world->registry.get(ae->handle);
+	CHECK(after != nullptr && after->saved_live_valid);
+	if (after != nullptr) {
+		for (int axis = 0; axis < 3; ++axis)
+			CHECK(after->saved_live_pos[axis] == entry[axis]);
+		CHECK(after->position.x.q16 == entry[0] + (3 << 16));
+		CHECK(after->position.y.q16 == entry[1]);
+		CHECK(after->position.z.q16 == entry[2]);
+		CHECK(after->drop_motion == w::DropMotion::Ride);
+	}
+	CHECK(!ae->inf.player_moving);
+	r.world->ai.root_motion = nullptr;
+}
+
 // The spawn's class init by the bound row (def+0x148): an org0 row's player body takes
 // Entity_InitOrganicAI, its legs as a placed person's: the anim pick (the player body's AI slot
 // reads zeros: no route, idle 43; the PERMANENT Q8-1 (a) reading of a slot retail would fault
@@ -1155,6 +1220,7 @@ int main() {
 	test_the_update_follows_the_rows_move_function();
 	test_the_walk_skips_a_null_row_body_whole();
 	test_a_vehicle_row_body_runs_its_movers_person_path();
+	test_a_genx_row_body_rides_its_ground_entity();
 	test_an_org_rows_player_body_takes_the_organic_init();
 	test_a_player_bodys_dcb_id_is_its_class_inits();
 	if (failures != 0) {
