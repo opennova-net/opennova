@@ -907,6 +907,38 @@ func test_diag_348_sound_only_impact_with_a_person_def() -> void:
 	pass_test("diagnostic run")
 
 
+# DIAGNOSTIC 2 (L5-s10 row 3; one CI run, removed by the fix): the same staging, two
+# sound-only rounds and no locating round, so the first shot follows no earlier shot's
+# recoil. Prints each shot's fired position.
+func test_diag_348_sound_only_first_with_a_person_def() -> void:
+	var root_dir := _stage_impact_fixture("diag_348_sound_only_first")
+	_append_to_file(root_dir.path_join("items.def"), "\nbegin \"Player #1, Multiplayer\"\n"
+			+ "  id 105305\n  type person\n  graphic US01\n  graphicenemy Indo01\n"
+			+ "  sid player1_mp\n  anim_def US01\n  hp 150\n"
+			+ "  sound_profile SP_JO_SP_PlayerM1\n  sound_profileFemale SP_JO_SP_PlayerF1\nend\n")
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
+			func(mission: MissionData) -> void:
+				assert_true(mission.set_header_string("terrain", "Tmap"))), OK)
+	var sim := world.get_sim()
+	var audio := world.get_mission_audio()
+	var listener := Vector3(16, 10, -16)
+	for shot in range(2):
+		sim.debug_spawn_round(Vector3(16, 60, -16), Vector3.DOWN, "AM_SOUNDONLY")
+		var before := _fired_named(audio, SOUND_ONLY_SOUND).size()
+		for _frame in range(60):
+			world.tick(listener, Transform3D(), ONE_TICK_DELTA)
+			if _fired_named(audio, SOUND_ONLY_SOUND).size() > before:
+				break
+		print("diag-348b shot ", shot, ": player pos=", sim.get_local_player_position(),
+				" tick=", sim.get_logic_tick())
+		for fired_v in _fired_named(audio, SOUND_ONLY_SOUND):
+			var fired: FiredSoundset = fired_v
+			print("diag-348b shot ", shot, ": fired pos=", fired.position)
+	world.unload()
+	pass_test("diagnostic run")
+
+
 func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 	# The strict call ledger ["weapon", "impact", "advance"] the recording
 	# EffectWorld double kept has no public twin. The same contract is pinned
