@@ -113,6 +113,8 @@ struct ListenHost {
 	inmatch::ServerLogs logs;
 	const PeerAddr *local_address = nullptr;
 	bool socket_at_boot = false;
+	// The menu's network type the host runs under (a NovaWorld host's setup keeps type 1).
+	inmatch::NetworkType network_type = inmatch::NetworkType::Lan;
 
 	bool boot(const opennova::bms::File &mission = test_mission::two_entity_mission()) {
 		role->bind(*kernel);
@@ -129,6 +131,7 @@ struct ListenHost {
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
 			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.network_type = network_type;
 			cfg.serve_and_play = true;
 			cfg.client_process = shared_process != nullptr ? shared_process : process.get();
 			cfg.logs = logs;
@@ -699,8 +702,17 @@ void test_the_destroy_arm_leaves_no_server() {
 //  CNapiGameSession_SendPlayerRemovedIfHosting called @0x51B5F3; PostMenu_RouteMissionExit
 //  @0x568460 - CGameSession_SetConnectionMode(0) @0x5686ED; NapiLib_Shutdown @0x4C9580 - the reset
 //  @0x4C958B]
+// D-NET-NEW-L9-22: the same teardown's later leg stops the slot's clock and sends PLAYER through
+// the process's sink, after the removal, on a NovaWorld host alone (the menu's network type 1
+// stands through its setup); a LAN host's reset and the process exit send none. GCC is the
+// install's CC.BIN, which the new host's tick init read again (none here: "").
+// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - CServerTick_SetState(0) @0x51B690,
+//  Server_SendPlayerMetricsToGate @0x51B696 (the network type @0x4FAA67);
+//  CNapiNetwork_SetNetworkType @0x4C4A50 - @0x4C4A82 / @0x4C4A85]
 void test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_session() {
-	for (const bool next_host : { true, false }) {
+	enum class Reset { LanHost, NovaWorldHost, Exit };
+	for (const Reset reset : { Reset::LanHost, Reset::NovaWorldHost, Reset::Exit }) {
+		const bool next_host = reset != Reset::Exit;
 		inmatch::ClientProcessState process;
 		auto first = std::make_unique<ListenHost>();
 		first->shared_process = &process;
@@ -729,11 +741,27 @@ void test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_sessi
 				server_goodbye_to_bytes(
 						0x5A5A1234u, make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP")));
 		std::vector<std::pair<int, int>> removed; // (the slot, the STOP datagrams sent by then)
+		// The PLAYER reports through the process's sink, each with the removals made by then.
+		std::vector<std::pair<std::string, std::size_t>> reports;
+		process.nwu_gate_metrics.host = [] {
+			GateMetricsHost host;
+			host.label = "LBL";
+			host.version = "V1.7.5.7";
+			return host;
+		};
+		process.nwu_gate_metrics.game_text = [](const char *, const char *, const char *fallback) {
+			return std::string(fallback);
+		};
+		process.nwu_gate_metrics.send = [&reports, &removed](const std::string &text) {
+			reports.emplace_back(text, removed.size());
+		};
 		if (next_host) {
 			first.reset();
 			auto second = std::make_unique<ListenHost>();
 			second->shared_process = &process;
 			second->socket_at_boot = true;
+			second->network_type = reset == Reset::NovaWorldHost ? inmatch::NetworkType::NovaWorld
+			                                                     : inmatch::NetworkType::Lan;
 			const CaptureSocket &socket = second->socket;
 			process.nwu_player_removed = [&removed, &socket, &stop](int player_number) {
 				int stops = 0;
@@ -751,12 +779,23 @@ void test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_sessi
 				CHECK(removed[0].first == 3);
 				CHECK(removed[0].second > 0);
 			}
+			if (reset == Reset::NovaWorldHost) {
+				CHECK(reports.size() == 1);
+				if (reports.size() == 1) {
+					CHECK(reports[0].first.find("BLOCK \"PLAYER\"\r\n") != std::string::npos);
+					CHECK(reports[0].first.find("\tGCC \"\"\r\n") != std::string::npos);
+					CHECK(reports[0].second == 1); // after the slot's removal
+				}
+			} else {
+				CHECK(reports.empty());
+			}
 		} else {
 			process.nwu_player_removed = [&removed](int player_number) {
 				removed.emplace_back(player_number, 0);
 			};
 			first->role->stop_unstopped_server_at_exit(inmatch::ServerLogs{});
 			CHECK(removed.empty());
+			CHECK(reports.empty());
 		}
 		CHECK(!process.unstopped_server.running && process.unstopped_server.nodes.empty());
 	}

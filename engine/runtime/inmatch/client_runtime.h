@@ -3,6 +3,7 @@
 #include <runtime/inmatch/chat_flood.h>
 #include <runtime/inmatch/client_console.h> // the S2C 0x06 echo's command walk (D-NET-710)
 #include <runtime/inmatch/file_transfer_session.h> // the process's S2C 0x02 probe words
+#include <runtime/inmatch/gate_metrics_reports.h> // GateMetricsSink (the held teardown's PLAYER)
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the process latch)
 #include <runtime/devtools/tick_profile.h>
@@ -148,6 +149,12 @@ struct ClientProcessState {
 	//  (the call @0x51B5F3; its state-6 test @0x4D0E48), NapiLinkedList_RemoveByUserData on the
 	//  session's PlayerList (the call @0x51B601)]
 	std::function<void(int player_number)> nwu_player_removed;
+	// The same session's METPROTOCOL sink for that teardown's PLAYER report, which no hosted
+	// match's context carries yet (Server_ReportHeldPlayerLeave); the same embedder installs and
+	// clears it with nwu_player_removed (D-NET-NEW-L9-22).
+	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - Server_SendPlayerMetricsToGate (the call
+	//  @0x51B696)]
+	GateMetricsSink nwu_gate_metrics;
 };
 
 class ClientRuntime {

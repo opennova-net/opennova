@@ -37,8 +37,9 @@ namespace opennova::inmatch {
 // for a node whose player was added (gated on is_authority @0x51B5D0, which the next host's
 // connection mode has set again, and the slot's active byte @0x51B5DC, which the teardown's
 // reset keeps): its first leg is the NovaWorld session's ClientHostPlayerRemoved, sent in state 6
-// alone (`player_removed`, the caller's; D-NET-NEW-L9-21). Its game sends queue to nodes this
-// walk destroys; its gate metrics report (@0x51B696) is not sent by our host at all.
+// alone, then the slot clock to phase 0 and the PLAYER gate report on a NovaWorld host
+// (`player_removed`, the caller's; D-NET-NEW-L9-21, D-NET-NEW-L9-22). Its game sends queue to
+// nodes this walk destroys.
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the protocol's +0x2D8 callback
 //  called @0x625438; CNapiGameSession_CreateSession @0x4C97C0 - NapiNPServer_DestroyPlayerCtx
 //  installed there @0x4C99D0; NapiNPServer_DestroyPlayerCtx @0x4C8400 -
@@ -58,7 +59,7 @@ namespace opennova::inmatch {
 //  session create's name copy @0x4C9985 comes after)]
 void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket *socket, const PeerAddr *local_address,
-		const std::function<void(int player_number)> &player_removed) {
+		const std::function<void(NapiNPConnection &slot)> &player_removed) {
 	if (!server.running) return;
 	for (UnstoppedNode &node : server.nodes) {
 		NapiNPConnection &conn = node.conn;
@@ -66,7 +67,7 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		teardown_unstopped_node(conn, logs, socket);
 		if (player_removed &&
 				(conn.link.owned_entity.valid() || conn.phase >= ConnectionPhase::PlayerAdded))
-			player_removed(conn.reply.player_slot);
+			player_removed(conn);
 	}
 	const std::string session_name = std::move(server.session_name);
 	server = UnstoppedServer{};

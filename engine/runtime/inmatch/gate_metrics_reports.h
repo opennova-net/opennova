@@ -127,6 +127,26 @@ void Server_ProcessPeriodicTimerUpdate(NapiNPServerCtx &ctx);
 //  +0x17D20 @0x51B690, Server_SendPlayerMetricsToGate @0x51B696]
 void Server_ReportPlayerLeave(NapiNPServerCtx &ctx, NapiNPConnection &slot);
 
+// The same leave for a held server's player, torn down by the next host's session reset ahead of
+// its session create, so no context of the new session reads it yet: the new host's setup runs
+// once its session hosts, as the authority (HostDialog_StartSession's connection mode), with the
+// menu's network type standing and is_in_session set with it. The reports read what that setup
+// left: g_GameType the host's first selected mission's (`game_type`), and the process clock's
+// GCC the install's CC.BIN, which Server_InitServerTicks read again ahead of the reset
+// (`process_gcc`). The slot clock to phase 0 at `now_ms`, then the PLAYER report through `sink`
+// on a NovaWorld host (`novaworld`).
+// [orig: HostDialog_StartSession @0x558760 - CGameSession_SetConnectionMode @0x558787 /
+//  @0x55878B, g_GameType @0x5587AE and the first selected mission's @0x5588A8,
+//  Session_ResetForStart (the tail jump @0x5588C5) -> Session_ResetFrameCounters @0x51E7F0 (the
+//  authority test @0x51E830) -> Server_InitServerTicks @0x5018C0 (Game_ReadCCBinFile @0x5018E8,
+//  byte_C87044 @0x501900); CNapiNetwork_SetNetworkType @0x4C4A50 - +0x50 @0x4C4A82, is_in_session
+//  @0x4C4A85; PreMenu_HostSetup @0x5691F0 - CNapiGameSession_ResetActiveSession called @0x5691F5;
+//  Server_HandlePlayerDisconnect @0x51B5C0 - CServerTick_SetState(0) @0x51B690,
+//  Server_SendPlayerMetricsToGate @0x51B696 (its gates @0x4FAA5B..0x4FAA8F)]
+void Server_ReportHeldPlayerLeave(const GateMetricsSink &sink, bool novaworld, uint32_t game_type,
+                                  const std::string &process_gcc, uint32_t now_ms,
+                                  NapiNPConnection &slot);
+
 // The round-end linger's expiry on an in-session authority: the mission clock's phase closed, the
 // mission file copied in, the SERVERMISSION report, the mission clock constructed again over the
 // process clock's GCC and MAXPLAYERS; then per slot in slot order its mission clock's phase

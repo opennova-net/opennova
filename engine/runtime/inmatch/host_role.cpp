@@ -5,6 +5,7 @@
 #include <base/gameprofile/gameprofile.h> // the title's version text (the own 0x0B's dword)
 #include <base/io/log.h>
 #include <base/io/perf_clock.h>
+#include <base/vfs/vfs.h> // vfs_country_code (a held player's PLAYER report's GCC)
 #include <formats/mission/bms.h>
 #include <formats/playersav/player_sav.h>
 #include <net/npwire/ingame_encode.h>
@@ -356,9 +357,23 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	//  (HostDialog_StartSession @0x558760, its connection mode @0x55878F),
 	//  CNapiGameSession_ConnectOrHost called @0x54F33B, the Premenu scene pushed @0x54F371 only
 	//  on its success]
+	// Each held player's teardown on this authority: the NovaWorld session's removal, then the
+	// slot clock to phase 0 and its PLAYER report under what this host's setup left (its game type,
+	// the CC.BIN its tick init read again), on a NovaWorld host (D-NET-NEW-L9-22)
+	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the removal @0x51B5F3, CServerTick_SetState(0)
+	//  @0x51B690, Server_SendPlayerMetricsToGate @0x51B696].
+	const std::string reset_gcc = vfs_country_code(host_cfg.game_root);
 	stop_unstopped_server(client_process_->unstopped_server, host_cfg.logs, socket_,
 			host_cfg.local_address_known ? &host_cfg.local_address : nullptr,
-			client_process_->nwu_player_removed);
+			[this, &host_cfg, &reset_gcc](NapiNPConnection &slot) {
+				if (client_process_->nwu_player_removed)
+					client_process_->nwu_player_removed(slot.reply.player_slot);
+				Server_ReportHeldPlayerLeave(client_process_->nwu_gate_metrics,
+						host_cfg.network_type == NetworkType::NovaWorld, host_cfg.config.game_type,
+						reset_gcc,
+						host_cfg.clock_ms ? host_cfg.clock_ms() : host_clock_ms(state.host_owner),
+						slot);
+			});
 	reset_state(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
 			host_cfg.title);
 	state.host_owner.host_loopback = &state.host_loop;

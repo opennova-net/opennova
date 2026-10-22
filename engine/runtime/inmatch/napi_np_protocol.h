@@ -208,18 +208,20 @@ bool latch_client_goodbye(NapiNPConnection &conn, const std::vector<uint8_t> &bo
 // and the old session name. Nothing when no server is held. The reset points: a host's
 // pre-game setup and a session create (HostRole's bring-ups), and the process's network
 // shutdown (the shells' exits). (D-NET-NEW-L1-26)
-// `player_removed` (a host's bring-up passes the process's NovaWorld leg,
-// ClientProcessState::nwu_player_removed) takes each node's player slot, after its burst, for a
-// node whose player was added: the destroy's removal callback reaches the slot's teardown on an
-// authority, whose first leg is the NovaWorld session's (D-NET-NEW-L9-21). The reset's own
-// Lobby_UpdateServerInfo(1) sends nothing: a nonzero argument returns at once.
+// `player_removed` (a host's bring-up passes the process's NovaWorld legs,
+// ClientProcessState::nwu_player_removed and Server_ReportHeldPlayerLeave over
+// ClientProcessState::nwu_gate_metrics) takes each node, after its burst, for a node whose player
+// was added: the destroy's removal callback reaches the slot's teardown on an authority, whose
+// first leg is the NovaWorld session's (D-NET-NEW-L9-21) and whose later one the slot clock's
+// PLAYER report (D-NET-NEW-L9-22). The reset's own Lobby_UpdateServerInfo(1) sends nothing: a
+// nonzero argument returns at once.
 // [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 from PreMenu_HostSetup @0x5691F5,
 //  CNapiGameSession_CreateSession @0x4C97CC and NapiLib_Shutdown @0x4C958B (the
 //  Lobby_UpdateServerInfo(1) call @0x4C8A7B; Lobby_UpdateServerInfo @0x4FE8C0 - the argument
 //  test @0x4FE8F2..0x4FE8FA); NapiNPProtocol_StopServer @0x62A820]
 void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket *socket, const PeerAddr *local_address,
-		const std::function<void(int player_number)> &player_removed = {});
+		const std::function<void(NapiNPConnection &slot)> &player_removed = {});
 
 // A held node's destroy (the stop's and the held pump's reap): its /INOUT removal line with the
 // latched record, then its 0x86 burst over `socket` (null: none open, nothing on the wire).

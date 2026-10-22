@@ -75,9 +75,12 @@ bool reporting(const NapiNPServerCtx &ctx) {
 
 // GameType_GetAbbreviation(g_GameType, 1): the GateTypeAbbrev text of the session's game type.
 // [orig: Server_SendServerMetricsToGate @0x4FA5F8]
+std::string game_type_text(const GateMetricsSink &sink, uint32_t game_type) {
+	return hud::game_text(sink.game_text, "GateTypeAbbrev",
+			game_type::host_abbreviation_key(game_type), "");
+}
 std::string game_type_text(const NapiNPServerCtx &ctx) {
-	return hud::game_text(ctx.gate_metrics.game_text, "GateTypeAbbrev",
-			game_type::host_abbreviation_key(ctx.config.game_type), "");
+	return game_type_text(ctx.gate_metrics, ctx.config.game_type);
 }
 
 // The player strings of a slot's net player: its ClientAuth strings and its PCID.
@@ -214,6 +217,16 @@ void Server_ReportPlayerLeave(NapiNPServerCtx &ctx, NapiNPConnection &slot) {
 	if (ctx.is_authority == 0 || slot_is_local(slot)) return;
 	slot.gate_tick.set_state(0, ctx.tick_count_ms);
 	Server_SendPlayerMetricsToGate(ctx, slot, slot);
+}
+
+void Server_ReportHeldPlayerLeave(const GateMetricsSink &sink, bool novaworld, uint32_t game_type,
+                                  const std::string &process_gcc, uint32_t now_ms,
+                                  NapiNPConnection &slot) {
+	if (slot_is_local(slot)) return;
+	slot.gate_tick.set_state(0, now_ms);
+	if (!novaworld || !sink.send || !sink.host) return;
+	sink.send(gate_metrics_player_text(sink.host(), game_type_text(sink, game_type),
+			copy_capped(process_gcc, 0x20), slot.gate_tick, player_strings(slot), now_ms));
 }
 
 void Server_ReportLingerExpiry(NapiNPServerCtx &ctx) {

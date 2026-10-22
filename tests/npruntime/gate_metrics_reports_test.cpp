@@ -13,7 +13,9 @@
 
 #include <net/npwire/session_hello.h>
 #include <runtime/inmatch/gate_metrics_reports.h>
+#include <runtime/inmatch/napi_np_protocol.h> // stop_unstopped_server (the held server's reset)
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_files.h>     // ServerLogs
 
 #include <cstdio>
 #include <memory>
@@ -262,12 +264,73 @@ void check_senders() {
 	expect(rig.sent.empty(), "no report off a NovaWorld session or with no sink");
 }
 
+// A held server's player at the next host's session reset: the stop's removal callback takes the
+// node after its burst, and the leave stops the node's slot clock and sends PLAYER under what the
+// new host's setup left (its game type, the CC.BIN its tick init read again), on a NovaWorld host
+// alone; a node whose player was never added takes no callback.
+// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - CServerTick_SetState(0) @0x51B690,
+//  Server_SendPlayerMetricsToGate @0x51B696; HostDialog_StartSession @0x558760 - g_GameType
+//  @0x5588A8, Session_ResetForStart (the tail jump @0x5588C5); Server_InitServerTicks @0x5018C0 - @0x501900]
+void check_held_player_leave() {
+	Rig rig;
+	NapiNPServerCtx &old_ctx = *rig.ctx;
+	old_ctx.tick_count_ms = 1000;
+	gate_clocks_session_create(old_ctx, "us");
+	gate_slot_clocks_player_added(old_ctx, rig.slot(1));
+	rig.slot(1).burst.game_state = 8;
+	gate_slot_clocks_game_state(rig.slot(1), 9, 2000, 0);
+	gate_slot_clocks_game_state(rig.slot(1), 10, 5000, 0);
+	UnstoppedServer held;
+	held.running = true;
+	held.nodes.push_back(UnstoppedNode{rig.slot(1), {}, {}});
+	UnstoppedNode never_added{rig.slot(2), {}, {}};
+	never_added.conn.phase = ConnectionPhase::Joined;
+	never_added.conn.link.owned_entity = {};
+	held.nodes.push_back(never_added);
+
+	std::vector<std::string> sent;
+	GateMetricsSink sink = rig.ctx->gate_metrics;
+	sink.send = [&sent](const std::string &text) { sent.push_back(text); };
+	std::vector<std::string> order;
+	uint32_t stopped_state = 99;
+	stop_unstopped_server(held, ServerLogs{}, nullptr, nullptr, [&](NapiNPConnection &slot) {
+		order.push_back("removed " + std::to_string(slot.reply.player_slot));
+		Server_ReportHeldPlayerLeave(sink, true, 0x10000u, "de", 61000, slot);
+		stopped_state = slot.gate_tick.state;
+	});
+	expect(order.size() == 1 && order[0] == "removed 1", "one node took the slot's teardown");
+	expect(stopped_state == 0, "the leave stops the held slot's clock");
+	expect(sent.size() == 1, "a held player's leave sends PLAYER on a NovaWorld host");
+	if (sent.size() == 1) {
+		expect(sent[0].find("BLOCK \"PLAYER\"") != std::string::npos, "PLAYER");
+		expect(has_row(sent[0], "\tGAMETYPE \"TDM\""), "GAMETYPE: the new host's game type");
+		expect(has_row(sent[0], "\tGCC \"de\""), "GCC: the CC.BIN the new host's tick init read");
+		expect(has_row(sent[0], "\tRUNNING 60") && has_row(sent[0], "\tLOADINGMISSION 3") &&
+				has_row(sent[0], "\tPLAYING 56"), "the held slot's clock, closed at the reset");
+		expect(has_row(sent[0], "\tPID \"PCID1\"") && has_row(sent[0], "\tPCC \"us\""),
+				"the held player's own strings");
+	}
+	expect(!held.running && held.nodes.empty(), "the stop clears the held server");
+
+	// Off NovaWorld or with no sink: the clock stops, nothing is sent.
+	sent.clear();
+	NapiNPConnection again = rig.slot(2);
+	again.gate_tick.construct(1000, "us", 16, 0, 0, 0);
+	again.gate_tick.set_state(3, 2000);
+	Server_ReportHeldPlayerLeave(sink, false, 0x10000u, "de", 9000, again);
+	expect(sent.empty() && again.gate_tick.state == 0, "a LAN host's reset sends no PLAYER");
+	again.gate_tick.set_state(3, 9000);
+	Server_ReportHeldPlayerLeave(GateMetricsSink{}, true, 0x10000u, "de", 9500, again);
+	expect(sent.empty() && again.gate_tick.state == 0, "no sink: no PLAYER");
+}
+
 } // namespace
 
 int main() {
 	check_client_auth_strings();
 	check_writers();
 	check_senders();
+	check_held_player_leave();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

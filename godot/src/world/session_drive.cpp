@@ -41,6 +41,26 @@ int64_t now_ms() {
 	return static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
 }
 
+// The METPROTOCOL gate reports' sink over the NovaWorld session `p_client_id` names: its strings
+// the registration's and the gate reply's, the GAMETYPE row the mounted gametext's, the send the
+// session's; it resolves the session by identity on every call (engine:
+// inmatch/gate_metrics_reports.h, D-NET-NEW-L9-22).
+opennova::inmatch::GateMetricsSink nw_gate_metrics_sink(
+		const ObjectID &p_client_id, const Ref<RtxtStringFile> &p_gametext) {
+	opennova::inmatch::GateMetricsSink sink;
+	sink.host = [p_client_id]() {
+		NovaWorldClient *live = Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(p_client_id));
+		return live != nullptr ? live->host_role().metrics_host() : opennova::GateMetricsHost{};
+	};
+	sink.game_text = game_text_lookup(p_gametext);
+	sink.send = [p_client_id](const std::string &p_text) {
+		NovaWorldClient *live = Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(p_client_id));
+		if (live != nullptr)
+			live->host_role().send_gate_metrics(p_text);
+	};
+	return sink;
+}
+
 } // namespace
 
 SessionDrive::SessionDrive(GameWorld *p_world) :
@@ -890,6 +910,9 @@ void SessionDrive::adopt_nw_client(NovaWorldClient *p_client) {
 		if (live != nullptr)
 			live->host_role().clear_player_slot(p_player_number);
 	};
+	// ... and that teardown's PLAYER gate report (engine: ClientProcessState::nwu_gate_metrics,
+	// D-NET-NEW-L9-22).
+	world_->client_process_.nwu_gate_metrics = nw_gate_metrics_sink(client_id, p_client->get_gametext());
 	// A hosting session's service traffic reaches the in-match host.
 	const Callable command = callable_mp(world_, &GameWorld::on_nw_host_server_command);
 	if (!p_client->is_connected("server_command", command)) {
@@ -910,6 +933,7 @@ NovaWorldClient *SessionDrive::release_nw_client() {
 	unbind_nw_host();
 	nw_client_id_ = ObjectID();
 	world_->client_process_.nwu_player_removed = nullptr;
+	world_->client_process_.nwu_gate_metrics = opennova::inmatch::GateMetricsSink{};
 	nwu_feed_live_ = false;
 	if (client == nullptr) {
 		return nullptr;
@@ -963,6 +987,7 @@ void SessionDrive::stop_nw_client() {
 	}
 	nw_client_id_ = ObjectID();
 	world_->client_process_.nwu_player_removed = nullptr;
+	world_->client_process_.nwu_gate_metrics = opennova::inmatch::GateMetricsSink{};
 }
 
 // The hosting session meets its match once the runtime is live: the GSID and
@@ -1030,18 +1055,7 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
 		// registration's and the gate reply's (engine: inmatch/gate_metrics_reports.h,
 		// D-NET-NEW-L9-22).
-		ctx->gate_metrics.host = [columns_client_id]() {
-			NovaWorldClient *live =
-					Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(columns_client_id));
-			return live != nullptr ? live->host_role().metrics_host() : opennova::GateMetricsHost{};
-		};
-		ctx->gate_metrics.game_text = game_text_lookup(client->get_gametext());
-		ctx->gate_metrics.send = [columns_client_id](const std::string &p_text) {
-			NovaWorldClient *live =
-					Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(columns_client_id));
-			if (live != nullptr)
-				live->host_role().send_gate_metrics(p_text);
-		};
+		ctx->gate_metrics = nw_gate_metrics_sink(columns_client_id, client->get_gametext());
 	}
 	const std::string login_pcid = client->get_login_pcid();
 	sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(),
