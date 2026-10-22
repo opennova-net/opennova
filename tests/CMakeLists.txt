@@ -5284,7 +5284,7 @@ add_executable(glass_leg_test world/glass_leg_test.cpp)
 target_link_libraries(glass_leg_test PRIVATE opennova_runtime)
 add_test(NAME glass_leg COMMAND glass_leg_test)
 # D-NET-515: the suspension's x87 products (the travel's locked share, half an impulse, the flip
-# bound) at the FPU's length, not in float.
+# bound) at the FPU's length, pinned clear of the 24-bit edge (Q3-11).
 add_executable(suspension_precision_test world/suspension_precision_test.cpp)
 target_link_libraries(suspension_precision_test PRIVATE opennova_runtime)
 add_test(NAME suspension_precision COMMAND suspension_precision_test)
