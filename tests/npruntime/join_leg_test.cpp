@@ -100,7 +100,10 @@ struct JoinFixture {
 
 	// `with_existing`: an already-joined client ahead of the joiner on the connection list.
 	// `settings`: the session's settings (null: a cap of 4 and the defaults).
-	explicit JoinFixture(bool with_existing, const inmatch::GameConfig *settings = nullptr) {
+	// `socket`: the host's socket mode; a socketless host's BuildFlags word is 0 (the session
+	// fact, D-NET-NEW-L1-19), so a pin that needs its nibble stands a LAN host.
+	explicit JoinFixture(bool with_existing, const inmatch::GameConfig *settings = nullptr,
+			inmatch::SocketMode socket = inmatch::SocketMode::Socketless) {
 		// A session host: remote joiners join only a session, and the join's placement
 		// runs in one (D-NET-NEW-L1-19).
 		world->rules.mp_session = true;
@@ -120,8 +123,8 @@ struct JoinFixture {
 		inmatch::GameConfig config;
 		config.max_players = 4;
 		if (settings != nullptr) config = *settings;
-		inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly,
-				inmatch::SocketMode::Socketless, /*host_key=*/0, nullptr, config);
+		inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly, socket,
+				/*host_key=*/0, nullptr, config);
 		ctx->world = world.get();
 		ctx->mission = &mission;
 		inmatch::Server_InitNewRoundState(*ctx);
@@ -1154,7 +1157,9 @@ bool run_an_orphaned_row_counts_on_its_side_in_the_balance_hold() {
 	settings.side_b_password = "bravo"; // arms the team-mode BuildFlags nibble
 	settings.balance_join = true;
 	settings.balance_join_percent = 0.5f;
-	JoinFixture f(/*with_existing=*/true, &settings);
+	// A LAN session host: a socketless one advertises no BuildFlags word
+	// [orig: CNapiServerConfig_BuildFlags @0x4C4DC0 - is_in_session @0x4C4DC4].
+	JoinFixture f(/*with_existing=*/true, &settings, inmatch::SocketMode::Lan);
 	if (!expect((f.ctx->np_protocol.build_flags & 0xF0u) != 0,
 	            "the side password arms the team-mode BuildFlags nibble")) return false;
 	inmatch::NapiNPConnection &existing = f.ctx->np_protocol.connection_list.front();
