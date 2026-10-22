@@ -155,7 +155,8 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	uint32_t active = 0;
 	// One slot row of the walk: the slot's active byte, not the local slot (+5), not a bot
 	// (+0x178E3), and its play ticks (slot+0x184) at least 1860; its own ten-sample ring's mean,
-	// clamped per slot.
+	// summed as it stands: the 255 clamp is the average's, past the walk
+	// (net_quality_host_ping_metric).
 	// [orig: CNetQuality_UpdateMetrics @0x4C5376..0x4C5398, `cmp [edi+17Fh],
 	//  744h` with edi = slot+5 @0x4C538E]
 	const auto sample_row = [&](const NapiNPConnection &conn) {
@@ -168,9 +169,9 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 				static_cast<int32_t>(row->play_ticks) <
 						static_cast<int32_t>(CONTROL_REQUEST_LIVE_GATE_TICKS))
 			return;
-		uint32_t mean = Server_PlayerAveragePingMs(conn);
-		if (mean > 0xFFu) mean = 0xFFu;               // per-slot clamp @0x4C540B
-		ping_sum += mean;
+		// [orig: the ring's sum over ten @0x4C53AA..0x4C53F7 added unclamped @0x4C53FA; the
+		//  clamp on the walk's average @0x4C5442..0x4C5448]
+		ping_sum += Server_PlayerAveragePingMs(conn);
 		++active;
 	};
 	// The walk is over the slot table, so an orphaned row (a row a repeated C2S 0x02's add left

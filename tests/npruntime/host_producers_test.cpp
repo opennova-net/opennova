@@ -315,7 +315,7 @@ bool check_host_quality_window() {
 	for (uint32_t i = 0; i < 10; ++i) f.conn(0).reply.rtt_ring[i] = 1000;
 	f.ctx.net_quality_sample_countdown = 1;
 	inmatch::Server_SampleHostNetQuality(f.ctx);
-	// The per-slot mean clamps at 255 before the scale: 255 * 255 / 1000 = 65;
+	// The walk's average clamps at 255 before the scale: 255 * 255 / 1000 = 65;
 	// the first (idle, no eligible slot) sample stored 0, so the five-slot
 	// average is 65 / 5 = 13,
 	// which the max-fold selects over the floor-1 bandwidth/loss terms.
