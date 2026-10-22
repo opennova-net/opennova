@@ -3,7 +3,7 @@ extends GutTest
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
 
-# The HUD declutter seam on GameHudPresenter: the huddetail edge cycles the
+# The HUD declutter seam on GameHudPresenter: each huddetail event cycles the
 # LIVE hud_detail level with wrap, the death screen forces level 3 through the
 # same live seam, neither write reaches the persisted config value (which only
 # the settings path owns), every mission start re-seeds the live level from
@@ -32,31 +32,31 @@ func _persisted_hud_detail() -> int:
 	return GameCfgStore.block().get_word(GameHudPresenter.HUD_DETAIL_CONFIG_KEY)
 
 
-func test_huddetail_edge_cycles_and_wraps_the_live_level() -> void:
+func test_huddetail_events_cycle_and_wrap_the_live_level() -> void:
 	var presenter: GameHudPresenter = autofree(GameHudPresenter.new())
 	var config := presenter.hud_detail_config()
 	var start := presenter.hud_detail_level()
 	assert_eq(start, config,
 			"a fresh presenter's live level is the persisted config value")
 
-	# A plain down edge cycles once; holding the key does not repeat.
-	presenter.poll_hud_detail_edge(true, true)
+	# One event cycles once; each further key-down (a held key's OS repeat)
+	# cycles again, as the key scan fires the row per event (D-CTRL-6).
+	presenter.dispatch_hud_detail(true, true)
 	assert_eq(presenter.hud_detail_level(), (start + 1) % 4,
-			"the down edge cycles the level once")
-	presenter.poll_hud_detail_edge(true, true)
-	assert_eq(presenter.hud_detail_level(), (start + 1) % 4,
-			"holding the key does not re-cycle")
+			"the event cycles the level once")
+	presenter.dispatch_hud_detail(true, true)
+	assert_eq(presenter.hud_detail_level(), (start + 2) % 4,
+			"a repeat's event cycles it again")
 
-	# Held across a closed gate window: the latch rides the UNGATED state.
-	presenter.poll_hud_detail_edge(true, false)
-	presenter.poll_hud_detail_edge(true, true)
-	assert_eq(presenter.hud_detail_level(), (start + 1) % 4,
-			"a press held across a gate window cannot re-fire")
+	# With gameplay input closed the event's case cycles nothing; no event, no cycle.
+	presenter.dispatch_hud_detail(true, false)
+	assert_eq(presenter.hud_detail_level(), (start + 2) % 4,
+			"no cycle while the gate is closed")
+	presenter.dispatch_hud_detail(false, true)
+	assert_eq(presenter.hud_detail_level(), (start + 2) % 4, "no event, no cycle")
 
-	presenter.poll_hud_detail_edge(false, true)
-
-	# Three more cycles are the identity: level + 1 wraps past 3 to 0.
-	for i in range(3):
+	# Two more cycles are the identity: level + 1 wraps past 3 to 0.
+	for i in range(2):
 		presenter.cycle_hud_detail()
 	assert_eq(presenter.hud_detail_level(), start,
 			"four cycles wrap 0->1->2->3->0 back to the start")

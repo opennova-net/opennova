@@ -320,6 +320,29 @@ void test_poll_rows() {
 	CHECK(d.poll_rows(local, false, f, kText) == 0);
 }
 
+// The talk rows' event dispatch (D-CTRL-6): each fired row is one queued event.
+// While the line is open the later events find it open. The Enter that submitted
+// never reached the scan (the open line took it), so a talk key-down scanned after
+// the close is a fresh event and opens the line again, where the held-state poll's
+// editor-consumed test would drop it. Inactive gameplay dispatches nothing.
+void test_dispatch_rows() {
+	ChatEntry c;
+	const ChatEntryFacts f = live();
+	const uint32_t local = 1u << kChatRowLocal;
+	const uint32_t enter = 1u << kChatRowTalk;
+	CHECK(c.dispatch_rows(local, true, f, kText) == kOpened);
+	CHECK(c.open_dispatch() == kChatDispatchLocal);
+	CHECK(c.dispatch_rows(local, true, f, kText) == 0);
+	c.key('x', 0, f, kText, nullptr);
+	c.key(13, 0, f, kText, [](int, std::string &) { return ChatSendResult::Sent; });
+	CHECK(!c.capturing());
+	CHECK(c.dispatch_rows(enter, true, live(301), kText) == kOpened);
+	c.reset();
+	ChatEntry d;
+	CHECK(d.dispatch_rows(local, false, f, kText) == 0);
+	CHECK(d.dispatch_rows(0, true, f, kText) == 0 && !d.capturing());
+}
+
 } // namespace
 
 // The command entry (D-NET-710): input actions 1 and 20 open the capture with the
@@ -407,6 +430,7 @@ int main() {
 	test_presets();
 	test_channel_cycle();
 	test_poll_rows();
+	test_dispatch_rows();
 	test_command_entry();
 	test_caps_lock_release();
 	if (failures == 0) std::printf("hud_chat_entry_test: all passed\n");

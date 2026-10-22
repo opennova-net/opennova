@@ -43,6 +43,10 @@ public:
 	// counter (the HUD tick).
 	int poll_rows(int p_rows_down, bool p_active, const Ref<Simulation> &p_sim,
 			const Ref<RtxtStringFile> &p_gametext, int64_t p_frame);
+	// One input frame's dispatched talk-row events (a mask of 1 << row, each one
+	// event; engine ChatEntry::dispatch_rows); returns the Event bits.
+	int dispatch_rows(int p_rows_fired, bool p_active, const Ref<Simulation> &p_sim,
+			const Ref<RtxtStringFile> &p_gametext, int64_t p_frame);
 	// One key event while the capture is open: true = the editor took it
 	// (every key does while capturing, releases included). Returns the Event
 	// bits through last_events().

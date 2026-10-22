@@ -210,6 +210,18 @@ public:
 	// @0x49d498 vs the special-keys/binding scan @0x49d2fb..0x49d488].
 	uint32_t poll_rows(uint32_t rows_down, bool active,
 			const ChatEntryFacts &facts, const GameTextLookup &gametext);
+	// One input frame's dispatched talk-row events (D-CTRL-6): each row set in
+	// `rows_fired` had one queued event this frame (a key-down the keyboard pass
+	// scanned to it, an OS repeat included, or a press of its mouse or joystick
+	// arm), dispatched in row order while gameplay input is active and no capture is
+	// open; once a row opened the capture the later rows' events find it open. A key
+	// the open line took never reached the scan (the capture branch), so no edge
+	// latch or editor-consumed test stands between.
+	// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the capture branch @0x49d2e3 ahead
+	//  of the scan's fires @0x49d42f / @0x49d488; Input_ProcessFrame @0x49d520 - the
+	//  drain's Input_HandleActionBinding call @0x49d5d8]
+	uint32_t dispatch_rows(uint32_t rows_fired, bool active,
+			const ChatEntryFacts &facts, const GameTextLookup &gametext);
 	// One key event while the capture is open: `key_char` the translated
 	// character (0 for none), `vk` the virtual key. Every key reaches here
 	// while capturing(); the embedder routes nothing else.

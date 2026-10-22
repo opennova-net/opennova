@@ -43,6 +43,34 @@ void test_edge_latch() {
 	CHECK(e.step(true, true)); // reset forgets the held key
 }
 
+// The event rows' dispatch (D-CTRL-6): each row handed in fired one queued event
+// this input frame, a key-down the keyboard pass scanned to it, an OS repeat
+// included, so a held key cycles its row once per repeat; no latch the held-state
+// poll left set suppresses it, and a closed gameplay gate or a head drop still
+// stops the case.
+void test_event_rows_dispatch_once_per_event() {
+	HudToggleState s;
+	s.hud_detail_level = 0;
+	HudKeyPoll k = keys();
+	k.huddetail = true;
+	CHECK(hud_toggles_dispatch(s, k) == kHudDetailCycled);
+	CHECK(hud_toggles_dispatch(s, k) == kHudDetailCycled); // the repeat's event
+	CHECK(s.hud_detail_level == 2);
+	CHECK(hud_toggles_poll(s, k) == kHudDetailCycled); // the held poll's latch is set now
+	CHECK(s.hud_detail_level == 3);
+	CHECK(hud_toggles_dispatch(s, k) == kHudDetailCycled); // the event passes it
+	CHECK(s.hud_detail_level == 0);
+	CHECK(!s.huddetail.was_down); // and leaves it cleared
+	k.active = false;
+	CHECK(hud_toggles_dispatch(s, k) == 0u);
+	k.active = true;
+	k.head_drops = 1u << kRowHudDetail;
+	CHECK(hud_toggles_dispatch(s, k) == 0u);
+	CHECK(s.hud_detail_level == 0);
+	HudKeyPoll none = keys();
+	CHECK(hud_toggles_dispatch(s, none) == 0u);
+}
+
 // The rows' down states arrive resolved: a key both rows carry reaches one of
 // them in the binding sampler (controls::BindingSet::pressed_key, the
 // first-match scan), so the poll fires every row handed in down.
@@ -912,6 +940,7 @@ void test_deploy_keys() {
 
 int main() {
 	test_edge_latch();
+	test_event_rows_dispatch_once_per_event();
 	test_huddetail_and_hudcolor_cycles();
 	test_showhud_goals_dotsize_and_view_actions();
 	test_overlay_windows();

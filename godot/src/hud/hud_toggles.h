@@ -115,6 +115,12 @@ public:
 			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
 			bool p_authority = false, bool p_mp_session_peer = false,
 			bool p_mouse_scale_negative = false, int p_head_drops = 0);
+	// One input frame's dispatched row events (a mask of 1 << Row, each one event;
+	// engine hud_toggles_dispatch), under the poll's gates; returns the Event bits.
+	int64_t dispatch(int p_rows_fired, bool p_active,
+			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
+			bool p_authority = false, bool p_mp_session_peer = false,
+			bool p_mouse_scale_negative = false, int p_head_drops = 0);
 	// The escape action's HUD-window close chain; returns the Event bits.
 	int escape(bool p_in_session, bool p_spawn_gate, bool p_authority = false);
 	// The session create / destroy's status-view rule (engine

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -81,6 +82,10 @@ public:
 	// samples Godot Input here at the device seam, plus the attached scripted
 	// device's held tokens.
 	bool is_token_pressed(const String &p_token) const;
+	// The same, without the keyboard slots: the scripted device's hold, the held
+	// mouse-mask buttons and the joystick. A keyboard key fires its row through the
+	// key queue's events instead (the shell's KeyboardPass; D-CTRL-6).
+	bool is_token_held_off_keyboard(const String &p_token) const;
 	// The scenario driver's scripted input device (devtools/scripted_input.h)
 	// at this seam: a token it holds reads held like a keyboard slot, so an
 	// open chat line silences it the same way. Null detaches.
@@ -128,6 +133,12 @@ public:
 	// the key scan's live gates, the modifier words read from the key state now
 	// (engine BindingSet::event_row carries the witness).
 	int event_code(int p_scan_code) const;
+	// Whether that fire carries the sign bit: a fallback-pass fire with Shift held
+	// (engine BindingSet::event_row's fallback_signed).
+	bool event_signed(int p_scan_code) const;
+	// Whether a key event is one the scripted device replayed for its hold (its row
+	// fires through the hold, not through the key queue's scan).
+	static bool is_scripted_key_event(const Ref<InputEventKey> &p_event);
 	// Whether a key bound to the token is down by the key state alone (the
 	// reset-aware device state; no scan gate, no keyboard capture, a
 	// special-key take included; engine controls::PlayerActionSource::keys_down
@@ -192,6 +203,7 @@ public:
 private:
 	// The physical key state by VK under the special-key takes.
 	bool vk_down_(int p_vk) const;
+	bool token_pressed_(const String &p_token, bool p_keyboard) const;
 
 	opennova::controls::BindingSet bindings_;
 	opennova::controls::HelpScreen help_screen_;

@@ -129,6 +129,35 @@ void hud_key_poll_set_rows(HudKeyPoll &k, uint32_t rows) {
 	k.lockgame = down(kRowLockGame);
 }
 
+namespace {
+
+// Every HUD row's held-state latch (the poll's).
+constexpr HudKeyEdge HudToggleState::*kKeyEdges[] = {
+	&HudToggleState::huddetail, &HudToggleState::hudcolor, &HudToggleState::showhud,
+	&HudToggleState::dotsize, &HudToggleState::goals, &HudToggleState::view1st,
+	&HudToggleState::viewwithgun, &HudToggleState::viewchase, &HudToggleState::playerlist,
+	&HudToggleState::old_messages, &HudToggleState::show_score,
+	&HudToggleState::friendly_tags, &HudToggleState::help, &HudToggleState::helpmap,
+	&HudToggleState::briefing, &HudToggleState::verbose, &HudToggleState::commander,
+	&HudToggleState::pause, &HudToggleState::audio_emote, &HudToggleState::radio_macro,
+	&HudToggleState::toggle_server, &HudToggleState::flipmouse, &HudToggleState::mousescale,
+	&HudToggleState::lockgame,
+};
+
+void reset_key_edges(HudToggleState &s) {
+	for (HudKeyEdge HudToggleState::*edge : kKeyEdges) (s.*edge).reset();
+}
+
+} // namespace
+
+uint32_t hud_toggles_dispatch(HudToggleState &s, const HudKeyPoll &fired) {
+	// A cleared latch passes its row's fire: each set row is one event.
+	reset_key_edges(s);
+	const uint32_t events = hud_toggles_poll(s, fired);
+	reset_key_edges(s);
+	return events;
+}
+
 uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	using namespace hud_toggle_event;
 	uint32_t events = 0;

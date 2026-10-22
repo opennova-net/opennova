@@ -40,9 +40,15 @@ class RecordingLegs:
 				return true
 		return false
 
-	# The binding scan: Escape's VK fires the escape row (code 18).
+	# The binding scan: Escape's VK fires the escape row (code 18), F6's huddetail
+	# (code 19).
 	func ring_binding_code(scan_code: int) -> int:
-		return KeyboardPass.ESCAPE_CODE if scan_code == 0x1B else -1
+		if scan_code == 0x1B:
+			return KeyboardPass.ESCAPE_CODE
+		return 19 if scan_code == 0x75 else -1
+
+	func ring_row_event(_key: InputEventKey, code: int, _scan_code: int) -> void:
+		calls.append("row %d" % code)
 
 	func ring_escape() -> void:
 		calls.append("escape")
@@ -224,3 +230,14 @@ func test_the_player_presenter_owns_the_queue_its_input_reset_empties() -> void:
 	presenter.push_key_event(x)
 	var pass_over := KeyboardPass.new(keys)
 	assert_eq(pass_over.take_key(), x, "the shell's pass reads the presenter's queue")
+
+
+# A key the chain leaves that the scan gives another row queues that row's event
+# for the input router in the keyboard pass, once per key-down (a held key's OS
+# repeat again), ahead of the event drain's Escape action.
+func test_another_rows_key_queues_its_row_event_in_the_pass() -> void:
+	var calls := _drained([KEY_ESCAPE, KEY_F6, KEY_F6], RecordingLegs.new())
+	assert_eq(calls.size(), 3)
+	assert_eq(calls[0] if calls.size() > 0 else "", "row 19")
+	assert_eq(calls[1] if calls.size() > 1 else "", "row 19", "the repeat fires the row again")
+	assert_eq(calls[2] if calls.size() > 2 else "", "escape")

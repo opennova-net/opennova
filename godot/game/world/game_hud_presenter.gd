@@ -1335,19 +1335,22 @@ func cycle_hud_color() -> void:
 	_apply_toggle_events(HudToggles.EVENT_HUD_COLOR_CYCLED)
 
 
-## One flipmouse + mousescale poll step over pre-sampled device state with the
-## mousescale fire's sign (the seam the tests drive); every other row idle.
-func poll_look_rows(flip_down: bool, scale_down: bool, negative: bool, active: bool) -> void:
-	var rows_down := ((1 << HudToggles.ROW_FLIP_MOUSE) if flip_down else 0) \
-			| ((1 << HudToggles.ROW_MOUSE_SCALE) if scale_down else 0)
-	_apply_toggle_events(_toggles.poll(rows_down, active, false, false, true,
+## One input frame's flipmouse and mousescale events with the mousescale fire's
+## sign (the seam the tests drive), as the player input router dispatches the
+## rows (HudToggles.dispatch); every other row idle.
+func dispatch_look_rows(flip_fired: bool, scale_fired: bool, negative: bool,
+		active: bool) -> void:
+	var rows_fired := ((1 << HudToggles.ROW_FLIP_MOUSE) if flip_fired else 0) \
+			| ((1 << HudToggles.ROW_MOUSE_SCALE) if scale_fired else 0)
+	_apply_toggle_events(_toggles.dispatch(rows_fired, active, false, false, true,
 			false, false, negative))
 
 
-## One huddetail poll step (the seam the tests drive); every other row idle.
-func poll_hud_detail_edge(detail_down: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(
-			(1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0, active,
+## One input frame's huddetail event (the seam the tests drive), as the player
+## input router dispatches the row (HudToggles.dispatch); every other row idle.
+func dispatch_hud_detail(fired: bool, active: bool) -> void:
+	_apply_toggle_events(_toggles.dispatch(
+			(1 << HudToggles.ROW_HUD_DETAIL) if fired else 0, active,
 			false, false))
 
 

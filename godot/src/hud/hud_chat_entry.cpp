@@ -52,6 +52,17 @@ int HudChatEntry::poll_rows(int p_rows_down, bool p_active,
 	return last_events_;
 }
 
+int HudChatEntry::dispatch_rows(int p_rows_fired, bool p_active,
+		const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext, int64_t p_frame) {
+	const uint32_t frame = static_cast<uint32_t>(p_frame);
+	const opennova::hud::ChatEntryFacts facts =
+			p_sim.is_valid() ? p_sim->chat_entry_facts(frame) : opennova::hud::ChatEntryFacts{};
+	last_events_ = static_cast<int>(entry_.dispatch_rows(static_cast<uint32_t>(p_rows_fired),
+			p_active, facts, game_text_lookup(p_gametext)));
+	apply_device_events(p_sim.is_valid() ? p_sim.ptr() : nullptr);
+	return last_events_;
+}
+
 void HudChatEntry::apply_device_events(Simulation *p_sim) const {
 	if ((last_events_ & EVENT_DENIED_SOUND) != 0 && p_sim != nullptr)
 		p_sim->raise_chat_denied_sound();
@@ -106,6 +117,9 @@ void HudChatEntry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("poll_rows", "rows_down", "active", "sim",
 								 "gametext", "frame"),
 			&HudChatEntry::poll_rows);
+	ClassDB::bind_method(D_METHOD("dispatch_rows", "rows_fired", "active", "sim",
+								 "gametext", "frame"),
+			&HudChatEntry::dispatch_rows);
 	ClassDB::bind_method(D_METHOD("key_event", "event", "sim", "gametext", "frame"),
 			&HudChatEntry::key_event);
 	ClassDB::bind_method(D_METHOD("last_events"), &HudChatEntry::last_events);

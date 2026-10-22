@@ -16,6 +16,7 @@
 #include <runtime/world/player_look.h> // pass_through_close_axis, kCursorCentreX / Y
 
 #include <cmath>
+#include <string_view>
 
 using namespace godot;
 
@@ -148,6 +149,7 @@ void PlayerInputRouter::teardown() {
 	controls_.unref();
 	input_override_.unref();
 	row_samples_.clear();
+	row_events_.clear();
 }
 
 // The sim, re-resolved per use: mission reloads free the runtime and its sim,
@@ -256,19 +258,59 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 	if (frame_menu_open_) return;
 	// A later paused update of the same frame reads the state the frame left.
 	if (row_samples_.empty()) queue_row_sample();
+	// The keyboard pass's events since the last update's input frame: a talk or HUD
+	// row's key-down (an OS repeat included) fires its row once, the first sample's
+	// drain dispatching them (D-CTRL-6; engine hud_toggles_dispatch and
+	// ChatEntry::dispatch_rows carry the witness). A frame that ran no update left
+	// them waiting here, as retail's queue keeps a key for the next update's drain.
+	int talk_events = 0;
+	int hud_events = 0;
+	bool hud_event_sign = false;
+	for (const RowEvent &event : row_events_) {
+		const opennova::controls::ActionDef *def = opennova::controls::action_for_code(event.code);
+		if (def == nullptr) continue;
+		const std::string_view token(def->token);
+		for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
+			if (token == opennova::hud::chat_talk_row_token(row)) talk_events |= 1 << row;
+		for (int row = 0; row < HudToggles::ROW_COUNT; ++row) {
+			if (token != opennova::hud::hud_toggle_row_token(row)) continue;
+			hud_events |= 1 << row;
+			if (row == HudToggles::ROW_MOUSE_SCALE) hud_event_sign = event.sign;
+		}
+	}
+	row_events_.clear();
 	// The drain dispatches every queued state in its order, so a press, its
-	// release and a new press seen by frames that ran no update each reach the
-	// rows; a pause row flips the word at once, and the states behind it meet the
-	// head with it (engine inmatch::TickInputSource carries the witness).
+	// release and a new press of a mouse or joystick arm seen by frames that ran no
+	// update each reach the rows; a pause row flips the word at once, and the states
+	// behind it meet the head with it (engine inmatch::TickInputSource carries the
+	// witness).
+	bool first = true;
 	for (const RowSample &sample : row_samples_) {
-		poll_talk_rows(rows_sim, sample.talk);
-		if (!poll_hud_toggles(rows_sim, sample.hud)) continue;
+		const int talk_fired = (sample.talk & ~talk_held_) | (first ? talk_events : 0);
+		int hud_fired = sample.hud & ~hud_held_;
+		// The mousescale fire's sign: the key event's, else the mouse arm's (Shift
+		// held; engine BindingSet::fire_signed).
+		bool mouse_scale_negative = controls_.is_valid() &&
+				controls_->is_token_fire_signed(String(opennova::hud::hud_toggle_row_token(
+						HudToggles::ROW_MOUSE_SCALE)));
+		if (first && (hud_events & (1 << HudToggles::ROW_MOUSE_SCALE)) != 0)
+			mouse_scale_negative = hud_event_sign;
+		if (first) hud_fired |= hud_events;
+		talk_held_ = sample.talk;
+		hud_held_ = sample.hud;
+		first = false;
+		poll_talk_rows(rows_sim, talk_fired);
+		if (!poll_hud_toggles(rows_sim, hud_fired, mouse_scale_negative)) continue;
 		r_pause.flip();
 		// The pause row's case resets the key queue behind its flip (engine
 		// controls::KeyEventQueue::reset carries the witness).
 		key_events()->reset();
 	}
 	row_samples_.clear();
+}
+
+void PlayerInputRouter::queue_row_event(int p_code, bool p_signed) {
+	row_events_.push_back(RowEvent{p_code, p_signed});
 }
 
 void PlayerInputRouter::queue_row_sample() {
@@ -280,15 +322,19 @@ void PlayerInputRouter::queue_row_sample() {
 
 int PlayerInputRouter::talk_rows_down() const {
 	int rows_down = 0;
+	if (controls_.is_null()) return rows_down;
 	for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
-		if (pressed(opennova::hud::chat_talk_row_token(row))) rows_down |= 1 << row;
+		if (controls_->is_token_held_off_keyboard(opennova::hud::chat_talk_row_token(row)))
+			rows_down |= 1 << row;
 	return rows_down;
 }
 
 int PlayerInputRouter::hud_rows_down() const {
 	int rows_down = 0;
+	if (controls_.is_null()) return rows_down;
 	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
-		if (pressed(opennova::hud::hud_toggle_row_token(row))) rows_down |= 1 << row;
+		if (controls_->is_token_held_off_keyboard(opennova::hud::hud_toggle_row_token(row)))
+			rows_down |= 1 << row;
 	return rows_down;
 }
 
@@ -317,7 +363,7 @@ bool PlayerInputRouter::begin_input_frame(const Ref<Simulation> &p_sim, int64_t 
 	return spectating;
 }
 
-void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim, int p_rows_down) {
+void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim, int p_rows_fired) {
 	// The talk rows are action bindings the input frame's drain dispatches
 	// every tick, after any typed keys reached an open line, so a one-tick
 	// press inside a multi-tick frame opens its line on its tick; the command
@@ -328,7 +374,7 @@ void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim, int p_rows_
 	// debounce and the flood are the engine's chat entry (ChatEntryFacts::frame,
 	// inmatch/chat_flood.h); the HUD presenter draws the line at its frame.
 	if (hud_chat_.is_null() || p_sim.is_null()) return;
-	hud_chat_->poll_rows(p_rows_down, frame_gameplay_input_active_, p_sim, chat_gametext_,
+	hud_chat_->dispatch_rows(p_rows_fired, frame_gameplay_input_active_, p_sim, chat_gametext_,
 			p_sim->get_main_frame_counter());
 }
 
@@ -457,7 +503,8 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	}
 }
 
-bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_down) {
+bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_fired,
+		bool p_mouse_scale_negative) {
 	// The HUD's key rows are action bindings like the rest: the input frame's
 	// key scan fires them and its drain dispatches them, every tick, so a row
 	// pressed for one tick of a multi-tick frame fires on that tick. hudcolor
@@ -472,9 +519,11 @@ bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_row
 	//  @0x49D58B, the drain's Input_HandleActionBinding call @0x49D5D8); the key
 	//  scan's fire @0x49d42f (the modifier pass) and @0x49d488 (the fallback);
 	//  huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
-	// The key sampling is this router's; the edge latches, the cycles and the
-	// window toggles are the engine's poll (engine hud/hud_toggles.h); the HUD
-	// presenter applies the event words at its frame.
+	// The row events are the keyboard pass's key-downs (an OS repeat fires its
+	// row again) and this router's press edges of the mouse, joystick and scripted
+	// arms (run_update_rows); the cycles and the window toggles are the engine's
+	// dispatch (engine hud/hud_toggles.h hud_toggles_dispatch); the HUD presenter
+	// applies the event words at its frame.
 	if (hud_toggles_.is_null() || p_sim.is_null()) return false;
 	// Each row's event passes the dispatcher's head by its catalog row's flags
 	// (the pre-round timer, the deploy overlay, the round-over gate, the dead
@@ -489,15 +538,11 @@ bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_row
 	// session peer any role but a dedicated host. The mousescale row steps by
 	// its fire's sign bit (Shift on a modifier-less key).
 	const int role = p_sim->session_role();
-	const int64_t events = hud_toggles_->poll(p_rows_down, frame_gameplay_input_active_,
+	const int64_t events = hud_toggles_->dispatch(p_rows_fired, frame_gameplay_input_active_,
 			p_sim->is_mp_session(),
 			opennova::game_type::is_objective(static_cast<uint32_t>(p_sim->get_session_game_type())),
 			!p_sim->local_player_dead(), role != Simulation::ROLE_JOINER,
-			role != Simulation::ROLE_DEDICATED_HOST,
-			controls_.is_valid() &&
-					controls_->is_token_fire_signed(String(opennova::hud::hud_toggle_row_token(
-							HudToggles::ROW_MOUSE_SCALE))),
-			head_drops);
+			role != Simulation::ROLE_DEDICATED_HOST, p_mouse_scale_negative, head_drops);
 	if (events != 0) hud_toggle_events_.push_back(events);
 	// The pause row's flip reaches the session at this update (engine
 	// inmatch::Session::run_updates); the HUD presenter's later apply of the event
@@ -537,6 +582,7 @@ void PlayerInputRouter::reset_input_state() {
 	actions_.clear_key_press_latches();
 	// The key queue's reset drops the rows a no-update frame left waiting.
 	row_samples_.clear();
+	row_events_.clear();
 	const Ref<Simulation> reset_sim = sim();
 	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
 }
@@ -616,6 +662,7 @@ void PlayerInputRouter::reset() {
 	look_delta_ = Vector2();
 	close_axis_ = Vector2();
 	row_samples_.clear();
+	row_events_.clear();
 	tick_scripted_look_ = Vector2();
 }
 

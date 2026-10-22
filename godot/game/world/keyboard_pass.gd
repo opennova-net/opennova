@@ -19,8 +19,11 @@ extends RefCounted
 ## order: an open chat line takes each key; otherwise the special-key chain runs
 ## its inline legs (the quit dialog's keys, the round-over leg's, the page keys)
 ## and the deploy leg queues its pick (event 12; under STAT too, a dead
-## player's); a key the chain leaves is the binding scan's, where the escape
-## row's key queues its event (18). Then the queued events dispatch in order,
+## player's); a key the chain leaves is the binding scan's: the escape row's key
+## queues its event (18), any other row's key its row event, which the player
+## input router dispatches in the next update's input frame (the talk and HUD
+## rows; every other row still fires from its held edge). Then the queued events
+## dispatch in order,
 ## and the first whose case resets the input (12's and 18's Input_ResetAllState
 ## memset the event queue) drops the rest. So a deploy key pressed under the
 ## confirmation sends its pick after the NO, ahead of the NO's own Escape, which
@@ -39,6 +42,8 @@ extends RefCounted
 ##   ring_binding_code(scan_code) -> int
 ##                                      the binding scan's dispatch code for the
 ##                                      key (ControlsModel.event_code), -1 none
+##   ring_row_event(key, code, scan_code)
+##                                      any other row's event, for the router
 ##   ring_escape()                      the Escape action (case 18)
 ##   ring_pick(param)                   the deploy pick (case 12)
 ##   ring_reset_ran() -> bool           the case just run reset the input (the
@@ -85,9 +90,13 @@ func drain(legs: Object) -> void:
 	var events: Array[int] = []
 	var key := _keys.pop_key()
 	while key != null:
-		if not legs.ring_chat_key(key) and not legs.ring_special_key(key, events) \
-				and int(legs.ring_binding_code(_keys.last_scan_code())) == ESCAPE_CODE:
-			events.append(ESCAPE_EVENT)
+		if not legs.ring_chat_key(key) and not legs.ring_special_key(key, events):
+			var scan_code := _keys.last_scan_code()
+			var code := int(legs.ring_binding_code(scan_code))
+			if code == ESCAPE_CODE:
+				events.append(ESCAPE_EVENT)
+			elif code >= 0:
+				legs.ring_row_event(key, code, scan_code)
 		key = _keys.pop_key()
 	for event in events:
 		if event == ESCAPE_EVENT:

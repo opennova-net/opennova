@@ -311,6 +311,17 @@ void hud_key_poll_set_rows(HudKeyPoll &keys, uint32_t rows_down);
 // the state, returns the hud_toggle_event bits that fired.
 uint32_t hud_toggles_poll(HudToggleState &state, const HudKeyPoll &keys);
 
+// One input frame's dispatched row events (D-CTRL-6): each row set in `fired` had one
+// queued event this frame, a key-down the keyboard pass scanned to it (an OS auto-repeat
+// is a key-down like a press, so a held key fires its row once per repeat) or a press of
+// its mouse or joystick arm. The cycles, toggles and gates are hud_toggles_poll's; no
+// edge latch stands between the event and its case (the latches are the held-state
+// poll's, which this leaves cleared).
+// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - one fire per dequeued key event
+//  (@0x49d42f / @0x49d488); Input_ProcessFrame @0x49d520 - the drain's
+//  Input_HandleActionBinding call @0x49d5d8]
+uint32_t hud_toggles_dispatch(HudToggleState &state, const HudKeyPoll &fired);
+
 // The mission teardown clears the four overlay windows and their latches,
 // keeping the color, detail, showhud and friendly-tag globals; the tip and
 // its once-counters clear as the next start from the menu clears them.

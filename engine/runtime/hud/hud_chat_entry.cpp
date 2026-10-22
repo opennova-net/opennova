@@ -103,6 +103,17 @@ uint32_t ChatEntry::poll_rows(uint32_t rows_down, bool active,
 	return events;
 }
 
+uint32_t ChatEntry::dispatch_rows(uint32_t rows_fired, bool active,
+		const ChatEntryFacts &facts, const GameTextLookup &gametext) {
+	key_consumed_ = false;
+	uint32_t events = 0;
+	for (int row = 0; row < kChatTalkRowCount; ++row) {
+		if ((rows_fired & (1u << row)) == 0u || !active || capturing()) continue;
+		events |= dispatch(kTalkRows[row].dispatch, facts, gametext);
+	}
+	return events;
+}
+
 void ChatEntry::reset_binding_state() {
 	// [orig: Input_InitBindingSystem @0x49a65f..0x49a699 — capture 0, the
 	// buffers empty, max 100, history / dispatch -1, g_InputActionId = 111]

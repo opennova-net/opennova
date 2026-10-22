@@ -1765,6 +1765,16 @@ func ring_binding_code(scan_code: int) -> int:
 	return ControlsBindings.model().event_code(scan_code)
 
 
+## Any other row the scan fired: its event, with the fire's sign (Shift on a
+## fallback-pass fire), waits for the player input router's next update, whose
+## drain dispatches it (PlayerInputRouter::queue_row_event). A key the scripted
+## device replayed for its hold fires its row through the hold instead.
+func ring_row_event(key: InputEventKey, code: int, scan_code: int) -> void:
+	if _player_presenter == null or ControlsModel.is_scripted_key_event(key):
+		return
+	_player_presenter.queue_row_event(code, ControlsBindings.model().event_signed(scan_code))
+
+
 ## A key's deploy pick parameter by the engine's rule, -1 when not taken.
 func _deploy_key_param(key: InputEventKey) -> int:
 	return _deploy_presenter.deploy_key_param(key) if _deploy_presenter != null else -1

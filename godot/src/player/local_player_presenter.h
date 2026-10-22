@@ -262,6 +262,10 @@ public:
 	void push_key_event(const Ref<InputEventKey> &p_event) {
 		input_router_.push_key_event(p_event);
 	}
+	// One row event the keyboard pass's scan queued (PlayerInputRouter::queue_row_event).
+	void queue_row_event(int p_code, bool p_signed) {
+		input_router_.queue_row_event(p_code, p_signed);
+	}
 	// A pass-through screen's close: the next input frame takes the menu
 	// cursor's offset (PlayerInputRouter::close_pass_through_screen).
 	void close_pass_through_screen();

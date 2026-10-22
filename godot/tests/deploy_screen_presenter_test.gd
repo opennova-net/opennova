@@ -58,6 +58,10 @@ class DeployRingLegs:
 	func ring_binding_code(scan_code: int) -> int:
 		return ControlsBindings.model().event_code(scan_code)
 
+	# No other row is the deploy screen's.
+	func ring_row_event(_key: InputEventKey, _code: int, _scan_code: int) -> void:
+		pass
+
 	func ring_escape() -> void:
 		escapes += 1
 		sim.escape_input_reset()

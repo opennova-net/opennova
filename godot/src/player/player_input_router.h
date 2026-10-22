@@ -122,6 +122,11 @@ public:
 	// One key-down, an OS repeat included, into the queue with Ctrl and Shift as
 	// the key state holds them (KeyEventQueue::push_key).
 	void push_key_event(const Ref<InputEventKey> &p_event);
+	// One row event the keyboard pass's scan queued (the shell's KeyboardPass):
+	// the row's dispatch code and the sign bit its fire carries. It waits for the
+	// next update's input frame, whose drain dispatches the talk and HUD rows'
+	// (run_update_rows); the other rows still fire from their held edges.
+	void queue_row_event(int p_code, bool p_signed);
 	// A pass-through screen closed (death.mnu's DEATH, stat.mnu's STAT): its
 	// close's input frame takes the menu cursor's offset from the re-centre
 	// point as one update's axis input, read here from the cursor's
@@ -157,14 +162,17 @@ private:
 	// look, the action rows and their requests), under the frame's gates.
 	void sample_input_frame(const Ref<MissionFrameInput> &p_input, const Vector2 &p_scripted_look,
 			bool p_spectating);
-	// The input frame's HUD toggle rows (`p_rows_down`, 1 << HudToggles::Row)
+	// The input frame's HUD toggle row events (`p_rows_fired`, 1 << HudToggles::Row)
 	// through the HUD's toggles, ahead of a later update's action rows, which
 	// read the menus the rows open. True when the pause row flipped the pause word.
-	bool poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_down);
-	// The input frame's talk rows (`p_rows_down`, 1 << HudChatEntry row) through
-	// the HUD's chat line, with or without a local player.
-	void poll_talk_rows(const Ref<Simulation> &p_sim, int p_rows_down);
-	// The rows' bindings held RIGHT NOW, one bit each.
+	bool poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_fired,
+			bool p_mouse_scale_negative);
+	// The input frame's talk row events (`p_rows_fired`, 1 << HudChatEntry row)
+	// through the HUD's chat line, with or without a local player.
+	void poll_talk_rows(const Ref<Simulation> &p_sim, int p_rows_fired);
+	// The rows' mouse, joystick and scripted arms held RIGHT NOW, one bit each
+	// (ControlsModel::is_token_held_off_keyboard): a keyboard key fires its row
+	// through the key queue's events.
 	int hud_rows_down() const;
 	int talk_rows_down() const;
 	void read_input_state(bool &r_forward, bool &r_back, bool &r_left, bool &r_right,
@@ -194,15 +202,24 @@ private:
 	bool frame_player_ = false;
 	bool frame_gameplay_input_active_ = false;
 	bool frame_menu_open_ = false;
-	// The talk and HUD rows' states the samples since the last update's poll saw,
-	// in order, each kept when it differs from the one before: the update polls
-	// each in turn, as the drain dispatches the queued key events.
+	// The talk and HUD rows' off-keyboard holds the samples since the last update's
+	// poll saw, in order, each kept when it differs from the one before: the update
+	// takes each one's press edges in turn, as the drain dispatches the queued events.
 	struct RowSample {
 		int talk = 0;
 		int hud = 0;
 	};
 	std::vector<RowSample> row_samples_;
 	void queue_row_sample();
+	// The off-keyboard holds the last edge read, which a press edge leaves behind.
+	int talk_held_ = 0;
+	int hud_held_ = 0;
+	// The keyboard pass's row events since the last update's input frame, in order.
+	struct RowEvent {
+		int code = -1;
+		bool sign = false;
+	};
+	std::vector<RowEvent> row_events_;
 	// A later update's device step (run_update_rows): the look pixels and the
 	// death screen its sample_tick reads.
 	Vector2 tick_scripted_look_;
