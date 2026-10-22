@@ -5224,6 +5224,11 @@ add_test(NAME npruntime_player_body_class COMMAND npruntime_player_body_class_te
 add_executable(body_trace_test world/body_trace_test.cpp)
 target_link_libraries(body_trace_test PRIVATE opennova_runtime)
 add_test(NAME body_trace COMMAND body_trace_test)
+# The infantry record's ground carrier: an unmounted body standing on an entity streams bone 0,
+# that entity and the pose local to it; on the terrain, free (D-NET-NEW-L4-20).
+add_executable(netsim_infantry_ground_carrier_test netsim/infantry_ground_carrier_test.cpp)
+target_link_libraries(netsim_infantry_ground_carrier_test PRIVATE opennova_runtime)
+add_test(NAME netsim_infantry_ground_carrier COMMAND netsim_infantry_ground_carrier_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

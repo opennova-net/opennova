@@ -246,15 +246,17 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		rec.handle = e.wire_handle;
 		rec.type_id = e.type_id;
 		rec.cls = e.entity_class;
-		// op1 carrier select: the RIDDEN vehicle (entity+0x16C) wins, else the standing-on
-		// ground entity (entity+0x28) [orig: @0x4c0a08]. With a live carrier the record's
+		// op1 carrier select, the player and the infantry record alike: the RIDDEN vehicle
+		// (entity+0x16C) wins, else the standing-on ground entity (entity+0x28) [orig: @0x4c0a08;
+		// NetPacket_SerializeInfantryEntityState @0x4C0320 - `mov ebp, [edi+28h]` @0x4C06F7,
+		// the +0x16C override @0x4C06EF..0x4C0708]. With a live carrier the record's
 		// position is CARRIER-LOCAL (Entity_TransformWorldToLocal @0x4c0b07) and its yaw
 		// byte is the LOCAL heading's high byte (sar 24 @0x4c0b85); the client mirrors the
 		// carrier back into its own groundEntity (@0x4c1353) — echoing 0xFFFF at a grounded
 		// client detaches + hard-snaps it to the record position (the v26 origin teleport,
 		// D-NET-151). A carrier whose pose we could not resolve (stale handle) falls back
 		// to the free-standing form.
-		const uint16_t player_carrier =
+		const uint16_t organic_carrier =
 				(e.mount_handle != wire_handle::kInvalid) ? e.mount_handle : e.ground_handle;
 		switch (e.entity_class) {
 		case EntityClass::Player:
@@ -267,12 +269,12 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// [orig: ItemDef type/attrib and +0x326/+0x312 gates @0x4c0a39].
 			rec.player.vehicle_bone = e.veh_bone;
 			rec.player.seat_type = e.mounted_weapon_seat_type;
-			if (player_carrier != wire_handle::kInvalid && e.carrier_pose_valid) {
+			if (organic_carrier != wire_handle::kInvalid && e.carrier_pose_valid) {
 				const WorldPose local = network_transform_world_to_local(
 						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
 						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
 						uint32_t(e.carrier_roll_bam));
-				rec.player.carrier_handle = player_carrier;
+				rec.player.carrier_handle = organic_carrier;
 				rec.player.pos_x_compressed = network_compress_fixedpoint(local.x);
 				rec.player.pos_y_compressed = network_compress_fixedpoint(local.y);
 				rec.player.pos_z_compressed = network_compress_fixedpoint(local.z);
@@ -412,20 +414,24 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		case EntityClass::Infantry: {
 			// Existing 14-byte infantry record, with the exact witnessed field
 			// sources [orig: NetPacket_SerializeInfantryEntityState @0x4C0320].
-			// A mounted entity writes its raw bone, vehicle handle, and local pose;
-			// no overlay-specific protocol extension is needed. The writer puts
-			// the target heading (+0x1A8) in the heading's place for the pose and
-			// the yaw byte, the mounted leg's local yaw included [orig: the swap
-			// @0x4C07C9..0x4C07CD; Entity_TransformWorldToLocal @0x4C07E3,
-			// srcPos[3] @0x43BB87].
+			// The carrier is the op1 select above: a mounted body writes its raw
+			// bone, the vehicle and its local pose; an unmounted one standing on an
+			// entity (+0x28: a deck, a building, a body) writes bone 0, that entity
+			// and the pose local to it, so a passenger its vehicle's destruction
+			// kills still names the hull its ground probe hit (D-NET-NEW-L4-20)
+			// [orig: the bone byte 0 @0x4C071F..0x4C072E, the carrier test
+			// @0x4C0735..0x4C073E]. The writer puts the target heading (+0x1A8) in the
+			// heading's place for the pose and the yaw byte, the carried leg's
+			// local yaw included [orig: the swap @0x4C07C9..0x4C07CD;
+			// Entity_TransformWorldToLocal @0x4C07E3, srcPos[3] @0x43BB87].
 			rec.infantry.seat_bone_idx =
 					e.mount_handle != wire_handle::kInvalid ? e.veh_bone : 0;
-			if (e.mount_handle != wire_handle::kInvalid && e.carrier_pose_valid) {
+			if (organic_carrier != wire_handle::kInvalid && e.carrier_pose_valid) {
 				const WorldPose local = network_transform_world_to_local(
 						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
 						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
 						uint32_t(e.carrier_roll_bam));
-				rec.infantry.vehicle_slot_handle = e.mount_handle;
+				rec.infantry.vehicle_slot_handle = organic_carrier;
 				rec.infantry.pos_x_compressed = network_compress_fixedpoint(local.x);
 				rec.infantry.pos_y_compressed = network_compress_fixedpoint(local.y);
 				rec.infantry.pos_z_compressed = network_compress_fixedpoint(local.z);
