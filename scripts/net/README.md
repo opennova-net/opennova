@@ -367,8 +367,11 @@ so the default suite is unchanged. An extension case may add:
   an OR or OO cell whose second mission header never arrives names a rotation
   our host did not take.
   A rotation cell's closing checks take the next mission's state. A retail
-  run that still sees its peer closes in any phase. Our joiner gets up to 60 s
-  to reach the next match; if it is still at that mission's deploy screen, it
+  run that still sees its peer closes in any phase. Our joiner's wait starts
+  once the rotation is on the wire (the host's S2C 0x25, the next mission's
+  load, at or after the window's start in the rolling external capture, up to
+  60 s; before it a snapshot still reads the old mission's match). It then gets
+  up to 60 s to reach the next match; if it is still at that mission's deploy screen, it
   closes when it is live and connected: its heartbeat advances, it keeps its
   self handle, and it has no join error or lost session. A run note names the
   closing state. x3's round RR, RR-aa, RO and OO cells failed the first
@@ -444,11 +447,16 @@ so the default suite is unchanged. An extension case may add:
   its readiness takes a loaded world hosting on the port with no own player.
   A Serve Only host's S2C 0x46 roster names no host (slot 0 cleared, on a
   retail Serve Only host as on ours), so the wire-readiness gate takes
-  `-NoHostPlayer` and requires the joiner's row alone. Every Serve Only cell saves its host's frame at the steady deadline, before
-  the closing checks (`serve-only-host-frame.png`, the summary's
-  `serve_only_host_screenshot`; onHook's screenshot of a retail host, the game
-  MCP's of ours): the dedicated host's round-end overlay when the deadline
-  falls in a round's linger. No tracked case sets it: the kick case
+  `-NoHostPlayer` and requires the joiner's row alone. Every Serve Only cell saves its host's frame twice
+  (onHook's screenshot of a retail host, the game MCP's of ours): on the
+  round's end, 1 s after the capture's first S2C 0x1D (at the window's start
+  when the round already ended), which `wait_capture_tag.ps1` reads off the
+  rolling external capture
+  (`serve-only-round-end-frame.png`, the summary's `serve_only_round_end`: the
+  0x1D's capture frame and time, the frame's path; the dedicated host's
+  round-end overlay), and at the steady deadline, before the closing checks
+  (`serve-only-host-frame.png`, `serve_only_host_screenshot`), so the
+  linger's length shows. No tracked case sets it: the kick case
   stages a listen host's `SERVER PUNT ALL`, which reaches the same PUNT (the
   `kick` row below).
 - `late_joiner`: E3's second joiner (`-LateJoiner`). It is the first joiner's

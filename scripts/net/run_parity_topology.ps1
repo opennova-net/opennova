@@ -168,9 +168,11 @@ param(
     # (host_screen_from_block: serve and play iff `dedicated` is 0), so the cell
     # writes the SERVER copy's `dedicated` = 1 (restored after); its readiness
     # takes a loaded world hosting on the port with no own player. Every Serve
-    # Only cell saves its host's frame at the steady deadline, before the
-    # closing checks (serve-only-host-frame.png): the dedicated host's round-end
-    # overlay when the deadline falls in the round's linger.
+    # Only cell saves its host's frame on the round's end (the capture's first
+    # S2C 0x1D plus 1 s, or the window's start when the round already ended:
+    # serve-only-round-end-frame.png, the dedicated host's round-end overlay)
+    # and again at the steady deadline, before the closing checks
+    # (serve-only-host-frame.png), so the linger's length shows.
     [switch] $ServeOnly,
 
     # The pinned SHA-256 of the SERVER copy's game.cfg (the case table's
@@ -630,11 +632,12 @@ $JoinScript = Join-Path $Repo "scripts\net\join_opennova.ps1"
 $NetLib = Join-Path $Repo "scripts\net\lib.ps1"
 $ProbeExe = Join-Path $Repo "build\apps\lan_probe\Release\opennova-lan-probe.exe"
 $WireReadyScript = Join-Path $Repo "scripts\net\wait_parity_wire_ready.ps1"
+$CaptureTagScript = Join-Path $Repo "scripts\net\wait_capture_tag.ps1"
 
 foreach ($required in @(
     $ServerDir, $ClientDir, $McpExe, $GodotLauncher, $CaptureScript, $HostScript,
     $JoinScript, $NetLib, $ProbeExe,
-    $WireReadyScript
+    $WireReadyScript, $CaptureTagScript
 )) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required parity input is missing: $required"
@@ -826,6 +829,7 @@ $script:EvidenceRole = ""
 $script:EvidenceInstanceId = ""
 $script:Screenshot = ""
 $script:ServeOnlyHostScreenshot = ""
+$script:ServeOnlyRoundEnd = $null
 $script:Acceptance = $null
 $script:StopEvidence = @()
 $script:CleanupFailure = ""
@@ -1968,7 +1972,54 @@ function Invoke-PreJoinMissionCycle {
     Write-Host "PARITY_RUN_NOTE pre-join cycle: the next mission runs (restart $($witness.restart_seen_utc), ready $($witness.ready_utc)); the joiner starts"
 }
 
+# The first record of one S2C tag on the rolling external capture, at or after
+# -AfterUtc when given (wait_capture_tag.ps1, the wire-readiness gate's
+# snapshot decode). With -OutPath it runs in the background and returns its
+# process (the caller reads the file with ConvertFrom-CaptureTagLine); without,
+# the call blocks and returns the record (capture frame, ts_ns) or $null on its
+# timeout.
+function Start-CaptureTagWait {
+    param(
+        [Parameter(Mandatory = $true)] [string] $Tag,
+        [Parameter(Mandatory = $true)] [int] $TimeoutSeconds,
+        [DateTime] $AfterUtc,
+        [string] $OutPath = ""
+    )
+    if (-not $script:ExternalCapture) { throw "A capture tag wait needs the rolling external capture." }
+    $itemsPath = Join-Path (Split-Path -Parent (Split-Path -Parent $ResolvedMissionArtifact)) "items.def"
+    $afterNs = if ($PSBoundParameters.ContainsKey("AfterUtc")) {
+        ([DateTimeOffset] $AfterUtc).ToUnixTimeMilliseconds() * 1000000
+    } else { 0 }
+    $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $CaptureTagScript,
+        "-Capture", $script:ExternalCapture, "-Items", $itemsPath, "-Direction", "S", "-Tag", $Tag,
+        "-AfterUnixNs", [string] $afterNs, "-TimeoutSeconds", [string] $TimeoutSeconds)
+    if ($OutPath) {
+        return Start-Process -FilePath powershell.exe -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $OutPath -RedirectStandardError "$OutPath.err" `
+            -ArgumentList @($arguments | ForEach-Object { if ("$_" -match '\s') { "`"$_`"" } else { "$_" } })
+    }
+    return ConvertFrom-CaptureTagLine @(& powershell.exe @arguments)
+}
+
+function ConvertFrom-CaptureTagLine {
+    param([object[]] $Lines)
+    foreach ($line in @($Lines)) {
+        if ("$line" -match '^PARITY_CAPTURE_TAG frame=(\d+) ts_ns=(\d+)') {
+            return [pscustomobject]@{ frame = [int64] $Matches[1]; ts_ns = [int64] $Matches[2] }
+        }
+    }
+    return $null
+}
+
+# -ServeOnlyRoundEnd (a Serve Only cell): while the window runs, the rolling
+# external capture is read for its first S2C 0x1D (the round's end), and the
+# host's frame is saved 1 s after it, or at once when the round ended before
+# the window opened (serve-only-round-end-frame.png; -RetailInstanceId names a
+# retail host). x8's retail Serve Only RR: the 0x1D came 2.4 s before the
+# window, nine 5 s countdowns ran in it, and its S2C 0x25 came at 42 s, so the
+# deadline frame showed the next mission's load.
 function Wait-UntilSteadyDeadline {
+    param([switch] $ServeOnlyRoundEnd, [string] $RetailInstanceId = "")
     if (-not $script:SteadyStartedUtc -or $script:SteadyCompletedUtc) {
         throw "Steady deadline wait is out of order"
     }
@@ -1978,9 +2029,39 @@ function Wait-UntilSteadyDeadline {
         [Globalization.DateTimeStyles]::RoundtripKind
     ).ToUniversalTime()
     $deadline = $started.AddSeconds($SteadySeconds)
+    $watch = $null
+    $watchOut = Join-Path $RunRoot "serve-only-round-end.txt"
+    $roundEnd = $null
+    if ($ServeOnly -and $ServeOnlyRoundEnd) {
+        $watch = Start-CaptureTagWait -Tag "0x1d" -TimeoutSeconds ($SteadySeconds + 5) -OutPath $watchOut
+        $script:ServeOnlyRoundEnd = [ordered]@{ watch_started_utc = [DateTime]::UtcNow.ToString("o"); tag = "S2C 0x1d" }
+    }
     while ([DateTime]::UtcNow -lt $deadline) {
+        if ($watch -and -not $script:ServeOnlyRoundEnd.Contains("frame_path")) {
+            if (-not $roundEnd -and (Test-Path -LiteralPath $watchOut)) {
+                $roundEnd = ConvertFrom-CaptureTagLine @(Get-Content -LiteralPath $watchOut -ErrorAction SilentlyContinue)
+                if ($roundEnd) {
+                    $script:ServeOnlyRoundEnd.capture_frame = $roundEnd.frame
+                    $script:ServeOnlyRoundEnd.capture_ts_ns = $roundEnd.ts_ns
+                    $script:ServeOnlyRoundEnd.seen_utc = [DateTime]::UtcNow.ToString("o")
+                }
+            }
+            if ($roundEnd -and [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge [int64] ($roundEnd.ts_ns / 1000000) + 1000) {
+                $script:ServeOnlyRoundEnd.frame_path = Save-ServeOnlyHostFrame -RetailInstanceId $RetailInstanceId `
+                    -Name "serve-only-round-end-frame.png"
+                $script:ServeOnlyRoundEnd.frame_utc = [DateTime]::UtcNow.ToString("o")
+            }
+        }
         $remainingMs = [int][Math]::Ceiling(($deadline - [DateTime]::UtcNow).TotalMilliseconds)
         Start-Sleep -Milliseconds ([Math]::Min(250, [Math]::Max(1, $remainingMs)))
+    }
+    if ($watch) {
+        if (-not $watch.HasExited) { Stop-Process -Id $watch.Id -Force -ErrorAction SilentlyContinue }
+        $script:ServeOnlyRoundEnd.watch_exit = $(if ($watch.HasExited) { $watch.ExitCode } else { $null })
+        if (-not $script:ServeOnlyRoundEnd.Contains("frame_path")) {
+            Write-Host "PARITY_RUN_NOTE Serve Only: no S2C 0x1d in the window's capture, so no round-end frame"
+        }
+        $script:ServeOnlyRoundEnd = [pscustomobject] $script:ServeOnlyRoundEnd
     }
 }
 
@@ -3235,31 +3316,33 @@ function Wait-ParityWireReady {
     return $script:WireReadyWitness
 }
 
-# A Serve Only cell's host frame at the steady deadline, before the closing
-# checks (the dedicated host's round-end overlay when the deadline falls in the
-# round's linger): a retail host's through onhook_screenshot, ours through the
-# game MCP's game_screenshot.
+# A Serve Only cell's host frame: at the steady deadline, before the closing
+# checks (serve-only-host-frame.png), and on the round's end (-Name
+# serve-only-round-end-frame.png, from Wait-UntilSteadyDeadline): a retail
+# host's through onhook_screenshot, ours through the game MCP's
+# game_screenshot. Returns the saved path.
 function Save-ServeOnlyHostFrame {
-    param([string] $RetailInstanceId = "")
+    param([string] $RetailInstanceId = "", [string] $Name = "serve-only-host-frame.png")
     if (-not $ServeOnly) { return }
-    $path = Join-Path $RunRoot "serve-only-host-frame.png"
+    $path = Join-Path $RunRoot $Name
     if ($RetailInstanceId) {
         $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_screenshot" -Arguments @{
             instance_id = $RetailInstanceId
             path = $path
             preview_max_dim = 256
         })
-        $script:ServeOnlyHostScreenshot = [string] $result.path
-        return
+        $path = [string] $result.path
+    } else {
+        $result = Invoke-GameTool -Port $HostMcpPort -Name "game_screenshot" -Arguments @{
+            format = "png"
+            max_dim = 4096
+        }
+        $image = @($result.content | Where-Object { $_.type -eq "image" }) | Select-Object -First 1
+        if (-not $image) { throw "game_screenshot returned no image from the OpenNova host" }
+        [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String([string] $image.data))
     }
-    $result = Invoke-GameTool -Port $HostMcpPort -Name "game_screenshot" -Arguments @{
-        format = "png"
-        max_dim = 4096
-    }
-    $image = @($result.content | Where-Object { $_.type -eq "image" }) | Select-Object -First 1
-    if (-not $image) { throw "game_screenshot returned no image from the OpenNova host" }
-    [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String([string] $image.data))
-    $script:ServeOnlyHostScreenshot = $path
+    if ($Name -eq "serve-only-host-frame.png") { $script:ServeOnlyHostScreenshot = $path }
+    return $path
 }
 
 function Save-RetailScreenshot {
@@ -3560,8 +3643,23 @@ function Start-OpenNovaJoinerExact {
 # deploy screen closes the cell when it is alive and connected: its heartbeat
 # advances, it keeps its self handle, and it has no join error or lost session.
 # x3's round RO and OO joiners failed the first mission's in-match check there.
+# The wait starts only once the rotation is on the wire: the host's S2C 0x25 (the
+# next mission's load) at or after the window's start in the rolling external
+# capture. Before it, a snapshot still reads the old mission's match (x8's Serve
+# Only RO: the first snapshot read in_match 0.19 s before the retail host's 0x25,
+# the cell quit our joiner, and no reload head reached the capture).
 function Wait-OpenNovaJoinerAfterRotation {
     param([int] $TimeoutSeconds = 60)
+    $steadyStarted = [DateTime]::Parse(
+        $script:SteadyStartedUtc,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind
+    ).ToUniversalTime()
+    $reload = Start-CaptureTagWait -Tag "0x25" -TimeoutSeconds $TimeoutSeconds -AfterUtc $steadyStarted
+    if (-not $reload) {
+        throw "The rotation's S2C 0x25 (the next mission's load) did not reach the capture within $TimeoutSeconds s"
+    }
+    Write-Host "PARITY_RUN_NOTE rotation: the host's S2C 0x25 at capture frame $($reload.frame); the OpenNova joiner's wait starts"
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     $first = $null
     while ($true) {
@@ -3591,6 +3689,7 @@ function Wait-OpenNovaJoinerAfterRotation {
                 $state.local_player, $state.deploy_presented, $state.joiner_phase, $state.join_admission_stage)
             $state | Add-Member -NotePropertyName after_rotation_class -NotePropertyValue $(if ($class -ne 'invalid') { $class } else { 'connected_after_rotation' }) -Force
             $state | Add-Member -NotePropertyName observed_utc -NotePropertyValue ([DateTime]::UtcNow.ToString("o")) -Force
+            $state | Add-Member -NotePropertyName rotation_reload -NotePropertyValue $reload -Force
             return $state
         }
         if ([DateTime]::UtcNow -ge $deadline) {
@@ -3737,8 +3836,8 @@ try {
                 Invoke-ScenarioIfRequested -RetailJoinerInstanceId ([string] $retailJoiner.instance_id) `
                     -RetailHostInstanceId $hostInstanceId
                 Start-RetailLateJoiner
-                Wait-UntilSteadyDeadline
-                Save-ServeOnlyHostFrame -RetailInstanceId $hostInstanceId
+                Wait-UntilSteadyDeadline -ServeOnlyRoundEnd -RetailInstanceId $hostInstanceId
+                $null = Save-ServeOnlyHostFrame -RetailInstanceId $hostInstanceId
                 $hostInstance = Wait-RetailProcessForPeer `
                     -ProcessId $script:RetailHostProcess.Id -Role host
                 $joinerInstance = if (Test-ScenarioEndsJoinerSession) {
@@ -3952,8 +4051,8 @@ try {
             if ($ExerciseInput) {
                 Publish-MotionGate
             }
-            Wait-UntilSteadyDeadline
-            Save-ServeOnlyHostFrame -RetailInstanceId ([string] $retailHost.instance_id)
+            Wait-UntilSteadyDeadline -ServeOnlyRoundEnd -RetailInstanceId ([string] $retailHost.instance_id)
+            $null = Save-ServeOnlyHostFrame -RetailInstanceId ([string] $retailHost.instance_id)
             $script:OpenNovaJoiner.Refresh()
             if ($script:OpenNovaJoiner.HasExited) {
                 throw "OpenNova joiner exited during the RO steady window"
@@ -4084,8 +4183,8 @@ try {
                         -ProcessId $script:RetailProcess.Id
                 }
                 Start-RetailLateJoiner
-                Wait-UntilSteadyDeadline
-                Save-ServeOnlyHostFrame
+                Wait-UntilSteadyDeadline -ServeOnlyRoundEnd
+                $null = Save-ServeOnlyHostFrame
                 $script:RetailProcess.Refresh()
                 $script:OpenNovaHost.Refresh()
                 if ($script:RetailProcess.HasExited -or $script:OpenNovaHost.HasExited) {
@@ -4152,8 +4251,8 @@ try {
             if ($ExerciseInput) {
                 Publish-MotionGate
             }
-            Wait-UntilSteadyDeadline
-            Save-ServeOnlyHostFrame
+            Wait-UntilSteadyDeadline -ServeOnlyRoundEnd
+            $null = Save-ServeOnlyHostFrame
             $script:OpenNovaHost.Refresh()
             $script:OpenNovaJoiner.Refresh()
             if ($script:OpenNovaHost.HasExited -or $script:OpenNovaJoiner.HasExited) {
@@ -4487,8 +4586,10 @@ $summary = [pscustomobject]@{
     evidence_role = $script:EvidenceRole
     evidence_instance_id = $script:EvidenceInstanceId
     screenshot = $script:Screenshot
-    # A Serve Only cell's host frame at the steady deadline.
+    # A Serve Only cell's host frames: at the steady deadline, and on the round's end
+    # (the window's first S2C 0x1D plus 1 s: its capture frame and time, the frame's path).
     serve_only_host_screenshot = $script:ServeOnlyHostScreenshot
+    serve_only_round_end = $script:ServeOnlyRoundEnd
     acceptance = $script:Acceptance
     opennova_launch_proofs = [pscustomobject] $script:OpenNovaLaunchProofs
     direct_runtime_launch = [bool] $AllowDirectRuntime
