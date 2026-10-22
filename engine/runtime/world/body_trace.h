@@ -24,6 +24,11 @@
 //   event's type word and the brain's state before and after the dispatch's transition, the
 //   one place besides a think that commits a pending state [orig: AIEvent_ProcessTimedEntries
 //   @0x455DF0 - the dispatch @0x455E4F, the commit @0x455E51..0x455E87].
+// - kClassEvent: a watched brain's class event callback run with a nonzero phase (the kill /
+//   damage notification 1, the death 4, ...): the phase and the brain's state before and after,
+//   whose transition tail commits a pending state in the same call [orig:
+//   EntityAI_ProcessGroundStateMachine @0x4583C0 / EntityAI_ProcessAirStateMachine @0x4581B0 - the
+//   tails @0x45856E..0x4585B4 / @0x458369..0x4583B0].
 // The ring holds the last kCapacity records; a reader polls by seq (since).
 #pragma once
 
@@ -45,6 +50,7 @@ enum class BodyTraceEvent : uint8_t {
     kForce = 2,
     kBlast = 3,
     kAiEvent = 4,
+    kClassEvent = 5,
 };
 
 struct BodyTraceRecord {
@@ -77,8 +83,9 @@ struct BodyTraceRecord {
     int32_t damage = 0;     // kBlast
     int16_t health_before = 0; // kBlast
     // kTick: the brain's current and pending states (-1 without a brain) and the think
-    // countdown (+0x2AC, Entity::spawn_phase). kAiEvent: the states before (brain_pend) and
-    // after (brain_state) the dispatch, the event's type word in ai_event.
+    // countdown (+0x2AC, Entity::spawn_phase). kAiEvent / kClassEvent: the states before
+    // (brain_pend) and after (brain_state) the dispatch or the call, the event's type word or
+    // the callback's phase in ai_event.
     int16_t brain_state = -1;
     int16_t brain_pend = -1;
     int32_t think_clock = 0;
@@ -161,6 +168,11 @@ void body_trace_blast(World &world, const Entity &target, int32_t kz_type, Entit
 void body_trace_ai_event(World &world, EntityHandle entity, int32_t type, int32_t state_before,
         int32_t state_after);
 
+// kClassEvent: the class event callback run on the brain of `entity` with `phase` (nonzero),
+// its state `state_before` ahead of the call and `state_after` past it.
+void body_trace_class_event(World &world, EntityHandle entity, int32_t phase,
+        int32_t state_before, int32_t state_after);
+
 inline const char *body_trace_event_name(BodyTraceEvent event) {
     switch (event) {
         case BodyTraceEvent::kTick: return "tick";
@@ -168,6 +180,7 @@ inline const char *body_trace_event_name(BodyTraceEvent event) {
         case BodyTraceEvent::kForce: return "force";
         case BodyTraceEvent::kBlast: return "blast";
         case BodyTraceEvent::kAiEvent: return "ai_event";
+        case BodyTraceEvent::kClassEvent: return "class_event";
     }
     return "unknown";
 }

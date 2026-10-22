@@ -27,6 +27,9 @@ extends GameProbe
 ## - `ai_event`: a timed AI event dispatched to its brain: the event's type word (`ai_event`)
 ##   and the brain's state before the dispatch (`brain_pend`) and after its transition
 ##   (`brain_state`).
+## - `class_event`: its brain's class event callback run with a nonzero phase (`ai_event`: 1 the
+##   kill / damage notification, 4 the death), with the states before and after the call, whose
+##   tail commits a pending state.
 ##
 ## `trigger_handle` (-1 none) keeps only the window around that entity's first `tick` at
 ## Health <= 0: `pre_ticks` before it to `post_ticks` after, and ends the run once the window
@@ -174,7 +177,7 @@ func _line(row: Dictionary) -> String:
 		"blast":
 			line += " kz=%d by=0x%04x damage=%d health %d->%d" % [int(row.hit_type),
 					int(row.other), int(row.damage), int(row.health_before), int(row.health)]
-		"ai_event":
+		"ai_event", "class_event":
 			line += " type=%d state %d->%d" % [int(row.ai_event), int(row.brain_pend),
 					int(row.brain_state)]
 	return line

@@ -474,13 +474,21 @@ void process_class_state_machine(
 // [orig: EntityAI_ProcessAirStateMachine @0x4581b0] event 0=update, 1=kill/damage
 // notification, 4=death.
 void AiSystem::process_air_state_machine(AiEntity &e, World &world, int event) {
+    const int32_t state_before = e.brain.f[AiBrain::kCurState];
     process_class_state_machine(*this, e, world, event, kAirClassGates);
+    // The body readout (an instrument, no behaviour; body_trace.h).
+    if (event != 0)
+        body_trace_class_event(world, e.handle, event, state_before, e.brain.f[AiBrain::kCurState]);
 }
 
 // [orig: EntityAI_ProcessGroundStateMachine @0x4583c0] event 0=update, 1=kill/damage
 // notification, 4=death.
 void AiSystem::process_ground_state_machine(AiEntity &e, World &world, int event) {
+    const int32_t state_before = e.brain.f[AiBrain::kCurState];
     process_class_state_machine(*this, e, world, event, kVehicleClassGates);
+    // The body readout (an instrument, no behaviour; body_trace.h).
+    if (event != 0)
+        body_trace_class_event(world, e.handle, event, state_before, e.brain.f[AiBrain::kCurState]);
 }
 
 void AiSystem::apply_transition(AiEntity &e, World &world) {

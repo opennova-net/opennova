@@ -143,6 +143,32 @@ static void test_a_brain_row_records_its_states_and_events() {
     CHECK(std::string(body_trace_event_name(rows[2].event)) == "ai_event");
 }
 
+// The class event callback's machine run with a nonzero phase on a watched brain: a
+// class_event record with the phase and the states either side of its tail's commit (the
+// authority commits the pending 5 in the call). A think (phase 0) records nothing.
+static void test_a_brain_row_records_its_class_events() {
+    Rig r;
+    World &w = *r.w;
+    w.ai.is_authority = true;
+    Entity hull;
+    hull.kind = EntityKind::Item;
+    const EntityHandle h = w.registry.spawn(1, hull);
+    AiEntity &brain = *w.ai.at(w.ai.attach(h));
+    brain.handle = h;
+    brain.brain.f[AiBrain::kCurState] = 3;
+    brain.brain.f[AiBrain::kPendState] = 5;
+    w.body_trace.watch[0] = h.packed;
+    w.ai.process_ground_state_machine(brain, w, 1);
+    const std::vector<BodyTraceRecord> rows = w.body_trace.since(0);
+    CHECK(rows.size() == 1);
+    if (rows.size() != 1) return;
+    CHECK(rows[0].event == BodyTraceEvent::kClassEvent && rows[0].handle == h.packed);
+    CHECK(rows[0].ai_event == 1 && rows[0].brain_pend == 3 && rows[0].brain_state == 5);
+    CHECK(std::string(body_trace_event_name(rows[0].event)) == "class_event");
+    w.ai.process_ground_state_machine(brain, w, 0);
+    CHECK(w.body_trace.next_seq() == 1);
+}
+
 static void test_the_ring_keeps_the_last_records() {
     BodyTrace trace;
     for (std::size_t i = 0; i < BodyTrace::kCapacity + 3; ++i) {
@@ -162,6 +188,7 @@ int main() {
     test_the_tick_records_each_watched_handle();
     test_the_event_records_follow_the_watch();
     test_a_brain_row_records_its_states_and_events();
+    test_a_brain_row_records_its_class_events();
     test_the_ring_keeps_the_last_records();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);

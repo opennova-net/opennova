@@ -131,15 +131,30 @@ void body_trace_blast(World &world, const Entity &target, int32_t kz_type, Entit
     world.body_trace.append(record);
 }
 
-void body_trace_ai_event(World &world, EntityHandle entity, int32_t type, int32_t state_before,
-        int32_t state_after) {
+namespace {
+
+void append_brain_event(World &world, BodyTraceEvent event, EntityHandle entity, int32_t word,
+        int32_t state_before, int32_t state_after) {
     if (!world.body_trace.watches(entity)) return;
-    BodyTraceRecord record = body_trace_head(world, BodyTraceEvent::kAiEvent, entity);
+    BodyTraceRecord record = body_trace_head(world, event, entity);
     record.present = world.registry.get(entity) != nullptr;
-    record.ai_event = type;
+    record.ai_event = word;
     record.brain_pend = static_cast<int16_t>(state_before);
     record.brain_state = static_cast<int16_t>(state_after);
     world.body_trace.append(record);
+}
+
+} // namespace
+
+void body_trace_ai_event(World &world, EntityHandle entity, int32_t type, int32_t state_before,
+        int32_t state_after) {
+    append_brain_event(world, BodyTraceEvent::kAiEvent, entity, type, state_before, state_after);
+}
+
+void body_trace_class_event(World &world, EntityHandle entity, int32_t phase,
+        int32_t state_before, int32_t state_after) {
+    append_brain_event(world, BodyTraceEvent::kClassEvent, entity, phase, state_before,
+            state_after);
 }
 
 } // namespace opennova::world
