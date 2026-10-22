@@ -890,10 +890,13 @@ bool GameWorld::settle_join_wire_assets() {
 // as the host; there is no per-role render path.
 void GameWorld::place_streamed_mission_objects(const Ref<Simulation> &p_sim) {
 	if (placer_.is_null() || p_sim.is_null()) {
+		UtilityFunctions::print_verbose(vformat("GameWorld: streamed objects not placed (placer %s)",
+				placer_.is_null() ? "none" : "kept"));
 		return;
 	}
 	const Array records = p_sim->get_streamed_placement_records();
 	if (records.is_empty()) {
+		UtilityFunctions::print_verbose("GameWorld: streamed objects not placed (no placement records)");
 		return;
 	}
 	Dictionary options;

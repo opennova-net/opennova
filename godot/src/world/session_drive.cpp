@@ -1,5 +1,6 @@
 #include "world/session_drive.h"
 
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
@@ -39,6 +40,15 @@ constexpr const char *kChannelNovaWorld = "NovaWorld";
 
 int64_t now_ms() {
 	return static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+}
+
+// The joiner's mission-start window readout (an instrument, D-NET-NEW-L2-35 (b)): each mark
+// prints the process frame and the wall clock in unix milliseconds under --verbose, so the
+// window from the S2C 0x1A to the C2S 0x0B splits against the capture's own timestamps.
+void join_window_mark(const char *p_event) {
+	UtilityFunctions::print_verbose(vformat("JoinWindow: %s frame=%d unix_ms=%d", p_event,
+			static_cast<int64_t>(Engine::get_singleton()->get_process_frames()),
+			static_cast<int64_t>(Time::get_singleton()->get_unix_time_from_system() * 1000.0)));
 }
 
 // The METPROTOCOL gate reports' sink over the NovaWorld session `p_client_id` names: its strings
@@ -266,12 +276,15 @@ void SessionDrive::step_preload() {
 		const int step = policy_->preload_step(join_preload_sim_->get_join_error(), now_ms());
 		if (step == NetSessionPolicy::STEP_FAIL) {
 			fail_join_preload(policy_->fail_reason());
+			return;
 		}
+		if (join_preload_sim_->is_join_mission_start_released()) join_window_mark("release");
 		return;
 	}
 	// The 0x1A's mission start: its load. Stop the frame pump before the synchronous
 	// load transfers or releases the preload simulation. Every failure below owns its
 	// own cleanup/reporting leg.
+	join_window_mark("load_begin");
 	world_->set_process(false);
 	policy_->disarm_preload();
 	const String bms = policy_->promoted_mission_file();
@@ -285,6 +298,7 @@ void SessionDrive::step_preload() {
 	join_preload_root_.unref();
 	join_identified_ = false;
 	const int err = world_->load_mission_internal(mission, bms, resource_root);
+	join_window_mark("load_end");
 	if (err != OK) {
 		// load_mission_internal emitted the specific resource/load failure.
 		cancel_join_preload();
@@ -564,12 +578,14 @@ void SessionDrive::update_joiner_admission_signals() {
 	// pushes the two 0x2F and the 0x0B (engine: inmatch/joiner_connection.h
 	// set_mission_start_loading, D-NET-531).
 	if (sim->is_join_mission_start_released()) {
+		join_window_mark("settle_begin");
 		if (!world_->settle_join_wire_assets()) {
 			world_->report_join_wire_asset_failure(
 					"join: failed to settle the host's streamed mission assets");
 			return;
 		}
 		sim->finish_join_mission_start();
+		join_window_mark("push_end");
 	}
 	const String loss_reason = sim->get_session_loss_reason();
 	const bool deploy_pending = sim->is_join_deploy_pick_pending();
