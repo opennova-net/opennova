@@ -2446,7 +2446,12 @@ function Wait-RetailRunForPeer {
                 $state.capture_counters.packets -ge 40) {
             return $status
         }
-        if ($ServeOnlyHost -and $state.peer -and $state.authority -and $state.serve_only -and
+        # A retail Serve Only host's run state never raises peer (nor counts a
+        # player) with a joiner in its session: x7's admin pass read phase
+        # in_match, authority, responder_ready, serve_only, connection mode 1
+        # and 1709 captured packets, but peer false and player_count 0. Its
+        # joiner's own readiness proves the session.
+        if ($ServeOnlyHost -and $state.authority -and $state.serve_only -and
                 $state.capture_counters.packets -ge 40) {
             return $status
         }
@@ -2478,7 +2483,9 @@ function Assert-RetailEndpointState {
             throw "Retail $Role PID $($Instance.pid) has nonzero capture counter ${counter}=$($state.capture_counters.$counter)"
         }
     }
-    if (-not [bool] $state.active -or -not [bool] $state.peer -or
+    # A retail Serve Only host never raises peer (Wait-RetailRunForPeer's note).
+    $servingOnly = $ServeOnly -and $Role -eq "host"
+    if (-not [bool] $state.active -or (-not [bool] $state.peer -and -not $servingOnly) -or
             [string] $state.capture_state -ne "recording" -or
             [int] $state.network_type -ne 2 -or
             [int] $state.requested_port -ne $Port -or
