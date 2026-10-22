@@ -1,5 +1,10 @@
 #pragma once
 
+// STAGED, NOT WIRED (D-CTRL-6 slice 1, LI-s10): nothing feeds or drains this queue yet. Its
+// live owner is the next slice (D-CTRL-6 slice 2a/2b, LI-s11): godot::PlayerInputRouter
+// (godot/src/player/player_input_router.h) owns one queue through the KeyEventQueue binding,
+// the shell feeds it every key-down and each input frame's keyboard pass drains it.
+
 #include <array>
 #include <cstdint>
 
