@@ -2406,12 +2406,14 @@ function Resolve-ScenarioAim {
         })
         $entities = @($pool.entities)
         $self = @($entities | Where-Object { [int] $_.net_id -eq 10000 + $slot })
-        $mark = if ($byRole) {
-            $targetSlot = if ($Handle -eq "host") { 0 } else { 1 }
-            @($entities | Where-Object { [int] $_.net_id -eq 10000 + $targetSlot })
+        # @() around the if: a statement's one-element array output unrolls to the element,
+        # which has no Count under strict mode.
+        $targetSlot = if ($Handle -eq "host") { 0 } else { 1 }
+        $mark = @(if ($byRole) {
+            $entities | Where-Object { [int] $_.net_id -eq 10000 + $targetSlot }
         } else {
-            @($entities | Where-Object { [int] $_.handle -eq $target })
-        }
+            $entities | Where-Object { [int] $_.handle -eq $target }
+        })
         if ($self.Count -ne 1 -or $mark.Count -ne 1) {
             throw "aim_at ${Handle}: the retail $actor's pool 0 holds $($self.Count) body record(s) with DcbId $(10000 + $slot) and $($mark.Count) live entity record(s) for the target"
         }
