@@ -331,7 +331,8 @@ public:
 	//  @0x6231A7..0x6231D9, cb_on_error(3) @0x623229, the cooked callback @0x623254,
 	//  HandlePacket @0x623284; NapiNPManager_HandlePacket @0x622F10 - the magic packet's
 	//  callback @0x622F53 and NapiNP_HandleMagicPacket (the call @0x622F62), the protocols'
-	//  DispatchOpcode @0x622F9B, cb_on_dispatch @0x622FCD, cb_on_error(4) @0x622FF9;
+	//  DispatchOpcode (the call @0x622F96; its handler call @0x622BFE), cb_on_dispatch
+	//  @0x622FCD, cb_on_error(4) @0x622FF9;
 	//  Nwu_HandleServerHello @0x626D20 - the CI's connection @0x627533 / @0x627541, the
 	//  enumerator running @0x627559, the identity @0x62758B..0x627643, the receive leg
 	//  (its last argument 0 @0x627650) queues to the protocol's server-opcode FIFO (+0x24C
@@ -367,7 +368,7 @@ public:
 	//  CVUNABLETOCREATE @0x56A1A2 / @0x56A1D8, the node's type, flag word and texts
 	//  @0x56A207..0x56A236; UI_JoinSelectedSession @0x5699D0 - the same walk
 	//  @0x569A4B..0x569A76 (none: CVUNABLETOCREATE @0x569A78),
-	//  CNapiNetwork_StartClientConnection (the call @0x569DED);
+	//  CNapiNetwork_StartClientConnection (the call @0x569DE6);
 	//  CNapiNetwork_StartClientConnection @0x4CA160 - the node's record by its id
 	//  (NapiNPEnumerator_FindTimerById, the call @0x4CA1EE; a node's record is always
 	//  there, the removed callback freeing the node, so its -1 @0x4CA1FC is not reached

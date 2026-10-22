@@ -622,18 +622,20 @@ void ClientRuntime::drain_enumerator(const std::function<void()> &enumerator_dra
 }
 
 std::vector<std::vector<uint8_t>> ClientRuntime::destroy_session(
-		int32_t reason, bool novaworld_join, const std::function<void()> &enumerator_drain) {
+		int32_t reason, const std::function<void()> &enumerator_drain) {
 	if (role_ != Role::Joiner || joiner_ == nullptr) return {};
 	std::vector<std::vector<uint8_t>> burst = disconnect("N.C:SWWAD[1]:" + std::to_string(reason));
 	// The session reset's connection destroy and its enumerator's drain [orig:
 	//  CNapiGameSession_FullDestroy @0x4C96A0 - CNapiGameSession_ResetActiveSession called
 	//  @0x4C96E2, ahead of the transport's teardown].
 	drain_enumerator(enumerator_drain);
-	// The transport's teardown, after the leave's lines (a joiner's socket is always open:
-	// SetTransportMode 2 / 4 at the enumerate; it closes with the join's session) [orig:
-	// CNapiGameSession_FullDestroy @0x4C96A0 - @0x4C9722, @0x4C974E, @0x4C9763].
-	tear_down_session_transport(novaworld_join, /*socket_open=*/true, connect_log_);
 	return burst;
+}
+
+void ClientRuntime::tear_down_transport(bool novaworld_join) {
+	if (role_ != Role::Joiner || joiner_ == nullptr) return;
+	// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - @0x4C9722, @0x4C974E, @0x4C9763]
+	tear_down_session_transport(novaworld_join, /*socket_open=*/true, connect_log_);
 }
 
 bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {

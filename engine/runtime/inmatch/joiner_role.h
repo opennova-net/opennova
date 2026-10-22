@@ -172,7 +172,7 @@ public:
 	//  the sprintf @0x4C96CC, the leave @0x4C96DB]
 	void cancel_join();
 	// The join's network type is NovaWorld (the menu's connect type 1): the session destroy keeps
-	// its transport, so no NET TEARING DOWN SOCKET (ClientRuntime::destroy_session). Set by the
+	// its transport, so no NET TEARING DOWN SOCKET (ClientRuntime::tear_down_transport). Set by the
 	// embedder from the join record; it outlives a runtime rebuild.
 	void set_join_novaworld(bool novaworld) { join_novaworld_ = novaworld; }
 	// The embedder's drain of the process enumerator's records (the browse the join went on
@@ -302,7 +302,8 @@ private:
 	// Ship one framed datagram to the dialed host (the socket send).
 	void send(const std::vector<uint8_t> &dg);
 	// FullDestroy(reason): the leave burst on the wire, then the session reset's stop of a held
-	// server over the same socket (stop_held_server; joiner_role.cpp).
+	// server over the same socket (stop_held_server), then the transport's teardown line
+	// (ClientRuntime::tear_down_transport; joiner_role.cpp).
 	void destroy_session(int32_t reason);
 	void stop_held_server();
 	// Deposit received framed datagrams for this frame's recv pump (socket

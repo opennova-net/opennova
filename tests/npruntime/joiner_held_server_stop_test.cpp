@@ -74,9 +74,18 @@ public:
 
 struct CaptureSocket final : IDatagramSocket {
 	std::vector<std::pair<PeerAddr, std::vector<uint8_t>>> sent;
+	// The connect log's file, read at each held joiner's send (null: not read): whether the
+	// transport's teardown line was already written when a STOP went out.
+	const MemoryFiles *files = nullptr;
+	bool teardown_ahead_of_stop = false;
 	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
 	void send_to(const PeerAddr &to, const uint8_t *data, std::size_t len) override {
 		sent.emplace_back(to, std::vector<uint8_t>(data, data + len));
+		if (files == nullptr || !(to == kHeld)) return;
+		const auto log = files->files.find(inmatch::kConnectLogFile);
+		if (log != files->files.end() &&
+				log->second.find("NET TEARING DOWN SOCKET") != std::string::npos)
+			teardown_ahead_of_stop = true;
 	}
 };
 
@@ -105,6 +114,8 @@ struct Outcome {
 	std::string inout;
 	int enumerator_drains = 0; // the embedder's process-enumerator drain runs
 	bool drain_ahead_of_stop = false; // the drain ran before the held server's first STOP
+	bool teardown_line = false; // the connect log's NET TEARING DOWN SOCKET was written
+	bool teardown_ahead_of_stop = false; // ... before a STOP went out
 };
 
 Outcome close_with_a_held_server(int32_t reason) {
@@ -131,6 +142,13 @@ Outcome close_with_a_held_server(int32_t reason) {
 	auto kernel = std::make_unique<mission::MissionKernel>();
 	kernel->world.registry.configure_pool(0, 16);
 	CaptureSocket socket;
+	// The connect log, on: the transport's teardown writes its line after the held server's
+	// stop (CNapiGameSession_FullDestroy: ResetActiveSession's StopServer @0x4C8AA1 ahead of
+	// CNapiNetwork_TearDownSocket @0x4C9763).
+	inmatch::ConnectLog connect_log{files};
+	connect_log.set_clock([] { return std::string("T"); });
+	connect_log.start(inmatch::ConnectLogHeader{});
+	socket.files = &files;
 	inmatch::JoinerRole role;
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
@@ -150,6 +168,7 @@ Outcome close_with_a_held_server(int32_t reason) {
 	role.kit_seams.reseed_on_side_change = [] { return false; };
 	role.kit_seams.push = [] {};
 	role.create_runtime("HeldStopJoiner", inmatch::JoinRole::Player, "", "");
+	role.runtime->set_connect_log(&connect_log);
 	// Its joiner was heard just now: the join attempt's pump keeps it (no reap).
 	process.unstopped_server.nodes[0].conn.receive_stamp_ms =
 			static_cast<uint32_t>(role.runtime->join_clock_ms());
@@ -180,6 +199,9 @@ Outcome close_with_a_held_server(int32_t reason) {
 	out.held_after = process.unstopped_server.running ||
 			!process.unstopped_server.nodes.empty();
 	out.inout = files.files[inmatch::kInoutLogFileName] + inout.pending();
+	out.teardown_line = files.files[inmatch::kConnectLogFile].find("NET TEARING DOWN SOCKET") !=
+			std::string::npos;
+	out.teardown_ahead_of_stop = socket.teardown_ahead_of_stop;
 	return out;
 }
 
@@ -194,6 +216,10 @@ void test_a_session_reset_stops_the_held_server_after_the_leave() {
 		CHECK(!out.held_after);
 		// The connection destroy drained the process enumerator once, ahead of the stop.
 		CHECK(out.enumerator_drains == 1 && out.drain_ahead_of_stop);
+		// FullDestroy's transport teardown writes its line after the reset's held-server stop;
+		// reason 2's reset is no FullDestroy and writes none.
+		CHECK(out.teardown_line == (reason == inmatch::kMissionExitQuit));
+		CHECK(!out.teardown_ahead_of_stop);
 		const std::size_t removed = out.inout.find(
 				"127.0.0.1:31000 : SERVER PLAYER REMOVED \"\". [1,9,0,0,\"\",0,\"NP.C:SH:STOP\"]");
 		// HOST STOPPED formats the socket the stop goes out on: its bind address and port.

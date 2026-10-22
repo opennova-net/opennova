@@ -1984,17 +1984,19 @@ void JoinerRole::cancel_join() {
 	destroy_session(runtime->pre_game_cancel_reason());
 }
 
-// The joiner's FullDestroy(reason): the leave burst goes out at once, then the session reset
-// (stop_held_server), ahead of the transport's teardown.
+// The joiner's FullDestroy(reason): the leave burst goes out at once, then the session reset (the
+// connection destroy's drain, then stop_held_server), then the transport's teardown with its
+// line, after the held server's stop.
 // [orig: CNapiGameSession_FullDestroy @0x4C96A0 - the leave @0x4C96DB,
 //  CNapiGameSession_ResetActiveSession called @0x4C96E2, CNapiNetwork_TearDownSocket called
-//  @0x4C9763; CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the burst sent at once
+//  @0x4C9763; CNapiGameSession_ResetActiveSession @0x4C8A70 - NapiNPProtocol_StopServer called
+//  @0x4C8AA1; CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the burst sent at once
 //  (CNapiNPConnection_SendDisconnectPacket called @0x625406)]
 void JoinerRole::destroy_session(int32_t reason) {
-	for (const std::vector<uint8_t> &dg :
-			runtime->destroy_session(reason, join_novaworld_, enumerator_drain_))
+	for (const std::vector<uint8_t> &dg : runtime->destroy_session(reason, enumerator_drain_))
 		send(dg);
 	stop_held_server();
+	runtime->tear_down_transport(join_novaworld_);
 }
 
 // A joiner's session reset (a destroying route's FullDestroy, the Post Menu's reason-2 arm)

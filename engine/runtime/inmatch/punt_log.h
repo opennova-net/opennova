@@ -134,12 +134,13 @@ std::string net_tearing_down_socket_text();
 // NovaWorld with a socket open writes NET TEARING DOWN SOCKET to `log` (null: none; the line only
 // while the log is on), and the embedder then closes the socket (true). A join on NovaWorld (the
 // menu's connect type 1) keeps its transport, and with no socket open there is nothing to tear
-// down (false, nothing written). A join's destroy runs it with the join's socket open
-// (ClientRuntime::destroy_session). The join machine's state 9 ahead of a dial (a refused row, the
-// choice's BACK or Cancel, the enumerate's ABORT) runs the same destroy over the process's
-// transport, with no connection of the join's own to leave (the connection is not active): its
-// session reset drains the enumerator's records (their REMOVED lines), then stops a held server
-// (stop_unstopped_server, over the still-open socket), then this teardown.
+// down (false, nothing written). A join's destroy runs it with the join's socket open, after its
+// session reset's held-server stop (ClientRuntime::tear_down_transport). The join machine's
+// state 9 ahead of a dial (a refused row, the choice's BACK or Cancel, the enumerate's ABORT)
+// runs the same destroy over the process's transport, with no connection of the join's own to
+// leave (the connection is not active): its session reset drains the enumerator's records (their
+// REMOVED lines), then stops a held server (stop_unstopped_server, over the still-open socket),
+// then this teardown.
 // [orig: CNapiGameSession_FullDestroy @0x4C96A0 - `networkConnectType_480 != 1` @0x4C9722, the
 //  transport mode @0x4C974E, CNapiNetwork_TearDownSocket (the calls @0x4C9763 / @0x4C976F);
 //  CNapiNetwork_TearDownSocket @0x4C4C90 - the manager test, the line @0x4C4CBE..0x4C4CE7 ahead

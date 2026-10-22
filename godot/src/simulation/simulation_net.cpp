@@ -717,7 +717,7 @@ void Simulation::set_join_network_type(int p_type) {
 			? opennova::inmatch::NetworkType::NovaWorld
 			: opennova::inmatch::NetworkType::Lan;
 	// A NovaWorld join's session destroy keeps its transport (engine:
-	// inmatch::ClientRuntime::destroy_session).
+	// inmatch::ClientRuntime::tear_down_transport).
 	if (joiner_role_ != nullptr)
 		joiner_role_->set_join_novaworld(
 				net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld);

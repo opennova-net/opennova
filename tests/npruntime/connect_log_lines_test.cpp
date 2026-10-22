@@ -693,7 +693,8 @@ void test_remote_joiner_destroy_tears_down_the_socket() {
 		client.set_connect_log(&log);
 		const std::vector<uint8_t> hello = client.start();
 		CHECK(!hello.empty());
-		CHECK(client.destroy_session(-1, novaworld).empty());
+		CHECK(client.destroy_session(-1).empty());
+		client.tear_down_transport(novaworld);
 		const std::vector<std::string> lines = log_lines(files);
 		if (novaworld) {
 			CHECK(lines.size() == 1);
@@ -785,7 +786,8 @@ void test_remote_joiner_destroy_drains_the_enumerator() {
 		++drains;
 		log.line("DRAIN");
 	};
-	CHECK(client.destroy_session(-1, /*novaworld_join=*/false, drain).empty());
+	CHECK(client.destroy_session(-1, drain).empty());
+	client.tear_down_transport(/*novaworld_join=*/false);
 	const std::vector<std::string> lines = log_lines(files);
 	const std::vector<std::string> tail(lines.begin() + static_cast<std::ptrdiff_t>(at), lines.end());
 	const std::vector<std::string> expected = {
