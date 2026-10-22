@@ -782,6 +782,61 @@ func test_use_hold_swallows_digit_rows_and_ctrl_digit_claims_them() -> void:
 	_frame(world, presenter, camera, 2)
 
 
+# A key-down event as the shell's key leg takes it: its label and its physical key.
+func _key_event(keycode: Key) -> InputEventKey:
+	var key := InputEventKey.new()
+	key.keycode = keycode
+	key.physical_keycode = keycode
+	key.pressed = true
+	return key
+
+
+# The special-key chain's held-USE arm (s9 FOUND 3): while the USE hold the next
+# input frame reads holds (the presenter's is_use_held, engine
+# controls::PlayerActions::use_held), the arm takes a digit and passes every
+# other key to the chain's tail, so the round-over leg never runs for it. The
+# round's last input frame latched the hold; the next one's head drops the held
+# USE row under the round-over gate, the hold ends, and the round-over leg takes
+# the key (out of a session, every key). Shift is released at the end.
+# [orig: Input_HandleSpecialKeys @0x49c5c0 - the held-USE arm @0x49c6d8, its
+#  non-digit's jump to the tail @0x49c6e0, the round-over arm @0x49c7cf, every
+#  key taken out of a session @0x49c8d5; Input_ProcessFrame @0x49d520 - the aging
+#  @0x49d57f; Input_HandleActionBinding @0x49AD40 - g_RoundOver @0x49ADEE..0x49AE16]
+func test_the_use_hold_passes_a_key_past_the_round_over_leg() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, camera, null, ControlsModel.new())
+	presenter.set_input_override(_move_intent())
+	var hud := GameHudPresenter.new()
+	add_child_autofree(hud)
+	hud.setup(world, presenter, null)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var sim := world.get_sim()
+	assert_false(sim.is_mp_session(), "a single-player world")
+	assert_false(presenter.is_use_held(), "no hold before USE")
+
+	_hold(KEY_SHIFT, true)
+	_frame(world, presenter, camera, 2)
+	assert_true(presenter.is_use_held(), "the held USE row latched the hold")
+	# The script's first execution loses the round, USE still held.
+	assert_true(sim.compile_and_set_wac(PackedStringArray(["Lose(0)"])))
+	assert_true(_frame_until(world, presenter, camera,
+			func() -> bool: return sim.is_round_over(), 600), "the WAC Lose ends the round")
+	assert_true(presenter.is_use_held(), "the round's last input frame latched the hold")
+	assert_false(hud.handle_special_key(_key_event(KEY_Q)),
+			"under the hold the key passes the round-over leg and nothing takes it")
+	_frame(world, presenter, camera, 1)
+	assert_false(presenter.is_use_held(), "the round-over gate drops the held USE row")
+	assert_true(hud.handle_special_key(_key_event(KEY_Q)),
+			"with no hold the round-over leg takes every key out of a session")
+	_hold(KEY_SHIFT, false)
+	_frame(world, presenter, camera, 1)
+
+
 # The router's menu arms: while the HUD's F9 Emotes menu is open a digit is its
 # pick, closing the menu and reaching no row (radarout rebound to 0 stays put);
 # once the menu is closed the same 0 fires the row again.

@@ -614,6 +614,62 @@ bool test_held_use_runs_the_arm_every_frame() {
 	return true;
 }
 
+// The special-key chain's held-USE word: the hold the last poll's USE row latched (the
+// mount chain alone), which the next input frame's head ages into the word the chain
+// reads. A frame whose arm leaves the chain (the armory's open, a press the head or the
+// latch takes) latches no hold, a seat pick that consumed the hold keeps the word up
+// while the key is held, and the release frame clears it.
+// [orig: Input_ProcessFrame @0x49d520 - g_UseItemHoldPrev = g_UseItemHoldLatch
+//  @0x49d57f, the latch cleared @0x49d585; Input_HandleActionBinding_0 case 0xB1's
+//  latch @0x4e0b71; Input_HandleSpecialKeys @0x49c5c0 - the held-USE arm's test
+//  @0x49c6d8, a non-digit's jump to the tail @0x49c6e0]
+bool test_use_held_is_the_hold_the_chain_reads() {
+	using Arm = UseItemPressArm;
+	std::vector<Arm> arms;
+	std::size_t asked = 0;
+	PlayerActionPoll gate = kLive;
+	gate.take_use_item_arm = [&]() { return asked < arms.size() ? arms[asked++] : Arm::kTaken; };
+	PlayerActions actions;
+	Keys keys;
+	CHECK(!actions.use_held());
+	arms = {Arm::kMountChain, Arm::kMountChain, Arm::kMountChain, Arm::kTaken};
+	keys.hold("useitem");
+	actions.poll(keys, gate);
+	CHECK(actions.use_held()); // the first held frame's latch: the next frame's word
+	keys.digits[2] = true;
+	CHECK(requests_are(actions.poll(keys, gate), {{Action::SelectSeat, 1}}));
+	CHECK(actions.use_held()); // the seat pick consumes the hold, not the word
+	keys.digits[2] = false;
+	actions.poll(keys, gate);
+	CHECK(actions.use_held());
+	// A taken press latches no hold: the word drops while the key is down, and the
+	// consumed hold's release edge toggles nothing.
+	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(!actions.use_held());
+	keys.release("useitem");
+	actions.poll(keys, gate);
+	CHECK(!actions.use_held());
+
+	PlayerActions armory;
+	arms = {Arm::kOpenArmory};
+	asked = 0;
+	keys.hold("useitem");
+	CHECK(requests_are(armory.poll(keys, gate), {{Action::OpenArmory}}));
+	CHECK(!armory.use_held());
+	keys.release("useitem");
+
+	PlayerActions released;
+	arms = {Arm::kMountChain};
+	asked = 0;
+	keys.hold("useitem");
+	released.poll(keys, gate);
+	CHECK(released.use_held());
+	keys.release("useitem");
+	CHECK(requests_are(released.poll(keys, gate), {{Action::ToggleMount}}));
+	CHECK(!released.use_held());
+	return true;
+}
+
 // Every menu close clears the key state: a key held through it (Shift as the
 // WEAPON screen's ACCEPT, a held W) reads up until its next key-down message,
 // a press or an OS repeat, or until its release; a key up at the reset is not
@@ -787,7 +843,8 @@ int main() {
 			test_spectator_rows_edge_to_their_codes, test_key_state_reset, test_reset_drops_the_held_release, test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen, test_to_special_latch_reads_the_key_state,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
 			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,
-			test_held_use_runs_the_arm_every_frame, test_key_rows_carry_their_dispatch_codes})
+			test_held_use_runs_the_arm_every_frame, test_use_held_is_the_hold_the_chain_reads,
+			test_key_rows_carry_their_dispatch_codes})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

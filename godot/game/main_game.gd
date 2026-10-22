@@ -508,7 +508,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 	# Once the SP round is over the special-key chain's round-over leg takes
-	# every key: RESTART runs the splash re-run (over a custom loading
+	# every key an earlier arm (the USE hold, an open Emotes / Radio menu) does
+	# not hold: RESTART runs the splash re-run (over a custom loading
 	# background) and the restart, ESC the quit; both reach the shell as the
 	# session's mission exit (_on_session_lost).
 	if _state == State.WORLD and _end_flow.is_round_ended() and _hud_presenter != null \

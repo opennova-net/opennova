@@ -1056,9 +1056,9 @@ func handle_chat_key(key: InputEventKey) -> bool:
 
 ## One key-down through the special-key chain (engine hud_toggles.h), over
 ## live play and in a pass-through screen's input frame: the quit dialog's keys
-## first; unless the dialog took the chain or an Emotes / Radio menu is open
-## (their digits are PlayerActions'), the round-over leg once the round-over
-## gate holds (Simulation.round_over_key: a session's end-of-round board takes
+## first; unless the dialog took the chain or an earlier arm holds it (the USE
+## hold, an open Emotes / Radio menu: _chain_arm_holds), the round-over leg once
+## the round-over gate holds (Simulation.round_over_key: a session's end-of-round board takes
 ## PgUp / PgDn, a co-op session or single player every key, its RESTART
 ## queueing input event 12), else the Tab board's page keys and then the
 ## status page's Enter / PgUp / PgDn; then the deploy keys: `deploy_param`
@@ -1086,8 +1086,7 @@ func handle_special_key(key: InputEventKey, deploy_param := Callable(),
 		return true
 	var page_key := key.keycode == KEY_PAGEUP or key.keycode == KEY_PAGEDOWN
 	var taken := false
-	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0 and not _toggles.is_emotes_menu_open() \
-			and not _toggles.is_radio_menu_open():
+	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0 and not _chain_arm_holds():
 		var round_over := int(sim.round_over_key(vk, restart_vk))
 		if round_over & HudToggles.ROUND_OVER_ARM:
 			# The RESTART arm queues event 12 (a session's pick); the restart's
@@ -1113,6 +1112,17 @@ func handle_special_key(key: InputEventKey, deploy_param := Callable(),
 	if taken:
 		ControlsBindings.model().consume_key_press(vk)
 	return taken
+
+
+## Whether an arm ahead of the round-over leg holds the special-key chain: the
+## held-USE seat arm (the USE hold the next input frame reads), then the Emotes
+## and Radio menus. Each takes a digit (PlayerActions' seat pick and menu
+## picks) and passes every other key to the chain's tail, so the round-over,
+## Tab board and status page legs never run for it (engine
+## controls::PlayerActions::use_held carries the witness).
+func _chain_arm_holds() -> bool:
+	return (_player_presenter != null and _player_presenter.is_use_held()) \
+			or _toggles.is_emotes_menu_open() or _toggles.is_radio_menu_open()
 
 
 ## The KeyPress gametext key's code: its first character as written, the
@@ -1206,10 +1216,11 @@ func begin_end_of_round_cine() -> void:
 
 ## One key-down once the round is over: the special-key chain's round-over
 ## leg (engine inmatch round_over_key; the world takes the RESTART and ESC
-## halves). Returns the HudToggles.ROUND_OVER_* bits (0 = not taken).
+## halves), unless an earlier arm holds the chain (_chain_arm_holds). Returns
+## the HudToggles.ROUND_OVER_* bits (0 = not taken).
 func handle_round_over_key(key: InputEventKey) -> int:
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim == null:
+	if sim == null or _chain_arm_holds():
 		return 0
 	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
 	var bits := int(sim.round_over_key(vk, _key_press_vk("STRKEYPRESS_RESTART", "R")))

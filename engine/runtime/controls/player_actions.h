@@ -250,6 +250,19 @@ public:
 	void reset();
 	// Deferred until after the next poll's fresh-USE-press reset.
 	void consume_use_hold();
+	// The USE hold the special-key chain's held-USE arm reads: the hold the last poll's USE
+	// row latched, which the next input frame's head ages into the word its keyboard pass
+	// reads, so a key the embedder's chain takes between two polls meets it. While it
+	// holds, the arm takes a digit (the seat pick, poll()) and passes every other key to
+	// the chain's tail: the Emotes, Radio and round-over arms, the Tab board's page keys
+	// and the status page's keys never run for it.
+	// [orig: Input_ProcessFrame @0x49d520 - g_UseItemHoldPrev = g_UseItemHoldLatch
+	//  @0x49d57f, the latch cleared @0x49d585, ahead of the keyboard pass
+	//  (Input_ProcessPlayerFrame @0x49d58b); Input_HandleActionBinding_0 case 0xB1's
+	//  latch @0x4e0b71; Input_HandleSpecialKeys @0x49c5c0 - the held-USE arm's test
+	//  @0x49c6d8 (its clear word on to the Emotes arm @0x49c731), a non-digit's jump to
+	//  the tail @0x49c6e0 -> @0x49c9c9]
+	bool use_held() const { return use_latched_; }
 	// A menu close's reset clears the key-press latch, which gates the release
 	// dispatch: a key held through it dispatches no release, neither then nor
 	// at its physical release (ToSpecial's release arm is the one ported).

@@ -246,6 +246,8 @@ public:
 	// debug pick rides Shift+F6; the tools window opening mid-hold): the
 	// router's release edge then runs no mount toggle.
 	void consume_use_hold();
+	// The USE hold the HUD's special-key chain reads (PlayerInputRouter::is_use_held).
+	bool is_use_held() const { return input_router_.is_use_held(); }
 	// The held USE row's armory arm took its open this frame (PlayerInputRouter::
 	// take_armory_request); reading clears it.
 	bool take_use_item_armory_request();

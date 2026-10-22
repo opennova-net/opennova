@@ -98,6 +98,9 @@ public:
 	// release edge then runs no mount toggle. Applied after this frame's
 	// fresh-press reset so a same-frame chord sticks.
 	void consume_use_hold();
+	// The USE hold the special-key chain's held-USE arm reads
+	// (controls::PlayerActions::use_held carries the witness).
+	bool is_use_held() const { return actions_.use_held(); }
 	// The held USE row's armory arm took its open on the last frame's poll
 	// (controls::PlayerAction::OpenArmory); reading clears it. The shell
 	// opens weapon.mnu's WEAPON screen.
