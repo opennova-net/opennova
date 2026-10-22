@@ -44,7 +44,7 @@
     {"tick": 384, "down": 149},
     {"tick": 390, "up": 149},
     {"tick": 450, "press": 209},
-    {"tick": 550, "aim_at": "0x0088"},
+    {"tick": 550, "aim_at": "joiner"},
     {"tick": 560, "down": 152},
     {"tick": 640, "up": 152},
     {"tick": 650, "look_px": [0, 250]},

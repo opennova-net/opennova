@@ -443,7 +443,8 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 	// A residual between a run's full health and death is a hit's draw: the damage is
 	// the round's impact speed times its weight / 875 [orig: Weapon_CalcImpactDamage
 	// @0x4EC920 (@0x4ECB2B)] times the zone's multiplier (on a type-3 target the switch
-	// @0x4EC9BF: 1.25 for zones 0..4, 1.0 for 5..8, 0.5 for 9..12 and 15..18, 3.0 for
+	// @0x4EC9BF: 1.25 for zones 0..4, 1.0 for 5..8 and for 19 and above (the default leg
+	// @0x4EC9B6 keeps the fld1 @0x4EC94D), 0.5 for 9..12 and 15..18, 3.0 for
 	// 13..14; the def flag 0x200's seat path @0x4EC968..0x4EC994: 6.0 for seat types 2, 3,
 	// 6 and 7), then on a type-3 target the shooter's 0.9 or 1.1 (@0x4ECB5A / @0x4ECB66)
 	// and the ammo def's clamp (@0x4ECB77..0x4ECB91), so where a round lands and how fast

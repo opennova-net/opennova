@@ -308,7 +308,9 @@ function Read-ParityScenario {
     # sensitivity word, and plays the rest after one look_px computed as
     # retail computes the look yaw (Invoke-ScenarioAimStage,
     # scripts/net/scenario_aim.py). A played part's end releases every held
-    # code, so no code is held across an aim_at.
+    # code, so no code is held across an aim_at. The target may also be the
+    # other player by role ("joiner" or "host"): its body by DcbId, not by a
+    # handle one capture saw (Resolve-ScenarioAim).
     $held = @{}
     $pressReleased = 0
     foreach ($step in $steps) {
@@ -317,8 +319,15 @@ function Read-ParityScenario {
         elseif ($names -contains "up") { $held.Remove([string] $step.up) }
         elseif ($names -contains "press") { $pressReleased = [Math]::Max($pressReleased, [int] $step.tick + 1) }
         elseif ($names -contains "aim_at") {
-            if ($names.Count -ne 2 -or [string] $step.aim_at -notmatch '^0x0?[0-9a-fA-F]{1,3}$') {
-                throw "Scenario $($spec.name): an aim_at step is {tick, aim_at} naming a pool-0 handle 0x0000..0x0FFF"
+            $other = if ([string] $spec.actor -eq "host") { "joiner" } else { "host" }
+            if ($names.Count -ne 2 -or ([string] $step.aim_at -notmatch '^0x0?[0-9a-fA-F]{1,3}$' -and
+                    [string] $step.aim_at -cne $other)) {
+                throw "Scenario $($spec.name): an aim_at step is {tick, aim_at} naming a pool-0 handle 0x0000..0x0FFF or the other player's role ($other)"
+            }
+            $retailActor = ([string] $spec.actor -eq "joiner" -and $Topology -in @("RR", "OR")) -or
+                ([string] $spec.actor -eq "host" -and $Topology -in @("RR", "RO"))
+            if ([string] $step.aim_at -ceq $other -and -not $retailActor) {
+                throw "Scenario $($spec.name): aim_at $other resolves on a retail actor's pool read, and $Topology's $($spec.actor) is OpenNova's"
             }
             if ($held.Count -gt 0 -or $pressReleased -gt [int] $step.tick) {
                 throw "Scenario $($spec.name): code(s) $(@($held.Keys) -join ', ') held (or a press released) across the aim_at at tick $($step.tick)"
@@ -2190,17 +2199,25 @@ function Invoke-ScenarioAimTool {
 # words; its mouse sensitivity is its copy's current profile record's +0x590
 # word (scenario_aim.py profile-word). An OpenNova actor's come from the
 # scenario_play probe's aim_read: the local player's heading BAM, its and the
-# target's mission positions, and the session's mouse sensitivity word.
+# target's mission positions, and the session's mouse sensitivity word. A
+# target named by role ("joiner" or "host") is the other player's body, found
+# the same way by its DcbId (10000 + its slot) in the retail actor's pool read,
+# so no captured handle rides the scenario; an OpenNova actor's aim_read takes
+# a handle, so the role form plays on a retail actor.
 function Resolve-ScenarioAim {
     param(
         [Parameter(Mandatory = $true)] [string] $Handle,
         [string] $RetailInstanceId = ""
     )
-    $target = [Convert]::ToInt32($Handle.Substring(2), 16)
+    $byRole = $Handle -in @("joiner", "host")
+    $target = if ($byRole) { -1 } else { [Convert]::ToInt32($Handle.Substring(2), 16) }
     $actor = [string] $script:ScenarioSpec.actor
     $retailActor = ($actor -eq "joiner" -and $Topology -in @("RR", "OR")) -or
         ($actor -eq "host" -and $Topology -in @("RR", "RO"))
     $invariant = [Globalization.CultureInfo]::InvariantCulture
+    if ($byRole -and -not $retailActor) {
+        throw "aim_at ${Handle}: a target named by role resolves on a retail actor's pool read; the OpenNova $actor on $Topology takes a handle"
+    }
     if ($retailActor) {
         $slot = if ($actor -eq "host") { 0 } else { 1 }
         $pool = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_pool_entities" -Arguments @{
@@ -2210,9 +2227,17 @@ function Resolve-ScenarioAim {
         })
         $entities = @($pool.entities)
         $self = @($entities | Where-Object { [int] $_.net_id -eq 10000 + $slot })
-        $mark = @($entities | Where-Object { [int] $_.handle -eq $target })
+        $mark = if ($byRole) {
+            $targetSlot = if ($Handle -eq "host") { 0 } else { 1 }
+            @($entities | Where-Object { [int] $_.net_id -eq 10000 + $targetSlot })
+        } else {
+            @($entities | Where-Object { [int] $_.handle -eq $target })
+        }
         if ($self.Count -ne 1 -or $mark.Count -ne 1) {
-            throw "aim_at ${Handle}: the retail $actor's pool 0 holds $($self.Count) body record(s) with DcbId $(10000 + $slot) and $($mark.Count) live entity record(s) at the handle"
+            throw "aim_at ${Handle}: the retail $actor's pool 0 holds $($self.Count) body record(s) with DcbId $(10000 + $slot) and $($mark.Count) live entity record(s) for the target"
+        }
+        if ($byRole) {
+            Write-Host "PARITY_RUN_NOTE aim_at ${Handle}: the body with DcbId $(10000 + $targetSlot) is handle 0x$(([int] $mark[0].handle).ToString('x4'))"
         }
         $copy = if ($actor -eq "host") { $ServerDir } else { $ClientDir }
         $word = Invoke-ScenarioAimTool -Arguments @("profile-word", "--copy=$copy")
@@ -2221,6 +2246,7 @@ function Resolve-ScenarioAim {
             logic_tick = $(if ($pool.PSObject.Properties.Name -contains "logic_tick") { $pool.logic_tick } else { $null })
             heading_bam = [long] $self[0].yaw_bam
             actor_q16 = @($self[0].pos)
+            target_handle = [int] $mark[0].handle
             target_q16 = @($mark[0].pos)
             mouse_sensitivity = [int] $word.mouse_sensitivity
             profile_slot = [int] $word.slot

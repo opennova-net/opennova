@@ -28,6 +28,10 @@ and its own mouse sensitivity word S, as retail computes the look yaw:
   (PlayerProfile_LoadAllFromDisk @0x54F670..0x54F682), the slot game.cfg's
   player_index, 0 when it lies outside 0..5 (@0x54F659..0x54F66B); player.sav holds
   the records after its 16-byte header (engine/formats/playersav/player_sav.h).
+  player.sav holds five records, so retail's bound keeps a slot (5, jle @0x54F667)
+  whose record lies past the array, and the session start then reads past it. The
+  script refuses that slot on purpose (profile_mouse_sensitivity finds no record 5 in
+  the file): a test instrument does not model the read past the array.
 
 The look is the px whose rounded turn lands nearest the bearing (the inverse of the
 half-up rounding above, a tie to the smaller |px|). onHook takes at most 32767 px
@@ -121,7 +125,8 @@ def profile_slot(game_cfg_text: str) -> int:
 
 
 def profile_mouse_sensitivity(player_sav: bytes, slot: int) -> int:
-    """The record's +0x590 word, the g_MouseSensitivity the session start copies."""
+    """The record's +0x590 word, the g_MouseSensitivity the session start copies. A slot
+    whose record the file does not hold (retail's slot 5, past its five) is refused."""
     at = PROFILE_HEADER_BYTES + slot * PROFILE_RECORD_BYTES + MOUSE_SENSITIVITY_OFFSET
     if at + 4 > len(player_sav):
         raise ValueError(f"player.sav ({len(player_sav)} bytes) holds no record {slot}")
