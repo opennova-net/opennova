@@ -951,12 +951,20 @@ inline bool active_player_recipient(const NapiNPConnection &conn) {
 }
 
 // A server a mission exit's error arm left unstopped. The post-mission router's error arms
-// skip the session's destroy, so ctx+0x68 stays set and the protocol keeps its server-side
-// nodes, host_running set, under a closed socket until the next session reset stops them
-// (stop_unstopped_server, napi_np_protocol.h). The process holds it (ClientProcessState).
+// skip the session's destroy, so the protocol keeps its server-side nodes, host_running set,
+// past the socket's close until the next session reset's StopServer, which gates on
+// host_running alone, stops them (stop_unstopped_server, napi_np_protocol.h). The process
+// holds it (ClientProcessState). Retail's LAN browse and join pumps step the held nodes in
+// between (their queued sends, their send intervals, the receive-timeout reap) over the
+// browse's socket; ours holds them inert (D-NET-NEW-L1-26, NARROWED to the held server's
+// pump).
 // [orig: PostMenu_RouteMissionExit @0x568460 - the error arms' loc_5686DA, no FullDestroy;
-//  CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0x68 test @0x4C8A73, StopServer
-//  called @0x4C8AA1, +0x68 cleared @0x4C8AC0]
+//  CNapiGameSession_ResetActiveSession @0x4C8A70 - StopServer called @0x4C8AA1 whatever
+//  +0x68 holds, +0x68 cleared @0x4C8AC0; NapiNPProtocol_StopServer @0x62A820 - host_running
+//  @0x62A85F..0x62A869;
+//  CNapiGameSession_InitTransportConnection's NapiNPProtocol_Pump(-1) @0x4CA14B,
+//  CNapiNetwork_PumpTransportAndProtocol's @0x4C6E3D, CNapiNetwork_PumpAndCheckState's
+//  @0x4C6EA2]
 struct UnstoppedServer {
 	bool running = false;
 	std::vector<NapiNPConnection> connections; // the server-side nodes, in list order

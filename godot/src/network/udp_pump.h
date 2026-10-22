@@ -70,6 +70,12 @@ public:
 
 	bool is_open() const { return socket_.is_valid(); }
 	int local_port() const { return local_port_; }
+	// The process's transport socket: the pump whose socket opened last (a host's or the
+	// NovaWorld session's listen, the LAN browse's or a join's client arm) while it stays
+	// open; null once it closes. Retail holds one transport socket, the manager's, and the
+	// process's network shutdown sends a held server's STOP bursts over it (GameWorld's exit;
+	// engine: inmatch::stop_unstopped_server carries the witness, D-NET-NEW-L1-26).
+	static UdpPump *process_transport();
 	// The dialed default destination as a packed PeerAddr (zero before dial).
 	opennova::PeerAddr dialed_host() const;
 	void close();

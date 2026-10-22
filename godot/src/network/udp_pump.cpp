@@ -52,7 +52,14 @@ uint32_t ipv4_from_string(const String &ip) {
 	return out;
 }
 
+// The pump whose socket opened last, while it stays open (UdpPump::process_transport).
+UdpPump *g_process_transport = nullptr;
+
 } // namespace
+
+UdpPump *UdpPump::process_transport() {
+	return g_process_transport;
+}
 
 UdpPump::UdpPump() {}
 UdpPump::~UdpPump() { close(); }
@@ -94,6 +101,7 @@ int UdpPump::bind_listen_at(int port, uint32_t address) {
 		return static_cast<int>(err);
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
+	g_process_transport = this;
 	capture_ = opennova::net::PcapUdpWriter::from_path(
 			opennova::to_std(capture_path_));
 	if (capture_ != nullptr) {
@@ -124,6 +132,7 @@ int UdpPump::bind_client() {
 		return static_cast<int>(err);
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
+	g_process_transport = this;
 	capture_ = opennova::net::PcapUdpWriter::from_path(
 			opennova::to_std(capture_path_));
 	return static_cast<int>(OK);
@@ -157,6 +166,7 @@ void UdpPump::close() {
 	capture_.reset();
 	if (socket_.is_valid()) socket_->close();
 	socket_.unref();
+	if (g_process_transport == this) g_process_transport = nullptr;
 	local_port_ = 0;
 	dest_ip_ = String();
 	dest_port_ = 0;

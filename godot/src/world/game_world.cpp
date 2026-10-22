@@ -20,6 +20,7 @@
 #include <runtime/mission/runtime_boot.h> // boot_files_from_index (the admin's process gametext)
 #include "util/string_convert.h"
 #include "network/novaworld_client.h"
+#include "network/udp_pump_datagram_socket.h" // the process transport (the shutdown's STOP bursts)
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_protocol.h> // stop_unstopped_server (the shutdown's reset)
 #include "audio/music_director.h"
@@ -183,12 +184,17 @@ void GameWorld::_notification(int p_what) {
 		// The admin server's sockets close with the process.
 		if (admin_pump_ != nullptr) admin_pump_->close();
 		// The process's network shut down: its session reset first stops a server an
-		// error-arm exit left unstopped (its /INOUT lines; engine stop_unstopped_server
-		// carries the witness), then the _inout.txt log, then the net log, each stops and
-		// flushes (ServerLogDevices::close carries the witness).
+		// error-arm exit left unstopped (its /INOUT lines, and its STOP bursts over the
+		// process's transport socket when one is open: a LAN browse's, a join's or the
+		// NovaWorld session's; engine stop_unstopped_server carries the witness), then the
+		// _inout.txt log, then the net log, each stops and flushes (ServerLogDevices::close
+		// carries the witness). This shell passes no socket address: HOST STOPPED carries
+		// the placeholder, as the joiner's reset does (D-NET-NEW-L1-26).
 		if (log_devices_ != nullptr) {
+			UdpPumpDatagramSocket transport(UdpPump::process_transport());
 			opennova::inmatch::stop_unstopped_server(client_process_.unstopped_server,
-					log_devices_->logs(), nullptr, nullptr);
+					log_devices_->logs(),
+					UdpPump::process_transport() != nullptr ? &transport : nullptr, nullptr);
 			log_devices_->close(0u);
 		}
 		NovaWorldClient::set_process_connect_log(nullptr);

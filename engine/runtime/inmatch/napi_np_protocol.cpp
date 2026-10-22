@@ -2013,7 +2013,9 @@ bool destroy_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	return teardown_connection(ctx, peer, goodbye_out);
 }
 
-// The reset tests +0x68, then StopServer walks the list with host_running still set: each node
+// The reset calls StopServer whatever +0x68 holds (its test gates only the reset's own
+// Lobby_UpdateServerInfo(1) and the table release); StopServer gates itself on host_running,
+// which a held server keeps set, and walks the list: each node
 // takes the STOP record if none is latched, and its destroy writes the /INOUT removal line and
 // sends the burst over whatever socket the manager holds then, a reopened one carrying it (a
 // closed one fails the first SendTo and ends the loop); host_running clears and HOST STOPPED
@@ -2030,9 +2032,12 @@ bool destroy_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 //  Server_ForwardEventToSession called @0x4C8426 (its is_authority test @0x51B8E7);
 //  Server_HandlePlayerDisconnect @0x51B5C0 - the removal called @0x51B5F3;
 //  HostDialog_StartSession @0x558760 - CGameSession_SetConnectionMode called @0x55878F]
-// [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0x68 test @0x4C8A73, StopServer
-//  called @0x4C8AA1; NapiNPProtocol_StopServer @0x62A820 - the record @0x62A8C3..0x62A8F6
-//  latched-if-invalid @0x62A904..0x62A919, CNapiNPConnection_Destroy @0x62A924, host_running
+// [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0x68 tests @0x4C8A73 (to the
+//  Lobby_UpdateServerInfo(1) call @0x4C8A7B) and @0x4C8AA6 (to the release
+//  @0x4C8AAC..0x4C8AB1), StopServer called @0x4C8AA1 unconditionally;
+//  NapiNPProtocol_StopServer @0x62A820 - host_running @0x62A85F..0x62A869, the record
+//  @0x62A8C3..0x62A8F6, latched-if-invalid @0x62A904..0x62A919, CNapiNPConnection_Destroy
+//  @0x62A924, host_running
 //  cleared @0x62A95C, CNapiNPConnection_LogHostStopped @0x62A97B; TeardownActiveConnection
 //  @0x6253C0 - the removal line @0x6253D2, the burst @0x6253EF..0x625424;
 //  CNapiNPConnection_LogHostStopped @0x61E780 - the socket read @0x61E7A6; PreMenu_HostSetup
