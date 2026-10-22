@@ -1700,6 +1700,12 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 			watercraft_db, PackedInt32Array([1291, 5008])))
 	assert_gt(host.get_mounted_graphic_source_count(), 0,
 			"the native install resolved the drivable model sources")
+	# The items table precedes the load: the spawn's AIData test and the class init
+	# brain each AIData brain-class row (the buggy's chel, the watercraft's cbot), and
+	# a brainless hull's mover stops at its head (D-NET-433)
+	# [orig: Entity_SpawnFromBMSRecord @0x40ED4E; Entity_UpdateWatercraftPhysics
+	#  @0x48D4EF -> @0x48EF50].
+	host.resolve_item_traits(watercraft_db)
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 	host.resolve_item_traits(watercraft_db)
@@ -1716,6 +1722,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	joiner.set_asset_root(root)
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			watercraft_db, PackedInt32Array([1291, 5008])))
+	joiner.resolve_item_traits(watercraft_db)
 	assert_true(joiner.load_from_mission_data(mission))
 	_install_combat_tables(joiner)
 	joiner.resolve_item_traits(watercraft_db)
@@ -1798,9 +1805,9 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	# The physics family is the item's def trait, so it is read from the
 	# placed row's own card. A placed item owns an AI brain only when its row
 	# carries the AI-class attrib AND a brain-class ai_function at spawn
-	# (Entity_SpawnFromBMSRecord's AIData test, then the class init), and
-	# this fixture resolves its items after the load, so the buggy is not an
-	# AI-pool row.
+	# (Entity_SpawnFromBMSRecord's AIData test, then the class init); this
+	# fixture's items table precedes the load, so the buggy (ai_function chel)
+	# is brained, while its move_function still picks its physics family.
 	var family := -1
 	if not host_record.is_empty():
 		var host_rows: PackedFloat32Array = host_record["snapshot"]

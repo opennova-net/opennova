@@ -1923,6 +1923,10 @@ void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &tra
 	}
 
 	watercraft_motor_core(world, veh, traits);
+	// The client runs the same mover to the same matrix-build tail, which sets Flags
+	// 0x20000 (kEntityFlagMatrixBuilt, homed on engine_flags) as the authority's does.
+	// [orig: Entity_UpdateWatercraftPhysics @0x48EF50..0x48EF63]
+	veh.engine_flags |= kEntityFlagMatrixBuilt;
 }
 
 // Blocks 12..19 of the cbot mover — the steer integrator through the yaw apply.
