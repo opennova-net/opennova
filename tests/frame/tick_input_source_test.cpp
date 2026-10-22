@@ -420,7 +420,7 @@ void test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch() {
 		FrameInput press;
 		press.delta_seconds = 0.002;
 		press.player.held_action_bits = HELD_FIRE;
-		press.player.pressed_action_bits = PRESSED_FIRE | PRESSED_TO_SPECIAL;
+		press.player.pressed_action_bits = PRESSED_FIRE | PRESSED_RELOAD;
 		CHECK(session.advance(press).ticks_run() == 0, "the press's frame runs no tick");
 		FrameInput next;
 		next.delta_seconds = 0.014;
@@ -430,11 +430,11 @@ void test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch() {
 		if (role->inputs.size() != 1) continue;
 		const InputPacket &tick = role->inputs[0].player;
 		if (still_held != 0) {
-			CHECK(tick.pressed_action_bits == (PRESSED_FIRE | PRESSED_TO_SPECIAL) &&
+			CHECK(tick.pressed_action_bits == (PRESSED_FIRE | PRESSED_RELOAD) &&
 							tick.held_action_bits == HELD_FIRE,
 					"a press still held at its dispatch fires on that tick");
 		} else {
-			CHECK(tick.pressed_action_bits == PRESSED_TO_SPECIAL && tick.held_action_bits == 0,
+			CHECK(tick.pressed_action_bits == PRESSED_RELOAD && tick.held_action_bits == 0,
 					"a press released before its dispatch fires nothing; other edges keep");
 		}
 	}
@@ -712,6 +712,52 @@ void test_the_update_drains_its_records_in_queue_order() {
 	}
 }
 
+// D-CTRL-6 (LI-s15): the reload row is a record of the update's drain, its arm the role's
+// past the head: a reload ahead of the pause row latches the weapon pump's reload; one
+// behind it meets the head's pause gate (flags 0x0C000801, bit 0) and drops. ToSpecial's
+// deferred dispatch is queued again behind the update's records and meets the same gate.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 (case 0xD3 -> WeaponSlot_RequestReload
+//  @0x53F110); Input_HandleActionBinding @0x49AD40 (case 25 @0x49B520, the pause gate
+//  @0x49ADDD..0x49ADE8); Input_ProcessFrame @0x49D520 (Input_FlushDeferredEvents @0x49D591)]
+void test_the_reload_record_meets_the_head_in_key_order() {
+	using opennova::controls::InputEventOrigin;
+	using opennova::controls::InputEventQueue;
+	const int32_t pause = opennova::controls::action_code(70);  // 25
+	const int32_t reload = opennova::controls::action_code(47); // 211
+	CHECK(pause == 25 && reload == 211, "the pause and reload rows' codes");
+	struct Queue final : TickInputSource {
+		std::vector<int32_t> codes;
+		bool queued = false;
+		InputPacket sample_tick(uint32_t) override { return {}; }
+		void queue_records(InputEventQueue &records) override {
+			if (queued) return;
+			queued = true;
+			for (const int32_t code : codes)
+				(void)records.push({code, 0, 0, 0, false, InputEventOrigin::Device});
+		}
+	};
+	for (const bool reload_first : {true, false}) {
+		auto role = std::make_unique<TickRecorder>();
+		spawn_local_player(*role);
+		role->kernel.local.to_special_queued = 1; // a deferred ToSpecial dispatch
+		Queue device;
+		device.codes = reload_first ? std::vector<int32_t>{reload, pause}
+		                            : std::vector<int32_t>{pause, reload};
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		FrameInput three;
+		three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 0 && session.state() == State::Paused,
+				"the first update's pause row pauses it");
+		CHECK(role->kernel.local.weapon.reload_pressed == reload_first,
+				reload_first ? "the reload ahead of the pause row latches"
+				             : "the reload behind the pause row drops at the head");
+		CHECK(role->kernel.local.to_special_queued == 0,
+				"the input frame's flush moved the deferred ToSpecial into the event queue");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -726,6 +772,7 @@ int main() {
 	test_rows_poll_once_per_update_and_never_in_a_no_update_frame();
 	test_the_keyboard_pass_runs_in_the_update_that_samples_it();
 	test_the_update_drains_its_records_in_queue_order();
+	test_the_reload_record_meets_the_head_in_key_order();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

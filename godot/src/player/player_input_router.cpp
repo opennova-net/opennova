@@ -111,6 +111,8 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		// The role's arms (engine inmatch::Role::dispatch_record): never handed here.
 		case Action::Respawn: break;
 		case Action::MedicRequest: break;
+		case Action::Reload: break;
+		case Action::ToSpecial: break;
 		// The router's own records (PlayerInputRouter::dispatch_record): never handed here.
 		case Action::EmbedderRow: break;
 	}
@@ -573,8 +575,10 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 		if (code < 0 || (action_sim.is_valid() && action_sim->action_head_admits(code)))
 			scroll_lock_turned_off_ = scroll_lock_device_turn_off();
 	}
-	p_input->set_weapon_input(actions.fire_held, actions.fire_edge, actions.reload_edge);
-	p_input->set_to_special_input(actions.to_special_held, actions.to_special_edge);
+	// The trigger and the ToSpecial keys' state; the reload and ToSpecial rows are records
+	// (engine inmatch::Role::dispatch_record carries the witness).
+	p_input->set_weapon_input(actions.fire_held, actions.fire_edge, false);
+	p_input->set_to_special_held(actions.to_special_held);
 	p_input->set_menu_open(frame_menu_open_);
 	for (const auto &request : actions.requests) {
 		// An action row's request is a record the update's drain dispatches in queue order

@@ -52,8 +52,7 @@ void Role::apply_input(const TickInput &input) {
 	// in their key order), all ahead of the mouse-axis events, the toggles, the held rows
 	// and the deferred dispatches, which the frame applies below. The session's updates
 	// drained already (TickInput::drained).
-	if (!input.drained)
-		drain_input_events(input.source, (input.player.held_action_bits & HELD_MENU_OPEN) != 0);
+	if (!input.drained) drain_input_events(input.source, input.player.held_action_bits);
 	if (kernel.world.spectator.death_screen && runtime != nullptr) {
 		apply_death_screen_input(kernel, *runtime, joiner, input.player);
 		return;
@@ -107,40 +106,11 @@ void Role::apply_input(const TickInput &input) {
 	const float look_y = input.player.look_delta_y != 0.0f &&
 			action_head_admits(controls::action_code(kLookYRow)) ? input.player.look_delta_y : 0.0f;
 	if (look_x != 0.0f || look_y != 0.0f) kernel.local.look(look_x, look_y);
+	// The trigger; the reload rides its record's arm (dispatch_record), PRESSED_RELOAD a
+	// sourceless frame's latch (PressedAction).
 	kernel.local.set_weapon_input((input.player.held_action_bits & HELD_FIRE) != 0,
 			(input.player.pressed_action_bits & PRESSED_FIRE) != 0,
 			(input.player.pressed_action_bits & PRESSED_RELOAD) != 0);
-	// The ToSpecial dispatches, with the deferred ones, once per input frame
-	// (a tick that consumes its own sample), as retail's input frame precedes
-	// the logic tick [orig: Input_ProcessFrame @0x49D520 -> Input_FlushDeferredEvents @0x49D591].
-	// Every queued dispatch, a press, a release or a deferred one queued
-	// again, passes the dispatcher's head, which drops the row (flags
-	// 0x8C000801) for a dead local player, under the deploy hold and once the
-	// round is over; a dropped deferred dispatch is gone. (The press scan's
-	// own dead gate, @0x49D330..0x49D339, takes the same press first.)
-	// [orig: Input_HandleActionBinding @0x49AD40 -- bit 0x1 with the dead
-	//  read @0x49AD8A..0x49ADA0, 0x8000000 with g_DeployScreenActive
-	//  @0x49ADC8..0x49ADD7, bit 0x1 with g_RoundOver @0x49ADFD (in a
-	//  session) / @0x49AE16; the deferred re-queue Input_FlushDeferredEvents
-	//  @0x497AC0 -> Input_QueueEvent]
-	if (input.consume_one_shots && (input.player.held_action_bits & HELD_MENU_OPEN) == 0) {
-		const bool held = (input.player.held_action_bits & HELD_TO_SPECIAL) != 0;
-		// The head's bit-0 operand: a joiner's replica dead bit; on the authority the
-		// constant 2 on a dedicated host in a session, else the dead bit
-		// (LocalPlayer::action_dispatch_drops, D-NET-433).
-		const bool local_dead = joiner && runtime != nullptr ? runtime->local_player_dead()
-				: kernel.local.action_dispatch_drops();
-		const bool round_over = joiner ? runtime != nullptr && runtime->state().spawn_success_gate
-				: kernel.world.match.outcome().ended;
-		const bool deploy_hold = runtime != nullptr && runtime->state().deploy_overlay_active;
-		if (local_dead || round_over || deploy_hold) {
-			kernel.local.clear_deferred_input();
-		} else {
-			if ((input.player.pressed_action_bits & PRESSED_TO_SPECIAL) != 0)
-				kernel.local.queue_to_special();
-			kernel.local.dispatch_to_special(held);
-		}
-	}
 }
 
 void Role::observe_frame_rate(int32_t fps) {
@@ -252,7 +222,8 @@ void Role::store_mission_exit(int32_t reason) {
 	if (kernel_ != nullptr) kernel_->world.mission_exit_reason = reason;
 }
 
-void Role::drain_input_events(TickInputSource *source, bool menu_open, bool pause_flips) {
+void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits,
+		bool pause_flips) {
 	// [orig: Input_ProcessFrame @0x49D520 - the count test @0x49D599, Input_DequeueEvent
 	//  @0x49D5BA, Input_HandleActionBinding @0x49D5D8, the count test @0x49D5E0 / the loop
 	//  @0x49D5E7; Game_ProcessMainFrame @0x5263F0 - UI_IsMenuScreenOpen @0x52660D skips
@@ -261,8 +232,25 @@ void Role::drain_input_events(TickInputSource *source, bool menu_open, bool paus
 	input_queue_reset_ = false;
 	ClientRuntime *runtime = client_runtime();
 	if (kind() == RoleKind::Joiner && (runtime == nullptr || !runtime->in_game_loop())) return;
-	if (menu_open) return;
+	if ((held_action_bits & HELD_MENU_OPEN) != 0) return;
 	pause_flips_ = pause_flips;
+	to_special_held_ = (held_action_bits & HELD_TO_SPECIAL) != 0;
+	// Input_FlushDeferredEvents: each deferred dispatch (ToSpecial's, kept by a reload or a
+	// draw in progress) is queued again behind the update's records, its third argument the
+	// deferred marker 0xFFFFEEEE, under the queue's cap, the deferred queue emptied; it
+	// passes the head again at its dispatch, which drops it for good [orig:
+	// Input_ProcessFrame @0x49D520 - Input_ProcessPlayerFrame @0x49D58B, then
+	// Input_FlushDeferredEvents @0x49D591; Input_FlushDeferredEvents @0x497AC0 - the count
+	// test @0x497AC0, `push 0FFFFEEEEh` @0x497AE1, Input_QueueEvent @0x497AE9, the shift
+	// @0x497B04..0x497B21].
+	constexpr int kToSpecialRow = 37;
+	constexpr int32_t kDeferredMarker = static_cast<int32_t>(0xFFFFEEEEu);
+	world::LocalPlayer &local = kernel_->local;
+	const int32_t deferred = local.to_special_queued;
+	local.to_special_queued = 0;
+	for (int32_t i = 0; i < deferred; ++i)
+		(void)input_events_.push({controls::action_code(kToSpecialRow), 0, 0, kDeferredMarker,
+				false, controls::InputEventOrigin::Device});
 	controls::InputEventRecord record;
 	while (input_events_.pop(record)) dispatch_record(record, source);
 	pause_flips_ = false;
@@ -312,6 +300,36 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	}
 	if (code == controls::action_code(kStandRow)) {
 		(void)request_stance(0);
+		return;
+	}
+	// The reload row (catalog row 47 magazine, code 211 = 0xD3, flags 0x0C000801) past the
+	// head: the weapon pump's reload latch, whose request the pump makes on its slot under
+	// the case's full-magazine and reserve gates (world::weapon_fsm_reload_allowed). A second
+	// record in the same input frame finds the latch set, as retail's second request finds
+	// the reload's 4 stored.
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0xD3 -> WeaponSlot_RequestReload
+	//  @0x53F110 (the next action's test @0x53F11E..0x53F12D, the store @0x53F12F)]
+	constexpr int kReloadRow = 47;
+	if (code == controls::action_code(kReloadRow)) {
+		if (action_head_admits(code))
+			kernel_->local.set_weapon_input(kernel_->local.weapon.fire_held, false, true);
+		return;
+	}
+	// ToSpecial (catalog row 37, code 220 = 0xDC, flags 0x8C000801) past the head (a dead
+	// local player, the pause, the deploy hold and the round over drop it, a deferred one
+	// for good): one dispatch with the keys' live state, which a reload or a draw in progress
+	// defers to the next input frame's flush (LocalPlayer::to_special_queued). (The press
+	// scan's own dead gate, @0x49D330..0x49D339, takes the same press first.)
+	// [orig: Input_HandleActionBinding @0x49AD40 - the head @0x49AD8A..0x49AE16 (bit 0
+	//  with g_RoundOver @0x49ADFD in a session, @0x49AE16 out of one);
+	//  Input_HandleActionBinding_0 @0x4E0420 - case 0xDC @0x4E1161..0x4E1181;
+	//  Input_QueueDeferredEvent @0x4993E0 (the 32 cap @0x4993E8)]
+	constexpr int kToSpecialRow = 37;
+	if (code == controls::action_code(kToSpecialRow)) {
+		if (action_head_admits(code)) {
+			kernel_->local.queue_to_special();
+			kernel_->local.dispatch_to_special(to_special_held_);
+		}
 		return;
 	}
 	// The pause row (catalog row 70, code 25; the declaration carries the witness): past
@@ -702,8 +720,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			// them); the update resumes when the drain leaves the word down
 			// (TickInputSource carries the witness).
 			if (source != nullptr) source->queue_records(role_->input_events());
-			role_->drain_input_events(
-					source, (sample.held_action_bits & HELD_MENU_OPEN) != 0, flips_apply);
+			role_->drain_input_events(source, sample.held_action_bits, flips_apply);
 			if (world.rules.pause_word) {
 				run_paused_update_legs();
 				previous_ran = false;
@@ -767,7 +784,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		// The update's drain, ahead of its body: a role tick's input prologue reads its
 		// outcome (TickInput::drained).
 		if (kernel != nullptr) {
-			role_->drain_input_events(source, menu_open, flips_apply);
+			role_->drain_input_events(source, tick_input.player.held_action_bits, flips_apply);
 			tick_input.drained = true;
 		}
 		// The drain left the word raised (an odd count of pause rows): the records behind

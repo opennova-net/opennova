@@ -124,12 +124,9 @@ void MissionFrameInput::set_weapon_input(bool p_fire_held,
 			(p_reload_pressed ? PRESSED_RELOAD : 0u);
 }
 
-void MissionFrameInput::set_to_special_input(bool p_held, bool p_dispatched) {
+void MissionFrameInput::set_to_special_held(bool p_held) {
 	value_.player.held_action_bits = (value_.player.held_action_bits & ~HELD_TO_SPECIAL) |
 			(p_held ? HELD_TO_SPECIAL : 0u);
-	value_.player.pressed_action_bits =
-			(value_.player.pressed_action_bits & ~PRESSED_TO_SPECIAL) |
-			(p_dispatched ? PRESSED_TO_SPECIAL : 0u);
 }
 
 void MissionFrameInput::set_menu_open(bool p_open) {

@@ -143,7 +143,7 @@ void run_the_roles_frame_reads_the_dedicated_operand() {
 		lp.inventory_valid = true;
 		lp.inventory.quick_switch_stash = 0;
 		lp.to_special_queued = 1;
-		r.frame(inmatch::PRESSED_TO_SPECIAL);
+		r.frame(0); // the input frame's flush queues the deferred record again
 		CHECK(lp.to_special_queued == 0);
 		CHECK(lp.inventory.quick_switch_stash == (peer ? -1 : 0));
 		// The mouse look's axis events pass the same head.

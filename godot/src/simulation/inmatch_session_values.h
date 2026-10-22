@@ -29,7 +29,6 @@ public:
 	enum PressedAction {
 		PRESSED_FIRE = opennova::inmatch::PRESSED_FIRE,
 		PRESSED_RELOAD = opennova::inmatch::PRESSED_RELOAD,
-		PRESSED_TO_SPECIAL = opennova::inmatch::PRESSED_TO_SPECIAL,
 	};
 
 private:
@@ -67,9 +66,9 @@ public:
 	// Axis input added at this input frame (the scripted device's look).
 	void set_look_delta(const Vector2 &p_delta);
 	void set_weapon_input(bool p_fire_held, bool p_fire_pressed, bool p_reload_pressed);
-	// The ToSpecial row after set_weapon_input: its keys' live state and a
-	// dispatch on this frame's press or release edge.
-	void set_to_special_input(bool p_held, bool p_dispatched);
+	// The ToSpecial keys' live state after set_weapon_input, which its records' dispatch
+	// reads (opennova::inmatch::HELD_TO_SPECIAL).
+	void set_to_special_held(bool p_held);
 	// A menu screen is up, under which no input frame runs
 	// (opennova::inmatch::HELD_MENU_OPEN).
 	void set_menu_open(bool p_open);

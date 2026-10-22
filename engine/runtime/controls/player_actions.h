@@ -74,6 +74,10 @@ enum class PlayerAction {
 	// request_respawn, request_medic), past their own head gates there.
 	Respawn,
 	MedicRequest,
+	// The reload row (catalog row 47 magazine, code 211) and ToSpecial (row 37, code 220):
+	// records whose arms the role owns (inmatch::Role::dispatch_record), past the head there.
+	Reload,
+	ToSpecial,
 	// A key event of a row whose arm the embedder owns (PlayerActionPoll::embedder_row:
 	// the talk, HUD and pause rows): its record, in key order with the action rows'.
 	EmbedderRow,
@@ -188,32 +192,26 @@ struct PlayerActionPoll {
 struct PlayerActionFrame {
 	bool fire_held = false;
 	bool fire_edge = false;
-	// The reload and ToSpecial rows reach the session as one edge per sample. Retail
-	// dispatches every record, but a second one in the same input frame changes nothing:
-	// the reload request takes only a next action of 0, 1 or 11 and stores the reload's 4,
-	// and ToSpecial's second press or release is a no-op. These edges dispatch in the
-	// tick's input prologue behind the drained records, so their order against the action
-	// rows' records is D-CTRL-6's next row. The Respawn and MedicReq rows are records in
-	// `requests` (PlayerAction::Respawn / MedicRequest), one per event in key order: the
-	// Respawn case's Player_ResetLocalInput memsets the event queue ahead of its 0x41 (a
-	// local entity with a def), which ends the drain, and the medic call's cooldown latches.
+	// The reload (catalog row 47 magazine, code 211 = 0xD3) and ToSpecial (row 37, default
+	// F, code 220 = 0xDC) rows are records in `requests` (PlayerAction::Reload / ToSpecial),
+	// one per event in key order with the action rows', whose arms the role owns
+	// (inmatch::Role::dispatch_record), past the dispatcher's head there: the reload's latch
+	// for the weapon pump's request, ToSpecial's dispatch with its keys' live state
+	// (to_special_held). ToSpecial's events are its scanned key-down's (a press, an OS
+	// repeat included), the release pass's (the row's flags carry the release bit
+	// 0x80000000) and its off-keyboard arm's edges; the handler tells a press from a release
+	// by the keys' state. The Respawn and MedicReq rows are records likewise
+	// (PlayerAction::Respawn / MedicRequest): the Respawn case's Player_ResetLocalInput
+	// memsets the event queue ahead of its 0x41 (a local entity with a def), which ends the
+	// drain, and the medic call's cooldown latches.
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 (case 0xD3 -> WeaponSlot_RequestReload
-	//  @0x53F110, the next action's test @0x53F11E..0x53F12D, the store @0x53F12F);
-	//  Input_HandleActionBinding @0x49AD40 (case 55: Player_ResetLocalInput @0x49B20B ahead of
-	//  NetPacket_SendRequestRespawn @0x49B22A); Player_ResetLocalInput @0x4B2B80 (the entity
-	//  and def tests @0x4B2B85..0x4B2B8D, Input_ResetAllState @0x4B2B99)]
-	bool reload_edge = false;
-	// ToSpecial (catalog row 37, default F, dispatch 220): its keys' live state
-	// and a dispatch: its scanned key-down's event (a press, an OS repeat
-	// included), the release pass's event (the row's flags carry the release bit
-	// 0x80000000), or an edge of its off-keyboard arm; the handler tells a press
-	// from a release by the keys' state. Two in one input frame run one dispatch:
-	// the handler's second press or second release changes nothing.
-	// [orig: Input_ProcessKeyboardEvents @0x49D249..0x49D2B9 (release) / @0x49D42F
-	//  (press); row flags 0x8C000801; Input_HandleActionBinding_0 case 0xDC
-	//  @0x4E1161..0x4E1181]
+	//  @0x53F110, the next action's test @0x53F11E..0x53F12D, the store @0x53F12F; case 0xDC
+	//  @0x4E1161..0x4E1181); Input_ProcessKeyboardEvents @0x49D249..0x49D2B9 (the release
+	//  pass) / @0x49D42F (the press); Input_HandleActionBinding @0x49AD40 (case 55:
+	//  Player_ResetLocalInput @0x49B20B ahead of NetPacket_SendRequestRespawn @0x49B22A);
+	//  Player_ResetLocalInput @0x4B2B80 (the entity and def tests @0x4B2B85..0x4B2B8D,
+	//  Input_ResetAllState @0x4B2B99)]
 	bool to_special_held = false;
-	bool to_special_edge = false;
 	// Retail's auto-run (D-NET-563): this frame's forward event (code 152 with its fourth
 	// argument 1, which a forward key's own event carries as 0), queued every input frame the
 	// Scroll Lock word reads on, and by the held Last_move row (catalog row 16, code 425,

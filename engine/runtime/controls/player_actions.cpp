@@ -237,10 +237,12 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 			if (!event.release && event.code == code && !chain_takes_key(event)) return true;
 		return false;
 	};
+	// The reload row: one record per key event under its gates, its off-keyboard arm's
+	// press edge behind the keyboard pass's events (the role's arm, PlayerAction::Reload).
+	const int reload_code = row_code("magazine");
 	const bool reload_gate = captured && admitted("magazine");
 	const bool reload_off = world::latched_key_edge(
 			reload_gate && source.held_off_keyboard("magazine"), true, reload_was_down_);
-	frame.reload_edge = (reload_gate && key_fired(row_code("magazine"))) || reload_off;
 	// The death screen releases capture. Medic still samples even with
 	// inactive gameplay or no simulation; the sim owns death/cooldown gates.
 	// [orig: Input_HandleActionBinding case 217 @0x49b4b4 (row 64 MedicReq)]
@@ -294,19 +296,14 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	//  press @0x49D42F]
 	frame.to_special_held = source.keys_down("ToSpecial");
 	const int to_special_code = row_code("ToSpecial");
-	bool to_special_press = false;
-	bool to_special_release = false;
-	for (const KeyRowEvent &event : gate.key_events) {
-		if (event.code != to_special_code || chain_takes_key(event)) continue;
-		(event.release ? to_special_release : to_special_press) = true;
-	}
+	const auto to_special_admits = [&](bool release) {
+		return gate.simulation_available && (release || (captured && admitted("ToSpecial")));
+	};
 	const bool to_special_off = source.held_off_keyboard("ToSpecial");
-	if (to_special_off && !to_special_off_down_) to_special_press = true;
-	if (!to_special_off && to_special_off_down_ && !gate.keyboard_captured)
-		to_special_release = true;
+	const bool to_special_off_press = to_special_off && !to_special_off_down_;
+	const bool to_special_off_release =
+			!to_special_off && to_special_off_down_ && !gate.keyboard_captured;
 	to_special_off_down_ = to_special_off;
-	frame.to_special_edge = gate.simulation_available &&
-			((to_special_press && captured && admitted("ToSpecial")) || to_special_release);
 	const auto request_of = [&source](const ActionRow &row, bool sign_known, bool sign) {
 		PlayerActionRequest request = row.request;
 		// The row's key event reaches its arm through the dispatcher's head.
@@ -322,7 +319,18 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// a Respawn ahead of a weapon row ends the drain before it (its reset), and one behind
 	// it runs after it.
 	for (const KeyRowEvent &event : gate.key_events) {
-		if (event.release || chain_takes_key(event)) continue;
+		if (chain_takes_key(event)) continue;
+		// ToSpecial's press and its release pass's event, each a record in key order.
+		if (event.code == to_special_code) {
+			if (to_special_admits(event.release))
+				frame.requests.push_back({Action::ToSpecial, 0, to_special_code, event.sign});
+			continue;
+		}
+		if (event.release) continue;
+		if (event.code == reload_code) {
+			if (reload_gate) frame.requests.push_back({Action::Reload, 0, reload_code, event.sign});
+			continue;
+		}
 		if (gate.embedder_row && gate.embedder_row(event.code)) {
 			frame.requests.push_back({Action::EmbedderRow, 0, event.code, event.sign});
 			continue;
@@ -345,7 +353,12 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 			break;
 		}
 	}
-	// The off-keyboard arms' press edges behind the keyboard pass's events.
+	// The off-keyboard arms' press edges behind the keyboard pass's events (ToSpecial's
+	// arm both edges).
+	if (reload_off) frame.requests.push_back({Action::Reload, 0, reload_code});
+	if ((to_special_off_press || to_special_off_release) &&
+			to_special_admits(to_special_off_release))
+		frame.requests.push_back({Action::ToSpecial, 0, to_special_code});
 	if (medic_off) frame.requests.push_back({Action::MedicRequest, 0, medic_code});
 	if (respawn_off) frame.requests.push_back({Action::Respawn, 0, respawn_code});
 	for (std::size_t i = 0; i < std::size(kRows); ++i) {
