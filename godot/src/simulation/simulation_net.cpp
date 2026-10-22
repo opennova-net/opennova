@@ -290,6 +290,20 @@ bool Simulation::enable_host_listen(int p_port) {
 			}
 		}
 	}
+	// The socket open's connect-log lines, the setup over the bound socket or the failure over the
+	// block's quad (engine: inmatch::write_transport_socket_open_lines).
+	if (net_.log_devices != nullptr) {
+		const opennova::PeerAddr local = net_.pump->local_address();
+		const opennova::gamecfg::GameCfg &block = net_.game_config.is_valid()
+				? net_.game_config->native().cfg()
+				: opennova::gamecfg::defaults();
+		opennova::inmatch::write_transport_socket_open_lines(net_.log_devices->connect(),
+				bound ? &local : nullptr, address,
+				opennova::inmatch::transport_port_quad(block, opennova::inmatch::NetworkType::Lan,
+						/*authority=*/true,
+						p_port > 0 ? std::optional<uint32_t>(static_cast<uint32_t>(p_port))
+								   : std::nullopt));
+	}
 	if (!bound) {
 		// Not a LAN host: the socketless SP listen server is what remains.
 		net_.pump_socket.reset();
@@ -804,7 +818,21 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 					opennova::inmatch::transport_bind_ports(net_.game_config->native().cfg(),
 							opennova::inmatch::NetworkType::Lan, /*authority=*/false),
 					opennova::inmatch::transport_bind_address(net_.game_config->native().cfg()));
-		if (net_.pump->dial(p_host_ip, p_port) != 0) {
+		const int dialed = net_.pump->dial(p_host_ip, p_port);
+		// The dial's socket open writes its connect-log lines; a name that resolves to nothing
+		// opens none (engine: inmatch::write_transport_socket_open_lines).
+		if (net_.log_devices != nullptr && dialed != static_cast<int>(ERR_CANT_RESOLVE)) {
+			const opennova::PeerAddr local = net_.pump->local_address();
+			const opennova::gamecfg::GameCfg &block = net_.game_config.is_valid()
+					? net_.game_config->native().cfg()
+					: opennova::gamecfg::defaults();
+			opennova::inmatch::write_transport_socket_open_lines(net_.log_devices->connect(),
+					net_.pump->is_open() ? &local : nullptr,
+					opennova::inmatch::transport_bind_address(block),
+					opennova::inmatch::transport_port_quad(block,
+							opennova::inmatch::NetworkType::Lan, /*authority=*/false));
+		}
+		if (dialed != 0) {
 			(void)install_offline_role();
 			return false;
 		}

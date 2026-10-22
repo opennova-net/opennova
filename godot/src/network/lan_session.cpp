@@ -197,6 +197,18 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 							opennova::inmatch::NetworkType::Lan, /*authority=*/false),
 					opennova::inmatch::transport_bind_address(game_config_->native().cfg()));
 		const int bind_error = pump_->bind_client();
+		// The socket open's connect-log lines (engine: inmatch::write_transport_socket_open_lines).
+		if (opennova::inmatch::ConnectLog *log = NovaWorldClient::process_connect_log()) {
+			const opennova::PeerAddr local = pump_->local_address();
+			const opennova::gamecfg::GameCfg &block = game_config_.is_valid()
+					? game_config_->native().cfg()
+					: opennova::gamecfg::defaults();
+			opennova::inmatch::write_transport_socket_open_lines(*log,
+					bind_error == static_cast<int>(OK) ? &local : nullptr,
+					opennova::inmatch::transport_bind_address(block),
+					opennova::inmatch::transport_port_quad(block,
+							opennova::inmatch::NetworkType::Lan, /*authority=*/false));
+		}
 		if (bind_error != static_cast<int>(OK)) {
 			pump_.unref();
 			browser_.stop();

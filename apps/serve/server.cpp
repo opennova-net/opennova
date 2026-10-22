@@ -729,22 +729,20 @@ bool Server::open_socket(std::string &error) {
 	// Every port of the scan binds on the block's mpipaddressstring (inmatch::
 	// transport_bind_address carries the witness).
 	const uint32_t address = inmatch::transport_bind_address(config_.cfg());
-	// The connect log's socket lines [orig: CNapiNetwork_OpenTransportSocket - "%s : NET
-	//  SETTING UP SOCKET...." @0x4C6BA0..0x4C6BD7, the setup @0x4C6C7B..0x4C6CFA, the failure
-	//  @0x4C6BF2..0x4C6C6B].
-	inmatch::ConnectLog &connect_log = log_devices_.connect();
-	connect_log.line("NET SETTING UP SOCKET....");
 	for (const uint16_t port : ports) {
 		socket_ = net::udp_bind(port, &bound_port_, address);
 		if (socket_.is_valid()) break;
 	}
+	// The connect log's socket lines, the failure's with its SetTransportMode(0) teardown line
+	// (inmatch::write_transport_socket_open_lines carries the witness).
+	const PeerAddr bound{address, static_cast<uint16_t>(bound_port_)};
+	inmatch::write_transport_socket_open_lines(log_devices_.connect(),
+			socket_.is_valid() ? &bound : nullptr, address,
+			inmatch::transport_port_quad(config_.cfg(), type, /*authority=*/true, first));
 	if (!socket_.is_valid()) {
-		connect_log.line(inmatch::transport_socket_error_text(address,
-				inmatch::transport_port_quad(config_.cfg(), type, /*authority=*/true, first)));
 		error = "no port of the bind scan from " + std::to_string(ports.front()) + " is free";
 		return false;
 	}
-	connect_log.line(inmatch::transport_socket_setup_text(address, bound_port_));
 	datagrams_ = std::make_unique<net::NetDatagramSocket>(socket_);
 	demux_ = std::make_unique<DatagramDemux>(*datagrams_);
 	return true;

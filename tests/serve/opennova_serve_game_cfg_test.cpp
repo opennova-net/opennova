@@ -225,6 +225,11 @@ int main() {
 					", PORTRANDOM=0!!!!!\r\n";
 			CHECK(log.find(" : NET SETTING UP SOCKET....\r\n") != std::string::npos);
 			CHECK(log.find(want) != std::string::npos);
+			// The failure's SetTransportMode(0) tears the socket down behind its line
+			// (inmatch::write_transport_socket_open_lines, D-NET-NEW-L1-30).
+			const std::string teardown = " : NET TEARING DOWN SOCKET\r\n";
+			CHECK(log.find(want) != std::string::npos &&
+					log.find(teardown, log.find(want)) != std::string::npos);
 			if (log.find(want) == std::string::npos) std::printf("connect log:\n%s\n", log.c_str());
 		}
 		std::unique_ptr<serve::Server> server =

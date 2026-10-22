@@ -15,6 +15,7 @@
 // from the block (host_screen_from_block).
 
 #include <formats/gamecfg/game_cfg.h>
+#include <net/npwire/peer_addr.h> // PeerAddr (a socket open's bound address)
 #include <runtime/inmatch/host_file.h>
 #include <runtime/inmatch/host_session.h> // HostConfig
 #include <runtime/inmatch/server_admin_command.h>
@@ -150,6 +151,20 @@ uint32_t transport_bind_address(const gamecfg::GameCfg &cfg);
 // NapiUdpSocket_CreateAndBind @0x62D4C1 / @0x62D4C4)]
 std::string transport_socket_error_text(uint32_t address, const TransportPortQuad &quad);
 std::string transport_socket_setup_text(uint32_t address, uint32_t port);
+// One socket open's lines (SetTransportMode into mode 2, 3 or 4: the LAN browse, a listen host,
+// a join's own dial, opennova-serve), each through ConnectLog::line, so none once the log is off:
+// "NET SETTING UP SOCKET....", then the bound socket's setup line (`bound`: its bind address and
+// port), or, when the scan bound nothing (`bound` null), the failure's line over the bind
+// address and the stored quad and the teardown line of the SetTransportMode(0) the failure runs.
+// The callers write them right after their bind, which writes nothing in between.
+// [orig: CNapiNetwork_SetTransportMode @0x4C8750 - CNapiNetwork_OpenTransportSocket called
+//  @0x4C8796, the failure's SetTransportMode(0) called @0x4C87A3, whose TearDownSocket is called
+//  @0x4C877B; CNapiNetwork_OpenTransportSocket @0x4C6A40 - the lines' gate g_ConnectLogEnabled,
+//  "NET SETTING UP SOCKET...." appended @0x4C6BD7, the failure @0x4C6C6B, the setup @0x4C6CFA;
+//  CNapiNetwork_TearDownSocket @0x4C4C90 - the line appended @0x4C4CE7]
+class ConnectLog;
+void write_transport_socket_open_lines(ConnectLog &log, const PeerAddr *bound, uint32_t address,
+		const TransportPortQuad &quad);
 
 // The cfg block's words every session create reads, single player's and a
 // host's alike: mpreset (a nonzero word ends the create, server_session.h),

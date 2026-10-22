@@ -10,6 +10,7 @@
 #include <net/npwire/nw_session_framing.h> // NapiPrng
 #include <runtime/inmatch/host_role.h> // singleplayer_game_config
 #include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/punt_log.h> // ConnectLog, net_tearing_down_socket_text
 #include <runtime/inmatch/server_session.h>
 
 #include <memory>
@@ -346,6 +347,18 @@ std::string transport_socket_error_text(uint32_t address, const TransportPortQua
 std::string transport_socket_setup_text(uint32_t address, uint32_t port) {
 	// Napi_FormatAddress's "%s:%ld" inside the line's brackets.
 	return "NET SOCKET SETUP [" + in_addr_text(address) + ":" + std::to_string(port) + "]";
+}
+
+void write_transport_socket_open_lines(ConnectLog &log, const PeerAddr *bound, uint32_t address,
+		const TransportPortQuad &quad) {
+	// The declaration carries the witness.
+	log.line("NET SETTING UP SOCKET....");
+	if (bound != nullptr) {
+		log.line(transport_socket_setup_text(bound->ip, bound->port));
+		return;
+	}
+	log.line(transport_socket_error_text(address, quad));
+	log.line(net_tearing_down_socket_text());
 }
 
 void store_server_command_config(

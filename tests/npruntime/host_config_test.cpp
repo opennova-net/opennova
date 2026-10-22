@@ -10,11 +10,14 @@
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/host_role.h> // singleplayer_game_config
 #include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/punt_log.h>    // ConnectLog (the socket open's lines)
+#include <runtime/inmatch/server_files.h> // ServerFileSink
 
 #include "common/test_expect.h"
 
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace opennova;
@@ -455,6 +458,46 @@ int main() {
 				"NET SOCKET SETUP ERROR!!!!!!!!  CANNOT CREATE SOCKET WITH PARAMS: IP=10.1.2.3, "
 				"PORTMIN=40000 PORTMAX=40004, PORTDELTA=2, PORTRANDOM=0!!!!!");
 		TEST_EXPECT(transport_socket_setup_text(0u, 40002) == "NET SOCKET SETUP [0.0.0.0:40002]");
+	}
+
+	// One socket open's lines in order: SETTING UP, then the bound socket's SETUP; a scan that
+	// bound nothing writes the failure's line and its SetTransportMode(0)'s TEARING DOWN; a log
+	// that is off writes none (D-NET-NEW-L1-30). [orig: CNapiNetwork_SetTransportMode @0x4C8750 -
+	// @0x4C8796, @0x4C87A3, @0x4C877B; CNapiNetwork_OpenTransportSocket @0x4C6A40 - @0x4C6BD7,
+	// @0x4C6C6B, @0x4C6CFA; CNapiNetwork_TearDownSocket @0x4C4C90 - @0x4C4CE7]
+	{
+		struct MemoryFiles final : ServerFileSink {
+			std::string text;
+			bool exists(const std::string &) override { return !text.empty(); }
+			void remove(const std::string &) override { text.clear(); }
+			bool write(const std::string &, std::string_view bytes, bool append) override {
+				if (!append) text.clear();
+				text.append(bytes.data(), bytes.size());
+				return true;
+			}
+		};
+		MemoryFiles files;
+		ConnectLog log(files);
+		log.set_clock([] { return std::string("T"); });
+		log.start(ConnectLogHeader{});
+		files.text.clear();
+		const TransportPortQuad quad{32768, 32772, 1, 0};
+		const opennova::PeerAddr bound{0u, 32770};
+		write_transport_socket_open_lines(log, &bound, 0u, quad);
+		TEST_EXPECT(files.text ==
+				"T : NET SETTING UP SOCKET....\r\nT : NET SOCKET SETUP [0.0.0.0:32770]\r\n");
+		files.text.clear();
+		write_transport_socket_open_lines(log, nullptr, 0x0302010Au, quad);
+		TEST_EXPECT(files.text ==
+				"T : NET SETTING UP SOCKET....\r\n"
+				"T : NET SOCKET SETUP ERROR!!!!!!!!  CANNOT CREATE SOCKET WITH PARAMS: "
+				"IP=10.1.2.3, PORTMIN=32768 PORTMAX=32772, PORTDELTA=1, PORTRANDOM=0!!!!!\r\n"
+				"T : NET TEARING DOWN SOCKET\r\n");
+		files.text.clear();
+		log.disable_at_server_connection();
+		files.text.clear();
+		write_transport_socket_open_lines(log, &bound, 0u, quad);
+		TEST_EXPECT(files.text.empty());
 	}
 
 	// The gate socket's scan: the block's mpgateserverlocalport quad whatever the network type,
