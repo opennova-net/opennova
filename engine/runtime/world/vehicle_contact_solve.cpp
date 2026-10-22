@@ -544,21 +544,31 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
                  (pair_contact || (any_pad && fwd_z16 < 0x6000 && traits.mass <= 10));
 
     // ---- the suspension spring leg, in the witnessed order
-    // (vehicle_suspension.h): the crash tests, then the extend loop's sink
-    // growth over the four pads at ftol(dt * 250) with the pre-gate skip
-    // [orig: the tests @0x47D745..0x47D7A8 + the client window @0x47E793..
-    //  0x47E7EE; the extend loop @0x47DB70..0x47DBD1, its pre-gate
-    //  @0x47DB76..0x47DBA8; the dt select on +0x2EC @0x47C1DE..0x47C222].
+    // (vehicle_suspension.h): the crash tests, then the pad quad's chassis-force
+    // clear, then the extend loop: every oscillator's remaining range resets to
+    // 0xFFFF and each free pad's sink grows by ftol(dt * 250) behind the
+    // pre-gate skip and the latch terms
+    // [orig: the tests @0x47D745..0x47D7A8; Entity_ComputeBoundingQuad @0x45B6E0
+    //  (the call @0x47DAE2) and Entity_ClearSuspensionForces @0x468980 (the call
+    //  @0x47DAF2); the extend loop @0x47DB70..0x47DBE0: the reset @0x47DB70, the
+    //  pre-gate @0x47DB76..0x47DBA8, the per-pad gate @0x47DBAA..0x47DBC1; the dt
+    //  select on +0x2EC @0x47C1DE..0x47C222].
 	const bool pad_contact[7] = { d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0, d[4] != 0, d[5] != 0,
 		d[6] != 0 };
 	vehicle_landing_damage(world, veh, traits, d, 7, up_z16);
 	world.vehicles.suspension_crash_tests(veh, traits, up_z16, SuspensionFamily::Tracked);
-	world.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tracked);
+	{
+		int32_t quad[4][3];
+		vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, quad);
+		vehicle_clear_chassis_forces(veh, quad, 0);
+	}
 	const int32_t sink_growth = static_cast<int32_t>(
             (m.crashed != 0 ? kSuspensionDtCrashed : kSuspensionDtNormal) *
             static_cast<float>(kSinkGrowthPerTick));
     const bool sinks_zero = m.plat_acc[0] == 0 && m.plat_acc[1] == 0 &&
                             m.plat_acc[2] == 0 && m.plat_acc[3] == 0;
+	for (int k = 0; k < 4; ++k)
+		m.wheel_osc[k].extension = 0xFFFF;
     // The pre-gate reads the +0x2F2 stability byte [orig: @0x47DB76].
     vehicle_suspension_grow_sinks(veh, pad_contact, 4, sink_growth,
                                   /*latch_gated=*/true,
@@ -574,6 +584,11 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 		for (int i = 0; i < 7; ++i) crash_depth = std::max(crash_depth, rec[i]);
 	// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0, the flush @0x47E122..0x47E157]
 	vehicle_flush_sinks(world, veh, up_z16, pz);
+	// A pad pair down on the contact copy (0 and 2, or 1 and 3) marks the hull as respawned
+	// (+0x2F1, which closes the client crash window) unless it is wreck-settled.
+	// [orig: @0x47E15D..0x47E184]
+	if (((d[0] != 0 && d[2] != 0) || (d[1] != 0 && d[3] != 0)) && m.wreck_2fc == 0)
+		m.fresh_2f1 = 1;
 	int32_t corner_adj[4] = { 0, 0, 0, 0 };
 
 	// ---- solve select: the no-pad branch [orig: the all-zero pad test
@@ -615,6 +630,10 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	}
 	if (d[2] != 0 && d[3] != 0)
 		vehicle_capture_contact_direction(veh, basis);
+	// The client crash window runs in the grounded arm only, after the handbrake capture, on the
+	// in-air flag as it stands before the clear below; the extend loop above read the request
+	// the previous tick's window left. [orig: @0x47E791..0x47E7F5]
+	world.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tracked);
 	// ---- pad contact: airborne clears unconditionally [orig: @0x47E8EE].
 	veh.flags &= ~kEntityFlagInAir;
     // The grounded spring loop over this tick's force records, its contact tests
