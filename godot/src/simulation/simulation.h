@@ -2238,6 +2238,10 @@ public:
 	TypedArray<UsePressRow> debug_use_press_trace(int64_t p_from_seq) const;
 	int64_t debug_use_press_next_seq() const;
 	int64_t debug_attach_requests_sent() const;
+	// The readout's watched registry handle (-1 clears): every record then carries that
+	// entity's scan inputs (its Flags, its pool-1 table row and radius, the local body's
+	// slice membership). Instrument state only.
+	void debug_set_use_press_watch(int64_t p_handle);
 	// A useitem key's release clears the press latch (engine
 	// LocalPlayer::release_use_item_key).
 	void release_use_item_key(bool p_system_key_up);

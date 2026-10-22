@@ -25,6 +25,7 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_spawn.h>
@@ -146,6 +147,62 @@ void test_the_ring_keeps_the_last_records() {
 	CHECK(!all.empty() && all.back().seq == w::UsePressTrace::kCapacity + 2);
 	CHECK(trace.since(trace.next_seq()).empty());
 	CHECK(trace.since(trace.next_seq() - 1).size() == 1);
+}
+
+// The watched entity's scan inputs ride every record: whether it exists, its Flags words,
+// its pool-1 table row and radius, and the local body's slice membership. Bit 0 of its
+// Flags keeps it out of the pool-1 table, and so out of the slice.
+// [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - the Flags & 1 skip @0x4B9382, the
+//  radius copy @0x4B9389; Entity_BuildProximityListsFromPools @0x4B8EB0 - the arena store
+//  @0x4B8FD6]
+void test_the_watch_carries_the_scan_inputs() {
+	Rig r;
+	r.world.registry.configure_pool(1, 4);
+	r.body().item_type_index = 1; // a pool-0 slice source (its +0x1C word)
+	w::Entity gun;
+	gun.kind = w::EntityKind::Item;
+	gun.position = r.body().position;
+	gun.position.x += 1.0f;
+	gun.bound_radius = 1.5f;
+	w::Seat seat;
+	seat.type = w::SeatType::Gunner;
+	seat.bone_index = 6;
+	gun.seats.push_back(seat);
+	const w::EntityHandle gun_h = r.world.registry.spawn(1, gun);
+	r.local->use_trace.watch = gun_h.packed;
+
+	// No collision world: the entity's words alone.
+	(void)r.local->take_use_item_press();
+	w::UsePressRecord rec = r.last();
+	CHECK(rec.watch == gun_h.packed && rec.watch_present);
+	CHECK(rec.watch_flags == r.world.registry.get(gun_h)->flags);
+	CHECK(!rec.watch_in_table && !rec.watch_in_slice && rec.slice_count == -1);
+
+	std::unique_ptr<w::CollisionWorld> cw = std::make_unique<w::CollisionWorld>();
+	r.world.collision = cw.get();
+	r.world.ai.collision = cw.get();
+	cw->build_initial_tables(r.world);
+	(void)r.local->take_use_item_press();
+	rec = r.last();
+	CHECK(rec.watch_in_table && rec.watch_table_radius_q16 > 0);
+	CHECK(rec.watch_in_slice && rec.slice_count >= 1);
+
+	// Flags bit 0: out of the pool-1 table, out of the slice.
+	r.world.registry.get(gun_h)->flags |= w::kEntityFlagCarried;
+	cw->build_initial_tables(r.world);
+	(void)r.local->mount_toggle_allowed();
+	rec = r.last();
+	CHECK(rec.event == w::UsePressEvent::kToggleGate);
+	CHECK((rec.watch_flags & w::kEntityFlagCarried) != 0);
+	CHECK(!rec.watch_in_table && !rec.watch_in_slice);
+
+	// An unwatched trace carries none of it.
+	r.local->use_trace.watch = 0xFFFFu;
+	(void)r.local->take_use_item_press();
+	rec = r.last();
+	CHECK(rec.watch == 0xFFFFu && !rec.watch_present && rec.slice_count == -1);
+	r.world.collision = nullptr;
+	r.world.ai.collision = nullptr;
 }
 
 // --- the joiner's scan (joiner_role_test's harness) ---
@@ -287,6 +344,7 @@ int main() {
 	test_a_press_records_its_arm_and_the_bodys_words();
 	test_the_toggle_gate_records_its_answer();
 	test_the_ring_keeps_the_last_records();
+	test_the_watch_carries_the_scan_inputs();
 	test_a_joiner_scan_records_its_pick_and_the_0x26_leaving();
 	if (failures != 0) {
 		std::printf("%d check(s) failed\n", failures);

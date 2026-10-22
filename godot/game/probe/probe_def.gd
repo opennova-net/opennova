@@ -698,11 +698,15 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "& 0x800 / 0x400000 / 0x200, its mount, the active slot's current / next "
 				+ "action. Each release's toggle gate. Each joiner seat scan: the candidate, "
 				+ "its pick and whether the 0x26 queued, with the runtime's framed-0x26 count "
-				+ "to show it left. `watch_ms` keeps polling each frame; an instrument that "
-				+ "changes nothing.",
+				+ "to show it left. `watch_ms` keeps polling each frame. `watch_handle` names one "
+				+ "registry entity whose scan inputs every record carries while the run lasts "
+				+ "(its Flags, its pool-1 table row and radius, the local body's slice "
+				+ "membership); an instrument that changes nothing.",
 				NET + "use_press_trace_probe.gd", {
 					"from_seq": { "type": "integer", "minimum": 0, "default": 0 },
 					"watch_ms": { "type": "integer", "minimum": 0, "maximum": 590_000,
 							"default": 0 },
+					"watch_handle": { "type": "integer", "minimum": -1, "maximum": 65534,
+							"default": -1 },
 				}, [], false, true, 600_000),
 	]

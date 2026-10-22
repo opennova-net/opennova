@@ -44,6 +44,14 @@ public:
 	int get_seat_index() const { return value_.seat_index; }
 	int get_bone() const { return value_.bone; }
 	int64_t get_attach_sent_before() const { return value_.attach_sent_before; }
+	int get_watch() const { return value_.watch; }
+	bool get_watch_present() const { return value_.watch_present; }
+	int64_t get_watch_flags() const { return value_.watch_flags; }
+	int64_t get_watch_engine_flags() const { return value_.watch_engine_flags; }
+	bool get_watch_in_table() const { return value_.watch_in_table; }
+	int64_t get_watch_table_radius_q16() const { return value_.watch_table_radius_q16; }
+	bool get_watch_in_slice() const { return value_.watch_in_slice; }
+	int get_slice_count() const { return value_.slice_count; }
 
 	Dictionary to_json_value() const;
 };

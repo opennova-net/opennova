@@ -4,6 +4,7 @@
 #include <base/io/log.h>
 #include <runtime/audio/oneshot_play.h> // listener view flags
 #include <runtime/world/angle.h>
+#include <runtime/world/collision.h> // the USE readout's watch: the pool-1 table and the slice
 #include <runtime/world/infantry.h>
 #include <runtime/world/mount_controls.h>
 #include <runtime/world/player_present.h>
@@ -121,6 +122,24 @@ w::UsePressRecord LocalPlayer::use_press_record(w::UsePressEvent event) const {
 	record.event = event;
 	record.logic_tick = world_.logic_tick;
 	w::use_press_fill_body(record, player(), w::active_local_weapon_slot(world_, weapon));
+	record.watch = use_trace.watch;
+	if (record.watch == 0xFFFFu) return record;
+	const w::EntityHandle watched{record.watch};
+	if (const w::Entity *e = world_.registry.get(watched)) {
+		record.watch_present = true;
+		record.watch_flags = e->flags;
+		record.watch_engine_flags = e->engine_flags;
+	}
+	if (world_.collision != nullptr) {
+		record.watch_in_table =
+				world_.collision->dynamic_table_radius_q16(watched, record.watch_table_radius_q16);
+		int32_t count = 0;
+		const w::EntityHandle *slice =
+				world_.collision->candidate_slice(world_.cached.local_player, count);
+		record.slice_count = slice != nullptr ? count : -1;
+		for (int32_t i = 0; slice != nullptr && i < count; ++i)
+			if (slice[i] == watched) record.watch_in_slice = true;
+	}
 	return record;
 }
 

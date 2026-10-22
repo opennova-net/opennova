@@ -33,6 +33,14 @@ Dictionary UsePressRow::to_json_value() const {
 	out["seat_index"] = get_seat_index();
 	out["bone"] = get_bone();
 	out["attach_sent_before"] = get_attach_sent_before();
+	out["watch"] = get_watch();
+	out["watch_present"] = get_watch_present();
+	out["watch_flags"] = get_watch_flags();
+	out["watch_engine_flags"] = get_watch_engine_flags();
+	out["watch_in_table"] = get_watch_in_table();
+	out["watch_table_radius_q16"] = get_watch_table_radius_q16();
+	out["watch_in_slice"] = get_watch_in_slice();
+	out["slice_count"] = get_slice_count();
 	return out;
 }
 
@@ -55,5 +63,13 @@ void UsePressRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, seat_index)
 	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, bone)
 	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, attach_sent_before)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, watch)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::BOOL, watch_present)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, watch_flags)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, watch_engine_flags)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::BOOL, watch_in_table)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, watch_table_radius_q16)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::BOOL, watch_in_slice)
+	OPENNOVA_RECORD_READ_ONLY(UsePressRow, Variant::INT, slice_count)
 	ClassDB::bind_method(D_METHOD("to_json_value"), &UsePressRow::to_json_value);
 }

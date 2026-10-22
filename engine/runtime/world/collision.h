@@ -1766,6 +1766,9 @@ public:
     // the arena, valid until the next 17th-tick rebuild; null when the entity has
     // no slice (retail's BSS-zero start: the first 16 ticks scan nothing).
     const EntityHandle *candidate_slice(EntityHandle h, int32_t &count_out) const;
+    // Whether the pool-1 dynamic table holds a row for `h`, and that row's radius
+    // [orig: g_DynProxRadius, the copy @0x4B9389].
+    bool dynamic_table_radius_q16(EntityHandle h, int32_t &radius_out) const;
     // True once the per-tick pool tables have been built — the discriminator
     // between "no candidates near" and "this world never ran the table build"
     // (headless callers), which keep whole-registry fallbacks.

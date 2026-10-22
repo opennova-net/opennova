@@ -21,6 +21,15 @@ extends GameProbe
 ## `from_seq` picks the first record; `watch_ms` > 0 keeps polling each frame for that
 ## long and logs each record as it lands. The records also go to use_press_trace.json
 ## in the run directory.
+##
+## `watch_handle` (a registry handle, -1 none) names one entity whose scan inputs every
+## record carries while this run lasts (the scan reports nothing for an entity it
+## rejects): whether it exists, its Flags words (bit 0 keeps it out of the pool-1 table,
+## bit 1 is the dead bit), whether the pool-1 dynamic table holds it and that row's
+## radius, and whether the local body's candidate slice holds it, beside the slice's
+## count. The run clears the watch when it ends, so a drive cell plays its scenario with
+## `scenario_play` `wait` false, runs this probe with `watch_handle` and a `watch_ms`
+## covering the scenario, then collects the scenario.
 
 const LOCAL_PLAYER_TIMEOUT_MS := 60_000
 
@@ -35,6 +44,14 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		return ProbeVerdict.failed("no local player: the session is not running")
 	if ctx.sim() == null:
 		return ProbeVerdict.failed("no simulation to read")
+	var watch_handle := int(ctx.args.get("watch_handle", -1))
+	if watch_handle >= 0:
+		ctx.sim().debug_set_use_press_watch(watch_handle)
+		ctx.defer_restore(func() -> void:
+			var live := ctx.sim()
+			if live != null:
+				live.debug_set_use_press_watch(-1))
+		ctx.log("watching 0x%04x: each record carries its scan inputs" % watch_handle)
 	var records: Array = []
 	var next_seq := _take(records, from_seq)
 	var deadline := Time.get_ticks_msec() + watch_ms
@@ -104,4 +121,9 @@ func _line(row: Dictionary) -> String:
 						int(row.seat_index), int(row.bone)]
 			if String(row.outcome) == "attach_queued":
 				line += " attach_sent_before=%d" % int(row.attach_sent_before)
+	if int(row.watch) != 0xFFFF:
+		line += " watch=0x%04x present=%s flags=0x%x engine_flags=0x%x" % [int(row.watch),
+				str(row.watch_present), int(row.watch_flags), int(row.watch_engine_flags)]
+		line += " table=%s radius=%d slice=%s/%d" % [str(row.watch_in_table),
+				int(row.watch_table_radius_q16), str(row.watch_in_slice), int(row.slice_count)]
 	return line

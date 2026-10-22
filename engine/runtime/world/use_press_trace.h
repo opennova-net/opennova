@@ -13,6 +13,11 @@
 //   For a queued 0x26 it also records the runtime's framed-0x26 count at queue time
 //   (inmatch::ClientRuntime::attach_requests_sent), so a later readout of that count shows
 //   whether the request left.
+// Every record also carries the watched entity's scan inputs (UsePressTrace::watch, one
+// registry handle the reader names): whether it exists, its Flags words, whether it holds
+// a row in the pool-1 dynamic table and that row's radius, and whether the local body's
+// candidate slice holds it. The scan reads all of them from host-sent state and reports
+// nothing for an entity it rejects.
 #pragma once
 
 #include <runtime/world/entity.h>
@@ -71,12 +76,27 @@ struct UsePressRecord {
     int16_t seat_index = -1;
     uint8_t bone = 0;
     uint32_t attach_sent_before = 0;
+    // The watched entity (UsePressTrace::watch; 0xFFFF none). Its Flags words whole: bit 0
+    // keeps it out of the pool-1 table, bit 1 is the dead bit.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - the Flags & 1 skip @0x4B9382,
+    //  the radius copy @0x4B9389; Entity_BuildProximityListsFromPools @0x4B8EB0 - the slice
+    //  arena stores @0x4B8FD6]
+    uint16_t watch = 0xFFFFu;
+    bool watch_present = false;
+    uint32_t watch_flags = 0;
+    uint32_t watch_engine_flags = 0;
+    bool watch_in_table = false;
+    int32_t watch_table_radius_q16 = 0;
+    bool watch_in_slice = false;
+    int32_t slice_count = -1; // the local body's candidate slice; -1 no slice
 };
 
 // The last kCapacity records; seq counts every record appended.
 class UsePressTrace {
 public:
     static constexpr std::size_t kCapacity = 64;
+    // The registry handle whose scan inputs every record carries (0xFFFF none).
+    uint16_t watch = 0xFFFFu;
 
     void append(UsePressRecord record) {
         record.seq = next_seq_++;

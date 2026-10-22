@@ -148,6 +148,15 @@ int32_t CollisionWorld::candidate_count(EntityHandle h) const {
     return it == candidates_.end() ? 0 : it->second.count;
 }
 
+bool CollisionWorld::dynamic_table_radius_q16(EntityHandle h, int32_t &radius_out) const {
+    for (const DynSlot &d : dynamics_) {
+        if (d.h != h) continue;
+        radius_out = d.radius;
+        return true;
+    }
+    return false;
+}
+
 const EntityHandle *CollisionWorld::candidate_slice(EntityHandle h, int32_t &count_out) const {
     auto it = candidates_.find(h.packed);
     if (it == candidates_.end() || it->second.count <= 0) {

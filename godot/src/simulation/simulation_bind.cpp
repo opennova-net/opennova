@@ -447,6 +447,8 @@ void Simulation::_bind_methods() {
 			&Simulation::debug_use_press_next_seq);
 	ClassDB::bind_method(D_METHOD("debug_attach_requests_sent"),
 			&Simulation::debug_attach_requests_sent);
+	ClassDB::bind_method(D_METHOD("debug_set_use_press_watch", "handle"),
+			&Simulation::debug_set_use_press_watch);
 	ClassDB::bind_method(D_METHOD("release_use_item_key", "system_key_up"),
 			&Simulation::release_use_item_key);
 	ClassDB::bind_method(D_METHOD("is_armory_press_latched"), &Simulation::is_armory_press_latched);

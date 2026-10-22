@@ -76,6 +76,12 @@ int64_t Simulation::debug_attach_requests_sent() const {
 	return runtime_ != nullptr ? static_cast<int64_t>(runtime_->attach_requests_sent()) : 0;
 }
 
+void Simulation::debug_set_use_press_watch(int64_t p_handle) {
+	if (!kernel_) return;
+	kernel_->local.use_trace.watch =
+			p_handle >= 0 && p_handle < 0xFFFF ? static_cast<uint16_t>(p_handle) : uint16_t{0xFFFF};
+}
+
 void Simulation::release_use_item_key(bool p_system_key_up) {
 	if (kernel_) kernel_->local.release_use_item_key(p_system_key_up);
 }

@@ -20,6 +20,8 @@ func test_the_catalog_registers_use_press_trace() -> void:
 	assert_false(def.validate_args({"from_seq": -1}).ok, "from_seq is a seq")
 	assert_false(def.validate_args({"watch_ms": 1.5}).ok, "watch_ms is whole milliseconds")
 	assert_true(def.validate_args({"from_seq": 3, "watch_ms": 5000}).ok)
+	assert_true(def.validate_args({"watch_handle": 0x102E}).ok)
+	assert_false(def.validate_args({"watch_handle": -2}).ok, "-1 is the only no-watch value")
 
 
 func test_the_readout_is_empty_without_a_kernel() -> void:
@@ -67,3 +69,19 @@ func test_a_press_and_its_toggle_gate_reach_the_readout() -> void:
 
 	assert_eq(sim.debug_use_press_trace(from + 1).size(), 1,
 			"from_seq skips the records before it")
+	assert_eq(press.watch, 0xFFFF, "no watch named: none carried")
+
+	# A watched handle rides every record; one the world does not hold reads absent.
+	sim.debug_set_use_press_watch(0x1FFE)
+	sim.take_use_item_press()
+	var watched: Array[UsePressRow] = sim.debug_use_press_trace(from + 2)
+	assert_eq(watched.size(), 1)
+	if watched.size() == 1:
+		assert_eq(watched[0].watch, 0x1FFE)
+		assert_false(watched[0].watch_present)
+	sim.debug_set_use_press_watch(-1)
+	sim.take_use_item_press()
+	var cleared: Array[UsePressRow] = sim.debug_use_press_trace(from + 3)
+	assert_eq(cleared.size(), 1)
+	if cleared.size() == 1:
+		assert_eq(cleared[0].watch, 0xFFFF, "-1 clears the watch")
