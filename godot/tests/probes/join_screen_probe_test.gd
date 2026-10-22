@@ -186,8 +186,8 @@ func test_the_side_password_is_typed_and_accepted_on_the_shells_choice() -> void
 	var accepted := await _run({"op": "press", "control": "ACCEPT", "until": "closed",
 			"wait_ms": 1000})
 	assert_true(accepted.ok, accepted.summary)
-	assert_eq_deep(_committed, [["", false, "sidepw"]],
-			"the commit hands the typed side password to the join")
+	# The commit hands the typed side password to the join.
+	assert_eq_deep(_committed, [["", false, "sidepw"]])
 	assert_eq(_aborts, 0)
 	assert_false(bool(accepted.data["open"]), "the commit closes the join screen")
 
