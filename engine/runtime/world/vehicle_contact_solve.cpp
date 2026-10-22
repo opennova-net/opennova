@@ -229,8 +229,8 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, c);
 	int32_t corner_adj[4] = { 0, 0, 0, 0 };
 
-	// ---- §6.10 branch select: any PAD depth = grounded.
-	const bool pad_contact = d[0] > 0 || d[1] > 0 || d[2] > 0 || d[3] > 0;
+	// ---- §6.10 branch select: any nonzero PAD depth = grounded [orig: @0x480D25..0x480D47].
+	const bool pad_contact = d[0] != 0 || d[1] != 0 || d[2] != 0 || d[3] != 0;
     if (!pad_contact) {
 		// Airborne marks the flag; the park and wreck latches decide whether to retain the
 		// vertical pose. A crashed hull whose spine touches first freezes its park, marking the
@@ -499,17 +499,23 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	plat_water_flag(world, veh, traits, probes, r, hull_bottom_neg, world.env.water_z);
 
 	// The stability contact byte feeds yaw integration and the slope-following velocity re-derive.
-	// Witness sites: [orig: @0x47D7F4, @0x47D8AF]
-	int32_t up_z16 = static_cast<int32_t>(basis.up[2] * io::kFp16OneD);
-	const int32_t fwd_z16 = static_cast<int32_t>(basis.fwd[2] * io::kFp16OneD);
+	// It reads the rebuilt matrix's up and forward Z (the row extracts' `sar 6`) and the latch
+	// bytes as they stand here, before the crash state: an upright (up.z > 0x1000) hull that is
+	// not crashed, wrecked (+0x2F0) or wreck-settled (+0x2FC) sets it on a pad pair, or, light
+	// (def mass <= 10) with its nose under 0x6000, on any pad; anything else clears it.
+	// Witness sites: [orig: Math_BuildFixedPointMatrixFromEulerAngles (the call @0x47D7BB), the row
+	//  extracts @0x47D7CD / @0x47D7DF (Math_ExtractRow2FromFixedPoint22 @0x6137A0); the pair arm
+	//  @0x47D7E4..0x47D843 (the pair test's last branch @0x47D7F4), the light arm
+	//  @0x47D854..0x47D89F, the clear @0x47D8A8, the join @0x47D8AF]
+	int32_t up_z16 = basis.q22.m[10] >> 6;
+	const int32_t fwd_z16 = basis.q22.m[8] >> 6;
 	for (int k = 0; k < 4; ++k) m.dbg_pad_depth[k] = d[k]; // diagnostic tap ("pd")
     const bool pair_contact =
             (d[0] != 0 && d[3] != 0) || (d[1] != 0 && d[2] != 0) ||
             (d[0] != 0 && d[2] != 0) || (d[1] != 0 && d[3] != 0);
     const bool any_pad = d[0] != 0 || d[1] != 0 || d[2] != 0 || d[3] != 0;
-    m.grounded = (up_z16 > 4096 && pair_contact) ||
-                 (any_pad && fwd_z16 < 24576 && traits.mass <= 10 &&
-                  up_z16 > 4096);
+    m.grounded = up_z16 > 0x1000 && m.crashed == 0 && m.settle_2f0 == 0 && m.wreck_2fc == 0 &&
+                 (pair_contact || (any_pad && fwd_z16 < 0x6000 && traits.mass <= 10));
 
     // ---- the suspension spring leg, in the witnessed order
     // (vehicle_suspension.h): the crash tests, then the extend loop's sink
@@ -535,7 +541,6 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	vehicle_crash_state(world, veh, traits, pad_contact, up_z16);
 	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	up_z16 = basis.q22.m[10] >> 6;
-	m.grounded = m.grounded && !m.crashed && !m.settle_2f0 && !m.wreck_2fc;
 	// [orig: Entity_ProcessTrackedVehiclePhysics @ 0x47E09F..0x47E107]
 	int32_t crash_depth = -1;
 	if (m.crashed || up_z16 < 0 || m.settle_2f0)

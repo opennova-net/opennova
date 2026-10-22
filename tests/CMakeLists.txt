@@ -5391,6 +5391,10 @@ add_test(NAME settle_static_contact COMMAND settle_static_contact_test)
 add_executable(aircraft_spring_legs_test world/aircraft_spring_legs_test.cpp)
 target_link_libraries(aircraft_spring_legs_test PRIVATE opennova_runtime)
 add_test(NAME aircraft_spring_legs COMMAND aircraft_spring_legs_test)
+# D-NET-NEW-L6-13: the tracked solve's +0x2F2 byte reads the latch bytes before the crash state.
+add_executable(contact_stability_byte_test world/contact_stability_byte_test.cpp)
+target_link_libraries(contact_stability_byte_test PRIVATE opennova_runtime)
+add_test(NAME contact_stability_byte COMMAND contact_stability_byte_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the
