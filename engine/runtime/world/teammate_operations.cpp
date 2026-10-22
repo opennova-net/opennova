@@ -157,8 +157,12 @@ bool TeammateOperations::start(World &world, int32_t subtype, int32_t patient_ss
     if (subtype != 1 && subtype != 2) return false;
     if (count_ == kCapacity) return false;
     EntityLifetime patient, marker;
+    // The first pool-0 row whose DcbId is the SSN, a player body's 10000 + its slot included
+    // (entity_dcb_id). [orig: EntityPool0_FindByParentRef @0x452020 - `cmp [eax+7Ch], edi`
+    //  @0x452049; its calls HeliLift_SpawnPickup @0x4525E8, HeliLift_SpawnFlyover @0x45273A]
     world.registry.for_each_in_pool(0, [&](const Entity &entity) {
-        if (!patient.valid() && entity.net_id == patient_ssn) patient = lifetime(&entity);
+        if (!patient.valid() && entity_dcb_id(world, entity) == patient_ssn)
+            patient = lifetime(&entity);
     });
     world.registry.for_each_in_pool(3, [&](const Entity &entity) {
         if (!marker.valid() && entity.has_item_def && entity.item_id == 6088 &&

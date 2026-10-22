@@ -18,6 +18,7 @@
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
 using namespace opennova;
@@ -2098,6 +2099,60 @@ static void test_single_alert_triggers() {
     CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtRedAlert, 99)));
 }
 
+// A co-op mission's Single triggers name each player as 10000 + its slot: the spawn copies the
+// slot byte to +0x154 ahead of the class init, whose plyr row stamps 10000 + it into the DcbId
+// every SSN walk keys, on the host for every player body alike, the host's own (slot 0) and a
+// joiner's (slot 1); a slot no body holds reads destroyed. The walks hold no session gate.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the +0x154 copy @0x43C418, the init call
+//  @0x43C4FE; PlayerClass_InitEntity @0x4B1060 - @0x4B1149..0x4B1173; Server_PlayerAdd @0x51CBC0 -
+//  the spawn @0x51D056, the +0x154 store @0x51D08B; Entity_IsAliveByBmsRef @0x43E640 - @0x43E669;
+//  Entity_IsBmsRefInTriggerBounds @0x43E510 - @0x43E591; EntityPool_FindByNetId @0x4F0A20 -
+//  @0x4F0A81..0x4F0A8C]
+static void test_coop_single_triggers_name_each_player_by_slot() {
+    World w;
+    w.rules.mp_session = true;
+    w.rules.logic_authority = true;
+    w.registry.configure_pool(0, 8);
+    world::Aabb zone;
+    zone.min = {10.0f, 0.0f, -16384.0f};
+    zone.max = {100.0f, 100.0f, 16384.0f};
+    const int area = w.registry.register_area(
+            "", zone, /*active=*/true, /*zone_id=*/7, {}, false,
+            std::array<int32_t, 4>{10 << 16, 100 << 16, 0, 100 << 16},
+            std::array<int32_t, 2>{static_cast<int32_t>(0xC0000000u), 0x40000000},
+            std::array<int32_t, 2>{-(5 << 16), 5 << 16});
+    world::PlayerSpawn own;
+    own.net_id = 0; // a player's record SSN word is 0 (D-NET-112)
+    const world::EntityHandle host_body = world::spawn_player(w, own);
+    world::PlayerSpawn joiner;
+    joiner.net_id = 0;
+    const world::EntityHandle joiner_body = world::spawn_remote_player(w, joiner);
+    CHECK(host_body.valid() && joiner_body.valid());
+    if (!host_body.valid() || !joiner_body.valid()) return;
+    w.registry.get(joiner_body)->player_slot_id = 1; // the joiner's slot byte (+0x154)
+    w.registry.get(host_body)->position.set_q16({200 << 16, 50 << 16, 0});
+    w.registry.get(joiner_body)->position.set_q16({50 << 16, 50 << 16, 0});
+
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+
+    using S = bms::SingleTriggerType;
+    CHECK(w.commands.resolve_ssn(10000) == host_body);
+    CHECK(w.commands.resolve_ssn(10001) == joiner_body);
+    CHECK(!w.commands.resolve_ssn(10002).valid());
+    CHECK(!w.commands.resolve_ssn(0).valid()); // no player body keeps the memset's 0
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAlive, 10000)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAlive, 10001)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDestroyed, 10002)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIsWithinArea, 10001, area)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIsWithinArea, 10000, area)));
+    w.registry.get(joiner_body)->flags |= world::kEntityFlagDead;
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDestroyed, 10001)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDestroyed, 10000)));
+}
+
 // Subs 6/9/12 are HEALTH thresholds, not unit counts [orig:
 // Entity_HasDamageCapacity @0x43e3d0 / HasFullHealth @0x43e470 /
 // HasHealthAboveThreshold @0x43e350 — pools 0-1, signed, no alive gate].
@@ -2425,8 +2480,11 @@ static void test_area_trigger_pool_and_identity_rules() {
     w.registry.spawn(3, inside);
     CHECK(!sys.evaluate_trigger_for_test(w, single));
     CHECK(!sys.evaluate_trigger_for_test(w, group));
+    // A player body (record SSN word 0) answers by its DcbId, 10000 + its slot byte 0, in a
+    // session or out of one: the walk has no session gate (entity_dcb_id).
     inside.net_id = 0;
     inside.group_id = 0;
+    inside.engine_flags |= world::kEntityFlagPlayer;
     const auto local = w.registry.spawn(0, inside);
     w.cached.local_player = local;
     single.param1 = 0;
@@ -2434,9 +2492,9 @@ static void test_area_trigger_pool_and_identity_rules() {
     CHECK(!sys.evaluate_trigger_for_test(w, single));
     CHECK(!sys.evaluate_trigger_for_test(w, group));
     single.param1 = 10000;
-    CHECK(sys.evaluate_trigger_for_test(w, single)); // SP representation alias
+    CHECK(sys.evaluate_trigger_for_test(w, single));
     w.rules.mp_session = true;
-    CHECK(!sys.evaluate_trigger_for_test(w, single)); // no MP local-player substitution
+    CHECK(sys.evaluate_trigger_for_test(w, single));
     single.param1 = 0x10047; // must not wrap to SSN 71
     CHECK(!sys.evaluate_trigger_for_test(w, single));
     group.param1 = 259; // must not wrap to group 3
@@ -3040,6 +3098,7 @@ int main() {
     test_trigger_relations_group_records();
     test_trigger_relations_matrices_and_visited();
     test_single_alert_triggers();
+    test_coop_single_triggers_name_each_player_by_slot();
     test_single_health_triggers();
     test_holding_triggers();
     test_single_distance_los_chain();

@@ -45,11 +45,11 @@ class EntityCommands {
 public:
     explicit EntityCommands(World &world) : world_(world) {}
 
-    // Script SSN -> entity handle (the WAC SSN*/BMS Single resolve), including
-    // the retail player mapping: SSN 10000 (mission::kPlayerSsn, the
-    // script-facing local-player SSN) = the local player. Our player
-    // entities carry net_id 0 (the wire is handle-based), so the mapping lives
-    // here at the script seam. [orig: EntityPool_FindByNetId @0x4f0a20]
+    // Script SSN -> entity handle (the WAC SSN*/BMS Single resolve): the first
+    // row over pools 0..3 whose DcbId's low 16 bits are the SSN. A player
+    // body's DcbId is its class init's 10000 + its slot (world::entity_dcb_id),
+    // so a script names every player, slot n as 10000 + n.
+    // [orig: EntityPool_FindByNetId @0x4f0a20]
     EntityHandle resolve_ssn(uint16_t ssn) const;
     EntityHandle resolve_target(EntityTarget target) const;
 

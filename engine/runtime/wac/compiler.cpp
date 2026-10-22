@@ -1255,7 +1255,9 @@ private:
 			// lookup; the leg never answers NULL. The port binds the net id
 			// when the VM first meets its world, and the embedder's registry
 			// answers the "Unknown SSN" question the pooled handle answered.
-			// The 10000 player alias (mission::kPlayerSsn) is EntityCommands::resolve_ssn's
+			// The registry's record-SSN lookup holds no player: a player's SSN is its DcbId,
+			// 10000 + its slot (world::entity_dcb_id, which EntityCommands::resolve_ssn keys
+			// when the VM binds), so 10000 (mission::kPlayerSsn) stays exempt here as the
 			// authoring seam, not a retail lookup. [orig: @0x4F2E97..0x4F2EED
 			// -> EntityPool_FindByNetId @0x4F0A20, the 16-bit key @0x4F0A3A]
 			const int32_t net = crt_atol(s + p) & 0xFFFF;

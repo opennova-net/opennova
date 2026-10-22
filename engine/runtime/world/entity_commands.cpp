@@ -40,38 +40,39 @@ static_assert(TriggerRelations::kSingles == mission::kRelationSsnRows,
 
 namespace {
 
-// Whether script SSN `ssn` names the local player's body through ours' alias: SSN 10000, a local
-// body, and its bound row the plyr row, whose class init alone stamps the DcbId with 10000 + the
-// slot byte; the organic init and an item row's write no DcbId, so their body keeps the spawn
-// memset's 0 and SSN 10000 names nothing (D-NET-348's class-init residue).
-// [orig: PlayerClass_InitEntity @0x4B1060 - the slot byte + 10000 @0x4B1149..0x4B1155, the
-//  DcbId store @0x4B1173; Entity_InitOrganicAI @0x4BFCC0 (no +0x7C store);
-//  Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE, the init call @0x43C4FE]
-bool local_player_ssn_alias(const World &world, int32_t ssn) {
-    if (ssn != mission::kPlayerSsn) return false;
-    const Entity *local = world.registry.get(world.cached.local_player);
-    return local != nullptr && player_item_row(world, *local).body_class == PlayerBodyClass::kPlayer;
+// Whether `entity`'s DcbId (+0x7C) is `ssn`, the full-word compare every script SSN walk but
+// EntityPool_FindByNetId's makes. Mission scripts (WAC SSN* commands, BMS Single triggers and
+// actions) name the players as 10000 + their slot: the player spawn copies the slot byte to +0x154
+// ahead of the class init, and the plyr row's init stamps 10000 + it into the DcbId; an organic or
+// item row's init writes none, so its body keeps the spawn memset's 0 (D-NET-348). Our player
+// bodies keep the record SSN word (Entity::net_id) at 0, so the key is world::entity_dcb_id: every
+// player body's, the local one's and each joiner's alike, and every other row's record SSN.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE, the +0x154 copy
+//  @0x43C418, the init call @0x43C4FE; PlayerClass_InitEntity @0x4B1060 - the slot byte + 10000
+//  @0x4B1149..0x4B1155, the DcbId store @0x4B1173; Entity_InitOrganicAI @0x4BFCC0 (no +0x7C
+//  store); e.g. Entity_IsBmsRefInTriggerBounds @0x43E510 - `cmp [ecx+7Ch], ebp` @0x43E591]
+bool dcb_id_is(const World &world, const Entity &entity, int32_t ssn) {
+    return entity_dcb_id(world, entity) == ssn;
 }
 
 } // namespace
 
-// Script SSN -> entity handle. Mission scripts (WAC SSN* commands + BMS Single
-// triggers/actions) address the players as SSN 10000 + player slot. The JO
-// player spawn [orig: Entity_SpawnFromAnimSlotProperty @0x43c390] leaves
-// DcbId@0x7C zero, and the player class init then stamps it with 10000 + the
-// slot byte [orig: PlayerClass_InitEntity @0x4b1149..0x4b1173], the key
-// EntityPool_FindByNetId matches (low 16 bits; pools 0..3, no netId gate).
-// Our player entities carry net_id 0 (the wire is handle-based), so the
-// mission::kPlayerSsn alias below maps SSN 10000 to the local player in their
-// place; MP joiner SSNs (10001+) wait on the net track.
-// [orig: EntityPool_FindByNetId @0x4f0a20]
+// The first row over pools 0..3, in pool and slot order, whose DcbId's low 16 bits are the SSN.
+// No SSN-0 guard, like the retail lookup this ports; resolve_ssn_in_pools012 below is the OTHER
+// retail walk (SSN-0 gate, pools 0..2) and the two differ on purpose.
+// [orig: EntityPool_FindByNetId @0x4f0a20 - the 16-bit key @0x4f0a3a, the +0x7C read @0x4f0a81
+//  masked @0x4f0a84 and compared @0x4f0a8c, the pool mask 0xF @0x4f0a5f]
 EntityHandle EntityCommands::resolve_ssn(uint16_t ssn) const {
-    if (local_player_ssn_alias(world_, ssn)) return world_.cached.local_player;
-    // No SSN-0 guard and pools 0..3, like the retail lookup this mirrors;
-    // resolve_ssn_in_pools012 below is the OTHER retail walk (dcb != 0 gate,
-    // pools 0..2) and the two differ on purpose. [orig: EntityPool_FindByNetId
-    // @0x4f0a20 — mask 0xF, no netId gate]
-    return world_.registry.find_by_net_id(ssn);
+    for (int pool = 0; pool < 4; ++pool) {
+        const size_t capacity = world_.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world_.registry.get(handle);
+            if (entity != nullptr && static_cast<uint16_t>(entity_dcb_id(world_, *entity)) == ssn)
+                return handle;
+        }
+    }
+    return EntityHandle{};
 }
 
 EntityHandle EntityCommands::resolve_target(EntityTarget target) const {
@@ -79,12 +80,13 @@ EntityHandle EntityCommands::resolve_target(EntityTarget target) const {
 }
 
 bool EntityCommands::set_ssn_target_selector(int32_t ssn, AiTargetSelector field, int32_t value) {
-    // [orig: 0x43DA50/+334, 0x43DAC0/+332, 0x43D970/+338, 0x43D9E0/+336]
+    // [orig: 0x43DA50/+334, 0x43DAC0/+332, 0x43D970/+338, 0x43D9E0/+336; the DcbId compares
+    //  e.g. Entity_SetAlertByBmsRef @0x43DA50 - @0x43DA79 / @0x43DAA9]
     if (ssn == 0) return false;
     for (int pool = 0; pool <= 1; ++pool) {
         for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
             Entity *entity = world_.registry.get(EntityHandle::make(pool, static_cast<int>(slot)));
-            if (entity == nullptr || entity->net_id != ssn) continue;
+            if (entity == nullptr || !dcb_id_is(world_, *entity, ssn)) continue;
             entity->target_selectors.set(field, value);
             return true;
         }
@@ -821,7 +823,7 @@ bool EntityCommands::set_ssn_waypoint(EntityTarget ssn, int32_t wp) {
 }
 
 int EntityCommands::redirect_ssn_to_waypoint(int32_t ssn, int32_t wp, int32_t node) {
-    // Pool 0: the first slot holder whose net id matches takes the order and
+    // Pool 0: the first slot holder whose DcbId (dcb_id_is) matches takes the order and
     // ENDS the walk — detach, the think cooldown and carrier word reset, the
     // brain copy, and no budget seed. [orig: Entity_SetWaypointForTeam
     //  @0x43DD2C..0x43DDCF — match @0x43DD2C, slot gate @0x43DD31, detach
@@ -829,7 +831,7 @@ int EntityCommands::redirect_ssn_to_waypoint(int32_t ssn, int32_t wp, int32_t no
     //  @0x43DDCF (and @0x43DDA2 without a brain)]
     Entity *first = nullptr;
     world_.registry.for_each_in_pool(0, [&](const Entity &candidate) {
-        if (first != nullptr || static_cast<int32_t>(candidate.net_id) != ssn) return;
+        if (first != nullptr || !dcb_id_is(world_, candidate, ssn)) return;
         if (world_.ai.for_handle(candidate.handle) == nullptr) return;
         first = world_.registry.get(candidate.handle);
     });
@@ -846,7 +848,7 @@ int EntityCommands::redirect_ssn_to_waypoint(int32_t ssn, int32_t wp, int32_t no
     // resets. [orig: @0x43DDD0..0x43DE89 — match @0x43DDED, slot gate @0x43DDF2]
     std::vector<EntityHandle> members;
     world_.registry.for_each_in_pool(1, [&](const Entity &candidate) {
-        if (static_cast<int32_t>(candidate.net_id) == ssn &&
+        if (dcb_id_is(world_, candidate, ssn) &&
                 world_.ai.for_handle(candidate.handle) != nullptr)
             members.push_back(candidate.handle);
     });
@@ -1080,14 +1082,10 @@ bool EntityCommands::ssn_in_area(int32_t ssn, int area_id) const {
             const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world_.registry.get(handle);
             if (entity == nullptr) continue;
-            // The SP listen-host model retains its existing script-player
-            // alias: its socketless local body carries net_id 0 (D-NET-112).
-            const bool local_alias = !world_.rules.mp_session &&
-                    handle == world_.cached.local_player && entity->net_id == 0 &&
-                    local_player_ssn_alias(world_, ssn);
-            // The position words against the record's words (D-NET-507)
-            // [orig: @0x43E596..0x43E5C1].
-            if ((entity->net_id == ssn || local_alias) && area->trigger_contains(entity->position))
+            // The DcbId compare, a player body's included [orig: `cmp [ecx+7Ch], ebp`
+            // @0x43E591 (pool 0) / @0x43E5EB (pool 1)]; the position words against the
+            // record's words (D-NET-507) [orig: @0x43E596..0x43E5C1].
+            if (dcb_id_is(world_, *entity, ssn) && area->trigger_contains(entity->position))
                 return true;
         }
     }
@@ -1206,14 +1204,9 @@ bool EntityCommands::bms_ref_alive(int32_t ssn) const {
             const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world_.registry.get(handle);
             if (entity == nullptr) continue;
-            // The SP listen-host model's socketless local body carries net_id
-            // 0 where retail stamps the player's DcbId 10000 + slot; the same
-            // D-NET-112 alias ssn_in_area applies.
-            // [orig: PlayerClass_InitEntity @0x4b1155..0x4b1173]
-            const bool local_alias = !world_.rules.mp_session &&
-                    handle == world_.cached.local_player && entity->net_id == 0 &&
-                    local_player_ssn_alias(world_, ssn);
-            if (static_cast<int32_t>(entity->net_id) != ssn && !local_alias) continue;
+            // The DcbId compare, a player body's 10000 + slot included [orig: `cmp
+            // [ecx+7Ch], edx` @0x43e669 / @0x43e699 / @0x43e6c9].
+            if (!dcb_id_is(world_, *entity, ssn)) continue;
             return ((entity->flags | entity->engine_flags) & kEntityFlagDead) == 0;
         }
     }
@@ -1629,21 +1622,21 @@ namespace {
 // matching row in pool order 0,1,2, no item gate; SSN 0 never matches
 // [orig: the dcb gate + pools-0,1,2 walks — Entity_FindByDCBAndSetFlag
 // @0x43db30, Entity_SetNetIdByParentRef @0x43d6c0]. The single teleport walks
-// with its item gate inside (resolve_teleport_target below). Our local-player
-// rows deliberately carry net_id 0 (the wire is handle-based), so the
-// resolve_ssn sentinel mapping runs first.
+// with its item gate inside (resolve_teleport_target below). The key is the
+// row's DcbId, every player body's 10000 + its slot included (dcb_id_is)
+// [orig: `cmp [ecx+7Ch], edx` @0x43db59 / @0x43db89 / @0x43dbb9, @0x43d6e9 /
+//  @0x43d719 / @0x43d749].
 EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
     // The dcb != 0 gate and the 0..2 pool set are this walk's own; the
-    // net-id lookup EntityCommands::resolve_ssn wraps has neither.
+    // lookup EntityCommands::resolve_ssn ports has neither.
     if (ssn == 0) return EntityHandle{};
-    if (local_player_ssn_alias(world, ssn)) return world.cached.local_player;
     for (int pool : {0, 1, 2}) {
         const size_t capacity = world.registry.pool_capacity(pool);
         for (size_t slot = 0; slot < capacity; ++slot) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world.registry.get(handle);
-            if (entity != nullptr && entity->net_id == ssn) return handle;
+            if (entity != nullptr && dcb_id_is(world, *entity, ssn)) return handle;
         }
     }
     return EntityHandle{};
@@ -1652,17 +1645,13 @@ EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
 // The single teleport's own target walk: pools 0, 1, 2 in order, the first
 // row holding an ItemTypeIndex whose DcbId matches. The gate sits inside the
 // walk, so a gated row carrying the SSN is passed over for a later match, in
-// the same pool or the next. SSN 0 and the local-player alias follow
-// resolve_ssn_in_pools012 (our player rows carry net_id 0).
+// the same pool or the next. SSN 0 and the DcbId key (a player body's
+// included) follow resolve_ssn_in_pools012.
 // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0 — pool 0 @0x43E005 (the
 //  +0x1C gate @0x43E02D, the DcbId compare @0x43E033), pool 1 @0x43E0BB
 //  (@0x43E0DD / @0x43E0E3), pool 2 @0x43E161 (@0x43E180 / @0x43E186)]
 EntityHandle resolve_teleport_target(const World &world, uint16_t ssn) {
     if (ssn == 0) return EntityHandle{};
-    if (local_player_ssn_alias(world, ssn)) {
-        const Entity *local = world.registry.get(world.cached.local_player);
-        if (local != nullptr && local->item_type_index != 0) return local->handle;
-    }
     for (int pool : {0, 1, 2}) {
         const size_t capacity = world.registry.pool_capacity(pool);
         for (size_t slot = 0; slot < capacity; ++slot) {
@@ -1670,7 +1659,7 @@ EntityHandle resolve_teleport_target(const World &world, uint16_t ssn) {
                     EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world.registry.get(handle);
             if (entity == nullptr || entity->item_type_index == 0) continue;
-            if (entity->net_id == ssn) return handle;
+            if (dcb_id_is(world, *entity, ssn)) return handle;
         }
     }
     return EntityHandle{};
@@ -2170,7 +2159,8 @@ void apply_ai_controller_command(World &world, Entity &entity, AiEntity &ae, int
                 bool preserve = false;
                 for (size_t slot = 0; slot < world.registry.pool_capacity(0); ++slot) {
                     const Entity *target = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
-                    if (target == nullptr || target->net_id != p2) continue;
+                    // The DcbId compare [orig: Entity_FindByNetId @0x4655B0 - @0x4655E0].
+                    if (target == nullptr || !dcb_id_is(world, *target, p2)) continue;
                     preserve = ((target->flags | target->engine_flags) & 2) == 0;
                     break;
                 }
