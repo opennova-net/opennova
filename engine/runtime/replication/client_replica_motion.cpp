@@ -1168,9 +1168,9 @@ static bool row_corpse_tail(ClientEntityState &es, bool edge_this_tick, bool org
 }
 
 // A seated body's pass, which ends at the mounted site: the primary channel at its
-// head (its capsule is the eye's extent), the seat carry, then the site's four leg
-// words, a passenger's lean keys and the eye, in that order. The seated row presents
-// through its seat path (the wire byte), not this channel.
+// head (its capsule is the eye's extent), the site's scrub, the seat carry, then the
+// site's four leg words, a passenger's lean keys and the eye, in that order. The
+// seated row presents through its seat path (the wire byte), not this channel.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF; the
 //  seat carry Entity_GetBoneTransformAndOrientation @0x4B6510 (+0x8C @0x4B654E, the legs
 //  @0x4B6554 / @0x4B655A, Roll @0x4B6572, +0x90 @0x4B6575); the site's leg words
@@ -1199,9 +1199,22 @@ void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es) {
 			es.rm_prev_bottom_live = true;
 		}
 	}
+	const ClientEntityState *carrier = state_.find(es.carrier_handle);
+	// The mounted site's scrub on every seated pass, ahead of the seat carry: the
+	// chute, in-air, afloat, ladder, dive and armory bits, the vertical velocity and
+	// the two canopy words, so a row that mounted airborne, afloat or on a ladder
+	// carries none of them through the ride. The site's +0x2C bit 4 clear is the
+	// local player's ladder pitch-restore latch, which a replica row never arms.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the carrier's def test
+	//  @0x4B638C, `and dword ptr [esi+24h],0FF8F57DFh` @0x4B6395, +0x2C @0x4B639C,
+	//  slideDecay @0x4B63AB, +0x378 / +0x37A @0x4B63B1 / @0x4B63B8]
+	if (carrier != nullptr) {
+		es.rm_entity_flags &= 0xFF8F57DFu;
+		es.rm_vel_z = 0;
+		es.rm_parachute = world::ParachuteState{};
+	}
 	// The seat carry: the seat bone's yaw into the body heading, its roll into
 	// Roll, its pitch into savedLivePitch.
-	const ClientEntityState *carrier = state_.find(es.carrier_handle);
 	ReplicaSeatFrame seat;
 	if (carrier != nullptr && replica_seat_frame_resolver_ &&
 			replica_seat_frame_resolver_(carrier->handle, carrier->type_id, es.mount_bone, seat)) {

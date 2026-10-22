@@ -692,6 +692,40 @@ void test_seated_row_eye_reads_its_channel_capsule() {
 	expect(es->rm_state >= 0, "(the channel stays armed while seated)");
 }
 
+// L5-s10 (V-ROLL-D's FOUND on D-NET-330): the mounted site scrubs a seated body on
+// every pass: Flags &= 0xFF8F57DF (the 0x20, 0x800, 0x2000, 0x8000, 0x100000,
+// 0x200000 and 0x400000 bits), slideDecay = 0 and both canopy words 0. The seat
+// bit 0x40 and the Indoors bit 0x800000 stay.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B6395, @0x4B63AB,
+//  @0x4B63B1 / @0x4B63B8]
+void test_seated_row_scrubs_its_body_words() {
+	static constexpr uint16_t kCarrier = 0x1010;
+	static constexpr uint16_t kCarrierType = 0x0400;
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	view.state().upsert(kCarrier).type_id = kCarrierType;
+	ns::ClientEntityState &row = view.state().upsert(kPlayerHandle);
+	row.type_id = kPlayerType;
+	row.cls = EntityClass::Player;
+	row.carrier_handle = kCarrier;
+	row.mount_bone = 3;
+	row.net_has_compact = true;
+	row.rm_adm_id = -1;
+	row.rm_entity_flags = 0x40u | 0x20u | 0x800u | 0x2000u | 0x8000u | 0x100000u | 0x200000u |
+	                      0x400000u | 0x800000u;
+	row.rm_vel_z = -0x1234;
+	row.rm_parachute.inflation = 5;
+	row.rm_parachute.flap = 7;
+	view.tick_remote_motion(0xFFFF);
+	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
+	expect(es->rm_entity_flags == (0x40u | 0x800000u),
+			"the seated pass clears Flags & ~0xFF8F57DF and keeps the seat and Indoors bits");
+	expect(es->rm_vel_z == 0, "the seated pass zeroes slideDecay");
+	expect(es->rm_parachute.inflation == 0 && es->rm_parachute.flap == 0,
+			"the seated pass zeroes both canopy words");
+}
+
 // D-NET-196: a decoded row's two channels serve the one ring table every body of
 // its .adm reads, the client's own World body included: the dual update re-inits
 // the secondary ahead of the primary, each re-init plays the state's head and
@@ -804,6 +838,7 @@ void test_dead_row_in_the_air_tumbles() {
 int main() {
 	test_dead_row_in_the_air_tumbles();
 	test_seated_row_eye_reads_its_channel_capsule();
+	test_seated_row_scrubs_its_body_words();
 	test_row_channels_serve_the_shared_variant_rings();
 	test_record_flags_land_on_the_mirror();
 	test_remote_lean_ramp_gates();
