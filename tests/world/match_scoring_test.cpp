@@ -272,9 +272,10 @@ void test_kill_event_adds_the_victim_score() {
 }
 
 // The kill accounting returns off the authority: a peer that reaches a lethal
-// edge (its own knife entry) scores nothing, the authority scores the victim's
-// word. [orig: Score_ProcessKillEvent @0x4FD400 - `cmp g_NapiNPCtx.is_authority,
-//  0` @0x4FD412, ahead of the event-12 call @0x4FD438]
+// edge (the projectile site's gate, which tests no authority of its own) scores
+// nothing, the authority scores the victim's word. [orig: Score_ProcessKillEvent
+//  @0x4FD400 - `cmp g_NapiNPCtx.is_authority, 0` @0x4FD412, ahead of the event-12
+//  call @0x4FD438; Projectile_ProcessDamageOnTarget @0x4E80F7..0x4E8133]
 void test_kill_event_scores_on_the_authority_alone() {
     auto world = make_world(gt::kTeamDeathmatch);
     const EntityHandle ace = player(*world, 0, 1);

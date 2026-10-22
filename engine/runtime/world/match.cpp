@@ -1168,7 +1168,9 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
 
 // Only the damage-pass lethal edges call Score_ProcessKillEvent, each at its
 // site while the victim exists, and it returns without a killer, off the
-// authority (a peer's own knife entry), or when the VICTIM's ItemDef `score`
+// authority (the one lethal gate with no authority test of its own is the
+// projectile site's [orig: Projectile_ProcessDamageOnTarget @0x4E80F7..0x4E8133,
+// its own is_authority test @0x4E8148]), or when the VICTIM's ItemDef `score`
 // word is zero, so a Player (no score on any Player
 // definition) never enters it, not even for a self-kill. Scorer event 12 runs
 // in every session; the SP tallies (the epilog score screen's counts and the

@@ -247,7 +247,7 @@ void test_two_bodies_die_in_slot_order() {
 
 // A damage-time record for the body raises nothing (its site scored the kill):
 // the edge raises the one transaction, and the kill is credited once.
-void test_damage_record_only_tallies() {
+void test_a_damage_record_raises_one_transaction() {
 	Fixture f;
 	f.hit(0, 1);
 	w::RoundDeath d;
@@ -668,7 +668,7 @@ int main() {
 	test_health_write_dies_in_its_frames_entity_update();
 	test_raise_ahead_of_the_walk_cancels_it();
 	test_two_bodies_die_in_slot_order();
-	test_damage_record_only_tallies();
+	test_a_damage_record_raises_one_transaction();
 	test_the_kill_command_credits_its_killer();
 	test_kill_player_dies_twice();
 	test_kill_player_unstaged_dies_killerless_twice();
