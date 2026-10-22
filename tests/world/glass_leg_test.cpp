@@ -9,7 +9,9 @@
 //   a repeat hit on that point:      3 words (the two gates and the rule's texture), no reseed;
 //   a miss on the model:             8 words (two per GLASS row), then the ring scar's 2;
 //   scar_type 2 on a miss:           4 words (id 2 spans one texture), no ring scar;
-//   a window point on a skinned model: 2 words (the two gates), no decal, no ring scar.
+//   a window point on a skinned model, a model without a collision block, or section 0 of a
+//   model whose scar-cache bone callback returns no matrices:
+//                                    2 words (the two gates), no decal, no ring scar.
 // The rolls pass at or under the main column's ftol(p * 100): 100, 10, 20, 33.
 // [orig: Impact_SpawnGlassEffectsOrScar @0x5CF1B0; Terrain_SpawnSurfaceEffectsAtUserPoints
 //  @0x5CEA90; Scar_ProjectDecalOntoEntity @0x5CE4A0; Scar_HasProjectedDecalAt @0x5CC700;
@@ -220,29 +222,68 @@ void test_a_model_without_a_row() {
 	CHECK(words_since(world, s0).size() == 2, "with only the ring's two words");
 }
 
-// A model whose LOD-0 render model is skinned (GHDR mesh type 2) or absent refuses the decal:
-// the window point still counts, so the impact ends with no ring scar, but only the leg's two
-// texture gates draw; no node, no roll, no reseed.
-// [orig: Scar_ProjectDecalOntoEntity @0x5CE517..0x5CE526; the count @0x5CEC6B ahead of the
-//  call @0x5CECBD, the rolls only on its 1 @0x5CECC5]
-void test_a_skinned_model() {
-	Rig rig;
-	build(rig);
+// A model gate that refuses the decal: the window point still counts, so the impact ends with no
+// ring scar, but only the leg's two texture gates draw; no node, no roll, no reseed.
+// [orig: the count @0x5CEC6B ahead of the call @0x5CECBD, the rolls only on its 1 @0x5CECC5]
+void check_refused(Rig &rig, const ProjectileHit &hit) {
 	World &world = *rig.world;
-	ItemDeathTraits skinned = *world.tables.item_death_traits.get(kWindowItem);
-	skinned.graphic_lod0_refuses_decal = true;
-	world.tables.item_death_traits.set(kWindowItem, skinned);
 	const Entity &building = *world.registry.get(rig.building);
 	const uint32_t crt_before = crt::crt_rand_state();
 	const uint32_t s0 = world.prng16_state;
-	CHECK(scar_add_entry(world, rig.hit, building, 1),
-			"a window point on a skinned model still ends the impact");
+	CHECK(scar_add_entry(world, hit, building, 1), "a refused window point still ends the impact");
 	CHECK(words_since(world, s0).size() == 2, "with only the two texture gates' words");
 	CHECK(crt::crt_rand_state() == crt_before, "no reseed");
 	CHECK(world.out.vehicle_effects.empty(), "no effect");
 	CHECK(world.out.scars.world_ring().cursor == 0, "no ring scar");
 	CHECK(world.out.scars.find_decals(rig.building, building.registry_spawn_id) == nullptr,
 			"no decal list");
+}
+
+// A model whose LOD-0 render model is skinned (GHDR mesh type 2) or absent refuses the decal.
+// [orig: Scar_ProjectDecalOntoEntity @0x5CE517..0x5CE526]
+void test_a_skinned_model() {
+	Rig rig;
+	build(rig);
+	ItemDeathTraits skinned = *rig.world->tables.item_death_traits.get(kWindowItem);
+	skinned.graphic_lod0_refuses_decal = true;
+	rig.world->tables.item_death_traits.set(kWindowItem, skinned);
+	check_refused(rig, rig.hit);
+}
+
+// A model without a collision block (+0xB0) refuses the decal.
+// [orig: Scar_ProjectDecalOntoEntity @0x5CE509..0x5CE511]
+void test_a_model_without_a_collision_block() {
+	Rig rig;
+	build(rig);
+	ItemDeathTraits blockless = *rig.world->tables.item_death_traits.get(kWindowItem);
+	blockless.graphic_no_collision_block = true;
+	rig.world->tables.item_death_traits.set(kWindowItem, blockless);
+	check_refused(rig, rig.hit);
+}
+
+// A model whose scar-cache bone callback returns no matrix array (the 'pwp0' row's): the
+// section's matrix is the array plus 64 bytes a section, null for section 0 alone, so a hit on
+// section 0 is refused and a hit on section 1 takes the decal as any window point does (twelve
+// words, one node).
+// [orig: Scar_ProjectDecalOntoEntity @0x5CE52C..0x5CE564 (`shl edx, 6; add edx, eax; jz`
+//  @0x5CE55F..0x5CE564); BoneCallback_pwp0_Bone @0x4E29E0]
+void test_a_model_whose_bone_callback_returns_no_matrices() {
+	Rig rig;
+	build(rig);
+	World &world = *rig.world;
+	ItemDeathTraits pwp0 = *world.tables.item_death_traits.get(kWindowItem);
+	pwp0.graphic_scar_bones_null = true;
+	world.tables.item_death_traits.set(kWindowItem, pwp0);
+	check_refused(rig, rig.hit);
+	ProjectileHit second = rig.hit;
+	second.section_index = 1;
+	const Entity &building = *world.registry.get(rig.building);
+	const uint32_t s0 = world.prng16_state;
+	CHECK(scar_add_entry(world, second, building, 1), "a section-1 window point ends the impact");
+	CHECK(words_since(world, s0).size() == 12, "and takes the decal's twelve words");
+	const ProjectedDecalList *list =
+			world.out.scars.find_decals(rig.building, building.registry_spawn_id);
+	CHECK(list != nullptr && list->nodes.size() == 1, "one decal node");
 }
 
 } // namespace
@@ -252,6 +293,8 @@ int main() {
 	test_a_window_point();
 	test_a_model_without_a_row();
 	test_a_skinned_model();
+	test_a_model_without_a_collision_block();
+	test_a_model_whose_bone_callback_returns_no_matrices();
 	if (failures == 0) std::printf("glass_leg: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

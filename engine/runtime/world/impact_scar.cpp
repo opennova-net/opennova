@@ -300,14 +300,27 @@ bool scar_project_decal_onto_entity(World &world, const Entity &entity, const Pr
 	const bool husk = (entity.engine_flags & kEntityFlagHusk) != 0u && traits != nullptr &&
 			traits->primary_husk_loaded;
 	if (!husk && !entity.has_graphic_model) return false;
+	// The model's collision block (+0xB0) [orig: @0x5CE509..0x5CE511].
+	if (traits != nullptr &&
+			(husk ? traits->husk_no_collision_block : traits->graphic_no_collision_block))
+		return false;
 	// The model's LOD-0 render model, present and not skinned ((+0x20) non-null, its +0x10
 	// bit 0 clear) [orig: @0x5CE517..0x5CE526].
 	if (traits != nullptr &&
 			(husk ? traits->husk_lod0_refuses_decal : traits->graphic_lod0_refuses_decal))
 		return false;
-	// The struck section and face, and the face's no-scar flag [orig:
-	// @0x5CE540..0x5CE5A2, the gates Scar_AddEntry shares].
-	if (hit.section_index < 0 || hit.face_index < 0) return false;
+	// The scar-cache bone callback (+0xAC), which the item load that creates the model binds
+	// (never null there),
+	// called for the section matrices [orig: @0x5CE52C..0x5CE53E]; the struck section, then
+	// its matrix, the array plus 64 bytes a section, must be non-null, so a callback that
+	// returns no array refuses section 0 alone [orig: @0x5CE540..0x5CE564]; then the face and
+	// its no-scar flag [orig: @0x5CE578..0x5CE5A2, the gates Scar_AddEntry shares].
+	if (hit.section_index < 0) return false;
+	if (traits != nullptr &&
+			(husk ? traits->husk_scar_bones_null : traits->graphic_scar_bones_null) &&
+			hit.section_index == 0)
+		return false;
+	if (hit.face_index < 0) return false;
 	if ((hit.material_flags & 0x400u) != 0u) return false;
 	// The first-hit rule [orig: @0x5CE624].
 	if (scar_has_projected_decal_at(world, entity, origin, scar_id)) return false;

@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 using namespace opennova::def;
 using namespace opennova::threedi;
@@ -168,6 +169,23 @@ static void model_user_points(const Threedi3di3 &model, std::vector<world::Model
 //  @0x5B50BA..0x5B50C3. A model with no RLOD does not load here.]
 static bool lod0_refuses_decal(const Threedi3di3 &model) {
 	return model.header.lod_count_decl <= 0 || model.header.mesh_type == THREEDI_MESH_SKINNED;
+}
+
+// Whether a loaded model's scar-cache bone callback returns no matrix array. The model load
+// binds the runtime model's +0xAC from LOD 0's RMDL tag (the RMDL chunk's first word, copied to
+// def+0x64) through the bone table's third column, row 0's on a miss, so it is never null; of
+// the table's 19 rows only the 'pwp0' row's third column returns null, every other one
+// g_BoneCallbackScratchMatrix. The row's packed word is stored as the bytes "0pwp".
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the graphic model's lookup @0x43A03C and
+//  +0xAC store @0x43A047, a husk model's @0x43A10D / @0x43A11B; BoneCallbackTable_LookupByTag
+//  @0x4E3310 (row 0's on a miss @0x4E3334); GPM_LoadRenderModel @0x5B5000 - the RMDL word to the
+//  render model's +0 @0x5B50A9; ThreediGp_LoadFromFile @0x5B5780 - to def+0x64 @0x5B5BDC;
+//  g_BoneCallbackTable @0x82CF00, 19 rows (@0x82D030), row 'pwp0' @0x82CF50, its third column
+//  @0x82CF5C -> BoneCallback_pwp0_Bone @0x4E29E0 (xor eax, eax)]
+static bool scar_bones_null(const Threedi3di3 &model) {
+	static constexpr char kPwp0[4] = {'0', 'p', 'w', 'p'};
+	return model.lods != nullptr && model.lod_count > 0 &&
+			std::memcmp(model.lods[0].model_type, kPwp0, sizeof(kPwp0)) == 0;
 }
 
 static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
@@ -364,6 +382,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				traits->graphic_name = model->header.name;
 				model_user_points(*model, traits->graphic_userpoints);
 				traits->graphic_lod0_refuses_decal = lod0_refuses_decal(*model);
+				traits->graphic_no_collision_block = model->collision == nullptr;
+				traits->graphic_scar_bones_null = scar_bones_null(*model);
 				traits->model_radius_q16 = world::model_bound_radius_q16_from_3di(*model);
 				// GPM+24/+28 remain zero in the retail 3DI3 load path. These
 				// legacy fields are distinct from CMDL's XY/Z radii.
@@ -634,6 +654,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				if (first_husk_m3 != nullptr) model_user_points(*first_husk_m3, t->husk_userpoints);
 				t->husk_lod0_refuses_decal =
 						first_husk_m3 != nullptr && lod0_refuses_decal(*first_husk_m3);
+				t->husk_no_collision_block =
+						first_husk_m3 != nullptr && first_husk_m3->collision == nullptr;
+				t->husk_scar_bones_null =
+						first_husk_m3 != nullptr && scar_bones_null(*first_husk_m3);
 				t->husk_model_loaded =
 						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
 				// The PIECE model — huskFinal first [orig: @ 0x4934af
