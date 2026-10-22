@@ -1886,6 +1886,31 @@ void test_dynamic_rules() {
 		expect_row(c, 'S', "entity_I_orientation_displacement_p90", "", "fail",
 				"DYNAMIC_RANGE_MISMATCH");
 	}
+	{
+		// A lone tail (state.transient_tail): x8's swap RR and RR-aa joiners stood still and
+		// sent the self-grenade's knockback on their last uplink before the death, OR's did
+		// not. The change its end cut sets no motion; two changes at the end still do.
+		auto still = [](uint32_t seed, int moved_tail) {
+			wire::ParityTrace trace = scripted(seed);
+			size_t last = 0;
+			for (size_t i = 0; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				u.pos_x = 1000 * 65536;
+				u.pos_y = 2000 * 65536;
+				u.pos_z = 50 * 65536;
+				if (u.ts_ns <= kSteadyStart + uint64_t(kSteadySeconds * 1e9))
+					last = i;
+			}
+			for (int k = 0; k < moved_tail; ++k)
+				trace.uplinks[last - size_t(k)].pos_x += (k + 1) * 32768;
+			trace.uplinks.resize(last + 1); // the uplinks stop at the window's last
+			return trace;
+		};
+		const Case tail = judge_case(still(1, 1), still(2, 1), still(3, 0));
+		expect_row(tail, 'C', "uplink_motion", "", "pass");
+		const Case moving = judge_case(still(1, 2), still(2, 2), still(3, 0));
+		expect_row(moving, 'C', "uplink_motion", "", "fail", "UPLINK_CONSTANT");
+	}
 }
 
 void test_evidence() {

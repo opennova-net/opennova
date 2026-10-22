@@ -11,8 +11,8 @@
 //                      position RR changes that the run never does
 //   field population   per entity class, the fields RR ever fills (diff_0a)
 //   dynamic vectors    origin-normalized range, displacement and step p90
-//                      (nearest rank) within 1/8x..8x of RR, each sequence from its
-//                      first sample past a lone transient lead, entity positions in
+//                      (nearest rank) within 1/8x..8x of RR, each sequence past a
+//                      lone transient lead and short of a lone tail, entity positions in
 //                      world units, uplink positions one sequence per carrier frame;
 //                      priority scores' per-slot median likewise;
 //                      initial position/anchor within 64 units
@@ -31,6 +31,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace opennova::parity {
@@ -101,15 +102,23 @@ double wrapped(double delta, double modulus) {
 	return delta;
 }
 
-// A sequence's first sample is a lone transient when the next one differs from it and
-// the one after repeats the next: the sequence comes to rest on its second sample, and
-// the first is a change the window's edge cut (a pose landing, a lone change record),
-// so it sets no baseline (state.transient_lead).
-size_t sequence_start(const std::vector<const Sample *> &seq) {
+// A sequence's lone transients at its edges, as the half-open range of `seq` it keeps. Its
+// first sample is a lone transient when the next one differs from it and the one after
+// repeats the next: the sequence comes to rest on its second sample, and the first is a
+// change the window's edge cut (a pose landing, a lone change record), so it sets no
+// baseline (state.transient_lead). Its last sample is one when it differs from the one
+// before while that one repeats its own predecessor: a change its end cut, the window's
+// end or its source's (a joiner's uplinks stop at its death) (state.transient_tail).
+template <typename T, typename Same>
+std::pair<size_t, size_t> sequence_span(const std::vector<T> &seq, Same same) {
 	static_assert(has_normalization("state.transient_lead"));
-	if (seq.size() >= 3 && seq[0]->axes != seq[1]->axes && seq[1]->axes == seq[2]->axes)
-		return 1;
-	return 0;
+	static_assert(has_normalization("state.transient_tail"));
+	size_t begin = 0, end = seq.size();
+	if (seq.size() >= 3 && !same(seq[0], seq[1]) && same(seq[1], seq[2]))
+		begin = 1;
+	if (end - begin >= 3 && !same(seq[end - 1], seq[end - 2]) && same(seq[end - 2], seq[end - 3]))
+		--end;
+	return { begin, end };
 }
 
 // `samples` in capture order.
@@ -121,9 +130,10 @@ VectorStats vector_stats(const std::vector<Sample> &samples, double modulus) {
 		groups[sample.group].push_back(&sample);
 	std::vector<double> ranges, displacements, steps;
 	for (const auto &group : groups) {
-		const std::vector<const Sample *> seq(
-				group.second.begin() + std::ptrdiff_t(sequence_start(group.second)),
-				group.second.end());
+		const std::pair<size_t, size_t> span = sequence_span(group.second,
+				[](const Sample *x, const Sample *y) { return x->axes == y->axes; });
+		const std::vector<const Sample *> seq(group.second.begin() + std::ptrdiff_t(span.first),
+				group.second.begin() + std::ptrdiff_t(span.second));
 		if (group.first == samples.front().group)
 			stats.baseline = seq.front()->axes;
 		if (seq.size() < 2)
@@ -210,17 +220,23 @@ void dynamic_metrics(std::vector<MetricValue> &out, char dir, const std::string 
 	}
 }
 
-// Handles whose key changes over the samples (a moving or turning entity).
+// Handles whose key changes over the samples (a moving or turning entity), each handle's
+// keys past its lone transients (sequence_span).
 template <typename T>
 size_t changing_handles(const std::vector<const T *> &records,
 		const std::function<uint32_t(const T &)> &handle,
 		const std::function<std::string(const T &)> &key) {
-	std::map<uint32_t, std::set<std::string>> seen;
+	std::map<uint32_t, std::vector<std::string>> seen;
 	for (const T *record : records)
-		seen[handle(*record)].insert(key(*record));
+		seen[handle(*record)].push_back(key(*record));
 	size_t changing = 0;
-	for (const auto &entry : seen)
-		changing += entry.second.size() > 1 ? 1 : 0;
+	for (const auto &entry : seen) {
+		const std::pair<size_t, size_t> span = sequence_span(
+				entry.second, [](const std::string &x, const std::string &y) { return x == y; });
+		const std::set<std::string> keys(entry.second.begin() + std::ptrdiff_t(span.first),
+				entry.second.begin() + std::ptrdiff_t(span.second));
+		changing += keys.size() > 1 ? 1 : 0;
+	}
 	return changing;
 }
 

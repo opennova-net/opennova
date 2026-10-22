@@ -677,6 +677,19 @@ inline constexpr Normalization kNormalizations[] = {
 			"14.8..17.1 s after the join on the three retail hosts, the window opening at the "
 			"runner's readiness) and 0.81 s before it on OR. A sequence with no rest at its "
 			"second sample keeps its first" },
+	{ "state.transient_tail", MaskKind::Field, '*', 0, "dynamic sequence end", 0,
+			"a dynamic sequence whose last sample differs from the one before while that one "
+			"repeats its own predecessor ends on its second-to-last sample: the last is a "
+			"change its end cut, the window's end or its source's. A joiner's uplinks stop at "
+			"its death (Player_BuildTag0CInputBody refuses a Health of 0 @0x42A58F and the dead"
+			" bit @0x42A599), and its self-grenade's knockback, which its own client applies at"
+			" the local blast ahead of the host's death record, reaches the last uplink only "
+			"when a send boundary falls between the two: x8's swap RR and RR-aa sent the "
+			"knocked body (0.65 units) on the last uplink, 0.19 / 0.09 s before the death's "
+			"0x13, x7's OR did too, and x8's OR sent it standing, 0.19 s before its 0x13, so "
+			"RR's uplink motion against OR's none failed C uplink_motion, range and step on a "
+			"control. The rule holds for every dynamic sequence and for the motion fills' "
+			"per-handle keys, the lead's too" },
 	{ "integrity.key", MaskKind::Field, '*', 0, "challenge key", 0,
 			"each integrity challenge's key is random per request: CRCs compare with the "
 			"key XORed out" },
