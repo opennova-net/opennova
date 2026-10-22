@@ -219,6 +219,14 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
         ent->saved_live_roll = player_class_init ? 0 : ent->roll_bam;
         ent->saved_live_valid = true;
     }
+    // The player class init zeroes the body's own Roll and Pitch words too, whatever the
+    // placement copied: an added body holds 0 until a later placement (its join's, its
+    // deploy's) copies a start marker's words again. A joiner's own body from its 0x0C record
+    // (which carries no Pitch / Roll) holds 0 either way.
+    // [orig: PlayerClass_InitEntity @0x4B1060 - ebx = 0 @0x4B1074, Roll @0x4B11C4, Pitch
+    //  @0x4B11CD; the placements' copies Entity_FindBestSpawnPoint @0x50CF3B / @0x50CF42,
+    //  Server_PositionPlayerForSpawn @0x50D3FD / @0x50D403]
+    if (player_class_init) ent->pitch_bam = ent->roll_bam = 0;
 
     // Publish the local-player handle ONLY for the host's own player: the net anchor + present
     // resolve it. A remote peer never becomes the local player. [ADR 0012] Whatever the row's

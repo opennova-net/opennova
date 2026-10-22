@@ -120,10 +120,16 @@ void warm_up_organic_body(World &world, AiSystem &ai, Entity &entity, AiEntity &
         //  +0x74 read @0x4B2EE2..0x4B2EFB; Entity_SpawnFromAnimSlotProperty - the memset
         //  @0x43C3FE]
         const int32_t eye_offset[3] = {inf.eye_offset_x, inf.eye_offset_y, inf.eye_offset_z};
+        // The resolver takes the player bit from the body's own Flags (0x100): a player
+        // body's warm-up tests the player-only volumes and the opening doors' sections that
+        // an NPC's skips.
+        // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - (Flags >> 8) & 1 @0x4B2C10..0x4B2C13
+        //  (stored @0x4B2C26), the query mask `lea ecx, [edx+ecx*2]` @0x4B2F79]
+        const bool player_class = ((entity.flags | entity.engine_flags) & kEntityFlagPlayer) != 0;
         const int32_t clearance = ai.collision->resolve_entity(
                 world, entity.handle, body.collide_state, pos.data(),
                 inf.vel, inf.vel[2], frame.capsule_bottom, frame.capsule_top,
-                body.heading, 0, false, ai.is_authority, world.logic_tick,
+                body.heading, 0, player_class, ai.is_authority, world.logic_tick,
                 inf.anim_state, infantry_anim_flags(inf.anim_state), body.health,
                 nullptr, nullptr, eye_offset);
         position.set_q16({pos[0], pos[1], pos[2]});

@@ -170,6 +170,115 @@ bool run_the_skip_test_reads_the_stamp() {
 	return true;
 }
 
+// The player class init zeroes the added body's own Pitch and Roll words, whatever the placement
+// copied (a start marker's), after the model init stamped savedLivePose from them; a body whose
+// row runs no such init (an item class row) keeps the placed words.
+// [orig: PlayerClass_InitEntity @0x4B1060 - ebx = 0 @0x4B1074, Roll @0x4B11C4, Pitch @0x4B11CD]
+bool run_the_player_class_init_zeroes_pitch_and_roll() {
+	constexpr int32_t kPitch10 = 0x071C0000;                            // spawn_angle_bam(10)
+	constexpr int32_t kRollMinus7 = static_cast<int32_t>(0xFB060000u); // spawn_angle_bam(-7)
+	for (const bool player_row : {true, false}) {
+		auto world = std::make_unique<w::World>();
+		world->registry.configure_pool(0, 8);
+		if (!player_row) world->tables.player.body_class = w::PlayerBodyClass::kItem;
+		w::PlayerSpawn spawn;
+		spawn.position = {8.0f, 8.0f, 0.0f};
+		spawn.team = 1;
+		spawn.pitch_bam = w::spawn_angle_bam(10);
+		spawn.roll_bam = w::spawn_angle_bam(-7);
+		if (!expect(spawn.pitch_bam == kPitch10 && spawn.roll_bam == kRollMinus7,
+		            "the marker's words")) return false;
+		const w::EntityHandle h = w::spawn_remote_player(*world, spawn);
+		const w::Entity *e = world->registry.get(h);
+		if (!expect(e != nullptr, "the add spawns the body")) return false;
+		if (player_row) {
+			if (!expect(e->pitch_bam == 0 && e->roll_bam == 0 && e->saved_live_pitch == 0 &&
+			                    e->saved_live_roll == 0,
+			            "the player class init zeroes Pitch / Roll and their saved words"))
+				return false;
+		} else {
+			if (!expect(e->pitch_bam == kPitch10 && e->roll_bam == kRollMinus7,
+			            "an item class row keeps the placed Pitch / Roll words")) return false;
+		}
+	}
+	return true;
+}
+
+// A pool-2 building on the body's own spot whose one volume of `type` has its -X face a quarter
+// unit past the body's column, the other faces 20 units off: every warm-up test point (radii
+// 0.5625 / 0.3125 / 0.5 for the double's one-unit capsule) reaches into it.
+w::CollisionModel wall_model(int32_t type) {
+	w::CollisionModel model;
+	const auto plane = [&](int16_t x, int16_t y, int16_t z, int32_t dist) {
+		w::CollisionPlane p;
+		p.nx = x;
+		p.ny = y;
+		p.nz = z;
+		p.dist = dist;
+		model.planes.push_back(p);
+	};
+	plane(-16384, 0, 0, kOne / 4);
+	plane(16384, 0, 0, -20 * kOne);
+	plane(0, 16384, 0, -20 * kOne);
+	plane(0, -16384, 0, -20 * kOne);
+	plane(0, 0, 16384, -20 * kOne);
+	plane(0, 0, -16384, -20 * kOne);
+	w::CollisionVolume volume;
+	volume.type = type;
+	volume.min_x = kOne / 4;
+	volume.max_x = 20 * kOne;
+	volume.min_y = volume.min_z = -20 * kOne;
+	volume.max_y = volume.max_z = 20 * kOne;
+	volume.plane_count = 6;
+	model.volumes.push_back(volume);
+	w::CollisionSection section;
+	section.volume_count = 1;
+	model.sections.push_back(section);
+	return model;
+}
+
+// The join's warm-up resolve takes the player bit from the body's own Flags (0x100), as every
+// per-tick resolve does: a player body meets a player-only (CP) volume as it meets a solid (CB)
+// one, a body without the bit passes through the CP volume and still meets the CB one.
+// [orig: Entity_MovementCollisionResolver @0x4B2BD0 - (Flags >> 8) & 1 @0x4B2C10..0x4B2C13,
+//  the query mask `lea ecx, [edx+ecx*2]` @0x4B2F79; Entity_ComputeBoneCollisionForce - the CP
+//  volume's mask test @0x4AE543]
+bool run_the_warmup_resolve_takes_the_player_bit() {
+	int32_t x[2][2] = {};
+	for (const bool player : {true, false}) {
+		for (const bool cp : {true, false}) {
+			Rig r;
+			w::Entity &e = r.entity();
+			// The +0x1C word the pool-0 slice build gates on, and a bound radius for the
+			// contact clamp.
+			e.item_type_index = 3;
+			e.bound_radius = 1;
+			if (!player) {
+				e.flags &= ~w::kEntityFlagPlayer;
+				e.engine_flags &= ~w::kEntityFlagPlayer;
+			}
+			r.world->registry.configure_pool(2, 1);
+			w::Entity building;
+			building.kind = w::EntityKind::Building;
+			building.position = {8.0f, 8.0f, 0.0f};
+			building.heading = w::placed_heading_bam(90);
+			building.bound_radius = 30;
+			building.alive = true;
+			const w::EntityHandle wall = r.world->registry.spawn(2, building);
+			r.collision->assign_entity(wall, r.collision->add_model(wall_model(
+					cp ? w::bvol_type::kPlayerCP : w::bvol_type::kSolidCB)));
+			r.rebuild();
+			w::warm_up_player_body(*r.world, e);
+			x[player ? 0 : 1][cp ? 0 : 1] = e.position.x.q16;
+		}
+	}
+	if (!expect(x[0][1] < 8 * kOne && x[1][1] == x[0][1],
+	            "the CB volume pushes the body off the face, player bit or not")) return false;
+	if (!expect(x[0][0] == x[0][1], "a player body meets the CP volume as it meets the CB one"))
+		return false;
+	return expect(x[1][0] == 8 * kOne, "a body without the player bit passes the CP volume");
+}
+
 } // namespace
 
 int main() {
@@ -177,6 +286,8 @@ int main() {
 	if (!run_the_add_stamps_the_placed_pose()) ++failures;
 	if (!run_the_join_warmup_reads_the_add_time_words()) ++failures;
 	if (!run_the_skip_test_reads_the_stamp()) ++failures;
+	if (!run_the_player_class_init_zeroes_pitch_and_roll()) ++failures;
+	if (!run_the_warmup_resolve_takes_the_player_bit()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;
