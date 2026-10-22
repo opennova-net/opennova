@@ -349,9 +349,15 @@ void test_replies_are_filtered_and_listed_at_first_sighting() {
     CHECK(b.record_count() == 0);
 }
 
-// The walk examines at most 32 listed sessions and the row table holds 32 rows.
-// [orig: UI_ProcessLANSessionStateMachine @0x558de0 - the 32 break @0x5593B5;
-//  UI_StartLANSessionSearch @0x558300 - memset(.., 0x23D00) @0x5583C1 (32 rows of 0x11E8)]
+// The walk examines at most 32 listed sessions; nothing bounds its append past the 32-row
+// table. Once 32 rows are listed, a replaced session among the first 32 frees its node, so
+// the 33rd listed session enters the walk's first 32 and lists as row 33; a join from row 33
+// takes the 33rd listed session (L2-s16's PERMANENT note withdrawn: V-ROLL-J).
+// [orig: UI_ProcessLANSessionStateMachine @0x558de0 - the 32 break @0x5593B5, the append
+//  @0x5593FA..0x559524 with no row-count test, UIList_AddRow @0x559516;
+//  UI_StartLANSessionSearch @0x558300 - memset(.., 0x23D00) @0x5583C1 (32 rows of 0x11E8);
+//  UI_HandleLANGameListEvent @0x556C70 - the row index @0x556C21; UI_JoinSelectedSession
+//  @0x5699D0 - the node walk @0x569A4B..0x569A76]
 void test_window_lists_at_most_thirty_two_hosts() {
     opennova::LanDiscoveryBrowser b;
     CHECK(b.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
@@ -362,6 +368,19 @@ void test_window_lists_at_most_thirty_two_hosts() {
     CHECK(b.record_count() == 40);
     CHECK(b.servers().size() == kLanBrowseMaxSessions);
     CHECK(b.servers().back().host_ip == "10.0.0.32");
+    // 10.0.0.1 restarts (another HK): its node goes and its new one is the list's last, so the
+    // walk's first 32 now reach 10.0.0.33, which lists as row 33.
+    const std::vector<uint8_t> restarted = server_reply_hk("Many", 0x99u);
+    reply(b, restarted, sender("10.0.0.1", 32768));
+    walk(b);
+    CHECK(b.servers().size() == kLanBrowseMaxSessions + 1);
+    if (b.servers().size() == kLanBrowseMaxSessions + 1)
+        CHECK(b.servers().back().host_ip == "10.0.0.33");
+    // Row 33's join takes the 33rd listed session: the listed sessions now run 10.0.0.2 ..
+    // 10.0.0.40, then the restarted 10.0.0.1.
+    LanDiscoveryRow join;
+    CHECK(b.join_session(kLanBrowseMaxSessions, join) && join.host_ip == "10.0.0.34");
+    CHECK(b.join_session(0, join) && join.host_ip == "10.0.0.2");
 }
 
 // The browse admits a session only when its P2 flag word allows the browser's network

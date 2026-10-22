@@ -266,8 +266,10 @@ void LanDiscoveryBrowser::walk_rows() {
 	// The LAN list's walk over the listed sessions in their discovery order: at most 32
 	// examined; a session whose record id the row table holds is skipped, any other's
 	// row is appended from its node. A row is never removed in the window, so a
-	// replaced session lists again beside its old row. Retail appends without a bound on
-	// its 32-row table; ours stops at the table's 32 rows.
+	// replaced session lists again beside its old row, past the 32-row table too: nothing
+	// bounds the append. (Retail's 33rd row writes past its table, over the options
+	// screens' scratch binding table, which is rebuilt before any reader: no face; the
+	// row itself is a list row a join selects by index.)
 	// [orig: UI_ProcessLANSessionStateMachine @0x558de0 - the node walk
 	//  @0x559384..0x559546 (the 32 break @0x5593B5, the step @0x559532..0x55953F), the key
 	//  compare @0x5593C1..0x5593E3 against the node's record id +0x14, the append
@@ -279,7 +281,7 @@ void LanDiscoveryBrowser::walk_rows() {
 		++examined;
 		const bool keyed = std::any_of(servers_.begin(), servers_.end(),
 				[&record](const LanDiscoveryRow &row) { return row.record_id == record.id; });
-		if (keyed || servers_.size() >= kLanBrowseMaxSessions) continue;
+		if (keyed) continue;
 		LanDiscoveryRow row;
 		row.host_ip = peer_addr_ip_to_string(record.sender);
 		row.port = record.sender.port;

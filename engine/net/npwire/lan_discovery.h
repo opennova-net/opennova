@@ -94,10 +94,14 @@ inline constexpr double kLanBrowseWindowSeconds = 30.0;
 // @0x6290c0 interval select; NapiNPSession_SendAnnouncePacket @0x61fa00 +37
 // player-count gate]
 inline constexpr double kLanAnnounceIntervalSeconds = 3.0;
-// The per-pump walk over the listed sessions examines at most 32 of them, and the
-// row table it appends to holds 32 rows (0x23D00 bytes of 0x11E8-byte rows).
+// The per-pump walk over the listed sessions examines at most 32 of them. The row
+// table it appends to is 32 rows long (0x23D00 bytes of 0x11E8-byte rows), but
+// nothing bounds the append: a replaced session among the first 32 lists again
+// past the table, a real list row that a join selects by its index
+// (LanDiscoveryBrowser::join_session).
 // [orig: UI_ProcessLANSessionStateMachine @0x558de0, the `session_count >= 32`
-// break @0x5593b5, the row stride 0x11E8 @0x5593db; UI_StartLANSessionSearch
+// break @0x5593b5, the row stride 0x11E8 @0x5593db, the append @0x5593FA..0x559524
+// with no row-count test, UIList_AddRow @0x559516; UI_StartLANSessionSearch
 // @0x558300 - the table's memset(.., 0x23D00) @0x5583C1]
 inline constexpr size_t kLanBrowseMaxSessions = 32;
 
