@@ -61,8 +61,9 @@ namespace {
 // move function org1), a person with no ai_function (5320: the null row; no move function, the
 // null physics row too), a brrl person (5321), an ele0 person (5322), a nade
 // person (5323: the row with no event callback), a schl person (5324, the one row with a
-// nonzero `score` word), a clym person (5325), a plyr person moved by the genx row (5326) and an
-// arty person moved by the arty row (5327; its tag in capitals, the lookup ignoring case).
+// nonzero `score` word), a clym person (5325), a plyr person moved by the genx row (5326), an
+// arty person moved by the arty row (5327; its tag in capitals, the lookup ignoring case) and a
+// plyr person moved by the ewep row (5328).
 const char kItems[] =
 		"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
 		"begin \"Player\"\r\n id 105305\r\n type person\r\n hp 150\r\n ai_function plyr\r\n"
@@ -79,7 +80,9 @@ const char kItems[] =
 		"begin \"Rider man\"\r\n id 105326\r\n type person\r\n hp 100\r\n ai_function plyr\r\n"
 		" move_function genx\r\nend\r\n"
 		"begin \"Barrage man\"\r\n id 105327\r\n type person\r\n hp 100\r\n ai_function ARTY\r\n"
-		" move_function arty\r\nend\r\n";
+		" move_function arty\r\nend\r\n"
+		"begin \"Gun man\"\r\n id 105328\r\n type person\r\n hp 100\r\n ai_function plyr\r\n"
+		" move_function ewep\r\nend\r\n";
 
 // Class 5 the plyr row, 6 the org0 row, 7 the classless row, 8 the brrl row, 9 the ele0 row
 // (classes 1..4 the plyr row: the load reads CHARACTER1 on until the first missing section).
@@ -97,10 +100,11 @@ const char kCharattr[] =
 		"[CHARACTER11]\r\nJUNGLE_CAMMO\t= 5324\r\nDESERT_CAMMO\t= 5324\r\nARCTIC_CAMMO\t= 5324\r\n"
 		"[CHARACTER12]\r\nJUNGLE_CAMMO\t= 5325\r\nDESERT_CAMMO\t= 5325\r\nARCTIC_CAMMO\t= 5325\r\n"
 		"[CHARACTER13]\r\nJUNGLE_CAMMO\t= 5326\r\nDESERT_CAMMO\t= 5326\r\nARCTIC_CAMMO\t= 5326\r\n"
-		"[CHARACTER14]\r\nJUNGLE_CAMMO\t= 5327\r\nDESERT_CAMMO\t= 5327\r\nARCTIC_CAMMO\t= 5327\r\n";
+		"[CHARACTER14]\r\nJUNGLE_CAMMO\t= 5327\r\nDESERT_CAMMO\t= 5327\r\nARCTIC_CAMMO\t= 5327\r\n"
+		"[CHARACTER15]\r\nJUNGLE_CAMMO\t= 5328\r\nDESERT_CAMMO\t= 5328\r\nARCTIC_CAMMO\t= 5328\r\n";
 
 constexpr uint8_t kPlyr = 5, kOrg = 6, kNull = 7, kBrrl = 8, kEle0 = 9, kNade = 10, kSchl = 11,
-		kClym = 12, kGenx = 13, kArty = 14;
+		kClym = 12, kGenx = 13, kArty = 14, kEwep = 15;
 constexpr uint8_t kEquipped = 3;
 
 struct Rig {
@@ -1601,6 +1605,144 @@ void test_an_arty_row_body_runs_the_barrage() {
 	}
 }
 
+// The ewep row's mover over a person body's words (D-NET-NEW-L4-14 (a), L4-s24).
+// With no ground and the +0x2D4 word (the right leg's chase yaw) nonzero, the spin tail runs
+// over the spawn backup: while the aim anchor X's top byte (+0x30F) is nonzero, +0x31B (the
+// backup X's top byte) takes 60 and +0x30F counts down; +0x31B coasts down, adding 32 times what
+// is left to the backup Z's low half as a 16-bit word (0xFFF0 + 59 * 32 wraps to 0x0750, the
+// high half kept). A zero +0x2D4 runs nothing.
+// With a ground: a dead PlayerControl ground hides the body and ends the update; a vehicle
+// ground clears the body's Flags bits 0..2 and copies its Health word and blink quad; an
+// unanchored body on a ground whose matrix bit is clear takes the ground's root pose
+// (Position, Yaw, Pitch, Roll, savedLivePose); the body's matrix bit is set either way. An
+// anchored body (the backup X's second byte inside 1..the ground model's userpoint count) takes
+// no root copy. A zero +0x2D4 with a ground ends the update before the vehicle leg.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - @0x440CBF..0x440CE1, @0x440E8E..0x440EA0,
+//  @0x440EA6..0x440EEF, @0x440F04..0x440F34, @0x4410EA..0x4411C2, @0x4411C9,
+//  @0x4413FE..0x44140E, @0x44142B..0x441447]
+void test_an_ewep_row_body_runs_the_ewep_legs() {
+	// The spin tail with no ground.
+	{
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		w::Entity *body = r.spawn_remote(kEwep);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr);
+		if (ae != nullptr) {
+			CHECK(w::body_move_row(*r.world, *ae, body) == w::PhysicsClass::Ewep);
+			body->flags &= ~w::kEntityFlagCarried;
+			body->engine_flags &= ~w::kEntityFlagCarried;
+			body->ground_target = w::EntityHandle{};
+			ae->inf.leg_yaw[0] = 0x40000000;
+			ae->inf.aim_point[0] = 0x02123456;
+			body->spawn_position.set_q16(w::FixedVec3{0x00120000, 0x00340000, 0x0005FFF0});
+			struct Step {
+				int32_t anchor_x, backup_x, backup_z;
+			};
+			for (const Step s : {Step{0x01123456, 0x3B120000, 0x00050750},
+						Step{0x00123456, 0x3B120000, 0x00050EB0},
+						Step{0x00123456, 0x3A120000, 0x000515F0}}) {
+				r.world->ai.update_organic(*ae, *r.world, 1);
+				CHECK(ae->inf.aim_point[0] == s.anchor_x);
+				CHECK(body->spawn_position.x.q16 == s.backup_x);
+				CHECK(body->spawn_position.z.q16 == s.backup_z);
+				CHECK(body->spawn_position.y.q16 == 0x00340000);
+			}
+			ae->inf.leg_yaw[0] = 0;
+			r.world->ai.update_organic(*ae, *r.world, 1);
+			CHECK(body->spawn_position.x.q16 == 0x3A120000);
+		}
+		r.world->ai.root_motion = nullptr;
+	}
+	// The ground legs.
+	struct Case {
+		bool dead_hull, vehicle, matrix_built, anchored, zero_word;
+	};
+	for (const Case c : {Case{false, true, false, false, false},
+				Case{false, true, true, false, false}, Case{false, false, false, true, false},
+				Case{true, true, false, false, false}, Case{false, true, false, false, true}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		r.world->registry.configure_pool(1, 4);
+		w::Entity seed;
+		seed.alive = true;
+		seed.has_item_def = true;
+		seed.item_type = c.vehicle ? 1 : 3;
+		seed.item_attrib = c.dead_hull ? w::kItemAttribPlayerControl : 0u;
+		seed.flags = c.dead_hull ? w::kEntityFlagDead : 0u;
+		seed.engine_flags = c.matrix_built ? w::kEntityFlagMatrixBuilt : 0u;
+		seed.health = 321;
+		for (uint32_t i = 0; i < 4; ++i) seed.blink_hits[i] = 0x1000u * (i + 1);
+		seed.position.set_q16({10 << 16, 20 << 16, 3 << 16});
+		seed.heading = 0x11110000;
+		seed.pitch_bam = 0x22220000;
+		seed.roll_bam = 0x33330000;
+		seed.saved_live_pos[0] = 9 << 16;
+		seed.saved_live_pos[1] = 19 << 16;
+		seed.saved_live_pos[2] = 2 << 16;
+		seed.saved_live_yaw = 0x44440000;
+		seed.saved_live_valid = true;
+		seed.has_graphic_model = c.anchored;
+		seed.graphic_model_userpoints = c.anchored ? 3 : 0;
+		const w::EntityHandle ground = r.world->registry.spawn(1, seed);
+		w::Entity *body = r.spawn_remote(kEwep);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ground.valid() && ae != nullptr);
+		if (!ground.valid() || ae == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		body->flags = (body->flags & ~0x7u) | w::kEntityFlagDead | w::kEntityFlagNVGWorn;
+		body->engine_flags &= ~(0x7u | w::kEntityFlagMatrixBuilt);
+		body->ground_target = ground;
+		body->health = 50;
+		body->position.set_q16({100 << 16, 200 << 16, 7 << 16});
+		// The backup X's second byte: 2 anchors on a 3-userpoint model; 0 never anchors.
+		body->spawn_position.set_q16(
+				w::FixedVec3{c.anchored ? 0x00120200 : 0x00120000, 0x00340000, 0x00050000});
+		ae->inf.leg_yaw[0] = c.zero_word ? 0 : 0x40000000;
+		ae->inf.aim_point[0] = 0x00123456;
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		if (c.dead_hull) {
+			CHECK((body->flags & w::kEntityFlagCarried) != 0);
+			CHECK((body->flags & w::kEntityFlagDead) != 0);
+			CHECK(body->health == 50);
+			CHECK((body->engine_flags & w::kEntityFlagMatrixBuilt) == 0);
+		} else if (c.zero_word) {
+			CHECK((body->flags & w::kEntityFlagDead) != 0);
+			CHECK(body->health == 50);
+			CHECK((body->engine_flags & w::kEntityFlagMatrixBuilt) == 0);
+			CHECK(body->position.x.q16 == (100 << 16));
+		} else {
+			CHECK((body->engine_flags & w::kEntityFlagMatrixBuilt) != 0);
+			if (c.vehicle) {
+				CHECK(((body->flags | body->engine_flags) & 0x7u) == 0);
+				CHECK(body->health == 321 && ae->health == 321);
+				for (uint32_t i = 0; i < 4; ++i) CHECK(body->blink_hits[i] == 0x1000u * (i + 1));
+			} else {
+				CHECK((body->flags & w::kEntityFlagDead) != 0);
+				CHECK(body->health == 50);
+			}
+			const bool copied = !c.matrix_built && !c.anchored;
+			CHECK(body->position.x.q16 == (copied ? (10 << 16) : (100 << 16)));
+			CHECK(body->position.y.q16 == (copied ? (20 << 16) : (200 << 16)));
+			if (copied) {
+				CHECK(body->position.z.q16 == (3 << 16));
+				CHECK(body->heading == 0x11110000 && ae->heading == 0x11110000);
+				CHECK(body->pitch_bam == 0x22220000 && ae->pitch == 0x22220000);
+				CHECK(body->roll_bam == 0x33330000 && ae->roll == 0x33330000);
+				CHECK(body->saved_live_pos[0] == (9 << 16));
+				CHECK(body->saved_live_pos[1] == (19 << 16));
+				CHECK(body->saved_live_pos[2] == (2 << 16));
+				CHECK(body->saved_live_yaw == 0x44440000);
+			}
+		}
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // A body bound to the psec row runs the physics step over its own words: the savedLivePose
 // stamp, then its velocity triple (+0x98 / +0x9C / +0xA0, the motor's) against the terrain
 // plus a quarter unit (no terrain here: 0x4000). Airborne it moves by the triple, falls 167,
@@ -1768,6 +1910,7 @@ int main() {
 	test_an_arty_row_body_zeroes_its_velocity_and_sends_group_6();
 	test_an_arty_row_body_takes_the_arty_init();
 	test_an_arty_row_body_runs_the_barrage();
+	test_an_ewep_row_body_runs_the_ewep_legs();
 	test_an_ele0_row_body_runs_the_elevator_mover();
 	test_an_upfx_row_body_runs_the_husk_leg();
 	test_a_psec_row_body_runs_the_physics_step();

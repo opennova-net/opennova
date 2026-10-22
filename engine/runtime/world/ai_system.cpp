@@ -660,8 +660,12 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - `mov esi, [ebp+2D4h]` @0x440E8E, the
 //  byte @0x4413A6, @0x4413B0, @0x441417; Entity_ResetToSpawnState @0x4B9610 - +0x2D4
 //  @0x4B96AA; Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8 / @0x4C0238]
+// The rest of the ewep mover runs over the person's words (person_ewep_mover), save the legs
+// that need a word ours does not yet home on a person (D-NET-NEW-L4-14 (a), narrowed): the
+// anchor byte's refill from the ground def's slot table, the joiner's C2S 0x0F pair and
+// destroy, the anchored bone attach, and the +0x170 occupant's clamp or detach.
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
-// narrowed): ewep's other legs, towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
+// narrowed): towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
 // pending word, and door's model callbacks.
 static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
@@ -669,8 +673,97 @@ static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
     body.net_anim_pending = word;
 }
 
+// The ewep row's mover over a person body's words. The ground entity (+0x28) is the carrier: a
+// dead PlayerControl ground hides the body (Flags bit 0) and ends the update. The +0x2D4 word
+// (the right leg's chase yaw, the spawn reset's Yaw) stands for the slot def: zero ends the
+// update when there is a ground. A vehicle ground (def type 1) clears the body's Flags bits
+// 0..2 (on a person the hide, dead and NVG bits), copies its 16-bit Health word and its blink
+// quad; its def+0x144 CTRL writer writes only the global bus, which ours composes with the
+// carrier's pose. Unanchored (the +0x319 byte, the spawn backup X's second byte, outside
+// 1..the ground model's userpoint count), a ground whose matrix bit is clear gives the body its
+// root pose: the Position, Yaw, Pitch and Roll words and savedLivePose as they are. The body's
+// matrix bit is set either way. Then, with the +0x2D4 word nonzero, the spin tail over the
+// spawn backup's bytes: while the aim anchor X's top byte (+0x30F) is nonzero, +0x31B (the
+// backup X's top byte) takes 60 and +0x30F counts down; +0x31B coasts down a step a tick,
+// adding 32 times what is left to the 16-bit word +0x320 (the backup Z's low half).
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the ground @0x440CBF, the dead
+//  PlayerControl hide @0x440CCA..0x440CE1, +0x2D4 @0x440E8E, the gate @0x440EA0, def type 1
+//  @0x440EA6..0x440EB1, `and [ebp+24h], 0FFFFFFF8h` @0x440EB3, Health @0x440EB7..0x440EBE,
+//  the quad @0x440EC5..0x440EEF, def+0x144 @0x440EF5..0x440EFF, the anchor test
+//  @0x440F04..0x440F34, the matrix-bit test @0x4410EA..0x4410F1, the root copy
+//  @0x441151..0x4411BC, `or [ebp+24h], 20000h` @0x4411C2, the gate @0x4411C9, the countdown
+//  @0x4413FE..0x44140E, the coast @0x44142B..0x441447; Entity_ResetToSpawnState @0x4B9610 -
+//  the backup @0x4B9632..0x4B9644, +0x2D4 @0x4B96AA]
+static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
+    Entity *ground = world.registry.get(body.ground_target);
+    if (emplaced_carrier_is_dead_hull(ground)) {
+        body.flags |= kEntityFlagCarried;
+        return;
+    }
+    const int32_t def_word = e.inf.leg_yaw[0];
+    if (ground != nullptr) {
+        if (def_word == 0) return;
+        if (ground->has_item_def && ground->item_type == 1) {
+            constexpr uint32_t kLowBits = kEntityFlagCarried | kEntityFlagDead | kEntityFlagNVGWorn;
+            body.flags &= ~kLowBits;
+            body.engine_flags &= ~kLowBits;
+            body.alive = true;
+            const int16_t health = static_cast<int16_t>(ground->health);
+            body.health = health;
+            e.health = health;
+            for (int i = 0; i < 4; ++i) body.blink_hits[i] = ground->blink_hits[i];
+        }
+        const int8_t anchor = static_cast<int8_t>(
+                static_cast<uint32_t>(body.spawn_position.x.q16) >> 8);
+        const bool anchored = ground->has_graphic_model && ground->graphic_model_userpoints > 0 &&
+                anchor > 0 && static_cast<uint32_t>(anchor) <= ground->graphic_model_userpoints;
+        if (!anchored && ((ground->flags | ground->engine_flags) & kEntityFlagMatrixBuilt) == 0) {
+            body.position = ground->position;
+            const int32_t yaw = ground->veh.yaw_seeded ? ground->veh.yaw_bam : ground->heading;
+            const int32_t pitch = ground->veh.yaw_seeded ? ground->veh.air_pitch_bam
+                                                         : ground->pitch_bam;
+            const int32_t roll = ground->veh.yaw_seeded ? ground->veh.air_roll_bam
+                                                        : ground->roll_bam;
+            body.heading = e.heading = yaw;
+            body.pitch_bam = e.pitch = pitch;
+            body.roll_bam = e.roll = roll;
+            std::copy_n(ground->saved_live_pos, 3, body.saved_live_pos);
+            body.saved_live_yaw = ground->saved_live_yaw;
+            body.saved_live_pitch = ground->saved_live_pitch;
+            body.saved_live_roll = ground->saved_live_roll;
+            body.saved_live_valid = ground->saved_live_valid;
+        }
+        body.engine_flags |= kEntityFlagMatrixBuilt;
+    }
+    if (def_word == 0) return;
+    uint32_t anchor_x = static_cast<uint32_t>(e.inf.aim_point[0]);
+    uint32_t backup_x = static_cast<uint32_t>(body.spawn_position.x.q16);
+    if ((anchor_x >> 24) != 0) {
+        backup_x = (backup_x & 0x00FFFFFFu) | (60u << 24);
+        anchor_x -= 1u << 24;
+        e.inf.aim_point[0] = static_cast<int32_t>(anchor_x);
+    }
+    uint8_t coast = static_cast<uint8_t>(backup_x >> 24);
+    if (coast != 0) {
+        --coast;
+        backup_x = (backup_x & 0x00FFFFFFu) | (static_cast<uint32_t>(coast) << 24);
+        if (coast != 0) {
+            // `movsx dx, al; shl dx, 5; add [ebp+320h], dx`: a 16-bit add.
+            const uint32_t z = static_cast<uint32_t>(body.spawn_position.z.q16);
+            const int step = static_cast<int8_t>(coast) * 32;
+            const uint16_t word = static_cast<uint16_t>(static_cast<uint32_t>(z) +
+                    static_cast<uint32_t>(step));
+            body.spawn_position.z.q16 = static_cast<int32_t>((z & 0xFFFF0000u) | word);
+        }
+    }
+    body.spawn_position.x.q16 = static_cast<int32_t>(backup_x);
+}
+
 static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entity &body) {
     switch (row) {
+    case PhysicsClass::Ewep:
+        person_ewep_mover(world, e, body);
+        return true;
     case PhysicsClass::Genx:
         update_dropped_object(world, body);
         return true;
@@ -790,7 +883,8 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // returns, and a body bound to an item row runs that row's mover over its own words:
     // a vehicle, aircraft or genx row's, the rokt / hlfr / jvln rows' pending-word writes,
     // psec's physics step, envs's and upfx's loop emitter, arty's barrage and session
-    // send (person_item_mover, the pool-0 walk's: a pool-1 slot's visit runs a row's vehicle
+    // send, ewep's ground and spin legs (person_item_mover, the pool-0 walk's: a pool-1 slot's
+    // visit runs a row's vehicle
     // mover and drop motion in its own legs); the other item rows' movers are not run here
     // (D-NET-NEW-L4-14 (a), narrowed).
     // [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472; Entity_UpdatePool1Slot
