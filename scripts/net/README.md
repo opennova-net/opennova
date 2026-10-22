@@ -559,7 +559,8 @@ decided whether one pre-pose frame was measured with the jump. c2 03TR read the
 host body's orientation range as 64 on RR, RR-aa and OR and as 5 on RO and OO.
 The steady start's desktop reset runs just before that setup, so the window
 opens and the steps follow the pose with no more delay than inside one stage.
-The witness's `setup_before_window` records that stage's start and end. A
+The witness's `setup_before_window` records that stage's start, the staging's
+end, a staged joiner's in-place reads (below) and the stage's end. A
 prelude must come before the pose, so a scenario with one plays wholly inside
 the window. A retail actor plays
 through onHook's virtual keyboard (`onhook_play_input`, bridge protocol 1.10,
@@ -636,6 +637,20 @@ what sticks:
 - the setup pose comes first, so a staged joiner actor turns while still at
   its spawn and is exposed only from the staging on (x1's `coop_ai_kill`: the
   camp's AI killed the staged joiner 0.55 s later, before its first tap).
+- the window opens with a staged joiner (slot 1) in place. The host's frames
+  built before its staging still carry the joiner where it stood, so its client
+  snaps back to them (undoing its own setup pose's position, keeping the
+  heading) and on to the staged spot only from the first frame after the
+  staging. x7's `coop_ai_kill` showed it on all five cells: that first frame
+  reached the joiner 0.14..0.19 s into the window on RR, RR-aa and OR, whose
+  first in-window uplink therefore stood at the spawn (the ~1518-unit jump
+  inside the window, and on RR the first frame too), and just before the
+  window on RO and OO. So after the staging the runner reads the joiner's own
+  body (a retail joiner's pool-0 record with DcbId 10001 through
+  `onhook_pool_entities`, an OpenNova joiner's `scenario_play` `place_read`)
+  every 0.1 s until two reads in a row stand within two units (x, y) of its
+  staged spot, then opens the window; `setup_before_window.in_place` keeps the
+  reads. A slot-0 staging has no client to wait for.
 
 An `aim_at` step (`{"tick": n, "aim_at": "0x0019"}`, a pool-0 handle) turns
 the actor onto that entity. The drivers take no such step: the runner plays

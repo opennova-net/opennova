@@ -1994,6 +1994,80 @@ function Invoke-ScenarioStaging {
     return [pscustomobject]@{ driver = "onhook_load_debug_snapshot"; entries = $applied.ToArray() }
 }
 
+# The window opens with a staged joiner in place. The host's frames built before
+# its staging still carry the joiner where it stood, so the joiner's client snaps
+# back to them (its own setup pose's position with it, its heading kept) and on
+# to the staged spot only from the first frame after the staging, past two units
+# [orig: Entity_UpdateInfantryPlayerBody @0x4B42C1..0x4B434A, the 0x20000
+# compare @0x4B431F; the heading copy skipped for the local player @0x4B434D].
+# x7's coop_ai_kill: that first frame reached the joiner 0.14..0.19 s into the
+# window on RR, RR-aa and OR, so their first in-window uplink stood at the spawn
+# and the ~1518-unit jump fell inside the window, and only RR's first frame
+# did; on RO and OO it landed just before the window. So the joiner's own body
+# is read (a retail joiner's pool-0 record with DcbId 10000 + its slot, an
+# OpenNova joiner's scenario_play place_read) until two reads in a row stand
+# within the snap's two units of its staged spot (x, y; z settles onto the
+# ground): one read can still be the setup pose's own write that the last
+# pre-staging frame is about to undo. From then on every uplink and frame
+# carries the staged spot. Slot 0 (the listen host's own player) has no client
+# to wait for.
+function Wait-ScenarioStagingInPlace {
+    param([string] $RetailJoinerInstanceId = "")
+    $entry = @(@($script:ScenarioSpec.staging) | Where-Object { [int] $_.slot -eq 1 })
+    if ($entry.Count -eq 0) { return $null }
+    $want = @($entry[0].position_bms | ForEach-Object { [double] $_ })
+    $retailJoiner = $Topology -in @("RR", "OR")
+    if ($retailJoiner -and -not $RetailJoinerInstanceId) {
+        throw "Scenario staging on $Topology needs the retail joiner's instance id to wait for its slot"
+    }
+    $reads = [System.Collections.Generic.List[object]]::new()
+    $inPlace = 0
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ($true) {
+        if ($retailJoiner) {
+            $pool = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_pool_entities" -Arguments @{
+                instance_id = $RetailJoinerInstanceId
+                pool = 0
+                max = 4096
+            })
+            $self = @(@($pool.entities) | Where-Object { [int] $_.net_id -eq 10001 })
+            if ($self.Count -ne 1) {
+                throw "Staging wait: the retail joiner's pool 0 holds $($self.Count) body record(s) with DcbId 10001"
+            }
+            $tick = if ($pool.PSObject.Properties.Name -contains "logic_tick") { $pool.logic_tick } else { $null }
+            $at = @(([double] $self[0].pos[0]) / 65536.0, ([double] $self[0].pos[1]) / 65536.0,
+                ([double] $self[0].pos[2]) / 65536.0)
+        } else {
+            $status = Invoke-GameProbe -Port $JoinerMcpPort -Name "scenario_play" -Process $script:OpenNovaJoiner `
+                -TimeoutSeconds 30 -PollMs 250 -Arguments @{ place_read = $true }
+            if ([string] $status.state -ne "passed" -or -not $status.verdict -or -not [bool] $status.verdict.ok) {
+                $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
+                throw "Staging wait: the OpenNova joiner's place read failed: state=$($status.state) $why"
+            }
+            $tick = $status.verdict.data.logic_tick
+            $at = @($status.verdict.data.position_bms | ForEach-Object { [double] $_ })
+        }
+        $distance = [Math]::Sqrt([Math]::Pow($at[0] - $want[0], 2) + [Math]::Pow($at[1] - $want[1], 2))
+        $reads.Add([pscustomobject][ordered]@{
+            utc = [DateTime]::UtcNow.ToString("o")
+            logic_tick = $tick
+            position_bms = $at
+            distance = [Math]::Round($distance, 3)
+        })
+        if ($distance -le 2.0) { ++$inPlace } else { $inPlace = 0 }
+        if ($inPlace -ge 2) { break }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Staging wait: the joiner did not stand at its staged spot within 15 s (last read $([Math]::Round($distance, 2)) units off)"
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    return [pscustomobject][ordered]@{
+        slot = 1
+        driver = $(if ($retailJoiner) { "onhook_pool_entities" } else { "scenario_play" })
+        reads = $reads.ToArray()
+    }
+}
+
 function Invoke-ScenarioStage {
     param(
         [Parameter(Mandatory = $true)] [object[]] $Steps,
@@ -2238,7 +2312,8 @@ function Invoke-ScenarioAimStage {
 # Applied inside the window, the pose landed 0.03..0.44 s in, and the S2C frame
 # period (about 190 ms) decided whether one pre-pose frame fell inside the
 # window, and the pose jump with it. c2 03TR read entity_P orientation range 64
-# on RR, RR-aa and OR against 5 on RO and OO. A prelude (the deploy key) must
+# on RR, RR-aa and OR against 5 on RO and OO. A staged joiner is waited for in
+# place too (Wait-ScenarioStagingInPlace). A prelude (the deploy key) must
 # come before the pose, so a scenario with one keeps its whole play in the window.
 function Test-ScenarioSetupBeforeWindow {
     $spec = $script:ScenarioSpec
@@ -2282,8 +2357,9 @@ function Invoke-ScenarioSetupBeforeWindow {
     catch { Write-Host "PARITY_RUN_NOTE desktop probe failed at the steady start: $($_.Exception.Message)" }
     $script:DesktopResetBeforeWindow = $true
     $startedUtc = [DateTime]::UtcNow.ToString("o")
-    # The actor's setup pose first, the staging last, so the window opens on
-    # the staging. A client keeps its own heading through the host's snap
+    # The actor's setup pose first, the staging last, then the wait for a
+    # staged joiner in place, so the window opens on the staging. A client
+    # keeps its own heading through the host's snap
     # (the copy skipped for the local player @0x4B434D..0x4B4353), so a staged
     # joiner actor turns while still at its spawn and is exposed only from the
     # staging on (x1's coop_ai_kill: the AI killed the joiner 0.55 s after it).
@@ -2299,9 +2375,14 @@ function Invoke-ScenarioSetupBeforeWindow {
             -Setup $spec.setup -RetailInstanceId $retailInstanceId -SetupOnly).setup
     }
     $staging = Invoke-ScenarioStaging -RetailHostInstanceId $RetailHostInstanceId
+    $stagedUtc = [DateTime]::UtcNow.ToString("o")
+    # The window opens on the staged joiner in place (Wait-ScenarioStagingInPlace).
+    $inPlace = Wait-ScenarioStagingInPlace -RetailJoinerInstanceId $RetailJoinerInstanceId
     $script:ScenarioEarlySetup = [pscustomobject]@{
         started_utc = $startedUtc
+        staged_utc = $stagedUtc
         applied_utc = [DateTime]::UtcNow.ToString("o")
+        in_place = $inPlace
         staging = $staging
         setup = $setup
     }
@@ -2378,7 +2459,12 @@ function Invoke-ScenarioIfRequested {
         staging = $staging
         setup = $(if ($early) { $early.setup } else { $main.setup })
         setup_before_window = $(if ($early) {
-            [pscustomobject]@{ started_utc = $early.started_utc; applied_utc = $early.applied_utc }
+            [pscustomobject][ordered]@{
+                started_utc = $early.started_utc
+                staged_utc = $early.staged_utc
+                applied_utc = $early.applied_utc
+                in_place = $early.in_place
+            }
         } else { $null })
         record = $main.record
     }

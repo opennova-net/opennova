@@ -679,13 +679,16 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "the start latched; a run with neither `scenario` nor `path` collects the "
 				+ "attached scenario. `aim_read` (a pool-0 handle, alone) plays nothing and "
 				+ "answers the runner's aim_at reads: the local player's heading BAM, its and "
-				+ "the handle's mission positions, the session's mouse sensitivity word.",
+				+ "the handle's mission positions, the session's mouse sensitivity word. "
+				+ "`place_read` (true, alone) answers the runner's staged-joiner wait: the "
+				+ "local player's mission position and heading BAM at this logic tick.",
 				NET + "scenario_play_probe.gd", {
 					"scenario": { "type": "object", "default": {} },
 					"path": { "type": "string", "default": "" },
 					"wait": { "type": "boolean", "default": true },
 					"aim_read": { "type": "integer", "minimum": -1, "maximum": 4095,
 							"default": -1 },
+					"place_read": { "type": "boolean", "default": false },
 				}, [], false, true, 1_800_000),
 		ProbeDef.make("stage_slot",
 				"The parity runner's slot staging on an OpenNova host: each `staging` entry "

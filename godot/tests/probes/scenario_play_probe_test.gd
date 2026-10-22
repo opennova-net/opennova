@@ -45,9 +45,11 @@ func test_the_catalog_registers_scenario_play() -> void:
 	assert_eq(def.input_schema.get("required", []), [], "every argument has a default")
 	var defaults := def.validate_args({})
 	assert_true(defaults.ok)
-	assert_eq_deep(defaults.values, {"scenario": {}, "path": "", "wait": true, "aim_read": -1})
+	assert_eq_deep(defaults.values,
+			{"scenario": {}, "path": "", "wait": true, "aim_read": -1, "place_read": false})
 	assert_false(def.validate_args({"scenario": [1]}).ok, "the scenario is an object")
 	assert_false(def.validate_args({"aim_read": 4096}).ok, "aim_read names a pool-0 handle")
+	assert_false(def.validate_args({"place_read": 1}).ok, "place_read is a flag")
 
 
 func test_scenario_play_plays_a_script_through_the_shell_frame() -> void:
@@ -147,10 +149,35 @@ func test_aim_read_answers_the_aim_reads() -> void:
 	assert_null(ControlsBindings.model().get_scripted_input(), "a read attaches no device")
 	var both := await _run({"aim_read": own, "scenario": {"steps": [{"tick": 0, "end": true}]}})
 	assert_false(both.ok)
-	assert_string_contains(both.summary, "reads alone")
+	assert_string_contains(both.summary, "read alone")
 	var absent := await _run({"aim_read": 0x0FFF})
 	assert_false(absent.ok)
 	assert_string_contains(absent.summary, "no entity 0x0fff")
+
+
+# The runner's staged-joiner wait (run_parity_topology.ps1 Wait-ScenarioStagingInPlace):
+# the local player's mission position and heading at this logic tick; it reads alone.
+func test_place_read_answers_the_staged_joiner_wait() -> void:
+	if await _booted_in_world() == null:
+		return
+	var sim := _shell.get_world().get_sim()
+	var read := await _run({"place_read": true})
+	assert_true(read.ok, read.summary)
+	var data := read.data
+	assert_eq(int(data.heading_bam), int(sim.get_local_player_heading_bam()))
+	assert_gt(int(data.logic_tick), 0, "read on a live logic tick")
+	# Godot (x, y up, z) -> mission (x, -z, y).
+	var home: Vector3 = sim.get_local_player_position()
+	assert_almost_eq(float(data.position_bms[0]), home.x, 0.01)
+	assert_almost_eq(float(data.position_bms[1]), -home.z, 0.01)
+	assert_null(ControlsBindings.model().get_scripted_input(), "a read attaches no device")
+	var both := await _run({"place_read": true, "aim_read": int(sim.get_local_player_wire_handle())})
+	assert_false(both.ok)
+	assert_string_contains(both.summary, "read alone")
+	var with_script := await _run({"place_read": true,
+			"scenario": {"steps": [{"tick": 0, "end": true}]}})
+	assert_false(with_script.ok)
+	assert_string_contains(with_script.summary, "read alone")
 
 
 func test_refusals_name_what_is_wrong() -> void:

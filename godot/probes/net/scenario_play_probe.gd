@@ -25,6 +25,12 @@ extends GameProbe
 ## scripts/net/scenario_aim.py computes) takes the local player's heading BAM,
 ## its and the handle's mission positions and the session's mouse sensitivity
 ## word, the onhook_pool_entities read's counterparts.
+##
+## `place_read` (true, alone) reads the local player's mission position and
+## heading BAM at this logic tick: the runner's wait for a staged joiner to
+## stand in place before the steady window (run_parity_topology.ps1
+## Wait-ScenarioStagingInPlace), the counterpart of onhook_pool_entities' read
+## of a retail joiner's own body.
 
 const LOCAL_PLAYER_TIMEOUT_MS := 60_000
 ## A start that no device sample latches means the world is not ticking.
@@ -41,10 +47,12 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var path := String(ctx.args.get("path", ""))
 	var wait := bool(ctx.args.get("wait", true))
 	var aim_read := int(ctx.args.get("aim_read", -1))
-	if aim_read >= 0:
-		if not scenario.is_empty() or not path.is_empty():
-			return ProbeVerdict.failed("`aim_read` reads alone, with no `scenario` or `path`")
-		return _aim_read(aim_read)
+	var place_read := bool(ctx.args.get("place_read", false))
+	if aim_read >= 0 or place_read:
+		if not scenario.is_empty() or not path.is_empty() or (aim_read >= 0 and place_read):
+			return ProbeVerdict.failed("`aim_read` and `place_read` each read alone, with no "
+					+ "`scenario`, `path` or other read")
+		return _place_read() if place_read else _aim_read(aim_read)
 	var controls := ControlsBindings.model()
 	if scenario.is_empty() and path.is_empty():
 		return await _collect(controls, wait)
@@ -224,6 +232,23 @@ func _aim_read(handle: int) -> ProbeVerdict:
 			"position_bms": [target_position.x, target_position.y, target_position.z],
 		},
 		"mouse_sensitivity": sim.get_session_mouse_sensitivity(),
+	})
+
+
+## The staged-joiner wait's read: the local player's mission position (its own
+## L, which its next C2S 0x0C uplink carries) and heading at this logic tick.
+func _place_read() -> ProbeVerdict:
+	var sim := _ctx.sim()
+	if sim == null or not sim.has_local_player():
+		return ProbeVerdict.failed("no local player to read")
+	var own: EntityCard = sim.entity_card(sim.get_local_player_wire_handle())
+	if own == null or not (own.has_ai() or own.has_world()):
+		return ProbeVerdict.failed("the local player has no entity card")
+	var position := own.get_mission_position()
+	return ProbeVerdict.passed("place read", {
+		"logic_tick": sim.get_logic_tick(),
+		"heading_bam": sim.get_local_player_heading_bam(),
+		"position_bms": [position.x, position.y, position.z],
 	})
 
 
