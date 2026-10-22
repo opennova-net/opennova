@@ -811,7 +811,7 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
         // [orig: ArtyClass_UpdateBarrage @0x447140 - +0x2BC @0x447148, the gate @0x44717D /
         //  @0x447185 / @0x447192..0x44719F / @0x4471A5..0x4471AE, the steps @0x4471B4..0x4471E9,
         //  the table index @0x447203..0x44721E, the radius @0x44723D..0x447260, X / Y
-        //  @0x447264..0x447288, Foliage_SampleDensityBilinear @0x606200 called @0x447290,
+        //  @0x447264..0x447288, Terrain_SampleMipMaxHeightBilinear @0x606200 called @0x447290,
         //  +0x2BC0000 @0x44729B, the block's pitch @0x4472B2, WeaponSlot_FireAndSpawnEffects @0x53F440 called
         //  @0x4472BA (+0x170 @0x447295, +0x2B0 @0x4472A4), the count @0x4472C2]
         const int32_t start = e.inf.anim_state;

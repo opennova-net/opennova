@@ -241,7 +241,7 @@ int32_t mip64_max_byte(const TerrainHeightField &f, int tile_x, int tile_z) {
 int32_t height_field_mip_max_bilinear_fixed(const TerrainHeightField &f, int32_t mission_x,
 		int32_t mission_y) {
 	if (!f.valid()) return 0;
-	// [orig: Foliage_SampleDensityBilinear @0x606200 - x - 0x100000 @0x60620D, -(y + 0x100000)
+	// [orig: Terrain_SampleMipMaxHeightBilinear @0x606200 - x - 0x100000 @0x60620D, -(y + 0x100000)
 	//  @0x606219, the shared grid routing @0x606220..0x606260, the empty cell's 0 @0x606264]
 	const int32_t centred_x = io::bam_sub(mission_x, 0x100000);
 	const int32_t centred_y = io::bam_add(mission_y, 0x100000);

@@ -158,7 +158,7 @@ TerrainHeightGradient height_field_gradient_fixed(
 // shared sector routing; the tile (the texel over 16) and its +1 neighbours wrap at 64, the
 // weights are the low eight bits of the shifted words' 4096ths, and the weighted sum of the
 // four bytes, halved, is the height. 0 with no grid and on an empty cell.
-// [orig: Foliage_SampleDensityBilinear @0x606200 - the centring @0x60620D / @0x606219, the
+// [orig: Terrain_SampleMipMaxHeightBilinear @0x606200 - the centring @0x60620D / @0x606219, the
 //  grid @0x606220..0x606260, the empty return @0x606264, the weights @0x606275 / @0x606280,
 //  the tiles @0x6062AF..0x6062C8, the taps and the sum @0x6062D1..0x606318, the halving @0x60631B (g_TerrainMipchainStorage
 //  +0x14 @0x6062CB); Terrain_BuildMipchain @0x6056D0 - the finest cell's rows @0x605740..

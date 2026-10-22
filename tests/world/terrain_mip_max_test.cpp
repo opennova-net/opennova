@@ -6,7 +6,7 @@
 // the low eight bits of the shifted words' 4096ths, the sum halved.
 // The values are the cited disassembly's arithmetic worked outside the port (a full 512-level
 // build up the chain, then the four-tap sum).
-// [orig: Foliage_SampleDensityBilinear @0x606200 - the centring @0x60620D / @0x606219, the
+// [orig: Terrain_SampleMipMaxHeightBilinear @0x606200 - the centring @0x60620D / @0x606219, the
 //  empty return @0x606264, the weights @0x606275 / @0x606280, the tiles @0x6062AF..0x6062C8,
 //  the sum @0x6062D1..0x606318 halved @0x60631B; Terrain_BuildMipchain @0x6056D0 - the rows @0x605740..0x60575D, the byte
 //  @0x60589B..0x6058A7, the level list @0x6058EE, its stores @0x6059D0..0x6059DC]
