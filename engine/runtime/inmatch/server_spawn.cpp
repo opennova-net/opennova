@@ -533,11 +533,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	//  ServerLog_BufferAndFlush's g_CreateSvrLogTxt gate @0x4FC0C3..0x4FC0CA]
 	if (!player_slot.has_value()) return {};
 
-	// The remote add stamps the row's time in the server ahead of its body; the host's own arm
-	// and the round init's re-spawn store none [orig: Server_PlayerAdd @0x51CBC0 - GetTickCount
-	//  stored at +0x170B0 @0x51CD95; the own arm @0x51CC24..0x51CC60].
+	// The remote add stamps the row's time in the server ahead of its body, GetTickCount, the
+	// process clock (D-NET-NEW-L8-33); the host's own arm and the round init's re-spawn store
+	// none [orig: Server_PlayerAdd @0x51CBC0 - GetTickCount @0x51CD8F stored at +0x170B0
+	//  @0x51CD95; the own arm @0x51CC24..0x51CC60].
 	if (!round_init && conn.type != NapiNPConnection::kTypeClientSide)
-		conn.row_added_host_ms = ctx.np_protocol.host_run_duration_ms;
+		conn.row_added_host_ms = host_tick_count_ms(ctx);
 
 	// The type-2 loopback is the host's OWN client (input-ordered, publishes cached.local_player); a
 	// type-1 node is a remote joiner the host snaps from the wire (never the local player). [ADR 0012]

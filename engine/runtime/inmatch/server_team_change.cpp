@@ -94,7 +94,9 @@ void Server_AutoBalanceTeams(NapiNPServerCtx &ctx, world::World *world) {
 	std::stable_sort(slots.begin(), slots.end(), [](const NapiNPConnection *a,
 			const NapiNPConnection *b) { return a->reply.player_slot < b->reply.player_slot; });
 	std::vector<Pair> pairs;
-	const uint32_t now_ms = ctx.np_protocol.host_run_duration_ms;
+	// Now is GetTickCount, the clock the rows' add stamps read (D-NET-NEW-L8-33)
+	// [orig: @0x4FCC5C].
+	const uint32_t now_ms = host_tick_count_ms(ctx);
 	for (NapiNPConnection *c : slots)
 		pairs.push_back({static_cast<int32_t>(now_ms - c->row_added_host_ms), c});
 	// CPairList_ShellSort: Knuth's gaps, 1-based indexes, ascending by key: an entry shifts while

@@ -183,6 +183,22 @@ void test_chat_stamp_reads_the_process_clock() {
 	expect(host.conn().reply.chat_last_ms == 72000u, "the console line throttles on the same clock");
 }
 
+// D-NET-NEW-L8-33: the team change's cooldown test and stamp are GetTickCount. With a 1 s
+// interval, a request at 70000 stamps it, and one 1000 ms of clock later (the tick held) passes
+// the cooldown and stamps 71000 (on the seam it would be refused and the stamp kept).
+// [orig: NapiNPServerMsg_0x04D_ChangeTeam @0x518F70 - GetTickCount @0x518FC9, the interval test
+//  @0x518FCB..0x518FDF, the stamp's GetTickCount @0x5190F1 into +0x178E4 @0x5190F3]
+void test_team_change_reads_the_process_clock() {
+	ClockHost host;
+	host.ctx.config.change_team_interval_seconds = 1;
+	host.ctx.config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;
+	host.reply(c2s::TEAM_CHANGE_REQUEST, {});
+	expect(host.conn().reply.team_change_ms == 70000u, "a team change stamps the process clock");
+	host.clock += 1000u; // the logic tick holds
+	host.reply(c2s::TEAM_CHANGE_REQUEST, {});
+	expect(host.conn().reply.team_change_ms == 71000u, "1000 ms of clock later the cooldown passes");
+}
+
 } // namespace
 
 int main() {
@@ -190,6 +206,7 @@ int main() {
 	test_rtt_reads_the_process_clock();
 	test_cookie_ring_reads_the_process_clock();
 	test_chat_stamp_reads_the_process_clock();
+	test_team_change_reads_the_process_clock();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "npruntime_host_process_clock: %d failure(s)\n", g_failures);
 		return 1;

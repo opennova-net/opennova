@@ -241,9 +241,11 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 // See header. [orig: NapiNPServerMsg_0x04D_ChangeTeam @0x518F70]
 void dispatch_team_change_request(NapiNPConnection &conn, uint32_t now_tick,
 		world::World *world, const ServerDispatchInputs &inputs) {
+	// The cooldown's test and stamp read GetTickCount, the process clock (D-NET-NEW-L8-33)
+	// [orig: @0x518FC9, @0x5190F1].
 	if (world != nullptr && inputs.server_ctx != nullptr)
 		Server_HandleTeamChangeRequest(*inputs.server_ctx, conn, *world,
-				io::host_milliseconds_for_logic_tick(now_tick));
+				world::authority_tick_count_ms(world, now_tick));
 }
 
 // See header. [orig: NapiNPServerMsg_DeathTimeoutReset @0x510540]
