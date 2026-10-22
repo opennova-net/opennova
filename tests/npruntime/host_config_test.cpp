@@ -500,6 +500,63 @@ int main() {
 		TEST_EXPECT(files.text.empty());
 	}
 
+	// The NovaWorld menu's entry opens the session socket in mode 4 with the same lines, its
+	// failure over the block's mpnovaworld quad (the non-authority's NovaWorld arm, random word
+	// included) and its mpipaddressstring; the session's close tears an open socket down with its
+	// line and writes nothing for a socket that is not open, a log that is off or no log.
+	// [orig: UI_ProcessLANSessionStateMachine @0x558E00 - SetTransportMode(4) @0x558EA3;
+	//  UI_OnStartupScreenActivate @0x5557F0 - SetTransportMode(0) @0x55582B;
+	//  CNapiNetwork_SetTransportMode @0x4C8750 - @0x4C877B; CNapiNetwork_TearDownSocket
+	//  @0x4C4C90 - @0x4C4CE7]
+	{
+		struct MemoryFiles final : ServerFileSink {
+			std::string text;
+			bool exists(const std::string &) override { return !text.empty(); }
+			void remove(const std::string &) override { text.clear(); }
+			bool write(const std::string &, std::string_view bytes, bool append) override {
+				if (!append) text.clear();
+				text.append(bytes.data(), bytes.size());
+				return true;
+			}
+		};
+		MemoryFiles files;
+		ConnectLog log(files);
+		log.set_clock([] { return std::string("T"); });
+		log.start(ConnectLogHeader{});
+		files.text.clear();
+		gamecfg::GameCfg block = gamecfg::defaults();
+		block.mp_ip_address_string = "10.1.2.3";
+		block.mp_lan_client_port_min = 41000; // the LAN client quad is not the session's
+		block.mp_lan_client_port_max = 41001;
+		block.mp_novaworld_port_min = 42000;
+		block.mp_novaworld_port_max = 42002;
+		block.mp_novaworld_port_delta = 1;
+		block.mp_novaworld_port_random = 1;
+		const opennova::PeerAddr bound{0x0302010Au, 42001};
+		write_novaworld_socket_open_lines(log, block, &bound);
+		TEST_EXPECT(files.text ==
+				"T : NET SETTING UP SOCKET....\r\nT : NET SOCKET SETUP [10.1.2.3:42001]\r\n");
+		files.text.clear();
+		write_novaworld_socket_open_lines(log, block, nullptr);
+		TEST_EXPECT(files.text ==
+				"T : NET SETTING UP SOCKET....\r\n"
+				"T : NET SOCKET SETUP ERROR!!!!!!!!  CANNOT CREATE SOCKET WITH PARAMS: "
+				"IP=10.1.2.3, PORTMIN=42000 PORTMAX=42002, PORTDELTA=1, PORTRANDOM=1!!!!!\r\n"
+				"T : NET TEARING DOWN SOCKET\r\n");
+		files.text.clear();
+		write_transport_socket_teardown_line(&log, /*socket_open=*/true);
+		TEST_EXPECT(files.text == "T : NET TEARING DOWN SOCKET\r\n");
+		files.text.clear();
+		write_transport_socket_teardown_line(&log, /*socket_open=*/false);
+		write_transport_socket_teardown_line(nullptr, /*socket_open=*/true);
+		TEST_EXPECT(files.text.empty());
+		log.disable_at_server_connection();
+		files.text.clear();
+		write_transport_socket_teardown_line(&log, /*socket_open=*/true);
+		write_novaworld_socket_open_lines(log, block, &bound);
+		TEST_EXPECT(files.text.empty());
+	}
+
 	// The gate socket's scan: the block's mpgateserverlocalport quad whatever the network type,
 	// the shipped 49152 / 65536 / 1 / 0 clamped to 49152..65535 from 49152, a random word
 	// starting the same walk at a drawn port. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 -

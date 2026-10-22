@@ -165,6 +165,30 @@ std::string transport_socket_setup_text(uint32_t address, uint32_t port);
 class ConnectLog;
 void write_transport_socket_open_lines(ConnectLog &log, const PeerAddr *bound, uint32_t address,
 		const TransportPortQuad &quad);
+// The NovaWorld menu's entry opens the session socket: its state 1 sets the NovaWorld network
+// type, connection mode 0 and transport mode 4 ahead of the gate service's start, so this open's
+// lines (write_transport_socket_open_lines) come before the gate's. The socket binds the block's
+// mpnovaworld quad, a non-authority's NovaWorld arm, on its mpipaddressstring; `bound` is the
+// bound socket, null when every bind failed. The session's later legs open nothing: a NovaWorld
+// join's enumerate-and-join meets mode 4 already set, and the same mode returns at once.
+// [orig: UI_ProcessLANSessionStateMachine @0x558E00 - SetNetworkType(1) called @0x558E8C,
+//  SetConnectionMode(0) @0x558E97, SetTransportMode(4) @0x558EA3 (4 pushed @0x558E9C),
+//  CNapiGateManager_WaitForConnect @0x558EAD; CNapiNetwork_SetTransportMode @0x4C8750 - the
+//  same mode's return @0x4C8766; UI_EnumerateAndJoinSession @0x569F50 - 4 pushed @0x56A06A,
+//  SetTransportMode called @0x56A07C]
+void write_novaworld_socket_open_lines(ConnectLog &log, const gamecfg::GameCfg &cfg,
+		const PeerAddr *bound);
+// The session socket's close when the NovaWorld session goes: the main menu's activation off
+// the NovaWorld menu resets the session, then sets transport mode 0, and a post-mission error
+// exit sets mode 0 likewise; an open socket (modes 1..4) tears down with "NET TEARING DOWN
+// SOCKET" through ConnectLog::line (none once the log is off, none with no log). A failed open
+// already left mode 0, so a socket that is not open writes nothing.
+// [orig: UI_OnStartupScreenActivate @0x5557F0 - CNapiGameSession_ResetToDisconnected called
+//  @0x555807, SetTransportMode(0) called @0x55582B; PostMenu_RouteMissionExit @0x568460 -
+//  SetTransportMode(0) called @0x568493 (reason 2), @0x5686F9 (the error arms);
+//  CNapiNetwork_SetTransportMode @0x4C8750 - TearDownSocket called @0x4C877B (modes 1..4);
+//  CNapiNetwork_TearDownSocket @0x4C4C90 - the line appended @0x4C4CE7]
+void write_transport_socket_teardown_line(ConnectLog *log, bool socket_open);
 
 // The cfg block's words every session create reads, single player's and a
 // host's alike: mpreset (a nonzero word ends the create, server_session.h),

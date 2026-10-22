@@ -310,30 +310,17 @@ void NovaWorldClient::start() {
 	// Every NovaWorld menu entry of the process reads the one kept gate response (D-NET-706).
 	lobby_.set_gate_memory(&opennova::process_gate_memory());
 
-	// The gate worker's socket: on every interface over the cfg block's
-	// mpgateserverlocalport quad (engine: inmatch::gate_bind_ports, its first free
-	// port the probe's source), and the NovaWorld network type's one socket:
-	// bound from the cfg block's mpnovaworld quad, its random word included
-	// (engine: inmatch::transport_bind_ports), it carries the NWU session now and,
-	// when this session hosts, the hosted match's game traffic too (the pump's
-	// demux, D-NET-346). Then the driver mints the ci/ck pair on them; a bind
-	// failure is the error state.
+	// The NovaWorld network type's one socket first, as the menu's entry opens it ahead
+	// of the gate service's start: bound from the cfg block's mpnovaworld quad, its
+	// random word included (engine: inmatch::transport_bind_ports), it carries the NWU
+	// session now and, when this session hosts, the hosted match's game traffic too
+	// (the pump's demux, D-NET-346); its open writes the socket's connect-log lines
+	// (engine: inmatch::write_novaworld_socket_open_lines). Then the gate worker's
+	// socket: on every interface over the cfg block's mpgateserverlocalport quad
+	// (engine: inmatch::gate_bind_ports, its first free port the probe's source). Then
+	// the driver mints the ci/ck pair on them; a bind failure is the error state.
 	gate_pump_.instantiate();
 	nw_pump_.instantiate();
-	bool gate_bound = false;
-	const std::vector<uint16_t> gate_ports = opennova::inmatch::gate_bind_ports(
-			game_config_.is_valid() ? game_config_->native().cfg() : opennova::gamecfg::defaults());
-	for (const uint16_t port : gate_ports) {
-		if (gate_pump_->bind_listen_at(port, 0u) == OK) {
-			gate_bound = true;
-			break;
-		}
-	}
-	if (!gate_bound) {
-		// The gate service's start failure: its connect-log lines and the menu's NWEC15.
-		enter_state(STATE_ERROR, opennova::to_gd(lobby_.gate_start_failed()));
-		return;
-	}
 	bool nw_bound = false;
 	const std::vector<uint16_t> nw_ports = game_config_.is_valid()
 			? opennova::inmatch::transport_bind_ports(game_config_->native().cfg(),
@@ -349,8 +336,29 @@ void NovaWorldClient::start() {
 			break;
 		}
 	}
+	if (opennova::inmatch::ConnectLog *log = process_connect_log()) {
+		const opennova::PeerAddr local = nw_pump_->local_address();
+		opennova::inmatch::write_novaworld_socket_open_lines(*log,
+				game_config_.is_valid() ? game_config_->native().cfg()
+										: opennova::gamecfg::defaults(),
+				nw_bound ? &local : nullptr);
+	}
 	if (!nw_bound) {
 		enter_state(STATE_ERROR, String("nw UDP bind failed"));
+		return;
+	}
+	bool gate_bound = false;
+	const std::vector<uint16_t> gate_ports = opennova::inmatch::gate_bind_ports(
+			game_config_.is_valid() ? game_config_->native().cfg() : opennova::gamecfg::defaults());
+	for (const uint16_t port : gate_ports) {
+		if (gate_pump_->bind_listen_at(port, 0u) == OK) {
+			gate_bound = true;
+			break;
+		}
+	}
+	if (!gate_bound) {
+		// The gate service's start failure: its connect-log lines and the menu's NWEC15.
+		enter_state(STATE_ERROR, opennova::to_gd(lobby_.gate_start_failed()));
 		return;
 	}
 	gate_socket_ = std::make_unique<UdpPumpDatagramSocket>(gate_pump_.ptr());
@@ -482,6 +490,10 @@ void NovaWorldClient::stop() {
 	if (gate_pump_.is_valid()) gate_pump_->close();
 	if (nw_pump_.is_valid()) {
 		nw_pump_->demux().set_session_claim(nullptr); // the lobby is gone
+		// The session reset above, then transport mode 0: an open socket's teardown line, then
+		// its close (engine: inmatch::write_transport_socket_teardown_line).
+		opennova::inmatch::write_transport_socket_teardown_line(g_process_connect_log,
+				nw_pump_->is_open());
 		nw_pump_->close();
 	}
 	gate_pump_.unref();

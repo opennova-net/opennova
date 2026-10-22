@@ -361,6 +361,18 @@ void write_transport_socket_open_lines(ConnectLog &log, const PeerAddr *bound, u
 	log.line(net_tearing_down_socket_text());
 }
 
+void write_novaworld_socket_open_lines(ConnectLog &log, const gamecfg::GameCfg &cfg,
+		const PeerAddr *bound) {
+	// The declaration carries the witness.
+	write_transport_socket_open_lines(log, bound, transport_bind_address(cfg),
+			transport_port_quad(cfg, NetworkType::NovaWorld, /*authority=*/false));
+}
+
+void write_transport_socket_teardown_line(ConnectLog *log, bool socket_open) {
+	// The declaration carries the witness.
+	if (log != nullptr && socket_open) log->line(net_tearing_down_socket_text());
+}
+
 void store_server_command_config(
 		gamecfg::GameCfg &block, std::string_view verb, const GameConfig &config) {
 	// The executor capped the strings to the block's widths (31 / 127).
