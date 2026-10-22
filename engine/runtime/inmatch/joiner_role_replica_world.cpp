@@ -487,7 +487,9 @@ void JoinerRole::apply_authoritative_health() {
 					// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0].
 					lp.reset_local_player_input(heading);
                     lp.reset_for_new_round();
-                    rt.reset_local_round_state();
+					// Game_InitNewRound's deploy-hold and being-revived clears ran in the
+					// receive, in the self record's respawn arm (ClientRuntime): a second
+					// clear here would drop a 0x3A the host sent since.
 					lp.respawn_init(/*rebuild_kit=*/false);
 					redeploy_release_pending_ = false;
 					redeploy_health_updates_at_release_ = 0;

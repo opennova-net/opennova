@@ -1379,8 +1379,6 @@ struct ClientState {
 	// @0x422680 store; Game_InitNewRound @0x422740 clear; the statics test
 	// `!entity+0x1E0` @0x553ec5].
 	bool local_medic_reviving = false;
-	// The self row's respawn_revision the latch clear last consumed.
-	std::uint32_t local_respawn_revision_seen = 0;
 	bool enemy_tags_visible = false;
 	// The deploy-map OVERLAY (retail g_DeployScreenActive @0xA860DC): armed by
 	// the S2C 0x0F game_flags bit0 unless the death screen is already up, then

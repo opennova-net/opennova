@@ -1356,18 +1356,9 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	es.net_saved_live_pose[1] = es.y;
 	es.net_saved_live_pose[2] = es.z;
 
+	// The local player's own respawn clears the being-revived latch in the record
+	// decode, not here (ClientRuntime's self record respawn arm).
 	const bool is_self = es.handle == self_handle;
-	// The local player's own dead->alive edge runs Game_InitNewRound, which
-	// clears the +0x1E0 being-revived latch [orig: the 1->0 edge hook
-	// @0x4c1109 -> Game_InitNewRound @0x422740, the store @0x422796 area
-	// `entity+0x1E0 = 0`].
-	if (is_self && es.respawn_revision != state_.local_respawn_revision_seen) {
-		state_.local_respawn_revision_seen = es.respawn_revision;
-		if (state_.local_medic_reviving) {
-			state_.local_medic_reviving = false;
-			state_.mark_changed();
-		}
-	}
 	const int64_t dx = int64_t(es.net_smooth_target[0]) - es.x;
 	const int64_t dy = int64_t(es.net_smooth_target[1]) - es.y;
 	const int64_t dz = int64_t(es.net_smooth_target[2]) - es.z;

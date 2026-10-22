@@ -1514,13 +1514,16 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				// the receive, so the pump's later handlers read it (D-NET-687), and runs
 				// the local respawn's Game_InitNewRound, which clears the deploy hold:
 				// the release of a deploy that sent no 0x5A, a medic revive's
-				// (D-NET-379). A dead record that never latched the bit (the pre-round,
-				// the round-over hold, the death screen, a hidden body) fires nothing.
+				// (D-NET-379), then the being-revived latch (+0x1E0), so a 0x3A later in
+				// the same pump sets it again and one ahead of the record is cleared. A
+				// dead record that never latched the bit (the pre-round, the round-over
+				// hold, the death screen, a hidden body) fires nothing.
 				// [orig: NetPacket_SerializePlayerState @0x4C09C0 - `test bl, 2`
 				//  @0x4C0FE1 (its jz @0x4C1005), `test byte [edi+24h], 2` @0x4C1109, the
 				//  Position stores @0x4C110F..0x4C111D, Game_InitNewRound @0x4C114C; the
-				//  Flags folds 0xE1 / 0xFD @0x4C12FF / @0x4C1307; g_ClientDeployHold = 0
-				//  @0x4227CE]
+				//  Flags folds 0xE1 / 0xFD @0x4C12FF / @0x4C1307; Game_InitNewRound
+				//  @0x422740 - g_ClientDeployHold = 0 @0x4227CE, `mov [eax+1E0h], ebx`
+				//  @0x4227D4]
 				if (self_row_before) {
 					const replication::ClientEntityState *self_after =
 							view_.state().find(joiner_->self_handle());
@@ -1533,6 +1536,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 								local_player_position_[axis] = self_after->record_sample[axis];
 						if (joiner_->release_deployment_on_respawn())
 							respawn_release_in_poll = true;
+						if (view_.state().local_medic_reviving) {
+							view_.state().local_medic_reviving = false;
+							view_.state().mark_changed();
+						}
 					}
 				}
 				// The 0x0F handler writes the local player's Position the same way, past

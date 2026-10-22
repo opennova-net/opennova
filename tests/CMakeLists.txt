@@ -5251,6 +5251,11 @@ add_test(NAME player_body_capsule_eye COMMAND player_body_capsule_eye_test)
 add_executable(npruntime_use_press_trace_test npruntime/use_press_trace_test.cpp)
 target_link_libraries(npruntime_use_press_trace_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_use_press_trace COMMAND npruntime_use_press_trace_test)
+# The being-revived latch clears in the self record's respawn arm, inside the receive: a 0x3A
+# after the reviving 0x0A in one pump stays latched, one ahead of it is cleared.
+add_executable(npruntime_medic_reviving_latch_test npruntime/medic_reviving_latch_test.cpp)
+target_link_libraries(npruntime_medic_reviving_latch_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_medic_reviving_latch COMMAND npruntime_medic_reviving_latch_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a
