@@ -1536,6 +1536,26 @@ void test_integrity() {
 		expect_row(judge_case(scripted(1), scripted(2), across(false)), 'B',
 				"integrity_alternation", "", "fail", "INTEGRITY_NOT_ALTERNATING");
 	}
+	{
+		// An ammo challenge between the join and the first uplink carries the class-init
+		// ADM's row (integrity.join_adm): the host's extra row there is the join's phase
+		// (x6's ash-deploy RO retail host: row 14 at join + 0.53 s); after the first
+		// uplink the same row is a host divergence.
+		auto extra_row = [](uint64_t at) {
+			wire::ParityTrace trace = scripted(3);
+			splice(trace, 'S', 0x031, at, bytes({ 0x0E, 0x34, 0x12 }));
+			std::vector<uint8_t> reply{ 0x0E };
+			put_u32(reply, 0xCAFEF00Du ^ 0x1234u);
+			put_u32(reply, 0x1234u);
+			splice(trace, 'C', 0x021, at + 20 * kMs, reply);
+			return trace;
+		};
+		const Case before = judge_case(scripted(1), scripted(2), extra_row(1600 * kMs), "OO");
+		expect_row(before, 'B', "integrity_rows", "ammo", "pass");
+		expect_row(before, 'B', "integrity_row_unwitnessed", "ammo", "pass");
+		const Case after = judge_case(scripted(1), scripted(2), extra_row(3 * kSec), "OO");
+		expect_row(after, 'B', "integrity_rows", "ammo", "fail", "HOST_AMMO_ROW_MISMATCH");
+	}
 }
 
 // The reload request re-arms on its own echo (count.reload_echo): RR's 2 and RR-aa's 3

@@ -596,6 +596,18 @@ inline constexpr Normalization kNormalizations[] = {
 			"(Server_DisconnectAndResetAllPlayerSlots @0x516160, the send @0x516385): x6's "
 			"round RO retail host began its second mission on the family it ended the first "
 			"on, RR and RR-aa on the other" },
+	{ "integrity.join_adm", MaskKind::Field, 'S', 0x031, "ammo challenge row", 0,
+			"an S2C 0x31 carries the ammo row of the recipient body's equipped ADM, entity+0x2B0 "
+			"(Server_BroadcastWeaponSlotStateToPlayers @0x508540: the lookup @0x50860A, the row "
+			"@0x50863E), which the plyr class init writes (PlayerClass_InitEntity @0x4B1116) "
+			"until the joiner's first C2S 0x0C writes its own (@0x4C20A3) or a round it fires "
+			"does (Server_ClientFiredRound @0x50BD56): between a C2S 0x0B and the first C2S "
+			"0x0C after it every host challenges the class-init ADM's row, and whether a "
+			"boundary falls in that span is the join's phase against the 311-tick clock. x6's "
+			"ash-i5a-aas-deploy RO retail host sent row 14 0.53 s after the join, before the "
+			"joiner's first 0x0C; its RR and RR-aa never met the span. Such a challenge leaves "
+			"the row sets, the CRC oracle and the unwitnessed rows; its reply's shape still "
+			"counts (integrity_pairs)" },
 	{ "count.reload_echo", MaskKind::Field, '*', 0, "C2S 0x25 / S2C 0x49 count", 0,
 			"a reload action queues its C2S 0x25 on a tick whose slot phase byte (+0x5A) has "
 			"bit 0 set and bit 0x80 clear, then sets 0x80 (WeaponAction_Reload @0x5430B0: "

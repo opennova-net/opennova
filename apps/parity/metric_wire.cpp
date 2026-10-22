@@ -873,9 +873,30 @@ void compare_handshakes(
 
 struct Transaction {
 	bool valid = false;
+	bool join_adm = false; // ammo, before the joiner's first uplink (integrity.join_adm)
 	uint32_t row = 0;
 	uint32_t base_crc = 0; // the reply CRC with the challenge key XORed out
 };
+
+// The spans from each C2S 0x0B (a join) to the first C2S 0x0C after it, in which the
+// host still holds the body's class-init ADM (integrity.join_adm).
+std::vector<std::pair<uint64_t, uint64_t>> join_adm_windows(const RunFacts &run) {
+	std::vector<std::pair<uint64_t, uint64_t>> out;
+	bool open = false;
+	for (const wire::ParityEvent &event : run.trace.events) {
+		if (event.dir != 'C')
+			continue;
+		const uint16_t identity = event_identity(event);
+		if (identity == 0x00B && !open) {
+			out.emplace_back(event.ts_ns, UINT64_MAX);
+			open = true;
+		} else if (identity == 0x00C && open) {
+			out.back().second = event.ts_ns;
+			open = false;
+		}
+	}
+	return out;
+}
 
 uint32_t u16_at(const std::vector<uint8_t> &b, size_t at) {
 	return b[at] | (uint32_t(b[at + 1]) << 8);
@@ -888,6 +909,14 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 	const uint16_t challenge_id = ammo ? 0x031 : 0x030, reply_id = ammo ? 0x021 : 0x020;
 	const size_t reply_size = ammo ? 9 : 5;
 	const std::vector<wire::ParityEvent> &events = run.trace.events;
+	// The 0x31 sends the ammo row of the body's equipped ADM, entity+0x2B0
+	// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 (the lookup @0x50860A, the
+	// row @0x50863E)], which the plyr class init writes [orig: PlayerClass_InitEntity
+	// @0x4B1116] until the joiner's uplink does [orig: NetPacket_SerializePlayerState
+	// @0x4C20A3] (or a fired round [orig: Server_ClientFiredRound @0x50BD56]).
+	static_assert(has_normalization("integrity.join_adm"));
+	const std::vector<std::pair<uint64_t, uint64_t>> windows =
+			ammo ? join_adm_windows(run) : std::vector<std::pair<uint64_t, uint64_t>>{};
 	std::vector<Transaction> out;
 	for (size_t i = 0; i < events.size(); ++i) {
 		const wire::ParityEvent &challenge = events[i];
@@ -905,6 +934,9 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 			}
 		}
 		Transaction t;
+		for (const auto &window : windows)
+			t.join_adm = t.join_adm ||
+					(challenge.ts_ns >= window.first && challenge.ts_ns < window.second);
 		if (challenge.body.size() == 3 && reply && reply->body.size() == reply_size) {
 			t.row = challenge.body[0];
 			const uint32_t key = u16_at(challenge.body, 1);
@@ -949,14 +981,18 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 		const std::vector<Transaction> ta = transactions(rr, ammo), tb = transactions(other, ammo);
 		std::map<uint32_t, std::set<uint32_t>> oracle;
 		std::set<std::string> rows_a, rows_b;
+		// A challenge before the joiner's first uplink carries the class-init ADM's
+		// row, there by the join's phase against the boundary: it leaves the rows,
+		// the oracle and the CRC checks, its reply's shape still counts
+		// (integrity.join_adm).
 		for (const Transaction &t : ta)
-			if (t.valid) {
+			if (t.valid && !t.join_adm) {
 				oracle[t.row].insert(t.base_crc);
 				rows_a.insert(std::to_string(t.row));
 			}
 		if (options.oracle_pool)
 			for (const Transaction &t : transactions(*options.oracle_pool, ammo))
-				if (t.valid)
+				if (t.valid && !t.join_adm)
 					oracle[t.row].insert(t.base_crc);
 		size_t invalid_a = 0, invalid_b = 0, crc_mismatch = 0, unwitnessed = 0;
 		for (const Transaction &t : ta)
@@ -966,6 +1002,8 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 				++invalid_b;
 				continue;
 			}
+			if (t.join_adm)
+				continue;
 			rows_b.insert(std::to_string(t.row));
 			const auto found = oracle.find(t.row);
 			if (found == oracle.end())
