@@ -258,12 +258,13 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 	const bool carry_limited = gt == game_type::kCaptureTheFlag ||
 			gt == game_type::kFlagBall || gt == game_type::kFlagMe;
 	// The slot table in slot order, an orphaned row too (D-NET-NEW-L1-24): its carry count,
-	// its body's drop and death, its stats and its punt-log line (the row's +20 and +40) are
-	// its own; its punt punts its net player (Server_LogCRCMismatchPunt describes the row's
-	// +0x1C), none past the leave (Q7-36 (a)).
+	// its body's drop and death, its stats and its punt-log line (the row's +0x14 and +0x28)
+	// are its own; its punt punts its net player (Server_LogCRCMismatchPunt describes the
+	// row's +0x1C), none past the leave (Q7-36 (a)).
 	// [orig: Server_CheckPlayerViolations @0x51ABD0 - the slot walk @0x51ABE0..0x51AD2E;
-	//  Server_WritePuntLog @0x4F9C70 - the row's +20 / +40 @0x4F9CAB..0x4F9CC1;
-	//  Server_LogCRCMismatchPunt @0x517ED0 - the row's +0x1C @0x517F47]
+	//  Server_WritePuntLog @0x4F9C70 - the row's +0x28 @0x4F9CA2 (the name copy), +0x14 /
+	//  +0x28 @0x4F9CCF / @0x4F9CD2 (the line's slot and name); Server_LogCRCMismatchPunt
+	//  @0x517ED0 - the row's +0x1C @0x517F47]
 	struct SlotRow {
 		NapiNPConnection *row;
 		NapiNPConnection *net_player;
@@ -277,10 +278,14 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 	});
 	for (const SlotRow &slot : slots) {
 		NapiNPConnection &conn = *slot.row;
-		const bool own_row = slot.net_player == &conn;
-		const bool state6 = own_row ? conn.slot_state == PlayerSlotState::Joined
-		                            : slot_in_match(conn);
-		if (!player_slot_active(conn) || !conn.link.owned_entity.valid() || !state6) continue;
+		// Every row in state 6 alone, an orphaned row too: its state word is its own (copied
+		// at the orphaning, stepped by its track and by the round end), so from the round end
+		// (state 7) the sweep takes no row, through the linger's periodic seconds too.
+		// [orig: Server_CheckPlayerViolations - `cmp dword ptr [esi+20h], 6` @0x51AC09, jnz
+		//  @0x51AC0D]
+		if (!player_slot_active(conn) || !conn.link.owned_entity.valid() ||
+				conn.slot_state != PlayerSlotState::Joined)
+			continue;
 		world::Entity *player = world.registry.get(conn.link.owned_entity);
 		if (player == nullptr) continue;
 		if (carry_limited) {

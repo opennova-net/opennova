@@ -31,6 +31,8 @@
 #include <runtime/inmatch/mission_rotation.h> // HostRotation
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/punt_log.h>     // PuntLog (the sweep's _PUNT.TXT lines)
+#include <runtime/inmatch/server_files.h>  // ServerFileSink
 #include <runtime/inmatch/server_entity_state.h> // snapshot_entity_states
 #include <runtime/inmatch/server_medic.h>        // Server_ResendTeamDownedStates
 #include <runtime/inmatch/server_tick.h>         // Server_ProcessRoundEnd
@@ -42,9 +44,14 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
+#include <base/io/rotating_prng.h>
+
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -243,6 +250,7 @@ struct OrphanRig {
 		orphan_body = w::spawn_remote_player(*world, s);
 		inmatch::NapiNPConnection player = row(3, 1, 0);
 		player.burst.spawned = true;
+		player.slot_state = inmatch::PlayerSlotState::Joined; // both rows in state 6
 		player.link.owned_entity = own_body;
 		player.link.transport = &transport;
 		player.link.mode = ns::TransportMode::Client;
@@ -421,6 +429,79 @@ void test_the_violation_sweep_takes_an_orphaned_row() {
 	CHECK(r.net_player().host_disconnect_sent);
 }
 
+// A _PUNT.TXT sink in memory.
+class MemoryFiles final : public inmatch::ServerFileSink {
+public:
+	std::map<std::string, std::string> files;
+	bool exists(const std::string &name) override { return files.count(name) != 0; }
+	void remove(const std::string &name) override { files.erase(name); }
+	bool write(const std::string &name, std::string_view bytes, bool append) override {
+		std::string &f = files[name];
+		if (!append) f.clear();
+		f.append(bytes.data(), bytes.size());
+		return true;
+	}
+};
+
+// The sweep takes a row in state 6 alone, an orphaned row too: after the round end (every row
+// in state 7) the orphaned row's ten suicides punt nobody and write no "#S>9" line, however
+// many of the linger's periodic seconds run the sweep. Ahead of the round end the same row
+// writes its line and punts its net player.
+// [orig: Server_CheckPlayerViolations @0x51ABD0 - `cmp dword ptr [esi+20h], 6` @0x51AC09, jnz
+//  @0x51AC0D, the suicide arm's Server_WritePuntLog call @0x51AD0D and its punt @0x51AD17;
+//  Server_ProcessRoundEnd - state 7 @0x51685E]
+void test_the_violation_sweep_takes_no_row_after_the_round_end() {
+	MemoryFiles files;
+	inmatch::PuntLog punt_log(files);
+	punt_log.set_time_text([] { return std::string("T"); });
+	punt_log.arm_punt_log();
+	const std::string armed = files.files["_PUNT.TXT"];
+	{
+		OrphanRig r;
+		r.ctx->logs.punt = &punt_log;
+		if (w::MatchPlayer *p = r.world->match.player(r.orphan_body))
+			p->stats[w::MatchStats::kSuicides] = 10;
+		inmatch::Server_ProcessRoundEnd(*r.ctx, *r.world, 1);
+		CHECK(r.orphan().slot_state == inmatch::PlayerSlotState::RoundOver);
+		for (int second = 0; second < 3; ++second)
+			inmatch::check_player_violations(*r.ctx, *r.world);
+		CHECK(!r.net_player().host_disconnect_sent);
+		CHECK(files.files["_PUNT.TXT"] == armed);
+	}
+	OrphanRig r;
+	r.ctx->logs.punt = &punt_log;
+	if (w::MatchPlayer *p = r.world->match.player(r.orphan_body))
+		p->stats[w::MatchStats::kSuicides] = 10;
+	inmatch::check_player_violations(*r.ctx, *r.world);
+	CHECK(r.net_player().host_disconnect_sent);
+	CHECK(files.files["_PUNT.TXT"].size() > armed.size());
+}
+
+// D-NET-652: the integrity family's gate reads the row's own words alone, so a punted
+// state-6 row (its description gone, its teardown not yet run) still takes its draw, one
+// PRNG_Next16, while its closed queue drops the request: the stream steps exactly once and
+// the row's transport carries nothing.
+// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 - state 6 @0x508580, the entity
+//  @0x50858A, PRNG_Next16 called @0x5085AE behind +0x15F40 == 0 @0x5085A6, no punt test;
+//  CNapiNPConnection_QueueMessage @0x628640 - the +0x70D test @0x62864D]
+void test_a_punted_row_takes_its_integrity_draw() {
+	OrphanRig r;
+	r.ctx->orphaned_player_rows.clear(); // the player's own row alone
+	if (w::MatchPlayer *p = r.world->match.player(r.own_body))
+		p->stats[w::MatchStats::kSuicides] = 10;
+	inmatch::check_player_violations(*r.ctx, *r.world); // the suicide arm punts it (t6)
+	CHECK(r.net_player().host_disconnect_sent);
+	CHECK(r.net_player().slot_state == inmatch::PlayerSlotState::Joined);
+	(void)r.drain();
+	r.ctx->scoreboard_broadcast_timer = 0x136u; // the boundary is the next step
+	r.ctx->integrity_entity_family_next = true;
+	uint32_t want = r.world->prng16_state;
+	(void)io::rotating_prng_next16(want);
+	inmatch::emit_scoreboard_boundary(*r.ctx, *r.world);
+	CHECK(r.world->prng16_state == want);
+	CHECK(r.drain().empty());
+}
+
 } // namespace
 
 int main() {
@@ -437,6 +518,8 @@ int main() {
 	test_the_round_end_takes_an_orphaned_row();
 	test_the_slot_walk_takes_an_orphaned_row();
 	test_the_violation_sweep_takes_an_orphaned_row();
+	test_the_violation_sweep_takes_no_row_after_the_round_end();
+	test_a_punted_row_takes_its_integrity_draw();
 	if (failures != 0) {
 		std::printf("npruntime_orphan_row_walks: %d failure(s)\n", failures);
 		return 1;
