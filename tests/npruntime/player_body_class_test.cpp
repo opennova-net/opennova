@@ -902,7 +902,8 @@ void test_the_placement_warm_up_counts_by_the_dcb_id() {
 //  @0x4C2466..0x4C246B, the null test @0x4C246F, the call @0x4C2472;
 //  Entity_SpawnFromAnimSlotProperty @0x43C390 - @0x43C440, the store @0x43C453;
 //  Entity_UpdateInfantryPlayerBody @0x4B40E0 - MoveOrder @0x4B414B, the stamp
-//  @0x4B4187..0x4B419C; Entity_UpdateInfantryAI @0x4B9910 - the stamp @0x4B9A53..0x4B9A6E]
+//  @0x4B4187..0x4B419C; Entity_UpdateInfantryAI @0x4B9910 - the stamp @0x4B9A53..0x4B9A6E;
+//  both stamps store +0x80 / +0x84 / +0x88 alone]
 void test_the_update_follows_the_rows_move_function() {
 	struct Case {
 		uint8_t player_class;
@@ -930,9 +931,24 @@ void test_the_update_follows_the_rows_move_function() {
 		body->engine_flags &= ~w::kEntityFlagCarried;
 		body->net_move_input = 0x08;
 		body->saved_live_valid = false;
+		// The stamp is the three Position words alone: the +0x8C..+0x94 words (a torso
+		// hit's roll on +0x94) survive the update.
+		body->saved_live_yaw = 0x01000000;
+		body->saved_live_pitch = 0x00200000;
+		body->saved_live_roll = 0x05B05B00;
+		const int32_t entry[3] = {body->position.x.q16, body->position.y.q16,
+				body->position.z.q16};
 		r.world->ai.update_organic(*ae, *r.world, 1);
 		const w::Entity *after = r.world->registry.get(ae->handle);
 		CHECK(after != nullptr && after->saved_live_valid == c.ran);
+		if (after != nullptr) {
+			CHECK(after->saved_live_yaw == 0x01000000);
+			CHECK(after->saved_live_pitch == 0x00200000);
+			CHECK(after->saved_live_roll == 0x05B05B00);
+			if (c.ran)
+				for (int axis = 0; axis < 3; ++axis)
+					CHECK(after->saved_live_pos[axis] == entry[axis]);
+		}
 		CHECK(ae->inf.player_moving == c.moving);
 		r.world->ai.root_motion = nullptr;
 	}
