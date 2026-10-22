@@ -47,11 +47,29 @@ struct Keys : PlayerActionSource {
 	}
 };
 
+// The Respawn and MedicReq rows' records, whose arms the role owns (inmatch::Role::
+// dispatch_record); requests_are leaves them out, medic() / respawn() count them.
+bool role_record(const PlayerActionRequest &request) {
+	return request.action == Action::Respawn || request.action == Action::MedicRequest;
+}
+
+int count_of(const PlayerActionFrame &frame, Action action) {
+	int count = 0;
+	for (const PlayerActionRequest &request : frame.requests) count += request.action == action;
+	return count;
+}
+
+int medic(const PlayerActionFrame &frame) { return count_of(frame, Action::MedicRequest); }
+int respawn(const PlayerActionFrame &frame) { return count_of(frame, Action::Respawn); }
+
 bool requests_are(const PlayerActionFrame &frame, const std::vector<PlayerActionRequest> &expected) {
-	if (frame.requests.size() != expected.size()) return false;
+	std::vector<PlayerActionRequest> rows;
+	for (const PlayerActionRequest &request : frame.requests)
+		if (!role_record(request)) rows.push_back(request);
+	if (rows.size() != expected.size()) return false;
 	for (std::size_t i = 0; i < expected.size(); ++i)
-		if (frame.requests[i].action != expected[i].action ||
-				frame.requests[i].value != expected[i].value) return false;
+		if (rows[i].action != expected[i].action || rows[i].value != expected[i].value)
+			return false;
 	return true;
 }
 
@@ -139,7 +157,7 @@ bool test_the_chain_takes_digit_events() {
 			key_row("radarout", 0xBD), key_row("MedicReq", '9')};
 	auto frame = actions.poll(keys, gate);
 	CHECK(requests_are(frame, {{Action::RadarZoom, 1}}));
-	CHECK(!frame.medic_edge);
+	CHECK(!medic(frame));
 	keys.release("useitem");
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::ToggleMount}}));
 	PlayerActionPoll emotes = kLive;
@@ -165,18 +183,32 @@ bool test_reload_medic_and_respawn_fire_on_their_events() {
 	gate.key_events = {key_row("magazine", 'R'), key_row("MedicReq", '9'),
 			key_row("respawn", 'R')};
 	auto frame = actions.poll(keys, gate);
-	CHECK(frame.reload_edge && frame.medic_edge && frame.respawn_edge);
+	CHECK(frame.reload_edge && medic(frame) == 1 && respawn(frame) == 1);
+	CHECK(frame.requests.size() == 2 && frame.requests[0].action == Action::MedicRequest &&
+			frame.requests[0].code == 217 && frame.requests[1].action == Action::Respawn &&
+			frame.requests[1].code == 55);
 	frame = actions.poll(keys, kLive);
-	CHECK(!frame.reload_edge && !frame.medic_edge && !frame.respawn_edge);
+	CHECK(!frame.reload_edge && !medic(frame) && !respawn(frame));
 	PlayerActionPoll inactive = kLive;
 	inactive.active = false;
 	inactive.key_events = gate.key_events;
 	frame = actions.poll(keys, inactive);
-	CHECK(!frame.reload_edge && frame.medic_edge && !frame.respawn_edge);
+	CHECK(!frame.reload_edge && medic(frame) && !respawn(frame));
 	keys.off.insert("magazine");
 	frame = actions.poll(keys, kLive);
 	CHECK(frame.reload_edge); // the off-keyboard arm's press edge
 	CHECK(!actions.poll(keys, kLive).reload_edge);
+	// The records keep the key order across the action rows and the role's rows: Knife,
+	// Respawn, Primary queue as 201, 55, 203; the medic call's off-keyboard arm queues behind
+	// the keyboard pass's events.
+	keys.off = {"MedicReq"};
+	PlayerActionPoll ordered = kLive;
+	ordered.key_events = {key_row("Knife", '1'), key_row("respawn", 'R'), key_row("Primary", '3')};
+	frame = actions.poll(keys, ordered);
+	CHECK(frame.requests.size() == 4 && frame.requests[0].code == code_of("Knife") &&
+			frame.requests[1].action == Action::Respawn && frame.requests[1].code == 55 &&
+			frame.requests[2].code == code_of("Primary") &&
+			frame.requests[3].action == Action::MedicRequest && frame.requests[3].code == 217);
 	return true;
 }
 
@@ -247,7 +279,7 @@ bool test_order_and_held_rows() {
 			"ScopeZeroDec", "ScopeZeroInc", "radarout", "radarin", "map_toggle", "binoculars",
 			"NVG", "nvggainup", "nvggaindown", "NextWaypoint"}) keys.hold(token);
 	auto frame = actions.poll(keys, kLive);
-	CHECK(frame.fire_held && frame.fire_edge && frame.reload_edge && frame.medic_edge);
+	CHECK(frame.fire_held && frame.fire_edge && frame.reload_edge && medic(frame));
 	std::vector<PlayerActionRequest> expected{{Action::ToggleMount}, {Action::ToggleScope}};
 	for (int seat = 0; seat < 10; ++seat) expected.push_back({Action::SelectSeat, seat});
 	for (int category = 1; category <= 9; ++category)
@@ -260,7 +292,7 @@ bool test_order_and_held_rows() {
 		expected.push_back(request);
 	CHECK(requests_are(frame, expected));
 	frame = actions.poll(keys, kLive);
-	CHECK(frame.fire_held && !frame.fire_edge && !frame.reload_edge && !frame.medic_edge);
+	CHECK(frame.fire_held && !frame.fire_edge && !frame.reload_edge && !medic(frame));
 	CHECK(frame.requests.empty());
 	return true;
 }
@@ -271,10 +303,10 @@ bool test_capture_and_overlay_edges() {
 	for (const char *token : {"attack_1", "magazine", "scope", "MedicReq", "Knife", "seat1",
 			"cycleweaponN", "Crouch", "radarout", "map_toggle"}) keys.hold(token);
 	auto frame = actions.poll(keys, {false, true, true});
-	CHECK(!frame.fire_held && !frame.fire_edge && !frame.reload_edge && frame.medic_edge);
-	CHECK(frame.requests.empty());
+	CHECK(!frame.fire_held && !frame.fire_edge && !frame.reload_edge && medic(frame) == 1);
+	CHECK(requests_are(frame, {}));
 	frame = actions.poll(keys, kLive);
-	CHECK(frame.fire_held && frame.fire_edge && frame.reload_edge && !frame.medic_edge);
+	CHECK(frame.fire_held && frame.fire_edge && frame.reload_edge && !medic(frame));
 	CHECK(requests_are(frame, {{Action::ToggleScope}})); // raw held rows do not re-fire
 	frame = actions.poll(keys, {true, false, true});
 	CHECK(!frame.fire_held && frame.requests.empty());
@@ -297,9 +329,9 @@ bool test_missing_simulation_freezes_only_scope_zero() {
 			"cycleweaponP", "Prone", "ScopeZeroDec", "ScopeZeroInc", "radarin", "map_toggle"})
 		keys.hold(token);
 	auto frame = actions.poll(keys, {true, true, false});
-	CHECK(frame.fire_edge && frame.reload_edge && frame.medic_edge && frame.requests.empty());
+	CHECK(frame.fire_edge && frame.reload_edge && medic(frame) == 1 && requests_are(frame, {}));
 	frame = actions.poll(keys, kLive);
-	CHECK(!frame.fire_edge && !frame.reload_edge && !frame.medic_edge);
+	CHECK(!frame.fire_edge && !frame.reload_edge && !medic(frame));
 	CHECK(requests_are(frame, {{Action::ScopeZero, -1}, {Action::ScopeZero, 1}}));
 	keys = Keys{};
 	actions.poll(keys, {true, true, false}); // zero's held latch does not see this release
@@ -321,7 +353,7 @@ bool test_reset_preserves_switch_hud_medic_and_use_state() {
 	actions.poll(keys, kLive);
 	actions.reset();
 	auto frame = actions.poll(keys, kLive);
-	CHECK(frame.fire_edge && frame.reload_edge && !frame.medic_edge);
+	CHECK(frame.fire_edge && frame.reload_edge && !medic(frame));
 	CHECK(requests_are(frame, {{Action::ToggleScope}, {Action::Stance, 0}, {Action::Stance, 1},
 			{Action::Stance, 2}, {Action::ScopeZero, -1}, {Action::ScopeZero, 1}}));
 	keys.digits[8] = true;
@@ -426,7 +458,7 @@ bool test_use_swallows_only_digit_event_rows() {
 				"seat5", "cycleweaponN", "Prone", "ScopeZeroInc", "radarout", "map_toggle"})
 			keys.hold(token, vk);
 		const auto frame = actions.poll(keys, kLive);
-		CHECK(frame.fire_edge && frame.reload_edge && frame.medic_edge);
+		CHECK(frame.fire_edge && frame.reload_edge && medic(frame));
 		if (vk == 0x30 || vk == 0x39) {
 			CHECK(requests_are(frame, {{Action::ToggleScope}}));
 		} else {
@@ -527,24 +559,24 @@ bool test_respawn_edges_on_ctrl_r() {
 	BoundKeys keys;
 	keys.down = {17, 'R'};
 	auto frame = actions.poll(keys, kLive);
-	CHECK(frame.respawn_edge && !frame.reload_edge);
-	CHECK(!actions.poll(keys, kLive).respawn_edge);
+	CHECK(respawn(frame) && !frame.reload_edge);
+	CHECK(!respawn(actions.poll(keys, kLive)));
 	keys.down.clear(); actions.poll(keys, kLive);
 	keys.down = {'R'};
 	frame = actions.poll(keys, kLive);
-	CHECK(!frame.respawn_edge && frame.reload_edge);
+	CHECK(!respawn(frame) && frame.reload_edge);
 	keys.down.clear(); actions.poll(keys, kLive);
 	keys.down = {17, 'R'};
-	CHECK(!actions.poll(keys, {false, true, true}).respawn_edge);
-	CHECK(!actions.poll(keys, kLive).respawn_edge); // the latch followed the hold
+	CHECK(!respawn(actions.poll(keys, {false, true, true})));
+	CHECK(!respawn(actions.poll(keys, kLive))); // the latch followed the hold
 	keys.down.clear(); actions.poll(keys, kLive);
 	PlayerActionPoll dead = kLive;
 	dead.death_screen = true;
 	keys.down = {17, 'R'};
-	CHECK(!actions.poll(keys, dead).respawn_edge);
+	CHECK(!respawn(actions.poll(keys, dead)));
 	keys.down.clear(); actions.poll(keys, kLive);
 	keys.down = {17, 'R'};
-	CHECK(actions.poll(keys, kLive).respawn_edge);
+	CHECK(respawn(actions.poll(keys, kLive)));
 	return true;
 }
 

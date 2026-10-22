@@ -108,6 +108,9 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		// take_vehicle_menu_request).
 		case Action::OpenArmory: break;
 		case Action::OpenVehicleMenu: break;
+		// The role's arms (engine inmatch::Role::dispatch_record): never handed here.
+		case Action::Respawn: break;
+		case Action::MedicRequest: break;
 	}
 }
 
@@ -156,6 +159,7 @@ void PlayerInputRouter::teardown() {
 	row_samples_.clear();
 	row_events_.clear();
 	action_events_.clear();
+	sample_records_.clear();
 }
 
 // The sim, re-resolved per use: mission reloads free the runtime and its sim,
@@ -338,6 +342,20 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 		if (poll_hud_toggles(rows_sim, hud_fired, mouse_scale_negative)) pause_row_ran();
 	}
 	row_samples_.clear();
+}
+
+void PlayerInputRouter::queue_records(opennova::controls::InputEventQueue &r_records) {
+	// Behind the records already waiting (the console's); the queue's cap drops the rest.
+	for (const opennova::controls::InputEventRecord &record : sample_records_)
+		(void)r_records.push(record);
+	sample_records_.clear();
+}
+
+void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventRecord &p_record) {
+	const Ref<Simulation> record_sim = sim();
+	if (record_sim.is_null()) return;
+	if (const auto request = opennova::controls::player_action_request(p_record))
+		apply_player_action(*record_sim.ptr(), *request);
 }
 
 void PlayerInputRouter::queue_row_event(int p_code, bool p_signed, int p_key) {
@@ -525,12 +543,17 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 		if (code < 0 || (action_sim.is_valid() && action_sim->action_head_admits(code)))
 			scroll_lock_turned_off_ = scroll_lock_device_turn_off();
 	}
-	p_input->set_weapon_input(actions.fire_held, actions.fire_edge,
-			actions.reload_edge, actions.medic_edge);
+	p_input->set_weapon_input(actions.fire_held, actions.fire_edge, actions.reload_edge);
 	p_input->set_to_special_input(actions.to_special_held, actions.to_special_edge);
 	p_input->set_menu_open(frame_menu_open_);
-	p_input->set_respawn_input(actions.respawn_edge);
 	for (const auto &request : actions.requests) {
+		// An action row's request is a record the update's drain dispatches in queue order
+		// (queue_records, dispatch_record); the special-key and USE arms run here.
+		if (request.code >= 0) {
+			sample_records_.push_back({request.code, 0, 0, 0, request.sign,
+					opennova::controls::InputEventOrigin::Device});
+			continue;
+		}
 		// A menu pick closes its menu whether or not a session carries it
 		// (engine hud_toggles_close_voice_menu carries the witness).
 		const bool radio = request.action == opennova::controls::PlayerAction::RadioPick;
@@ -636,6 +659,7 @@ void PlayerInputRouter::reset_input_state() {
 	row_samples_.clear();
 	row_events_.clear();
 	action_events_.clear();
+	sample_records_.clear();
 	const Ref<Simulation> reset_sim = sim();
 	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
 }
@@ -717,6 +741,7 @@ void PlayerInputRouter::reset() {
 	row_samples_.clear();
 	row_events_.clear();
 	action_events_.clear();
+	sample_records_.clear();
 	tick_scripted_look_ = Vector2();
 }
 

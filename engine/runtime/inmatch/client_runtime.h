@@ -8,6 +8,7 @@
 #include <runtime/inmatch/joiner_net_trace.h> // the joiner net readout (an instrument)
 #include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the process latch)
 #include <runtime/devtools/tick_profile.h>
+#include <runtime/controls/input_event_queue.h> // the console's records (queue_console_action)
 #include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
 #include <runtime/hud/net_quality_indicators.h> // g_NetQuality's display state
 #include <runtime/hud/feed_format.h>    // FeedPost (the client-raised ring lines)
@@ -503,25 +504,19 @@ public:
 	void set_authority_console(std::function<bool(const std::string &line)> arms) {
 		authority_console_ = std::move(arms);
 	}
-	// Input_QueueEvent's queue as the console fills it (the local command's binding
-	// CRC arm and the S2C 0x06 walk's binding arm): a record per action, up to 32;
-	// one past the cap is dropped (the queue's one live gate: no catalog record
-	// carries 0x2000000 and the 0x1000000 gate is dead). The next input frame
-	// (Role::apply_input) takes them in order and dispatches each by its code ahead of
-	// that frame's own presses, as the devices queue theirs behind.
+	// Input_QueueEvent as the console calls it (the local command's binding CRC arm and
+	// the S2C 0x06 walk's binding arm): a record per action into the input frame's event
+	// queue the owning role keeps (Role::input_events, installed through
+	// set_input_event_queue), whose cap drops one past 32 (controls::InputEventQueue).
+	// The next input frame's drain (Role::drain_input_events) dispatches them in order
+	// ahead of that frame's own presses, as the devices queue theirs behind. False when
+	// the record was dropped or no queue is installed.
 	// [orig: Input_QueueEvent @0x4979C0 - `cmp count, 20h; jge` @0x4979C8..0x4979CB,
 	//  the gates @0x4979D1..0x497A0B, the store @0x497A11..0x497A67; Input_ProcessFrame
 	//  @0x49D520 - Input_ProcessPlayerFrame @0x49D58B appends, the drain @0x49D599..0x49D5E7
 	//  into Input_HandleActionBinding @0x49D5D8]
-	struct ConsoleAction {
-		int32_t code = 0;
-		int32_t p1 = 0;
-		int32_t p2 = 0;
-		int32_t p3 = 0;
-	};
-	static constexpr std::size_t kInputEventQueueCap = 32;
 	bool queue_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3);
-	std::vector<ConsoleAction> take_console_actions();
+	void set_input_event_queue(controls::InputEventQueue *queue) { input_events_ = queue; }
 	// Where a dispatched console action whose arm the role does not own goes: the
 	// embedder's action dispatch by code (its screens' and devices' arms). Unset: the
 	// action goes nowhere. The game's sink takes 3 the exit (input_action_exit), 12 the
@@ -539,8 +534,8 @@ public:
 	void set_console_action_sink(ClientConsoleQueueAction sink) {
 		console_action_sink_ = std::move(sink);
 	}
-	void dispatch_to_console_action_sink(const ConsoleAction &action) const {
-		if (console_action_sink_) console_action_sink_(action.code, action.p1, action.p2, action.p3);
+	void dispatch_to_console_action_sink(const controls::InputEventRecord &record) const {
+		if (console_action_sink_) console_action_sink_(record.code, record.p1, record.p2, record.p3);
 	}
 	// An Emotes / Radio menu pick (1..10): C2S 0x14 / C2S 0x13 [i16 value].
 	// The sender carries no gate of its own: CNapiNetwork_QueueReliableMessage
@@ -1417,7 +1412,7 @@ private:
 	ClientLocalCommandSeams local_command_seams_;
 	ClientConsoleQueueAction console_action_sink_;
 	std::function<bool(const std::string &line)> authority_console_;
-	std::vector<ConsoleAction> console_actions_; // Input_QueueEvent's (queue_console_action)
+	controls::InputEventQueue *input_events_ = nullptr; // the role's (queue_console_action)
 	// GetTickCount (the console guard, the S2C 0x58's receipt stamp): the joiner's
 	// monotonic clock, else the process's steady clock.
 	uint32_t console_tick_ms() const;

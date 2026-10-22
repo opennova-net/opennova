@@ -2920,7 +2920,6 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 		}
 		h.kernel->world.rules.mp_session = in_session; // the joiner boot's session word
 		inmatch::TickInput press = h.input;
-		press.player.pressed_action_bits = inmatch::PRESSED_RESPAWN;
 		// A live health tail; the self record's dead bit decides below.
 		h.role.runtime->state().local_health = 100;
 		if (in_session) {
@@ -2962,6 +2961,7 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 			ok &= expect(h.role.runtime->local_player_dead(),
 					"respawn key: the self record's dead bit reads dead");
 			body->inf.anim_state = w::anim_state::kWalkForward;
+			(void)h.role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false, opennova::controls::InputEventOrigin::Device});
 			h.role.apply_input(press);
 			ok &= expect(body->inf.anim_state == w::anim_state::kWalkForward,
 					"respawn key: a dead L takes no reset");
@@ -2980,6 +2980,7 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 		// @0x497EE6; Input_ProcessFrame - the count test @0x49D5E0].
 		press.player.movement.forward = true;
 		(void)h.role.take_input_reset();
+		(void)h.role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false, opennova::controls::InputEventOrigin::Device});
 		h.role.apply_input(press);
 		ok &= expect(body->inf.anim_state == w::anim_state::kIdle &&
 				lp.input_flags.flags == 0 && lp.input_flags.prev == 0 &&

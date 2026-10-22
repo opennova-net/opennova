@@ -244,18 +244,22 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// The death screen releases capture. Medic still samples even with
 	// inactive gameplay or no simulation; the sim owns death/cooldown gates.
 	// [orig: Input_HandleActionBinding case 217 @0x49b4b4 (row 64 MedicReq)]
+	const int medic_code = row_code("MedicReq");
 	const bool medic_off = world::latched_key_edge(
 			admitted("MedicReq") && source.held_off_keyboard("MedicReq"), true, medic_was_down_);
-	frame.medic_edge = (admitted("MedicReq") && key_fired(row_code("MedicReq"))) || medic_off;
 	// Respawn: the dispatcher's code 55 row (byte_49C384[54] = 37, jump-table
 	// entry 37 -> the case) under the gameplay gate; its latch follows the
-	// keys regardless. [orig: Input_HandleActionBinding @0x49AEE9..0x49AEF0
-	//  (the index byte @0x49C3BA, the entry @0x49C32C) -> case 55 @0x49B20B]
+	// keys regardless. An alive-mode row, so the death screen's scan never admits it;
+	// the live-player, round and session gates are the role's
+	// (inmatch::Role::request_respawn). [orig: Input_HandleActionBinding @0x49AEE9..0x49AEF0
+	//  (the index byte @0x49C3BA, the entry @0x49C32C) -> case 55 @0x49B20B; the row's code
+	//  @0x817658]
+	const int respawn_code = row_code("respawn");
 	const bool respawn_off = world::latched_key_edge(
 			admitted("respawn") && source.held_off_keyboard("respawn"), gate.active,
 			respawn_was_down_);
-	frame.respawn_edge =
-			(gate.active && admitted("respawn") && key_fired(row_code("respawn"))) || respawn_off;
+	const bool respawn_fired =
+			(gate.active && admitted("respawn") && key_fired(respawn_code)) || respawn_off;
 	// Retail's auto-run (D-NET-563, PlayerActionFrame::auto_run_forward): the Scroll Lock word
 	// and the held Last_move row queue the forward event; the forward, back and strafe keys'
 	// own held events (the analog pass, skipped under a text line, where pressed() reads them
@@ -270,7 +274,7 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	frame.auto_run_forward = gate.active && (gate.scroll_lock_on || held("Last_move"));
 	for (const char *token : {"move_forward", "move_back", "strafe_left", "strafe_right"})
 		if (held(token)) frame.scroll_lock_off.push_back(row_code(token));
-	if (frame.respawn_edge) frame.scroll_lock_off.push_back(row_code("respawn"));
+	if (respawn_fired) frame.scroll_lock_off.push_back(respawn_code);
 	// ToSpecial: the handler reads its keys raw (keys_down, g_InputState.keyState)
 	// to tell a press from a release. A press dispatches on its scanned key-down's
 	// event, with captured gameplay input and under the death screen's binding
@@ -307,16 +311,28 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		PlayerActionRequest request = row.request;
 		// The row's key event reaches its arm through the dispatcher's head.
 		request.code = row_code(row.token);
+		request.sign = sign_known ? sign : source.fire_signed(row.token);
 		// NextWaypoint (code 23) reads the fire's sign: back when signed
 		// [orig: Input_HandleActionBinding case 23 @0x49B3DE..0x49B44D].
-		if (request.action == Action::WaypointCycle &&
-				(sign_known ? sign : source.fire_signed(row.token)))
-			request.value = -1;
+		if (request.action == Action::WaypointCycle && request.sign) request.value = -1;
 		return request;
 	};
-	// The keyboard pass's events, one request each in the queue's order.
+	// The keyboard pass's events, one record each in the queue's order: the action rows,
+	// the medic call and the Respawn key alike (Input_QueueEvent per scanned key-down), so
+	// a Respawn ahead of a weapon row ends the drain before it (its reset), and one behind
+	// it runs after it.
 	for (const KeyRowEvent &event : gate.key_events) {
 		if (event.release || chain_takes_key(event)) continue;
+		if (event.code == medic_code) {
+			if (admitted("MedicReq"))
+				frame.requests.push_back({Action::MedicRequest, 0, medic_code, event.sign});
+			continue;
+		}
+		if (event.code == respawn_code) {
+			if (gate.active && admitted("respawn"))
+				frame.requests.push_back({Action::Respawn, 0, respawn_code, event.sign});
+			continue;
+		}
 		for (const ActionRow &row : kRows) {
 			if (row_code(row.token) != event.code) continue;
 			const bool active = row.gate == Gate::Captured ? captured : gate.active;
@@ -325,6 +341,9 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 			break;
 		}
 	}
+	// The off-keyboard arms' press edges behind the keyboard pass's events.
+	if (medic_off) frame.requests.push_back({Action::MedicRequest, 0, medic_code});
+	if (respawn_off) frame.requests.push_back({Action::Respawn, 0, respawn_code});
 	for (std::size_t i = 0; i < std::size(kRows); ++i) {
 		const auto &row = kRows[i];
 		if ((row.flags & NeedsSimulation) && !gate.simulation_available) continue;
@@ -403,6 +422,19 @@ int WheelRemainder::feed(int32_t delta) {
 	for (; remainder_ >= kWheelDelta; remainder_ -= kWheelDelta) ++notches;  // @ 0x761575..0x7615AA
 	for (; remainder_ <= -kWheelDelta; remainder_ += kWheelDelta) --notches; // @ 0x7615AC..0x7615DB
 	return notches;
+}
+
+std::optional<PlayerActionRequest> player_action_request(const InputEventRecord &record) {
+	for (const auto &row : kRows) {
+		if (row_code(row.token) != record.code) continue;
+		PlayerActionRequest request = row.request;
+		request.code = record.code;
+		request.sign = record.sign;
+		// [orig: Input_HandleActionBinding case 23 @0x49B3DE..0x49B44D (the sign)]
+		if (request.action == Action::WaypointCycle && record.sign) request.value = -1;
+		return request;
+	}
+	return std::nullopt;
 }
 
 std::optional<PlayerActionRequest> player_wheel_action(std::string_view token) {

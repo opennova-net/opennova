@@ -8,6 +8,7 @@
 // single-player pause, and a latched fire press's binding test at its
 // dispatch (D-NET-NEW-LI-3).
 #include <runtime/devtools/scripted_input.h>
+#include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit record)
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
 
@@ -591,6 +592,104 @@ void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
 	}
 }
 
+// D-CTRL-6 (LI-s14): one event-record queue per input frame. The console's queued records
+// wait at its head; each update's sample queues its action rows behind them; the update's
+// drain dispatches every record in order, the front first, handing the ones the role does
+// not own to the source; a reset inside a dispatch ends the drain (the records behind it
+// never dispatch); the queue holds 32 records across the console's and the device's; a
+// paused update drains its records too.
+// [orig: Input_QueueEvent @0x4979C0 (the cap @0x4979C8..0x4979CB); Input_DequeueEvent
+//  @0x497F30; Input_ProcessFrame @0x49D520 (the drain @0x49D599..0x49D5E7,
+//  Input_HandleActionBinding @0x49D5D8); Input_ResetAllState @0x497ED0 (the memset
+//  @0x497EE6); Input_HandleActionBinding @0x49AD40 (case 4 @0x49AF4C)]
+using Dispatched = std::vector<std::pair<int32_t, uint32_t>>; // (code, the logic tick)
+
+void test_the_update_drains_its_records_in_queue_order() {
+	using opennova::controls::InputEventOrigin;
+	using opennova::controls::InputEventQueue;
+	using opennova::controls::InputEventRecord;
+	struct RecordDevice final : TickInputSource {
+		TickRecorder *role = nullptr;
+		std::vector<std::vector<int32_t>> per_sample; // the codes each sample queues
+		size_t samples = 0;
+		Dispatched dispatched;
+		bool quit_first = true; // the console's quit record ran ahead of every device record
+		int32_t reset_code = -1; // a dispatch that runs the whole input reset
+		InputPacket sample_tick(uint32_t) override { return {}; }
+		void queue_records(InputEventQueue &records) override {
+			if (samples < per_sample.size())
+				for (const int32_t code : per_sample[samples])
+					(void)records.push({code, 0, 0, 0, false, InputEventOrigin::Device});
+			++samples;
+		}
+		void dispatch_record(const InputEventRecord &record) override {
+			dispatched.emplace_back(record.code, role->kernel.world.logic_tick);
+			quit_first = quit_first &&
+					role->kernel.world.mission_exit_reason == opennova::inmatch::kMissionExitReset;
+			if (record.code == reset_code) role->reset_all_input_state();
+		}
+	};
+	const InputEventRecord quit{4, 0, 0, 0, false, InputEventOrigin::Console}; // row 78
+	FrameInput three;
+	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	{
+		auto role = std::make_unique<TickRecorder>();
+		RecordDevice device;
+		device.role = role.get();
+		device.per_sample = {{201, 203}, {19}};
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		CHECK(role->input_events().push(quit), "the console's record waits at the head");
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 3, "three updates");
+		const Dispatched order{{201, 500u}, {203, 500u}, {19, 501u}};
+		CHECK(device.dispatched == order && device.quit_first && role->input_events().empty(),
+				"the console's record first, then each update's records in order, at its update");
+	}
+	{
+		auto role = std::make_unique<TickRecorder>();
+		RecordDevice device;
+		device.role = role.get();
+		device.per_sample = {{201, 300, 203}, {19}};
+		device.reset_code = 300;
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 3, "three updates");
+		const Dispatched order{{201, 500u}, {300, 500u}, {19, 501u}};
+		CHECK(device.dispatched == order,
+				"a reset inside a dispatch ends the drain: the record behind it never dispatches");
+	}
+	{
+		auto role = std::make_unique<TickRecorder>();
+		RecordDevice device;
+		device.role = role.get();
+		device.per_sample = {{201, 203}};
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		for (int i = 0; i < 31; ++i) (void)role->input_events().push(quit);
+		CHECK(role->input_events().size() == 31, "31 console records");
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 3, "three updates");
+		const Dispatched order{{201, 500u}};
+		CHECK(device.dispatched == order,
+				"the queue holds 32 records across the console's and the device's: 203 dropped");
+	}
+	{
+		auto role = std::make_unique<TickRecorder>();
+		RecordDevice device;
+		device.role = role.get();
+		device.per_sample = {{201}};
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		CHECK(session.pause().applied(), "the pause");
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 0, "a paused frame runs no tick");
+		const Dispatched order{{201, 500u}};
+		CHECK(device.dispatched == order, "a paused update drains its records at the frozen tick");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -604,6 +703,7 @@ int main() {
 	test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch();
 	test_rows_poll_once_per_update_and_never_in_a_no_update_frame();
 	test_the_keyboard_pass_runs_in_the_update_that_samples_it();
+	test_the_update_drains_its_records_in_queue_order();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

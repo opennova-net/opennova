@@ -61,34 +61,22 @@ void Role::apply_input(const TickInput &input) {
 	// The spectate state the free-fly motor reads, ahead of the pack and the
 	// entity update (a joiner restamps it after its receive).
 	stamp_spectator_motor(kernel, runtime, joiner);
-	// The console's queued actions dispatch first, in queue order: the devices queue
-	// this frame's own events behind them (ClientRuntime::queue_console_action)
-	// [orig: Input_ProcessFrame @0x49D520 - Input_ProcessPlayerFrame @0x49D58B, the
-	//  drain @0x49D599..0x49D5E7 -> Input_HandleActionBinding @0x49D5D8].
-	// Under a menu screen no input frame runs, so the queued actions wait for the
-	// screen's close (whose reset may drop them) [orig: Game_ProcessMainFrame @0x5263F0 -
-	// UI_IsMenuScreenOpen @0x52660D skips Input_ProcessFrame @0x52661D].
-	input_queue_reset_ = false;
-	if (runtime != nullptr && (input.player.held_action_bits & HELD_MENU_OPEN) == 0)
-		for (const ClientRuntime::ConsoleAction &action : runtime->take_console_actions()) {
-			dispatch_console_action(action.code, action.p1, action.p2, action.p3);
-			if (input_queue_reset_) break; // the queue's memset ends the drain (below)
-		}
+	// The update's records in queue order: the console's queued actions first, then the
+	// device passes' (the key scan's rows, the Respawn key and the medic call among them,
+	// in their key order), all ahead of the mouse-axis events, the toggles, the held rows
+	// and the deferred dispatches, which the frame applies below.
+	drain_input_events(input.source, (input.player.held_action_bits & HELD_MENU_OPEN) != 0);
 	if (kernel.world.spectator.death_screen && runtime != nullptr) {
 		apply_death_screen_input(kernel, *runtime, joiner, input.player);
 		return;
 	}
 	const world::PlayerInput &movement = input.player.movement;
-	// The Respawn key's row runs among the frame's key rows, which the devices queue
-	// ahead of the mouse-axis events, the toggles and the deferred dispatches.
-	if (!input_queue_reset_ && (input.player.pressed_action_bits & PRESSED_RESPAWN) != 0)
-		request_respawn();
-	// A reset this frame (Player_ResetLocalInput -> Input_ResetAllState, the Respawn
-	// key's or a console-queued one's) memsets the event queue in the middle of the
-	// drain, so the frame's later events never dispatch (the look, the weapon rows,
-	// the medic call, the ToSpecial and deferred dispatches), and it clears the key
-	// state, so a key held through it reads up (its held rows queue nothing) until its
-	// next key-down; the devices' own reset is the embedder's (take_input_reset)
+	// A reset in this frame's drain (Player_ResetLocalInput -> Input_ResetAllState, the
+	// Respawn key's or a console-queued one's) memsets the event queue in the middle of the
+	// drain, so the frame's later events never dispatch (the look, the weapon rows, the
+	// ToSpecial and deferred dispatches), and it clears the key state, so a key held
+	// through it reads up (its held rows queue nothing) until its next key-down; the
+	// devices' own reset is the embedder's (take_input_reset)
 	// (D-NET-560). [orig: Player_ResetLocalInput @0x4B2B80 - Input_ResetAllState
 	//  @0x4B2B99; Input_ResetAllState @0x497ED0 - the queue's memset @0x497EE6,
 	//  Input_ClearKeyState; Input_ProcessFrame @0x49D520 - the drain's count test
@@ -134,11 +122,6 @@ void Role::apply_input(const TickInput &input) {
 	kernel.local.set_weapon_input((input.player.held_action_bits & HELD_FIRE) != 0,
 			(input.player.pressed_action_bits & PRESSED_FIRE) != 0,
 			(input.player.pressed_action_bits & PRESSED_RELOAD) != 0);
-	// The medic-call edge is an action binding, not weapon state: it fires its
-	// request immediately like retail's binding dispatch (the gates and the
-	// cooldown live in request_medic).
-	if ((input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
-		request_medic();
 	// The ToSpecial dispatches, with the deferred ones, once per input frame
 	// (a tick that consumes its own sample), as retail's input frame precedes
 	// the logic tick [orig: Input_ProcessFrame @0x49D520 -> Input_FlushDeferredEvents @0x49D591].
@@ -281,7 +264,22 @@ void Role::store_mission_exit(int32_t reason) {
 	if (kernel_ != nullptr) kernel_->world.mission_exit_reason = reason;
 }
 
-void Role::dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+void Role::drain_input_events(TickInputSource *source, bool menu_open) {
+	// [orig: Input_ProcessFrame @0x49D520 - the count test @0x49D599, Input_DequeueEvent
+	//  @0x49D5BA, Input_HandleActionBinding @0x49D5D8, the count test @0x49D5E0 / the loop
+	//  @0x49D5E7; Game_ProcessMainFrame @0x5263F0 - UI_IsMenuScreenOpen @0x52660D skips
+	//  Input_ProcessFrame @0x52661D; Game_StartMission @0x524360 - the final wait
+	//  @0x526295..0x5262E5 runs no main frame]
+	input_queue_reset_ = false;
+	ClientRuntime *runtime = client_runtime();
+	if (kind() == RoleKind::Joiner && (runtime == nullptr || !runtime->in_game_loop())) return;
+	if (menu_open) return;
+	controls::InputEventRecord record;
+	while (input_events_.pop(record)) dispatch_record(record, source);
+}
+
+void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSource *source) {
+	const int32_t code = record.code;
 	// Input_HandleActionBinding's switch by the record's code: the Respawn row
 	// (catalog row 68, code 55) and the medic call (row 64 MedicReq, code 217) are
 	// the role's arms, behind their own head gates; every other code is the
@@ -326,15 +324,18 @@ void Role::dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t
 		(void)request_stance(0);
 		return;
 	}
-	if (ClientRuntime *runtime = client_runtime())
-		runtime->dispatch_to_console_action_sink({code, p1, p2, p3});
+	if (record.origin == controls::InputEventOrigin::Device) {
+		if (source != nullptr) source->dispatch_record(record);
+		return;
+	}
+	if (ClientRuntime *runtime = client_runtime()) runtime->dispatch_to_console_action_sink(record);
 }
 
 bool Role::reset_local_input() {
 	// Player_ResetLocalInput: the local entity and its def, then Input_DisableScrollLock
 	// (the embedder's device, on this return: D-NET-563), Input_ResetAllState (the deferred queue here; the key
 	// state and the key-press latches the embedder's devices, take_input_reset; the event
-	// queue's memset, which ends the frame's drain, apply_input's input_queue_reset_),
+	// queue's memset, which ends the frame's drain, and apply_input's input_queue_reset_),
 	// then g_InputFlags, the pack and the idle snap (LocalPlayer::reset_key_input)
 	// (D-NET-560). [orig: Player_ResetLocalInput @0x4B2B80 - the entity and def tests
 	//  @0x4B2B85..0x4B2B8D, Input_DisableScrollLock @0x4B2B91, Input_ResetAllState
@@ -353,6 +354,7 @@ bool Role::reset_local_input() {
 	} else if (!local->has_item_def) {
 		return false;
 	}
+	input_events_.reset();
 	kernel.local.clear_deferred_input();
 	input_reset_pending_ = true;
 	input_queue_reset_ = true;
@@ -363,7 +365,7 @@ bool Role::reset_local_input() {
 void Role::reset_all_input_state() {
 	// [orig: Input_ResetAllState @0x497ED0 - the event queue's memset @0x497EE6, the
 	//  deferred queue's @0x497EF7, the key-press latch @0x497F08 (the devices')]
-	if (ClientRuntime *runtime = client_runtime()) (void)runtime->take_console_actions();
+	input_events_.reset();
 	kernel_->local.clear_deferred_input();
 	input_reset_pending_ = true;
 	input_queue_reset_ = true;
@@ -404,9 +406,9 @@ bool Role::request_deployment_pick(uint16_t wire_value) {
 	//  filters DeathScreen_FilterInputAction @0x52AD50 (the call @0x49AE4C),
 	//  Input_NullActionFilter (@0x49AE68), Cine_FilterInputAction @0x56FC30 (@0x49AE84),
 	//  the def+0x170 callback Input_HandleActionBinding_0 @0x4E0420 (@0x49AEB6)]
-	// The queue's memset ends a console drain the action rides (apply_input's
-	// input_queue_reset_; D-NET-685, V-L2-s7) [orig: Input_ResetAllState @0x497ED0 - the
-	// event queue's memset @0x497EE6].
+	// The queue's memset ends the drain the action rides (drain_input_events; D-NET-685,
+	// V-L2-s7) [orig: Input_ResetAllState @0x497ED0 - the event queue's memset @0x497EE6].
+	input_events_.reset();
 	kernel.local.clear_deferred_input();
 	input_reset_pending_ = true;
 	input_queue_reset_ = true;
@@ -697,7 +699,13 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			// source, the frame's sample).
 			InputPacket sample =
 					source != nullptr ? source->sample_tick(world.logic_tick) : input.player;
+			// The sample's records join the queue behind the console's (TickInputSource
+			// carries the witness); a paused update drains them here, its bit-0 rows meeting
+			// the head's pause gate; the resuming update's tick drains them
+			// (Role::apply_input).
+			if (source != nullptr) source->queue_records(role_->input_events());
 			if (!resumes) {
+				role_->drain_input_events(source, (sample.held_action_bits & HELD_MENU_OPEN) != 0);
 				run_paused_update_legs();
 				previous_ran = false;
 				continue;
@@ -711,6 +719,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			latest_camera_ = input.camera;
 			consume_one_shots = true;
 			TickInput tick_input = merged_tick_input(input, true);
+			tick_input.source = source;
 			tick_input.head_stepped = true;
 			if (!menu_open) {
 				tick_input.player.look_delta_x += static_cast<float>(axis[0]);
@@ -747,9 +756,11 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		if (pauses) set_state(State::Paused);
 		if (source != nullptr) {
 			latch_packet(source->sample_tick(kernel->world.logic_tick));
+			source->queue_records(role_->input_events());
 			consume_one_shots = true;
 		}
 		TickInput tick_input = merged_tick_input(input, consume_one_shots);
+		tick_input.source = source;
 		// The mouse pump's axis input for this tick (world::MouseAxisPump
 		// carries the witness): the frame's first tick reads the cursor offset
 		// the frame banked, every tick takes its spread share; under a menu
@@ -763,7 +774,8 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			// Input_HandleActionBinding @0x49AD40 (@0x49ADDD..0x49ADE8)]; the head's
 			// HUD counters stepped unpaused before the input frame, and the body runs
 			// paused: no role tick (no server tick, entity update or weapon walk),
-			// only the paused legs.
+			// only the paused legs. Its drain runs as a paused update's does.
+			role_->drain_input_events(source, menu_open);
 			consume_pending_one_shots();
 			consume_one_shots = false;
 			world::World &world = kernel->world;

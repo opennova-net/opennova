@@ -271,7 +271,7 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 		CHECK(!own->link.spectator);
 		// The Respawn key's 0x41 kills the body through the server's handler.
 		inmatch::TickInput press = tick_input(0);
-		press.player.pressed_action_bits = inmatch::PRESSED_RESPAWN;
+		(void)role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false, opennova::controls::InputEventOrigin::Device});
 		role.apply_input(press);
 		role.run_tick(tick_input(0));
 		role.run_tick(tick_input(0));
@@ -1327,7 +1327,7 @@ int main() {
 		if (own == nullptr || body == nullptr) continue;
 		CHECK(body->health > 0 && !kernel.local.local_player_dead());
 		inmatch::TickInput press = tick_input(0);
-		press.player.pressed_action_bits = inmatch::PRESSED_RESPAWN;
+		(void)role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false, opennova::controls::InputEventOrigin::Device});
 		role.apply_input(press);
 		role.run_tick(tick_input(0));
 		CHECK(body->health > 0); // the press frame only flushed it

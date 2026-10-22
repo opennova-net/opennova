@@ -143,7 +143,8 @@ bool test_respawn_press() {
 	Keys keys;
 	keys.held.insert("respawn");
 	const PlayerActionFrame pressed = actions.poll(keys, live(false));
-	CHECK(pressed.respawn_edge && offs_are(pressed, {55}));
+	CHECK(pressed.requests.size() == 1 && pressed.requests[0].action == PlayerAction::Respawn &&
+			offs_are(pressed, {55}));
 	CHECK(actions.poll(keys, live(false)).scroll_lock_off.empty());
 	return true;
 }

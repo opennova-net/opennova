@@ -3612,6 +3612,8 @@ bool run_console_actions_queue_for_the_input_frame() {
 	const std::string client_scrk = "CLIENT-CONSOLE-QUEUE-SCRK";
 	const std::string server_scrk = "SERVER-CONSOLE-QUEUE-SCRK";
 	inmatch::ClientRuntime client("ConsoleQueue", [] { return uint64_t{7000}; });
+	opennova::controls::InputEventQueue queue; // the owning role's (Role::input_events)
+	client.set_input_event_queue(&queue);
 	client.set_title(&kJo);
 	client.seed_session(0x434F4E51u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -3622,14 +3624,15 @@ bool run_console_actions_queue_for_the_input_frame() {
 					{'r', 'e', 's', 'p', 'a', 'w', 'n', 0})});
 	client.receive(echo.data(), echo.size());
 	(void)client.Client_ProcessNetworkFrame(1);
-	std::vector<inmatch::ClientRuntime::ConsoleAction> actions = client.take_console_actions();
-	if (!expect(actions.size() == 1 && actions[0].code == 55 && client.take_console_actions().empty(),
+	opennova::controls::InputEventRecord record;
+	if (!expect(queue.size() == 1 && queue.pop(record) && record.code == 55 &&
+					record.origin == opennova::controls::InputEventOrigin::Console && queue.empty(),
 			"the echoed respawn token queues code 55 once"))
 		return false;
-	for (int32_t i = 0; i < 33; ++i) (void)client.queue_console_action(i, 0, 0, 0);
-	actions = client.take_console_actions();
-	return expect(actions.size() == inmatch::ClientRuntime::kInputEventQueueCap &&
-					actions.front().code == 0 && actions.back().code == 31,
+	bool queued = true;
+	for (int32_t i = 0; i < 33; ++i) queued = client.queue_console_action(i, 0, 0, 0);
+	return expect(!queued && queue.size() == opennova::controls::InputEventQueue::kCapacity &&
+					queue.at(0).code == 0 && queue.at(31).code == 31,
 			"the queue holds 32 records in order; the 33rd is dropped");
 }
 

@@ -77,6 +77,7 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 	server_password_ = server_password;
 	join_password_ = join_password;
 	runtime = std::make_unique<ClientRuntime>(player_name);
+	runtime->set_input_event_queue(&input_events_); // its console's records
 	runtime->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
 	// A submission with no kit seam resolves the fresh profile's page through the
 	// kernel's weapon table (JoinerConnection::set_weapon_table).

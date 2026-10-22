@@ -1,5 +1,6 @@
 #pragma once
 
+#include <runtime/controls/input_event_queue.h>
 #include <runtime/hud/hud_minimap.h> // HudMinimapRadar
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_input.h>
@@ -186,6 +187,13 @@ struct PauseRowWord {
 	}
 };
 
+// The update's records. The sample's action rows (a scanned key-down's row, the
+// off-keyboard arms' press edges) are the event queue's records: the session hands the
+// role's queue to queue_records right after the update's sample, behind the records already
+// waiting there (the console's), and the update's drain (Role::drain_input_events) then
+// dispatches every record in order, handing each one whose arm the role does not own to
+// dispatch_record [orig: Input_ProcessFrame @0x49D520 (Input_ProcessPlayerFrame @0x49D58B
+//  appends, the drain @0x49D599..0x49D5E7, Input_HandleActionBinding @0x49D5D8)].
 class TickInputSource {
 public:
 	virtual ~TickInputSource() = default;
@@ -195,6 +203,8 @@ public:
 		(void)new_sample;
 		(void)pause;
 	}
+	virtual void queue_records(controls::InputEventQueue &records) { (void)records; }
+	virtual void dispatch_record(const controls::InputEventRecord &record) { (void)record; }
 };
 
 struct FrameInput {
@@ -223,6 +233,9 @@ struct TickInput {
 	// exactly once; a catch-up tick with no source of its own reuses the held
 	// state with no edges.
 	bool consume_one_shots = false;
+	// The update's input source, which takes the drained records whose arm the role does
+	// not own (TickInputSource::dispatch_record); null with no device.
+	TickInputSource *source = nullptr;
 	// The count of the loaded-model list the host froze at its mission start,
 	// which the host wraps its S2C 0x68 cursor at (0 until a list froze)
 	// [orig: Server_SendLoadedModelPageRequest @0x511375 / @0x511391 reads
@@ -371,11 +384,29 @@ public:
 	// false.
 	virtual bool bring_up() { return false; }
 
-	// The frame's input onto the local player, shared by every role: movement
-	// keys, mouse look, the fire/reload bits and the medic edge [orig: the
-	// per-frame input dispatch feeding Player_PackInputStateToEntity @0x4df450
-	// and Input_HandleActionBinding case 217 @0x49b4b4].
+	// The frame's input onto the local player, shared by every role: the update's drain
+	// (drain_input_events, with the tick's source), then the movement keys, mouse look and
+	// the fire/reload bits [orig: the per-frame input dispatch feeding
+	// Player_PackInputStateToEntity @0x4df450].
 	void apply_input(const TickInput &input);
+	// The input frame's event queue (g_InputEventQueueStorage): the console's queued
+	// actions wait here between input frames (ClientRuntime::queue_console_action), the
+	// update's device records join them behind (TickInputSource::queue_records).
+	controls::InputEventQueue &input_events() { return input_events_; }
+	// The update's drain: every queued record in order, the front first, until the queue
+	// reads empty, so a reset inside a dispatch (Player_ResetLocalInput's, the deploy pick's
+	// Input_ResetAllState) ends it. The arms the role owns run here: the quit row's exit,
+	// the Respawn key (55), the medic call (217), the stance selects (169 / 170 / 172).
+	// Every other record goes to the embedder: a console record to the console sink
+	// (ClientRuntime::set_console_action_sink), a device record to `source`
+	// (TickInputSource::dispatch_record). A joiner outside its game loop runs no input
+	// frame, nor does an update under a menu screen: the records wait (a screen's close
+	// resets them). Session::run_updates runs it in the paused and the pausing updates,
+	// apply_input in the updates that tick.
+	// [orig: Input_ProcessFrame @0x49D520 - the drain @0x49D599..0x49D5E7 ->
+	//  Input_HandleActionBinding @0x49D5D8; Game_ProcessMainFrame @0x5263F0 -
+	//  UI_IsMenuScreenOpen @0x52660D skips Input_ProcessFrame @0x52661D]
+	void drain_input_events(TickInputSource *source, bool menu_open);
 	// The medic call past the session/entity gates: a dead local player with
 	// the cooldown at zero sends through the role and stamps the cooldown.
 	bool request_medic();
@@ -395,11 +426,9 @@ public:
 	// console-queued one, past their rows' head: the role's C2S 0x1D
 	// (send_stance_request). 0 stand / 1 crouch / 2 prone. True = sent.
 	bool request_stance(int stance);
-	// A console-queued input action (ClientRuntime::queue_console_action), dispatched
-	// by its action code at the input frame: the arms the role owns (the Respawn
-	// key's code, the medic call's, the stance selects'), every other code to the
-	// embedder's dispatch (ClientRuntime::set_console_action_sink).
-	void dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3);
+	// One drained record, dispatched by its code (drain_input_events): the arms the role
+	// owns, every other code to the embedder's leg its origin names.
+	void dispatch_record(const controls::InputEventRecord &record, TickInputSource *source);
 	// Player_ResetLocalInput, which the Respawn key (case 55) and the Escape key (case
 	// 18, ahead of its `!is_in_session && g_RoundOver` test; the embedder's escape runs it)
 	// run: the input reset (D-NET-560). True when it ran past its local-entity test, where its
@@ -418,9 +447,9 @@ public:
 	// take_input_reset) and the dialog reset (D-NET-685). True = queued.
 	bool request_deployment_pick(uint16_t wire_value);
 	// Input_ResetAllState run outside the input frame, at the armory screen's ACCEPT and
-	// CANCEL head: the event queue's records (the console's queued actions) and the
-	// deferred queue go, and the embedder's devices owe their key queue, key state and
-	// key-press latch reset (take_input_reset).
+	// CANCEL head: the event queue's records (input_events: the console's queued actions)
+	// and the deferred queue go, and the embedder's devices owe their key queue, key state
+	// and key-press latch reset (take_input_reset).
 	// [orig: Input_ResetAllState @0x497ED0 - Input_ResetKeyQueue, Input_ClearKeyState, the
 	//  event queue's memset @0x497EE6, the deferred queue's @0x497EF7, the key-press latch
 	//  @0x497F08; WeaponLoadout_ApplyFromBuffer @0x565CD0 - the guards @0x565CE4..0x565CF8,
@@ -444,8 +473,9 @@ public:
 protected:
 	mission::MissionKernel *kernel_ = nullptr;
 	bool input_reset_pending_ = false; // take_input_reset
-	// A reset ran in this input frame (Input_ResetAllState's queue memset): the
-	// frame's later dispatches are gone (apply_input; D-NET-560).
+	controls::InputEventQueue input_events_; // input_events
+	// A reset ran in this input frame's drain (Input_ResetAllState's queue memset): the
+	// frame's later events are gone, the held rows' with them (apply_input; D-NET-560).
 	bool input_queue_reset_ = false;
 };
 
@@ -463,17 +493,13 @@ enum HeldAction : uint32_t {
 	//  Input_FlushDeferredEvents @0x49D591, its one caller].
 	HELD_MENU_OPEN = 1u << 2,
 };
+// The Respawn key (code 55) and the medic call (code 217) are records the update's drain
+// dispatches in queue order (Role::drain_input_events), not edges.
 enum PressedAction : uint32_t {
 	PRESSED_FIRE = 1u << 0,
 	PRESSED_RELOAD = 1u << 1,
-	// The dead player's medic call edge (the MedicReq action row; retail
-	// Input_HandleActionBinding case 217 @0x49b4b4).
-	PRESSED_MEDIC_REQUEST = 1u << 2,
 	// A ToSpecial dispatch: a press or a release edge of its keys.
 	PRESSED_TO_SPECIAL = 1u << 3,
-	// The Respawn row's press edge (catalog row 68; retail
-	// Input_HandleActionBinding case 55 @0x49B20B).
-	PRESSED_RESPAWN = 1u << 4,
 };
 
 

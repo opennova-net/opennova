@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include <runtime/controls/input_event_queue.h>
 #include <runtime/controls/key_event_queue.h>
 
 namespace opennova::controls {
@@ -68,6 +69,11 @@ enum class PlayerAction {
 	// The USE-ITEM vehicle-loadout arm's open (vehicle.mnu VEHICLE): the
 	// embedder's shell opens the screen over inmatch::VehicleMenu.
 	OpenVehicleMenu,
+	// The Respawn row (catalog row 68, Ctrl+R, code 55) and the medic call (row 64
+	// MedicReq, code 217): records whose arms the role owns (inmatch::Role::dispatch_record:
+	// request_respawn, request_medic), past their own head gates there.
+	Respawn,
+	MedicRequest,
 };
 
 // The arm a frame's held USE takes, as the embedder's press latch decides it
@@ -93,8 +99,21 @@ struct PlayerActionRequest {
 	//  the seat index @0x49c6e6..0x49c6ed, Entity_FindAvailableSeat (the call @0x49c702), the
 	//  menu picks @0x49c745 / @0x49c791;
 	//  Input_ProcessFrame @0x49d520 - the release edge @0x49d6c1..0x49d6dc]
+	// A request with a code is a record of the input frame's event queue: the embedder
+	// queues it (InputEventRecord: the code, the arguments 0, the sign) and the update's
+	// drain dispatches it in queue order (inmatch::Role::drain_input_events); one with
+	// none runs at once.
 	int code = -1;
+	// The sign bit its record carries: the fire's Shift sign (PlayerActionSource::fire_signed;
+	// KeyRowEvent::sign), which NextWaypoint reads.
+	bool sign = false;
 };
+
+// The request a drained record of an action row names: the row's request by its code,
+// NextWaypoint's direction from the record's sign. None for a code no action row carries.
+// [orig: Input_HandleActionBinding @0x49AD40 (the switch by the record's code; case 23
+//  @0x49B3DE..0x49B44D reads the sign); Input_HandleActionBinding_0 @0x4E0420]
+std::optional<PlayerActionRequest> player_action_request(const InputEventRecord &record);
 
 struct PlayerActionPoll {
 	bool active = false;
@@ -158,22 +177,21 @@ struct PlayerActionPoll {
 struct PlayerActionFrame {
 	bool fire_held = false;
 	bool fire_edge = false;
-	// The reload, MedicReq, Respawn and ToSpecial rows reach the session as one edge
-	// per sample. Retail dispatches every record, but a second one in the same input
-	// frame changes nothing: the reload request takes only a next action of 0, 1 or
-	// 11 and stores the reload's 4, the medic call's cooldown
-	// latches, the Respawn case's Player_ResetLocalInput memsets the event queue ahead
-	// of its 0x41 (a local entity with a def), which ends the drain, and ToSpecial's
-	// second press or release is a no-op. These edges dispatch in the session's tick
-	// prologue, behind the sample's row requests: their order against those rows is
-	// D-CTRL-6's next row (one event record queue per input frame).
+	// The reload and ToSpecial rows reach the session as one edge per sample. Retail
+	// dispatches every record, but a second one in the same input frame changes nothing:
+	// the reload request takes only a next action of 0, 1 or 11 and stores the reload's 4,
+	// and ToSpecial's second press or release is a no-op. These edges dispatch in the
+	// tick's input prologue behind the drained records, so their order against the action
+	// rows' records is D-CTRL-6's next row. The Respawn and MedicReq rows are records in
+	// `requests` (PlayerAction::Respawn / MedicRequest), one per event in key order: the
+	// Respawn case's Player_ResetLocalInput memsets the event queue ahead of its 0x41 (a
+	// local entity with a def), which ends the drain, and the medic call's cooldown latches.
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 (case 0xD3 -> WeaponSlot_RequestReload
 	//  @0x53F110, the next action's test @0x53F11E..0x53F12D, the store @0x53F12F);
 	//  Input_HandleActionBinding @0x49AD40 (case 55: Player_ResetLocalInput @0x49B20B ahead of
 	//  NetPacket_SendRequestRespawn @0x49B22A); Player_ResetLocalInput @0x4B2B80 (the entity
 	//  and def tests @0x4B2B85..0x4B2B8D, Input_ResetAllState @0x4B2B99)]
 	bool reload_edge = false;
-	bool medic_edge = false;
 	// ToSpecial (catalog row 37, default F, dispatch 220): its keys' live state
 	// and a dispatch: its scanned key-down's event (a press, an OS repeat
 	// included), the release pass's event (the row's flags carry the release bit
@@ -185,12 +203,6 @@ struct PlayerActionFrame {
 	//  @0x4E1161..0x4E1181]
 	bool to_special_held = false;
 	bool to_special_edge = false;
-	// The Respawn row (catalog row 68, Ctrl+R, dispatch 55): its press edge
-	// with gameplay input live. An alive-mode row, so the death screen's scan
-	// never admits it; the live-player, round and session gates are the
-	// role's (inmatch::Role::request_respawn) [orig: Input_HandleActionBinding
-	// case 55 @0x49B20B; the row's code @0x817658].
-	bool respawn_edge = false;
 	// Retail's auto-run (D-NET-563): this frame's forward event (code 152 with its fourth
 	// argument 1, which a forward key's own event carries as 0), queued every input frame the
 	// Scroll Lock word reads on, and by the held Last_move row (catalog row 16, code 425,
@@ -220,7 +232,9 @@ struct PlayerActionFrame {
 	//  @0x76117A; Game_InitSubsystems (the call @0x4A7260); Game_ShutdownSubsystems (the call
 	//  @0x4A53B7)]
 	std::vector<int> scroll_lock_off;
-	// Apply in order: the USE special-key/release arm precedes binding rows.
+	// In order: the USE special-key / release arms (no code: they run at once), then the
+	// action rows' records (a code: the embedder queues them for the update's drain), the
+	// keyboard pass's events first, then the off-keyboard arms' press edges.
 	std::vector<PlayerActionRequest> requests;
 };
 

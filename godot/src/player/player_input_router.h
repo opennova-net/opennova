@@ -87,6 +87,11 @@ public:
 	// update of a running frame).
 	void run_update_rows(uint32_t p_logic_tick, bool p_new_sample,
 			opennova::inmatch::PauseRowWord &r_pause) override;
+	// The update's sample's action-row records (its requests with a code), in order,
+	// into the role's event queue, and a drained one back to its arm through the
+	// dispatcher's head (engine inmatch::TickInputSource carries the witness).
+	void queue_records(opennova::controls::InputEventQueue &r_records) override;
+	void dispatch_record(const opennova::controls::InputEventRecord &p_record) override;
 	// The shell's keyboard pass over the key queue (its KeyboardPass over the
 	// shell's legs), run at each update's input-frame head under no menu screen;
 	// it decides itself whether its shell state drains the keys. Kept across a
@@ -243,6 +248,9 @@ private:
 	// since the last device sample, in order.
 	std::vector<opennova::controls::KeyRowEvent> action_events_;
 	void queue_key_row_event(const opennova::controls::KeyRowEvent &p_event);
+	// The last sample's action-row records, in order, until the session hands the role's
+	// event queue to queue_records.
+	std::vector<opennova::controls::InputEventRecord> sample_records_;
 	// The device step of the frame's head or of a later update (run_update_rows): the
 	// look pixels and the death screen the update's sample_tick reads.
 	Vector2 tick_scripted_look_;

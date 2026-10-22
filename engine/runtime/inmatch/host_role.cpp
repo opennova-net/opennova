@@ -235,6 +235,7 @@ void HostRole::install_spawned_body_bind() {
 void HostRole::make_client_runtime(uint32_t game_type) {
 	mission::MissionKernel &kernel = *kernel_;
 	state.client_runtime = std::make_unique<inmatch::ClientRuntime>(state.host_loop);
+	state.client_runtime->set_input_event_queue(&input_events_); // its console's records
 	// The 0x4C report's count runs on across the runtimes [orig: g_NetQualityReportTimer
 	//  @0xA85B84, process-lived; Client_ProcessNetworkFrame @0x42C239 / @0x42C246].
 	state.client_runtime->use_process_state(client_process_);

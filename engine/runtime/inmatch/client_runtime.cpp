@@ -2053,15 +2053,8 @@ bool ClientRuntime::console_command(const std::string &line) {
 
 bool ClientRuntime::queue_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3) {
 	// [orig: Input_QueueEvent @0x4979C0 - the cap @0x4979C8..0x4979CB]
-	if (console_actions_.size() >= kInputEventQueueCap) return false;
-	console_actions_.push_back({code, p1, p2, p3});
-	return true;
-}
-
-std::vector<ClientRuntime::ConsoleAction> ClientRuntime::take_console_actions() {
-	std::vector<ConsoleAction> out;
-	out.swap(console_actions_);
-	return out;
+	return input_events_ != nullptr &&
+			input_events_->push({code, p1, p2, p3, false, controls::InputEventOrigin::Console});
 }
 
 void ClientRuntime::queue_carrier_repair_requests() {

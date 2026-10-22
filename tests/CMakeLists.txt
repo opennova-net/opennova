@@ -5524,6 +5524,9 @@ add_test(NAME inmatch_tick_input_source COMMAND inmatch_tick_input_source_test)
 add_executable(controls_key_event_queue_test controls/key_event_queue_test.cpp)
 target_link_libraries(controls_key_event_queue_test PRIVATE opennova_runtime)
 add_test(NAME controls_key_event_queue COMMAND controls_key_event_queue_test)
+add_executable(controls_input_event_queue_test controls/input_event_queue_test.cpp)
+target_link_libraries(controls_input_event_queue_test PRIVATE opennova_runtime)
+add_test(NAME controls_input_event_queue COMMAND controls_input_event_queue_test)
 
 # --- parity lane LP (proof) ---
 

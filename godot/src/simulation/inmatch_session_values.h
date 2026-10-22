@@ -29,11 +29,7 @@ public:
 	enum PressedAction {
 		PRESSED_FIRE = opennova::inmatch::PRESSED_FIRE,
 		PRESSED_RELOAD = opennova::inmatch::PRESSED_RELOAD,
-		// The dead player's medic call edge (the MedicReq action row; retail
-		// Input_HandleActionBinding case 217 @0x49b4b4).
-		PRESSED_MEDIC_REQUEST = opennova::inmatch::PRESSED_MEDIC_REQUEST,
 		PRESSED_TO_SPECIAL = opennova::inmatch::PRESSED_TO_SPECIAL,
-		PRESSED_RESPAWN = opennova::inmatch::PRESSED_RESPAWN,
 	};
 
 private:
@@ -70,17 +66,13 @@ public:
 	void set_cursor_delta(const Vector2i &p_delta);
 	// Axis input added at this input frame (the scripted device's look).
 	void set_look_delta(const Vector2 &p_delta);
-	void set_weapon_input(bool p_fire_held, bool p_fire_pressed,
-			bool p_reload_pressed, bool p_medic_pressed = false);
+	void set_weapon_input(bool p_fire_held, bool p_fire_pressed, bool p_reload_pressed);
 	// The ToSpecial row after set_weapon_input: its keys' live state and a
 	// dispatch on this frame's press or release edge.
 	void set_to_special_input(bool p_held, bool p_dispatched);
 	// A menu screen is up, under which no input frame runs
 	// (opennova::inmatch::HELD_MENU_OPEN).
 	void set_menu_open(bool p_open);
-	// The Respawn row's press edge, after set_weapon_input
-	// (opennova::inmatch::PRESSED_RESPAWN).
-	void set_respawn_input(bool p_dispatched);
 	void set_sequence(int64_t p_sequence);
 	int64_t get_sequence() const;
 
