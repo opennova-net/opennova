@@ -884,6 +884,7 @@ func _wire_shell() -> void:
 	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
 	_menu_shell.game_reloaded.connect(_on_game_reloaded)
 	_menu_shell.ingame_controls_accepted.connect(_on_ingame_controls_accepted)
+	_menu_shell.screen_activated.connect(_on_menu_screen_activated)
 	_bundled_companion = BundledMenuCompanion.new()
 	_bundled_companion.play_retail_requested.connect(play_retail)
 	_bundled_companion.change_folder_requested.connect(request_retail_dir)
@@ -922,6 +923,16 @@ func _on_game_reloaded() -> void:
 		return
 	_player_options.reload()
 	refresh_local_profile_for_mount(true)
+
+
+# The main menu's activation (the STARTUP screen) sets transport mode 0: the LAN
+# screen's browse tears its own open socket down with its connect-log line, and its
+# enumerator runs on over no socket (LanSession.tear_down_transport; engine
+# inmatch::write_transport_socket_teardown_line carries the witness). The NovaWorld
+# session's socket goes with its panel's close (NovaWorldClient.stop).
+func _on_menu_screen_activated(screen_name: String) -> void:
+	if screen_name.nocasecmp_to("STARTUP") == 0 and _lan_session != null:
+		_lan_session.tear_down_transport()
 
 
 # The in-game options Accept wrote the dialog into the current profile record:

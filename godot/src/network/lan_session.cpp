@@ -147,6 +147,7 @@ void LanSession::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &LanSession::set_resource_root);
 	ClassDB::bind_method(D_METHOD("get_resource_root"), &LanSession::get_resource_root);
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
+	ClassDB::bind_method(D_METHOD("tear_down_transport"), &LanSession::tear_down_transport);
 	ClassDB::bind_method(D_METHOD("stop_enumerator"), &LanSession::stop_enumerator);
 	ClassDB::bind_static_method("LanSession", D_METHOD("destroy_pre_dial_session", "novaworld"),
 			&LanSession::destroy_pre_dial_session);
@@ -327,9 +328,16 @@ void LanSession::stop_enumerator() {
 
 void LanSession::stop() {
 	stop_enumerator();
-	if (pump_.is_valid() && !pump_installed_) pump_->close();
+	tear_down_transport();
 	pump_.unref();
 	pump_installed_ = false;
+}
+
+void LanSession::tear_down_transport() {
+	if (pump_.is_null() || pump_installed_ || !pump_->is_open()) return;
+	opennova::inmatch::write_transport_socket_teardown_line(
+			NovaWorldClient::process_connect_log(), /*socket_open=*/true);
+	pump_->close();
 }
 
 TypedArray<LanServerRow> LanSession::get_servers() const {

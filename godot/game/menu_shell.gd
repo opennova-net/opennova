@@ -121,6 +121,9 @@ signal game_reloaded()
 # to the live bindings and the running session, then saves the profile
 # (docs/playerinfo/player-sav-re.md "The controls words").
 signal ingame_controls_accepted()
+# A screen the driver shows (its activation): main_game runs the main menu's
+# (STARTUP's) transport reset off it.
+signal screen_activated(screen_name: String)
 
 
 var _driver: MenuDriver
@@ -508,6 +511,7 @@ func _refresh_underlay() -> void:
 func _on_screen_changed(screen_name: String) -> void:
 	if _underlay != null:
 		_underlay.set_screen(screen_name)
+	screen_activated.emit(screen_name)
 
 
 # After each open, resolve the launch/quit controls and seed mission/mod lists.

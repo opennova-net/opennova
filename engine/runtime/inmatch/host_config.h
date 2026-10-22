@@ -197,11 +197,21 @@ void write_novaworld_socket_open_lines(ConnectLog &log, const gamecfg::GameCfg &
 // exit sets mode 0 likewise; an open socket (modes 1..4) tears down with "NET TEARING DOWN
 // SOCKET" through ConnectLog::line (none once the log is off, none with no log). A failed open
 // already left mode 0, so a socket that is not open writes nothing.
-// [orig: UI_OnStartupScreenActivate @0x5557F0 - CNapiGameSession_ResetToDisconnected called
-//  @0x555807, SetTransportMode(0) called @0x55582B; PostMenu_RouteMissionExit @0x568460 -
-//  SetTransportMode(0) called @0x568493 (reason 2), @0x5686F9 (the error arms);
-//  CNapiNetwork_SetTransportMode @0x4C8750 - TearDownSocket called @0x4C877B (modes 1..4);
-//  CNapiNetwork_TearDownSocket @0x4C4C90 - the line appended @0x4C4CE7]
+// The LAN browse's socket (mode 2, the LAN screen's SEARCH) goes the same way: the main menu's
+// activation (the STARTUP screen, unless the post-mission return to the NovaWorld menu is set)
+// sets mode 0, and a LAN host's start sets mode 3, so the browse's open socket tears down with
+// the line ahead of the host's own open. The enumerator is not stopped there: the menu frame's
+// browse runs on over no socket until its window ends.
+// [orig: UI_DispatchScreenEvent @0x54E6A0 - the STARTUP compare @0x54EEFF,
+//  UI_OnStartupScreenActivate called @0x54EF0B; UI_OnStartupScreenActivate @0x5557F0 - the
+//  return test @0x5557F7, CNapiGameSession_ResetToDisconnected called @0x555807,
+//  SetTransportMode(0) called @0x55582B; UI_HandleHostSessionStart @0x556D00 - the LAN arm's
+//  SetNetworkType(2) @0x556E83, 3 pushed @0x556E9F, SetTransportMode called @0x556EA6;
+//  Menu_UpdateFrame @0x5528A0 - UI_ProcessLANSessionStateMachine called @0x5528ED each menu
+//  frame; PostMenu_RouteMissionExit @0x568460 - SetTransportMode(0) called @0x568493
+//  (reason 2), @0x5686F9 (the error arms); CNapiNetwork_SetTransportMode @0x4C8750 -
+//  TearDownSocket called @0x4C877B (modes 1..4); CNapiNetwork_TearDownSocket @0x4C4C90 - the
+//  line appended @0x4C4CE7]
 void write_transport_socket_teardown_line(ConnectLog *log, bool socket_open);
 
 // The cfg block's words every session create reads, single player's and a

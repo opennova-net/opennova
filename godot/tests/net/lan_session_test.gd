@@ -368,6 +368,39 @@ func test_the_window_end_keeps_the_browse_socket() -> void:
 		pump.close()
 
 
+# The main menu's activation sets transport mode 0: the browse's own socket tears down (its
+# connect-log line, engine: inmatch::write_transport_socket_teardown_line carries the witness)
+# and closes, while the enumerator runs on over no socket; the next SEARCH opens a fresh one.
+func test_the_main_menus_teardown_closes_the_browse_socket_and_keeps_the_enumerator() -> void:
+	var browser := LanSession.new()
+	add_child_autofree(browser)
+	assert_eq(browser.start_browsing("127.0.0.1", 32785, 32785), OK)
+	browser.tear_down_transport()
+	assert_true(browser.is_browsing(), "the enumerator runs on past the teardown")
+	browser.tear_down_transport() # a closed socket tears down once
+	assert_eq(browser.start_browsing("127.0.0.1", 32785, 32785), OK,
+			"the next search opens a fresh socket")
+	var pump: UdpPump = browser.take_transport()
+	assert_not_null(pump, "the search holds a socket again")
+	if pump != null:
+		assert_true(pump.is_open(), "the fresh socket is open")
+		pump.close()
+
+
+# The teardown leaves an installed socket (the NovaWorld session's) to its owner.
+func test_the_teardown_leaves_an_installed_socket_open() -> void:
+	var owner_pump := UdpPump.new()
+	assert_eq(owner_pump.bind_listen(0), OK)
+	var browser := LanSession.new()
+	add_child_autofree(browser)
+	browser.set_transport(owner_pump)
+	browser.tear_down_transport()
+	assert_true(owner_pump.is_open(), "the installed socket is its owner's")
+	browser.stop()
+	assert_true(owner_pump.is_open(), "stop leaves it open too")
+	owner_pump.close()
+
+
 # D-NET-712: the proxy-assisted join's rendezvous rides the browse; the shell
 # installs the target's proxy fields on the enumeration before it starts. A
 # target without them (or none) installs nothing and the browse runs as before.

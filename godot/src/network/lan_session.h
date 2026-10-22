@@ -84,9 +84,15 @@ public:
 	// stops and forgets it (nothing closes it here); null when the browse has none.
 	Ref<UdpPump> take_transport();
 	// Stop the enumerator and close the browse's own socket (an installed one stays
-	// open: it is its owner's), as a mode change does. The session records stay. The
-	// window's end stops the enumerator alone and keeps the socket.
+	// open: it is its owner's), as a mode change does (tear_down_transport). The session
+	// records stay. The window's end stops the enumerator alone and keeps the socket.
 	void stop();
+	// The transport mode's change away from the browse's: its own open socket tears down
+	// with its connect-log line, then closes, while the enumerator runs on over no socket
+	// (the main menu's activation; a LAN host's start, through stop). An installed socket
+	// is its owner's and stays (engine: inmatch::write_transport_socket_teardown_line
+	// carries the witness).
+	void tear_down_transport();
 	// Stop the enumerator alone: the records, the rows and the socket stay. The window's
 	// end does this, and so does a row's join press: the press hands the frame to the join
 	// machine, and the LAN screen's browse pumps no more (MpMenuCompanion._on_lan_join;
