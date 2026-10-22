@@ -266,10 +266,12 @@ void vehicle_clear_chassis(Entity::VehicleMotorState &m) {
 	m.chassis_contact_active = false;
 }
 
-// Consume and clear all four force records, retaining their rotational delta.
-// [orig: Entity_ClearSuspensionForces @0x468980;
-// Entity_ComputeChassisOrientation @0x463940]
-static void compute_chassis_forces(Entity &e, const int32_t corners[4][3], int mode) {
+// Fold the quad into the retained matrix: each corner moved by its live force record (none
+// moves under a zero rate), fitted, and the fit's delta from the current euler matrix appended.
+// [orig: Entity_ComputeChassisOrientation @0x463940 (the force offsets inside
+//  Vehicle_ComputeAveragedOrientation @0x459A50 / Vehicle_ComputeOrientationFrom4Wheels
+//  @0x459310); Entity_ClearSuspensionForces @0x468980 calls it when a record is live]
+void vehicle_compute_chassis_orientation(Entity &e, const int32_t corners[4][3], int mode) {
 	auto &m = e.veh;
 	{
 		int32_t moved[4][3];
@@ -307,7 +309,7 @@ void vehicle_clear_chassis_forces(Entity &e, const int32_t corners[4][3], int mo
 	for (const auto &force : e.veh.chassis_forces)
 		any |= force.rate != 0;
 	if (any)
-		compute_chassis_forces(e, corners, mode);
+		vehicle_compute_chassis_orientation(e, corners, mode);
 	for (auto &force : e.veh.chassis_forces)
 		force = {};
 }
@@ -436,6 +438,34 @@ void vehicle_bounding_quad(const CollisionMatrix &matrix, int32_t width, int32_t
 					retail_q16_mul_rhu(forward[k], matrix.m[4 * i] >> 6)),
 					retail_q16_mul_rhu(side[k], matrix.m[4 * i + 1] >> 6));
 }
+// The square arm takes the larger of |width| and |length| (into the length's slot) and halves it,
+// and lifts by half |z_span| (the model's collision block +0x2C - +0x28, the box Z pair) along
+// row 2 of the matrix it builds from the entity's own euler words, not along the caller's axes:
+// lifted = origin + rhu(lift * row2), c0 = origin + rhu(half * axis), c1 = origin - that,
+// c2 = lifted - that, c3 = lifted + that, each product rounded on its own. The halves are
+// ftol(word * 0.5f) of a nonnegative word, exact below 2^24 at every x87 length.
+// [orig: Entity_ComputeBoundingQuad @0x45B6E0 - the larger |extent| @0x45B6F5..0x45B71A; the
+//  lift's span (+0x30 -> +0xB0, +0x2C - +0x28, abs) @0x45B721..0x45B74A;
+//  Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 over the entity's +4 block @0x45B75C and
+//  its Math_ExtractRow2FromFixedPoint22 @0x6137A0 @0x45B76B; the lifted origin
+//  @0x45B773..0x45B7DF; the half extent flt_7C3B94 (0.5f) @0x45B7C9..0x45B7E8; the axis
+//  products @0x45B7EC..0x45B878; c0 @0x45B886..0x45B896, c1 @0x45B89D..0x45B8AF, c2
+//  @0x45B8B2..0x45B8CA, c3 @0x45B8CD..0x45B8DC]
+void vehicle_square_quad(const CollisionMatrix &euler, int32_t z_span, int32_t width,
+		int32_t length, const int32_t axis[3], int32_t x, int32_t y, int32_t z, int32_t out[4][3]) {
+	const int32_t half = std::max(io::bam_abs(width), io::bam_abs(length)) / 2;
+	const int32_t lift = io::bam_abs(z_span) / 2;
+	const int32_t origin[3] = { x, y, z };
+	for (int i = 0; i < 3; ++i) {
+		const int32_t lifted =
+				io::bam_add(origin[i], retail_q16_mul_rhu(lift, euler.m[4 * i + 2] >> 6));
+		const int32_t along = retail_q16_mul_rhu(half, axis[i]);
+		out[0][i] = io::bam_add(origin[i], along);
+		out[1][i] = io::bam_sub(origin[i], along);
+		out[2][i] = io::bam_sub(lifted, along);
+		out[3][i] = io::bam_add(lifted, along);
+	}
+}
 // Shared settled/airborne suspension state machine. Contact records retain
 // all seven probes: the slow inverted path also reads spine slots 4 and 6.
 // [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140;
@@ -543,6 +573,7 @@ bool vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], cons
 	out.pitch_bam = angles[1];
 	out.roll_bam = angles[2];
 	out.fwd_z = double(matrix.m[8]) / 4194304.0;
+	out.matrix = matrix;
 	return fit;
 }
 // The boat's two buoyancy/ground calls always pass waterContact=1 and a
@@ -577,7 +608,7 @@ void vehicle_boat_suspension_fit(World &world, Entity &e, const VehicleTraits &t
 			if (std::all_of(std::begin(m.plat_acc), std::end(m.plat_acc),
 						[](int32_t v) { return v >= 0; })) {
 				vehicle_clear_chassis(m);
-				compute_chassis_forces(e, corners, 0);
+				vehicle_compute_chassis_orientation(e, corners, 0);
 				if ((e.flags & kEntityFlagInAir) != 0)
 					fit = false;
 			}
@@ -625,5 +656,6 @@ void vehicle_boat_suspension_fit(World &world, Entity &e, const VehicleTraits &t
 	out.pitch_bam = angles[1];
 	out.roll_bam = angles[2];
 	out.fwd_z = double(matrix.m[8]) / 4194304.0;
+	out.matrix = matrix;
 }
 } // namespace opennova::world::detail

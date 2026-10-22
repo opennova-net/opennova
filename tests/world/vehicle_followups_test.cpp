@@ -359,6 +359,30 @@ void crashed_upright_depth_precedes_springs() {
         CHECK(z == 65536);
     }
 }
+// A parked hull (the replicated 0x10 bit with the crash latch clear) on its wheels runs the
+// parked arm: the square quad folds into the retained chassis matrix and the latch closes. The
+// bike had no parked arm and stayed unlatched. Level on flat ground with both wheels down, the
+// bike's crash test (no wheel contact) and the arming (no request) stay off. A client: the
+// authority's crash state would clear the aircraft's bit of an unlatched hull.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600, the arm @0x47BD7E..0x47BEB7;
+//  Entity_ProcessAircraftContactPhysics @0x47EF10, the arm @0x48154B..0x48168D]
+void parked_hull_latches_through_the_square_quad() {
+    for (auto family : {VehicleFamily::Bike, VehicleFamily::Helicopter}) {
+        Rig r;
+        r.world.rules.logic_authority = false;
+        r.world.ai.is_authority = false;
+        auto t = r.traits(family, true);
+        auto &v = r.entity();
+        v.flags |= kEntityFlagSuspensionCrashed;
+        int32_t z = to_fixed(v.position.z);
+        r.contact(t, z);
+        CHECK(v.veh.crashed == 1);
+        CHECK(v.veh.chassis_active);
+        for (const auto &force : v.veh.chassis_forces)
+            CHECK(force.rate == 0);
+    }
+}
+
 // A climbing track can be supported by its inboard belly station while its
 // outer wheel is clear. Retail uses max(wheel, belly) for sink growth, spring
 // catch-up and the retained-contact tail. [orig: @ 0x4784CC..0x47853A,
@@ -913,6 +937,7 @@ int main() {
     wheelie_vertical_cap_and_catchup();
     bike_axle_and_release();
     crashed_upright_depth_precedes_springs();
+    parked_hull_latches_through_the_square_quad();
     bike_off_contact_planar_forward();
     vehicle_respawn_reseeds_destroy_timer();
     bike_indestructible_hull_skips_impact_damage();

@@ -86,6 +86,33 @@ void test_the_bounding_quad() {
 			CHECK(quad[k][i] == expected[k][i], "the quad corner is the two rounded row products");
 }
 
+// The square quad (the parked aircraft's, the bike's): the lower pair along the axis at half the
+// larger |width| / |length| (|-327683| over 262144: 163841), lifted along the euler matrix's
+// row 2 by half |z_span| (|-131075|: 65537), each product rounded on its own (integer words,
+// the same at every length; the halves are exact below 2^24). Row 0 >> 6 is (56755, 32768, -1),
+// row 2 >> 6 is (0, -1147, 65526): along = (141888, 81921, -3) ((163841 * -1 + 0x8000) >> 16
+// floors to -3), the lift (0, -1147, 65527). The aircraft's parked arm built a flat box quad
+// through the Q22 matrix instead, its lower corners at +/- half each span with no lift.
+// [orig: Entity_ComputeBoundingQuad @0x45B6E0, the square arm @0x45B6F5..0x45B8DC; the calls
+//  @0x481653 (Entity_ProcessAircraftContactPhysics @0x47EF10) and @0x47AB1C / @0x47BE7A
+//  (Entity_ProcessLightVehiclePhysics @0x479600)]
+void test_the_square_quad() {
+	CollisionMatrix m;
+	const int32_t words[12] = { 3632377, -2097130, 41, 0, 2097185, 3632311, -73373, 0, -41, 73400,
+		4193665, 0 };
+	for (int i = 0; i < 12; ++i) m.m[i] = words[i];
+	const int32_t axis[3] = { m.m[0] >> 6, m.m[4] >> 6, m.m[8] >> 6 };
+	int32_t quad[4][3];
+	detail::vehicle_square_quad(m, -131075, -327683, 262144, axis, 100 << 16, 200 << 16, 10 << 16,
+			quad);
+	const int32_t expected[4][3] = { { 6695488, 13189121, 655357 },
+		{ 6411712, 13025279, 655363 }, { 6411712, 13024132, 720890 },
+		{ 6695488, 13187974, 720884 } };
+	for (int k = 0; k < 4; ++k)
+		for (int i = 0; i < 3; ++i)
+			CHECK(quad[k][i] == expected[k][i], "the square quad corner");
+}
+
 // The plat fit's forward sum reads set 1's edge normalized twice beside set 2's once-normalized
 // copy. A one-word change of an even sum never moves its quarter unless the sum's sign differs
 // from the edge's, so the pin is a crossed quad whose edges c0 - c3 and c1 - c2 oppose: set 1's
@@ -114,6 +141,7 @@ int main() {
 	test_half_energy();
 	test_the_flip_bound();
 	test_the_bounding_quad();
+	test_the_square_quad();
 	test_the_fit_reads_the_edge_normalized_twice();
 	if (failures == 0) std::printf("suspension_precision: all passed\n");
 	return failures == 0 ? 0 : 1;

@@ -327,6 +327,11 @@ struct PlatFit {
 	int32_t z_avg = 0;          // plain 4-corner average (orientation solver)
     int32_t positive_z_avg = 0; // corners with z > 0 only (wheeled solver leg C)
     double fwd_z = 0.0; // unit forward vertical component (beach term feed)
+	// The suspension call's output matrix, the one its euler words come from: the aircraft
+	// solve's parked arm reads its rows 0 and 2 after the call [orig:
+	// Entity_ProcessAircraftContactPhysics @0x47EF10, the `matrix` handed to
+	// Entity_ProcessWheeledVehicleSuspension @0x481475 and read @0x48157C..0x4815A0].
+	CollisionMatrix matrix;
 };
 
 // Assemble the three Q16 axes into the solver's Q22 matrix for extraction.
@@ -352,6 +357,15 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matr
 // [orig: Entity_ComputeBoundingQuad @0x45B6E0, the non-square arm]
 void vehicle_bounding_quad(const CollisionMatrix &matrix, int32_t width, int32_t length,
 		int32_t x, int32_t y, int32_t z, int32_t out[4][3]);
+// The square bounding quad: c0 / c1 the origin plus / minus half the larger |width| / |length|
+// along `axis`, c2 / c3 their copies lifted by half |z_span| along the entity's euler matrix's
+// row 2: c2 (-axis, lifted), c3 (+axis, lifted).
+// [orig: Entity_ComputeBoundingQuad @0x45B6E0, the square arm]
+void vehicle_square_quad(const CollisionMatrix &euler, int32_t z_span, int32_t width,
+		int32_t length, const int32_t axis[3], int32_t x, int32_t y, int32_t z, int32_t out[4][3]);
+// Fold the corner quad, each corner moved by its live force record, into the retained chassis
+// matrix. [orig: Entity_ComputeChassisOrientation @0x463940]
+void vehicle_compute_chassis_orientation(Entity &, const int32_t corners[4][3], int mode);
 bool vehicle_suspension_fit(World &, Entity &, int32_t corners[4][3], const bool *contacts,
 		PlatFit &, int32_t px, int32_t py, int32_t pz, bool tank = false);
 void vehicle_boat_suspension_fit(World &, Entity &, const VehicleTraits &, int32_t corners[4][3],
