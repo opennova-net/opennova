@@ -15,6 +15,7 @@
 
 namespace opennova {
 class IDatagramSocket;
+struct ConnectionKeys; // net/npwire/nw_session_framing.h
 }
 
 // P2 — Per-connection handshake. The proven server legs of novaworld::HostSessionAccept, promoted
@@ -201,6 +202,28 @@ bool answer_session_ping(NapiNPConnection &conn, const std::vector<uint8_t> &bod
 		uint32_t stamp_ms, uint32_t clock_ms, std::vector<std::vector<uint8_t>> &sends);
 bool latch_client_goodbye(NapiNPConnection &conn, const std::vector<uint8_t> &body);
 
+// The 0x42's shared legs, the live host's join handler's and the held server's queued pass:
+// the connection template a server-side create copies (the protocol's cs_dir template, the
+// configured packet ceiling its field 13); the accept's node fill past the gates and the validate
+// callback (the names, the client's keys and ids, the reconnect counts and the CU vars, the dcb
+// and the keys the create drew, then the new-connection callback's MPS negotiation: true when it
+// negotiated the ceiling, whose two CS updates, make_game_session_initial_settings, are the
+// node's first sequenced records); the node's 0x82 from its current words; and a refusal's CR=0
+// 0x82 (the family JFC, the reason JFP).
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - the create @0x62BF06, the keys @0x62BF5E /
+//  @0x62BF99, the template copies @0x62BFC9 / @0x62BFE3, the state change @0x62C2D7;
+//  CNapiNPConnection_OnStateChange @0x626060 - cb_server_1 @0x6261CD, SendSessionInit @0x6261FC;
+//  NapiNPProtocol_SendJoinRejection @0x620CD0]
+CsConfig server_node_template(const NapiNPServerCtx &ctx);
+bool fill_joined_node(NapiNPConnection &conn, const ClientAuth &auth, const PeerAddr &peer,
+		const TitleIdentity &identity, uint32_t connection_id, const ConnectionKeys &server_keys,
+		uint32_t receive_stamp_ms);
+std::vector<ProtocolMessage> make_game_session_initial_settings(int32_t max_packet_bytes);
+std::vector<uint8_t> make_server_auth_datagram(const ClientAuth &auth, const PeerAddr &peer,
+		const NapiNPConnection &conn);
+std::vector<uint8_t> join_rejection_datagram(const ClientAuth &auth, uint32_t failure_family,
+		uint32_t failure_reason);
+
 // The next session reset's StopServer over a server an error-arm exit left unstopped
 // (UnstoppedServer, napi_np_connection.h): a held own client first (its CLIENT removal line;
 // its goodbye is the loopback's), then each node takes the STOP record (the first latch
@@ -246,7 +269,10 @@ void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &log
 // not on is_authority): its lines, and a hello the identity gate admits takes the held session's
 // 0x81 over `socket` (the protocol's words as the exit left them, the uptime at `now_ms`, NP
 // and NC the held nodes), its dispatch line PROTOCOL for a PM-less hello, else TOSSED [4].
-// (D-NET-NEW-L1-26)
+// A 0x42 from any source is the held protocol's as well (its join handler's head gate is
+// host_running alone): its lines, and one whose TLV walk holds the protocol's identity is queued
+// for the next queue pass (PROTOCOL), one whose walk ends on a CU bound is taken unqueued
+// (PROTOCOL), any other is tossed [4]. (D-NET-NEW-L1-26)
 struct UnstoppedReceive {
 	bool taken = false;
 	uint32_t net_quality_link_errors = 0;
@@ -261,7 +287,15 @@ UnstoppedReceive receive_unstopped_server(UnstoppedServer &server, const ServerL
 // measures, the peer's ACK, the ACK owed; a future packet waits on the node's ordered queue and
 // latches the missing-sequence check; the records reach no handler: every handler of the
 // server table returns at is_authority, which the router's error arm cleared), a queued 0x46
-// latches its record and leaves its node pending; then each node in list order replays its
+// latches its record and leaves its node pending, and a queued 0x42 takes the join handler's
+// queued pass: the protocol's gates (HK 3, the password 4, PV2 7, NA 5, the refusal byte 6, each a
+// CR=0 0x82 over `socket`), a held node at its address sent its 0x82 again (the same CI and CK)
+// or destroyed, the create (next_connection_index, the manager's keys), the validate callback
+// over the held words (the join lock 14 / 2, the address bans 14 / 3, the held nodes against
+// the capacity 14 / 4 or 14 / 5), then the accept: the node filled as the live host's
+// (fill_joined_node), the connect log's disabling line while it is on, the 0x82 over `socket`,
+// its /INOUT line, the MPS's two CS updates queued, and the node appended to the held list,
+// where the same pump's legs build them; then each node in list order replays its
 // ready successors and, latched with its ordered queue still nonempty, sends its 0x84 over
 // `socket`. Then every held node, in list order, takes PumpFlags' legs: its holdoff step; at a
 // zero holdoff the build of its queue (the packets framed before the exit, then the messages

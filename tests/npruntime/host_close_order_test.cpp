@@ -1190,6 +1190,294 @@ void test_a_held_server_answers_a_hello() {
 	CHECK(socket.sent.size() == 2);
 }
 
+namespace {
+
+const PeerAddr kStock{0x0900000Au, 32768}; // 10.0.0.9, a stock client's socket
+const char *const kStockScrk = "STOCKCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+
+// A stock client's 0x42 to the held server's identity and host key.
+ClientAuth stock_join(uint32_t host_key, uint32_t ci, uint32_t ck) {
+	ClientAuth auth = make_title_client_auth(kJo, ci, ck, host_key, "Stock", kStockScrk);
+	auth.cu.push_back(make_client_cu_chunk(2, "MPS", "1000"));
+	return auth;
+}
+
+std::vector<uint8_t> join_datagram(const ClientAuth &auth) {
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+}
+
+// The datagrams `socket` sent to `to`, in order.
+std::vector<std::vector<uint8_t>> sent_to(const CaptureSocket &socket, const PeerAddr &to) {
+	std::vector<std::vector<uint8_t>> out;
+	for (const auto &[peer, bytes] : socket.sent)
+		if (peer == to) out.push_back(bytes);
+	return out;
+}
+
+bool parse_auth_datagram(const std::vector<uint8_t> &datagram, ServerAuth &reply) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	return nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
+			opcode == SESSION_OPCODE_SERVER_AUTH && parse_server_auth(body.data(), body.size(), reply);
+}
+
+// A held server's 0x42 through the socket pass (taken, queued, nothing sent) and the browse's
+// next pump (the queued pass); returns the server's 0x82 to the stock client.
+bool held_join(inmatch::UnstoppedServer &server, const inmatch::ServerLogs &logs,
+		CaptureSocket &socket, const ClientAuth &auth, uint32_t now_ms, ServerAuth &reply) {
+	const std::vector<uint8_t> datagram = join_datagram(auth);
+	const std::size_t sent_before = socket.sent.size();
+	CHECK(inmatch::receive_unstopped_server(server, logs, socket, kStock, datagram.data(),
+			datagram.size(), now_ms).taken);
+	CHECK(socket.sent.size() == sent_before && server.queue.size() == 1);
+	inmatch::pump_unstopped_server(server, logs, socket, now_ms);
+	CHECK(server.queue.empty());
+	for (const std::vector<uint8_t> &bytes : sent_to(socket, kStock))
+		if (parse_auth_datagram(bytes, reply)) return true;
+	return false;
+}
+
+} // namespace
+
+// D-NET-NEW-L1-26 (L1-s23 row 0): the held protocol's join handler, end to end from an error-arm
+// exit. Its head gate is host_running alone, never is_authority, so a stock client's 0x42 the
+// process's socket reads (a joiner of the ghost row the held 0x81 put in its browse) is the held
+// protocol's: the socket pass queues it (RAW, COOKED, PROTOCOL; nothing sent), and the browse's
+// next Pump(-1) runs the queued pass: the protocol's gates and the validate callback over the
+// words the close held (no lock, no ban, the held nodes under the session's cap of 4), the create
+// on the process's connection counter (the 0x82's MI), the keys, the new-connection callback (the
+// connect log's disabling line after the PROTOCOL line, the joiner's MPS of 1000 under the
+// template's 1300), the 0x82 with CR 1, the /INOUT added line, and the two CS updates, built
+// in the same pump as the node's first sequenced packet. The new node counts in the next 0x81's
+// NP and NC.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - host_running @0x62B7D7, the queue
+//  @0x62C323, the create @0x62BF06, the validate callback @0x62C0B1, OnStateChange @0x62C2D7;
+//  NapiNPProtocol_PumpRecvQueues @0x6266A0 - the handler with 1 @0x6267AD;
+//  CNapiNPConnection_Create @0x62ACB0 - the counter @0x62B282..0x62B296;
+//  CNapiNPConnection_OnStateChange @0x626060 - connection_id @0x62619C, SendSessionInit
+//  @0x6261FC, LogPlayerAdded @0x626204; NapiNPServer_HandleNewConnection @0x4C8040 - the
+//  disabling line @0x4C80A7, the MPS @0x4C818D..0x4C81E4, ++np_count @0x4C820D;
+//  CNapiNPConnection_SendSessionInit @0x620EF0 - MI @0x620FE8]
+void test_a_held_server_admits_a_stock_join() {
+	auto host = std::make_unique<ListenHost>();
+	if (!host->boot()) {
+		++failures;
+		return;
+	}
+	host->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld;
+	host->role->close();
+	inmatch::UnstoppedServer &held = host->process->unstopped_server;
+	CHECK(held.running && held.join_capacity == 4 && !held.lineup_queue_open);
+	CHECK(!held.join_locked && held.banned_addresses.empty() && held.server_password.empty());
+	CHECK(!held.reject_new_connections && held.node_template.max_packet_bytes == 1300);
+	const std::size_t nodes_before = held.nodes.size();
+
+	MemoryFiles files;
+	inmatch::ConnectLog connect{files};
+	connect.set_clock([] { return std::string(); });
+	connect.start(inmatch::ConnectLogHeader{});
+	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
+	inout.set_stamp_text([] { return std::string(); });
+	inout.set_enabled(true);
+	inmatch::ServerLogs logs;
+	logs.connect = &connect;
+	logs.inout = &inout;
+	logs.inout_switch = true;
+
+	CaptureSocket socket;
+	const uint32_t index_before = next_connection_index();
+	ServerAuth reply;
+	CHECK(held_join(held, logs, socket, stock_join(held.hello.hk, 9, 0x51515151u), 6016, reply));
+	CHECK(held.nodes.size() == nodes_before + 1);
+	const std::vector<std::vector<uint8_t>> to_stock = sent_to(socket, kStock);
+	CHECK(to_stock.size() == 2);
+	if (held.nodes.size() == nodes_before + 1 && to_stock.size() == 2) {
+		const inmatch::NapiNPConnection &node = held.nodes.back().conn;
+		CHECK(node.peer == kStock && node.phase == inmatch::ConnectionPhase::Joined);
+		CHECK(node.type == inmatch::NapiNPConnection::kTypeServerSide);
+		CHECK(node.client_ci == 9 && node.client_ck == 0x51515151u && node.player_name == "Stock");
+		CHECK(node.receive_stamp_ms == 6016 && node.timeouts.max_packet_bytes == 1000);
+		CHECK(reply.cr == 1 && reply.ci == 9 && reply.ck == 0x51515151u);
+		CHECK(reply.mi == index_before + 1 && node.connection_id == reply.mi);
+		CHECK(reply.sk == node.server_sk && reply.scrk == node.server_scrk && !reply.scrk.empty());
+		CHECK(reply.rip == kStock.ip && reply.rpn == kStock.port && reply.na == "Stock");
+		bool ceiling = false;
+		for (const CsField &field : reply.client_cs)
+			if (field.field_index == 13 && field.value == 1000) ceiling = true;
+		CHECK(ceiling);
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> records;
+		CHECK(nw_decode_inbound(to_stock[1].data(), to_stock[1].size(), opcode, body) &&
+				opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE);
+		CHECK(decode_protocol_packet_plaintext(body.data(), body.size(), node.server_scrk, header,
+				records));
+		CHECK(records.size() == 2 && records[0].flags.settings_update &&
+				records[1].flags.settings_update);
+	}
+	const std::string connect_text = files.files[inmatch::kConnectLogFile];
+	const std::size_t taken = connect_text.find(" FROM 10.0.0.9:32768 [" + std::string(kJo.pn) + "]");
+	const std::size_t disabled = connect_text.find("NET SERVER DISABLING CONNECTLOG");
+	CHECK(taken != std::string::npos && disabled != std::string::npos && taken < disabled);
+	CHECK(!connect.enabled());
+	const std::string inout_text = files.files[inmatch::kInoutLogFileName] + inout.pending();
+	CHECK(inout_text.find("PLAYER ADDED \"Stock\"") != std::string::npos);
+
+	// The next 0x81 counts the new node.
+	const std::vector<uint8_t> probe =
+			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(
+					make_title_client_hello(kJo, 5)));
+	CaptureSocket browser;
+	CHECK(inmatch::receive_unstopped_server(held, logs, browser, kStock, probe.data(), probe.size(),
+			6032).taken);
+	ServerHello hello;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	CHECK(browser.sent.size() == 1 &&
+			nw_decode_inbound(browser.sent[0].second.data(), browser.sent[0].second.size(), opcode,
+					body) &&
+			parse_server_hello(body.data(), body.size(), hello));
+	CHECK(hello.np == nodes_before + 1 && hello.nc == nodes_before + 1);
+}
+
+// D-NET-NEW-L1-26 (L1-s23 row 0): the queued pass's refusals, each a CR=0 0x82 with the family
+// (JFC) and the reason (JFP) and no node: the server password (4, ahead of the create: the
+// connection counter does not move), then past the create (the counter moves) the validate
+// callback over the dead session's words: the held nodes against the cap (14 / 4, or 14 / 5
+// with the lineup queue open), the join lock (14 / 2) and the address bans (14 / 3). A 0x42 of
+// another identity is tossed [4] at the socket pass and never queued.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - PW @0x62BE18, the identity's return 0
+//  @0x62B7E6, the create @0x62BF06, the validate callback @0x62C0B1, the refusal @0x62C0E7;
+//  CNapiNetwork_ValidateJoinRequest @0x4C61B0 - g_ServerJoinLocked @0x4C61CA, g_BannedIdList
+//  @0x4C6217, the count @0x4C623F, 5 @0x4C624E; NapiNPProtocol_SendJoinRejection @0x620CD0]
+void test_a_held_server_refuses_a_join() {
+	MemoryFiles files;
+	inmatch::ConnectLog connect{files};
+	connect.set_clock([] { return std::string(); });
+	connect.start(inmatch::ConnectLogHeader{});
+	inmatch::ServerLogs logs;
+	logs.connect = &connect;
+
+	inmatch::UnstoppedServer server;
+	server.running = true;
+	server.session_name = "Held";
+	server.protocol_name = kJo.pn;
+	server.identity = &kJo;
+	server.hello.hk = 0x1234ABCDu;
+	server.server_password = "Secret";
+	server.join_capacity = 2;
+	server.nodes.push_back(held_node(kPeer, 0x11111111u));
+	server.nodes.push_back(held_node(PeerAddr{0x0100007Fu, 31002}, 0x22222222u));
+	CaptureSocket socket;
+	ServerAuth reply;
+
+	// The password: refused ahead of the create.
+	uint32_t index = next_connection_index();
+	ClientAuth auth = stock_join(server.hello.hk, 9, 0x51515151u);
+	auth.pw = "wrong";
+	CHECK(held_join(server, logs, socket, auth, 6000, reply));
+	CHECK(reply.cr == 0 && reply.jfc == 4 && reply.jfp == 0 && server.nodes.size() == 2);
+	CHECK(next_connection_index() == index + 1);
+
+	// The cap: the two held nodes fill 2; refused past the create.
+	auth.pw = "SECRET"; // the compare ignores case
+	index = next_connection_index();
+	reply = ServerAuth{};
+	CHECK(held_join(server, logs, socket, auth, 6000, reply));
+	CHECK(reply.cr == 0 && reply.jfc == 14 && reply.jfp == 4 && server.nodes.size() == 2);
+	CHECK(next_connection_index() == index + 2);
+	server.lineup_queue_open = true;
+	reply = ServerAuth{};
+	CHECK(held_join(server, logs, socket, auth, 6000, reply));
+	CHECK(reply.cr == 0 && reply.jfc == 14 && reply.jfp == 5);
+
+	// Room again: the join lock, then the address bans.
+	server.join_capacity = 4;
+	server.join_locked = true;
+	reply = ServerAuth{};
+	CHECK(held_join(server, logs, socket, auth, 6000, reply));
+	CHECK(reply.cr == 0 && reply.jfc == 14 && reply.jfp == 2 && server.nodes.size() == 2);
+	server.join_locked = false;
+	server.banned_addresses.push_back(kStock.ip);
+	reply = ServerAuth{};
+	CHECK(held_join(server, logs, socket, auth, 6000, reply));
+	CHECK(reply.cr == 0 && reply.jfc == 14 && reply.jfp == 3 && server.nodes.size() == 2);
+
+	// Another identity: tossed at the socket pass, nothing queued or sent.
+	ClientAuth other = auth;
+	other.pn = "OTHERPROTOCOL";
+	const std::vector<uint8_t> refused = join_datagram(other);
+	const std::size_t sent_before = socket.sent.size();
+	CHECK(inmatch::receive_unstopped_server(server, logs, socket, kStock, refused.data(),
+			refused.size(), 6000).taken);
+	CHECK(server.queue.empty() && socket.sent.size() == sent_before);
+	const std::string text = files.files[inmatch::kConnectLogFile];
+	CHECK(text.find(" FROM 10.0.0.9:32768 [4]") != std::string::npos);
+}
+
+// D-NET-NEW-L1-26 (L1-s23 row 0): a held node at the 0x42's address. With the same CI and CK
+// (a retransmit) it is sent its 0x82 again, its keys unchanged, and nothing is created; with
+// another CI it is destroyed (its removal line, its four 0x86 under its own CK, no record
+// latched) and the 0x42 creates its node at the tail of the held list.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - FindConnection(1, sender) @0x62BEBA, the
+//  retransmit @0x62BEE6, SendSessionInit @0x62BEE9 and its return @0x62BEF1,
+//  CNapiNPConnection_Destroy @0x62BEFB, the create @0x62BF06;
+//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the line @0x6253D2, the burst
+//  @0x6253EF..0x625424]
+void test_a_held_node_takes_a_retransmitted_join() {
+	MemoryFiles files;
+	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
+	inout.set_stamp_text([] { return std::string(); });
+	inout.set_enabled(true);
+	inmatch::ServerLogs logs;
+	logs.inout = &inout;
+	logs.inout_switch = true;
+
+	inmatch::UnstoppedServer server;
+	server.running = true;
+	server.session_name = "Held";
+	server.protocol_name = kJo.pn;
+	server.identity = &kJo;
+	server.hello.hk = 0x1234ABCDu;
+	server.join_capacity = 4;
+	server.nodes.push_back(held_node(kStock, 0x51515151u));
+	server.nodes[0].conn.client_ci = 9;
+	server.nodes.push_back(held_node(kPeer, 0x11111111u));
+
+	// The retransmit: its 0x82 again, nothing created.
+	CaptureSocket socket;
+	uint32_t index = next_connection_index();
+	ServerAuth reply;
+	CHECK(held_join(server, logs, socket, stock_join(server.hello.hk, 9, 0x51515151u), 6000, reply));
+	CHECK(reply.cr == 1 && reply.sk == 0x0BADF00Du && reply.scrk == server.nodes[0].conn.server_scrk);
+	CHECK(sent_to(socket, kStock).size() == 1 && server.nodes.size() == 2);
+	CHECK(server.nodes[0].conn.peer == kStock);
+	CHECK(next_connection_index() == index + 1);
+
+	// Another CI at the address: the held node goes, the new one is created at the tail.
+	socket.sent.clear();
+	reply = ServerAuth{};
+	CHECK(held_join(server, logs, socket, stock_join(server.hello.hk, 10, 0x52525252u), 6000, reply));
+	const std::vector<uint8_t> goodbye = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(0x51515151u, DisconnectEvent{}));
+	const std::vector<std::vector<uint8_t>> to_stock = sent_to(socket, kStock);
+	CHECK(to_stock.size() >= 5);
+	if (to_stock.size() >= 5) {
+		for (std::size_t i = 0; i < 4; ++i) CHECK(to_stock[i] == goodbye);
+		ServerAuth fresh;
+		CHECK(parse_auth_datagram(to_stock[4], fresh) && fresh.cr == 1 && fresh.ci == 10 &&
+				fresh.ck == 0x52525252u);
+	}
+	CHECK(server.nodes.size() == 2 && server.nodes[0].conn.peer == kPeer);
+	CHECK(server.nodes.size() == 2 && server.nodes[1].conn.peer == kStock &&
+			server.nodes[1].conn.client_ci == 10);
+	const std::string inout_text = files.files[inmatch::kInoutLogFileName] + inout.pending();
+	const std::size_t removed = inout_text.find("PLAYER REMOVED");
+	const std::size_t added = inout_text.find("PLAYER ADDED \"Stock\"");
+	CHECK(removed != std::string::npos && added != std::string::npos && removed < added);
+}
+
 int main() {
 	test_an_empty_latch_takes_the_leave_and_stops_the_server();
 	test_a_stale_kick_maps_the_leave_and_skips_the_stop();
@@ -1209,6 +1497,9 @@ int main() {
 	test_a_reaped_node_goes_before_the_next_nodes_legs();
 	test_an_error_arm_holds_the_sessions_hello_words();
 	test_a_held_server_answers_a_hello();
+	test_a_held_server_admits_a_stock_join();
+	test_a_held_server_refuses_a_join();
+	test_a_held_node_takes_a_retransmitted_join();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }

@@ -1261,6 +1261,17 @@ void HostRole::close() {
 		unstopped.identity = identity;
 		unstopped.host_start_tick = ctx.np_protocol.host_start_tick;
 		if (identity != nullptr) unstopped.hello = host_server_hello(ctx, ClientHello{}, PeerAddr{});
+		// And the words a 0x42 the held protocol queues meets: its own gates' (the password, the
+		// refusal byte, the node template) and the validate callback's (the join lock, the
+		// address bans, the capacity), none of which the error arm resets (receive_unstopped_server).
+		unstopped.server_password = ctx.config.server_password;
+		unstopped.reject_new_connections = ctx.np_protocol.reject_new_connections;
+		unstopped.node_template = server_node_template(ctx);
+		unstopped.join_locked = ctx.join_locked;
+		for (const banlist::AddressBan &ban : ctx.bans.addresses.entries)
+			unstopped.banned_addresses.push_back(ban.address);
+		unstopped.join_capacity = ctx.config.join_capacity();
+		unstopped.lineup_queue_open = ctx.config.lineup_queue_open();
 		// A listen host whose own client never left (an exit that is not the own leave's, the
 		// NovaWorld session's end among them) holds its own pair too: the session's own client
 		// connection (+0xE60, type 2) and the type-1 twin its own 0x42 created, at address 0, the

@@ -1013,6 +1013,23 @@ struct UnstoppedServer {
 	// The protocol's server-opcode queue (+0x22C, unbounded), which only a pump with flag bit 0
 	// drains: the LAN browse's and a join attempt's Pump(-1), never the joined match's flags 26.
 	std::vector<UnstoppedPacket> queue;
+	// The words a queued 0x42 meets, as the exit left them (receive_unstopped_server,
+	// pump_unstopped_server): the protocol's server password (its PW test) and its
+	// new-connection refusal byte (+0x1F7), the connection template a created node copies (the
+	// configured packet ceiling its field 13); the server context's join lock, its address
+	// bans and its capacity (max_players, plus the lineup queue's size while it is open), which
+	// the validate callback reads. The protocol's host key is the 0x81's (`hello.hk`).
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - PW against +log_buffer @0x62BE18, +0x1F7
+	//  @0x62BE8F, the template copies @0x62BFC9 / @0x62BFE3; CNapiNetwork_ValidateJoinRequest
+	//  @0x4C61B0 - g_ServerJoinLocked @0x4C61CA, g_BannedIdList @0x4C6217, the cap
+	//  @0x4C6220..0x4C623F]
+	std::string server_password;
+	bool reject_new_connections = false;
+	CsConfig node_template{};
+	bool join_locked = false;
+	std::vector<uint32_t> banned_addresses;
+	int32_t join_capacity = 0;
+	bool lineup_queue_open = false;
 };
 
 } // namespace opennova::inmatch

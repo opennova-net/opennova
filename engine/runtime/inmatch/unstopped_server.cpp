@@ -1,14 +1,16 @@
 // The held server: a server a mission exit's error arm left unstopped (UnstoppedServer,
 // napi_np_connection.h) between the exit and the next session reset. The reset's StopServer over
 // it, the manager's read of a datagram for it (a held node's socket legs, the protocol's hello
-// handler) and the browse's and a join's protocol pump over it; napi_np_protocol.h declares them
+// handler, its join handler's socket pass) and the browse's and a join's protocol pump over it
+// (the join handler's queued pass among them); napi_np_protocol.h declares them
 // (D-NET-NEW-L1-26).
 #include <runtime/inmatch/napi_np_protocol.h>
 
 #include <runtime/inmatch/punt_log.h>       // ConnectLog (the manager's lines)
 #include <runtime/inmatch/server_console.h> // the /INOUT lines
 
-#include <base/io/le.h> // read_u32_le (a datagram's key)
+#include <base/io/le.h>       // read_u32_le (a datagram's key)
+#include <base/io/strutil.h> // iequals (Napi_StrCaseEqual: the held join's PW and PV2)
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/outgoing_packets.h> // plan_outgoing_packets (a held node's build)
@@ -63,10 +65,17 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 	if (!server.running) return;
 	// A held own pair: the reset destroys the session's own client connection first, its
 	// removal line with the record it holds (latched or not); its 0x46 goes to the manager's
-	// loopback. The stop's walk then takes its twin, the first node, as any node.
+	// loopback. The stop's walk then takes its twin, the first node, as any node. The line's
+	// gate, the active byte +0x28, holds for every held own client: a session's create
+	// succeeds only once its own connection reached state 5, whose state change sets the byte,
+	// and only a teardown clears it.
 	// [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0xE60 test @0x4C8A83, its
 	//  CNapiNPConnection_Destroy @0x4C8A93 ahead of StopServer @0x4C8AA1;
-	//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the removal line @0x6253D2]
+	//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the +0x28 test @0x6253C9, the
+	//  removal line @0x6253D2, the clear @0x625535; CNapiGameSession_CreateSession -
+	//  CNapiGameSession_WaitForHostResponse called @0x4C9C6F, the failure's destroy @0x4C9C79;
+	//  CNapiGameSession_WaitForHostResponse @0x62B2D0 - state 5 @0x62B4C6, return 0 @0x62B4DD;
+	//  CNapiNPConnection_OnStateChange @0x626060 - states 1 / 5 @0x626079, +0x28 set @0x626172]
 	if (server.own_client)
 		write_inout_line(logs,
 				inout_player_removed_line(*server.own_client, NapiNPConnection::kTypeClientSide));
@@ -182,6 +191,124 @@ bool answer_unstopped_hello(const UnstoppedServer &server, opennova::IDatagramSo
 	return hello.pm == 0;
 }
 
+// The held protocol's join handler on the socket pass (its last argument 0), over a 0x42 from any
+// source: the head gate is host_running and the processing byte alone, never is_authority. The
+// TLV walk ending on a CU bound returns 1 with nothing queued; an identity that is not the
+// protocol's returns 0; any other 0x42 is queued on the protocol's server-opcode queue for the
+// pump's queued pass and returns 1. Returns the handler's result.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - host_running @0x62B7D7, +0x1F5 and the
+//  size @0x62B802 (return 0), the CU bounds @0x62BBEB..0x62BBFA with the socket pass's return 1
+//  @0x62C331, the identity compares through @0x62BDAE with their return 0 @0x62B7E6, the
+//  is_server test @0x62BDC5, NapiFifo_WritePacketAtomic(+0x22C) @0x62C323, return 1 @0x62C328]
+bool queue_unstopped_join(UnstoppedServer &server, const PeerAddr &from,
+		std::vector<uint8_t> body) {
+	ClientAuth auth;
+	if (!parse_client_auth(body.data(), body.size(), auth)) return !body.empty();
+	if (server.identity == nullptr || !matches_title_identity(*server.identity, auth))
+		return false;
+	server.queue.push_back(UnstoppedPacket{from, SESSION_OPCODE_CLIENT_AUTH, std::move(body)});
+	return true;
+}
+
+// The held protocol's join handler on the queued pass (its last argument 1), in the queue's
+// arrival order: the identity again, then the protocol's own gates, each a CR=0 0x82 over
+// `socket` (HK against the 0x81's host key 3, the server password 4, PV2 7, an empty NA 5, the
+// new-connection refusal byte 6); a held node at the sender's address whose CI and CK match is
+// sent its 0x82 again and nothing more, any other is destroyed (its removal line, its burst);
+// then the create (the process's connection counter, the server keys), the validate callback
+// over the dead session's words, set in session again by the browse's or the join's network
+// type (the join lock 14 / 2, the address bans 14 / 3, the held nodes against the capacity
+// 14 / 4, or 14 / 5 with the lineup queue open), a refused node going with no line; then the
+// accept: the node filled as the live host fills one (fill_joined_node), its state change's
+// receive stamp at `now_ms`, the new-connection callback's disabling line while the connect log
+// is still on and its MPS negotiation, the 0x82 over `socket`, the /INOUT line, and the two CS
+// updates queued for the node's first build. The removal callbacks reach no handler
+// (is_authority, which the router's error arm cleared).
+// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the handler called with 1 @0x6267AD;
+//  NapiNPProtocol_HandleClientJoin @0x62B750 - HK @0x62BDD5 (3), PW @0x62BE18 (4), PV2 @0x62BE40
+//  (7), NA @0x62BE7D (5), +0x1F7 @0x62BE8F (6), FindConnection(1, sender) @0x62BEBA, the
+//  retransmit's SendSessionInit @0x62BEE9 (return @0x62BEF1), CNapiNPConnection_Destroy
+//  @0x62BEFB, CNapiNPConnection_Create @0x62BF06, the keys @0x62BF5E / @0x62BF99, the validate
+//  callback +0x2D0 called @0x62C0B1, the refusal @0x62C0E7 and the destroy @0x62C248, the state
+//  set @0x62C2D2 and CNapiNPConnection_OnStateChange called @0x62C2D7;
+//  CNapiNPConnection_Create @0x62ACB0 - the counter @0x62B282..0x62B296;
+//  CNapiNPConnection_Destroy @0x62A4B0 - TeardownActiveConnection only in states 1 / 5
+//  @0x62A4F0..0x62A4F9;
+//  CNapiNetwork_ValidateJoinRequest @0x4C61B0 - is_in_session @0x4C61C1, g_ServerJoinLocked
+//  @0x4C61CA (2), g_BannedIdList @0x4C6217 (3), the count @0x4C623F (4 / 5 @0x4C624E);
+//  UI_StartLANSessionSearch @0x558300 - CNapiNetwork_SetNetworkType called @0x55831F;
+//  UI_ProcessLANSessionStateMachine - SetNetworkType(1) called @0x558E8C;
+//  CNapiNetwork_SetNetworkType @0x4C4A50 - is_in_session @0x4C4A85;
+//  CNapiNPConnection_OnStateChange @0x626060 - connection_id from the counter @0x62619C,
+//  cb_server_1 @0x6261CD, SendSessionInit @0x6261FC, LogPlayerAdded @0x626204;
+//  NapiNPServer_HandleNewConnection @0x4C8040 - the disabling line @0x4C80A7, the MPS
+//  @0x4C818D..0x4C81E4, ++np_count @0x4C820D]
+void join_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
+		opennova::IDatagramSocket &socket, const PeerAddr &from, const std::vector<uint8_t> &body,
+		uint32_t now_ms) {
+	ClientAuth auth;
+	if (server.identity == nullptr || !parse_client_auth(body.data(), body.size(), auth) ||
+			!matches_title_identity(*server.identity, auth))
+		return;
+	const auto refuse = [&](uint32_t family, uint32_t reason) {
+		const std::vector<uint8_t> datagram = join_rejection_datagram(auth, family, reason);
+		socket.send_to(from, datagram.data(), datagram.size());
+	};
+	uint32_t reject = 0;
+	if (auth.hk != server.hello.hk) reject = 3;
+	else if (!server.server_password.empty() &&
+			!strutil::iequals(auth.pw, std::string_view(server.server_password.c_str())))
+		reject = 4;
+	else if (!strutil::iequals(auth.pv2, server.identity->pv2)) reject = 7;
+	else if (auth.na.empty()) reject = 5;
+	else if (server.reject_new_connections) reject = 6;
+	if (reject != 0) {
+		refuse(reject, 0);
+		return;
+	}
+	if (UnstoppedNode *existing = find_unstopped_node(server, from)) {
+		if (existing->conn.client_ci == auth.ci && existing->conn.client_ck == auth.ck) {
+			const std::vector<uint8_t> datagram =
+					make_server_auth_datagram(auth, from, existing->conn);
+			socket.send_to(from, datagram.data(), datagram.size());
+			return;
+		}
+		teardown_unstopped_node(existing->conn, logs, &socket);
+		server.nodes.erase(server.nodes.begin() + (existing - server.nodes.data()));
+	}
+	const uint32_t connection_id = next_connection_index();
+	const ConnectionKeys server_keys = manager_connection_keys();
+	if (server.join_locked) {
+		refuse(14, 2);
+		return;
+	}
+	if (std::find(server.banned_addresses.begin(), server.banned_addresses.end(), from.ip) !=
+			server.banned_addresses.end()) {
+		refuse(14, 3);
+		return;
+	}
+	if (static_cast<int32_t>(server.nodes.size()) >= server.join_capacity) {
+		refuse(14, server.lineup_queue_open ? 5u : 4u);
+		return;
+	}
+	UnstoppedNode node;
+	NapiNPConnection &conn = node.conn;
+	conn.type = NapiNPConnection::kTypeServerSide;
+	conn.peer = from;
+	conn.timeouts = server.node_template;
+	conn.seq = make_jo_game_session_sequencing();
+	sync_session_sequencing_limits(conn.seq, conn.timeouts);
+	const bool negotiated =
+			fill_joined_node(conn, auth, from, *server.identity, connection_id, server_keys, now_ms);
+	if (logs.connect != nullptr && logs.connect->enabled())
+		logs.connect->disable_at_server_connection();
+	const std::vector<uint8_t> datagram = make_server_auth_datagram(auth, from, conn);
+	socket.send_to(from, datagram.data(), datagram.size());
+	write_inout_line(logs, inout_player_added_line(conn));
+	if (negotiated) node.queued = make_game_session_initial_settings(conn.timeouts.max_packet_bytes);
+	server.nodes.push_back(std::move(node));
+}
+
 } // namespace
 
 // The manager's read of a held node's datagram. The manager writes RAW, COOKED and its dispatch
@@ -191,7 +318,9 @@ bool answer_unstopped_hello(const UnstoppedServer &server, opennova::IDatagramSo
 // is queued for the pump's server-opcode pass; a 0x46 the same; a resend list and a ping need
 // the active node and act at once over the socket the manager read from; the probe is taken for
 // the node. A 0x41 needs no node: it reaches the protocol's hello handler from any source
-// (answer_unstopped_hello). The protocol's processing and drop bytes are written only zero.
+// (answer_unstopped_hello); nor does a 0x42, whose handler's socket pass queues it for the
+// pump's queued pass (queue_unstopped_join). The protocol's processing and drop bytes are
+// written only zero.
 // [orig: NapiNPManager_PumpReceive @0x623010 - cb_on_raw @0x623121, cb_on_packet @0x623254,
 //  HandlePacket called @0x623284; NapiNPManager_HandlePacket @0x622F10 - DispatchOpcode called
 //  @0x622F96 with last argument 0, cb_on_dispatch @0x622FCD, cb_on_error(4) @0x622FF9;
@@ -224,6 +353,17 @@ UnstoppedReceive receive_unstopped_server(UnstoppedServer &server, const ServerL
 		held_connect_log_line(logs, napi_got_raw_text(static_cast<int32_t>(len), from));
 		held_connect_log_line(logs, napi_got_cooked_text(unpacked_len, from));
 		const bool handled = answer_unstopped_hello(server, socket, from, body, now_ms);
+		held_connect_log_line(logs, handled
+				? napi_got_protocol_text(unpacked_len, from, server.protocol_name)
+				: napi_tossed_text(unpacked_len, from, NapiTossReason::NoProtocol));
+		return out;
+	}
+	// A 0x42 needs no node either: the join handler's socket pass queues it for the pump.
+	if (opcode == SESSION_OPCODE_CLIENT_AUTH) {
+		out.taken = true;
+		held_connect_log_line(logs, napi_got_raw_text(static_cast<int32_t>(len), from));
+		held_connect_log_line(logs, napi_got_cooked_text(unpacked_len, from));
+		const bool handled = queue_unstopped_join(server, from, std::move(body));
 		held_connect_log_line(logs, handled
 				? napi_got_protocol_text(unpacked_len, from, server.protocol_name)
 				: napi_tossed_text(unpacked_len, from, NapiTossReason::NoProtocol));
@@ -385,6 +525,11 @@ uint32_t pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 	std::vector<UnstoppedPacket> queued = std::move(server.queue);
 	server.queue.clear();
 	for (UnstoppedPacket &packet : queued) {
+		// A queued 0x42 takes the join handler's queued pass (join_unstopped_server).
+		if (packet.opcode == SESSION_OPCODE_CLIENT_AUTH) {
+			join_unstopped_server(server, logs, socket, packet.from, packet.body, now_ms);
+			continue;
+		}
 		UnstoppedNode *node = find_unstopped_node(server, packet.from);
 		if (node == nullptr || node->conn.phase < ConnectionPhase::Joined) continue;
 		NapiNPConnection &conn = node->conn;

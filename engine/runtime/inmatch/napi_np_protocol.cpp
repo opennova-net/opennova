@@ -218,15 +218,7 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 	// countdown delayed them up to period-1 pumps versus the golden timing.
 	node.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(
 			ctx.config.effective_send_holdoff_ticks());
-	// The cs_dir template copy: the reap window and the outbound pool bound this node lives
-	// under (120000 / 1200 unless the host's `_NSTMOUT.TXT` changed them).
-	// [orig: CNapiNPConnection_Create @0x62acb0 copies proto+0xE44/+0xE80 (`rep movsd ecx=0Fh`
-	//  @0x62ae7b/@0x62aeb8); NapiNPMessage_Create reads msg_out_max off the node @0x628048]
-	node.timeouts = ctx.np_protocol.connection_template;
-	// Both template blocks carry the host's configured `mpmaxpacketsize` as field 13
-	// [orig: CNapiNetwork_Init @0x4caa53..0x4caa7b, stores @0x4cab3c/@0x4cac0c].
-	node.timeouts.max_packet_bytes = static_cast<int32_t>(
-			cs_max_packet_bytes(ctx.config.max_packet_size, kCsMaxPacketCeilingGame));
+	node.timeouts = server_node_template(ctx);
 	node.seq = make_jo_game_session_sequencing();
 	sync_session_sequencing_limits(node.seq, node.timeouts);
 	ctx.np_protocol.connection_list.push_back(std::move(node));
@@ -234,6 +226,19 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 }
 
 } // namespace
+
+CsConfig server_node_template(const NapiNPServerCtx &ctx) {
+	// The cs_dir template copy: the reap window and the outbound pool bound this node lives
+	// under (120000 / 1200 unless the host's `_NSTMOUT.TXT` changed them).
+	// [orig: CNapiNPConnection_Create @0x62acb0 copies proto+0xE44/+0xE80 (`rep movsd ecx=0Fh`
+	//  @0x62ae7b/@0x62aeb8); NapiNPMessage_Create reads msg_out_max off the node @0x628048]
+	CsConfig timeouts = ctx.np_protocol.connection_template;
+	// Both template blocks carry the host's configured `mpmaxpacketsize` as field 13
+	// [orig: CNapiNetwork_Init @0x4caa53..0x4caa7b, stores @0x4cab3c/@0x4cac0c].
+	timeouts.max_packet_bytes = static_cast<int32_t>(
+			cs_max_packet_bytes(ctx.config.max_packet_size, kCsMaxPacketCeilingGame));
+	return timeouts;
+}
 
 // The S2C 0x86 SERVER_GOODBYE burst for `conn`: up to cs_dir0.recv_max_per_tick (4, clamped
 // 0..32) identical datagrams carrying [le32 client CK][the connection's latched disconnect
@@ -502,22 +507,28 @@ uint32_t server_connection_count(const NapiNPServerCtx &ctx) {
 void reject_client_join(const ClientAuth &auth, const PeerAddr &peer,
 		uint32_t failure_family, uint32_t failure_reason, HandleResult &out) {
 	(void)peer;
+	out.outbound.push_back(join_rejection_datagram(auth, failure_family, failure_reason));
+}
+
+} // namespace
+
+std::vector<uint8_t> join_rejection_datagram(const ClientAuth &auth, uint32_t failure_family,
+		uint32_t failure_reason) {
 	ServerAuth rejection;
 	rejection.ci = auth.ci;
 	rejection.ck = auth.ck;
 	rejection.cr = 0;
 	rejection.jfc = failure_family;
 	rejection.jfp = failure_reason;
-	out.outbound.push_back(nw_encode_outbound(
-			SESSION_OPCODE_SERVER_AUTH,
-			server_auth_rejection_to_bytes(rejection)));
+	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH,
+			server_auth_rejection_to_bytes(rejection));
 }
 
 // Build + frame a 0x82 ServerAuth for `conn` from its CURRENT keys (server_sk / server_scrk /
 // connection_id). Used for a fresh join AND to re-send on a retransmitted 0x42 (the original
 // re-sends the cached packet via CNapiNPConnection_SendSessionInit @0x620ef0 rather than re-minting).
-std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const ClientAuth &auth,
-                                               const PeerAddr &peer, const NapiNPConnection &conn) {
+std::vector<uint8_t> make_server_auth_datagram(const ClientAuth &auth, const PeerAddr &peer,
+		const NapiNPConnection &conn) {
 	// A game host's 0x82 carries no CU on any network type: SendSessionInit writes only the
 	// connection's type-3 vars, the host keeps the 0x42's CUs under their own type 1/2, and only a
 	// client's 0x82 handler creates a type-3 var. The NovaworldName / web-domain / NWUID block is
@@ -558,6 +569,8 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	}
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply));
 }
+
+namespace {
 
 HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const SessionReplyState &reply) {
 	// [orig: HostSessionAccept::pose_from_session]
@@ -651,6 +664,8 @@ bool negotiate_max_packet_bytes(NapiNPConnection &conn, long mps) {
 	return true;
 }
 
+} // namespace
+
 std::vector<ProtocolMessage> make_game_session_initial_settings(int32_t max_packet_bytes) {
 	std::vector<ProtocolMessage> settings;
 	for (const uint8_t direction : {uint8_t{0}, uint8_t{1}}) {
@@ -662,6 +677,117 @@ std::vector<ProtocolMessage> make_game_session_initial_settings(int32_t max_pack
 	}
 	return settings;
 }
+
+// See header. Retail's order: the create's names and keys (HandleClientJoin), its CU chunks,
+// the reconnect counts, then the state change's stamps and the new-connection callback's MPS
+// negotiation (OnStateChange, HandleNewConnection), each a store into the one node here.
+bool fill_joined_node(NapiNPConnection &conn, const ClientAuth &auth, const PeerAddr &peer,
+		const TitleIdentity &identity, uint32_t connection_id, const ConnectionKeys &server_keys,
+		uint32_t receive_stamp_ms) {
+	// Retail stores the ClientAuth CU tags on the connection and only latches
+	// the live spectator flag at the game-layer join message; keep the same
+	// two-step shape so the roster/0x16/0x75 state cannot flip before the
+	// witnessed latch point. [orig: NapiNetConfig_LoadFromConnTags @0x4c7260;
+	// the entry+55 latch @0x512aa0]
+	conn.join_environment = parse_client_game_environment(auth);
+	// The ClientAuth strings the METPROTOCOL player reports print (D-NET-NEW-L9-22).
+	conn.gate_player = parse_client_gate_metrics_player(auth);
+	const ParsedClientJoinRequest join_role = parse_client_join_request(auth);
+	conn.join_spectator_request = join_role.spectator ? 1 : 0;
+	conn.join_spectator_password = join_role.spectator_password;
+	conn.join_password = join_role.join_password;
+	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
+	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
+	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the
+	// callsign in NA, and the golden host's 0x0C record name equals NA ("FooPlayer"). Only
+	// the witnessed NOVAWORLD-connect gate tags, which begin with the title's product code
+	// ("jop:cus2" retail / "jopd:cus4" demo under JO's "jop", "dfx2:0:cus:buffy" under DFX2's
+	// "dfx2") and carry a ':', fall back to CO / the Hello name: a callsign is free text and may
+	// itself contain ':' — treating any colon as a gate tag stalled that joiner's 0x0C
+	// name-match (the host would name it the company string, never equal to its NA).
+	// [wire: retail-ashi5a f=199140 / retail_join_v18 f=47676; net-re §5.0b]
+	const std::string_view product_code = identity.product_code;
+	const bool na_is_gate_tag = auth.na.size() > product_code.size() &&
+			strutil::iequals(std::string_view(auth.na).substr(0, product_code.size()),
+					product_code) &&
+			auth.na.find(':') != std::string::npos;
+	if (!auth.na.empty() && !na_is_gate_tag) {
+		conn.player_name = auth.na;
+	} else if (conn.player_name.empty() && !auth.co.empty()) {
+		conn.player_name = auth.co;
+	}
+	// auth.scrk decrypts inbound SESSION; our server_scrk encrypts outbound SESSION and is echoed
+	// in ServerAuth so the client can read our replies.
+	conn.client_scrk = auth.scrk;
+	conn.client_ck = auth.ck;
+	conn.client_ci = auth.ci;
+	// A re-join counts its reconnect: DCNT as sent, RCNT one past the client's when DCNT > 0.
+	// [orig: HandleClientJoin @0x62c28d..0x62c2a3 — `jle` signed]
+	conn.dcnt = auth.dcnt;
+	conn.rcnt = static_cast<int32_t>(auth.dcnt) > 0 ? auth.rcnt + 1u : auth.rcnt;
+	conn.receive_inactive_ms = 0;
+	// The accept's state change stamps the receive clock; a retransmitted 0x42 to a node already
+	// in state 1 runs no state change (ours returns before this) (D-NET-256).
+	// [orig: NapiNPProtocol_HandleClientJoin - the state-1 skip @0x62C2A9..0x62C2AC, the state set
+	//  @0x62C2D4, CNapiNPConnection_OnStateChange called @0x62C2D7; OnStateChange @0x626060 -
+	//  GetTickCount @0x6260E8, `mov [esi+5E8h], ebp` @0x62612F]
+	conn.receive_stamp_ms = receive_stamp_ms;
+	conn.c2s_reassembly = {};
+	// The 0x42's CU chunks carry the joiner's character/profile vars — the per-side character
+	// selection Server_PlayerAdd folds into the player record (CharacterJoinVars). Values are
+	// decimal strings converted with atol semantics: CI0/CI1 keep the low u16, TR clamps to
+	// {0, 1, 0xFF}, the rest keep the low u8. Only type-2 chunks are tag-list vars. [orig:
+	// NapiNPProtocol_HandleClientJoin @0x62b750 CU loop (type gate @node+20 == 2) ->
+	// NapiNetConfig_LoadFromConnTags @0x4c7260 (Napi_StrCaseEqual match, atol values); D-NET-146]
+	conn.char_vars = CharacterJoinVars{}; // a recreated node starts tag-absent (zero-init)
+	long mps = 0; // the MPS tag: the joiner's own packet ceiling (0 = absent)
+	for (const auto &blob : auth.cu) {
+		uint8_t cu_type = 0;
+		std::string cu_name, cu_value;
+		if (!parse_client_cu_chunk(blob.data(), blob.size(), cu_type, cu_name, cu_value)) continue;
+		if (cu_type != 2) continue;
+		const long v = io::retail_atol(cu_value.c_str()); // retail atol (D-NET-384)
+		if (strutil::iequals(cu_name, "CI0")) {
+			conn.char_vars.char_id[0] = static_cast<uint16_t>(v);
+		} else if (strutil::iequals(cu_name, "CI1")) {
+			conn.char_vars.char_id[1] = static_cast<uint16_t>(v);
+		} else if (strutil::iequals(cu_name, "TR")) {
+			// [@0x4c752f] tr != -1 && (u8)tr >= 2 -> -1: only 0 (side A) and 1 (side B) pass.
+			uint8_t tr = static_cast<uint8_t>(v);
+			if (tr != 0xFF && tr >= 2) tr = 0xFF;
+			conn.char_vars.team_request = tr;
+		} else if (strutil::iequals(cu_name, "CTA")) {
+			conn.char_vars.char_class[0] = static_cast<uint8_t>(v);
+		} else if (strutil::iequals(cu_name, "CTB")) {
+			conn.char_vars.char_class[1] = static_cast<uint8_t>(v);
+		} else if (strutil::iequals(cu_name, "VCA")) {
+			conn.char_vars.avatar[0] = static_cast<uint8_t>(v);
+		} else if (strutil::iequals(cu_name, "VCB")) {
+			conn.char_vars.avatar[1] = static_cast<uint8_t>(v);
+		} else if (strutil::iequals(cu_name, "MPS")) {
+			mps = v; // [orig: LoadFromConnTags "MPS" @0x7ca070 -> net_cfg.max_packet_bytes]
+		}
+		// The environment tags (DB included) were parsed and validated before allocation.
+		// Stored/display-only fields (VERSIONSTRING/COUNTRYCODE/TZB...) have no retained
+		// runtime consumer yet.
+	}
+	// The dcb the caller's create counted (the 0x82's MI).
+	conn.connection_id = connection_id;
+	conn.self_id_seen = false;
+	conn.admission_stage = GameAdmissionStage::AwaitJoinRequest;
+	conn.admission_padding_x = 0;
+	conn.admission_padding_y = 0;
+	// The keys the create drew (NapiNP_GenerateSessionKey's SK, GenerateTxKey's SCRK).
+	conn.server_sk = server_keys.key;
+	conn.server_scrk = server_keys.scrk;
+	conn.phase = ConnectionPhase::Joined;
+	// The new-connection callback negotiates the packet ceiling before the 0x82 goes out
+	// (D-NET-234) [orig: OnStateChange @0x6261cd -> HandleNewConnection @0x4c818d..0x4c81e4,
+	// then SendSessionInit @0x6261fc].
+	return negotiate_max_packet_bytes(conn, mps);
+}
+
+namespace {
 
 // ---------------------------------------------------------------------------
 // P3/P8 — the World-driven spawn-gate. conn.burst is the SINGLE authority for a connection's spawn
@@ -864,9 +990,6 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		reject_client_join(auth, peer, reject, 0, out);
 		return;
 	}
-	const ClientGameEnvironment game_environment =
-			parse_client_game_environment(auth);
-	const ParsedClientJoinRequest join_role = parse_client_join_request(auth);
 
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750] The stateless 0x41 leaves
 	// no node, so a first 0x42 creates one. Only retransmit/address-reuse paths
@@ -882,7 +1005,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// The retransmit leg touches no receive clock: only an in-order session packet or
 		// a ping stamps conn+0x5E8 [orig: HandleClientJoin @0x62bee6..0x62bef1].
 		if (existing->client_ci == auth.ci && existing->client_ck == auth.ck) {
-			out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, *existing));
+			out.outbound.push_back(make_server_auth_datagram(auth, peer, *existing));
 			// A retry normally means the original ServerAuth/settings pair was lost. Reconstruct the
 			// retained first session packet under sequence 1 rather than minting a new sequence.
 			if (existing->peer_acked_seq < 1) {
@@ -918,6 +1041,16 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	//  @0x62BF06 ahead of the validate callback @0x62C0B1; CNapiNPConnection_Create - the step
 	//  @0x62B282..0x62B296]
 	(void)next_connection_index();
+	// The created node's keys come at the create too, ahead of the validate callback, so a
+	// refused 0x42 has drawn them from the manager's PRNG as well. R2: the server SK and then
+	// its SCRK from the manager's PRNG (D-NET-524), unless a deterministic source is forced
+	// (golden byte-parity).
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - NapiNP_GenerateSessionKey @0x62bf5e
+	//  (the SK, stored @0x62bf6b), then CNapiNPConnection_GenerateTxKey @0x62bf99, ahead of the
+	//  validate callback called @0x62C0B1]
+	const ConnectionKeys server_keys = ctx.server_key_mint.forced
+			? ConnectionKeys{ctx.server_key_mint.server_sk, ctx.server_key_mint.server_scrk}
+			: manager_connection_keys();
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, registered as the join-validate callback by
 	// CNapiGameSession_CreateSession @0x4c97c0 and invoked at the 0x42 join]. Reject when the session
 	// is already full. The witnessed gate is ONE count, players and spectators alike: the host's
@@ -956,92 +1089,6 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
-	// Retail stores the ClientAuth CU tags on the connection and only latches
-	// the live spectator flag at the game-layer join message; keep the same
-	// two-step shape so the roster/0x16/0x75 state cannot flip before the
-	// witnessed latch point. [orig: NapiNetConfig_LoadFromConnTags @0x4c7260;
-	// the entry+55 latch @0x512aa0]
-	conn.join_environment = game_environment;
-	// The ClientAuth strings the METPROTOCOL player reports print (D-NET-NEW-L9-22).
-	conn.gate_player = parse_client_gate_metrics_player(auth);
-	conn.join_spectator_request = join_role.spectator ? 1 : 0;
-	conn.join_spectator_password = join_role.spectator_password;
-	conn.join_password = join_role.join_password;
-	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
-	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
-	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the
-	// callsign in NA, and the golden host's 0x0C record name equals NA ("FooPlayer"). Only
-	// the witnessed NOVAWORLD-connect gate tags, which begin with the title's product code
-	// ("jop:cus2" retail / "jopd:cus4" demo under JO's "jop", "dfx2:0:cus:buffy" under DFX2's
-	// "dfx2") and carry a ':', fall back to CO / the Hello name: a callsign is free text and may
-	// itself contain ':' — treating any colon as a gate tag stalled that joiner's 0x0C
-	// name-match (the host would name it the company string, never equal to its NA).
-	// [wire: retail-ashi5a f=199140 / retail_join_v18 f=47676; net-re §5.0b]
-	const std::string_view product_code = identity->product_code;
-	const bool na_is_gate_tag = auth.na.size() > product_code.size() &&
-			strutil::iequals(std::string_view(auth.na).substr(0, product_code.size()),
-					product_code) &&
-			auth.na.find(':') != std::string::npos;
-	if (!auth.na.empty() && !na_is_gate_tag) {
-		conn.player_name = auth.na;
-	} else if (conn.player_name.empty() && !auth.co.empty()) {
-		conn.player_name = auth.co;
-	}
-	// auth.scrk decrypts inbound SESSION; our server_scrk encrypts outbound SESSION and is echoed
-	// in ServerAuth so the client can read our replies.
-	conn.client_scrk = auth.scrk;
-	conn.client_ck = auth.ck;
-	conn.client_ci = auth.ci;
-	// A re-join counts its reconnect: DCNT as sent, RCNT one past the client's when DCNT > 0.
-	// [orig: HandleClientJoin @0x62c28d..0x62c2a3 — `jle` signed]
-	conn.dcnt = auth.dcnt;
-	conn.rcnt = static_cast<int32_t>(auth.dcnt) > 0 ? auth.rcnt + 1u : auth.rcnt;
-	conn.receive_inactive_ms = 0;
-	// The accept's state change stamps the receive clock; a retransmitted 0x42 to a node already
-	// in state 1 runs no state change (ours returns before this) (D-NET-256).
-	// [orig: NapiNPProtocol_HandleClientJoin - the state-1 skip @0x62C2A9..0x62C2AC, the state set
-	//  @0x62C2D4, CNapiNPConnection_OnStateChange called @0x62C2D7; OnStateChange @0x626060 -
-	//  GetTickCount @0x6260E8, `mov [esi+5E8h], ebp` @0x62612F]
-	conn.receive_stamp_ms = ctx.np_protocol.receive_clock_ms;
-	conn.c2s_reassembly = {};
-	// The 0x42's CU chunks carry the joiner's character/profile vars — the per-side character
-	// selection Server_PlayerAdd folds into the player record (CharacterJoinVars). Values are
-	// decimal strings converted with atol semantics: CI0/CI1 keep the low u16, TR clamps to
-	// {0, 1, 0xFF}, the rest keep the low u8. Only type-2 chunks are tag-list vars. [orig:
-	// NapiNPProtocol_HandleClientJoin @0x62b750 CU loop (type gate @node+20 == 2) ->
-	// NapiNetConfig_LoadFromConnTags @0x4c7260 (Napi_StrCaseEqual match, atol values); D-NET-146]
-	conn.char_vars = CharacterJoinVars{}; // a recreated node starts tag-absent (zero-init)
-	long mps = 0; // the MPS tag: the joiner's own packet ceiling (0 = absent)
-	for (const auto &blob : auth.cu) {
-		uint8_t cu_type = 0;
-		std::string cu_name, cu_value;
-		if (!parse_client_cu_chunk(blob.data(), blob.size(), cu_type, cu_name, cu_value)) continue;
-		if (cu_type != 2) continue;
-		const long v = io::retail_atol(cu_value.c_str()); // retail atol (D-NET-384)
-		if (strutil::iequals(cu_name, "CI0")) {
-			conn.char_vars.char_id[0] = static_cast<uint16_t>(v);
-		} else if (strutil::iequals(cu_name, "CI1")) {
-			conn.char_vars.char_id[1] = static_cast<uint16_t>(v);
-		} else if (strutil::iequals(cu_name, "TR")) {
-			// [@0x4c752f] tr != -1 && (u8)tr >= 2 -> -1: only 0 (side A) and 1 (side B) pass.
-			uint8_t tr = static_cast<uint8_t>(v);
-			if (tr != 0xFF && tr >= 2) tr = 0xFF;
-			conn.char_vars.team_request = tr;
-		} else if (strutil::iequals(cu_name, "CTA")) {
-			conn.char_vars.char_class[0] = static_cast<uint8_t>(v);
-		} else if (strutil::iequals(cu_name, "CTB")) {
-			conn.char_vars.char_class[1] = static_cast<uint8_t>(v);
-		} else if (strutil::iequals(cu_name, "VCA")) {
-			conn.char_vars.avatar[0] = static_cast<uint8_t>(v);
-		} else if (strutil::iequals(cu_name, "VCB")) {
-			conn.char_vars.avatar[1] = static_cast<uint8_t>(v);
-		} else if (strutil::iequals(cu_name, "MPS")) {
-			mps = v; // [orig: LoadFromConnTags "MPS" @0x7ca070 -> net_cfg.max_packet_bytes]
-		}
-		// The environment tags (DB included) were parsed and validated before allocation.
-		// Stored/display-only fields (VERSIONSTRING/COUNTRYCODE/TZB...) have no retained
-		// runtime consumer yet.
-	}
 	// [orig: CNapiNPConnection_Create @0x62acb0 — conn.connection_id (the dcb) = ++protocol[947],
 	// wrapping 0 -> 1]. On a LAN listen host the host ASSIGNS the dcb (it does not learn it from the
 	// client) and advertises it in ServerAuth.MI. It becomes spawn-eligible only after the final
@@ -1049,25 +1096,10 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// arrives via that 0x48 and overrides this host provisional value -- retail's Create assigns
 	// the provisional `++protocol[947]` on BOTH network types (no transport-mode gate @0x62acb0),
 	// so the provisional-then-override shape is the port, not a placeholder.
-	conn.connection_id = ctx.np_protocol.next_connection_id++;
+	const uint32_t connection_id = ctx.np_protocol.next_connection_id++;
 	if (ctx.np_protocol.next_connection_id == 0) ctx.np_protocol.next_connection_id = 1; // wrap 0 -> 1
-	conn.self_id_seen = false;
-	conn.admission_stage = GameAdmissionStage::AwaitJoinRequest;
-	conn.admission_padding_x = 0;
-	conn.admission_padding_y = 0;
-	// R2: the server SK and then its SCRK from the manager's PRNG (D-NET-524), unless a
-	// deterministic source is forced (golden byte-parity).
-	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - NapiNP_GenerateSessionKey @0x62bf5e
-	//  (the SK, stored @0x62bf6b), then CNapiNPConnection_GenerateTxKey @0x62bf99]
-	if (ctx.server_key_mint.forced) {
-		conn.server_scrk = ctx.server_key_mint.server_scrk;
-		conn.server_sk = ctx.server_key_mint.server_sk;
-	} else {
-		const ConnectionKeys keys = manager_connection_keys();
-		conn.server_sk = keys.key;
-		conn.server_scrk = keys.scrk;
-	}
-	conn.phase = ConnectionPhase::Joined;
+	const bool negotiated = fill_joined_node(conn, auth, peer, *identity, connection_id,
+			server_keys, ctx.np_protocol.receive_clock_ms);
 	// The connection is up: the new-connection callback turns the _connectlog.txt debug log
 	// off for the process, in the queued pass after the whole drain has written its lines
 	// (finish_manager_receive), then counts a login
@@ -1078,11 +1110,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// The validation-phase deadline base for CheckPlayerTimeouts (netPlayer+0xA4
 	// is stamped with GetTickCount when the node enters the validating state).
 	conn.join_validated_host_ms = ctx.np_protocol.host_run_duration_ms;
-	// The new-connection callback negotiates the packet ceiling before the 0x82 goes out
-	// (D-NET-234) [orig: OnStateChange @0x6261cd -> HandleNewConnection @0x4c818d..0x4c81e4,
-	// then SendSessionInit @0x6261fc].
-	const bool negotiated = negotiate_max_packet_bytes(conn, mps);
-	out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, conn));
+	out.outbound.push_back(make_server_auth_datagram(auth, peer, conn));
 	// The /INOUT line once the 0x82 is out [orig: CNapiNPConnection_OnStateChange
 	//  @0x626204 -> CNapiNPConnection_LogPlayerAdded].
 	write_inout_line(ctx, inout_player_added_line(conn));
