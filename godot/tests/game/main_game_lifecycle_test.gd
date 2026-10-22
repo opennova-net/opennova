@@ -604,10 +604,19 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 
 	var failures: Array[String] = []
 	var revealed := false
-	var observed_receiving := false
 	world.load_failed.connect(func(reason: String) -> void:
 		failures.append(reason)
 	)
+	# The 0x1A's mission start runs the load and the settle in one call with no receive
+	# between (D-NET-NEW-L2-35; engine inmatch::JoinerRole::poll_mission_start), so no frame
+	# shows the loaded sim; the load's world_loaded is its last act, and the TIL state read
+	# there is the one the settle reads next.
+	var observed := {"settle_til_state": -1}
+	world.world_loaded.connect(func() -> void:
+		var join_sim: Simulation = world.get_sim()
+		if join_sim != null and join_sim.is_joiner():
+			observed["settle_til_state"] = join_sim.get_join_terrain_til_state()
+	, CONNECT_ONE_SHOT)
 	var target := JoinTarget.new()
 	target.host_ip = "127.0.0.1"
 	target.port = host.get_host_listen_port()
@@ -617,18 +626,13 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 		host.step()
 		await get_tree().process_frame
 		revealed = revealed or world.visible
-		var join_sim: Simulation = world.get_sim()
-		if join_sim != null and join_sim.is_joiner():
-			observed_receiving = observed_receiving or \
-					join_sim.get_join_terrain_til_state() == \
-					Simulation.JOIN_TERRAIN_TIL_RECEIVING
 		if not failures.is_empty() and not _shell.is_world_loading():
 			break
 
 	assert_eq(failures.size(), 1,
 			"one fail-closed edge owns the incomplete terrain stream")
-	assert_true(observed_receiving,
-			"the admitted join exposed a begun but incomplete 0x45 stream")
+	assert_eq(int(observed["settle_til_state"]), Simulation.JOIN_TERRAIN_TIL_RECEIVING,
+			"the settle saw a begun but incomplete 0x45 stream")
 	if not failures.is_empty():
 		assert_string_contains(failures[0], "streamed mission assets")
 	assert_false(revealed,

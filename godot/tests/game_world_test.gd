@@ -1935,10 +1935,21 @@ func test_join_wire_asset_failure_is_edge_gated_per_session() -> void:
 			"unload rearms the latch for the next join")
 
 
-func test_escape_aborts_the_joiner_admission_wait() -> void:
-	# ESC during the SECOND interruptible joiner wait: a real host drives the
-	# wire-header preload through local world load, then this test stops pumping it
-	# before admission so cancel_join_admission owns the remaining wait.
+# ESC in the joiner's GAME-START wait, before the host releases the S2C 0x1A: retail's wait
+# reads the key queue at the head of every pass and returns 3 on ESC, and its mission start
+# leaves with exit reason 1 for the Post Menu ("Mission loading aborted")
+# [orig: NapiClient_WaitForGameStart @0x42CC10 - Input_DequeueKeyEvent @0x42CC6C, the ESC test
+# @0x42CC77, return 3 @0x42CCCD; Game_StartMission @0x524360 - the ret-3 test @0x524E59..0x524E5C,
+# g_MissionExitReason @0x524E87, the Post Menu push @0x524E8D]. That is the last joiner wait
+# ahead of the load: the 0x1A's pass runs the load, the settle, the push and the final wait's
+# first pass in one call (D-NET-NEW-L2-35), so no frame shows a wait between the load and the
+# final wait, whose ESC is test_escape_in_the_final_wait_leaves_it_for_the_game_loop's. A real
+# host drives the join to its S2C 0x11; the test then stops stepping it, so the host stays
+# parked in slot state 3 short of the C2S 0x0A's world stream and never releases the 0x1A.
+# Nothing is loaded and no admission watch is armed, so the admission leg declines the ESC and
+# the preload's takes it (the shell offers it the preload's first, main_game.gd
+# _on_camera_escape).
+func test_escape_aborts_the_joiner_game_start_wait() -> void:
 	var world := WorldFixture.make_world(self)
 	await get_tree().process_frame
 	world.set_playable(false)
@@ -1950,7 +1961,7 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
-	host_options.server_name = "Abort Admission Host"
+	host_options.server_name = "Abort Game Start Host"
 	host_options.mission_name = mission.get_mission_name()
 	host_options.mission_file = "mnml.bms"
 	host_options.expansion = ""
@@ -1961,31 +1972,38 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	assert_true(host.load_from_mission_data(mission))
 	var failures: Array[String] = []
 	world.load_failed.connect(func(reason: String): failures.append(reason))
-	var observed := {"local_load": false}
+	var observed := {"identified": false, "local_load": false}
+	world.join_session_identified.connect(
+			func(_info: LoadingScreenInfo): observed["identified"] = true, CONNECT_ONE_SHOT)
 	world.world_loaded.connect(
 			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
 
-	assert_false(world.cancel_join_admission(), "no armed admission wait is a no-op")
+	assert_false(world.cancel_join_admission(), "no join: the admission leg is a no-op")
 	assert_eq(world.load_mission_as_joiner(
 			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
 	for _frame in range(600):
 		host.step()
 		await get_tree().process_frame
-		if bool(observed["local_load"]):
+		if bool(observed["identified"]):
 			break
-	assert_true(bool(observed["local_load"]),
-			"the real wire-header preload reached the admission wait")
-	assert_true(world.cancel_join_admission(), "an armed admission wait accepts the abort")
-	# GameWorld is externally ticked by MainGame in production. This bare-world
-	# fixture drives the same frame observer once so it consumes the abort.
-	world.tick(Vector3.ZERO)
-	await get_tree().process_frame
+	assert_true(bool(observed["identified"]), "the real host's S2C 0x11 identified the join")
+	# The game-start wait's passes; the parked host releases no 0x1A.
+	for _frame in range(3):
+		await get_tree().process_frame
+	assert_false(bool(observed["local_load"]), "no S2C 0x1A: the mission start's load has not run")
+	assert_null(world.get_runtime(), "no mission root lives in the game-start wait")
+	assert_eq(failures.size(), 0)
+	assert_false(world.cancel_join_admission(),
+			"no final wait and no admission watch: the admission leg declines the ESC")
+	assert_true(world.cancel_join_preload(), "the game-start wait takes the ESC")
 	assert_eq(failures.size(), 1)
 	if failures.size() == 1:
 		assert_string_contains(failures[0], "aborted")
+	assert_false(world.is_loaded())
 	await get_tree().process_frame
-	assert_eq(failures.size(), 1, "the aborted watchdog does not double-report")
-	assert_false(world.cancel_join_admission(), "the wait is disarmed after the abort")
+	assert_eq(failures.size(), 1, "the aborted wait does not double-report")
+	assert_false(world.cancel_join_preload(), "the wait is gone after the abort")
+	assert_false(bool(observed["local_load"]), "the aborted join never loads")
 	world.unload()
 
 
