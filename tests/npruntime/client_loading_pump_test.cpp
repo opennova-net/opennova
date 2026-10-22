@@ -1040,6 +1040,87 @@ bool run_the_quality_fold_starts_with_the_game_loop() {
 			"receive window");
 }
 
+// D-NET-NEW-L2-40 (L2-s26 FOUND 2): the connection indicators and the client net frame's
+// link-error leg are the main frame's, which none of the join's waits runs. A silence past two
+// whole seconds in the game-start wait raises no incoming link error; a link error the wait's
+// receive raises (its missing-sequence request's) holds its countdown through the waits; the
+// game loop's frames raise the silence's flag (once the 0x0F's ten-second hold-off ran out)
+// and step its countdown. An abandoned mission start's game loop is a main frame too: its
+// frames step the 0x4C report's timer and report.
+// [orig: g_GameModeGameLoop's frame Game_ProcessMainFrame @0x5263F0 - the one caller of
+//  CNetQuality_UpdateIndicators @0x4C3090 (@0x52668D) and Client_ProcessNetworkFrame
+//  @0x42C180 (@0x526692); Client_ProcessNetworkFrame - the silence leg @0x42C1F8..0x42C21E,
+//  the 0x4C @0x42C22D..0x42C279; NapiClient_WaitForGameStart @0x42CC10 - its pumps
+//  @0x42CC7E / @0x42CC88 / @0x42CC92 and no net frame; Game_StartMission @0x524360 -
+//  "Mission loading aborted 1" pushes g_GameModeGameLoop @0x524DB4]
+bool run_the_link_indicators_step_in_the_main_frame_alone() {
+	{
+		Harness h;
+		if (!expect(drive_into_the_world_stream(h, 0), "indicators: the world stream runs"))
+			return false;
+		const hud::NetQualityIndicators &q = h.client.net_quality_indicators();
+		h.now_ms += 3500;
+		(void)h.frame();
+		if (!expect(q.link_error_bits == 0 && q.link_error_countdown == 0,
+				"indicators: the game-start wait's silence raises no link error"))
+			return false;
+		// A packet lost on the way: the next one is a future, whose missing-sequence request
+		// raises the incoming link error inside the wait.
+		const std::vector<uint8_t> lost = frame_server_session(h.server_tx, h.server_scrk,
+				h.auth.ck, {make_protocol_message(0x79, {0x10})});
+		(void)h.frame({make_protocol_message(0x79, {0x10})});
+		if (!expect(q.link_error_bits == static_cast<uint32_t>(hud::kNetLinkErrorIncoming) &&
+						q.link_error_countdown == hud::kNetLinkErrorFrames,
+				"indicators: the wait's missing-sequence request raises the incoming flag"))
+			return false;
+		for (int i = 0; i < 8; ++i) (void)h.frame();
+		h.client.receive(lost.data(), lost.size());
+		(void)h.frame();
+		(void)h.frame({make_protocol_message(0x1A, {})});
+		if (!expect(std::string(h.client.admission_stage_name()) ==
+						std::string("awaiting the world state (S2C 0x0F)"),
+				"indicators: the 0x1A's mission start ran into the final wait"))
+			return false;
+		for (int i = 0; i < 4; ++i) (void)h.frame();
+		if (!expect(q.link_error_countdown == hud::kNetLinkErrorFrames &&
+						q.link_error_alpha == 0,
+				"indicators: the waits step no countdown and ramp no alpha"))
+			return false;
+		std::vector<uint8_t> world_state(23, 0);
+		(void)h.frame({make_protocol_message(0x0F, world_state)});
+		if (!expect(h.client.in_game_loop() && q.link_error_bits == 0,
+				"indicators: the 0x0F clears the flags and the game loop runs"))
+			return false;
+		// Silent game-loop frames: the leg raises the flag once the hold-off has run out.
+		bool raised = false;
+		for (int i = 0; i < 800 && !raised; ++i) {
+			(void)h.frame();
+			raised = (q.link_error_bits & static_cast<uint32_t>(hud::kNetLinkErrorIncoming)) != 0;
+		}
+		if (!expect(raised, "indicators: the game loop's silence raises the incoming flag"))
+			return false;
+		// A packet ends the silence (its frame's leg still reads the old stamp); the next
+		// main frame steps the countdown and raises nothing.
+		(void)h.frame({make_protocol_message(0x79, {0x10})});
+		(void)h.frame();
+		if (!expect(q.link_error_countdown == hud::kNetLinkErrorFrames - 1,
+				"indicators: the game loop's frame steps the countdown"))
+			return false;
+	}
+	Harness h;
+	if (!expect(drive_into_the_world_stream(h, 0), "abandoned: the world stream runs"))
+		return false;
+	(void)h.frame({make_protocol_message(0x1A, {}), make_protocol_message(0x1D, {})});
+	if (!expect(h.client.mission_start_aborted() && !h.client.in_game_loop() &&
+					h.client.in_main_frame(),
+			"abandoned: a round over in the 0x1A's pass abandons the start into the game loop"))
+		return false;
+	bool reported = false;
+	for (int i = 0; i < 320 && !reported; ++i)
+		reported = carries(sent_tags(h, h.frame()), 0x4C);
+	return expect(reported, "abandoned: the game loop's frames step the 0x4C timer and report");
+}
+
 // Game_StartMission's pumps from the S2C 0x1A to the final wait for the 0x0F, by where the
 // send-holdoff countdown c stood. The 0x1A's iteration of the game-start wait receives (a
 // step) and sends (a build only at a spent countdown, the one immediate header-only ACK,
@@ -1593,6 +1674,7 @@ int main() {
 	ok = run_the_release_frame_bears_l_and_ships_its_uplink() && ok;
 	ok = run_the_final_wait_end_ends_the_mode_init() && ok;
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
+	ok = run_the_link_indicators_step_in_the_main_frame_alone() && ok;
 	ok = run_the_net_readout_records_each_frame() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_sync_tail_0x0a_joins_the_queue() && ok;

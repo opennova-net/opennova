@@ -1240,19 +1240,22 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 
 	// The main frame's 62-frame quality fold runs ahead of the client net frame
 	// (the level it stores is what the 0x4C leg below reports). Its countdown steps
-	// in the game loop's frames alone, from the mission start's zero, so a mission's
-	// first fold is its first game-loop frame.
+	// in the game loop's frames alone (in_main_frame), from the mission start's zero, so
+	// a mission's first fold is its first game-loop frame.
 	// [orig: Game_ProcessMainFrame @0x526537..0x526555 (g_NetQualityUpdateCountdown - 1, > 0 skips,
 	//  else 62); Game_StartMission's head `mov g_NetQualityUpdateCountdown, ebx` @0x52439e]
-	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_game_loop())
-		update_net_quality();
+	const bool main_frame_legs = role_ != Role::Joiner || in_main_frame();
+	if (role_ == Role::Joiner && main_frame_legs) update_net_quality();
 	// Then the connection indicators step once, in a session, still ahead of
 	// the client net frame whose callbacks raise their flags [orig:
 	// Game_ProcessMainFrame — `cmp is_in_session` @0x526680 ->
 	// CNetQuality_UpdateIndicators @0x52668d, Client_ProcessNetworkFrame
 	// @0x526692]. The session word is the view's: a joiner is always in one,
-	// the listen host's own client only on a networked host.
-	if (view_.mp_session()) hud::net_quality_update_indicators(net_indicators_, novaworld_link_);
+	// the listen host's own client only on a networked host. A joiner's waits run
+	// no main frame: a flag their receives raise holds its countdown until the game
+	// loop's first frame (D-NET-NEW-L2-40).
+	if (view_.mp_session() && main_frame_legs)
+		hud::net_quality_update_indicators(net_indicators_, novaworld_link_);
 
 	// Per-frame tick bump — SKIPPED entirely while the clock is unseeded. The client's
 	// network-role tick is anchored by the host's S2C 0x61 seed, never free-run from zero:
@@ -1283,12 +1286,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		last_keepalive_tick_ = current_tick_;
 	}
 	// A joiner that has heard nothing for three whole seconds raises the
-	// incoming link error every frame, ahead of the receive pump [orig:
+	// incoming link error every main frame, ahead of the receive pump; the join's
+	// waits, which run no client net frame, never test it (D-NET-NEW-L2-40) [orig:
 	// Client_ProcessNetworkFrame @0x42c1f8..0x42c21e — `is_mp_session_peer &&
 	// !is_authority && CNapiNetwork_GetSessionUptime(ctx) > 2`; that getter
 	// @0x4c6ed0 is (GetTickCount() - napi_conn+0x5E8) / 1000, the connection's
 	// last-admitted-receive stamp, not a session uptime].
-	if (role_ == Role::Joiner && joiner_ != nullptr &&
+	if (role_ == Role::Joiner && in_main_frame() &&
 			joiner_->milliseconds_since_last_receive() / 1000u > 2u)
 		hud::net_quality_set_flag(net_indicators_, hud::kNetLinkErrorIncoming,
 				view_.state().local_clock_ms);
@@ -1820,12 +1824,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 
 	// (0x4C) net-quality / anti-cheat report — after the recv pump; gated is_in_session &&
 	// is_mp_session_peer alone, so the game loop's frame steps the timer and reports dead
-	// or alive (D-NET-529). The count is the process's (the embedder's ClientProcessState,
+	// or alive (D-NET-529), an abandoned mission start's game loop too (in_main_frame,
+	// D-NET-NEW-L2-40). The count is the process's (the embedder's ClientProcessState,
 	// handed over by the JoinerRole): it runs free across joins and missions, so a later
 	// join's first report lands at its phase, not 311 frames in (D-NET-602).
 	// [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279, its one caller
 	//  Game_ProcessMainFrame @0x5263F0 (the call @0x526692); g_NetQualityReportTimer @0xA85B84]
-	if (!replay_mode_ && joiner_->in_game_loop()) {
+	if (!replay_mode_ && in_main_frame()) {
 		if (process_state().step_net_quality_report()) {
 			frame_trace_.report_queued = true;
 			ProtocolMessage quality = make_protocol_message(0x4C, std::vector<uint8_t>{

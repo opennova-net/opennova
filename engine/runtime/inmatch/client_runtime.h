@@ -1050,6 +1050,19 @@ public:
 		return joiner_ ? joiner_->pre_game_cancel_reason() : -1;
 	}
 	bool mission_start_aborted() const { return joiner_ && joiner_->mission_start_aborted(); }
+	// The joiner runs its game loop's main frame (g_GameModeGameLoop's Game_ProcessMainFrame):
+	// from the mission start's end on (in_game_loop), and in a mission start the round-over
+	// gate abandoned, which pushes the game loop with nothing loaded. None of the join's waits
+	// (the join screen's state machine, Game_StartMission's loops) is a main frame, so the
+	// main frame's own legs step in this frame alone: the quality fold, the connection
+	// indicators, and the client net frame's link-error leg and 0x4C report (D-NET-NEW-L2-40).
+	// [orig: g_GameModeGameLoop's frame Game_ProcessMainFrame @0x5263F0, the one caller of
+	//  CNetQuality_UpdateIndicators @0x4C3090 (@0x52668D) and Client_ProcessNetworkFrame
+	//  @0x42C180 (@0x526692); Game_StartMission @0x524360 - "Mission loading aborted 1"
+	//  pushes g_GameModeGameLoop @0x524DB4, out of the final wait @0x5262F3]
+	bool in_main_frame() const {
+		return joiner_ && (joiner_->in_game_loop() || joiner_->mission_start_aborted());
+	}
 	uint32_t mp_attributes_revision() const {
 		return joiner_ ? joiner_->mp_attributes_revision() : 0u;
 	}
