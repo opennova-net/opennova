@@ -13,6 +13,8 @@
 #include "network/udp_pump_datagram_socket.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
+#include "simulation/joiner_net_trace_row.h" // the joiner net readout's rows
+#include "simulation/model_list_node_row.h" // the model-list readout's rows
 #include "object/character_join_profile.h" // the two-side character selection record
 #include "network/host_session_options.h" // the hosted-session request record
 #include "network/join_target.h" // the join request the discovered session comes from
@@ -21,7 +23,9 @@
 #include "resource_index/resource_root.h" // session_title (the launch game a bare session speaks)
 #include <net/title/title_identity.h> // TitleIdentity::game_id (the session's rules title)
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 #include <runtime/inmatch/server_admin_command.h> // Server_ExecuteServerCommand (the NovaWorld ServerCommand verbs)
@@ -950,6 +954,7 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 	namespace inmatch = opennova::inmatch;
 	std::vector<uint32_t> page;
 	net_.mission_start_model_files.clear();
+	net_.mission_start_model_entries.clear();
 	if (kernel_ && assets_.root.is_valid()) {
 		const opennova::mission::BootFileSource files =
 				opennova::mission::boot_files_from_index(assets_.root->native_index());
@@ -958,12 +963,47 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 				/*dedicated=*/!is_joiner() && !net_.host_serve_and_play);
 		page = list.freeze();
 		net_.mission_start_model_files = list.model_files();
+		net_.mission_start_model_entries = inmatch::loaded_model_list_entries(list);
 	}
 	// The same frozen count is a host's S2C 0x68 cursor wrap (the role reads
 	// it every tick) [orig: Server_SendLoadedModelPageRequest @0x511375 / @0x511391].
 	net_.loaded_model_list_count = static_cast<uint32_t>(page.size());
 	if (!is_joiner() || !runtime_) return;
 	runtime_->set_loaded_model_challenge_snapshot(std::move(page));
+}
+
+TypedArray<ModelListNodeRow> Simulation::debug_mission_start_model_nodes() const {
+	TypedArray<ModelListNodeRow> rows;
+	for (const opennova::inmatch::LoadedModelListEntry &entry : net_.mission_start_model_entries) {
+		Ref<ModelListNodeRow> row;
+		row.instantiate();
+		row->assign(entry);
+		rows.push_back(row);
+	}
+	return rows;
+}
+
+int64_t Simulation::debug_loaded_model_list_count() const {
+	return static_cast<int64_t>(net_.loaded_model_list_count);
+}
+
+TypedArray<JoinerNetTraceRow> Simulation::debug_joiner_net_trace(int64_t p_from_seq) const {
+	TypedArray<JoinerNetTraceRow> rows;
+	if (runtime_ == nullptr) return rows;
+	const uint32_t from = static_cast<uint32_t>(
+			std::clamp<int64_t>(p_from_seq, 0, static_cast<int64_t>(UINT32_MAX)));
+	for (const opennova::inmatch::JoinerNetTraceRecord &record :
+			runtime_->net_trace().since(from)) {
+		Ref<JoinerNetTraceRow> row;
+		row.instantiate();
+		row->assign(record);
+		rows.push_back(row);
+	}
+	return rows;
+}
+
+int64_t Simulation::debug_joiner_net_trace_next_seq() const {
+	return runtime_ != nullptr ? static_cast<int64_t>(runtime_->net_trace().next_seq()) : 0;
 }
 
 PackedStringArray Simulation::get_mission_start_model_files() const {

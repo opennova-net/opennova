@@ -97,6 +97,8 @@
 #include "simulation/hud_view_records.h"
 #include "simulation/use_press_row.h"
 #include "simulation/body_trace_row.h"
+#include "simulation/joiner_net_trace_row.h"
+#include "simulation/model_list_node_row.h"
 #include "simulation/epilog_cine_record.h"
 #include "simulation/deploy_rows.h"
 #include "simulation/player_weapon_view.h"
@@ -296,6 +298,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(RoundOutcome);
 	GDREGISTER_CLASS(UsePressRow);
 	GDREGISTER_CLASS(BodyTraceRow);
+	GDREGISTER_CLASS(JoinerNetTraceRow);
+	GDREGISTER_CLASS(ModelListNodeRow);
 	GDREGISTER_CLASS(CineEventRecord);
 	GDREGISTER_CLASS(EpilogCineState);
 	GDREGISTER_CLASS(DeployStatus);

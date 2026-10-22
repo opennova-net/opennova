@@ -971,14 +971,22 @@ void ClientRuntime::update_net_quality() {
 	// holds only inside the mission start, which runs no main frame here.
 	// [orig: @0x4c5606..0x4c5630; g_NetSpawnSuspended @0x24d1de0 written by
 	//  Game_StartMission and Game_ShowErrorLogAndAbortMission alone]
+	// The joiner net readout records the fold's inputs and terms (an instrument).
+	frame_trace_.quality_folded = true;
+	frame_trace_.fold_fps = observed_frame_rate_;
+	frame_trace_.fold_deploy_hold = !deployed_;
+	frame_trace_.fold_spawn_gate = view_.state().spawn_success_gate;
+	frame_trace_.fold_preround = view_.state().preround_delay_seconds != 0;
 	const bool held = !deployed_ || view_.state().spawn_success_gate ||
 			view_.state().preround_delay_seconds != 0;
 	if (held) {
 		replication::net_quality_window_clear(client_quality_window_);
 	} else {
 		replication::net_quality_window_push(client_quality_window_,
-				replication::net_quality_bandwidth_metric(observed_frame_rate_),
-				replication::net_quality_client_ping_metric(joiner_->client_average_ping_ms()),
+				trace_note(frame_trace_.fold_bandwidth,
+						replication::net_quality_bandwidth_metric(observed_frame_rate_)),
+				trace_note(frame_trace_.fold_ping, replication::net_quality_client_ping_metric(
+						joiner_->client_average_ping_ms())),
 				replication::net_quality_loss_metric(0.0));
 	}
 	// The tail folds the host scalar (+0x0C) with the client's (+0x10): on a joiner
@@ -992,6 +1000,9 @@ void ClientRuntime::update_net_quality() {
 	// CNetQuality_SetLevel(&g_NetQuality, level) [orig: @0x52659b]: the level
 	// the 0x4C report carries and the quality icon's channels ramp toward.
 	hud::net_quality_set_level(net_indicators_, replication::net_quality_level(combined));
+	frame_trace_.window_quality = client_quality_window_.quality;
+	frame_trace_.host_metric = view_.state().net.host_metric;
+	frame_trace_.level = net_quality_level();
 	replication::ClientNetQuality &net = view_.state().net;
 	net.level = net_quality_level();
 	net.ping_ms = joiner_->client_ping_ms();
@@ -1164,6 +1175,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	std::vector<std::vector<uint8_t>> outbound;
 	receive_sends_logged_ = 0;
 	receive_leave_logged_ = false;
+	frame_trace_ = JoinerNetTraceRecord{}; // the joiner net readout's record (an instrument)
 	// Session loss is a terminal owner state, not only a receive-side event. A
 	// prior host description (or the silence reap below) must stop the next frame
 	// before its tick/housekeeping producers can mint fresh C2S traffic.
@@ -1815,8 +1827,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	//  Game_ProcessMainFrame @0x5263F0 (the call @0x526692); g_NetQualityReportTimer @0xA85B84]
 	if (!replay_mode_ && joiner_->in_game_loop()) {
 		if (process_state().step_net_quality_report()) {
-			ProtocolMessage quality = make_protocol_message(
-					0x4C, std::vector<uint8_t>{net_quality_level()});
+			frame_trace_.report_queued = true;
+			ProtocolMessage quality = make_protocol_message(0x4C, std::vector<uint8_t>{
+					trace_note(frame_trace_.report_level, net_quality_level())});
 			// This is neither indefinitely reliable nor one-send: retail passes
 			// userParam=310 and ages it in open logical send boundaries.
 			// [orig: QueueReliableMessage @0x42C279 -> user_param1 310]
@@ -1846,7 +1859,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// Until mission loading ends the joiner is not in this frame at all but in
 	// the loading loop of its admission stage, which calls the send pump its own
 	// way (step_send_pump_loop, D-NET-254).
-	const bool send_block_open = step_send_pump_loop();
+	frame_trace_.countdown_before = send_holdoff_countdown_;
+	const bool send_block_open = trace_note(frame_trace_.block_open, step_send_pump_loop());
 	if (send_block_open) build_send_boundary(outbound, now_tick,
 			[&](std::vector<ProtocolMessage> &send_messages) {
 		// The witnessed deploy gate the 0x2C RTT ping and the 0x0C uplink share: is_in_session &&
@@ -1896,6 +1910,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 					c2s::ENTITY_UPLINK, std::move(payload));
 			uplink_message.reliable = false; // Client_ProcessNetworkFrame @0x42C4A3 userParam=1
 			send_messages.push_back(std::move(uplink_message));
+			frame_trace_.uplink_sent = true;
 		}
 		// (step_send_pump_loop re-armed the countdown from the stored dictated
 		// period when it counted out [orig: the PumpFlags 0x200 reload-when-0
@@ -1918,6 +1933,14 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	//  Entity_UpdateAllEntities @0x52674b]
 	queue_carrier_repair_requests();
 	if (verification_pass) JoinerConnection::step_client_net_frame_counter();
+	// The joiner net readout's record lands (an instrument, joiner_net_trace.h).
+	frame_trace_.frame_tick = view_.frame_tick();
+	frame_trace_.client_tick = current_tick_;
+	frame_trace_.wall_ms = joiner_->monotonic_milliseconds32();
+	frame_trace_.pump_loop = joiner_->send_pump_loop();
+	frame_trace_.holdoff_ticks = send_holdoff_ticks_;
+	frame_trace_.frames_applied = view_.state().frames_applied;
+	net_trace_.append(frame_trace_);
 	lap.mark(devtools::Slot::SIM_CLIENT_SEND);
 	return outbound;
 }

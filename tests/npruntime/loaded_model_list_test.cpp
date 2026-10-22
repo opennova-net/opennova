@@ -322,10 +322,37 @@ void test_the_305_entry_pages() {
 	CHECK(joiner.make_loaded_model_page_reply(350).payload.size() == 4);
 }
 
+// The model-list readout (an instrument): the nodes head first, as the freeze walks them, each
+// with its place in load order and its dword's place in the page, a foliage node off the page
+// [orig: CEffectWorld_RebuildAllModelBuffers @0x5B3A80 - the walk @0x5b3a89, the unmarked
+//  count @0x5b13b0..0x5b13d6, the values @0x5b142b].
+void test_the_readout_entries() {
+	inmatch::LoadedModelList list([](const std::string &) { return true; });
+	CHECK(list.load("first.3di"));
+	list.load_foliage("bush.3di");
+	CHECK(list.load("second.3di"));
+	CHECK(list.load("FIRST.pcx")); // found again: no new node
+	const std::vector<inmatch::LoadedModelListEntry> entries =
+			inmatch::loaded_model_list_entries(list);
+	CHECK(entries.size() == 3);
+	if (entries.size() != 3) return;
+	CHECK(entries[0].name == "second.3DI" && entries[0].load_index == 2 &&
+			!entries[0].foliage && entries[0].page_index == 0);
+	CHECK(entries[1].name == "bush.3DI" && entries[1].load_index == 1 && entries[1].foliage &&
+			entries[1].page_index == -1);
+	CHECK(entries[2].name == "first.3DI" && entries[2].load_index == 0 &&
+			!entries[2].foliage && entries[2].page_index == 1);
+	// The page the freeze makes holds one dword per entry with a page index.
+	CHECK(list.freeze().size() == 2);
+	CHECK(inmatch::loaded_model_list_entries(
+			inmatch::LoadedModelList([](const std::string &) { return true; })).empty());
+}
+
 } // namespace
 
 int main() {
 	test_node_names();
+	test_the_readout_entries();
 	test_the_mission_start_list();
 	test_the_special_event();
 	test_the_305_entry_pages();

@@ -5,6 +5,7 @@
 #include <runtime/inmatch/file_transfer_session.h> // the process's S2C 0x02 probe words
 #include <runtime/inmatch/gate_metrics_reports.h> // GateMetricsSink (the held teardown's PLAYER)
 #include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/joiner_net_trace.h> // the joiner net readout (an instrument)
 #include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the process latch)
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
@@ -660,6 +661,9 @@ public:
 	// The USE readout's send leg (an instrument, no behaviour: world/use_press_trace.h): the
 	// C2S 0x26 requests this runtime's send builds framed, since its creation.
 	uint32_t attach_requests_sent() const { return attach_requests_sent_; }
+	// The joiner net readout (an instrument, no behaviour: inmatch/joiner_net_trace.h): one
+	// record per client net frame run to its end (the joiner_net_trace probe).
+	const JoinerNetTrace &net_trace() const { return net_trace_; }
 	bool queue_vehicle_detach(uint16_t vehicle_handle);
 	// Entity_SendDetachPacket itself: the reliable C2S 0x27 [self][target][2 B],
 	// gated only on the target (the plyr class callback's seat leave; the mount
@@ -1355,6 +1359,10 @@ private:
 	// send_holdoff_ticks; PumpFlags 0x200 reload @0x629802]. 0 = per-tick
 	// (the protocol template default). NovaWorld hosts dictate 12 (~5.2 Hz).
 	uint32_t send_holdoff_ticks_ = 0;
+	// The joiner net readout (joiner_net_trace.h): the frame's record as run_frame fills it,
+	// and the ring it lands in at the frame's end.
+	JoinerNetTraceRecord frame_trace_{};
+	JoinerNetTrace net_trace_;
 	// The retail loop the joiner's last frame ran in (a change is that loop's entry) and the
 	// GetTickCount stamp of a timed loop's last send-pump call (step_send_pump_loop).
 	JoinerConnection::SendPumpLoop send_pump_loop_ = JoinerConnection::SendPumpLoop::NetworkFrame;

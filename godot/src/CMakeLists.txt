@@ -179,6 +179,8 @@ add_library(opennova_bindings OBJECT
     simulation/weapon_kit_entry.cpp
     simulation/use_press_row.cpp
     simulation/body_trace_row.cpp
+    simulation/joiner_net_trace_row.cpp
+    simulation/model_list_node_row.cpp
     object/skeletal_anim.cpp
     hud/hud_draw_list_stats.cpp
     hud/font_page_glyphs.cpp

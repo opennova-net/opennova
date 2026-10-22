@@ -1375,6 +1375,75 @@ bool run_the_roster_outlives_a_reload() {
 			"roster: the next mission's list joins slot 0 and drops only the unbound slot 1");
 }
 
+// The joiner net readout (inmatch/joiner_net_trace.h, an instrument with no behaviour): one
+// record per client net frame run to its end. Each holds the send countdown ahead of the
+// frame's step, whether the block opened and the 0x0C left in it, the dictated period, the
+// replica's applied 0x0A count, the frame's clocks and its loop. The 62-frame fold's record
+// carries its inputs and the terms it pushed, the 0x4C's its level. The frames send what
+// run_an_early_release_stays_in_the_final_wait pins.
+// [orig: Client_ProcessNetworkFrame @0x42C180 - the gate @0x42C3DD, the 0x0C
+//  @0x42C46F..0x42C4A3, the 0x4C @0x42c23e..0x42c279; Game_ProcessMainFrame @0x5263F0 - the
+//  fold's countdown @0x526537..0x526555; CNetQuality_UpdateMetrics @0x4C52C0 - the holds
+//  @0x4c5606..0x4c5630]
+bool run_the_net_readout_records_each_frame() {
+	Harness h;
+	h.uplink = true;
+	h.client.set_observed_frame_rate(0); // the game mode's init value: the frame-rate term 255
+	if (!drive_to_an_early_in_match_release(h, 6)) return false;
+	std::vector<uint8_t> world_state(23, 0);
+	(void)h.frame({make_protocol_message(0x0F, world_state)});
+	const inmatch::JoinerNetTrace &trace = h.client.net_trace();
+	int folds = 0;
+	int uplinks = 0;
+	for (int i = 0; i < 70; ++i) {
+		const uint32_t seq = trace.next_seq();
+		const uint32_t countdown = h.client.send_holdoff_countdown();
+		const bool pack_frame = h.client.send_block_opens_this_frame();
+		const uint32_t frames_before = h.client.state().frames_applied;
+		// A short 0x0A (anchor and flags only) still counts as an applied frame.
+		const std::vector<std::vector<uint8_t>> sent = i == 10
+				? h.frame({make_protocol_message(0x0A, std::vector<uint8_t>(14, 0))})
+				: h.frame();
+		const std::vector<inmatch::JoinerNetTraceRecord> rows = trace.since(seq);
+		if (!expect(rows.size() == 1 && rows[0].seq == seq && trace.next_seq() == seq + 1,
+				"readout: one record per client net frame"))
+			return false;
+		const inmatch::JoinerNetTraceRecord &r = rows[0];
+		if (!expect(r.countdown_before == countdown && r.block_open == pack_frame &&
+						r.holdoff_ticks == 6,
+				"readout: the countdown ahead of the step, the block it opened, the period"))
+			return false;
+		if (!expect(r.uplink_sent == carries(sent_tags(h, sent), 0x0C),
+				"readout: uplink_sent is the frame's C2S 0x0C"))
+			return false;
+		if (!expect(r.frames_applied == h.client.state().frames_applied &&
+						(i == 10) == (r.frames_applied == frames_before + 1),
+				"readout: the applied 0x0A count, stepping in the frame whose receive took one"))
+			return false;
+		if (!expect(r.pump_loop == inmatch::JoinerConnection::SendPumpLoop::NetworkFrame &&
+						r.wall_ms == static_cast<uint32_t>(h.now_ms) &&
+						r.frame_tick == h.client.view().frame_tick(),
+				"readout: the game loop's frame, its clock and its frame tick"))
+			return false;
+		if (r.uplink_sent) ++uplinks;
+		if (r.report_queued &&
+				!expect(r.report_level == h.client.net_quality_level(),
+						"readout: the 0x4C carries the level the fold left"))
+			return false;
+		if (!r.quality_folded) continue;
+		++folds;
+		const bool held = r.fold_deploy_hold || r.fold_spawn_gate || r.fold_preround;
+		if (!expect(r.fold_fps == 0 && r.fold_bandwidth == (held ? 0 : 255) &&
+						r.window_quality == h.client.client_quality_window().quality &&
+						r.host_metric == h.client.state().net.host_metric &&
+						r.level == h.client.net_quality_level(),
+				"readout: the fold's frame rate, the term it pushed, the window and the level"))
+			return false;
+	}
+	return expect(folds == 2, "readout: the first game-loop frame folds, then every 62") &&
+			expect(uplinks > 0, "readout: the game loop's boundaries carry the 0x0C");
+}
+
 int main() {
 	bool ok = true;
 	ok = run_admission_follows_the_retail_loading_loops() && ok;
@@ -1386,6 +1455,7 @@ int main() {
 	ok = run_a_bodyless_joiner_pings() && ok;
 	ok = run_the_release_frame_bears_l_and_ships_its_uplink() && ok;
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
+	ok = run_the_net_readout_records_each_frame() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_sync_tail_0x0a_joins_the_queue() && ok;
 	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;

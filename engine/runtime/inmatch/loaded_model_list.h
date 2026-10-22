@@ -144,4 +144,21 @@ LoadedModelList mission_start_model_list(const mission::MissionKernel &kernel,
 		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority,
 		bool dedicated);
 
+// One node of a frozen list as the model-list readout reports it (a debug instrument with no
+// behaviour: the model_list_dump probe, Simulation::debug_mission_start_model_nodes): its
+// file, its foliage mark, its place in load order (0 the first load) and its dword's place in
+// the frozen page (-1 for a marked node, which the page skips). Retail's list is walked from
+// g_ModelDefListHead, head first, the order the freeze reads it in [orig:
+// CEffectWorld_RebuildAllModelBuffers @0x5B3A80 - the walk @0x5b3a89, the unmarked count
+// @0x5b13b0..0x5b13d6, the values @0x5b142b; CEffectDef_FindByTypeName @0x5b01a0 - the node's
+// name +0xFC @0x5B01B0, its next +0 @0x5B01C4].
+struct LoadedModelListEntry {
+	std::string name;
+	bool foliage = false;
+	uint32_t load_index = 0;
+	int32_t page_index = -1;
+};
+// The list's entries head first (the reverse of load order).
+std::vector<LoadedModelListEntry> loaded_model_list_entries(const LoadedModelList &list);
+
 } // namespace opennova::inmatch

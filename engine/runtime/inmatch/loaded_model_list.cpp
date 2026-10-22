@@ -324,6 +324,22 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 	return list;
 }
 
+std::vector<LoadedModelListEntry> loaded_model_list_entries(const LoadedModelList &list) {
+	const std::vector<LoadedModelList::Node> nodes = list.nodes();
+	std::vector<LoadedModelListEntry> out;
+	out.reserve(nodes.size());
+	int32_t page = 0;
+	for (size_t i = 0; i < nodes.size(); ++i) {
+		LoadedModelListEntry entry;
+		entry.name = nodes[i].name;
+		entry.foliage = nodes[i].foliage;
+		entry.load_index = static_cast<uint32_t>(nodes.size() - 1 - i);
+		entry.page_index = nodes[i].foliage ? -1 : page++;
+		out.push_back(std::move(entry));
+	}
+	return out;
+}
+
 std::vector<uint32_t> mission_start_model_page(const mission::MissionKernel &kernel,
 		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority,
 		bool dedicated) {

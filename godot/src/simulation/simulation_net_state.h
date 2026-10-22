@@ -14,6 +14,7 @@
 #include <runtime/inmatch/charattr_table.h>  // CharAttrTable
 #include <runtime/inmatch/game_config.h>          // GameConfig
 #include <runtime/inmatch/joiner_connection.h>    // JoinerConnection::DiscoveredSession
+#include <runtime/inmatch/loaded_model_list.h>    // LoadedModelListEntry (the model-list readout)
 #include <runtime/inmatch/mission_rotation.h>     // HostRotation (D-NET-331)
 #include <runtime/inmatch/client_runtime.h>       // ClientProcessState (the process's client words)
 #include <runtime/inmatch/rotation_admin.h>      // HostRotationAdmin (the remote admin)
@@ -153,6 +154,9 @@ struct SimulationNetState {
 	// The same list's model files in load order (LoadedModelList::model_files): what the
 	// shell's load builds before the first frame, a death's husk family among them (FX-5).
 	std::vector<std::string> mission_start_model_files;
+	// The same list's nodes head first, foliage included (inmatch::loaded_model_list_entries):
+	// the model-list readout's (an instrument).
+	std::vector<opennova::inmatch::LoadedModelListEntry> mission_start_model_entries;
 	// The joiner's network type (JoinTarget::network_type; retail's
 	// g_NapiNPCtx.transport_mode on the client). Retained across rebuilds.
 	opennova::inmatch::NetworkType join_network_type = opennova::inmatch::NetworkType::Lan;

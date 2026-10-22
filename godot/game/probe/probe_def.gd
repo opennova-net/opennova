@@ -709,6 +709,29 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"watch_handle": { "type": "integer", "minimum": -1, "maximum": 65534,
 							"default": -1 },
 				}, [], false, true, 600_000),
+		ProbeDef.make("joiner_net_trace",
+				"The joiner net readout (Simulation.debug_joiner_net_trace): the engine's last "
+				+ "2048 client net frame records from `from_seq`. Each frame: its clocks (frame "
+				+ "tick, network tick, wall ms, loop), the send countdown ahead of its step, the "
+				+ "dictated period, whether the block opened and the 0x0C left, the applied 0x0A "
+				+ "count; the 62-frame quality fold's inputs, terms, window and level; a 0x4C's "
+				+ "level. `watch_ms` keeps polling each frame. The verdict histograms the "
+				+ "countdown at each 0x0A receipt and each uplink's frames since the last one; "
+				+ "an instrument that changes nothing.",
+				NET + "joiner_net_trace_probe.gd", {
+					"from_seq": { "type": "integer", "minimum": 0, "default": 0 },
+					"watch_ms": { "type": "integer", "minimum": 0, "maximum": 590_000,
+							"default": 0 },
+				}, [], false, true, 600_000),
+		ProbeDef.make("model_list_dump",
+				"The model-list readout (Simulation.debug_mission_start_model_nodes): the "
+				+ "model-def list this mission's load froze, head first, foliage nodes "
+				+ "included: each node's file, mark, load index and page index, with the page's "
+				+ "count (a joiner's C2S 0x3D page, a host's S2C 0x68 wrap). `log_names` logs "
+				+ "each node; an instrument that changes nothing.",
+				NET + "model_list_dump_probe.gd", {
+					"log_names": { "type": "boolean", "default": false },
+				}, [], false, true, 120_000),
 		ProbeDef.make("body_trace",
 				"The body readout (Simulation.debug_body_trace): per logic tick, each of up to 8 "
 				+ "watched registry handles' (`watch_handles`, plus the local body's own with "

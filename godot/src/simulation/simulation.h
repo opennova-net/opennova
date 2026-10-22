@@ -92,6 +92,8 @@ class ScarDrawList;         // one frame's impact-scar draw list (world/scar_dra
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
 class UsePressRow;          // one USE readout record (simulation/use_press_row.h)
 class BodyTraceRow;         // one body readout record (simulation/body_trace_row.h)
+class JoinerNetTraceRow;    // one joiner net readout record (simulation/joiner_net_trace_row.h)
+class ModelListNodeRow;     // one frozen model-list node (simulation/model_list_node_row.h)
 class PlayerProfiles; // the player profile's records (player/player_profiles.h)
 class EnvironmentSnapshot;  // the F3 Environment record as a typed read (simulation/environment_snapshot.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
@@ -882,6 +884,18 @@ public:
 	// frame, as retail's loads build every listed row's husk family at the mission start
 	// (FX-5). Empty until the snapshot is finalized.
 	PackedStringArray get_mission_start_model_files() const;
+	// The model-list readout (a debug instrument; engine inmatch/loaded_model_list.h
+	// loaded_model_list_entries, the model_list_dump probe): the list this mission's load froze,
+	// head first, foliage nodes included (empty until the snapshot is finalized); and the
+	// frozen page's count (the C2S 0x3D page a joiner answers, a host's S2C 0x68 wrap).
+	TypedArray<ModelListNodeRow> debug_mission_start_model_nodes() const;
+	int64_t debug_loaded_model_list_count() const;
+	// The joiner net readout (a debug instrument; engine inmatch/joiner_net_trace.h, the
+	// joiner_net_trace probe): the role's client runtime's per-frame records with seq >=
+	// p_from_seq, oldest first (none without a runtime, and none on a host's own client), and
+	// the seq the next record takes.
+	TypedArray<JoinerNetTraceRow> debug_joiner_net_trace(int64_t p_from_seq) const;
+	int64_t debug_joiner_net_trace_next_seq() const;
 	// The joiner's mission start (engine: inmatch/joiner_connection.h
 	// set_mission_start_loading): the shell declares its load runs after the S2C 0x1A,
 	// reads the release, and once the load has ended pushes the two 0x2F and the 0x0B.
