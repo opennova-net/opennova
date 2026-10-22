@@ -1380,8 +1380,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// retail applies it [orig: @0x4c1153]; so are the other carried rows. A
 		// seated player row's pass runs its
 		// channel at its head (tick_seated_body: the mounted eye's capsule,
-		// D-NET-330) while it presents through its seat path (the seat clips
-		// dispatch) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the bit0
+		// D-NET-330), and the row presents that channel
+		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the bit0
 		// test @0x4B411E, the dual update @0x4B41DF]. A
 		// dead row is not frozen: its mover runs and the death edge commits
 		// the death clip to the channel. The respawn edge keeps the channel

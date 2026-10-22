@@ -618,7 +618,7 @@ void test_remote_lean_ramp_gates() {
 // the body heading, Roll and savedLivePitch, the four leg words take the body heading,
 // a passenger's keys ramp its lean, and the eye is the four-turn capsule leg over the
 // channel's capsule (the extent capped at 0xD000) and those words, after the ramp.
-// The row keeps presenting through its seat path, not the channel.
+// The row presents that channel (present_rows test_seated_replica_row_presents_its_channel).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF; the
 //  seat carry @0x4B6510..0x4B6575; the leg words @0x4B668B..0x4B66A3; the passenger
 //  ramp @0x4B6684..0x4B66C3; the eye @0x4B66D9..0x4B68FC]
@@ -688,7 +688,7 @@ void test_seated_row_eye_reads_its_channel_capsule() {
 	world::player_body_capsule_eye(0xD000, -0x2800000, kSeatYaw + 0x08000000, kSeatYaw,
 	                               kSeatRoll, kSeatPitch, capped);
 	expect(es->eye_offset[2] == capped[2], "the seated extent caps at 0xD000");
-	// The seated row presents through its seat path, not the channel.
+	// The seated row presents its channel, so the channel stays armed.
 	expect(es->rm_state >= 0, "(the channel stays armed while seated)");
 }
 

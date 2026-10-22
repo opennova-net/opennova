@@ -1170,7 +1170,7 @@ static bool row_corpse_tail(ClientEntityState &es, bool edge_this_tick, bool org
 // A seated body's pass, which ends at the mounted site: the primary channel at its
 // head (its capsule is the eye's extent), the site's scrub, the seat carry, then the
 // site's four leg words, a passenger's lean keys and the eye, in that order. The
-// seated row presents through its seat path (the wire byte), not this channel.
+// seated row presents this channel, as every armed row does (D-NET-330).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF; the
 //  seat carry Entity_GetBoneTransformAndOrientation @0x4B6510 (+0x8C @0x4B654E, the legs
 //  @0x4B6554 / @0x4B655A, Roll @0x4B6572, +0x90 @0x4B6575); the site's leg words

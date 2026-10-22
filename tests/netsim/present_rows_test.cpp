@@ -360,6 +360,48 @@ bool test_replica_rows_present_the_served_ring_entries() {
 	return ok;
 }
 
+// D-NET-330: a seated player row presents the channel its pass runs, as an
+// authoritative body does: the bone build samples the body's primary channel,
+// seated or not. A carried row the fold disarmed falls back to the wire byte.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF ahead of
+//  the mounted site @0x4B637C..0x4B638F; Entity_BuildBoneTransformMatrices @0x4B1290 -
+//  AnimChannel_ComputeBoneMatrices called @0x4B1388]
+bool test_seated_replica_row_presents_its_channel() {
+	opennova::replication::ClientState state;
+	opennova::replication::ClientEntityState seated;
+	seated.handle = 0x0008;
+	seated.cls = nw::EntityClass::Player;
+	seated.carrier_handle = 0x1010;
+	seated.mount_bone = 3;
+	seated.anim_state_id = 24;
+	seated.rm_adm_id = 0;
+	seated.rm_state = 107;
+	seated.rm_phase = 5;
+	seated.rm_variant = 0;
+	seated.rm_blend_weight = 1.0f;
+	const im::ClientReplicaPresentContext context{nullptr, nullptr, true, nullptr};
+	float row[w::PF_STRIDE];
+	im::initialize_client_replica_present_row(row);
+	im::project_client_replica_present_row(row, seated, state, context);
+	bool ok = expect(row[w::PF_ANIM_STATE] == 107.0f && row[w::PF_ANIM_REMOTE_REQUEST] == 0.0f &&
+					row[w::PF_ANIM_PHASE_TICKS] == 5.0f,
+			"a seated row presents its channel's state and playhead");
+	w::SkeletalPoseInputs inputs;
+	ok = expect(im::skeletal_pose_inputs_for_client(seated, state, context, inputs) &&
+					inputs.primary_state == 107 && inputs.primary_phase == 5,
+			"...and poses from it") && ok;
+
+	opennova::replication::ClientEntityState disarmed = seated;
+	disarmed.rm_state = -1; // the fold disarmed it (a carried row that is not seated)
+	im::initialize_client_replica_present_row(row);
+	im::project_client_replica_present_row(row, disarmed, state, context);
+	ok = expect(row[w::PF_ANIM_STATE] == 24.0f && row[w::PF_ANIM_REMOTE_REQUEST] == 1.0f,
+			"a disarmed carried row presents the wire byte") && ok;
+	ok = expect(!im::skeletal_pose_inputs_for_client(disarmed, state, context, inputs),
+			"...and has no channel pose") && ok;
+	return ok;
+}
+
 } // namespace
 
 bool test_vehicle_suspension_reaches_present_rows() {
@@ -1617,6 +1659,7 @@ int main() {
 	ok = test_rows_carry_the_slot_march_start() && ok;
 	ok = test_replica_statics_present_their_pitch_and_roll() && ok;
 	ok = test_replica_rows_present_the_served_ring_entries() && ok;
+	ok = test_seated_replica_row_presents_its_channel() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;
