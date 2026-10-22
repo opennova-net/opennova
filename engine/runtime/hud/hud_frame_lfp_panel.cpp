@@ -1,5 +1,5 @@
-// THE AAS ZONE STATUS PANEL element: the spawn-zone list grouped by owning
-// team, one marker per contested zone, the group's status text
+// THE AAS ZONE STATUS PANEL element: the spawn-zone list grouped by zone
+// number, one marker per contested zone, the group's status text
 // [orig: HUD_DrawZoneStatusPanel @0x5a2480 -> HUD_DrawZoneMarker @0x5986f0].
 // hud/hud_lfp_panel.h owns the policy (frames, colours, stepping); this is
 // the walk that puts it on screen. The feed (world/lfp_feed.h) supplies one
@@ -18,7 +18,12 @@ namespace opennova::hud {
 
 namespace {
 
-constexpr int kLfpTeamMax = 30; // [orig: the 30-dword count table @0x5a24b9]
+// The per-group count table: 30 dwords, a zone byte's low five bits counted
+// only below 30 [orig: memset(.., 0x78) @0x5a24b9, `cmp ecx, 1Eh; jge`
+// @0x5a24e0]. Groups 30 and 31 read past retail's table (its stack beyond);
+// no shipped mission numbers a zone above 13, so they read the zero here.
+constexpr int kLfpGroupCounted = 30;
+constexpr int kLfpGroupSlots = 32;
 
 } // namespace
 
@@ -28,28 +33,33 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	if (!lp.shown || !layout_.lfp_anchor_present) return;
 	if (font_.font() == nullptr) return;
 	// The conquest arm (g_GameType 0x50010, a BMS task-type-10 mission's mode
-	// [orig: Game_StartMission @0x524CE1..0x524D01]): no group breaks on a team
-	// change, every contested marker on its own row at the seed group's x, its
+	// [orig: Game_StartMission @0x524CE1..0x524D01]): no group breaks on a zone
+	// number change, every contested marker on its own row at the seed group's x, its
 	// status kind cleared before it and its text drawn right after it
 	// [orig: HUD_DrawZoneStatusPanel `cmp g_GameType, 50010h; setz`
 	//  @0x5a248d..0x5a24a1, the skipped break @0x5a25e7..0x5a25f6, the marker leg
 	//  @0x5a2711..0x5a2786].
 	const bool conquest = lp.game_type == game_type::kConquerAndControl;
 
-	// Pass 1: zones per team [orig: @0x5a24c5..0x5a24ea — team byte & 0x1F,
-	// nonzero and < 30].
-	std::array<int, kLfpTeamMax> per_team{};
+	// The markers group by the zone byte (+0x21A), never the team: a zero byte
+	// is no group, the low five bits name it [orig: `mov al, [eax+21Ah]`
+	// @0x5a24cd / @0x5a2582 / @0x5a25ce, `and ecx, 1Fh` @0x5a24d9 / @0x5a25d7].
+	const auto group_of = [](const HudLfpZone &z) { return z.zone_byte & 0x1F; };
+	// Pass 1: zones per group [orig: @0x5a24c5..0x5a24ea — the byte nonzero,
+	// its group below 30].
+	std::array<int, kLfpGroupSlots> per_group{};
 	for (const HudLfpZone &z : lp.zones) {
-		if (z.team != 0 && z.team < kLfpTeamMax) ++per_team[static_cast<size_t>(z.team)];
+		if (z.zone_byte != 0 && group_of(z) < kLfpGroupCounted)
+			++per_group[static_cast<size_t>(group_of(z))];
 	}
-	// The seed and the walk test the team byte and the transient slot's 0xC0
-	// flags; the timer entry gates only the marker itself, never the seed
-	// [orig: the seed search @0x5a2501..0x5a2575 reads the team and the slot
-	//  flags only; in the walk CProximityList_FindEntryById @0x5a2689 skips
-	//  past the marker and the flags test @0x5a26ef follows it]. Without a
+	// The seed and the walk test the zone byte and the regular slot's 0xC0
+	// source bits; the timer entry gates only the marker itself, never the seed
+	// [orig: the seed search @0x5a2501..0x5a2575 reads the byte and the slot
+	//  bits only; in the walk CProximityList_FindEntryById @0x5a2689 skips
+	//  past the marker and the bits test @0x5a26ef follows it]. Without a
 	// seed the panel draws nothing at all.
 	const auto flagged = [](const HudLfpZone &z) {
-		return z.team != 0 && (z.capture_flags & 0xC0u) != 0;
+		return z.zone_byte != 0 && (z.capture_flags & 0xC0u) != 0;
 	};
 	const auto contested = [&](const HudLfpZone &z) {
 		return flagged(z) && z.timer_present;
@@ -82,10 +92,10 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	const uint32_t viewer_color = lfp_team_color(lp.local_team);
 	const uint32_t opposing_color = lfp_opposing_team_color(lp.local_team);
 
-	// The group cursor [orig: x = g_HUDZonePanelX - 98 * count[team]
-	// @0x5a2589..0x5a259d; the markers' y = g_HUDZonePanelY + 86 * group
+	// The group cursor [orig: x = g_HUDZonePanelX - 98 * count[group]
+	// @0x5a2589..0x5a259d; the markers' y = g_HUDZonePanelY + 86 * row
 	// (@0x5a249d, @0x5a2667), the status text's y = that + 12 (@0x5a25bd)].
-	int current_team = lp.zones[start].team;
+	int current_group = group_of(lp.zones[start]);
 	int group = 0;
 	int index_in_group = 0;
 	int status_kind = 0;          // [orig: g_HUDZoneStatusKind, 0 at group start]
@@ -98,7 +108,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 		if (status_kind == 0) return;
 		int tx = 0, ty = 0;
 		lfp_status_text_origin(layout_.lfp_anchor_x, layout_.lfp_anchor_y,
-				per_team[static_cast<size_t>(current_team)], group, tx, ty);
+				per_group[static_cast<size_t>(current_group)], group, tx, ty);
 		const std::string &s = status_kind == 1 ? lp.under_attack_text
 												 : lp.ready_text;
 		const char *fallback = status_kind == 1 ? "!Under\nAttack!!"
@@ -109,13 +119,13 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 
 	for (size_t i = start; i < lp.zones.size(); ++i) {
 		const HudLfpZone &z = lp.zones[i];
-		if (z.team == 0) continue;
-		// A team change closes the group: its text, then the next row
-		// [orig: @0x5a25f6..0x5a2679].
-		if (!conquest && z.team != current_team) {
+		if (z.zone_byte == 0) continue; // [orig: `test al, al; jz` @0x5a25dd]
+		// A group change closes the group: its text, then the next row
+		// [orig: @0x5a25f2..0x5a2679].
+		if (!conquest && group_of(z) != current_group) {
 			flush_status();
 			++group;
-			current_team = z.team;
+			current_group = group_of(z);
 			index_in_group = 0;
 			status_kind = 0;
 		}
@@ -126,7 +136,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 		// ---- HUD_DrawZoneMarker @0x5986f0 ----
 		int mx = 0, my = 0;
 		lfp_marker_origin(layout_.lfp_anchor_x, layout_.lfp_anchor_y,
-				per_team[static_cast<size_t>(current_team)], index_in_group, group,
+				per_group[static_cast<size_t>(current_group)], index_in_group, group,
 				mx, my);
 		// The AAS arm steps the next marker 98 across; the conquest arm keeps
 		// its x [orig: `add y_offset, 62h` @0x5a27a3, the AAS leg alone].

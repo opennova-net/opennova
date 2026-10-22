@@ -1787,6 +1787,7 @@ void test_text_draws_the_drawers_halved_diffuse(const fnt_font_t *font) {
 		state.lfp_panel.local_team = 1;
 		opennova::hud::HudLfpZone z;
 		z.letter_index = 0;
+		z.zone_byte = 1;
 		z.team = 1;
 		z.timer_present = true;
 		z.timer_team = 1;
@@ -2638,9 +2639,13 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 	lp.shown = true;
 	lp.local_team = 1;
 	state.hud_frame = 0; // phase A
-	const auto zone = [](int letter, int team, bool contested) {
+	// The markers group by the zone byte's low five bits, never the team
+	// [orig: HUD_DrawZoneStatusPanel `mov al, [eax+21Ah]` @0x5a24cd / @0x5a25ce,
+	//  `and ecx, 1Fh` @0x5a24d9 / @0x5a25d7].
+	const auto zone = [](int letter, int team, int zone_no, bool contested) {
 		HudLfpZone z;
 		z.letter_index = letter;
+		z.zone_byte = zone_no;
 		z.team = team;
 		z.timer_present = true;
 		z.timer_team = team;
@@ -2648,7 +2653,7 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		return z;
 	};
 	// Nothing contested -> nothing drawn at all.
-	lp.zones = {zone(0, 1, false), zone(1, 2, false)};
+	lp.zones = {zone(0, 1, 1, false), zone(1, 2, 2, false)};
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		size_t icons = 0;
@@ -2657,11 +2662,12 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 					q.texture <= opennova::hud::kHudTexLfpNeutral) ++icons;
 		CHECK(icons == 0, "no contested zone seeds the walk: the panel is empty");
 	}
-	// Team 1 holds A and B (B under attack), team 2 holds C (ready).
-	HudLfpZone a = zone(0, 1, true);
-	HudLfpZone b = zone(1, 1, true);
+	// Zone 1 holds A and B (team 1, B under attack), zone 2 holds C (team 2,
+	// ready).
+	HudLfpZone a = zone(0, 1, 1, true);
+	HudLfpZone b = zone(1, 1, 1, true);
 	b.rate = -3; // own point draining -> UNDER ATTACK
-	HudLfpZone c = zone(2, 2, true);
+	HudLfpZone c = zone(2, 2, 2, true);
 	c.control = 0; // enemy point at zero control -> READY
 	lp.zones = {a, b, c};
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
@@ -2677,7 +2683,7 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		CHECK(std::fabs(icons[0].x0 - (1020.0f - 196.0f)) < 0.01f, "A right-anchors the group");
 		CHECK(std::fabs(icons[1].x0 - (1020.0f - 98.0f)) < 0.01f, "B steps 98 across");
 		CHECK(std::fabs(icons[0].y0 - 27.0f) < 0.01f, "the first row IS the anchor");
-		CHECK(std::fabs(icons[2].y0 - (27.0f + 86.0f)) < 0.01f, "the next team steps 86 down");
+		CHECK(std::fabs(icons[2].y0 - (27.0f + 86.0f)) < 0.01f, "the next zone number steps 86 down");
 		CHECK(std::fabs(icons[2].x0 - (1020.0f - 98.0f)) < 0.01f, "a one-zone group ends at the same edge");
 		CHECK(icons[0].texture == opennova::hud::kHudTexLfpTeam1 &&
 				icons[2].texture == opennova::hud::kHudTexLfpTeam2,
@@ -2699,8 +2705,8 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		CHECK(std::fabs(icons[2].v0 - 0.75f) < 1e-6f, "ready draws frame 3 on phase B");
 		CHECK(std::fabs(icons[1].v0 - 0.0f) < 1e-6f, "the attack frame is a blink");
 	}
-	// The conquest arm: no group break on a team change, every contested
-	// marker on its own row at the seed group's x (team 1's two zones put it
+	// The conquest arm: no group break on a zone number change, every contested
+	// marker on its own row at the seed group's x (zone 1's two markers put it
 	// 196 left of the anchor), the rows 86 apart
 	// [orig: HUD_DrawZoneStatusPanel @0x5a25e7..0x5a25f6 (the break skipped), the marker
 	//  leg @0x5a2711..0x5a2786; y_offset steps only in the AAS leg @0x5a27a3].
@@ -2730,6 +2736,32 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
 				q.texture <= opennova::hud::kHudTexLfpNeutral) ++tdm_icons;
 	CHECK(tdm_icons == 3, "a non-conquest game type draws the AAS arm");
+	// One zone number, two owners: a neutral marker and a team 2 marker share
+	// zone 3's row, each on its own team's sheet; a team-1 zone with a zero zone
+	// byte is no marker at all; the seed is the first flagged NUMBERED zone
+	// [orig: `test al, al; jz` @0x5a25dd, the seed @0x5a2509..0x5a256e; the
+	//  sheet by +0x162 @0x59893d..0x598957].
+	lp.game_type = 0;
+	HudLfpZone unnumbered = zone(0, 1, 0, true);
+	HudLfpZone neutral = zone(1, 0, 3, true);
+	HudLfpZone held = zone(2, 2, 3, true);
+	lp.zones = {unnumbered, neutral, held};
+	const HudDrawList &list_n = compiler.compile(state, 1024.0f, 768.0f);
+	std::vector<HudQuad> row_icons;
+	for (const HudQuad &q : list_n.quads)
+		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
+				q.texture <= opennova::hud::kHudTexLfpNeutral) row_icons.push_back(q);
+	CHECK(row_icons.size() == 2, "the unnumbered zone draws no marker");
+	if (row_icons.size() == 2) {
+		CHECK(row_icons[0].texture == opennova::hud::kHudTexLfpNeutral &&
+				row_icons[1].texture == opennova::hud::kHudTexLfpTeam2,
+				"a neutral zone draws on the neutral sheet beside its zone-mate");
+		CHECK(std::fabs(row_icons[0].x0 - (1020.0f - 196.0f)) < 0.01f &&
+				std::fabs(row_icons[1].x0 - (1020.0f - 98.0f)) < 0.01f,
+				"both markers of zone 3 share one right-anchored row");
+		CHECK(std::fabs(row_icons[0].y0 - 27.0f) < 0.01f &&
+				std::fabs(row_icons[1].y0 - 27.0f) < 0.01f, "the first group sits on the anchor row");
+	}
 }
 
 // The map medic marker: a local-team medic's blip is REPLACED by the

@@ -834,7 +834,16 @@ void set_vehicle_panel_anchor(const HudLayout &layout, int stance, HudVehiclePan
 // everything from the registry + the zone-timer entry; the element draws.
 struct HudLfpZone {
 	int letter_index = 0;   // 'A' + the spawn-zone list index
-	int team = 0;           // the zone entity's team byte (+0x162 & 0x1F)
+	// The zone entity's zone byte (+0x21A: the zone number, plus 32 x its rank
+	// on a client): the panel skips a zero byte and groups the markers by its
+	// low five bits [orig: HUD_DrawZoneStatusPanel `mov al, [eax+21Ah]`
+	//  @0x5A24CD / @0x5A25CE, `and ecx, 1Fh` @0x5A24D9 / @0x5A25D7].
+	int zone_byte = 0;
+	// The zone entity's Team byte (+0x162, signed) as this client holds it: the
+	// marker's sheet, colour, tile and its attack / ready tests
+	// [orig: HUD_DrawZoneMarker `mov al, [ebp+162h]; movsx eax, al`
+	//  @0x598734..0x59873A, the reads @0x598815 / @0x59893D].
+	int team = 0;
 	// The zone-timer entry's fields the marker reads [orig: EntryById[1] team,
 	//  [8] value, [9] control target, [10] limit, [11] rate, [12] active].
 	bool timer_present = false;
@@ -848,8 +857,9 @@ struct HudLfpZone {
 	// +0x220 the owning side's, +0x221 the other side's.
 	uint8_t count_owner = 0;
 	uint8_t count_other = 0;
-	// The transient minimap slot's flag byte for this zone (+4 & 0xC0 gates
-	// the marker) [orig: the word_28E5620 walk @0x5a2517..0x5a256e].
+	// The source byte (+4) of the zone's first regular overlay slot; its 0xC0
+	// capture bits gate the marker [orig: the word_28E5620 walk
+	//  @0x5a2517..0x5a256e, MapOverlay_FindRegularSlotByEntity @0x5BE870 inlined].
 	uint8_t capture_flags = 0;
 	bool in_cylinder = false;
 	int distance_m = 0;     // after the witnessed subtrahend, metres
@@ -858,9 +868,8 @@ struct HudLfpZone {
 struct HudLfpPanelState {
 	bool shown = false;
 	int local_team = 0;
-	// The session game type: the drawer's conquest arm (g_GameType ==
-	// 0x50010) is unmodelled and the element draws nothing under it
-	// [orig: @0x5a24a1].
+	// The session game type: the drawer's one game-type test picks the
+	// conquest arm (g_GameType == 0x50010) [orig: @0x5a24a1].
 	uint32_t game_type = 0;
 	std::string under_attack_text; // Overlays/STROVER_UNDERATTACK
 	std::string ready_text;        // Overlays/STROVER_READYFORTAKEOVER

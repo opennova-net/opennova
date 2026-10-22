@@ -31,6 +31,7 @@ void build_lfp_zones(const World &world, const SpawnZoneRegistry &registry,
                      const Entity &local, int local_team,
                      const LfpZoneTimerLookup &timer,
                      const LfpCaptureFlagsLookup &capture_flags,
+                     const LfpZoneTeamLookup &team_byte,
                      std::vector<hud::HudLfpZone> &out) {
     out.clear();
     out.reserve(registry.entries.size());
@@ -39,10 +40,12 @@ void build_lfp_zones(const World &world, const SpawnZoneRegistry &registry,
         if (zone == nullptr) continue;
         hud::HudLfpZone row;
         row.letter_index = static_cast<int>(i);
-        // The zone's team byte, masked like the panel's count pass
-        // [orig: entity+538 & 0x1F @0x5a24d9; the marker's +0x162 read
-        //  @0x59873a is the same byte].
-        row.team = zone->team & 0x1F;
+        // The zone byte the panel groups by (+0x21A), and the Team byte the
+        // marker reads, sign-extended (+0x162) -- two fields
+        // [orig: HUD_DrawZoneStatusPanel `mov al, [eax+21Ah]` @0x5a24cd;
+        //  HUD_DrawZoneMarker `mov al, [ebp+162h]; movsx eax, al` @0x598734..0x59873a].
+        row.zone_byte = zone->zone_number;
+        row.team = team_byte ? team_byte(*zone) : static_cast<int8_t>(zone->team);
         LfpZoneTimer t;
         if (timer && timer(zone->handle, t)) {
             row.timer_present = true;

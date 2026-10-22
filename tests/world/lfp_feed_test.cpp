@@ -71,12 +71,15 @@ int main() {
     };
 
     std::vector<opennova::hud::HudLfpZone> rows;
-    build_lfp_zones(w, reg, *w.registry.get(vh), 1, timer, flags, rows);
+    build_lfp_zones(w, reg, *w.registry.get(vh), 1, timer, flags, {}, rows);
     CHECK(rows.size() == 2);
     if (rows.size() == 2) {
         // List order = registry order; letters follow the index.
         CHECK(rows[0].letter_index == 0 && rows[1].letter_index == 1);
         CHECK(rows[0].team == 1 && rows[1].team == 2);
+        // The zone byte rides beside the team: the panel groups by it
+        // [orig: HUD_DrawZoneStatusPanel `mov al, [eax+21Ah]` @0x5a24cd].
+        CHECK(rows[0].zone_byte == 1 && rows[1].zone_byte == 2);
         // The timer join.
         CHECK(rows[0].timer_present && rows[0].rate == -2 && rows[0].control == 60);
         CHECK(rows[0].count_owner == 3 && rows[0].count_other == 1);
@@ -93,11 +96,11 @@ int main() {
     }
     // Standing inside the zone's bound radius floors the distance at zero.
     w.registry.get(vh)->position = {48.0f, 0.0f, 10.0f};
-    build_lfp_zones(w, reg, *w.registry.get(vh), 1, timer, flags, rows);
+    build_lfp_zones(w, reg, *w.registry.get(vh), 1, timer, flags, {}, rows);
     CHECK(rows.size() == 2 && rows[0].distance_m == 0);
     // A height difference past half the radius leaves the cylinder.
     w.registry.get(vh)->position = {50.0f, 0.0f, 10.0f + 36.0f};
-    build_lfp_zones(w, reg, *w.registry.get(vh), 1, timer, flags, rows);
+    build_lfp_zones(w, reg, *w.registry.get(vh), 1, timer, flags, {}, rows);
     CHECK(rows.size() == 2 && !rows[0].in_cylinder);
     // The Z test reads the Position words' delta (D-NET-507) [orig:
     // HUD_DrawZoneMarker @0x5986F0 (the Z test @0x5987D1..0x598810)]. The viewer stands on zone A's
@@ -113,14 +116,24 @@ int main() {
         v->position.y.q16 = a->position.y.q16;
         v->position.z.q16 = 19088745;
         a->position.z.q16 = 16794984;
-        build_lfp_zones(w, reg, *v, 1, timer, flags, rows);
+        build_lfp_zones(w, reg, *v, 1, timer, flags, {}, rows);
         CHECK(rows.size() == 2 && !rows[0].in_cylinder);
         // One word nearer is inside: the half radius itself passes.
         v->position.z.q16 = 19088744;
-        build_lfp_zones(w, reg, *v, 1, timer, flags, rows);
+        build_lfp_zones(w, reg, *v, 1, timer, flags, {}, rows);
         CHECK(rows.size() == 2 && rows[0].in_cylinder);
     }
-    (void)zb;
+    // The team lookup: the marker's Team byte as the client holds it (a
+    // joiner's replica row), over the entity's own byte [orig:
+    // HUD_DrawZoneMarker `mov al, [ebp+162h]; movsx eax, al` @0x598734..0x59873a].
+    {
+        const LfpZoneTeamLookup held = [&](const Entity &zone) {
+            return zone.handle == zb ? 0 : static_cast<int>(zone.team);
+        };
+        build_lfp_zones(w, reg, *w.registry.get(vh), 1, timer, flags, held, rows);
+        CHECK(rows.size() == 2 && rows[0].team == 1 && rows[1].team == 0 &&
+              rows[1].zone_byte == 2);
+    }
 
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);

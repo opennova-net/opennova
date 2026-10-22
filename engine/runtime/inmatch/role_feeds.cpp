@@ -726,7 +726,13 @@ bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zon
 				replication::find_regular_overlay_slot(runtime->state().minimap, h.packed);
 		return slot != nullptr ? slot->source : 0;
 	};
-	world::build_lfp_zones(w, zones, *local, local_team, timer, capture_flags, out);
+	// The zone's Team byte as this client holds it (a joiner's replica row once
+	// a team store lands), sign-extended as the marker reads it [orig:
+	// HUD_DrawZoneMarker `mov al, [ebp+162h]; movsx eax, al` @0x598734..0x59873a].
+	const world::LfpZoneTeamLookup team_byte = [&view](const world::Entity &zone) {
+		return static_cast<int>(static_cast<int8_t>(zone_team_byte(view, zone)));
+	};
+	world::build_lfp_zones(w, zones, *local, local_team, timer, capture_flags, team_byte, out);
 	return true;
 }
 
