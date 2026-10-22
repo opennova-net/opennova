@@ -895,6 +895,9 @@ func _wire_shell() -> void:
 	# The LAN search's socket binds on the block's client quad (engine
 	# inmatch::transport_bind_ports, D-NET-NEW-L8-10).
 	_lan_session.game_config = GameCfgStore.block()
+	# The LAN screen's browse stands for the process's one enumerator: a join's session reset
+	# and the process exit drain its records (engine: ClientRuntime::drain_enumerator).
+	_lan_session.set_process_enumerator(true)
 	add_child(_lan_session)
 	_mp_companion.set_lan_session(_lan_session)
 	_menu_shell.add_companion(_mp_companion)
@@ -1236,6 +1239,14 @@ func start_join_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
 func drain_lan_records() -> void:
 	if _lan_session != null:
 		_lan_session.drain_records()
+
+
+## The browse a join went on from (the enumerate-and-join's, the launch search's) hands its
+## records to the process's one enumerator, the LAN screen's browse, where the join's session
+## reset drains them (engine: net/npwire/lan_discovery.h adopt_records, D-NET-NEW-L8-8).
+func adopt_lan_records(from: LanSession) -> void:
+	if _lan_session != null and from != null:
+		_lan_session.adopt_records(from)
 
 
 ## A join's enumerate-and-join: the join screen shows retail's PRE_ENUMSESSION

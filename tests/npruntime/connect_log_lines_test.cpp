@@ -32,9 +32,11 @@
 #include <runtime/inmatch/server_files.h>
 #include <runtime/inmatch/server_session.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
@@ -701,6 +703,65 @@ void test_remote_joiner_destroy_tears_down_the_socket() {
 	}
 }
 
+// The session destroy's connection destroy drains its enumerator between the leave and the
+// transport's teardown: the record a join with no row enumerated writes its REMOVED line, then
+// the embedder's drain (the browse records a row's join went on from) runs, then NET TEARING
+// DOWN SOCKET. A second destroy finds nothing left to drain.
+// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - the leave @0x4C96DB,
+//  CNapiGameSession_ResetActiveSession called @0x4C96E2, CNapiNetwork_TearDownSocket called
+//  @0x4C9763; CNapiGameSession_ResetActiveSession @0x4C8A70 - CNapiNPConnection_Destroy called
+//  @0x4C8A93; CNapiNPConnection_Destroy @0x62A4B0 - NapiNPEnumerator_DrainTimerList (the call
+//  @0x62A554); CNapiNetwork_OnSessionRemoved @0x4C68C0 - the line @0x4C6975]
+void test_remote_joiner_destroy_drains_the_enumerator() {
+	const PeerAddr host_addr = peer_addr_from_octets({10, 0, 0, 1}, 32786);
+	const PeerAddr joiner_peer = peer_addr_from_octets({10, 0, 0, 9}, 4200);
+	MemoryFiles files;
+	inmatch::ConnectLog log{files};
+	log.set_clock([] { return std::string("T"); });
+	log.start(inmatch::ConnectLogHeader{});
+	inmatch::NapiNPServerCtx host;
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostOnly,
+			inmatch::SocketMode::Lan, /*host_key=*/0x0FE0E11Au);
+	uint64_t now_ms = 1000;
+	inmatch::ClientRuntime client("DrainJoiner", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
+	client.set_host_address(host_addr);
+	client.set_connect_log(&log);
+	const std::vector<uint8_t> hello = client.start();
+	const inmatch::HandleResult reply =
+			inmatch::handle_server_datagram(host, joiner_peer, hello.data(), hello.size(), 0);
+	CHECK(reply.outbound.size() == 1);
+	if (reply.outbound.size() != 1) return;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ServerHello sh;
+	CHECK(nw_decode_inbound(reply.outbound[0].data(), reply.outbound[0].size(), opcode, body) &&
+			parse_server_hello(body.data(), body.size(), sh));
+	client.receive(reply.outbound[0].data(), reply.outbound[0].size());
+	now_ms += 16;
+	client.Client_ProcessNetworkFrame(1);
+	const std::size_t at = log_lines(files).size();
+	int drains = 0;
+	const std::function<void()> drain = [&log, &drains] {
+		++drains;
+		log.line("DRAIN");
+	};
+	CHECK(client.destroy_session(-1, /*novaworld_join=*/false, drain).empty());
+	const std::vector<std::string> lines = log_lines(files);
+	const std::vector<std::string> tail(lines.begin() + static_cast<std::ptrdiff_t>(at), lines.end());
+	const std::vector<std::string> expected = {
+		"NET SESSION AT 10.0.0.1:32786 [" + sh.sn.substr(0, 63) + "] HAS BEEN REMOVED.",
+		"DRAIN",
+		"NET TEARING DOWN SOCKET",
+	};
+	CHECK(tail == expected);
+	CHECK(drains == 1);
+	// Drained once: a second drain writes no record's line.
+	const std::size_t after = log_lines(files).size();
+	client.drain_enumerator({});
+	CHECK(log_lines(files).size() == after);
+}
+
 } // namespace
 
 int main() {
@@ -711,6 +772,7 @@ int main() {
 	test_remote_joiner_manager_pass_ahead_of_the_client_pump();
 	test_remote_joiner_duplicate_hellos();
 	test_remote_joiner_destroy_tears_down_the_socket();
+	test_remote_joiner_destroy_drains_the_enumerator();
 	if (failures != 0) {
 		std::printf("connect_log_lines: %d failure(s)\n", failures);
 		return 1;

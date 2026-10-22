@@ -853,6 +853,40 @@ void test_each_datagram_writes_the_managers_lines_and_net_got() {
     if (lines.size() == 3) CHECK(lines[2] == "NAPI TOSSED " + cooked(alpha) + at + " [4]");
 }
 
+// D-NET-NEW-L8-8 (b): the process has one enumerator. The browse a join went on from hands its
+// records to the process's (the LAN screen's) silently, keeping none, and they stay there,
+// frozen, until a drain: the join's session reset, or the next search or LAN screen, each
+// record writing its REMOVED line in list order.
+// [orig: CNapiNetwork_StartClientConnection @0x4CA160 - the ctx's one client connection
+//  @0x4CA1C2, NapiTimer_Stop @0x4CA1D8; CNapiNPConnection_Destroy @0x62A4B0 -
+//  NapiNPEnumerator_DrainTimerList (the call @0x62A554)]
+void test_a_join_hands_its_browse_records_to_the_process_enumerator() {
+    std::vector<std::string> process_lines;
+    std::vector<std::string> probe_lines;
+    opennova::LanDiscoveryBrowser process;
+    process.set_connect_log(session_lines(process_lines));
+    opennova::LanDiscoveryBrowser probe;
+    probe.set_connect_log(session_lines(probe_lines));
+    CHECK(probe.begin(kJo, kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
+    const std::vector<uint8_t> alpha = server_reply_hk("Alpha", 1u);
+    const std::vector<uint8_t> bravo = server_reply_hk("Bravo", 2u);
+    reply(probe, alpha, sender("10.0.0.1", 32768));
+    reply(probe, bravo, sender("10.0.0.2", 32768));
+    CHECK(probe.record_count() == 2);
+    probe.stop();
+    probe_lines.clear();
+    process.adopt_records(probe);
+    CHECK(probe.record_count() == 0 && process.record_count() == 2);
+    CHECK(probe_lines.empty() && process_lines.empty());
+    process.drain_records();
+    const std::vector<std::string> removed = {
+        "NET SESSION AT 10.0.0.1:32768 [Alpha] HAS BEEN REMOVED.",
+        "NET SESSION AT 10.0.0.2:32768 [Bravo] HAS BEEN REMOVED.",
+    };
+    CHECK(process_lines == removed);
+    CHECK(probe_lines.empty());
+}
+
 int main() {
     test_begin_validates_the_range_and_fixes_one_identity();
     test_each_port_gets_an_announce_naming_its_destination();
@@ -872,6 +906,7 @@ int main() {
     test_enumerate_and_join_browse_has_no_window();
     test_a_row_joins_the_listed_session_at_its_index();
     test_each_datagram_writes_the_managers_lines_and_net_got();
+    test_a_join_hands_its_browse_records_to_the_process_enumerator();
     if (failures == 0) std::printf("lan_discovery_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

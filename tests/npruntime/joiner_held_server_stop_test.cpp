@@ -101,6 +101,8 @@ struct Outcome {
 	bool stop_ahead = false;  // a STOP sent ahead of a datagram to the host
 	bool held_after = false;
 	std::string inout;
+	int enumerator_drains = 0; // the embedder's process-enumerator drain runs
+	bool drain_ahead_of_stop = false; // the drain ran before the held server's first STOP
 };
 
 Outcome close_with_a_held_server(int32_t reason) {
@@ -134,6 +136,14 @@ Outcome close_with_a_held_server(int32_t reason) {
 	role.use_process_state(&process);
 	role.set_server_logs(logs);
 	role.set_local_address(kOwnSocket);
+	// The session reset's connection destroy drains the process enumerator ahead of the held
+	// server's stop (CNapiGameSession_ResetActiveSession: the destroy, then StopServer).
+	role.set_enumerator_drain([&out, &socket] {
+		++out.enumerator_drains;
+		bool stopped = false;
+		for (const auto &sent : socket.sent) stopped = stopped || sent.first == kHeld;
+		out.drain_ahead_of_stop = !stopped;
+	});
 	role.kit_seams.apply_authoritative = [] {};
 	role.kit_seams.reseed_on_side_change = [] { return false; };
 	role.kit_seams.push = [] {};
@@ -180,6 +190,8 @@ void test_a_session_reset_stops_the_held_server_after_the_leave() {
 		CHECK(out.stops > 0);
 		CHECK(!out.stop_ahead);
 		CHECK(!out.held_after);
+		// The connection destroy drained the process enumerator once, ahead of the stop.
+		CHECK(out.enumerator_drains == 1 && out.drain_ahead_of_stop);
 		const std::size_t removed = out.inout.find(
 				"127.0.0.1:31000 : SERVER PLAYER REMOVED \"\". [1,9,0,0,\"\",0,\"NP.C:SH:STOP\"]");
 		// HOST STOPPED formats the socket the stop goes out on: its bind address and port.
@@ -196,6 +208,8 @@ void test_an_error_arm_keeps_the_server_held() {
 	CHECK(out.stops == 0);
 	CHECK(out.held_after);
 	CHECK(out.inout.find("PLAYER REMOVED") == std::string::npos);
+	// No reset, no destroy: the enumerator's records stay for the next drain.
+	CHECK(out.enumerator_drains == 0);
 }
 
 // The join attempt's protocol pump is Pump(-1): it receives first, a held node's joiner's 0x43

@@ -615,10 +615,20 @@ std::vector<std::vector<uint8_t>> ClientRuntime::disconnect(std::string_view lea
 	return log_client_sends(joiner_->disconnect(leave_tag), lost_before);
 }
 
+void ClientRuntime::drain_enumerator(const std::function<void()> &enumerator_drain) {
+	if (role_ != Role::Joiner || joiner_ == nullptr) return;
+	joiner_->drain_enumerated_record();
+	if (enumerator_drain) enumerator_drain();
+}
+
 std::vector<std::vector<uint8_t>> ClientRuntime::destroy_session(
-		int32_t reason, bool novaworld_join) {
+		int32_t reason, bool novaworld_join, const std::function<void()> &enumerator_drain) {
 	if (role_ != Role::Joiner || joiner_ == nullptr) return {};
 	std::vector<std::vector<uint8_t>> burst = disconnect("N.C:SWWAD[1]:" + std::to_string(reason));
+	// The session reset's connection destroy and its enumerator's drain [orig:
+	//  CNapiGameSession_FullDestroy @0x4C96A0 - CNapiGameSession_ResetActiveSession called
+	//  @0x4C96E2, ahead of the transport's teardown].
+	drain_enumerator(enumerator_drain);
 	// The transport's teardown, after the leave's lines (a joiner's socket is always open:
 	// SetTransportMode 2 / 4 at the enumerate) [orig: CNapiGameSession_FullDestroy @0x4C96A0 -
 	// @0x4C9722, @0x4C974E, @0x4C9763; CNapiNetwork_TearDownSocket @0x4C4C90 - @0x4C4CBE..0x4C4CE7].

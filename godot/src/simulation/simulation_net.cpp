@@ -16,6 +16,7 @@
 #include "object/character_join_profile.h" // the two-side character selection record
 #include "network/host_session_options.h" // the hosted-session request record
 #include "network/join_target.h" // the join request the discovered session comes from
+#include "network/lan_session.h" // drain_process_enumerator (the session reset's drain)
 #include "util/string_convert.h"
 #include "resource_index/resource_root.h" // session_title (the launch game a bare session speaks)
 #include <net/title/title_identity.h> // TitleIdentity::game_id (the session's rules title)
@@ -834,6 +835,9 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// The join's network type: a NovaWorld join's session destroy keeps its transport.
 	joiner_role_->set_join_novaworld(
 			net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld);
+	// The session reset's connection destroy drains the process enumerator's records, the
+	// browse the join went on from (engine: ClientRuntime::drain_enumerator, D-NET-NEW-L8-8).
+	joiner_role_->set_enumerator_drain([] { LanSession::drain_process_enumerator(); });
 	install_console_seams();
 	install_charattr_table();
 	install_character_join_vars();

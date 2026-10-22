@@ -216,11 +216,24 @@ public:
 	// (disconnect), then the transport's teardown, which writes NET TEARING DOWN SOCKET while the
 	// connect log is on, unless the join runs on NovaWorld (`novaworld_join`: the menu's connect
 	// type 1 keeps the transport).
+	// Between the two, the session reset destroys the connection, which drains its enumerator
+	// (drain_enumerator with `enumerator_drain`).
 	// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - the sprintf @0x4C96CC, the leave @0x4C96DB,
+	//  CNapiGameSession_ResetActiveSession called @0x4C96E2,
 	//  `networkConnectType_480 != 1` @0x4C9722, the socket state @0x4C974E,
 	//  CNapiNetwork_TearDownSocket (the calls @0x4C9763 / @0x4C976F); CNapiNetwork_TearDownSocket
 	//  @0x4C4C90 - the line @0x4C4CBE..0x4C4CE7 ahead of NapiNPManager_CloseSocket @0x4C4CF5]
-	std::vector<std::vector<uint8_t>> destroy_session(int32_t reason, bool novaworld_join);
+	std::vector<std::vector<uint8_t>> destroy_session(int32_t reason, bool novaworld_join,
+			const std::function<void()> &enumerator_drain = {});
+	// The session reset's connection destroy drains the connection's enumerator, every record
+	// writing its REMOVED line: the join's own enumerated record (a join with no row), then
+	// `enumerator_drain`, the embedder's records of the browse the join went on from (its
+	// records stay the enumerator's from the dial on: the dial stops the enumerator and nothing
+	// drains it until this destroy, or the next search or LAN screen).
+	// [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - CNapiNPConnection_Destroy called
+	//  @0x4C8A93; CNapiNPConnection_Destroy @0x62A4B0 - NapiNPEnumerator_DrainTimerList (the
+	//  call @0x62A554); CNapiNetwork_StartClientConnection @0x4CA160 - NapiTimer_Stop @0x4CA1D8]
+	void drain_enumerator(const std::function<void()> &enumerator_drain);
 
 	// Queue one reliable C2S 0x1D stance change (0xA9 crouch / 0xAA prone / 0xAC stand) from
 	// the stance key SELECT; it leaves inside the next open send boundary in queue order.

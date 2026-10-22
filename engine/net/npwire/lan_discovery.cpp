@@ -198,6 +198,12 @@ void LanDiscoveryBrowser::drain_records() {
 	while (!records_.empty()) destroy_record(0);
 }
 
+void LanDiscoveryBrowser::adopt_records(LanDiscoveryBrowser &from) {
+	if (&from == this) return;
+	for (Record &record : from.records_) records_.push_back(std::move(record));
+	from.records_.clear();
+}
+
 void LanDiscoveryBrowser::create_record(const PeerAddr &from, LanDiscoveryServer server) {
 	// [orig: NapiNPSession_Create @0x624540 - the stamp GetTickCount into +0xB0C
 	//  @0x6245AE, appended at the enumerator list's tail @0x6246DA..0x624701, the id

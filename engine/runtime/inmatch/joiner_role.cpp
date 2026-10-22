@@ -1946,8 +1946,10 @@ void JoinerRole::close() {
 	if (reason == kMissionExitNone) {
 		for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
 	} else if (reason == kMissionExitReset) {
-		// The reason-2 arm's session reset: the connection's destroy, then the held server's stop.
+		// The reason-2 arm's session reset: the connection's destroy (its leave, then its
+		// enumerator's drain), then the held server's stop.
 		for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
+		runtime->drain_enumerator(enumerator_drain_);
 		stop_held_server();
 	} else if (route_mission_exit(reason, /*novaworld=*/false).destroys_session) {
 		destroy_session(reason);
@@ -1966,7 +1968,8 @@ void JoinerRole::cancel_join() {
 //  @0x4C9763; CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the burst sent at once
 //  (CNapiNPConnection_SendDisconnectPacket called @0x625406)]
 void JoinerRole::destroy_session(int32_t reason) {
-	for (const std::vector<uint8_t> &dg : runtime->destroy_session(reason, join_novaworld_))
+	for (const std::vector<uint8_t> &dg :
+			runtime->destroy_session(reason, join_novaworld_, enumerator_drain_))
 		send(dg);
 	stop_held_server();
 }

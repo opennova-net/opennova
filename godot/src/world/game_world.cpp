@@ -195,6 +195,10 @@ void GameWorld::_notification(int p_what) {
 		// carries the witness). HOST STOPPED formats that socket's bind address and port, the
 		// placeholder with none open (engine: inmatch::inout_host_line, D-NET-NEW-L1-26).
 		if (log_devices_ != nullptr) {
+			// The session reset's connection destroy drains the process enumerator first, each
+			// record's REMOVED line (engine: ClientRuntime::drain_enumerator carries the witness;
+			// the shutdown's reset: NapiLib_Shutdown -> CNapiGameSession_ResetActiveSession).
+			LanSession::drain_process_enumerator();
 			UdpPump *open_transport = UdpPump::process_transport();
 			UdpPumpDatagramSocket transport(open_transport);
 			const opennova::PeerAddr transport_address =

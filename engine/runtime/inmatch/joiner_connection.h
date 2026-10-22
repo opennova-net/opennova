@@ -304,6 +304,13 @@ public:
 		uint32_t client_index = 0;
 	};
 	void set_discovered_session(DiscoveredSession session) { discovered_ = std::move(session); }
+	// The connection destroy's drain of its enumerator: the session record a join with no row
+	// enumerated goes, writing its REMOVED line; none is left after. A row's join holds no
+	// record of its own (its browse's are the embedder's, ClientRuntime::drain_enumerator).
+	// [orig: CNapiNPConnection_Destroy @0x62A4B0 - NapiNPEnumerator_DrainTimerList (the call
+	//  @0x62A554); NapiNPTimer_Destroy @0x621E50 - the removed callback @0x621E5D..0x621E6F;
+	//  CNapiNetwork_OnSessionRemoved @0x4C68C0 - the line @0x4C6975]
+	void drain_enumerated_record();
 	// The connection's peer, the host the connect sends to (the dialed endpoint; zero for a
 	// socketless joiner). A discovered session's record holds the reply's source, which the
 	// 0x42 writes as SIP / SPN; a dial without a row announces to it, and the 0x41 writes its

@@ -157,8 +157,11 @@ func _on_launch_browse_rows(rows: Array, browse: LanSession) -> void:
 		if row == null or (_launch_browse_port != 0 and row.port != _launch_browse_port):
 			continue
 		var target := JoinTarget.from_lan_row(row)
-		# The join goes on with the search's socket (D-NET-NEW-R3-3).
+		# The join goes on with the search's socket (D-NET-NEW-R3-3) and its records, the
+		# process enumerator's from here on (MainGame.adopt_lan_records).
 		target.transport = _launch_browse.take_transport()
+		if _shell != null:
+			_shell.adopt_lan_records(_launch_browse)
 		_cancel_launch_browse()
 		_apply_launch_join_role(target)
 		join_lan_server(target)
@@ -363,6 +366,10 @@ func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
 	target.host_ip = row.host_ip
 	target.port = row.port
 	target.transport = probe.take_transport()
+	# The enumerate's records stay the process enumerator's until the join's session reset
+	# drains them (MainGame.adopt_lan_records; engine: ClientRuntime::drain_enumerator).
+	if _shell != null:
+		_shell.adopt_lan_records(probe)
 	_cancel_spectator_probe()
 	if target.entry_step() == JoinTarget.ENTRY_PROMPT:
 		_begin_join_choice(target)
@@ -387,6 +394,10 @@ func _cancel_spectator_probe() -> void:
 # the destroy zeroes the process game type the remote admin reads
 # (GameWorld.pre_game_cancelled).
 func _abort_spectator_preflight() -> void:
+	# State 9's FullDestroy drains the enumerate's records, each writing its removed line
+	# (engine: ClientRuntime::drain_enumerator carries the witness).
+	if _spectator_probe != null:
+		_spectator_probe.drain_records()
 	_cancel_spectator_probe()
 	_release_novaworld_client()
 	if _world != null:
@@ -438,6 +449,10 @@ func _commit_join_choice(game_password: String, spectate: bool, team_password: S
 # The choice's BACK or Cancel: retail's state 9 as above.
 func _cancel_join_role_choice() -> void:
 	_join_choice_target = null
+	# State 9's FullDestroy drains the process enumerator's records (the browse the join came
+	# from), each writing its removed line (engine: ClientRuntime::drain_enumerator).
+	if _shell != null:
+		_shell.drain_lan_records()
 	_release_novaworld_client()
 	if _world != null:
 		_world.pre_game_cancelled()

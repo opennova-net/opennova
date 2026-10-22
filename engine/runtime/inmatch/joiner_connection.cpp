@@ -796,6 +796,12 @@ void JoinerConnection::on_server_hello(
 	enumerate_pass_ended_ = false;
 }
 
+void JoinerConnection::drain_enumerated_record() {
+	if (!enumerated_session_recorded_) return;
+	enumerated_session_recorded_ = false;
+	connect_log_line(net_session_removed_text(host_address_, enumerated_session_sn_));
+}
+
 namespace {
 // One per process, never reset [orig: g_ClientNetFrameCounter @0xA822A4].
 uint32_t g_client_net_frame_counter = 0;

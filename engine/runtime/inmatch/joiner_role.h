@@ -40,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace opennova::inmatch {
@@ -174,6 +175,10 @@ public:
 	// its transport, so no NET TEARING DOWN SOCKET (ClientRuntime::destroy_session). Set by the
 	// embedder from the join record; it outlives a runtime rebuild.
 	void set_join_novaworld(bool novaworld) { join_novaworld_ = novaworld; }
+	// The embedder's drain of the process enumerator's records (the browse the join went on
+	// from), each writing its REMOVED line: the session reset's connection destroy runs it
+	// (ClientRuntime::drain_enumerator). Set by the embedder; it outlives a runtime rebuild.
+	void set_enumerator_drain(std::function<void()> drain) { enumerator_drain_ = std::move(drain); }
 	void store_mission_exit(int32_t reason) override {
 		if (runtime) runtime->set_mission_exit_reason(reason);
 	}
@@ -384,6 +389,7 @@ private:
 	std::string join_password_;
 	bool started_ = false;       // ClientHello emitted (Idle -> Hello)
 	bool join_novaworld_ = false; // set_join_novaworld: FullDestroy keeps the transport
+	std::function<void()> enumerator_drain_; // set_enumerator_drain
 	bool local_spawned_ = false; // L spawned at reached_in_match (one-shot guard)
 	bool wire_world_static_initialized_ = false;
 	uint64_t wire_world_topology_revision_seen_ = ~uint64_t{0};

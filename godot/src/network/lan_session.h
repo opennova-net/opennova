@@ -90,6 +90,14 @@ public:
 	// process's _connectlog.txt (LanDiscoveryBrowser::drain_records): the LAN screen's
 	// activation and a join's enumerate-and-join drain them, as a search does.
 	void drain_records() { browser_.drain_records(); }
+	// This browse stands for the process's one enumerator (the LAN screen's, MainGame's): a
+	// join's session reset and the process exit drain its records (drain_process_enumerator;
+	// engine: ClientRuntime::drain_enumerator carries the witness, D-NET-NEW-L8-8).
+	void set_process_enumerator(bool p_enabled);
+	static void drain_process_enumerator();
+	// The records of the browse a join went on from (the enumerate-and-join's, the launch
+	// search's) become this one's, silently (engine: LanDiscoveryBrowser::adopt_records).
+	void adopt_records(LanSession *p_from);
 	TypedArray<LanServerRow> get_servers() const;
 	// The session a join from the list's row `index` takes: the listed session at the
 	// row's index, which a replaced session makes another than the row's own (engine:

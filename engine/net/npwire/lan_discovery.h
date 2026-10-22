@@ -245,6 +245,13 @@ public:
 	//  UI_StartLANSessionSearch @0x55830F, UI_InitLANMultiplayerScreen @0x5569C7,
 	//  UI_EnumerateAndJoinSession @0x56A08C]
 	void drain_records();
+	// The records of `from`, another browse of the same process (the join's enumerate, a
+	// launch search), join this one's at its list's tail, silently, and `from` keeps none:
+	// the process has one enumerator, whose records a join's dial freezes until a drain (the
+	// join's session destroy, the next search or LAN screen; ClientRuntime::drain_enumerator).
+	// [orig: CNapiNetwork_StartClientConnection @0x4CA160 - the ctx's one client connection
+	//  @0x4CA1C2, its enumerator stopped @0x4CA1D8, nothing drained]
+	void adopt_records(LanDiscoveryBrowser &from);
 	// The connect log's line writer: the embedder's _connectlog.txt, which writes while
 	// the log is on (ConnectLog::line); none writes nothing. Kept across begin/stop.
 	void set_connect_log(std::function<void(const std::string &)> line) {

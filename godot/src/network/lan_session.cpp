@@ -31,6 +31,8 @@ constexpr const char *DEFAULT_BROADCAST = "255.255.255.255";
 // The process's held server and its log devices (LanSession::set_process_held_server).
 opennova::inmatch::UnstoppedServer *g_held_server = nullptr;
 opennova::inmatch::ServerLogs g_held_server_logs;
+// The browse standing for the process's one enumerator (LanSession::set_process_enumerator).
+LanSession *g_process_enumerator = nullptr;
 
 Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row, uint32_t client_index) {
 	// Retail hosts advertise the typed server name in the host's single-byte
@@ -92,7 +94,23 @@ LanSession::LanSession() {
 }
 
 LanSession::~LanSession() {
+	if (g_process_enumerator == this) g_process_enumerator = nullptr;
 	stop();
+}
+
+void LanSession::set_process_enumerator(bool p_enabled) {
+	if (p_enabled)
+		g_process_enumerator = this;
+	else if (g_process_enumerator == this)
+		g_process_enumerator = nullptr;
+}
+
+void LanSession::drain_process_enumerator() {
+	if (g_process_enumerator != nullptr) g_process_enumerator->drain_records();
+}
+
+void LanSession::adopt_records(LanSession *p_from) {
+	if (p_from != nullptr && p_from != this) browser_.adopt_records(p_from->browser_);
 }
 
 void LanSession::_bind_methods() {
@@ -110,6 +128,8 @@ void LanSession::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_resource_root"), &LanSession::get_resource_root);
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
 	ClassDB::bind_method(D_METHOD("drain_records"), &LanSession::drain_records);
+	ClassDB::bind_method(D_METHOD("set_process_enumerator", "enabled"), &LanSession::set_process_enumerator);
+	ClassDB::bind_method(D_METHOD("adopt_records", "from"), &LanSession::adopt_records);
 	ClassDB::bind_method(D_METHOD("get_servers"), &LanSession::get_servers);
 	ClassDB::bind_method(D_METHOD("get_join_row", "index"), &LanSession::get_join_row);
 	ClassDB::bind_method(D_METHOD("is_browsing"), &LanSession::is_browsing);
