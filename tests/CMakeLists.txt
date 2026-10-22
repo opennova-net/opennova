@@ -5562,7 +5562,8 @@ add_test(NAME controls_input_event_queue COMMAND controls_input_event_queue_test
 # --- parity lane R3L (R3-lite replay) ---
 # R3-lite: the retail capture run_20260426_120859's S2C stream replayed into a seeded joiner
 # ClientRuntime at its own timing (every tag decodes and dispatches; pools, frames, board; the
-# C2S replies body for body; the timer sends by rate).
+# C2S replies body for body; the timer sends by rate), and its host twin: the capture's C2S
+# stream into a socketless host (every record reaches a named handler but 0x48's; the replies).
 add_executable(npruntime_retail_s2c_replay_test npruntime/retail_s2c_replay_test.cpp)
 target_link_libraries(npruntime_retail_s2c_replay_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_retail_s2c_replay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

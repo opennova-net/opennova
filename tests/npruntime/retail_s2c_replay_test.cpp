@@ -32,26 +32,58 @@
 //
 // Class resolution: the authored 14-row table the core nwmsg_codec_parity leg uses (no
 // items.def). client_input.nwmsg is client_runtime.nwmsg's first bundle, recorded twice.
+//
+// The host twin. The capture's C2S stream (client_startup, client_runtime: one bundle per
+// retail packet) is framed packet by packet as the joiner's 0x43 and fed, at the capture's
+// own timing, into a socketless host (bring_up_host) that the twin's joiner reached through
+// a 0x41 / 0x42 of its own (the capture keeps no handshake). The host is configured as the
+// capture's was: the S2C 0x08's game type, the JOIN's expansion and VERSIONCRCSTRING, the
+// S2C 0x04's slot capacity. The host's producer runs between packets (tick_connections, the
+// spawn pump once per periodic second); a packet with an in-match record waits until the
+// host has added the player, as the retail client's did (it answered the add's records).
+// Asserted, each failure naming the tag and the packet:
+//   - every packet deframes in order; no description (disconnect) is queued; the joiner is
+//     never torn down;
+//   - the 0x00 / 0x01 / 0x02 reach the admission walk in its turn; every other record reaches
+//     the in-match switch, and only C2S 0x48's take its default arm with no named handler
+//     (NapiNPServerCtx::unnamed_records; retail's 0x48 handler is a lone retn);
+//   - the replies a handler sends in the twin's state, tag for tag per packet (kReplyRules),
+//     each a tag the retail host's own stream carries.
+// The capture keeps no C2S of the joiner's load (its 0x2F, its 0x0B), so the twin's slot waits
+// at state 5 and the in-game handlers that need a joined slot stop at their join gates; their
+// reply tags are printed, not asserted.
 
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/napi_np_connection.h> // make_jo_game_session_sequencing
+#include <runtime/inmatch/napi_np_protocol.h>   // handle_server_datagram / tick_connections
+#include <runtime/inmatch/napi_np_server_ctx.h> // NapiNPServerCtx::unnamed_record_count
+#include <runtime/inmatch/server_spawn.h>       // Server_InitNewRoundState / the spawn pump
+#include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/item_replication_catalog.h>
 #include <runtime/world/entity.h> // world::retail_pool_capacity
+#include <runtime/world/world.h>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/crt_ftol.h> // retail_atol (the VERSIONCRCSTRING the host's check reads)
 #include <base/io/tick_rate.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h> // mission::make_default
+#include <net/npwire/flat_tlv.h>      // the C2S 0x00 JOIN body's fields
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_decode_session.h> // decode_session_config
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h> // the twin joiner's 0x41 / 0x42
+#include <net/npwire/session_keys.h>
 #include <net/title/title_identity.h>
 
 #include "common/nwmsg_fixture.h"
 #include "conn_fixture.h"
+#include "host_test_setup.h"
 
 #include <algorithm>
 #include <array>
@@ -63,6 +95,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -816,11 +849,398 @@ void run_client_leg(const std::string &dir) {
 				hex_head(retail.report_bodies.front()).c_str());
 }
 
+// --- the host twin ---
+
+constexpr uint32_t kTwinHostKey = 0x4833524Cu;   // the host's HK, echoed in the twin's 0x42
+constexpr uint32_t kTwinClientKey = 0x4A33524Cu; // the twin joiner's CK
+const std::string kTwinClientScrk = "R3L-TWIN-CLIENT-SCRK";
+const PeerAddr kTwinPeer{0x0100007Fu, 30002};
+
+// The stock client's 0x42 environment block (the build values the host's JOIN check reads:
+// the retail host admitted this client, so its environment was the title's).
+void add_stock_environment(ClientAuth &auth) {
+	const std::pair<const char *, const char *> fields[] = {
+		{"BT", "0"}, {"VN", "2"}, {"BN", "1"}, {"DB", "0"}, {"MBN", "20042002"},
+		{"SOPD", "180"}, {"VERSIONSTRING", "V1.7.5.7"}, {"COUNTRYCODE", "us"},
+		{"TZB", "300"}, {"MPS", "1300"},
+	};
+	for (const auto &field : fields) auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
+}
+
+// One string field of the C2S 0x00 JOIN body's flat-TLV run ("" when absent).
+std::string join_field(const std::vector<uint8_t> &body, const std::string &name) {
+	std::string value;
+	std::size_t pos = 0;
+	while (pos < body.size()) {
+		FlatTlvField field;
+		const std::size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd || field.name.empty()) break;
+		if (field.name == name) value = load_value_string(field.value, body.data() + body.size(), 512);
+		pos = next;
+	}
+	return value;
+}
+
+// The reply a record's handler sends in the twin's state, -1 for none asserted. Each pair is
+// a requester-only answer with no state gate the twin's slot fails (the admission's three, the
+// in-match legs a joiner's added slot answers before its join). Records whose answer needs a
+// joined slot or host state the twin does not model (0x0E, 0x06, 0x25, 0x28, 0x29, 0x4E, ...)
+// assert nothing here; their reply tags print.
+int expected_reply(const Logical &record, bool admission, uint32_t capacity) {
+	const std::vector<uint8_t> &b = record.body;
+	if (admission) {
+		switch (record.full_tag) {
+			case c2s::JOIN: return s2c::INIT;                     // dispatch_admission's 0x00
+			case c2s::JOIN_FORM_POST: return s2c::JOIN_PADDING_PROBE; // admission_padding_probe
+			default: return -1; // the 0x02's four records: kAdmissionEchoReplies
+		}
+	}
+	switch (record.full_tag) {
+		case c2s::PING: return s2c::SPECTATOR_FLAGS;
+		case c2s::FILE_CHUNK_REQUEST: return s2c::FILE_TRANSFER_CHUNK;
+		case c2s::MISSION_CHUNK_REQUEST: return s2c::MISSION_DATA_CHUNK;
+		case c2s::PLAYER_SYNC_REQUEST: return !b.empty() && b[0] < capacity ? s2c::PLAYER_SYNC : -1;
+		case c2s::SPAWN_MENU_REQUEST: return s2c::SPAWN_ACK_TIMESTAMP;
+		case c2s::VISIBLE_PLAYERS_REQUEST: return b.empty() ? s2c::VISIBLE_PLAYERS : -1;
+		case c2s::BURST_MEMBER_2D: return s2c::SESSION_STATUS;
+		case c2s::EMPTY_SLOT_SWEEP_REQUEST: return s2c::EMPTY_SLOT_SWEEP;
+		case c2s::RTT_CONSUMED: return is_ping(b) ? s2c::RTT_ECHO : -1;
+		default: return -1;
+	}
+}
+
+// The admission's completing 0x02 answers its four records (emit_admission_metadata), behind
+// the holdoff dictation's settings records.
+const uint8_t kAdmissionEchoReplies[] = {s2c::SYNC_STATE, s2c::PLAYER_NAME, s2c::FULL_PLAYER_INFO,
+		s2c::SYNC_TICK};
+
+// Every reply tag the rules above can name: the per-packet comparison's columns.
+const uint8_t kAssertedReplies[] = {s2c::INIT, s2c::SYNC_STATE, s2c::JOIN_PADDING_PROBE, s2c::SYNC_TICK,
+		s2c::PLAYER_NAME, s2c::FULL_PLAYER_INFO, s2c::SPECTATOR_FLAGS, s2c::FILE_TRANSFER_CHUNK,
+		s2c::MISSION_DATA_CHUNK, s2c::PLAYER_SYNC, s2c::SPAWN_ACK_TIMESTAMP, s2c::VISIBLE_PLAYERS,
+		s2c::SESSION_STATUS, s2c::EMPTY_SLOT_SWEEP, s2c::RTT_ECHO};
+
+std::string tags_text(const std::vector<uint8_t> &tags) {
+	std::string out;
+	char buf[8];
+	for (uint8_t t : tags) {
+		std::snprintf(buf, sizeof buf, " %02x", t);
+		out += buf;
+	}
+	return out.empty() ? " -" : out;
+}
+
+struct TwinHost {
+	std::unique_ptr<world::World> host_world = std::make_unique<world::World>();
+	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	std::unique_ptr<bms::File> mission_file = std::make_unique<bms::File>();
+	replication::UdpSessionTransport transport{replication::UdpSessionTransport::Role::Host};
+
+	inmatch::NapiNPConnection *joiner() {
+		for (inmatch::NapiNPConnection &c : ctx->np_protocol.connection_list)
+			if (c.peer == kTwinPeer && c.type == inmatch::NapiNPConnection::kTypeServerSide) return &c;
+		return nullptr;
+	}
+
+	// The low-table records the transport holds, in order; a queued description (the
+	// disconnect / punt carrier) fails at once.
+	std::vector<uint8_t> drain(const std::string &where) {
+		std::vector<uint8_t> tags;
+		replication::Datagram d;
+		while (transport.pop_outbound(d)) {
+			if ((d.protocol_flags_raw & PROTOCOL_MSG_FLAG_SETTINGS_UPDATE) != 0) {
+				if (d.tag == hightag::DESCRIPTION_PACKET)
+					fail("host twin: %s: the host queued a description (a disconnect) %s", where.c_str(),
+							hex_head(d.body, 40).c_str());
+				continue;
+			}
+			tags.push_back(d.tag);
+		}
+		return tags;
+	}
+};
+
+void run_host_twin(const std::string &dir) {
+	Stream c2s_stream, down;
+	if (!load_stream(dir, {"client_startup.nwmsg", "client_runtime.nwmsg"}, c2s_stream) ||
+			!load_stream(dir, {"server_join_packets.nwmsg", "server_load_packets.nwmsg",
+					"server_runtime_packets.nwmsg"}, down))
+		return;
+
+	// --- the host, configured as the capture's was ---
+	const Logical *join = c2s_stream.first(c2s::JOIN);
+	const Logical *config_msg = down.first(s2c::SESSION_CONFIG);
+	const Logical *slot_msg = down.first(s2c::SESSION_SLOT_CONFIG);
+	SessionConfig session{};
+	if (join == nullptr || config_msg == nullptr || slot_msg == nullptr || slot_msg->body.size() < 24 ||
+			!decode_session_config(config_msg->body.data(), config_msg->body.size(), session)) {
+		fail("host twin: the capture lacks its C2S 0x00, a decodable S2C 0x08 or a 24-byte S2C 0x04");
+		return;
+	}
+	const std::string expansion = join_field(join->body, "EXP");
+	const std::string version_crc = join_field(join->body, "VERSIONCRCSTRING");
+
+	auto host = std::make_unique<TwinHost>();
+	world::World &w = *host->host_world;
+	inmatch::NapiNPServerCtx &ctx = *host->ctx;
+	w.rules.mp_session = true;
+	w.registry.configure_pool(0, 16);
+	w.registry.configure_pool(1, 8);
+	w.registry.configure_pool(2, 8);
+	w.registry.configure_pool(3, 16);
+	{
+		world::Entity start; // a start marker for the joiner's add
+		start.kind = world::EntityKind::Marker;
+		start.item_id = 6002;
+		start.position = {10.0f, 20.0f, 1.0f};
+		start.item_type_index = 1;
+		start.has_item_def = true;
+		w.registry.spawn(3, start);
+	}
+	mission::make_default(*host->mission_file);
+	inmatch::GameConfig config;
+	config.game_type = static_cast<uint32_t>(session.fields[3]);
+	config.max_players = slot_msg->body[18]; // the capture's slot capacity
+	config.expansion = expansion;
+	config.expansion_version_checksum = io::retail_atol(version_crc.c_str());
+	// A Serve Only host: its slot 0 is the host's row, so the joiner takes slot 1, as the
+	// capture's (S2C 0x04 byte 17) did on its listen host.
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+			inmatch::SocketMode::Socketless, kTwinHostKey, nullptr, config);
+	ctx.world = &w;
+	ctx.mission = host->mission_file.get();
+	inmatch::Server_InitNewRoundState(ctx);
+	const uint32_t capacity = ctx.config.total_player_slot_capacity();
+	std::printf("host twin: game type 0x%X, EXP %s, VERSIONCRCSTRING %s, slot capacity %u (the "
+			"capture's 0x04: %u), authority %u\n", config.game_type, expansion.c_str(), version_crc.c_str(),
+			capacity, static_cast<unsigned>(slot_msg->body[18]), static_cast<unsigned>(ctx.is_authority));
+
+	// --- the twin joiner's 0x41 / 0x42 ---
+	uint32_t host_tick = 1;
+	const TitleIdentity &title = *title_identity(gameprofile::GAME_JO);
+	{
+		const std::vector<uint8_t> hello = nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
+				client_hello_to_bytes(make_title_client_hello(title, 1)));
+		(void)inmatch::handle_server_datagram(ctx, kTwinPeer, hello.data(), hello.size(), host_tick);
+	}
+	uint32_t server_sk = 0;
+	{
+		ClientAuth auth = make_title_client_auth(title, 1, kTwinClientKey, kTwinHostKey, "R3L-JOINER",
+				kTwinClientScrk);
+		add_stock_environment(auth);
+		const std::vector<uint8_t> datagram =
+				nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		const inmatch::HandleResult accepted =
+				inmatch::handle_server_datagram(ctx, kTwinPeer, datagram.data(), datagram.size(), host_tick);
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ServerAuth server_auth;
+		if (accepted.outbound.empty() ||
+				!nw_decode_inbound(accepted.outbound[0].data(), accepted.outbound[0].size(), opcode, body) ||
+				opcode != SESSION_OPCODE_SERVER_AUTH || !parse_server_auth(body.data(), body.size(), server_auth) ||
+				host->joiner() == nullptr) {
+			fail("host twin: the host did not accept the twin joiner's 0x42");
+			return;
+		}
+		server_sk = server_auth.sk;
+	}
+	// The owner binds the accepted connection's transport (HostOwner's accept).
+	host->joiner()->link.transport = &host->transport;
+	host->joiner()->link.mode = replication::TransportMode::Client;
+
+	// --- the corpus's C2S, packet by packet ---
+	std::vector<std::vector<const Logical *>> records(c2s_stream.packets.size());
+	for (const Logical &m : c2s_stream.messages) records[m.packet].push_back(&m);
+	auto needs_slot = [&](std::size_t p) {
+		for (const Logical *r : records[p])
+			if (r->full_tag > c2s::JOIN_PADDING_ECHO) return true;
+		return false;
+	};
+
+	SessionSequencing client_tx = inmatch::make_jo_game_session_sequencing();
+	client_tx.outbound_message_limit = 0; // the replaying joiner retains nothing
+	const uint64_t tick_us = static_cast<uint64_t>(io::kTickMs) * 1000u;
+	const uint64_t t0 = c2s_stream.packets.front().ts_us;
+	auto tick_of = [&](uint64_t ts) { return ts <= t0 ? uint64_t(0) : (ts - t0) / tick_us; };
+	const uint64_t k_last = tick_of(c2s_stream.packets.back().ts_us);
+	const uint64_t k_limit = k_last + 10u * static_cast<uint64_t>(io::kTicksPerSecondInt);
+
+	std::map<uint16_t, std::size_t> seen, at_admission, at_switch, unnamed;
+	std::map<uint8_t, std::size_t> reply_histogram, producer_histogram;
+	std::set<uint8_t> asserted_replies;
+	std::size_t next = 0;
+	uint32_t framed = 0;
+	uint64_t held_since = 0;
+	bool holding = false;
+	for (uint64_t k = 0; next < c2s_stream.packets.size() && k <= k_limit; ++k, ++host_tick) {
+		while (next < c2s_stream.packets.size() && tick_of(c2s_stream.packets[next].ts_us) <= k) {
+			inmatch::NapiNPConnection *conn = host->joiner();
+			if (conn == nullptr) {
+				fail("host twin: the joiner's connection is gone before %s", c2s_stream.where(next).c_str());
+				return;
+			}
+			if (needs_slot(next) && !player_slot_active(*conn)) {
+				if (!holding) held_since = k;
+				holding = true;
+				break; // the retail client answered the add's records: hold for the add
+			}
+			if (holding && k != held_since)
+				std::printf("host twin: %s held %llu frames for the player add\n", c2s_stream.where(next).c_str(),
+						static_cast<unsigned long long>(k - held_since));
+			holding = false;
+			const std::string where = c2s_stream.where(next);
+			for (uint8_t t : host->drain(where)) ++producer_histogram[t];
+
+			// The state each record meets: the admission walk until the 0x02 completes it, the
+			// in-match switch after (the slot gate open, no description sent).
+			bool admission = conn->admission_stage != inmatch::GameAdmissionStage::Complete;
+			const bool slot_active = player_slot_active(*conn);
+			const uint32_t id_before = conn->connection_id;
+			std::map<uint8_t, std::size_t> want_replies;
+			std::map<uint16_t, std::size_t> want_unnamed;
+			std::vector<uint8_t> record_tags;
+			for (const Logical *r : records[next]) {
+				record_tags.push_back(static_cast<uint8_t>(r->full_tag));
+				++seen[r->full_tag];
+				if (admission) {
+					if (r->full_tag > c2s::JOIN_PADDING_ECHO)
+						fail("host twin: C2S 0x%02X at %s arrives ahead of the admission's end: no handler "
+								"answers it", r->full_tag, where.c_str());
+					else
+						++at_admission[r->full_tag];
+					if (r->full_tag == c2s::JOIN_PADDING_ECHO)
+						for (uint8_t t : kAdmissionEchoReplies) ++want_replies[t];
+				} else if (r->full_tag > c2s::JOIN_PADDING_ECHO && !slot_active) {
+					fail("host twin: C2S 0x%02X at %s meets the slot gate (no player added): no handler "
+							"answers it", r->full_tag, where.c_str());
+				} else {
+					++at_switch[r->full_tag];
+					if (r->full_tag == c2s::CLIENT_ACK) ++want_unnamed[r->full_tag];
+				}
+				const int reply = expected_reply(*r, admission, capacity);
+				if (reply >= 0) ++want_replies[static_cast<uint8_t>(reply)];
+				if (admission && r->full_tag == c2s::JOIN_PADDING_ECHO) admission = false;
+			}
+			std::array<uint32_t, 256> unnamed_before{};
+			for (std::size_t t = 0; t < unnamed_before.size(); ++t)
+				unnamed_before[t] = ctx.unnamed_record_count(static_cast<uint8_t>(t));
+
+			std::vector<ProtocolMessage> messages;
+			for (const nwmsg::FixtureMessage &m : c2s_stream.packets[next].physical)
+				messages.push_back(nwmsg::message_from_fixture(m));
+			std::vector<uint8_t> body;
+			if (!frame_session_packet(client_tx, SessionCrypto{kTwinClientScrk, {}, server_sk}, messages, body)) {
+				fail("host twin: framing %s failed", where.c_str());
+				return;
+			}
+			const std::vector<uint8_t> datagram =
+					nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(body));
+			const inmatch::HandleResult result = inmatch::handle_server_datagram(
+					ctx, kTwinPeer, datagram.data(), datagram.size(), host_tick);
+			++framed;
+			++next;
+			for (const inmatch::HostAcceptEvent &e : result.events)
+				if (e.kind == inmatch::HostAcceptEvent::Kind::PeerGoodbye)
+					fail("host twin: %s: the host dropped the joiner", where.c_str());
+			conn = host->joiner();
+			if (conn == nullptr) {
+				fail("host twin: %s: the joiner's connection was torn down", where.c_str());
+				return;
+			}
+			if (conn->seq.last_inbound_seq != framed || !conn->seq.queued_inbound.empty())
+				fail("host twin: %s: the host's inbound frontier is %u (%zu queued), %u packets framed",
+						where.c_str(), conn->seq.last_inbound_seq, conn->seq.queued_inbound.size(), framed);
+			if (conn->host_disconnect_sent) fail("host twin: %s: the host sent the joiner a description", where.c_str());
+			if (conn->connection_id != id_before)
+				std::printf("note: host twin: %s moved the joiner's connection id %u -> %u (our C2S 0x48 "
+						"leg; retail's handler reads nothing)\n", where.c_str(), id_before, conn->connection_id);
+
+			// Every record but 0x48's reaches a named case.
+			for (std::size_t t = 0; t < unnamed_before.size(); ++t) {
+				const uint32_t delta =
+						ctx.unnamed_record_count(static_cast<uint8_t>(t)) - unnamed_before[t];
+				if (delta != 0) unnamed[static_cast<uint16_t>(t)] += delta;
+				const auto want = want_unnamed.find(static_cast<uint16_t>(t));
+				const std::size_t expected = want == want_unnamed.end() ? 0 : want->second;
+				if (delta != expected)
+					fail("host twin: C2S 0x%02X at %s: %u record(s) took the in-match switch's default arm with "
+							"no named handler, %zu expected", static_cast<unsigned>(t), where.c_str(), delta,
+							expected);
+			}
+
+			// The replies, tag for tag.
+			const std::vector<uint8_t> replies = host->drain(where);
+			std::map<uint8_t, std::size_t> got;
+			for (uint8_t t : replies) {
+				++got[t];
+				++reply_histogram[t];
+			}
+			for (uint8_t t : kAssertedReplies) {
+				const std::size_t want = want_replies.count(t) ? want_replies[t] : 0;
+				const std::size_t have = got.count(t) ? got[t] : 0;
+				if (want != 0) asserted_replies.insert(t);
+				if (want != have)
+					fail("host twin: %s (C2S%s): S2C 0x%02X x%zu queued, x%zu expected (replies%s)", where.c_str(),
+							tags_text(record_tags).c_str(), t, have, want, tags_text(replies).c_str());
+			}
+			if (c2s_stream.packets[next - 1].file == "client_startup.nwmsg")
+				std::printf("host twin: %s C2S%s -> S2C%s\n", where.c_str(), tags_text(record_tags).c_str(),
+						tags_text(replies).c_str());
+		}
+		// The host's frame: the spawn pump once per periodic second, then the producer.
+		if (k % static_cast<uint64_t>(io::kTicksPerSecondInt) == 0)
+			(void)inmatch::Server_ProcessPendingPlayerSpawns(ctx, w);
+		(void)inmatch::tick_connections(ctx, static_cast<int>(io::kTickMs), host_tick);
+		for (uint8_t t : host->drain("the producer")) ++producer_histogram[t];
+	}
+
+	// --- the run ---
+	if (next != c2s_stream.packets.size())
+		fail("host twin: only %zu of %zu packets delivered (%s waits for the player add)", next,
+				c2s_stream.packets.size(), c2s_stream.where(next).c_str());
+	if (const inmatch::NapiNPConnection *conn = host->joiner()) {
+		if (conn->admission_stage != inmatch::GameAdmissionStage::Complete)
+			fail("host twin: the admission never completed");
+		if (!conn->c2s_reassembly.buffer.empty()) fail("host twin: a C2S fragment chain is still open");
+		std::printf("host twin: %u packets, %zu records; the joiner's slot %u in state %u, phase %u\n", framed,
+				c2s_stream.messages.size(), conn->reply.player_slot, static_cast<unsigned>(conn->slot_state),
+				static_cast<unsigned>(conn->phase));
+	}
+	std::printf("host twin: C2S tag  records  admission  switch  default(unnamed)\n");
+	for (const auto &kv : seen) {
+		const uint16_t tag = kv.first;
+		const std::size_t handled = at_admission[tag] + at_switch[tag];
+		std::printf("  0x%02X  %7zu  %9zu  %6zu  %7zu%s\n", tag, kv.second, at_admission[tag], at_switch[tag],
+				unnamed[tag], tag == c2s::CLIENT_ACK
+						? "  (retail: NapiNPServerMsg_0x048 @0x510F30, a lone retn)"
+						: "");
+		if (handled != kv.second)
+			fail("host twin: C2S 0x%02X: %zu of %zu records reached a handler", tag, handled, kv.second);
+	}
+	std::string reply_line, producer_line;
+	char buf[24];
+	for (const auto &kv : reply_histogram) {
+		std::snprintf(buf, sizeof buf, " %02x:%zu", kv.first, kv.second);
+		reply_line += buf;
+	}
+	for (const auto &kv : producer_histogram) {
+		std::snprintf(buf, sizeof buf, " %02x:%zu", kv.first, kv.second);
+		producer_line += buf;
+	}
+	std::printf("host twin: S2C replies (tag:count)%s\nhost twin: S2C from the producer%s\n", reply_line.c_str(),
+			producer_line.c_str());
+	// Each asserted reply is one the retail host sent on this session.
+	for (uint8_t t : asserted_replies)
+		if (down.count(t) == 0)
+			fail("host twin: the asserted reply S2C 0x%02X never appears in the retail host's stream", t);
+}
+
 } // namespace
 
 int main() {
 	const std::string dir = std::string(FIXTURE_DIR) + "/" + kRun;
 	run_client_leg(dir);
+	run_host_twin(dir);
 	if (g_failures != 0) {
 		std::printf("npruntime_retail_s2c_replay: %d failure(s)\n", g_failures);
 		return 1;

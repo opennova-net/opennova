@@ -799,6 +799,13 @@ struct NapiNPServerCtx {
 	std::vector<OrphanedPlayerRow> orphaned_player_rows;
 	// The last net-player identity drawn for an orphaned row (NapiNPConnection::net_player_serial).
 	uint32_t last_net_player_serial = 0;
+	// Test seam: per tag, the in-match records dispatch_session_replies' default arm took with
+	// no named handler on this host. The squad legs' tags (Server_HandleSquadMessage) are named;
+	// C2S 0x48's records count here, its server handler being a bare return. No game code
+	// reads it. [orig: NapiNPServerMsg_0x048 @0x510F30 (a lone retn), the server table's 0x48
+	// row @0x82B9B8]
+	std::array<uint32_t, 256> unnamed_records{};
+	uint32_t unnamed_record_count(uint8_t tag) const { return unnamed_records[tag]; }
 
 	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
 	// compiler-default special members suffice.

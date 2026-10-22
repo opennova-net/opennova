@@ -1514,9 +1514,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			default:
 				// The command map's squad / waypoint / punt legs (server_squad.h); 0x48
-				// + per-frame client updates: consumed (no reactive reply).
-				if (inputs.server_ctx != nullptr && world != nullptr)
-					Server_HandleSquadMessage(*inputs.server_ctx, conn, msg.tag, msg.payload, *world);
+				// + per-frame client updates: consumed (no reactive reply). A record no
+				// named handler takes counts on the host's test seam
+				// (NapiNPServerCtx::unnamed_records).
+				if (inputs.server_ctx != nullptr && world != nullptr &&
+						Server_HandleSquadMessage(*inputs.server_ctx, conn, msg.tag, msg.payload, *world))
+					break;
+				if (inputs.server_ctx != nullptr) ++inputs.server_ctx->unnamed_records[msg.tag];
 				break;
 		}
 	}
