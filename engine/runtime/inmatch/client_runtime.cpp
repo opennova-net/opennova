@@ -2236,7 +2236,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end() {
 	// wait for the S2C 0x0F, whose every pass reads the socket and runs the receive
 	// handlers before its send: everything that arrived during the load is folded first,
 	// its ACK rides the held submissions' packet and its handlers' replies queue behind
-	// them. That is the next frame's WorldStateWait loop, its receive then its send.
+	// them. That is the WorldStateWait loop's first pass, its receive then its send, which
+	// the role runs right after this push, in the same call (JoinerRole::push_mission_start_end).
 	// [orig: Game_StartMission @0x526295..0x5262e5 - PumpManagerReceive @0x5262b4,
 	//  PumpClientProtocolRecv @0x5262be, PumpClientProtocolSend @0x5262da]
 	return log_client_sends(std::move(outbound), joiner_->session_lost());

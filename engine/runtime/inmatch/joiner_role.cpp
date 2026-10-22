@@ -159,13 +159,41 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 }
 
 // The mission start's end once the S2C 0x1A released it: its pumps' datagrams, the two
-// 0x2F and the 0x0B in one packet or two by the send-holdoff countdown; what it holds
-// leaves from the next frame's final wait (ClientRuntime::push_mission_start_end)
-// [orig: Game_StartMission @0x524360 - @0x5258a2, @0x526255, the final wait @0x5262b4 /
-// @0x5262da].
+// 0x2F and the 0x0B in one packet or two by the send-holdoff countdown
+// (ClientRuntime::push_mission_start_end). The final wait's first pass follows the push's
+// send in the same call, no frame between (D-NET-NEW-L2-35): its manager receive reads the
+// socket, its client receive runs the handlers over what came during the load, and its send
+// ships what the push's countdown held (the busy spin's passes count it out at once). The
+// wait's later passes are the frames' (run_tick), until the S2C 0x0F.
+// [orig: Game_StartMission @0x524360 - @0x5258a2, the send @0x526255, Game_PumpWindowMessages
+//  @0x52625A, Input_ResetKeyQueue @0x526288, the wait's first pass:
+//  CNapiNetwork_PumpManagerReceive @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE,
+//  CNapiNetwork_PumpClientProtocolSend @0x5262DA]
 void JoinerRole::push_mission_start_end() {
 	if (!runtime) return;
 	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_end()) send(dg);
+	if (!runtime->in_final_wait()) return;
+	deposit_inbound();
+	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_)) send(dg);
+}
+
+// The game-start wait's pass, and when its receive took the S2C 0x1A the mission start's call
+// in the same call: the load, the settle, the push and the final wait's first pass (joiner_role.h
+// carries the witness).
+// [orig: NapiClient_WaitForGameStart @0x42CC10 - the receive @0x42CC88, the send @0x42CC92, the
+//  flag test @0x42CCB9..0x42CCBF, the return @0x42CCC1; Game_StartMission @0x524360 - the call
+//  @0x524E29, @0x524E54..0x524E63, the send @0x526255]
+JoinerRole::MissionStartPass JoinerRole::poll_mission_start(const MissionStartLegs &legs) {
+	if (!runtime) return MissionStartPass::Stopped;
+	if (!runtime->mission_start_released()) {
+		poll_preload();
+		if (legs.after_pass && !legs.after_pass()) return MissionStartPass::Stopped;
+		if (!runtime->mission_start_released()) return MissionStartPass::Waiting;
+	}
+	if (!legs.load || !legs.load()) return MissionStartPass::Stopped;
+	if (legs.settle && !legs.settle()) return MissionStartPass::Stopped;
+	push_mission_start_end();
+	return MissionStartPass::Started;
 }
 
 // The load's first leg (ClientRuntime::push_mission_start_first_loadout) [orig:
@@ -1650,10 +1678,10 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	const uint32_t now = now_tick_;
 	// The uplink describes L's pose as left by the previous entity update and this frame's
 	// receive; this frame's raw-input/motor pass follows all inbound application.
+	// The health edge is this net frame's own (its applier writes L, which no receive outside
+	// the net frame finds: L is born at the in-match edge, after the final wait's first pass).
 	const uint32_t health_updates_before =
 			rt.state().health_updates_applied;
-	const uint32_t objective_updates_before =
-			rt.state().objective_updates_applied;
 	const bool local_existed_before_net = local_spawned_;
 	// The own record's compact revision ahead of the receive: a record the receive folds
 	// is the uplink's echo (the builder below).
@@ -1855,7 +1883,8 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	decoded.health =
 			rt.state().health_updates_applied != health_updates_before;
 	decoded.objectives =
-			rt.state().objective_updates_applied != objective_updates_before;
+			rt.state().objective_updates_applied != objective_updates_seen_;
+	objective_updates_seen_ = rt.state().objective_updates_applied;
 	if (decoded.objectives) {
 		const replication::ClientState &client = rt.state();
 		world.script.subgoals.won = client.objective_won;

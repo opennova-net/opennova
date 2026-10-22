@@ -122,13 +122,35 @@ public:
 	void push_mission_start_first_loadout();
 	// The end of a mission start whose load ran after the S2C 0x1A
 	// (ClientRuntime::set_mission_start_loading): sends what its pumps build, the two
-	// 0x2F and the 0x0B; nothing before the release or after the push.
+	// 0x2F and the 0x0B, then runs the final wait's first pass for the S2C 0x0F, which
+	// ships what the push's countdown held; nothing before the release.
 	void push_mission_start_end();
+	// The mission start's call, from the game-start wait's pass whose receive takes the S2C
+	// 0x1A to the final wait's first pass, with no frame between its legs (D-NET-NEW-L2-35):
+	// the wait's pass returns on the 0x1A's flag straight into the mission start's load, whose
+	// end pushes the two 0x2F and the 0x0B and enters the final wait, none of it rendering. The
+	// embedder's legs: `after_pass`, its own checks on the wait's pass (its window, the join
+	// error; false stops ahead of the load); `load`, its load (the first leg's pumps inside it,
+	// push_mission_start_first_loadout); `settle`, the streamed world's settle
+	// (materialize_world_stream, then the statics' placement and the loaded-model warm). A leg
+	// that returns false stops the call, its embedder reporting why. A mission start the 0x1A
+	// already released goes straight to the load. Waiting: the pass took no 0x1A.
+	// [orig: NapiClient_WaitForGameStart @0x42CC10 - the receive @0x42CC88, the send @0x42CC92,
+	//  the flag test @0x42CCB9..0x42CCBF, the return @0x42CCC1; Game_StartMission @0x524360 -
+	//  the call @0x524E29, the return-code tests @0x524E54..0x524E63, the 0x0B @0x52624B, the
+	//  send @0x526255, the final wait @0x526295..0x5262E5]
+	struct MissionStartLegs {
+		std::function<bool()> after_pass;
+		std::function<bool()> load;
+		std::function<bool()> settle;
+	};
+	enum class MissionStartPass : uint8_t { Waiting, Stopped, Started };
+	MissionStartPass poll_mission_start(const MissionStartLegs &legs);
 	// The streamed pools into the World for that mission start's settle (D-NET-NEW-L2-38):
 	// the frame phase that materializes them and stamps the statics' placed identity
-	// (materialize_replica_world) runs only in a session update, and the first frame after
-	// the load may bank none (its clock re-base), so the settle runs it ahead of placing the
-	// streamed statics; the next update finds the World in step. Retail's client writes each
+	// (materialize_replica_world) runs only in a session update, and the settle runs in the
+	// mission start's call, ahead of any (poll_mission_start), so it runs it ahead of placing
+	// the streamed statics; the next update finds the World in step. Retail's client writes each
 	// streamed row into its pool slot in its page's receive (a pool-1 0x0D's, a pool-2 0x10's),
 	// and the mission start's load initializes every pool's rows from their models ahead of its
 	// 0x0B.
@@ -402,6 +424,10 @@ private:
 	int32_t uplink_cpu_percent_ = 0;
 	// The last folded 0x0A tail whose stance echo L has latched.
 	uint32_t stance_echo_seen_ = 0;
+	// The objective syncs whose subgoals the world holds: a receive outside the net frame (the
+	// final wait's first pass, inside the push) folds them too, so the next net frame copies
+	// them over (the copy is the state's, so a re-baselined count only copies it again).
+	uint32_t objective_updates_seen_ = 0;
 	// The self row's compact revision whose Flags byte L has folded.
 	uint32_t local_flags_revision_seen_ = 0;
 	// The wire-leg clock: the frame's start, stamped where the uplink ships

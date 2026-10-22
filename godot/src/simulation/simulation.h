@@ -902,7 +902,8 @@ public:
 	int64_t debug_joiner_net_trace_next_seq() const;
 	// The joiner's mission start (engine: inmatch/joiner_connection.h
 	// set_mission_start_loading): the shell declares its load runs after the S2C 0x1A,
-	// reads the release, and once the load has ended pushes the two 0x2F and the 0x0B.
+	// and runs it inside the game-start wait's pass that takes the 0x1A
+	// (poll_join_mission_start).
 	void set_join_mission_start_loading(bool p_loading);
 	// The joiner's load at the S2C 0x11 (engine: inmatch/joiner_connection.h
 	// set_sync_tail_loading): the shell declares it while the 0x11 is awaited and clears it
@@ -916,7 +917,12 @@ public:
 	// The streamed pools into the World ahead of the settle's placement (engine:
 	// inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
 	void materialize_join_world_stream();
-	void finish_join_mission_start();
+	// The game-start wait's pass and, when it takes the S2C 0x1A, the mission start's call in
+	// the same call: the shell's load, its settle, then the push and the final wait's first
+	// pass (engine: inmatch::JoinerRole::poll_mission_start, D-NET-NEW-L2-35). Stopped
+	// without a joiner.
+	opennova::inmatch::JoinerRole::MissionStartPass poll_join_mission_start(
+			const opennova::inmatch::JoinerRole::MissionStartLegs &p_legs);
 	bool poll_join_preload();
 	// The shell's cancel of a join: ahead of the mission start the join screen's ABORT
 	// (engine inmatch::JoinerRole::cancel_join carries the witness); inside it the

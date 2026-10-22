@@ -271,51 +271,72 @@ void SessionDrive::step_preload() {
 		join_identified_ = true;
 		if (!load_join_terrain()) return;
 	}
-	if (!join_preload_sim_->is_join_mission_start_released()) {
-		join_preload_sim_->poll_join_preload();
-		const int step = policy_->preload_step(join_preload_sim_->get_join_error(), now_ms());
+	// The game-start wait's passes until the S2C 0x1A releases the mission start. The pass
+	// whose receive takes it goes straight on into the mission start's call, this one: the
+	// load (its first leg's pumps inside it), the settle of the host's streamed world (the
+	// loaded-model freeze's analog), the push of the two 0x2F and the 0x0B, and the final
+	// wait's first pass, with no frame between (engine: inmatch::JoinerRole::poll_mission_start
+	// carries the witness, D-NET-NEW-L2-35). A failing leg owns its cleanup and report; the
+	// local reference keeps the simulation the call runs in alive through them.
+	Ref<Simulation> sim = join_preload_sim_;
+	opennova::inmatch::JoinerRole::MissionStartLegs legs;
+	legs.after_pass = [&]() {
+		const int step = policy_->preload_step(sim->get_join_error(), now_ms());
 		if (step == NetSessionPolicy::STEP_FAIL) {
 			fail_join_preload(policy_->fail_reason());
-			return;
+			return false;
 		}
-		if (join_preload_sim_->is_join_mission_start_released()) join_window_mark("release");
-		return;
-	}
+		if (sim->is_join_mission_start_released()) join_window_mark("release");
+		return true;
+	};
 	// The 0x1A's mission start: its load. Stop the frame pump before the synchronous
-	// load transfers or releases the preload simulation. Every failure below owns its
-	// own cleanup/reporting leg.
-	join_window_mark("load_begin");
-	world_->set_process(false);
-	policy_->disarm_preload();
-	const String bms = policy_->promoted_mission_file();
-	Ref<ResourceRoot> resource_root = join_preload_root_;
-	if (resource_root.is_null()) {
-		fail_join_preload("join: resource root is unavailable after session identification");
-		return;
-	}
-	const Ref<MissionData> mission = open_join_mission_header(bms);
-	if (mission.is_null()) return;
-	join_preload_root_.unref();
-	join_identified_ = false;
-	const int err = world_->load_mission_internal(mission, bms, resource_root);
-	join_window_mark("load_end");
-	if (err != OK) {
-		// load_mission_internal emitted the specific resource/load failure.
-		cancel_join_preload();
-		clear_pending_session();
-		return;
-	}
-	// Post-load joiner watchdog: the admission tail (the mission start's loadout and
-	// status -> the grants -> the S2C 0x0F) is server-driven with no protocol-level
-	// timeout, so a stalled or incompatible host would leave the player loaded but hidden
-	// forever. The policy reuses the retail ConnectOrHost window from the load and
-	// composes a stage-named failure -- the reachable analog of retail's post-load
-	// network-wait failure returns (engine: runtime/inmatch/join_session_policy.h). It
-	// covers only SERVER-owed transitions: at the player-paced deployment pick the
-	// watchdog ends (retail's DEATH screen simply waits; net-re 5.61).
-	// A reload's admission tail has no window either (net-re §5.70.7).
-	if (!reloading_join_) policy_->arm_admission_watch(now_ms());
-	reloading_join_ = false;
+	// load transfers or releases the preload simulation.
+	legs.load = [&]() {
+		join_window_mark("load_begin");
+		world_->set_process(false);
+		policy_->disarm_preload();
+		const String bms = policy_->promoted_mission_file();
+		Ref<ResourceRoot> resource_root = join_preload_root_;
+		if (resource_root.is_null()) {
+			fail_join_preload("join: resource root is unavailable after session identification");
+			return false;
+		}
+		const Ref<MissionData> mission = open_join_mission_header(bms);
+		if (mission.is_null()) return false;
+		join_preload_root_.unref();
+		join_identified_ = false;
+		const int err = world_->load_mission_internal(mission, bms, resource_root);
+		join_window_mark("load_end");
+		if (err != OK) {
+			// load_mission_internal emitted the specific resource/load failure.
+			cancel_join_preload();
+			clear_pending_session();
+			return false;
+		}
+		// Post-load joiner watchdog: the admission tail (the mission start's loadout and
+		// status -> the grants -> the S2C 0x0F) is server-driven with no protocol-level
+		// timeout, so a stalled or incompatible host would leave the player loaded but hidden
+		// forever. The policy reuses the retail ConnectOrHost window from the load and
+		// composes a stage-named failure -- the reachable analog of retail's post-load
+		// network-wait failure returns (engine: runtime/inmatch/join_session_policy.h). It
+		// covers only SERVER-owed transitions: at the player-paced deployment pick the
+		// watchdog ends (retail's DEATH screen simply waits; net-re 5.61).
+		// A reload's admission tail has no window either (net-re §5.70.7).
+		if (!reloading_join_) policy_->arm_admission_watch(now_ms());
+		reloading_join_ = false;
+		return true;
+	};
+	// The host's streamed assets settle and the loaded-model list freezes, ahead of the push.
+	legs.settle = [&]() {
+		join_window_mark("settle_begin");
+		if (world_->settle_join_wire_assets()) return true;
+		world_->report_join_wire_asset_failure(
+				"join: failed to settle the host's streamed mission assets");
+		return false;
+	};
+	if (sim->poll_join_mission_start(legs) ==
+			opennova::inmatch::JoinerRole::MissionStartPass::Started)
+		join_window_mark("push_end");
 }
 
 bool SessionDrive::identify_join_session() {
@@ -572,20 +593,6 @@ void SessionDrive::update_joiner_admission_signals() {
 	if (sim.is_null() || !sim->is_joiner()) {
 		policy_->disarm_admission_watch();
 		return;
-	}
-	// The S2C 0x1A released the joiner's mission start: its load runs now (the
-	// host's streamed assets settle and the loaded-model list freezes), and its end
-	// pushes the two 0x2F and the 0x0B (engine: inmatch/joiner_connection.h
-	// set_mission_start_loading, D-NET-531).
-	if (sim->is_join_mission_start_released()) {
-		join_window_mark("settle_begin");
-		if (!world_->settle_join_wire_assets()) {
-			world_->report_join_wire_asset_failure(
-					"join: failed to settle the host's streamed mission assets");
-			return;
-		}
-		sim->finish_join_mission_start();
-		join_window_mark("push_end");
 	}
 	const String loss_reason = sim->get_session_loss_reason();
 	const bool deploy_pending = sim->is_join_deploy_pick_pending();

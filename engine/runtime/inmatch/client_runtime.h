@@ -896,8 +896,9 @@ public:
 	// in its order: its receive pumps step the send-holdoff countdown, its send pumps build
 	// only at a spent countdown and reload it, so the first 0x2F, the second and the 0x0B
 	// leave in one packet or two by where the countdown stood; what it still holds at the
-	// last send leaves from the next frame's final wait, after that frame's receive
-	// (D-NET-NEW-L2-6). The pumps run in two legs at the load's two points:
+	// last send leaves from the final wait's first pass, after its receive (D-NET-NEW-L2-6),
+	// which the role runs right after the push (JoinerRole::push_mission_start_end, with no
+	// frame between, D-NET-NEW-L2-35). The pumps run in two legs at the load's two points:
 	// push_mission_start_first_loadout once its definition and model loads are in (the
 	// send pump ahead of them, the receive after them, the first 0x2F queued, the four
 	// send pumps ahead of the model freeze), so a countdown spent there sends the first

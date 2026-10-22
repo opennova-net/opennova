@@ -1037,8 +1037,10 @@ void Simulation::materialize_join_world_stream() {
 	if (joiner_role_ != nullptr) joiner_role_->materialize_world_stream();
 }
 
-void Simulation::finish_join_mission_start() {
-	if (joiner_role_ != nullptr) joiner_role_->push_mission_start_end();
+opennova::inmatch::JoinerRole::MissionStartPass Simulation::poll_join_mission_start(
+		const opennova::inmatch::JoinerRole::MissionStartLegs &p_legs) {
+	if (joiner_role_ == nullptr) return opennova::inmatch::JoinerRole::MissionStartPass::Stopped;
+	return joiner_role_->poll_mission_start(p_legs);
 }
 
 bool Simulation::poll_join_preload() {

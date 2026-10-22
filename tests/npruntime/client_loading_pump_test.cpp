@@ -686,7 +686,8 @@ bool run_a_reset_before_the_mission_start_is_cleared() {
 
 // Drive the admission under a dictated `period` into NapiClient_WaitForGameStart: the
 // transfers, the 0x09, the 0x11 and its 0x0A, the world stream running.
-bool drive_into_the_world_stream(Harness &h, uint8_t period) {
+template <class H>
+bool drive_into_the_world_stream(H &h, uint8_t period) {
 	if (!h.handshake()) return false;
 	(void)h.frame({settings_record(0), settings_record(1)});
 	(void)h.frame({make_protocol_message(0x00, {})});
@@ -1189,6 +1190,74 @@ bool run_the_mission_start_first_leg_runs_mid_load() {
 			"end leg: the 0x0F wait sends the second 0x2F with the 0x0B");
 }
 
+// D-NET-NEW-L2-35: the mission start's call has no frame between its legs. The game-start
+// wait's pass whose receive takes the S2C 0x1A goes straight on into the load (the first leg
+// inside it), the settle, the push and the final wait's first pass, all in that one call
+// (JoinerRole::poll_mission_start); a pass that takes no 0x1A runs none of them. The push's
+// countdown holds the second 0x2F and the 0x0B (c = 11, as above), and the final wait's first
+// pass, inside the same call, ships them.
+// [orig: NapiClient_WaitForGameStart @0x42CC10 - the receive @0x42CC88, the send @0x42CC92,
+//  the flag test @0x42CCB9..0x42CCBF, the return @0x42CCC1; Game_StartMission @0x524360 -
+//  the call @0x524E29, the first 0x2F @0x525836, the 0x0B @0x52624B, the send @0x526255,
+//  the final wait's first pass @0x5262B4 / @0x5262BE / @0x5262DA]
+bool run_the_mission_start_runs_in_the_0x1a_pass() {
+	RoleHarness h;
+	if (!expect(drive_into_the_world_stream(h, 12), "mission start call: the world stream runs"))
+		return false;
+	h.client.set_mission_start_loading(true);
+	for (int i = 0; i < 24 && h.client.send_holdoff_countdown() != 3; ++i) (void)h.frame();
+	std::vector<std::string> order;
+	std::vector<std::vector<uint8_t>> first_leg;
+	std::size_t load_from = 0;
+	std::size_t settle_from = 0;
+	inmatch::JoinerRole::MissionStartLegs legs;
+	legs.after_pass = [&] {
+		order.push_back(h.client.mission_start_released() ? "pass 0x1A" : "pass");
+		return true;
+	};
+	legs.load = [&] {
+		order.push_back("load");
+		load_from = h.socket.sent.size();
+		h.role.push_mission_start_first_loadout();
+		first_leg.assign(h.socket.sent.begin() + static_cast<std::ptrdiff_t>(load_from),
+				h.socket.sent.end());
+		return true;
+	};
+	legs.settle = [&] {
+		order.push_back("settle");
+		settle_from = h.socket.sent.size();
+		return true;
+	};
+	if (!expect(h.client.send_holdoff_countdown() == 3 &&
+	                    h.role.poll_mission_start(legs) ==
+	                            inmatch::JoinerRole::MissionStartPass::Waiting &&
+	                    order == std::vector<std::string>{"pass"} &&
+	                    h.client.send_holdoff_countdown() == 2,
+			"mission start call: a pass with no 0x1A runs no leg"))
+		return false;
+	order.clear();
+	const std::size_t call_from = h.socket.sent.size();
+	const std::vector<uint8_t> release =
+			frame_server_session(h.server_tx, h.server_scrk, h.auth.ck,
+					{make_protocol_message(0x1A, {})});
+	h.client.receive(release.data(), release.size());
+	if (!expect(h.role.poll_mission_start(legs) ==
+	                    inmatch::JoinerRole::MissionStartPass::Started &&
+	                    order == std::vector<std::string>{"pass 0x1A", "load", "settle"},
+			"mission start call: the 0x1A's pass runs the load, then the settle, in its call"))
+		return false;
+	if (!expect(load_from == call_from && h.packets(first_leg, {{0x2F}}) &&
+	                    settle_from == load_from + first_leg.size(),
+			"mission start call: the 0x1A's pass sends nothing at c = 2, the load's first leg "
+			"the first 0x2F alone"))
+		return false;
+	const std::vector<std::vector<uint8_t>> after_settle(
+			h.socket.sent.begin() + static_cast<std::ptrdiff_t>(settle_from), h.socket.sent.end());
+	return expect(h.packets(after_settle, {{0x2F, 0x0B}}) && h.client.in_final_wait(),
+			"mission start call: the final wait's first pass, inside the push, ships the "
+			"held second 0x2F with the 0x0B");
+}
+
 // The joiner's round clock at its mission start: retail never seeds it. Game_StartMission's
 // round-clock seed (g_RoundTimeRemaining = g_RoundTimeLimitMinutes x 3720 when in session,
 // outside the Co-op waypoint family, with a nonzero limit) sits on the authority / single-player
@@ -1529,6 +1598,7 @@ int main() {
 	ok = run_the_sync_tail_0x0a_joins_the_queue() && ok;
 	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;
 	ok = run_the_mission_start_first_leg_runs_mid_load() && ok;
+	ok = run_the_mission_start_runs_in_the_0x1a_pass() && ok;
 	ok = run_the_joiner_mission_start_keeps_the_folded_round_clock() && ok;
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;
