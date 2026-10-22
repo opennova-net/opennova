@@ -1688,7 +1688,9 @@ public:
     std::vector<ReplicaPowerupContact> take_replica_powerup_contacts();
 
     struct ResolveState {
-        int32_t prev_pos[3] = {};   // savedLivePose stand-in (updated per resolve)
+        // The replica seam's savedLivePose stand-in (updated per resolve); a stamped
+        // registry source reads its own Entity::saved_live_pos (resolve_entity).
+        int32_t prev_pos[3] = {};
         bool prev_valid = false;
         uint8_t skip_counter = 0;   // [orig: entity pad_370[3] idle throttle]
     };

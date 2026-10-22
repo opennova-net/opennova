@@ -198,6 +198,26 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     const EntityHandle h = world.registry.spawn_from(0, spawn.min_entity_slot, seed);
     if (!h.valid()) return h;
     Entity *ent = world.registry.get(h);
+    // The model init stamps savedLivePose (+0x80..+0x94) from the placed Position and Yaw /
+    // Pitch / Roll words; the player class init then takes savedLiveYaw = Yaw and zeroes
+    // savedLiveRoll / savedLivePitch. Nothing restamps a hidden body before its join (its
+    // mover returns at the hidden bit), so the join's warm-up resolver gates its planes on
+    // the add's placement (D-NET-503). The authority's add runs the model init itself; a
+    // joiner's body from its 0x0C record reaches one only through the player class init.
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the placement @0x43C459, then
+    //  Entity_InitFromModel @0x43C492; Entity_InitFromModel @0x40DC30 - @0x40E14D..0x40E18C;
+    //  PlayerClass_InitEntity @0x4B1060 - Entity_InitFromModel @0x4B10C8, savedLiveYaw
+    //  @0x4B11AC, savedLiveRoll @0x4B11BE, savedLivePitch @0x4B11C7; Entity_InitFromItemDef
+    //  @0x49E550 - the class init @0x49E5EA (NapiNPClientMsg_0x00C @0x42E730)]
+    if (!spawn.from_wire_record || player_class_init) {
+        ent->saved_live_pos[0] = ent->position.x.q16;
+        ent->saved_live_pos[1] = ent->position.y.q16;
+        ent->saved_live_pos[2] = ent->position.z.q16;
+        ent->saved_live_yaw = ent->heading;
+        ent->saved_live_pitch = player_class_init ? 0 : ent->pitch_bam;
+        ent->saved_live_roll = player_class_init ? 0 : ent->roll_bam;
+        ent->saved_live_valid = true;
+    }
 
     // Publish the local-player handle ONLY for the host's own player: the net anchor + present
     // resolve it. A remote peer never becomes the local player. [ADR 0012] Whatever the row's

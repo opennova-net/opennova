@@ -112,11 +112,20 @@ void warm_up_organic_body(World &world, AiSystem &ai, Entity &entity, AiEntity &
     body.collide_state.skip_counter = 0;
     if (ai.collision != nullptr) {
         std::array<int32_t, 3> pos = position.words();
+        // The resolver's eye point is the body's CameraOffset words as they stand: only the
+        // mover writes them, so a body that never ran one (a fresh add, a mission's organic)
+        // holds its spawn memset's 0, the eye at the origin; never the resolver's
+        // derived capsule height, which only a row without the words takes (D-NET-503).
+        // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - CameraOffset +0x6C / +0x70 /
+        //  +0x74 read @0x4B2EE2..0x4B2EFB; Entity_SpawnFromAnimSlotProperty - the memset
+        //  @0x43C3FE]
+        const int32_t eye_offset[3] = {inf.eye_offset_x, inf.eye_offset_y, inf.eye_offset_z};
         const int32_t clearance = ai.collision->resolve_entity(
                 world, entity.handle, body.collide_state, pos.data(),
                 inf.vel, inf.vel[2], frame.capsule_bottom, frame.capsule_top,
                 body.heading, 0, false, ai.is_authority, world.logic_tick,
-                inf.anim_state, infantry_anim_flags(inf.anim_state), body.health);
+                inf.anim_state, infantry_anim_flags(inf.anim_state), body.health,
+                nullptr, nullptr, eye_offset);
         position.set_q16({pos[0], pos[1], pos[2]});
         if (clearance < kOrganicWarmupSettleQ16)
             position.z.q16 = io::bam_sub(position.z.q16, clearance);
@@ -412,12 +421,19 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
             }
             if (ai.collision != nullptr) {
                 std::array<int32_t, 3> pos = body->self->position.words();
+                // The eye point is the body's CameraOffset words as they stand; the reset
+                // writes none (as the warm-up's, warm_up_organic_body).
+                // [orig: Entity_ResetToSpawnState @0x4B9610 - the resolver call @0x4B9755;
+                //  Entity_MovementCollisionResolver - the read @0x4B2EE2..0x4B2EFB]
+                const int32_t eye_offset[3] = {
+                        inf.eye_offset_x, inf.eye_offset_y, inf.eye_offset_z};
                 const int32_t clearance = ai.collision->resolve_entity(
                         world, entity.handle, body->collide_state, pos.data(),
                         inf.vel, inf.vel[2], frame.capsule_bottom, frame.capsule_top,
                         heading, 0, (flags & kEntityFlagPlayer) != 0,
                         ai.is_authority, world.logic_tick, inf.anim_state,
-                        infantry_anim_flags(inf.anim_state), body->health);
+                        infantry_anim_flags(inf.anim_state), body->health,
+                        nullptr, nullptr, eye_offset);
                 body->self->position.set_q16({pos[0], pos[1], pos[2]});
                 if (clearance <= 0) body->self->position.z.q16 -= clearance;
             }

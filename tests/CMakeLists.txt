@@ -5075,6 +5075,11 @@ add_test(NAME npruntime_host_close_order COMMAND npruntime_host_close_order_test
 add_executable(npruntime_orphan_row_walks_test npruntime/orphan_row_walks_test.cpp)
 target_link_libraries(npruntime_orphan_row_walks_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_orphan_row_walks COMMAND npruntime_orphan_row_walks_test)
+# D-NET-503 (late join): the join's warm-up resolve reads the add's savedLivePose stamp and the
+# body's CameraOffset (0); the skip test's X leg alone reads the stamp.
+add_executable(npruntime_join_warmup_pose_test npruntime/join_warmup_pose_test.cpp)
+target_link_libraries(npruntime_join_warmup_pose_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_join_warmup_pose COMMAND npruntime_join_warmup_pose_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

@@ -46,6 +46,23 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         state.prev_pos[2] = pos[2];
         state.prev_valid = true;
     }
+    // The previous pose the skip test, the plane gating and the run-over victim's
+    // displacement read is the source's savedLivePose (+0x80..+0x88): the mover's entry
+    // stamp, or the model init's at a spawn, which the join and deploy placements leave as
+    // they stand (a hidden body runs no mover), so their warm-up gates on the add's
+    // placement (D-NET-503). A stamped registry row reads its own words. The stand-in is
+    // the replica seam's: retail's remote row is a pool entity its mover stamps, where
+    // ours is a decoded row with no registry entity, so its last resolve stands in; a
+    // registry row no model init stamped (a harness row) takes the same.
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the skip test @0x4B2C72, the
+    //  victim delta @0x4B3827 / @0x4B382D; Entity_ComputeBoneCollisionForce @0x4AE150 -
+    //  the source's savedLivePose @0x4AE3AC; the stamps Entity_InitFromModel @0x40E14D..0x40E169,
+    //  Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C; a remote row's org2 resolve,
+    //  Entity_UpdateInfantryPlayerBody's call @0x4B7CF4]
+    // (The resolver writes none of the three words, so one read serves all three sites.)
+    const int32_t *saved_source =
+            ent != nullptr && ent->saved_live_valid ? ent->saved_live_pos : state.prev_pos;
+    const int32_t saved_live[3] = {saved_source[0], saved_source[1], saved_source[2]};
 
     // Idle skip-throttle. [orig: @ 0x4b2c3d-0x4b2cba — full update when the anim
     // state's table bit 0 is set, moving, sliding, displaced > 200, airborne
@@ -55,7 +72,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     if ((anim_state_flags & 1u) != 0) full_update = true; // [orig: @ 0x4b2c1e]
     if (vel_xy[0] != 0 || vel_xy[1] != 0) full_update = true;
     if (vel_z > 0 || vel_z < -420) full_update = true;
-    if (abs32(pos[0] - state.prev_pos[0]) > 200 || abs32(pos[1] - state.prev_pos[1]) > 200)
+    // Only X counts: the Y leg takes the absolute value of the equality bit (`cmp ebp,
+    // [esi+84h]; setz al`), 0 or 1, which never passes 200.
+    // [orig: the X leg @0x4B2C72..0x4B2C82, the Y leg @0x4B2C84..0x4B2C99]
+    if (abs32(pos[0] - saved_live[0]) > 200)
         full_update = true;
     // The registry pair is the one retail Flags word; the infantry motors set
     // the bit at their jump / fall edges and clear it on landing.
@@ -219,9 +239,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     q.points = points;
     q.radii = radii;
     q.num_points = num_points;
-    q.prev_pos[0] = state.prev_pos[0];
-    q.prev_pos[1] = state.prev_pos[1];
-    q.prev_pos[2] = state.prev_pos[2];
+    q.prev_pos[0] = saved_live[0]; // [orig: Entity_ComputeBoneCollisionForce @0x4AE3AC]
+    q.prev_pos[1] = saved_live[1];
+    q.prev_pos[2] = saved_live[2];
     q.source_bound_radius = source_bound_radius_q16;
     // Mask bit 0x1 arms the inflated CL recontact test while the ladder latch
     // rides; retail recomputes the arg per query, so a mid-loop fresh entry
@@ -599,9 +619,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
 
     // The run-over kill and the bump sound [orig: @0x4b37c2..0x4b3a5c — gates,
     // the kill and the sound in vehicle_collision_damage.h]. The pusher's
-    // displacement is its mover-entry savedLivePose delta (+0x80); the victim's
-    // is measured from the resolver's previous-tick pose (its +0x80 stamp lives
-    // in the body motors' prologues).
+    // displacement is its mover-entry savedLivePose delta (+0x80), the victim's
+    // its own (saved_live, above) [orig: @0x4B3818 / @0x4B3827].
     if (pusher.valid() && ent != nullptr) {
         const Entity *p = world.registry.get(pusher);
         const uint32_t vflags = ent->flags | ent->engine_flags;
@@ -615,8 +634,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
 			const int32_t pdy = p->saved_live_valid
 					? io::bam_sub(p->position.y.q16, p->saved_live_pos[1])
 					: 0;
-			const int32_t vdx = io::bam_sub(pos[0], state.prev_pos[0]);
-			const int32_t vdy = io::bam_sub(pos[1], state.prev_pos[1]);
+			const int32_t vdx = io::bam_sub(pos[0], saved_live[0]);
+			const int32_t vdy = io::bam_sub(pos[1], saved_live[1]);
 			const int32_t rdx = io::bam_sub(pdx, vdx);
 			const int32_t rdy = io::bam_sub(pdy, vdy);
 			const double rl =
