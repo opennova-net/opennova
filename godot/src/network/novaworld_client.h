@@ -372,6 +372,7 @@ private:
 	int64_t ping_generation_ = 0;
 	PingSweepWorker ping_worker_;
 	void start_ping_sweep();
+	void apply_ping_reply(int64_t rid, int ms, int64_t generation);
 	void apply_ping_results(const Dictionary &results, int64_t generation);
 
 	// Account login + join (ADR 0010 Phase 3/5). Separate child HTTPRequests so

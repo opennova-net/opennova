@@ -29,11 +29,27 @@ struct EchoHandles {
 	std::vector<unsigned char> reply;
 };
 
+// One echo's completion: its reply stamped, and an answered echo handed to
+// `replied` at once.
+void harvest_echo(opennova::PingEcho &echo, EchoHandles &h,
+		const opennova::PingSweepRunner::EchoReplied &replied) {
+	const DWORD n = IcmpParseReplies(h.reply.data(), static_cast<DWORD>(h.reply.size()));
+	if (n == 0) return;
+	const ICMP_ECHO_REPLY *reply = reinterpret_cast<const ICMP_ECHO_REPLY *>(h.reply.data());
+	if (reply->Status != IP_SUCCESS) return;
+	echo.answered = true;
+	echo.ms = static_cast<int>(reply->RoundTripTime);
+	if (replied) replied(echo);
+}
+
 // One device echo pass over a chunk of slots (event-completion form): fire
-// every echo, wait for the chunk, and harvest the replies. The per-echo
-// timeout is the witnessed 3000 ms; a completed request signals its event
-// whether it succeeded or timed out, so the wait only adds scheduling slack.
-void run_echo_pass(HANDLE icmp, std::vector<opennova::PingEcho *> &chunk) {
+// every echo, then take each completion as it signals, so each reply answers
+// its row as it lands (the runner's per-reply leg carries the witness). The
+// per-echo timeout is the witnessed 3000 ms; a completed request signals its
+// event whether it succeeded or timed out, so the deadline only adds
+// scheduling slack.
+void run_echo_pass(HANDLE icmp, std::vector<opennova::PingEcho *> &chunk,
+		const opennova::PingSweepRunner::EchoReplied &replied) {
 	unsigned char payload[8] = {'o', 'p', 'e', 'n', 'n', 'o', 'v', 'a'};
 	std::vector<EchoHandles> handles(chunk.size());
 	std::vector<HANDLE> events;
@@ -55,21 +71,19 @@ void run_echo_pass(HANDLE icmp, std::vector<opennova::PingEcho *> &chunk) {
 		events.push_back(h.event);
 		in_flight.push_back(i);
 	}
-	if (!events.empty()) {
-		WaitForMultipleObjects(static_cast<DWORD>(events.size()), events.data(), TRUE,
-		                       opennova::kPingTimeoutMs + opennova::kPingWaitSlackMs);
-	}
-	for (size_t i : in_flight) {
-		EchoHandles &h = handles[i];
-		const DWORD n = IcmpParseReplies(h.reply.data(), static_cast<DWORD>(h.reply.size()));
-		if (n > 0) {
-			const ICMP_ECHO_REPLY *reply =
-					reinterpret_cast<const ICMP_ECHO_REPLY *>(h.reply.data());
-			if (reply->Status == IP_SUCCESS) {
-				chunk[i]->answered = true;
-				chunk[i]->ms = static_cast<int>(reply->RoundTripTime);
-			}
-		}
+	const ULONGLONG deadline =
+			GetTickCount64() + opennova::kPingTimeoutMs + opennova::kPingWaitSlackMs;
+	while (!events.empty()) {
+		const ULONGLONG now = GetTickCount64();
+		if (now >= deadline) break;
+		const DWORD signaled = WaitForMultipleObjects(static_cast<DWORD>(events.size()),
+				events.data(), FALSE, static_cast<DWORD>(deadline - now));
+		// The deadline or a failed wait ends the pass (WAIT_OBJECT_0 is 0).
+		if (signaled >= static_cast<DWORD>(events.size())) break;
+		const size_t k = static_cast<size_t>(signaled);
+		harvest_echo(*chunk[in_flight[k]], handles[in_flight[k]], replied);
+		events.erase(events.begin() + static_cast<std::ptrdiff_t>(k));
+		in_flight.erase(in_flight.begin() + static_cast<std::ptrdiff_t>(k));
 	}
 	for (EchoHandles &h : handles) {
 		if (h.event != nullptr) CloseHandle(h.event);
@@ -81,9 +95,10 @@ void run_echo_pass(HANDLE icmp, std::vector<opennova::PingEcho *> &chunk) {
 } // namespace
 
 void PingSweepWorker::start(std::vector<std::pair<int64_t, std::string>> targets,
-                            Callable sink, int64_t generation) {
+                            Callable reply_sink, Callable sink, int64_t generation) {
 	runner_.start(std::move(targets),
-			[](std::vector<opennova::PingEcho> &echoes, const std::function<bool()> &cancelled) {
+			[](std::vector<opennova::PingEcho> &echoes, const std::function<bool()> &cancelled,
+					const opennova::PingSweepRunner::EchoReplied &replied) {
 #ifdef _WIN32
 				const HANDLE icmp = IcmpCreateFile();
 				if (icmp != INVALID_HANDLE_VALUE) {
@@ -92,7 +107,9 @@ void PingSweepWorker::start(std::vector<std::pair<int64_t, std::string>> targets
 					// between chunks.
 					opennova::run_ping_passes(
 							echoes,
-							[icmp](std::vector<opennova::PingEcho *> &chunk) { run_echo_pass(icmp, chunk); },
+							[icmp, &replied](std::vector<opennova::PingEcho *> &chunk) {
+								run_echo_pass(icmp, chunk, replied);
+							},
 							cancelled);
 					IcmpCloseHandle(icmp);
 				} else {
@@ -103,8 +120,12 @@ void PingSweepWorker::start(std::vector<std::pair<int64_t, std::string>> targets
 				// as retail's never-attempted fold so the browser's pending "..."
 				// terminates.
 				(void)cancelled;
+				(void)replied;
 				for (opennova::PingEcho &e : echoes) e.attempted = false;
 #endif
+			},
+			[reply_sink](int64_t rid, int ms, int64_t p_generation) {
+				reply_sink.call_deferred(rid, ms, p_generation);
 			},
 			[sink](std::vector<std::pair<int64_t, int>> rows, int64_t p_generation) {
 				Dictionary results;

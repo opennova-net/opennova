@@ -122,6 +122,8 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_server_ping_rids"), &NovaWorldClient::get_server_ping_rids);
 	ClassDB::bind_method(D_METHOD("get_server_ping_values"),
 			&NovaWorldClient::get_server_ping_values);
+	ClassDB::bind_method(D_METHOD("_apply_ping_reply", "rid", "ms", "generation"),
+	                     &NovaWorldClient::apply_ping_reply);
 	ClassDB::bind_method(D_METHOD("_apply_ping_results", "results", "generation"),
 	                     &NovaWorldClient::apply_ping_results);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
@@ -964,9 +966,17 @@ void NovaWorldClient::start_ping_sweep() {
 		return;
 	}
 	// A refreshed list's sweep supersedes the running one at once (the engine's
-	// PingSweepRunner, net/novaworld/ping_sweep_runner.h).
-	ping_worker_.start(std::move(targets), Callable(this, "_apply_ping_results"),
-	                   ping_generation_);
+	// PingSweepRunner, net/novaworld/ping_sweep_runner.h); each reply answers its row in
+	// the process's ping manager as it lands, the sweep's end the list's display.
+	ping_worker_.start(std::move(targets), Callable(this, "_apply_ping_reply"),
+	                   Callable(this, "_apply_ping_results"), ping_generation_);
+}
+
+void NovaWorldClient::apply_ping_reply(int64_t rid, int ms, int64_t generation) {
+	// One reply as it lands: its entry in the process's ping manager answers with its
+	// round trip, so a join made mid-sweep reports the replies so far (engine:
+	// PingSweepRunner's per-reply leg carries the witness); a superseded sweep's drops there.
+	opennova::process_gate_ping_manager().apply_result(generation, rid, ms);
 }
 
 void NovaWorldClient::apply_ping_results(const Dictionary &results, int64_t generation) {
