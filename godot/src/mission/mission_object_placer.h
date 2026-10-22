@@ -576,6 +576,8 @@ private:
 	int _append_static_item_effect_source(int p_kind, int p_entity_index,
 			int p_bms_id, int p_item_id, const String &p_graphic,
 			const Transform3D &p_xform);
+	int _append_model_less_item_effect_source(int p_kind, int p_entity_index,
+			int p_bms_id, int p_item_id, const Transform3D &p_xform);
 	int _append_static_light_draw_source(int p_source_index, int p_kind,
 			int p_entity_index, int p_bms_id, int p_item_id,
 			int p_robj_index, const AABB &p_world_bounds);

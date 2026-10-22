@@ -215,6 +215,10 @@ void MissionObjectPlacer::_place_bucket(MissionPlacementRun &p_run, size_t p_fir
 		const String graphic = _graphic_for(item_id);
 		if (graphic.is_empty()) {
 			++p_run.unresolved;
+			// Nothing to draw, but the mission start still spawns the def's particle effect
+			// (_append_model_less_item_effect_source).
+			_append_model_less_item_effect_source(kind, entity.index, entity.bms_id, item_id,
+					_entity_transform_for_item(entity.position, entity.rotation_deg, item_id));
 			continue;
 		}
 		const Transform3D xform = _entity_transform_for_item(

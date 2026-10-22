@@ -533,8 +533,10 @@ int ItemEffectDirector::_attach_item_effect_to_static(const opennova::mission::S
 	const opennova::def::DefItemParticleFx fx = item_db->get_particle_fx(item_id);
 	const String effect(fx.effect);
 	const String userpoint(fx.userpoint);
-	const Ref<ObjectData> data = provider_->static_source_object_data(p_source.asset_id);
-	if (effect.is_empty() || data.is_null()) {
+	const Ref<ObjectData> data = p_source.model_less
+			? Ref<ObjectData>()
+			: provider_->static_source_object_data(p_source.asset_id);
+	if (effect.is_empty() || (data.is_null() && !p_source.model_less)) {
 		return 0;
 	}
 	if (effect_world->are_particles_hidden()) {
@@ -543,6 +545,16 @@ int ItemEffectDirector::_attach_item_effect_to_static(const opennova::mission::S
 	}
 	const Transform3D entity_transform = from_static_source_transform(p_source.world_transform);
 	int attached = 0;
+	// A def with no model: one emitter at the entity's position and basis
+	// (StaticEffectSource::model_less).
+	if (p_source.model_less) {
+		if (_spawn_static_item_effect(effect_world, effect, entity_transform)) {
+			item_fx_registered_static_.insert(p_source_index);
+			item_fx_pending_static_.erase(p_source_index);
+			return 1;
+		}
+		return 0;
+	}
 	// The same engine attach plan as the animated leg (engine: formats/threedi/threedi_3di3.h); static sources compose the
 	// EffectWorld.spawn_effect_attached local pose once with their placement
 	// transform, and the spawn_count==0 leg keeps the entity basis (an

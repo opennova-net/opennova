@@ -240,9 +240,12 @@ func _fx_gun_anchor_info() -> ModelUserPoint:
 # .def parser stops at a bare LF.
 func _fx_item_row(row: Dictionary) -> String:
 	var id := int(row.get("id", 0))
-	var text := "\r\nbegin \"fx item %d\"\r\n  id %d\r\n  type %s\r\n  graphic %s\r\n" % [
-			id, id, String(row.get("type", "object")),
-			String(row.get("graphic", FX_MOUNT_GRAPHIC))]
+	var text := "\r\nbegin \"fx item %d\"\r\n  id %d\r\n  type %s\r\n" % [
+			id, id, String(row.get("type", "object"))]
+	# An empty "graphic" authors no graphic line (a model-less def).
+	var graphic := String(row.get("graphic", FX_MOUNT_GRAPHIC))
+	if not graphic.is_empty():
+		text += "  graphic %s\r\n" % graphic
 	var anim_def := String(row.get("anim_def", ""))
 	if not anim_def.is_empty():
 		text += "  anim_def %s\r\n" % anim_def
@@ -3582,6 +3585,34 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	world.set_particles_hidden(false)
 	assert_eq(_fx_unowned_rows(world).size(), 2,
 			"revisiting the same descriptor index cannot duplicate its persistent effect")
+
+
+func test_a_model_less_effect_item_spawns_its_effect_at_its_origin() -> void:
+	# A def with no graphic that names a particle effect (jox01's FX_FireFlies_20m and
+	# FX_Moths_1m rows): nothing draws, but the mission start still spawns the effect, once at
+	# the entity's position and basis (StaticEffectSource::model_less carries the witness).
+	var root_dir := _stage_item_fx_fixture("model_less", [
+		{"id": 108010, "type": "effect", "graphic": "", "effect": FX_FALLBACK_EFFECT},
+	])
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
+			func(mission: MissionData) -> void:
+				mission.add_entity(
+						MissionData.KIND_ITEM, 108010, Vector3(-5, 6, 7), Vector3(0, 45, 0))), OK)
+	assert_eq(world.get_mission_stats().unresolved, 1,
+			"a def with no graphic has nothing to draw")
+	var rows := _fx_unowned_rows(world, FX_FALLBACK_EFFECT)
+	assert_eq(rows.size(), 1, "one emitter, at the entity's origin")
+	if rows.size() == 1:
+		var row: EffectGroupReport = rows[0]
+		assert_eq(row.binding, EffectScene.BINDING_WORLD)
+		assert_true(row.transform.is_equal_approx(MissionObjectPlacer.entity_transform(
+				Vector3(-5, 6, 7), Vector3(0, 45, 0))),
+				"the emitter stands at the entity's position and basis")
+	world.set_particles_hidden(true)
+	world.set_particles_hidden(false)
+	assert_eq(_fx_unowned_rows(world, FX_FALLBACK_EFFECT).size(), 1,
+			"the registered descriptor is never revisited")
 
 
 func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:

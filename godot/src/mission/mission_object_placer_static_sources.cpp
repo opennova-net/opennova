@@ -94,6 +94,22 @@ int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
 	return static_sources_.append_effect(std::move(source));
 }
 
+// A def with no graphic that names a particle effect (jox01's FX_FireFlies_20m / FX_Moths_1m
+// rows): the effect still spawns, once at the entity's position
+// (opennova::mission::StaticEffectSource::model_less carries the witness).
+int MissionObjectPlacer::_append_model_less_item_effect_source(int p_kind,
+		int p_entity_index, int p_bms_id, int p_item_id, const Transform3D &p_xform) {
+	if (item_db_.is_null() || item_db_->get_particle_fx(p_item_id).effect[0] == '\0') return -1;
+	opennova::mission::StaticEffectSource source;
+	source.kind = p_kind;
+	source.entity_index = p_entity_index;
+	source.bms_id = p_bms_id;
+	source.item_id = p_item_id;
+	source.world_transform = to_static_source_transform(p_xform);
+	source.model_less = true;
+	return static_sources_.append_effect(std::move(source));
+}
+
 int MissionObjectPlacer::_append_static_light_draw_source(int p_source_index,
 		int p_kind, int p_entity_index, int p_bms_id, int p_item_id,
 		int p_robj_index, const AABB &p_world_bounds) {
