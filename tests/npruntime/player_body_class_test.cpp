@@ -1800,6 +1800,72 @@ void test_an_ewep_row_body_asks_for_a_destroyed_ground() {
 	}
 }
 
+// The ewep row over a person body whose ground link names a slot that holds no row: the shared
+// destroy zeroed the slot and left the link, so the mover reads a zeroed ground (no def, no
+// model, a clear matrix bit) and gives the body its zero root words, Position (0, 0, 0),
+// Yaw / Pitch / Roll 0 and a zero savedLivePose, the body's matrix bit set; the spin tail
+// follows. A zero +0x2D4 word ends the update first. On a joiner (the mark provider bound) only a
+// marked slot is known zeroed; an unmarked one may hold a decoded row, and nothing runs.
+// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70; Entity_UpdateTransformAndTurret
+//  @0x440CA0 - @0x440E8C..0x440EA0, the def test @0x440EA9, the model @0x440F04, the matrix bit
+//  @0x4410EA, the copy @0x441151..0x4411BC, `or [ebp+24h], 20000h` @0x4411C2]
+void test_an_ewep_row_body_over_a_zeroed_ground() {
+	static constexpr uint16_t kGround = 0x1002;
+	struct Case {
+		bool joiner, marked, zero_word;
+		bool zeroed;
+	};
+	for (const Case c : {Case{false, false, false, true}, Case{false, false, true, false},
+				Case{true, true, false, true}, Case{true, false, false, false}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		r.world->registry.configure_pool(1, 8);
+		w::Entity *body = r.spawn_remote(kEwep);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr);
+		if (ae == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		body->ground_target = w::EntityHandle{kGround};
+		CHECK(r.world->registry.get(body->ground_target) == nullptr);
+		if (c.joiner) {
+			r.world->rules.mp_session = true;
+			r.world->rules.mp_session_peer = true;
+			r.world->rules.logic_authority = false;
+			r.world->destroyed_mark = [&c](uint16_t handle) { return c.marked && handle == kGround; };
+		}
+		r.world->logic_tick = 0x100; // the joiner's ask needs tick & 0x7F == 0x7F: not this tick
+		body->engine_flags &= ~w::kEntityFlagMatrixBuilt;
+		body->position.set_q16({100 << 16, 200 << 16, 7 << 16});
+		body->heading = 0x11110000;
+		body->pitch_bam = 0x22220000;
+		body->roll_bam = 0x33330000;
+		body->saved_live_pos[0] = 9 << 16;
+		body->saved_live_yaw = 0x44440000;
+		ae->inf.leg_yaw[0] = c.zero_word ? 0 : 0x40000000;
+		ae->inf.aim_point[0] = 0x01123456;
+		r.world->ai.update_organic(*ae, *r.world, 0x100);
+		CHECK(r.world->out.entity_info_requests.empty());
+		if (c.zeroed) {
+			CHECK(body->position.x.q16 == 0 && body->position.y.q16 == 0 && body->position.z.q16 == 0);
+			CHECK(body->heading == 0 && ae->heading == 0);
+			CHECK(body->pitch_bam == 0 && body->roll_bam == 0);
+			CHECK(body->saved_live_pos[0] == 0 && body->saved_live_yaw == 0);
+			CHECK((body->engine_flags & w::kEntityFlagMatrixBuilt) != 0);
+			CHECK(ae->inf.aim_point[0] == 0x00123456); // the spin tail ran
+		} else {
+			CHECK(body->position.x.q16 == (100 << 16) && body->position.y.q16 == (200 << 16));
+			CHECK(body->heading == 0x11110000);
+			CHECK(body->saved_live_pos[0] == (9 << 16));
+			CHECK((body->engine_flags & w::kEntityFlagMatrixBuilt) == 0);
+		}
+		r.world->destroyed_mark = {};
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // A body bound to the psec row runs the physics step over its own words: the savedLivePose
 // stamp, then its velocity triple (+0x98 / +0x9C / +0xA0, the motor's) against the terrain
 // plus a quarter unit (no terrain here: 0x4000). Airborne it moves by the triple, falls 167,
@@ -1969,6 +2035,7 @@ int main() {
 	test_an_arty_row_body_runs_the_barrage();
 	test_an_ewep_row_body_runs_the_ewep_legs();
 	test_an_ewep_row_body_asks_for_a_destroyed_ground();
+	test_an_ewep_row_body_over_a_zeroed_ground();
 	test_an_ele0_row_body_runs_the_elevator_mover();
 	test_an_upfx_row_body_runs_the_husk_leg();
 	test_a_psec_row_body_runs_the_physics_step();

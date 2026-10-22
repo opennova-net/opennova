@@ -721,8 +721,34 @@ static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
         world.out.entity_info_requests.push_back(body.handle);
         return;
     }
+    // The link is a pointer into the ground's slot, and the shared destroy zeroes the slot without
+    // clearing it: a link to a slot that holds no row reads a zeroed entity. On the host (and in
+    // single player) the registry holds every row, so a vacant slot is that zeroed one; a joiner's
+    // decoded rows live outside it, so there only a slot the destroy marked is known zeroed. A
+    // zeroed ground has no def, no model and a clear matrix bit: no vehicle leg, no anchor, and the
+    // root copy gives the body its zero words, Position (0, 0, 0), Yaw / Pitch / Roll 0 and a zero
+    // savedLivePose (its own matrix built from the zero angles first).
+    // [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70 over +0..+0x2B4, the +0x154 and
+    //  +0x219 stores @0x43EA78..0x43EA7F, Entity_ClearAllReferences @0x465670 (the call @0x43E921;
+    //  it clears AI targets alone, never a +0x28 link); Entity_UpdateTransformAndTurret @0x440CA0 -
+    //  the def null tests @0x440CCD / @0x440EA9, the model @0x440F04..0x440F09, the matrix bit
+    //  @0x4410EA, Math_BuildFixedPointMatrixFromEulerAngles @0x441149, the copy @0x441151..0x4411BC]
+    const bool zeroed_ground = ground == nullptr && body.ground_target.valid() &&
+            (!world.destroyed_mark || world.destroyed_mark(body.ground_target.packed));
     const int32_t def_word = e.inf.leg_yaw[0];
-    if (ground != nullptr) {
+    if (zeroed_ground) {
+        if (def_word == 0) return;
+        body.position.set_q16(FixedVec3{0, 0, 0});
+        body.heading = e.heading = 0;
+        body.pitch_bam = e.pitch = 0;
+        body.roll_bam = e.roll = 0;
+        std::fill_n(body.saved_live_pos, 3, 0);
+        body.saved_live_yaw = 0;
+        body.saved_live_pitch = 0;
+        body.saved_live_roll = 0;
+        body.saved_live_valid = true;
+        body.engine_flags |= kEntityFlagMatrixBuilt;
+    } else if (ground != nullptr) {
         if (def_word == 0) return;
         if (ground->has_item_def && ground->item_type == 1) {
             constexpr uint32_t kLowBits = kEntityFlagCarried | kEntityFlagDead | kEntityFlagNVGWorn;
