@@ -133,7 +133,7 @@ inline constexpr uint32_t kFloodEcho = 0x20;  // the sender flooded: echo the li
 //  past its team-game test @0x49B9BF, the squad's past its NovaWorld test @0x49BA20, the
 //  crew's past its vehicle test @0x49BA42, the others' @0x49BA25), the call @0x49B9D1 ahead
 //  of the debounce @0x49B9D6; the command arm, cases 1 and 20, @0x49AEF7..0x49AEF9;
-//  Input_ReleaseCapsLockIfActive @0x7611A0 (the VK_CAPITAL byte @0x7611CA, SendInput
+//  Input_ReleaseCapsLockIfActive @0x7611A0 (the VK_CAPITAL byte compare @0x7611C6, SendInput
 //  @0x76121B, the pump @0x761224)]
 inline constexpr uint32_t kCapsLockRelease = 0x40;
 } // namespace chat_entry_event

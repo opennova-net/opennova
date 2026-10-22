@@ -226,10 +226,10 @@ private:
 //  (Cursor_Show @0x4A53A2, dword_B49844 pushed @0x4A53A7..0x4A53AC,
 //  Input_DisableScrollLock @0x4A53B7, Input_SetNumLockState(g_SavedNumLockState)
 //  @0x4A53BC..0x4A53C3, Input_ReleaseCapsLockIfActive @0x4A53CF); Input_IsNumLockOn @0x760ED0
-//  (the byte @0x760F17); Input_SetNumLockState @0x761240 (Input_SetKeyState(0x90, state)
+//  (the byte compare @0x760F10); Input_SetNumLockState @0x761240 (Input_SetKeyState(0x90, state)
 //  @0x76124A); Input_SetKeyState @0x760F60 (the byte against the state wanted
 //  @0x760FA6..0x760FB2, SendInput @0x761002, the pump @0x761009);
-//  Input_ReleaseCapsLockIfActive @0x7611A0 (the VK_CAPITAL byte @0x7611CA, SendInput
+//  Input_ReleaseCapsLockIfActive @0x7611A0 (the VK_CAPITAL byte compare @0x7611C6, SendInput
 //  @0x76121B, the pump @0x761224); Input_DisableScrollLock @0x7610F0 (no read of its argument)]
 inline constexpr int kVkCapital = 0x14;
 inline constexpr int kVkNumLock = 0x90;
