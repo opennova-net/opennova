@@ -878,14 +878,10 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // buildings. Seat/armory carriers also belong in the proximity table when
     // their visual has no collision hull: attach scans consume this same slice,
     // and the old whole-registry fallback must not be their only discovery path.
-    // Retail also rejects dynamic CANDIDATES whose entity+0x114 carries ammo flag
-    // `noage` (0x4000) when it builds the per-entity slices [orig:
-    // Entity_BuildProximityListsFromPools @0x4b8fd4 (pool-0 sources) / @0x4b9214
-    // (pool-1 sources); the pool-1 table build itself @0x4b9340 has no such test].
-    // OpenNova's transient rounds live in RoundSim rather than the entity registry,
-    // and round-to-placed-device conversion clears noage before the pool-1 entity
-    // is materialized, so every registry item already satisfies that gate by
-    // construction (a D-COL row for the omitted gate is proposed for sign-off).
+    // The table holds a noage device as any other row (the table build tests no
+    // +0x114 bit); the slice builds skip it as a candidate (DynSlot::noage).
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - the pool-1 row
+    //  gate @0x4B9385, the stores @0x4B9389..0x4B93B3]
     auto push_dynamic = [&](const Entity &e) {
         if (e.kind != EntityKind::Item || (e.flags & 1u) != 0) return;
         auto it = instances_.find(e.handle.packed);
@@ -914,6 +910,7 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
             for (const Vec3 &point : e.armory_points) include_point(point);
         }
         d.h = e.handle;
+        d.noage = e.ammo_word_noage;
         dynamics_.push_back(d);
     };
 
@@ -1005,6 +1002,10 @@ void CollisionWorld::build_candidate_slices(World &world) {
                 continue;
             if (vec_len_ftol(d.x - p[0], d.y - p[1], d.z - p[2]) > total) continue;
             if (arena_used_ >= kCandidateArenaCap) break;
+            // A candidate whose +0x114 word carries noage (a placed device from
+            // a noage round) takes no entry. [orig: @0x4B8FCA, jnz @0x4B8FD4
+            //  (pool-0 sources); @0x4B920A, jnz @0x4B9214 (pool-1 sources)]
+            if (d.noage) continue;
             arena_[static_cast<size_t>(arena_used_++)] = d.h;
             ++slice.count;
         }
@@ -1085,6 +1086,9 @@ void CollisionWorld::build_candidate_slices(World &world) {
                              d.z - position_q16.z) > total)
                 continue;
             if (wire_arena_.size() >= 3000) break;
+            // The noage candidate gate, as the registry build's.
+            // [orig: @0x4B8FCA / @0x4B920A]
+            if (d.noage) continue;
             wire_arena_.push_back(d.h);
             ++slice.count;
         }

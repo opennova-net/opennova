@@ -1270,6 +1270,65 @@ void test_placed_device_takes_the_model_init_no_target_bit() {
     CHECK(streamed);
 }
 
+// The conversion's copy carries the round's +0x114 ammo-flags word, so a
+// device from a noage ammo (the satchel's here, as the shipped satchel,
+// claymore and AV_Mine author it) keeps the noage bit. The dynamic table still
+// holds it, but no slice build takes it as a candidate, for a pool-0 or a
+// pool-1 source; a device from an ammo without the flag is a candidate.
+// [orig: RoundData_SpawnRound @0x4EC0D0 - the +0x114 store @0x4EC615;
+//  Entity_ConvertRoundToPlacedEntity @0x5455B0 - the copy @0x5455D6, the
+//  round's clear @0x5455E2; Entity_BuildProximityLists_Pool01 @0x4B9340;
+//  Entity_BuildProximityListsFromPools @0x4B8EB0 - @0x4B8FCA / @0x4B920A]
+void test_a_noage_device_is_no_slice_candidate() {
+    Rig rig(0);
+    const AmmoTableEntry &noage = rig.w.tables.ammo.entries[kAmmoSatchel];
+    AmmoTableEntry aging = noage;
+    aging.flags &= ~kNoAge;
+    CHECK(rig.w.throwables.place_from_round(rig.w, make_satchel_round(rig, Vec3{51, 50, 0}),
+                                            noage));
+    CHECK(rig.w.throwables.place_from_round(rig.w, make_satchel_round(rig, Vec3{49, 50, 0}),
+                                            aging));
+    CHECK(rig.w.throwables.devices.size() == 2);
+    if (rig.w.throwables.devices.size() < 2) return;
+    const EntityHandle kept_out = rig.w.throwables.devices[0].entity;
+    const EntityHandle candidate = rig.w.throwables.devices[1].entity;
+    const Entity *kept_entity = rig.w.registry.get(kept_out);
+    const Entity *candidate_entity = rig.w.registry.get(candidate);
+    CHECK(kept_entity != nullptr && kept_entity->ammo_word_noage);
+    CHECK(candidate_entity != nullptr && !candidate_entity->ammo_word_noage);
+    // Two sources within reach of both: the thrower (pool 0, its +0x1C word
+    // set) and a typed pool-1 item with a def.
+    Entity *thrower = rig.w.registry.get(rig.thrower);
+    CHECK(thrower != nullptr);
+    if (thrower == nullptr) return;
+    thrower->item_type_index = 1;
+    Entity hull;
+    hull.kind = EntityKind::Item;
+    hull.has_item_def = true;
+    hull.item_type_index = 7;
+    hull.bound_radius = 1.0f;
+    hull.position = Vec3{50, 52, 0};
+    const EntityHandle hull_handle = rig.w.registry.spawn(1, hull);
+    CHECK(hull_handle.valid());
+    CollisionWorld collision;
+    collision.build_initial_tables(rig.w);
+    int32_t radius = 0;
+    CHECK(collision.dynamic_table_radius_q16(kept_out, radius));
+    CHECK(collision.dynamic_table_radius_q16(candidate, radius));
+    for (const EntityHandle source : {rig.thrower, hull_handle}) {
+        int32_t count = 0;
+        const EntityHandle *slice = collision.candidate_slice(source, count);
+        bool saw_kept_out = false;
+        bool saw_candidate = false;
+        for (int32_t i = 0; i < count; ++i) {
+            if (slice[i] == kept_out) saw_kept_out = true;
+            if (slice[i] == candidate) saw_candidate = true;
+        }
+        CHECK(!saw_kept_out);
+        CHECK(saw_candidate);
+    }
+}
+
 // The same init's matrix-built leg ORs Flags 0x20000 for a decoration,
 // building or object def or a null update callback (+0x1C4), which the rest
 // leg nulled for an unparented round and set to the parent follow for a
@@ -2871,6 +2930,7 @@ int main() {
     test_round_slot_reuse_clears_throwable_state();
     test_satchel_places_device();
     test_placed_device_takes_the_model_init_no_target_bit();
+    test_a_noage_device_is_no_slice_candidate();
     test_placed_device_takes_the_model_init_matrix_and_hp0_legs();
     test_placed_device_reads_its_def_type_and_attrib_words();
     test_placed_device_pose_and_ballistic_damage();

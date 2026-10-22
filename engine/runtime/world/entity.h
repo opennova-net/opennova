@@ -1292,6 +1292,17 @@ struct Entity {
     // Entity_BuildProximityList @ 0x4b406b / movement collision resolver
     // @ 0x4b36f0 from g_BlinkHitSlot0..3 @ 0xB57C74]
     uint32_t blink_hits[4] = {};
+    // Bit 0x4000 (ammo `noage`) of the +0x114 word. A round's spawn stores its
+    // ammo's flags word there, and the conversion's memcpy carries that word
+    // into the placed pool-1 device before it clears the ROUND's bit, so a
+    // device thrown from a noage ammo (the shipped satchel, claymore, AV_Mine)
+    // keeps it. Every candidate-slice build then skips that device as a
+    // dynamic candidate. Nothing else sets the bit on a pool-1 entity.
+    // [orig: RoundData_SpawnRound @0x4EC0D0 - the store @0x4EC615;
+    //  Entity_ConvertRoundToPlacedEntity @0x5455B0 - the copy @0x5455D6, the
+    //  round's clear @0x5455E2; Entity_BuildProximityListsFromPools @0x4B8EB0 -
+    //  the tests @0x4B8FCA / @0x4B920A]
+    bool ammo_word_noage = false;
     int16_t music_location = 0; // itemDef+434; containing-building WAC location
 
     // Render-occlusion three-ray latch countdown (entity+342): while nonzero the

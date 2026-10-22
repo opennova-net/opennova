@@ -1096,6 +1096,10 @@ size_t CollisionWorld::stage_replica_candidates(const int32_t pos[3],
             continue;
         if (vec_len_ftol(d.x - pos[0], d.y - pos[1], d.z - pos[2]) > total) continue;
         if (slice.count >= room) break;
+        // The pool-0 source build's noage candidate gate.
+        // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - @0x4B8FCA,
+        //  jnz @0x4B8FD4]
+        if (d.noage) continue;
         arena_.push_back(d.h);
         ++slice.count;
     }

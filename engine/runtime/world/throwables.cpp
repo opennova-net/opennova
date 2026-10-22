@@ -1321,11 +1321,20 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     seed.item_id = item_id;
     // The copy carries the round's Flags 0x800000, its BB state as the last
     // tick's refresh left it (this tick's runs after the motor), which the
-    // device keeps until its first think visit rebuilds it; the +0x114 bit
-    // rides along too, read by no device leg.
+    // device keeps until its first think visit rebuilds it; the +0x114 Indoors
+    // bit rides along too, read by no device leg.
     // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 - the memcpy
     //  @0x5455D6; Entity_UpdatePool1Slot @0x4B8E1B..0x4B8E25]
     if (round.indoors_flags) seed.flags |= kEntityFlagIndoors;
+    // The same copy carries the round's ammo-flags word with its noage bit, as
+    // the spawn stored it; the authority's round keeps the bit until the
+    // conversion clears it on the ROUND after the copy. The device is then no
+    // slice's dynamic candidate.
+    // [orig: RoundData_SpawnRound @0x4EC0D0 - the +0x114 store @0x4EC615;
+    //  Entity_ConvertRoundToPlacedEntity @0x5455B0 - the copy @0x5455D6, the
+    //  round's clear @0x5455E2; Entity_BuildProximityListsFromPools @0x4B8EB0
+    //  - @0x4B8FCA / @0x4B920A]
+    seed.ammo_word_noage = (ammo.flags & kAmmoFlagNoAge) != 0;
     if (const ThrowableClassRow *row = classes.get(item_id)) {
         seed.item_type_index = row->item_type_index; // the template's +0x1C
         // [orig: Entity_InitFromItemDef @ 0x49e550 — Health/Armor from the def]

@@ -1944,6 +1944,12 @@ private:
     struct DynSlot {    // [orig: g_DynProx* dword tables]
         int32_t x = 0, y = 0, z = 0, radius = 0;
         EntityHandle h;
+        // The row's +0x114 noage bit (Entity::ammo_word_noage), which every
+        // slice build reads through the row's entity pointer; the word has no
+        // writer after the device's clone, so the table's copy is that word.
+        // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - @0x4B8FCA /
+        //  @0x4B920A]
+        bool noage = false;
     };
     struct PersonSlot { // [orig: g_PersonProx* dword tables]
         int32_t x = 0, y = 0, z = 0, radius = 0;
