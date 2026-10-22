@@ -2305,7 +2305,8 @@ void send_unstopped_header_only(NapiNPConnection &c, opennova::IDatagramSocket &
 //  state 1 / 5 test @0x629279, the holdoff @0x62927B, `queued > 0 || has_pending_out`
 //  @0x6292A9, BuildOutgoingPackets called @0x6292B4, PrunePacketQueue @0x6292BB;
 //  CNapiNPConnection_PumpStateMachine @0x6292E0 state 1 - PumpSendIntervals called @0x62933F,
-//  timeout_ms @0x629344 (negative: no reap @0x62934C), the joined word +0x30 @0x629352, the
+//  timeout_ms @0x629344 (negative: no reap @0x62934C), the source address +0x30 @0x629352
+//  (NapiNPProtocol_HandleClientJoin's store @0x62BF28; 0 only for the in-process loopback), the
 //  elapsed `now - +0x5E8` @0x62935C against it @0x629362, the record {1, 3, elapsed, timeout,
 //  "", 0, "NP.C:PT:SERTMOUT"} @0x6293B7..0x6293E6, RequestDisconnect @0x62940A;
 //  CNapiNPConnection_PumpSendIntervals @0x628FD0 - the active leg @0x628FF1..0x629017, the
@@ -2411,7 +2412,7 @@ uint32_t pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		}
 		// Then the receive reap.
 		const uint32_t silent_ms = now_ms - c.receive_stamp_ms;
-		if (c.timeouts.timeout_ms >= 0 && c.phase >= ConnectionPhase::Joined &&
+		if (c.timeouts.timeout_ms >= 0 && c.peer.ip != 0 &&
 				silent_ms > static_cast<uint32_t>(c.timeouts.timeout_ms)) {
 			c.receive_inactive_ms = silent_ms;
 			latch_disconnect_event(c, make_disconnect_event(1, 3, silent_ms,
