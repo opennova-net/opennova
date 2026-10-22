@@ -6,6 +6,7 @@
 // packed handle (pool<<12 | slot) — 4-bit pool index, 12-bit slot.
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -1164,6 +1165,15 @@ struct Entity {
     // Empty for non-emplacements. [orig: ItemDef+0x54B primaryWeapon; label consumer
     // HUD_DrawVehicleSeatAndArmoryLabels @0x5a351d via Entity_GetWeaponSlots slot0]
     std::string primary_weapon;
+    // The def's four addeweap slots' 1-based userpoint indexes into its model (0 where a slot's
+    // userpoint is not found or the slot is not authored): the table a child on this entity
+    // reads its anchor byte (+0x319) from by its slot byte (+0x214, sub_type). Retail keeps it
+    // on the def; every entity of the def carries the same copy here.
+    // [orig: Entity_InitFromModel @0x40DC30 - the names def+0x1C3 + 16 * i @0x40DE30..0x40DE42,
+    //  ModelGPM_FindUserpointByName @0x40DE46, the 1-based index into def+0x214 + i
+    //  @0x40DE52..0x40DE70, 0 @0x40DE7C; read by Entity_UpdateTransformAndTurret
+    //  @0x440CEF..0x440CFD and Entity_GetMountSlotBoneIndex @0x546680]
+    std::array<uint8_t, 4> def_slot_userpoints{};
     // Child entity created from its parent's items.def addeweap* slot. All
     // variants share the parent/userpoint carry relation; G/C remain explicit
     // metadata (G flag bit 2, C flag bit 1 in retail) for their distinct

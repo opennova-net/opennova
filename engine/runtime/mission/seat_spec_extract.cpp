@@ -67,7 +67,8 @@ int seat_pose_index_for_user_point(const std::string &name) {
 bool item_has_runtime_metadata(const mission::ItemSeatSpec &spec) {
 	return spec.mount_config_valid || !spec.seats.empty() ||
 			!spec.armory_points.empty() || !spec.primary_weapon.empty() ||
-			!spec.emplacement_attachments.empty();
+			!spec.emplacement_attachments.empty() ||
+			spec.slot_userpoints != std::array<uint8_t, 4>{};
 }
 
 // graphic -> "<basename>.3di" is assets::AssetStore's own name rule; the extractor
@@ -295,6 +296,22 @@ void extract_item_seat_specs(const DefItemsFile &items,
 		// Authored attachment rows survive a missing model (parent-root
 		// anchors); seats and armory locals need the model userpoints.
 		extract_attachments(*def, model, spec.emplacement_attachments);
+		// The def's slot table: each authored slot's userpoint, by name, first match, as a
+		// 1-based index into the model's userpoints, else 0; every slot with a name, an item
+		// id of 0 included [orig: Entity_InitFromModel @0x40DC30 - the names def+0x1C3 + 16 * i
+		// @0x40DE30..0x40DE42, ModelGPM_FindUserpointByName @0x40DE46, def+0x214 + i
+		// @0x40DE52..0x40DE70, 0 @0x40DE7C].
+		for (size_t i = 0; i < def->emplacement_attachments_count && i < 4 &&
+				def->emplacement_attachments != nullptr; ++i) {
+			const std::string wanted = trimmed(def->emplacement_attachments[i].userpoint);
+			if (wanted.empty() || model == nullptr || model->user_points == nullptr) continue;
+			for (size_t u = 0; u < model->user_point_count; ++u) {
+				if (!strutil::iequals(trimmed(model->user_points[u].name), wanted)) continue;
+				spec.slot_userpoints[i] =
+						static_cast<uint8_t>(std::clamp(static_cast<int>(u) + 1, 0, 255));
+				break;
+			}
+		}
 		if (model != nullptr) {
 			extract_seats(*model, spec.seats, spec.off_table_seats);
 			// "armory*" userpoints label/scan only on Armory-attrib items —

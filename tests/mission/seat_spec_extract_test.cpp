@@ -181,7 +181,7 @@ int main() {
     std::snprintf(carrier.primary_weapon, sizeof(carrier.primary_weapon),
             "%s", "WPN_50CAL");
     carrier.attrib = DEF_ITEM_ATTRIB_ARMORY;
-    DefItemEmplacementAttachment carrier_rows[2];
+    DefItemEmplacementAttachment carrier_rows[3];
     std::memset(carrier_rows, 0, sizeof(carrier_rows));
     std::snprintf(carrier_rows[0].userpoint, sizeof(carrier_rows[0].userpoint),
             "%s", "gunanchor"); // case-insensitive whole-name match
@@ -196,8 +196,11 @@ int main() {
             "%s", "NoSuchPoint");
     carrier_rows[1].item_id = 100600;
     carrier_rows[1].kind = DEF_ITEM_EMPLACEMENT_ADDEWEAP;
+    // A userpoint alone: no child (item id 0), but the def's slot table still holds it.
+    std::snprintf(carrier_rows[2].userpoint, sizeof(carrier_rows[2].userpoint),
+            "%s", "USEGUN");
     carrier.emplacement_attachments = carrier_rows;
-    carrier.emplacement_attachments_count = 2;
+    carrier.emplacement_attachments_count = 3;
     carrier.emplacement_g_slot = 1;
     carrier.emplacement_c_slot = 2;
 
@@ -269,6 +272,11 @@ int main() {
                 near(cs.armory_points[0].z, 18.0f));
     }
     CHECK(cs.emplacement_attachments.size() == 2);
+    // The def's slot table: every named slot's 1-based userpoint index (the id-0 slot's too),
+    // 0 where the name finds none and past the authored slots.
+    // [orig: Entity_InitFromModel @0x40DC30 - @0x40DE2C..0x40DE8A]
+    CHECK(cs.slot_userpoints[0] == 8 && cs.slot_userpoints[1] == 0 &&
+            cs.slot_userpoints[2] == 5 && cs.slot_userpoints[3] == 0);
     if (cs.emplacement_attachments.size() == 2) {
         const mission::ItemEmplacementAttachmentSpec &a =
                 cs.emplacement_attachments[0];

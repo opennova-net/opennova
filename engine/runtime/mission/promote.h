@@ -15,6 +15,7 @@
 // docs/world/world-wac-ai-re.md for the RE map + the tracked deviations below.
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -77,6 +78,9 @@ struct ItemSeatSpec {
     std::vector<world::Vec3> armory_points;
     std::string primary_weapon;
     std::vector<ItemEmplacementAttachmentSpec> emplacement_attachments;
+    // The def's addeweap slot table (world::Entity::def_slot_userpoints): each authored slot's
+    // userpoint as a 1-based index into the model's userpoints, 0 where it is not found.
+    std::array<uint8_t, 4> slot_userpoints{};
     // Turret articulation limits in BAM, resolved from the primary weapon's
     // weapon.def rows (targetyawrange/targetpitchmax/targetpitchmin) once the
     // embedder's weapon table is loaded — the clamp window the emplaced-controls

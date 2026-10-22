@@ -1866,6 +1866,51 @@ void test_an_ewep_row_body_over_a_zeroed_ground() {
 	}
 }
 
+// The ewep row's anchor refill over a person body: a live PlayerControl ground refills the body's
+// anchor byte (+0x319, the spawn backup X's second byte) from its def's slot table by the body's
+// slot byte (+0x214, a person's 0) when the byte reads 0xFF; another byte, a ground without the
+// attrib, or a dead PlayerControl ground (which hides the body) leaves it.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - @0x440CCA..0x440CFD]
+void test_an_ewep_row_body_refills_its_anchor_byte() {
+	struct Case {
+		bool player_control, dead;
+		int32_t backup_x, backup_x_after;
+	};
+	for (const Case c : {Case{true, false, 0x0012FF34, 0x00120634},
+				Case{true, false, 0x00120534, 0x00120534},
+				Case{false, false, 0x0012FF34, 0x0012FF34},
+				Case{true, true, 0x0012FF34, 0x0012FF34}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		r.world->registry.configure_pool(1, 4);
+		w::Entity seed;
+		seed.alive = !c.dead;
+		seed.has_item_def = true;
+		seed.item_type = 3;
+		seed.item_attrib = c.player_control ? w::kItemAttribPlayerControl : 0u;
+		seed.flags = c.dead ? w::kEntityFlagDead : 0u;
+		seed.def_slot_userpoints = {6, 2, 0, 0};
+		const w::EntityHandle ground = r.world->registry.spawn(1, seed);
+		w::Entity *body = r.spawn_remote(kEwep);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ground.valid() && ae != nullptr);
+		if (!ground.valid() || ae == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		body->ground_target = ground;
+		CHECK(body->sub_type == 0);
+		body->spawn_position.set_q16(w::FixedVec3{c.backup_x, 0x00340000, 0x00050000});
+		ae->inf.leg_yaw[0] = 0x40000000;
+		ae->inf.aim_point[0] = 0x00123456; // the spin tail stays idle: no anchor count, no coast
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		CHECK(body->spawn_position.x.q16 == c.backup_x_after);
+		CHECK(((body->flags & w::kEntityFlagCarried) != 0) == c.dead);
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // The ewep row's +0x170 leg over a person body: a linked entity that does not ride the body (its
 // mount link names another, or its slot holds no row on the host) is let go, the link cleared;
 // one riding the body keeps it, and the +0x2AC clock (spawn_phase) takes 1 while the link holds.
@@ -2089,6 +2134,7 @@ int main() {
 	test_an_ewep_row_body_asks_for_a_destroyed_ground();
 	test_an_ewep_row_body_over_a_zeroed_ground();
 	test_an_ewep_row_body_lets_go_of_a_rider_off_it();
+	test_an_ewep_row_body_refills_its_anchor_byte();
 	test_an_ele0_row_body_runs_the_elevator_mover();
 	test_an_upfx_row_body_runs_the_husk_leg();
 	test_a_psec_row_body_runs_the_physics_step();

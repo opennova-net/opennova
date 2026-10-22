@@ -662,9 +662,9 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 //  @0x4B96AA; Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8 / @0x4C0238]
 // The rest of the ewep mover runs over the person's words (person_ewep_mover), save the legs
 // that need a word ours does not yet home on a person (D-NET-NEW-L4-14 (a), narrowed): the
-// anchor byte's refill from the ground def's slot table, the joiner's destroy of its own body
-// behind its C2S 0x0F pair, the anchored bone attach, and a riding +0x170 occupant's turret
-// window (garbage-pointer limits, the Q16-1 (a) class) with the HUD_COM2GUN leg behind it.
+// joiner's destroy of its own body behind its C2S 0x0F pair, the anchored bone attach, and a
+// riding +0x170 occupant's turret window (garbage-pointer limits, the Q16-1 (a) class) with the
+// HUD_COM2GUN leg behind it.
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
 // narrowed): towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
@@ -713,6 +713,22 @@ static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
     if (emplaced_carrier_is_dead_hull(ground)) {
         body.flags |= kEntityFlagCarried;
         return;
+    }
+    // A live PlayerControl ground refills the anchor byte (+0x319, the spawn backup X's second
+    // byte) from its def's slot table by the body's slot byte (+0x214) when the byte reads 0xFF.
+    // A person's slot byte is the spawn's 0 (no person update, record writer, reset or init
+    // writes it), so the table's first slot answers; a slot byte past the four-byte table would
+    // read the def's next bytes, which ours does not model.
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the PlayerControl test @0x440CD1, the
+    //  0xFF test @0x440CE6, `movsx ecx, byte ptr [ebp+214h]` @0x440CEF, the table byte
+    //  @0x440CF6, the store @0x440CFD; the table Entity_InitFromModel @0x40DE2C..0x40DE8A]
+    if (ground != nullptr && ground->has_item_def &&
+            (ground->item_attrib & kItemAttribPlayerControl) != 0) {
+        const uint32_t backup_x = static_cast<uint32_t>(body.spawn_position.x.q16);
+        const int8_t slot = static_cast<int8_t>(body.sub_type);
+        if (((backup_x >> 8) & 0xFFu) == 0xFFu && slot >= 0 && slot < 4)
+            body.spawn_position.x.q16 = static_cast<int32_t>((backup_x & 0xFFFF00FFu) |
+                    (static_cast<uint32_t>(ground->def_slot_userpoints[static_cast<size_t>(slot)]) << 8));
     }
     // A session peer off the authority asks the host again for a ground the shared destroy
     // removed (the link still names its slot, whose destroyed mark is set) on a tick whose low

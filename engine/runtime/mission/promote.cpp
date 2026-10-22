@@ -577,6 +577,8 @@ void initialize_item_seats(Entity &entity, const std::vector<ItemSeatSpec> &spec
     entity.emplaced_config = spec->mount_config_valid ? spec->mount_config : 0;
     entity.armory_points = spec->armory_points;
     entity.primary_weapon = spec->primary_weapon;
+    // The def's addeweap slot table [orig: Entity_InitFromModel @0x40DC30 - @0x40DE2C..0x40DE8A].
+    entity.def_slot_userpoints = spec->slot_userpoints;
     // The item-definition traits (has_item_def, item_attrib) come only from
     // the items.def sweep; a seat spec never stands in for a definition row.
     if (spec->seats.empty()) return;
