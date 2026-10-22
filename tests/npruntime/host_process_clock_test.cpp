@@ -69,9 +69,11 @@ struct ClockHost {
 	}
 	inmatch::NapiNPConnection &conn() { return ctx.np_protocol.connection_list.front(); }
 	void reply(uint8_t tag, std::vector<uint8_t> body) {
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = &ctx;
 		(void)inmatch::dispatch_session_replies(ctx.config, conn(),
 				{make_protocol_message(tag, std::move(body))}, world.logic_tick,
-				ctx.np_protocol.connection_list, &world);
+				ctx.np_protocol.connection_list, &world, inputs);
 	}
 };
 
@@ -155,12 +157,39 @@ void test_cookie_ring_reads_the_process_clock() {
 	       "the new key carries the process clock");
 }
 
+// D-NET-NEW-L8-32: the slot's +100360 stamp (the chat and console lines' 1000 ms throttle, the
+// capture flip's stamp and the refused-touch nag's 10 s test) is GetTickCount. A chat line, then
+// another 1000 ms of clock later with the logic tick held, both pass the throttle and stamp the
+// clock (on the seam the second would be throttled); the console line likewise.
+// [orig: NapiNPServer_HandleChatMessage @0x513760 - GetTickCount @0x5137DE, the 1000 ms test
+//  @0x513811..0x513819, the stamp @0x513820; NapiNPServerMsg_HandleConsoleLine @0x5199D0 -
+//  GetTickCount @0x519A1E, the stamp @0x519A3C]
+void test_chat_stamp_reads_the_process_clock() {
+	ClockHost host;
+	const auto line = [](const char *text, bool with_channel) {
+		std::vector<uint8_t> body;
+		if (with_channel) body.push_back(0);
+		for (const char *c = text; *c != 0; ++c) body.push_back(static_cast<uint8_t>(*c));
+		body.push_back(0);
+		return body;
+	};
+	host.reply(c2s::CHAT_MESSAGE, line("hello", true));
+	expect(host.conn().reply.chat_last_ms == 70000u, "a chat line stamps the process clock");
+	host.clock += 1000u; // the logic tick holds
+	host.reply(c2s::CHAT_MESSAGE, line("again", true));
+	expect(host.conn().reply.chat_last_ms == 71000u, "1000 ms of clock later the throttle passes");
+	host.clock += 1000u;
+	host.reply(c2s::ADMIN_NETLOG_COMMAND, line("STATUS", false));
+	expect(host.conn().reply.chat_last_ms == 72000u, "the console line throttles on the same clock");
+}
+
 } // namespace
 
 int main() {
 	test_time_sync_reads_the_process_clock();
 	test_rtt_reads_the_process_clock();
 	test_cookie_ring_reads_the_process_clock();
+	test_chat_stamp_reads_the_process_clock();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "npruntime_host_process_clock: %d failure(s)\n", g_failures);
 		return 1;

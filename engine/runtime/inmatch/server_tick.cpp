@@ -311,7 +311,8 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 //  @0x500BE4..0x500BF1, bit 0x08 @0x500C10, the stamp @0x500C19..0x500C33, the
 //  set @0x500C35..0x500C3C]
 void arm_refused_capture_nags(NapiNPServerCtx &ctx, world::World &world) {
-	const uint32_t now_ms = io::host_milliseconds_for_logic_tick(world.logic_tick);
+	// GetTickCount, the process clock the host binds (D-NET-NEW-L8-32) [orig: @0x500C19].
+	const uint32_t now_ms = world::authority_tick_count_ms(world);
 	for (const world::EntityHandle toucher : world.zones.capture.refused_touches) {
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!conn.link.owned_entity.valid() || conn.link.owned_entity != toucher)
@@ -1016,8 +1017,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
 					if (conn.link.owned_entity.valid() &&
 							conn.link.owned_entity == flip->capturer)
-						conn.reply.chat_last_ms =
-								io::host_milliseconds_for_logic_tick(world.logic_tick);
+						conn.reply.chat_last_ms = world::authority_tick_count_ms(
+								world); // GetTickCount @0x50F90C (D-NET-NEW-L8-32)
 			}
 			// The banner, keyed on the zone's new owner, goes to every in-match
 			// player even once the round is decided.

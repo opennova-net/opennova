@@ -1201,16 +1201,18 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					const auto nul = std::find(begin, msg.payload.end(), uint8_t{0});
 					uplink.text.assign(begin, nul);
 				}
+				// The throttle's now is GetTickCount, the process clock (D-NET-NEW-L8-32)
+				// [orig: NapiNPServer_HandleChatMessage @0x5137DE].
 				std::vector<ProtocolMessage> chat = Server_HandleChatMessage(
 						*inputs.server_ctx, conn, uplink,
-						io::host_milliseconds_for_logic_tick(now_tick), *world);
+						world::authority_tick_count_ms(world, now_tick), *world);
 				for (ProtocolMessage &m : chat) replies.push_back(std::move(m));
 				break;
 			}
 			case c2s::ADMIN_NETLOG_COMMAND: // [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0]
 				if (inputs.server_ctx != nullptr) // a peer's console line (server_console.h)
 					Server_HandleConsoleCommandMessage(*inputs.server_ctx, conn, msg.payload,
-							io::host_milliseconds_for_logic_tick(now_tick), replies);
+							world::authority_tick_count_ms(world, now_tick), replies); // GetTickCount @0x519A1E (D-NET-NEW-L8-32)
 				break;
 			case c2s::LOADED_MODEL_PAGE_REPLY: { // [orig: NapiNPServerMsg_0x03D @0x500EC0]
 				// Authority-gated; the body is never read: the handler stamps the
