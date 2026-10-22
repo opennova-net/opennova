@@ -452,6 +452,15 @@ uint8_t local_weapon_fire_adm(World &world, const LocalPlayerWeapon &w, const En
 	return has_def ? slot_adm : shooter.equipped_adm_index;
 }
 
+// The first-person model is the EquippedSlot's def's: the borrowed slot's while a borrow
+// holds it (its def adm the borrow keeps), else the personal slot's, whose def the
+// AdmDef byte names.
+// [orig: Player_RenderFirstPersonViewModel @0x4DED60 - the EquippedSlot @0x4DEDAA, its
+//  Def @0x4DEDBC and the Def's fpModel test]
+uint8_t local_first_person_model_def_adm(const LocalPlayerWeapon &w, const Entity &player) {
+	return w.usegun_slot_active ? w.usegun_weapon_adm : player.equipped_adm_index;
+}
+
 // A designated-G route leg's EquippedSlot store for the local player, on each record that
 // seats L on the gun: the gun's own slot (byte 1) or its carrier's (byte 2). The record's
 // attach ran first in the same apply, and its mount queued the switch-out on the slot L

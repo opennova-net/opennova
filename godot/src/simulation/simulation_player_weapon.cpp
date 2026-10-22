@@ -243,8 +243,10 @@ void Simulation::set_local_player_first_person_model_available(bool p_available)
 	if (!p_available || !kernel_) return;
 	const opennova::world::Entity *player =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
+	// The model the shell loaded is the EquippedSlot's def's (D-WPN-52 follow).
 	if (player != nullptr)
-		kernel_->local.weapon.first_person_model_adm = player->equipped_adm_index;
+		kernel_->local.weapon.first_person_model_adm =
+				opennova::world::local_first_person_model_def_adm(kernel_->local.weapon, *player);
 }
 
 bool Simulation::is_local_player_first_person_model_available() const {

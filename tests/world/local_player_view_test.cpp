@@ -3362,6 +3362,9 @@ struct ScopedAimFixture : LocalWorld {
         entity().equipped_adm_index = 1;
         w.tables.weapons.entries.resize(2);
         w.tables.weapons.entries[1].valid = true;
+        // The def the fire cases install: a local fire names the firing slot's def by
+        // its name [orig: WeaponAction_Fire @0x542B10 - @0x542C1C..0x542C2F].
+        w.tables.weapons.entries[1].name = "WPN_AIM";
         player.weapon.active = true;
         player.view.scope_engaged = true;
         player.view.scope_settled = true;

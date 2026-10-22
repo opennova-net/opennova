@@ -327,6 +327,13 @@ const WeaponSlotState *active_local_weapon_slot(const World &world,
 // def. [orig: WeaponAction_Fire @0x542B10 - @0x542C1C..0x542C3F]
 uint8_t local_weapon_fire_adm(World &world, const LocalPlayerWeapon &w, const Entity &shooter);
 
+// The def whose first-person model the view draws: the EquippedSlot's. Under a borrow
+// that is the borrowed slot's def, which a route store or a borrowing attach never
+// stamps into the AdmDef byte; on the personal slot it is the def the byte names.
+// [orig: Player_RenderFirstPersonViewModel @0x4DED60 - the EquippedSlot @0x4DEDAA, its
+//  Def @0x4DEDBC and the Def's fpModel test]
+uint8_t local_first_person_model_def_adm(const LocalPlayerWeapon &w, const Entity &player);
+
 // A designated-G route leg's EquippedSlot store for the local player (each record seating L
 // on `gun`): the borrow holds the gun's routed slot at once, cutting off a switch-out the
 // record's attach staged; the AdmDef byte is left as it was.
