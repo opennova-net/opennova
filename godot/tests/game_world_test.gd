@@ -2222,6 +2222,20 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 	if mission_start_load != null and not mission_start_load.spans().is_empty():
 		assert_eq(mission_start_load.spans()[0].name, "objects",
 				"the S2C 0x1A's load goes on from the objects; the 0x11 ran the head")
+		# The mission start's sound banks and its streamed world's init run ahead of the first
+		# 0x2F, the effect builds after it (D-NET-NEW-L2-42; engine inmatch/joiner_role.h
+		# MissionStartLegs carries the witness).
+		var top := []
+		for span: LoadTimelineSpan in mission_start_load.spans():
+			if span.depth == 0:
+				top.append(span.name)
+		var audio := top.find("audio")
+		var streamed := top.find("streamed_world")
+		var first_leg := top.find("first_leg")
+		var effects := top.find("effects")
+		assert_true(audio >= 0 and streamed > audio, "the streamed world follows the audio: %s" % [top])
+		assert_true(first_leg > streamed, "the first leg follows the streamed world: %s" % [top])
+		assert_true(effects > first_leg, "the effect builds follow the first leg: %s" % [top])
 	world.unload()
 
 

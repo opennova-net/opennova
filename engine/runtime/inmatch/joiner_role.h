@@ -130,14 +130,19 @@ public:
 	// the wait's pass returns on the 0x1A's flag straight into the mission start's load, whose
 	// end pushes the two 0x2F and the 0x0B and enters the final wait, none of it rendering. The
 	// embedder's legs: `after_pass`, its own checks on the wait's pass (its window, the join
-	// error; false stops ahead of the load); `load`, its load (the first leg's pumps inside it,
-	// push_mission_start_first_loadout); `settle`, the streamed world's settle
-	// (materialize_world_stream, then the statics' placement and the loaded-model warm). A leg
-	// that returns false stops the call, its embedder reporting why. A mission start the 0x1A
-	// already released goes straight to the load. Waiting: the pass took no 0x1A.
+	// error; false stops ahead of the load); `load`, its load, which initializes the streamed
+	// world (materialize_world_stream, then the statics' placement) after its sound banks and
+	// ahead of the first leg's pumps (push_mission_start_first_loadout), as the mission start
+	// reloads the entity models and initializes every pool's rows from them ahead of its first
+	// 0x2F (D-NET-NEW-L2-42); `settle`, the model freeze's analog after it (the loaded-model
+	// list and its warm). A leg that returns false stops the call, its embedder reporting why.
+	// A mission start the 0x1A already released goes straight to the load. Waiting: the pass
+	// took no 0x1A.
 	// [orig: NapiClient_WaitForGameStart @0x42CC10 - the receive @0x42CC88, the send @0x42CC92,
 	//  the flag test @0x42CCB9..0x42CCBF, the return @0x42CCC1; Game_StartMission @0x524360 -
-	//  the call @0x524E29, the return-code tests @0x524E54..0x524E63, the 0x0B @0x52624B, the
+	//  the call @0x524E29, the return-code tests @0x524E54..0x524E63, DialogSystem_Init
+	//  @0x525463, Game_ReloadEntityModelsAndCallbacks @0x52550E, Entity_InitAllFromModels
+	//  @0x52567F, the first 0x2F @0x525836, the freeze @0x525A6E, the 0x0B @0x52624B, the
 	//  send @0x526255, the final wait @0x526295..0x5262E5]
 	struct MissionStartLegs {
 		std::function<bool()> after_pass;
@@ -146,10 +151,10 @@ public:
 	};
 	enum class MissionStartPass : uint8_t { Waiting, Stopped, Started };
 	MissionStartPass poll_mission_start(const MissionStartLegs &legs);
-	// The streamed pools into the World for that mission start's settle (D-NET-NEW-L2-38):
-	// the frame phase that materializes them and stamps the statics' placed identity
-	// (materialize_replica_world) runs only in a session update, and the settle runs in the
-	// mission start's call, ahead of any (poll_mission_start), so it runs it ahead of placing
+	// The streamed pools into the World for that mission start's load (D-NET-NEW-L2-38,
+	// D-NET-NEW-L2-42): the frame phase that materializes them and stamps the statics' placed
+	// identity (materialize_replica_world) runs only in a session update, and the load runs in
+	// the mission start's call, ahead of any (poll_mission_start), so it runs it ahead of placing
 	// the streamed statics; the next update finds the World in step. Retail's client writes each
 	// streamed row into its pool slot in its page's receive (a pool-1 0x0D's, a pool-2 0x10's),
 	// and the mission start's load initializes every pool's rows from their models ahead of its

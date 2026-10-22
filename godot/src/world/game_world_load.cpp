@@ -300,18 +300,28 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		}
 		challenge_sim->finalize_loaded_model_challenge_snapshot();
 	}
-	// A joiner's definitions and world are in: its mission start's first leg queues the first
-	// 0x2F and runs the pumps ahead of the effect builds and the model warm, the freeze's
-	// analog (engine: ClientRuntime::push_mission_start_first_loadout, D-NET-NEW-L2-35).
-	if (challenge_sim.is_valid() && challenge_sim->is_joiner()) {
-		timeline->span("first_leg");
-		challenge_sim->push_join_mission_start_first_loadout();
-		timeline->end_span();
-	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_AUDIO));
 	timeline->span("audio");
 	start_mission_audio(p_mission, p_bms_name);
 	timeline->end_span();
+	if (challenge_sim.is_valid() && challenge_sim->is_joiner()) {
+		// A joiner's mission start initializes every streamed row from its model, then queues
+		// its first 0x2F: its sound banks, the entity models' reload and the rows' init all
+		// run ahead of the first submission, and the model freeze after it (the settle,
+		// settle_join_wire_assets) (engine: inmatch::JoinerRole::MissionStartLegs carries the
+		// witness, D-NET-NEW-L2-42).
+		if (wire_header_join) {
+			timeline->span("streamed_world");
+			(void)place_join_wire_world(challenge_sim, timeline);
+			timeline->end_span();
+		}
+		// The definitions and the world are in: the mission start's first leg queues the first
+		// 0x2F and runs the pumps ahead of the effect builds and the model warm, the freeze's
+		// analog (engine: ClientRuntime::push_mission_start_first_loadout, D-NET-NEW-L2-35).
+		timeline->span("first_leg");
+		challenge_sim->push_join_mission_start_first_loadout();
+		timeline->end_span();
+	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS));
 	timeline->span("effects");
 	start_effect_world();
@@ -858,10 +868,42 @@ bool GameWorld::apply_join_wire_til_if_ready() {
 	return true;
 }
 
+// A wire-header joiner's streamed world at its mission start's load, ahead of its first
+// submission (load_mission_internal carries the witness): the S2C 0x45 overlay applied, the
+// stream landed in the World with its statics' placed identity, and the statics placed. False on
+// a failure, which latches join_wire_assets_failed_ for the settle to report.
+bool GameWorld::place_join_wire_world(const Ref<Simulation> &p_sim, const Ref<LoadTimeline> &p_timeline) {
+	if (!join_wire_assets_pending_) {
+		return !join_wire_assets_failed_;
+	}
+	p_timeline->span("til");
+	const bool til_applied = apply_join_wire_til_if_ready();
+	p_timeline->end_span();
+	if (!til_applied) {
+		return false;
+	}
+	const int64_t til_state = p_sim->get_join_terrain_til_state();
+	if (til_state == Simulation::JOIN_TERRAIN_TIL_RECEIVING || til_state == Simulation::JOIN_TERRAIN_TIL_INVALID ||
+			(til_state == Simulation::JOIN_TERRAIN_TIL_COMPLETE && !join_wire_til_applied_) ||
+			(til_state != Simulation::JOIN_TERRAIN_TIL_ABSENT && til_state != Simulation::JOIN_TERRAIN_TIL_COMPLETE)) {
+		join_wire_assets_failed_ = true;
+		return false;
+	}
+	// The stream lands in the World and its statics take their placed identity first: the
+	// load runs in the mission start's call, ahead of any session update, whose frame phase
+	// does it (engine: inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
+	p_timeline->span("materialize");
+	p_sim->materialize_join_world_stream();
+	p_timeline->end_span();
+	place_streamed_mission_objects(p_sim, p_timeline);
+	return true;
+}
+
 // Complete the wire-only part of a retail join once the protocol reaches its
-// deployment/admission boundary. SessionDrive calls this before revealing
-// the world (or deploy map), guaranteeing the optional 0x45 overlay and the
-// C2S 0x3D page (inmatch/loaded_model_list.h) reflect the completed initial stream.
+// deployment/admission boundary: the model freeze's analog, after the load's first
+// submission (load_mission_internal placed the streamed world ahead of it). SessionDrive
+// calls this before revealing the world (or deploy map), guaranteeing the C2S 0x3D page
+// (inmatch/loaded_model_list.h) reflects the completed initial stream.
 bool GameWorld::settle_join_wire_assets() {
 	if (join_wire_assets_failed_) {
 		return false;
@@ -869,46 +911,21 @@ bool GameWorld::settle_join_wire_assets() {
 	if (!join_wire_assets_pending_) {
 		return true;
 	}
-	// The settle's own timeline (an instrument: its lines print under --verbose beside the
-	// load's), the rest of the joiner's 0x1A -> C 0x2F window after load_mission_internal.
-	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Join settle %s", loaded_mission_file_));
-	timeline->span("til");
-	const bool til_applied = apply_join_wire_til_if_ready();
-	timeline->end_span();
-	if (!til_applied) {
-		timeline->finish();
-		return false;
-	}
 	Ref<Simulation> sim = get_sim();
 	if (sim.is_null() || !sim->is_joiner()) {
 		join_wire_assets_failed_ = true;
-		timeline->finish();
 		return false;
 	}
-	const int64_t til_state = sim->get_join_terrain_til_state();
-	if (til_state == Simulation::JOIN_TERRAIN_TIL_RECEIVING || til_state == Simulation::JOIN_TERRAIN_TIL_INVALID ||
-			(til_state == Simulation::JOIN_TERRAIN_TIL_COMPLETE && !join_wire_til_applied_) ||
-			(til_state != Simulation::JOIN_TERRAIN_TIL_ABSENT && til_state != Simulation::JOIN_TERRAIN_TIL_COMPLETE)) {
-		join_wire_assets_failed_ = true;
-		timeline->finish();
-		return false;
-	}
-	timeline->span("streamed_objects");
-	// The stream lands in the World and its statics take their placed identity first: the
-	// settle runs in the mission start's call, ahead of any session update, whose frame phase
-	// does it (engine: inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
-	timeline->span("materialize");
-	sim->materialize_join_world_stream();
-	timeline->end_span();
-	place_streamed_mission_objects(sim, timeline);
-	timeline->end_span();
+	// The settle's own timeline (an instrument: its lines print under --verbose beside the
+	// load's), the rest of the joiner's 0x1A -> C 0x2F window after load_mission_internal.
+	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Join settle %s", loaded_mission_file_));
 	timeline->span("model_list");
 	player_visuals_->prewarm_loaded_model_challenge_definitions();
 	sim->finalize_loaded_model_challenge_snapshot();
 	timeline->end_span();
 	// The joiner's mission start models, its list known now: built and freed undrawn (the
-	// load's forced frames ran before the stream landed), so a death's husk swap finds its
-	// data, meshes, textures and shaders built (D-NET-NEW-L5-8).
+	// list freezes after the load's forced frames), so a death's husk swap finds its data,
+	// meshes, textures and shaders built (D-NET-NEW-L5-8).
 	timeline->span("model_warm");
 	if (Node3D *model_warm = build_model_warm(sim->get_mission_start_model_files(), Vector3())) {
 		model_warm->set_visible(false);

@@ -801,6 +801,7 @@ private:
 			const Ref<ResourceRoot> &p_resource_root, const PackedByteArray &p_wire_til_bytes,
 			bool p_wire_is_authoritative);
 	bool apply_join_wire_til_if_ready();
+	bool place_join_wire_world(const Ref<Simulation> &p_sim, const Ref<LoadTimeline> &p_timeline);
 	// `p_timeline` (may be null) takes the placement's legs as nested spans (an instrument).
 	void place_streamed_mission_objects(const Ref<Simulation> &p_sim,
 			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
