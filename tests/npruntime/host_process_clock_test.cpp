@@ -345,6 +345,37 @@ void test_deploy_idle_reads_the_process_clock() {
 	       "the next millisecond of clock punts it t35");
 }
 
+// D-NET-NEW-L8-36: the spawn pump's re-nag of a held joiner (its S2C 0x03 at most once per
+// 1000 ms) tests and stamps the pump's one GetTickCount. A joiner the cap holds is nagged at 70000;
+// with the logic tick and the run clock held, exactly 1000 ms of clock later it is not, and the
+// next millisecond it is again, stamped 71001 (on the run clock it would never be re-nagged).
+// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - GetTickCount @0x4C8DF8, kept
+//  @0x4C8DFE; the stamp's zero test @0x4C8F7A..0x4C8F7F, `sub` @0x4C8F85, 0x3E8 @0x4C8F87, the
+//  stamp @0x4C8FCD / @0x4C8FD1]
+void test_hold_nag_reads_the_process_clock() {
+	ClockHost host;
+	host.ctx.config.max_players = 1; // the in-match peer fills the cap
+	ns::UdpSessionTransport wire(ns::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection held = conn_fixture::make_conn(8,
+			inmatch::NapiNPConnection::kTypeServerSide, &wire, ns::TransportMode::Client,
+			w::EntityHandle{}, false);
+	held.phase = inmatch::ConnectionPhase::Joined;
+	held.self_id_seen = true; // its 0x02 listed it
+	host.ctx.np_protocol.connection_list.push_back(std::move(held));
+	inmatch::SessionReplyState &st = host.ctx.np_protocol.connection_list.back().reply;
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(host.ctx, host.world);
+	expect(st.admission_hold_nag_pending && st.admission_hold_nag_host_ms == 70000u,
+	       "the held joiner is nagged and stamped on the process clock");
+	st.admission_hold_nag_pending = false; // its 0x03 went
+	host.clock += 1000u;                   // the logic tick and the run clock hold
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(host.ctx, host.world);
+	expect(!st.admission_hold_nag_pending, "exactly 1000 ms of clock is no re-nag");
+	host.clock += 1u;
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(host.ctx, host.world);
+	expect(st.admission_hold_nag_pending && st.admission_hold_nag_host_ms == 71001u,
+	       "the next millisecond of clock re-nags it");
+}
+
 } // namespace
 
 int main() {
@@ -355,6 +386,7 @@ int main() {
 	test_team_change_reads_the_process_clock();
 	test_ticket_wait_reads_the_process_clock();
 	test_deploy_idle_reads_the_process_clock();
+	test_hold_nag_reads_the_process_clock();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "npruntime_host_process_clock: %d failure(s)\n", g_failures);
 		return 1;

@@ -1110,7 +1110,10 @@ static void orphan_player_row(NapiNPServerCtx &ctx, NapiNPConnection &conn) {
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world) {
 	if (!ctx.is_authority || world.match.outcome().ended) return 0;
 	int spawned = 0;
-	const uint32_t host_ms = ctx.np_protocol.host_run_duration_ms;
+	// The pump's one GetTickCount, the process clock the re-nag's 1000 ms test and its stamp
+	// read, so a host load counts (D-NET-NEW-L8-36) [orig: GetTickCount @0x4C8DF8, kept
+	//  @0x4C8DFE; the test @0x4C8F81..0x4C8F87, the stamp @0x4C8FCD / @0x4C8FD1].
+	const uint32_t host_ms = host_tick_count_ms(ctx);
 	bool restart = true;
 	while (restart) {
 		restart = false;
