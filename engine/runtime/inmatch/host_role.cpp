@@ -1261,6 +1261,29 @@ void HostRole::close() {
 		unstopped.identity = identity;
 		unstopped.host_start_tick = ctx.np_protocol.host_start_tick;
 		if (identity != nullptr) unstopped.hello = host_server_hello(ctx, ClientHello{}, PeerAddr{});
+		// A listen host whose own client never left (an exit that is not the own leave's, the
+		// NovaWorld session's end among them) holds its own pair too: the session's own client
+		// connection (+0xE60, type 2) and the type-1 twin its own 0x42 created, at address 0, the
+		// first server-side node of the list. Our one own node stands for the pair: the client
+		// as it is, the twin a server-side copy with no record of its own.
+		// (D-NET-NEW-L1-26, L9-s11's own-pair hand-over)
+		// [orig: CNapiGameSession_CreateSession @0x4C97C0 - the type-2 create @0x4C9B9C ahead of
+		//  its 0x42's type-1 create (NapiNPProtocol_HandleClientJoin @0x62BF06, the address word
+		//  @0x62BF28); CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0xE60 destroy
+		//  @0x4C8A93 ahead of StopServer @0x4C8AA1]
+		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (conn.type != NapiNPConnection::kTypeClientSide) continue;
+			unstopped.own_client = conn;
+			unstopped.own_client->link.transport = nullptr;
+			UnstoppedNode twin;
+			twin.conn = conn;
+			twin.conn.type = NapiNPConnection::kTypeServerSide;
+			twin.conn.link.transport = nullptr;
+			twin.conn.disconnect_event_valid = false;
+			twin.conn.disconnect_event = DisconnectEvent{};
+			unstopped.nodes.push_back(std::move(twin));
+			break;
+		}
 		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (conn.type != NapiNPConnection::kTypeServerSide) continue;
 			UnstoppedNode node;

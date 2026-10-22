@@ -511,7 +511,17 @@ StoppedLater error_arm_then(bool next_host) {
 		if (to == kPeer && bytes == stop) ++early_stops;
 	CHECK(early_stops == 0);
 	CHECK(inout.pending().find("PLAYER REMOVED") == std::string::npos);
-	CHECK(process.unstopped_server.running && process.unstopped_server.nodes.size() == 1);
+	// The own pair is held with the joiner (the exit is not the own leave's): the twin, at
+	// address 0, first; the own client beside the list.
+	CHECK(process.unstopped_server.running && process.unstopped_server.nodes.size() == 2);
+	CHECK(process.unstopped_server.own_client.has_value());
+	if (process.unstopped_server.nodes.size() == 2) {
+		CHECK(process.unstopped_server.nodes[0].conn.peer.ip == 0 &&
+				process.unstopped_server.nodes[0].conn.type ==
+						inmatch::NapiNPConnection::kTypeServerSide &&
+				!process.unstopped_server.nodes[0].conn.disconnect_event_valid);
+		CHECK(process.unstopped_server.nodes[1].conn.peer == kPeer);
+	}
 	first->ctx().logs.inout = nullptr;
 	first.reset(); // the session goes; the process keeps the server
 
@@ -550,6 +560,14 @@ StoppedLater error_arm_then(bool next_host) {
 			"127.0.0.1:31000 : SERVER PLAYER REMOVED \"\". [1,9,0,0,\"\",0,\"NP.C:SH:STOP\"]");
 	const std::size_t stopped = out.text.find(expected_stopped);
 	CHECK(removed != std::string::npos && stopped != std::string::npos && removed < stopped);
+	// The reset destroys the own client first, then the stop's walk takes its twin ahead of the
+	// joiner; neither sends on the socket (the manager's loopback).
+	const std::size_t own_client = out.text.find("0.0.0.0:0 : CLIENT PLAYER REMOVED");
+	const std::size_t own_twin = out.text.find(
+			"0.0.0.0:0 : SERVER PLAYER REMOVED", own_client == std::string::npos ? 0 : own_client);
+	CHECK(own_client != std::string::npos && own_twin != std::string::npos &&
+			own_client < own_twin && own_twin < removed);
+	CHECK(out.text.find("[1,9,0,0,\"\",0,\"NP.C:SH:STOP\"]", own_twin) != std::string::npos);
 	if (next_host) {
 		const std::size_t started = out.text.find(" : HOST STARTED ");
 		CHECK(started == std::string::npos || stopped < started);
@@ -723,11 +741,15 @@ void test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_sessi
 		first->ctx().np_protocol.connection_list.back().client_ck = 0x5A5A1234u;
 		first->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld;
 		first->role->close();
-		CHECK(process.unstopped_server.nodes.size() == 1);
-		if (process.unstopped_server.nodes.size() != 1)
+		// The own pair's twin first (address 0), then the joiner.
+		CHECK(process.unstopped_server.nodes.size() == 2);
+		if (process.unstopped_server.nodes.size() != 2)
 			return;
+		const inmatch::NapiNPConnection twin = process.unstopped_server.nodes.front().conn;
+		const bool twin_added =
+				twin.link.owned_entity.valid() || twin.phase >= inmatch::ConnectionPhase::PlayerAdded;
 		// The held joiner's player was added on slot 3; a second held node never got its player.
-		inmatch::NapiNPConnection &added = process.unstopped_server.nodes.front().conn;
+		inmatch::NapiNPConnection &added = process.unstopped_server.nodes.back().conn;
 		added.phase = inmatch::ConnectionPhase::PlayerAdded;
 		added.reply.player_slot = 3;
 		inmatch::NapiNPConnection pending = added;
@@ -774,10 +796,16 @@ void test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_sessi
 				++failures;
 				return;
 			}
-			CHECK(removed.size() == 1);
-			if (removed.size() == 1) {
-				CHECK(removed[0].first == 3);
-				CHECK(removed[0].second > 0);
+			// The twin's leg (the host slot), before any STOP datagram (its burst is the
+			// loopback's), then the joiner's after its burst.
+			CHECK(removed.size() == (twin_added ? 2u : 1u));
+			if (removed.size() == (twin_added ? 2u : 1u)) {
+				if (twin_added) {
+					CHECK(removed.front().first == twin.reply.player_slot);
+					CHECK(removed.front().second == 0);
+				}
+				CHECK(removed.back().first == 3);
+				CHECK(removed.back().second > 0);
 			}
 			if (reset == Reset::NovaWorldHost) {
 				CHECK(reports.size() == 1);

@@ -202,9 +202,11 @@ bool answer_session_ping(NapiNPConnection &conn, const std::vector<uint8_t> &bod
 bool latch_client_goodbye(NapiNPConnection &conn, const std::vector<uint8_t> &body);
 
 // The next session reset's StopServer over a server an error-arm exit left unstopped
-// (UnstoppedServer, napi_np_connection.h): each node takes the STOP record (the first latch
+// (UnstoppedServer, napi_np_connection.h): a held own client first (its CLIENT removal line;
+// its goodbye is the loopback's), then each node takes the STOP record (the first latch
 // wins), its /INOUT removal line and its 0x86 burst over `socket` (null: none open, nothing on
-// the wire), in list order; then HOST STOPPED over `local_address` (null: the placeholder)
+// the wire; the own pair's twin at address 0 bursts into the loopback), in list order; then
+// HOST STOPPED over `local_address` (null: the placeholder)
 // and the old session name. Nothing when no server is held. The reset points: a host's
 // pre-game setup and a session create (HostRole's bring-ups), and the process's network
 // shutdown (the shells' exits). (D-NET-NEW-L1-26)

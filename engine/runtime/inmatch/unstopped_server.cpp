@@ -61,6 +61,15 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket *socket, const PeerAddr *local_address,
 		const std::function<void(NapiNPConnection &slot)> &player_removed) {
 	if (!server.running) return;
+	// A held own pair: the reset destroys the session's own client connection first, its
+	// removal line with the record it holds (latched or not); its 0x46 goes to the manager's
+	// loopback. The stop's walk then takes its twin, the first node, as any node.
+	// [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0xE60 test @0x4C8A83, its
+	//  CNapiNPConnection_Destroy @0x4C8A93 ahead of StopServer @0x4C8AA1;
+	//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the removal line @0x6253D2]
+	if (server.own_client)
+		write_inout_line(logs,
+				inout_player_removed_line(*server.own_client, NapiNPConnection::kTypeClientSide));
 	for (UnstoppedNode &node : server.nodes) {
 		NapiNPConnection &conn = node.conn;
 		latch_disconnect_event(conn, make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP"));
@@ -81,7 +90,10 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &logs,
 		opennova::IDatagramSocket *socket) {
 	write_inout_line(logs, inout_player_removed_line(conn));
-	if (socket == nullptr) return;
+	// The own pair's twin, at address 0, bursts into the manager's loopback, not the socket
+	// [orig: CNapiNPManager_SendTo @0x61EC20 - the address test @0x61EC59, the loopback FIFO
+	//  @0x61ECCD].
+	if (socket == nullptr || conn.peer.ip == 0) return;
 	for (const std::vector<uint8_t> &datagram : host_goodbye_burst(/*host_running=*/true, conn))
 		socket->send_to(conn.peer, datagram.data(), datagram.size());
 }
@@ -417,6 +429,11 @@ uint32_t pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 	const auto pump_legs = [&](UnstoppedNode &node) {
 		NapiNPConnection &c = node.conn;
 		if (c.type != NapiNPConnection::kTypeServerSide || c.pending_disconnect) return;
+		// The own pair's twin (address 0): its builds, keepalives and requests go to the
+		// manager's loopback for the held own client, never the socket, and its reap reads the
+		// address word 0 [orig: CNapiNPManager_SendTo @0x61EC20 - @0x61EC59, the FIFO @0x61ECCD;
+		//  CNapiNPConnection_PumpStateMachine - the address word +0x30 @0x629352].
+		if (c.peer.ip == 0) return;
 		// 0x10: the holdoff.
 		if (c.s2c_send_holdoff_countdown > 0) --c.s2c_send_holdoff_countdown;
 		c.s2c_send_boundary_open = c.s2c_send_holdoff_countdown == 0;
