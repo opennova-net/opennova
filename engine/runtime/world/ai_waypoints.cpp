@@ -378,8 +378,8 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
         ve != nullptr && ve->inf.wait_cooldown == 1)
         return;
     Entity::VehicleMotorState &m = veh.veh;
-    const int32_t n = ++m.stuck_ticks;                 // [orig: @0x4652b6]
-    if (!is_authority || (n & 0xF) != 0) return;       // [orig: @0x4652bc/@0x4652c4]
+    const int32_t n = ++m.stuck_ticks;                 // [orig: @0x4652A9]
+    if (!is_authority || (n & 0xF) != 0) return;       // [orig: @0x4652b6/@0x4652bc/@0x4652c4]
     const int32_t px = veh.position.x.q16;
     const int32_t py = veh.position.y.q16;
     const int32_t pz = veh.position.z.q16;
