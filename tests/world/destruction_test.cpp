@@ -4190,6 +4190,11 @@ void test_blast_breaks_flagged_sections_at_transformed_box_centers() {
     seed.health = seed.health_max = 1000;
     seed.bound_radius = 20;
     seed.position = {20, 30, 10};
+    // A zero heading word: the placement builder skips its yaw stage, so the
+    // placement is the exact identity and the box centers below sit where they
+    // are authored [orig: Math_BuildFixedPointMatrixFromEulerAngles @0x613F40,
+    // `test ecx, ecx; jz` @0x6140A6..0x6140AC].
+    seed.heading = 0;
     const auto h = w.registry.spawn(2, seed);
     CollisionModel model;
     model.sections.resize(4);

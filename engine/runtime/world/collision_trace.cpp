@@ -43,13 +43,12 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     int32_t p[3];
     entity_pos_fixed(*e, p);
     const int32_t heading = e->heading;
-    // Statics authored with pitch/roll (rocks seated on slopes) take the full
-    // euler matrix so the shell leans with the visual [orig: the entity
-    // orientation matrix @ 0x613f40 serves every collision query]; pure-yaw
-    // placements keep the quantized-table heading path bit-for-bit. Entity/item
-    // scale is already present in retail's placement/pose matrices; preserve it
-    // before either publication path so the matching scaled inverse can be
-    // selected by the polygon walker.
+    // Every placement, pure yaw included, takes the full euler matrix, so a
+    // static authored with pitch/roll (a rock seated on a slope) leans with its
+    // visual [orig: the entity orientation matrix @ 0x613f40 serves every
+    // collision query]. Entity/item scale is already present in retail's
+    // placement/pose matrices; preserve it before either publication path so
+    // the matching scaled inverse can be selected by the polygon walker.
     CollisionMatrix world_mat = collision_matrix_from_placement(
             heading, e->pitch_bam, e->roll_bam, p, e->uniform_scale_q16);
 
