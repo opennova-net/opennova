@@ -649,6 +649,11 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 				conn.join_ticket_validation =
 						inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
 				if (conn.join_ticket_validation) {
+					// State 3's entry stamps the net player's +0xA4 with GetTickCount, the
+					// validation watchdog's deadline base (D-NET-NEW-L8-34).
+					// [orig: CNetPlayer_SetGameState(3) called @0x512FA6 - GetTickCount
+					//  @0x4C408A, the store @0x4C4156]
+					conn.join_validated_host_ms = host_tick_count_ms(*inputs.server_ctx);
 					conn.admission_stage = GameAdmissionStage::AwaitPlayEnter;
 					break;
 				}

@@ -1103,9 +1103,6 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	//  NapiNPServer_HandleNewConnection @0x4c8054..0x4c80AF, @0x4c8203].
 	ctx.connect_log_disable_queued = true;
 	++ctx.total_logins;
-	// The validation-phase deadline base for CheckPlayerTimeouts (netPlayer+0xA4
-	// is stamped with GetTickCount when the node enters the validating state).
-	conn.join_validated_host_ms = ctx.np_protocol.host_run_duration_ms;
 	out.outbound.push_back(make_server_auth_datagram(auth, peer, conn));
 	// The /INOUT line once the 0x82 is out [orig: CNapiNPConnection_OnStateChange
 	//  @0x626204 -> CNapiNPConnection_LogPlayerAdded].

@@ -606,16 +606,22 @@ std::string join_ticket_for(const NapiNPServerCtx &ctx, const NapiNPConnection &
 //   state 3, no arm:   after 120 s the chat-coded punt 42 "N.C:NONWTOVALU";
 //   state 4, armed:    after 120 s the record {DC 2, "N.C:NWJTICKTMOUT", 44};
 //   state 4, no arm:   at once the record {DC 2, "N.C:NONWTOVALU", 42}.
-// The first latched record wins (stage_host_disconnect); the stamp is the
-// one netPlayer+0xA4 word for both states.
+// The first latched record wins (stage_host_disconnect). The deadline base is
+// the net player's +0xA4, which each game-state change stamps with
+// GetTickCount: state 3's at the C2S 0x01, state 4's at the enter request
+// here; the walk measures GetTickCount against it, the process clock, which
+// runs on through a host load (D-NET-NEW-L8-34).
 // [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 — caller @0x51DBF3 inside
 //  the periodic block; gates @0x4C8B0B; state 3 @0x4C8B76, the arm @0x4C8B88,
 //  SendPlayEnterRequest @0x4C8BC1 + SetGameState(4) @0x4C8BCA, stamp read
-//  @0x4C8B8A, 0x1D4C0 compare @0x4C8B9D, SendChatMessage(42) @0x4C8BB1;
-//  state 4 armed record @0x4C8CD7..0x4C8D68, no-arm record @0x4C8BF8..0x4C8C9E]
+//  @0x4C8B8A, GetTickCount @0x4C8B90, 0x1D4C0 compare @0x4C8B98 / `jbe` @0x4C8B9D,
+//  SendChatMessage(42) @0x4C8BB1; state 4: stamp read @0x4C8CB3, GetTickCount
+//  @0x4C8CB9, 0x1D4C0 compare @0x4C8CC1, armed record @0x4C8CD7..0x4C8D68,
+//  no-arm record @0x4C8BF8..0x4C8C9E; CNetPlayer_SetGameState @0x4C4060 -
+//  GetTickCount @0x4C408A, +0xA4 @0x4C4156]
 void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx) {
 	if (!ctx.is_authority) return;
-	const uint32_t host_ms = ctx.np_protocol.host_run_duration_ms;
+	const uint32_t host_ms = host_tick_count_ms(ctx);
 	const bool armed = ctx.novaworld_join_tickets_armed;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide ||
@@ -636,7 +642,10 @@ void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx) {
 					request.join_ticket = join_ticket_for(ctx, conn);
 					ctx.on_player_enter_request(request);
 				}
+				// State 4's entry restamps +0xA4: its 120 s run from the request.
+				// [orig: CNetPlayer_SetGameState(4) called @0x4C8BCA]
 				conn.player_enter_requested = true;
+				conn.join_validated_host_ms = host_ms;
 				continue;
 			}
 			if (!expired) continue;

@@ -651,10 +651,12 @@ struct NapiNPConnection {
 	// FIRST/MID/FINAL C2S records share one receive buffer on this peer's
 	// connection. Only a completed semantic message may reach host dispatch.
 	ProtocolReassemblyState c2s_reassembly{};
-	// The host-clock millisecond at which the 0x42 join was accepted: the
-	// validation-phase deadline base (netPlayer+0xA4) that reaps a peer which
-	// keeps talking but never completes its admission.
-	// [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 reads [esi+0xA4] @0x4C8B8A]
+	// The ticket wait's deadline base (netPlayer+0xA4): the host's GetTickCount
+	// (host_tick_count_ms) at its latest game-state change, state 3's at the C2S
+	// 0x01, then state 4's at the enter request (D-NET-NEW-L8-34).
+	// [orig: CNetPlayer_SetGameState @0x4C4060 - GetTickCount @0x4C408A, +0xA4
+	//  @0x4C4156; CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 reads [esi+0xA4]
+	//  @0x4C8B8A / @0x4C8CB3]
 	uint32_t join_validated_host_ms = 0;
 	// The C2S 0x00 JOIN's CD identity blob as [name][value] pairs: the joiner's
 	// NovaWorld NAMEINFO / PCID / SQUADINFO / JOINTICKET cookies. Empty on LAN.
@@ -714,7 +716,7 @@ struct NapiNPConnection {
 	// ClientPlayerEnterRequest went to the service; admitted = its result was
 	// success (state 6), which sends the probe. A C2S 0x02 (game state 7) leaves
 	// the wait: it clears this and join_ticket_validation (complete_admission).
-	// The deadline base stays join_validated_host_ms.
+	// The request restamps join_validated_host_ms.
 	// [orig: CNetPlayer_SetGameState(player, 4) @0x4C8BCA;
 	//  CNapiGameSession_HandlePlayEnterResponse @0x4D1940 — state-4 gate
 	//  @0x4D1B40, CNetPlayer_SetGameState(6) called @0x4D1C11]

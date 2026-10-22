@@ -1646,11 +1646,14 @@ bool check_player_enter_hook() {
 	if (!expect(!inmatch::Server_ApplyPlayerEnterResult(f.ctx, 21, true, 0, 0),
 			"a result for a settled joiner is refused"))
 		return false;
-	f.ctx.np_protocol.host_run_duration_ms = 0x1D4C0u;
+	// The request at 1000 ms entered state 4, which restamped the deadline base, so the wait's
+	// 120 s run from there (D-NET-NEW-L8-34) [orig: CNetPlayer_SetGameState(4) called
+	// @0x4C8BCA - GetTickCount @0x4C408A, +0xA4 @0x4C4156; the state-4 test @0x4C8CB3..0x4C8CC1].
+	f.ctx.np_protocol.host_run_duration_ms = 1000u + 0x1D4C0u;
 	inmatch::Server_CheckPlayerTimeouts(f.ctx);
 	if (!expect(!conn_by_id(22).host_disconnect_sent, "exactly 120 s is not yet the ticket deadline"))
 		return false;
-	f.ctx.np_protocol.host_run_duration_ms = 0x1D4C1u;
+	f.ctx.np_protocol.host_run_duration_ms = 1000u + 0x1D4C1u;
 	inmatch::Server_CheckPlayerTimeouts(f.ctx);
 	if (!expect(conn_by_id(22).host_disconnect_sent, "past 120 s the ticket wait reaps")) return false;
 	// Without the arm the announced state is punted at once and a fresh joiner

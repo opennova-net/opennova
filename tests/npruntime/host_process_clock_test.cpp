@@ -1,8 +1,10 @@
 // The host's GetTickCount readers on the process clock (D-NET-NEW-L8-29 and the clock sweep after
 // D-NET-NEW-L8-28): retail reads GetTickCount, which runs on through a load or a held start, where
-// ours' logic-tick seam (io::host_milliseconds_for_logic_tick) stood still. The World's
-// tick_count_ms is the clock the host binds (HostConfig::clock_ms); each case below injects one,
-// holds the logic tick and moves the clock, so only a reader on the process clock passes.
+// ours' logic-tick seam (io::host_milliseconds_for_logic_tick) stood still, and so did the run
+// clock (host_run_duration_ms) the protocol timers read. The World's tick_count_ms and the host
+// context's process_clock_ms are the clock the host binds (HostConfig::clock_ms); each case below
+// injects one, holds the logic tick and the run clock and moves the clock, so only a reader on the
+// process clock passes.
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -16,9 +18,11 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "conn_fixture.h"
@@ -55,6 +59,7 @@ struct ClockHost {
 		inmatch::GameConfig config;
 		config.max_players = 4;
 		inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+		ctx.process_clock_ms = [this] { return clock; };
 		world.rules.mp_session = true;
 		world.registry.configure_pool(0, 8);
 		world.tick_count_ms = [this] { return clock; };
@@ -76,6 +81,19 @@ struct ClockHost {
 				ctx.np_protocol.connection_list, &world, inputs);
 	}
 };
+
+// Whether a DESCRIPTION record naming `ddstr` left on `wire` (draining it).
+bool sent_description(ns::UdpSessionTransport &wire, const char *ddstr) {
+	const std::string text(ddstr);
+	bool found = false;
+	ns::Datagram datagram;
+	while (wire.pop_outbound(datagram))
+		if (datagram.tag == hightag::DESCRIPTION_PACKET &&
+				std::search(datagram.body.begin(), datagram.body.end(), text.begin(),
+						text.end()) != datagram.body.end())
+			found = true;
+	return found;
+}
 
 std::vector<uint8_t> u32_pair(uint32_t a, uint32_t b) {
 	std::vector<uint8_t> out;
@@ -199,6 +217,72 @@ void test_team_change_reads_the_process_clock() {
 	expect(host.conn().reply.team_change_ms == 71000u, "1000 ms of clock later the cooldown passes");
 }
 
+// D-NET-NEW-L8-34: the ticket wait's 120 s deadlines are GetTickCount against the net player's
+// +0xA4, which each game-state change stamps with GetTickCount: the C2S 0x01's state 3, then the
+// watchdog's enter request's state 4. The logic tick and the run clock held throughout (on the run
+// clock nothing would expire):
+//   - a joiner whose 0x01 entered state 3 at 70000, the arm then gone, is reaped with
+//     "N.C:NONWTOVALU" past 120 s of clock from its 0x01;
+//   - an armed host's request 5000 ms of clock after a joiner's 0x01 enters state 4 and restamps,
+//     so the joiner is reaped with "N.C:NWJTICKTMOUT" past 120 s from the request (from the 0x01's
+//     stamp it would be 5000 ms early).
+// [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - SetGameState(3) called @0x512FA6;
+//  CNetPlayer_SetGameState @0x4C4060 - GetTickCount @0x4C408A, +0xA4 @0x4C4156;
+//  CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 - SetGameState(4) called @0x4C8BCA, state 3's
+//  GetTickCount @0x4C8B90 and compare @0x4C8B98, state 4's @0x4C8CB9 / @0x4C8CC1]
+void test_ticket_wait_reads_the_process_clock() {
+	ClockHost host;
+	host.ctx.transport_mode = inmatch::NetworkType::NovaWorld;
+	ns::UdpSessionTransport state3_wire(ns::UdpSessionTransport::Role::Host);
+	ns::UdpSessionTransport state4_wire(ns::UdpSessionTransport::Role::Host);
+	auto joiner = [&host](uint32_t id) -> inmatch::NapiNPConnection & {
+		for (inmatch::NapiNPConnection &c : host.ctx.np_protocol.connection_list)
+			if (c.connection_id == id) return c;
+		return host.ctx.np_protocol.connection_list.front();
+	};
+	// A joined node posts its gated C2S 0x01 (the arm on), entering state 3.
+	auto form_post = [&](uint32_t id, ns::UdpSessionTransport &wire) {
+		inmatch::NapiNPConnection node = conn_fixture::make_conn(id,
+				inmatch::NapiNPConnection::kTypeServerSide, &wire, ns::TransportMode::Client,
+				w::EntityHandle{}, false);
+		node.phase = inmatch::ConnectionPhase::Joined;
+		node.admission_stage = inmatch::GameAdmissionStage::AwaitFormPost;
+		host.ctx.np_protocol.connection_list.push_back(std::move(node));
+		host.ctx.novaworld_join_tickets_armed = true;
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = &host.ctx;
+		(void)inmatch::dispatch_session_replies(host.ctx.config, joiner(id),
+				{make_protocol_message(0x01, {0x00})}, host.world.logic_tick,
+				host.ctx.np_protocol.connection_list, nullptr, inputs);
+	};
+
+	form_post(20, state3_wire);
+	expect(joiner(20).join_ticket_validation && joiner(20).join_validated_host_ms == 70000u,
+	       "the gated 0x01 enters state 3 and stamps the process clock");
+	host.ctx.novaworld_join_tickets_armed = false;
+	host.clock = 70000u + 0x1D4C0u;
+	inmatch::Server_CheckPlayerTimeouts(host.ctx);
+	expect(!joiner(20).host_disconnect_sent, "exactly 120 s past the 0x01 does not reap state 3");
+	host.clock += 1u;
+	inmatch::Server_CheckPlayerTimeouts(host.ctx);
+	expect(joiner(20).host_disconnect_sent && sent_description(state3_wire, "N.C:NONWTOVALU"),
+	       "past 120 s from the 0x01 the state-3 joiner is reaped");
+
+	const uint32_t posted = host.clock;
+	form_post(21, state4_wire);
+	host.clock = posted + 5000u;
+	inmatch::Server_CheckPlayerTimeouts(host.ctx);
+	expect(joiner(21).player_enter_pending() && joiner(21).join_validated_host_ms == posted + 5000u,
+	       "the enter request enters state 4 and restamps the process clock");
+	host.clock = posted + 5000u + 0x1D4C0u;
+	inmatch::Server_CheckPlayerTimeouts(host.ctx);
+	expect(!joiner(21).host_disconnect_sent, "exactly 120 s past the request does not reap state 4");
+	host.clock += 1u;
+	inmatch::Server_CheckPlayerTimeouts(host.ctx);
+	expect(joiner(21).host_disconnect_sent && sent_description(state4_wire, "N.C:NWJTICKTMOUT"),
+	       "past 120 s from the request the state-4 joiner is reaped");
+}
+
 } // namespace
 
 int main() {
@@ -207,6 +291,7 @@ int main() {
 	test_cookie_ring_reads_the_process_clock();
 	test_chat_stamp_reads_the_process_clock();
 	test_team_change_reads_the_process_clock();
+	test_ticket_wait_reads_the_process_clock();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "npruntime_host_process_clock: %d failure(s)\n", g_failures);
 		return 1;
