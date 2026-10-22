@@ -45,8 +45,9 @@ func test_the_catalog_registers_scenario_play() -> void:
 	assert_eq(def.input_schema.get("required", []), [], "every argument has a default")
 	var defaults := def.validate_args({})
 	assert_true(defaults.ok)
-	assert_eq_deep(defaults.values, {"scenario": {}, "path": "", "wait": true})
+	assert_eq_deep(defaults.values, {"scenario": {}, "path": "", "wait": true, "aim_read": -1})
 	assert_false(def.validate_args({"scenario": [1]}).ok, "the scenario is an object")
+	assert_false(def.validate_args({"aim_read": 4096}).ok, "aim_read names a pool-0 handle")
 
 
 func test_scenario_play_plays_a_script_through_the_shell_frame() -> void:
@@ -122,6 +123,34 @@ func test_wait_false_returns_at_the_start_and_a_bare_run_collects() -> void:
 	assert_null(ControlsBindings.model().get_scripted_input(), "collecting detaches it")
 	var nothing := await _run({})
 	assert_false(nothing.ok, "nothing left to collect")
+
+
+# The runner's aim_at reads (run_parity_topology.ps1 Resolve-ScenarioAim): the local
+# player's heading BAM and mission position, the handle's position, the session's mouse
+# sensitivity word; a read plays nothing, attaches no device and reads alone.
+func test_aim_read_answers_the_aim_reads() -> void:
+	if await _booted_in_world() == null:
+		return
+	var sim := _shell.get_world().get_sim()
+	var own := int(sim.get_local_player_wire_handle())
+	var read := await _run({"aim_read": own})
+	assert_true(read.ok, read.summary)
+	var data := read.data
+	assert_eq(int(data.heading_bam), int(sim.get_local_player_heading_bam()))
+	assert_eq(int(data.mouse_sensitivity), int(sim.get_session_mouse_sensitivity()))
+	assert_eq(int(data.target.handle), own)
+	assert_eq_deep(data.target.position_bms, data.position_bms)
+	# Godot (x, y up, z) -> mission (x, -z, y).
+	var home: Vector3 = sim.get_local_player_position()
+	assert_almost_eq(float(data.position_bms[0]), home.x, 0.01)
+	assert_almost_eq(float(data.position_bms[1]), -home.z, 0.01)
+	assert_null(ControlsBindings.model().get_scripted_input(), "a read attaches no device")
+	var both := await _run({"aim_read": own, "scenario": {"steps": [{"tick": 0, "end": true}]}})
+	assert_false(both.ok)
+	assert_string_contains(both.summary, "reads alone")
+	var absent := await _run({"aim_read": 0x0FFF})
+	assert_false(absent.ok)
+	assert_string_contains(absent.summary, "no entity 0x0fff")
 
 
 func test_refusals_name_what_is_wrong() -> void:

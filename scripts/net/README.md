@@ -29,6 +29,7 @@ does not hash-bind binaries, retail trees or a corpus.
 | `parity-attribution.json` | The verdict-row to D-NET attribution table (`opennova.parity-attribution.v1`), transcribed from `docs/net/lan-parity-verdict.md`. |
 | `parity-cases.json` | The tracked parity case table (`opennova.parity-cases.v1`). |
 | `compare_scenario.py` | Check scenario runs against their expectations and against the RR reference. |
+| `scenario_aim.py` | The scenario `aim_at` step's look (retail's look-yaw arithmetic) and the profile's mouse sensitivity word; `test_scenario_aim.py` its unit tests. |
 | `admin_client.py` | The remote-admin protocol's client half (stdlib): the plaintext `query` status, or a login and commands, as JSON (the runner's pre-join mission cycle; the admin exercise). |
 | `wait_parity_wire_ready.ps1` | Wait for and validate the topology's live wire-ready state. |
 
@@ -547,8 +548,8 @@ A scenario (`scenarios/*.json`, `opennova.scenario.v1`) is one scripted play in
 retail's action vocabulary, by its `actor` (the joiner or the host): an
 optional `prelude` stage, a setup pose, then steps on logic ticks relative to
 the stage's start (`down`/`up`/`press` an action code, `look_px` raw mouse
-pixels, `char` one typed character, `click` a named menu widget, `end`), then
-a settle. `run_parity_topology.ps1 -Scenario <file>`
+pixels, `aim_at` a turn onto a pool-0 entity (below), `char` one typed
+character, `click` a named menu widget, `end`), then a settle. `run_parity_topology.ps1 -Scenario <file>`
 plays it right after the steady window starts, on `in_match` and on
 `deploy_hold` runs (a prelude can press the deploy key). A scenario with no
 prelude takes its setup pose, then its staging, just before the window opens,
@@ -635,6 +636,38 @@ what sticks:
 - the setup pose comes first, so a staged joiner actor turns while still at
   its spawn and is exposed only from the staging on (x1's `coop_ai_kill`: the
   camp's AI killed the staged joiner 0.55 s later, before its first tap).
+
+An `aim_at` step (`{"tick": n, "aim_at": "0x0019"}`, a pool-0 handle) turns
+the actor onto that entity. The drivers take no such step: the runner plays
+the stage in parts (`Invoke-ScenarioAimStage`), each ending on the next
+`aim_at`'s tick, reads that side's actor and target between two parts
+(`Resolve-ScenarioAim`), and starts the next part with one `look_px` [px, 0]
+computed as retail computes the look yaw (`scenario_aim.py`, its tests in
+`test_scenario_aim.py`): one tick's look of px turns the heading by
+`(px * (S << 11) + 0x8000) >> 16` units of 65536 BAM, half up, for the actor's
+mouse sensitivity word S (`Input_ProcessMouseAxisBindings @0x499680`: sens
+@0x4996DD, the scale @0x49972E; the look action, case 166 of
+`Input_HandleActionBinding_0`, subtracts it shifted left 16 from the +0x10
+heading, @0x4E10A4..0x4E10A7), onto the bearing `trunc(atan2(dy, dx) *
+dbl_7C19D8)` the AI's target scan measures against the same heading
+(`AI_FindBestTargetB @0x466F60`, @0x4671A9..0x4671CD), with px the look whose
+rounded turn lands nearest. A look_px reaches that axis word past the main
+frame's mouse pump on both drivers, so no pump factor applies; the view must
+be unscoped (a scoped one divides sens by the zoom, @0x499714). A retail
+actor's reads are one `onhook_pool_entities` pool 0 on its own instance: its
+body is the record whose DcbId is 10000 plus its slot (the host 0, the pair's
+joiner 1; `PlayerClass_InitEntity @0x4B1149..0x4B1173`), its heading that
+record's `yaw_bam`, the positions the Q16 words; S is its copy's current
+profile record's +0x590 word (`player.sav`, the record `game.cfg`'s
+`player_index` names), which the session start copies
+(`Game_ApplySessionSettingsToGlobals @0x55161E`). An OpenNova actor's come
+from `scenario_play`'s `aim_read` (the local player's heading BAM, its and the
+target's mission positions, the session's copy of the same word). No code is
+held, and no press released, across an `aim_at`, since a part's end releases
+everything. The witness's `record` then carries each part's record and each
+aim's reads and look, and the run prints one `PARITY_RUN_NOTE aim_at` line per
+aim. The parts add the reads' round trips (a fraction of a second each) to
+the play's span.
 
 A scenario whose play ends the joiner's session (E4's `kick`) says
 `"ends_joiner_session": true`. The runner then reads the joiner's closing

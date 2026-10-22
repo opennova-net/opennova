@@ -298,6 +298,35 @@ function Read-ParityScenario {
         if ($prelude.Count -lt 1 -or -not ($prelude[-1].PSObject.Properties.Name -contains "end")) {
             throw "Scenario $($spec.name): the prelude must end with an end step"
         }
+        if (@($prelude | Where-Object { $_.PSObject.Properties.Name -contains "aim_at" }).Count -gt 0) {
+            throw "Scenario $($spec.name): aim_at plays in the steps, not the prelude"
+        }
+    }
+    # An aim_at step {"tick": t, "aim_at": "0x0019"} turns the actor onto that
+    # pool-0 entity: the runner plays the steps before it, reads that side's
+    # actor heading and position, the target's position and the actor's mouse
+    # sensitivity word, and plays the rest after one look_px computed as
+    # retail computes the look yaw (Invoke-ScenarioAimStage,
+    # scripts/net/scenario_aim.py). A played part's end releases every held
+    # code, so no code is held across an aim_at.
+    $held = @{}
+    $pressReleased = 0
+    foreach ($step in $steps) {
+        $names = @($step.PSObject.Properties.Name)
+        if ($names -contains "down") { $held[[string] $step.down] = $true }
+        elseif ($names -contains "up") { $held.Remove([string] $step.up) }
+        elseif ($names -contains "press") { $pressReleased = [Math]::Max($pressReleased, [int] $step.tick + 1) }
+        elseif ($names -contains "aim_at") {
+            if ($names.Count -ne 2 -or [string] $step.aim_at -notmatch '^0x0?[0-9a-fA-F]{1,3}$') {
+                throw "Scenario $($spec.name): an aim_at step is {tick, aim_at} naming a pool-0 handle 0x0000..0x0FFF"
+            }
+            if ($held.Count -gt 0 -or $pressReleased -gt [int] $step.tick) {
+                throw "Scenario $($spec.name): code(s) $(@($held.Keys) -join ', ') held (or a press released) across the aim_at at tick $($step.tick)"
+            }
+            if ($ActorScenarioProbes) {
+                throw "Scenario $($spec.name) aims (aim_at steps), which plays in parts: no -ActorScenarioProbes"
+            }
+        }
     }
     $settle = $spec.settle_seconds
     if (-not (Test-JsonInteger $settle) -or $settle -lt 0 -or $settle -gt 300) {
@@ -1974,6 +2003,10 @@ function Invoke-ScenarioStage {
         # actor plays no input; an OpenNova actor plays -Steps, the lone end.
         [switch] $SetupOnly
     )
+    if (-not $SetupOnly -and
+            @($Steps | Where-Object { $_.PSObject.Properties.Name -contains "aim_at" }).Count -gt 0) {
+        return Invoke-ScenarioAimStage -Steps $Steps -Setup $Setup -RetailInstanceId $RetailInstanceId
+    }
     $hasPose = $null -ne $Setup -and $null -ne $Setup.pose
     $actor = [string] $script:ScenarioSpec.actor
     $retailActor = ($actor -eq "joiner" -and $Topology -in @("RR", "OR")) -or
@@ -2060,6 +2093,144 @@ function Invoke-ScenarioStage {
     }
     $record = $status.verdict.data
     return [pscustomobject]@{ driver = "scenario_play"; setup = $record.setup; record = $record }
+}
+
+# The aim_at step's arithmetic (scripts/net/scenario_aim.py, unit-tested in
+# test_scenario_aim.py); one JSON object back.
+$ScenarioAimScript = Join-Path $Repo "scripts\net\scenario_aim.py"
+function Invoke-ScenarioAimTool {
+    param([Parameter(Mandatory = $true)] [string[]] $Arguments)
+    $lines = @(& python -I $ScenarioAimScript @Arguments)
+    if ($LASTEXITCODE -ne 0) {
+        throw "scenario_aim.py $($Arguments -join ' ') failed (exit $LASTEXITCODE)"
+    }
+    return ($lines -join "`n") | ConvertFrom-Json
+}
+
+# One aim_at: this side's reads, then the look that turns the actor onto the
+# target. A retail actor's reads come from onhook_pool_entities (pool 0) on its
+# own instance: its body is the record whose DcbId is 10000 + its slot (the
+# host 0, the pair's joiner 1) [orig: PlayerClass_InitEntity, the slot byte
+# +0x154 plus 0x2710 @0x4B1149..0x4B1155 stored to +0x7C @0x4B1173], its
+# heading the record's yaw_bam (+0x10), and both positions the Q16 Position
+# words; its mouse sensitivity is its copy's current profile record's +0x590
+# word (scenario_aim.py profile-word). An OpenNova actor's come from the
+# scenario_play probe's aim_read: the local player's heading BAM, its and the
+# target's mission positions, and the session's mouse sensitivity word.
+function Resolve-ScenarioAim {
+    param(
+        [Parameter(Mandatory = $true)] [string] $Handle,
+        [string] $RetailInstanceId = ""
+    )
+    $target = [Convert]::ToInt32($Handle.Substring(2), 16)
+    $actor = [string] $script:ScenarioSpec.actor
+    $retailActor = ($actor -eq "joiner" -and $Topology -in @("RR", "OR")) -or
+        ($actor -eq "host" -and $Topology -in @("RR", "RO"))
+    $invariant = [Globalization.CultureInfo]::InvariantCulture
+    if ($retailActor) {
+        $slot = if ($actor -eq "host") { 0 } else { 1 }
+        $pool = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_pool_entities" -Arguments @{
+            instance_id = $RetailInstanceId
+            pool = 0
+            max = 4096
+        })
+        $entities = @($pool.entities)
+        $self = @($entities | Where-Object { [int] $_.net_id -eq 10000 + $slot })
+        $mark = @($entities | Where-Object { [int] $_.handle -eq $target })
+        if ($self.Count -ne 1 -or $mark.Count -ne 1) {
+            throw "aim_at ${Handle}: the retail $actor's pool 0 holds $($self.Count) body record(s) with DcbId $(10000 + $slot) and $($mark.Count) live entity record(s) at the handle"
+        }
+        $copy = if ($actor -eq "host") { $ServerDir } else { $ClientDir }
+        $word = Invoke-ScenarioAimTool -Arguments @("profile-word", "--copy=$copy")
+        $read = [pscustomobject][ordered]@{
+            driver = "onhook_pool_entities"
+            logic_tick = $(if ($pool.PSObject.Properties.Name -contains "logic_tick") { $pool.logic_tick } else { $null })
+            heading_bam = [long] $self[0].yaw_bam
+            actor_q16 = @($self[0].pos)
+            target_q16 = @($mark[0].pos)
+            mouse_sensitivity = [int] $word.mouse_sensitivity
+            profile_slot = [int] $word.slot
+        }
+        $actorXY = "$([long] $self[0].pos[0]),$([long] $self[0].pos[1])"
+        $targetXY = "$([long] $mark[0].pos[0]),$([long] $mark[0].pos[1])"
+    } else {
+        $port = if ($actor -eq "host") { $HostMcpPort } else { $JoinerMcpPort }
+        $process = if ($actor -eq "host") { $script:OpenNovaHost } else { $script:OpenNovaJoiner }
+        $status = Invoke-GameProbe -Port $port -Name "scenario_play" -Process $process `
+            -TimeoutSeconds 30 -PollMs 250 -Arguments @{ aim_read = $target }
+        if ([string] $status.state -ne "passed" -or -not $status.verdict -or -not [bool] $status.verdict.ok) {
+            $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
+            throw "aim_at ${Handle}: the OpenNova $actor's aim read failed: state=$($status.state) $why"
+        }
+        $data = $status.verdict.data
+        $read = [pscustomobject][ordered]@{
+            driver = "scenario_play"
+            logic_tick = $data.logic_tick
+            heading_bam = [long] $data.heading_bam
+            actor_bms = @($data.position_bms)
+            target_bms = @($data.target.position_bms)
+            mouse_sensitivity = [int] $data.mouse_sensitivity
+        }
+        $actorXY = "$(([double] $data.position_bms[0]).ToString('R', $invariant)),$(([double] $data.position_bms[1]).ToString('R', $invariant))"
+        $targetXY = "$(([double] $data.target.position_bms[0]).ToString('R', $invariant)),$(([double] $data.target.position_bms[1]).ToString('R', $invariant))"
+    }
+    $look = Invoke-ScenarioAimTool -Arguments @("look", "--heading-bam=$($read.heading_bam)",
+        "--actor=$actorXY", "--target=$targetXY", "--sensitivity=$($read.mouse_sensitivity)")
+    Write-Host "PARITY_RUN_NOTE aim_at ${Handle}: heading $($read.heading_bam) -> look_px $($look.look_px) (S $($read.mouse_sensitivity), residual $($look.residual_bam) BAM)"
+    return [pscustomobject][ordered]@{ aim_at = $Handle; read = $read; look = $look }
+}
+
+# A stage with aim_at steps plays in parts: the steps before each aim_at (the
+# setup pose with the first part) up to an end on the aim_at's tick, then the
+# aim's reads and look, then the next part from that tick on, its ticks
+# relative to it and its first step the look (one look_px per same-tick step
+# scenario_aim.py gives; the steps of one tick sum into one axis word on both
+# drivers, so it rounds once). The witness records each part's record and
+# each aim.
+function Invoke-ScenarioAimStage {
+    param(
+        [Parameter(Mandatory = $true)] [object[]] $Steps,
+        $Setup = $null,
+        [string] $RetailInstanceId = ""
+    )
+    $parts = [System.Collections.Generic.List[object]]::new()
+    $aims = [System.Collections.Generic.List[object]]::new()
+    $pending = [System.Collections.Generic.List[object]]::new()
+    $partSetup = $Setup
+    $origin = 0
+    foreach ($step in $Steps) {
+        if ($step.PSObject.Properties.Name -contains "aim_at") {
+            $at = [int] $step.tick
+            if ($pending.Count -gt 0 -or $null -ne $partSetup -or $at -gt $origin) {
+                $pending.Add([pscustomobject]@{ tick = $at - $origin; end = $true })
+                $parts.Add((Invoke-ScenarioStage -Steps $pending.ToArray() -Setup $partSetup `
+                    -RetailInstanceId $RetailInstanceId))
+                $partSetup = $null
+            }
+            $aim = Resolve-ScenarioAim -Handle ([string] $step.aim_at) -RetailInstanceId $RetailInstanceId
+            $aims.Add($aim)
+            $pending = [System.Collections.Generic.List[object]]::new()
+            foreach ($px in @($aim.look.look_steps)) {
+                $pending.Add([pscustomobject]@{ tick = 0; look_px = @([int] $px, 0) })
+            }
+            $origin = $at
+            continue
+        }
+        $copy = [ordered]@{}
+        foreach ($field in $step.PSObject.Properties) { $copy[$field.Name] = $field.Value }
+        $copy.tick = [int] $step.tick - $origin
+        $pending.Add([pscustomobject] $copy)
+    }
+    $parts.Add((Invoke-ScenarioStage -Steps $pending.ToArray() -Setup $partSetup `
+        -RetailInstanceId $RetailInstanceId))
+    return [pscustomobject]@{
+        driver = $parts[0].driver
+        setup = $parts[0].setup
+        record = [pscustomobject][ordered]@{
+            parts = @($parts | ForEach-Object { $_.record })
+            aims = $aims.ToArray()
+        }
+    }
 }
 
 # A scenario with no prelude takes its setup pose and its staging BEFORE the

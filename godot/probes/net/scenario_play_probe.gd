@@ -19,6 +19,12 @@ extends GameProbe
 ## applied_logic_tick[, release_logic_tick]}], setup}. `wait` false returns as
 ## soon as the start latched and leaves the script playing; a later run with
 ## neither `scenario` nor `path` collects that script's record. Role-agnostic.
+##
+## `aim_read` (a pool-0 handle, alone) reads instead of playing: the runner's
+## aim_at step (run_parity_topology.ps1 Resolve-ScenarioAim, whose look
+## scripts/net/scenario_aim.py computes) takes the local player's heading BAM,
+## its and the handle's mission positions and the session's mouse sensitivity
+## word, the onhook_pool_entities read's counterparts.
 
 const LOCAL_PLAYER_TIMEOUT_MS := 60_000
 ## A start that no device sample latches means the world is not ticking.
@@ -34,6 +40,11 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var scenario: Dictionary = ctx.args.get("scenario", {})
 	var path := String(ctx.args.get("path", ""))
 	var wait := bool(ctx.args.get("wait", true))
+	var aim_read := int(ctx.args.get("aim_read", -1))
+	if aim_read >= 0:
+		if not scenario.is_empty() or not path.is_empty():
+			return ProbeVerdict.failed("`aim_read` reads alone, with no `scenario` or `path`")
+		return _aim_read(aim_read)
 	var controls := ControlsBindings.model()
 	if scenario.is_empty() and path.is_empty():
 		return await _collect(controls, wait)
@@ -187,6 +198,33 @@ func _record(driver: ScriptedInput, setup: Dictionary) -> Dictionary:
 		"setup": setup,
 		"cancel_reason": driver.get_cancel_reason(),
 	}
+
+
+## The aim_at reads on this side: the local player's +0x10 heading, its and the
+## target's mission positions, and the session's copy of the profile's mouse
+## sensitivity word (g_MouseSensitivity's).
+func _aim_read(handle: int) -> ProbeVerdict:
+	var sim := _ctx.sim()
+	if sim == null or not sim.has_local_player():
+		return ProbeVerdict.failed("no local player to aim")
+	var own: EntityCard = sim.entity_card(sim.get_local_player_wire_handle())
+	var target: EntityCard = sim.entity_card(handle)
+	if own == null or not (own.has_ai() or own.has_world()):
+		return ProbeVerdict.failed("the local player has no entity card")
+	if target == null or not (target.has_ai() or target.has_world()):
+		return ProbeVerdict.failed("no entity 0x%04x to aim at" % handle)
+	var own_position := own.get_mission_position()
+	var target_position := target.get_mission_position()
+	return ProbeVerdict.passed("aim read 0x%04x" % handle, {
+		"logic_tick": sim.get_logic_tick(),
+		"heading_bam": sim.get_local_player_heading_bam(),
+		"position_bms": [own_position.x, own_position.y, own_position.z],
+		"target": {
+			"handle": handle,
+			"position_bms": [target_position.x, target_position.y, target_position.z],
+		},
+		"mouse_sensitivity": sim.get_session_mouse_sensitivity(),
+	})
 
 
 func _read_scenario(path: String) -> Dictionary:
