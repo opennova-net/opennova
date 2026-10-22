@@ -243,6 +243,13 @@ static func _build_definitions() -> Array[ProbeDef]:
 				RUNTIME + "world_reveal_probe.gd", {
 					"timeout_ms": { "type": "integer", "minimum": 1000, "default": 60000 },
 				}, [], false, true, 120_000),
+		ProbeDef.make("load_timeline",
+				"The last mission load's timing (GameWorld.last_load_timeline()): its label, "
+				+ "total ms and top-20 summary, each span's name, depth, end and duration in "
+				+ "microseconds, and the ticks_usec and unix ms clocks at the read, which put each "
+				+ "span on a capture's clock; a failed load keeps its timeline too. An instrument "
+				+ "that changes nothing.",
+				RUNTIME + "load_timeline_probe.gd", {}, [], false, false, 60_000),
 
 		ProbeDef.make("perf_sample",
 				"Sample the shell's frame-time counters (world tick legs, the audio "
