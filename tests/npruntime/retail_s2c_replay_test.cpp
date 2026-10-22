@@ -33,6 +33,12 @@
 // Class resolution: the authored 14-row table the core nwmsg_codec_parity leg uses (no
 // items.def). client_input.nwmsg is client_runtime.nwmsg's first bundle, recorded twice.
 //
+// The client leg runs the corpus's two other runs too (run_20260426_113242,
+// run_20260426_120102), which keep the join stream and a sample of steady packets with no load
+// stream between (RunSpec): there it asserts the admission, the decode, the handlers, the
+// S2C 0x04 slot, the frames and the board (where a 0x16 is kept), and the replies whose
+// oracle the kept streams hold, as a prefix of the client's kept C2S (run_client_leg).
+//
 // The host twin. The capture's C2S stream (client_startup, client_runtime: one bundle per
 // retail packet) is framed packet by packet as the joiner's 0x43 and fed, at the capture's
 // own timing, into a socketless host (bring_up_host) that the twin's joiner reached through
@@ -105,11 +111,12 @@ namespace inmatch = opennova::inmatch;
 namespace rep = opennova::replication;
 
 int g_failures = 0;
+const char *g_leg = "";
 
 void fail(const char *fmt, ...) {
 	std::va_list args;
 	va_start(args, fmt);
-	std::printf("FAIL R3L: ");
+	std::printf("FAIL R3L: [%s] ", g_leg);
 	std::vprintf(fmt, args);
 	std::printf("\n");
 	va_end(args);
@@ -169,6 +176,29 @@ std::shared_ptr<const rep::ItemReplicationCatalog> authored_catalog() {
 
 // --- the corpus ---
 
+// One capture run's files. run_20260426_120859 keeps the whole session (the join, the load and
+// the runtime S2C, one bundle per packet, and the client's runtime C2S); the other two keep the
+// join stream and a sample of steady packets (the server's join bundle and one or two after it),
+// the client's join-window C2S and its first in-game bundle, with no load stream between.
+struct RunSpec {
+	const char *run;
+	std::vector<std::string> down;    // the S2C files, in session order
+	std::string in_game_file;         // the S2C file whose first packet ends the final load wait
+	std::string runtime_c2s_file;     // the client's in-game C2S
+	bool full;                        // the run keeps its load and runtime streams
+};
+
+const RunSpec kRunSpecs[] = {
+	{"run_20260426_120859",
+			{"server_join_packets.nwmsg", "server_load_packets.nwmsg", "server_runtime_packets.nwmsg"},
+			"server_runtime_packets.nwmsg", "client_runtime.nwmsg", true},
+	{"run_20260426_113242", {"server_join.nwmsg", "server_steady.nwmsg"}, "server_steady.nwmsg",
+			"client_input.nwmsg", false},
+	{"run_20260426_120102", {"server_join.nwmsg", "server_steady.nwmsg"}, "server_steady.nwmsg",
+			"client_input.nwmsg", false},
+};
+
+// The host twin's run: the one whose C2S stream is whole.
 const char kRun[] = "run_20260426_120859";
 
 struct Packet { // one capture bundle = one retail protocol packet
@@ -461,19 +491,26 @@ constexpr uint32_t kClientKey = 0x00000001u; // the joiner's local key (ClientAu
 const std::string kClientScrk = "R3L-CLIENT-SCRK";
 const std::string kServerScrk = "R3L-SERVER-SCRK";
 
-void run_client_leg(const std::string &dir) {
+// A run that keeps no load stream (RunSpec::full false) replays its join stream and its steady
+// sample with the S2C gap between them closed to one second; what needs the missing load is
+// printed, not asserted:
+// the pool tally and the self row (the load's spawn pages), the timer sends (no runtime C2S),
+// the C2S 0x28's first word (the load's S2C 0x19 stamp), the 0x0F carrier repairs (the load's
+// carriers), and every retail reply record the client sent inside the gap (its trigger rode the
+// missing stream). Its other replies compare as a prefix: the client's later C2S is not kept.
+void run_client_leg(const std::string &fixture_root, const RunSpec &spec) {
+	const std::string dir = fixture_root + "/" + spec.run;
 	Stream down, startup, runtime_c2s, input;
-	if (!load_stream(dir, {"server_join_packets.nwmsg", "server_load_packets.nwmsg",
-			"server_runtime_packets.nwmsg"}, down) ||
+	if (!load_stream(dir, spec.down, down) ||
 			!load_stream(dir, {"client_startup.nwmsg"}, startup) ||
-			!load_stream(dir, {"client_runtime.nwmsg"}, runtime_c2s) ||
+			!load_stream(dir, {spec.runtime_c2s_file}, runtime_c2s) ||
 			!load_stream(dir, {"client_input.nwmsg"}, input))
 		return;
 	if (down.packets.empty() || runtime_c2s.packets.empty()) {
 		fail("the corpus streams are empty");
 		return;
 	}
-	{
+	if (spec.full) {
 		std::vector<std::vector<uint8_t>> first_bundle;
 		for (const Logical &m : runtime_c2s.messages)
 			if (m.packet == 0) first_bundle.push_back(m.body);
@@ -573,8 +610,25 @@ void run_client_leg(const std::string &dir) {
 
 	const uint64_t tick_us = static_cast<uint64_t>(io::kTickMs) * 1000u;
 	const uint64_t t0 = down.packets.front().ts_us;
-	auto tick_of = [&](uint64_t ts) { return ts <= t0 ? uint64_t(0) : (ts - t0) / tick_us; };
-	const std::size_t runtime_first = down.first_packet_of("server_runtime_packets.nwmsg");
+	const std::size_t runtime_first = down.first_packet_of(spec.in_game_file);
+	if (runtime_first == 0 || runtime_first >= down.packets.size()) {
+		fail("no %s after the join stream", spec.in_game_file.c_str());
+		return;
+	}
+	// A run with no load stream closes its S2C gap to one second: the gap held the retail
+	// client's load, which a joiner seeded past it does not run, and a silence that long leaves
+	// nothing to ACK the seeded client's own sends.
+	const uint64_t gap_from = down.packets[runtime_first - 1].ts_us;
+	const uint64_t gap_to = down.packets[runtime_first].ts_us;
+	const uint64_t gap_shift =
+			!spec.full && gap_to - gap_from > 1000000u ? gap_to - gap_from - 1000000u : 0;
+	if (gap_shift != 0)
+		std::printf("note: the S2C gap ahead of %s (%.1f s, the load) replays as 1 s\n",
+				down.where(runtime_first).c_str(), static_cast<double>(gap_to - gap_from) / 1e6);
+	auto tick_of = [&](uint64_t ts) {
+		if (ts >= gap_to) ts -= gap_shift;
+		return ts <= t0 ? uint64_t(0) : (ts - t0) / tick_us;
+	};
 	const uint64_t k_end =
 			std::max(tick_of(down.packets.back().ts_us), tick_of(runtime_c2s.packets.back().ts_us)) + 2;
 
@@ -730,8 +784,10 @@ void run_client_leg(const std::string &dir) {
 	if (!runtime->has_self_handle() || runtime->self_handle() != self.handle)
 		fail("the self handle is %s0x%04X, the capture's 0x%04X", runtime->has_self_handle() ? "" : "unbound ",
 				runtime->self_handle(), self.handle);
-	if (runtime->state().find(self.handle) == nullptr)
-		fail("no replica row for the self handle 0x%04X", self.handle);
+	if (runtime->state().find(self.handle) == nullptr) {
+		if (spec.full) fail("no replica row for the self handle 0x%04X", self.handle);
+		else std::printf("note: no replica row for the self handle 0x%04X (its 0x0C rides the load)\n", self.handle);
+	}
 
 	// --- pools ---
 	{
@@ -745,7 +801,9 @@ void run_client_leg(const std::string &dir) {
 				pools_text(want_end).c_str());
 		for (uint16_t tag : unmodelled)
 			std::printf("note: S2C 0x%02X writes rows the pool tally does not model\n", tag);
-		if (unmodelled.empty()) {
+		if (!spec.full)
+			std::printf("note: no load stream: the pool counts are not compared\n");
+		else if (unmodelled.empty()) {
 			if (pools_at_load_end != want_load) fail("pool counts at the load's end differ");
 			if (got_end != want_end) fail("pool counts at the run's end differ");
 		}
@@ -778,22 +836,31 @@ void run_client_leg(const std::string &dir) {
 							got.spectator ? 1 : 0, want.slot_id, want.score1, want.score2, want.flags);
 			}
 		}
-	} else {
+	} else if (spec.full) {
 		fail("no S2C 0x16 in the capture");
+	} else {
+		std::printf("note: no S2C 0x16 in the kept streams: the board is not compared\n");
 	}
 
 	// --- the replies, body for body, and the timer sends ---
+	// A run with no load stream drops the retail replies the client sent inside the S2C gap:
+	// what they answered rode the stream the run does not keep.
+	auto in_gap = [&](uint64_t ts) { return !spec.full && ts > gap_from && ts < gap_to; };
 	C2STally retail;
 	std::set<uint8_t> not_replayed;
+	std::map<uint8_t, std::size_t> gap_dropped;
 	for (const Logical &m : startup.messages) {
 		const bool reply = is_reply_class(m.full_tag) || m.full_tag == c2s::RTT_CONSUMED;
-		if (reply) tally_message(retail, static_cast<uint8_t>(m.full_tag), m.body, false);
+		if (reply && in_gap(startup.packets[m.packet].ts_us)) ++gap_dropped[static_cast<uint8_t>(m.full_tag)];
+		else if (reply) tally_message(retail, static_cast<uint8_t>(m.full_tag), m.body, false);
 		else not_replayed.insert(static_cast<uint8_t>(m.full_tag));
 	}
 	for (const Logical &m : runtime_c2s.messages) {
 		if (m.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
 		tally_message(retail, static_cast<uint8_t>(m.full_tag), m.body, true);
 	}
+	for (const auto &kv : gap_dropped)
+		std::printf("note: %zu retail C2S 0x%02X sent inside the S2C gap (not compared)\n", kv.second, kv.first);
 	for (const auto &kv : retail.other) not_replayed.insert(static_cast<uint8_t>(kv.first));
 	std::string skipped;
 	for (uint8_t tag : not_replayed) {
@@ -807,15 +874,21 @@ void run_client_leg(const std::string &dir) {
 	for (int cls : kReplyClasses) {
 		const std::vector<std::vector<uint8_t>> &got = ours.replies[cls];
 		const std::vector<std::vector<uint8_t>> &want = retail.replies[cls];
-		std::printf("  %s0x%02X  %5zu  %6zu\n", cls == kPong ? "pong " : "     ", cls & 0xFF,
-				got.size(), want.size());
+		// With no load stream, the 0x28's first word is the load's S2C 0x19 stamp and a 0x0F
+		// asks after a carrier the load spawned: neither has its oracle.
+		const bool load_bound = cls == c2s::LOADOUT_REQUEST || cls == c2s::ENTITY_INFO_QUERY;
+		std::printf("  %s0x%02X  %5zu  %6zu%s\n", cls == kPong ? "pong " : "     ", cls & 0xFF,
+				got.size(), want.size(), !spec.full && load_bound ? "  (needs the load: printed only)" : "");
+		if (!spec.full && load_bound) continue;
 		std::size_t first_diff = std::min(got.size(), want.size());
 		for (std::size_t i = 0; i < std::min(got.size(), want.size()); ++i)
 			if (got[i] != want[i]) {
 				first_diff = i;
 				break;
 			}
-		if (got.size() != want.size() || first_diff != std::min(got.size(), want.size())) {
+		// The whole run's replies compare exactly; a sample's, as the prefix its kept C2S covers.
+		const bool counts_differ = spec.full ? got.size() != want.size() : got.size() < want.size();
+		if (counts_differ || first_diff != std::min(got.size(), want.size())) {
 			const std::vector<uint8_t> none;
 			fail("C2S %s0x%02X: ours %zu, retail %zu; first difference at #%zu: ours %s retail %s",
 					cls == kPong ? "pong " : "", cls & 0xFF, got.size(), want.size(), first_diff,
@@ -835,6 +908,10 @@ void run_client_leg(const std::string &dir) {
 			"0x0C %zu\n", window_frames, ours.reports, retail.reports, interval, ours.pings, retail.pings,
 			ours.uplinks, retail.uplinks, ours_before_window.reports, ours_before_window.pings,
 			ours_before_window.uplinks);
+	if (!spec.full) {
+		std::printf("note: no runtime C2S: the timer sends are not compared\n");
+		return;
+	}
 	if (abs_diff(ours.reports, retail.reports) > 1)
 		fail("C2S 0x4C: ours %zu, retail %zu over the window", ours.reports, retail.reports);
 	if (abs_diff(ours.pings, retail.pings) > timer_tolerance(retail.pings))
@@ -1238,9 +1315,15 @@ void run_host_twin(const std::string &dir) {
 } // namespace
 
 int main() {
-	const std::string dir = std::string(FIXTURE_DIR) + "/" + kRun;
-	run_client_leg(dir);
-	run_host_twin(dir);
+	const std::string root = FIXTURE_DIR;
+	for (const RunSpec &spec : kRunSpecs) {
+		g_leg = spec.run;
+		std::printf("== the client leg: %s%s ==\n", spec.run, spec.full ? "" : " (join + steady sample)");
+		run_client_leg(root, spec);
+	}
+	g_leg = kRun;
+	std::printf("== the host twin: %s ==\n", kRun);
+	run_host_twin(root + "/" + kRun);
 	if (g_failures != 0) {
 		std::printf("npruntime_retail_s2c_replay: %d failure(s)\n", g_failures);
 		return 1;
