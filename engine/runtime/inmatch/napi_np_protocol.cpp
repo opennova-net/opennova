@@ -14,6 +14,7 @@
 #include <net/npwire/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/outgoing_packets.h> // plan_outgoing_packets (a held node's build)
 #include <net/npwire/protocol_message.h> // make_protocol_message (frame the burst messages)
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -2047,14 +2048,10 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket *socket, const PeerAddr *local_address,
 		const std::function<void(int player_number)> &player_removed) {
 	if (!server.running) return;
-	for (NapiNPConnection &conn : server.connections) {
+	for (UnstoppedNode &node : server.nodes) {
+		NapiNPConnection &conn = node.conn;
 		latch_disconnect_event(conn, make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP"));
-		write_inout_line(logs, inout_player_removed_line(conn));
-		if (socket != nullptr) {
-			for (const std::vector<uint8_t> &datagram :
-					host_goodbye_burst(/*host_running=*/true, conn))
-				socket->send_to(conn.peer, datagram.data(), datagram.size());
-		}
+		teardown_unstopped_node(conn, logs, socket);
 		if (player_removed &&
 				(conn.link.owned_entity.valid() || conn.phase >= ConnectionPhase::PlayerAdded))
 			player_removed(conn.reply.player_slot);
@@ -2062,6 +2059,241 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 	const std::string session_name = std::move(server.session_name);
 	server = UnstoppedServer{};
 	write_inout_line(logs, inout_host_line(local_address, session_name, /*started=*/false));
+}
+
+// A held node's destroy, as any running server's: the removal line with the latched record,
+// then the burst over the socket the manager holds (none open: nothing on the wire).
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the removal line @0x6253D2, the
+//  burst @0x6253EF..0x625424 (SendDisconnectPacket's host_running gate @0x61F329)]
+void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &logs,
+		opennova::IDatagramSocket *socket) {
+	write_inout_line(logs, inout_player_removed_line(conn));
+	if (socket == nullptr) return;
+	for (const std::vector<uint8_t> &datagram : host_goodbye_burst(/*host_running=*/true, conn))
+		socket->send_to(conn.peer, datagram.data(), datagram.size());
+}
+
+// The browse socket's receive over a held server: a joiner's 0x43 finds its node by the
+// sender's address and port, as at the host's own socket (the protocol's processing byte the
+// leg tests, +0x1F5, is written only zero, by the protocol's create). An in-order packet, and
+// each queued successor it makes contiguous, is parsed: the receive stamp the reap measures,
+// the peer's ACK over the node's sent list and the ACK the node now owes. The records' own
+// handlers are not run here (the server's message handlers with no mission; NARROWED), nor
+// the missing-sequence request, the ping, resend-list and goodbye legs.
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the +0x1F5 test @0x626A76,
+//  FindConnection(proto, 1, sender) @0x626A96..0x626AC5, the in-order leg @0x626BEB ->
+//  CNapiNPConnection_ParseMessages @0x625BC0 (the stamp @0x625D54, the ack sweep
+//  @0x625D90..0x625DA2); NapiNPProtocol_FindConnection @0x622750 (type, address and port);
+//  NapiNPProtocol_Create @0x625730 - the +0x1F5 store @0x625846; NapiNPProtocol_PumpRecvQueues
+//  @0x6266A0 - the connection walk's ParseMessages @0x62696B]
+bool receive_unstopped_server(UnstoppedServer &server, const PeerAddr &from,
+		const uint8_t *raw, std::size_t len, uint32_t now_ms) {
+	if (!server.running || raw == nullptr || len == 0) return false;
+	NapiNPConnection *node = nullptr;
+	for (UnstoppedNode &held : server.nodes) {
+		if (held.conn.peer == from) {
+			node = &held.conn;
+			break;
+		}
+	}
+	if (node == nullptr || node->phase < ConnectionPhase::Joined) return false;
+	std::vector<uint8_t> unpacked;
+	if (!nw_unpack_inbound(raw, len, unpacked)) return false;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (!nw_split_unpacked(unpacked, opcode, body) ||
+			opcode != SESSION_OPCODE_PROTOCOL_MESSAGE)
+		return false;
+	NapiNPConnection &conn = *node;
+	ProtocolPacketHeader hdr;
+	std::vector<ProtocolMessage> flat;
+	SessionDeframeAdmission admission;
+	if (!deframe_session_packet(conn.seq,
+			SessionCrypto{{}, conn.client_scrk, 0, conn.server_sk}, body.data(), body.size(),
+			hdr, flat, &admission, /*drain_queued_successors=*/false))
+		return true;
+	for (;;) {
+		if (admission.admitted) {
+			conn.receive_inactive_ms = 0;
+			conn.receive_stamp_ms = now_ms;
+			for (const SessionDeframeAdmission::Packet &packet : admission.packets)
+				if (!packet.messages.empty()) conn.session_ack_owed = true;
+			if (admission.max_ack_count > conn.peer_acked_seq)
+				conn.peer_acked_seq = admission.max_ack_count;
+			acknowledge_session_packets(conn.seq, admission.max_ack_count);
+		}
+		admission = SessionDeframeAdmission{};
+		if (!take_ready_session_packet(conn.seq, admission)) break;
+	}
+	return true;
+}
+
+namespace {
+
+// BuildOutgoingPackets over a held node's queue, as the host frame's boundary builds a
+// connection's (host_session.cpp build_s2c_queue / send_session_batches, the node in hand):
+// the packets framed before the exit leave first, then the queued messages planned under the
+// node's ceiling and its build budget, the description's and the overflow's latches in queue
+// order; what the budget or a failed frame leaves stays queued. Returns whether a staged packet
+// left. [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430 - the ceiling @0x628436, the
+//  packet loop @0x62860B..0x628619; NapiNPMessage_Create @0x627FC0 (the overflow's
+//  RequestDisconnect @0x628112)]
+bool build_unstopped_node(UnstoppedNode &node, opennova::IDatagramSocket &socket,
+		uint32_t now_ms) {
+	NapiNPConnection &c = node.conn;
+	std::size_t budget = max_packets_per_build(c.timeouts.max_packets_per_tick);
+	bool released = false;
+	if (!node.staged.empty()) {
+		std::size_t sent = 0;
+		while (sent < node.staged.size() && sent < budget) {
+			socket.send_to(c.peer, node.staged[sent].data(), node.staged[sent].size());
+			++sent;
+		}
+		node.staged.erase(node.staged.begin(),
+				node.staged.begin() + static_cast<std::ptrdiff_t>(sent));
+		budget -= sent;
+		c.last_session_send_ms = now_ms;
+		released = true;
+	}
+	if (node.queued.empty() || budget == 0) return released;
+	OutgoingPacketPlan plan = plan_outgoing_packets(c.seq, node.queued,
+			packet_ceiling_bytes(c.timeouts.max_packet_bytes), budget,
+			OutgoingOverflow::DropRefused);
+	for (std::size_t m = 0; m < node.queued.size(); ++m) {
+		const ProtocolMessage &message = node.queued[m];
+		if (message.capacity_exempt && message.full_tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION) {
+			DisconnectEvent description;
+			if (parse_disconnect_event(message.payload.data(), message.payload.size(), description))
+				latch_disconnect_event(c, description);
+		}
+		if (plan.overflow && m == plan.overflow_message) {
+			latch_disconnect_event(c, make_disconnect_event(1, 4, plan.overflow_count,
+					static_cast<uint32_t>(c.seq.outbound_message_limit), "", 0, "NP.C:MSGCRE"));
+			c.pending_disconnect = true;
+		}
+	}
+	for (std::size_t p = 0; p < plan.packets.size(); ++p) {
+		std::vector<uint8_t> datagram;
+		if (!c.server_scrk.empty()) datagram = frame_session_replies(c, plan.packets[p]);
+		if (datagram.empty()) {
+			std::vector<ProtocolMessage> rest;
+			for (std::size_t q = p; q < plan.packets.size(); ++q)
+				for (ProtocolMessage &record : plan.packets[q]) rest.push_back(std::move(record));
+			for (ProtocolMessage &record : plan.unbuilt) rest.push_back(std::move(record));
+			node.queued = std::move(rest);
+			return released;
+		}
+		socket.send_to(c.peer, datagram.data(), datagram.size());
+		c.last_session_send_ms = now_ms;
+	}
+	node.queued = std::move(plan.unbuilt);
+	return released;
+}
+
+// One header-only packet carrying the node's current ACK (BuildOutgoingPackets with
+// has_pending_out set and nothing queued @0x62847E).
+void send_unstopped_header_only(NapiNPConnection &c, opennova::IDatagramSocket &socket,
+		uint32_t now_ms) {
+	if (c.server_scrk.empty()) return;
+	const std::vector<uint8_t> packet = frame_session_replies(c, {});
+	if (packet.empty()) return;
+	socket.send_to(c.peer, packet.data(), packet.size());
+	c.last_session_send_ms = now_ms;
+}
+
+} // namespace
+
+// PumpFlags(-1) over each held node: the type test passes a type-1 node, a node already
+// pending skips every leg; 0x10 steps the holdoff; 0x20 builds at a zero holdoff when the node
+// holds queued messages or owes an ACK, and prunes; 0x40 runs the state-1 arm, the send
+// intervals (host_session.cpp pump_send_interval_legs' two legs) and then the receive reap,
+// which leaves the node pending and ends its legs; 0x80 steps the flush counter, 0x100 prunes
+// and 0x200 reloads a zero holdoff. Then the protocol pump's pending walk: the PDESTME record
+// only where none is latched, the destroy's teardown, the node off the list.
+// [orig: NapiNPProtocol_Pump(-1) from CNapiGameSession_InitTransportConnection @0x4CA14B,
+//  CNapiNetwork_PumpTransportAndProtocol @0x4C6E3D and CNapiNetwork_PumpAndCheckState @0x4C6EA2;
+//  CNapiNPConnection_PumpFlags @0x629780 - the type test @0x629788..0x62978F, the pending test
+//  @0x629791, 0x10 @0x62979D..0x6297AC, 0x20 @0x6297B7, 0x40 @0x6297C8, 0x80 @0x6297D5, 0x100
+//  @0x6297E6, 0x200 @0x6297F3..0x629802; CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the
+//  state 1 / 5 test @0x629279, the holdoff @0x62927B, `queued > 0 || has_pending_out`
+//  @0x6292A9, BuildOutgoingPackets called @0x6292B4, PrunePacketQueue @0x6292BB;
+//  CNapiNPConnection_PumpStateMachine @0x6292E0 state 1 - PumpSendIntervals called @0x62933F,
+//  timeout_ms @0x629344 (negative: no reap @0x62934C), the joined word +0x30 @0x629352, the
+//  elapsed `now - +0x5E8` @0x62935C against it @0x629362, the record {1, 3, elapsed, timeout,
+//  "", 0, "NP.C:PT:SERTMOUT"} @0x6293B7..0x6293E6, RequestDisconnect @0x62940A;
+//  CNapiNPConnection_PumpSendIntervals @0x628FD0 - the active leg @0x628FF1..0x629017, the
+//  empty leg @0x629041..0x629067, the build @0x62907B, the prune @0x629082, the stamp
+//  @0x629089; NapiNPProtocol_Pump @0x62A650 - the pending walk @0x62A6FD..0x62A793]
+void pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
+		opennova::IDatagramSocket &socket, uint32_t now_ms) {
+	if (!server.running) return;
+	for (UnstoppedNode &node : server.nodes) {
+		NapiNPConnection &c = node.conn;
+		if (c.type != NapiNPConnection::kTypeServerSide || c.pending_disconnect) continue;
+		// 0x10: the holdoff.
+		if (c.s2c_send_holdoff_countdown > 0) --c.s2c_send_holdoff_countdown;
+		c.s2c_send_boundary_open = c.s2c_send_holdoff_countdown == 0;
+		// 0x20: the build.
+		if (c.s2c_send_holdoff_countdown == 0 &&
+				(!node.staged.empty() || !node.queued.empty() || c.session_ack_owed)) {
+			const uint32_t sequence_before = c.seq.next_outbound_seq;
+			const bool released = build_unstopped_node(node, socket, now_ms);
+			if (c.session_ack_owed && !released && c.seq.next_outbound_seq == sequence_before)
+				send_unstopped_header_only(c, socket, now_ms);
+			prune_session_send_boundary(c.seq);
+			c.session_ack_owed = false;
+		}
+		// 0x40: the state-1 arm, its send intervals first.
+		if (!c.server_scrk.empty()) {
+			if (c.last_session_send_ms == 0) {
+				c.last_session_send_ms = now_ms;
+			} else {
+				const uint64_t since_ms = static_cast<uint32_t>(now_ms - c.last_session_send_ms);
+				const int32_t active_ms = c.timeouts.active_send_interval_ms;
+				const int32_t empty_ms = c.timeouts.idle_send_interval_ms;
+				const bool retained = c.seq.retained_outbound_message_count > 0;
+				const bool active_due =
+						active_ms >= 0 && retained && since_ms > static_cast<uint64_t>(active_ms);
+				const bool empty_due = !active_due && empty_ms >= 0 && !retained &&
+						c.seq.queued_inbound.empty() && since_ms > static_cast<uint64_t>(empty_ms);
+				if (active_due || empty_due) {
+					const uint32_t sequence_before = c.seq.next_outbound_seq;
+					const bool released = build_unstopped_node(node, socket, now_ms);
+					if (!released && c.seq.next_outbound_seq == sequence_before)
+						send_unstopped_header_only(c, socket, now_ms);
+					prune_session_send_boundary(c.seq);
+					c.last_session_send_ms = now_ms;
+				}
+			}
+		}
+		// Then the receive reap.
+		const uint32_t silent_ms = now_ms - c.receive_stamp_ms;
+		if (c.timeouts.timeout_ms >= 0 && c.phase >= ConnectionPhase::Joined &&
+				silent_ms > static_cast<uint32_t>(c.timeouts.timeout_ms)) {
+			c.receive_inactive_ms = silent_ms;
+			latch_disconnect_event(c, make_disconnect_event(1, 3, silent_ms,
+					static_cast<uint32_t>(c.timeouts.timeout_ms), "", 0, "NP.C:PT:SERTMOUT"));
+			c.pending_disconnect = true;
+			continue;
+		}
+		// 0x80, 0x100, 0x200.
+		advance_session_send_flush_counter(c.seq);
+		prune_session_send_boundary(c.seq);
+		if (c.s2c_send_holdoff_countdown == 0 && c.s2c_send_holdoff_dictated)
+			c.s2c_send_holdoff_countdown = c.s2c_send_holdoff_ticks;
+		c.s2c_send_boundary_open = c.s2c_send_holdoff_countdown == 0;
+	}
+	// The pending walk: each pending node's destroy, in list order.
+	for (auto it = server.nodes.begin(); it != server.nodes.end();) {
+		if (!it->conn.pending_disconnect) {
+			++it;
+			continue;
+		}
+		latch_disconnect_event(it->conn,
+				make_disconnect_event(1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"));
+		teardown_unstopped_node(it->conn, logs, &socket);
+		it = server.nodes.erase(it);
+	}
 }
 
 std::size_t connection_count(const NapiNPServerCtx &ctx) {

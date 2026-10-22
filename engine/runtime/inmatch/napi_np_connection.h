@@ -954,10 +954,10 @@ inline bool active_player_recipient(const NapiNPConnection &conn) {
 // skip the session's destroy, so the protocol keeps its server-side nodes, host_running set,
 // past the socket's close until the next session reset's StopServer, which gates on
 // host_running alone, stops them (stop_unstopped_server, napi_np_protocol.h). The process
-// holds it (ClientProcessState). Retail's LAN browse and join pumps step the held nodes in
-// between (their queued sends, their send intervals, the receive-timeout reap) over the
-// browse's socket; ours holds them inert (D-NET-NEW-L1-26, NARROWED to the held server's
-// pump).
+// holds it (ClientProcessState). In between, the LAN browse's and a join's protocol pumps step
+// the held nodes over their socket (host_session.h pump_unstopped_server: the queued sends,
+// the send intervals, the receive-timeout reap), and a joiner's datagram that socket reads
+// reaches its node (napi_np_protocol.h receive_unstopped_server) (D-NET-NEW-L1-26).
 // [orig: PostMenu_RouteMissionExit @0x568460 - the error arms' loc_5686DA, no FullDestroy;
 //  CNapiGameSession_ResetActiveSession @0x4C8A70 - StopServer called @0x4C8AA1 whatever
 //  +0x68 holds, +0x68 cleared @0x4C8AC0; NapiNPProtocol_StopServer @0x62A820 - host_running
@@ -965,10 +965,19 @@ inline bool active_player_recipient(const NapiNPConnection &conn) {
 //  CNapiGameSession_InitTransportConnection's NapiNPProtocol_Pump(-1) @0x4CA14B,
 //  CNapiNetwork_PumpTransportAndProtocol's @0x4C6E3D, CNapiNetwork_PumpAndCheckState's
 //  @0x4C6EA2]
+// One held node: the connection (its keys, sequence and ack state, latched record, names,
+// receive stamp, send clocks and holdoff) and its queue as the exit left it: the packets
+// framed before the exit, then the messages its connection had not yet built (the
+// teardown's 0x25s among them), which its next build sends.
+struct UnstoppedNode {
+	NapiNPConnection conn;
+	std::vector<std::vector<uint8_t>> staged; // framed, not yet sent (they own lower sequences)
+	std::vector<ProtocolMessage> queued;      // not yet built, in queue order
+};
 struct UnstoppedServer {
 	bool running = false;
-	std::vector<NapiNPConnection> connections; // the server-side nodes, in list order
-	std::string session_name;                  // the protocol's (+0x288), HOST STOPPED's
+	std::vector<UnstoppedNode> nodes; // the server-side nodes, in list order
+	std::string session_name;         // the protocol's (+0x288), HOST STOPPED's
 };
 
 } // namespace opennova::inmatch

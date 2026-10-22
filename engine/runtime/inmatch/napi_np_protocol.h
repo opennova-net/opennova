@@ -214,6 +214,33 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket *socket, const PeerAddr *local_address,
 		const std::function<void(int player_number)> &player_removed = {});
 
+// A held node's destroy (the stop's and the held pump's reap): its /INOUT removal line with the
+// latched record, then its 0x86 burst over `socket` (null: none open, nothing on the wire).
+void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &logs,
+		opennova::IDatagramSocket *socket);
+
+// One datagram the socket of a pump that steps a held server (the LAN browse's, a join's) read
+// from `from`: a held node's joiner's 0x43 is parsed at the transport (the receive stamp the
+// reap measures, the peer's ACK, the ACK owed) at `now_ms`, the host clock's
+// (host_monotonic_milliseconds). True when a held node took it. (D-NET-NEW-L1-26)
+bool receive_unstopped_server(UnstoppedServer &server, const PeerAddr &from,
+		const uint8_t *raw, std::size_t len, uint32_t now_ms);
+
+// The LAN browse's and a join's protocol pump over a held server, NapiNPProtocol_Pump(-1): every
+// held node, in list order, takes PumpFlags' legs at `now_ms` (the host clock's,
+// host_monotonic_milliseconds): its holdoff step; at a zero holdoff the build of its queue (the
+// packets framed before the exit, then the messages not yet built: the teardown's 0x25s, or a
+// header-only packet when an ACK is owed) over `socket`; its send intervals (the keepalive and
+// the retained-records rebuild); the receive-timeout reap past cs_dir0's timeout since its last
+// receive ("NP.C:PT:SERTMOUT", latched if none is); the flush counter, the prune and the
+// holdoff's reload. Then the protocol pump's pending walk destroys each reaped node:
+// teardown_unstopped_node over `socket`, and the node leaves the held list, so the next reset's
+// StopServer stops only the nodes still held. Nothing when no server is held. A held node's
+// slot teardown reaches no handler: the browse's connection mode clears is_authority.
+// (D-NET-NEW-L1-26)
+void pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
+		opennova::IDatagramSocket &socket, uint32_t now_ms);
+
 // Finalize one host socket receive batch. Future packets latch a missing-sequence check while
 // handle_server_datagram drains; only here, after later datagrams could have closed the gap, does
 // the host emit one 0x84 per connection whose ordered queue is still nonempty. This is the

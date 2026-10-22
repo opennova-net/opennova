@@ -502,7 +502,7 @@ StoppedLater error_arm_then(bool next_host) {
 		if (to == kPeer && bytes == stop) ++early_stops;
 	CHECK(early_stops == 0);
 	CHECK(inout.pending().find("PLAYER REMOVED") == std::string::npos);
-	CHECK(process.unstopped_server.running && process.unstopped_server.connections.size() == 1);
+	CHECK(process.unstopped_server.running && process.unstopped_server.nodes.size() == 1);
 	first->ctx().logs.inout = nullptr;
 	first.reset(); // the session goes; the process keeps the server
 
@@ -534,7 +534,7 @@ StoppedLater error_arm_then(bool next_host) {
 		expected_stopped = "???.???.???.???:????? : HOST STOPPED \"" + session_name + "\".";
 	}
 	out.held_after = process.unstopped_server.running ||
-			!process.unstopped_server.connections.empty();
+			!process.unstopped_server.nodes.empty();
 	// What a pump's interval flush already wrote, then what the log still holds.
 	out.text = files.files[inmatch::kInoutLogFileName] + inout.pending();
 	const std::size_t removed = out.text.find(
@@ -674,7 +674,7 @@ void test_the_destroy_arm_leaves_no_server() {
 	}
 	host->ctx().mission_exit_reason = inmatch::kMissionExitQuit;
 	host->role->close();
-	CHECK(!process.unstopped_server.running && process.unstopped_server.connections.empty());
+	CHECK(!process.unstopped_server.running && process.unstopped_server.nodes.empty());
 }
 
 // D-NET-NEW-L9-21 (L1-s18's hand-over): at the next host's session reset each held node's destroy
@@ -702,11 +702,11 @@ void test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_sessi
 		first->ctx().np_protocol.connection_list.back().client_ck = 0x5A5A1234u;
 		first->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld;
 		first->role->close();
-		CHECK(process.unstopped_server.connections.size() == 1);
-		if (process.unstopped_server.connections.size() != 1)
+		CHECK(process.unstopped_server.nodes.size() == 1);
+		if (process.unstopped_server.nodes.size() != 1)
 			return;
 		// The held joiner's player was added on slot 3; a second held node never got its player.
-		inmatch::NapiNPConnection &added = process.unstopped_server.connections.front();
+		inmatch::NapiNPConnection &added = process.unstopped_server.nodes.front().conn;
 		added.phase = inmatch::ConnectionPhase::PlayerAdded;
 		added.reply.player_slot = 3;
 		inmatch::NapiNPConnection pending = added;
@@ -714,7 +714,7 @@ void test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_sessi
 		pending.phase = inmatch::ConnectionPhase::Joined;
 		pending.link.owned_entity = {};
 		pending.reply.player_slot = 4;
-		process.unstopped_server.connections.push_back(pending);
+		process.unstopped_server.nodes.push_back(inmatch::UnstoppedNode{pending, {}, {}});
 
 		const std::vector<uint8_t> stop = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
 				server_goodbye_to_bytes(
@@ -749,8 +749,132 @@ void test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_sessi
 			first->role->stop_unstopped_server_at_exit(inmatch::ServerLogs{});
 			CHECK(removed.empty());
 		}
-		CHECK(!process.unstopped_server.running && process.unstopped_server.connections.empty());
+		CHECK(!process.unstopped_server.running && process.unstopped_server.nodes.empty());
 	}
+}
+
+// A held node as an error-arm exit leaves it: its keys, its 0x42 accepted, its last receive and
+// last send at 1000 ms on the host clock.
+inmatch::UnstoppedNode held_node(const PeerAddr &peer, uint32_t client_ck) {
+	inmatch::UnstoppedNode node;
+	node.conn.type = inmatch::NapiNPConnection::kTypeServerSide;
+	node.conn.phase = inmatch::ConnectionPhase::Joined;
+	node.conn.peer = peer;
+	node.conn.client_ck = client_ck;
+	node.conn.server_scrk = "SERVERHELDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD";
+	node.conn.client_scrk = "CLIENTHELDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD";
+	node.conn.server_sk = 0x0BADF00Du;
+	node.conn.receive_stamp_ms = 1000;
+	node.conn.last_session_send_ms = 1000;
+	return node;
+}
+
+// D-NET-NEW-L1-26 (L1-s19, V-ROLL-G on L1-s18 (a)): the held server between the error-arm exit
+// and the next reset. The LAN browse's and a join's protocol pump, NapiNPProtocol_Pump(-1),
+// steps each held node through PumpFlags' legs over the pump's socket:
+//   - the first pump with a zero holdoff builds the node's queue: its 0x25 leaves in one S2C
+//     0x83 over the node's own keys, and nothing else goes;
+//   - a joiner's 0x43 that socket reads stamps its node's receive (a header-only keepalive
+//     counts); a datagram from no held node's address is not taken;
+//   - past cs_dir0's timeout (120000 ms) since its last receive the node is reaped: the send
+//     interval's keepalive first, then its removal line with {1, 3, elapsed, timeout, "", 0,
+//     "NP.C:PT:SERTMOUT"} and its four 0x86 echoing that record, and it leaves the held list;
+//   - so the next reset's StopServer bursts STOP to the node still held alone.
+// [orig: NapiNPProtocol_Pump(-1) from CNapiNetwork_PumpTransportAndProtocol @0x4C6E3D;
+//  CNapiNPConnection_PumpFlags @0x629780 (the type test @0x629788..0x62978F);
+//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 (BuildOutgoingPackets called @0x6292B4);
+//  CNapiNPConnection_PumpStateMachine @0x6292E0 (PumpSendIntervals called @0x62933F, the
+//  elapsed test @0x62935C..0x629364, the SERTMOUT record @0x6293B7..0x6293E6);
+//  NapiNPProtocol_Pump @0x62A650 (the pending walk @0x62A6FD..0x62A793);
+//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 (the line @0x6253D2, the burst
+//  @0x6253EF..0x625424); NapiNPProtocol_HandleSessionPacket @0x626A00 (the +0x1F5 test
+//  @0x626A76, FindConnection(1, sender) @0x626AC5, ParseMessages' stamp @0x625D54);
+//  NapiNPProtocol_StopServer @0x62A820]
+void test_the_browse_pump_steps_the_held_server() {
+	MemoryFiles files;
+	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
+	inout.set_stamp_text([] { return std::string(); });
+	inout.set_enabled(true);
+	inmatch::ServerLogs logs;
+	logs.inout = &inout;
+	logs.inout_switch = true;
+
+	const PeerAddr kStale{0x0100007Fu, 31002};
+	inmatch::UnstoppedServer server;
+	server.running = true;
+	server.session_name = "Held";
+	server.nodes.push_back(held_node(kPeer, 0x11111111u));
+	server.nodes.push_back(held_node(kStale, 0x22222222u));
+	ProtocolMessage reset = make_protocol_message(s2c::GAME_RESET, {});
+	reset.reliable = false;
+	server.nodes[0].queued.push_back(reset);
+
+	// The first pump: the queued 0x25 leaves, alone.
+	CaptureSocket socket;
+	inmatch::pump_unstopped_server(server, logs, socket, 1016);
+	CHECK(socket.sent.size() == 1);
+	if (socket.sent.size() == 1) {
+		CHECK(socket.sent[0].first == kPeer);
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> records;
+		CHECK(nw_decode_inbound(socket.sent[0].second.data(), socket.sent[0].second.size(),
+				opcode, body) && opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE);
+		CHECK(decode_protocol_packet_plaintext(body.data(), body.size(),
+				server.nodes[0].conn.server_scrk, header, records));
+		CHECK(records.size() == 1 && records[0].tag == s2c::GAME_RESET);
+	}
+	CHECK(server.nodes.size() == 2 && server.nodes[0].queued.empty());
+
+	// The fresh node's joiner sends a keepalive at 60000 ms: its node's receive moves.
+	SessionSequencing joiner;
+	std::vector<uint8_t> keepalive_body;
+	CHECK(frame_session_packet(joiner,
+			SessionCrypto{server.nodes[0].conn.client_scrk, {}, server.nodes[0].conn.server_sk},
+			{}, keepalive_body));
+	const std::vector<uint8_t> keepalive =
+			nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(keepalive_body));
+	CHECK(inmatch::receive_unstopped_server(server, kPeer, keepalive.data(), keepalive.size(),
+			60000));
+	CHECK(server.nodes[0].conn.receive_stamp_ms == 60000);
+	CHECK(!inmatch::receive_unstopped_server(server, PeerAddr{0x0100007Fu, 40000},
+			keepalive.data(), keepalive.size(), 60000));
+	CHECK(server.nodes[1].conn.receive_stamp_ms == 1000);
+
+	// At 121001 ms the stale node (last receive at 1000) is reaped; the fresh one is kept.
+	socket.sent.clear();
+	inmatch::pump_unstopped_server(server, logs, socket, 121001);
+	CHECK(server.nodes.size() == 1 && server.nodes[0].conn.peer == kPeer);
+	const std::vector<uint8_t> reaped = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(0x22222222u, make_disconnect_event(1, 3, 120001, 120000, "", 0,
+					"NP.C:PT:SERTMOUT")));
+	int reaps = 0;
+	int to_stale = 0;
+	for (const auto &[to, bytes] : socket.sent) {
+		if (!(to == kStale)) continue;
+		++to_stale;
+		if (bytes == reaped) ++reaps;
+	}
+	CHECK(reaps == 4);
+	CHECK(to_stale == 5); // the interval's keepalive, then the burst
+	CHECK(!socket.sent.empty() && socket.sent.back().second == reaped);
+	const std::string reaped_text = files.files[inmatch::kInoutLogFileName] + inout.pending();
+	CHECK(reaped_text.find("NP.C:PT:SERTMOUT") != std::string::npos);
+
+	// The next reset's StopServer: STOP to the node still held alone.
+	CaptureSocket reopened;
+	inmatch::stop_unstopped_server(server, logs, &reopened, nullptr);
+	const std::vector<uint8_t> stop = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(0x11111111u, make_disconnect_event(1, 9, 0, 0, "", 0,
+					"NP.C:SH:STOP")));
+	int stops = 0;
+	for (const auto &[to, bytes] : reopened.sent) {
+		CHECK(to == kPeer);
+		if (bytes == stop) ++stops;
+	}
+	CHECK(stops == 4 && reopened.sent.size() == 4);
+	CHECK(!server.running && server.nodes.empty());
 }
 
 } // namespace
@@ -770,6 +894,7 @@ int main() {
 	test_the_remapped_exit_reads_the_own_client_record();
 	test_close_routes_the_last_entity_pass_first();
 	test_the_next_hosts_reset_removes_each_held_player_from_the_novaworld_session();
+	test_the_browse_pump_steps_the_held_server();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }

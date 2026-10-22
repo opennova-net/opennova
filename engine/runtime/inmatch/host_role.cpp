@@ -1211,16 +1211,44 @@ void HostRole::close() {
 			: kernel_ != nullptr ? kernel_->world.mission_exit_reason : 0;
 	if (route_mission_exit(exit_reason, /*novaworld=*/false).error != PostMissionError::None) {
 		// The unstopped server outlives the session in the process (ctx+0x68 and the protocol's
-		// list are g_NapiNPCtx's): the next session reset stops it (stop_unstopped_server). The
-		// nodes' transports go with this session; the stop needs their keys, records and names.
+		// list are g_NapiNPCtx's): the browse's and a join's pumps step it
+		// (pump_unstopped_server) and the next session reset stops it (stop_unstopped_server).
+		// The nodes' transports go with this session; each node keeps its keys, sequence,
+		// records, names and clocks, and its queue as it stands: the packets framed for its
+		// boundary, then every message not yet built, the walk's 0x25 among them, in the
+		// order the boundary would have packed them (the owner's held messages ahead of what
+		// its transport holds) (D-NET-NEW-L1-26).
+		// [orig: CNapiNPConnection_QueueMessage @0x628640 (the 0x25s queued, nothing built);
+		//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - BuildOutgoingPackets called
+		//  @0x6292B4 at the browse's first due pump]
 		UnstoppedServer &unstopped = client_process_->unstopped_server;
 		unstopped = UnstoppedServer{};
 		unstopped.running = ctx.np_protocol.host_running != 0;
 		unstopped.session_name = ctx.np_protocol.session_name;
 		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (conn.type != NapiNPConnection::kTypeServerSide) continue;
-			unstopped.connections.push_back(conn);
-			unstopped.connections.back().link.transport = nullptr;
+			UnstoppedNode node;
+			node.conn = conn;
+			node.conn.link.transport = nullptr;
+			auto staged = state.host_owner.pending_session_datagrams.find(conn.peer);
+			if (staged != state.host_owner.pending_session_datagrams.end())
+				node.staged = std::move(staged->second);
+			auto pending = state.host_owner.pending_session_messages.find(conn.peer);
+			if (pending != state.host_owner.pending_session_messages.end())
+				node.queued = std::move(pending->second);
+			if (conn.link.transport != nullptr) {
+				auto *udp = static_cast<replication::UdpSessionTransport *>(conn.link.transport);
+				replication::Datagram held;
+				while (udp->pop_outbound(held)) {
+					ProtocolMessage message = make_protocol_message(
+							held.tag, std::move(held.body), held.protocol_flags_raw);
+					message.reliable = held.reliable;
+					message.capacity_exempt = held.capacity_exempt;
+					message.retention_flushes = held.retention_flushes;
+					node.queued.push_back(std::move(message));
+				}
+			}
+			unstopped.nodes.push_back(std::move(node));
 		}
 		return;
 	}

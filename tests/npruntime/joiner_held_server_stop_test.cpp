@@ -97,7 +97,7 @@ Outcome close_with_a_held_server(int32_t reason) {
 	held.phase = inmatch::ConnectionPhase::Joined;
 	held.peer = kHeld;
 	held.client_ck = kHeldCk;
-	process.unstopped_server.connections.push_back(held);
+	process.unstopped_server.nodes.push_back(inmatch::UnstoppedNode{held, {}, {}});
 
 	// The kernel lives on the heap: a World-carrying frame is megabytes.
 	auto kernel = std::make_unique<mission::MissionKernel>();
@@ -138,7 +138,7 @@ Outcome close_with_a_held_server(int32_t reason) {
 		}
 	}
 	out.held_after = process.unstopped_server.running ||
-			!process.unstopped_server.connections.empty();
+			!process.unstopped_server.nodes.empty();
 	out.inout = files.files[inmatch::kInoutLogFileName] + inout.pending();
 	return out;
 }
