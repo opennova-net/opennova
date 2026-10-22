@@ -487,18 +487,24 @@ func test_a_stale_leave_mission_escape_runs_the_escape_action_once() -> void:
 func test_the_shell_runs_the_death_screens_input_frame_over_its_key_ring() -> void:
 	DeployMenuFixture.stage(self, TMP_DIR, STAGED_FIXTURES, true)
 	var pair := _join_pair_with_pending_pick()
+	# The shell's process state, as the shell suites keep it: the config file,
+	# the cfg block and the launch flags come back as they were.
+	var config := TestFs.snapshot(ResourceDirSettings.CONFIG_PATH)
+	GameCfgStore.reset()
+	LaunchFlags.set_args_override(PackedStringArray([]))
 	var shell: MainGame = await WorldFixture.boot_shell(self)
 	var shell_dir := WorldFixture.last_shell_dir()
-	if shell == null:
-		TestFs.remove_dir_recursive(shell_dir)
-		return
-	var loaded: bool = await WorldFixture.start_shell_mission(self, shell)
-	assert_true(loaded, "the minimal mission loads through the real front end")
-	if loaded:
-		await _shell_death_screen_keys(pair, shell)
-	_assert_no_key_held()
-	await WorldFixture.release_shell(self, shell)
+	if shell != null:
+		var loaded: bool = await WorldFixture.start_shell_mission(self, shell)
+		assert_true(loaded, "the minimal mission loads through the real front end")
+		if loaded:
+			await _shell_death_screen_keys(pair, shell)
+		_assert_no_key_held()
+		await WorldFixture.release_shell(self, shell)
 	TestFs.remove_dir_recursive(shell_dir)
+	LaunchFlags.clear_args_override()
+	config.restore()
+	GameCfgStore.reset()
 
 
 func _shell_death_screen_keys(pair: Dictionary, shell: MainGame) -> void:
