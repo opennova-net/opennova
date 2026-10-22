@@ -11,6 +11,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/body_anim.h>
 #include <runtime/world/mount_controls.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_motor.h>
@@ -619,8 +620,27 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // [orig: Entity_UpdatePhysicsStep @0x53BE10 - the stamp @0x53BE1E..0x53BE4D, the +0xA0 read
 //  @0x53BE58, the +0x270 test @0x53BE81; Entity_ResetToSpawnState @0x4B9610 - the zeroed
 //  +0x98..+0xA8 @0x4B9668..0x4B9686; PlayerClass_InitEntity @0x4B1060]
+// The arty row's mover zeroes the velocity triple (the motor's), then on the session's
+// authority sends S2C 0x44 group 6 (Entity_SendEffectPacket, 0x136, msgClass 1): the +0x170
+// link's handle (0xFFFF with none), the +0x78 word, then the def+0x164 serializer's body, which
+// only the guided class rows' serializer writes for group 6, the attach triple +0x2E4 / +0x2E8 /
+// +0x2EC (the legs' re-plant pair and the aim heading on a person; the spawn reset's Yaw words).
+// The person rows' serializers and the vehicles' return -1 off group 11 and every other row has
+// none, so no packet leaves. Its barrage leg opens on +0x2C4, which only the arty class init sets
+// on a body whose own update never runs (D-NET-NEW-L4-14 (a), narrowed).
+// [orig: ArtyClass_UpdateBarrage @0x447140 - the zeroes @0x44714F..0x447163, the gate
+//  @0x447148 / @0x447185 / @0x447199 / @0x4471AE, the send @0x4472C9..0x4472D9;
+//  Entity_SendEffectPacket @0x445C40 - the serialize @0x445C6C, the -1 test @0x445C76, the send
+//  @0x445CA2; NetPacket_SerializeEntityForServer @0x4D6240 - the authority and def+0x164 test
+//  @0x4D62B1, the +0x170 handle @0x4D62B9..0x4D62F3, +0x78 @0x4D62FC, the group @0x4D632C;
+//  Entity_SerializeGuidedMissileState @0x447C50 - the group switch @0x447C80, group 6's +0x2E4 /
+//  +0x2E8 / +0x2EC writes @0x447DF6..0x447E44; NetPacket_SerializePlayerState
+//  @0x4C09C0 - `cmp [esi+1Ch], 0Bh` @0x4C09F6, the -1 @0x4C20D1; NetPacket_SerializeInfantryEntityState
+//  @0x4C0320 - @0x4C06E9, the -1 @0x4C06D8; Entity_SerializeVehicleState @0x460560 - @0x460B47,
+//  the -1 @0x460B3C; Entity_ResetToSpawnState @0x4B9610 - +0x2EC / +0x2E4 / +0x2E8
+//  @0x4B9698..0x4B96A4; ArtyClass_InitFromDef @0x443430 - +0x2C4 = 10 @0x443473]
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
-// narrowed): ewep, ele0, towr, nade, rock, schl, clym, arti, aflr, gflr, stng and arty,
+// narrowed): ewep, ele0, towr, nade, rock, schl, clym, arti, aflr, gflr, stng, arty's barrage,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
 // pending word, upfx's swap-fade leg, and door's model callbacks.
 static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
@@ -658,6 +678,20 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
     case PhysicsClass::Door:
     case PhysicsClass::Squib:
         return true;
+    case PhysicsClass::Arty:
+        for (int axis = 0; axis < 3; ++axis) e.inf.vel[axis] = 0;
+        if (world.rules.mp_session && world.rules.logic_authority &&
+                player_item_row(world, body).guided_record) {
+            GuidedUpdateEvent send;
+            send.shooter = body.primary_occupant.valid() ? body.primary_occupant.packed : 0xFFFF;
+            send.net_id = static_cast<uint16_t>(body.owner_connection_id);
+            send.group = 6;
+            send.state.saved[0] = e.inf.leg_target[0];
+            send.state.saved[1] = e.inf.leg_target[1];
+            send.state.saved[2] = e.inf.aim_heading;
+            world.out.entity_events.push_back(send);
+        }
+        return true;
     case PhysicsClass::Cveh:
     case PhysicsClass::Ctrn:
     case PhysicsClass::Catv:
@@ -683,7 +717,8 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // player-body update. The null row's stub is skipped, org0's and chld's are bare
     // returns, and a body bound to an item row runs that row's mover over its own words:
     // a vehicle, aircraft or genx row's, the rokt / hlfr / jvln rows' pending-word writes,
-    // psec's physics step (person_item_mover, the pool-0 walk's: a pool-1 slot's visit runs a row's vehicle
+    // psec's physics step, envs's and upfx's loop emitter, arty's velocity zeroes and session
+    // send (person_item_mover, the pool-0 walk's: a pool-1 slot's visit runs a row's vehicle
     // mover and drop motion in its own legs); the other item rows' movers are not run here
     // (D-NET-NEW-L4-14 (a), narrowed).
     // [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472; Entity_UpdatePool1Slot

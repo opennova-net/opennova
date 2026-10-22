@@ -511,6 +511,11 @@ struct PlayerTemplate {
     // player rows' "plyr". An item class row's event body (item_death_class_from_tag).
     PlayerBodyClass body_class = PlayerBodyClass::kPlayer;
     ItemDeathClass item_event_class = ItemDeathClass::kNull;
+    // Whether the row's network callback (def+0x164, its ai_function row's) is the guided
+    // record's serializer: the rokt, stng, hlfr, jvln and arty rows' alone.
+    // [orig: g_EntityClassEventCallbackTable @0x813000 - the +0x14 word Entity_SerializeGuidedMissileState
+    //  @0x447C50 in the rows @0x8132B8..0x813318; EntityDef_LookupClassCallbacks @0x407DC0]
+    bool guided_record = false;
     // A satchel, claymore or AV mine row's device think, which a body bound to it runs as
     // its class event (ThrowableSim::think_device_row_body); kNone for every other row.
     ThrowClass device_think = ThrowClass::kNone;

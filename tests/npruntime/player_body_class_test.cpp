@@ -61,7 +61,8 @@ namespace {
 // move function org1), a person with no ai_function (5320: the null row; no move function, the
 // null physics row too), a brrl person (5321), an ele0 person (5322), a nade
 // person (5323: the row with no event callback), a schl person (5324, the one row with a
-// nonzero `score` word), a clym person (5325) and a plyr person moved by the genx row (5326).
+// nonzero `score` word), a clym person (5325), a plyr person moved by the genx row (5326) and an
+// arty person moved by the arty row (5327; its tag in capitals, the lookup ignoring case).
 const char kItems[] =
 		"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
 		"begin \"Player\"\r\n id 105305\r\n type person\r\n hp 150\r\n ai_function plyr\r\n"
@@ -76,7 +77,9 @@ const char kItems[] =
 		" ai_function schl\r\nend\r\n"
 		"begin \"Claymore man\"\r\n id 105325\r\n type person\r\n hp 100\r\n ai_function clym\r\nend\r\n"
 		"begin \"Rider man\"\r\n id 105326\r\n type person\r\n hp 100\r\n ai_function plyr\r\n"
-		" move_function genx\r\nend\r\n";
+		" move_function genx\r\nend\r\n"
+		"begin \"Barrage man\"\r\n id 105327\r\n type person\r\n hp 100\r\n ai_function ARTY\r\n"
+		" move_function arty\r\nend\r\n";
 
 // Class 5 the plyr row, 6 the org0 row, 7 the classless row, 8 the brrl row, 9 the ele0 row
 // (classes 1..4 the plyr row: the load reads CHARACTER1 on until the first missing section).
@@ -93,10 +96,11 @@ const char kCharattr[] =
 		"[CHARACTER10]\r\nJUNGLE_CAMMO\t= 5323\r\nDESERT_CAMMO\t= 5323\r\nARCTIC_CAMMO\t= 5323\r\n"
 		"[CHARACTER11]\r\nJUNGLE_CAMMO\t= 5324\r\nDESERT_CAMMO\t= 5324\r\nARCTIC_CAMMO\t= 5324\r\n"
 		"[CHARACTER12]\r\nJUNGLE_CAMMO\t= 5325\r\nDESERT_CAMMO\t= 5325\r\nARCTIC_CAMMO\t= 5325\r\n"
-		"[CHARACTER13]\r\nJUNGLE_CAMMO\t= 5326\r\nDESERT_CAMMO\t= 5326\r\nARCTIC_CAMMO\t= 5326\r\n";
+		"[CHARACTER13]\r\nJUNGLE_CAMMO\t= 5326\r\nDESERT_CAMMO\t= 5326\r\nARCTIC_CAMMO\t= 5326\r\n"
+		"[CHARACTER14]\r\nJUNGLE_CAMMO\t= 5327\r\nDESERT_CAMMO\t= 5327\r\nARCTIC_CAMMO\t= 5327\r\n";
 
 constexpr uint8_t kPlyr = 5, kOrg = 6, kNull = 7, kBrrl = 8, kEle0 = 9, kNade = 10, kSchl = 11,
-		kClym = 12, kGenx = 13;
+		kClym = 12, kGenx = 13, kArty = 14;
 constexpr uint8_t kEquipped = 3;
 
 struct Rig {
@@ -1263,6 +1267,76 @@ void test_an_envs_or_upfx_row_body_registers_its_loop() {
 	}
 }
 
+// A body bound to the arty row zeroes its velocity triple on every visit, then on the session's
+// authority sends S2C 0x44 group 6 when its def's network callback is the guided serializer (an
+// arty / rokt / stng / hlfr / jvln ai_function): the +0x170 link's handle (0xFFFF with none),
+// the +0x78 word, the attach triple (+0x2E4 / +0x2E8 / +0x2EC: the legs' re-plant pair and the
+// aim heading). A plyr row's serializer returns -1 for group 6, so its body sends nothing; nor
+// does a joiner or a session-less world. No player-body update follows.
+// [orig: ArtyClass_UpdateBarrage @0x447140 - @0x44714F..0x447163, @0x4472C9..0x4472D9;
+//  NetPacket_SerializeEntityForServer @0x4D6240 - @0x4D62B1, @0x4D62B9..0x4D62F3, @0x4D62FC,
+//  @0x4D632C; Entity_SerializeGuidedMissileState @0x447C50 - @0x447DF6..0x447E44;
+//  NetPacket_SerializePlayerState @0x4C09C0 - @0x4C09F6, @0x4C20D1]
+void test_an_arty_row_body_zeroes_its_velocity_and_sends_group_6() {
+	struct Case {
+		uint8_t player_class;
+		bool link, session, authority;
+		bool sent;
+	};
+	for (const Case c : {Case{kArty, false, true, true, true}, Case{kArty, true, true, true, true},
+				Case{kArty, false, true, false, false}, Case{kArty, false, false, true, false},
+				Case{kPlyr, false, true, true, false}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		const w::Entity *other = r.spawn_remote(kPlyr);
+		const w::EntityHandle link = other != nullptr ? other->handle : w::EntityHandle{};
+		w::Entity *body = r.spawn_remote(c.player_class);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(link.valid() && ae != nullptr && body->item_type_index > 0);
+		if (!link.valid() || ae == nullptr || body->item_type_index <= 0) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		// The plyr case: the test's own row, the plyr person bound to the arty move function.
+		r.world->tables.item_rows[static_cast<size_t>(body->item_type_index)].move_row =
+				w::PhysicsClass::Arty;
+		CHECK(w::body_move_row(*r.world, *ae, body) == w::PhysicsClass::Arty);
+		CHECK(w::player_item_row(*r.world, *body).guided_record == (c.player_class == kArty));
+		body->flags &= ~w::kEntityFlagCarried;
+		body->engine_flags &= ~w::kEntityFlagCarried;
+		body->net_move_input = 0x08;
+		body->owner_connection_id = 5;
+		body->primary_occupant = c.link ? link : w::EntityHandle{};
+		ae->inf.vel[0] = 0x400;
+		ae->inf.vel[1] = -0x300;
+		ae->inf.vel[2] = 0x200;
+		ae->inf.leg_target[0] = 0x11110000;
+		ae->inf.leg_target[1] = 0x22220000;
+		ae->inf.aim_heading = 0x33330000;
+		r.world->rules.mp_session = c.session;
+		r.world->rules.logic_authority = c.authority;
+		r.world->out.entity_events.clear();
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		for (int axis = 0; axis < 3; ++axis) CHECK(ae->inf.vel[axis] == 0);
+		CHECK(r.world->out.entity_events.size() == (c.sent ? 1u : 0u));
+		if (c.sent && r.world->out.entity_events.size() == 1) {
+			const auto *send = std::get_if<w::GuidedUpdateEvent>(&r.world->out.entity_events[0]);
+			CHECK(send != nullptr);
+			if (send != nullptr) {
+				CHECK(send->shooter == (c.link ? link.packed : 0xFFFF));
+				CHECK(send->net_id == 5);
+				CHECK(send->group == 6);
+				CHECK(send->state.saved[0] == 0x11110000);
+				CHECK(send->state.saved[1] == 0x22220000);
+				CHECK(send->state.saved[2] == 0x33330000);
+			}
+		}
+		CHECK(!ae->inf.player_moving);
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // A body bound to the psec row runs the physics step over its own words: the savedLivePose
 // stamp, then its velocity triple (+0x98 / +0x9C / +0xA0, the motor's) against the terrain
 // plus a quarter unit (no terrain here: 0x4000). Airborne it moves by the triple, falls 167,
@@ -1427,6 +1501,7 @@ int main() {
 	test_a_genx_row_body_rides_its_ground_entity();
 	test_an_item_row_body_runs_its_movers_head();
 	test_an_envs_or_upfx_row_body_registers_its_loop();
+	test_an_arty_row_body_zeroes_its_velocity_and_sends_group_6();
 	test_a_psec_row_body_runs_the_physics_step();
 	test_an_org_rows_player_body_takes_the_organic_init();
 	test_a_player_bodys_dcb_id_is_its_class_inits();

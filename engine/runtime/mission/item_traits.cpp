@@ -167,6 +167,13 @@ void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
     if (def != nullptr) {
         row.body_class = world::player_body_class_from_tag(def->ai_function);
         row.item_event_class = world::item_death_class_from_tag(def->ai_function);
+        // The row's def+0x164 by the same whole-name lookup: the guided serializer for the
+        // five missile rows [orig: EntityDef_LookupClassCallbacks @0x407DC0 - the stricmp call
+        //  @0x407DD8, def+0x164 = the row's +0x14 @0x407E4A; the rows @0x8132B8..0x813318].
+        bool guided_record = false;
+        for (const char *guided : {"rokt", "stng", "hlfr", "jvln", "arty"})
+            guided_record = guided_record || strutil::iequals(def->ai_function, guided);
+        row.guided_record = guided_record;
         const world::ThrowClass think = world::throw_class_from_tag(def->ai_function);
         if (think == world::ThrowClass::kSatchel || think == world::ThrowClass::kClaymore ||
                 think == world::ThrowClass::kAVMine)
