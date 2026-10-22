@@ -168,6 +168,9 @@ function Get-CaseHostPlayerClass { param($Case) return [int] (Get-CaseField $Cas
 # passwords, the SERVER game.cfg's mphostsidepassworda / b for the cell
 # (run_parity_topology.ps1 -HostSidePasswordA / B; "" keeps the copy's).
 function Get-CaseHostSidePassword { param($Case, [string] $Side) return [string] (Get-CaseField $Case "host_side_password_$Side" "") }
+# joiner_side_password: the side password a retail joiner enters (RR, RR-aa,
+# OR; run_parity_topology.ps1 -JoinerSidePassword).
+function Get-CaseJoinerSidePassword { param($Case) return [string] (Get-CaseField $Case "joiner_side_password" "") }
 # deploy_zones: the mission offers deploy zones, so a joiner joins on the
 # deploy screen; an in_match auto_deploy case deploys its retail roles with
 # onHook's deploy (run_parity_topology.ps1 -DeployZones).
@@ -276,6 +279,11 @@ function Read-ParityCases {
                 $case.permanent_death -isnot [bool]) {
             throw "Parity case '$($case.id)': permanent_death is true or false"
         }
+        if ($case.PSObject.Properties.Name -contains "joiner_side_password" -and
+                ($case.joiner_side_password -isnot [string] -or
+                [string] $case.joiner_side_password -cnotmatch '^[\x21\x23-\x7E]{1,16}$')) {
+            throw "Parity case '$($case.id)': joiner_side_password is 1-16 printable ASCII characters, no space or quote"
+        }
         foreach ($side in @("a", "b")) {
             $name = "host_side_password_$side"
             if ($case.PSObject.Properties.Name -contains $name -and
@@ -383,6 +391,8 @@ function Get-CellArguments {
     if ($sideA) { $arguments += @("-HostSidePasswordA", $sideA) }
     $sideB = Get-CaseHostSidePassword $Case "b"
     if ($sideB) { $arguments += @("-HostSidePasswordB", $sideB) }
+    $joinerSide = Get-CaseJoinerSidePassword $Case
+    if ($joinerSide) { $arguments += @("-JoinerSidePassword", $joinerSide) }
     $class = Get-CaseHostPlayerClass $Case
     if ($class -ne 0) { $arguments += @("-HostPlayerClass", [string] $class) }
     if (Get-CaseDeployZones $Case) { $arguments += "-DeployZones" }
@@ -478,6 +488,10 @@ function Get-ReferenceMismatches {
         if ($recordedSide -cne (Get-CaseHostSidePassword $Case $side)) {
             $reasons.Add("$name '$recordedSide' is not '$(Get-CaseHostSidePassword $Case $side)'")
         }
+    }
+    $recordedJoinerSide = if ($fields -contains "joiner_side_password") { [string] $Summary.joiner_side_password } else { "" }
+    if ($recordedJoinerSide -cne (Get-CaseJoinerSidePassword $Case)) {
+        $reasons.Add("joiner_side_password '$recordedJoinerSide' is not '$(Get-CaseJoinerSidePassword $Case)'")
     }
     $recordedClass = if ($fields -contains "host_player_class") { [int] $Summary.host_player_class } else { 0 }
     if ($recordedClass -ne (Get-CaseHostPlayerClass $Case)) {

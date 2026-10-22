@@ -115,6 +115,16 @@ param(
     [string] $HostSidePasswordA = "",
     [string] $HostSidePasswordB = "",
 
+    # D-NET-167's acceptance, the joiner half: the side password a RETAIL
+    # joiner enters on the join screen (onhook_join_lan side_password,
+    # opennova-int #78: it clicks TEAM_PASSWORD, types it and presses Enter),
+    # 16 characters at most; the cell then requires the tool's
+    # side_password_entered (false: the host never advertised the side
+    # bits 0x30, a finding). RR and RR-aa launch their roles one by one for
+    # it (onhook_run_lan_pair takes none). Our joiner's join screen has no
+    # runner seam yet, so RO and OO refuse it.
+    [string] $JoinerSidePassword = "",
+
     # E5's medic: the host player's class for this cell (5..9; 0 keeps the
     # copy's). The class is the current weapon.sav record's side byte
     # (+0 blue, +0x8006 red), which the session start clamps to 5..9 into
@@ -256,6 +266,12 @@ if ($HostSessionName.Length -gt 31 -or $HostSessionName -notmatch '^[\x20-\x7e]+
 $ServerName = $HostSessionName
 if ($ReadinessMode -eq "deploy_hold" -and ($AutoDeploy -or $ExerciseInput)) {
     throw "deploy_hold readiness cannot auto-deploy or exercise input."
+}
+if ($JoinerSidePassword -and $Topology -in @("RO", "OO")) {
+    throw "-JoinerSidePassword is a retail joiner's (RR, RR-aa, OR): our joiner's join screen has no runner seam yet."
+}
+if ($JoinerSidePassword -and $JoinerSidePassword -cnotmatch '^[\x21\x23-\x7E]{1,16}$') {
+    throw "-JoinerSidePassword is 1-16 printable ASCII characters, no space or quote."
 }
 if ($DeployZones -and -not $AutoDeploy) {
     throw "-DeployZones deploys an in_match auto-deploy cell's retail roles; a deploy_hold cell holds them."
@@ -2955,10 +2971,29 @@ function Start-RetailHostExact {
     }
 }
 
+# D-NET-167: a retail joiner's side password into its onhook_join_lan
+# arguments, and the tool's witness that it was entered.
+function Add-JoinerSidePassword {
+    param([Parameter(Mandatory = $true)] [hashtable] $Arguments)
+    if ($JoinerSidePassword) { $Arguments.side_password = $JoinerSidePassword }
+    return $Arguments
+}
+
+function Assert-JoinerSidePasswordEntered {
+    param([Parameter(Mandatory = $true)] $Result)
+    if (-not $JoinerSidePassword) { return }
+    $entered = ($Result.PSObject.Properties.Name -contains "side_password_entered") -and [bool] $Result.side_password_entered
+    $script:JoinerSidePasswordEntered = $entered
+    if (-not $entered) {
+        throw "onhook_join_lan never showed the team-password panel (side_password_entered false): the host did not advertise its side passwords (P2 0x30)"
+    }
+}
+$script:JoinerSidePasswordEntered = $null
+
 function Start-RetailJoinerExact {
     $joinerDir = Join-Path $RunRoot "joiner"
     New-Item -ItemType Directory -Path $joinerDir -Force | Out-Null
-    $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_join_lan" -Arguments @{
+    $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_join_lan" -Arguments (Add-JoinerSidePassword @{
         game_dir = $ClientDir
         expansion = $Expansion
         join_address = "127.0.0.1"
@@ -2976,8 +3011,9 @@ function Start-RetailJoinerExact {
         # in_match readiness waits for.
         readiness = $(if ($ReadinessMode -eq "in_match") { "in_match" } else { "peer" })
         wait_timeout_ms = 240000
-    })
+    }))
     Assert-OnHookRoleLaunch -Tool "onhook_join_lan" -Result $result
+    Assert-JoinerSidePasswordEntered -Result $result
     $script:OwnedRetailRuns.Add([string] $result.run_id)
     $script:RetailJoinerProcess = Get-Process -Id ([int] $result.pid) -ErrorAction Stop
     Bind-EffectiveRetailConfig -Role client -Source (Join-Path $ClientDir "onhook.cfg")
@@ -3523,7 +3559,7 @@ try {
             # onhook_run_lan_pair takes no serve_only: a Serve Only RR launches its
             # host (onhook_host_lan serve_only) and its joiner one by one, as
             # does a cell whose host cycles its mission before the join.
-            if ($ReadinessMode -eq "deploy_hold" -or $ServeOnly -or $PreJoinMissionCycle) {
+            if ($ReadinessMode -eq "deploy_hold" -or $ServeOnly -or $PreJoinMissionCycle -or $JoinerSidePassword) {
                 $retailHost = Start-RetailHostExact
                 Invoke-PreJoinMissionCycle -RetailHostProcessId $script:RetailHostProcess.Id
                 $retailJoiner = Start-RetailJoinerExact
@@ -3807,7 +3843,7 @@ try {
             Invoke-PreJoinMissionCycle
             $joinerDir = Join-Path $RunRoot "joiner"
             New-Item -ItemType Directory -Path $joinerDir -Force | Out-Null
-            $retailJoinLaunch = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_join_lan" -Arguments @{
+            $retailJoinLaunch = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_join_lan" -Arguments (Add-JoinerSidePassword @{
                 game_dir = $ClientDir
                 expansion = $Expansion
                 join_address = "127.0.0.1"
@@ -3822,8 +3858,9 @@ try {
                 deploy = [bool] $DeployZones
                 readiness = $(if ($ReadinessMode -eq "in_match") { "in_match" } else { "peer" })
                 wait_timeout_ms = 240000
-            })
+            }))
             Assert-OnHookRoleLaunch -Tool "onhook_join_lan" -Result $retailJoinLaunch
+            Assert-JoinerSidePasswordEntered -Result $retailJoinLaunch
             $script:OwnedRetailRuns.Add([string] $retailJoinLaunch.run_id)
             $script:RetailProcess = Get-Process -Id ([int] $retailJoinLaunch.pid) -ErrorAction Stop
             $script:RetailJoinerProcess = $script:RetailProcess
@@ -4245,6 +4282,9 @@ $summary = [pscustomobject]@{
     # D-NET-167: the host's side passwords ("" keeps the copy's).
     host_side_password_a = $HostSidePasswordA
     host_side_password_b = $HostSidePasswordB
+    # D-NET-167: the retail joiner's side password and the tool's witness.
+    joiner_side_password = $JoinerSidePassword
+    joiner_side_password_entered = $script:JoinerSidePasswordEntered
     # The case's deploy zones: onHook deployed the retail roles.
     deploy_zones = [bool] $DeployZones
     server_game_cfg_overrides = @($script:ServerGameCfgOverrides)

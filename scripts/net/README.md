@@ -396,9 +396,16 @@ so the default suite is unchanged. An extension case may add:
   characters, no space or quote): the host's side passwords, the SERVER
   copy's `game.cfg` `mphostsidepassworda` / `mphostsidepasswordb` for the
   cell (entries in `server_game_cfg_overrides`, restored like `time_limit`).
-  Both hosts read them there, so every topology takes them. A joiner that
-  enters one is not staged yet: our joiner's join screen has no runner seam
-  and `onhook_join_lan` takes no side password.
+  Both hosts read them there, so every topology takes them.
+- `joiner_side_password`: the side password a retail joiner enters on the
+  join screen (`-JoinerSidePassword`, the same characters): `onhook_join_lan`
+  `side_password` (opennova-int #78) clicks `TEAM_PASSWORD`, types it and
+  presses Enter, and the cell requires its `side_password_entered` (false:
+  the host never advertised the side bits 0x30). RR and RR-aa then launch
+  host and joiner one by one (`onhook_run_lan_pair` takes no side password).
+  RO and OO refuse it: our joiner's join screen has no runner seam yet. The
+  host needs a team game type, no game password and no spectator slots, or
+  retail shows another panel first.
 - `host_player_class`: E5's medic (`-HostPlayerClass`, 5..9): the host
   player's class for the cell. The class is the current `weapon.sav` record's
   side byte (+0 blue, +0x8006 red, each record 0x1080C bytes after a 16-byte
