@@ -153,11 +153,12 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	// The send window's three inputs [orig: @0x4C531B..0x4C54C6].
 	uint32_t ping_sum = 0;
 	uint32_t active = 0;
-	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		// The slot's active byte, not the local slot (+5), not a bot
-		// (+0x178E3), and its play ticks (slot+0x184) at least 1860
-		// [orig: CNetQuality_UpdateMetrics @0x4C5376..0x4C5398, `cmp [edi+17Fh],
-		//  744h` with edi = slot+5 @0x4C538E]
+	// One slot row of the walk: the slot's active byte, not the local slot (+5), not a bot
+	// (+0x178E3), and its play ticks (slot+0x184) at least 1860; its own ten-sample ring's mean,
+	// clamped per slot.
+	// [orig: CNetQuality_UpdateMetrics @0x4C5376..0x4C5398, `cmp [edi+17Fh],
+	//  744h` with edi = slot+5 @0x4C538E]
+	const auto sample_row = [&](const NapiNPConnection &conn) {
 		const world::MatchPlayer *row =
 				ctx.world != nullptr ? ctx.world->match.player(conn.link.owned_entity)
 						: nullptr;
@@ -166,16 +167,26 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 				row == nullptr ||
 				static_cast<int32_t>(row->play_ticks) <
 						static_cast<int32_t>(CONTROL_REQUEST_LIVE_GATE_TICKS))
-			continue;
+			return;
 		uint32_t mean = Server_PlayerAveragePingMs(conn);
 		if (mean > 0xFFu) mean = 0xFFu;               // per-slot clamp @0x4C540B
 		ping_sum += mean;
 		++active;
-	}
+	};
+	// The walk is over the slot table, so an orphaned row (a row a repeated C2S 0x02's add left
+	// behind) is sampled as any row, with its own ring as the re-add left it: its net player's
+	// later samples land in the net player's current row (D-NET-NEW-L1-31). The sums take the
+	// rows in any order alike.
+	// [orig: CNetQuality_UpdateMetrics - g_PlayerSlots walked @0x4C5373..0x4C540B, stride 0x188E8
+	//  @0x4C5403; NapiNPServerMsg_HandlePingResponse @0x515070 - the slot through the net
+	//  player's +0xC0 @0x515093]
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) sample_row(conn);
+	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) sample_row(orphan.row);
 	// With no eligible slot the ping and loss samples are stored as 0, not the
 	// floor 1 [orig: LABEL_23 — `*(this + cursor + 17) = 0; *(this + cursor + 22) = 0`].
-	// The slots' loss counters (+100359) are unmodeled: an eligible slot reads 0,
-	// which the loss term floors to 1.
+	// The slots' loss counters (+0x1880C) have no writer but this walk's own zeroing, so an
+	// eligible slot reads 0, which the loss term floors to 1 [orig: @0x4C539A / @0x4C53A0, the
+	// image's only references to the field].
 	const uint32_t avg_ping = active != 0 ? ping_sum / active : 0u;
 	// The frame-pressure term reads the main loop's FR counter
 	// [orig: `mov ecx, g_StatsAvgFps` @0x4C531B].

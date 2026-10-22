@@ -35,6 +35,7 @@
 #include <runtime/inmatch/server_files.h>  // ServerFileSink
 #include <runtime/inmatch/server_entity_state.h> // snapshot_entity_states
 #include <runtime/inmatch/server_medic.h>        // Server_ResendTeamDownedStates
+#include <runtime/inmatch/server_net_quality.h>  // Server_SampleHostNetQuality
 #include <runtime/inmatch/server_tick.h>         // Server_ProcessRoundEnd
 #include <runtime/inmatch/server_tick_maintenance.h> // the play ticks, the periodic walk
 #include <runtime/inmatch/udp_session_transport.h>
@@ -288,6 +289,28 @@ void test_the_play_ticks_count_an_orphaned_row() {
 	CHECK(own != nullptr && own->play_ticks == 1);
 }
 
+// The host's net-quality sample walks the slot table: the orphaned row (its ring at 300 ms) is
+// sampled beside its net player's current row (100 ms), the per-row means averaging 200 ms, the
+// ping metric 255 * 200 / 1000 = 51; walking the connections alone would sample 100 ms, 25
+// (D-NET-NEW-L1-31). [orig: CNetQuality_UpdateMetrics @0x4C52C0 - g_PlayerSlots walked
+// @0x4C5373..0x4C540B, the gate @0x4C5376..0x4C5398, the ping term @0x4C5442..0x4C5471]
+void test_the_net_quality_walk_samples_an_orphaned_row() {
+	OrphanRig r;
+	for (const w::EntityHandle body : {r.own_body, r.orphan_body})
+		r.world->match.player(body)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	for (uint32_t i = 0; i < 10; ++i) {
+		r.net_player().reply.rtt_ring[i] = 100;
+		r.orphan().reply.rtt_ring[i] = 300;
+	}
+	r.ctx->stats_avg_fps = 62;
+	r.ctx->net_quality_sample_countdown = 0;
+	inmatch::Server_SampleHostNetQuality(*r.ctx);
+	const int32_t cursor = r.ctx->host_quality_window.cursor;
+	CHECK(cursor == 1);
+	CHECK(r.ctx->host_quality_window.ping[cursor] == 51);
+	CHECK(r.ctx->host_quality_window.loss[cursor] == 1);
+}
+
 // The orphaned row's body has been dead 360 periodic seconds: the walk's next second counts
 // 361, sends the row's 0x6E to its net player and punts that player (t7). Past the player's
 // leave the counter alone steps.
@@ -512,6 +535,7 @@ int main() {
 	test_an_orphaned_spectator_rows_body_is_hidden();
 	test_the_net_player_is_bound_by_identity();
 	test_the_play_ticks_count_an_orphaned_row();
+	test_the_net_quality_walk_samples_an_orphaned_row();
 	test_the_periodic_walk_takes_an_orphaned_row();
 	test_the_downed_resend_takes_an_orphaned_row();
 	test_the_integrity_family_takes_an_orphaned_row();
