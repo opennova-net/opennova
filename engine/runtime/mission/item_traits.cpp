@@ -183,10 +183,14 @@ void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
         for (const char *guided : {"rokt", "stng", "hlfr", "jvln", "arty"})
             guided_record = guided_record || strutil::iequals(def->ai_function, guided);
         row.guided_record = guided_record;
-        // And its def+0x148, the arty row's init alone of the item rows a body runs
-        // [orig: EntityDef_LookupClassCallbacks @0x407DC0 - @0x407E33..0x407E36; the arty
-        //  row @0x813318, ArtyClass_InitFromDef @0x443430].
-        row.arty_class_init = strutil::iequals(def->ai_function, "arty");
+        // And its def+0x148, the item rows' inits a body runs (world::ItemClassInit)
+        // [orig: EntityDef_LookupClassCallbacks @0x407DC0 - @0x407E33..0x407E36; the rows
+        //  @0x813318 / @0x813330 / @0x813348: ArtyClass_InitFromDef @0x443430,
+        //  AflrClass_InitFromDef @0x4434B0, GflrClass_InitFromDef @0x443510].
+        row.class_init = strutil::iequals(def->ai_function, "arty")   ? world::ItemClassInit::kArty
+                : strutil::iequals(def->ai_function, "aflr") ? world::ItemClassInit::kAirFlare
+                : strutil::iequals(def->ai_function, "gflr") ? world::ItemClassInit::kGroundFlare
+                                                             : world::ItemClassInit::kNone;
         const world::ThrowClass think = world::throw_class_from_tag(def->ai_function);
         if (think == world::ThrowClass::kSatchel || think == world::ThrowClass::kClaymore ||
                 think == world::ThrowClass::kAVMine)

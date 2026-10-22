@@ -12,6 +12,7 @@
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/player_spawn.h> // player_item_row (the bound row's class)
 #include <runtime/world/world.h>
+#include <runtime/terrain_query/height_field.h>
 #include <base/io/fixed.h>
 #include <base/io/bam.h>
 #include <base/io/strutil.h>
@@ -356,6 +357,35 @@ void arty_class_init(World &world, AiEntity &body, Entity &entity) {
     entity.equipped_adm_index = static_cast<uint8_t>(artyrnd < 0 ? 0 : artyrnd);
 }
 
+// The aflr and gflr rows' class inits over a person body's words. Each reads the +0x170 link
+// first, which is null at a body's spawn (the spawn's memset, and no store before the init), so
+// their linked arms (the link's motion or velocity into the body's) do not run there. aflr
+// re-copies the def's heatsig into +0x1A4 (the model init's copy of the same word, so it holds),
+// sets +0x1C to -1 and stores the terrain's bilinear height under the Position words in +0x88
+// (savedLivePose's Z); gflr sets the velocity triple (+0x98 / +0x9C / +0xA0, the motor's) to
+// (0, 0, 1336) and stores the same height in +0x88. The terrain sampler reads 0 without a grid.
+// Ours does not write aflr's -1: our item_type_index is also the body's def row
+// (player_item_row), where retail keeps the def pointer (+0x20) apart from the index word
+// (D-NET-NEW-L4-14 (a), narrowed).
+// [orig: AflrClass_InitFromDef @0x4434B0 - the link @0x4434B5..0x4434BD, +0x1A4 @0x4434EA, +0x1C
+//  @0x4434F6, Terrain_SampleHeightBilinear @0x6067B0 called @0x4434FD, +0x88 @0x443505;
+//  GflrClass_InitFromDef @0x443510 - the link @0x443515..0x44351F, the null arm
+//  @0x443564..0x443570, the call @0x443582, +0x88 @0x44358A; Entity_SpawnFromAnimSlotProperty
+//  @0x43C390 - the memset @0x43C3FE, the init @0x43C4FE]
+void flare_class_init(World &world, AiEntity &body, Entity &entity, bool ground_flare) {
+    if (ground_flare) {
+        body.inf.vel[0] = 0;
+        body.inf.vel[1] = 0;
+        body.inf.vel[2] = 1336;
+    } else {
+        entity.heat_sig = player_item_row(world, entity).heat_sig;
+    }
+    entity.saved_live_pos[2] = world.tables.terrain != nullptr
+            ? terrain::height_field_height_bilinear_fixed(*world.tables.terrain,
+                      entity.position.x.q16, entity.position.y.q16)
+            : 0;
+}
+
 } // namespace
 
 // Initial org1 callback, after definition/ADM/collision resources are bound.
@@ -385,14 +415,18 @@ void player_body_class_init(World &world, Entity &entity) {
         return;
     }
     case PlayerBodyClass::kItem: {
-        // Of the item rows' inits, the arty row's runs over the body's words (D-NET-NEW-L4-23
-        // (a)); the other rows with an init of their own are not run here.
+        // The item row's init over the body's words: the arty row's (D-NET-NEW-L4-23 (a)) and
+        // the two flare rows' (D-NET-NEW-L4-14 (a)); the other rows' inits are not run here.
         // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - `mov eax, [ecx+148h]` @0x43C4F3,
         //  the call @0x43C4FE]
-        if (!player_item_row(world, entity).arty_class_init) return;
+        const ItemClassInit init = player_item_row(world, entity).class_init;
+        if (init == ItemClassInit::kNone) return;
         AiEntity *body = world.ai.for_handle(entity.handle);
         if (body == nullptr || !body->inf.active || entity.handle.pool() != 0) return;
-        arty_class_init(world, *body, entity);
+        if (init == ItemClassInit::kArty)
+            arty_class_init(world, *body, entity);
+        else
+            flare_class_init(world, *body, entity, init == ItemClassInit::kGroundFlare);
         return;
     }
     }

@@ -464,6 +464,15 @@ struct ScriptState {
 //  @0x4A5A70 ("Null" for an empty tag @0x4A5AAE)]
 enum class PlayerBodyClass : uint8_t { kPlayer, kOrganic, kItem };
 
+// An item row's class init (def+0x148, its ai_function row's +0xC word) that a body bound to the
+// row runs at its spawn (player_body_class_init): the arty, aflr and gflr rows'. The rokt and hlfr
+// rows' init (RoktClass_InitFromDef @0x443410, a memset of +0x2B8..+0x30B) zeroes words that are
+// all still 0 at a body's spawn, so it is not one. [orig: g_EntityClassEventCallbackTable
+//  @0x813000 - the rokt / hlfr rows @0x8132B8 / @0x8132E8 (init @0x8132C4 / @0x8132F4), arty
+//  @0x813318 (@0x813324), aflr @0x813330 (@0x81333C), gflr @0x813348 (@0x813354);
+//  EntityDef_LookupClassCallbacks @0x407DC0 - @0x407E33..0x407E36]
+enum class ItemClassInit : uint8_t { kNone, kArty, kAirFlare, kGroundFlare };
+
 // One items.def row's spawn traits: a player spawn binds its class's camouflage
 // row from MissionTables::item_rows (the sweep's copy of g_ItemDefs); a World
 // whose sweep never ran (a native harness) spawns from MissionTables::player.
@@ -517,12 +526,8 @@ struct PlayerTemplate {
     // [orig: g_EntityClassEventCallbackTable @0x813000 - the +0x14 word Entity_SerializeGuidedMissileState
     //  @0x447C50 in the rows @0x8132B8..0x813318; EntityDef_LookupClassCallbacks @0x407DC0]
     bool guided_record = false;
-    // Whether the row's class init (def+0x148, its ai_function row's +0xC word) is the arty
-    // row's, the one item class init a body bound to the row runs (player_body_class_init).
-    // [orig: g_EntityClassEventCallbackTable @0x813000 - the arty row @0x813318, its init
-    //  ArtyClass_InitFromDef @0x443430; EntityDef_LookupClassCallbacks @0x407DC0 -
-    //  @0x407E33..0x407E36]
-    bool arty_class_init = false;
+    // The row's item class init a body bound to the row runs (player_body_class_init).
+    ItemClassInit class_init = ItemClassInit::kNone;
     // A satchel, claymore or AV mine row's device think, which a body bound to it runs as
     // its class event (ThrowableSim::think_device_row_body); kNone for every other row.
     ThrowClass device_think = ThrowClass::kNone;

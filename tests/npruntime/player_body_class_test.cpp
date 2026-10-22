@@ -62,8 +62,9 @@ namespace {
 // null physics row too), a brrl person (5321), an ele0 person (5322), a nade
 // person (5323: the row with no event callback), a schl person (5324, the one row with a
 // nonzero `score` word), a clym person (5325), a plyr person moved by the genx row (5326), an
-// arty person moved by the arty row (5327; its tag in capitals, the lookup ignoring case) and a
-// plyr person moved by the ewep row (5328).
+// arty person moved by the arty row (5327; its tag in capitals, the lookup ignoring case), a
+// plyr person moved by the ewep row (5328), and an aflr and a gflr person (5329 with heatsig 345,
+// 5330; no class names them, a test binds them by row).
 const char kItems[] =
 		"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
 		"begin \"Player\"\r\n id 105305\r\n type person\r\n hp 150\r\n ai_function plyr\r\n"
@@ -82,7 +83,11 @@ const char kItems[] =
 		"begin \"Barrage man\"\r\n id 105327\r\n type person\r\n hp 100\r\n ai_function ARTY\r\n"
 		" move_function arty\r\nend\r\n"
 		"begin \"Gun man\"\r\n id 105328\r\n type person\r\n hp 100\r\n ai_function plyr\r\n"
-		" move_function ewep\r\nend\r\n";
+		" move_function ewep\r\nend\r\n"
+		"begin \"Air flare man\"\r\n id 105329\r\n type person\r\n hp 100\r\n heatsig 345\r\n"
+		" ai_function aflr\r\nend\r\n"
+		"begin \"Ground flare man\"\r\n id 105330\r\n type person\r\n hp 100\r\n"
+		" ai_function gflr\r\nend\r\n";
 
 // Class 5 the plyr row, 6 the org0 row, 7 the classless row, 8 the brrl row, 9 the ele0 row
 // (classes 1..4 the plyr row: the load reads CHARACTER1 on until the first missing section).
@@ -1499,7 +1504,8 @@ void test_an_arty_row_body_takes_the_arty_init() {
 		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
 		CHECK(ae != nullptr);
 		if (ae == nullptr) continue;
-		CHECK(w::player_item_row(*r.world, *body).arty_class_init == (c.player_class == kArty));
+		CHECK((w::player_item_row(*r.world, *body).class_init == w::ItemClassInit::kArty) ==
+				(c.player_class == kArty));
 		ae->inf.anim_pending = 0x55;
 		body->net_anim_pending = 0x55;
 		ae->inf.wpn_deferred = 0;
@@ -1517,6 +1523,47 @@ void test_an_arty_row_body_takes_the_arty_init() {
 		CHECK(ae->inf.wpn_state == 31);
 		CHECK(body->death_anim_state == 186);
 		CHECK(body->equipped_adm_index == (c.artyrnd_row ? 2 : 0));
+	}
+}
+
+// The aflr and gflr rows' class inits over a body at its spawn, the +0x170 link null: aflr
+// re-copies the row's heatsig and stores the terrain's bilinear height in savedLivePose's Z (0
+// with no terrain), its -1 into +0x1C not written (our index is the body's row too); gflr sets
+// the velocity triple to (0, 0, 1336) and stores the same height.
+// [orig: AflrClass_InitFromDef @0x4434B0; GflrClass_InitFromDef @0x443510 - the null arm
+//  @0x443564..0x443570]
+void test_a_flare_row_body_takes_the_flare_init() {
+	for (const bool ground : {false, true}) {
+		Rig r;
+		w::Entity *body = r.spawn_remote(kPlyr);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr);
+		if (ae == nullptr) continue;
+		int32_t index = -1;
+		for (size_t i = 0; i < r.world->tables.item_rows.size(); ++i)
+			if (r.world->tables.item_rows[i].type_id == (ground ? 5330 : 5329))
+				index = static_cast<int32_t>(i);
+		CHECK(index > 0);
+		if (index <= 0) continue;
+		body->item_type_index = index;
+		CHECK(w::player_item_row(*r.world, *body).class_init ==
+				(ground ? w::ItemClassInit::kGroundFlare : w::ItemClassInit::kAirFlare));
+		CHECK(!body->primary_occupant.valid());
+		ae->inf.vel[0] = 5;
+		ae->inf.vel[1] = 6;
+		ae->inf.vel[2] = 7;
+		body->heat_sig = 0;
+		body->saved_live_pos[2] = 0x123456;
+		w::player_body_class_init(*r.world, *body);
+		CHECK(body->saved_live_pos[2] == 0);
+		CHECK(body->item_type_index == index);
+		if (ground) {
+			CHECK(ae->inf.vel[0] == 0 && ae->inf.vel[1] == 0 && ae->inf.vel[2] == 1336);
+			CHECK(body->heat_sig == 0);
+		} else {
+			CHECK(ae->inf.vel[0] == 5 && ae->inf.vel[1] == 6 && ae->inf.vel[2] == 7);
+			CHECK(body->heat_sig == 345);
+		}
 	}
 }
 
@@ -2135,6 +2182,7 @@ int main() {
 	test_an_ewep_row_body_over_a_zeroed_ground();
 	test_an_ewep_row_body_lets_go_of_a_rider_off_it();
 	test_an_ewep_row_body_refills_its_anchor_byte();
+	test_a_flare_row_body_takes_the_flare_init();
 	test_an_ele0_row_body_runs_the_elevator_mover();
 	test_an_upfx_row_body_runs_the_husk_leg();
 	test_a_psec_row_body_runs_the_physics_step();
