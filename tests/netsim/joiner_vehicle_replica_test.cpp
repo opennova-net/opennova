@@ -183,13 +183,17 @@ bool run_record_tail_mirrors_flags_and_health() {
 	return ok;
 }
 
-// D-NET-NEW-L5-15, PERMANENT (Q9-1 (a)): a spawned hull holds its spawn pose until
-// its first compact arms the client mover. Retail's joiner runs the chase from its
-// first entity pass over the 0x0D memset's zero target and pulls a hull lying more than
-// 2 u from the world origin onto it; ours keeps the pose as a deliberate fix.
+// D-NET-NEW-L5-15, NOT-A-DIVERGENCE (Q9-1b (a)): a spawned hull holds its spawn pose
+// until its first compact arms the client mover, as retail's does. Retail's class init
+// runs after the 0x0D memset and seeds the chase target from the hull's pose with a zero
+// progress word, so the first entity pass measures no distance, skips the snap and takes
+// the small arm; the hull holds until its first compact stages a target.
 // [orig: NapiNPClientMsg_0x00D @0x432C40 - the memset @0x432D1B..0x432D23;
+//  Game_StartMission - NapiClient_WaitForGameStart @0x524E29, then
+//  Entity_InitAllFromModels @0x52567F; Entity_InitVehicleAIFromDef @0x4686C0 (the
+//  call @0x4687FF); Entity_InitVehicleAI @0x460200 - the seed @0x4602F9..0x460326;
 //  Entity_UpdateVehiclePhysics @0x48AF00 - the client chase @0x48B54C, the snap
-//  @0x48B563..0x48B640]
+//  @0x48B563..0x48B640 not reached, the < 0x2000 arm @0x48B64B]
 bool run_hull_holds_its_spawn_pose_until_its_first_compact() {
 	Harness h;
 	bool ok = true;
