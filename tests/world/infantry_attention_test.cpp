@@ -437,6 +437,30 @@ static void test_a_player_candidates_term_reads_its_dcb_id() {
     CHECK(f.body().inf.head_look_target == joiner);
 }
 
+// The sees relations after the pick key both singles on the DcbId (+0x7C, entity_dcb_id): a
+// player's 10000 + slot fails every setter's < 0x80 guard, so a joiner looked at sets the group
+// rows and the observer's single-group row and no single row of its own, where its net id
+// (0 on our host) would set row 0. The pick itself reads 10007 as the test above does.
+// [orig: Entity_UpdateInfantryAI - self @0x4BE42C / @0x4BE456, target @0x4BE43C / @0x4BE453;
+//  SharedMem_Init @0x452AD0 - `cmp eax, 80h` @0x452AD4; TeamMatrix_SetEnemy @0x452BF0 -
+//  @0x452BF4 / @0x452BFF]
+static void test_a_player_targets_sees_relations_read_its_dcb_id() {
+    Fixture f;
+    const auto joiner = f.person({6.5f, 0, 2}, 0); // the host gives a joiner's body net id 0
+    Entity &row = *f.world.registry.get(joiner);
+    row.engine_flags |= kEntityFlagPlayer;
+    row.player_slot_id = 7;
+    AiEntity &body = *f.world.ai.at(f.world.ai.attach(joiner));
+    body.inf.active = false; // its own update stays out of the tick
+    f.tick(512);
+    CHECK(f.body().inf.head_look_target == joiner);
+    const auto &r = f.world.script.relations;
+    CHECK(r.group_group(TriggerRelations::kSees, 2, 3));
+    CHECK(r.single_group(TriggerRelations::kSees, 8, 3));
+    CHECK(!r.group_single(TriggerRelations::kSees, 2, 0));
+    CHECK(!f.sees(0));
+}
+
 int main() {
     test_idle_scan_relations_and_history();
     test_speaker_identity_and_authority();
@@ -450,6 +474,7 @@ int main() {
     test_look_chase_instruction_boundaries();
     test_mounted_attention_respects_vehicle_motion();
     test_a_player_candidates_term_reads_its_dcb_id();
+    test_a_player_targets_sees_relations_read_its_dcb_id();
     std::printf("infantry attention: %s (%d failures)\n", failures ? "FAILED" : "OK", failures);
     return failures ? 1 : 0;
 }

@@ -449,6 +449,19 @@ static void test_aim_origin_takes_the_non_person_leg() {
     w.logic_tick = 0xFFFFFFFFu; // wrapped phase = 35, same jitter band
     sys.weapon_aim_origin(w, target, out);
     CHECK(out[0] == 96256 && out[1] == 98304 && out[2] == 131072);
+    // A player body's identity is its DcbId (entity_dcb_id), 10000 + its slot on a plyr row,
+    // not the net id ours keeps (0 on our host): slot 3's phase 36 * 10003 = 0x57EAC is low
+    // (& 0x80) with jitter 0x20, where net id 0's is high with jitter 0.
+    // [orig: Entity_ComputeWeaponFireOrigin `mov eax, [esi+7Ch]` @0x43B4C2;
+    //  PlayerClass_InitEntity @0x4B1149..0x4B1173]
+    target.net_id = 0;
+    target.engine_flags |= kEntityFlagPlayer;
+    target.player_slot_id = 3;
+    w.logic_tick = 0;
+    sys.weapon_aim_origin(w, target, out);
+    CHECK(out[0] == 79872 && out[1] == 114688 && out[2] == 65536);
+    target.engine_flags &= ~kEntityFlagPlayer;
+    target.player_slot_id = 0;
 
     // The attached body's position is the entity's own words (one store, as
     // retail's): the person leg and the raw origin read the same words.
@@ -4443,7 +4456,11 @@ int main() {
             w.registry.get(EntityHandle::make(1, 0))->health = 0;
             AiTarget out{};
             CHECK(sys.acquire_target(w, e, out) == true);
-            CHECK(out.net_id == 0x11);
+            CHECK(out.handle == EntityHandle::make(0, 1));
+            // Its single key is its DcbId (entity_dcb_id): 10000 + slot 0 on the seed's plyr
+            // row, not the 0x11 on its Entity [orig: AI_HandleEvent_HelicopterCombatD
+            //  @0x4677C9; PlayerClass_InitEntity @0x4B1149..0x4B1173].
+            CHECK(out.net_id == 10000);
             // The local cheat word's 0x800 bit excludes the LOCAL player from that leg
             // [orig: `test dword_24C1930,800h` @0x467141].
             w.cached.local_player = EntityHandle::make(0, 1);

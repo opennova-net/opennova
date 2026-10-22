@@ -1420,8 +1420,8 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
         // A non-authority in-session peer runs the SAME hit path with
         // Weapon_CalcImpactDamage's forced zero [orig: @0x4ec933..0x4ec93a]:
         // no health, hits, or deaths, but the person class callback still
-        // fires (@0x4e820e) and stages the death anim / tips the body on the
-        // joiner too. Only a person with a World entity reaches this leg on a
+        // fires (@0x4e820e) and stages the death anim / stores the +0x94 hit roll
+        // on the joiner too. Only a person with a World entity reaches this leg on a
         // joiner (the wire person proxies never resolve to geometry_entity,
         // collision_trace.cpp), i.e. the joiner's own body.
         const bool peer_person_hit = world.rules.mp_session &&
@@ -1500,9 +1500,12 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             const int32_t pre_hit_health = target->health;
             if (authoritative) {
                 if (shooter != nullptr) {
+                    // DcbId singles (+0x7C, entity_dcb_id): a player's 10000 + slot fails the
+                    // < 0x80 guard [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0 - shooter
+                    //  @0x4E80C0 / @0x4E80EA, target @0x4E80D0 / @0x4E80E1]
                     auto &rel = world.script.relations;
-                    const int sg = shooter->group_id, ss = shooter->net_id;
-                    const int vg = target->group_id, vs = target->net_id;
+                    const int sg = shooter->group_id, ss = entity_dcb_id(world, *shooter);
+                    const int vg = target->group_id, vs = entity_dcb_id(world, *target);
                     rel.set_group_group(TriggerRelations::kShot, sg, vg);
                     rel.set_single_group(TriggerRelations::kShot, ss, vg);
                     rel.set_group_single(TriggerRelations::kShot, sg, vs);
@@ -1575,7 +1578,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         target->last_attacker = r.owner;
                     // The person class callback, event 1 with a projectile: EVERY hit (lethal
                     // or not, damage 0 included) selects the death anim from the hit bone +
-                    // attack quadrant into +0x2C0 and tips the body on a torso-stack bone; a
+                    // attack quadrant into +0x2C0 and sets the +0x94 roll on a torso-stack bone; a
                     // later kill that stamps nothing (WAC kill/SSNHP/GroupHP) plays this hit's
                     // clip, while killSSN and KillSingle clear it first [orig: WacCmd_KillSsn
                     // @0x4F1EBD; Entity_KillByNetId @0x43DC1B]. The roll, the mask switch, and

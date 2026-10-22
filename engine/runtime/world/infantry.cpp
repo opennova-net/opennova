@@ -769,19 +769,37 @@ PhysicsClass body_move_row(const World &world, const AiEntity &e, const Entity *
     return player_item_row(world, *ent).move_row;
 }
 
+namespace {
+
+// A player body's DcbId: its bound row's class-init word, the row as body_move_row picks it
+// (the seed's in the harness case).
+int32_t player_body_dcb_id(const World &world, const Entity &ent) {
+    const PlayerTemplate &row =
+            world.tables.item_rows.empty() || !world.tables.class_cammo_installed
+            ? world.tables.player
+            : player_item_row(world, ent);
+    // [orig: PlayerClass_InitEntity `movzx edx, byte [esi+154h]; add edx, 2710h`
+    //  @0x4B1149..0x4B1155, the +0x7C store @0x4B1173]
+    return row.body_class == PlayerBodyClass::kPlayer ? 10000 + ent.player_slot_id : 0;
+}
+
+} // namespace
+
 // See the ai.h declaration.
 int32_t body_dcb_id(const World &world, const AiEntity &e, const Entity *ent) {
     const bool player_body = e.inf.is_local_player || e.net_is_remote_peer ||
             (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0);
     if (!player_body || ent == nullptr) return e.net_id;
-    // The bound row as body_move_row picks it (the seed's in the harness case).
-    const PlayerTemplate &row =
-            world.tables.item_rows.empty() || !world.tables.class_cammo_installed
-            ? world.tables.player
-            : player_item_row(world, *ent);
-    // [orig: PlayerClass_InitEntity `movzx edx, byte [esi+154h]; add edx, 2710h`
-    //  @0x4B1149..0x4B1155, the +0x7C store @0x4B1173]
-    return row.body_class == PlayerBodyClass::kPlayer ? 10000 + ent->player_slot_id : 0;
+    return player_body_dcb_id(world, *ent);
+}
+
+// See the ai.h declaration.
+int32_t entity_dcb_id(const World &world, const Entity &ent) {
+    const AiEntity *body = world.ai.for_handle(ent.handle);
+    const bool player_body =
+            (body != nullptr && (body->inf.is_local_player || body->net_is_remote_peer)) ||
+            ((ent.flags | ent.engine_flags) & kEntityFlagPlayer) != 0;
+    return player_body ? player_body_dcb_id(world, ent) : ent.net_id;
 }
 
 // See infantry_internal.h.

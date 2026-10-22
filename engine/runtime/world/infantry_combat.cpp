@@ -70,12 +70,17 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             if (((flags & 2) != 0 || c->health <= 0) &&
                     int32_t(world.logic_tick - c->death_tick) > 16) continue;
             if ((flags & kEntityFlagPlayer) != 0 && world.match.outcome().ended) continue;
-            const bool selected = self->target_selectors.admits_team(c->net_id, c->group_id);
+            // The selector words match the candidate's DcbId (+0x7C, entity_dcb_id), a
+            // player's 10000 + slot. [orig: Entity_FindTargets `cmp eax, [esi+7Ch]`
+            //  @0x53A791 / @0x53A7C3; Entity_ValidateWeaponTarget @0x53A4C0;
+            //  Weapon_CalcDamageByType @0x53944C]
+            const int32_t dcb_id = entity_dcb_id(world, *c);
+            const bool selected = self->target_selectors.admits_team(dcb_id, c->group_id);
             const AiEntity *candidate_ai = sys.for_handle(h);
             const bool candidate_berserk = candidate_ai != nullptr && (candidate_ai->slot.f[1] & 0x200) != 0;
             if (!selected && !scanner_berserk && !candidate_berserk &&
                     (c->team == 0 || c->team == team)) continue;
-            if (!self->target_selectors.allows(c->net_id, c->group_id)) continue;
+            if (!self->target_selectors.allows(dcb_id, c->group_id)) continue;
             // Pool 2's explicitly selected targets bypass the armor-pair gate.
             // [orig: @0x53A878, @0x53AA86, @0x53AC3F]
             if (!(pool == 2 && selected) && c->armor_impact == -1 && c->armor_kz == -1) continue;
@@ -108,7 +113,7 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
                     score = INT32_MAX;
             }
             if ((c->item_attrib & 0x40) != 0 && !c->primary_occupant.valid()) score = INT32_MAX;
-            score = self->target_selectors.adjust_score(score, c->net_id, c->group_id);
+            score = self->target_selectors.adjust_score(score, dcb_id, c->group_id);
             if (score == INT32_MAX) continue;
             candidates.push_back({h, score});
             // Retail sorts at 128 and resumes insertion at 127, discarding

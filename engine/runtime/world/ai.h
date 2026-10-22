@@ -610,6 +610,26 @@ PhysicsClass body_move_row(const World &world, const AiEntity &body, const Entit
 //  Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE]
 int32_t body_dcb_id(const World &world, const AiEntity &body, const Entity *entity);
 
+// Any entity's DcbId (+0x7C), the Entity form of body_dcb_id for the reads that hold an
+// Entity: a player body's (a Player-flag row, or a body the AI knows as the local or a remote
+// player) is its bound row's class-init word as body_dcb_id reads it; every other entity's is
+// its record's SSN (Entity::net_id). Read where retail reads a body's +0x7C that can be a
+// player: the org1 attention's sees relations, the target walk's selector words, the weapon
+// validator, the person aim point's phase, the vehicle AI's candidate and engage relations,
+// and the projectile hit's shot relations. A player's 10000 + slot fails every relation
+// setter's `< 0x80` row guard.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - self @0x4BE42C / @0x4BE456, target @0x4BE43C /
+//  @0x4BE453; Entity_FindTargets @0x53A610 - @0x53A791 / @0x53A7C3;
+//  Entity_ValidateWeaponTarget @0x53A400 - @0x53A4C0; Weapon_CalcDamageByType @0x539140 -
+//  @0x53944C; Entity_ComputeWeaponFireOrigin @0x43B4B0 - @0x43B4C2;
+//  AI_HandleEvent_HelicopterCombatD @0x467730 - self @0x4677BF / @0x4677DD / @0x46788F /
+//  @0x4678AD, target @0x4677C9 / @0x4677DA / @0x467899 / @0x4678AA;
+//  Entity_FindNearestThreat @0x4B0990 - self @0x4B0A7B / @0x4B0A99 / @0x4B0ABF / @0x4B0ADD,
+//  target @0x4B0A85 / @0x4B0A96 / @0x4B0AC9 / @0x4B0ADA;
+//  Projectile_ProcessDamageOnTarget @0x4E7FB0 - shooter @0x4E80C0 / @0x4E80EA, target
+//  @0x4E80D0 / @0x4E80E1; the guard e.g. TeamMatrix_SetEnemy @0x452BF0 - @0x452BF4..0x452C05]
+int32_t entity_dcb_id(const World &world, const Entity &entity);
+
 class AiSystem; // fwd
 
 // AIEvent ring entry: 5 dwords. [orig: dword_AE0778 ring, AIEvent_QueueEntry.]
@@ -795,7 +815,7 @@ enum RelOp {
     kRelProximity = 2,    // EntityMatrix_SetProximityBit@0x452b60 (self relmat, target net)
     kRelEnemy = 3,        // TeamMatrix_SetEnemy         @0x452bf0 (self net,    target net)
     kRelAllied = 4,       // TeamMatrix_SetAllied        @0x452aa0 (self relmat, target relmat)
-    kRel452B30 = 5,       // sub_452B30                  @0x452b30 (self net,    target relmat)
+    kRel452B30 = 5,       // TargetedMatrix_SetSingleGroupBit @0x452b30 (self net, target relmat)
     kRelDamaged = 6,      // EntityMatrix_SetDamagedBit  @0x452bc0 (self relmat, target net)
     kRelSpotted = 7,      // TeamMatrix_SetSpottedBy     @0x452c70 (self net,    target net)
 };

@@ -227,11 +227,18 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
         inf.previous_look_target = inf.last_look_target;
         inf.last_look_target = inf.head_look_target;
         if (const Entity *target = world.registry.get(inf.head_look_target)) {
+            // The singles are both DcbIds (+0x7C, entity_dcb_id): a player's 10000 + slot
+            // fails the setters' < 0x80 guard. [orig: Entity_UpdateInfantryAI @0x4B9910 -
+            //  self @0x4BE42C / @0x4BE456, target @0x4BE43C / @0x4BE453; the setters
+            //  EventMatrix_SetSpecialBit @0x452A40, SharedMem_Init @0x452AD0,
+            //  EntityMatrix_SetProximityBit @0x452B60, TeamMatrix_SetEnemy @0x452BF0]
+            const int32_t self_dcb_id = entity_dcb_id(world, *self);
+            const int32_t target_dcb_id = entity_dcb_id(world, *target);
             auto &relations = world.script.relations;
             relations.set_group_group(TriggerRelations::kSees, self->group_id, target->group_id);
-            relations.set_single_group(TriggerRelations::kSees, self->net_id, target->group_id);
-            relations.set_group_single(TriggerRelations::kSees, self->group_id, target->net_id);
-            relations.set_single_single(TriggerRelations::kSees, self->net_id, target->net_id);
+            relations.set_single_group(TriggerRelations::kSees, self_dcb_id, target->group_id);
+            relations.set_group_single(TriggerRelations::kSees, self->group_id, target_dcb_id);
+            relations.set_single_single(TriggerRelations::kSees, self_dcb_id, target_dcb_id);
         }
     }
 

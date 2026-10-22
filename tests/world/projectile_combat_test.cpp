@@ -2189,6 +2189,39 @@ void test_friendly_fire_gate() {
     }
 }
 
+// The shot relations' singles are DcbIds (+0x7C, entity_dcb_id): a player shooter's is its
+// class init's 10000 + slot, which the setters' < 0x80 guard rejects, so its hit on an NPC
+// sets the group rows and the NPC's single row against the player's group, and no single row
+// of the player's own, where its net id (0 on our host) would set row 0.
+// [orig: Projectile_ProcessDamageOnTarget - shooter @0x4E80C0 / @0x4E80EA, target @0x4E80D0 /
+//  @0x4E80E1; ShotMatrix_SetSingleGroupBit @0x452B00 - `cmp eax, 80h` @0x452B04;
+//  PlayerClass_InitEntity @0x4B1149..0x4B1173]
+void test_shot_relations_key_a_player_shooter_by_its_dcb_id() {
+    Rig r;
+    r.world.ai.is_authority = true;
+    r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+    Entity *s = r.world.registry.get(r.shooter);
+    Entity *t = r.world.registry.get(r.target);
+    s->team = 2;
+    t->team = 1;
+    s->group_id = 3;
+    t->group_id = 4;
+    s->flags |= kEntityFlagPlayer;
+    s->net_id = 0;
+    s->player_slot_id = 2;
+    t->net_id = 9;
+    CHECK(entity_dcb_id(r.world, *s) == 10002);
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    t = r.world.registry.get(r.target);
+    CHECK(t->health < 100);
+    const TriggerRelations &rel = r.world.script.relations;
+    CHECK(rel.group_group(TriggerRelations::kShot, 3, 4));
+    CHECK(rel.group_single(TriggerRelations::kShot, 3, 9));
+    CHECK(!rel.single_group(TriggerRelations::kShot, 0, 4));
+    CHECK(!rel.single_single(TriggerRelations::kShot, 0, 9));
+}
+
 void test_vehicle_occupant_reduction_count_cap_and_depth() {
     Rig r;
     r.world.registry.configure_pool(1, 2);
@@ -4223,6 +4256,8 @@ static const NamedTest kTests[] = {
     {"test_exact_one_hop_vehicle_parent_damage_routing", test_exact_one_hop_vehicle_parent_damage_routing},
     {"test_zero_damage_hit_still_notifies_the_vehicle_brain", test_zero_damage_hit_still_notifies_the_vehicle_brain},
     {"test_friendly_fire_gate", test_friendly_fire_gate},
+    {"test_shot_relations_key_a_player_shooter_by_its_dcb_id",
+     test_shot_relations_key_a_player_shooter_by_its_dcb_id},
     {"test_vehicle_occupant_reduction_count_cap_and_depth", test_vehicle_occupant_reduction_count_cap_and_depth},
     {"test_retail_force_order_and_stock_gates", test_retail_force_order_and_stock_gates},
     {"test_retail_aerodynamic_drag_vectors", test_retail_aerodynamic_drag_vectors},

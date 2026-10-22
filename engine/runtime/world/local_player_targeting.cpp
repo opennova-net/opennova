@@ -98,9 +98,13 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
             if (((flags & 2u) != 0 || target->health <= 0) &&
                 int32_t(world.logic_tick - target->death_tick) > 16) continue;
             if ((flags & kEntityFlagPlayer) != 0 && world.match.outcome().ended) continue;
-            if (!owner.target_selectors.admits_team(target->net_id, target->group_id) &&
+            // The SSN selector words match the target's DcbId (+0x7C, entity_dcb_id), a
+            // player's 10000 + slot [orig: Entity_FindTargets @0x53A791 / @0x53A7C3;
+            //  Entity_ValidateWeaponTarget @0x53A4C0; Weapon_CalcDamageByType @0x53944C].
+            const int32_t dcb_id = entity_dcb_id(world, *target);
+            if (!owner.target_selectors.admits_team(dcb_id, target->group_id) &&
                 (target->team == 0 || target->team == team)) continue;
-            if (!owner.target_selectors.allows(target->net_id, target->group_id)) continue;
+            if (!owner.target_selectors.allows(dcb_id, target->group_id)) continue;
             if (target->armor_impact == -1 && target->armor_kz == -1) continue;
             int32_t aim[3], metrics[6];
             world.ai.weapon_aim_origin(world, *target, aim);
@@ -111,7 +115,7 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
             if (target->item_type == 3 && (flags & 0x8000u) != 0) continue;
             int32_t score = io::bam_sub(0, static_cast<int32_t>(arc));
             if (world.rules.mp_session) score = io::bam_add(uint16_t(target->heat_sig), score >> 12);
-            score = owner.target_selectors.adjust_score(score, target->net_id, target->group_id);
+            score = owner.target_selectors.adjust_score(score, dcb_id, target->group_id);
             if (score == INT32_MAX) continue;
             push({h, -1, score});
         }

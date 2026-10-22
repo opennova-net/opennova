@@ -2125,17 +2125,21 @@ int main() {
 		world.tables.ammo.entries[1].impact_effects[5].sound = saved_sound;
 	}
 
-	// The processed hit also writes the sticky SHOT relations (players carry
-	// group 0, so only the single rows land; rows outside the retail < 0x80
-	// guard are no-ops) [orig: Projectile_ProcessDamageOnTarget
-	// @ 0x4e80ae..0x4e80ef; guard e.g. EntityMatrix_SetProximityBit @ 0x452b60].
+	// The processed hit also writes the sticky SHOT relations, keyed on the DcbIds
+	// (+0x7C, entity_dcb_id): a player's is 10000 + its slot, outside the retail
+	// < 0x80 guard, so no single row of two players lands [orig:
+	// Projectile_ProcessDamageOnTarget @ 0x4e80ae..0x4e80ef (shooter +0x7C @0x4E80C0 /
+	// @0x4E80EA, target @0x4E80D0 / @0x4E80E1); guard e.g. EntityMatrix_SetProximityBit
+	// @ 0x452b60].
 	{
 		const w::Entity *sh = world.registry.get(hb);
 		const w::Entity *vic = world.registry.get(hc);
-		const bool in_range = sh->net_id < 128 && vic->net_id < 128;
-		if (!expect(world.script.relations.single_single(w::TriggerRelations::kShot,
-		            sh->net_id, vic->net_id) == in_range,
-		            "shot S->S written on processed damage iff rows pass the <0x80 guard"))
+		const int32_t ss = w::entity_dcb_id(world, *sh);
+		const int32_t vs = w::entity_dcb_id(world, *vic);
+		if (!expect(ss >= 10000 && vs >= 10000 &&
+		                    !world.script.relations.single_single(
+		                            w::TriggerRelations::kShot, ss, vs),
+		            "shot S->S keys the players' DcbIds, which fail the <0x80 guard"))
 			return 1;
 	}
 

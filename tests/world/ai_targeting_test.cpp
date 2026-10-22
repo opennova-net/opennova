@@ -311,8 +311,60 @@ static void test_air_class_takes_only_helo_brained_vehicles() {
     CHECK(found.handle == helo);
 }
 
+// A player target's single key is its DcbId (+0x7C, entity_dcb_id): the class-init word 10000 +
+// its slot on a plyr row, not the net id ours keeps on its Entity (0 on our host). The
+// candidate carries it into the found target and the engage's Entity_SetAITarget trace; the
+// relation setters' < 0x80 guard rejects it, so the engage sets the group rows and the
+// scanner's single-group rows and no row of the player's own; and the weapon validator's
+// exclusive SSN word matches it.
+// [orig: AI_FindBestTargetB @0x466F60; AI_HandleEvent_HelicopterCombatD - self +0x7C
+//  @0x4677BF / @0x4677DD / @0x46788F / @0x4678AD, target @0x4677C9 / @0x4677DA / @0x467899 /
+//  @0x4678AA; TeamMatrix_SetEnemy @0x452BF0 - @0x452BF4 / @0x452BFF;
+//  Entity_ValidateWeaponTarget @0x53A400 - @0x53A4C0; PlayerClass_InitEntity
+//  @0x4B1149..0x4B1173]
+static void test_a_player_target_engages_by_its_dcb_id() {
+    Scanner s;
+    World &w = *s.w;
+    Entity &self = *w.registry.get(s.e().handle);
+    self.net_id = 5;
+    self.group_id = 6;
+    s.e().net_id = 5;
+    s.e().relmat_id = 6;
+    // A remote player's body: class 0 ends on pool 0's Player-flagged rows.
+    s.e().profile.class_priority[0] = 1;
+    const EntityHandle player = s.spawn_enemy(0, kEntityFlagPlayer, 3);
+    Entity &body = *w.registry.get(player);
+    body.net_id = 0;
+    body.player_slot_id = 3;
+    body.group_id = 4;
+    CHECK(entity_dcb_id(w, body) == 10003);
+    AiTarget found{};
+    CHECK(w.ai.acquire_target(w, s.e(), found));
+    CHECK(found.handle == player);
+    CHECK(found.net_id == 10003);
+    w.ai.engage_target(w, s.e(), found);
+    CHECK(w.ai.target_set_calls.size() == 1 && w.ai.target_set_calls[0] == 10003);
+    const TriggerRelations &r = w.script.relations;
+    for (const auto rel : {TriggerRelations::kSees, TriggerRelations::kTargeted}) {
+        CHECK(r.group_group(rel, 6, 4));
+        CHECK(r.single_group(rel, 5, 4));
+        CHECK(!r.group_single(rel, 6, 0));
+        CHECK(!r.single_single(rel, 5, 0));
+    }
+    // The validator's exclusive SSN word names the player by its DcbId.
+    s.e().profile.radar_fov_bam = INT32_MAX;
+    s.e().profile.approach_cap = 1000 << 16;
+    self.target_selectors.set(AiTargetSelector::ExclusiveSsn, 10003);
+    const int32_t pose[6] = {};
+    int32_t metrics[6];
+    CHECK(w.ai.weapon_target_metrics(w, s.e(), body, pose, 0, /*skip_los=*/true, metrics));
+    self.target_selectors.set(AiTargetSelector::ExclusiveSsn, 10004);
+    CHECK(!w.ai.weapon_target_metrics(w, s.e(), body, pose, 0, /*skip_los=*/true, metrics));
+}
+
 int main() {
     test_engage_jitter_keys_on_the_target_brain();
+    test_a_player_target_engages_by_its_dcb_id();
     test_air_class_takes_only_helo_brained_vehicles();
     test_rounds_mark_their_shooter();
     test_scripted_berserk_reaches_the_readers();

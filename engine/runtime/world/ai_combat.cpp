@@ -118,7 +118,10 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
             cand.range_primary = c->radar_sig;
             cand.range_secondary = c->heat_sig;
             cand.relmat_id = c->group_id;                  // group key (+0x11C commandGroup)
-            cand.net_id = c->net_id;                       // single key (+0x7C SSN)
+            // The single key, the DcbId (+0x7C; a player's 10000 + slot, entity_dcb_id) the
+            // engage's relations read [orig: AI_HandleEvent_HelicopterCombatD - @0x4677C9,
+            //  @0x4677DA, @0x467899, @0x4678AA].
+            cand.net_id = entity_dcb_id(world, *c);
             // The engage keys its jitter on the target's SM brain pointer
             // (entity+0x64); a person's body carries none [orig:
             // AI_HandleEvent_HelicopterCombatD `cmp [ebx+64h],ebp` @0x4677EA].
@@ -265,16 +268,20 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
 }
 
 // The acquisition/fire relation quads, APPLIED (D-AI-3 closed 2026-07-16). Keys:
-// group = commandGroup (entity+0x11C -> Entity::group_id), single = the authored SSN
-// (entity+0x7C DcbId -> Entity::net_id). Witnessed order + arg orientation from the raw
-// call block: sees {GG[selfG][tgtG], SG[selfSsn][tgtG], GS[tgtSsn][selfG] (transposed),
-// SS[selfSsn][tgtSsn]} then targeted the same; setter->matrix identity pinned via the
-// g_SeesMatrix*/g_TargetedMatrix* bases. [orig: @0x4677b3..0x4678b2 / @0x4b0a6f..0x4b0ae2;
-// world-wac-ai-re §16.4/§17.2; matrix map docs/mission/bms-event-runtime-re.md §3a]
+// group = commandGroup (entity+0x11C -> Entity::group_id), single = the DcbId (entity+0x7C:
+// a record's SSN, a player body's 10000 + slot, entity_dcb_id). Witnessed order + arg
+// orientation from the raw call block: sees {GG[selfG][tgtG], SG[selfSsn][tgtG],
+// GS[tgtSsn][selfG] (transposed), SS[selfSsn][tgtSsn]} then targeted the same;
+// setter->matrix identity pinned via the g_SeesMatrix*/g_TargetedMatrix* bases.
+// [orig: @0x4677b3..0x4678b2 (self +0x7C @0x4677BF / @0x4677DD / @0x46788F / @0x4678AD,
+//  target @0x4677C9 / @0x4677DA / @0x467899 / @0x4678AA) / @0x4b0a6f..0x4b0ae2 (self
+//  @0x4B0A7B / @0x4B0A99 / @0x4B0ABF / @0x4B0ADD, target @0x4B0A85 / @0x4B0A96 /
+//  @0x4B0AC9 / @0x4B0ADA); world-wac-ai-re §16.4/§17.2; matrix map
+//  docs/mission/bms-event-runtime-re.md §3a]
 void AiSystem::apply_engage_relations(World &world, const Entity &self, const Entity &target) {
     TriggerRelations &rel = world.script.relations;
-    const int sg = self.group_id, ss = self.net_id;
-    const int tg = target.group_id, ts = target.net_id;
+    const int sg = self.group_id, ss = entity_dcb_id(world, self);
+    const int tg = target.group_id, ts = entity_dcb_id(world, target);
     rel.set_group_group(TriggerRelations::kSees, sg, tg);       // [orig: @0x452a40 GG]
     rel.set_single_group(TriggerRelations::kSees, ss, tg);      // [orig: @0x452ad0 SG]
     rel.set_group_single(TriggerRelations::kSees, sg, ts);      // [orig: @0x452b60 GS]
@@ -461,14 +468,15 @@ int AiSystem::weapon_fire_position(World &world, const AiEntity &e, int32_t out[
 void AiSystem::weapon_aim_origin(World &world, const Entity &e, int32_t out[3]) const {
     // The person target point is its CameraOffset, with a time/identity
     // phase selecting the height and small XY jitter. The assembly loads
-    // tick's VALUE, not its address. [orig: @0x43B4C2..0x43B523]
+    // tick's VALUE, not its address; the identity is the DcbId (+0x7C,
+    // entity_dcb_id), a player's 10000 + slot. [orig: @0x43B4C2..0x43B523]
     if (e.has_item_def && e.item_type == 3) {
         const AiEntity *body = for_handle(e.handle);
         if (body) weapon_fire_origin(*body, out); else weapon_fire_origin(e, out);
         const int32_t eye[3] = {body ? body->inf.eye_offset_x : e.eye_offset_x,
                                 body ? body->inf.eye_offset_y : e.eye_offset_y,
                                 body ? body->inf.eye_offset_z : e.eye_offset_z};
-        const uint32_t phase = world.logic_tick + 36u * uint32_t(e.net_id);
+        const uint32_t phase = world.logic_tick + 36u * uint32_t(entity_dcb_id(world, e));
         const bool low = (phase & 0x80u) != 0;
         const int32_t jitter = int32_t(phase & 0x60u);
         out[0] = io::bam_add(out[0], io::bam_add(io::bam_sar(eye[0], low ? 2 : 1),
@@ -681,9 +689,11 @@ bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &ta
 	if ((target_flags & kEntityFlagPlayer) != 0 &&
 			(world.rules.ai_rules_skip_local_player || world.match.outcome().ended))
 		return false;
+    // The exclusive SSN word matches the target's DcbId (entity_dcb_id).
     const Entity *shooter = world.registry.get(e.handle);
-    if (shooter != nullptr && !shooter->target_selectors.allows(target.net_id, target.group_id))
-        return false; // [orig: Entity_ValidateWeaponTarget @0x53A400]
+    if (shooter != nullptr &&
+            !shooter->target_selectors.allows(entity_dcb_id(world, target), target.group_id))
+        return false; // [orig: Entity_ValidateWeaponTarget @0x53A400 - +0x7C @0x53A4C0]
 	int32_t aim[3];
 	weapon_aim_origin(world, target, aim);
 	if (aim_offset != 0) {
@@ -891,11 +901,16 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t, bool 
 	const int32_t self_rm = static_cast<int32_t>(static_cast<int16_t>(e.relmat_id)); // movsx entity+284
     const int32_t tgt_rm = static_cast<int32_t>(static_cast<int16_t>(t.relmat_id));  // movsx target+284
 
+    // The singles are DcbIds: the self's (body_dcb_id) and the target's, as the candidate
+    // fill read it (entity_dcb_id) [orig: AI_HandleEvent_HelicopterCombatD @0x467730 -
+    //  self @0x4677BF / @0x4677DD / @0x46788F / @0x4678AD, target @0x4677C9 / @0x4677DA /
+    //  @0x467899 / @0x4678AA].
+    const int32_t self_dcb_id = body_dcb_id(world, e, world.registry.get(e.handle));
     // [orig: 0x4677b3..0x4677e2] the sees quad before the controller branch.
     rel_ops.push_back({kRelEventSpecial, self_rm, tgt_rm});
-    rel_ops.push_back({kRelSharedMem, e.net_id, tgt_rm});
+    rel_ops.push_back({kRelSharedMem, self_dcb_id, tgt_rm});
     rel_ops.push_back({kRelProximity, self_rm, t.net_id});
-    rel_ops.push_back({kRelEnemy, e.net_id, t.net_id});
+    rel_ops.push_back({kRelEnemy, self_dcb_id, t.net_id});
     {
         const Entity *se = world.registry.get(e.handle);
         const Entity *te = t.handle.valid() ? world.registry.get(t.handle) : nullptr;
@@ -921,9 +936,9 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t, bool 
 
 	// [orig: 0x467883..0x4678b2] the targeted quad after pending = 17.
 	rel_ops.push_back({kRelAllied, self_rm, tgt_rm});
-    rel_ops.push_back({kRel452B30, e.net_id, tgt_rm});
+    rel_ops.push_back({kRel452B30, self_dcb_id, tgt_rm});
     rel_ops.push_back({kRelDamaged, self_rm, t.net_id});
-    rel_ops.push_back({kRelSpotted, e.net_id, t.net_id});
+    rel_ops.push_back({kRelSpotted, self_dcb_id, t.net_id});
 }
 
 // [orig: AI_HandleCommand @0x465770] Queued ChangeAI dispatcher. Alert, authored
