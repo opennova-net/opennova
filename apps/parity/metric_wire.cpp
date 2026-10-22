@@ -46,6 +46,63 @@ bool reload_echo_identity(char dir, uint16_t identity) {
 	return (dir == 'C' && identity == 0x025) || (dir == 'S' && identity == 0x049);
 }
 
+// A run's reload round trip on the wire (count.reload_echo): its first C2S 0x25's
+// datagram, the first S2C 0x49 at or after it, and the longest entry spacing the
+// auto-reload loop can have had: a request datagram that follows another with no C
+// datagram between them carries the n requests the loop entered between the two
+// sends, so n - 1 spacings fit in the gap. Wire time: the external capture, else the
+// evidence capture through `end_ns` (trace.read_time). 0 where the run shows none.
+struct ReloadTrip {
+	uint64_t first_request_ns = 0;
+	uint64_t first_echo_ns = 0;
+	uint64_t loop_bound_ns = 0;
+};
+
+ReloadTrip reload_trip(const RunFacts &run, uint64_t end_ns) {
+	static_assert(has_normalization("trace.read_time"));
+	struct Mark {
+		uint64_t ts_ns;
+		char dir;
+		uint16_t identity;
+	};
+	std::vector<Mark> marks;
+	if (run.external_loaded) {
+		for (const WireTimedEvent &event : run.external_events)
+			marks.push_back({ event.ts_ns, event.dir, event.identity });
+	} else {
+		for (const wire::ParityEvent &event : run.trace.events)
+			if (event.ts_ns <= end_ns)
+				marks.push_back({ event.ts_ns, event.dir, event_identity(event) });
+	}
+	std::stable_sort(marks.begin(), marks.end(),
+			[](const Mark &a, const Mark &b) { return a.ts_ns < b.ts_ns; });
+	// The C datagrams (one capture time each) and the requests each carries.
+	std::vector<std::pair<uint64_t, size_t>> sends;
+	ReloadTrip trip;
+	for (const Mark &mark : marks) {
+		if (mark.dir == 'S') {
+			if (mark.identity == 0x049 && trip.first_request_ns != 0 && trip.first_echo_ns == 0)
+				trip.first_echo_ns = mark.ts_ns;
+			continue;
+		}
+		if (sends.empty() || sends.back().first != mark.ts_ns)
+			sends.push_back({ mark.ts_ns, 0 });
+		if (mark.identity != 0x025)
+			continue;
+		++sends.back().second;
+		if (trip.first_request_ns == 0)
+			trip.first_request_ns = mark.ts_ns;
+	}
+	for (size_t i = 1; i < sends.size(); ++i) {
+		if (sends[i - 1].second == 0 || sends[i].second < 2)
+			continue;
+		const uint64_t bound = (sends[i].first - sends[i - 1].first) / (sends[i].second - 1);
+		if (trip.loop_bound_ns == 0 || bound < trip.loop_bound_ns)
+			trip.loop_bound_ns = bound;
+	}
+	return trip;
+}
+
 MetricValue metric(char dir, const char *name, std::string key, const char *code) {
 	MetricValue value;
 	value.direction = dir;
@@ -213,8 +270,9 @@ void compare_tags(
 		MetricValue count = metric(dir, "tag_count", key, "COUNT_MISMATCH");
 		const double cadence = sa.count < 20 ? periodic_cadence_ms(sa.times, end_a) : 0.0;
 		if (reload_echo_identity(dir, identity)) {
-			// The reload request re-arms on its own echo: past the first re-send the
-			// count is the round trip's phase (count.reload_echo).
+			// The auto-reload loop re-sends until the first echo lands: past the first
+			// request the count is the echo's latency against the loop's period
+			// (count.reload_echo).
 			static_assert(has_normalization("count.reload_echo"));
 			const size_t a_class = std::min<size_t>(sa.count, 2);
 			const size_t b_class = std::min<size_t>(sb.count, 2);
@@ -222,7 +280,24 @@ void compare_tags(
 			count.floor = 0.0;
 			count.subject = std::to_string(sb.count);
 			count.reference = std::to_string(sa.count);
-			count.detail = "a lone request against one its echo re-armed (1 against 2 or more)";
+			count.detail = "a lone request against a looped one (1 against 2 or more)";
+			if (b_class == 1 && a_class == 2) {
+				// A lone request is retail's own outcome when its echo landed before the
+				// loop's next entry: inside the longest spacing the reference's own
+				// requests allow.
+				const ReloadTrip lone = reload_trip(other, end_b);
+				const ReloadTrip looped = reload_trip(rr, end_a);
+				if (lone.first_echo_ns != 0 && looped.loop_bound_ns != 0) {
+					const uint64_t latency = lone.first_echo_ns - lone.first_request_ns;
+					const bool inside = latency < looped.loop_bound_ns;
+					count.distance = inside ? 0.0 : 1.0;
+					count.detail = "a lone request whose echo landed " +
+							std::to_string(latency / 1000000) + " ms after it, " +
+							(inside ? "inside" : "past") +
+							" the reference loop's longest entry spacing (" +
+							std::to_string(looped.loop_bound_ns / 1000000) + " ms)";
+				}
+			}
 		} else if (cadence > 0.0) {
 			const uint64_t first = *std::min_element(sb.times.begin(), sb.times.end());
 			const double span_ms = end_b > first ? double(end_b - first) / 1e6 : 0.0;

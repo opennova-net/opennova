@@ -541,7 +541,15 @@ inline constexpr Normalization kNormalizations[] = {
 			"per-frame positions and ticks: these bodies compare as their decoded state "
 			"records" },
 	{ "uplink.carrier", MaskKind::Field, 'C', 0x00C, "carrier", 0,
-			"the ground entity handle is session-local: compared as none/bound" },
+			"the ground entity handle is session-local: compared as none/bound, and as the "
+			"count of its changes between consecutive uplinks. The word is the body's ground "
+			"link +0x28 (NetPacket_SerializePlayerState @0x4C09C0: the read @0x4C142B, the "
+			"handle word @0x4C1950) and the position goes out relative to its pose "
+			"(Entity_TransformWorldToLocal @0x4C1961, the store @0x4C197C; the host's apply "
+			"back to world @0x4C1DE1), so each change is a change of the position's frame of "
+			"reference: x7's fragrespawn RR, RR-aa and OR change it once (none to the hut "
+			"0x2011 at the respawn), where a joiner whose link flips each record sends "
+			"positions in two frames" },
 	{ "uplink.priority_handle", MaskKind::Field, 'C', 0x00C, "priority_handle", 0,
 			"priority handles are session-local: compared as occupied/empty" },
 	{ "uplink.priority_score", MaskKind::Field, 'C', 0x00C, "priority_score", 0,
@@ -711,19 +719,31 @@ inline constexpr Normalization kNormalizations[] = {
 			"54. Such a challenge leaves the row sets and the unwitnessed rows; RR's CRC still "
 			"joins the oracle and the run's still checks against it" },
 	{ "count.reload_echo", MaskKind::Field, '*', 0, "C2S 0x25 / S2C 0x49 count", 0,
-			"a reload action queues its C2S 0x25 on a tick whose slot phase byte (+0x5A) has "
-			"bit 0 set and bit 0x80 clear, then sets 0x80 (WeaponAction_Reload @0x5430B0: "
-			"the tests @0x5430C0 / @0x5430C6, the send @0x543103, the latch @0x543108); the "
-			"host echoes every request to its sender as S2C 0x49 "
-			"(NapiNPServerMsg_HandleReloadRequest @0x514DF0, the sender's copy @0x514EE3) and "
-			"the local player's echo refills the clip and clears the latch "
+			"a slot whose clip is empty runs an auto-reload loop: the idle action finds the "
+			"clip empty with rounds in the pool and auto reload on and queues RELOAD "
+			"(WeaponAction_Idle @0x542920: the phase write @0x542960, WeaponSlot_RequestReload "
+			"called @0x5429AF, which queues action 4 while the phase byte +0x5A's sign bit is "
+			"clear, @0x53F11C / @0x53F12F); the transition enters it on phase 1 with the "
+			"action's delayStart timer (WeaponAction_ProcessFrame @0x540E60: @0x5413EA / "
+			"@0x5413EC); the reload action sends one C2S 0x25 on that phase and sets 0x80 "
+			"(WeaponAction_Reload @0x5430B0: the tests @0x5430C0 / @0x5430C6, the send "
+			"@0x543103, @0x543108), the action shims then write phase 2 "
+			"(ActionSlot_ExecuteActionNoEffect @0x5419F4, ActionSlot_ExecuteActionWithEffect "
+			"@0x541881), and the timer's expiry returns it to idle "
+			"(ActionSlot_FinishActivePhase called @0x54316E). The host echoes every request to "
+			"its sender as S2C 0x49 (NapiNPServerMsg_HandleReloadRequest @0x514DF0, the "
+			"sender's copy @0x514EE3), and the loop ends when the first echo refills the clip "
 			"(NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 calling WeaponSlot_ReloadAmmo "
-			"@0x541720 @0x42C116, the clear @0x5417A2), so the action re-sends once per echo "
-			"that lands while it runs: past the first re-send the count is the round trip's "
-			"phase against the action. The self-grenade cases' retail runs of x1..x6 carry 2 "
-			"to 6 requests, one pass's RR and RR-aa up to 3 apart (x5's team switch 5 against "
-			"2), and never 1. The pair's counts compare as a lone request against a re-armed "
-			"one" },
+			"@0x541720 @0x42C116: the pool @0x541842, the clip @0x541850). So the count is the "
+			"loop's entries before the first echo lands, the echo's latency against the loop's "
+			"period: the self-grenade cases' RR and RR-aa runs of x1..x7 carry 4 to 6 requests,"
+			" and x1's OR retail joiner (our host echoing) sent one, its echo landing 23 ms "
+			"after it on the wire. The pair's counts compare as a lone request against a looped"
+			" one, except a lone request whose first echo landed inside the longest entry "
+			"spacing the reference's own requests allow (a request datagram that follows "
+			"another with no C datagram between carries the n requests entered between the two "
+			"sends: n - 1 spacings fit in their gap; x7's RR 2 then 3, 187 ms apart, at most 93"
+			" ms), on the external capture's wire time" },
 };
 
 inline constexpr size_t kNormalizationCount = sizeof(kNormalizations) / sizeof(kNormalizations[0]);

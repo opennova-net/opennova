@@ -1593,9 +1593,12 @@ void test_integrity() {
 	}
 }
 
-// The reload request re-arms on its own echo (count.reload_echo): RR's 2 and RR-aa's 3
-// against a subject's 5 are the round trip's phase (retail held 2 to 6 over x1..x6);
-// a lone request whose echo never re-armed one is not.
+// The auto-reload loop re-sends until the first echo lands (count.reload_echo): RR's 2
+// and RR-aa's 3 against a subject's 5 are the echo's latency against the loop. A lone
+// request passes only when its echo landed inside the longest entry spacing the
+// reference's own requests allow: x7's selfnade RR sent 2 then 3 requests in two
+// consecutive datagrams 187 ms apart (spacing at most 93 ms) and x7 RO's joiner sent one,
+// its echo on the wire 55 ms later; x1's OR retail joiner sent one, echoed in 23 ms.
 void test_reload_echo() {
 	auto reloads = [](uint32_t seed, int n) {
 		wire::ParityTrace trace = scripted(seed);
@@ -1609,9 +1612,37 @@ void test_reload_echo() {
 	const Case more = judge_case(reloads(1, 2), reloads(2, 3), reloads(3, 5));
 	expect_row(more, 'C', "tag_count", "0x25:0", "pass");
 	expect_row(more, 'S', "tag_count", "0x49:0", "pass");
+	// One request per datagram with C datagrams between them bounds no spacing: a lone
+	// request still fails.
 	const Case lone = judge_case(reloads(1, 2), reloads(2, 3), reloads(3, 1));
 	expect_row(lone, 'C', "tag_count", "0x25:0", "fail", "COUNT_MISMATCH");
 	expect_row(lone, 'S', "tag_count", "0x49:0", "fail", "COUNT_MISMATCH");
+
+	// The scripted joiner sends a C datagram every tick (32 ms): a loop that put 2 requests
+	// in one and 3 in the next entered them at most 16 ms apart.
+	static constexpr uint64_t kLoopAt = 2 * kSec + 219 * kTick;
+	auto looped = [](uint32_t seed) {
+		wire::ParityTrace trace = scripted(seed);
+		for (int i = 0; i < 2; ++i)
+			splice(trace, 'C', 0x025, kLoopAt, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		for (int i = 0; i < 3; ++i)
+			splice(trace, 'C', 0x025, kLoopAt + kTick, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		for (int i = 0; i < 5; ++i)
+			splice(trace, 'S', 0x049, kLoopAt + 2 * kTick, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		return trace;
+	};
+	auto single = [](uint32_t seed, uint64_t echo_after) {
+		wire::ParityTrace trace = scripted(seed);
+		splice(trace, 'C', 0x025, kLoopAt, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		splice(trace, 'S', 0x049, kLoopAt + echo_after, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		return trace;
+	};
+	const Case fast = judge_case(looped(1), looped(2), single(3, 10 * kMs));
+	expect_row(fast, 'C', "tag_count", "0x25:0", "pass");
+	expect_row(fast, 'S', "tag_count", "0x49:0", "pass");
+	const Case slow = judge_case(looped(1), looped(2), single(3, 25 * kMs));
+	expect_row(slow, 'C', "tag_count", "0x25:0", "fail", "COUNT_MISMATCH");
+	expect_row(slow, 'S', "tag_count", "0x49:0", "fail", "COUNT_MISMATCH");
 }
 
 void test_milestones_and_rates() {
@@ -1659,6 +1690,24 @@ void test_state() {
 			u.carrier = 0x3001;
 		const Case c = judge_case(scripted(1), scripted(2), subject);
 		expect_row(c, 'C', "uplink_carrier", "", "fail", "UPLINK_CARRIER_MISMATCH");
+	}
+	{
+		// The carrier word is the position's frame of reference: one change (a respawn onto a
+		// building) in every run passes; a link that flips every few uplinks, as x7's
+		// fragrespawn RO / OO joiner did (92 / 101 changes against RR's 1), does not.
+		auto respawn = [](uint32_t seed, size_t flip_every) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			for (size_t i = half; i < trace.uplinks.size(); ++i) {
+				const bool off = flip_every != 0 && (i - half) % flip_every == flip_every - 1;
+				trace.uplinks[i].carrier = off ? 0xFFFF : 0x2011;
+			}
+			return trace;
+		};
+		const Case once = judge_case(respawn(1, 0), respawn(2, 0), respawn(3, 0));
+		expect_row(once, 'C', "uplink_carrier_changes", "", "pass");
+		const Case flips = judge_case(respawn(1, 0), respawn(2, 0), respawn(3, 5));
+		expect_row(flips, 'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
 	}
 	{
 		// Session-local handles: another carrier/priority handle number is the same state.

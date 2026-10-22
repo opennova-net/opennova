@@ -293,6 +293,19 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 	both("uplink_move", "UPLINK_MOVE_MISMATCH", [](const U &s) { return std::to_string(s.move); });
 	both("uplink_carrier", "UPLINK_CARRIER_MISMATCH",
 			[](const U &s) { return std::string(s.carrier == 0xFFFF ? "none" : "bound"); });
+	// The carrier word is the body's ground link and the uplink's position is relative
+	// to it, so each change of the word between consecutive uplinks changes the
+	// position's frame of reference (uplink.carrier).
+	auto carrier_changes = [](const std::vector<const U *> &states) {
+		size_t changes = 0;
+		for (size_t i = 1; i < states.size(); ++i)
+			changes += states[i]->carrier != states[i - 1]->carrier ? 1 : 0;
+		return double(changes);
+	};
+	MetricValue frames = metric('C', "uplink_carrier_changes", "", "UPLINK_CARRIER_SEQUENCE");
+	count_metric(frames, carrier_changes(a), 0.0, carrier_changes(b), 0.0);
+	frames.detail = "changes of the carrier word between consecutive uplinks";
+	out.push_back(frames);
 	auto occupied = [](const U &s, int slot) {
 		return s.priority_handle[slot] != 0 || s.priority_score[slot] != 0;
 	};
