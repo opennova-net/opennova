@@ -768,16 +768,15 @@ struct SessionRules {
     // g_RulesFlags @0x24D1E34 = mpattrib]. Hosts stamp it from their config's
     // mpattrib value, joiners from the S2C 0x64 fixed block's +44 word.
     bool no_friendly_fire = false;
-    // The host's allowSniperScopeZoom option as the SESSION sees it (byte_A821F0):
-    // the class-6 sniper lock on a Primary def's scope zoom (its floor becomes
-    // scope_max_mag) reads it at the zoom step and the mount clamp. Retail zeroes
-    // it outside a session, stamps the serving host's config value on the
-    // authority and, on a joiner, bit 16 of the S2C 0x08 flags dword (the bit
-    // server_initial_state.cpp emits from the option); offline it stays 0, which
-    // locks snipers at max. Hosts stamp it from GameConfig::allow_sniper_scope_zoom
-    // (HostRole::apply_rule_words), joiners from their session-config bitflags
-    // after each fold and on the load's fresh world (JoinerRole::mirror_session_zoom_rule);
-    // the slot fills read sniper_zoom_fill below.
+    // The host's allowSniperScopeZoom option as the SESSION sees it
+    // (g_SessionAllowSniperScopeZoom): the class-6 sniper lock on a Primary def's scope zoom (its
+    // floor becomes scope_max_mag) reads it at the zoom step and the mount clamp. Retail zeroes it
+    // outside a session, stamps the serving host's config value on the authority and, on a joiner,
+    // bit 16 of the S2C 0x08 flags dword (the bit server_initial_state.cpp emits from the option);
+    // offline it stays 0, which locks snipers at max. Hosts stamp it from
+    // GameConfig::allow_sniper_scope_zoom (HostRole::apply_rule_words), joiners from their
+    // session-config bitflags after each fold and on the load's fresh world
+    // (JoinerRole::mirror_session_zoom_rule); the slot fills read sniper_zoom_fill below.
     // [orig: Game_ApplySessionSettingsToGlobals @0x552284 (the reset) / @0x5522b9
     //  (the authority stamp); NapiNPClientMsg_HandleSessionConfig @0x428392;
     //  readers Player_AdjustWeaponElevation @0x4dbe36, Player_MountWeaponSlot
@@ -787,7 +786,8 @@ struct SessionRules {
     // rule above in a session on a peer, else the config's own allowSniperScopeZoom
     // (a dedicated host's, single player's game.cfg). [orig: WeaponSlot_InitFromDef
     //  @0x53EF07..0x53EF25 - is_in_session @0x53EF07, is_mp_session_peer @0x53EF0F,
-    //  byte_A821F0 @0x53EF17, g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F]
+    //  g_SessionAllowSniperScopeZoom @0x53EF17,
+    //  g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F]
     bool sniper_zoom_fill = false;
     // Multiplayer blast damage to Building ItemDefs is disabled unless the
     // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.

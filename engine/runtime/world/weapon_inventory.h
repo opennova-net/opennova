@@ -185,7 +185,7 @@ struct WeaponInventorySlot {
 // session's byte in a session and the config's own option offline; the caller
 // passes it. A slot initialized without an owner (the emplacement's own slot)
 // never locks [orig: WeaponSlot_InitFromDef @ 0x53EEF1..0x53EF27 — entityPtr 0
-// skips @ 0x53EEF7, class @ 0x53EEF9, category @ 0x53EF02, byte_A821F0
+// skips @ 0x53EEF7, class @ 0x53EEF9, category @ 0x53EF02, g_SessionAllowSniperScopeZoom
 // @ 0x53EF17 / allowSniperScopeZoom_5EC @ 0x53EF1F].
 bool weapon_slot_zoom_sniper_lock(int32_t owner_class, int32_t def_category,
                                   bool allow_sniper_scope_zoom);

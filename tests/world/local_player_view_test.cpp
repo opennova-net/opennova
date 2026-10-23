@@ -1950,7 +1950,7 @@ void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
     step_slot.scope_zoom = 8;
     CHECK(local_player_adjust_scope_zoom(lw.w, stepped, step_view, step_slot, limits, -2));
     CHECK(step_slot.scope_zoom == 10);
-    lw.w.rules.allow_sniper_scope_zoom = true; // byte_A821F0
+    lw.w.rules.allow_sniper_scope_zoom = true; // g_SessionAllowSniperScopeZoom
     CHECK(local_player_scope_zoom_floor(lw.w, limits, 10) == 2);
     lw.w.rules.allow_sniper_scope_zoom = false;
     limits.category = 2;
@@ -2070,7 +2070,7 @@ void test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp() {
     local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
     CHECK(w.slot.scope_zoom == 6);
     // The class-6 lock at mount floors the zoom at the max; the session bit
-    // (World::rules.allow_sniper_scope_zoom = byte_A821F0) lifts it.
+    // (World::rules.allow_sniper_scope_zoom = g_SessionAllowSniperScopeZoom) lifts it.
     lw.entity().player_class = 6;
     w.slot.scope_zoom = 4;
     local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);

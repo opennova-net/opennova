@@ -217,7 +217,7 @@ int32_t local_player_scope_zoom(const LocalPlayerWeapon &w, WeaponSlotState &slo
 // scope_max_mag [orig: WeaponDef +0x98 'scope_min_mag' (@0x544f7a; the record
 // default 2 @0x53ff73), +0 'category' (3 = Primary)]. The session bit the
 // class-6 sniper lock consults is World::rules.allow_sniper_scope_zoom
-// (byte_A821F0). Carried by the caller until LocalPlayerWeapon grows the
+// (g_SessionAllowSniperScopeZoom). Carried by the caller until LocalPlayerWeapon grows the
 // scope_min_mag field (WeaponInstallData::scope_min_mag <- DefWeaponDef::
 // scope_min_mag); `local_player_scope_zoom_limits` fills the category from
 // the weapon table by the equipped def name.

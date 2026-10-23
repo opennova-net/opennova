@@ -215,9 +215,9 @@ ScopeZoomLimits local_player_scope_zoom_limits(const World &world, const LocalPl
 int32_t local_player_scope_zoom_floor(const World &world, const ScopeZoomLimits &limits,
                                       int32_t scope_max_mag) {
     // [orig: Player_AdjustWeaponElevation @0x4dbe29 ecx = Def+0x98; the lock
-    //  @0x4dbe2f..0x4dbe3f: player+0x294 == 6 && Def+0 == 3 && !byte_A821F0
+    //  @0x4dbe2f..0x4dbe3f: player+0x294 == 6 && Def+0 == 3 && !g_SessionAllowSniperScopeZoom
     //  -> ecx = Def+0x90; Player_MountWeaponSlot @0x4dfadd..0x4dfb01 the same;
-    //  byte_A821F0 = rules.allow_sniper_scope_zoom]
+    //  g_SessionAllowSniperScopeZoom = rules.allow_sniper_scope_zoom]
     const Entity *player = world.registry.get(world.cached.local_player);
     const bool sniper_lock = player != nullptr && player->player_class == 6 &&
                              limits.category == 3 && !world.rules.allow_sniper_scope_zoom;

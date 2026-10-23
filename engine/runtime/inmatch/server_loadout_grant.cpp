@@ -133,7 +133,7 @@ world::WeaponInventory slot_inventory(const world::WeaponTable &table,
 // keeping it. [orig: WeaponSlotPool_ResetAllEntries @0x53F240 +
 //  WeaponSlotTable_LoadAllFromDefs @0x5414E0, the incumbent kept @0x5415D6]
 // The fill's sniper lock reads the session's zoom rule [orig: WeaponSlot_InitFromDef
-//  @0x53EF07..0x53EF25 - byte_A821F0 in a session on a peer, else the config's
+//  @0x53EF07..0x53EF25 - g_SessionAllowSniperScopeZoom in a session on a peer, else the config's
 //  allowSniperScopeZoom, the same value on a host].
 void reload_slots(const world::WeaponTable &table, world::WeaponInventory &inv,
                   const std::vector<std::string> &display, uint8_t player_class,

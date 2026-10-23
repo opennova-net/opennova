@@ -160,7 +160,7 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
             weapon_kit_expand_display_list(kit, table);
     // The local player owns every slot the fill seeds: its class feeds the
     // zoom seed's sniper lock. The permission is the fill's value: the
-    // session byte (byte_A821F0) on an in-session peer, else the config's own
+    // session byte (g_SessionAllowSniperScopeZoom) on an in-session peer, else the config's own
     // allowSniperScopeZoom (World::rules.sniper_zoom_fill) [orig:
     //  WeaponSlot_InitFromDef @ 0x53EF07..0x53EF25; Config_SetDefaults
     //  @ 0x54D364].

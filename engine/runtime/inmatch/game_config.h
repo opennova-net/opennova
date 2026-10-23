@@ -258,7 +258,7 @@ struct GameConfig {
 	static constexpr uint32_t kMpAttribClaymorePref = 0x8000;
 	// Read only by the scope-zero -1 floor [orig: `test g_RulesFlags,10000h`
 	// @0x4dbd15 in Player_AdjustWeaponZoomLevel]. No retail writer sets it:
-	// mp_allowsniperscopezoom feeds the 0x08 flags dword bit 16 (byte_A821F0,
+	// mp_allowsniperscopezoom feeds the 0x08 flags dword bit 16 (g_SessionAllowSniperScopeZoom,
 	// read by WeaponSlot_InitFromDef @0x53ef17) and never this word, so the
 	// bit is live only when a host cfg carries it in its mpattrib value.
 	static constexpr uint32_t kMpAttribAutoScopeZero = 0x10000;

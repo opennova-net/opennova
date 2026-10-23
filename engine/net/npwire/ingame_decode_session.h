@@ -368,7 +368,7 @@ bool decode_session_slot_config(const uint8_t *body, size_t len, SessionSlotConf
 // §5.54 S2C 0x08 — SESSION CONFIG (fixed 51 B; the historic "game-state
 // snapshot ~2 KB" note was wrong): [10 × i32][7 × u8][u32 bitflags]. fields[3]
 // = gameType (→ g_GameType); bitflags bits 13/15/16 are latched into
-// g_SessionSpectatorsAllowed / g_SessionPermanentDeath / byte_A821F0. Bumps
+// g_SessionSpectatorsAllowed / g_SessionPermanentDeath / g_SessionAllowSniperScopeZoom. Bumps
 // g_LoadingProgress to >= 1.
 // [orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]
 struct SessionConfig {
