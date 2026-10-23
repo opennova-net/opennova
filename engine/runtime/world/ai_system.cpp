@@ -1184,9 +1184,14 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
 		//  @0x542C1C..0x542C2F].
 		const int32_t fire_mode =
 				((weapon_events.fired_clip_before_consume & 3) << 4) | 2;
-		if (fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index,
-				fire_mode, mount->primary_weapon_slot_adm))
-			gunner->inf.aim_ref0 = gunner->inf.combat_target;
+		// The slot's fire leaves the gunner's +0x2F0 alone: only the body's anim-event
+		// fire blocks store its target there, and neither the request nor the fire
+		// action nor the send writes it. [orig: Entity_UpdateInfantryAI @0x4B9910 (the stores
+		//  @0x4BF381 / @0x4BF3F5 / @0x4BF4AD; none in the request @0x4BF4B3..0x4BF59E);
+		//  WeaponAction_Fire @0x542B10; Entity_FireWeaponAndSendPacket @0x42BD80;
+		//  Server_ClientFiredRound @0x50BAA0]
+		(void)fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index,
+				fire_mode, mount->primary_weapon_slot_adm);
     }
 }
 

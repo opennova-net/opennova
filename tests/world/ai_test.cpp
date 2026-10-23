@@ -2053,9 +2053,15 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     // the AI. The walk reads the frame's own tick, one behind logic_tick.
     w->cached.local_player = npc_h;
     w->logic_tick = 1;
+    npc.inf.aim_ref0 = EntityHandle{};
     w->pump_weapon_actions();
     CHECK(w->out.rounds.count == 1);
     CHECK(w->out.rounds.records[0].shooter_handle == npc_h.packed);
+    // The slot's fire writes no +0x2F0 on the gunner: only the body's anim-event
+    // fire blocks store the target there. [orig: Entity_UpdateInfantryAI @0x4B9910 (the stores
+    //  @0x4BF381 / @0x4BF3F5 / @0x4BF4AD; none in the request @0x4BF4B3..0x4BF59E);
+    //  WeaponAction_Fire @0x542B10; Entity_FireWeaponAndSendPacket @0x42BD80]
+    CHECK(!npc.inf.aim_ref0.valid());
     CHECK(w->out.rounds.records[0].origin_x == 0x12345);
     CHECK(w->out.rounds.records[0].origin_y == -0x23456);
     CHECK(w->out.rounds.records[0].origin_z == 0x34567);
