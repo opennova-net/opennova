@@ -27,6 +27,7 @@
 #include <runtime/inmatch/server_console.h> // the chat display wrap
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the NovaWorld session's clock)
 
 #include <chrono>
 #include <cstdlib>
@@ -110,12 +111,10 @@ std::string game_text(const rtxt::File *table, const char *section, const char *
 	return value.empty() ? fallback : value;
 }
 
-// The wall clock the NovaWorld session runs on (the session's GetTickCount).
-uint32_t wall_ms() {
-	return static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch())
-					.count());
-}
+// The clock the NovaWorld session runs on, the process's GetTickCount (the main loop's; engine
+// world/tick_count_clock.h carries its steps, D-NET-NEW-LF-2)
+// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 - GetTickCount @0x628FE3].
+uint32_t wall_ms() { return world::frame_tick_count_ms(); }
 
 // The lister's outcome as start's error text, naming the cfg word and the gate host the
 // listing ran with (a listing runs only for networkconnecttype 1 with a --master-host).

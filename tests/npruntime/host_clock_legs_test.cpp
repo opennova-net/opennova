@@ -32,6 +32,7 @@
 #include <net/npwire/session_keys.h>
 #include <net/npwire/session_ping.h>
 #include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/udp_session_transport.h>
@@ -241,6 +242,18 @@ void test_the_host_clock_is_the_main_loops() {
 	}
 }
 
+// The joiner's connection reads the same clock at 64 bits (its legs, its reap, its pings' stamps
+// and round trips), as retail's client connection reads the same GetTickCount.
+void test_the_joiner_connection_reads_the_same_clock() {
+	const auto joiner = std::make_unique<inmatch::JoinerConnection>("ClockProbe");
+	for (int i = 0; i < 64; ++i) {
+		const uint64_t before = opennova::world::frame_tick_count_ms64();
+		const uint64_t now = joiner->monotonic_now_ms();
+		const uint64_t after = opennova::world::frame_tick_count_ms64();
+		CHECK(before <= now && now <= after);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -250,6 +263,7 @@ int main() {
 	test_a_joiner_heard_in_the_load_is_not_reaped();
 	test_the_legs_step_on_the_tick_count_clock();
 	test_the_host_clock_is_the_main_loops();
+	test_the_joiner_connection_reads_the_same_clock();
 	if (g_failures != 0) {
 		std::printf("host_clock_legs: %d failure(s)\n", g_failures);
 		return 1;

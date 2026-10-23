@@ -267,7 +267,8 @@ public:
 	// `player_name` is the displayed game ClientAuth.NA callsign; numeric connection
 	// ownership identifies the local player. ClientHello.CO is the company identity.
 	explicit JoinerConnection(std::string player_name);
-	// Injectable monotonic wall clock for deterministic hosts/tests. Production uses steady_clock.
+	// Injectable monotonic clock for deterministic hosts/tests. Production reads the process's
+	// GetTickCount (world::frame_tick_count_ms64, the main loop's clock).
 	JoinerConnection(std::string player_name, MonotonicMilliseconds monotonic_milliseconds);
 
 	// The title identity the connection speaks: its 0x41 and 0x42 carry it and the host's

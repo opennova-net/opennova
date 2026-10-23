@@ -60,6 +60,23 @@ void test_the_clock_steps_on_the_system_timer() {
 	CHECK(total == 1000);
 	// The live clock never reads 0 (an embedder's "no stamp").
 	CHECK(world::frame_tick_count_ms() != 0);
+	CHECK(world::frame_tick_count_ms64() != 0);
+}
+
+// The 64-bit reading is the same count without GetTickCount's wrap: past 2^32 ms (49.7 days) it
+// keeps counting where the 32-bit one wraps to its low bits, and the live 64-bit clock's low 32
+// bits read between two reads of the 32-bit one (GetTickCount64 and GetTickCount on Windows).
+void test_the_64_bit_reading_is_the_same_clock() {
+	const uint64_t past_wrap_us = (uint64_t{1} << 32) * 1000u + 5u * world::kSystemTimerIntervalUs;
+	const uint64_t wide = world::tick_count_ms64_from_us(past_wrap_us);
+	CHECK(wide > 0xFFFFFFFFull);
+	CHECK(world::tick_count_ms_from_us(past_wrap_us) == static_cast<uint32_t>(wide));
+	for (int i = 0; i < 64; ++i) {
+		const uint32_t before = world::frame_tick_count_ms();
+		const uint32_t low = static_cast<uint32_t>(world::frame_tick_count_ms64());
+		const uint32_t after = world::frame_tick_count_ms();
+		CHECK(low - before <= after - before);
+	}
 }
 
 // One frame: 2 ms of work, the elapsed read from the stamp through the clock, the bank and lock.
@@ -106,6 +123,7 @@ void test_the_lock_steps_with_the_timer() {
 int main() {
 	test_the_clock_steps_on_the_system_timer();
 	test_the_lock_steps_with_the_timer();
+	test_the_64_bit_reading_is_the_same_clock();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

@@ -8,6 +8,7 @@
 #include <net/npwire/ingame_message_id.h>
 
 #include <runtime/world/world.h>
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the console guard's clock)
 
 #include <base/gameprofile/gameprofile.h> // VERSION's version text
 #include <net/title/title_identity.h> // the title the VERSION line reads
@@ -15,7 +16,6 @@
 #include <base/io/tick_rate.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cstring>
 #include <utility>
 #include <cmath>
@@ -1991,10 +1991,11 @@ uint32_t ClientRuntime::session_elapsed_ms() const {
 	return status.uptime_ms - session_status_receipt_ms_ + console_tick_ms();
 }
 
+// The console guard's GetTickCount, the process's (the joiner's connection clock, else the main
+// loop's) [orig: Client_ProcessConsoleCommand @0x520E80 - GetTickCount @0x520EA4].
 uint32_t ClientRuntime::console_tick_ms() const {
 	if (joiner_ != nullptr) return joiner_->monotonic_milliseconds32();
-	return static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count());
+	return world::frame_tick_count_ms();
 }
 
 bool ClientRuntime::console_command(const std::string &line) {

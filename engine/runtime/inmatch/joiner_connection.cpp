@@ -19,9 +19,9 @@
 #include <base/vfs/vfs.h>
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 #include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the connect start's clear)
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms64 (the connection's clock)
 
 #include <algorithm>
-#include <chrono>
 #include <limits>
 #include <string_view>
 #include <utility>
@@ -36,11 +36,12 @@ namespace opennova::inmatch {
 
 namespace {
 
-uint64_t steady_milliseconds() {
-	using namespace std::chrono;
-	return static_cast<uint64_t>(
-	        duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
+// The connection's clock, the process's GetTickCount (the main loop's; engine
+// world/tick_count_clock.h carries its steps, D-NET-NEW-LF-2): the send-interval legs, the
+// receive reap, the pings' stamps and their round trips read it.
+// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 - GetTickCount @0x628FE3;
+//  NapiNPClientMsg_0x057_RTT @0x432210 - GetTickCount @0x432274, `sub eax, esi` @0x432280]
+uint64_t tick_count_milliseconds() { return world::frame_tick_count_ms64(); }
 
 // C2S 0x02 echo of the post-auth join probe. Retail writes THREE leading dwords — the probe's two
 // position values plus the client's net-frame counter — then random filler up to the requested
@@ -190,13 +191,13 @@ bool has_initial_cs_config_pair(const std::vector<ProtocolMessage> &messages) {
 } // namespace
 
 JoinerConnection::JoinerConnection(std::string player_name)
-		: JoinerConnection(std::move(player_name), &steady_milliseconds) {}
+		: JoinerConnection(std::move(player_name), &tick_count_milliseconds) {}
 
 JoinerConnection::JoinerConnection(std::string player_name,
 		MonotonicMilliseconds monotonic_milliseconds)
 		: player_name_(std::move(player_name)),
 		  monotonic_milliseconds_(std::move(monotonic_milliseconds)) {
-	if (!monotonic_milliseconds_) monotonic_milliseconds_ = &steady_milliseconds;
+	if (!monotonic_milliseconds_) monotonic_milliseconds_ = &tick_count_milliseconds;
 	// A fresh profile with no Avatars.def until the embedder installs the mounted
 	// selection: the Godot binding computes it from the mounted Avatars.def and the
 	// profile before start() (fresh_profile_character_vars).
