@@ -25,12 +25,14 @@
 #include <net/npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>                 // AiSystem / AiEntity (engine-frame mirror)
+#include <runtime/world/collision.h>          // CollisionWorld / CollisionModel
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
 #include <cstdint>
+#include <memory>
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
@@ -1447,24 +1449,40 @@ bool run_apply_rejects_own_player() {
 
 // A wire-owned player's death still executes the retail relationship edge. The
 // real seat claim must release before the same tick's player compact is built:
-// the record's bone and seat bytes are zero. Its carrier is the ground link, not
-// 0xFFFF: the update's head took the mount as the ground, the death edge's detach
-// clears the mount, the bone and the seat type but never the ground, the dead body's
-// ride keeps a ground within its bound radius, and the record writes the mount, else
-// the ground. In a world with terrain the body's ground probe would rewrite the ground
-// later in the pass; this rig has none.
+// the record's bone and seat bytes are zero. Its carrier is the ground link: the
+// update's head took the mount as the ground, and the death edge's detach clears the
+// mount, the bone and the seat type but never the ground. The dead body's ride keeps a
+// ground within its bound radius. Its vertical resolve's ground probe then stores its
+// own hit, unconditionally: the hit, or null on a miss. Only the resolver's idle skip
+// (its counter past 10 on a still body, not every 64th update) returns ahead of the
+// probe. So on a full resolve the probe misses the collision-less hull and the carrier
+// is 0xFFFF; on an idle-skip tick the head store's vehicle stands. The record writes the
+// mount, else the ground.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the head store @0x4B41A2..0x4B41B4,
 //  Entity_DetachFromVehicleIfServer @0x4359D0 called @0x4B4C11, the edge's +0x184
-//  store @0x4B4CDB, the radius drop @0x4B529F..0x4B52FF; Entity_DetachFromVehicle
-//  @0x4355F0 - +0x16C @0x435915, +0x157 @0x43591B, +0x168 @0x435921;
+//  store @0x4B4CDB, the radius drop @0x4B529F..0x4B52FF, the resolver call @0x4B7CF4;
+//  Entity_DetachFromVehicle @0x4355F0 - +0x16C @0x435915, +0x157 @0x43591B, +0x168
+//  @0x435921; Entity_MovementCollisionResolver @0x4B2BD0 - the idle skip
+//  @0x4B2C3D..0x4B2CEC, Entity_RaycastGroundHeightAndObject called @0x4B3D95;
+//  Entity_RaycastGroundHeightAndObject @0x414320 - the +0x28 store @0x414370;
 //  NetPacket_SerializePlayerState @0x4C09C0 - the +0x16C load @0x4C0A00, the +0x28 read
 //  @0x4C0A08, the +0x16C override @0x4C0A15..0x4C0A20, the zero bone and seat @0x4C0A7B /
 //  @0x4C0A95]
-bool run_remote_mounted_player_death_detaches_compact() {
-	w::World world;
+bool run_remote_mounted_player_death_detaches_compact(bool idle_skip) {
+	FlatTerrain terrain;
+	auto world_heap = std::make_unique<w::World>();
+	w::World &world = *world_heap;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
+	auto collision = std::make_unique<w::CollisionWorld>();
+	collision->terrain = &terrain.field;
+	world.tables.terrain = &terrain.field;
+	world.collision = collision.get();
 	w::AiSystem &ai = world.ai;
+	ai.terrain = &terrain.field;
+	ai.collision = collision.get();
+	// Not every 64th update: the resolver's cadence term leaves the skip to its counter.
+	world.entity_update_counter = 1;
 
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;
@@ -1475,6 +1493,7 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	peer.health_max = 150;
 	peer.alive = true;
 	peer.engine_flags = w::kEntityFlagPlayer;
+	peer.position = {10.0f, 10.0f, 0.0f};
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
 	if (!expect(ph.valid(), "mounted remote player spawned")) return false;
 	ai.attach(ph);
@@ -1482,6 +1501,12 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	if (!expect(peer_ai != nullptr, "mounted remote player body attached")) return false;
 	peer_ai->inf.active = true;
 	peer_ai->net_is_remote_peer = true;
+	// The authority's chase walks toward the last staged pose: the body's own.
+	peer_ai->net_smooth_target[0] = fx(10.0);
+	peer_ai->net_smooth_target[1] = fx(10.0);
+	peer_ai->net_smooth_target[2] = 0;
+	// The resolver's counter: fresh (a full resolve) or inside its skip band.
+	peer_ai->collide_state.skip_counter = idle_skip ? 15 : 0;
 
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
@@ -1494,6 +1519,8 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	vehicle.health = 3000;
 	vehicle.health_max = 3000;
 	vehicle.alive = true;
+	vehicle.position = {10.0f, 10.0f, 0.0f};
+	vehicle.bound_radius.q16 = fx(4.0);
 	w::Seat driver;
 	driver.type = w::SeatType::Driver;
 	driver.retail_slot = 8;
@@ -1501,6 +1528,8 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	vehicle.seats.push_back(driver);
 	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
 	if (!expect(vh.valid(), "death-test carrier spawned")) return false;
+	// A hull with no collision geometry: the probe passes through it.
+	collision->assign_entity(vh, collision->add_model(w::CollisionModel{}));
 	if (!expect(world.vehicles.process_attach(ph, vh, 3),
 	            "remote player occupies the actual driver seat")) return false;
 
@@ -1537,9 +1566,11 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	const nw::FrameUpdateRecord *wire_peer = nullptr;
 	for (const nw::FrameUpdateRecord &record : frame.records)
 		if (record.handle == ph.packed) wire_peer = &record;
-	return expect(wire_peer != nullptr && wire_peer->player.carrier_handle == vh.packed &&
+	const uint16_t carrier = idle_skip ? vh.packed : uint16_t{0xFFFFu};
+	return expect(wire_peer != nullptr && wire_peer->player.carrier_handle == carrier &&
 	                      wire_peer->player.vehicle_bone == 0 && wire_peer->player.seat_type == 0,
-	              "same-tick dead player compact carries its ground link with a zero bone and seat");
+	              idle_skip ? "an idle-skip death tick's compact carries the head store's vehicle"
+	                        : "a full-resolve death tick's compact carries the probe's miss, 0xFFFF");
 }
 
 // On a client the infantry motor skips a wire-owned remote body entirely: the joiner's replica
@@ -1597,7 +1628,8 @@ int main() {
 	                run_apply_player_intent_stages_remote_peer() &&
 	                run_wire_pose_drives_remote_airborne_jump_gate() &&
 	                run_apply_rejects_own_player() &&
-	                run_remote_mounted_player_death_detaches_compact() &&
+	                run_remote_mounted_player_death_detaches_compact(/*idle_skip=*/false) &&
+	                run_remote_mounted_player_death_detaches_compact(/*idle_skip=*/true) &&
 	                run_motor_skips_client_wire_peer();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
