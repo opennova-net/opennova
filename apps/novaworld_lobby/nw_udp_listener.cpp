@@ -580,7 +580,8 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 				park = now - park->second.parked_ms > kParkedLobbyTtlMs ? parked_lobby_states_.erase(park)
 				                                                       : std::next(park);
 			}
-			parked_lobby_states_[peer] = ParkedLobbyState{it->second.client_ci, it->second.lobby, now};
+			parked_lobby_states_[peer] = ParkedLobbyState{
+					it->second.client_ci, it->second.lobby, now, it->second.server_sk, it->second.client_ck};
 			if (was_hosting) {
 				std::printf("[lobby] stopped addr=%s rid=%u server_name='%s' reason=%s\n",
 						peer_addr_to_string(peer).c_str(), it->second.lobby.rid,
@@ -1692,17 +1693,29 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 					(static_cast<uint32_t>(body[1]) << 8) |
 					(static_cast<uint32_t>(body[2]) << 16) |
 					(static_cast<uint32_t>(body[3]) << 24);
+			// The live session's keys, or, for the rest of the client's burst once its first
+			// goodbye closed the session, the parked ones.
 			uint32_t expected_key = 0;
+			uint32_t client_ck = 0;
+			bool live = false;
 			{
 				std::lock_guard<std::mutex> lk(lobby_states_mu_);
 				const auto it = lobby_states_.find(peer);
-				if (it == lobby_states_.end()) {
+				const auto park = parked_lobby_states_.find(peer);
+				if (it != lobby_states_.end()) {
+					expected_key = it->second.server_sk;
+					client_ck = it->second.client_ck;
+					live = true;
+				} else if (park != parked_lobby_states_.end() && park->second.server_sk != 0 &&
+						now_ms() - park->second.parked_ms <= kParkedLobbyTtlMs) {
+					expected_key = park->second.server_sk;
+					client_ck = park->second.client_ck;
+				} else {
 					std::printf(
 							"[nwudp] GOODBYE without lobby auth state from %s; dropped\n",
 							client_label.c_str());
 					break;
 				}
-				expected_key = it->second.server_sk;
 			}
 			if (remote_key != expected_key) {
 				std::printf(
@@ -1710,16 +1723,24 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 						client_label.c_str(), remote_key, expected_key);
 				break;
 			}
-			std::printf("[nwudp] GOODBYE from %s sk=0x%08x\n",
-			            client_label.c_str(), remote_key);
-			// Addr-keyed (G.7): two retail processes both ship ci=1, so a
-			// ci-keyed logout would drop the wrong connection.
-			manager_.notify_logout_addr(peer);
-			// notify_logout_addr fires on_lost which calls
-			// erase_lobby_state via main.cpp's wiring (G.6).
-			// Belt-and-braces erase here too in case the handler isn't
-			// installed.
-			erase_lobby_state(peer, "goodbye", loop_db);
+			std::printf("[nwudp] GOODBYE from %s sk=0x%08x%s\n", client_label.c_str(), remote_key,
+			            live ? "" : " (the session closed)");
+			if (live) {
+				// Addr-keyed (G.7): two retail processes both ship ci=1, so a
+				// ci-keyed logout would drop the wrong connection.
+				manager_.notify_logout_addr(peer);
+				// notify_logout_addr fires on_lost which calls
+				// erase_lobby_state via main.cpp's wiring (G.6).
+				// Belt-and-braces erase here too in case the handler isn't
+				// installed.
+				erase_lobby_state(peer, "goodbye", loop_db);
+			}
+			// Each goodbye draws one ServerGoodBye: the client's CK and DS 2, nothing else, the
+			// same for every goodbye of the burst (the live NOVAWORLDUDP service, the LN S1 / S1b /
+			// S1d retail records, 2026-10-23; D-NET-NEW-L9-35).
+			const std::vector<uint8_t> answer = nw_encode_outbound(
+					SESSION_OPCODE_SERVER_GOODBYE, service_goodbye_answer_to_bytes(client_ck));
+			opennova::net::udp_send_to(socket.get(), from, answer.data(), answer.size());
 			break;
 		}
 

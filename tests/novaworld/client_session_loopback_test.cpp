@@ -624,6 +624,21 @@ void test_send_interval_pump() {
 	expect(server_decode_inbound(goodbye, opcode, body) && opcode == SESSION_OPCODE_CLIENT_GOODBYE &&
 	               body == client_goodbye_to_bytes(server.server_sk, reap),
 	       "0x46 after the reap carries the CLNTTMOUT record");
+	// The NOVAWORLDUDP service's answer to each goodbye (the LN S1 / S1b / S1d retail records,
+	// 2026-10-23; D-NET-NEW-L9-35): the client's CK and one TLV, DS 2, 18 B of UDP payload. The
+	// closed session takes nothing from it.
+	const uint32_t ck = client.client_key();
+	const std::vector<uint8_t> answer_body = service_goodbye_answer_to_bytes(ck);
+	expect(answer_body == std::vector<uint8_t>{ static_cast<uint8_t>(ck), static_cast<uint8_t>(ck >> 8),
+	                                            static_cast<uint8_t>(ck >> 16), static_cast<uint8_t>(ck >> 24),
+	                                            'D', 'S', 0, 4, 0, 2, 0, 0, 0 },
+	       "the service's goodbye answer is the client's CK and DS 2, nothing else");
+	const auto answer = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE, answer_body);
+	expect(answer.size() == 18, "the answer is 18 B of UDP payload");
+	std::vector<std::vector<uint8_t>> after;
+	client.handle_datagram(answer.data(), answer.size(), after);
+	expect(after.empty() && client.state() == ClientSession::State::Closed,
+	       "the closed session takes nothing from the answer");
 }
 
 // ServerLeaveNovaWorld: the punt. State 0, the session closes as a peer

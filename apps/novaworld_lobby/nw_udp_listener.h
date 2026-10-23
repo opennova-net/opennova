@@ -428,11 +428,14 @@ private:
 	// CI and address and re-joins with a fresh CK, counting the disconnect (DCNT > 0); that 0x42
 	// takes the parked state back, so its re-host (CurrentlyHosting=1) keeps its RID and GSID.
 	// Service policy (the retail service side has no witness); an entry lapses after
-	// kParkedLobbyTtlMs or on any fresh join from its address. Guarded by lobby_states_mu_.
+	// kParkedLobbyTtlMs or on any fresh join from its address. Its SK and CK answer the rest of
+	// the client's goodbye burst (the 0x46 case). Guarded by lobby_states_mu_.
 	struct ParkedLobbyState {
 		uint32_t client_ci = 0;
 		LobbyState lobby;
 		uint64_t parked_ms = 0;
+		uint32_t server_sk = 0;
+		uint32_t client_ck = 0;
 	};
 	std::unordered_map<PeerAddr, ParkedLobbyState, PeerAddrHash> parked_lobby_states_;
 	std::atomic<bool> command_drain_paused_{false}; // pause_command_drain

@@ -364,6 +364,14 @@ std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key);
 // the host-side latched record (SERTMOUT reap, STOP, MSGCRE, the echoed client goodbye, ...).
 std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const DisconnectEvent &event);
 
+// The NOVAWORLDUDP service's answer to each ClientGoodBye (0x46) a lobby session sends: S2C 0x86
+// whose body is the departing client's CK (the one its 0x42 carried) and one flat TLV, DS 2, with
+// no other field and no terminator: 13 B, 18 B of UDP payload with the opcode and the envelope.
+// The service answers every goodbye of the client's burst alike, those after the first one closed
+// the session included. The service is NovaLogic's, not in the client's IDB: the witness is the
+// live record (the LN S1 / S1b / S1d retail records, 2026-10-23, six sessions; D-NET-NEW-L9-35).
+std::vector<uint8_t> service_goodbye_answer_to_bytes(uint32_t client_ck);
+
 // Parse a connection-description body (the inner message payload, already SCRK-decrypted). Unknown
 // names are skipped by their length and field order is not assumed, matching the retail walk. The
 // walk stops at a malformed field or an empty name and KEEPS the fields gathered so far; it returns

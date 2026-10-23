@@ -447,6 +447,14 @@ std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const Disconnec
 	return disconnect_packet_body_to_bytes(client_ck, event);
 }
 
+std::vector<uint8_t> service_goodbye_answer_to_bytes(uint32_t client_ck) {
+	std::vector<uint8_t> buf;
+	buf.reserve(13);
+	io::append_u32_le(buf, client_ck);
+	append_u32_field(buf, "DS", 2);
+	return buf;
+}
+
 // [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0]. The retail walk reads name-keyed
 // TLVs in whatever order they arrive, compares each name through Napi_StrCaseEqual, ignores names
 // it does not know (the cursor has already skipped their value by its length), and stops at an
