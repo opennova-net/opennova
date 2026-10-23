@@ -48,9 +48,8 @@ bool local_slot_zoom_sniper_lock(const World &world, int32_t def_category) {
 
 // The install's body past its presentation-epoch clear (local_weapon_install). `view_writes`:
 // the install writes the mount request's pitch and view words itself (no request runs around
-// it: an embedder's install, the spawn's select); a switch's commit, a loadout apply's select
-// (its mount request follows), or a store no mount runs, writes none (mount_queue_switch_out
-// writes them at the request).
+// it: an embedder's install); a commit (commit_mount: a switch's, a select's, a store no mount
+// runs) writes none (mount_queue_switch_out writes them at the request).
 void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &data,
 		bool preserve_slot_state, bool allow_same_weapon_rebake, WeaponInventory *inventory,
 		PlayerViewState &view, bool view_writes);
@@ -90,13 +89,14 @@ bool install_data_by_name(const World &world, const std::string &name,
 //  Input_HandleActionBinding_0 @0x4E0420 - the EquippedSlot @0x4E08E2, its def @0x4E08F2,
 //  the PowerThrow sign bit @0x4E08FD]
 bool commit_mount(World &world, LocalPlayerWeapon &w, const std::string &name,
-		bool preserve_slot_state, bool view_writes) {
+		bool preserve_slot_state) {
 	LocalPlayer *local = world.local_player_state;
 	if (local == nullptr || &local->weapon != &w) return false;
 	WeaponInstallData data;
 	if (!install_data_by_name(world, name, false, data)) return false;
 	mount_install(world, w, data, preserve_slot_state, false,
-			local->inventory_valid ? &local->inventory : nullptr, local->view, view_writes);
+			local->inventory_valid ? &local->inventory : nullptr, local->view,
+			/*view_writes=*/false);
 	return true;
 }
 
@@ -326,11 +326,8 @@ bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// [orig: WeaponAction_SwitchFrom @0x5433B0 - WeaponSlot_TryQueueSwitchTo @0x5434A3]
 	// A switch's commit writes none of the mount's view words (its request did) but a
 	// SWITCHRANK's scope byte clear, which the pump runs past this store
-	// (clear_scope_at_local_switchrank); a select writes none, and a loadout apply's mount
-	// request follows it; the spawn's select, which no mount follows, writes them
-	// (PendingCommit).
-	event.installed = def != nullptr &&
-			commit_mount(world, w, def->name, false, kind == PendingCommit::kSpawnSelect);
+	// (clear_scope_at_local_switchrank); a select writes none (PendingCommit).
+	event.installed = def != nullptr && commit_mount(world, w, def->name, false);
 	w.events.push_back(std::move(event));
 	return true;
 }

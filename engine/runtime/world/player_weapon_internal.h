@@ -17,11 +17,11 @@ namespace opennova::world {
 Vec3 local_player_mission_position(const World &world);
 
 // The commit's own mount of the EquippedSlot's def (player_weapon.cpp carries the witness);
-// false when nothing mounts. `view_writes`: the install writes the mount request's pitch and
-// view words (the spawn's select's); a switch's commit, a loadout apply's select, or a store
-// no mount runs, writes none. Defined in player_weapon.cpp.
+// false when nothing mounts. It writes none of the mount request's pitch and view words (a
+// switch's commit, a select, a store no mount runs: the request writes them). Defined in
+// player_weapon.cpp.
 bool commit_mount(World &world, LocalPlayerWeapon &w, const std::string &name,
-		bool preserve_slot_state, bool view_writes);
+		bool preserve_slot_state);
 
 // Player_MountWeaponSlot's request on the mounted slot's def `target`, every local mount's leg
 // (player_weapon.cpp carries the witness); `personal_slot`: the mounted slot is one of the

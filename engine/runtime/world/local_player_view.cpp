@@ -118,6 +118,24 @@ void local_player_camera_reset(World *world, LocalPlayerWeapon &w, PlayerViewSta
     w.nvg_scope_restore = false;      // dword_B76554 = 0 @0x4de2b9
 }
 
+void local_player_init_player_clears(LocalPlayerWeapon &w, PlayerViewState &v) {
+    // [orig: Player_InitPlayer @0x4E15F0; the declaration carries the words]
+    v.scope_settled = false;      // g_WeaponScopeActive (the memset @0x4E1602)
+    w.aim_range_q16 = 0;          // dword_B76808
+    w.pitch_offset_bam = 0;       // dword_B79008
+    v.view_bias = PlayerViewBias{};
+    w.power_throw_start_tick = 0; // g_FireChargeStartTick
+    player_view_weapon_switch_reset(v); // @0x4E1609..0x4E16B9, @0x4E16E9..0x4E16FE
+    PlayerViewBiasInterp &lower_raise = v.weapon_lower_raise_interp; // @0x4E164D..0x4E1722
+    for (int i = 0; i < 3; ++i) {
+        lower_raise.velocity.position_q16[i] = 0.0f;
+        lower_raise.target.position_q16[i] = 0.0f;
+        lower_raise.current.position_q16[i] = 0.0f;
+        lower_raise.current.rotation_bam[i] = lower_raise.velocity.rotation_bam[i];
+    }
+    lower_raise.active = false;
+}
+
 void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
                              LocalPlayerViewTracker &t) {
     local_player_camera_reset(world, w, v);

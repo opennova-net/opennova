@@ -134,6 +134,19 @@ struct LocalViewSessionInputs {
 //  g_BinocularsToggle = 0 @0x4de2b3, dword_B76554 = 0 @0x4de2b9]
 void local_player_camera_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v);
 
+// Player_InitPlayer's clears of the view and weapon words its weapon leg's select, walk and
+// mount read and write: its memset of the local-player block zeroes the promoted scope byte, the
+// rangefinder word a ForceScoped mount seeds, the AbsorbPitch elevation offset, the six published
+// view-bias words and the PowerThrow windup start; then the scope camera interp clears (hipfire
+// 1, not engaged, no bound slot) and the weapon view's lower / raise interp alike (positions
+// zero, the running angles back to their velocity words, inactive).
+// [orig: Player_InitPlayer @0x4E15F0 - memset(&g_LocalPlayerEntity, 0, 0x3160) @0x4E1602
+//  (g_WeaponScopeActive @0xB76478, dword_B76808, dword_B79008, g_ViewPosBiasX..g_ViewRotBiasRoll
+//  @0xB76520..0xB76534, g_FireChargeStartTick @0xB76800), the scope interp
+//  @0x4E1609..0x4E16B9 and @0x4E16E9..0x4E16FE, the lower / raise interp @0x4E164D..0x4E16D8 and
+//  @0x4E1704..0x4E1722]
+void local_player_init_player_clears(LocalPlayerWeapon &w, PlayerViewState &v);
+
 void local_player_view_reset(World *world, LocalPlayerWeapon &w,
                              PlayerViewState &v, LocalPlayerViewTracker &t);
 

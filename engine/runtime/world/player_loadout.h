@@ -112,9 +112,24 @@ bool local_loadout_set_player_class(World &world, LocalPlayerLoadout &loadout,
 // Player_SwitchToWeaponByHandle(195)]. Entity-optional: a joiner rebuilds its
 // inventory before L spawns; entity stamps re-run at the joiner spawn block.
 // Fill warnings ride the engine log sink [orig: ErrorLog_WriteTimestamped].
+// `select_spawn_default`: the whole of Player_InitPlayer's leg, its clears of the view and
+// weapon words, the select of 195 and the walk's camera reset; false, the fill alone (a
+// loadout apply's rebuild).
 void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
                            LocalPlayerWeapon &weapon, WeaponInventory &inventory,
                            bool &inventory_valid, bool select_spawn_default);
+
+// Player_InitPlayer's leg (local_loadout_rebuild with the spawn select) over a spawn kit
+// that reached the sim after the mission start's environment snap and script init (the
+// profile page the shell hands the sim past its load; retail copies it ahead of
+// Player_InitPlayer). Both run after Player_InitPlayer in retail, so the fov target they
+// left stands over the walk's camera reset.
+// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC ahead of
+//  Environment_SnapStateToTargets @0x525CAE and WacScript_InitAndLoad @0x525CB3;
+//  Environment_SnapStateToTargets @0x57D1E0 - g_CameraFovTargetQ16 @0x57D2BB]
+void local_loadout_rebuild_after_start(World &world, LocalPlayerLoadout &loadout,
+                                       LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                                       bool &inventory_valid);
 
 // The armory ACCEPT apply [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0
 // offline leg: parse the tuples, expand sub-weapons, reset + refill the slot

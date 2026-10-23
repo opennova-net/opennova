@@ -454,9 +454,9 @@ struct PlayerViewState {
     // latch is the same-category mount's gate (player_view_weapon_lower_raise_active).
     // `weapon_lower_raise_hip_pose` is the bound slot's def +0x10C at the start,
     // the step's bias reference. Its steps publish `view_bias` after the scope's,
-    // so the viewmodel drops and rises with it. A mission start's fresh view
-    // starts it idle, as Player_InitPlayer's clear does [orig: Player_InitPlayer
-    // @0x4E15F0 (@0x4E171C / @0x4E1722), called @0x525BBC].
+    // so the viewmodel drops and rises with it. Player_InitPlayer's clear stops it
+    // (local_player_init_player_clears) [orig: Player_InitPlayer @0x4E15F0
+    // (@0x4E171C / @0x4E1722), called @0x525BBC].
     PlayerViewBiasInterp weapon_lower_raise_interp;
     PlayerViewPose weapon_lower_raise_hip_pose;
     // The six published bias words both interps' steps write (PlayerViewBias).

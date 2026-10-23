@@ -794,27 +794,35 @@ bool switch_eligible(const WeaponTable &table, const WeaponInventory &inv,
 
 } // namespace
 
-WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
-                                            WeaponInventory &inv, int32_t handle,
-                                            const WeaponSwitchGates &gates) {
-    // [orig: Player_SwitchToWeaponByHandle @ 0x4E0170]
-    WeaponSwitchOutcome out;
-    if (gates.seat_blocked) return out; // [orig: parentSlot 2/3/5 @ 0x4e0192]
-    if (handle < 0) return out;
-    int32_t group = handle / weapon_combo::kRanksPerCategory;
-    int32_t rank = handle % weapon_combo::kRanksPerCategory;
-    (void)rank;
+bool weapon_switch_walk_resets_view(const WeaponTable &table, const WeaponInventory &inv,
+                                    int32_t handle, const WeaponSwitchGates &gates) {
+    // [orig: Player_SwitchToWeaponByHandle @0x4E0170; the declaration carries the gates]
+    if (gates.seat_blocked) return false; // [orig: parentSlot 2/3/5 @ 0x4e0192]
+    const int32_t group = handle / weapon_combo::kRanksPerCategory;
     const WeaponTableEntry *eq = gates.borrowed_def != nullptr
             ? gates.borrowed_def
             : entry_at(table, inv, inv.equipped_combo);
     if (eq != nullptr && gates.equipped_valid) {
         // The FSM gate: blocked while firing; reload blocks same-category presses;
         // recoil blocks cross-category presses [orig: @ 0x4e0192..0x4e0223].
-        int32_t a = gates.equipped_action;
-        bool blocked = (a == 4 && eq->category == group) || a == 2 ||
-                       (a == 3 && eq->category != group);
-        if (blocked) return out;
+        const int32_t a = gates.equipped_action;
+        const bool blocked = (a == 4 && eq->category == group) || a == 2 ||
+                             (a == 3 && eq->category != group);
+        if (blocked) return false;
     }
+    return true;
+}
+
+WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
+                                            WeaponInventory &inv, int32_t handle,
+                                            const WeaponSwitchGates &gates) {
+    // [orig: Player_SwitchToWeaponByHandle @ 0x4E0170]
+    WeaponSwitchOutcome out;
+    if (handle < 0 || !weapon_switch_walk_resets_view(table, inv, handle, gates)) return out;
+    const int32_t group = handle / weapon_combo::kRanksPerCategory;
+    const WeaponTableEntry *eq = gates.borrowed_def != nullptr
+            ? gates.borrowed_def
+            : entry_at(table, inv, inv.equipped_combo);
     out.reset_view = true; // reset precedes selection, even on a later deny @0x4E0223
     if (eq == nullptr) {
         if (!weapon_select_slot(table, inv, handle, /*commit_equip=*/true) &&

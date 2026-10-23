@@ -122,13 +122,6 @@ void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventor
     if (!weapon_select_slot(table, inventory, inventory.current_slot,
                 !gates.equip_blocked))
         return;
-    // Player_InitPlayer follows the select with SwitchToWeaponByHandle(195)
-    // [orig: @ 0x4e1995/@ 0x4e19a1], but the switch's mount walk rides the
-    // entity's AI-slot binding gate [orig: entity+0x68 test @ 0x4e023a; writer
-    // Entity_AllocateAISlot @ 0x40d2f4] — modeled here as not-yet-bound during
-    // the spawn rebuild (the motor/presentation bind after load), so the spawn
-    // equips exactly the selected slot and plays no switch actions. The gate's
-    // init-time value is an open question (D-WPN-21, docs/divergence-ledger.md).
     // The select cleared the NVG scope restore latch [orig:
     // Player_SelectWeaponSlot @0x4dd730 / @0x4dd7fe, every successful select;
     // called @0x4e1995 (Player_InitPlayer), @0x566285
@@ -136,10 +129,9 @@ void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventor
     weapon.nvg_scope_restore = false;
     inventory.pending_combo = inventory.equipped_combo;
     // A select writes none of the mount's view words: the loadout applies' mount request
-    // below writes them; the spawn's, which no mount follows here, writes them at its
-    // install (PendingCommit) [orig: Player_SelectWeaponSlot @0x4DD680].
-    commit_pending_weapon_switch(world, weapon, &inventory,
-            mount ? PendingCommit::kSelect : PendingCommit::kSpawnSelect);
+    // below writes them, Player_InitPlayer's walk its camera reset's (local_loadout_rebuild)
+    // [orig: Player_SelectWeaponSlot @0x4DD680].
+    commit_pending_weapon_switch(world, weapon, &inventory, PendingCommit::kSelect);
     if (!mount) return;
     // The loadout applies then mount the EquippedSlot the select stored, through the mount's
     // own leg: its def's category is its own, so the queue is SWITCHRANK on that slot (none
@@ -207,14 +199,57 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     weapon.switch_in_flight = false;
     weapon.switch_deferred_action = -1;
     if (!select_spawn_default) return;
-    // Player_InitPlayer's walk follows its select whatever it found, and clears a running
-    // PowerThrow windup at its head past its seat gate; the loadout applies run no walk
-    // [orig: Player_InitPlayer @0x4E15F0 - Player_SwitchToWeaponByHandle @0x4E19A1 (->
-    //  @0x4E019B); local_weapon_walk_clears_windup].
-    local_weapon_walk_clears_windup(world, weapon);
+    // Player_InitPlayer's own view and weapon words start cleared: its memset of the
+    // local-player block and its two interps' clears precede its weapon leg; the loadout
+    // applies run no Player_InitPlayer [orig: Player_InitPlayer @0x4E15F0 (the memset
+    //  @0x4E1602, the interps @0x4E1609..0x4E1722); local_player_init_player_clears].
+    LocalPlayer *local = world.local_player_state;
+    PlayerViewState *view =
+            local != nullptr && &local->weapon == &weapon ? &local->view : nullptr;
+    if (view != nullptr) local_player_init_player_clears(weapon, *view);
     // The select of the word [orig: Player_InitPlayer @0x4E15F0 (the
-    //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E)]; no mount follows it here.
+    //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E, the call @0x4E1995)].
     select_current_slot(world, weapon, inventory, /*mount=*/false);
+    // Then its walk on the word, whatever the select found: past its seat gate it clears a
+    // running PowerThrow windup, and past the EquippedSlot's action gate it resets the camera
+    // (the scope interp cleared, hipfire, an optic EquippedSlot bound, the fov target 80, the
+    // binocular clears, the NVG latch).
+    // [orig: Player_InitPlayer @0x4E15F0 - Player_SwitchToWeaponByHandle @0x4E19A1 (the windup
+    //  clear @0x4E019B, the gates @0x4E017D..0x4E01F6, Player_ResetCameraAndMovementState
+    //  @0x4E01FC); local_weapon_walk_clears_windup; weapon_switch_walk_resets_view]
+    local_weapon_walk_clears_windup(world, weapon);
+    if (view == nullptr ||
+            !weapon_switch_walk_resets_view(table, inventory, inventory.current_slot,
+                    local_weapon_switch_gates(world, weapon, &inventory)))
+        return;
+    local_player_camera_reset(&world, weapon, *view);
+    // Past the reset the walk binds the interp again, as the reset did, under the body's AI
+    // slot (+0x68, which every body's spawn allocates), and mounts only a body whose Flags &
+    // 3 is clear. Player_InitPlayer clears the body's hidden bit only after its walk, and the
+    // mission start's round init spawns every player body hidden (a joiner's body takes its
+    // 0x0C record's Flags, the host's hidden body's), so the mission start's walk mounts
+    // nothing: the spawn equips the selected slot and plays no switch action. A remote
+    // joiner's team assign re-runs Player_InitPlayer on a body in play (D-WPN-21).
+    // [orig: Player_SwitchToWeaponByHandle @0x4E0170 - the +0x68 test @0x4E023A, the rebind
+    //  @0x4E024D..0x4E025F, the Flags test @0x4E0265 / @0x4E0269, the mount @0x4E0362;
+    //  Player_InitPlayer @0x4E15F0 - the clear @0x4E19C2; Game_StartMission @0x524360 -
+    //  Server_InitAllPlayerEntitiesForRound @0x525BAF ahead of Player_InitPlayer @0x525BBC;
+    //  Server_InitAllPlayerEntitiesForRound @0x516AA0 - Entity_SpawnFromAnimSlotProperty
+    //  @0x516B67; Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_AllocateAISlot @0x43C48C,
+    //  Flags |= 0x101 @0x43C508; Entity_AllocateAISlot @0x40D2C0 - the +0x68 store @0x40D2F4;
+    //  NapiNPClientMsg_0x00C @0x42E730 - Entity_AllocateAISlot @0x42E81E, Flags @0x42E91A;
+    //  NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14]
+}
+
+void local_loadout_rebuild_after_start(World &world, LocalPlayerLoadout &loadout,
+                                       LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                                       bool &inventory_valid) {
+    // [orig: Game_StartMission @0x524360; the declaration carries the order]
+    int32_t &fov = world.weather.core.scalar_channels.camera_fov_target_fp;
+    const int32_t started = fov;
+    local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
+            /*select_spawn_default=*/true);
+    fov = started;
 }
 
 bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,

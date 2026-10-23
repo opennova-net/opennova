@@ -1259,6 +1259,124 @@ void test_a_loadout_apply_writes_its_view_words_at_its_mount() {
 	CHECK(rig->view().scope_settled); // the optic's SWITCHRANK keeps it
 }
 
+// --- Player_InitPlayer's view words (L7-s28 row 0, V-ROLL-AV D1, D-WPN-21) --------------
+
+// Player_InitPlayer's select writes none of the mount's view words: the ForceScoped optic it
+// selects (through the global scan, category 3 being empty) raises no scope byte and seeds no
+// rangefinder word. Its walk's camera reset then binds the optic with the interp cleared,
+// hipfire and nothing engaged; the walk queues no switch action (the mission start's body is
+// hidden at its walk, D-WPN-21).
+// [orig: Player_InitPlayer @0x4E15F0 - the memset @0x4E1602, the select @0x4E1995, the walk
+//  @0x4E19A1; Player_SelectWeaponSlot @0x4DD680; Player_SwitchToWeaponByHandle @0x4E0170 -
+//  Player_ResetCameraAndMovementState @0x4E01FC, the Flags test @0x4E0265;
+//  Player_ResetCameraAndMovementState @0x4DE1F0 - the bind @0x4DE287..0x4DE2A7]
+void test_the_spawn_select_writes_no_view_word_and_its_walk_resets_the_camera() {
+	const auto rig = std::make_unique<Rig>(
+			std::vector<WeaponKitEntry>{WeaponKitEntry{"WPN_FORCED", -1, -1, -1}});
+	LocalPlayerWeapon &w = rig->weapon();
+	PlayerViewState &v = rig->view();
+	CHECK(rig->inventory().equipped_combo == 6 * weapon_combo::kRanksPerCategory);
+	CHECK(rig->inventory().current_slot == weapon_combo::kDefaultSpawnCombo);
+	CHECK(w.active && w.def_name == "WPN_FORCED");
+	CHECK(!v.scope_settled);    // no ForceScoped byte
+	CHECK(w.aim_range_q16 == 0); // no Def+0xA0 seed
+	CHECK(v.weapon_pose_bound);  // the reset's optic bind
+	CHECK(!v.scope_engaged && v.scope_hipfire && !v.weapon_pose_interp.active);
+	CHECK(w.slot.current == weapon_action::kIdle && w.slot.next == weapon_action::kIdle);
+}
+
+// A re-run of Player_InitPlayer (a team assign's, a round init's) clears the words its memset
+// and its two interp clears name, whatever the last weapon left: the scope byte, the
+// rangefinder word, the AbsorbPitch offset, the six view-bias words, a running lower / raise
+// and the PowerThrow windup. Its select of an AbsorbPitch def levels no pitch, and its walk's
+// reset writes the fov target 80 and drops the binoculars request.
+// [orig: Player_InitPlayer @0x4E15F0 - memset(&g_LocalPlayerEntity, 0, 0x3160) @0x4E1602, the
+//  lower / raise interp @0x4E164D..0x4E16D8 and @0x4E1704..0x4E1722, the select @0x4E1995, the
+//  walk @0x4E19A1; Player_ResetCameraAndMovementState @0x4DE1F0 - g_CameraFovTargetQ16
+//  @0x4DE202, g_BinocularsToggle @0x4DE2B3]
+void test_a_player_init_rerun_clears_the_view_words() {
+	const auto rig = std::make_unique<Rig>(rifle_kit());
+	LocalPlayerWeapon &w = rig->weapon();
+	PlayerViewState &v = rig->view();
+	rig->tick();
+	v.scope_settled = true;
+	w.aim_range_q16 = 777;
+	w.pitch_offset_bam = 55;
+	v.view_bias.position_q16[2] = -4096;
+	v.view_bias.rotation_bam[0] = 12;
+	player_view_start_weapon_lower(v);
+	CHECK(rig->lower_raise_active());
+	w.power_throw_start_tick = 9;
+	v.binoculars_requested = true;
+	rig->local().input.look_pitch = 1234;
+	int32_t &fov = rig->world.weather.core.scalar_channels.camera_fov_target_fp;
+	fov = 20 << 16;
+	rig->local().loadout.spawn_kit() = {WeaponKitEntry{"WPN_MORTAR", -1, -1, -1}};
+	local_loadout_rebuild(rig->world, rig->local().loadout, w, rig->inventory(),
+			rig->local().inventory_valid, /*select_spawn_default=*/true);
+	CHECK(rig->inventory().equipped_combo == 8 * weapon_combo::kRanksPerCategory);
+	CHECK(!v.scope_settled && w.aim_range_q16 == 0 && w.pitch_offset_bam == 0);
+	CHECK(v.view_bias.position_q16[2] == 0 && v.view_bias.rotation_bam[0] == 0);
+	CHECK(!rig->lower_raise_active());
+	CHECK(w.power_throw_start_tick == 0);
+	CHECK(rig->local().input.look_pitch == 1234); // the select levels nothing
+	CHECK(fov == (80 << 16));
+	CHECK(!v.binoculars_requested);
+	CHECK(!v.weapon_pose_bound); // no optic to bind
+	CHECK(w.slot.next == weapon_action::kIdle);
+}
+
+// A re-run on a body in a Controller, Gunner or Driver seat walks nothing: the walk's seat gate
+// skips its camera reset, so the fov target and the binoculars request stand and an optic
+// stays unbound past the memset's interp clear; the memset's own clears still run.
+// [orig: Player_SwitchToWeaponByHandle @0x4E0170 - the seat gate @0x4E017D..0x4E0192;
+//  Player_InitPlayer @0x4E15F0 - the memset @0x4E1602, g_FpCameraInterp.entitySlotPtr = 0
+//  @0x4E16F8]
+void test_a_seated_player_init_rerun_resets_no_camera() {
+	const auto rig = std::make_unique<Rig>(rifle_kit());
+	LocalPlayerWeapon &w = rig->weapon();
+	PlayerViewState &v = rig->view();
+	rig->tick();
+	Entity *body = rig->world.registry.get(rig->world.cached.local_player);
+	CHECK(body != nullptr);
+	if (body == nullptr) return;
+	body->mounted = true;
+	body->mount_type = SeatType::Driver;
+	v.scope_settled = true;
+	v.binoculars_requested = true;
+	w.power_throw_start_tick = 9;
+	int32_t &fov = rig->world.weather.core.scalar_channels.camera_fov_target_fp;
+	fov = 20 << 16;
+	rig->local().loadout.spawn_kit() = {WeaponKitEntry{"WPN_OPTIC", -1, -1, -1}};
+	local_loadout_rebuild(rig->world, rig->local().loadout, w, rig->inventory(),
+			rig->local().inventory_valid, /*select_spawn_default=*/true);
+	CHECK(rig->inventory().equipped_combo == 4 * weapon_combo::kRanksPerCategory);
+	CHECK(!v.scope_settled && w.power_throw_start_tick == 0);
+	CHECK(fov == (20 << 16));
+	CHECK(v.binoculars_requested);
+	CHECK(!v.weapon_pose_bound);
+}
+
+// The spawn kit's rebuild past the mission start's environment snap and script init (a profile
+// page the shell hands the sim after its load) keeps the fov target they left, as retail's
+// Player_InitPlayer precedes both; the rest is Player_InitPlayer's leg: the optic it selects is
+// bound and the byte cleared.
+// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC,
+//  Environment_SnapStateToTargets @0x525CAE, WacScript_InitAndLoad @0x525CB3]
+void test_the_rebuild_after_the_start_keeps_the_fov() {
+	const auto rig = std::make_unique<Rig>(rifle_kit());
+	PlayerViewState &v = rig->view();
+	int32_t &fov = rig->world.weather.core.scalar_channels.camera_fov_target_fp;
+	fov = 33 << 16;
+	v.scope_settled = true;
+	rig->local().loadout.spawn_kit() = {WeaponKitEntry{"WPN_OPTIC", -1, -1, -1}};
+	local_loadout_rebuild_after_start(rig->world, rig->local().loadout, rig->weapon(),
+			rig->inventory(), rig->local().inventory_valid);
+	CHECK(rig->inventory().equipped_combo == 4 * weapon_combo::kRanksPerCategory);
+	CHECK(fov == (33 << 16));
+	CHECK(v.weapon_pose_bound && !v.scope_settled);
+}
+
 } // namespace
 
 int main() {
@@ -1281,6 +1399,10 @@ int main() {
 	test_a_force_crouch_mount_requests_the_crouch();
 	test_a_switchrank_completion_clears_the_scope_byte_for_a_def_with_no_optic();
 	test_a_loadout_apply_writes_its_view_words_at_its_mount();
+	test_the_spawn_select_writes_no_view_word_and_its_walk_resets_the_camera();
+	test_a_player_init_rerun_clears_the_view_words();
+	test_a_seated_player_init_rerun_resets_no_camera();
+	test_the_rebuild_after_the_start_keeps_the_fov();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

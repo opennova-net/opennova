@@ -432,9 +432,14 @@ Error Simulation::use_player_profile(const Ref<PlayerProfiles> &p_profiles) {
 	// the sim AFTER the runtime exists, so the copy is redone here instead of
 	// depending on the shell's call order. seed_session_kit_from_profile is a no-op
 	// outside a live session and before the catalog resolves names, so this leaves
-	// single player and a pre-catalog load exactly as they were.
-	if (seed_session_kit_from_profile())
-		rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
+	// single player and a pre-catalog load exactly as they were. The rebuild keeps the
+	// fov target the mission start's environment and script init left (the engine's
+	// world::local_loadout_rebuild_after_start).
+	if (seed_session_kit_from_profile()) {
+		opennova::world::local_loadout_rebuild_after_start(kernel_->world, kernel_->local.loadout,
+				kernel_->local.weapon, kernel_->local.inventory, kernel_->local.inventory_valid);
+		push_joiner_loadout_kit();
+	}
 	// The seam's class AND its kit page both come out of this record — re-arm it.
 	push_joiner_loadout_kit();
 	return OK;

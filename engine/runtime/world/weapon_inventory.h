@@ -536,6 +536,15 @@ WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
                                             WeaponInventory &inv, int32_t handle,
                                             const WeaponSwitchGates &gates);
 
+// Whether the walk on `handle` passes its two gates ahead of its camera reset: a body in no
+// Controller, Gunner or Driver seat, and an EquippedSlot whose action admits the walk (not
+// FIRE; not RELOAD on the handle's own category; not RECOIL on another), or one with no def.
+// [orig: Player_SwitchToWeaponByHandle @0x4E0170 - the seat gate @0x4E017D..0x4E0192, the
+//  EquippedSlot and its def @0x4E01A5..0x4E01D4, the action gate @0x4E01D6..0x4E01F6, the
+//  reset @0x4E01FC]
+bool weapon_switch_walk_resets_view(const WeaponTable &table, const WeaponInventory &inv,
+                                    int32_t handle, const WeaponSwitchGates &gates);
+
 // Player_CycleWeaponSlot @ 0x4DFE70 — next/prev over ALL 780 combos (direction +1/-1),
 // every candidate needs the ammo score (no weapon_class exemption), silent stop on
 // wrap (no deny).
