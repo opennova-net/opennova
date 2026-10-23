@@ -1169,6 +1169,14 @@ bool infantry_org1_still_think(InfantryState &inf, const IRootMotionSource *sour
 // [orig: Entity_UpdateInfantryAI @0x4BEB18..0x4BEFF0]
 void infantry_look_tick(const InfantryState &inf, int32_t &heading, int32_t &pitch,
                         bool mounted = false);
+// The on-foot form over explicit words, which a client's free-standing org1 replica runs too
+// (ClientReplicaPipeline::tick_org1_looks): the Yaw chases the aim heading (+0x2EC) and the
+// Pitch the aim pitch (+0x2D0), a clamped quarter with the aim flag (+0x360) set, else a
+// clamped eighth; then the Yaw is held within 90 degrees of the body heading (+0x8C).
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the look @0x4BEB18..0x4BEBE7, the clamp
+//  @0x4BEFC5..0x4BEFED]
+void infantry_on_foot_look(int32_t aim_heading, int32_t aim_pitch, bool aim_flag,
+                           int32_t body_heading, int32_t &heading, int32_t &pitch);
 void infantry_recoil_tick(InfantryState &inf, int32_t &heading,
                           int32_t &pitch, int32_t random16);
 

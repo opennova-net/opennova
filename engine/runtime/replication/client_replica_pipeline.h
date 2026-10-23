@@ -422,20 +422,26 @@ public:
 	void tick_remote_motion(uint16_t self_handle);
 	void tick_remote_motion_through_self();
 	void tick_remote_motion_after_self();
-	// The look half of a live seated org1 row's seat branch, for each row this tick's visit
-	// reached it on (rm_seat_look_due): the Yaw chases the aim heading (+0x2EC) a quarter of
-	// the way, the step clamped to +-0x2000000, the Pitch the aim pitch (+0x2D0) an eighth,
-	// then the Yaw is held within 90 degrees of the seat's body heading (+0x8C) unless the
-	// carrier's config is 3, 4, 5 or 7. Retail walks pool 1 (a gun's ai-fn tether and its
-	// class update's window store) before the pool-0 body, and the body's recoil block precedes
-	// its seat branch, so the embedder calls this leg after its gun channels and tick_recoil
-	// (a joiner: after tick_replica_emplaced_channels and tick_remote_recoil).
-	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the recoil @0x4BE7FD..0x4BE84B, the seat bone
-	//  @0x4BED72 (+0x8C @0x4BEDB3), the look @0x4BEF57..0x4BEF97, the clamp @0x4BEF9A..0x4BEFED;
-	//  Entity_AttachToBoneAndUpdateTransform @0x5463D0 (+0x8C @0x546620);
-	//  Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9 ahead of the
-	//  pool-0 walk @0x4C2426..0x4C2472]
-	void tick_seated_looks();
+	// The look of each org1 row this tick's visit reached it on (rm_look_due). A live seated
+	// row's seat branch: the Yaw chases the aim heading (+0x2EC) a quarter of the way, the step
+	// clamped to +-0x2000000, the Pitch the aim pitch (+0x2D0) an eighth, then the Yaw is held
+	// within 90 degrees of the seat's body heading (+0x8C) unless the carrier's config is 3, 4,
+	// 5 or 7. A free-standing row's on-foot form (world::infantry_on_foot_look) after its body
+	// chase, with the aim flag (+0x360) clear: a client stores only 0 there. Retail walks pool 1
+	// (a gun's ai-fn tether and its class update's window store) before the pool-0 body, and the
+	// body's recoil block precedes both branches, so the embedder calls this leg after its gun
+	// channels and tick_recoil (a joiner: after tick_replica_emplaced_channels and
+	// tick_remote_recoil). The body chase adds the same step to the Yaw as the recoil's
+	// half-step does, so running the chase in the walk and the look here keeps retail's words.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the recoil @0x4BE7FD..0x4BE84B, the body chase
+	//  @0x4BE8FD..0x4BE931, the free-standing look @0x4BEB18..0x4BEBE7, the seat bone
+	//  @0x4BED72 (+0x8C @0x4BEDB3), the seated look @0x4BEF57..0x4BEF97, the clamp
+	//  @0x4BEF9A..0x4BEFED, the aim flag's client-reachable stores @0x4B9E30 / @0x4BA100 /
+	//  @0x4BA319; Entity_ResetToSpawnState @0x4B9610 - @0x4B96B6; NapiNPClientMsg_0x00C
+	//  @0x42E730 - the memset @0x42E7E9..0x42E7F1; Entity_AttachToBoneAndUpdateTransform
+	//  @0x5463D0 (+0x8C @0x546620); Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk
+	//  @0x4C2158..0x4C21E9 ahead of the pool-0 walk @0x4C2426..0x4C2472]
+	void tick_org1_looks();
 	void set_self_body_split(bool on) { self_body_split_ = on; }
 	// The pool-1 interleave (a joiner, whose World walks pool 1 by slot): the walk parks
 	// every pool-1 row too, and each takes its visit at its own slot of the World's pool-1

@@ -160,6 +160,11 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		// promote].
 		es.net_smooth_heading = rec.orientation;
 		es.net_target_heading_bam = rec.orientation;
+		// The model init stamps the body heading (+0x8C) with the Yaw too: the mission start's
+		// for the load stream's rows.
+		// [orig: Entity_InitAllFromModels -> Entity_InitFromModel @0x40DC30 - +0x8C @0x40E172,
+		//  the stage +0x240 @0x40E1A7]
+		es.rm_body_heading = rec.orientation;
 		es.heading_known = true;
 		es.pitch_bam = 0; // organic spawn carries no entity+20/+24 Euler fields
 		es.roll_bam = 0;
@@ -234,14 +239,16 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 					static_cast<uint32_t>(es.pitch_byte) << 24);
 		}
 		// An organic row's respawn runs the reset over the snapped pose: the spawn backup
-		// takes Position and +0x2D4 the Yaw.
-		// [orig: Entity_ResetToSpawnState @0x4B9610 - @0x4B9623..0x4B9644, @0x4B96AA]
+		// takes Position and +0x2D4 the Yaw, and an org1 body's heading (+0x8C) the Yaw.
+		// [orig: Entity_ResetToSpawnState @0x4B9610 - @0x4B9623..0x4B9644, +0x8C @0x4B968C,
+		//  @0x4B96AA]
 		if (force_live_snap &&
 				(es.cls == EntityClass::Player || es.cls == EntityClass::Infantry)) {
 			es.spawn_backup[0] = es.x;
 			es.spawn_backup[1] = es.y;
 			es.spawn_backup[2] = es.z;
 			es.reset_yaw = es.heading_bam;
+			if (es.cls == EntityClass::Infantry) es.rm_body_heading = es.heading_bam;
 		}
 		if (force_live_snap && remote_motion_mode_) {
 			// Retail stages the target BEFORE the respawn branch snaps the live
@@ -454,7 +461,7 @@ void ClientReplicaPipeline::follow_carrier_seat(ClientEntityState &child,
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the angle apply @0x4B43E6..0x4B440A,
 	//  the seat carry @0x4B654E..0x4B6575]
 	if (child.cls == EntityClass::Player) return;
-	// So is a live seated org1 body's: its seat branch's look half (tick_seated_looks); the bone
+	// So is a live seated org1 body's: its seat branch's look half (tick_org1_looks); the bone
 	// pose writes the body heading, Roll and savedLivePitch.
 	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the bone pose @0x4BED96..0x4BEDDA, the look
 	//  @0x4BEF57..0x4BEF97]
@@ -1298,10 +1305,16 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			es.aim_pitch_byte = rec.infantry.aim_pitch_byte;
 			es.anim_state_id = rec.infantry.anim_byte;
 			es.state_flags = rec.infantry.flags_byte;
-			// The record carries the aim words (+0x2EC, +0x2D0), not the live Yaw / Pitch: a
-			// seated body's seat branch chases them every tick (tick_seated_looks).
+			// The record writes the aim words (+0x2EC, +0x2D0), not the live Yaw / Pitch: the
+			// body's look chases them every tick, a seated body's in its seat branch, a
+			// free-standing one's after its body chase (tick_org1_looks).
 			// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the stores @0x4C066C /
-			//  @0x4C0672; Entity_UpdateInfantryAI @0x4B9910 - the look @0x4BEF57..0x4BEF97]
+			//  @0x4C0672; Entity_UpdateInfantryAI @0x4B9910 - the seated look
+			//  @0x4BEF57..0x4BEF97, the free-standing look @0x4BEB18..0x4BEBE7]
+			es.rm_aim_heading_word = static_cast<int32_t>(
+					static_cast<uint32_t>(rec.infantry.aim_heading_byte) << 24);
+			es.rm_aim_word = static_cast<int32_t>(
+					static_cast<uint32_t>(rec.infantry.aim_pitch_byte) << 24);
 			if (es.carrier_handle != wire_handle::kInvalid) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,
@@ -1564,7 +1577,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		} else if (child->cls == EntityClass::Infantry) {
 			child->net_interp_progress = 0;
 			// An infantry record writes the live Yaw on its respawn edge alone; a live seated
-			// body's is its look's (tick_seated_looks).
+			// body's is its look's (tick_org1_looks).
 			// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the respawn arm's
 			//  +0x10 store @0x4C05D5, the stage @0x4C0689..0x4C06AA]
 			if (pending.force_live_snap || child->mount_bone == 0 ||

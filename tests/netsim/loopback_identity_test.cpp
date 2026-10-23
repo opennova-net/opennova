@@ -425,7 +425,7 @@ bool run_compact_pose_fields_survive_client_fold() {
 	            "infantry compact stages its aim bytes and writes no live Pitch"))
 		return false;
 	// The infantry record writes the aim words (+0x2EC, +0x2D0) and never the live Pitch: the
-	// body update's look chases it every tick (a seated body's in tick_seated_looks), so a
+	// body update's look chases it every tick (tick_org1_looks), so a
 	// second fold leaves it where it was.
 	// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the stores @0x4C066C /
 	//  @0x4C0672; Entity_UpdateInfantryAI @0x4B9910 - the look @0x4BEF87..0x4BEF97]
@@ -779,13 +779,14 @@ bool run_carried_child_follows_later_carrier_same_mover_tick() {
 	if (!expect(moved_child->x == expected.x && moved_child->y == expected.y &&
 	                    moved_child->z == expected.z,
 	            "child-first rider follows the carrier's final same-tick pose")) return false;
-	// A live seated org1 body's Yaw is its seat branch's look (tick_seated_looks, after the
+	// A live seated org1 body's Yaw is its seat branch's look (tick_org1_looks, after the
 	// tick's gun channels), never the follow's: the walk only arms that look, and the record
 	// wrote no live Yaw (no respawn edge).
 	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
 	//  look @0x4BEF57..0x4BEF97; NetPacket_SerializeInfantryEntityState @0x4C0320 - the
 	//  respawn arm's +0x10 store @0x4C05D5]
-	return expect(moved_child->heading_bam == 0 && moved_child->rm_seat_look_due,
+	return expect(moved_child->heading_bam == 0 && moved_child->rm_look_due &&
+	                      moved_child->rm_look_seated,
 	              "the follow writes no Yaw for a live seated org1 rider; its look is armed");
 }
 

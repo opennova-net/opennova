@@ -211,7 +211,9 @@ void row_deck_ride(ClientEntityState &es,
 	// render heading and the body heading (org2 @0x4b5656..0x4b56c1, org1
 	// @0x4ba842..0x4ba861; the mounted 0x1000-seat skip is seat-machinery a
 	// transport row never reaches). org1 additionally drags its chase TARGET
-	// (+0x1A8 @0x4ba867) and look Pitch (+0x14 @0x4ba88e); org2's savedLivePitch
+	// (+0x1A8 @0x4ba867), its look Pitch (+0x14 @0x4ba88e) and its aim words, the
+	// yaw delta into +0x2EC (@0x4BA84C) and the pitch delta into +0x2D0
+	// (@0x4BA852), which its look chases; org2's savedLivePitch
 	// and torso/aim target adds have no row channels — named deferrals. Roll
 	// adopts on both (+0x18 @0x4b5723/@0x4ba88b). The pitch/roll deltas are
 	// rotated by the carrier-vs-rider relative yaw taken BEFORE the yaw add.
@@ -232,6 +234,8 @@ void row_deck_ride(ClientEntityState &es,
 			es.net_target_heading_bam =
 					io::bam_add(es.net_target_heading_bam, dyaw);
 			es.pitch_bam = io::bam_add(es.pitch_bam, pitch_d);
+			es.rm_aim_heading_word = io::bam_add(es.rm_aim_heading_word, dyaw);
+			es.rm_aim_word = io::bam_add(es.rm_aim_word, pitch_d);
 		}
 	}
 }
@@ -819,15 +823,13 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		                               es.roll_bam, es.rm_body_pitch, es.eye_offset);
 		row_body_conform(es, target_state, conform_io);
 	}
-	// Rotation heading: org2 = the leg-chased body heading loaded from
-	// entity+0x8C [orig: Entity_UpdateInfantryPlayerBody @0x4B41E4, Q22 rotate
-	// @0x4B41F0..0x4B4255]; org1 = the row's chased heading (retail pins org1
-	// body == render heading). This tick's
-	// freshly-chased body heading is used (retail consumes the same-tick
-	// value — the leg chase runs earlier in the same body pass).
-	int32_t move_heading = es.heading_bam;
-	if (es.cls == EntityClass::Player) move_heading = es.rm_body_heading;
-	else es.rm_body_heading = move_heading;
+	// Rotation heading: the body heading entity+0x8C, never the look Yaw: org2's is
+	// the leg-chased midpoint [orig: Entity_UpdateInfantryPlayerBody @0x4B41E4, Q22
+	// rotate @0x4B41F0..0x4B4255], org1's its body chase's [orig:
+	// Entity_UpdateInfantryAI @0x4B9910 - `fild dword ptr [esi+8Ch]` @0x4BF001]. This
+	// tick's freshly-chased body heading is used (retail consumes the same-tick
+	// value: the chase runs earlier in the same body pass).
+	const int32_t move_heading = es.rm_body_heading;
 	// The own player's row is locally predicted world-side; its chase is the
 	// 48/512 soft reconciliation only — no root add (risk-listed; retail's
 	// local player integrates in its OWN motor, not the remote path). The
@@ -1347,11 +1349,17 @@ void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es) {
 	                               es.roll_bam, es.rm_body_pitch, es.eye_offset);
 }
 
-// The look half of org1's seat branch over every row whose visit this tick reached it. The
-// seat's body heading is the seat bone's yaw (the frame resolver; a frame that does not
-// resolve leaves the word as it was, as a failed bone lookup leaves +0x8C). The aim words are
-// the record's two aim bytes, each the high byte of its word: +0x2EC (the yaw byte the host
-// clamps within 0x1FFFFFE0 of its Yaw) and +0x2D0.
+// The look of every org1 row whose visit this tick reached it. A free-standing row takes the
+// on-foot form over its own body heading, with the aim flag clear (a client stores only 0 at
+// +0x360: the 0x0C spawn clears the whole entity, and the dead legs and the respawn reset
+// store 0). A seated row takes its seat branch's look half: the seat's body heading is the
+// seat bone's yaw (the frame resolver; a frame that does not resolve leaves the word as it
+// was, as a failed bone lookup leaves +0x8C). The aim words are the record's (+0x2EC, the yaw
+// byte the host clamps within 0x1FFFFFE0 of its Yaw, and +0x2D0) plus any deck ride's adds.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the free-standing look @0x4BEB18..0x4BEBE7 and
+//  its clamp @0x4BEFC5..0x4BEFED (world::infantry_on_foot_look); the aim flag's
+//  client-reachable stores @0x4B9E30 / @0x4BA100 / @0x4BA319; Entity_ResetToSpawnState
+//  @0x4B9610 - @0x4B96B6; NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1]
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - Entity_GetBoneTransformAndOrientation @0x4BED72,
 //  +0x8C @0x4BEDB3; the look: `mov eax, [esi+2ECh]` @0x4BEF57, (aim - Yaw + 2) >> 2
 //  @0x4BEF5D..0x4BEF62, the clamp to +-0x2000000 @0x4BEF65..0x4BEF7A, the Yaw store
@@ -1360,17 +1368,22 @@ void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es) {
 //  @0x4BEFC5..0x4BEFED; Entity_AttachToBoneAndUpdateTransform @0x5463D0 - a gunner's +0x8C
 //  @0x546620; NetPacket_SerializeInfantryEntityState @0x4C0320 - the byte stores
 //  @0x4C066C / @0x4C0672, the host's clamp @0x4C0921..0x4C0960]
-void ClientReplicaPipeline::tick_seated_looks() {
+void ClientReplicaPipeline::tick_org1_looks() {
 	for (ClientEntityState &es : state_.entities) {
-		if (!es.rm_seat_look_due) continue;
-		es.rm_seat_look_due = false;
+		if (!es.rm_look_due) continue;
+		es.rm_look_due = false;
+		if (!es.rm_look_seated) {
+			world::infantry_on_foot_look(es.rm_aim_heading_word, es.rm_aim_word,
+					/*aim_flag=*/false, es.rm_body_heading, es.heading_bam, es.pitch_bam);
+			continue;
+		}
 		const ClientEntityState *carrier = state_.find(es.carrier_handle);
 		ReplicaSeatFrame seat;
 		if (carrier != nullptr && replica_seat_frame_resolver_ &&
 				replica_seat_frame_resolver_(carrier->handle, carrier->type_id, es.mount_bone, seat))
 			es.rm_body_heading = seat.heading;
-		const int32_t aim_heading = static_cast<int32_t>(static_cast<uint32_t>(es.pitch_byte) << 24);
-		const int32_t aim_pitch = static_cast<int32_t>(static_cast<uint32_t>(es.aim_pitch_byte) << 24);
+		const int32_t aim_heading = es.rm_aim_heading_word;
+		const int32_t aim_pitch = es.rm_aim_word;
 		int32_t yaw_step = io::bam_sar(io::bam_add(io::bam_sub(aim_heading, es.heading_bam), 2), 2);
 		if (yaw_step > 0x2000000) yaw_step = 0x2000000;
 		else if (yaw_step < -0x2000000) yaw_step = -0x2000000;
@@ -1520,14 +1533,16 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			if (es.rm_starved) return;
 		}
 		// A seated org1 body with Health reaches its seat branch, whose look half runs after
-		// the tick's gun channels (tick_seated_looks). A dead one's record zeroed its Health,
+		// the tick's gun channels (tick_org1_looks). A dead one's record zeroed its Health,
 		// so it takes the on-foot branch.
 		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
 		//  branch @0x4BE8F7; NetPacket_SerializeInfantryEntityState @0x4C0320 - the dead bit's
 		//  Health store @0x4C04FC]
 		if (es.cls == EntityClass::Infantry && es.mount_bone != 0 &&
-				(es.state_flags & world::kEntityFlagDead) == 0u)
-			es.rm_seat_look_due = true;
+				(es.state_flags & world::kEntityFlagDead) == 0u) {
+			es.rm_look_due = true;
+			es.rm_look_seated = true;
+		}
 		// A seated body's pass still refreshes its ride link off the seat's
 		// ground link (the record's store) [orig: @0x4B5EA9..0x4B5F2C;
 		// the ground store @0x4C1353].
@@ -1642,21 +1657,28 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			organic_chase_tail(es, is_self, /*starved=*/true);
 			break;
 		}
-		// Heading: the promoted target chased with the org1 body
-		// quarter-step — the witnessed (d + 2) >> 2 rounding, clamped
-		// [orig: the body chase @0x4be8fd — (target - body + 2) >> 2 then
-		// ±69273360/tick; the target is one record behind the wire
-		// (§5.38e §1); the sibling world-side port is infantry.cpp's
-		// body-yaw chase].
+		// The body chase: the body heading (+0x8C) steps a quarter of the way to the
+		// promoted target (+0x1A8, one record behind the wire, §5.38e §1), the step
+		// clamped to +-69273360, and the Yaw (+0x10) takes the same step, keeping the
+		// look's offset from the body. The look (Yaw toward +0x2EC, Pitch toward +0x2D0,
+		// the 90-degree clamp about the body) runs after the tick's recoil
+		// (tick_org1_looks); the root turns by the body heading (row_root_motion_tick).
+		// The sibling world-side port is infantry_org1_heading_chase.
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the body chase @0x4BE8FD..0x4BE931,
+		//  the look @0x4BEB18..0x4BEBE7, the clamp @0x4BEFC5..0x4BEFED, the rotation
+		//  @0x4BF001]
 		{
 			int32_t step = io::bam_sar(
 					io::bam_add(io::bam_sub(es.net_target_heading_bam,
-					                        es.heading_bam),
+					                        es.rm_body_heading),
 					            2),
 					2);
 			if (step > 69273360) step = 69273360;
 			if (step < -69273360) step = -69273360;
+			es.rm_body_heading = io::bam_add(es.rm_body_heading, step);
 			es.heading_bam = io::bam_add(es.heading_bam, step);
+			es.rm_look_due = true;
+			es.rm_look_seated = false;
 		}
 		const int16_t death_state = row_death_edge(es);
 		if (death_state >= 0 && !is_self) death_edges_.push_back(es.handle);

@@ -732,11 +732,14 @@ struct ClientEntityState {
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `cmp ax, 200h; jge`
 	//  @0x4B4431..0x4B4435; Entity_UpdateInfantryAI @0x4B9910 - @0x4B9C09..0x4B9C0D]
 	bool rm_starved = false;
-	// This tick's visit of a live seated org1 row reached its seat branch, whose look half
-	// (ClientReplicaPipeline::tick_seated_looks) runs after the tick's gun channels.
+	// This tick's visit of an org1 row reached its look: a live seated row's seat branch
+	// (rm_look_seated), or a free-standing row's body chase. The look runs after the tick's gun
+	// channels and the recoil (ClientReplicaPipeline::tick_org1_looks).
 	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
-	//  branch @0x4BE8F7, the look @0x4BEF57..0x4BEF97]
-	bool rm_seat_look_due = false;
+	//  branch @0x4BE8F7, the seated look @0x4BEF57..0x4BEF97, the free-standing look
+	//  @0x4BEB18..0x4BEBE7]
+	bool rm_look_due = false;
+	bool rm_look_seated = false;
 	// Vehicle speed register mirror (retail vehicleData[177]) — the DECOMPRESSED
 	// 16.16 wire value [orig: the mode-2 read decompresses weaponAimY before the
 	// store]. Gates the fast-vehicle snap threshold (>= 293 ~ 0.28 m/s ->
@@ -811,8 +814,10 @@ struct ClientEntityState {
 	// org2 leg-chain state: the LEGS chase the wire yaw (quarter-step clamp
 	// ±0x3000000, twist ±0x30000000, staggered idle re-plant windows) and the
 	// body heading is their midpoint — the root delta rotates by THIS, not the
-	// view yaw [orig: @0x4b4945..0x4b4ac1; midpoint @0x4b4ab5]. org1 rows
-	// rotate by heading_bam (retail pins body == render heading for org1).
+	// view yaw [orig: @0x4b4945..0x4b4ac1; midpoint @0x4b4ab5]. An org1 row's
+	// body heading (+0x8C) is its own: the body chase steps it and the Yaw
+	// together, and the root delta rotates by it [orig: Entity_UpdateInfantryAI
+	// @0x4B9910 - the chase @0x4BE8FD..0x4BE931, the rotation @0x4BF001].
 	// The witnessed vertical: dz is REPLACED by the capsule-bottom history
 	// delta while the prev-bottom slot is live; climbs 32..35 and grenade
 	// deaths 176..179 reset the slot every update [orig: AnimMap_UpdateEntity
@@ -831,11 +836,21 @@ struct ClientEntityState {
 	// the decay @0x4B6DBD, the chase @0x4B6FC1; Entity_BuildBoneTransformMatrices
 	// @0x4B1290 (the body build @0x4B182E)].
 	int32_t rm_body_pitch = 0;
-	// The aim word +0x2D0 a player body's dead in-air tumble aims the pitch at
-	// (a + b every fourth tick; the pitch chases it every tick); no other leg of
-	// the player body pass writes it [orig: Entity_UpdateInfantryPlayerBody
-	// @0x4B40E0 - the store @0x4B6D44, the read @0x4B6D5B].
+	// The aim pitch word +0x2D0. A player body's dead in-air tumble aims the pitch at it
+	// (a + b every fourth tick; the pitch chases it every tick); no other leg of the
+	// player body pass writes it. An org1 row's record writes it (its aim pitch byte
+	// << 24), a deck ride adds the carrier's pitch delta, and its look chases the Pitch
+	// toward it [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the store @0x4B6D44,
+	// the read @0x4B6D5B; NetPacket_SerializeInfantryEntityState @0x4C0320 - the store
+	// @0x4C0672; Entity_UpdateInfantryAI @0x4B9910 - the ride's add @0x4BA852].
 	int32_t rm_aim_word = 0;
+	// An org1 row's aim heading word +0x2EC: its record writes it (the aim heading byte
+	// << 24), a deck ride adds the carrier's yaw delta, and its look chases the Yaw
+	// toward it. A 0x0C spawn clears it with the whole entity.
+	// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the store @0x4C066C;
+	//  Entity_UpdateInfantryAI @0x4B9910 - the ride's add @0x4BA84C; NapiNPClientMsg_0x00C
+	//  @0x42E730 - the memset @0x42E7E9..0x42E7F1]
+	int32_t rm_aim_heading_word = 0;
 	bool rm_leg_seeded = false;
 	// Parked by the body walk past the own body's slot: the row's visit, its
 	// selection and its lean ramp wait for the after-self leg

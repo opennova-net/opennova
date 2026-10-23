@@ -83,22 +83,17 @@ inline bool aim_overlay_inputs_for_client(
 
 	out = anim::AimOverlayInputs{};
 	out.aim_yaw = entity.heading_bam;
-	// The bone build's aim pitch is the body's live Pitch word (+0x14), seated or not: a
+	// The bone build's aim pitch is the body's live Pitch word (+0x14) for every row: a
 	// player row's chase steps it toward its record's pitch, seated too (divisor 12 on a
-	// joiner; snap folds mirror the byte, §5.38e §3), and a live seated org1 row's look
-	// steps it toward the aim pitch (+0x2D0, tick_seated_looks). A free-standing org1 row
-	// presents the aim pitch word itself.
+	// joiner; snap folds mirror the byte, §5.38e §3), and an org1 row's look steps it toward
+	// the aim pitch (+0x2D0, tick_org1_looks). An org1 row's body chain turns by its body
+	// heading (+0x8C, its body chase's), not by the look Yaw.
 	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `mov edx, [ebp+14h]` @0x4B17AD;
 	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the angle apply @0x4B43E6..0x4B440A;
-	//  Entity_UpdateInfantryAI @0x4B9910 - the seated look @0x4BEF87..0x4BEF97]
-	const bool live_seated_infantry = entity.cls == EntityClass::Infantry &&
-			entity.mount_bone != 0 &&
-			entity.carrier_handle != world::EntityHandle::kInvalid &&
-			(entity.state_flags & world::kEntityFlagDead) == 0u;
-	out.aim_pitch = entity.cls == EntityClass::Player || live_seated_infantry
-			? entity.pitch_bam
-			: static_cast<int32_t>(static_cast<uint32_t>(entity.aim_pitch_byte) << 24);
-	out.body_yaw = out.aim_yaw;
+	//  Entity_UpdateInfantryAI @0x4B9910 - the body chase @0x4BE8FD..0x4BE931, the
+	//  free-standing look @0x4BEB18..0x4BEBE7, the seated look @0x4BEF87..0x4BEF97]
+	out.aim_pitch = entity.pitch_bam;
+	out.body_yaw = entity.cls == EntityClass::Infantry ? entity.rm_body_heading : out.aim_yaw;
 	out.leg_yaw_r = out.body_yaw;
 	out.leg_yaw_l = out.body_yaw;
 	// The body and leg chains take the body's savedLivePitch and Roll, the slope

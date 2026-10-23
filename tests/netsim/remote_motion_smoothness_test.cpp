@@ -1263,7 +1263,9 @@ bool run_root_rotation_pair_is_the_world_motors() {
 // (cosine -6433/2^22 there) would drag X back 7/65536 a tick; an Infantry row
 // facing +Y drifts X back by retail's 30.5 ppm cosine (-201/2^22: one 65536th a
 // tick for the clip's 4096 step, Y 4095 a tick), where the exact trig holds X and
-// walks Y 4096. Each heading is set on the row (a first record does not swing it).
+// walks Y 4096. Each heading is set on the row (a first record does not swing it). The
+// Infantry row's look Yaw stays 0 off its body heading: the root turns by the body heading
+// (+0x8C), never the Yaw (D-NET-NEW-L5-30).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B41F0..0x4B4255;
 //  Entity_UpdateInfantryAI @0x4BF001..0x4BF074]
 bool run_replica_root_step_takes_the_world_pair() {
@@ -1323,7 +1325,8 @@ bool run_replica_root_step_takes_the_world_pair() {
 		view.state().find(handle)->rm_adm_id = 0;
 		view.tick_remote_motion(0xFFFF);
 		ns::ClientEntityState *row = view.state().find(handle);
-		row->heading_bam = 0x40000000; // a first record does not swing the heading
+		row->heading_bam = 0; // the look, a quarter turn off the body
+		row->rm_body_heading = 0x40000000;
 		row->net_target_heading_bam = 0x40000000;
 		const int32_t x0 = row->x;
 		const int32_t y0 = row->y;
@@ -1331,7 +1334,9 @@ bool run_replica_root_step_takes_the_world_pair() {
 		const ns::ClientEntityState *es = view.state().find(handle);
 		std::fprintf(stderr, "[root-pair] org1 dX=%d dY=%d\n", es->x - x0, es->y - y0);
 		ok &= expect(es->y - y0 == 16 * 4095 && es->x - x0 == -16,
-		             "an Infantry row facing +Y drifts X back by retail's cosine");
+		             "an Infantry row whose body faces +Y drifts X back by retail's cosine");
+		ok &= expect(es->heading_bam == 0 && es->rm_body_heading == 0x40000000,
+		             "the root turns by the body heading; the look Yaw stays its own");
 	}
 	return ok;
 }

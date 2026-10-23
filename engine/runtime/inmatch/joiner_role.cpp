@@ -1260,7 +1260,7 @@ void JoinerRole::pump() {
 				&materializer_, kernel.wire_header_world);
 		rt.tick_remote_recoil();
 	}
-	rt.view().tick_seated_looks(); // org1's seated look, after the gun channels and the recoil
+	rt.view().tick_org1_looks(); // org1's looks, after the gun channels and the recoil
 	lp.sync_local_mounted_input_heading();
 	// What the view arbiter reads from the session (death screen, end round,
 	// the death camera): the joiner samples it AFTER this frame's recv fold,

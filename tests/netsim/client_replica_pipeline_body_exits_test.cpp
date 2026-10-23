@@ -17,7 +17,10 @@
 
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/anim/aim_overlay.h>
+#include <runtime/inmatch/client_replica_emplaced.h>
 #include <runtime/inmatch/client_replica_present.h>
+#include <runtime/mission/promote.h>
+#include <runtime/world/world.h>
 
 #include <net/npwire/entity_class.h>
 #include <net/npwire/ingame_decode.h>
@@ -165,7 +168,7 @@ void tick(ns::ClientReplicaPipeline &view) {
 	view.tick_remote_motion(0xFFFF);
 	view.tick_lean_ramp();
 	view.tick_recoil();
-	view.tick_seated_looks();
+	view.tick_org1_looks();
 }
 
 struct Words {
@@ -454,6 +457,38 @@ void test_seated_infantry_look_chases_its_aim_words() {
 			"a dead seated row takes no look: the seat follow's carrier + local yaw");
 }
 
+// D-NET-NEW-L5-30 (found on the way): a seated org1 gunner's look reads its aim heading WORD,
+// which the record writes and the gun channel cannot reach. The joiner's gun channel writes the
+// gunner's Pitch high byte back into the row's class-specific byte (an infantry row's aim heading
+// byte); a look that read that byte chased the gunner's own Pitch (0x30) instead of its aim
+// heading (0x01): a clamped 0x2000000 where retail steps (0x1000000 + 2) >> 2 = 0x400000.
+// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the store @0x4C066C;
+//  Entity_UpdateChildAttachment @0x4409A0 - the immediate path @0x440B39..0x440B58 (the gun's
+//  words, never the occupant's aim words); Entity_UpdateInfantryAI @0x4B9910 - the seated look
+//  @0x4BEF57..0x4BEF84]
+void test_gun_channel_leaves_the_gunner_aim_heading() {
+	BodySource src;
+	auto view = seated_infantry_view(src, false, 0x01, 0x00);
+	ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
+	rider.pitch_bam = 0x30000000;
+	auto world = std::make_unique<opennova::world::World>();
+	world->registry.configure_pool(1, 8);
+	std::vector<opennova::mission::ItemSeatSpec> specs(1);
+	specs[0].type_id = kHullType;
+	opennova::world::Seat gunner_seat;
+	gunner_seat.type = opennova::world::SeatType::Gunner;
+	gunner_seat.bone_index = 2;
+	specs[0].seats.push_back(gunner_seat);
+	view->tick_remote_motion(0xFFFF); // the walk arms the seated look
+	opennova::inmatch::tick_replica_emplaced_channels(view->state(), specs, *world, 0xFFFF,
+			nullptr, false);
+	expect(rider.pitch_byte == 0x30 && rider.heading_bam == 0 && rider.pitch_bam == 0x30000000,
+			"(the gun channel left the look and wrote the Pitch byte back)");
+	view->tick_org1_looks();
+	expect(rider.heading_bam == 0x00400000,
+			"the seated gunner's look chases its aim heading word, not the written-back byte");
+}
+
 // D-NET-NEW-L5-29: the seated look holds the Yaw within 90 degrees of the seat's body heading
 // (+0x8C, the seat bone's yaw) unless the carrier's config is 3, 4, 5 or 7.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - the config gate @0x4BEF9A..0x4BEFC3, the clamp
@@ -472,10 +507,125 @@ void test_seated_infantry_look_holds_within_ninety_degrees() {
 	}
 }
 
-// Row 2 (D-NET-NEW-L5-29 / D-NET-NEW-L5-27): the replica aim overlay's pitch is the body's live
-// Pitch word for a player row, seated or not, and for a live seated org1 row; a free-standing
-// org1 row presents its aim pitch word.
-// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `mov edx, [ebp+14h]` @0x4B17AD]
+constexpr uint16_t kFreeInfantry = 0x0007;
+
+// One 0x0A: the hull, and a free-standing org1 row at the anchor (the yaw byte 0x10) carrying
+// its two aim bytes, the aim heading's (+0x2EC) and the aim pitch's (+0x2D0).
+std::vector<uint8_t> free_infantry_frame(uint8_t aim_heading, uint8_t aim_pitch,
+		uint8_t flags = 0, uint8_t yaw = 0x10) {
+	nw::FrameUpdate fu = hull_update(50.0);
+	nw::FrameUpdateRecord rec;
+	rec.handle = kFreeInfantry;
+	rec.type_id = kInfantryType;
+	rec.cls = nw::EntityClass::Infantry;
+	rec.infantry.vehicle_slot_handle = 0xFFFF;
+	rec.infantry.yaw_byte = yaw;
+	rec.infantry.flags_byte = flags;
+	rec.infantry.aim_heading_byte = aim_heading;
+	rec.infantry.aim_pitch_byte = aim_pitch;
+	rec.infantry.anim_byte = as::kIdle;
+	fu.records.push_back(rec);
+	return nw::encode_frame_update(fu);
+}
+
+std::unique_ptr<ns::ClientReplicaPipeline> free_infantry_view(BodySource &src,
+		uint8_t aim_heading, uint8_t aim_pitch) {
+	auto view = make_view(src);
+	view->state().upsert(kFreeInfantry).type_id = kInfantryType;
+	view->apply(0x0A, free_infantry_frame(aim_heading, aim_pitch));
+	view->state().find(kFreeInfantry)->rm_adm_id = 0;
+	return view;
+}
+
+// D-NET-NEW-L5-30: a free-standing org1 row's body heading (+0x8C) and its look Yaw (+0x10) are
+// two words. The body chase steps the body heading a quarter of the way to the promoted target
+// (+0x1A8) and adds the same step to the Yaw; then the look (aim flag clear on a client) steps
+// the Yaw an eighth of the way to the aim heading (+0x2EC) and the Pitch to the aim pitch
+// (+0x2D0), each step's positive clamp testing 16 times the stored one (0xE000000 / 0xC000000
+// against 0xE00000 / 0xC00000). The record writes the aim words, never the live ones; a respawn
+// record's reset stamps the body heading with the Yaw.
+// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the promote @0x4C0653, the stores
+//  @0x4C066C / @0x4C0672, the respawn Yaw @0x4C05D5; Entity_UpdateInfantryAI @0x4B9910 - the
+//  body chase @0x4BE8FD..0x4BE931, the eighth @0x4BEB8C..0x4BEBE7; Entity_ResetToSpawnState
+//  @0x4B9610 - +0x8C @0x4B968C]
+void test_free_standing_infantry_body_and_look_split() {
+	BodySource src;
+	auto view = free_infantry_view(src, 0x20, 0xF0);
+	view->apply(0x0A, free_infantry_frame(0x20, 0xF0)); // promotes the first record's 0x10
+	ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+	expect(es.net_target_heading_bam == 0x10000000 && es.rm_body_heading == 0 &&
+					es.heading_bam == 0 && es.pitch_bam == 0 &&
+					es.rm_aim_heading_word == 0x20000000 &&
+					es.rm_aim_word == static_cast<int32_t>(0xF0000000u),
+			"the records stage the target and write the aim words, never the live Yaw or Pitch");
+	tick(*view);
+	// (0x10000000 + 2) >> 2 = 0x4000000; (0x1C000000 + 4) >> 3 = 0x3800000 (under the positive
+	// test 0xE000000); (-0x10000000 + 4) >> 3 = -0x2000000, clamped to -0xC00000.
+	expect(es.rm_body_heading == 0x04000000, "the body chase steps the body heading a quarter");
+	expect(es.heading_bam == 0x07800000,
+			"the Yaw takes the body's step, then an eighth of the way to the aim heading");
+	expect(es.pitch_bam == -0x00C00000, "the Pitch steps an eighth, clamped to -0xC00000");
+	tick(*view);
+	// 0x3000000 to the body; (0x15800000 + 4) >> 3 = 0x2B00000; the Pitch clamps again.
+	expect(es.rm_body_heading == 0x07000000 && es.heading_bam == 0x0D300000 &&
+					es.pitch_bam == -0x01800000,
+			"the second tick steps from the live words");
+
+	// A respawn record writes the Yaw live and the reset stamps the body heading with it.
+	view->apply(0x0A, free_infantry_frame(0x20, 0xF0,
+			static_cast<uint8_t>(nw::world::kEntityFlagDead)));
+	view->apply(0x0A, free_infantry_frame(0x20, 0xF0, 0, 0x30));
+	expect(es.heading_bam == 0x30000000 && es.rm_body_heading == 0x30000000,
+			"the respawn record's reset stamps the body heading with the new Yaw");
+}
+
+// D-NET-NEW-L5-30: the free-standing look holds the Yaw within 90 degrees of the body heading.
+// The aim heading 0x80 is half a turn off; each eighth clamps to -0xE00000, 73 of them stay
+// within 0x3FE00000, and the 74th is held at -0x40000000.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the eighth @0x4BEB8C..0x4BEBB4, the clamp with no
+//  parent @0x4BEF9A..0x4BEFA2 -> @0x4BEFC5..0x4BEFED]
+void test_free_standing_infantry_look_holds_within_ninety_degrees() {
+	BodySource src;
+	auto view = free_infantry_view(src, 0x80, 0x00); // one record: the target is 0
+	ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+	for (int i = 0; i < 73; ++i) tick(*view);
+	expect(es.rm_body_heading == 0 && es.heading_bam == -73 * 0xE00000,
+			"73 clamped eighths turn the Yaw, the body holds its target");
+	tick(*view);
+	expect(es.heading_bam == -0x40000000, "the 74th is held 90 degrees off the body heading");
+	tick(*view);
+	expect(es.heading_bam == -0x40000000, "and holds there");
+}
+
+// D-NET-NEW-L5-30: a deck ride carries the carrier's yaw delta into the aim heading word too,
+// so the look keeps its aim on the turning deck.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ride's adds: Yaw @0x4BA849, +0x2EC @0x4BA84C,
+//  +0x2D0 @0x4BA852, +0x8C @0x4BA861, +0x1A8 @0x4BA867]
+void test_deck_ride_turns_the_aim_words() {
+	BodySource src;
+	auto view = free_infantry_view(src, 0x20, 0x00);
+	constexpr uint16_t kDeck = 0x1009;
+	view->set_carrier_pose_provider(
+			[](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
+				if (handle != kDeck) return false;
+				out = ns::ClientReplicaPipeline::CarrierPose{};
+				out.yaw = 0x01000000; // the deck turns 0x1000000 this tick
+				out.bound_radius = 0x7FFFFFFF;
+				return true;
+			});
+	ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+	es.resolved_ground = kDeck;
+	view->tick_remote_motion(0xFFFF);
+	expect(es.rm_aim_heading_word == 0x21000000 && es.rm_aim_word == 0 &&
+					es.rm_body_heading == 0x01000000 &&
+					es.net_target_heading_bam == 0x01000000,
+			"the deck's yaw delta turns the aim heading word with the body and the target");
+}
+
+// Row 2 (D-NET-NEW-L5-29 / D-NET-NEW-L5-27 / D-NET-NEW-L5-30): the replica aim overlay's pitch is
+// the body's live Pitch word for every row; an org1 row's body chain turns by its body heading.
+// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `mov edx, [ebp+14h]` @0x4B17AD;
+//  Entity_UpdateInfantryAI @0x4B9910 - the body chase @0x4BE8FD..0x4BE931]
 void test_overlay_pitch_is_the_live_pitch_word() {
 	ns::ClientState state;
 	opennova::anim::AimOverlayInputs in;
@@ -496,14 +646,18 @@ void test_overlay_pitch_is_the_live_pitch_word() {
 	npc.mount_bone = 2;
 	npc.pitch_bam = 0x00765432;
 	npc.aim_pitch_byte = 0xF0;
+	npc.rm_aim_word = static_cast<int32_t>(0xF0000000u);
 	expect(opennova::inmatch::aim_overlay_inputs_for_client(npc, state, {}, in) &&
 					in.aim_pitch == 0x00765432,
 			"a live seated org1 row's overlay reads its live Pitch");
 	npc.carrier_handle = 0xFFFF;
 	npc.mount_bone = 0;
+	npc.heading_bam = 0x12000000;
+	npc.rm_body_heading = 0x10000000;
 	expect(opennova::inmatch::aim_overlay_inputs_for_client(npc, state, {}, in) &&
-					in.aim_pitch == static_cast<int32_t>(0xF0000000u),
-			"a free-standing org1 row presents its aim pitch word");
+					in.aim_pitch == 0x00765432 && in.aim_yaw == 0x12000000 &&
+					in.body_yaw == 0x10000000,
+			"a free-standing org1 row presents its live Pitch, its look Yaw and its body heading");
 }
 
 // The authority's view runs no chase, so its rows count nothing and never starve: with no
@@ -530,6 +684,10 @@ int main() {
 	test_seated_rider_yaw_chases_its_record();
 	test_seated_infantry_look_chases_its_aim_words();
 	test_seated_infantry_look_holds_within_ninety_degrees();
+	test_gun_channel_leaves_the_gunner_aim_heading();
+	test_free_standing_infantry_body_and_look_split();
+	test_free_standing_infantry_look_holds_within_ninety_degrees();
+	test_deck_ride_turns_the_aim_words();
 	test_overlay_pitch_is_the_live_pitch_word();
 	test_authority_rows_never_starve();
 	if (failures != 0) {

@@ -63,6 +63,10 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     row.heading_known = true;
     row.net_smooth_heading = row.heading_bam;
     row.net_target_heading_bam = row.heading_bam;
+    // The model init after the Yaw store stamps the body heading (+0x8C) with it.
+    // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the Yaw @0x433B8C, the
+    //  Entity_InitFromModel call @0x433E6C; Entity_InitFromModel @0x40DC30 - +0x8C @0x40E172]
+    row.rm_body_heading = row.heading_bam;
     row.net_smooth_target[0] = row.x;
     row.net_smooth_target[1] = row.y;
     row.net_smooth_target[2] = row.z;
