@@ -103,6 +103,9 @@ struct TerrainStaticShadowPlannerDiagnostics {
 	uint64_t frame_triangle_build_us = 0;
 	uint64_t frame_alpha_test_triangles = 0;
 	std::array<uint64_t, 4> frame_blend_triangles{};
+	// The pixel loop's work (TerrainStaticShadowRasterStats): fragments that
+	// reached the depth test, and the black blocks / pixels it skipped.
+	TerrainStaticShadowRasterStats frame_raster{};
 	uint64_t frame_unsupported_draw_count = 0;
 	uint64_t frame_unsupported_attribution_truncated = 0;
 	std::vector<TerrainStaticShadowUnsupportedAttribution>

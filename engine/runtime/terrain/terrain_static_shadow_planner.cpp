@@ -755,6 +755,7 @@ bool TerrainStaticShadowPlanner::rasterize(const TerrainTilePageKey &page,
 				std::chrono::duration_cast<std::chrono::microseconds>(
 						std::chrono::steady_clock::now() - build_started)
 						.count());
+		input.stats = &diagnostics_.frame_raster;
 		return rasterize_terrain_static_shadow_alpha(input, page_alpha);
 	} catch (const std::bad_alloc &) {
 		return false;

@@ -64,6 +64,9 @@ void merge_planner_diagnostics(
 	target.frame_raster_count += source.frame_raster_count;
 	target.frame_triangles += source.frame_triangles;
 	target.frame_alpha_test_triangles += source.frame_alpha_test_triangles;
+	target.frame_raster.fragments += source.frame_raster.fragments;
+	target.frame_raster.absorbed_blocks += source.frame_raster.absorbed_blocks;
+	target.frame_raster.absorbed_pixels += source.frame_raster.absorbed_pixels;
 	for (std::size_t index = 0; index < target.frame_blend_triangles.size();
 			++index) {
 		target.frame_blend_triangles[index] +=
@@ -443,6 +446,12 @@ Dictionary TerrainStaticShadowRasterizer::get_diagnostics() const {
 			static_cast<int64_t>(frame.frame_triangles);
 	diagnostics["frame_alpha_test_triangles"] =
 			static_cast<int64_t>(frame.frame_alpha_test_triangles);
+	diagnostics["frame_raster_fragments"] =
+			static_cast<int64_t>(frame.frame_raster.fragments);
+	diagnostics["frame_raster_absorbed_blocks"] =
+			static_cast<int64_t>(frame.frame_raster.absorbed_blocks);
+	diagnostics["frame_raster_absorbed_pixels"] =
+			static_cast<int64_t>(frame.frame_raster.absorbed_pixels);
 	diagnostics["frame_opaque_triangles"] =
 			static_cast<int64_t>(frame.frame_blend_triangles[
 					static_cast<std::size_t>(opennova::terrain::

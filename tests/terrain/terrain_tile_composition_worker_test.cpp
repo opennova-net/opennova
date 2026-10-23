@@ -4,7 +4,7 @@
 // has completed; a completion a predicate rejects stays queued while an
 // allowed one behind it drains; an epoch bump drops everything queued; a
 // one-worker, no-lane-thread budget composes the same bytes as the hardware
-// sizing.
+// sizing, whose page rasters take every lane of the pool.
 #include <runtime/terrain/terrain_tile_composition_worker.h>
 
 #include <algorithm>
@@ -83,6 +83,10 @@ Rgba8Image compose_one(TerrainTileCompositionWorker::Threads threads) {
 	cache.begin_frame(0);
 	worker.install_sources(solid_sources());
 	CHECK(worker.worker_count() == std::max<std::size_t>(threads.page_workers, 1));
+	// One page's rasters take the whole lane pool plus their page worker, not
+	// the page-worker count: the TOD refresh composes a single page a frame,
+	// and the frame waits on it (LF-s1).
+	CHECK(worker.raster_lanes() == threads.lane_threads + 1);
 	const opennova::terrain::TerrainTileLightEpoch light{ 128, 128, 255 };
 	CHECK(worker.enqueue(job_for(cache, 10, 1), worker.sources(), {}, light, {}, 1, nullptr, 0,
 			false));

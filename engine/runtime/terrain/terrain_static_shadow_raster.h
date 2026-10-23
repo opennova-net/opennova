@@ -112,6 +112,22 @@ struct TerrainStaticShadowRasterTriangle {
 	float alpha_scale = 1.0f;
 };
 
+// The work one raster did (diagnostics; the bytes never depend on them).
+// Every blend leaves a black temp pixel black (opaque and multiply write 0,
+// additive keeps the destination, alpha scales it), and the resolve reads the
+// temp alone, so the pixel loop skips black pixels: an 8x8 temp block whose
+// pixels are all black, and a black pixel inside a live block, cost no edge
+// test, depth test or texture fetch.
+struct TerrainStaticShadowRasterStats {
+	// Pixel centres a triangle admitted over a live (non-black) temp pixel:
+	// each reached the depth test.
+	uint64_t fragments = 0;
+	// 8x8 temp blocks of a triangle's bounds skipped as all black.
+	uint64_t absorbed_blocks = 0;
+	// Black temp pixels skipped inside a live block.
+	uint64_t absorbed_pixels = 0;
+};
+
 struct TerrainStaticShadowRasterInput {
 	// Input order remains retail collector/ROBJ/strip order. Every triangle is
 	// already admitted for culling/material visibility by the binding.
@@ -121,6 +137,8 @@ struct TerrainStaticShadowRasterInput {
 	// Threads the pixel loop may split its rows across (1 = the calling
 	// thread only). Every count produces the same bytes.
 	std::size_t threads = 1;
+	// Optional: receives this raster's work counts (added to).
+	TerrainStaticShadowRasterStats *stats = nullptr;
 };
 
 // Atomically mutates only page.alpha. Invalid page storage, non-finite input,

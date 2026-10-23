@@ -167,7 +167,8 @@ TerrainTileCompositionWorker::Threads TerrainTileCompositionWorker::Threads::for
 }
 
 TerrainTileCompositionWorker::TerrainTileCompositionWorker(Threads threads)
-		: lane_pool_(retain_row_stripe_pool(threads.lane_threads)) {
+		: lane_pool_(retain_row_stripe_pool(threads.lane_threads)),
+		  raster_lanes_(lane_pool_ != nullptr ? threads.lane_threads + 1 : 1) {
 	const std::size_t count = std::max<std::size_t>(threads.page_workers, 1);
 	workers_.reserve(count);
 	for (std::size_t index = 0; index < count; ++index)
@@ -312,7 +313,7 @@ void TerrainTileCompositionWorker::worker_loop() {
 			// DECLARED plan it cannot draw).
 			const TerrainTilePageSourceView view =
 					item.sources->view(item.tint, item.light, item.scorch.valid ? &item.scorch : nullptr);
-			completion.pixels = compose_terrain_tile_page(item.job, view, worker_count());
+			completion.pixels = compose_terrain_tile_page(item.job, view, raster_lanes_);
 			completion.success = completion.pixels.is_valid();
 			const auto page_done = std::chrono::steady_clock::now();
 			completion.page_us = static_cast<uint64_t>(
@@ -326,7 +327,7 @@ void TerrainTileCompositionWorker::worker_loop() {
 					active_shadow = item.shadow;
 					// The frame waits on the slowest page, so one page's
 					// shadow pixel loop may spread over the pool's width.
-					shadow_planner.set_raster_threads(worker_count());
+					shadow_planner.set_raster_threads(raster_lanes_);
 				}
 				// Material animation samples the requesting frame's tick, as
 				// retail's tile render does for each model it submits.

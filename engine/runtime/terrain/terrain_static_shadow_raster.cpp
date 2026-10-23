@@ -422,9 +422,29 @@ bool prepare_triangle(const TerrainStaticShadowRasterTriangle &triangle,
 	return true;
 }
 
+// The temp's black-pixel bookkeeping: blocks of kBlock x kBlock pixels on a
+// grid aligned to the temp origin, each counting its non-black pixels. A block
+// row is exactly one row stripe (kBlock == kRowStripeRows), so only the lane
+// owning the stripe ever reads or writes its counts.
+constexpr int kBlock = 8;
+static_assert(kBlock == kRowStripeRows,
+		"a live-count block row must be exactly one lane's row stripe");
+
+struct LiveBlocks {
+	std::vector<uint8_t> counts;
+	uint32_t columns = 0;
+};
+
+// One lane's counts on a cache line of its own (the lanes bump them per
+// fragment).
+struct alignas(64) LaneStats {
+	TerrainStaticShadowRasterStats counts;
+};
+
 // The pixel loop of one prepared triangle over rows [row_begin, row_end).
 void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
-		uint32_t high_width, uint8_t *temporary, float *depth_buffer) noexcept {
+		uint32_t high_width, uint8_t *temporary, float *depth_buffer,
+		LiveBlocks &live, TerrainStaticShadowRasterStats &stats) noexcept {
 	const std::array<ScreenVertex, 3> &vertices = prepared.vertices;
 	const TerrainStaticShadowRasterTriangle &triangle = *prepared.source;
 	const float orientation = prepared.orientation;
@@ -433,11 +453,21 @@ void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
 	const int x1 = prepared.x1;
 	const int y0 = std::max(prepared.y0, row_begin);
 	const int y1 = std::min(prepared.y1, row_end);
-	constexpr int kBlock = 8;
-	for (int block_y = y0; block_y < y1; block_y += kBlock) {
-	const int block_y_end = std::min(block_y + kBlock, y1);
-	for (int block_x = x0; block_x < x1; block_x += kBlock) {
-	const int block_x_end = std::min(block_x + kBlock, x1);
+	// The blocks walk the temp's grid (not the triangle's corner): which block
+	// a pixel falls in changes only which blocks the rejections can skip,
+	// never which pixels a triangle admits.
+	for (int block_row = y0 / kBlock; block_row * kBlock < y1; ++block_row) {
+	const int block_y = std::max(block_row * kBlock, y0);
+	const int block_y_end = std::min(block_row * kBlock + kBlock, y1);
+	for (int block_column = x0 / kBlock; block_column * kBlock < x1; ++block_column) {
+	const int block_x = std::max(block_column * kBlock, x0);
+	const int block_x_end = std::min(block_column * kBlock + kBlock, x1);
+	uint8_t &block_live = live.counts[static_cast<std::size_t>(block_row) * live.columns +
+			static_cast<std::size_t>(block_column)];
+	if (block_live == 0) {
+		++stats.absorbed_blocks;
+		continue;
+	}
 	if (edge_rejects_block(vertices[1], vertices[2], orientation,
 				block_x, block_x_end - 1, block_y, block_y_end - 1) ||
 			edge_rejects_block(vertices[2], vertices[0], orientation,
@@ -448,6 +478,13 @@ void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
 	}
 	for (int y = block_y; y < block_y_end; ++y) {
 		for (int x = block_x; x < block_x_end; ++x) {
+			const std::size_t pixel =
+					static_cast<std::size_t>(y) * high_width + x;
+			uint8_t &destination = temporary[pixel];
+			if (destination == 0) {
+				++stats.absorbed_pixels;
+				continue;
+			}
 			const float sample_x = static_cast<float>(x);
 			const float sample_y = static_cast<float>(y);
 			const float e0 = edge(vertices[1], vertices[2],
@@ -466,8 +503,7 @@ void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
 			const float w2 = e2 * inverse_area;
 			const float depth = vertices[0].depth * w0 +
 					vertices[1].depth * w1 + vertices[2].depth * w2;
-			const std::size_t pixel =
-					static_cast<std::size_t>(y) * high_width + x;
+			++stats.fragments;
 			// Every shipped PROJSHAD declaration has normal z mode. Retail
 			// therefore applies LESSEQUAL and writes depth even for alpha,
 			// additive, and multiplicative material-blend variants.
@@ -488,9 +524,9 @@ void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
 						triangle.alpha_test_inverted)) continue;
 			}
 			depth_buffer[pixel] = depth;
-			uint8_t &destination = temporary[pixel];
 			destination = blend_fragment(
 					destination, triangle.blend, source_alpha);
+			if (destination == 0) --block_live;
 		}
 	}
 	}
@@ -562,19 +598,26 @@ bool rasterize_terrain_static_shadow_alpha(
 	std::vector<uint8_t> temporary;
 	std::vector<uint8_t> resolved;
 	std::vector<float> depth_buffer;
+	LiveBlocks live;
+	live.columns = (high_width + kBlock - 1) / kBlock;
+	const uint32_t block_rows = (high_height + kBlock - 1) / kBlock;
 	try {
 		temporary.resize(high_count);
 		resolved.resize(page.alpha.size());
 		depth_buffer.assign(high_count, input.receiver_depth);
+		live.counts.assign(static_cast<std::size_t>(live.columns) * block_rows, 0);
 	} catch (const std::bad_alloc &) {
 		return false;
 	}
 
 	for (uint32_t y = 0; y < high_height; ++y) {
 		for (uint32_t x = 0; x < high_width; ++x) {
-			temporary[static_cast<std::size_t>(y) * high_width + x] =
-					page.alpha[static_cast<std::size_t>(y / kTemporaryScale) *
-							page.width + x / kTemporaryScale];
+			const uint8_t value = page.alpha[static_cast<std::size_t>(y / kTemporaryScale) *
+					page.width + x / kTemporaryScale];
+			temporary[static_cast<std::size_t>(y) * high_width + x] = value;
+			if (value != 0) {
+				++live.counts[static_cast<std::size_t>(y / kBlock) * live.columns + x / kBlock];
+			}
 		}
 	}
 
@@ -628,17 +671,26 @@ bool rasterize_terrain_static_shadow_alpha(
 
 	// Each pixel's fragments arrive in triangle order however the rows are
 	// split, so the stripes below produce the serial loop's bytes exactly.
+	std::vector<LaneStats> lane_stats(lanes);
 	run_row_stripe_lanes(lanes, [&](std::size_t lane) noexcept {
+		TerrainStaticShadowRasterStats &stats = lane_stats[lane].counts;
 		for (const std::vector<PreparedTriangle> &prepared : runs) {
 			for (const PreparedTriangle &triangle : prepared) {
 				for_lane_stripes(lane, lanes, triangle.y0, triangle.y1,
 						[&](int row_begin, int row_end) {
 							raster_rows(triangle, row_begin, row_end, high_width,
-									temporary.data(), depth_buffer.data());
+									temporary.data(), depth_buffer.data(), live, stats);
 						});
 			}
 		}
 	});
+	if (input.stats != nullptr) {
+		for (const LaneStats &lane : lane_stats) {
+			input.stats->fragments += lane.counts.fragments;
+			input.stats->absorbed_blocks += lane.counts.absorbed_blocks;
+			input.stats->absorbed_pixels += lane.counts.absorbed_pixels;
+		}
+	}
 
 	for (uint32_t y = 0; y < page.height; ++y) {
 		for (uint32_t x = 0; x < page.width; ++x) {

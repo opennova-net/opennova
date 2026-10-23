@@ -164,6 +164,9 @@ public:
 
 	// The page workers this worker started (at least one).
 	std::size_t worker_count() const noexcept { return workers_.size(); }
+	// The lanes each page's raster splits across: the lane pool's threads and
+	// the page worker (1 with no pool).
+	std::size_t raster_lanes() const noexcept { return raster_lanes_; }
 	// Queued + completed + the current epoch's in-flight jobs.
 	std::size_t pending_jobs() const;
 	std::size_t current_epoch_active_jobs() const;
@@ -198,6 +201,10 @@ private:
 	TerrainTileCompositionDemandQueue completion_queue_;
 	// The page rasters' shared lane pool, kept warm for this worker's life.
 	RowStripePoolLease lane_pool_;
+	// The lanes one page's rasters split across: the pool's threads plus the
+	// page worker itself. The TOD refresh composes one page a frame, so a
+	// page alone may take the whole pool; concurrent pages share it.
+	std::size_t raster_lanes_ = 1;
 	std::vector<std::thread> workers_;
 	std::shared_ptr<const SourceSnapshot> current_sources_;
 	std::size_t active_jobs_ = 0;
