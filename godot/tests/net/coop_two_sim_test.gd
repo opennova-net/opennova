@@ -614,7 +614,14 @@ func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	assert_true(host.command_fog_distance(291))
 	assert_true(host.command_sky_speed(170))
 	assert_true(host.command_snow(0, 1))
-	assert_true(host.command_quake(60))
+	# The quake outlasts the loop's 1200 host ticks (WacCmd_Quake stores 6 x seconds: 3600),
+	# so its countdown is live whenever the join lands. The join over real UDP runs on the two
+	# processes' wall clocks (the joiner's GetTickCount legs, the host's protocol timers on its
+	# process clock, D-NET-NEW-L8-27..37) while this loop steps a host tick every ~2 ms, so the
+	# step the first record lands on follows the machine's speed; a 60 s quake (360 ticks)
+	# ran out under it on the Linux runner (push 196). The wire carries the count capped at
+	# 255 (retail's NetPacket_WritePlayerState, the cap at 0x4FFB0B).
+	assert_true(host.command_quake(600))
 
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
