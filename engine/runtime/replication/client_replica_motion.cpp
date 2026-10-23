@@ -130,8 +130,13 @@ void row_ride_link(ClientEntityState &es, const ClientState &state,
 //  the target's ground @0x4BA82C..0x4BA840), the adds @0x4BA842..0x4BA852, the skip to
 //  @0x4BA85A; Entity_AllocateAISlot @0x40D2C0 - the memset @0x40D2E9; the think's store
 //  @0x4BBF85 behind `cmp is_authority, 0` @0x4BA97E..0x4BA985]
+// `seated`: a live seated org1 body's ride (its parent is its ground) adds only the angle deltas;
+// its position words are the seat pose's, which overwrites the ride's translation in the same
+// update [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat pose @0x4BED96..0x4BEDD4 /
+// Entity_AttachToBoneAndUpdateTransform @0x4BEC23].
 void row_deck_ride(ClientEntityState &es,
-                   const ClientReplicaPipeline::CarrierPoseProvider &carrier, bool aim_adds) {
+                   const ClientReplicaPipeline::CarrierPoseProvider &carrier, bool aim_adds,
+                   bool seated = false) {
 	if (es.resolved_ground == 0xFFFF) return;
 	ClientReplicaPipeline::CarrierPose cp;
 	if (!carrier(es.resolved_ground, cp)) return;
@@ -159,11 +164,13 @@ void row_deck_ride(ClientEntityState &es,
 	const int32_t dyaw = io::bam_sub(cp.yaw, cp.saved_yaw);
 	const int32_t dpitch = io::bam_sub(cp.pitch, cp.saved_pitch);
 	const int32_t droll = io::bam_sub(cp.roll, cp.saved_roll);
-	es.x += dpx;
-	es.y += dpy;
-	es.z += dpz;
+	if (!seated) {
+		es.x += dpx;
+		es.y += dpy;
+		es.z += dpz;
+	}
 	const int32_t rider_yaw_before = es.heading_bam;
-	if (dyaw != 0 || dpitch != 0 || droll != 0) {
+	if (!seated && (dyaw != 0 || dpitch != 0 || droll != 0)) {
 		auto q22c = [](int32_t bam) {
 			return static_cast<int32_t>(
 					std::cos(static_cast<double>(bam) * kRadPerBam) * io::kQ22One);
@@ -1810,6 +1817,14 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			row_chase_count(es, es.net_interp_progress);
 			if (es.rm_starved) return;
 		}
+		// A live seated org1 body rides its parent, its ground since the visit's head: the
+		// angle deltas into the Yaw and the aim words (unless the parent is IsTurret), the target,
+		// Pitch, and the words the seat pose overwrites (D-NET-NEW-L5-38). The authority's twin
+		// is world::infantry_follow_carrier over a mounted rider.
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ground store @0x4B9A0F..0x4B9A11, the
+		//  ride @0x4BA45D..0x4BA88E ahead of the seat branch @0x4BE8F7]
+		if (es.cls == EntityClass::Infantry && carrier_pose_provider_)
+			row_deck_ride(es, carrier_pose_provider_, org1_ride_aim_adds(es), /*seated=*/true);
 		// A live seated org1 body reaches its seat branch, whose look half runs after the tick's
 		// gun channels (tick_org1_looks).
 		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the

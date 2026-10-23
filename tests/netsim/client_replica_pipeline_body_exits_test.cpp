@@ -446,7 +446,43 @@ void test_seated_infantry_look_chases_its_aim_words() {
 	tick(*view);
 	// (-0x0E000000 + 4) >> 3 = -0x01C00000.
 	expect(rider.heading_bam == 0x04000000 && rider.pitch_bam == -0x03C00000,
-			"the second tick steps from the live words; the hull's turn is not carried");
+			"the second tick steps from the live words (no carrier pose: no ride)");
+}
+
+// D-NET-NEW-L5-38: a live seated org1 body rides its parent, its ground: the hull's turn this tick
+// (0x1000000) goes into the Yaw and the aim heading (+0x2EC) unless the parent is IsTurret, and
+// into the target (+0x1A8) either way, ahead of the seat branch, whose bone pose then overwrites
+// the body heading and keeps the seat's position (the ride's 1 u translation does not show).
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ground store @0x4B9A0F..0x4B9A11, the ride
+//  @0x4BA45D..0x4BA88E (the gate @0x4BA812..0x4BA840), the seat pose @0x4BED96..0x4BEDDA, the
+//  seated look @0x4BEF57..0x4BEF84]
+void test_seated_org1_rider_rides_its_parent() {
+	for (const bool turret : {false, true}) {
+		BodySource src;
+		auto view = seated_infantry_view(src, false, 0x20, 0x00);
+		view->set_carrier_pose_provider(
+				[](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
+					if (handle != kHull) return false;
+					out = ns::ClientReplicaPipeline::CarrierPose{};
+					out.pos[0] = 1 << 16;
+					out.yaw = 0x01000000;
+					out.bound_radius = 0x7FFFFFFF;
+					return true;
+				});
+		view->set_replica_def_attrib2_resolver([turret](uint16_t type) {
+			return type == kHullType && turret ? 0x1000u : 0u;
+		});
+		ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
+		tick(*view);
+		expect(rider.x == fixed_of(51.0) && rider.rm_body_heading == 0 &&
+						rider.net_target_heading_bam == 0x01000000 && rider.resolved_ground == kHull,
+				"the seated ride turns the target; the seat keeps the position and the body heading");
+		// The seated look: (0x20000000 + 2) >> 2 clamps to 0x2000000 either way.
+		expect(rider.rm_aim_heading_word == (turret ? 0x20000000 : 0x21000000) &&
+						rider.heading_bam == (turret ? 0x02000000 : 0x03000000),
+				turret ? "an IsTurret parent's ride leaves the seated Yaw and aim heading"
+				       : "the seated ride turns the Yaw and the aim heading with the hull");
+	}
 }
 
 // D-NET-NEW-L5-34: an org1 body is in its vehicle only while its Health is above 0. The 0x13
@@ -759,16 +795,22 @@ void test_org1_ride_skips_the_aim_adds_on_a_turret() {
 			return type == kHullType && turret ? 0x1000u : 0u;
 		});
 		ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
-		tick(*view); // alive and seated: the Yaw 0x2000000
+		// Alive and seated, the body rides its parent too (D-NET-NEW-L5-38): the target turns
+		// 0x1000000; the Yaw (0x3000000, or 0x2000000 under IsTurret) and the aim heading
+		// (0x21000000, or 0x20000000) as test_seated_org1_rider_rides_its_parent pins; the
+		// seat pose leaves the body heading and the legs at 0.
+		tick(*view);
 		view->apply(nw::s2c::ENTITY_DEATH, {static_cast<uint8_t>(kSeatedInfantry & 0xFF),
 				static_cast<uint8_t>(kSeatedInfantry >> 8), 0, 0});
 		tick(*view);
-		expect(rider.rm_body_heading == 0x01000000 && rider.net_target_heading_bam == 0x01000000 &&
+		// The body chase (0x1000000 + 2) >> 2 = 0x400000, then the ride's 0x1000000.
+		expect(rider.rm_body_heading == 0x01400000 && rider.net_target_heading_bam == 0x02000000 &&
 						rider.rm_leg_yaw[0] == 0x01000000 && rider.rm_leg_target[1] == 0x01000000,
 				"the ride turns the body heading, the target and the legs either way");
-		// The look then steps an eighth of the 0x1E000000 left: 0x3C00000.
-		expect(rider.rm_aim_heading_word == (turret ? 0x20000000 : 0x21000000) &&
-						rider.heading_bam == (turret ? 0x05C00000 : 0x06C00000),
+		// The Yaw took the chase's 0x400000 (and the ride's 0x1000000 without IsTurret); the look
+		// then steps an eighth of the 0x1DC00000 left: 0x3B80000.
+		expect(rider.rm_aim_heading_word == (turret ? 0x20000000 : 0x22000000) &&
+						rider.heading_bam == (turret ? 0x05F80000 : 0x07F80000),
 				turret ? "an IsTurret parent's ride leaves the Yaw and the aim heading"
 				       : "any other parent's ride turns the Yaw and the aim heading");
 	}
@@ -997,6 +1039,7 @@ int main() {
 	test_seated_infantry_look_chases_its_aim_words();
 	test_seated_infantry_look_holds_within_ninety_degrees();
 	test_dead_seated_infantry_takes_the_free_standing_branch();
+	test_seated_org1_rider_rides_its_parent();
 	test_gun_channel_leaves_the_gunner_aim_heading();
 	test_free_standing_infantry_body_and_look_split();
 	test_free_standing_infantry_look_holds_within_ninety_degrees();
