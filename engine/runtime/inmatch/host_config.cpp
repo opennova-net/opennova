@@ -152,6 +152,17 @@ HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg) {
 	// by the apply's cap @0x551B30].
 	host.serve_and_play = cfg.dedicated == 0;
 	host.game_type_setting = cfg.mp_gametype;
+	// The session's cap, already 1..65 (or 1..251) [orig: game_settings.max_players
+	// @0x56963F], and the dedicated word the slot limit adds the host's own
+	// slot for (GameConfig::player_slot_limit) [orig: @0x551B20..0x551B35]; in
+	// session the apply's 65 ceiling never cuts.
+	config.max_players = static_cast<uint32_t>(host.player_limit);
+	config.dedicated_server = !host.serve_and_play;
+	apply_block_session_settings(config, cfg);
+	return host;
+}
+
+void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cfg) {
 	// The create's words: mpreset, the lineup queue the 0x42 gate admits past
 	// the cap [CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C624E] and the
 	// duplicate-PCID word.
@@ -197,12 +208,6 @@ HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg) {
 	config.no_crosshair_spread = cfg.mp_no_crosshair_spread;
 	config.no_scope_drift = cfg.mp_no_scope_drift;
 
-	// The session's cap, already 1..65 (or 1..251) [orig: game_settings.max_players
-	// @0x56963F], and the dedicated word the slot limit adds the host's own
-	// slot for (GameConfig::player_slot_limit) [orig: @0x551B20..0x551B35]; in
-	// session the apply's 65 ceiling never cuts.
-	config.max_players = static_cast<uint32_t>(host.player_limit);
-	config.dedicated_server = !host.serve_and_play;
 	config.num_teams = static_cast<uint8_t>(cfg.mp_numteams); // g_NumTeamsConfig @0x551BAC
 	// The net config's side byte [orig: (char)g_GameConfigState.sideRequirement_424 @0x5697C3].
 	config.host_side_request = static_cast<int8_t>(cfg.side_req);
@@ -277,7 +282,6 @@ HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg) {
 	// The LAN send cadence reads the block's word [orig:
 	// NapiNPServer_GetSendHoldoffTicks @0x4C4AD1, lanMode_544].
 	config.lan_mode = static_cast<uint32_t>(cfg.lanmode);
-	return host;
 }
 
 TransportPortQuad transport_port_quad(const gamecfg::GameCfg &cfg, NetworkType type,

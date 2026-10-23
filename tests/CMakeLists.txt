@@ -5092,7 +5092,8 @@ target_link_libraries(npruntime_side_password_hold_test PRIVATE opennova_net ope
 target_include_directories(npruntime_side_password_hold_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_side_password_hold COMMAND npruntime_side_password_hold_test)
 # D-NET-NEW-L1-40: the S2C 0x08's BuildFlags called live (an admin SET after the create reaches
-# it), the team test's create-time game_settings words, P1 / P2 the create's across a map change.
+# it), the team test's create-time game_settings words, P1 / P2 the create's across a map change;
+# D-NET-NEW-L1-42's shell half: the listen host's map change applies the cfg block again.
 add_executable(npruntime_server_config_flags_live_test npruntime/server_config_flags_live_test.cpp)
 target_link_libraries(npruntime_server_config_flags_live_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_server_config_flags_live_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

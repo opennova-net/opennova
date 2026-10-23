@@ -98,6 +98,17 @@ int32_t store_session_player_cap(gamecfg::GameCfg *block, int32_t requested, int
 // wrote [orig: UI_HandleHostSessionStart @0x556E36 / @0x556E72 ->
 // CNapiGameSession_BuildAndCreateSession @0x5694D0].
 HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg);
+// The block's session words onto `config` (host_screen_from_block's mapping without the title,
+// the cap and the server type): every first-load mission start applies the block again, so the
+// game shell's listen host takes the block as it stands at a map change, where what a remote
+// admin's SET wrote into it (the attribute word, the rules, the names and passwords) reaches
+// the next mission, as opennova-serve's boot_mission builds its next config from the block; the
+// words the block does not hold (the mission identity, the expansion, the channel, the host's
+// callsign, the tool-set rules) stay the session's (D-NET-NEW-L1-42's shell half).
+// [orig: Game_StartMission @0x524360 - the first-load flag @0x5243A4,
+//  Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E; CAdminServer_HandleSetCommand
+//  @0x405A60 - the rules word into the block @0x406190]
+void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cfg);
 
 // The session socket's bind scan over the cfg block's port quads, as the
 // socket open picks them: a NovaWorld session, either side, the mpnovaworld

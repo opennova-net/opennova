@@ -865,9 +865,12 @@ func _on_host_pressed() -> void:
 				"Back to Host Game", Callable(self, "_return_to_host"), Screen.HOST)
 		return
 	_set_status("Starting host...")
+	# The session's name goes into the process's cfg block, as the host screen's GAME_NAME
+	# does, and the request seeds from the block: every mission start applies the block's name
+	# again, a map change's too (engine inmatch::apply_block_session_settings).
+	GameCfgStore.block().apply_host_dialog_control("GAME_NAME", "%s's Game" % player_name)
 	var config := HostSessionConfig.new()
 	config.channel = HostSessionConfig.CHANNEL_NOVAWORLD
-	config.server_name = "%s's Game" % player_name
 	config.mission = mission
 	# The authority plays the starting map's mode: g_GameType comes from the
 	# mission, as the LAN host screen's request derives it.

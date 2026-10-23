@@ -14,7 +14,9 @@
 //   - a map change keeps game_settings' server and side passwords, the create's or an admin
 //     SET's, whatever the next config carries (D-NET-NEW-L1-42);
 //   - the hello's SN / SF read the protocol's copies, which the create and the admin SET write
-//     and a map change does not (D-NET-NEW-L1-43).
+//     and a map change does not (D-NET-NEW-L1-43);
+//   - the game shell's listen host applies the cfg block onto its session config at a map change,
+//     so an admin SET's block words reach the next mission (D-NET-NEW-L1-42's shell half).
 // [orig: ServerConfig_SerializeToPacket @0x505BD0 - CNapiServerConfig_BuildFlags @0x505D29,
 //  stored @0x505D3B; CNapiServerConfig_BuildFlags @0x4C4DC0 - the cfg word's bit 4 @0x4C4DD2,
 //  `test [ecx+0F34h], 10000h` @0x4C4E30, `test [ecx+0F38h], al` @0x4C4E3C, side A @0x4C4E5F;
@@ -34,6 +36,7 @@
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/game_config.h>
+#include <runtime/inmatch/host_config.h> // host_screen_from_block, apply_block_session_settings
 #include <runtime/inmatch/napi_np_protocol.h> // host_server_hello
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_initial_state.h>
@@ -72,11 +75,13 @@ std::unique_ptr<inmatch::NapiNPServerCtx> host(uint32_t type, bool team_choose,
 	return ctx;
 }
 
-// A remote admin's SET line over the host's console (the SET right alone).
-bool admin_set(inmatch::NapiNPServerCtx &ctx, const char *line) {
-	opennova::gamecfg::GameCfg block;
+// A remote admin's SET line over the host's console (the SET right alone), into `block` (null:
+// a scratch block).
+bool admin_set(inmatch::NapiNPServerCtx &ctx, const char *line,
+		opennova::gamecfg::GameCfg *block = nullptr) {
+	opennova::gamecfg::GameCfg scratch;
 	inmatch::AdminConsole::Seams seams;
-	seams.config_block = &block;
+	seams.config_block = block != nullptr ? block : &scratch;
 	inmatch::AdminConsole console(ctx, std::move(seams));
 	opennova::AdminSession session;
 	session.user = "admin";
@@ -214,6 +219,44 @@ bool run_the_hello_reads_the_protocols_copies() {
 	              "an empty name: the protocol's copy is \"Untitled\", the config's stays empty");
 }
 
+// D-NET-NEW-L1-42's shell half: the game shell's listen host carries its session config from
+// mission to mission and, at a map change, applies the process's cfg block onto it again
+// (apply_block_session_settings), as every first-load start applies the block: what a remote
+// admin's SET wrote into the block (the attribute word, the rules) reaches the next mission, and
+// the words the block does not hold (the callsign, the channel, the rotation's mode) stay the
+// session's.
+// [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals @0x524662 under the
+//  first-load flag @0x52465E; CAdminServer_HandleSetCommand @0x405A60 - the cfg word @0x406190]
+bool run_the_shell_host_applies_the_block_at_a_map_change() {
+	opennova::gamecfg::GameCfg block;
+	block.mp_max_players = 4;
+	block.time_limit = 15;
+	inmatch::GameConfig session = inmatch::host_screen_from_block(block).config;
+	session.game_type = game_type::kTeamDeathmatch;
+	session.player_name = "Callsign";
+	session.session_channel = inmatch::GameSessionChannel::Lan;
+	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			/*host_key=*/0, nullptr, session);
+	if (!expect((ctx->config.mp_attributes & kTeamChoose) == 0 &&
+	                    ctx->config.round_time_limit_minutes == 15,
+	            "the create: the block's word without TeamChoose, its 15 minutes"))
+		return false;
+	if (!expect(admin_set(*ctx, "SET ChangeTeam 1", &block) &&
+	                    admin_set(*ctx, "SET GameTime 30", &block),
+	            "SET ChangeTeam 1 and SET GameTime 30 are accepted"))
+		return false;
+	inmatch::GameConfig next = session; // the shell's session config, the map staged on it
+	inmatch::apply_block_session_settings(next, block);
+	inmatch::continue_session(*ctx, next, nullptr);
+	return expect((ctx->config.mp_attributes & kTeamChoose) != 0 &&
+	                      ctx->config.round_time_limit_minutes == 30 &&
+	                      ctx->config.player_name == "Callsign" &&
+	                      ctx->config.session_channel == inmatch::GameSessionChannel::Lan &&
+	                      ctx->config.game_type == game_type::kTeamDeathmatch,
+	              "the next mission takes the SET's block words and keeps the session's own");
+}
+
 } // namespace
 
 int main() {
@@ -223,6 +266,7 @@ int main() {
 	if (!run_a_map_change_keeps_the_creates_words()) ++failures;
 	if (!run_a_map_change_keeps_the_settings_passwords()) ++failures;
 	if (!run_the_hello_reads_the_protocols_copies()) ++failures;
+	if (!run_the_shell_host_applies_the_block_at_a_map_change()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

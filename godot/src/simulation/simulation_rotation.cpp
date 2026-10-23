@@ -10,6 +10,7 @@
 #include <base/gameprofile/game_type.h> // game_type::for_mission_attribs (the head's record)
 #include <base/io/strutil.h>
 #include <runtime/inmatch/host_boot.h> // begin_next_host_mission_load
+#include <runtime/inmatch/host_config.h> // apply_block_session_settings
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/map_change.h>
 #include <runtime/mission/mission_sidecars.h> // mission_base_name
@@ -87,8 +88,14 @@ String Simulation::begin_host_map_change() {
 }
 
 void Simulation::stage_next_mission_session_config(const opennova::bms::File &p_document) {
-	// The map change's next map: the session keeps its config, the rotation names the map
-	// and its mode (Game_StartMission's authority arm, inmatch/map_change.h).
+	// The map change's next map: the session config takes the process's cfg block as it stands,
+	// so what a remote admin's SET wrote into it reaches the next mission, and keeps the words
+	// the block does not hold (engine inmatch::apply_block_session_settings carries the
+	// witness); the rotation names the map and its mode (Game_StartMission's authority arm,
+	// inmatch/map_change.h).
+	if (net_.game_config.is_valid())
+		opennova::inmatch::apply_block_session_settings(
+				net_.host_session_config, net_.game_config->native().cfg());
 	net_.host_session_config.mission_file = net_.rotation().list.map_file;
 	net_.host_session_config.game_type = net_.rotation().list.map_game_type;
 	net_.host_session_config.mission_name = p_document.get_mission_name();
