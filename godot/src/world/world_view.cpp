@@ -118,7 +118,7 @@ Ref<ResourceRoot> LiveWorldView::resource_root_impl() const {
 
 bool LiveWorldView::scene_drawn_impl() const {
 	GameWorld *w = world();
-	return w == nullptr || w->get_last_frame_scene_drawn();
+	return w == nullptr || w->get_last_frame_world_drawn();
 }
 
 void LiveArmoryWorldView::bind(GameWorld *p_world) {

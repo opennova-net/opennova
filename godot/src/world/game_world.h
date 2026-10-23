@@ -139,6 +139,9 @@ public:
 		// The scene gate's verdict (leg_scene_gate): false while the status page stands in for
 		// the scene frame, when no kSceneLeg row runs.
 		bool scene_drawn = true;
+		// The drawn scene frame skips its world (engine inmatch::FrameOutcome::world_skipped):
+		// no kWorldLeg row runs.
+		bool world_skipped = false;
 		// One of the first frames past a mission load: its legs nest as spans under the frame's
 		// span of the post-load timeline (an instrument; null on every other frame).
 		LoadTimeline *post_load_frame = nullptr;
@@ -152,6 +155,11 @@ public:
 		// the status page stands in for the scene frame (engine hud_server_status.h
 		// main_frame_draws_scene carries the witness).
 		kSceneLeg = 1u << 1,
+		// The row is the scene frame's world block, whose state legs a frame that skips its
+		// world (a cine playing, the command map over the menu) does not run: the terrain
+		// frame's composes, the water pass, the collect, the foliage and the sun veil's
+		// stop-down target (engine inmatch::FrameOutcome::world_skipped carries the witness).
+		kWorldLeg = 1u << 2,
 	};
 	// What a leg body reports back to the loop: it ran (its LegScope banks
 	// the span), it did not run this frame (nothing is banked -- a skipped
@@ -544,12 +552,20 @@ public:
 	static bool frame_leg_stops_frame(const String &p_name);
 	// Whether the live table's row `p_name` draws the scene (kSceneLeg).
 	static bool frame_leg_draws_scene(const String &p_name);
+	// Whether the live table's row `p_name` is the world block's (kWorldLeg).
+	static bool frame_leg_in_world(const String &p_name);
 	// The live table's rows whose bodies the last frame ran, in table order (a structural seam:
 	// the scene gate's skip is visible here).
 	PackedStringArray get_last_frame_legs() const;
 	// The last frame's scene gate verdict (FrameContext::scene_drawn): the shell's own scene
 	// legs after the world frame (the death.mnu latch) run on it.
 	bool get_last_frame_scene_drawn() const { return last_frame_scene_drawn_; }
+	// The last frame drew its world: the scene frame, with its world-skip word down (a cine
+	// playing or the command map over the menu skips the world block). The death.mnu latch's
+	// open and close legs sit in that block.
+	bool get_last_frame_world_drawn() const {
+		return last_frame_scene_drawn_ && !last_frame_world_skipped_;
+	}
 	// Re-evaluates only camera-dependent production render state for an
 	// exact-pose visual capture (the settle contract and the frozen-pose leg
 	// order live with the replay table in game_world_frame.cpp).
@@ -1143,6 +1159,7 @@ private:
 	// Bit i: the live table's row i ran its body in the last frame (get_last_frame_legs).
 	uint64_t last_frame_run_mask_ = 0;
 	bool last_frame_scene_drawn_ = true;
+	bool last_frame_world_skipped_ = false;
 	// Identity latch for measured render time on the water reflection RTT.
 	ObjectID stats_water_vp_id_;
 	// Edge latch for the compositor passes' RD GPU timestamps (F3 capture

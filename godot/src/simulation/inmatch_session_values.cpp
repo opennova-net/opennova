@@ -192,6 +192,7 @@ void MissionFrameOutcome::assign(const opennova::inmatch::FrameOutcome &p_value)
 	error_ = opennova::to_gd(p_value.error.message);
 	frame_stamp_ms_ = p_value.frame_stamp_ms;
 	scene_drawn_ = p_value.scene_drawn;
+	world_skipped_ = p_value.world_skipped;
 }
 
 } // namespace godot

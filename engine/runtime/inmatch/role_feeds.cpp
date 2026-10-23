@@ -47,6 +47,23 @@ bool local_player_dead(const RoleView &view) {
 	return view.kernel != nullptr && view.kernel->local.local_player_dead();
 }
 
+namespace {
+
+// The local entity's dead bit (entity+0x24 & 2), not the health word: a joiner's replica
+// reads its own record's state flags once its self handle is bound.
+bool local_dead_bit(const RoleView &view) {
+	if (view.joiner) {
+		if (view.runtime == nullptr) return false;
+		const ClientRuntime &runtime = *view.runtime;
+		if (!runtime.has_self_handle()) return false;
+		const replication::ClientEntityState *self = runtime.state().find(runtime.self_handle());
+		return self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
+	}
+	return view.kernel != nullptr && view.kernel->local.local_player_dead();
+}
+
+} // namespace
+
 bool death_menu_triggered(const RoleView &view) {
 	if (view.runtime == nullptr || view.kernel == nullptr) return false;
 	if (view.runtime->state().deploy_overlay_active) return true;
@@ -54,15 +71,29 @@ bool death_menu_triggered(const RoleView &view) {
 	const bool respawns = w.rules.mp_session ||
 			(w.tables.mission_attrib_flags & world::MissionTables::kMissionAttribSinglePlayerRespawn) != 0;
 	if (!respawns) return false;
-	// The entity's dead bit itself, not the health word: a joiner's replica
-	// reads its own record's state flags once its self handle is bound.
-	if (view.joiner) {
-		const ClientRuntime &runtime = *view.runtime;
-		if (!runtime.has_self_handle()) return false;
-		const replication::ClientEntityState *self = runtime.state().find(runtime.self_handle());
-		return self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
-	}
-	return view.kernel->local.local_player_dead();
+	return local_dead_bit(view);
+}
+
+bool hud_overlays_called(const RoleView &view, bool help_open) {
+	if (view.kernel == nullptr) return false;
+	// The death.mnu triggers take the frame to the menu's open leg [orig:
+	//  Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAB58 (the dead bit in session or under
+	//  the respawn attribute), @0x5CAC81..0x5CAC88 (g_DeployScreenActive) -> loc_5CAB5E].
+	if (death_menu_triggered(view)) return false;
+	// A latch left from an open takes it to the close leg [orig: `cmp g_DeathMenuOpenLatch`
+	//  @0x5CAC8E -> Game_CloseInGameScreens @0x5CAC9C].
+	if (view.runtime != nullptr && view.runtime->state().death_menu_open_latch) return false;
+	const world::PlayerViewState &v = view.kernel->local.view;
+	// Camera mode 0, or the death screen: the pass for a body without the dead bit, the F1
+	// help shut [orig: @0x5CACA6..0x5CACB7; @0x5CACED..0x5CACFE (entity+0x24 & 2,
+	//  dword_24C18B0); the call @0x5CAD04].
+	if (v.camera_mode == 0 || v.death_screen_active) return !local_dead_bit(view) && !help_open;
+	// The chase view: the pass from a control seat alone (parentEntity, parentSlot 2 / 5)
+	// [orig: @0x5CACB9..0x5CACDD; the call @0x5CACE3]; any other mode draws none.
+	if (v.camera_mode != 1) return false;
+	const world::World &w = view.kernel->world;
+	const world::Entity *local = w.registry.get(w.cached.local_player);
+	return local != nullptr && local->mounted && world::is_vehicle_control_seat(local->mount_type);
 }
 
 int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones, int vk) {

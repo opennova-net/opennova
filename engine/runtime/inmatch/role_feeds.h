@@ -101,6 +101,15 @@ bool local_player_dead(const RoleView &view);
 // @0x5CAC81 (g_DeployScreenActive)]
 bool death_menu_triggered(const RoleView &view);
 
+// Whether the drawn scene frame calls its HUD pass (HUD_RenderAllOverlays), past its
+// world-skip word: not when a death.mnu trigger holds (the frame takes the menu's open
+// leg) nor while the open latch is left over (the close leg); in camera mode 0 or under
+// the death screen for a body without the dead bit, the F1 help shut; in the chase view
+// (mode 1) from a control seat alone; never in any other mode. The session's radar step
+// runs on it (Session::step_hud_radar_frame). [orig: Render_ProcessMainSceneFrame
+// @0x5CAB2B..0x5CACFE, the calls @0x5CACE3 / @0x5CAD04]
+bool hud_overlays_called(const RoleView &view, bool help_open);
+
 // The deploy leg of the special-key handler over this role's facts (the
 // session bit, the mission attribute, the local player's dead bit and team
 // byte, the deploy-map overlay, the spawn-zone list's team bytes); the rule

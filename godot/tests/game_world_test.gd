@@ -1920,6 +1920,22 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 			assert_true(legs.has("audio"), "its audio still runs: %s" % [legs])
 			assert_false(world.get_last_frame_scene_drawn(),
 					"the shell's scene legs (the death.mnu latch) stand down under the page")
+			assert_false(world.get_last_frame_world_drawn(), "no world under the page")
+			# The command map over the menu: the scene frame draws, its world block does not,
+			# so the death.mnu latch's legs stand down (engine inmatch::FrameOutcome::
+			# world_skipped) [orig: Render_ProcessMainSceneFrame @0x5CA171..0x5CA190,
+			# @0x5CA620..0x5CA640].
+			var mapped := MissionFrameInput.new()
+			mapped.command_map_open = true
+			world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, mapped)
+			assert_true(world.get_last_frame_scene_drawn(), "the command map's frame draws the scene")
+			assert_false(world.get_last_frame_world_drawn(), "but not its world")
+			legs = Array(world.get_last_frame_legs())
+			assert_true(legs.has("local_view") and not legs.has("terrain")
+					and not legs.has("sun_veil"),
+					"the camera compose runs, the world block's rows do not: %s" % [legs])
+			world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, MissionFrameInput.new())
+			assert_true(world.get_last_frame_world_drawn(), "the map closed, the world draws again")
 		world.unload()
 
 

@@ -1055,6 +1055,18 @@ void Session::count_rendered_frame() {
 		role_->observe_frame_statistics(frames_last_second_, accumulator_.cpu_percent());
 }
 
+bool Session::hud_pass_called(const FrameInput &input, const FrameOutcome &out) const {
+	// Inside the world block, past its world-skip word, at its own call site
+	// (inmatch::hud_overlays_called carries the witness) [orig: Render_ProcessMainSceneFrame
+	//  @0x5CA620..0x5CA640; @0x5CAB2B..0x5CAD04].
+	if (out.world_skipped || role_ == nullptr || role_->kernel() == nullptr) return false;
+	RoleView view;
+	view.kernel = role_->kernel();
+	view.runtime = role_->client_runtime();
+	view.joiner = kind_ == RoleKind::Joiner;
+	return hud_overlays_called(view, input.hud_toggles != nullptr && input.hud_toggles->help_open);
+}
+
 void Session::step_scene_head(const FrameInput &input, FrameOutcome &out) {
 	mission::MissionKernel *kernel = role_ != nullptr ? role_->kernel() : nullptr;
 	// The render callback's first leg, the listener update, asks a session peer's cine
@@ -1124,7 +1136,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		step_scene_head(input, out);
 		count_rendered_frame();
 		if (!out.terminal() && out.scene_drawn) {
-			if (!out.world_skipped) step_hud_radar_frame();
+			if (hud_pass_called(input, out)) step_hud_radar_frame();
 			step_cine_render_frame();
 		}
 		return out;
@@ -1198,15 +1210,16 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		rebase_clock_ = true;
 	}
 	last_perf_ = out.perf;
-	// The frame's render follows the drain: the scene frame's HUD pass, then its cine pass;
-	// the status page runs neither, so under it the radar ages nothing, and a frame that
-	// skips its world runs no HUD pass [orig: Game_MainLoop's Game_ProcessMainFrame drain,
+	// The frame's render follows the drain: the scene frame's HUD pass where its call site
+	// calls it (hud_pass_called), then its cine pass; the status page runs neither, so under
+	// it the radar ages nothing, and a frame that skips its world runs no HUD pass
+	// [orig: Game_MainLoop's Game_ProcessMainFrame drain,
 	// then the render's HUD_RenderAllOverlays and cine pass; Render_ProcessMainSceneFrame
 	// @0x5CAD04 (@0x5CACE3 for a chase view from a control seat) -> HUD_RenderAllOverlays,
 	// inside the world block @0x5CA620..0x5CA640 jumps past, then @0x5CADFC ->
 	// Cine_RenderOrEndPlayback, the scene arm @0x521CE8 alone].
 	if (!out.terminal() && out.scene_drawn) {
-		if (!out.world_skipped) step_hud_radar_frame();
+		if (hud_pass_called(input, out)) step_hud_radar_frame();
 		step_cine_render_frame();
 	}
 	return out;

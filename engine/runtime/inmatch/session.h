@@ -752,6 +752,9 @@ private:
 	// cine test on a session peer, under the page too, then the drawn scene frame's
 	// world-skip word, stamped into the local view.
 	void step_scene_head(const FrameInput &input, FrameOutcome &out);
+	// Whether the drawn frame's HUD pass runs: not on a frame that skips its world, else
+	// at its call site's gates (inmatch::hud_overlays_called).
+	bool hud_pass_called(const FrameInput &input, const FrameOutcome &out) const;
 	static int64_t now_us();
 
 	Role *role_ = nullptr;

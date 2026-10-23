@@ -128,6 +128,7 @@ private:
 	String error_;
 	uint32_t frame_stamp_ms_ = 0;
 	bool scene_drawn_ = true;
+	bool world_skipped_ = false;
 
 protected:
 	static void _bind_methods();
@@ -146,6 +147,9 @@ public:
 	// The render callback's choice after the drain: the scene frame, or the status page in its
 	// place (engine inmatch::Session::draws_scene); C++ only, GameWorld's scene gate reads it.
 	bool is_scene_drawn() const { return scene_drawn_; }
+	// The drawn scene frame skipped its world (engine inmatch::FrameOutcome::world_skipped);
+	// C++ only, GameWorld's scene gate reads it.
+	bool is_world_skipped() const { return world_skipped_; }
 
 	void assign(const opennova::inmatch::FrameOutcome &p_value);
 };

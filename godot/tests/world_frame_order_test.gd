@@ -78,6 +78,19 @@ func test_the_scene_rows_are_the_scene_frame() -> void:
 	assert_false(GameWorld.frame_leg_draws_scene("no_such_leg"))
 
 
+# The scene frame's world block (Render_ProcessMainSceneFrame @0x5CA620..0x5CA640 jumps past
+# it when the head's world-skip word is up: a cine plays, or the command map is over the
+# menu): its state legs are flagged, all of them scene rows.
+func test_the_world_block_rows() -> void:
+	var world_rows := ["terrain", "water", "occlusion", "foliage", "sun_veil"]
+	for name in Array(GameWorld.frame_leg_names()):
+		assert_eq(GameWorld.frame_leg_in_world(name), world_rows.has(name),
+				"%s is the world block's: %s" % [name, world_rows.has(name)])
+		if GameWorld.frame_leg_in_world(name):
+			assert_true(GameWorld.frame_leg_draws_scene(name), "%s is a scene row" % name)
+	assert_false(GameWorld.frame_leg_in_world("no_such_leg"))
+
+
 func test_only_the_session_and_network_rows_stop_the_frame() -> void:
 	for name in GameWorld.frame_leg_names():
 		var stops := GameWorld.frame_leg_stops_frame(name)

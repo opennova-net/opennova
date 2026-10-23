@@ -260,7 +260,64 @@ static void serve_only_end_round_cases() {
 	CHECK(!end_round_session_state(listen).header_known);
 }
 
+// The scene frame's call of its HUD pass (the session's radar step runs on it): no call
+// while a death.mnu trigger holds (the deploy-map overlay; the dead bit in session) or
+// the open latch is left over; in camera mode 0 or under the death screen for a body
+// without the dead bit, the F1 help shut; in the chase view from a control seat alone.
+// [orig: Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAB58, @0x5CAC81 (g_DeployScreenActive),
+//  @0x5CAC8E (g_DeathMenuOpenLatch), @0x5CACA6..0x5CACDD (the mode, the death screen, the
+//  seat), @0x5CACED..0x5CACFE (the dead bit, dword_24C18B0); the calls @0x5CACE3 / @0x5CAD04]
+static void hud_pass_call_site_cases() {
+	auto runtime_heap = std::make_unique<ClientRuntime>("hud");
+	ClientRuntime &runtime = *runtime_heap;
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 8);
+	world::Entity seed;
+	seed.alive = true;
+	seed.health = 100;
+	const world::EntityHandle local = kernel.world.registry.spawn(0, seed);
+	kernel.world.cached.local_player = local;
+	RoleView view;
+	view.kernel = &kernel;
+	view.runtime = &runtime;
+	world::PlayerViewState &v = kernel.local.view;
+	CHECK(hud_overlays_called(view, false));
+	CHECK(!hud_overlays_called(view, true)); // the F1 help
+	runtime.state().deploy_overlay_active = true;
+	CHECK(!hud_overlays_called(view, false)); // the menu's open leg
+	runtime.state().deploy_overlay_active = false;
+	runtime.state().death_menu_open_latch = true;
+	CHECK(!hud_overlays_called(view, false)); // the close leg
+	runtime.state().death_menu_open_latch = false;
+	world::Entity &body = *kernel.world.registry.get(local);
+	body.flags |= world::kEntityFlagDead;
+	CHECK(!hud_overlays_called(view, false)); // out of session: the mode-0 leg's dead bit
+	kernel.world.rules.mp_session = true;
+	CHECK(!hud_overlays_called(view, false)); // in session: the death trigger
+	kernel.world.rules.mp_session = false;
+	body.flags &= ~world::kEntityFlagDead;
+	v.camera_mode = 1;
+	CHECK(!hud_overlays_called(view, false)); // the chase view on foot
+	body.mounted = true;
+	body.mount_type = world::SeatType::Gunner;
+	CHECK(!hud_overlays_called(view, false));
+	body.mount_type = world::SeatType::Driver;
+	CHECK(hud_overlays_called(view, false)); // parentSlot 5
+	body.mount_type = world::SeatType::Controller;
+	CHECK(hud_overlays_called(view, true)); // parentSlot 2; this leg reads no help word
+	body.mounted = false;
+	v.death_screen_active = true;
+	CHECK(hud_overlays_called(view, false)); // the death screen takes the mode-0 leg
+	v.death_screen_active = false;
+	v.camera_mode = 4;
+	CHECK(!hud_overlays_called(view, false));
+	RoleView bare;
+	CHECK(!hud_overlays_called(bare, false));
+}
+
 int main() {
+	hud_pass_call_site_cases();
 	voice_macro_override_cases();
 	lighting_walk_keeps_the_row_at_l_cases();
 	serve_only_end_round_cases();

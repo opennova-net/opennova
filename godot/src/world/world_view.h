@@ -23,9 +23,10 @@ class GameWorld;
 // live one over itself; a test fakes it by overriding the two hooks (ADR 0043
 // rule 11: a presenter depends on the narrowest surface it uses, never on a
 // world double). The bound verbs dispatch to a script override of the hook
-// first, else to the C++ implementation behind them. scene_drawn is the last
-// frame's scene gate verdict (GameWorld.get_last_frame_scene_drawn): a screen's
-// scene-frame legs run on it; the base and a world-less view answer drawn.
+// first, else to the C++ implementation behind them. scene_drawn is whether the last
+// frame drew its world (GameWorld.get_last_frame_world_drawn: the scene frame, its
+// world-skip word down): a screen's world-block legs (the death.mnu close) run on it;
+// the base and a world-less view answer drawn.
 class WorldView : public RefCounted {
 	GDCLASS(WorldView, RefCounted)
 

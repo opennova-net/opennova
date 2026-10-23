@@ -993,6 +993,7 @@ void ObjectModel::mark_render_order_dirty_all() {
 // their one process loop. There is no per-node _process, so nothing self-clocks
 // off Godot's frame outside that one driver.
 HashSet<ObjectModel *> ObjectModel::awake_models_;
+bool ObjectModel::world_skipped_ = false;
 HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
 HashSet<ObjectModel *> ObjectModel::water_mirror_clip_models_;
 HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
@@ -1448,7 +1449,9 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 	// A model the weapon Inset pass draws through its twins is submitted
 	// there even while the main view hides the node: its pose, PANM and
 	// materials advance for the twins (object_model_views.cpp).
-	const bool renderable = (is_visible_in_tree() && on_screen_) || !view_twins_.empty();
+	// A frame that skips its world submits no model (set_world_skipped).
+	const bool renderable = !world_skipped_ &&
+			((is_visible_in_tree() && on_screen_) || !view_twins_.empty());
 	if (p_profile != nullptr && renderable) {
 		++p_profile->renderable_models;
 	}

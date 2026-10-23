@@ -1523,7 +1523,10 @@ func _on_join_deploy_pick_required() -> void:
 func _maybe_open_death_menu() -> void:
 	if _state == State.MENU or _world == null:
 		return
-	if not _world.get_last_frame_scene_drawn():
+	# The latch's open and close legs sit in the scene frame's world block: a frame the
+	# status page stands in for, or one that skips its world (a cine, the command map over
+	# the menu), takes neither (engine inmatch::FrameOutcome::world_skipped).
+	if not _world.get_last_frame_world_drawn():
 		return
 	var sim: Simulation = _world.get_sim()
 	if sim == null:

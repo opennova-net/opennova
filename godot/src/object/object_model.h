@@ -576,6 +576,8 @@ private:
 	// themselves on wake and drop out on park. Replaces the per-node _process
 	// clock so nothing self-clocks outside that one driver.
 	static HashSet<ObjectModel *> awake_models_;
+	// The frame skips its world (set_world_skipped): no model submits.
+	static bool world_skipped_;
 	// Monotonic invalidation stamp for native row plans that retain typed model
 	// pointers. Godot destroys Nodes on the main thread; PREDELETE advances this
 	// before any cached pointer can be observed by a later presentation walk.
@@ -856,6 +858,11 @@ public:
 	// work; there is no per-node _process.
 	static void advance_awake_frame(double p_delta);
 	static PackedInt64Array profile_awake_frame(double p_delta);
+	// The game frame's world-skip word (engine inmatch::FrameOutcome::world_skipped): a frame
+	// that skips its world submits no model, so the awake set's next advance treats every
+	// model as not renderable (its clocks and anims advance; its PANM and material
+	// generators, and their render-stream noise draws, wait for a drawn frame).
+	static void set_world_skipped(bool p_skipped) { world_skipped_ = p_skipped; }
 	static uint64_t lifetime_generation() { return lifetime_generation_; }
 	void set_present_planned(bool p_planned) { present_planned_ = p_planned; }
 	bool is_present_planned() const { return present_planned_; }

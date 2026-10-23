@@ -141,25 +141,27 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// pass (the witnessed order is cited at the engine's render frame,
 	// docs/render/render-order-re.md); the water noise the terrain binds is
 	// the previous frame's, exactly as the original water pass regenerates it
-	// after the terrain draw.
-	{ "terrain", FrameStats::WORLD_TERRAIN, &GameWorld::leg_terrain, kSceneLeg },
-	{ "water", FrameStats::WORLD_WATER, &GameWorld::leg_water, kSceneLeg },
+	// after the terrain draw. Terrain, water, the collect (occlusion), the foliage and the
+	// sun veil's stop-down target are the world block's state legs (kWorldLeg): a frame
+	// that skips its world (a cine, the command map over the menu) runs none of them.
+	{ "terrain", FrameStats::WORLD_TERRAIN, &GameWorld::leg_terrain, kSceneLeg | kWorldLeg },
+	{ "water", FrameStats::WORLD_WATER, &GameWorld::leg_water, kSceneLeg | kWorldLeg },
 	// Net-session edges; a failed streamed-asset leg STOPS the frame.
 	{ "network", FrameStats::WORLD_NETWORK_FRAME, &GameWorld::leg_network, kStopsFrame },
 	// Blink flags only change on sim ticks (the body gates on did_tick).
 	{ "blink", FrameStats::WORLD_BLINK, &GameWorld::leg_blink, kSceneLeg },
 	// The OCCL_* slots land inside OcclusionFrame.apply_frame itself.
-	{ "occlusion", kNoSlot, &GameWorld::leg_occlusion, kSceneLeg },
+	{ "occlusion", kNoSlot, &GameWorld::leg_occlusion, kSceneLeg | kWorldLeg },
 	// Foliage receives the same live render transform and consumes this
 	// frame's detail-cell handoff (after terrain) and the MODEL anchors the
 	// visible-entity walk just admitted (after occlusion: retail collects the
 	// visible entities before the BySide walks that update the model tiles;
 	// banked at finish).
-	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kSceneLeg },
+	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kSceneLeg | kWorldLeg },
 	{ "iris", FrameStats::WORLD_IRIS, &GameWorld::leg_iris, kSceneLeg },
 	// The sun-veil stop-down feed for the weather ticks banked above (the
 	// veil alpha itself rides the Celestial shader-global push).
-	{ "sun_veil", FrameStats::WORLD_SUN_VEIL, &GameWorld::leg_sun_veil, kSceneLeg },
+	{ "sun_veil", FrameStats::WORLD_SUN_VEIL, &GameWorld::leg_sun_veil, kSceneLeg | kWorldLeg },
 	// The EffectWorld point-light select for this camera (after iris
 	// publishes the frame's ambient scale, before the lit material draws
 	// consume the pushed globals).
@@ -326,6 +328,15 @@ PackedStringArray GameWorld::get_last_frame_legs() const {
 	return names;
 }
 
+bool GameWorld::frame_leg_in_world(const String &p_name) {
+	for (int i = 0; i < kFrameLegCount; ++i) {
+		if (p_name == kFrameLegs[i].name) {
+			return (kFrameLegs[i].flags & kWorldLeg) != 0;
+		}
+	}
+	return false;
+}
+
 bool GameWorld::frame_leg_stops_frame(const String &p_name) {
 	for (int i = 0; i < kFrameLegCount; ++i) {
 		if (p_name == kFrameLegs[i].name) {
@@ -344,6 +355,8 @@ void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext 
 		const FrameLeg &leg = p_legs[i];
 		// The status page stands in for the scene frame: its rows do not run.
 		if ((leg.flags & kSceneLeg) != 0 && !r_ctx.scene_drawn) continue;
+		// A frame that skips its world runs none of its world block's rows.
+		if ((leg.flags & kWorldLeg) != 0 && r_ctx.world_skipped) continue;
 		if (live_table && i < 64) last_frame_run_mask_ |= uint64_t{1} << i;
 		// One of the first frames past a load: the leg's span under the frame's (an instrument).
 		LoadTimeline *post_load = live_table ? r_ctx.post_load_frame : nullptr;
@@ -532,6 +545,7 @@ GameWorld::LegResult GameWorld::leg_scene_gate(FrameContext &r_ctx) {
 	// advance takes the role's verdict on the view word as it stands (engine
 	// inmatch::Session::draws_scene carries the witness).
 	const Ref<Simulation> sim = get_sim();
+	last_frame_world_skipped_ = false;
 	if (sim.is_null()) {
 		r_ctx.scene_drawn = last_frame_scene_drawn_ = true;
 		return kLegSkipped;
@@ -543,6 +557,10 @@ GameWorld::LegResult GameWorld::leg_scene_gate(FrameContext &r_ctx) {
 				r_ctx.input.is_valid() ? r_ctx.input->get_hud_toggles() : Ref<HudToggles>());
 	}
 	last_frame_scene_drawn_ = r_ctx.scene_drawn;
+	// The drawn frame's world-skip word (engine inmatch::FrameOutcome::world_skipped): the
+	// shell's world-block legs (the death.mnu latch's open and close) stand down on it.
+	last_frame_world_skipped_ = r_ctx.outcome.is_valid() && r_ctx.outcome->is_world_skipped();
+	r_ctx.world_skipped = last_frame_world_skipped_;
 	return kLegRan;
 }
 
@@ -1388,6 +1406,11 @@ void GameWorld::render_material_frame() {
 	// while it renders. The Inset pass collects its own verdicts first (after
 	// the main collect of the occlusion leg), then both views select levels.
 	// Both views draw at the session's object detail (object_detail_).
+	// The render sector walk sits in the world block: a frame that skips its world (a cine,
+	// the command map over the menu) submits no model, so no PANM or material generator
+	// evaluates and none draws its render-stream noise (engine inmatch::FrameOutcome::
+	// world_skipped); the models' clocks and anims still advance.
+	ObjectModel::set_world_skipped(last_frame_world_skipped_);
 	ObjectLodFrame frames[2];
 	if (Camera3D *image = image_camera()) {
 		frames[0] = ObjectLodFrame::from_camera(image, surface_width(), object_detail_);
@@ -1444,11 +1467,13 @@ void GameWorld::render_material_frame() {
 	}
 	if (!frame_stats_on_) {
 		ObjectModel::advance_awake_frame(frame_delta_);
+		ObjectModel::set_world_skipped(false);
 		// The Inset twins follow the poses the advance just wrote.
 		ObjectModel::sync_view_twins();
 		return;
 	}
 	const PackedInt64Array profile = ObjectModel::profile_awake_frame(frame_delta_);
+	ObjectModel::set_world_skipped(false);
 	ObjectModel::sync_view_twins();
 	if (profile.size() < ObjectModel::AWAKE_PROFILE_SLOT_COUNT) {
 		return;
