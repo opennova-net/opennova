@@ -1590,6 +1590,48 @@ bool run_the_mission_start_push_bears_l() {
 			"birth: the call ends in the final wait with L, ahead of any release");
 }
 
+// D-NET-NEW-L2-53: the mission start's second 0x2F reads its words at its build, past
+// Player_InitPlayer and the receive: the init stores g_CurrentWeaponSlot (195, then its weapon
+// leg's select), which the second 0x2F reads @0x525C1A, its team @0x525BE8. A slot the init leg
+// moves goes out in the second 0x2F; the first 0x2F, queued ahead of the init, keeps 195.
+// [orig: Game_StartMission @0x524360 - the first 0x2F @0x525836, Player_InitPlayer @0x525BBC,
+//  the receive @0x525BD9, g_LocalTeam @0x525BE8, g_CurrentWeaponSlot @0x525C1A,
+//  NetPacket_SendLoadoutSubmit @0x525C2E; Player_InitPlayer @0x4E15F0 - g_CurrentWeaponSlot = 195
+//  @0x4E17FF, Player_SelectWeaponSlot @0x4E1995]
+bool run_the_second_0x2f_reads_its_words_past_the_init() {
+	Harness h;
+	if (!expect(drive_into_the_world_stream(h, 0), "second 0x2F: the world stream runs"))
+		return false;
+	h.load_declared = true;
+	(void)h.frame({self_spawn_record()});
+	(void)h.frame({make_protocol_message(0x1A, {})});
+	if (!expect(h.client.mission_start_released(),
+			"second 0x2F: the 0x1A released the mission start"))
+		return false;
+	inmatch::ClientRuntime::MissionStartEndLegs legs;
+	legs.init_player = [&] {
+		inmatch::JoinerConnection::LoadoutKit kit;
+		kit.equipped_combo = 7;
+		h.client.set_loadout_kit(std::move(kit));
+	};
+	std::vector<std::vector<uint8_t>> sent = h.client.push_mission_start_end(legs);
+	const std::vector<std::vector<uint8_t>> wait_pass = h.frame();
+	sent.insert(sent.end(), wait_pass.begin(), wait_pass.end());
+	std::vector<uint32_t> slots;
+	for (const std::vector<uint8_t> &datagram : sent) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, h.auth.scrk, header, messages)) continue;
+		for (const ProtocolMessage &m : messages) {
+			LoadoutSubmit submit;
+			if (m.tag == 0x2F && decode_loadout_submit(m.payload.data(), m.payload.size(), submit))
+				slots.push_back(submit.weapon_slot_index);
+		}
+	}
+	return expect(slots == std::vector<uint32_t>({195u, 7u}),
+			"second 0x2F: the first keeps 195, the second carries the slot the init left");
+}
+
 // The joiner's round clock at its mission start: retail never seeds it. Game_StartMission's
 // round-clock seed (g_RoundTimeRemaining = g_RoundTimeLimitMinutes x 3720 when in session,
 // outside the Co-op waypoint family, with a nonzero limit) sits on the authority / single-player
@@ -2027,6 +2069,7 @@ int main() {
 	ok = run_the_mission_start_runs_in_the_0x1a_pass() && ok;
 	ok = run_the_mission_start_legs_keep_retails_order() && ok;
 	ok = run_the_mission_start_push_bears_l() && ok;
+	ok = run_the_second_0x2f_reads_its_words_past_the_init() && ok;
 	ok = run_the_joiner_mission_start_keeps_the_folded_round_clock() && ok;
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;

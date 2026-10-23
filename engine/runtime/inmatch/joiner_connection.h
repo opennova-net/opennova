@@ -695,17 +695,28 @@ public:
 	// [orig: Game_StartMission @0x524360 - the loads @0x525495..0x525762, the first 0x2F
 	//  @0x525836, the freeze @0x525a6e]
 	bool take_mission_start_first_loadout(ProtocolMessage &out);
-	// The mission start's submissions at its end, in retail's order, unframed (the runtime
-	// queues each at its own point): the first 0x2F when take_mission_start_first_loadout has
-	// not taken it (first_loadout's tag 0 when it has), the second and the 0x0B; the stage
-	// moves on to the final wait for the S2C 0x0F. False when the mission start is not
-	// released.
+	// The mission start's end once its load has run, unframed: the first 0x2F when
+	// take_mission_start_first_loadout has not taken it (first_loadout's tag 0 when it has)
+	// and Player_InitPlayer's binding of the local entity; the stage moves on to the final wait
+	// for the S2C 0x0F. False when the mission start is not released. The second 0x2F and the
+	// 0x0B are built where the runtime queues them (mission_start_second_loadout,
+	// mission_start_status), past the init and the receive, as retail reads their words.
 	struct MissionStartSubmissions {
 		ProtocolMessage first_loadout;  // C2S 0x2F, slot 195 [orig: @0x525836]
-		ProtocolMessage second_loadout; // C2S 0x2F, the spawn fill's slot [orig: @0x525c2e]
-		ProtocolMessage mission_status; // C2S 0x0B [orig: @0x52624b]
 	};
 	bool take_mission_start_submissions(MissionStartSubmissions &out);
+	// The mission start's second C2S 0x2F, its words read at its build, past Player_InitPlayer
+	// and the receive: the latched team (g_LocalTeam), the side block's class byte and the
+	// spawn fill's equipped slot (g_CurrentWeaponSlot, which Player_InitPlayer stores 195 into
+	// and its weapon leg selects from) (D-NET-NEW-L2-53).
+	// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, the receive @0x525BD9,
+	//  g_LocalTeam @0x525BE8, g_CurrentWeaponSlot @0x525C1A, NetPacket_SendLoadoutSubmit
+	//  @0x525C2E; Player_InitPlayer @0x4E15F0 - @0x4E17FF, Player_SelectWeaponSlot @0x4E1995]
+	ProtocolMessage mission_start_second_loadout() const;
+	// The mission start's C2S 0x0B, built ahead of its queue.
+	// [orig: Game_StartMission @0x524360 - NetPacket_WriteStringAndThreeInts @0x52622E, the
+	//  0x0B's queue @0x52623f..0x52624b (CNapiNetwork_QueueReliableMessage @0x52624B)]
+	ProtocolMessage mission_start_status() const;
 
 	// The current profile's per-side character selections, serialized into the
 	// game-session ClientAuth as CI0/CI1/TR/CTA/CTB/VCA/VCB. Configure this before

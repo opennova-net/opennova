@@ -2266,7 +2266,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end(
 	(void)joiner_->take_mission_start_submissions(submissions);
 	if (legs.init_player) legs.init_player();
 	mission_start_receive_pump();
-	send_queue_.push_back(std::move(submissions.second_loadout));
+	// The second 0x2F's words as they stand past the init and the receive (the team, the
+	// side's class, the equipped slot), read at its build (D-NET-NEW-L2-53).
+	// [orig: Game_StartMission @0x524360 - g_LocalTeam @0x525BE8, g_CurrentWeaponSlot
+	//  @0x525C1A, NetPacket_SendLoadoutSubmit @0x525C2E]
+	send_queue_.push_back(joiner_->mission_start_second_loadout());
 	// The block on the local entity: its indoors bit and revive latch cleared, unhidden,
 	// every proximity list rebuilt, hidden again (the header carries the witness).
 	if (legs.start_block) legs.start_block();
@@ -2276,7 +2280,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end(
 	if (legs.present) legs.present();
 	// The Attack & Defend latch, past the present and ahead of the 0x0B's queue.
 	if (legs.latch) legs.latch();
-	send_queue_.push_back(std::move(submissions.mission_status));
+	send_queue_.push_back(joiner_->mission_start_status());
 	mission_start_send_pump(outbound);
 	// The push ends here. What the countdown still holds waits in the queue for the final
 	// wait for the S2C 0x0F, whose every pass reads the socket and runs the receive

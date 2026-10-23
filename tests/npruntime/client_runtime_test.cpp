@@ -1769,8 +1769,11 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 	if (!expect(!joiner.in_mission_start(), "the final wait is past the mission start's aborts")) {
 		return false;
 	}
+	// The second 0x2F and the 0x0B are built at their queue points, past the take (its
+	// Player_InitPlayer binding) and the receive (D-NET-NEW-L2-53).
 	const std::vector<std::vector<uint8_t>> mission_start_end = joiner.frame_messages(
-			{submissions.first_loadout, submissions.second_loadout, submissions.mission_status});
+			{submissions.first_loadout, joiner.mission_start_second_loadout(),
+					joiner.mission_start_status()});
 	if (!expect(mission_start_end.size() == 1 &&
 				decode_client_session(
 						mission_start_end[0], client_auth.scrk,
@@ -2132,8 +2135,8 @@ bool run_early_sync_tail_latch() {
 	return expect(world_end_result.outbound.empty() &&
 				joiner.take_mission_start_submissions(submissions) &&
 				submissions.first_loadout.tag == 0x2F &&
-				submissions.second_loadout.tag == 0x2F &&
-				submissions.mission_status.tag == 0x0B,
+				joiner.mission_start_second_loadout().tag == 0x2F &&
+				joiner.mission_start_status().tag == 0x0B,
 			"early-tail: the FSM continues normally past the latched stage");
 }
 

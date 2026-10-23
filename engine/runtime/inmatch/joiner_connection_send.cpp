@@ -514,25 +514,29 @@ bool JoinerConnection::take_mission_start_first_loadout(ProtocolMessage &out) {
 
 bool JoinerConnection::take_mission_start_submissions(MissionStartSubmissions &out) {
 	if (post_auth_stage_ != PostAuthStage::AwaitMissionStart) return false;
-	// The first 0x2F unless the load's first leg took it, the second and the mission status,
-	// in that order.
-	// [orig: Game_StartMission @0x525836 / @0x525c2e -> NetPacket_SendLoadoutSubmit
-	//  @0x42cdc0; the 0x0B @0x52623f..0x52624b]
+	// The first 0x2F unless the load's first leg took it; the second and the mission status
+	// are built at their queue points (mission_start_second_loadout, mission_start_status).
+	// [orig: Game_StartMission @0x525836 -> NetPacket_SendLoadoutSubmit @0x42cdc0]
 	out.first_loadout = ProtocolMessage{};
 	(void)take_mission_start_first_loadout(out.first_loadout);
 	// Player_InitPlayer between the two binds the local player entity to the joiner's
 	// own entity (the S2C 0x50's compares read it from here on) [orig: Game_StartMission
 	// @0x524360 - the call @0x525BBC; Player_InitPlayer @0x4E15F0 - the store @0x4E17EB].
 	if (has_self_handle_) *local_player_entity_ = self_handle_;
-	const LoadoutSubmit second = build_profile_loadout_submit(assigned_team_, true);
-	const gameprofile::GameProfile *profile =
-			title_ != nullptr ? gameprofile::gameprofile_by_id(title_->game_id) : nullptr;
-	out.second_loadout = make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(second));
-	out.mission_status = make_protocol_message(0x0B, build_mission_status(
-			mission_status_side_password(),
-			packed_game_version(profile != nullptr ? profile->version_text : nullptr)));
 	post_auth_stage_ = PostAuthStage::AwaitDeployment;
 	return true;
+}
+
+ProtocolMessage JoinerConnection::mission_start_second_loadout() const {
+	return make_protocol_message(c2s::LOADOUT_SUBMIT,
+			encode_loadout_submit(build_profile_loadout_submit(assigned_team_, true)));
+}
+
+ProtocolMessage JoinerConnection::mission_start_status() const {
+	const gameprofile::GameProfile *profile =
+			title_ != nullptr ? gameprofile::gameprofile_by_id(title_->game_id) : nullptr;
+	return make_protocol_message(0x0B, build_mission_status(mission_status_side_password(),
+			packed_game_version(profile != nullptr ? profile->version_text : nullptr)));
 }
 
 std::vector<uint8_t> JoinerConnection::frame_loadout_submit(const LoadoutSubmit &submit) {
