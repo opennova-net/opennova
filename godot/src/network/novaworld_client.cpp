@@ -912,20 +912,26 @@ Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestS
 	}
 	http->set_accept_gzip(false);
 	// A menu-browser GET takes its nocachefix pair: the tick now and the server's resolved
-	// address (engine: browser_cache_bust_url, D-NET-NEW-L9-31).
+	// address (engine: browser_cache_bust_url, D-NET-NEW-L9-31). The host is resolved once and
+	// the request connects to that address, its Host line still the name, so the connect uses the
+	// address the pair reads, as the browser's does (one resolve into the request's +0x30 word,
+	// cited at browser_cache_bust_url in engine/net/novaworld/http_flow.h).
 	std::string url = spec.url;
 	if (spec.cache_bust) {
 		const std::size_t colon = authority.find(':');
+		IP *ip = IP::get_singleton();
+		const String address = ip != nullptr
+				? ip->resolve_hostname(opennova::to_gd(authority.substr(0, colon)), IP::TYPE_IPV4)
+				: String();
+		const PackedStringArray octets = address.split(".");
+		if (octets.size() != 4)
+			return ERR_CANT_RESOLVE;
 		std::array<uint8_t, 4> server{};
-		if (IP *ip = IP::get_singleton()) {
-			const PackedStringArray octets =
-					ip->resolve_hostname(opennova::to_gd(authority.substr(0, colon)), IP::TYPE_IPV4)
-							.split(".");
-			if (octets.size() == 4) {
-				for (int i = 0; i < 4; ++i)
-					server[static_cast<std::size_t>(i)] = static_cast<uint8_t>(octets[i].to_int());
-			}
-		}
+		for (int i = 0; i < 4; ++i)
+			server[static_cast<std::size_t>(i)] = static_cast<uint8_t>(octets[i].to_int());
+		const std::string port = colon == std::string::npos ? std::string() : authority.substr(colon);
+		url = spec.url.substr(0, host_at) + opennova::to_std(address) + port +
+				(path_at == std::string::npos ? std::string() : spec.url.substr(path_at));
 		url = opennova::browser_cache_bust_url(url, opennova::world::frame_tick_count_ms(), server);
 	}
 	const HTTPClient::Method method = (spec.method == opennova::HttpMethod::Post)

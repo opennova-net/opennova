@@ -12,6 +12,7 @@
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (a GET's nocachefix tick)
 
 #include <chrono>
+#include <optional>
 
 namespace opennova::serve {
 
@@ -377,8 +378,19 @@ void Lister::ship(const HttpRequestSpec &spec) {
 	const char *method = spec.method == HttpMethod::Post ? "POST" : "GET";
 	io::logf(LogLevel::kDebug, "[http] %s %s", method, spec.url.c_str());
 	http_ = std::async(std::launch::async, [spec, method, allow_public]() {
-		const auto resolve = [allow_public](const std::string &host, net::Endpoint &out) {
-			return resolve_destination(host, out, allow_public, "web host");
+		// One resolve per request: the connect uses the address the nocachefix pair reads.
+		// [orig: CNapiWinsock_InitFromUrl @0x658DA0 - CNapiWinsock_ResolveHostAsync called
+		//  @0x658E4B into the request's +0x30 word, which CUIBrowser_SendHTTPRequest @0x658840
+		//  reads for the pair @0x6588A3 and the connect reads @0x6597F3]
+		std::optional<net::Endpoint> resolved;
+		const auto resolve = [allow_public, &resolved](const std::string &host, net::Endpoint &out) {
+			if (!resolved) {
+				net::Endpoint server{};
+				if (!resolve_destination(host, server, allow_public, "web host")) return false;
+				resolved = server;
+			}
+			out.ip = resolved->ip;
+			return true;
 		};
 		// A menu-browser GET takes its nocachefix pair once its server resolved: the tick at the
 		// send and that server's address (browser_cache_bust_url, D-NET-NEW-L9-31).
@@ -387,10 +399,14 @@ void Lister::ship(const HttpRequestSpec &spec) {
 			const std::size_t scheme = url.find("://");
 			const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
 			const std::size_t host_end = url.find_first_of(":/", host_at);
+			const std::string host = url.substr(host_at,
+					host_end == std::string::npos ? std::string::npos : host_end - host_at);
 			net::Endpoint server{};
-			(void)resolve(url.substr(host_at, host_end == std::string::npos ? std::string::npos
-			                                                                : host_end - host_at),
-					server);
+			if (!resolve(host, server)) {
+				net::HttpReply refused;
+				refused.error = "cannot reach " + host;
+				return refused;
+			}
 			url = browser_cache_bust_url(url, world::frame_tick_count_ms(), server.ip);
 		}
 		return net::http_exchange(method, url, spec.headers, spec.body, kHttpTimeoutMs, resolve);
