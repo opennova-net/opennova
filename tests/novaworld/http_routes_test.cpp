@@ -3806,6 +3806,17 @@ int test_join_roster(Harness &h) {
 	TEST_EXPECT(nwjoin(ada).code == 200);
 	TEST_EXPECT(nwjoin(bo).code == 200);
 	TEST_EXPECT(roster() == (std::vector<std::string>{ "roster_ada", "roster_bo" }));
+	// No client sends the relay's tag in a query (D-NET-267 as amended): a ?tag= with no tag cookie is
+	// no second call, it starts a fresh relay, and the roster does not move.
+	{
+		const auto first = h.send_to(h.fresh_port, "GET", "/NWJoin.dll?rid=" + rid);
+		const std::string tag = set_cookie_value(first, "NWJOINSESSIONTAG");
+		const auto queried = h.send_to(h.fresh_port, "GET", "/NWJoin.dll?tag=" + tag,
+				{ "Cookie: LOGINSESSIONTAG=" + ada });
+		const std::string fresh = set_cookie_value(queried, "NWJOINSESSIONTAG");
+		TEST_EXPECT(!tag.empty() && queried.code == 200 && !fresh.empty() && fresh != tag);
+		TEST_EXPECT(roster() == (std::vector<std::string>{ "roster_ada", "roster_bo" }));
+	}
 
 	// Each plays on it, its lobby session signed in as its account.
 	PushHost ada_client(h.nw_udp.bound_port(), 0x524f5332u);

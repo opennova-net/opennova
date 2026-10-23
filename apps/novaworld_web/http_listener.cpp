@@ -1460,22 +1460,16 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 
 	// GET /NWLogin.dll  (relay refresh — completes auth)
 	auto handle_login_get = [this, templates_dir](const crow::request &req) {
-		// Prefer ?tag= query param (set by our relay template's refresh
-		// URL). Fall back to LOGINSESSIONTAG cookie for clients that do
-		// preserve it (curl, Vue dev, Godot).
+		// The relay page's bare refresh: the LOGINSESSIONTAG cookie carries the tag
+		// (net/novaworld/relay_request.h).
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		std::string tag;
-		if (req.url_params.get("tag")) {
-			tag = req.url_params.get("tag");
-		} else {
-			auto tag_it = cookies.find("LOGINSESSIONTAG");
-			if (tag_it != cookies.end()) tag = tag_it->second;
-		}
+		if (auto tag_it = cookies.find("LOGINSESSIONTAG"); tag_it != cookies.end()) tag = tag_it->second;
 		if (tag.empty()) {
-			std::printf("[http] GET %s -> 400 (no tag in query or cookie)\n",
+			std::printf("[http] GET %s -> 400 (no LOGINSESSIONTAG cookie)\n",
 					loggable(req.url).c_str());
 			crow::response res(400);
-			res.body = "missing LOGINSESSIONTAG (cookie or ?tag= query)";
+			res.body = "missing LOGINSESSIONTAG cookie";
 			return res;
 		}
 		auto session = sessions_.get_login(tag);
@@ -1574,11 +1568,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 	auto handle_logout = [this, templates_dir](const crow::request &req) {
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		std::string tag;
-		if (req.url_params.get("tag")) {
-			tag = req.url_params.get("tag");
-		} else if (auto it = cookies.find("LOGINSESSIONTAG"); it != cookies.end()) {
-			tag = it->second;
-		}
+		if (auto it = cookies.find("LOGINSESSIONTAG"); it != cookies.end()) tag = it->second;
 		if (!tag.empty()) {
 			sessions_.erase_login(tag);
 			try { clear_active_user_session_by_tag(*db_pool_.acquire(), tag); }
@@ -1784,26 +1774,18 @@ void HttpListener::register_legacy_host_join_routes(
 	//                                             success template.
 	auto handle_join = [this, templates_dir](const crow::request &req) {
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
-		// Same HTTP/1.0 cookie-loss workaround as /NWLogin.dll: prefer
-		// ?tag= URL param (we set it in REFRESH_ENDPOINT below) and fall
-		// back to NWJOINSESSIONTAG cookie for clients that preserve it.
+		// The relay page's bare refresh carries the tag in the NWJOINSESSIONTAG cookie.
 		std::string tag_from_request;
-		if (req.url_params.get("tag")) {
-			tag_from_request = req.url_params.get("tag");
-		} else {
-			auto tag_it = cookies.find("NWJOINSESSIONTAG");
-			if (tag_it != cookies.end()) tag_from_request = tag_it->second;
-		}
+		if (auto tag_it = cookies.find("NWJOINSESSIONTAG"); tag_it != cookies.end())
+			tag_from_request = tag_it->second;
 
 		// The page link's query (rid=NNN and the page fields) is the first call
 		// even when the client's persistent jar still carries the tag a previous
 		// join or host left: a stock client sends every jar cookie on every GET
-		// (net/novaworld/relay_request.h). Only our client's `?tag=` follow-up and
-		// the relay page's bare refresh resolve a tag.
+		// (net/novaworld/relay_request.h). Only the relay page's bare refresh
+		// resolves a tag.
 		const bool first_call =
-				classify_relay_request(req.url_params.get("tag") != nullptr,
-				                       has_relay_first_call_query(req),
-				                       !tag_from_request.empty()) ==
+				classify_relay_request(has_relay_first_call_query(req), !tag_from_request.empty()) ==
 				RelayLeg::First;
 
 		if (first_call) {
@@ -1854,14 +1836,12 @@ void HttpListener::register_legacy_host_join_routes(
 			return res;
 		}
 
-		// Second call — tag came either from ?tag= or NWJOINSESSIONTAG.
-		// Diagnostic (join-failure triage): show how the tag arrived (proves the
-		// NWJOINSESSIONTAG cookie round-trips on the bare refresh URL) and the
-		// full inbound cookie set — LOGINSESSIONTAG / PERSISTENTEXPRESSLOGINDATA
-		// decide the joiner identity that PUBPCID is encoded from.
-		std::printf("[http] /NWJoin.dll (second call) tag=%s (from %s) cookies=[%s]\n",
+		// Second call — the tag came from the NWJOINSESSIONTAG cookie.
+		// Diagnostic (join-failure triage): the full inbound cookie set —
+		// LOGINSESSIONTAG / PERSISTENTEXPRESSLOGINDATA decide the joiner identity
+		// that PUBPCID is encoded from.
+		std::printf("[http] /NWJoin.dll (second call) tag=%s cookies=[%s]\n",
 				loggable_secret(tag_from_request).c_str(),
-				req.url_params.get("tag") ? "query" : "cookie",
 				cookie_summary(request_cookie_header(req)).c_str());
 		const auto session = sessions_.get_join(tag_from_request);
 		if (!session) {
@@ -2145,7 +2125,7 @@ void HttpListener::register_legacy_host_join_routes(
 
 	// ----- Phase F.2: /NWHost.dll two-phase relay -------------------------
 	// Mirrors onnet's onnw/controllers/nova_world/host.py.
-	//   First call (no NWJOINSESSIONTAG cookie OR ?tag= query):
+	//   First call (the page link's query, or no NWJOINSESSIONTAG cookie):
 	//     - generate session + 48-char A-P host_key (24 random bytes nibble-encoded)
 	//     - record the key's hash with the account the request's retail login
 	//       names, an active account (retail_login_user -> hostdb::record_host_key), if any
@@ -2153,7 +2133,7 @@ void HttpListener::register_legacy_host_join_routes(
 	//       jop_2_host2.htm etc.) where the page link names none
 	//     - render relay template with REFRESH_ENDPOINT="NWHost.dll" (bare; the
 	//       NWJOINSESSIONTAG cookie carries the tag — matches onnet/genuine)
-	//   Second call (tag in query or cookie):
+	//   Second call (the bare refresh, its tag in the cookie):
 	//     - render success template (jop_2_host2.htm) with {{HOSTKEY}} substituted
 	//       so retail's IB3 parser extracts <TITLE>[HOSTKEY=...&]</TITLE>
 	//       and uses it for subsequent UDP ClientHostRequest.
@@ -2170,22 +2150,16 @@ void HttpListener::register_legacy_host_join_routes(
 			return looks_encrypted(s) ? fallback : s;
 		};
 
-		// Resolve tag — prefer ?tag= query, fall back to NWJOINSESSIONTAG cookie.
+		// The tag rides the NWJOINSESSIONTAG cookie.
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		std::string tag;
-		if (req.url_params.get("tag")) {
-			tag = req.url_params.get("tag");
-		} else {
-			auto it = cookies.find("NWJOINSESSIONTAG");
-			if (it != cookies.end()) tag = it->second;
-		}
+		if (auto it = cookies.find("NWJOINSESSIONTAG"); it != cookies.end()) tag = it->second;
 
 		// The host page link's query is the first call even with a stale tag
 		// cookie in the client's jar (net/novaworld/relay_request.h).
 		const bool host_first_call =
-				classify_relay_request(req.url_params.get("tag") != nullptr,
-				                       has_relay_first_call_query(req),
-				                       !tag.empty()) == RelayLeg::First;
+				classify_relay_request(has_relay_first_call_query(req), !tag.empty()) ==
+				RelayLeg::First;
 		if (host_first_call) {
 			// First call — generate session.
 			HostSession s;
