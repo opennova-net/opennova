@@ -865,10 +865,18 @@ func _on_host_pressed() -> void:
 				"Back to Host Game", Callable(self, "_return_to_host"), Screen.HOST)
 		return
 	_set_status("Starting host...")
-	# The session's name goes into the process's cfg block, as the host screen's GAME_NAME
-	# does, and the request seeds from the block: every mission start applies the block's name
-	# again, a map change's too (engine inmatch::apply_block_session_settings).
-	GameCfgStore.block().apply_host_dialog_control("GAME_NAME", "%s's Game" % player_name)
+	# Retail's NovaWorld host is its host dialog, the LAN host's MULTI_PLAYER_HOST, whose START
+	# reads the controls back into the process's cfg block before its NovaWorld arm opens the
+	# hosting URL; this page's map picker stands in for that dialog, untouched. It opened on
+	# the block (the populate writes the cap clamped to the screen's into it) and reads back
+	# what it showed, so the block keeps game.cfg's words, the session's name among them (no
+	# name of the page's own), and with no pb\pbcl.dll its PunkBuster spin shows and stores 0
+	# (engine inmatch/host_settings.h carries the witness). The request seeds from the block
+	# (HostSessionConfig), and every mission start applies the block again (engine
+	# inmatch::apply_block_session_settings).
+	var block := GameCfgStore.block()
+	block.populate_host_dialog()
+	block.apply_host_dialog_control("SERVER_PUNKBUSTER", "0")
 	var config := HostSessionConfig.new()
 	config.channel = HostSessionConfig.CHANNEL_NOVAWORLD
 	config.mission = mission

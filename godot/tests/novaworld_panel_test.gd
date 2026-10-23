@@ -418,6 +418,45 @@ func test_hosting_started_hands_the_request_up() -> void:
 		"the FFI options retain the NovaWorld period-12 selector")
 
 
+# The NovaWorld host is retail's host dialog with the page's map picker for its controls,
+# untouched: the dialog opens on the process's cfg block (its cap clamped to the screen's
+# 64 in the block) and START reads back what it showed, so the request is the block's and
+# its name is game.cfg's, which the block keeps (the page has no name of its own); with no
+# pb\pbcl.dll the PunkBuster spin stores 0 (engine inmatch/host_settings.h
+# populate_host_dialog and apply_host_dialog_control carry the witness).
+func test_host_request_is_the_untouched_host_dialog() -> void:
+	var run_dir := OS.get_cache_dir().path_join("opennova_nw_panel_cfg_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
+	_root_dirs.append(run_dir)
+	var cfg_path := run_dir.path_join(GameCfgStore.FILE_NAME)
+	var file := FileAccess.open(cfg_path, FileAccess.WRITE)
+	assert_not_null(file, "game.cfg opens for write")
+	if file != null:
+		file.store_string("version = 29\r\ngame_name = \"Night Ops\"\r\nmpmaxplayers = 80\r\n" +
+				"sv_punkbuster = 1\r\n")
+		file.close()
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
+	GameCfgStore.reset()
+	var panel := _make_panel(PackedStringArray(["alpha.bms"]))
+	panel.select_mission(0)
+	var client := panel.client_for_test()
+	for connection in client.get_signal_connection_list("host_failed"):
+		client.disconnect("host_failed", connection["callable"])
+	watch_signals(panel)
+	panel.press_host()
+	client.emit_signal("hosting_started")
+	assert_signal_emitted(panel, "host_requested")
+	var config: HostSessionConfig = get_signal_parameters(panel, "host_requested")[0]
+	assert_eq(config.server_name, "Night Ops", "the request hosts under game.cfg's name")
+	assert_eq(config.max_players, 64, "under the cap the screen's populate clamped")
+	assert_eq(config.server_punkbuster, 0, "with PunkBuster stored 0 (no pb\\pbcl.dll)")
+	assert_eq(GameCfgStore.block().host_dialog_value("GAME_NAME"), "Night Ops",
+		"the block keeps the file's name")
+	assert_string_contains(FileAccess.get_file_as_string(cfg_path), "Night Ops",
+		"and the launch's save writes it back")
+	GameCfgStore.reset()
+
+
 # The NovaWorld menu's re-entry after a match: the panel takes the session
 # back, leaves its hosting and play, and lands in the lobby when signed in.
 func test_adopted_session_lands_in_the_lobby_or_sign_in() -> void:

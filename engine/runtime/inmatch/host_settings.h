@@ -15,6 +15,17 @@ namespace opennova::inmatch {
 // file's. [orig: UI_PopulateHostSettingsFromConfig @0x555FE0;
 // UI_HandleHostSessionStart @0x556D00 - HostDialog_ReadSettings @0x556E36,
 // Game_SaveConfig @0x556E72; CNapiGameSession_BuildAndCreateSession @0x5694D0]
+// The NovaWorld host runs the same dialog: its open populates the controls,
+// its START reads them back into the block, then its NovaWorld arm opens the
+// hosting URL. So a dialog left untouched (the game shell's NovaWorld page,
+// whose map picker stands in for it) keeps the block's words, the name it
+// shows among them, plus the populate's cap clamp and, with no pb\pbcl.dll,
+// the PunkBuster spin's 0 (D-NET-NEW-L1-49).
+// [orig: UI_InitHostSettingsDialog @0x558960 - the populate @0x5589C7;
+//  UI_PopulateHostSettingsFromConfig - GAME_NAME @0x556010, the pb\pbcl.dll
+//  test @0x55613A; UI_HandleHostSessionStart - the NovaWorld arm
+//  (networkConnectType_480 == 1) @0x556E47; HostDialog_ReadSettings - GAME_NAME
+//  @0x555962, SERVER_PUNKBUSTER @0x555A9B]
 //
 // The controls, in the read's order. [orig: HostDialog_ReadSettings @0x555940]
 const std::vector<std::string_view>& host_dialog_controls();
