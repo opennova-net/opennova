@@ -370,6 +370,11 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 //  Game_MainLoop(&g_GameModeGameLoop) @0x4A6767) and the PreMenu's
 //  MultiPlayer_JoinSessionStateMachine @0x56A320 (state 2, the call @0x56A46A), both ahead of
 //  GameLoop_Init's Game_StartMission call @0x526377]
+// The create reads the player's character words, which the session settings' apply copies from
+// the profile ahead of it; the game's embedder projects the local profile before the create
+// (GameWorld::create_fresh_session, D-NET-NEW-L1-50) [orig: SinglePlayer_StartMission - the call
+//  @0x561C28; CNapiGameSession_CreateSession @0x4C97C0 - the profile words' reads
+//  @0x4C9960..0x4C9CCE, PlayerSession_InitFromProfile called @0x4C9CCE].
 CreateSessionResult HostRole::create_session(const HostBringup &bringup) {
 	inmatch::HostConfig host_cfg = bringup.host_cfg;
 	// The session title's override table is the bring-up's mission text's (the mount's).
@@ -579,7 +584,7 @@ void HostRole::begin_mission_load() {
 void HostRole::open_mission_load_window() {
 	// The chat rings start every mission empty: CHAT GET and the status page list none of
 	// the last map's lines [orig: Game_StartMission @0x524A10 -> Chat_ClearAllChannels
-	//  @0x497D30].
+	//  @0x497D30; the start's only earlier exit is the BMS load's failure @0x5247A7].
 	server_console_clear(state.host_owner.ctx);
 	// Then the window's first pumps over the reset slots and the rebuilt streams, the spawn
 	// gate still held (D-NET-116), around the BMS header's second read [orig: Game_StartMission

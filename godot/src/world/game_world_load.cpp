@@ -1448,10 +1448,8 @@ int GameWorld::create_fresh_session(const Ref<MissionData> &p_mission, const Str
 	// The create reads the player's character words: the session settings' apply copies the
 	// profile's ahead of it, over the Avatars.def the process loaded at its start, so the local
 	// profile is projected here, from the mount's table, ahead of the options that carry it
-	// (D-NET-NEW-L1-50, V-ROLL-BE C-1) [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 -
-	//  Game_ApplySessionSettingsToGlobals called @0x5695B8; SinglePlayer_StartMission - the call
-	//  @0x561C28; CNapiGameSession_CreateSession @0x4C97C0 - the profile words' reads
-	//  @0x4C9960..0x4C9CCE, PlayerSession_InitFromProfile called @0x4C9CCE].
+	// (D-NET-NEW-L1-50, V-ROLL-BE C-1; the witness is HostRole::create_session's,
+	// engine/runtime/inmatch/host_role.cpp).
 	Ref<AvatarDatabase> avatar_db;
 	avatar_db.instantiate();
 	if (resource_root_.is_null() ||
