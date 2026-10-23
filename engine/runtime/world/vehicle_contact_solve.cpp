@@ -1692,6 +1692,11 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     int32_t crash_depth = -1;
     if (m.crashed || up_z16 < 0 || m.settle_2f0)
         for (int i = 0; i < 5; ++i) crash_depth = std::max(crash_depth, rec[i]);
+	// The deepest of all six records, floored at 0: the tail's inverted-rebuild gate.
+	// [orig: var_264 = 0 @0x47AD40, the scan @0x47ADB6..0x47AE01]
+	int32_t max_rec = 0;
+	for (int i = 0; i < 6; ++i)
+		max_rec = std::max(max_rec, rec[i]);
     // The contact gate reads the previous rear-contact run; its tail increments later.
     // [orig: Entity_ProcessLightVehiclePhysics @ 0x47A909..0x47A94E]
     m.grounded = up_z16 > 4096 && io::bam_abs(side_z16) < 40960 &&
@@ -1738,16 +1743,26 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         if (body_contact) m.byte_2ef = 1;
     }
     int32_t corner_adj[4] = {0, 0, 0, 0};
-	// The tail every arm reaches: the rear-contact run, the launch direction, the per-tick request
-	// and quiet-spring clears, the downhill contact direction, the solved byte and the airborne
-	// count.
+	// The tail every arm reaches: the rear-contact run, the launch direction, the authority's park
+	// bit (set while crashed or a wreck at rest, else cleared), the axis rebuild of an inverted,
+	// unparked bike whose records touched, the per-tick request and quiet-spring clears, the
+	// downhill contact direction, the solved byte and the airborne count.
 	// [orig: @0x47BEC2..0x47C19A: the quiet clear @0x47BEC2..0x47BEE3, +0x3D0 @0x47BEE9..0x47BEF9,
-	//  +0x3CE @0x47BEF0, the launch @0x47BF00..0x47C03B, +0x2ED @0x47C0B6, the downhill
-	//  @0x47C08C..0x47C180, +0x3D4 @0x47C182..0x47C193]
+	//  +0x3CE @0x47BEF0, the launch @0x47BF00..0x47C03B, the park @0x47C041..0x47C061, the rebuild
+	//  (var_264 > 0, var_274 < 0, !(Flags & 0x10) @0x47C065..0x47C075;
+	//  Entity_RebuildOrientationMatrixFromAxes @0x4632E0, the call @0x47C082), +0x2ED @0x47C0B6,
+	//  the downhill @0x47C08C..0x47C180, +0x3D4 @0x47C182..0x47C193]
 	const auto light_tail = [&] {
 		if (d[1] != 0)
 			m.light_rear_contact_ticks += 1;
 		light_capture_launch(veh, basis, px, py, pz);
+		if (world.ai.is_authority) {
+			const uint32_t park = m.crashed != 0 || m.settle_2f0 != 0 ? 0x10u : 0u;
+			veh.flags = (veh.flags & ~0x10u) | park;
+			veh.engine_flags = (veh.engine_flags & ~0x10u) | park;
+		}
+		if (max_rec > 0 && up_z16 < 0 && ((veh.flags | veh.engine_flags) & 0x10u) == 0)
+			vehicle_rebuild_rest_orientation(world, veh, false);
 		vehicle_suspension_tick_tail(veh, traits);
 		vehicle_contact_downhill_tail(veh, pz);
 		m.contact_solved_once = true;

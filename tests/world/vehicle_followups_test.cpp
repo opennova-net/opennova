@@ -407,6 +407,49 @@ void bike_wreck_at_rest_leaves_the_wheel_arm() {
     }
 }
 
+// D-NET-NEW-L6-26: the bike's tail. The authority parks a crashed bike (Flags 0x10) and unparks
+// one neither crashed nor at rest, in either arm; a client leaves the bit alone. An inverted,
+// unparked bike whose records touch is rebuilt upright from its axes, the crash pair cleared.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the park @0x47C041..0x47C061, the rebuild
+//  @0x47C065..0x47C082]
+void bike_tail_parks_and_rebuilds() {
+    for (const bool authority : {true, false}) {
+        Rig r;
+        r.world.ai.is_authority = authority;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        v.veh.crashed = 1;
+        int32_t z = to_fixed(v.position.z);
+        r.contact(t, z);
+        CHECK(v.veh.crashed == 1);
+        CHECK((((v.flags | v.engine_flags) & 0x10u) != 0) == authority);
+    }
+    {
+        Rig r; // high in the air: the both-off arm
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        v.flags |= kEntityFlagSuspensionCrashed;
+        int32_t z = 10 * 65536;
+        r.contact(t, z);
+        CHECK((v.flags & kEntityFlagInAir) != 0);
+        CHECK(((v.flags | v.engine_flags) & 0x10u) == 0);
+    }
+    {
+        Rig r; // a client's bike on its back
+        r.world.ai.is_authority = false;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        v.veh.air_roll_bam = int32_t(0x80000000u);
+        int32_t z = to_fixed(v.position.z);
+        r.contact(t, z);
+        const int32_t up =
+                detail::vehicle_euler_basis(v.veh.yaw_bam, v.veh.air_pitch_bam, v.veh.air_roll_bam)
+                        .q22.m[10] >> 6;
+        CHECK(up > 0);
+        CHECK(v.veh.crashed == 0);
+    }
+}
+
 // A climbing track can be supported by its inboard belly station while its
 // outer wheel is clear. Retail uses max(wheel, belly) for sink growth, spring
 // catch-up and the retained-contact tail. [orig: @ 0x4784CC..0x47853A,
@@ -963,6 +1006,7 @@ int main() {
     crashed_upright_depth_precedes_springs();
     parked_hull_latches_through_the_square_quad();
     bike_wreck_at_rest_leaves_the_wheel_arm();
+    bike_tail_parks_and_rebuilds();
     bike_off_contact_planar_forward();
     vehicle_respawn_reseeds_destroy_timer();
     bike_indestructible_hull_skips_impact_damage();
