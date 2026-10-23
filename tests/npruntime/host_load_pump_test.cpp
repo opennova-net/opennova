@@ -27,12 +27,15 @@
 //   - the gate is clear once the load ends;
 //   - the round clock outlives its mission and its session (D-NET-NEW-L1-52): a second
 //     session's first mission-start update in the same process reads the first session's last
-//     clock, and a map change's reads the old round's;
+//     clock, and a map change's reads the old round's; the menus' remote admin reads that
+//     clock and its SET GameTime writes it, so the next session's update reads the SET
+//     (D-NET-NEW-L1-54);
 //   - the reset's 0x25 to a kept remote leaves at the load pump its send countdown's
 //     residual names (the head for 1), ahead of the 0x7B, or with the 0x7B at the first
 //     tick once the residual passes the load's pumps (holdoff 12, residual 11), and an
 //     admitting remote's C2S 0x01 read inside the load is answered there (its S2C 0x02).
 #include <base/gameprofile/gameprofile.h>
+#include <formats/gamecfg/game_cfg.h> // the menus console's block (D-NET-NEW-L1-54)
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
@@ -51,6 +54,7 @@
 #include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/remote_admin.h> // RemoteAdminConsoles (the menus console)
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/session.h>
@@ -741,10 +745,66 @@ void test_the_round_clock_outlives_its_session() {
 	}
 }
 
+// The menus' remote admin runs over the same round clock (D-NET-NEW-L1-54): with no session
+// bound, GET GAMESETTINGS' GameTime reads the clock the last session's close handed back, and a
+// SET GameTime writes it, so the next session's first mission-start update reads 3720 x the
+// SET's value. A mirror the console kept on its own would leave the update reading the last
+// session's clock.
+// [orig: g_RoundTimeRemaining @0x24C1958; CAdminServer_HandleGet @0x40388D;
+//  CAdminServer_HandleSetCommand @0x405A60 - `imul eax, 0E88h` @0x405E80, the store
+//  @0x405E86; Lobby_UpdateServerInfo's read @0x4FED57, called by Game_StartMission @0x5248F5]
+void test_a_menus_game_time_reaches_the_next_session() {
+	auto process = std::make_unique<inmatch::ClientProcessState>();
+	int32_t first_clock = 0;
+	{
+		auto host = std::make_unique<Host>();
+		host->process = process.get();
+		host->round_minutes = 1;
+		host->role.set_socket(&host->socket);
+		host->role.set_rotation(&host->rotation);
+		inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
+		CHECK(host->boot_current(/*next_mission=*/false));
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		for (int f = 0; f < 8; ++f) (void)host->session.advance(input);
+		first_clock = host->kernel->world.match.remaining_ticks();
+		CHECK(first_clock > 0 && first_clock <= 3720);
+		(void)host->session.close();
+		CHECK(process->round_time_remaining_ticks == first_clock);
+	}
+	// The menus: the console over no session, on the process's words.
+	auto consoles = std::make_unique<inmatch::RemoteAdminConsoles>();
+	consoles->use_process_state(process.get());
+	gamecfg::GameCfg block = gamecfg::defaults();
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &block;
+	consoles->bind(inmatch::RemoteAdminBinding{}, seams);
+	consoles->console()->set_scene(inmatch::AdminScene::MainMenu);
+	consoles->refresh_process_mission();
+	CHECK(consoles->process_mission().round_ticks_remaining == first_clock);
+	std::vector<std::string> replies;
+	(void)consoles->dispatch(AdminSession{"boss", 0xFFFFFFFFu}, "SET GameTime 3", replies);
+	CHECK(replies.size() == 1 && replies[0] == "OK - Setting Changed.");
+	CHECK(process->round_time_remaining_ticks == 3 * 3720);
+	{
+		auto host = std::make_unique<Host>();
+		host->process = process.get();
+		host->round_minutes = 2;
+		host->role.set_socket(&host->socket);
+		host->role.set_rotation(&host->rotation);
+		inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
+		CHECK(host->boot_current(/*next_mission=*/false));
+		// The next session's first update read the menus' SET.
+		CHECK(host->clock_at_update == 3 * 3720);
+		(void)host->session.close();
+	}
+}
+
 int main() {
 	test_handlers_drop_under_the_load_gate();
 	test_fresh_load_pumps_its_session();
 	test_the_round_clock_outlives_its_session();
+	test_a_menus_game_time_reaches_the_next_session();
 	test_map_change_load_pumps_after_the_slot_reset();
 	test_map_change_reset_leaves_at_the_residual_pump();
 	test_map_change_server_info_stream_is_empty_until_the_rebuild();

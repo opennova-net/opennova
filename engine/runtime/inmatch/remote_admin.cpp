@@ -214,7 +214,7 @@ void RemoteAdminConsoles::refresh_process_mission() {
 		if (bound_.world != nullptr) process_mission_.tod_fixed24 = bound_.world->weather.tod_fixed24;
 		// g_RulesFlags, the joined mission's S2C 0x64 word (the joiner's world keeps it), and
 		// g_RoundTimeRemaining, the S2C 0x0A clock.
-		// [orig: CAdminServer_HandleGet @0x403591..0x403A02 (g_RulesFlags), @0x4038C5
+		// [orig: CAdminServer_HandleGet @0x403591..0x403A02 (g_RulesFlags), @0x40388D
 		//  (g_RoundTimeRemaining); NapiNPClientMsg_0x00A @0x42FEC0 (@0x430219..0x430235)]
 		if (bound_.world != nullptr) process_mission_.rules_word = bound_.world->rules.mpattrib;
 		process_mission_.round_ticks_remaining = client->state().round_time_remaining_ticks;
@@ -230,6 +230,11 @@ void RemoteAdminConsoles::refresh_process_mission() {
 		// day keeps the last mission's clock (no teardown writer).
 		// [orig: Game_TeardownMission @0x522350 (@0x5223FA, CPlayerStats_Init(&g_SessionStatus))]
 		process_mission_.session_elapsed_ms = 0;
+		// g_RoundTimeRemaining is the process's, as the last session's close handed it back
+		// (D-NET-NEW-L1-52), or as a SET in the menus left it.
+		// [orig: g_RoundTimeRemaining @0x24C1958; CAdminServer_HandleGet @0x40388D]
+		if (process_ != nullptr)
+			process_mission_.round_ticks_remaining = process_->round_time_remaining_ticks;
 	}
 }
 
@@ -257,6 +262,13 @@ bool RemoteAdminConsoles::dispatch(const AdminSession &session, std::string_view
 			apply_rules_word(*bound_.world, process_mission_.rules_word);
 		bound_.client->state().round_time_remaining_ticks = process_mission_.round_ticks_remaining;
 	}
+	// The menus' SET GameTime writes the process's clock, which the next session's first
+	// mission-start update reads (D-NET-NEW-L1-54).
+	// [orig: CAdminServer_HandleSetCommand @0x405A60 - the store @0x405E86;
+	//  Lobby_UpdateServerInfo's read @0x4FED57, called by Game_StartMission @0x5248F5]
+	if (bound_.host == nullptr && bound_.client == nullptr && bound_.world == nullptr &&
+			process_ != nullptr)
+		process_->round_time_remaining_ticks = process_mission_.round_ticks_remaining;
 	return kept;
 }
 

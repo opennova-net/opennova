@@ -39,6 +39,10 @@ struct BootFileSource;
 }
 
 namespace opennova::inmatch {
+struct ClientProcessState; // client_runtime.h
+}
+
+namespace opennova::inmatch {
 
 class JoinerRole;
 
@@ -239,6 +243,16 @@ public:
 	// The process's mission globals as the status report last read them.
 	const AdminProcessMission &process_mission() const { return process_mission_; }
 
+	// The process's client words (the embedder's: GameWorld's, opennova-serve's). With no
+	// session bound (the menus), GET GAMESETTINGS' GameTime reads its round clock and SET
+	// GameTime writes it, retail's one g_RoundTimeRemaining, so the next session's first
+	// mission-start update reads what the menus set (D-NET-NEW-L1-54). Null keeps the clock in
+	// the process words here.
+	// [orig: CAdminServer_HandleGet @0x40388D (the read); CAdminServer_HandleSetCommand
+	//  @0x405A60 - `imul eax, 0E88h` @0x405E80, the store @0x405E86; Lobby_UpdateServerInfo's
+	//  read @0x4FED57, called by Game_StartMission @0x5248F5]
+	void use_process_state(ClientProcessState *state) { process_ = state; }
+
 	// The session's destroy: g_GameType goes to 0; g_MapFileName and g_SessionTitle keep the
 	// last session's. Retail destroys it on the Post Menu's destroy arm (route_mission_exit) and
 	// on every pre-game exit to the MainMenu (the join or host machine's cancel and failures);
@@ -267,7 +281,7 @@ public:
 	// g_GameType; the session clock, the time of day and GET GAMESETTINGS' live words; and the
 	// session's settings globals into the menus' context. With no session (the menus) they keep
 	// the last session's (a destroy zeroed the game type, session_destroyed; the teardown the
-	// clock).
+	// clock), and the round clock is the process's (use_process_state).
 	void refresh_process_mission();
 	// The session's exit frame, where the embedder's frame stops before its pump: retail's last
 	// main frame runs its whole tick (the round clock, the client and server net frames, the
@@ -298,6 +312,7 @@ private:
 	std::unique_ptr<AdminConsole> console_;
 	RemoteAdminBinding bound_;
 	AdminProcessMission process_mission_;
+	ClientProcessState *process_ = nullptr; // use_process_state
 };
 
 } // namespace opennova::inmatch

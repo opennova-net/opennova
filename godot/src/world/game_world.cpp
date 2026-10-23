@@ -549,6 +549,8 @@ bool GameWorld::open_remote_admin() {
 	                                         : dir + "/" + opennova::admincfg::kFileName;
 	opennova::admincfg::AdminConfig config;
 	(void)opennova::admincfg::load_file(cfg_path, config);
+	// The menus' round clock is the process's (engine RemoteAdminConsoles::use_process_state).
+	admin_consoles_.use_process_state(&client_process_);
 	admin_server_ = std::make_unique<opennova::AdminServer>(std::move(config), admin_consoles_,
 			admin_rand_, [&files](std::string_view p_line) {
 				(void)files.write(opennova::inmatch::kAdminLogFileName,

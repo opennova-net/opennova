@@ -1070,6 +1070,8 @@ bool Server::save_config() {
 void Server::open_admin() {
 	admincfg::AdminConfig config;
 	(void)admincfg::load_file(admincfg::kFileName, config);
+	// The round clock with no session bound is the process's (RemoteAdminConsoles::use_process_state).
+	admin_consoles_.use_process_state(&client_process_);
 	admin_server_ = std::make_unique<AdminServer>(std::move(config), admin_consoles_, admin_rand_,
 			[this](std::string_view line) {
 				(void)files_.write(inmatch::kAdminLogFileName, inmatch::admin_log_file_text(line),
