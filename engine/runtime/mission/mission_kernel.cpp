@@ -249,7 +249,7 @@ void MissionKernel::occlusion_init_mission() {
 	// The model init's class inits come first: the gnrc / gnrl / gnl2 rows cache the entity under
 	// them as their ground link, both roles, over the attached models and the placements.
 	// [orig: Game_StartMission - Entity_InitAllFromModels @0x52567F (no role gate) ->
-	//  Entity_CreateBoundingProxy @0x407D60 per row]
+	//  Entity_CacheGroundEntityBelow @0x407D60 per row]
 	w::run_ground_cache_class_inits(world);
 	collision.build_initial_tables(world);
 	// The mission-start blink stamp runs ahead of the portal init.

@@ -128,7 +128,7 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function);
 // The gnrc / gnrl / gnl2 rows' class init: an entity with no ground link takes the nearest pool-2
 // or pool-1 entity a 10-unit drop from its position meets (CollisionWorld::
 // raycast_nearest_entity), none for bare ground.
-// [orig: Entity_CreateBoundingProxy @0x407D60 (IDB name; it builds no proxy)]
+// [orig: Entity_CacheGroundEntityBelow @0x407D60]
 void cache_ground_entity_below(World &world, Entity &e);
 // The load's class inits of those rows, over pools 2, 3, 1 and 0 as the model init runs them.
 // [orig: Entity_InitAllFromModels @0x40E460]

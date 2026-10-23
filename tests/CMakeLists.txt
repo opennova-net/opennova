@@ -5462,7 +5462,7 @@ add_executable(tracked_contact_legs_test world/tracked_contact_legs_test.cpp)
 target_link_libraries(tracked_contact_legs_test PRIVATE opennova_runtime)
 add_test(NAME tracked_contact_legs COMMAND tracked_contact_legs_test)
 # D-NET-NEW-L6-38 (D-NET-515): the gnrc / gnrl / gnl2 rows' class init caches the entity under
-# them as their ground link (Entity_CreateBoundingProxy @0x407D60, Physics_RaycastNearestEntity).
+# them as their ground link (Entity_CacheGroundEntityBelow @0x407D60, Physics_RaycastNearestEntity).
 add_executable(ground_cache_test world/ground_cache_test.cpp)
 target_link_libraries(ground_cache_test PRIVATE opennova_runtime)
 add_test(NAME ground_cache COMMAND ground_cache_test)

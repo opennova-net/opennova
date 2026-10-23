@@ -2,7 +2,7 @@
 // them as their ground link (+0x28): the nearest pool-2, then pool-1 entity whose CFAC faces a
 // 10-unit drop from the entity's position crosses. Retail's 03TR barrels sit on the truck that way,
 // so the truck's contact solve skips them as its own riders.
-// [orig: Entity_CreateBoundingProxy @0x407D60; Physics_RaycastNearestEntity @0x5394B0;
+// [orig: Entity_CacheGroundEntityBelow @0x407D60; Physics_RaycastNearestEntity @0x5394B0;
 //  Physics_RaycastEntityPool @0x4143E0; Entity_InitAllFromModels @0x40E460; the rider skip in
 //  Entity_CheckCollisionState @0x462A30 - @0x462E26..0x462E4F]
 #include <runtime/world/collision.h>
