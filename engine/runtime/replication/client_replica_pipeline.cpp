@@ -1563,7 +1563,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TransformLocalToWorld
 		//  @0x4C10D4, the stores @0x4C0FD7..0x4C0FF6, the reset @0x4C0FFC;
 		//  NetPacket_SerializeInfantryEntityState @0x4C0320 - Entity_TransformLocalToWorld
-		//  @0x4C05A2, the reset @0x4C04E1]
+		//  @0x4C05A2, the block @0x4C04E1, the reset @0x4C04EC]
 		if (child->cls == EntityClass::Player) {
 			land_compact_pose(*child, w.x, w.y, w.z, true, heading, pending.force_live_snap);
 		} else {

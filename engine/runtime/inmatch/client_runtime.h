@@ -709,11 +709,11 @@ public:
 	// queues its one reliable C2S (a joiner on its held one-shot queue, the
 	// listen host's client on its loopback to its own server); false when no
 	// session carries it. [orig: NetPacket_SendUserWaypointCreate @0x42ddc0 (0x17),
-	//  NetPacket_SendUserWaypointRemove @0x42de00 (0x4F), NetPacket_SendWeaponSlotSwitch
+	//  NetPacket_SendUserWaypointRemove @0x42de00 (0x4F), NetPacket_SendSquadJoin
 	//  @0x42dc10 (0x43), NetPacket_SendCommandType44 @0x42dc70 (0x44),
-	//  NetPacket_SendWeaponAction @0x42dcc0 (0x45), NetPacket_SendTeamChange
-	//  @0x42dd00 (0x46), NetPacket_SendVoteKick @0x42dd50 (0x4B), the punt vote
-	//  @0x5488ae (0x3F) — every IDB name a misnomer; all
+	//  NetPacket_SendFireteamAssign @0x42dcc0 (0x45), NetPacket_SendSquadRecruit
+	//  @0x42dd00 (0x46), NetPacket_SendGoCode @0x42dd50 (0x4B), the punt vote
+	//  @0x5488ae (0x3F); all
 	//  CNapiNetwork_QueueReliableMessage(tag, 1, 0)]
 	bool queue_squad_message(uint8_t c2s_tag, std::vector<uint8_t> body);
 	// The local body's slot byte (g_LocalPlayerEntity+0x154; the pipeline's local_body_slot):
@@ -759,12 +759,12 @@ public:
 	// fireteam assignment [fireteam][count][members] (0x45), the order
 	// [kind][count][text][targets] (0x44) and the punt vote [target] (0x3F).
 	// [orig: CMap_EntityWidgetHandler @0x54865c / @0x548616;
-	//  CCommandMap_SendWeaponActionToTeammates @0x548d67;
+	//  CMap_SendFireteamAssign @0x548d67;
 	//  CMap_BuildAndSendOrderCommand @0x547839; CCommandMap_HandleOrderAction
 	//  @0x548c25; CMap_HandlePlayerListCallback @0x54889b..0x5488b9]
 	void send_squad_recruit(uint8_t target);
 	// The join also plays the local body's RECRUIT_ACCEPT set when the leader is not its own
-	// slot byte [orig: NetPacket_SendWeaponSlotSwitch @0x42dc3c..0x42dc5d].
+	// slot byte [orig: NetPacket_SendSquadJoin @0x42dc3c..0x42dc5d].
 	void send_squad_join(world::World &world, uint8_t leader);
 	void send_fireteam_assign(uint8_t fireteam, const std::vector<uint8_t> &members);
 	void send_squad_order(uint8_t kind, const std::string &text,

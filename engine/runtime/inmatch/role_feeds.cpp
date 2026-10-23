@@ -917,7 +917,7 @@ bool command_map_roster(const RoleView &view, menu::CommandMapRoster &out) {
 	const replication::ClientState &cs = runtime.state();
 	// The command map's walks and sends read the local body's slot byte, 0xFF while the body is
 	// destroyed in place [orig: CMap_PopulateTeamList_0 @0x548d80; CMap_BuildAndSendOrderCommand
-	//  @0x5476cf; CCommandMap_SendWeaponActionToTeammates @0x548d30; CMap_OnGoCodeButton
+	//  @0x5476cf; CMap_SendFireteamAssign @0x548d30; CMap_OnGoCodeButton
 	//  @0x54829f; CMap_EntityWidgetHandler @0x548653].
 	const int local_slot = runtime.local_body_slot();
 	out.local_slot = static_cast<uint8_t>(local_slot < 0 ? 0xFF : local_slot);

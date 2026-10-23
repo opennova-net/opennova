@@ -802,7 +802,7 @@ int main() {
 		CHECK(host.host_loop.c2s_pending() == 0);
 		// The host player's command-map sends reach its own server's squad
 		// handlers the same way: a C2S 0x45 naming its own slot lands the
-		// fireteam there. [orig: NetPacket_SendWeaponAction @0x42dceb (0x45)
+		// fireteam there. [orig: NetPacket_SendFireteamAssign @0x42dceb (0x45)
 		// -> CNapiNetwork_QueueReliableMessage @0x4c4fa0;
 		// NapiNPServerMsg_0x045_HandleTeamAssignment @0x510c00]
 		inmatch::NapiNPConnection *self = nullptr;

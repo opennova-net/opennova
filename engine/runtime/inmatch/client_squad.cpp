@@ -111,7 +111,7 @@ void ClientRuntime::clear_user_waypoints(world::World &world) {
 }
 
 void ClientRuntime::send_go_code(world::World &world, uint8_t code) {
-	// NetPacket_SendVoteKick (a misnomer) with entity+0x154, then
+	// NetPacket_SendGoCode with entity+0x154, then
 	// Server_PlayGoCodeSoundAndChat(local, code, 0) [orig: @0x5482ad, @0x5482bc].
 	GoCode go;
 	go.leader = static_cast<uint8_t>(local_body_slot());
@@ -129,8 +129,8 @@ void ClientRuntime::send_go_code(world::World &world, uint8_t code) {
 }
 
 void ClientRuntime::send_squad_recruit(uint8_t target) {
-	// NetPacket_SendTeamChange(local entity+0x154, the row's slot) (a
-	// misnomer: the recruit) [orig: @0x54864e..0x54865c].
+	// NetPacket_SendSquadRecruit(local entity+0x154, the row's slot)
+	// [orig: @0x54864e..0x54865c].
 	const int slot = local_body_slot();
 	SquadRecruit recruit;
 	recruit.recruiter = static_cast<uint8_t>(slot < 0 ? 0xFF : slot);
@@ -139,12 +139,12 @@ void ClientRuntime::send_squad_recruit(uint8_t target) {
 }
 
 void ClientRuntime::send_squad_join(world::World &world, uint8_t leader) {
-	// [orig: NetPacket_SendWeaponSlotSwitch(slot) @0x548616 (a misnomer: the join)]
+	// [orig: NetPacket_SendSquadJoin(slot) @0x548616]
 	queue_squad_message(c2s::SQUAD_JOIN_REQUEST, encode_squad_join_request(leader));
 	// After the queue, a leader other than the local body's own slot byte plays the body's
 	// RECRUIT_ACCEPT set through the interface; the body's sound prefix (+0x374) lies past the
 	// destroy's memset, so a body destroyed in place (slot byte 0xFF) plays it too.
-	// [orig: NetPacket_SendWeaponSlotSwitch @0x42DC10 - the queue @0x42DC37, the
+	// [orig: NetPacket_SendSquadJoin @0x42DC10 - the queue @0x42DC37, the
 	//  g_LocalPlayerEntity test @0x42DC3C..0x42DC43, `cmp [eax+154h], bl` @0x42DC45..0x42DC4B,
 	//  SoundProfile_FindByEntityAndType(L, 6) @0x42DC50, Sound_PlayInterfaceTriggerSet
 	//  @0x42DC5D]
@@ -154,7 +154,7 @@ void ClientRuntime::send_squad_join(world::World &world, uint8_t leader) {
 }
 
 void ClientRuntime::send_fireteam_assign(uint8_t fireteam, const std::vector<uint8_t> &members) {
-	// [orig: NetPacket_SendWeaponAction(fireteam, count, slots) @0x548d67]
+	// [orig: NetPacket_SendFireteamAssign(fireteam, count, slots) @0x548d67]
 	FireteamAssign assign;
 	assign.fireteam = fireteam;
 	assign.members = members;

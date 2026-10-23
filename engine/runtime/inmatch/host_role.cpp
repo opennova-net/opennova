@@ -877,13 +877,13 @@ void HostRole::drain_host_client_gameplay_requests() {
 		//  @0x5199D0; NapiClientCmd_HandleDebugCommand @0x42c7ec;
 		//  NapiNPServerMsg_0x024 @0x514DC0]
 		// [orig: NetPacket_SendUserWaypointCreate @0x42dde6 (0x17),
-		//  NetPacket_SendWeaponSlotSwitch @0x42dc20 (0x43),
+		//  NetPacket_SendSquadJoin @0x42dc20 (0x43),
 		//  NetPacket_SendCommandType44 @0x42dca0 (0x44),
-		//  NetPacket_SendWeaponAction @0x42dceb (0x45), NetPacket_SendTeamChange
-		//  @0x42dd19 (0x46), NetPacket_SendVoteKick @0x42dd69 (0x4B),
+		//  NetPacket_SendFireteamAssign @0x42dceb (0x45), NetPacket_SendSquadRecruit
+		//  @0x42dd19 (0x46), NetPacket_SendGoCode @0x42dd69 (0x4B),
 		//  NetPacket_SendUserWaypointRemove @0x42de21 (0x4F),
-		//  CMap_HandlePlayerListCallback @0x5488b9 (0x3F) — every sender name
-		//  a misnomer; CNapiNetwork_QueueReliableMessage @0x4c4fa0 queues on
+		//  CMap_HandlePlayerListCallback @0x5488b9 (0x3F);
+		//  CNapiNetwork_QueueReliableMessage @0x4c4fa0 queues on
 		//  the local client connection (this+0xE60)]
 		const bool squad = dg.tag == c2s::WAYPOINT_SHARE || dg.tag == c2s::PUNT_VOTE ||
 				dg.tag == c2s::SQUAD_JOIN_REQUEST || dg.tag == c2s::SQUAD_ORDER_REQUEST ||

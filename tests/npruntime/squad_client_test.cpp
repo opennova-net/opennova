@@ -211,7 +211,7 @@ void test_local_slot_is_the_latched_slot() {
 // send plays the body's RECRUIT_ACCEPT set whenever the leader is not the byte. The spawn-slot
 // notice keeps g_LocalPlayerSlotId.
 // [orig: NapiNPClientMsg_HandleSquadJoin @0x425666..0x425672; NapiNPClientMsg_0x073
-//  @0x4257d0..0x4257e2; NetPacket_SendWeaponSlotSwitch @0x42dc3c..0x42dc5d;
+//  @0x4257d0..0x4257e2; NetPacket_SendSquadJoin @0x42dc3c..0x42dc5d;
 //  CMap_EntityWidgetHandler @0x54864e..0x54865c; CMap_OnGoCodeButton @0x54829a..0x5482ad;
 //  Entity_Destroy @0x43E810 - @0x43EA78; NapiNPClientMsg_FullEntitySpawn @0x433780 - @0x433BBB]
 void test_destroy_window_reads_the_body_slot_byte() {
