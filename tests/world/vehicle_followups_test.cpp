@@ -490,6 +490,26 @@ void bike_unleaned_drops_lean_rates() {
     }
 }
 
+// D-NET-NEW-L6-31: an airborne bike under the water word flushes its sinks after this tick's growth
+// (the tracked flush's water leg, with no up gate on the wreck leg); over the water it keeps them.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47B157..0x47B186]
+void bike_sinks_flush_under_water() {
+    for (const bool under : {true, false}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        auto &m = v.veh;
+        v.flags |= kEntityFlagInAir;
+        m.plat_acc[0] = 3000;
+        m.plat_acc[1] = 1000;
+        int32_t z = 10 * 65536;
+        r.world.env.water_z = under ? 20 * 65536 : 0;
+        r.contact(t, z);
+        CHECK((v.flags & kEntityFlagInAir) != 0);
+        CHECK(m.plat_acc[0] == (under ? 0 : 3100));
+    }
+}
+
 // A climbing track can be supported by its inboard belly station while its
 // outer wheel is clear. Retail uses max(wheel, belly) for sink growth, spring
 // catch-up and the retained-contact tail. [orig: @ 0x4784CC..0x47853A,
@@ -1049,6 +1069,7 @@ int main() {
     bike_tail_parks_and_rebuilds();
     bike_pair_clear_is_ungated();
     bike_unleaned_drops_lean_rates();
+    bike_sinks_flush_under_water();
     bike_off_contact_planar_forward();
     vehicle_respawn_reseeds_destroy_timer();
     bike_indestructible_hull_skips_impact_damage();

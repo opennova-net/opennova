@@ -1739,6 +1739,12 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
                                   /*latch_gated=*/false, /*pre_gate_skip=*/false);
 	vehicle_crush_damage(world, veh, traits, d + 2, up_z16);
 	vehicle_crash_state(world, veh, traits, nullptr, up_z16);
+	// The four sinks flush for a wreck at rest, upright or not, or for a bike in the air under the
+	// water word (the in-air flag as the last tick left it), after this tick's growth.
+	// [orig: @0x47B157..0x47B186: +0x2F0 @0x47B157, Flags 0x2000 @0x47B160, Z against
+	//  g_EnvWaterHeightFixed @0x47B169..0x47B172, the clears @0x47B174..0x47B186]
+	if (m.settle_2f0 || ((veh.flags & kEntityFlagInAir) != 0 && pz < world.env.water_z))
+		std::fill_n(m.plat_acc, 4, 0);
 	const bool both_wheels_off = d[0] == 0 && d[1] == 0;
 	// The caller enables +0x2EF one tick after crash arming: immediately in
     // a wheel-contact branch, or on an off-wheel branch once a body probe
