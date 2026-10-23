@@ -94,7 +94,7 @@
     X(SIM_UPDATE_WALKS, "the pool-1 slot walk (brains, vehicle motors, ewep, items) + the pool-0 organic walk")     /* The pool-1 slot visit's legs (World::update_pool1_slot), disjoint from SIM_AI_INFANTRY. */     X(SIM_WALK_THINK, "pool-1 think visits: the blink refresh, then a brain, a minefield or an item's damage callback")     X(SIM_WALK_MOTOR, "pool-1 vehicle motors")     X(SIM_WALK_EWEP, "pool-1 emplaced-weapon class updates")     X(SIM_WALK_ITEMS, "pool-1 item legs: destroy fade, squib, death motion, dropped objects, elevators")     X(SIM_WALK_DEVICES, "pool-1 placed devices (throwables): clock, think, parent-follow")     X(SIM_WALK_MOUNTED, "pool-1 mounted brains: the seat shortcut and the re-pose") \
     X(SIM_AI_INFANTRY, "infantry/player body rows") \
     X(SIM_AI_INFANTRY_COMBAT, "NPC perception, reactions, and aim") \
-    X(SIM_AI_INFANTRY_ANIMATION, "weapon/body channels + root-motion sampling") \
+    X(SIM_AI_INFANTRY_ANIMATION, "weapon/body channels + root-motion sampling")     X(SIM_AI_INFANTRY_MOTION, "NPC slope pass, attachment sample, carrier ride and terrain gradient ahead of the think") \
     X(SIM_AI_INFANTRY_COLLISION, "mounted and ordinary movement resolver calls") \
     X(SIM_AI_INFANTRY_COLLISION_CONTACTS, "candidate/model contact passes") \
     X(SIM_AI_INFANTRY_COLLISION_REPULSION, "person-sphere separation") \
@@ -166,7 +166,7 @@
     X(TRACE_DYNAMIC_FACES, "VALUE: dynamic survivor face-set sizes") \
     X(EFFECTS_DRAIN, "sim.drain_effects, summed over ticks") \
     X(EFFECTS_TICK, "EffectWorld.advance_fixed_tick, summed over ticks") \
-    X(PRESENT_SNAPSHOT, "native build_present_snapshot") \
+    X(PRESENT_SNAPSHOT, "native build_present_snapshot")     X(PRESENT_SNAPSHOT_BODY, "its organic rows' body columns: pose, weapon channel, aim overlays, held weapon, person overlays") \
     X(PRESENT_MISSION, "MissionPresentPass.present_snapshot") \
     X(PRESENT_MISSION_CORE, "row scan, transform, and submission gate") \
     X(PRESENT_MISSION_AIM, "right-hand collapse + aim-overlay publication") \

@@ -51,6 +51,10 @@ struct PresentRowsContext {
 	// lifetime at the same handle. Null on the world path; a bare kernel's
 	// joiner rows without one fall back to the handle and the type.
 	const replication::ClientWorldMaterializer *materializer = nullptr;
+	// An instrument: when set, the world path adds the wall time of its organic rows' body
+	// columns (the pose, the weapon channel, the aim overlays, the held weapon, the person
+	// overlays) to it, in microseconds.
+	uint64_t *body_us = nullptr;
 };
 
 // The decoded fold's dead->alive respawn revision, mirrored per pool row on the

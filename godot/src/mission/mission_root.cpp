@@ -680,6 +680,8 @@ void MissionRoot::present_entity_rows(bool p_stats_on) {
 	if (p_stats_on) {
 		// The native buffer build the fetch above just paid for.
 		frame_stats_->add(FrameStats::PRESENT_SNAPSHOT, sim_->get_last_present_snapshot_us());
+		frame_stats_->add(FrameStats::PRESENT_SNAPSHOT_BODY,
+				sim_->get_last_present_snapshot_body_us());
 	}
 	const int64_t layout_revision = static_cast<int64_t>(snapshot->layout_revision);
 	const int64_t mission_start = p_stats_on ? now_usec() : 0;

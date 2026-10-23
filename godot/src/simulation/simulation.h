@@ -1658,6 +1658,9 @@ public:
 	int64_t get_last_present_snapshot_us() const {
 		return static_cast<int64_t>(present_.last_snapshot_us);
 	}
+	int64_t get_last_present_snapshot_body_us() const {
+		return static_cast<int64_t>(present_.last_snapshot_body_us);
+	}
 	int64_t get_last_occlusion_build_us() const {
 		return static_cast<int64_t>(present_.last_occlusion_build_us);
 	}

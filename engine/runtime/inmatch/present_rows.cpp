@@ -1,6 +1,8 @@
 // The packed present-row collectors (see present_rows.h).
 #include <runtime/inmatch/present_rows.h>
 
+#include <base/io/perf_clock.h> // the body columns' instrument (PresentRowsContext::body_us)
+
 #include <runtime/inmatch/client_replica_present.h> // the emplaced/overlay/held-weapon writers
 #include <runtime/inmatch/client_replica_emplaced.h> // the joiner's carrier gun words
 #include <runtime/inmatch/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
@@ -895,6 +897,14 @@ static void write_world_present_row(const PresentRowsContext &context,
 				: 0.0f;
 	}
 	if (!ae->inf.active) return;
+	// The body columns' wall time (an instrument, PresentRowsContext::body_us).
+	struct BodyClock {
+		uint64_t *sink;
+		uint64_t start;
+		~BodyClock() {
+			if (sink != nullptr) *sink += io::perf_now_us() - start;
+		}
+	} body_clock{context.body_us, context.body_us != nullptr ? io::perf_now_us() : 0};
 	write_present_body(r, infantry_body_pose(ae->inf));
 	// The upper-body weapon channel this body derived for itself; the gate
 	// is the §14.8.6 consumer test and engine_flags bit 0x100 is the "is a

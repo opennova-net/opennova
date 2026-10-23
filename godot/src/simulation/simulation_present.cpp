@@ -733,9 +733,11 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	auto &frame = *present_.snapshot;
 	frame.rows.clear();
 	frame.door_phases.clear();
+	present_.last_snapshot_body_us = 0;
 	if (runtime_ && kernel_) {
 		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner(),
-				host_ctx(), joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr};
+				host_ctx(), joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr,
+				runtime_profiling_enabled_ ? &present_.last_snapshot_body_us : nullptr};
 		if (is_joiner()) {
 			opennova::inmatch::build_client_replica_present_rows(
 					context, present_.pool_lifecycle, frame.rows, frame.door_phases);

@@ -110,6 +110,8 @@ struct SimulationPresentState {
 	mutable std::shared_ptr<SimulationPresentSnapshot> snapshot;
 	// The last snapshot's build time and row count (the F3 counters).
 	mutable uint64_t last_snapshot_us = 0;
+	// Its organic rows' body columns (PresentRowsContext::body_us), within last_snapshot_us.
+	mutable uint64_t last_snapshot_body_us = 0;
 	mutable int last_entity_count = 0;
 	// get_hud_minimap_snapshot cache: the retained banks bump
 	// ClientMinimapState::revision, and every other input — entity resolves,

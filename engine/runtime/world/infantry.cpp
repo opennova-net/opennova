@@ -1235,18 +1235,24 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // the attach sample, then the ground-carrier ride and the gradient.
     // [orig: Entity_UpdateInfantryAI slope @0x4BA066, attach sample @0x4BA348,
     //  carrier @0x4BA45D..0x4BA891, gradient @0x4BA896, think @0x4BA970]
-    if (npc_body) infantry_slope_pass(e, world, logic_tick, key);
-    const InfantryAttachmentPose attachment = npc_body && body_live
-            ? infantry_attachment_pose(e, world) : InfantryAttachmentPose{};
-    if (npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, false);
-    // Org1 samples before the think so path_state=1 is visible to this tick's
-    // boarding and detour selection. Its replacement motion overrides the
-    // motor-head animation sample and still rotates by body heading. [orig: @0x4BA8CC,
-    // @0x4BA917..0x4BA94E; root rotation @0x4BF001]
+    // (The four legs ahead of the think report as SIM_AI_INFANTRY_MOTION, an instrument.)
+    InfantryAttachmentPose attachment{};
     const auto *gradient_field = world.tables.terrain ? world.tables.terrain : terrain;
     int32_t gradient_dx = 0, gradient_dy = 0;
-    const bool terrain_slide = npc_body && infantry_terrain_motion(
-            e, tick_entity, gradient_field, true, gradient_dx, gradient_dy);
+    bool terrain_slide = false;
+    {
+        const devtools::ProfileScope motion_scope(
+                world.profile, devtools::Slot::SIM_AI_INFANTRY_MOTION);
+        if (npc_body) infantry_slope_pass(e, world, logic_tick, key);
+        if (npc_body && body_live) attachment = infantry_attachment_pose(e, world);
+        if (npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, false);
+        // Org1 samples before the think so path_state=1 is visible to this tick's
+        // boarding and detour selection. Its replacement motion overrides the
+        // motor-head animation sample and still rotates by body heading. [orig: @0x4BA8CC,
+        // @0x4BA917..0x4BA94E; root rotation @0x4BF001]
+        terrain_slide = npc_body && infantry_terrain_motion(
+                e, tick_entity, gradient_field, true, gradient_dx, gradient_dy);
+    }
 
     if (e.health > 0 && inf.is_local_player) {
         const Entity *ent = world.registry.get(e.handle);

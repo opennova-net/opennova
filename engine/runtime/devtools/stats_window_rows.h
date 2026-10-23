@@ -27,7 +27,7 @@ struct StatsRow {
 namespace stats_rows {
 
 inline constexpr Slot k_ai_infantry_collision_unattributed[] = {Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS, Slot::SIM_AI_INFANTRY_COLLISION_REPULSION, Slot::SIM_AI_INFANTRY_COLLISION_GROUND};
-inline constexpr Slot k_ai_infantry_unattributed[] = {Slot::SIM_AI_INFANTRY_COMBAT, Slot::SIM_AI_INFANTRY_ANIMATION, Slot::SIM_AI_INFANTRY_COLLISION};
+inline constexpr Slot k_ai_infantry_unattributed[] = {Slot::SIM_AI_INFANTRY_COMBAT, Slot::SIM_AI_INFANTRY_ANIMATION, Slot::SIM_AI_INFANTRY_MOTION, Slot::SIM_AI_INFANTRY_COLLISION};
 inline constexpr Slot k_update_walks_other[] = {Slot::SIM_AI_INFANTRY, Slot::SIM_WALK_THINK, Slot::SIM_WALK_MOTOR, Slot::SIM_WALK_EWEP, Slot::SIM_WALK_ITEMS, Slot::SIM_WALK_DEVICES, Slot::SIM_WALK_MOUNTED};
 inline constexpr Slot k_update_entities_unattributed[] = {Slot::SIM_UPDATE_WALKS, Slot::SIM_UPDATE_ATTACHMENTS, Slot::SIM_UPDATE_HELILIFT_FACES, Slot::SIM_UPDATE_PRECIPITATION, Slot::SIM_UPDATE_PIECES_EVENTS, Slot::SIM_UPDATE_PROJECTILES, Slot::SIM_UPDATE_EXPLOSIONS, Slot::SIM_UPDATE_PROXIMITY};
 inline constexpr Slot k_attachment_unattributed[] = {Slot::SIM_ATTACHMENT_ORPHANS, Slot::SIM_ATTACHMENT_CHILDREN, Slot::SIM_ATTACHMENT_RIDERS};
@@ -76,12 +76,13 @@ inline constexpr StatsRow kRows[] = {
 	{"ai_infantry", "Infantry/player bodies", 9, RowKind::SPAN, Slot::SIM_AI_INFANTRY, nullptr, 0},
 	{"ai_infantry_combat", "NPC combat/perception", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COMBAT, nullptr, 0},
 	{"ai_infantry_animation", "Animation + root motion", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_ANIMATION, nullptr, 0},
+	{"ai_infantry_motion", "NPC slope, carrier, gradient", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_MOTION, nullptr, 0},
 	{"ai_infantry_collision", "Movement collision resolver", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION, nullptr, 0},
 	{"ai_infantry_collision_contacts", "Model contact passes", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS, nullptr, 0},
 	{"ai_infantry_collision_repulsion", "Person repulsion", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_REPULSION, nullptr, 0},
 	{"ai_infantry_collision_ground", "Ground settle ray", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_GROUND, nullptr, 0},
 	{"ai_infantry_collision_unattributed", "Resolver remainder", 11, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY_COLLISION, k_ai_infantry_collision_unattributed, 3},
-	{"ai_infantry_unattributed", "Infantry remainder", 10, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY, k_ai_infantry_unattributed, 3},
+	{"ai_infantry_unattributed", "Infantry remainder", 10, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY, k_ai_infantry_unattributed, 4},
 	{"walk_think", "Pool-1 thinks (brains, mines, items)", 9, RowKind::SPAN, Slot::SIM_WALK_THINK, nullptr, 0},
 	{"walk_motor", "Vehicle motors", 9, RowKind::SPAN, Slot::SIM_WALK_MOTOR, nullptr, 0},
 	{"walk_ewep", "Emplaced weapons", 9, RowKind::SPAN, Slot::SIM_WALK_EWEP, nullptr, 0},
@@ -162,6 +163,7 @@ inline constexpr StatsRow kRows[] = {
 	{"effects", "Effects tick", 3, RowKind::SPAN, Slot::EFFECTS_TICK, nullptr, 0},
 	{"present", "Present", 3, RowKind::GROUP, Slot::COUNT, k_present, 7},
 	{"snapshot", "Row snapshot", 4, RowKind::SPAN, Slot::PRESENT_SNAPSHOT, nullptr, 0},
+	{"snapshot_body", "Body columns", 5, RowKind::SPAN, Slot::PRESENT_SNAPSHOT_BODY, nullptr, 0},
 	{"mission_rows", "Mission rows", 4, RowKind::SPAN, Slot::PRESENT_MISSION, nullptr, 0},
 	{"mission_rows_core", "Row scan/transform/submission", 5, RowKind::SPAN, Slot::PRESENT_MISSION_CORE, nullptr, 0},
 	{"mission_rows_aim", "Aim overlay", 5, RowKind::SPAN, Slot::PRESENT_MISSION_AIM, nullptr, 0},
