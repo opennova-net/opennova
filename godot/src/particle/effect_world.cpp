@@ -69,6 +69,8 @@ ParticleRenderer *EffectWorld::_ensure_renderer() {
 	renderer->set_texture_dir(texture_dir_);
 	renderer->set_environment_source(_environment_source());
 	renderer->set_water_plane(water_height_, _reflection_camera());
+	renderer->set_inset_mirror_camera(Object::cast_to<Camera3D>(
+			ObjectDB::get_instance(inset_mirror_camera_id_)));
 	renderer->set_second_scene_camera(get_second_scene_camera());
 	renderer->set_session_render_settings(session_texcompression_level_, session_particle_density_);
 	renderer->set_main_view_nvg_scene(main_view_nvg_scene_);
@@ -141,6 +143,13 @@ void EffectWorld::set_water_plane(float p_value, Camera3D *p_reflection_camera) 
 			? ObjectID(p_reflection_camera->get_instance_id())
 			: ObjectID();
 	_ensure_renderer()->set_water_plane(p_value, p_reflection_camera);
+}
+
+void EffectWorld::set_inset_mirror_camera(Camera3D *p_camera) {
+	inset_mirror_camera_id_ = p_camera != nullptr
+			? ObjectID(p_camera->get_instance_id())
+			: ObjectID();
+	_ensure_renderer()->set_inset_mirror_camera(p_camera);
 }
 
 void EffectWorld::set_second_scene_camera(Camera3D *p_camera) {
@@ -245,9 +254,11 @@ void EffectWorld::clear_world() {
 	water_height_ = 0.0f;
 	reflection_camera_id_ = ObjectID();
 	second_scene_camera_id_ = ObjectID();
+	inset_mirror_camera_id_ = ObjectID();
 	if (ParticleRenderer *renderer = _renderer()) {
 		renderer->set_water_plane(0.0f, nullptr);
 		renderer->set_second_scene_camera(nullptr);
+		renderer->set_inset_mirror_camera(nullptr);
 	}
 	scene_.instantiate();
 	load_report_ = scene_->open(TypedArray<ParticleFile>());
@@ -850,6 +861,8 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::set_owner_position_provider);
 	ClassDB::bind_method(D_METHOD("set_water_plane", "value", "reflection_camera"),
 			&EffectWorld::set_water_plane);
+	ClassDB::bind_method(D_METHOD("set_inset_mirror_camera", "camera"),
+			&EffectWorld::set_inset_mirror_camera);
 	ClassDB::bind_method(D_METHOD("set_second_scene_camera", "camera"),
 			&EffectWorld::set_second_scene_camera);
 	ClassDB::bind_method(D_METHOD("get_second_scene_camera"),

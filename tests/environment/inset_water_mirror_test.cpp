@@ -1,15 +1,19 @@
 // The weapon Inset pass's water: the water pass latch both scenes share, the Inset's own mirror
-// source, and the mirror image the bloom's water redraw samples (environment/water_frame.h,
-// environment/water_mirror.h carry the witnesses).
+// source, the mirror image the bloom's water redraw samples, and the stride the Inset's mirror
+// particles draw in (environment/water_frame.h, environment/water_mirror.h,
+// renderer/particle_density.h carry the witnesses).
 //
 // The oracles are retail's order and arithmetic: a scene's water pass stores its collect's
 // g_BlinkWaterVisible only past its water letter [orig: Terrain_RenderWorldScene, the label
 // @0x5c93b8..0x5c93cd; Terrain_RenderWaterPass, the stores @0x610666 / @0x610671]; the Inset's
 // prerender mirrors the view block at aspect 1.0 [orig: Render_MainScene @0x5c125c] with the
 // mirror's z' = 2 wh - z, pitch and roll negated [orig: @0x5c1376..0x5c139c]; the bloom runs
-// after the Inset pass [orig: Render_ProcessMainSceneFrame, the calls @0x5ca949 then @0x5caa97].
+// after the Inset pass [orig: Render_ProcessMainSceneFrame, the calls @0x5ca949 then @0x5caa97];
+// the Inset's prerender draws ahead of its own density set [orig: Render_WeaponInsetScene, the
+// calls @0x5c99b7 then @0x5c9dd9].
 #include <runtime/environment/water_frame.h>
 #include <runtime/environment/water_mirror.h>
+#include <runtime/renderer/particle_density.h>
 #include <runtime/terrain/quadtree.h>
 
 #include <cmath>
@@ -102,12 +106,25 @@ void test_the_bloom_water_samples_the_last_mirror_rendered() {
 	CHECK(env::bloom_water_mirror_image(true) == env::WaterMirrorImage::kInset);
 }
 
+void test_the_inset_mirror_draws_in_the_main_scene_stride() {
+	// Session density 0: the main scene's scale 0x10000 >> 2 is 0.25, a stride of 4.
+	const renderer::ParticleFrameStrides strides = renderer::particle_frame_strides(0, false, 1);
+	CHECK(strides.main_view == 4u);
+	CHECK(strides.inset_mirror == strides.main_view);
+	// The frame's mirror keeps the stride the previous frame's last pass left.
+	CHECK(strides.mirror == 1u);
+	const renderer::ParticleFrameStrides dense = renderer::particle_frame_strides(2, false, 4);
+	CHECK(dense.inset_mirror == 1u);
+	CHECK(dense.mirror == 4u);
+}
+
 } // namespace
 
 int main() {
 	test_the_latch_is_one_word_for_both_scenes();
 	test_the_inset_mirror_reflects_its_view_block_square();
 	test_the_bloom_water_samples_the_last_mirror_rendered();
+	test_the_inset_mirror_draws_in_the_main_scene_stride();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

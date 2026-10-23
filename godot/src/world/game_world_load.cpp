@@ -1747,8 +1747,10 @@ void GameWorld::start_effect_world() {
 		if (role_sim.is_valid()) role_sim->bind_item_effect_scene(effect_world->shared_native_scene());
 	}
 	if (water_ != nullptr) {
-		if (effect_world != nullptr)
+		if (effect_world != nullptr) {
 			effect_world->set_water_plane(water_->get_water_height(), water_->get_reflection_camera());
+			effect_world->set_inset_mirror_camera(water_->get_inset_reflection_camera());
+		}
 		// The sim-side water plane (env.water_z): the footstep water pick, the
 		// landing legs, AND the destruction paths (submerged wrecks skip pieces,
 		// the wreck fire steams out) all gate on it [orig: g_EnvWaterHeightFixed

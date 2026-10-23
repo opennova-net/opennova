@@ -47,6 +47,7 @@ private:
 	ObjectID environment_source_;
 	ObjectID reflection_camera_;
 	ObjectID second_scene_camera_;
+	ObjectID inset_mirror_camera_;
 	float water_height_ = 0.0f;
 	// The session's texcompression_level and particle_density (the fresh
 	// profile's until an embedder hands the mission's copy over) and whether
@@ -92,6 +93,12 @@ public:
 	// ObjectID is kept; a freed camera retires the view on the next render.
 	void set_second_scene_camera(Camera3D *p_camera);
 	Camera3D *get_second_scene_camera() const;
+	// The weapon Inset pass's own water mirror camera: its reflected scene
+	// runs the mirror's particle pair again for that mirror's eye, on a frame
+	// whose Inset pass renders that mirror (Water::advance_inset_frame; engine
+	// renderer/particle_frame.h compiles_mirror_particles). Null retires it.
+	void set_inset_mirror_camera(Camera3D *p_camera);
+	Camera3D *get_inset_mirror_camera() const;
 	// The session's game.cfg texcompression_level and particle_density
 	// (renderer/texture_compression.h, renderer/particle_density.h): the
 	// atlas pages are built again under the flags they give (DXT5 at a

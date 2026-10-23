@@ -1181,7 +1181,10 @@ func test_an_out_of_view_haze_still_runs_the_distortion_row() -> void:
 # from the main eye ahead of Water_RenderReflectedWorldScene, which builds
 # none): an emitter the main eye sees submits to the mirror's passes even
 # while the mirror's own eye faces away from it.
-func test_the_mirror_culls_by_the_main_eye() -> void:
+func test_each_mirror_culls_by_its_own_eye_over_a_square() -> void:
+	# A mirror's reflected scene builds no viewport of its own: its passes submit against the
+	# mirror eye Render_MainScene rebuilt last (the mirrored block, the RTT's square rect, the
+	# pass's horizontal fov; engine renderer/particle_frame.h ParticleViewInput::frustum).
 	var viewport := _main_view()
 	var camera := Camera3D.new()
 	camera.position = Vector3(0.0, 0.0, 5.0)
@@ -1199,9 +1202,21 @@ func test_the_mirror_culls_by_the_main_eye() -> void:
 
 	var report := renderer.get_debug_draw_list_report()
 	assert_eq(int(_slot(report, "world_camera_side").get("selected_emitters", -1)), 1)
+	assert_eq(int(_slot(report, "reflection_camera_side").get("selected_emitters", -1)), 0,
+			"the mirror's eye faces away: its pass submits nothing the main eye sees")
+	assert_eq(int(_slot(report, "reflection_camera_side").get("frustum_culled_emitters", -1)), 1)
+
+	# The square: a wide mirror frame whose own field is short vertically still
+	# submits an emitter inside its horizontal fov's square.
+	(mirror_camera.get_viewport() as SubViewport).size = Vector2i(128, 32)
+	mirror_camera.keep_aspect = Camera3D.KEEP_WIDTH
+	mirror_camera.fov = 60.0
+	mirror_camera.rotation_degrees = Vector3.ZERO
+	mirror_camera.position = Vector3(0.0, -2.5, 5.0)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	report = renderer.get_debug_draw_list_report()
 	assert_eq(int(_slot(report, "reflection_camera_side").get("selected_emitters", -1)), 1,
-			"the mirror's pass submits what the main eye sees")
-	assert_eq(int(_slot(report, "reflection_camera_side").get("frustum_culled_emitters", -1)), 0)
+			"26.6 degrees up: outside the frame's 8.2-degree half height, inside the 30-degree square")
 
 	# The mirror's passes run inside its reflected scene, which a frame renders only while
 	# its water pass runs (retail Render_TerrainScene's g_WaterActive test ahead of
@@ -1214,6 +1229,59 @@ func test_the_mirror_culls_by_the_main_eye() -> void:
 			"an unrendered mirror compiles no pass")
 	assert_true(_slot(report, "reflection_far_side").is_empty())
 	assert_eq(int(_slot(report, "world_camera_side").get("selected_emitters", -1)), 1)
+
+
+func test_the_inset_mirror_compiles_its_own_pair_while_it_renders() -> void:
+	# The weapon Inset pass's own prerender runs the reflected scene again, its particle
+	# pair for its own eye (engine environment/water_mirror.h inset_mirror_source,
+	# renderer/particle_frame.h compiles_mirror_particles), only on a frame whose Inset
+	# pass renders that mirror.
+	var viewport := _main_view()
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var inset_mirror := _shared_world_camera(viewport)
+	(inset_mirror.get_viewport() as SubViewport).size = Vector2i(64, 64)
+	inset_mirror.keep_aspect = Camera3D.KEEP_WIDTH
+	inset_mirror.fov = 9.5
+	inset_mirror.position = Vector3(0.0, 0.0, 5.0)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _live_world_scene()
+	renderer.procedural_fallback_enabled = true
+	renderer.set_water_plane(-100.0, null)
+	renderer.set_inset_mirror_camera(inset_mirror)
+	viewport.add_child(renderer)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+
+	var report := renderer.get_debug_draw_list_report()
+	assert_eq(renderer.get_inset_mirror_camera(), inset_mirror)
+	assert_true(bool(report.get("inset_mirror_compositor_attached", false)))
+	assert_eq(int(_slot(report, "inset_mirror_camera_side").get("selected_emitters", -1)), 1,
+			"the Inset mirror's own eye sees the emitter")
+	assert_true(_slot(report, "reflection_camera_side").is_empty(), "no main mirror this frame")
+
+	# Its narrow square culls by its own eye.
+	inset_mirror.position = Vector3(3.0, 0.0, 5.0)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	report = renderer.get_debug_draw_list_report()
+	assert_eq(int(_slot(report, "inset_mirror_camera_side").get("selected_emitters", -1)), 0)
+	assert_eq(int(_slot(report, "inset_mirror_camera_side").get("frustum_culled_emitters", -1)), 1)
+
+	# The Inset pass left its mirror unrendered: no pair.
+	(inset_mirror.get_viewport() as SubViewport).render_target_update_mode = \
+			SubViewport.UPDATE_DISABLED
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	report = renderer.get_debug_draw_list_report()
+	assert_true(_slot(report, "inset_mirror_camera_side").is_empty())
+	assert_true(_slot(report, "inset_mirror_far_side").is_empty())
+	assert_eq(int(_slot(report, "world_camera_side").get("selected_emitters", -1)), 1)
+
+	renderer.set_inset_mirror_camera(null)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	report = renderer.get_debug_draw_list_report()
+	assert_false(bool(report.get("inset_mirror_compositor_attached", true)),
+			"no Inset mirror: its pair detaches")
 
 
 func _asymmetric_dirt_image(_name: String) -> Image:

@@ -257,17 +257,24 @@ struct ParticleViewInput {
 	//  @0x5e5979]. Not valid: no clip state, every emitter with live particles submits.
 	// The test reads the current g_MainViewport, which a scene's passes share: the scene's
 	// two world passes (Terrain_RenderWorldScene @ 0x5c93a0, the calls @0x5c95b5 /
-	// @0x5c9690; there is no first-person particle pass) and the water mirror's, whose
-	// reflected scene builds no viewport of its own after Render_MainScene rebuilds the
-	// main eye's (Viewport_BuildProjectionMatrix, the call @0x5c170b, ahead of
-	// Water_RenderReflectedWorldScene's @0x5c171f), so the embedder hands the mirror's
-	// passes and the first-person view the main view's frustum; the Inset pass re-runs
-	// the scene routine with its own eye. The distortion row's content gate does not read
-	// the submit: EffectWorld_HasDistortionParticles @ 0x5f6640 answers any class-7
-	// child of a visible group (the group test @0x5e9848, the class compare @0x5e986b and
-	// its jz @0x5e9871: no live count, no view), so the embedder counts the
-	// distortion pass's emitters ahead of the submit's tests (the selected, the empty and
-	// the culled together).
+	// @0x5c9690; there is no first-person particle pass), so the embedder hands the
+	// first-person view the main view's frustum; the Inset pass re-runs the scene routine
+	// with its own eye. A water mirror's reflected scene builds no viewport of its own
+	// (Water_RenderReflectedWorldScene @ 0x5c8510 down to its particle calls @0x5c85db /
+	// @0x5c85e5): Render_MainScene rebuilds the mirror eye's right ahead of it
+	// (Viewport_BuildProjectionMatrix, the call @0x5c170b, over the block @0x5c1701 its first
+	// build took @0x5c1499: the mirrored camera block above the plane, the RTT's square rect
+	// @0x5c1464..0x5c1482 and the pass's fov); only its entity collect (the call @0x5c16fc)
+	// runs under the unmirrored block's build (@0x5c16e8). Viewport_BuildProjectionMatrix
+	// @ 0x410fb0 spans the fov across the rect's width and the height at the same focal
+	// (@0x410fc6..0x411056), so each mirror's passes cull by the mirror's own eye over a
+	// square at the pass's horizontal fov, whatever field its image projects (the main
+	// frame's mirror draws the main view's, environment/water_mirror.h). The distortion
+	// row's content gate does not read the submit: EffectWorld_HasDistortionParticles
+	// @ 0x5f6640 answers any class-7 child of a visible group (the group test @0x5e9848,
+	// the class compare @0x5e986b and its jz @0x5e9871: no live count, no view), so the
+	// embedder counts the distortion pass's emitters ahead of the submit's tests (the
+	// selected, the empty and the culled together).
 	particle::ParticleViewFrustum frustum{};
 };
 

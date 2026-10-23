@@ -95,6 +95,9 @@ public:
 	// the cached basis) or null (the owner is gone: its groups detach).
 	void set_owner_position_provider(const Callable &p_provider);
 	void set_water_plane(float p_value, Camera3D *p_reflection_camera);
+	// The weapon Inset pass's own water mirror camera
+	// (ParticleRenderer::set_inset_mirror_camera); clear_world() drops it.
+	void set_inset_mirror_camera(Camera3D *p_camera);
 	// The camera of a second view of this world's scene (the weapon Inset pass),
 	// or null while none renders: the renderer compiles the world's particles
 	// for it too (ParticleRenderer::set_second_scene_camera). The device owner
@@ -316,6 +319,7 @@ private:
 	float water_height_ = 0.0f;
 	ObjectID reflection_camera_id_;
 	ObjectID second_scene_camera_id_;
+	ObjectID inset_mirror_camera_id_;
 	int session_texcompression_level_ = 1;
 	int session_particle_density_ = 2;
 	bool main_view_nvg_scene_ = false;

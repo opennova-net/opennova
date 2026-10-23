@@ -80,7 +80,10 @@ enum ParticleDrawSlot : std::size_t {
 	kFirstPerson = 6,
 	// The post-scene distortion pass (class-7 emitters, main view).
 	kDistortion = 7,
-	kParticleDrawSlotCount = 8,
+	// The weapon Inset pass's own water mirror.
+	kInsetMirrorFarSide = 8,
+	kInsetMirrorCameraSide = 9,
+	kParticleDrawSlotCount = 10,
 };
 
 using ParticleEffectPair = std::array<Ref<ParticleCompositorEffect>, 2>;
@@ -173,6 +176,27 @@ ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 	result.frustum = particle_view_frustum(camera->get_frustum(),
 			transform.origin - transform.basis.get_column(2) * (camera->get_near() + 1.0f));
 	return result;
+}
+
+// A water mirror's submit clip state: its own eye over a square at its
+// horizontal fov, whatever field its image projects (renderer::ParticleViewInput
+// frustum carries the witness). The node's projection carries the horizontal
+// fov in its first column, its frustum form (the RTT's half texel) included.
+opennova::particle::ParticleViewFrustum mirror_cull_frustum(Camera3D *camera) {
+	const Projection projection = camera->get_camera_projection();
+	const double focal_x = static_cast<double>(projection.columns[0][0]);
+	if (!(focal_x > 0.0))
+		return {};
+	const double fov_h = 2.0 * std::atan(1.0 / focal_x) * 180.0 / 3.14159265358979323846;
+	const Projection square = Projection::create_perspective(static_cast<real_t>(fov_h), 1.0f,
+			camera->get_near(), camera->get_far(), true);
+	const Transform3D transform = camera->get_camera_transform();
+	const Vector<Plane> planes = square.get_projection_planes(transform);
+	TypedArray<Plane> plane_array;
+	for (int index = 0; index < planes.size(); ++index)
+		plane_array.push_back(planes[index]);
+	return particle_view_frustum(plane_array,
+			transform.origin - transform.basis.get_column(2) * (camera->get_near() + 1.0f));
 }
 
 // One comparable value for "what this slot draws": FNV-1a over the compiled
@@ -454,11 +478,13 @@ public:
 	ParticleEffectPair world_effects;
 	ParticleEffectPair reflection_effects;
 	ParticleEffectPair second_scene_effects;
+	ParticleEffectPair inset_mirror_effects;
 	// The post-particle overlay pass of each view, composed right after the
 	// view's pair (runtime/renderer/scene_overlay.h).
 	Ref<SceneOverlayCompositorEffect> world_overlay;
 	Ref<SceneOverlayCompositorEffect> reflection_overlay;
 	Ref<SceneOverlayCompositorEffect> second_scene_overlay;
+	Ref<SceneOverlayCompositorEffect> inset_mirror_overlay;
 	// FrameFX's type-0 row: the distortion subset's effect (attached to no
 	// camera) and the drawer FrameFX calls; the drawer outlives effect sets.
 	Ref<ParticleCompositorEffect> distortion_effect;
@@ -467,9 +493,11 @@ public:
 	ObjectID attached_world_camera;
 	ObjectID attached_reflection_camera;
 	ObjectID attached_second_scene_camera;
+	ObjectID attached_inset_mirror_camera;
 	bool inherited_world_compositor = false;
 	bool inherited_reflection_compositor = false;
 	bool inherited_second_scene_compositor = false;
+	bool inherited_inset_mirror_compositor = false;
 	// The stride the frame's last scene pass left, which the next frame's
 	// water mirror draws in (renderer::particle_frame_strides); the effect
 	// world's scale starts at kParticleDensityScaleInitial.
@@ -503,8 +531,8 @@ public:
 	// no lifecycle path (hide, warm, shutdown, re-entry) can skip a view.
 	template <typename Visitor>
 	void for_each_effect(Visitor &&visit) {
-		for (ParticleEffectPair *pair :
-				{&world_effects, &reflection_effects, &second_scene_effects}) {
+		for (ParticleEffectPair *pair : {&world_effects, &reflection_effects,
+					 &second_scene_effects, &inset_mirror_effects}) {
 			for (Ref<ParticleCompositorEffect> &effect : *pair)
 				visit(effect);
 		}
@@ -513,8 +541,8 @@ public:
 
 	template <typename Visitor>
 	void for_each_overlay(Visitor &&visit) {
-		for (Ref<SceneOverlayCompositorEffect> *overlay :
-				{&world_overlay, &reflection_overlay, &second_scene_overlay}) {
+		for (Ref<SceneOverlayCompositorEffect> *overlay : {&world_overlay, &reflection_overlay,
+					 &second_scene_overlay, &inset_mirror_overlay}) {
 			visit(*overlay);
 		}
 	}
@@ -539,8 +567,10 @@ public:
 			overlay.instantiate();
 		});
 		// The mirror's reflected scene draws only its coronas after its
-		// particle passes.
+		// particle passes; the Inset pass's own mirror closes its target the
+		// same way.
 		reflection_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_MIRROR);
+		inset_mirror_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_MIRROR);
 		// The second scene view is the weapon Inset pass: its tail draws its
 		// own corona walk and no glare (runtime/renderer/scene_overlay.h
 		// kInsetOverlayOrder).
@@ -683,6 +713,9 @@ public:
 		detach_compositor_group(attached_second_scene_camera,
 				view_group(second_scene_effects, second_scene_overlay),
 				inherited_second_scene_compositor);
+		detach_compositor_group(attached_inset_mirror_camera,
+				view_group(inset_mirror_effects, inset_mirror_overlay),
+				inherited_inset_mirror_compositor);
 	}
 
 	void attach_compositor_group(Camera3D *camera, Viewport *viewport,
@@ -957,7 +990,8 @@ public:
 					camera_forward[static_cast<int>(component)];
 		}
 		const bool water_mirror = effect == reflection_effects[0] ||
-				effect == reflection_effects[1];
+				effect == reflection_effects[1] || effect == inset_mirror_effects[0] ||
+				effect == inset_mirror_effects[1];
 		submission->fog_color = water_mirror ? mirror_fog_color : fog_color;
 		submission->fog_start = water_mirror ? mirror_fog_start : fog_start;
 		submission->fog_end = water_mirror ? mirror_fog_end : fog_end;
@@ -1046,6 +1080,10 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::set_main_view_nvg_scene);
 	ClassDB::bind_method(D_METHOD("get_second_scene_camera"),
 			&ParticleRenderer::get_second_scene_camera);
+	ClassDB::bind_method(D_METHOD("set_inset_mirror_camera", "camera"),
+			&ParticleRenderer::set_inset_mirror_camera);
+	ClassDB::bind_method(D_METHOD("get_inset_mirror_camera"),
+			&ParticleRenderer::get_inset_mirror_camera);
 	ClassDB::bind_method(D_METHOD("set_hidden", "hidden"),
 			&ParticleRenderer::set_hidden);
 	ClassDB::bind_method(D_METHOD("get_hidden"),
@@ -1196,6 +1234,18 @@ Camera3D *ParticleRenderer::get_second_scene_camera() const {
 		return nullptr;
 	return Object::cast_to<Camera3D>(ObjectDB::get_instance(
 			static_cast<std::uint64_t>(second_scene_camera_)));
+}
+
+void ParticleRenderer::set_inset_mirror_camera(Camera3D *p_camera) {
+	inset_mirror_camera_ = p_camera != nullptr ?
+			ObjectID(p_camera->get_instance_id()) : ObjectID();
+}
+
+Camera3D *ParticleRenderer::get_inset_mirror_camera() const {
+	if (!inset_mirror_camera_.is_valid())
+		return nullptr;
+	return Object::cast_to<Camera3D>(ObjectDB::get_instance(
+			static_cast<std::uint64_t>(inset_mirror_camera_)));
 }
 
 void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
@@ -1381,6 +1431,12 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			second_scene_camera == reflection_camera ||
 			!second_scene_camera->is_inside_tree()))
 		second_scene_camera = nullptr;
+	Camera3D *inset_mirror_camera = get_inset_mirror_camera();
+	if (inset_mirror_camera != nullptr && (inset_mirror_camera == camera ||
+			inset_mirror_camera == reflection_camera ||
+			inset_mirror_camera == second_scene_camera ||
+			!inset_mirror_camera->is_inside_tree()))
+		inset_mirror_camera = nullptr;
 	// Attached even while the particles are hidden: the hidden particle passes
 	// are disabled, and each view's overlay pass (not particles) still draws.
 	impl_->attach_compositor_group(camera, viewport,
@@ -1398,6 +1454,11 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			impl_->attached_second_scene_camera,
 			Impl::view_group(impl_->second_scene_effects, impl_->second_scene_overlay),
 			impl_->inherited_second_scene_compositor);
+	impl_->attach_compositor_group(inset_mirror_camera,
+			inset_mirror_camera != nullptr ? inset_mirror_camera->get_viewport() : nullptr,
+			impl_->attached_inset_mirror_camera,
+			Impl::view_group(impl_->inset_mirror_effects, impl_->inset_mirror_overlay),
+			impl_->inherited_inset_mirror_compositor);
 	if (hidden_)
 		return;
 	if (scene_.is_null()) {
@@ -1536,30 +1597,31 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 				view_camera, effects[1], false, lod_divisor);
 	};
 
-	// The mirror's passes compile only on a frame whose water renders the mirror: its viewport left
+	// A mirror's passes compile only on a frame whose water renders that mirror: its viewport left
 	// disabled, the reflected scene runs none (renderer::compiles_mirror_particles carries the
-	// witness, D-NET-NEW-L3-39).
-	const SubViewport *mirror_viewport = reflection_camera != nullptr ?
-			Object::cast_to<SubViewport>(reflection_camera->get_viewport()) : nullptr;
-	const bool mirror_rendered = mirror_viewport == nullptr ||
-			mirror_viewport->get_update_mode() != SubViewport::UPDATE_DISABLED;
-	if (reflection_camera != nullptr &&
-			opennova::renderer::compiles_mirror_particles(mirror_rendered)) {
-		// The reflected pass selects its water subsets by the main camera's
-		// side (Water_RenderReflectedWorldScene passes the prerender's
-		// below-water flag), whether its eye is mirrored or not.
-		// The reflected scene keeps the main view's viewport for its submit tests: its eye is the
-		// mirror's, its cull the main eye's (renderer::ParticleViewInput::frustum carries the
-		// witness).
-		ParticleCameraFrame mirror_camera = particle_camera_frame(reflection_camera);
-		mirror_camera.frustum = world_camera.frustum;
-		compile_secondary_pair(mirror_camera,
-				camera_above_water, kReflectionFarSide, kReflectionCameraSide,
-				impl_->reflection_effects, strides.mirror);
-	} else {
-		impl_->retire_view_pair(impl_->reflection_effects, kReflectionFarSide,
-				kReflectionCameraSide);
-	}
+	// witness, D-NET-NEW-L3-39). The reflected pass selects its water subsets by the prerender's
+	// below-water flag, the main eye's side, whether its eye is mirrored or not, and culls by
+	// its own eye over a square at its horizontal fov (renderer::ParticleViewInput::frustum
+	// carries the witness). The weapon Inset pass's own mirror runs the same pair after the
+	// main scene's passes, in the main scene's stride (renderer::ParticleFrameStrides).
+	auto compile_mirror_pair = [&](Camera3D *mirror, ParticleDrawSlot far_slot,
+			ParticleDrawSlot camera_slot, ParticleEffectPair &effects,
+			std::uint32_t lod_divisor) {
+		const SubViewport *mirror_viewport = mirror != nullptr ?
+				Object::cast_to<SubViewport>(mirror->get_viewport()) : nullptr;
+		const bool mirror_rendered = mirror_viewport == nullptr ||
+				mirror_viewport->get_update_mode() != SubViewport::UPDATE_DISABLED;
+		if (mirror != nullptr && opennova::renderer::compiles_mirror_particles(mirror_rendered)) {
+			ParticleCameraFrame mirror_camera = particle_camera_frame(mirror);
+			mirror_camera.frustum = mirror_cull_frustum(mirror);
+			compile_secondary_pair(mirror_camera, camera_above_water, far_slot, camera_slot,
+					effects, lod_divisor);
+		} else {
+			impl_->retire_view_pair(effects, far_slot, camera_slot);
+		}
+	};
+	compile_mirror_pair(reflection_camera, kReflectionFarSide, kReflectionCameraSide,
+			impl_->reflection_effects, strides.mirror);
 
 	if (second_scene_camera != nullptr) {
 		// The original runs its one scene routine again for this camera, so the
@@ -1575,6 +1637,8 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 		impl_->retire_view_pair(impl_->second_scene_effects, kSecondSceneFarSide,
 				kSecondSceneCameraSide);
 	}
+	compile_mirror_pair(inset_mirror_camera, kInsetMirrorFarSide, kInsetMirrorCameraSide,
+			impl_->inset_mirror_effects, strides.inset_mirror);
 }
 
 int64_t ParticleRenderer::get_rendered_quad_count() const {
@@ -1621,6 +1685,8 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	result["reflection_camera_side"] = slot_report(kReflectionCameraSide);
 	result["second_scene_far_side"] = slot_report(kSecondSceneFarSide);
 	result["second_scene_camera_side"] = slot_report(kSecondSceneCameraSide);
+	result["inset_mirror_far_side"] = slot_report(kInsetMirrorFarSide);
+	result["inset_mirror_camera_side"] = slot_report(kInsetMirrorCameraSide);
 	result["first_person"] = slot_report(kFirstPerson);
 	result["distortion"] = slot_report(kDistortion);
 	result["distortion_backend"] = impl_->distortion_effect->get_backend_report();
@@ -1641,6 +1707,10 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 			impl_->second_scene_effects[0]->get_backend_report();
 	result["second_scene_camera_backend"] =
 			impl_->second_scene_effects[1]->get_backend_report();
+	result["inset_mirror_far_backend"] =
+			impl_->inset_mirror_effects[0]->get_backend_report();
+	result["inset_mirror_camera_backend"] =
+			impl_->inset_mirror_effects[1]->get_backend_report();
 	Dictionary world_overlay;
 	impl_->world_overlay->write_backend_report(world_overlay);
 	result["world_overlay_backend"] = world_overlay;
@@ -1657,6 +1727,8 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 			impl_->attached_reflection_camera.is_valid();
 	result["second_scene_compositor_attached"] =
 			impl_->attached_second_scene_camera.is_valid();
+	result["inset_mirror_compositor_attached"] =
+			impl_->attached_inset_mirror_camera.is_valid();
 	result["world_compositor_inherited_effects"] =
 			impl_->inherited_world_compositor;
 	result["reflection_compositor_inherited_effects"] =
