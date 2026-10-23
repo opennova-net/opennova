@@ -5360,6 +5360,11 @@ add_test(NAME netsim_joiner_pool1_interleave COMMAND netsim_joiner_pool1_interle
 add_executable(npruntime_joiner_local_dcb_id_test npruntime/joiner_local_dcb_id_test.cpp)
 target_link_libraries(npruntime_joiner_local_dcb_id_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_joiner_local_dcb_id COMMAND npruntime_joiner_local_dcb_id_test)
+# D-NET-NEW-L5-22: the ewep update's tank-command call (HUD_COM2GUN and the occupant's
+# TANK_COMAND composite) behind the window leg, its 125-tick stamp and the local seat gates.
+add_executable(emplaced_command_call_test world/emplaced_command_call_test.cpp)
+target_link_libraries(emplaced_command_call_test PRIVATE opennova_runtime)
+add_test(NAME emplaced_command_call COMMAND emplaced_command_call_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

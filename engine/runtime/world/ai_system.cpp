@@ -877,7 +877,8 @@ static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
     // the turret window over the body's +0x322 / +0x324 words, whose limits read the body's
     // +0x2D4 word (the Yaw) as a weapon def, or its +0x2EC word as a slot pointer: garbage-pointer
     // reads over a person, the Q16-1 (a) class, which ours does not run; the local player's
-    // HUD_COM2GUN leg behind them stays narrowed with them (D-NET-NEW-L4-14 (a)).
+    // tank-command leg behind them (world::emplaced_command_call, an item gun's) is reached only
+    // past those reads, so it stays narrowed with them (D-NET-NEW-L4-14 (a)).
     // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the link @0x4411D1, `cmp [eax+16Ch], ebp`
     //  @0x4411E4, Entity_GetWeaponTurretLimits @0x540D70 (the call @0x441228; slot +0x20 / +0x38
     //  @0x540DB5..0x540E58), the COM2GUN leg @0x4412B6..0x441364, the let-go @0x441366..0x441380,

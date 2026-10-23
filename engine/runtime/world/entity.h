@@ -1246,6 +1246,11 @@ struct Entity {
     //  @0x4B63C7; Entity_AttachToBoneAndUpdateTransform @0x546517..0x546518]
     bool replica_usegun_rider = false;
     uint8_t emplaced_spin_ticks = 0; // entity+0x31B
+    // The tank-command leg's last call tick (entity+0x31C): zero from the spawn's clear,
+    // re-stamped by each call (world::emplaced_command_call).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the read @0x441305, the store
+    //  @0x441310]
+    uint32_t emplaced_command_stamp = 0;
     uint16_t emplaced_spin_phase = 0; // entity+0x320, WEAP_SPIN
     int16_t emplaced_gun_yaw_word = 0;   // entity+0x322
     int16_t emplaced_gun_pitch_word = 0; // entity+0x324

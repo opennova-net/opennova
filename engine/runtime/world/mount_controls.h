@@ -12,6 +12,8 @@
 #include <runtime/world/fire_sound.h>
 #include <runtime/world/world.h>
 
+#include <runtime/audio/sound_profile.h>
+
 #include <formats/def/def.h>
 
 #include <base/io/bam.h>
@@ -394,6 +396,43 @@ inline void clamp_emplaced_gun_words_to_window(const World &world, Entity &mount
  }
 }
 
+// The game text the tank-command leg posts (Chat_AddMessageChannel1 in g_HUDColors'
+// fifth entry, yellow, for 930 ticks).
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - "HUD_COM2GUN" @0x44132C, the section
+//  "HUD" @0x7C4E64 pushed @0x441331, `mov ecx, g_HUDColors+10h` @0x44134B, `push 3A2h` @0x441351]
+inline constexpr HudChatLine kEmplacedCommandCallLine{"HUD", "HUD_COM2GUN", 0xFFF0F000u};
+
+// The window leg's tail while the occupant rides this gun: the tank-command call. With the
+// local player in a UseGun seat (attach type 3) of a gun whose ground entity (+0x28) is this
+// gun's own (two guns with none match), an occupant holding the packed jump bit (MoveOrder
+// 0x20) more than 124 ticks past the gun's last call (+0x31C, a signed difference) re-stamps
+// it; an occupant other than the local player then plays its TANK_COMAND composite on the
+// interface channel and posts HUD_COM2GUN to the CHAT ring.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - g_LocalPlayerEntity @0x4412B6..0x4412BD,
+//  `cmp dword ptr [eax+168h], 3` @0x4412C3, its +0x16C @0x4412D0, `cmp eax, [ebp+28h]`
+//  @0x4412DE..0x4412E1, `test byte ptr [eax+12Ch], 20h` @0x4412F0, the tick test
+//  @0x4412FD..0x44130E, the stamp @0x441310, the local test @0x441316, SoundProfile_FindByEntityAndType
+//  (occupant, 8) @0x441321, Sound_PlayInterfaceTriggerSet @0x441327, GameText_GetString @0x441336,
+//  Chat_AddMessageChannel1 @0x44135C]
+inline void emplaced_command_call(World &world, Entity &gun, bool occupant_is_local,
+		uint8_t occupant_move_order, int occupant_anim_slot) {
+	const Entity *local = world.registry.get(world.cached.local_player);
+	if (local == nullptr || !local->mounted || local->mount_type != SeatType::Gunner) return;
+	const Entity *local_gun = world.registry.get(local->mount_target);
+	if (local_gun == nullptr || local_gun->ground_target != gun.ground_target) return;
+	if ((occupant_move_order & Entity::kMoveOrderJump) == 0) return;
+	if (static_cast<int32_t>(world.logic_tick - gun.emplaced_command_stamp) <= 124) return;
+	gun.emplaced_command_stamp = world.logic_tick;
+	if (occupant_is_local) return;
+	char name[64];
+	ScriptSoundEvent call;
+	call.kind = ScriptSoundEvent::Kind::Interface;
+	call.name = audio::compose_entity_sound_set(occupant_anim_slot, audio::kEntitySoundTankCommand,
+			name, sizeof(name));
+	if (!call.name.empty()) world.out.script_sounds.push_back(std::move(call));
+	world.out.hud_chat_lines.push_back(kEmplacedCommandCallLine);
+}
+
 // The parent-brain publication: an addeweap child whose anchor userpoint
 // rides the parent ROOT hands its gun words to the parent's AI brain turret
 // channel — the live/staged yaw (and, for a helicopter parent, the pitch) the
@@ -550,6 +589,12 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 		return;
 	publish_emplaced_gun_words_to_parent(world, mount);
 	clamp_emplaced_gun_words_to_window(world, mount, gunner);
+	// The window leg's tail, the ewep update's own behind its slot Def (+0x2D4):
+	// the tank-command call over the occupant's packed MoveOrder byte.
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the slot Def gate @0x4411C9..0x4411CB]
+	if (mount.emplaced_update && emplaced_slot_def(world, mount) != nullptr)
+		emplaced_command_call(world, mount, occupant.handle == world.cached.local_player,
+				occupant.net_move_input, occupant.anim_slot);
 }
 
 // The ewep class update's every-tick legs outside the occupied channel, in

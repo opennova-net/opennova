@@ -205,6 +205,13 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 					local_mount->replica_usegun_rider = occupant.handle != self_handle &&
 							(occupant.state_flags & (world::kEntityFlagCarried |
 									world::kEntityFlagDead)) == 0u;
+					// The window leg's tail over the rider's 0x0A MoveOrder byte: the
+					// tank-command call (world::emplaced_command_call carries the witness).
+					if (local_mount->emplaced_update &&
+							world::emplaced_slot_def(world, *local_mount) != nullptr)
+						world::emplaced_command_call(world, *local_mount,
+								occupant.handle == self_handle, occupant.move_input,
+								occupant.spawn_anim_slot);
 				}
 			}
 			occupant.yaw_byte =

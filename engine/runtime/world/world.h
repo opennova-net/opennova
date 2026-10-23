@@ -847,6 +847,13 @@ struct WeaponReloadRequest {
 	uint16_t reload_param = 0;
 };
 
+// One CHAT-ring line by its game-text key (WorldOutbox::hud_chat_lines).
+struct HudChatLine {
+    const char *section = "";
+    const char *key = "";
+    uint32_t argb = 0;
+};
+
 struct HudRelay {
     uint8_t kind = 0;
     int32_t slot = 0;
@@ -1003,6 +1010,11 @@ struct WorldOutbox {
 	EffectLog effects;
     std::vector<ScriptEffectEvent> script_effects;
     std::vector<ScriptSoundEvent> script_sounds;
+    // The CHAT-ring lines the sim posts by their game-text key, in the order raised; the
+    // HUD owner resolves each in its section (a miss reads "") and posts it in its colour for
+    // the 930 ticks every such site passes (Chat_AddMessageChannel1; the ewep tank-command
+    // leg, world::emplaced_command_call, carries the witness).
+    std::vector<HudChatLine> hud_chat_lines;
     // An audio channel shutdown is owed: every audio channel falls silent and
     // the ambient channel handles drop, so the mix takes its channels anew. The
     // embedder's audio device takes and clears it. Three setters: the pause
@@ -1084,6 +1096,7 @@ struct WorldOutbox {
         effects.clear();
         script_effects.clear();
         script_sounds.clear();
+        hud_chat_lines.clear();
         terrain_scorches.clear_pending();
         slot_sounds.clear();
         sound_emitters.clear();
