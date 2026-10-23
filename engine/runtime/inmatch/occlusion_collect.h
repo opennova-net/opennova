@@ -25,7 +25,12 @@ namespace opennova::inmatch {
 using WireOcclusionLatchMap = std::unordered_map<uint16_t, uint8_t>;
 
 // The walk for the camera `cam` (its frame words already built by
-// OcclusionWorld::build_frame): `r_culled_bms` takes the placed rows' dropped
+// OcclusionWorld::build_frame), in the collectors' order: the statics (the
+// pool-2 rows that are not Building-type defs, in slot order), then pool 0,
+// then pool 1, each pool in slot order with its placed rows, decoded wire rows
+// and the local player each at its own slot (a joiner's local player at its
+// self handle), so the re-arms take the shared PRNG stream's draws in retail's
+// order (occlusion_collect.cpp carries the witness). `r_culled_bms` takes the placed rows' dropped
 // BMS ids, `r_culled_wire` the dropped wire handles, `r_anchors` the MODEL
 // foliage tier's anchors (mission units: the collected persons with a stance
 // bit and no groundEntity); `r_handles` is the caller's reused scratch. The
