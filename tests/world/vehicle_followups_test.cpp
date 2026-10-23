@@ -383,6 +383,30 @@ void parked_hull_latches_through_the_square_quad() {
     }
 }
 
+// D-NET-NEW-L6-25: a wreck at rest (+0x2F0) on its wheels leaves the bike's wheel arm before the
+// spring loop: the records lift it and the chassis call refits it, and only the tail follows, so
+// the wheel pair's fall absorption never runs. The same crashed bike not at rest halves its fall.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47B851..0x47B8C9, the vz halving
+//  @0x47BD68..0x47BD78 it skips]
+void bike_wreck_at_rest_leaves_the_wheel_arm() {
+    for (const bool at_rest : {true, false}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        auto &m = v.veh;
+        m.crashed = 1;
+        m.byte_2ef = 1;
+        m.settle_2f0 = at_rest ? 1 : 0;
+        m.slide_z = -0x800;
+        int32_t z = to_fixed(v.position.z);
+        const int32_t z0 = z;
+        r.contact(t, z);
+        CHECK((v.flags & kEntityFlagInAir) == 0);
+        CHECK(z > z0); // the crash depth lifts it either way
+        CHECK(m.slide_z == (at_rest ? -0x800 : -0x400));
+    }
+}
+
 // A climbing track can be supported by its inboard belly station while its
 // outer wheel is clear. Retail uses max(wheel, belly) for sink growth, spring
 // catch-up and the retained-contact tail. [orig: @ 0x4784CC..0x47853A,
@@ -938,6 +962,7 @@ int main() {
     bike_axle_and_release();
     crashed_upright_depth_precedes_springs();
     parked_hull_latches_through_the_square_quad();
+    bike_wreck_at_rest_leaves_the_wheel_arm();
     bike_off_contact_planar_forward();
     vehicle_respawn_reseeds_destroy_timer();
     bike_indestructible_hull_skips_impact_damage();

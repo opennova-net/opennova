@@ -1452,15 +1452,16 @@ static void light_capture_launch(Entity &entity, const VehicleEulerBasis &basis,
 // Entity_UpdatePartSpinAccumulator runs later in the mover and intentionally
 // acts on that same word, exactly as it does in retail.
 // `rec` is the solve's force records' depth words (the chassis call's contact block, read at
-// [2] / [5] / [8] / [11] / [14] / [17]): the airborne arm's snapshot, the grounded arm's records
-// as its spring loop resolved them. The corners are the caller's quad: each wheel's corner takes
-// the catch-up in either arm, and its resolved record on the ground.
+// [2] / [5] / [8] / [11] / [14] / [17]): the snapshot in the airborne arm and at the
+// wreck-at-rest exit, the grounded arm's records as its spring loop resolved them. The corners
+// are the caller's quad, each wheel's corner raised by the caller's lift: the catch-up in either
+// arm plus its resolved record on the ground, none at the wreck-at-rest exit.
 // [orig: the contact block @0x468BAA..0x468D17; the callers' quad var_8C + 12k: the airborne
-//  catch-up @0x47B4BC and the call @0x47B540, the grounded catch-up @0x47B9A0, the lift
-//  @0x47BB5D and the call @0x47BBAE]
+//  catch-up @0x47B4BC and the call @0x47B540, the exit's call @0x47B88E, the grounded catch-up
+//  @0x47B9A0, the lift @0x47BB5D and the call @0x47BBAE]
 bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits,
 		const VehicleEulerBasis &basis, const int32_t rec[6], int32_t px, int32_t py, int32_t pz,
-		const int32_t corner_adjust[4]) {
+		const int32_t corner_lift[2]) {
 	auto &m = veh.veh;
 	if (!m.crashed)
 		return false;
@@ -1471,9 +1472,8 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
         up[k] = matrix.m[4*k+2] >> 6;
         side[k] = matrix.m[4*k+1] >> 6;
     }
-	const bool grounded = (veh.flags & kEntityFlagInAir) == 0;
-	corners[0][2] = io::bam_add(corners[0][2], io::bam_add(grounded ? rec[0] : 0, corner_adjust[0]));
-	corners[1][2] = io::bam_add(corners[1][2], io::bam_add(grounded ? rec[1] : 0, corner_adjust[1]));
+	corners[0][2] = io::bam_add(corners[0][2], corner_lift[0]);
+	corners[1][2] = io::bam_add(corners[1][2], corner_lift[1]);
 	const auto force = [&](int corner, int32_t rate, const int32_t direction[3]) {
 		std::copy_n(direction, 3, m.chassis_forces[corner].direction);
 		m.chassis_forces[corner].rate = rate;
@@ -1738,6 +1738,21 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         if (body_contact) m.byte_2ef = 1;
     }
     int32_t corner_adj[4] = {0, 0, 0, 0};
+	// The tail every arm reaches: the rear-contact run, the launch direction, the per-tick request
+	// and quiet-spring clears, the downhill contact direction, the solved byte and the airborne
+	// count.
+	// [orig: @0x47BEC2..0x47C19A: the quiet clear @0x47BEC2..0x47BEE3, +0x3D0 @0x47BEE9..0x47BEF9,
+	//  +0x3CE @0x47BEF0, the launch @0x47BF00..0x47C03B, +0x2ED @0x47C0B6, the downhill
+	//  @0x47C08C..0x47C180, +0x3D4 @0x47C182..0x47C193]
+	const auto light_tail = [&] {
+		if (d[1] != 0)
+			m.light_rear_contact_ticks += 1;
+		light_capture_launch(veh, basis, px, py, pz);
+		vehicle_suspension_tick_tail(veh, traits);
+		vehicle_contact_downhill_tail(veh, pz);
+		m.contact_solved_once = true;
+		m.plat_airborne_ticks = (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
+	};
     if (both_wheels_off) {
 		// When both wheels leave support, reset the rear-contact run, mark airborne and fit the
 		// axle with the family spring/crash gates.
@@ -1764,12 +1779,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
             corners[1][2] = io::bam_add(corners[1][2], corner_adj[1]);
             light_apply_frame(world, veh, just_armed ? basis.q22 : light_axle_frame(corners, basis.q22), true);
         }
-        light_capture_launch(veh, basis, px, py, pz);
-		vehicle_suspension_tick_tail(veh, traits);
-		vehicle_contact_downhill_tail(veh, pz);
-		m.contact_solved_once = true;
-		m.plat_airborne_ticks = (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
-
+		light_tail();
 		return;
 	}
     // Both wheels settle a released launch after the contact run reaches ten.
@@ -1797,6 +1807,31 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 	// larger inset span along the forward row `sar 6`) — lifted by the wheel
 	// d's in the spring loop [orig: dest[2] += d0 / dest[5] += d1].
 	veh.flags &= ~kEntityFlagInAir;
+	// A wreck at rest (+0x2F0) leaves the arm here. With the deepest record touching (the crash
+	// depth) it lifts by it and runs the chassis call over the quad as built at the entry Z (no
+	// spring loop, no corner lift) and the records as they stand, taking all three eulers; either
+	// way only the tail follows.
+	// [orig: @0x47B851..0x47B8C9: the gate @0x47B851, `cmp eax, edi; jle loc_47BEC2`
+	//  @0x47B85E..0x47B860, Z += depth @0x47B866, Entity_UpdateVehicleChassisOrientation @0x468A50
+	//  (the call @0x47B88E: the quad, the snapshot, a4 = a6 = 0, which it never reads), Roll /
+	//  Pitch / Yaw @0x47B8C0..0x47B8C6, `jmp loc_47BEC0` @0x47B8C9]
+	if (m.settle_2f0) {
+		if (crash_depth > 0) {
+			const int32_t quad_z = pz;
+			pz = io::bam_add(pz, crash_depth);
+			const int32_t no_lift[2] = { 0, 0 };
+			const bool armed = world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
+			if (armed ||
+					!light_fall_over_tick(world, veh, traits, basis, rec, px, py, quad_z, no_lift)) {
+				int32_t corners[4][3];
+				light_bounding_quad(traits, basis, px, py, quad_z, corners);
+				light_apply_frame(world, veh,
+						armed ? basis.q22 : light_axle_frame(corners, basis.q22), true);
+			}
+		}
+		light_tail();
+		return;
+	}
     // The bike's spring loop over its two wheel depths (the quadratic/fast
     // pair, the same kernels as the tracked solve; run with the tracked loop's
     // shape — vehicle_suspension.h names the bike's own loop a residual)
@@ -1813,8 +1848,10 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     cr[2] += rec[1] + corner_adj[1];
     const bool just_armed =
             world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
+	const int32_t grounded_lift[2] = { io::bam_add(rec[0], corner_adj[0]),
+		io::bam_add(rec[1], corner_adj[1]) };
 	const bool falling = !just_armed &&
-			light_fall_over_tick(world, veh, traits, basis, rec, px, py, pz, corner_adj);
+			light_fall_over_tick(world, veh, traits, basis, rec, px, py, pz, grounded_lift);
 	// The fall-over arm runs only while crashed, which keeps the parked arm below off; so the
 	// matrix that arm reads is this frame's.
 	CollisionMatrix fitted = basis.q22;
@@ -1874,19 +1911,14 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     // lean bound |right.z| < 40960, REAR wheel contact, and a rear-contact
     // run longer than one tick [orig: the +1 @0x47B739-region, reset in the
     // both-wheels-off branch; `|entity[1].pad_040[8]| <= 1` kills the byte].
-    if (d[1] != 0) m.light_rear_contact_ticks += 1;
     if (m.crashed) m.grounded = false;
-    light_capture_launch(veh, basis, px, py, pz);
 
 	// The crash latch armed at the chassis-call site above (the bike seed
 	// ejects its riders) [orig: @0x468B00..0x468B3B]. Wheels back in contact
 	// reset the sinks (the tracked form, both wheels as the pair); the tail
 	// clears the per-tick request [orig: @0x47C0B6].
 	vehicle_suspension_post_contact(veh, wheel_contact, 2, up_z16);
-    vehicle_suspension_tick_tail(veh, traits);
-	vehicle_contact_downhill_tail(veh, pz);
-	m.contact_solved_once = true;
-	m.plat_airborne_ticks = (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
+	light_tail();
 }
 
 } // namespace detail
