@@ -962,7 +962,10 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 		{ traits.box_x_lo + (Lbox >> 1), ymid_box, traits.box_z_hi + w },
 		{ traits.box_x_lo + (Lbox >> 2), ymid_box, traits.box_z_hi - w },
 	};
-	const int32_t hull_bottom_neg = -(traits.box_z_lo + r); // [orig: -v41 @0x4761B4]
+	// Pad 0's Z, negated: its compression included, as the tracked solve's.
+	// [orig: `mov eax, [esi+2D4h]; add eax, ebp; ... neg eax` @0x4764AF..0x4764C7, stored
+	//  @0x4764CC; reloaded into ebp @0x4773E9 for the water flag's `add edx, ebp` @0x4774CC]
+	const int32_t hull_bottom_neg = -(pad_z + m.wheel_comp[0]);
 	// The quad extents are absolute. [orig: `cdq; xor; sub` @0x476488..0x4764A8]
 	const int32_t half_w = io::bam_abs(
             (traits.foot_y_hi - r) - (traits.foot_y_lo + r));

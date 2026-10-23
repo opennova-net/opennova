@@ -176,12 +176,53 @@ void test_the_tracked_water_leg_raises_only_the_contact_copy() {
 	CHECK(v.veh.air_roll_bam == 0);
 }
 
+// D-NET-NEW-L6-22: the tank's in-water flag compares the pads' mean Z plus the hull-bottom word,
+// which carries wheel 0's compression (as the tracked solve's does). A level tank high over the
+// field with every wheel compressed 0x4000: the mean sits 0x4000 over the origin and the word
+// takes it back, so the origin, 0x2000 under the water word, is in the water. Without the
+// compression the mean would sit 0x2000 over the water: dry.
+// [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 - @0x4764AF..0x4764CC, @0x4774B0..0x4774D0]
+void test_the_tank_hull_bottom_carries_wheel_0s_compression() {
+	auto owner = std::make_unique<World>();
+	World &world = *owner;
+	std::vector<uint16_t> heights(1024 * 1024, uint16_t(42 * 256));
+	std::vector<int> sectors(256, 1);
+	t::TerrainHeightField terrain{};
+	terrain.heightmap = heights.data();
+	terrain.dim = 1024;
+	terrain.layout.sector_grid = sectors.data();
+	terrain.wrap_x = terrain.wrap_z = true;
+	world.tables.terrain = &terrain;
+	world.ai.terrain = &terrain;
+	world.registry.configure_pool(1, 4);
+	Entity h;
+	h.kind = EntityKind::Item;
+	h.item_id = 1294;
+	h.has_item_def = true;
+	h.has_graphic_model = true;
+	h.alive = true;
+	h.health = h.health_max = 1000;
+	Entity &v = *world.registry.get(world.registry.spawn(1, h));
+
+	VehicleTraits tr = truck();
+	tr.family = VehicleFamily::Tank;
+	tr.amphibian = false;
+	for (int k = 0; k < 4; ++k) v.veh.wheel_comp[k] = 0x4000;
+	v.veh.slide_z = -400; // the mover's dribble: no rest tick
+	const int32_t z = (62 << 16);
+	world.env.water_z = z + 0x2000;
+	int32_t px = 100 << 16, py = 200 << 16, pz = z;
+	detail::wheeled_contact_solve(world, v, tr, v.veh, px, py, px, py, pz);
+	CHECK((v.flags & 0x8000u) != 0);
+}
+
 } // namespace
 
 int main() {
 	test_the_second_pass_writes_the_records();
 	test_the_light_second_pass_leaves_the_mid_hull_probe_out();
 	test_the_tracked_water_leg_raises_only_the_contact_copy();
+	test_the_tank_hull_bottom_carries_wheel_0s_compression();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
