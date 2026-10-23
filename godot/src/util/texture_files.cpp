@@ -69,17 +69,7 @@ Ref<Texture> TextureFiles::material_row_texture_(const String &name, uint8_t typ
 		return cached->second;
 	}
 	const renderer::TextureLoad load = renderer::material_texture_load(source, type);
-	Ref<Texture2D> image;
-	if (load.reader != renderer::TextureReader::None) {
-		const std::string key = "material-image:" + std::to_string(static_cast<int>(load.reader)) + ":" +
-		                        std::to_string(static_cast<int>(load.transform)) + ":" +
-		                        to_std(to_gd(load.file).to_lower());
-		auto cached = cache_.find(key);
-		if (cached == cache_.end())
-			cached = cache_.emplace(key, load_material_image_from_bytes(load, read_(to_gd(load.file)))).first;
-		image = cached->second;
-	}
-	return prepare_material_texture(image, name, type);
+	return make_material_texture(load, [this, &load] { return read_(to_gd(load.file)); }, name, type);
 }
 
 } // namespace opennova

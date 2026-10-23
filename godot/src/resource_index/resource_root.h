@@ -88,10 +88,11 @@ private:
 	mutable uint64_t resolve_memo_epoch_ = 0;
 	mutable bool resolve_memo_built_ = false;
 
-	// Decoded-texture cache for VFS-backed load_texture, and the material rows' decode
-	// memo. Both archive and loose winners resolve through the mounted index so the mount
-	// mode owns precedence. Negative results cache too, so a missing name is probed once.
-	// Same epoch self-clear as the memo above.
+	// Decoded-texture cache for VFS-backed load_texture (a material row's texture is the
+	// registry's below, made from its file with no decoded device texture kept). Both archive
+	// and loose winners resolve through the mounted index so the mount mode owns precedence.
+	// Negative results cache too, so a missing name is probed once. Same epoch self-clear as
+	// the memo above.
 	mutable std::unordered_map<std::string, Ref<Texture2D>> texture_cache_;
 	// The game's texture registry over this mount's material rows
 	// (renderer/texture_registry.h): what a row's loader made, by the row's key, the first

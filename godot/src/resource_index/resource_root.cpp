@@ -857,19 +857,8 @@ Ref<Texture> ResourceRoot::material_row_texture_(const String &name, uint8_t typ
 		return opennova::prepare_material_chunk(read_file(opennova::to_gd(source.file)), type);
 	}
 	const opennova::renderer::TextureLoad load = opennova::renderer::material_texture_load(source, type);
-	Ref<Texture2D> image;
-	if (load.reader != opennova::renderer::TextureReader::None) {
-		const std::string key = "material-image:" + std::to_string(static_cast<int>(load.reader)) + ":" +
-				std::to_string(static_cast<int>(load.transform)) + ":" +
-				opennova::to_std(opennova::to_gd(load.file).to_lower());
-		auto cached = texture_cache_.find(key);
-		if (cached == texture_cache_.end()) {
-			cached = texture_cache_.emplace(key, opennova::load_material_image_from_bytes(
-					load, read_file(opennova::to_gd(load.file)))).first;
-		}
-		image = cached->second;
-	}
-	return opennova::prepare_material_texture(image, name, type);
+	return opennova::make_material_texture(load, [this, &load] { return read_file(opennova::to_gd(load.file)); },
+			name, type);
 }
 
 bool ResourceRoot::material_texture_missing(const String &name, uint8_t type) const {

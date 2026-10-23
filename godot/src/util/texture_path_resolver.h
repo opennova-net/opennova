@@ -56,16 +56,6 @@ godot::Ref<godot::Texture2D> load_texture_with_mipmaps(const std::vector<rendere
 godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, const godot::String &filename,
 		renderer::TextureLoader loader);
 
-// Decode one material row's file with the reader its loader picked for it
-// (renderer::material_texture_source, as a load: renderer::material_texture_load),
-// never by the file's name: the DDS reader takes what D3DX takes by content
-// (renderer::dds_reader_codec_order; a DDS keeps its authored mip chain), the TGA
-// reader (.tga and .mdt files) a TGA alone and the PCX reader a PCX, each building
-// its chain, then the loader's transform. None or bytes the reader cannot decode
-// give null.
-godot::Ref<godot::Texture2D> load_material_image_from_bytes(
-		const renderer::TextureLoad &load, const godot::PackedByteArray &bytes);
-
 // The highest mip level retail's device samples for a texture: one D3DX built
 // (a DDS row's or sibling's) keeps its chain (no ceiling, kUnboundedMaxLod);
 // every texture built from decoded pixels ends at its creation chain's last
@@ -74,17 +64,20 @@ godot::Ref<godot::Texture2D> load_material_image_from_bytes(
 inline constexpr float kUnboundedMaxLod = 1000.0f;
 float texture_max_lod(const godot::Ref<godot::Texture> &texture, uint32_t creation_flags = 0);
 
-// The texture a material row's loader makes of its decoded file (`source`):
-// the engine's material-specific pixel transform uploaded (generated textures
-// share the resolver's epoch and shutdown lifetime), a normal map (type 4 or 5)
-// or the occlusion producer halved to renderer::kNormalMapSideCap. Null when
-// the loader makes nothing (no file decoded, a type or name no producer takes),
-// where the dispatcher binds missing_material_texture instead: what a row's
-// loader makes is what the texture registry keeps (renderer/texture_registry.h),
-// the checkerboard never.
-godot::Ref<godot::Texture> prepare_material_texture(
-		const godot::Ref<godot::Texture2D> &source,
-		const godot::String &name, uint8_t type);
+// The texture a material row's loader makes of its file: `load` the file and reader it picked
+// (renderer::material_texture_source, as a load: renderer::material_texture_load), `read` that
+// file's bytes. The file is decoded with that reader, never by its name (the DDS reader takes
+// what D3DX takes by content, renderer::dds_reader_codec_order, and keeps its authored mip
+// chain; the TGA reader, .tga and .mdt files, a TGA alone; the PCX reader a PCX), then made
+// into one device texture: the decoded file with its chain, or the engine's material-specific
+// pixel transform of the decoded pixels (a normal map, type 4 or 5, or the occlusion producer
+// halved to renderer::kNormalMapSideCap), never a device texture read back (engine
+// renderer/material_texture.h carries the witness). Null when the loader makes nothing (no
+// file decoded, a type or name no producer takes: nothing is read for those), where the
+// dispatcher binds missing_material_texture instead: what a row's loader makes is what the
+// texture registry keeps (renderer/texture_registry.h), the checkerboard never.
+godot::Ref<godot::Texture> make_material_texture(const renderer::TextureLoad &load,
+		const std::function<godot::PackedByteArray()> &read, const godot::String &name, uint8_t type);
 
 // A chunk producer's texture (types 16 to 18); null when the chunk does not load.
 godot::Ref<godot::Texture> prepare_material_chunk(
