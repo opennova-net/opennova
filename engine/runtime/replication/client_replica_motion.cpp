@@ -239,8 +239,10 @@ void row_deck_ride(ClientEntityState &es,
 			es.pitch_bam = io::bam_add(es.pitch_bam, pitch_d);
 			es.rm_aim_heading_word = io::bam_add(es.rm_aim_heading_word, dyaw);
 			es.rm_aim_word = io::bam_add(es.rm_aim_word, pitch_d);
-			// org1's four leg words take the yaw delta too [orig: Entity_UpdateInfantryAI
-			// @0x4B9910 - +0x2D4 @0x4BA86D, +0x2D8 @0x4BA873, +0x2E4 @0x4BA879, +0x2E8 @0x4BA87F].
+			// org1's four leg words take the yaw delta too, and its savedLivePitch the pitch
+			// delta [orig: Entity_UpdateInfantryAI @0x4B9910 - +0x2D4 @0x4BA86D, +0x2D8
+			// @0x4BA873, +0x2E4 @0x4BA879, +0x2E8 @0x4BA87F, +0x90 @0x4BA885].
+			es.rm_body_pitch = io::bam_add(es.rm_body_pitch, pitch_d);
 			es.rm_leg_yaw[0] = io::bam_add(es.rm_leg_yaw[0], dyaw);
 			es.rm_leg_yaw[1] = io::bam_add(es.rm_leg_yaw[1], dyaw);
 			es.rm_leg_target[0] = io::bam_add(es.rm_leg_target[0], dyaw);
@@ -509,6 +511,39 @@ struct RowConformIo {
 	uint32_t tick = 0;
 };
 
+// One ground column of either slope pass: the ground height under the row's position offset by
+// (dx, dy), probed from 0x4000 above down 0x20000 (Entity_RaycastGroundHeight's base and ground
+// height, both motors' calls).
+// [orig: Entity_RaycastGroundHeight @0x4142C0 -> Entity_RaycastCollision's terrain leg
+//  @0x413760; the org2 calls' 0x4000 / 0x20000 @0x4B6E32..0x4B6E37, org1's
+//  @0x4BA199..0x4BA19E]
+int32_t row_ground_column(const ClientEntityState &es, const RowConformIo &io_in, int32_t dx,
+		int32_t dy) {
+	if (io_in.probe != nullptr && *io_in.probe) {
+		ClientReplicaPipeline::ReplicaGroundColumn q;
+		q.row_handle = es.handle;
+		q.type_id = es.type_id;
+		q.pos[0] = es.x;
+		q.pos[1] = es.y;
+		q.pos[2] = es.z;
+		q.dx = dx;
+		q.dy = dy;
+		q.entity_flags = es.rm_entity_flags;
+		q.source_bound_radius_q16 = io_in.bound_radius != nullptr && *io_in.bound_radius
+				? (*io_in.bound_radius)(es.type_id) : 0;
+		return (*io_in.probe)(q);
+	}
+	// The terrain column alone, clipped by the terrain (an indoors body skips it); with no
+	// terrain the ray's end comes back.
+	const int32_t start[3] = {io::bam_add(es.x, dx), io::bam_add(es.y, dy),
+	                          io::bam_add(es.z, 0x4000)};
+	int32_t end[3] = {start[0], start[1], io::bam_sub(start[2], 0x20000)};
+	if (io_in.terrain != nullptr && io_in.terrain->valid() &&
+			(es.rm_entity_flags & world::kEntityFlagIndoors) == 0u)
+		(void)world::terrain_clip_segment(*io_in.terrain, start, end, end);
+	return end[2];
+}
+
 void row_body_conform(ClientEntityState &es, int arbitrated_state, const RowConformIo &io_in) {
 	const uint32_t flags = es.rm_entity_flags;
 	const bool dead = (flags & world::kEntityFlagDead) != 0u;
@@ -553,33 +588,7 @@ void row_body_conform(ClientEntityState &es, int arbitrated_state, const RowConf
 		return;
 	}
 	if ((io_in.tick & 1u) != 0u) return;
-	const int32_t pos[3] = {es.x, es.y, es.z};
-	auto probe = [&](int32_t dx, int32_t dy) -> int32_t {
-		if (io_in.probe != nullptr && *io_in.probe) {
-			ClientReplicaPipeline::ReplicaGroundColumn q;
-			q.row_handle = es.handle;
-			q.type_id = es.type_id;
-			q.pos[0] = pos[0];
-			q.pos[1] = pos[1];
-			q.pos[2] = pos[2];
-			q.dx = dx;
-			q.dy = dy;
-			q.entity_flags = flags;
-			q.source_bound_radius_q16 = io_in.bound_radius != nullptr && *io_in.bound_radius
-					? (*io_in.bound_radius)(es.type_id) : 0;
-			return (*io_in.probe)(q);
-		}
-		// The terrain column alone, clipped by the terrain (an indoors body skips
-		// it); with no terrain the ray's end comes back [orig: Entity_RaycastGroundHeight
-		// @0x4142C0 -> Entity_RaycastCollision's terrain leg @0x413760].
-		const int32_t start[3] = {io::bam_add(pos[0], dx), io::bam_add(pos[1], dy),
-		                          io::bam_add(pos[2], 0x4000)};
-		int32_t end[3] = {start[0], start[1], io::bam_sub(start[2], 0x20000)};
-		if (io_in.terrain != nullptr && io_in.terrain->valid() &&
-				(flags & world::kEntityFlagIndoors) == 0u)
-			(void)world::terrain_clip_segment(*io_in.terrain, start, end, end);
-		return end[2];
-	};
+	auto probe = [&](int32_t dx, int32_t dy) { return row_ground_column(es, io_in, dx, dy); };
 	int32_t c, s;
 	world::quantized_dir(es.heading_bam, c, s);
 	const int32_t fx = static_cast<int32_t>((22528LL * c) >> 22);
@@ -615,6 +624,103 @@ void row_body_conform(ClientEntityState &es, int arbitrated_state, const RowConf
 	if (arbitrated_state != world::anim_state::kRollLeft &&
 			arbitrated_state != world::anim_state::kRollRight)
 		es.roll_bam += (roll_slope - es.roll_bam + 2) >> 2;
+}
+
+// The org1 slope pass on a free-standing row, every eighth key tick (the update's stagger key,
+// the bare tick on a client), ahead of the deck ride. A dead body in the air tumbles: two
+// tick-phase ramps a and b aim the +0x2D0 word at a + b and the aim heading (+0x2EC) at the
+// target (+0x1A8), pull savedLivePitch (+0x90) and Roll an eighth of the way to a and b, and turn
+// the target by b >> 2. Otherwise a conforming body (the def's attrib 0x200, an anim state with
+// flag bit 2, or a corpse neither in the air, afloat nor on a ladder) probes four ground columns
+// (0x5800 fore and aft along its Yaw, a quarter of that to either side), takes the slopes as the
+// height differences shifted left 14 (fore-aft) and 16 (side), clamped to +-0x271C71A0, slides
+// 0x800 along its Yaw on either beyond 0x22222200, aims a corpse's +0x2D0 at the fore-aft slope
+// and its +0x2EC at the target, and chases savedLivePitch and Roll an eighth of the way to the
+// slopes; any other body decays savedLivePitch and Roll a sixteenth toward level. The aim flag
+// stores (0) are the client's standing value. Org2's twin is row_body_conform;
+// AiSystem::infantry_slope_pass keeps the authority's.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the key test @0x4BA066..0x4BA079, the tumble
+//  @0x4BA07F..0x4BA107, the selector @0x4BA10F..0x4BA131, the decay @0x4BA133..0x4BA152, the
+//  probes @0x4BA15A..0x4BA221, the clamps @0x4BA1D1..0x4BA1E8 / @0x4BA22D..0x4BA244, the slides
+//  @0x4BA249..0x4BA2FB, the corpse's aim words @0x4BA301..0x4BA319, the chases
+//  @0x4BA320..0x4BA343]
+constexpr int32_t kRowOrg1SlopeClamp = 0x271C71A0;
+constexpr int32_t kRowOrg1SlideThreshold = 0x22222200;
+
+void row_org1_slope_pass(ClientEntityState &es, uint32_t key, uint32_t def_attrib,
+		int current_state, const RowConformIo &io_in) {
+	if ((key & 7u) != 0u) return;
+	const uint32_t flags = es.rm_entity_flags;
+	const bool dead = (flags & world::kEntityFlagDead) != 0u;
+	if (dead && (flags & world::kEntityFlagInAir) != 0u) {
+		const int32_t a = (32 - static_cast<int32_t>(key & 0x3Fu)) * 0xFFFFFF;
+		const int32_t b = (32 - static_cast<int32_t>(((key >> 6) - key) & 0x3Fu)) * 0xFFFFFF;
+		es.rm_aim_word = io::bam_add(a, b);
+		es.rm_aim_heading_word = es.net_target_heading_bam;
+		es.rm_body_pitch = io::bam_add(es.rm_body_pitch,
+				io::bam_sar(io::bam_add(io::bam_sub(a, es.rm_body_pitch), 4), 3));
+		es.roll_bam = io::bam_add(es.roll_bam,
+				io::bam_sar(io::bam_add(io::bam_sub(b, es.roll_bam), 4), 3));
+		es.net_target_heading_bam = io::bam_add(es.net_target_heading_bam, io::bam_sar(b, 2));
+		return;
+	}
+	const bool conform = (def_attrib & world::kItemAttribLandable) != 0u ||
+			(world::infantry_anim_flags(current_state) & 2u) != 0u ||
+			(dead && (flags & 0x10A000u) == 0u);
+	if (!conform) {
+		es.rm_body_pitch = io::bam_sub(es.rm_body_pitch,
+				io::bam_sar(io::bam_add(es.rm_body_pitch, 8), 4));
+		es.roll_bam = io::bam_sub(es.roll_bam, io::bam_sar(io::bam_add(es.roll_bam, 8), 4));
+		return;
+	}
+	int32_t c, s;
+	world::quantized_dir(es.heading_bam, c, s);
+	const auto q22 = [](int32_t k, int32_t v) {
+		return static_cast<int32_t>((static_cast<int64_t>(k) * v) >> 22);
+	};
+	const int32_t fy = q22(0x5800, s);
+	const int32_t fx = q22(0x5800, c);
+	const auto clamp_slope = [](int32_t v) {
+		return v > kRowOrg1SlopeClamp ? kRowOrg1SlopeClamp
+				: v < -kRowOrg1SlopeClamp ? -kRowOrg1SlopeClamp : v;
+	};
+	const auto shl = [](int32_t v, int n) {
+		return static_cast<int32_t>(static_cast<uint32_t>(v) << n);
+	};
+	const int32_t ahead = row_ground_column(es, io_in, fx, fy);
+	const int32_t behind = row_ground_column(es, io_in, -fx, -fy);
+	const int32_t pitch_slope = clamp_slope(shl(io::bam_sub(ahead, behind), 14));
+	const int32_t ly = io::bam_sar(fy, 2);
+	const int32_t lx = io::bam_sar(fx, 2);
+	const int32_t left = row_ground_column(es, io_in, -ly, lx);
+	const int32_t right = row_ground_column(es, io_in, ly, -lx);
+	const int32_t roll_slope = clamp_slope(shl(io::bam_sub(left, right), 16));
+	const int32_t sx = q22(0x800, c);
+	const int32_t sy = q22(0x800, s);
+	if (pitch_slope > kRowOrg1SlideThreshold) {
+		es.rm_vel_xy[0] = io::bam_sub(es.rm_vel_xy[0], sx);
+		es.rm_vel_xy[1] = io::bam_sub(es.rm_vel_xy[1], sy);
+	}
+	if (pitch_slope < -kRowOrg1SlideThreshold) {
+		es.rm_vel_xy[0] = io::bam_add(es.rm_vel_xy[0], sx);
+		es.rm_vel_xy[1] = io::bam_add(es.rm_vel_xy[1], sy);
+	}
+	if (roll_slope > kRowOrg1SlideThreshold) {
+		es.rm_vel_xy[0] = io::bam_add(es.rm_vel_xy[0], sy);
+		es.rm_vel_xy[1] = io::bam_sub(es.rm_vel_xy[1], sx);
+	}
+	if (roll_slope < -kRowOrg1SlideThreshold) {
+		es.rm_vel_xy[0] = io::bam_sub(es.rm_vel_xy[0], sy);
+		es.rm_vel_xy[1] = io::bam_add(es.rm_vel_xy[1], sx);
+	}
+	if (dead) {
+		es.rm_aim_word = pitch_slope;
+		es.rm_aim_heading_word = es.net_target_heading_bam;
+	}
+	es.roll_bam = io::bam_add(es.roll_bam,
+			io::bam_sar(io::bam_add(io::bam_sub(roll_slope, es.roll_bam), 4), 3));
+	es.rm_body_pitch = io::bam_add(es.rm_body_pitch,
+			io::bam_sar(io::bam_add(io::bam_sub(pitch_slope, es.rm_body_pitch), 4), 3));
 }
 
 // One served ring entry for a decoded row's channel (world::AnimVariantRings,
@@ -1499,7 +1605,15 @@ void ClientReplicaPipeline::tick_org1_looks() {
 					/*aim_flag=*/false, es.rm_body_heading, hold, es.heading_bam, es.pitch_bam);
 			continue;
 		}
-		if (seat_resolved) es.rm_body_heading = seat.heading;
+		// The seat bone's pose: its yaw into the body heading, its roll into Roll, its pitch into
+		// savedLivePitch (D-NET-NEW-L5-36: the overlay's body chain reads the last two).
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - +0x8C @0x4BEDB3, Roll @0x4BEDD7, +0x90
+		//  @0x4BEDDA]
+		if (seat_resolved) {
+			es.rm_body_heading = seat.heading;
+			es.roll_bam = seat.roll;
+			es.rm_body_pitch = seat.pitch;
+		}
 		// The seat branch then stamps the four leg words with the body heading.
 		// [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BEF36..0x4BEF51]
 		es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = es.rm_body_heading;
@@ -1782,6 +1896,12 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		const int current_state = death_state >= 0 ? static_cast<int>(death_state)
 				: es.net_anim_current >= 0 ? static_cast<int>(es.net_anim_current)
 				                          : static_cast<int>(es.anim_state_id);
+		const uint32_t def_attrib = replica_def_attrib_resolver_
+				? replica_def_attrib_resolver_(es.type_id) : 0u;
+		// The slope pass reads the Yaw the last tick's look left, ahead of this tick's body
+		// chase (D-NET-NEW-L5-36) [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BA066..0x4BA343,
+		//  ahead of the ride @0x4BA45D and the body chase @0x4BE8FD].
+		row_org1_slope_pass(es, rm_key, def_attrib, current_state, conform_io);
 		// The body chase: the body heading (+0x8C) steps a quarter of the way to the
 		// promoted target (+0x1A8, one record behind the wire, §5.38e §1), the step
 		// clamped to +-69273360, and the Yaw (+0x10) takes the same step, keeping the
@@ -1805,8 +1925,6 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			if (step < -69273360) step = -69273360;
 			es.rm_body_heading = io::bam_add(es.rm_body_heading, step);
 			es.heading_bam = io::bam_add(es.heading_bam, step);
-			const uint32_t def_attrib = replica_def_attrib_resolver_
-					? replica_def_attrib_resolver_(es.type_id) : 0u;
 			row_org1_legs(es, rm_key, def_attrib, current_state);
 			es.rm_look_due = true;
 			es.rm_look_seated = false;

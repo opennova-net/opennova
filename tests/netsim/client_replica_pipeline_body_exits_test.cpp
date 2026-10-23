@@ -127,7 +127,8 @@ std::vector<uint8_t> frame(const std::vector<Row> &rows, double hull_x = 50.0) {
 	return nw::encode_frame_update(fu);
 }
 
-std::unique_ptr<ns::ClientReplicaPipeline> make_view(BodySource &src, bool remote_motion = true) {
+std::unique_ptr<ns::ClientReplicaPipeline> make_view(opennova::world::IRootMotionSource &src,
+		bool remote_motion = true) {
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
 	view->set_remote_motion_mode(remote_motion);
 	view->set_root_motion_source(&src);
@@ -736,6 +737,103 @@ void test_free_standing_infantry_legs() {
 	}
 }
 
+// A source whose channel yields no frame: the row's update ends before its velocity integrate,
+// so a test reads the velocity its slope pass left.
+struct NoFrameSource final : public opennova::world::IRootMotionSource {
+	bool has_clip(int, int) const override { return true; }
+	bool advance(int, int, int32_t &, opennova::world::RootMotionFrame &) override {
+		return false;
+	}
+	int32_t clip_length_ticks(int, int, int) const override { return 62; }
+	bool clip_loops(int, int, int) const override { return true; }
+};
+
+// D-NET-NEW-L5-36: a free-standing org1 row's slope pass, on every eighth key tick. A body that
+// does not conform decays savedLivePitch (+0x90) and Roll a sixteenth toward level. A
+// conforming one (the def's attrib 0x200 here) probes four columns (0x5800 fore and aft, 0x1600
+// to the sides at Yaw 0); on a ground rising 2 per unit of x and 1 per unit of y the slopes
+// (0x16000 << 14, 0x2C00 << 16) clamp to 0x271C71A0, past the slide threshold 0x22222200 on
+// both, so the velocity takes 0x800 against the fore-aft slope and 0x800 against the side one,
+// and savedLivePitch and Roll chase an eighth: (0x271C71A0 + 4) >> 3 = 0x4E38E34. A corpse aims
+// its +0x2D0 at the fore-aft slope and its +0x2EC at the target (+0x1A8).
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the key test @0x4BA066..0x4BA079, the selector
+//  @0x4BA10F..0x4BA131, the decay @0x4BA133..0x4BA152, the probes @0x4BA15A..0x4BA221, the
+//  clamps @0x4BA1D1..0x4BA244, the slides @0x4BA249..0x4BA2FB, the corpse's aim words
+//  @0x4BA301..0x4BA319, the chases @0x4BA320..0x4BA343]
+void test_org1_slope_pass() {
+	{
+		BodySource src;
+		auto view = free_infantry_view(src, 0x00, 0x00);
+		ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+		es.rm_body_pitch = 0x01000000;
+		es.roll_bam = -0x01000000;
+		for (int key = 1; key <= 7; ++key) tick(*view);
+		expect(es.rm_body_pitch == 0x01000000 && es.roll_bam == -0x01000000,
+				"the slope pass waits for an eighth key tick");
+		tick(*view); // key 8
+		expect(es.rm_body_pitch == 0x00F00000 && es.roll_bam == -0x00F00000,
+				"a body that does not conform decays savedLivePitch and Roll a sixteenth");
+	}
+	for (const bool dead : {false, true}) {
+		NoFrameSource src;
+		auto view = make_view(src);
+		view->state().upsert(kFreeInfantry).type_id = kInfantryType;
+		view->apply(0x0A, free_infantry_frame(0x00, 0x00, 0, 0x00));
+		ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+		es.rm_adm_id = 0;
+		view->set_replica_def_attrib_resolver([](uint16_t) { return 0x200u; });
+		view->set_replica_ground_probe(
+				[](const ns::ClientReplicaPipeline::ReplicaGroundColumn &q) {
+					return q.dx * 2 + q.dy;
+				});
+		if (dead) {
+			view->apply(nw::s2c::ENTITY_DEATH, {static_cast<uint8_t>(kFreeInfantry & 0xFF),
+					static_cast<uint8_t>(kFreeInfantry >> 8), 0, 0});
+			es.net_target_heading_bam = es.rm_body_heading = 0x01000000;
+		}
+		for (int key = 1; key <= 8; ++key) tick(*view);
+		expect(es.rm_vel_xy[0] == -0x800 && es.rm_vel_xy[1] == -0x800,
+				"the steep slopes slide the body 0x800 down each");
+		expect(es.rm_body_pitch == 0x04E38E34 && es.roll_bam == 0x04E38E34,
+				"savedLivePitch and Roll chase an eighth of the way to the clamped slopes");
+		if (dead)
+			expect(es.rm_aim_word == 0x271C71A0 && es.rm_aim_heading_word == 0x01000000,
+					"a corpse aims +0x2D0 at the fore-aft slope and +0x2EC at the target");
+	}
+}
+
+// D-NET-NEW-L5-36: a dead org1 body in the air tumbles on every eighth key tick: at key 8 the
+// ramps are a = 24 * 0xFFFFFF and b = -24 * 0xFFFFFF (((8 >> 6) - 8) & 0x3F = 56), so +0x2D0 is
+// a + b = 0 and +0x2EC the target as it stood; savedLivePitch takes (a + 4) >> 3, Roll
+// (b + 4) >> 3, and the target turns by b >> 2.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the gate @0x4BA07F..0x4BA092, the ramps
+//  @0x4BA094..0x4BA0BD, the aim words @0x4BA0C0..0x4BA0CC, the chases @0x4BA0D2..0x4BA0F5, the
+//  target @0x4BA0F7..0x4BA0FA]
+void test_org1_dead_body_tumbles_in_the_air() {
+	NoFrameSource src;
+	auto view = make_view(src);
+	view->state().upsert(kFreeInfantry).type_id = kInfantryType;
+	view->apply(0x0A, free_infantry_frame(0x00, 0x7F, 0, 0x00));
+	ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+	es.rm_adm_id = 0;
+	view->apply(nw::s2c::ENTITY_DEATH, {static_cast<uint8_t>(kFreeInfantry & 0xFF),
+			static_cast<uint8_t>(kFreeInfantry >> 8), 0, 0});
+	tick(*view); // key 1: the death edge
+	es.rm_entity_flags |= nw::world::kEntityFlagInAir;
+	es.net_target_heading_bam = es.rm_body_heading = 0x10000000;
+	for (int key = 2; key <= 7; ++key) tick(*view);
+	expect(es.rm_aim_heading_word == 0 && es.rm_body_pitch == 0 && es.roll_bam == 0,
+			"(no tumble before key 8)");
+	tick(*view); // key 8
+	expect(es.rm_aim_word == 0 && es.rm_aim_heading_word == 0x10000000,
+			"the tumble aims +0x2D0 at a + b and +0x2EC at the target");
+	expect(es.rm_body_pitch == 0x02FFFFFD && es.roll_bam == -0x02FFFFFD,
+			"savedLivePitch and Roll chase an eighth of the way to the ramps");
+	// The target turned by b >> 2 = -0x5FFFFFA; the body chase then stepped its quarter.
+	expect(es.net_target_heading_bam == 0x0A000006,
+			"the tumble turns the target by b >> 2");
+}
+
 // D-NET-NEW-L5-35: the class init stamps a spawned org1 row's aim heading and its four leg words
 // with the Yaw (Entity_InitAllFromModels after the 0x0C stream), and the respawn record's reset
 // stamps the legs again.
@@ -869,6 +967,8 @@ int main() {
 	test_org1_deck_ride_has_no_radius_drop();
 	test_free_standing_infantry_legs();
 	test_org1_init_and_reset_stamp_the_legs();
+	test_org1_slope_pass();
+	test_org1_dead_body_tumbles_in_the_air();
 	test_overlay_pitch_is_the_live_pitch_word();
 	test_authority_rows_never_starve();
 	if (failures != 0) {
