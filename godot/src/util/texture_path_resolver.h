@@ -48,8 +48,15 @@ godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image>
 
 // load_texture_with_mipmaps's pixels made on the CPU alone (image_with_mipmaps over the
 // first attempt that decodes), no device texture made and none read back; uncached.
+// `r_reader` takes the reader that decoded it.
 godot::Ref<godot::Image> load_image_with_mipmaps(const std::vector<renderer::TextureLoad> &attempts,
-		const TextureReadFn &read);
+		const TextureReadFn &read, renderer::TextureReader *r_reader = nullptr);
+
+// load_texture_with_mipmaps's texture made of those pixels (`image` its levels, `reader` the
+// one that decoded it): the image uploaded; a DDS reader's remembered as D3DX's chain for
+// texture_max_lod. Null for no image.
+godot::Ref<godot::Texture2D> upload_texture_with_mipmaps(const godot::Ref<godot::Image> &image,
+		renderer::TextureReader reader);
 
 // A loader's texture: the first of its attempts that reads and decodes
 // (load_texture_image), with its mip chain (texture_with_mipmaps). A texture the

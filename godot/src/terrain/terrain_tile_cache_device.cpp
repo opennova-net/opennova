@@ -134,10 +134,10 @@ bool TerrainTileCacheDevice::rebuild(
 	const Ref<Image> live_colormap = p_data->get_colormap_image();
 	const bool have_colormap = live_colormap.is_valid() && !live_colormap->is_empty()
 			? image_to_rgba8(live_colormap, colormap)
-			: texture_to_rgba8(p_data->get_colormap(), colormap);
-	const bool have_normal = texture_to_rgba8(
-			p_surface_inputs->get_heightfield_normal_texture(),
-			heightfield_normal);
+			: p_data->texture_rgba8(p_data->get_colormap(), colormap);
+	// The surface inputs' own atlas, which their texture was made of (nothing read back).
+	heightfield_normal = p_surface_inputs->get_heightfield_normal_image();
+	const bool have_normal = heightfield_normal.is_valid();
 	if (!have_colormap || !have_normal) {
 		return false;
 	}
@@ -168,12 +168,13 @@ bool TerrainTileCacheDevice::rebuild(
 			{uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{4}}) {
 		const std::string_view name =
 				opennova::terrain::terrain_scorch_texture_name(texture_index);
-		// The scorch set loads through the stage loader (Terrain_LoadScorchTextures).
-		const Ref<Texture2D> texture = p_data->load_source_texture(
+		// The scorch set loads through the stage loader (Terrain_LoadScorchTextures), its pixels
+		// decoded alone: no device texture is made of them here.
+		const Ref<Image> image = p_data->load_source_image(
 				String::utf8(name.data(), static_cast<int>(name.size())),
 				opennova::renderer::TextureLoader::Stage);
 		opennova::terrain::Rgba8Image base;
-		if (!texture_to_rgba8(texture, base)) {
+		if (!image_to_rgba8(image, base)) {
 			scorch_ready = false;
 			break;
 		}
@@ -206,7 +207,7 @@ bool TerrainTileCacheDevice::rebuild(
 	if (tile_info.is_valid() && tile_info->get_entry_count() > 0) {
 		tile_overlay_required_ = true;
 		opennova::terrain::Rgba8Image tilestrip;
-		if (!texture_to_rgba8(p_data->get_tilestrip_tex(), tilestrip)) {
+		if (!p_data->texture_rgba8(p_data->get_tilestrip_tex(), tilestrip)) {
 			return false;
 		}
 		snapshot->tilestrip = std::make_shared<const std::vector<opennova::terrain::Rgba8Image>>(

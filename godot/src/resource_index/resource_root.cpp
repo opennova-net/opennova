@@ -734,14 +734,19 @@ Ref<Image> ResourceRoot::load_image(const String &name, TextureLoader loader, Lo
 	return load_texture_image(name, loader, policy);
 }
 
-Ref<Image> ResourceRoot::load_image_with_mipmaps(const String &name, TextureLoader loader) const {
+Ref<Image> ResourceRoot::load_image_with_mipmaps(const String &name, TextureLoader loader,
+		opennova::renderer::TextureReader *r_reader) const {
+	if (r_reader != nullptr) {
+		*r_reader = opennova::renderer::TextureReader::None;
+	}
 	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
 		return Ref<Image>();
 	}
 	return opennova::load_image_with_mipmaps(texture_attempts_(name, loader, LOOKUP_SESSION_DEFAULT),
 			[this](const opennova::renderer::TextureLoad &load) {
 				return read_texture_attempt_(load, LOOKUP_SESSION_DEFAULT);
-			});
+			},
+			r_reader);
 }
 
 void ResourceRoot::release_decoded_textures() {

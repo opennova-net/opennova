@@ -273,8 +273,10 @@ public:
 			LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
 	// C++ siblings only (not bound): the pixels load_texture's texture holds, made on the CPU
 	// (its levels: a DDS's own chain, else generated), no device texture made or read back;
-	// uncached. The terrain's static shadows read their casters' alpha through it.
-	Ref<Image> load_image_with_mipmaps(const String &name, TextureLoader loader) const;
+	// uncached; `r_reader` takes the reader that decoded it. The terrain's static shadows read
+	// their casters' alpha through it, and TerrainData its texture slots.
+	Ref<Image> load_image_with_mipmaps(const String &name, TextureLoader loader,
+			opennova::renderer::TextureReader *r_reader = nullptr) const;
 	// The device textures load_texture holds decoded (its cache's entries, a miss's
 	// included): a structural count for tests.
 	int64_t get_decoded_texture_count() const;

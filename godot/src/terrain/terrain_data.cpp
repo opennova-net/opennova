@@ -1,6 +1,7 @@
 #include "terrain/terrain_data.h"
 
 #include "terrain/terrain_foliage_def.h"
+#include "terrain/terrain_image_convert.h"
 #include "terrain/terrain_foliage_map.h"
 #include "terrain/terrain_tile_info.h"
 
@@ -593,15 +594,25 @@ void TerrainData::_notify_terrain_changed() {
 // mounted root's, or the loose TRN directory's.
 // ---------------------------------------------------------------------------
 
-Ref<Texture2D> TerrainData::load_source_texture(
+Ref<Image> TerrainData::load_source_image(
 		const String &p_filename, opennova::renderer::TextureLoader p_loader) const {
 	if (p_filename.is_empty()) return {};
 	if (resource_root.is_valid() && !resource_root->get_root_dir().is_empty()) {
-		return resource_root->load_texture(p_filename,
+		return resource_root->load_image_with_mipmaps(p_filename,
 				static_cast<ResourceRoot::TextureLoader>(p_loader));
 	}
 	if (trn_path.is_empty()) return {};
-	return opennova::load_texture_from_dir(trn_path.get_base_dir(), p_filename, p_loader);
+	return opennova::load_image_from_dir(trn_path.get_base_dir(), p_filename, p_loader);
+}
+
+bool TerrainData::texture_rgba8(const Ref<Texture2D> &p_texture, opennova::terrain::Rgba8Image &r_out) const {
+	if (p_texture.is_valid()) {
+		const auto held = slot_images_.find(p_texture->get_instance_id());
+		if (held != slot_images_.end()) {
+			return image_to_rgba8(held->second, r_out);
+		}
+	}
+	return texture_to_rgba8(p_texture, r_out);
 }
 
 // ---------------------------------------------------------------------------
@@ -716,6 +727,7 @@ Error TerrainData::begin_load_from_resource_root(const Ref<ResourceRoot> &p_reso
 	blendmap_image.unref();
 	load_units_.clear();
 	texture_units_.clear();
+	slot_images_.clear();
 	load_next_ = 0;
 	load_error_ = OK;
 	load_state_ = LoadState::None;
@@ -761,6 +773,7 @@ Error TerrainData::begin_load_from_resource_root(const Ref<ResourceRoot> &p_reso
 Error TerrainData::_begin_load_from_trn_text(const std::string &trn_content, const opennova::TrnLaterTexts &later) {
 	load_units_.clear();
 	texture_units_.clear();
+	slot_images_.clear();
 	load_next_ = 0;
 	load_error_ = OK;
 	load_state_ = LoadState::None;
@@ -854,10 +867,19 @@ void TerrainData::_note_load_missing(const String &p_name) const {
 // directory). Warn when a referenced texture fails to resolve (e.g. a raw .tga stripped from an
 // exported PCK) so the failure is visible instead of silently untextured.
 Ref<Texture2D> TerrainData::_load_slot_texture(const char *slot, const String &filename,
-		opennova::renderer::TextureLoader loader) const {
-	Ref<Texture2D> tex = load_use_root_
-			? resource_root->load_texture(filename, static_cast<ResourceRoot::TextureLoader>(loader))
-			: opennova::load_texture_from_dir(load_dir_, filename, loader);
+		opennova::renderer::TextureLoader loader) {
+	Ref<Texture2D> tex;
+	if (load_use_root_) {
+		// The texture made of the pixels the root decodes, which stay with it, so the terrain's
+		// derived inputs read them and never the texture back (texture_rgba8).
+		opennova::renderer::TextureReader reader = opennova::renderer::TextureReader::None;
+		const Ref<Image> image = resource_root->load_image_with_mipmaps(filename,
+				static_cast<ResourceRoot::TextureLoader>(loader), &reader);
+		tex = opennova::upload_texture_with_mipmaps(image, reader);
+		if (tex.is_valid()) slot_images_[tex->get_instance_id()] = image;
+	} else {
+		tex = opennova::load_texture_from_dir(load_dir_, filename, loader);
+	}
 	if (tex.is_null() && !filename.is_empty()) {
 		UtilityFunctions::push_warning("TerrainData: ", slot, " texture '", filename,
 			"' did not resolve under ", load_dir_, " (terrain may render untextured)");

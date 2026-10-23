@@ -249,7 +249,7 @@ bool TerrainSurfaceInputs::rebuild_blend() {
 	const Ref<Image> live_blend = terrain_data->get_blendmap_image();
 	const bool have_source = live_blend.is_valid()
 		? image_to_rgba8(live_blend, source)
-		: texture_to_rgba8(terrain_data->get_detailblendmap(), source);
+		: terrain_data->texture_rgba8(terrain_data->get_detailblendmap(), source);
 	if (have_source) {
 		// Retail creates the DBlendmap quadrants with flags 0x100001: no
 		// mip-suppression bit, so they carry the full box-filtered auto chain.
@@ -380,14 +380,13 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 	}
 
 	opennova::terrain::Rgba8Image detail_source;
-	if (texture_to_rgba8(terrain_data->get_detailmap(), detail_source)) {
+	if (terrain_data->texture_rgba8(terrain_data->get_detailmap(), detail_source)) {
 		detail_coefficient_texture = texture_from_rgba8(
 			opennova::terrain::build_detail_coefficient_map(detail_source), true);
 	}
 
 	opennova::terrain::Rgba8Image far_source;
-	const bool have_far = texture_to_rgba8(
-		terrain_data->get_detailmapdist(), far_source);
+	const bool have_far = terrain_data->texture_rgba8(terrain_data->get_detailmapdist(), far_source);
 	const Ref<Texture2D> authored_layers[3] = {
 		terrain_data->get_detailmap_c1(),
 		terrain_data->get_detailmap_c2(),
@@ -397,7 +396,7 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 	// far texture when one is authored, at the session's terrain texture detail.
 	for (int layer = 0; layer < 3; ++layer) {
 		opennova::terrain::Rgba8Image base_source;
-		if (texture_to_rgba8(authored_layers[layer], base_source)) {
+		if (terrain_data->texture_rgba8(authored_layers[layer], base_source)) {
 			detail_layer_textures[layer] = texture_from_dxt_levels(
 				opennova::terrain::build_detail_layer_levels(
 					base_source, have_far ? &far_source : nullptr, texcompression_level,
@@ -410,9 +409,9 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 	// [orig: PolyTrn_InitTextures @ 0x60af97/0x60aff9 (load + optional
 	// create-with-blend); stage bind @ 0x6043ff, see docs/terrain/terrain-re.md]
 	opennova::terrain::Rgba8Image detail2_source;
-	if (texture_to_rgba8(terrain_data->get_detailmap2(), detail2_source)) {
+	if (terrain_data->texture_rgba8(terrain_data->get_detailmap2(), detail2_source)) {
 		opennova::terrain::Rgba8Image far2_source;
-		if (texture_to_rgba8(terrain_data->get_detailmapdist2(), far2_source)) {
+		if (terrain_data->texture_rgba8(terrain_data->get_detailmapdist2(), far2_source)) {
 			paired_detail2_texture = texture_from_retail_mips(
 				opennova::terrain::build_paired_detail_mip_chain(
 					detail2_source, far2_source));

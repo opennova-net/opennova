@@ -16,6 +16,7 @@
 #include <formats/cpt/cpt_io.h>
 #include <runtime/renderer/texture_load_rules.h>
 #include <runtime/terrain_query/coords.h>
+#include <runtime/terrain/texture_preprocess.h>
 #include <runtime/terrain_query/height_field.h>
 #include <formats/trn/trn_io.h>
 
@@ -23,6 +24,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace godot {
@@ -143,7 +145,10 @@ private:
 	void _note_load_missing(const String &p_name) const;
 	Error _begin_load_from_trn_text(const std::string &trn_content, const opennova::TrnLaterTexts &later);
 	Ref<Texture2D> _load_slot_texture(const char *slot, const String &filename,
-			opennova::renderer::TextureLoader loader) const;
+			opennova::renderer::TextureLoader loader);
+	// The pixels each slot texture a load made through the mounted root was uploaded from, by
+	// the texture's instance id (texture_rgba8).
+	std::unordered_map<uint64_t, Ref<Image>> slot_images_;
 	void _use_default_pcx_slot(const String &slot_id);
 	void _load_pcx_slot(const String &slot_id, const String &filename);
 	bool _load_heights(const String &cpt_name);
@@ -205,12 +210,17 @@ public:
 	Ref<Texture2D> get_foliagemap_tex() const;
 	void set_tilestrip_tex(const Ref<Texture2D> &p_tex);
 	Ref<Texture2D> get_tilestrip_tex() const;
-	// C++ runtime auxiliary-texture seam: resolves through the same mounted VFS
+	// C++ runtime auxiliary-image seam: resolves through the same mounted VFS
 	// (or loose TRN directory) as authored terrain slots without exposing the
 	// ResourceRoot or a second lookup policy; `p_loader` is the retail loader the
-	// texture's role uses (renderer::TextureLoader).
-	Ref<Texture2D> load_source_texture(const String &p_filename,
+	// file's role uses (renderer::TextureLoader). The decoded image, no device
+	// texture made (the tile cache's scorch set reads its pixels).
+	Ref<Image> load_source_image(const String &p_filename,
 			opennova::renderer::TextureLoader p_loader) const;
+	// `p_texture`'s top level as RGBA8: the pixels this data's load decoded it from when it
+	// is a slot texture the load made (no device readback), else the texture read back (one
+	// an editor assigned). False when there are none.
+	bool texture_rgba8(const Ref<Texture2D> &p_texture, opennova::terrain::Rgba8Image &r_out) const;
 
 	// Numeric accessors
 	void set_detail_density(int p_val);

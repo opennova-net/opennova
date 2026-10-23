@@ -376,21 +376,26 @@ godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image>
 }
 
 godot::Ref<godot::Image> load_image_with_mipmaps(const std::vector<renderer::TextureLoad> &attempts,
-		const TextureReadFn &read) {
-	return image_with_mipmaps(load_texture_image(attempts, read));
+		const TextureReadFn &read, renderer::TextureReader *r_reader) {
+	return image_with_mipmaps(load_texture_image(attempts, read, nullptr, r_reader));
 }
 
-godot::Ref<godot::Texture2D> load_texture_with_mipmaps(const std::vector<renderer::TextureLoad> &attempts,
-		const TextureReadFn &read) {
-	renderer::TextureReader reader = renderer::TextureReader::None;
-	const godot::Ref<godot::Texture2D> texture =
-			texture_with_mipmaps(load_texture_image(attempts, read, nullptr, &reader));
+godot::Ref<godot::Texture2D> upload_texture_with_mipmaps(const godot::Ref<godot::Image> &image,
+		renderer::TextureReader reader) {
+	const godot::Ref<godot::Texture2D> texture = texture_with_mipmaps(image);
 	// The archive and stage loaders' DDS sibling goes through D3DX (its chain);
 	// a TGA or PCX is built from pixels (renderer::pixel_texture_last_level).
 	if (reader == renderer::TextureReader::Dds && texture.is_valid()) {
 		g_authored_mip_chains.insert(texture->get_instance_id());
 	}
 	return texture;
+}
+
+godot::Ref<godot::Texture2D> load_texture_with_mipmaps(const std::vector<renderer::TextureLoad> &attempts,
+		const TextureReadFn &read) {
+	renderer::TextureReader reader = renderer::TextureReader::None;
+	const godot::Ref<godot::Image> image = load_texture_image(attempts, read, nullptr, &reader);
+	return upload_texture_with_mipmaps(image, reader);
 }
 
 namespace {

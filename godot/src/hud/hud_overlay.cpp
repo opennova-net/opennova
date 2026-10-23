@@ -1639,7 +1639,7 @@ void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 	// transparent shore cutout in its own texture slot.
 	Ref<Texture2D> colormap = p_terrain->get_colormap();
 	opennova::terrain::Rgba8Image source;
-	if (texture_to_rgba8(colormap, source)) {
+	if (p_terrain->texture_rgba8(colormap, source)) {
 		const opennova::terrain::Rgba8Image device =
 				opennova::terrain::terrain_colormap_device_image(source, p_texcompression_level);
 		PackedByteArray bytes;
