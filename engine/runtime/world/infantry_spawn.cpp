@@ -50,10 +50,15 @@ bool player_watches(World &world, AiSystem &ai, const Entity &entity,
     return ai.line_of_sight_clear(world, from, to, entity.handle, player->handle);
 }
 
+} // namespace
+
+// See entity_spawn.h.
 void release_corpse_effect(World &world, Entity &entity) {
     if (entity.death_effect_active[0] != 0)
         release_death_effect_bank(entity, 1, world.out.destruction);
 }
+
+namespace {
 
 // Registration has already started both channels on the ADM reset clip; the
 // init's two requests (the secondary 43, the primary `state`) re-init them on
@@ -585,6 +590,53 @@ bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &entity) {
     return true;
 }
 
+// The 186-tick decay both corpse legs spawn into the corpse's +0x1CC slot: a group the
+// corpse holds there is released first, then the def's decay effect spawns at the corpse's
+// Position, oriented (0, 0, -0.5) and tagged with the corpse, so the group takes the section
+// gate. The slot keeps the group for its next release; it stays where it spawned, as the
+// victim-hit emitter in the same slot does (spawn_victim_hit_emitter): the pool-0 walk re-poses
+// no +0x1CC emitter, the pool-2 walk alone does (Entity_UpdateAllEntities @0x4C2100 - the
+// pool-0 walk @0x4C2443..0x4C261F; CEffect_UpdateEmitterTransform called @0x4C22FA).
+// [orig: org1 Entity_UpdateInfantryAI @0x4B9910 - the release @0x4B9EB7..0x4B9ED1, the tag
+//  @0x4B9F0F, the orientation word 0xFFFF8000 @0x4B9F24, CEffectWorld_SpawnEmitterAtPosition
+//  called @0x4B9F36, the slot store @0x4B9F3E; the org2 twin Entity_UpdateInfantryPlayerBody
+//  @0x4B40E0 - the release @0x4B4DB9..0x4B4DD3, the tag @0x4B4E12, the orientation word
+//  @0x4B4E27, the call @0x4B4E39, the store @0x4B4E41]
+static void spawn_corpse_decay(World &world, Entity &entity, const std::string &effect_name) {
+    release_corpse_effect(world, entity);
+    DestructionEffectEvent effect;
+    effect.effect = effect_name;
+    effect.pos = entity.position;
+    effect.dir = {0.0f, 0.0f, -0.5f};
+    effect.attach_net_id = entity.net_id;
+    effect.attach_bms_id = entity.bms_id;
+    effect.attach_wire_handle = entity.handle.packed;
+    effect.attach_spawn_origin = entity.spawn_origin;
+    effect.family = 1;
+    effect.section_tagged = true;
+    effect.positioned = true;
+    entity.death_effect_active[0] = 1;
+    world.out.destruction.effects.push_back(std::move(effect));
+}
+
+// Corpse expiry is the shared destroy: the facial slot, scar entries and incoming references go
+// with the row, not only the registry slot and the brain. The destroy notifies no peer: no S2C
+// 0x12 rides it (the remove-and-notify is the script, vehicle and disconnect paths', never a
+// corpse leg's); a joiner tracking the row is despawned by the priority list's freed-row test
+// instead.
+// [orig: Entity_UpdateInfantryAI @0x4B9F93 -> Entity_Destroy @0x43E810 (no send among its
+//  callees); the updater then leaves through loc_4BFC89 @0x4B9F9B; Server_RemoveEntityAndNotify
+//  @0x50A270 has no caller in Entity_UpdateInfantryAI; the freed-row despawn
+//  Server_BuildEntityPriorityList @0x50E7F3; the org2 twin Entity_UpdateInfantryPlayerBody
+//  @0x4B4E5F, its return @0x4B4E71]
+static void destroy_corpse(World &world, AiSystem &ai, Entity &entity) {
+    release_corpse_effect(world, entity);
+    entity.hidden = true;
+    const EntityHandle handle = entity.handle;
+    world.commands.remove_ssn(handle);
+    if (ai.collision != nullptr) ai.collision->refresh_after_registry_change(world);
+}
+
 NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
     const bool silent = (entity.section_mask & 1u) != 0;
     if (entity.leave_corpse && !silent) return NpcCorpseStep::Kept;
@@ -593,23 +645,8 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
     const auto *traits = world.tables.item_death_traits.get(entity.item_id);
     const bool decay_effect = traits != nullptr && !traits->particledeath.empty();
     // [orig: the 186-tick decay spawn @0x4B9E7D; respawn quota leg @0x4B9FA0]
-    if (entity.corpse_timer == 186 && !silent && decay_effect) {
-        release_corpse_effect(world, entity);
-        DestructionEffectEvent effect;
-        effect.effect = traits->particledeath;
-        effect.pos = entity.position;
-        effect.attach_net_id = entity.net_id;
-        effect.attach_bms_id = entity.bms_id;
-        effect.attach_wire_handle = entity.handle.packed;
-        effect.attach_spawn_origin = entity.spawn_origin;
-        effect.family = 1;
-        // The corpse is the descriptor's tag, so the decay group takes the
-        // section gate [orig: Entity_UpdateInfantryAI, the store of esi
-        // @ 0x4B9F0F ahead of the spawn @ 0x4B9F36].
-        effect.section_tagged = true;
-        entity.death_effect_active[0] = 1;
-        world.out.destruction.effects.push_back(std::move(effect));
-    }
+    if (entity.corpse_timer == 186 && !silent && decay_effect)
+        spawn_corpse_decay(world, entity, traits->particledeath);
     if (entity.corpse_timer > 0) return NpcCorpseStep::Kept;
     if (entity.npc_respawns > 0) {
         if (!spawn_zone_ready(world, entity)) {
@@ -634,23 +671,32 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
         entity.corpse_timer = 62;
         return NpcCorpseStep::Kept;
     }
-    // Corpse expiry is the shared destroy: the facial slot, scar entries and
-    // incoming references go with the row, not only the registry slot and the
-    // brain. The destroy notifies no peer: no S2C 0x12 rides it (the
-    // remove-and-notify is the script, vehicle and disconnect paths', never
-    // this leg's); a joiner tracking the row is despawned by the priority
-    // list's freed-row test instead.
-    // [orig: Entity_UpdateInfantryAI @0x4B9F93 -> Entity_Destroy @0x43E810
-    //  (no send among its callees); the updater then leaves through loc_4BFC89
-    //  @0x4B9F9B; Server_RemoveEntityAndNotify @0x50A270 has no caller in
-    //  Entity_UpdateInfantryAI; the freed-row despawn
-    //  Server_BuildEntityPriorityList @0x50E7F3]
-    release_corpse_effect(world, entity);
-    entity.hidden = true;
-    const EntityHandle handle = entity.handle;
-    world.commands.remove_ssn(handle);
-    if (ai.collision != nullptr) ai.collision->refresh_after_registry_change(world);
+    destroy_corpse(world, ai, entity);
     return NpcCorpseStep::Removed;
+}
+
+// See entity_spawn.h. Unlike org1's, the step has no zero guard (it is an add of the -1 the
+// update keeps in ebx), and a non-positive timer is stored back as 0 every tick.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dead bit `test byte ptr [esi+24h], 2`
+//  @0x4B4D30, LeaveCorpse `test dword ptr [edi+54h], 400000h` @0x4B4D63, section bit 0
+//  @0x4B4D6C, `or ebx, 0FFFFFFFFh` @0x4B4BE6, `add [esi+148h], ebx` @0x4B4D79, `cmp ..., 0BAh`
+//  @0x4B4D7F, section bit 0 @0x4B4D8F, def+0x412 @0x4B4D9C, the decay @0x4B4DA9..0x4B4E41,
+//  `cmp [esi+148h], ebp; jg` @0x4B4E47..0x4B4E4D, section bit 0 @0x4B4E4F, the zero store
+//  @0x4B4E56, Entity_Destroy @0x43E810 called @0x4B4E5F]
+bool step_player_corpse(World &world, AiSystem &ai, Entity &entity) {
+    if (((entity.flags | entity.engine_flags) & kEntityFlagDead) == 0) return false;
+    const bool silent = (entity.section_mask & 1u) != 0;
+    if (entity.leave_corpse && !silent) return false;
+    entity.corpse_timer = static_cast<int32_t>(uint32_t(entity.corpse_timer) - 1u);
+    const auto *traits = world.tables.item_death_traits.get(entity.item_id);
+    if (entity.corpse_timer == 186 && !silent && traits != nullptr &&
+            !traits->particledeath.empty())
+        spawn_corpse_decay(world, entity, traits->particledeath);
+    if (entity.corpse_timer > 0) return false;
+    entity.corpse_timer = 0;
+    if (!silent) return false;
+    destroy_corpse(world, ai, entity);
+    return true;
 }
 
 } // namespace opennova::world

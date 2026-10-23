@@ -1137,8 +1137,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     //  (PRNG_Next16 called @0x4B581B), the spread @0x4B584E..0x4B5960, the drift
     //  @0x4B5966..0x4B5C97; GameEvent_PlayerDeath @0x516DD0 - PRNG_Next16 called @0x5170E2 /
     //  @0x517115 / @0x5171DA / @0x5171F8 / @0x51722C]
+    // The corpse leg follows the dead tail, ahead of the ride; a destroyed corpse leaves the
+    // update (step_player_corpse). [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the tail
+    // @0x4B4D30..0x4B4D5F, the corpse leg @0x4B4D63..0x4B4E56, the destroy's return @0x4B4E71,
+    // the ride @0x4B5288]
     if (!npc_body) {
-        if (tick_entity != nullptr) player_body_dead_tail(e, *tick_entity);
+        if (tick_entity != nullptr) {
+            player_body_dead_tail(e, *tick_entity);
+            if (step_player_corpse(world, *this, *tick_entity)) return;
+        }
         infantry_follow_carrier(e, world, frame.capsule_bottom, true);
         player_body_kick_tick(world, e, world.registry.get(e.handle), logic_tick);
     }

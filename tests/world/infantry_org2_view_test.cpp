@@ -7,6 +7,8 @@
 //   (the mount) is a crashed vehicle; its prone local clears.
 // - D-NET-NEW-L5-49: the pitch clamp is skipped while the mount is a crashed vehicle.
 // - D-NET-NEW-L5-50: the local body in a control seat halves its Pitch under the chase camera.
+// - D-NET-NEW-L5-55: the dead body's corpse leg after its dead tail (its timer, its 186 decay, the
+//   LeaveCorpse keep, section bit 0's destroy).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the canopy chase @0x4B4945..0x4B496C, the
 //  skip test @0x4B4972..0x4B4978, the mount config test @0x4B4AC6..0x4B4ADE, the ground test
 //  @0x4B4AE0..0x4B4AF9, the clamp @0x4B4AFB..0x4B4B59, the legs @0x4B4B5F..0x4B4B6B, the leg model
@@ -474,6 +476,72 @@ void test_dead_tail_through_the_tick() {
 					0u);
 }
 
+// D-NET-NEW-L5-55: the player body's corpse leg, after its dead tail, every tick its dead bit is
+// latched. The timer drops by one a tick. At 186 the def's decay spawns once into the corpse's
+// +0x1CC slot (oriented (0, 0, -0.5), tagged with the corpse, positioned). At 0 the timer stays
+// 0 and the body stays. A LeaveCorpse def keeps its timer. Section bit 0 overrides LeaveCorpse,
+// spawns no decay and destroys the body at 0. A live body's timer is left alone.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B4D63..0x4B4E71]
+void test_corpse_leg_through_the_tick() {
+	enum class Kind { kDecay, kLeaveCorpse, kSilent, kLive };
+	for (const Kind kind : {Kind::kDecay, Kind::kLeaveCorpse, Kind::kSilent, Kind::kLive}) {
+		auto wp = std::make_unique<w::World>();
+		w::World &world = *wp;
+		world.registry.configure_pool(0, 16);
+		static constexpr uint16_t kItem = 0x14B9;
+		static constexpr int32_t kTimer = 188;
+		w::ItemDeathTraits traits;
+		traits.particledeath = "corpse_decay";
+		world.tables.item_death_traits.set(kItem, traits);
+		const bool dead = kind != Kind::kLive;
+		w::Entity body;
+		body.kind = w::EntityKind::Organic;
+		body.item_id = kItem;
+		body.health = dead ? 0 : 100;
+		body.alive = !dead;
+		body.flags = body.engine_flags = dead ? w::kEntityFlagDead : 0u;
+		body.leave_corpse = kind == Kind::kLeaveCorpse || kind == Kind::kSilent;
+		body.section_mask = kind == Kind::kSilent ? 1u : 0u;
+		body.corpse_timer = kTimer;
+		const w::EntityHandle bh = world.registry.spawn(0, body);
+		w::AiEntity *ae = world.ai.at(world.ai.attach(bh));
+		CHECK(ae != nullptr);
+		if (ae == nullptr) continue;
+		ae->inf.active = true;
+		ae->inf.is_local_player = true;
+		int decays = 0, decay_tick = -1;
+		bool destroyed = false;
+		for (int t = 1; t <= kTimer + 2 && !destroyed; ++t) {
+			world.ai.tick_infantry(*ae, world, static_cast<uint32_t>(t));
+			for (const w::DestructionEffectEvent &effect : world.out.destruction.effects) {
+				if (effect.effect != "corpse_decay") continue;
+				++decays;
+				decay_tick = t;
+				CHECK(effect.family == 1 && effect.attach_wire_handle == bh.packed);
+				CHECK(effect.dir.x == 0.0f && effect.dir.y == 0.0f && effect.dir.z == -0.5f);
+				CHECK(effect.section_tagged && effect.positioned && !effect.release);
+			}
+			world.out.destruction.effects.clear();
+			destroyed = world.registry.get(bh) == nullptr;
+			if (kind == Kind::kSilent && !destroyed) CHECK(t < kTimer);
+		}
+		const w::Entity *ent = world.registry.get(bh);
+		switch (kind) {
+		case Kind::kDecay:
+			CHECK(decays == 1 && decay_tick == kTimer - 186);
+			CHECK(ent != nullptr && ent->corpse_timer == 0 && ent->death_effect_active[0] == 1);
+			break;
+		case Kind::kLeaveCorpse:
+		case Kind::kLive:
+			CHECK(decays == 0 && ent != nullptr && ent->corpse_timer == kTimer);
+			break;
+		case Kind::kSilent:
+			CHECK(decays == 0 && destroyed && world.ai.for_handle(bh) == nullptr);
+			break;
+		}
+	}
+}
+
 // D-NET-NEW-L5-50: the local body in a control seat (ctrlx / drvrx) under the chase camera
 // (g_CameraMode 1) halves its Pitch ahead of the phase, every tick; a passenger seat, the first
 // person camera or a body not the local one keeps it [orig: @0x4B4921..0x4B4942].
@@ -538,6 +606,7 @@ int main() {
 	test_kick_follows_the_view_clamp();
 	test_dead_tail();
 	test_dead_tail_through_the_tick();
+	test_corpse_leg_through_the_tick();
 	if (failures == 0) std::printf("infantry_org2_view: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

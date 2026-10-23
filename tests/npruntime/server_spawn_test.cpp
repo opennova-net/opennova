@@ -983,6 +983,24 @@ int main() {
 				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
 		if (!expect(body->health == 1 && body->health_max == 100,
 		            "a row word of 0 deploys the hp-0 body at its 1")) return 1;
+
+		// D-NET-NEW-L5-55: the deploy's reset releases the corpse's +0x1CC emitter, the
+		// decay its corpse leg spawned (or a hit's), so the group does not outlive the
+		// corpse. [orig: Server_DeployPlayer - Entity_ResetToSpawnState @0x4B9610 called
+		//  @0x517899; the release @0x4B97CB..0x4B97F5]
+		body->alive = false;
+		body->health = 0;
+		body->flags |= w::kEntityFlagDead;
+		body->death_effect_active[0] = 1;
+		bare_world->out.destruction.effects.clear();
+		inmatch::Server_ReleasePlayerDeployment(
+				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
+		bool decay_released = false;
+		for (const w::DestructionEffectEvent &effect : bare_world->out.destruction.effects)
+			decay_released |= effect.release && effect.family == 1 &&
+					effect.attach_wire_handle == body->handle.packed;
+		if (!expect(decay_released && body->death_effect_active[0] == 0,
+		            "the deploy releases the corpse's decay emitter")) return 1;
 	}
 
 	// A join-time spectator is POSITIONED with the substitute team while its

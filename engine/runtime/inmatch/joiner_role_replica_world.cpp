@@ -730,6 +730,10 @@ void JoinerRole::apply_authoritative_health() {
 					local->net_analog_y = 0;
 					local->net_analog_z = 0;
 					world::entity_reset_to_spawn_state(*local);
+					// The reset releases the corpse's +0x1CC emitter (its own corpse leg's
+					// decay, or a hit's) [orig: NetPacket_SerializePlayerState - Entity_ResetToSpawnState
+					//  @0x4B9610 called @0x4C113C; the release @0x4B97CB..0x4B97F5].
+					world::release_corpse_effect(world, *local);
 
 					local_ai->heading = heading;
 					local_ai->pitch = pitch;

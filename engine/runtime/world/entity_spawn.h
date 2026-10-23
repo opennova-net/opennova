@@ -161,5 +161,16 @@ OrganicSpawnBody organic_spawn_pose(const OrganicSpawnFacts &facts, uint32_t net
 enum class NpcCorpseStep { Kept, Respawned, Removed };
 bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &e);
 NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &e);
+// The player body's corpse leg, every tick its dead bit is latched, after its dead tail: unless
+// its def has LeaveCorpse and section bit 0 is clear, the timer drops by one each tick; at 186
+// the def's decay effect spawns (not with section bit 0); at 0 or below the timer stays at 0, and
+// a body with section bit 0 is destroyed (returns true; the caller's AiEntity is gone). No
+// respawn quota, no watched-corpse hold: those are org1's.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B4D63..0x4B4E71]
+bool step_player_corpse(World &world, AiSystem &ai, Entity &e);
+// The corpse's +0x1CC emitter (the decay, or a hit's), released when the body holds one; the
+// reset does it, so every player respawn that resets the body releases it too.
+// [orig: Entity_ResetToSpawnState @0x4B9610 - @0x4B97CB..0x4B97F5]
+void release_corpse_effect(World &world, Entity &e);
 
 } // namespace opennova::world

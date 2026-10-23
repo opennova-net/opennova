@@ -141,6 +141,10 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 			world, *player, def_hp ? *row.item_hp : player->health_max) : 100;
 	if (world::retail_signed_i16(player->health) < ceiling) player->health = ceiling;
 	world::entity_reset_to_spawn_state(*player, ceiling);
+	// The reset releases the corpse's +0x1CC emitter (its corpse leg's decay, or a hit's)
+	// [orig: Server_DeployPlayer - Entity_ResetToSpawnState @0x4B9610 called @0x517899; the
+	//  release @0x4B97CB..0x4B97F5].
+	world::release_corpse_effect(world, *player);
 	// Spawn protection: every deploy of a non-bot slot whose revive latch (+89932)
 	// is clear stores the title's ticks into entity+292 (deploy_spawn_protection_ticks;
 	// the reset above never touches it); the per-tick arm in Server_TickUpdate counts it

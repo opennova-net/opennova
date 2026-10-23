@@ -1997,7 +1997,9 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		// ungated [orig: Entity_UpdateInfantryPlayerBody @0x4b4d0d ->
 		// Entity_DropCarriedObject].
 		if (death_state >= 0) drop_carried_objective(es.handle);
-		corpse_leg(es, death_state >= 0, /*org1=*/false);
+		// The client's own row is its World body's, whose update runs its own corpse leg
+		// (world::step_player_corpse), so the row runs none: one leg, one decay.
+		if (!is_self) corpse_leg(es, death_state >= 0, /*org1=*/false);
 		organic_chase_tail(es, is_self, /*starved=*/false, death_state);
 		commit_death_state(es, death_state);
 		break;
