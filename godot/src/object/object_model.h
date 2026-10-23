@@ -247,11 +247,15 @@ public:
 		BUILD_PROFILE_BUILDS = 0,
 		BUILD_PROFILE_SKELETON_US, // the head: level thresholds, PANM, the Skeleton3D and Skin
 		BUILD_PROFILE_MESHES_US, // ObjectData::build_lod_submeshes per retained level
-		BUILD_PROFILE_MATERIALS_US, // the per-surface rows: materials, part nodes, anim frames
+		BUILD_PROFILE_MATERIALS_US, // the per-surface rows past their materials: part nodes, anim frames
 		BUILD_PROFILE_NODES_US, // the surface slots' MeshInstance3D nodes
 		BUILD_PROFILE_LEVELS_US, // the active level applied, the skin palette, the rest transforms
 		BUILD_PROFILE_OCCLUDERS_US, // the authored occluders
 		BUILD_PROFILE_TAIL_US, // the runtime state, the stamps and the render order
+		// The surface materials, apart from the rows (the materials phase is the four together):
+		BUILD_PROFILE_MATERIAL_TEXTURES_US, // a new material's stage textures (a first load decodes)
+		BUILD_PROFILE_MATERIAL_CREATES_US, // a new material past its textures: shader, parameters
+		BUILD_PROFILE_ALPHA_COPIES_US, // an alpha strip's own copy of its material
 		BUILD_PROFILE_SLOT_COUNT,
 	};
 	// The process's scene builds since the last take, then zeroed: the mission load's model warm
@@ -792,7 +796,6 @@ private:
 	bool material_runs_skin_program(int p_material_index) const;
 	HashMap<int64_t, bool> material_skin_programs_;
 	void collect_anim_frames(int p_material_index);
-	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
 	// One shader parameter written to a material and, when the material
 	// carries the postmultiply pass, to its proxy as well.
 	static void set_material_and_auxiliary_parameter(

@@ -107,6 +107,10 @@ godot::Ref<godot::Texture> prepare_material_chunk(
 // nothing (renderer::missing_material_texture_rgba).
 godot::Ref<godot::Texture> missing_material_texture();
 
+// The flat normal (one 1x1 texel of (0.5, 0.5, 1, 1)) an object material binds when its row has no
+// normal-map stage: one texture for every such material, made once, never one per material.
+godot::Ref<godot::Texture> flat_normal_material_texture();
+
 // Case-insensitive lookup of a sidecar file (e.g. a .til) next to `dir`.
 godot::String resolve_sidecar_path(const godot::String &dir, const godot::String &filename, const char *ext);
 

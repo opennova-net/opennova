@@ -178,7 +178,14 @@ void ObjectModel::rebuild_scene() {
 					bool(submesh.get("is_skinned", false));
 			surface.q3_admitted = q3_admitted;
 			surface.local_center = mesh->get_aabb().get_center();
+			// The material's own cost on its slots: its stage textures (create_material adds
+			// them) apart from the rest of its build.
+			build_phase(BUILD_PROFILE_MATERIALS_US);
+			const int64_t textures_before = build_profile_[BUILD_PROFILE_MATERIAL_TEXTURES_US];
 			Ref<ShaderMaterial> material = material_for_index(surface.material_index);
+			build_phase(BUILD_PROFILE_MATERIAL_CREATES_US);
+			build_profile_[BUILD_PROFILE_MATERIAL_CREATES_US] -=
+					build_profile_[BUILD_PROFILE_MATERIAL_TEXTURES_US] - textures_before;
 			// One source submesh is one retail strip. Transparent strips must own
 			// their material instance because Godot stores render_priority on the
 			// material, while retail chooses Q1/Q2 independently for every strip on
@@ -189,6 +196,7 @@ void ObjectModel::rebuild_scene() {
 				const Ref<ShaderMaterial> shared_material = material;
 				material = material->duplicate();
 				FrameFx::clone_q3_object_material(shared_material, material);
+				build_phase(BUILD_PROFILE_ALPHA_COPIES_US);
 			}
 			surface.material = material;
 			// A skinned effect's vertex program poses the strip from the

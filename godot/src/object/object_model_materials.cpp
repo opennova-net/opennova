@@ -8,6 +8,7 @@
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/math.hpp>
 
 #include "object/object_shader_cache.h"
@@ -194,9 +195,14 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 	Ref<Texture2D> detail;
 	Ref<Texture2D> normal;
 	if (object_data_.is_valid() && p_array_index >= 0) {
+		// The stage loads on the build profile's own slot (an instrument; the first load of a
+		// texture decodes and uploads it, every later one is the registry's).
+		const uint64_t textures_start = Time::get_singleton()->get_ticks_usec();
 		diffuse = object_data_->load_material_stage_texture(p_array_index, 1);
 		detail = object_data_->load_material_stage_texture(p_array_index, 2);
 		normal = object_data_->load_material_stage_texture(p_array_index, 3);
+		build_profile_[BUILD_PROFILE_MATERIAL_TEXTURES_US] +=
+				static_cast<int64_t>(Time::get_singleton()->get_ticks_usec() - textures_start);
 	}
 
 	int32_t key = shader_cache->classify(shader_tag, material_flags, emissive_type,
@@ -259,7 +265,7 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 	}
 	const Ref<Texture> bound_normal = normal.is_valid()
 			? Ref<Texture>(normal)
-			: Ref<Texture>(solid_colour_texture(Color(0.5f, 0.5f, 1.0f, 1.0f)));
+			: opennova::flat_normal_material_texture();
 	material->set_shader_parameter("u_normal_map", bound_normal);
 	material->set_shader_parameter("u_normal_max_lod",
 			opennova::texture_max_lod(bound_normal));
@@ -326,12 +332,6 @@ void ObjectModel::collect_anim_frames(int p_material_index) {
 		frames.append(object_data_->load_material_anim_frame(p_material_index, 1, frame));
 	}
 	anim_frames_by_mat_[p_material_index] = frames;
-}
-
-Ref<ImageTexture> ObjectModel::solid_colour_texture(const Color &p_color) {
-	const Ref<Image> image = Image::create(1, 1, false, Image::FORMAT_RGBA8);
-	image->set_pixel(0, 0, p_color);
-	return ImageTexture::create_from_image(image);
 }
 
 // A surface material needs per-frame evaluation only if a parameter its

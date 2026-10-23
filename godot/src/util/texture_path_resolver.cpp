@@ -582,6 +582,17 @@ godot::Ref<godot::Texture> missing_material_texture() {
     return texture;
 }
 
+godot::Ref<godot::Texture> flat_normal_material_texture() {
+    const std::string key = "material:flat_normal";
+    const auto cached = g_material_cache.find(key);
+    if (cached != g_material_cache.end()) return cached->second;
+    const godot::Ref<godot::Image> image = godot::Image::create(1, 1, false, godot::Image::FORMAT_RGBA8);
+    image->set_pixel(0, 0, godot::Color(0.5f, 0.5f, 1.0f, 1.0f));
+    const godot::Ref<godot::Texture> texture = godot::ImageTexture::create_from_image(image);
+    if (texture.is_valid()) g_material_cache.emplace(key, texture);
+    return texture;
+}
+
 godot::String resolve_file_in_dir(const godot::String &dir, const godot::String &name) {
 	if (dir.is_empty() || name.is_empty()) {
 		return godot::String();

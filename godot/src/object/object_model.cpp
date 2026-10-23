@@ -1019,10 +1019,17 @@ String ObjectModel::format_build_profile(const PackedInt64Array &p_profile) {
 	const auto ms = [&p_profile](BuildProfileSlot p_slot) {
 		return static_cast<int>(p_profile[p_slot] / 1000);
 	};
-	return vformat("%d build(s): head %d ms, meshes %d ms, materials %d ms, nodes %d ms, "
-				   "levels %d ms, occluders %d ms, tail %d ms",
+	// The materials phase is its four slots together, then each.
+	const int64_t materials_us = p_profile[BUILD_PROFILE_MATERIAL_TEXTURES_US] +
+			p_profile[BUILD_PROFILE_MATERIAL_CREATES_US] + p_profile[BUILD_PROFILE_ALPHA_COPIES_US] +
+			p_profile[BUILD_PROFILE_MATERIALS_US];
+	return vformat("%d build(s): head %d ms, meshes %d ms, materials %d ms (textures %d ms, "
+				   "creates %d ms, alpha copies %d ms, rows %d ms), nodes %d ms, levels %d ms, "
+				   "occluders %d ms, tail %d ms",
 			static_cast<int>(p_profile[BUILD_PROFILE_BUILDS]), ms(BUILD_PROFILE_SKELETON_US),
-			ms(BUILD_PROFILE_MESHES_US), ms(BUILD_PROFILE_MATERIALS_US), ms(BUILD_PROFILE_NODES_US),
+			ms(BUILD_PROFILE_MESHES_US), static_cast<int>(materials_us / 1000),
+			ms(BUILD_PROFILE_MATERIAL_TEXTURES_US), ms(BUILD_PROFILE_MATERIAL_CREATES_US),
+			ms(BUILD_PROFILE_ALPHA_COPIES_US), ms(BUILD_PROFILE_MATERIALS_US), ms(BUILD_PROFILE_NODES_US),
 			ms(BUILD_PROFILE_LEVELS_US), ms(BUILD_PROFILE_OCCLUDERS_US), ms(BUILD_PROFILE_TAIL_US));
 }
 
@@ -2301,6 +2308,9 @@ void ObjectModel::_bind_methods() {
 	BIND_ENUM_CONSTANT(BUILD_PROFILE_LEVELS_US);
 	BIND_ENUM_CONSTANT(BUILD_PROFILE_OCCLUDERS_US);
 	BIND_ENUM_CONSTANT(BUILD_PROFILE_TAIL_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_MATERIAL_TEXTURES_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_MATERIAL_CREATES_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_ALPHA_COPIES_US);
 	BIND_ENUM_CONSTANT(BUILD_PROFILE_SLOT_COUNT);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
