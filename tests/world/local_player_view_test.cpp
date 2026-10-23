@@ -1211,11 +1211,17 @@ void test_scope_press_after_a_reset_runs_its_leg() {
         CHECK(!v.scope_engaged && player_view_scope_settled(v));
         CHECK(lw.w.vehicles.detach(lw.local));
         CHECK(local_player_scope_view_visible(lw.w, w, v)); // the promoted byte still shows it
+        // The Driver held the occupant word: the detach stamps its EquippedSlot held-ready
+        // (64), which the scope-down writer does not count complete, so the toggle's queue
+        // takes IDLE until the next pump consumes the byte [orig: Entity_DetachFromVehicle
+        // @0x4355F0 (@0x43578C..0x435794); WeaponSlot_TryQueueScopeDown @0x53F080
+        // (@0x53F092..0x53F09E)].
+        CHECK(w.slot.phase == weapon_phase::kHeld);
         lw.w.weather.core.scalar_channels.camera_fov_target_fp = 20 << 16;
         CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
         CHECK(lw.w.weather.core.scalar_channels.camera_fov_target_fp == (80 << 16));
         CHECK(!player_view_scope_settled(v) && !v.scope_engaged && v.scope_hipfire);
-        CHECK(w.slot.next == weapon_action::kScopeDown);
+        CHECK(w.slot.next == weapon_action::kIdle);
         CHECK(!local_player_scope_view_visible(lw.w, w, v));
     }
     // The engage direction: the promoted byte cleared under a set target.
@@ -2344,11 +2350,14 @@ void test_authored_rotation_bias_continues_through_air_reload_and_rebake() {
     CHECK(out[1] == 0x10000000 && out[2] == 0x20000000);
 
     // Render-side clip rebaking the same installed weapon preserves the
-    // current authored pose. A real new mount resets the published bias.
+    // current authored pose. A real new mount's request clears the published bias;
+    // the install that follows keeps the words (D-NET-NEW-L7-28) [orig:
+    // Player_MountWeaponSlot @0x4DFA40 (@0x4DFBCF..0x4DFBE8)].
     local_weapon_install(lw.w, weapon, data, false, true, nullptr, view);
     local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
     CHECK(static_cast<uint32_t>(out[0]) == 0xF8000000u);
     data.name = "NEW_ROTATION_MOUNT";
+    player_view_mount_clear_bias(view);
     local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
     local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
     CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0);

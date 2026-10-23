@@ -5624,9 +5624,18 @@ func test_local_usegun_direct_swap_commits_the_latest_parent_at_the_detach_switc
 
 	# The scan walks the rider's proximity slice, which refreshes every 16
 	# ticks; it was last built at the first gun's seat, 8 u from the third gun,
-	# so let it refresh before looking down the row.
+	# so let it refresh before looking down the row. The USE toggle is the
+	# weapon-busy gate's too: it swallows the press while the second gun's draw
+	# runs (currentAction SWITCHTO), so the draw runs out first [orig:
+	# Entity_ToggleVehicleMount @0x436958..0x436977].
 	for _tick in range(17):
 		sim.step()
+	for _tick in range(80):
+		if sim.get_local_player_weapon_state().current_action < 2:
+			break
+		sim.step()
+	assert_true(sim.get_local_player_weapon_state().current_action < 2,
+			"the second gun's draw ran out")
 	MountLook.face(self, sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
 	assert_true(sim.local_player_toggle_mount(),
 			"a third gun down the row drives a second direct mounted-seat swap")
@@ -5684,6 +5693,14 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	assert_false(mount_event == null,
 			"the emplacement commits before its SWITCHTO draw")
 	assert_true(mount_event.installed, "the attach's commit mounts the gun's def itself")
+	# The commit queued the gun's draw; the next pump enters it, so the death lands
+	# over a running SWITCHTO (a detach ahead of that pump would find the draw only
+	# queued, and its mount's SWITCHFROM would take the slot and commit the switch back
+	# at once) [orig: WeaponAction_SwitchFrom @0x5433B0 (WeaponSlot_TryQueueSwitchTo
+	# @0x5434A3); WeaponSlot_ForceQueueSwitchFrom @0x53F170 (@0x53F17A..0x53F185)].
+	sim.step()
+	assert_eq(sim.get_local_player_weapon_state().current_action, 6,
+			"the gun's draw runs when the death lands")
 	var fired_before := sim.get_local_player_weapon_state().fired_serial
 	# The switch back's commit mounts the personal def at once, which starts its serials
 	# over: the round ring is the witness a shot would leave across it.
