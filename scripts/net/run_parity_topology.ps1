@@ -2155,12 +2155,21 @@ function Write-ScenarioPoseSnapshot {
 # World::run_entity_pass). An OpenNova host stages inside the stage_slot probe
 # on the first frame whose logic tick reaches the value (the probe reports it).
 # A retail host's tick is onhook_pool_entities' logic_tick, g_CurrentTick at
-# its frame callback: the runner reads it until the value is at most 6 ticks
-# ahead and stages, the pose landing on the frame callback after
-# onhook_load_debug_snapshot returns (from the read's sample to the landing
-# about 5 ticks: x8 / x9's 35..51 ms reads, 31..65 ms calls, one frame), so the
-# landing centres on the value as the probe's does; a read after the last
-# entry bounds it. A staging outside value +- tolerance fails the cell.
+# its frame callback, and it steps every 16 ms of GetTickCount time, 62.5 a
+# second: the main loop banks 16 units a millisecond, drains 64 a pass and
+# calls the mode's update (in a mission g_GameModeGameLoop's
+# Game_ProcessMainFrame) on every fourth pass [orig: Game_MainLoop @0x52B630
+# (`shl ecx, 4` @0x52B7AA, `add esi, ecx` @0x52B7B2, `sub esi, 40h` @0x52BA21,
+# `test byte ptr g_TickPhase, 3` @0x52BA40, `call eax` @0x52BA58)]. The runner
+# sleeps through the gap at that rate but its last 30 ticks (a sleep and the
+# next read come back late, never early: x10's ran 31..77 ms over), reads
+# those back to back (a read every 3 to 5 ticks) and stages on the first read
+# at most 6 ticks ahead, so that read lands 2 to 6 ticks ahead. The pose lands
+# inside onhook_load_debug_snapshot, on the frame callback that serves it, 3
+# to 5 ticks after the read's sample (x10: 33..83 ms calls), so the landing
+# centres on the value as the probe's does; a read after the last entry
+# bounds it from above (x10: 6 to 8 ticks after the read). A staging outside
+# value +- tolerance fails the cell.
 function Read-RetailHostTick {
     param([Parameter(Mandatory = $true)] [string] $RetailHostInstanceId)
     $pool = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_pool_entities" -Arguments @{
@@ -2181,9 +2190,11 @@ function Wait-RetailHostTick {
     $started = [DateTime]::UtcNow
     $deadline = $started.AddSeconds(50)
     $reads = 0
+    $firstTick = $null
     while ($true) {
         $tick = Read-RetailHostTick -RetailHostInstanceId $RetailHostInstanceId
         ++$reads
+        if ($null -eq $firstTick) { $firstTick = $tick }
         $ahead = $value - $tick
         if ($ahead -lt -[long] $HostTick.tolerance) {
             throw "Staging tick: the retail host was already at tick $tick, past $value + $($HostTick.tolerance), when its staging was due ($reads reads)"
@@ -2194,16 +2205,17 @@ function Wait-RetailHostTick {
                 ahead = $ahead
                 lead_ticks = $leadTicks
                 reads = $reads
+                first_tick = $firstTick
                 waited_ms = [int] ([DateTime]::UtcNow - $started).TotalMilliseconds
             }
         }
         if ([DateTime]::UtcNow -ge $deadline) {
             throw "Staging tick: the retail host's tick never came within $leadTicks of $value in 50 s ($reads reads, last $tick)"
         }
-        # Sleep through most of the gap at 62 ticks a second; the last 8 ticks
-        # are read back to back.
-        $sleepTicks = $ahead - $leadTicks - 8
-        if ($sleepTicks -gt 0) { Start-Sleep -Milliseconds ([int] ($sleepTicks * 1000 / 62)) }
+        # Sleep at retail's 16 ms a tick through all but the gap's last 30
+        # ticks; those are read back to back.
+        $sleepTicks = $ahead - $leadTicks - 24
+        if ($sleepTicks -gt 0) { Start-Sleep -Milliseconds ([int] ($sleepTicks * 16)) }
     }
 }
 

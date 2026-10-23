@@ -717,13 +717,19 @@ once per main frame (`Game_ProcessMainFrame` @0x5265B4), ours is
 `World::logic_tick`. An OpenNova host waits inside `stage_slot` (`stage_tick`,
 `stage_tolerance`) and stages on the first frame whose tick has reached v; a
 retail host's tick is `onhook_pool_entities`' `logic_tick` (its `g_CurrentTick`
-at the frame callback), read until v is at most 6 ticks ahead, then staged (the
-read's sample to the pose's landing is about 5 ticks), with one more read after
-the last entry bounding the landing. Either side waits at most 50 s. A staging
-outside v +- t fails the cell, and so does a host already past v + t when the
-staging is due (the tick never comes back: v must sit past every topology's
-readiness); the witness's `staging.staging_tick` keeps the staged tick (ours)
-or the two reads (retail), and `compare_scenario.py` requires every run to
+at the frame callback), which steps every 16 ms of `GetTickCount` time, 62.5 a
+second (`Game_MainLoop` @0x52B630 banks 16 units a millisecond, drains 64 a
+pass and runs the frame on every fourth pass, @0x52B7AA..0x52BA58). The runner
+sleeps through the gap at that rate but its last 30 ticks, reads those back to
+back and stages on the first read at most 6 ticks ahead (2 to 6 ahead: a read
+every 3 to 5 ticks); the pose lands inside `onhook_load_debug_snapshot`, 3 to
+5 ticks after that read, and one more read after the last entry bounds the
+landing from above (x10: 6 to 8 ticks after the read). Either side waits at
+most 50 s. A staging outside v +- t fails the cell, and so does a host already
+past v + t when the staging is due (the tick never comes back: v must sit past
+every topology's readiness); the witness's `staging.staging_tick` keeps the
+staged tick (ours) or the two reads and the first read's tick (retail), and
+`compare_scenario.py` requires every run to
 have played the same tick. `coop_ai_kill`'s `why` names its value: 4528 (176
 mod 256), 8 ticks from the nearest shooter's perception boundary on either
 side, past every earlier cell's readiness.
