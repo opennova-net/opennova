@@ -306,13 +306,17 @@ void Water::_release_mirror_rig(MirrorRig &r_rig) {
 // Publish this water plane's height as the session's transparent water-split
 // (the g_WaterSplitHeightFloat equivalent; the witness rides the
 // render-order record) so
-// blended world materials can take their far/camera-side rung; cleared when
-// the water node leaves the tree.
+// blended world materials can take their far/camera-side rung, and with it
+// the mirrors' clip arm; cleared when the water node leaves the tree. Both
+// follow the height, never g_WaterActive: the split is written every frame
+// (renderer/render_order.h transparent_queue_for) and every mirror that
+// renders, the Inset's included, renders clipped (environment/water_mirror.h,
+// the CLIP note).
 void Water::_push_water_split_height() {
 	if (!built_ || !is_inside_tree() || globals_held_) {
 		return;
 	}
-	const bool active = is_water_pass_active() && is_visible_in_tree();
+	const bool active = is_water_render_active() && is_visible_in_tree();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	_write_global(rs, "opennova_water_active", active);
 	_write_global(rs, "opennova_water_height", water_height_);

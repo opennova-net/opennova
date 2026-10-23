@@ -59,8 +59,10 @@ void ObjectModel::set_water_mirror_clip_wave(opennova::env::MirrorClipWave p_wav
 
 // The per-draw test against the live water plane (the building pass reads
 // the graphic's bound-block floor, the first entity wave the entity+0 bound
-// radius; runtime/environment/water_mirror.h carries the witnesses). No plane
-// means no mirror pass, so nothing is armed.
+// radius; runtime/environment/water_mirror.h carries the witnesses). The
+// plane follows the water's height, so it stands for every mirror that renders
+// (the Inset's included); no plane means no water and no mirror pass, so
+// nothing is armed.
 void ObjectModel::refresh_water_mirror_clip() {
 	if (water_mirror_clip_inherited_) {
 		return;

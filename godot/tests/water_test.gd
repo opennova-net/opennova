@@ -205,6 +205,50 @@ func test_releasing_the_renderer_takes_its_water_split_with_it() -> void:
 	assert_false(cache.has_water_plane(), "the released water takes its split with it")
 
 
+func test_the_split_and_the_mirror_clip_follow_the_height_alone() -> void:
+	# Every scene core writes the transparent split from the height whatever
+	# g_WaterActive (engine renderer/render_order.h transparent_queue_for), and
+	# every mirror that renders, the weapon Inset's included, renders clipped
+	# (environment/water_mirror.h, the CLIP note): the plane stands while the
+	# main scene's water pass is down.
+	var cache := ObjectShaderCache.get_singleton()
+	cache.clear_water_plane()
+	var fixture := _make_water_fixture(7.0)
+	var water: Water = fixture["water"]
+	water.set_visible_terrain_bounds(true, 20.0, 40.0)
+	water.set_blink_water_visible(false)
+	water.advance_frame(TICK)
+	assert_false(water.is_water_pass_active())
+	assert_eq(water.get_reflection_viewport().render_target_update_mode,
+			SubViewport.UPDATE_DISABLED, "no main prerender")
+	assert_true(cache.has_water_plane(), "the split stands without the water pass")
+	# The eye above the plane: a strip below it takes the far-side rung.
+	assert_eq(cache.alpha_rung_for_height(2.0), ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE)
+	assert_eq(cache.alpha_rung_for_height(12.0), ObjectShaderCache.RENDER_RUNG_ALPHA_CAMERA_SIDE)
+	# The Inset's own water pass up while the main one is down: its mirror
+	# renders under the same plane.
+	var inset_view := SubViewport.new()
+	inset_view.size = Vector2i(96, 96)
+	(fixture["viewport"] as SubViewport).add_child(inset_view)
+	var inset := Camera3D.new()
+	inset.keep_aspect = Camera3D.KEEP_WIDTH
+	inset.fov = 9.5
+	inset_view.add_child(inset)
+	inset.make_current()
+	var block := Transform3D(Basis.from_euler(Vector3(deg_to_rad(-20.0), 0.0, 0.0)),
+			Vector3(100.3, 27.0, -33.7))
+	inset.global_transform = block
+	water.set_inset_visible_terrain_bounds(true, 0.0, 30.0)
+	water.advance_inset_frame(inset, block)
+	assert_true(water.is_inset_mirror_rendered())
+	assert_true(cache.has_water_plane(), "the Inset's mirror renders clipped")
+	# A zero height is no water: no split, no mirror.
+	water.water_height = 0.0
+	water.advance_frame(TICK)
+	assert_false(cache.has_water_plane())
+	water.release_runtime_renderer_resources()
+
+
 func test_process_exit_releases_the_reflection_decode_before_its_viewport() -> void:
 	var fixture := _make_water_fixture()
 	var water := fixture["water"] as Water

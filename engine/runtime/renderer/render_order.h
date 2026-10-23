@@ -115,6 +115,10 @@ uint32_t transparent_sort_key(float view_depth);
 // Which transparent queue a strip joins: above-water (Q1) when its center
 // height reaches the water plane, else below-water (Q2)
 // [orig: @ 0x5d932e..0x5d9354 vs g_WaterSplitHeightFloat @ 0x8437C4].
+// Every scene core writes the split from the height ahead of its passes,
+// whatever g_WaterActive and the water letter [orig: Terrain_RenderWorldScene
+// @ 0x5c93a0, the store @0x5c93e2..0x5c93ef], so a frame whose water pass does
+// not run still splits its transparents about the plane.
 enum class TransparentQueue : uint8_t {
 	AboveWater,
 	BelowWater,

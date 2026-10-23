@@ -34,7 +34,13 @@
 // (wh - 0.1) [orig: Render_MainScene @ 0x5c1561..0x5c1578 plane wh - 0.1,
 // armed while wh != 0; Terrain_RenderSectorBatch @ 0x6092c6..0x60935b]).
 // The shaders port it as a discard in the mirror pass (the one camera whose
-// mask omits the water layer, render/visual_layers.h). The reflected pass
+// mask omits the water layer, render/visual_layers.h). Every mirror render
+// arms it, the weapon Inset's included, whatever the main scene's
+// g_WaterActive: the reflected pass sets g_WaterMirrorActive on entry [orig:
+// Water_RenderReflectedWorldScene @ 0x5c8510, the store @0x5c8540] and the
+// terrain's plane rides each terrain pass of a render with a height [orig:
+// Render_MainScene @ 0x5c1240, the branch @0x5c155f, the arm @0x5c1567], which
+// is every render (the height branch @0x5c1268). The reflected pass
 // fogs with the dry weather block whatever side the eye is on
 // (EnvironmentState::build_water_mirror_fog) and never swaps the terrain's
 // stage 3 to the water noise (the mirror context's below-water word is 0
