@@ -785,7 +785,12 @@ int main() {
 		if (!expect(map.mode == 2, "map clear: a live body keeps the map")) return 1;
 		world.registry.get(local)->flags |= opennova::world::kEntityFlagDead;
 		frame.command_map_open = true;
-		frame.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		// Six ticks' time a frame: the bank smooths each frame's time with 7/8 of the history
+		// the idle frame left, and only every fourth 4 ms quantum runs an update, so three
+		// ticks' time banks one update on this frame and none on the next (the status page's)
+		// [orig: Game_MainLoop @0x52B630 - the EMA @0x52B83C..0x52B866, the drain
+		//  @0x52BA08..0x52BA6B].
+		frame.delta_seconds = TickAccumulator::kTickDt * 6.0;
 		const FrameOutcome skipped = session.advance(frame);
 		if (!expect(skipped.world_skipped && skipped.ticks_run() > 0 && map.mode == 2,
 				"map clear: a frame that skips its world keeps it, its updates too")) return 1;
