@@ -16,6 +16,7 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/vehicle_collision_damage.h>
+#include <runtime/world/vehicle_motor.h> // carrier_pose_fixed
 #include <runtime/world/world.h>
 
 #include "item_pool_step.h"
@@ -1819,6 +1820,55 @@ void test_dead_item_settle() {
     tick_dead_items(w, nullptr, 0.0f, w.out.destruction); // dry: the water word 0
     CHECK(e->veh.slide_z == sz0 - 334);
     CHECK(e->position.z < 5.0f);
+}
+
+// The routed falling and the static wreck callbacks stamp savedLivePose (+0x80..+0x94: the
+// Position words and the Yaw / Pitch / Roll words) at their head, ahead of the move, every
+// tick: a reader of the wreck's displacement takes that tick's alone. A body standing on the
+// wreck rides Position less savedLivePose, so with the death transforms' stamp left standing
+// the dead 50cal gunner on 03TR's dying hull took the hull's whole rise since its death at
+// every tick and flew over the water retail's lands in (D-NET-897, L4-s29).
+// [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - the stores @0x493FAA..0x493FD9;
+//  Entity_UpdateStaticDeathPhysics @0x494230 - the stores @0x494279..0x4942A0]
+void test_falling_and_static_wrecks_stamp_their_pose_first() {
+    for (const DeathMotionMode mode : {DeathMotionMode::Falling, DeathMotionMode::Static}) {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        w.registry.configure_pool(1, 4);
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = 700;
+        seed.health = 0;
+        seed.position = Vec3{0.0f, 0.0f, 5.0f};
+        seed.bound_radius = 2.0f;
+        const EntityHandle h = w.registry.spawn(1, seed);
+        ItemDeathTraits t = barrel_traits();
+        t.unit_type = 1;
+        w.tables.item_death_traits.set(700, t);
+        Entity *e = w.registry.get(h);
+        e->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
+        e->alive = false;
+        e->death_motion = mode;
+        e->veh.vel_x = 65536;
+        e->veh.vel_y = -32768;
+        e->veh.slide_z = 4096;
+        // The death transforms' stamp, a pose the wreck has since left.
+        e->saved_live_pos[0] = e->position.x.q16 - 0x40000;
+        e->saved_live_pos[1] = e->position.y.q16;
+        e->saved_live_pos[2] = e->position.z.q16 - 0x40000;
+        e->saved_live_valid = true;
+        for (int tick = 0; tick < 2; ++tick) {
+            int32_t before[3];
+            int32_t before_yaw = 0, before_pitch = 0, before_roll = 0;
+            carrier_pose_fixed(*e, before, before_yaw, before_pitch, before_roll);
+            tick_dead_items(w, nullptr, 0.0f, w.out.destruction); // dry: the water word 0
+            CHECK(e->saved_live_pos[0] == before[0]);
+            CHECK(e->saved_live_pos[1] == before[1]);
+            CHECK(e->saved_live_pos[2] == before[2]);
+            CHECK(e->saved_live_yaw == before_yaw);
+            CHECK(e->position.z.q16 != before[2]); // and then it moved
+        }
+    }
 }
 
 // ItemDef attrib2 StaticDeath freezes only the generic falling callback.
@@ -5352,6 +5402,7 @@ int main() {
     test_death_piece_ground_scorch_routing();
     test_bullet_gates();
     test_dead_item_settle();
+    test_falling_and_static_wrecks_stamp_their_pose_first();
     test_generic_staticdeath_freezes();
     test_specialized_piece_physics_callback();
     test_dead_item_landing_split();

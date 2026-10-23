@@ -1842,6 +1842,14 @@ void tick_item_death_motion(World &world, Entity &entity,
         publish_piece_physics_angles(*e);
         return;
     }
+    // The routed falling and the static callbacks stamp savedLivePose (+0x80..+0x94: the
+    // Position words and the Yaw / Pitch / Roll words) at their head, ahead of any move, so a
+    // reader of the wreck's displacement (a body standing on it, its run-over push) takes this
+    // tick's alone (D-NET-897: the dead 50cal gunner on the 03TR hull).
+    // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - the stores @0x493FAA..0x493FD9;
+    //  Entity_UpdateStaticDeathPhysics @0x494230 - the stores @0x494279..0x4942A0]
+    if (e->death_motion == DeathMotionMode::Falling || e->death_motion == DeathMotionMode::Static)
+        stamp_saved_live_pose(*e);
     if (e->death_motion != DeathMotionMode::Static &&
         e->veh.slide_z == 0 && e->veh.vel_x == 0 && e->veh.vel_y == 0)
         return;
