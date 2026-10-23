@@ -282,6 +282,16 @@ inline constexpr int kFrameFxScanlineTileHeight = 64;
 inline constexpr std::uint32_t kFrameFxScanlineDiffuse = 0x808080u;
 std::vector<std::uint8_t> frame_fx_scanline_texels(const FrameFxRand &rand);
 
+// Whether a mission start makes the "ffscan" texture, its texels drawn from the render stream:
+// the mission textures stage's full arm does, past the HUD's textures; a dedicated host's
+// reduced arm makes none and draws none (D-NET-NEW-L3-35).
+// [orig: Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the full arm's
+//  call @0x587261 (HUD_LoadAllTextures @0x587205 ahead of it), none on the reduced arm
+//  @0x58727A..0x58728C; CFrameFX_CreatePixelShaders @0x5821D0, that call its only one]
+constexpr bool builds_frame_fx_scanline_texture(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
+
 // --- the NVG view -------------------------------------------------------------
 
 // The NVG targets: the scene renders into a 512-square target and the glow

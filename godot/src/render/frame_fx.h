@@ -234,6 +234,8 @@ public:
 	// the render CRT stream (retail CFrameFX_CreatePixelShaders @0x58289f, from
 	// Render_InitMissionTextures @0x587261).
 	void init_mission_textures();
+	// Whether the node holds a mission's "ffscan" texels (init_mission_textures ran).
+	bool has_mission_textures() const { return !scanline_texels_.empty(); }
 	// Process-exit boundary: stop render callbacks and release compositor-owned
 	// device resources while RenderingServer and RenderingDevice are still live.
 	void shutdown();

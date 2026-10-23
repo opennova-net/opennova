@@ -891,6 +891,10 @@ private:
 	// layers (WorldScene::load_sky_maps), a dedicated host's reduced arm none (D-NET-NEW-L3-34).
 	// `p_timeline` takes it as the span sky_maps on either arm.
 	void load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
+	// The same stage's FrameFX texture past the HUD's: the full arm makes the "ffscan" scanlines
+	// (WorldScene::init_frame_fx_mission_textures), a dedicated host's reduced arm none
+	// (D-NET-NEW-L3-35). `p_timeline` takes it as the span frame_fx_textures on either arm.
+	void load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void run_mission_start();

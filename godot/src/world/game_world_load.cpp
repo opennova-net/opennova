@@ -145,6 +145,7 @@ int GameWorld::load_world(const String &p_dir) {
 	last_load_timeline_ = timeline;
 	load_terrain_textures(timeline, /*p_dedicated_host=*/false);
 	load_sky_maps(timeline, /*p_dedicated_host=*/false);
+	load_frame_fx_textures(timeline, /*p_dedicated_host=*/false);
 	timeline->finish();
 
 	world_ready_ = true;
@@ -446,6 +447,10 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->span("hud_textures");
 	emit_signal(kSignalHudTexturesLoad, !dedicated_host);
 	timeline->end_span();
+	// FrameFX's mission texture past the HUD's: the full arm's "ffscan" scanlines, none on a
+	// dedicated host's reduced arm (engine renderer/frame_fx_effects.h
+	// builds_frame_fx_scanline_texture carries the witness, D-NET-NEW-L3-35).
+	load_frame_fx_textures(timeline, dedicated_host);
 	if (!dedicated_host) {
 		// The render arm's device inits past the freeze: the effect catalog and the presenters'
 		// fire pipelines warm in the forced frames; a dedicated host's reduced arm runs none (no
@@ -1223,6 +1228,15 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 void GameWorld::load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host) {
 	p_timeline->span("sky_maps");
 	scene_.load_sky_maps(p_dedicated_host);
+	p_timeline->end_span();
+}
+
+// The mission textures stage's FrameFX texture: the full arm's scanlines, a dedicated host's
+// reduced arm none (engine renderer/frame_fx_effects.h builds_frame_fx_scanline_texture,
+// D-NET-NEW-L3-35).
+void GameWorld::load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host) {
+	p_timeline->span("frame_fx_textures");
+	scene_.init_frame_fx_mission_textures(p_dedicated_host);
 	p_timeline->end_span();
 }
 

@@ -1920,6 +1920,8 @@ void FrameFx::_bind_methods() {
 			&FrameFx::set_nvg_sights_card);
 	ClassDB::bind_method(D_METHOD("init_mission_textures"),
 			&FrameFx::init_mission_textures);
+	ClassDB::bind_method(D_METHOD("has_mission_textures"),
+			&FrameFx::has_mission_textures);
 	ClassDB::bind_static_method("FrameFx",
 			D_METHOD("invalidate_q3_source", "source"),
 			&FrameFx::invalidate_q3_source);

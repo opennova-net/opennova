@@ -1886,16 +1886,28 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 			assert_true(sky_maps > terrain_textures and freeze > sky_maps,
 					"the sky maps load past the terrain's textures, ahead of the freeze: %s" % [names])
 			assert_false(names.has("model_warm"), "no arm builds a listed model: %s" % [names])
+			# FrameFX's mission texture follows the HUD's, past the freeze, on both arms; it makes
+			# the scanlines on the full arm alone (D-NET-NEW-L3-35; engine
+			# renderer/frame_fx_effects.h builds_frame_fx_scanline_texture carries the witness).
+			var hud_textures := names.find("hud_textures")
+			var frame_fx_textures := names.find("frame_fx_textures")
+			assert_true(hud_textures > freeze and frame_fx_textures > hud_textures,
+					"FrameFX's texture follows the HUD's, past the freeze: %s" % [names])
 			if serve_and_play:
 				for leg in ["effects_warm", "effect_spawn"]:
 					assert_true(names.has(leg), "a listen host's warm runs %s: %s" % [leg, names])
-				assert_true(names.find("effects_warm") > freeze,
-						"the full arm's device warm follows its freeze: %s" % [names])
+				assert_true(names.find("effects_warm") > frame_fx_textures,
+						"the full arm's device warm follows its textures: %s" % [names])
 			else:
 				for leg in warm_legs:
 					assert_false(names.has(leg), "no %s on a dedicated host: %s" % [leg, names])
 		assert_null(world.get_node_or_null("MissionStartModelWarm"),
 				"no listed model stands under the world past its load")
+		var frame_fx: FrameFx = world.get_frame_fx()
+		assert_not_null(frame_fx)
+		if frame_fx != null:
+			assert_eq(frame_fx.has_mission_textures(), serve_and_play,
+					"the scanlines are the full arm's mission texture alone")
 		# The foliage's definitions load with the render subsystems, which a dedicated host's start
 		# jumps over (Game_StartMission's dedicated arm skips Render_InitTerrainSubsystems): its
 		# dispatcher stays unconfigured, a listen host's takes the terrain.

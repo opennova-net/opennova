@@ -7,6 +7,7 @@
 #include <formats/env/env.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
+#include <runtime/renderer/frame_fx_effects.h> // builds_frame_fx_scanline_texture
 
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
@@ -293,6 +294,15 @@ void WorldScene::load_sky_maps(bool p_dedicated_host) const {
 	}
 }
 
+// The texels draw from the render CRT stream (engine renderer/frame_fx_effects.h
+// builds_frame_fx_scanline_texture carries the witness).
+void WorldScene::init_frame_fx_mission_textures(bool p_dedicated_host) const {
+	if (nodes_.framefx != nullptr &&
+			opennova::renderer::builds_frame_fx_scanline_texture(p_dedicated_host)) {
+		nodes_.framefx->init_mission_textures();
+	}
+}
+
 WorldEnvironmentLoad WorldScene::load_environment(
 		const Ref<ResourceRoot> &p_root, const String &p_trn_path, const String &p_env_path) const {
 	WorldEnvironmentLoad report;
@@ -329,11 +339,6 @@ WorldEnvironmentLoad WorldScene::load_environment(
 	}
 	if (nodes_.precipitation != nullptr) {
 		nodes_.precipitation->set_resource_root(p_root);
-	}
-	// FrameFX's mission texture (the "ffscan" scanlines) draws from the render
-	// CRT stream here, as Render_InitMissionTextures does.
-	if (nodes_.framefx != nullptr) {
-		nodes_.framefx->init_mission_textures();
 	}
 	if (nodes_.environment_cube != nullptr) {
 		nodes_.environment_cube->force_capture();
