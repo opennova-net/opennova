@@ -821,11 +821,17 @@ private:
 	void place_streamed_mission_objects(const Ref<Simulation> &p_sim,
 			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
 	void clear_mission_tile_info();
-	// The terrain's load: the .trn, then overcast.def and the mission's .env (`p_environment`, its
-	// name without the extension; empty: none) through the terrain's parser (D-TERRAIN-18), with
-	// the mission's tile set over its tilestrip.
+	// The terrain's connect leg (engine terrain/terrain_load_legs.h carries the witness):
+	// the .trn, then overcast.def and the mission's .env (`p_environment`, its name without the
+	// extension; empty: none) through the terrain's parser (D-TERRAIN-18), with the mission's tile
+	// set over its tilestrip, the height data and the char and foliage maps, bound to every row
+	// that reads the terrain; the terrain node left unbuilt for the mission textures stage.
 	bool load_terrain(
 			const String &p_trn_path, const String &p_tile_set, const String &p_environment);
+	// The mission textures stage's terrain, every arm's (D-NET-NEW-L2-46): the texture slots and
+	// the tile set's atlas the connect leg held, the terrain node's build over them, then the
+	// foliage's; `p_timeline` takes it as one span. Nothing when no connect leg is pending.
+	void load_terrain_textures(const Ref<LoadTimeline> &p_timeline);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void run_mission_start();
@@ -892,6 +898,9 @@ private:
 	// A join's S2C 0x11 ran the mission start's head (load_join_terrain), which its S2C 0x1A load
 	// skips.
 	bool join_terrain_preloaded_ = false;
+	// The connect leg loaded the terrain's configuration and heights; its textures and build wait
+	// for the mission textures stage (load_terrain_textures).
+	bool terrain_textures_pending_ = false;
 	bool world_ready_ = false;
 	Ref<MissionData> loaded_mission_;
 	// The BMS clock the weather home is seeded with at the mission-start

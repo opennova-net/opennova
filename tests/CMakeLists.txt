@@ -5671,3 +5671,12 @@ add_executable(hud_takeover_status_test hud/hud_takeover_status_test.cpp)
 target_link_libraries(hud_takeover_status_test PRIVATE opennova_runtime)
 target_include_directories(hud_takeover_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_takeover_status COMMAND hud_takeover_status_test)
+
+# --- parity lane LF (performance) ---
+# The two legs of a mission start's terrain load (runtime/terrain/terrain_load_legs.h,
+# D-NET-NEW-L2-46): the connect leg ahead of the joiner's C2S 0x0A, the textures at the
+# mission textures stage.
+add_executable(terrain_load_legs_test terrain/terrain_load_legs_test.cpp)
+target_link_libraries(terrain_load_legs_test PRIVATE opennova_runtime)
+target_compile_features(terrain_load_legs_test PRIVATE cxx_std_17)
+add_test(NAME terrain_load_legs COMMAND terrain_load_legs_test)

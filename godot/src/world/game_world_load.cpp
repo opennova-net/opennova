@@ -396,6 +396,11 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// pays this at load (the load plan's effect-system witness).
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM));
+	// The mission textures stage opens with the terrain's, on every arm, a dedicated host's reduced
+	// one too: the texture slots and the tile set's atlas the head's connect leg held, then the
+	// terrain's build and the foliage's (engine terrain/terrain_load_legs.h carries the witness,
+	// D-NET-NEW-L2-46).
+	load_terrain_textures(timeline);
 	const PackedStringArray start_models = challenge_sim.is_valid()
 			? challenge_sim->get_mission_start_model_files()
 			: PackedStringArray();
@@ -687,6 +692,7 @@ void GameWorld::unload() {
 	join_wire_assets_failed_ = false;
 	join_wire_asset_failure_emitted_ = false;
 	join_terrain_preloaded_ = false;
+	terrain_textures_pending_ = false;
 	stop_water_render_stats();
 	// Net-session teardown: the preload sim/root, the notification latches, the
 	// typed request staging, and the NovaWorld gate registration.
@@ -1122,22 +1128,39 @@ void GameWorld::clear_mission_tile_info() {
 
 bool GameWorld::load_terrain(
 		const String &p_trn_path, const String &p_tile_set, const String &p_environment) {
+	terrain_textures_pending_ = false;
 	Ref<TerrainData> data;
 	data.instantiate();
 	prepare_terrain_load(**data, p_tile_set, p_environment);
-	if (data->load_from_resource_root(resource_root_, p_trn_path) != OK) {
+	if (data->load_config_from_resource_root(resource_root_, p_trn_path) != OK) {
 		return false;
 	}
 	if (terrain_ == nullptr) {
 		return false;
 	}
 	terrain_data_ = data;
-	// Every row that reads the terrain takes it (world/world_scene.h), then
-	// the terrain builds whole.
+	// The previous mission's build goes (an unload keeps it), then every row that reads the
+	// terrain takes the new one (world/world_scene.h); the node builds at the mission textures
+	// stage (load_terrain_textures).
+	terrain_->clear_built();
 	scene_.bind_terrain(data, mission_tile_info_);
+	terrain_textures_pending_ = true;
+	return true;
+}
+
+void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline) {
+	if (!terrain_textures_pending_) {
+		return;
+	}
+	terrain_textures_pending_ = false;
+	if (terrain_ == nullptr || terrain_data_.is_null()) {
+		return;
+	}
+	p_timeline->span("terrain_textures");
+	terrain_data_->load_textures();
 	terrain_->build();
 	configure_foliage();
-	return true;
+	p_timeline->end_span();
 }
 
 // Runtime foliage: Terrain supplies the retail 16-unit detail-cell set; the

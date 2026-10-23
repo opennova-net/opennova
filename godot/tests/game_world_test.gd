@@ -1866,6 +1866,16 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 		assert_not_null(timeline)
 		if timeline != null:
 			var names := Array(timeline.span_names())
+			# Both arms load the terrain's textures first, the head having read its configuration
+			# and heights alone (D-NET-NEW-L2-46; engine terrain/terrain_load_legs.h carries the
+			# witness).
+			var terrain_textures := names.find("terrain_textures")
+			assert_true(names.find("terrain") >= 0 and names.find("objects") > names.find("terrain")
+					and terrain_textures > names.find("objects"),
+					"the head reads the terrain, the mission textures stage loads its textures: %s" % [names])
+			var arm := names.find("model_materials" if not serve_and_play else "effects_warm")
+			assert_true(terrain_textures >= 0 and arm > terrain_textures,
+					"the terrain's textures open the stage's arm: %s" % [names])
 			if serve_and_play:
 				assert_false(names.has("model_materials"),
 						"a listen host's mission textures are the full arm: %s" % [names])
@@ -2283,6 +2293,18 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 			stages.append(span.name)
 		assert_eq(stages, ["environment", "terrain", "avatars"],
 				"the 0x11 loads the environment, the terrain and the avatar combos' models")
+	# The 0x11's terrain is the connect leg's alone: the configuration, the heights and the maps;
+	# the texture slots and the terrain's build wait for the mission textures stage
+	# (D-NET-NEW-L2-46; engine terrain/terrain_load_legs.h carries the witness).
+	var terrain: Terrain = world.get_terrain_node()
+	var terrain_data: TerrainData = world.get_terrain_data()
+	assert_not_null(terrain)
+	assert_true(terrain_data != null and terrain_data.is_loaded(),
+			"the 0x11 read the terrain's configuration and heights")
+	if terrain_data != null:
+		assert_null(terrain_data.get_colormap(), "no texture slot loads at the 0x11")
+	if terrain != null:
+		assert_false(terrain.is_built(), "the terrain builds at the mission textures stage")
 	for _frame in range(600):
 		host.step()
 		await get_tree().process_frame
@@ -2290,6 +2312,10 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 			break
 	assert_true(bool(observed["local_load"]), "the S2C 0x1A's mission start loaded the world")
 	assert_eq(failures.size(), 0)
+	if terrain != null:
+		assert_true(terrain.is_built(), "the mission start built the terrain")
+	if terrain_data != null:
+		assert_not_null(terrain_data.get_colormap(), "its texture slots loaded")
 	var mission_start_load: LoadTimeline = world.last_load_timeline()
 	assert_not_null(mission_start_load)
 	if mission_start_load != null and not mission_start_load.spans().is_empty():
@@ -2306,9 +2332,13 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 		var streamed := top.find("streamed_world")
 		var first_leg := top.find("first_leg")
 		var effects := top.find("effects")
+		var terrain_textures := top.find("terrain_textures")
+		var effects_warm := top.find("effects_warm")
 		assert_true(audio >= 0 and streamed > audio, "the streamed world follows the audio: %s" % [top])
 		assert_true(first_leg > streamed, "the first leg follows the streamed world: %s" % [top])
 		assert_true(effects > first_leg, "the effect builds follow the first leg: %s" % [top])
+		assert_true(terrain_textures > effects and effects_warm > terrain_textures,
+				"the terrain's textures open the mission textures stage: %s" % [top])
 	world.unload()
 
 
