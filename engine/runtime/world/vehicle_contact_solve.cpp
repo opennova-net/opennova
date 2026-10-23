@@ -144,8 +144,13 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	// The probes ride the head matrix, the hull's effective scale included.
 	// [orig: @0x47F28E..0x47F2E5]
+	const CollisionMatrix head = vehicle_solve_matrix(veh);
 	int32_t probes[7][3];
-	place_probes(vehicle_solve_matrix(veh), probes_model, px, py, pz, probes);
+	place_probes(head, probes_model, px, py, pz, probes);
+	// The occupant matrix: the head's rows normalized. The fit and the euler extraction after it
+	// read it. [orig: @0x47F2E8..0x47F4CB; the readers @0x480F01 / @0x481475, @0x480F16 /
+	//  @0x48148A]
+	CollisionMatrix occupant = vehicle_occupant_matrix(head);
 
     // ---- §6.4 the two force passes + severity (terrain leg; the shared
     // sub-contract with the platform solve) [orig: @0x47F855..0x480150].
@@ -231,9 +236,12 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 		}
 	}
 	vehicle_crush_damage(world, veh, traits, d + 4, basis.q22.m[10] >> 6);
-	vehicle_crash_state(world, veh, traits, d, basis.q22.m[10] >> 6);
-	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-	const int32_t up_z16 = basis.q22.m[10] >> 6;
+	// A rebuild in the crash state replaces the occupant; the rows read from here on are then its
+	// extracts. [orig: @0x480A2B..0x480A61, @0x480B0B..0x480B41]
+	basis = vehicle_crash_state(world, veh, traits, d, basis.q22.m[10] >> 6, &occupant)
+			? vehicle_basis_from_matrix(occupant)
+			: vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	int32_t up_z16 = basis.q22.m[10] >> 6;
 
 	// Save the pre-spring penetration. Upright live hulls leave the -1 sentinel. The deepest
 	// probe of all seven feeds the tail. Both scan the force records.
@@ -283,7 +291,7 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 		// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140, the call @0x480F01 with no
 		//  contact array]
 		PlatFit fit;
-		vehicle_suspension_fit(world, veh, c, nullptr, fit, px, py, pz);
+		vehicle_suspension_fit(world, veh, occupant, c, nullptr, fit, px, py, pz);
 		m.air_pitch_bam = fit.pitch_bam;
 		m.air_roll_bam = fit.roll_bam;
 		if (m.crashed)
@@ -325,7 +333,7 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	for (int k = 0; k < 4; ++k)
 		c[k][2] = io::bam_add(io::bam_add(c[k][2], corner_adj[k]), rec[k]);
     PlatFit fit;
-	vehicle_suspension_fit(world, veh, c, pad_contact4, fit, px, py, pz);
+	vehicle_suspension_fit(world, veh, occupant, c, pad_contact4, fit, px, py, pz);
 	// Conform writes pitch and roll; the parked arm also adopts yaw. The mover integrates the
 	// rates after return.
 	// Witness sites: [orig: @0x48148A]
@@ -389,10 +397,12 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 		vehicle_apply_chassis(world, veh, matrix);
 		m.crashed = 1;
 	}
-	// The rebuild arm's own square quad (the call @0x481774) is a quad nothing reads.
+	// The rebuild arm's own square quad (the call @0x481774) is a quad nothing reads; the tail
+	// tests the rebuilt rows' up. [orig: Entity_RebuildOrientationMatrixFromAxes @0x4632E0 (the
+	//  call @0x4816C7), the row-2 extract @0x4816D9, the tail's `cmp var_21C` @0x4817DC]
 	if (((veh.flags | veh.engine_flags) & 0x10u) == 0 &&
 			((m.crashed && up_z16 < 8192) || m.settle_2f0)) {
-		vehicle_rebuild_rest_orientation(world, veh, false);
+		up_z16 = vehicle_rebuild_rest_orientation(world, veh, false).m[10] >> 6;
 		m.crashed = 0;
 		m.settle_2f0 = 0;
 	}
@@ -483,6 +493,11 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	const CollisionMatrix head = vehicle_solve_matrix(veh);
 	int32_t probes[7][3];
 	place_probes(head, probes_model, px, py, pz, probes);
+	// The occupant matrix: the head's rows normalized (eventData). The crash tests, the strike
+	// helper, the fit and the euler extraction after it read it.
+	// [orig: @0x47C5E5..0x47C7C8; the readers @0x47D6BF, @0x47E56C / @0x47E861, @0x47E5E6 /
+	//  @0x47EC4D, @0x47E5FE / @0x47EC62]
+	CollisionMatrix occupant = vehicle_occupant_matrix(head);
 
     // ---- the two force passes + severity (the shared sub-contract with the
     // platform/air solves; terrain leg only) [orig: Entity_CheckCollisionState
@@ -570,10 +585,10 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	const bool pad_contact[7] = { d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0, d[4] != 0, d[5] != 0,
 		d[6] != 0 };
 	vehicle_landing_damage(world, veh, traits, d, 7, up_z16);
-	// The crash tests read the head matrix's row 2 normalized (they run ahead of the rebuild
-	// whose extracts every other up read takes). [orig: the dot @0x47D6BF..0x47D722]
+	// The crash tests read the occupant's row 2 z (they run ahead of the rebuild whose extracts
+	// every other up read takes). [orig: the dot @0x47D6BF..0x47D722]
 	world.vehicles.suspension_crash_tests(
-			veh, traits, vehicle_crash_test_up(head), SuspensionFamily::Tracked);
+			veh, traits, occupant.m[10] >> 6, SuspensionFamily::Tracked);
 	{
 		int32_t quad[4][3];
 		vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, quad);
@@ -591,8 +606,11 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
                                   /*latch_gated=*/true,
                                   !m.grounded && sinks_zero && up_z16 < 0);
 	vehicle_crush_damage(world, veh, traits, d + 4, up_z16);
-	vehicle_crash_state(world, veh, traits, d, up_z16);
-	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	// A rebuild in the crash state replaces the occupant; the rows read from here on are then its
+	// extracts, else the unscaled rebuild's. [orig: @0x47DEC4..0x47DEFA, @0x47DFB1..0x47DFE7]
+	basis = vehicle_crash_state(world, veh, traits, d, up_z16, &occupant)
+			? vehicle_basis_from_matrix(occupant)
+			: vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	up_z16 = basis.q22.m[10] >> 6;
 	// The deepest force record. [orig: Entity_ProcessTrackedVehiclePhysics @ 0x47E09F..0x47E107
 	//  (`mov ecx, [esp+..+var_1C4]` @0x47E095)]
@@ -721,7 +739,8 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 					}
 				int32_t support[4] = { 0, 0, 0, 0 };
 				support[lowest] = 500;
-				vehicle_apply_tracked_suspension_forces(world, veh, traits, true, support, &basis.q22);
+				vehicle_apply_tracked_suspension_forces(
+						world, veh, traits, true, support, &occupant);
 			}
 			// [orig: the in-air set @0x47E57B, +0x2EF = 0 @0x47E582, brain+0x318 &= 0x3F @0x47E589]
 			veh.flags |= kEntityFlagInAir;
@@ -733,7 +752,8 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 		//  @0x47E590..0x47E5BF (the copy) / @0x47E5C1..0x47E5E5 (none) joined @0x47E5E6; Roll / Pitch
 		//  @0x47E61F / @0x47E622, Yaw when crashed @0x47E62B..0x47E632]
 		PlatFit fit;
-		vehicle_suspension_fit(world, veh, c, depth > 0 ? pad_contact : nullptr, fit, px, py, pz);
+		vehicle_suspension_fit(
+				world, veh, occupant, c, depth > 0 ? pad_contact : nullptr, fit, px, py, pz);
 		m.air_pitch_bam = fit.pitch_bam;
 		m.air_roll_bam = fit.roll_bam;
 		if (m.crashed)
@@ -763,7 +783,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 			if (io::bam_abs(m.slide_z) > 0x5000)
 				m.slide_z = 0x5000;
 			const int32_t support[4] = { rec[0], rec[1], rec[2], rec[3] };
-			vehicle_apply_tracked_suspension_forces(world, veh, traits, true, support, &basis.q22);
+			vehicle_apply_tracked_suspension_forces(world, veh, traits, true, support, &occupant);
 			vehicle_clear_chassis_forces(veh, c, 0);
 		} else {
 			if ((veh.flags & kEntityFlagInAir) != 0)
@@ -791,7 +811,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     for (int k = 0; k < 4; ++k)
         c[k][2] = io::bam_add(io::bam_add(c[k][2], lift ? rec[k] : 0), corner_adj[k]);
     PlatFit fit;
-	vehicle_suspension_fit(world, veh, c, pad_contact, fit, px, py, pz);
+	vehicle_suspension_fit(world, veh, occupant, c, pad_contact, fit, px, py, pz);
 	// Conform always adopts pitch and roll; crash state also adopts yaw.
 	// Witness sites: [orig: @0x47EC62, @0x47EC83, @0x47EC75, @0x47EC8F]
 	m.air_pitch_bam = fit.pitch_bam;
@@ -825,11 +845,10 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	// word the tail reads [orig: the row-2 extract into var_288's vector @0x47ED94, the reload
 	// @0x47EE34].
 	if (((veh.flags | veh.engine_flags) & 0x10u) == 0 && up_z16 < 0) {
-		vehicle_rebuild_rest_orientation(world, veh, false);
+		up_z16 = vehicle_rebuild_rest_orientation(world, veh, false).m[10] >> 6;
 		m.crashed = 0;
 		m.byte_2ef = 0;
 		m.settle_2f0 = 0;
-		up_z16 = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22.m[10] >> 6;
 	}
 	tracked_tail(up_z16);
 }
@@ -988,6 +1007,11 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	const CollisionMatrix head = vehicle_solve_matrix(veh);
 	int32_t probes[13][3];
 	place_probes(head, probes_model, px, py, pz, probes);
+	// The occupant matrix (isUnderwater in the IDB): the head's rows normalized. The crash tests,
+	// the strike helper, the fit and the euler extraction after it read it.
+	// [orig: @0x476253..0x4763FF; the readers @0x4776DB, @0x478A9F / @0x478C4D, @0x478B1C /
+	//  @0x478FAC, @0x478B31 / @0x478FC3]
+	CollisionMatrix occupant = vehicle_occupant_matrix(head);
     int32_t radii[13]; // the 13 radius stores all copy suspensionOffset
     for (int i = 0; i < 13; ++i) radii[i] = r;
 
@@ -1029,14 +1053,14 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	// Witness sites: [orig: @0x477496, @0x48f004]
 	plat_water_flag(world, veh, traits, probes, r, hull_bottom_neg, world.env.water_z);
 
-	// The crash tests (a)/(b) read the head matrix's row 2 normalized. The matrix is then rebuilt
-	// unscaled from the euler words and every other up read takes its row 2 extract's z.
+	// The crash tests (a)/(b) read the occupant's row 2 z. The head matrix is then rebuilt unscaled
+	// from the euler words and every other up read takes its row 2 extract's z.
 	// [orig: the dot @0x4776DB..0x47773D, the tests @0x477760..0x4777BF; the rebuild
 	//  Math_BuildFixedPointMatrixFromEulerAngles (the call @0x4777D2) and its extracts @0x4777E4 /
 	//  @0x4777F6; the readers @0x477D2F (the stability byte), @0x477E93 (the landing), @0x478048
 	//  (the crush), @0x4782C0 (the crash state)]
 	world.vehicles.suspension_crash_tests(
-			veh, traits, vehicle_crash_test_up(head), SuspensionFamily::Tank);
+			veh, traits, occupant.m[10] >> 6, SuspensionFamily::Tank);
 	int32_t up_z16 = basis.q22.m[10] >> 6;
 
 	// ---- the wall walk: only a probe that struck a steep model face carries a
@@ -1113,8 +1137,11 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 		vehicle_clear_chassis_forces(veh, quad, 0);
 	}
 	vehicle_crush_damage(world, veh, traits, averaged + 10, up_z16);
-	vehicle_crash_state(world, veh, traits, nullptr, up_z16);
-	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	// A rebuild in the crash state replaces the occupant; the rows read from here on are then its
+	// extracts. [orig: @0x4781E7..0x47821D, @0x4782DD..0x478313]
+	basis = vehicle_crash_state(world, veh, traits, nullptr, up_z16, &occupant)
+			? vehicle_basis_from_matrix(occupant)
+			: vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	up_z16 = basis.q22.m[10] >> 6;
 
 	// Preserve depths before the wheel springs absorb penetration.
@@ -1261,7 +1288,7 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 				averaged[2] = 500;
 				const int32_t support[4] = { averaged[2], averaged[5], averaged[8], averaged[11] };
 				vehicle_apply_wheel_suspension_forces(
-						world, veh, traits, true, support, &basis.q22);
+						world, veh, traits, true, support, &occupant);
 			}
 			// [orig: @0x478AA7..0x478ABC]
 			m.tumble_hard_latched = m.tumble_med_latched = false;
@@ -1272,7 +1299,7 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 		//  @0x469933..0x46999E), call @0x478B1C;
 		//  slot records @0x478ACA..0x478AF5, none @0x478AF7..0x478B1B]
 		PlatFit fit;
-		vehicle_suspension_fit(world, veh, dest, fit_contacts, fit, px, py, pz, true);
+		vehicle_suspension_fit(world, veh, occupant, dest, fit_contacts, fit, px, py, pz, true);
 		adopt_fit(fit);
 		common_tail();
 		return;
@@ -1294,7 +1321,7 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 					m.slide_z = 0xA000;
 				const int32_t support[4] = { d[0], d[1], d[2], d[3] };
 				vehicle_apply_wheel_suspension_forces(
-						world, veh, traits, true, support, &basis.q22);
+						world, veh, traits, true, support, &occupant);
 				vehicle_clear_chassis_forces(veh, dest, 0);
 			} else {
 				m.slide_z = 0;
@@ -1324,7 +1351,7 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
     PlatFit fit;
 	// [orig: Entity_ComputeSuspensionAndOrientation call @0x478FAC]
 	const bool fitted =
-			vehicle_suspension_fit(world, veh, c, slot_contacts, fit, px, py, pz, true);
+			vehicle_suspension_fit(world, veh, occupant, c, slot_contacts, fit, px, py, pz, true);
 	adopt_fit(fit);
     // A diagonally supported track pair clears every retained sink. The
     // crash-settle latch lowers the threshold from 250 to zero.
@@ -1365,10 +1392,10 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	// accepts up.z < 8192. [orig: @0x479352..0x47943E]
 	if (((veh.flags | veh.engine_flags) & 0x10u) == 0 &&
 			((m.crashed && up_z16 < 8192) || m.settle_2f0)) {
-		vehicle_rebuild_rest_orientation(world, veh, false);
+		// The tail tests the rebuilt rows' up. [orig: the row-2 extract @0x479397]
+		up_z16 = vehicle_rebuild_rest_orientation(world, veh, false).m[10] >> 6;
 		m.crashed = 0;
 		m.settle_2f0 = 0;
-		up_z16 = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22.m[10] >> 6;
 	}
 	common_tail();
 }

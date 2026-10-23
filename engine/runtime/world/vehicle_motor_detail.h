@@ -150,19 +150,28 @@ CollisionMatrix vehicle_solve_matrix(const Entity &veh);
 //  Math_SetRow0FromVec3Scaled @0x613820 (@0x47990C), Math_SetRow2FromVec3Scaled @0x613850
 //  (@0x47991E)]
 CollisionMatrix vehicle_matrix_rows(const CollisionMatrix &head);
-// The tracked and wheeled solves' crash tests' up word: the head matrix's row 2 extract
-// normalized on the x87 (the length of the three squares' sum, each component times 65536.0f
-// over it, truncated; a zero length all 0), its z. The tests dot it with the world up
-// (0, 0, 0x10000), whose x operand is a zeroed local, so the dot is the z. Both solves normalize all three
-// extracts into their occupant matrix, but rebuild the matrix unscaled from the euler words before
-// any other reader, so only the tests see a normalized word.
-// [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 - the normalize @0x476366..0x4763CC
-//  (flt_7C32BC loaded @0x4762B2, `fdivrp` @0x476391), the world up var_418 / var_414 / var_410 =
-//  0 / 0 / 0x10000 @0x4760F5..0x4760FD, the dot @0x4776DB..0x47773D;
-//  Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the normalize @0x47C72F..0x47C795, the world
-//  up @0x47C486..0x47C494, the dot @0x47D6BF..0x47D722; the normalize form is q16_normalize's
-//  (Q3-11)]
-int32_t vehicle_crash_test_up(const CollisionMatrix &head);
+// The occupant matrix the tracked, wheeled and aircraft solves set from their head matrix: each
+// row extracted (`sar 6`), normalized on the x87 (the length of the three squares' sum, each
+// component times 65536.0f over it, truncated; a zero length all 0) and set back (`shl 6`). The
+// other seven words are the head's (retail's are an uninitialized stack matrix's, which no
+// reader of these solves reads). The crash tests read its row 2's z (they dot it with the world
+// up (0, 0, 0x10000), whose x operand is a zeroed local); the strike helpers, the suspension fit
+// and the euler extraction after it take the whole matrix, unless a rebuild replaced it first
+// (vehicle_crash_state). The unscaled rebuild from the euler words the other readers take goes
+// into the head's buffer, not this one.
+// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the extracts @0x47C5E5..0x47C64C, the
+//  normalizes @0x47C651..0x47C795 (flt_7C32BC, `fdivrp` @0x47C68A), the sets
+//  Math_SetRow1FromVec3Scaled @0x613880 (@0x47C7A4), Math_SetRow0FromVec3Scaled @0x613820
+//  (@0x47C7B6), Math_SetRow2FromVec3Scaled @0x613850 (@0x47C7C8) into eventData, the world up
+//  @0x47C486..0x47C494, the dot @0x47D6BF..0x47D722, the head rebuild into upY @0x47D7BB;
+//  Entity_ProcessWheeledVehiclePhysics @0x475DE0 - the extracts @0x476253..0x476284, the
+//  normalizes @0x476289..0x4763CC (flt_7C32BC loaded @0x4762B2, `fdivrp` @0x4762BF / @0x476391),
+//  the sets @0x4763DB..0x4763FF, the world up
+//  var_418 / var_414 / var_410 = 0 / 0 / 0x10000 @0x4760F5..0x4760FD, the dot @0x4776DB..0x47773D;
+//  Entity_ProcessAircraftContactPhysics @0x47EF10 - the extracts @0x47F2E8..0x47F34F, the
+//  normalizes @0x47F354..0x47F496 (`fdivrp` @0x47F38D), the sets @0x47F4A7..0x47F4CB; the
+//  normalize form is q16_normalize's (Q3-11)]
+CollisionMatrix vehicle_occupant_matrix(const CollisionMatrix &head);
 
 // One bilinear terrain probe force [orig: Entity_ComputeCollisionForces
 // @0x462150, terrain loop @0x462246..0x4624CA]: 4 samples at ±r, gradient
@@ -371,12 +380,21 @@ void vehicle_health_effects(World &world, Entity &e, const VehicleTraits &traits
 void vehicle_release_damage_effects(World &world, Entity &e);
 void vehicle_smoke_effect(World &world, Entity &e, bool release = false);
 // `depths` is the aircraft's or tracked solve's contact copy (seven depths); the other families
-// pass none.
-void vehicle_crash_state(
-		World &world, Entity &e, const VehicleTraits &traits, const int32_t *depths, int32_t up_z16);
+// pass none. A rebuild sets its rows into the solve's `occupant` matrix (when given) and its row
+// 2's z is the up word the later arm tests; the return says one ran, after which the solve reads
+// its rows from the occupant.
+// [orig: Entity_RebuildOrientationMatrixFromAxes @0x4632E0 into the occupant and its re-extracts:
+//  tracked @0x47DEC4..0x47DEFA / @0x47DFB1..0x47DFE7 (the later arm's `cmp var_288` @0x47DF93),
+//  tank @0x4781E7..0x47821D / @0x4782DD..0x478313 (`cmp var_43C` @0x4782C0), aircraft
+//  @0x480A2B..0x480A61 / @0x480B0B..0x480B41 (`cmp var_21C` @0x480AED)]
+bool vehicle_crash_state(World &world, Entity &e, const VehicleTraits &traits,
+		const int32_t *depths, int32_t up_z16, CollisionMatrix *occupant = nullptr);
 void vehicle_flush_sinks(World &world, Entity &e, int32_t up_z16, int32_t pz);
 void vehicle_expire_contact_wake(World &, Entity &);
-void vehicle_rebuild_rest_orientation(World &, Entity &, bool inverted);
+// Returns the rows the rebuild sets into its matrix argument, the matrix its euler words come
+// from. [orig: Entity_RebuildOrientationMatrixFromAxes @0x4632E0 (the sets @0x4634E0..0x4634F6);
+//  Entity_BuildOrientationFromVectors @0x458DF0 (the sets @0x459004..0x45901A)]
+CollisionMatrix vehicle_rebuild_rest_orientation(World &, Entity &, bool inverted);
 void vehicle_rest_state(World &, Entity &, VehicleFamily);
 void vehicle_emit_skid_effects(World &, Entity &, const VehicleTraits &);
 bool vehicle_has_contact_direction(const Entity::VehicleMotorState &m);
@@ -441,8 +459,14 @@ void vehicle_square_quad(const CollisionMatrix &euler, int32_t z_span, int32_t w
 // Fold the corner quad, each corner moved by its live force record, into the retained chassis
 // matrix. [orig: Entity_ComputeChassisOrientation @0x463940]
 void vehicle_compute_chassis_orientation(Entity &, const int32_t corners[4][3], int mode);
-bool vehicle_suspension_fit(World &, Entity &, int32_t corners[4][3], const bool *contacts,
-		PlatFit &, int32_t px, int32_t py, int32_t pz, bool tank = false);
+// The fit runs on the solve's occupant matrix (its matrix handle, read and written in place);
+// the euler words come from what it leaves there.
+// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140 (the reads @0x46B180,
+//  @0x46B46B..0x46B48F, Entity_ApplyBoneAttachmentTransform @0x45A750 at @0x46B3F5 / @0x46B682 /
+//  @0x46C8CD, the sets @0x46C5CD..0x46C5E3); Entity_ComputeSuspensionAndOrientation @0x4698A0]
+bool vehicle_suspension_fit(World &, Entity &, const CollisionMatrix &occupant,
+		int32_t corners[4][3], const bool *contacts, PlatFit &, int32_t px, int32_t py, int32_t pz,
+		bool tank = false);
 void vehicle_boat_suspension_fit(World &, Entity &, const VehicleTraits &, int32_t corners[4][3],
 		PlatFit &, int32_t px, int32_t py, int32_t pz);
 void vehicle_boat_lean(Entity &, const VehicleTraits &, int32_t side_z16);

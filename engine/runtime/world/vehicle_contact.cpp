@@ -24,7 +24,7 @@ void vehicle_expire_contact_wake(World &world, Entity &e) {
 // preserve forward and rebuild the other two axes by normalized crosses.
 // [orig: Entity_BuildOrientationFromVectors @0x458DF0 (down);
 // Entity_RebuildOrientationMatrixFromAxes @0x4632E0 (up)]
-void vehicle_rebuild_rest_orientation(World &world, Entity &e, bool inverted) {
+CollisionMatrix vehicle_rebuild_rest_orientation(World &world, Entity &e, bool inverted) {
 	auto &m = e.veh;
 	const auto basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	int64_t raw[3] = { basis.q22.m[0] >> 6, basis.q22.m[4] >> 6, basis.q22.m[8] >> 6 };
@@ -34,7 +34,20 @@ void vehicle_rebuild_rest_orientation(World &world, Entity &e, bool inverted) {
 	q16_normalize(raw, side);
 	q16_cross(forward, side, raw);
 	q16_normalize(raw, up);
-	vehicle_axes_to_euler(forward, side, up, m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	// The rows set into the caller's matrix, the euler words read back from them.
+	// [orig: Math_SetRow2FromVec3Scaled / Row0 / Row1 @0x4634E0..0x4634F6, then
+	//  Math_FixedPointMatrixToEulerAngles @0x463501]
+	CollisionMatrix rows;
+	for (int k = 0; k < 3; ++k) {
+		rows.m[4 * k] = bam_shl_wrap(forward[k], 6);
+		rows.m[4 * k + 1] = bam_shl_wrap(side[k], 6);
+		rows.m[4 * k + 2] = bam_shl_wrap(up[k], 6);
+	}
+	int32_t euler[3];
+	collision_matrix_to_euler(rows, euler);
+	m.yaw_bam = euler[0];
+	m.air_pitch_bam = euler[1];
+	m.air_roll_bam = euler[2];
 	m.crashed = 0;
 	m.byte_2ef = 0;
 	m.settle_2f0 = inverted ? 1 : 0;
@@ -46,6 +59,7 @@ void vehicle_rebuild_rest_orientation(World &world, Entity &e, bool inverted) {
 		vehicle_smoke_effect(world, e, true);
 		vehicle_clear_chassis(m);
 	}
+	return rows;
 }
 
 // Parked-state maintenance is also reached through the sleep returns.

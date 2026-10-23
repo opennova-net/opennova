@@ -384,6 +384,51 @@ void test_the_parked_push() {
 
 } // namespace
 
+// D-NET-NEW-L6-35 (row N): a rebuild in the crash state sets its rows into the solve's occupant
+// matrix (the nine rotation words; the other seven stay) and the hull's euler words are read back
+// from them; the later inverted arm tests the re-extracted up, so a client's settled, unparked hull
+// (+0x2F0, health left) rebuilds once. A parked one (Flags 0x10) rebuilds in neither arm and leaves
+// the occupant as it was.
+// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - Entity_RebuildOrientationMatrixFromAxes
+//  @0x4632E0 into eventData (the call @0x47DEC4), the re-extracts @0x47DED6..0x47DEFA, the later
+//  arm's `cmp var_288` @0x47DF93; the rebuild's sets @0x4634E0..0x4634F6 and
+//  Math_FixedPointMatrixToEulerAngles @0x463501]
+void test_a_rebuild_replaces_the_occupant() {
+	const VehicleTraits tracked = truck();
+	for (const bool parked : { false, true }) {
+		auto rig = std::make_unique<Rig>(false);
+		Entity &v = rig->e();
+		v.veh.settle_2f0 = 1;
+		v.veh.yaw_bam = 0x20000000;
+		v.veh.air_pitch_bam = 0x01000000;
+		v.veh.air_roll_bam = 0x50000000; // past a quarter roll: the up word is negative
+		if (parked)
+			v.flags |= 0x10u;
+		CollisionMatrix occupant;
+		for (int i = 0; i < 16; ++i)
+			occupant.m[i] = 7 + i;
+		const int32_t depths[7] = {};
+		const bool rebuilt =
+				detail::vehicle_crash_state(rig->world, v, tracked, depths, -0x4000, &occupant);
+		CHECK(rebuilt == !parked);
+		if (parked) {
+			for (int i = 0; i < 16; ++i)
+				CHECK(occupant.m[i] == 7 + i);
+			CHECK(v.veh.settle_2f0 == 1);
+			continue;
+		}
+		CHECK((occupant.m[10] >> 6) > 65000);
+		CHECK(occupant.m[3] == 10 && occupant.m[7] == 14 && occupant.m[11] == 18);
+		CHECK(occupant.m[12] == 19 && occupant.m[15] == 22);
+		int32_t euler[3];
+		collision_matrix_to_euler(occupant, euler);
+		CHECK(euler[0] == v.veh.yaw_bam);
+		CHECK(euler[1] == v.veh.air_pitch_bam);
+		CHECK(euler[2] == v.veh.air_roll_bam);
+		CHECK(v.veh.settle_2f0 == 0 && v.veh.crashed == 0);
+	}
+}
+
 int main() {
 	test_the_extend_loop_resets_every_range();
 	test_a_pad_pair_marks_the_hull_respawned();
@@ -393,6 +438,7 @@ int main() {
 	test_the_tail_legs();
 	test_the_no_pad_arm();
 	test_the_parked_push();
+	test_a_rebuild_replaces_the_occupant();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

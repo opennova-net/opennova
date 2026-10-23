@@ -765,7 +765,9 @@ void test_fit_seed_skips_latched_arms() {
 	int32_t corners[4][3] = { { 65536, 65536, 0 }, { 65536, -65536, 0 },
 		{ -65536, -65536, 0 }, { -65536, 65536, 0 } };
 	detail::PlatFit fit;
-	CHECK(detail::vehicle_suspension_fit(w, v, corners, nullptr, fit, 0, 0, 0, true),
+	const CollisionMatrix occupant =
+			detail::vehicle_occupant_matrix(detail::vehicle_solve_matrix(v));
+	CHECK(detail::vehicle_suspension_fit(w, v, occupant, corners, nullptr, fit, 0, 0, 0, true),
 			"an unlatched client seed still fits on the ground");
 	CHECK(v.veh.crashed == 0, "and the client stays unlatched");
 }
@@ -793,7 +795,9 @@ void test_crash_arm_quad_uses_the_box() {
 	v.veh.air_roll_bam = int32_t(0x80000000u); // inverted: the slow arm, not the settle
 	int32_t corners[4][3] = {};
 	detail::PlatFit fit;
-	detail::vehicle_suspension_fit(w, v, corners, nullptr, fit, 0, 0, 0, true);
+	const CollisionMatrix occupant =
+			detail::vehicle_occupant_matrix(detail::vehicle_solve_matrix(v));
+	detail::vehicle_suspension_fit(w, v, occupant, corners, nullptr, fit, 0, 0, 0, true);
 	CHECK(std::abs(corners[0][0] - 131072) <= 2 && std::abs(std::abs(corners[0][1]) - 65536) <= 2,
 			"the crash quad spans the box");
 }

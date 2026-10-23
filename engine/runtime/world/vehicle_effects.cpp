@@ -142,9 +142,21 @@ void vehicle_health_effects(World &world, Entity &e, const VehicleTraits &t, boo
 //  @0x4807F6, the pair clear @0x48082B..0x480831, the +0x364 clear @0x48087C; the park
 //  @0x4808A8..0x4808BC, the unpark @0x4808ED..0x480907; the rebuild gate @0x480AE0..0x480AFC);
 // boat @0x483474..0x48367D]
-void vehicle_crash_state(
-		World &world, Entity &e, const VehicleTraits &t, const int32_t *depths, int32_t up) {
+bool vehicle_crash_state(World &world, Entity &e, const VehicleTraits &t, const int32_t *depths,
+		int32_t up, CollisionMatrix *occupant) {
 	auto &m = e.veh;
+	// A rebuild sets its rows into the solve's occupant matrix (the nine rotation words) and the
+	// solve re-extracts them: the later arm tests that up word.
+	bool rebuilt = false;
+	const auto rebuild = [&](bool inverted) {
+		const CollisionMatrix rows = vehicle_rebuild_rest_orientation(world, e, inverted);
+		if (occupant != nullptr)
+			for (int k = 0; k < 3; ++k)
+				for (int col = 0; col < 3; ++col)
+					occupant->m[4 * k + col] = rows.m[4 * k + col];
+		up = rows.m[10] >> 6;
+		rebuilt = true;
+	};
 	const bool boat = t.family == VehicleFamily::Watercraft;
 	const bool tank = t.family == VehicleFamily::Tank;
 	const bool bike = t.family == VehicleFamily::Bike;
@@ -204,18 +216,19 @@ void vehicle_crash_state(
 		if (!tank && !bike && !boat && authority)
 			set_parked(e, true);
 		if (!bike && !boat && (e.flags & 0x10u) == 0)
-			vehicle_rebuild_rest_orientation(world, e, false);
+			rebuild(false);
 	}
 	if (boat) {
 		if ((e.flags & 0x10u) != 0 && up > 0)
-			vehicle_rebuild_rest_orientation(world, e, true);
+			rebuild(true);
 		else if ((e.flags & 0x10u) == 0 && up < 0)
-			vehicle_rebuild_rest_orientation(world, e, false);
+			rebuild(false);
 	} else if (!bike && !m.crashed && (air || !m.wreck_2fc) && up < 0 && (e.flags & 0x10u) == 0 &&
 			(!tank || (!authority && !m.byte_2ef))) {
-		vehicle_rebuild_rest_orientation(world, e, false);
+		rebuild(false);
 	}
 	m.spring_energy = std::max(0, m.spring_energy);
+	return rebuilt;
 }
 
 // The aircraft and tracked solves flush the four sinks after their max-depth scans: a

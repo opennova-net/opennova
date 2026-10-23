@@ -517,27 +517,75 @@ void occupant_rows_floor_each_word() {
         CHECK(plain.m[i] == euler.m[i]);
 }
 
-// D-NET-NEW-L6-34 (row J): the tracked and wheeled solves' crash tests read the head matrix's row 2
-// extract normalized, its z: a twice-scaled level hull reads 65536 (its raw extract 131072); a row
-// 2 of (30000, 0, 58000) reads 58210 and one of (-1234, 40000, 51000) 51557 (the raw z 58000 and
-// 51000); a zero row reads 0. Each word sits clear of an integer edge at 24, 53 and 64 bits.
-// [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 - @0x476366..0x4763CC, the dot
-//  @0x4776DB..0x47773D; Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47C72F..0x47C795, the
-//  dot @0x47D6BF..0x47D722]
-void crash_test_up_is_the_normalized_row() {
+// D-NET-NEW-L6-34 (row J) and D-NET-NEW-L6-35 (row N): the tracked, wheeled and aircraft solves'
+// occupant matrix is the head's rows, each extracted (`sar 6`), normalized and set back (`shl 6`);
+// the crash tests read its row 2's z. A twice-scaled level hull's rows read 65536 (the raw extracts
+// 131072). A row 0 of (3000, 4000, 0) reads (39321, 52428, 0); a zero row 1 stays 0; a row 2 of
+// (30000, 0, 58000) reads (30108, 0, 58210) and one of (-1235, 40000, 51000), its x extracted from
+// -1234 * 64 - 5 (the floor), (-1248, 40437, 51557). The other seven words are the head's. Each
+// word sits clear of an integer edge at 24, 53 and 64 bits in either division order.
+// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47C5E5..0x47C7C8, the dot
+//  @0x47D6BF..0x47D722; Entity_ProcessWheeledVehiclePhysics @0x475DE0 - @0x476253..0x4763FF, the
+//  dot @0x4776DB..0x47773D; Entity_ProcessAircraftContactPhysics @0x47EF10 - @0x47F2E8..0x47F4CB]
+void occupant_rows_are_normalized() {
     Entity e;
     e.uniform_scale_q16 = 2 * 65536;
-    CHECK(detail::vehicle_crash_test_up(detail::vehicle_solve_matrix(e)) == 65536);
+    const CollisionMatrix level = detail::vehicle_occupant_matrix(detail::vehicle_solve_matrix(e));
+    CHECK(level.m[0] == 4194304 && level.m[5] == 4194304 && level.m[10] == 4194304);
+    CHECK(level.m[1] == 0 && level.m[2] == 0 && level.m[4] == 0 && level.m[6] == 0);
+    CHECK(level.m[8] == 0 && level.m[9] == 0);
     CollisionMatrix head;
+    for (int i = 0; i < 16; ++i)
+        head.m[i] = 1000 + i;
+    head.m[0] = 3000 * 64;
+    head.m[4] = 4000 * 64;
+    head.m[8] = 0;
+    head.m[1] = head.m[5] = head.m[9] = 0;
     head.m[2] = 30000 * 64;
     head.m[6] = 0;
     head.m[10] = 58000 * 64;
-    CHECK(detail::vehicle_crash_test_up(head) == 58210);
-    head.m[2] = -1234 * 64;
+    CollisionMatrix rows = detail::vehicle_occupant_matrix(head);
+    CHECK((rows.m[0] >> 6) == 39321 && (rows.m[4] >> 6) == 52428 && rows.m[8] == 0);
+    CHECK(rows.m[1] == 0 && rows.m[5] == 0 && rows.m[9] == 0);
+    CHECK((rows.m[2] >> 6) == 30108 && rows.m[6] == 0 && (rows.m[10] >> 6) == 58210);
+    CHECK(rows.m[3] == 1003 && rows.m[7] == 1007 && rows.m[11] == 1011);
+    CHECK(rows.m[12] == 1012 && rows.m[15] == 1015);
+    head.m[2] = -1234 * 64 - 5;
     head.m[6] = 40000 * 64;
     head.m[10] = 51000 * 64;
-    CHECK(detail::vehicle_crash_test_up(head) == 51557);
-    CHECK(detail::vehicle_crash_test_up(CollisionMatrix{}) == 0);
+    rows = detail::vehicle_occupant_matrix(head);
+    CHECK((rows.m[2] >> 6) == -1248 && (rows.m[6] >> 6) == 40437 && (rows.m[10] >> 6) == 51557);
+    CHECK((rows.m[2] & 63) == 0 && (rows.m[6] & 63) == 0 && (rows.m[10] & 63) == 0);
+    rows = detail::vehicle_occupant_matrix(CollisionMatrix{});
+    for (int i = 0; i < 16; ++i)
+        CHECK(rows.m[i] == 0);
+}
+
+// D-NET-NEW-L6-35 (row N): the suspension fit runs on the matrix the solve hands it, not on one it
+// builds from the hull's euler words. A tracked wreck (+0x2FC) is not fitted, so the matrix leaves
+// the call as it entered and the euler words come from it: the occupant of a hull yawed a quarter
+// turn and pitched 0x08000000, while the hull's own euler words are all 0.
+// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140 (the wreck arm @0x46B419..0x46B434); its
+//  callers' occupant @0x47E5E6 / @0x47EC4D and the extraction Math_FixedPointMatrixToEulerAngles
+//  @0x47E5FE / @0x47EC62]
+void the_fit_runs_on_the_occupant() {
+    Rig r;
+    auto &v = r.entity();
+    v.veh.yaw_bam = v.veh.air_pitch_bam = v.veh.air_roll_bam = 0;
+    v.veh.crash_request = 0;
+    v.veh.wreck_2fc = 1;
+    const int32_t origin[3] = {};
+    const CollisionMatrix occupant = detail::vehicle_occupant_matrix(
+            collision_matrix_from_euler(0x40000000, 0x08000000, 0, origin));
+    int32_t corners[4][3] = {};
+    detail::PlatFit fit;
+    CHECK(!detail::vehicle_suspension_fit(r.world, v, occupant, corners, nullptr, fit, 0, 0, 0));
+    for (int i = 0; i < 16; ++i)
+        CHECK(fit.matrix.m[i] == occupant.m[i]);
+    int32_t euler[3];
+    collision_matrix_to_euler(occupant, euler);
+    CHECK(fit.yaw_bam == euler[0] && fit.pitch_bam == euler[1] && fit.roll_bam == euler[2]);
+    CHECK(std::abs(fit.yaw_bam - 0x40000000) < 0x100000);
 }
 
 // D-NET-NEW-L6-32 (row L): a bike the last tick left in the air landing on its wheels with no
@@ -1190,7 +1238,8 @@ int main() {
     bike_pair_clear_is_ungated();
     bike_probes_ride_the_scaled_matrix();
     occupant_rows_floor_each_word();
-    crash_test_up_is_the_normalized_row();
+    occupant_rows_are_normalized();
+    the_fit_runs_on_the_occupant();
     bike_landing_clears_the_chassis_state();
     bike_unleaned_drops_lean_rates();
     bike_sinks_flush_under_water();

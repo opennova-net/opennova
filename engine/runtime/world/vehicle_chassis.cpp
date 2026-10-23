@@ -488,13 +488,15 @@ void vehicle_square_quad(const CollisionMatrix &euler, int32_t z_span, int32_t w
 	}
 }
 // Shared settled/airborne suspension state machine. Contact records retain
-// all seven probes: the slow inverted path also reads spine slots 4 and 6.
-// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140;
-// Entity_ComputeSuspensionAndOrientation @0x4698A0]
-bool vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], const bool *contacts,
-		PlatFit &out, int32_t px, int32_t py, int32_t pz, bool tank) {
+// all seven probes: the slow inverted path also reads spine slots 4 and 6. The matrix every arm
+// reads and writes is the solve's occupant, its matrix handle.
+// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140 (its matrix argument read @0x46B180 and
+//  @0x46B46B..0x46B48F, applied @0x46B3F5); Entity_ComputeSuspensionAndOrientation @0x4698A0]
+bool vehicle_suspension_fit(World &world, Entity &e, const CollisionMatrix &occupant,
+		int32_t corners[4][3], const bool *contacts, PlatFit &out, int32_t px, int32_t py,
+		int32_t pz, bool tank) {
 	auto &m = e.veh;
-	CollisionMatrix matrix = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22;
+	CollisionMatrix matrix = occupant;
 	bool fit = true;
 	out.z_avg = out.positive_z_avg = pz;
 	// A pending request enters the latch seed. A client still missing the

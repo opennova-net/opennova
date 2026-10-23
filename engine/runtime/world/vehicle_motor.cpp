@@ -1106,11 +1106,16 @@ CollisionMatrix vehicle_solve_matrix(const Entity &veh) {
 			m.yaw_bam, m.air_pitch_bam, m.air_roll_bam, origin, veh.uniform_scale_q16);
 }
 
-int32_t vehicle_crash_test_up(const CollisionMatrix &head) {
-	const int64_t row2[3] = { head.m[2] >> 6, head.m[6] >> 6, head.m[10] >> 6 };
-	int32_t unit[3];
-	q16_normalize(row2, unit);
-	return unit[2];
+CollisionMatrix vehicle_occupant_matrix(const CollisionMatrix &head) {
+	CollisionMatrix out = head;
+	for (int row = 0; row < 3; ++row) {
+		const int64_t extract[3] = { head.m[row] >> 6, head.m[4 + row] >> 6, head.m[8 + row] >> 6 };
+		int32_t unit[3];
+		q16_normalize(extract, unit);
+		for (int k = 0; k < 3; ++k)
+			out.m[4 * k + row] = bam_shl_wrap(unit[k], 6);
+	}
+	return out;
 }
 
 CollisionMatrix vehicle_matrix_rows(const CollisionMatrix &head) {
@@ -1783,7 +1788,9 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
             // The wheeled solver's settled/airborne fit: same 4-normal fit;
             // Z = the average of the ABOVE-ground corners, rise-clamped
             // +0x2000/tick (blockers §3).
-			vehicle_suspension_fit(world, veh, c, nullptr, fit, px, py, pz);
+			vehicle_suspension_fit(world, veh,
+					vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22, c, nullptr,
+					fit, px, py, pz);
 			if (m.plat_afloat) {
 				// The wheeled solver's settled-fit Z: the average of the
 				// ABOVE-ZERO corners only, rise-clamped +0x2000/tick
