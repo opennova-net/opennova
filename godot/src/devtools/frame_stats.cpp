@@ -74,6 +74,8 @@ void FrameStats::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add", "slot", "amount"), &FrameStats::add);
 	ClassDB::bind_method(D_METHOD("drain"), &FrameStats::drain);
 	ClassDB::bind_static_method("FrameStats", D_METHOD("slot_name", "slot"), &FrameStats::slot_name);
+	ClassDB::bind_static_method("FrameStats", D_METHOD("slot_description", "slot"),
+			&FrameStats::slot_description);
 	ADD_SIGNAL(MethodInfo("capture_changed", PropertyInfo(Variant::BOOL, "active")));
 
 #define OPENNOVA_FRAME_STATS_BIND_SLOT(name, description) BIND_ENUM_CONSTANT(name);
