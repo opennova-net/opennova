@@ -21,6 +21,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/infantry_internal.h> // player_body_dead_tail
 #include <runtime/world/infantry_view.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/vehicle_motor.h> // stamp_saved_live_pose
@@ -405,6 +406,74 @@ void test_kick_follows_the_view_clamp() {
 	CHECK(ae->inf.recoil_pitch == (1 << 18) - 0x4000);
 }
 
+// D-NET-NEW-L5-54: the player body's dead tail. A latched-dead body's aim pitch takes
+// savedLivePitch, its Yaw (and the local look) the body heading, and Flags drops 0x60; a live
+// body keeps all of them [orig: @0x4B4D30..0x4B4D5F].
+void test_dead_tail() {
+	for (const bool dead : {false, true}) {
+		for (const bool local : {false, true}) {
+			auto wp = std::make_unique<w::World>();
+			w::World &world = *wp;
+			world.registry.configure_pool(0, 16);
+			w::Entity body;
+			body.kind = w::EntityKind::Organic;
+			const w::EntityHandle bh = world.registry.spawn(0, body);
+			w::AiEntity *ae = world.ai.at(world.ai.attach(bh));
+			w::Entity *ent = world.registry.get(bh);
+			CHECK(ae != nullptr && ent != nullptr);
+			if (ae == nullptr || ent == nullptr) continue;
+			ae->inf.is_local_player = local;
+			ae->inf.body_heading = 0x10000000;
+			ae->heading = 0x30000000;
+			ae->inf.target_heading = 0x20000000;
+			ae->body_pitch = 0x00123400;
+			ae->inf.aim_pitch = -5;
+			static constexpr uint32_t kKept = 0x1000u;
+			ent->flags = kKept | w::kEntityFlagParachute | w::kEntityFlagMounted |
+					(dead ? w::kEntityFlagDead : 0u);
+			ent->engine_flags = ent->flags;
+			w::player_body_dead_tail(*ae, *ent);
+			CHECK(ae->inf.aim_pitch == (dead ? 0x00123400 : -5));
+			CHECK(ae->heading == (dead ? 0x10000000 : 0x30000000));
+			CHECK(ae->inf.target_heading == (dead && local ? 0x10000000 : 0x20000000));
+			const uint32_t flags_want = dead ? (kKept | w::kEntityFlagDead)
+					: (kKept | w::kEntityFlagParachute | w::kEntityFlagMounted);
+			CHECK(ent->flags == flags_want && ent->engine_flags == flags_want);
+		}
+	}
+}
+
+// D-NET-NEW-L5-54 through the authority's body tick: a dead local player (its edge latched) under
+// a canopy and in a seat's Flags runs its view phase (the canopy chase moves its body heading),
+// then its dead tail: its Yaw and look take that body heading and the 0x60 bits drop.
+void test_dead_tail_through_the_tick() {
+	auto wp = std::make_unique<w::World>();
+	w::World &world = *wp;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(1, 16);
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.health = 0;
+	body.flags = body.engine_flags =
+			w::kEntityFlagDead | w::kEntityFlagParachute | w::kEntityFlagMounted;
+	const w::EntityHandle bh = world.registry.spawn(0, body);
+	w::AiEntity *ae = world.ai.at(world.ai.attach(bh));
+	CHECK(ae != nullptr);
+	if (ae == nullptr) return;
+	ae->inf.active = true;
+	ae->inf.is_local_player = true;
+	ae->inf.body_heading = 0;
+	ae->inf.target_heading = 0x10000000;
+	world.ai.tick_infantry(*ae, world, 1);
+	CHECK(ae->inf.body_heading == (0x10000000 + 8) >> 4); // the canopy chase ran first
+	CHECK(ae->heading == ae->inf.body_heading);
+	CHECK(ae->inf.target_heading == ae->inf.body_heading);
+	const w::Entity *ent = world.registry.get(bh);
+	CHECK(ent != nullptr &&
+			((ent->flags | ent->engine_flags) & (w::kEntityFlagParachute | w::kEntityFlagMounted)) ==
+					0u);
+}
+
 // D-NET-NEW-L5-50: the local body in a control seat (ctrlx / drvrx) under the chase camera
 // (g_CameraMode 1) halves its Pitch ahead of the phase, every tick; a passenger seat, the first
 // person camera or a body not the local one keeps it [orig: @0x4B4921..0x4B4942].
@@ -467,6 +536,8 @@ int main() {
 				Ride::kCrashed})
 		test_seated_player_rides_its_mount(kind);
 	test_kick_follows_the_view_clamp();
+	test_dead_tail();
+	test_dead_tail_through_the_tick();
 	if (failures == 0) std::printf("infantry_org2_view: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

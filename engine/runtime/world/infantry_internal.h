@@ -25,6 +25,11 @@ void commit_player_body_state(InfantryState &inf, int resolved,
 // Standing org1/org2 carrier delta, after the animation capsule sample.
 // Returns whether carrier transport changed the position.
 bool infantry_follow_carrier(AiEntity &, World &, int32_t capsule_bottom, bool player_body);
+// The player body's dead tail, every tick its dead bit is latched, after its death edge and
+// ahead of its deck ride: the aim pitch (+0x2D0) takes savedLivePitch (+0x90), the Yaw and the
+// local look take the body heading (+0x8C), and Flags drops 0x60 (the canopy and seat bits).
+// A client's decoded rows run the replica twin (replication row_root_motion_tick).
+void player_body_dead_tail(AiEntity &e, Entity &ent);
 // Select/cache an obstacle detour and publish target_heading before gait selection.
 // [orig: AI_FindCoverPosition @0x4AFAB0]
 void infantry_detour(AiSystem &ai, AiEntity &e, World &world);

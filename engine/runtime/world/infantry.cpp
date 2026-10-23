@@ -837,6 +837,18 @@ bool player_body_network_chase(AiEntity &e, Entity &body, bool authority, bool l
 //  g_LocalPlayerLookYaw` @0x4B583C..0x4B5848, the spread @0x4B584E..0x4B5960 (the mount test
 //  @0x4B585B), the drift's local-only gate @0x4B5966; Input_HandleActionBinding_0 `add [eax+14h]`
 //  @0x4E0D39]
+// See infantry_internal.h. [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `test byte ptr
+//  [esi+24h], 2` @0x4B4D30, +0x2D0 @0x4B4D46, Yaw @0x4B4D4C, the local test @0x4B4D4F,
+//  g_LocalPlayerLookYaw @0x4B4D59, `and dword ptr [esi+24h], 0FFFFFF9Fh` @0x4B4D5F]
+void player_body_dead_tail(AiEntity &e, Entity &ent) {
+    if (((ent.flags | ent.engine_flags) & kEntityFlagDead) == 0) return;
+    e.inf.aim_pitch = e.body_pitch;
+    e.heading = e.inf.body_heading;
+    if (e.inf.is_local_player) e.inf.target_heading = e.inf.body_heading;
+    ent.flags &= ~(kEntityFlagParachute | kEntityFlagMounted);
+    ent.engine_flags &= ~(kEntityFlagParachute | kEntityFlagMounted);
+}
+
 static void player_body_kick_tick(World &world, AiEntity &e, const Entity *ent,
                                   uint32_t logic_tick) {
     const int32_t heading_before = e.heading;
@@ -1126,6 +1138,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     //  @0x4B5966..0x4B5C97; GameEvent_PlayerDeath @0x516DD0 - PRNG_Next16 called @0x5170E2 /
     //  @0x517115 / @0x5171DA / @0x5171F8 / @0x51722C]
     if (!npc_body) {
+        if (tick_entity != nullptr) player_body_dead_tail(e, *tick_entity);
         infantry_follow_carrier(e, world, frame.capsule_bottom, true);
         player_body_kick_tick(world, e, world.registry.get(e.handle), logic_tick);
     }
