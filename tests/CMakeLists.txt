@@ -5097,6 +5097,12 @@ add_executable(npruntime_server_config_flags_live_test npruntime/server_config_f
 target_link_libraries(npruntime_server_config_flags_live_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_server_config_flags_live_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_server_config_flags_live COMMAND npruntime_server_config_flags_live_test)
+# D-NET-NEW-L1-41: the join check's side-password leg runs under BuildFlags' team-choose bit
+# (the cfg word or, in a team game, the create's copy), not the cfg word alone.
+add_executable(npruntime_side_password_gate_test npruntime/side_password_gate_test.cpp)
+target_link_libraries(npruntime_side_password_gate_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_side_password_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_side_password_gate COMMAND npruntime_side_password_gate_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

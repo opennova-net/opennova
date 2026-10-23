@@ -3020,8 +3020,12 @@ bool run_side_password_admission() {
 		replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
 		conn.link.transport = &transport;
 		const auto join = retail_join_request(config.expansion);
+		// The leg runs under the session's BuildFlags, so the JOIN reaches it with the host
+		// context (D-NET-NEW-L1-41) [orig: Server_ValidatePlayerJoinRequest @0x512495].
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = &ctx;
 		const auto replies = inmatch::dispatch_session_replies(config, conn,
-				{make_protocol_message(0x00, join)}, 5, roster, nullptr);
+				{make_protocol_message(0x00, join)}, 5, roster, nullptr, inputs);
 		if (test.reject) {
 			replication::Datagram staged;
 			DisconnectEvent event;
