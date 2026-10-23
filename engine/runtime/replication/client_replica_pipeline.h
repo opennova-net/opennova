@@ -321,6 +321,14 @@ public:
 		bool release = false;
 	};
 	std::vector<ReplicaCorpseDecay> drain_corpse_decays();
+	// The organic rows whose respawn arm ran in this receive, by wire handle in record order: the
+	// arm's reset releases the row's +0x1CC group inside the decode, ahead of the frame's entity
+	// update, so the embedder stops each one at the receive's point and a hit emitter the update
+	// spawns on the row survives (D-NET-NEW-L5-60). [orig: NetPacket_SerializePlayerState
+	// @0x4C09C0 - Entity_ResetToSpawnState called @0x4C113C; NetPacket_SerializeInfantryEntityState
+	// @0x4C0320 - the call @0x4C05EC; Entity_ResetToSpawnState @0x4B9610 - the release
+	// @0x4B97CB..0x4B97F5]
+	std::vector<uint16_t> drain_respawn_releases();
 	// A sound-profile slot one replica body's mover leg played this tick, at
 	// the body's position when it played, with the identity the embedder
 	// resolves it through: the row's items.def type and, for a player, its
@@ -851,6 +859,7 @@ private:
 	std::vector<uint16_t> carrier_repair_requests_;
 	std::vector<uint16_t> death_edges_;
 	std::vector<ReplicaCorpseDecay> corpse_decays_;
+	std::vector<uint16_t> respawn_releases_;
 	std::vector<ReplicaSlotSound> slot_sounds_;
 	ReplicaDeathTraitsResolver replica_death_traits_resolver_;
 	ReplicaPlayerCammoResolver replica_player_cammo_resolver_;

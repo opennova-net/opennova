@@ -359,6 +359,12 @@ ClientReplicaPipeline::drain_corpse_decays() {
 	return out;
 }
 
+std::vector<uint16_t> ClientReplicaPipeline::drain_respawn_releases() {
+	std::vector<uint16_t> out;
+	out.swap(respawn_releases_);
+	return out;
+}
+
 std::vector<ClientReplicaPipeline::ReplicaSlotSound>
 ClientReplicaPipeline::drain_slot_sounds() {
 	std::vector<ReplicaSlotSound> out;
@@ -1186,18 +1192,15 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 				++es.respawn_revision;
 				respawned_this_record = true;
 				// The respawn arm's reset releases the body's +0x1CC group (its corpse leg's
-				// decay, or a hit's), every organic row's, the own one's included: the embedder
-				// stops it as it does an expired row's (erase_expired_remote_rows).
+				// decay, or a hit's), every organic row's, the own one's included, inside the
+				// decode: the embedder stops it at the receive's point (drain_respawn_releases),
+				// as it does an expired row's in the walk (erase_expired_remote_rows).
 				// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead test @0x4C1109,
 				//  Entity_ResetToSpawnState @0x4B9610 called @0x4C113C;
 				//  NetPacket_SerializeInfantryEntityState @0x4C0320 - the dead test @0x4C05B3, the
 				//  call @0x4C05EC; the reset's release @0x4B97CB..0x4B97F5]
-				if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
-					ReplicaCorpseDecay release;
-					release.handle = es.handle;
-					release.release = true;
-					corpse_decays_.push_back(release);
-				}
+				if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry)
+					respawn_releases_.push_back(es.handle);
 			}
 		}
 		// The organic wire-dead position skip (LABEL_151). Vehicle wrecks are the

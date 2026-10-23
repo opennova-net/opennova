@@ -354,19 +354,23 @@ bool run_respawn_snaps_without_glide() {
 
 // D-NET-NEW-L5-60: the respawn arm's reset releases the row's +0x1CC group (a decay or a hit
 // emitter): the dead record queues no release, the dead->alive edge queues exactly one for the
-// row, and a further live record none. [orig: NetPacket_SerializePlayerState @0x4C09C0 - the
-// dead test @0x4C1109, Entity_ResetToSpawnState called @0x4C113C; the reset's release
-// @0x4B97CB..0x4B97F5]
+// row, and a further live record none. The release rides its own queue, which the embedder
+// drains at the receive's point (V-ROLL-BA F2), never the walk's corpse queue.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead test @0x4C1109,
+//  Entity_ResetToSpawnState called @0x4C113C; the reset's release @0x4B97CB..0x4B97F5]
 bool run_respawn_releases_the_corpse_group() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x000B;
 	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	bool walk_queue_clean = true;
 	const auto releases = [&] {
-		int count = 0;
 		for (const auto &d : view.drain_corpse_decays())
-			if (d.release && d.handle == handle) ++count;
+			walk_queue_clean &= !(d.release && d.handle == handle);
+		int count = 0;
+		for (const uint16_t released : view.drain_respawn_releases())
+			if (released == handle) ++count;
 		return count;
 	};
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
@@ -381,7 +385,8 @@ bool run_respawn_releases_the_corpse_group() {
 	if (!expect(releases() == 1, "the respawn edge releases the row's group once")) return false;
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
 	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax + (80 << 16))));
-	return expect(releases() == 0, "a live record after it releases nothing");
+	if (!expect(releases() == 0, "a live record after it releases nothing")) return false;
+	return expect(walk_queue_clean, "the walk's corpse queue carries no respawn release");
 }
 
 // D-NET-NEW-L5-61: the respawn arm and its reset store neither the torso roll (+0x2DC) nor the

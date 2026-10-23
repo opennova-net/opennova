@@ -934,6 +934,18 @@ void raise_exit_mission_tone(world::World &world) {
 	world.out.script_sounds.push_back(std::move(tone));
 }
 
+// The embedder's stop of a decoded organic row's +0x1CC group, by the key every spawn into the
+// slot carries (family 1, the row's wire handle, no spawn origin), as a hit emitter's
+// (world/wire_person_hit.cpp) and the corpse leg's decay below are keyed.
+void push_replica_slot_release(world::World &world, uint16_t wire_handle) {
+	world::DestructionEffectEvent release;
+	release.family = 1;
+	release.attach_wire_handle = wire_handle;
+	release.attach_spawn_origin = world::kSpawnOriginNone;
+	release.release = true;
+	world.out.destruction.effects.push_back(std::move(release));
+}
+
 } // namespace
 
 // The joiner frame [orig: Game_ProcessMainFrame @0x5263f0 -- the client-side
@@ -1065,6 +1077,15 @@ void JoinerRole::pump() {
 	// existed is read ahead of it.
 	const bool had_local = local_spawned_;
 	const FrameSignals decoded = run_client_net_frame();
+	// The respawn arms' +0x1CC releases land at the receive's point: retail's reset runs inside
+	// the record decode, ahead of the frame's entity update, whose projectile pass may spawn a
+	// hit emitter into the same slot (D-NET-NEW-L5-60).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - Client_ProcessNetworkFrame called @0x526692 ahead
+	//  of Entity_UpdateAllEntities called @0x52674B; NetPacket_SerializePlayerState @0x4C09C0 -
+	//  Entity_ResetToSpawnState called @0x4C113C; Entity_UpdateAllEntities @0x4C2100 -
+	//  Weapon_UpdateAllProjectiles called @0x4C223A]
+	for (const uint16_t handle : rt.view().drain_respawn_releases())
+		push_replica_slot_release(world, handle);
 	// Phase 0 of the authoritative 0x0A is the client's one pre-round
 	// predicate. Mirror it onto World before any local entity/system work.
 	world.preround_delay_seconds =
@@ -1288,12 +1309,7 @@ void JoinerRole::pump() {
 		const def::DefItemsFile *items = kernel_->items_table();
 		for (const auto &decay : rt.view().drain_corpse_decays()) {
 			if (decay.release) {
-				world::DestructionEffectEvent release;
-				release.family = 1;
-				release.attach_wire_handle = decay.handle;
-				release.attach_spawn_origin = world::kSpawnOriginNone;
-				release.release = true;
-				world.out.destruction.effects.push_back(std::move(release));
+				push_replica_slot_release(world, decay.handle);
 				continue;
 			}
 			const def::DefItemDef *item = items != nullptr

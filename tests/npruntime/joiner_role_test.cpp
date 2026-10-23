@@ -3219,6 +3219,77 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 			"revive: no grant folds, so L keeps the kit it died with");
 }
 
+// D-NET-NEW-L5-60 follow-up (V-ROLL-BA F2): a remote row's respawn arm releases its +0x1CC group
+// inside the record decode, so the release reaches the embedder ahead of anything the frame's
+// entity update spawns: here L's own corpse leg's decay, which the update spawns the same frame
+// (a hit emitter the update's projectile pass spawns on the respawned row survives the same way).
+// [orig: Game_ProcessMainFrame @0x5263F0 - Client_ProcessNetworkFrame called @0x526692 ahead of
+//  Entity_UpdateAllEntities called @0x52674B; NetPacket_SerializePlayerState @0x4C09C0 -
+//  Entity_ResetToSpawnState called @0x4C113C; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
+//  decay @0x4B4DA9..0x4B4E41]
+bool run_respawn_release_precedes_the_frames_entity_update() {
+	Harness h;
+	constexpr uint16_t kSelf = 0x0005;
+	constexpr uint16_t kRemote = 0x0007;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, kSelf, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	for (const uint16_t handle : {kSelf, kRemote}) {
+		auto &row = h.role.runtime->state().upsert(handle);
+		row.cls = EntityClass::Player;
+		row.type_id = w::kPlayerInfantryTypeId;
+	}
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	auto frame = [&](int16_t health, uint8_t self_flags, uint8_t remote_flags) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = health;
+		const std::pair<uint16_t, uint8_t> rows[] = {{kSelf, self_flags}, {kRemote, remote_flags}};
+		for (const auto &[handle, state_flags] : rows) {
+			FrameUpdateRecord rec;
+			rec.handle = handle;
+			rec.type_id = w::kPlayerInfantryTypeId;
+			rec.cls = EntityClass::Player;
+			rec.player.carrier_handle = 0xFFFF;
+			rec.player.state_flags = state_flags;
+			fu.records.push_back(rec);
+		}
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	const uint8_t dead = static_cast<uint8_t>(w::kEntityFlagDead);
+	frame(100, 0x00, 0x00);
+	frame(0, dead, dead); // L and the remote row both down
+	w::Entity *local = h.kernel->world.registry.get(h.kernel->world.cached.local_player);
+	if (!expect(local != nullptr && !local->alive, "release order: L is down")) return false;
+	// L's corpse leg reaches 186 in the next frame's update, spawning its decay there.
+	w::ItemDeathTraits traits;
+	traits.particledeath = "decay";
+	h.kernel->world.tables.item_death_traits.set(local->item_id, traits);
+	local->corpse_timer = 187;
+	h.kernel->world.out.destruction.effects.clear();
+	frame(0, dead, 0x00); // the remote row's respawn edge
+	const auto &effects = h.kernel->world.out.destruction.effects;
+	int release_at = -1, decay_at = -1, releases = 0;
+	for (size_t i = 0; i < effects.size(); ++i) {
+		if (effects[i].release && effects[i].attach_wire_handle == kRemote) {
+			++releases;
+			release_at = static_cast<int>(i);
+		}
+		if (!effects[i].release && effects[i].effect == "decay") decay_at = static_cast<int>(i);
+	}
+	if (!expect(releases == 1 && decay_at >= 0,
+			"release order: the frame releases the row once and spawns L's decay"))
+		return false;
+	return expect(release_at < decay_at,
+			"release order: the respawn release precedes the update's spawn");
+}
+
 // The 0x0A tail's last word is the host's copy of L's +0x120 (Armor; ammo class
 // 1's carried pool): the joiner stores it on L every frame that carries the
 // tail, alive or dead (B-4).
@@ -5468,6 +5539,7 @@ int main() {
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
+	ok &= run_respawn_release_precedes_the_frames_entity_update();
 	ok &= run_tail_armor_lands_on_l();
 	ok &= run_tail_carried_word_lands_on_l();
 	ok &= run_entity_death_names_l();
