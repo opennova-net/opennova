@@ -1893,8 +1893,15 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		}
 		{
 			const uint64_t local_resubmit_revision = rt.local_resubmit_revision();
-			if (local_resubmit_revision > local_resubmit_revision_seen_) {
-				local_resubmit_revision_seen_ = local_resubmit_revision;
+			// One re-run per self 0x50 of the receive, in order [orig: NapiNPClientMsg_TeamAssign
+			//  @0x431910, once per message (CNapiNPConnection_DispatchMessage @0x625EF1)].
+			const std::size_t runs = local_resubmit_revision > local_resubmit_revision_seen_
+					? std::max<std::size_t>(1, rt.receive_mount_count(
+							ClientRuntime::ReceiveMount::kSelfTeamAssign))
+					: 0;
+			local_resubmit_revision_seen_ = std::max(local_resubmit_revision_seen_,
+					local_resubmit_revision);
+			for (std::size_t occurrence = 0; occurrence < runs; ++occurrence) {
 				// The 0x50 handler's local arm RE-SELECTS the newly assigned side's profile page
 				// and re-submits it: profileData = (team==1||team==3) ? blue : red, class
 				// = *profileData, page = profileData + {6,2054,4102,6150,8198}
@@ -1910,9 +1917,10 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 				reinit_local_player_on_team_assign();
 				// Its walk's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x50's
 				// place, past the handler's own sends [orig: NapiNPClientMsg_TeamAssign @0x431910
-				//  - the 0x2F @0x431A9E, the 0x22 / 0x23 @0x431AE4 / @0x431B05,
+				//  - the 0x2F @0x431AAD, the 0x22 / 0x23 @0x431AE4 / @0x431B05,
 				//  Player_InitPlayer(1) @0x431B14].
-				flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kSelfTeamAssign, 0);
+				flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kSelfTeamAssign,
+						occurrence);
 			}
 		}
 		const uint64_t deployment_release_revision =

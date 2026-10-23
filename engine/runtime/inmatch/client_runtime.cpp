@@ -1654,10 +1654,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				}
 				// A self 0x50's local arm queues its C2S 0x2F ahead of the 0x22 / 0x23 pair the
 				// handler asks for after it, which the fold above raised [orig:
-				// NapiNPClientMsg_TeamAssign @0x431910 - NetPacket_SendLoadoutSubmit @0x431A9E
+				// NapiNPClientMsg_TeamAssign @0x431910 - NetPacket_SendLoadoutSubmit @0x431AAD
 				// ahead of the 0x22 @0x431AE4 and the 0x23 @0x431B05].
-				if (pr.local_resubmit && entries_folded + 1 == pr.local_resubmit_entries)
-					queue_replies_after(entries_folded + 1);
+				const bool self_team_assign =
+						std::find(pr.local_resubmit_entries.begin(), pr.local_resubmit_entries.end(),
+								entries_folded + 1) != pr.local_resubmit_entries.end();
+				if (self_team_assign) queue_replies_after(entries_folded + 1);
 				queue_fold_requests();
 				queue_replies_after(++entries_folded);
 				// The 0x5A's handler mounts last, past its own sends, a self 0x50's runs
@@ -1670,8 +1672,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				if (std::find(pr.loadout_grant_entries.begin(), pr.loadout_grant_entries.end(),
 						entries_folded) != pr.loadout_grant_entries.end())
 					mark_receive_mount(ReceiveMount::kWeaponLoadout, entries_folded);
-				if (pr.local_resubmit && entries_folded == pr.local_resubmit_entries)
-					mark_receive_mount(ReceiveMount::kSelfTeamAssign, entries_folded);
+				if (self_team_assign) mark_receive_mount(ReceiveMount::kSelfTeamAssign, entries_folded);
 				// A 0x35 the fold took (a well-formed body) mounts its pickup at its place
 				// [orig: NapiNPClientMsg_0x035 @0x4261A0 - Player_MountPickedUpWeapon
 				//  @0x42624C / @0x42625B].
@@ -1728,7 +1729,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				++self_team_revision_;
 				self_assigned_team_ = pr.self_team;
 			}
-			if (pr.local_resubmit) ++local_resubmit_revision_;
+			// One per self 0x50, each handler's own re-run [orig: @0x431B14].
+			local_resubmit_revision_ += pr.local_resubmit_entries.size();
 			// S2C 0x46 bit15 — roster bookkeeping only; the entity row stays.
 			// [orig: PlayerSlot_ClearAndUnlink @0x434730 via @0x431411..0x43144c]
 			for (uint8_t slot : pr.cleared_player_slots)

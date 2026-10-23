@@ -2364,7 +2364,7 @@ bool run_a_pickup_mount_queues_at_the_0x35s_place() {
 // 0x50's place among the receive's sends, past the handler's own: one datagram carrying the 0x50
 // and then a time-sync ping ships the 0x1D ahead of the ping's C2S 0x08; the ping first ships
 // its reply first.
-// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the 0x2F @0x431A9E, the 0x22 / 0x23 @0x431AE4 /
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the 0x2F @0x431AAD, the 0x22 / 0x23 @0x431AE4 /
 //  @0x431B05, Player_InitPlayer(1) @0x431B14; Player_SwitchToWeaponByHandle @0x4E0170 - the
 //  +0x68 test @0x4E023A, the Flags test @0x4E0265, the rank cycle @0x4E02C9..0x4E0342, the mount
 //  @0x4E0362; Player_MountWeaponSlot @0x4DFA40 - CNapiNetwork_QueueReliableMessage(0x1D)
@@ -2454,10 +2454,15 @@ bool run_a_team_assign_walk_mount_queues_at_the_0x50s_place() {
 }
 
 // A self S2C 0x50's sends leave in its handler's order: the local arm's C2S 0x2F re-submission,
-// then the 0x22 / 0x23 pair the handler asks for every player entity's team change.
-// [orig: NapiNPClientMsg_TeamAssign @0x431910 - NetPacket_SendLoadoutSubmit @0x431A9E,
-//  CNapiNetwork_QueueReliableMessage(0x22) @0x431AE4, (0x23) @0x431B05]
+// then the 0x22 / 0x23 pair the handler asks for every player entity's team change; two in one
+// receive run their handlers one after the other, each in that order, each re-running L's init.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - NetPacket_SendLoadoutSubmit @0x431AAD,
+//  CNapiNetwork_QueueReliableMessage(0x22) @0x431AE4, (0x23) @0x431B05, Player_InitPlayer(1)
+//  @0x431B14; CNapiNPConnection_ParseMessages @0x625BC0 - CNapiNPConnection_DispatchMessage
+//  @0x625EF1 per message]
 bool run_a_self_team_assign_resubmits_ahead_of_its_pair() {
+	bool ok = true;
+	for (const int count : {1, 2}) {
 	Harness h;
 	h.role.poll_preload();
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
@@ -2473,19 +2478,35 @@ bool run_a_self_team_assign_resubmits_ahead_of_its_pair() {
 	assign.team = 1;
 	assign.net_id = 0x0213;
 	assign.anim_slot = 0x2C;
+	std::vector<ProtocolMessage> messages;
+	for (int i = 0; i < count; ++i)
+		messages.push_back(make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign)));
 	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
 	std::vector<uint8_t> packet;
-	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
-			{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, packet);
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey}, messages, packet);
 	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
 	const std::size_t from = h.socket.datagrams.size();
+	const std::size_t pushes_before = static_cast<std::size_t>(
+			std::count(h.seams.begin(), h.seams.end(), std::string("push_kit")));
 	h.role.runtime->receive(datagram.data(), datagram.size());
 	h.role.run_tick(h.input);
 	const std::vector<uint8_t> order = sent_tags_since(h.socket, from,
 			{0x2F, c2s::PLAYER_SYNC_REQUEST, c2s::VISIBLE_PLAYERS_REQUEST});
-	const std::vector<uint8_t> expected{0x2F, c2s::PLAYER_SYNC_REQUEST,
-			c2s::VISIBLE_PLAYERS_REQUEST};
-	return expect(order == expected, "self 0x50 order: the 0x2F, then the 0x22 / 0x23 pair");
+	std::vector<uint8_t> expected;
+	for (int i = 0; i < count; ++i) {
+		expected.push_back(0x2F);
+		expected.push_back(c2s::PLAYER_SYNC_REQUEST);
+		expected.push_back(c2s::VISIBLE_PLAYERS_REQUEST);
+	}
+	ok &= expect(order == expected, count == 1
+			? "self 0x50 order: the 0x2F, then the 0x22 / 0x23 pair"
+			: "self 0x50 order: each of two in one receive ships its 0x2F, then its pair");
+	const std::size_t pushes = static_cast<std::size_t>(
+			std::count(h.seams.begin(), h.seams.end(), std::string("push_kit"))) - pushes_before;
+	ok &= expect(pushes == static_cast<std::size_t>(count),
+			"self 0x50 order: one local arm (the seam's re-arm) per self 0x50");
+	}
+	return ok;
 }
 
 // Each S2C 0x5A of a receive applies at its turn (L7-s28, V-ROLL-AX N1): two grants around a

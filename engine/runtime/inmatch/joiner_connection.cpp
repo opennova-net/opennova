@@ -1721,7 +1721,7 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			//   (2) !is_authority -> entity->Team = team @0x4319ee (any pool 0..4);
 			//   (3) the player-slot team byte mirrors it @0x431a0b;
 			//   (4) player (Flags & 0x100) + self -> per-side profile reselect and ONE
-			//       C2S 0x2F re-submission @0x431a9e carrying the NEW team and slot 195
+			//       C2S 0x2F re-submission @0x431AAD carrying the NEW team and slot 195
 			//       RAW (the pre-Player_InitPlayer form, NOT g_CurrentWeaponSlot).
 			// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910]
 			TeamAssign assign;
@@ -1766,14 +1766,14 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 				// Player_InitPlayer(1) re-run @0x431b14 (same compare @0x431B0A) are
 				// D-NET-570.
 				// [orig: `test Flags, 100h` @0x431A15, `cmp entity, g_LocalPlayerEntity`
-				//  @0x431A1B, the reselect @0x431a35..0x431a9a, the submit @0x431a9e]
+				//  @0x431A1B, the reselect @0x431a35..0x431a9a, the submit @0x431AAD]
 				if (local_entity) {
 					const LoadoutSubmit resubmit =
 							build_profile_loadout_submit(assigned_team_, false);
 					periodic_replies.push_back(make_protocol_message(
 							0x2F, encode_loadout_submit(resubmit)));
 					out.local_resubmit = true;
-					out.local_resubmit_entries = out.inbound_reducer.size();
+					out.local_resubmit_entries.push_back(out.inbound_reducer.size());
 				}
 			}
 		} else if (m.tag == s2c::EMPTY_SLOT_SWEEP) {
