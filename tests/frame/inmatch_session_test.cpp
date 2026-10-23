@@ -310,7 +310,7 @@ int main() {
 			paged.since_render_seconds = 0.0;
 			paged.hud_toggles = &view_up;
 			const FrameOutcome first = session.advance(paged);
-			if (!expect(!first.scene_drawn && !session.last_scene_drawn(),
+			if (!expect(!first.scene_drawn,
 					"page: a listen host's view word stands the page in")) return 1;
 			if (!expect(first.ticks_run() == 0,
 					"page: the load's re-base still banks only the time since the render")) return 1;
@@ -321,7 +321,7 @@ int main() {
 			FrameInput drawn = paged;
 			drawn.hud_toggles = &view_down;
 			const FrameOutcome back = session.advance(drawn);
-			if (!expect(back.scene_drawn && session.last_scene_drawn(),
+			if (!expect(back.scene_drawn,
 					"page: the view word down draws the scene")) return 1;
 			if (!expect(!target.kernel.world.epilog.active,
 					"page: the scene frame's cine pass ends the cine past its end")) return 1;

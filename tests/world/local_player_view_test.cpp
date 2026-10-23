@@ -1849,6 +1849,39 @@ void test_frame_publishes_the_fp_draw_gates() {
     CHECK(frame.fp_round_winner_set);
 }
 
+// The Inset pass runs in the scene's non-NVG fork alone. An Inset raise the NVG press
+// catches mid-ease promotes under NVG (the press's own scope toggle needs the promoted
+// byte, so it neither drops the sight nor latches a restore), and that frame runs no
+// Inset pass (no second compose, no aperture) while the FP draw's Inset skip still holds.
+// [orig: Render_ProcessMainSceneFrame @0x5CA6AB..0x5CA6BF (g_NVGActive && !g_CameraMode:
+//  the NVG branch), the Inset gate @0x5CA937..0x5CA945 and call @0x5CA949 in the other;
+//  Input_HandleActionBinding_0 @0x4E0420 (the NVG press's Player_IsEquippedWeaponScoped
+//  call @0x4E06B3)]
+void test_inset_pass_runs_in_the_non_nvg_fork_alone() {
+    LocalWorld lw;
+    lw.w.weather.seed(WeatherSeed{});
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    LocalPlayerWeapon up = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, DEF_WEAPON_FLAG2_INSET);
+    PlayerViewState view;
+    CHECK(local_player_scope_toggle(lw.w, up, view, up.slot));
+    settle_ease(view);
+    local_player_view_frame(&lw.w, up, view, tracker, frame);
+    CHECK(frame.inset_scope_active && frame.fp_inset_scoped);
+
+    LocalPlayerWeapon caught = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, DEF_WEAPON_FLAG2_INSET);
+    PlayerViewState raising;
+    CHECK(local_player_scope_toggle(lw.w, caught, raising, caught.slot));
+    CHECK(player_view_scope_ease_active(raising));
+    CHECK(local_player_nvg_toggle(lw.w, caught, raising));
+    CHECK(raising.nvg_active && raising.scope_engaged && !caught.nvg_scope_restore);
+    settle_ease(raising);
+    CHECK(player_view_scope_settled(raising));
+    local_player_view_frame(&lw.w, caught, raising, tracker, frame);
+    CHECK(!frame.inset_scope_active && frame.fp_inset_scoped);
+    CHECK(frame.inset_fov_over_zoom == 0.0f);
+}
+
 void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
     LocalWorld lw;
     LocalPlayerWeapon weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
@@ -4129,6 +4162,7 @@ int main() {
     test_airborne_bias_is_separate_from_reload_and_force_scope_admission();
     test_scope_fov_target_and_render_queries_share_weather_state();
     test_frame_publishes_the_fp_draw_gates();
+    test_inset_pass_runs_in_the_non_nvg_fork_alone();
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
     test_arms_dip_follows_the_weapon_category_not_the_anim_map();
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();

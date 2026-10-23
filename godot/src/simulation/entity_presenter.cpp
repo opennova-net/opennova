@@ -355,7 +355,6 @@ void EntityPresenter::present_scars() {
 
 void EntityPresenter::present_passes() {
 	present_minefields();
-	if (Simulation *simulation = sim()) simulation->advance_facial_presentation(listener_position_);
 	fire_->present();
 	destruction_->present();
 	throwable_->present();
@@ -366,7 +365,6 @@ void EntityPresenter::present_passes() {
 
 PackedInt64Array EntityPresenter::profile_present_passes() {
 	present_minefields();
-	if (Simulation *simulation = sim()) simulation->advance_facial_presentation(listener_position_);
 	PackedInt64Array spans;
 	spans.resize(PASS_PROFILE_SLOT_COUNT);
 	Time *clock = Time::get_singleton();

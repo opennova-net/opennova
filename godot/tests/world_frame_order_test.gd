@@ -10,7 +10,7 @@ extends GutTest
 func test_frame_leg_table_is_the_witnessed_order() -> void:
 	assert_eq(Array(GameWorld.frame_leg_names()), [
 		"begin", "session", "remote_admin", "scene_gate", "script_voice", "local_view",
-		"scene_environment",
+		"facial", "scene_environment",
 		"environment_nodes", "terrain", "water", "network", "blink",
 		"occlusion", "foliage", "iris", "sun_veil", "lights", "ragdolls", "materials", "framefx",
 		"slot_shadows", "particles", "precipitation", "scene_overlay",
@@ -51,6 +51,13 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 			"the camera compose follows the voice update")
 	assert_true(GameWorld.frame_leg_draws_scene("script_voice"),
 			"the voice update is the scene frame's, not the update's")
+	# FaceAnim_RenderAllSlots runs in the scene frame after its camera compose (@0x5CA50C) and
+	# again inside the Inset pass after that pass's own compose (@0x5C99BC): every drawn frame,
+	# over the views the local view composed.
+	assert_eq(names.find("facial"), local_view + 1,
+			"the facial passes follow the compose that places both views")
+	assert_true(GameWorld.frame_leg_draws_scene("facial"),
+			"the facial passes are the scene frame's, not the update's")
 
 
 # The status page stands in for retail's whole scene frame (GameLoop_RenderFrame draws

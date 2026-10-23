@@ -121,6 +121,10 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// (the driven tank's cockpit), which copies the carrier hull's transform:
 	// that must stay AFTER the session row, whose entity walks stamp the hull.
 	{ "local_view", FrameStats::WORLD_LOCAL_VIEW, &GameWorld::leg_local_view, kSceneLeg },
+	// The scene frame's facial passes, once per drawn frame whether or not it ran an update:
+	// the main scene's after its camera compose, and the weapon Inset scene's own when the
+	// frame runs that pass, over the views local_view just composed.
+	{ "facial", kNoSlot, &GameWorld::leg_facial, kSceneLeg },
 	// Retail re-applies fog/ambient per scene pass. Classify the adjusted
 	// render eye after camera placement and publish that pass payload before
 	// terrain, foliage, objects, viewmodel, and particles consume it.
@@ -547,6 +551,19 @@ GameWorld::LegResult GameWorld::leg_script_voice(FrameContext &r_ctx) {
 
 GameWorld::LegResult GameWorld::leg_local_view(FrameContext &r_ctx) {
 	present_local_view_frame();
+	return kLegRan;
+}
+
+GameWorld::LegResult GameWorld::leg_facial(FrameContext &r_ctx) {
+	// The frame's composed view carries both passes' eyes and the Inset pass's verdict
+	// (engine world::FacialSystem::render_scene_passes carries the witness). No local player
+	// presents no view and draws no scene frame.
+	const Ref<Simulation> sim = get_sim();
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	const Ref<PlayerLocalView> view =
+			presenter != nullptr ? presenter->presented_view() : Ref<PlayerLocalView>();
+	if (sim.is_null() || view.is_null()) return kLegSkipped;
+	sim->advance_facial_presentation(view->native_frame());
 	return kLegRan;
 }
 

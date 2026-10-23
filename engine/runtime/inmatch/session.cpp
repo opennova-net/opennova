@@ -1098,17 +1098,17 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		if (out.ticks.empty() && !out.terminal()) out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
 		// The render callback's choice after the drain (draws_scene); both arms count.
-		out.scene_drawn = last_scene_drawn_ = draws_scene(input.hud_toggles);
+		out.scene_drawn = draws_scene(input.hud_toggles);
 		count_rendered_frame();
 		if (!out.terminal() && out.scene_drawn) {
-			step_cine_render_frame();
 			step_hud_radar_frame();
+			step_cine_render_frame();
 		}
 		return out;
 	}
 	if (state_ != State::Running) {
 		out.status = FrameStatus::NotRunning;
-		out.scene_drawn = last_scene_drawn_ = draws_scene(input.hud_toggles);
+		out.scene_drawn = draws_scene(input.hud_toggles);
 		last_perf_ = out.perf;
 		return out;
 	}
@@ -1146,7 +1146,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	accumulator_.record_frame_work(world::frame_tick_count_ms() - frame_start_ms, out.perf.updates);
 	// The render callback reads its view word after the drain and draws the scene frame or the
 	// status page in its place (draws_scene); each arm's render counts.
-	out.scene_drawn = last_scene_drawn_ = draws_scene(input.hud_toggles);
+	out.scene_drawn = draws_scene(input.hud_toggles);
 	// Each update counted toward the 62-update second inside the loop; this
 	// frame's render counts now.
 	count_rendered_frame();
@@ -1174,15 +1174,15 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		rebase_clock_ = true;
 	}
 	last_perf_ = out.perf;
-	// The frame's render follows the drain: the scene frame's cine pass, then its HUD pass;
+	// The frame's render follows the drain: the scene frame's HUD pass, then its cine pass;
 	// the status page runs neither, so under it no cine ends and the radar ages nothing
 	// [orig: Game_MainLoop's Game_ProcessMainFrame drain, then the render's
-	// cine pass and HUD_RenderAllOverlays; Render_ProcessMainSceneFrame @0x5CADFC ->
-	// Cine_RenderOrEndPlayback, @0x5CAD04 -> HUD_RenderAllOverlays, the scene arm
-	// @0x521CE8 alone].
+	// HUD_RenderAllOverlays and cine pass; Render_ProcessMainSceneFrame @0x5CAD04 (@0x5CACE3
+	// for a chase view from a control seat) -> HUD_RenderAllOverlays, then @0x5CADFC ->
+	// Cine_RenderOrEndPlayback, the scene arm @0x521CE8 alone].
 	if (!out.terminal() && out.scene_drawn) {
-		step_cine_render_frame();
 		step_hud_radar_frame();
+		step_cine_render_frame();
 	}
 	return out;
 }

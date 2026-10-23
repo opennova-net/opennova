@@ -615,9 +615,6 @@ public:
 	//  the view word @0x521CD6, is_authority @0x521CDF..0x521CE6; Render_ProcessMainSceneFrame
 	//  @0x521CE8 or Server_DrawStatusScreen @0x521CEF]
 	bool draws_scene(const hud::HudToggleState *toggles) const;
-	// The last advanced frame's verdict (FrameOutcome::scene_drawn): the embedder's scene
-	// passes that run inside its session step read it.
-	bool last_scene_drawn() const { return last_scene_drawn_; }
 	// The main loop's frame statistics the authority's status page shows:
 	// the frames rendered during the last 62 logic updates and the CPU share
 	// of the frame-rate window (world::TickAccumulator::cpu_percent). A paused
@@ -760,7 +757,6 @@ private:
 	CameraSample latest_camera_;
 	SessionError last_error_;
 	FramePerf last_perf_;
-	bool last_scene_drawn_ = true;
 	// The HUD pass's gates as the embedder last handed them, and the radar
 	// step's last snapshot.
 	uint32_t hud_radar_gates_ = kHudRadarGatesDefault;

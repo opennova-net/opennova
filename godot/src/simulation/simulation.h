@@ -2182,13 +2182,15 @@ public:
 	void set_contact_debug_kind_mask(int64_t p_mask);
 	void clear_contact_debug();
 	bool native_physics_snapshot(opennova::devtools::PhysicsSnapshot &out) const;
+	// The scene frame's facial passes over the view the frame just composed (the frame-leg
+	// table's facial row; engine world::FacialSystem::render_scene_passes).
+	void advance_facial_presentation(const opennova::world::LocalPlayerViewFrame &p_view);
+	void fill_minefield_draw_rows(std::vector<opennova::world::MinefieldDraw> &r_rows) const;
 	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
 	// rounds with a TrcrID model plus placed devices; the enemy-team item swap
 	// follows the viewer team (engine: runtime/world/round_sim.h).
 	// The native form is the throwable pass's; the bound form wraps the same
 	// rows for the tests.
-	void advance_facial_presentation(const Vector3 &p_camera);
-	void fill_minefield_draw_rows(std::vector<opennova::world::MinefieldDraw> &r_rows) const;
 	void fill_throwable_visual_rows(std::vector<opennova::world::ThrowableVisualRow> &r_rows) const;
 	TypedArray<ThrowableVisualRow> get_throwable_visuals() const;
 	// Even-tick, simulation-owned watercraft W3/W4 wake samples. The native

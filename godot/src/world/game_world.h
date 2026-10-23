@@ -736,6 +736,7 @@ private:
 	LegResult leg_scene_gate(FrameContext &r_ctx);
 	LegResult leg_script_voice(FrameContext &r_ctx);
 	LegResult leg_local_view(FrameContext &r_ctx);
+	LegResult leg_facial(FrameContext &r_ctx);
 	LegResult leg_scene_environment(FrameContext &r_ctx);
 	LegResult leg_environment_nodes(FrameContext &r_ctx);
 	LegResult leg_terrain(FrameContext &r_ctx);

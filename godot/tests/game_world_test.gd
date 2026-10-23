@@ -1913,7 +1913,7 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 			world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, paged)
 			legs = Array(world.get_last_frame_legs())
 			assert_false(legs.has("terrain") or legs.has("particles") or legs.has("local_view")
-					or legs.has("script_voice"),
+					or legs.has("script_voice") or legs.has("facial"),
 					"a listen host's status view stands in for the scene's rows: %s" % [legs])
 			assert_true(legs.has("audio"), "its audio still runs: %s" % [legs])
 			assert_false(world.get_last_frame_scene_drawn(),

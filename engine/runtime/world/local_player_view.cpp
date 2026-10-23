@@ -1118,8 +1118,16 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
     out.scope_zero_max = w.def.scope_zero.max_steps;
     out.scope_zero_step = w.def.scope_zero.step_metres;
     out.scope_zero_default = w.def.scope_zero.default_metres;
+	// The Inset pass runs in the scene's non-NVG fork alone: with NVG up in first
+	// person the frame takes the NVG composite and no Inset pass (its compose, its
+	// scene, its cues, its facial pass) runs, whatever the latched Inset flag. The
+	// flag can stand under NVG: a raise the NVG press caught mid-ease promotes after it
+	// [orig: Render_ProcessMainSceneFrame @0x5CA6AB..0x5CA6BF (g_NVGActive &&
+	//  !g_CameraMode takes the NVG branch), the Inset gate @0x5CA937..0x5CA945 and
+	//  call @0x5CA949 in the other].
 	out.inset_scope_active = optical_view && out.scope_details_scoped &&
-			(w.def.flags2 & DEF_WEAPON_FLAG2_INSET) && !v.binoculars_view_active;
+			(w.def.flags2 & DEF_WEAPON_FLAG2_INSET) && !v.binoculars_view_active &&
+			(!v.nvg_active || v.camera_mode != 0);
 	// The FP draw's own gates (player_present.h fp_viewmodel_retail_submit):
 	// the alive gate reads the local dead bit and the decided winner; the draw
 	// skips the showhud test for an Emplaced def and skips the model for a

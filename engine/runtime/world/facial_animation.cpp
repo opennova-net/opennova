@@ -6,6 +6,7 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
+#include <runtime/world/local_player_view.h>
 #include <runtime/world/tick_count_clock.h>
 #include <runtime/world/world.h>
 
@@ -273,6 +274,22 @@ void FacialSystem::compile_draws(World &world, int32_t camera_x, int32_t camera_
 		draw.eye_offset = {slot.eyes.x * 0.02f, slot.eyes.y * 0.01f};
 		out.push_back(std::move(draw));
 	}
+}
+
+void FacialSystem::render_scene_passes(World &world, const LocalPlayerViewFrame &view,
+		std::vector<FacialDraw> &out) {
+	// No local player, no scene frame [orig: Render_ProcessMainSceneFrame @0x5CA137].
+	if (!view.camera_pose_valid) return;
+	// The sort's local-player skip reads the camera mode [orig: Scar_SortSlotsByDistance
+	// @0x57FED6..0x57FEE5].
+	const bool first_person = view.camera_mode == 0;
+	// The main scene's pass [orig: Render_ProcessMainSceneFrame @0x5CA50C].
+	compile_draws(world, view.camera.pos_q16[0], view.camera.pos_q16[1], first_person, out);
+	// The Inset scene's own, inside that pass [orig: Render_ProcessMainSceneFrame @0x5CA949 ->
+	// Render_WeaponInsetScene @0x5C99BC].
+	if (view.inset_scope_active)
+		compile_draws(world, view.inset_camera.pos_q16[0], view.inset_camera.pos_q16[1],
+				first_person, out);
 }
 
 } // namespace opennova::world

@@ -8,6 +8,7 @@
 #include <runtime/wac/vm.h>
 #include <runtime/world/facial_animation.h>
 #include <runtime/world/infantry_internal.h>
+#include <runtime/world/local_player_view.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
 #include "common/test_paths.h"
@@ -254,6 +255,31 @@ void test_look_back_uses_the_placement_heading() {
 	CHECK(f.slot(h).automatic == 6);
 }
 
+// The scene frame's passes: the main scene's, then the weapon Inset scene's own on a
+// frame that runs that pass, each one counter step and one sort from its own pass's eye,
+// so an Inset frame steps the update's 64-frame look cadence twice; a frame with no
+// local player draws no scene. [orig: Render_ProcessMainSceneFrame @0x5CA137, @0x5CA50C;
+//  the Inset call @0x5CA949 -> Render_WeaponInsetScene @0x5C99BC; FaceAnim_RenderAllSlots
+//  ++dword_26C7768 @0x580367; Scar_SortSlotsByDistance @0x57FE72..0x57FE78]
+void test_scene_passes_step_once_per_pass() {
+	auto f = std::make_unique<Fixture>();
+	const auto near_main = f->spawn(1, 10), near_inset = f->spawn(2, 40);
+	std::vector<FacialDraw> draws;
+	LocalPlayerViewFrame view;
+	f->world.facials.render_scene_passes(f->world, view, draws);
+	CHECK(f->world.facials.display_frame() == 0);
+	view.camera_pose_valid = true;
+	f->world.facials.render_scene_passes(f->world, view, draws);
+	CHECK(f->world.facials.display_frame() == 1);
+	CHECK(f->slot(near_main).priority == 0 && f->slot(near_inset).priority == 1);
+	view.inset_scope_active = true;
+	view.inset_camera.pos_q16[0] = 40 << 16;
+	f->world.facials.render_scene_passes(f->world, view, draws);
+	CHECK(f->world.facials.display_frame() == 3);
+	// The Inset pass sorted last, from its own eye.
+	CHECK(f->slot(near_inset).priority == 0 && f->slot(near_main).priority == 1);
+}
+
 } // namespace
 
 int main() {
@@ -263,5 +289,6 @@ int main() {
 	test_slot_lifetime_and_capacity();
 	test_automatic_expression();
 	test_look_back_uses_the_placement_heading();
+	test_scene_passes_step_once_per_pass();
 	return failures ? 1 : 0;
 }

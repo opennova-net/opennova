@@ -17,6 +17,7 @@ namespace opennova::def { struct DefItemsFile; }
 namespace opennova::world {
 
 class World;
+struct LocalPlayerViewFrame;
 
 inline constexpr const char *kFacialExpressions[9] = {
 	"NORMAL", "HAPPY", "SAD", "SMIRK", "ANGRY", "SURPRISE", "DISGUST", "FEAR", "AGGRESSIVE"
@@ -79,15 +80,29 @@ public:
 	void override_expression(const Entity &entity, int32_t expression, int32_t transitions = 80);
 	void automatic_expression(const Entity &entity, int32_t expression);
 
-	// Stable nearest-first sort; only three visible slots have live targets.
-	// [orig: Scar_SortSlotsByDistance @0x57FE60; FaceAnim_RenderAllSlots; Render_ScarSlot @0x580170]
-	// The scene frame's pass alone: a frame the status page stands in for steps no counter,
-	// so the update's look cadence holds there (the embedder runs it on the session's
-	// verdict, inmatch::Session::last_scene_drawn) [orig: Render_ProcessMainSceneFrame
-	// @0x5CA50C -> FaceAnim_RenderAllSlots @0x580360, ++dword_26C7768 @0x580367; its reader
-	// FaceAnim_UpdateSlot @0x57FA50 (the read @0x57FA60)].
+	// One pass: the counter step, then the stable nearest-first sort from the pass's eye;
+	// only three visible slots have live targets.
+	// [orig: FaceAnim_RenderAllSlots @0x580360 (++dword_26C7768 @0x580367; its reader
+	//  FaceAnim_UpdateSlot @0x57FA50, the read @0x57FA60); Scar_SortSlotsByDistance
+	//  @0x57FE60; Render_ScarSlot @0x580170]
 	void compile_draws(World &world, int32_t camera_x, int32_t camera_y,
 			bool first_person, std::vector<FacialDraw> &out);
+
+	// The scene frame's passes, once per drawn scene frame whether or not the frame ran an
+	// update (the embedder's scene row, so a frame the status page stands in for steps no
+	// counter): the main scene's, from the eye of the frame's camera compose, then the
+	// weapon Inset scene's own when that pass runs, from its own compose's eye. An Inset
+	// frame steps the counter twice, which moves the update's 64-frame look cadence. A
+	// frame with no local player draws no scene.
+	// [orig: Game_MainLoop @0x52B630 (the render callback every iteration, the call
+	//  @0x52BAC6, after the update drain); Render_ProcessMainSceneFrame @0x5CA137 (no local
+	//  player: no scene frame),
+	//  @0x5CA50C -> FaceAnim_RenderAllSlots, the Inset gate @0x5CA937..0x5CA945 and call
+	//  @0x5CA949 -> Render_WeaponInsetScene @0x5C9740 -> FaceAnim_RenderAllSlots @0x5C99BC;
+	//  each pass's eye the viewport its own Viewport_BuildProjectionMatrix built
+	//  (@0x5CA4F8 / @0x5C999B), read by Scar_SortSlotsByDistance @0x57FE72..0x57FE78]
+	void render_scene_passes(World &world, const LocalPlayerViewFrame &view,
+			std::vector<FacialDraw> &out);
 
 	const std::vector<FacialSlot> &slots() const { return slots_; }
 	uint32_t display_frame() const { return display_frame_; }

@@ -40,16 +40,14 @@
 using namespace sim_internal;
 
 
-void Simulation::advance_facial_presentation(const Vector3 &p_camera) {
-    // The scene frame's pass: its counter (the facial update's 64-frame look cadence) steps
-    // on a frame that draws the scene alone, never under the status page (engine
-    // world::FacialSystem::compile_draws carries the witness).
-    if (!kernel_ || !p_camera.is_finite() || !session_.last_scene_drawn()) return;
+void Simulation::advance_facial_presentation(const opennova::world::LocalPlayerViewFrame &p_view) {
+    // The scene frame's passes (the facial update's 64-frame look cadence steps once each):
+    // the main scene's, and the Inset scene's own on a frame that runs it (engine
+    // world::FacialSystem::render_scene_passes carries the witness). The table's scene row
+    // runs this, so a frame the status page stands in for steps nothing.
+    if (!kernel_) return;
     std::vector<opennova::world::FacialDraw> rows;
-    int32_t camera[3];
-    fixed3_from_godot(p_camera, camera);
-    kernel_->world.facials.compile_draws(kernel_->world, camera[0], camera[1],
-            kernel_->local.view.camera_mode == 0, rows);
+    kernel_->world.facials.render_scene_passes(kernel_->world, p_view, rows);
     // JO renders these targets then writes two unused globals. The complete
     // .text/.rdata/.data audit found no texture sink; model materials retain
     // their normal textures. Keep the frame counter/priority state live.
