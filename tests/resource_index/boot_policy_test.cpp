@@ -65,6 +65,13 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(!parse_launch_flags({"game.exe", "LAN"}).lan);
     CHECK(!parse_launch_flags({"game.exe", "/LAN="}).lan);
     CHECK(!parse_launch_flags({"game.exe"}).lan);
+    // /sstga: the whole token, any case [orig: Game_ParseCommandLineAndInit
+    // `_stricmp(token, "/sstga")` @0x4A77C1..0x4A77D3].
+    CHECK(parse_launch_flags({"game.exe", "/sstga"}).screenshot_tga);
+    CHECK(parse_launch_flags({"game.exe", "/w", "/SSTGA"}).screenshot_tga);
+    CHECK(!parse_launch_flags({"game.exe", "/sstgax"}).screenshot_tga);
+    CHECK(!parse_launch_flags({"game.exe", "sstga"}).screenshot_tga);
+    CHECK(!parse_launch_flags({"game.exe"}).screenshot_tga);
 
     // D-NET-540: /POSTIPADDRESS <address> and /POSTPORTNUMBER <n>, any case, the last one
     // standing; the port is the CRT atol of its token (0 when absent, so it overrides nothing)

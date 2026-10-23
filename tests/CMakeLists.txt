@@ -5644,6 +5644,11 @@ add_executable(npruntime_host_process_clock_test npruntime/host_process_clock_te
 target_link_libraries(npruntime_host_process_clock_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_host_process_clock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_process_clock COMMAND npruntime_host_process_clock_test)
+# D-NET-NEW-L8-44 (/sstga): the Screen Shot action's run-length TGA, its packets byte for byte.
+add_executable(screenshot_tga_test tga/screenshot_tga_test.cpp)
+target_link_libraries(screenshot_tga_test PRIVATE opennova_formats)
+target_include_directories(screenshot_tga_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME screenshot_tga COMMAND screenshot_tga_test)
 
 # --- parity lane L9 (NovaWorld) ---
 add_executable(npruntime_listing_baffle_key_test npruntime/listing_baffle_key_test.cpp)

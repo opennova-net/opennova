@@ -1892,9 +1892,11 @@ func _run_record_leg(code: int, param: int) -> void:
 
 
 ## The Screen Shot action's device leg (case 2): the frame as it last drew, written as the
-## first free SS%0.5d.jpg in the working directory (LaunchFlags.screen_shot_path; engine
-## gameprofile/player_files.h screenshot_file_name carries the witness). Nothing is written once
-## every index is taken, or when the device holds no frame.
+## first free SS%0.5d.jpg in the working directory, or under /sstga the first free SS%0.5d.tga
+## through the engine's run-length TGA writer (LaunchFlags.screen_shot_path and
+## screen_shot_tga_file; engine gameprofile/player_files.h screenshot_file_name and
+## formats/tga/tga.h tga_write_screenshot carry the witness). Nothing is written once every
+## index is taken, or when the device holds no frame.
 func _take_screen_shot() -> void:
 	var path := LaunchFlags.screen_shot_path()
 	if path.is_empty():
@@ -1902,7 +1904,14 @@ func _take_screen_shot() -> void:
 	var image := get_viewport().get_texture().get_image()
 	if image == null or image.is_empty():
 		return
-	image.save_jpg(path)
+	if not LaunchFlags.screen_shot_tga():
+		image.save_jpg(path)
+		return
+	image.convert(Image.FORMAT_RGBA8)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file != null:
+		file.store_buffer(LaunchFlags.screen_shot_tga_file(
+				image.get_data(), image.get_width(), image.get_height()))
 
 
 ## The quit dialog's yes runs input action 3 inline: the Exit Mission tone, then the

@@ -120,6 +120,90 @@ bool tga_write_rgb24(const uint8_t *rgba, uint32_t width, uint32_t height, std::
 	return write_true_colour(rgba, width, height, TgaForm{24, 0, false}, out, error, false);
 }
 
+// The Screen Shot action's TGA (tga.h carries the witness): Screenshot_SaveTGARLE's walk, `p` the
+// newest pixel's place in the frame's buffer (top row first), `row` and `x` its row and column, the
+// row the walk is on moving with the packet [orig: Screenshot_SaveTGARLE @0x51FF20].
+bool tga_write_screenshot(const uint8_t *rgba, uint32_t width, uint32_t height, std::vector<uint8_t> &out,
+                          std::string &error) {
+	out.clear();
+	if (rgba == nullptr || width == 0 || height == 0) {
+		error = "A TGA needs at least one pixel.";
+		return false;
+	}
+	if (width > 0xFFFFu || height > 0xFFFFu) {
+		error = "A TGA side is at most 65535 pixels.";
+		return false;
+	}
+	io::append_u8(out, 0);                              // no image ID
+	io::append_u8(out, 0);                              // no colour map
+	io::append_u8(out, TGA_TYPE_RUN_LENGTH_TRUE_COLOR); // @0x51FFD3
+	for (int i = 0; i < 5; ++i) io::append_u8(out, 0);  // the colour map's spec
+	io::append_u16_le(out, 0);                          // x origin
+	io::append_u16_le(out, 0);                          // y origin
+	io::append_u16_le(out, uint16_t(width));            // @0x51FFD8
+	io::append_u16_le(out, uint16_t(height));           // @0x51FFDD
+	io::append_u8(out, 24);                             // @0x51FFE2
+	io::append_u8(out, 0);                              // no alpha bits, the bottom row first
+	const int64_t w = width, pixels = int64_t(width) * height;
+	// A pixel's word, its 24 colour bits (the & 0xFFFFFF @0x52001B): R << 16 | G << 8 | B.
+	const auto colour = [&](int64_t i) {
+		const uint8_t *px = rgba + size_t(i) * 4;
+		return uint32_t(px[0]) << 16 | uint32_t(px[1]) << 8 | uint32_t(px[2]);
+	};
+	// Whether the pixel at `i` holds `c`: one outside the frame matches nothing.
+	const auto holds = [&](int64_t i, uint32_t c) { return i >= 0 && i < pixels && colour(i) == c; };
+	const auto pair = [&](int64_t a, int64_t b) { return a >= 0 && a < pixels && holds(b, colour(a)); };
+	const auto put_colour = [&](uint32_t c) {
+		out.push_back(uint8_t(c));
+		out.push_back(uint8_t(c >> 8));
+		out.push_back(uint8_t(c >> 16));
+	};
+	int64_t row = int64_t(height) - 1;
+	while (row >= 0) {
+		int64_t x = 0, p = row * w;
+		while (x < w) {
+			uint32_t c = colour(p);
+			uint8_t count = 0;
+			// One more pixel in the packet, the next one written: past a row's last pixel, the first
+			// of the next row up (@0x520069..0x520072, @0x520126..0x520135). None past the image's
+			// last pixel, where the game's walk goes on into the memory before its buffer.
+			const auto take_next = [&]() {
+				if (row == 0 && x + 1 == w) return false;
+				++count;
+				if (++x == w) {
+					--row;
+					x = 0;
+					p = row * w;
+				} else {
+					++p;
+				}
+				return true;
+			};
+			if (pair(p, p + 1)) {
+				// A run: the cap, the step, then the pixel after the newest one against the first.
+				while (count < 0x7F && take_next() && holds(p + 1, c)) {}
+				out.push_back(uint8_t(0x80u | count));
+				put_colour(c);
+			} else {
+				// A literal: the pair ahead, the cap, the step, the newest pixel, then its pair.
+				const size_t count_at = out.size();
+				out.push_back(0);
+				put_colour(c);
+				while (!pair(p + 1, p + 2) && count < 0x7F && take_next()) {
+					c = colour(p);
+					put_colour(c);
+					if (pair(p, p + 1)) break;
+				}
+				out[count_at] = count;
+			}
+			++x;
+			++p;
+		}
+		--row;
+	}
+	return true;
+}
+
 // The header the game's readers take (above): the image type at byte 2, the sides at 12
 // and 14.
 bool tga_header_size(const uint8_t *bytes, size_t size, uint32_t &width, uint32_t &height) {

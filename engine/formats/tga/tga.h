@@ -15,6 +15,7 @@ namespace opennova::tga {
 
 inline constexpr size_t TGA_HEADER_SIZE = 18;
 inline constexpr uint8_t TGA_TYPE_TRUE_COLOR = 2;
+inline constexpr uint8_t TGA_TYPE_RUN_LENGTH_TRUE_COLOR = 10;
 inline constexpr uint8_t TGA_DESCRIPTOR_ALPHA_8 = 8; // 8 alpha bits, the origin at the bottom left
 
 // `rgba` holds width x height pixels, R, G, B, A each, the top row first. False, with
@@ -55,6 +56,38 @@ bool tga_read_form(const uint8_t *bytes, size_t size, TgaForm &out);
 // writer that leaves alpha out by design).
 bool tga_write(const uint8_t *rgba, uint32_t width, uint32_t height, const TgaForm &form, std::vector<uint8_t> &out,
                std::string &error);
+
+// The Screen Shot action's TGA (the launch's /sstga): the frame run-length encoded the way the game's
+// capture writes it. `rgba` as tga_write_rgba32 (its alpha unread: the capture's pixels are 24-bit).
+// The header: no image ID, no colour map, image type 10 (run-length true colour), the origin (0, 0),
+// the sides, 24 bits a pixel, the descriptor 0 (no alpha bits, the first row the bottom one). The
+// packets walk the rows from the bottom up, each packet carrying on into the next row written:
+// - a pixel equal to the pixel after it opens a run: one more pixel each step while the pixel after
+//   the newest one equals the first, at most 128, then the byte 0x80 | (count - 1) and the colour's
+//   B, G, R;
+// - any other opens a literal: one more pixel each step unless the next two are equal, at most 128,
+//   stopping too after a pixel equal to the one after it; then the byte count - 1 and each pixel's
+//   B, G, R.
+// "The pixel after" is the next one in the frame's memory, top row first: past a row's last pixel that
+// is the first pixel of the row below it on screen (the row written before), while the packet goes on
+// with the first pixel of the row above (the next one written). So a run that reaches a row's end takes
+// the next row's first pixel in its colour whenever the row below starts in that colour, whatever that
+// pixel holds (a reader sees it so), and a run never goes on into the next row on its own colour alone.
+// The capture's own reads outside the frame are none here: the first row written compares its last
+// pixel with the word past the frame's end (a pixel outside matches nothing), and a packet ends at the
+// image's last pixel, where the game's runs on into the memory before its buffer (a reader stops at
+// the image's last pixel either way). False, with `error`, as tga_write_rgba32 refuses.
+// [orig: Screenshot_SaveTGARLE @0x51FF20 - the header @0x51FFA8..0x51FFE7 (type 10 @0x51FFD3, the sides
+//  @0x51FFD8 / @0x51FFDD, 24 bits @0x51FFE2), the rows from height - 1 down @0x51FFEC / @0x5201AD, the run
+//  test @0x520016..0x520032, the run @0x520050..0x5200AF (the cap @0x520050, the next row's start
+//  @0x520069..0x520072, the pixel after the newest @0x520074..0x52007F, the 0x80 | count word
+//  @0x520090..0x5200AF), the literal @0x5200BC..0x520193 (the pair ahead @0x520107..0x520112, the cap
+//  @0x520114, the next row's start @0x520126..0x520135, the pair at the newest @0x52015A..0x520169, the
+//  count byte and the pixels @0x52017D / @0x520193); its pixels Screenshot_CaptureTGA @0x5201E0 (the
+//  viewport's sides @0x5201F6..0x52020F, the "Snap Buffer for TGA ss" @0x520217, the back buffer
+//  @0x520241, top row first: CGfxDevice_CaptureBackbufferToARGB @0x6772E0)]
+bool tga_write_screenshot(const uint8_t *rgba, uint32_t width, uint32_t height, std::vector<uint8_t> &out,
+                          std::string &error);
 
 // The size a TGA's 18-byte header states: the width and height at bytes 12 and 14 (tga.cpp
 // holds the witnesses). False when `size` is shorter than the header or the image type at

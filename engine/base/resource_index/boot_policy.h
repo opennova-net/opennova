@@ -118,6 +118,7 @@ inline constexpr const char *kLaunchFlagNoReload = "/noreload";
 inline constexpr const char *kLaunchFlagConnectLog = "/CONNECTLOG";
 inline constexpr const char *kLaunchFlagNoConnectLog = "/NOCONNECTLOG";
 inline constexpr const char *kLaunchFlagLan = "/LAN";
+inline constexpr const char *kLaunchFlagScreenshotTga = "/sstga";
 inline constexpr const char *kLaunchFlagPostIpAddress = "/POSTIPADDRESS";
 inline constexpr const char *kLaunchFlagPostPortNumber = "/POSTPORTNUMBER";
 inline constexpr const char *kLaunchFlagUdpNovaWorld = "/UDPNOVAWORLD";
@@ -200,6 +201,12 @@ struct LaunchFlags {
     // @0x4A74D9..0x4A74E9 -> g_LanSwitch = 1 @0x4A74EB; Game_LoadConfig
     // @0x5514B1..0x5514BA].
     bool lan = false;
+    // /sstga: the whole token, any case: the Screen Shot action writes SS%0.5d.tga through the
+    // run-length TGA writer (formats/tga/tga.h tga_write_screenshot) instead of the JPEG
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - `_stricmp(token, "/sstga")`
+    // @0x4A77C1..0x4A77D1 -> g_ScreenshotTga = 1 @0x4A77D3; read by Screenshot_CaptureToFile
+    // @0x522290 (the extension) and @0x5222F2 (the writer)].
+    bool screenshot_tga = false;
     // /POSTIPADDRESS <address> and /POSTPORTNUMBER <n>, each the whole token in any case and
     // its next token as it stands, the last one standing: the address the game resolves (DNS
     // on; one that does not resolve overrides nothing) and the port's CRT atol (0 overrides

@@ -164,6 +164,7 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.no_hud = has_flag(args, kLaunchFlagNoHud); // [orig: @0x4A79F6..0x4A7A09]
     f.no_reload = has_flag(args, kLaunchFlagNoReload); // [orig: @0x4A76D7..0x4A76E9]
     f.lan = has_flag(args, kLaunchFlagLan); // [orig: @0x4A74D9..0x4A74EB]
+    f.screenshot_tga = has_flag(args, kLaunchFlagScreenshotTga); // [orig: @0x4A77C1..0x4A77D3]
     parse_novaworld_switches(args, f);
     parse_log_switches(args, f);
     return f;

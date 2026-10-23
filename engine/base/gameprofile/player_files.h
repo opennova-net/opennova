@@ -34,13 +34,15 @@ std::string player_file_words(const std::string &logical_name);
 
 // The file the Screen Shot action writes in the game's working directory: the first
 // "SS%0.5d.<ext>" of index 0..99998 the directory does not hold (`exists` asks after each
-// name), its extension "tga" under the launch's /sstga, else "jpg" (the device's JPEG of the
-// frame); "" when all of them are taken, and the action writes nothing.
+// name), its extension "tga" under the launch's /sstga (the frame through the run-length TGA
+// writer, formats/tga/tga.h tga_write_screenshot), else "jpg" (the device's JPEG of the frame);
+// "" when all of them are taken, and the action writes nothing.
 // [orig: Screenshot_CaptureToFile @0x5221A0 - the arm the action takes (the frame-capture bit
 //  of dword_B4C3C0 clear @0x5221BC; only input code 127, which no catalog row carries, sets
-//  it), the extension pick @0x522290..0x52229F ("jpg" @0x7D0224, "tga" under dword_B4C3C8,
+//  it), the extension pick @0x522290..0x52229F ("jpg" @0x7D0224, "tga" under g_ScreenshotTga,
 //  set by /sstga in Game_ParseCommandLineAndInit @0x4A77D3), sprintf("SS%0.5d.%s") @0x5222B2,
-//  File_CheckExists @0x5222BC, the stop at 99999 @0x5222D1; the action's call @0x49AF15]
+//  File_CheckExists @0x5222BC, the stop at 99999 @0x5222D1, the TGA arm Screenshot_CaptureTGA
+//  @0x5201E0 (the call @0x522300); the action's call @0x49AF15]
 std::string screenshot_file_name(const std::function<bool(const std::string &)> &exists, bool tga);
 
 } // namespace opennova::gameprofile
