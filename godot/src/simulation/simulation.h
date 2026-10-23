@@ -278,6 +278,11 @@ private:
 	void fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome);
 	opennova::inmatch::FrameInput begin_session_frame(
 			const Ref<MissionFrameInput> &p_input);
+	// A joiner sim with no load left to run (one that dialed after its own mission loaded)
+	// ends the mission start the S2C 0x1A released at the next session frame's head: the
+	// push and the final wait's first pass, poll_join_mission_start with its load done
+	// (engine: inmatch::JoinerRole::push_mission_start_end). The released frame holds until it.
+	void end_loaded_join_mission_start();
 	opennova::inmatch::Role &active_role();
 	// Install a freshly constructed role as the session's (the session's role
 	// switch is the gate: false while it is loaded/running, the role stays and
@@ -919,11 +924,6 @@ public:
 	// the seq the next record takes.
 	TypedArray<JoinerNetTraceRow> debug_joiner_net_trace(int64_t p_from_seq) const;
 	int64_t debug_joiner_net_trace_next_seq() const;
-	// The joiner's mission start (engine: inmatch/joiner_connection.h
-	// set_mission_start_loading): the shell declares its load runs after the S2C 0x1A,
-	// and runs it inside the game-start wait's pass that takes the 0x1A
-	// (poll_join_mission_start).
-	void set_join_mission_start_loading(bool p_loading);
 	// The joiner's load at the S2C 0x11 (engine: inmatch/joiner_connection.h
 	// set_sync_tail_loading): the shell declares it while the 0x11 is awaited and clears it
 	// once the load has ended; the 0x0A follows.

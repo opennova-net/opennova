@@ -1186,13 +1186,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		pending_reload_notifications_.clear();
 		return outbound;
 	}
-	// A released mission start whose load the embedder still runs: retail is inside
-	// Game_StartMission, which runs no client net frame (no tick, no housekeeping, no
-	// receive, no send) until the load's own pumps (push_mission_start_end). What arrives
-	// waits in the queue. [orig: Game_StartMission @0x524e29..0x526255]
-	if (joiner_ != nullptr && joiner_->mission_start_released() &&
-			joiner_->mission_start_loading())
-		return outbound;
+	// A released mission start holds the frame until the embedder's load ends with
+	// push_mission_start_end: retail is inside Game_StartMission, which runs no client net
+	// frame (no tick, no housekeeping, no receive, no send) until the load's own pumps. What
+	// arrives waits in the queue. [orig: Game_StartMission @0x524e29..0x526255]
+	if (joiner_ != nullptr && joiner_->mission_start_released()) return outbound;
 	// The 0x11's declared load runs the same way: no pump on the game connection until it has
 	// ended; the frame after it is the game-start wait's first, whose head queues the 0x0A
 	// ahead of its receive (JoinerConnection::set_sync_tail_loading carries the witness).
@@ -1955,13 +1953,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// @0x629802]: the in-match boundary reopens every send_holdoff_ticks_
 		// ticks, 0 = per-tick.)
 	});
-	// The frame that received the 0x1A with no load to run goes straight on into the
-	// mission start's end: Game_StartMission leaves NapiClient_WaitForGameStart after its
-	// last send and runs its pumps [orig: @0x42cc92 -> @0x42ccbf -> @0x524e29].
-	if (joiner_->mission_start_released() && !joiner_->mission_start_loading()) {
-		for (std::vector<uint8_t> &d : push_mission_start_end())
-			outbound.push_back(std::move(d));
-	}
 	// The stale-carrier sweep runs in the entity update, after the client net frame,
 	// so its 0x0F requests queue behind this frame's send block and leave at the next
 	// boundary ahead of that frame's producers. Our movers step inside run_frame,

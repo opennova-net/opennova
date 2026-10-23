@@ -40,6 +40,7 @@
 #include <net/npwire/idatagram_socket.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include "npruntime/fresh_profile_oracle.h"
+#include "npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
 #include <net/npwire/ingame_decode.h>          // PlayerExtendedUplink (the §5.10 0x0C body)
 #include <net/npwire/ingame_message_catalog.h> // ingame_message_name
@@ -228,6 +229,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	for (int f = 0; f < 400 && !ready; ++f) {
 		pump_and_deliver();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d);
+		push_released_mission_start(client, ship_joiner);
 		++tick;
 		ready = client.in_match() && client.is_deployed();
 	}

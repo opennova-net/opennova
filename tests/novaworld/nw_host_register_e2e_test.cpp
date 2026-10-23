@@ -29,6 +29,7 @@
 
 #include "net_sockets.h"
 #include "../npruntime/enumerated_join.h"
+#include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
 #include <chrono>
 #include <cstdint>
@@ -1158,6 +1159,7 @@ int main() {
 			     live_joiner.Client_ProcessNetworkFrame(live_tick)) {
 				send_live(dg);
 			}
+			push_released_mission_start(live_joiner, send_live);
 		}
 		expect(live_joiner.has_self_handle(),
 		       "standalone JO host streams a named pool-0 spawn for self discovery");
@@ -1180,6 +1182,7 @@ int main() {
 			     live_joiner.Client_ProcessNetworkFrame(live_tick)) {
 				send_live(dg);
 			}
+			push_released_mission_start(live_joiner, send_live);
 			self_kept = self_kept && live_joiner.has_self_handle();
 		}
 		expect(live_joiner.in_match() && self_kept,

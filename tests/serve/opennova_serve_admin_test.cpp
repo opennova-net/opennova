@@ -26,6 +26,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 #include "serve_test_support.h"
+#include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_protocol.h>
@@ -109,6 +110,7 @@ struct Rig {
 			return;
 		}
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, [this](std::vector<uint8_t> datagram) { ship(datagram); });
 		++tick;
 		for (replication::ClientChatLine &line : client.view().drain_chat_lines()) chat.push_back(line);
 	}

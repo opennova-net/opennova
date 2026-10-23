@@ -30,6 +30,7 @@
 #include "common/boot_file_source.h"
 #include "common/synthetic_mission.h"
 
+#include "joiner_mission_start.h" // the harness's end of a released mission start
 #include "net_datagram_socket.h"
 #include "net_sockets.h"
 
@@ -551,6 +552,7 @@ void test_round_end_abandons_a_joiners_mission_start() {
 		const bool exit_pending = client.mission_start_aborted() &&
 				client.mission_exit_reason() == inmatch::kMissionExitRoundOver;
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		if (exit_pending)
 			restarted_next &= !client.mission_start_aborted() &&
@@ -633,6 +635,7 @@ int main() {
 		host_up = host.frame();
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		const int32_t reason = client.mission_exit_reason();
 		if (reason == 0) return;

@@ -137,8 +137,8 @@ public:
 	// definition and model loads are in (ClientRuntime::push_mission_start_first_loadout):
 	// sends what its pumps build, the first 0x2F when the countdown is spent there.
 	void push_mission_start_first_loadout();
-	// The end of a mission start whose load ran after the S2C 0x1A
-	// (ClientRuntime::set_mission_start_loading): sends what its pumps build, the two
+	// The end of the mission start the S2C 0x1A released, once the embedder's load has run
+	// (ClientRuntime::push_mission_start_end): sends what its pumps build, the two
 	// 0x2F and the 0x0B, then runs the final wait's first pass for the S2C 0x0F, which
 	// ships what the push's countdown held; nothing before the release.
 	void push_mission_start_end();

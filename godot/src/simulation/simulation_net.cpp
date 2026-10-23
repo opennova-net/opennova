@@ -1015,11 +1015,6 @@ PackedStringArray Simulation::get_mission_start_model_files() const {
 	return files;
 }
 
-void Simulation::set_join_mission_start_loading(bool p_loading) {
-	net_.join_mission_start_loading = p_loading;
-	install_join_mission_start();
-}
-
 void Simulation::set_join_sync_tail_loading(bool p_loading) {
 	net_.join_sync_tail_loading = p_loading;
 	install_join_mission_start();
@@ -1040,6 +1035,11 @@ void Simulation::end_join_mission_data_load() {
 
 bool Simulation::is_join_mission_start_released() const {
 	return is_joiner() && runtime_ != nullptr && runtime_->mission_start_released();
+}
+
+void Simulation::end_loaded_join_mission_start() {
+	if (joiner_role_ != nullptr && is_join_mission_start_released())
+		joiner_role_->push_mission_start_end();
 }
 
 void Simulation::push_join_mission_start_first_loadout() {

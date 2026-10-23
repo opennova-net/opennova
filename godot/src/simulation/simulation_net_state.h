@@ -142,9 +142,6 @@ struct SimulationNetState {
 	// The game-session APPID join token (decoded .joi CK) a NovaWorld host
 	// validates (reject code 9). "0" is the LAN default. Retained across rebuilds.
 	std::string app_id = "0";
-	// The joiner's mission-start seam (JoinerConnection::set_mission_start_loading): the
-	// shell's load runs after the S2C 0x1A. Retained across rebuilds.
-	bool join_mission_start_loading = false;
 	// The joiner's S2C 0x11 load seam (JoinerConnection::set_sync_tail_loading): the shell's
 	// terrain load runs at the 0x11, ahead of the 0x0A. Retained across rebuilds.
 	bool join_sync_tail_loading = false;

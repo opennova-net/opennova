@@ -590,21 +590,6 @@ public:
 	//  @0x42cf0b, AdmDef_FindIndexByName @0x42cf21]
 	void set_weapon_table(const world::WeaponTable *weapons) { weapons_ = weapons; }
 
-	// The end of the joiner's mission start. Retail's Game_StartMission waits for the S2C
-	// 0x1A (NapiClient_WaitForGameStart), runs the whole definition and model load, queues
-	// the first 0x2F (slot 195), freezes the loaded-model list, runs Player_InitPlayer,
-	// queues the second 0x2F (the spawn fill's slot) and the 0x0B, and pumps them out at
-	// its send points (ClientRuntime::push_mission_start_end). The 0x1A only releases the
-	// mission start (stage AwaitMissionStart). An embedder whose mission-start load runs
-	// AFTER the release sets `loading` before the 0x1A arrives and pushes once its load
-	// has ended; without it (no load to run) the runtime pushes in the 0x1A's frame.
-	// [orig: Game_StartMission @0x524360 - NapiClient_WaitForGameStart @0x524e29, the
-	//  loads @0x525495..0x525762, the first 0x2F @0x525836, the freeze @0x525a6e,
-	//  Player_InitPlayer @0x525bbc, the second 0x2F @0x525c2e, the 0x0B
-	//  @0x52620e..0x52624b, CNapiNetwork_PumpClientProtocolSend @0x526255]
-	void set_mission_start_loading(bool loading) { mission_start_loading_ = loading; }
-	bool mission_start_loading() const { return mission_start_loading_; }
-
 	// The S2C 0x11's answer (D-NET-NEW-L2-19). The 0x11 ends the sync-tail wait, which reads
 	// its flag after the whole pass and that pass's paced send; the mission start then runs the
 	// 0x0B header's terrain and environment load and the avatar combo models, pumping nothing
@@ -676,6 +661,17 @@ public:
 	// The game-start wait's 0x0A for the client runtime's one queue: nullopt when none is owed
 	// or the declared load still runs. Taking it moves the join on to the world stream's wait.
 	std::optional<ProtocolMessage> take_world_stream_request();
+	// The end of the joiner's mission start. Retail's Game_StartMission waits for the S2C
+	// 0x1A (NapiClient_WaitForGameStart), runs the whole definition and model load, queues
+	// the first 0x2F (slot 195), freezes the loaded-model list, runs Player_InitPlayer,
+	// queues the second 0x2F (the spawn fill's slot) and the 0x0B, and pumps them out at
+	// its send points (ClientRuntime::push_mission_start_end). The 0x1A only releases the
+	// mission start (stage AwaitMissionStart); the embedder's load runs after the release and
+	// ends with push_mission_start_end.
+	// [orig: Game_StartMission @0x524360 - NapiClient_WaitForGameStart @0x524e29, the
+	//  loads @0x525495..0x525762, the first 0x2F @0x525836, the freeze @0x525a6e,
+	//  Player_InitPlayer @0x525bbc, the second 0x2F @0x525c2e, the 0x0B
+	//  @0x52620e..0x52624b, CNapiNetwork_PumpClientProtocolSend @0x526255]
 	bool mission_start_released() const {
 		return post_auth_stage_ == PostAuthStage::AwaitMissionStart;
 	}
@@ -1466,7 +1462,6 @@ private:
 	LoadoutKit loadout_kit_;      // binding-injected submission content (see set_loadout_kit)
 	bool loadout_kit_set_ = false;
 	const world::WeaponTable *weapons_ = nullptr; // set_weapon_table
-	bool mission_start_loading_ = false;          // set_mission_start_loading
 	bool mission_start_first_loadout_taken_ = false; // take_mission_start_first_loadout
 	bool sync_tail_loading_ = false;              // set_sync_tail_loading
 	bool mission_data_loading_ = false;           // set_mission_data_loading

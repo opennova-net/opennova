@@ -894,15 +894,6 @@ public:
 		if (joiner_)
 			joiner_->set_loaded_model_challenge_snapshot(std::move(values));
 	}
-	// The mission start's end (JoinerConnection::set_mission_start_loading): an embedder
-	// whose load runs after the S2C 0x1A declares it, and once its load has ended calls
-	// push_mission_start_end for the datagrams to send. While the released mission start
-	// loads, the frame neither receives nor sends: retail is inside Game_StartMission's
-	// load, which pumps only at its own points. Without the declaration the frame that
-	// received the 0x1A pushes at once.
-	void set_mission_start_loading(bool loading) {
-		if (joiner_) joiner_->set_mission_start_loading(loading);
-	}
 	// The S2C 0x11's load (JoinerConnection::set_sync_tail_loading): an embedder whose 0x0B
 	// header terrain / environment load and avatar combo models run at the 0x11 declares it
 	// before the 0x11 arrives and clears it once that load has ended; meanwhile the frame

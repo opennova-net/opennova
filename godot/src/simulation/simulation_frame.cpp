@@ -246,10 +246,12 @@ bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
 	return accepted;
 }
 
-// The shared head of a session frame: reset the frame's profile spans, take the
+// The shared head of a session frame: a loaded joiner's released mission start ends
+// (end_loaded_join_mission_start), then reset the frame's profile spans, take the
 // typed input, place the sound listener and stamp the viewport height.
 opennova::inmatch::FrameInput Simulation::begin_session_frame(
 		const Ref<MissionFrameInput> &p_input) {
+	end_loaded_join_mission_start();
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
 	if (kernel_ != nullptr) kernel_->profile.reset();
@@ -312,6 +314,7 @@ bool Simulation::step() {
 	// frame value inmatch::Session consumes. Direct look input has already updated
 	// kernel_->local.input's composed heading/pitch, so it must not be replayed as a
 	// second pixel delta here.
+	end_loaded_join_mission_start();
 	opennova::inmatch::FrameInput input;
 	input.player.movement = kernel_->local.input;
 	input.player.held_action_bits = kernel_->local.weapon.fire_held

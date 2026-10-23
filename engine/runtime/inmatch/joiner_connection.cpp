@@ -1881,8 +1881,7 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 		           !mission_start_aborted_ && (!round_over_gate_ || out.mission_started)) {
 			// The world-stream terminator ends the game-start wait and releases the mission
 			// start, whose end queues and pumps the loadout/status submissions
-			// (ClientRuntime::push_mission_start_end): in this frame when the embedder has no
-			// load to run, else when its load ends.
+			// (ClientRuntime::push_mission_start_end) when the embedder's load ends.
 			// [orig: NapiClient_WaitForGameStart @0x42cc10 (the exit test @0x42ccbf) from
 			//  Game_StartMission @0x524e29]
 			post_auth_stage_ = PostAuthStage::AwaitMissionStart;
@@ -2287,7 +2286,7 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			// and the avatar combo models (an embedder's declared load, set_sync_tail_loading),
 			// then NapiClient_WaitForGameStart queues the empty reliable C2S 0x0A at its head and
 			// pumps it; the rest of the load waits for the S2C 0x1A's mission start
-			// (set_mission_start_loading; D-NET-NEW-L2-19).
+			// (push_mission_start_end at its end; D-NET-NEW-L2-19).
 			// [orig: NapiNPClientMsg_0x011 @0x4226E0; Game_StartMission @0x524360 - the joiner
 			//  arm's NapiClient_SendPlayerSyncAndWaitForSyncTail @0x524DAB, then
 			//  Game_LoadTerrainDuringConnect @0x524DF2, Avatars_LoadComboModels @0x524E24,

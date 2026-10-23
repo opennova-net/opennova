@@ -155,7 +155,6 @@ void Simulation::install_join_glsvss_request() {
 
 void Simulation::install_join_mission_start() {
 	if (!runtime_) return;
-	runtime_->set_mission_start_loading(net_.join_mission_start_loading);
 	runtime_->set_sync_tail_loading(net_.join_sync_tail_loading);
 	runtime_->set_mission_data_loading(net_.join_mission_data_loading);
 }

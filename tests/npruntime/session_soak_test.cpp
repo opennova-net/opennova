@@ -30,6 +30,7 @@
 
 #include <net/npwire/idatagram_socket.h>
 #include "impaired_datagram_socket.h"
+#include "joiner_mission_start.h" // the harness's end of a released mission start
 #include <net/npwire/ingame_decode.h>
 
 #include <base/io/tick_rate.h>
@@ -340,6 +341,9 @@ bool run_soak(const SoakCase &soak) {
 			} else {
 				out = j.client->Client_ProcessNetworkFrame(tick);
 			}
+			push_released_mission_start(*j.client, [&out](std::vector<uint8_t> datagram) {
+				out.push_back(std::move(datagram));
+			});
 			for (const std::vector<uint8_t> &d : out)
 				if (!d.empty()) j.sock->send_to(kHostAddr, d.data(), d.size());
 			const uint32_t frontier = j.client->inbound_frontier_seq();

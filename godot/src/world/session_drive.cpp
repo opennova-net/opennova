@@ -215,9 +215,9 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// This shell loads the joiner's mission start in two parts: the 0x0B header's terrain at
 	// the S2C 0x11 (step_preload's declaration, set_join_sync_tail_loading), the rest after
 	// the S2C 0x1A releases it (the world load, the host's streamed assets, the loaded-model
-	// freeze), whose end sends the two 0x2F and the 0x0B (engine:
-	// inmatch/joiner_connection.h set_mission_start_loading, D-NET-531, D-NET-NEW-L2-19).
-	join_preload_sim_->set_join_mission_start_loading(true);
+	// freeze), whose end sends the two 0x2F and the 0x0B (step_preload's
+	// poll_join_mission_start; engine: inmatch::JoinerRole::push_mission_start_end, D-NET-531,
+	// D-NET-NEW-L2-19).
 	// Ahead of both, every mission start's effect system loads between its final S2C 0x64
 	// and its 0x09 (step_preload; engine: inmatch/joiner_connection.h set_mission_data_loading,
 	// D-NET-NEW-L2-43).
@@ -274,8 +274,8 @@ void SessionDrive::step_preload() {
 	// The 0x11 ended the sync-tail wait: the session is identified once, the 0x0B header's
 	// terrain loads, and the load's end releases the 0x0A, which the next poll queues at its
 	// head; the world stream then runs until the S2C 0x1A releases the mission start and the
-	// rest of its load (D-NET-NEW-L2-19; engine inmatch/joiner_connection.h preload_ready,
-	// set_sync_tail_loading and set_mission_start_loading carry the witness).
+	// rest of its load (D-NET-NEW-L2-19; engine inmatch/joiner_connection.h preload_ready and
+	// set_sync_tail_loading, ClientRuntime::push_mission_start_end carry the witness).
 	if (!join_identified_) {
 		if (!identify_join_session()) return;
 		join_identified_ = true;

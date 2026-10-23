@@ -29,6 +29,8 @@
 //  Game_StartMission's final loop @0x52628d..0x5262df; the main-loop gate
 //  Client_ProcessNetworkFrame @0x42c3dd]
 
+#include "joiner_mission_start.h" // the harness's end of a released mission start
+
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/joiner_role.h> // the release frame through the role (D-NET-526)
@@ -158,6 +160,10 @@ struct Harness {
 	ClientAuth auth;
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	bool uplink = false; // the frame builds a C2S 0x0C body (the game loop's uplink)
+	// The test runs the mission start's load itself after the S2C 0x1A releases it, ending
+	// it with push_mission_start_end; without it the harness has no load to run and ends the
+	// released mission start right after the 0x1A's frame (push_released_mission_start).
+	bool load_declared = false;
 
 	Harness() { client.set_title(&kJo); }
 
@@ -170,8 +176,14 @@ struct Harness {
 					frame_server_session(server_tx, server_scrk, auth.ck, *incoming);
 			client.receive(dg.data(), dg.size());
 		}
-		if (uplink) return client.Client_ProcessNetworkFrame(PlayerExtendedUplink{}, tick++);
-		return client.Client_ProcessNetworkFrame(tick++);
+		std::vector<std::vector<uint8_t>> sent =
+				uplink ? client.Client_ProcessNetworkFrame(PlayerExtendedUplink{}, tick++)
+				       : client.Client_ProcessNetworkFrame(tick++);
+		if (!load_declared)
+			push_released_mission_start(client, [&sent](std::vector<uint8_t> datagram) {
+				sent.push_back(std::move(datagram));
+			});
+		return sent;
 	}
 	std::vector<std::vector<uint8_t>> frame(std::vector<ProtocolMessage> incoming) {
 		return frame(&incoming);
@@ -846,6 +858,9 @@ struct RoleHarness {
 	ClientAuth auth;
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	inmatch::ClientRuntime &client;
+	// The test runs the mission start's call itself (poll_mission_start); without it the
+	// harness has no load to run and ends the released mission start after the 0x1A's tick.
+	bool load_declared = false;
 
 	RoleHarness() : client(install()) {}
 
@@ -874,6 +889,9 @@ struct RoleHarness {
 		}
 		const std::size_t from = socket.sent.size();
 		role.run_tick(input);
+		// The embedder's end of the mission start the tick's receive released, its load done
+		// (poll_mission_start's): the push and the final wait's first pass, shipped here.
+		if (!load_declared && client.mission_start_released()) role.push_mission_start_end();
 		return std::vector<std::vector<uint8_t>>(socket.sent.begin() +
 						static_cast<std::ptrdiff_t>(from), socket.sent.end());
 	}
@@ -1036,7 +1054,7 @@ bool run_the_final_wait_end_ends_the_mode_init() {
 bool run_a_0x0f_after_the_mission_start_call_ends_the_mode_init() {
 	RoleHarness h;
 	if (!expect(drive_into_the_world_stream(h, 0), "call end: the world stream runs")) return false;
-	h.client.set_mission_start_loading(true);
+	h.load_declared = true;
 	(void)h.frame({self_spawn_record()});
 	const std::vector<uint8_t> release = frame_server_session(h.server_tx, h.server_scrk,
 			h.auth.ck, {make_protocol_message(0x1A, {})});
@@ -1308,7 +1326,7 @@ bool run_the_mission_start_submissions_follow_the_countdown() {
 	Harness h;
 	if (!expect(drive_into_the_world_stream(h, 12), "loading: the world stream runs"))
 		return false;
-	h.client.set_mission_start_loading(true);
+	h.load_declared = true;
 	for (int i = 0; i < 24 && h.client.send_holdoff_countdown() != 1; ++i) (void)h.frame();
 	if (!expect(h.packets(h.frame({make_protocol_message(0x1A, {})}), {{}}) &&
 						h.client.mission_start_released(),
@@ -1361,7 +1379,7 @@ bool run_the_mission_start_first_leg_runs_mid_load() {
 	Harness h;
 	if (!expect(drive_into_the_world_stream(h, 12), "first leg: the world stream runs"))
 		return false;
-	h.client.set_mission_start_loading(true);
+	h.load_declared = true;
 	for (int i = 0; i < 24 && h.client.send_holdoff_countdown() != 2; ++i) (void)h.frame();
 	if (!expect(h.client.send_holdoff_countdown() == 2, "first leg: c = 2 ahead of the 0x1A"))
 		return false;
@@ -1403,7 +1421,7 @@ bool run_the_mission_start_runs_in_the_0x1a_pass() {
 	RoleHarness h;
 	if (!expect(drive_into_the_world_stream(h, 12), "mission start call: the world stream runs"))
 		return false;
-	h.client.set_mission_start_loading(true);
+	h.load_declared = true;
 	for (int i = 0; i < 24 && h.client.send_holdoff_countdown() != 3; ++i) (void)h.frame();
 	std::vector<std::string> order;
 	std::vector<std::vector<uint8_t>> first_leg;

@@ -26,6 +26,7 @@
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/server_log_devices.h>
 #include "serve_test_support.h"
+#include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 #include "status_console.h"
 
 #include <base/io/strutil.h>
@@ -454,6 +455,7 @@ void test_serve_session_capture() {
 		if (!server.frame(kFrame)) return false;
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		return true;
 	};

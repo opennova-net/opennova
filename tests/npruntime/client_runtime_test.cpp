@@ -1114,9 +1114,8 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	              "no CC.BIN and a zero bias omit COUNTRYCODE and TZB");
 }
 
-// `mission_start_loading`: the embedder's mission-start load runs after the S2C 0x1A
-// (the shell's), so the 0x1A only releases the mission start and its end pushes the
-// 0x2F pair and the 0x0B (D-NET-531); else the load already ran and the 0x1A sends them.
+// The mission start: the S2C 0x1A only releases it, and its end (the embedder's load's)
+// pushes the 0x2F pair and the 0x0B (D-NET-531).
 // [orig: Game_StartMission @0x524360 - NapiClient_WaitForGameStart @0x524e29, the loads
 //  @0x525495..0x525762, the 0x2F @0x525836 / @0x525c2e, the 0x0B @0x52624b, the push
 //  @0x526255]

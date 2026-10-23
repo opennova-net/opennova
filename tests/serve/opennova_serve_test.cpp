@@ -15,6 +15,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 #include "serve_test_support.h"
+#include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
 #include <base/gameprofile/game_type.h>
 #include <formats/mission/bms.h>
@@ -283,6 +284,7 @@ int main() {
 		}
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		in_match = client.in_match();
 	}
@@ -293,6 +295,7 @@ int main() {
 		if (!server.frame(kFrame)) break;
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 	}
 	CHECK(client.is_deployed());
@@ -327,6 +330,7 @@ int main() {
 			if (!server.frame(kFrame)) break;
 			drain();
 			for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+			push_released_mission_start(client, ship);
 			++tick;
 			// The joiner's stored exit 4, in session and not the authority, is
 			// the Game Loop: the reload in place (main_frame_exit).
@@ -401,6 +405,7 @@ int main() {
 			ended = !server.frame(kFrame);
 			drain();
 			(void)client.Client_ProcessNetworkFrame(tick++);
+			push_released_mission_start(client, [](std::vector<uint8_t>) {});
 		}
 		CHECK(ended);
 		CHECK(server.rotation_ended());
@@ -409,6 +414,7 @@ int main() {
 	for (int f = 0; f < 120 && !client.session_lost(); ++f) {
 		drain();
 		(void)client.Client_ProcessNetworkFrame(tick++);
+		push_released_mission_start(client, [](std::vector<uint8_t>) {});
 	}
 	CHECK(client.session_lost());
 	CHECK(client.has_disconnect_event() &&

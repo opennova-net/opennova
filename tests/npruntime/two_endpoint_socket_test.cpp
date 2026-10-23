@@ -32,6 +32,7 @@
 #include <runtime/inmatch/server_spawn.h>
 
 #include "host_test_setup.h"
+#include "joiner_mission_start.h" // the harness's end of a released mission start
 
 #include <runtime/inmatch/udp_session_transport.h>
 
@@ -185,6 +186,7 @@ int main() {
 		inmatch::host_session_pump(owner, host_dgram);
 		drain_joiner();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d);
+		push_released_mission_start(client, ship_joiner);
 		++tick;
 		ready = client.in_match() && client.is_deployed();
 	}

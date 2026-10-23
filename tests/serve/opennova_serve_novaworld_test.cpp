@@ -25,6 +25,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 #include "serve_test_support.h"
+#include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
 #include "lister.h"
 #include "nw_udp_listener.h"
@@ -358,6 +359,7 @@ int main() {
 		}
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		in_match = client.in_match();
 	}
@@ -371,6 +373,7 @@ int main() {
 		if (!server.frame(kFrame)) break;
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		with_joiner = row();
 		if (with_joiner && with_joiner->roster.size() == 1) break;
