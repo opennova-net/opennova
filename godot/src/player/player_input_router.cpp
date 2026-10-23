@@ -41,8 +41,12 @@ constexpr int kUseItemRow = 44;
 // controls::KeyRowEvent and PlayerAction::EmbedderRow carry the witness).
 constexpr int kDeployPickCode = 12;
 constexpr int kEscapeRow = 67;
+// The Screen Shot row (code 2): its case writes the frame to a file, the shell's device leg
+// (engine gameprofile/player_files.h screenshot_file_name carries the witness).
+constexpr int kScreenShotRow = 69;
 bool shell_record(int p_code) {
-	return p_code == kDeployPickCode || p_code == opennova::controls::action_code(kEscapeRow);
+	return p_code == kDeployPickCode || p_code == opennova::controls::action_code(kEscapeRow) ||
+			p_code == opennova::controls::action_code(kScreenShotRow);
 }
 
 // The held USE row's arm through the sim's press latch (engine

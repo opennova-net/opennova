@@ -53,6 +53,8 @@ extends RefCounted
 
 ## The escape row's dispatch code (catalog row 67).
 const ESCAPE_CODE := 18
+## The Screen Shot row's dispatch code (catalog row 69).
+const SCREEN_SHOT_CODE := 2
 
 var _keys: KeyEventQueue
 

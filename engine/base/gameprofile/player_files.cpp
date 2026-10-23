@@ -1,6 +1,7 @@
 #include <base/gameprofile/player_files.h>
 
 #include <cctype>
+#include <cstdio>
 
 #include <base/gameprofile/required_resources.h>
 #include <base/io/os_path.h>
@@ -52,6 +53,17 @@ bool screenshot_name(const std::string &name) {
 }
 
 } // namespace
+
+std::string screenshot_file_name(const std::function<bool(const std::string &)> &exists, bool tga) {
+	const char *extension = tga ? "tga" : "jpg";
+	for (int index = 0; index < 99999; ++index) {
+		char name[32];
+		// Retail's "SS%0.5d.%s": the same five digits as %05d for every index it tries.
+		std::snprintf(name, sizeof name, "SS%05d.%s", index, extension);
+		if (!exists(name)) return name;
+	}
+	return std::string();
+}
 
 const std::vector<PlayerFile> &player_files() {
 	static const std::vector<PlayerFile> rows = [] {

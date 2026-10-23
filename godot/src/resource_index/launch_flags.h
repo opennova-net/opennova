@@ -72,6 +72,10 @@ public:
 	// `--working-dir <path>`, which a source run passes since Godot's `--path` moved the process
 	// to the project, else the process's working directory (a packaged runtime's own).
 	static String working_dir();
+	// The file the Screen Shot action writes: the first SS%0.5d.jpg the working directory does
+	// not hold, under it; "" when every index is taken (engine gameprofile/player_files.h
+	// screenshot_file_name carries the witness).
+	static String screen_shot_path();
 
 	// The whole parsed set, for a C++ consumer that reads several switches at once (the
 	// NovaWorld connect's command line, NovaWorldClient::start).

@@ -1882,11 +1882,27 @@ func _run_record_leg(code: int, param: int) -> void:
 	if code == KeyboardPass.ESCAPE_CODE:
 		if not _run_escape_action() and is_gameplay_input_active():
 			_pause()
+	elif code == KeyboardPass.SCREEN_SHOT_CODE:
+		_take_screen_shot()
 	elif _deploy_presenter != null:
 		_deploy_presenter.send_pick(param)
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim != null and bool(sim.take_input_reset()):
 		_reset_key_state()
+
+
+## The Screen Shot action's device leg (case 2): the frame as it last drew, written as the
+## first free SS%0.5d.jpg in the working directory (LaunchFlags.screen_shot_path; engine
+## gameprofile/player_files.h screenshot_file_name carries the witness). Nothing is written once
+## every index is taken, or when the device holds no frame.
+func _take_screen_shot() -> void:
+	var path := LaunchFlags.screen_shot_path()
+	if path.is_empty():
+		return
+	var image := get_viewport().get_texture().get_image()
+	if image == null or image.is_empty():
+		return
+	image.save_jpg(path)
 
 
 ## The quit dialog's yes runs input action 3 inline: the Exit Mission tone, then the

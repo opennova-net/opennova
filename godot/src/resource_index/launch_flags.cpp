@@ -1,6 +1,8 @@
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
+#include <base/gameprofile/player_files.h>
 
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
@@ -44,6 +46,7 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("mcp_port"), &LaunchFlags::mcp_port);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("novaworld_host"), &LaunchFlags::novaworld_host);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_hud"), &LaunchFlags::no_hud);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("screen_shot_path"), &LaunchFlags::screen_shot_path);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_reload"), &LaunchFlags::no_reload);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan"), &LaunchFlags::lan);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("set_args_override", "args"),
@@ -177,6 +180,14 @@ String LaunchFlags::novaworld_host() {
 
 int LaunchFlags::mcp_port() {
 	return parse().mcp_port;
+}
+
+String LaunchFlags::screen_shot_path() {
+	const String dir = working_dir();
+	const std::string name = opennova::gameprofile::screenshot_file_name(
+			[&dir](const std::string &p_name) { return FileAccess::file_exists(dir.path_join(to_gd(p_name))); },
+			false);
+	return name.empty() ? String() : dir.path_join(to_gd(name));
 }
 
 bool LaunchFlags::no_hud() {
