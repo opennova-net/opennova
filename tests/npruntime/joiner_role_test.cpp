@@ -2230,6 +2230,74 @@ bool run_a_receive_time_mount_request_ships_in_its_frame() {
 			"receive-time 0x1D: shipped once");
 }
 
+// The 0x5A's mount request queues at the 0x5A's place among its receive's sends (L7-s28 row 1,
+// V-ROLL-AV N1): one datagram carrying the grant and then a time-sync ping ships the apply's
+// C2S 0x1D ahead of the ping's C2S 0x08 reply, as retail dispatches the 0x5A's handler (its
+// mount queues the 0x1D) before the ping's; the ping ahead of the grant ships its reply first.
+// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - CNapiNPConnection_DispatchMessage @0x625EF1
+//  per message in the packet's order; NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 -
+//  Player_MountWeaponSlot @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30;
+//  NapiNPClientMsg_0x043 @0x42FA90 - CNapiNetwork_QueueReliableMessage(0x08) @0x42FAD3]
+bool run_a_grant_mount_request_queues_at_the_grants_place() {
+	bool ok = true;
+	for (const bool grant_first : {true, false}) {
+		Harness h;
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h.role.run_tick(h.input);
+		if (!expect(h.role.local_spawned(), "grant place: L spawned")) return false;
+		bool raise = true;
+		h.role.kit_seams.apply_authoritative = [&h, &raise] {
+			if (!raise) return;
+			raise = false;
+			h.kernel->world.out.stance_requests.push_back(0xA9);
+		};
+		WeaponLoadout list;
+		list.avatar_class = 6;
+		WeaponLoadoutSlot slot;
+		slot.type_id = 1;
+		list.slots = {slot};
+		const ProtocolMessage grant =
+				make_protocol_message(s2c::WEAPON_LOADOUT, encode_weapon_loadout(list));
+		const ProtocolMessage ping =
+				make_protocol_message(s2c::TIME_SYNC_PING, {0x78, 0x56, 0x34, 0x12});
+		SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				grant_first ? std::vector<ProtocolMessage>{grant, ping}
+				            : std::vector<ProtocolMessage>{ping, grant},
+				packet);
+		auto datagram =
+				nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		const std::size_t from = h.socket.datagrams.size();
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+		// The tick's 0x1D and 0x08, in send order.
+		std::vector<uint8_t> order;
+		for (std::size_t i = from; i < h.socket.datagrams.size(); ++i) {
+			const std::vector<uint8_t> &dg = h.socket.datagrams[i];
+			uint8_t opcode = 0;
+			std::vector<uint8_t> body;
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!nw_decode_inbound(dg.data(), dg.size(), opcode, body) ||
+					opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
+					!decode_protocol_packet_plaintext(body.data(), body.size(), kClientScrk,
+							header, messages)) continue;
+			for (const ProtocolMessage &m : messages)
+				if (m.tag == 0x1D || m.tag == c2s::TIME_SYNC_REPLY) order.push_back(m.tag);
+		}
+		const std::vector<uint8_t> expected = grant_first
+				? std::vector<uint8_t>{0x1D, c2s::TIME_SYNC_REPLY}
+				: std::vector<uint8_t>{c2s::TIME_SYNC_REPLY, 0x1D};
+		ok &= expect(order == expected, grant_first
+				? "grant place: the grant's 0x1D ahead of the ping's reply behind it"
+				: "grant place: the ping's reply ahead of the grant's 0x1D behind it");
+	}
+	return ok;
+}
+
 // Every C2S 0x0C body the role shipped from datagram `from` on, decoded.
 std::vector<PlayerExtendedUplink> uplinks_since(const CountingSocket &socket, std::size_t from) {
 	std::vector<PlayerExtendedUplink> out;
@@ -4713,6 +4781,7 @@ int main() {
 	ok &= run_uplink_dead_test_is_the_builders();
 	ok &= run_stance_follows_the_authority_echo();
 	ok &= run_a_receive_time_mount_request_ships_in_its_frame();
+	ok &= run_a_grant_mount_request_queues_at_the_grants_place();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();

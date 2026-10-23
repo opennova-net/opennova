@@ -1810,6 +1810,15 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 			weapon_availability_revision_seen_ = rt.state().weapon_availability_revision;
 		}
 		if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
+		// The apply's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x5A's place
+		// among this receive's sends, ahead of what the handlers of the messages behind it in
+		// the datagram queued, as the handler's own mount queues it
+		// (ClientRuntime::queue_loadout_mount_stance_change).
+		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
+		//  @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30]
+		for (const uint16_t action_id : world.out.stance_requests)
+			(void)rt.queue_loadout_mount_stance_change(action_id);
+		world.out.stance_requests.clear();
 		// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
 		// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
 		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
@@ -1902,7 +1911,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		rebuild_local_from_full_spawn();
 		fold_local_record();
 		apply_world_state_load();
-		// The receive's mount requests (a 0x5A apply's mount of a ForceCrouch def) queue their
+		// The receive's mount requests (the 0x5A apply's queued at its place above) queue their
 		// C2S 0x1D in the receive, as the handler's own call does, so this frame's send block
 		// frames them, not the next one's.
 		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the mount @0x4296F4) ->

@@ -804,6 +804,18 @@ bool ClientRuntime::queue_stance_change(uint16_t action_id) {
 	return true;
 }
 
+bool ClientRuntime::queue_loadout_mount_stance_change(uint16_t action_id) {
+	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296F4); the declaration
+	//  carries the order]
+	const std::size_t end = send_queue_.size();
+	if (!queue_stance_change(action_id)) return false;
+	if (loadout_send_mark_ == kNoLoadoutSendMark) return true;
+	const auto mark = send_queue_.begin() + static_cast<std::ptrdiff_t>(loadout_send_mark_);
+	std::rotate(mark, send_queue_.begin() + static_cast<std::ptrdiff_t>(end), send_queue_.end());
+	++loadout_send_mark_;
+	return true;
+}
+
 bool ClientRuntime::queue_door_request(uint16_t handle, int16_t state, uint8_t section) {
 	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_input_frame()) return false;
 	DoorSlotAction request;
@@ -1175,6 +1187,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	std::vector<std::vector<uint8_t>> outbound;
 	receive_sends_logged_ = 0;
 	receive_leave_logged_ = false;
+	loadout_send_mark_ = kNoLoadoutSendMark;
 	frame_trace_ = JoinerNetTraceRecord{}; // the joiner net readout's record (an instrument)
 	// Session loss is a terminal owner state, not only a receive-side event. A
 	// prior host description (or the silence reap below) must stop the next frame
@@ -1605,6 +1618,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				}
 				queue_fold_requests();
 				queue_replies_after(++entries_folded);
+				// The 0x5A's handler mounts last, past its own sends: the after-receive apply's
+				// 0x1D joins the queue here (queue_loadout_mount_stance_change) [orig:
+				// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
+				// @0x4296F4].
+				if (tb.first == s2c::WEAPON_LOADOUT) loadout_send_mark_ = send_queue_.size();
 			}
 			queue_fold_requests();
 			queue_replies_after(pr.inbound_reducer.size());
@@ -1714,6 +1732,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the
 	//  0x4C timer @0x42C23E and the send block @0x42C3DD]
 	if (after_receive != nullptr && *after_receive) (*after_receive)();
+	loadout_send_mark_ = kNoLoadoutSendMark;
 	// The stats board splits the maintenance lap (an instrument): the receive-handler writes
 	// above, the timers below, then the movers.
 	lap.mark(devtools::Slot::SIM_CLIENT_AFTER_RECEIVE);
