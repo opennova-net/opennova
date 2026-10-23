@@ -706,6 +706,11 @@ void check_teardown_line_order() {
 		std::vector<std::vector<uint8_t>> out;
 		session->request_disconnect(out);
 		CHECK(rig.all.empty()); // the line waits for the burst
+		// A user leave's goodbye burst, as the live JO client sends it (the LN S1b record,
+		// 2026-10-23): four datagrams, each 74 B of UDP payload (the 4 B envelope, the opcode, the
+		// key and the unlatched record's seven TLVs).
+		CHECK(burst == 4 && out.size() == burst);
+		for (const auto &dg : out) CHECK(dg.size() == 74);
 		for (const auto &dg : out) rig.lobby.send(dg);
 		CHECK(order_ok(rig.all, burst));
 		rig.lobby.close();
