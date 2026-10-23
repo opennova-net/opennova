@@ -223,9 +223,9 @@ public:
 
 struct FrameInput {
 	double delta_seconds = 0.0;
-	// Wall-clock since the previous frame finished rendering (its present),
-	// or negative when the shell has not sampled one. Banked instead of
-	// delta_seconds on a frame after a mission-start frame (Session::advance).
+	// The main loop's clock (world::frame_tick_count_ms) since the previous frame finished
+	// rendering (its present), or negative when the shell has not sampled one. Banked instead
+	// of delta_seconds on a frame after a mission-start frame (Session::advance).
 	double since_render_seconds = -1.0;
 	CameraSample camera;
 	InputPacket player;

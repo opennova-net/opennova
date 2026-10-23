@@ -657,13 +657,13 @@ public:
 	// The bound signal targets.
 	void on_runtime_effects(const Array &p_effects);
 	void on_runtime_fixed_tick(int p_logic_tick);
-	// RenderingServer frame_post_draw: stamps when the frame finished
-	// rendering, the clock a mission-start frame re-bases to.
+	// RenderingServer frame_post_draw: stamps when the frame finished rendering on the main
+	// loop's clock, the clock a mission-start frame re-bases to.
 	void on_frame_post_draw();
-	// Seconds since the last frame finished rendering (negative before the
-	// first). The shell's frame loop hands it to the session on each frame
-	// (MissionFrameInput.since_render_seconds); a synthetic driver stepping
-	// tick() leaves it unsampled and banks its own delta.
+	// Seconds since the last frame finished rendering on the main loop's clock, in its steps
+	// (negative before the first). The shell's frame loop hands it to the session on each
+	// frame (MissionFrameInput.since_render_seconds); a synthetic driver stepping tick() leaves
+	// it unsampled and banks its own delta.
 	double get_seconds_since_render() const;
 	// The frame's elapsed wall time since this method's previous call, in whole
 	// milliseconds of the process's monotonic clock (0 on the first call): what
@@ -1087,8 +1087,8 @@ private:
 	Vector3 frame_camera_pos_;
 	Transform3D frame_camera_xform_;
 	double frame_delta_ = 0.0;
-	// Time::get_ticks_usec() at the last frame_post_draw (0: none yet).
-	uint64_t last_post_draw_usec_ = 0;
+	// world::frame_tick_count_ms() at the last frame_post_draw (0: none yet).
+	uint32_t last_post_draw_ms_ = 0;
 	// world::frame_tick_count_ms() at the last take_frame_elapsed_seconds (0: none).
 	uint32_t frame_clock_ms_ = 0;
 	bool frame_probe_enabled_ = false;

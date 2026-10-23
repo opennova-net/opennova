@@ -348,12 +348,15 @@ Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 }
 
 void GameWorld::on_frame_post_draw() {
-	last_post_draw_usec_ = Time::get_singleton()->get_ticks_usec();
+	// The main loop's clock read after the render, the stamp a mission-start frame's re-base
+	// takes (engine inmatch::Session::advance carries the witness, D-NET-NEW-LF-2).
+	last_post_draw_ms_ = opennova::world::frame_tick_count_ms();
 }
 
 double GameWorld::get_seconds_since_render() const {
-	if (last_post_draw_usec_ == 0) return -1.0;
-	return static_cast<double>(Time::get_singleton()->get_ticks_usec() - last_post_draw_usec_) / 1e6;
+	if (last_post_draw_ms_ == 0) return -1.0;
+	const uint32_t elapsed_ms = opennova::world::frame_tick_count_ms() - last_post_draw_ms_;
+	return static_cast<double>(elapsed_ms) / 1000.0;
 }
 
 double GameWorld::take_frame_elapsed_seconds() {

@@ -21,12 +21,12 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/weapon_inventory.h> // the availability builder's two modes
 #include <runtime/world/world.h>
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the process's GetTickCount)
 #include <formats/mission/bms.h>
 #include <runtime/mission/promote.h> // mission_availability_pairs (the item_availability chunk)
 #include <net/title/title_identity.h> // title_in_match (the availability values, DFX2-10)
 
 #include <algorithm>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -38,13 +38,7 @@
 namespace opennova::inmatch {
 
 // See host_session.h.
-uint32_t host_monotonic_milliseconds() {
-	const uint64_t value = static_cast<uint64_t>(
-			std::chrono::duration_cast<std::chrono::milliseconds>(
-					std::chrono::steady_clock::now().time_since_epoch()).count());
-	const uint32_t low = static_cast<uint32_t>(value);
-	return low != 0 ? low : 1u;
-}
+uint32_t host_monotonic_milliseconds() { return world::frame_tick_count_ms(); }
 
 // See host_session.h.
 uint32_t host_clock_ms(const HostOwner &owner) {

@@ -1099,21 +1099,25 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		return out;
 	}
 	latch_input(input);
-	// The frame's start stamp, in whole milliseconds like GetTickCount
-	// [orig: Game_MainLoop @0x52b798 / @0x52b7ae (after the frame lock
-	//  @0x52b8d7)].
-	int64_t frame_start_ms = now_us() / 1000;
-	// A mission-start frame re-based the clock once it had rendered, so this
-	// frame banks only the time since that render [orig: Game_MainLoop
-	// @0x52bac8..0x52bad2].
+	// The frame's start stamp, the main loop's clock: the read the frame banked (the embedder's
+	// frame stamp, else a read now), which the lock restamps when it slept
+	// [orig: Game_MainLoop @0x52B630 - GetTickCount @0x52B798, kept @0x52B7AE; the lock's
+	//  restamp @0x52B8D7].
+	uint32_t frame_start_ms =
+			input.frame_stamp_ms != 0 ? input.frame_stamp_ms : world::frame_tick_count_ms();
+	// A mission-start frame re-based the clock once it had rendered, so this frame banks only
+	// the time since that render: the embedder's main-loop clock read after the render
+	// (FrameInput::since_render_seconds) [orig: Game_MainLoop @0x52bac8..0x52bad2, GetTickCount
+	// @0x52BAD0].
 	const double elapsed = rebase_clock_ && input.since_render_seconds >= 0.0
 			? input.since_render_seconds : input.delta_seconds;
 	rebase_clock_ = false;
 	uint32_t lock_stamp_ms = 0;
 	const int32_t due = bank_frame(elapsed, input, lock_stamp_ms);
-	// A lock that slept restamped the frame's start, which the CPU share measures its
-	// work from [orig: Game_MainLoop @0x52B8D7, the share's read @0x52BA9B..0x52BAA1].
-	if (lock_stamp_ms != 0) frame_start_ms = now_us() / 1000;
+	// A lock that slept restamped the frame's start with its last read, which the CPU share
+	// measures its work from [orig: Game_MainLoop @0x52B8D7, the share's read
+	// @0x52BA9B..0x52BAA1].
+	if (lock_stamp_ms != 0) frame_start_ms = lock_stamp_ms;
 	// The FR counter is published before the drain runs this frame's ticks
 	// [orig: Game_MainLoop g_StatsAvgFps store @0x52B98F, drain @0x52BA08].
 	if (role_ != nullptr) {
@@ -1125,8 +1129,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// The CPU share's inputs: this frame's work from its start stamp to the
 	// end of the drain, and the updates the drain ran, a paused one too [orig:
 	// @0x52ba4f; @0x52ba9b..0x52baa1].
-	accumulator_.record_frame_work(
-			static_cast<uint32_t>(now_us() / 1000 - frame_start_ms), out.perf.updates);
+	accumulator_.record_frame_work(world::frame_tick_count_ms() - frame_start_ms, out.perf.updates);
 	// Each update counted toward the 62-update second inside the loop; this
 	// frame's render counts now.
 	count_rendered_frame();

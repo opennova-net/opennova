@@ -21,6 +21,10 @@
 //  `elapsed > timeout_ms` @0x629362, "NP.C:PT:SERTMOUT" @0x6293B7..0x6293E6;
 //  Server_PumpNetworkTransport @0x4FD960 (the send pump's call @0x4FD98B), from
 //  Game_StartMission's in-load calls]
+// The clock is the main loop's, GetTickCount with the system timer's 15 and 16 ms steps
+// (world::frame_tick_count_ms; host_monotonic_milliseconds returns it, D-NET-NEW-LF-2), so the
+// strict `now - last > interval` gate fires at the first timer step past the interval, not 1 ms
+// past it: pinned over a fake microsecond counter read through those steps.
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/peer_addr.h>
@@ -31,6 +35,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/udp_session_transport.h>
+#include <runtime/world/tick_count_clock.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -197,6 +202,45 @@ void test_the_reap_counts_a_long_load() {
 	CHECK(!socket.sent.empty());
 }
 
+// The legs over the main loop's clock: a fake microsecond counter read through GetTickCount's
+// steps (world::tick_count_ms_from_us), pumped once a millisecond. Armed at 5 s (the clock reads
+// 5000, the connection's receive stamp), the EMPTY leg's 30000 ms interval is not passed while
+// the clock reads 35000 (the step at 35.000 s: exactly the interval, the strict gate holds), and
+// fires at the first pump past the next step, 35.015625 s (the clock reads 35015): 15 ms after a
+// 1 ms clock would have sent.
+void test_the_legs_step_on_the_tick_count_clock() {
+	uint64_t fake_us = 5000000; // outlives the host, whose clock reads it
+	auto host = std::make_unique<ClockHost>();
+	CaptureSocket socket;
+	host->owner.clock_ms = [&fake_us] { return opennova::world::tick_count_ms_from_us(fake_us); };
+	inmatch::host_session_load_pump(host->owner, socket); // arms the leg clock at 5000
+	CHECK(host->remote() != nullptr && host->remote()->last_session_send_ms == 5000);
+	uint64_t first_send_us = 0;
+	bool held_at_the_interval = false;
+	for (fake_us = 34990000; fake_us <= 35100000 && first_send_us == 0; fake_us += 1000) {
+		inmatch::host_session_load_pump(host->owner, socket);
+		if (!socket.sent.empty()) {
+			first_send_us = fake_us;
+		} else if (opennova::world::tick_count_ms_from_us(fake_us) == 35000) {
+			held_at_the_interval = true;
+		}
+	}
+	CHECK(held_at_the_interval);
+	CHECK(first_send_us == 35016000);
+	CHECK(socket.sent.size() == 1 && header_only(*host->remote(), socket.sent[0]));
+	CHECK(host->remote()->last_session_send_ms == 35015);
+}
+
+// The host's clock is the main loop's: one process clock, read between two of its reads.
+void test_the_host_clock_is_the_main_loops() {
+	for (int i = 0; i < 64; ++i) {
+		const uint32_t before = opennova::world::frame_tick_count_ms();
+		const uint32_t host = inmatch::host_monotonic_milliseconds();
+		const uint32_t after = opennova::world::frame_tick_count_ms();
+		CHECK(host - before <= after - before);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -204,6 +248,8 @@ int main() {
 	test_a_long_load_fires_the_active_leg();
 	test_the_reap_counts_a_long_load();
 	test_a_joiner_heard_in_the_load_is_not_reaped();
+	test_the_legs_step_on_the_tick_count_clock();
+	test_the_host_clock_is_the_main_loops();
 	if (g_failures != 0) {
 		std::printf("host_clock_legs: %d failure(s)\n", g_failures);
 		return 1;

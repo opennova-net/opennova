@@ -85,8 +85,15 @@ struct HostOwner {
 	bool serve_and_play = false;
 };
 
-// The process's monotonic millisecond clock, never 0 (GetTickCount's stand-in): the
-// HostConfig::clock_ms an embedder supplies.
+// The process's millisecond clock, never 0: the HostConfig::clock_ms an embedder supplies. It is
+// the main loop's clock (world::frame_tick_count_ms, GetTickCount with the system timer's 15 and
+// 16 ms steps), one clock for the frame's bank and the protocol, as retail's protocol reads the
+// same GetTickCount: the send-interval legs' strict `now - last > interval` gate, the builds'
+// stamps, the pings, the receive reap and the timestamps (D-NET-NEW-LF-2).
+// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 - GetTickCount @0x628FE3, the active
+//  leg's `jbe` @0x629015; CNapiNPConnection_BuildOutgoingPackets @0x628462 / @0x6285FF;
+//  CNapiNPConnection_SendPing @0x61F263; NapiNPManager_PumpReceive @0x62304F;
+//  NetPacket_WriteTimestamp @0x5046CD]
 uint32_t host_monotonic_milliseconds();
 
 // The owner's clock now: its supplied clock, else the tick clock (now_tick x 16 ms).
@@ -162,8 +169,9 @@ struct HostConfig {
 	uint32_t host_key = 0;
 	uint32_t host_start_tick = 0;
 	uint32_t session_seed_id = 0;
-	// The process's monotonic millisecond clock (GetTickCount's), which every embedder supplies
-	// (host_monotonic_milliseconds) and a test injects; empty runs the owner on its tick clock.
+	// The process's millisecond clock (GetTickCount's, the main loop's), which every embedder
+	// supplies (host_monotonic_milliseconds) and a test injects; empty runs the owner on its tick
+	// clock.
 	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 and CNapiNPConnection_PumpStateMachine
 	//  @0x6292E0 read GetTickCount]
 	std::function<uint32_t()> clock_ms;
