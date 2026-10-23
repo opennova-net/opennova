@@ -24,6 +24,7 @@
 #include <godot_cpp/classes/quad_mesh.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
@@ -1511,7 +1512,15 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 				view_camera, effects[1], false, lod_divisor);
 	};
 
-	if (reflection_camera != nullptr) {
+	// The mirror's passes compile only on a frame whose water renders the mirror: its viewport left
+	// disabled, the reflected scene runs none (renderer::compiles_mirror_particles carries the
+	// witness, D-NET-NEW-L3-39).
+	const SubViewport *mirror_viewport = reflection_camera != nullptr ?
+			Object::cast_to<SubViewport>(reflection_camera->get_viewport()) : nullptr;
+	const bool mirror_rendered = mirror_viewport == nullptr ||
+			mirror_viewport->get_update_mode() != SubViewport::UPDATE_DISABLED;
+	if (reflection_camera != nullptr &&
+			opennova::renderer::compiles_mirror_particles(mirror_rendered)) {
 		// The reflected pass selects its water subsets by the main camera's
 		// side (Water_RenderReflectedWorldScene passes the prerender's
 		// below-water flag), whether its eye is mirrored or not.

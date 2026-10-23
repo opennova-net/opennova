@@ -1203,6 +1203,18 @@ func test_the_mirror_culls_by_the_main_eye() -> void:
 			"the mirror's pass submits what the main eye sees")
 	assert_eq(int(_slot(report, "reflection_camera_side").get("frustum_culled_emitters", -1)), 0)
 
+	# The mirror's passes run inside its reflected scene, which a frame renders only while
+	# its water pass runs (retail Render_TerrainScene's g_WaterActive test ahead of
+	# Water_ReflectionPrerender): a mirror the water left unrendered compiles none.
+	(mirror_camera.get_viewport() as SubViewport).render_target_update_mode = \
+			SubViewport.UPDATE_DISABLED
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	report = renderer.get_debug_draw_list_report()
+	assert_true(_slot(report, "reflection_camera_side").is_empty(),
+			"an unrendered mirror compiles no pass")
+	assert_true(_slot(report, "reflection_far_side").is_empty())
+	assert_eq(int(_slot(report, "world_camera_side").get("selected_emitters", -1)), 1)
+
 
 func _asymmetric_dirt_image(_name: String) -> Image:
 	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)

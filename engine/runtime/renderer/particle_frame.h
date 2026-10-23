@@ -54,6 +54,18 @@ enum class ParticleWaterSubset : std::uint8_t {
 ParticleWaterSubset particle_water_subset_for_side(bool camera_above_water,
 		bool camera_side);
 
+// Whether a frame compiles the water mirror's two particle passes: they run inside the reflected
+// scene, which a frame renders only while its water pass runs, past the water detail gate (the
+// reimpl runs detail 3: environment/water_mirror.h). A mirror the frame leaves unrendered
+// compiles none (D-NET-NEW-L3-39).
+// [orig: Render_TerrainScene @0x610C80 - the g_WaterActive test @0x610CD2,
+//  Water_ReflectionPrerender (the call @0x610CE0) -> Render_MainScene (the call @0x5C27C6) ->
+//  Water_RenderReflectedWorldScene @0x5C8510 (the call @0x5C171F): the detail gate @0x5C85AD,
+//  EffectWorld_RenderParticlePass (the calls @0x5C85DB / @0x5C85E5)]
+constexpr bool compiles_mirror_particles(bool mirror_rendered) noexcept {
+	return mirror_rendered;
+}
+
 // The Distort graphic's wave angle from GetTickCount's DWORD (the embedder's one
 // clock): retail reads the DWORD unsigned (`fild`, plus 2^32 when the sign bit is
 // set), multiplies by flt_7DB864 = 0.004f and hands the product, still at the
