@@ -853,6 +853,10 @@ struct ClientEntityState {
 	//  Entity_UpdateInfantryAI @0x4B9910 - the ride's add @0x4BA84C; NapiNPClientMsg_0x00C
 	//  @0x42E730 - the memset @0x42E7E9..0x42E7F1]
 	int32_t rm_aim_heading_word = 0;
+	// Whether a player row's leg words hold retail's stamps: its spawn's class init
+	// (seed_player_init_words), its respawn record's reset or its seated site's. A row none
+	// stamped (no row in play: every row arrives by a 0x0C or a 0x18) takes the stamp at its
+	// first leg chase (row_leg_chase).
 	bool rm_leg_seeded = false;
 	// Parked by the body walk past the own body's slot: the row's visit, its
 	// selection and its lean ramp wait for the after-self leg
@@ -905,6 +909,29 @@ inline void seed_org1_init_words(ClientEntityState &row, int32_t yaw) {
 	row.pitch_bam = 0;
 	row.roll_bam = 0;
 	row.rm_body_pitch = 0;
+}
+
+// A player row's class init over its Yaw, which runs after the spawn's Yaw store: the four leg
+// words (+0x2D4 / +0x2D8 and their re-plant targets +0x2E4 / +0x2E8) and the body heading
+// (+0x8C) take the Yaw; the arms dip (+0x371), the torso roll (+0x2DC), the lean (+0xB0),
+// savedLiveRoll (+0x94), Roll, savedLivePitch (+0x90) and the Pitch are 0. The bone build reads
+// the body heading and the leg words for a player as for any body.
+// [orig: PlayerClass_InitEntity @0x4B1060 (the plyr class row's init @0x813054, def+0x148 by
+//  EntityDef_LookupClassCallbacks @0x407E04) - +0x371 @0x4B117C, +0x2E4 / +0x2E8 @0x4B118E /
+//  @0x4B1194, +0x2D4 / +0x2D8 @0x4B119A / @0x4B11A0, +0x8C @0x4B11AC, +0x2DC @0x4B11B2, +0xB0
+//  @0x4B11B8, +0x94 @0x4B11BE, Roll @0x4B11C4, +0x90 @0x4B11C7, Pitch @0x4B11CD]
+inline void seed_player_init_words(ClientEntityState &row, int32_t yaw) {
+	row.arms_dip_ticks = 0;
+	row.rm_leg_target[0] = row.rm_leg_target[1] = yaw;
+	row.rm_leg_yaw[0] = row.rm_leg_yaw[1] = yaw;
+	row.rm_body_heading = yaw;
+	row.torso_roll = 0;
+	row.lean_angle = 0;
+	row.rm_body_roll = 0;
+	row.roll_bam = 0;
+	row.rm_body_pitch = 0;
+	row.pitch_bam = 0;
+	row.rm_leg_seeded = true;
 }
 
 // The Health a client keeps for a remote player from its compact's

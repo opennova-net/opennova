@@ -584,7 +584,6 @@ void JoinerRole::resolve_row_adm_ids() {
 		if (rearm) {
 			es.rm_adm_id = -2;
 			es.rm_state = -1;
-			es.rm_leg_seeded = false;
 			es.wpn_state = es.wpn_playing = -1;
 			es.wpn_deferred = 0;
 		}

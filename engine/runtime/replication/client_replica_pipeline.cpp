@@ -85,7 +85,6 @@ void row_channel_disarm(ClientEntityState &es) {
 	es.rm_blend_weight = 1.0f;
 	es.rm_blend_step = 0.0f;
 	es.rm_prev_bottom_live = false;
-	es.rm_leg_seeded = false;
 }
 } // namespace
 
@@ -173,6 +172,12 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		//  @0x4BFD6B / @0x4BFD71, Roll @0x4BFD99, Pitch @0x4BFDA2 (the org1 class row's init
 		//  @0x81303C)]
 		if (es.cls == EntityClass::Infantry) seed_org1_init_words(es, rec.orientation);
+		// A player row's class init stamps its four leg words and its body heading with the
+		// Yaw, its Pitch, roll and lean words staying 0 (D-NET-NEW-L5-42).
+		// [orig: Entity_InitAllFromModels @0x40E460 - the pool-0 init callbacks
+		//  @0x40E5F0..0x40E60B; PlayerClass_InitEntity @0x4B1060 - @0x4B117C..0x4B11CD (the plyr
+		//  class row's init @0x813054)]
+		if (es.cls == EntityClass::Player) seed_player_init_words(es, rec.orientation);
 		es.heading_known = true;
 		es.pitch_bam = 0; // organic spawn carries no entity+20/+24 Euler fields
 		es.roll_bam = 0;
@@ -247,7 +252,7 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 					static_cast<uint32_t>(es.pitch_byte) << 24);
 		}
 		// An organic row's respawn runs the reset over the snapped pose: the spawn backup
-		// takes Position and +0x2D4 the Yaw, and an org1 body's heading (+0x8C) the Yaw.
+		// takes Position and +0x2D4 the Yaw, and the body heading (+0x8C) the Yaw.
 		// [orig: Entity_ResetToSpawnState @0x4B9610 - @0x4B9623..0x4B9644, +0x8C @0x4B968C,
 		//  @0x4B96AA]
 		if (force_live_snap &&
@@ -256,17 +261,21 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 			es.spawn_backup[1] = es.y;
 			es.spawn_backup[2] = es.z;
 			es.reset_yaw = es.heading_bam;
-			// An org1 body's reset also stamps its four leg words; its +0x2EC stamp is the
-			// record's own aim heading store's to overwrite later in the same read.
+			// The reset is the class's either way: it stamps the four leg words with the Yaw
+			// and zeroes savedLivePitch (+0x90) and Roll (D-NET-NEW-L5-42); an org1 body's
+			// +0x2EC stamp is the record's own aim heading store's to overwrite later in the
+			// same read.
 			// [orig: Entity_ResetToSpawnState @0x4B9610 - +0x2E4 / +0x2E8 @0x4B969E / @0x4B96A4,
-			//  +0x2D4 / +0x2D8 @0x4B96AA / @0x4B96B0, +0x2EC @0x4B9698;
-			//  NetPacket_SerializeInfantryEntityState @0x4C0320 - the reset @0x4C05EC, the +0x2EC
-			//  store @0x4C066C]
-			if (es.cls == EntityClass::Infantry) {
-				es.rm_body_heading = es.heading_bam;
-				es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = es.heading_bam;
-				es.rm_leg_target[0] = es.rm_leg_target[1] = es.heading_bam;
-			}
+			//  +0x2D4 / +0x2D8 @0x4B96AA / @0x4B96B0, +0x2EC @0x4B9698, +0x90 @0x4B97DD, Roll
+			//  @0x4B97E3; NetPacket_SerializeInfantryEntityState @0x4C0320 - the reset
+			//  @0x4C05EC, the +0x2EC store @0x4C066C; NetPacket_SerializePlayerState @0x4C09C0 -
+			//  the reset @0x4C113C]
+			es.rm_body_heading = es.heading_bam;
+			es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = es.heading_bam;
+			es.rm_leg_target[0] = es.rm_leg_target[1] = es.heading_bam;
+			es.rm_leg_seeded = true;
+			es.rm_body_pitch = 0;
+			es.roll_bam = 0;
 		}
 		if (force_live_snap && remote_motion_mode_) {
 			// Retail stages the target BEFORE the respawn branch snaps the live
@@ -1467,12 +1476,11 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// test @0x4B411E, the dual update @0x4B41DF]. A
 		// dead row is not frozen: its mover runs and the death edge commits
 		// the death clip to the channel. The respawn edge keeps the channel
-		// (the next state blends out of the death clip) and resets what
-		// Entity_ResetToSpawnState resets on the row: the leg and body yaws
-		// re-seed to the new heading, and the velocities zero
-		// [orig: @0x4b962c velocityX/Y + slideDecay = 0; @0x4b968c..0x4b96b0
-		// savedLiveYaw and the four leg yaws = Yaw]. (The one-shot phase seed
-		// rides the arbitration's direct-commit leg — net_anim_ratio.)
+		// (the next state blends out of the death clip) and zeroes the velocities
+		// Entity_ResetToSpawnState zeroes [orig: @0x4b962c velocityX/Y + slideDecay = 0];
+		// the reset's yaw stamps are land_compact_pose's. A frozen row's disarm leaves its
+		// leg words as they stand: its update returns ahead of its leg chase and holds them.
+		// (The one-shot phase seed rides the arbitration's direct-commit leg — net_anim_ratio.)
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
 			const bool seated_player = rec.cls == EntityClass::Player &&
 					es.carrier_handle != wire_handle::kInvalid && es.mount_bone != 0;
@@ -1482,7 +1490,6 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			if (row_frozen) {
 				row_channel_disarm(es);
 			} else if (respawned_this_record) {
-				es.rm_leg_seeded = false;
 				es.rm_vel_xy[0] = 0;
 				es.rm_vel_xy[1] = 0;
 				es.rm_vel_z = 0;

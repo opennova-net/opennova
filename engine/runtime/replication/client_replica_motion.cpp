@@ -317,6 +317,7 @@ inline int32_t row_abs_bam(int32_t v) { return io::bam_abs(v); }
 
 void row_leg_chase(ClientEntityState &es, uint32_t key) {
 	const int32_t yaw = es.heading_bam;
+	// A row no spawn's class init or respawn reset stamped (rm_leg_seeded) takes the stamp here.
 	if (!es.rm_leg_seeded) {
 		es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = yaw;
 		es.rm_leg_target[0] = es.rm_leg_target[1] = yaw;

@@ -78,6 +78,7 @@ struct Row {
 	uint8_t flags = 0;
 	uint16_t carrier = 0xFFFF;
 	uint8_t pitch = 0;
+	uint8_t yaw = 0x40;
 };
 
 // One 0x0A from the anchor (100, 200, 10): each row free-standing at the anchor, or seated on
@@ -113,14 +114,14 @@ std::vector<uint8_t> frame(const std::vector<Row> &rows, double hull_x = 50.0) {
 			rec.player.vehicle_bone = row.carrier != 0xFFFF ? 1 : 0;
 			rec.player.pos_x_compressed = nw::network_compress_fixedpoint(
 					row.carrier != 0xFFFF ? fixed_of(1.0) : 0);
-			rec.player.yaw_byte = 0x40;
+			rec.player.yaw_byte = row.yaw;
 			rec.player.pitch_byte = row.pitch;
 			rec.player.state_flags = row.flags;
 			rec.player.anim_state_id = as::kIdle;
 		} else {
 			rec.type_id = kInfantryType;
 			rec.infantry.vehicle_slot_handle = 0xFFFF;
-			rec.infantry.yaw_byte = 0x40;
+			rec.infantry.yaw_byte = row.yaw;
 			rec.infantry.flags_byte = row.flags;
 			rec.infantry.anim_byte = as::kIdle;
 		}
@@ -1016,6 +1017,96 @@ void test_overlay_pitch_is_the_live_pitch_word() {
 			"its leg words");
 }
 
+// D-NET-NEW-L5-42: the bone build turns the body chain by +0x8C and the leg chains by +0x2D4 /
+// +0x2D8 whatever the class, so a free-standing player row presents its body heading and its leg
+// words, not its Yaw.
+// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - +0x8C @0x4B1819, +0x2D4 @0x4B1833,
+//  +0x2D8 @0x4B184A]
+void test_player_overlay_reads_the_body_and_leg_words() {
+	ns::ClientState state;
+	opennova::anim::AimOverlayInputs in;
+	ns::ClientEntityState player;
+	player.handle = 0x0003;
+	player.cls = nw::EntityClass::Player;
+	player.heading_bam = 0x12000000;
+	player.rm_body_heading = 0x10000000;
+	player.rm_leg_yaw[0] = 0x0E000000;
+	player.rm_leg_yaw[1] = 0x0F000000;
+	expect(opennova::inmatch::aim_overlay_inputs_for_client(player, state, {}, in) &&
+					in.aim_yaw == 0x12000000 && in.body_yaw == 0x10000000 &&
+					in.leg_yaw_r == 0x0E000000 && in.leg_yaw_l == 0x0F000000,
+			"a free-standing player row presents its look Yaw, its body heading and its legs");
+}
+
+// D-NET-NEW-L5-42: a player row's class init stamps its four leg words and its body heading with
+// the Yaw and zeroes its Pitch, after a 0x0C (the mission start's init) and a 0x18 (its init
+// callback after the Yaw and Pitch stores) alike; a respawn record's reset stamps them with the
+// new Yaw and zeroes savedLivePitch and Roll; a hidden record's freeze holds the legs, which then
+// chase on from where they stood (0x0E000000 toward the Yaw: a clamped quarter step).
+// [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B117C..0x4B11CD; NapiNPClientMsg_FullEntitySpawn
+//  @0x433780 - the init callback @0x433E74..0x433E82; Entity_ResetToSpawnState @0x4B9610 -
+//  @0x4B968C..0x4B96B0, +0x90 @0x4B97DD, Roll @0x4B97E3; NetPacket_SerializePlayerState
+//  @0x4C09C0 - the reset @0x4C113C; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the bit-0 exit
+//  @0x4B411E, the chase @0x4B49E9..0x4B4A43]
+void test_player_init_and_reset_stamp_the_legs() {
+	constexpr uint16_t kRow = 0x0003;
+	const auto words_are = [](const ns::ClientEntityState &es, int32_t yaw) {
+		return es.rm_leg_yaw[0] == yaw && es.rm_leg_yaw[1] == yaw && es.rm_leg_target[0] == yaw &&
+				es.rm_leg_target[1] == yaw && es.rm_body_heading == yaw;
+	};
+	{
+		BodySource src;
+		auto view = make_view(src);
+		nw::OrganicSpawnRecord rec;
+		rec.slot_id = kRow;
+		rec.def_type = 3;
+		rec.item_type_id = kPlayerType;
+		rec.minimap_flags = nw::world::kEntityFlagPlayer;
+		rec.orientation = 0x12345678;
+		nw::OrganicSpawnBatch batch;
+		batch.records.push_back(rec);
+		batch.entity_count = 1;
+		view->apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
+		ns::ClientEntityState &es = *view->state().find(kRow);
+		expect(words_are(es, 0x12345678) && es.pitch_bam == 0,
+				"the 0x0C row's class init stamps the legs and the body heading with the Yaw");
+		es.rm_adm_id = 0;
+		view->apply(0x0A, frame({{kRow, nw::EntityClass::Player, 0x00}}));
+		es.rm_body_pitch = 0x01000000;
+		es.roll_bam = 0x02000000;
+		view->apply(0x0A, frame({{kRow, nw::EntityClass::Player,
+				static_cast<uint8_t>(nw::world::kEntityFlagDead)}}));
+		view->apply(0x0A, frame({{kRow, nw::EntityClass::Player, 0x00, 0xFFFF, 0, 0x30}}));
+		expect(es.heading_bam == 0x30000000 && words_are(es, 0x30000000) &&
+						es.rm_body_pitch == 0 && es.roll_bam == 0,
+				"the respawn reset stamps the legs and the body heading, zeroes +0x90 and Roll");
+		es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = 0x0E000000;
+		view->apply(0x0A, frame({{kRow, nw::EntityClass::Player, 0x01}}));
+		view->apply(0x0A, frame({{kRow, nw::EntityClass::Player, 0x00}}));
+		view->tick_remote_motion(0xFFFF);
+		// The Yaw steps a twelfth from 0x30000000 toward 0x40000000; each leg, more than
+		// 0x15555540 off it, re-plants on it and steps the clamped 0x3000000.
+		expect(es.rm_leg_yaw[0] == 0x11000000 && es.rm_leg_yaw[1] == 0x11000000,
+				"a freeze holds the legs: they chase a clamped quarter on from where they stood");
+	}
+	{
+		BodySource src;
+		auto view = make_view(src);
+		nw::FullEntitySpawnRecord rec;
+		rec.slot_id = kRow;
+		rec.item_type_id = kPlayerType;
+		rec.item_type = 3;
+		rec.minimap_flags = nw::world::kEntityFlagPlayer;
+		rec.heading_hi = 0x2000;
+		rec.pitch_hi = 0x0800;
+		view->apply(nw::s2c::FULL_ENTITY_SPAWN, nw::encode_full_entity_spawn(rec));
+		const ns::ClientEntityState &es = *view->state().find(kRow);
+		expect(es.heading_bam == 0x20000000 && words_are(es, 0x20000000) && es.pitch_bam == 0,
+				"the 0x18 row's init callback stamps the legs and the body heading, zeroes the "
+				"Pitch the record stored");
+	}
+}
+
 // D-NET-NEW-L5-41 (V-ROLL-AV F1): a free-standing org1 row rides its deck after its slope pass
 // and ahead of its body chase, so the ride turns the deck's pitch delta by the deck's Yaw less
 // the rider's as the last look left it (0 here): the whole delta lands in the Pitch, the aim
@@ -1209,6 +1300,8 @@ int main() {
 	test_org1_dead_body_tumbles_in_the_air();
 	test_org1_ride_skips_the_aim_adds_on_a_turret();
 	test_overlay_pitch_is_the_live_pitch_word();
+	test_player_overlay_reads_the_body_and_leg_words();
+	test_player_init_and_reset_stamp_the_legs();
 	test_org1_deck_ride_precedes_the_body_chase();
 	test_player_gradient_slide_replaces_the_world_pair();
 	test_infantry_gradient_slide_replaces_the_clip_pair();

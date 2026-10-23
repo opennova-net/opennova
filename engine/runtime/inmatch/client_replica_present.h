@@ -93,14 +93,18 @@ inline bool aim_overlay_inputs_for_client(
 	//  Entity_UpdateInfantryAI @0x4B9910 - the body chase @0x4BE8FD..0x4BE931, the
 	//  free-standing look @0x4BEB18..0x4BEBE7, the seated look @0x4BEF87..0x4BEF97]
 	out.aim_pitch = entity.pitch_bam;
-	// The body chain turns by +0x8C and the two leg chains by +0x2D4 / +0x2D8: an org1 row's
-	// body chase and leg chase (row_org1_legs) keep those words.
+	// The body chain turns by +0x8C and the two leg chains by +0x2D4 / +0x2D8, whatever the
+	// row's class (D-NET-NEW-L5-42): an org1 row's body chase and leg chase (row_org1_legs) keep
+	// those words, a player row's leg chase (row_leg_chase) its legs and their midpoint, and each
+	// class's spawn init and respawn reset stamp them with the Yaw. A host's view chases no row;
+	// its persons present the World's bodies, whose own updates keep the words (present_rows.cpp).
 	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `mov edx, [ebp+8Ch]` @0x4B1819 (the
 	//  body matrix @0x4B182E), `mov ecx, [ebp+2D4h]` @0x4B1833 (@0x4B1845), `mov eax, [ebp+2D8h]`
-	//  @0x4B184A (@0x4B185C)]
-	out.body_yaw = entity.cls == EntityClass::Infantry ? entity.rm_body_heading : out.aim_yaw;
-	out.leg_yaw_r = entity.cls == EntityClass::Infantry ? entity.rm_leg_yaw[0] : out.body_yaw;
-	out.leg_yaw_l = entity.cls == EntityClass::Infantry ? entity.rm_leg_yaw[1] : out.body_yaw;
+	//  @0x4B184A (@0x4B185C), no class test between @0x4B17AA and @0x4B186E;
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the leg chase @0x4B4945..0x4B4ABB]
+	out.body_yaw = entity.rm_body_heading;
+	out.leg_yaw_r = entity.rm_leg_yaw[0];
+	out.leg_yaw_l = entity.rm_leg_yaw[1];
 	// The body and leg chains take the body's savedLivePitch and Roll, the slope
 	// conform's words every organic row runs (row_body_conform, row_org1_slope_pass); a
 	// mounted body's seat pose replaces them below [orig: Entity_BuildBoneTransformMatrices
