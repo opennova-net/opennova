@@ -300,6 +300,15 @@ public:
 	void set_replica_kill_section_store(ReplicaKillSectionStore store) {
 		replica_kill_section_store_ = std::move(store);
 	}
+	// Each row the client's Entity_Destroy takes (erase_entity_tree, the root and each member
+	// its refNum walk destroys), told to the embedder at the destroy's reference clears: the
+	// joiner's HUD target cursor lets go of a decoded remote person's row
+	// (world::LocalPlayer::note_wire_entity_destroyed) [orig: Entity_Destroy @0x43E810 -
+	// `cmp g_HUDTargetCursorEntity, esi` @0x43E89C, the clear @0x43E8A4].
+	using ReplicaDestroyObserver = std::function<void(uint16_t handle)>;
+	void set_replica_destroy_observer(ReplicaDestroyObserver observer) {
+		replica_destroy_observer_ = std::move(observer);
+	}
 	// A corpse whose dead tail reached 186 this tick: the embedder spawns the
 	// def's decay effect at its body origin [orig: CEffectWorld_SpawnEmitterAtPosition
 	// @0x4b4e39 / @0x4b9f36]; `release` marks an org1 corpse destroyed this
@@ -846,6 +855,7 @@ private:
 	ReplicaPlayerCammoResolver replica_player_cammo_resolver_;
 	ReplicaHitRecordResolver replica_hit_record_resolver_;
 	ReplicaKillSectionStore replica_kill_section_store_;
+	ReplicaDestroyObserver replica_destroy_observer_;
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
 	// Entity_KillBySlotId @0x42BCE0]

@@ -1590,6 +1590,10 @@ void JoinerRole::wire_frame_providers() {
 						(e->engine_flags & world::kEntityFlagDead) == 0)
 					world.round_sim.hit_record.section = section;
 			});
+	// The client's destroy of a row: the HUD target cursor naming its decoded remote person
+	// names none (world::LocalPlayer::note_wire_entity_destroyed carries the witness).
+	rt.view().set_replica_destroy_observer(
+			[this](uint16_t handle) { kernel_->local.note_wire_entity_destroyed(handle); });
 	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
 	// joiner world's collision tables live, each armed Player/Infantry row's
 	// settle runs the ported movement collision resolver — candidate-model

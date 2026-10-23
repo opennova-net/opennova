@@ -154,6 +154,10 @@ void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
 	// target re-picks while its row still stands [orig: @0x43e820..0x43e838].
 	spectate_on_entity_removed(root_handle);
 	discard_entity_notifications(root_handle);
+	// The destroy zeroes the HUD target cursor naming its entity, ahead of its group walk
+	// [orig: Entity_Destroy @0x43E810 - `cmp g_HUDTargetCursorEntity, esi` @0x43E89C, the clear
+	//  @0x43E8A4, the EntityReference_DestroyEWeapGroup call @0x43E9CD].
+	if (replica_destroy_observer_) replica_destroy_observer_(root_handle);
 	// The client runs the shared Entity_Destroy, refNum walk included. The row
 	// leaves its refNum group first (the streamed refNum byte stands in for the
 	// list the 0x0D / 0x10 / 0x18 handlers joined it to); then a non-person

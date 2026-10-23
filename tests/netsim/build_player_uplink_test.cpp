@@ -1077,6 +1077,17 @@ bool run_hud_cursor_names_a_remote_person() {
 	ok &= expect(reused == crate_h &&
 			ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
 			"a new entity in the destroyed one's slot is not the cursor");
+	// A decoded remote person's row destroyed since the build: the client's destroy clears the
+	// word for it alone, so a row later spawned in its slot gets no cursor term; another row's
+	// destroy leaves the word [orig: Entity_Destroy @0x43E810 - @0x43E89C..0x43E8A4].
+	cursor = {};
+	cursor.wire_person = kPerson;
+	w::hud_target_cursor_note_destroyed(cursor, 0x0009);
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == kPerson,
+			"another row's destroy keeps the cursor");
+	w::hud_target_cursor_note_destroyed(cursor, kPerson);
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
+			"the cursor's row destroyed names none");
 	return ok;
 }
 

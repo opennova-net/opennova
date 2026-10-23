@@ -51,6 +51,15 @@ struct HudTargetCursor {
 // The cursor's entity as a reader resolves it now: none for a round lock, for no word, or for
 // a named entity destroyed (or its slot reused) since the build.
 const Entity *hud_target_cursor_entity(const World &world, const HudTargetCursor &cursor);
+// A decoded remote person's row went through the client's destroy: a cursor naming it names
+// none from then on, as the destroy zeroes the word for its entity (a named registry entity
+// carries its own lifetime instead, hud_target_cursor_entity). A row that a later spawn page
+// rebuilds in place is no destroy: the word keeps naming its slot.
+// [orig: Entity_Destroy @0x43E810 - `cmp g_HUDTargetCursorEntity, esi` @0x43E89C, the clear
+//  @0x43E8A4; NapiNPClientMsg_0x00C @0x42E730 - the slot's memset calls @0x42E7F1 / @0x42E7FE]
+inline void hud_target_cursor_note_destroyed(HudTargetCursor &cursor, uint16_t wire_handle) {
+    if (cursor.wire_person == wire_handle) cursor.wire_person = 0xFFFF;
+}
 
 class LocalPlayer {
 public:
@@ -426,6 +435,11 @@ public:
     void note_hud_scene_head() { hud_cursor_at_scene_ = hud_cursor_; }
     const HudTargetCursor &hud_target_cursor() const { return hud_cursor_; }
     const HudTargetCursor &hud_target_cursor_at_scene() const { return hud_cursor_at_scene_; }
+    // A decoded remote person's row went through the client's destroy
+    // (hud_target_cursor_note_destroyed carries the witness).
+    void note_wire_entity_destroyed(uint16_t wire_handle) {
+        hud_target_cursor_note_destroyed(hud_cursor_, wire_handle);
+    }
     // Reset the frame-input state and seed the look heading from the (auto-)
     // spawned local player's facing — the session bring-up's tail.
     void reset_local_player_input_to_player_facing();
