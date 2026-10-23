@@ -72,6 +72,33 @@ func test_the_map_change_keeps_the_listen_hosts_session_across_the_reload() -> v
 	world.unload()
 
 
+# Retail opens its archives once per process, never at a map change (engine inmatch/map_change.h
+# carries the witness, D-NET-NEW-L3-24): a host mounted on its own archives (no injected root)
+# loads the next map on the same mount.
+func test_the_map_change_loads_on_the_sessions_mount() -> void:
+	var dir := OS.get_cache_dir().path_join("opennova_host_mount_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	WorldFixture.stage_shell_archives(self, dir)
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var options := _host_options(1)
+	options.dir = dir
+	assert_eq(world.load_mission_as_host(options), OK)
+	var mount: ResourceRoot = world.get_resource_root()
+	assert_not_null(mount)
+	var next_map: String = world.begin_map_change()
+	assert_eq(next_map.to_lower(), "mnml.bms")
+	world.unload()
+	assert_eq(world.load_next_mission(next_map), OK)
+	assert_same(world.get_resource_root(), mount, "the next map loads on the session's mount")
+	world.unload()
+	if mount != null:
+		mount.clear()
+	await get_tree().process_frame
+	TestFs.remove_dir_recursive(dir)
+
+
 func test_the_rotations_end_keeps_nothing() -> void:
 	# REPLAY off on a one-entry rotation: the advance runs out.
 	var world: GameWorld = await _hosted_world(0)

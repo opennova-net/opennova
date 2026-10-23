@@ -769,6 +769,11 @@ private:
 	Ref<ResourceRoot> mount_runtime_root(const String &p_dir);
 	String resolver_expansion();
 	String resolver_game();
+	// load_mission past its mount: the document from `p_root` (archive-only) and the one mission
+	// path. `p_timeline` is the entry's timeline (null: the load begins its own). A host's map
+	// change loads the next map on the session's mount this way (SessionDrive).
+	int load_mission_on_root(const String &p_bms_name, const Ref<ResourceRoot> &p_root,
+			const Ref<LoadTimeline> &p_timeline);
 	// The ONE mission path -- the file entry (load_mission) and the in-memory
 	// entry (load_mission_data) converge here.
 	int load_mission_internal(const Ref<MissionData> &p_mission, const String &p_bms_name,

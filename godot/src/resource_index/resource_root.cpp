@@ -727,6 +727,11 @@ Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader lo
 	return image;
 }
 
+void ResourceRoot::release_decoded_textures() {
+	texture_cache_.clear();
+	texture_registry_.clear();
+}
+
 void ResourceRoot::sync_texture_caches_() const {
 	const uint64_t epoch = opennova::cache_epoch();
 	if (texture_cache_epoch_ != epoch) {

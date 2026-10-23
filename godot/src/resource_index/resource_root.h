@@ -188,6 +188,11 @@ public:
 	// editor device's placer, say), and the mounting device makes afresh what read a moved file (its
 	// placer among them).
 	Error mount_files(std::shared_ptr<const opennova::FileSource> files);
+	// C++ siblings only (not bound): the decoded textures this root holds dropped (texture_cache_,
+	// texture_registry_), the mount, its index and its parsed assets kept: a mission's teardown,
+	// whose device objects retail destroys while its archives stay open (engine
+	// inmatch/map_change.h carries the witness). A holder keeps the texture it holds.
+	void release_decoded_textures();
 	// Global cache epoch (see base/resource_index/resource_index.h): bumped by every mount/clear on ANY
 	// root. GDScript cache holders compare it against the epoch they were built under and
 	// self-clear when it moved. bump_cache_epoch() lets tools/tests force an

@@ -49,6 +49,15 @@
 //     with the game's device stages these run in phase B, past the render arm's last pump.
 //   the boot's phase B, or end_host_mission_load after it on the game,
 //     ends with the load-end S2C 0x7B to every slot.
+// The embedder loads the next map on the session's mount: retail opens its archives once per
+// process and again only on a mods or expansion switch, never at a map change, and its teardown
+// destroys the mission's device objects with the archives still open (D-NET-NEW-L3-24; the game:
+// SessionDrive::load_next_host_mission, GameWorld::unload's decoded-texture drop).
+// [orig: PFF_OpenAllArchives @0x4A4310 - its callers Game_InitSubsystems @0x4A6F44,
+//  Game_ReloadExpansionAndMods @0x552798, Expansion_ReloadAllAssets @0x5683B5 (behind its
+//  changed-name test @0x56837A), Expansion_SwitchTo @0x56896F; Game_TeardownMission @0x522350 -
+//  CGfxDevice_DestroyAllObjects @0x52274A, whose texture-cache free is D3DTextureCache_FreeAll
+//  @0x6781C6]
 // The host pumps its socket at the witnessed points: the teardown's pump ahead
 // of the slot reset, then the load's with its spawn gate held (D-NET-116): its
 // first, then its window spread through the load as retail's is, so the 0x25s

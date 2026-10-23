@@ -755,8 +755,12 @@ int SessionDrive::load_next_host_mission(const String &p_bms_name) {
 	}
 	// The kept simulation rides stage_runtime_options into the runtime, which
 	// boots the next map inside its session (Simulation::begin_host_map_change
-	// latched it).
-	const int err = world_->load_mission(p_bms_name, String());
+	// latched it). The next map loads on the session's mount, which no map change opens
+	// again (engine inmatch/map_change.h carries the witness, D-NET-NEW-L3-24).
+	const Ref<ResourceRoot> mount = world_->resource_root_;
+	const int err = mount.is_valid()
+			? world_->load_mission_on_root(p_bms_name, mount, Ref<LoadTimeline>())
+			: world_->load_mission(p_bms_name, String());
 	kept_sim_.unref();
 	return err;
 }

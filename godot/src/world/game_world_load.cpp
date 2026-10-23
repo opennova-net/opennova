@@ -162,18 +162,30 @@ int GameWorld::load_mission(const String &p_bms_name, const String &p_dir) {
 		timeline->finish();
 		return ERR_CANT_OPEN;
 	}
+	return load_mission_on_root(p_bms_name, resource_root, timeline);
+}
+
+int GameWorld::load_mission_on_root(const String &p_bms_name, const Ref<ResourceRoot> &p_root,
+		const Ref<LoadTimeline> &p_timeline) {
+	Ref<LoadTimeline> timeline = p_timeline;
+	if (timeline.is_null()) {
+		emit_signal(kSignalLoadProgress,
+				MissionData::load_progress_percent(MissionData::LOAD_STAGE_MISSION_SETUP));
+		timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+		last_load_timeline_ = timeline;
+	}
 	// The runtime BMS path bypasses loose overrides even under /d.
 	// [orig: Mission_LoadBMSFromPFF @ 0x40d43c]
-	if (!resource_root->has_file(p_bms_name, ResourceRoot::LOOKUP_FORCE_ARCHIVE_ONLY)) {
+	if (!p_root->has_file(p_bms_name, ResourceRoot::LOOKUP_FORCE_ARCHIVE_ONLY)) {
 		emit_signal(kSignalLoadFailed,
-				vformat("%s not found in %s", p_bms_name, resource_root->get_root_dir()));
+				vformat("%s not found in %s", p_bms_name, p_root->get_root_dir()));
 		timeline->finish();
 		return ERR_FILE_NOT_FOUND;
 	}
 	timeline->span("document");
 	Ref<MissionData> mission;
 	mission.instantiate();
-	if (mission->open_from_resource_root(resource_root, p_bms_name,
+	if (mission->open_from_resource_root(p_root, p_bms_name,
 				ResourceRoot::LOOKUP_FORCE_ARCHIVE_ONLY) != OK) {
 		emit_signal(kSignalLoadFailed,
 				vformat("failed to parse %s: %s", p_bms_name, mission->get_last_error()));
@@ -182,7 +194,7 @@ int GameWorld::load_mission(const String &p_bms_name, const String &p_dir) {
 	}
 	timeline->end_span();
 	entry_timeline_ = timeline;
-	return load_mission_internal(mission, p_bms_name, resource_root);
+	return load_mission_internal(mission, p_bms_name, p_root);
 }
 
 // Load the exact saved, top-level loose BMS from the selected resource root.
@@ -737,6 +749,10 @@ void GameWorld::unload() {
 	effect_world_id_ = ObjectID();
 	free_join_effect_world();
 	free_head_effect_world();
+	// The teardown destroys the mission's device objects and keeps the archives open: the
+	// mount's decoded textures go, its index and parsed assets stay for the next load on it
+	// (engine inmatch/map_change.h carries the witness, D-NET-NEW-L3-24).
+	if (resource_root_.is_valid()) resource_root_->release_decoded_textures();
 	mission_audio_id_ = ObjectID();
 	placer_.unref();
 	weapon_db_.unref(); // re-resolves against the next load's mounted root
