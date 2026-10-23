@@ -772,11 +772,13 @@ static void person_ewep_anchored_attach(World &world, AiEntity &e, Entity &body,
 // (+0x1C / +0x20), so the pool-0 walk runs nothing over it (its +0x1C4 is 0), its uplink stops
 // (the serializer's def test) and its record applies are dropped (the case-2 def test);
 // Position and the Yaw / Pitch / Roll words 0, Flags 0, Health 0, no ground (+0x28), no mount
-// (+0x168 / +0x16C), no occupant (+0x170), +0x2AC 0, savedLivePose 0, the velocity triple 0.
+// (+0x168 / +0x16C), no occupant (+0x170), +0x2AC 0, savedLivePose 0, the velocity triple 0,
+// the subType byte (+0x214) 0; then the destroy's tail stores 0xFF in the slot byte (+0x154).
 // Its words past +0x2B4 stay. A 0x18 of its handle rebuilds it (JoinerRole::rebuild_local_from_full_spawn).
-// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70; Entity_UpdateAllEntities @0x4C2100 -
-//  the null test @0x4C246F; Pool_SerializeEntityViaVTable @0x4D64E0 - the def test @0x4D6556;
-//  NetPacket_SerializePlayerState @0x4C09C0 - the def test @0x4C0F92]
+// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70, +0x154 @0x43EA78;
+//  Entity_UpdateAllEntities @0x4C2100 - the null test @0x4C246F; Pool_SerializeEntityViaVTable
+//  @0x4D64E0 - the def test @0x4D654F..0x4D6554; NetPacket_SerializePlayerState @0x4C09C0 - the
+//  def test @0x4C0F92]
 static void destroy_local_body_in_place(AiEntity &e, Entity &body) {
     body.has_item_def = false;
     body.item_type_index = 0;
@@ -798,11 +800,13 @@ static void destroy_local_body_in_place(AiEntity &e, Entity &body) {
     body.mount_bone = 0;
     body.primary_occupant = {};
     body.spawn_phase = 0;
+    body.sub_type = 0;
     std::fill_n(body.saved_live_pos, 3, 0);
     body.saved_live_yaw = 0;
     body.saved_live_pitch = 0;
     body.saved_live_roll = 0;
     for (int axis = 0; axis < 3; ++axis) e.inf.vel[axis] = 0;
+    body.player_slot_id = 0xFF;
 }
 
 void person_ewep_mover(World &world, AiEntity &e, Entity &body) {

@@ -1851,9 +1851,10 @@ void test_an_ewep_row_body_asks_for_a_destroyed_ground() {
 // The ewep row's stale-ground leg over the local player's own body (D-NET-892 A2, L5-s21): after
 // its two C2S 0x0F the update destroys the body in place, the memset over +0..+0x2B4 leaving it
 // the local player's with no def, Position and the angles 0, Flags 0, Health 0 and no ground;
-// its words past +0x2B4 (the spawn backup, +0x2D4) stay. A remote body is not touched.
+// its words past +0x2B4 (the spawn backup, +0x2D4) stay, the slot byte takes the destroy's 0xFF.
+// A remote body is not touched.
 // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - Entity_Destroy @0x440E2F; Entity_Destroy
-//  @0x43E810 - the memset @0x43EA70]
+//  @0x43E810 - the memset @0x43EA70, +0x154 @0x43EA78]
 void test_an_ewep_row_local_body_is_destroyed_in_place() {
 	static constexpr uint16_t kGround = 0x1003;
 	for (const bool local : {true, false}) {
@@ -1873,6 +1874,8 @@ void test_an_ewep_row_local_body_is_destroyed_in_place() {
 		body->position.set_q16(w::FixedVec3{5 << 16, 6 << 16, 7 << 16});
 		body->heading = 0x10000000;
 		body->spawn_position.x.q16 = 0x00012345;
+		body->sub_type = 2;
+		body->player_slot_id = 4;
 		r.world->rules.mp_session = true;
 		r.world->rules.mp_session_peer = true;
 		r.world->rules.logic_authority = false;
@@ -1893,6 +1896,9 @@ void test_an_ewep_row_local_body_is_destroyed_in_place() {
 		CHECK((body->heading == 0) == local);
 		CHECK((body->flags == 0) == local);
 		CHECK(body->ground_target == (local ? w::EntityHandle{} : w::EntityHandle{kGround}));
+		// The memset zeroes the subType byte; the destroy's tail stores 0xFF in the slot byte.
+		CHECK(body->sub_type == (local ? 0 : 2));
+		CHECK(body->player_slot_id == (local ? 0xFF : 4));
 		CHECK(body->spawn_position.x.q16 == 0x00012345);
 		CHECK(ae->inf.leg_yaw[0] == 0x40000000);
 		CHECK(!local || r.world->cached.local_player == self);

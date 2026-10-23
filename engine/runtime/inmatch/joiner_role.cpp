@@ -1842,7 +1842,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// release L has not taken yet (apply_authoritative_health's revive).
 	// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0; jz`
 	//  @0x42A58F..0x42A597, `test byte [eax+24h], 2; jnz` @0x42A599..0x42A59D;
-	//  Pool_SerializeEntityViaVTable @0x4D64E0 - the def test @0x4D6556]
+	//  Pool_SerializeEntityViaVTable @0x4D64E0 - the def test @0x4D654F..0x4D6554]
 	const std::vector<std::vector<uint8_t>> outs = rt.Client_ProcessNetworkFrame(
 			[&](PlayerExtendedUplink &up) {
 		if (!local_spawned_ || !world.cached.local_player.valid() || redeploy_release_pending_)

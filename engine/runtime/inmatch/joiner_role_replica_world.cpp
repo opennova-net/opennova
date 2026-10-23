@@ -494,13 +494,15 @@ void JoinerRole::fold_local_record() {
 // its Flags word, Position and the Yaw / Pitch words, Health the def's healthMax, its Team,
 // NetId, animSlot, class word and +0x154 slot byte, its ground entity (+0x28), no occupant and
 // no mount, the lean 0, the model init's savedLivePose; then the def's class init (the plyr
-// row's: the equipped default, the DcbId). The words past +0x2B4 stay. The record's +0x16C and
-// +0x170 handles are not modeled here: L stays unmounted, with no occupant.
+// row's: the equipped default, the DcbId). The record's subType byte lands on +0x214. The words
+// past +0x2B4 stay. The record's +0x16C and +0x170 handles are not modeled here: L stays
+// unmounted, with no occupant.
 // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_Destroy @0x433815, the memset
 //  @0x433821, Flags @0x433B69, Position / Yaw @0x433B77..0x433B8C, NetId / Team / Pitch / class /
-//  +0x154 @0x433B9F..0x433BBB, ItemList_FindIndexByTypeId @0x433BC7, the def stores
-//  @0x433BD4..0x433BDF, Health = healthMax @0x433C39, +0x170 @0x433C91, +0x28 @0x433CDD, +0x16C
-//  @0x433D21, the lean @0x433E5C, Entity_InitFromModel @0x433E6C, the class init @0x433E82]
+//  +0x154 @0x433B9F..0x433BBB, subType @0x433BC1, ItemList_FindIndexByTypeId @0x433BC7, the
+//  def stores @0x433BD4..0x433BDF, Health = healthMax @0x433C39, +0x170 @0x433C91, +0x28
+//  @0x433CDD, +0x16C @0x433D21, the lean @0x433E5C, Entity_InitFromModel @0x433E6C, the class
+//  init @0x433E82]
 void rebuild_local_body_words(world::World &world, world::Entity &local, world::AiEntity &local_ai,
 		const replication::ClientEntityState &self) {
 	world::bind_player_item_row(world, local, world::item_index_by_type_id(world, self.type_id));
@@ -521,10 +523,14 @@ void rebuild_local_body_words(world::World &world, world::Entity &local, world::
 	local.anim_slot = self.spawn_anim_slot;
 	local.player_class = self.spawn_player_class;
 	local.player_slot_id = self.spawn_byte_154;
+	local.sub_type = self.spawn_sub_type;
 	local.owner_connection_id = self.spawn_owner_connection_id;
 	local.group_id = 0;
-	local.ground_target = world.registry.get(world::EntityHandle{self.target_handle}) != nullptr
-			? world::EntityHandle{self.target_handle} : world::EntityHandle{};
+	// The ground link is the slot the record's handle names, used or not: none only for 0xFFFF
+	// or a handle past the pool tables (the decode's resolve), so a ground the shared destroy
+	// left marked is linked again and the ewep update's stale-ground leg reads its mark.
+	// [orig: @0x433C89..0x433CD3, the store @0x433CDD]
+	local.ground_target = world::EntityHandle{self.target_handle};
 	local.primary_occupant = {};
 	local.mounted = false;
 	local.mount_target = {};
