@@ -1,4 +1,5 @@
 #include "devtools/frame_stats.h"
+#include "render/rd_glsl.h"
 
 #include <godot_cpp/classes/engine.hpp>
 
@@ -59,6 +60,14 @@ String FrameStats::slot_description(int p_slot) {
 	return String::utf8(opennova::devtools::slot_description(static_cast<opennova::devtools::Slot>(p_slot)));
 }
 
+PackedInt64Array FrameStats::rd_glsl_compile_totals() {
+	const RdGlslCompileTotals &totals = godot::rd_glsl_compile_totals();
+	PackedInt64Array out;
+	out.push_back(totals.count.load(std::memory_order_relaxed));
+	out.push_back(totals.usec.load(std::memory_order_relaxed));
+	return out;
+}
+
 void FrameStats::sync_capture_signal() {
 	const bool active = board_.is_capture_active();
 	if (active == last_signaled_) {
@@ -76,6 +85,8 @@ void FrameStats::_bind_methods() {
 	ClassDB::bind_static_method("FrameStats", D_METHOD("slot_name", "slot"), &FrameStats::slot_name);
 	ClassDB::bind_static_method("FrameStats", D_METHOD("slot_description", "slot"),
 			&FrameStats::slot_description);
+	ClassDB::bind_static_method("FrameStats", D_METHOD("rd_glsl_compile_totals"),
+			&FrameStats::rd_glsl_compile_totals);
 	ADD_SIGNAL(MethodInfo("capture_changed", PropertyInfo(Variant::BOOL, "active")));
 
 #define OPENNOVA_FRAME_STATS_BIND_SLOT(name, description) BIND_ENUM_CONSTANT(name);

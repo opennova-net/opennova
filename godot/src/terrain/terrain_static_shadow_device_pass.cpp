@@ -211,7 +211,7 @@ RID compile_compute(RenderingDevice *p_rd, const std::string &p_source, const ch
 	source.instantiate();
 	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_COMPUTE, opennova::to_gd(p_source));
-	const Ref<RDShaderSPIRV> spirv = p_rd->shader_compile_spirv_from_source(source);
+	const Ref<RDShaderSPIRV> spirv = compile_rd_glsl_source(p_rd, source);
 	if (spirv.is_null()) {
 		r_error = "no SPIR-V";
 		return RID();

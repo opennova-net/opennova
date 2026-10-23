@@ -11,10 +11,38 @@
 #include "util/string_convert.h"
 
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 
 namespace godot {
+
+// The process's RenderingDevice GLSL compiles so far, their count and their microseconds (an
+// instrument: the verbose PipelineCompiles line names a frame that compiled one, beside Godot's
+// own pipeline compilations; FrameStats::rd_glsl_compile_totals reads them).
+struct RdGlslCompileTotals {
+	std::atomic<int64_t> count{0};
+	std::atomic<int64_t> usec{0};
+};
+inline RdGlslCompileTotals &rd_glsl_compile_totals() {
+	static RdGlslCompileTotals totals;
+	return totals;
+}
+
+// One GLSL compile on p_rd, counted and timed into rd_glsl_compile_totals.
+inline Ref<RDShaderSPIRV> compile_rd_glsl_source(RenderingDevice *p_rd,
+		const Ref<RDShaderSource> &p_source) {
+	const auto start = std::chrono::steady_clock::now();
+	Ref<RDShaderSPIRV> spirv = p_rd->shader_compile_spirv_from_source(p_source);
+	const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+			std::chrono::steady_clock::now() - start);
+	RdGlslCompileTotals &totals = rd_glsl_compile_totals();
+	totals.count.fetch_add(1, std::memory_order_relaxed);
+	totals.usec.fetch_add(static_cast<int64_t>(elapsed.count()), std::memory_order_relaxed);
+	return spirv;
+}
 
 // A GLSL float literal for an engine constant: %.9g round-trips every float,
 // and a trailing ".0" keeps integral values typed as floats.
@@ -85,7 +113,7 @@ inline std::string compile_rd_spirv(RenderingDevice *p_rd, const std::string &p_
 			opennova::to_gd(p_vertex_glsl));
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
 			opennova::to_gd(p_fragment_glsl));
-	r_spirv = p_rd->shader_compile_spirv_from_source(source);
+	r_spirv = compile_rd_glsl_source(p_rd, source);
 	if (r_spirv.is_null())
 		return "no SPIR-V";
 	const String vertex_error =

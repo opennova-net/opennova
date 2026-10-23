@@ -35,3 +35,16 @@ func test_a_slow_window_names_its_largest_time_slots() -> void:
 			"a slot under MIN_SLOT_US is left out")
 	assert_eq(line.find(FrameStats.slot_name(FrameStats.FRAME_NODES_ADDED).to_lower()), -1,
 			"a VALUE slot is never a time")
+
+
+# The PipelineCompiles line: the compiles since the previous read, Godot's by source and then
+# our GLSL compiles with their milliseconds; nothing when nothing compiled or on a first read.
+func test_the_compile_line_names_what_compiled_since_the_last_read() -> void:
+	var before := PackedInt64Array([4, 10, 20, 7, 3, 2, 50_000])
+	var after := PackedInt64Array([4, 12, 20, 16, 3, 5, 92_000])
+	assert_eq(SlowFrameReport.compile_line(before, after, 9, 1000),
+			"PipelineCompiles: frame=9 unix_ms=1000: mesh 2, draw 9, rd_glsl 3 (42 ms)")
+	assert_eq(SlowFrameReport.compile_line(after, after, 10, 1016), "",
+			"a read with nothing compiled prints nothing")
+	assert_eq(SlowFrameReport.compile_line(PackedInt64Array(), after, 1, 0), "",
+			"a first read prints nothing")

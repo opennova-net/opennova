@@ -7,15 +7,21 @@ extends Node
 ## the time slots that took the most of it. A joiner's verbose log then carries, beside its
 ## LoadTimeline and JoinWindow lines, where every heavy frame of the join went (the frames
 ## after the S2C 0x0F included); unix_ms lines it up with the capture. The open dev tools
-## own the board: no drain while they are up.
+## own the board: no drain while they are up. Beside it, a PipelineCompiles line names each
+## frame whose read found pipelines compiled since the previous read (Godot's, by source, and
+## our RenderingDevice GLSL compiles): the frames that pay a first draw's compiles.
 
 const SLOW_FRAME_US := 100_000
 const TOP_SLOTS := 10
 const MIN_SLOT_US := 1_000
+## Godot's pipeline compilation sources (RenderingServer.get_rendering_info), in compile_totals'
+## order; our RenderingDevice GLSL compiles (count, microseconds) follow them.
+const PIPELINE_SOURCES: Array[String] = ["canvas", "mesh", "surface", "draw", "specialization"]
 
 var _board: FrameStats = null
 var _tools_open := Callable()
 var _time_slots := PackedInt32Array()
+var _compile_totals := PackedInt64Array()
 
 
 func _init() -> void:
@@ -37,10 +43,18 @@ func _process(_delta: float) -> void:
 	if not _board.is_capture_active():
 		_board.set_capture_active(true)
 		return
-	var line := report_line(_board.drain(), _time_slots, Engine.get_process_frames(),
-			int(Time.get_unix_time_from_system() * 1000.0))
+	var frame := Engine.get_process_frames()
+	var unix_ms := int(Time.get_unix_time_from_system() * 1000.0)
+	var line := report_line(_board.drain(), _time_slots, frame, unix_ms)
 	if not line.is_empty():
 		print_verbose(line)
+	# The pipelines compiled since the last frame's read (the previous frame's draw, this
+	# frame's process): which first draw pays which compiles.
+	var totals := compile_totals()
+	var compiles := compile_line(_compile_totals, totals, frame, unix_ms)
+	_compile_totals = totals
+	if not compiles.is_empty():
+		print_verbose(compiles)
 
 
 ## The board's time slots (every slot whose description does not mark it a VALUE).
@@ -50,6 +64,42 @@ static func time_slots() -> PackedInt32Array:
 		if not FrameStats.slot_description(slot).begins_with("VALUE"):
 			slots.append(slot)
 	return slots
+
+
+## The process's compile totals so far: Godot's pipeline compilations by source
+## (PIPELINE_SOURCES' order), then our RenderingDevice GLSL compiles' count and microseconds.
+static func compile_totals() -> PackedInt64Array:
+	var totals := PackedInt64Array()
+	for info in [RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_CANVAS,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_MESH,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SURFACE,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SPECIALIZATION]:
+		totals.append(RenderingServer.get_rendering_info(info))
+	totals.append_array(FrameStats.rd_glsl_compile_totals())
+	return totals
+
+
+## One frame's compile line, or "" when nothing compiled since `previous` (a first read, whose
+## `previous` is empty, prints nothing): each Godot source that compiled, with its count, then
+## our GLSL compiles with their count and milliseconds.
+static func compile_line(previous: PackedInt64Array, current: PackedInt64Array, frame: int,
+		unix_ms: int) -> String:
+	var sources := PIPELINE_SOURCES.size()
+	if previous.size() != sources + 2 or current.size() != sources + 2:
+		return ""
+	var parts := PackedStringArray()
+	for i in sources:
+		var compiled := current[i] - previous[i]
+		if compiled > 0:
+			parts.append("%s %d" % [PIPELINE_SOURCES[i], compiled])
+	var glsl := current[sources] - previous[sources]
+	if glsl > 0:
+		parts.append("rd_glsl %d (%d ms)" % [glsl,
+				(current[sources + 1] - previous[sources + 1]) / 1000])
+	if parts.is_empty():
+		return ""
+	return "PipelineCompiles: frame=%d unix_ms=%d: %s" % [frame, unix_ms, ", ".join(parts)]
 
 
 ## One window's line, or "" when its FRAME_WALL sum stays under SLOW_FRAME_US: the wall,

@@ -886,7 +886,7 @@ bool FrameFxCompositorEffect::Impl::ensure_decode_compute() {
 	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_COMPUTE,
 			opennova::to_gd(decode_compute_shader_source()));
-	const Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
+	const Ref<RDShaderSPIRV> spirv = compile_rd_glsl_source(rd, source);
 	if (spirv.is_valid() &&
 			spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_COMPUTE).is_empty())
 		decode_shader = rd->shader_create_from_spirv(spirv, "OpenNova FrameFX decode");
