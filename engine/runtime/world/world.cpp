@@ -302,6 +302,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // motor (throwables.cpp); the item update callback still follows it.
     if (ctx.is_authority && body == nullptr) {
         if (PlacedDevice *device = throwables.device_for(row)) {
+            const devtools::ProfileScope device_scope(profile, devtools::Slot::SIM_WALK_DEVICES);
             throwables.update_device(*this, *device, ai.collision, tables.terrain);
             if (Entity *e = live()) {
                 update_item_destroy_fade(*this, *e);
@@ -325,9 +326,10 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     else if (body == nullptr && !row.is_ai_capable) kind = ThinkKind::Item;
     // A mounted non-organic brain takes the seat-follow shortcut: no think and
     // no clock step this visit (its row still runs the motor legs).
-    if (brain != nullptr && !row.motor_suspended && row.health > 0 &&
-            ai.pose_if_mounted(*brain, *this))
-        kind = ThinkKind::None;
+    if (brain != nullptr && !row.motor_suspended && row.health > 0) {
+        const devtools::ProfileScope mounted_scope(profile, devtools::Slot::SIM_WALK_MOUNTED);
+        if (ai.pose_if_mounted(*brain, *this)) kind = ThinkKind::None;
+    }
     auto clock_of = [kind](Entity &e) -> int32_t * {
         switch (kind) {
         case ThinkKind::Brain: return &e.spawn_phase;
@@ -343,6 +345,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     //  the Entity_BuildProximityList call @0x4B8E25 (CollisionWorld::refresh_blink),
     //  `call eax` @0x4B8E3C]
     if (clock != nullptr && *clock <= 0) {
+        const devtools::ProfileScope think_scope(profile, devtools::Slot::SIM_WALK_THINK);
         if (ai.collision != nullptr) ai.collision->refresh_blink(*this, row);
         switch (kind) {
         case ThinkKind::Brain:
@@ -366,27 +369,36 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
     Entity *e = live();
     if (e == nullptr) return;
-    vehicles.update_motor(*e, ctx.is_authority);
-    if ((e = live()) == nullptr) return;
-    tick_emplaced_weapon_class_update(*this, *e);
-    if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
-        ai.update_organic(*body, *this, ctx.logic_tick);
-    if ((e = live()) == nullptr) return;
-    update_item_destroy_fade(*this, *e);
-    if (e->squib.motor) {
-        tick_squib(*this, *e);
-    } else {
-        const float water_z = static_cast<float>(env.water_z) / 65536.0f;
-        tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
+    {
+        const devtools::ProfileScope motor_scope(profile, devtools::Slot::SIM_WALK_MOTOR);
+        vehicles.update_motor(*e, ctx.is_authority);
     }
     if ((e = live()) == nullptr) return;
-    // A dropped carried object's installed fall or ride (Match owns the
-    // carry objects), or a genx def's own ride.
-    if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
-    if ((e = live()) == nullptr) return;
-    // An ele0 def's own mover [orig: Entity_UpdateFallAndLandState @0x4A20E0 through
-    //  @0x4B8E53].
-    if (e->elevator_motion) update_item_elevator(*this, *e);
+    {
+        const devtools::ProfileScope ewep_scope(profile, devtools::Slot::SIM_WALK_EWEP);
+        tick_emplaced_weapon_class_update(*this, *e);
+    }
+    if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
+        ai.update_organic(*body, *this, ctx.logic_tick);
+    {
+        const devtools::ProfileScope items_scope(profile, devtools::Slot::SIM_WALK_ITEMS);
+        if ((e = live()) == nullptr) return;
+        update_item_destroy_fade(*this, *e);
+        if (e->squib.motor) {
+            tick_squib(*this, *e);
+        } else {
+            const float water_z = static_cast<float>(env.water_z) / 65536.0f;
+            tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
+        }
+        if ((e = live()) == nullptr) return;
+        // A dropped carried object's installed fall or ride (Match owns the
+        // carry objects), or a genx def's own ride.
+        if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
+        if ((e = live()) == nullptr) return;
+        // An ele0 def's own mover [orig: Entity_UpdateFallAndLandState @0x4A20E0 through
+        //  @0x4B8E53].
+        if (e->elevator_motion) update_item_elevator(*this, *e);
+    }
     // The +0x1C4 call ends here, whichever class leg it took: a joiner's decoded row
     // takes its visit at this slot (D-NET-196). [orig: Entity_UpdatePool1Slot
     //  @0x4B8E41..0x4B8E53, the return @0x4B8E55]
@@ -395,8 +407,10 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         if ((e = live()) == nullptr) return;
     }
     // A mounted non-organic brain re-poses on its seat after the mover ran.
-    if (brain != nullptr && ctx.is_authority && brain->brain.f[AiBrain::kOwner] != 0)
+    if (brain != nullptr && ctx.is_authority && brain->brain.f[AiBrain::kOwner] != 0) {
+        const devtools::ProfileScope mounted_scope(profile, devtools::Slot::SIM_WALK_MOUNTED);
         ai.refresh_mounted_pose(*brain, *this);
+    }
     // The trailing decrement, every visit whether or not the row thought.
     // [orig: `add [esi+2ACh],-1` @0x4B8EA0]
     if ((e = live()) == nullptr) return;

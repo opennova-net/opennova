@@ -28,7 +28,7 @@ namespace stats_rows {
 
 inline constexpr Slot k_ai_infantry_collision_unattributed[] = {Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS, Slot::SIM_AI_INFANTRY_COLLISION_REPULSION, Slot::SIM_AI_INFANTRY_COLLISION_GROUND};
 inline constexpr Slot k_ai_infantry_unattributed[] = {Slot::SIM_AI_INFANTRY_COMBAT, Slot::SIM_AI_INFANTRY_ANIMATION, Slot::SIM_AI_INFANTRY_COLLISION};
-inline constexpr Slot k_update_walks_other[] = {Slot::SIM_AI_INFANTRY};
+inline constexpr Slot k_update_walks_other[] = {Slot::SIM_AI_INFANTRY, Slot::SIM_WALK_THINK, Slot::SIM_WALK_MOTOR, Slot::SIM_WALK_EWEP, Slot::SIM_WALK_ITEMS, Slot::SIM_WALK_DEVICES, Slot::SIM_WALK_MOUNTED};
 inline constexpr Slot k_update_entities_unattributed[] = {Slot::SIM_UPDATE_WALKS, Slot::SIM_UPDATE_ATTACHMENTS, Slot::SIM_UPDATE_HELILIFT_FACES, Slot::SIM_UPDATE_PRECIPITATION, Slot::SIM_UPDATE_PIECES_EVENTS, Slot::SIM_UPDATE_PROJECTILES, Slot::SIM_UPDATE_EXPLOSIONS, Slot::SIM_UPDATE_PROXIMITY};
 inline constexpr Slot k_attachment_unattributed[] = {Slot::SIM_ATTACHMENT_ORPHANS, Slot::SIM_ATTACHMENT_CHILDREN, Slot::SIM_ATTACHMENT_RIDERS};
 inline constexpr Slot k_world_unattributed[] = {Slot::SIM_WORLD_SETUP, Slot::SIM_WORLD_SCRIPTS, Slot::SIM_UPDATE_ENTITIES, Slot::SIM_WORLD_HOUSEKEEPING};
@@ -82,7 +82,13 @@ inline constexpr StatsRow kRows[] = {
 	{"ai_infantry_collision_ground", "Ground settle ray", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_GROUND, nullptr, 0},
 	{"ai_infantry_collision_unattributed", "Resolver remainder", 11, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY_COLLISION, k_ai_infantry_collision_unattributed, 3},
 	{"ai_infantry_unattributed", "Infantry remainder", 10, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY, k_ai_infantry_unattributed, 3},
-	{"update_walks_other", "Brains, vehicle motors, items", 9, RowKind::RESIDUAL, Slot::SIM_UPDATE_WALKS, k_update_walks_other, 1},
+	{"walk_think", "Pool-1 thinks (brains, mines, items)", 9, RowKind::SPAN, Slot::SIM_WALK_THINK, nullptr, 0},
+	{"walk_motor", "Vehicle motors", 9, RowKind::SPAN, Slot::SIM_WALK_MOTOR, nullptr, 0},
+	{"walk_ewep", "Emplaced weapons", 9, RowKind::SPAN, Slot::SIM_WALK_EWEP, nullptr, 0},
+	{"walk_items", "Item legs", 9, RowKind::SPAN, Slot::SIM_WALK_ITEMS, nullptr, 0},
+	{"walk_devices", "Placed devices", 9, RowKind::SPAN, Slot::SIM_WALK_DEVICES, nullptr, 0},
+	{"walk_mounted", "Mounted brains' seat pose", 9, RowKind::SPAN, Slot::SIM_WALK_MOUNTED, nullptr, 0},
+	{"update_walks_other", "Walk remainder", 9, RowKind::RESIDUAL, Slot::SIM_UPDATE_WALKS, k_update_walks_other, 7},
 	{"update_attachments", "Emplacement attachments", 8, RowKind::SPAN, Slot::SIM_UPDATE_ATTACHMENTS, nullptr, 0},
 	{"attachment_orphans", "Orphan-chain cleanup", 9, RowKind::SPAN, Slot::SIM_ATTACHMENT_ORPHANS, nullptr, 0},
 	{"attachment_children", "Child attachment pose", 9, RowKind::SPAN, Slot::SIM_ATTACHMENT_CHILDREN, nullptr, 0},
