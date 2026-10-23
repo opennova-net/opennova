@@ -122,8 +122,16 @@ void row_ride_link(ClientEntityState &es, const ClientState &state,
 	}
 }
 
+// `aim_adds`: an org1 body's Yaw / +0x2EC / +0x2D0 adds run unless its parent's def is IsTurret
+// (attrib2 0x1000), or its AI slot's combat target (+0x68 -> +0x0C) stands on another ground
+// entity: a client's slot holds no target (the slot is zeroed at allocation and its store is the
+// think's, behind the authority test), so only the def half reaches a replica.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the gate @0x4BA812..0x4BA840 (IsTurret @0x4BA823,
+//  the target's ground @0x4BA82C..0x4BA840), the adds @0x4BA842..0x4BA852, the skip to
+//  @0x4BA85A; Entity_AllocateAISlot @0x40D2C0 - the memset @0x40D2E9; the think's store
+//  @0x4BBF85 behind `cmp is_authority, 0` @0x4BA97E..0x4BA985]
 void row_deck_ride(ClientEntityState &es,
-                   const ClientReplicaPipeline::CarrierPoseProvider &carrier) {
+                   const ClientReplicaPipeline::CarrierPoseProvider &carrier, bool aim_adds) {
 	if (es.resolved_ground == 0xFFFF) return;
 	ClientReplicaPipeline::CarrierPose cp;
 	if (!carrier(es.resolved_ground, cp)) return;
@@ -230,15 +238,18 @@ void row_deck_ride(ClientEntityState &es,
 		};
 		const int32_t pitch_d = m22(dpitch, rc) - m22(droll, rs);
 		const int32_t roll_d = m22(dpitch, rs) + m22(droll, rc);
-		es.heading_bam = io::bam_add(es.heading_bam, dyaw);
+		if (es.cls != EntityClass::Infantry || aim_adds)
+			es.heading_bam = io::bam_add(es.heading_bam, dyaw);
 		es.rm_body_heading = io::bam_add(es.rm_body_heading, dyaw);
 		es.roll_bam = io::bam_add(es.roll_bam, roll_d);
 		if (es.cls == EntityClass::Infantry) {
 			es.net_target_heading_bam =
 					io::bam_add(es.net_target_heading_bam, dyaw);
 			es.pitch_bam = io::bam_add(es.pitch_bam, pitch_d);
-			es.rm_aim_heading_word = io::bam_add(es.rm_aim_heading_word, dyaw);
-			es.rm_aim_word = io::bam_add(es.rm_aim_word, pitch_d);
+			if (aim_adds) {
+				es.rm_aim_heading_word = io::bam_add(es.rm_aim_heading_word, dyaw);
+				es.rm_aim_word = io::bam_add(es.rm_aim_word, pitch_d);
+			}
 			// org1's four leg words take the yaw delta too, and its savedLivePitch the pitch
 			// delta [orig: Entity_UpdateInfantryAI @0x4B9910 - +0x2D4 @0x4BA86D, +0x2D8
 			// @0x4BA873, +0x2E4 @0x4BA879, +0x2E8 @0x4BA87F, +0x90 @0x4BA885].
@@ -1642,6 +1653,17 @@ std::optional<world::PhysicsClass> ClientReplicaPipeline::person_move_row(uint16
 	return world::physics_class_from_move_function(profile->callbacks.move_function);
 }
 
+// Whether an org1 body's deck ride adds the deltas to its Yaw and aim words: not when its parent's
+// def is IsTurret (attrib2 0x1000; row_deck_ride). A body with no parent, or a player body, adds.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the parent @0x4BA812..0x4BA821, `test dword ptr
+//  [eax+58h], 1000h` @0x4BA823]
+bool ClientReplicaPipeline::org1_ride_aim_adds(const ClientEntityState &row) const {
+	if (row.cls != EntityClass::Infantry) return true;
+	const ClientEntityState *parent = state_.find(row.carrier_handle);
+	if (parent == nullptr || !replica_def_attrib2_resolver_) return true;
+	return (replica_def_attrib2_resolver_(parent->type_id) & 0x1000u) == 0u;
+}
+
 bool ClientReplicaPipeline::person_takes_item_row(const ClientEntityState &es,
 		uint16_t self_handle) const {
 	if (es.handle == self_handle || world::EntityHandle{es.handle}.pool() != 0 ||
@@ -1669,7 +1691,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	auto organic_chase_tail = [&](ClientEntityState &row, bool is_self,
 	                              bool starved = false) {
 		if (!is_self && !starved && carrier_pose_provider_)
-			row_deck_ride(row, carrier_pose_provider_);
+			row_deck_ride(row, carrier_pose_provider_, org1_ride_aim_adds(row));
 		// The body pass's ride link, after the ride and ahead of the integrate
 		// [orig: @0x4B5EA9..0x4B5F2C]; the client's own body runs the World's.
 		if (!is_self && row.cls == EntityClass::Player && ground_occupant_provider_)

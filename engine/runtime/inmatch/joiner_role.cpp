@@ -1471,6 +1471,18 @@ void JoinerRole::wire_frame_providers() {
 						: nullptr;
 				return item != nullptr ? static_cast<uint32_t>(item->attrib) : 0u;
 			});
+	// An org1 deck ride reads its parent's second attrib word (the IsTurret bit) from the same
+	// items.def [orig: Entity_UpdateInfantryAI @0x4B9910 - `test dword ptr [eax+58h], 1000h`
+	//  @0x4BA823].
+	rt.view().set_replica_def_attrib2_resolver(
+			[this](uint16_t type_id) -> uint32_t {
+				const def::DefItemsFile *items = kernel_->items_table();
+				const def::DefItemDef *item = items != nullptr
+						? mission::find_item_def(*items,
+								  static_cast<int>(type_id) + mission::kItemIdOffset)
+						: nullptr;
+				return item != nullptr ? static_cast<uint32_t>(item->attrib2) : 0u;
+			});
 	// The replica dead tail's def fields, from the same items.def the spawn
 	// stream typed the row from: deathtime (the edge's moveTimer seed),
 	// LeaveCorpse, and whether the def names a decay effect.

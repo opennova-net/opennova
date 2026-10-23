@@ -737,6 +737,43 @@ void test_free_standing_infantry_legs() {
 	}
 }
 
+// D-NET-NEW-L5-37: an org1 body's deck ride adds the yaw delta to its Yaw and its aim heading
+// (+0x2EC) unless its parent's def is IsTurret (attrib2 0x1000); the body heading, the target and
+// the legs take it either way. A dead body in the seat its record names (the 0x13 window) rides
+// its parent: the hull turns 0x1000000 this tick.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the gate @0x4BA812..0x4BA840, the adds
+//  @0x4BA842..0x4BA852, the rest @0x4BA85A..0x4BA88E]
+void test_org1_ride_skips_the_aim_adds_on_a_turret() {
+	for (const bool turret : {false, true}) {
+		BodySource src;
+		auto view = seated_infantry_view(src, false, 0x20, 0x00);
+		view->set_carrier_pose_provider(
+				[](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
+					if (handle != kHull) return false;
+					out = ns::ClientReplicaPipeline::CarrierPose{};
+					out.yaw = 0x01000000;
+					out.bound_radius = 0x7FFFFFFF;
+					return true;
+				});
+		view->set_replica_def_attrib2_resolver([turret](uint16_t type) {
+			return type == kHullType && turret ? 0x1000u : 0u;
+		});
+		ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
+		tick(*view); // alive and seated: the Yaw 0x2000000
+		view->apply(nw::s2c::ENTITY_DEATH, {static_cast<uint8_t>(kSeatedInfantry & 0xFF),
+				static_cast<uint8_t>(kSeatedInfantry >> 8), 0, 0});
+		tick(*view);
+		expect(rider.rm_body_heading == 0x01000000 && rider.net_target_heading_bam == 0x01000000 &&
+						rider.rm_leg_yaw[0] == 0x01000000 && rider.rm_leg_target[1] == 0x01000000,
+				"the ride turns the body heading, the target and the legs either way");
+		// The look then steps an eighth of the 0x1E000000 left: 0x3C00000.
+		expect(rider.rm_aim_heading_word == (turret ? 0x20000000 : 0x21000000) &&
+						rider.heading_bam == (turret ? 0x05C00000 : 0x06C00000),
+				turret ? "an IsTurret parent's ride leaves the Yaw and the aim heading"
+				       : "any other parent's ride turns the Yaw and the aim heading");
+	}
+}
+
 // A source whose channel yields no frame: the row's update ends before its velocity integrate,
 // so a test reads the velocity its slope pass left.
 struct NoFrameSource final : public opennova::world::IRootMotionSource {
@@ -969,6 +1006,7 @@ int main() {
 	test_org1_init_and_reset_stamp_the_legs();
 	test_org1_slope_pass();
 	test_org1_dead_body_tumbles_in_the_air();
+	test_org1_ride_skips_the_aim_adds_on_a_turret();
 	test_overlay_pitch_is_the_live_pitch_word();
 	test_authority_rows_never_starve();
 	if (failures != 0) {

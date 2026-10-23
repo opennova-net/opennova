@@ -701,6 +701,12 @@ public:
 	void set_replica_def_attrib_resolver(ReplicaDefAttribResolver resolver) {
 		replica_def_attrib_resolver_ = std::move(resolver);
 	}
+	// The def's second attrib word (ItemDef+0x58), by wire type: an org1 deck ride reads its
+	// parent's IsTurret bit (0x1000) [orig: Entity_UpdateInfantryAI @0x4B9910 - `test dword ptr
+	// [eax+58h], 1000h` @0x4BA823].
+	void set_replica_def_attrib2_resolver(ReplicaDefAttribResolver resolver) {
+		replica_def_attrib2_resolver_ = std::move(resolver);
+	}
 	// A seated row's seat type (+0x168: 1 sitex, 2 ctrlx, 3 UseGun, 5 drvrx), the
 	// type of the carrier's seat whose bone the record names, which the attach
 	// stamps from the carrier model's userpoint; 0 for none. The embedder answers
@@ -954,12 +960,14 @@ private:
 	// seat-local sample on a carrier, except a world-mover vehicle, which the
 	// embedding sim predicts (its row publishes the mirrored pose).
 	static bool follows_carrier_seat(const ClientEntityState &child);
+	bool org1_ride_aim_adds(const ClientEntityState &row) const;
 	// One such row's follow: its pose from its carrier row's live pose and its
 	// seat-local sample; a carrier row that is gone invalidates the sample.
 	static void follow_carrier_seat(ClientEntityState &child, const ClientEntityState *carrier);
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
 	ReplicaGroundProbe replica_ground_probe_;
 	ReplicaDefAttribResolver replica_def_attrib_resolver_;
+	ReplicaDefAttribResolver replica_def_attrib2_resolver_;
 	ReplicaSeatTypeResolver replica_seat_type_resolver_;
 	ReplicaSeatFrameResolver replica_seat_frame_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
