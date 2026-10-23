@@ -474,8 +474,10 @@ bool Simulation::debug_weapon_trigger(int p_trigger) {
 	if (slot == nullptr) return false;
 	// p_trigger is devtools::WeaponRequest::Trigger, paired at the drain.
 	switch (p_trigger) {
-		case 0:  // Fire: the press edge, latched until the pump consumes it.
-			kernel_->local.set_weapon_input(weapon.fire_held, true, false);
+		case 0:  // Fire: a key's press and release, the fire row's two legs (a PowerThrow's
+			// tap throw among them; engine world::LocalPlayer::fire_record).
+			(void)kernel_->local.fire_record(true, true);
+			(void)kernel_->local.fire_record(false, true);
 			return true;
 		case 1:  // Reload: refused exactly where the input dispatcher refuses it.
 			if (!opennova::world::weapon_fsm_reload_allowed(weapon.def, *slot)) return false;

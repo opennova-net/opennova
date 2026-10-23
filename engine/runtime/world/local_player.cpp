@@ -405,6 +405,15 @@ bool LocalPlayer::press_fire() {
 	return w::local_weapon_press_fire(world_, weapon, view);
 }
 
+bool LocalPlayer::fire_record(bool binding_held, bool from_keyboard) {
+	// [orig: Input_HandleActionBinding_0 case 0x95 @0x4E07B5..0x4E0A1E; the declaration
+	//  carries the legs]
+	if (view.binoculars_view_active) return false;
+	if (!binding_held) return w::local_weapon_release_fire(world_, weapon);
+	if ((weapon.def.flags & w::weapon_flag::kPowerThrow) == 0) return press_fire();
+	return from_keyboard && w::local_weapon_power_throw_press(world_, weapon);
+}
+
 bool LocalPlayer::request_reload() {
 	return w::local_weapon_request_reload(world_, weapon, view,
 			inventory_valid ? &inventory : nullptr);

@@ -107,15 +107,24 @@ void test_blockfire_refuses_at_the_dispatch_not_after_it() {
 
 void test_only_fire_scoped_refuses_outside_the_optical_view() {
 	Fixture f;
-	f.weapon.def.flags = weapon_flag::kOnlyFireScoped;
+	f.world.tables.weapons.entries[1].flags = weapon_flag::kOnlyFireScoped;
 	CHECK(!f.press()); // no optical view up
 	CHECK(!f.weapon.fire_pressed);
 	CHECK(f.world.script.weapon_input.fire_requested(kCategory)); // the latch precedes the test
 }
 
+// The two flags are the EquippedSlot def's, not the mounted FSM def's (they differ on a
+// borrowed carrier slot's route) [orig: EquippedSlot->Def+8 @0x4E097C / @0x4E09AC].
+void test_the_flags_are_the_equipped_slot_defs() {
+	Fixture f;
+	f.weapon.def.flags = weapon_flag::kOnlyFireScoped | weapon_flag::kOnlyFireLocked;
+	CHECK(f.press()); // the slot's def carries neither
+	CHECK(!f.weapon.fire_press_dry);
+}
+
 void test_only_fire_locked_without_a_lock_dry_clicks() {
 	Fixture f;
-	f.weapon.def.flags = weapon_flag::kOnlyFireLocked;
+	f.world.tables.weapons.entries[1].flags = weapon_flag::kOnlyFireLocked;
 	CHECK(f.press());
 	CHECK(f.weapon.fire_press_dry); // the player's aim runtime holds no lock
 	f.pump(true);
@@ -139,6 +148,7 @@ int main() {
 	test_the_press_stamps_the_script_latch_at_the_dispatch();
 	test_blockfire_refuses_at_the_dispatch_not_after_it();
 	test_only_fire_scoped_refuses_outside_the_optical_view();
+	test_the_flags_are_the_equipped_slot_defs();
 	test_only_fire_locked_without_a_lock_dry_clicks();
 	test_a_driver_seat_refuses_after_the_latch();
 	if (failures != 0) {

@@ -208,13 +208,23 @@ public:
     // no local player.
     bool apply_pose(const int32_t (&position_q16)[3], int32_t heading_bam, int32_t pitch_bam);
     void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
-    // The left mouse button's down at the update's message pump: the PowerThrow windup
-    // test it owes the weapon pump (world::local_weapon_left_button_down).
+    // The left mouse button's down at the update's message pump: the PowerThrow windup's
+    // restart or clear (world::local_weapon_left_button_down).
     void left_button_down();
     // The reload row's arm at its record's dispatch (world::local_weapon_request_reload).
     bool request_reload();
     // The fire row's press leg at its record's dispatch (world::local_weapon_press_fire).
     bool press_fire();
+    // The fire row's record past the dispatcher's head and the cease fire (case 0x95): with
+    // the binocular view down, the binding held runs the press leg (a PowerThrow def's
+    // windup start from the keyboard alone, world::local_weapon_power_throw_press; any other
+    // def's gates and request latch, press_fire), the binding up the release leg (a running
+    // windup's throw, world::local_weapon_release_fire). True = a leg latched a request or
+    // started a windup.
+    // [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95: g_BinocularsViewActive
+    //  @0x4E07B5, Input_IsBindingActive(0x95) @0x4E07D9, the release leg @0x4E07E9, the press
+    //  leg @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device test @0x4E090B)]
+    bool fire_record(bool binding_held, bool from_keyboard);
     // The ToSpecial action (input case 220): each press or release edge of its
     // keys queues one dispatch, and dispatch_to_special runs the queue with the
     // keys' live state, keeping a deferred dispatch (and those behind it) for

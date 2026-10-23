@@ -140,11 +140,13 @@ struct LocalPlayerWeapon {
     bool fire_held = false;
     bool fire_pressed = false;    // latched until the pump consumes the edge
     bool reload_pressed = false;
+    // The PowerThrow windup's start, g_FireChargeStartTick: the input phase's tick
+    // (local_weapon_input_tick) its left-down or key press stored, 0 for none.
     uint32_t power_throw_start_tick = 0;
     uint8_t pending_throw_charge = 0;
-    // A left button's down at this update's message pump owes the pump its PowerThrow
-    // windup test (local_weapon_left_button_down); consumed with the press latch.
-    bool power_throw_left_down = false;
+    // The fire row's release leg took the windup at its record (local_weapon_release_fire):
+    // the pump requests the throw with the charge byte; consumed with the press latch.
+    bool power_throw_released = false;
     // The latched press passed case 0x95's press-leg gates at its record
     // (local_weapon_press_fire): the pump requests it with no WAC gate of its own; and
     // whether an accepted request becomes the dry click (OnlyFireLocked with no lock).
@@ -524,24 +526,51 @@ bool local_held_weapon_visible(const World &world, const Entity &entity,
 void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
                             bool fire_held, bool fire_pressed,
                             bool reload_pressed);
+// The game's tick as the update's input phase reads it (its message pump, its input frame's
+// records): retail steps g_CurrentTick at the update's head, ahead of both, and the weapon
+// walk reads the same value; ours steps World::logic_tick inside the world tick, behind the
+// input frame, so the input phase's tick is the one the step leaves (a paused update steps
+// neither, and ours lags the pausing update's step by one, which the +1 still matches).
+// [orig: Game_ProcessMainFrame @0x5263F0 - ++g_CurrentTick @0x5265B4, Game_PumpWindowMessages
+//  @0x526608, Input_ProcessFrame @0x52661D, WeaponAction_ProcessAllEntities @0x526786]
+uint32_t local_weapon_input_tick(const World &world);
 // The left mouse button's down (the message's event 2; a double click's 1024 runs none),
 // at the update's message pump ahead of its input frame, whatever row the button binds:
 // with the binocular view down, a local entity, an equipped weapon and a seat that is no
-// Controller or Driver seat, the pump's next tick runs the PowerThrow windup test, which
-// restarts the windup on a slot that can fire with ammo and clears it otherwise (a def
-// without the PowerThrow flag clears it too). The fire row's press leg starts a windup
-// only from the keyboard and only when none runs (inmatch::Role::dispatch_record).
+// Controller or Driver seat, a PowerThrow def whose slot can fire with ammo restarts the
+// windup at the input phase's tick; any other clears it (a def without the PowerThrow flag
+// too). The fire row's press leg starts a windup only from the keyboard and only when none
+// runs (local_weapon_power_throw_press).
 // [orig: Input_ProcessBindings @0x4DDA50 - the event-2 leg @0x4DDA88..0x4DDAFE (the
 //  binocular test @0x4DDA90, g_LocalPlayerEntity @0x4DDA99, the EquippedSlot @0x4DDAA3,
 //  parentSlot 2 / 5 @0x4DDAB3, the def @0x4DDABA, its sign bit @0x4DDABF,
 //  WeaponSlot_CanFireInCurrentState and WeaponSlot_HasAmmoAvailable, the stores
 //  @0x4DDAF6 / @0x4DDAFE); Input_DispatchMouseEvent @0x761470]
-void local_weapon_left_button_down(const World &world, LocalPlayerWeapon &w,
+void local_weapon_left_button_down(World &world, LocalPlayerWeapon &w,
                                    const PlayerViewState &view);
+// The fire row's press leg for a PowerThrow def at its record (inmatch::Role::dispatch_record,
+// the binding held by a key: Input_IsBindingActive's device 1): with an equipped weapon and
+// no windup running, the windup starts at the input phase's tick on a slot that can fire with
+// ammo, else stays 0. It requests no fire. True = a windup started.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95's press leg: the EquippedSlot
+//  @0x4E08DC..0x4E08EC, the PowerThrow sign bit @0x4E08FD, the device test @0x4E090B, the
+//  start test @0x4E0915, the store @0x4E0947, the clear @0x4E0954]
+bool local_weapon_power_throw_press(World &world, LocalPlayerWeapon &w);
+// The fire row's release leg at its record (inmatch::Role::dispatch_record, the binding up,
+// past the head, the binocular view and the cease fire): a running windup ends, its held
+// ticks (the input phase's tick less its start) become the charge byte
+// (power_throw_charge_from_hold), and the pump requests the throw with it
+// (LocalPlayerWeapon::power_throw_released). Any def: the leg reads the windup alone. A
+// release with no windup does nothing. True = a throw requested.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95's release leg @0x4E07E9..0x4E0879
+//  (the start test @0x4E07EF, held @0x4E07F7..0x4E07FC, the clear @0x4E0801, the charge
+//  @0x4E07FE..0x4E085A, WeaponSlot_RequestFire(EquippedSlot, 0x96, charge) @0x4E086F)]
+bool local_weapon_release_fire(World &world, LocalPlayerWeapon &w);
 // The reload row's arm at its record's dispatch (inmatch::Role::dispatch_record), on the
 // slot equipped then: with the binocular view down and an equipped weapon (under the pump's
-// own input block), a magazine short of its capacity and a pool that is not 0 (read through
-// the player's seat as the pump reads them) request the reload, which takes the slot's next
+// own input block but its seat leg: the case has no seat test, and a Driver's or an unarmed
+// Controller's EquippedSlot is its own weapon's), a magazine short of its capacity and a pool
+// that is not 0 (read through the player's seat as the pump reads them) request the reload, which takes the slot's next
 // action only from IDLE, EMPTYIDLE or OVERHEATED (weapon_fsm_request_reload). So a reload
 // ahead of a switch or a fire in the same drain queues RELOAD before they queue theirs.
 // True = requested. A sourceless frame's reload latch stays the pump's (reload_pressed).
@@ -572,7 +601,7 @@ bool local_weapon_request_reload(World &world, LocalPlayerWeapon &w,
 //  (0x10000000) @0x4E09AC..0x4E09BB, the aim runtime's lock bit @0x4E09BD..0x4E09C9, the
 //  seats @0x4E09CB..0x4E09FF (Driver @0x4E09DE, Controller's EWeap @0x4E09F5),
 //  Player_RequestPrimaryFire @0x4E0A06, nextAction = 5 @0x4E0A1E; Player_RequestPrimaryFire
-//  @0x5414C0 -> WeaponSlot_RequestFire(slot, 149, 0) @0x5414D4]
+//  @0x5414C0 -> WeaponSlot_RequestFire(slot, 149, 0) @0x5414CC]
 bool local_weapon_press_fire(World &world, LocalPlayerWeapon &w, const PlayerViewState &view);
 
 // Why the pump would drop this tick's weapon input, if it would. The pump's

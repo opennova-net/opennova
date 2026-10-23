@@ -121,14 +121,19 @@ static void test_block_does_not_revoke_an_accepted_delayed_shot() {
     CHECK(!f.world.script.weapon_input.fire_requested(3));
 }
 
+// The PowerThrow's press leg (a key's) and its release leg at their records take no WAC
+// latch or BlockFire gate [orig: Input_HandleActionBinding_0 case 0x95 - the PowerThrow
+// branch @0x4E08FD..0x4E095C ahead of the latch @0x4E0961, the release leg @0x4E07E9].
 static void test_power_throw_bypasses_the_ordinary_binding_latches() {
     Fixture f(5);
     f.weapon.def.flags = weapon_flag::kPowerThrow;
     f.script("blockfire(5,1)\n");
-    f.pump(true, true);
+    CHECK(local_weapon_power_throw_press(f.world, f.weapon));
+    f.pump(true);
     CHECK(f.weapon.power_throw_start_tick != 0);
     CHECK(f.weapon.slot.clip == 30);
     CHECK(!f.world.script.weapon_input.fire_requested(5));
+    CHECK(local_weapon_release_fire(f.world, f.weapon));
     f.pump(false);
     CHECK(f.weapon.fired_serial == 1);
     CHECK(f.weapon.slot.clip == 29);

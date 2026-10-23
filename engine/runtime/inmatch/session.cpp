@@ -137,9 +137,21 @@ void Role::apply_input(const TickInput &input) {
 	if (look_x != 0.0f || look_y != 0.0f) kernel.local.look(look_x, look_y);
 	// The trigger; the reload rides its record's arm (dispatch_record), PRESSED_RELOAD a
 	// sourceless frame's latch (PressedAction).
-	kernel.local.set_weapon_input((input.player.held_action_bits & HELD_FIRE) != 0,
-			(input.player.pressed_action_bits & PRESSED_FIRE) != 0,
+	const bool fire_held = (input.player.held_action_bits & HELD_FIRE) != 0;
+	const bool fire_pressed = (input.player.pressed_action_bits & PRESSED_FIRE) != 0;
+	kernel.local.set_weapon_input(fire_held, fire_pressed,
 			(input.player.pressed_action_bits & PRESSED_RELOAD) != 0);
+	// A sourceless frame (the embedder's frame value: no device, so no records) carries the
+	// fire row as its bits alone. A PowerThrow def's windup then runs as a key's would: the
+	// press bit is the press leg's start, the hold's end the release leg's throw
+	// (LocalPlayer::fire_record); a device's windup is its records' alone.
+	if (input.source == nullptr &&
+			(kernel.local.weapon.def.flags & world::weapon_flag::kPowerThrow) != 0) {
+		if (fire_pressed)
+			(void)kernel.local.fire_record(true, true);
+		else if (!fire_held)
+			(void)kernel.local.fire_record(false, true);
+	}
 }
 
 void Role::observe_frame_rate(int32_t fps) {
@@ -373,12 +385,13 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// The fire row (catalog row 43 attack_1, code 149 = 0x95, flags 0x8C400C01) past the head:
 	// the case drops the record whole under the binocular view or a cease fire, then tests the
 	// binding live (the update's sample, HELD_FIRE). Held, the press leg latches the weapon
-	// pump's fire request (a PowerThrow's windup among it); up, the release leg, whose
-	// PowerThrow throw the pump runs from the hold's end. So a click whose button came up
-	// before its record's update fires nothing (D-NET-NEW-LI-3). A PowerThrow def's press leg
-	// requests no fire: it starts the windup only when the binding's device is the keyboard
-	// (HELD_FIRE_KEYS), a mouse press's windup being its left-down's
-	// (world::local_weapon_left_button_down), a joystick's none.
+	// pump's fire request; up, the release leg, which throws a running PowerThrow windup
+	// (LocalPlayer::fire_record). So a click whose button came up before its record's update
+	// fires nothing (D-NET-NEW-LI-3), and a windup throws only at a record that reads the
+	// binding up: none under a cease fire or an open text line (whose release pass queues no
+	// event). A PowerThrow def's press leg requests no fire: it starts the windup only when the
+	// binding's device is the keyboard (HELD_FIRE_KEYS), a mouse press's windup being its
+	// left-down's (world::local_weapon_left_button_down), a joystick's none.
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95: g_BinocularsViewActive
 	//  @0x4E07B5, g_InCeaseFire @0x4E07C2, Input_IsBindingActive(0x95) @0x4E07D9, the release
 	//  leg @0x4E07E9, the press leg @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device
@@ -387,14 +400,8 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// the WAC latch and BlockFire, OnlyFireScoped, OnlyFireLocked's dry click, the seats).
 	constexpr int kFireRow = 43;
 	if (code == controls::action_code(kFireRow)) {
-		world::LocalPlayer &local = kernel_->local;
-		if (!action_head_admits(code) || local.view.binoculars_view_active ||
-				kernel_->world.rules.cease_fire || !fire_held_)
-			return;
-		if ((local.weapon.def.flags & world::weapon_flag::kPowerThrow) == 0)
-			(void)local.press_fire();
-		else if (fire_keys_held_)
-			local.set_weapon_input(true, true, false);
+		if (!action_head_admits(code) || kernel_->world.rules.cease_fire) return;
+		(void)kernel_->local.fire_record(fire_held_, fire_keys_held_);
 		return;
 	}
 	// The pause row (catalog row 70, code 25; the declaration carries the witness): past

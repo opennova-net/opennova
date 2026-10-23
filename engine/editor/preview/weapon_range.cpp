@@ -452,20 +452,29 @@ void WeaponRange::fire_shot_(const WeaponRangeShot &shot) {
 void WeaponRange::apply_gestures_(int32_t tick) {
 	world::World &world = *world_;
 	world::LocalPlayerWeapon &weapon = local_->weapon;
-	bool pressed = false;
 	bool reload = false;
 	for (const WeaponGestureAt &at : gestures_) {
 		if (at.tick != tick) continue;
 		WeaponRangeEvent refused;
 		refused.tick = tick;
 		refused.kind = WeaponRangeEvent::Kind::Refused;
+		// The fire key's events are the fire row's records past the dispatcher's head: its
+		// press the press leg with the key held, its release the release leg (a PowerThrow's
+		// throw) [orig: Input_HandleActionBinding_0 case 0x95 @0x4E07B5..0x4E0A1E;
+		// world::LocalPlayer::fire_record].
 		switch (at.gesture) {
-		case WeaponGesture::Fire: pressed = true; break;
+		case WeaponGesture::Fire:
+			(void)local_->fire_record(true, true);
+			(void)local_->fire_record(false, true);
+			break;
 		case WeaponGesture::Hold:
-			pressed = !holding_;
+			if (!holding_) (void)local_->fire_record(true, true);
 			holding_ = true;
 			break;
-		case WeaponGesture::Release: holding_ = false; break;
+		case WeaponGesture::Release:
+			if (holding_) (void)local_->fire_record(false, true);
+			holding_ = false;
+			break;
 		case WeaponGesture::Reload: {
 			// The dispatcher's gate ahead of the request: a full magazine or an empty reserve refuses it [orig:
 			// input case 0xD3 @ 0x4E0420].
@@ -503,7 +512,7 @@ void WeaponRange::apply_gestures_(int32_t tick) {
 		}
 		}
 	}
-	local_->set_weapon_input(holding_, pressed, reload);
+	local_->set_weapon_input(holding_, false, reload);
 }
 
 void WeaponRange::step_() {

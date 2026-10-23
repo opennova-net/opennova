@@ -864,13 +864,14 @@ void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
 	CHECK(role->input_events().empty(), "the reset emptied the queue");
 }
 
-// D-CTRL-6 (LI-s16): the fire row's record (attack_1, code 149 = 0x95: a key's, a click's,
-// a press's or a release's) is the role's arm past the head: the case drops it whole under a
-// cease fire, then tests the binding live at its dispatch (the update's sample, HELD_FIRE):
-// held, the press leg latches the weapon pump's fire request; up (a click whose button came
-// up before its update), the release leg latches none (D-NET-NEW-LI-3). A PowerThrow def's
-// press leg requests no fire: it latches the press (its windup test) only from the keyboard
-// (HELD_FIRE_KEYS), never from a mouse's or a joystick's binding.
+// D-CTRL-6 (LI-s16, LI-s17): the fire row's record (attack_1, code 149 = 0x95: a key's, a
+// click's, a press's or a release's) is the role's arm past the head: the case drops it whole
+// under a cease fire, then tests the binding live at its dispatch (the update's sample,
+// HELD_FIRE): held, the press leg latches the weapon pump's fire request; up (a click whose
+// button came up before its update), the release leg latches none (D-NET-NEW-LI-3) but throws
+// a running PowerThrow windup, which a cease fire leaves running. A PowerThrow def's press leg
+// requests no fire: it starts the windup only from the keyboard (HELD_FIRE_KEYS), never from a
+// mouse's or a joystick's binding.
 // [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95: g_InCeaseFire @0x4E07C2,
 //  Input_IsBindingActive(0x95) @0x4E07D9, the release leg @0x4E07E9, the press leg
 //  @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device test @0x4E090B)]
@@ -915,10 +916,19 @@ void test_the_fire_record_tests_its_binding_live() {
 				: face == 1 ? "a binding that reads up takes the release leg: no request"
 				            : "a cease fire drops the record whole");
 	}
-	for (const bool keys : {false, true}) { // a PowerThrow def: the mouse's binding; a key's
+	// A PowerThrow def with three rounds on an idle slot.
+	const auto power_throw = [](TickRecorder &role) -> opennova::world::LocalPlayerWeapon & {
+		opennova::world::LocalPlayerWeapon &w = role.kernel.local.weapon;
+		w.active = true;
+		w.def.flags = opennova::world::weapon_flag::kPowerThrow;
+		w.def.clip_capacity = 3;
+		w.slot.clip = 3;
+		return w;
+	};
+	for (const bool keys : {false, true}) { // the mouse's binding; a key's
 		auto role = std::make_unique<TickRecorder>();
 		spawn_local_player(*role);
-		role->kernel.local.weapon.def.flags = opennova::world::weapon_flag::kPowerThrow;
+		opennova::world::LocalPlayerWeapon &w = power_throw(*role);
 		FireDevice device;
 		device.held = true;
 		device.keys = keys;
@@ -928,9 +938,26 @@ void test_the_fire_record_tests_its_binding_live() {
 		three.delta_seconds = TickAccumulator::kTickDt * 3.0;
 		three.tick_source = &device;
 		CHECK(session.advance(three).ticks_run() == 3, "three updates");
-		CHECK(role->kernel.local.weapon.fire_pressed == keys,
-				keys ? "a PowerThrow's key press latches its windup test"
-				     : "a PowerThrow's mouse press latches none: its left-down owns the windup");
+		CHECK((w.power_throw_start_tick != 0) == keys && !w.fire_pressed,
+				keys ? "a PowerThrow's key press starts its windup and requests no fire"
+				     : "a PowerThrow's mouse press starts none: its left-down owns the windup");
+	}
+	for (const bool cease : {false, true}) { // a running windup, the binding up at its record
+		auto role = std::make_unique<TickRecorder>();
+		spawn_local_player(*role);
+		opennova::world::LocalPlayerWeapon &w = power_throw(*role);
+		w.power_throw_start_tick = 450;
+		role->kernel.world.rules.cease_fire = cease;
+		FireDevice device;
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		FrameInput three;
+		three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 3, "three updates");
+		CHECK(w.power_throw_released == !cease && (w.power_throw_start_tick == 0) == !cease,
+				cease ? "a cease fire drops the release record: the windup runs on"
+				      : "the release leg takes the windup for the pump's throw");
 	}
 }
 

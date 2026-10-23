@@ -84,6 +84,21 @@ void test_the_case_gates() {
 	}
 }
 
+// The case has no seat test: a Driver keeps its own weapon's EquippedSlot, which the weapon
+// walk pumps, so the reload is requested on it (the fire's press leg refuses the seat).
+// [orig: Entity_AttachToVehicleSlot @0x4946D0 - the Driver leg @0x4948A6..0x494936;
+//  WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1; case 0x95's Driver refusal @0x4E09DE]
+void test_a_driver_seat_reloads_its_own_weapon() {
+	Fixture f;
+	Entity *body = f.world.registry.get(f.player);
+	body->mounted = true;
+	body->mount_type = SeatType::Driver;
+	CHECK(local_weapon_input_block(f.world, f.weapon) == LocalWeaponInputBlock::kSeat);
+	CHECK(f.reload());
+	CHECK(f.weapon.slot.next == weapon_action::kReload);
+	CHECK(!local_weapon_press_fire(f.world, f.weapon, f.view));
+}
+
 void test_a_reload_behind_a_queued_action_queues_nothing() {
 	Fixture f;
 	f.weapon.slot.next = weapon_action::kSwitchFrom; // a switch the drain queued first
@@ -104,6 +119,7 @@ void test_a_reload_behind_a_queued_action_queues_nothing() {
 int main() {
 	test_the_request_queues_reload_on_the_equipped_slot();
 	test_the_case_gates();
+	test_a_driver_seat_reloads_its_own_weapon();
 	test_a_reload_behind_a_queued_action_queues_nothing();
 	if (failures != 0) {
 		std::printf("reload_at_dispatch: %d failure(s)\n", failures);
