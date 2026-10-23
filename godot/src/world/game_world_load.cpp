@@ -738,21 +738,15 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 	if (sim.is_valid()) {
 		sim->set_character_avatar_database(avatar_db);
 	}
-	if (avatar_db.is_valid()) {
-		local_character_profile_ = avatar_db->character_join_profile_from_loadout(
-				player_visuals_->spawn_loadout(), drive_.pending_session());
-	} else {
+	if (avatar_db.is_null()) {
 		UtilityFunctions::push_warning("GameWorld: Avatars.def unavailable; players draw their item model");
 		if (!resource_root_->has_file("Avatars.def")) {
 			// The log line the editor's Play reads back into a Problems row (ADR 0046 DI-27).
 			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, "Avatars.def", String(),
 					"players draw their item model");
 		}
-		// The empty table still projects the record's voice override (engine
-		// join_character_profile_without_table).
-		local_character_profile_ = AvatarDatabase::character_join_profile_without_table(
-				player_visuals_->spawn_loadout(), drive_.pending_session());
 	}
+	project_local_character_profile(avatar_db);
 	panm_clock_->sample(get_frame_clock_ms(),
 			static_cast<int64_t>(Engine::get_singleton()->get_process_frames()));
 	placer_->set_panm_clock(panm_clock_);
@@ -1426,6 +1420,16 @@ Ref<MissionSetupOptions> GameWorld::make_runtime_options(const Ref<MissionData> 
 	return opts;
 }
 
+void GameWorld::project_local_character_profile(const Ref<AvatarDatabase> &p_avatar_db) {
+	// The empty table still projects the record's voice override (engine
+	// join_character_profile_without_table).
+	local_character_profile_ = p_avatar_db.is_valid()
+			? p_avatar_db->character_join_profile_from_loadout(
+					  player_visuals_->spawn_loadout(), drive_.pending_session())
+			: AvatarDatabase::character_join_profile_without_table(
+					  player_visuals_->spawn_loadout(), drive_.pending_session());
+}
+
 // See game_world.h. Retail's host opens its socket at the host screen's START and creates its
 // session in the pre-game menu, both ahead of the Game Loop's mission start; a single player's
 // start creates its session ahead of it too. So the session stands before the mission start's
@@ -1435,11 +1439,25 @@ int GameWorld::create_fresh_session(const Ref<MissionData> &p_mission, const Str
 		const Ref<ResourceRoot> &p_resource_root) {
 	staged_runtime_options_.unref();
 	resource_root_ = p_resource_root;
+	// The create reads the player's character words: the session settings' apply copies the
+	// profile's ahead of it, over the Avatars.def the process loaded at its start, so the local
+	// profile is projected here, from the mount's table, ahead of the options that carry it
+	// (D-NET-NEW-L1-50, V-ROLL-BE C-1) [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 -
+	//  Game_ApplySessionSettingsToGlobals called @0x5695B8; SinglePlayer_StartMission - the call
+	//  @0x561C28; CNapiGameSession_CreateSession @0x4C97C0 - the profile words' reads
+	//  @0x4C9960..0x4C9CCE, PlayerSession_InitFromProfile called @0x4C9CCE].
+	Ref<AvatarDatabase> avatar_db;
+	avatar_db.instantiate();
+	if (resource_root_.is_null() ||
+			avatar_db->load_from_resource_root(resource_root_, "Avatars.def") != OK)
+		avatar_db.unref();
+	project_local_character_profile(avatar_db);
 	Ref<MissionSetupOptions> opts = make_runtime_options(p_mission, p_bms_name);
 	Ref<Simulation> sim = opts->get_simulation();
 	const int stage_error = MissionRoot::stage_simulation(sim, p_mission, opts);
 	if (stage_error != OK) {
-		if (stage_error == ERR_CANT_CREATE && opts->get_net_transport() == "lan") {
+		// Any LAN setup failure reads as the bind's, as the runtime's setup reports it.
+		if (opts->get_net_transport() == "lan") {
 			emit_signal(kSignalLoadFailed,
 					vformat("host start: could not bind LAN UDP port %d", opts->get_bind_port()));
 		} else {
@@ -1450,9 +1468,9 @@ int GameWorld::create_fresh_session(const Ref<MissionData> &p_mission, const Str
 	if (sim->create_host_session(p_mission, p_resource_root,
 				opts->get_mission_file().replace("\\", "/").get_file()) != OK) {
 		// The session create ended the process (exit code 0): no load failure to show, the
-		// shell exits.
+		// shell exits; the load returns what the boot's refusal returned.
 		emit_signal(kSignalProcessExitRequested, 0);
-		return ERR_CANT_CREATE;
+		return ERR_CANT_OPEN;
 	}
 	opts->set_simulation(sim);
 	opts->set_session_staged(true);

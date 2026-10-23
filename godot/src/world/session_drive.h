@@ -209,6 +209,10 @@ private:
 	// One reset for the typed request staging, used by every session
 	// load-failure leg and reset().
 	void clear_pending_session();
+	// The host request a fresh load staged with its created session at the load's start
+	// (GameWorld::create_fresh_session -> stage_runtime_options), null on any other load: the
+	// load's later legs read it until the runtime starts (pending_dedicated, pending_session).
+	Ref<HostSessionOptions> staged_host_request() const;
 	// r_avatar_db, when given, takes the Avatars.def the profile was built over (null
 	// when none loaded).
 	Ref<CharacterJoinProfile> build_join_character_profile(

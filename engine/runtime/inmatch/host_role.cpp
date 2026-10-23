@@ -456,8 +456,8 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	// The integrity tables the mission's def loads built, past the create [orig: Game_StartMission
 	//  - AmmoDef_LoadAll @0x525495, WeaponDefs_LoadFile @0x5254BD].
 	ctx.config.integrity_sources = host_cfg.config.integrity_sources;
-	// The session onto its first mission's World: its clock, its rules, the first mission's
-	// settings and the host's own add (bind_host_session_world).
+	// The session onto its first mission's World: its clock, its rules and the first mission's
+	// settings (bind_host_session_world); the host's own add ran inside the create.
 	inmatch::bind_host_session_world(state.host_owner, host_cfg);
 	// The mission start that follows the create sets both report clocks loading
 	// (D-NET-NEW-L9-22) [orig: Game_StartMission @0x524360 - CServerTick_SetState(1) @0x5244A4 /

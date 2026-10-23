@@ -4560,7 +4560,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	cfg.socket_mode = inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = true;
 	inmatch::start_host_session(owner, cfg);
-	// The session onto its World (the create reads none): its rules, the own add.
+	// The session onto its World: its rules (the own add ran in the create, the World bound).
 	inmatch::bind_host_session_world(owner, cfg);
 	// The mission start's round init: the own body (the session create's add binds none), then
 	// the own client's load-time stream over the loopback (HostRole::init_round_after_premission,
@@ -4628,7 +4628,7 @@ bool run_host_startup_maps_claymore_preference() {
 		cfg.config.mp_attributes = 0x8000u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
-		// The session onto its World (the create reads none): its rules, the own add.
+		// The session onto its World: its rules (the own add ran in the create, the World bound).
 		inmatch::bind_host_session_world(owner, cfg);
 		if (!expect(world.throwables.team_trigger_claymore,
 		            "host startup enables same-team claymore triggers for mp_attributes 0x8000"))
@@ -4645,7 +4645,7 @@ bool run_host_startup_maps_claymore_preference() {
 		cfg.config.mp_attributes = 0x3A06u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
-		// The session onto its World (the create reads none): its rules, the own add.
+		// The session onto its World: its rules (the own add ran in the create, the World bound).
 		inmatch::bind_host_session_world(owner, cfg);
 		if (!expect(!world.throwables.team_trigger_claymore,
 		            "host startup disables same-team claymore triggers for default mp_attributes 0x3A06"))
@@ -4668,7 +4668,7 @@ bool run_host_startup_maps_no_tracers_rule() {
 		cfg.config.mp_attributes = 0x0001u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
-		// The session onto its World (the create reads none): its rules, the own add.
+		// The session onto its World: its rules (the own add ran in the create, the World bound).
 		inmatch::bind_host_session_world(owner, cfg);
 		if (!expect(world.round_sim.no_tracers_rule,
 		            "host startup arms the NoTracers rule for mp_attributes 0x0001"))
@@ -4685,7 +4685,7 @@ bool run_host_startup_maps_no_tracers_rule() {
 		cfg.config.mp_attributes = 0x3A06u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
-		// The session onto its World (the create reads none): its rules, the own add.
+		// The session onto its World: its rules (the own add ran in the create, the World bound).
 		inmatch::bind_host_session_world(owner, cfg);
 		if (!expect(!world.round_sim.no_tracers_rule,
 		            "host startup clears the NoTracers rule for default mp_attributes 0x3A06"))

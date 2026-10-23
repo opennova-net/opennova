@@ -720,9 +720,14 @@ void SessionDrive::cancel_join_preload() {
 	world_->free_join_effect_world();
 }
 
+Ref<HostSessionOptions> SessionDrive::staged_host_request() const {
+	const Ref<MissionSetupOptions> &staged = world_->staged_runtime_options_;
+	return staged.is_valid() ? staged->get_host_session() : Ref<HostSessionOptions>();
+}
+
 bool SessionDrive::pending_session() const {
 	return pending_host_.is_valid() || pending_join_.is_valid() || kept_sim_.is_valid() ||
-			join_preload_sim_.is_valid();
+			join_preload_sim_.is_valid() || staged_host_request().is_valid();
 }
 
 bool SessionDrive::pending_dedicated() const {
@@ -730,7 +735,8 @@ bool SessionDrive::pending_dedicated() const {
 		const Ref<HostSessionOptions> live = kept_sim_->get_host_session_config();
 		return live.is_valid() && !live->get_serve_and_play();
 	}
-	return pending_host_.is_valid() && !pending_host_->get_serve_and_play();
+	const Ref<HostSessionOptions> host = pending_host_.is_valid() ? pending_host_ : staged_host_request();
+	return host.is_valid() && !host->get_serve_and_play();
 }
 
 bool SessionDrive::keep_session(MissionRoot *p_runtime) {

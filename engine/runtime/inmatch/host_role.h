@@ -260,9 +260,9 @@ public:
 	// The shell's general bring-up (the LAN host or its SP listen server with
 	// the shell's mission text and terrain tiles), the mission's half under the
 	// session create: the World under the session (the process's CRT stream onto
-	// it), the mission's text and tiles, the session's rules and the host's own add
-	// (bind_host_session_world), the client view and the load's pumps. A caller that
-	// ran no create_session for this load has it run first. The rules word is the
+	// it), the mission's text and tiles, the session's rules (bind_host_session_world;
+	// the host's own add ran inside the create), the client view and the load's pumps.
+	// A caller that ran no create_session for this load has it run first. The rules word is the
 	// config's mpattrib in a session and 0x4204 for a socketless host, the
 	// shell's single player (D-NET-405).
 	void bring_up(const HostBringup &bringup);

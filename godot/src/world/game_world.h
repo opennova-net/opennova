@@ -943,6 +943,10 @@ private:
 	// process_exit_requested for the create's mpreset exit) and returns the error on a failure.
 	int create_fresh_session(const Ref<MissionData> &p_mission, const String &p_bms_name,
 			const Ref<ResourceRoot> &p_resource_root);
+	// The local player's character profile (local_character_profile_) from Avatars.def's table
+	// (null: the empty table's projection) over the spawn loadout, in session or out. The fresh
+	// session's create reads it at the load's start, the placement again over the placer's table.
+	void project_local_character_profile(const Ref<AvatarDatabase> &p_avatar_db);
 	void run_mission_start();
 	void load_player_weapon_profile();
 	void start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name);
