@@ -823,10 +823,6 @@ PackedInt32Array MenuDriver::selected_host_launch_options() const {
 	return out;
 }
 
-void MenuDriver::select_host_location(int p_id, const String &p_country) {
-	opennova::menu::HostDialog::select_location(runtime_, p_id, to_std(p_country));
-}
-
 bool MenuDriver::is_front_options_screen(const String &p_screen) {
 	return opennova::menu::OptionsScreen::is_front_screen(to_std(p_screen));
 }
@@ -1067,7 +1063,6 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::toggle_host_mission_switch);
 	ClassDB::bind_method(D_METHOD("selected_host_launch_options"),
 			&MenuDriver::selected_host_launch_options);
-	ClassDB::bind_method(D_METHOD("select_host_location", "id", "country"), &MenuDriver::select_host_location);
 	ClassDB::bind_method(D_METHOD("prepare_options", "profiles"), &MenuDriver::prepare_options);
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
 	ClassDB::bind_method(D_METHOD("apply_options_policy", "profiles"), &MenuDriver::apply_options_policy);

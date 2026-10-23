@@ -1,10 +1,14 @@
 #include "host_settings.h"
 
 #include <base/io/crt_ftol.h>
+#include <formats/mnu/mnu.h>
+#include <runtime/menu/menu_flow.h>
+#include <runtime/menu/menu_runtime.h>
 
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 
 namespace opennova::inmatch {
 namespace {
@@ -60,7 +64,11 @@ bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
     //  SERVER_PASSWORD @0x555990 (17), SERVER_MESSAGE @0x5559BC (128), BLUE_PW
     //  @0x555E7F, RED_PW @0x555EA8, SPECTATOR_PW @0x555ED1 (17 each);
     //  CStaticWnd_GetLabelText @0x657570]; the location's item, its length clamped into 1..3
-    // [orig: strncpy(country_3C5, item, count) @0x555A72].
+    // [orig: strncpy(country_3C5, item, count) @0x555A72]. A label shorter than its cap copies
+    // whole with its NUL; one of the cap or longer copies its first cap bytes with none
+    // [orig: CStaticWnd_GetLabelText - the strlen + 1 against the cap @0x657597, strncpy
+    // @0x6575BF], where retail's field reads on into the next one (GAME_NAME's 32 into
+    // country_3C5, the unbounded-copy class of D-GAMECFG-1): the block holds the 32.
     if (control == "GAME_NAME") { cfg.game_name = value.substr(0, 32); return true; }
     if (control == "SERVER_PASSWORD") { cfg.mp_host_game_password = value.substr(0, 17); return true; }
     if (control == "SERVER_MESSAGE") { cfg.servermsg = value.substr(0, 128); return true; }
@@ -174,6 +182,95 @@ std::string host_dialog_value(const gamecfg::GameCfg& cfg, std::string_view cont
     if (control == "ALLOW_AI") return number(cfg.enable_ai);
     if (control == "TOD_CONTINUITY") return number(cfg.mp_tod_continuity);
     return std::string();
+}
+
+namespace {
+
+// A control as both walks find it, -1 when the screen lacks it (the walk
+// skips it). [orig: UI_FindScreenControl @0x63AE80]
+int host_screen_control(const menu::MenuRuntime& screen, std::string_view control) {
+    return screen.find_screen_control(std::string(kHostDialogScreen), std::string(control));
+}
+
+mnu::WindowType host_control_kind(const menu::MenuRuntime& screen, int id) {
+    return static_cast<mnu::WindowType>(screen.widget_kind_of(id));
+}
+
+} // namespace
+
+void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg) {
+    // The clamp lands in the block ahead of MAX_PLAYERS' show, the one word it moves.
+    populate_host_dialog(cfg);
+    for (std::string_view control : host_dialog_controls()) {
+        const int id = host_screen_control(screen, control);
+        if (id < 0) continue;
+        std::string value = host_dialog_value(cfg, control);
+        if (control == "SERVER_PUNKBUSTER") {
+            // No pb\pbcl.dll: the row of value 0, and the spin made inert.
+            // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 (the File_CheckExists
+            //  ("pb\\pbcl.dll") call @0x55613A, SpinList_SelectItemByValue(0) @0x556157,
+            //  UIWidget_SetInteractiveRecursive(0) @0x556160)]
+            value = "0";
+            screen.set_widget_disabled(id, true);
+        }
+        switch (host_control_kind(screen, id)) {
+            case mnu::WindowType::SpinList:
+                // [orig: SpinList_SelectItemByValue @0x64BA50 (row 0 on a miss @0x64BA82);
+                //  GAME_LOCATION: UI_PopulateHostSettingsFromConfig @0x555FE0 (the
+                //  CSpinListWnd_GetItemCount call @0x5560D7, each row's name by the
+                //  CSpinListWnd_GetItemNameByIndex call @0x5560E7 against the country by
+                //  _strnicmp(country_3C5, name, 3) @0x5560FC, the first match selected by the
+                //  CSpinListWnd_SetSelectedIndex call @0x556114, none: the row stays)]
+                if (control == "GAME_LOCATION") menu::HostDialog::select_location(screen, id, value);
+                else screen.select_row_by_value(id, value, false);
+                break;
+            case mnu::WindowType::CheckBox:
+                screen.set_widget_checked(id, value != "0");
+                break;
+            default:
+                // The edits' text set, SetIntValue's "%d" through it for the numeric ones
+                // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 (GAME_NAME's vtable+0x4C
+                //  call @0x556015); CEditWnd_SetText @0x661900 (CButtonWnd_SetLabel, the {hot}
+                //  cut, @0x661912); CEditWnd_SetIntValue @0x657520 (sprintf "%d" @0x657540, the
+                //  set @0x657558)].
+                screen.set_widget_text(id, value);
+                break;
+        }
+    }
+}
+
+void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg) {
+    for (std::string_view control : host_dialog_controls()) {
+        const int id = host_screen_control(screen, control);
+        if (id < 0) continue;
+        std::string value = screen.get_widget_text(id);
+        switch (host_control_kind(screen, id)) {
+            case mnu::WindowType::SpinList: {
+                // The selected row's value, 0 out of range (item_value's ""), GAME_LOCATION's
+                // its name [orig: CSpinListWnd_GetSelectedValue @0x64BAF0 (item+4 @0x64BB11);
+                // CSpinListWnd_GetSelectedName @0x64BB20; HostDialog_ReadSettings @0x555940
+                // (the SERVERTYPE read @0x5559DE and each spin's after it, the GAME_LOCATION
+                // name call @0x5559FF)]
+                const int row = screen.selected_row(id);
+                value = control == "GAME_LOCATION" ? screen.item_text(id, row) : screen.item_value(id, row);
+                break;
+            }
+            case mnu::WindowType::CheckBox:
+                value = screen.is_widget_checked(id) ? "1" : "0";
+                break;
+            default:
+                break;
+        }
+        apply_host_dialog_control(cfg, control, value);
+    }
+}
+
+void read_untouched_host_dialog(gamecfg::GameCfg& cfg, const mnu::Document* doc) {
+    // A fresh runtime (frameless): every control starts as the document authors it.
+    auto screen = std::make_unique<menu::MenuRuntime>();
+    if (doc != nullptr) screen->open_document(doc, std::string(), std::string(kHostDialogScreen));
+    populate_host_screen(*screen, cfg);
+    read_host_screen(*screen, cfg);
 }
 
 uint32_t session_point_limit(int32_t cfg_limit) {

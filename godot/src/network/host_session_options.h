@@ -198,7 +198,6 @@ public:
 	// The MCP status boundary's JSON shape (one key per live-session field;
 	// the request-only fields above stay out of it).
 	Dictionary to_json_value() const;
-	static PackedStringArray dialog_controls();
 	// The request the session create makes of the process's cfg block
 	// (inmatch::host_screen_from_block): every session word, the cap, the
 	// server type, and the LAN authority's first bind port (mplanserverportmin).

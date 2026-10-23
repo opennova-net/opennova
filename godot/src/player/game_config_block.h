@@ -18,6 +18,8 @@
 namespace godot {
 
 class JoinTarget;
+class MenuDriver;
+class MnuDocument;
 class ResourceRoot;
 class RtxtStringFile;
 
@@ -72,6 +74,14 @@ public:
 	void populate_host_dialog();
 	String host_dialog_value(const String &p_control) const;
 	bool apply_host_dialog_control(const String &p_control, const String &p_value);
+	// The whole screen over the block (the engine's populate_host_screen /
+	// read_host_screen): the menu's MULTI_PLAYER_HOST controls shown from the
+	// block, and START's read of them into it; and the dialog left untouched
+	// over the mounted menu document (read_untouched_host_dialog; null: no
+	// screen).
+	void populate_host_screen(const Ref<MenuDriver> &p_driver);
+	void read_host_screen(const Ref<MenuDriver> &p_driver);
+	void read_untouched_host_dialog(const Ref<MnuDocument> &p_doc);
 	// Single player's mission start's block write after its save (the engine's
 	// GameConfigBlock::single_player_mission_start).
 	void single_player_mission_start() { block_.single_player_mission_start(); }

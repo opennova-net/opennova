@@ -148,13 +148,6 @@ int HostSessionOptions::get_player_slot_limit() const {
 			max_players_, serve_and_play_, config_.title));
 }
 
-PackedStringArray HostSessionOptions::dialog_controls() {
-	PackedStringArray result;
-	for (const auto name : opennova::inmatch::host_dialog_controls())
-		result.push_back(String::utf8(name.data(), static_cast<int64_t>(name.size())));
-	return result;
-}
-
 void HostSessionOptions::seed_from_block(const Ref<GameConfigBlock> &p_block) {
 	if (p_block.is_null()) return;
 	const opennova::gamecfg::GameCfg &cfg = p_block->native().cfg();
@@ -251,7 +244,6 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::PACKED_INT32_ARRAY, rotation_launch_options)
 #undef HOST_SESSION_PROPERTY
 	ClassDB::bind_method(D_METHOD("to_json_value"), &HostSessionOptions::to_json_value);
-	ClassDB::bind_static_method("HostSessionOptions", D_METHOD("dialog_controls"), &HostSessionOptions::dialog_controls);
 	ClassDB::bind_method(D_METHOD("seed_from_block", "block"), &HostSessionOptions::seed_from_block);
 	ClassDB::bind_method(D_METHOD("duplicate_options"), &HostSessionOptions::duplicate_options);
 	ClassDB::bind_method(D_METHOD("get_player_slot_limit"), &HostSessionOptions::get_player_slot_limit);

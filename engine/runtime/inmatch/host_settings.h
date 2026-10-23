@@ -6,6 +6,13 @@
 #include <string>
 #include <string_view>
 
+namespace opennova::menu {
+class MenuRuntime;
+}
+namespace opennova::mnu {
+struct Document;
+}
+
 namespace opennova::inmatch {
 
 // The MULTI_PLAYER_HOST screen works on the process's cfg block: it opens
@@ -18,15 +25,20 @@ namespace opennova::inmatch {
 // The NovaWorld host runs the same dialog: its open populates the controls,
 // its START reads them back into the block, then its NovaWorld arm opens the
 // hosting URL. So a dialog left untouched (the game shell's NovaWorld page,
-// whose map picker stands in for it) keeps the block's words, the name it
-// shows among them, plus the populate's cap clamp and, with no pb\pbcl.dll,
-// the PunkBuster spin's 0 (D-NET-NEW-L1-49).
+// whose map picker stands in for it) gives the block back as the screen
+// shows it: the populate's cap clamp, with no pb\pbcl.dll the PunkBuster
+// spin's 0, and every other control's read of what its populate showed
+// (read_untouched_host_dialog; D-NET-NEW-L1-49).
 // [orig: UI_InitHostSettingsDialog @0x558960 - the populate @0x5589C7;
 //  UI_PopulateHostSettingsFromConfig - GAME_NAME @0x556010, the pb\pbcl.dll
 //  test @0x55613A; UI_HandleHostSessionStart - the NovaWorld arm
 //  (networkConnectType_480 == 1) @0x556E47; HostDialog_ReadSettings - GAME_NAME
 //  @0x555962, SERVER_PUNKBUSTER @0x555A9B]
 //
+// The screen both walks find every control on. [orig: UI_FindScreenControl
+// @0x63AE80 (g_GameMenu, "MULTI_PLAYER_HOST", the control's name) at each
+// control of UI_PopulateHostSettingsFromConfig and HostDialog_ReadSettings]
+inline constexpr std::string_view kHostDialogScreen = "MULTI_PLAYER_HOST";
 // The controls, in the read's order. [orig: HostDialog_ReadSettings @0x555940]
 const std::vector<std::string_view>& host_dialog_controls();
 // One control's selected spin value or raw edit string into the block, as the
@@ -49,6 +61,31 @@ void populate_host_dialog(gamecfg::GameCfg& cfg);
 // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 - per control in
 //  host_settings.cpp]
 std::string host_dialog_value(const gamecfg::GameCfg& cfg, std::string_view control);
+// The screen's open over the menu runtime holding it: the populate's clamp
+// (populate_host_dialog), then each control the screen holds shows the
+// block's word (host_dialog_value): a spin list the row whose value= is the
+// word, row 0 when no row holds it; GAME_LOCATION the first row whose name
+// matches the country over three characters, the row left when none does;
+// SERVER_PUNKBUSTER, with no pb\pbcl.dll (none ships with OpenNova), the row
+// of value 0, disabled; an edit by its text set (the class's {hot} cut); a
+// checkbox (the shipped screen has none) checked on a nonzero word. A control
+// the screen lacks is skipped.
+// [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 - per control in
+//  host_settings.cpp]
+void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg);
+// START's read of the screen into the block, each control it holds in the
+// read's order through apply_host_dialog_control: a spin list its selected
+// row's value= (GAME_LOCATION the row's name), an edit its text, a checkbox
+// 1 or 0.
+// [orig: HostDialog_ReadSettings @0x555940]
+void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg);
+// The dialog left untouched: the mounted menu's MULTI_PLAYER_HOST opened
+// fresh (null `doc`, or a menu without the screen: no control), populated and
+// read back, so the block takes each word as the screen gives it back.
+// [orig: UI_InitHostSettingsDialog @0x558960 - UI_PopulateHostSettingsFromConfig
+//  @0x5589C7; UI_HandleHostSessionStart @0x556D00 - HostDialog_ReadSettings
+//  @0x556E36, the NovaWorld arm @0x556E47]
+void read_untouched_host_dialog(gamecfg::GameCfg& cfg, const mnu::Document* doc);
 // The live player-slot limit the session apply makes of a cap: the cap, plus
 // the host's own slot when dedicated (GameConfig::player_slot_limit), under the
 // title's ceiling (TitlePlayerCaps::session; `title` a gameprofile::GameId).

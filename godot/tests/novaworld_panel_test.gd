@@ -22,7 +22,7 @@ func after_each() -> void:
 	_root_dirs.clear()
 
 
-func _real_root(missions: PackedStringArray) -> ResourceRoot:
+func _real_root(missions: PackedStringArray, files := {}) -> ResourceRoot:
 	var dir := OS.get_temp_dir().replace("\\", "/") + \
 			"/opennova_nw_panel_%d_%d" % [Time.get_ticks_usec(), _root_dirs.size()]
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
@@ -35,16 +35,22 @@ func _real_root(missions: PackedStringArray) -> ResourceRoot:
 		if file != null:
 			file.store_string("bms")
 			file.close()
+	for file_name in files:
+		var extra := FileAccess.open(dir.path_join(file_name), FileAccess.WRITE)
+		assert_not_null(extra, "fixture %s opens for write" % file_name)
+		if extra != null:
+			extra.store_string(files[file_name])
+			extra.close()
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)
 	return root
 
 
-func _make_panel(missions: PackedStringArray) -> NovaWorldPanel:
+func _make_panel(missions: PackedStringArray, files := {}) -> NovaWorldPanel:
 	var panel = PANEL_SCENE.instantiate()
 	panel.start_client_on_ready = false
 	panel.target_override = NovaWorldSettings.Target.OPENNOVA
-	panel.resource_root = _real_root(missions)
+	panel.resource_root = _real_root(missions, files)
 	add_child_autofree(panel)
 	return panel
 
@@ -418,12 +424,29 @@ func test_hosting_started_hands_the_request_up() -> void:
 		"the FFI options retain the NovaWorld period-12 selector")
 
 
+# The multiplayer menu's MULTI_PLAYER_HOST as the shipped one authors its spins: value= rows (an
+# <ITEM> with none holds 0), GAME_LOCATION's two-letter rows behind an empty one.
+func _host_dialog_menu() -> String:
+	var body := MenuDriverFixture.wnd("edit", "GAME_NAME", 10)
+	body += MenuDriverFixture.wnd("spinlist", "GAME_LOCATION", 34,
+			'<ITEMS><ITEM value="33"></ITEM><ITEM value="8">DE</ITEM><ITEM value="32">US</ITEM></ITEMS>')
+	body += MenuDriverFixture.wnd("spinlist", "SERVER_PUNKBUSTER", 58,
+			'<ITEMS><ITEM>NO</ITEM><ITEM value="1">YES</ITEM></ITEMS>')
+	body += MenuDriverFixture.wnd("spinlist", "REPLAY", 82,
+			'<ITEMS><ITEM>NEXT</ITEM><ITEM value="1">REPLAY</ITEM></ITEMS>')
+	body += MenuDriverFixture.wnd("edit", "MAX_PLAYERS", 106)
+	return MenuDriverFixture.screen_xml("MULTI_PLAYER_HOST", body)
+
+
 # The NovaWorld host is retail's host dialog with the page's map picker for its controls,
 # untouched: the dialog opens on the process's cfg block (its cap clamped to the screen's
-# 64 in the block) and START reads back what it showed, so the request is the block's and
-# its name is game.cfg's, which the block keeps (the page has no name of its own); with no
-# pb\pbcl.dll the PunkBuster spin stores 0 (engine inmatch/host_settings.h
-# populate_host_dialog and apply_host_dialog_control carry the witness).
+# 64 in the block) and START reads back every control as the mounted menu's screen shows
+# it, so the request is the block's: its name is game.cfg's, which the block keeps (the
+# page has no name of its own); with no pb\pbcl.dll the PunkBuster spin stores 0; a word
+# no spin row holds comes back as row 0's (replay 2 as NEXT's 0); the country comes back as
+# the matched row's own name ("us" as "US"). The launch's save then writes the block's
+# words, not the file's (engine inmatch/host_settings.h read_untouched_host_dialog carries
+# the witness).
 func test_host_request_is_the_untouched_host_dialog() -> void:
 	var run_dir := OS.get_cache_dir().path_join("opennova_nw_panel_cfg_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
@@ -433,11 +456,12 @@ func test_host_request_is_the_untouched_host_dialog() -> void:
 	assert_not_null(file, "game.cfg opens for write")
 	if file != null:
 		file.store_string("version = 29\r\ngame_name = \"Night Ops\"\r\nmpmaxplayers = 80\r\n" +
-				"sv_punkbuster = 1\r\n")
+				"sv_punkbuster = 1\r\nreplay = 2\r\ncountry = \"us\"\r\n")
 		file.close()
 	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
 	GameCfgStore.reset()
-	var panel := _make_panel(PackedStringArray(["alpha.bms"]))
+	var panel := _make_panel(PackedStringArray(["alpha.bms"]),
+			{NovaWorldPanel.HOST_DIALOG_MENU: _host_dialog_menu()})
 	panel.select_mission(0)
 	var client := panel.client_for_test()
 	for connection in client.get_signal_connection_list("host_failed"):
@@ -450,10 +474,16 @@ func test_host_request_is_the_untouched_host_dialog() -> void:
 	assert_eq(config.server_name, "Night Ops", "the request hosts under game.cfg's name")
 	assert_eq(config.max_players, 64, "under the cap the screen's populate clamped")
 	assert_eq(config.server_punkbuster, 0, "with PunkBuster stored 0 (no pb\\pbcl.dll)")
+	assert_eq(config.country, "US", "and the country the location row's own name")
 	assert_eq(GameCfgStore.block().host_dialog_value("GAME_NAME"), "Night Ops",
 		"the block keeps the file's name")
-	assert_string_contains(FileAccess.get_file_as_string(cfg_path), "Night Ops",
-		"and the launch's save writes it back")
+	assert_eq(GameCfgStore.block().host_dialog_value("REPLAY"), "0",
+		"and takes row 0's value for a word no REPLAY row holds")
+	var saved := FileAccess.get_file_as_string(cfg_path)
+	assert_string_contains(saved, 'country                 = "US"',
+		"the launch's save writes the block's country, not the file's")
+	assert_string_contains(saved, "replay                  = 0",
+		"and its replay word")
 	GameCfgStore.reset()
 
 

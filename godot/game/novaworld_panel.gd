@@ -35,6 +35,10 @@ signal host_requested(config: HostSessionConfig)
 # cell text; this panel only renders them).
 const COLUMN_TITLES: PackedStringArray = [
 	"Server", "Mission", "Mode", "Players", "Ping", "Access"]
+# The menu file holding the host dialog: the multiplayer menu, whose host
+# buttons open its MULTI_PLAYER_HOST with file="mp.mnu" and whose
+# NW_MULTI_PLAYER the NovaWorld arm returns to.
+const HOST_DIALOG_MENU := "mp.mnu"
 
 enum Screen { CONNECTING, LOGIN, LOBBY, HOST, MESSAGE }
 
@@ -867,16 +871,16 @@ func _on_host_pressed() -> void:
 	_set_status("Starting host...")
 	# Retail's NovaWorld host is its host dialog, the LAN host's MULTI_PLAYER_HOST, whose START
 	# reads the controls back into the process's cfg block before its NovaWorld arm opens the
-	# hosting URL; this page's map picker stands in for that dialog, untouched. It opened on
+	# hosting URL; this page's map picker stands in for that dialog, untouched. It opens on
 	# the block (the populate writes the cap clamped to the screen's into it) and reads back
-	# what it showed, so the block keeps game.cfg's words, the session's name among them (no
-	# name of the page's own), and with no pb\pbcl.dll its PunkBuster spin shows and stores 0
-	# (engine inmatch/host_settings.h carries the witness). The request seeds from the block
+	# every control as the mounted menu's screen shows it, so the block keeps game.cfg's words
+	# the screen can show, the session's name among them (no name of the page's own), and
+	# takes the screen's for the rest: a spin's row 0 for a word no row holds, the location
+	# row's own name, with no pb\pbcl.dll PunkBuster's 0 (engine inmatch/host_settings.h
+	# read_untouched_host_dialog carries the witness). The request seeds from the block
 	# (HostSessionConfig), and every mission start applies the block again (engine
 	# inmatch::apply_block_session_settings).
-	var block := GameCfgStore.block()
-	block.populate_host_dialog()
-	block.apply_host_dialog_control("SERVER_PUNKBUSTER", "0")
+	GameCfgStore.block().read_untouched_host_dialog(_host_dialog_document())
 	var config := HostSessionConfig.new()
 	config.channel = HostSessionConfig.CHANNEL_NOVAWORLD
 	config.mission = mission
@@ -899,6 +903,18 @@ func _on_host_pressed() -> void:
 		_on_host_failed("NWEC01")
 		return
 	_client.start_hosting(config.to_session_options())
+
+
+# The mounted menu holding the host dialog (HOST_DIALOG_MENU); null when the mount has
+# none, which leaves only the populate's clamp.
+func _host_dialog_document() -> MnuDocument:
+	if resource_root == null:
+		return null
+	var bytes := resource_root.read_file(HOST_DIALOG_MENU)
+	if bytes.is_empty():
+		return null
+	var doc := MnuDocument.new()
+	return doc if doc.load_from_bytes(bytes) == OK else null
 
 
 # The service accepted the hosting (the session is in state 6): the mission

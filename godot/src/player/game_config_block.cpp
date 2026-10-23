@@ -1,5 +1,7 @@
 #include "player/game_config_block.h"
 
+#include "mnu/menu_driver.h"
+#include "mnu/mnu_document.h"
 #include "network/join_target.h"
 #include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
@@ -74,6 +76,10 @@ void GameConfigBlock::_bind_methods() {
 			&GameConfigBlock::single_player_mission_start);
 	ClassDB::bind_method(D_METHOD("apply_host_dialog_control", "control", "value"),
 			&GameConfigBlock::apply_host_dialog_control);
+	ClassDB::bind_method(D_METHOD("populate_host_screen", "driver"), &GameConfigBlock::populate_host_screen);
+	ClassDB::bind_method(D_METHOD("read_host_screen", "driver"), &GameConfigBlock::read_host_screen);
+	ClassDB::bind_method(D_METHOD("read_untouched_host_dialog", "doc"),
+			&GameConfigBlock::read_untouched_host_dialog);
 }
 
 void GameConfigBlock::set_path(const String &p_path) {
@@ -146,6 +152,18 @@ String GameConfigBlock::host_dialog_value(const String &p_control) const {
 bool GameConfigBlock::apply_host_dialog_control(const String &p_control, const String &p_value) {
 	return inmatch::apply_host_dialog_control(
 			block_.cfg(), opennova::to_std(p_control), opennova::to_std(p_value));
+}
+
+void GameConfigBlock::populate_host_screen(const Ref<MenuDriver> &p_driver) {
+	if (p_driver.is_valid()) inmatch::populate_host_screen(p_driver->runtime(), block_.cfg());
+}
+
+void GameConfigBlock::read_host_screen(const Ref<MenuDriver> &p_driver) {
+	if (p_driver.is_valid()) inmatch::read_host_screen(p_driver->runtime(), block_.cfg());
+}
+
+void GameConfigBlock::read_untouched_host_dialog(const Ref<MnuDocument> &p_doc) {
+	inmatch::read_untouched_host_dialog(block_.cfg(), p_doc.is_valid() ? &p_doc->get_native() : nullptr);
 }
 
 void GameConfigBlock::join_choice(const Ref<GameConfigBlock> &p_block,

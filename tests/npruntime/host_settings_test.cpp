@@ -7,7 +7,13 @@
 //  @0x551B26..0x551B48]
 #include <runtime/inmatch/host_settings.h>
 #include "common/test_expect.h"
+#include <formats/mnu/mnu.h>
+#include <runtime/menu/menu_runtime.h>
 #include <limits>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace opennova::inmatch;
 namespace gamecfg = opennova::gamecfg;
@@ -45,10 +51,109 @@ int title_caps() {
     TEST_EXPECT(config.player_slot_limit() == 252);
     return 0;
 }
+
+namespace mnu = opennova::mnu;
+
+mnu::Window control(const char* name, mnu::WindowType type,
+                    std::vector<std::pair<const char*, const char*>> rows = {}) {
+    mnu::Window window;
+    window.name = name;
+    window.type = type;
+    window.items.present = !rows.empty();
+    for (const auto& [text, value] : rows) {
+        mnu::Item row;
+        row.text = text;
+        row.value = value;
+        window.items.items.push_back(row);
+    }
+    return window;
+}
+
+// A MULTI_PLAYER_HOST as the shipped multiplayer menu authors it: the edits, the spins with their
+// value= rows (an <ITEM> with none holds 0), GAME_LOCATION's two-letter rows behind an empty one,
+// no SERVER_LANONLY.
+mnu::Document host_dialog_document() {
+    mnu::Window main = control("MAIN", mnu::WindowType::Window);
+    main.children = {
+        control("GAME_NAME", mnu::WindowType::Edit),
+        control("SERVERTYPE", mnu::WindowType::SpinList, {{"HOST AND PLAY", ""}, {"HOST ONLY", "1"}}),
+        control("GAME_LOCATION", mnu::WindowType::SpinList, {{"", "33"}, {"DE", "8"}, {"US", "32"}}),
+        control("SERVER_PUNKBUSTER", mnu::WindowType::SpinList, {{"NO", ""}, {"YES", "1"}}),
+        control("REPLAY", mnu::WindowType::SpinList, {{"NEXT", ""}, {"REPLAY", "1"}}),
+        control("TIME", mnu::WindowType::Edit),
+        control("MAX_PLAYERS", mnu::WindowType::Edit),
+        control("ALLOW_AI", mnu::WindowType::SpinList, {{"NO", ""}, {"YES", "1"}}),
+    };
+    mnu::Screen screen;
+    screen.name = "MULTI_PLAYER_HOST";
+    screen.roots.push_back(main);
+    mnu::Document doc;
+    doc.screens.push_back(screen);
+    return doc;
+}
+
+// The dialog left untouched gives the block back as its screen shows it: a word the screen can
+// show stays, a spin's word no row holds comes back as row 0's value, GAME_LOCATION comes back as
+// the matched row's own name (its case, its length) or, matching none, as the row the screen
+// stands on, PunkBuster as 0 with no pb\pbcl.dll, the cap clamped; a control the screen lacks
+// keeps its word, and with no screen only the clamp writes. The edits' text set cuts a {hot}.
+// [orig: UI_InitHostSettingsDialog @0x558960 - UI_PopulateHostSettingsFromConfig @0x5589C7;
+//  UI_PopulateHostSettingsFromConfig - the location match @0x5560D7..0x556114, PunkBuster
+//  @0x55613A..0x556160, the clamp @0x556322..0x55632A; SpinList_SelectItemByValue @0x64BA50 (row
+//  0 on a miss @0x64BA82); CButtonWnd_SetLabel @0x6572F0 (the {hot} cut @0x657451..0x657480);
+//  UI_HandleHostSessionStart - HostDialog_ReadSettings @0x556E36; HostDialog_ReadSettings -
+//  CSpinListWnd_GetSelectedValue @0x5559DE, the location's strncpy @0x555A72]
+int untouched_dialog() {
+    const mnu::Document doc = host_dialog_document();
+    gamecfg::GameCfg cfg;
+    cfg.game_name = "Night{hot}Ops";
+    cfg.country = "us";
+    cfg.sv_punkbuster = 1;
+    cfg.replay = 2;
+    cfg.time_limit = 25;
+    cfg.mp_max_players = 80;
+    cfg.enable_ai = 2;
+    cfg.dedicated = 1;
+    cfg.mp_novaworld_host_lan_only = 5;
+    read_untouched_host_dialog(cfg, &doc);
+    TEST_EXPECT(cfg.game_name == "NightOps");
+    TEST_EXPECT(cfg.country == "US");
+    TEST_EXPECT(cfg.sv_punkbuster == 0 && cfg.replay == 0 && cfg.enable_ai == 0);
+    TEST_EXPECT(cfg.time_limit == 25 && cfg.mp_max_players == 64 && cfg.dedicated == 1);
+    TEST_EXPECT(cfg.mp_novaworld_host_lan_only == 5);
+    // Three letters match no two-letter row: the screen stands on row 0, whose empty name
+    // copies its NUL alone.
+    cfg.country = "USA";
+    cfg.replay = 1;
+    read_untouched_host_dialog(cfg, &doc);
+    TEST_EXPECT(cfg.country.empty() && cfg.replay == 1);
+    cfg.country = "de";
+    read_untouched_host_dialog(cfg, &doc);
+    TEST_EXPECT(cfg.country == "DE");
+    // No screen: the clamp alone.
+    cfg.sv_punkbuster = 1;
+    cfg.replay = 2;
+    cfg.mp_max_players = 80;
+    read_untouched_host_dialog(cfg, nullptr);
+    TEST_EXPECT(cfg.sv_punkbuster == 1 && cfg.replay == 2 && cfg.mp_max_players == 64);
+    // The LAN screen: the open, the player's edit, START's read; PunkBuster's spin is disabled.
+    auto screen = std::make_unique<opennova::menu::MenuRuntime>();
+    TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
+    populate_host_screen(*screen, cfg);
+    const int name = screen->find_screen_control(std::string(kHostDialogScreen), "GAME_NAME");
+    const int punkbuster = screen->find_screen_control(std::string(kHostDialogScreen), "SERVER_PUNKBUSTER");
+    TEST_EXPECT(name >= 0 && screen->get_widget_text(name) == "NightOps");
+    TEST_EXPECT(punkbuster >= 0 && screen->is_widget_disabled(punkbuster));
+    screen->set_widget_text(name, "Renamed");
+    read_host_screen(*screen, cfg);
+    TEST_EXPECT(cfg.game_name == "Renamed" && cfg.sv_punkbuster == 0 && cfg.replay == 0);
+    return 0;
+}
 } // namespace
 
 int main() {
     if (title_caps() != 0) return 1;
+    if (untouched_dialog() != 0) return 1;
     gamecfg::GameCfg cfg;
     const auto read = [&](const char* name, const char* value) {
         return apply_host_dialog_control(cfg, name, value);
@@ -144,6 +249,12 @@ int main() {
     TEST_EXPECT(read("GAME_LOCATION", "") && cfg.country.empty() && shown("GAME_LOCATION").empty());
     TEST_EXPECT(read("GAME_LOCATION", "USA") && cfg.country == "USA");
     TEST_EXPECT(read("GAME_NAME", "Night Ops") && shown("GAME_NAME") == "Night Ops");
+    // GAME_NAME's GetText(serverName_3A5, 0x20) copies a label of 32 or more bytes 32 deep, no
+    // NUL [orig: HostDialog_ReadSettings @0x55595B..0x555967; CStaticWnd_GetLabelText
+    // @0x657570, the strncpy(dest, label, 32) @0x6575BF]; 31 bytes copy whole with theirs.
+    TEST_EXPECT(read("GAME_NAME", std::string(40, 'n').c_str()) && cfg.game_name == std::string(32, 'n'));
+    TEST_EXPECT(read("GAME_NAME", std::string(31, 'n').c_str()) && cfg.game_name == std::string(31, 'n'));
+    TEST_EXPECT(read("GAME_NAME", "Night Ops"));
     TEST_EXPECT(read("CONNECTIONSPEED", "5") && read("MAX_FF_KILLS", "3"));
     TEST_EXPECT(shown("CONNECTIONSPEED") == "5" && shown("MAX_FF_KILLS") == "3");
     TEST_EXPECT(cfg.nwisptype == 5 && cfg.numallowablefriendlykills == 3);

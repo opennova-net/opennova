@@ -249,36 +249,12 @@ func _on_host_table_cell_clicked(_id: int, widget_name: String, row: int, column
 
 
 # The host screen opens showing the process's cfg block, the populate step the
-# retail dialog init runs before the mission pool (the engine's
-# populate_host_dialog, which clamps the block's cap to the screen's, then
-# host_dialog_value over the block; GameConfigBlock; the witness is
-# engine runtime/inmatch/host_settings.h). Edits take the text, spins
-# select the item whose authored value= matches, GAME_LOCATION the item whose
-# name shares the country's first three characters, checkboxes the nonzero
-# value. A user-cleared edit is still read verbatim at START.
+# retail dialog init runs before the mission pool (GameConfigBlock over the
+# engine's populate_host_screen, which carries the witness: the cap clamped to
+# the screen's, each control from the block, PunkBuster 0 and disabled with no
+# pb\pbcl.dll). A user-cleared edit is still read verbatim at START.
 func _seed_host_controls() -> void:
-	var block := GameCfgStore.block()
-	block.populate_host_dialog()
-	for control in HostSessionOptions.dialog_controls():
-		var id := _id(control)
-		if id < 0:
-			continue
-		var value: String = block.host_dialog_value(control)
-		if control == "SERVER_PUNKBUSTER":
-			# No pb\pbcl.dll ships with OpenNova; the populate selects 0 and
-			# disables the spin whenever that file is absent.
-			value = "0"
-			_driver.set_widget_disabled(id, true)
-		match _driver.widget_kind_of(id):
-			MnuDocument.TYPE_SPINLIST:
-				if control == "GAME_LOCATION":
-					_driver.select_host_location(id, value)
-				else:
-					_driver.select_row_by_value(id, value, false)
-			MnuDocument.TYPE_CHECKBOX:
-				_driver.set_widget_checked(id, value != "0")
-			_:
-				_driver.set_widget_text(id, value)
+	GameCfgStore.block().populate_host_screen(_driver)
 
 
 ## The catalog comes from the mounted resource root; tests may supply catalog rows.
@@ -313,24 +289,12 @@ func _on_host_start() -> void:
 
 
 # Read the screen's controls by name into the cfg block (HostDialog_ReadSettings,
-# the engine's apply_host_dialog_control), then the host request from the block.
+# the engine's read_host_screen), then the host request from the block.
 # Unread controls (weapon restrictions) still render. MissionRoot derives the
 # wire game type from the selected mission; the record's Co-op value remains the
 # fallback for explicit callers that do not request auto derivation.
 func _read_host_config() -> HostSessionConfig:
-	var block := GameCfgStore.block()
-	for control in HostSessionOptions.dialog_controls():
-		var id := _id(control)
-		if id < 0:
-			continue
-		var value := _driver.get_widget_text(id)
-		match _driver.widget_kind_of(id):
-			MnuDocument.TYPE_SPINLIST:
-				value = _driver.item_text(id, _driver.selected_row(id)) \
-						if control == "GAME_LOCATION" else _driver.spin_value_attr(id)
-			MnuDocument.TYPE_CHECKBOX:
-				value = "1" if _driver.is_widget_checked(id) else "0"
-		block.apply_host_dialog_control(control, value)
+	GameCfgStore.block().read_host_screen(_driver)
 	var config := HostSessionConfig.new()
 	config.missions.assign(_driver.selected_host_missions())
 	config.mission_launch_options.assign(_driver.selected_host_launch_options())
