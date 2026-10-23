@@ -1909,6 +1909,23 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	for _settle in range(8):
 		host.step()
 		joiner.step()
+	# The joiner's in-match submit empties its slot table until the host's 0x5A lands, and
+	# the grant's select mounts the granted M4 itself: a fresh slot whose clip channel and
+	# serials start over (D-NET-NEW-LI-25). The shot's window opens past that mount, or its
+	# play_serial pin would read the restarted channel.
+	# [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the select @0x4296E3]
+	var granted := false
+	for _grant in range(240):
+		if joiner.get_local_player_inventory().equipped_name == "WPN_M4AUTO":
+			granted = true
+			break
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	assert_true(granted, "the host's grant reached the joiner ahead of the shot")
+	for _settle in range(8):
+		host.step()
+		joiner.step()
 
 	var remote_before := _present_record_for_type(joiner, 0x14B9)
 	assert_false(remote_before.is_empty(),
