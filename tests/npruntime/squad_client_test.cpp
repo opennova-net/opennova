@@ -288,6 +288,11 @@ void test_destroy_window_reads_the_body_slot_byte() {
 		}
 	}
 	CHECK(recruits == 1 && go_codes == 1);
+	// The go-code button also posts the leader's own line (no suppress flags) through the send
+	// [orig: CMap_OnGoCodeButton - Server_PlayGoCodeSoundAndChat(L, code, 0) @0x5482b8..0x5482bc].
+	lines = c.runtime.drain_squad_lines();
+	CHECK(lines.size() == 1 && lines[0].kind == hud::SquadFeedLine::Kind::GoCode &&
+			lines[0].value == 2);
 	// A 0x18 of the body's handle rebuilds the byte at its place in the receive: the 0x71
 	// behind it in the same pump is a join of ours again.
 	FullEntitySpawnRecord rebuild;
