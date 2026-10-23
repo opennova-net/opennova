@@ -914,9 +914,9 @@ void HudOverlay::clear_weapon() {
 void HudOverlay::reset_overlay_buffers() {
     compiler_.reset_overlay_buffers();
 	// The reset rebuilds the layer table at the stored hud_detail level, so an item
-	// flash's level-0 side path ends at the round init [orig: HUD_ResetAllOverlayBuffers
-	// @0x59DD40 - g_HUDDetailLevel @0x59DD6F, the CRenderState_SetLayerVisibility call
-	// @0x59DD75].
+	// flash's level-0 side path ends at the round init: the embedder's half of the
+	// overlay-buffer reset, witnessed at HudFrameCompiler::reset_overlay_buffers
+	// (runtime/hud/hud_frame.h: the layer visibility call there is the embedder's).
 	declutter_.apply_level(declutter_.level());
 	apply_declutter_();
     queue_redraw();

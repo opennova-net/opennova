@@ -1313,7 +1313,8 @@ public:
 	// dword_2723EAC (@0x59dd83) are the local player's radar state, reset by
 	// the round init (world::radar_reset); the item flash timers' last tick
 	// g_HUDItemFlashLastTick (@0x59dd7d) is item_flash_'s (HudItemFlash::reset_last_tick);
-	// the layer visibility call @0x59dd75 is the embedder's (its declutter table)
+	// the layer visibility call @0x59dd75 at g_HUDDetailLevel (@0x59dd6f) is the embedder's
+	// (its declutter table, rebuilt at the stored level: HudOverlay::reset_overlay_buffers)
 	// and the target-overlay stamp dword_2723D58 (@0x59dd95) has none here.
 	void reset_overlay_buffers();
 
