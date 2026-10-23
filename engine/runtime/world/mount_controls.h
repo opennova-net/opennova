@@ -590,11 +590,14 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 			emplaced_carrier_is_dead_hull(world.registry.get(mount.emplacement_parent)))
 		return;
 	publish_emplaced_gun_words_to_parent(world, mount);
+	// The ewep update's window leg and the tank-command call behind it sit behind its slot Def
+	// (+0x2D4): a gun with none ends its update ahead of both, with a ground or without one.
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the slot Def read @0x440E8E, `jz` with a
+	//  ground @0x440EA0, the gate without one @0x4411C9..0x4411CB]
+	if (mount.emplaced_update && emplaced_slot_def(world, mount) == nullptr) return;
 	clamp_emplaced_gun_words_to_window(world, mount, gunner);
-	// The window leg's tail, the ewep update's own behind its slot Def (+0x2D4):
-	// the tank-command call over the occupant's packed MoveOrder byte.
-	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the slot Def gate @0x4411C9..0x4411CB]
-	if (mount.emplaced_update && emplaced_slot_def(world, mount) != nullptr)
+	// The window leg's tail: the tank-command call over the occupant's packed MoveOrder byte.
+	if (mount.emplaced_update)
 		emplaced_command_call(world, mount.ground_target, mount.emplaced_command_stamp,
 				occupant.handle == world.cached.local_player, occupant.net_move_input,
 				occupant.anim_slot);

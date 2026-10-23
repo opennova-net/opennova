@@ -193,8 +193,12 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				world::advance_emplaced_gun_channel(channel, look, mount.heading_bam,
 						mount.pitch_bam,
 						(spec->item_attrib2 & def::DEF_ITEM_ATTRIB2_ISTURRET) != 0);
-				world::clamp_emplaced_gun_channel(channel, look, mount.heading_bam, mount.pitch_bam,
-						replica_window(mount, state, specs, *spec));
+				// The class update's window leg sits behind the gun's slot Def (+0x2D4), as on
+				// the World's channel (world::tick_emplaced_weapon_channel carries the witness).
+				if (local_mount == nullptr || !local_mount->emplaced_update ||
+						world::emplaced_slot_def(world, *local_mount) != nullptr)
+					world::clamp_emplaced_gun_channel(channel, look, mount.heading_bam,
+							mount.pitch_bam, replica_window(mount, state, specs, *spec));
 				mount.emplaced_gun_yaw_word = channel.yaw;
 				mount.emplaced_gun_pitch_word = channel.pitch;
 				occupant.heading_bam = look.heading;

@@ -155,9 +155,35 @@ void test_the_channel_gates_on_the_ewep_row() {
 	CHECK(r.lines() == 0 && r.b().emplaced_command_stamp == 0);
 }
 
+// An ewep gun with no slot Def (+0x2D4) ends its update ahead of the window leg: its authored
+// arc pins no occupant look. A mount whose update is not the ewep row keeps the channel's clamp
+// (that path is not this leg's). [orig: Entity_UpdateTransformAndTurret @0x440CA0 - @0x440EA0,
+// @0x4411C9..0x4411CB]
+void test_an_ewep_gun_without_a_slot_def_runs_no_window() {
+	constexpr int32_t kBamPerDegree = 11930464;
+	for (const bool ewep : {true, false}) {
+		Rig r;
+		Entity &gun = r.b();
+		gun.emplaced_update = ewep;
+		gun.primary_weapon_slot_adm = kAdmSlotNone; // no slot Def
+		gun.heading = 0x40000000;
+		gun.emplacement_right_limit_bam = 30 * kBamPerDegree;
+		gun.emplacement_left_limit_bam = -30 * kBamPerDegree;
+		gun.emplacement_down_limit_bam = 20 * kBamPerDegree;
+		gun.emplacement_up_limit_bam = -10 * kBamPerDegree;
+		const Entity &rider = *r.w.registry.get(r.rider);
+		AiEntity gunner;
+		gunner.heading = 0; // 90 degrees off the gun, far past its 30-degree arc
+		gunner.inf.target_heading = 0;
+		tick_emplaced_weapon_channel(r.w, gun, rider, gunner);
+		CHECK((gunner.heading == 0) == ewep);
+	}
+}
+
 } // namespace
 
 int main() {
+	test_an_ewep_gun_without_a_slot_def_runs_no_window();
 	test_the_call_posts_and_restamps();
 	test_no_jump_bit_no_call();
 	test_the_local_seat_gates();
