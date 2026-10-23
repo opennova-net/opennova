@@ -4296,7 +4296,8 @@ bool run_a_defless_l_drops_its_own_record() {
 // D-NET-NEW-L2-56: the mission start's model reload registers each pool-0 person row's
 // animation map in the load. A pool-0 row takes its channel from its row's animDef there, and
 // the frame's row pass leaves it; a pool-1 row (that leg loads models alone) waits for the
-// frame's pass.
+// frame's pass. No stock producer streams a person outside pool 0 (joiner_role.h,
+// resolve_row_adm_ids), so that control row pins only the reload walk's pool test.
 // [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 - the pool-1 leg's load @0x5229B8, the
 //  animDef test @0x522D07, AnimMap_LoadAdmFile called @0x522D14, AnimMap_RegisterEntity called
 //  @0x522D38]

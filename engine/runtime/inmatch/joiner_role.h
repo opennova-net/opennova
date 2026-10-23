@@ -421,6 +421,14 @@ private:
 	// ClientHello once (Idle -> Hello) on the first armed frame.
 	void send_hello_once();
 	// Resolve each decoded organic row's adm id once its type is known.
+	// A person row outside pool 0 has no retail registration (the 0x0D handler and the reload's
+	// pool-1 leg register none), and no stock producer streams one: the 0x0D carries pool 1,
+	// retail allocates every person in pool 0, and a person class init traps on any other pool.
+	// So this pass resolving one is an unreachable edge of ours, not a lazy retail path.
+	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940 - Pool_GetEntryUnchecked(1) called
+	//  @0x5039C9; Entity_CloneFromTemplateByType @0x4398A0 - a person's Pool_AllocEntry(0) called
+	//  @0x4398C1; Entity_InitOrganicAI @0x4BFCC0 - the pool test @0x4BFD0B, int 3 @0x4BFD15;
+	//  PlayerClass_InitEntity @0x4B1060 - the pool test @0x4B10AB, int 3 @0x4B10B5]
 	void resolve_row_adm_ids();
 	// A kernel rearm (its adm revision moved) restarts every row's channel (-2: resolve again).
 	void rearm_row_adm_ids();
