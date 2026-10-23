@@ -622,6 +622,32 @@ void test_deck_ride_turns_the_aim_words() {
 			"the deck's yaw delta turns the aim heading word with the body and the target");
 }
 
+// D-NET-NEW-L5-32: an org1 body's deck ride tests no radius: 223 u off a carrier whose bound
+// radius is a quarter unit, it still rides the carrier's 1 u step and keeps its ground link (a
+// player body there drops both: netsim_client_replica_pipeline_contact_resolver pins that).
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ride's head @0x4BA45D..0x4BA479, the
+//  translation @0x4BA47F..0x4BA4C9; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the org2 drop
+//  @0x4B529F..0x4B52FF]
+void test_org1_deck_ride_has_no_radius_drop() {
+	BodySource src;
+	auto view = free_infantry_view(src, 0x00, 0x00);
+	constexpr uint16_t kDeck = 0x1009;
+	view->set_carrier_pose_provider(
+			[](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
+				if (handle != kDeck) return false;
+				out = ns::ClientReplicaPipeline::CarrierPose{};
+				out.pos[0] = 1 << 16; // the deck moved 1 u this tick
+				out.bound_radius = 1 << 14;
+				return true;
+			});
+	ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+	es.resolved_ground = kDeck;
+	view->tick_remote_motion(0xFFFF);
+	// The visit snaps the row onto its record (the anchor, 100 u on x), then the ride adds 1 u.
+	expect(es.resolved_ground == kDeck && es.x == fixed_of(101.0),
+			"an org1 body rides its deck at any distance, keeping the ground link");
+}
+
 // Row 2 (D-NET-NEW-L5-29 / D-NET-NEW-L5-27 / D-NET-NEW-L5-30): the replica aim overlay's pitch is
 // the body's live Pitch word for every row; an org1 row's body chain turns by its body heading.
 // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `mov edx, [ebp+14h]` @0x4B17AD;
@@ -688,6 +714,7 @@ int main() {
 	test_free_standing_infantry_body_and_look_split();
 	test_free_standing_infantry_look_holds_within_ninety_degrees();
 	test_deck_ride_turns_the_aim_words();
+	test_org1_deck_ride_has_no_radius_drop();
 	test_overlay_pitch_is_the_live_pitch_word();
 	test_authority_rows_never_starve();
 	if (failures != 0) {

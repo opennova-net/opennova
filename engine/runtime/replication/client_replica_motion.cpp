@@ -127,11 +127,14 @@ void row_deck_ride(ClientEntityState &es,
 	if (es.resolved_ground == 0xFFFF) return;
 	ClientReplicaPipeline::CarrierPose cp;
 	if (!carrier(es.resolved_ground, cp)) return;
-	// The unmounted out-of-radius drop: 3D distance vs the carrier's bound
-	// radius, saturated at 0x7FFF0000 before the int compare; beyond it the
-	// ride AND the ground link drop [orig: @0x4b52a7..0x4b52ff — the
-	// flt_7C19E0 = 2147418112.0 clamp, groundEntity = 0].
-	{
+	// The unmounted out-of-radius drop, org2's alone: 3D distance vs the
+	// carrier's bound radius, saturated at 0x7FFF0000 before the int compare;
+	// beyond it the ride AND the ground link drop [orig: @0x4b52a7..0x4b52ff —
+	// the flt_7C19E0 = 2147418112.0 clamp, groundEntity = 0]. org1's twin rides
+	// its ground entity at any distance (D-NET-NEW-L5-32) [orig:
+	// Entity_UpdateInfantryAI @0x4B9910 - the ride's head @0x4BA45D..0x4BA479,
+	// the translation @0x4BA47F..0x4BA4C9].
+	if (es.cls == EntityClass::Player) {
 		const double ddx = static_cast<double>(es.x - cp.pos[0]);
 		const double ddy = static_cast<double>(es.y - cp.pos[1]);
 		const double ddz = static_cast<double>(es.z - cp.pos[2]);
