@@ -27,6 +27,10 @@ void MissionFrameInput::_bind_methods() {
 			&MissionFrameInput::set_sequence);
 	ClassDB::bind_method(D_METHOD("get_sequence"),
 			&MissionFrameInput::get_sequence);
+	ClassDB::bind_method(D_METHOD("set_hud_toggles", "toggles"),
+			&MissionFrameInput::set_hud_toggles);
+	ClassDB::bind_method(D_METHOD("get_hud_toggles"),
+			&MissionFrameInput::get_hud_toggles);
 
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "delta_seconds"),
 			"set_delta_seconds", "get_delta_seconds");

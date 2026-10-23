@@ -387,6 +387,22 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 	}
 }
 
+// The page stands in for the whole scene frame: a dedicated host's (no session peer) always, a
+// peer's while its status view is up on the authority (GameLoop_RenderFrame @0x521355,
+// @0x521CD6..0x521CEF).
+void test_main_frame_draws_scene() {
+	using opennova::hud::main_frame_draws_scene;
+	// A dedicated host: the page whatever the view word holds.
+	CHECK(!main_frame_draws_scene(false, true, true));
+	CHECK(!main_frame_draws_scene(false, true, false));
+	// A listen host or a single player: the page while the view is up.
+	CHECK(!main_frame_draws_scene(true, true, true));
+	CHECK(main_frame_draws_scene(true, true, false));
+	// A joiner (no authority) draws the scene even with the word set.
+	CHECK(main_frame_draws_scene(true, false, true));
+	CHECK(main_frame_draws_scene(true, false, false));
+}
+
 } // namespace
 
 int main() {
@@ -396,6 +412,7 @@ int main() {
 	test_score_rows();
 	test_page_compile(&font);
 	test_dedicated_host_twin(&font);
+	test_main_frame_draws_scene();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

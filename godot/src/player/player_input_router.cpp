@@ -250,6 +250,7 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	Ref<MissionFrameInput> frame_input;
 	frame_input.instantiate();
 	frame_input->set_delta_seconds(p_delta);
+	frame_input->set_hud_toggles(hud_toggles_);
 	// The window's messages were read since the last frame: the keyboard state holds any
 	// turn-off sent then (retail pumps them at once after its send). A turn-off the Escape
 	// key's reset owes goes out here, ahead of the frame's sample, which then reads the word

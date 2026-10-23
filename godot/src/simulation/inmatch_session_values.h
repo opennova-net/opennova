@@ -11,6 +11,8 @@
 
 #include <runtime/inmatch/session.h>
 
+#include "hud/hud_toggles.h"
+
 namespace godot {
 
 // Typed Godot values for the portable in-match Session. They carry
@@ -36,6 +38,7 @@ private:
 	opennova::inmatch::FrameInput value_;
 	opennova::inmatch::TickInputSource *tick_source_ = nullptr;
 	ObjectID tick_source_owner_;
+	Ref<HudToggles> hud_toggles_;
 
 protected:
 	static void _bind_methods();
@@ -80,6 +83,13 @@ public:
 	void set_menu_open(bool p_open);
 	void set_sequence(int64_t p_sequence);
 	int64_t get_sequence() const;
+
+	// The HUD toggles this frame's input rows drive (the shell's): the world reads their
+	// status view after the session's drain, where retail's render callback reads its word
+	// (GameWorld's scene gate; engine hud_server_status.h main_frame_draws_scene). Null when
+	// the shell has none.
+	void set_hud_toggles(const Ref<HudToggles> &p_toggles) { hud_toggles_ = p_toggles; }
+	Ref<HudToggles> get_hud_toggles() const { return hud_toggles_; }
 
 	const opennova::inmatch::FrameInput &native_value() const { return value_; }
 };

@@ -9,7 +9,7 @@ extends GutTest
 
 func test_frame_leg_table_is_the_witnessed_order() -> void:
 	assert_eq(Array(GameWorld.frame_leg_names()), [
-		"begin", "session", "remote_admin", "local_view", "scene_environment",
+		"begin", "session", "remote_admin", "scene_gate", "local_view", "scene_environment",
 		"environment_nodes", "terrain", "water", "network", "blink",
 		"occlusion", "foliage", "iris", "sun_veil", "lights", "ragdolls", "materials", "framefx",
 		"slot_shadows", "particles", "precipitation", "scene_overlay",
@@ -42,6 +42,24 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 			"the ragdolls read the avatar the local view posed this frame")
 	assert_lt(names.find("ragdolls"), names.find("materials"),
 			"the ragdolls pose their bodies before the materials leg writes the bones")
+
+
+# The status page stands in for retail's whole scene frame (GameLoop_RenderFrame draws
+# Server_DrawStatusScreen in place of Render_ProcessMainSceneFrame; engine hud_server_status.h
+# main_frame_draws_scene): the scene's rows are flagged, and the gate that reads the view word
+# after the drain sits between the update's rows and the first of them.
+func test_the_scene_rows_are_the_scene_frame() -> void:
+	var names := Array(GameWorld.frame_leg_names())
+	var kept := ["begin", "session", "remote_admin", "scene_gate", "network", "audio", "finish"]
+	for name in names:
+		assert_eq(GameWorld.frame_leg_draws_scene(name), not kept.has(name),
+				"%s draws the scene: %s" % [name, not kept.has(name)])
+	var gate := names.find("scene_gate")
+	assert_eq(gate, names.find("remote_admin") + 1, "the gate reads the word after the drain")
+	for name in names:
+		if GameWorld.frame_leg_draws_scene(name):
+			assert_gt(names.find(name), gate, "%s runs behind the gate" % name)
+	assert_false(GameWorld.frame_leg_draws_scene("no_such_leg"))
 
 
 func test_only_the_session_and_network_rows_stop_the_frame() -> void:

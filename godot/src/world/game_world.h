@@ -136,12 +136,19 @@ public:
 	struct FrameContext {
 		Ref<MissionFrameInput> input;
 		Ref<MissionFrameOutcome> outcome;
+		// The scene gate's verdict (leg_scene_gate): false while the status page stands in for
+		// the scene frame, when no kSceneLeg row runs.
+		bool scene_drawn = true;
 	};
 	enum FrameLegFlags : uint32_t {
 		kLegNone = 0,
 		// A kLegStop return from this leg STOPS the frame: the later legs (the
 		// finish included) do not run.
 		kStopsFrame = 1u << 0,
+		// The row draws the scene (retail's Render_ProcessMainSceneFrame): it does not run while
+		// the status page stands in for the scene frame (engine hud_server_status.h
+		// main_frame_draws_scene carries the witness).
+		kSceneLeg = 1u << 1,
 	};
 	// What a leg body reports back to the loop: it ran (its LegScope banks
 	// the span), it did not run this frame (nothing is banked -- a skipped
@@ -518,6 +525,11 @@ public:
 	static PackedStringArray frozen_pose_leg_names();
 	// Whether the named live leg stops the frame on a false return.
 	static bool frame_leg_stops_frame(const String &p_name);
+	// Whether the live table's row `p_name` draws the scene (kSceneLeg).
+	static bool frame_leg_draws_scene(const String &p_name);
+	// The live table's rows whose bodies the last frame ran, in table order (a structural seam:
+	// the scene gate's skip is visible here).
+	PackedStringArray get_last_frame_legs() const;
 	// Re-evaluates only camera-dependent production render state for an
 	// exact-pose visual capture (the settle contract and the frozen-pose leg
 	// order live with the replay table in game_world_frame.cpp).
@@ -706,6 +718,7 @@ private:
 	LegResult leg_begin(FrameContext &r_ctx);
 	LegResult leg_session(FrameContext &r_ctx);
 	LegResult leg_remote_admin(FrameContext &r_ctx);
+	LegResult leg_scene_gate(FrameContext &r_ctx);
 	LegResult leg_local_view(FrameContext &r_ctx);
 	LegResult leg_scene_environment(FrameContext &r_ctx);
 	LegResult leg_environment_nodes(FrameContext &r_ctx);
@@ -1097,6 +1110,8 @@ private:
 	bool frame_timing_ = false;
 	bool frame_skip_occlusion_ = false;
 	int64_t device_frame_start_us_ = 0;
+	// Bit i: the live table's row i ran its body in the last frame (get_last_frame_legs).
+	uint64_t last_frame_run_mask_ = 0;
 	// Identity latch for measured render time on the water reflection RTT.
 	ObjectID stats_water_vp_id_;
 	// Edge latch for the compositor passes' RD GPU timestamps (F3 capture

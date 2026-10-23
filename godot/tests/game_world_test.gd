@@ -1894,6 +1894,25 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 		if dispatcher != null:
 			assert_eq(dispatcher.get_terrain_data() != null, serve_and_play,
 					"the foliage configures on a listen host's start alone")
+		# The status page stands in for the scene frame: a dedicated host's always, a listen
+		# host's while its status view is up (engine hud_server_status.h main_frame_draws_scene).
+		world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, null)
+		var legs := Array(world.get_last_frame_legs())
+		assert_true(legs.has("scene_gate") and legs.has("audio") and legs.has("finish"),
+				"the gate, the audio and the finish run on every frame: %s" % [legs])
+		assert_eq(legs.has("terrain"), serve_and_play,
+				"the scene's rows run on a listen host's frame alone: %s" % [legs])
+		if serve_and_play:
+			var view_up := HudToggles.new()
+			view_up.session_init(true, false) # the status view stands up
+			assert_true(view_up.is_server_status_view())
+			var paged := MissionFrameInput.new()
+			paged.set_hud_toggles(view_up)
+			world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, paged)
+			legs = Array(world.get_last_frame_legs())
+			assert_false(legs.has("terrain") or legs.has("particles") or legs.has("local_view"),
+					"a listen host's status view stands in for the scene's rows: %s" % [legs])
+			assert_true(legs.has("audio"), "its audio still runs: %s" % [legs])
 		world.unload()
 
 

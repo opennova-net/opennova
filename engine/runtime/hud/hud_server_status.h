@@ -139,6 +139,20 @@ ServerStatusText server_status_text(const GameTextLookup &gametext, uint32_t gam
 // [orig: UI_DrawDisconnectReasonDialog @0x5b8edc..0x5b8eff].
 const char *quit_dialog_text_key(bool in_session, bool authority);
 
+// Whether a main frame draws the scene (the world, the viewmodel, the screen effects and the HUD)
+// or the status page stands in for it. A frame with no session peer (a dedicated host) always
+// draws the page; a peer's frame draws it while the status view is up on the authority; every
+// other frame draws the scene. The frame's audio legs run ahead of the choice either way.
+// [orig: GameLoop_RenderFrame @0x521310 - Audio_UpdateListenerFromView @0x52131E,
+//  SharedMem_UpdateEngineSoundState @0x521329, SoundEmitter_UpdateAndMixTop8 @0x521341; `cmp
+//  g_NapiNPCtx.is_mp_session_peer, 0` @0x52134E, `jz` to the page @0x521355; the view word
+//  @0x521CD6, is_authority @0x521CDF..0x521CE6; Render_ProcessMainSceneFrame @0x521CE8,
+//  Server_DrawStatusScreen @0x521CEF]
+constexpr bool main_frame_draws_scene(bool mp_session_peer, bool authority,
+		bool server_status_view) noexcept {
+	return mp_session_peer && !(server_status_view && authority);
+}
+
 // The page's throttle: a draw is due once 200 ms passed since the last one,
 // or, while the window is inactive, once 10 s passed; the first draw seeds
 // the last stamp one second back.

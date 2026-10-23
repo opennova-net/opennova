@@ -12,6 +12,7 @@
 #include <runtime/renderer/scene_pass_gates.h>
 #include <runtime/environment/water_mirror.h>
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame clock)
+#include <runtime/hud/hud_server_status.h> // main_frame_draws_scene (the scene gate)
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
@@ -107,21 +108,25 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// stopped never reaches it (engine inmatch/remote_admin.h). The menus' frames pump it from
 	// the internal process step instead.
 	{ "remote_admin", kNoSlot, &GameWorld::leg_remote_admin, kLegNone },
+	// The render callback's choice, read after the drain as retail's reads its view word: the
+	// scene's rows (kSceneLeg) run, or the status page stands in for them. The session's
+	// update, the net-session edges, the audio and the finish run either way.
+	{ "scene_gate", kNoSlot, &GameWorld::leg_scene_gate, kLegNone },
 	// Place the local-player camera/viewmodel from the state the session tick
 	// just produced, BEFORE every camera-driven render leg reads it (D-RORD-8).
 	// It also hands the entity presenter the frame's virtual-display verdict
 	// (the driven tank's cockpit), which copies the carrier hull's transform:
 	// that must stay AFTER the session row, whose entity walks stamp the hull.
-	{ "local_view", FrameStats::WORLD_LOCAL_VIEW, &GameWorld::leg_local_view, kLegNone },
+	{ "local_view", FrameStats::WORLD_LOCAL_VIEW, &GameWorld::leg_local_view, kSceneLeg },
 	// Retail re-applies fog/ambient per scene pass. Classify the adjusted
 	// render eye after camera placement and publish that pass payload before
 	// terrain, foliage, objects, viewmodel, and particles consume it.
-	{ "scene_environment", FrameStats::WORLD_SCENE_ENV, &GameWorld::leg_scene_environment, kLegNone },
+	{ "scene_environment", FrameStats::WORLD_SCENE_ENV, &GameWorld::leg_scene_environment, kSceneLeg },
 	// The environment presenters (weather smoothing, sun direction, sky dome,
 	// celestial bodies): ex-self-clocked _process nodes, now ordered here so
 	// they take THIS frame's render eye and every later leg consumes what they
 	// published this frame, never last frame's.
-	{ "environment_nodes", FrameStats::WORLD_ENV_NODES, &GameWorld::leg_environment_nodes, kLegNone },
+	{ "environment_nodes", FrameStats::WORLD_ENV_NODES, &GameWorld::leg_environment_nodes, kSceneLeg },
 	// Terrain samples the viewport camera directly and tracks the visible
 	// terrain bounds the water leg's g_WaterActive test reads, so it runs
 	// first: in the original frame Terrain_SetupViewAndLighting precedes
@@ -130,62 +135,62 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// docs/render/render-order-re.md); the water noise the terrain binds is
 	// the previous frame's, exactly as the original water pass regenerates it
 	// after the terrain draw.
-	{ "terrain", FrameStats::WORLD_TERRAIN, &GameWorld::leg_terrain, kLegNone },
-	{ "water", FrameStats::WORLD_WATER, &GameWorld::leg_water, kLegNone },
+	{ "terrain", FrameStats::WORLD_TERRAIN, &GameWorld::leg_terrain, kSceneLeg },
+	{ "water", FrameStats::WORLD_WATER, &GameWorld::leg_water, kSceneLeg },
 	// Net-session edges; a failed streamed-asset leg STOPS the frame.
 	{ "network", FrameStats::WORLD_NETWORK_FRAME, &GameWorld::leg_network, kStopsFrame },
 	// Blink flags only change on sim ticks (the body gates on did_tick).
-	{ "blink", FrameStats::WORLD_BLINK, &GameWorld::leg_blink, kLegNone },
+	{ "blink", FrameStats::WORLD_BLINK, &GameWorld::leg_blink, kSceneLeg },
 	// The OCCL_* slots land inside OcclusionFrame.apply_frame itself.
-	{ "occlusion", kNoSlot, &GameWorld::leg_occlusion, kLegNone },
+	{ "occlusion", kNoSlot, &GameWorld::leg_occlusion, kSceneLeg },
 	// Foliage receives the same live render transform and consumes this
 	// frame's detail-cell handoff (after terrain) and the MODEL anchors the
 	// visible-entity walk just admitted (after occlusion: retail collects the
 	// visible entities before the BySide walks that update the model tiles;
 	// banked at finish).
-	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
-	{ "iris", FrameStats::WORLD_IRIS, &GameWorld::leg_iris, kLegNone },
+	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kSceneLeg },
+	{ "iris", FrameStats::WORLD_IRIS, &GameWorld::leg_iris, kSceneLeg },
 	// The sun-veil stop-down feed for the weather ticks banked above (the
 	// veil alpha itself rides the Celestial shader-global push).
-	{ "sun_veil", FrameStats::WORLD_SUN_VEIL, &GameWorld::leg_sun_veil, kLegNone },
+	{ "sun_veil", FrameStats::WORLD_SUN_VEIL, &GameWorld::leg_sun_veil, kSceneLeg },
 	// The EffectWorld point-light select for this camera (after iris
 	// publishes the frame's ambient scale, before the lit material draws
 	// consume the pushed globals).
-	{ "lights", FrameStats::WORLD_LIGHT, &GameWorld::leg_lights, kLegNone },
+	{ "lights", FrameStats::WORLD_LIGHT, &GameWorld::leg_lights, kSceneLeg },
 	// The opt-in ragdoll corpses (ADR 0060): after the session walks dispatched
 	// this frame's body clips and the local view posed the avatar, before the
 	// materials leg writes the awake models' bones.
-	{ "ragdolls", FrameStats::WORLD_RAGDOLL, &GameWorld::leg_ragdolls, kLegNone },
+	{ "ragdolls", FrameStats::WORLD_RAGDOLL, &GameWorld::leg_ragdolls, kSceneLeg },
 	// Per-model runtime advance (ex-self-clocked ObjectModel _process): after
 	// occlusion resolves visibility, before the particle composite over it.
-	{ "materials", FrameStats::WORLD_MATERIAL, &GameWorld::leg_materials, kLegNone },
+	{ "materials", FrameStats::WORLD_MATERIAL, &GameWorld::leg_materials, kSceneLeg },
 	// Compile focused Q3 only after this frame's celestial, water, occlusion,
 	// and object-material producers have published their final transforms
 	// and parameters. The typed snapshot is consumed by the terminal
 	// compositor; it is never self-clocked from a stale process callback.
-	{ "framefx", FrameStats::WORLD_FRAMEFX, &GameWorld::leg_framefx, kLegNone },
+	{ "framefx", FrameStats::WORLD_FRAMEFX, &GameWorld::leg_framefx, kSceneLeg },
 	// The render-slot ground shadows plan against the light select published
 	// above and stamp the model subtrees the material frame just rebuilt
 	// (ex-self-clocked SlotShadow _process, which ran after the whole frame).
-	{ "slot_shadows", FrameStats::WORLD_SLOT_SHADOW, &GameWorld::leg_slot_shadows, kLegNone },
-	{ "particles", FrameStats::WORLD_PARTICLES, &GameWorld::leg_particles, kLegNone },
+	{ "slot_shadows", FrameStats::WORLD_SLOT_SHADOW, &GameWorld::leg_slot_shadows, kSceneLeg },
+	{ "particles", FrameStats::WORLD_PARTICLES, &GameWorld::leg_particles, kSceneLeg },
 	// The precipitation streaks after the particle pass and the trails,
 	// before the murk overlay (retail Terrain_RenderWorldScene
 	// @ 0x5c96a6).
-	{ "precipitation", FrameStats::WORLD_WEATHER, &GameWorld::leg_precipitation, kLegNone },
+	{ "precipitation", FrameStats::WORLD_WEATHER, &GameWorld::leg_precipitation, kSceneLeg },
 	// The post-particle overlay tail (renderer/scene_overlay.h): every
 	// producer above has published this frame's streaks, coronas and murk
 	// state, so one immutable frame reaches each view's overlay pass.
-	{ "scene_overlay", kNoSlot, &GameWorld::leg_scene_overlay, kLegNone },
+	{ "scene_overlay", kNoSlot, &GameWorld::leg_scene_overlay, kSceneLeg },
 	// Plan the frame's FrameFX screen effects (retail's post-scene dispatch)
 	// once the particle and tracer producers have published this frame, so
 	// the distortion row's content gate reads it; the terminal compositor
 	// executes the plan after every transparent.
-	{ "screen_effects", kNoSlot, &GameWorld::leg_screen_effects, kLegNone },
+	{ "screen_effects", kNoSlot, &GameWorld::leg_screen_effects, kSceneLeg },
 	// The audio leg (banked at finish).
 	{ "audio", kNoSlot, &GameWorld::leg_audio, kLegNone },
-	{ "clear", FrameStats::WORLD_CLEAR, &GameWorld::leg_clear, kLegNone },
-	{ "environment_cube", FrameStats::WORLD_ENV_CUBE, &GameWorld::leg_environment_cube, kLegNone },
+	{ "clear", FrameStats::WORLD_CLEAR, &GameWorld::leg_clear, kSceneLeg },
+	{ "environment_cube", FrameStats::WORLD_ENV_CUBE, &GameWorld::leg_environment_cube, kSceneLeg },
 	// Banks the foliage/audio counters + the RENDER_WATER_* / RENDER_Q3_* /
 	// RENDER_SLOT_* rows.
 	{ "finish", kNoSlot, &GameWorld::leg_finish, kLegNone },
@@ -290,6 +295,23 @@ PackedStringArray GameWorld::frozen_pose_leg_names() {
 	return names;
 }
 
+bool GameWorld::frame_leg_draws_scene(const String &p_name) {
+	for (int i = 0; i < kFrameLegCount; ++i) {
+		if (p_name == kFrameLegs[i].name) {
+			return (kFrameLegs[i].flags & kSceneLeg) != 0;
+		}
+	}
+	return false;
+}
+
+PackedStringArray GameWorld::get_last_frame_legs() const {
+	PackedStringArray names;
+	for (int i = 0; i < kFrameLegCount && i < 64; ++i) {
+		if ((last_frame_run_mask_ >> i) & 1u) names.append(kFrameLegs[i].name);
+	}
+	return names;
+}
+
 bool GameWorld::frame_leg_stops_frame(const String &p_name) {
 	for (int i = 0; i < kFrameLegCount; ++i) {
 		if (p_name == kFrameLegs[i].name) {
@@ -302,8 +324,13 @@ bool GameWorld::frame_leg_stops_frame(const String &p_name) {
 // --- the loop -------------------------------------------------------------------
 
 void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext &r_ctx, bool p_timed) {
+	const bool live_table = p_legs == kFrameLegs;
+	if (live_table) last_frame_run_mask_ = 0;
 	for (int i = 0; i < p_count; ++i) {
 		const FrameLeg &leg = p_legs[i];
+		// The status page stands in for the scene frame: its rows do not run.
+		if ((leg.flags & kSceneLeg) != 0 && !r_ctx.scene_drawn) continue;
+		if (live_table && i < 64) last_frame_run_mask_ |= uint64_t{1} << i;
 		LegResult result = kLegRan;
 		{
 			// The board is latched by the begin row (frame_stats_on_), so every
@@ -444,6 +471,25 @@ GameWorld::LegResult GameWorld::leg_remote_admin(FrameContext &r_ctx) {
 		return kLegSkipped;
 	}
 	pump_remote_admin(opennova::inmatch::AdminScene::GameLoop);
+	return kLegRan;
+}
+
+GameWorld::LegResult GameWorld::leg_scene_gate(FrameContext &r_ctx) {
+	// The page stands in for the scene frame: a dedicated host's always (no session peer), a
+	// listen host's or a single player's while its status view is up; a joiner draws the
+	// scene. The view word is the HUD toggles' after this frame's drain (engine
+	// hud_server_status.h main_frame_draws_scene carries the witness).
+	const Ref<Simulation> sim = get_sim();
+	if (sim.is_null()) {
+		r_ctx.scene_drawn = true;
+		return kLegSkipped;
+	}
+	const int role = sim->session_role();
+	const Ref<HudToggles> toggles =
+			r_ctx.input.is_valid() ? r_ctx.input->get_hud_toggles() : Ref<HudToggles>();
+	r_ctx.scene_drawn = opennova::hud::main_frame_draws_scene(
+			role != Simulation::ROLE_DEDICATED_HOST, role != Simulation::ROLE_JOINER,
+			toggles.is_valid() && toggles->is_server_status_view());
 	return kLegRan;
 }
 
