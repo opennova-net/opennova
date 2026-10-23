@@ -270,6 +270,7 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
 
     piece.health = 0;
     piece.alive = false;
+    piece.death_effect_active[0] &= static_cast<uint8_t>(~1u); // +0x1CC [orig: @0x40769E]
     piece.damage_state = -1;
     piece.death_anim_state = death_anim_state;
     piece.corpse_timer = 0;
@@ -807,14 +808,19 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
     victim.death_anim_state =
             compute_death_anim_state(record.section, quadrant, death_cause::kBullet);
     // The ammo's burn/force pair from the round's position, crediting its
-    // owner [orig: Entity_ApplyCollisionForce call @0x4074BA]. The ammo's
-    // hit emitter (ammo dword +72, its `secondary_effect`) and its 173 clip
-    // stay with D-ITEM-6 on this native leg; a joiner's wire-built person rows
-    // run them (wire_person_hit.cpp) [orig: @0x4074C7..0x40754A,
-    // @0x4076D3..0x4076D5].
+    // owner [orig: Entity_ApplyCollisionForce call @0x4074BA].
     if (ammo != nullptr)
         apply_collision_force(world, victim, ammo->secondary_anim, ammo->kz_physics,
                               record.round_pos.q16(), record.round_owner);
+    // The ammo's hit emitter (+72, `secondary_effect`) into the body's +0x1CC
+    // slot, the explosion queue's victim descriptor (spawn_victim_hit_emitter).
+    // [orig: OrganicClass_HandleEvent @0x407310 - +72 @0x407453, the release
+    //  @0x4074DB..0x4074F9, the descriptor @0x4074FF..0x40753A, the store @0x40754A;
+    //  the plyr twin Entity_HandleDamageAndTriggerZones @0x407720 - @0x4077BB,
+    //  @0x407843..0x4078B2; AmmoDef_ParseProperty -> +0x48 @0x40AA36]
+    const bool hit_emitter = ammo != nullptr && !ammo->secondary_effect.empty();
+    if (hit_emitter)
+        spawn_victim_hit_emitter(victim, ammo->secondary_effect, world.out.destruction);
     const bool dead = ((victim.flags | victim.engine_flags) & kEntityFlagDead) != 0;
     // [orig: the torso-stack roll @0x40755E..0x407575]
     if (!dead) apply_hit_body_roll(victim, record.section, quadrant);
@@ -829,6 +835,9 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
         try_spawn_dismemberment_piece(world, victim, record.round_vel_q16,
                                       record.section, victim.death_anim_state,
                                       /*was_alive=*/true);
+    // Then the fire death, after the cut (a clone keeps the section's clip)
+    // [orig: @0x4076D3..0x4076D5; the plyr twin @0x407A72..0x407A7C].
+    if (hit_emitter) victim.death_anim_state = anim_state::kDeathFire;
 }
 
 int hit_record_death_anim_state(const HitRecord &record, int32_t victim_heading_bam) {
