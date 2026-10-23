@@ -18,6 +18,7 @@
 
 #include <runtime/audio/sound_profile.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/ground_conform.h>
 #include <runtime/world/vehicle_suspension.h>
 #include <runtime/world/world.h>
 
