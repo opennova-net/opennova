@@ -250,6 +250,9 @@ public:
 		// handler's local arm ran: the per-side profile reselect and the C2S 0x2F
 		// re-submission [orig: @0x431A1B..0x431A9E].
 		bool local_resubmit = false;
+		// The inbound_reducer entries through that 0x50 (its index + 1; the last such 0x50's):
+		// its handler's Player_InitPlayer(1) runs at its place [orig: @0x431B14].
+		std::size_t local_resubmit_entries = 0;
 		// Diagnostic summary of S2C 0x50; entity state is folded only from the
 		// corresponding raw inbound_gameplay record.
 		std::vector<std::pair<uint16_t, uint8_t>> entity_team_assigns;

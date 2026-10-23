@@ -46,6 +46,7 @@
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/weapon_inventory.h>
+#include <runtime/world/weapon_table_build.h>
 #include <runtime/world/wire_person_hit.h> // WirePersonBody (the person pass's row view)
 #include <net/npwire/entity_class.h> // class_from_tag (the row's class)
 #include <runtime/world/world.h>
@@ -2238,6 +2239,113 @@ bool run_a_receive_time_mount_request_ships_in_its_frame() {
 //  per message in the packet's order; NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 -
 //  Player_MountWeaponSlot @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30;
 //  NapiNPClientMsg_0x043 @0x42FA90 - CNapiNetwork_QueueReliableMessage(0x08) @0x42FAD3]
+// A self S2C 0x50's Player_InitPlayer(1) re-run walks on L in play and mounts (D-WPN-21's
+// team-assign half): its kit's rifle selected, the walk rank-cycles category 3 onto the next
+// rank, a ForceCrouch def, whose mount request raises the crouch. That C2S 0x1D queues at the
+// 0x50's place among the receive's sends, past the handler's own: one datagram carrying the 0x50
+// and then a time-sync ping ships the 0x1D ahead of the ping's C2S 0x08; the ping first ships
+// its reply first.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the 0x2F @0x431A9E, the 0x22 / 0x23 @0x431AE4 /
+//  @0x431B05, Player_InitPlayer(1) @0x431B14; Player_SwitchToWeaponByHandle @0x4E0170 - the
+//  +0x68 test @0x4E023A, the Flags test @0x4E0265, the rank cycle @0x4E02C9..0x4E0342, the mount
+//  @0x4E0362; Player_MountWeaponSlot @0x4DFA40 - CNapiNetwork_QueueReliableMessage(0x1D)
+//  @0x4DFC30; NapiNPClientMsg_0x043 @0x42FA90 - @0x42FAD3]
+bool run_a_team_assign_walk_mount_queues_at_the_0x50s_place() {
+	static const char kDefs[] =
+			"ammoclass_max_carry CLASS_TA 1000\r\n"
+			"weapon \"WPN_TA_RIFLE\"\r\n"
+			"\tcategory 3\r\n"
+			"\trank 0\r\n"
+			"\tclipsize 10\r\n"
+			"\tstartrounds 30\r\n"
+			"\tammoclass CLASS_TA 1\r\n"
+			"end\r\n"
+			"weapon \"WPN_TA_MORTAR\"\r\n"
+			"\tcategory 3\r\n"
+			"\trank 1\r\n"
+			"\tclipsize 1\r\n"
+			"\tstartrounds 10\r\n"
+			"\tammoclass CLASS_TA 1\r\n"
+			"\tflags ForceCrouch\r\n"
+			"end\r\n";
+	bool ok = true;
+	for (const bool team_first : {true, false}) {
+		def::DefWeaponsFile defs{};
+		if (!expect(def::def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kDefs),
+						sizeof(kDefs) - 1, &defs) == 0,
+					"team-assign walk: the defs parse"))
+			return false;
+		{
+			Harness h;
+			h.kernel->world.tables.weapons = w::build_weapon_table(defs);
+			h.kernel->world.tables.weapon_defs = &defs;
+			h.role.poll_preload();
+			h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+			                             /*game_type=*/0x10002u);
+			h.role.run_tick(h.input); // the spawn frame
+			auto &row = h.role.runtime->state().upsert(0x0005);
+			row.cls = EntityClass::Player;
+			row.type_id = w::kPlayerInfantryTypeId;
+			w::Entity *L = h.kernel->local.player();
+			if (!expect(h.role.local_spawned() && L != nullptr, "team-assign walk: L spawned"))
+				return false;
+			// L in play: an AI slot, the hidden and dead bits clear.
+			if (h.kernel->world.ai.for_handle(L->handle) == nullptr)
+				h.kernel->world.ai.attach(L->handle);
+			L->flags &= ~(w::kEntityFlagCarried | w::kEntityFlagDead);
+			L->engine_flags &= ~(w::kEntityFlagCarried | w::kEntityFlagDead);
+			h.kernel->local.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_TA_RIFLE", -1, -1, -1},
+					w::WeaponKitEntry{"WPN_TA_MORTAR", -1, -1, -1}};
+			TeamAssign assign;
+			assign.entity_handle = 0x0005;
+			assign.team = 1;
+			assign.net_id = 0x0213;
+			assign.anim_slot = 0x2C;
+			const ProtocolMessage team =
+					make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign));
+			const ProtocolMessage ping =
+					make_protocol_message(s2c::TIME_SYNC_PING, {0x78, 0x56, 0x34, 0x12});
+			SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+			std::vector<uint8_t> packet;
+			frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+					team_first ? std::vector<ProtocolMessage>{team, ping}
+					           : std::vector<ProtocolMessage>{ping, team},
+					packet);
+			auto datagram =
+					nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+			const std::size_t from = h.socket.datagrams.size();
+			h.role.runtime->receive(datagram.data(), datagram.size());
+			h.role.run_tick(h.input);
+			ok &= expect(h.kernel->local.inventory.current_slot == 3 * 65 + 1,
+					"team-assign walk: the cycle stored rank 1's word");
+			// The tick's 0x1D and 0x08, in send order.
+			std::vector<uint8_t> order;
+			for (std::size_t i = from; i < h.socket.datagrams.size(); ++i) {
+				const std::vector<uint8_t> &dg = h.socket.datagrams[i];
+				uint8_t opcode = 0;
+				std::vector<uint8_t> body;
+				ProtocolPacketHeader header;
+				std::vector<ProtocolMessage> messages;
+				if (!nw_decode_inbound(dg.data(), dg.size(), opcode, body) ||
+						opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
+						!decode_protocol_packet_plaintext(body.data(), body.size(), kClientScrk,
+								header, messages)) continue;
+				for (const ProtocolMessage &m : messages)
+					if (m.tag == 0x1D || m.tag == c2s::TIME_SYNC_REPLY) order.push_back(m.tag);
+			}
+			const std::vector<uint8_t> expected = team_first
+					? std::vector<uint8_t>{0x1D, c2s::TIME_SYNC_REPLY}
+					: std::vector<uint8_t>{c2s::TIME_SYNC_REPLY, 0x1D};
+			ok &= expect(order == expected, team_first
+					? "team-assign walk: the walk's 0x1D ahead of the ping's reply behind it"
+					: "team-assign walk: the ping's reply ahead of the walk's 0x1D behind it");
+		}
+		def::def_free_weapons(&defs);
+	}
+	return ok;
+}
+
 bool run_a_grant_mount_request_queues_at_the_grants_place() {
 	bool ok = true;
 	for (const bool grant_first : {true, false}) {
@@ -4782,6 +4890,7 @@ int main() {
 	ok &= run_stance_follows_the_authority_echo();
 	ok &= run_a_receive_time_mount_request_ships_in_its_frame();
 	ok &= run_a_grant_mount_request_queues_at_the_grants_place();
+	ok &= run_a_team_assign_walk_mount_queues_at_the_0x50s_place();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();

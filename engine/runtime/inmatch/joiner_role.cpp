@@ -565,6 +565,16 @@ bool JoinerRole::queue_stance_change(uint16_t action_id) {
 	return runtime && runtime->queue_stance_change(action_id);
 }
 
+void JoinerRole::flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount at) {
+	// [orig: Player_MountWeaponSlot @0x4DFA40 - CNapiNetwork_QueueReliableMessage(0x1D)
+	//  @0x4DFC30, inside its message's handler; ClientRuntime carries the order]
+	if (kernel_ == nullptr) return;
+	std::vector<uint16_t> &requests = kernel_->world.out.stance_requests;
+	for (const uint16_t action_id : requests)
+		if (runtime) (void)runtime->queue_receive_mount_stance_change(at, action_id);
+	requests.clear();
+}
+
 bool JoinerRole::send_stance_request(int stance) {
 	if (!kernel_ || stance < 0 || stance > 2) return false;
 	if (!kernel_->local.stance_request_allowed()) return false;
@@ -1813,12 +1823,10 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		// The apply's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x5A's place
 		// among this receive's sends, ahead of what the handlers of the messages behind it in
 		// the datagram queued, as the handler's own mount queues it
-		// (ClientRuntime::queue_loadout_mount_stance_change).
+		// (ClientRuntime::queue_receive_mount_stance_change).
 		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
 		//  @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30]
-		for (const uint16_t action_id : world.out.stance_requests)
-			(void)rt.queue_loadout_mount_stance_change(action_id);
-		world.out.stance_requests.clear();
+		flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kWeaponLoadout);
 		// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
 		// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
 		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
@@ -1886,6 +1894,11 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 				// does too.
 				if (kit_seams.push) kit_seams.push();
 				reinit_local_player_on_team_assign();
+				// Its walk's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x50's
+				// place, past the handler's own sends [orig: NapiNPClientMsg_TeamAssign @0x431910
+				//  - the 0x2F @0x431A9E, the 0x22 / 0x23 @0x431AE4 / @0x431B05,
+				//  Player_InitPlayer(1) @0x431B14].
+				flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kSelfTeamAssign);
 			}
 		}
 		const uint64_t deployment_release_revision =

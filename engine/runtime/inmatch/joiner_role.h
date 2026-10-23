@@ -569,6 +569,9 @@ private:
 	// A self S2C 0x50's re-run of Player_InitPlayer(1) on L, then its identity pair
 	// (D-NET-570).
 	void reinit_local_player_on_team_assign();
+	// The world's stance requests an after-receive leg raised, queued at its message's place
+	// among the receive's sends (ClientRuntime::queue_receive_mount_stance_change).
+	void flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount at);
 	// The mission start's Player_InitPlayer on the identity of the L about to spawn
 	// (D-NET-570's pre-spawn half; joiner_role.cpp carries the witness).
 	void stamp_mission_start_identity(world::PlayerSpawn &spawn);

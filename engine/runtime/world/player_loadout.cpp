@@ -241,6 +241,29 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     //  NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14]
 }
 
+void local_loadout_rebuild_on_team_assign(World &world, LocalPlayerLoadout &loadout,
+                                          LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                                          bool &inventory_valid) {
+    // [orig: NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14; the
+    //  declaration carries the walk]
+    local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
+            /*select_spawn_default=*/true);
+    LocalPlayer *local = world.local_player_state;
+    if (local == nullptr || &local->weapon != &weapon) return;
+    // The walk past its reset: the body's AI slot, then its hidden and dead bits
+    // [orig: Player_SwitchToWeaponByHandle @0x4E0170 - @0x4E023A, @0x4E0265 / @0x4E0269].
+    const Entity *body = world.registry.get(world.cached.local_player);
+    if (body == nullptr || world.ai.for_handle(body->handle) == nullptr) return;
+    if (((body->flags | body->engine_flags) & (kEntityFlagCarried | kEntityFlagDead)) != 0)
+        return;
+    // Its rank cycle and mount (or deny), the weapon key's walk past the same gates, the
+    // camera reset already run [orig: @0x4E026F..0x4E0362].
+    WeaponSwitchOutcome out = weapon_switch_to_handle(world.tables.weapons, inventory,
+            inventory.current_slot, local_weapon_switch_gates(world, weapon, &inventory));
+    out.reset_view = false;
+    handle_weapon_switch_outcome(world, weapon, &inventory, out, local->view);
+}
+
 void local_loadout_rebuild_after_start(World &world, LocalPlayerLoadout &loadout,
                                        LocalPlayerWeapon &weapon, WeaponInventory &inventory,
                                        bool &inventory_valid) {

@@ -950,10 +950,13 @@ void LocalPlayer::tick_view() {
 }
 
 void LocalPlayer::respawn_init(bool rebuild_kit) {
-    if (rebuild_kit)
-        local_loadout_rebuild(world_, loadout, weapon, inventory, inventory_valid,
-                              /*select_spawn_default=*/true);
+    // The view effects reset ahead of the weapon leg, Player_InitPlayer's head clears ahead of
+    // its walk, so a mount the walk runs on a body in play keeps its view words [orig:
+    // Player_InitPlayer @0x4E15F0 - the memset @0x4E1602, g_NVGActive @0x4E17D4, the walk
+    // @0x4E19A1; NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14].
     local_player_view_reset(&world_, weapon, view, view_tracker);
+    if (rebuild_kit)
+        local_loadout_rebuild_on_team_assign(world_, loadout, weapon, inventory, inventory_valid);
     hud_map_control.reset_spawn();
 }
 

@@ -453,10 +453,11 @@ public:
     // [orig: Server_ProcessRoundEnd @0x5164F0 - g_BinocularsViewActive @0x5168EA,
     //  g_BinocularsToggle @0x5168F0, g_MapOverlayMode @0x5168F6, g_WeaponScopeActive @0x5168FC]
     void round_end_view_clear();
-    // The respawn's Player_InitPlayer resets, in order: with `rebuild_kit` the
-    // weapon leg (local_loadout_rebuild with the spawn-default select), then the
-    // view effects (local_player_view_reset: both cleared, NVG seeded from the
-    // mission's StartWithNVGOn bit) and the map state back to its spawn
+    // The respawn's Player_InitPlayer resets, in order: the view effects
+    // (local_player_view_reset: both cleared, NVG seeded from the mission's
+    // StartWithNVGOn bit), then with `rebuild_kit` the weapon leg of a team assign's
+    // re-run (local_loadout_rebuild_on_team_assign: the spawn-default select and the walk,
+    // whose mount runs on a body in play), and the map state back to its spawn
     // defaults (HudMapControl::reset_spawn). A joiner's redeploy runs it
     // without the kit, which the release bundle's 0x5A already rebuilt
     // (D-NET-378). [orig: Player_InitPlayer @0x4E15F0 -- the zoom seeds

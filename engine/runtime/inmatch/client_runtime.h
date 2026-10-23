@@ -257,19 +257,25 @@ public:
 	// False for HostClient or before in-match. [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/
 	// @0x4e0e3e -> CNapiNetwork_QueueReliableMessage @0x4e0de7]
 	bool queue_stance_change(uint16_t action_id);
-	// The C2S 0x1D a 0x5A apply's mount raises (the embedder's after-receive apply of the grant
-	// this receive carried): queued at the 0x5A's place among the receive's sends, behind what
-	// the handlers ahead of it queued and ahead of what the handlers behind it in the datagram
-	// queued, as the handler's own mount queues it there; with no 0x5A in this receive, at the
-	// queue's end. Gated as queue_stance_change.
+	// The receive handlers whose mount the embedder's after-receive leg runs: the 0x5A apply's
+	// (its select's mount request) and a self 0x50's Player_InitPlayer(1) (its walk's mount).
+	enum class ReceiveMount : uint8_t {
+		kWeaponLoadout,
+		kSelfTeamAssign,
+	};
+	// The C2S 0x1D such a mount raises: queued at its message's place among the receive's sends
+	// (the last such message's), behind what the handlers ahead of it queued and ahead of what
+	// the handlers behind it in the datagram queued, as the handler's own mount queues it there;
+	// with no such message in this receive, at the queue's end. Gated as queue_stance_change.
 	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
 	//  @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30, inside the receive
 	//  (Client_ProcessNetworkFrame @0x42C228): NapiNPProtocol_PumpRecvQueues @0x6266A0 parses
 	//  each packet (CNapiNPConnection_ParseMessages @0x62696B), whose loop dispatches each
 	//  message to its handler in the packet's order (CNapiNPConnection_ParseMessages @0x625BC0 -
 	//  CNapiNPConnection_DispatchMessage @0x625EF1); e.g. a time-sync ping behind the 0x5A
-	//  queues its reply after the 0x1D (NapiNPClientMsg_0x043 @0x42FA90 - the queue @0x42FAD3)]
-	bool queue_loadout_mount_stance_change(uint16_t action_id);
+	//  queues its reply after the 0x1D (NapiNPClientMsg_0x043 @0x42FA90 - the queue @0x42FAD3);
+	//  NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14 past its sends]
+	bool queue_receive_mount_stance_change(ReceiveMount at, uint16_t action_id);
 	// Queue one reliable C2S 0x1A door section request {handle, record state,
 	// section} the joiner world's door callback raised; it leaves inside the
 	// next open send boundary in queue order. False for HostClient or before
@@ -1379,10 +1385,15 @@ private:
 	// [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 -> CNapiNPConnection_QueueMessage
 	//  @0x628640, one outgoing list per connection]
 	std::deque<ProtocolMessage> send_queue_;
-	// The send_queue_ position of the last S2C 0x5A this frame's receive folded: the queue's
-	// length past that message's own replies (queue_loadout_mount_stance_change); none outside.
-	static constexpr std::size_t kNoLoadoutSendMark = static_cast<std::size_t>(-1);
-	std::size_t loadout_send_mark_ = kNoLoadoutSendMark;
+	// Per ReceiveMount, the send_queue_ position of the last such message this frame's receive
+	// folded (the queue's length past that message's own sends) and its reducer entry, which
+	// orders two marks at one position (queue_receive_mount_stance_change); none outside.
+	struct ReceiveSendMark {
+		static constexpr std::size_t kNone = static_cast<std::size_t>(-1);
+		std::size_t position = kNone;
+		std::size_t entry = 0;
+	};
+	std::array<ReceiveSendMark, 2> receive_send_marks_{};
 	uint32_t attach_requests_sent_ = 0; // the USE readout's count (attach_requests_sent)
 	// S2C 0x49 handlers run inside the receive pump. Preserve their decoded
 	// notifications for the embedding simulation after applying the remote-Person

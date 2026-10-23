@@ -119,6 +119,23 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
                            LocalPlayerWeapon &weapon, WeaponInventory &inventory,
                            bool &inventory_valid, bool select_spawn_default);
 
+// Player_InitPlayer's leg (local_loadout_rebuild with the spawn select) re-run on a body that
+// can be in play: a remote joiner's self S2C 0x50 runs Player_InitPlayer(1), and its walk mounts
+// past the camera reset. A body with an AI slot (+0x68) whose hidden and dead bits are clear
+// rank-cycles the handle's category from the EquippedSlot's rank (from rank 0 when the
+// EquippedSlot holds another category: the exact slot first) and mounts the first eligible slot,
+// storing the current slot word, as a weapon key's walk does; with none eligible it plays the
+// deny. A hidden or dead body, or one without an AI slot, mounts nothing. (The mission start's
+// re-runs take local_loadout_rebuild: their body is born hidden at the walk.)
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14;
+//  Player_SwitchToWeaponByHandle @0x4E0170 - the +0x68 test @0x4E023A, the Flags test
+//  @0x4E0265 / @0x4E0269, the category compare @0x4E026F, the exact slot @0x4E0278..0x4E02C3,
+//  the rank cycle @0x4E02C9..0x4E0342, the deny's tail jump @0x4E0354, the word @0x4E035C, the
+//  mount @0x4E0362]
+void local_loadout_rebuild_on_team_assign(World &world, LocalPlayerLoadout &loadout,
+                                          LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                                          bool &inventory_valid);
+
 // Player_InitPlayer's leg (local_loadout_rebuild with the spawn select) over a spawn kit
 // that reached the sim after the mission start's environment snap and script init (the
 // profile page the shell hands the sim past its load; retail copies it ahead of

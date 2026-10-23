@@ -249,6 +249,15 @@ constexpr const char *kWeaponDef =
 		"\tclipsize 10\r\n"
 		"\tstartrounds 40\r\n"
 		"\tammoclass CLASS_762MM 1\r\n"
+		"end\r\n"
+		// An optic rank of the rifle's category, 3 (L7-s28).
+		"weapon \"WPN_RIFLE_S\"\r\n"
+		"\tcategory 3\r\n"
+		"\trank 3\r\n"
+		"\tclipsize 10\r\n"
+		"\tstartrounds 40\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
+		"\tflags Scoped\r\n"
 		"end\r\n";
 
 constexpr int32_t kRifle = 3 * weapon_combo::kRanksPerCategory;
@@ -1377,6 +1386,78 @@ void test_the_rebuild_after_the_start_keeps_the_fov() {
 	CHECK(v.weapon_pose_bound && !v.scope_settled);
 }
 
+// A self S2C 0x50's Player_InitPlayer(1) walks on a body that can be in play (D-WPN-21's
+// team-assign half): past the camera reset, a body with an AI slot whose hidden and dead bits
+// are clear rank-cycles category 3 from the selected rifle and mounts the next eligible rank:
+// the current slot word stored, SWITCHRANK queued on the rifle, whose completion commits it.
+// The re-run resets the view ahead of the weapon leg, so the mount's optic bind stands. A
+// hidden body, a dead one, or one with no AI slot mounts nothing; with category 3 empty and a
+// pistol selected, the walk scans category 3 from rank 1 and plays the deny.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14;
+//  Player_SwitchToWeaponByHandle @0x4E0170 - the +0x68 test @0x4E023A, the Flags test
+//  @0x4E0265 / @0x4E0269, the category compare @0x4E026F, the exact slot @0x4E0278..0x4E02C3,
+//  the rank cycle @0x4E02C9..0x4E0342, the deny @0x4E0354, the word @0x4E035C, the mount
+//  @0x4E0362; Player_MountWeaponSlot @0x4DFA40 - the bind @0x4DFC35..0x4DFC9A]
+void test_a_team_assign_rerun_mounts_the_next_rank_on_a_body_in_play() {
+	const auto rerun = [](Rig &rig) {
+		local_loadout_rebuild_on_team_assign(rig.world, rig.local().loadout, rig.weapon(),
+				rig.inventory(), rig.local().inventory_valid);
+	};
+	{
+		const auto rig = std::make_unique<Rig>(rifle_kit());
+		rig->world.ai.attach(rig->world.cached.local_player);
+		rig->tick();
+		rerun(*rig);
+		CHECK(rig->inventory().current_slot == kRifleB);
+		CHECK(rig->inventory().pending_combo == kRifleB);
+		CHECK(rig->inventory().equipped_combo == kRifle);
+		CHECK(rig->weapon().slot.next == weapon_action::kSwitchRank);
+		CHECK(rig->tick_until_commit() >= 1);
+		CHECK(rig->inventory().equipped_combo == kRifleB);
+	}
+	{
+		// The re-run through LocalPlayer::respawn_init: the cycle skips the empty ranks 1 and 2
+		// onto the optic, whose bind the view reset ahead of the weapon leg leaves standing.
+		const auto rig = std::make_unique<Rig>(std::vector<WeaponKitEntry>{
+				WeaponKitEntry{"WPN_RIFLE", -1, -1, -1}, WeaponKitEntry{"WPN_RIFLE_S", -1, -1, -1}});
+		rig->world.ai.attach(rig->world.cached.local_player);
+		rig->tick();
+		rig->local().respawn_init(/*rebuild_kit=*/true);
+		CHECK(rig->inventory().current_slot == kRifle + 3);
+		CHECK(rig->weapon().slot.next == weapon_action::kSwitchRank);
+		CHECK(rig->view().weapon_pose_bound && !rig->view().scope_engaged);
+	}
+	for (int arm = 0; arm < 3; ++arm) {
+		// Hidden, dead, no AI slot: the walk ends past its reset.
+		const auto rig = std::make_unique<Rig>(rifle_kit());
+		if (arm != 2) rig->world.ai.attach(rig->world.cached.local_player);
+		Entity *body = rig->world.registry.get(rig->world.cached.local_player);
+		CHECK(body != nullptr);
+		if (body == nullptr) return;
+		if (arm == 0) body->flags |= kEntityFlagCarried;
+		if (arm == 1) body->flags |= kEntityFlagDead;
+		rig->tick();
+		rerun(*rig);
+		CHECK(rig->inventory().current_slot == weapon_combo::kDefaultSpawnCombo);
+		CHECK(rig->inventory().equipped_combo == kRifle);
+		CHECK(rig->weapon().slot.next == weapon_action::kIdle);
+	}
+	{
+		const auto rig = std::make_unique<Rig>(
+				std::vector<WeaponKitEntry>{WeaponKitEntry{"WPN_PISTOL", -1, -1, -1}});
+		rig->world.ai.attach(rig->world.cached.local_player);
+		rig->tick();
+		rig->weapon().events.clear();
+		rerun(*rig);
+		CHECK(rig->inventory().equipped_combo == kPistol);
+		CHECK(rig->inventory().current_slot == weapon_combo::kDefaultSpawnCombo);
+		bool denied = false;
+		for (const WeaponPresentationEvent &event : rig->weapon().events)
+			denied = denied || event.switch_denied;
+		CHECK(denied);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -1403,6 +1484,7 @@ int main() {
 	test_a_player_init_rerun_clears_the_view_words();
 	test_a_seated_player_init_rerun_resets_no_camera();
 	test_the_rebuild_after_the_start_keeps_the_fov();
+	test_a_team_assign_rerun_mounts_the_next_rank_on_a_body_in_play();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

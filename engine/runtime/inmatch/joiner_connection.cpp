@@ -1772,6 +1772,7 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 					periodic_replies.push_back(make_protocol_message(
 							0x2F, encode_loadout_submit(resubmit)));
 					out.local_resubmit = true;
+					out.local_resubmit_entries = out.inbound_reducer.size();
 				}
 			}
 		} else if (m.tag == s2c::EMPTY_SLOT_SWEEP) {
