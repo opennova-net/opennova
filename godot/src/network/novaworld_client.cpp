@@ -11,6 +11,7 @@
 #include <runtime/inmatch/host_config.h> // transport_bind_ports / gate_bind_ports
 #include <runtime/inmatch/punt_log.h>   // ConnectLog (the gate and connect lines)
 #include <runtime/inmatch/server_files.h> // ServerLogs, server_logs_inout_line
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the lobby's clock)
 
 #include <array>
 #include <godot_cpp/classes/engine.hpp>
@@ -372,7 +373,7 @@ void NovaWorldClient::start() {
 	demux.set_session_claim([this](const opennova::PeerAddr &from, const uint8_t *data, std::size_t len) {
 		return lobby_.claims(from, data, len);
 	});
-	clock_accum_s_ = 0.0;
+	clock_origin_ms_ = opennova::world::frame_tick_count_ms();
 	clock_ms_ = 0;
 	// The game's command line: its NovaWorld switches override the gate response.
 	const opennova::LaunchFlags flags = LaunchFlags::parsed();
@@ -507,7 +508,11 @@ void NovaWorldClient::stop() {
 	}
 }
 
-void NovaWorldClient::_process(double delta) {
+void NovaWorldClient::_process(double) {
+	// The ms wall clock every retail deadline and interval runs on: GetTickCount, the process's
+	// one clock (engine world/tick_count_clock.h), never a sum of the engine's capped process
+	// steps, which lost the time of every hitch past the cap.
+	clock_ms_ = opennova::world::frame_tick_count_ms() - clock_origin_ms_;
 	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) {
 		// A leg whose session a punt, the reap or an error ended still ends its wait on the
 		// session's state (engine: NwuHostRole::poll_request, connect_or_host.h's
@@ -522,9 +527,6 @@ void NovaWorldClient::_process(double delta) {
 	// The driver pumps the gate + session sockets, the stage retransmits, the
 	// connect deadlines and the session's negotiated keepalive/reap; role
 	// progress arrives through the hooks (sync_session_state / traces).
-	// The ms wall clock every retail deadline and interval runs on (GetTickCount).
-	clock_accum_s_ += delta;
-	clock_ms_ = static_cast<uint32_t>(clock_accum_s_ * 1000.0);
 	// The probe is the menu's state-1 frame, whose session pump ran ahead of it, so the lobby's
 	// first tick is the next frame's (engine: NwuLobbySession::probe). An activation in the
 	// input step (a key, a button) runs start() before this frame's process step, which then

@@ -334,11 +334,13 @@ private:
 	bool authenticated_ = false; // true only after the EPASK login returns NWHANDLE
 	Ref<NovaWorldGateInfo> server_info_;
 	// The driver's two sockets (bound at start(), closed at stop()) and their
-	// engine adapters, and the driver's ms wall clock.
+	// engine adapters, and the driver's ms wall clock: the process's one GetTickCount clock
+	// (engine world::frame_tick_count_ms) read at each process step, from its reading at
+	// start() (the lobby's clock restarts at 0 with each open, NwuLobbySession::open).
 	Ref<UdpPump> gate_pump_;
 	Ref<UdpPump> nw_pump_;
 	std::unique_ptr<UdpPumpDatagramSocket> gate_socket_;
-	double clock_accum_s_ = 0.0;
+	uint32_t clock_origin_ms_ = 0;
 	uint32_t clock_ms_ = 0;
 	// The process frame whose start() ran the probe (Engine::get_process_frames): the menu's
 	// state-1 frame, which runs no lobby tick of its own (_process).
