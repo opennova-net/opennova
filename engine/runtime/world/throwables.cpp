@@ -125,7 +125,8 @@ ThrowClass throw_motor_from_move_function(const char *move_function) {
 
 // [orig: the release leg of the fire binding @ 0x4e07e9 — held < 0x1F ticks ->
 // 0xFF; else clamp((held - 31) * (1/93), 0.1, 1.0) * 255 (flt_7CD390 = 1/93,
-// flt_7C69F4 = 0.1, flt_7CA29C = 255); a 0 result falls back to 0 = unscaled.]
+// flt_7C69F4 = 0.1, flt_7CA29C = 255); a 0 result falls back to 1 (@0x4E0856..0x4E085A,
+// ebx = 1 @0x4E0446), which the 0.1 floor (25 at the least) never reaches.]
 uint8_t power_throw_charge_from_hold(int32_t held_ticks) {
     if (held_ticks < 31) return 255;
     double v = double(held_ticks - 31) * (1.0 / 93.0);
