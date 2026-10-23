@@ -610,7 +610,7 @@ void test_free_standing_infantry_look_holds_within_ninety_degrees() {
 void test_deck_ride_turns_the_aim_words() {
 	BodySource src;
 	auto view = free_infantry_view(src, 0x20, 0x00);
-	constexpr uint16_t kDeck = 0x1009;
+	static constexpr uint16_t kDeck = 0x1009; // static: MSVC needs no capture for it
 	view->set_carrier_pose_provider(
 			[](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
 				if (handle != kDeck) return false;
@@ -637,7 +637,7 @@ void test_deck_ride_turns_the_aim_words() {
 void test_org1_deck_ride_has_no_radius_drop() {
 	BodySource src;
 	auto view = free_infantry_view(src, 0x00, 0x00);
-	constexpr uint16_t kDeck = 0x1009;
+	static constexpr uint16_t kDeck = 0x1009; // static: MSVC needs no capture for it
 	view->set_carrier_pose_provider(
 			[](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
 				if (handle != kDeck) return false;
