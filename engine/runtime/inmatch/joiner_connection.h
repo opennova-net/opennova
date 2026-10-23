@@ -704,6 +704,13 @@ public:
 	// [orig: Game_StartMission @0x524360 - the loads @0x525495..0x525762, the first 0x2F
 	//  @0x525836, the freeze @0x525a6e]
 	bool take_mission_start_first_loadout(ProtocolMessage &out);
+	// Whether that take would run: the first leg's receive precedes the build, whose words it
+	// reads past that receive (D-NET-NEW-L2-54) [orig: Game_StartMission @0x524360 - the receive
+	// @0x525784, g_LocalTeam @0x525793, the first 0x2F @0x525836].
+	bool mission_start_first_loadout_owed() const {
+		return post_auth_stage_ == PostAuthStage::AwaitMissionStart &&
+				!mission_start_first_loadout_taken_;
+	}
 	// The mission start's end once its load has run, unframed: the first 0x2F when
 	// take_mission_start_first_loadout has not taken it (first_loadout's tag 0 when it has)
 	// and Player_InitPlayer's binding of the local entity; the stage moves on to the final wait

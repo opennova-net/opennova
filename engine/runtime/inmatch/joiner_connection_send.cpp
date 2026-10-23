@@ -499,9 +499,7 @@ LoadoutSubmit profile_loadout_submit(const JoinerConnection::LoadoutKit &kit, ui
 }
 
 bool JoinerConnection::take_mission_start_first_loadout(ProtocolMessage &out) {
-	if (post_auth_stage_ != PostAuthStage::AwaitMissionStart ||
-			mission_start_first_loadout_taken_)
-		return false;
+	if (!mission_start_first_loadout_owed()) return false;
 	// The SAME per-side profile kit twice, first with the fixed slot 195, then (at the end)
 	// with the spawn fill's equipped slot. "Per-side" is literal: the latched team byte picks
 	// the profile side block, and that block's class byte picks the page [orig: @0x525767].

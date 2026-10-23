@@ -961,15 +961,16 @@ public:
 	}
 	bool mission_start_released() const { return joiner_ && joiner_->mission_start_released(); }
 	// Game_StartMission's network pumps from the 0x1A to the final wait for the S2C 0x0F,
-	// in its order: its receive pumps step the send-holdoff countdown, its send pumps build
+	// in its order: its receive pumps run the client pump and step the send-holdoff countdown,
+	// its send pumps build
 	// only at a spent countdown and reload it, so the first 0x2F, the second and the 0x0B
 	// leave in one packet or two by where the countdown stood; what it still holds at the
 	// last send leaves from the final wait's first pass, after its receive (D-NET-NEW-L2-6),
 	// which the role runs right after the push (JoinerRole::push_mission_start_end, with no
 	// frame between, D-NET-NEW-L2-35). The pumps run in two legs at the load's two points:
 	// push_mission_start_first_loadout once its definition and model loads are in (the
-	// send pump ahead of them, the receive after them, the first 0x2F queued, the four
-	// send pumps ahead of the model freeze), so a countdown spent there sends the first
+	// send pump ahead of them, the receive after them, the first 0x2F built and queued, the
+	// four send pumps ahead of the model freeze), so a countdown spent there sends the first
 	// 0x2F alone mid-load; push_mission_start_end at its end (the pump after the freeze,
 	// the frame tick's zero, the receive, the second 0x2F and the 0x0B queued, the last
 	// send), running the first leg too when the embedder did not (D-NET-NEW-L2-35).
@@ -990,15 +991,49 @@ public:
 	//  @0x525C90, `push 64h` @0x525D22, LoadingScreen_UpdateAndPresent @0x525D29,
 	//  Game_LatchAttackDefendRole @0x5260C1, the 0x0B @0x52620E..0x52624B, the send
 	//  @0x526255].
-	struct MissionStartEndLegs {
+	// The load's network points run the role's legs too (D-NET-NEW-L2-54). Each loading step
+	// runs the NovaWorld session's periodic update, whose manager pump reads the game's one
+	// socket (the session is built on the game's manager): what it reads waits on the client
+	// protocol's queue, the 0x84's resends and the 0x85's pong leave from inside it. A LAN
+	// session's update returns at its head (the session's +0 and +0x68 words are zero), so the
+	// load reads no socket. Each receive pump runs the client pump over that queue, every
+	// handler at its place (`after_receive`, the role's handler writes on its own entity), and
+	// then steps the countdown. `periodic_deposit` is the role's socket read ahead of each
+	// update's manager receive, set on a NovaWorld join alone.
+	// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the +0 / +0x68 tests @0x4D4403 /
+	//  @0x4D4411, NapiNPManager_Pump(flags 4) @0x4D441F; CNapiGameSession_InitNPConnection
+	//  @0x4D3BE0 - the game's manager @0x4D3C6B; CNapiGameSession_ResetToDisconnected @0x4D0890 -
+	//  +0x68 @0x4D08C3, +0 @0x4D092E; Game_StartMission @0x524360 - the receives @0x525784 /
+	//  @0x525BD9 (`is_in_session && is_mp_session_peer` alone); NapiNPProtocol_Pump @0x62A650 -
+	//  PumpRecvQueues @0x62A6AC ahead of PumpFlags @0x62A6F8]
+	struct MissionStartPumpLegs {
+		std::function<void()> periodic_deposit;
+		AfterReceive after_receive;
+	};
+	struct MissionStartEndLegs : MissionStartPumpLegs {
 		std::function<void()> init_player;
 		std::function<void()> start_block;
 		std::function<void()> present;
 		std::function<void()> latch;
 	};
-	std::vector<std::vector<uint8_t>> push_mission_start_first_loadout();
+	std::vector<std::vector<uint8_t>> push_mission_start_first_loadout(
+			const MissionStartPumpLegs &legs = {});
 	std::vector<std::vector<uint8_t>> push_mission_start_end(
 			const MissionStartEndLegs &legs = {});
+	// A declared load of the mission start holds the frames (run_frame returns at its head):
+	// the released mission start's, the S2C 0x11's terrain load, the final S2C 0x64's effect
+	// load. Each runs the session's periodic update at its loading steps.
+	// [orig: Game_StartMission @0x524360 - the updates @0x52493D / @0x524999 / @0x5249B4 /
+	//  @0x5249CF around CEffectSystem_Init @0x524980; Game_LoadTerrainDuringConnect @0x520710 -
+	//  the updates @0x52072C / @0x5207E7]
+	bool declared_load_running() const {
+		return joiner_ && (joiner_->mission_start_released() || joiner_->sync_tail_load_running() ||
+				joiner_->mission_data_load_running());
+	}
+	// One periodic update of a declared load, outside the legs (the embedder's loading steps):
+	// the manager receive over what the role's deposit queued, its sends (already logged).
+	// Nothing outside a declared load.
+	std::vector<std::vector<uint8_t>> pump_mission_start_manager_receive();
 	// The messages queued for the next send boundary (the mission start's queue order).
 	std::size_t queued_send_count() const { return send_queue_.size(); }
 	void set_weapon_table(const world::WeaponTable *weapons) {
@@ -1519,12 +1554,24 @@ private:
 	// (its ACK) and the one flush.
 	void build_send_boundary(std::vector<std::vector<uint8_t>> &outbound, uint32_t now_tick,
 			const std::function<void(std::vector<ProtocolMessage> &)> &append = {});
+	// The frame's (0) leg, the NAPI manager's receive over every datagram the socket held, and a
+	// remote joiner's (1) leg, the client pump over what it queued with the receive pump's
+	// missing-sequence tail: false when a host teardown in it ended the session (its goodbyes
+	// in `outbound`, the leave line written). The frame and the load's pumps share both.
+	void manager_receive_pass(std::vector<std::vector<uint8_t>> &outbound);
+	bool client_receive_pass(std::vector<std::vector<uint8_t>> &outbound);
 	// The mission start's pumps (push_mission_start_first_loadout / _end): a send pump builds
-	// only at a spent countdown and reloads it, else it only ages the flush; a receive pump
-	// steps the countdown and reads no socket. The first leg: false when it does not run.
+	// only at a spent countdown and reloads it, else it only ages the flush, and writes its
+	// lines at its send; a periodic update runs the manager receive on a NovaWorld join alone; a
+	// receive pump runs the client pump and the role's handler writes, then steps the countdown.
+	// The first leg: false when it does not run.
 	void mission_start_send_pump(std::vector<std::vector<uint8_t>> &outbound);
-	void mission_start_receive_pump();
-	bool mission_start_first_leg(std::vector<std::vector<uint8_t>> &outbound);
+	void mission_start_periodic_update(std::vector<std::vector<uint8_t>> &outbound,
+			const MissionStartPumpLegs &legs);
+	void mission_start_receive_pump(std::vector<std::vector<uint8_t>> &outbound,
+			const MissionStartPumpLegs &legs);
+	bool mission_start_first_leg(std::vector<std::vector<uint8_t>> &outbound,
+			const MissionStartPumpLegs &legs);
 	// The C2S 0x0F self-heal requests the replica fold and the stale-carrier sweep raised,
 	// appended to the one queue where their producer ran.
 	void queue_carrier_repair_requests();

@@ -142,6 +142,9 @@ public:
 			const Ref<ResourceRoot> &p_resource_root);
 	void open_host_load_window();
 	void pump_host_load_stage();
+	// The join's simulation ahead of the runtime's adoption (stage_runtime_options), null
+	// otherwise: a join's load steps pump its session there (GameWorld::pump_join_load_step).
+	Ref<Simulation> join_preload_simulation() const { return join_preload_sim_; }
 	int reload_as_joiner();
 	// The NovaWorld session (a NovaWorldClient), handed over by the shell with a
 	// joiner or host load: retail keeps the NWU session playing or hosting

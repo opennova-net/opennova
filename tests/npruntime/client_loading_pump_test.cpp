@@ -52,6 +52,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
+#include <net/npwire/session_ping.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -1632,6 +1633,227 @@ bool run_the_second_0x2f_reads_its_words_past_the_init() {
 			"second 0x2F: the first keeps 195, the second carries the slot the init left");
 }
 
+// Each sent C2S 0x2F in `sent`, in order, with the ACK of the packet that carried it.
+struct SentSubmit {
+	LoadoutSubmit submit;
+	uint32_t ack = 0;
+};
+template <class H>
+std::vector<SentSubmit> sent_loadout_submits(H &h, const std::vector<std::vector<uint8_t>> &sent) {
+	std::vector<SentSubmit> out;
+	for (const std::vector<uint8_t> &datagram : sent) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, h.auth.scrk, header, messages)) continue;
+		for (const ProtocolMessage &m : messages) {
+			SentSubmit s;
+			s.ack = header.ack_count;
+			if (m.tag == 0x2F && decode_loadout_submit(m.payload.data(), m.payload.size(), s.submit))
+				out.push_back(s);
+		}
+	}
+	return out;
+}
+
+std::vector<uint8_t> submit_teams(const std::vector<SentSubmit> &submits) {
+	std::vector<uint8_t> teams;
+	for (const SentSubmit &s : submits) teams.push_back(s.submit.team);
+	return teams;
+}
+
+// The self S2C 0x50 moving the joiner's own entity (slot 0xC6) to team 1.
+ProtocolMessage self_team_1() {
+	return make_protocol_message(0x50, {0xC6, 0x00, 0x01, 0x00, 0x00, 0x00});
+}
+
+// D-NET-NEW-L2-54: a NovaWorld join's mission start reads the socket at its loading steps: its
+// session's periodic update runs a manager pump on the game's one socket, so what the host sends
+// during the load (its 0x5A answer to the first 0x2F, a 0x50) waits on the client queue, and the
+// receive past Player_InitPlayer runs its handler ahead of the second 0x2F's build: the 0x5A's
+// slot selection (the embedder's kit fold, g_CurrentWeaponSlot) and the 0x50's team latch move
+// the second 0x2F's words, the 0x50's own re-submission queues ahead of it, and the packet that
+// carries it ACKs the answer. A LAN session's update returns at its head: the datagram waits on
+// the socket for the final wait's first manager receive, past the second 0x2F, whose words keep
+// the old team and slot 195.
+// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - @0x4D4403 / @0x4D4411,
+//  NapiNPManager_Pump(flags 4) @0x4D441F; Game_StartMission @0x524360 - the updates @0x525A8E /
+//  @0x525B09, Player_InitPlayer @0x525BBC, the receive @0x525BD9, g_LocalTeam @0x525BE8,
+//  g_CurrentWeaponSlot @0x525C1A, the second 0x2F @0x525C2E, the present @0x525D29, the final
+//  wait's PumpManagerReceive @0x5262B4; NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the
+//  selection @0x4296E3; NapiNPClientMsg_TeamAssign @0x431910 - the latch @0x4319DB, the submit
+//  @0x431AAD]
+bool run_a_novaworld_load_runs_its_handlers_ahead_of_the_second_0x2f() {
+	for (const bool team_assign : {false, true}) {
+		for (const bool novaworld : {true, false}) {
+			RoleHarness h;
+			h.role.set_join_novaworld(novaworld);
+			// The embedder's kit fold: a grant's selection moves the equipped slot.
+			uint64_t kit_revision = 0;
+			h.role.kit_seams.apply_authoritative = [&h, &kit_revision] {
+				if (h.client.authoritative_loadout_revision() == kit_revision) return;
+				kit_revision = h.client.authoritative_loadout_revision();
+				inmatch::JoinerConnection::LoadoutKit kit;
+				kit.equipped_combo = 7;
+				h.client.set_loadout_kit(std::move(kit));
+			};
+			if (!expect(drive_into_the_world_stream(h, 0), "in-load answer: the world stream runs"))
+				return false;
+			h.load_declared = true;
+			(void)h.frame({self_spawn_record()});
+			(void)h.frame({make_protocol_message(0x1A, {})});
+			if (!expect(h.client.mission_start_released(),
+					"in-load answer: the 0x1A released the mission start"))
+				return false;
+			const std::size_t from = h.socket.sent.size();
+			h.role.push_mission_start_first_loadout();
+			// The host's answer lands on the socket during the load.
+			const std::vector<uint8_t> answer = frame_server_session(h.server_tx, h.server_scrk,
+					h.auth.ck, {team_assign ? self_team_1() : first_grant()});
+			const uint32_t answer_seq = h.server_tx.next_outbound_seq - 1;
+			h.client.receive(answer.data(), answer.size());
+			bool handled_by_present = false;
+			h.role.push_mission_start_end([&] {
+				handled_by_present = team_assign ? h.client.assigned_team() == 1
+				                                 : h.client.authoritative_loadout_revision() != 0;
+			});
+			const std::vector<std::vector<uint8_t>> sent(
+					h.socket.sent.begin() + static_cast<std::ptrdiff_t>(from), h.socket.sent.end());
+			const std::vector<SentSubmit> submits = sent_loadout_submits(h, sent);
+			const char *what = novaworld ? "NovaWorld: the receive past the init runs the answer"
+			                             : "LAN: the answer waits for the final wait";
+			if (!expect(handled_by_present == novaworld, what)) return false;
+			if (team_assign) {
+				// The first 0x2F; on NovaWorld the 0x50's re-submission, then the second on team 1;
+				// on LAN the second on team 2, the re-submission from the final wait's pass.
+				const std::vector<uint8_t> want = novaworld ? std::vector<uint8_t>{2, 1, 1}
+				                                            : std::vector<uint8_t>{2, 2, 1};
+				if (!expect(submit_teams(submits) == want, what)) return false;
+				continue;
+			}
+			if (!expect(submits.size() == 2 && submits[0].submit.weapon_slot_index == 195u &&
+			                    submits[1].submit.weapon_slot_index == (novaworld ? 7u : 195u),
+					what))
+				return false;
+			if (!expect((submits[1].ack >= answer_seq) == novaworld,
+					novaworld ? "NovaWorld: the second 0x2F's packet ACKs the in-load 0x5A"
+					          : "LAN: the second 0x2F's packet leaves ahead of the 0x5A's ACK"))
+				return false;
+		}
+	}
+	return true;
+}
+
+// D-NET-NEW-L2-54 (V-ROLL-AY N1): the update past the receive reads the socket but runs no
+// handler ahead of the second 0x2F: a self 0x50 that lands after the update ahead of the init
+// (@0x525B09) is read at @0x525BE3 and waits on the client queue, so the second 0x2F keeps team
+// 2 and the final wait's first pass latches the team and re-submits; one that lands during the
+// load is run at the receive @0x525BD9 and moves the second 0x2F to team 1. The load's receive
+// pumps read no socket themselves: on a LAN session (no periodic deposit) the in-time 0x50 waits
+// too.
+// [orig: Game_StartMission @0x524360 - the update @0x525B09, Player_InitPlayer @0x525BBC, the
+//  receive @0x525BD9, the update @0x525BE3, g_LocalTeam @0x525BE8, the second 0x2F @0x525C2E;
+//  CNapiNetwork_PumpClientProtocolRecv @0x4C4FE0 (flags 26)]
+bool run_the_update_past_the_receive_runs_no_handler() {
+	enum class Lands { InTime, AtTheInit, LanInTime };
+	for (const Lands lands : {Lands::InTime, Lands::AtTheInit, Lands::LanInTime}) {
+		Harness h;
+		if (!expect(drive_into_the_world_stream(h, 0), "update past the receive: the world stream"))
+			return false;
+		h.load_declared = true;
+		(void)h.frame({self_spawn_record()});
+		(void)h.frame({make_protocol_message(0x1A, {})});
+		const auto land = [&h] {
+			const std::vector<uint8_t> dg =
+					frame_server_session(h.server_tx, h.server_scrk, h.auth.ck, {self_team_1()});
+			h.client.receive(dg.data(), dg.size());
+		};
+		inmatch::ClientRuntime::MissionStartEndLegs legs;
+		if (lands != Lands::LanInTime) legs.periodic_deposit = [] {}; // the socket is the queue
+		std::vector<std::vector<uint8_t>> sent = h.client.push_mission_start_first_loadout(legs);
+		if (lands != Lands::AtTheInit) land();
+		if (lands == Lands::AtTheInit) legs.init_player = land;
+		const std::vector<std::vector<uint8_t>> pushed = h.client.push_mission_start_end(legs);
+		sent.insert(sent.end(), pushed.begin(), pushed.end());
+		const std::vector<uint8_t> at_push = submit_teams(sent_loadout_submits(h, sent));
+		const std::vector<uint8_t> at_wait = submit_teams(sent_loadout_submits(h, h.frame()));
+		const bool in_time = lands == Lands::InTime;
+		if (!expect(at_push == (in_time ? std::vector<uint8_t>{2, 1, 1} : std::vector<uint8_t>{2, 2}) &&
+		                    at_wait == (in_time ? std::vector<uint8_t>{} : std::vector<uint8_t>{1}),
+				in_time ? "in time: the receive runs the 0x50 ahead of the second 0x2F"
+				        : "late or LAN: the 0x50 waits for the final wait's first pass"))
+			return false;
+	}
+	return true;
+}
+
+// D-NET-NEW-L2-54: the embedder's loading steps run the session's periodic update between the
+// load's pumps. On a NovaWorld join its manager pump answers a host's WR ping at once, mid-load
+// (the 0x85's 0x45 pong from inside the receive); on a LAN join the update reads nothing and the
+// ping waits for the final wait's first manager receive. Outside a declared load the step does
+// nothing (the frames read the socket themselves). The S2C 0x11's declared terrain load runs
+// the same updates: its manager receive pongs at once, and once the load ends the step reads
+// nothing.
+// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - @0x4D4403 / @0x4D4411,
+//  NapiNPManager_Pump(flags 4) @0x4D441F; Nwu_HandlePing @0x623A70; Game_StartMission @0x524360 -
+//  the updates @0x525405..0x52571F, the final wait's PumpManagerReceive @0x5262B4;
+//  Game_LoadTerrainDuringConnect @0x520710 - the updates @0x52072C / @0x5207E7]
+bool run_a_loading_step_answers_a_ping_on_novaworld() {
+	{
+		Harness h;
+		h.client.set_sync_tail_loading(true);
+		(void)drive_into_the_world_stream(h, 0); // the 0x11's load holds the 0x0A
+		const std::vector<uint8_t> ping = nw_encode_outbound(
+				SESSION_OPCODE_SERVER_PING, build_session_ping_body(h.auth.ck, true, 0x55667788u));
+		h.client.receive(ping.data(), ping.size());
+		if (!expect(h.client.declared_load_running() &&
+		                    h.client.pump_mission_start_manager_receive().size() == 1,
+				"terrain load: the 0x11's declared load's update pongs at once"))
+			return false;
+		h.client.set_sync_tail_loading(false);
+		(void)h.frame(); // the 0x0A: the load is over
+		h.client.receive(ping.data(), ping.size());
+		if (!expect(!h.client.declared_load_running() &&
+		                    h.client.pump_mission_start_manager_receive().empty(),
+				"terrain load: past the load the step reads nothing (the frames do)"))
+			return false;
+	}
+	for (const bool novaworld : {true, false}) {
+		RoleHarness h;
+		h.role.set_join_novaworld(novaworld);
+		if (!expect(drive_into_the_world_stream(h, 0), "loading step: the world stream runs"))
+			return false;
+		h.load_declared = true;
+		const std::vector<uint8_t> early = nw_encode_outbound(
+				SESSION_OPCODE_SERVER_PING, build_session_ping_body(h.auth.ck, true, 0x11223344u));
+		h.client.receive(early.data(), early.size());
+		std::size_t from = h.socket.sent.size();
+		h.role.pump_mission_start_periodic_update();
+		if (!expect(h.socket.sent.size() == from,
+				"loading step: nothing outside a declared load"))
+			return false;
+		(void)h.frame({make_protocol_message(0x1A, {})});
+		const std::vector<uint8_t> ping = nw_encode_outbound(
+				SESSION_OPCODE_SERVER_PING, build_session_ping_body(h.auth.ck, true, 0xAABBCCDDu));
+		h.client.receive(ping.data(), ping.size());
+		from = h.socket.sent.size();
+		h.role.pump_mission_start_periodic_update();
+		uint8_t opcode = 0;
+		std::vector<uint8_t> pong_body;
+		SessionPingBody parsed;
+		const bool ponged = h.socket.sent.size() == from + 1 &&
+				nw_decode_inbound(h.socket.sent[from].data(), h.socket.sent[from].size(), opcode,
+						pong_body) &&
+				opcode == SESSION_OPCODE_CLIENT_PING &&
+				parse_session_ping_body(pong_body.data(), pong_body.size(), parsed) &&
+				parsed.timestamp_ms == 0xAABBCCDDu;
+		if (!expect(ponged == novaworld && (novaworld || h.socket.sent.size() == from),
+				novaworld ? "NovaWorld: the loading step's update pongs the WR ping at once"
+				          : "LAN: the loading step's update reads nothing"))
+			return false;
+	}
+	return true;
+}
+
 // The joiner's round clock at its mission start: retail never seeds it. Game_StartMission's
 // round-clock seed (g_RoundTimeRemaining = g_RoundTimeLimitMinutes x 3720 when in session,
 // outside the Co-op waypoint family, with a nonzero limit) sits on the authority / single-player
@@ -2070,6 +2292,9 @@ int main() {
 	ok = run_the_mission_start_legs_keep_retails_order() && ok;
 	ok = run_the_mission_start_push_bears_l() && ok;
 	ok = run_the_second_0x2f_reads_its_words_past_the_init() && ok;
+	ok = run_a_novaworld_load_runs_its_handlers_ahead_of_the_second_0x2f() && ok;
+	ok = run_the_update_past_the_receive_runs_no_handler() && ok;
+	ok = run_a_loading_step_answers_a_ping_on_novaworld() && ok;
 	ok = run_the_joiner_mission_start_keeps_the_folded_round_clock() && ok;
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;

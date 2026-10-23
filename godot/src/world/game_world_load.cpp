@@ -317,6 +317,8 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		drive_.pump_host_load_stage(); // after the terrain
 	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_OBJECTS));
+	// A join's loading steps run its session's periodic update after each present.
+	pump_join_load_step();
 
 	loaded_mission_ = p_mission;
 	timeline->span("objects");
@@ -330,6 +332,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	place_mission_objects(p_mission);
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_RUNTIME));
+	pump_join_load_step();
 	timeline->span("runtime");
 	// Open and seed GAME music for sessions with a local client, including SP;
 	// dedicated hosts close the context. The shell owns the actual music VM.
@@ -364,6 +367,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		challenge_sim->finalize_loaded_model_challenge_snapshot();
 	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_AUDIO));
+	pump_join_load_step();
 	timeline->span("audio");
 	start_mission_audio(p_mission, p_bms_name);
 	timeline->end_span();
@@ -414,6 +418,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		}
 	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS));
+	pump_join_load_step();
 	timeline->span("effects");
 	// A join's mission-data load built and warmed the effect world ahead of its 0x09; the
 	// rest binds it to this mission (load_join_effect_system).
@@ -430,6 +435,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// pays this at load (the load plan's effect-system witness).
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM));
+	pump_join_load_step();
 	// The mission textures stage opens with the terrain's, on every arm, a dedicated host's reduced
 	// one too: the texture slots and the tile set's atlas the head's connect leg held, then the
 	// terrain's build (engine terrain/terrain_load_legs.h carries the witness, D-NET-NEW-L2-46).
@@ -495,6 +501,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// listeners run inside the load's call.
 	timeline->span("finish");
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_FINISH));
+	pump_join_load_step();
 	timeline->end_span();
 	loaded_mission_file_ = p_bms_name;
 	world_ready_ = true;
@@ -526,9 +533,12 @@ int GameWorld::load_join_terrain(const Ref<MissionData> &p_mission, const String
 		const Ref<ResourceRoot> &p_resource_root) {
 	join_terrain_preloaded_ = false;
 	copy_mission_start_options();
+	// The load's steps run the session's periodic update ahead of the terrain and past it.
+	pump_join_load_step();
 	Ref<LoadTimeline> timeline;
 	const int err = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
 	if (err != OK) return err;
+	pump_join_load_step();
 	// Then the avatar combos' models, at the header's climate: their data loads into the
 	// placer the S2C 0x1A's load keeps, and that load's freeze resolves their materials with the
 	// rest of the list (engine: inmatch/loaded_model_list.h avatar_combo_models, D-NET-NEW-L2-19,
@@ -665,6 +675,15 @@ void GameWorld::start_mission_root() {
 
 void GameWorld::pulse_load_progress(int p_percent) {
 	emit_signal(kSignalLoadProgress, p_percent);
+}
+
+// Each loading step's present is followed by the session's periodic update, which a join's
+// simulation runs (engine inmatch::JoinerRole::pump_mission_start_periodic_update carries the
+// witness, D-NET-NEW-L2-54): the drive holds that simulation until the runtime adopts it.
+void GameWorld::pump_join_load_step() {
+	Ref<Simulation> sim = get_sim();
+	if (sim.is_null()) sim = drive_.join_preload_simulation();
+	if (sim.is_valid()) sim->pump_join_mission_start_periodic_update();
 }
 
 // Populate the world with the mission's placed objects under the mission
@@ -1660,9 +1679,12 @@ void GameWorld::load_join_effect_system(const Ref<ResourceRoot> &p_resource_root
 	// again for its terrain).
 	session_texcompression_level_ = texcompression_level_;
 	session_particle_density_ = particle_density_;
+	// The load's steps run the session's periodic update around the effect system's build.
+	pump_join_load_step();
 	timeline->span("effects");
 	EffectWorld *effect_world = create_effect_world(p_resource_root, timeline);
 	timeline->end_span();
+	pump_join_load_step();
 	// The catalog warms in front of the load camera as the load's warm does; no mission
 	// root lives yet, so no presenter pipeline warms here (the S2C 0x1A's load draws those).
 	timeline->span("effects_warm");
@@ -1671,6 +1693,7 @@ void GameWorld::load_join_effect_system(const Ref<ResourceRoot> &p_resource_root
 	warm_effect_world_catalog();
 	effect_world_id_ = live_effect_world;
 	timeline->end_span();
+	pump_join_load_step();
 	join_effect_world_id_ = ObjectID(effect_world->get_instance_id());
 	timeline->finish();
 }

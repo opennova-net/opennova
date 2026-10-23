@@ -205,8 +205,12 @@ void JoinerRole::push_mission_start_end(const std::function<void()> &present) {
 	//  @0x525BD9, the second 0x2F @0x525C2E, Entity_BuildAllProximityLists @0x525C90,
 	//  Game_LatchAttackDefendRole @0x5260C1, the 0x0B @0x52624B]
 	ClientRuntime::MissionStartEndLegs legs;
+	static_cast<ClientRuntime::MissionStartPumpLegs &>(legs) = mission_start_pump_legs();
 	legs.init_player = [this] {
 		if (init_local_player_at_mission_start()) mission_start_birth_unreleased_ = true;
+		// L, the receive handlers' local player from here on (the receive past the init reads
+		// its Position).
+		runtime->set_local_player_position(kernel_->world);
 	};
 	legs.start_block = [this] { run_mission_start_local_block(); };
 	legs.present = present;
@@ -241,7 +245,27 @@ JoinerRole::MissionStartPass JoinerRole::poll_mission_start(const MissionStartLe
 // Game_StartMission @0x524360 - the first 0x2F @0x525836, the pumps @0x5258a2..@0x525a61].
 void JoinerRole::push_mission_start_first_loadout() {
 	if (!runtime) return;
-	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_first_loadout()) send(dg);
+	for (const std::vector<uint8_t> &dg :
+			runtime->push_mission_start_first_loadout(mission_start_pump_legs()))
+		send(dg);
+}
+
+// The load's legs at its network points (ClientRuntime::MissionStartPumpLegs carries the
+// witness, D-NET-NEW-L2-54): a NovaWorld join's periodic updates read the socket, a LAN join's
+// read nothing; every receive runs the handlers' writes on L as it stands ahead of it.
+ClientRuntime::MissionStartPumpLegs JoinerRole::mission_start_pump_legs() {
+	ClientRuntime::MissionStartPumpLegs legs;
+	if (join_novaworld_) legs.periodic_deposit = [this] { deposit_inbound(); };
+	// The receive itself never bears L (its birth is the init's, or a seeded session's
+	// in-match edge inside these writes), so L as it stands is L ahead of the receive.
+	legs.after_receive = [this] { apply_receive_writes(local_spawned_); };
+	return legs;
+}
+
+void JoinerRole::pump_mission_start_periodic_update() {
+	if (!runtime || !join_novaworld_ || !runtime->declared_load_running()) return;
+	deposit_inbound();
+	for (const std::vector<uint8_t> &dg : runtime->pump_mission_start_manager_receive()) send(dg);
 }
 
 // Drain every datagram pending on the socket into the runtime's recv fold
@@ -1777,6 +1801,181 @@ void JoinerRole::send_hello_once() {
 	}
 }
 
+// The receive handlers' writes on L, in the receive's place: the runtime runs this leg right
+// after a receive pump, the frame's (ahead of the send block, open or not) and the mission
+// start's load's two (ClientRuntime::AfterReceive, ClientRuntime::MissionStartPumpLegs; the
+// frame's witness is run_client_net_frame's).
+void JoinerRole::apply_receive_writes(bool local_existed_before) {
+	world::World &world = kernel_->world;
+	world::LocalPlayer &lp = kernel_->local;
+	ClientRuntime &rt = *runtime;
+	// The receive's S2C 0x08 byte, which a first grant's 0x5A slot rebuild (the kit apply
+	// below) fills from (mirror_session_zoom_rule).
+	mirror_session_zoom_rule();
+	// The host policy is installed before either the granted kit or side
+	// reseed can consult availability. A pre-load packet remains retained in
+	// ClientState until the first world frame reaches this boundary.
+	// [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0]
+	if (weapon_availability_revision_seen_ != rt.state().weapon_availability_revision) {
+		lp.loadout.availability.values = rt.state().weapon_availability;
+		weapon_availability_revision_seen_ = rt.state().weapon_availability_revision;
+	}
+	// Each of the receive's S2C 0x5A grants applies at its turn (a grant deferred from an
+	// earlier receive, with none in this one, once): the kit, its mount request, whose C2S
+	// 0x1D queues at its 0x5A's place, the name list and L's row.
+	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0, once per message
+	//  (CNapiNPConnection_DispatchMessage @0x625EF1)]
+	const auto apply_grant = [&](std::size_t grant) {
+		if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
+		// The apply's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x5A's place
+		// among this receive's sends, ahead of what the handlers of the messages behind it in
+		// the datagram queued, as the handler's own mount queues it
+		// (ClientRuntime::queue_receive_mount_stance_change).
+		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
+		//  @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30]
+		flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kWeaponLoadout, grant);
+		// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
+		// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
+		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
+		//  the climate pick @0x42942D..0x429463, ItemList_FindIndexByTypeId @0x42946C, the
+		//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485, no index compare, the model
+		//  words through @0x4294BA, AnimMap_InitBoneTypes @0x4294C4]
+		if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
+			loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
+			// The apply first rebuilds the process's loadout name list from the list's rows (each
+			// row whose weapon the table has: its name and three values), ahead of its L test, so
+			// the next body the joiner spawns takes the list's first weapon (D-NET-143).
+			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the
+			//  rows @0x429230..0x4293B9 (AdmDef_GetEntryByIndex @0x42923D, the name @0x4292F0), the
+			//  L test @0x4293F2]
+			apply_weapon_loadout_name_list(world, rt.authoritative_loadout());
+			if (world::Entity *local = world.registry.get(world.cached.local_player)) {
+				world::rebind_player_camouflage_row(world, *local);
+				// Off the authority the grant's class is also its side's class word
+				// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the Team test
+				//  @0x429411..0x42941D, g_CharClassTeam2 @0x42941F, g_CharClassTeam1 @0x429427].
+				granted_side_class_[local->team == 1 || local->team == 3 ? 0 : 1] = local->player_class;
+			}
+		}
+	};
+	// The receive's message legs on L run in the receive's order, each message's whole ahead
+	// of the next's (ClientRuntime::receive_legs): each 0x5A's apply, each self 0x50's local
+	// arm and Player_InitPlayer(1), each 0x35's pickup. So a 0x5A behind a 0x35 rebuilds the
+	// slot table the pickup landed in, a self 0x50 behind a 0x5A re-copies its side's profile
+	// page over the grant's kit and its init rebuilds from the page, and each of two self
+	// 0x50s re-runs the init on its own side. What a receive outside a frame's folded (the
+	// push's final-wait pass) carries no mark: it runs first, as its receive came first, its
+	// 0x1D at the queue's end.
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - CNapiNPConnection_DispatchMessage
+	//  @0x625EF1, once per message in the packet's order; NapiNPClientMsg_HandleWeaponLoadoutSync
+	//  @0x4290E0; NapiNPClientMsg_TeamAssign @0x431910; NapiNPClientMsg_0x035 @0x4261A0]
+	const std::vector<ClientRuntime::ReceiveLeg> legs = rt.receive_legs();
+	const auto marked = [&legs](ClientRuntime::ReceiveMount at) {
+		return static_cast<std::size_t>(std::count_if(legs.begin(), legs.end(),
+				[at](const ClientRuntime::ReceiveLeg &leg) { return leg.at == at; }));
+	};
+	if (rt.receive_loadout_grant_count() == 0) apply_grant(0);
+	const uint64_t local_resubmit_revision = rt.local_resubmit_revision();
+	const bool unmarked_team_assign = local_resubmit_revision > local_resubmit_revision_seen_ &&
+			marked(ClientRuntime::ReceiveMount::kSelfTeamAssign) == 0;
+	local_resubmit_revision_seen_ = std::max(local_resubmit_revision_seen_,
+			local_resubmit_revision);
+	if (unmarked_team_assign) {
+		apply_self_team_assign(rt.self_assigned_team());
+		flush_stance_requests();
+	}
+	const std::vector<WeaponPickupNotice> pickups = rt.drain_weapon_pickups();
+	const std::size_t unmarked_pickups = pickups.size() -
+			std::min(pickups.size(), marked(ClientRuntime::ReceiveMount::kWeaponPickup));
+	for (std::size_t i = 0; i < unmarked_pickups; ++i) {
+		apply_weapon_pickup(*this, rt, world, lp, pickups[i]);
+		flush_stance_requests();
+	}
+	for (const ClientRuntime::ReceiveLeg &leg : legs) {
+		switch (leg.at) {
+		case ClientRuntime::ReceiveMount::kWeaponLoadout:
+			rt.stage_receive_loadout_grant(leg.occurrence);
+			apply_grant(leg.occurrence);
+			break;
+		case ClientRuntime::ReceiveMount::kSelfTeamAssign:
+			apply_self_team_assign(leg.team);
+			// Its walk's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x50's
+			// place, past the handler's own sends [orig: NapiNPClientMsg_TeamAssign @0x431910
+			//  - the 0x2F @0x431AAD, the 0x22 / 0x23 @0x431AE4 / @0x431B05,
+			//  Player_InitPlayer(1) @0x431B14].
+			flush_receive_mount_stance_requests(leg.at, leg.occurrence);
+			break;
+		case ClientRuntime::ReceiveMount::kWeaponPickup:
+			// Each S2C 0x35 for L mounts its pickup inside the receive, its 0x1D at its place,
+			// so this frame's send block frames it [orig: NapiNPClientMsg_0x035 @0x4261A0 -
+			//  Player_MountPickedUpWeapon @0x42624C / @0x42625B -> Player_MountWeaponSlot
+			//  @0x4E040E; Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead
+			//  of the send block @0x42C3DD].
+			if (unmarked_pickups + leg.occurrence < pickups.size())
+				apply_weapon_pickup(*this, rt, world, lp,
+						pickups[unmarked_pickups + leg.occurrence]);
+			flush_receive_mount_stance_requests(leg.at, leg.occurrence);
+			break;
+		}
+	}
+	// The team selector may only just have become known: the S2C 0x04 latch landing after
+	// the catalog, a side change no self 0x50 carried (each self 0x50's leg above copied its
+	// own side's page). The resident kit buffer follows the side, as the mission start's copy
+	// would have read the latch [orig: Game_StartMission @0x524360 - the side pick
+	//  @0x525798, the copy @0x525818].
+	if (kit_seams.reseed_on_side_change && kit_seams.reseed_on_side_change())
+		if (kit_seams.push) kit_seams.push();
+	// S2C 0x50 re-latched OUR OWN team. L's team is seeded once by spawn_from_self
+	// (the self record's team byte, or a pre-spawn 0x50's); a later one must move both the
+	// entity's Team and the round sim's presenting-client team, or friend/foe styling
+	// keeps rendering the old side. Retail does the same two writes: g_LocalTeam for
+	// the latch and entity->Team for the entity itself. Each self 0x50 whose local arm ran
+	// stored its own team at its turn above; this stores the receive's last, the one a
+	// self 0x50 ahead of the local entity's binding leaves.
+	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — @0x4319db / @0x4319ee; the round-spawn
+	//  style select reads the local player's Team @0x4ec740]
+	{
+		const uint64_t self_team_revision = rt.self_team_revision();
+		if (self_team_revision > self_team_revision_seen_) {
+			self_team_revision_seen_ = self_team_revision;
+			// Leg 2's store on the joiner's own entity (not the g_LocalTeam latch,
+			// which the local arm alone takes, D-NET-572).
+			store_local_team(rt.self_assigned_team());
+		}
+	}
+	const uint64_t deployment_release_revision =
+			rt.deployment_release_revision();
+	if (deployment_release_revision > deployment_release_revision_seen_) {
+		deployment_release_revision_seen_ = deployment_release_revision;
+		// The first release admits L, which the mission start bore (or which the in-match
+		// edge bears below, D-NET-NEW-L2-52). A later release must revive that existing
+		// identity, but only after a positive 0x0A tail observed after this release frame
+		// (not a stale positive already queued ahead of it).
+		if (local_existed_before && !mission_start_birth_unreleased_) {
+			redeploy_release_pending_ = true;
+			redeploy_health_updates_at_release_ =
+					rt.state().health_updates_applied;
+		}
+		mission_start_birth_unreleased_ = false;
+	}
+	{
+		// L's birth on the stats board (an instrument).
+		devtools::ProfileScope birth(world.profile, devtools::Slot::SIM_CLIENT_LOCAL_BIRTH);
+		spawn_and_arm_local_player();
+	}
+	rebuild_local_from_full_spawn();
+	fold_local_record();
+	apply_world_state_load();
+	// The receive's mount requests (the 0x5A apply's queued at its place above) queue their
+	// C2S 0x1D in the receive, as the handler's own call does, so this frame's send block
+	// frames them, not the next one's.
+	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the mount @0x4296F4) ->
+	//  Player_MountWeaponSlot @0x4DFA40 (CNapiNetwork_QueueReliableMessage(0x1D)
+	//  @0x4DFC1B..0x4DFC30); Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228
+	//  ahead of the send block @0x42C3DD]
+	flush_stance_requests();
+}
+
 // The client net frame (recv-fold + connect-drive + the gated C2S 0x0C uplink) with the
 // receive handlers' writes on L in its after-receive leg (loadout/kit, side assignment,
 // the deployment-release latch, a seeded session's birth of L on the in-match edge, its own
@@ -1788,7 +1987,6 @@ void JoinerRole::send_hello_once() {
 JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;
-	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
 	const uint32_t now = now_tick_;
 	// The uplink describes L's pose as left by the previous entity update and this frame's
@@ -1826,171 +2024,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	//  @0x4319DB / @0x4319EE, the local arm @0x431A35..0x431AAD; NapiNPClientMsg_0x00F
 	//  @0x42E200 - the hold clear @0x42E391, the pose stores @0x42E3B9..0x42E3F2]
 	const ClientRuntime::AfterReceive after_receive = [&] {
-		// The receive's S2C 0x08 byte, which a first grant's 0x5A slot rebuild (the kit apply
-		// below) fills from (mirror_session_zoom_rule).
-		mirror_session_zoom_rule();
-		// The host policy is installed before either the granted kit or side
-		// reseed can consult availability. A pre-load packet remains retained in
-		// ClientState until the first world frame reaches this boundary.
-		// [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0]
-		if (weapon_availability_revision_seen_ != rt.state().weapon_availability_revision) {
-			lp.loadout.availability.values = rt.state().weapon_availability;
-			weapon_availability_revision_seen_ = rt.state().weapon_availability_revision;
-		}
-		// Each of the receive's S2C 0x5A grants applies at its turn (a grant deferred from an
-		// earlier receive, with none in this one, once): the kit, its mount request, whose C2S
-		// 0x1D queues at its 0x5A's place, the name list and L's row.
-		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0, once per message
-		//  (CNapiNPConnection_DispatchMessage @0x625EF1)]
-		const auto apply_grant = [&](std::size_t grant) {
-			if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
-			// The apply's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x5A's place
-			// among this receive's sends, ahead of what the handlers of the messages behind it in
-			// the datagram queued, as the handler's own mount queues it
-			// (ClientRuntime::queue_receive_mount_stance_change).
-			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
-			//  @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30]
-			flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kWeaponLoadout, grant);
-			// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
-			// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
-			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
-			//  the climate pick @0x42942D..0x429463, ItemList_FindIndexByTypeId @0x42946C, the
-			//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485, no index compare, the model
-			//  words through @0x4294BA, AnimMap_InitBoneTypes @0x4294C4]
-			if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
-				loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
-				// The apply first rebuilds the process's loadout name list from the list's rows (each
-				// row whose weapon the table has: its name and three values), ahead of its L test, so
-				// the next body the joiner spawns takes the list's first weapon (D-NET-143).
-				// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the
-				//  rows @0x429230..0x4293B9 (AdmDef_GetEntryByIndex @0x42923D, the name @0x4292F0), the
-				//  L test @0x4293F2]
-				apply_weapon_loadout_name_list(world, rt.authoritative_loadout());
-				if (world::Entity *local = world.registry.get(world.cached.local_player)) {
-					world::rebind_player_camouflage_row(world, *local);
-					// Off the authority the grant's class is also its side's class word
-					// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the Team test
-					//  @0x429411..0x42941D, g_CharClassTeam2 @0x42941F, g_CharClassTeam1 @0x429427].
-					granted_side_class_[local->team == 1 || local->team == 3 ? 0 : 1] = local->player_class;
-				}
-			}
-		};
-		// The receive's message legs on L run in the receive's order, each message's whole ahead
-		// of the next's (ClientRuntime::receive_legs): each 0x5A's apply, each self 0x50's local
-		// arm and Player_InitPlayer(1), each 0x35's pickup. So a 0x5A behind a 0x35 rebuilds the
-		// slot table the pickup landed in, a self 0x50 behind a 0x5A re-copies its side's profile
-		// page over the grant's kit and its init rebuilds from the page, and each of two self
-		// 0x50s re-runs the init on its own side. What a receive outside a frame's folded (the
-		// push's final-wait pass) carries no mark: it runs first, as its receive came first, its
-		// 0x1D at the queue's end.
-		// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - CNapiNPConnection_DispatchMessage
-		//  @0x625EF1, once per message in the packet's order; NapiNPClientMsg_HandleWeaponLoadoutSync
-		//  @0x4290E0; NapiNPClientMsg_TeamAssign @0x431910; NapiNPClientMsg_0x035 @0x4261A0]
-		const std::vector<ClientRuntime::ReceiveLeg> legs = rt.receive_legs();
-		const auto marked = [&legs](ClientRuntime::ReceiveMount at) {
-			return static_cast<std::size_t>(std::count_if(legs.begin(), legs.end(),
-					[at](const ClientRuntime::ReceiveLeg &leg) { return leg.at == at; }));
-		};
-		if (rt.receive_loadout_grant_count() == 0) apply_grant(0);
-		const uint64_t local_resubmit_revision = rt.local_resubmit_revision();
-		const bool unmarked_team_assign = local_resubmit_revision > local_resubmit_revision_seen_ &&
-				marked(ClientRuntime::ReceiveMount::kSelfTeamAssign) == 0;
-		local_resubmit_revision_seen_ = std::max(local_resubmit_revision_seen_,
-				local_resubmit_revision);
-		if (unmarked_team_assign) {
-			apply_self_team_assign(rt.self_assigned_team());
-			flush_stance_requests();
-		}
-		const std::vector<WeaponPickupNotice> pickups = rt.drain_weapon_pickups();
-		const std::size_t unmarked_pickups = pickups.size() -
-				std::min(pickups.size(), marked(ClientRuntime::ReceiveMount::kWeaponPickup));
-		for (std::size_t i = 0; i < unmarked_pickups; ++i) {
-			apply_weapon_pickup(*this, rt, world, lp, pickups[i]);
-			flush_stance_requests();
-		}
-		for (const ClientRuntime::ReceiveLeg &leg : legs) {
-			switch (leg.at) {
-			case ClientRuntime::ReceiveMount::kWeaponLoadout:
-				rt.stage_receive_loadout_grant(leg.occurrence);
-				apply_grant(leg.occurrence);
-				break;
-			case ClientRuntime::ReceiveMount::kSelfTeamAssign:
-				apply_self_team_assign(leg.team);
-				// Its walk's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x50's
-				// place, past the handler's own sends [orig: NapiNPClientMsg_TeamAssign @0x431910
-				//  - the 0x2F @0x431AAD, the 0x22 / 0x23 @0x431AE4 / @0x431B05,
-				//  Player_InitPlayer(1) @0x431B14].
-				flush_receive_mount_stance_requests(leg.at, leg.occurrence);
-				break;
-			case ClientRuntime::ReceiveMount::kWeaponPickup:
-				// Each S2C 0x35 for L mounts its pickup inside the receive, its 0x1D at its place,
-				// so this frame's send block frames it [orig: NapiNPClientMsg_0x035 @0x4261A0 -
-				//  Player_MountPickedUpWeapon @0x42624C / @0x42625B -> Player_MountWeaponSlot
-				//  @0x4E040E; Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead
-				//  of the send block @0x42C3DD].
-				if (unmarked_pickups + leg.occurrence < pickups.size())
-					apply_weapon_pickup(*this, rt, world, lp,
-							pickups[unmarked_pickups + leg.occurrence]);
-				flush_receive_mount_stance_requests(leg.at, leg.occurrence);
-				break;
-			}
-		}
-		// The team selector may only just have become known: the S2C 0x04 latch landing after
-		// the catalog, a side change no self 0x50 carried (each self 0x50's leg above copied its
-		// own side's page). The resident kit buffer follows the side, as the mission start's copy
-		// would have read the latch [orig: Game_StartMission @0x524360 - the side pick
-		//  @0x525798, the copy @0x525818].
-		if (kit_seams.reseed_on_side_change && kit_seams.reseed_on_side_change())
-			if (kit_seams.push) kit_seams.push();
-		// S2C 0x50 re-latched OUR OWN team. L's team is seeded once by spawn_from_self
-		// (the self record's team byte, or a pre-spawn 0x50's); a later one must move both the
-		// entity's Team and the round sim's presenting-client team, or friend/foe styling
-		// keeps rendering the old side. Retail does the same two writes: g_LocalTeam for
-		// the latch and entity->Team for the entity itself. Each self 0x50 whose local arm ran
-		// stored its own team at its turn above; this stores the receive's last, the one a
-		// self 0x50 ahead of the local entity's binding leaves.
-		// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — @0x4319db / @0x4319ee; the round-spawn
-		//  style select reads the local player's Team @0x4ec740]
-		{
-			const uint64_t self_team_revision = rt.self_team_revision();
-			if (self_team_revision > self_team_revision_seen_) {
-				self_team_revision_seen_ = self_team_revision;
-				// Leg 2's store on the joiner's own entity (not the g_LocalTeam latch,
-				// which the local arm alone takes, D-NET-572).
-				store_local_team(rt.self_assigned_team());
-			}
-		}
-		const uint64_t deployment_release_revision =
-				rt.deployment_release_revision();
-		if (deployment_release_revision > deployment_release_revision_seen_) {
-			deployment_release_revision_seen_ = deployment_release_revision;
-			// The first release admits L, which the mission start bore (or which the in-match
-			// edge bears below, D-NET-NEW-L2-52). A later release must revive that existing
-			// identity, but only after a positive 0x0A tail observed after this release frame
-			// (not a stale positive already queued ahead of it).
-			if (local_existed_before_net && !mission_start_birth_unreleased_) {
-				redeploy_release_pending_ = true;
-				redeploy_health_updates_at_release_ =
-						rt.state().health_updates_applied;
-			}
-			mission_start_birth_unreleased_ = false;
-		}
-		{
-			// L's birth on the stats board (an instrument).
-			devtools::ProfileScope birth(world.profile, devtools::Slot::SIM_CLIENT_LOCAL_BIRTH);
-			spawn_and_arm_local_player();
-		}
-		rebuild_local_from_full_spawn();
-		fold_local_record();
-		apply_world_state_load();
-		// The receive's mount requests (the 0x5A apply's queued at its place above) queue their
-		// C2S 0x1D in the receive, as the handler's own call does, so this frame's send block
-		// frames them, not the next one's.
-		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the mount @0x4296F4) ->
-		//  Player_MountWeaponSlot @0x4DFA40 (CNapiNetwork_QueueReliableMessage(0x1D)
-		//  @0x4DFC1B..0x4DFC30); Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228
-		//  ahead of the send block @0x42C3DD]
-		flush_stance_requests();
+		apply_receive_writes(local_existed_before_net);
 	};
 	// The builder at the send block, on L as the receive left it. Its own refusals: no
 	// body, a Health word of 0, the dead bit (no alive latch, D-NET-433), and its serializer's

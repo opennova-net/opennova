@@ -864,6 +864,11 @@ private:
 	// placer's per-model pulse at the object stage's constant value (the load plan's per-model
 	// pulse witness) and the freeze's per-file present, each at its stored checkpoint.
 	void pulse_load_progress(int p_percent);
+	// A loading step of a join's declared loads (the S2C 0x11's terrain, the final 0x64's
+	// effects, the 0x1A's stage emits): the NovaWorld session's periodic update on the join's
+	// simulation, the drive's until the runtime adopts it (engine
+	// inmatch::JoinerRole::pump_mission_start_periodic_update, D-NET-NEW-L2-54); no-ops elsewhere.
+	void pump_join_load_step();
 	// The terrain's .trn, overcast.def and the named .env over the engine
 	// defaults, as the time-of-day load reads them; never fails.
 	void load_environment(const String &p_trn_path, const String &p_env_path);

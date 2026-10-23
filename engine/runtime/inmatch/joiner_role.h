@@ -140,8 +140,16 @@ public:
 	void poll_preload();
 	// The first leg of a mission start whose load runs after the S2C 0x1A, once its
 	// definition and model loads are in (ClientRuntime::push_mission_start_first_loadout):
-	// sends what its pumps build, the first 0x2F when the countdown is spent there.
+	// sends what its pumps build, the first 0x2F when the countdown is spent there. Its receive
+	// runs the client pump with the role's handler writes (mission_start_pump_legs).
 	void push_mission_start_first_loadout();
+	// The NovaWorld session's periodic update at a loading step of the mission start's declared
+	// loads (the 0x11's terrain, the final 0x64's effects, the 0x1A's load): a NovaWorld join's
+	// manager pump reads the game's socket there, the session packets waiting for the next
+	// receive, the 0x84's resends and the 0x85's pong sent at once; a LAN join's reads nothing
+	// (ClientRuntime::MissionStartPumpLegs and declared_load_running carry the witness,
+	// D-NET-NEW-L2-54). Nothing outside a declared load.
+	void pump_mission_start_periodic_update();
 	// The end of the mission start the S2C 0x1A released, once the embedder's load has run
 	// (ClientRuntime::push_mission_start_end): sends what its pumps build, the two
 	// 0x2F and the 0x0B, then runs the final wait's first pass for the S2C 0x0F, which
@@ -435,6 +443,13 @@ private:
 	// --- the frame's phases ----------------------------------------------------
 	void pump();
 	FrameSignals run_client_net_frame();
+	// The receive handlers' writes on L at a receive's place (ClientRuntime::AfterReceive): the
+	// frame's (run_client_net_frame) and the mission start's load's two
+	// (mission_start_pump_legs). `local_existed_before` is whether L stood ahead of that receive.
+	void apply_receive_writes(bool local_existed_before);
+	// The load's legs at its network points: a NovaWorld join's socket read ahead of each
+	// periodic update, the handler writes at each receive (D-NET-NEW-L2-54).
+	ClientRuntime::MissionStartPumpLegs mission_start_pump_legs();
 	void wire_frame_providers();
 	// The S2C 0x08's sniper-zoom byte onto the world's rules: after each receive's fold and on
 	// the load's fresh world (bring_up), ahead of every slot fill.
