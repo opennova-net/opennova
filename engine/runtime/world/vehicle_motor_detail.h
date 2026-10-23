@@ -152,8 +152,8 @@ CollisionMatrix vehicle_solve_matrix(const Entity &veh);
 CollisionMatrix vehicle_matrix_rows(const CollisionMatrix &head);
 // The tracked and wheeled solves' crash tests' up word: the head matrix's row 2 extract
 // normalized on the x87 (the length of the three squares' sum, each component times 65536.0f
-// over it, truncated; a zero length all 0), its z. The tests dot it with the world up (0, 0, 0x10000),
-// whose x operand is a zeroed local, so the dot is the z. Both solves normalize all three
+// over it, truncated; a zero length all 0), its z. The tests dot it with the world up
+// (0, 0, 0x10000), whose x operand is a zeroed local, so the dot is the z. Both solves normalize all three
 // extracts into their occupant matrix, but rebuild the matrix unscaled from the euler words before
 // any other reader, so only the tests see a normalized word.
 // [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 - the normalize @0x476366..0x4763CC

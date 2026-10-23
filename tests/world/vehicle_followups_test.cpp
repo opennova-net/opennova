@@ -541,8 +541,9 @@ void crash_test_up_is_the_normalized_row() {
 }
 
 // D-NET-NEW-L6-32 (row L): a bike the last tick left in the air landing on its wheels with no
-// wheelie request drops its retained chassis state at the wheel arm's entry; a request keeps it. A
-// crashed, fallen bike (+0x2EF, +0x2FC: the fall-over arm only spins its matrix) isolates the clear.
+// wheelie request drops its retained chassis state at the wheel arm's entry; a request keeps it.
+// A crashed, fallen bike (+0x2EF, +0x2FC: the fall-over arm only spins its matrix) isolates the
+// clear.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47B58D..0x47B5F5]
 void bike_landing_clears_the_chassis_state() {
     for (const bool request : {false, true}) {

@@ -1916,7 +1916,8 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 			const int32_t no_lift[2] = { 0, 0 };
 			const bool armed = world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
 			if (armed ||
-					!light_fall_over_tick(world, veh, traits, euler, basis, rec, px, py, quad_z, no_lift)) {
+					!light_fall_over_tick(
+							world, veh, traits, euler, basis, rec, px, py, quad_z, no_lift)) {
 				int32_t corners[4][3];
 				light_bounding_quad(traits, euler, basis, px, py, quad_z, corners);
 				light_apply_frame(world, veh,
