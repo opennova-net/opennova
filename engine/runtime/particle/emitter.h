@@ -331,9 +331,10 @@ bool emitter_alive(const Emitter &e) noexcept;
 // extent becomes 0.01) against the view's clip state. The NOVISNOUPDATE gate tests an
 // emitter's live bounds with it, and the render submit tests the same bounds before the
 // emitter joins the frame's render list (renderer/particle_frame.h).
-// [orig: BoundingBox_IsVisibleInFrustum @ 0x5e45b0 -> @ 0x5f6ca0 ->
-//  Viewport_TransformAndClipPoint @ 0x4115e0]. The port tests the sphere against the six
-// camera planes instead of retail's fixed-point viewport projection.
+// [orig: BoundingBox_IsVisibleInFrustum @ 0x5e45b0 -> Viewport_IsSphereVisible @ 0x5f6ca0 ->
+//  Viewport_TransformAndClipPoint @ 0x4115e0 against the current g_MainViewport]. The port
+// tests the sphere against the six camera planes instead of retail's fixed-point viewport
+// projection.
 bool bounds_visible_in_frustum(Vec3 minimum, Vec3 maximum,
 		const ParticleViewFrustum &frustum) noexcept;
 

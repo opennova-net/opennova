@@ -243,6 +243,19 @@ struct ParticleViewInput {
 	//  call @0x5e756a; it is CParticleSystem's vtable slot +0x24 (0x7dcae0), the call
 	//  CParticleGroup_RenderChildren @ 0x5e5890 makes per child @0x5e58ec / @0x5e58ff /
 	//  @0x5e5979]. Not valid: no clip state, every emitter with live particles submits.
+	// The test reads the current g_MainViewport, which a scene's passes share: the scene's
+	// two world passes (Terrain_RenderWorldScene @ 0x5c93a0, the calls @0x5c95b5 /
+	// @0x5c9690; there is no first-person particle pass) and the water mirror's, whose
+	// reflected scene builds no viewport of its own after Render_MainScene rebuilds the
+	// main eye's (Viewport_BuildProjectionMatrix, the call @0x5c170b, ahead of
+	// Water_RenderReflectedWorldScene's @0x5c171f), so the embedder hands the mirror's
+	// passes and the first-person view the main view's frustum; the Inset pass re-runs
+	// the scene routine with its own eye. The distortion row's content gate does not read
+	// the submit: EffectWorld_HasDistortionParticles @ 0x5f6640 answers any class-7
+	// child of a visible group (the group test @0x5e9848, the class compare @0x5e986b and
+	// its jz @0x5e9871: no live count, no view), so the embedder counts the
+	// distortion pass's emitters ahead of the submit's tests (the selected, the empty and
+	// the culled together).
 	particle::ParticleViewFrustum frustum{};
 };
 

@@ -1456,11 +1456,17 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	// main eye and drawn by FrameFX's type-0 row through the drawer (retail
 	// FrameFX_DistortionPass @ 0x5838F8). The row's content gate reads the
 	// live class-7 emitters (EffectWorld_HasDistortionParticles
-	// @ 0x5F6640); the pass fog rides along for the tracer distortion ribbons.
+	// @ 0x5F6640): every class-7 child of a visible group, ahead of the
+	// render submit's live-count and view tests, so the pass's emitters the
+	// submit left out count too; the pass fog rides along for the tracer
+	// distortion ribbons.
 	compile_world(kDistortion, opennova::renderer::ParticleWaterSubset::Distortion,
 			world_camera, impl_->distortion_effect, thermal, world_divisor);
-	impl_->distortion_drawer->set_particles_present(
-			impl_->compilers[kDistortion].draw_list().debug.selected_emitters > 0);
+	const opennova::renderer::ParticleFrameDebugCounters &distortion =
+			impl_->compilers[kDistortion].draw_list().debug;
+	const std::size_t distortion_children = distortion.selected_emitters +
+			distortion.empty_emitters + distortion.frustum_culled_emitters;
+	impl_->distortion_drawer->set_particles_present(distortion_children > 0);
 	impl_->distortion_drawer->set_pass_fog(impl_->fog_color, impl_->fog_start,
 			impl_->fog_end, impl_->fog_type);
 
@@ -1476,6 +1482,10 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	first_person_view.projection_valid = world_camera.projection_valid;
 	first_person_view.projection_near_is_one = true;
 	first_person_view.lod_divisor = world_divisor;
+	// Retail draws every particle in the scene's world passes, against the scene's one viewport:
+	// no pass of its own culls a first-person particle by another eye
+	// (renderer::ParticleViewInput::frustum carries the witness).
+	first_person_view.frustum = world_camera.frustum;
 	const opennova::renderer::ParticleDrawList &first_person_draw =
 			impl_->compilers[kFirstPerson].compile(impl_->render_snapshot,
 					first_person_view);
@@ -1505,7 +1515,12 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 		// The reflected pass selects its water subsets by the main camera's
 		// side (Water_RenderReflectedWorldScene passes the prerender's
 		// below-water flag), whether its eye is mirrored or not.
-		compile_secondary_pair(particle_camera_frame(reflection_camera),
+		// The reflected scene keeps the main view's viewport for its submit tests: its eye is the
+		// mirror's, its cull the main eye's (renderer::ParticleViewInput::frustum carries the
+		// witness).
+		ParticleCameraFrame mirror_camera = particle_camera_frame(reflection_camera);
+		mirror_camera.frustum = world_camera.frustum;
+		compile_secondary_pair(mirror_camera,
 				camera_above_water, kReflectionFarSide, kReflectionCameraSide,
 				impl_->reflection_effects, strides.mirror);
 	} else {

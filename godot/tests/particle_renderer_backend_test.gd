@@ -1148,6 +1148,62 @@ func test_distortion_particles_draw_in_the_framefx_row() -> void:
 	assert_gt(_column_contrast(after, 4, 16), 0.8, "outside the haze the frame is untouched")
 
 
+# The distortion row's content gate counts every class-7 child of a visible
+# group, ahead of the render submit's live-count and view tests (retail
+# EffectWorld_HasDistortionParticles @ 0x5F6640 tests neither): a haze behind
+# the eye compiles no quad, yet the row still runs.
+func test_an_out_of_view_haze_still_runs_the_distortion_row() -> void:
+	var viewport := _main_view()
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var scene := EffectScene.new()
+	scene.open([ParticleFixture.parse(self, _overlap_document("haze", 7))])
+	var renderer := ParticleRenderer.new()
+	renderer.scene = scene
+	renderer.procedural_fallback_enabled = true
+	renderer.set_water_plane(-100.0, null)
+	viewport.add_child(renderer)
+	_overlap_spawn(scene, "haze", 20.0)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+
+	var report := renderer.get_debug_draw_list_report()
+	var distortion := _slot(report, "distortion")
+	assert_eq(int(distortion.get("selected_emitters", -1)), 0, "the haze behind the eye never submits")
+	assert_eq(int(distortion.get("frustum_culled_emitters", -1)), 1)
+	assert_true(bool(report.get("distortion_present", false)),
+			"the row runs for any class-7 emitter, in view or not")
+
+
+# The water mirror's reflected scene keeps the main view's viewport for the
+# render submit's view test (retail Render_MainScene rebuilds g_MainViewport
+# from the main eye ahead of Water_RenderReflectedWorldScene, which builds
+# none): an emitter the main eye sees submits to the mirror's passes even
+# while the mirror's own eye faces away from it.
+func test_the_mirror_culls_by_the_main_eye() -> void:
+	var viewport := _main_view()
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var mirror_camera := _shared_world_camera(viewport)
+	mirror_camera.position = Vector3(0.0, 0.0, 5.0)
+	mirror_camera.rotation_degrees = Vector3(0.0, 180.0, 0.0)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _live_world_scene()
+	renderer.procedural_fallback_enabled = true
+	renderer.set_water_plane(-100.0, mirror_camera)
+	viewport.add_child(renderer)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+
+	var report := renderer.get_debug_draw_list_report()
+	assert_eq(int(_slot(report, "world_camera_side").get("selected_emitters", -1)), 1)
+	assert_eq(int(_slot(report, "reflection_camera_side").get("selected_emitters", -1)), 1,
+			"the mirror's pass submits what the main eye sees")
+	assert_eq(int(_slot(report, "reflection_camera_side").get("frustum_culled_emitters", -1)), 0)
+
+
 func _asymmetric_dirt_image(_name: String) -> Image:
 	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
 	for y in image.get_height():
