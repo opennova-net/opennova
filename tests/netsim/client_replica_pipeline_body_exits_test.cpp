@@ -1251,7 +1251,8 @@ std::unique_ptr<ns::ClientReplicaPipeline> spawned_player_view(
 //   +x, then the legs chase the Yaw 0x40000000 a clamped 0x3000000 and are held 0x30000000
 //   off it (0x10000000), the body heading their midpoint.
 // - A deck turning 0x1000000 rides after the leg chase: the legs chase the old Yaw (no
-//   re-plant), the ride turns the Yaw and the body heading after the midpoint.
+//   re-plant), the ride turns the Yaw, the body heading, the legs and their targets after the
+//   midpoint (D-NET-NEW-L5-51).
 // - On a ladder the Yaw half a turn off the body is held 0x55555500 off it and the legs take
 //   the body heading, unless the ground is a vehicle in its crash state.
 // - Under a canopy the body heading chases a sixteenth of the way to the Yaw (0x4000000) and
@@ -1261,7 +1262,8 @@ std::unique_ptr<ns::ClientReplicaPipeline> spawned_player_view(
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the rotation @0x4B41E4..0x4B4255, the
 //  canopy chase @0x4B4945..0x4B496C, the clamp @0x4B4AFB..0x4B4B42 (the crash skip
 //  @0x4B4AE0..0x4B4AF9), the legs @0x4B4B5F..0x4B4B6B, the chases @0x4B49E9..0x4B4ABB, the
-//  pitch clamp @0x4B4B71..0x4B4BC6, the dead tail @0x4B4D30..0x4B4D5F, the ride @0x4B52A0]
+//  pitch clamp @0x4B4B71..0x4B4BC6, the dead tail @0x4B4D30..0x4B4D5F, the ride @0x4B52A0, its
+//  leg adds @0x4B56C1..0x4B56D3]
 void test_player_view_phase() {
 	{
 		WalkSource src;
@@ -1292,9 +1294,10 @@ void test_player_view_phase() {
 		view->tick_remote_motion(0xFFFF); // the snap
 		es.resolved_ground = kDeck;
 		view->tick_remote_motion(0xFFFF);
-		expect(es.rm_leg_yaw[0] == 0 && es.rm_leg_yaw[1] == 0 &&
+		expect(es.rm_leg_yaw[0] == 0x01000000 && es.rm_leg_yaw[1] == 0x01000000 &&
+						es.rm_leg_target[0] == 0x01000000 && es.rm_leg_target[1] == 0x01000000 &&
 						es.rm_body_heading == 0x01000000 && es.heading_bam == 0x01000000,
-				"the ride turns the Yaw and the body heading after the leg chase");
+				"the ride turns the Yaw, the body heading and the legs after the leg chase");
 	}
 	for (const bool crashed : {false, true}) {
 		BodySource src;
@@ -1378,6 +1381,81 @@ void test_player_view_phase() {
 		expect(es.rm_aim_word == es.rm_body_pitch && es.heading_bam == es.rm_body_heading &&
 						(es.rm_entity_flags & 0x60u) == 0,
 				"a dead body's tail aims +0x2D0 at savedLivePitch and its Yaw at the body heading");
+	}
+}
+
+enum class SeatedRide { kPassenger, kTurret, kDriver, kDriverFreeLook, kCrashed };
+
+// D-NET-NEW-L5-51 / D-NET-NEW-L5-52: a seated player row rides its mount, its ground since its
+// update's head. The hull turns 0x1000000 and pitches 0x1000000 this tick (its stamp at 0); the
+// row's Yaw faces the turned hull, so the whole pitch delta lands. The ride turns the Yaw unless
+// the hull's def is IsTurret; the row as the hull's first occupant on a PlayerControl def holds its
+// Yaw unless its MoveOrder carries the free-look bit; the pitch delta goes into the pitch lag and
+// the aim pitch, and the lag's first thirty-second into the Pitch unless the hull is crashed. The
+// body heading turns either way (no seat frame here to overwrite it).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ground = mount store @0x4B41B4, the ride
+//  @0x4B5288..0x4B5726 (the mounted test @0x4B529F, the IsTurret test @0x4B5694), the hold
+//  @0x4B572E..0x4B57AA, the pitch lag @0x4B57B0..0x4B57E5]
+void test_seated_player_row_rides_its_mount() {
+	for (const SeatedRide kind : {SeatedRide::kPassenger, SeatedRide::kTurret, SeatedRide::kDriver,
+				SeatedRide::kDriverFreeLook, SeatedRide::kCrashed}) {
+		BodySource src;
+		auto view = spawned_player_view(src, 0x00);
+		view->apply(0x0A, frame({{0x0003, nw::EntityClass::Player,
+				static_cast<uint8_t>(nw::world::kEntityFlagMounted), kHull, 0, 0x00}}));
+		ns::ClientEntityState &es = *view->state().find(0x0003);
+		tick(*view);
+		static constexpr int32_t kTurn = 0x01000000; // static: MSVC needs no capture for it
+		view->set_carrier_pose_provider(
+				[](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
+					if (handle != kHull) return false;
+					out = ns::ClientReplicaPipeline::CarrierPose{};
+					out.yaw = kTurn;
+					out.pitch = kTurn;
+					out.bound_radius = 1; // a seated row drops no ground at any distance
+					return true;
+				});
+		const bool turret = kind == SeatedRide::kTurret;
+		view->set_replica_def_attrib2_resolver([turret](uint16_t type) {
+			return type == kHullType && turret ? 0x1000u : 0u;
+		});
+		const bool driver = kind == SeatedRide::kDriver || kind == SeatedRide::kDriverFreeLook;
+		view->set_replica_def_attrib_resolver([driver](uint16_t type) {
+			return type == kHullType && driver ? 0x40u : 0u;
+		});
+		view->set_ground_occupant_provider(
+				[driver](uint16_t ground, uint16_t &occupant, uint16_t &ground_of_ground) {
+					if (ground != kHull) return false;
+					occupant = driver ? 0x0003 : 0xFFFF;
+					ground_of_ground = 0xFFFF;
+					return true;
+				});
+		const bool crashed = kind == SeatedRide::kCrashed;
+		view->set_replica_ground_crashed_resolver(
+				[crashed](uint16_t ground) { return crashed && ground == kHull; });
+		es.heading_bam = kTurn;
+		es.pitch_bam = 0;
+		es.rm_body_heading = 0;
+		es.rm_pitch_lag = 0;
+		es.rm_aim_word = 0;
+		es.move_input = kind == SeatedRide::kDriverFreeLook
+				? static_cast<uint8_t>(nw::world::Entity::kMoveOrderFreeLook)
+				: uint8_t{0};
+		view->tick_remote_motion(0xFFFF);
+		const bool turned = kind == SeatedRide::kPassenger ||
+				kind == SeatedRide::kDriverFreeLook || kind == SeatedRide::kCrashed;
+		expect(es.resolved_ground == kHull, "the seated row's ground is its mount");
+		expect(es.heading_bam == (turned ? 2 * kTurn : kTurn),
+				turned ? "the mount's turn turns the seated Yaw"
+				       : "an IsTurret mount, or the driver's hold, keeps the seated Yaw");
+		expect(es.rm_body_heading == kTurn && es.rm_leg_yaw[0] == kTurn &&
+						es.rm_leg_target[1] == kTurn,
+				"the turn turns the body heading and the legs either way");
+		expect(es.rm_aim_word == kTurn, "the pitch delta goes into the aim pitch");
+		expect(es.rm_pitch_lag == (crashed ? kTurn : 0x00F80000) &&
+						es.pitch_bam == (crashed ? 0 : 0x00080000),
+				crashed ? "a crashed mount holds the pitch lag"
+				        : "a thirty-second of the pitch lag steps into the Pitch");
 	}
 }
 
@@ -1530,6 +1608,7 @@ int main() {
 	test_jump_loop_word_is_org1s();
 	test_full_spawn_registers_the_channel();
 	test_player_view_phase();
+	test_seated_player_row_rides_its_mount();
 	test_player_gradient_slide_replaces_the_world_pair();
 	test_infantry_gradient_slide_replaces_the_clip_pair();
 	test_authority_rows_never_starve();

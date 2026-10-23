@@ -16,12 +16,14 @@
 //  halving @0x4B4921..0x4B4942]
 // Core-only: every value is the test's own; the World is heap-held.
 #include <base/io/bam.h>
+#include <formats/def/def.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/infantry_view.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/vehicle_motor.h> // stamp_saved_live_pose
 #include <runtime/world/world.h>
 
 #include <cstdint>
@@ -229,6 +231,180 @@ void test_seated_player_runs_the_phase(Mount kind) {
 	CHECK(occ != nullptr && occ->heading == yaw_want);
 }
 
+// D-NET-NEW-L5-51: the ride's turn. The yaw delta turns the Yaw and the local look unless the
+// mount is IsTurret, then the body heading and the four leg words either way; the turned pitch
+// delta goes into savedLivePitch, the pitch lag and the aim pitch, the roll delta into Roll
+// [orig: @0x4B5683..0x4B5723].
+void test_ride_turn() {
+	for (const bool turret : {false, true}) {
+		for (const bool local : {false, true}) {
+			int32_t yaw = 0x10000000, look = 0x20000000, body_heading = 0x30000000;
+			int32_t legs[2] = {1, 2}, targets[2] = {3, 4};
+			int32_t body_pitch = 5, lag = 6, aim = 7, roll = 8;
+			const w::Org2RideWords words{yaw, local ? &look : nullptr, body_heading, legs, targets,
+					body_pitch, lag, aim, roll};
+			static constexpr int32_t kDyaw = 0x01000000;
+			w::infantry_org2_ride_turn(words, kDyaw, 0x100, 0x200, turret);
+			CHECK(yaw == (turret ? 0x10000000 : 0x11000000));
+			CHECK(look == (turret || !local ? 0x20000000 : 0x21000000));
+			CHECK(body_heading == 0x31000000);
+			CHECK(legs[0] == kDyaw + 1 && legs[1] == kDyaw + 2);
+			CHECK(targets[0] == kDyaw + 3 && targets[1] == kDyaw + 4);
+			CHECK(body_pitch == 0x105 && lag == 0x106 && aim == 0x107 && roll == 0x208);
+		}
+	}
+}
+
+// D-NET-NEW-L5-51: the driver's hold gate and the hold [orig: @0x4B572E..0x4B57AA].
+void test_ride_hold() {
+	static constexpr uint32_t kPlayerControl = 0x40u;
+	CHECK(w::infantry_org2_ride_holds(true, kPlayerControl, 0u, false));
+	CHECK(!w::infantry_org2_ride_holds(false, kPlayerControl, 0u, false));
+	CHECK(!w::infantry_org2_ride_holds(true, 0u, 0u, false));
+	CHECK(!w::infantry_org2_ride_holds(true, kPlayerControl, 0x10u, false));
+	CHECK(w::infantry_org2_ride_holds(true, kPlayerControl, 0x08u, false));
+	CHECK(!w::infantry_org2_ride_holds(true, kPlayerControl, 0u, true));
+	int32_t yaw = 0x11000000, look = 0x21000000, body_heading = 0, body_pitch = 0, lag = 0;
+	int32_t aim = 0, roll = 0, legs[2] = {}, targets[2] = {};
+	const w::Org2RideWords words{yaw, &look, body_heading, legs, targets, body_pitch, lag, aim, roll};
+	w::infantry_org2_ride_hold(words, 0x10000000, 0x20000000, 0x00400000);
+	CHECK(yaw == 0x10400000 && look == 0x20400000);
+}
+
+// D-NET-NEW-L5-52: the pitch lag's step, a rounded thirty-second, its remainder pulled one toward
+// zero when negative [orig: @0x4B57CD..0x4B57E5].
+void test_pitch_lag_step() {
+	int32_t lag = 0x40000000;
+	CHECK(w::infantry_org2_pitch_lag_step(lag) == 0x02000000 && lag == 0x3E000000);
+	lag = -3200;
+	CHECK(w::infantry_org2_pitch_lag_step(lag) == -100 && lag == -3099);
+	lag = 15;
+	CHECK(w::infantry_org2_pitch_lag_step(lag) == 0 && lag == 15);
+}
+
+enum class Ride { kPassenger, kTurret, kDriver, kDriverFreeLook, kCrashed };
+
+// D-NET-NEW-L5-51 / D-NET-NEW-L5-52 through the authority's body tick: a local player seated on
+// a vehicle that turns 0x1000000 and pitches 0x1000000 between its first and second ticks (its
+// mover-entry stamp at yaw and pitch 0). The second tick's ride, its ground the mount, turns the
+// look with the vehicle; under an IsTurret mount it does not; in the drvrx seat of a PlayerControl
+// def it holds the look unless the MoveOrder carries the free-look bit. The look faces the
+// vehicle's turned Yaw, so the whole pitch delta lands in the pitch lag and the aim pitch; the
+// lag's first thirty-second steps into the Pitch, unless the vehicle is crashed.
+void test_seated_player_rides_its_mount(Ride kind) {
+	auto wp = std::make_unique<w::World>();
+	w::World &world = *wp;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(1, 16);
+	w::Entity vehicle;
+	vehicle.net_id = 200;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
+	vehicle.item_type = 1;
+	vehicle.position = {10.f, 20.f, 5.f};
+	const bool driver = kind == Ride::kDriver || kind == Ride::kDriverFreeLook;
+	if (driver) vehicle.item_attrib = w::kItemAttribPlayerControl;
+	if (kind == Ride::kTurret) vehicle.item_attrib2 = def::DEF_ITEM_ATTRIB2_ISTURRET;
+	if (kind == Ride::kCrashed) vehicle.veh.crashed = 1;
+	w::Seat seat;
+	seat.type = driver ? w::SeatType::Driver : w::SeatType::Passenger;
+	vehicle.seats.push_back(seat);
+	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
+	w::Entity body;
+	body.net_id = 100;
+	body.kind = w::EntityKind::Organic;
+	body.health = 100;
+	body.alive = true;
+	const w::EntityHandle bh = world.registry.spawn(0, body);
+	w::AiSystem &ai = world.ai;
+	w::AiEntity *ae = ai.at(ai.attach(bh));
+	CHECK(ae != nullptr);
+	if (ae == nullptr) return;
+	ae->inf.active = true;
+	ae->inf.is_local_player = true;
+	CHECK(world.commands.mount(bh, vh));
+	ai.tick_infantry(*ae, world, 1);
+	w::Entity *veh = world.registry.get(vh);
+	w::Entity *occ = world.registry.get(bh);
+	CHECK(veh != nullptr && occ != nullptr && occ->ground_target == vh);
+	if (veh == nullptr || occ == nullptr) return;
+	CHECK((veh->primary_occupant == bh) == driver);
+	w::stamp_saved_live_pose(*veh);
+	veh->heading = io::bam_add(veh->heading, 0x01000000);
+	veh->pitch_bam = io::bam_add(veh->pitch_bam, 0x01000000);
+	// The look faces the turned vehicle: the ride turns the pitch delta by the vehicle's Yaw less
+	// the body's, 0, so the whole delta lands.
+	const int32_t look0 = veh->heading;
+	ae->inf.target_heading = look0;
+	ae->inf.look_pitch = 0;
+	ae->inf.carrier_pitch_lag = 0;
+	ae->inf.aim_pitch = 0;
+	if (kind == Ride::kDriverFreeLook) occ->net_move_input |= w::Entity::kMoveOrderFreeLook;
+	ai.tick_infantry(*ae, world, 2);
+	const bool turned = kind == Ride::kPassenger || kind == Ride::kDriverFreeLook ||
+			kind == Ride::kCrashed;
+	const int32_t yaw_want = turned ? io::bam_add(look0, 0x01000000) : look0;
+	CHECK(ae->inf.target_heading == yaw_want);
+	CHECK(ae->heading == yaw_want);
+	CHECK(occ->heading == yaw_want);
+	const bool crashed = kind == Ride::kCrashed;
+	CHECK(ae->inf.carrier_pitch_lag == (crashed ? 0x01000000 : 0x00F80000));
+	CHECK(ae->inf.look_pitch == (crashed ? 0 : 0x00080000));
+	CHECK(ae->pitch == ae->inf.look_pitch);
+	CHECK(ae->inf.aim_pitch == 0x01000000);
+}
+
+// D-NET-NEW-L5-53: the recoil follows the view phase. A seated local player looking past both of
+// the skip branch's clamps with a recoil accumulator of 1 << 18 is clamped first, then kicked: the
+// Pitch ends 0x1000 past its 80 degree clamp and the Yaw 0x4000 off its 120 degree one (the sign
+// the PRNG draw picks). The old order (kick, then clamp) left both on the clamp.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the phase @0x4B4945..0x4B4BC6, the recoil
+//  @0x4B57EB..0x4B5848]
+void test_kick_follows_the_view_clamp() {
+	auto wp = std::make_unique<w::World>();
+	w::World &world = *wp;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(1, 16);
+	w::Entity vehicle;
+	vehicle.net_id = 200;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
+	vehicle.item_type = 1;
+	w::Seat seat;
+	seat.type = w::SeatType::Passenger;
+	vehicle.seats.push_back(seat);
+	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
+	w::Entity body;
+	body.net_id = 100;
+	body.kind = w::EntityKind::Organic;
+	body.health = 100;
+	body.alive = true;
+	const w::EntityHandle bh = world.registry.spawn(0, body);
+	w::AiSystem &ai = world.ai;
+	w::AiEntity *ae = ai.at(ai.attach(bh));
+	CHECK(ae != nullptr);
+	if (ae == nullptr) return;
+	ae->inf.active = true;
+	ae->inf.is_local_player = true;
+	CHECK(world.commands.mount(bh, vh));
+	ai.tick_infantry(*ae, world, 1);
+	const int32_t seat_heading = ae->inf.body_heading;
+	const int32_t seat_pitch = ae->body_pitch;
+	ae->inf.target_heading = io::bam_add(seat_heading, 0x70000000);
+	ae->inf.look_pitch = io::bam_add(seat_pitch, 0x40000000);
+	ae->inf.recoil_pitch = 1 << 18;
+	ai.tick_infantry(*ae, world, 2);
+	// The step (0x40000 + 4) >> 3 = 0x8000: the Pitch takes 0x1000, the Yaw the half 0x4000.
+	CHECK(ae->inf.look_pitch == io::bam_add(io::bam_add(seat_pitch, kPitchLimit), 0x1000));
+	CHECK(ae->pitch == ae->inf.look_pitch);
+	const int32_t off = io::bam_sub(ae->inf.target_heading, io::bam_add(seat_heading, kYawLimit));
+	CHECK(off == 0x4000 || off == -0x4000);
+	CHECK(ae->heading == ae->inf.target_heading);
+	CHECK(ae->inf.recoil_pitch == (1 << 18) - 0x4000);
+}
+
 // D-NET-NEW-L5-50: the local body in a control seat (ctrlx / drvrx) under the chase camera
 // (g_CameraMode 1) halves its Pitch ahead of the phase, every tick; a passenger seat, the first
 // person camera or a body not the local one keeps it [orig: @0x4B4921..0x4B4942].
@@ -284,6 +460,13 @@ int main() {
 	test_seated_player_runs_the_phase(Mount::kConfig3);
 	test_seated_player_runs_the_phase(Mount::kCrashed);
 	test_chase_camera_halves_a_drivers_pitch();
+	test_ride_turn();
+	test_ride_hold();
+	test_pitch_lag_step();
+	for (const Ride kind : {Ride::kPassenger, Ride::kTurret, Ride::kDriver, Ride::kDriverFreeLook,
+				Ride::kCrashed})
+		test_seated_player_rides_its_mount(kind);
+	test_kick_follows_the_view_clamp();
 	if (failures == 0) std::printf("infantry_org2_view: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

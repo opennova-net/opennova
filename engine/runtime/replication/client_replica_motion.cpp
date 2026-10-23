@@ -15,6 +15,7 @@
 #include <runtime/world/dir_table.h>           // quantized_dir (the slope conform's probe facing)
 #include <runtime/world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/infantry.h>            // IRootMotionSource + the anim flag/state tables
+#include <runtime/world/infantry_view.h>       // the org2 deck ride's turn, hold and pitch lag
 #include <runtime/world/vehicle_motor.h>       // vehicle_chase_bucket (the vehicle-family interp bucket)
 #include <net/npwire/wire_handle.h>
 #include <base/io/bam.h>                      // wrapped retail pitch chase
@@ -131,24 +132,35 @@ void row_ride_link(ClientEntityState &es, const ClientState &state,
 //  the target's ground @0x4BA82C..0x4BA840), the adds @0x4BA842..0x4BA852, the skip to
 //  @0x4BA85A; Entity_AllocateAISlot @0x40D2C0 - the memset @0x40D2E9; the think's store
 //  @0x4BBF85 behind `cmp is_authority, 0` @0x4BA97E..0x4BA985]
-// `seated`: a live seated org1 body's ride (its parent is its ground) adds only the angle deltas;
-// its position words are the seat pose's, which overwrites the ride's translation in the same
-// update [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat pose @0x4BED96..0x4BEDD4 /
-// Entity_AttachToBoneAndUpdateTransform @0x4BEC23].
-void row_deck_ride(ClientEntityState &es,
+// A player row's deck-ride words (a decoded row is never the local body: no look word).
+world::Org2RideWords org2_ride_words(ClientEntityState &es) {
+	return world::Org2RideWords{es.heading_bam, nullptr, es.rm_body_heading, es.rm_leg_yaw,
+			es.rm_leg_target, es.rm_body_pitch, es.rm_pitch_lag, es.rm_aim_word, es.roll_bam};
+}
+
+// A player row's adds are org2's (world::infantry_org2_ride_turn), its Yaw's unless its mount is
+// IsTurret (`aim_adds` false), its pitch delta into its pitch lag rather than its Pitch.
+// `seated`: a live seated body's ride (its parent is its ground) adds only the angle deltas; its
+// position words are the seat pose's, which overwrites the ride's translation in the same update
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat pose @0x4BED96..0x4BEDD4 /
+// Entity_AttachToBoneAndUpdateTransform @0x4BEC23; Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+// the seat carry @0x4B6510..0x4B6575]. Whether the row still has its ground after the ride (no
+// radius drop) and the carrier served its pose: the ride's driver hold follows only then.
+bool row_deck_ride(ClientEntityState &es,
                    const ClientReplicaPipeline::CarrierPoseProvider &carrier, bool aim_adds,
                    bool seated = false) {
-	if (es.resolved_ground == 0xFFFF) return;
+	if (es.resolved_ground == 0xFFFF) return false;
 	ClientReplicaPipeline::CarrierPose cp;
-	if (!carrier(es.resolved_ground, cp)) return;
-	// The unmounted out-of-radius drop, org2's alone: 3D distance vs the
+	if (!carrier(es.resolved_ground, cp)) return false;
+	// The out-of-radius drop, org2's alone and only with no mount (+0x16C): 3D distance vs the
 	// carrier's bound radius, saturated at 0x7FFF0000 before the int compare;
-	// beyond it the ride AND the ground link drop [orig: @0x4b52a7..0x4b52ff —
-	// the flt_7C19E0 = 2147418112.0 clamp, groundEntity = 0]. org1's twin rides
+	// beyond it the ride AND the ground link drop [orig: Entity_UpdateInfantryPlayerBody
+	// @0x4B40E0 - the mounted test @0x4B529F, @0x4b52a7..0x4b52ff: the flt_7C19E0 =
+	// 2147418112.0 clamp, groundEntity = 0]. org1's twin rides
 	// its ground entity at any distance (D-NET-NEW-L5-32) [orig:
 	// Entity_UpdateInfantryAI @0x4B9910 - the ride's head @0x4BA45D..0x4BA479,
 	// the translation @0x4BA47F..0x4BA4C9].
-	if (es.cls == EntityClass::Player) {
+	if (es.cls == EntityClass::Player && !seated) {
 		const double ddx = static_cast<double>(es.x - cp.pos[0]);
 		const double ddy = static_cast<double>(es.y - cp.pos[1]);
 		const double ddz = static_cast<double>(es.z - cp.pos[2]);
@@ -156,7 +168,7 @@ void row_deck_ride(ClientEntityState &es,
 		if (len > 2147418112.0) len = 2147418112.0;
 		if (static_cast<int32_t>(len) > cp.bound_radius) {
 			es.resolved_ground = 0xFFFF;
-			return;
+			return false;
 		}
 	}
 	const int32_t dpx = cp.pos[0] - cp.saved_pos[0];
@@ -227,15 +239,15 @@ void row_deck_ride(ClientEntityState &es,
 		es.z = cp.pos[2] + cb_half + (zp >> 8);
 	}
 	// Heading/attitude adoption. Both motors add the carrier yaw delta to the
-	// render heading and the body heading (org2 @0x4b5656..0x4b56c1, org1
-	// @0x4ba842..0x4ba861; the mounted 0x1000-seat skip is seat-machinery a
-	// transport row never reaches). org1 additionally drags its chase TARGET
+	// render heading (unless the mount is IsTurret) and the body heading (org2
+	// @0x4b5656..0x4b56c1, org1 @0x4ba842..0x4ba861), the four leg words and
+	// savedLivePitch the deltas. org1 additionally drags its chase TARGET
 	// (+0x1A8 @0x4ba867), its look Pitch (+0x14 @0x4ba88e) and its aim words, the
 	// yaw delta into +0x2EC (@0x4BA84C) and the pitch delta into +0x2D0
-	// (@0x4BA852), which its look chases; org2's savedLivePitch
-	// and torso/aim target adds have no row channels — named deferrals. Roll
-	// adopts on both (+0x18 @0x4b5723/@0x4ba88b). The pitch/roll deltas are
-	// rotated by the carrier-vs-rider relative yaw taken BEFORE the yaw add.
+	// (@0x4BA852), which its look chases; org2's pitch delta goes into its aim pitch
+	// and its pitch lag instead (world::infantry_org2_ride_turn). Roll adopts on
+	// both (+0x18 @0x4b5723/@0x4ba88b). The pitch/roll deltas are rotated by the
+	// carrier-vs-rider relative yaw taken BEFORE the yaw add.
 	if (dyaw != 0 || dpitch != 0 || droll != 0) {
 		const int32_t rel_yaw = io::bam_sub(cp.yaw, rider_yaw_before);
 		const double rr = static_cast<double>(rel_yaw) * kRadPerBam;
@@ -246,28 +258,29 @@ void row_deck_ride(ClientEntityState &es,
 		};
 		const int32_t pitch_d = m22(dpitch, rc) - m22(droll, rs);
 		const int32_t roll_d = m22(dpitch, rs) + m22(droll, rc);
-		if (es.cls != EntityClass::Infantry || aim_adds)
-			es.heading_bam = io::bam_add(es.heading_bam, dyaw);
+		if (es.cls == EntityClass::Player) {
+			world::infantry_org2_ride_turn(org2_ride_words(es), dyaw, pitch_d, roll_d, !aim_adds);
+			return true;
+		}
+		if (aim_adds) es.heading_bam = io::bam_add(es.heading_bam, dyaw);
 		es.rm_body_heading = io::bam_add(es.rm_body_heading, dyaw);
 		es.roll_bam = io::bam_add(es.roll_bam, roll_d);
-		if (es.cls == EntityClass::Infantry) {
-			es.net_target_heading_bam =
-					io::bam_add(es.net_target_heading_bam, dyaw);
-			es.pitch_bam = io::bam_add(es.pitch_bam, pitch_d);
-			if (aim_adds) {
-				es.rm_aim_heading_word = io::bam_add(es.rm_aim_heading_word, dyaw);
-				es.rm_aim_word = io::bam_add(es.rm_aim_word, pitch_d);
-			}
-			// org1's four leg words take the yaw delta too, and its savedLivePitch the pitch
-			// delta [orig: Entity_UpdateInfantryAI @0x4B9910 - +0x2D4 @0x4BA86D, +0x2D8
-			// @0x4BA873, +0x2E4 @0x4BA879, +0x2E8 @0x4BA87F, +0x90 @0x4BA885].
-			es.rm_body_pitch = io::bam_add(es.rm_body_pitch, pitch_d);
-			es.rm_leg_yaw[0] = io::bam_add(es.rm_leg_yaw[0], dyaw);
-			es.rm_leg_yaw[1] = io::bam_add(es.rm_leg_yaw[1], dyaw);
-			es.rm_leg_target[0] = io::bam_add(es.rm_leg_target[0], dyaw);
-			es.rm_leg_target[1] = io::bam_add(es.rm_leg_target[1], dyaw);
+		es.net_target_heading_bam = io::bam_add(es.net_target_heading_bam, dyaw);
+		es.pitch_bam = io::bam_add(es.pitch_bam, pitch_d);
+		if (aim_adds) {
+			es.rm_aim_heading_word = io::bam_add(es.rm_aim_heading_word, dyaw);
+			es.rm_aim_word = io::bam_add(es.rm_aim_word, pitch_d);
 		}
+		// org1's four leg words take the yaw delta too, and its savedLivePitch the pitch
+		// delta [orig: Entity_UpdateInfantryAI @0x4B9910 - +0x2D4 @0x4BA86D, +0x2D8
+		// @0x4BA873, +0x2E4 @0x4BA879, +0x2E8 @0x4BA87F, +0x90 @0x4BA885].
+		es.rm_body_pitch = io::bam_add(es.rm_body_pitch, pitch_d);
+		es.rm_leg_yaw[0] = io::bam_add(es.rm_leg_yaw[0], dyaw);
+		es.rm_leg_yaw[1] = io::bam_add(es.rm_leg_yaw[1], dyaw);
+		es.rm_leg_target[0] = io::bam_add(es.rm_leg_target[0], dyaw);
+		es.rm_leg_target[1] = io::bam_add(es.rm_leg_target[1], dyaw);
 	}
+	return true;
 }
 
 // The AIR-family bucket [orig: Entity_UpdateAircraftPhysics @0x490310
@@ -791,20 +804,61 @@ bool row_channel_advance(ClientEntityState &es, world::IRootMotionSource &src,
 	return have;
 }
 
-// What a free-standing player row's body pass reads beyond its own words: the carrier pose and
-// the ground's occupant words for its ride and ride link, and whether its ground entity is a
-// vehicle in its crash state, which lifts its view phase's Yaw clamp.
+// What a player row's body pass reads beyond its own words: the carrier pose and the ground's
+// occupant words for its ride, its driver's hold and its ride link, whether its ground entity is a
+// vehicle in its crash state, which lifts its view phase's Yaw clamp and skips its pitch lag, and
+// the ground's def attrib word (the hold's PlayerControl bit).
 struct RowPlayerPassIo {
 	const ClientReplicaPipeline::CarrierPoseProvider *carrier = nullptr;
 	const ClientReplicaPipeline::GroundOccupantProvider *ground_words = nullptr;
 	const ClientState *state = nullptr;
 	const ClientReplicaPipeline::ReplicaGroundCrashedResolver *ground_crashed = nullptr;
+	const ClientReplicaPipeline::ReplicaDefAttribResolver *def_attrib = nullptr;
 };
 
-// A player row's deck ride, then its ride link [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
-// the ride @0x4B52A0, the link @0x4B5EA9..0x4B5F2C].
+// A player row's org2 deck ride (seated or not: a seated row's ground is its mount), its driver's
+// hold and its pitch lag, the authority's world::infantry_follow_carrier over the row's words: the
+// ride's turn (row_deck_ride); then, while the row keeps its ground, the hold when the row is its
+// ground's first occupant (+0x170) on a PlayerControl def with no free-look bit (its MoveOrder byte)
+// and its ground no crashed vehicle: the Yaw takes back what it held ahead of the ride, turned by
+// the ground's own ground's yaw delta; then the pitch lag's step into the Pitch unless the ground
+// (after the ride's radius drop) is a crashed vehicle. `yaw_adds` is false under an IsTurret mount.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ride @0x4B5288..0x4B5726, the hold
+//  @0x4B572E..0x4B57AA, the pitch lag @0x4B57B0..0x4B57E5]
+void row_org2_ride(ClientEntityState &es, const RowPlayerPassIo &io, bool yaw_adds, bool seated) {
+	const int32_t yaw_before = es.heading_bam;
+	const bool rode = io.carrier != nullptr && *io.carrier &&
+			row_deck_ride(es, *io.carrier, yaw_adds, seated);
+	const auto crashed = [&](uint16_t ground) {
+		return ground != wire_handle::kInvalid && io.ground_crashed != nullptr &&
+				*io.ground_crashed && (*io.ground_crashed)(ground);
+	};
+	uint16_t occupant = wire_handle::kInvalid;
+	uint16_t ground_of_ground = wire_handle::kInvalid;
+	if (rode && io.ground_words != nullptr && *io.ground_words && io.state != nullptr &&
+			(*io.ground_words)(es.resolved_ground, occupant, ground_of_ground)) {
+		const ClientEntityState *ground = io.state->find(es.resolved_ground);
+		const uint32_t attrib = ground != nullptr && io.def_attrib != nullptr && *io.def_attrib
+				? (*io.def_attrib)(ground->type_id)
+				: 0u;
+		if (world::infantry_org2_ride_holds(occupant == es.handle, attrib, es.move_input,
+					crashed(es.resolved_ground))) {
+			int32_t ground_ground_dyaw = 0;
+			ClientReplicaPipeline::CarrierPose gp;
+			if (ground_of_ground != wire_handle::kInvalid && (*io.carrier)(ground_of_ground, gp))
+				ground_ground_dyaw = io::bam_sub(gp.yaw, gp.saved_yaw);
+			world::infantry_org2_ride_hold(org2_ride_words(es), yaw_before, 0, ground_ground_dyaw);
+		}
+	}
+	if (!crashed(es.resolved_ground))
+		es.pitch_bam = io::bam_add(es.pitch_bam, world::infantry_org2_pitch_lag_step(es.rm_pitch_lag));
+}
+
+// A free-standing player row's deck ride, its hold and its pitch lag (row_org2_ride: no mount, so
+// no IsTurret skip), then its ride link [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ride
+// @0x4B5288, the link @0x4B5EA9..0x4B5F2C].
 void row_player_ride(ClientEntityState &es, const RowPlayerPassIo &io) {
-	if (io.carrier != nullptr && *io.carrier) row_deck_ride(es, *io.carrier, /*aim_adds=*/true);
+	row_org2_ride(es, io, /*yaw_adds=*/true, /*seated=*/false);
 	if (io.ground_words != nullptr && *io.ground_words && io.state != nullptr)
 		row_ride_link(es, *io.state, *io.ground_words);
 }
@@ -1644,12 +1698,13 @@ std::optional<world::PhysicsClass> ClientReplicaPipeline::person_move_row(uint16
 	return world::physics_class_from_move_function(profile->callbacks.move_function);
 }
 
-// Whether an org1 body's deck ride adds the deltas to its Yaw and aim words: not when its parent's
-// def is IsTurret (attrib2 0x1000; row_deck_ride). A body with no parent, or a player body, adds.
+// Whether a body's deck ride adds the yaw delta to its Yaw (and an org1 body's to its aim words):
+// not when its parent's def is IsTurret (attrib2 0x1000; row_deck_ride). A body with no parent
+// adds. Both motors test it.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - the parent @0x4BA812..0x4BA821, `test dword ptr
-//  [eax+58h], 1000h` @0x4BA823]
-bool ClientReplicaPipeline::org1_ride_aim_adds(const ClientEntityState &row) const {
-	if (row.cls != EntityClass::Infantry) return true;
+//  [eax+58h], 1000h` @0x4BA823; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the parent
+//  @0x4B5683..0x4B5692, `test dword ptr [eax+58h], 1000h` @0x4B5694]
+bool ClientReplicaPipeline::deck_ride_yaw_adds(const ClientEntityState &row) const {
 	const ClientEntityState *parent = state_.find(row.carrier_handle);
 	if (parent == nullptr || !replica_def_attrib2_resolver_) return true;
 	return (replica_def_attrib2_resolver_(parent->type_id) & 0x1000u) == 0u;
@@ -1692,6 +1747,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		player_io.ground_words = &ground_occupant_provider_;
 		player_io.state = &state_;
 		player_io.ground_crashed = &replica_ground_crashed_resolver_;
+		player_io.def_attrib = &replica_def_attrib_resolver_;
 		const bool player_pass = row.cls == EntityClass::Player && !is_self && !starved;
 		if (player_pass && root_motion_ == nullptr) row_player_ride(row, player_io);
 		// The own row's channel shadows the World body's, which serves the rings
@@ -1751,11 +1807,18 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		es.rm_starved = es.net_interp_progress >= 512;
 		if (body_update_exits_ahead_of_channel(es)) return;
 	}
-	// An org1 body with a parent takes it as its ground entity ahead of its chase, so a deck
-	// ride (a dead seated body's, below) rides the parent itself.
+	// A body with a parent takes it as its ground entity ahead of its chase, so a deck ride (a
+	// seated player body's, or a dead seated org1 body's, below) rides the parent itself, and a
+	// seated player body's ride link reads the parent's occupant: the record's store of the
+	// parent's own ground link is overwritten at every update's head.
 	// [orig: Entity_UpdateInfantryAI @0x4B9910 - `if (parentEntity) groundEntity = parentEntity`
-	//  @0x4B9A0F..0x4B9A11, after the bit-0 exit @0x4B9A07]
-	if (es.cls == EntityClass::Infantry && es.carrier_handle != wire_handle::kInvalid)
+	//  @0x4B9A0F..0x4B9A11, after the bit-0 exit @0x4B9A07; Entity_UpdateInfantryPlayerBody
+	//  @0x4B40E0 - `mov eax, [esi+16Ch]` @0x4B41A2, the store @0x4B41B4, after the bit-0 exit
+	//  @0x4B411E and the +0x188 exit @0x4B412D..0x4B4135]. The client's own row is its World
+	// body's, which stores its own.
+	if ((es.cls == EntityClass::Infantry ||
+				(es.cls == EntityClass::Player && es.handle != self_handle)) &&
+			es.carrier_handle != wire_handle::kInvalid)
 		es.resolved_ground = es.carrier_handle;
 	advance_row_weapon_channel(es, self_handle);
 	if (!es.net_has_compact) return;
@@ -1816,7 +1879,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ground store @0x4B9A0F..0x4B9A11, the
 		//  ride @0x4BA45D..0x4BA88E ahead of the seat branch @0x4BE8F7]
 		if (es.cls == EntityClass::Infantry && carrier_pose_provider_)
-			row_deck_ride(es, carrier_pose_provider_, org1_ride_aim_adds(es), /*seated=*/true);
+			row_deck_ride(es, carrier_pose_provider_, deck_ride_yaw_adds(es), /*seated=*/true);
 		// A live seated org1 body reaches its seat branch, whose look half runs after the tick's
 		// gun channels (tick_org1_looks).
 		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
@@ -1848,10 +1911,25 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			row_org2_view_phase(es, rm_key,
 					(seat.mount_config_valid && seat.mount_config == 3) || mount_crashed,
 					mount_crashed, mount != nullptr && !es.net_health_zero);
+			// Its deck ride, its driver's hold and its pitch lag (row_org2_ride), its ground the
+			// mount: the angle deltas alone, the seat carry owning its position; the mount's yaw
+			// turns its Yaw unless the mount's def is IsTurret, then the body heading, the legs and
+			// targets, savedLivePitch and Roll, which the seat carry overwrites, and the pitch lag
+			// and the aim pitch, which it keeps.
+			// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ride @0x4B5288..0x4B5726 (the
+			//  mounted test @0x4B529F), the hold @0x4B572E..0x4B57AA, the pitch lag
+			//  @0x4B57B0..0x4B57E5, ahead of the ride link @0x4B5EA9 and the seat carry
+			//  @0x4B6510..0x4B6575]
+			RowPlayerPassIo io;
+			io.carrier = &carrier_pose_provider_;
+			io.ground_words = &ground_occupant_provider_;
+			io.state = &state_;
+			io.ground_crashed = &replica_ground_crashed_resolver_;
+			io.def_attrib = &replica_def_attrib_resolver_;
+			row_org2_ride(es, io, deck_ride_yaw_adds(es), /*seated=*/true);
 		}
-		// A seated body's pass still refreshes its ride link off the seat's
-		// ground link (the record's store) [orig: @0x4B5EA9..0x4B5F2C;
-		// the ground store @0x4C1353].
+		// A seated body's pass still refreshes its ride link off its ground link, the mount the
+		// update's head stored [orig: @0x4B5EA9..0x4B5F2C; the store @0x4B41B4].
 		if (es.cls == EntityClass::Player && es.handle != self_handle &&
 				ground_occupant_provider_)
 			row_ride_link(es, state_, ground_occupant_provider_);
@@ -1961,7 +2039,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		//  the ride @0x4BA45D..0x4BA88E (the relative yaw @0x4BA7A5..0x4BA7A8), the body
 		//  chase @0x4BE8FD]
 		if (carrier_pose_provider_)
-			row_deck_ride(es, carrier_pose_provider_, org1_ride_aim_adds(es));
+			row_deck_ride(es, carrier_pose_provider_, deck_ride_yaw_adds(es));
 		// The body chase: the body heading (+0x8C) steps a quarter of the way to the
 		// promoted target (+0x1A8, one record behind the wire, §5.38e §1), the step
 		// clamped to +-69273360, and the Yaw (+0x10) takes the same step, keeping the

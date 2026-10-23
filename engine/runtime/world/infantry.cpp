@@ -825,6 +825,49 @@ bool player_body_network_chase(AiEntity &e, Entity &body, bool authority, bool l
     return authority;
 }
 
+// The player body's recoil, weapon-weight spread and scoped drift, in that order, after its deck
+// ride and pitch lag (tick_infantry). The recoil's PRNG draw is unconditional, R = 0 included.
+// The local look keeps the kick: the yaw half-step also lands on g_LocalPlayerLookYaw, and the
+// pitch step on entity Pitch, which the mouse accumulates into by relative adds. The staged input
+// copies take both so the post-tick look fold carries them, as the scoped drift's do. The spread
+// reads the body's live mount and Flags. Org1 runs the same pair after its think (the post-think
+// block in tick_infantry) [orig: Entity_UpdateInfantryAI @0x4BE7FD..0x4BE86F].
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the recoil @0x4B57EB..0x4B5839 (PRNG_Next16
+//  called @0x4B581B, the pitch @0x4B5815..0x4B5818), the local test and `add
+//  g_LocalPlayerLookYaw` @0x4B583C..0x4B5848, the spread @0x4B584E..0x4B5960 (the mount test
+//  @0x4B585B), the drift's local-only gate @0x4B5966; Input_HandleActionBinding_0 `add [eax+14h]`
+//  @0x4E0D39]
+static void player_body_kick_tick(World &world, AiEntity &e, const Entity *ent,
+                                  uint32_t logic_tick) {
+    const int32_t heading_before = e.heading;
+    const int32_t pitch_before = e.pitch;
+    infantry_recoil_tick(e.inf, e.heading, e.pitch, world.next_prng16());
+    if (e.inf.is_local_player) {
+        e.inf.target_heading =
+                io::bam_add(e.inf.target_heading, io::bam_sub(e.heading, heading_before));
+        e.inf.look_pitch = io::bam_add(e.inf.look_pitch, io::bam_sub(e.pitch, pitch_before));
+    }
+    const uint32_t flags = ent != nullptr ? (ent->flags | ent->engine_flags) : 0u;
+    const WeaponTableEntry *held =
+            ent != nullptr ? world.tables.weapons.by_index(ent->equipped_adm_index) : nullptr;
+    InfantryWeightSpreadInputs weight_inputs;
+    weight_inputs.produce = e.inf.is_local_player && e.inf.player_moving &&
+            !(ent != nullptr && ent->mounted) && held != nullptr;
+    weight_inputs.aimed_shot_available = e.inf.aimed_shot_available;
+    weight_inputs.prone = e.inf.stance == InfantryState::Stance::kProne;
+    weight_inputs.crouched = e.inf.stance == InfantryState::Stance::kCrouch;
+    weight_inputs.drowning = (flags & kEntityFlagDrowning) != 0;
+    weight_inputs.airborne_rising =
+            (e.inf.airborne || (flags & kEntityFlagInAir) != 0) && e.inf.vel[2] > 0;
+    if (held != nullptr) {
+        weight_inputs.weaponweight_fp16 = held->weaponweight_fp16;
+        weight_inputs.clipweight_fp16 = held->clipweight_fp16;
+    }
+    infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
+    if (world.local_player_state != nullptr)
+        world.local_player_state->apply_scoped_aim_drift(e, logic_tick);
+}
+
 void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Recoil/dispersion live ahead of the network-snap motor exit [orig: the
     // Entity_UpdateInfantryAI flag test @0x4b9a03 exits past the sound block]. Received
@@ -946,6 +989,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         tick_entity->saved_live_pos[2] = tick_entity->position.z.q16;
         tick_entity->saved_live_valid = true;
     }
+    // A player body that holds a mount takes it as its ground entity at its update's head,
+    // ahead of the queued use, the chase, the view phase and the deck ride, which rides it.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `mov eax, [esi+16Ch]` @0x4B41A2, the
+    //  store @0x4B41B4]
+    if (!npc_body && tick_entity != nullptr && tick_entity->mounted &&
+            tick_entity->mount_target.valid())
+        tick_entity->ground_target = tick_entity->mount_target;
     // The org2 queued USE survives a ground-probe clear through entity+0x180.
     // Clear the request after the attempt, including failed mounts. Ordinary
     // local input still enters through LocalPlayer::toggle_mount.
@@ -971,56 +1021,18 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         finish_infantry_tick(e, world);
         return;
     }
-    // The player bodies decay recoil and spread at their head; org1 runs the
-    // same pair after its think (below). [orig: org1 Entity_UpdateInfantryAI
-    //  @0x4BE7FD..0x4BE86F]
-    if (!npc_body) {
-        const int32_t heading_before = e.heading;
-        const int32_t pitch_before = e.pitch;
-        infantry_recoil_tick(e.inf, e.heading, e.pitch, world.next_prng16());
-        // The local look keeps the kick: the yaw half-step also lands on
-        // g_LocalPlayerLookYaw, and the pitch step on entity Pitch, which the
-        // mouse accumulates into by relative adds. The staged input copies take
-        // both so the post-tick look fold carries them, as the scoped drift's do.
-        // [orig: Entity_UpdateInfantryPlayerBody @0x4b583c..0x4b5848 (local
-        //  test, `add g_LocalPlayerLookYaw`), pitch @0x4b5815..0x4b5818;
-        //  Input_HandleActionBinding_0 `add [eax+14h]` @0x4e0d39]
-        if (e.inf.is_local_player) {
-            e.inf.target_heading = io::bam_add(e.inf.target_heading,
-                                               io::bam_sub(e.heading, heading_before));
-            e.inf.look_pitch = io::bam_add(e.inf.look_pitch,
-                                           io::bam_sub(e.pitch, pitch_before));
-        }
-    }
-    InfantryWeightSpreadInputs weight_inputs;
     const uint32_t tick_flags = tick_entity != nullptr
             ? (tick_entity->flags | tick_entity->engine_flags)
             : 0u;
-    const bool mounted_for_spread = tick_entity != nullptr && tick_entity->mounted;
-    const WeaponTableEntry *held = tick_entity != nullptr
-            ? world.tables.weapons.by_index(tick_entity->equipped_adm_index)
-            : nullptr;
-    weight_inputs.produce = e.inf.is_local_player && e.inf.player_moving &&
-                            !mounted_for_spread && held != nullptr;
-    weight_inputs.aimed_shot_available = e.inf.aimed_shot_available;
-    weight_inputs.prone = e.inf.stance == InfantryState::Stance::kProne;
-    weight_inputs.crouched = e.inf.stance == InfantryState::Stance::kCrouch;
-    weight_inputs.drowning = (tick_flags & kEntityFlagDrowning) != 0;
-    weight_inputs.airborne_rising =
-            (e.inf.airborne || (tick_flags & kEntityFlagInAir) != 0) &&
-            e.inf.vel[2] > 0;
-    if (held != nullptr) {
-        weight_inputs.weaponweight_fp16 = held->weaponweight_fp16;
-        weight_inputs.clipweight_fp16 = held->clipweight_fp16;
-    }
-    if (!npc_body) infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
     // The view phase (infantry_view.cpp) runs for every player body the authority
-    // moves, seated or not, ahead of the scoped drift: a seated body's Flags 0x40
+    // moves, seated or not, ahead of its death edge, its deck ride and its recoil,
+    // spread and scoped drift (player_body_kick_tick): a seated body's Flags 0x40
     // takes its skip branch (the Yaw held about the body heading its last seat
     // carry left, the legs on it), and its seat pose later reads the clamped look.
     // This phase has no PRNG draws.
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the phase @0x4B4945..0x4B4BC6
-    //  ahead of the drift @0x4B5966 and the mounted site's returns @0x4B6907 / @0x4B6977]
+    //  ahead of the recoil @0x4B57EB, the drift @0x4B5966 and the mounted site's returns
+    //  @0x4B6907 / @0x4B6977]
     // The org2 body reads the RAW current_tick for its leg re-plant windows:
     // the prologue stores it into the frame slot and the leg phase masks that
     // slot, with no per-entity stagger term (that term is org1's alone).
@@ -1028,9 +1040,6 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     //  @0x4B467A..0x4B4683 (ebp = tick & 0x3F)]
     if (!npc_body && !client_wire_peer)
         infantry_org2_view_tick(world, e, tick_entity, logic_tick);
-    // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, local-only gate @0x4B5966]
-    if (world.local_player_state != nullptr)
-        world.local_player_state->apply_scoped_aim_drift(e, logic_tick);
     if (!npc_body && (tick_flags & 1u) == 0) {
         const Entity *parent = tick_entity != nullptr && tick_entity->mounted
                 ? world.registry.get(tick_entity->mount_target) : nullptr;
@@ -1103,6 +1112,22 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 ? ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagDead) == 0
                 : player_body_death_edge_open(*this, e, tick_entity);
         if (edge_open) infantry_death_edge(*this, e, world, tick_entity, org1_body, logic_tick);
+    }
+    // The player body's deck ride (seated or not), its driver's hold and its pitch lag, then its
+    // recoil, spread and scoped drift, all after its death edge: the view phase's clamps ran
+    // first, so a kick at a clamp edge stands until the next tick's phase. On the PRNG_Next16
+    // stream the authority's death edge (its transaction's death-family roll) and the think
+    // cadence's row event ahead of it now draw ahead of the kick, as retail's do; the ride draws
+    // none; the kick's draw precedes the drift's, as before.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the row event @0x4B4BE1, the death edge
+    //  @0x4B4BF1..0x4B4D25 (Entity_CheckAndProcessDeath @0x51B550 called @0x4B4CEA), the ride
+    //  @0x4B5288..0x4B57AA, the pitch lag @0x4B57B0..0x4B57E5, the recoil @0x4B57EB..0x4B5848
+    //  (PRNG_Next16 called @0x4B581B), the spread @0x4B584E..0x4B5960, the drift
+    //  @0x4B5966..0x4B5C97; GameEvent_PlayerDeath @0x516DD0 - PRNG_Next16 called @0x5170E2 /
+    //  @0x517115 / @0x5171DA / @0x5171F8 / @0x51722C]
+    if (!npc_body) {
+        infantry_follow_carrier(e, world, frame.capsule_bottom, true);
+        player_body_kick_tick(world, e, world.registry.get(e.handle), logic_tick);
     }
     // Org1's corpse leg, think and motion gates read that dead bit, not health:
     // a script that writes health back onto a corpse leaves it dead.
@@ -1291,8 +1316,6 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
         infantry_weapon_channel(e, world, logic_tick);
     }
-
-    if (!npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, true);
 
     // Restamp the camera offset from the current simulated head, after the
     // motor-head channel update and current view/seat/lean pose. An org1 body

@@ -846,6 +846,12 @@ struct ClientEntityState {
 	// the read @0x4B6D5B; NetPacket_SerializeInfantryEntityState @0x4C0320 - the store
 	// @0x4C0672; Entity_UpdateInfantryAI @0x4B9910 - the ride's add @0x4BA852].
 	int32_t rm_aim_word = 0;
+	// A player row's pitch lag +0x2E0: its deck ride adds the carrier's turned pitch delta, and a
+	// thirty-second of it steps into the Pitch every pass unless its ground is a crashed vehicle
+	// (world::infantry_org2_pitch_lag_step). A 0x0C spawn clears it with the whole entity.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ride's add @0x4B5715, the step
+	//  @0x4B57B0..0x4B57E5; NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1]
+	int32_t rm_pitch_lag = 0;
 	// An org1 row's aim heading word +0x2EC: its record writes it (the aim heading byte
 	// << 24), a deck ride adds the carrier's yaw delta, and its look chases the Yaw
 	// toward it. A 0x0C spawn clears it with the whole entity.

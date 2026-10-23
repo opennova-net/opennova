@@ -989,7 +989,7 @@ private:
 	// seat-local sample on a carrier, except a world-mover vehicle, which the
 	// embedding sim predicts (its row publishes the mirrored pose).
 	static bool follows_carrier_seat(const ClientEntityState &child);
-	bool org1_ride_aim_adds(const ClientEntityState &row) const;
+	bool deck_ride_yaw_adds(const ClientEntityState &row) const;
 	// One such row's follow: its pose from its carrier row's live pose and its
 	// seat-local sample; a carrier row that is gone invalidates the sample.
 	static void follow_carrier_seat(ClientEntityState &child, const ClientEntityState *carrier);

@@ -1,6 +1,8 @@
 // The player body's (org2) view phase, one kernel for the authority's body tick and a client's
 // decoded rows (replication::row_org2_view_phase), split out of infantry.cpp and
-// client_replica_legs.cpp, which each carried a copy.
+// client_replica_legs.cpp, which each carried a copy; and its deck ride's turn, driver's hold and
+// pitch lag, which the authority's ride (infantry_follow_carrier) and a client's
+// (replication::row_org2_ride) share.
 #include <runtime/world/infantry_view.h>
 
 #include <base/io/bam.h>
@@ -31,12 +33,13 @@ constexpr int32_t kViewYawLimit = 0x55555500;
 constexpr int32_t kPitchLimit = 0x38E38E00;
 constexpr int32_t kPronePitchLimit = 0x1C71C700;
 
-// A vehicle (its def's type 1, Entity_IsVehicle's test) in its crash state (+0x2EC).
+} // namespace
+
+// [orig: Entity_IsVehicle @0x402BB0 (called @0x4B4AE9 / @0x4B5751), `cmp byte ptr [edi+2ECh], 0`
+//  @0x4B4AF2; the pitch lag's inline twin @0x4B57B0..0x4B57C4]
 bool crashed_vehicle(const Entity *e) {
     return e != nullptr && e->has_item_def && e->item_type == 1u && e->veh.crashed != 0;
 }
-
-} // namespace
 
 // The view phase, in its pass's order, with no locality test:
 // - under a canopy (Flags 0x20) the body heading (+0x8C) chases a sixteenth of the way to the Yaw
@@ -166,6 +169,61 @@ void infantry_org2_view_tick(const World &world, AiEntity &e, const Entity *tick
         e.heading = inf.target_heading;
         e.pitch = inf.look_pitch;
     }
+}
+
+// The ride's turn, seated or not (a seated body's ground is its mount): the yaw delta turns the
+// Yaw and the local look unless the mount's def is IsTurret (attrib2 0x1000), then the body
+// heading, both legs and both re-plant targets; the turned pitch delta goes into savedLivePitch,
+// the pitch lag and the aim pitch, the turned roll delta into Roll. A seated body's seat carry
+// later overwrites its body heading, legs, savedLivePitch and Roll; its Yaw, look, pitch lag and
+// aim pitch keep the turn.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the turn's yaw @0x4B5656..0x4B567F (the Yaw
+//  read @0x4B563D), the mount's def test @0x4B5683..0x4B569B, the Yaw @0x4B569D..0x4B56A4, the
+//  local test @0x4B56A7, g_LocalPlayerLookYaw @0x4B56AF, +0x8C @0x4B56BB, +0x2D4 @0x4B56C1, +0x2D8
+//  @0x4B56C7, +0x2E4 @0x4B56CD, +0x2E8 @0x4B56D3, the turned pair @0x4B56D9..0x4B570B, +0x90
+//  @0x4B570F, +0x2E0 @0x4B5715, +0x2D0 @0x4B571B, Roll @0x4B5723]
+void infantry_org2_ride_turn(const Org2RideWords &w, int32_t dyaw, int32_t pitch_d, int32_t roll_d,
+                             bool turret_mount) {
+    if (!turret_mount) {
+        w.yaw = io::bam_add(w.yaw, dyaw);
+        if (w.look_yaw != nullptr) *w.look_yaw = io::bam_add(*w.look_yaw, dyaw);
+    }
+    w.body_heading = io::bam_add(w.body_heading, dyaw);
+    for (int leg = 0; leg < 2; ++leg) {
+        w.leg_yaw[leg] = io::bam_add(w.leg_yaw[leg], dyaw);
+        w.leg_target[leg] = io::bam_add(w.leg_target[leg], dyaw);
+    }
+    w.body_pitch = io::bam_add(w.body_pitch, pitch_d);
+    w.pitch_lag = io::bam_add(w.pitch_lag, pitch_d);
+    w.aim_pitch = io::bam_add(w.aim_pitch, pitch_d);
+    w.roll = io::bam_add(w.roll, roll_d);
+}
+
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `cmp [edi+170h], esi` @0x4B572E, `test byte
+//  ptr [edx+54h], 40h` @0x4B5739, `test byte ptr [esi+12Ch], 10h` @0x4B573F, the ground's crash test
+//  @0x4B5748..0x4B5761 (Entity_IsVehicle @0x402BB0 called @0x4B5751)]
+bool infantry_org2_ride_holds(bool first_occupant, uint32_t ground_attrib, uint32_t move_order,
+                              bool ground_crashed) {
+    return first_occupant && (ground_attrib & 0x40u) != 0u && (move_order & 0x10u) == 0u &&
+            !ground_crashed;
+}
+
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the Yaw @0x4B5763..0x4B5767, the ground's
+//  ground @0x4B576A..0x4B577D, the local test @0x4B5780, g_LocalPlayerLookYaw @0x4B5788..0x4B57A4
+//  (the look saved @0x4B5325, the Yaw @0x4B5332)]
+void infantry_org2_ride_hold(const Org2RideWords &w, int32_t yaw_before, int32_t look_before,
+                             int32_t ground_ground_dyaw) {
+    w.yaw = io::bam_add(yaw_before, ground_ground_dyaw);
+    if (w.look_yaw != nullptr) *w.look_yaw = io::bam_add(look_before, ground_ground_dyaw);
+}
+
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the crash gate @0x4B57B0..0x4B57CB, the step
+//  @0x4B57CD..0x4B57D6, the Pitch @0x4B57D9, the lag @0x4B57DC..0x4B57E5]
+int32_t infantry_org2_pitch_lag_step(int32_t &pitch_lag) {
+    const int32_t step = io::bam_sar(io::bam_add(pitch_lag, 16), 5);
+    const int32_t rest = io::bam_sub(pitch_lag, step);
+    pitch_lag = io::bam_sub(rest, rest >> 31);
+    return step;
 }
 
 } // namespace opennova::world
