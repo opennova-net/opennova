@@ -586,7 +586,7 @@ struct HudWaypointState {
 	int32_t world_x = 0;
 	int32_t world_y = 0;
 	// Altitude, Q16. Drives the spinmap state-line tricolor and the
-	// WPIndctr frame. [orig: dword_2723520 read by HUD_UpdateWaypointAltitudeColor @0x590970]
+	// WPIndctr frame. [orig: g_WaypointPosZ (0x2723520) read by HUD_UpdateWaypointAltitudeColor @0x590970]
 	int32_t world_z = 0;
 };
 

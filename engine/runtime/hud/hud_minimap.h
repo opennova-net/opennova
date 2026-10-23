@@ -419,7 +419,7 @@ struct HudMinimapInput {
 	bool waypoint_present = false;
 	int32_t waypoint_x = 0;
 	int32_t waypoint_y = 0;
-	int32_t waypoint_z = 0; // Q16 [orig: dword_2723520, HUD_UpdateWaypointAltitudeColor @0x590970 altitude test]
+	int32_t waypoint_z = 0; // Q16 [orig: g_WaypointPosZ (0x2723520), HUD_UpdateWaypointAltitudeColor @0x590970 altitude test]
 	// The nearest FARP HUD_BuildEntityInfo resolved this frame (hudInfo+0x10
 	// and g_TrackedTargetPos) [orig: @0x4b891a..0x4b89e3].
 	bool farp_present = false;
