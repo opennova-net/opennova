@@ -1226,12 +1226,13 @@ bool Simulation::escape_input_reset() {
 	return role_ != nullptr && kernel_ && active_role().reset_local_input();
 }
 
-void Simulation::input_action_exit() {
+void Simulation::input_action_exit(bool p_menu_screen) {
 	// Input action 3 over the running role (engine inmatch/remote_admin.h
 	// input_action_exit carries the witness).
 	if (kernel_)
-		opennova::inmatch::input_action_exit(
-				remote_admin_binding(), opennova::inmatch::ExitSite::Input);
+		opennova::inmatch::input_action_exit(remote_admin_binding(),
+				p_menu_screen ? opennova::inmatch::ExitSite::MenuScreen
+							  : opennova::inmatch::ExitSite::Input);
 }
 
 void Simulation::reset_all_input_state() {

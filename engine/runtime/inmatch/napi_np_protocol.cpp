@@ -1504,22 +1504,42 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 } // namespace
 
-// The own client's disconnected callback, which its teardown runs after the goodbye burst: the
-// process latch keeps the first record it is handed (one an earlier session's callback left
-// there, a kicked joiner's, else this leave's own), and the exit reason maps from the latch, so
-// a stale kick record turns the own leave's exit 1 into the kick's (7, 9..19) (D-NET-NEW-L1-26).
-// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the client callback called
-//  @0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the latch @0x4C6535..0x4C6559,
-//  the switch from @0x4C655F (35 -> 7 @0x4C65A2, 36 -> 9 @0x4C65C9, on to 45 -> 18)]
-static void own_client_disconnected(NapiNPServerCtx &ctx, const DisconnectEvent &record) {
+// The own client's disconnected callback, which its teardown runs after the goodbye burst, inside
+// the exit action's disconnect: the process latch keeps the first record it is handed (one an
+// earlier session's callback left there, a kicked joiner's, else this leave's own), and the
+// switch over the latch either stores an exit reason (a stale kick's 35 -> 7, 36..45 -> 9..18,
+// 46 / 49 -> 19, over the leave's 1) or queues an input action (DPC 1 / 33 / unlisted: action 3;
+// 34: action 36) (D-NET-NEW-L1-26). The queued action runs where the exit's input pass goes on
+// to drain the queue (`queued_action_dispatches`): action 3 again (exit reason 1, a second Exit
+// Mission tone, a disconnect that finds the client gone), action 36 exit reason 5; a menu
+// screen's confirmation closes its screen first, whose input reset drops it (L1-s32 row 1).
+// [orig: CNapiNPConnection_RequestDisconnect @0x61E0F0 - SetState(6) @0x61E0FA;
+//  CNapiNPConnection_SetState @0x626250 - CNapiNPConnection_TeardownActiveConnection @0x62628F;
+//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the client callback called @0x6254E7;
+//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the latch @0x4C6535..0x4C6559, the switch
+//  from @0x4C655F (35 -> 7 @0x4C65A2, 36 -> 9 @0x4C65C9, on to 45 -> 18), Input_QueueEvent(36)
+//  @0x4C6596, Input_QueueEvent(3) @0x4C67A4; Input_ProcessFrame @0x49D520 - the drain
+//  @0x49D599..0x49D5E7; Input_HandleActionBinding @0x49AD40 - case 3: reason 1 @0x49AF26,
+//  Sound_PlayInterfaceTriggerSet @0x49AF30 (its peer gate @0x527BEB), the disconnect @0x49AF42;
+//  case 36: reason 5 @0x49B780]
+static void own_client_disconnected(NapiNPServerCtx &ctx, const DisconnectEvent &record,
+		bool queued_action_dispatches) {
 	if (ctx.client_disconnect_latch == nullptr) return;
 	ctx.client_disconnect_latch->latch(record);
-	// A queued action's reason folds in at once here (1 for action 3, 5 for 36).
 	const DisconnectExit exit = ctx.client_disconnect_latch->disconnect_exit();
-	const int32_t reason = exit.reason != kMissionExitNone
-			? exit.reason
-			: mission_exit_reason_for_input_action(exit.input_action);
-	if (reason != kMissionExitNone) ctx.mission_exit_reason = reason;
+	if (exit.reason != kMissionExitNone) {
+		ctx.mission_exit_reason = exit.reason;
+		return;
+	}
+	if (exit.input_action == 0 || !queued_action_dispatches) return;
+	ctx.mission_exit_reason = mission_exit_reason_for_input_action(exit.input_action);
+	if (exit.input_action == kInputActionExit && ctx.is_mp_session_peer != 0 &&
+			ctx.world != nullptr) {
+		world::ScriptSoundEvent tone;
+		tone.kind = world::ScriptSoundEvent::Kind::Interface;
+		tone.name = kExitMissionSoundset;
+		ctx.world->out.script_sounds.push_back(std::move(tone));
+	}
 }
 
 // See header.
@@ -1534,9 +1554,8 @@ bool drain_own_goodbye(NapiNPServerCtx &ctx, OwnGoodbye drain) {
 		// The own type-2 stays in state 6 with that record until the session reset.
 		ctx.own_client_left = true;
 		ctx.own_client_left_record = record;
-		if (!teardown_own_connection(ctx)) return false;
-		own_client_disconnected(ctx, record);
-		return true;
+		// The callback ran at the exit (request_own_client_disconnect).
+		return teardown_own_connection(ctx);
 	}
 	return false;
 }
@@ -1550,7 +1569,8 @@ bool drain_own_goodbye(NapiNPServerCtx &ctx, OwnGoodbye drain) {
 //  the loopback FIFO, CNapiNPManager_SendTo @0x61EC20 (@0x61EC59, @0x61ECC6)), the client
 //  callback @0x6254E7; Input_HandleActionBinding case 3 (the string @0x49AF38, the call
 //  @0x49AF42)] (D-NET-NEW-L8-21)
-void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain) {
+void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain,
+		bool queued_action_dispatches) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeClientSide) continue;
 		// Torn down already: its connected byte is clear, so a later exit does nothing.
@@ -1558,6 +1578,13 @@ void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain) {
 		latch_disconnect_event(conn, make_disconnect_event(2, 2, 0, 0, "I.C:CIDEMIS", 0, ""));
 		write_inout_line(ctx, inout_player_removed_line(conn, NapiNPConnection::kTypeClientSide));
 		conn.own_goodbye = drain;
+		// The client's teardown runs inside the disconnect, its callback with it: the record it
+		// is handed is the connection's (a null one reads as zeros); the goodbye it queued waits
+		// for `drain`. [orig: OnDisconnectedFromServer - the copy of conn+0x654 @0x4C6545, the
+		//  memset @0x4C6551]
+		own_client_disconnected(ctx,
+				conn.disconnect_event_valid ? conn.disconnect_event : DisconnectEvent{},
+				queued_action_dispatches);
 		return;
 	}
 }
@@ -1879,9 +1906,8 @@ std::vector<TickOut> tick_connections(
 	}
 	for (const std::optional<PeerAddr> &pending : destroy_pending) {
 		if (!pending.has_value()) {
-			// The admin's GOTO MENUSTATE: the own client's teardown runs its disconnected
-			// callback as the input pass's does, so the process latch takes the record and
-			// maps the exit (a stale kick's 35 -> 7, 36..45 -> 9..18, 34 -> 5); no wire face,
+			// The admin's GOTO MENUSTATE: the own client's goodbye, whose teardown ran its
+			// disconnected callback at the exit (request_own_client_disconnect); no wire face,
 			// no peer event (D-NET-NEW-L1-26).
 			// [orig: CAdminServer_HandleGotoCommand -> Input_HandleActionBinding (the call
 			//  @0x404A5D) case 3 -> CNapiNetwork_DisconnectActiveConnection (called @0x49AF42)

@@ -372,8 +372,8 @@ func _ready() -> void:
 	_deploy_presenter = DeployScreenPresenter.install(self, _world.world_view(),
 			_hud if _hud != null else self, func() -> void: _state = State.DEPLOY,
 			_leave_screen.bind(State.DEPLOY))
-	# DEATH's exit confirmation YES runs input action 3, as the quit dialog's yes does.
-	_deploy_presenter.exit_confirmed.connect(_on_quit_confirmed)
+	# DEATH's exit confirmation YES runs input action 3, a menu screen's confirmation.
+	_deploy_presenter.exit_confirmed.connect(_on_screen_exit_confirmed)
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
 	# The process's cfg block every mission's session create reads, and the
 	# create's mpreset exit (docs/net/novaworld-net-re.md D-NET-385).
@@ -1879,6 +1879,16 @@ func _on_quit_confirmed() -> void:
 	_on_return_to_menu.call_deferred()
 
 
+## DEATH's exit confirmation YES, a menu screen's: input action 3 inline after the screen's
+## close, whose input reset drops what the action's disconnect queued, then the return to the
+## menu (engine inmatch/remote_admin.h ExitSite carries the witness).
+func _on_screen_exit_confirmed() -> void:
+	_play_exit_tone()
+	if _world != null and _world.get_sim() != null:
+		_world.get_sim().input_action_exit(true)
+	_on_return_to_menu.call_deferred()
+
+
 ## Input action 3's Exit Mission tone, which the action plays ahead of its
 ## disconnect on every path that runs it, the quit dialog's yes and the INGAME
 ## CONFIRM_YES alike (engine inmatch/remote_admin.h input_action_exit carries the
@@ -1973,14 +1983,14 @@ func _on_return_to_menu() -> void:
 
 
 ## The menu shell's CONFIRM_YES. The INGAME screen's (the in-game menu over live
-## play) runs input action 3 inline, as the quit dialog's yes does, so a joiner's
+## play) runs input action 3 inline as a menu screen's confirmation, so a joiner's
 ## goodbye leaves at the click; then the shell returns to the menu (engine
-## inmatch/remote_admin.h input_action_exit carries the witness).
+## inmatch/remote_admin.h input_action_exit and ExitSite carry the witness).
 func _on_menu_return_to_menu() -> void:
 	if _state == State.PAUSED and not _world_load_pending and _world != null \
 			and _world.get_sim() != null:
 		_play_exit_tone()
-		_world.get_sim().input_action_exit()
+		_world.get_sim().input_action_exit(true)
 	_on_return_to_menu()
 
 

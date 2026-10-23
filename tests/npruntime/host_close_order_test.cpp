@@ -174,8 +174,12 @@ struct ListenHost {
 	}
 };
 
-// The listen host's own leave from the frame's input pass, then the session's end.
+// The listen host's own leave from the frame's input pass, then the session's end. The own
+// client's callback runs inside the leave's disconnect, so the latch's mapping stands from the
+// exit on (L1-s32 row 1) [orig: CNapiNPConnection_RequestDisconnect @0x61E0F0 - SetState(6)
+// @0x61E0FA; CNapiNPConnection_SetState @0x626250 - TeardownActiveConnection @0x62628F].
 struct Outcome {
+	int32_t exit_reason_at_exit = 0;
 	int32_t exit_reason = 0;
 	int stop_burst = 0;
 	inmatch::ProcessDisconnectLatch latch;
@@ -193,7 +197,7 @@ Outcome leave_with_latch(const inmatch::ProcessDisconnectLatch &held) {
 	inmatch::RemoteAdminBinding binding;
 	binding.host = &host->ctx();
 	inmatch::input_action_exit(binding, inmatch::ExitSite::Input);
-	CHECK(host->ctx().mission_exit_reason == inmatch::kMissionExitQuit);
+	out.exit_reason_at_exit = host->ctx().mission_exit_reason;
 	host->role->close();
 	out.exit_reason = host->ctx().mission_exit_reason;
 	out.stop_burst = host->stop_burst();
@@ -210,6 +214,7 @@ inmatch::ProcessDisconnectLatch kick_record(uint32_t code) {
 
 void test_an_empty_latch_takes_the_leave_and_stops_the_server() {
 	const Outcome out = leave_with_latch(inmatch::ProcessDisconnectLatch{});
+	CHECK(out.exit_reason_at_exit == inmatch::kMissionExitQuit);
 	CHECK(out.exit_reason == inmatch::kMissionExitQuit);
 	CHECK(out.stop_burst > 0);
 	CHECK(out.latch.valid && out.latch.event.dc == 2 && out.latch.event.dpc == 0 &&
@@ -220,6 +225,7 @@ void test_a_stale_kick_maps_the_leave_and_skips_the_stop() {
 	for (const auto &[code, exit] : {std::pair<uint32_t, int32_t>{35, inmatch::kMissionExitPirate},
 				 std::pair<uint32_t, int32_t>{37, 10}}) {
 		const Outcome out = leave_with_latch(kick_record(code));
+		CHECK(out.exit_reason_at_exit == exit);
 		CHECK(out.exit_reason == exit);
 		CHECK(out.stop_burst == 0);
 		CHECK(out.latch.valid && out.latch.event.dpc == code); // the first record wins
@@ -229,6 +235,7 @@ void test_a_stale_kick_maps_the_leave_and_skips_the_stop() {
 // A stale record that maps the reason 1 (an unlisted code) takes the leave's own route.
 void test_a_stale_unlisted_code_keeps_the_stop() {
 	const Outcome out = leave_with_latch(kick_record(17));
+	CHECK(out.exit_reason_at_exit == inmatch::kMissionExitQuit);
 	CHECK(out.exit_reason == inmatch::kMissionExitQuit);
 	CHECK(out.stop_burst > 0);
 }

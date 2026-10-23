@@ -1029,10 +1029,11 @@ public:
 	// shell through take_input_reset. True when it ran past its local-entity test: the
 	// shell's device then owes the Scroll Lock turn-off (D-NET-563).
 	bool escape_input_reset();
-	// Input action 3, the exit: the in-game CONFIRM_YES runs it inline and a console-queued
-	// code 3 at its input frame (engine inmatch/remote_admin.h input_action_exit carries the
-	// witness): a joiner's CIDEMIS goodbye leaves inside it.
-	void input_action_exit();
+	// Input action 3, the exit: the quit dialog's yes and a menu screen's confirmation (the
+	// in-game CONFIRM_YES, the death screen's yes: `p_menu_screen`) run it inline and a
+	// console-queued code 3 at its input frame (engine inmatch/remote_admin.h input_action_exit
+	// and ExitSite carry the witness): a joiner's CIDEMIS goodbye leaves inside it.
+	void input_action_exit(bool p_menu_screen = false);
 	// Monotonic initial-admission boundary: the host's S2C 0x0F has landed in the
 	// deploy wait, for any role (D-NET-678). Deploy-pick state is intentionally
 	// exposed separately.

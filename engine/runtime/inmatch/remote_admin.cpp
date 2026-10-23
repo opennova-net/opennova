@@ -107,9 +107,9 @@ void input_action_exit(const RemoteAdminBinding &binding, ExitSite site) {
 		binding.host->mission_exit_reason = kMissionExitQuit;
 		// [orig: CNapiNetwork_DisconnectActiveConnection(&g_NapiNPCtx, "I.C:CIDEMIS") @0x49AF42
 		//  on ctx+0xE60, the own client a listen host's create made (@0x4C9B9C)]
-		request_own_client_disconnect(*binding.host, site == ExitSite::Admin
-						? OwnGoodbye::NextReceivePump
-						: OwnGoodbye::TeardownPump);
+		request_own_client_disconnect(*binding.host,
+				site == ExitSite::Admin ? OwnGoodbye::NextReceivePump : OwnGoodbye::TeardownPump,
+				/*queued_action_dispatches=*/site != ExitSite::MenuScreen);
 	} else if (binding.joiner != nullptr)
 		binding.joiner->quit_to_menu();
 	else if (binding.world != nullptr)

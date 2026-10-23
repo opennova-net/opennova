@@ -228,11 +228,13 @@ void test_admin_exit_removes_the_host_player_at_the_next_receive_pump() {
 
 // D-NET-NEW-L1-26 (L1-s16 FOUND 1): the admin path's teardown runs the own client's
 // disconnected callback too: a stale kick record in the process latch (DPC 35) maps the
-// admin's exit 1 to 7 at the next receive pump, as the input pass's path maps it.
+// admin's exit 1 to 7, at the exit itself (the client's teardown runs inside the action's
+// disconnect, L1-s32 row 1), as the input pass's path maps it; the next receive pump keeps it.
 // [orig: Input_HandleActionBinding (the admin's call @0x404A5D) case 3 -> the own client's
-//  teardown, CNapiNPConnection_TeardownActiveConnection's client callback called @0x6254E7;
-//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the latch @0x4C6535..0x4C6559, 35 -> 7
-//  @0x4C65A2]
+//  teardown (CNapiNPConnection_RequestDisconnect @0x61E0F0 - SetState(6) @0x61E0FA ->
+//  CNapiNPConnection_SetState @0x626250 - @0x62628F), CNapiNPConnection_TeardownActiveConnection's
+//  client callback called @0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the latch
+//  @0x4C6535..0x4C6559, 35 -> 7 @0x4C65A2]
 void test_admin_exit_runs_the_own_client_callback() {
 	auto host = std::make_unique<ListenHost>(true);
 	inmatch::ProcessDisconnectLatch latch;
@@ -241,7 +243,7 @@ void test_admin_exit_runs_the_own_client_callback() {
 	inmatch::RemoteAdminBinding binding;
 	binding.host = &host->ctx;
 	inmatch::input_action_exit(binding, inmatch::ExitSite::Admin);
-	CHECK(host->ctx.mission_exit_reason == inmatch::kMissionExitQuit);
+	CHECK(host->ctx.mission_exit_reason == inmatch::kMissionExitPirate);
 	(void)inmatch::tick_connections(host->ctx, 0, 2, /*respect_s2c_send_boundary=*/false,
 			/*run_spawn_pump=*/false);
 	CHECK(host->own() == nullptr);
@@ -379,6 +381,66 @@ void test_single_player_input_exit_leaves_the_record_only() {
 	CHECK(sp->inout_lines().empty());
 }
 
+// L1-s32 row 1: the own client's callback runs inside the exit's disconnect, and the input
+// action its switch queues over a stale record runs where the exit's input pass drains the
+// queue after it: the quit dialog's yes in the key scan and a console code 3 in the drain (the
+// same pass: the drain re-reads the count), the admin's at the next frame's main pass; a menu
+// screen's confirmation closes its screen first, whose input reset drops it. Action 3 stores exit
+// reason 1 and plays the Exit Mission tone again (the listen host is a session peer), action 36
+// stores 5; a stored reason (35 -> 7) maps every site at the exit.
+// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - Input_QueueEvent(36) @0x4C6596,
+//  Input_QueueEvent(3) @0x4C67A4, 35 -> 7 @0x4C65A2; Input_QueueEvent @0x4979C0 (the in-session
+//  gate @0x497A0B passes both); Input_ProcessFrame @0x49D520 - Input_ProcessPlayerFrame
+//  @0x49D58B, the drain @0x49D599..0x49D5E7; Input_HandleSpecialKeys @0x49C5C0 - the quit
+//  dialog's yes @0x49C5FA; Input_HandleActionBinding @0x49AD40 - case 3: reason 1 @0x49AF26, the
+//  tone @0x49AF30; case 36: reason 5 @0x49B780; Sound_PlayInterfaceTriggerSet @0x527BE0 - the
+//  peer gate @0x527BEB; UI_IngameConfirmExitCommand @0x555460 - Game_CloseInGameScreens
+//  @0x55546A; UI_ProcessMenuScreenFrame @0x54E650 - UI_CloseMenuScreen @0x54E659]
+struct StaleExit {
+	int32_t reason = 0;
+	std::size_t tones = 0;
+};
+
+StaleExit exit_over_stale_record(uint32_t dpc, inmatch::ExitSite site) {
+	auto host = std::make_unique<ListenHost>(true);
+	inmatch::ProcessDisconnectLatch latch;
+	latch.latch(make_disconnect_event(1, 2, 0, 0, "", dpc, "")); // a received kick
+	host->ctx.client_disconnect_latch = &latch;
+	inmatch::RemoteAdminBinding binding;
+	binding.host = &host->ctx;
+	host->world.out.script_sounds.clear();
+	inmatch::input_action_exit(binding, site);
+	StaleExit out;
+	out.reason = host->ctx.mission_exit_reason;
+	for (const w::ScriptSoundEvent &sound : host->world.out.script_sounds)
+		if (sound.kind == w::ScriptSoundEvent::Kind::Interface &&
+				sound.name == inmatch::kExitMissionSoundset)
+			++out.tones;
+	CHECK(latch.valid && latch.event.dpc == dpc); // the first record wins
+	host->ctx.client_disconnect_latch = nullptr;
+	return out;
+}
+
+void test_a_stale_records_queued_action_runs_where_the_pass_drains() {
+	using inmatch::ExitSite;
+	for (const ExitSite site : {ExitSite::Input, ExitSite::Admin, ExitSite::MenuScreen}) {
+		const bool drains = site != ExitSite::MenuScreen;
+		// DPC 34 queues action 36: exit reason 5 where it runs, the leave's 1 where it is dropped.
+		StaleExit out = exit_over_stale_record(34, site);
+		CHECK(out.reason == (drains ? inmatch::kMissionExitCdTrouble : inmatch::kMissionExitQuit));
+		CHECK(out.tones == 0);
+		// DPC 33 (the kick, the deploy-idle punt) queues action 3: reason 1 and a second tone
+		// where it runs (the first is the shell's, ahead of the action).
+		out = exit_over_stale_record(33, site);
+		CHECK(out.reason == inmatch::kMissionExitQuit);
+		CHECK(out.tones == (drains ? 1u : 0u));
+		// A stored reason maps at the exit whatever the site.
+		out = exit_over_stale_record(35, site);
+		CHECK(out.reason == inmatch::kMissionExitPirate);
+		CHECK(out.tones == 0);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -389,6 +451,7 @@ int main() {
 	test_dedicated_host_exit();
 	test_single_player_admin_exit_is_path_a();
 	test_single_player_input_exit_leaves_the_record_only();
+	test_a_stale_records_queued_action_runs_where_the_pass_drains();
 	if (failures != 0) {
 		std::printf("own_client_exit: %d failure(s)\n", failures);
 		return 1;

@@ -177,7 +177,12 @@ ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hel
 // pair's server-side twin: its /INOUT SERVER line and the host player's removal, the leave
 // line and the 0x46 removal to the others), or the mission teardown's pump. A host with no own
 // client (a dedicated host) and a second call do nothing. (D-NET-NEW-L8-21)
-void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain);
+// The client's disconnected callback runs inside it, as the client's teardown runs inside the
+// exit's disconnect: the process latch, then the exit reason it stores or the input action it
+// queues, which runs when `queued_action_dispatches` (the exit's input pass drains the queue
+// after it; a menu screen's confirmation resets it first) (D-NET-NEW-L1-26, L1-s32 row 1).
+void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain,
+		bool queued_action_dispatches);
 
 // The pending walk of a pump that drains the own client's goodbye held for `drain`: the own
 // pair's twin is torn down (its /INOUT SERVER line, the host player's removal, the leave records
