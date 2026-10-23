@@ -197,7 +197,21 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 //  @0x526370 (the call @0x526377)]
 void JoinerRole::push_mission_start_end(const std::function<void()> &present) {
 	if (!runtime) return;
-	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_end(present)) send(dg);
+	// The role's legs at their points in the push (D-NET-NEW-L2-52): L's birth where
+	// Player_InitPlayer binds and inits the local entity, the null-tested block past the second
+	// 0x2F's queue, and the Attack & Defend latch on L as they left it, ahead of the 0x0B's
+	// queue. Retail's joiner latches there, after Player_InitPlayer and the receive drain.
+	// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, the receive drain
+	//  @0x525BD9, the second 0x2F @0x525C2E, Entity_BuildAllProximityLists @0x525C90,
+	//  Game_LatchAttackDefendRole @0x5260C1, the 0x0B @0x52624B]
+	ClientRuntime::MissionStartEndLegs legs;
+	legs.init_player = [this] {
+		if (init_local_player_at_mission_start()) mission_start_birth_unreleased_ = true;
+	};
+	legs.start_block = [this] { run_mission_start_local_block(); };
+	legs.present = present;
+	legs.latch = [this] { kernel_->local.latch_attack_defend_role(runtime->game_type()); };
+	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_end(legs)) send(dg);
 	if (!runtime->in_final_wait()) return;
 	deposit_inbound();
 	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_)) send(dg);
@@ -1046,8 +1060,9 @@ void JoinerRole::pump() {
 	apply_mounted_ammo_update();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 	mirror_mission_entities();
-	// The Attack & Defend latch the boot ran with no L, on L's spawn frame
-	// once the mirror applied the frame's teams, as retail's joiner latches
+	// The Attack & Defend latch the boot ran with no L, on a seeded session's L spawn
+	// frame once the mirror applied the frame's teams (a join's L latches in its mission
+	// start's push, JoinerRole::push_mission_start_end), as retail's joiner latches
 	// after its mission start pumped every message, the last drain after
 	// Player_InitPlayer [orig: Game_StartMission @0x524360 -- the
 	//  NapiClient_WaitForGameStart call @0x524E29, the Player_InitPlayer call
@@ -1722,8 +1737,9 @@ void JoinerRole::send_hello_once() {
 
 // The client net frame (recv-fold + connect-drive + the gated C2S 0x0C uplink) with the
 // receive handlers' writes on L in its after-receive leg (loadout/kit, side assignment,
-// the deployment-release latch, L's birth on the in-match edge, its own record and the
-// 0x0F's pose), then the ~1 Hz freeze tripwire and the objective sync into world subgoals.
+// the deployment-release latch, a seeded session's birth of L on the in-match edge, its own
+// record and the 0x0F's pose), then the ~1 Hz freeze tripwire and the objective sync into
+// world subgoals.
 // The wire leg's clock stops right after the ship, so the embedder's F3 Stats board
 // measures the net frame with its folds. Returns what this frame's pump decoded (drives
 // the later phases).
@@ -1735,8 +1751,9 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	const uint32_t now = now_tick_;
 	// The uplink describes L's pose as left by the previous entity update and this frame's
 	// receive; this frame's raw-input/motor pass follows all inbound application.
-	// The health edge is this net frame's own (its applier writes L, which no receive outside
-	// the net frame finds: L is born at the in-match edge, after the final wait's first pass).
+	// The health edge is this net frame's own (its applier writes L; the one receive outside
+	// the net frame, the push's final-wait first pass, folds only what came during the load,
+	// ahead of any host reply to the mission start's sends, D-NET-NEW-L2-52).
 	const uint32_t health_updates_before =
 			rt.state().health_updates_applied;
 	const bool local_existed_before_net = local_spawned_;
@@ -1751,10 +1768,11 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// right after its receive pump, ahead of the send block, open or not
 	// (ClientRuntime::AfterReceive). Each fold applies what the receive brought (each is
 	// revision-gated), in the handlers' order: the availability, the 0x5A's kit and row,
-	// the side's kit buffer, the 0x50's team and local arm, the release latch; then L's
-	// birth on the in-match edge (retail's L exists from the mission start, so its handlers
-	// write it inside the receive), its own record and the 0x0F's pose. So a release's 0x0C
-	// is built from L as the receive left it (D-NET-526): a game-loop frame's in that frame;
+	// the side's kit buffer, the 0x50's team and local arm, the release latch; then a seeded
+	// session's birth of L on the in-match edge (a join's L is born at its mission start, as
+	// retail's, so the handlers write it inside the receive, D-NET-NEW-L2-52), its own record
+	// and the 0x0F's pose. So a release's 0x0C is built from L as the receive left it
+	// (D-NET-526): a game-loop frame's in that frame;
 	// the final wait's 0x0F pass sends the completion burst alone and the game loop's first
 	// frame builds the first 0x0C (D-NET-NEW-L2-48).
 	// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
@@ -1850,14 +1868,16 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 				rt.deployment_release_revision();
 		if (deployment_release_revision > deployment_release_revision_seen_) {
 			deployment_release_revision_seen_ = deployment_release_revision;
-			// The first release creates L (below). A later release must revive that
-			// existing identity, but only after a positive 0x0A tail observed after
-			// this release frame (not a stale positive already queued ahead of it).
-			if (local_existed_before_net) {
+			// The first release admits L, which the mission start bore (or which the in-match
+			// edge bears below, D-NET-NEW-L2-52). A later release must revive that existing
+			// identity, but only after a positive 0x0A tail observed after this release frame
+			// (not a stale positive already queued ahead of it).
+			if (local_existed_before_net && !mission_start_birth_unreleased_) {
 				redeploy_release_pending_ = true;
 				redeploy_health_updates_at_release_ =
 						rt.state().health_updates_applied;
 			}
+			mission_start_birth_unreleased_ = false;
 		}
 		{
 			// L's birth on the stats board (an instrument).
@@ -2007,10 +2027,11 @@ void JoinerRole::reinit_local_player_on_team_assign() {
 	ClientRuntime &rt = *runtime;
 	world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) {
-		// Past the mission start's binding (its Player_InitPlayer ran), ours' L spawns
-		// later (at its release): the re-run and the 0x50's own pair wait for that spawn
-		// (stamp_mission_start_identity). A local arm ahead of the binding (a stale one in
-		// a reload's waits) is overwritten by the mission start's init, so it leaves nothing.
+		// Past the mission start's binding with no L yet (a self handle bound only past the
+		// mission start: ours bears L on the in-match edge, D-NET-NEW-L2-52): the re-run and
+		// the 0x50's own pair wait for that spawn (stamp_mission_start_identity). A local arm
+		// ahead of the binding (a stale one in a reload's waits) is overwritten by the mission
+		// start's init, so it leaves nothing.
 		if (!rt.in_mission_start() && !rt.in_pre_game() && !rt.mission_start_aborted())
 			post_start_identity_pending_ = true;
 		return;
@@ -2030,11 +2051,12 @@ void JoinerRole::reinit_local_player_on_team_assign() {
 }
 
 // The joiner's own entity's identity at the mission start's Player_InitPlayer, which ours runs
-// on L at its spawn (the release, after the final wait): the init restamps animSlot from the
-// avatar byte of the side L's Team names (team 1 or 3 the first side; the avatar bytes are
+// on L at its birth (the mission start's push, else the in-match edge, D-NET-NEW-L2-52): the
+// init restamps animSlot from the avatar byte of the side L's Team names (team 1 or 3 the
+// first side; the avatar bytes are
 // the ones the join sent as VCA / VCB) and never writes the NetId, so L keeps the latest
 // 0x0C / 0x50 NetId, the self row's; a self 0x50 whose local arm ran after the init (the
-// mission start bound the local entity, L not yet spawned here) re-ran the init and then
+// mission start bound the local entity, L born on the in-match edge) re-ran the init and then
 // stored its own pair, so L takes that 0x50's animSlot instead. With no self row (a seeded
 // harness) the record's NetId stands; with no join vars installed, the record's animSlot.
 // [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC; Player_InitPlayer
@@ -2070,6 +2092,7 @@ void JoinerRole::reset_for_join() {
 	// correction).
 	started_ = false;
 	local_spawned_ = false;
+	mission_start_birth_unreleased_ = false;
 	final_wait_seen_ = false;
 	final_wait_end_ = false;
 	deployment_release_revision_seen_ = 0;

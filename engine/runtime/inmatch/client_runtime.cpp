@@ -2248,14 +2248,15 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_first_loadou
 }
 
 std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end(
-		const std::function<void()> &present) {
+		const MissionStartEndLegs &legs) {
 	std::vector<std::vector<uint8_t>> outbound;
 	if (joiner_ == nullptr || !joiner_->mission_start_released()) return outbound;
 	// The first leg here when the embedder's load did not run it at its point.
 	(void)mission_start_first_leg(outbound);
 	// The pump after the freeze, then the load's zero of the frame tick (no main frame runs
 	// until the final wait ends), Player_InitPlayer (the submissions' take binds the local
-	// player entity), the receive, the second 0x2F and the 0x0B queued, the last send.
+	// player entity, the role's leg inits it), the receive, the second 0x2F and the 0x0B
+	// queued, the last send.
 	// [orig: Game_StartMission @0x524360 - NetClient_FlushAndSync @0x525aca, `mov
 	//  g_CurrentTick, ebx` @0x525B9F, Player_InitPlayer @0x525BBC, the receive @0x525bd9, the
 	//  second 0x2F @0x525c2e and the 0x0B @0x52624b queued, the send @0x526255]
@@ -2263,12 +2264,18 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end(
 	view_.zero_frame_tick();
 	JoinerConnection::MissionStartSubmissions submissions;
 	(void)joiner_->take_mission_start_submissions(submissions);
+	if (legs.init_player) legs.init_player();
 	mission_start_receive_pump();
 	send_queue_.push_back(std::move(submissions.second_loadout));
+	// The block on the local entity: its indoors bit and revive latch cleared, unhidden,
+	// every proximity list rebuilt, hidden again (the header carries the witness).
+	if (legs.start_block) legs.start_block();
 	// The loading screen's 100 %, past the second 0x2F's queue and ahead of the 0x0B's: the
 	// mission start presents it itself, ahead of the final wait (the header carries the
 	// witness, D-NET-NEW-L8-41).
-	if (present) present();
+	if (legs.present) legs.present();
+	// The Attack & Defend latch, past the present and ahead of the 0x0B's queue.
+	if (legs.latch) legs.latch();
 	send_queue_.push_back(std::move(submissions.mission_status));
 	mission_start_send_pump(outbound);
 	// The push ends here. What the countdown still holds waits in the queue for the final

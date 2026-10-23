@@ -954,27 +954,33 @@ struct RoleHarness {
 	}
 };
 
-// D-NET-526: the joiner's own body is born where retail's handlers write it, in the
-// receive. The release (a 0x5A) and the S2C 0x0F reach a joiner whose self record is
-// bound in one packet: the role's after-receive leg spawns L, folds its record and lands
-// the 0x0F's pose. That pass is the final wait's (D-NET-NEW-L2-48): under no holdoff its
+// D-NET-526, D-NET-NEW-L2-52: the joiner's own body is born at its mission start, where
+// retail's Player_InitPlayer binds the self entity the world stream's 0x0C built, ahead of the
+// 0x0B and the final wait; it leaves the mission start hidden. The release (a 0x5A) and the S2C
+// 0x0F then reach it in one packet: the role's after-receive leg writes the handlers' stores on
+// L, folds its record and lands the 0x0F's pose, and the release is L's admission, no
+// redeploy's hold. That pass is the final wait's (D-NET-NEW-L2-48): under no holdoff its
 // send ships the 0x0F's completion burst alone (the early form: RR's kick / aikill / 03tr-dm
 // joiners), and it runs no entity update or World tick, so the game loop's first frame
 // builds the 0x2C ping and the first 0x0C from L as the 0x0F left it, at the 0x0F's position.
 // [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
 //  block @0x42C3DD, the 0x0C's build from g_LocalPlayerEntity @0x42C46F..0x42C482;
 //  NapiNPClientMsg_0x00F @0x42E200 - the pose stores @0x42E3B9..0x42E3CE;
-//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, the final wait's send @0x5262DA
-//  ahead of its exit test @0x5262DF; Game_ProcessMainFrame @0x5263F0 - Client_ProcessNetworkFrame
-//  @0x526692 ahead of Entity_UpdateAllEntities @0x52674B]
-bool run_the_release_pass_bears_l_and_the_first_frame_ships_its_uplink() {
+//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, `or [eax+24h], edi` @0x525C9E,
+//  the 0x0B @0x52624B, the final wait's send @0x5262DA ahead of its exit test @0x5262DF;
+//  Player_InitPlayer @0x4E15F0 - the store @0x4E17EB; Game_ProcessMainFrame @0x5263F0 -
+//  Client_ProcessNetworkFrame @0x526692 ahead of Entity_UpdateAllEntities @0x52674B]
+bool run_the_mission_start_bears_l_and_the_first_frame_ships_its_uplink() {
 	RoleHarness h;
 	// The self record rides the world stream, ahead of the mission start.
 	if (!expect(drive_to_the_final_wait(h, 0, {self_spawn_record()}),
 			"release frame: the final wait runs"))
 		return false;
-	if (!expect(h.client.has_self_handle() && !h.client.in_match() && !h.role.local_spawned(),
-			"release frame: the self record is bound, no release yet, no L"))
+	const world::Entity *born = h.kernel->local.player();
+	if (!expect(h.client.has_self_handle() && !h.client.in_match() && h.role.local_spawned() &&
+	                    born != nullptr && (born->flags & world::kEntityFlagCarried) != 0u,
+			"release frame: the self record is bound, no release yet; the mission start bore L, "
+			"hidden"))
 		return false;
 	// 23-byte header [u32 tick][i32 x][i32 y][i32 z][i16 yaw][i16 pitch][i16 roll][u8 flags],
 	// the 128 pool dwords, zero waypoint / location counts.
@@ -990,8 +996,9 @@ bool run_the_release_pass_bears_l_and_the_first_frame_ships_its_uplink() {
 	                    {{0x28, 0x29, 0x2D, 0x32, 0x22, 0x23}}),
 			"release frame: the 0x0F's pass (the wait's) sends its burst alone"))
 		return false;
-	if (!expect(h.client.in_match() && h.role.local_spawned(),
-			"release frame: L is born in the pass whose receive released it"))
+	if (!expect(h.client.in_match() && h.role.local_spawned() &&
+	                    h.kernel->local.player() == born,
+			"release frame: the mission start's L takes the release in the pass"))
 		return false;
 	const std::vector<std::vector<uint8_t>> sent = h.frame();
 	if (!expect(h.packets(sent, {{0x2C, 0x0C}}),
@@ -1486,6 +1493,103 @@ bool run_the_mission_start_runs_in_the_0x1a_pass() {
 			"held second 0x2F with the 0x0B");
 }
 
+// D-NET-NEW-L2-52: the mission start's role legs sit at retail's points in the push.
+// Player_InitPlayer runs right after the submissions' take binds the local entity, ahead of
+// the receive and the second 0x2F's queue; the null-tested block with the proximity rebuild
+// runs past that queue; then the 100 % present and the Attack & Defend latch, ahead of the
+// 0x0B's queue. Under a dictated period of 12 with the countdown at 1 at the wait's exit, the
+// push's first leg sends the first 0x2F alone and its end holds the second 0x2F and the 0x0B
+// for the 0x0F wait.
+// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC (Player_InitPlayer
+//  @0x4E15F0 - the store @0x4E17EB), the receive @0x525BD9, the second 0x2F @0x525C2E,
+//  Entity_BuildAllProximityLists @0x525C90, LoadingScreen_UpdateAndPresent @0x525D29,
+//  Game_LatchAttackDefendRole @0x5260C1, the 0x0B @0x52624B, the send @0x526255]
+bool run_the_mission_start_legs_keep_retails_order() {
+	Harness h;
+	if (!expect(drive_into_the_world_stream(h, 12), "legs: the world stream runs")) return false;
+	h.load_declared = true;
+	(void)h.frame({self_spawn_record()});
+	for (int i = 0; i < 24 && h.client.send_holdoff_countdown() != 2; ++i) (void)h.frame();
+	(void)h.frame({make_protocol_message(0x1A, {})});
+	if (!expect(h.client.mission_start_released() && h.client.has_self_handle() &&
+	                    !h.client.local_entity_bound(),
+			"legs: the 0x1A released the mission start, the self entity not yet bound"))
+		return false;
+	std::vector<std::string> order;
+	std::vector<std::size_t> queued;
+	bool bound_at_init = false;
+	const auto leg = [&](const char *name) {
+		order.push_back(name);
+		queued.push_back(h.client.queued_send_count());
+	};
+	inmatch::ClientRuntime::MissionStartEndLegs legs;
+	legs.init_player = [&] {
+		leg("init_player");
+		bound_at_init = h.client.local_entity_bound();
+	};
+	legs.start_block = [&] { leg("start_block"); };
+	legs.present = [&] { leg("present"); };
+	legs.latch = [&] { leg("latch"); };
+	const std::vector<std::vector<uint8_t>> pushed = h.client.push_mission_start_end(legs);
+	if (!expect(order == std::vector<std::string>{"init_player", "start_block", "present",
+	                                              "latch"},
+			"legs: the player init, the block, the present, the latch, in that order"))
+		return false;
+	if (!expect(bound_at_init, "legs: the player init runs on the local entity its take bound"))
+		return false;
+	if (!expect(queued[1] == queued[0] + 1 && queued[2] == queued[1] && queued[3] == queued[1],
+			"legs: the second 0x2F is queued between the player init and the block; the "
+			"present and the latch run ahead of the 0x0B's queue"))
+		return false;
+	if (!expect(h.packets(pushed, {{0x2F}}) && h.client.send_holdoff_countdown() == 11,
+			"legs: the push sends the first 0x2F alone and holds the rest at c = 11"))
+		return false;
+	return expect(h.packets(h.frame(), {{0x2F, 0x0B}}),
+			"legs: the 0x0F wait sends the second 0x2F with the 0x0B behind the legs");
+}
+
+// D-NET-NEW-L2-52: a join's L is born in its mission start, as retail's Player_InitPlayer binds
+// and inits the self entity the world stream's 0x0C built: not in the 0x1A's pass or the load,
+// but in the push, so the embedder's 100 % present already finds L, which the block left
+// hidden, and the call ends in the final wait with L ahead of any release.
+// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, `or [eax+24h], edi`
+//  @0x525C9E, LoadingScreen_UpdateAndPresent @0x525D29, the 0x0B @0x52624B;
+//  Player_InitPlayer @0x4E15F0 - Player_FindLocalPlayerEntity @0x4E17E4, the store @0x4E17EB]
+bool run_the_mission_start_push_bears_l() {
+	RoleHarness h;
+	if (!expect(drive_into_the_world_stream(h, 0), "birth: the world stream runs")) return false;
+	h.load_declared = true;
+	(void)h.frame({self_spawn_record()});
+	if (!expect(h.client.has_self_handle() && !h.role.local_spawned(),
+			"birth: the world stream's self record bears no L"))
+		return false;
+	const std::vector<uint8_t> release = frame_server_session(h.server_tx, h.server_scrk,
+			h.auth.ck, {make_protocol_message(0x1A, {})});
+	h.client.receive(release.data(), release.size());
+	bool spawned_at_load = true;
+	bool spawned_at_present = false;
+	bool hidden_at_present = false;
+	inmatch::JoinerRole::MissionStartLegs legs;
+	legs.load = [&] {
+		spawned_at_load = h.role.local_spawned();
+		return true;
+	};
+	legs.present = [&] {
+		spawned_at_present = h.role.local_spawned();
+		const world::Entity *L = h.kernel->local.player();
+		hidden_at_present = L != nullptr && (L->flags & world::kEntityFlagCarried) != 0u;
+	};
+	if (!expect(h.role.poll_mission_start(legs) == inmatch::JoinerRole::MissionStartPass::Started,
+			"birth: the mission start's call runs"))
+		return false;
+	if (!expect(!spawned_at_load, "birth: no L in the 0x1A's pass or the load")) return false;
+	if (!expect(spawned_at_present && hidden_at_present,
+			"birth: the push bears L ahead of the 100 % present, hidden by the block"))
+		return false;
+	return expect(h.client.in_final_wait() && !h.client.in_match() && h.role.local_spawned(),
+			"birth: the call ends in the final wait with L, ahead of any release");
+}
+
 // The joiner's round clock at its mission start: retail never seeds it. Game_StartMission's
 // round-clock seed (g_RoundTimeRemaining = g_RoundTimeLimitMinutes x 3720 when in session,
 // outside the Co-op waypoint family, with a nonzero limit) sits on the authority / single-player
@@ -1907,7 +2011,7 @@ int main() {
 	ok = run_a_self_team_assign_waits_for_the_mission_starts_player_init() && ok;
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
 	ok = run_a_bodyless_joiner_pings() && ok;
-	ok = run_the_release_pass_bears_l_and_the_first_frame_ships_its_uplink() && ok;
+	ok = run_the_mission_start_bears_l_and_the_first_frame_ships_its_uplink() && ok;
 	ok = run_the_final_wait_end_ends_the_mode_init() && ok;
 	ok = run_a_0x0f_after_the_mission_start_call_ends_the_mode_init() && ok;
 	ok = run_the_0x0f_pass_lands_its_handler_writes() && ok;
@@ -1921,6 +2025,8 @@ int main() {
 	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;
 	ok = run_the_mission_start_first_leg_runs_mid_load() && ok;
 	ok = run_the_mission_start_runs_in_the_0x1a_pass() && ok;
+	ok = run_the_mission_start_legs_keep_retails_order() && ok;
+	ok = run_the_mission_start_push_bears_l() && ok;
 	ok = run_the_joiner_mission_start_keeps_the_folded_round_clock() && ok;
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;

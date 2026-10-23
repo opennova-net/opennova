@@ -267,133 +267,156 @@ void JoinerRole::materialize_replica_world() {
 	}
 }
 
-// On the in-match edge (detected by the recv-fold): learn H + spawn L at the host-advertised
-// pose. L is the joiner's OWN motor-driven pool-0 entity (publishes cached.local_player); H is the
-// wire identity the host knows us by — the two stay distinct, reconciled by the owner-ID match (§5.38b).
-void JoinerRole::spawn_and_arm_local_player() {
+// L's birth where retail's mission start binds and inits the local entity: its Player_InitPlayer
+// finds the joiner's own pool-0 body (the host's 0x0C built it in the world stream's receive) and
+// binds it, on every role, so retail's L exists from the mission start, ahead of its second 0x2F,
+// its 0x0B and the final wait; ours bears L there at the host-advertised pose, once the self
+// handle is bound (D-NET-NEW-L2-52). L is the joiner's OWN motor-driven pool-0 entity (publishes
+// cached.local_player); H is the wire identity the host knows us by; the two stay distinct,
+// reconciled by the owner-ID match (§5.38b).
+// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC; Player_InitPlayer @0x4E15F0 -
+//  Player_FindLocalPlayerEntity @0x4E17E4, the store @0x4E17EB, Player_FatalPlayerDcbNotFound
+//  @0x4E17F2 (no local entity is fatal); NapiNPClientMsg_0x00C @0x42E730]
+bool JoinerRole::init_local_player_at_mission_start() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;
 	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
-	if (rt.in_match() && rt.has_self_handle() && !local_spawned_) {
-		const JoinerConnection::SelfSpawn &sp = rt.spawn_pose();
-		world::PlayerSpawn spawn = spawn_from_self(sp);
-		stamp_mission_start_identity(spawn);
-		const world::EntityHandle h = world::spawn_player(world, spawn);
-		local_spawned_ = h.valid();
-		// A 0x18 that built the self row ahead of L's spawn is not a rebuild of L.
+	if (!rt.has_self_handle() || local_spawned_) return false;
+	const JoinerConnection::SelfSpawn &sp = rt.spawn_pose();
+	world::PlayerSpawn spawn = spawn_from_self(sp);
+	stamp_mission_start_identity(spawn);
+	const world::EntityHandle h = world::spawn_player(world, spawn);
+	local_spawned_ = h.valid();
+	// A 0x18 that built the self row ahead of L's spawn is not a rebuild of L.
+	if (const replication::ClientEntityState *row = rt.state().find(rt.self_handle()))
+		self_full_spawn_revision_seen_ = row->spawn_revision;
+	// A client builds its own body from the host's 0x0C like every
+	// pool-0 entity: the slot memset leaves commandGroup (+0x11C) 0 and no
+	// client message stores it. The 1 spawn_player stamps is the
+	// authority's (Entity_SpawnFromAnimSlotProperty @0x43C50F, reached
+	// from Server_PlayerAdd @0x51D056 and
+	// Server_InitAllPlayerEntitiesForRound @0x516B67).
+	// [orig: NapiNPClientMsg_0x00C @0x42E7F1]
+	if (world::Entity *body = world.registry.get(h)) body->group_id = 0;
+	// L's +0x154 is its own record's slot byte, whichever spawn built it (the 0x0C's
+	// store, the 0x18's). Its DcbId (+0x7C) is the plyr class init's 10000 + that byte
+	// (world::entity_dcb_id): the 0x18 runs the init after its store, and a 0x0C body,
+	// whose own init ran ahead of the store, takes it again at the mission start's
+	// re-init of every pool-0 row, ahead of Player_InitPlayer, where L is born
+	// (D-NET-NEW-L5-18).
+	// [orig: NapiNPClientMsg_0x00C @0x42E730 - Entity_InitFromItemDef @0x42E84D ahead of
+	//  the +0x154 store @0x42EA06; NapiNPClientMsg_FullEntitySpawn @0x433780 - the store
+	//  @0x433BBB ahead of the init call @0x433E82; Game_StartMission @0x524360 -
+	//  NapiClient_WaitForGameStart @0x524E29, Entity_InitAllFromModels @0x52567F (no
+	//  role gate), Player_InitPlayer @0x525BBC; Entity_InitAllFromModels @0x40E460 - the
+	//  pool-0 init callbacks @0x40E5DA..0x40E60B; PlayerClass_InitEntity @0x4B1060 -
+	//  10000 + [+0x154] @0x4B1149..0x4B1155]
+	if (world::Entity *body = world.registry.get(h))
 		if (const replication::ClientEntityState *row = rt.state().find(rt.self_handle()))
-			self_full_spawn_revision_seen_ = row->spawn_revision;
-		// A client builds its own body from the host's 0x0C like every
-		// pool-0 entity: the slot memset leaves commandGroup (+0x11C) 0 and no
-		// client message stores it. The 1 spawn_player stamps is the
-		// authority's (Entity_SpawnFromAnimSlotProperty @0x43C50F, reached
-		// from Server_PlayerAdd @0x51D056 and
-		// Server_InitAllPlayerEntitiesForRound @0x516B67).
-		// [orig: NapiNPClientMsg_0x00C @0x42E7F1]
-		if (world::Entity *body = world.registry.get(h)) body->group_id = 0;
-		// L's +0x154 is its own record's slot byte, whichever spawn built it (the 0x0C's
-		// store, the 0x18's). Its DcbId (+0x7C) is the plyr class init's 10000 + that byte
-		// (world::entity_dcb_id): the 0x18 runs the init after its store, and a 0x0C body,
-		// whose own init ran ahead of the store, takes it again at the mission start's
-		// re-init of every pool-0 row, ahead of Player_InitPlayer, where L is born
-		// (D-NET-NEW-L5-18).
-		// [orig: NapiNPClientMsg_0x00C @0x42E730 - Entity_InitFromItemDef @0x42E84D ahead of
-		//  the +0x154 store @0x42EA06; NapiNPClientMsg_FullEntitySpawn @0x433780 - the store
-		//  @0x433BBB ahead of the init call @0x433E82; Game_StartMission @0x524360 -
-		//  NapiClient_WaitForGameStart @0x524E29, Entity_InitAllFromModels @0x52567F (no
-		//  role gate), Player_InitPlayer @0x525BBC; Entity_InitAllFromModels @0x40E460 - the
-		//  pool-0 init callbacks @0x40E5DA..0x40E60B; PlayerClass_InitEntity @0x4B1060 -
-		//  10000 + [+0x154] @0x4B1149..0x4B1155]
-		if (world::Entity *body = world.registry.get(h))
-			if (const replication::ClientEntityState *row = rt.state().find(rt.self_handle()))
-				body->player_slot_id = row->spawn_byte_154;
-		// L is born after the boot's definition sweeps: bind its items.def row
-		// now, as the host's L was at boot (without it L kept the "default"
-		// sound profile, which authors no slots: no footsteps, foley, landings
-		// or death scream).
-		if (local_spawned_) kernel.bind_spawned_body(h);
-		// Arm L the way the host's own spawn does at Player_InitPlayer time: the
-		// shell applied the profile kit/class BEFORE L existed (the pre-spawn
-		// apply latched it into the inventory), so stamp the deferred class +
-		// damage classes + equipped adm on the fresh entity now. [orig:
-		// Player_InitPlayer weapon leg @ 0x4e15f0; equippedAdmIndex stamp @ 0x4dd727]
-		if (world::Entity *L = world.registry.get(h)) {
-			// Player_InitPlayer ends by clearing the local player's hidden bit, on a
-			// joiner as on a host, at every mission start.
-			// [orig: Game_StartMission @0x525BBC -> Player_InitPlayer @0x4E15F0,
-			//  `and dword ptr [eax+24h], 0FFFFFFFEh` @0x4E19C2]
-			L->hidden = false;
-			L->flags &= ~world::kEntityFlagCarried;
-			// Then the mission start's own block on a non-null local player, a joiner's L
-			// as the host's (HostRole::init_local_player_at_mission_start): the indoors bit
-			// and the medic-revive latch cleared, the hidden bit cleared, every proximity
-			// list rebuilt, the hidden bit set again, so L leaves the mission start hidden;
-			// the frame's record fold (fold_local_record, the 0x0A's Flags byte) and the
-			// world-state load (apply_world_state_load, the 0x0F's clear) then decide it.
-			// [orig: Game_StartMission @0x524360 - the null tests @0x525C70 / @0x525C9A,
-			//  `and [eax+24h], 0FF7FFFFFh` @0x525C74, +0x1E0 = 0 @0x525C81,
-			//  `and [eax+24h], 0FFFFFFFEh` @0x525C8C, Entity_BuildAllProximityLists
-			//  @0x525C90, `or [eax+24h], edi` @0x525C9E (edi = 1 from @0x5255B9)]
-			L->flags &= ~world::kEntityFlagIndoors;
-			L->medic_reviving = false;
-			if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
-			L->flags |= world::kEntityFlagCarried;
-			// The mission start's Player_InitPlayer class word: the side L's Team names, as
-			// it is (no range test), whatever class the shell's pre-spawn apply latched
-			// [orig: Player_InitPlayer @0x4E15F0 - @0x4E1809..0x4E1832; Game_StartMission
-			//  @0x525BBC].
-			stamp_init_player_class(*L);
-			// No damage-class bytes: in a session only the host's accept writes them
-			// (D-NET-691) [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515E92;
-			//  WeaponLoadout_ApplyFromBuffer's in-session leg sends @0x565D94].
-			if (lp.inventory_valid && lp.inventory.equipped_combo >= 0) {
-				const world::WeaponInventorySlot *slot =
-						lp.inventory.slot(lp.inventory.equipped_combo);
-				if (slot != nullptr && slot->adm_index >= 0) {
-					L->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
-					// Replay the deferred PRESENTATION half of every selection that
-					// committed while L did not exist (the 0x5A grant applies before
-					// the spawn). Retail has no entity precondition there: the
-					// selection restamps equippedAdmIndex and the FP viewmodel is
-					// re-resolved per frame off EquippedSlot [orig: the 0x5A tail
-					// @0x4296E3 -> Player_SelectWeaponSlot @0x4DD680 @0x4dd727;
-					// Player_RenderFirstPersonViewModel @0x4DED60]. Exactly ONE event
-					// is queued, naming the weapon the inventory actually selected —
-					// without it the viewmodel and the weapon FSM kept running the
-					// SUBMITTED weapon while the entity and the wire followed the
-					// granted one.
-					// weapon.start_in_switchto is deliberately left as the last
-					// rebuild settled it — the spawn mount plays no switch actions
-					// (D-WPN-21), and this replay only restores the notification.
-					if (lp.weapon.presentation_pending) {
-						lp.weapon.presentation_pending = false;
-						const world::WeaponTableEntry *def =
-								world.tables.weapons.by_index(
-										static_cast<uint8_t>(slot->adm_index));
-						world::WeaponPresentationEvent event;
-						event.tick = world.logic_tick;
-						if (const world::Entity *local =
-									world.registry.get(
-											world.cached.local_player))
-							event.world_position = local->position;
-						event.switch_to_weapon =
-								def != nullptr ? def->name : std::string();
-						lp.weapon.events.push_back(std::move(event));
-					}
+			body->player_slot_id = row->spawn_byte_154;
+	// L is born after the boot's definition sweeps: bind its items.def row
+	// now, as the host's L was at boot (without it L kept the "default"
+	// sound profile, which authors no slots: no footsteps, foley, landings
+	// or death scream).
+	if (local_spawned_) kernel.bind_spawned_body(h);
+	// Arm L the way the host's own spawn does at Player_InitPlayer time: the
+	// shell applied the profile kit/class BEFORE L existed (the pre-spawn
+	// apply latched it into the inventory), so stamp the deferred class +
+	// damage classes + equipped adm on the fresh entity now. [orig:
+	// Player_InitPlayer weapon leg @ 0x4e15f0; equippedAdmIndex stamp @ 0x4dd727]
+	if (world::Entity *L = world.registry.get(h)) {
+		// Player_InitPlayer ends by clearing the local player's hidden bit, on a
+		// joiner as on a host, at every mission start.
+		// [orig: Game_StartMission @0x525BBC -> Player_InitPlayer @0x4E15F0,
+		//  `and dword ptr [eax+24h], 0FFFFFFFEh` @0x4E19C2]
+		L->hidden = false;
+		L->flags &= ~world::kEntityFlagCarried;
+		// The mission start's Player_InitPlayer class word: the side L's Team names, as
+		// it is (no range test), whatever class the shell's pre-spawn apply latched
+		// [orig: Player_InitPlayer @0x4E15F0 - @0x4E1809..0x4E1832; Game_StartMission
+		//  @0x525BBC].
+		stamp_init_player_class(*L);
+		// No damage-class bytes: in a session only the host's accept writes them
+		// (D-NET-691) [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515E92;
+		//  WeaponLoadout_ApplyFromBuffer's in-session leg sends @0x565D94].
+		if (lp.inventory_valid && lp.inventory.equipped_combo >= 0) {
+			const world::WeaponInventorySlot *slot =
+					lp.inventory.slot(lp.inventory.equipped_combo);
+			if (slot != nullptr && slot->adm_index >= 0) {
+				L->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
+				// Replay the deferred PRESENTATION half of every selection that
+				// committed while L did not exist (the load's profile kit apply; on the
+				// in-match edge, the 0x5A grant ahead of it). Retail has no entity
+				// precondition there: the
+				// selection restamps equippedAdmIndex and the FP viewmodel is
+				// re-resolved per frame off EquippedSlot [orig: the 0x5A tail
+				// @0x4296E3 -> Player_SelectWeaponSlot @0x4DD680 @0x4dd727;
+				// Player_RenderFirstPersonViewModel @0x4DED60]. Exactly ONE event
+				// is queued, naming the weapon the inventory actually selected;
+				// without it the viewmodel and the weapon FSM kept running the
+				// SUBMITTED weapon while the entity and the wire followed the
+				// granted one.
+				// weapon.start_in_switchto is deliberately left as the last
+				// rebuild settled it: the spawn mount plays no switch actions
+				// (D-WPN-21), and this replay only restores the notification.
+				if (lp.weapon.presentation_pending) {
+					lp.weapon.presentation_pending = false;
+					const world::WeaponTableEntry *def =
+							world.tables.weapons.by_index(
+									static_cast<uint8_t>(slot->adm_index));
+					world::WeaponPresentationEvent event;
+					event.tick = world.logic_tick;
+					if (const world::Entity *local =
+								world.registry.get(
+										world.cached.local_player))
+						event.world_position = local->position;
+					event.switch_to_weapon =
+							def != nullptr ? def->name : std::string();
+					lp.weapon.events.push_back(std::move(event));
 				}
 			}
 		}
-		// Retail polls live keys; a press during the join wait must not cross
-		// the spawn edge as a queued shot/reload. Clear the consume-latches too;
-		// the embedder clears its device-input latches and seeds the look
-		// heading from the spawn facing in the hook.
-		lp.weapon.fire_held = false;
-		lp.weapon.fire_pressed = false;
-		lp.weapon.reload_pressed = false;
-		kernel.resolve_new_infantry_adm_ids();
-		lp.reset_local_player_input(spawn.heading);
 	}
+	// Retail polls live keys; a press during the join wait must not cross
+	// the spawn edge as a queued shot/reload. Clear the consume-latches too;
+	// the look heading starts at the spawn facing.
+	lp.weapon.fire_held = false;
+	lp.weapon.fire_pressed = false;
+	lp.weapon.reload_pressed = false;
+	kernel.resolve_new_infantry_adm_ids();
+	lp.reset_local_player_input(spawn.heading);
+	return local_spawned_;
+}
+
+// The mission start's own block on a non-null local player, a joiner's L as the host's
+// (HostRole::init_local_player_at_mission_start), past its second 0x2F's queue: the indoors bit
+// and the medic-revive latch cleared, the hidden bit cleared, every proximity list rebuilt, the
+// hidden bit set again, so L leaves the mission start hidden; the record fold
+// (fold_local_record, the 0x0A's Flags byte) and the world-state load (apply_world_state_load,
+// the 0x0F's clear) then decide it.
+// [orig: Game_StartMission @0x524360 - the null tests @0x525C70 / @0x525C9A,
+//  `and [eax+24h], 0FF7FFFFFh` @0x525C74, +0x1E0 = 0 @0x525C81,
+//  `and [eax+24h], 0FFFFFFFEh` @0x525C8C, Entity_BuildAllProximityLists
+//  @0x525C90, `or [eax+24h], edi` @0x525C9E (edi = 1 from @0x5255B9)]
+void JoinerRole::run_mission_start_local_block() {
+	world::World &world = kernel_->world;
+	world::Entity *L = local_spawned_ ? world.registry.get(world.cached.local_player) : nullptr;
+	if (L != nullptr) {
+		L->flags &= ~world::kEntityFlagIndoors;
+		L->medic_reviving = false;
+		L->flags &= ~world::kEntityFlagCarried;
+	}
+	if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
+	if (L != nullptr) L->flags |= world::kEntityFlagCarried;
+}
+
+// The in-match edge (detected by the recv-fold) bears L only where the mission start found no
+// self handle to bind (a seeded session, which runs no mission start): both of the mission
+// start's legs, on the release.
+void JoinerRole::spawn_and_arm_local_player() {
+	if (!runtime->in_match() || local_spawned_) return;
+	if (init_local_player_at_mission_start()) run_mission_start_local_block();
 }
 
 // The player record's Flags apply: the record that names the local player folds

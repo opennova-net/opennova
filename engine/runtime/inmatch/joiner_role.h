@@ -140,9 +140,12 @@ public:
 	// The end of the mission start the S2C 0x1A released, once the embedder's load has run
 	// (ClientRuntime::push_mission_start_end): sends what its pumps build, the two
 	// 0x2F and the 0x0B, then runs the final wait's first pass for the S2C 0x0F, which
-	// ships what the push's countdown held; nothing before the release. `present` is the
-	// embedder's 100 % loading present, which the push runs between the second 0x2F's queue
-	// and the 0x0B's (ClientRuntime::push_mission_start_end carries the witness).
+	// ships what the push's countdown held; nothing before the release. The push runs the
+	// role's legs at their points: L's birth at the local entity's binding, its block past
+	// the second 0x2F's queue, the Attack & Defend latch ahead of the 0x0B's (D-NET-NEW-L2-52).
+	// `present` is the embedder's 100 % loading present, which the push runs between the
+	// second 0x2F's queue and the 0x0B's (ClientRuntime::push_mission_start_end carries the
+	// witness).
 	void push_mission_start_end(const std::function<void()> &present = {});
 	// The mission start's call, from the game-start wait's pass whose receive takes the S2C
 	// 0x1A to the final wait's first pass, with no frame between its legs (D-NET-NEW-L2-35):
@@ -332,6 +335,7 @@ public:
 	// the tripwire samplers deliberately persist across loads.
 	void reset_for_load(uint64_t deployment_release_revision_baseline) {
 		local_spawned_ = false;
+		mission_start_birth_unreleased_ = false;
 		deployment_release_revision_seen_ = deployment_release_revision_baseline;
 		weapon_availability_revision_seen_ = 0;
 		redeploy_release_pending_ = false;
@@ -359,6 +363,7 @@ public:
 	bool begin_mission_reload() {
 		if (!runtime || !runtime->begin_mission_reload()) return false;
 		local_spawned_ = false;
+		mission_start_birth_unreleased_ = false;
 		post_start_identity_pending_ = false;
 		weather_revision_seen_ = 0;
 		weapon_availability_revision_seen_ = 0;
@@ -427,6 +432,15 @@ private:
 	// The replica-world mirror and the authoritative appliers, through
 	// refresh_wire_collision_proxies (joiner_role_replica_world.cpp).
 	void materialize_replica_world();
+	// L's birth where retail's mission start binds and inits the local entity (its
+	// Player_InitPlayer), once the self handle is bound; true when it bore L
+	// (joiner_role_replica_world.cpp, D-NET-NEW-L2-52).
+	bool init_local_player_at_mission_start();
+	// The mission start's null-tested block on L: the indoors bit and the revive latch
+	// cleared, unhidden, every proximity list rebuilt, hidden again.
+	void run_mission_start_local_block();
+	// The in-match edge's birth, for a self handle bound only past the mission start (a
+	// seeded session): both legs above, on the receive's release.
 	void spawn_and_arm_local_player();
 	// The S2C 0x0F landing on L: the authoritative pose (+ look yaw, the
 	// un-hide) and, for a waypoint gametype, the host-filtered route.
@@ -502,7 +516,10 @@ private:
 	bool started_ = false;       // ClientHello emitted (Idle -> Hello)
 	bool join_novaworld_ = false; // set_join_novaworld: FullDestroy keeps the transport
 	std::function<void()> enumerator_drain_; // set_enumerator_drain
-	bool local_spawned_ = false; // L spawned at reached_in_match (one-shot guard)
+	bool local_spawned_ = false; // L born (the mission start's, else reached_in_match's)
+	// L was born at the mission start and has taken no deployment release since: the first
+	// release is its admission, not a redeploy (D-NET-NEW-L2-52).
+	bool mission_start_birth_unreleased_ = false;
 	bool final_wait_seen_ = false; // the last tick ended inside the final wait
 	bool final_wait_end_ = false;  // take_final_wait_end's one-shot
 	bool wire_world_static_initialized_ = false;

@@ -933,14 +933,29 @@ public:
 	//  @0x5258A2 / @0x5258EA / @0x5259F1 / @0x525A61, the freeze @0x525A6E, the pump
 	//  @0x525ACA, the zero @0x525B9F, the receive @0x525BD9, the second 0x2F @0x525C2E, the
 	//  0x0B @0x52624B, the send @0x526255]
-	// `present` is the embedder's loading screen at 100 %, which the mission start presents
-	// past the second 0x2F's queue and ahead of the 0x0B's (R-L2-s38-1, D-NET-NEW-L8-41)
-	// [orig: Game_StartMission @0x524360 - the second 0x2F @0x525C2E, `push 64h` @0x525D22,
-	//  LoadingScreen_UpdateAndPresent @0x525D29, the 0x0B @0x52620E..0x52624B, the send
+	// The legs are the role's and the embedder's, each at its point between the 0x1A's load
+	// and the 0x0B: `init_player`, the role's Player_InitPlayer on its own entity (L's birth),
+	// right after the submissions' take binds the local entity, ahead of the receive and the
+	// second 0x2F's queue; `start_block`, the null-tested block on the local entity with the
+	// proximity rebuild, past the second 0x2F's queue (D-NET-NEW-L2-52); `present`, the
+	// embedder's loading screen at 100 % (R-L2-s38-1, D-NET-NEW-L8-41); `latch`, the Attack
+	// & Defend role latch, ahead of the 0x0B's queue (D-NET-NEW-L2-52).
+	// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, the second 0x2F
+	//  @0x525C2E, the null tests @0x525C70 / @0x525C9A, Entity_BuildAllProximityLists
+	//  @0x525C90, `push 64h` @0x525D22, LoadingScreen_UpdateAndPresent @0x525D29,
+	//  Game_LatchAttackDefendRole @0x5260C1, the 0x0B @0x52620E..0x52624B, the send
 	//  @0x526255].
+	struct MissionStartEndLegs {
+		std::function<void()> init_player;
+		std::function<void()> start_block;
+		std::function<void()> present;
+		std::function<void()> latch;
+	};
 	std::vector<std::vector<uint8_t>> push_mission_start_first_loadout();
 	std::vector<std::vector<uint8_t>> push_mission_start_end(
-			const std::function<void()> &present = {});
+			const MissionStartEndLegs &legs = {});
+	// The messages queued for the next send boundary (the mission start's queue order).
+	std::size_t queued_send_count() const { return send_queue_.size(); }
 	void set_weapon_table(const world::WeaponTable *weapons) {
 		if (joiner_) joiner_->set_weapon_table(weapons);
 	}
