@@ -53,6 +53,12 @@ struct MinimapOverlayInputs {
 // session). [orig: Entity_GetDisplayName @0x59BF70]
 bool entity_display_name(const world::Entity &e, uint8_t hud_team, uint32_t rules_word,
                          const replication::ClientState *cs, std::string &out);
+// The same lookup over a joiner's decoded remote person (its replica row), the pool-0 entity
+// retail's client built for it: the wire handle's slot, the spawn's Flags word and team byte,
+// and the Name the spawn copied.
+bool row_display_name(const replication::ClientEntityState &row, uint8_t hud_team,
+                      uint32_t rules_word, const replication::ClientState *cs,
+                      std::string &out);
 
 // Fills `out` (replaced).
 void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverlays &out);

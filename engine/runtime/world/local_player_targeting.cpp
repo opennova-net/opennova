@@ -325,7 +325,8 @@ void LocalPlayer::update_aim_target() {
     }
 }
 
-void LocalPlayer::build_hud_target_cursor() {
+HudTargetCursor hud_target_cursor_build(const World &world, const AiEntity *body,
+        uint16_t aim_wire_person) {
     // The record's +0x168: the lock word, a round included; only a zero word takes the
     // head-look target, whose store on a joiner may name a decoded remote person instead.
     // A word whose entity is gone reads as the zero word the destroy's reference clear
@@ -333,17 +334,21 @@ void LocalPlayer::build_hud_target_cursor() {
     //  [esi+168h], 0` @0x4B8816, headLookTarget @0x4B881F; Entity_ClearAllReferences @0x465670 -
     //  the aiRuntime +0xC clear @0x4656DB..0x4656E7].
     HudTargetCursor cursor;
-    if (const AiEntity *body = player_ai()) {
+    if (body != nullptr) {
         cursor.lock = AiSlot::target_of(body->slot.f[3]);
-        if (cursor.lock.entity.valid() && world_.registry.get(cursor.lock.entity) == nullptr)
+        if (cursor.lock.entity.valid() && world.registry.get(cursor.lock.entity) == nullptr)
             cursor.lock = TargetRef{};
         const EntityHandle named = cursor.lock.valid() ? cursor.lock.entity : body->inf.head_look_target;
-        if (const Entity *e = world_.registry.get(named))
+        if (const Entity *e = world.registry.get(named))
             cursor.entity = EntityLifetime{e->handle, e->registry_spawn_id};
         else if (!cursor.lock.valid())
-            cursor.wire_person = aim_wire_person_;
+            cursor.wire_person = aim_wire_person;
     }
-    hud_cursor_ = cursor;
+    return cursor;
+}
+
+void LocalPlayer::build_hud_target_cursor() {
+    view_tracker.hud_cursor = hud_target_cursor_build(world_, player_ai(), aim_wire_person_);
 }
 
 const Entity *hud_target_cursor_entity(const World &world, const HudTargetCursor &cursor) {

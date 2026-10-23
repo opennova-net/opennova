@@ -174,6 +174,44 @@ static void inset_target_name_cases() {
 		// until the next build [orig: Entity_Destroy @0x43E810 - @0x43E89C..0x43E8A4].
 		kernel.world.registry.despawn(mate_h);
 		CHECK(hud_role_facts(host).inset_target_name.empty());
+		// On a joiner the cursor may name a decoded remote person: the pool-0 entity retail's
+		// client built for its row, named by the same lookup over the row's Flags word, team
+		// byte and Name, a player through the 0x4C slot driving its slot, with no team gate
+		// (D-NET-NEW-L8-53) [orig: Entity_GetDisplayName @0x59BF70 - the Player test
+		//  @0x59BFA0, the team gate @0x59BFB2, the slot walk @0x59C07A..0x59C0BB].
+		replication::ClientState &cs = host_runtime.state();
+		replication::ClientEntityState &remote = cs.upsert(0x0006);
+		remote.rm_entity_flags = world::kEntityFlagPlayer;
+		remote.team = 2;
+		remote.team_known = true;
+		remote.display_name = "Body";
+		replication::ClientEntityState &rifleman = cs.upsert(0x0007);
+		rifleman.team = 1;
+		rifleman.team_known = true;
+		rifleman.display_name = "Rifleman";
+		const auto scene_names = [&](uint16_t wire_handle) {
+			world::HudTargetCursor cursor;
+			cursor.wire_person = wire_handle;
+			kernel.local.view_tracker.hud_cursor_at_scene = cursor;
+			return hud_role_facts(host).inset_target_name;
+		};
+		CHECK(scene_names(0x0006).empty()); // a player no 0x4C slot drives
+		replication::ClientRosterSlot &wire_slot = cs.roster[4];
+		wire_slot.bound = true;
+		wire_slot.name = "Remote";
+		wire_slot.entity_slot = 6;
+		cs.visible_players.push_back({4, 0x0006});
+		CHECK(scene_names(0x0006) == "Remote"); // the other team's player too
+		CHECK(scene_names(0x0007) == "Rifleman"); // a non-player of the HUD team
+		rifleman.display_name.clear();
+		CHECK(scene_names(0x0007) == hud::friendly_tag_fallback_name(0x0007));
+		rifleman.team = 2;
+		CHECK(scene_names(0x0007).empty()); // a non-player of another team
+		kernel.world.rules.mpattrib = 0x400;
+		CHECK(scene_names(0x0006).empty()); // FriendlyTag 0 nulls every name
+		kernel.world.rules.mpattrib = 0;
+		CHECK(scene_names(0x0009).empty()); // no row holds the handle
+		kernel.local.view_tracker.hud_cursor_at_scene = world::HudTargetCursor{};
 	}
 }
 

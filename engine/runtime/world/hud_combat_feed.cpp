@@ -15,6 +15,41 @@
 #include <runtime/world/world.h>
 
 namespace opennova::world {
+namespace {
+// The HUD target cursor's entity as a HUD reader takes it at its read: a registry entity the
+// record names (none once destroyed, hud_target_cursor_entity), else, on a joiner, the decoded
+// remote person the record names through its row (World::wire_cursor_person), as retail's
+// client reads the pool-0 entity it built for that person. A round lock names no pool entity.
+struct CursorSubject {
+	bool pool0 = false;
+	uint8_t team = 0;
+	uint8_t item_type = 0; // the ItemDef's type, 0 with no def
+};
+CursorSubject cursor_subject(const World &world, const HudTargetCursor &cursor) {
+	CursorSubject out;
+	if (const Entity *e = hud_target_cursor_entity(world, cursor)) {
+		out.pool0 = e->handle.pool() == 0;
+		out.team = e->team;
+		out.item_type = e->has_item_def ? e->item_type : 0;
+		return out;
+	}
+	World::WireCursorPerson person;
+	if (cursor.wire_person != 0xFFFF && world.wire_cursor_person &&
+			world.wire_cursor_person(cursor.wire_person, person)) {
+		out.pool0 = EntityHandle{cursor.wire_person}.pool() == 0;
+		out.team = person.team;
+		out.item_type = person.item_type;
+	}
+	return out;
+}
+// The friendly test the crosshair and the inset share: the cursor's team is the local
+// player's, or neither team 1 nor team 2 [orig: HUD_DrawCrosshair @0x592692..0x5926B4;
+//  Render_WeaponInsetScene @0x5C9F84..0x5C9FAA].
+bool cursor_team_admitted(uint8_t cursor_team, uint8_t local_team) {
+	return cursor_team == local_team || (cursor_team != 1 && cursor_team != 2);
+}
+} // namespace
+
 void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerViewFrame &view,
 		LocalPlayerViewTracker &tracker, bool can_fire) {
 	const auto &service = tracker.hud_service;
@@ -44,62 +79,67 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 		out.custom_texture = def->crosshair;
 		out.commander_texture = def->commanders_x;
 	}
-	// HUD+0x168 is the AI slot's +0xC target word: an entity, or a round when the heat
-	// lock took a flare (D-NET-64). Any nonzero word sets the cursor flag HUD+8; only a
-	// zero word takes the head-look target (+0x344). The crosshair draws the cursor at
-	// the word's fire origin (a round's Position) tinted by the word's team byte (+0x162,
-	// a round's own); the inset's brackets and friendly marker need the word's pool-0
-	// index, which a round has none of, so a round lock draws neither.
-	// [orig: HUD_BuildEntityInfo @0x4B8440 - the slot word into +0x168
+	// The cursor the crosshair reads is this pass's record (tracker.hud_cursor): the lock word
+	// (an entity, or a round when the heat lock took a flare, D-NET-64), else, under a zero
+	// word only, the head-look target, on a joiner perhaps a decoded remote person. Only a
+	// nonzero word sets the cursor flag HUD+8, so the cursor quad draws only for a lock: at the
+	// word's fire origin (a round's Position) tinted by the word's team byte (+0x162, a round's
+	// own). The friendly brackets need the cursor's pool-0 index (a round has none) and a
+	// person def. [orig: HUD_BuildEntityInfo @0x4B8440 - the slot word into +0x168
 	//  @0x4B87ED..0x4B87F3, the zero test @0x4B8816..0x4B881D, the head-look fallback
 	//  @0x4B881F..0x4B8825, +8 = 1 @0x4B882D; HUD_DrawCrosshair - the cursor
 	//  @0x592776..0x592790, the team compare @0x5927AA..0x5927BD,
-	//  Entity_ComputeWeaponFireOrigin @0x592803; Render_WeaponInsetScene @0x5C9740 -
-	//  Pool_GetIndexFromPtr(0, cursor) @0x5C9F78]
-	const TargetRef cursor = body ? AiSlot::target_of(body->slot.f[3]) : TargetRef{};
-	const Entity *target = cursor.entity.valid() ? world.registry.get(cursor.entity) : nullptr;
-	const bool round_cursor = cursor.round >= 0 &&
-			static_cast<size_t>(cursor.round) < world.round_sim.rounds.size();
-	s.target_cursor = (target != nullptr || round_cursor) && weapon.active;
+	//  Entity_ComputeWeaponFireOrigin @0x592803; the pool test (the call @0x592675), the team
+	//  read @0x592692; the bracket gate's def type @0x592CE8..0x592CF3]
+	const HudTargetCursor &cursor = tracker.hud_cursor;
+	const Entity *target = hud_target_cursor_entity(world, cursor);
+	const bool round_cursor = cursor.lock.round >= 0 &&
+			static_cast<size_t>(cursor.lock.round) < world.round_sim.rounds.size();
+	s.target_cursor = cursor.lock.valid() && (target != nullptr || round_cursor) && weapon.active;
 	s.target_locked = body && (body->slot.f[2] & 1);
-	if (!cursor.valid() && body)
-		target = world.registry.get(body->inf.head_look_target);
 	if (round_cursor) {
 		s.target_friendly =
-				world.round_sim.rounds[static_cast<size_t>(cursor.round)].team == player->team;
-		round_target_origin(world, cursor.round, out.target.data());
+				world.round_sim.rounds[static_cast<size_t>(cursor.lock.round)].team == player->team;
+		round_target_origin(world, cursor.lock.round, out.target.data());
 		out.target_valid = true;
 	} else if (target) {
 		s.target_friendly = target->team == player->team;
 		world.ai.weapon_aim_origin(world, *target, out.target.data());
 		out.target_valid = true;
-		// These are mpattrib option bits, not a time-based animation. The
-		// selector is the is_client bit, which connection modes 2 AND 3 set:
-		// every instance that owns a local player (single player, the listen
-		// host, a joiner) tests bit 3. The >> 8 leg belongs to a dedicated
-		// host, which draws no HUD.
-		// [orig: HUD_DrawCrosshair -- g_RulesFlags @0x59265F,
-		//  is_mp_session_peer @0x5926D4, shr 3 @0x5926DC / shr 8 @0x5926E1;
-		//  CGameSession_SetConnectionMode @0x4C49F0]
-		const bool client = world.cached.local_player.valid();
-		const bool admitted = ((world.rules.mpattrib >> (client ? 3 : 8)) & 1u) == 0;
-		const bool team = s.target_friendly || (target->team != 1 && target->team != 2);
-		// Outside a session every target is a teammate candidate; inside one
-		// only a team game type admits them. Single player is outside.
-		// [orig: HUD_DrawCrosshair -- `cmp g_NapiNPCtx.is_in_session`
-		//  @0x5926C0, `test g_GameType,10000h` @0x5926C4, the clear @0x5926D0]
-		const bool team_mode =
-				!world.rules.mp_session || (world.match.rules().game_type & 0x10000u);
-		s.inset_friendly = target->handle.pool() == 0 && admitted && team && team_mode &&
-				!(mount &&
-						(player->mount_type == SeatType::Controller ||
-								player->mount_type == SeatType::Driver));
-		s.target_brackets = target->handle.pool() == 0 && target->has_item_def &&
-				target->item_type == 3 && admitted && team && team_mode &&
-				!(mount &&
-						(player->mount_type == SeatType::Controller ||
-								player->mount_type == SeatType::Driver));
 	}
+	// These are mpattrib option bits, not a time-based animation. The
+	// selector is the is_client bit, which connection modes 2 AND 3 set:
+	// every instance that owns a local player (single player, the listen
+	// host, a joiner) tests bit 3. The >> 8 leg belongs to a dedicated
+	// host, which draws no HUD.
+	// [orig: HUD_DrawCrosshair -- g_RulesFlags @0x59265F,
+	//  is_mp_session_peer @0x5926D4, shr 3 @0x5926DC / shr 8 @0x5926E1;
+	//  CGameSession_SetConnectionMode @0x4C49F0]
+	const bool client = world.cached.local_player.valid();
+	const bool admitted = ((world.rules.mpattrib >> (client ? 3 : 8)) & 1u) == 0;
+	// Outside a session every target is a teammate candidate; inside one
+	// only a team game type admits them. Single player is outside.
+	// [orig: HUD_DrawCrosshair -- `cmp g_NapiNPCtx.is_in_session`
+	//  @0x5926C0, `test g_GameType,10000h` @0x5926C4, the clear @0x5926D0]
+	const bool team_mode =
+			!world.rules.mp_session || (world.match.rules().game_type & 0x10000u);
+	const bool driving = mount &&
+			(player->mount_type == SeatType::Controller || player->mount_type == SeatType::Driver);
+	const CursorSubject crosshair = cursor_subject(world, cursor);
+	s.target_brackets = crosshair.pool0 && crosshair.item_type == 3 && admitted &&
+			cursor_team_admitted(crosshair.team, player->team) && team_mode && !driving;
+	// The weapon inset reads the cursor ahead of this frame's pass, as the scene frame found
+	// it: the last pass's record (tracker.hud_cursor_at_scene). Its brackets and friendly
+	// marker take the same pool-0, team, session and seat tests over that record, with no def
+	// test. [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - the Render_WeaponInsetScene call
+	//  @0x5CA949 ahead of the HUD_RenderAllOverlays calls @0x5CACE3 / @0x5CAD04;
+	//  Render_WeaponInsetScene @0x5C9740 - g_HUDTargetCursorEntity @0x5C9F5D, the pool test
+	//  (the call @0x5C9F6D), the team compare @0x5C9F84..0x5C9F98, the session clear
+	//  @0x5C9FAF..0x5C9FC4, the rules bit @0x5C9FC6..0x5C9FDE, the seat test
+	//  @0x5C9FE1..0x5C9FFC, the gate @0x5CA002..0x5CA00C]
+	const CursorSubject inset = cursor_subject(world, tracker.hud_cursor_at_scene);
+	s.inset_friendly = inset.pool0 && admitted && cursor_team_admitted(inset.team, player->team) &&
+			team_mode && !driving;
 	// OnlyScoped is the admission gate for the impact flags, independently
 	// of the ordinary CanFire/Sighted/Scoped reticle predicates. Neither the
 	// preview nor its two cues tests the dead bit or the death screen.

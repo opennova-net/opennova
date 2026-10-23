@@ -1410,6 +1410,22 @@ void JoinerRole::wire_frame_providers() {
                 row->ride_occupant == runtime->self_handle();
         return true;
     };
+    // The HUD target cursor's decoded remote person (world::HudTargetCursor::wire_person): the
+    // team byte and the def's type of the pool-0 entity retail's client built for its row,
+    // the def the spawn typed it from [orig: NapiNPClientMsg_0x00C @0x42E730 - the team
+    //  @0x42E979; HUD_DrawCrosshair @0x592640 - the def type @0x592CE8..0x592CF3].
+    world.wire_cursor_person = [this](uint16_t handle, world::World::WireCursorPerson &out) {
+        const replication::ClientEntityState *row = runtime->state().find(handle);
+        if (row == nullptr) return false;
+        out.team = row->team_known ? row->team : 0;
+        const def::DefItemsFile *items = kernel_->items_table();
+        const def::DefItemDef *item = items != nullptr
+                ? mission::find_item_def(*items,
+                          static_cast<int>(row->type_id) + mission::kItemIdOffset)
+                : nullptr;
+        out.item_type = item != nullptr ? static_cast<uint8_t>(item->type) : 0;
+        return true;
+    };
     // The damage pass's wire-built persons: a remote player or infantry is a
     // replica row here, where retail's client flies its rounds into its own
     // pool-0 entity for it (world/wire_person_hit.h). The row's def is the
@@ -2279,6 +2295,7 @@ void JoinerRole::close() {
 		kernel_->world.round_sim.guided_inputs_provider = {};
 		kernel_->world.round_sim.wire_actor_provider = {};
 		kernel_->world.destroyed_mark = {};
+		kernel_->world.wire_cursor_person = {};
 		kernel_->world.round_sim.wire_person_body = {};
 		kernel_->wire_person_pose = {};
 	}

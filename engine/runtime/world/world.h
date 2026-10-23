@@ -1414,6 +1414,19 @@ public:
     // readers run off the authority only). [orig: Entity_Destroy @0x43E810 - the memset
     // @0x43EA70, the mark @0x43EA7F; read by Entity_UpdateTransformAndTurret @0x440D2A]
     std::function<bool(uint16_t wire_handle)> destroyed_mark;
+    // A decoded remote person's entity fields the HUD target cursor's readers take, by its wire
+    // handle (HudTargetCursor::wire_person): retail's client built the person as its own pool-0
+    // entity, whose team byte (+0x162) the crosshair's and the inset's team compares read and
+    // whose def's type (+0x20 -> +0x5C) the crosshair's bracket test reads. A joiner's role
+    // binds it over its replica rows (false: no row holds the handle); empty on every other
+    // peer, whose cursor names registry entities only. [orig: HUD_DrawCrosshair @0x592640 -
+    // the team read @0x592692, the def type @0x592CE8..0x592CF3; Render_WeaponInsetScene
+    // @0x5C9740 - the team read @0x5C9F84]
+    struct WireCursorPerson {
+        uint8_t team = 0;      // the row's team byte (0 while none decoded)
+        uint8_t item_type = 0; // the row's ItemDef type, 0 with no def
+    };
+    std::function<bool(uint16_t wire_handle, WireCursorPerson &out)> wire_cursor_person;
     // The authority's GetTickCount: the process clock its host binds (HostConfig::clock_ms, at
     // the session start and at each next mission's bind); empty is the deterministic logic-tick
     // seam (authority_tick_count_ms). The 0x26 sender's entity+560 stamp reads it, and so do

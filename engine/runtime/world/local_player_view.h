@@ -38,6 +38,12 @@ struct LocalPlayerViewTracker {
 	// A failed impact preview resets its point, but retains the last range.
 	// [orig: Player_UpdatePerFrame @0x4DE9F2, miss @0x4DEADE..0x4DEB43]
 	int32_t hud_impact_distance_q16 = 0;
+	// The HUD target cursor (hud_combat_feed.h HudTargetCursor) as the HUD pass last built it,
+	// and as the scene frame found it ahead of its pass (LocalPlayer::build_hud_target_cursor /
+	// note_hud_scene_head): the crosshair reads the first, the weapon inset the second
+	// (fill_hud_combat_view).
+	HudTargetCursor hud_cursor;
+	HudTargetCursor hud_cursor_at_scene;
     // The binocular ACTIVATION seeds one fixed-radius random aim displacement.
     // It survives movement/death/third-person suppression and is re-seeded on
     // the next activation, not on the raw toggle: retail runs the seed from the

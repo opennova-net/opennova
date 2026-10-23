@@ -358,19 +358,29 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	// returned before its build. Its display name is the lookup's over the
 	// session rules word, the HUD's team and the role's 0x4C slot table. A lock
 	// on a round (a flare the heat lock took) is the cursor too: pool 0 holds no
-	// round, so the inset's pool test draws neither brackets nor a name for it.
+	// round, so the inset's pool test draws neither brackets nor a name for it. On a joiner the
+	// cursor may name a decoded remote person, the pool-0 entity retail's client built for its
+	// row: the lookup reads that row (row_display_name).
 	// [orig: Render_WeaponInsetScene @0x5C9740 -- g_HUDTargetCursorEntity @0x5CA0A4, the pool
 	//  test @0x5C9F78, the call @0x5CA0AB; Render_ProcessMainSceneFrame @0x5CA0F0 -- the inset's
 	//  call @0x5CA949 ahead of the HUD pass's @0x5CACE3 / @0x5CAD04; Entity_GetDisplayName
-	//  @0x59BF70 (its pool test @0x59BF87..0x59BF94)]
+	//  @0x59BF70 (its pool test @0x59BF87..0x59BF94, the slot walk @0x59C07A..0x59C0BB)]
 	{
 		const world::World &tw = view.kernel->world;
 		const world::Entity *local = tw.registry.get(tw.cached.local_player);
-		const world::Entity *cursor = world::hud_target_cursor_entity(
-				tw, view.kernel->local.hud_target_cursor_at_scene());
-		if (cursor != nullptr && local != nullptr)
-			(void)entity_display_name(*cursor, local->team, session_rules_word(view),
-					view.runtime != nullptr ? &view.runtime->state() : nullptr,
+		const world::HudTargetCursor &at_scene = view.kernel->local.hud_target_cursor_at_scene();
+		const world::Entity *cursor = world::hud_target_cursor_entity(tw, at_scene);
+		const replication::ClientState *cs =
+				view.runtime != nullptr ? &view.runtime->state() : nullptr;
+		const replication::ClientEntityState *row =
+				cursor == nullptr && at_scene.wire_person != 0xFFFF && cs != nullptr
+				? cs->find(at_scene.wire_person)
+				: nullptr;
+		if (local != nullptr && cursor != nullptr)
+			(void)entity_display_name(*cursor, local->team, session_rules_word(view), cs,
+					out.inset_target_name);
+		else if (local != nullptr && row != nullptr)
+			(void)row_display_name(*row, local->team, session_rules_word(view), cs,
 					out.inset_target_name);
 	}
 	if (voice_menus != 0u) {

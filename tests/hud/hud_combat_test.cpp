@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <vector>
 #include <formats/def/def.h>
 #include <net/npwire/ingame_encode.h>
 #include <runtime/hud/hud_bay_logos.h>
@@ -342,9 +344,13 @@ static void world_feeds() {
 	weapon.def_name = "MORTAR";
 	LocalPlayerViewFrame frame;
 	LocalPlayerViewTracker tracker;
+	// One frame over a steady cursor: the HUD pass's record over the slot word and the head-look
+	// target, which the next scene frame's inset finds unchanged.
 	auto read = [&](bool scoped = false) {
 		frame = {};
 		frame.scope_settled = scoped;
+		tracker.hud_cursor = hud_target_cursor_build(world, body, 0xFFFF);
+		tracker.hud_cursor_at_scene = tracker.hud_cursor;
 		fill_hud_combat_view(world, weapon, frame, tracker, scoped);
 	};
 	read();
@@ -535,6 +541,96 @@ static void world_feeds() {
 	weapon.active = false;
 	read(true);
 	CHECK(!frame.hud_combat.state.impact_map);
+}
+
+// The crosshair reads this pass's record of the HUD target cursor, the weapon inset the record
+// as the scene frame found it ahead of the pass (the last pass's), and on a joiner either may
+// name a decoded remote person, read through its row as the pool-0 entity retail's client
+// built for it (World::wire_cursor_person): its pool, its team byte and, for the crosshair's
+// brackets only, its def's type. A head-look target sets no cursor flag, so no cursor quad.
+// [orig: HUD_DrawCrosshair @0x592640 - the pool test (the call @0x592675), the team read
+//  @0x592692, the def type @0x592CE8..0x592CF3, the cursor flag @0x592776..0x592790;
+//  Render_WeaponInsetScene @0x5C9740 - g_HUDTargetCursorEntity @0x5C9F5D, the pool test (the
+//  call @0x5C9F6D), the team compare @0x5C9F84..0x5C9F98; Render_ProcessMainSceneFrame
+//  @0x5CA0F0 - the inset's call @0x5CA949 ahead of the pass's @0x5CACE3 / @0x5CAD04]
+static void cursor_records() {
+	auto world_heap = std::make_unique<World>();
+	World &world = *world_heap;
+	world.registry.configure_pool(0, 8);
+	Entity seed;
+	seed.alive = true;
+	seed.health = 100;
+	seed.team = 1;
+	seed.has_item_def = true;
+	seed.item_type = 3;
+	const auto player = world.registry.spawn(0, seed);
+	world.cached.local_player = player;
+	world.ai.attach(player);
+	seed.position = { 100, 0, 10 };
+	const auto mate = world.registry.spawn(0, seed);
+	LocalPlayerWeapon weapon;
+	weapon.active = true;
+	LocalPlayerViewFrame frame;
+	LocalPlayerViewTracker tracker;
+	HudTargetCursor none;
+	HudTargetCursor named;
+	named.entity = EntityLifetime{ mate, world.registry.get(mate)->registry_spawn_id };
+	const auto read = [&](const HudTargetCursor &pass, const HudTargetCursor &scene) {
+		frame = {};
+		tracker.hud_cursor = pass;
+		tracker.hud_cursor_at_scene = scene;
+		fill_hud_combat_view(world, weapon, frame, tracker, false);
+		return frame.hud_combat.state;
+	};
+	// The inset reads the last pass's record: a teammate the pass now names shows on the
+	// crosshair at once and in the inset one frame later; one it has dropped stays in the inset
+	// for that frame.
+	HudCombatState st = read(named, none);
+	CHECK(st.target_brackets && !st.inset_friendly);
+	st = read(named, named);
+	CHECK(st.target_brackets && st.inset_friendly);
+	st = read(none, named);
+	CHECK(!st.target_brackets && st.inset_friendly);
+	// A decoded remote person: no registry entity, its row through the role's hook.
+	struct Row {
+		uint16_t handle;
+		uint8_t team, item_type;
+	};
+	std::vector<Row> rows = { { 0x0005, 1, 3 }, { 0x0006, 2, 3 }, { 0x0007, 1, 0 },
+		{ 0x1008, 1, 3 } };
+	world.wire_cursor_person = [&rows](uint16_t handle, World::WireCursorPerson &out) {
+		for (const Row &row : rows)
+			if (row.handle == handle) {
+				out.team = row.team;
+				out.item_type = row.item_type;
+				return true;
+			}
+		return false;
+	};
+	HudTargetCursor wire;
+	const auto person = [&](uint16_t handle) {
+		wire.wire_person = handle;
+		return read(wire, wire);
+	};
+	st = person(0x0005); // a teammate with a person def
+	CHECK(st.target_brackets && st.inset_friendly);
+	CHECK(!st.target_cursor && !frame.hud_combat.target_valid);
+	st = person(0x0006); // the other team
+	CHECK(!st.target_brackets && !st.inset_friendly);
+	st = person(0x0007); // no person def: the inset takes no def test
+	CHECK(!st.target_brackets && st.inset_friendly);
+	st = person(0x1008); // off pool 0
+	CHECK(!st.target_brackets && !st.inset_friendly);
+	st = person(0x0009); // no row holds the handle
+	CHECK(!st.target_brackets && !st.inset_friendly);
+	// The row's team is read at each read: a team change shows on the next frame's reads.
+	rows[1].team = 1;
+	st = person(0x0006);
+	CHECK(st.target_brackets && st.inset_friendly);
+	// The destroy's clear (hud_target_cursor_note_destroyed) leaves the record naming none.
+	hud_target_cursor_note_destroyed(wire, 0x0006);
+	st = read(wire, wire);
+	CHECK(!st.target_brackets && !st.inset_friendly);
 }
 
 static void parser_and_received_feedback() {
@@ -830,6 +926,7 @@ int main() {
 	mortar_map_and_world_cues();
 	combat_text_font_slots();
 	world_feeds();
+	cursor_records();
 	parser_and_received_feedback();
 	sent_feedback();
 	if (!failures)
