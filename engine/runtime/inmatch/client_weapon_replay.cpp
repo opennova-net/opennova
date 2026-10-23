@@ -185,26 +185,20 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
     }
 }
 
-void apply_weapon_pickups(JoinerRole &role, ClientRuntime &rt, world::World &world,
-        world::LocalPlayer &lp) {
-    const std::vector<WeaponPickupNotice> notices = rt.drain_weapon_pickups();
-    for (std::size_t i = 0; i < notices.size(); ++i) {
-        const WeaponPickupNotice &notice = notices[i];
-        // Only the picker's own client acts [orig: Player_MountPickedUpWeapon @0x4E03DC]
-        if (!rt.has_self_handle() || notice.picker_handle != rt.self_handle()) continue;
-        world::EntityHandle row_handle;
-        row_handle.packed = notice.powerup_handle;
-        // The row is the one the world already holds: the after-receive runs this ahead of the
-        // frame's replica materialization, so a powerup row born in this same receive is not
-        // found. Its weapon word +0x2B0 has one writer, the pickup's contact pass in a world
-        // tick on a row materialized earlier, so such a row carries weapon 0 and the grant
-        // refuses it either way [orig: PowerupAction_Pickup @0x4428A0 - the store @0x4428FB].
-        // Should a fresh row ever take its weapon word from the wire, this lookup moves behind
-        // the materialization.
-        world::powerup_weapon_grant_received(world, lp,
-                role.replica_world_entity(world, row_handle), rt.local_player_dead());
-        // Its mount's 0x1D at its 0x35's place [orig: Player_MountWeaponSlot @0x4E040E].
-        role.flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kWeaponPickup, i);
-    }
+void apply_weapon_pickup(JoinerRole &role, ClientRuntime &rt, world::World &world,
+        world::LocalPlayer &lp, const WeaponPickupNotice &notice) {
+    // Only the picker's own client acts [orig: Player_MountPickedUpWeapon @0x4E03DC]
+    if (!rt.has_self_handle() || notice.picker_handle != rt.self_handle()) return;
+    world::EntityHandle row_handle;
+    row_handle.packed = notice.powerup_handle;
+    // The row is the one the world already holds: the after-receive runs this ahead of the
+    // frame's replica materialization, so a powerup row born in this same receive is not
+    // found. Its weapon word +0x2B0 has one writer, the pickup's contact pass in a world
+    // tick on a row materialized earlier, so such a row carries weapon 0 and the grant
+    // refuses it either way [orig: PowerupAction_Pickup @0x4428A0 - the store @0x4428FB].
+    // Should a fresh row ever take its weapon word from the wire, this lookup moves behind
+    // the materialization.
+    world::powerup_weapon_grant_received(world, lp,
+            role.replica_world_entity(world, row_handle), rt.local_player_dead());
 }
 } // namespace opennova::inmatch

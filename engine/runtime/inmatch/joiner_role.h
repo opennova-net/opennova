@@ -74,9 +74,14 @@ public:
 	struct KitSeams {
 		// The S2C 0x5A authoritative-loadout fold (the grant -> kit rows).
 		std::function<void()> apply_authoritative;
-		// Re-copy the resident kit page when the side selector moved; true =
-		// the resident buffer changed (the frame then re-arms the 0x2F seam).
+		// Re-copy the resident kit page when the side selector moved with no self 0x50
+		// carrying it (the S2C 0x04 latch landing after the catalog); true = the resident
+		// buffer changed (the frame then re-arms the 0x2F seam).
 		std::function<bool()> reseed_on_side_change;
+		// A self S2C 0x50's local arm: copy the page of the side `team` names over the
+		// resident buffer, whatever it held and whether or not the side moved
+		// (inmatch::reseed_session_kit_on_team_assign).
+		std::function<void(uint8_t team)> reseed_on_team_assign;
 		// Re-arm the joiner 0x2F loadout-submission seam.
 		std::function<void()> push;
 	};
@@ -571,6 +576,11 @@ private:
 	// Player_InitPlayer's class word on L: the side its Team names (team 1 or 3 the first),
 	// stored as it is.
 	void stamp_init_player_class(world::Entity &local) const;
+	// L's Team and the round sim's presenting team, a self S2C 0x50's store.
+	void store_local_team(uint8_t team);
+	// One self S2C 0x50 whose local arm ran, at its turn in the receive: the Team store, the
+	// arm's page copy and seam re-arm, then Player_InitPlayer(1) (joiner_role.cpp).
+	void apply_self_team_assign(uint8_t team);
 	// A self S2C 0x50's re-run of Player_InitPlayer(1) on L, then its identity pair
 	// (D-NET-570).
 	void reinit_local_player_on_team_assign();

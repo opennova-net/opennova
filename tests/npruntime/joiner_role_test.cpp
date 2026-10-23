@@ -20,6 +20,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/client_replica_present.h>
 #include <runtime/inmatch/joiner_role.h>
+#include <runtime/inmatch/loadout_submit.h> // the 0x5A apply and the 0x50 page copy
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/role_feeds.h> // the scene frame's dead-bit reads
@@ -2565,6 +2566,305 @@ bool run_each_grant_mounts_at_its_place() {
 	return ok;
 }
 
+// The receive's message legs run in its order (L7-s29 row 1): the per-message legs' shared rig.
+// The S2C 0x5A apply the shell's seam runs (Simulation::apply_joiner_authoritative_loadout): the
+// grant's rows over the spawn buffer and the slot table, once per grant revision.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the copy into g_SpawnLoadoutBuffer
+//  @0x4293E9, the slot rebuild @0x4294E3..0x4294FA]
+void install_grant_apply(Harness &h, uint64_t &applied) {
+	h.role.kit_seams.apply_authoritative = [&h, &applied] {
+		inmatch::ClientRuntime &rt = *h.role.runtime;
+		const uint64_t revision = rt.authoritative_loadout_revision();
+		if (revision == 0 || revision <= applied) return;
+		std::vector<w::WeaponKitEntry> kit;
+		inmatch::kit_from_authoritative_grant(h.kernel->world.tables.weapons,
+				rt.authoritative_loadout(), kit);
+		w::LocalPlayer &lp = h.kernel->local;
+		if (w::local_loadout_apply_accept(h.kernel->world, lp.loadout, lp.weapon, lp.inventory,
+					lp.inventory_valid, kit, rt.authoritative_loadout().avatar_class,
+					/*validate_banned=*/false))
+			applied = revision;
+	};
+}
+
+// Frame `messages` into one datagram, receive it, and run the frame.
+void receive_one_datagram(Harness &h, const std::vector<ProtocolMessage> &messages) {
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey}, messages, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input);
+}
+
+// A 0x5A behind a 0x35 in one receive rebuilds the slot table the pickup landed in (L7-s29 row 1):
+// the pickup lands its mortar in rank 1, then the grant's apply rebuilds the table from its rifle
+// alone, so rank 1 ends empty; the grant ahead of the pickup leaves the mortar landed.
+// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - CNapiNPConnection_DispatchMessage @0x625EF1
+//  per message; NapiNPClientMsg_0x035 @0x4261A0 - Player_MountPickedUpWeapon @0x42624C /
+//  @0x42625B; NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - WeaponSlotPool_ResetAllEntries
+//  @0x4294E3, WeaponSlotTable_LoadAllFromDefs @0x4294FA]
+bool run_a_grant_behind_a_pickup_rebuilds_its_table() {
+	static const char kDefs[] =
+			"ammoclass_max_carry CLASS_PU 1000\r\n"
+			"weapon \"WPN_PU_RIFLE\"\r\n"
+			"\tcategory 3\r\n"
+			"\trank 0\r\n"
+			"\tclipsize 10\r\n"
+			"\tstartrounds 30\r\n"
+			"\tammoclass CLASS_PU 1\r\n"
+			"end\r\n"
+			"weapon \"WPN_PU_MORTAR\"\r\n"
+			"\tcategory 3\r\n"
+			"\trank 1\r\n"
+			"\tclipsize 1\r\n"
+			"\tstartrounds 10\r\n"
+			"\tammoclass CLASS_PU 1\r\n"
+			"end\r\n";
+	bool ok = true;
+	for (const bool pickup_first : {true, false}) {
+		def::DefWeaponsFile defs{};
+		if (!expect(def::def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kDefs),
+						sizeof(kDefs) - 1, &defs) == 0,
+					"grant behind pickup: the defs parse"))
+			return false;
+		{
+			Harness h;
+			h.kernel->world.registry.configure_pool(1, 8);
+			h.kernel->world.tables.weapons = w::build_weapon_table(defs);
+			h.kernel->world.tables.weapon_defs = &defs;
+			uint64_t applied = 0;
+			install_grant_apply(h, applied);
+			h.role.poll_preload();
+			h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+			                             /*game_type=*/0x10002u);
+			h.role.run_tick(h.input); // the spawn frame
+			w::LocalPlayer &lp = h.kernel->local;
+			if (!expect(h.role.local_spawned() && lp.player() != nullptr,
+						"grant behind pickup: L spawned"))
+				return false;
+			lp.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_PU_RIFLE", -1, -1, -1}};
+			w::local_loadout_rebuild(h.kernel->world, lp.loadout, lp.weapon, lp.inventory,
+					lp.inventory_valid, /*select_spawn_default=*/true);
+			const uint8_t rifle =
+					static_cast<uint8_t>(h.kernel->world.tables.weapons.index_of("WPN_PU_RIFLE"));
+			const int16_t mortar = static_cast<int16_t>(
+					h.kernel->world.tables.weapons.index_of("WPN_PU_MORTAR"));
+			w::Entity row;
+			row.kind = w::EntityKind::Item;
+			row.spawn_origin = 0;
+			row.powerup_weapon = static_cast<uint8_t>(mortar);
+			const w::EntityHandle row_handle = h.kernel->world.registry.spawn(1, row);
+			WeaponPickupNotice notice;
+			notice.picker_handle = 0x0005;
+			notice.powerup_handle = static_cast<uint16_t>(row_handle.packed);
+			WeaponLoadout grant;
+			grant.avatar_class = 8;
+			WeaponLoadoutSlot slot;
+			slot.type_id = rifle;
+			slot.ammo_primary = slot.ammo_secondary = slot.ammo_alt = 0xFF;
+			grant.slots = {slot};
+			const ProtocolMessage pickup =
+					make_protocol_message(s2c::WEAPON_PICKUP, encode_weapon_pickup(notice));
+			const ProtocolMessage apply =
+					make_protocol_message(s2c::WEAPON_LOADOUT, encode_weapon_loadout(grant));
+			receive_one_datagram(h, pickup_first ? std::vector<ProtocolMessage>{pickup, apply}
+			                                     : std::vector<ProtocolMessage>{apply, pickup});
+			const w::WeaponInventorySlot *rank1 = lp.inventory.slot(3 * 65 + 1);
+			ok &= expect(applied != 0, "grant behind pickup: the grant applied");
+			ok &= expect(rank1 != nullptr && (pickup_first ? rank1->adm_index < 0
+			                                               : rank1->adm_index == mortar),
+					pickup_first
+							? "grant behind pickup: the grant's rebuild leaves the mortar's rank empty"
+							: "grant ahead of pickup: the mortar lands in the granted table");
+		}
+		def::def_free_weapons(&defs);
+	}
+	return ok;
+}
+
+// The side pages the team-assign pins' profile holds: the blue page's rifle, the red page's
+// pistol, each side's class 8.
+playersav::Record team_pages_profile() {
+	playersav::Record profile;
+	profile.blue.player_class = 8;
+	profile.red.player_class = 8;
+	profile.blue.pages[8 - playersav::kMinPlayerClass].entries = {
+			playersav::KitEntry{"WPN_TP_RIFLE", -1, -1, -1}};
+	profile.red.pages[8 - playersav::kMinPlayerClass].entries = {
+			playersav::KitEntry{"WPN_TP_PISTOL", -1, -1, -1}};
+	return profile;
+}
+
+constexpr char kTeamPagesDefs[] =
+		"ammoclass_max_carry CLASS_TR 1000\r\n"
+		"ammoclass_max_carry CLASS_TP 1000\r\n"
+		"weapon \"WPN_TP_RIFLE\"\r\n"
+		"\tcategory 3\r\n"
+		"\trank 0\r\n"
+		"\tclipsize 10\r\n"
+		"\tstartrounds 30\r\n"
+		"\tammoclass CLASS_TR 1\r\n"
+		"end\r\n"
+		"weapon \"WPN_TP_PISTOL\"\r\n"
+		"\tcategory 2\r\n"
+		"\trank 0\r\n"
+		"\tclipsize 10\r\n"
+		"\tstartrounds 30\r\n"
+		"\tammoclass CLASS_TP 1\r\n"
+		"end\r\n";
+
+// A self S2C 0x50 behind a 0x5A in one receive re-copies its side's profile page over the grant's
+// kit, and its Player_InitPlayer(1) rebuilds from the page (L7-s29 row 1): the grant's pistol
+// gives way to the blue page's rifle, though the buffer was last copied from that same side; the
+// 0x50 ahead of the grant leaves the grant's kit.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4293E9; NapiNPClientMsg_TeamAssign
+//  @0x431910 - the side pick @0x431A27..0x431A54, the copy @0x431A9A, Player_InitPlayer(1)
+//  @0x431B14; Player_InitPlayer @0x4E15F0 - AvatarDef_BuildDisplayList(g_SpawnLoadoutBuffer)
+//  @0x4E1882; CNapiNPConnection_DispatchMessage @0x625EF1 per message]
+bool run_a_team_assign_behind_a_grant_rebuilds_from_the_page() {
+	bool ok = true;
+	const playersav::Record profile = team_pages_profile();
+	for (const bool grant_first : {true, false}) {
+		def::DefWeaponsFile defs{};
+		if (!expect(def::def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kTeamPagesDefs),
+						sizeof(kTeamPagesDefs) - 1, &defs) == 0,
+					"team assign behind grant: the defs parse"))
+			return false;
+		{
+			Harness h;
+			h.kernel->world.tables.weapons = w::build_weapon_table(defs);
+			h.kernel->world.tables.weapon_defs = &defs;
+			uint64_t applied = 0;
+			install_grant_apply(h, applied);
+			int seeded_side = static_cast<int>(playersav::SideId::Blue);
+			h.role.kit_seams.reseed_on_team_assign = [&](uint8_t team) {
+				inmatch::reseed_session_kit_on_team_assign(profile, team, h.kernel->local.loadout,
+						seeded_side);
+			};
+			h.role.poll_preload();
+			h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+			                             /*game_type=*/0x10002u);
+			h.role.run_tick(h.input); // the spawn frame
+			auto &row = h.role.runtime->state().upsert(0x0005);
+			row.cls = EntityClass::Player;
+			row.type_id = w::kPlayerInfantryTypeId;
+			w::LocalPlayer &lp = h.kernel->local;
+			if (!expect(h.role.local_spawned() && lp.player() != nullptr,
+						"team assign behind grant: L spawned"))
+				return false;
+			WeaponLoadout grant;
+			grant.avatar_class = 8;
+			WeaponLoadoutSlot slot;
+			slot.type_id =
+					static_cast<uint8_t>(h.kernel->world.tables.weapons.index_of("WPN_TP_PISTOL"));
+			slot.ammo_primary = slot.ammo_secondary = slot.ammo_alt = 0xFF;
+			grant.slots = {slot};
+			TeamAssign assign;
+			assign.entity_handle = 0x0005;
+			assign.team = 1;
+			assign.net_id = 0x0213;
+			assign.anim_slot = 0x2C;
+			const ProtocolMessage apply =
+					make_protocol_message(s2c::WEAPON_LOADOUT, encode_weapon_loadout(grant));
+			const ProtocolMessage team =
+					make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign));
+			receive_one_datagram(h, grant_first ? std::vector<ProtocolMessage>{apply, team}
+			                                    : std::vector<ProtocolMessage>{team, apply});
+			const std::vector<w::WeaponKitEntry> &kit = lp.loadout.spawn_kit();
+			const w::WeaponInventorySlot *rifle = lp.inventory.slot(3 * 65);
+			const w::WeaponInventorySlot *pistol = lp.inventory.slot(2 * 65);
+			const char *want = grant_first ? "WPN_TP_RIFLE" : "WPN_TP_PISTOL";
+			ok &= expect(applied != 0, "team assign behind grant: the grant applied");
+			ok &= expect(kit.size() == 1 && kit[0].name == want, grant_first
+					? "team assign behind grant: the page stands in the spawn buffer"
+					: "team assign ahead of grant: the grant's kit stands in the spawn buffer");
+			ok &= expect(rifle != nullptr && pistol != nullptr &&
+							(rifle->adm_index >= 0) == grant_first &&
+							(pistol->adm_index >= 0) == !grant_first,
+					grant_first ? "team assign behind grant: the init rebuilt the table from the page"
+					            : "team assign ahead of grant: the grant's apply rebuilt the table");
+		}
+		def::def_free_weapons(&defs);
+	}
+	return ok;
+}
+
+// Two self S2C 0x50s with different teams in one receive each run on their own side (L7-s29
+// row 1): each stores its team on L ahead of its local arm, copies its side's page and re-runs
+// the init on it, so the second's arm finds the first's blue rebuild and the receive ends on the
+// red page.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - g_LocalTeam @0x4319DB, the Team store @0x4319EE,
+//  the side pick @0x431A27..0x431A54, the copy @0x431A9A, Player_InitPlayer(1) @0x431B14, once
+//  per message (CNapiNPConnection_DispatchMessage @0x625EF1)]
+bool run_two_team_assigns_each_run_on_their_own_side() {
+	const playersav::Record profile = team_pages_profile();
+	def::DefWeaponsFile defs{};
+	if (!expect(def::def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kTeamPagesDefs),
+					sizeof(kTeamPagesDefs) - 1, &defs) == 0,
+				"two team assigns: the defs parse"))
+		return false;
+	bool ok = true;
+	{
+		Harness h;
+		h.kernel->world.tables.weapons = w::build_weapon_table(defs);
+		h.kernel->world.tables.weapon_defs = &defs;
+		int seeded_side = -1;
+		std::vector<uint8_t> copied;
+		h.role.kit_seams.reseed_on_team_assign = [&](uint8_t team) {
+			copied.push_back(team);
+			inmatch::reseed_session_kit_on_team_assign(profile, team, h.kernel->local.loadout,
+					seeded_side);
+		};
+		// Each leg's re-arm, ahead of its init: L's Team and the slot table as they stand.
+		std::vector<uint8_t> teams_at_arm;
+		std::vector<bool> rifle_at_arm;
+		h.role.kit_seams.push = [&] {
+			const w::Entity *L = h.kernel->local.player();
+			teams_at_arm.push_back(L != nullptr ? L->team : 0);
+			const w::WeaponInventorySlot *rifle = h.kernel->local.inventory.slot(3 * 65);
+			rifle_at_arm.push_back(rifle != nullptr && rifle->adm_index >= 0);
+		};
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+		                             /*game_type=*/0x10002u);
+		h.role.run_tick(h.input); // the spawn frame
+		auto &row = h.role.runtime->state().upsert(0x0005);
+		row.cls = EntityClass::Player;
+		row.type_id = w::kPlayerInfantryTypeId;
+		if (!expect(h.role.local_spawned(), "two team assigns: L spawned")) return false;
+		copied.clear();
+		teams_at_arm.clear();
+		rifle_at_arm.clear();
+		std::vector<ProtocolMessage> messages;
+		for (const uint8_t team : {uint8_t{1}, uint8_t{2}}) {
+			TeamAssign assign;
+			assign.entity_handle = 0x0005;
+			assign.team = team;
+			assign.net_id = 0x0213;
+			assign.anim_slot = 0x2C;
+			messages.push_back(make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign)));
+		}
+		receive_one_datagram(h, messages);
+		ok &= expect(copied == std::vector<uint8_t>{1, 2},
+				"two team assigns: each copies its own side's page, in order");
+		ok &= expect(teams_at_arm == std::vector<uint8_t>{1, 2},
+				"two team assigns: each stores its own team on L ahead of its arm");
+		ok &= expect(rifle_at_arm.size() == 2 && rifle_at_arm[1],
+				"two team assigns: the second's arm finds the first's init on the blue page");
+		const w::WeaponInventorySlot *rifle = h.kernel->local.inventory.slot(3 * 65);
+		const w::WeaponInventorySlot *pistol = h.kernel->local.inventory.slot(2 * 65);
+		ok &= expect(rifle != nullptr && rifle->adm_index < 0 && pistol != nullptr &&
+						pistol->adm_index >= 0,
+				"two team assigns: the receive ends on the red page's init");
+	}
+	def::def_free_weapons(&defs);
+	return ok;
+}
+
 bool run_a_grant_mount_request_queues_at_the_grants_place() {
 	bool ok = true;
 	for (const bool grant_first : {true, false}) {
@@ -5101,6 +5401,9 @@ int main() {
 	ok &= run_a_self_team_assign_resubmits_ahead_of_its_pair();
 	ok &= run_a_pickup_mount_queues_at_the_0x35s_place();
 	ok &= run_each_grant_mounts_at_its_place();
+	ok &= run_a_grant_behind_a_pickup_rebuilds_its_table();
+	ok &= run_a_team_assign_behind_a_grant_rebuilds_from_the_page();
+	ok &= run_two_team_assigns_each_run_on_their_own_side();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();

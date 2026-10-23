@@ -1774,6 +1774,7 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 							0x2F, encode_loadout_submit(resubmit)));
 					out.local_resubmit = true;
 					out.local_resubmit_entries.push_back(out.inbound_reducer.size());
+					out.local_resubmit_teams.push_back(assigned_team_);
 				}
 			}
 		} else if (m.tag == s2c::EMPTY_SLOT_SWEEP) {

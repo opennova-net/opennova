@@ -841,12 +841,22 @@ void ClientRuntime::stage_receive_loadout_grant(std::size_t i) {
 	authoritative_loadout_revision_ = receive_loadout_revision_base_ + i + 1;
 }
 
-void ClientRuntime::mark_receive_mount(ReceiveMount at, std::size_t entry) {
+std::vector<ClientRuntime::ReceiveLeg> ClientRuntime::receive_legs() const {
+	// [orig: CNapiNPConnection_DispatchMessage @0x625EF1; the declaration carries the order]
+	std::vector<ReceiveLeg> legs;
+	legs.reserve(receive_send_marks_.size());
+	for (const ReceiveSendMark &m : receive_send_marks_)
+		legs.push_back(ReceiveLeg{m.at, m.occurrence, m.team});
+	return legs;
+}
+
+void ClientRuntime::mark_receive_mount(ReceiveMount at, std::size_t entry, uint8_t team) {
 	ReceiveSendMark mark;
 	mark.at = at;
 	mark.occurrence = receive_mount_count(at);
 	mark.position = send_queue_.size();
 	mark.entry = entry;
+	mark.team = team;
 	receive_send_marks_.push_back(mark);
 }
 
@@ -1657,9 +1667,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				// handler asks for after it, which the fold above raised [orig:
 				// NapiNPClientMsg_TeamAssign @0x431910 - NetPacket_SendLoadoutSubmit @0x431AAD
 				// ahead of the 0x22 @0x431AE4 and the 0x23 @0x431B05].
-				const bool self_team_assign =
-						std::find(pr.local_resubmit_entries.begin(), pr.local_resubmit_entries.end(),
-								entries_folded + 1) != pr.local_resubmit_entries.end();
+				const auto self_team_assign_at = std::find(pr.local_resubmit_entries.begin(),
+						pr.local_resubmit_entries.end(), entries_folded + 1);
+				const bool self_team_assign = self_team_assign_at != pr.local_resubmit_entries.end();
 				if (self_team_assign) queue_replies_after(entries_folded + 1);
 				queue_fold_requests();
 				queue_replies_after(++entries_folded);
@@ -1673,7 +1683,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				if (std::find(pr.loadout_grant_entries.begin(), pr.loadout_grant_entries.end(),
 						entries_folded) != pr.loadout_grant_entries.end())
 					mark_receive_mount(ReceiveMount::kWeaponLoadout, entries_folded);
-				if (self_team_assign) mark_receive_mount(ReceiveMount::kSelfTeamAssign, entries_folded);
+				if (self_team_assign)
+					mark_receive_mount(ReceiveMount::kSelfTeamAssign, entries_folded,
+							pr.local_resubmit_teams[static_cast<std::size_t>(
+									self_team_assign_at - pr.local_resubmit_entries.begin())]);
 				// A 0x35 the fold took (a well-formed body) mounts its pickup at its place
 				// [orig: NapiNPClientMsg_0x035 @0x4261A0 - Player_MountPickedUpWeapon
 				//  @0x42624C / @0x42625B].

@@ -328,6 +328,13 @@ opennova::inmatch::JoinerRole::KitSeams Simulation::joiner_kit_seams() {
 	opennova::inmatch::JoinerRole::KitSeams seams;
 	seams.apply_authoritative = [this] { apply_joiner_authoritative_loadout(); };
 	seams.reseed_on_side_change = [this] { return reseed_session_kit_on_side_change(); };
+	// A self S2C 0x50's page copy over the resident buffer (engine:
+	// inmatch::reseed_session_kit_on_team_assign); its Player_InitPlayer(1) rebuilds after.
+	seams.reseed_on_team_assign = [this](uint8_t p_team) {
+		if (kernel_)
+			opennova::inmatch::reseed_session_kit_on_team_assign(player_.weapon_profile, p_team,
+					kernel_->local.loadout, player_.weapon_profile_seeded_side);
+	};
 	seams.push = [this] { push_joiner_loadout_kit(); };
 	return seams;
 }

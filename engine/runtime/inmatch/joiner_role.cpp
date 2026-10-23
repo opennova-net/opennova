@@ -1793,8 +1793,9 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// The receive handlers' writes on L, in the receive's place: the runtime runs this leg
 	// right after its receive pump, ahead of the send block, open or not
 	// (ClientRuntime::AfterReceive). Each fold applies what the receive brought (each is
-	// revision-gated), in the handlers' order: the availability, the 0x5A's kit and row,
-	// the side's kit buffer, the 0x50's team and local arm, the release latch; then a seeded
+	// revision-gated): the availability; the message legs in the receive's order (each
+	// 0x5A's kit and row, each self 0x50's team, page copy and init, each 0x35's pickup);
+	// the side's kit buffer and the 0x50's last team; the release latch; then a seeded
 	// session's birth of L on the in-match edge (a join's L is born at its mission start, as
 	// retail's, so the handlers write it inside the receive, D-NET-NEW-L2-52), its own record
 	// and the 0x0F's pose. So a release's 0x0C is built from L as the receive left it
@@ -1806,7 +1807,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC;
 	//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the L test @0x4293F2, the
 	//  selection @0x4296E3, the hold clear @0x429713; NapiNPClientMsg_TeamAssign @0x431910 -
-	//  @0x4319DB / @0x4319EE, the local arm @0x431A35..0x431A9E; NapiNPClientMsg_0x00F
+	//  @0x4319DB / @0x4319EE, the local arm @0x431A35..0x431AAD; NapiNPClientMsg_0x00F
 	//  @0x42E200 - the hold clear @0x42E391, the pose stores @0x42E3B9..0x42E3F2]
 	const ClientRuntime::AfterReceive after_receive = [&] {
 		// The receive's S2C 0x08 byte, which a first grant's 0x5A slot rebuild (the kit apply
@@ -1858,23 +1859,80 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 				}
 			}
 		};
-		const std::size_t grants = rt.receive_loadout_grant_count();
-		if (grants == 0) apply_grant(0);
-		for (std::size_t grant = 0; grant < grants; ++grant) {
-			rt.stage_receive_loadout_grant(grant);
-			apply_grant(grant);
+		// The receive's message legs on L run in the receive's order, each message's whole ahead
+		// of the next's (ClientRuntime::receive_legs): each 0x5A's apply, each self 0x50's local
+		// arm and Player_InitPlayer(1), each 0x35's pickup. So a 0x5A behind a 0x35 rebuilds the
+		// slot table the pickup landed in, a self 0x50 behind a 0x5A re-copies its side's profile
+		// page over the grant's kit and its init rebuilds from the page, and each of two self
+		// 0x50s re-runs the init on its own side. What a receive outside a frame's folded (the
+		// push's final-wait pass) carries no mark: it runs first, as its receive came first, its
+		// 0x1D at the queue's end.
+		// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - CNapiNPConnection_DispatchMessage
+		//  @0x625EF1, once per message in the packet's order; NapiNPClientMsg_HandleWeaponLoadoutSync
+		//  @0x4290E0; NapiNPClientMsg_TeamAssign @0x431910; NapiNPClientMsg_0x035 @0x4261A0]
+		const std::vector<ClientRuntime::ReceiveLeg> legs = rt.receive_legs();
+		const auto marked = [&legs](ClientRuntime::ReceiveMount at) {
+			return static_cast<std::size_t>(std::count_if(legs.begin(), legs.end(),
+					[at](const ClientRuntime::ReceiveLeg &leg) { return leg.at == at; }));
+		};
+		if (rt.receive_loadout_grant_count() == 0) apply_grant(0);
+		const uint64_t local_resubmit_revision = rt.local_resubmit_revision();
+		const bool unmarked_team_assign = local_resubmit_revision > local_resubmit_revision_seen_ &&
+				marked(ClientRuntime::ReceiveMount::kSelfTeamAssign) == 0;
+		local_resubmit_revision_seen_ = std::max(local_resubmit_revision_seen_,
+				local_resubmit_revision);
+		if (unmarked_team_assign) {
+			apply_self_team_assign(rt.self_assigned_team());
+			flush_stance_requests();
 		}
-		// The team selector may only just have become known (the S2C 0x04 latch landing
-		// after the catalog) or may have moved us across the line (S2C 0x50). Either way the
-		// resident kit buffer follows the side, exactly as retail re-copies restrictionData
-		// for the newly assigned side [orig: NapiNPClientMsg_TeamAssign @0x431a9a].
+		const std::vector<WeaponPickupNotice> pickups = rt.drain_weapon_pickups();
+		const std::size_t unmarked_pickups = pickups.size() -
+				std::min(pickups.size(), marked(ClientRuntime::ReceiveMount::kWeaponPickup));
+		for (std::size_t i = 0; i < unmarked_pickups; ++i) {
+			apply_weapon_pickup(*this, rt, world, lp, pickups[i]);
+			flush_stance_requests();
+		}
+		for (const ClientRuntime::ReceiveLeg &leg : legs) {
+			switch (leg.at) {
+			case ClientRuntime::ReceiveMount::kWeaponLoadout:
+				rt.stage_receive_loadout_grant(leg.occurrence);
+				apply_grant(leg.occurrence);
+				break;
+			case ClientRuntime::ReceiveMount::kSelfTeamAssign:
+				apply_self_team_assign(leg.team);
+				// Its walk's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x50's
+				// place, past the handler's own sends [orig: NapiNPClientMsg_TeamAssign @0x431910
+				//  - the 0x2F @0x431AAD, the 0x22 / 0x23 @0x431AE4 / @0x431B05,
+				//  Player_InitPlayer(1) @0x431B14].
+				flush_receive_mount_stance_requests(leg.at, leg.occurrence);
+				break;
+			case ClientRuntime::ReceiveMount::kWeaponPickup:
+				// Each S2C 0x35 for L mounts its pickup inside the receive, its 0x1D at its place,
+				// so this frame's send block frames it [orig: NapiNPClientMsg_0x035 @0x4261A0 -
+				//  Player_MountPickedUpWeapon @0x42624C / @0x42625B -> Player_MountWeaponSlot
+				//  @0x4E040E; Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead
+				//  of the send block @0x42C3DD].
+				if (unmarked_pickups + leg.occurrence < pickups.size())
+					apply_weapon_pickup(*this, rt, world, lp,
+							pickups[unmarked_pickups + leg.occurrence]);
+				flush_receive_mount_stance_requests(leg.at, leg.occurrence);
+				break;
+			}
+		}
+		// The team selector may only just have become known: the S2C 0x04 latch landing after
+		// the catalog, a side change no self 0x50 carried (each self 0x50's leg above copied its
+		// own side's page). The resident kit buffer follows the side, as the mission start's copy
+		// would have read the latch [orig: Game_StartMission @0x524360 - the side pick
+		//  @0x525798, the copy @0x525818].
 		if (kit_seams.reseed_on_side_change && kit_seams.reseed_on_side_change())
 			if (kit_seams.push) kit_seams.push();
 		// S2C 0x50 re-latched OUR OWN team. L's team is seeded once by spawn_from_self
 		// (the self record's team byte, or a pre-spawn 0x50's); a later one must move both the
 		// entity's Team and the round sim's presenting-client team, or friend/foe styling
 		// keeps rendering the old side. Retail does the same two writes: g_LocalTeam for
-		// the latch and entity->Team for the entity itself.
+		// the latch and entity->Team for the entity itself. Each self 0x50 whose local arm ran
+		// stored its own team at its turn above; this stores the receive's last, the one a
+		// self 0x50 ahead of the local entity's binding leaves.
 		// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — @0x4319db / @0x4319ee; the round-spawn
 		//  style select reads the local player's Team @0x4ec740]
 		{
@@ -1883,44 +1941,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 				self_team_revision_seen_ = self_team_revision;
 				// Leg 2's store on the joiner's own entity (not the g_LocalTeam latch,
 				// which the local arm alone takes, D-NET-572).
-				const uint8_t assigned = rt.self_assigned_team();
-				if (world::Entity *L =
-						world.registry.get(world.cached.local_player)) {
-					L->team = assigned;
-				}
-				world.round_sim.local_team = assigned;
-			}
-		}
-		{
-			const uint64_t local_resubmit_revision = rt.local_resubmit_revision();
-			// One re-run per self 0x50 of the receive, in order [orig: NapiNPClientMsg_TeamAssign
-			//  @0x431910, once per message (CNapiNPConnection_DispatchMessage @0x625EF1)].
-			const std::size_t runs = local_resubmit_revision > local_resubmit_revision_seen_
-					? std::max<std::size_t>(1, rt.receive_mount_count(
-							ClientRuntime::ReceiveMount::kSelfTeamAssign))
-					: 0;
-			local_resubmit_revision_seen_ = std::max(local_resubmit_revision_seen_,
-					local_resubmit_revision);
-			for (std::size_t occurrence = 0; occurrence < runs; ++occurrence) {
-				// The 0x50 handler's local arm RE-SELECTS the newly assigned side's profile page
-				// and re-submits it: profileData = (team==1||team==3) ? blue : red, class
-				// = *profileData, page = profileData + {6,2054,4102,6150,8198}
-				// [orig: NapiNPClientMsg_TeamAssign @0x431a35..@0x431a9e — the submit
-				// passes slot 195 RAW]. The re-submission itself lives in the joiner
-				// runtime; re-arm the seam from the NEW side so its content is the page
-				// retail would have copied. The resident buffer itself moves with the side
-				// in reseed_kit_on_side_change above (retail's qmemcpy replaces
-				// restrictionData wholesale @0x431a9a) — a reassignment WITHIN one side
-				// reaches only this re-arm, which is what retail's unconditional re-submit
-				// does too.
-				if (kit_seams.push) kit_seams.push();
-				reinit_local_player_on_team_assign();
-				// Its walk's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x50's
-				// place, past the handler's own sends [orig: NapiNPClientMsg_TeamAssign @0x431910
-				//  - the 0x2F @0x431AAD, the 0x22 / 0x23 @0x431AE4 / @0x431B05,
-				//  Player_InitPlayer(1) @0x431B14].
-				flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kSelfTeamAssign,
-						occurrence);
+				store_local_team(rt.self_assigned_team());
 			}
 		}
 		const uint64_t deployment_release_revision =
@@ -1946,12 +1967,6 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		rebuild_local_from_full_spawn();
 		fold_local_record();
 		apply_world_state_load();
-		// Each S2C 0x35 for L mounts its pickup inside the receive, its 0x1D at its place, so
-		// this frame's send block frames it (apply_weapon_pickups) [orig: NapiNPClientMsg_0x035
-		//  @0x4261A0 - Player_MountPickedUpWeapon @0x42624C / @0x42625B -> Player_MountWeaponSlot
-		//  @0x4E040E; Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the
-		//  send block @0x42C3DD].
-		apply_weapon_pickups(*this, rt, world, lp);
 		// The receive's mount requests (the 0x5A apply's queued at its place above) queue their
 		// C2S 0x1D in the receive, as the handler's own call does, so this frame's send block
 		// frames them, not the next one's.
@@ -2071,6 +2086,32 @@ void JoinerRole::stamp_init_player_class(world::Entity &local) const {
 	}
 	if (const CharacterJoinVars *vars = runtime->character_join_vars())
 		local.player_class = vars->char_class[side];
+}
+
+void JoinerRole::store_local_team(uint8_t team) {
+	// [orig: NapiNPClientMsg_TeamAssign @0x431910 - @0x4319EE; the round-spawn style select
+	//  reads the local player's Team @0x4EC740]
+	world::World &world = kernel_->world;
+	if (world::Entity *L = world.registry.get(world.cached.local_player)) L->team = team;
+	world.round_sim.local_team = team;
+}
+
+// One self S2C 0x50 whose local arm ran, at its turn in the receive: its Team store on L,
+// then the arm's copy of the page of the side its team names over the spawn buffer, whatever
+// the buffer held (a 0x5A grant's kit, an armory ACCEPT's) and whether or not the side moved,
+// the 0x2F seam re-armed (the re-submission itself is the runtime's, at its place), then
+// Player_InitPlayer(1), which rebuilds the slots from that buffer, on the side L's Team now
+// names.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - g_LocalTeam @0x4319DB, the Team store
+//  @0x4319EE, the side pick @0x431A27..0x431A54, the class switch @0x431A59..0x431A66,
+//  the copy @0x431A9A, NetPacket_SendLoadoutSubmit (the call @0x431AAD), Player_InitPlayer(1)
+//  @0x431B14; Player_InitPlayer @0x4E15F0 - AvatarDef_BuildDisplayList(g_SpawnLoadoutBuffer)
+//  @0x4E1882]
+void JoinerRole::apply_self_team_assign(uint8_t team) {
+	store_local_team(team);
+	if (kit_seams.reseed_on_team_assign) kit_seams.reseed_on_team_assign(team);
+	if (kit_seams.push) kit_seams.push();
+	reinit_local_player_on_team_assign();
 }
 
 // A self S2C 0x50 on the local entity re-runs Player_InitPlayer(1) after its local arm:

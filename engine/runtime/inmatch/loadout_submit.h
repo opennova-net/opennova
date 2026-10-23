@@ -68,17 +68,31 @@ bool seed_session_kit_from_profile(world::World &world,
 bool seed_single_player_kit_from_profile(world::World &world,
 		const playersav::Record *profile, world::LocalPlayerLoadout &loadout);
 
-// The side-change re-copy rule: whenever the SIDE the selector names stops
-// matching the side the resident buffer was copied from, re-copy. Keyed on
-// the side rather than the raw team so a 1<->3 (or 2<->4) reassignment
-// inside one side does not needlessly rebuild — those read the same block
-// @0x525798 — and so an in-session armory ACCEPT, which changes the buffer
-// but never the side, is not undone. [orig: the S2C 0x50 leg re-copies the
-// new side's page @0x431a9a; the 0x04 case retail never has, because the
-// latch precedes Game_StartMission's copy.] Returns true when it re-seeded
-// (the caller re-runs its loadout rebuild + push).
+// The side-change re-copy rule, for a side change no self S2C 0x50 carried: the
+// S2C 0x04 latch landing after the catalog, a case retail never has, because its
+// latch precedes Game_StartMission's copy. Whenever the SIDE the selector names
+// stops matching the side the resident buffer was copied from, re-copy, as that
+// copy would have read the latch. Keyed on the side rather than the raw team: a
+// 1<->3 (or 2<->4) move reads the same block @0x525798, and an in-session armory
+// ACCEPT, which changes the buffer but never the side, stands. A self 0x50
+// re-copies whatever the side (reseed_session_kit_on_team_assign). Returns true
+// when it re-seeded (the caller re-runs its loadout rebuild + push).
+// [orig: Game_StartMission @0x524360 - the side pick @0x525798, Buffer_CopyUntilDoubleNull
+//  (the call @0x525818)]
 bool reseed_session_kit_on_side_change(world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
+		world::LocalPlayerLoadout &loadout, int &seeded_side);
+
+// A self S2C 0x50's local arm: the page of the side `team` names (teams 1 and 3 the blue
+// block, every other the red), for that side's class byte, copied over the resident buffer
+// whatever it held (a 0x5A grant's kit, an armory ACCEPT's) and whether or not the side
+// moved; a class outside 5..9 copies nothing. The Player_InitPlayer(1) the handler runs
+// next rebuilds the slots from it. Returns true when it copied.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the g_LocalTeam read @0x431A27, the side
+//  pick @0x431A2D..0x431A54, the class switch @0x431A59..0x431A66, the copy `rep movsd`
+//  @0x431A9A; Player_InitPlayer @0x4E15F0 - AvatarDef_BuildDisplayList(g_SpawnLoadoutBuffer)
+//  @0x4E1882]
+bool reseed_session_kit_on_team_assign(const playersav::Record &profile, uint8_t team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side);
 
 // The joiner's C2S 0x2F submission content — the wire seam D-NET-168

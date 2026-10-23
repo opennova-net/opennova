@@ -107,6 +107,23 @@ bool reseed_session_kit_on_side_change(world::World &world,
 			world, profile, assigned_team, loadout, seeded_side);
 }
 
+bool reseed_session_kit_on_team_assign(const playersav::Record &profile, uint8_t team,
+		world::LocalPlayerLoadout &loadout, int &seeded_side) {
+	// [orig: NapiNPClientMsg_TeamAssign @0x431910 - @0x431A27..0x431A9A; the declaration
+	//  carries the legs]
+	const playersav::SideId side_id = playersav::side_for_team(team);
+	const playersav::Side &side = profile.side(side_id);
+	const playersav::KitPage *page = side.page_for_class(side.player_class);
+	if (page == nullptr) return false;
+	std::vector<world::WeaponKitEntry> kit;
+	kit.reserve(page->entries.size());
+	for (const playersav::KitEntry &e : page->entries)
+		kit.push_back(world::WeaponKitEntry{e.name, e.ammo_primary, e.ammo_secondary, e.flags});
+	loadout.spawn_kit() = std::move(kit);
+	seeded_side = static_cast<int>(side_id);
+	return true;
+}
+
 int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 		const world::WeaponInventory *inventory, uint8_t team,
 		int32_t requested_combo) {

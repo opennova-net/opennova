@@ -283,6 +283,18 @@ public:
 			uint16_t action_id);
 	// How many messages of `at` this frame's receive folded (their marks).
 	std::size_t receive_mount_count(ReceiveMount at) const;
+	// One such message of this frame's receive: its kind, its occurrence among its kind's and,
+	// for a self 0x50, the team it names.
+	struct ReceiveLeg {
+		ReceiveMount at = ReceiveMount::kWeaponLoadout;
+		std::size_t occurrence = 0;
+		uint8_t team = 0;
+	};
+	// This frame's receive's such messages in the receive's order, the order the embedder's
+	// after-receive runs their legs in, each message's whole ahead of the next's.
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - CNapiNPConnection_DispatchMessage
+	//  @0x625EF1, once per message in the packet's order]
+	std::vector<ReceiveLeg> receive_legs() const;
 	// This frame's receive's S2C 0x5A grants, in arrival order. The receive leaves the last one
 	// as authoritative_loadout at the revision past them all; staging grant `i` sets it and the
 	// revision as they stood past that grant, so the embedder applies each grant at its turn, as
@@ -1032,7 +1044,7 @@ public:
 	// whether or not that entity is the local one yet) [orig: @0x4319EE].
 	uint8_t self_assigned_team() const { return self_assigned_team_; }
 	// Bumps on every S2C 0x50 whose local arm ran (the per-side reselect and the 0x2F)
-	// [orig: NapiNPClientMsg_TeamAssign @0x431A1B..0x431A9E].
+	// [orig: NapiNPClientMsg_TeamAssign @0x431A1B..0x431AAD].
 	uint64_t local_resubmit_revision() const { return local_resubmit_revision_; }
 	// Roster slots whose bookkeeping the host cleared via S2C 0x46 bit15. Draining
 	// keeps it a one-shot; the associated ENTITY row is deliberately untouched
@@ -1407,11 +1419,12 @@ private:
 		std::size_t occurrence = 0;
 		std::size_t position = 0;
 		std::size_t entry = 0;
+		uint8_t team = 0; // a self 0x50's team
 	};
 	std::vector<ReceiveSendMark> receive_send_marks_;
 	std::vector<WeaponLoadout> receive_loadout_grants_;
 	uint64_t receive_loadout_revision_base_ = 0;
-	void mark_receive_mount(ReceiveMount at, std::size_t entry);
+	void mark_receive_mount(ReceiveMount at, std::size_t entry, uint8_t team = 0);
 	uint32_t attach_requests_sent_ = 0; // the USE readout's count (attach_requests_sent)
 	// S2C 0x49 handlers run inside the receive pump. Preserve their decoded
 	// notifications for the embedding simulation after applying the remote-Person

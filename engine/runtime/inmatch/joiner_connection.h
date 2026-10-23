@@ -251,11 +251,14 @@ public:
 		uint8_t self_team = 0;
 		// The 0x50 named the local player entity (g_LocalPlayerEntity), so its
 		// handler's local arm ran: the per-side profile reselect and the C2S 0x2F
-		// re-submission [orig: @0x431A1B..0x431A9E].
+		// re-submission [orig: @0x431A1B..0x431AAD].
 		bool local_resubmit = false;
 		// Per such 0x50, the inbound_reducer entries through it (its index + 1): its handler's
 		// sends and its Player_InitPlayer(1) run at its place [orig: @0x431AAD..0x431B14].
 		std::vector<std::size_t> local_resubmit_entries;
+		// Per such 0x50, the team it names, the g_LocalTeam its arm reads [orig: @0x4319DB,
+		//  the side pick @0x431A27].
+		std::vector<uint8_t> local_resubmit_teams;
 		// Diagnostic summary of S2C 0x50; entity state is folded only from the
 		// corresponding raw inbound_gameplay record.
 		std::vector<std::pair<uint16_t, uint8_t>> entity_team_assigns;
