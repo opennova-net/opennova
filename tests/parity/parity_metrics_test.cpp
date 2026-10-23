@@ -3074,6 +3074,32 @@ void test_frame_draws() {
 				"frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
 	}
 	{
+		// Push 208's aikill OR: the AI's 75 hit landed between the last frame before the
+		// window (150) and the window's first frame (75), so the window opens on 150
+		// (frame.health_open). Every frame of the run is written, the window's by its
+		// steady index.
+		auto opened = [](uint32_t seed, int32_t before, int32_t first, int32_t residual) {
+			wire::ParityTrace trace = scripted(seed);
+			size_t index = 0;
+			for (wire::ParityFrameState &f : trace.frames) {
+				if (f.ts_ns < kSteadyStart) {
+					f.health = before;
+					continue;
+				}
+				const size_t i = index++;
+				f.health = i < 50 ? first : i < 100 ? residual : 0;
+			}
+			return trace;
+		};
+		expect_row(judge_case(opened(1, 150, 150, 36), opened(2, 150, 150, 8),
+						   opened(3, 150, 75, 75), "OR"),
+				'S', "frame_health", "", "pass");
+		// A hit the last frame before the window already carried leaves full unseen.
+		expect_row(judge_case(opened(1, 150, 150, 36), opened(2, 150, 150, 8),
+						   opened(3, 75, 75, 75), "OR"),
+				'S', "frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
+	}
+	{
 		// x6's hostkill: the +0x168 countdown (weapon[1]) from `top` and the +0x170 one
 		// (weapon[2]) from 120, both started at steady frame `start` `skipped` seconds in, a
 		// second every 8 frames (two weapon blocks), +0x170 still running at the window's end

@@ -667,6 +667,17 @@ inline constexpr Normalization kNormalizations[] = {
 			"consecutive frames takes 'hit' out of both sets. x8's 01tr-coop-aikill: RR 150 to "
 			"36 at 1.009 s and 0 at 1.383 s, RR-aa 150 to 8 at 0.600 s and 0 at 0.758 s (one "
 			"frame caught), OR 150 at 1.119 s and 0 at 1.307 s, two consecutive frames" },
+	{ "frame.health_open", MaskKind::Field, 'S', 0x00A, "health at the window's open", 0,
+			"the frame's tail carries the Health word as it stands at the send "
+			"(NetPacket_WritePlayerState @0x4FF6B0, the read @0x4FFD56, the store @0x4FFD6A), "
+			"so between two frames the recipient holds the earlier value and the window opens "
+			"on the health the last frame before it carried: each run's health set starts from "
+			"that frame. The camp AI's first hit lands by its own aim draw: x7's "
+			"01tr-coop-aikill RR took a 75 hit 0.58 s after its staging, inside a window that "
+			"opened before the staging; push 208's OR took the same 75 0.58 s after its "
+			"staging, with the window opening 0.42 s after it (the setup's at-rest wait), so "
+			"its first in-window frame already carried 75, its window read {75, 0} with 75 as "
+			"full, and the straight death took the hit out of both sets" },
 	{ "frame.weapon_countdown", MaskKind::Field, 'S', 0x00A, "weapon[1..4]", 0,
 			"the weapon block rides one frame in four (NetPacket_WritePlayerState @0x4FF6B0, "
 			"the phase test @0x4FF81B) and its slot bytes +0x168, +0x170, +0x16C and +0x164 "

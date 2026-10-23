@@ -561,10 +561,24 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 				return true;
 		return false;
 	};
+	// The Health word holds between sends, so the window opens on the value the last frame
+	// before it carried: the sets start from that frame (frame.health_open).
+	static_assert(has_normalization("frame.health_open"));
+	auto opened = [](const RunFacts &run, std::vector<const F *> frames) {
+		const F *open = nullptr;
+		for (const F &state : run.trace.frames)
+			if (state.decoded && state.ts_ns < run.info.steady_start_ns &&
+					(open == nullptr || state.ts_ns >= open->ts_ns))
+				open = &state;
+		if (open != nullptr)
+			frames.insert(frames.begin(), open);
+		return frames;
+	};
 	{
-		const int32_t full_a = full_health(a), full_b = full_health(b);
-		std::set<std::string> ha = health(a, full_a), hb = health(b, full_b);
-		if (straight_death(a, full_a) || straight_death(b, full_b)) {
+		const auto oa = opened(rr, a), ob = opened(other, b);
+		const int32_t full_a = full_health(oa), full_b = full_health(ob);
+		std::set<std::string> ha = health(oa, full_a), hb = health(ob, full_b);
+		if (straight_death(oa, full_a) || straight_death(ob, full_b)) {
 			ha.erase("hit");
 			hb.erase("hit");
 		}
