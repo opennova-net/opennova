@@ -8622,6 +8622,28 @@ bool run_voice_menu_picks_round_trip_through_a_host() {
             "the host's own-copy 0x6D posts the joiner's radio line");
 }
 
+// The listen host's own client queues its 0x0F's completion pair on its own connection behind
+// what it queued before (L7-s29, L7-s28 FOUND): a 0x5A apply's mount request (a ForceCrouch spawn
+// weapon's C2S 0x1D, raised at the grant ahead of the receive) leaves ahead of the 0x22 / 0x23
+// pair, as retail's one outgoing list hands them to the loopback in queue order.
+// [orig: NapiNPClientMsg_0x00F - CNapiNetwork_QueueReliableMessage (the calls @0x42E690 /
+//  @0x42E6AB); Player_MountWeaponSlot @0x4DFA40 - the 0x1D's (the call @0x4DFC30);
+//  CNapiNetwork_QueueReliableMessage @0x4C4FA0 -> CNapiNPConnection_QueueMessage @0x628640]
+bool run_host_client_burst_follows_its_mount_request() {
+    ns::LoopbackChannel host_loop;
+    inmatch::ClientRuntime host_view(host_loop);
+    if (!expect(host_view.queue_stance_change(0xA9), "the host's own client queues the 0x1D"))
+        return false;
+    host_loop.host_send(s2c::WORLD_STATE_LOAD, {});
+    host_view.Client_ProcessNetworkFrame();
+    std::vector<uint8_t> tags;
+    ns::Datagram dg;
+    while (host_loop.host_recv(dg)) tags.push_back(dg.tag);
+    return expect(tags == std::vector<uint8_t>{c2s::STANCE_CHANGE, c2s::PLAYER_SYNC_REQUEST,
+                                               c2s::VISIBLE_PLAYERS_REQUEST},
+            "the mount's 0x1D leaves ahead of the 0x0F's 0x22 / 0x23 pair");
+}
+
 bool run_host_client_refreshes_visible_players() {
     ns::LoopbackChannel host_loop;
     inmatch::ClientRuntime host_view(host_loop);
@@ -9114,6 +9136,7 @@ int main() {
                     run_emote_stamps_the_speaker_body_and_voices_it() &&
                     run_voice_menu_picks_round_trip_through_a_host() &&
                     run_host_client_refreshes_visible_players() &&
+                    run_host_client_burst_follows_its_mount_request() &&
                     run_contextual_radio_keys_match_retail() &&
                     run_charattr_challenge_table_matches_retail() &&
                     run_charattr_latches_follow_retail() &&
