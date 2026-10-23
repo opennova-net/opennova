@@ -534,6 +534,15 @@ static func _build_definitions() -> Array[ProbeDef]:
 				RUNTIME + "hud_killfeed_probe.gd", {
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, true, 300_000),
+		ProbeDef.make("hud_pass_call_site",
+				"The HUD pass's call site (D-NET-NEW-L8-50): per state, the frame's "
+				+ "hud_pass_called verdict, the HUD's element count and a PNG: live play, the F1 "
+				+ "help held open through the real key path, the debug on-foot chase view, live "
+				+ "play again and, with `kill`, the local player's death; the pass is called "
+				+ "only in live play.",
+				RUNTIME + "hud_pass_call_site_probe.gd", {
+					"kill": { "type": "boolean", "default": false },
+				}, [], true, true, 300_000),
 		ProbeDef.make("vm_bone_dump",
 				"The first-person viewmodel bone dump: equip `weapon`, write the rig's "
 				+ "placement inputs and every bone's camera-relative transform, then the "
