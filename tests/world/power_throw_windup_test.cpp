@@ -161,6 +161,34 @@ void test_the_left_downs_gates() {
 	CHECK(f.weapon.power_throw_start_tick == 7); // no equipped weapon: no test
 }
 
+// A Driver, or a Controller of a carrier with no EWeap, keeps its own EquippedSlot, which the
+// walk pumps; case 0x95's PowerThrow branch sits ahead of the press leg's seat test and the
+// release leg has none, and the fire action and the send test no seat: a key's windup throws
+// from those seats. The left button's down there starts none (its own seat test).
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - the PowerThrow sign bit @0x4E08FD ahead of
+//  the seat test @0x4E09CB..0x4E09DE, the release leg @0x4E07E9..0x4E0879;
+//  Input_ProcessBindings @0x4DDA50 - parentSlot 2 / 5 @0x4DDAAE / @0x4DDAB3;
+//  WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1; WeaponAction_Fire @0x542B10]
+void test_a_drivers_key_windup_throws() {
+	for (const SeatType seat : {SeatType::Driver, SeatType::Controller}) {
+		Fixture f;
+		Entity *body = f.world.registry.get(f.player);
+		body->mounted = true;
+		body->mount_type = seat; // a Controller of no carrier: no EWeap to borrow
+		CHECK(local_weapon_input_block(f.world, f.weapon) == LocalWeaponInputBlock::kSeat);
+		f.update(true, false, false, true);
+		CHECK(f.weapon.power_throw_start_tick == 0); // the left-down's seat test
+		f.update(true, true); // the key's press leg starts it
+		const uint32_t started = f.weapon.power_throw_start_tick;
+		CHECK(started != 0);
+		for (int tick = 0; tick < 3; ++tick) f.update(true);
+		CHECK(f.weapon.power_throw_start_tick == started); // the seated pump keeps it
+		f.update(false, false, true); // the release record throws
+		CHECK(f.weapon.power_throw_start_tick == 0);
+		CHECK(f.weapon.fired_serial == 1);
+	}
+}
+
 void test_an_ordinary_def_keeps_no_windup() {
 	Fixture f;
 	f.weapon.def.flags = 0;
@@ -180,6 +208,7 @@ int main() {
 	test_a_press_the_slot_could_not_fire_starts_nothing_while_held();
 	test_the_left_down_restarts_or_clears_the_windup();
 	test_the_left_downs_gates();
+	test_a_drivers_key_windup_throws();
 	test_an_ordinary_def_keeps_no_windup();
 	if (failures != 0) {
 		std::printf("power_throw_windup: %d failure(s)\n", failures);

@@ -1663,8 +1663,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	WeaponFsmInputs in;
 	// The action binding permits an armed controller's borrowed carrier slot.
 	// [orig: Input_HandleActionBinding_0 @0x4E09CB..0x4E09FF]
-	const bool accept_weapon_input =
-			local_weapon_input_block(world, w) == LocalWeaponInputBlock::kNone;
+	const LocalWeaponInputBlock input_block = local_weapon_input_block(world, w);
+	const bool accept_weapon_input = input_block == LocalWeaponInputBlock::kNone;
 	in.fire_held = accept_weapon_input && w.fire_held;
 	in.fire_pressed = accept_weapon_input && w.fire_pressed;
 	// PowerThrow: the press never fires; the windup's start and its end are the input
@@ -1674,12 +1674,19 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95's release leg
 	//  WeaponSlot_RequestFire(EquippedSlot, 0x96, charge) @0x4E086F; the press leg's
 	//  PowerThrow branch @0x4E08FD..0x4E095C requests none; world-wac-ai-re §27]
-	// The seats and the dead body that refuse the pump's input end a windup with no throw.
+	// The dead body and a UseGun switch in flight end a windup with no throw. The seat does
+	// not: the PowerThrow branch sits ahead of the press leg's seat test and the release leg
+	// has none, a Driver's EquippedSlot (an unarmed Controller's too) stays its own weapon's,
+	// and the walk, the fire action and the send test no seat, so a key's windup throws from
+	// those seats. [orig: Input_HandleActionBinding_0 - the PowerThrow sign bit @0x4E08FD ahead
+	//  of the seat test @0x4E09CB..0x4E09DE; Entity_AttachToVehicleSlot @0x4946D0 - the Driver
+	//  leg @0x4948A6..0x494936; WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1;
+	//  WeaponAction_Fire @0x542B10; Entity_FireWeaponAndSendPacket @0x42BD80]
 	bool power_throw_release = false;
 	if ((w.def.flags & weapon_flag::kPowerThrow) != 0) {
 		in.fire_held = false;
 		in.fire_pressed = false;
-		if (!accept_weapon_input) {
+		if (!accept_weapon_input && input_block != LocalWeaponInputBlock::kSeat) {
 			w.power_throw_start_tick = 0;
 			w.pending_throw_charge = 0;
 		} else if (w.power_throw_released) {

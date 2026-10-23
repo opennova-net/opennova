@@ -622,7 +622,8 @@ enum class LocalWeaponInputBlock : uint8_t {
     kInactive,      // no weapon installed
     kDead,
     kUseGunSwitch,  // a UseGun attach/swap/detach is staged
-    kSeat,          // the occupied seat blocks firing
+    kSeat,          // the occupied seat blocks firing (not a reload, nor a PowerThrow
+                    // windup or its throw: those legs test no seat)
 };
 LocalWeaponInputBlock local_weapon_input_block(const World &world,
                                                const LocalPlayerWeapon &w);
