@@ -1682,6 +1682,13 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 			trail_was_water);
 
 	vehicle_bike_lean(veh, traits, basis.q22.m[9] >> 6);
+	// A bike left not leaning (+0x2EF clear after the lean's own clear and set) drops both lean
+	// rates, +0xA8 and +0xAC, ahead of the chassis fits and the mover's attitude step.
+	// [orig: `cmp byte ptr [esi+2EFh], 0` @0x47A8BD, +0xA8 = 0 @0x47A8E2, +0xAC = 0 @0x47A8E8]
+	if (m.byte_2ef == 0) {
+		m.air_pitch_rate = 0;
+		m.air_roll_rate = 0;
+	}
 
 	light_wall_speed_halving(m, forces); // [orig: @0x47AE05..0x47B1A9]
 

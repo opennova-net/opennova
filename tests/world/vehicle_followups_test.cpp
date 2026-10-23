@@ -471,6 +471,25 @@ void bike_pair_clear_is_ungated() {
     CHECK(m.slide_z == -0x400);
 }
 
+// D-NET-NEW-L6-30: a slow, level bike on its wheels is not leaning (the lean leaves +0x2EF clear),
+// so the solve drops both lean rates; a fast one leans (+0x2EF set) and keeps its pitch rate.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the lean @0x47A78B..0x47A7D8, the clear
+//  @0x47A8BD..0x47A8E8]
+void bike_unleaned_drops_lean_rates() {
+    for (const bool fast : {false, true}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        auto &m = v.veh;
+        m.speed = fast ? 6000 : 1000;
+        m.air_pitch_rate = 0x1000;
+        int32_t z = to_fixed(v.position.z);
+        r.contact(t, z);
+        CHECK(m.byte_2ef == (fast ? 1 : 0));
+        CHECK(m.air_pitch_rate == (fast ? 0x1000 : 0));
+    }
+}
+
 // A climbing track can be supported by its inboard belly station while its
 // outer wheel is clear. Retail uses max(wheel, belly) for sink growth, spring
 // catch-up and the retained-contact tail. [orig: @ 0x4784CC..0x47853A,
@@ -1029,6 +1048,7 @@ int main() {
     bike_wreck_at_rest_leaves_the_wheel_arm();
     bike_tail_parks_and_rebuilds();
     bike_pair_clear_is_ungated();
+    bike_unleaned_drops_lean_rates();
     bike_off_contact_planar_forward();
     vehicle_respawn_reseeds_destroy_timer();
     bike_indestructible_hull_skips_impact_damage();
