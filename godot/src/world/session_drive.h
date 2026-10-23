@@ -133,6 +133,12 @@ public:
 	// legs have no deadline (net-re §5.70.7).
 	bool keep_session(MissionRoot *p_runtime);
 	bool has_kept_session() const { return kept_sim_.is_valid(); }
+	// True while the load is a fresh host's or single player's: no join staged or preloaded and
+	// no kept session, so the world's load creates its session at its start
+	// (GameWorld::create_fresh_session).
+	bool fresh_authority_load() const {
+		return pending_join_.is_null() && join_preload_sim_.is_null() && kept_sim_.is_null();
+	}
 	int load_next_host_mission(const String &p_bms_name);
 	// That load's head ahead of the world's effect system, the head's window past it, and its
 	// stage pumps at the terrain and ahead of the objects, on the kept session

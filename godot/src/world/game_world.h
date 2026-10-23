@@ -931,6 +931,18 @@ private:
 	void load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
+	// The runtime's options the load knows at its start: the mission's names, the process's words
+	// and profiles, the playable gate and the session request the drive stages (start_runtime adds
+	// the terrain, the item table, the .til and the placer once the load built them).
+	Ref<MissionSetupOptions> make_runtime_options(const Ref<MissionData> &p_mission,
+			const String &p_bms_name);
+	// A fresh host's or single player's session at the load's start, ahead of the head's terrain
+	// and the objects: the runtime's options, the simulation staged over them
+	// (MissionRoot::stage_simulation: its role, its record, its bound socket) and its session
+	// created (Simulation::create_host_session), kept for start_runtime. Emits load_failed (or
+	// process_exit_requested for the create's mpreset exit) and returns the error on a failure.
+	int create_fresh_session(const Ref<MissionData> &p_mission, const String &p_bms_name,
+			const Ref<ResourceRoot> &p_resource_root);
 	void run_mission_start();
 	void load_player_weapon_profile();
 	void start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name);
@@ -1028,6 +1040,9 @@ private:
 	// load_mission's timeline (its mount and document spans, an instrument), which
 	// load_mission_internal goes on with.
 	Ref<LoadTimeline> entry_timeline_;
+	// The runtime's options create_fresh_session staged with their created session, which
+	// start_runtime consumes (unload drops them).
+	Ref<MissionSetupOptions> staged_runtime_options_;
 	Ref<WeaponDatabase> weapon_db_; // weapon.def, lazy per mounted root (FP viewmodel)
 	ObjectID music_director_id_;
 	ObjectID mission_audio_id_;

@@ -681,7 +681,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	if (host_role_ != nullptr && is_host_listening()) {
 		if (next_mission) {
 			stage_next_mission_session_config(document);
-		} else {
+		} else if (!host_role_->create_ran()) {
 			seed_host_rotation(net_, p_resource_root);
 		}
 		host_role_->set_rotation(&net_.rotation());
@@ -759,6 +759,32 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
 	push_joiner_loadout_kit();
 	return OK;
+}
+
+// The world load's session create (engine inmatch/host_boot.h create_host_session carries the
+// witness): the session record boot_mission builds, the rotation seeded first on a listening host,
+// as boot_mission seeds it for a create it runs itself.
+int64_t Simulation::create_host_session(const Ref<MissionData> &p_mission,
+		const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file) {
+	namespace inmatch = opennova::inmatch;
+	if (host_role_ == nullptr || net_.map_change_pending || p_mission.is_null() ||
+			p_resource_root.is_null())
+		return OK;
+	const opennova::bms::File &document = p_mission->native_file();
+	const std::string mission_file = opennova::to_std(p_mission_file);
+	if (is_host_listening()) {
+		seed_host_rotation(net_, p_resource_root);
+		host_role_->set_rotation(&net_.rotation());
+	}
+	const PackedByteArray table = p_resource_root->get_expansion_override_table();
+	const inmatch::CreateSessionResult created = inmatch::create_host_session(*host_role_,
+			opennova::mission::boot_files_from_index(p_resource_root->native_index()),
+			opennova::mission::mission_base_name(mission_file),
+			std::vector<uint8_t>(table.ptr(), table.ptr() + table.size()),
+			host_session_cfg(opennova::game_type::for_mission_attribs(document.header.attrib_flags),
+					mission_file),
+			/*session_score_ini=*/is_host_listening());
+	return created == inmatch::CreateSessionResult::ProcessExit ? ERR_CANT_CREATE : OK;
 }
 
 bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {

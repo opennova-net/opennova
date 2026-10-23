@@ -18,6 +18,7 @@
 //     mission .til, the mission text, the gametext "Server" strings, a fresh
 //     session's create (HostRole::create_session: its round-state init's CRT
 //     seed and key draws, ahead of every World and of the mission start),
+//     unless the embedder ran it ahead of its own loads (create_host_session),
 //     Session::begin_load, the fresh kernel and its open, the terrain field
 //     with the placed tiles and the .TSD table, the environment and the water
 //     plane (both before the PreMission pass), the HostRole's staged
@@ -247,6 +248,23 @@ HostLoadingBand host_loading_band(const mission::BootFileSource &files,
 // none of them again. A headless host leaves them to phase A, which runs the head and its
 // window after its text reads and the stages after its terrain and environment.
 void begin_next_host_mission_load(HostRole &host, const mission::BootFileSource &files,
+		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table,
+		HostConfig host_cfg, bool session_score_ini);
+
+// A fresh session's create for an embedder that loads ahead of phase A (the game's world load:
+// its terrain and objects before the runtime): the config with the process's own reads (the
+// loose score.ini when `session_score_ini`, Avatars.def, the own slot's character selection),
+// the mission text and the "Server" strings as phase A reads them, then HostRole::create_session,
+// at the load's start, ahead of the mission start and of every one of its stages. Phase A then
+// runs none (HostRole::create_ran). ProcessExit: the `mpreset` word refused it; the embedder
+// ends its process with code 0 and boots nothing.
+// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 (Server_InitNewRoundState called
+//  @0x5695B3, CNapiGameSession_CreateSession called @0x56997D), from the PreMenu's
+//  MultiPlayer_JoinSessionStateMachine @0x56A320 (state 2's call @0x56A46A) after the host
+//  screen's START opened the socket (UI_HandleHostSessionStart's SetTransportMode(3) @0x556EA6);
+//  SinglePlayer_StartMission @0x561AF0 (@0x561C23, @0x561E65); then GameLoop_Init's
+//  Game_StartMission call @0x526377]
+CreateSessionResult create_host_session(HostRole &host, const mission::BootFileSource &files,
 		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table,
 		HostConfig host_cfg, bool session_score_ini);
 
