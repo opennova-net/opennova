@@ -12,7 +12,7 @@
 //
 // Pinned here, core-only (a synthetic mount, a recording socket, no retail data):
 //   - a fresh session's boot runs the update once, ahead of the fresh kernel, the terrain step
-//     and every server pump;
+//     and every server pump, past the session's create, whose keys it reads (D-NET-NEW-L1-50);
 //   - a dedicated host's map change runs it past the head (the next map's session settings on
 //     the context, the old World gone with the teardown) and ahead of the window's first pump,
 //     which sends the kept joiner its S2C 0x25, and ahead of the next kernel and its terrain;
@@ -116,6 +116,10 @@ struct UpdateSeen {
 	bool terrain_ran = false;
 	std::string mission_file;
 	std::string server_name;
+	// The session the update read: created, and its round-state init's keys.
+	bool in_session = false;
+	uint32_t baffle_key = 0;
+	uint32_t pcid_key = 0;
 };
 
 struct DedicatedHost {
@@ -184,6 +188,9 @@ struct DedicatedHost {
 				seen.terrain_ran = terrain_ran;
 				seen.mission_file = ctx().config.mission_file;
 				seen.server_name = ctx().config.server_name;
+				seen.in_session = ctx().is_in_session != 0;
+				seen.baffle_key = ctx().game_server_baffle_key;
+				seen.pcid_key = ctx().cookie_key_table.current();
 			};
 		}
 		std::string error;
@@ -239,6 +246,13 @@ void test_a_fresh_session_updates_ahead_of_its_load() {
 	CHECK(host->seen.drains == 0);
 	CHECK(host->socket.drains > 0); // the load's pumps followed it
 	CHECK(host->session.state() == inmatch::State::Running);
+	// The session's create ran ahead of it (D-NET-NEW-L1-50): the update reads the keys its
+	// round-state init drew, the ones the session keeps [orig: CNapiGameSession_BuildAndCreateSession
+	// @0x5694D0 - Server_InitNewRoundState called @0x5695B3, ahead of GameLoop_Init's
+	// Game_StartMission call @0x526377].
+	CHECK(host->seen.in_session);
+	CHECK(host->seen.baffle_key != 0u && host->seen.baffle_key == host->ctx().game_server_baffle_key);
+	CHECK(host->seen.pcid_key != 0u && host->seen.pcid_key == host->ctx().cookie_key_table.keys[0]);
 }
 
 // A map change: past the head, ahead of the window's first pump (the kept joiner's 0x25), the

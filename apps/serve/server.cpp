@@ -25,6 +25,7 @@
 #include <runtime/inmatch/server_ban_lists.h>
 #include <runtime/inmatch/punt_log.h> // the connect log's socket teardown line
 #include <runtime/inmatch/server_console.h> // the chat display wrap
+#include <runtime/inmatch/server_info.h> // read_session_listing_columns (the start's update)
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
 #include <runtime/world/present_drains.h> // discard_entity_presentation (no presenter)
@@ -311,8 +312,8 @@ bool Server::start_session(std::string &error) {
 // the start applied, the rotation's game type, the mission text's title or else the header's name,
 // the header's climate (the validate read the header ahead of it), TimeOfDay's class the apply
 // cleared, and the last round's clock (a fresh process's 0), the session's own columns over them
-// once it is bound (a map change's settings, title, lock and keys). Every mission start on a
-// NovaWorld authority in session runs it outside the 1860-tick timer, both lists whole; the
+// (its settings, lock and keys: the create stood it up ahead of the start). Every mission start on
+// a NovaWorld authority in session runs it outside the 1860-tick timer, both lists whole; the
 // starting map's is the fresh host's first full Host list, its host result having published
 // nothing (D-NET-465), and its METPROTOCOL ID report follows (g_SessionRoundCount == 0,
 // D-NET-NEW-L9-22). The session's periodic update then sends them, so they leave the load's
@@ -328,6 +329,18 @@ bool Server::start_session(std::string &error) {
 void Server::run_mission_start_update(const std::string &header_name, int32_t climate) {
 	if (listing_ == nullptr || lister_ == nullptr || lister_->finished()) return;
 	HostRegistration r = listing_columns();
+	// The session the boot's head created ahead of this mission start (HostRole::create_session,
+	// D-NET-NEW-L1-50): its columns over the settings, as a bound listing reads them, the round-state
+	// init's GameServerBaffleKey and the cookie-key ring's first key among them.
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
+	//  @0x5695B3 (the g_GameServerBaffleKey store @0x51CB88, CSessionIdRing_Init called @0x51CB8E),
+	//  ahead of GameLoop_Init's Game_StartMission call @0x526377; Lobby_UpdateServerInfo @0x4FE8C0 -
+	//  the ring's current key @0x4FF191..0x4FF196, g_GameServerBaffleKey read @0x4FF1CC]
+	if (role_ != nullptr)
+		inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx,
+				[this](const char *section, const char *key, const char *fallback) {
+					return game_text(have_gametext_ ? &gametext_ : nullptr, section, key, fallback);
+				});
 	// [orig: Lobby_UpdateServerInfo - MissionText_GetString("info", "title") @0x4FE989..0x4FE993,
 	//  the header's name when it reads empty @0x4FE99D..0x4FE9AD; the climate @0x4FE9D5]
 	const std::string title = boot_.mission_text.get_string("info", "title");

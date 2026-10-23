@@ -180,6 +180,15 @@ int main() {
 	CHECK(var(lobby->last_host_update["Host"], "TimeOfDay") == "Unknown");
 	CHECK(var(lobby->last_host_update["Host"], "TimeLeft") == "0");
 	CHECK(var(lobby->last_host_update["Host"], "MissionName") == "Serve Test Map");
+	// The session's create ran ahead of the mission start, so the update carries the keys its
+	// round-state init drew (D-NET-NEW-L1-50) [orig: CNapiGameSession_BuildAndCreateSession
+	// @0x5694D0 - Server_InitNewRoundState called @0x5695B3 (the g_GameServerBaffleKey store
+	// @0x51CB88, CSessionIdRing_Init called @0x51CB8E), ahead of GameLoop_Init's Game_StartMission
+	// call @0x526377; Lobby_UpdateServerInfo @0x4FE8C0 - @0x4FF191..0x4FF196, @0x4FF1CC].
+	for (const char *key : {"GameServerBaffleKey", "PCIDKey"}) {
+		const std::string value = var(lobby->last_host_update["Host"], key);
+		CHECK(value != "<absent>" && value != "0" && !value.empty());
+	}
 
 	// The service's only endpoint is the source of the host's NWU datagrams:
 	// the game socket.
