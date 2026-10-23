@@ -1130,9 +1130,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const int32_t tick_start_z = e.self->position.z.q16;
 
     // 1. Death edge, once per life, keyed on the dead bit the edge itself
-    // latches (a player body's gate also takes the head's hidden bit, and off
-    // the authority or for a rowless test body the posed death clip:
-    // player_body_death_edge_open).
+    // latches (a player body's gate also takes the head's hidden bit, and for a
+    // rowless test body the posed death clip: player_body_death_edge_open).
     // [orig: Entity_UpdateInfantryAI `cmp [esi+11Eh],bp; jg` @0x4B9C40,
     //  `test byte ptr [esi+24h],2; jnz` @0x4B9C4D; the player-body twin
     //  Entity_UpdateInfantryPlayerBody @0x4B4BF1 / @0x4B4BFE]

@@ -5404,7 +5404,8 @@ target_link_libraries(infantry_org2_view_test PRIVATE opennova_runtime)
 add_test(NAME infantry_org2_view COMMAND infantry_org2_view_test)
 # D-AI-9's player leg (D-NET-NEW-L5-65): the player redeploys reset through the shared World reset,
 # its resolve and lift running on a live body (the deploy's) and not on a dead one (the joiner's
-# record arm), the resolver's skip count zeroed at its head, its tail the slices and the body's list.
+# record arm), the resolver's skip count zeroed at its head, its tail the slices and the body's list;
+# a player body's death edge gated on its flags on every peer (D-NET-NEW-L5-66).
 add_executable(npruntime_player_redeploy_reset_test npruntime/player_redeploy_reset_test.cpp)
 target_link_libraries(npruntime_player_redeploy_reset_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_player_redeploy_reset COMMAND npruntime_player_redeploy_reset_test)

@@ -518,9 +518,16 @@ void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &ar
 	world::InfantryState &inf = local_ai->inf;
 	inf.active = true;
 	inf.is_local_player = true;
-	// The shared spawn/revive reset (InfantryState::reset_for_spawn): one field list with the
-	// host spawn seeding, so a NEW motor field re-defaults here without a second hand-list.
-	inf.reset_for_spawn(heading);
+	// The shared spawn/revive reset's motor half (InfantryState::reset_motor_for_spawn): one
+	// field list with the host spawn seeding, so a NEW motor field re-defaults here without a
+	// second hand-list. Both animation channels stay the corpse's: the reset above ran on the
+	// still-dead L and requested no state, and the arm and Game_InitNewRound store no
+	// animation word, so L's first updates run on its death state (the slope-conform leg) until
+	// its selection, skipped while it falls, replaces it (D-NET-NEW-L5-66).
+	// [orig: Entity_ResetToSpawnState @0x4B9610 - the dead test @0x4B96ED past the requests
+	//  @0x4B9708 / @0x4B9714 / @0x4B972A; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
+	//  conform test @0x4B6DA2..0x4B6DB0, the selector's skip @0x4B70B8..0x4B70D3]
+	inf.reset_motor_for_spawn(heading);
 
 	lp.weapon.fire_held = false;
 	lp.weapon.fire_pressed = false;

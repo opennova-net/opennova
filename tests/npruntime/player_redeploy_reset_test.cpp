@@ -8,8 +8,10 @@
 //   - The host's deploy clears the dead bit ahead of the reset, so a body placed into a wall
 //     leaves the deploy pushed out of it.
 //   - The joiner's record respawn arm calls the reset on its still-dead L, so the reset
-//     resolves nothing (the arm's own pin is inmatch_joiner_role's
-//     run_the_respawn_arm_resolves_nothing_in_the_receive).
+//     resolves nothing and requests no state: L keeps the corpse's channels and its first
+//     ticks run on the death state (D-NET-NEW-L5-66; the arm's own pin is
+//     inmatch_joiner_role's run_the_respawn_arm_resolves_nothing_in_the_receive), its death
+//     edge gated on its flags alone.
 // [orig: Entity_ResetToSpawnState @0x4B9610 - +0x373 = 0 @0x4B9656, the dead test @0x4B96ED
 //  (its jnz @0x4B96F7), AnimMap_UpdateDualChannels called @0x4B973D,
 //  Entity_MovementCollisionResolver called @0x4B9755, the lift @0x4B9761, the clear @0x4B97B0,
@@ -33,6 +35,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/infantry_internal.h> // player_body_death_edge_open
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
@@ -282,6 +285,33 @@ bool run_the_deploy_pushes_the_body_out_of_a_wall() {
 	              "deploy: the reset's resolve pushes the body out of the wall along +Y");
 }
 
+// D-NET-NEW-L5-66: a player body's death edge opens on its flags on every peer, never on its
+// animation state: a joiner's redeployed L runs its first ticks on the corpse's death state
+// (0x82) with its dead bit clear, and a death then still takes the edge; the dead bit or the
+// hidden bit closes it; a rowless test body keys the posed death clip.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the hidden-bit return @0x4B411E..0x4B4127,
+//  Health <= 0 @0x4B4BF1..0x4B4BF8, the dead bit @0x4B4BFE..0x4B4C02]
+bool run_a_joiner_bodys_death_edge_reads_its_flags() {
+	Rig r(/*dead=*/false);
+	r.world->ai.is_authority = false;
+	w::AiEntity &ai = r.motor();
+	ai.inf.reset_body_animation(174);
+	w::Entity &e = r.entity();
+	e.flags &= ~(w::kEntityFlagDead | w::kEntityFlagCarried);
+	e.engine_flags &= ~(w::kEntityFlagDead | w::kEntityFlagCarried);
+	if (!expect(w::player_body_death_edge_open(r.world->ai, ai, &e),
+	            "edge gate: open on a death state with the dead and hidden bits clear")) return false;
+	e.flags |= w::kEntityFlagDead;
+	if (!expect(!w::player_body_death_edge_open(r.world->ai, ai, &e),
+	            "edge gate: the dead bit closes it")) return false;
+	e.flags &= ~w::kEntityFlagDead;
+	e.flags |= w::kEntityFlagCarried;
+	if (!expect(!w::player_body_death_edge_open(r.world->ai, ai, &e),
+	            "edge gate: the hidden bit closes it")) return false;
+	return expect(!w::player_body_death_edge_open(r.world->ai, ai, nullptr),
+	              "edge gate: a rowless body keys the posed death clip");
+}
+
 } // namespace
 
 int main() {
@@ -289,6 +319,7 @@ int main() {
 	ok &= run_the_reset_resolves_a_live_body_out_of_a_wall();
 	ok &= run_the_reset_on_a_dead_body_resolves_nothing();
 	ok &= run_the_deploy_pushes_the_body_out_of_a_wall();
+	ok &= run_a_joiner_bodys_death_edge_reads_its_flags();
 	if (!ok) return 1;
 	std::printf("player_redeploy_reset_test: OK\n");
 	return 0;

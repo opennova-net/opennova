@@ -4191,6 +4191,15 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 	if (!expect(h.role.runtime->queue_deployment_pick(0xFFFF), "arm reset: the Default Spawn pick"))
 		return false;
 	h.role.run_tick(h.input);
+	// L's corpse channel on a death state (0x82: flag bit 2, neither 0x4 nor 0x20), L in the
+	// air, where its 4th-tick selection waits for the landing (D-NET-NEW-L5-66).
+	constexpr int kDeathState = 174;
+	if (!expect(w::infantry_anim_flags(kDeathState) == 0x82u, "arm reset: 174 is a death state"))
+		return false;
+	local_ai->inf.reset_body_animation(kDeathState);
+	local_ai->inf.airborne = true;
+	local->flags |= w::kEntityFlagInAir;
+	local->engine_flags |= w::kEntityFlagInAir;
 	// The release: the record alive again; its receive's respawn arm lands L at (16, 0, 0).
 	h.socket.datagrams.clear();
 	frame(100, 0x00);
@@ -4216,6 +4225,11 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 		return false;
 	if (!expect(!local_ai->inf.was_hit && local_ai->inf.damage_timer == 0,
 			"arm reset: the shared reset clears L's hit words"))
+		return false;
+	// The arm leaves L's body channel the corpse's: no state request, the pending word 0; the
+	// first update ran on the death state (D-NET-NEW-L5-66).
+	if (!expect(local_ai->inf.anim_state == kDeathState && local_ai->inf.anim_pending == 0,
+			"arm reset: L's body channel stays on the corpse's death state"))
 		return false;
 	return expect(local->position.y.q16 > kOne / 4,
 			"arm reset: L's own update pushes it out of the wall along +Y");

@@ -34,16 +34,18 @@ bool org2_owns_death_transaction(const World &world, EntityHandle victim) {
             ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0);
 }
 
-// On the authority the dead bit is the edge's own latch, so the gate is
-// retail's: an unhidden body whose dead bit is clear. A joiner's own body takes
-// its dead bit from the 0x0A fold together with the Health
-// (JoinerRole::apply_authoritative_health), and a rowless test body has no
-// flags word, so those key the edge on the posed death clip instead.
-// [orig: Entity_UpdateInfantryPlayerBody -- the head's hidden-bit return
-//  @0x4B411E..0x4B4127, Health <= 0 @0x4B4BF1 (the caller's), the dead bit
-//  @0x4B4BFE]
-bool player_body_death_edge_open(const AiSystem &ai, const AiEntity &e, const Entity *ent) {
-    if (ent == nullptr || !ai.is_authority) return infantry_anim_flags(e.inf.anim_state) != 0x82u;
+// The dead bit is the edge's own latch on every peer (a joiner's own body too: its 0x0A tail
+// stores Health alone and its record's flag fold masks bit 1 out), so the gate is retail's on
+// both: an unhidden body whose dead bit is clear. It never reads the animation state: a joiner's
+// redeployed body runs its first ticks on the corpse's death state with its dead bit clear
+// (JoinerRole::land_local_respawn_arm), and a death then still takes the edge. A rowless test
+// body has no flags word, so it keys the edge on the posed death clip instead.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the head's hidden-bit return
+//  @0x4B411E..0x4B4127, Health <= 0 @0x4B4BF1..0x4B4BF8 (the caller's), the dead bit
+//  @0x4B4BFE..0x4B4C02; NetPacket_SerializePlayerState @0x4C09C0 - the local fold's
+//  `and ebx, 0E1h` @0x4C12FF]
+bool player_body_death_edge_open(const AiSystem &, const AiEntity &e, const Entity *ent) {
+    if (ent == nullptr) return infantry_anim_flags(e.inf.anim_state) != 0x82u;
     return ((ent->flags | ent->engine_flags) & (kEntityFlagCarried | kEntityFlagDead)) == 0;
 }
 

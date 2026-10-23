@@ -706,14 +706,30 @@ struct InfantryState {
     // owns identity/loadout fields (active, is_local_player, adm_id, health
     // caps, weapon-channel mirrors) and any post-reset seeding.
     void reset_for_spawn(int32_t heading) {
+        reset_body_animation(anim_state::kIdle);
+        reset_weapon_animation(anim_state::kIdle);
+        reset_motor_for_spawn(heading);
+    }
+    // The same list less the two animation channels, which the joiner's record respawn arm
+    // leaves as the corpse's: the arm's reset runs on the still-dead L, so its state requests
+    // (+0x2BC / +0x2C8) and dual updates do not run and it clears only the pending word
+    // (+0x2B8, InfantryState::anim_pending), and neither the arm nor Game_InitNewRound stores
+    // an animation word. L's first updates then run on the death state: its flag bit 2 takes
+    // the slope-conform leg (the probes, the chase, the steep-ground slide), and the 4th-tick
+    // selection, skipped while L is airborne, replaces it once L lands.
+    // [orig: Entity_ResetToSpawnState @0x4B9610 - +0x2B8 = 0 @0x4B96F1, the dead test @0x4B96ED
+    //  past the requests @0x4B9708 / @0x4B9714 / @0x4B972A; NetPacket_SerializePlayerState
+    //  @0x4C09C0 - the arm @0x4C110F..0x4C1135; Game_InitNewRound @0x422740;
+    //  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the conform test on +0x2BC's flag bit 2
+    //  @0x4B6DA2..0x4B6DB0, the selector's skip @0x4B70B8..0x4B70D3; g_AnimStateFlagsTable
+    //  @0x8139E8 (the death states' 0x82)]
+    void reset_motor_for_spawn(int32_t heading) {
         player_moving = false;
         player_move_dir_index = 0;
         move_mode = 0;
         path_state = 0;
         detour_target[0] = detour_target[1] = detour_target[2] = 0;
         target_dist = 0;
-        reset_body_animation(anim_state::kIdle);
-        reset_weapon_animation(anim_state::kIdle);
         reload_anim_ticks = 0;
         arms_dip_ticks = 0;
         pitch_kick_accum = 0;
