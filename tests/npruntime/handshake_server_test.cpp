@@ -3410,10 +3410,13 @@ bool run_join_gate_admits_the_lineup_queue() {
 // review). A Serve Only host with a cap of 1 has one joiner row; with a queue of 1 its gate
 // admits two. Retail's C2S 0x02 handler picks no row, so the second joiner's 0x02 is answered
 // with the post-handshake metadata like the first's, and the spawn pump, its cap reached by the
-// first joiner's add, holds the second and re-sends it the one-byte S2C 0x03.
+// first joiner's add, holds the second and re-sends it the S2C 0x03 queue record: the add
+// unlinked the first, so the held second is the pending list's head and only node, [1][1][1].
 // [orig: the C2S 0x02 handler @0x512FD0 (no row pick; the 0x7A / 0x7B / 0x03 sends
 //  @0x5130AC..0x5131D5); CNapiServer_ProcessPendingPlayerSpawns - the cap @0x4C8E13, the
-//  0x03 nag @0x4C8F7A..0x4C8FD1; Server_PlayerAdd's row pick @0x51CC9A]
+//  unlink @0x4C8FF6, the 0x03 nag @0x4C8F7A..0x4C8FD1; NapiNode_UnlinkFromList - the count
+//  @0x4C6042; NetPacket_WriteSpawnQueueRecord @0x502AC0 - [1] @0x502AFA, the place
+//  @0x502AFD..0x502B10, the count @0x502B13..0x502B24; Server_PlayerAdd's row pick @0x51CC9A]
 bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
 	world::World world;
 	world.registry.configure_pool(0, 16);
@@ -3456,6 +3459,8 @@ bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
 	            "neither 0x02 picks a row; the second completes its admission without one"))
 		return false;
 
+	// The held node's record: [1][u16 place 1][u16 count 1].
+	const std::vector<uint8_t> held_record = {0x01, 0x01, 0x00, 0x01, 0x00};
 	advance_to_periodic_second(world);
 	const std::vector<inmatch::TickOut> spawn_out = inmatch::tick_connections(ctx, 16, 6);
 	bool second_held_nag = false;
@@ -3466,7 +3471,7 @@ bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
 			std::vector<ProtocolMessage> messages;
 			if (!decode_s2c(datagram, second_scrk, header, messages)) continue;
 			const ProtocolMessage *nag = find_reply(messages, 0x03);
-			if (nag != nullptr && nag->payload == std::vector<uint8_t>{0x00}) second_held_nag = true;
+			if (nag != nullptr && nag->payload == held_record) second_held_nag = true;
 		}
 	}
 	first = second = nullptr;
@@ -3478,7 +3483,7 @@ bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
 	                    second != nullptr &&
 	                    second->phase < inmatch::ConnectionPhase::PlayerAdded &&
 	                    inmatch::connection_count(ctx) == 2 && second_held_nag,
-	            "the pump adds the first and holds the second, re-sending it the S2C 0x03 {00}"))
+	            "the pump adds the first and holds the second, re-sending it the S2C 0x03 [1][1][1]"))
 		return false;
 
 	// On a LAN host the second joiner's 0x01 entered state 6, so the join watchdog never visits
@@ -3497,7 +3502,7 @@ bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
 			std::vector<ProtocolMessage> messages;
 			if (!decode_s2c(datagram, second_scrk, header, messages)) continue;
 			const ProtocolMessage *nag = find_reply(messages, 0x03);
-			if (nag != nullptr && nag->payload == std::vector<uint8_t>{0x00}) still_nagged = true;
+			if (nag != nullptr && nag->payload == held_record) still_nagged = true;
 		}
 	}
 	second = nullptr;
@@ -3506,7 +3511,7 @@ bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
 	return expect(second != nullptr && !second->join_ticket_validation &&
 	                      !second->host_disconnect_sent && inmatch::connection_count(ctx) == 2 &&
 	                      still_nagged,
-	        "past 120 s the held LAN joiner is still connected and still re-sent the 0x03");
+	        "past 120 s the held LAN joiner is still connected and still re-sent its record");
 }
 
 // A Serve Only host (D-NET-400) advertises, admits and publishes its session cap; only the
