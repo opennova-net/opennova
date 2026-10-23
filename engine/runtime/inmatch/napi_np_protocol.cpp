@@ -349,6 +349,16 @@ void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving) {
 	const world::EntityHandle owned_entity = leaving.link.owned_entity;
 	const uint8_t player_slot = leaving.reply.player_slot;
 	if (had_player) {
+		// The NovaWorld game session's leg first, every added slot's on the authority, the listen
+		// host's own among them: ClientHostPlayerRemoved in state 6 and the slot's PlayerList vars
+		// dropped (ClientProcessState::nwu_player_removed), ahead of the spectator arm's return
+		// and of every later leg (D-NET-NEW-L9-29).
+		// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the authority test @0x51B5D0, the
+		//  slot's active byte @0x51B5DC, the bot byte +0x178E3 @0x51B5E5 (never set in JO),
+		//  CNapiGameSession_SendPlayerRemovedIfHosting called @0x51B5F3,
+		//  NapiLinkedList_RemoveByUserData called @0x51B601, the +5 test @0x51B606]
+		if (ctx.nwu_player_removed != nullptr && *ctx.nwu_player_removed)
+			(*ctx.nwu_player_removed)(static_cast<int>(player_slot));
 		// A slot not the local one stops its report clock and sends the METPROTOCOL PLAYER report,
 		// ahead of the leave's sends (D-NET-NEW-L9-22).
 		// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - CServerTick_SetState(0) @0x51B690,

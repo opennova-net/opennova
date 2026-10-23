@@ -38,6 +38,7 @@
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/remote_admin.h>
 #include <runtime/inmatch/character_registry.h>
+#include <runtime/inmatch/client_runtime.h> // ClientProcessState (the process's NovaWorld legs)
 #include <runtime/inmatch/game_config_block.h>
 #include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_file.h>
@@ -276,6 +277,9 @@ private:
 	std::string chat_font_name_;
 	fnt::fnt_font_t chat_font_{};
 	bool chat_font_valid_ = false;
+	// The process's client words the role steps, whose NovaWorld teardown leg a listed server's
+	// lister takes (host_on_novaworld); it outlives the role.
+	inmatch::ClientProcessState client_process_;
 	std::unique_ptr<inmatch::HostRole> role_;
 	std::unique_ptr<inmatch::Session> session_;
 	inmatch::HostBoot boot_;

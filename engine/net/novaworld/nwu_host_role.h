@@ -14,14 +14,14 @@
 
 namespace opennova {
 
-// What a roster sync does to the published roster: the slots to remove (gone, or now another
-// player's: its connection, name, address or PCID differs, a leave and a re-join between two
-// syncs included), the players to add, and the kept players whose PlayerTeam / PlayerType alone
-// changed.
-// [orig: Server_HandlePlayerDisconnect @0x51B5C0 — ClientHostPlayerRemoved @0x51b5f3;
-//  Server_PlayerAdd @0x51cbc0 — ClientHostPlayerAdded @0x51d4b5]
+// What a roster sync does to the published roster: the players to add (a slot the roster lacks,
+// or one now another player's: its connection, name, address or PCID differs, a re-join
+// included), and the kept players whose PlayerTeam / PlayerType alone changed. No removal: a
+// player's teardown sends its own, ahead of any later add into its slot (the in-match host's
+// player teardown, inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29).
+// [orig: Server_PlayerAdd @0x51cbc0 — ClientHostPlayerAdded @0x51d4b5;
+//  Server_HandlePlayerDisconnect @0x51B5C0 — ClientHostPlayerRemoved called @0x51B5F3]
 struct RosterSync {
-	std::vector<int> removed;
 	std::vector<HostPlayerSlot> added;
 	std::vector<HostPlayerSlot> vars;
 };
@@ -130,8 +130,8 @@ public:
 	// session's PlayerList at once, with no ClientHostPlayerAdded, and a changed one rides the
 	// next update. A slot not in the roster is left alone.
 	void set_player_vars(int slot, const std::string &team, const std::string &type);
-	// The roster onto `wanted` (plan_roster_sync): the removals, then the adds, then the kept
-	// players' vars.
+	// The roster onto `wanted` (plan_roster_sync): the adds, then the kept players' vars. A
+	// removal is the player's teardown's (clear_player_slot).
 	void sync_roster(const std::vector<HostPlayerSlot> &wanted);
 	const std::map<int, HostPlayerSlot> &roster() const { return players_; }
 	// The live session the server-info update reads its columns from at each run, over the

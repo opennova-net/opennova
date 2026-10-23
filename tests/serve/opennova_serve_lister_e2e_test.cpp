@@ -1,8 +1,9 @@
 // opennova-serve's NovaWorld listing driver end to end: the Lister (apps/serve/lister.h) over real
 // loopback UDP against the real apps/novaworld_lobby NwUdpListener and an in-test gate, its source
 // an in-test stand-in for the live match. The host result publishes nothing (D-NET-465); the
-// mission start's update publishes the whole Host list and the roster; a roster edit removes one
-// player while the other keeps its slot, at once; a renamed column rides the next 1860-tick
+// mission start's update publishes the whole Host list and the roster; a player's teardown removes
+// it (the hosted match's leg, clear_player_slot, D-NET-NEW-L9-29) and a roster edit adds the
+// next while the other keeps its slot, at once; a renamed column rides the next 1860-tick
 // refresh (the bound match's server-info update, which ServeListing hooks to the host role's
 // update_server_info: called directly here, the stand-in having no match); the stop removes the
 // row.
@@ -219,7 +220,10 @@ int main() {
 	expect(slot_of(row("Lister E2E"), "Alpha") == 0 && slot_of(row("Lister E2E"), "Bravo") == 1,
 			"the players hold their slots");
 
-	// Alpha leaves, Charlie arrives in the freed slot, the server is renamed.
+	// Alpha leaves (its teardown's removal, as the hosted match's player teardown sends it:
+	// the server's teardown hook, called directly here), Charlie arrives in the freed slot, the server
+	// is renamed.
+	lister.host_role().clear_player_slot(0);
 	source.set(columns("Lister E2E Renamed"), { player(1, "Bravo"), player(0, "Charlie") });
 	expect(tick_until([&] { return slot_of(row("Lister E2E"), "Charlie") >= 0; }, 300),
 			"the roster change goes out at once");

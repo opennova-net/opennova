@@ -5692,6 +5692,11 @@ add_executable(npruntime_host_boot_mission_start_update_test npruntime/host_boot
 target_link_libraries(npruntime_host_boot_mission_start_update_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_host_boot_mission_start_update_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_boot_mission_start_update COMMAND npruntime_host_boot_mission_start_update_test)
+# A player's teardown runs the NovaWorld session's ClientHostPlayerRemoved leg first, the listen
+# host's own at its leave included (D-NET-NEW-L9-29).
+add_executable(npruntime_teardown_nwu_player_removed_test npruntime/teardown_nwu_player_removed_test.cpp)
+target_link_libraries(npruntime_teardown_nwu_player_removed_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_teardown_nwu_player_removed COMMAND npruntime_teardown_nwu_player_removed_test)
 
 # --- parity lane LI (input seam) ---
 add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)

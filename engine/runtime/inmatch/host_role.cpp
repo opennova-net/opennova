@@ -319,6 +319,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	// reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
 	state.host_owner.ctx.file_transfer_session = &client_process_->file_transfer_session;
 	state.host_owner.ctx.client_disconnect_latch = &client_process_->disconnect_latch;
+	state.host_owner.ctx.nwu_player_removed = &client_process_->nwu_player_removed;
 	client_process_->file_transfer_session.start_mission();
 	inmatch::HostConfig host_cfg;
 	host_cfg.config = config;
@@ -381,6 +382,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	// context reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
 	ctx.file_transfer_session = &client_process_->file_transfer_session;
 	ctx.client_disconnect_latch = &client_process_->disconnect_latch;
+	ctx.nwu_player_removed = &client_process_->nwu_player_removed;
 	client_process_->file_transfer_session.start_mission();
 	// The fresh context stands inside the mission load, which holds the spawn gate
 	// until its end (finish_mission_load) [orig: Game_StartMission @0x524398].
@@ -446,6 +448,7 @@ void HostRole::begin_next_mission_load(HostBringup head) {
 	//  bring-up's]
 	ctx.file_transfer_session = &client_process_->file_transfer_session;
 	ctx.client_disconnect_latch = &client_process_->disconnect_latch;
+	ctx.nwu_player_removed = &client_process_->nwu_player_removed;
 	// The report clocks loading, just ahead of the add (D-NET-NEW-L9-22) [orig: Game_StartMission
 	//  - CServerTick_SetState(1) @0x5244A4 / @0x5244AF].
 	ctx.tick_count_ms = inmatch::host_clock_ms(state.host_owner);

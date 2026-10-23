@@ -248,40 +248,39 @@ void roster_sync() {
 	current[1] = slot(1, "Joiner", "1", "8");
 	current[2] = slot(2, "Leaver", "2", "8");
 
-	// Slot 0's team and slot 1's type change; slot 2 leaves; slot 3 arrives.
+	// Slot 0's team and slot 1's type change; slot 2 leaves; slot 3 arrives. A leave is its
+	// teardown's removal, not the sync's (D-NET-NEW-L9-29).
+	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the removal called @0x51B5F3]
 	const opennova::RosterSync sync = opennova::plan_roster_sync(current,
 			{slot(0, "Host", "2", "8"), slot(1, "Joiner", "1", "5"), slot(3, "New", "1", "8")});
-	expect(sync.removed == std::vector<int>{2}, "only the gone slot is removed");
 	expect(sync.added.size() == 1 && sync.added[0].slot == 3, "only the new slot is added");
 	expect(sync.vars.size() == 2 && sync.vars[0].slot == 0 && sync.vars[0].team == "2" &&
 	               sync.vars[1].slot == 1 && sync.vars[1].type == "5",
 	       "a kept player's team or type change is its vars alone");
 
-	// A slot now another player's: removed, then added.
+	// A slot now another player's: an add (the previous player's teardown removed it).
 	const opennova::RosterSync swap =
 			opennova::plan_roster_sync(current, {slot(0, "Host", "1", "8"), slot(1, "Other", "1", "8"),
 			                                     slot(2, "Leaver", "2", "8")});
-	expect(swap.removed == std::vector<int>{1} && swap.added.size() == 1 &&
-	               swap.added[0].player_name == "Other" && swap.vars.empty(),
-	       "a slot's new player is a removal and an add");
+	expect(swap.added.size() == 1 && swap.added[0].player_name == "Other" && swap.vars.empty(),
+	       "a slot's new player is an add");
 
 	// A leave and a re-join of the same player into the same slot between two syncs (same name,
-	// address and PCID): the re-join is a new connection, so a removal and an add, as retail's
-	// remove and add each send theirs (D-NET-659).
+	// address and PCID): the re-join is a new connection, so an add, its leave's removal sent at
+	// that teardown, as retail's remove and add each send theirs (D-NET-659).
 	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 (the removal @0x51b5f3); Server_PlayerAdd
 	//  @0x51cbc0 (the add @0x51d4b5)]
 	HostPlayerSlot rejoined = current[1];
 	rejoined.connection_id = 7;
 	const opennova::RosterSync rejoin =
 			opennova::plan_roster_sync(current, { current[0], rejoined, current[2] });
-	expect(rejoin.removed == std::vector<int>{ 1 } && rejoin.added.size() == 1 &&
-					rejoin.added[0].connection_id == 7 && rejoin.vars.empty(),
-			"a slot's re-joined player is a removal and an add");
+	expect(rejoin.added.size() == 1 && rejoin.added[0].connection_id == 7 && rejoin.vars.empty(),
+			"a slot's re-joined player is an add");
 
 	// Nothing changed: nothing to do.
 	const opennova::RosterSync same = opennova::plan_roster_sync(current,
 			{current[0], current[1], current[2]});
-	expect(same.removed.empty() && same.added.empty() && same.vars.empty(), "an unchanged roster is left alone");
+	expect(same.added.empty() && same.vars.empty(), "an unchanged roster is left alone");
 }
 
 // B-14: the one roster both embedders sync. Every connection past its player add, at its

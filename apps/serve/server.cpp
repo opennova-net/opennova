@@ -613,6 +613,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.host_cfg.network_type =
 			novaworld_ ? inmatch::NetworkType::NovaWorld : inmatch::NetworkType::Lan;
 	request.host_cfg.serve_and_play = host_.serve_and_play;
+	// The process's client words, whose NovaWorld teardown leg the listing installs.
+	request.host_cfg.client_process = &client_process_;
 	request.host_cfg.game_root = options_.resource_dir;
 	// The mounted Avatars.def's combos the player add validates against (D-NET-137).
 	request.host_cfg.characters = characters_;
@@ -867,6 +869,13 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	demux_->set_session_claim([&lobby](const PeerAddr &from, const uint8_t *data, std::size_t len) {
 		return lobby.claims(from, data, len);
 	});
+	// Each player's teardown sends its ClientHostPlayerRemoved on the hosting session itself
+	// (inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29) [orig:
+	//  Server_HandlePlayerDisconnect @0x51B5C0 - CNapiGameSession_SendPlayerRemovedIfHosting called
+	//  @0x51B5F3].
+	client_process_.nwu_player_removed = [this](int player_number) {
+		if (lister_ != nullptr) lister_->host_role().clear_player_slot(player_number);
+	};
 	// The Host list's tokens are the mounted gametext's NovaWorld and TimeOfDay strings.
 	lister_->host_role().set_lobby_text(make_host_lobby_text(
 			[this](const char *section, const char *key, std::string &out) {

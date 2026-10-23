@@ -895,7 +895,9 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 }
 
 // A retail host SetOrCreates the five per-slot PlayerList vars when a player is
-// added and sends ClientHostPlayerAdded / Removed on each roster change; a team
+// added and sends ClientHostPlayerAdded; a player's teardown sends its
+// ClientHostPlayerRemoved itself, the host's own at its leave included (engine:
+// NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29), so the sync only adds; a team
 // change, a loadout's accept and a weapon-slot list rewrite the slot's
 // PlayerTeam / PlayerType alone, which the match keeps per connection
 // (NapiNPConnection::player_list_team / player_list_type) and the roster sync
@@ -906,7 +908,6 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 // is ever added to this roster.
 void SessionDrive::sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<Simulation> &p_sim) {
 	std::vector<opennova::HostPlayerSlot> wanted;
-	bool self_listed = false;
 	for (const opennova::inmatch::HostPlayerListRow &row : p_sim->host_player_list_rows()) {
 		opennova::HostPlayerSlot player;
 		if (row.own) {
@@ -914,13 +915,11 @@ void SessionDrive::sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<
 			player = nw_self_slot_;
 			player.team = row.slot.team;
 			player.type = row.slot.type;
-			self_listed = true;
 		} else {
 			player = row.slot;
 		}
 		wanted.push_back(std::move(player));
 	}
-	if (nw_self_slot_set_ && !self_listed) wanted.push_back(nw_self_slot_);
 	p_host.sync_roster(wanted);
 	for (const opennova::HostPlayerSlot &player : wanted) {
 		if (nw_self_slot_set_ && player.slot == nw_self_slot_.slot) nw_self_slot_ = player;
@@ -954,9 +953,10 @@ void SessionDrive::adopt_nw_client(NovaWorldClient *p_client) {
 		world_->add_child(p_client);
 	}
 	nw_client_id_ = ObjectID(p_client->get_instance_id());
-	// The process's one NovaWorld session takes the player teardowns no hosted match's roster
-	// sync sees: a held server's, stopped by the next host's session reset (engine:
-	// inmatch/client_runtime.h ClientProcessState::nwu_player_removed, D-NET-NEW-L9-21).
+	// The process's one NovaWorld session takes every player teardown's leg: the hosted match's,
+	// the host's own at its leave included (D-NET-NEW-L9-29), and a held server's, stopped by
+	// the next host's session reset (engine: inmatch/client_runtime.h
+	// ClientProcessState::nwu_player_removed, D-NET-NEW-L9-21).
 	const ObjectID client_id = nw_client_id_;
 	world_->client_process_.nwu_player_removed = [client_id](int p_player_number) {
 		NovaWorldClient *live = Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(client_id));

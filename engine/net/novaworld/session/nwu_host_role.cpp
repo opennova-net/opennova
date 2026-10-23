@@ -307,7 +307,6 @@ void NwuHostRole::set_player_vars(int slot, const std::string &team, const std::
 
 void NwuHostRole::sync_roster(const std::vector<HostPlayerSlot> &wanted) {
 	const RosterSync sync = plan_roster_sync(players_, wanted);
-	for (int slot : sync.removed) clear_player_slot(slot);
 	for (const HostPlayerSlot &player : sync.added) set_player_slot(player);
 	for (const HostPlayerSlot &player : sync.vars) set_player_vars(player.slot, player.team, player.type);
 }
@@ -319,12 +318,6 @@ RosterSync plan_roster_sync(const std::map<int, HostPlayerSlot> &current,
 				a.ip_and_port == b.ip_and_port && a.pcid == b.pcid;
 	};
 	RosterSync sync;
-	for (const auto &entry : current) {
-		bool kept = false;
-		for (const HostPlayerSlot &player : wanted)
-			if (player.slot == entry.first && same_player(player, entry.second)) kept = true;
-		if (!kept) sync.removed.push_back(entry.first);
-	}
 	for (const HostPlayerSlot &player : wanted) {
 		const auto it = current.find(player.slot);
 		if (it == current.end() || !same_player(player, it->second))

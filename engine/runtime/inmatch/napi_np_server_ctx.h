@@ -320,6 +320,14 @@ struct NapiNPServerCtx {
 	// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0, installed on the session's own
 	//  type-2 by CNapiGameSession_CreateSession @0x4C9BEC]
 	ProcessDisconnectLatch *client_disconnect_latch = nullptr;
+	// The process's NovaWorld game session's leg of a player's teardown
+	// (ClientProcessState::nwu_player_removed: ClientHostPlayerRemoved in state 6 and the slot's
+	// PlayerList vars dropped), which remove_connection_player runs first for a slot whose player
+	// was added, the listen host's own included; null on a context no host role brought up, an
+	// unset function when no NovaWorld session is held.
+	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - CNapiGameSession_SendPlayerRemovedIfHosting
+	//  called @0x51B5F3, NapiLinkedList_RemoveByUserData on the PlayerList called @0x51B601]
+	const std::function<void(int player_number)> *nwu_player_removed = nullptr;
 	// ctx+0xE60 past the own client's leave: retail's own type-2 connection stays allocated in
 	// state 6 (its pump state machine has no state-6 arm and nothing destroys it before the
 	// session reset), holding the record its leave latched, which the post-mission router's
