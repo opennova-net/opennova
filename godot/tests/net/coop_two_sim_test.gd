@@ -302,16 +302,6 @@ func _fixture_m4() -> WeaponDef:
 	return weapons.get_weapon(index) if index >= 0 else null
 
 
-func _fixture_m9() -> WeaponDef:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(DefFixture.directory()), OK)
-	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
-	var index := weapons.find_weapon("WPN_M9Beretta")
-	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else null
-
-
 func _fixture_emplaced_50() -> WeaponDef:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(DefFixture.directory()), OK)
@@ -1120,15 +1110,14 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_eq(weapons.load(DefFixture.directory().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_EMPLCD50NA"))
 	host.set_local_player_weapon(personal, {})
 	host.drain_local_player_weapon_events()
 	assert_true(host.local_player_toggle_mount())
 	host.step()
 	for raw in host.drain_local_player_weapon_events():
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50NA":
-			host.set_local_player_weapon(mounted, {}, true)
+			# The commit mounted the gun's def on the sim; the event is the viewmodel's.
+			assert_true((raw as PlayerWeaponEvent).installed)
 	assert_true(host.entity_card_by_ai_index(0).is_mounted(),
 			"host player remains mounted after the local switch commit")
 
@@ -2250,9 +2239,8 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 			switched = true
 			break
 	assert_true(switched, "the joiner switched to its secondary before the echo")
-	# Mirror LocalPlayerPresenter consuming the committed switch event: mount the
-	# newly selected definition so later ticks bridge the M9 FSM to the M9 slot.
-	joiner.set_local_player_weapon(_fixture_m9(), {})
+	# The committed switch mounted the newly selected definition itself, so later ticks
+	# bridge the M9 FSM to the M9 slot with no presenter install.
 	assert_eq(_inventory_clip(joiner, "WPN_M4AUTO"), spent_m4_clip,
 			"the original M4 slot stays spent while its echo is withheld")
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,

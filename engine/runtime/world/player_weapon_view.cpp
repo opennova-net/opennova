@@ -85,7 +85,8 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	// @0x599881, WeaponSlot_HasAmmoAvailable @0x59988F (rounds loaded or in the pool, a
 	// clipless def's pool); the drawer derives the fill from held ticks]. Both def reads
 	// are the EquippedSlot's def (slot+0x20 @0x59986C, @0x541B39): a borrow's slot is the
-	// gun's from its commit on, while the installed def follows at the switch's install.
+	// gun's from its commit on, and the commit that stores the personal slot (a detach's
+	// switch back) mounts its def with it, so neither lags the store.
 	const WeaponFsmDef *slot_def = local_equipped_slot_def(world, w);
 	const bool windup_active = slot_def != nullptr &&
 			(slot_def->flags & weapon_flag::kPowerThrow) != 0 && w.power_throw_start_tick != 0 &&

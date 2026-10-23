@@ -82,6 +82,7 @@ struct TerrainHeightField;
 }
 
 namespace opennova::audio { class SoundSetIndex; }
+namespace opennova::def { struct DefWeaponsFile; }
 namespace opennova::dbf { struct File; }
 namespace opennova::lwf { struct File; }
 namespace opennova::rtxt { struct File; }
@@ -548,6 +549,10 @@ struct MissionTables {
     // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink
     // equipped-weapon gate, and the player-spawn WPN_M4AUTO default. (D-NET-141/143)
     WeaponTable weapons;
+    // The weapon.def parse that table was built from (the kernel's, non-owning; null in a
+    // world with no parse): the local player's mounts read its row by name
+    // (local_weapon_install_by_name), a switch's commit among them.
+    const def::DefWeaponsFile *weapon_defs = nullptr;
     // The ammo.def ballistics/damage table (empty until the host feeds it —
     // Simulation::load_ammo_table, beside the weapon table). [orig: g_AmmoDefTable
     // @0xA2ECE8, AmmoDef_LoadAll @0x40b0b0; §5.60]

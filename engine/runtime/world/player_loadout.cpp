@@ -133,8 +133,7 @@ void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventor
     // (WeaponLoadout_ApplyFromBuffer), @0x4296e3 (the 0x5A apply)].
     weapon.nvg_scope_restore = false;
     inventory.pending_combo = inventory.equipped_combo;
-    commit_pending_weapon_switch(world, weapon, &inventory);
-    weapon.start_in_switchto = false;
+    commit_pending_weapon_switch(world, weapon, &inventory, /*select=*/true);
 }
 
 } // namespace

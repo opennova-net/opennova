@@ -116,6 +116,10 @@ public:
 	// the new def [orig: the ACCEPT re-mount, WeaponLoadout_ApplyFromBuffer
 	// @0x565cd0 -> Player_MountWeaponSlot @0x4dfa40].
 	bool set_local_player_weapon_by_name(const String &p_weapon_name, bool p_preserve_slot_state = false);
+	// A switch the sim's own commit mounted (world::WeaponPresentationEvent::installed):
+	// the render-side half alone -- the def record the viewmodel reads and the FP model's
+	// availability reset -- with no sim install. False for a name weapon.def lacks.
+	bool present_local_player_weapon(const String &p_weapon_name);
 	// Armory NONE (or a spawn kit that equips nothing): clear the equipped
 	// render/FSM state; nothing first-person draws until a weapon equips.
 	void clear_local_player_weapon();

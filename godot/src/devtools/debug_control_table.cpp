@@ -1003,7 +1003,8 @@ void DebugControlTable::register_automation_actions() {
 		if (effects == nullptr) {
 			return outcome_error(ERR_UNAVAILABLE);
 		}
-		return outcome_result(effects->apply_weapon_switch(from_variant<String>(p_args[0]), false));
+		return outcome_result(
+				effects->apply_weapon_switch(from_variant<String>(p_args[0]), false, false));
 	};
 
 	Entry &clear_viewmodel = action(control_id::kClearViewmodelWeapon, "Player",

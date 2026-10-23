@@ -66,6 +66,7 @@ MissionKernel::~MissionKernel() {
 	world.collision = nullptr;
 	world.pose_provider = nullptr;
 	world.tables.terrain = nullptr;
+	world.tables.weapon_defs = nullptr;
 	world.ai.collision = nullptr;
 	world.ai.terrain = nullptr;
 	world.ai.root_motion = nullptr;
@@ -559,6 +560,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);
 	weapon_defs = file;
 	weapon_defs_ok = true;
+	world.tables.weapon_defs = &weapon_defs;
 	mission::stamp_seat_spec_turret_limits(world, seat_specs);
 	// The authoritative side's own player spawned before this feed: re-stamp
 	// its equipped default now that the process's loadout name list's first name
@@ -1243,22 +1245,8 @@ bool MissionKernel::restore_baseline() {
 
 bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve_slot_state,
 		bool allow_same_weapon_rebake) {
-	if (!weapon_defs_ok || weapon_name.empty()) return false;
-	// The entry the weapon table holds for the name: a name's last block
-	// (def_weapon_index_by_name), the one whose descriptors the table baked.
-	const int index = def_weapon_index_by_name(weapon_defs.entries, weapon_defs.count, weapon_name.c_str());
-	if (index < 0) return false;
-	const DefWeaponDef *row = &weapon_defs.entries[index];
-	// The mount runs the descriptors the weapon table baked as it loaded, and
-	// its channel plays from the table's shared ANIMADM rings. A same-weapon
-	// re-bake (the dev tools' live ACTION edits) bakes the retained row as
-	// edited instead. [orig: Player_MountWeaponSlot @ 0x4dfa40; Anim_InitActions
-	// @ 0x541fa0 at the def's END]
-	w::WeaponInstallData data = w::weapon_install_data_from_def(*row);
-	data.table_baked = !allow_same_weapon_rebake;
-	w::local_weapon_install(world, local.weapon, data, preserve_slot_state,
+	return w::local_weapon_install_by_name(world, local.weapon, weapon_name, preserve_slot_state,
 			allow_same_weapon_rebake, local.inventory_valid ? &local.inventory : nullptr, local.view);
-	return true;
 }
 
 void MissionKernel::keep_weapon_action_edit(int action_id) {

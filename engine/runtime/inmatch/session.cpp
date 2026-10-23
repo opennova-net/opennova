@@ -145,7 +145,9 @@ void Role::apply_input(const TickInput &input) {
 	// A sourceless frame (the embedder's frame value: no device, so no records) carries the
 	// fire row as its bits alone. A PowerThrow def's windup then runs as a key's would: the
 	// press bit is the press leg's start, the hold's end the release leg's throw
-	// (LocalPlayer::fire_record); a device's windup is its records' alone.
+	// (LocalPlayer::fire_record); a device's windup is its records' alone. The def is the
+	// EquippedSlot's, which the commit that stored the slot mounted (LocalPlayerWeapon::def)
+	// [orig: Input_HandleActionBinding_0 @0x4E08E2 / @0x4E08F2 / @0x4E08FD].
 	if (input.source == nullptr &&
 			(kernel.local.weapon.def.flags & world::weapon_flag::kPowerThrow) != 0) {
 		if (fire_pressed)

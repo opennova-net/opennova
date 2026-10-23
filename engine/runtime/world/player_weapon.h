@@ -66,6 +66,11 @@ struct WeaponPresentationEvent {
     std::string switch_to_weapon;
     bool clear_weapon = false;
     bool preserve_slot_state = false;
+    // The switch's own commit (or EquippedSlot store) already mounted switch_to_weapon's def
+    // on the sim (local_weapon_install_by_name), so the presenter's leg is device work alone
+    // (the viewmodel); false leaves the mount to the presenter (a world with no weapon.def
+    // parse, the joiner spawn's and the restore's replays).
+    bool installed = false;
     bool switch_denied = false;
 };
 
@@ -116,6 +121,12 @@ inline constexpr size_t kWeaponTraceCapacity = 1024;
 // The local player's whole equipped-weapon state — the moved binding members,
 // one aggregate the embedder holds beside the world.
 struct LocalPlayerWeapon {
+    // The EquippedSlot's def: a switch's commit and an EquippedSlot store mount it at once
+    // (local_weapon_install_by_name), so the walk's FSM, the PowerThrow branch, the press and
+    // release legs read the committed slot's def from the commit on, every tick after it in
+    // the frame included. [orig: WeaponAction_ProcessFrame @0x540E60 - weaponSlot->Def
+    //  @0x540E71; Input_HandleActionBinding_0 @0x4E0420 - the EquippedSlot @0x4E08E2, its
+    //  def @0x4E08F2, the PowerThrow sign bit @0x4E08FD]
     WeaponFsmDef def{};
     std::string def_name;
     WeaponSlotState slot{};
@@ -345,10 +356,10 @@ const WeaponSlotState *active_local_weapon_slot(const World &world,
                                                const LocalPlayerWeapon &w);
 
 // The def of the EquippedSlot (active_local_weapon_slot): under a borrow the borrowed
-// slot's def, its table row's descriptors (null for a row the table lacks), which the
-// installed def (LocalPlayerWeapon::def) matches only once the switch's install runs;
-// else the personal slot's installed def. The commit stores the EquippedSlot, and its
-// readers take that slot's def. [orig: WeaponAction_SwitchFrom @0x5433B0 - the store
+// slot's def, its table row's descriptors (null for a row the table lacks); else the
+// personal slot's installed def (LocalPlayerWeapon::def), which the commit mounts. The
+// commit stores the EquippedSlot, and its readers take that slot's def.
+// [orig: WeaponAction_SwitchFrom @0x5433B0 - the store
 // @0x543475; WeaponAction_SwitchRank @0x543500 - the store @0x543539;
 // HUD_DrawPowerThrowChargeBar @0x59986C, WeaponSlot_HasAmmoAvailable @0x541B39]
 const WeaponFsmDef *local_equipped_slot_def(const World &world, const LocalPlayerWeapon &w);
@@ -459,9 +470,14 @@ void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun)
 void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
                                WeaponInventory *inventory, PlayerViewState &view);
 
-// The pending -> equipped commit and the shared switch-outcome routing.
+// The pending -> equipped commit and the shared switch-outcome routing. The commit
+// mounts the committed slot's def at once (local_weapon_install_by_name): a switch
+// action's completion draws it (SWITCHTO), a SWITCHRANK's and a select's do not.
+// [orig: WeaponAction_SwitchFrom @0x5433B0 - the store @0x543475,
+//  WeaponSlot_TryQueueSwitchTo @0x5434A3; WeaponAction_SwitchRank @0x543500 - the store
+//  @0x543539, no SWITCHTO; Player_SelectWeaponSlot @0x4DD680 - the store @0x4DD704]
 void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
-                                  WeaponInventory *inventory);
+                                  WeaponInventory *inventory, bool select);
 void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
                                   WeaponInventory *inventory,
                                   const WeaponSwitchOutcome &out, PlayerViewState &view);
@@ -517,6 +533,15 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
                           bool preserve_slot_state,
                           bool allow_same_weapon_rebake,
                           WeaponInventory *inventory, PlayerViewState &view);
+// The mount by name over the weapon.def parse the table was built from
+// (MissionTables::weapon_defs): the row a name's last block holds, mounted with the
+// descriptors the weapon table baked as it loaded; a same-weapon re-bake (the dev tools'
+// live ACTION edits) bakes the retained row as edited instead. False with no parse or no
+// row of that name. [orig: Player_MountWeaponSlot @0x4DFA40; Anim_InitActions @0x541FA0 at
+// the def's END]
+bool local_weapon_install_by_name(World &world, LocalPlayerWeapon &w, const std::string &name,
+                                  bool preserve_slot_state, bool allow_same_weapon_rebake,
+                                  WeaponInventory *inventory, PlayerViewState &view);
 // A zoom step on the personal slot lands in its inventory entry, the storage
 // the next mount reads back: retail's EquippedSlot IS that slot-table entry,
 // so the step's store is the entry's own zoom [orig: Player_AdjustWeaponElevation

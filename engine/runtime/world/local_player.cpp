@@ -410,6 +410,8 @@ bool LocalPlayer::fire_record(bool binding_held, bool from_keyboard) {
 	//  carries the legs]
 	if (view.binoculars_view_active) return false;
 	if (!binding_held) return w::local_weapon_release_fire(world_, weapon);
+	// The press leg's sign bit is the EquippedSlot def's, which the commit that stored the
+	// slot mounted (LocalPlayerWeapon::def) [orig: @0x4E08E2 / @0x4E08F2 / @0x4E08FD].
 	if ((weapon.def.flags & w::weapon_flag::kPowerThrow) == 0) return press_fire();
 	return from_keyboard && w::local_weapon_power_throw_press(world_, weapon);
 }

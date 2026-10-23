@@ -70,10 +70,11 @@ func _rebake(weapon_name: String) -> void:
 	_sim.rebake_local_player_weapon(_db.get_weapon(idx), {})
 
 
-# Step + drain like the shells: a switch event installs the def, and the rebuilt
-# viewmodel installs the SAME def again ~a frame later (the FP model resolve —
-# GameWorld's local-player weapon setup). The re-install racing the FSM is the
-# regression surface this file exists for.
+# Step + drain like the shells: a switch event the sim's commit did not mount installs
+# the def (one it mounted is the viewmodel's alone), and the rebuilt viewmodel
+# installs the SAME def again ~a frame later (the FP model resolve, GameWorld's
+# local-player weapon setup). The re-install racing the FSM is the regression
+# surface this file exists for.
 func _step_and_pump(ticks: int) -> Array[String]:
 	var switched: Array[String] = []
 	for _i in ticks:
@@ -87,7 +88,8 @@ func _step_and_pump(ticks: int) -> Array[String]:
 			var name := (ev as PlayerWeaponEvent).switch_to_weapon
 			if not name.is_empty():
 				switched.append(name)
-				_install(name)
+				if not (ev as PlayerWeaponEvent).installed:
+					_install(name)
 				_reinstall_pending = name
 				_reinstall_ticks = 2
 	return switched

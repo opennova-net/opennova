@@ -281,7 +281,7 @@ void test_the_local_player_holds_a_refused_gun_on_foot() {
 	CHECK(local.weapon.usegun_slot_active && local.weapon.usegun_switch == w::LocalUseGunSwitch::kNone);
 	// A personal mount's commit replaces it.
 	local.inventory.pending_combo = personal;
-	w::commit_pending_weapon_switch(world, local.weapon, &local.inventory);
+	w::commit_pending_weapon_switch(world, local.weapon, &local.inventory, false);
 	CHECK(!local.weapon.usegun_slot_active && !local.weapon.usegun_on_foot);
 	world.local_player_state = nullptr;
 }

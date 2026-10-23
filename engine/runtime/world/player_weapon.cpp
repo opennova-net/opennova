@@ -45,6 +45,54 @@ bool local_slot_zoom_sniper_lock(const World &world, int32_t def_category) {
 			def_category, world.rules.sniper_zoom_fill);
 }
 
+// The install's body past its presentation-epoch clear (local_weapon_install).
+void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &data,
+		bool preserve_slot_state, bool allow_same_weapon_rebake, WeaponInventory *inventory,
+		PlayerViewState &view);
+
+// The install payload of the weapon.def row a name's last block holds
+// (MissionTables::weapon_defs); false with no parse or no such row.
+bool install_data_by_name(const World &world, const std::string &name,
+		bool allow_same_weapon_rebake, WeaponInstallData &out) {
+	const DefWeaponsFile *defs = world.tables.weapon_defs;
+	if (defs == nullptr || name.empty()) return false;
+	// The entry the weapon table holds for the name: a name's last block
+	// (def_weapon_index_by_name), the one whose descriptors the table baked.
+	const int index = def_weapon_index_by_name(defs->entries, defs->count, name.c_str());
+	if (index < 0) return false;
+	out = weapon_install_data_from_def(defs->entries[index]);
+	// The mount runs the descriptors the weapon table baked as it loaded, and
+	// its channel plays from the table's shared ANIMADM rings. A same-weapon
+	// re-bake (the dev tools' live ACTION edits) bakes the retained row as
+	// edited instead. [orig: Player_MountWeaponSlot @ 0x4dfa40; Anim_InitActions
+	// @ 0x541fa0 at the def's END]
+	out.table_baked = !allow_same_weapon_rebake;
+	return true;
+}
+
+// The commit's own mount: a switch's commit and an EquippedSlot store mount the
+// EquippedSlot's def at once, so the walk's FSM, the PowerThrow branch and the press and
+// release legs read the committed slot's def from the commit on, the ticks after it in the
+// same frame included, where the slot table's entries carry their own def. The frame's
+// pending presentation records stay (in tick order, the switch's own among them): the
+// presenter's leg for the switch is device work alone. False when nothing mounts (no
+// weapon.def parse or row, no bound local player): the record then leaves the mount to
+// the presenter.
+// [orig: WeaponAction_ProcessAllEntities @0x542690 - the EquippedSlot read @0x5426AD;
+//  WeaponAction_ProcessFrame @0x540E60 - weaponSlot->Def @0x540E71;
+//  Input_HandleActionBinding_0 @0x4E0420 - the EquippedSlot @0x4E08E2, its def @0x4E08F2,
+//  the PowerThrow sign bit @0x4E08FD]
+bool commit_mount(World &world, LocalPlayerWeapon &w, const std::string &name,
+		bool preserve_slot_state) {
+	LocalPlayer *local = world.local_player_state;
+	if (local == nullptr || &local->weapon != &w) return false;
+	WeaponInstallData data;
+	if (!install_data_by_name(world, name, false, data)) return false;
+	mount_install(world, w, data, preserve_slot_state, false,
+			local->inventory_valid ? &local->inventory : nullptr, local->view);
+	return true;
+}
+
 } // namespace
 
 WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w) {
@@ -256,6 +304,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	event.switch_to_weapon = next_def != nullptr ? next_def->name : std::string();
 	event.clear_weapon = next_def == nullptr;
 	event.preserve_slot_state = true;
+	const size_t event_index = w.events.size();
 	w.events.push_back(std::move(event));
 	if (next_def == nullptr) w.active = false;
 
@@ -276,6 +325,12 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 		w.usegun_weapon_adm = 0xFF;
 		w.usegun_saved_adm = 0xFF;
 	}
+	// The stored slot's def mounts with the store, the slot as it stands: the gun's, or the
+	// personal one a detach's switch back restores. [orig: WeaponAction_SwitchFrom @0x5433B0
+	//  (@0x543475) / WeaponAction_SwitchRank @0x543500 (@0x543539); WeaponAction_ProcessFrame
+	//  @0x540E71]
+	if (next_def != nullptr)
+		w.events[event_index].installed = commit_mount(world, w, next_def->name, true);
 }
 
 void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
@@ -414,6 +469,8 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 					event.world_position = local_player_mission_position(world);
 					event.switch_to_weapon = def->name;
 					event.preserve_slot_state = true;
+					// The routed slot's def mounts with the store (commit_mount).
+					event.installed = commit_mount(world, w, def->name, true);
 					w.events.push_back(std::move(event));
 				}
 			} else {
@@ -485,6 +542,8 @@ const WeaponFsmDef *local_equipped_slot_def(const World &world, const LocalPlaye
 	// [orig: WeaponAction_SwitchFrom @0x5433B0 / WeaponAction_SwitchRank @0x543500 - the
 	//  commits' EquippedSlot stores @0x543475 / @0x543539; the readers take the slot's def
 	//  +0x20: HUD_DrawPowerThrowChargeBar @0x59986C, WeaponSlot_HasAmmoAvailable @0x541B39]
+	// The personal slot's def is the installed one, which the commit that stores the slot
+	// mounts (commit_mount): a detach's switch back reads its own def from the commit on.
 	if (const Entity *gun = local_borrowed_gun(world, w)) {
 		const WeaponTableEntry *row = world.tables.weapons.by_index(borrowed_slot_adm(world, *gun));
 		return row != nullptr ? &row->action_fsm : nullptr;
@@ -552,6 +611,8 @@ void local_usegun_store_equipped_slot(World &world, LocalPlayerWeapon &w, Entity
 		event.world_position = local_player_mission_position(world);
 		event.switch_to_weapon = def->name;
 		event.preserve_slot_state = true;
+		// The stored slot's def mounts with the store (commit_mount).
+		event.installed = commit_mount(world, w, def->name, true);
 		w.events.push_back(std::move(event));
 	}
 }
@@ -574,12 +635,14 @@ void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun)
 	w.usegun_pending_on_foot = false;
 	w.usegun_switch_action = -1;
 	// The first-person model follows the EquippedSlot's def each frame
-	// [orig: Player_RenderFirstPersonViewModel @0x4DED60].
+	// [orig: Player_RenderFirstPersonViewModel @0x4DED60], and the walk pumps the stored
+	// slot with that def from the store on (commit_mount).
 	WeaponPresentationEvent event;
 	event.tick = world.logic_tick;
 	event.world_position = local_player_mission_position(world);
 	event.switch_to_weapon = def->name;
 	event.preserve_slot_state = true;
+	event.installed = commit_mount(world, w, def->name, true);
 	w.events.push_back(std::move(event));
 }
 
@@ -704,7 +767,7 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 }
 
 void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
-		WeaponInventory *inventory) {
+		WeaponInventory *inventory, bool select) {
 	// The pending -> equipped commit [orig: the switchfrom/switchrank completion
 	// consumes g_PendingWeaponSlot; EquippedSlot swap + the equippedAdmIndex stamp
 	// @ 0x4dd727; the FP model re-resolve runs shell-side off the event].
@@ -750,9 +813,11 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 			world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
 	// SWITCHRANK commits in place; only a holster (or an initial mount) queues
 	// the target's draw. Treating a fire-mode change as SWITCHFROM inserted a
-	// second animation and its draw lockout after the mode-switch action.
-	// [orig: WeaponAction_SwitchRank @0x543500 vs SwitchFrom @0x543475]
-	w.start_in_switchto = !completed_rank;
+	// second animation and its draw lockout after the mode-switch action. A select
+	// stores the slot with no switch action at all (the spawn mount plays none,
+	// D-WPN-21). [orig: WeaponAction_SwitchRank @0x543500 vs SwitchFrom @0x543475;
+	//  Player_SelectWeaponSlot @0x4DD680 (the store @0x4DD704)]
+	w.start_in_switchto = !select && !completed_rank;
 	if (e == nullptr) {
 		w.presentation_pending = true;
 		return;
@@ -764,6 +829,10 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	event.tick = world.logic_tick;
 	event.world_position = local_player_mission_position(world);
 	event.switch_to_weapon = def != nullptr ? def->name : std::string();
+	// The committed slot and its def mount with the store (commit_mount): a fresh slot
+	// whose draw the switch action's completion queued (start_in_switchto).
+	// [orig: WeaponAction_SwitchFrom @0x5433B0 - WeaponSlot_TryQueueSwitchTo @0x5434A3]
+	event.installed = def != nullptr && commit_mount(world, w, def->name, false);
 	w.events.push_back(std::move(event));
 }
 
@@ -789,7 +858,7 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 			//  the walk; the OUTGOING slot's FSM plays SWITCHRANK (same category) or
 			//  SWITCHFROM (cross category) and its completion commits]
 			if (!w.active) {
-				commit_pending_weapon_switch(world, w, inventory);
+				commit_pending_weapon_switch(world, w, inventory, false);
 				break;
 			}
 			// The mount clears the NVG restore latch at the request, past its
@@ -1016,34 +1085,64 @@ void fp_channel_advance(anim::AdmRingTable &rings, LocalPlayerWeapon &w) {
 	w.anim_latched_variant = next.variant;
 }
 
+namespace {
+
+// The FP model resolve re-installs the SAME weapon once its viewmodel (and
+// .adm clip lengths) finish loading. That resolve is a render-side consumer
+// in retail with no access to the action slot [orig: the per-frame FP model
+// resolve @ 0x4ded60 vs the mount's slot state in Player_MountWeaponSlot
+// @ 0x4dfa40], so an explicitly requested same-name rebake only refreshes
+// the def and rings.
+// Resetting the slot here instead destroyed a queued/holstering SWITCHFROM
+// whenever the late viewmodel install raced a switch request: the completion
+// never fired, commit_pending_weapon_switch never ran, and the FSM def
+// desynced from equipped_adm_index (the rifle then fired the previous
+// weapon's ammo).
+bool install_is_same_weapon_rebake(const LocalPlayerWeapon &w, const WeaponInstallData &data,
+		bool allow_same_weapon_rebake) {
+	return allow_same_weapon_rebake && w.active && !w.start_in_switchto && !data.name.empty() &&
+			strutil::iequals(data.name, w.def_name);
+}
+
+} // namespace
+
 void local_weapon_install(World &world, LocalPlayerWeapon &w,
 		const WeaponInstallData &data, bool preserve_slot_state,
 		bool allow_same_weapon_rebake, WeaponInventory *inventory,
 		PlayerViewState &view) {
-	// The FP model resolve re-installs the SAME weapon once its viewmodel (and
-	// .adm clip lengths) finish loading. That resolve is a render-side consumer
-	// in retail with no access to the action slot [orig: the per-frame FP model
-	// resolve @ 0x4ded60 vs the mount's slot state in Player_MountWeaponSlot
-	// @ 0x4dfa40], so an explicitly requested same-name rebake only refreshes
-	// the def and rings.
-	// Resetting the slot here instead destroyed a queued/holstering SWITCHFROM
-	// whenever the late viewmodel install raced a switch request: the completion
-	// never fired, commit_pending_weapon_switch never ran, and the FSM def
-	// desynced from equipped_adm_index (the rifle then fired the previous
-	// weapon's ammo).
-	const bool same_weapon_rebake = allow_same_weapon_rebake && w.active &&
-			!w.start_in_switchto && !data.name.empty() &&
-			strutil::iequals(data.name, w.def_name);
+	// A mount the embedder asks for is a new presentation epoch: no payload from the
+	// previous weapon may cross this seam, even though its strings were copied into the
+	// pending records. The same-weapon rebake is NOT an epoch: undrained records
+	// (including a racing switch commit or deny) must survive it. A switch's own commit
+	// mounts with no clear (commit_mount): its records stay in tick order.
+	if (!install_is_same_weapon_rebake(w, data, allow_same_weapon_rebake)) w.events.clear();
+	mount_install(world, w, data, preserve_slot_state, allow_same_weapon_rebake, inventory,
+			view);
+}
+
+bool local_weapon_install_by_name(World &world, LocalPlayerWeapon &w, const std::string &name,
+		bool preserve_slot_state, bool allow_same_weapon_rebake, WeaponInventory *inventory,
+		PlayerViewState &view) {
+	// [orig: Player_MountWeaponSlot @0x4DFA40; the declaration carries the rule]
+	WeaponInstallData data;
+	if (!install_data_by_name(world, name, allow_same_weapon_rebake, data)) return false;
+	local_weapon_install(world, w, data, preserve_slot_state, allow_same_weapon_rebake,
+			inventory, view);
+	return true;
+}
+
+namespace {
+
+void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &data,
+		bool preserve_slot_state, bool allow_same_weapon_rebake, WeaponInventory *inventory,
+		PlayerViewState &view) {
+	const bool same_weapon_rebake =
+			install_is_same_weapon_rebake(w, data, allow_same_weapon_rebake);
 	// The NVG scope restore latch is the switch request's to clear (the reset,
 	// the mount, the select); the install that follows a committed switch, and
 	// the render-side rebake, leave it [orig: dword_B76554's writers
 	// @0x4dd730 / @0x4dd7fe / @0x4de2b9 / @0x4dfb75; WeaponAction_SwitchFrom
 	// @0x5433b0 / SwitchRank @0x543500 write none].
-	// A mount is a new presentation epoch: no payload from the previous weapon may
-	// cross this seam, even though its strings were copied into the pending records.
-	// The same-weapon rebake is NOT an epoch — undrained records (including a
-	// racing switch commit or deny) must survive it.
-	if (!same_weapon_rebake) w.events.clear();
 	// The channel plays from the weapon's ANIMADM rings, one table per file
 	// shared by every weapon naming it, held by the weapon table.
 	// [orig: AnimMap_LoadAdmFile @ 0x40cc40, the cached entry @ 0x40CD45..0x40CD5C]
@@ -1263,6 +1362,8 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.def_name = data.name;
 	w.active = true;
 }
+
+} // namespace
 
 void local_weapon_store_scope_zoom(const World &world, const LocalPlayerWeapon &w,
                                    WeaponInventory &inventory) {
@@ -1752,6 +1853,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	//  leg @0x4948A6..0x494936; WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1;
 	//  WeaponAction_Fire @0x542B10; Entity_FireWeaponAndSendPacket @0x42BD80]
 	bool power_throw_release = false;
+	// The branch reads the EquippedSlot's def, which its commit mounted (commit_mount)
+	// [orig: Input_HandleActionBinding_0 @0x4E08E2 / @0x4E08F2 / @0x4E08FD].
 	if ((w.def.flags & weapon_flag::kPowerThrow) != 0) {
 		in.fire_held = false;
 		in.fire_pressed = false;
@@ -1826,6 +1929,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// entity's body Z against the water word).
 	if (player != nullptr) weapon_fire_environment_inputs(world, *player, in);
 	WeaponFsmEvents ev;
+	// The slot runs its own def, the EquippedSlot's from the commit that stored it on (the
+	// commit mounts it, commit_mount) [orig: WeaponAction_ProcessAllEntities @0x5426AD ->
+	// WeaponAction_ProcessFrame @0x540E60 - weaponSlot->Def @0x540E71].
 	weapon_fsm_tick(w.def, active_slot, in, ev);
 	// The tick's re-queue leaves as a deferred fire record (its dispatch next input frame
 	// runs the record's gates: the head, the cease fire, the live binding, the press leg's).
@@ -2214,7 +2320,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// WeaponAction_SwitchRank @0x543500 (@0x543528..0x543539)].
 	if (io.inventory != nullptr && (!borrowed_usegun_slot || w.usegun_on_foot) &&
 			w.switch_in_flight && ev.switch_completed)
-		commit_pending_weapon_switch(world, w, io.inventory);
+		commit_pending_weapon_switch(world, w, io.inventory, false);
 	// The FSM's scope legs already ran inside the tick (LocalWeaponScope);
 	// the serials count the calls for the dev tools.
 	if (ev.unscope) ++w.unscope_serial;

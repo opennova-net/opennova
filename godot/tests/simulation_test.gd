@@ -4911,20 +4911,17 @@ func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var primary_index := weapons.find_weapon("WPN_M4AUTO")
-	var secondary_index := weapons.find_weapon("WPN_colt45")
 	assert_gte(primary_index, 0)
-	assert_gte(secondary_index, 0)
 	sim.set_local_player_weapon(weapons.get_weapon(primary_index), {})
 
-	# First switch normally, then mirror the LocalPlayerPresenter installing the new
-	# weapon definition. Its first tick enters SWITCHTO (the draw animation).
+	# First switch normally: its commit mounts the new weapon definition itself (no
+	# presenter install between), so the tick after it enters SWITCHTO (the draw animation).
 	sim.request_local_player_weapon_category(2)
 	for _tick in range(120):
 		sim.step()
 		if sim.get_local_player_weapon_name() == "WPN_colt45":
 			break
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_colt45")
-	sim.set_local_player_weapon(weapons.get_weapon(secondary_index), {})
 	sim.step()
 	assert_eq(sim.get_local_player_weapon_state().current_action, 6,
 		"the newly equipped secondary is drawing through SWITCHTO")
@@ -5019,8 +5016,6 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_EMPLCD50"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
 	sim.step() # seed the decoded listen-client present rows
@@ -5037,9 +5032,9 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	var mount_event_found := false
 	for raw in sim.drain_local_player_weapon_events():
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50":
-			mount_event_found = true
-	assert_true(mount_event_found)
-	sim.set_local_player_weapon(mounted, {}, true)
+			# The commit mounted the gun's def on the sim; the event is the viewmodel's.
+			mount_event_found = (raw as PlayerWeaponEvent).installed
+	assert_true(mount_event_found, "the attach's commit mounts the gun's def itself")
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM, gun_index,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"authored gfx1 alone cannot cull when its first-person model failed to resolve")
@@ -5124,8 +5119,6 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_EMPLCD50NA"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
 	sim.step()
@@ -5153,9 +5146,9 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	var mounted_switch := false
 	for raw in sim.drain_local_player_weapon_events():
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50NA":
-			mounted_switch = true
-	assert_true(mounted_switch)
-	sim.set_local_player_weapon(mounted, {}, true)
+			# The commit mounted the gun's def on the sim; the event is the viewmodel's.
+			mounted_switch = (raw as PlayerWeaponEvent).installed
+	assert_true(mounted_switch, "the attach's commit mounts the gun's def itself")
 	assert_eq(_present_field_for_origin(
 			sim, MissionData.KIND_ITEM, gun_index,
 			Simulation.PF_WORLD_HEAT_GLOW_VALID), 1)
@@ -5241,8 +5234,6 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_EMPLCD50NA"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
 	assert_true(sim.local_player_toggle_mount())
@@ -5251,9 +5242,12 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			0.001, "mounted player origin coincides with the authored Usegun point")
 	assert_lt(absf(wrapf(sim.get_local_player_yaw_deg(), -180.0, 180.0)),
 			0.01, 'UseGun attach pre-snaps a mismatched local look to the gun yaw')
+	var mount_installed := false
 	for raw in sim.drain_local_player_weapon_events():
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50NA":
-			sim.set_local_player_weapon(mounted, {}, true)
+			# The commit mounted the gun's def on the sim; the event is the viewmodel's.
+			mount_installed = (raw as PlayerWeaponEvent).installed
+	assert_true(mount_installed, "the attach's commit mounts the gun's def itself")
 	sim.debug_set_panm_time_ms(0)
 	var initial_weapon_state := sim.get_local_player_weapon_state()
 	assert_true(initial_weapon_state.emplaced_controls_valid)
@@ -5390,16 +5384,17 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			"an Emplaced pending def takes retail's same-pump -901 commit")
 	assert_true(mount_event.preserve_slot_state,
 			"the host must not reset the emplacement's persistent slot")
+	assert_true(mount_event.installed,
+			"the -901 commit mounts the gun's def itself; the event is the viewmodel's")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER")
 	var handed_off := sim.get_local_player_weapon_state()
-	# Read ahead of the switch's install below: the bar's def is the EquippedSlot's, the
-	# gun's from the commit on, not the PowerThrow personal def still installed.
+	# The bar's def is the EquippedSlot's, the gun's, which its commit mounted: the
+	# PowerThrow personal def no longer reads once the slot is stored.
 	assert_false(handed_off.windup_active,
 			"the borrowed gun's def (no PowerThrow flag) draws no charge bar")
 	assert_eq(handed_off.fired_serial, personal_fired_before)
 	assert_eq(handed_off.round_ring_count, personal_rounds_before,
 			"releasing through the handoff cannot leak a charged personal round")
-	sim.set_local_player_weapon(mounted_def, {}, true)
 	var mounted_before := sim.get_local_player_weapon_state()
 	assert_eq(mounted_before.clip,
 			mounted_def.clipsize)
@@ -5454,7 +5449,8 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	assert_false(detach_event == null,
 			"outgoing Emplaced detach also commits on the next pump")
 	assert_true(detach_event.preserve_slot_state)
-	sim.set_local_player_weapon(personal_def, {}, true)
+	assert_true(detach_event.installed,
+			"the switch back's commit mounts the personal def itself")
 	assert_eq(sim.get_local_player_weapon_state().clip,
 			personal_clip, "the personal slot resumes with its original magazine")
 
@@ -5476,7 +5472,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 		if not remount_event == null:
 			break
 	assert_false(remount_event == null)
-	sim.set_local_player_weapon(mounted_def, {}, true)
+	assert_true(remount_event.installed)
 	assert_eq(sim.get_local_player_weapon_state().clip,
 			mounted_clip_after,
 			"the emplacement keeps its own clip state while nobody is attached")
@@ -5536,10 +5532,6 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var first_mount: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_AVENGER"))
-	var second_mount: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_EMPLCD50"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
 	# Seed the listen-client rows and let the personal slot reach an attachable
@@ -5559,7 +5551,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_AVENGER":
 			first_event = raw
 	assert_false(first_event == null)
-	sim.set_local_player_weapon(first_mount, {}, true)
+	assert_true(first_event.installed, "the attach's commit mounts the gun's def itself")
 	# Even a host-side resolution report cannot manufacture fpModel on a Def that
 	# has none, and a different target Def must not inherit that model identity.
 	sim.set_local_player_first_person_model_available(true)
@@ -5594,7 +5586,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			swap_event = raw
 	assert_false(swap_event == null,
 			"latest pending parent commits directly with no personal interlude")
-	sim.set_local_player_weapon(second_mount, {}, true)
+	assert_true(swap_event.installed, "the swap's commit mounts the new gun's def itself")
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
 			first_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"the committed swap leaves the old AVENGER parent visible")
@@ -5655,8 +5647,6 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
-	var mounted_def: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_AVENGER"))
 	var personal_def: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
 	sim.set_local_player_weapon(personal_def, {})
@@ -5671,8 +5661,11 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 			mount_event = raw
 	assert_false(mount_event == null,
 			"the emplacement commits before its SWITCHTO draw")
-	sim.set_local_player_weapon(mounted_def, {}, true)
+	assert_true(mount_event.installed, "the attach's commit mounts the gun's def itself")
 	var fired_before := sim.get_local_player_weapon_state().fired_serial
+	# The switch back's commit mounts the personal def at once, which starts its serials
+	# over: the round ring is the witness a shot would leave across it.
+	var rounds_before := sim.get_local_player_weapon_state().round_ring_count
 	sim.set_local_player_weapon_input(true, true, false)
 	sim.debug_set_entity_health(0, 0)
 	var restore_event: PlayerWeaponEvent = null
@@ -5687,7 +5680,9 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 			"forced detach during SWITCHTO eventually restores the personal slot")
 	assert_eq(sim.get_local_player_weapon_state().fired_serial,
 			fired_before, "a dead local gunner cannot fire the emplacement")
-	sim.set_local_player_weapon(personal_def, {}, true)
+	assert_eq(sim.get_local_player_weapon_state().round_ring_count, rounds_before,
+			"no round of the dead gunner's reached the ring")
+	assert_true(restore_event.installed)
 	assert_false(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 
 

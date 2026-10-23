@@ -56,6 +56,9 @@ public:
 	String get_switch_to_weapon() const;
 	bool get_clear_weapon() const { return value_.clear_weapon; }
 	bool get_preserve_slot_state() const { return value_.preserve_slot_state; }
+	// The switch's commit already mounted its def on the sim: the presenter's leg is the
+	// viewmodel alone (world::WeaponPresentationEvent::installed).
+	bool get_installed() const { return value_.installed; }
 	bool get_switch_denied() const { return value_.switch_denied; }
 };
 

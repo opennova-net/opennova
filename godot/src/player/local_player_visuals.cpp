@@ -264,8 +264,7 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 	return resolved;
 }
 
-bool LocalPlayerVisuals::set_local_player_weapon_by_name(const String &p_weapon_name,
-		bool p_preserve_slot_state) {
+bool LocalPlayerVisuals::present_local_player_weapon(const String &p_weapon_name) {
 	if (p_weapon_name.is_empty()) {
 		return false;
 	}
@@ -278,12 +277,20 @@ bool LocalPlayerVisuals::set_local_player_weapon_by_name(const String &p_weapon_
 	}
 	viewmodel_weapon_override_ = p_weapon_name;
 	viewmodel_weapon_cleared_ = false;
-	local_weapon_preserve_slot_state_ = p_preserve_slot_state;
 	// The render-side def record (viewmodel gfx/adm/fov reads + the name guard).
 	local_weapon_ = weapon_db->get_weapon(index);
+	set_first_person_model_available(false);
+	return true;
+}
+
+bool LocalPlayerVisuals::set_local_player_weapon_by_name(const String &p_weapon_name,
+		bool p_preserve_slot_state) {
+	if (!present_local_player_weapon(p_weapon_name)) {
+		return false;
+	}
+	local_weapon_preserve_slot_state_ = p_preserve_slot_state;
 	const Ref<Simulation> mount_sim = sim();
 	if (mount_sim.is_valid()) {
-		set_first_person_model_available(false);
 		// One-step native mount (S6b, ADR 0028): the sim bakes the FSM from
 		// its RETAINED weapon.def row and seeds the clip rings from the rig's
 		// own .adm -- the mount is not hostage to the FP model load, matching
