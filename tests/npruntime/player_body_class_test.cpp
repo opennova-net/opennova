@@ -2011,6 +2011,78 @@ void test_an_ewep_row_body_lets_go_of_a_rider_off_it() {
 	}
 }
 
+// The ewep row's tank-command call over a person body (D-NET-NEW-L5-22, L5-s21): an occupant
+// riding the body that holds the jump bit, with the local player in a UseGun seat of a gun on the
+// body's ground, plays its TANK_COMAND composite and posts HUD_COM2GUN once the tick is more than
+// 124 past the body's +0x31C word, the spawn backup's Y, which the call re-stamps. The turret
+// window ahead of it (its limits read the +0x2D4 Yaw word as a weapon def) is not run.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the call @0x4412B6..0x44135C;
+//  Entity_ResetToSpawnState @0x4B9610 - +0x31C @0x4B963B]
+void test_an_ewep_row_body_runs_the_tank_command_call() {
+	struct Case {
+		uint32_t past_stamp;
+		bool posts;
+	};
+	for (const Case c : {Case{125, true}, Case{124, false}}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		r.world->registry.configure_pool(1, 8);
+		w::Entity *body = r.spawn_remote(kEwep);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr);
+		if (ae == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		const w::EntityHandle self = body->handle;
+		w::Entity deck;
+		deck.alive = true;
+		const w::EntityHandle ground = r.world->registry.spawn(1, deck);
+		w::Entity gun;
+		gun.alive = true;
+		gun.ground_target = ground;
+		const w::EntityHandle local_gun = r.world->registry.spawn(1, gun);
+		w::Entity seated;
+		seated.alive = true;
+		seated.mounted = true;
+		seated.mount_target = local_gun;
+		seated.mount_type = w::SeatType::Gunner;
+		r.world->cached.local_player = r.world->registry.spawn(0, seated);
+		w::Entity caller;
+		caller.alive = true;
+		caller.mounted = true;
+		caller.mount_target = self;
+		caller.net_move_input = static_cast<uint8_t>(w::Entity::kMoveOrderJump);
+		caller.anim_slot = 2; // the BM2 body
+		const w::EntityHandle rider = r.world->registry.spawn(1, caller);
+		body = r.world->registry.get(self);
+		CHECK(body != nullptr && ground.valid() && local_gun.valid() && rider.valid());
+		if (body == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		body->ground_target = ground;
+		body->primary_occupant = rider;
+		ae->inf.leg_yaw[0] = 0x40000000;
+		constexpr int32_t kBackupY = 0x00012340;
+		body->spawn_position.y.q16 = kBackupY;
+		const uint32_t tick = static_cast<uint32_t>(kBackupY) + c.past_stamp;
+		r.world->logic_tick = tick;
+		r.world->ai.update_organic(*ae, *r.world, tick);
+		CHECK(body->primary_occupant == rider);
+		CHECK(r.world->out.hud_chat_lines.size() == (c.posts ? 1u : 0u));
+		bool composite = false;
+		for (const w::ScriptSoundEvent &sound : r.world->out.script_sounds)
+			composite |= sound.name == "BM2_TANK_COMAND" &&
+					sound.kind == w::ScriptSoundEvent::Kind::Interface;
+		CHECK(composite == c.posts);
+		CHECK(body->spawn_position.y.q16 ==
+				(c.posts ? static_cast<int32_t>(tick) : kBackupY));
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // The ewep row's anchored leg over a person body (D-NET-NEW-L4-14 (a), L4-s28). The anchor byte
 // (the spawn backup X's second byte, 2) names the ground model's second userpoint record. A record
 // on the model's root (subobject 0) publishes the body's +0x322 word (the backup Z's high half),
@@ -2294,6 +2366,7 @@ int main() {
 	test_an_ewep_row_body_asks_for_a_destroyed_ground();
 	test_an_ewep_row_body_over_a_zeroed_ground();
 	test_an_ewep_row_body_lets_go_of_a_rider_off_it();
+	test_an_ewep_row_body_runs_the_tank_command_call();
 	test_an_ewep_row_body_refills_its_anchor_byte();
 	test_an_ewep_row_body_rides_its_anchor();
 	test_a_flare_row_body_takes_the_flare_init();

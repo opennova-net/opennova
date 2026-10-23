@@ -414,15 +414,17 @@ inline constexpr HudChatLine kEmplacedCommandCallLine{"HUD", "HUD_COM2GUN", 0xFF
 //  @0x4412FD..0x44130E, the stamp @0x441310, the local test @0x441316, SoundProfile_FindByEntityAndType
 //  (occupant, 8) @0x441321, Sound_PlayInterfaceTriggerSet @0x441327, GameText_GetString @0x441336,
 //  Chat_AddMessageChannel1 @0x44135C]
-inline void emplaced_command_call(World &world, Entity &gun, bool occupant_is_local,
-		uint8_t occupant_move_order, int occupant_anim_slot) {
+// `ground` and `stamp` are the updated entity's +0x28 and +0x31C: an item gun's ground_target and
+// emplaced_command_stamp, a person body's ground_target and its spawn backup's Y word.
+inline void emplaced_command_call(World &world, EntityHandle ground, uint32_t &stamp,
+		bool occupant_is_local, uint8_t occupant_move_order, int occupant_anim_slot) {
 	const Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr || !local->mounted || local->mount_type != SeatType::Gunner) return;
 	const Entity *local_gun = world.registry.get(local->mount_target);
-	if (local_gun == nullptr || local_gun->ground_target != gun.ground_target) return;
+	if (local_gun == nullptr || local_gun->ground_target != ground) return;
 	if ((occupant_move_order & Entity::kMoveOrderJump) == 0) return;
-	if (static_cast<int32_t>(world.logic_tick - gun.emplaced_command_stamp) <= 124) return;
-	gun.emplaced_command_stamp = world.logic_tick;
+	if (static_cast<int32_t>(world.logic_tick - stamp) <= 124) return;
+	stamp = world.logic_tick;
 	if (occupant_is_local) return;
 	char name[64];
 	ScriptSoundEvent call;
@@ -593,8 +595,9 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 	// the tank-command call over the occupant's packed MoveOrder byte.
 	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the slot Def gate @0x4411C9..0x4411CB]
 	if (mount.emplaced_update && emplaced_slot_def(world, mount) != nullptr)
-		emplaced_command_call(world, mount, occupant.handle == world.cached.local_player,
-				occupant.net_move_input, occupant.anim_slot);
+		emplaced_command_call(world, mount.ground_target, mount.emplaced_command_stamp,
+				occupant.handle == world.cached.local_player, occupant.net_move_input,
+				occupant.anim_slot);
 }
 
 // The ewep class update's every-tick legs outside the occupied channel, in

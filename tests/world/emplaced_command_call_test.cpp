@@ -55,7 +55,8 @@ struct Rig {
 	Entity &b() { return *w.registry.get(gun_b); }
 	Entity &l() { return *w.registry.get(local); }
 	void call(uint8_t move_order, bool rider_is_local = false) {
-		emplaced_command_call(w, b(), rider_is_local, move_order, 7);
+		emplaced_command_call(w, b().ground_target, b().emplaced_command_stamp, rider_is_local,
+				move_order, 7);
 	}
 	size_t lines() const { return w.out.hud_chat_lines.size(); }
 	size_t sounds() const { return w.out.script_sounds.size(); }

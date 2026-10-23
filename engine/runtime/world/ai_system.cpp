@@ -675,9 +675,9 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 //  @0x4B96AA; Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8 / @0x4C0238]
 // The rest of the ewep mover runs over the person's words (person_ewep_mover), save the legs
 // that need a word ours does not yet home on a person (D-NET-NEW-L4-14 (a), narrowed): the
-// joiner's destroy of its own body behind its C2S 0x0F pair, and a riding +0x170 occupant's
-// turret window (garbage-pointer limits, the Q16-1 (a) class) with the HUD_COM2GUN leg behind
-// it.
+// joiner's destroy of its own body behind its C2S 0x0F pair. A riding +0x170 occupant's turret
+// window (garbage-pointer limits, the Q16-1 (a) class) is not run; the tank-command call behind
+// it is.
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
 // narrowed): towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
@@ -876,9 +876,11 @@ static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
     // clear is the leg. While the link holds, the +0x2AC clock takes 1. One riding the body takes
     // the turret window over the body's +0x322 / +0x324 words, whose limits read the body's
     // +0x2D4 word (the Yaw) as a weapon def, or its +0x2EC word as a slot pointer: garbage-pointer
-    // reads over a person, the Q16-1 (a) class, which ours does not run; the local player's
-    // tank-command leg behind them (world::emplaced_command_call, an item gun's) is reached only
-    // past those reads, so it stays narrowed with them (D-NET-NEW-L4-14 (a)).
+    // reads over a person, the Q16-1 (a) class, which ours does not run. The tank-command call
+    // behind them reads none of the limits, so it runs over the person's words: its +0x28 ground
+    // link and its +0x31C stamp, the spawn backup's Y word (world::emplaced_command_call).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the clamps @0x44123C / @0x44128C ahead
+    //  of the call @0x4412B6..0x44135C; Entity_ResetToSpawnState @0x4B9610 - +0x31C @0x4B963B]
     // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the link @0x4411D1, `cmp [eax+16Ch], ebp`
     //  @0x4411E4, Entity_GetWeaponTurretLimits @0x540D70 (the call @0x441228; slot +0x20 / +0x38
     //  @0x540DB5..0x540E58), the COM2GUN leg @0x4412B6..0x441364, the let-go @0x441366..0x441380,
@@ -887,6 +889,13 @@ static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
     if (body.primary_occupant.valid()) {
         const Entity *rider = world.registry.get(body.primary_occupant);
         const bool rides_body = rider != nullptr && rider->mount_target == body.handle;
+        if (rides_body) {
+            uint32_t stamp = static_cast<uint32_t>(body.spawn_position.y.q16);
+            emplaced_command_call(world, body.ground_target, stamp,
+                    rider->handle == world.cached.local_player, rider->net_move_input,
+                    rider->anim_slot);
+            body.spawn_position.y.q16 = static_cast<int32_t>(stamp);
+        }
         if (!rides_body && (rider != nullptr || link_reads_zeroed_slot(world, body.primary_occupant)))
             body.primary_occupant = {};
         if (body.primary_occupant.valid()) body.spawn_phase = 1;
