@@ -1091,18 +1091,12 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 
 } // namespace
 
-// The chase tail the org2 and org1 legs share: the position step while the
-// bucket runs, then the 512-progress cap with the starved idle force — a
-// movement state parked past the progress cap walks its root motion forever,
-// so retail reads AND writes the arbitration current (+0x2BC)
-// [orig: @0x4b464f/@0x4b465f, g_AnimStateFlagsTable bit0 gate; the org1
-//  twin is §5.38a cap 512 -> idle 43, the same shape].
-static void row_chase_step_and_cap(ClientEntityState &es, int16_t progress) {
-	if (progress < es.net_interp_steps) {
-		es.x += es.net_smooth_target[0];
-		es.y += es.net_smooth_target[1];
-		es.z += es.net_smooth_target[2];
-	}
+// The chase's count and cap, which a seated body's pass runs too (visit_remote_row's carrier
+// branch): progress counts up to 512; held there, a movement state parked past the cap walks
+// its root motion forever, so retail reads AND writes the arbitration current (+0x2BC), the
+// starved idle force [orig: @0x4b4431..0x4b443e, @0x4b464f/@0x4b465f, g_AnimStateFlagsTable
+// bit0 gate; the org1 twin @0x4B9C09..0x4B9C2F, cap 512 -> idle 43, the same shape].
+static void row_chase_count(ClientEntityState &es, int16_t progress) {
 	if (progress < 512) {
 		es.net_interp_progress = progress + 1;
 	} else if ((world::infantry_anim_flags(es.net_anim_current >= 0
@@ -1112,6 +1106,17 @@ static void row_chase_step_and_cap(ClientEntityState &es, int16_t progress) {
 		es.net_anim_current = world::anim_state::kIdle;
 		es.anim_state_id = world::anim_state::kIdle;
 	}
+}
+
+// The chase tail the org2 and org1 legs share: the position step while the
+// bucket runs, then the count and cap (row_chase_count).
+static void row_chase_step_and_cap(ClientEntityState &es, int16_t progress) {
+	if (progress < es.net_interp_steps) {
+		es.x += es.net_smooth_target[0];
+		es.y += es.net_smooth_target[1];
+		es.z += es.net_smooth_target[2];
+	}
+	row_chase_count(es, progress);
 }
 
 // The organic death edge's mover-side halves (client_replica_body_arbitration
@@ -1342,6 +1347,21 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		}
 		return;
 	}
+	// A hidden (wire bit 0: carried-object, killed, not-ready, spectating; never a seat
+	// mount, which streams 0x40) or channel-less organic body's update returns ahead of its
+	// dual update, so the row runs nothing this tick and holds its staged pose. The starved
+	// test reads the progress ahead of this tick's count; the visit latches it for the legs
+	// after the walk (body_update_ended).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the bit-0 test @0x4B411E, the
+	//  +0x188 test @0x4B412D..0x4B4135, the dual update @0x4B41DF; Entity_UpdateInfantryAI
+	//  @0x4B9910 - the +0x188 test @0x4B9931..0x4B993B, the bit-0 test @0x4B9A03..0x4B9A07,
+	//  the dual update @0x4B9A48; the seat attach's Flags 0x40 @0x4946D0 / @0x494752; the bit
+	//  rides the wire raw, net-re §5.38e §5]
+	const bool organic = es.cls == EntityClass::Player || es.cls == EntityClass::Infantry;
+	if (organic) {
+		es.rm_starved = es.net_interp_progress >= 512;
+		if (body_update_exits_ahead_of_channel(es)) return;
+	}
 	advance_row_weapon_channel(es, self_handle);
 	if (!es.net_has_compact) return;
 	const bool chased_class = es.cls == EntityClass::Player ||
@@ -1362,30 +1382,37 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	// attachment. Hold its last world pose until a resolvable carried sample
 	// (or an explicit free-standing sample) arrives.
 	if (es.carrier_handle != wire_handle::kInvalid) {
+		// A seated body runs the chase apply too (no exit ahead of it tests the seat): the
+		// seated record resets its count, and with no record for 512 ticks it starves and
+		// returns ahead of its ride link and its mounted site. Its position step is the
+		// mounted site's to overwrite, so the count, the cap's idle force and the starved exit
+		// stand here alone.
+		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the one chase skip, the
+		//  authority's local player, @0x4B4279..0x4B428F, the count @0x4B4431..0x4B443E, the
+		//  starved exit @0x4B4669..0x4B4670, the site selector @0x4B637C..0x4B638F;
+		//  Entity_UpdateInfantryAI @0x4B9910 - the chase @0x4B9A8C, the starved exit
+		//  @0x4B9C09..0x4B9C39]
+		if (organic) {
+			row_chase_count(es, es.net_interp_progress);
+			if (es.rm_starved) return;
+		}
 		// A seated body's pass still refreshes its ride link off the seat's
 		// ground link (the record's store) [orig: @0x4B5EA9..0x4B5F2C;
 		// the ground store @0x4C1353].
 		if (es.cls == EntityClass::Player && es.handle != self_handle &&
-				ground_occupant_provider_ &&
-				!(es.state_flags_known && (es.state_flags & 0x01u) != 0u))
+				ground_occupant_provider_)
 			row_ride_link(es, state_, ground_occupant_provider_);
 		// A seated body's pass runs its channel and ends at the mounted site
 		// (bone 0 is a deck, not a seat) [orig: Entity_UpdateInfantryPlayerBody
-		// @0x4B40E0 - the bit0 test @0x4B411E, the dual update call @0x4B41DF, the
-		// site selector on the mount word +0x16C @0x4B637C..0x4B638F].
+		// @0x4B40E0 - the dual update call @0x4B41DF, the site selector on the mount
+		// word +0x16C @0x4B637C..0x4B638F].
 		if (es.cls == EntityClass::Player && es.handle != self_handle &&
-				es.mount_bone != 0 &&
-				!(es.state_flags_known && (es.state_flags & 0x01u) != 0u))
+				es.mount_bone != 0)
 			tick_seated_body(es);
 		return;
 	}
-	// The organic mover-skip: wire bit0 (carried-object/killed/not-ready
-	// — NOT seat mounts, which stream 0x40) freezes the row at its staged
-	// pose [orig: the Flags&1 early return @0x4b9a03 / the body-pass twin;
-	// the bit rides the wire raw, §5.38e §5]. No vehicle mover tests it
-	// [orig: Entity_UpdatePool1Slot calls the mover @0x4B8E53 ungated].
-	if (es.cls != EntityClass::Vehicle && es.state_flags_known &&
-			(es.state_flags & 0x01u) != 0u) return;
+	// No vehicle mover tests wire bit 0 [orig: Entity_UpdatePool1Slot calls the mover
+	// @0x4B8E53 ungated]; a hidden organic row returned at the visit's head.
 	// A vehicle wreck holds its dead-pose snap. A dead ORGANIC keeps its
 	// mover: neither body pass tests Flags & 2 ahead of the chase, so a
 	// corpse follows its own wire records (the host's dying body falls and
@@ -1902,7 +1929,10 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
 		//  kind-3 Entity_AttachToBoneAndUpdateTransform call @0x4B63C7, every other kind's
 		//  bone pose through the branch @0x4B64EF to the Entity_GetBoneTransformAndOrientation
 		//  call @0x4B6510, ahead of the eye restamp]
-		if (follows_carrier_seat(es)) {
+		// An organic body whose update exits ahead of its mounted site keeps its pose
+		// (body_update_ends_ahead).
+		const bool organic = es.cls == EntityClass::Player || es.cls == EntityClass::Infantry;
+		if (follows_carrier_seat(es) && !(organic && body_update_ends_ahead(es))) {
 			const auto carrier = row_by_handle.find(es.carrier_handle);
 			follow_carrier_seat(es, carrier == row_by_handle.end()
 					? nullptr : &state_.entities[carrier->second]);

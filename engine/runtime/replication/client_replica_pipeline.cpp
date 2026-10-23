@@ -295,7 +295,8 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 // requests for one handle in a frame (two children of one stale carrier, two records of one
 // slot) both go out.
 // [orig: CNapiNetwork_QueueReliableMessage @0x4C4FA0 -> CNapiNPConnection_QueueMessage
-//  @0x628640, NapiNPMessage_Create @0x6286C3; the calls @0x440DAB / @0x440E29, @0x4307E9]
+//  @0x628640 (the NapiNPMessage_Create call @0x6286C3); the calls @0x440DAB / @0x440E29, the
+//  0x0A type bail @0x4307E9, the carrier bail @0x4608AE..0x4608C1]
 void ClientReplicaPipeline::queue_carrier_repair(uint16_t handle) {
 	carrier_repair_requests_.push_back(handle);
 }
@@ -533,9 +534,13 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 			// pose: that is the org2 body's mounted site, which its +0x1C4 never runs
 			// (D-NET-892) [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call
 			// @0x4C2472; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the site selector
-			// @0x4B637C..0x4B638F].
+			// @0x4B637C..0x4B638F]. Nor does an organic body whose update exited ahead of
+			// that site this tick (body_update_ended).
+			const bool organic = child.cls == EntityClass::Player ||
+			                     child.cls == EntityClass::Infantry;
 			if (!child.rm_parked && follows_carrier_seat(child) &&
-					!person_takes_item_row(child, parked_self_))
+					!person_takes_item_row(child, parked_self_) &&
+					!(organic && body_update_ended(child)))
 				follow_carrier_seat(child, find_row(child.carrier_handle));
 
 			if (persistent_carrier[child_index] == wire_handle::kInvalid) continue;
@@ -1536,6 +1541,13 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		child->record_sample[0] = w.x;
 		child->record_sample[1] = w.y;
 		child->record_sample[2] = w.z;
+		// A seated person's record restarts its chase count as a free-standing one does:
+		// the vehicle compose falls into the same stage and reset.
+		// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TransformLocalToWorld
+		//  @0x4C10D4, the reset @0x4C0FFC; NetPacket_SerializeInfantryEntityState @0x4C0320 -
+		//  Entity_TransformLocalToWorld @0x4C05A2, the reset @0x4C04E1]
+		if (child->cls == EntityClass::Player || child->cls == EntityClass::Infantry)
+			child->net_interp_progress = 0;
 		// World heading = carrier + local for every carried class: the player
 		// read composes its yaw byte [orig: @0x4c10d4] and the vehicle read
 		// lifts its eulerZ through Entity_TransformLocalToWorld's out[3] =

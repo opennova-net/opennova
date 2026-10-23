@@ -142,6 +142,14 @@ public:
 	// pool-0 row and those after) takes them in its own visit, ahead of it, in
 	// tick_remote_motion_through_self or tick_remote_motion_after_self, as retail
 	// runs them inside each body's own update (D-NET-196).
+	// The exits both organic body updates take ahead of their per-tick legs
+	// (client_replica_body_ticks.cpp): Flags bit 0 and no animation channel end the update
+	// ahead of its dual update; the starved chase ends it after the channel and the chase's
+	// count. A leg ahead of the row's visit asks body_update_ends_ahead (the progress as the
+	// chase will test it), a leg after the visit body_update_ended (the visit's latch).
+	static bool body_update_exits_ahead_of_channel(const ClientEntityState &es);
+	static bool body_update_ends_ahead(const ClientEntityState &es);
+	static bool body_update_ended(const ClientEntityState &es);
 	void tick_lean_decay(uint16_t self_handle = 0xFFFFu);
 	void lean_decay_row(ClientEntityState &es);
 	// Every visited row's ramp (a row the walk parked ramps after its visit).

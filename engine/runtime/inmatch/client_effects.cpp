@@ -222,8 +222,12 @@ void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
         std::snprintf(event.set_name, sizeof(event.set_name), "%s", set->c_str());
         world.out.slot_sounds.push_back(event);
     }
+    // The leg follows every exit of the body update (body_update_ended: bit 0, no channel,
+    // starved) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the exits
+    // @0x4B411E..0x4B4135 and @0x4B4669..0x4B4670 ahead of the prone clear @0x4B4709].
     for (auto &row : state().entities) {
         if (row.cls != EntityClass::Player || (row.state_flags & 1u) != 0 ||
+                replication::ClientReplicaPipeline::body_update_ended(row) ||
                 (has_self_handle() && row.handle == self_handle())) continue;
         // The prone clear reads the +0x16C MOUNT parent's def, never the ground
         // link the wire carrier also names; mount_bone is the row's mounted test

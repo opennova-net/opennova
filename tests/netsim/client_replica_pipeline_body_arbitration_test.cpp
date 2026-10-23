@@ -711,7 +711,9 @@ void test_seated_row_scrubs_its_body_words() {
 	row.carrier_handle = kCarrier;
 	row.mount_bone = 3;
 	row.net_has_compact = true;
-	row.rm_adm_id = -1;
+	// The stamp pending (-2), so no channel runs: a channel-less body (-1) runs nothing at all
+	// (D-NET-NEW-L5-25).
+	row.rm_adm_id = -2;
 	row.rm_entity_flags = 0x40u | 0x20u | 0x800u | 0x2000u | 0x8000u | 0x100000u | 0x200000u |
 	                      0x400000u | 0x800000u;
 	row.rm_vel_z = -0x1234;
@@ -977,7 +979,7 @@ void test_parked_row_keeps_its_body_legs_until_its_visit() {
 	static constexpr int32_t kTorso = 0x1000000;
 	for (const uint16_t handle : {kLate, kSelf, kEarly}) {
 		ns::ClientEntityState &row = *view.state().find(handle);
-		row.rm_adm_id = -1; // no channel: the body legs alone
+		row.rm_adm_id = -2; // the stamp pending, no channel: the body legs alone
 		row.lean_angle = kLean;
 		row.pitch_kick_accum = kKick;
 		row.arms_dip_ticks = 6;
@@ -1044,7 +1046,7 @@ void test_dead_row_in_the_air_tumbles() {
 	row.type_id = kPlayerType;
 	row.cls = EntityClass::Player;
 	row.net_has_compact = true;
-	row.rm_adm_id = -1; // no channel: the conform leg alone
+	row.rm_adm_id = -2; // the stamp pending, no channel: the conform leg alone
 	row.rm_entity_flags = world::kEntityFlagDead | world::kEntityFlagInAir;
 	row.rm_body_pitch = 0x100000;
 	row.roll_bam = 0x100000;

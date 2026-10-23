@@ -202,9 +202,11 @@ void ClientReplicaPipeline::select_row_weapon_channels(uint16_t self_handle, uin
 			select_row_weapon_channel(es, self_handle, tick);
 }
 
+// The selection follows every exit of the update (body_update_ended).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the selection gate @0x4B5D71]
 void ClientReplicaPipeline::select_row_weapon_channel(ClientEntityState &es,
 		uint16_t self_handle, uint32_t tick) {
-	if (root_motion_ == nullptr) return;
+	if (root_motion_ == nullptr || body_update_ended(es)) return;
 	if (row_weapon_channel_runs(es, self_handle))
 		row_weapon_channel_select(es, weapon_table_, tick);
 }

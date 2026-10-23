@@ -12,6 +12,36 @@
 
 namespace opennova::replication {
 
+// Both organic updates exit ahead of their per-tick legs: Flags bit 0 (a hidden body) and no
+// animation channel (+0x188 null: the type registered none, the row's rm_adm_id -1) end the
+// update ahead of its dual update; the starved chase (progress held at the 512 cap, tested
+// ahead of the tick's count) ends it after the channel and the count. So a hidden, channel-less
+// or starved row takes no lean decay, dip, torso roll, selection, mounted site, lean ramp or
+// recoil draw. The starved exit is a client's (the authority's chase runs on, and ours steps no
+// progress there); org1's epilog-screen exit is single-player (the epilog's cinematic starts
+// only out of session), so no replica row meets it. An unstamped row (rm_adm_id -2, the
+// embedder's pending stamp) is not channel-less.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `test dl, 1` @0x4B411E / `jnz` @0x4B4127,
+//  the +0x188 test @0x4B412D..0x4B4135, the dual update @0x4B41DF, `cmp ax, 200h; jge`
+//  @0x4B4431..0x4B4435, the idle force @0x4B464F..0x4B465F, `cmp is_authority, 0; jz`
+//  @0x4B4669..0x4B4670; Entity_UpdateInfantryAI @0x4B9910 - the +0x188 test
+//  @0x4B9931..0x4B993B, g_EpilogScreenActive @0x4B998C..0x4B99CD, the bit-0 test
+//  @0x4B9A03..0x4B9A07, the dual update @0x4B9A48, the authority skip @0x4B9A74..0x4B9A7A,
+//  the starved exit @0x4B9C09..0x4B9C39; AnimMap_RegisterEntity @0x40BB60 - the +0x188 store
+//  @0x40BBD5, the free @0x40BD8B; Game_StartMission @0x525DBF..0x525DC9 and
+//  Server_ProcessRoundEnd @0x51691D..0x516965, the cinematic starts out of session]
+bool ClientReplicaPipeline::body_update_exits_ahead_of_channel(const ClientEntityState &es) {
+	return (es.state_flags_known && (es.state_flags & 0x01u) != 0u) || es.rm_adm_id == -1;
+}
+
+bool ClientReplicaPipeline::body_update_ends_ahead(const ClientEntityState &es) {
+	return body_update_exits_ahead_of_channel(es) || es.net_interp_progress >= 512;
+}
+
+bool ClientReplicaPipeline::body_update_ended(const ClientEntityState &es) {
+	return body_update_exits_ahead_of_channel(es) || es.rm_starved;
+}
+
 // A row the walk will park (every pool-0 row under the own-body split) keeps its
 // lean, its kick and its torso roll until its own visit: retail runs the decay, the
 // dip and the roll inside each body's update, so the legs ahead of the pool-0 walk
@@ -29,6 +59,7 @@ void ClientReplicaPipeline::tick_lean_decay(uint16_t self_handle) {
 
 void ClientReplicaPipeline::lean_decay_row(ClientEntityState &es) {
 	if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) return;
+	if (body_update_ends_ahead(es)) return;
 	es.lean_angle = io::bam_sub(es.lean_angle,
 			io::bam_sar(io::bam_add(es.lean_angle, 8), 4));
 }
@@ -47,6 +78,7 @@ void ClientReplicaPipeline::lean_ramp_row(ClientEntityState &es) {
 	// the site selector @0x4B637C..0x4B638F, the passenger ramp
 	// @0x4B6684..0x4B66C3, the eye @0x4B66D9..0x4B68FC].
 	if (es.carrier_handle != wire_handle::kInvalid && es.mount_bone != 0) return;
+	if (body_update_ended(es)) return;
 	// Its gates: a ladder contact or a chute (Flags 0x100020; a remote body's
 	// chute bit is the record's, whose low byte bar the dead bit lands on the
 	// row's Flags mirror), the prone latch with none of Flags 0x10A000 (a remote body's
@@ -80,6 +112,7 @@ void ClientReplicaPipeline::tick_arms_dip(uint16_t self_handle) {
 
 void ClientReplicaPipeline::arms_dip_row(ClientEntityState &es) {
 	if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) return;
+	if (body_update_ends_ahead(es)) return;
 	// An Infantry row's update is org1's, whose block has no dip window: the term eases an
 	// eighth-step alone and the window byte is never read, so a 0x49 stamp stays and dips
 	// nothing. Its torso roll is org1's own: prone idle decays it a thirty-second step toward
@@ -140,7 +173,8 @@ void ClientReplicaPipeline::arms_dip_row(ClientEntityState &es) {
 }
 
 // The recoil chase and its PRNG draw are the org2 and org1 body updates' own, so a person
-// bound to an item row (person_takes_item_row) draws nothing and keeps its words (D-NET-892).
+// bound to an item row (person_takes_item_row) draws nothing and keeps its words (D-NET-892),
+// and a row whose update exited ahead of the block (body_update_ended) draws nothing either.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the +0x380 block @0x4B57EB..0x4B5839,
 //  PRNG_Next16 @0x4B581B; Entity_UpdateInfantryAI @0x4B9910 - @0x4BE7FD..0x4BE84B,
 //  PRNG_Next16 @0x4BE82D; Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472]
@@ -148,7 +182,7 @@ void ClientReplicaPipeline::tick_recoil() {
 	for (ClientEntityState &es : state_.entities) {
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
 			continue;
-		if (person_takes_item_row(es, parked_self_)) continue;
+		if (person_takes_item_row(es, parked_self_) || body_update_ended(es)) continue;
 		// [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0] The low bit selects the
 		// recoil-yaw sign; prng16_ keeps the complete state because decoded rows
 		// share one stream rather than owning one generator each. Other

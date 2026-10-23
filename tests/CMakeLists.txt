@@ -5379,6 +5379,13 @@ add_test(NAME emplaced_command_call COMMAND emplaced_command_call_test)
 add_executable(npruntime_replica_person_ewep_test npruntime/replica_person_ewep_test.cpp)
 target_link_libraries(npruntime_replica_person_ewep_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_replica_person_ewep COMMAND npruntime_replica_person_ewep_test)
+# D-NET-NEW-L5-25: the organic body updates' exits ahead of their legs (bit 0, no channel, the
+# starved chase), a seated body's chase count and starve, the authority's rows never starving.
+add_executable(netsim_client_replica_pipeline_body_exits_test
+    netsim/client_replica_pipeline_body_exits_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_body_exits_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_client_replica_pipeline_body_exits
+    COMMAND netsim_client_replica_pipeline_body_exits_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

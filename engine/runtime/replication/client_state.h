@@ -724,6 +724,12 @@ struct ClientEntityState {
 	// Chase bookkeeping [orig: entity+0x27C / entity+0x27E].
 	int16_t net_interp_progress = 0;
 	int16_t net_interp_steps = 0;
+	// This tick's starved exit of an organic body's update: its chase found the progress
+	// at the 512 cap ahead of the tick's count. The row's visit latches it for the legs that
+	// run after it (ClientReplicaPipeline::body_update_ended).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `cmp ax, 200h; jge`
+	//  @0x4B4431..0x4B4435; Entity_UpdateInfantryAI @0x4B9910 - @0x4B9C09..0x4B9C0D]
+	bool rm_starved = false;
 	// Vehicle speed register mirror (retail vehicleData[177]) — the DECOMPRESSED
 	// 16.16 wire value [orig: the mode-2 read decompresses weaponAimY before the
 	// store]. Gates the fast-vehicle snap threshold (>= 293 ~ 0.28 m/s ->
