@@ -194,8 +194,31 @@ func present(force := false) -> void:
 		var viewport := get_viewport()
 		var world_was_off := viewport.disable_3d
 		viewport.disable_3d = true
+		if OS.is_stdout_verbose():
+			# The instrument's GPU read: the root's draws are timed from the load's first present.
+			RenderingServer.viewport_set_measure_render_time(get_tree().root.get_viewport_rid(), true)
+		var draw_start := Time.get_ticks_usec()
 		RenderingServer.force_draw(true, 0.0)
+		_note_slow_present(Time.get_ticks_usec() - draw_start, now)
 		viewport.disable_3d = world_was_off
+
+
+## An instrument (--verbose only): a present whose forced draw ran 50 ms or more names
+## its split and the offscreen targets that drew in it beside the screen.
+func _note_slow_present(draw_usec: int, present_start_ms: int) -> void:
+	if draw_usec < 50000 or not OS.is_stdout_verbose():
+		return
+	var drawn := PackedStringArray()
+	for node in get_tree().root.find_children("*", "SubViewport", true, false):
+		var target := node as SubViewport
+		if target.render_target_update_mode != SubViewport.UPDATE_DISABLED:
+			drawn.append("%s %dx%d" % [target.name, target.size.x, target.size.y])
+	var root_rid := get_tree().root.get_viewport_rid()
+	print_verbose("LoadingScreen: present at %d%%: %d ms, force_draw %d ms; the root's last measured draw gpu %.1f ms cpu %.1f ms; the targets drawing: [%s]" % [
+			_progress, GameWorld.tick_count_ms() - present_start_ms, draw_usec / 1000,
+			RenderingServer.viewport_get_measured_render_time_gpu(root_rid),
+			RenderingServer.viewport_get_measured_render_time_cpu(root_rid),
+			", ".join(drawn)])
 
 
 ## Give a newly mounted Control one complete SceneTree frame to receive layout

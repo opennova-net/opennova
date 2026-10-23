@@ -15,6 +15,8 @@
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/classes/performance.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
@@ -41,6 +43,25 @@ namespace {
 
 int64_t now_us() {
 	return static_cast<int64_t>(Time::get_singleton()->get_ticks_usec());
+}
+
+// The process's object counts at the load's end and at each post-load frame's start (an
+// instrument, --verbose only): a flush that frees or builds in bulk between two frames shows as
+// the difference of two lines.
+void print_post_load_counts(const String &p_label) {
+	if (!OS::get_singleton()->is_stdout_verbose()) return;
+	Performance *perf = Performance::get_singleton();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	UtilityFunctions::print_verbose(vformat(
+			"Post-load counts %s: nodes %d, objects %d, resources %d, orphan nodes %d, video memory %d MB, "
+			"textures %d MB, buffers %d MB",
+			p_label, static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_NODE_COUNT)),
+			static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_COUNT)),
+			static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_RESOURCE_COUNT)),
+			static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_ORPHAN_NODE_COUNT)),
+			static_cast<int64_t>(rs->get_rendering_info(RenderingServer::RENDERING_INFO_VIDEO_MEM_USED) >> 20),
+			static_cast<int64_t>(rs->get_rendering_info(RenderingServer::RENDERING_INFO_TEXTURE_MEM_USED) >> 20),
+			static_cast<int64_t>(rs->get_rendering_info(RenderingServer::RENDERING_INFO_BUFFER_MEM_USED) >> 20)));
 }
 
 // ONE RAII leg timer: samples the clock only while a board is active, banks
@@ -421,7 +442,9 @@ Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 	const Ref<LoadTimeline> post_load =
 			post_load_frames_left_ > 0 ? post_load_frames_ : Ref<LoadTimeline>();
 	if (post_load.is_valid()) {
-		post_load->span(vformat("frame_%d", kPostLoadFrames - post_load_frames_left_ + 1));
+		const String frame_label = vformat("frame_%d", kPostLoadFrames - post_load_frames_left_ + 1);
+		print_post_load_counts(frame_label);
+		post_load->span(frame_label);
 		ctx.post_load_frame = post_load.ptr();
 	}
 	run_leg_table(kFrameLegs, kFrameLegCount, ctx, true);
@@ -437,6 +460,7 @@ void GameWorld::begin_post_load_frames(const String &p_bms_name) {
 	end_post_load_frames();
 	post_load_frames_ = LoadTimeline::begin(vformat("Post-load frames %s", p_bms_name));
 	post_load_frames_left_ = kPostLoadFrames;
+	print_post_load_counts("load_end");
 }
 
 void GameWorld::end_post_load_frames() {

@@ -1622,16 +1622,33 @@ MissionObjectPlacer::LoadProfile MissionObjectPlacer::take_load_profile() {
 int MissionObjectPlacer::resolve_model_materials(const PackedStringArray &p_files,
 		const Callable &p_present) {
 	_check_epoch();
-	const uint64_t start = Time::get_singleton()->get_ticks_usec();
+	Time *time = Time::get_singleton();
+	const uint64_t start = time->get_ticks_usec();
+	// The split (an instrument): the files' data loads, the resolves, the presents.
+	uint64_t load_us = 0;
+	uint64_t resolve_us = 0;
+	uint64_t present_us = 0;
+	uint64_t present_max_us = 0;
 	int rows = 0;
 	for (int64_t i = p_files.size() - 1; i >= 0; --i) {
+		const uint64_t load_start = time->get_ticks_usec();
 		const Ref<ObjectData> data = _load_object_data(p_files[i]);
+		const uint64_t resolve_start = time->get_ticks_usec();
 		if (data.is_valid()) rows += data->resolve_materials();
+		const uint64_t present_start = time->get_ticks_usec();
 		if (p_present.is_valid()) p_present.call();
+		const uint64_t present_end = time->get_ticks_usec();
+		load_us += resolve_start - load_start;
+		resolve_us += present_start - resolve_start;
+		present_us += present_end - present_start;
+		present_max_us = std::max<uint64_t>(present_max_us, present_end - present_start);
 	}
 	UtilityFunctions::print_verbose(vformat(
-			"MissionObjectPlacer: model materials %d row(s) over %d file(s): %d ms", rows, p_files.size(),
-			static_cast<int>((Time::get_singleton()->get_ticks_usec() - start) / 1000)));
+			"MissionObjectPlacer: model materials %d row(s) over %d file(s): %d ms (data loads %d ms, "
+			"resolves %d ms, presents %d ms, the slowest present %d ms)",
+			rows, p_files.size(), static_cast<int>((time->get_ticks_usec() - start) / 1000),
+			static_cast<int>(load_us / 1000), static_cast<int>(resolve_us / 1000),
+			static_cast<int>(present_us / 1000), static_cast<int>(present_max_us / 1000)));
 	return rows;
 }
 
