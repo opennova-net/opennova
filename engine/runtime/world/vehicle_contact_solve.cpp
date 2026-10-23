@@ -689,6 +689,30 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 			}
 			veh.flags &= ~kEntityFlagInAir; // [orig: @0x47E3EE / @0x47E3FA / @0x47E4C6]
 		} else {
+			// A client hull just off the ground, not crashed, whose replicated park bit (Flags 0x10)
+			// is up, strikes its pads through the tracked strike forces: the lowest-corner search
+			// seeded 0x80000000 with jge never leaves corner 0, so slot 0 of the support block reads
+			// 500 and presses along -up. That block is the water-entry effect descriptor's stack
+			// block, filled only on a water entry this tick (@0x47D54B..0x47D5DE): slots 1..3 are an
+			// uninitialized stack read whose sign alone picks the press or the lift.
+			// PERMANENT (Q21-1 (a)): a deliberate fix of a retail bug: slots 1..3 read as 0, the
+			// free lift along +up.
+			// [orig: @0x47E4D2..0x47E56C: the gates @0x47E4D5..0x47E4F8, the search
+			//  @0x47E4FA..0x47E549, the slot write @0x47E561, Entity_ApplyLightVehicleSuspensionForces
+			//  @0x463750 (the call @0x47E56C) with the solve's matrix]
+			if ((veh.flags & kEntityFlagInAir) == 0 && !world.ai.is_authority && !m.crashed &&
+					((veh.flags | veh.engine_flags) & 0x10u) != 0) {
+				int lowest = 0;
+				int32_t lowest_z = INT32_MIN;
+				for (int k = 0; k < 4; ++k)
+					if (c[k][2] < lowest_z) {
+						lowest = k;
+						lowest_z = c[k][2];
+					}
+				int32_t support[4] = { 0, 0, 0, 0 };
+				support[lowest] = 500;
+				vehicle_apply_tracked_suspension_forces(world, veh, traits, true, support, &basis.q22);
+			}
 			// [orig: the in-air set @0x47E57B, +0x2EF = 0 @0x47E582, brain+0x318 &= 0x3F @0x47E589]
 			veh.flags |= kEntityFlagInAir;
 			m.byte_2ef = 0;

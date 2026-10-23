@@ -344,6 +344,31 @@ void test_the_no_pad_arm() {
 	}
 }
 
+// D-NET-NEW-L6-18 (Q21-1 (a)): a client hull just off the ground with its park bit up strikes its
+// pads: slot 0 of the support block presses (8000 along -up on a level hull), slots 1..3, an
+// uninitialized stack read in retail, read 0 here and lift (800 along +up); the strike crashes it.
+// The authority runs no push. [orig: @0x47E4D2..0x47E56C]
+void test_the_parked_push() {
+	const int32_t kHigh = kGround + (20 << 16);
+	for (const bool authority : { false, true }) {
+		auto rig = std::make_unique<Rig>(authority);
+		Entity &v = rig->e();
+		v.health = 0;
+		v.flags |= kEntityFlagSuspensionCrashed;
+		rig->solve(kHigh);
+		const auto &f = v.veh.chassis_forces;
+		CHECK((v.flags & kEntityFlagInAir) != 0);
+		if (authority) {
+			CHECK(v.veh.crashed == 0);
+			for (int k = 0; k < 4; ++k) CHECK(f[k].rate == 0);
+		} else {
+			CHECK(v.veh.crashed == 1);
+			CHECK(f[0].rate == 8000 && f[0].direction[2] == -65536);
+			for (int k = 1; k < 4; ++k) CHECK(f[k].rate == 800 && f[k].direction[2] == 65536);
+		}
+	}
+}
+
 } // namespace
 
 int main() {
@@ -354,6 +379,7 @@ int main() {
 	test_the_grounded_crashed_block();
 	test_the_tail_legs();
 	test_the_no_pad_arm();
+	test_the_parked_push();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
