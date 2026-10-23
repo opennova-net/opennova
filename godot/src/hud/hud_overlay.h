@@ -91,7 +91,10 @@ public:
 	// art + .fnt through the mounted VFS root (null root -> layout only: bars
 	// and boxes draw, textured/text elements self-hide). Resets the compiler's
 	// runtime state (a fresh HUD build).
-	void configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root);
+	// `p_full_arm` false: a dedicated host's reduced arm, the box styles, the connection
+	// icons and the fonts alone (no HUD texture load, no map materials).
+	void configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root,
+			bool p_full_arm = true);
 	bool is_configured() const;
 	void set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<RtxtStringFile> &p_gametext);
     void set_player_context(const Ref<PlayerLocalView> &p_view);

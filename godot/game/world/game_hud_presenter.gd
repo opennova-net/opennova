@@ -65,6 +65,9 @@ const SCRIPT_CHAT_ARGB := -1
 # mission has a local player (ensure_game_hud(); the GUT files build the real one
 # over a staged root).
 var _game_hud: HudOverlay = null
+# Whether the HUD's textures leg ran the full arm (false: a dedicated host's reduced
+# arm, which loads no terrain picture).
+var _hud_full_arm := true
 var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
 var _vehicle_panel := VehiclePanelPresenterScript.new()  # the mounted-vehicle panel lane
 var _message_log := MessageLogPresenterScript.new()  # the Recent Messages (J) lane + chat drain
@@ -256,7 +259,8 @@ func get_ui_parent() -> Node:
 
 
 func _on_minimap_water_changed(mask: ImageTexture) -> void:
-	if _game_hud == null:
+	# A reduced arm's HUD holds no terrain picture (_load_hud_textures).
+	if _game_hud == null or not _hud_full_arm:
 		return
 	_game_hud.set_minimap_terrain(
 			_world.get_terrain_data() if _world != null else null, mask,
@@ -365,7 +369,8 @@ func ensure_game_hud() -> void:
 	if _game_hud == null:
 		_init_overlay_system(_world.get_loaded_mission_file() if _world != null else "")
 	if not _game_hud.is_configured():
-		_load_hud_textures()
+		var sim: Simulation = _world.get_sim() if _world != null else null
+		_load_hud_textures(sim == null or sim.session_role() != Simulation.ROLE_DEDICATED_HOST)
 	_mount_game_hud()
 
 
@@ -382,11 +387,11 @@ func _on_hud_overlay_init(mission_file: String) -> void:
 
 
 ## The load's HUD textures leg (GameWorld.hud_textures_load, at the mission textures
-## stage past the model freeze, on every arm; engine mission/mission_load_plan.h
-## carries the witness).
-func _on_hud_textures_load() -> void:
+## stage past the model freeze, on every arm, `full_arm` false on a dedicated host's
+## reduced one; engine mission/mission_load_plan.h carries the witness).
+func _on_hud_textures_load(full_arm: bool) -> void:
 	if _game_hud != null and not _game_hud.is_configured():
-		_load_hud_textures()
+		_load_hud_textures(full_arm)
 
 
 # The overlay system's init: the overlay and its child controls, the hudpos.def
@@ -483,14 +488,19 @@ func _init_overlay_system(mission_file: String) -> void:
 
 # The HUD's textures, fonts and map pictures over the layout the init read
 # (HudOverlay.configure: the HUD loader's textures, the overlay fonts, the stdbox
-# frame), the terrain's colour map and the view effects' art.
-func _load_hud_textures() -> void:
+# frame), the terrain's colour map and the view effects' art. A dedicated host's
+# reduced arm loads the fonts, the stdbox and the connection icons alone: no HUD
+# art, no terrain picture, no view effects.
+func _load_hud_textures(full_arm: bool) -> void:
 	var root: ResourceRoot = _world.get_resource_root() if _world != null else null
 	_game_hud.set_crosshair_style(_crosshair_style)
 	_game_hud.set_crosshair_color(_crosshair_color)
 	_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
 	_game_hud.set_aspect_mode(_aspect_mode)
-	_game_hud.configure(_hud_pos, root)
+	_hud_full_arm = full_arm
+	_game_hud.configure(_hud_pos, root, full_arm)
+	if not full_arm:
+		return
 	# TerrainData owns the TRN 16x16 sector routing table and the colormap
 	# texture; the native overlay copies only the portable routing scalars.
 	# The raw colormap remains the sharp base; depthspin supplies water only.

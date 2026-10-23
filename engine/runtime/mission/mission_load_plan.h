@@ -42,15 +42,21 @@
 //    @0x525836; HUD_InitOverlaySystem @0x5A4620 (hudpos @0x5A4931, the
 //    type-2043 pool scan @0x5A4999)];
 //  - the HUD's textures and their render materials load at the mission
-//    textures stage past the freeze on the full arm, then every arm, the
-//    reduced one too, loads the HUD's fonts and the stdbox frame the status
-//    page draws (GameWorld's hud_textures_load leg, D-NET-NEW-L8-40)
-//    [orig: Render_InitMissionTextures @0x587120 - the freeze @0x5871CF,
-//    HUD_LoadAllTextures @0x587205 (its materials GfxShader_CreateForTexture
-//    @0x59E029 / @0x59E08F / @0x59E0A8 / @0x59E19E / @0x59E22C), the reduced
-//    arm's freeze @0x58728C and return; Game_StartMission - the call
-//    @0x525A6E, HUD_InitAllFonts @0x525A9A, BoxTexture_LoadAndSetupUVRegions
-//    ("stdbox") @0x525AC0].
+//    textures stage past the freeze on the full arm, with the tip panel's art
+//    and the view effects' after them; a dedicated host's reduced arm loads none
+//    of them. Both arms load the connection icons ahead of the split, and after
+//    it the HUD's fonts and the stdbox frame (its border, its camo tile and its
+//    material) the status page draws (GameWorld's hud_textures_load leg and its
+//    arm, D-NET-NEW-L8-40)
+//    [orig: Game_StartMission @0x524360 - the reduced flag @0x524958..0x52495C
+//    (is_in_session, is_authority, !is_mp_session_peer), the call @0x525A6E,
+//    HUD_InitAllFonts @0x525A9A, BoxTexture_LoadAndSetupUVRegions ("stdbox")
+//    @0x525AC0; Render_InitMissionTextures @0x587120 - CNetworkIcons_LoadTextures
+//    @0x587129 (both arms), the arm test @0x58713C, the freeze @0x5871CF,
+//    HUD_LoadAllTextures @0x587205 (its materials, GfxShader_CreateForTexture
+//    called @0x59E024 / @0x59E07E / @0x59E094 / @0x59E199 / @0x59E21F),
+//    ViewFx_InitShadersAndTextures @0x587217, CTipSystem_Init @0x587270, the
+//    reduced arm @0x58727A: its freeze @0x58728C and return].
 
 namespace opennova::mission {
 

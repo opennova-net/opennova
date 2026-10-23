@@ -140,7 +140,8 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_detail_level", "level"), &HudOverlay::next_hud_detail_level);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("sight_scale_index_default"), &HudOverlay::sight_scale_index_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_friendly_tag_mode", "mode"), &HudOverlay::next_friendly_tag_mode);
-	ClassDB::bind_method(D_METHOD("configure", "hudpos", "root"), &HudOverlay::configure);
+	ClassDB::bind_method(D_METHOD("configure", "hudpos", "root", "full_arm"), &HudOverlay::configure,
+			DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("is_configured"), &HudOverlay::is_configured);
 	ClassDB::bind_method(D_METHOD("set_crosshair_style", "style"), &HudOverlay::set_crosshair_style);
 	ClassDB::bind_method(D_METHOD("get_crosshair_style"), &HudOverlay::get_crosshair_style);
@@ -527,7 +528,8 @@ void HudOverlay::load_crosshair_texture_() {
 	layout_.crosshair_tex_h = tex.is_valid() ? tex->get_height() : 0;
 }
 
-void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root) {
+void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root,
+		bool p_full_arm) {
 	root_ = p_root;
 	layout_ = HudLayout{};
 	textures_ = {};
@@ -569,7 +571,11 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// resolves the names it hands back and stamps the texture-derived fields.
 	opennova::hud::HudLayoutAssets assets;
 	opennova::hud::hud_layout_from_hudpos(file, layout_, assets);
-	configure_combat_(assets);
+	// A dedicated host's mission textures stage runs the reduced arm: none of the HUD's own art
+	// (the texture load, the tip system), only the box styles, the connection icons and the
+	// fonts its status page draws with (engine mission/mission_load_plan.h carries the witness,
+	// D-NET-NEW-L8-40).
+	if (p_full_arm) configure_combat_(assets);
 
 	// The HUDDECLUT mask table the file authors: the engine's
 	// declutter_from_hudpos, from retail's zeroed table whatever the file
@@ -591,7 +597,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// (runtime/hud/hud_texture_materials.h); the draws combine through it.
 	// The static HUD frame background the engine picked (the last authored
 	// StaticFrame line, hud_static_frame_index); absent, nothing is loaded.
-	if (layout_.frame_pos.present) {
+	if (p_full_arm && layout_.frame_pos.present) {
 		const Ref<Texture2D> tex = load_hud_texture_(opennova::to_gd(assets.static_frame),
 				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStaticFrameRole));
 		textures_[opennova::hud::kHudTexFrame] = tex;
@@ -661,116 +667,121 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		textures_[opennova::hud::kHudTexNetNovaWorldIcon] = novaworld_icon;
 		layout_.net_link_icon_texture_valid = link_icon.is_valid();
 		layout_.net_novaworld_icon_texture_valid = novaworld_icon.is_valid();
-		// The tip panel's own box atlas (no second stage) and its two icons.
-		const Ref<Texture2D> tip_box = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipBox), ResourceRoot::TEXTURE_LOADER_TGA, false,
-				opennova::hud::kBoxMaterialWord);
-		const Ref<Texture2D> tip_keyboard = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipKeyboard), ResourceRoot::TEXTURE_LOADER_STAGE, false,
-				opennova::hud::kTipIconMaterialWord);
-		const Ref<Texture2D> tip_gameplay = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipGameplay), ResourceRoot::TEXTURE_LOADER_STAGE, false,
-				opennova::hud::kTipIconMaterialWord);
-		textures_[opennova::hud::kHudTexTipBox] = tip_box;
-		textures_[opennova::hud::kHudTexTipKeyboard] = tip_keyboard;
-		textures_[opennova::hud::kHudTexTipGameplay] = tip_gameplay;
-		layout_.tip_box_texture_valid = tip_box.is_valid();
-		layout_.tip_box_tex_w = tip_box.is_valid() ? tip_box->get_width() : 0;
-		layout_.tip_box_tex_h = tip_box.is_valid() ? tip_box->get_height() : 0;
-		layout_.tip_keyboard_texture_valid = tip_keyboard.is_valid();
-		layout_.tip_gameplay_texture_valid = tip_gameplay.is_valid();
+		// The tip panel's own box atlas (no second stage) and its two icons: the full arm's.
+		if (p_full_arm) {
+			const Ref<Texture2D> tip_box = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipBox), ResourceRoot::TEXTURE_LOADER_TGA, false,
+					opennova::hud::kBoxMaterialWord);
+			const Ref<Texture2D> tip_keyboard = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipKeyboard), ResourceRoot::TEXTURE_LOADER_STAGE, false,
+					opennova::hud::kTipIconMaterialWord);
+			const Ref<Texture2D> tip_gameplay = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipGameplay), ResourceRoot::TEXTURE_LOADER_STAGE, false,
+					opennova::hud::kTipIconMaterialWord);
+			textures_[opennova::hud::kHudTexTipBox] = tip_box;
+			textures_[opennova::hud::kHudTexTipKeyboard] = tip_keyboard;
+			textures_[opennova::hud::kHudTexTipGameplay] = tip_gameplay;
+			layout_.tip_box_texture_valid = tip_box.is_valid();
+			layout_.tip_box_tex_w = tip_box.is_valid() ? tip_box->get_width() : 0;
+			layout_.tip_box_tex_h = tip_box.is_valid() ? tip_box->get_height() : 0;
+			layout_.tip_keyboard_texture_valid = tip_keyboard.is_valid();
+			layout_.tip_gameplay_texture_valid = tip_gameplay.is_valid();
+		}
 	}
-	{
-		// The AAS zone status panel's three team-icon atlases and the two
-		// tiles [orig: HUD_LoadAllTextures @0x59dda0 — JO_LFP.tga team 1,
-		// R_LFP.tga team 2, N_LFP.tga neutral; lfp_alf.tga the tile for
-		// everyone else's zones -> 0x27239C0 @0x59e104/@0x59e10e, lfp_dlf.tga
-		// the tile for the viewer's OWN zones -> 0x27239D0 (textureId +4 =
-		// 0x27239D4) @0x59e11a/@0x59e11f, see docs/interface/hud-re.md].
-		const Ref<Texture2D> team1 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam1), ResourceRoot::TEXTURE_LOADER_FILE, false,
-				opennova::hud::kLfpIconMaterialWord);
-		const Ref<Texture2D> team2 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam2), ResourceRoot::TEXTURE_LOADER_FILE, false,
-				opennova::hud::kLfpIconMaterialWord);
-		const Ref<Texture2D> neutral = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpNeutral), ResourceRoot::TEXTURE_LOADER_FILE, false,
-				opennova::hud::kLfpIconMaterialWord);
-		const Ref<Texture2D> tile_own = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOwn), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-		const Ref<Texture2D> tile_other = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOther), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-		textures_[opennova::hud::kHudTexLfpTeam1] = team1;
-		textures_[opennova::hud::kHudTexLfpTeam2] = team2;
-		textures_[opennova::hud::kHudTexLfpNeutral] = neutral;
-		textures_[opennova::hud::kHudTexLfpTileOwn] = tile_own;
-		textures_[opennova::hud::kHudTexLfpTileOther] = tile_other;
-		layout_.lfp_icon_texture_valid[0] = team1.is_valid();
-		layout_.lfp_icon_texture_valid[1] = team2.is_valid();
-		layout_.lfp_icon_texture_valid[2] = neutral.is_valid();
-		layout_.lfp_tile_own_texture_valid = tile_own.is_valid();
-		layout_.lfp_tile_other_texture_valid = tile_other.is_valid();
-	}
+	// The rest is the HUD texture load's and the tip system's, the full arm's alone.
+	if (p_full_arm) {
+		{
+			// The AAS zone status panel's three team-icon atlases and the two
+			// tiles [orig: HUD_LoadAllTextures @0x59dda0 — JO_LFP.tga team 1,
+			// R_LFP.tga team 2, N_LFP.tga neutral; lfp_alf.tga the tile for
+			// everyone else's zones -> 0x27239C0 @0x59e104/@0x59e10e, lfp_dlf.tga
+			// the tile for the viewer's OWN zones -> 0x27239D0 (textureId +4 =
+			// 0x27239D4) @0x59e11a/@0x59e11f, see docs/interface/hud-re.md].
+			const Ref<Texture2D> team1 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam1), ResourceRoot::TEXTURE_LOADER_FILE, false,
+					opennova::hud::kLfpIconMaterialWord);
+			const Ref<Texture2D> team2 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam2), ResourceRoot::TEXTURE_LOADER_FILE, false,
+					opennova::hud::kLfpIconMaterialWord);
+			const Ref<Texture2D> neutral = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpNeutral), ResourceRoot::TEXTURE_LOADER_FILE, false,
+					opennova::hud::kLfpIconMaterialWord);
+			const Ref<Texture2D> tile_own = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOwn), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+			const Ref<Texture2D> tile_other = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOther), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+			textures_[opennova::hud::kHudTexLfpTeam1] = team1;
+			textures_[opennova::hud::kHudTexLfpTeam2] = team2;
+			textures_[opennova::hud::kHudTexLfpNeutral] = neutral;
+			textures_[opennova::hud::kHudTexLfpTileOwn] = tile_own;
+			textures_[opennova::hud::kHudTexLfpTileOther] = tile_other;
+			layout_.lfp_icon_texture_valid[0] = team1.is_valid();
+			layout_.lfp_icon_texture_valid[1] = team2.is_valid();
+			layout_.lfp_icon_texture_valid[2] = neutral.is_valid();
+			layout_.lfp_tile_own_texture_valid = tile_own.is_valid();
+			layout_.lfp_tile_other_texture_valid = tile_other.is_valid();
+		}
 
-	{
-		// The HUDLS bar's bracket and more-available marker, named by hudpos.
-		const Ref<Texture2D> bracket = load_hud_texture_(opennova::to_gd(assets.hudls_bracket),
-				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kHudlsRole));
-		const Ref<Texture2D> moreav = load_hud_texture_(opennova::to_gd(assets.hudls_moreav),
-				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kHudlsRole));
-		textures_[opennova::hud::kHudTexSlotBarBracket] = bracket;
-		textures_[opennova::hud::kHudTexSlotBarMoreAv] = moreav;
-		layout_.hudls.bracket_texture_valid = bracket.is_valid();
-		layout_.hudls.bracket_tex_w = bracket.is_valid() ? bracket->get_width() : 0;
-		layout_.hudls.bracket_tex_h = bracket.is_valid() ? bracket->get_height() : 0;
-		layout_.hudls.moreav_texture_valid = moreav.is_valid();
-		layout_.hudls.moreav_tex_w = moreav.is_valid() ? moreav->get_width() : 0;
-		layout_.hudls.moreav_tex_h = moreav.is_valid() ? moreav->get_height() : 0;
-	}
+		{
+			// The HUDLS bar's bracket and more-available marker, named by hudpos.
+			const Ref<Texture2D> bracket = load_hud_texture_(opennova::to_gd(assets.hudls_bracket),
+					ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kHudlsRole));
+			const Ref<Texture2D> moreav = load_hud_texture_(opennova::to_gd(assets.hudls_moreav),
+					ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kHudlsRole));
+			textures_[opennova::hud::kHudTexSlotBarBracket] = bracket;
+			textures_[opennova::hud::kHudTexSlotBarMoreAv] = moreav;
+			layout_.hudls.bracket_texture_valid = bracket.is_valid();
+			layout_.hudls.bracket_tex_w = bracket.is_valid() ? bracket->get_width() : 0;
+			layout_.hudls.bracket_tex_h = bracket.is_valid() ? bracket->get_height() : 0;
+			layout_.hudls.moreav_texture_valid = moreav.is_valid();
+			layout_.hudls.moreav_tex_w = moreav.is_valid() ? moreav->get_width() : 0;
+			layout_.hudls.moreav_tex_h = moreav.is_valid() ? moreav->get_height() : 0;
+		}
 
-	// The eight HUDSTANCE records' textures by slot (the six stance frames,
-	// then the team tiles; the engine resolved the ids and offsets), each with
-	// its image's own size.
-	for (int i = 0; i < opennova::hud::kHudStanceRecords; ++i) {
-		const size_t r = static_cast<size_t>(i);
-		const Ref<Texture2D> tex = load_hud_texture_(opennova::to_gd(assets.stance_textures[r]),
-				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStanceRole));
-		textures_[opennova::hud::kHudTexStance0 + i] = tex;
-		layout_.stance_texture_valid[r] = tex.is_valid();
-		layout_.stance_frame_w[r] = tex.is_valid() ? tex->get_width() : 0;
-		layout_.stance_frame_h[r] = tex.is_valid() ? tex->get_height() : 0;
-	}
+		// The eight HUDSTANCE records' textures by slot (the six stance frames,
+		// then the team tiles; the engine resolved the ids and offsets), each with
+		// its image's own size.
+		for (int i = 0; i < opennova::hud::kHudStanceRecords; ++i) {
+			const size_t r = static_cast<size_t>(i);
+			const Ref<Texture2D> tex = load_hud_texture_(opennova::to_gd(assets.stance_textures[r]),
+					ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStanceRole));
+			textures_[opennova::hud::kHudTexStance0 + i] = tex;
+			layout_.stance_texture_valid[r] = tex.is_valid();
+			layout_.stance_frame_w[r] = tex.is_valid() ? tex->get_width() : 0;
+			layout_.stance_frame_h[r] = tex.is_valid() ? tex->get_height() : 0;
+		}
 
-	load_crosshair_texture_();
-	apply_crosshair_options_();
-	// Retail uploads the strip at its authored resolution with its full
-	// box-filtered mip chain; the default spinmap badges then sample near the
-	// 16px level. A mipless upload aliases the source into a visibly broken
-	// armory "A". The compiler's half-texel cell insets ride the PHYSICAL
-	// dimensions of whatever strip this install mounts (stock 16x480,
-	// RevX02 64x1920), so stamp the measured size.
-	const Ref<Texture2D> map_icons = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapIcons), ResourceRoot::TEXTURE_LOADER_FILE, true,
-			opennova::hud::kTsdIconMaterialWord);
-	textures_[opennova::hud::kHudTexMapIcons] = map_icons;
-	apply_map_icon_sampling_();
-	if (map_icons.is_valid()) {
-		state_.minimap.icon_strip_w_px =
-				static_cast<float>(map_icons->get_width());
-		state_.minimap.icon_strip_h_px =
-				static_cast<float>(map_icons->get_height());
-	} else {
-		state_.minimap.icon_strip_w_px =
-				opennova::hud::HudMinimapInput{}.icon_strip_w_px;
-		state_.minimap.icon_strip_h_px =
-				opennova::hud::HudMinimapInput{}.icon_strip_h_px;
+		load_crosshair_texture_();
+		apply_crosshair_options_();
+		// Retail uploads the strip at its authored resolution with its full
+		// box-filtered mip chain; the default spinmap badges then sample near the
+		// 16px level. A mipless upload aliases the source into a visibly broken
+		// armory "A". The compiler's half-texel cell insets ride the PHYSICAL
+		// dimensions of whatever strip this install mounts (stock 16x480,
+		// RevX02 64x1920), so stamp the measured size.
+		const Ref<Texture2D> map_icons = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapIcons), ResourceRoot::TEXTURE_LOADER_FILE, true,
+				opennova::hud::kTsdIconMaterialWord);
+		textures_[opennova::hud::kHudTexMapIcons] = map_icons;
+		apply_map_icon_sampling_();
+		if (map_icons.is_valid()) {
+			state_.minimap.icon_strip_w_px =
+					static_cast<float>(map_icons->get_width());
+			state_.minimap.icon_strip_h_px =
+					static_cast<float>(map_icons->get_height());
+		} else {
+			state_.minimap.icon_strip_w_px =
+					opennova::hud::HudMinimapInput{}.icon_strip_w_px;
+			state_.minimap.icon_strip_h_px =
+					opennova::hud::HudMinimapInput{}.icon_strip_h_px;
+		}
+		// The compass ring and the radar sector-slice marks are colour-mode HUD
+		// textures: like every textured map sprite their material is colour family
+		// 0x600, whose MODULATE2X stage runs on the device (map_modulate2x_material),
+		// so the textures stay raw. The marks draw only while both loaded
+		// (HudMinimapInput::radar_slices_loaded carries the witness).
+		textures_[opennova::hud::kHudTexMapCompass] =
+				load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapCompass), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+		textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadar), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+		textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadarNarrow), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+		state_.minimap.radar_slices_loaded =
+				textures_[opennova::hud::kHudTexMapRadar].is_valid() &&
+				textures_[opennova::hud::kHudTexMapRadarNarrow].is_valid();
+		textures_[opennova::hud::kHudTexMapWpIndicator] =
+				load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapWpIndicator), ResourceRoot::TEXTURE_LOADER_FILE, false,
+						opennova::hud::kWpIndicatorMaterialWord);
 	}
-	// The compass ring and the radar sector-slice marks are colour-mode HUD
-	// textures: like every textured map sprite their material is colour family
-	// 0x600, whose MODULATE2X stage runs on the device (map_modulate2x_material),
-	// so the textures stay raw. The marks draw only while both loaded
-	// (HudMinimapInput::radar_slices_loaded carries the witness).
-	textures_[opennova::hud::kHudTexMapCompass] =
-			load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapCompass), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-	textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadar), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-	textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadarNarrow), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-	state_.minimap.radar_slices_loaded =
-			textures_[opennova::hud::kHudTexMapRadar].is_valid() &&
-			textures_[opennova::hud::kHudTexMapRadarNarrow].is_valid();
-	textures_[opennova::hud::kHudTexMapWpIndicator] =
-			load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapWpIndicator), ResourceRoot::TEXTURE_LOADER_FILE, false,
-					opennova::hud::kWpIndicatorMaterialWord);
 
 	// The two hudpos font names; the width pick and the load ride
 	// ensure_label_fonts_, which runs on the first draw and on every width-tier
@@ -778,10 +789,11 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	hudpos_font_lo_ = assets.font_lo;
 	hudpos_font_hi_ = assets.font_hi;
 
-	// The HUD's render materials with its textures, not at its first draw: the texture
-	// load creates them (engine mission/mission_load_plan.h carries the witness).
+	// The HUD's render materials with its textures, not at its first draw: the box styles'
+	// load makes the flat one's on both arms, the full arm's texture load the map pass's
+	// (engine mission/mission_load_plan.h carries the witness).
 	ensure_flat_material_();
-	ensure_map_materials_();
+	if (p_full_arm) ensure_map_materials_();
 
 	configured_ = true;
 	compiler_.configure(layout_, nullptr);

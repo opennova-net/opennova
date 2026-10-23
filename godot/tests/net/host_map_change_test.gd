@@ -106,6 +106,7 @@ func test_the_map_change_builds_the_hud_inside_its_load() -> void:
 		return
 	assert_true(first.is_configured(), "the first map's textures stage loaded it")
 	assert_false(first.is_inside_tree(), "no frame mounted it")
+	assert_not_null(first.get_minimap_terrain_picture(), "the full arm loads the terrain picture")
 	_assert_hud_legs(world.last_load_timeline())
 	var next_map: String = world.begin_map_change()
 	world.unload()
@@ -178,7 +179,19 @@ func test_a_serve_only_hosts_map_change_runs_the_reduced_arm() -> void:
 	world.set_resource_root(root)
 	var options := _host_options(1)
 	options.serve_and_play = false
+	var presenter := GameHudPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null, null)
 	assert_eq(world.load_mission_as_host(options), OK)
+	# The reduced arm's HUD (D-NET-NEW-L8-40): the fonts, the stdbox and the connection icons the
+	# status page draws, none of the full arm's HUD art, terrain picture or map materials
+	# [orig: Render_InitMissionTextures @0x587120 - the arm test @0x58713C to @0x58727A, past
+	# HUD_LoadAllTextures @0x587205 and ViewFx_InitShadersAndTextures @0x587217].
+	var hud: HudOverlay = presenter.get_game_hud()
+	assert_not_null(hud, "a Serve Only load builds the HUD its status page draws through")
+	if hud != null:
+		assert_true(hud.is_configured(), "its reduced arm loaded it")
+		assert_null(hud.get_minimap_terrain_picture(), "no terrain picture on the reduced arm")
 	var sim: Simulation = world.get_sim()
 	assert_not_null(sim)
 	if sim == null:
@@ -187,9 +200,12 @@ func test_a_serve_only_hosts_map_change_runs_the_reduced_arm() -> void:
 	var next_map: String = world.begin_map_change()
 	assert_eq(next_map.to_lower(), "mnml.bms", "the rotation names the next map")
 	world.unload()
+	presenter.teardown()
 	assert_eq(world.load_next_mission(next_map), OK)
 	assert_same(world.get_sim(), sim, "the next map runs on the same simulation")
 	assert_eq(sim.session_role(), Simulation.ROLE_DEDICATED_HOST, "still a Serve Only host")
+	assert_null(presenter.get_game_hud().get_minimap_terrain_picture(),
+			"the map change's reduced arm loads no terrain picture either")
 	assert_null(world.get_effect_world(), "the next map loads no effect system either")
 	var timeline: LoadTimeline = world.last_load_timeline()
 	assert_not_null(timeline)
@@ -210,6 +226,7 @@ func test_a_serve_only_hosts_map_change_runs_the_reduced_arm() -> void:
 			assert_false(names.has(leg),
 					"no %s at a Serve Only host's map change: %s" % [leg, names])
 	world.unload()
+	presenter.teardown()
 
 
 func test_the_rotations_end_keeps_nothing() -> void:

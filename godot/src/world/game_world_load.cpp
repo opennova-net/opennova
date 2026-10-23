@@ -440,10 +440,11 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// The HUD's textures and fonts at the mission textures stage, past the freeze: the full
 	// arm loads the HUD's textures and their materials there, and every arm, a dedicated
 	// host's reduced one too, then loads the HUD's fonts and the stdbox frame the status page
-	// draws. The shell's HUD loads them here, inside the load (engine
-	// mission/mission_load_plan.h carries the witness, D-NET-NEW-L8-40).
+	// draws, with the connection icons both arms load ahead of the split. The shell's HUD
+	// loads them here, inside the load, by the arm (engine mission/mission_load_plan.h carries
+	// the witness, D-NET-NEW-L8-40).
 	timeline->span("hud_textures");
-	emit_signal(kSignalHudTexturesLoad);
+	emit_signal(kSignalHudTexturesLoad, !dedicated_host);
 	timeline->end_span();
 	if (!dedicated_host) {
 		// The render arm's device inits past the freeze: the effect catalog and the presenters'

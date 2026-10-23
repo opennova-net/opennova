@@ -959,10 +959,12 @@ void GameWorld::_bind_methods() {
 	// The two HUD legs of every mission start's load, a dedicated host's included: the
 	// overlay system's init past the rows' init and ahead of a joiner's first 0x2F
 	// (`mission_file` names the mission whose text the HUD's tables resolve), then the
-	// HUD's textures and fonts at the mission textures stage, past the model freeze. The
-	// shell's HUD builds in them, inside the load (game_world_load.cpp carries the witness).
+	// HUD's textures and fonts at the mission textures stage, past the model freeze, by its
+	// arm (`full_arm` false: a dedicated host's reduced arm, the fonts, the box styles and
+	// the connection icons alone). The shell's HUD builds in them, inside the load
+	// (game_world_load.cpp carries the witness).
 	ADD_SIGNAL(MethodInfo(kSignalHudOverlayInit, PropertyInfo(Variant::STRING, "mission_file")));
-	ADD_SIGNAL(MethodInfo(kSignalHudTexturesLoad));
+	ADD_SIGNAL(MethodInfo(kSignalHudTexturesLoad, PropertyInfo(Variant::BOOL, "full_arm")));
 	// Presentation side effects drained from the mission runtime's EffectLog
 	// each tick (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/
 	// "set_light"/"dialog"). Player text is consumed by the HUD; debug_text
