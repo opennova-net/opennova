@@ -255,11 +255,18 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 			// pose [orig: LABEL_123 staging precedes the +0x24&2 snap @0x4C1109+]
 			// — the staged target stays at the wire pose, so the next mover tick
 			// sees a zero delta (deadband) instead of gliding anywhere.
+			// An infantry record's respawn arm still promotes the previous stage into the
+			// target (+0x1A8) ahead of its new stage, over the reset's +0x1A8 = Yaw
+			// (D-NET-NEW-L5-33). [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 -
+			//  Entity_ResetToSpawnState @0x4C05EC (+0x1A8 @0x4B9692), then the promote
+			//  @0x4C0646..0x4C0653 and the stage @0x4C0693]
+			const int32_t previous_stage = es.net_smooth_heading;
 			es.net_smooth_target[0] = wx;
 			es.net_smooth_target[1] = wy;
 			es.net_smooth_target[2] = wz;
 			es.net_smooth_heading = has_heading ? heading_bam : es.heading_bam;
-			es.net_target_heading_bam = es.net_smooth_heading;
+			es.net_target_heading_bam = es.cls == EntityClass::Infantry
+					? previous_stage : es.net_smooth_heading;
 			es.net_interp_steps = 0;
 			es.net_interp_progress = 0;
 		}

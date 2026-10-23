@@ -577,6 +577,12 @@ void test_free_standing_infantry_body_and_look_split() {
 	view->apply(0x0A, free_infantry_frame(0x20, 0xF0, 0, 0x30));
 	expect(es.heading_bam == 0x30000000 && es.rm_body_heading == 0x30000000,
 			"the respawn record's reset stamps the body heading with the new Yaw");
+	// D-NET-NEW-L5-33: its promote still runs after the reset: the target is the dead
+	// record's stage (0x10), the new yaw only the stage.
+	// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the reset call @0x4C05EC,
+	//  the promote @0x4C0646..0x4C0653, the stage @0x4C0693]
+	expect(es.net_target_heading_bam == 0x10000000 && es.net_smooth_heading == 0x30000000,
+			"the respawn record promotes the previous stage into the target");
 }
 
 // D-NET-NEW-L5-30: the free-standing look holds the Yaw within 90 degrees of the body heading.
