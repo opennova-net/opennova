@@ -1704,6 +1704,53 @@ bool run_the_net_readout_records_each_frame() {
 			expect(uplinks > 0, "readout: the game loop's boundaries carry the 0x0C");
 }
 
+// D-NET-NEW-L2-49 (LX-s25's 03tr-dm row: our joiner's first C2S 0x4C carried 02 where retail's
+// carries 01, so our host's S2C 0x46 relayed an extra 0x0400 field): the S2C 0x0F's pass is the
+// final wait's, which steps no 0x4C timer. A fresh process's first report is then the game loop's
+// 311th frame, the frame of its sixth quality fold, which runs first and has pushed the first
+// fold's sample out of the five-sample window. The witnessed inputs: the frame rate reads 0 from
+// the mode's init until the FR counter's first two-second window closes (the folds of frames 1
+// and 63 score 255), then any rate of 16 or more (the floor 1); no pong (ping term 1), no loss, no
+// S2C 0x79 (host scalar 0). The window then holds 255, 1, 1, 1, 1: 51, level 1, the report's
+// byte. A pass that stepped the timer put the report on frame 310, ahead of the sixth fold:
+// 255, 255, 1, 1, 1, 102, level 2.
+// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5 (no
+//  Client_ProcessNetworkFrame); Game_ProcessMainFrame @0x5263F0 - the countdown
+//  @0x526537..0x526555, CNetQuality_UpdateMetrics @0x52658B, Client_ProcessNetworkFrame
+//  @0x526692; Client_ProcessNetworkFrame @0x42C180 - the timer @0x42C22D..0x42C23E, the level
+//  read @0x42C256, the queue @0x42C279; CNetQuality_UpdateMetrics @0x4C52C0 - the receive window
+//  @0x4C5636..0x4C584E, the level @0x4C586A..0x4C58B0; Game_MainLoop @0x52B630 - the mode's init
+//  @0x52B70D, then g_StatsAvgFps = 0 @0x52B727]
+bool run_the_first_report_after_a_join_follows_the_sixth_fold() {
+	Harness h;
+	h.client.set_observed_frame_rate(0);
+	if (!expect(drive_to_the_final_wait(h, 0), "first report: the final wait runs")) return false;
+	std::vector<uint8_t> world_state(23, 0);
+	if (!expect(!carries(sent_tags(h, h.frame({make_protocol_message(0x0F, world_state)})), 0x4C),
+			"first report: the 0x0F's pass reports nothing"))
+		return false;
+	int report_frame = 0;
+	std::vector<uint8_t> report;
+	for (int frame = 1; frame <= 320 && report_frame == 0; ++frame) {
+		// The FR counter's first window has closed by the third fold.
+		if (frame == 125) h.client.set_observed_frame_rate(62);
+		for (const std::vector<uint8_t> &dg : h.frame()) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_client_session(dg, h.auth.scrk, header, messages)) continue;
+			for (const ProtocolMessage &m : messages) {
+				if (m.tag != 0x4C || report_frame != 0) continue;
+				report_frame = frame;
+				report = m.payload;
+			}
+		}
+	}
+	if (!expect(report_frame == 311, "first report: the game loop's 311th frame reports"))
+		return false;
+	return expect(report == std::vector<uint8_t>({0x01}) && h.client.net_quality_level() == 1,
+			"first report: the sixth fold's window (255, 1, 1, 1, 1) reports level 1");
+}
+
 int main() {
 	bool ok = true;
 	ok = run_admission_follows_the_retail_loading_loops() && ok;
@@ -1718,6 +1765,7 @@ int main() {
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
 	ok = run_the_link_indicators_step_in_the_main_frame_alone() && ok;
 	ok = run_the_net_readout_records_each_frame() && ok;
+	ok = run_the_first_report_after_a_join_follows_the_sixth_fold() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_sync_tail_0x0a_joins_the_queue() && ok;
 	ok = run_the_mission_data_load_holds_the_0x09() && ok;

@@ -1250,6 +1250,14 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// a mission's first fold is its first game-loop frame.
 	// [orig: Game_ProcessMainFrame @0x526537..0x526555 (g_NetQualityUpdateCountdown - 1, > 0 skips,
 	//  else 62); Game_StartMission's head `mov g_NetQualityUpdateCountdown, ebx` @0x52439e]
+	// The pass belongs to the loop its head runs in, judged here, ahead of the receive: a wait's
+	// pass whose receive ends the wait (the final wait's S2C 0x0F) is still that wait's, which
+	// runs the receive and the send alone, so the main frame's legs after the receive (the 0x4C
+	// report's timer below) take this judgement too, never the state the receive left.
+	// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5:
+	//  CNapiNetwork_PumpManagerReceive @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE,
+	//  CNapiNetwork_PumpClientProtocolSend @0x5262DA, the g_ClientWorldStateLoaded exit test
+	//  @0x5262DF; no Client_ProcessNetworkFrame in it]
 	const bool main_frame_legs = role_ != Role::Joiner || in_main_frame();
 	if (role_ == Role::Joiner && main_frame_legs) update_net_quality();
 	// Then the connection indicators step once, in a session, still ahead of
@@ -1833,10 +1841,14 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// or alive (D-NET-529), an abandoned mission start's game loop too (in_main_frame,
 	// D-NET-NEW-L2-40). The count is the process's (the embedder's ClientProcessState,
 	// handed over by the JoinerRole): it runs free across joins and missions, so a later
-	// join's first report lands at its phase, not 311 frames in (D-NET-602).
+	// join's first report lands at its phase, not 311 frames in (D-NET-602). The 0x0F's pass
+	// steps nothing (main_frame_legs): a fresh process's first report is the game loop's 311th
+	// frame, the one whose fold (ahead of this leg) is the sixth, which has pushed the first
+	// fold's sample out of the window (D-NET-NEW-L2-49).
 	// [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279, its one caller
-	//  Game_ProcessMainFrame @0x5263F0 (the call @0x526692); g_NetQualityReportTimer @0xA85B84]
-	if (!replay_mode_ && in_main_frame()) {
+	//  Game_ProcessMainFrame @0x5263F0 (the call @0x526692, after CNetQuality_UpdateMetrics
+	//  @0x52658B); g_NetQualityReportTimer @0xA85B84]
+	if (!replay_mode_ && main_frame_legs) {
 		if (process_state().step_net_quality_report()) {
 			frame_trace_.report_queued = true;
 			ProtocolMessage quality = make_protocol_message(0x4C, std::vector<uint8_t>{
