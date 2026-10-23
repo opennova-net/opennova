@@ -106,10 +106,10 @@ namespace {
 //  select @0x4296E3, Player_MountWeaponSlot @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer
 //  @0x565CD0 (the select @0x566285, the mount @0x56628A..0x566297)].
 void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventory &inventory) {
-    // Player_InitPlayer's walk follows the select whatever it found, and clears a running
-    // PowerThrow windup at its head [orig: Player_InitPlayer @0x4E15F0 -
-    //  Player_SwitchToWeaponByHandle @0x4E19A1; local_weapon_walk_clears_windup].
-    local_weapon_walk_clears_windup(world, weapon);
+    // No walk here: both loadout applies end on the select and the mount alone, so a running
+    // PowerThrow windup survives them; the walk that clears it is Player_InitPlayer's
+    // (local_loadout_rebuild) [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285,
+    //  @0x566297); NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296E3, @0x4296F4)].
     const WeaponTable &table = world.tables.weapons;
     const WeaponSwitchGates gates =
             local_weapon_switch_gates(world, weapon, &inventory);
@@ -184,6 +184,11 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     weapon.switch_in_flight = false;
     weapon.switch_deferred_action = -1;
     if (!select_spawn_default) return;
+    // Player_InitPlayer's walk follows its select whatever it found, and clears a running
+    // PowerThrow windup at its head past its seat gate; the loadout applies run no walk
+    // [orig: Player_InitPlayer @0x4E15F0 - Player_SwitchToWeaponByHandle @0x4E19A1 (->
+    //  @0x4E019B); local_weapon_walk_clears_windup].
+    local_weapon_walk_clears_windup(world, weapon);
     // The select of the word [orig: Player_InitPlayer @0x4E15F0 (the
     //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E)].
     select_current_slot(world, weapon, inventory);

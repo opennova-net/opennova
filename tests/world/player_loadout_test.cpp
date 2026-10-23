@@ -206,6 +206,27 @@ void test_armor_carry_bit_follows_accepted_loadout() {
     CHECK((player->carry_flags & 8) == 0);
 }
 
+// A running PowerThrow windup survives both loadout applies, which end on the select and the
+// mount with no walk; the spawn rebuild's walk (Player_InitPlayer's) clears it (D-NET-NEW-LI-22,
+// V-ROLL-AJ). [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285, @0x566297);
+//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296E3, @0x4296F4); Player_InitPlayer
+//  @0x4E15F0 - Player_SwitchToWeaponByHandle @0x4E19A1 (-> @0x4E019B)]
+void test_a_windup_survives_the_applies_and_the_spawn_walk_clears_it() {
+    Rig r;
+    r.world.registry.configure_pool(0, 1);
+    r.world.cached.local_player = r.world.registry.spawn(0, Entity{});
+    r.weapon.power_throw_start_tick = 7;
+    CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, /*validate_banned=*/true));
+    CHECK(r.weapon.power_throw_start_tick == 7); // the armory ACCEPT runs no walk
+    CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, /*validate_banned=*/false));
+    CHECK(r.weapon.power_throw_start_tick == 7); // nor the S2C 0x5A apply
+    local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, /*select_spawn_default=*/true);
+    CHECK(r.weapon.power_throw_start_tick == 0); // Player_InitPlayer's walk clears it
+}
+
 } // namespace
 
 // The armory open-time class policy [orig: Armory_ResolveSelectedClass
@@ -304,6 +325,7 @@ int main() {
     test_class_latch_survives_kit_reset();
     test_armor_carry_bit_follows_accepted_loadout();
     test_rebuild_and_mount_carry_the_slot_zoom();
+    test_a_windup_survives_the_applies_and_the_spawn_walk_clears_it();
     test_armory_class_policy();
     test_player_info_menu_policy();
     if (failures == 0) std::printf("player_loadout_test: all passed\n");

@@ -1205,9 +1205,10 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 		w.switch_deferred_action = weapon_action::kSwitchFrom;
 	// A mount leaves a running PowerThrow windup alone: the walk clears it ahead of the mount
 	// (local_weapon_walk_clears_windup, past the walk's own gates), and a mount no walk runs (a
-	// UseGun's, a ToSpecial switch's) carries it onto the new slot, whose release requests fire
-	// there (local_weapon_pump_tick). [orig: Player_MountWeaponSlot @0x4DFA40 writes no
-	//  g_FireChargeStartTick (@0xB76800); Player_SwitchToWeaponByHandle @0x4E019B;
+	// UseGun's, a ToSpecial switch's, a loadout apply's) carries it onto the new slot, whose
+	// release requests fire there (local_weapon_pump_tick). [orig: Player_MountWeaponSlot
+	//  @0x4DFA40 writes no g_FireChargeStartTick (@0xB76800); Player_SwitchToWeaponByHandle
+	//  @0x4E019B;
 	//  Entity_AttachToUseGunSlot @0x546B80 (the mount @0x546C38); Input_HandleActionBinding_0
 	//  case 0xDC's Player_EquipWeaponByEntity @0x4E11B2 / @0x4E125B]
 	w.pending_throw_charge = 0;
