@@ -135,7 +135,11 @@ void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventor
     // (WeaponLoadout_ApplyFromBuffer), @0x4296e3 (the 0x5A apply)].
     weapon.nvg_scope_restore = false;
     inventory.pending_combo = inventory.equipped_combo;
-    commit_pending_weapon_switch(world, weapon, &inventory, /*select=*/true);
+    // A select writes none of the mount's view words: the loadout applies' mount request
+    // below writes them; the spawn's, which no mount follows here, writes them at its
+    // install (PendingCommit) [orig: Player_SelectWeaponSlot @0x4DD680].
+    commit_pending_weapon_switch(world, weapon, &inventory,
+            mount ? PendingCommit::kSelect : PendingCommit::kSpawnSelect);
     if (!mount) return;
     // The loadout applies then mount the EquippedSlot the select stored, through the mount's
     // own leg: its def's category is its own, so the queue is SWITCHRANK on that slot (none

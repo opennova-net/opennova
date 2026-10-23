@@ -18,8 +18,8 @@ Vec3 local_player_mission_position(const World &world);
 
 // The commit's own mount of the EquippedSlot's def (player_weapon.cpp carries the witness);
 // false when nothing mounts. `view_writes`: the install writes the mount request's pitch and
-// view words (a select's); a switch's commit, or a store no mount runs, writes none. Defined
-// in player_weapon.cpp.
+// view words (the spawn's select's); a switch's commit, a loadout apply's select, or a store
+// no mount runs, writes none. Defined in player_weapon.cpp.
 bool commit_mount(World &world, LocalPlayerWeapon &w, const std::string &name,
 		bool preserve_slot_state, bool view_writes);
 

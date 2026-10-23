@@ -429,7 +429,8 @@ private:
 	void commit_pending_weapon_switch() {
 		opennova::world::commit_pending_weapon_switch(
 				kernel_->world, kernel_->local.weapon,
-				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr, false);
+				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr,
+				opennova::world::PendingCommit::kSwitch);
 	}
 	void handle_weapon_switch_outcome(
 			const opennova::world::WeaponSwitchOutcome &p_out) {

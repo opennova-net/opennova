@@ -470,6 +470,23 @@ void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun)
 void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
                                WeaponInventory *inventory, PlayerViewState &view);
 
+// How commit_pending_weapon_switch stores the pending slot. A switch action's completion
+// (or a store no action runs) writes none of the mount's view words: its mount request
+// wrote them. A select writes none either (Player_SelectWeaponSlot stores the slot, stamps
+// it and clears the NVG latch alone): a loadout apply's select is followed by the mount
+// request on the slot it stored, which writes them as a same-slot mount does. The spawn's
+// select (Player_InitPlayer's) is followed by no mount here (its walk's, D-WPN-21), and
+// its install writes the mount's view words in that mount's stead.
+// [orig: Player_SelectWeaponSlot @0x4DD680 (the stores @0x4DD704 / @0x4DD727, the latch
+//  @0x4DD72D); NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the select @0x4296E3, the
+//  mount @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285,
+//  @0x56628A..0x566297); Player_InitPlayer @0x4E15F0 (the select @0x4E1995)]
+enum class PendingCommit : uint8_t {
+	kSwitch,
+	kSelect,
+	kSpawnSelect,
+};
+
 // The pending -> equipped commit and the shared switch-outcome routing. The commit
 // mounts the committed slot's def at once (local_weapon_install_by_name): a switch
 // action's completion draws it (SWITCHTO), a SWITCHRANK's and a select's do not.
@@ -483,7 +500,7 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 //  @0x543539, no SWITCHTO; Player_SelectWeaponSlot @0x4DD680 - the store @0x4DD704;
 //  Player_MountWeaponSlot @0x4DFA40 - @0x4DFB7B..0x4DFBC5]
 bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
-                                  WeaponInventory *inventory, bool select);
+                                  WeaponInventory *inventory, PendingCommit kind);
 void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
                                   WeaponInventory *inventory,
                                   const WeaponSwitchOutcome &out, PlayerViewState &view);

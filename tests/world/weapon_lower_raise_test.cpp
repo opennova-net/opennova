@@ -1223,6 +1223,42 @@ void test_a_switchrank_completion_clears_the_scope_byte_for_a_def_with_no_optic(
 	CHECK(rig->view().scope_settled); // an optic's SWITCHRANK keeps it
 }
 
+// --- a loadout apply's select writes no view word (L7-s27 row 1) ------------------------
+
+// A loadout apply's select stores the slot and writes none of the mount's view words; the
+// mount request that follows on the slot it stored compares that slot with itself, one
+// category: no byte clear, no fov write, and the bind engages an optic over a raised byte.
+// Here the apply's kit drops the held pistol, so the select falls through to the optic of
+// another category: the byte and the fov target stand, and the optic engages.
+// [orig: Player_SelectWeaponSlot @0x4DD680 (the stores @0x4DD704 / @0x4DD727, the latch
+//  @0x4DD72D, nothing else); WeaponLoadout_ApplyFromBuffer @0x565CD0 (the select @0x566285,
+//  the mount @0x56628A..0x566297); Player_MountWeaponSlot @0x4DFA40 (the category compare
+//  @0x4DFB4C..0x4DFB5E, the bind and engage @0x4DFC35..0x4DFC9A)]
+void test_a_loadout_apply_writes_its_view_words_at_its_mount() {
+	constexpr int32_t kOptic = 4 * weapon_combo::kRanksPerCategory;
+	const auto rig = std::make_unique<Rig>(rifle_kit());
+	LocalPlayerWeapon &w = rig->weapon();
+	rig->tick();
+	rig->press(2);
+	CHECK(rig->tick_until_commit() >= 1);
+	rig->settle();
+	CHECK(rig->inventory().equipped_combo == kPistol);
+	int32_t &fov = rig->world.weather.core.scalar_channels.camera_fov_target_fp;
+	fov = 20 << 16;
+	rig->view().scope_settled = true;
+	CHECK(local_loadout_apply_accept(rig->world, rig->local().loadout, w, rig->inventory(),
+			rig->local().inventory_valid,
+			std::vector<WeaponKitEntry>{WeaponKitEntry{"WPN_OPTIC", -1, -1, -1}}, 0, false));
+	CHECK(rig->inventory().equipped_combo == kOptic);
+	CHECK(w.slot.next == weapon_action::kSwitchRank); // the mount's, on the slot itself
+	CHECK(rig->view().scope_settled);
+	CHECK(fov == (20 << 16));
+	CHECK(rig->view().weapon_pose_bound && rig->view().scope_engaged);
+	rig->settle(); // the SWITCHRANK on the slot itself runs out
+	CHECK(rig->inventory().equipped_combo == kOptic);
+	CHECK(rig->view().scope_settled); // the optic's SWITCHRANK keeps it
+}
+
 } // namespace
 
 int main() {
@@ -1244,6 +1280,7 @@ int main() {
 	test_the_mount_request_writes_the_view_words();
 	test_a_force_crouch_mount_requests_the_crouch();
 	test_a_switchrank_completion_clears_the_scope_byte_for_a_def_with_no_optic();
+	test_a_loadout_apply_writes_its_view_words_at_its_mount();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

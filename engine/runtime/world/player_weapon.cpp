@@ -47,9 +47,10 @@ bool local_slot_zoom_sniper_lock(const World &world, int32_t def_category) {
 }
 
 // The install's body past its presentation-epoch clear (local_weapon_install). `view_writes`:
-// the install writes the mount request's pitch and view words itself (no request ran ahead of
-// it: an embedder's install, a select); a switch's commit, or a store no mount runs, writes
-// none (mount_queue_switch_out wrote them at the request).
+// the install writes the mount request's pitch and view words itself (no request runs around
+// it: an embedder's install, the spawn's select); a switch's commit, a loadout apply's select
+// (its mount request follows), or a store no mount runs, writes none (mount_queue_switch_out
+// writes them at the request).
 void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &data,
 		bool preserve_slot_state, bool allow_same_weapon_rebake, WeaponInventory *inventory,
 		PlayerViewState &view, bool view_writes);
@@ -240,7 +241,8 @@ void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState 
 }
 
 bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
-		WeaponInventory *inventory, bool select) {
+		WeaponInventory *inventory, PendingCommit kind) {
+	const bool select = kind != PendingCommit::kSwitch;
 	// The pending -> equipped commit [orig: the switchfrom/switchrank completion
 	// consumes g_PendingWeaponSlot; EquippedSlot swap + the equippedAdmIndex stamp
 	// @ 0x4dd727; the FP model re-resolve runs shell-side off the event].
@@ -324,8 +326,11 @@ bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// [orig: WeaponAction_SwitchFrom @0x5433B0 - WeaponSlot_TryQueueSwitchTo @0x5434A3]
 	// A switch's commit writes none of the mount's view words (its request did) but a
 	// SWITCHRANK's scope byte clear, which the pump runs past this store
-	// (clear_scope_at_local_switchrank); a select runs no request, and its install writes them.
-	event.installed = def != nullptr && commit_mount(world, w, def->name, false, select);
+	// (clear_scope_at_local_switchrank); a select writes none, and a loadout apply's mount
+	// request follows it; the spawn's select, which no mount follows, writes them
+	// (PendingCommit).
+	event.installed = def != nullptr &&
+			commit_mount(world, w, def->name, false, kind == PendingCommit::kSpawnSelect);
 	w.events.push_back(std::move(event));
 	return true;
 }
@@ -352,7 +357,7 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 			//  the walk; the OUTGOING slot's FSM plays SWITCHRANK (same category) or
 			//  SWITCHFROM (cross category) and its completion commits]
 			if (!w.active) {
-				commit_pending_weapon_switch(world, w, inventory, false);
+				commit_pending_weapon_switch(world, w, inventory, PendingCommit::kSwitch);
 				break;
 			}
 			// The word is stored (pending_combo); the mount's queue, its NVG latch clear
@@ -1855,7 +1860,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// scope byte for a def with no optic.
 		const bool completed_from = active_slot.current == weapon_action::kSwitchFrom;
 		const bool completed_rank = active_slot.current == weapon_action::kSwitchRank;
-		if (commit_pending_weapon_switch(world, w, io.inventory, false)) {
+		if (commit_pending_weapon_switch(world, w, io.inventory, PendingCommit::kSwitch)) {
 			if (completed_from) start_local_weapon_raise(world, w, view);
 			if (completed_rank) clear_scope_at_local_switchrank(world, w, view);
 		}

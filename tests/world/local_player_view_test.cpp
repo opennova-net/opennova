@@ -947,7 +947,7 @@ void test_nvg_restore_latch_is_the_requests() {
     {
         Rig r;
         r.inventory.pending_combo = 66;
-        commit_pending_weapon_switch(r.lw.w, r.w, &r.inventory, false);
+        commit_pending_weapon_switch(r.lw.w, r.w, &r.inventory, PendingCommit::kSwitch);
         CHECK(r.inventory.equipped_combo == 66 && r.w.nvg_scope_restore);
         WeaponInstallData data;
         data.name = "LATCH_2";
