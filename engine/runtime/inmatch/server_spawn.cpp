@@ -1000,8 +1000,14 @@ int32_t count_players_on_team(const NapiNPServerCtx &ctx, uint8_t index) {
 //  CNapiServerConfig_BuildFlags @0x4C4DC0 - 0x20 @0x4C4E5F, 0x10 @0x4C4E7F]
 bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 	if ((build_server_config_flags(ctx) & 0xF0u) == 0) return true;
-	int team_id = conn.char_vars.team_request == 0 ? 0
-			: conn.char_vars.team_request == 1 ? 1 : -1;
+	// TR is the net player's signed byte (-1 automatic). It is only ever 0, 1 or -1: the
+	// tag load narrows a joiner's to those three (NapiNPProtocol's TR parse), and the host's
+	// own copies the session's byte, the cfg block's side requirement, which holds only -1
+	// [orig: `mov bl, [esi+1C0h]` @0x4C8E8F; NapiNetConfig_LoadFromConnTags @0x4C7529..0x4C7537;
+	//  NapiNPServer_HandleNewConnection @0x4C817D; CNapiGameSession_BuildAndCreateSession
+	//  @0x56979F / @0x5697C3; Config_SetDefaults @0x54D1FA; UI_PreGameMenuStateMachine
+	//  @0x568C55].
+	int team_id = static_cast<int8_t>(conn.char_vars.team_request);
 	if (opennova::strutil::iequals(conn.join_password.c_str(),
 				ctx.config.side_a_password.c_str())) {
 		team_id = 0;
