@@ -22,6 +22,7 @@
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/mission_exit.h>
+#include <runtime/inmatch/role_feeds.h> // the scene frame's dead-bit reads
 #include <runtime/replication/connection_fan.h>
 #include <formats/def/def.h>
 #include <formats/mission/mission.h>
@@ -3754,6 +3755,18 @@ bool run_a_preround_death_latches_when_the_round_opens() {
 	deliver_dead_tail(0);
 	ok &= expect(h.role.runtime->local_player_dead(),
 			"pre-round death: the round's first body tick latches the dead bit");
+	// The scene frame's dead-bit reads (the death.mnu trigger, the HUD pass's mode-0 leg, the
+	// map overlay clear) take that latch, the entity's own bit, with no self record carrying
+	// one: the record's flag fold masks bit 1 out [orig: Render_ProcessMainSceneFrame
+	// @0x5CAB54 / @0x5CAC63 / @0x5CACED (entity+0x24 & 2); NetPacket_SerializePlayerState
+	// @0x4C09C0 - `and ebx, 0E1h` @0x4C12FF].
+	inmatch::RoleView view;
+	view.kernel = h.kernel.get();
+	view.runtime = h.role.runtime.get();
+	view.joiner = true;
+	ok &= expect(inmatch::local_player_dead(view) && inmatch::death_menu_triggered(view) &&
+					!inmatch::hud_overlays_called(view, false),
+			"pre-round death: the scene frame reads the latched bit with no self record");
 	return ok;
 }
 

@@ -789,8 +789,10 @@ struct HudMapControl {
 		zoom_q16 = spawn_zoom_q16;
 		big_zoom_q16 = spawn_big_zoom_q16;
 	}
-	// The render gate zeroes the mode whenever the local player is dead.
-	// [orig: @0x5cac67..0x5cac6d — g_MapOverlayMode = 0 on Flags & 2]
+	// The scene frame's world block zeroes the mode for a dead local body, once per frame
+	// that draws its world (inmatch::Session::step_map_overlay_death_clear).
+	// [orig: Render_ProcessMainSceneFrame @0x5CAC50..0x5CAC6D - Flags & 2 @0x5CAC63, its
+	//  jz @0x5CAC67, g_MapOverlayMode = 0 @0x5CAC6D]
 	void on_local_player_dead() { mode = 0; }
 	// The respawn init every overlay-window action runs zeroes the mode
 	// (hud_toggles.h kOverlayWindowsCleared) [orig: Game_InitRespawnState

@@ -43,26 +43,13 @@ uint32_t session_rules_word(const RoleView &view) {
 }
 
 bool local_player_dead(const RoleView &view) {
+	// The local entity's dead bit (entity+0x24 & 2). A joiner's is its body's own latch, never
+	// its self record's state bit: the record's flag fold masks bit 1 out for every entity
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - `and ebx, 0E1h` @0x4C12FF (the local
+	//  player), `and ebx, 0FDh` @0x4C1307, the fold `xor [edi+24h], ebx` @0x4C1311].
 	if (view.joiner) return view.runtime != nullptr && view.runtime->local_player_dead();
 	return view.kernel != nullptr && view.kernel->local.local_player_dead();
 }
-
-namespace {
-
-// The local entity's dead bit (entity+0x24 & 2), not the health word: a joiner's replica
-// reads its own record's state flags once its self handle is bound.
-bool local_dead_bit(const RoleView &view) {
-	if (view.joiner) {
-		if (view.runtime == nullptr) return false;
-		const ClientRuntime &runtime = *view.runtime;
-		if (!runtime.has_self_handle()) return false;
-		const replication::ClientEntityState *self = runtime.state().find(runtime.self_handle());
-		return self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
-	}
-	return view.kernel != nullptr && view.kernel->local.local_player_dead();
-}
-
-} // namespace
 
 bool death_menu_triggered(const RoleView &view) {
 	if (view.runtime == nullptr || view.kernel == nullptr) return false;
@@ -71,7 +58,7 @@ bool death_menu_triggered(const RoleView &view) {
 	const bool respawns = w.rules.mp_session ||
 			(w.tables.mission_attrib_flags & world::MissionTables::kMissionAttribSinglePlayerRespawn) != 0;
 	if (!respawns) return false;
-	return local_dead_bit(view);
+	return local_player_dead(view);
 }
 
 bool hud_overlays_called(const RoleView &view, bool help_open) {
@@ -87,7 +74,7 @@ bool hud_overlays_called(const RoleView &view, bool help_open) {
 	// Camera mode 0, or the death screen: the pass for a body without the dead bit, the F1
 	// help shut [orig: @0x5CACA6..0x5CACB7; @0x5CACED..0x5CACFE (entity+0x24 & 2,
 	//  dword_24C18B0); the call @0x5CAD04].
-	if (v.camera_mode == 0 || v.death_screen_active) return !local_dead_bit(view) && !help_open;
+	if (v.camera_mode == 0 || v.death_screen_active) return !local_player_dead(view) && !help_open;
 	// The chase view: the pass from a control seat alone (parentEntity, parentSlot 2 / 5)
 	// [orig: @0x5CACB9..0x5CACDD; the call @0x5CACE3]; any other mode draws none.
 	if (v.camera_mode != 1) return false;

@@ -22,6 +22,7 @@ struct HudToggleState;
 namespace opennova::inmatch {
 
 class ClientRuntime;
+struct RoleView;
 
 enum class State : uint8_t {
 	Unloaded = 0,
@@ -752,9 +753,14 @@ private:
 	// cine test on a session peer, under the page too, then the drawn scene frame's
 	// world-skip word, stamped into the local view.
 	void step_scene_head(const FrameInput &input, FrameOutcome &out);
+	// The role's facts for the scene frame's legs (inmatch/role_feeds.h).
+	RoleView frame_role_view() const;
 	// Whether the drawn frame's HUD pass runs: not on a frame that skips its world, else
 	// at its call site's gates (inmatch::hud_overlays_called).
 	bool hud_pass_called(const FrameInput &input, const FrameOutcome &out) const;
+	// The world block's map overlay leg after the HUD pass: a drawn frame that draws its
+	// world closes an open map for a body with the dead bit (hud::HudMapControl).
+	void step_map_overlay_death_clear(const FrameOutcome &out);
 	static int64_t now_us();
 
 	Role *role_ = nullptr;

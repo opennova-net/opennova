@@ -211,16 +211,6 @@ int Simulation::get_hud_big_zoom_q16() const {
 	return kernel_->local.hud_map_control.big_zoom_q16;
 }
 
-void Simulation::tick_hud_map_death_gate() {
-	// The render gate zeroes the mode whenever the local player is dead;
-	// respawn re-opens nothing — only the M key does (witness at
-	// hud::HudMapControl::on_local_player_dead).
-	if (kernel_->local.hud_map_control.mode == 0) return;
-	// The joiner reads its recipient-specific 0x0A health tail, the authority
-	// its entity flags — the one local_player_dead() seam.
-	if (local_player_dead()) kernel_->local.hud_map_control.on_local_player_dead();
-}
-
 bool Simulation::get_hud_map_flip_180() const {
 	// AttribFlags::RotateMap180; the map-side witness is
 	// HudMinimapInput::flip_180 (hud/hud_minimap.h).

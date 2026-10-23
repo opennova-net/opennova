@@ -483,9 +483,6 @@ private:
 	// cat-7 player-trigger evaluator's LIVE word) as the view-action producers
 	// have written it; 0 without a kernel. A test seam over the engine state.
 	int debug_input_action_bits() const;
-	// The dead-player map-mode clear, run once per advanced tick (witness at
-	// hud::HudMapControl::on_local_player_dead).
-	void tick_hud_map_death_gate();
 	// The loadout profile seams the joiner role keeps shell-side (the role is
 	// constructed with them).
 	opennova::inmatch::JoinerRole::KitSeams joiner_kit_seams();

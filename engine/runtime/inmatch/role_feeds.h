@@ -88,8 +88,10 @@ uint32_t session_rules_word(const RoleView &view);
 // [orig: g_DeathScreenActive, NapiNPClientMsg_0x00A @0x42ff88..0x43002b].
 bool local_death_screen_active(const RoleView &view);
 
-// The one role-agnostic read of the local player's dead bit: the joiner's
-// replica, the authority's entity flags (the kernel).
+// The one role-agnostic read of the local player's dead bit (entity+0x24 & 2): the
+// joiner's body latch (ClientRuntime::local_player_dead; its self record's state bit
+// never folds into the entity's flags), the authority's entity flags (the kernel). The
+// scene frame's death.mnu trigger, its HUD pass gate and its map overlay clear read it.
 bool local_player_dead(const RoleView &view);
 
 // The frame loop's two triggers for death.mnu's DEATH screen, every role's

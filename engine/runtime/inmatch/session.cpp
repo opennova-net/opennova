@@ -1055,16 +1055,34 @@ void Session::count_rendered_frame() {
 		role_->observe_frame_statistics(frames_last_second_, accumulator_.cpu_percent());
 }
 
+RoleView Session::frame_role_view() const {
+	RoleView view;
+	view.kernel = role_ != nullptr ? role_->kernel() : nullptr;
+	view.runtime = role_ != nullptr ? role_->client_runtime() : nullptr;
+	view.joiner = kind_ == RoleKind::Joiner;
+	return view;
+}
+
 bool Session::hud_pass_called(const FrameInput &input, const FrameOutcome &out) const {
 	// Inside the world block, past its world-skip word, at its own call site
 	// (inmatch::hud_overlays_called carries the witness) [orig: Render_ProcessMainSceneFrame
 	//  @0x5CA620..0x5CA640; @0x5CAB2B..0x5CAD04].
 	if (out.world_skipped || role_ == nullptr || role_->kernel() == nullptr) return false;
-	RoleView view;
-	view.kernel = role_->kernel();
-	view.runtime = role_->client_runtime();
-	view.joiner = kind_ == RoleKind::Joiner;
-	return hud_overlays_called(view, input.hud_toggles != nullptr && input.hud_toggles->help_open);
+	return hud_overlays_called(frame_role_view(),
+			input.hud_toggles != nullptr && input.hud_toggles->help_open);
+}
+
+void Session::step_map_overlay_death_clear(const FrameOutcome &out) {
+	// The world block's map overlay leg, past the HUD pass and the sun veil: an open map
+	// closes for a body with the dead bit, once per drawn frame that draws its world (a
+	// frame that skips it, and the status page, run no world block) [orig:
+	// Render_ProcessMainSceneFrame - the world-skip jump @0x5CA620..0x5CA640, the HUD pass's
+	// return to loc_5CAB95 @0x5CAD09, the sun veil @0x5CAC4B, `cmp g_MapOverlayMode, 0`
+	// @0x5CAC50, `test byte ptr [ecx+24h], 2` @0x5CAC63, the clear @0x5CAC6D].
+	if (out.world_skipped || role_ == nullptr || role_->kernel() == nullptr) return;
+	hud::HudMapControl &map = role_->kernel()->local.hud_map_control;
+	if (map.mode == 0) return;
+	if (local_player_dead(frame_role_view())) map.on_local_player_dead();
 }
 
 void Session::step_scene_head(const FrameInput &input, FrameOutcome &out) {
@@ -1137,6 +1155,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		count_rendered_frame();
 		if (!out.terminal() && out.scene_drawn) {
 			if (hud_pass_called(input, out)) step_hud_radar_frame();
+			step_map_overlay_death_clear(out);
 			step_cine_render_frame();
 		}
 		return out;
@@ -1211,15 +1230,17 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	}
 	last_perf_ = out.perf;
 	// The frame's render follows the drain: the scene frame's HUD pass where its call site
-	// calls it (hud_pass_called), then its cine pass; the status page runs neither, so under
-	// it the radar ages nothing, and a frame that skips its world runs no HUD pass
+	// calls it (hud_pass_called), the world block's map overlay clear, then its cine pass;
+	// the status page runs none, so under it the radar ages nothing, and a frame that skips
+	// its world runs no HUD pass and no clear
 	// [orig: Game_MainLoop's Game_ProcessMainFrame drain,
 	// then the render's HUD_RenderAllOverlays and cine pass; Render_ProcessMainSceneFrame
 	// @0x5CAD04 (@0x5CACE3 for a chase view from a control seat) -> HUD_RenderAllOverlays,
-	// inside the world block @0x5CA620..0x5CA640 jumps past, then @0x5CADFC ->
-	// Cine_RenderOrEndPlayback, the scene arm @0x521CE8 alone].
+	// inside the world block @0x5CA620..0x5CA640 jumps past, the clear @0x5CAC6D, then
+	// @0x5CADFC -> Cine_RenderOrEndPlayback, the scene arm @0x521CE8 alone].
 	if (!out.terminal() && out.scene_drawn) {
 		if (hud_pass_called(input, out)) step_hud_radar_frame();
+		step_map_overlay_death_clear(out);
 		step_cine_render_frame();
 	}
 	return out;

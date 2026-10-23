@@ -756,6 +756,51 @@ int main() {
 				"world skip: a cine past its last event stops at the head")) return 1;
 	}
 
+	// The world block's map overlay clear: a drawn frame that draws its world closes an open
+	// map for a body with the dead bit. A live body keeps it; a frame that skips its world
+	// and the listen host's status page run no world block, so the updates they run keep it
+	// too, until the next frame that draws the world.
+	// [orig: Render_ProcessMainSceneFrame - the world-skip jump @0x5CA620..0x5CA640,
+	//  `cmp g_MapOverlayMode, 0` @0x5CAC50, `test byte ptr [ecx+24h], 2` @0x5CAC63, the clear
+	//  @0x5CAC6D; GameLoop_RenderFrame's view word @0x521CD6]
+	{
+		auto target = std::make_unique<TickProbe>();
+		target->probe_kind = RoleKind::ListenHost;
+		Session session(*target);
+		if (!load(session)) return 1;
+		opennova::world::World &world = target->kernel.world;
+		world.registry.configure_pool(0, 4);
+		opennova::world::Entity seed;
+		seed.alive = true;
+		seed.health = 100;
+		const opennova::world::EntityHandle local = world.registry.spawn(0, seed);
+		world.cached.local_player = local;
+		opennova::hud::HudMapControl &map = target->kernel.local.hud_map_control;
+		map.mode = 2;
+		opennova::hud::HudToggleState page;
+		page.server_status_view = true;
+		FrameInput frame; // no main-loop clock sample: every frame banks its delta
+		frame.delta_seconds = 0.0;
+		(void)session.advance(frame);
+		if (!expect(map.mode == 2, "map clear: a live body keeps the map")) return 1;
+		world.registry.get(local)->flags |= opennova::world::kEntityFlagDead;
+		frame.command_map_open = true;
+		frame.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		const FrameOutcome skipped = session.advance(frame);
+		if (!expect(skipped.world_skipped && skipped.ticks_run() > 0 && map.mode == 2,
+				"map clear: a frame that skips its world keeps it, its updates too")) return 1;
+		frame.command_map_open = false;
+		frame.hud_toggles = &page;
+		const FrameOutcome paged = session.advance(frame);
+		if (!expect(!paged.scene_drawn && paged.ticks_run() > 0 && map.mode == 2,
+				"map clear: the status page keeps it")) return 1;
+		frame.hud_toggles = nullptr;
+		frame.delta_seconds = 0.0;
+		const FrameOutcome drawn = session.advance(frame);
+		if (!expect(drawn.scene_drawn && !drawn.world_skipped && map.mode == 0,
+				"map clear: the frame that draws the world closes the dead body's map")) return 1;
+	}
+
 	// A paused single-player frame's updates run the legs retail's main frame
 	// runs outside its pause tests: the pending fire-sound slots count down and
 	// play, the incoming-lock tone drains one per update (31 -> 28 over three),
