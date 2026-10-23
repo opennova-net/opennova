@@ -278,6 +278,11 @@ public:
 	// materializer's owned rows; full-BMS joins read the promoted registry row
 	// (spawn-origin gated).
 	world::Entity *replica_world_entity(world::World &world, world::EntityHandle handle);
+	// The world's stance requests an after-receive leg raised, queued at its message's place
+	// among the receive's sends: the receive's `occurrence`-th message of `at`
+	// (ClientRuntime::queue_receive_mount_stance_change).
+	void flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount at,
+			std::size_t occurrence);
 	// The World's pool-1 slot leg (World::pool1_slot_leg, installed by the pump): the
 	// slot's decoded row takes its visit there, then its twin's pose or its twin the
 	// row's, then its proxy's live words (D-NET-196; joiner_role_replica_world.cpp).
@@ -569,9 +574,6 @@ private:
 	// A self S2C 0x50's re-run of Player_InitPlayer(1) on L, then its identity pair
 	// (D-NET-570).
 	void reinit_local_player_on_team_assign();
-	// The world's stance requests an after-receive leg raised, queued at its message's place
-	// among the receive's sends (ClientRuntime::queue_receive_mount_stance_change).
-	void flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount at);
 	// The mission start's Player_InitPlayer on the identity of the L about to spawn
 	// (D-NET-570's pre-spawn half; joiner_role.cpp carries the witness).
 	void stamp_mission_start_identity(world::PlayerSpawn &spawn);

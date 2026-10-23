@@ -57,11 +57,13 @@
 #include "../common/hull_brain.h"
 #include "../common/test_paths.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <utility>
@@ -2239,6 +2241,123 @@ bool run_a_receive_time_mount_request_ships_in_its_frame() {
 //  per message in the packet's order; NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 -
 //  Player_MountWeaponSlot @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30;
 //  NapiNPClientMsg_0x043 @0x42FA90 - CNapiNetwork_QueueReliableMessage(0x08) @0x42FAD3]
+// The tags in `tags` the socket shipped from datagram `from` on, in send order.
+std::vector<uint8_t> sent_tags_since(const CountingSocket &socket, std::size_t from,
+		std::initializer_list<uint8_t> tags) {
+	std::vector<uint8_t> out;
+	for (std::size_t i = from; i < socket.datagrams.size(); ++i) {
+		const std::vector<uint8_t> &dg = socket.datagrams[i];
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!nw_decode_inbound(dg.data(), dg.size(), opcode, body) ||
+				opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
+				!decode_protocol_packet_plaintext(body.data(), body.size(), kClientScrk,
+						header, messages)) continue;
+		for (const ProtocolMessage &m : messages)
+			if (std::find(tags.begin(), tags.end(), m.tag) != tags.end()) out.push_back(m.tag);
+	}
+	return out;
+}
+
+// An S2C 0x35 naming L mounts its pickup inside the receive (L7-s28, V-ROLL-AX F1): the weapon its
+// powerup row names lands in L's table, and the mount request on it, a ForceCrouch def, raises the
+// crouch, whose C2S 0x1D ships in the receive's own frame at the 0x35's place: ahead of a ping's
+// 0x08 behind the 0x35, behind a ping's 0x08 ahead of it.
+// [orig: NapiNPClientMsg_0x035 @0x4261A0 - Player_MountPickedUpWeapon @0x42624C / @0x42625B;
+//  Player_MountPickedUpWeapon @0x4E03D0 - WeaponSlot_InitFromAvatarDef @0x4E0401,
+//  Player_MountWeaponSlot @0x4E040E; Player_MountWeaponSlot @0x4DFA40 - @0x4DFC30;
+//  Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send block
+//  @0x42C3DD; NapiNPClientMsg_0x043 @0x42FA90 - @0x42FAD3]
+bool run_a_pickup_mount_queues_at_the_0x35s_place() {
+	static const char kDefs[] =
+			"ammoclass_max_carry CLASS_PU 1000\r\n"
+			"weapon \"WPN_PU_RIFLE\"\r\n"
+			"\tcategory 3\r\n"
+			"\trank 0\r\n"
+			"\tclipsize 10\r\n"
+			"\tstartrounds 30\r\n"
+			"\tammoclass CLASS_PU 1\r\n"
+			"end\r\n"
+			"weapon \"WPN_PU_MORTAR\"\r\n"
+			"\tcategory 3\r\n"
+			"\trank 1\r\n"
+			"\tclipsize 1\r\n"
+			"\tstartrounds 10\r\n"
+			"\tammoclass CLASS_PU 1\r\n"
+			"\tflags ForceCrouch\r\n"
+			"end\r\n";
+	bool ok = true;
+	for (const bool pickup_first : {true, false}) {
+		def::DefWeaponsFile defs{};
+		if (!expect(def::def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kDefs),
+						sizeof(kDefs) - 1, &defs) == 0,
+					"pickup place: the defs parse"))
+			return false;
+		{
+			Harness h;
+			h.kernel->world.registry.configure_pool(1, 8);
+			h.kernel->world.tables.weapons = w::build_weapon_table(defs);
+			h.kernel->world.tables.weapon_defs = &defs;
+			h.role.poll_preload();
+			h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+			                             /*game_type=*/0x10002u);
+			h.role.run_tick(h.input); // the spawn frame
+			w::Entity *L = h.kernel->local.player();
+			if (!expect(h.role.local_spawned() && L != nullptr, "pickup place: L spawned"))
+				return false;
+			// L holds the rifle (the spawn's select installed it).
+			w::LocalPlayer &lp = h.kernel->local;
+			lp.loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_PU_RIFLE", -1, -1, -1}};
+			w::local_loadout_rebuild(h.kernel->world, lp.loadout, lp.weapon, lp.inventory,
+					lp.inventory_valid, /*select_spawn_default=*/true);
+			if (!expect(lp.weapon.active && lp.weapon.def_name == "WPN_PU_RIFLE",
+						"pickup place: L holds the rifle"))
+				return false;
+			// The powerup row the joiner's own pickup wrote the mortar into (+0x2B0), one of the
+			// mission's rows.
+			w::Entity row;
+			row.kind = w::EntityKind::Item;
+			row.spawn_origin = 0;
+			row.powerup_weapon = static_cast<uint8_t>(
+					h.kernel->world.tables.weapons.index_of("WPN_PU_MORTAR"));
+			const w::EntityHandle row_handle = h.kernel->world.registry.spawn(1, row);
+			WeaponPickupNotice notice;
+			notice.picker_handle = 0x0005;
+			notice.powerup_handle = static_cast<uint16_t>(row_handle.packed);
+			const ProtocolMessage pickup =
+					make_protocol_message(s2c::WEAPON_PICKUP, encode_weapon_pickup(notice));
+			const ProtocolMessage ping =
+					make_protocol_message(s2c::TIME_SYNC_PING, {0x78, 0x56, 0x34, 0x12});
+			SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+			std::vector<uint8_t> packet;
+			frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+					pickup_first ? std::vector<ProtocolMessage>{pickup, ping}
+					             : std::vector<ProtocolMessage>{ping, pickup},
+					packet);
+			auto datagram =
+					nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+			const std::size_t from = h.socket.datagrams.size();
+			h.role.runtime->receive(datagram.data(), datagram.size());
+			h.role.run_tick(h.input);
+			ok &= expect(lp.inventory.pending_combo == 3 * 65 + 1,
+					"pickup place: the pickup's slot is the pending one");
+			const std::vector<uint8_t> order = sent_tags_since(h.socket, from,
+					{0x1D, c2s::TIME_SYNC_REPLY});
+			const std::vector<uint8_t> expected = pickup_first
+					? std::vector<uint8_t>{0x1D, c2s::TIME_SYNC_REPLY}
+					: std::vector<uint8_t>{c2s::TIME_SYNC_REPLY, 0x1D};
+			ok &= expect(order == expected, pickup_first
+					? "pickup place: the pickup's 0x1D in its frame, ahead of the ping's reply"
+					: "pickup place: the ping's reply ahead of the pickup's 0x1D, in one frame");
+		}
+		def::def_free_weapons(&defs);
+	}
+	return ok;
+}
+
 // A self S2C 0x50's Player_InitPlayer(1) re-run walks on L in play and mounts (D-WPN-21's
 // team-assign half): its kit's rifle selected, the walk rank-cycles category 3 onto the next
 // rank, a ForceCrouch def, whose mount request raises the crouch. That C2S 0x1D queues at the
@@ -2320,20 +2439,8 @@ bool run_a_team_assign_walk_mount_queues_at_the_0x50s_place() {
 			ok &= expect(h.kernel->local.inventory.current_slot == 3 * 65 + 1,
 					"team-assign walk: the cycle stored rank 1's word");
 			// The tick's 0x1D and 0x08, in send order.
-			std::vector<uint8_t> order;
-			for (std::size_t i = from; i < h.socket.datagrams.size(); ++i) {
-				const std::vector<uint8_t> &dg = h.socket.datagrams[i];
-				uint8_t opcode = 0;
-				std::vector<uint8_t> body;
-				ProtocolPacketHeader header;
-				std::vector<ProtocolMessage> messages;
-				if (!nw_decode_inbound(dg.data(), dg.size(), opcode, body) ||
-						opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
-						!decode_protocol_packet_plaintext(body.data(), body.size(), kClientScrk,
-								header, messages)) continue;
-				for (const ProtocolMessage &m : messages)
-					if (m.tag == 0x1D || m.tag == c2s::TIME_SYNC_REPLY) order.push_back(m.tag);
-			}
+			const std::vector<uint8_t> order = sent_tags_since(h.socket, from,
+					{0x1D, c2s::TIME_SYNC_REPLY});
 			const std::vector<uint8_t> expected = team_first
 					? std::vector<uint8_t>{0x1D, c2s::TIME_SYNC_REPLY}
 					: std::vector<uint8_t>{c2s::TIME_SYNC_REPLY, 0x1D};
@@ -2374,22 +2481,8 @@ bool run_a_self_team_assign_resubmits_ahead_of_its_pair() {
 	const std::size_t from = h.socket.datagrams.size();
 	h.role.runtime->receive(datagram.data(), datagram.size());
 	h.role.run_tick(h.input);
-	std::vector<uint8_t> order;
-	for (std::size_t i = from; i < h.socket.datagrams.size(); ++i) {
-		const std::vector<uint8_t> &dg = h.socket.datagrams[i];
-		uint8_t opcode = 0;
-		std::vector<uint8_t> body;
-		ProtocolPacketHeader header;
-		std::vector<ProtocolMessage> messages;
-		if (!nw_decode_inbound(dg.data(), dg.size(), opcode, body) ||
-				opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
-				!decode_protocol_packet_plaintext(body.data(), body.size(), kClientScrk,
-						header, messages)) continue;
-		for (const ProtocolMessage &m : messages)
-			if (m.tag == 0x2F || m.tag == c2s::PLAYER_SYNC_REQUEST ||
-					m.tag == c2s::VISIBLE_PLAYERS_REQUEST)
-				order.push_back(m.tag);
-	}
+	const std::vector<uint8_t> order = sent_tags_since(h.socket, from,
+			{0x2F, c2s::PLAYER_SYNC_REQUEST, c2s::VISIBLE_PLAYERS_REQUEST});
 	const std::vector<uint8_t> expected{0x2F, c2s::PLAYER_SYNC_REQUEST,
 			c2s::VISIBLE_PLAYERS_REQUEST};
 	return expect(order == expected, "self 0x50 order: the 0x2F, then the 0x22 / 0x23 pair");
@@ -2431,20 +2524,8 @@ bool run_a_grant_mount_request_queues_at_the_grants_place() {
 		h.role.runtime->receive(datagram.data(), datagram.size());
 		h.role.run_tick(h.input);
 		// The tick's 0x1D and 0x08, in send order.
-		std::vector<uint8_t> order;
-		for (std::size_t i = from; i < h.socket.datagrams.size(); ++i) {
-			const std::vector<uint8_t> &dg = h.socket.datagrams[i];
-			uint8_t opcode = 0;
-			std::vector<uint8_t> body;
-			ProtocolPacketHeader header;
-			std::vector<ProtocolMessage> messages;
-			if (!nw_decode_inbound(dg.data(), dg.size(), opcode, body) ||
-					opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
-					!decode_protocol_packet_plaintext(body.data(), body.size(), kClientScrk,
-							header, messages)) continue;
-			for (const ProtocolMessage &m : messages)
-				if (m.tag == 0x1D || m.tag == c2s::TIME_SYNC_REPLY) order.push_back(m.tag);
-		}
+		const std::vector<uint8_t> order = sent_tags_since(h.socket, from,
+				{0x1D, c2s::TIME_SYNC_REPLY});
 		const std::vector<uint8_t> expected = grant_first
 				? std::vector<uint8_t>{0x1D, c2s::TIME_SYNC_REPLY}
 				: std::vector<uint8_t>{c2s::TIME_SYNC_REPLY, 0x1D};
@@ -4941,6 +5022,7 @@ int main() {
 	ok &= run_a_grant_mount_request_queues_at_the_grants_place();
 	ok &= run_a_team_assign_walk_mount_queues_at_the_0x50s_place();
 	ok &= run_a_self_team_assign_resubmits_ahead_of_its_pair();
+	ok &= run_a_pickup_mount_queues_at_the_0x35s_place();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();

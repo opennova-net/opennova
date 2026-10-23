@@ -598,6 +598,7 @@ public:
 	// S2C 0x35 powerup weapon grants, in receive order; the joiner role
 	// applies the ones naming its own player (inmatch/joiner_role.cpp).
 	std::vector<WeaponPickupNotice> drain_weapon_pickups();
+	std::size_t pending_weapon_pickup_count() const { return pending_weapon_pickups_.size(); }
 	std::vector<ClientEffectCommand> drain_effect_commands();
 	void post_chat_line(ClientChatLine line) {
 		line.feed_order = next_feed_order_++;

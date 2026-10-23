@@ -565,13 +565,14 @@ bool JoinerRole::queue_stance_change(uint16_t action_id) {
 	return runtime && runtime->queue_stance_change(action_id);
 }
 
-void JoinerRole::flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount at) {
+void JoinerRole::flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount at,
+		std::size_t occurrence) {
 	// [orig: Player_MountWeaponSlot @0x4DFA40 - CNapiNetwork_QueueReliableMessage(0x1D)
 	//  @0x4DFC30, inside its message's handler; ClientRuntime carries the order]
 	if (kernel_ == nullptr) return;
 	std::vector<uint16_t> &requests = kernel_->world.out.stance_requests;
 	for (const uint16_t action_id : requests)
-		if (runtime) (void)runtime->queue_receive_mount_stance_change(at, action_id);
+		if (runtime) (void)runtime->queue_receive_mount_stance_change(at, occurrence, action_id);
 	requests.clear();
 }
 
@@ -1826,7 +1827,13 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		// (ClientRuntime::queue_receive_mount_stance_change).
 		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
 		//  @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30]
-		flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kWeaponLoadout);
+		{
+			// The apply takes the receive's last grant (ClientRuntime::authoritative_loadout).
+			const std::size_t grants =
+					rt.receive_mount_count(ClientRuntime::ReceiveMount::kWeaponLoadout);
+			flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kWeaponLoadout,
+					grants == 0 ? 0 : grants - 1);
+		}
 		// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
 		// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
 		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
@@ -1898,7 +1905,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 				// place, past the handler's own sends [orig: NapiNPClientMsg_TeamAssign @0x431910
 				//  - the 0x2F @0x431A9E, the 0x22 / 0x23 @0x431AE4 / @0x431B05,
 				//  Player_InitPlayer(1) @0x431B14].
-				flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kSelfTeamAssign);
+				flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kSelfTeamAssign, 0);
 			}
 		}
 		const uint64_t deployment_release_revision =
@@ -1924,6 +1931,12 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		rebuild_local_from_full_spawn();
 		fold_local_record();
 		apply_world_state_load();
+		// Each S2C 0x35 for L mounts its pickup inside the receive, its 0x1D at its place, so
+		// this frame's send block frames it (apply_weapon_pickups) [orig: NapiNPClientMsg_0x035
+		//  @0x4261A0 - Player_MountPickedUpWeapon @0x42624C / @0x42625B -> Player_MountWeaponSlot
+		//  @0x4E040E; Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the
+		//  send block @0x42C3DD].
+		apply_weapon_pickups(*this, rt, world, lp);
 		// The receive's mount requests (the 0x5A apply's queued at its place above) queue their
 		// C2S 0x1D in the receive, as the handler's own call does, so this frame's send block
 		// frames them, not the next one's.

@@ -187,13 +187,17 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
 
 void apply_weapon_pickups(JoinerRole &role, ClientRuntime &rt, world::World &world,
         world::LocalPlayer &lp) {
-    for (const WeaponPickupNotice &notice : rt.drain_weapon_pickups()) {
+    const std::vector<WeaponPickupNotice> notices = rt.drain_weapon_pickups();
+    for (std::size_t i = 0; i < notices.size(); ++i) {
+        const WeaponPickupNotice &notice = notices[i];
         // Only the picker's own client acts [orig: Player_MountPickedUpWeapon @0x4E03DC]
         if (!rt.has_self_handle() || notice.picker_handle != rt.self_handle()) continue;
         world::EntityHandle row_handle;
         row_handle.packed = notice.powerup_handle;
         world::powerup_weapon_grant_received(world, lp,
                 role.replica_world_entity(world, row_handle), rt.local_player_dead());
+        // Its mount's 0x1D at its 0x35's place [orig: Player_MountWeaponSlot @0x4E040E].
+        role.flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kWeaponPickup, i);
     }
 }
 } // namespace opennova::inmatch

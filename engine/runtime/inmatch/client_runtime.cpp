@@ -804,24 +804,43 @@ bool ClientRuntime::queue_stance_change(uint16_t action_id) {
 	return true;
 }
 
-bool ClientRuntime::queue_receive_mount_stance_change(ReceiveMount at, uint16_t action_id) {
+bool ClientRuntime::queue_receive_mount_stance_change(ReceiveMount at, std::size_t occurrence,
+		uint16_t action_id) {
 	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296F4);
-	//  NapiNPClientMsg_TeamAssign @0x431910 (@0x431B14); the declaration carries the order]
+	//  NapiNPClientMsg_TeamAssign @0x431910 (@0x431B14); NapiNPClientMsg_0x035 @0x4261A0
+	//  (@0x42624C / @0x42625B); the declaration carries the order]
 	const std::size_t end = send_queue_.size();
 	if (!queue_stance_change(action_id)) return false;
-	ReceiveSendMark &mark = receive_send_marks_[static_cast<std::size_t>(at)];
-	if (mark.position == ReceiveSendMark::kNone) return true;
-	const std::size_t position = mark.position;
+	ReceiveSendMark *mark = nullptr;
+	for (ReceiveSendMark &m : receive_send_marks_)
+		if (m.at == at && m.occurrence == occurrence) mark = &m;
+	if (mark == nullptr) return true;
+	const std::size_t position = mark->position;
 	std::rotate(send_queue_.begin() + static_cast<std::ptrdiff_t>(position),
 			send_queue_.begin() + static_cast<std::ptrdiff_t>(end), send_queue_.end());
 	// The insert moves every send behind it, a later message's mark at the same place too.
 	for (ReceiveSendMark &other : receive_send_marks_)
-		if (&other != &mark && other.position != ReceiveSendMark::kNone &&
-				(other.position > position ||
-						(other.position == position && other.entry > mark.entry)))
+		if (&other != mark && (other.position > position ||
+				(other.position == position && other.entry > mark->entry)))
 			++other.position;
-	++mark.position;
+	++mark->position;
 	return true;
+}
+
+std::size_t ClientRuntime::receive_mount_count(ReceiveMount at) const {
+	std::size_t n = 0;
+	for (const ReceiveSendMark &m : receive_send_marks_)
+		if (m.at == at) ++n;
+	return n;
+}
+
+void ClientRuntime::mark_receive_mount(ReceiveMount at, std::size_t entry) {
+	ReceiveSendMark mark;
+	mark.at = at;
+	mark.occurrence = receive_mount_count(at);
+	mark.position = send_queue_.size();
+	mark.entry = entry;
+	receive_send_marks_.push_back(mark);
 }
 
 bool ClientRuntime::queue_door_request(uint16_t handle, int16_t state, uint8_t section) {
@@ -1195,7 +1214,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	std::vector<std::vector<uint8_t>> outbound;
 	receive_sends_logged_ = 0;
 	receive_leave_logged_ = false;
-	receive_send_marks_ = {};
+	receive_send_marks_.clear();
 	frame_trace_ = JoinerNetTraceRecord{}; // the joiner net readout's record (an instrument)
 	// Session loss is a terminal owner state, not only a receive-side event. A
 	// prior host description (or the silence reap below) must stop the next frame
@@ -1530,6 +1549,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				// so a 0x53 measures from the local Position the handlers before it left
 				// (D-NET-687) [orig: NapiNPClientMsg_ZoneTimerWindow @0x428ae0 - the
 				// Position reads @0x428C19..0x428CB1].
+				const std::size_t pickups_before = view_.pending_weapon_pickup_count();
 				if (!apply_zone_timer_body(tb.first, tb.second)) view_.apply(tb.first, tb.second);
 				// The local entity's Health as the 0x0A leaves it: the recipient tail's store
 				// comes first, then the record loop, where a record naming the local entity
@@ -1632,18 +1652,22 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 					queue_replies_after(entries_folded + 1);
 				queue_fold_requests();
 				queue_replies_after(++entries_folded);
-				// The 0x5A's handler mounts last, past its own sends, and a self 0x50's runs
-				// Player_InitPlayer(1), whose walk can mount, past its: the after-receive legs'
-				// 0x1D joins the queue here (queue_receive_mount_stance_change) [orig:
+				// The 0x5A's handler mounts last, past its own sends, a self 0x50's runs
+				// Player_InitPlayer(1), whose walk can mount, past its, and a 0x35's mounts its
+				// pickup: the after-receive legs' 0x1D joins the queue here
+				// (queue_receive_mount_stance_change) [orig:
 				// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
 				// @0x4296F4; NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1)
 				// @0x431B14].
 				if (tb.first == s2c::WEAPON_LOADOUT)
-					receive_send_marks_[static_cast<std::size_t>(ReceiveMount::kWeaponLoadout)] =
-							{send_queue_.size(), entries_folded};
+					mark_receive_mount(ReceiveMount::kWeaponLoadout, entries_folded);
 				if (pr.local_resubmit && entries_folded == pr.local_resubmit_entries)
-					receive_send_marks_[static_cast<std::size_t>(ReceiveMount::kSelfTeamAssign)] =
-							{send_queue_.size(), entries_folded};
+					mark_receive_mount(ReceiveMount::kSelfTeamAssign, entries_folded);
+				// A 0x35 the fold took (a well-formed body) mounts its pickup at its place
+				// [orig: NapiNPClientMsg_0x035 @0x4261A0 - Player_MountPickedUpWeapon
+				//  @0x42624C / @0x42625B].
+				if (view_.pending_weapon_pickup_count() > pickups_before)
+					mark_receive_mount(ReceiveMount::kWeaponPickup, entries_folded);
 			}
 			queue_fold_requests();
 			queue_replies_after(pr.inbound_reducer.size());
@@ -1753,7 +1777,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the
 	//  0x4C timer @0x42C23E and the send block @0x42C3DD]
 	if (after_receive != nullptr && *after_receive) (*after_receive)();
-	receive_send_marks_ = {};
+	receive_send_marks_.clear();
 	// The stats board splits the maintenance lap (an instrument): the receive-handler writes
 	// above, the timers below, then the movers.
 	lap.mark(devtools::Slot::SIM_CLIENT_AFTER_RECEIVE);
