@@ -205,7 +205,8 @@ public:
     // Clears the claim and emits vehicle_control_stopped iff `occupant` IS the claimant —
     // a second control-seat occupant staying aboard does NOT keep the engine running.
     // [orig: Entity_DetachFromVehicle @0x4355f0 — `occupantEntity == entity` gate @0x4356e9,
-    // emitter release + engine-stop sound @0x435716..0x435759, +368 clear @0x43577c]
+    // emitter release + engine-stop sound @0x435716..0x435759, +368 clear @0x43577c; the
+    // local claimant's EquippedSlot phase = 64 @0x43578C..0x435794]
     bool release_primary_occupant(Entity &vehicle, EntityHandle occupant);
     // A joiner's decoded remote organics live outside the native pools; the joiner
     // binds itself here so the +368 readers still see a remote claimant. Null on the

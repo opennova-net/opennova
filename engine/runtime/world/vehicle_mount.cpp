@@ -118,6 +118,21 @@ bool VehicleSystem::release_primary_occupant(Entity &vehicle, EntityHandle occup
             traits != nullptr && traits->player_control)
         detail::vehicle_smoke_effect(world, vehicle, /*release=*/true);
     vehicle.primary_occupant = EntityHandle{};
+    // The local claimant's EquippedSlot takes the held-ready phase (0x40) once the word
+    // clears, after the detach's own mount queued its switch back on that slot: the pump's
+    // next transition there takes the held variant (the phase re-stamped 0x40 past the
+    // entered handler), and the handler after it consumes the byte at the begin-active shim
+    // (ACTIVE, the clip played again, no begin leg). The slot is whichever the walk pumps:
+    // a borrowed gun's or carrier's, else the personal one (a Driver's, an unarmed
+    // Controller's). With no EquippedSlot retail's write would fault; ours writes nothing.
+    // [orig: Entity_DetachFromVehicle @0x4355F0 - the word's clear @0x43577C,
+    //  g_LocalPlayerEntity == entity @0x43578C, EquippedSlot->phase = 64 @0x435794;
+    //  WeaponAction_ProcessFrame @0x540E60 (the held variant @0x541453..0x54148E);
+    //  ActionSlot_BeginActivePhase @0x53F830 (@0x53F88B..0x53F8B0)]
+    if (occupant == world.cached.local_player && world.local_player_state != nullptr) {
+        LocalPlayerWeapon &w = world.local_player_state->weapon;
+        if (w.active) active_local_weapon_slot(world, w)->phase = weapon_phase::kHeld;
+    }
     world.vehicles.emit_control_stopped(vehicle);
     return true;
 }

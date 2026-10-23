@@ -780,6 +780,99 @@ void test_the_mount_request_clears_the_view_bias_and_the_commit_does_not() {
 	CHECK(rig->view().view_bias.position_q16[2] < 0);
 }
 
+// --- the claimant's held-ready EquippedSlot (L7-s26 row 1) ------------------------------
+
+// A PlayerControl carrier with a drvrx seat (bone 3, slot 8) and a sitex seat (bone 4,
+// slot 0).
+EntityHandle spawn_car(World &world, float x) {
+	Entity v;
+	v.kind = EntityKind::Item;
+	v.has_item_def = true;
+	v.has_graphic_model = true;
+	v.item_attrib = kItemAttribPlayerControl;
+	v.health = v.health_max = 2000;
+	v.alive = true;
+	v.position = {x, -6.0f, 0.0f};
+	Seat driver;
+	driver.type = SeatType::Driver;
+	driver.bone_index = 3;
+	driver.retail_slot = 8;
+	driver.source_name = "drvrx00";
+	v.seats.push_back(driver);
+	Seat passenger;
+	passenger.type = SeatType::Passenger;
+	passenger.bone_index = 4;
+	passenger.retail_slot = 0;
+	passenger.source_name = "sitex00";
+	v.seats.push_back(passenger);
+	return world.registry.spawn(1, v);
+}
+
+// The detach clears the carrier's occupant word and, for the local player who held it,
+// stamps the EquippedSlot's phase 64 after the detach's own mount. A UseGun seat's is the
+// gun's slot, whose queued switch back the pump then enters by the held variant (the phase
+// re-stamped 64 past the entered handler); the handler after it consumes the byte at the
+// begin-active shim (ACTIVE), and the switch back runs out and commits the rifle. A Driver's
+// is the personal slot (no mount); a passenger held no word and its slot keeps its phase.
+// [orig: Entity_DetachFromVehicle @0x4355F0 (the mount @0x43565F, the word's clear
+//  @0x43577C, the local test @0x43578C, EquippedSlot->phase = 64 @0x435794);
+//  WeaponAction_ProcessFrame @0x540E60 (the held variant @0x541453..0x54148E);
+//  ActionSlot_BeginActivePhase @0x53F830 (@0x53F88B..0x53F891)]
+void test_a_claimants_detach_holds_its_equipped_slot_ready() {
+	{
+		const auto rig = std::make_unique<Rig>(rifle_kit());
+		World &world = rig->world;
+		LocalPlayerWeapon &w = rig->weapon();
+		give_body_an_ai(world);
+		const EntityHandle gun = spawn_gun(world, "WPN_GUN_N", 4.0f);
+		rig->tick();
+		seat_and_settle(*rig, gun);
+		CHECK(world.registry.get(gun)->primary_occupant == world.cached.local_player);
+		WeaponSlotState &slot = gun_slot(world, gun);
+		CHECK(slot.phase != weapon_phase::kHeld);
+		CHECK(world.vehicles.detach(world.cached.local_player));
+		CHECK(!world.registry.get(gun)->primary_occupant.valid());
+		CHECK(slot.next == weapon_action::kSwitchFrom && slot.current == weapon_action::kIdle);
+		CHECK(slot.phase == weapon_phase::kHeld);
+		CHECK(w.usegun_slot_active && w.usegun_switch == LocalUseGunSwitch::kDetach);
+		rig->tick(); // the held variant enters SWITCHFROM and stamps 64 again
+		CHECK(slot.current == weapon_action::kSwitchFrom && slot.phase == weapon_phase::kHeld);
+		rig->tick(); // the begin-active shim consumes it
+		CHECK(slot.current == weapon_action::kSwitchFrom && slot.phase == weapon_phase::kActive);
+		int committed = -1;
+		for (int t = 1; t <= 60 && committed < 0; ++t) {
+			rig->tick();
+			if (!w.usegun_slot_active) committed = t;
+		}
+		CHECK(committed >= 1);
+		CHECK(rig->inventory().equipped_combo == kRifle);
+		CHECK(rig->adm_byte() == rig->adm("WPN_RIFLE"));
+	}
+	for (const SeatType seat : {SeatType::Driver, SeatType::Passenger}) {
+		const auto rig = std::make_unique<Rig>(rifle_kit());
+		World &world = rig->world;
+		LocalPlayerWeapon &w = rig->weapon();
+		give_body_an_ai(world);
+		const EntityHandle car = spawn_car(world, 4.0f);
+		rig->tick();
+		rig->settle();
+		const int seat_index = seat == SeatType::Driver ? 0 : 1;
+		CHECK(world.vehicles.attach_to_seat(world.cached.local_player, {car, seat_index, seat}));
+		CHECK((world.registry.get(car)->primary_occupant == world.cached.local_player) ==
+				(seat == SeatType::Driver));
+		for (int t = 0; t < 3; ++t) rig->tick();
+		const uint8_t before = w.slot.phase;
+		CHECK(before != weapon_phase::kHeld);
+		CHECK(world.vehicles.detach(world.cached.local_player));
+		CHECK(!w.usegun_slot_active && w.usegun_switch == LocalUseGunSwitch::kNone);
+		if (seat == SeatType::Driver) {
+			CHECK(w.slot.phase == weapon_phase::kHeld);
+		} else {
+			CHECK(w.slot.phase == before);
+		}
+	}
+}
+
 } // namespace
 
 int main() {
@@ -796,6 +889,7 @@ int main() {
 	test_a_gun_to_gun_move_inside_the_lower_commits_at_the_switchfrom();
 	test_the_last_interp_step_publishes_the_view_bias();
 	test_the_mount_request_clears_the_view_bias_and_the_commit_does_not();
+	test_a_claimants_detach_holds_its_equipped_slot_ready();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
