@@ -9,7 +9,10 @@ extends Node
 ## after the S2C 0x0F included); unix_ms lines it up with the capture. The open dev tools
 ## own the board: no drain while they are up. Beside it, a PipelineCompiles line names each
 ## frame whose read found pipelines compiled since the previous read (Godot's, by source, and
-## our RenderingDevice GLSL compiles): the frames that pay a first draw's compiles.
+## our RenderingDevice GLSL compiles): the frames that pay a first draw's compiles. While the
+## world times its first frames past a load (GameWorld.is_post_load_frames_open: a joiner's run
+## on to its first C2S 0x0C), every window under SLOW_FRAME_US prints too, as a PostLoadFrame
+## line: the S2C 0x0F's first-send window, frame by frame.
 
 const SLOW_FRAME_US := 100_000
 const TOP_SLOTS := 10
@@ -17,9 +20,12 @@ const MIN_SLOT_US := 1_000
 ## Godot's pipeline compilation sources (RenderingServer.get_rendering_info), in compile_totals'
 ## order; our RenderingDevice GLSL compiles (count, microseconds) follow them.
 const PIPELINE_SOURCES: Array[String] = ["canvas", "mesh", "surface", "draw", "specialization"]
+## The label of a post-load frame's line under SLOW_FRAME_US.
+const POST_LOAD_LABEL := "PostLoadFrame"
 
 var _board: FrameStats = null
 var _tools_open := Callable()
+var _post_load_open := Callable()
 var _time_slots := PackedInt32Array()
 var _compile_totals := PackedInt64Array()
 
@@ -30,10 +36,12 @@ func _init() -> void:
 	process_priority = 2_147_483_647
 
 
-## `tools_open` answers whether the dev tools are up (they drain the board then).
-func setup(board: FrameStats, tools_open: Callable) -> void:
+## `tools_open` answers whether the dev tools are up (they drain the board then);
+## `post_load_open` whether the world still times its first frames past a load.
+func setup(board: FrameStats, tools_open: Callable, post_load_open := Callable()) -> void:
 	_board = board
 	_tools_open = tools_open
+	_post_load_open = post_load_open
 	_time_slots = time_slots()
 
 
@@ -45,7 +53,10 @@ func _process(_delta: float) -> void:
 		return
 	var frame := Engine.get_process_frames()
 	var unix_ms := int(Time.get_unix_time_from_system() * 1000.0)
-	var line := report_line(_board.drain(), _time_slots, frame, unix_ms)
+	var window := _board.drain()
+	var line := report_line(window, _time_slots, frame, unix_ms)
+	if line.is_empty() and _post_load_open.is_valid() and bool(_post_load_open.call()):
+		line = report_line(window, _time_slots, frame, unix_ms, 0, POST_LOAD_LABEL)
 	if not line.is_empty():
 		print_verbose(line)
 	# The pipelines compiled since the last frame's read (the previous frame's draw, this
@@ -102,19 +113,19 @@ static func compile_line(previous: PackedInt64Array, current: PackedInt64Array, 
 	return "PipelineCompiles: frame=%d unix_ms=%d: %s" % [frame, unix_ms, ", ".join(parts)]
 
 
-## One window's line, or "" when its FRAME_WALL sum stays under SLOW_FRAME_US: the wall,
-## the render frames the window spans, then up to TOP_SLOTS of `slots` at MIN_SLOT_US or
+## One window's line, or "" when its FRAME_WALL sum stays under `min_wall_us`: the label, the
+## wall, the render frames the window spans, then up to TOP_SLOTS of `slots` at MIN_SLOT_US or
 ## more, largest first, in milliseconds. Slots nest (a GameWorld leg sits inside
 ## frame_world), so the parts do not sum to the wall.
 static func report_line(window: FrameStatsWindow, slots: PackedInt32Array, frame: int,
-		unix_ms: int) -> String:
+		unix_ms: int, min_wall_us: int = SLOW_FRAME_US, label: String = "SlowFrame") -> String:
 	if window == null:
 		return ""
 	var sums := window.sums
 	if sums.size() <= FrameStats.FRAME_WALL:
 		return ""
 	var wall := sums[FrameStats.FRAME_WALL]
-	if wall < SLOW_FRAME_US:
+	if wall < min_wall_us:
 		return ""
 	var ranked: Array[Vector2i] = []
 	for slot in slots:
@@ -125,5 +136,5 @@ static func report_line(window: FrameStatsWindow, slots: PackedInt32Array, frame
 	var parts := PackedStringArray()
 	for i in mini(TOP_SLOTS, ranked.size()):
 		parts.append("%s %d" % [FrameStats.slot_name(ranked[i].y).to_lower(), ranked[i].x / 1000])
-	return "SlowFrame: frame=%d unix_ms=%d wall %d ms over %d frame(s): %s" % [
-		frame, unix_ms, wall / 1000, window.frames, ", ".join(parts)]
+	return "%s: frame=%d unix_ms=%d wall %d ms over %d frame(s): %s" % [
+		label, frame, unix_ms, wall / 1000, window.frames, ", ".join(parts)]

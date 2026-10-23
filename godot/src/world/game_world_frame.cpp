@@ -11,6 +11,7 @@
 #include <runtime/renderer/scene_overlay.h>
 #include <runtime/renderer/scene_pass_gates.h>
 #include <runtime/environment/water_mirror.h>
+#include <runtime/inmatch/joiner_net_trace.h> // the post-load frames' net-pass marks
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame clock)
 
 #include <godot_cpp/classes/engine.hpp>
@@ -408,6 +409,7 @@ void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext 
 				post_load->span(vformat("updates_%d", r_ctx.outcome->get_ticks_run()));
 				post_load->end_span();
 			}
+			if (leg.run == &GameWorld::leg_session) mark_post_load_net_passes(*post_load);
 		}
 		if (result == kLegStop && (leg.flags & kStopsFrame) != 0) {
 			return;
@@ -439,34 +441,73 @@ Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 	ctx.input = input;
 	// One of the first frames past a mission load: a span of the post-load timeline, its legs
 	// nested (an instrument). The load's end opened it (begin_post_load_frames).
-	const Ref<LoadTimeline> post_load =
-			post_load_frames_left_ > 0 ? post_load_frames_ : Ref<LoadTimeline>();
+	const Ref<LoadTimeline> post_load = post_load_open_ ? post_load_frames_ : Ref<LoadTimeline>();
 	if (post_load.is_valid()) {
-		const String frame_label = vformat("frame_%d", kPostLoadFrames - post_load_frames_left_ + 1);
+		const String frame_label = vformat("frame_%d", post_load_frame_count_ + 1);
 		print_post_load_counts(frame_label);
 		post_load->span(frame_label);
 		ctx.post_load_frame = post_load.ptr();
 	}
 	run_leg_table(kFrameLegs, kFrameLegCount, ctx, true);
 	// An unload inside the frame printed it already (end_post_load_frames).
-	if (post_load.is_valid() && post_load_frames_left_ > 0) {
+	if (post_load.is_valid() && post_load_open_) {
 		post_load->end_span();
-		if (--post_load_frames_left_ == 0) post_load->finish();
+		++post_load_frame_count_;
+		const Ref<Simulation> sim = get_sim();
+		const bool awaits_uplink = sim.is_valid() && sim->is_joiner() && !post_load_uplink_seen_;
+		if (!post_load_frames_continue(post_load_frame_count_, awaits_uplink)) {
+			post_load_open_ = false;
+			post_load->finish();
+		}
 	}
 	return ctx.outcome;
+}
+
+bool GameWorld::post_load_frames_continue(int p_frames_timed, bool p_awaits_uplink) {
+	if (p_frames_timed < kPostLoadFrames) return true;
+	return p_awaits_uplink && p_frames_timed < kPostLoadFramesMax;
+}
+
+void GameWorld::mark_post_load_net_passes(LoadTimeline &r_frames) {
+	// Each client net pass the frame's updates ran, in order: the loop it ran in (the S2C 0x0F's
+	// is the final wait's), the send countdown ahead of its step, whether its send block opened and
+	// whether a C2S 0x0C left in it (engine inmatch/joiner_net_trace.h carries the witness). The
+	// first 0x0C a game-loop pass sends ends a joiner's wait for its first uplink.
+	const Ref<Simulation> sim = get_sim();
+	const opennova::inmatch::JoinerNetTrace *trace = sim.is_valid() ? sim->joiner_net_trace() : nullptr;
+	if (trace == nullptr) return;
+	for (const opennova::inmatch::JoinerNetTraceRecord &record : trace->since(post_load_trace_seq_)) {
+		String name = vformat("%s_cd%d", opennova::inmatch::send_pump_loop_name(record.pump_loop),
+				static_cast<int>(record.countdown_before));
+		if (record.block_open) name += "_open";
+		if (record.uplink_sent) {
+			name += "_0c";
+			if (record.pump_loop == opennova::inmatch::JoinerConnection::SendPumpLoop::NetworkFrame)
+				post_load_uplink_seen_ = true;
+		}
+		r_frames.span(name);
+		r_frames.end_span();
+	}
+	post_load_trace_seq_ = trace->next_seq();
 }
 
 void GameWorld::begin_post_load_frames(const String &p_bms_name) {
 	end_post_load_frames();
 	post_load_frames_ = LoadTimeline::begin(vformat("Post-load frames %s", p_bms_name));
-	post_load_frames_left_ = kPostLoadFrames;
+	post_load_open_ = true;
+	post_load_frame_count_ = 0;
+	post_load_uplink_seen_ = false;
+	// The net passes the load ran are not the timeline's.
+	const Ref<Simulation> sim = get_sim();
+	const opennova::inmatch::JoinerNetTrace *trace = sim.is_valid() ? sim->joiner_net_trace() : nullptr;
+	post_load_trace_seq_ = trace != nullptr ? trace->next_seq() : 0;
 	print_post_load_counts("load_end");
 }
 
 void GameWorld::end_post_load_frames() {
 	// The timeline prints once, at its last frame or at an unload ahead of it.
-	if (post_load_frames_left_ > 0 && post_load_frames_.is_valid()) post_load_frames_->finish();
-	post_load_frames_left_ = 0;
+	if (post_load_open_ && post_load_frames_.is_valid()) post_load_frames_->finish();
+	post_load_open_ = false;
 }
 
 void GameWorld::on_frame_post_draw() {

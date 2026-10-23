@@ -69,6 +69,7 @@ struct ScriptDebugReport;
 } // namespace opennova::mission
 namespace opennova::inmatch {
 struct NetDebugReport;
+class JoinerNetTrace;
 } // namespace opennova::inmatch
 
 namespace godot {
@@ -926,6 +927,9 @@ public:
 	// the seq the next record takes.
 	TypedArray<JoinerNetTraceRow> debug_joiner_net_trace(int64_t p_from_seq) const;
 	int64_t debug_joiner_net_trace_next_seq() const;
+	// The same readout for a C++ embedder (the post-load frame timeline's net-pass marks, an
+	// instrument): null without a runtime.
+	const opennova::inmatch::JoinerNetTrace *joiner_net_trace() const;
 	// The joiner's load at the S2C 0x11 (engine: inmatch/joiner_connection.h
 	// set_sync_tail_loading): the shell declares it while the 0x11 is awaited and clears it
 	// once the load has ended; the 0x0A follows.

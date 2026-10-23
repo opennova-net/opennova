@@ -1007,6 +1007,10 @@ int64_t Simulation::debug_joiner_net_trace_next_seq() const {
 	return runtime_ != nullptr ? static_cast<int64_t>(runtime_->net_trace().next_seq()) : 0;
 }
 
+const opennova::inmatch::JoinerNetTrace *Simulation::joiner_net_trace() const {
+	return runtime_ != nullptr ? &runtime_->net_trace() : nullptr;
+}
+
 PackedStringArray Simulation::get_mission_start_model_files() const {
 	PackedStringArray files;
 	for (const std::string &file : net_.mission_start_model_files) {

@@ -48,3 +48,24 @@ func test_the_compile_line_names_what_compiled_since_the_last_read() -> void:
 			"a read with nothing compiled prints nothing")
 	assert_eq(SlowFrameReport.compile_line(PackedInt64Array(), after, 1, 0), "",
 			"a first read prints nothing")
+
+
+# The post-load frames' line: a window under SLOW_FRAME_US prints with the floor at 0 and the
+# PostLoadFrame label, its slots as a slow window's.
+func test_a_post_load_window_prints_under_the_threshold_with_its_label() -> void:
+	var window := _drained([[FrameStats.FRAME_WALL, 31_000], [FrameStats.FRAME_DRAW, 12_000]])
+	var line := SlowFrameReport.report_line(window, SlowFrameReport.time_slots(), 5, 2000, 0,
+			SlowFrameReport.POST_LOAD_LABEL)
+	assert_true(line.begins_with("PostLoadFrame: frame=5 unix_ms=2000 wall 31 ms over "), line)
+	assert_gt(line.find(FrameStats.slot_name(FrameStats.FRAME_DRAW).to_lower() + " 12"), 0, line)
+
+
+# GameWorld.post_load_frames_continue: the first eight frames always; past them only while a
+# joiner awaits its first C2S 0x0C past the final wait, and never past the cap.
+func test_the_post_load_frames_run_on_to_a_joiners_first_uplink() -> void:
+	assert_true(GameWorld.post_load_frames_continue(7, false), "the first eight frames always")
+	assert_false(GameWorld.post_load_frames_continue(8, false),
+			"a host's frames, or a joiner's whose first 0x0C left, end at eight")
+	assert_true(GameWorld.post_load_frames_continue(8, true), "a joiner awaiting its first 0x0C runs on")
+	assert_true(GameWorld.post_load_frames_continue(119, true), "up to the cap")
+	assert_false(GameWorld.post_load_frames_continue(120, true), "never past the cap")

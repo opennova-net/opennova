@@ -1125,6 +1125,10 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_weapon_database"), &GameWorld::get_weapon_database);
 	ClassDB::bind_method(D_METHOD("last_load_timeline"), &GameWorld::last_load_timeline);
 	ClassDB::bind_method(D_METHOD("last_post_load_frames"), &GameWorld::last_post_load_frames);
+	ClassDB::bind_method(D_METHOD("is_post_load_frames_open"), &GameWorld::is_post_load_frames_open);
+	ClassDB::bind_static_method("GameWorld",
+			D_METHOD("post_load_frames_continue", "frames_timed", "awaits_uplink"),
+			&GameWorld::post_load_frames_continue);
 	ClassDB::bind_method(D_METHOD("get_runtime"), &GameWorld::get_runtime);
 	ClassDB::bind_method(D_METHOD("get_mission_stats"), &GameWorld::get_mission_stats);
 	ClassDB::bind_method(D_METHOD("get_static_live_population_count"),

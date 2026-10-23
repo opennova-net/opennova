@@ -135,7 +135,7 @@ func _init() -> void:
 	# Under --verbose the heavy frames print where they went (an instrument).
 	if OS.is_stdout_verbose():
 		var slow_frames := SlowFrameReport.new()
-		slow_frames.setup(_frame_stats, is_dev_tools_open)
+		slow_frames.setup(_frame_stats, is_dev_tools_open, _post_load_frames_open)
 		add_child(slow_frames)
 	_dev_tools = DevTools.new()
 	_dev_tools.name = "DevTools"
@@ -617,6 +617,12 @@ func _sync_dev_tools_pick_policy() -> void:
 
 func is_dev_tools_open() -> bool:
 	return _dev_tools != null and _dev_tools.is_open()
+
+
+# Whether the world still times its first frames past a load (the slow-frame readout's post-load
+# lines, an instrument).
+func _post_load_frames_open() -> bool:
+	return _world != null and _world.is_post_load_frames_open()
 
 
 ## Shift+F6 (and the probe/test seam): pick whatever the crosshair is on into the
