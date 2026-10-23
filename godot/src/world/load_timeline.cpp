@@ -1,5 +1,7 @@
 #include "world/load_timeline.h"
 
+#include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -34,6 +36,7 @@ void LoadTimeline::span(const String &p_name) {
 	entry->set_name(p_name);
 	entry->set_depth(open_.size() - 1);
 	entry->set_start_us(Time::get_singleton()->get_ticks_usec());
+	entry->set_start_compiles(pipeline_compiles());
 	spans_.push_back(entry);
 }
 
@@ -44,6 +47,22 @@ void LoadTimeline::end_span() {
 	const int idx = open_[open_.size() - 1];
 	open_.remove_at(open_.size() - 1);
 	spans_[idx]->set_end_us(Time::get_singleton()->get_ticks_usec());
+	spans_[idx]->set_end_compiles(pipeline_compiles());
+}
+
+int64_t LoadTimeline::pipeline_compiles() {
+	if (!OS::get_singleton()->is_stdout_verbose()) {
+		return -1;
+	}
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) {
+		return -1;
+	}
+	return static_cast<int64_t>(
+			rs->get_rendering_info(RenderingServer::RENDERING_INFO_PIPELINE_COMPILATIONS_CANVAS) +
+			rs->get_rendering_info(RenderingServer::RENDERING_INFO_PIPELINE_COMPILATIONS_MESH) +
+			rs->get_rendering_info(RenderingServer::RENDERING_INFO_PIPELINE_COMPILATIONS_SURFACE) +
+			rs->get_rendering_info(RenderingServer::RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW));
 }
 
 String LoadTimeline::finish() {
@@ -54,6 +73,19 @@ String LoadTimeline::finish() {
 	const String line = summary();
 	UtilityFunctions::print_verbose(String("LoadTimeline: ") + line);
 	UtilityFunctions::print_verbose(String("LoadTimeline detail: ") + label_ + String(": ") + detail());
+	// The spans whose bracket compiled pipelines (under --verbose; their counts nest as the
+	// spans do).
+	PackedStringArray compiled;
+	for (const Ref<LoadTimelineSpan> &s : spans_) {
+		if (s->compiles() > 0) {
+			compiled.append(String(">").repeat(s->get_depth()) + s->get_name() +
+					vformat(" %d", static_cast<int64_t>(s->compiles())));
+		}
+	}
+	if (!compiled.is_empty()) {
+		UtilityFunctions::print_verbose(String("LoadTimeline pipelines: ") + label_ + String(": ") +
+				String(", ").join(compiled));
+	}
 	return line;
 }
 

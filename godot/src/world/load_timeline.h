@@ -27,6 +27,15 @@ public:
 	int64_t get_end_us() const { return end_us_; }
 	void set_end_us(int64_t p_value) { end_us_ = p_value; }
 	int64_t duration_us() const { return end_us_ - start_us_; }
+	// The renderer's synchronous pipeline compiles at the span's edges (an instrument, read
+	// under --verbose alone; -1 unread): LoadTimeline::pipeline_compiles.
+	void set_start_compiles(int64_t p_value) { start_compiles_ = p_value; }
+	void set_end_compiles(int64_t p_value) { end_compiles_ = p_value; }
+	int64_t compiles() const {
+		return start_compiles_ >= 0 && end_compiles_ >= start_compiles_
+				? end_compiles_ - start_compiles_
+				: 0;
+	}
 
 protected:
 	static void _bind_methods();
@@ -36,6 +45,8 @@ private:
 	int depth_ = 0;
 	int64_t start_us_ = 0;
 	int64_t end_us_ = 0;
+	int64_t start_compiles_ = -1;
+	int64_t end_compiles_ = -1;
 };
 
 // Named nested wall-clock spans for one operation (a mission load; the former
@@ -83,6 +94,11 @@ public:
 	// The one duration rendering every perf surface shares (the summary line
 	// and the load status agree by construction).
 	static String format_ms(double p_ms);
+	// The renderer's synchronous pipeline compiles so far (canvas, mesh, surface and draw
+	// sources; the background specializations left out), read under --verbose alone, else -1:
+	// finish() prints the spans that compiled any (an instrument: where a load's first-use
+	// pipelines land).
+	static int64_t pipeline_compiles();
 
 protected:
 	static void _bind_methods();
