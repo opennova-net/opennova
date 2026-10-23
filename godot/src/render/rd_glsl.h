@@ -15,7 +15,12 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <map>
+#include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace godot {
 
@@ -99,13 +104,58 @@ inline const char *const kGlslSampleEffectStage = R"GLSL(vec4 rd_sample_effect_s
 			textureLod(tex, tex_uv + offset, lod));
 })GLSL";
 
-// Compiles one vertex + fragment GLSL pair to SPIR-V on p_rd. Returns an
-// empty string when both stages produced bytecode (r_spirv holds it);
-// otherwise the failure text: "no SPIR-V" when the compiler returned nothing,
-// else "vertex=<error>; fragment=<error>". The caller creates the shader from
+// The SPIR-V of each vertex + fragment pair compile_rd_spirv compiled, by the pair's text, held
+// as plain bytes (no Godot object in static storage outlives the engine): the compositors that
+// draw one pair (a particle pass per view, an overlay per view) compile it once per process and
+// each creates its own shader from the bytes.
+struct RdSpirvPairCache {
+	std::mutex mutex;
+	std::map<std::pair<std::string, std::string>,
+			std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>>
+			entries;
+};
+inline RdSpirvPairCache &rd_spirv_pair_cache() {
+	static RdSpirvPairCache cache;
+	return cache;
+}
+
+inline PackedByteArray rd_spirv_packed(const std::vector<std::uint8_t> &p_bytes) {
+	PackedByteArray packed;
+	packed.resize(static_cast<int64_t>(p_bytes.size()));
+	if (!p_bytes.empty())
+		std::memcpy(packed.ptrw(), p_bytes.data(), p_bytes.size());
+	return packed;
+}
+
+inline std::vector<std::uint8_t> rd_spirv_bytes(const PackedByteArray &p_packed) {
+	std::vector<std::uint8_t> bytes(static_cast<std::size_t>(p_packed.size()));
+	if (!bytes.empty())
+		std::memcpy(bytes.data(), p_packed.ptr(), bytes.size());
+	return bytes;
+}
+
+// Compiles one vertex + fragment GLSL pair to SPIR-V on p_rd, once per process
+// for each pair's text (rd_spirv_pair_cache). Returns an empty string when
+// both stages produced bytecode (r_spirv holds it); otherwise the failure
+// text: "no SPIR-V" when the compiler returned nothing, else
+// "vertex=<error>; fragment=<error>". The caller creates the shader from
 // r_spirv (shader_create_from_spirv) and reports a rejection itself.
 inline std::string compile_rd_spirv(RenderingDevice *p_rd, const std::string &p_vertex_glsl,
 		const std::string &p_fragment_glsl, Ref<RDShaderSPIRV> &r_spirv) {
+	RdSpirvPairCache &cache = rd_spirv_pair_cache();
+	const std::pair<std::string, std::string> key(p_vertex_glsl, p_fragment_glsl);
+	{
+		std::lock_guard<std::mutex> lock(cache.mutex);
+		const auto found = cache.entries.find(key);
+		if (found != cache.entries.end()) {
+			r_spirv.instantiate();
+			r_spirv->set_stage_bytecode(RenderingDevice::SHADER_STAGE_VERTEX,
+					rd_spirv_packed(found->second.first));
+			r_spirv->set_stage_bytecode(RenderingDevice::SHADER_STAGE_FRAGMENT,
+					rd_spirv_packed(found->second.second));
+			return std::string();
+		}
+	}
 	Ref<RDShaderSource> source;
 	source.instantiate();
 	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
@@ -120,10 +170,17 @@ inline std::string compile_rd_spirv(RenderingDevice *p_rd, const std::string &p_
 			r_spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_VERTEX);
 	const String fragment_error =
 			r_spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_FRAGMENT);
-	if (vertex_error.is_empty() && fragment_error.is_empty() &&
-			!r_spirv->get_stage_bytecode(RenderingDevice::SHADER_STAGE_VERTEX).is_empty() &&
-			!r_spirv->get_stage_bytecode(RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty())
+	const PackedByteArray vertex_bytes =
+			r_spirv->get_stage_bytecode(RenderingDevice::SHADER_STAGE_VERTEX);
+	const PackedByteArray fragment_bytes =
+			r_spirv->get_stage_bytecode(RenderingDevice::SHADER_STAGE_FRAGMENT);
+	if (vertex_error.is_empty() && fragment_error.is_empty() && !vertex_bytes.is_empty() &&
+			!fragment_bytes.is_empty()) {
+		std::lock_guard<std::mutex> lock(cache.mutex);
+		cache.entries.emplace(key,
+				std::make_pair(rd_spirv_bytes(vertex_bytes), rd_spirv_bytes(fragment_bytes)));
 		return std::string();
+	}
 	return "vertex=" + opennova::to_std(vertex_error) + "; fragment=" +
 			opennova::to_std(fragment_error);
 }
