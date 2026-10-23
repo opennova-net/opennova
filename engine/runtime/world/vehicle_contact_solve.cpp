@@ -982,6 +982,8 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	// The two force passes retain per-probe severity. Shared impact response applies damage, sound
 	// and momentum; a terrain-only hit uses the strongest-point quarter-speed cut.
 	// Witness sites: [orig: @0x476A8E, @0x4769B8, @0x476BC3, @0x476D7B..0x476F0C, shift @0x476F98]
+	// The thresholds are the cosines of the def's slip (+0x8F8) and max (+0x8F4) slopes.
+	// [orig: @0x4761B4..0x4761F2]
 	const int32_t soft = cos22_of_bam_x87(traits.max_slope);
 	const int32_t hard = cos22_of_bam_x87(traits.slip_slope);
     PlatProbeForce forces[13];
