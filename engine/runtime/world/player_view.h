@@ -351,13 +351,12 @@ inline int32_t screen_flash_revive_channel(const ScreenFlashState &st) {
 // camera shake 10, both capped at 255, then a radar damage blip is added at
 // `pos_q16` (mission 16.16) for `source` — kind 255 for self damage, else 2
 // when the source's +0x170 entity is class 6, else 0 (radar_damage_kind) —
-// and two per-player-slot words are stamped. Every one of retail's five call
-// sites is gated on the victim being the local player; this function is the
-// arm they share. A world with no bound local player state is a no-op.
-//
-// UNPORTED here, deliberately: the unk_26C77A0[100 * (shadowSlot1 & 0x7FFF)]
-// words +11 = 6 / +12 = 10 [orig: @0x4dd907..0x4dd916], whose consumers are
-// unwitnessed.
+// and the local player's facial row takes the damage face, the expression
+// override 6 (DISGUST) for 10 transitions [orig: @0x4DD907..0x4DD916], on a
+// facial slot the player owns only (retail's unguarded row-0 write is not
+// ported: PERMANENT (Q22-1 (a)), D-NET-NEW-LI-21). Every one of retail's five
+// call sites is gated on the victim being the local player; this function is
+// the arm they share. A world with no bound local player state is a no-op.
 void player_on_damage_received(World &world, const RadarSource &source,
                                const int32_t pos_q16[3]);
 

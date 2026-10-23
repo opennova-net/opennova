@@ -519,9 +519,17 @@ void player_on_damage_received(World &world, const RadarSource &source,
     camera_shake_arm(local->view.shake, kShakeArmDamageReceived); // [orig: @0x4dd8a6..0x4dd8ad]
     // The radar damage blip [orig: Radar_AddBlip @0x59b280, called @0x4dd8ee].
     radar_add_blip(world, source.id, pos_q16, radar_damage_kind(source));
-    // The per-player-slot words unk_26C77A0[100 * (shadowSlot1 & 0x7FFF)]
-    // +11 = 6 / +12 = 10 [orig: @0x4dd907..0x4dd916] stay unported: they have
-    // no witnessed consumer.
+    // The damage face: the local player's facial row takes the expression override 6
+    // (DISGUST) for 10 transitions, the fields CScarDecal_Update steps.
+    // [orig: @0x4DD8F3..0x4DD916 - entity+0x1B8's row unk_26C77A0 + 100 * (word & 0x7FFF):
+    //  +0x2C = 6 @0x4DD90F, +0x30 = 10 @0x4DD916; CScarDecal_Update @0x57FA50 reads them
+    //  @0x57FACB / @0x57FAD2]
+    // PERMANENT (Q22-1 (a)): retail indexes the row without testing the slot word, so a local
+    // player with no facial slot writes row 0, the first allocated face (another character's).
+    // Ours writes only a slot the player owns (FacialSystem::override_expression): a
+    // deliberate fix of that retail bug (D-NET-NEW-LI-21).
+    if (const Entity *player = world.registry.get(world.cached.local_player))
+        world.facials.override_expression(*player, 6, 10);
 }
 
 bool player_view_toggle_binoculars(PlayerViewState &v) {

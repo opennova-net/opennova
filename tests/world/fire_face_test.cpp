@@ -15,6 +15,8 @@
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
 #include <runtime/world/facial_animation.h>
+#include <runtime/world/local_player.h>
+#include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/world.h>
 #include "common/test_paths.h"
@@ -160,6 +162,44 @@ void test_no_facial_slot_takes_no_face() {
 	CHECK(f->face() == nullptr);
 }
 
+// The damage face (D-NET-NEW-LI-21): damage to the local player sets its facial row's
+// expression override 6 (DISGUST) for 10 transitions, and no gaze. A local player with no
+// facial slot writes no row: retail's unguarded write lands in row 0, another character's face,
+// which ours leaves alone (PERMANENT, Q22-1 (a)).
+// [orig: Player_OnDamageReceived @0x4DD880 - the row @0x4DD8F3..0x4DD907, +0x2C = 6 @0x4DD90F,
+//  +0x30 = 10 @0x4DD916; CScarDecal_Update @0x57FA50 (@0x57FACB / @0x57FAD2)]
+void test_the_damage_face() {
+	auto f = std::make_unique<Fixture>();
+	auto local = std::make_unique<LocalPlayer>(f->world);
+	f->world.local_player_state = local.get();
+	const int32_t at[3] = {0, 0, 0};
+	player_on_damage_received(f->world, RadarSource{}, at);
+	FacialSlot *face = f->face();
+	CHECK(face != nullptr && face->expression_override == 6 && face->override_timer == 10);
+	CHECK(face != nullptr && face->directed_timer == 0); // no gaze write
+	f->world.local_player_state = nullptr;
+}
+
+void test_no_facial_slot_writes_no_row() {
+	auto f = std::make_unique<Fixture>();
+	auto local = std::make_unique<LocalPlayer>(f->world);
+	f->world.local_player_state = local.get();
+	// The fixture's person holds row 0 (the first allocated face); the local player is a
+	// second body with no facial slot.
+	FacialSlot *row0 = f->face();
+	CHECK(row0 != nullptr && (f->world.registry.get(f->player)->facial_slot & 0x7FFF) == 0);
+	Entity body;
+	body.kind = EntityKind::Organic;
+	body.alive = true;
+	body.health = 100;
+	f->world.cached.local_player = f->world.registry.spawn(0, body);
+	CHECK(f->world.registry.get(f->world.cached.local_player)->facial_slot == 0);
+	const int32_t at[3] = {0, 0, 0};
+	player_on_damage_received(f->world, RadarSource{}, at);
+	CHECK(row0 != nullptr && row0->expression_override == -1 && row0->override_timer == 0);
+	f->world.local_player_state = nullptr;
+}
+
 } // namespace
 
 int main() {
@@ -168,6 +208,8 @@ int main() {
 	test_a_refused_press_sets_none();
 	test_the_release_sets_the_fire_face();
 	test_no_facial_slot_takes_no_face();
+	test_the_damage_face();
+	test_no_facial_slot_writes_no_row();
 	if (failures != 0) {
 		std::printf("fire_face: %d failure(s)\n", failures);
 		return 1;
