@@ -1330,6 +1330,13 @@ public:
     FacialSystem facials;
     TeammateOperations teammates;
     int32_t vehicle_ai_spawn_phase = 0; // [orig: dword_B21F80]
+    // The record spawn's think-clock stagger: every record spawn, the load's
+    // records and the addeweap children alike (a deployable's children too),
+    // takes this counter modulo 60 into its +0x2AC clock and steps it by 11.
+    // The mission reset each load runs first zeroes it (promote_mission).
+    // [orig: g_BmsSpawnPhaseCounter @0xA77638 - Entity_SpawnFromBMSRecord
+    //  @0x40EC8C..0x40ECB8; Mission_ResetBmsState @0x40DB80 (the zero @0x40DBD1)]
+    uint32_t bms_spawn_phase_counter = 0;
     IItemPieceSpawner *item_piece_spawner = nullptr; // non-owning mission asset factory
     ITeammateSpawner *teammate_spawner = nullptr; // non-owning mission asset factory
     DeathPieceSim death_pieces;
@@ -1674,6 +1681,7 @@ public:
         FacialSystem facials;
         TeammateOperations teammates;
         int32_t vehicle_ai_spawn_phase = 0;
+        uint32_t bms_spawn_phase_counter = 0;
         Match match;
         // The SP score block and the subgoal masks at play start: a restart
         // lands on the post-census, post-memset block and the post-PreMission

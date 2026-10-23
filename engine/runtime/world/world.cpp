@@ -991,6 +991,7 @@ World::Snapshot World::snapshot() const {
     s.facials = facials;
     s.teammates = teammates;
     s.vehicle_ai_spawn_phase = vehicle_ai_spawn_phase;
+    s.bms_spawn_phase_counter = bms_spawn_phase_counter;
     s.match = match;
     s.kill_stats = kill_stats;
     s.epilog = epilog;
@@ -1086,6 +1087,10 @@ void World::restore(const Snapshot &s) {
     load_systems(); // systems re-init their per-mission state
     teammates = s.teammates;
     vehicle_ai_spawn_phase = s.vehicle_ai_spawn_phase;
+    // A restart re-runs the load, which replays the counter from its zero to
+    // the play-start value [orig: Game_StartMission @0x524360 -> Mission_LoadBMSFile
+    //  @0x40F4E0 (the calls @0x524B5D / @0x524FFA)].
+    bms_spawn_phase_counter = s.bms_spawn_phase_counter;
     script.heli_lift_active_count = int32_t(teammates.count());
     // on_load clears the WAC input arrays. A sealed play-start baseline may
     // already contain controls authored by the initial script execution.

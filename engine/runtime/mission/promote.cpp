@@ -670,6 +670,17 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
             ++result.dropped;
             return;
         }
+        // The child's record spawn stamps the running spawn-phase counter into
+        // its +0x2AC think clock and steps it by 11, as a placed record's does,
+        // so a load's children think on staggered ticks (an unoccupied gun on
+        // its carrier then re-arms that clock to 62 at every think).
+        // [orig: Entity_SpawnAddEWeapChildren @0x40F300 - Entity_SpawnFromBMSRecord
+        //  (the call @0x40F3FF), its stamp @0x40EC8C..0x40ECB8]
+        if (Entity *stamped = world.registry.get(child_handle)) {
+            stamped->class_think_ticks =
+                    static_cast<int32_t>(world.bms_spawn_phase_counter % 60u);
+            world.bms_spawn_phase_counter += 11u;
+        }
         result.handles.push_back(child_handle);
         Entity *child = world.registry.get(child_handle);
         carrier = world.registry.get(carrier_handle);
@@ -1035,8 +1046,9 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     };
     // g_BmsSpawnPhaseCounter, zeroed by the mission reset every load runs [orig: the
     // reset Mission_ResetBmsState @0x40DBD1, called
-    // from Mission_LoadBMSFile @0x40F50E]
-    uint32_t spawn_phase_counter = 0;
+    // from Mission_LoadBMSFile @0x40F50E]. The world keeps it past the load: the
+    // addeweap children below and a later deployable's children step it on.
+    world.bms_spawn_phase_counter = 0;
     // g_LocationNameCount: each type-0x7FC spawn takes it and adds one, in the load's
     // pool order (items, buildings, markers, organics) [orig: Entity_SpawnFromBMSRecord
     //  @0x40E9F0 - the read @0x40F188, the store @0x40F18F, the add @0x40F20C].
@@ -1067,7 +1079,15 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             const bool admit = admitted[idx] != 0;
             ++idx;
             if (!admit) { ++r.dropped; continue; }
-            if (idx > used_window) { ++r.dropped; continue; } // record index >= used
+            if (idx > used_window) {
+                // Record index >= used: retail still spawns the accepted record into
+                // its slot, so its stamp steps the spawn-phase counter.
+                // [orig: Mission_LoadBMSFile @0x40F4E0 (the call @0x40FB19) ->
+                //  Entity_SpawnFromBMSRecord's stamp @0x40EC8C..0x40ECB8]
+                world.bms_spawn_phase_counter += 11u;
+                ++r.dropped;
+                continue;
+            }
             bms::Entity e = record;
             if (e.type_id == 5305) e.type_id = 4999 + kBmsTeammateClass;
             Entity seed = make_seed(e, kind, static_cast<uint16_t>(e.id), origin);
@@ -1120,8 +1140,9 @@ PromoteResult promote_mission(const bms::File &m, World &world,
                 // mov [esi+2ACh],ecx; add g_BmsSpawnPhaseCounter,0Bh` @0x40ec8c..0x40ecb8;
                 // the counter resets per load]. Vehicles re-stamp their own
                 // 0..15 phase below.
-                spawned->class_think_ticks = static_cast<int32_t>(spawn_phase_counter % 60u);
-                spawn_phase_counter += 11u;
+                spawned->class_think_ticks =
+                        static_cast<int32_t>(world.bms_spawn_phase_counter % 60u);
+                world.bms_spawn_phase_counter += 11u;
             }
             const bool ai_capable =
                     ai_capable_default ||

@@ -1016,6 +1016,66 @@ static void test_bms_admission_zeros_rejected_marker_projections() {
     CHECK(world->registry.get(EntityHandle::make(3, 1))->class_think_ticks == 0);
 }
 
+// Every record spawn stamps the load's spawn-phase counter modulo 60 into its
+// +0x2AC clock and steps it by 11: the admitted records in load order (an
+// accepted organic above pool 0's used window included, a rejected record never),
+// then the addeweap children, which spawn through the same record spawn. The
+// world keeps the counter past the load, so a later carrier's children step on.
+// [orig: Entity_SpawnFromBMSRecord @0x40E9F0 - the stamp @0x40EC8C..0x40ECB8;
+//  Mission_LoadBMSFile @0x40F4E0 - the organic spawn @0x40FB19, the children
+//  @0x40FD69 / @0x40FD8E; Entity_SpawnAddEWeapChildren @0x40F300 - the record
+//  spawn @0x40F3FF; Mission_ResetBmsState @0x40DB80 (the zero @0x40DBD1)]
+static void test_attachment_children_take_the_spawn_phase_stagger() {
+    bms::File m{};
+    m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
+    m.items.push_back(item(/*type_id=*/164, 30 << 16, 20 << 16, 3 << 16));
+    m.items.push_back(item(/*type_id=*/164, 50 << 16, 20 << 16, 3 << 16));
+    m.items[2].bmsi_attributes = 0x80; // multiplayer only: rejected offline, no stamp
+    bms::Entity bunker = item(/*type_id=*/0x60, 40 << 16, 50 << 16, 0);
+    bunker.type = bms::ItemType::Building;
+    m.buildings.push_back(bunker);
+    m.organics.resize(4);
+    for (bms::Entity &e : m.organics) e.type_id = 5001;
+    m.organics[1].bmsi_attributes = 0x80; // rejected: organics[3] lands above used
+
+    mission::PromoteOptions o{};
+    mission::ItemSeatSpec carrier{};
+    carrier.type_id = 164;
+    mission::ItemEmplacementAttachmentSpec gun{};
+    gun.child_type_id = 166;
+    gun.stored_slot = 1;
+    carrier.emplacement_attachments.push_back(gun);
+    o.item_seat_specs = {carrier};
+
+    auto w = std::make_unique<World>();
+    w->bms_spawn_phase_counter = 500; // a previous load's: the load zeroes it
+    mission::promote_mission(m, *w, o);
+    // Stamps 0, 11 (items), 22 (bunker), 33, 44, 55 (organics 0, 2 and 3): 66.
+    CHECK(w->registry.get(EntityHandle::make(1, 0))->class_think_ticks == 0);
+    CHECK(w->registry.get(EntityHandle::make(1, 1))->class_think_ticks == 11);
+    CHECK(w->registry.get(EntityHandle::make(2, 0))->class_think_ticks == 22);
+    // The children follow in pool-1 order: 66 % 60 and 77 % 60.
+    const Entity *first = nullptr;
+    const Entity *second = nullptr;
+    w->registry.for_each([&](const Entity &e) {
+        if (e.emplacement_parent == EntityHandle::make(1, 0)) first = &e;
+        if (e.emplacement_parent == EntityHandle::make(1, 1)) second = &e;
+    });
+    CHECK(first != nullptr && second != nullptr);
+    if (first == nullptr || second == nullptr) return;
+    CHECK(first->class_think_ticks == 6);
+    CHECK(second->class_think_ticks == 17);
+    CHECK(w->bms_spawn_phase_counter == 88);
+
+    // A carrier spawned after the load (a deployable's) steps on: 88 % 60.
+    const mission::ItemAttachmentSpawns later =
+            mission::spawn_item_attachments(*w, {EntityHandle::make(1, 0)}, o.item_seat_specs);
+    CHECK(later.handles.size() == 1);
+    if (later.handles.size() == 1)
+        CHECK(w->registry.get(later.handles[0])->class_think_ticks == 28);
+    CHECK(w->bms_spawn_phase_counter == 99);
+}
+
 // The BMS AI-attribute fold inside the AI branch (the def carries 0x100000):
 // every authored bit lands on its AiSlot[1] behavior bit or entity Flags bit,
 // and 0x2000000 sets entity+0x2C bit 0x80 outside the branch. A record whose
@@ -1157,6 +1217,7 @@ int main() {
     test_bms_pool0_used_window_is_the_accepted_count();
     test_bms_pool_used_counts_are_the_load_counts();
     test_bms_admission_zeros_rejected_marker_projections();
+    test_attachment_children_take_the_spawn_phase_stagger();
     test_script_spatial_tables_are_promoted_and_replaced();
     // A synthetic mission: 3 markers forming a path, 1 looping waypoint record (channel 0),
     // 2 organics on that route (teams 1/2), 1 building.
