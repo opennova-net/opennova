@@ -941,8 +941,13 @@ int main() {
 		w::AiEntity *body_motor = bare_world->ai.for_handle(bare_world->cached.local_player);
 		if (!expect(body != nullptr && body_motor != nullptr,
 		            "the marker-less player has a body and a motor")) return 1;
-		body_motor->heading = 0x12340000;
-		body->heading = w::placed_heading_bam(10);
+		// Retail keeps ONE Yaw word (+0x10): the deploy's reset reads it and copies it into
+		// the motor's heading copies, storing nothing to it; the motor's word is our mirror of
+		// it, so the body's word and the mirror hold one value.
+		// [orig: Entity_ResetToSpawnState @0x4B9610 - the Yaw read @0x4B964A, its copies
+		//  @0x4B965C..0x4B96B0]
+		body->heading = 0x12340000;
+		body_motor->heading = body->heading;
 		body->alive = false;
 		body->health = 0;
 		body->flags |= w::kEntityFlagDead;
@@ -953,7 +958,8 @@ int main() {
 		inmatch::Server_ReleasePlayerDeployment(
 				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
 		if (!expect(body->alive && body->position.x == 5.0f && body->position.z == 7.25f &&
-		                    static_cast<uint32_t>(body_motor->heading) == 0x12340000u,
+		                    static_cast<uint32_t>(body_motor->heading) == 0x12340000u &&
+		                    static_cast<uint32_t>(body->heading) == 0x12340000u,
 		            "with no placement the revived player keeps its body's heading word")) return 1;
 
 		// D-PWR-7: the deploy's health is two signed raises to the difficulty-aware

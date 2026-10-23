@@ -213,9 +213,16 @@ bool run_the_reset_on_a_dead_body_resolves_nothing() {
 
 // The host's deploy places a dead body on the 6002 start (123, 456, 7), a quarter unit into a
 // wall whose +Y face its corpse's slice holds, and clears the dead bit ahead of the reset: the
-// deploy leaves the body pushed out along +Y, its X the start's.
+// deploy leaves the body pushed out along +Y, its X the start's. The host's world is the
+// authority and runs the root-motion clips; the body carries the bound radius its model's init
+// stamps, which the contact force's clamp reads (a zero radius clamps every push to nothing).
+// [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the clamp's `shl ecx, 7` @0x4AEEC6;
+//  Entity_InitFromModel @0x40DC30 - the +0 store @0x40E076]
 bool run_the_deploy_pushes_the_body_out_of_a_wall() {
+	Source source;
 	auto world = std::make_unique<w::World>();
+	world->ai.root_motion = &source;
+	world->ai.is_authority = true;
 	world->tables.player.has_item_def = true;
 	world->tables.player.item_type_index = 1;
 	world->tables.player.item_type = 3;
@@ -256,6 +263,7 @@ bool run_the_deploy_pushes_the_body_out_of_a_wall() {
 	w::Entity *body = world->registry.get(body_h);
 	if (!expect(body != nullptr && body->item_type_index == 1,
 	            "deploy: the player is a pool-0 slice source")) return false;
+	body->bound_radius = 1;
 	// The corpse 1.25 units off the wall's +Y face, its slice built there and its savedLivePose
 	// stamped there.
 	body->position.set_q16({123 * kOne, 457 * kOne + kOne / 2, 7 * kOne});

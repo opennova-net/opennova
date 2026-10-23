@@ -4086,7 +4086,29 @@ bool run_the_respawn_arm_leaves_the_stage_to_the_later_record() {
 //  block @0x42C3DD; Game_ProcessMainFrame @0x5263F0 - Entity_UpdateAllEntities called @0x52674B;
 //  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the savedLivePose stamp @0x4B4187..0x4B419C,
 //  Entity_MovementCollisionResolver called @0x4B7CF4]
+// L's update stamps its savedLivePose at its own pose ahead of the resolve, so the plane gate
+// reads a pose inside the wall: a face takes a test point only when the point's radius reaches
+// it. The root-motion double gives L's clips a one-unit capsule, as a body's clips carry one,
+// so each test point's radius reaches the +Y face a quarter unit off.
+// [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the savedLivePose's transform called
+//  @0x4AE3AC, the plane gate's `js` @0x4AE7BE]
+struct ArmClipSource final : w::IRootMotionSource {
+	bool has_clip(int, int state) const override {
+		return state == 0 || state == 43 || state == 44 || state == 174;
+	}
+	int32_t clip_length_ticks(int, int, int) const override { return 10000; }
+	bool advance(int, int state, int32_t &phase, w::RootMotionFrame &out) override {
+		if (!has_clip(0, state)) return false;
+		++phase;
+		out = {};
+		out.capsule_bottom = 65536;
+		out.capsule_top = 2 * 65536;
+		return true;
+	}
+};
+
 bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
+	ArmClipSource clips;
 	Harness h;
 	auto &world = h.kernel->world;
 	world.registry.configure_pool(2, 4);
@@ -4182,6 +4204,10 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 	local->saved_live_pos[1] = kOne + kOne / 2;
 	local->saved_live_pos[2] = 0;
 	local->saved_live_valid = true;
+	// The bound radius L's model init stamps, which the contact force's clamp reads (a zero
+	// radius clamps every push to nothing). [orig: Entity_InitFromModel @0x40DC30 - the +0
+	// store @0x40E076; Entity_ComputeBoneCollisionForce @0x4AE150 - `shl ecx, 7` @0x4AEEC6]
+	local->bound_radius = 1;
 	h.kernel->collision.rebuild_candidate_slices(world);
 	if (!expect(h.kernel->collision.candidate_count(local->handle) >= 1,
 			"arm reset: the corpse's slice holds the wall"))
@@ -4200,6 +4226,7 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 	local_ai->inf.airborne = true;
 	local->flags |= w::kEntityFlagInAir;
 	local->engine_flags |= w::kEntityFlagInAir;
+	world.ai.root_motion = &clips;
 	// The release: the record alive again; its receive's respawn arm lands L at (16, 0, 0).
 	h.socket.datagrams.clear();
 	frame(100, 0x00);
