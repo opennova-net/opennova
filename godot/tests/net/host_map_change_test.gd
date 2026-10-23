@@ -99,6 +99,48 @@ func test_the_map_change_loads_on_the_sessions_mount() -> void:
 	TestFs.remove_dir_recursive(dir)
 
 
+# A Serve Only host's map change runs the next mission start's reduced arm, as its first load
+# does: no effect system at the head (D-NET-NEW-L3-23), its listed models' materials resolved and
+# none of the warm's legs: no effect spawn, no model build, no pipeline warm, no forced frame
+# (engine inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness,
+# D-NET-NEW-L3-25).
+func test_a_serve_only_hosts_map_change_runs_the_reduced_arm() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	var options := _host_options(1)
+	options.serve_and_play = false
+	assert_eq(world.load_mission_as_host(options), OK)
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		return
+	assert_eq(sim.session_role(), Simulation.ROLE_DEDICATED_HOST, "a Serve Only host")
+	var next_map: String = world.begin_map_change()
+	assert_eq(next_map.to_lower(), "mnml.bms", "the rotation names the next map")
+	world.unload()
+	assert_eq(world.load_next_mission(next_map), OK)
+	assert_same(world.get_sim(), sim, "the next map runs on the same simulation")
+	assert_eq(sim.session_role(), Simulation.ROLE_DEDICATED_HOST, "still a Serve Only host")
+	assert_null(world.get_effect_world(), "the next map loads no effect system either")
+	var timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(timeline)
+	if timeline != null:
+		var names := Array(timeline.span_names())
+		assert_false(names.has("effect_system"), "no effect system at the head: %s" % [names])
+		assert_true(names.has("model_materials"),
+				"the next map resolves its listed models' materials: %s" % [names])
+		for leg in ["effects_warm", "effect_spawn", "model_warm", "present_pipelines",
+				"forced_draw_1", "forced_draw_2", "force_sync", "warm_reset"]:
+			assert_false(names.has(leg),
+					"no %s at a Serve Only host's map change: %s" % [leg, names])
+	world.unload()
+
+
 func test_the_rotations_end_keeps_nothing() -> void:
 	# REPLAY off on a one-entry rotation: the advance runs out.
 	var world: GameWorld = await _hosted_world(0)
