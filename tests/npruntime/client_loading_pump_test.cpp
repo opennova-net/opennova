@@ -1854,6 +1854,72 @@ bool run_a_loading_step_answers_a_ping_on_novaworld() {
 	return true;
 }
 
+// D-NET-NEW-L9-25: each periodic update of a NovaWorld join's load runs the process's NovaWorld
+// session's own half (its NOVAWORLDUDP protocol's pump, its state and GLSVSS legs) past the
+// update's manager receive. At the embedder's loading step the WR ping's pong is already on the
+// socket when the session's half runs; nothing runs outside a declared load or on a LAN join. In
+// the mission start's legs the session's half runs once per periodic update: the first leg's six
+// (one ahead of its receive, one past it, one per send pump of the four) and the push's four.
+// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - NapiNPManager_Pump(flags 4) @0x4D441F
+//  ahead of NapiNPProtocol_Pump(-1) @0x4D442E; Game_StartMission @0x524360 - the updates
+//  @0x525405..0x52571F, @0x52578E, @0x525889, @0x5258BC, @0x525962, @0x525A57, @0x525A8E,
+//  @0x525B09, @0x525BE3, @0x525D33]
+bool run_a_loading_step_runs_the_novaworld_sessions_update() {
+	for (const bool novaworld : {true, false}) {
+		// The process outlives the harness whose runtime points at it.
+		inmatch::ClientProcessState process;
+		std::vector<std::size_t> sent_at_update;
+		RoleHarness h;
+		process.nwu_periodic_update = [&h, &sent_at_update] {
+			sent_at_update.push_back(h.socket.sent.size());
+		};
+		h.role.use_process_state(&process);
+		h.role.set_join_novaworld(novaworld);
+		if (!expect(drive_into_the_world_stream(h, 0), "session update: the world stream runs"))
+			return false;
+		h.load_declared = true;
+		sent_at_update.clear();
+		h.role.pump_mission_start_periodic_update();
+		if (!expect(sent_at_update.empty(), "session update: nothing outside a declared load"))
+			return false;
+		(void)h.frame({make_protocol_message(0x1A, {})});
+		const std::vector<uint8_t> ping = nw_encode_outbound(
+				SESSION_OPCODE_SERVER_PING, build_session_ping_body(h.auth.ck, true, 0x0BADF00Du));
+		h.client.receive(ping.data(), ping.size());
+		sent_at_update.clear();
+		const std::size_t from = h.socket.sent.size();
+		h.role.pump_mission_start_periodic_update();
+		if (!expect(novaworld ? sent_at_update == std::vector<std::size_t>{from + 1}
+		                      : sent_at_update.empty(),
+				novaworld ? "NovaWorld: the loading step runs the session's half past the pong"
+				          : "LAN: the loading step runs no session update"))
+			return false;
+	}
+	for (const bool novaworld : {true, false}) {
+		inmatch::ClientProcessState process;
+		int updates = 0;
+		Harness h;
+		process.nwu_periodic_update = [&updates] { ++updates; };
+		h.client.use_process_state(&process);
+		if (!expect(drive_into_the_world_stream(h, 0), "session update: the world stream (legs)"))
+			return false;
+		h.load_declared = true;
+		(void)h.frame({self_spawn_record()});
+		(void)h.frame({make_protocol_message(0x1A, {})});
+		inmatch::ClientRuntime::MissionStartEndLegs legs;
+		if (novaworld) legs.periodic_deposit = [] {}; // the socket is the queue
+		updates = 0;
+		(void)h.client.push_mission_start_first_loadout(legs);
+		const int first_leg = updates;
+		(void)h.client.push_mission_start_end(legs);
+		if (!expect(first_leg == (novaworld ? 6 : 0) && updates == (novaworld ? 10 : 0),
+				novaworld ? "NovaWorld: each of the legs' periodic updates runs the session's half"
+				          : "LAN: the legs' updates run no session update"))
+			return false;
+	}
+	return true;
+}
+
 // The joiner's round clock at its mission start: retail never seeds it. Game_StartMission's
 // round-clock seed (g_RoundTimeRemaining = g_RoundTimeLimitMinutes x 3720 when in session,
 // outside the Co-op waypoint family, with a nonzero limit) sits on the authority / single-player
@@ -2295,6 +2361,7 @@ int main() {
 	ok = run_a_novaworld_load_runs_its_handlers_ahead_of_the_second_0x2f() && ok;
 	ok = run_the_update_past_the_receive_runs_no_handler() && ok;
 	ok = run_a_loading_step_answers_a_ping_on_novaworld() && ok;
+	ok = run_a_loading_step_runs_the_novaworld_sessions_update() && ok;
 	ok = run_the_joiner_mission_start_keeps_the_folded_round_clock() && ok;
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;

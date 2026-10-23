@@ -541,6 +541,15 @@ void NovaWorldClient::_process(double) {
 	publish_connect_or_host_wait();
 }
 
+// A loading step's update runs the session's pump alone, on the clock as it stands mid-load; the
+// frame's notices, host refresh and play poll stay _process's (engine:
+// inmatch::ClientProcessState::nwu_periodic_update carries the witness, D-NET-NEW-L9-25).
+void NovaWorldClient::run_load_step_update() {
+	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) return;
+	clock_ms_ = opennova::world::frame_tick_count_ms() - clock_origin_ms_;
+	lobby_.tick(clock_ms_);
+}
+
 // The role-specific halves of the shared NwuLobbySession driver: what to do
 // with the gate response, which verify identity to ship, and the trace lines
 // that keep the retail _connectlog shape (trace()).

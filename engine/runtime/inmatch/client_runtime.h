@@ -157,6 +157,17 @@ struct ClientProcessState {
 	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - Server_SendPlayerMetricsToGate (the call
 	//  @0x51B696)]
 	GateMetricsSink nwu_gate_metrics;
+	// The same session's own half of each periodic update a NovaWorld join's loading steps run,
+	// past the manager receive: the NOVAWORLDUDP protocol's pump over what that receive queued
+	// for it (its handlers' answers and due sends leave there), then its connection-state legs and
+	// its GLSVSS leg (NwuLobbySession::tick, which the shell's frame runs otherwise). The same
+	// embedder installs and clears it with nwu_player_removed; unset when no session is held.
+	// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - on the game session object at
+	//  0xB5FFE0 (`mov ecx` @0x524938 ahead of the call @0x52493D), NapiNPManager_Pump(flags 4) (the call
+	//  @0x4D441F), then NapiNPProtocol_Pump(-1) on the session's protocol +0x6C (the call
+	//  @0x4D442E), the connection's state legs @0x4D4433..0x4D44B1, the GLSVSS leg
+	//  @0x4D44B7..0x4D4532]
+	std::function<void()> nwu_periodic_update;
 };
 
 class ClientRuntime {

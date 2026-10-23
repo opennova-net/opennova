@@ -166,6 +166,10 @@ public:
 	// The NWU session as the match reads it (C++ only): the shell keeps this
 	// node alive through the match (SessionDrive::adopt_nw_client).
 	opennova::NwuLobbySession::MatchFacts nwu_match_facts() const { return lobby_.match_facts(); }
+	// The session's periodic update at a mission load's loading step (C++ only), which holds the
+	// frames: the session's own pump at the live clock. Its notices wait for the frame's drain
+	// (engine: inmatch::ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25).
+	void run_load_step_update();
 
 	// Host a game (the NovaWorld menu's Host): ConnectOrHost's hosting leg on
 	// this logged-in session -- the session-state and gate checks, the hosting

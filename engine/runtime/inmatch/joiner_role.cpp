@@ -262,10 +262,16 @@ ClientRuntime::MissionStartPumpLegs JoinerRole::mission_start_pump_legs() {
 	return legs;
 }
 
+// The embedder's loading step: the update's manager receive (its answers leave from inside it),
+// then the NovaWorld session's own half (ClientProcessState::nwu_periodic_update carries the
+// witness, D-NET-NEW-L9-25) [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 -
+// NapiNPManager_Pump(flags 4) @0x4D441F ahead of NapiNPProtocol_Pump(-1) @0x4D442E].
 void JoinerRole::pump_mission_start_periodic_update() {
 	if (!runtime || !join_novaworld_ || !runtime->declared_load_running()) return;
 	deposit_inbound();
 	for (const std::vector<uint8_t> &dg : runtime->pump_mission_start_manager_receive()) send(dg);
+	if (client_process_ != nullptr && client_process_->nwu_periodic_update)
+		client_process_->nwu_periodic_update();
 }
 
 // Drain every datagram pending on the socket into the runtime's recv fold

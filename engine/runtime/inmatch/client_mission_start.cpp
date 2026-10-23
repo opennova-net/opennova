@@ -31,14 +31,17 @@ void ClientRuntime::mission_start_send_pump(std::vector<std::vector<uint8_t>> &o
 }
 
 // The session's periodic update at a loading step: a NovaWorld join's reads the game's socket
-// (the role's deposit, then the manager receive); a LAN session's returns at its head
+// (the role's deposit, then the manager receive), then runs the NovaWorld session's own half
+// (ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25); a LAN session's returns at its head
 // (D-NET-NEW-L2-54; the header carries the witness) [orig: CNapiGameSession_ProcessPeriodicUpdate
-// @0x4D4400 - @0x4D4403 / @0x4D4411, NapiNPManager_Pump(flags 4) @0x4D441F].
+// @0x4D4400 - @0x4D4403 / @0x4D4411, NapiNPManager_Pump(flags 4) @0x4D441F, NapiNPProtocol_Pump(-1)
+// @0x4D442E].
 void ClientRuntime::mission_start_periodic_update(std::vector<std::vector<uint8_t>> &outbound,
 		const MissionStartPumpLegs &legs) {
 	if (!legs.periodic_deposit) return;
 	legs.periodic_deposit();
 	manager_receive_pass(outbound);
+	if (process_state().nwu_periodic_update) process_state().nwu_periodic_update();
 }
 
 // A receive pump of the load: the client pump, the role's handler writes (none after a teardown

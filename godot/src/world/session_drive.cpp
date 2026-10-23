@@ -966,6 +966,12 @@ void SessionDrive::adopt_nw_client(NovaWorldClient *p_client) {
 	// ... and that teardown's PLAYER gate report (engine: ClientProcessState::nwu_gate_metrics,
 	// D-NET-NEW-L9-22).
 	world_->client_process_.nwu_gate_metrics = nw_gate_metrics_sink(client_id, p_client->get_gametext());
+	// ... and that session's own pump at a mission load's loading steps, past their manager
+	// receive (engine: ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25).
+	world_->client_process_.nwu_periodic_update = [client_id] {
+		NovaWorldClient *live = Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(client_id));
+		if (live != nullptr) live->run_load_step_update();
+	};
 	// A hosting session's service traffic reaches the in-match host.
 	const Callable command = callable_mp(world_, &GameWorld::on_nw_host_server_command);
 	if (!p_client->is_connected("server_command", command)) {
@@ -987,6 +993,7 @@ NovaWorldClient *SessionDrive::release_nw_client() {
 	nw_client_id_ = ObjectID();
 	world_->client_process_.nwu_player_removed = nullptr;
 	world_->client_process_.nwu_gate_metrics = opennova::inmatch::GateMetricsSink{};
+	world_->client_process_.nwu_periodic_update = nullptr;
 	nwu_feed_live_ = false;
 	if (client == nullptr) {
 		return nullptr;
@@ -1041,6 +1048,7 @@ void SessionDrive::stop_nw_client() {
 	nw_client_id_ = ObjectID();
 	world_->client_process_.nwu_player_removed = nullptr;
 	world_->client_process_.nwu_gate_metrics = opennova::inmatch::GateMetricsSink{};
+	world_->client_process_.nwu_periodic_update = nullptr;
 }
 
 // The hosting session meets its match once the runtime is live: the GSID and

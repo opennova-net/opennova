@@ -683,11 +683,18 @@ void GameWorld::pulse_load_progress(int p_percent) {
 
 // Each loading step's present is followed by the session's periodic update, which a join's
 // simulation runs (engine inmatch::JoinerRole::pump_mission_start_periodic_update carries the
-// witness, D-NET-NEW-L2-54): the drive holds that simulation until the runtime adopts it.
+// witness, D-NET-NEW-L2-54): the drive holds that simulation until the runtime adopts it. The
+// join's update runs the NovaWorld session's own half past its manager receive; any other load (a
+// NovaWorld host's) runs that half alone, the process's held session's pump (engine:
+// inmatch::ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25).
 void GameWorld::pump_join_load_step() {
 	Ref<Simulation> sim = get_sim();
 	if (sim.is_null()) sim = drive_.join_preload_simulation();
-	if (sim.is_valid()) sim->pump_join_mission_start_periodic_update();
+	if (sim.is_valid() && sim->is_joiner()) {
+		sim->pump_join_mission_start_periodic_update();
+		return;
+	}
+	if (client_process_.nwu_periodic_update) client_process_.nwu_periodic_update();
 }
 
 // Populate the world with the mission's placed objects under the mission
