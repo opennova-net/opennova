@@ -1605,6 +1605,7 @@ void test_the_mirror_collect_leaves_the_scene_words() {
 //  Entity_InitFromModel @ 0x40e204..0x40e20a; PRNG_Next16_C @ 0x6131b0]
 void test_the_mirror_collect_walks_the_entities_under_its_match() {
     Rig rig;
+    rig.world.registry.configure_pool(1, 4); // the vehicle's pool (the rig configures 0 and 2)
     Entity npc;
     npc.kind = EntityKind::Organic;
     npc.net_id = rig.next_net_id++;
