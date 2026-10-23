@@ -187,7 +187,7 @@ adding it to this table.
   (`BootRootMount.bundled_assets_dir` / `mount_bundled`): the archives mounted
   as an install's are, its menu then its mission (`--mission onjo_m1.bms`
   starts it straight away).
-  - The game zip ships the editor's export of this project as `assets/` beside
+  - The game zip ships the editor's export of this project directly beside
     `opennova.exe` (`scripts/package_godot_windows.ps1`: it stages the
     tracked files of this folder as a project of their own, refusing an
     unpulled LFS pointer, and runs `opennova-project export` over them; the
@@ -200,14 +200,14 @@ adding it to this table.
     here: a source run plays the last export, not the folder.
 - Played on the build, the original `Jointops.exe` (1.7.5.7) dropped beside
   the archives with nothing else from an install and no `/d` boots to the same
-  menu (the editor's strict Play, or the game zip's `assets/` with it dropped
+  menu (the editor's strict Play, or the game zip's root with it dropped
   in): it writes its own `game.cfg` and saves on its first run. That drop-in is
   the standing proof that our data and the original game still agree.
 - The base game's expansions are editor expansion projects of their own beside
   it (`expansions/`, its README; ADR 0046 T5), built over this project's export.
-  The game zip ships each as `assets/expansion/<name>/`, which the main menu's
+  The game zip ships each as `expansion/<name>/`, which the main menu's
   MODS lists and `/exp <name>` mounts, in OpenNova and in the original game
-  dropped into `assets/` alike.
+  dropped beside the base game's archives alike.
 - `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT` are wired by control name in
   `godot/game/bundled_menu_companion.gd` (retail wires its own `EXIT` by name
   too; its menus have no quit `ACTION`). `MainGame` mounts the picked install,

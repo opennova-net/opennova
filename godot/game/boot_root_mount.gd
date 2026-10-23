@@ -1,7 +1,7 @@
 class_name BootRootMount
 extends RefCounted
 ## Mount the CLI-supplied or picked game directory (--loose-root permits a
-## loose-only root), or OpenNova's own bundled assets/ (ADR 0048).
+## loose-only root), or OpenNova's own bundled game (ADR 0048).
 
 static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:
 	var root := ResourceRoot.new()
@@ -33,13 +33,13 @@ const PROJECT_EXPORT_DIR := "build/export"
 const EXPORT_ARCHIVE := "resource.pff"
 
 
-## The bundled game's folder (ADR 0048 d8). An exported exe's `assets/` beside
-## it, which the game zip fills with the editor's export of the base game
+## The bundled game's folder (ADR 0048 d8). An exported exe's own directory,
+## which the game zip fills with the editor's export of the base game
 ## (scripts/package_godot_windows.ps1). A source run's, the same export of the
 ## base game project (project_game_dir).
 static func bundled_assets_dir() -> String:
 	if OS.has_feature("template"):
-		return OS.get_executable_path().get_base_dir().path_join("assets")
+		return OS.get_executable_path().get_base_dir()
 	return project_game_dir(bundled_project_dir())
 
 

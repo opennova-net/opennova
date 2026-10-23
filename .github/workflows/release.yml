@@ -70,7 +70,7 @@ jobs:
 
   # Tagged releases ship the runtime, the editor with its own copy of the
   # runtime, the Blender authoring add-on, the apps and the switcher. The game carries
-  # OpenNova's own game (assets/) and no retail data.
+  # OpenNova's own game beside the executable, and no retail data.
   package-godot-windows:
     needs: gate
     runs-on: windows-latest
