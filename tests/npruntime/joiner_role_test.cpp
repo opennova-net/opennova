@@ -3793,14 +3793,164 @@ bool run_redeploy_release_rebuilds_the_candidate_slices() {
 	if (!expect(h.role.runtime->queue_deployment_pick(0xFFFF), "slice: the Default Spawn pick"))
 		return false;
 	h.role.run_tick(h.input);
-	frame(100, 0x00); // the record alive again
-	frame(100, 0x00); // the next tail releases L
+	frame(100, 0x00); // the record alive again: its receive's respawn arm releases L
 	local = world.registry.get(world.cached.local_player);
 	if (!expect(local != nullptr && local->alive && std::fabs(local->position.x - 40.0f) < 0.01f,
 			"slice: the release lands L on the record's pose"))
 		return false;
 	return expect(h.kernel->collision.candidate_count(local->handle) == 1,
 			"slice: the release rebuilds L's slice at the redeployed pose");
+}
+
+// D-NET-NEW-L2-55: the self record's respawn arm lands on L in its own receive. A dead L
+// whose alive self record arrives (the release of its deploy pick) takes the record's world
+// sample, its composed Yaw and its Pitch byte inside that receive, so the frame's own C2S
+// 0x0C carries the redeployed body, with no later 0x0A first: the record's carrier-local
+// words, its yaw byte as the carrier-local heading (the composed Yaw, a carrier's plus the
+// byte, never the byte of that sum, which a carrier Yaw with low bits moves), and its Pitch
+// byte over the corpse's look pitch. The record is a stock host's respawn into a hut
+// (fragrespawn RR, the release's 0x0A: words 60544, 21859, 59552, yaw byte 234, pitch byte
+// 0), after which a stock joiner's first 0x0C carried heading 234 << 8 and pitch 0.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead test @0x4C1109, the stores
+//  @0x4C110F..0x4C1123, Entity_ResetToSpawnState called @0x4C113C, Game_InitNewRound called
+//  @0x4C114C; Entity_TransformLocalToWorld @0x43BD00 - out[3] @0x43BE7E, out[4] @0x43BE8A;
+//  Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send block
+//  @0x42C3DD]
+bool run_the_respawn_arm_lands_l_in_its_receive() {
+	Harness h;
+	auto &world = h.kernel->world;
+	world.registry.configure_pool(2, 4);
+	def::DefItemDef defs[2]{};
+	defs[0].id = 100000;
+	defs[1].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[1].type = 3;
+	defs[1].hp = 100;
+	std::strcpy(defs[1].move_function, "org2");
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_collision_instances();
+	// The hut, placed, its Yaw -120 degrees (low bits set).
+	constexpr int32_t kHutYaw = static_cast<int32_t>(0xAAAAAAABu);
+	w::Entity hut;
+	hut.kind = w::EntityKind::Building;
+	hut.position = {100.0f, 200.0f, 10.0f};
+	hut.heading = kHutYaw;
+	hut.bound_radius = 1.0f;
+	hut.alive = true;
+	const w::EntityHandle hh = world.registry.spawn(2, hut);
+	h.kernel->collision.build_initial_tables(world);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	auto &self_row = h.role.runtime->state().upsert(0x0005);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	// The hut's replica row.
+	auto &hut_row = h.role.runtime->state().upsert(hh.packed);
+	hut_row.cls = EntityClass::NoNetworkCallback;
+	hut_row.x = hut.position.x.q16;
+	hut_row.y = hut.position.y.q16;
+	hut_row.z = hut.position.z.q16;
+	hut_row.heading_bam = kHutYaw;
+	hut_row.heading_known = true;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	auto frame = [&](int16_t health, const PlayerCompactRecord &player) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = health;
+		FrameUpdateRecord rec;
+		rec.handle = 0x0005;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player = player;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	PlayerCompactRecord open;
+	open.carrier_handle = 0xFFFF;
+	frame(100, open);
+	PlayerCompactRecord dead = open;
+	dead.state_flags = w::kEntityFlagDead;
+	frame(0, dead);
+	w::Entity *local = world.registry.get(world.cached.local_player);
+	w::AiEntity *local_ai = h.kernel->local.player_ai();
+	if (!expect(local != nullptr && local_ai != nullptr && !local->alive &&
+					h.role.runtime->deployment_pick_pending(),
+			"respawn arm: the death downs L and owes a pick"))
+		return false;
+	if (!expect(h.role.runtime->queue_deployment_pick(0xFFFF), "respawn arm: the Default Spawn pick"))
+		return false;
+	h.role.run_tick(h.input);
+	// The corpse's look pitch.
+	constexpr int32_t kCorpsePitch = -3200 * 65536;
+	h.kernel->local.input.look_pitch = kCorpsePitch;
+	local_ai->inf.look_pitch = kCorpsePitch;
+	// The release's 0x0A: the self record alive, standing in the hut (bone 0).
+	PlayerCompactRecord respawn;
+	respawn.carrier_handle = hh.packed;
+	respawn.vehicle_bone = 0;
+	respawn.pos_x_compressed = 60544;
+	respawn.pos_y_compressed = 21859;
+	respawn.pos_z_compressed = 59552;
+	respawn.yaw_byte = 234;
+	respawn.pitch_byte = 0;
+	h.socket.datagrams.clear();
+	frame(100, respawn);
+	local = world.registry.get(world.cached.local_player);
+	if (!expect(local != nullptr && local->alive && (local->flags & w::kEntityFlagDead) == 0u,
+			"respawn arm: the record's own receive revives L"))
+		return false;
+	ProtocolMessage message;
+	EntityPacketSubHeader sub;
+	PlayerExtendedUplink up;
+	size_t header_bytes = 0, body_bytes = 0;
+	if (!expect(h.socket.last_message(0x0C, message) &&
+					decode_entity_packet_sub_header(message.payload.data(),
+							message.payload.size(), sub, header_bytes) &&
+					decode_player_extended_uplink(message.payload.data() + header_bytes,
+							message.payload.size() - header_bytes, up, body_bytes),
+			"respawn arm: the release frame ships its 0x0C"))
+		return false;
+	if (!expect(up.carrier_handle == hh.packed, "respawn arm: the 0x0C names the hut")) return false;
+	const int32_t words[3] = {network_decompress_fixedpoint(60544),
+			network_decompress_fixedpoint(21859), network_decompress_fixedpoint(59552)};
+	const int32_t sent[3] = {up.pos_x, up.pos_y, up.pos_z};
+	for (int axis = 0; axis < 3; ++axis) {
+		// The local -> world -> local round trip's fixed-point rounding.
+		const int32_t d = sent[axis] - words[axis];
+		if (!expect(d >= -4 && d <= 4,
+				"respawn arm: the 0x0C carries the record's position in the hut"))
+			return false;
+	}
+	if (!expect(up.heading == static_cast<int16_t>(0xEA00u),
+			"respawn arm: the heading is the record's byte (the composed Yaw less the hut's)"))
+		return false;
+	if (!expect(up.pitch == 0, "respawn arm: the pitch is the record's byte, not the corpse's look"))
+		return false;
+	// The next frame's body update keeps both: the look pitch is the arm's, and the stage
+	// L chases is the composed Yaw.
+	h.socket.datagrams.clear();
+	h.role.run_tick(h.input);
+	if (!expect(h.socket.last_message(0x0C, message) &&
+					decode_entity_packet_sub_header(message.payload.data(),
+							message.payload.size(), sub, header_bytes) &&
+					decode_player_extended_uplink(message.payload.data() + header_bytes,
+							message.payload.size() - header_bytes, up, body_bytes),
+			"respawn arm: the next frame ships its 0x0C"))
+		return false;
+	// The body's own ground probe may have dropped the hut link in the fall: the heading is
+	// then the world Yaw's high word.
+	const int16_t heading = up.carrier_handle == hh.packed
+			? static_cast<int16_t>(0xEA00u)
+			: static_cast<int16_t>((static_cast<uint32_t>(kHutYaw) + 0xEA000000u) >> 16);
+	return expect(up.pitch == 0 && up.heading == heading,
+			"respawn arm: the next 0x0C keeps the record's pitch and the composed heading");
 }
 
 // The Respawn key on a joiner (dispatch 55): past the live-player gate the
@@ -5547,6 +5697,7 @@ int main() {
 	ok &= run_the_person_pass_keys_the_class_row();
 	ok &= run_a_seated_death_sends_the_seat_leave();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
+	ok &= run_the_respawn_arm_lands_l_in_its_receive();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_respawn_key_before_the_first_tail();
 	ok &= run_a_preround_death_latches_when_the_round_opens();

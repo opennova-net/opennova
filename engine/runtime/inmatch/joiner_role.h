@@ -348,16 +348,11 @@ public:
 	// enable_join: a fresh join resets every per-session latch (the runtime is
 	// rebuilt beside it).
 	void reset_for_join();
-	// finish_load: a (re)load respawns L and re-baselines the release cursor
-	// to the live runtime edge (a retail-style menu join keeps its session);
+	// finish_load: a (re)load respawns L (a retail-style menu join keeps its session);
 	// the tripwire samplers deliberately persist across loads.
-	void reset_for_load(uint64_t deployment_release_revision_baseline) {
+	void reset_for_load() {
 		local_spawned_ = false;
-		mission_start_birth_unreleased_ = false;
-		deployment_release_revision_seen_ = deployment_release_revision_baseline;
 		weapon_availability_revision_seen_ = 0;
-		redeploy_release_pending_ = false;
-		redeploy_health_updates_at_release_ = 0;
 	}
 	// finish_load's direct-load branch rebuilt a fresh ClientRuntime: the hello
 	// re-arms and the receive-side cursors restart with it.
@@ -380,7 +375,6 @@ public:
 	bool begin_mission_reload() {
 		if (!runtime || !runtime->begin_mission_reload()) return false;
 		local_spawned_ = false;
-		mission_start_birth_unreleased_ = false;
 		post_start_identity_pending_ = false;
 		weather_revision_seen_ = 0;
 		weapon_availability_revision_seen_ = 0;
@@ -444,8 +438,8 @@ private:
 	FrameSignals run_client_net_frame();
 	// The receive handlers' writes on L at a receive's place (ClientRuntime::AfterReceive): the
 	// frame's (run_client_net_frame) and the mission start's load's two
-	// (mission_start_pump_legs). `local_existed_before` is whether L stood ahead of that receive.
-	void apply_receive_writes(bool local_existed_before);
+	// (mission_start_pump_legs).
+	void apply_receive_writes();
 	// The load's legs at its network points: a NovaWorld join's socket read ahead of each
 	// periodic update, the handler writes at each receive (D-NET-NEW-L2-54).
 	ClientRuntime::MissionStartPumpLegs mission_start_pump_legs();
@@ -469,9 +463,11 @@ private:
 	// The S2C 0x0F landing on L: the authoritative pose (+ look yaw, the
 	// un-hide) and, for a waypoint gametype, the host-filtered route.
 	void apply_world_state_load();
-	// The self player record onto L, once per folded record: its Flags under 0xE1, then
-	// the mount edge's position snap (D-NET-NEW-L2-13).
+	// The self player record onto L, once per folded record: its stage, the respawn arm,
+	// its Flags under 0xE1, then the mount edge's position snap (D-NET-NEW-L2-13).
 	void fold_local_record();
+	// The self record's respawn arm onto L, in the receive (D-NET-NEW-L2-55).
+	void land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &arm);
 	// A 0x18 naming the joiner's own handle rebuilds L in place (its ewep update's destroy
 	// asks for one), once per such record.
 	void rebuild_local_from_full_spawn();
@@ -541,20 +537,12 @@ private:
 	bool join_novaworld_ = false; // set_join_novaworld: FullDestroy keeps the transport
 	std::function<void()> enumerator_drain_; // set_enumerator_drain
 	bool local_spawned_ = false; // L born (the mission start's, else reached_in_match's)
-	// L was born at the mission start and has taken no deployment release since: the first
-	// release is its admission, not a redeploy (D-NET-NEW-L2-52).
-	bool mission_start_birth_unreleased_ = false;
 	bool final_wait_seen_ = false; // the last tick ended inside the final wait
 	bool final_wait_end_ = false;  // take_final_wait_end's one-shot
 	bool wire_world_static_initialized_ = false;
 	uint64_t wire_world_topology_revision_seen_ = ~uint64_t{0};
 	uint64_t wire_world_stream_revision_seen_ = ~uint64_t{0};
 	replication::ClientWorldMaterializer materializer_;
-	// ClientRuntime raises a monotonic edge for each gameplay/deployment release.
-	// The role uses it to snap L to the host-selected post-pick pose; health
-	// remains separately gated by authoritative_spawn_released(), so C2S 0x0E
-	// cannot kill L and a stale positive tail cannot revive a genuinely dead L.
-	uint64_t deployment_release_revision_seen_ = 0;
 	uint32_t mp_attributes_revision_seen_ = 0; // stamp_mission_rules' last copy
 	// S2C 0x50 re-latched OUR OWN team (the second g_LocalTeam writer). The
 	// join-time team arrives through the spawn, so only later edges apply here.
@@ -567,8 +555,6 @@ private:
 	uint32_t world_state_revision_seen_ = 0;
 	// The 0x0F / local 0x50 track legs consumed (replica_track.h).
 	ReplicaTrackSeen track_seen_;
-	bool redeploy_release_pending_ = false;
-	uint32_t redeploy_health_updates_at_release_ = 0;
 	uint32_t now_tick_ = 0;
 	// The staged replica-peer table's identity (source pointer, count, pump
 	// tick): the resolver lambda re-copies it only when one of them changes.

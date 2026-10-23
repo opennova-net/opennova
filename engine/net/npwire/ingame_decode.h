@@ -811,9 +811,9 @@ struct RoundEventRecord {
 	                                  // (shooter+104→+12, stamped by @0x50c2ad); 0xFFFF=sentinel
 	uint16_t shot_seq = 0;            // per-shot sequence word (ring+28; the C2S 0x06 hit_part
 	                                  // fire counter round-trips here) → word_B7C670
-	uint16_t pos_x_compressed = 0;    // fire ORIGIN: Network_DecompressFixedPoint → + dword_A822E4
-	uint16_t pos_y_compressed = 0;    // → + dword_A822E8
-	uint16_t pos_z_compressed = 0;    // → + dword_A822EC
+	uint16_t pos_x_compressed = 0;    // fire ORIGIN: Network_DecompressFixedPoint → + g_FrameAnchorX
+	uint16_t pos_y_compressed = 0;    // → + g_FrameAnchorY
+	uint16_t pos_z_compressed = 0;    // → + g_FrameAnchorZ
 	uint16_t yaw_bam_high = 0;        // fire DIRECTION yaw, BAM high half (<< 16 on apply)
 	uint16_t pitch_bam_high = 0;      // fire DIRECTION pitch, BAM high half
 
@@ -917,7 +917,7 @@ bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
 // ===========================================================================
 // S2C 0x0A per-frame update — the whole message, walked into structured form.
 // [orig: NapiNPClientMsg_0x00A @ 0x42FEC0]. The 12-byte header's three i32 refs
-// are stored into dword_A822E4/E8/EC (verbatim; the per-message position anchor)
+// are stored into g_FrameAnchorX/Y/Z (verbatim; the per-message position anchor)
 // and the trailing event loop carries one compact record per nearby entity,
 // each prefixed by `[u8 tag=1][u16 handle][u16 typeId]`. The compact decoder is
 // selected by the type's EntityClass (§5.10b), so the per-record width is
@@ -1035,7 +1035,7 @@ inline constexpr uint8_t kFrameFlags2RouteMask         = 0x0F;
 inline constexpr uint8_t kFrameFlags2MountedAmmoRoute  = 0x08;
 
 struct FrameUpdate {
-	// Header refs (dword_A822E4/E8/EC) — the i32 16.16 world anchor each compact
+	// Header refs (g_FrameAnchorX/Y/Z) — the i32 16.16 world anchor each compact
 	// record's decompressed position is added to (when unmounted).
 	int32_t anchor_x = 0, anchor_y = 0, anchor_z = 0;
 	uint8_t  flags1 = 0;            // loadprog / death-spectator signals

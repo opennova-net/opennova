@@ -854,7 +854,7 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		return complete;
 	};
 
-	// 12-byte reference header -> the position anchor (dword_A822E4/E8/EC).
+	// 12-byte reference header -> the position anchor (g_FrameAnchorX/Y/Z).
 	out.anchor_x = c.i32();
 	out.anchor_y = c.i32();
 	out.anchor_z = c.i32();

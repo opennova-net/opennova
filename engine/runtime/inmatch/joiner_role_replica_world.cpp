@@ -20,7 +20,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/destruction.h> // run_ground_cache_class_init (a 0x18 row's class init)
-#include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state (redeploy release)
+#include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state (the respawn arm)
 #include <runtime/world/geom.h>
 #include <runtime/world/mount_controls.h> // emplaced_command_call (the ewep row over a decoded person)
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
@@ -419,6 +419,98 @@ void JoinerRole::spawn_and_arm_local_player() {
 	if (init_local_player_at_mission_start()) run_mission_start_local_block();
 }
 
+// The self record's respawn arm onto L, where the record decode runs it: inside the receive,
+// past the record's stage and ahead of its class pick and Flags fold, so the release frame's
+// own send block builds the C2S 0x0C from the redeployed body. The arm writes the record's
+// world sample, its composed Yaw (a carrier's Yaw plus the record's byte, never the byte of
+// that sum) and its Pitch byte, which is the local body's look pitch (+0x14), then
+// g_LocalPlayerLookYaw, the reset and Game_InitNewRound. L then falls from the host's spawn
+// height under its own update, as a stock joiner's does (D-NET-NEW-L2-55).
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FD7..0x4C0FFC, the dead
+//  test @0x4C1109, Position @0x4C110F..0x4C111D, Yaw @0x4C1120, Pitch @0x4C1123,
+//  g_LocalPlayerLookYaw @0x4C1135, Entity_ResetToSpawnState called @0x4C113C, Game_InitNewRound
+//  called @0x4C114C, the climate pick from @0x4C1248, the Flags fold @0x4C12FF;
+//  Entity_TransformLocalToWorld @0x43BD00 - out[3] @0x43BE7E, out[4] @0x43BE8A;
+//  Game_InitNewRound @0x422740 - g_LocalPlayerLookYaw = Yaw @0x4227E3]
+void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &arm) {
+	mission::MissionKernel &kernel = *kernel_;
+	world::World &world = kernel.world;
+	world::LocalPlayer &lp = kernel.local;
+	ClientRuntime &rt = *runtime;
+	world::Entity *local = world.registry.get(world.cached.local_player);
+	world::AiEntity *local_ai = world.ai.for_handle(world.cached.local_player);
+	if (local == nullptr || local_ai == nullptr) return;
+	const int32_t heading = arm.yaw;
+	const int32_t pitch = arm.pitch;
+	// The record's words (D-NET-507): the own row's chase runs in the World's entity pass.
+	local->position.set_q16({arm.position[0], arm.position[1], arm.position[2]});
+	local->heading = heading;
+	local->pitch_bam = pitch;
+	local->roll_bam = 0;
+	local->health = rt.local_entity_health();
+	local->alive = true;
+	local->hidden = false;
+	local->flags &= ~1u;
+	local->death_anim_state = 0;
+	local->corpse_timer = 0;
+	local->net_move_input = 0;
+	local->net_analog_x = 0;
+	local->net_analog_y = 0;
+	local->net_analog_z = 0;
+	world::entity_reset_to_spawn_state(*local);
+	// The reset releases the corpse's +0x1CC emitter (its own corpse leg's
+	// decay, or a hit's) [orig: NetPacket_SerializePlayerState - Entity_ResetToSpawnState
+	//  @0x4B9610 called @0x4C113C; the release @0x4B97CB..0x4B97F5].
+	world::release_corpse_effect(world, *local);
+
+	local_ai->heading = heading;
+	local_ai->pitch = pitch;
+	local_ai->roll = 0;
+	local_ai->body_pitch = 0;
+	local_ai->health = static_cast<int16_t>(local->health);
+	local_ai->vel_x = 0;
+	local_ai->vel_y = 0;
+	local_ai->net_smooth_target[0] = arm.position[0];
+	local_ai->net_smooth_target[1] = arm.position[1];
+	local_ai->net_smooth_target[2] = arm.position[2];
+	local_ai->net_smooth_heading = heading;
+	local_ai->net_smooth_pitch = pitch;
+	local_ai->net_interp_progress = 0;
+	local_ai->net_interp_steps = 0;
+	local_ai->collide_state = {};
+
+	world::InfantryState &inf = local_ai->inf;
+	inf.active = true;
+	inf.is_local_player = true;
+	// The shared spawn/revive reset (InfantryState::reset_for_spawn): one field list with the
+	// host spawn seeding, so a NEW motor field re-defaults here without a second hand-list.
+	inf.reset_for_spawn(heading);
+	// The reset's tail rebuilds every slice, then L's own list (D-NET-687) [orig: @0x4C113C ->
+	// Entity_ResetToSpawnState - @0x4B98EB, @0x4B98F1].
+	if (world.ai.collision != nullptr)
+		world.ai.collision->refresh_entity_proximity(world, *local);
+
+	lp.weapon.fire_held = false;
+	lp.weapon.fire_pressed = false;
+	lp.weapon.reload_pressed = false;
+	// The embedder clears its device-input latches, seeds the look heading and resets its view
+	// and map; the kit is the release's 0x5A, already folded (D-NET-378), or after a medic
+	// revive, which sends none, the kit L died with (D-NET-379): retail's client runs
+	// Player_InitPlayer only at the mission start and a team change [orig: Player_InitPlayer
+	// @0x4E15F0, called from Game_StartMission @0x525BBC and NapiNPClientMsg_TeamAssign @0x431B14;
+	// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0].
+	lp.reset_local_player_input(heading);
+	// The arm's Pitch store is the local body's look pitch, which no later write of the
+	// respawn moves, so the first 0x0C carries the record's pitch, not the corpse's look.
+	inf.look_pitch = pitch;
+	lp.input.look_pitch = pitch;
+	lp.reset_for_new_round();
+	// Game_InitNewRound's deploy-hold and being-revived clears ran in the receive, in the self
+	// record's respawn arm (ClientRuntime): a second clear here would drop a 0x3A the host sent
+	// since.
+	lp.respawn_init(/*rebuild_kit=*/false);
+}
+
 // The player record's Flags apply: the record that names the local player folds
 // the wire byte into its Flags under 0xE1 (a remote's under 0xFD), so the host's
 // deploy-screen bit 0x01, the chute 0x20 and bits 0x40 / 0x80 land on L and ride
@@ -433,6 +525,10 @@ void JoinerRole::fold_local_record() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;
 	ClientRuntime &rt = *runtime;
+	// The respawn arm this receive's record took, if any: a record the fold drops (no L, no
+	// def) takes its arm with it.
+	ClientRuntime::LocalRespawnArm arm;
+	const bool respawn_arm = rt.take_local_respawn_arm(arm);
 	if (!local_spawned_ || !world.cached.local_player.valid() || !rt.has_self_handle()) return;
 	const replication::ClientEntityState *self = rt.state().find(rt.self_handle());
 	if (self == nullptr || !self->state_flags_known ||
@@ -446,19 +542,23 @@ void JoinerRole::fold_local_record() {
 	if (!local->has_item_def) return;
 	// The record's stage first: its world sample becomes L's chase target, its yaw and
 	// pitch the staged angles, and the chase restarts; L's own update then walks toward
-	// it off the authority (world::player_body_network_chase, D-NET-NEW-L2-14).
+	// it off the authority (world::player_body_network_chase, D-NET-NEW-L2-14). The staged
+	// Yaw is the record's composed one (a carrier's Yaw plus the byte), the row's stage, not
+	// the byte of that sum (D-NET-NEW-L2-55).
 	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - +0x240 @0x4C0FD7, +0x234..+0x23C
-	//  @0x4C0FE4..0x4C0FF0, +0x244 @0x4C0FF6, +0x27C = 0 @0x4C0FFC]
+	//  @0x4C0FE4..0x4C0FF0, +0x244 @0x4C0FF6, +0x27C = 0 @0x4C0FFC; the carrier's
+	//  Entity_TransformLocalToWorld @0x4C10D4 (out[3] @0x43BE7E) ahead of the stage]
 	if (world::AiEntity *local_ai = world.ai.for_handle(world.cached.local_player)) {
 		local_ai->net_smooth_target[0] = self->record_sample[0];
 		local_ai->net_smooth_target[1] = self->record_sample[1];
 		local_ai->net_smooth_target[2] = self->record_sample[2];
-		local_ai->net_smooth_heading =
-				static_cast<int32_t>(static_cast<uint32_t>(self->yaw_byte) << 24);
+		local_ai->net_smooth_heading = self->net_smooth_heading;
 		local_ai->net_smooth_pitch =
 				static_cast<int32_t>(static_cast<uint32_t>(self->pitch_byte) << 24);
 		local_ai->net_interp_progress = 0;
 	}
+	// Then the respawn arm, when this receive's record took it (land_local_respawn_arm).
+	if (respawn_arm) land_local_respawn_arm(arm);
 	// Every player record, the local one too, re-resolves the body's row by its class:
 	// the camouflage item by the mission climate, rebound only when its index differs
 	// from the body's (the local record skips the remote stores and lands here)
@@ -668,10 +768,8 @@ void JoinerRole::rebuild_local_from_full_spawn() {
 // scalar to the joiner's distinct motor entity L (the pump gates this phase on
 // the frame's decoded health signal). A fresh-frame guard prevents
 // ClientState's pre-frame zero default from killing L during the handshake.
-// Once L is dead, positive health revives it only after the separate
-// deployment release latched by the net-frame folds (the ACK-qualified 0x5A, or
-// the self record's respawn edge), and only from a later tail. That edge also snaps L to H's redeployed authoritative
-// pose before its next uplink can run.
+// Once L is dead, positive health does not revive it: the self record's respawn
+// arm does, in the receive (land_local_respawn_arm, D-NET-NEW-L2-55).
 // [orig: tail health read @0x430428; store to local Health @0x4305df]
 void JoinerRole::apply_authoritative_health() {
 	mission::MissionKernel &kernel = *kernel_;
@@ -723,96 +821,6 @@ void JoinerRole::apply_authoritative_health() {
 						rt.authoritative_spawn_released() ? rt.local_entity_health() : int16_t{0};
 				local->health = stored;
 				local_ai->health = stored;
-			} else if (redeploy_release_pending_ &&
-					rt.state().health_updates_applied >
-							redeploy_health_updates_at_release_) {
-				// The recipient's own compact is deliberately priority-boosted
-				// by the host. Use its redeployed pose, not the corpse pose,
-				// before movement/uplink resumes.
-				const replication::ClientEntityState *self =
-						client_entity_for_handle(
-								rt.state(), rt.self_handle());
-				if (self != nullptr && self->seen_this_frame) {
-					const int32_t heading =
-							static_cast<int32_t>(
-									static_cast<uint32_t>(self->yaw_byte) << 24);
-					const int32_t pitch =
-							static_cast<int32_t>(
-									static_cast<uint32_t>(self->pitch_byte) << 24);
-					// The record's words (D-NET-507): the own row's chase runs in the World's
-					// entity pass, after this (D-NET-196).
-					local->position.set_q16({self->record_sample[0], self->record_sample[1],
-							self->record_sample[2]});
-					local->heading = heading;
-					local->pitch_bam = pitch;
-					local->roll_bam = 0;
-					local->health = health;
-					local->alive = true;
-					local->hidden = false;
-					local->flags &= ~1u;
-					local->death_anim_state = 0;
-					local->corpse_timer = 0;
-					local->net_move_input = 0;
-					local->net_analog_x = 0;
-					local->net_analog_y = 0;
-					local->net_analog_z = 0;
-					world::entity_reset_to_spawn_state(*local);
-					// The reset releases the corpse's +0x1CC emitter (its own corpse leg's
-					// decay, or a hit's) [orig: NetPacket_SerializePlayerState - Entity_ResetToSpawnState
-					//  @0x4B9610 called @0x4C113C; the release @0x4B97CB..0x4B97F5].
-					world::release_corpse_effect(world, *local);
-
-					local_ai->heading = heading;
-					local_ai->pitch = pitch;
-					local_ai->roll = 0;
-					local_ai->body_pitch = 0;
-					local_ai->health = health;
-					local_ai->vel_x = 0;
-					local_ai->vel_y = 0;
-					local_ai->net_smooth_target[0] = self->record_sample[0];
-					local_ai->net_smooth_target[1] = self->record_sample[1];
-					local_ai->net_smooth_target[2] = self->record_sample[2];
-					local_ai->net_smooth_heading = heading;
-					local_ai->net_smooth_pitch = pitch;
-					local_ai->net_interp_progress = 0;
-					local_ai->net_interp_steps = 0;
-					local_ai->collide_state = {};
-
-					world::InfantryState &inf = local_ai->inf;
-					inf.active = true;
-					inf.is_local_player = true;
-					// The shared spawn/revive reset (InfantryState::
-					// reset_for_spawn): one field list with the host spawn
-					// seeding, so a NEW motor field re-defaults here without
-					// a second hand-list to forget.
-					inf.reset_for_spawn(heading);
-					// The reset's tail rebuilds every slice, then L's own list, one
-					// 0x0A after retail's record decode runs it (D-NET-687) [orig:
-					// @0x4C113C -> Entity_ResetToSpawnState - @0x4B98EB, @0x4B98F1].
-					if (world.ai.collision != nullptr)
-						world.ai.collision->refresh_entity_proximity(world, *local);
-
-					lp.weapon.fire_held = false;
-					lp.weapon.fire_pressed = false;
-					lp.weapon.reload_pressed = false;
-					// The embedder clears its device-input latches, seeds the
-					// look heading and resets its view and map; the kit is the
-					// release's 0x5A, already folded (D-NET-378), or after a medic
-					// revive, which sends none, the kit L died with (D-NET-379):
-					// retail's client runs Player_InitPlayer only at the mission
-					// start and a team change [orig: Player_InitPlayer @0x4E15F0,
-					// called from Game_StartMission @0x525BBC and
-					// NapiNPClientMsg_TeamAssign @0x431B14;
-					// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0].
-					lp.reset_local_player_input(heading);
-                    lp.reset_for_new_round();
-					// Game_InitNewRound's deploy-hold and being-revived clears ran in the
-					// receive, in the self record's respawn arm (ClientRuntime): a second
-					// clear here would drop a 0x3A the host sent since.
-					lp.respawn_init(/*rebuild_kit=*/false);
-					redeploy_release_pending_ = false;
-					redeploy_health_updates_at_release_ = 0;
-				}
 			} else if (local->alive && (local->flags & 2u) == 0u) {
 				local->health = health;
 				local_ai->health = health;

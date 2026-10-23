@@ -117,7 +117,7 @@ bool JoinerRole::bring_up() {
 	// The round-over gate is lowered only at the mission start's head, which the runtime
 	// folds at the mission data's pass (ClientRuntime's mission_started), never at the load
 	// (V-L2-s8) [orig: Game_StartMission @0x524360 - `mov g_RoundOver, ebx` @0x524A1F].
-	reset_for_load(runtime->deployment_release_revision());
+	reset_for_load();
 	stamp_mission_rules();
 	mirror_session_zoom_rule(); // the load's fresh world, ahead of its fill
 	kernel_->local.loadout.pending_player_class = -1; // the embedder re-applies the kit after each load
@@ -207,7 +207,7 @@ void JoinerRole::push_mission_start_end(const std::function<void()> &present) {
 	ClientRuntime::MissionStartEndLegs legs;
 	static_cast<ClientRuntime::MissionStartPumpLegs &>(legs) = mission_start_pump_legs();
 	legs.init_player = [this] {
-		if (init_local_player_at_mission_start()) mission_start_birth_unreleased_ = true;
+		init_local_player_at_mission_start();
 		// L, the receive handlers' local player from here on (the receive past the init reads
 		// its Position).
 		runtime->set_local_player_position(kernel_->world);
@@ -256,9 +256,7 @@ void JoinerRole::push_mission_start_first_loadout() {
 ClientRuntime::MissionStartPumpLegs JoinerRole::mission_start_pump_legs() {
 	ClientRuntime::MissionStartPumpLegs legs;
 	if (join_novaworld_) legs.periodic_deposit = [this] { deposit_inbound(); };
-	// The receive itself never bears L (its birth is the init's, or a seeded session's
-	// in-match edge inside these writes), so L as it stands is L ahead of the receive.
-	legs.after_receive = [this] { apply_receive_writes(local_spawned_); };
+	legs.after_receive = [this] { apply_receive_writes(); };
 	return legs;
 }
 
@@ -1855,7 +1853,7 @@ void JoinerRole::send_hello_once() {
 // after a receive pump, the frame's (ahead of the send block, open or not) and the mission
 // start's load's two (ClientRuntime::AfterReceive, ClientRuntime::MissionStartPumpLegs; the
 // frame's witness is run_client_net_frame's).
-void JoinerRole::apply_receive_writes(bool local_existed_before) {
+void JoinerRole::apply_receive_writes() {
 	world::World &world = kernel_->world;
 	world::LocalPlayer &lp = kernel_->local;
 	ClientRuntime &rt = *runtime;
@@ -1994,21 +1992,6 @@ void JoinerRole::apply_receive_writes(bool local_existed_before) {
 			store_local_team(rt.self_assigned_team());
 		}
 	}
-	const uint64_t deployment_release_revision =
-			rt.deployment_release_revision();
-	if (deployment_release_revision > deployment_release_revision_seen_) {
-		deployment_release_revision_seen_ = deployment_release_revision;
-		// The first release admits L, which the mission start bore (or which the in-match
-		// edge bears below, D-NET-NEW-L2-52). A later release must revive that existing
-		// identity, but only after a positive 0x0A tail observed after this release frame
-		// (not a stale positive already queued ahead of it).
-		if (local_existed_before && !mission_start_birth_unreleased_) {
-			redeploy_release_pending_ = true;
-			redeploy_health_updates_at_release_ =
-					rt.state().health_updates_applied;
-		}
-		mission_start_birth_unreleased_ = false;
-	}
 	{
 		// L's birth on the stats board (an instrument).
 		devtools::ProfileScope birth(world.profile, devtools::Slot::SIM_CLIENT_LOCAL_BIRTH);
@@ -2029,8 +2012,8 @@ void JoinerRole::apply_receive_writes(bool local_existed_before) {
 
 // The client net frame (recv-fold + connect-drive + the gated C2S 0x0C uplink) with the
 // receive handlers' writes on L in its after-receive leg (loadout/kit, side assignment,
-// the deployment-release latch, a seeded session's birth of L on the in-match edge, its own
-// record and the 0x0F's pose), then the ~1 Hz freeze tripwire and the objective sync into
+// a seeded session's birth of L on the in-match edge, its own record with its respawn arm
+// and the 0x0F's pose), then the ~1 Hz freeze tripwire and the objective sync into
 // world subgoals.
 // The wire leg's clock stops right after the ship, so the embedder's F3 Stats board
 // measures the net frame with its folds. Returns what this frame's pump decoded (drives
@@ -2047,7 +2030,6 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// ahead of any host reply to the mission start's sends, D-NET-NEW-L2-52).
 	const uint32_t health_updates_before =
 			rt.state().health_updates_applied;
-	const bool local_existed_before_net = local_spawned_;
 	// The own record's compact revision ahead of the receive: a record the receive folds
 	// is the uplink's echo (the builder below).
 	const uint16_t self_before = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
@@ -2060,11 +2042,11 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// (ClientRuntime::AfterReceive). Each fold applies what the receive brought (each is
 	// revision-gated): the availability; the message legs in the receive's order (each
 	// 0x5A's kit and row, each self 0x50's team, page copy and init, each 0x35's pickup);
-	// the side's kit buffer and the 0x50's last team; the release latch; then a seeded
-	// session's birth of L on the in-match edge (a join's L is born at its mission start, as
-	// retail's, so the handlers write it inside the receive, D-NET-NEW-L2-52), its own record
-	// and the 0x0F's pose. So a release's 0x0C is built from L as the receive left it
-	// (D-NET-526): a game-loop frame's in that frame;
+	// the side's kit buffer and the 0x50's last team; then a seeded session's birth of L on
+	// the in-match edge (a join's L is born at its mission start, as retail's, so the handlers
+	// write it inside the receive, D-NET-NEW-L2-52), its own record (a respawn arm's
+	// redeploy among its writes, D-NET-NEW-L2-55) and the 0x0F's pose. So a release's 0x0C is
+	// built from L as the receive left it (D-NET-526): a game-loop frame's in that frame;
 	// the final wait's 0x0F pass sends the completion burst alone and the game loop's first
 	// frame builds the first 0x0C (D-NET-NEW-L2-48).
 	// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
@@ -2075,19 +2057,18 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	//  @0x4319DB / @0x4319EE, the local arm @0x431A35..0x431AAD; NapiNPClientMsg_0x00F
 	//  @0x42E200 - the hold clear @0x42E391, the pose stores @0x42E3B9..0x42E3F2]
 	const ClientRuntime::AfterReceive after_receive = [&] {
-		apply_receive_writes(local_existed_before_net);
+		apply_receive_writes();
 	};
-	// The builder at the send block, on L as the receive left it. Its own refusals: no
-	// body, a Health word of 0, the dead bit (no alive latch, D-NET-433), and its serializer's
-	// no def (a body its own ewep update destroyed); then the role's hold on a redeploy
-	// release L has not taken yet (apply_authoritative_health's revive).
+	// The builder at the send block, on L as the receive left it (a respawn arm's redeployed
+	// body included, D-NET-NEW-L2-55). Its own refusals: no body, a Health word of 0, the dead
+	// bit (no alive latch, D-NET-433), and its serializer's no def (a body its own ewep update
+	// destroyed).
 	// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0; jz`
 	//  @0x42A58F..0x42A597, `test byte [eax+24h], 2; jnz` @0x42A599..0x42A59D;
 	//  Pool_SerializeEntityViaVTable @0x4D64E0 - the def test @0x4D654F..0x4D6554]
 	const std::vector<std::vector<uint8_t>> outs = rt.Client_ProcessNetworkFrame(
 			[&](PlayerExtendedUplink &up) {
-		if (!local_spawned_ || !world.cached.local_player.valid() || redeploy_release_pending_)
-			return false;
+		if (!local_spawned_ || !world.cached.local_player.valid()) return false;
 		const world::Entity *e = world.registry.get(world.cached.local_player);
 		const world::AiEntity *ae = world.ai.for_handle(world.cached.local_player);
 		if (e == nullptr || ae == nullptr || world::retail_signed_i16(e->health) == 0 ||
@@ -2299,13 +2280,9 @@ void JoinerRole::reset_for_join() {
 	// correction).
 	started_ = false;
 	local_spawned_ = false;
-	mission_start_birth_unreleased_ = false;
 	final_wait_seen_ = false;
 	final_wait_end_ = false;
-	deployment_release_revision_seen_ = 0;
 	mounted_ammo_revision_seen_ = 0;
-	redeploy_release_pending_ = false;
-	redeploy_health_updates_at_release_ = 0;
 	last_frontier_seq_ = 0;
 	last_records_applied_ = 0;
 	last_outbound_seq_ = 0;

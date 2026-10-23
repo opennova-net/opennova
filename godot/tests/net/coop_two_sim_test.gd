@@ -1004,8 +1004,9 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 		joiner.step()
 
 	# The player's 0x0E pick is released by an ACK-qualified 0x5A. That edge
-	# reuses L (rather than spawning a second local entity), but revival still
-	# waits for the following fresh positive recipient-health tail.
+	# reuses L (rather than spawning a second local entity); the release's alive
+	# self record revives it in its receive (the record's respawn arm,
+	# D-NET-NEW-L2-55).
 	assert_true(joiner.is_join_deploy_pick_pending(),
 			"death returned the established joiner to its deployment picker")
 	assert_true(joiner.send_deployment_pick(0),
@@ -1027,7 +1028,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			break
 		OS.delay_msec(2)
 	assert_true(revived,
-			"the post-pick release plus a later positive tail revives existing local L")
+			"the post-pick release's alive self record revives existing local L")
 	assert_gt(revived_card.get_health(), 0)
 	assert_eq(revived_card.get_ai_health(), revived_card.get_health(),
 			"the registry and infantry motor health revive atomically")

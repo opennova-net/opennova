@@ -471,6 +471,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	self_team_revision_ = 0;
 	self_assigned_team_ = 0;
 	local_dead_latch_ = false;
+	local_respawn_arm_pending_ = false;
 	local_entity_health_ = 0;
 	self_team_assigns_.clear();
 	cleared_player_slots_.clear();
@@ -562,6 +563,7 @@ bool ClientRuntime::begin_mission_reload() {
 	authoritative_spawn_released_ = false;
 	local_entity_health_ = 0;
 	local_dead_latch_ = false; // the next mission start's Player_InitPlayer
+	local_respawn_arm_pending_ = false;
 	cleared_player_slots_.clear();
 	// The previous mission's replica goes with its world. The round gate the
 	// 0x25 raised holds until the reload's mission start clears it
@@ -1414,7 +1416,9 @@ bool ClientRuntime::client_receive_pass(std::vector<std::vector<uint8_t>> &outbo
 			// while the local entity's own dead bit is set (local_dead_latch_, the
 			// body's death edge; the record's bit is never folded into Flags). It
 			// clears the entity's bit, writes the local Position from the record in
-			// the receive, so the pump's later handlers read it (D-NET-687), and runs
+			// the receive, so the pump's later handlers read it (D-NET-687), latches the
+			// arm's pose for L, which the role's record fold lands in the same receive
+			// (D-NET-NEW-L2-55), and runs
 			// the local respawn's Game_InitNewRound, which clears the deploy hold:
 			// the release of a deploy that sent no 0x5A, a medic revive's
 			// (D-NET-379), then the being-revived latch (+0x1E0), so a 0x3A later in
@@ -1423,7 +1427,8 @@ bool ClientRuntime::client_receive_pass(std::vector<std::vector<uint8_t>> &outbo
 			// hold, the death screen, a hidden body) fires nothing.
 			// [orig: NetPacket_SerializePlayerState @0x4C09C0 - `test bl, 2`
 			//  @0x4C0FE1 (its jz @0x4C1005), `test byte [edi+24h], 2` @0x4C1109, the
-			//  Position stores @0x4C110F..0x4C111D, the Game_InitNewRound call @0x4C114C; the
+			//  Position stores @0x4C110F..0x4C111D, the Yaw / Pitch stores @0x4C1120 / @0x4C1123,
+			//  the Game_InitNewRound call @0x4C114C; the
 			//  Flags folds 0xE1 / 0xFD @0x4C12FF / @0x4C1307; Game_InitNewRound
 			//  @0x422740 - g_ClientDeployHold = 0 @0x4227CE, `mov [eax+1E0h], ebx`
 			//  @0x4227D4]
@@ -1434,9 +1439,18 @@ bool ClientRuntime::client_receive_pass(std::vector<std::vector<uint8_t>> &outbo
 						self_after->state_flags_known && (self_after->state_flags & 0x02u) == 0 &&
 						local_dead_latch_) {
 					local_dead_latch_ = false;
-					if (local_entity_bound())
-						for (int axis = 0; axis < 3; ++axis)
+					if (local_entity_bound()) {
+						// The arm's pose for L, at this record: the staged sample, the staged
+						// (composed) Yaw and the record's Pitch byte (LocalRespawnArm).
+						for (int axis = 0; axis < 3; ++axis) {
 							local_player_position_[axis] = self_after->record_sample[axis];
+							local_respawn_arm_.position[axis] = self_after->record_sample[axis];
+						}
+						local_respawn_arm_.yaw = self_after->net_smooth_heading;
+						local_respawn_arm_.pitch = static_cast<int32_t>(
+								static_cast<uint32_t>(self_after->pitch_byte) << 24);
+						local_respawn_arm_pending_ = true;
+					}
 					if (joiner_->release_deployment_on_respawn())
 						respawn_release_in_poll = true;
 					if (view_.state().local_medic_reviving) {

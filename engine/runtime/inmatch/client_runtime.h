@@ -347,10 +347,8 @@ public:
 	// establishment becomes applicable (even if deploy UI remains pending), and
 	// again on an ACK-qualified post-pick release or the self record's respawn
 	// edge (a medic revive's deploy sends no 0x5A). Unrelated valid 0x5A grants
-	// still open gameplay_gate_open(), but do not invent a pose/respawn edge.
-	// Consumers use the revision,
-	// rather than positive health alone, to distinguish a real respawn from a
-	// stale 0x0A tail.
+	// still open gameplay_gate_open(), but do not invent a pose/respawn edge. L's
+	// redeploy is the self record's respawn arm alone (take_local_respawn_arm).
 	uint64_t deployment_release_revision() const {
 		return deployment_release_revision_;
 	}
@@ -1223,6 +1221,27 @@ public:
 	//  NetPacket_SerializePlayerState @0x4C09C0 - the dead record's Health zero
 	//  @0x4C10F1..0x4C10FB, the respawn arm @0x4C1109]
 	bool local_player_dead() const { return local_dead_latch_; }
+	// What the self record's respawn arm writes on the local entity, latched at that
+	// record: Position is the record's world sample (a carrier's compose included), Yaw the
+	// transform's out[3] (the carrier's Yaw plus the record's byte, the stage +0x240 word),
+	// Pitch the record's byte (out[4], a pass-through). The role's record fold lands it on L,
+	// once (take_local_respawn_arm). The arm's Roll store reads a word no read of this case
+	// writes (out[5] passes through @0x4C112A's uninitialized slot); L keeps 0.
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage +0x240 @0x4C0FD7,
+	//  Entity_TransformLocalToWorld @0x4C10D4, the arm's stores @0x4C110F..0x4C112A;
+	//  Entity_TransformLocalToWorld @0x43BD00 - out[3] @0x43BE7E, out[5] @0x43BE84,
+	//  out[4] @0x43BE8A]
+	struct LocalRespawnArm {
+		int32_t position[3] = {0, 0, 0};
+		int32_t yaw = 0;
+		int32_t pitch = 0;
+	};
+	bool take_local_respawn_arm(LocalRespawnArm &out) {
+		if (!local_respawn_arm_pending_) return false;
+		local_respawn_arm_pending_ = false;
+		out = local_respawn_arm_;
+		return true;
+	}
 	// The local entity's Health word as this frame's receive left it: each 0x0A's
 	// recipient tail stores it, then the record naming the local entity zeroes it when
 	// dead or, alive, raises a Health of 0 or less to 1 (the receive loop carries the
@@ -1415,6 +1434,9 @@ private:
 	int32_t local_player_position_[3] = {0, 0, 0};
 	// local_player_dead's latch (the local entity's Flags & 2).
 	bool local_dead_latch_ = false;
+	// The self record's respawn arm, until the role lands it (take_local_respawn_arm).
+	LocalRespawnArm local_respawn_arm_;
+	bool local_respawn_arm_pending_ = false;
 	// The local entity's Health word as the receive leaves it (local_entity_health).
 	int16_t local_entity_health_ = 0;
 	ConnectLog *connect_log_ = nullptr; // set_connect_log
