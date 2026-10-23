@@ -10,7 +10,9 @@
 //   - a team host created with TeamChoose keeps bit 4 after `SET ChangeTeam 0` (the create's
 //     copy), a deathmatch host's drops it;
 //   - a map change to a team mission keeps the create's type in the team test (a side password
-//     arms no 0x20) and leaves P1 / P2 as created.
+//     arms no 0x20) and leaves P1 / P2 as created;
+//   - a map change keeps game_settings' server and side passwords, the create's or an admin
+//     SET's, whatever the next config carries (D-NET-NEW-L1-42).
 // [orig: ServerConfig_SerializeToPacket @0x505BD0 - CNapiServerConfig_BuildFlags @0x505D29,
 //  stored @0x505D3B; CNapiServerConfig_BuildFlags @0x4C4DC0 - the cfg word's bit 4 @0x4C4DD2,
 //  `test [ecx+0F34h], 10000h` @0x4C4E30, `test [ecx+0F38h], al` @0x4C4E3C, side A @0x4C4E5F;
@@ -129,6 +131,32 @@ bool run_a_map_change_keeps_the_creates_words() {
 	              "after a map change to a team mission: P1 / P2 the create's, no 0x20 in the tail");
 }
 
+// D-NET-NEW-L1-42: game_settings' passwords are the create's or an admin SET's; a map change
+// writes none of them, whatever the next config carries.
+// [orig: CNapiGameSession_CreateSession @0x4C97C0 - the settings copy @0x4C9826;
+//  CAdminServer_HandleSetCommand - CAdminServer_SetSidePassword (+0x60) @0x406284]
+bool run_a_map_change_keeps_the_settings_passwords() {
+	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	config.game_type = game_type::kTeamDeathmatch;
+	config.server_password = "sesame";
+	config.side_a_password = "blue1";
+	inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			/*host_key=*/0, nullptr, config);
+	if (!expect(admin_set(*ctx, "SET SideBPassword bravo"), "SET SideBPassword is accepted"))
+		return false;
+	inmatch::GameConfig next = config; // the embedder's next config: other passwords
+	next.server_password.clear();
+	next.side_a_password = "other";
+	next.side_b_password.clear();
+	inmatch::continue_session(*ctx, next, nullptr);
+	return expect(ctx->config.server_password == "sesame" && ctx->config.side_a_password == "blue1" &&
+	                      ctx->config.side_b_password == "bravo" &&
+	                      (record_tail(*ctx) & 0x38u) == 0x38u,
+	              "after a map change the passwords are the create's and the admin's");
+}
+
 } // namespace
 
 int main() {
@@ -136,6 +164,7 @@ int main() {
 	if (!run_an_admin_change_team_reaches_a_later_record()) ++failures;
 	if (!run_the_team_test_reads_the_creates_copy()) ++failures;
 	if (!run_a_map_change_keeps_the_creates_words()) ++failures;
+	if (!run_a_map_change_keeps_the_settings_passwords()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

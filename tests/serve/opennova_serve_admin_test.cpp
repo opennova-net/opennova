@@ -6,7 +6,9 @@
 //   - PLAYER LIST lists the host's own slot 0, then the joiner;
 //   - MISSION LIST, then MISSION ADD with ONESHOT at a position, SETNEXT onto it and CYCLE: the
 //     map changes to the SETNEXT entry, and the next CYCLE removes the one-shot after it played
-//     and plays the entry that slid into its slot;
+//     and plays the entry that slid into its slot; a SET ChangeTeam and a SET ServerPassword
+//     ahead of the second CYCLE reach the next mission (the cfg block's mp-attribute word, the
+//     session's server password: D-NET-NEW-L1-42);
 //   - SET ServerName changes the session's name and re-saves ./game.cfg; SET ServerMessage is
 //     not a SET key (retail's usage and `Setting Not Found`, no save);
 //   - CHAT SEND reaches the joiner as S2C 0x14 [10][255], and CHAT GET lists the host's ring;
@@ -28,6 +30,7 @@
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_protocol.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/game_config.h> // kMpAttribTeamChoose
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h>
 
@@ -339,6 +342,12 @@ int main() {
 	check_eq(admin.one("CHAT GET"), "", "the map change emptied the display buffer");
 	check_eq(admin.one("CHAT SEND after the cycle"), "OK - Chat sent.", "CHAT SEND on the next map");
 	check_eq(admin.one("CHAT GET"), "after the cycle \r\n", "CHAT GET lists the next map's line alone");
+	// An admin SET ahead of the map change: the next mission keeps the cfg block's mp-attribute
+	// word as the SET left it and the session's server password (D-NET-NEW-L1-42)
+	// [orig: CAdminServer_HandleSetCommand @0x405A60 - ChangeTeam @0x405C80, the cfg word
+	//  @0x406190; Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals @0x524662].
+	check_eq(admin.one("SET ChangeTeam 1"), "OK - Setting Changed.", "SET ChangeTeam 1");
+	check_eq(admin.one("SET ServerPassword sesame"), "OK - Setting Changed.", "SET ServerPassword");
 	check_eq(admin.one("MISSION CYCLE"), "OK - Server is cycling...", "the second CYCLE");
 	CHECK(rig.wait([&] {
 		return server.missions_played() == 3 && rig.client.map_file() == "SERVETST.BMS" &&
@@ -347,6 +356,8 @@ int main() {
 	rig.with([&] {
 		// The one-shot removed after it played; the entry that slid into its slot plays.
 		CHECK(server.rotation().list.count == 3 && server.rotation().list.cursor == 2);
+		CHECK((rig.ctx().config.mp_attributes & inmatch::GameConfig::kMpAttribTeamChoose) != 0);
+		CHECK(rig.ctx().config.server_password == "sesame");
 		CHECK(rig.ctx().config.mission_file == "SERVETST.BMS");
 		CHECK(rig.client.map_file() == "SERVETST.BMS");
 		return 0;

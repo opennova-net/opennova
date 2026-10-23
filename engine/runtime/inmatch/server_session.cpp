@@ -129,8 +129,18 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
 
 void continue_session(NapiNPServerCtx &ctx, const GameConfig &config,
 		const rtxt::File *text_override) {
-	start_mission_state(ctx, config);
-	resolve_mission_config(ctx, config, ctx.np_protocol.identity, text_override);
+	// game_settings is the create's: a map change writes none of it, so its server and side
+	// passwords stay the create's (or an admin SET's) whatever the next config carries
+	// (D-NET-NEW-L1-42). [orig: CNapiGameSession_CreateSession @0x4C97C0 - the settings copy
+	//  @0x4C9826; the admin password arms CAdminServer_HandleSetCommand @0x405A60 - CAITask_SetName
+	//  (+0x20) @0x40620A, CAdminServer_SetSidePassword (+0x40 / +0x60) @0x406247 / @0x406284;
+	//  Game_StartMission @0x524360 reads its name @0x5244BC and writes none of it]
+	GameConfig next = config;
+	next.server_password = ctx.config.server_password;
+	next.side_a_password = ctx.config.side_a_password;
+	next.side_b_password = ctx.config.side_b_password;
+	start_mission_state(ctx, next);
+	resolve_mission_config(ctx, next, ctx.np_protocol.identity, text_override);
 	// The exit the round end stored is spent: the main frame read it before
 	// the map change [orig: Game_ProcessMainFrame @0x526806..0x526867].
 	ctx.mission_exit_reason = 0;

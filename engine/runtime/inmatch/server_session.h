@@ -80,7 +80,8 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 
 // The next mission inside the same session (net-re §5.70.6): the session
 // config takes `config` (the next map's identity on the host screen's or the
-// host file's rules), every mission-start reset of the context runs (the
+// host file's rules) but keeps the create's game_settings passwords (the server
+// and side passwords, D-NET-NEW-L1-42), every mission-start reset of the context runs (the
 // scoreboard counter, the round-end state, both transfer tokens, the
 // mission-data block, the advertised flag words, the stored exit reason),
 // and the connection list, the protocol state and the session identity stay.

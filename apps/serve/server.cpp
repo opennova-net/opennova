@@ -516,7 +516,13 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// [orig: Game_StartMission @0x5244DE..0x52452B sets g_GameType from the
 	//  rotation's current catalog entry +0x1128 on the authority, over the
 	//  file's GameType], the mission identity and the expansion check.
-	inmatch::GameConfig config = host_.config;
+	// The block as it stands, not the startup's reading of it: every mission start applies it
+	// again, a map change's too, so what an admin SET wrote into it (the mp-attribute word, the
+	// rules) reaches the next mission; the create's game_settings passwords stay the session's
+	// (continue_session) (D-NET-NEW-L1-42) [orig: Game_StartMission @0x524360 - the first-load
+	//  flag @0x5243A4, Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E;
+	//  CAdminServer_HandleSetCommand @0x405A60 - the cfg word @0x406190].
+	inmatch::GameConfig config = inmatch::host_screen_from_block(config_.cfg()).config;
 	config.game_type = list.map_game_type;
 	config.mission_file = map_file;
 	config.mission_name = doc.get_mission_name();
