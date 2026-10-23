@@ -752,12 +752,16 @@ func test_second_scene_submission_is_compiled_for_its_own_eye() -> void:
 	camera.position = Vector3(0.0, 10.0, 5.0)
 	camera.current = true
 	viewport.add_child(camera)
+	# Each eye looks at the emitters: one out of a view never submits there (retail
+	# CParticleEmitter_TrySubmitForRender @ 0x5e7540).
+	camera.look_at(Vector3.ZERO, Vector3.UP)
 	# Clearly not the main eye: below the water plane, elsewhere, turned and
-	# rolled, under a narrow field of view.
+	# rolled, under a narrower field of view.
 	var second_camera := _shared_world_camera(viewport)
 	second_camera.position = Vector3(30.0, -10.0, -20.0)
-	second_camera.rotation_degrees = Vector3(15.0, 120.0, 40.0)
-	second_camera.fov = 5.0
+	second_camera.look_at(Vector3(0.0, 0.5, 0.0), Vector3.UP)
+	second_camera.rotate_object_local(Vector3.FORWARD, deg_to_rad(40.0))
+	second_camera.fov = 30.0
 
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _live_world_scene_at_heights(PackedFloat32Array([-2.0, 0.0, 3.0]))
