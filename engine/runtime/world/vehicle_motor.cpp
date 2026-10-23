@@ -1675,10 +1675,25 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
             m.plat_planing = true;
             if (!m.plat_porpoise) {
                 if (fwd_z_now > pitchThr) {
-                    // dist/293 > (cmd/293)*0.5 -> latch (the per-tick travel
-                    // is our speed here; the saved-pose dist is equivalent
-                    // between integrations).
-                    if (m.speed / 293 > (cmd / 293) / 2) m.plat_porpoise = true;
+                    // The hull's XY travel since the mover's entry stamp, not its speed
+                    // register: the integration and the push above moved it by its
+                    // velocity words and the contact share, so the length of
+                    // savedLivePose - Position (capped at flt_7C19E0, truncated) / 293
+                    // against (cmd / 293) * 0.5 truncated latches the dip
+                    // (D-NET-NEW-L6-41).
+                    // [orig: the travel @0x48376B..0x4837A1, the cap flt_7C19E0
+                    //  (2147418112.0f) @0x4837A3..0x4837B6, the command half (flt_7C3B94
+                    //  0.5f) @0x4837D2..0x48380B, the travel's ftol and /293 @0x48380D..0x483825,
+                    //  `jle` @0x483829, the latch @0x48382B; Entity_UpdateWatercraftPhysics
+                    //  @0x48D480 - the entry stamp @0x48D4AC..0x48D4C5, the integration
+                    //  @0x48ECA8..0x48ECC6]. A row no mover stamped reads no travel.
+                    const double tx = veh.saved_live_valid
+                            ? double(io::bam_sub(veh.saved_live_pos[0], px)) : 0.0;
+                    const double ty = veh.saved_live_valid
+                            ? double(io::bam_sub(veh.saved_live_pos[1], py)) : 0.0;
+                    const int32_t travel =
+                            int32_t(std::min(std::sqrt(ty * ty + tx * tx), 2147418112.0));
+                    if (travel / 293 > int32_t(double(cmd / 293) * 0.5)) m.plat_porpoise = true;
                 } else {
                     const int32_t lift = (m.speed >= planeSpd) ? liftHi : liftLo;
                     c[0][2] += lift;

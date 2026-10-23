@@ -1169,6 +1169,44 @@ bool run_planing_boat_leans_into_steer() {
 	return ok;
 }
 
+// D-NET-NEW-L6-41: the porpoise latch reads the hull's XY travel since the mover's entry stamp
+// (savedLivePose - Position), not its speed register: a fast register with no travel stays
+// unlatched, a slow register over 2 u of travel latches against the command's half.
+// [orig: Entity_ProcessPlatformPhysics @0x481870 - the travel @0x48376B..0x4837A1, the cap
+//  @0x4837A3..0x4837B6, the command half @0x4837D2..0x48380B, `jle` @0x483829, the latch
+//  @0x48382B]
+bool run_porpoise_latch_reads_the_travel() {
+	bool ok = true;
+	for (const bool travelled : { false, true }) {
+		Rig r;
+		make_rig(r);
+		set_zodiac_boxes(r.traits);
+		r.traits.pitch_lift = 10;
+		r.traits.pitch_lift_vel = 10;
+		w::Entity *e = r.world.registry.get(r.boat);
+		e->veh.yaw_seeded = true;
+		e->veh.yaw_bam = 0;
+		// The bow up past the light hull's threshold (10 * 0.1 * 4096), whichever pitch sign
+		// raises the forward row's z.
+		int32_t nose_up = w::bam_from_degrees_wrapped(10.0);
+		if ((w::detail::vehicle_euler_basis(0, nose_up, 0).q22.m[8] >> 6) <= 4096)
+			nose_up = w::bam_from_degrees_wrapped(-10.0);
+		ok &= expect((w::detail::vehicle_euler_basis(0, nose_up, 0).q22.m[8] >> 6) > 4096,
+				"the porpoise rig's bow rides past the threshold");
+		e->veh.air_pitch_bam = nose_up;
+		e->veh.speed = travelled ? 1 : 20000; // 20000 / 293 = 68 over the half command 27
+		e->veh.cmd_speed = 16384;
+		e->veh.plat_afloat = true;
+		w::stamp_saved_live_pose(*e); // the mover's entry stamp
+		if (travelled)
+			e->saved_live_pos[0] -= 2 << 16; // 131072 / 293 = 447 over 27
+		r.world.vehicles.watercraft_platform_solve(*e, r.traits);
+		ok &= expect(e->veh.plat_porpoise == travelled,
+				"the porpoise latch reads the travel since the entry stamp, not the speed");
+	}
+	return ok;
+}
+
 bool run_water_rudder_wraps_min_speed() {
 	// Retail NEG is a 32-bit wrapping register operation: INT_MIN remains
 	// INT_MIN. Promoting before negation reverses the rudder-rate sign.
@@ -2647,6 +2685,7 @@ int main() {
 	ok &= run_heavy_heeled_hull_rights_itself();
 	ok &= run_bike_grounded_lean_recovers_roll();
 	ok &= run_planing_boat_leans_into_steer();
+	ok &= run_porpoise_latch_reads_the_travel();
 	ok &= run_water_rudder_wraps_min_speed();
 	ok &= run_airborne_watercraft_preserves_yaw_rate();
 	ok &= run_prior_euler_drives_thrust_and_beach_stop();
