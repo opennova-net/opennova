@@ -697,6 +697,23 @@ inline constexpr Normalization kNormalizations[] = {
 			"reads 0 ahead of a living first window frame is an earlier life's (a respawn at "
 			"the open) and opens nothing, so a run that never dies inside the window keeps no "
 			"dead value from before it" },
+	{ "frame.death_rekey", MaskKind::Field, 'S', 0x00A, "record classes at a death", 0,
+			"a frame's records are its priority list's head cut at the soft byte budget "
+			"(NetPacket_SerializeEntityStatesToPacket @0x50F070, the test @0x50F345..0x50F34B), "
+			"and once the recipient's body carries the dead bit (+0x24 mask 0x02, read "
+			"@0x50E674..0x50E689 in Server_BuildEntityPriorityList @0x50E590) its list drops the "
+			"distance, view and line-of-sight terms for a class weight, 200 on pool 0 (@0x50EB39) "
+			"and 100 on pool 1 (@0x50EFE3), plus each entity's age byte, which every build "
+			"grows (@0x50E62E..0x50E637) and each send zeroes (@0x50F168). So the first frame "
+			"after a death takes the entities whose ages the living key let grow, and which "
+			"classes fill its budget is the death's phase against those bytes. x8 / x10 / x11's "
+			"01tr-coop-aikill: that frame alone carried no vehicle on x10's RR and RR-aa (27 "
+			"infantry each), x10's OO (27), x8's OO and x11's OR (26), and 1 to 4 vehicles on "
+			"x8's RR (3) and RR-aa (4), x8's RO and OR and x11's RO, a retail host (2), x10's OR "
+			"and x11's OO (1); every other steady frame of every run carried all three classes, "
+			"so retail's own RR read {PVI} on x8 and {PI,PVI} on x10. That first frame (the first "
+			"whose Health word reads 0 after a living one) leaves the record-class set on "
+			"every run" },
 	{ "frame.weapon_countdown", MaskKind::Field, 'S', 0x00A, "weapon[1..4]", 0,
 			"the weapon block rides one frame in four (NetPacket_WritePlayerState @0x4FF6B0, "
 			"the phase test @0x4FF81B) and its slot bytes +0x168, +0x170, +0x16C and +0x164 "

@@ -3172,6 +3172,30 @@ void test_frame_draws() {
 				"pass");
 	}
 	{
+		// x10 / x11's aikill: the recipient dies at steady frame 100, and the first frame after
+		// the death, keyed on the dead list's class weights and age bytes, carried no vehicle
+		// on one run and some on another (frame.death_rekey). `bare` names the steady frame
+		// that carries none.
+		auto dies = [&rewrite](uint32_t seed, size_t bare) {
+			return rewrite(scripted(seed),
+					[bare](size_t i, wire::ParityFrameState &f, wire::ParityEntity &) {
+						f.health = i < 100 ? 150 : 0;
+						f.vehicles = i == bare ? 0 : 1;
+					});
+		};
+		constexpr size_t kNone = size_t(-1);
+		// x11 RO against x10's RR / RR-aa: {PV} against {P,PV}, only the death's frame apart.
+		expect_row(judge_case(dies(1, 100), dies(2, 100), dies(3, kNone), "RO"), 'S',
+				"frame_record_classes", "", "pass");
+		expect_row(judge_case(dies(1, kNone), dies(2, kNone), dies(3, 100), "OO"), 'S',
+				"frame_record_classes", "", "pass");
+		// A vehicle-less frame while alive, or past the death's first frame, still compares.
+		expect_row(judge_case(dies(1, kNone), dies(2, kNone), dies(3, 50), "OO"), 'S',
+				"frame_record_classes", "", "fail", "FRAME_RECORD_CLASS_MISMATCH");
+		expect_row(judge_case(dies(1, kNone), dies(2, kNone), dies(3, 101), "OO"), 'S',
+				"frame_record_classes", "", "fail", "FRAME_RECORD_CLASS_MISMATCH");
+	}
+	{
 		// x6's hostkill: the +0x168 countdown (weapon[1]) from `top` and the +0x170 one
 		// (weapon[2]) from 120, both started at steady frame `start` `skipped` seconds in, a
 		// second every 8 frames (two weapon blocks), +0x170 still running at the window's end

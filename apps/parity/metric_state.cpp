@@ -512,7 +512,32 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 	}
 	set_metric(out, 'S', "frame_phase_step", "FRAME_HEADER_FLAGS_MISMATCH", phase_step(a),
 			phase_step(b));
-	both("frame_record_classes", "FRAME_RECORD_CLASS_MISMATCH", [](const F &f) {
+	// A frame's records are its priority list's head cut at the soft byte budget
+	// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 (the test @0x50F345..0x50F34B)],
+	// and a dead recipient's list is keyed on the class weights and each entity's age byte
+	// alone [orig: Server_BuildEntityPriorityList @0x50E590 (the dead bit @0x50E674..0x50E689,
+	// pool 0's 200 @0x50EB39, pool 1's 100 @0x50EFE3)], the ages growing every build
+	// (@0x50E62E..0x50E637) and zeroed at each send (@0x50F168): the first frame after the
+	// death takes its classes from the ages the living key left, so it leaves the set
+	// (frame.death_rekey).
+	static_assert(has_normalization("frame.death_rekey"));
+	auto rekeyed = [](const RunFacts &run, const std::vector<const F *> &frames) {
+		std::set<const F *> edges;
+		const F *previous = nullptr;
+		for (const F &state : run.trace.frames) {
+			if (!state.decoded)
+				continue;
+			if (previous != nullptr && previous->health > 0 && state.health == 0)
+				edges.insert(&state);
+			previous = &state;
+		}
+		std::vector<const F *> kept;
+		for (const F *f : frames)
+			if (edges.count(f) == 0)
+				kept.push_back(f);
+		return kept;
+	};
+	auto classes = [](const F &f) {
 		std::string key;
 		if (f.players)
 			key += "P";
@@ -523,7 +548,9 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 		if (f.none)
 			key += "N";
 		return key.empty() ? std::string("-") : key;
-	});
+	};
+	set_metric(out, 'S', "frame_record_classes", "FRAME_RECORD_CLASS_MISMATCH",
+			values(rekeyed(rr, a), classes), values(rekeyed(other, b), classes));
 	both("frame_local_state", "FRAME_LOCAL_STATE_MISMATCH",
 			[](const F &f) { return std::to_string(f.state_flag_byte); });
 	// A residual between a run's full health and death is a hit's draw: the damage is
