@@ -498,10 +498,16 @@ Ref<HitboxDebugReport> Simulation::get_hitbox_debug() {
 }
 
 int Simulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,
-                                      const String &p_ammo_name) {
+                                      const String &p_ammo_name, int p_shooter_wire_handle) {
 	if (!kernel_) return -1;
 	const int ammo_index = kernel_->world.tables.ammo.index_of(p_ammo_name.utf8().get_data());
 	if (ammo_index < 0) return -1;
+	opennova::world::EntityHandle owner = kernel_->world.cached.local_player;
+	if (p_shooter_wire_handle >= 0) {
+		if (p_shooter_wire_handle > 0xFFFF) return -1;
+		owner = opennova::world::EntityHandle{static_cast<uint16_t>(p_shooter_wire_handle)};
+		if (kernel_->world.registry.get(owner) == nullptr) return -1;
+	}
 	// Godot world (x, up, z) -> mission (x, -z, up); direction -> the spawn's
 	// yaw/pitch BAM (the §5.16 mission bearing: vel = (cos yaw, sin yaw, sin
 	// pitch) x speed — round_sim.cpp spawn).
@@ -514,7 +520,7 @@ int Simulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_
 	if (sz > 1.0) sz = 1.0;
 	if (sz < -1.0) sz = -1.0;
 	opennova::world::RoundSpawnParams params;
-	params.owner = kernel_->world.cached.local_player;
+	params.owner = owner;
 	params.shooter_handle = params.owner.valid() ? params.owner.packed : 0xFFFF;
 	params.ammo_index = ammo_index;
 	params.origin = opennova::world::Vec3{p_from_godot.x, -p_from_godot.z, p_from_godot.y};

@@ -429,8 +429,9 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);
-	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),
-	                     &Simulation::debug_spawn_round);
+	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name",
+	                              "shooter_wire_handle"),
+	                     &Simulation::debug_spawn_round, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("debug_pick_entity", "from_godot", "dir_godot", "max_range_units"),
 	                     &Simulation::debug_pick_entity);
 	ClassDB::bind_method(D_METHOD("get_hitbox_debug"), &Simulation::get_hitbox_debug);

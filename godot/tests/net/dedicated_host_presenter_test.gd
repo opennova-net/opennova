@@ -48,12 +48,15 @@ func _join(world: GameWorld, host: Simulation) -> Simulation:
 	return joiner
 
 
-func _has_player_body(sim: Simulation) -> bool:
+# The joiner's body in the host's pool: a player body that is not the host's own player (a
+# listen host's local player). -1 when the pool holds none.
+func _joiner_body_handle(sim: Simulation) -> int:
+	var own: int = sim.get_local_player_wire_handle() if sim.has_local_player() else -1
 	for index in range(sim.get_entity_count()):
 		var card: EntityCard = sim.entity_card_by_ai_index(index)
-		if card != null and card.get_item_id() == PLAYER_ITEM:
-			return true
-	return false
+		if card != null and card.get_item_id() == PLAYER_ITEM and card.get_wire_handle() != own:
+			return card.get_wire_handle()
+	return -1
 
 
 # Frames until one runs a logic tick (the session's banked update); false when none did.
@@ -96,7 +99,8 @@ func test_a_serve_only_hosts_session_presents_no_entity() -> void:
 			joiner.step()
 			OS.delay_msec(2)
 		# The sim's words: the host's pool holds the joiner's body whichever role it plays.
-		assert_true(_has_player_body(host), "the host's session admitted the joiner's body")
+		var joiner_body := _joiner_body_handle(host)
+		assert_gte(joiner_body, 0, "the host's session admitted the joiner's body")
 		var wire: WirePresentStats = runtime.get_wire_present_stats()
 		if serve_and_play:
 			assert_gt(wire.spawned + wire.unresolved, 0,
@@ -107,11 +111,13 @@ func test_a_serve_only_hosts_session_presents_no_entity() -> void:
 			assert_eq(presenter.wire_entity_count(), 0, "no wire node exists")
 			assert_eq(runtime.get_perf_counters().present_us, 0, "no present frame ran")
 
-		# A round with no shooter: the fire pass presents it on a listen host; a dedicated
-		# host's ticked frame drops it undrawn. Either way the frame empties the fire ring.
+		# A round the joiner's body fires (the fire pass counts no round of the host's own
+		# player, whose fire presents through its action slot): the fire pass presents it on a
+		# listen host; a dedicated host's ticked frame drops it undrawn. Either way the frame
+		# empties the fire ring.
 		var fires_before: int = presenter.get_fire_present_stats().fires
-		assert_gte(host.debug_spawn_round(Vector3(0, 40, 0), Vector3(1, 0, 0), "AM_556MM"), 0,
-				"the host's ammo table carries the fixture round")
+		assert_gte(host.debug_spawn_round(Vector3(0, 40, 0), Vector3(1, 0, 0), "AM_556MM",
+				joiner_body), 0, "the host's ammo table carries the fixture round")
 		assert_true(_tick_once(world, host), "a frame ran a logic tick")
 		assert_eq(host.drain_fire_presentation_events().size(), 0,
 				"the ticked frame emptied the fire ring")

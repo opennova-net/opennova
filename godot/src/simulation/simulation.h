@@ -2249,12 +2249,13 @@ public:
 			const Vector3 &p_dir_godot, float p_max_range_units);
 	// Diagnostic round injector: spawns one live round through the REAL
 	// RoundSim::spawn (production velocity/tracer/trail path; owner = the
-	// local player) from a Godot-space origin along a Godot-space direction,
-	// firing the named ammo ("AMMO_556", ...). The world tick flies it and the
-	// F3 Rounds ring records the outcome — the pose-replay probe's seam.
-	// Returns the round slot, -1 on bad ammo/full pool.
+	// local player, or the entity p_shooter_wire_handle names when it is >= 0)
+	// from a Godot-space origin along a Godot-space direction, firing the named
+	// ammo ("AMMO_556", ...). The world tick flies it and the F3 Rounds ring
+	// records the outcome — the pose-replay probe's seam. Returns the round
+	// slot, -1 on bad ammo/full pool or a shooter handle naming no entity.
 	int debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,
-	                      const String &p_ammo_name);
+	                      const String &p_ammo_name, int p_shooter_wire_handle = -1);
 
 	// Local-player blink state (engine: runtime/world/collision.h). The render/audio hosts gate interior behavior on these.
 	bool local_player_indoors() const;
