@@ -595,8 +595,9 @@ bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &entity) {
 // Position, oriented (0, 0, -0.5) and tagged with the corpse, so the group takes the section
 // gate. The slot keeps the group for its next release; it stays where it spawned, as the
 // victim-hit emitter in the same slot does (spawn_victim_hit_emitter): the pool-0 walk re-poses
-// no +0x1CC emitter, the pool-2 walk alone does (Entity_UpdateAllEntities @0x4C2100 - the
-// pool-0 walk @0x4C2443..0x4C261F; CEffect_UpdateEmitterTransform called @0x4C22FA).
+// no +0x1CC emitter, only the pool-1 and pool-2 walks do (Entity_UpdateAllEntities @0x4C2100 -
+// the pool-0 walk @0x4C2443..0x4C261F; CEffect_UpdateEmitterTransform called @0x4B8E76 /
+// @0x4C22FA).
 // [orig: org1 Entity_UpdateInfantryAI @0x4B9910 - the release @0x4B9EB7..0x4B9ED1, the tag
 //  @0x4B9F0F, the orientation word 0xFFFF8000 @0x4B9F24, CEffectWorld_SpawnEmitterAtPosition
 //  called @0x4B9F36, the slot store @0x4B9F3E; the org2 twin Entity_UpdateInfantryPlayerBody
