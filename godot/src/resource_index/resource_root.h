@@ -280,6 +280,10 @@ public:
 	// The device textures load_texture holds decoded (its cache's entries, a miss's
 	// included): a structural count for tests.
 	int64_t get_decoded_texture_count() const;
+	// C++ seam (not bound; an instrument's read): the material rows' textures the registry holds.
+	int64_t get_registered_material_texture_count() const {
+		return static_cast<int64_t>(texture_registry_.size());
+	}
 	// One material row's texture of runtime `type`: the texture the registry keeps
 	// under the row's key (renderer::texture_registry_key: the name as written and
 	// its loader's suffix, without case), so the first row of a key to load decides

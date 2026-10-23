@@ -19,12 +19,16 @@
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/performance.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -49,20 +53,63 @@ int64_t now_us() {
 // The process's object counts at the load's end and at each post-load frame's start (an
 // instrument, --verbose only): a flush that frees or builds in bulk between two frames shows as
 // the difference of two lines.
-void print_post_load_counts(const String &p_label) {
+void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const String &p_label) {
 	if (!OS::get_singleton()->is_stdout_verbose()) return;
 	Performance *perf = Performance::get_singleton();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	UtilityFunctions::print_verbose(vformat(
 			"Post-load counts %s: nodes %d, objects %d, resources %d, orphan nodes %d, video memory %d MB, "
-			"textures %d MB, buffers %d MB",
+			"textures %d MB, buffers %d MB; decoded textures %d, registered material textures %d",
 			p_label, static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_NODE_COUNT)),
 			static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_COUNT)),
 			static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_RESOURCE_COUNT)),
 			static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_ORPHAN_NODE_COUNT)),
 			static_cast<int64_t>(rs->get_rendering_info(RenderingServer::RENDERING_INFO_VIDEO_MEM_USED) >> 20),
 			static_cast<int64_t>(rs->get_rendering_info(RenderingServer::RENDERING_INFO_TEXTURE_MEM_USED) >> 20),
-			static_cast<int64_t>(rs->get_rendering_info(RenderingServer::RENDERING_INFO_BUFFER_MEM_USED) >> 20)));
+			static_cast<int64_t>(rs->get_rendering_info(RenderingServer::RENDERING_INFO_BUFFER_MEM_USED) >> 20),
+			p_root != nullptr ? p_root->get_decoded_texture_count() : int64_t(-1),
+			p_root != nullptr ? p_root->get_registered_material_texture_count() : int64_t(-1)));
+	if (p_world == nullptr || !p_world->is_inside_tree()) return;
+	// The offscreen targets, each with its server-side update mode, its size, its last
+	// frame's 3D draw calls (a first 3D draw builds a target's render buffers) and its
+	// last measured GPU draw; the load's end turns on every target's timing.
+	const bool load_end = p_label == String("load_end");
+	PackedStringArray targets;
+	TypedArray<Node> found =
+			p_world->get_tree()->get_root()->find_children("*", "SubViewport", true, false);
+	for (int64_t i = 0; i < found.size(); ++i) {
+		SubViewport *target = Object::cast_to<SubViewport>(found[i]);
+		if (target == nullptr) continue;
+		const RID rid = target->get_viewport_rid();
+		if (load_end) rs->viewport_set_measure_render_time(rid, true);
+		const int64_t mode = static_cast<int64_t>(rs->viewport_get_update_mode(rid));
+		const int64_t draws = rs->viewport_get_render_info(rid,
+				RenderingServer::VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
+				RenderingServer::VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME);
+		if (mode == RenderingServer::VIEWPORT_UPDATE_DISABLED && draws == 0) continue;
+		targets.push_back(vformat("%s %dx%d mode %d draws %d gpu %.1f ms", target->get_name(),
+				target->get_size().x, target->get_size().y, mode, draws,
+				rs->viewport_get_measured_render_time_gpu(rid)));
+	}
+	UtilityFunctions::print_verbose(vformat("Post-load targets %s: [%s]", p_label,
+			String(", ").join(targets)));
+	// The orphan nodes at the load's end, by class: the next flush frees them, and the
+	// device objects they hold go with them two frames on.
+	if (!load_end) return;
+	HashMap<String, int64_t> orphans;
+	const TypedArray<int> ids = Node::get_orphan_node_ids();
+	for (int64_t i = 0; i < ids.size(); ++i) {
+		const Node *orphan = Object::cast_to<Node>(ObjectDB::get_instance(ObjectID(uint64_t(int64_t(ids[i])))));
+		if (orphan == nullptr) continue;
+		const String key = vformat("%s %s", orphan->get_class(), orphan->get_name());
+		orphans[key] = (orphans.has(key) ? orphans[key] : 0) + 1;
+	}
+	PackedStringArray orphan_rows;
+	for (const KeyValue<String, int64_t> &row : orphans) {
+		orphan_rows.push_back(vformat("%s x%d", row.key, row.value));
+	}
+	UtilityFunctions::print_verbose(vformat("Post-load orphans load_end: [%s]",
+			String(", ").join(orphan_rows)));
 }
 
 // ONE RAII leg timer: samples the clock only while a board is active, banks
@@ -444,7 +491,7 @@ Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 	const Ref<LoadTimeline> post_load = post_load_open_ ? post_load_frames_ : Ref<LoadTimeline>();
 	if (post_load.is_valid()) {
 		const String frame_label = vformat("frame_%d", post_load_frame_count_ + 1);
-		print_post_load_counts(frame_label);
+		print_post_load_counts(this, resource_root_.ptr(), frame_label);
 		post_load->span(frame_label);
 		ctx.post_load_frame = post_load.ptr();
 	}
@@ -501,7 +548,7 @@ void GameWorld::begin_post_load_frames(const String &p_bms_name) {
 	const Ref<Simulation> sim = get_sim();
 	const opennova::inmatch::JoinerNetTrace *trace = sim.is_valid() ? sim->joiner_net_trace() : nullptr;
 	post_load_trace_seq_ = trace != nullptr ? trace->next_seq() : 0;
-	print_post_load_counts("load_end");
+	print_post_load_counts(this, resource_root_.ptr(), "load_end");
 }
 
 void GameWorld::end_post_load_frames() {

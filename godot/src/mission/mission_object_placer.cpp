@@ -1630,6 +1630,10 @@ int MissionObjectPlacer::resolve_model_materials(const PackedStringArray &p_file
 	uint64_t present_us = 0;
 	uint64_t present_max_us = 0;
 	int rows = 0;
+	// The textures the resolves made (the registry's growth; the rest of the rows found theirs
+	// registered by the placement's scene builds or an earlier row).
+	const int64_t registered_before =
+			resource_root_.is_valid() ? resource_root_->get_registered_material_texture_count() : 0;
 	for (int64_t i = p_files.size() - 1; i >= 0; --i) {
 		const uint64_t load_start = time->get_ticks_usec();
 		const Ref<ObjectData> data = _load_object_data(p_files[i]);
@@ -1643,11 +1647,14 @@ int MissionObjectPlacer::resolve_model_materials(const PackedStringArray &p_file
 		present_us += present_end - present_start;
 		present_max_us = std::max<uint64_t>(present_max_us, present_end - present_start);
 	}
+	const int64_t made = resource_root_.is_valid()
+			? resource_root_->get_registered_material_texture_count() - registered_before
+			: 0;
 	UtilityFunctions::print_verbose(vformat(
 			"MissionObjectPlacer: model materials %d row(s) over %d file(s): %d ms (data loads %d ms, "
-			"resolves %d ms, presents %d ms, the slowest present %d ms)",
+			"resolves %d ms making %d texture(s), presents %d ms, the slowest present %d ms)",
 			rows, p_files.size(), static_cast<int>((time->get_ticks_usec() - start) / 1000),
-			static_cast<int>(load_us / 1000), static_cast<int>(resolve_us / 1000),
+			static_cast<int>(load_us / 1000), static_cast<int>(resolve_us / 1000), made,
 			static_cast<int>(present_us / 1000), static_cast<int>(present_max_us / 1000)));
 	return rows;
 }
