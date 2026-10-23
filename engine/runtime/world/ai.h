@@ -599,6 +599,13 @@ bool player_body_network_chase(AiEntity &e, Entity &body, bool authority, bool l
 //  @0x4B40E0, null @0x82ABC8 -> nullsub_2 @0x4A8070]
 PhysicsClass body_move_row(const World &world, const AiEntity &body, const Entity *entity);
 
+// The ewep row's mover over a person body's words (ai_system.cpp carries the witness): the
+// World's pool-0 walk runs it for a body bound to the ewep row, and a joiner runs it over a
+// decoded person row's words (inmatch::run_replica_person_ewep). The body need not be in the
+// registry; its ground (+0x28) and occupant (+0x170) are looked up there.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0]
+void person_ewep_mover(World &world, AiEntity &e, Entity &body);
+
 // A body's DcbId (+0x7C) as the org1 update reads it: its stagger key and its think's aim-pitch
 // seed. A placed person's is its record's (AiEntity::net_id). A player body's is its class
 // init's: the plyr row's stamps 10000 + the slot byte (+0x154), an org row's and an item row's

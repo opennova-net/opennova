@@ -768,7 +768,7 @@ static void person_ewep_anchored_attach(World &world, AiEntity &e, Entity &body,
     body.roll_bam = e.roll = frame.roll;
 }
 
-static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
+void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
     Entity *ground = world.registry.get(body.ground_target);
     if (emplaced_carrier_is_dead_hull(ground)) {
         body.flags |= kEntityFlagCarried;

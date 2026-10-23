@@ -627,6 +627,17 @@ struct ClientEntityState {
 	// spawnPhase, the think cadence the plyr callback re-arms
 	// [orig: Entity_HandleDamageAndTriggerZones @0x407B5E / @0x407C71].
 	int32_t spawn_phase = 0;
+	// The spawn reset's words a person's later update reads: +0x2D4 (the Yaw it stored) and
+	// the spawn backup +0x318 / +0x31C / +0x320 (the Position it stored). A joiner's spawns
+	// (0x0C, 0x18) run no reset, so they hold the spawn's clear until a record's dead -> alive
+	// edge runs it over the snapped pose (land_compact_pose). The ewep row's update over a
+	// person reads them (ClientReplicaPipeline::set_person_ewep_mover).
+	// [orig: Entity_ResetToSpawnState @0x4B9610 - the backup @0x4B9632..0x4B9644, +0x2D4
+	//  @0x4B96AA; its record callers NetPacket_SerializePlayerState @0x4C113C and
+	//  NetPacket_SerializeInfantryEntityState @0x4C05EC; NapiNPClientMsg_0x00C @0x42E730 and
+	//  NapiNPClientMsg_FullEntitySpawn @0x433780 call none]
+	int32_t reset_yaw = 0;
+	int32_t spawn_backup[3] = {};
 	// Replica-row vertical velocity — the caller-owned gravity channel of the
 	// org movers, integrated before the contact resolve and zeroed on landing
 	// [orig: org2 vel_z -= 208 then pos += vel @0x4B7CE0..0x4B7CEF; org1

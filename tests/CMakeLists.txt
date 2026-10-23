@@ -5365,6 +5365,12 @@ add_test(NAME npruntime_joiner_local_dcb_id COMMAND npruntime_joiner_local_dcb_i
 add_executable(emplaced_command_call_test world/emplaced_command_call_test.cpp)
 target_link_libraries(emplaced_command_call_test PRIVATE opennova_runtime)
 add_test(NAME emplaced_command_call COMMAND emplaced_command_call_test)
+# D-NET-892 (d): a joiner's pool-0 walk runs a decoded person's bound move row (the ewep row's
+# update over the row's words, nothing for the other non-org rows); the reset's words at a
+# record's dead -> alive edge.
+add_executable(npruntime_replica_person_ewep_test npruntime/replica_person_ewep_test.cpp)
+target_link_libraries(npruntime_replica_person_ewep_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_replica_person_ewep COMMAND npruntime_replica_person_ewep_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

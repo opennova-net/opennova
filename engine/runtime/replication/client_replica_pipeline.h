@@ -15,6 +15,7 @@
 
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/item_replication_catalog.h>
+#include <runtime/world/physics_class_table.h>
 #include <runtime/inmatch/session_transport.h>
 
 namespace opennova {
@@ -341,6 +342,20 @@ public:
 	void set_carrier_pose_provider(CarrierPoseProvider provider) {
 		carrier_pose_provider_ = std::move(provider);
 	}
+	// The pool-0 walk runs a person row's bound move function, its +0x1C4 (the def's
+	// move_function row): org1 and org2 are the chases below; the ewep row's update runs through
+	// this seam over the row's words (the embedder's World holds the ground and the occupant),
+	// which returns true when the update destroyed the row (its stale-ground leg), the row then
+	// leaving after the walk; every other row runs nothing here (the null row skipped whole,
+	// org0's and chld's bare returns, and the item rows ours does not run over a person).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk's +0x1C4 call @0x4C2472;
+	//  NapiNPClientMsg_0x00C @0x42E730 / NapiNPClientMsg_FullEntitySpawn @0x433780 - def+0x158
+	//  into +0x1C4; Entity_UpdateTransformAndTurret @0x440CA0]
+	using PersonEwepMover = std::function<bool(ClientEntityState &row)>;
+	void set_person_ewep_mover(PersonEwepMover mover) { person_ewep_mover_ = std::move(mover); }
+	// The bound move row of a person row's type, by the def's move_function; none without a
+	// catalog entry (the row keeps its class's chase).
+	std::optional<world::PhysicsClass> person_move_row(uint16_t type_id) const;
 	// The ride link's ground words: the embedder's entity at a ground handle,
 	// its occupant (+0x170) and its own ground entity (+0x28) as wire
 	// handles (0xFFFF for none); false where it has no entity there. A remote
@@ -906,6 +921,7 @@ private:
 	ReplicaSeatTypeResolver replica_seat_type_resolver_;
 	ReplicaSeatFrameResolver replica_seat_frame_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
+	PersonEwepMover person_ewep_mover_;
 	GroundOccupantProvider ground_occupant_provider_;
 	int32_t water_z_ = 0;
 	ItemClassResolver item_resolver_;                    // items.def table (authoritative)

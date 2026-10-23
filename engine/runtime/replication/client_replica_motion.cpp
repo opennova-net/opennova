@@ -1263,6 +1263,12 @@ void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es) {
 	                               es.roll_bam, es.rm_body_pitch, es.eye_offset);
 }
 
+std::optional<world::PhysicsClass> ClientReplicaPipeline::person_move_row(uint16_t type_id) const {
+	const ItemReplicationProfile *profile = item_def(type_id);
+	if (profile == nullptr) return std::nullopt;
+	return world::physics_class_from_move_function(profile->callbacks.move_function);
+}
+
 // One row's whole visit in the body walk: its secondary channel, then its family's
 // chase, death edge, deck ride and root motion (tick_remote_motion's walk order).
 void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t self_handle,
@@ -1308,6 +1314,28 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 				row_corpse_tail(row, edge, org1, traits, corpse_decays_))
 			remote_motion_expired_.emplace_back(row.handle, traits.decay_effect);
 	};
+	// The pool-0 walk calls a person's bound move function (+0x1C4): org1's and org2's are the
+	// chases below; the ewep row's update runs through the embedder's seam over the row's words
+	// with no compact needed, the row leaving after the walk when the update destroyed it; any
+	// other row runs nothing here (ClientReplicaPipeline::set_person_ewep_mover). The joiner's
+	// own row is its World body's (L runs the World's update).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472;
+	//  Entity_UpdateTransformAndTurret @0x440CA0 - Entity_Destroy @0x440E2F]
+	if (es.handle != self_handle && world::EntityHandle{es.handle}.pool() == 0 &&
+			(es.cls == EntityClass::Player || es.cls == EntityClass::Infantry)) {
+		const std::optional<world::PhysicsClass> row = person_move_row(es.type_id);
+		if (row && *row != world::PhysicsClass::Org1 && *row != world::PhysicsClass::Org2) {
+			if (*row == world::PhysicsClass::Ewep && person_ewep_mover_ && person_ewep_mover_(es)) {
+				// The stale-ground leg: the ground's C2S 0x0F, then the body's, and the body's
+				// destroy, the row leaving after the walk.
+				// [orig: @0x440DAB, @0x440E29, Entity_Destroy @0x440E2F]
+				queue_carrier_repair(es.resolved_ground);
+				queue_carrier_repair(es.handle);
+				remote_motion_expired_.emplace_back(es.handle, false);
+			}
+			return;
+		}
+	}
 	advance_row_weapon_channel(es, self_handle);
 	if (!es.net_has_compact) return;
 	const bool chased_class = es.cls == EntityClass::Player ||

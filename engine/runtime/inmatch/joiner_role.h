@@ -45,6 +45,17 @@
 
 namespace opennova::inmatch {
 
+// The ewep row's update over a decoded person row on a joiner (the replica walk's +0x1C4 for a
+// person bound to the ewep row, ClientReplicaPipeline::set_person_ewep_mover): the World's
+// world::person_ewep_mover runs over a body that holds the row's words, its ground and
+// occupant looked up in the joiner's World, and the words go back onto the row. `self_handle`
+// is the joiner's own wire handle (its rider link names L). Returns true when the update's
+// stale-ground leg ran: the caller queues its two C2S 0x0F by wire handle and destroys the row.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472;
+//  Entity_UpdateTransformAndTurret @0x440CA0]
+bool run_replica_person_ewep(world::World &world, replication::ClientState &state,
+		replication::ClientEntityState &row, uint16_t self_handle);
+
 class JoinerRole final : public Role, public world::VehicleOccupancySource {
 public:
 	RoleKind kind() const override { return RoleKind::Joiner; }

@@ -19,6 +19,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state (redeploy release)
 #include <runtime/world/geom.h>
+#include <runtime/world/mount_controls.h> // emplaced_command_call (the ewep row over a decoded person)
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/player_view.h>   // the fullscreen damage-feedback words + the shake arm
@@ -77,6 +78,108 @@ world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 }
 
 } // namespace
+
+// The row's words as the body's: Position and the Yaw / Pitch / Roll words, the Flags low byte,
+// the ground link (+0x28, the record's store, resolved_ground), the spawn backup and +0x2D4
+// (the reset's, spawn_backup / reset_yaw), the slot byte (+0x214, the spawn record's), the
+// +0x170 link (ride_occupant), +0x2AC (spawn_phase) and savedLivePose's Position. The aim
+// anchor (+0x30C) is the org1 class init's alone, which ours runs on no decoded row: 0, so the
+// spin tail's countdown stays off. The rider test of a decoded rider is its row's seat link
+// (+0x16C, carrier_handle with a seat bone), which the joiner's World cannot see; the World
+// update reads the joiner's own body by its World handle. The update's 16-bit Health copy
+// lands on the row's Health mirror; the blink quad has no home on a row (nothing presents it).
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the ground @0x440CBF, the rider test
+//  @0x4411E4, the let-go @0x441366..0x44136D, +0x2AC @0x441393, the Health copy @0x440EB7..0x440EBE,
+//  Entity_Destroy @0x440E2F; Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8]
+bool run_replica_person_ewep(world::World &world, replication::ClientState &state,
+		replication::ClientEntityState &row, uint16_t self_handle) {
+	world::Entity body;
+	body.kind = world::EntityKind::Organic;
+	body.handle = world::EntityHandle{row.handle};
+	body.position.set_q16({row.x, row.y, row.z});
+	body.heading = row.heading_bam;
+	body.pitch_bam = row.pitch_bam;
+	body.roll_bam = row.roll_bam;
+	body.flags = row.state_flags;
+	body.health = static_cast<int16_t>(row.health_word);
+	body.ground_target = world::EntityHandle{row.resolved_ground};
+	body.spawn_position.x.q16 = row.spawn_backup[0];
+	body.spawn_position.y.q16 = row.spawn_backup[1];
+	body.spawn_position.z.q16 = row.spawn_backup[2];
+	body.sub_type = row.spawn_sub_type;
+	body.spawn_phase = row.spawn_phase;
+	std::copy_n(row.net_saved_live_pose, 3, body.saved_live_pos);
+	body.saved_live_yaw = row.heading_bam;
+	body.saved_live_pitch = row.pitch_bam;
+	body.saved_live_roll = row.roll_bam;
+	body.saved_live_valid = true;
+	// The +0x170 link: L by its World handle; a decoded rider by its row's seat link, which the
+	// World cannot test, so its leg is taken here after the update, where the update reaches it
+	// (no hide, no destroy, a nonzero +0x2D4): kept, a rider off the body let go, a vanished one
+	// let go only where the shared destroy marked its slot.
+	const bool rider_is_self =
+			self_handle != world::EntityHandle::kInvalid && row.ride_occupant == self_handle;
+	if (rider_is_self) body.primary_occupant = world.cached.local_player;
+	world::AiEntity ae;
+	ae.handle = body.handle;
+	ae.heading = row.heading_bam;
+	ae.pitch = row.pitch_bam;
+	ae.roll = row.roll_bam;
+	ae.health = static_cast<int16_t>(body.health);
+	ae.inf.leg_yaw[0] = row.reset_yaw;
+	const bool hidden_by_hull =
+			world::emplaced_carrier_is_dead_hull(world.registry.get(body.ground_target));
+	const std::size_t requests_before = world.out.entity_info_requests.size();
+	world::person_ewep_mover(world, ae, body);
+	// The stale-ground leg's two C2S 0x0F go out by the row's and its ground's wire handles
+	// through the replica's own queue (the caller's), not the World's, whose drain reads a
+	// World handle as L's.
+	const bool destroyed = world.out.entity_info_requests.size() == requests_before + 2 &&
+			world.out.entity_info_requests.back() == body.handle;
+	if (destroyed) world.out.entity_info_requests.resize(requests_before);
+	if (!rider_is_self && row.ride_occupant != world::EntityHandle::kInvalid && !hidden_by_hull &&
+			!destroyed && row.reset_yaw != 0) {
+		const replication::ClientEntityState *rider_row = state.find(row.ride_occupant);
+		const bool kept = rider_row != nullptr
+				? rider_row->carrier_handle == row.handle && rider_row->mount_bone != 0
+				: !(world.destroyed_mark && world.destroyed_mark(row.ride_occupant));
+		if (!kept) {
+			row.ride_occupant = world::EntityHandle::kInvalid;
+		} else {
+			// The leg's tank-command call over the rider's record byte, then +0x2AC = 1 (the spin
+			// tail after them reads neither).
+			if (rider_row != nullptr) {
+				uint32_t stamp = static_cast<uint32_t>(body.spawn_position.y.q16);
+				world::emplaced_command_call(world, body.ground_target, stamp, false,
+						rider_row->move_input, rider_row->spawn_anim_slot);
+				body.spawn_position.y.q16 = static_cast<int32_t>(stamp);
+			}
+			body.spawn_phase = 1;
+		}
+	}
+	row.x = body.position.x.q16;
+	row.y = body.position.y.q16;
+	row.z = body.position.z.q16;
+	row.heading_bam = body.heading;
+	row.pitch_bam = body.pitch_bam;
+	row.roll_bam = body.roll_bam;
+	row.yaw_byte = static_cast<uint8_t>(static_cast<uint32_t>(row.heading_bam) >> 24);
+	if (static_cast<uint8_t>(body.flags) != row.state_flags) {
+		row.state_flags = static_cast<uint8_t>(body.flags);
+		row.state_flags_known = true;
+	}
+	if (static_cast<int16_t>(body.health) != static_cast<int16_t>(row.health_word)) {
+		row.health_word = static_cast<uint16_t>(body.health);
+		row.health_known = true;
+	}
+	row.spawn_backup[0] = body.spawn_position.x.q16;
+	row.spawn_backup[1] = body.spawn_position.y.q16;
+	row.spawn_backup[2] = body.spawn_position.z.q16;
+	row.spawn_phase = body.spawn_phase;
+	if (rider_is_self && !body.primary_occupant.valid()) row.ride_occupant = world::EntityHandle::kInvalid;
+	std::copy_n(body.saved_live_pos, 3, row.net_saved_live_pose);
+	return destroyed;
+}
 
 world::Entity *JoinerRole::replica_world_entity(
 		world::World &world, world::EntityHandle handle) {

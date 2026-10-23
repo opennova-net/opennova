@@ -239,6 +239,16 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 			es.pitch_bam = static_cast<int32_t>(
 					static_cast<uint32_t>(es.pitch_byte) << 24);
 		}
+		// An organic row's respawn runs the reset over the snapped pose: the spawn backup
+		// takes Position and +0x2D4 the Yaw.
+		// [orig: Entity_ResetToSpawnState @0x4B9610 - @0x4B9623..0x4B9644, @0x4B96AA]
+		if (force_live_snap &&
+				(es.cls == EntityClass::Player || es.cls == EntityClass::Infantry)) {
+			es.spawn_backup[0] = es.x;
+			es.spawn_backup[1] = es.y;
+			es.spawn_backup[2] = es.z;
+			es.reset_yaw = es.heading_bam;
+		}
 		if (force_live_snap && remote_motion_mode_) {
 			// Retail stages the target BEFORE the respawn branch snaps the live
 			// pose [orig: LABEL_123 staging precedes the +0x24&2 snap @0x4C1109+]

@@ -1524,6 +1524,10 @@ void JoinerRole::wire_frame_providers() {
 			[this]() -> const world::HitRecord * {
 				return &kernel_->world.round_sim.hit_record;
 			});
+	// A decoded person bound to the ewep row runs the World's ewep update over its words.
+	rt.view().set_person_ewep_mover([this](replication::ClientEntityState &row) {
+		return run_replica_person_ewep(kernel_->world, runtime->state(), row, self_wire_handle());
+	});
 	// The 0x26 route's section store, at the fold, under the gate
 	// apply_item_state_event applies to the same entity (it stores the same
 	// word again when the drain runs the callback).
