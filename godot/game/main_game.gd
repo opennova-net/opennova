@@ -132,11 +132,6 @@ func _init() -> void:
 	_render_stats.setup(_frame_stats)
 	_frame_phase_sampler.setup(_frame_stats)
 	add_child(_frame_phase_sampler)
-	# Under --verbose the heavy frames print where they went (an instrument).
-	if OS.is_stdout_verbose():
-		var slow_frames := SlowFrameReport.new()
-		slow_frames.setup(_frame_stats, is_dev_tools_open)
-		add_child(slow_frames)
 	_dev_tools = DevTools.new()
 	_dev_tools.name = "DevTools"
 	_dev_tools.set_frame_stats(_frame_stats)
