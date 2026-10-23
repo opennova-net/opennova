@@ -1069,7 +1069,7 @@ struct HudFrameState {
 	// session (the embedder resolves it), centred at (512, 364) in the Impact38
 	// slot in g_HUDColors.active. The scene frame's gameplay overlays draw it
 	// below the blank declutter level; the status page draws it unconditionally.
-	// [orig: UI_DrawDisconnectReasonDialog @0x5b8eb0 — from
+	// [orig: UI_DrawQuitConfirmDialog @0x5b8eb0 — from
 	//  HUD_DrawGameplayOverlays @0x5be1ce (the level-3 skip @0x5be185) and
 	//  Server_DrawStatusScreen @0x50b270]
 	bool quit_dialog_open = false;

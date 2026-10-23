@@ -1,7 +1,7 @@
 // THE SERVER-STATUS PAGE compile (hud_server_status.h), the quit dialog it
 // shares with the scene frame's gameplay overlays, the console lines and the
 // player score list.
-// [orig: Server_DrawStatusScreen @0x50a2d0; UI_DrawDisconnectReasonDialog
+// [orig: Server_DrawStatusScreen @0x50a2d0; UI_DrawQuitConfirmDialog
 //  @0x5b8eb0; HUD_DrawServerConsoleLines (ex
 //  Vehicle_ComputeSuspensionBoneTransforms) @0x5ba0a0;
 //  HUD_DrawPlayerScoreList @0x500300]

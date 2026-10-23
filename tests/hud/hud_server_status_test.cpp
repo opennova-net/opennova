@@ -6,7 +6,7 @@
 // clock, the bottom row, the ticker, the console lines, the quit dialog (on
 // the page and in the scene frame's gameplay overlays) and the score list.
 // [orig: Server_DrawStatusScreen @0x50a2d0; HUD_DrawPlayerScoreList
-//  @0x500300; UI_DrawDisconnectReasonDialog @0x5b8eb0;
+//  @0x500300; UI_DrawQuitConfirmDialog @0x5b8eb0;
 //  HUD_DrawServerConsoleLines @0x5ba0a0]
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_frame.h>
@@ -321,7 +321,7 @@ void test_page_compile(const fnt_font_t *font) {
 // transition's first-pass latch g_EndRoundOverlayFirstPass set). The quit dialog reads the
 // same twin; a listen host's page reads the twin its scene frames restamped.
 // [orig: HUD_DrawEndRoundStatsOverlay @0x5B7CD0 (`mov ebp, g_HUDColors.active`
-//  @0x5B7CE6); UI_DrawDisconnectReasonDialog @0x5B8EB0 (@0x5B8EB5);
+//  @0x5B7CE6); UI_DrawQuitConfirmDialog @0x5B8EB0 (@0x5B8EB5);
 //  HUD_InitTeamColorTable @0x51F240 (entry 2 @0x51F24F, the twin @0x51F2DE),
 //  run by Game_StartMission's first load @0x5258C1 after HUD_InitOverlaySystem
 //  @0x525733; HUD_DrawTextCentered_HalfBright @0x580680 (@0x58068F, @0x5806AB);

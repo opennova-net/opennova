@@ -717,7 +717,7 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 	element_(HudElement::Objectives, [&] { element_objectives(state, w, h); });
 	element_(HudElement::HelpScreen, [&] { element_help_screen(state, w, h); });
 	// The quit dialog below the blank level [orig: `cmp g_HUDDetailLevel, 3`
-	// @0x5be185; UI_DrawDisconnectReasonDialog @0x5be1ce]. Out of a session
+	// @0x5be185; UI_DrawQuitConfirmDialog @0x5be1ce]. Out of a session
 	// it would also draw the save-game list (sub_5B72E0 / sub_5B74B0
 	// @0x5be1dd..0x5be1eb); the dialog only opens in a session.
 	if (state.hud_detail_level != 3) element_(HudElement::QuitDialog, [&] { element_quit_dialog(state, w, h); });

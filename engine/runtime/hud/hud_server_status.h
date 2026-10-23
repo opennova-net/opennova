@@ -136,7 +136,7 @@ ServerStatusText server_status_text(const GameTextLookup &gametext, uint32_t gam
 
 // The quit dialog's Overlays key: STROVER_QUITSERVER on an authority in a
 // session, STROVER_QUITCLIENT for a joiner, STROVER5 out of a session
-// [orig: UI_DrawDisconnectReasonDialog @0x5b8edc..0x5b8eff].
+// [orig: UI_DrawQuitConfirmDialog @0x5b8edc..0x5b8eff].
 const char *quit_dialog_text_key(bool in_session, bool authority);
 
 // Whether a main frame draws the scene (the world, the viewmodel, the screen effects and the HUD)

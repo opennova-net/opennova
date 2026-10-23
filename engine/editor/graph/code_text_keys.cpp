@@ -259,7 +259,7 @@ const CodeTextKey kRows[] = {
 	{"GAMETEXT.BIN", "Overlays", "STROVER48", "GameType_GetAbbreviation", 0x521204},
 	{"GAMETEXT.BIN", "Overlays", "STROVER48", "HUD_GetGameTypeOverlayLabel", 0x5B8706},
 	{"GAMETEXT.BIN", "Overlays", "STROVER48", "HUD_DrawGameModeHeader", 0x5B8A1F},
-	{"GAMETEXT.BIN", "Overlays", "STROVER5", "UI_DrawDisconnectReasonDialog", 0x5B8F09},
+	{"GAMETEXT.BIN", "Overlays", "STROVER5", "UI_DrawQuitConfirmDialog", 0x5B8F09},
 	{"GAMETEXT.BIN", "Overlays", "STROVER50", "UI_UpdateDeathScreenContent", 0x55385D},
 	{"GAMETEXT.BIN", "Overlays", "STROVER50", "HUD_DrawGameTimer", 0x593E00},
 	{"GAMETEXT.BIN", "Overlays", "STROVER50", "HUD_DrawGameModeHeader", 0x5B8940},
