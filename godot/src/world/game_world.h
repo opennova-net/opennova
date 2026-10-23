@@ -571,6 +571,11 @@ public:
 	bool get_last_frame_world_drawn() const {
 		return last_frame_scene_drawn_ && !last_frame_world_skipped_;
 	}
+	// The last frame's scene frame called its HUD pass (engine inmatch::FrameOutcome::
+	// hud_pass_called): the HUD presenter's gameplay overlay pass compiles on it
+	// (HudOverlay::set_overlay_pass_called). A frame the session did not advance leaves the
+	// HUD's own gates (true).
+	bool get_last_frame_hud_pass_called() const { return last_frame_hud_pass_called_; }
 	// Re-evaluates only camera-dependent production render state for an
 	// exact-pose visual capture (the settle contract and the frozen-pose leg
 	// order live with the replay table in game_world_frame.cpp).
@@ -1173,6 +1178,7 @@ private:
 	uint64_t last_frame_run_mask_ = 0;
 	bool last_frame_scene_drawn_ = true;
 	bool last_frame_world_skipped_ = false;
+	bool last_frame_hud_pass_called_ = true;
 	// Identity latch for measured render time on the water reflection RTT.
 	ObjectID stats_water_vp_id_;
 	// Edge latch for the compositor passes' RD GPU timestamps (F3 capture

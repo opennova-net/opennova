@@ -1186,7 +1186,8 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		count_rendered_frame();
 		if (!out.terminal() && out.scene_drawn) {
 			step_hud_scene_cursor();
-			if (hud_pass_called(input, out)) step_hud_radar_frame();
+			out.hud_pass_called = hud_pass_called(input, out);
+			if (out.hud_pass_called) step_hud_radar_frame();
 			step_map_overlay_death_clear(out);
 			step_cine_render_frame();
 		}
@@ -1276,7 +1277,8 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// @0x5CADFC -> Cine_RenderOrEndPlayback, the scene arm @0x521CE8 alone].
 	if (!out.terminal() && out.scene_drawn) {
 		step_hud_scene_cursor();
-		if (hud_pass_called(input, out)) step_hud_radar_frame();
+		out.hud_pass_called = hud_pass_called(input, out);
+		if (out.hud_pass_called) step_hud_radar_frame();
 		step_map_overlay_death_clear(out);
 		step_cine_render_frame();
 	}

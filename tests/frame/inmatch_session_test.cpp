@@ -792,13 +792,24 @@ int main() {
 		if (!expect(mapped.scene_drawn && mapped.world_skipped &&
 				target->kernel.local.view.world_skipped,
 				"world skip: the command map over the menu skips the world")) return 1;
-		if (!expect(world.out.sound_emitters.empty(),
+		if (!expect(world.out.sound_emitters.empty() && !mapped.hud_pass_called,
 				"world skip: no HUD pass re-registers the tone")) return 1;
 		frame.command_map_open = false;
 		const FrameOutcome drawn = session.advance(frame);
 		if (!expect(!drawn.world_skipped && !target->kernel.local.view.world_skipped &&
-				world.out.sound_emitters.size() == 1,
+				world.out.sound_emitters.size() == 1 && drawn.hud_pass_called,
 				"world skip: the world drawn, the HUD pass re-registers the tone")) return 1;
+		// The F1 help shuts the call site in camera mode 0: the world draws, the HUD pass
+		// (its tone, the embedder's overlay pass on hud_pass_called) does not [orig:
+		// Render_ProcessMainSceneFrame - `cmp g_HelpScreenOpen, 0` @0x5CACF7, the call @0x5CAD04].
+		opennova::hud::HudToggleState help;
+		help.help_open = true;
+		frame.hud_toggles = &help;
+		const FrameOutcome helped = session.advance(frame);
+		if (!expect(helped.scene_drawn && !helped.world_skipped && !helped.hud_pass_called &&
+				world.out.sound_emitters.size() == 1,
+				"call site: the F1 help calls no HUD pass")) return 1;
+		frame.hud_toggles = nullptr;
 		opennova::world::CineEvent event;
 		event.duration = 50;
 		world.epilog.events.push_back(event);

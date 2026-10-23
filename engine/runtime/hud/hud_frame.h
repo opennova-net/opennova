@@ -1148,6 +1148,15 @@ struct HudFrameState {
 	int breath_time = 20;
 	bool spawn_success_gate = false;
 	std::string breath_label;
+	// The scene frame calls the gameplay overlay pass at all: the embedder's frame verdict
+	// (inmatch::FrameOutcome::hud_pass_called), false where the call site's gates skip
+	// HUD_RenderAllOverlays (the F1 help, the dead bit, a death.mnu trigger or its latch, a
+	// chase view on foot, camera mode 4 and up, a skipped world). The pass's head tests it
+	// first (overlay_pass_runs); the scene frame's own legs draw as on any frame. True where no
+	// session frame ran.
+	// [orig: Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAD04, the HUD_RenderAllOverlays calls
+	//  @0x5CACE3 / @0x5CAD04]
+	bool overlay_pass_called = true;
 	HudMinimapInput minimap;
 	// The mission's static footprint polygons (baked once per feed); the
 	// spinmap element lends them to the compile input by pointer — the
@@ -1337,8 +1346,10 @@ public:
 	static constexpr uint32_t kRadarGatePass = 1u;
 	static constexpr uint32_t kRadarGateMapSite = 2u;
 	uint32_t radar_frame_gates(const HudFrameState &state) const;
-	// Whether the gameplay overlay pass gets past its head: neither the round-over latch nor
-	// the white hit flash [orig: HUD_RenderAllOverlays @0x5A8084..0x5A809F].
+	// Whether the gameplay overlay pass runs past its head: its call site calls it
+	// (overlay_pass_called), then neither the round-over latch nor the white hit flash
+	// [orig: Render_ProcessMainSceneFrame - the calls @0x5CACE3 / @0x5CAD04;
+	//  HUD_RenderAllOverlays @0x5A8084..0x5A809F].
 	static bool overlay_pass_runs(const HudFrameState &state);
 
 	// THE CONNECTION INDICATORS' DRAWER, shared by both of retail's callers
@@ -1514,6 +1525,10 @@ private:
 	void layout_map_labels(const HudMapPass &pass, size_t begin, size_t end,
 			std::vector<GameFontQuad> &out) const;
 	bool corner_spinmap_visible(const HudFrameState &state) const;
+	// The corner map's own gates inside the pass, past its head (corner_spinmap_visible).
+	bool corner_spinmap_gates_(const HudFrameState &state) const;
+	// The pass's head past its call site: neither the round-over latch nor the white flash.
+	static bool overlay_pass_head_runs(const HudFrameState &state);
 	void element_objectives(const HudFrameState &state, float w, float h);
 	void element_attach_labels(const HudFrameState &state);
 	// The friendly tags' label pass (hud_frame_friendly_tags.cpp).

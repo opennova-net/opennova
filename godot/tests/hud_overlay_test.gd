@@ -358,6 +358,28 @@ func test_crosshair_requires_active_weapon() -> void:
 		"An armed hip stance emits the five tapered regions (14 triangles).")
 
 
+# The scene frame calls the gameplay overlay pass only past its call site's gates (the F1
+# help, the dead bit, a death.mnu trigger or its latch, a chase view on foot, camera mode 4 and
+# up; GameWorld.get_last_frame_hud_pass_called): an uncalled pass draws none of its elements,
+# the crosshair among them [orig: Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAD04, the
+# HUD_RenderAllOverlays calls @0x5CACE3 / @0x5CAD04; HUD_RenderAllOverlays - the
+# HUD_DrawCrosshair call @0x5A84E5].
+func test_the_overlay_pass_draws_only_where_the_scene_frame_calls_it() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+	]), PackedStringArray(["cross01.tga"]), {
+		"cross01.tga": Vector2i(8, 8),
+	})
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
+	assert_eq(hud.get_draw_list_stats().tris, 14, "the called pass draws the crosshair")
+	hud.set_overlay_pass_called(false)
+	assert_eq(hud.get_draw_list_stats().tris, 0, "an uncalled pass draws none of it")
+	hud.set_overlay_pass_called(true)
+	assert_eq(hud.get_draw_list_stats().tris, 14, "the next called pass draws it again")
+
+
 # BMS action 28 sub 37's item flash rebuilds the layer table at level 0 and
 # keeps the stored hud_detail level; the round init's overlay-buffer reset
 # rebuilds it at the stored level again [orig: RenderState_SetLayerVisibilityByIndex

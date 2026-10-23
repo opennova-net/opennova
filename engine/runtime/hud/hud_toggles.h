@@ -53,7 +53,7 @@ struct HudToggleState {
 	bool scoreboard_open = false;     // [orig: g_ScoreboardPanelVisible]
 	bool message_log_open = false;    // [orig: g_ShowMessageLog @0x24C18C0]
 	bool end_round_stats_open = false; // [orig: dword_24C18AC]
-	bool help_open = false;           // the F1 key-binding help [orig: dword_24C18B0]
+	bool help_open = false;           // the F1 key-binding help [orig: g_HelpScreenOpen]
 	bool map_legend_open = false;     // the F12 map legend [orig: dword_24C18B4]
 	// The briefing window: 0 closed, 2 open (the draw tests nonzero, the
 	// escape chain and the page keys test bit 1) [orig: dword_24C18C8 —

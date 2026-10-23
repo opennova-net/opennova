@@ -351,6 +351,12 @@ struct FrameOutcome {
 	// [orig: Render_ProcessMainSceneFrame @0x5CA171..0x5CA190 (ebx); the skips
 	//  @0x5CA4EA..0x5CA4EC and @0x5CA620..0x5CA640 -> loc_5CAD2D].
 	bool world_skipped = false;
+	// The drawn scene frame calls its HUD pass (Session::hud_pass_called, the call site's gates:
+	// not past the world skip, a death.mnu trigger or the latch, the F1 help, the dead bit, a
+	// chase view on foot, camera mode 4 and up). The embedder's HUD compiles its gameplay overlay
+	// pass on it (hud::HudFrameState::overlay_pass_called) as the session runs its radar step
+	// [orig: Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAD04, the calls @0x5CACE3 / @0x5CAD04].
+	bool hud_pass_called = false;
 
 	int32_t ticks_run() const { return static_cast<int32_t>(ticks.size()); }
 	bool terminal() const {

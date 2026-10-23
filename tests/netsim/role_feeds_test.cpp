@@ -309,7 +309,7 @@ static void serve_only_end_round_cases() {
 // without the dead bit, the F1 help shut; in the chase view from a control seat alone.
 // [orig: Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAB58, @0x5CAC81 (g_DeployScreenActive),
 //  @0x5CAC8E (g_DeathMenuOpenLatch), @0x5CACA6..0x5CACDD (the mode, the death screen, the
-//  seat), @0x5CACED..0x5CACFE (the dead bit, dword_24C18B0); the calls @0x5CACE3 / @0x5CAD04]
+//  seat), @0x5CACED..0x5CACFE (the dead bit, g_HelpScreenOpen); the calls @0x5CACE3 / @0x5CAD04]
 static void hud_pass_call_site_cases() {
 	auto runtime_heap = std::make_unique<ClientRuntime>("hud");
 	ClientRuntime &runtime = *runtime_heap;

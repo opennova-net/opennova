@@ -73,7 +73,7 @@ bool hud_overlays_called(const RoleView &view, bool help_open) {
 	const world::PlayerViewState &v = view.kernel->local.view;
 	// Camera mode 0, or the death screen: the pass for a body without the dead bit, the F1
 	// help shut [orig: @0x5CACA6..0x5CACB7; @0x5CACED..0x5CACFE (entity+0x24 & 2,
-	//  dword_24C18B0); the call @0x5CAD04].
+	//  g_HelpScreenOpen); the call @0x5CAD04].
 	if (v.camera_mode == 0 || v.death_screen_active) return !local_player_dead(view) && !help_open;
 	// The chase view: the pass from a control seat alone (parentEntity, parentSlot 2 / 5)
 	// [orig: @0x5CACB9..0x5CACDD; the call @0x5CACE3]; any other mode draws none.

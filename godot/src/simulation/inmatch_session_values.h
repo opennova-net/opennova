@@ -130,6 +130,7 @@ private:
 	bool rendered_ = true;
 	bool scene_drawn_ = true;
 	bool world_skipped_ = false;
+	bool hud_pass_called_ = false;
 
 protected:
 	static void _bind_methods();
@@ -154,6 +155,9 @@ public:
 	// The drawn scene frame skipped its world (engine inmatch::FrameOutcome::world_skipped);
 	// C++ only, GameWorld's scene gate reads it.
 	bool is_world_skipped() const { return world_skipped_; }
+	// The drawn scene frame called its HUD pass (engine inmatch::FrameOutcome::hud_pass_called);
+	// C++ only, GameWorld's scene gate reads it for the HUD's overlay pass.
+	bool is_hud_pass_called() const { return hud_pass_called_; }
 
 	void assign(const opennova::inmatch::FrameOutcome &p_value);
 };

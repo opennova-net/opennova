@@ -603,6 +603,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# witnesses).
 	_game_hud.set_frame_clocks(sim.get_logic_tick(), sim.get_main_frame_counter(),
 			sim.get_session_frame_counter(), sim.get_hud_frame_counter())
+	# Whether this frame's scene frame called its HUD pass: the gameplay overlay pass draws
+	# (and does its state work) only then; the scene frame's own legs draw either way (engine
+	# inmatch::FrameOutcome::hud_pass_called carries the witness).
+	_game_hud.set_overlay_pass_called(_world.get_last_frame_hud_pass_called())
 	if stats_on:
 		# HudOverlay._draw runs in Godot's deferred flush after this tick; the
 		# previous frame's compile + canvas emit land here. Timing arms only

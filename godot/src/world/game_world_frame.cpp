@@ -548,6 +548,7 @@ GameWorld::LegResult GameWorld::leg_scene_gate(FrameContext &r_ctx) {
 	// renders nothing at all, neither arm (engine inmatch::Session::renders carries the witness).
 	const Ref<Simulation> sim = get_sim();
 	last_frame_world_skipped_ = false;
+	last_frame_hud_pass_called_ = true;
 	if (sim.is_null()) {
 		r_ctx.rendered = true;
 		r_ctx.scene_drawn = last_frame_scene_drawn_ = true;
@@ -566,6 +567,10 @@ GameWorld::LegResult GameWorld::leg_scene_gate(FrameContext &r_ctx) {
 	// shell's world-block legs (the death.mnu latch's open and close) stand down on it.
 	last_frame_world_skipped_ = r_ctx.outcome.is_valid() && r_ctx.outcome->is_world_skipped();
 	r_ctx.world_skipped = last_frame_world_skipped_;
+	// Whether the drawn frame called its HUD pass, at the call site's gates (engine
+	// inmatch::FrameOutcome::hud_pass_called carries the witness): the HUD presenter's overlay
+	// pass follows it. A frame the session did not advance leaves the HUD's own gates.
+	if (r_ctx.outcome.is_valid()) last_frame_hud_pass_called_ = r_ctx.outcome->is_hud_pass_called();
 	return kLegRan;
 }
 

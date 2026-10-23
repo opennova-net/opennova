@@ -254,6 +254,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_weapon_ammo_key);
 	ClassDB::bind_method(D_METHOD("set_no_hud", "no_hud"), &HudOverlay::set_no_hud);
 	ClassDB::bind_method(D_METHOD("set_menu_screen_open", "open"), &HudOverlay::set_menu_screen_open);
+	ClassDB::bind_method(D_METHOD("set_overlay_pass_called", "called"),
+			&HudOverlay::set_overlay_pass_called);
 	ClassDB::bind_method(D_METHOD("set_end_round_overlay", "shown", "top", "bottom",
 								  "texts", "ys"),
 			&HudOverlay::set_end_round_overlay);
@@ -1078,6 +1080,12 @@ void HudOverlay::set_no_hud(bool p_no_hud) {
 void HudOverlay::set_menu_screen_open(bool p_open) {
 	if (state_.menu_screen_open == p_open) return;
 	state_.menu_screen_open = p_open;
+	queue_redraw();
+}
+
+void HudOverlay::set_overlay_pass_called(bool p_called) {
+	if (state_.overlay_pass_called == p_called) return;
+	state_.overlay_pass_called = p_called;
 	queue_redraw();
 }
 

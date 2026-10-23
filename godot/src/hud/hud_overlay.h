@@ -165,6 +165,11 @@ public:
 	// HudFrameState::menu_screen_open carries the witness): the preround
 	// armory line yields to it.
 	void set_menu_screen_open(bool p_open);
+	// Whether this frame's scene frame calls the gameplay overlay pass (GameWorld::
+	// get_last_frame_hud_pass_called, engine inmatch::FrameOutcome::hud_pass_called): where it
+	// does not, the pass draws nothing and does none of its state work, and the scene frame's
+	// own legs draw (engine hud::HudFrameState::overlay_pass_called).
+	void set_overlay_pass_called(bool p_called);
 	// The resolved gametext Overlays/STROVER_MISSIONOBJECTIVES header line.
 	void set_objectives_header(const String &p_text);
 	// The Tab board: whether it is held open (its 4-team page alternates on the

@@ -813,20 +813,29 @@ void HudFrameCompiler::element_scope_details(const HudFrameState &state, float w
 // [orig: showhud test 2 @0x5A8635; slot-17 cmp @0x5A86E8; level early-out
 //  @0x5A80C4; big map @0x5cac50]
 bool HudFrameCompiler::corner_spinmap_visible(const HudFrameState &state) const {
+	// The corner map draws inside the pass: its call site and its head first
+	// (overlay_pass_runs), then its own gates.
+	return overlay_pass_runs(state) && corner_spinmap_gates_(state);
+}
+
+bool HudFrameCompiler::corner_spinmap_gates_(const HudFrameState &state) const {
 	// The corner map's gates: the authored HUDSPINMAP rect, the /NOHUD
-	// overlay master's bit 1, the level-3 early-out and the pass's head
-	// (overlay_pass_runs), the HUDDECLUT slot-17 cmp nested in the showhud
-	// bit-1 test [orig: /NOHUD mask @0x4a7a09 / @0x5a81ce; level early-out
-	// @0x5A80C4; the head @0x5A8084..0x5A809F; showhud test 2 @0x5A8635;
-	// slot-17 cmp @0x5A86E8].
+	// overlay master's bit 1, the level-3 early-out, the HUDDECLUT slot-17 cmp
+	// nested in the showhud bit-1 test [orig: /NOHUD mask @0x4a7a09 / @0x5a81ce;
+	// level early-out @0x5A80C4; showhud test 2 @0x5A8635; slot-17 cmp @0x5A86E8].
 	return layout_.spinmap_rect.present && (state.overlay_master & 2u) != 0u &&
-			state.hud_detail_level < 3 && overlay_pass_runs(state) &&
+			state.hud_detail_level < 3 &&
 			state.declutter_visible[kDeclutterSpinmap] && (state.showhud_flags & 2u) != 0u;
 }
 
-// The overlay pass's head past the level test: the round-over latch and the white hit flash
-// return before it draws [orig: HUD_RenderAllOverlays @0x5A8084..0x5A809F].
+// The overlay pass runs where the scene frame calls it, past its head: the round-over latch
+// and the white hit flash return before it draws [orig: Render_ProcessMainSceneFrame - the
+// calls @0x5CACE3 / @0x5CAD04; HUD_RenderAllOverlays @0x5A8084..0x5A809F].
 bool HudFrameCompiler::overlay_pass_runs(const HudFrameState &state) {
+	return state.overlay_pass_called && overlay_pass_head_runs(state);
+}
+
+bool HudFrameCompiler::overlay_pass_head_runs(const HudFrameState &state) {
 	return !state.spawn_success_gate && !state.combat.white_flash;
 }
 
@@ -834,9 +843,12 @@ uint32_t HudFrameCompiler::radar_frame_gates(const HudFrameState &state) const {
 	// [orig: g_HUDDetailLevel == 3 @0x5a80c4; the spawn-success early-out
 	//  @0x5a8084 is the session's own read (inmatch/session.h)]
 	if (state.hud_detail_level >= 3) return 0u;
-	// The corner map's own update site needs mask bits 9, 6 and 10
-	// [orig: @0x5a78ff / @0x5a7906 / @0x5a790a].
-	const bool map_site = corner_spinmap_visible(state) &&
+	// The corner map's own update site needs mask bits 9, 6 and 10; its head and gates are
+	// the HUD's, its call site the session's own (inmatch::Session::hud_pass_called), so the
+	// gates handed back leave overlay_pass_called out [orig: @0x5a78ff / @0x5a7906 /
+	// @0x5a790a; HUD_RenderAllOverlays @0x5A8084..0x5A809F; Render_ProcessMainSceneFrame -
+	// the calls @0x5CACE3 / @0x5CAD04].
+	const bool map_site = overlay_pass_head_runs(state) && corner_spinmap_gates_(state) &&
 			(state.minimap.flags & 0x640u) == 0x640u;
 	return kRadarGatePass | (map_site ? kRadarGateMapSite : 0u);
 }

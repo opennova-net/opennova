@@ -298,7 +298,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 		events |= kFriendlyTagsCycled;
 	}
 	// The F1 key-binding help, then the keeping init [orig: case 8
-	// `xor dword_24C18B0, 1` @0x49af73; the wrapper @0x49af7f]
+	// `xor g_HelpScreenOpen, 1` @0x49af73; the wrapper @0x49af7f]
 	if (s.help.step(k.help, k.active) && admitted(kRowHelp)) {
 		s.help_open = !s.help_open;
 		events |= kHelpToggled | respawn_init_keeping(s, &s.help_open, k.in_session);

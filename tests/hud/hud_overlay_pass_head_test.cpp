@@ -197,12 +197,83 @@ void test_the_big_map_reads_the_last_record_and_altitude_colour() {
 	CHECK(pointer_band(compiler->compile(*state, 1024.0f, 768.0f).big_map) == 2);
 }
 
+// The scene frame calls the pass only past its call site's gates (the F1 help, the dead bit, a
+// death.mnu trigger or its latch, a chase view on foot, camera mode 4 and up): an uncalled pass
+// draws nothing and does none of its head's work (no record build, no item flash tick), while
+// the scene frame's own legs (the end-of-round overlay, the big map over the last record) draw.
+// The radar gates the HUD hands the session leave the call site out: the session tests it itself.
+// [orig: Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAD04 - the HUD_RenderAllOverlays calls
+//  @0x5CACE3 / @0x5CAD04, the big map @0x5CAC50 -> HUD_BuildMapOverlayView @0x5CAD15;
+//  HUD_RenderAllOverlays @0x5A8070 - the HUD_BuildEntityInfo call @0x5A80BC, the
+//  HUD_TickItemFlashTimers call @0x5A80FB]
+void test_the_scene_frame_call_site_gates_the_pass() {
+	const opennova::fnt::fnt_font_t font = test_font::uniform_test_font();
+	auto compiler = std::make_unique<HudFrameCompiler>();
+	HudLayout layout;
+	layout.health_rect = {10.0f, 20.0f, 100.0f, 8.0f, true};
+	compiler->configure(layout, &font);
+	compiler->configure_label_fonts(&font, &font, &font, 1.0f, 1.0f, &font);
+	auto state = std::make_unique<HudFrameState>();
+	state->health_fraction = 1.0f;
+	state->end_round.shown = true;
+	state->end_round.lines = {{"D", 300}};
+	state->minimap.map_mode = 3;
+	state->minimap.terrain.present = true;
+	state->minimap.terrain.sector_count = 16;
+	state->minimap.terrain.sector_rows = 16;
+	state->minimap.terrain.sector_grid.fill(1);
+	state->waypoint.present = true;
+	state->waypoint.world_x = 200 << 16;
+	state->waypoint.world_z = 3 << 16; // above the player at z 0
+
+	// A called pass at tick 100 builds the record and takes the item flash's last tick.
+	state->ticks = 100;
+	const HudDrawList &called = compiler->compile(*state, 1024.0f, 768.0f);
+	CHECK(drew(called, HudElement::Health));
+	CHECK(drew(called, HudElement::EndRoundOverlay));
+	CHECK(pointer_band(called.big_map) == 0);
+
+	// The uncalled stretch: no pass draw, the frame's own legs still up; a waypoint cleared
+	// inside it still points on the big map (no record build); a timer armed inside it keeps
+	// its count.
+	state->overlay_pass_called = false;
+	CHECK(!HudFrameCompiler::overlay_pass_runs(*state));
+	state->waypoint.present = false;
+	compiler->set_item_flash(2, 0x80);
+	state->ticks = 140;
+	const HudDrawList &uncalled = compiler->compile(*state, 1024.0f, 768.0f);
+	CHECK(!drew(uncalled, HudElement::Health));
+	CHECK(drew(uncalled, HudElement::EndRoundOverlay));
+	CHECK(pointer_band(uncalled.big_map) == 0);
+	CHECK(compiler->item_flash().timer(2) == 0x80);
+
+	// The next called pass, at tick 150, rebuilds the record and takes the whole 50 ticks.
+	state->overlay_pass_called = true;
+	state->ticks = 150;
+	const HudDrawList &back = compiler->compile(*state, 1024.0f, 768.0f);
+	CHECK(drew(back, HudElement::Health));
+	CHECK(pointer_band(back.big_map) == -1);
+	CHECK(compiler->item_flash().timer(2) == 0x80 - 50);
+
+	// The radar gates over an authored corner map: the pass and the map site, called or not.
+	auto radar = std::make_unique<HudFrameCompiler>();
+	HudLayout corner;
+	corner.spinmap_rect = {800.0f, 20.0f, 200.0f, 200.0f, true};
+	radar->configure(corner, &font);
+	auto view = std::make_unique<HudFrameState>();
+	const uint32_t both = HudFrameCompiler::kRadarGatePass | HudFrameCompiler::kRadarGateMapSite;
+	CHECK(radar->radar_frame_gates(*view) == both);
+	view->overlay_pass_called = false;
+	CHECK(radar->radar_frame_gates(*view) == both);
+}
+
 } // namespace
 
 int main() {
 	test_the_head_returns_before_the_pass();
 	test_the_item_flash_ticks_behind_the_head();
 	test_the_big_map_reads_the_last_record_and_altitude_colour();
+	test_the_scene_frame_call_site_gates_the_pass();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
