@@ -1326,6 +1326,9 @@ public:
 	// synthetic-def seam and retires with S7a.
 	bool install_local_player_weapon_by_name(const String &p_weapon_name,
 	                                         bool p_preserve_slot_state = false);
+	// The spawn sync's by-name install: a fresh slot with none of the mount's view words
+	// (engine: MissionKernel::install_spawn_weapon).
+	bool install_local_player_spawn_weapon_by_name(const String &p_weapon_name);
 	// Render-side late binding of .adm clip lengths for the already-mounted def.
 	// This is the only path allowed to preserve a same-name live action slot and
 	// queued presentation (engine: runtime/inmatch/joiner_role.cpp).
@@ -1627,10 +1630,10 @@ public:
 	}
 	static Ref<FpViewmodelSpec> fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 			const String &p_character_arms, const String &p_animadm, int p_flags);
-	// Rebuild the local player's slot pool from the spawn kit and select the spawn
-	// default — the Player_InitPlayer weapon leg (engine: runtime/inmatch/host_session.h). Runs automatically after load_weapon_table; call
-	// again on respawn.
-	void respawn_local_player_loadout();
+	// Player_InitPlayer(1)'s re-run on the local player, as a self S2C 0x50's handler runs it
+	// (engine: LocalPlayer::respawn_init(true): the view resets, the weapon leg from the spawn
+	// kit with its select and walk, the map defaults), then the 0x2F seam re-armed.
+	void reinit_local_player();
 	// The category keys (engine: runtime/controls/controls.h). Category 1..9 =
 	// the retail Knife/Sidearm/Primary/Flashbang/Frag/Smoke/Accessory/Detonator/
 	// Medpack keys ('1'..'9').

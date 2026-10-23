@@ -371,10 +371,15 @@ void LocalPlayerVisuals::sync_local_player_weapon_from_inventory(const Ref<Simul
 		clear_local_player_weapon();
 		return;
 	}
-	if (p_mount) {
-		set_local_player_weapon_by_name(equipped);
-	} else {
-		present_local_player_weapon(equipped);
+	if (!present_local_player_weapon(equipped) || !p_mount) {
+		return;
+	}
+	// The spawn's mount writes none of the mount's view words, as retail's spawn writes none
+	// (the engine's local_weapon_install_spawn_by_name carries the witness).
+	local_weapon_preserve_slot_state_ = false;
+	if (!p_sim->install_local_player_spawn_weapon_by_name(equipped)) {
+		UtilityFunctions::push_warning(
+				vformat("GameWorld: sim has no retained weapon.def row for '%s'", equipped));
 	}
 }
 

@@ -754,7 +754,7 @@ func test_start_with_nvg_reseeds_on_player_init() -> void:
 
 	assert_false(sim.request_local_player_nvg_toggle())
 	assert_eq(sim.request_local_player_nvg_gain(3), 3)
-	sim.respawn_local_player_loadout()
+	sim.reinit_local_player()
 	view = sim.get_local_player_view()
 	assert_true(view.nvg_active,
 			"Player_InitPlayer reseeds the mission's StartWithNVGOn bit")
@@ -5737,7 +5737,7 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 			"no round of the dead gunner's reached the ring")
 	# The respawn's select stores the personal slot as the EquippedSlot, off any seat,
 	# which ends the borrow [orig: Player_SelectWeaponSlot @0x4DD680 (@0x4DD6E0..0x4DD704)].
-	sim.respawn_local_player_loadout()
+	sim.reinit_local_player()
 	for raw in sim.drain_local_player_weapon_events():
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_M4AUTO":
 			restore_event = raw

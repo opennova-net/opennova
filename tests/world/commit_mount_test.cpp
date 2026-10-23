@@ -83,6 +83,15 @@ constexpr const char *kWeaponDef =
 		"\t\tdelaystart 2\r\n"
 		"\t\tdelayend 2\r\n"
 		"\tend\r\n"
+		"end\r\n"
+		// A ForceScoped def of its own category (4), whose mount writes the scope words.
+		"weapon \"WPN_FORCED\"\r\n"
+		"\tcategory 4\r\n"
+		"\trank 0\r\n"
+		"\tclipsize 5\r\n"
+		"\tstartrounds 20\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
+		"\tflags ForceScoped\r\n"
 		"end\r\n";
 
 // One local player on the parsed table, its kit rebuilt with the spawn select, the parse
@@ -265,6 +274,41 @@ void test_no_parse_leaves_the_mount_to_the_presenter() {
 			&rig->local().inventory, rig->local().view));
 }
 
+// The spawn's sync mounts with none of the mount's view words (L7-s28 FOUND, L7-s29): the
+// shell's sync of the EquippedSlot the spawn settled installs the def, a fresh slot, and leaves
+// the ForceScoped settle and range seed and the fov target as they stood, as retail's spawn
+// writes none; the by-name mount of the same def writes them.
+// [orig: Player_InitPlayer @0x4E15F0 - Player_SelectWeaponSlot (the call @0x4E1995), the walk
+//  (the call @0x4E19A1, its Flags test @0x4E0265 on a body born hidden); Player_MountWeaponSlot
+//  @0x4DFA40 - ForceScoped @0x4DFB23..0x4DFB44, g_CameraFovTargetQ16 @0x4DFB66]
+void test_the_spawn_sync_mounts_without_view_words() {
+	for (const bool spawn : {true, false}) {
+		const auto rig = std::make_unique<Rig>(std::vector<WeaponKitEntry>{
+				WeaponKitEntry{"WPN_RIFLE", -1, -1, -1}});
+		LocalPlayerWeapon &w = rig->weapon();
+		PlayerViewState &view = rig->local().view;
+		int32_t &fov = rig->world.weather.core.scalar_channels.camera_fov_target_fp;
+		fov = 33 << 16;
+		w.aim_range_q16 = 7;
+		CHECK(!view.scope_settled);
+		const bool installed = spawn
+				? local_weapon_install_spawn_by_name(rig->world, w, "WPN_FORCED",
+						&rig->local().inventory, view)
+				: local_weapon_install_by_name(rig->world, w, "WPN_FORCED", false, false,
+						&rig->local().inventory, view);
+		CHECK(installed);
+		CHECK(w.active && w.def_name == "WPN_FORCED");
+		if (spawn) {
+			CHECK(!view.scope_settled);
+			CHECK(w.aim_range_q16 == 7);
+		} else {
+			CHECK(view.scope_settled);
+			CHECK(w.aim_range_q16 != 7);
+		}
+		CHECK(fov == (33 << 16)); // ForceScoped keeps the target either way
+	}
+}
+
 } // namespace
 
 int main() {
@@ -272,6 +316,7 @@ int main() {
 	test_the_tick_after_the_commit_runs_the_new_def();
 	test_the_borrow_and_its_detach_mount_their_defs();
 	test_no_parse_leaves_the_mount_to_the_presenter();
+	test_the_spawn_sync_mounts_without_view_words();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

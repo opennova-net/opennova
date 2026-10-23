@@ -329,6 +329,9 @@ public:
 	// scope state (the F3 Weapon window's `auto`/ANIM edits).
 	bool install_weapon(const std::string &weapon_name,
 			bool preserve_slot_state = false, bool allow_same_weapon_rebake = false);
+	// The spawn's by-name install: a fresh slot and none of the mount's view words
+	// (world::local_weapon_install_spawn_by_name).
+	bool install_spawn_weapon(const std::string &weapon_name);
 	// Keep an F3 Weapon window edit of the mounted weapon's ACTION row for
 	// its next mount: a by-name mount copies the weapon table's descriptors,
 	// so the table entry takes the row as the live weapon now runs it.

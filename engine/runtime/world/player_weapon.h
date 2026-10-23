@@ -565,6 +565,20 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 bool local_weapon_install_by_name(World &world, LocalPlayerWeapon &w, const std::string &name,
                                   bool preserve_slot_state, bool allow_same_weapon_rebake,
                                   WeaponInventory *inventory, PlayerViewState &view);
+// The spawn's mount by name (the embedder's sync of the EquippedSlot the spawn settled, a
+// fresh slot): local_weapon_install_by_name's install with none of the mount's view words,
+// as retail's spawn writes none: Player_InitPlayer's select stores the slot with no view
+// word, and its walk mounts nothing on a body born hidden, so no AbsorbPitch level, no
+// ForceScoped scope byte or range seed, no fov target, no bias clear or bind. False with no
+// parse or no row of that name.
+// [orig: Player_InitPlayer @0x4E15F0 - Player_SelectWeaponSlot (the call @0x4E1995), the walk
+//  Player_SwitchToWeaponByHandle (the call @0x4E19A1); Player_SwitchToWeaponByHandle
+//  @0x4E0170 - the Flags test @0x4E0265 / @0x4E0269; Player_MountWeaponSlot @0x4DFA40 - the
+//  view words @0x4DFA7A..0x4DFABE, @0x4DFB23..0x4DFB66, the bias clear @0x4DFBCF..0x4DFBE8,
+//  the bind @0x4DFC35..0x4DFC9A]
+bool local_weapon_install_spawn_by_name(World &world, LocalPlayerWeapon &w,
+                                        const std::string &name, WeaponInventory *inventory,
+                                        PlayerViewState &view);
 // A zoom step on the personal slot lands in its inventory entry, the storage
 // the next mount reads back: retail's EquippedSlot IS that slot-table entry,
 // so the step's store is the entry's own zoom [orig: Player_AdjustWeaponElevation

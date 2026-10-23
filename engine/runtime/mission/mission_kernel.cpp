@@ -1255,6 +1255,12 @@ bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve
 			allow_same_weapon_rebake, local.inventory_valid ? &local.inventory : nullptr, local.view);
 }
 
+bool MissionKernel::install_spawn_weapon(const std::string &weapon_name) {
+	// [orig: Player_InitPlayer @0x4E15F0; world::local_weapon_install_spawn_by_name carries it]
+	return w::local_weapon_install_spawn_by_name(world, local.weapon, weapon_name,
+			local.inventory_valid ? &local.inventory : nullptr, local.view);
+}
+
 void MissionKernel::keep_weapon_action_edit(int action_id) {
 	if (action_id < 0 || action_id >= w::weapon_action::kCount) return;
 	const int index = world.tables.weapons.index_of(local.weapon.def_name.c_str());

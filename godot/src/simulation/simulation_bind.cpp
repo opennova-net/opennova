@@ -492,8 +492,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::has_explicit_spawn_loadout);
 	ClassDB::bind_method(D_METHOD("get_weapon_availability", "weapon_name"),
 	                     &Simulation::get_weapon_availability);
-	ClassDB::bind_method(D_METHOD("respawn_local_player_loadout"),
-	                     &Simulation::respawn_local_player_loadout);
+	ClassDB::bind_method(D_METHOD("reinit_local_player"),
+	                     &Simulation::reinit_local_player);
 	ClassDB::bind_method(D_METHOD("set_local_player_class", "player_class"),
 	                     &Simulation::set_local_player_class);
 	ClassDB::bind_method(D_METHOD("use_player_profile", "profiles"),

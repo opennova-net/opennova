@@ -2094,8 +2094,8 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			// (Retail reads GetTickCount here; that is an OS primitive, so the
 			// monotonic millisecond clock is the equivalent.)
 			// [orig: NapiNPClientMsg_0x043 @0x42FA90 — echo @0x42faa7, local stamp
-			//  @0x42fac4, QueueReliableMessage(tag 8, len 8) @0x42fad8; the host-side
-			//  validator NapiNPServerMsg_ValidateTimeSync @0x502210]
+			//  @0x42fac4, CNapiNetwork_QueueReliableMessage(tag 8, len 8) (the call
+			//  @0x42FAD3); the host-side validator NapiNPServerMsg_ValidateTimeSync @0x502210]
 			uint32_t server_stamp = 0;
 			std::size_t scalar_consumed = 0;
 			decode_u32_scalar(m.payload.data(), m.payload.size(), server_stamp,

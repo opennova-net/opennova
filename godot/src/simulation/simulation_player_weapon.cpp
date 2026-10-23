@@ -228,6 +228,10 @@ bool Simulation::install_local_player_weapon_by_name(
 			opennova::to_std(p_weapon_name), p_preserve_slot_state);
 }
 
+bool Simulation::install_local_player_spawn_weapon_by_name(const String &p_weapon_name) {
+	return kernel_->install_spawn_weapon(opennova::to_std(p_weapon_name));
+}
+
 void Simulation::rebake_local_player_weapon(const Ref<WeaponDef> &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state) {
 	install_local_player_weapon(

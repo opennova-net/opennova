@@ -612,6 +612,17 @@ bool local_weapon_install_by_name(World &world, LocalPlayerWeapon &w, const std:
 	return true;
 }
 
+bool local_weapon_install_spawn_by_name(World &world, LocalPlayerWeapon &w,
+		const std::string &name, WeaponInventory *inventory, PlayerViewState &view) {
+	// [orig: Player_InitPlayer @0x4E15F0; the declaration carries the rule]
+	WeaponInstallData data;
+	if (!install_data_by_name(world, name, false, data)) return false;
+	w.events.clear(); // a new presentation epoch, as local_weapon_install's
+	mount_install(world, w, data, /*preserve_slot_state=*/false,
+			/*allow_same_weapon_rebake=*/false, inventory, view, /*view_writes=*/false);
+	return true;
+}
+
 namespace {
 
 void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &data,

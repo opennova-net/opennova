@@ -279,9 +279,9 @@ bool Simulation::apply_local_player_loadout_rows(
 	return true;
 }
 
-void Simulation::respawn_local_player_loadout() {
-	// The respawn resets are the engine's (LocalPlayer::respawn_init); the 0x2F
-	// seam re-arms once the rebuilt kit has settled.
+void Simulation::reinit_local_player() {
+	// Player_InitPlayer(1)'s re-run is the engine's (LocalPlayer::respawn_init, which carries
+	// the witness); the 0x2F seam re-arms once the rebuilt kit has settled.
 	if (!kernel_) return;
 	kernel_->local.respawn_init(/*rebuild_kit=*/true);
 	push_joiner_loadout_kit();
