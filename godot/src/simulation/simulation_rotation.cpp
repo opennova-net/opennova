@@ -118,6 +118,11 @@ void Simulation::begin_next_host_mission_load(const Ref<MissionData> &p_mission,
 			/*session_score_ini=*/true);
 }
 
+void Simulation::open_host_load_window() {
+	if (net_.map_change_pending && host_role_ != nullptr && host_role_->next_mission_load_begun())
+		host_role_->open_next_mission_load_window();
+}
+
 void Simulation::pump_host_load_stage() {
 	if (net_.map_change_pending && host_role_ != nullptr && host_role_->next_mission_load_begun())
 		host_role_->pump_load_stage();

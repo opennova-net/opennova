@@ -53,6 +53,7 @@
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_admin_command.h>
+#include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/mission/mission_sidecars.h>
@@ -197,10 +198,23 @@ struct DedicatedHost {
 
 	inmatch::NapiNPServerCtx &ctx() { return role.state.host_owner.ctx; }
 
+	// The rotation's current map's session config.
+	inmatch::HostConfig current_host_cfg() const {
+		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
+		cfg.config.server_name = "Load Order";
+		cfg.config.game_type = rotation.list.map_game_type;
+		cfg.config.mission_file = rotation.list.map_file;
+		cfg.config.max_players = 9;
+		cfg.config.num_teams = 2;
+		cfg.socket_mode = inmatch::SocketMode::Lan;
+		cfg.serve_and_play = false;
+		return cfg;
+	}
+
 	bool boot_current(bool next_mission) {
 		const std::string map_file = rotation.list.map_file;
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
 		r.mission = test_mission::two_entity_mission();
 		r.mission.header.attrib_flags = bms::AttribFlags::TeamDeathmatch;
 		std::snprintf(r.mission.header.mission_name, sizeof(r.mission.header.mission_name), "%s",
@@ -211,14 +225,8 @@ struct DedicatedHost {
 		r.session = &session;
 		r.role = &role;
 		r.host = &role;
-		r.host_cfg.config.server_name = "Load Order";
-		r.host_cfg.config.game_type = rotation.list.map_game_type;
-		r.host_cfg.config.mission_file = map_file;
+		r.host_cfg = current_host_cfg();
 		r.host_cfg.config.mission_name = r.mission.get_mission_name();
-		r.host_cfg.config.max_players = 9;
-		r.host_cfg.config.num_teams = 2;
-		r.host_cfg.socket_mode = inmatch::SocketMode::Lan;
-		r.host_cfg.serve_and_play = false;
 		r.next_mission = next_mission;
 		r.render_arm_deferred = render_arm_deferred;
 		r.boot_options.playable = false;
@@ -648,10 +656,55 @@ void test_listen_render_arm_pumps_three_around_the_textures() {
 	}
 }
 
+// The map change's head as the game's world load runs it, ahead of phase A: the head through
+// the per-slot reset pumps nothing and clears no console line, so the embedder's effect system
+// loads between the reset and the window, as retail's does; the window then clears the console
+// and pumps twice, ahead of the terrain; with the embedder's three stage pumps the load pumps as
+// a headless host's does (eleven, the teardown's and the router's included).
+// [orig: Game_StartMission @0x524360 - Server_PumpNetworkTransport @0x5245E8,
+//  Server_ResetAllPlayerSlotFrameState @0x5248BC, CEffectSystem_Init @0x524980,
+//  Chat_ClearAllChannels @0x524A10, Server_PumpNetworkTransport @0x524A63 and @0x524F76]
+void test_the_embedder_head_leaves_its_window_to_the_effect_system() {
+	auto host = std::make_unique<DedicatedHost>();
+	host->role.set_socket(&host->socket);
+	host->role.set_rotation(&host->rotation);
+	inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
+	CHECK(host->boot_current(/*next_mission=*/false));
+	host->ctx().mission_exit_reason = inmatch::kMissionExitMapCycle;
+	inmatch::FrameInput input;
+	input.delta_seconds = kFrame;
+	bool ended = false;
+	for (int f = 0; f < 16 && !ended; ++f) ended = host->session.advance(input).terminal();
+	CHECK(ended);
+	add_kept_joiner(*host, /*countdown=*/3);
+	size_t drains = 0;
+	host->socket.on_drain = [&drains]() { ++drains; };
+	CHECK(inmatch::begin_host_map_change(host->role, host->catalog) ==
+			inmatch::MapChangeStep::NextMission);
+	// The teardown's pump and the router's (@0x5245E8).
+	CHECK(drains == 2);
+	inmatch::server_console_add(host->ctx(), "a line of the last map", 0xFFFFFFFFu);
+	inmatch::begin_next_host_mission_load(host->role, test_boot::source_over(&host->files),
+			mission::mission_base_name(host->rotation.list.map_file), {},
+			host->current_host_cfg(), /*session_score_ini=*/false);
+	CHECK(host->role.next_mission_load_begun());
+	CHECK(drains == 2);
+	CHECK(!host->ctx().console_chat.empty());
+	host->role.open_next_mission_load_window();
+	CHECK(drains == 4);
+	CHECK(host->ctx().console_chat.empty());
+	for (int stage = 0; stage < 3; ++stage) host->role.pump_load_stage();
+	CHECK(host->boot_current(/*next_mission=*/true));
+	CHECK(drains == 11);
+	CHECK(host->ctx().net_spawn_suspended == 0);
+	CHECK(host->session.state() == inmatch::State::Running);
+}
+
 } // namespace
 
 int main() {
 	test_dedicated_map_change_spreads_its_pumps_through_the_load();
+	test_the_embedder_head_leaves_its_window_to_the_effect_system();
 	test_listen_map_change_pumps_ten_through_the_load();
 	test_dedicated_render_arm_answers_a_leg_during_the_device_stages();
 	test_listen_render_arm_pumps_three_around_the_textures();

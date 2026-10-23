@@ -783,8 +783,13 @@ private:
 	// objects.
 	int load_join_terrain(const Ref<MissionData> &p_mission, const String &p_bms_name,
 			const Ref<ResourceRoot> &p_resource_root);
-	// The mission start's head through its terrain (the option copies, the tile info, the
-	// environment, the terrain); `r_timeline` takes the load's timeline.
+	// The mission start's copies of the options (the object detail, the texfilter,
+	// texcompression and particle-density words, the ragdoll bit), ahead of its effect system
+	// and its head.
+	void copy_mission_start_options();
+	// The mission start's head through its terrain past the copies (the tile info, the
+	// environment, the terrain); `r_timeline` takes the load's timeline, begun here when the
+	// caller began none.
 	int load_mission_head(const Ref<MissionData> &p_mission, const String &p_bms_name,
 			const Ref<ResourceRoot> &p_resource_root, Ref<LoadTimeline> &r_timeline);
 	void start_mission_root();
@@ -825,9 +830,11 @@ private:
 	// only the models and the presenters' fire pipelines draw in the forced frames.
 	int warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects = true);
 	// A new effect world under this world with every mounted .ptl of `p_resource_root` parsed
-	// at the session's words (start_effect_world's and load_join_effect_system's head).
+	// at the session's words (the mission start's head's, load_join_effect_system's and a
+	// dedicated host's start_effect_world's).
 	EffectWorld *create_effect_world(const Ref<ResourceRoot> &p_resource_root);
 	void free_join_effect_world();
+	void free_head_effect_world();
 	// The mission start's models (Simulation::get_mission_start_model_files) built under one
 	// container at `p_at` through MissionObjectPlacer::warm_models; null when none built. The
 	// caller frees it (FX-5).
@@ -899,6 +906,9 @@ private:
 	// The effect world a join's mission-data load built ahead of its 0x09, until the S2C 0x1A's
 	// load adopts it (load_join_effect_system).
 	ObjectID join_effect_world_id_;
+	// The effect world the mission start's head built ahead of its terrain (a host's with its
+	// own client, a single player's), until start_effect_world binds it (load_mission_internal).
+	ObjectID head_effect_world_id_;
 	// Frame-clear cache (divergence #21): recompute only when the env
 	// generation moves or the camera crosses the water plane.
 	int64_t clear_env_generation_ = -1;

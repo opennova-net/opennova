@@ -228,10 +228,11 @@ HostLoadingBand host_loading_band(const mission::BootFileSource &files,
 // loads its terrain and objects ahead of phase A (the game's world load): the session
 // config with the loose score.ini when `session_score_ini` (as phase A reads it), the
 // mission text and the "Server" strings, read as phase A reads them. The embedder then
-// runs the load's three stage pumps (HostRole::pump_load_stage) at its own terrain and
-// ahead of its objects; phase A runs neither again. A headless host leaves both to
-// phase A, which runs the head after its text reads and the stages after its terrain
-// and environment.
+// loads its effect system (a host with its own client), opens the head's window
+// (HostRole::open_next_mission_load_window) and runs the load's three stage pumps
+// (HostRole::pump_load_stage) at its own terrain and ahead of its objects; phase A runs
+// none of them again. A headless host leaves them to phase A, which runs the head and its
+// window after its text reads and the stages after its terrain and environment.
 void begin_next_host_mission_load(HostRole &host, const mission::BootFileSource &files,
 		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table,
 		HostConfig host_cfg, bool session_score_ini);

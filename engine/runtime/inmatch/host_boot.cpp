@@ -288,7 +288,11 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 
 	// A map change's load head, when the embedder ran none ahead of its own loads (a
 	// headless host): the start's world-free legs and the window's first pumps, then the
-	// load's stage pumps below (HostRole::begin_next_mission_load, pump_load_stage).
+	// load's stage pumps below (HostRole::begin_next_mission_load,
+	// open_next_mission_load_window, pump_load_stage). A headless host has no client of its
+	// own, so no effect system loads between the head and the window [orig: Game_StartMission
+	//  - the gate @0x524958..0x524979 skips CEffectSystem_Init @0x524980 in session on the
+	//  authority with no own client].
 	const bool stage_pumps = request.host != nullptr && request.next_mission &&
 			!request.host->next_mission_load_begun();
 	if (stage_pumps) {
@@ -298,6 +302,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		head.server_text = boot.server_text;
 		head.next_mission = true;
 		request.host->begin_next_mission_load(std::move(head));
+		request.host->open_next_mission_load_window();
 	}
 
 	if (!request.session->begin_load().applied()) {

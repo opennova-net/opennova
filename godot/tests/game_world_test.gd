@@ -2427,7 +2427,8 @@ func test_a_mission_whose_environment_does_not_load_starts_on_the_engine_default
 		var timeline: LoadTimeline = world.last_load_timeline()
 		assert_not_null(timeline)
 		if timeline != null:
-			assert_eq(timeline.spans()[0].name, "environment", "the environment stage ran")
+			# The mission start's effect system leads its head (load_mission_internal).
+			assert_eq(timeline.spans()[1].name, "environment", "the environment stage ran")
 		world.unload()
 
 
@@ -2460,11 +2461,15 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 		return
 	assert_eq(timeline.label, "Mission load %s" % bms_name)
 	var spans := timeline.spans()
-	assert_eq(spans.size(), 2)
-	if spans.size() == 2:
-		assert_eq(spans[0].name, "environment")
-		assert_eq(spans[1].name, "terrain")
-		assert_gt(spans[1].end_us, 0,
+	# The mission start's effect system loads ahead of its terrain, as retail's does past the
+	# head's per-slot reset (CEffectSystem_Init @0x524980 ahead of Game_LoadTerrainDuringConnect
+	# @0x524F7C; GameWorld::load_mission_internal carries the witness).
+	assert_eq(spans.size(), 3)
+	if spans.size() == 3:
+		assert_eq(spans[0].name, "effect_system")
+		assert_eq(spans[1].name, "environment")
+		assert_eq(spans[2].name, "terrain")
+		assert_gt(spans[2].end_us, 0,
 			"finish closes the terrain span left open by the early return")
 
 

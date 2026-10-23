@@ -149,18 +149,28 @@ public:
 	int render_arm_pumps_owed() const { return render_arm_pumps_owed_; }
 	// A map change's next mission start, its world-free head, ahead of the load's terrain:
 	// the file-transfer session and the report clocks, the mission text and the "Server"
-	// strings, the continued session (its streams rebuilt), the per-slot reset and the
-	// console's clear, then the window's first two pumps, so the reset's 0x25s and a kept
-	// joiner's reload legs meet the load's pumps while it loads. `head` is the bring-up
-	// record as the boot builds it (its integrity tables the previous mission's until the
-	// load's def loads; HostBringup::next_mission). The embedder runs it, or phase A does
-	// when no one did. [orig: Game_StartMission @0x524360 - the add @0x5244B4 / the store
-	// @0x5244C6, CServerTick_SetState @0x5244A4 / @0x5244AF, TextResource_LoadMissionTextBin
-	// @0x5247CE, Game_SerializeMissionInfoToDataStream @0x5247EB,
-	// CNapiGameSession_InitRandomSeedOrRequest @0x5248A7, Server_ResetAllPlayerSlotFrameState
-	// @0x5248BC, Chat_ClearAllChannels @0x524A10, Server_PumpNetworkTransport @0x524A63 and
-	// @0x524F76]
+	// strings, the continued session (its streams rebuilt) and the per-slot reset. The
+	// embedder's effect system loads next (a host with its own client), then
+	// open_next_mission_load_window. `head` is the bring-up record as the boot builds it (its
+	// integrity tables the previous mission's until the load's def loads;
+	// HostBringup::next_mission). The embedder runs it, or phase A does when no one did.
+	// [orig: Game_StartMission @0x524360 - the add @0x5244B4 / the store @0x5244C6,
+	//  CServerTick_SetState @0x5244A4 / @0x5244AF, TextResource_LoadMissionTextBin @0x5247CE,
+	//  Game_SerializeMissionInfoToDataStream @0x5247EB, CNapiGameSession_InitRandomSeedOrRequest
+	//  @0x5248A7, Server_ResetAllPlayerSlotFrameState @0x5248BC; the effect system's init
+	//  @0x524980..0x5249D4 follows]
 	void begin_next_mission_load(HostBringup head);
+	// The head's window past the effect system: the console's clear, then the window's first
+	// two pumps, so the reset's 0x25s and a kept joiner's reload legs meet the load's pumps
+	// while it loads. Between the head and the window the embedder loads its effect system on
+	// every load but a dedicated host's (the game's world load: GameWorld::load_mission_internal),
+	// ahead of the terrain, the objects and the runtime (D-NET-NEW-L3-22).
+	// [orig: Game_StartMission - the dedicated test (in session, the authority, no own client)
+	//  @0x524958..0x524979, CEffectSystem_Init @0x524980, CEffectManager_RegisterAllMaterials
+	//  @0x52499E, CEffectSystem_BuildTextureAtlases @0x5249B9, Precipitation_Reset @0x5249D4, all
+	//  under is_first_load @0x52496C; Chat_ClearAllChannels @0x524A10, Server_PumpNetworkTransport
+	//  @0x524A63 and @0x524F76; the router's pump @0x5245E8 precedes the head]
+	void open_next_mission_load_window();
 	// One of the load's stage pumps between the head and the bring-up: after the terrain,
 	// after the mission's document, after the avatars and the environment clock.
 	// [orig: Game_StartMission - Server_PumpNetworkTransport @0x524F8C (after

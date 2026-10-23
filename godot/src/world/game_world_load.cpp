@@ -249,6 +249,24 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		// session through the load's stages, as retail's load does (engine
 		// inmatch/map_change.h; HostRole::begin_next_mission_load / pump_load_stage).
 		drive_.begin_next_host_mission_load(p_mission, p_bms_name, p_resource_root);
+		timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+		last_load_timeline_ = timeline;
+		copy_mission_start_options();
+		// Then the mission start's effect system at the copies' words, past the head's per-slot
+		// reset and ahead of the window's first pumps and the terrain, on every load but a
+		// dedicated host's: retail's skips it in session on the authority with no client of its
+		// own (engine inmatch/host_role.h open_next_mission_load_window carries the witness,
+		// D-NET-NEW-L3-22). A join's mission-data load built one already
+		// (load_join_effect_system); a single player's restart, whose effect system retail keeps
+		// from its first load, builds one here too, its unload having freed the last.
+		// start_effect_world binds it to the mission once the runtime stands.
+		if (!drive_.pending_dedicated() && ObjectDB::get_instance(join_effect_world_id_) == nullptr) {
+			timeline->span("effect_system");
+			free_head_effect_world();
+			head_effect_world_id_ = ObjectID(create_effect_world(p_resource_root)->get_instance_id());
+			timeline->end_span();
+		}
+		drive_.open_host_load_window();
 		const int head_error = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
 		if (head_error != OK) return head_error;
 		drive_.pump_host_load_stage(); // after the terrain
@@ -401,6 +419,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 int GameWorld::load_join_terrain(const Ref<MissionData> &p_mission, const String &p_bms_name,
 		const Ref<ResourceRoot> &p_resource_root) {
 	join_terrain_preloaded_ = false;
+	copy_mission_start_options();
 	Ref<LoadTimeline> timeline;
 	const int err = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
 	if (err != OK) return err;
@@ -422,13 +441,8 @@ int GameWorld::load_join_terrain(const Ref<MissionData> &p_mission, const String
 	return OK;
 }
 
-// The mission start's head through its terrain: the start's copies of the options, the
-// terrain's gate, the tile info, the environment (the mission's overrides, its clock, the
-// weather owner) and the terrain. Emits load_failed and returns the error on a failure;
-// `r_timeline` is the load's timeline from the tile info on.
-int GameWorld::load_mission_head(const Ref<MissionData> &p_mission, const String &p_bms_name,
-		const Ref<ResourceRoot> &p_resource_root, Ref<LoadTimeline> &r_timeline) {
-	const bool wire_header_join = p_mission->is_wire_header_only();
+// The mission start's copies of the options, which its effect system and its head build at.
+void GameWorld::copy_mission_start_options() {
 	// The mission start's copy of the options' object detail: the frames draw
 	// at it until the next mission start (engine: renderer/object_lod.h).
 	object_detail_ = object_polydetail_;
@@ -450,6 +464,16 @@ int GameWorld::load_mission_head(const Ref<MissionData> &p_mission, const String
 	// ragdoll/ragdoll_option.h).
 	ragdolls_.set_enabled(game_config_.is_valid() &&
 			opennova::ragdoll::ragdolls_enabled(game_config_->native().cfg().no_blood));
+}
+
+// The mission start's head through its terrain, past the start's copies of the options
+// (copy_mission_start_options): the terrain's gate, the tile info, the environment (the
+// mission's overrides, its clock, the weather owner) and the terrain. Emits load_failed and
+// returns the error on a failure; `r_timeline` is the load's timeline, begun here from the tile
+// info on when the caller began none.
+int GameWorld::load_mission_head(const Ref<MissionData> &p_mission, const String &p_bms_name,
+		const Ref<ResourceRoot> &p_resource_root, Ref<LoadTimeline> &r_timeline) {
+	const bool wire_header_join = p_mission->is_wire_header_only();
 	join_wire_assets_pending_ = wire_header_join;
 	join_wire_til_applied_ = false;
 	join_wire_assets_failed_ = false;
@@ -466,6 +490,7 @@ int GameWorld::load_mission_head(const Ref<MissionData> &p_mission, const String
 	if (!p_resource_root->has_file(trn)) {
 		emit_signal(kSignalLoadFailed,
 				missing_mission_asset_reason(trn, p_bms_name, p_resource_root, wire_header_join));
+		if (r_timeline.is_valid()) r_timeline->finish();
 		return ERR_FILE_NOT_FOUND;
 	}
 	// The environment gates nothing: a .env that is not there is skipped and the
@@ -475,8 +500,10 @@ int GameWorld::load_mission_head(const Ref<MissionData> &p_mission, const String
 	set_weather_world_tick_driven(true);
 	set_water_world_rendering_enabled(false);
 	// Keep stage attribution stable so load timelines remain comparable.
-	r_timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
-	last_load_timeline_ = r_timeline;
+	if (r_timeline.is_null()) {
+		r_timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+		last_load_timeline_ = r_timeline;
+	}
 	resource_root_ = p_resource_root;
 	load_mission_tile_info(p_bms_name, p_mission, p_resource_root, PackedByteArray(),
 			p_mission->is_wire_header_only());
@@ -691,6 +718,7 @@ void GameWorld::unload() {
 	}
 	effect_world_id_ = ObjectID();
 	free_join_effect_world();
+	free_head_effect_world();
 	mission_audio_id_ = ObjectID();
 	placer_.unref();
 	weapon_db_.unref(); // re-resolves against the next load's mounted root
@@ -1401,13 +1429,30 @@ EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_
 	return effect_world;
 }
 
-void GameWorld::free_join_effect_world() {
-	EffectWorld *pending = Object::cast_to<EffectWorld>(ObjectDB::get_instance(join_effect_world_id_));
-	join_effect_world_id_ = ObjectID();
-	if (pending != nullptr) {
+namespace {
+
+// A pending effect world (a join's or the mission start head's), its id cleared.
+EffectWorld *take_effect_world(ObjectID &r_id) {
+	EffectWorld *pending = Object::cast_to<EffectWorld>(ObjectDB::get_instance(r_id));
+	r_id = ObjectID();
+	return pending;
+}
+
+void free_effect_world(ObjectID &r_id) {
+	if (EffectWorld *pending = take_effect_world(r_id)) {
 		pending->release_runtime_renderer_resources();
 		pending->queue_free();
 	}
+}
+
+} // namespace
+
+void GameWorld::free_join_effect_world() {
+	free_effect_world(join_effect_world_id_);
+}
+
+void GameWorld::free_head_effect_world() {
+	free_effect_world(head_effect_world_id_);
 }
 
 void GameWorld::load_join_effect_system(const Ref<ResourceRoot> &p_resource_root) {
@@ -1434,11 +1479,11 @@ void GameWorld::load_join_effect_system(const Ref<ResourceRoot> &p_resource_root
 }
 
 void GameWorld::start_effect_world() {
-	EffectWorld *effect_world = Object::cast_to<EffectWorld>(ObjectDB::get_instance(join_effect_world_id_));
-	join_effect_world_id_ = ObjectID();
-	if (effect_world == nullptr) {
-		effect_world = create_effect_world(resource_root_);
-	}
+	// The effect world a join's mission-data load built (load_join_effect_system) or the
+	// mission start's head did (load_mission_internal), else a new one: a dedicated host's.
+	EffectWorld *effect_world = take_effect_world(join_effect_world_id_);
+	if (effect_world == nullptr) effect_world = take_effect_world(head_effect_world_id_);
+	if (effect_world == nullptr) effect_world = create_effect_world(resource_root_);
 	effect_world_id_ = ObjectID(effect_world->get_instance_id());
 	// The mission header's wind drives GLOBALWIND particles
 	// (engine: runtime/particle/emitter.h).

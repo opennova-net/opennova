@@ -476,12 +476,18 @@ void HostRole::begin_next_mission_load(HostBringup head) {
 	//  @0x5248AC..0x5248BC].
 	if (ctx.is_in_session != 0 && ctx.is_authority != 0)
 		inmatch::Server_ResetAllPlayerSlotFrameState(ctx);
+	next_mission_head_run_ = true;
+	window_pumps_run_ = 0;
+}
+
+// See host_role.h. The effect system's init (a host with its own client) ran between the
+// per-slot reset and here [orig: Game_StartMission - the gate @0x524958..0x524979,
+//  CEffectSystem_Init @0x524980 .. Precipitation_Reset @0x5249D4].
+void HostRole::open_next_mission_load_window() {
 	// The chat rings start every mission empty: CHAT GET and the status page list none of
 	// the last map's lines [orig: Game_StartMission @0x524A10 -> Chat_ClearAllChannels
 	//  @0x497D30].
-	server_console_clear(ctx);
-	next_mission_head_run_ = true;
-	window_pumps_run_ = 0;
+	server_console_clear(state.host_owner.ctx);
 	// Then the window's first pumps over the reset slots and the rebuilt streams, the spawn
 	// gate still held (D-NET-116), around the BMS header's second read [orig: Game_StartMission
 	//  - Server_PumpNetworkTransport @0x524A63, BMS_LoadAndValidateHeader @0x524F66,
