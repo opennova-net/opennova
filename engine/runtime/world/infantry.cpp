@@ -449,7 +449,11 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.lean_right = false;
     inf.lean_angle = 0;
     inf.torso_roll = 0;
-    inf.carrier_pitch_lag = 0;
+    // The deck ride's pitch lag (+0x2E0) survives a respawn: no store on the deploy path
+    // writes it, so a residual still steps into the Pitch a thirty-second a tick.
+    // [orig: Server_DeployPlayer @0x517740 and its Server_PositionPlayerForSpawn @0x50CF60,
+    //  Entity_WarmUpOrganicAnimation @0x4B8B20, Entity_ResetToSpawnState @0x4B9610 and
+    //  Game_InitNewRound @0x422740 store no +0x2E0; the step @0x4B57CD..0x4B57E5]
     inf.body_heading = heading;
     inf.target_heading = heading;
     inf.leg_yaw[0] = inf.leg_yaw[1] = heading;
@@ -1036,6 +1040,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const uint32_t tick_flags = tick_entity != nullptr
             ? (tick_entity->flags | tick_entity->engine_flags)
             : 0u;
+    // The local player body registers its rain ambient ahead of its view phase, dead or alive:
+    // org2 alone, with no Health test. [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
+    //  local test @0x4B473B..0x4B4741, the rain gate @0x4B4747..0x4B4768, the two
+    //  SoundEmitter_RegisterSetLayers calls @0x4B4857 / @0x4B4906, ahead of the phase @0x4B4945;
+    //  SoundEmitter_RegisterSetLayers @0x528340 has no Entity_UpdateInfantryAI caller]
+    if (!npc_body && local && tick_entity != nullptr) infantry_rain_ambient(world, *tick_entity);
     // The view phase (infantry_view.cpp) runs for every player body the authority
     // moves, seated or not, ahead of its death edge, its deck ride and its recoil,
     // spread and scoped drift (player_body_kick_tick): a seated body's Flags 0x40
@@ -1052,14 +1062,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     //  @0x4B467A..0x4B4683 (ebp = tick & 0x3F)]
     if (!npc_body && !client_wire_peer)
         infantry_org2_view_tick(world, e, tick_entity, logic_tick);
-    if (!npc_body && (tick_flags & 1u) == 0) {
-        const Entity *parent = tick_entity != nullptr && tick_entity->mounted
-                ? world.registry.get(tick_entity->mount_target) : nullptr;
-        const uint8_t stance_bits = e.inf.stance == InfantryState::Stance::kProne ? 1 :
-                e.inf.stance == InfantryState::Stance::kCrouch ? 2 : 0;
-        emit_stance_change_sound(world, e.handle.packed, e.self->position.words().data(), e.inf.stance_sound_state,
-                stance_bits, tick_flags, parent != nullptr && parent->has_item_def);
-    }
+    // The stance the stance sound compares, as the update's head and its prone-local clear leave
+    // it (the crouch key, and the prone key unless Flags 0x10A000 or a seat with a def or Flags
+    // 0x40 clears it); the sound itself is emitted after the on-foot site, below.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the head @0x4B4156..0x4B4183, the clear
+    //  @0x4B46FC..0x4B471B, the sum @0x4B7045]
+    const Entity *stance_parent = !npc_body && tick_entity != nullptr && tick_entity->mounted
+            ? world.registry.get(tick_entity->mount_target) : nullptr;
+    const bool stance_parent_def = stance_parent != nullptr && stance_parent->has_item_def;
+    const uint8_t stance_bits = e.inf.stance == InfantryState::Stance::kProne ? 1 :
+            e.inf.stance == InfantryState::Stance::kCrouch ? 2 : 0;
 
     // The player body's think cadence, ahead of the org2 death edge: the body's class event
     // callback (entity+0x1C8, its bound row's: player_body_row_event, D-NET-348) fires as
@@ -1194,9 +1206,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 
     if (e.health > 0 && inf.is_local_player) {
         const Entity *ent = world.registry.get(e.handle);
-        // The rain ambient registration rides the local body tick.
+        // (The org2 body's rain ambient registered ahead of its view phase, above.)
         if (ent != nullptr) {
-            infantry_rain_ambient(world, *ent);
             int32_t building_reverb = 0;
             if (ent->blink_hits[0])
                 if (const auto *building = world.registry.get(EntityHandle::make(2, ent->blink_hits[0] >> 20)))
@@ -1370,6 +1381,19 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                                   ? (tick_entity->flags | tick_entity->engine_flags)
                                   : 0u);
 
+    // The stance sound, after the on-foot site: a body with no seat this pass compares the stance
+    // its head took with its latch and plays the change at its Position, dead or alive. A seated
+    // body's mounted site returns first, so its latch holds through the ride (a detach pass's
+    // site included).
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the mounted returns @0x4B6907 /
+    //  @0x4B6977, the block @0x4B703D..0x4B709D (the compare with +0x304 @0x4B7048,
+    //  Entity_PlaySound3D_FullVolume called @0x4B7089) ahead of the 4th-tick selector @0x4B70CE]
+    if (!npc_body && (tick_flags & 1u) == 0) {
+        const Entity *ent = world.registry.get(e.handle);
+        if (!seated_body && !(ent != nullptr && ent->mounted))
+            emit_stance_change_sound(world, e.handle.packed, e.self->position.words().data(),
+                    e.inf.stance_sound_state, stance_bits, tick_flags, stance_parent_def);
+    }
     // Org2 selects its next gait only after the current head pose was built.
     // [orig: head @0x4B6BB3; fourth-tick selector @0x4B70CE; ladder @0x4B7484]
     if (e.health > 0 && !npc_body) {

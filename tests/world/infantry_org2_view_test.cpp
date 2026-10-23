@@ -9,6 +9,8 @@
 // - D-NET-NEW-L5-50: the local body in a control seat halves its Pitch under the chase camera.
 // - D-NET-NEW-L5-55: the dead body's corpse leg after its dead tail (its timer, its 186 decay, the
 //   LeaveCorpse keep, section bit 0's destroy).
+// - D-NET-NEW-L5-57 / -58: the local body's rain ambient ahead of the phase, dead or alive; the
+//   stance sound after the on-foot site.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the canopy chase @0x4B4945..0x4B496C, the
 //  skip test @0x4B4972..0x4B4978, the mount config test @0x4B4AC6..0x4B4ADE, the ground test
 //  @0x4B4AE0..0x4B4AF9, the clamp @0x4B4AFB..0x4B4B59, the legs @0x4B4B5F..0x4B4B6B, the leg model
@@ -31,6 +33,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 
 using namespace opennova;
@@ -542,6 +545,85 @@ void test_corpse_leg_through_the_tick() {
 	}
 }
 
+// D-NET-NEW-L5-57: the local player body registers its rain ambient ahead of its view phase with no
+// Health test, so a dead local body keeps its two rain loops; a player body not the local one
+// registers none. [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B473B..0x4B4906]
+void test_rain_ambient_dead_or_alive() {
+	for (const bool dead : {false, true}) {
+		for (const bool local : {false, true}) {
+			auto wp = std::make_unique<w::World>();
+			w::World &world = *wp;
+			world.registry.configure_pool(0, 16);
+			world.weather.core.scalar_channels.rain_pct_fp = 0x8000;
+			world.weather.precipitation_kind = static_cast<uint32_t>(w::PrecipitationKind::Rain);
+			w::Entity body;
+			body.kind = w::EntityKind::Organic;
+			body.health = dead ? 0 : 100;
+			body.alive = !dead;
+			body.position = {10.f, 20.f, 0.f};
+			// A player body not the local one is org2 by its player bit.
+			body.flags = body.engine_flags =
+					(dead ? w::kEntityFlagDead : 0u) | (local ? 0u : w::kEntityFlagPlayer);
+			const w::EntityHandle bh = world.registry.spawn(0, body);
+			w::AiEntity *ae = world.ai.at(world.ai.attach(bh));
+			CHECK(ae != nullptr);
+			if (ae == nullptr) continue;
+			ae->inf.active = true;
+			ae->inf.is_local_player = local;
+			world.ai.tick_infantry(*ae, world, 1);
+			int left = 0, right = 0;
+			for (const w::SoundEmitterEvent &ev : world.out.sound_emitters.pending()) {
+				if (ev.set_name == "LPNV_RAIN_L") ++left;
+				if (ev.set_name == "LPNV_RAIN_R") ++right;
+			}
+			CHECK(left == (local ? 1 : 0) && right == (local ? 1 : 0));
+		}
+	}
+}
+
+// D-NET-NEW-L5-58: the stance sound plays after the on-foot site. A seated body's mounted site
+// returns first, so it plays none and its latch holds; the same body on foot plays its change.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the mounted returns @0x4B6907 / @0x4B6977,
+//  the stance block @0x4B703D..0x4B709D]
+void test_stance_sound_after_the_on_foot_site() {
+	for (const bool seated : {true, false}) {
+		auto wp = std::make_unique<w::World>();
+		w::World &world = *wp;
+		world.registry.configure_pool(0, 16);
+		world.registry.configure_pool(1, 16);
+		w::Entity vehicle;
+		vehicle.net_id = 200;
+		vehicle.kind = w::EntityKind::Item;
+		vehicle.has_item_def = true;
+		vehicle.has_graphic_model = true;
+		vehicle.item_type = 1;
+		vehicle.position = {10.f, 20.f, 5.f};
+		w::Seat seat;
+		seat.type = w::SeatType::Passenger;
+		vehicle.seats.push_back(seat);
+		const w::EntityHandle vh = world.registry.spawn(1, vehicle);
+		w::Entity body;
+		body.net_id = 100;
+		body.kind = w::EntityKind::Organic;
+		body.health = 100;
+		body.alive = true;
+		const w::EntityHandle bh = world.registry.spawn(0, body);
+		w::AiEntity *ae = world.ai.at(world.ai.attach(bh));
+		CHECK(ae != nullptr);
+		if (ae == nullptr) continue;
+		ae->inf.active = true;
+		ae->inf.is_local_player = true;
+		ae->inf.stance = w::InfantryState::Stance::kCrouch; // the crouch key: no seat clears it
+		if (seated) CHECK(world.commands.mount(bh, vh));
+		world.ai.tick_infantry(*ae, world, 1);
+		int crouch_sounds = 0;
+		for (const w::SoundSlotEvent &ev : world.out.slot_sounds)
+			if (std::strcmp(ev.set_name, "TO_CROUCH") == 0) ++crouch_sounds;
+		CHECK(crouch_sounds == (seated ? 0 : 1));
+		CHECK(ae->inf.stance_sound_state == (seated ? 0 : 1));
+	}
+}
+
 // D-NET-NEW-L5-50: the local body in a control seat (ctrlx / drvrx) under the chase camera
 // (g_CameraMode 1) halves its Pitch ahead of the phase, every tick; a passenger seat, the first
 // person camera or a body not the local one keeps it [orig: @0x4B4921..0x4B4942].
@@ -607,6 +689,8 @@ int main() {
 	test_dead_tail();
 	test_dead_tail_through_the_tick();
 	test_corpse_leg_through_the_tick();
+	test_rain_ambient_dead_or_alive();
+	test_stance_sound_after_the_on_foot_site();
 	if (failures == 0) std::printf("infantry_org2_view: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

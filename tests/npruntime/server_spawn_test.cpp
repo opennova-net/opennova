@@ -992,6 +992,11 @@ int main() {
 		body->health = 0;
 		body->flags |= w::kEntityFlagDead;
 		body->death_effect_active[0] = 1;
+		// D-NET-NEW-L5-59: no store on the deploy path writes the deck ride's pitch lag
+		// (+0x2E0), so its residual survives the respawn. [orig: Server_DeployPlayer
+		//  @0x517740, Entity_ResetToSpawnState @0x4B9610: no +0x2E0 store]
+		static constexpr int32_t kPitchLag = 0x00123400;
+		body_motor->inf.carrier_pitch_lag = kPitchLag;
 		bare_world->out.destruction.effects.clear();
 		inmatch::Server_ReleasePlayerDeployment(
 				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
@@ -1001,6 +1006,8 @@ int main() {
 					effect.attach_wire_handle == body->handle.packed;
 		if (!expect(decay_released && body->death_effect_active[0] == 0,
 		            "the deploy releases the corpse's decay emitter")) return 1;
+		if (!expect(body_motor->inf.carrier_pitch_lag == kPitchLag,
+		            "the deploy leaves the deck ride's pitch lag")) return 1;
 	}
 
 	// A join-time spectator is POSITIONED with the substitute team while its
