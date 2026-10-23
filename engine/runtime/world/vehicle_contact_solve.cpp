@@ -55,8 +55,8 @@ void air_contact_tail(World &world, Entity &veh, const VehicleTraits &traits, in
 
 // A tank or tracked contact arm entering the crash state: both crash bytes and the inlined
 // Entity_ClearSuspensionState.
-// [orig: tank @0x478991..0x4789DD, @0x478C80..0x478CCC; tracked @0x47E894..0x47E8E0;
-//  Entity_ClearSuspensionState @0x4592B0]
+// [orig: tank @0x478991..0x4789DD, @0x478C80..0x478CCC; tracked @0x47E46D..0x47E4C0,
+//  @0x47E894..0x47E8E0; Entity_ClearSuspensionState @0x4592B0]
 void contact_enter_crash(Entity::VehicleMotorState &m) {
 	m.byte_2ef = 1;
 	m.crashed = 1;
@@ -622,31 +622,84 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 		veh.roll_bam = m.air_roll_bam;
 	};
 
-	// ---- solve select: the no-pad branch [orig: the all-zero pad test
-    // @0x47E1A9].
-    if (!any_pad) {
-        if (up_z16 < 0) {
-			// Inverted spine contact lifts the hull by the deepest force record across all seven
-			// probes and feeds crush/crash state.
-			// Witness sites: [orig: @0x47E1DF, @0x47E1E9, @0x47E23E, @0x47E358, @0x47E4C6]
-			int32_t maxd = 0;
-			for (int i = 0; i < 7; ++i) maxd = std::max(maxd, rec[i]);
-            if (maxd > 0) {
-                pz += maxd;
-                veh.flags &= ~kEntityFlagInAir;
-				tracked_tail(up_z16);
-				return;
+	// The pad-rectangle bounding quad, in the witnessed winding: corner k sits over pad k, so the
+	// identity lift pairing is geometric. Both arms fit it as it stood before either moves Z.
+	// [orig: Entity_ComputeBoundingQuad @0x45B6E0 non-square arm, called @0x47DAE2/@0x47DB54 (or
+	// after the crash state's rebuilds @0x47DF71 / @0x47E05E): c0=(+f,+s), c1=(+f,-s), c2=(-f,-s),
+	// c3=(-f,+s), each corner the origin plus two separately rounded Q16 row products]
+	int32_t c[4][3];
+	vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, c);
+
+	// ---- solve select: the no-pad branch [orig: the all-zero copy test @0x47E18B..0x47E1A9].
+	if (!any_pad) {
+		// A crashed or inverted hull takes the deepest force record of all seven (seeded -1); a
+		// crashed hull whose spine touches with neither its park frozen (+0x2EF) nor a wreck at rest
+		// (+0x2F0) freezes its park, marking the +0x364 cue while it still rolls (+0xAC), else +0x365.
+		// [orig: @0x47E1AF..0x47E274: the seed @0x47E1B5, the gate @0x47E1BE..0x47E1C4, the scan
+		//  @0x47E1DF..0x47E23E (the -1 seed's `jle` @0x47E1E9), the freeze @0x47E244..0x47E274]
+		int32_t depth = -1;
+		if (m.crashed || up_z16 < 0) {
+			for (int i = 0; i < 7; ++i)
+				depth = std::max(depth, rec[i]);
+			if (depth > 0 && m.crashed && !m.byte_2ef && !m.settle_2f0) {
+				m.byte_2ef = 1;
+				if (m.air_roll_rate != 0)
+					m.plat_at_rest = true;
+				else
+					m.plat_porpoise = true;
 			}
-        }
-		// Airborne sets the flag and fits the unlifted corners before parked spring application.
-		// Witness sites: [orig: @0x47E57B, @0x47E5E6, @0x47E283]
-		world.vehicles.suspension_airborne_loop(veh, traits, 4, sink_growth, corner_adj);
-		veh.flags |= kEntityFlagInAir;
-		// The pad quad [orig: Entity_ComputeBoundingQuad @0x45B6E0, the call @0x47DB54].
-		int32_t corners[4][3];
-		vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, corners);
+		}
+		// Only a hull neither crashed nor a wreck at rest runs the airborne loop: each oscillator
+		// steps, and each sink past one growth step drops its fit corner (the catch-up, under no
+		// crash request). [orig: the gate @0x47E27B..0x47E28A, the loop @0x47E290..0x47E344, the
+		//  catch-up gate @0x47E2DB..0x47E2EB, `add [ebp+0], ecx` into the quad's corner Z
+		//  (outVerts + 8 + 12k) @0x47E318]
+		if (!m.crashed && !m.settle_2f0) {
+			world.vehicles.suspension_airborne_loop(veh, traits, 4, sink_growth, corner_adj);
+			for (int k = 0; k < 4; ++k)
+				c[k][2] = io::bam_add(c[k][2], corner_adj[k]);
+		}
+		if (depth > 0) {
+			pz = io::bam_add(pz, depth); // [orig: @0x47E358]
+			if (m.crashed && (veh.flags & kEntityFlagInAir) != 0) {
+				// A crashed hull still falling past 0x1000, and no wreck, rebounds at |vz >> 1|
+				// capped 0x5000 with the soft tumble cue unless the medium latch (brain+0x318 bit 7)
+				// holds it; a slower one stops.
+				// [orig: @0x47E35B..0x47E40B: the rebound @0x47E375..0x47E3B1, profile +0xC4
+				//  @0x47E3B7..0x47E3E6, vz = 0 @0x47E401]
+				if (io::bam_abs(m.slide_z) > 0x1000 && !m.settle_2f0) {
+					m.slide_z = io::bam_abs(io::bam_sar(m.slide_z, 1));
+					if (io::bam_abs(m.slide_z) > 0x5000)
+						m.slide_z = 0x5000;
+					if (!m.tumble_med_latched)
+						world.vehicles.play_contact_sound(veh, traits, audio::kSlotTumbleHitSoft);
+				} else {
+					m.slide_z = 0;
+				}
+			} else {
+				// Landing on the spine enters the crash state, with the skid cue (profile +0x64, or
+				// the global set) once per latch (brain+0x318 bit 3) while |speed| passes 0x100.
+				// [orig: @0x47E410..0x47E4C0: the cue @0x47E410..0x47E46A, the latch inline
+				//  @0x47E46D..0x47E4C0]
+				if (io::bam_abs(m.speed) > 0x100 && !m.skid_sound_latched) {
+					m.skid_sound_latched = true;
+					world.vehicles.play_contact_sound(veh, traits, 25);
+				}
+				contact_enter_crash(m);
+			}
+			veh.flags &= ~kEntityFlagInAir; // [orig: @0x47E3EE / @0x47E3FA / @0x47E4C6]
+		} else {
+			// [orig: the in-air set @0x47E57B, +0x2EF = 0 @0x47E582, brain+0x318 &= 0x3F @0x47E589]
+			veh.flags |= kEntityFlagInAir;
+			m.byte_2ef = 0;
+			m.tumble_hard_latched = m.tumble_med_latched = false;
+		}
+		// The fit takes the contact copy when the spine touched, else none (its sixth argument
+		// is unread). [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140, the calls
+		//  @0x47E590..0x47E5BF (the copy) / @0x47E5C1..0x47E5E5 (none) joined @0x47E5E6; Roll / Pitch
+		//  @0x47E61F / @0x47E622, Yaw when crashed @0x47E62B..0x47E632]
 		PlatFit fit;
-		vehicle_suspension_fit(world, veh, corners, nullptr, fit, px, py, pz);
+		vehicle_suspension_fit(world, veh, c, depth > 0 ? pad_contact : nullptr, fit, px, py, pz);
 		m.air_pitch_bam = fit.pitch_bam;
 		m.air_roll_bam = fit.roll_bam;
 		if (m.crashed)
@@ -660,13 +713,6 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	// in-air flag as it stands before the clear below; the extend loop above read the request
 	// the previous tick's window left. [orig: @0x47E791..0x47E7F5]
 	world.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tracked);
-	// The pad-rectangle bounding quad, in the witnessed winding: corner k sits over pad k, so the
-	// identity lift pairing below is geometric [orig: Entity_ComputeBoundingQuad @0x45B6E0
-	// non-square arm, called @0x47DAE2/@0x47DB54 (or after the crash state's rebuilds @0x47DF71 /
-	// @0x47E05E): c0=(+f,+s), c1=(+f,-s), c2=(-f,-s), c3=(-f,+s), each corner the origin plus two
-	// separately rounded Q16 row products].
-	int32_t c[4][3];
-	vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, c);
 	// A crashed hull still falling fast rebounds at half speed (capped 0x5000) and strikes its pads
 	// through the tracked strike forces off the force records, folding them into the chassis pose
 	// at once; a crashed hull falling slower stops and re-enters the crash state, as does every

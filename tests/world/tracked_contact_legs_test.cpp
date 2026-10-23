@@ -1,6 +1,6 @@
 // The tracked contact solve's extend-loop and respawn legs (D-NET-NEW-L6-16), the aircraft and
-// tracked crash-state latch (D-NET-NEW-L6-17), the grounded arm's crashed block (D-NET-NEW-L6-19)
-// and the tail legs (D-NET-NEW-L6-20).
+// tracked crash-state latch (D-NET-NEW-L6-17), the grounded arm's crashed block (D-NET-NEW-L6-19),
+// the tail legs (D-NET-NEW-L6-20) and the no-pad arm (D-NET-NEW-L6-18).
 // - The extend loop resets every oscillator's remaining range to 0xFFFF, after the pad quad's
 //   chassis-force clear. [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the quad
 //   @0x47DAE2 and Entity_ClearSuspensionForces @0x47DAF2; the reset @0x47DB70]
@@ -295,6 +295,55 @@ void test_the_tail_legs() {
 	}
 }
 
+// D-NET-NEW-L6-18: the no-pad arm.
+// - A free hull's airborne loop steps its oscillators and drops each fit corner by its sink past
+//   one growth step: the two front sinks of 20000 pitch the level hull and raise the hard-landing
+//   marker (a drop past -5000 while falling). A crashed hull skips the loop: its oscillators hold.
+//   [orig: @0x47E27B..0x47E28A, @0x47E290..0x47E344, `add [ebp+0], ecx` @0x47E318]
+// - An inverted free hull (parked, so the crash state does not rebuild it) whose spine touches
+//   lifts by the deepest record and lands in the crash state, with the skid latch past |speed|
+//   0x100. [orig: @0x47E1AF..0x47E23E, @0x47E358, @0x47E410..0x47E4C0]
+void test_the_no_pad_arm() {
+	const int32_t kHigh = kGround + (20 << 16); // no probe reaches the field
+	for (const bool crashed : { false, true }) {
+		auto rig = std::make_unique<Rig>(true);
+		Entity &v = rig->e();
+		v.health = 0;
+		v.veh.crashed = crashed ? 1 : 0;
+		v.veh.plat_acc[0] = v.veh.plat_acc[1] = 20000;
+		v.veh.wheel_osc[0].amplitude = 10000;
+		const float phase = v.veh.wheel_osc[0].phase;
+		rig->solve(kHigh);
+		CHECK((v.flags & kEntityFlagInAir) != 0);
+		if (crashed) {
+			CHECK(v.veh.wheel_osc[0].phase == phase);
+			CHECK(v.veh.landing_2ee == 0);
+		} else {
+			CHECK(v.veh.wheel_osc[0].phase != phase);
+			CHECK(v.veh.air_pitch_bam != 0);
+			CHECK(v.veh.landing_2ee == 1);
+		}
+	}
+	{
+		// Inverted, the spine probes (box_z_hi - 104136) sink 4096 into the field; the pads ride
+		// clear above it. A client: the authority's crash state would unpark and rebuild it.
+		auto rig = std::make_unique<Rig>(false);
+		Entity &v = rig->e();
+		v.health = 0;
+		v.flags |= kEntityFlagSuspensionCrashed;
+		v.veh.air_roll_bam = int32_t(0x80000000u);
+		v.veh.speed = 0x200;
+		const int32_t z = kGround + 304748 - 4096;
+		int32_t px = 100 << 16, py = 200 << 16, pz = z;
+		v.veh.slide_z = -400;
+		detail::ground_contact_solve(rig->world, v, truck(), v.veh, px, py, px, py, pz);
+		CHECK(pz > z);
+		CHECK((v.flags & kEntityFlagInAir) == 0);
+		CHECK(v.veh.crashed == 1 && v.veh.byte_2ef == 1);
+		CHECK(v.veh.skid_sound_latched);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -304,6 +353,7 @@ int main() {
 	test_the_crash_latch_per_family();
 	test_the_grounded_crashed_block();
 	test_the_tail_legs();
+	test_the_no_pad_arm();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
