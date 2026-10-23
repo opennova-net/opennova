@@ -179,11 +179,7 @@ const float NVG_GLOW_THRESHOLD = @NVG_GLOW_THRESHOLD@;
 const vec3 NVG_GLOW_SCALE = @NVG_GLOW_SCALE@;
 const float NVG_GLOW_ALPHA = @NVG_GLOW_ALPHA@;
 
-vec3 gamma_to_linear(vec3 gamma_rgb) {
-	vec3 c = clamp(gamma_rgb, vec3(0.0), vec3(1.0));
-	return mix(pow((c + vec3(0.055)) * (1.0 / 1.055), vec3(2.4)),
-			c * (1.0 / 12.92), lessThan(c, vec3(0.04045)));
-}
+@GAMMA_TO_LINEAR@
 
 // D3D9's pre-transformed quads place pixel centers on integer positions:
 // the rect-normalised position of this pixel's center.
@@ -326,6 +322,44 @@ void main() {
 }
 )GLSL";
 
+// The terminal display decode's transfer, one text for both of its forms
+// (the fragment stage's mode 4 and the in-place compute pass).
+const char *kGlslGammaToLinear = R"GLSL(vec3 gamma_to_linear(vec3 gamma_rgb) {
+	vec3 c = clamp(gamma_rgb, vec3(0.0), vec3(1.0));
+	return mix(pow((c + vec3(0.055)) * (1.0 / 1.055), vec3(2.4)),
+			c * (1.0 / 12.92), lessThan(c, vec3(0.04045)));
+})GLSL";
+
+// The terminal display decode in place: each pixel of the scene colour is
+// read, decoded and written back by the same invocation. The copy-then-draw
+// form (a full-frame stretch into the scratch target, then mode 4 back into
+// the colour) produces the same texels at twice the bandwidth: its stretch
+// samples every texel at its own centre, an exact copy.
+const char *kDecodeComputeShaderTemplate = R"GLSL(#version 450
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(rgba16f, set = 0, binding = 0) uniform restrict image2D scene_color;
+
+layout(push_constant, std430) uniform DecodePush {
+	ivec4 size;
+} pc;
+
+@GAMMA_TO_LINEAR@
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (pixel.x >= pc.size.x || pixel.y >= pc.size.y)
+		return;
+	vec4 source = imageLoad(scene_color, pixel);
+	imageStore(scene_color, pixel, vec4(gamma_to_linear(source.rgb), source.a));
+}
+)GLSL";
+
+std::string decode_compute_shader_source() {
+	std::string source(kDecodeComputeShaderTemplate);
+	splice_token(source, "@GAMMA_TO_LINEAR@", kGlslGammaToLinear);
+	return source;
+}
+
 std::string glsl_list4(const std::array<float, 4> &p_values) {
 	return glsl_float(p_values[0]) + ", " + glsl_float(p_values[1]) + ", " +
 			glsl_float(p_values[2]) + ", " + glsl_float(p_values[3]);
@@ -334,6 +368,7 @@ std::string glsl_list4(const std::array<float, 4> &p_values) {
 std::string frame_fragment_shader_source() {
 	namespace r = opennova::renderer;
 	std::string source(kFrameFragmentShaderTemplate);
+	splice_token(source, "@GAMMA_TO_LINEAR@", kGlslGammaToLinear);
 	splice_token(source, "@LUMA@", glsl_vec3(r::kFrameFxLumaWeights));
 	splice_token(source, "@WEIGHTS@", glsl_list4(r::kFrameFxWeightedTapWeights));
 	splice_token(source, "@WEIGHT_STEPS@", glsl_list4(r::kFrameFxWeightedTapSteps));
@@ -490,6 +525,10 @@ public:
 		RID q3_uniform;
 		RID nvg_scene_uniform;
 		RID nvg_glow_uniform;
+		// The scene colour as the in-place decode's storage image (invalid
+		// where the colour cannot be one: that view runs the copy-then-draw
+		// decode).
+		RID decode_image_uniform;
 		Vector2i size;
 		Vector2i capture_size;
 	};
@@ -537,6 +576,12 @@ public:
 
 	RenderingDevice *rd = nullptr;
 	RID shader;
+	// The in-place terminal decode, built with the first target that can use
+	// it (a failed build leaves every view on the copy-then-draw decode).
+	RID decode_shader;
+	RID decode_pipeline;
+	bool decode_compute_failed = false;
+	std::size_t decode_in_place_views = 0;
 	RID sampler;
 	RID repeat_sampler;
 	RID scanlines;
@@ -593,6 +638,7 @@ public:
 	}
 
 	void release_target(ViewTarget &target) {
+		release_uniform(target.decode_image_uniform);
 		release_uniform(target.nvg_glow_uniform);
 		release_uniform(target.nvg_scene_uniform);
 		release_uniform(target.q3_uniform);
@@ -642,12 +688,21 @@ public:
 		for (auto &entry : pipelines)
 			release_pipeline(entry.second);
 		pipelines.clear();
+		if (rd != nullptr && decode_pipeline.is_valid() &&
+				rd->compute_pipeline_is_valid(decode_pipeline))
+			rd->free_rid(decode_pipeline);
+		decode_pipeline = RID();
+		release_rid(decode_shader);
+		decode_compute_failed = false;
 		release_rid(repeat_sampler);
 		release_rid(sampler);
 		release_rid(shader);
 	}
 
 	bool initialize_rd();
+	bool ensure_decode_compute();
+	RID make_decode_image_uniform(const RID &color, const Ref<RDTextureFormat> &format);
+	bool decode_in_place(const ViewTarget &target, std::size_t &draws);
 	RID make_texture(const Vector2i &size,
 			RenderingDevice::DataFormat format, bool readback = false);
 	RID make_framebuffer(const RID &texture);
@@ -820,6 +875,71 @@ RID FrameFxCompositorEffect::Impl::make_uniform(const RID &texture,
 	return rd->uniform_set_create(uniforms, shader, 0);
 }
 
+bool FrameFxCompositorEffect::Impl::ensure_decode_compute() {
+	if (decode_pipeline.is_valid())
+		return true;
+	if (decode_compute_failed)
+		return false;
+	Ref<RDShaderSource> source;
+	source.instantiate();
+	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
+	source->set_stage_source(RenderingDevice::SHADER_STAGE_COMPUTE,
+			opennova::to_gd(decode_compute_shader_source()));
+	const Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
+	if (spirv.is_valid() &&
+			spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_COMPUTE).is_empty())
+		decode_shader = rd->shader_create_from_spirv(spirv, "OpenNova FrameFX decode");
+	if (decode_shader.is_valid())
+		decode_pipeline = rd->compute_pipeline_create(decode_shader);
+	if (!decode_pipeline.is_valid()) {
+		release_rid(decode_shader);
+		decode_compute_failed = true;
+		return false;
+	}
+	return true;
+}
+
+// The scene colour as a storage image, where it can be one: single-sampled
+// RGBA16F (the compute shader's declared format) with the storage usage.
+RID FrameFxCompositorEffect::Impl::make_decode_image_uniform(const RID &color,
+		const Ref<RDTextureFormat> &format) {
+	if (format.is_null() ||
+			format->get_format() != RenderingDevice::DATA_FORMAT_R16G16B16A16_SFLOAT ||
+			format->get_samples() != RenderingDevice::TEXTURE_SAMPLES_1 ||
+			!format->get_usage_bits().has_flag(RenderingDevice::TEXTURE_USAGE_STORAGE_BIT) ||
+			!ensure_decode_compute())
+		return RID();
+	Ref<RDUniform> image;
+	image.instantiate();
+	image->set_uniform_type(RenderingDevice::UNIFORM_TYPE_IMAGE);
+	image->set_binding(0);
+	image->add_id(color);
+	TypedArray<Ref<RDUniform>> uniforms;
+	uniforms.push_back(image);
+	return rd->uniform_set_create(uniforms, decode_shader, 0);
+}
+
+bool FrameFxCompositorEffect::Impl::decode_in_place(const ViewTarget &target,
+		std::size_t &draws) {
+	PackedByteArray push;
+	push.resize(16);
+	write_u32(push, 0, static_cast<std::uint32_t>(target.size.x));
+	write_u32(push, 4, static_cast<std::uint32_t>(target.size.y));
+	write_u32(push, 8, 0u);
+	write_u32(push, 12, 0u);
+	const int64_t list = rd->compute_list_begin();
+	if (list == RenderingDevice::INVALID_ID)
+		return false;
+	rd->compute_list_bind_compute_pipeline(list, decode_pipeline);
+	rd->compute_list_bind_uniform_set(list, target.decode_image_uniform, 0);
+	rd->compute_list_set_push_constant(list, push, static_cast<uint32_t>(push.size()));
+	rd->compute_list_dispatch(list, static_cast<uint32_t>((target.size.x + 7) / 8),
+			static_cast<uint32_t>((target.size.y + 7) / 8), 1);
+	rd->compute_list_end();
+	++draws;
+	return true;
+}
+
 bool FrameFxCompositorEffect::Impl::ensure_targets(
 		RenderSceneBuffersRD *buffers, std::uint32_t count,
 		const Vector2i &size) {
@@ -905,6 +1025,7 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 		target.q3_uniform = make_uniform(target.q3_color, sampler);
 		target.nvg_scene_uniform = make_uniform(target.nvg_scene, sampler);
 		target.nvg_glow_uniform = make_uniform(target.nvg_glow, sampler);
+		target.decode_image_uniform = make_decode_image_uniform(target.color, color_format);
 		const bool valid = target.color_framebuffer.is_valid() &&
 				target.scene_scratch.is_valid() &&
 				target.scene_scratch_framebuffer.is_valid() &&
@@ -1489,6 +1610,7 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	nvg_lens_drawn = false;
 	nvg_sights_drawn = 0;
 	std::size_t draws = 0;
+	std::size_t in_place_views = 0;
 	bool sampled_q3 = false;
 	bool q3_failed = false;
 	bool effects_failed = false;
@@ -1530,19 +1652,26 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		// sRGB output encoding. Canvas/viewmodel/HUD passes run afterward.
 		if (gpu_timing && view == 0)
 			rd->capture_timestamp("opennova_decode_begin");
-		if (!stretch(target.scene_scratch_framebuffer, target.size,
-				target.color_uniform, target.size, draws))
-			return false;
-		FramePush decode;
-		decode.pass = FramePass::GammaDecode;
-		decode.rect_w = static_cast<float>(target.size.x);
-		decode.rect_h = static_cast<float>(target.size.y);
-		decode.source_w = decode.rect_w;
-		decode.source_h = decode.rect_h;
-		if (!draw_pushes(target.color_framebuffer, target.scratch_uniform,
-				BlendMode::Replace, &decode, 1, TargetLoad::Discard, clear_black))
-			return false;
-		++draws;
+		if (target.decode_image_uniform.is_valid() &&
+				rd->uniform_set_is_valid(target.decode_image_uniform)) {
+			if (!decode_in_place(target, draws))
+				return false;
+			++in_place_views;
+		} else {
+			if (!stretch(target.scene_scratch_framebuffer, target.size,
+					target.color_uniform, target.size, draws))
+				return false;
+			FramePush decode;
+			decode.pass = FramePass::GammaDecode;
+			decode.rect_w = static_cast<float>(target.size.x);
+			decode.rect_h = static_cast<float>(target.size.y);
+			decode.source_w = decode.rect_w;
+			decode.source_h = decode.rect_h;
+			if (!draw_pushes(target.color_framebuffer, target.scratch_uniform,
+					BlendMode::Replace, &decode, 1, TargetLoad::Discard, clear_black))
+				return false;
+			++draws;
+		}
 		if (gpu_timing && view == 0)
 			rd->capture_timestamp("opennova_decode_end");
 	}
@@ -1559,6 +1688,7 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		++rendered_frames;
 		gpu_draw_calls = draws;
 		view_count = count;
+		decode_in_place_views = in_place_views;
 		last_size = size;
 		last_capture_size = targets.empty() ? Vector2i() :
 				targets.front().capture_size;
@@ -1582,6 +1712,11 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["blur_target_size"] = static_cast<int64_t>(kWorkSide);
 	result["framebuffer_blend_domain"] = "gamma";
 	result["terminal_transfer"] = "srgb_inverse_then_display_encode";
+	// How the last frame's views ran that transfer: in place (one compute
+	// pass per view) or copied and drawn back (two full-frame passes).
+	result["terminal_decode"] = decode_in_place_views == 0 ? "copy_and_draw" :
+			decode_in_place_views == view_count ? "compute_in_place" : "mixed";
+	result["terminal_decode_compute_failed"] = decode_compute_failed;
 	result["callback_seen"] = callback_seen;
 	result["rd_available"] = rd_available;
 	result["status"] = opennova::to_gd(status);

@@ -277,6 +277,10 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 		assert_eq(String(report.get("status", "")), "drawn_without_q3",
 				String(report.get("failure", "FrameFX terminal failed")))
 		assert_false(bool(report.get("q3_sampled", true)))
+		# The single-sampled Forward+ colour decodes in place: one compute pass,
+		# not the full-frame copy and the draw back (LF-s1, 2.1 ms at 1440p).
+		assert_eq(String(report.get("terminal_decode", "")), "compute_in_place")
+		assert_false(bool(report.get("terminal_decode_compute_failed", true)))
 		var center := viewport.get_texture().get_image().get_pixel(32, 16)
 		assert_gt(center.g, 0.65,
 				"beauty green survives the terminal decode and display encode")
