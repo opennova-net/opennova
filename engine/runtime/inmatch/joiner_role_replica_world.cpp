@@ -12,6 +12,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 
 #include <base/gameprofile/game_type.h> // kCaptureTheFlag / kFlagBall (the fresh-pickup lookup)
+#include <net/npwire/ingame_message_id.h> // s2c::FULL_ENTITY_SPAWN (the own row's 0x18)
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 
 
@@ -252,6 +253,9 @@ void JoinerRole::spawn_and_arm_local_player() {
 		stamp_mission_start_identity(spawn);
 		const world::EntityHandle h = world::spawn_player(world, spawn);
 		local_spawned_ = h.valid();
+		// A 0x18 that built the self row ahead of L's spawn is not a rebuild of L.
+		if (const replication::ClientEntityState *row = rt.state().find(rt.self_handle()))
+			self_full_spawn_revision_seen_ = row->spawn_revision;
 		// A client builds its own body from the host's 0x0C like every
 		// pool-0 entity: the slot memset leaves commandGroup (+0x11C) 0 and no
 		// client message stores it. The 1 spawn_player stamps is the
@@ -386,6 +390,9 @@ void JoinerRole::fold_local_record() {
 	world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) return;
 	local_flags_revision_seen_ = self->compact_revision;
+	// A body with no def drops the record whole (its own ewep update destroyed it, until a 0x18
+	// rebuilds it). [orig: NetPacket_SerializePlayerState @0x4C09C0 - the def test @0x4C0F92]
+	if (!local->has_item_def) return;
 	// The record's stage first: its world sample becomes L's chase target, its yaw and
 	// pitch the staged angles, and the chase restarts; L's own update then walks toward
 	// it off the authority (world::player_body_network_chase, D-NET-NEW-L2-14).
@@ -480,6 +487,76 @@ void JoinerRole::fold_local_record() {
 	local->ground_target = mount != nullptr ? mount->ground_target
 			: record_carrier != nullptr        ? record_carrier->handle
 			                                   : world::EntityHandle{};
+}
+
+// A 0x18 naming the joiner's own handle rebuilds its body in place: retail's slot is the one
+// g_LocalPlayerEntity names, so the record's stores land on L. The record's def by its type word,
+// its Flags word, Position and the Yaw / Pitch words, Health the def's healthMax, its Team,
+// NetId, animSlot, class word and +0x154 slot byte, its ground entity (+0x28), no occupant and
+// no mount, the lean 0, the model init's savedLivePose; then the def's class init (the plyr
+// row's: the equipped default, the DcbId). The words past +0x2B4 stay. The record's +0x16C and
+// +0x170 handles are not modeled here: L stays unmounted, with no occupant.
+// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_Destroy @0x433815, the memset
+//  @0x433821, Flags @0x433B69, Position / Yaw @0x433B77..0x433B8C, NetId / Team / Pitch / class /
+//  +0x154 @0x433B9F..0x433BBB, ItemList_FindIndexByTypeId @0x433BC7, the def stores
+//  @0x433BD4..0x433BDF, Health = healthMax @0x433C39, +0x170 @0x433C91, +0x28 @0x433CDD, +0x16C
+//  @0x433D21, the lean @0x433E5C, Entity_InitFromModel @0x433E6C, the class init @0x433E82]
+void rebuild_local_body_words(world::World &world, world::Entity &local, world::AiEntity &local_ai,
+		const replication::ClientEntityState &self) {
+	world::bind_player_item_row(world, local, world::item_index_by_type_id(world, self.type_id));
+	local.flags = self.spawn_entity_flags;
+	local.engine_flags = self.spawn_entity_flags;
+	local.alive = (self.spawn_entity_flags & world::kEntityFlagDead) == 0u;
+	local.position.set_q16({self.x, self.y, self.z});
+	local.heading = local_ai.heading = self.heading_bam;
+	local.pitch_bam = local_ai.pitch = self.pitch_bam;
+	local.roll_bam = local_ai.roll = 0;
+	const world::PlayerTemplate &item_row = world::player_item_row(world, local);
+	local.health = item_row.has_item_def && item_row.item_hp.has_value()
+			? world::retail_signed_i16(*item_row.item_hp) : 0;
+	local_ai.health = static_cast<int16_t>(local.health);
+	local.team = self.team;
+	local_ai.team = self.team;
+	local.minimap_net_id = self.net_id;
+	local.anim_slot = self.spawn_anim_slot;
+	local.player_class = self.spawn_player_class;
+	local.player_slot_id = self.spawn_byte_154;
+	local.owner_connection_id = self.spawn_owner_connection_id;
+	local.group_id = 0;
+	local.ground_target = world.registry.get(world::EntityHandle{self.target_handle}) != nullptr
+			? world::EntityHandle{self.target_handle} : world::EntityHandle{};
+	local.primary_occupant = {};
+	local.mounted = false;
+	local.mount_target = {};
+	local.mount_type = world::SeatType::None;
+	local.mount_bone = 0;
+	local.spawn_phase = 0;
+	local_ai.inf.lean_angle = 0;
+	for (int axis = 0; axis < 3; ++axis) local_ai.inf.vel[axis] = 0;
+	local.saved_live_pos[0] = local.position.x.q16;
+	local.saved_live_pos[1] = local.position.y.q16;
+	local.saved_live_pos[2] = local.position.z.q16;
+	local.saved_live_yaw = local.heading;
+	local.saved_live_pitch = local.pitch_bam;
+	local.saved_live_roll = 0;
+	local.saved_live_valid = true;
+}
+
+void JoinerRole::rebuild_local_from_full_spawn() {
+	world::World &world = kernel_->world;
+	ClientRuntime &rt = *runtime;
+	if (!local_spawned_ || !world.cached.local_player.valid() || !rt.has_self_handle()) return;
+	const replication::ClientEntityState *self = rt.state().find(rt.self_handle());
+	if (self == nullptr || self->spawn_tag != s2c::FULL_ENTITY_SPAWN ||
+			self->spawn_revision == self_full_spawn_revision_seen_)
+		return;
+	self_full_spawn_revision_seen_ = self->spawn_revision;
+	world::Entity *local = world.registry.get(world.cached.local_player);
+	world::AiEntity *local_ai = world.ai.for_handle(world.cached.local_player);
+	if (local == nullptr || local_ai == nullptr) return;
+	rebuild_local_body_words(world, *local, *local_ai, *self);
+	kernel_->bind_spawned_body(world.cached.local_player);
+	world::player_body_class_init(world, *local);
 }
 
 // The 0x0A tail is the authoritative health source for the recipient's OWN

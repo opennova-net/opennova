@@ -1832,14 +1832,17 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 			}
 		}
 		spawn_and_arm_local_player();
+		rebuild_local_from_full_spawn();
 		fold_local_record();
 		apply_world_state_load();
 	};
 	// The builder at the send block, on L as the receive left it. Its own refusals: no
-	// body, a Health word of 0, the dead bit (no alive latch, D-NET-433); then the role's
-	// hold on a redeploy release L has not taken yet (apply_authoritative_health's revive).
+	// body, a Health word of 0, the dead bit (no alive latch, D-NET-433), and its serializer's
+	// no def (a body its own ewep update destroyed); then the role's hold on a redeploy
+	// release L has not taken yet (apply_authoritative_health's revive).
 	// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0; jz`
-	//  @0x42A58F..0x42A597, `test byte [eax+24h], 2; jnz` @0x42A599..0x42A59D]
+	//  @0x42A58F..0x42A597, `test byte [eax+24h], 2; jnz` @0x42A599..0x42A59D;
+	//  Pool_SerializeEntityViaVTable @0x4D64E0 - the def test @0x4D6556]
 	const std::vector<std::vector<uint8_t>> outs = rt.Client_ProcessNetworkFrame(
 			[&](PlayerExtendedUplink &up) {
 		if (!local_spawned_ || !world.cached.local_player.valid() || redeploy_release_pending_)
@@ -1847,7 +1850,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		const world::Entity *e = world.registry.get(world.cached.local_player);
 		const world::AiEntity *ae = world.ai.for_handle(world.cached.local_player);
 		if (e == nullptr || ae == nullptr || world::retail_signed_i16(e->health) == 0 ||
-				(e->flags & 2u) != 0u)
+				(e->flags & 2u) != 0u || !e->has_item_def)
 			return false;
 		// The interest list scores the decoded entities against L; the HUD
 		// target cursor is the aim acquisition's combat target, else its

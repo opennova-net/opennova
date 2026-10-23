@@ -1848,6 +1848,59 @@ void test_an_ewep_row_body_asks_for_a_destroyed_ground() {
 	}
 }
 
+// The ewep row's stale-ground leg over the local player's own body (D-NET-892 A2, L5-s21): after
+// its two C2S 0x0F the update destroys the body in place, the memset over +0..+0x2B4 leaving it
+// the local player's with no def, Position and the angles 0, Flags 0, Health 0 and no ground;
+// its words past +0x2B4 (the spawn backup, +0x2D4) stay. A remote body is not touched.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - Entity_Destroy @0x440E2F; Entity_Destroy
+//  @0x43E810 - the memset @0x43EA70]
+void test_an_ewep_row_local_body_is_destroyed_in_place() {
+	static constexpr uint16_t kGround = 0x1003;
+	for (const bool local : {true, false}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		r.world->registry.configure_pool(1, 8);
+		w::Entity *body = local ? r.spawn_local(kEwep) : r.spawn_remote(kEwep);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr);
+		if (ae == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		const w::EntityHandle self = body->handle;
+		body->ground_target = w::EntityHandle{kGround};
+		body->position.set_q16(w::FixedVec3{5 << 16, 6 << 16, 7 << 16});
+		body->heading = 0x10000000;
+		body->spawn_position.x.q16 = 0x00012345;
+		r.world->rules.mp_session = true;
+		r.world->rules.mp_session_peer = true;
+		r.world->rules.logic_authority = false;
+		r.world->destroyed_mark = [](uint16_t handle) { return handle == kGround; };
+		r.world->logic_tick = 0x7F;
+		ae->inf.leg_yaw[0] = 0x40000000;
+		r.world->ai.update_organic(*ae, *r.world, 0x7F);
+		body = r.world->registry.get(self);
+		CHECK(body != nullptr);
+		if (body == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		CHECK(r.world->out.entity_info_requests.size() == 2);
+		CHECK(body->has_item_def == !local);
+		CHECK(body->health == (local ? 0 : body->health));
+		CHECK((body->position.x.q16 == 0) == local);
+		CHECK((body->heading == 0) == local);
+		CHECK((body->flags == 0) == local);
+		CHECK(body->ground_target == (local ? w::EntityHandle{} : w::EntityHandle{kGround}));
+		CHECK(body->spawn_position.x.q16 == 0x00012345);
+		CHECK(ae->inf.leg_yaw[0] == 0x40000000);
+		CHECK(!local || r.world->cached.local_player == self);
+		r.world->destroyed_mark = {};
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // The ewep row over a person body whose ground link names a slot that holds no row: the shared
 // destroy zeroed the slot and left the link, so the mover reads a zeroed ground (no def, no
 // model, a clear matrix bit) and gives the body its zero root words, Position (0, 0, 0),
@@ -2364,6 +2417,7 @@ int main() {
 	test_an_arty_row_body_runs_the_barrage();
 	test_an_ewep_row_body_runs_the_ewep_legs();
 	test_an_ewep_row_body_asks_for_a_destroyed_ground();
+	test_an_ewep_row_local_body_is_destroyed_in_place();
 	test_an_ewep_row_body_over_a_zeroed_ground();
 	test_an_ewep_row_body_lets_go_of_a_rider_off_it();
 	test_an_ewep_row_body_runs_the_tank_command_call();

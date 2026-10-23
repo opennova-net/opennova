@@ -301,8 +301,12 @@ const PlayerTemplate &player_item_row(const World &world, const Entity &body) {
 
 void rebind_player_camouflage_row(World &world, Entity &body) {
     if (world.tables.item_rows.empty() || !world.tables.class_cammo_installed) return;
-    const int32_t index =
-            item_index_by_type_id(world, player_cammo_type_id(world, body.player_class));
+    bind_player_item_row(world, body,
+            item_index_by_type_id(world, player_cammo_type_id(world, body.player_class)));
+}
+
+void bind_player_item_row(World &world, Entity &body, int32_t index) {
+    if (index < 0 || static_cast<size_t>(index) >= world.tables.item_rows.size()) return;
     const PlayerTemplate &row = world.tables.item_rows[static_cast<size_t>(index)];
     body.item_id = row.type_id;
     body.item_type_index = index;

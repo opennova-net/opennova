@@ -56,6 +56,12 @@ namespace opennova::inmatch {
 bool run_replica_person_ewep(world::World &world, replication::ClientState &state,
 		replication::ClientEntityState &row, uint16_t self_handle);
 
+// The words a 0x18 naming the joiner's own handle stores on its body L, from the self row the
+// record built (JoinerRole::rebuild_local_from_full_spawn then binds the def's traits and runs
+// its class init). [orig: NapiNPClientMsg_FullEntitySpawn @0x433780]
+void rebuild_local_body_words(world::World &world, world::Entity &local, world::AiEntity &local_ai,
+		const replication::ClientEntityState &row);
+
 class JoinerRole final : public Role, public world::VehicleOccupancySource {
 public:
 	RoleKind kind() const override { return RoleKind::Joiner; }
@@ -410,6 +416,9 @@ private:
 	// The self player record onto L, once per folded record: its Flags under 0xE1, then
 	// the mount edge's position snap (D-NET-NEW-L2-13).
 	void fold_local_record();
+	// A 0x18 naming the joiner's own handle rebuilds L in place (its ewep update's destroy
+	// asks for one), once per such record.
+	void rebuild_local_from_full_spawn();
 	void apply_authoritative_health();
 	// The tail's carried word onto L's carried link (D-NET-728).
 	void apply_local_carried_object(world::World &world, world::Entity &local);
@@ -448,6 +457,8 @@ private:
 	uint32_t objective_updates_seen_ = 0;
 	// The self row's compact revision whose Flags byte L has folded.
 	uint32_t local_flags_revision_seen_ = 0;
+	// The self row's 0x18 generation L was last built from (rebuild_local_from_full_spawn).
+	uint32_t self_full_spawn_revision_seen_ = 0;
 	// The wire-leg clock: the frame's start, stamped where the uplink ships
 	// (before the decoded-state folds) so the stats board measures exactly the
 	// wire leg.

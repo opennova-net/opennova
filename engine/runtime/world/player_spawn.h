@@ -146,6 +146,13 @@ const PlayerTemplate &player_item_row(const World &world, const Entity &body);
 //  @0x515B60..0x515B78]
 void rebind_player_camouflage_row(World &world, Entity &body);
 
+// A body's binding to the items row at `index`: its ItemTypeIndex and the def words the game
+// reads through it (the type word, the type byte, the attribute word, the armor words, the
+// damage reduction, the model slot, the def hp word's copy) -- the stores both re-resolves
+// above and a joiner's 0x18 rebuild of its own body make. A World with no rows keeps the body.
+// [orig: entity+0x1C ItemTypeIndex, entity+0x20 itemDef = g_ItemDefs[entity+0x1C]]
+void bind_player_item_row(World &world, Entity &body, int32_t index);
+
 // Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry entity of its class's
 // camouflage row (player_spawn.cpp player_spawn_row); (2/3)
 // item-template health init; (4) place Position/Yaw/Team, then the class init; no

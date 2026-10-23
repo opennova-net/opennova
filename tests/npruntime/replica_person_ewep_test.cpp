@@ -253,9 +253,61 @@ void test_the_respawn_edge_runs_the_reset() {
 			"+0x2D4 takes the Yaw");
 }
 
+// A 0x18 naming the joiner's own handle rebuilds its body's words from the record: the def by
+// the type word, Flags, Position and the Yaw / Pitch words, Health the def's healthMax, its Team
+// and the record's identity bytes, its ground entity, no mount; the words past +0x2B4 stay.
+// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - @0x433B69..0x433BBB, @0x433BC7..0x433BDF,
+//  @0x433C39, @0x433CDD]
+void test_the_full_spawn_rebuilds_the_local_body() {
+	Rig r;
+	w::PlayerTemplate null_row;
+	null_row.type_id = 0;
+	null_row.has_item_def = true;
+	w::PlayerTemplate plyr;
+	plyr.type_id = 0x14B9;
+	plyr.has_item_def = true;
+	plyr.item_hp = 150;
+	r.world.tables.item_rows = {null_row, plyr};
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.has_item_def = false; // its own ewep update destroyed it
+	body.mounted = true;
+	body.spawn_position.x.q16 = 0x00012345;
+	w::AiEntity ai;
+	ai.inf.vel[0] = 99;
+	ns::ClientEntityState self;
+	self.type_id = 0x14B9;
+	self.x = 1 << 16;
+	self.y = 2 << 16;
+	self.z = 3 << 16;
+	self.heading_bam = 0x20000000;
+	self.pitch_bam = 0x01000000;
+	self.spawn_entity_flags = 0x101;
+	self.team = 2;
+	self.net_id = 0x0405;
+	self.spawn_anim_slot = 3;
+	self.spawn_player_class = 8;
+	self.spawn_byte_154 = 5;
+	self.target_handle = r.ground.packed;
+	opennova::inmatch::rebuild_local_body_words(r.world, body, ai, self);
+	expect(body.has_item_def && body.item_type_index == 1 && body.item_id == 0x14B9,
+			"the record's type word binds the def");
+	expect(body.health == 150 && ai.health == 150, "Health is the def's healthMax");
+	expect(body.flags == 0x101 && body.position.x.q16 == (1 << 16) && body.position.z.q16 == (3 << 16) &&
+			body.heading == 0x20000000 && body.pitch_bam == 0x01000000 && body.roll_bam == 0,
+			"Flags, Position and the angles");
+	expect(body.team == 2 && body.minimap_net_id == 0x0405 && body.anim_slot == 3 &&
+			body.player_class == 8 && body.player_slot_id == 5,
+			"the record's identity bytes");
+	expect(body.ground_target == r.ground && !body.mounted && ai.inf.vel[0] == 0,
+			"its ground entity, no mount, the velocity cleared");
+	expect(body.spawn_position.x.q16 == 0x00012345, "the words past +0x2B4 stay");
+}
+
 } // namespace
 
 int main() {
+	test_the_full_spawn_rebuilds_the_local_body();
 	test_the_respawn_edge_runs_the_reset();
 	test_the_walk_runs_the_bound_move_row();
 	test_the_update_runs_over_the_rows_words();

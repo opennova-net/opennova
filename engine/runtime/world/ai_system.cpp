@@ -673,9 +673,8 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - `mov esi, [ebp+2D4h]` @0x440E8E, the
 //  byte @0x4413A6, @0x4413B0, @0x441417; Entity_ResetToSpawnState @0x4B9610 - +0x2D4
 //  @0x4B96AA; Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8 / @0x4C0238]
-// The rest of the ewep mover runs over the person's words (person_ewep_mover), save the legs
-// that need a word ours does not yet home on a person (D-NET-NEW-L4-14 (a), narrowed): the
-// joiner's destroy of its own body behind its C2S 0x0F pair. A riding +0x170 occupant's turret
+// The rest of the ewep mover runs over the person's words (person_ewep_mover), the joiner's
+// destroy of its own body behind its C2S 0x0F pair included. A riding +0x170 occupant's turret
 // window (garbage-pointer limits, the Q16-1 (a) class) is not run; the tank-command call behind
 // it is.
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
@@ -768,6 +767,44 @@ static void person_ewep_anchored_attach(World &world, AiEntity &e, Entity &body,
     body.roll_bam = e.roll = frame.roll;
 }
 
+// Entity_Destroy over the local player's own body, which stays the local player's (retail's
+// g_LocalPlayerEntity keeps naming the slot): the memset over +0..+0x2B4 leaves it no def
+// (+0x1C / +0x20), so the pool-0 walk runs nothing over it (its +0x1C4 is 0), its uplink stops
+// (the serializer's def test) and its record applies are dropped (the case-2 def test);
+// Position and the Yaw / Pitch / Roll words 0, Flags 0, Health 0, no ground (+0x28), no mount
+// (+0x168 / +0x16C), no occupant (+0x170), +0x2AC 0, savedLivePose 0, the velocity triple 0.
+// Its words past +0x2B4 stay. A 0x18 of its handle rebuilds it (JoinerRole::rebuild_local_from_full_spawn).
+// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70; Entity_UpdateAllEntities @0x4C2100 -
+//  the null test @0x4C246F; Pool_SerializeEntityViaVTable @0x4D64E0 - the def test @0x4D6556;
+//  NetPacket_SerializePlayerState @0x4C09C0 - the def test @0x4C0F92]
+static void destroy_local_body_in_place(AiEntity &e, Entity &body) {
+    body.has_item_def = false;
+    body.item_type_index = 0;
+    body.item_id = 0;
+    body.has_graphic_model = false;
+    body.position.set_q16(FixedVec3{0, 0, 0});
+    body.heading = e.heading = 0;
+    body.pitch_bam = e.pitch = 0;
+    body.roll_bam = e.roll = 0;
+    body.flags = 0;
+    body.engine_flags = 0;
+    body.alive = true;
+    body.health = 0;
+    e.health = 0;
+    body.ground_target = {};
+    body.mounted = false;
+    body.mount_target = {};
+    body.mount_type = SeatType::None;
+    body.mount_bone = 0;
+    body.primary_occupant = {};
+    body.spawn_phase = 0;
+    std::fill_n(body.saved_live_pos, 3, 0);
+    body.saved_live_yaw = 0;
+    body.saved_live_pitch = 0;
+    body.saved_live_roll = 0;
+    for (int axis = 0; axis < 3; ++axis) e.inf.vel[axis] = 0;
+}
+
 void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
     Entity *ground = world.registry.get(body.ground_target);
     if (emplaced_carrier_is_dead_hull(ground)) {
@@ -793,10 +830,10 @@ void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
     // A session peer off the authority asks the host again for a ground the shared destroy
     // removed (the link still names its slot, whose destroyed mark is set) on a tick whose low
     // seven bits are all set: a reliable C2S 0x0F for the ground's handle, then one for the
-    // body's own, and the update ends. The ground's refNum group removal and store act on a
-    // zeroed slot and change nothing. The body's own destroy, whose slot the reply's 0x18
-    // rebuilds, is not run: our joiner's L has no rebuild from a 0x18 of its own handle
-    // (D-NET-NEW-L4-14 (a), narrowed).
+    // body's own, then the body's destroy, and the update ends. The ground's refNum group
+    // removal and store act on a zeroed slot and change nothing. The local player's own body
+    // is destroyed in place (destroy_local_body_in_place), the reply's 0x18 rebuilding it; a
+    // decoded person's row the replica destroys (inmatch::run_replica_person_ewep).
     // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the ground @0x440CBF, the gates
     //  @0x440D03..0x440D24 (is_in_session, is_mp_session_peer, is_authority), the mark
     //  `cmp byte ptr [edi+219h], 0` @0x440D2A, `and eax, 7Fh` / `cmp al, 7Fh`
@@ -809,6 +846,8 @@ void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
             (world.logic_tick & 0x7Fu) == 0x7Fu) {
         world.out.entity_info_requests.push_back(body.ground_target);
         world.out.entity_info_requests.push_back(body.handle);
+        if (&body == world.registry.get(world.cached.local_player))
+            destroy_local_body_in_place(e, body);
         return;
     }
     // A ground link to a destroyed slot reads a zeroed ground (link_reads_zeroed_slot): no def, no
