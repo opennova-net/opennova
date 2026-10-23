@@ -1421,6 +1421,10 @@ private:
 	// entry 2 is the hudpos hud_textcolor [orig: HUD_RenderAllOverlays
 	// @0x5A810C / HUD_DrawGameTimerOverlay @0x59CCB8].
 	uint32_t hud_palette(int index) const;
+	// The snapshot twin's HUD-init seed and its hudcolor-cycle store
+	// (hud_colors_active_), run at the head of each compile, the scene's and
+	// the status page's.
+	void sync_hud_colors_active(const HudFrameState &state);
 	void emit_rect(float x0, float y0, float x1, float y1, uint32_t color,
 			bool filled, int32_t texture = kHudTexNone, bool additive = false);
 	// HUD_DrawTexturedQuadWithBorder's draw of an image of tex_w x tex_h at design (x, y), the quad
@@ -1625,11 +1629,13 @@ private:
 	uint8_t flash_key_class_ = 0;
 	int flash_stamp_ = 0;
 	// THE SNAPSHOT TWIN g_HUDColors.active @0x24C1868: seeded table[index] |
-	// 0xFF000000 at HUD init [orig: HUD_InitTeamColorTable @0x51F240], rewritten
+	// 0xFF000000 at HUD init, entry 2 the 0xFF010101 placeholder
+	// [orig: HUD_InitTeamColorTable @0x51F240], rewritten
 	// table[index] by the hudcolor cycle [orig: @0x49AFC7] and restamped
 	// palette[index] (no alpha OR) every frame by the GAMEINFO drawer
 	// [orig: HUD_DrawGameTimerOverlay @0x59CCD0] — so under /NOHUD or the
-	// blank level the last restamp persists.
+	// blank level the last restamp persists, and a dedicated host's status
+	// page, which no gameplay pass precedes, keeps the seed.
 	uint32_t hud_colors_active_ = 0;
 	int hud_colors_active_index_ = -1; // -1 = not seeded yet
 	int silhouette_stamp_ = 0;

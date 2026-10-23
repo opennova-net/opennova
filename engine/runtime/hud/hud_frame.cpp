@@ -481,21 +481,9 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	//  not the overlay pass, so the level-3 early-out below never covers it.
 	element_(HudElement::SightsCard, [&] { element_sights_card(state, surface_w, surface_h); });
 
-	// The snapshot twin's two non-frame writers: the HUD-init seed with the
-	// forced alpha, and the hudcolor cycle's table[index] store — seen here as
-	// the scheme index changing between frames [orig: HUD_InitTeamColorTable
-	// @0x51F240; the cycle @0x49AFC7]. The per-frame restamp is the GAMEINFO
-	// drawer's (element_game_info).
-	{
-		const int idx = state.hud_color_index >= 0 && state.hud_color_index <= 5
-				? state.hud_color_index
-				: 2;
-		if (hud_colors_active_index_ < 0)
-			hud_colors_active_ = hud_palette(idx) | 0xFF000000u;
-		else if (idx != hud_colors_active_index_)
-			hud_colors_active_ = hud_palette(idx);
-		hud_colors_active_index_ = idx;
-	}
+	// The snapshot twin's two non-frame writers (sync_hud_colors_active); the
+	// per-frame restamp is the GAMEINFO drawer's (element_game_info).
+	sync_hud_colors_active(state);
 
 	// /NOHUD clears the overlay master word: HUD_DrawGameplayOverlays returns
 	// whole on a zero word (the breath bar, the service prompts and the
@@ -1644,19 +1632,56 @@ uint32_t HudFrameCompiler::active_color(const HudFrameState &state) const {
 	return hud_palette(idx) | 0xFF000000u;
 }
 
+namespace {
+
+// The g_HUDColors.palette entries 0..5 as HUD_InitTeamColorTable writes them
+// [orig: HUD_InitTeamColorTable @0x51F245..0x51F277].
+constexpr uint32_t kHudSchemeTableAtInit[6] = {
+		0xFFFFFFFFu, // 0 white
+		0xFF00FF00u, // 1 green
+		0xFF010101u, // 2 the placeholder the frame refresh overwrites with hud_textcolor
+		0xFF80A0FFu, // 3 light blue
+		0xFFF0F000u, // 4 yellow
+		0xFFFF5050u, // 5 salmon
+};
+
+} // namespace
+
 uint32_t HudFrameCompiler::hud_palette(int index) const {
 	// [orig: HUD_InitTeamColorTable @0x51f240 — the scheme immediates; entry 2
 	// is refreshed from g_HudposTextColor every frame @0x5a810c / @0x59ccb8]
-	static constexpr uint32_t kSchemeTable[6] = {
-			0xFFFFFFFFu, // 0 white
-			0xFF00FF00u, // 1 green
-			0xFF010101u, // 2 init placeholder — sourced live from hud_textcolor
-			0xFF80A0FFu, // 3 light blue
-			0xFFF0F000u, // 4 yellow
-			0xFFFF5050u, // 5 salmon
-	};
 	if (index < 0 || index > 5) index = 2;
-	return index == 2 ? layout_.hud_text : kSchemeTable[index];
+	return index == 2 ? layout_.hud_text : kHudSchemeTableAtInit[index];
+}
+
+void HudFrameCompiler::sync_hud_colors_active(const HudFrameState &state) {
+	// The snapshot twin's two non-frame writers: the HUD-init seed with the
+	// forced alpha, and the hudcolor cycle's table[index] store, seen here as
+	// the scheme index changing between frames [orig: HUD_InitTeamColorTable
+	// @0x51F240 (the store @0x51F2DE); the cycle @0x49AFC7].
+	// The seed reads the table as the init leaves it, entry 2 the 0xFF010101
+	// placeholder: every MP mission load runs GameLoop_Init's
+	// HUD_InitTeamColorTable, then Game_StartMission(0), whose HUD init copies
+	// the hudpos text colour into entry 2 and the twin, and whose first-load
+	// arm then runs HUD_InitTeamColorTable again, restoring both. Only the
+	// gameplay overlay pass refreshes entry 2 and restamps the twin, so a host
+	// that never draws it (the dedicated host's status page) keeps the seed,
+	// and with the default index 2 its twin readers draw half-bright black.
+	// [orig: GameLoop_Init @0x526370 (HUD_InitTeamColorTable, then
+	//  Game_StartMission(0) @0x526377); Game_StartMission @0x524360
+	//  (is_first_load = !is_restart @0x5243A6, HUD_InitOverlaySystem @0x525733,
+	//  the first-load HUD_InitTeamColorTable @0x5258C1); HUD_InitOverlaySystem
+	//  @0x5A4620 (entry 2 @0x5A4965, the twin @0x5A4977); the refresh
+	//  HUD_RenderAllOverlays @0x5A810C and the restamp HUD_DrawGameTimerOverlay
+	//  @0x59CCB8..0x59CCD0, both past the level-3 return @0x5A80C4]
+	const int idx = state.hud_color_index >= 0 && state.hud_color_index <= 5
+			? state.hud_color_index
+			: 2;
+	if (hud_colors_active_index_ < 0)
+		hud_colors_active_ = kHudSchemeTableAtInit[idx] | 0xFF000000u;
+	else if (idx != hud_colors_active_index_)
+		hud_colors_active_ = hud_palette(idx);
+	hud_colors_active_index_ = idx;
 }
 
 void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
@@ -2092,7 +2117,13 @@ void HudFrameCompiler::element_end_round_overlay(const HudFrameState &state,
 	const float ls = (have_impact || have_large) ? label_large_scale_
 			: have_bold ? label_scale_ : 1.0f;
 	if (lf.font() == nullptr) return;
-	const uint32_t color = half_bright_keep_alpha(active_color(state));
+	// The snapshot twin, drawn half-bright with the alpha forced: a dedicated
+	// host's seed (0xFF010101 at the default index) draws black on its black
+	// status page [orig: `mov ebp, g_HUDColors.active` @0x5B7CE6, pushed at each
+	// HUD_DrawTextCenteredScaled (the first @0x5B7E86);
+	// HUD_DrawTextCentered_HalfBright @0x580680 (`and eax, 7F7F7Fh` @0x58068F,
+	// `or eax, 0FF000000h` @0x5806AB)].
+	const uint32_t color = half_bright_argb(hud_colors_active_);
 	for (const HudEndRoundLine &line : er.lines) {
 		if (line.text.empty()) continue;
 		const GameFontRun run = lf.layout(line.text.c_str(), sx(512.0f, w),

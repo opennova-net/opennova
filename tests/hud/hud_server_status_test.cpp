@@ -312,6 +312,81 @@ void test_page_compile(const fnt_font_t *font) {
 	CHECK(run_at(ded, 10.0f, 680.0f) != nullptr && run_at(ded, 10.0f, 608.0f) == nullptr);
 }
 
+// A dedicated host's round end: the page's end-round leg draws the overlay's
+// lines in the snapshot twin g_HUDColors.active. No gameplay pass precedes the
+// page, so the twin keeps the HUD init's seed, table[index] | 0xFF000000 with
+// entry 2 the 0xFF010101 placeholder, and at the default index the half-bright
+// draw lays the lines black on the page's black clear: retail's Serve Only host
+// shows no banner (the twin read 0xFF010101 there through a round end while the
+// transition's first-pass latch g_EndRoundOverlayFirstPass set). The quit dialog reads the
+// same twin; a listen host's page reads the twin its scene frames restamped.
+// [orig: HUD_DrawEndRoundStatsOverlay @0x5B7CD0 (`mov ebp, g_HUDColors.active`
+//  @0x5B7CE6); UI_DrawDisconnectReasonDialog @0x5B8EB0 (@0x5B8EB5);
+//  HUD_InitTeamColorTable @0x51F240 (entry 2 @0x51F24F, the twin @0x51F2DE),
+//  run by Game_StartMission's first load @0x5258C1 after HUD_InitOverlaySystem
+//  @0x525733; HUD_DrawTextCentered_HalfBright @0x580680 (@0x58068F, @0x5806AB);
+//  the restamp HUD_DrawGameTimerOverlay @0x59CCD0]
+void test_dedicated_host_twin(const fnt_font_t *font) {
+	HudLayout layout;
+	const auto make = [&](HudFrameCompiler &compiler) {
+		compiler.configure(layout, font);
+		compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f, font);
+	};
+	const auto impact_colors = [](const HudDrawList &list, uint32_t want, size_t lines) {
+		const std::vector<Run> impact = runs_on(list, kHudFontSlotImpact38);
+		bool ok = impact.size() == lines;
+		for (const Run &r : impact) ok = ok && r.color == want;
+		return ok;
+	};
+	HudFrameState state;
+	state.spawn_success_gate = true;
+	state.end_round.shown = true;
+	state.end_round.lines = {{"D", 300}, {"S", 414}};
+	ServerStatusPageState page = listen_page(4);
+	page.mp_session_peer = false;
+	page.game_type = 0x10000u;
+	CHECK(half_bright_argb(0xFF010101u) == 0xFF000000u);
+	{
+		// The default index 2: the placeholder, black.
+		HudFrameCompiler compiler;
+		make(compiler);
+		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), 0xFF000000u, 2));
+		// The page draws nothing to restamp it: the next due page keeps the seed.
+		CHECK(compiler.compile_server_status_page(state, page, 10200, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), 0xFF000000u, 2));
+		// The quit dialog's text, the same twin.
+		state.end_round.shown = false;
+		state.quit_dialog_open = true;
+		state.quit_dialog_text = "Q";
+		CHECK(compiler.compile_server_status_page(state, page, 10400, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), 0xFF000000u, 1));
+		state.quit_dialog_open = false;
+		state.end_round.shown = true;
+	}
+	{
+		// Another index seeds its own entry: yellow at 4.
+		HudFrameCompiler compiler;
+		make(compiler);
+		state.hud_color_index = 4;
+		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), half_bright_argb(0xFFF0F000u), 2));
+		state.hud_color_index = 2;
+	}
+	{
+		// A listen host's scene frame restamped the twin from the hudpos text
+		// colour before its page went up.
+		HudFrameCompiler compiler;
+		make(compiler);
+		state.end_round.shown = false;
+		(void)compiler.compile(state, 1024.0f, 768.0f);
+		state.end_round.shown = true;
+		page.mp_session_peer = true;
+		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), half_bright_argb(layout.hud_text), 2));
+	}
+}
+
 } // namespace
 
 int main() {
@@ -320,6 +395,7 @@ int main() {
 	test_grid_cells_and_codes();
 	test_score_rows();
 	test_page_compile(&font);
+	test_dedicated_host_twin(&font);
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
