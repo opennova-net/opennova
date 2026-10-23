@@ -1898,6 +1898,18 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 		if dispatcher != null:
 			assert_eq(dispatcher.get_terrain_data() != null, serve_and_play,
 					"the foliage configures on a listen host's start alone")
+		# The terrain's LOD cache (its tiles' meshes) builds in the same terrain leg, which a
+		# dedicated host's start jumps over; its textures build on both arms (D-NET-NEW-L3-32;
+		# engine terrain/terrain_load_legs.h builds_lod_cache carries the witness).
+		var terrain: Terrain = world.get_terrain_node()
+		assert_not_null(terrain)
+		if terrain != null:
+			assert_true(terrain.is_built(), "the mission textures stage builds the terrain")
+			var meshes := 0
+			for lod in 8:
+				if terrain.get_tile_lod_mesh(0, lod, false) != null:
+					meshes += 1
+			assert_eq(meshes > 0, serve_and_play, "the tiles' LOD meshes build on a listen host alone")
 		# The status page stands in for the scene frame: a dedicated host's always, a listen
 		# host's while its status view is up (engine hud_server_status.h main_frame_draws_scene).
 		world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, null)

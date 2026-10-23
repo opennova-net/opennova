@@ -880,10 +880,13 @@ private:
 	bool load_terrain(
 			const String &p_trn_path, const String &p_tile_set, const String &p_environment);
 	// The mission textures stage's terrain, every arm's (D-NET-NEW-L2-46): the texture slots and
-	// the tile set's atlas the connect leg held, the terrain node's build over them, then the
-	// foliage's unless `p_foliage` is false (a dedicated host's start, which loads no render
-	// subsystem); `p_timeline` takes it as one span. Nothing when no connect leg is pending.
-	void load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool p_foliage);
+	// the tile set's atlas the connect leg held and the terrain node's build over them, then the
+	// foliage's. A dedicated host's start (`p_dedicated_host`), which jumps over the render
+	// subsystems' terrain leg, builds no LOD cache (the node's tile meshes and patch pool) and
+	// configures no foliage (engine terrain/terrain_load_legs.h builds_lod_cache and
+	// loads_foliage_definitions, D-NET-NEW-L3-32, D-NET-NEW-LF-3). `p_timeline` takes it as one
+	// span. Nothing when no connect leg is pending.
+	void load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void run_mission_start();

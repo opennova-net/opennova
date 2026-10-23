@@ -8,6 +8,7 @@
 
 using opennova::terrain::TerrainLoadFile;
 using opennova::terrain::TerrainLoadLeg;
+using opennova::terrain::builds_lod_cache;
 using opennova::terrain::loads_foliage_definitions;
 using opennova::terrain::terrain_load_leg;
 
@@ -37,6 +38,12 @@ int main() {
 	// jumps over (D-NET-NEW-LF-3).
 	CHECK(loads_foliage_definitions(false));
 	CHECK(!loads_foliage_definitions(true));
+	// The LOD cache (the patches' device geometry) builds in the same terrain leg: a dedicated
+	// host's start builds none, its textures still load at the mission textures stage
+	// (D-NET-NEW-L3-32).
+	CHECK(builds_lod_cache(false));
+	CHECK(!builds_lod_cache(true));
+	CHECK(terrain_load_leg(TerrainLoadFile::TextureSlot) == TerrainLoadLeg::MissionTextures);
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

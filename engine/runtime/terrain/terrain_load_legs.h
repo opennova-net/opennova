@@ -56,4 +56,19 @@ constexpr bool loads_foliage_definitions(bool dedicated_host) noexcept {
 	return !dedicated_host;
 }
 
+// Whether a mission start builds the terrain's LOD cache: the device geometry its patches draw
+// from, each LOD level's static vertex and index buffers. It builds in the same render subsystems'
+// terrain leg as the foliage's definitions, so a dedicated host's start jumps over it too; its
+// mission textures stage still loads the terrain's textures (PolyTrn_InitTextures runs on both
+// arms) (D-NET-NEW-L3-32).
+// [orig: Game_StartMission @0x524360 - the dedicated test @0x5259B4 skipping
+//  Render_InitTerrainSubsystems (the call @0x5259FD); Render_InitTerrainSubsystems @0x587000 ->
+//  Render_InitLodCacheAndFoliage @0x604DA0 (the call @0x587004) -> LODTileCache_SetDetailAndRebuild
+//  @0x602750 (the call @0x604DAA): each present LOD level (TerrainLodTable_HasLevel @0x6029C0, the
+//  call @0x6027A1) builds its buffers (LODTileCache_InitLevelBuffers @0x602310, the call @0x6027B0:
+//  GStaticIB_Init @0x6842D0, the call @0x6023A8; GStaticVB_Init @0x683F70, the call @0x6023BB)]
+constexpr bool builds_lod_cache(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
+
 } // namespace opennova::terrain

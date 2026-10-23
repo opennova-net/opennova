@@ -17,7 +17,7 @@
 #include <runtime/environment/environment_state.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/placement_traits.h> // builds_placement_draws (the dedicated host's placement)
-#include <runtime/terrain/terrain_load_legs.h> // loads_foliage_definitions (the dedicated arm)
+#include <runtime/terrain/terrain_load_legs.h> // builds_lod_cache, loads_foliage_definitions (the dedicated arm)
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -141,7 +141,7 @@ int GameWorld::load_world(const String &p_dir) {
 	// texture slots, its build and the foliage's, D-NET-NEW-L2-46) follows the connect leg at once.
 	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("World load %s", terrain_file_));
 	last_load_timeline_ = timeline;
-	load_terrain_textures(timeline, true);
+	load_terrain_textures(timeline, /*p_dedicated_host=*/false);
 	timeline->finish();
 
 	world_ready_ = true;
@@ -408,11 +408,12 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// The mission textures stage opens with the terrain's, on every arm, a dedicated host's reduced
 	// one too: the texture slots and the tile set's atlas the head's connect leg held, then the
 	// terrain's build (engine terrain/terrain_load_legs.h carries the witness, D-NET-NEW-L2-46).
-	// The foliage's definitions load with the render subsystems, which a dedicated host's start
-	// jumps over (the same header's loads_foliage_definitions, D-NET-NEW-LF-3).
+	// The terrain's LOD cache and the foliage's definitions build with the render subsystems,
+	// which a dedicated host's start jumps over (the same header's builds_lod_cache and
+	// loads_foliage_definitions, D-NET-NEW-L3-32, D-NET-NEW-LF-3).
 	const bool dedicated_host = challenge_sim.is_valid() &&
 			challenge_sim->session_role() == Simulation::ROLE_DEDICATED_HOST;
-	load_terrain_textures(timeline, opennova::terrain::loads_foliage_definitions(dedicated_host));
+	load_terrain_textures(timeline, dedicated_host);
 	// Then the freeze, on every arm: the listed models' materials resolve and no model builds, a
 	// wire-header joiner's list too (it froze above, its world stream landed). The full arm's
 	// freeze is the reduced arm's, with the render arm's device inits after it (engine
@@ -1177,7 +1178,7 @@ bool GameWorld::load_terrain(
 	return true;
 }
 
-void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool p_foliage) {
+void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host) {
 	if (!terrain_textures_pending_) {
 		return;
 	}
@@ -1187,8 +1188,8 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 	}
 	p_timeline->span("terrain_textures");
 	terrain_data_->load_textures();
-	terrain_->build();
-	if (p_foliage) configure_foliage();
+	terrain_->build(opennova::terrain::builds_lod_cache(p_dedicated_host));
+	if (opennova::terrain::loads_foliage_definitions(p_dedicated_host)) configure_foliage();
 	p_timeline->end_span();
 }
 

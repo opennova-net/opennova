@@ -104,7 +104,7 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_suppressed_static_shadow_bms_ids"),
 		&Terrain::get_suppressed_static_shadow_bms_ids);
 
-	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
+	ClassDB::bind_method(D_METHOD("build", "lod_cache"), &Terrain::build, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("refresh_region", "rects", "tiles", "foliage"), &Terrain::refresh_region_rects, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_refresh_us"), &Terrain::get_refresh_us);
 	ClassDB::bind_method(D_METHOD("get_heightfield_normal_bytes"), &Terrain::get_heightfield_normal_bytes);
@@ -114,7 +114,7 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_refresh_pages_retired"), &Terrain::get_refresh_pages_retired);
 	ClassDB::bind_method(D_METHOD("get_tile_lod_mesh", "tile", "lod", "flat"), &Terrain::get_tile_lod_mesh);
 	ClassDB::bind_method(D_METHOD("get_heightfield_normal_texture"), &Terrain::get_heightfield_normal_texture);
-	ClassDB::bind_method(D_METHOD("build_begin"), &Terrain::build_begin);
+	ClassDB::bind_method(D_METHOD("build_begin", "lod_cache"), &Terrain::build_begin, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("build_step"), &Terrain::build_step);
 	ClassDB::bind_method(D_METHOD("get_build_step_count"), &Terrain::get_build_step_count);
 	ClassDB::bind_method(D_METHOD("get_build_steps_done"), &Terrain::get_build_steps_done);
@@ -1340,16 +1340,17 @@ void Terrain::_clear_terrain() {
 	building_ = false;
 }
 
-void Terrain::build() {
-	if (!build_begin()) {
+void Terrain::build(bool p_lod_cache) {
+	if (!build_begin(p_lod_cache)) {
 		return;
 	}
 	while (build_step() == BUILD_STEP_MORE) {
 	}
 }
 
-bool Terrain::build_begin() {
+bool Terrain::build_begin(bool p_lod_cache) {
 	_clear_terrain();
+	build_lod_cache_ = p_lod_cache;
 	build_done_ = 0;
 	build_total_ = 0;
 	if (terrain_data.is_null() || !terrain_data->is_loaded()) {
@@ -1385,7 +1386,9 @@ Terrain::BuildStep Terrain::build_step() {
 		// A terrain with no tile is refused by the prepare; the count stands.
 		build_total_ = static_cast<int>(tile_infos.size()) + kBuildTailUnits + 1;
 	} else if (build_done_ <= tiles) {
-		if (!_build_terrain_tile(static_cast<size_t>(build_done_ - 1))) {
+		// The tiles' LOD meshes are the LOD cache's geometry: a build without it makes none
+		// (engine terrain/terrain_load_legs.h builds_lod_cache carries the witness).
+		if (build_lod_cache_ && !_build_terrain_tile(static_cast<size_t>(build_done_ - 1))) {
 			return failed();
 		}
 	} else {
@@ -1394,8 +1397,9 @@ Terrain::BuildStep Terrain::build_step() {
 				UtilityFunctions::print_verbose("Terrain: ", build_total_verts_, " verts, ",
 						build_total_indices_, " indices across ", tiles, " tiles");
 				// Create lightweight RenderingServer instances for the main view's pool
-				// (the Inset's is created when it first renders).
-				_create_pool_instances(main_pool, terrain_material->get_rid());
+				// (the Inset's is created when it first renders); a build without the LOD
+				// cache has nothing for them to draw.
+				if (build_lod_cache_) _create_pool_instances(main_pool, terrain_material->get_rid());
 				break;
 			case 2:
 				if (terrain_material.is_valid()) {
