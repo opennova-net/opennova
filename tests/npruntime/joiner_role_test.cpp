@@ -2346,6 +2346,55 @@ bool run_a_team_assign_walk_mount_queues_at_the_0x50s_place() {
 	return ok;
 }
 
+// A self S2C 0x50's sends leave in its handler's order: the local arm's C2S 0x2F re-submission,
+// then the 0x22 / 0x23 pair the handler asks for every player entity's team change.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - NetPacket_SendLoadoutSubmit @0x431A9E,
+//  CNapiNetwork_QueueReliableMessage(0x22) @0x431AE4, (0x23) @0x431B05]
+bool run_a_self_team_assign_resubmits_ahead_of_its_pair() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+	                             /*game_type=*/0x10002u);
+	h.role.run_tick(h.input); // the spawn frame
+	auto &row = h.role.runtime->state().upsert(0x0005);
+	row.cls = EntityClass::Player;
+	row.type_id = w::kPlayerInfantryTypeId;
+	if (!expect(h.role.local_spawned(), "self 0x50 order: L spawned")) return false;
+	TeamAssign assign;
+	assign.entity_handle = 0x0005;
+	assign.team = 1;
+	assign.net_id = 0x0213;
+	assign.anim_slot = 0x2C;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	const std::size_t from = h.socket.datagrams.size();
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input);
+	std::vector<uint8_t> order;
+	for (std::size_t i = from; i < h.socket.datagrams.size(); ++i) {
+		const std::vector<uint8_t> &dg = h.socket.datagrams[i];
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!nw_decode_inbound(dg.data(), dg.size(), opcode, body) ||
+				opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
+				!decode_protocol_packet_plaintext(body.data(), body.size(), kClientScrk,
+						header, messages)) continue;
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == 0x2F || m.tag == c2s::PLAYER_SYNC_REQUEST ||
+					m.tag == c2s::VISIBLE_PLAYERS_REQUEST)
+				order.push_back(m.tag);
+	}
+	const std::vector<uint8_t> expected{0x2F, c2s::PLAYER_SYNC_REQUEST,
+			c2s::VISIBLE_PLAYERS_REQUEST};
+	return expect(order == expected, "self 0x50 order: the 0x2F, then the 0x22 / 0x23 pair");
+}
+
 bool run_a_grant_mount_request_queues_at_the_grants_place() {
 	bool ok = true;
 	for (const bool grant_first : {true, false}) {
@@ -4891,6 +4940,7 @@ int main() {
 	ok &= run_a_receive_time_mount_request_ships_in_its_frame();
 	ok &= run_a_grant_mount_request_queues_at_the_grants_place();
 	ok &= run_a_team_assign_walk_mount_queues_at_the_0x50s_place();
+	ok &= run_a_self_team_assign_resubmits_ahead_of_its_pair();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();

@@ -1624,6 +1624,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 					authoritative_spawn_released_ = false;
 					joiner_->begin_redeployment();
 				}
+				// A self 0x50's local arm queues its C2S 0x2F ahead of the 0x22 / 0x23 pair the
+				// handler asks for after it, which the fold above raised [orig:
+				// NapiNPClientMsg_TeamAssign @0x431910 - NetPacket_SendLoadoutSubmit @0x431A9E
+				// ahead of the 0x22 @0x431AE4 and the 0x23 @0x431B05].
+				if (pr.local_resubmit && entries_folded + 1 == pr.local_resubmit_entries)
+					queue_replies_after(entries_folded + 1);
 				queue_fold_requests();
 				queue_replies_after(++entries_folded);
 				// The 0x5A's handler mounts last, past its own sends, and a self 0x50's runs
