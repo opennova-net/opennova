@@ -1558,10 +1558,13 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 	# The sim answers category REQUESTS through the event drain
 	# (switch_to_weapon); the presenter is the ONE registered fixed-tick
 	# consumer from setup to teardown. Attachment is the adoption boundary:
-	# pre-setup history is discarded, never replayed; live events reinstall the
-	# FP presentation [orig: the ACCEPT re-mount WeaponLoadout_ApplyFromBuffer
-	# @0x565cd0 tail -> Player_MountWeaponSlot @0x4dfa40]; teardown releases the
-	# world-to-presenter callback.
+	# pre-setup history is discarded, never replayed. A switch's commit mounts the
+	# stored slot's def in the sim and queues its draw, presenter or not
+	# [orig: WeaponAction_SwitchFrom @0x5433B0 - the EquippedSlot store @0x543475,
+	# WeaponSlot_TryQueueSwitchTo @0x5434A3], so its record carries `installed` and the
+	# presenter's leg is the FP presentation alone, which follows the EquippedSlot's def
+	# [orig: Player_RenderFirstPersonViewModel @0x4DED60 - the EquippedSlot read @0x4DEDAA,
+	# its Def @0x4DEDBC]; teardown releases the world-to-presenter callback.
 	var world := _load_player_world()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
@@ -1589,8 +1592,8 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 	assert_eq(String(world.local_player_weapon_name()), "WPN_M4AUTO",
 			"discarded history is never replayed into the presentation")
 
-	# Live: switch back to the primary, then to the satchel again — the second
-	# leg changes the installed def, so the FP viewmodel is reinstalled.
+	# Live: switch back to the primary, then to the satchel again. The second leg's
+	# commit mounts the satchel's def, so its record rebuilds the FP viewmodel.
 	sim.request_local_player_weapon_category(3)
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return String(sim.get_local_player_weapon_name()) == "WPN_M4AUTO"),
@@ -1603,7 +1606,7 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 	sim.request_local_player_weapon_category(7)
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return String(world.local_player_weapon_name()) == "WPN_SATCHEL_CHARGE"),
-			"the live switch event reinstalls the parent weapon definition")
+			"the live switch event presents the def its commit mounted")
 	_frame(world, presenter, camera, 2)
 	assert_not_null(presenter.viewmodel(), "the satchel viewmodel rebuilt")
 	assert_ne(presenter.viewmodel(), vm_before,
@@ -1618,8 +1621,16 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 	sim.request_local_player_weapon_category(3)
 	for i in 45:
 		world.tick(camera.global_position, camera.global_transform, TICK)
-	assert_gt(world.drain_local_player_weapon_events().size(), 0,
+	var late_events := world.drain_local_player_weapon_events()
+	assert_gt(late_events.size(), 0,
 			"teardown releases the world-to-presenter callback")
+	var late_switch: PlayerWeaponEvent = null
+	for raw in late_events:
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_M4AUTO":
+			late_switch = raw
+	assert_not_null(late_switch, "the switch back's record waits undrained")
+	assert_true(late_switch != null and late_switch.installed,
+			"the commit mounted the primary's def with no presenter")
 	assert_eq(String(world.local_player_weapon_name()), "WPN_SATCHEL_CHARGE",
 			"no presenter, no presentation change")
 
