@@ -540,6 +540,36 @@ void crash_test_up_is_the_normalized_row() {
     CHECK(detail::vehicle_crash_test_up(CollisionMatrix{}) == 0);
 }
 
+// D-NET-NEW-L6-32 (row L): a bike the last tick left in the air landing on its wheels with no
+// wheelie request drops its retained chassis state at the wheel arm's entry; a request keeps it. A
+// crashed, fallen bike (+0x2EF, +0x2FC: the fall-over arm only spins its matrix) isolates the clear.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47B58D..0x47B5F5]
+void bike_landing_clears_the_chassis_state() {
+    for (const bool request : {false, true}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        auto &m = v.veh;
+        m.crashed = 1;
+        m.byte_2ef = 1;
+        m.wreck_2fc = 1;
+        m.wheelie_request = request ? 1 : 0;
+        v.flags |= kEntityFlagInAir;
+        m.chassis_active = true;
+        m.chassis_contact_active = true;
+        m.chassis_blend_tick = r.world.logic_tick;
+        m.chassis_blend_ticks = 1000;
+        m.chassis_quaternion[3] = 1.0f;
+        int32_t z = to_fixed(v.position.z);
+        r.contact(t, z);
+        CHECK((v.flags & kEntityFlagInAir) == 0); // the wheel arm ran
+        CHECK(m.chassis_active == request);
+        CHECK(m.chassis_contact_active == request);
+        CHECK(m.chassis_blend_ticks == (request ? 1000 : 0));
+        CHECK(m.chassis_quaternion[3] == (request ? 1.0f : 0.0f));
+    }
+}
+
 // D-NET-NEW-L6-30: a slow, level bike on its wheels is not leaning (the lean leaves +0x2EF clear),
 // so the solve drops both lean rates; a fast one leans (+0x2EF set) and keeps its pitch rate.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the lean @0x47A78B..0x47A7D8, the clear
@@ -1160,6 +1190,7 @@ int main() {
     bike_probes_ride_the_scaled_matrix();
     occupant_rows_floor_each_word();
     crash_test_up_is_the_normalized_row();
+    bike_landing_clears_the_chassis_state();
     bike_unleaned_drops_lean_rates();
     bike_sinks_flush_under_water();
     bike_crashed_wheel_takes_the_landing_impulse();

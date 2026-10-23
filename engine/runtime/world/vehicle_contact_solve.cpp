@@ -1868,6 +1868,14 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 		light_tail();
 		return;
 	}
+	// A bike the last tick left in the air landing on a wheel with no wheelie request drops its
+	// retained chassis state (Entity_ClearSuspensionState's stores, inline). The pre-split clear
+	// above already covers an uncrashed bike; this one reaches a crashed bike landing.
+	// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - Flags 0x2000 @0x47B58D, +0x3DD
+	//  @0x47B5A5, the stores @0x47B5AE..0x47B5F5 (the identity +0x4F4 @0x47B5B7, +0x534..+0x540,
+	//  +0x4EC / +0x4F0 / +0x4E8, +0x3DC); Entity_ClearSuspensionState @0x4592B0]
+	if ((veh.flags & kEntityFlagInAir) != 0 && m.wheelie_request == 0)
+		vehicle_clear_chassis(m);
     // Both wheels settle a released launch after the contact run reaches ten.
     // [orig: Entity_ProcessLightVehiclePhysics @ 0x47B5FD..0x47B63F]
     if (!m.crashed && d[0] && d[1] && m.bike_ground_contact_ticks >= 10 &&
