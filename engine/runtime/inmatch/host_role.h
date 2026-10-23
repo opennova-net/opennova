@@ -164,7 +164,12 @@ public:
 	// two pumps, so the reset's 0x25s and a kept joiner's reload legs meet the load's pumps
 	// while it loads. Between the head and the window the embedder loads its effect system on
 	// every load but a dedicated host's (the game's world load: GameWorld::load_mission_internal),
-	// ahead of the terrain, the objects and the runtime (D-NET-NEW-L3-22).
+	// ahead of the terrain, the objects and the runtime (D-NET-NEW-L3-22). A dedicated host
+	// loads none at all; its freeze still builds the mission's model buffers, with none of the
+	// render arm's device inits (D-NET-NEW-L3-23) [orig: Render_InitMissionTextures @0x587120 -
+	//  the dedicated test @0x58713C -> @0x58727A: PolyTrn_InitTextures @0x58727A,
+	//  CEffectWorld_RebuildAllModelBuffers @0x58728C; Game_StartMission - the render arm's test
+	//  @0x5259B4, the freeze's call @0x525A6E].
 	// [orig: Game_StartMission - the dedicated test (in session, the authority, no own client)
 	//  @0x524958..0x524979, CEffectSystem_Init @0x524980, CEffectManager_RegisterAllMaterials
 	//  @0x52499E, CEffectSystem_BuildTextureAtlases @0x5249B9, Precipitation_Reset @0x5249D4, all

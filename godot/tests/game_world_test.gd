@@ -1806,6 +1806,37 @@ func test_lan_host_threads_truthful_base_metadata_into_the_native_session() -> v
 	world.unload()
 
 
+# Retail's mission start loads its effect system at the head on every load but a dedicated
+# host's (the test in session on the authority with no client of its own; engine
+# inmatch/host_role.h open_next_mission_load_window carries the witness): a listen host's world
+# builds it ahead of its environment, a Serve Only host's has none and still loads.
+func test_a_dedicated_host_loads_no_effect_system() -> void:
+	for serve_and_play in [true, false]:
+		var world := WorldFixture.make_world(self)
+		await get_tree().process_frame
+		world.set_playable(false)
+		var root := ResourceRoot.new()
+		assert_eq(root.set_root_dir(
+				ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+		world.set_resource_root(root)
+		var options := _lan_host_config("mnml.bms", 0)
+		options.serve_and_play = serve_and_play
+		assert_eq(world.load_mission_as_host(options), OK)
+		var timeline: LoadTimeline = world.last_load_timeline()
+		assert_not_null(timeline)
+		if serve_and_play:
+			assert_not_null(world.get_effect_world(), "a listen host's world has its effect system")
+			if timeline != null and timeline.spans().size() >= 2:
+				assert_eq(timeline.spans()[0].name, "effect_system")
+				assert_eq(timeline.spans()[1].name, "environment")
+		else:
+			assert_null(world.get_effect_world(), "a dedicated host's world loads none")
+			if timeline != null:
+				assert_false(Array(timeline.span_names()).has("effect_system"),
+						"no effect system at the dedicated host's head")
+		world.unload()
+
+
 func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless() -> void:
 	# Reserve an OS-chosen endpoint, then request that exact port through the
 	# production GameWorld host path. The old behavior silently started an SP

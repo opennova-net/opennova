@@ -56,11 +56,14 @@ void GameWorld::route_dialog_lines() {
 
 void GameWorld::route_script_effects() {
     const Ref<Simulation> sim = get_sim();
+    if (sim.is_null()) return;
     EffectWorld *effects = get_effect_world();
-    if (sim.is_null() || effects == nullptr) return;
+    // A dedicated host has no effect world (start_effect_world): its descriptors drain unshown.
+    // Any other load's wait for its effect world.
+    if (effects == nullptr && sim->session_role() != Simulation::ROLE_DEDICATED_HOST) return;
     std::vector<opennova::world::ScriptEffectEvent> events;
     sim->drain_script_effects(events);
-    if (events.empty()) return;
+    if (events.empty() || effects == nullptr) return;
     // Compilation can register stock aliases before any FX command executes.
     // BMS's direct named lookup sees those definitions too.
     for (const auto &name : sim->script_effect_names()) effects->intern_effect(opennova::to_gd(name));

@@ -1337,8 +1337,11 @@ Node3D *GameWorld::build_model_warm(const PackedStringArray &p_models, const Vec
 // builds their buffers, so a death's swap builds nothing (D-NET-NEW-L5-8; the
 // witness: engine inmatch/loaded_model_list.h, mission_start_model_list).
 int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects) {
+	// A dedicated host has no effect world (start_effect_world): its mission start's models
+	// still build and draw here, as retail's dedicated freeze still builds its model buffers
+	// (engine inmatch/host_role.h open_next_mission_load_window carries the witness).
 	EffectWorld *effect_world = get_effect_world();
-	if (effect_world == nullptr) {
+	if (effect_world == nullptr && p_models.is_empty()) {
 		return 0;
 	}
 	Vector3 warm_pos;
@@ -1350,17 +1353,20 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 	// leave the catalog cold forever. Lift it only across the loading-screen
 	// draws; keep the director's persisted switch unchanged and restore the
 	// EffectWorld before persistent item effects are reattached.
-	const bool restore_particles_hidden = effect_world->are_particles_hidden();
+	const bool restore_particles_hidden = effect_world != nullptr && effect_world->are_particles_hidden();
 	if (restore_particles_hidden) {
 		effect_world->set_particles_hidden(false);
 	}
-	const int spawned = p_spawn_effects ? effect_world->warm_all_effects(warm_pos) : 0;
+	const int spawned =
+			p_spawn_effects && effect_world != nullptr ? effect_world->warm_all_effects(warm_pos) : 0;
 	Node3D *model_warm = build_model_warm(p_models, warm_pos);
 	// A warmed catalog still draws the presenters' fire pipelines below.
 	if (spawned <= 0 && model_warm == nullptr && (p_spawn_effects || get_runtime() == nullptr)) {
-		effect_world->reset_runtime_state();
-		if (restore_particles_hidden) {
-			effect_world->set_particles_hidden(true);
+		if (effect_world != nullptr) {
+			effect_world->reset_runtime_state();
+			if (restore_particles_hidden) {
+				effect_world->set_particles_hidden(true);
+			}
 		}
 		return 0;
 	}
@@ -1369,9 +1375,11 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 	if (runtime != nullptr) {
 		runtime->warm_present_pipelines(warm_pos);
 	}
-	effect_world->advance_simulation_tick(Simulation::tick_dt(),
+	if (effect_world != nullptr) {
+		effect_world->advance_simulation_tick(Simulation::tick_dt(),
 				get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
-	effect_world->render_now(get_frame_clock_ms());
+		effect_world->render_now(get_frame_clock_ms());
+	}
 	// Pipeline compiles need real draws. Skip the forced frames inside the
 	// editor embedder (re-entrant editor drawing); the texture warm above still
 	// runs there, and the shipped game is what the full warm protects.
@@ -1383,9 +1391,11 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 		set_visible(true);
 		RenderingServer *rs = RenderingServer::get_singleton();
 		rs->force_draw(true);
-		effect_world->advance_simulation_tick(Simulation::tick_dt(),
-				get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
-		effect_world->render_now(get_frame_clock_ms());
+		if (effect_world != nullptr) {
+			effect_world->advance_simulation_tick(Simulation::tick_dt(),
+					get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
+			effect_world->render_now(get_frame_clock_ms());
+		}
 		rs->force_draw(true);
 		// The reset below cancels any unserviced compositor warm request. Drain
 		// the forced draws first so threaded renderers cannot race that cancel.
@@ -1395,15 +1405,18 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 	if (model_warm != nullptr) {
 		model_warm->queue_free();
 	}
-	effect_world->reset_runtime_state();
-	if (restore_particles_hidden) {
-		effect_world->set_particles_hidden(true);
+	if (effect_world != nullptr) {
+		effect_world->reset_runtime_state();
+		if (restore_particles_hidden) {
+			effect_world->set_particles_hidden(true);
+		}
 	}
 	item_fx_->reattach();
 	if (light_director_.is_valid()) {
 		light_director_->reattach();
 	}
-	const int64_t unresolved = effect_world->get_unresolved_texture_names().size();
+	const int64_t unresolved =
+			effect_world != nullptr ? effect_world->get_unresolved_texture_names().size() : 0;
 	UtilityFunctions::print_verbose(vformat(
 			"GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)", spawned, unresolved));
 	return spawned;
@@ -1480,22 +1493,30 @@ void GameWorld::load_join_effect_system(const Ref<ResourceRoot> &p_resource_root
 
 void GameWorld::start_effect_world() {
 	// The effect world a join's mission-data load built (load_join_effect_system) or the
-	// mission start's head did (load_mission_internal), else a new one: a dedicated host's.
+	// mission start's head did (load_mission_internal). A dedicated host has none: retail's
+	// loads no effect system (engine inmatch/host_role.h open_next_mission_load_window carries
+	// the witness), so its passes and its warm run without one and the sim's item emitters keep
+	// the kernel's own scene. Any other load without one builds it here.
 	EffectWorld *effect_world = take_effect_world(join_effect_world_id_);
 	if (effect_world == nullptr) effect_world = take_effect_world(head_effect_world_id_);
-	if (effect_world == nullptr) effect_world = create_effect_world(resource_root_);
-	effect_world_id_ = ObjectID(effect_world->get_instance_id());
-	// The mission header's wind drives GLOBALWIND particles
-	// (engine: runtime/particle/emitter.h).
-	if (loaded_mission_.is_valid()) {
-		if (const Ref<MissionInfo> info = loaded_mission_->get_info(); info.is_valid()) {
-			effect_world->set_mission_wind(info->get_wind_speed(), info->get_wind_direction());
+	const Ref<Simulation> role_sim = get_sim();
+	const bool dedicated_host = role_sim.is_valid() &&
+			role_sim->session_role() == Simulation::ROLE_DEDICATED_HOST;
+	if (effect_world == nullptr && !dedicated_host) effect_world = create_effect_world(resource_root_);
+	if (effect_world != nullptr) {
+		effect_world_id_ = ObjectID(effect_world->get_instance_id());
+		// The mission header's wind drives GLOBALWIND particles
+		// (engine: runtime/particle/emitter.h).
+		if (loaded_mission_.is_valid()) {
+			if (const Ref<MissionInfo> info = loaded_mission_->get_info(); info.is_valid()) {
+				effect_world->set_mission_wind(info->get_wind_speed(), info->get_wind_direction());
+			}
 		}
+		if (role_sim.is_valid()) role_sim->bind_item_effect_scene(effect_world->shared_native_scene());
 	}
-    if (const Ref<Simulation> sim = get_sim(); sim.is_valid())
-        sim->bind_item_effect_scene(effect_world->shared_native_scene());
 	if (water_ != nullptr) {
-		effect_world->set_water_plane(water_->get_water_height(), water_->get_reflection_camera());
+		if (effect_world != nullptr)
+			effect_world->set_water_plane(water_->get_water_height(), water_->get_reflection_camera());
 		// The sim-side water plane (env.water_z): the footstep water pick, the
 		// landing legs, AND the destruction paths (submerged wrecks skip pieces,
 		// the wreck fire steams out) all gate on it [orig: g_EnvWaterHeightFixed
