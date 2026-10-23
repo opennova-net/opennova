@@ -663,7 +663,10 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 	// Pulse the load-progress screen from inside the model-load loop at the
 	// object stage's constant value (the load plan's per-model pulse witness).
 	options["progress"] = callable_mp(this, &GameWorld::pulse_object_stage_progress);
+	// The placement's model builds split by phase (ObjectModel::take_build_profile), from here.
+	(void)ObjectModel::take_build_profile();
 	mission_stats_ = placer_->place(p_mission, get_runtime(), options);
+	const PackedInt64Array build_profile = ObjectModel::take_build_profile();
 	apply_occlusion_culling_policy();
 	// Static tile shadows are composed from the placer's resolved ObjectData and
 	// exact entity transforms. Attach only after place() has finished building
@@ -684,6 +687,8 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 			static_cast<int>(mission_stats_->get_span_animated_models_usec() / 1000),
 			mission_stats_->get_graphics(), mission_stats_->get_batches(),
 			mission_stats_->get_static_shadow_batches()));
+	UtilityFunctions::print_verbose(String("GameWorld: placement scene builds: ") +
+			ObjectModel::format_build_profile(build_profile));
 }
 
 // Tear down a loaded world so the shell can return to the menu (or load a

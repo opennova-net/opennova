@@ -241,6 +241,23 @@ public:
 		AWAKE_PROFILE_RENDERABLE_MODELS,
 		AWAKE_PROFILE_SLOT_COUNT,
 	};
+	// Fixed layout returned by take_build_profile(): the scene builds since the last take and their
+	// cost split by rebuild_scene's phases, in microseconds (an instrument).
+	enum BuildProfileSlot {
+		BUILD_PROFILE_BUILDS = 0,
+		BUILD_PROFILE_SKELETON_US, // the head: level thresholds, PANM, the Skeleton3D and Skin
+		BUILD_PROFILE_MESHES_US, // ObjectData::build_lod_submeshes per retained level
+		BUILD_PROFILE_MATERIALS_US, // the per-surface rows: materials, part nodes, anim frames
+		BUILD_PROFILE_NODES_US, // the surface slots' MeshInstance3D nodes
+		BUILD_PROFILE_LEVELS_US, // the active level applied, the skin palette, the rest transforms
+		BUILD_PROFILE_OCCLUDERS_US, // the authored occluders
+		BUILD_PROFILE_TAIL_US, // the runtime state, the stamps and the render order
+		BUILD_PROFILE_SLOT_COUNT,
+	};
+	// The process's scene builds since the last take, then zeroed: the mission load's model warm
+	// and its placement print it under --verbose (format_build_profile).
+	static PackedInt64Array take_build_profile();
+	static String format_build_profile(const PackedInt64Array &p_profile);
 
 private:
 	struct AwakeFrameProfile {
@@ -602,6 +619,8 @@ private:
 	// GameWorld.get_runtime_perf_counters reads it for the F3/perf path.
 	int geometry_instance_count_ = 0;
 	static int64_t live_geometry_instance_count_;
+	// take_build_profile's accumulators (BuildProfileSlot).
+	static int64_t build_profile_[BUILD_PROFILE_SLOT_COUNT];
 	void retire_geometry_instances();
 
 	// Main-body skeletal animation (.bad/.adm via SkeletalAnim).
@@ -1329,5 +1348,6 @@ public:
 
 } // namespace godot
 VARIANT_ENUM_CAST(godot::ObjectModel::AwakeFrameProfileSlot);
+VARIANT_ENUM_CAST(godot::ObjectModel::BuildProfileSlot);
 VARIANT_ENUM_CAST(godot::ObjectModel::AvatarPart);
 VARIANT_ENUM_CAST(godot::ObjectModel::PresentationLayer);

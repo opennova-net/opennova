@@ -1001,6 +1001,29 @@ HashSet<ObjectModel *> ObjectModel::authored_lod_models_;
 HashSet<ObjectModel *> ObjectModel::pixel_cull_models_;
 uint64_t ObjectModel::lifetime_generation_ = 0;
 int64_t ObjectModel::live_geometry_instance_count_ = 0;
+int64_t ObjectModel::build_profile_[ObjectModel::BUILD_PROFILE_SLOT_COUNT] = {};
+
+PackedInt64Array ObjectModel::take_build_profile() {
+	PackedInt64Array result;
+	result.resize(BUILD_PROFILE_SLOT_COUNT);
+	for (int slot = 0; slot < BUILD_PROFILE_SLOT_COUNT; ++slot) {
+		result.set(slot, build_profile_[slot]);
+		build_profile_[slot] = 0;
+	}
+	return result;
+}
+
+String ObjectModel::format_build_profile(const PackedInt64Array &p_profile) {
+	if (p_profile.size() < BUILD_PROFILE_SLOT_COUNT) return String();
+	const auto ms = [&p_profile](BuildProfileSlot p_slot) {
+		return static_cast<int>(p_profile[p_slot] / 1000);
+	};
+	return vformat("%d build(s): head %d ms, meshes %d ms, materials %d ms, nodes %d ms, "
+				   "levels %d ms, occluders %d ms, tail %d ms",
+			static_cast<int>(p_profile[BUILD_PROFILE_BUILDS]), ms(BUILD_PROFILE_SKELETON_US),
+			ms(BUILD_PROFILE_MESHES_US), ms(BUILD_PROFILE_MATERIALS_US), ms(BUILD_PROFILE_NODES_US),
+			ms(BUILD_PROFILE_LEVELS_US), ms(BUILD_PROFILE_OCCLUDERS_US), ms(BUILD_PROFILE_TAIL_US));
+}
 
 void ObjectModel::retire_geometry_instances() {
 	live_geometry_instance_count_ -= geometry_instance_count_;
@@ -1986,6 +2009,8 @@ void ObjectModel::_bind_methods() {
 			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_static_method("ObjectModel", D_METHOD("sync_view_twins"),
 			&ObjectModel::sync_view_twins);
+	ClassDB::bind_static_method("ObjectModel", D_METHOD("take_build_profile"),
+			&ObjectModel::take_build_profile);
 	ClassDB::bind_method(D_METHOD("set_inset_occlusion_hidden", "hidden"),
 			&ObjectModel::set_inset_occlusion_hidden);
 	ClassDB::bind_method(D_METHOD("set_inset_occlusion_section_mask", "raw_mask", "forced_mask"),
@@ -2265,6 +2290,15 @@ void ObjectModel::_bind_methods() {
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_AWAKE_MODELS);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_RENDERABLE_MODELS);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_SLOT_COUNT);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_BUILDS);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_SKELETON_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_MESHES_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_MATERIALS_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_NODES_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_LEVELS_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_OCCLUDERS_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_TAIL_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_SLOT_COUNT);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_VIEWMODEL);

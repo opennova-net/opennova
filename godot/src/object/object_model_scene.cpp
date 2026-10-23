@@ -17,6 +17,7 @@
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/occluder_instance3d.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/visual_instance3d.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 
@@ -85,6 +86,15 @@ void ObjectModel::rebuild_scene() {
 		set_model_bounds(AABB());
 		return;
 	}
+	// The build's phases on the process's build profile (an instrument: take_build_profile).
+	Time *build_clock = Time::get_singleton();
+	uint64_t build_lap = build_clock->get_ticks_usec();
+	const auto build_phase = [build_clock, &build_lap](BuildProfileSlot p_slot) {
+		const uint64_t now = build_clock->get_ticks_usec();
+		build_profile_[p_slot] += static_cast<int64_t>(now - build_lap);
+		build_lap = now;
+	};
+	++build_profile_[BUILD_PROFILE_BUILDS];
 
 	active_lod_ = clamp_lod_index(active_lod_);
 	const Threedi3di3 &native_model = object_data_->native_model();
@@ -130,6 +140,7 @@ void ObjectModel::rebuild_scene() {
 	}
 	const int bone_count =
 			skeletal_scene_ && skeleton_ != nullptr ? skeleton_->get_bone_count() : 0;
+	build_phase(BUILD_PROFILE_SKELETON_US);
 	// Every retained level's submeshes become mesh/material rows (no nodes):
 	// the shared meshes come from ObjectData's memo, the materials from this
 	// model's per-index cache, and an alpha strip owns its priority-bearing
@@ -140,6 +151,7 @@ void ObjectModel::rebuild_scene() {
 			++lod_index) {
 		const Array submeshes = object_data_->build_lod_submeshes(
 				static_cast<int>(lod_index), skeletal_scene_, bone_count, false);
+		build_phase(BUILD_PROFILE_MESHES_US);
 		authored_lod_available_[lod_index] = !submeshes.is_empty();
 		std::vector<LevelSurface> &level = level_surfaces_[lod_index];
 		level.reserve(static_cast<std::size_t>(submeshes.size()));
@@ -207,6 +219,7 @@ void ObjectModel::rebuild_scene() {
 			collect_anim_frames(surface.material_index);
 			level.push_back(surface);
 		}
+		build_phase(BUILD_PROFILE_MATERIALS_US);
 		slot_count = std::max(slot_count, level.size());
 	}
 	// One retained MeshInstance3D per surface slot, parented from the start
@@ -237,6 +250,7 @@ void ObjectModel::rebuild_scene() {
 		parent->add_child(instance);
 		surface_slots_[slot].instance = instance;
 	}
+	build_phase(BUILD_PROFILE_NODES_US);
 	apply_level_surfaces();
 	build_skin_palette();
 
@@ -245,6 +259,7 @@ void ObjectModel::rebuild_scene() {
 			!authored_lod_thresholds_q16_.empty()) {
 		authored_lod_models_.insert(this);
 	}
+	build_phase(BUILD_PROFILE_LEVELS_US);
 
 	if (authored_occluders_enabled_) {
 		opennova::world::OcclusionModel occlusion_model;
@@ -283,6 +298,7 @@ void ObjectModel::rebuild_scene() {
 	// Whether Godot's occlusion consumer runs is the world's decision
 	// (GameWorld reads get_authored_occluder_count after placement); a model
 	// never flips its viewport's state.
+	build_phase(BUILD_PROFILE_OCCLUDERS_US);
 
 	apply_runtime_state(0.0);
 	// Newly rebuilt GeometryInstance3Ds have default instance uniforms. Keep
@@ -306,6 +322,7 @@ void ObjectModel::rebuild_scene() {
 	}
 	refresh_water_mirror_clip();
 	refresh_render_order();
+	build_phase(BUILD_PROFILE_TAIL_US);
 }
 
 Node3D *ObjectModel::surface_parent_for(const LevelSurface &p_surface) {

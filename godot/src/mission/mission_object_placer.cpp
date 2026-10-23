@@ -1615,6 +1615,8 @@ int MissionObjectPlacer::warm_models(const PackedStringArray &p_files, Node3D *p
 	uint64_t data_usec = 0;
 	uint64_t build_usec = 0;
 	std::vector<std::pair<uint64_t, String>> slowest;
+	// The builds' own phase split (ObjectModel::take_build_profile), from here.
+	(void)ObjectModel::take_build_profile();
 	for (const String &file : p_files) {
 		const uint64_t start = time->get_ticks_usec();
 		(void)_load_object_data(file);
@@ -1639,6 +1641,8 @@ int MissionObjectPlacer::warm_models(const PackedStringArray &p_files, Node3D *p
 			"MissionObjectPlacer: model warm %d/%d built: data %d ms, build %d ms; slowest (ms): %s",
 			built, p_files.size(), static_cast<int>(data_usec / 1000), static_cast<int>(build_usec / 1000),
 			String(", ").join(top)));
+	UtilityFunctions::print_verbose(String("MissionObjectPlacer: model warm scene builds: ") +
+			ObjectModel::format_build_profile(ObjectModel::take_build_profile()));
 	return built;
 }
 

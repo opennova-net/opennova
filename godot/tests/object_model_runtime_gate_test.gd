@@ -778,3 +778,26 @@ func test_a_model_drops_its_weather_sample_once_no_rings_stand() -> void:
 	model.set_ctrl_value("FLICKER", 0x2000)
 	model.advance_runtime_frame(0.016)
 	assert_eq(model.get_ctrl_values().get("FLICKER"), 0x2000, "a value written since stands")
+
+
+# The scene builds' phase split (an instrument the mission load's model warm and placement print
+# under --verbose): one set_object_data is one build, its phases are no longer than the build's wall
+# time, and a take zeroes the profile.
+func test_a_scene_build_counts_on_the_build_profile() -> void:
+	ObjectModel.take_build_profile()
+	var started := Time.get_ticks_usec()
+	_spy_model()
+	var elapsed := Time.get_ticks_usec() - started
+	var profile: PackedInt64Array = ObjectModel.take_build_profile()
+	assert_eq(profile.size(), int(ObjectModel.BUILD_PROFILE_SLOT_COUNT))
+	if profile.size() != int(ObjectModel.BUILD_PROFILE_SLOT_COUNT):
+		return
+	assert_eq(profile[ObjectModel.BUILD_PROFILE_BUILDS], 1, "one set_object_data, one build")
+	var phases := 0
+	for slot in range(ObjectModel.BUILD_PROFILE_SKELETON_US, ObjectModel.BUILD_PROFILE_SLOT_COUNT):
+		assert_true(profile[slot] >= 0, "phase %d is a duration" % slot)
+		phases += profile[slot]
+	assert_true(phases <= elapsed,
+			"the phases (%d us) lie inside the build (%d us)" % [phases, elapsed])
+	assert_eq(ObjectModel.take_build_profile()[ObjectModel.BUILD_PROFILE_BUILDS], 0,
+			"a take zeroes the profile")
