@@ -6,7 +6,7 @@
 //      PER-SIDE PROFILE RESELECT: the NEW team byte picks the profile side block, that
 //      block's class byte is the wire class, and the page that class indexes is the kit.
 //      [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — latch @0x4319db, entity team @0x4319ee,
-//       slot team @0x431a0b, the side pick @0x431a35, the re-submit @0x431a9e]
+//       slot team @0x431a0b, the side pick @0x431a35, the re-submit @0x431AAD]
 //
 //  (B) The ENTITY-REMOVAL fold. C2S 0x32 -> S2C 0x5D is the empty-slot sweep: the host
 //      answers the REQUESTER ONLY with every empty pool-0 index, and the client destroys
@@ -215,7 +215,7 @@ bool run_team_assign_relatches_self_and_resubmits() {
 }
 
 // Pull the single C2S 0x2F this poll queued. Zero or more than one fails loudly: retail
-// emits EXACTLY one re-submission per self team assign [orig: @0x431a9e].
+// emits EXACTLY one re-submission per self team assign [orig: @0x431AAD].
 bool one_loadout_submit(const inmatch::JoinerConnection::PollResult &poll,
 		std::vector<uint8_t> &payload_out, LoadoutSubmit &decoded_out, const char *what) {
 	int submits = 0;
@@ -253,7 +253,7 @@ bool same_rows(const std::vector<LoadoutSubmitEntry> &got,
 // @0x515A36] and drops every row that fails it.
 // [orig: NapiNPClientMsg_TeamAssign @0x431910 — the side pick @0x431a35, profileType =
 //  *profileData, the page qmemcpy, then NetPacket_SendLoadoutSubmit(team, profileType,
-//  restrictionData, 195) @0x431a9e]
+//  restrictionData, 195) @0x431AAD]
 bool run_team_assign_reselects_the_new_sides_profile() {
 	constexpr uint16_t kSelf = 0x0005;
 	inmatch::JoinerConnection joiner("SideJoiner", [] { return uint64_t(0); });
@@ -355,7 +355,7 @@ bool run_team_assign_reselects_the_new_sides_profile() {
 // A caller that never calls set_loadout_kit submits the fresh profile's kit, its page resolved
 // through the installed weapon table (D-NET-531): the S2C 0x50 re-submit carries it under the
 // NEW team byte and slot 195 raw. The per-side seam must not disturb that fallback.
-// [orig: NapiNPClientMsg_TeamAssign @0x431a9e; NetPacket_SendLoadoutSubmit @0x42cdc0 -
+// [orig: NapiNPClientMsg_TeamAssign @0x431AAD; NetPacket_SendLoadoutSubmit @0x42cdc0 -
 //  @0x42cf0b, @0x42cf21]
 bool run_team_assign_default_kit_stays_byte_identical() {
 	constexpr uint16_t kSelf = 0x0005;

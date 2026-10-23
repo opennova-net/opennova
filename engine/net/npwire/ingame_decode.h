@@ -1192,7 +1192,7 @@ bool decode_destroy_entity_list(const uint8_t *body, size_t len,
 //   (4) `entity->Flags & 0x100` (a player) AND entity == local player -> retail
 //       re-selects the per-side profile (team 1/3 -> side A block, else side B),
 //       refreshes restrictionData, and RE-SENDS ONE C2S 0x2F via
-//       NetPacket_SendLoadoutSubmit @0x431a9e carrying the NEW team, the per-side
+//       NetPacket_SendLoadoutSubmit @0x431AAD carrying the NEW team, the per-side
 //       profile class, and slot 195 RAW (the pre-Player_InitPlayer form, NOT the
 //       live g_CurrentWeaponSlot), then C2S 0x22/0x23 acks (@0x431acb..0x431b05),
 //       Player_InitPlayer(1) @0x431b14, then the identity stores

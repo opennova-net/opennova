@@ -1223,6 +1223,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	receive_leave_logged_ = false;
 	receive_send_marks_.clear();
 	receive_loadout_grants_.clear();
+	receive_loadout_revision_base_ = authoritative_loadout_revision_;
 	frame_trace_ = JoinerNetTraceRecord{}; // the joiner net readout's record (an instrument)
 	// Session loss is a terminal owner state, not only a receive-side event. A
 	// prior host description (or the silence reap below) must stop the next frame
@@ -1711,7 +1712,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				//  PumpFlags reload @0x6297f3..0x629802]
 				send_holdoff_ticks_ = pr.send_holdoff;
 			}
-			receive_loadout_revision_base_ = authoritative_loadout_revision_;
 			for (const WeaponLoadout &grant : pr.loadout_grants) {
 				authoritative_loadout_ = grant;
 				++authoritative_loadout_revision_;

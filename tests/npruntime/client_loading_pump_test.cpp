@@ -753,7 +753,7 @@ bool drive_into_the_world_stream(H &h, uint8_t period) {
 // mission start's two 0x2F carry the older team. After the mission start the same 0x50
 // latches the team and re-submits a 0x2F on it.
 // [orig: NapiNPClientMsg_TeamAssign @0x431910 - the compares @0x4319CF / @0x431A1B, the
-//  latch @0x4319DB, the submit @0x431A9E; Game_StartMission @0x524360 - the first 0x2F
+//  latch @0x4319DB, the submit @0x431AAD; Game_StartMission @0x524360 - the first 0x2F
 //  @0x525836, Player_InitPlayer @0x525BBC (its store @0x4E17EB), the second @0x525C2E]
 bool run_a_self_team_assign_waits_for_the_mission_starts_player_init() {
 	Harness h;

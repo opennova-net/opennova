@@ -81,7 +81,7 @@ bool decode_c2s(const std::vector<uint8_t> &datagram, const std::string &client_
 // re-submits when an S2C 0x50 moves its own entity, after the host's BMS header named a mission
 // of `mission_type` (0: no header). The sender fixes the class for every 0x2F (the armory's
 // takes it in inmatch::armory_accept_in_session, pinned by damage_class_bytes).
-// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the reselect's submit @0x431a9e]
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the reselect's submit @0x431AAD]
 int resubmit_class(const TitleIdentity *title, uint8_t mission_type) {
 	inmatch::JoinerConnection joiner("Dfx2Loadout");
 	joiner.set_title(title);
