@@ -274,8 +274,9 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_item_flash", "index", "value"),
 			&HudOverlay::set_item_flash);
 	ClassDB::bind_method(D_METHOD("get_item_flash_timers"), &HudOverlay::get_item_flash_timers);
-	ClassDB::bind_method(D_METHOD("carry_item_flash_timers", "timers"),
-			&HudOverlay::carry_item_flash_timers);
+	ClassDB::bind_method(D_METHOD("get_process_words"), &HudOverlay::get_process_words);
+	ClassDB::bind_method(D_METHOD("carry_process_words", "words"),
+			&HudOverlay::carry_process_words);
 	ClassDB::bind_method(D_METHOD("set_showhud_flags", "flags"),
 			&HudOverlay::set_showhud_flags);
     ClassDB::bind_method(D_METHOD("set_aspect_mode", "mode"), &HudOverlay::set_aspect_mode);
@@ -989,11 +990,10 @@ int HudOverlay::send_command_map_chat(const Ref<Simulation> &p_sim, bool p_all,
 void HudOverlay::set_frame_clocks(int64_t p_logic_tick, int64_t p_main_frame,
 		int64_t p_session_frame, int64_t p_hud_frame) {
 	state_.ticks = static_cast<int>(static_cast<uint32_t>(p_logic_tick));
-	// A mission start zeroes the main-frame counter; the message rings' held
-	// lines keep the frames they had left (HudFrameCompiler::rebase_message_clock).
+	// Only a mission start zeroes the main-frame counter, and that start clears the message
+	// rings (HudFrameCompiler::clear_message_rings carries the witness).
 	const uint32_t main_frame = static_cast<uint32_t>(p_main_frame);
-	if (main_frame < state_.main_frame)
-		compiler_.rebase_message_clock(static_cast<int>(main_frame - state_.main_frame));
+	if (main_frame < state_.main_frame) compiler_.clear_message_rings();
 	state_.main_frame = main_frame;
 	state_.session_frame = static_cast<uint32_t>(p_session_frame);
 	state_.hud_frame = static_cast<uint32_t>(p_hud_frame);
@@ -1555,11 +1555,16 @@ PackedInt32Array HudOverlay::get_item_flash_timers() const {
 	return out;
 }
 
-void HudOverlay::carry_item_flash_timers(const PackedInt32Array &p_timers) {
-	std::array<int32_t, opennova::hud::HudItemFlash::kCount> timers{};
-	for (int i = 0; i < opennova::hud::HudItemFlash::kCount && i < p_timers.size(); ++i)
-		timers[static_cast<size_t>(i)] = p_timers[i];
-	compiler_.carry_item_flash_timers(timers);
+Ref<HudProcessWordsCarry> HudOverlay::get_process_words() const {
+	Ref<HudProcessWordsCarry> out;
+	out.instantiate();
+	out->words = compiler_.process_words();
+	return out;
+}
+
+void HudOverlay::carry_process_words(const Ref<HudProcessWordsCarry> &p_words) {
+	if (p_words.is_null()) return;
+	compiler_.carry_process_words(p_words->words);
 	queue_redraw();
 }
 

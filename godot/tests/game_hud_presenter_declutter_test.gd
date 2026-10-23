@@ -608,7 +608,8 @@ func test_hud_uses_the_presented_camera_frame() -> void:
 
 # The 16 HUD item flash timers outlive a mission: retail's are process words no mission start,
 # round init or HUD init writes (the start's HUD init zeroes their last tick alone), while the
-# presenter rebuilds its overlay per mission, so it carries the timers into the next one; the
+# presenter rebuilds its overlay per mission, so it carries the HUD's process words (engine
+# hud_frame.h HudProcessWords) into the next one, through the next overlay's configure; the
 # carry rebuilds no layer table [orig: g_HUDItemFlashTimers @0x2723CF8 - its writers the tick's
 # walk @0x59A9F7 and the arm's store @0x5A302A; HUD_InitOverlaySystem @0x5A4620 - the
 # HUD_ResetAllOverlayBuffers call @0x5A4949].
@@ -618,6 +619,7 @@ func test_item_flash_timers_carry_into_the_next_missions_overlay() -> void:
 	var hud := presenter.get_game_hud()
 	hud.set_item_flash(5, 0x800)
 	assert_eq(hud.get_item_flash_timers()[5], 0x800, "the arm stores the timer")
+	assert_not_null(hud.get_process_words(), "the overlay hands its process words over")
 	presenter.teardown()
 	presenter.ensure_game_hud()
 	var next := presenter.get_game_hud()

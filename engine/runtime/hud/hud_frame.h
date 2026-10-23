@@ -1235,6 +1235,38 @@ static_assert(kHudFontSlotImpact38 < kHudFontSlotCount,
 bool hud_weapon_group_visible(const HudFrameState &state);
 bool hud_stance_group_visible(const HudFrameState &state);
 
+// THE HUD'S PROCESS WORDS: the overlay state whose only writers are the draws and the BMS
+// arm, so no mission start, round init or HUD init touches it and it keeps its value into
+// the next mission, where the start's HUD init has zeroed only the fade stamps and the item
+// flash timers' last tick (HudFrameCompiler::reset_overlay_buffers). The embedder rebuilds its
+// HUD per mission and carries these into the new one (HudFrameCompiler::process_words /
+// carry_process_words). The two silhouette keys are pointers into process-lifetime storage
+// (the entity pools, the weapon def table), so a slot or def keeps its key across missions
+// (HudCombatState::vehicle_identity / weapon_identity). The chat and system rings are no
+// process words: every mission start clears all six chat channels.
+// [orig: g_HUDItemFlashTimers @0x2723CF8 (writers @0x59A9F7 / @0x5A302A); g_HUDStancePrev /
+//  g_HUDStanceCur (HUD_DrawStanceIndicator @0x599F10, the stores @0x599F8C / @0x599F92);
+//  g_HUDAmmoKeyBucket / g_HUDAmmoKeyReserve / g_HUDAmmoKeyClass (HUD_DrawAmmoIndicator
+//  @0x599A30, the stores @0x599AB4 / @0x599ABA / @0x599AC5); g_WaypointAltitudeColor /
+//  g_WaypointAltitudeBand (HUD_UpdateWaypointAltitudeColor @0x590970, the stores
+//  @0x59098E..0x5909C9); g_HUDSilhouetteVehicleKey (HUD_DrawTargetEntityOverlay, the store
+//  @0x59A604); g_HUDSilhouetteWeaponKey (HUD_DrawWeaponSilhouette, the store @0x59A744);
+//  HUD_InitOverlaySystem @0x5A4620 - its memset calls @0x5A491D / @0x5A4941 / @0x5A49C8 and
+//  the HUD_ResetAllOverlayBuffers call @0x5A4949; Game_StartMission @0x524360 - the
+//  Chat_ClearAllChannels call @0x524A10]
+struct HudProcessWords {
+	std::array<int32_t, HudItemFlash::kCount> item_flash_timers{};
+	int stance_prev = 0;
+	int stance_cur = 0;
+	int32_t ammo_key_bucket = 0;
+	int32_t ammo_key_reserve = 0;
+	uint8_t ammo_key_class = 0;
+	uint32_t waypoint_altitude_color = 0;
+	int waypoint_altitude_band = 0;
+	uint64_t silhouette_vehicle = 0;
+	std::string silhouette_weapon;
+};
+
 class HudFrameCompiler {
 public:
 	// `font` is the hudpos font loaded for the current width (null when hudpos
@@ -1301,12 +1333,14 @@ public:
 	// line, oldest first, NO expiry test [orig: HUD_DrawMessageLog
 	// @0x5b9d70 walks slots 16..1 of both rings @0x5b9e8a..0x5b9f1a].
 	const std::vector<HudMessageLine> &chat_lines() const { return chat_lines_; }
-	// The rings' lives are retail's per-slot countdowns, which run once per
-	// frame and outlive a mission start (Input_InitBindingSystem @0x525BA5
-	// clears only the flood table); the port stamps an expiry against the
-	// main-frame counter, which a mission start zeroes, so the clock's restart
-	// re-bases every held line by its jump, each keeping the frames it had left.
-	void rebase_message_clock(int delta);
+	// The rings' lives are retail's per-slot countdowns, which run once per frame; the port
+	// stamps an expiry against the main-frame counter instead. Only a mission start zeroes that
+	// counter, and the same start clears all six chat channels ahead of it, so a clock restart
+	// empties the rings [orig: Game_StartMission @0x524360 - the Chat_ClearAllChannels call
+	//  @0x524A10 ahead of the Game_ResetSessionHudState call @0x525BAA; Chat_ClearAllChannels
+	//  @0x497D30 - the CHAT memsets @0x497D3E / @0x497D54, the SYSTEM ones @0x497D6A /
+	//  @0x497D80].
+	void clear_message_rings();
 	void reset_runtime_state();
 	// Respawn clears the overlay clocks, retaining the chat/system rings and
 	// the previous stance/ammo values [orig: HUD_ResetAllOverlayBuffers
@@ -1318,10 +1352,10 @@ public:
 	// one HUD_DrawTargetEntityOverlay @0x59a60a and HUD_DrawWeaponSilhouette
 	// @0x59a74a share, and the item flash timers' last tick g_HUDItemFlashLastTick
 	// (@0x59dd7d), item_flash_'s (HudItemFlash::reset_last_tick). The stamps'
-	// keys are retained as in retail: the prev/cur bytes (byte_2723D3C/D3D
-	// @0x599f8c/@0x599f92, byte_2723D4C @0x599ac5) and the silhouette keys
-	// (silhouette_vehicle_ / silhouette_weapon_, dword_2723D60 @0x59a604 /
-	// dword_2723D5C @0x59a744). The rest of the routine has no compiler-side
+	// keys are retained as in retail: the prev/cur bytes (g_HUDStancePrev / g_HUDStanceCur
+	// @0x599f8c/@0x599f92, g_HUDAmmoKeyClass @0x599ac5) and the silhouette keys
+	// (silhouette_vehicle_ / silhouette_weapon_, g_HUDSilhouetteVehicleKey @0x59a604 /
+	// g_HUDSilhouetteWeaponKey @0x59a744). The rest of the routine has no compiler-side
 	// state: the missile list unk_2722B40 (memset @0x59dd4e), the radar blip
 	// table unk_2721F40 + the edge timers dword_2721EEC/EF0 (@0x59dd5e..0x59dd6a)
 	// and the radar's last tick g_RadarLastUpdateTick (@0x59dd83) are the local
@@ -1344,11 +1378,11 @@ public:
 	// [orig: RenderState_SetLayerVisibilityByIndex @0x5A3020 - the store @0x5A302A].
 	void set_item_flash(int index, int32_t value) { item_flash_.set(index, value); }
 	const HudItemFlash &item_flash() const { return item_flash_; }
-	// A torn-down HUD's timers into this one, which keeps its last tick (HudItemFlash::
-	// carry_timers carries the witness): no layer rebuild, no tick.
-	void carry_item_flash_timers(const std::array<int32_t, HudItemFlash::kCount> &timers) {
-		item_flash_.carry_timers(timers);
-	}
+	// The process words as this HUD holds them, and a torn-down HUD's into this one
+	// (HudProcessWords carries the witness): each word only, so this HUD keeps its zeroed fade
+	// stamps and item flash last tick; no layer rebuild, no tick.
+	HudProcessWords process_words() const;
+	void carry_process_words(const HudProcessWords &words);
 
 	// The HUD-owned gates the radar legs ride, as bits the embedder hands the
 	// session's per-frame radar step (inmatch/session.h; world::radar_hud_frame):
@@ -1663,8 +1697,8 @@ private:
 	MapWindowDraw command_map_draw_;
 	StanceFade stance_;
 	// The clip-indicator flash latch: the (bucket, reserve, class byte) key
-	// and the stamp, BSS-zero like retail's [orig: dword_2723D40 / dword_2723D44
-	// / byte_2723D4C, stamp g_HUDAmmoFadeStamp; HUD_DrawAmmoIndicator @0x599A96..0x599ACA].
+	// and the stamp, BSS-zero like retail's [orig: g_HUDAmmoKeyBucket / g_HUDAmmoKeyReserve
+	// / g_HUDAmmoKeyClass, stamp g_HUDAmmoFadeStamp; HUD_DrawAmmoIndicator @0x599A96..0x599ACA].
 	int32_t flash_key_bucket_ = 0;
 	int32_t flash_key_reserve_ = 0;
 	uint8_t flash_key_class_ = 0;
@@ -1690,7 +1724,7 @@ private:
 	bool hud_palette2_refreshed_ = false;
 	// The item flash timers and their last tick (set_item_flash): BSS-zero, never
 	// cleared; only the overlay-buffer reset zeroes the last tick. A new mission's HUD
-	// takes the last one's timers (carry_item_flash_timers).
+	// takes the last one's timers (carry_process_words).
 	HudItemFlash item_flash_;
 	// THE ENTITY-INFO RECORD'S MAP FIELDS (g_HUDEntityInfo) as the pass's head last built them:
 	// the waypoint's active byte and position, and the nearest FARP. The head builds them past
@@ -1714,9 +1748,9 @@ private:
 	uint32_t waypoint_altitude_color_ = 0;
 	int waypoint_altitude_band_ = 0;
 	// The silhouettes' shared fade stamp and their two keys, the controlled vehicle and the
-	// weapon [orig: g_HUDSilhouetteFadeStamp - HUD_DrawTargetEntityOverlay @0x59A60A (key
-	//  dword_2723D60 @0x59A604), HUD_DrawWeaponSilhouette @0x59A74A (key dword_2723D5C
-	//  @0x59A744)].
+	// weapon, process words (HudProcessWords) [orig: g_HUDSilhouetteFadeStamp -
+	//  HUD_DrawTargetEntityOverlay @0x59A60A (key g_HUDSilhouetteVehicleKey @0x59A604),
+	//  HUD_DrawWeaponSilhouette @0x59A74A (key g_HUDSilhouetteWeaponKey @0x59A744)].
 	int silhouette_stamp_ = 0;
 	uint64_t silhouette_vehicle_ = 0;
 	std::string silhouette_weapon_;

@@ -433,6 +433,10 @@ static void world_feeds() {
 	p->carry_flags = 24;
 	read();
 	CHECK(frame.hud_combat.state.vehicle_controls && frame.hud_combat.state.gear == 0);
+	// The silhouette's key is the mount's pool slot, which a later spawn into that slot keeps
+	// [orig: HUD_DrawTargetEntityOverlay - the key compare @0x59A5F7 over g_HUDRootEntity, a
+	//  pool-slot pointer; EntityPool_Allocate @0x442130, called once by Game_Run].
+	CHECK(frame.hud_combat.state.vehicle_identity == mounted.packed);
 	CHECK(frame.hud_combat.state.altitude_agl_q16 == 90 << 16);
 	CHECK(frame.hud_combat.state.parachute && frame.hud_combat.state.armor);
 	CHECK(!frame.hud_combat.state.target_brackets &&

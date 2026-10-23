@@ -32,6 +32,7 @@ using opennova::hud::HudFrameState;
 using opennova::hud::HudLayout;
 using opennova::hud::HudMinimapCompiler;
 using opennova::hud::HudMinimapInput;
+using opennova::hud::HudProcessWords;
 using opennova::hud::HudTri;
 
 namespace {
@@ -2557,22 +2558,74 @@ void test_message_log_element(const fnt_font_t *font) {
 			"a single line sits in the bottom row, not the top");
 }
 
-// A mission start zeroes the main-frame counter (world::HudFrameCounters); a held ring line keeps
-// the frames it had left, as retail's per-slot countdowns outlive the start [orig:
-// Input_InitBindingSystem @0x525BA5 clears only the flood table, not the rings].
-void test_message_clock_rebase(const fnt_font_t *font) {
+// A mission start zeroes the main-frame counter (world::HudFrameCounters), and the same start
+// clears all six chat channels ahead of it: a clock restart empties both rings, and the HUD's
+// configure (its mission's HUD init) leaves them empty [orig: Game_StartMission @0x524360 - the
+// Chat_ClearAllChannels call @0x524A10 ahead of the Game_ResetSessionHudState call @0x525BAA].
+void test_message_clock_restart_clears(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	HudLayout layout;
 	layout.chat_text = {5, 40, 0, 0, true};
 	compiler.configure(layout, font);
 	compiler.push_chat_line("a", 0xFF102030u, 1000); // expires at 1930
-	compiler.rebase_message_clock(-1000);
+	compiler.push_message("b", 1000);
 	HudFrameState state;
-	state.main_frame = 929;
-	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.size() == 1,
-			"the line keeps its frames past the counter's restart");
-	state.main_frame = 930;
-	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(), "and expires when they run out");
+	state.main_frame = 1001;
+	CHECK(!compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(), "the held lines draw");
+	compiler.clear_message_rings();
+	CHECK(compiler.chat_lines().empty(), "the restart empties the CHAT ring");
+	state.main_frame = 1;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(),
+			"no held line draws past the counter's restart");
+	compiler.push_chat_line("c", 0xFF102030u, 1);
+	compiler.configure(layout, font);
+	CHECK(compiler.chat_lines().empty(), "the mission's HUD init leaves the rings empty");
+}
+
+// The HUD's process words outlive a mission: the embedder's next HUD takes the torn-down one's,
+// and its configure (the HUD init) keeps them while it zeroes the fade stamps, so a stance, an
+// ammo key or a silhouette key unchanged across the start restamps no fade
+// [orig: HUD_DrawStanceIndicator @0x599F10 - the stores @0x599F8C / @0x599F92;
+//  HUD_DrawAmmoIndicator @0x599A30 - the stores @0x599AB4 / @0x599ABA / @0x599AC5;
+//  HUD_UpdateWaypointAltitudeColor @0x590970; HUD_DrawTargetEntityOverlay - the key store
+//  @0x59A604; HUD_DrawWeaponSilhouette - the key store @0x59A744; HUD_InitOverlaySystem
+//  @0x5A4620 - the HUD_ResetAllOverlayBuffers call @0x5A4949].
+void test_process_words_carry(const fnt_font_t *font) {
+	HudLayout layout;
+	HudFrameCompiler last;
+	last.configure(layout, font);
+	HudProcessWords words;
+	words.item_flash_timers[3] = 0x400;
+	words.stance_prev = 1;
+	words.stance_cur = 2;
+	words.ammo_key_bucket = 7;
+	words.ammo_key_reserve = 30;
+	words.ammo_key_class = 4;
+	words.waypoint_altitude_color = 0xFF007000u;
+	words.waypoint_altitude_band = 2;
+	words.silhouette_vehicle = 0x1005;
+	words.silhouette_weapon = "M4";
+	last.carry_process_words(words);
+	HudFrameCompiler next;
+	next.carry_process_words(last.process_words());
+	next.configure(layout, font);
+	const HudProcessWords kept = next.process_words();
+	CHECK(kept.item_flash_timers[3] == 0x400 && kept.item_flash_timers[2] == 0,
+			"the item flash timers carry");
+	CHECK(kept.stance_prev == 1 && kept.stance_cur == 2, "the stance bytes carry");
+	CHECK(kept.ammo_key_bucket == 7 && kept.ammo_key_reserve == 30 && kept.ammo_key_class == 4,
+			"the ammo key carries");
+	CHECK(kept.waypoint_altitude_color == 0xFF007000u && kept.waypoint_altitude_band == 2,
+			"the waypoint altitude colour and band carry");
+	CHECK(kept.silhouette_vehicle == 0x1005 && kept.silhouette_weapon == "M4",
+			"the silhouette keys carry");
+	// A fresh HUD with no carry holds BSS-zero words.
+	HudFrameCompiler fresh;
+	fresh.configure(layout, font);
+	const HudProcessWords zero = fresh.process_words();
+	CHECK(zero.stance_cur == 0 && zero.ammo_key_bucket == 0 && zero.silhouette_vehicle == 0 &&
+			zero.silhouette_weapon.empty() && zero.waypoint_altitude_color == 0,
+			"a fresh HUD's words are zero");
 }
 
 // The CHAT feed loop: three newest lines at HUDCHATTEXT, alpha folded from the
@@ -3519,7 +3572,8 @@ int main() {
 	test_compiler_chat_input(&font);
 	test_message_log_element(&font);
 	test_chat_feed_loop(&font);
-	test_message_clock_rebase(&font);
+	test_message_clock_restart_clears(&font);
+	test_process_words_carry(&font);
 	test_lfp_panel_element(&font);
 	test_spinmap_medic_marker(&font);
 	test_char_extent(&font);

@@ -112,6 +112,7 @@
 #include "hud/hud_entity_info.h"
 #include "hud/loading_background.h"
 #include "hud/hud_draw_list_stats.h"
+#include "hud/hud_process_words_carry.h"
 #include "hud/hud_overlay.h"
 #include "hud/map_view_state.h"
 #include "hud/map_view_window.h"
@@ -340,6 +341,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HudPos);
 	GDREGISTER_CLASS(VehicleHudBlock);
 	GDREGISTER_CLASS(HudDrawListStats);
+	GDREGISTER_CLASS(HudProcessWordsCarry);
 	GDREGISTER_CLASS(HudOverlay);
 	GDREGISTER_CLASS(MapViewState);
 	GDREGISTER_CLASS(MapViewWindow);

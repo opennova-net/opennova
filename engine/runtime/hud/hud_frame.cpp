@@ -165,20 +165,46 @@ void HudFrameCompiler::reset_overlay_buffers() {
 }
 
 void HudFrameCompiler::reset_runtime_state() {
-	stance_ = StanceFade{};
-	flash_key_bucket_ = 0;
-	flash_key_reserve_ = 0;
-	flash_key_class_ = 0;
+	// The mission start's HUD words: the fade stamps (the HUD init's overlay-buffer reset), the
+	// snapshot twin's seed and the rings (the start's chat clear). The process words
+	// (HudProcessWords) are no HUD init's: a carried set stands [orig: HUD_InitOverlaySystem
+	//  @0x5A4620 - the HUD_ResetAllOverlayBuffers call @0x5A4949, the g_HUDColors.active seed
+	//  @0x5A4977; Game_StartMission @0x524360 - the Chat_ClearAllChannels call @0x524A10].
+	stance_.stamp = 0;
 	flash_stamp_ = 0;
 	hud_colors_active_ = 0;
 	hud_colors_active_index_ = -1;
 	silhouette_stamp_ = 0;
-	silhouette_vehicle_ = 0;
-	silhouette_weapon_.clear();
-	feed_lines_.clear();
-	chat_lines_.clear();
-	chat_raw_lines_.clear();
+	clear_message_rings();
 	draw_list_ = HudDrawList{};
+}
+
+HudProcessWords HudFrameCompiler::process_words() const {
+	HudProcessWords words;
+	words.item_flash_timers = item_flash_.timers();
+	words.stance_prev = stance_.prev;
+	words.stance_cur = stance_.cur;
+	words.ammo_key_bucket = flash_key_bucket_;
+	words.ammo_key_reserve = flash_key_reserve_;
+	words.ammo_key_class = flash_key_class_;
+	words.waypoint_altitude_color = waypoint_altitude_color_;
+	words.waypoint_altitude_band = waypoint_altitude_band_;
+	words.silhouette_vehicle = silhouette_vehicle_;
+	words.silhouette_weapon = silhouette_weapon_;
+	return words;
+}
+
+void HudFrameCompiler::carry_process_words(const HudProcessWords &words) {
+	item_flash_.carry_timers(words.item_flash_timers);
+	stance_.prev = words.stance_prev;
+	stance_.cur = words.stance_cur;
+	flash_key_bucket_ = words.ammo_key_bucket;
+	flash_key_reserve_ = words.ammo_key_reserve;
+	flash_key_class_ = words.ammo_key_class;
+	waypoint_altitude_color_ = words.waypoint_altitude_color;
+	waypoint_altitude_band_ = words.waypoint_altitude_band;
+	silhouette_vehicle_ = words.silhouette_vehicle;
+	silhouette_weapon_ = words.silhouette_weapon;
 }
 
 void HudFrameCompiler::push_chat_line(const std::string &text, uint32_t argb,
@@ -310,9 +336,10 @@ int chat_wrap_text(const GameFont &font, float scale, std::string &text,
 	}
 }
 
-void HudFrameCompiler::rebase_message_clock(int delta) {
-	for (std::vector<HudMessageLine> *ring : {&feed_lines_, &chat_lines_, &chat_raw_lines_})
-		for (HudMessageLine &line : *ring) line.expire_tick += delta;
+void HudFrameCompiler::clear_message_rings() {
+	feed_lines_.clear();
+	chat_lines_.clear();
+	chat_raw_lines_.clear();
 }
 
 void HudFrameCompiler::push_message(const std::string &text, int now_ticks) {
@@ -1351,8 +1378,8 @@ void HudFrameCompiler::element_clip_indicator(const HudFrameState &state,
 	// The restamp key (D-HUD-5): any change of the def's ammo bucket, the
 	// HUD reserve or the LOW BYTE of the def's ammo-class id restamps; two
 	// defs agreeing on all three do not [orig: @0x599A90 `mov edi,[ecx+0DCh]`,
-	// @0x599A96 vs dword_2723D40, @0x599A9E the reserve vs dword_2723D44,
-	// @0x599AAC `cmp dl,[ecx+0D8h]` vs byte_2723D4C; the stores
+	// @0x599A96 vs g_HUDAmmoKeyBucket, @0x599A9E the reserve vs g_HUDAmmoKeyReserve,
+	// @0x599AAC `cmp dl,[ecx+0D8h]` vs g_HUDAmmoKeyClass; the stores
 	// @0x599AB4..0x599ACA]. HUD_BuildEntityInfo has already folded
 	// capacity-one ammo into the reserve, so a reload that keeps the displayed
 	// total never restamps [orig: @0x4B85EF].

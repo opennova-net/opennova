@@ -273,7 +273,14 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	s.vehicle_controls = mount && mount->has_item_def &&
 			(player->mount_type == SeatType::Controller || player->mount_type == SeatType::Driver);
 	if (s.vehicle_controls) {
-		s.vehicle_identity = mount->registry_spawn_id;
+		// The silhouette's key is the record's root entity, the mount's pool-slot pointer: the
+		// pools are allocated once per process, so a slot keeps its address across spawns and
+		// missions, and the key is the slot's handle here.
+		// [orig: HUD_BuildEntityInfo - the root entity +0x234 @0x4B8655;
+		//  HUD_DrawTargetEntityOverlay - g_HUDRootEntity @0x59A5E9, the key compare @0x59A5F7,
+		//  its store @0x59A604; EntityPool_Allocate @0x442130 (its one malloc, the call
+		//  @0x44214C), called once, by Game_Run (the call @0x4A7FC5)]
+		s.vehicle_identity = mount->handle.packed;
 		out.vehicle_texture = mount->hud_image;
 		s.gear = (player->net_stance_bits & 2) ? 0 : 2 - ((player->net_stance_bits & 1) != 0);
 		if (mount->item_unit_type == 3) {

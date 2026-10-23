@@ -30,6 +30,7 @@
 #include <runtime/renderer/texture_load_rules.h> // MaterialColorStage
 
 #include "hud/hud_map_pass_renderer.h"
+#include "hud/hud_process_words_carry.h"
 #include "resource_index/resource_root.h"
 
 #include <array>
@@ -373,13 +374,14 @@ public:
 	// / HudDeclutter::apply_level). The compiler holds the timers; its overlay
 	// pass counts them down on the logic tick set_frame_clocks carries.
 	void set_item_flash(int p_index, int p_value);
-	// The 16 timers as this overlay holds them, and the carry a new mission's overlay takes
-	// from the torn-down one's (GameHudPresenter): retail's timers are process words no mission
-	// start resets, the start zeroing their last tick alone (engine hud_declutter.h
-	// HudItemFlash::carry_timers carries the witness). The carry stores the timers only: no
-	// layer rebuild, no tick.
+	// The 16 timers as this overlay holds them.
 	PackedInt32Array get_item_flash_timers() const;
-	void carry_item_flash_timers(const PackedInt32Array &p_timers);
+	// The HUD's process words as this overlay holds them, and the carry a new mission's overlay
+	// takes from the torn-down one's (GameHudPresenter): retail's are process words no mission
+	// start resets (engine hud_frame.h HudProcessWords carries the witness). The carry stores the
+	// words only: no layer rebuild, no tick. A null carry stores none.
+	Ref<HudProcessWordsCarry> get_process_words() const;
+	void carry_process_words(const Ref<HudProcessWordsCarry> &p_words);
 	// The showhud 2-bit FP-view flags (engine: runtime/hud/hud_toggles.cpp): bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.
 	void set_showhud_flags(int p_flags);
