@@ -373,8 +373,9 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 // The create reads the player's character words, which the session settings' apply copies from
 // the profile ahead of it; the game's embedder projects the local profile before the create
 // (GameWorld::create_fresh_session, D-NET-NEW-L1-50) [orig: SinglePlayer_StartMission - the call
-//  @0x561C28; CNapiGameSession_CreateSession @0x4C97C0 - the profile words' reads
-//  @0x4C9960..0x4C9CCE, PlayerSession_InitFromProfile called @0x4C9CCE].
+//  @0x561C28; CNapiGameSession_CreateSession @0x4C97C0 - the class word's reads @0x4C995A
+//  (g_CharClassTeam1) / @0x4C9966 (g_CharClassTeam2) by g_SideRequirement, its store @0x4C9960 /
+//  @0x4C996C, PlayerSession_InitFromProfile called @0x4C9CCE].
 CreateSessionResult HostRole::create_session(const HostBringup &bringup) {
 	inmatch::HostConfig host_cfg = bringup.host_cfg;
 	// The session title's override table is the bring-up's mission text's (the mount's).
@@ -501,7 +502,10 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	//  CNapiGameSession_CreateSession @0x4C97C0 from CNapiGameSession_BuildAndCreateSession
 	//  @0x56997D (the PreMenu's MultiPlayer_JoinSessionStateMachine @0x56A46A), before
 	//  GameLoop_Init's Game_StartMission call @0x526377]
-	if (head_run) server_console_clear(ctx);
+	// A single player's restart (Game_StartMission(1)) is no first load, so its start runs the
+	// window's clear alone [orig: Game_StartMission - is_first_load into ebp @0x52540A, the
+	//  `jz loc_5254EB` @0x525425 past Chat_ClearAllChannels @0x52546D].
+	if (head_run && !kernel.restart_boot()) server_console_clear(ctx);
 	render_arm_pumps_owed_ = render_arm_deferred_ ? render_arm_pumps() : 0;
 	pump_load((head_run ? 0 : 1) + load_window_pumps() - render_arm_pumps_owed_ - window_pumps_run_);
 	mission_load_head_run_ = false;

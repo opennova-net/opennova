@@ -30,6 +30,8 @@
 //     clock, and a map change's reads the old round's; the menus' remote admin reads that
 //     clock and its SET GameTime writes it, so the next session's update reads the SET
 //     (D-NET-NEW-L1-54);
+//   - a first load's second chat clear past the stage pumps drops a line taken during the
+//     load; a single player's restart runs no second clear, so the line stands;
 //   - the reset's 0x25 to a kept remote leaves at the load pump its send countdown's
 //     residual names (the head for 1), ahead of the 0x7B, or with the 0x7B at the first
 //     tick once the residual passes the load's pumps (holdoff 12, residual 11), and an
@@ -55,6 +57,7 @@
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/remote_admin.h> // RemoteAdminConsoles (the menus console)
+#include <runtime/inmatch/server_console.h> // server_console_add (a line during the load)
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/session.h>
@@ -238,6 +241,10 @@ struct Host {
 	inmatch::ClientProcessState *process = nullptr;
 	uint32_t round_minutes = 0;
 	int32_t clock_at_update = -2;
+	// A single player's restart boot (Game_StartMission(1)), and a CHAT line the context's console
+	// takes past the window's clear, ahead of the stage pumps and the bring-up.
+	bool restart = false;
+	std::string line_after_window;
 
 	inmatch::NapiNPServerCtx &ctx() { return role.state.host_owner.ctx; }
 
@@ -262,6 +269,11 @@ struct Host {
 		r.host_cfg.client_process = process;
 		r.host_cfg.config.round_time_limit_minutes = round_minutes;
 		r.next_mission = next_mission;
+		r.boot_options.restart = restart;
+		r.before_terrain = [this](mission::MissionKernel &) {
+			if (!line_after_window.empty())
+				inmatch::server_console_add(ctx(), line_after_window, 0xFFFFFFFFu);
+		};
 		r.boot_options.playable = false;
 		r.boot_options.mp_session = true;
 		r.boot_options.terrain = false;
@@ -745,6 +757,34 @@ void test_the_round_clock_outlives_its_session() {
 	}
 }
 
+// A first load clears the chat rings twice: at the window's open and again past the stage pumps,
+// so a line the console took while the map loaded is gone at the bring-up. A single player's
+// restart (Game_StartMission(1)) is no first load: its start runs the window's clear alone, and
+// that line stands (D-NET-116, V-ROLL-BF R0-1).
+// [orig: Game_StartMission @0x524360 - is_first_load = !is_restart @0x5243A6, Chat_ClearAllChannels
+//  @0x524A10; is_first_load into ebp @0x52540A, the `jz loc_5254EB` @0x525425 past
+//  Chat_ClearAllChannels @0x52546D]
+bool console_holds(const inmatch::NapiNPServerCtx &ctx, const std::string &text) {
+	for (const inmatch::ServerConsoleLine &line : ctx.console_chat)
+		if (line.text == text) return true;
+	return false;
+}
+
+void test_a_restart_keeps_the_lines_its_load_took() {
+	for (const bool restart : {false, true}) {
+		auto host = std::make_unique<Host>();
+		host->restart = restart;
+		host->line_after_window = "said during the load";
+		host->role.set_socket(&host->socket);
+		host->role.set_rotation(&host->rotation);
+		inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
+		CHECK(host->boot_current(/*next_mission=*/false));
+		CHECK(host->kernel->restart_boot() == restart);
+		CHECK(console_holds(host->ctx(), "said during the load") == restart);
+		(void)host->session.close();
+	}
+}
+
 // The menus' remote admin runs over the same round clock (D-NET-NEW-L1-54): with no session
 // bound, GET GAMESETTINGS' GameTime reads the clock the last session's close handed back, and a
 // SET GameTime writes it, so the next session's first mission-start update reads 3720 x the
@@ -804,6 +844,7 @@ int main() {
 	test_handlers_drop_under_the_load_gate();
 	test_fresh_load_pumps_its_session();
 	test_the_round_clock_outlives_its_session();
+	test_a_restart_keeps_the_lines_its_load_took();
 	test_a_menus_game_time_reaches_the_next_session();
 	test_map_change_load_pumps_after_the_slot_reset();
 	test_map_change_reset_leaves_at_the_residual_pump();

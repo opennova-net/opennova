@@ -154,7 +154,9 @@ struct ClientProcessState {
 	// [orig: g_RoundTimeRemaining @0x24C1958 (zero-initialized); its writers Game_StartMission
 	//  @0x524A5D (-1) and @0x525251 (3720 x the limit), Game_ProcessMainFrame's step @0x526602,
 	//  Server_CheckWinConditions @0x51B064 (0), CAdminServer_HandleSetCommand's GameTime @0x405E86,
-	//  NapiNPClientMsg_0x00A @0x430220 / @0x430235 and NapiNPClientMsg_0x01F @0x427CD8 / @0x427CE7;
+	//  a joiner's NapiNPClientMsg_0x00A @0x430220 / @0x430235, and NapiNPClientMsg_0x01F
+	//  @0x427CD8 / @0x427CE7, whose body runs on the authority alone (@0x427CB7) and which no
+	//  stock peer sends;
 	//  Lobby_UpdateServerInfo's read @0x4FED57, called @0x5248F5 ahead of @0x524A5D]
 	int32_t round_time_remaining_ticks = 0;
 	// ctx+0xD94, the client callback's disconnect latch (mission_exit.h ProcessDisconnectLatch):
