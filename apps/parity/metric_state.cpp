@@ -562,7 +562,9 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 		return false;
 	};
 	// The Health word holds between sends, so the window opens on the value the last frame
-	// before it carried: the sets start from that frame (frame.health_open).
+	// before it carried: the sets start from that frame (frame.health_open). A 0 there ahead
+	// of a living first window frame is an earlier life's (a respawn at the open), not this
+	// window's death, so it opens nothing.
 	static_assert(has_normalization("frame.health_open"));
 	auto opened = [](const RunFacts &run, std::vector<const F *> frames) {
 		const F *open = nullptr;
@@ -570,7 +572,9 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 			if (state.decoded && state.ts_ns < run.info.steady_start_ns &&
 					(open == nullptr || state.ts_ns >= open->ts_ns))
 				open = &state;
-		if (open != nullptr)
+		const bool earlier_life = open != nullptr && open->health == 0 && !frames.empty() &&
+				frames.front()->health != 0;
+		if (open != nullptr && !earlier_life)
 			frames.insert(frames.begin(), open);
 		return frames;
 	};

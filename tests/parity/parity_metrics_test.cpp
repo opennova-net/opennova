@@ -3098,6 +3098,20 @@ void test_frame_draws() {
 		expect_row(judge_case(opened(1, 150, 150, 36), opened(2, 150, 150, 8),
 						   opened(3, 75, 75, 75), "OR"),
 				'S', "frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
+		// A 0 before a living window is an earlier life's (a respawn at the open): it opens
+		// nothing, so a run that never dies inside the window fails against a straight death
+		// inside it ({150} against {150, 0}, where the prepended 0 would have read {0, 150}).
+		auto reborn = [](uint32_t seed) {
+			wire::ParityTrace trace = scripted(seed);
+			for (wire::ParityFrameState &f : trace.frames)
+				f.health = f.ts_ns < kSteadyStart ? 0 : 150;
+			return trace;
+		};
+		expect_row(judge_case(opened(1, 150, 150, 0), opened(2, 150, 150, 0), reborn(3), "OR"),
+				'S', "frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
+		// Both sides reborn at the open, neither dying inside the window: {150} on both.
+		expect_row(judge_case(reborn(1), reborn(2), reborn(3), "OR"), 'S', "frame_health", "",
+				"pass");
 	}
 	{
 		// x6's hostkill: the +0x168 countdown (weapon[1]) from `top` and the +0x170 one

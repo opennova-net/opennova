@@ -677,7 +677,10 @@ inline constexpr Normalization kNormalizations[] = {
 			"opened before the staging; push 208's OR took the same 75 0.58 s after its "
 			"staging, with the window opening 0.42 s after it (the setup's at-rest wait), so "
 			"its first in-window frame already carried 75, its window read {75, 0} with 75 as "
-			"full, and the straight death took the hit out of both sets" },
+			"full, and the straight death took the hit out of both sets. An opening frame that "
+			"reads 0 ahead of a living first window frame is an earlier life's (a respawn at "
+			"the open) and opens nothing, so a run that never dies inside the window keeps no "
+			"dead value from before it" },
 	{ "frame.weapon_countdown", MaskKind::Field, 'S', 0x00A, "weapon[1..4]", 0,
 			"the weapon block rides one frame in four (NetPacket_WritePlayerState @0x4FF6B0, "
 			"the phase test @0x4FF81B) and its slot bytes +0x168, +0x170, +0x16C and +0x164 "
