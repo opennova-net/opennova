@@ -730,8 +730,26 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
     }
 }
 
+bool weapon_fsm_fire_request_taken(const WeaponFsmDef &def, const WeaponSlotState &slot) {
+    // [orig: WeaponSlot_RequestFire @0x53EFA0; the declaration carries the returns]
+    switch (slot.current) {
+        case weapon_action::kIdle:
+            return true; // @0x53EFE5
+        case weapon_action::kEmptyIdle:
+            return !def.auto_fire; // the semi leg's state 1 @0x53F020..0x53F028; auto @0x53F013
+        case weapon_action::kFire:
+        case weapon_action::kRecoil:
+        case weapon_action::kScopeUp:
+        case weapon_action::kScopeDown:
+            return def.auto_fire; // @0x53F005 / @0x53EFE5
+        default:
+            return false;
+    }
+}
+
 bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot) {
     // [orig: WeaponSlot_RequestFire @ 0x53efa0]
+    const bool taken = weapon_fsm_fire_request_taken(def, slot);
     if (def.auto_fire) {
         switch (slot.current) {
             case weapon_action::kIdle:
@@ -739,30 +757,28 @@ bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot) {
             case weapon_action::kScopeUp:
             case weapon_action::kScopeDown:
                 slot.next = weapon_action::kFire;
-                return true;
+                break;
             case weapon_action::kEmptyIdle:
                 slot.next = weapon_action::kEmpty;
-                return false;
+                break;
             case weapon_action::kFire:
                 // A fire request landing mid-FIRE re-queues itself as a deferred
                 // event: the loop self-sustains, one dispatch a tick, while the
                 // trigger stays down, until a state that accepts the dispatch
                 // consumes it (RECOIL banks the shot); a release drops it at the
-                // next dispatch (the fire record's live binding test). [orig:
-                // @ 0x53effd Input_QueueDeferredEvent; the dispatch's binding test
-                // @0x4E07D9]
+                // next dispatch (the fire record's live binding test). The call
+                // still returns 1. [orig: @ 0x53effd Input_QueueDeferredEvent, the
+                // return @0x53F005; the dispatch's binding test @0x4E07D9]
                 slot.refire_queued = true;
-                return false;
+                break;
             default:
-                return false;
+                break;
         }
+        return taken;
     }
-    if (slot.current == weapon_action::kIdle) {
-        slot.next = weapon_action::kFire;
-        return true;
-    }
-    if (slot.current == weapon_action::kEmptyIdle) slot.next = weapon_action::kEmpty;
-    return false;
+    if (slot.current == weapon_action::kIdle) slot.next = weapon_action::kFire;
+    else if (slot.current == weapon_action::kEmptyIdle) slot.next = weapon_action::kEmpty;
+    return taken;
 }
 
 void weapon_fsm_request_reload(WeaponSlotState &slot) {
@@ -933,8 +949,12 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
     //  @0x4E07D9)]
     if (in.reload_pressed) weapon_fsm_request_reload(slot);
     slot.refire_queued = false; // the last tick's re-queue is the caller's queue's
+    // The dry click reads the request's return: an automatic def's mid-FIRE deferral returns
+    // 1 too, so its next action becomes the click over the shot's RECOIL.
+    // [orig: Input_HandleActionBinding_0 - the return's test @0x4E0A0E, nextAction = 5
+    //  @0x4E0A1E; WeaponSlot_RequestFire @0x53F005]
     if (in.fire_pressed && weapon_fsm_request_fire(def, slot) && in.fire_dry)
-        slot.next = weapon_action::kEmpty; // [orig: @0x4E0A1E]
+        slot.next = weapon_action::kEmpty;
 
     // --- the pump tail [orig: WeaponAction_ProcessFrame @ 0x541262..0x5414ac] -----
 

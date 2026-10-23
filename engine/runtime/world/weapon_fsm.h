@@ -501,8 +501,17 @@ bool weapon_fsm_can_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
 // [orig: WeaponSlot_RequestFire @ 0x53efa0] AUTO (Flags&0x100): current {0,3,9,10} ->
 // next=FIRE, {1} -> next=EMPTY, {2} -> re-queues the deferred fire event (the
 // refire_queued latch [orig: @ 0x53effd]); SEMI: {0} -> FIRE, {1} -> EMPTY. Returns
-// true when a fire was queued.
+// the call's return (weapon_fsm_fire_request_taken).
 bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot);
+// WeaponSlot_RequestFire's return for the slot as it stands, which its callers read (case
+// 0x95's dry click and fire face): 1 for an automatic def in IDLE, RECOIL, SCOPEUP or SCOPEDOWN
+// (FIRE queued) and in FIRE (the deferral), and for a semi def in IDLE (FIRE queued) and in
+// EMPTYIDLE (EMPTY queued: the state's own 1 left in eax); 0 otherwise, an automatic def's
+// EMPTYIDLE (EMPTY queued) included. It reads the def's automatic flag and the current
+// action alone.
+// [orig: WeaponSlot_RequestFire @0x53EFA0 - mov eax, 1 @0x53EFE5 / @0x53F005, the state in
+//  eax @0x53F020..0x53F028, xor eax, eax @0x53F013]
+bool weapon_fsm_fire_request_taken(const WeaponFsmDef &def, const WeaponSlotState &slot);
 // [orig: WeaponSlot_RequestReload @ 0x53f110] next {0,1,11} and no reload pending
 // (phase sign bit) -> next = RELOAD.
 void weapon_fsm_request_reload(WeaponSlotState &slot);

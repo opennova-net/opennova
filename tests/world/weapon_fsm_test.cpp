@@ -568,6 +568,73 @@ void test_tap_during_fire_drops_at_dispatch() {
     CHECK(s.current == wa::kIdle);
 }
 
+// WeaponSlot_RequestFire's return, which case 0x95's legs read: an automatic def takes the
+// request in IDLE / RECOIL / SCOPEUP / SCOPEDOWN (FIRE queued) and mid-FIRE (the deferral),
+// refuses it in EMPTYIDLE (EMPTY queued); a semi def takes it in IDLE and in EMPTYIDLE (EMPTY
+// queued, the state's 1 left in eax). [orig: WeaponSlot_RequestFire @0x53EFA0 - FIRE queued
+//  @0x53EFDE..0x53EFEB, the deferral @0x53EFFD..0x53F005, the auto EMPTYIDLE @0x53F00C..0x53F013,
+//  the semi EMPTYIDLE @0x53F020..0x53F028]
+void test_request_fire_return() {
+    const WeaponFsmDef auto_def = make_ak_def();
+    WeaponFsmDef semi_def = make_ak_def();
+    semi_def.auto_fire = false;
+    struct Row {
+        const WeaponFsmDef *def;
+        int32_t current;
+        bool taken;
+        int32_t next;
+        bool deferred;
+    };
+    const Row rows[] = {
+        {&auto_def, wa::kIdle, true, wa::kFire, false},
+        {&auto_def, wa::kRecoil, true, wa::kFire, false},
+        {&auto_def, wa::kScopeUp, true, wa::kFire, false},
+        {&auto_def, wa::kScopeDown, true, wa::kFire, false},
+        {&auto_def, wa::kFire, true, wa::kReload, true},
+        {&auto_def, wa::kEmptyIdle, false, wa::kEmpty, false},
+        {&auto_def, wa::kReload, false, wa::kReload, false},
+        {&semi_def, wa::kIdle, true, wa::kFire, false},
+        {&semi_def, wa::kEmptyIdle, true, wa::kEmpty, false},
+        {&semi_def, wa::kRecoil, false, wa::kReload, false},
+        {&semi_def, wa::kFire, false, wa::kReload, false},
+    };
+    for (const Row &row : rows) {
+        WeaponSlotState s = make_ak_slot();
+        s.current = row.current;
+        s.next = wa::kReload; // a stand-in the call leaves where it writes no next action
+        CHECK(weapon_fsm_fire_request_taken(*row.def, s) == row.taken);
+        CHECK(weapon_fsm_request_fire(*row.def, s) == row.taken);
+        CHECK(s.next == row.next);
+        CHECK(s.refire_queued == row.deferred);
+    }
+}
+
+// The dry click reads the request's return: an OnlyFireLocked press with no lock landing
+// mid-FIRE on an automatic def is taken (the deferral), so the click replaces the shot's
+// RECOIL. [orig: Input_HandleActionBinding_0 @0x4E0420 - the return's test @0x4E0A0E,
+//  nextAction = 5 @0x4E0A1E; WeaponSlot_RequestFire @0x53F005]
+void test_dry_click_reads_the_mid_fire_return() {
+    WeaponFsmDef def = make_ak_def();
+    WeaponSlotState s = make_ak_slot();
+    WeaponFsmInputs in;
+    WeaponFsmEvents ev;
+    in.fire_pressed = true;
+    game_tick(def, s, in, ev); // the shot on FIRE's entry tick
+    CHECK(ev.fired && s.current == wa::kFire && s.next == wa::kRecoil);
+    in.fire_pressed = false;
+    game_tick(def, s, in, ev);
+    CHECK(s.current == wa::kFire);
+    in.fire_pressed = true; // the dry press, mid-FIRE
+    in.fire_dry = true;
+    game_tick(def, s, in, ev);
+    CHECK(s.next == wa::kEmpty);
+    CHECK(s.refire_queued);
+    in.fire_pressed = false;
+    in.fire_dry = false;
+    for (int t = 0; t < 20 && s.current == wa::kFire; ++t) game_tick(def, s, in, ev);
+    CHECK(s.current == wa::kEmpty); // the click, not the RECOIL
+}
+
 void test_auto_reload_from_recoil() {
     WeaponFsmDef def = make_ak_def();
     WeaponSlotState s = make_ak_slot();
@@ -1685,6 +1752,8 @@ int main() {
     test_empty_clip_paths();
     test_empty_clip_held_auto_reload();
     test_tap_during_fire_drops_at_dispatch();
+    test_request_fire_return();
+    test_dry_click_reads_the_mid_fire_return();
     test_auto_reload_from_recoil();
     test_reload_scope_stash();
     test_reload_request_gate();
