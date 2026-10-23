@@ -75,6 +75,26 @@ func test_the_water_mask_is_made_with_the_terrains_textures() -> void:
 				"the terrain's textures, the freeze, then the HUD's: %s" % [names])
 
 
+# Retail's load draws no world frame: its presents draw the loading screen alone (engine
+# hud/loading_screen.h carries the witness). The effect warm's one forced frame is the
+# device's pipeline warm, and no second frame follows it (D-NET-NEW-L3-47).
+func test_the_effect_warm_forces_one_frame() -> void:
+	var root_dir := _staged(WorldFixture.stage_minimal_root("warm_one_frame"))
+	assert_gt(WorldFixture.stage_effects(root_dir).size(), 0, "a catalog to warm")
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir), OK)
+	var timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(timeline)
+	if timeline != null:
+		var names := Array(timeline.span_names())
+		assert_true(names.has("effect_spawn") and names.has("forced_draw_1"),
+				"the warm spawns the catalog and forces its frame: %s" % [names])
+		assert_false(names.has("forced_draw_2"), "no second forced frame: %s" % [names])
+		assert_true(names.find("force_sync") > names.find("forced_draw_1"),
+				"the drain follows the one frame: %s" % [names])
+	world.unload()
+
+
 # The object detail (game.cfg's object_polydetail; engine renderer/object_lod.h):
 # the shell's options word reaches the frames only through the copy each
 # mission start takes, so a change made mid-mission waits for the next one.
@@ -1895,7 +1915,7 @@ func test_a_dedicated_host_loads_no_effect_system() -> void:
 # Neither builds a listed model at the freeze (D-NET-NEW-L3-25, D-NET-NEW-L3-31).
 func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 	var warm_legs := ["effects_warm", "effect_spawn", "present_pipelines",
-			"forced_draw_1", "forced_draw_2", "force_sync", "warm_reset"]
+			"forced_draw_1", "force_sync", "warm_reset"]
 	for serve_and_play in [true, false]:
 		var world := WorldFixture.make_world(self)
 		await get_tree().process_frame

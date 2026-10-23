@@ -222,7 +222,7 @@ func test_a_serve_only_hosts_map_change_runs_the_reduced_arm() -> void:
 				and names.find("hud_textures") > freeze,
 				"the HUD's init and textures legs run on the reduced arm: %s" % [names])
 		for leg in ["effects_warm", "effect_spawn", "model_warm", "present_pipelines",
-				"forced_draw_1", "forced_draw_2", "force_sync", "warm_reset"]:
+				"forced_draw_1", "force_sync", "warm_reset"]:
 			assert_false(names.has(leg),
 					"no %s at a Serve Only host's map change: %s" % [leg, names])
 	world.unload()

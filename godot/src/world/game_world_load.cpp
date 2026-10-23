@@ -1536,12 +1536,16 @@ void GameWorld::build_minimap_water_mask() {
 
 // The load-time effect warm pass: spawn every catalog effect in front of the
 // load camera, advance the fixed tick so fresh emitters actually emit,
-// force-draw two frames SYNCHRONOUSLY so every new material/pipeline draws
+// force-draw one frame SYNCHRONOUSLY so every new material/pipeline draws
 // once (no coroutine — the load path stays callable without await), then
 // clear the warm spawns exactly like the sim-restart path (reset +
 // re-register the persistent item effects). Returns the count. The mission
 // start's models build nothing here: the freeze ahead of it resolved their
-// materials alone (load_mission_internal, D-NET-NEW-L3-31).
+// materials alone (load_mission_internal, D-NET-NEW-L3-31). Retail's load draws
+// no world frame at all, its presents the loading screen alone (engine
+// hud/loading_screen.h carries the witness): the one forced frame is the
+// device's pipeline warm, and a second compiled nothing in either load LP
+// read while its GPU work held the next present (D-NET-NEW-L3-47).
 int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTimeline> &p_timeline) {
 	// The legs as nested spans of the caller's timeline (an instrument).
 	const auto leg = [&p_timeline](const char *p_name) {
@@ -1614,16 +1618,8 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		leg("forced_draw_1");
 		rs->force_draw(true);
 		leg_end();
-		leg("forced_draw_2");
-		if (effect_world != nullptr) {
-			effect_world->advance_simulation_tick(Simulation::tick_dt(),
-					get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
-			effect_world->render_now(get_frame_clock_ms());
-		}
-		rs->force_draw(true);
-		leg_end();
 		// The reset below cancels any unserviced compositor warm request. Drain
-		// the forced draws first so threaded renderers cannot race that cancel.
+		// the forced draw first so threaded renderers cannot race that cancel.
 		leg("force_sync");
 		rs->force_sync();
 		leg_end();
