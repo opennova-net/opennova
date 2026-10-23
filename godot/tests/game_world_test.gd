@@ -577,7 +577,9 @@ func test_an_unload_restarts_the_frame_clock() -> void:
 	world.unload()
 	assert_eq(world.take_frame_elapsed_seconds(), 0.0,
 			"the first sample after an unload only stamps the clock")
-	OS.delay_msec(30)
+	# The clock moves in the system timer's steps (15.6 ms where the timer is coarse): a
+	# 30 ms stall can cross a single step (16 ms), a 50 ms stall crosses three or four.
+	OS.delay_msec(50)
 	assert_gte(world.take_frame_elapsed_seconds(), 0.030, "the clock runs again")
 
 

@@ -1176,11 +1176,11 @@ func test_an_out_of_view_haze_still_runs_the_distortion_row() -> void:
 			"the row runs for any class-7 emitter, in view or not")
 
 
-# The water mirror's reflected scene keeps the main view's viewport for the
-# render submit's view test (retail Render_MainScene rebuilds g_MainViewport
-# from the main eye ahead of Water_RenderReflectedWorldScene, which builds
-# none): an emitter the main eye sees submits to the mirror's passes even
-# while the mirror's own eye faces away from it.
+# Each water mirror's reflected scene culls by the mirror's own eye: retail
+# Render_MainScene rebuilds g_MainViewport from the mirrored camera block over
+# the RTT's square rect, at the pass's horizontal fov, ahead of
+# Water_RenderReflectedWorldScene, which builds none (D-NET-NEW-L3-36 follow-up
+# 3). So an emitter only the main eye sees never submits to the mirror's passes.
 func test_each_mirror_culls_by_its_own_eye_over_a_square() -> void:
 	# A mirror's reflected scene builds no viewport of its own: its passes submit against the
 	# mirror eye Render_MainScene rebuilt last (the mirrored block, the RTT's square rect, the
