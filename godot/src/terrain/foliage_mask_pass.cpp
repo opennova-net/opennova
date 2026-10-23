@@ -597,6 +597,19 @@ FoliageMaskCompositorEffect::~FoliageMaskCompositorEffect() = default;
 
 void FoliageMaskCompositorEffect::_bind_methods() {}
 
+void FoliageMaskCompositorEffect::create_device() {
+	if (!shutdown_requested_.load(std::memory_order_acquire)) {
+		call_device_create(callable_mp(this,
+				&FoliageMaskCompositorEffect::create_device_on_render_thread));
+	}
+}
+
+void FoliageMaskCompositorEffect::create_device_on_render_thread() {
+	if (!shutdown_requested_.load(std::memory_order_acquire)) {
+		impl_->initialize();
+	}
+}
+
 void FoliageMaskCompositorEffect::publish(
 		const std::shared_ptr<const FoliageMaskFrame> &p_frame) {
 	if (shutdown_requested_.load(std::memory_order_acquire)) {
@@ -684,6 +697,13 @@ FoliageMaskPass::~FoliageMaskPass() {
 	effect_.unref();
 	installed_into_.unref();
 	target_texture_.unref();
+}
+
+void FoliageMaskPass::create_device() {
+	if (effect_.is_null()) {
+		effect_.instantiate();
+	}
+	effect_->create_device();
 }
 
 void FoliageMaskPass::_install(Node *p_scope) {

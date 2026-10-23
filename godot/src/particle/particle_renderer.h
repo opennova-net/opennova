@@ -61,6 +61,7 @@ private:
 
 	void _invalidate_catalog();
 	void _restore_device_state();
+	void _create_ribbon_device_on_render_thread();
 
 protected:
 	static void _bind_methods();
@@ -130,6 +131,14 @@ public:
 	// Registers that device with a FrameFx node. The world does this every
 	// frame through EffectWorld; previews and tests bind it once.
 	void attach_distortion_row(Node *p_frame_fx);
+	// The particle materials' device objects as the effect system's atlases build: every
+	// particle pass's compositor (each view's pair and the distortion subset) creates its
+	// shaders ahead of its first render callback (ParticleCompositorEffect::create_device).
+	void create_particle_devices();
+	// The tracer pool's materials at the mission textures stage: the distortion ribbon
+	// device and each view's overlay stage, whose NVG laser draws the pool's laser material
+	// (EffectDistortionDrawer::create_device, SceneOverlayCompositorEffect::create_device).
+	void create_tracer_pool_devices();
 
 	// Compiles the latest fixed-tick scene snapshot for both render domains and
 	// publishes an immutable World copy across the render-thread boundary.

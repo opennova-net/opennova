@@ -60,6 +60,10 @@ public:
 	EnvironmentCubeBlit(const EnvironmentCubeBlit &) = delete;
 	EnvironmentCubeBlit &operator=(const EnvironmentCubeBlit &) = delete;
 
+	// Render thread: the shader, the cubemap with its layer framebuffers and
+	// the pipeline on p_rd, ahead of the first publish (whose own creates then
+	// find them); a refusal latches as a publish's does.
+	void create_device(RenderingDevice *p_rd);
 	void set_request(const Request &p_request);
 	// Render thread: resolves the request's device textures, lazily creates
 	// the shader, pipeline, cube and per-layer framebuffers, and draws the six

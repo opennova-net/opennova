@@ -16,6 +16,14 @@
 //  (the calls @0x5B00F2 / @0x5B0106), HLSLEffect_LoadFromDirectory (@0x5B0118 / @0x5B0132),
 //  HLSLEffect_LoadAllFromPFFArchive per archive (@0x5B014E); Material_ResolveEffectSubobjectsAndShader
 //  @0x5B1870 - HLSLEffect_FindByName (the call @0x5B18C1)]
+// Each effect loads with every technique it declares, its GLOW and PROJSHAD passes with its NORMAL
+// one, so the passes the glow source (q3_frame.h) and the slot captures (render_slot_shadow.h)
+// draw are loaded with the set too: a backend that draws those passes on its own device creates
+// their shaders at the renderer's start as well, never at a frame's first glow source or first
+// capture (D-NET-NEW-LF-13).
+// [orig: HLSLEffect_LoadFromFile @0x5AE690 - D3DXCreateEffect (the call @0x5AE7F7) compiles the
+//  whole effect; each technique's pass by its "ttype" annotation (HLSLEffect_ParsePassData
+//  @0x5AE120), kept per type by the switch @0x5AEB41]
 
 #include <runtime/renderer/material_classify.h>
 

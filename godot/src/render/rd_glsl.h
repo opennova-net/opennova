@@ -7,6 +7,9 @@
 #include <godot_cpp/classes/rd_shader_source.hpp>
 #include <godot_cpp/classes/rd_shader_spirv.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/variant/callable.hpp>
+#include <godot_cpp/variant/callable_method_pointer.hpp>
 
 #include "util/string_convert.h"
 
@@ -103,6 +106,17 @@ inline const char *const kGlslSampleEffectStage = R"GLSL(vec4 rd_sample_effect_s
 	return 0.5 * (textureLod(tex, tex_uv - offset, lod) +
 			textureLod(tex, tex_uv + offset, lod));
 })GLSL";
+
+// Runs p_create on the render thread when the server has a RenderingDevice: a compositor's
+// device objects (its shaders, samplers and fixed targets) created where the renderer creates its
+// matching effect, the renderer's start or a mission load's stage, ahead of the compositor's first
+// render callback (its callback's own create then finds them). A renderer without one (headless,
+// Compatibility) creates nothing here, as its callbacks create nothing.
+inline void call_device_create(const Callable &p_create) {
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (server != nullptr && server->get_rendering_device() != nullptr)
+		server->call_on_render_thread(p_create);
+}
 
 // The SPIR-V of each vertex + fragment pair compile_rd_spirv compiled, by the pair's text, held
 // as plain bytes (no Godot object in static storage outlives the engine): the compositors that

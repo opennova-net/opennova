@@ -251,6 +251,14 @@ bool EnvironmentCubeBlit::draw_layer(RenderingDevice *rd, int layer,
 	return true;
 }
 
+void EnvironmentCubeBlit::create_device(RenderingDevice *p_rd) {
+	if (p_rd == nullptr || device_failed_.load(std::memory_order_acquire))
+		return;
+	rd_ = p_rd;
+	if (!ensure_shader(p_rd) || !ensure_cube(p_rd) || !ensure_pipeline(p_rd))
+		device_failed_.store(true, std::memory_order_release);
+}
+
 void EnvironmentCubeBlit::publish() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	RenderingDevice *rd = rs != nullptr ? rs->get_rendering_device() : nullptr;

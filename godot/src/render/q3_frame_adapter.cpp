@@ -1444,6 +1444,10 @@ bool Q3FrameAdapter::draw_view(RenderingDevice *p_rd, RenderData *p_render_data,
 			p_framebuffer, r_draw_calls);
 }
 
+bool Q3FrameAdapter::create_device(RenderingDevice *p_rd) {
+	return impl_ && impl_->initialize(p_rd);
+}
+
 void Q3FrameAdapter::release_device(RenderingDevice *p_rd) {
 	if (impl_)
 		impl_->release_device(p_rd);

@@ -46,6 +46,20 @@ enum class TracerShader : std::uint8_t {
 	Distortion = 3,
 };
 
+// Whether a mission start creates the tracer pool's three materials (the smoke pair's, the NVG
+// laser's and the distortion pass's): the mission textures stage's full arm does, past the view
+// effects' and ahead of FrameFX's; a dedicated host's reduced arm creates none. A device backend
+// creates the distortion ribbons' objects there, and the overlay stages that draw the NVG laser
+// theirs, ahead of the first frame that draws them (D-NET-NEW-LF-13).
+// [orig: Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the full arm's call
+//  @0x587240 (ViewFx_InitShadersAndTextures @0x587217 ahead of it, CFrameFX_CreatePixelShaders
+//  @0x587261 past it), none on the reduced arm @0x58727A..0x58728C; CEffectEmitterPool_CreateShaders
+//  @0x5DC8F0 - pool+0x3008 (GfxShader_Create2TexDesc, the call @0x5DCA39, the store @0x5DCA43),
+//  pool+0x300C (CGfxShader_CreateFromChannelDesc, the call @0x5DCABA, the store @0x5DCAC4)]
+constexpr bool creates_tracer_pool_shaders(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
+
 // One style row [orig: the 0x830-B style block].
 struct TracerStyleView {
 	const std::uint32_t *colors = nullptr; // +0x18 ARGB ramp, count +0x10

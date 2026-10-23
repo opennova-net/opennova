@@ -1665,6 +1665,16 @@ bool ParticleCompositorEffect::draw_distortion_set(const FrameFxDistortionTarget
 	return impl_->draw_distortion(*submission, p_target, r_draws);
 }
 
+void ParticleCompositorEffect::create_device() {
+	if (impl_ && !impl_->shutdown_requested.load(std::memory_order_acquire))
+		call_device_create(callable_mp(this, &ParticleCompositorEffect::create_device_on_render_thread));
+}
+
+void ParticleCompositorEffect::create_device_on_render_thread() {
+	if (impl_ && impl_->initialize_rd())
+		impl_->ensure_scene_snapshot_shader();
+}
+
 void ParticleCompositorEffect::publish(
 		const std::shared_ptr<const ParticleWorldSubmission> &p_submission) {
 	if (impl_ && !impl_->shutdown_requested.load(std::memory_order_acquire))

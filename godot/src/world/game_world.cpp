@@ -131,6 +131,13 @@ void GameWorld::_ready() {
 	dispatcher_ = nodes.foliage;
 	sun_shadow_ = nodes.sun_shadow;
 	slot_shadow_ = nodes.slot_shadow;
+	// The effect set's GLOW and PROJSHAD passes load with it as the renderer starts: FrameFX's Q3
+	// glow source and the slot captures create their device shaders here, ahead of any mission
+	// (engine renderer/object_shader_template.h carries the witness, D-NET-NEW-LF-13).
+	if (!Engine::get_singleton()->is_editor_hint()) {
+		if (framefx_ != nullptr) framefx_->create_glow_source_device();
+		if (slot_shadow_ != nullptr) slot_shadow_->create_capture_device();
+	}
 	// The occlusion frame's retained render nodes exist from here on; its
 	// per-mission members arrive with each load.
 	occlusion_->setup(terrain_, dispatcher_, sky_dome_, celestial_, water_, env_);

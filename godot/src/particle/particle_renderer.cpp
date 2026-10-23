@@ -56,6 +56,7 @@
 #include "particle/particle_first_person_batch.h"
 #include "particle/particle_material_cache.h"
 #include "render/frame_fx.h"
+#include "render/rd_glsl.h" // call_device_create
 #include "render/scene_overlay_compositor.h"
 #include "render/world_environment_lookup.h"
 #include "util/string_convert.h"
@@ -1282,6 +1283,29 @@ std::shared_ptr<EffectDistortionDrawer> ParticleRenderer::distortion_drawer() co
 void ParticleRenderer::attach_distortion_row(Node *p_frame_fx) {
 	if (FrameFx *frame_fx = Object::cast_to<FrameFx>(p_frame_fx))
 		frame_fx->set_distortion_drawer(distortion_drawer());
+}
+
+void ParticleRenderer::create_particle_devices() {
+	if (shutdown_ || !impl_)
+		return;
+	impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
+		effect->create_device();
+	});
+}
+
+void ParticleRenderer::create_tracer_pool_devices() {
+	if (shutdown_ || !impl_)
+		return;
+	call_device_create(callable_mp(this, &ParticleRenderer::_create_ribbon_device_on_render_thread));
+	impl_->for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
+		overlay->create_device();
+	});
+}
+
+void ParticleRenderer::_create_ribbon_device_on_render_thread() {
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (!shutdown_ && impl_ && server != nullptr)
+		impl_->distortion_drawer->create_device(server->get_rendering_device());
 }
 
 void ParticleRenderer::publish_scene_overlay(

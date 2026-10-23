@@ -19,6 +19,9 @@
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/placement_traits.h> // builds_placement_draws (the dedicated host's placement)
 #include <runtime/terrain/terrain_load_legs.h> // the dedicated arm's terrain legs
+#include <runtime/renderer/environment_cube.h> // creates_environment_cube (the render subsystems)
+#include <runtime/renderer/frame_fx_effects.h> // creates_view_effect_shaders (the mission textures)
+#include <runtime/renderer/tracer_frame.h> // creates_tracer_pool_shaders (the mission textures)
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -468,9 +471,10 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->span("hud_textures");
 	emit_signal(kSignalHudTexturesLoad, !dedicated_host);
 	timeline->end_span();
-	// FrameFX's mission texture past the HUD's: the full arm's "ffscan" scanlines, none on a
-	// dedicated host's reduced arm (engine renderer/frame_fx_effects.h
-	// builds_frame_fx_scanline_texture carries the witness, D-NET-NEW-L3-35).
+	// The view effects', the tracer pool's and FrameFX's device objects past the HUD's textures,
+	// FrameFX's "ffscan" scanlines with its pixel shaders: the full arm's, none on a dedicated
+	// host's reduced arm (load_frame_fx_textures carries the witnesses, D-NET-NEW-L3-35,
+	// D-NET-NEW-LF-13).
 	load_frame_fx_textures(timeline, dedicated_host);
 	if (!dedicated_host) {
 		// The render arm's device inits past the freeze: the effect catalog and the presenters'
@@ -1259,6 +1263,13 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 	// freeze and the HUD's textures (engine mission/mission_load_plan.h carries the witness,
 	// D-NET-NEW-L3-37).
 	build_minimap_water_mask();
+	// The render subsystems' environment cube, ahead of the tile cache's page targets: its device
+	// objects create here, ahead of the first capture, on the full arm alone (engine
+	// renderer/environment_cube.h creates_environment_cube carries the witness, D-NET-NEW-LF-13).
+	if (environment_cube_ != nullptr &&
+			opennova::renderer::creates_environment_cube(p_dedicated_host)) {
+		environment_cube_->create_cube_device();
+	}
 	terrain_->build(opennova::terrain::builds_lod_cache(p_dedicated_host),
 			opennova::terrain::builds_tile_cache_targets(p_dedicated_host));
 	if (opennova::terrain::loads_foliage_definitions(p_dedicated_host)) configure_foliage();
@@ -1274,11 +1285,22 @@ void GameWorld::load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedica
 	p_timeline->end_span();
 }
 
-// The mission textures stage's FrameFX texture: the full arm's scanlines, a dedicated host's
-// reduced arm none (engine renderer/frame_fx_effects.h builds_frame_fx_scanline_texture,
-// D-NET-NEW-L3-35).
+// The mission textures stage's view effects, tracer pool and FrameFX, past the HUD's textures and
+// in that order, on the full arm alone: the NVG view's device objects, the tracer pool's
+// materials' (the distortion ribbons' and the overlay stages', whose NVG laser draws the pool's
+// laser material), then FrameFX's pixel shaders and its scanline texture (engine
+// renderer/frame_fx_effects.h creates_view_effect_shaders, creates_frame_fx_pixel_shaders and
+// builds_frame_fx_scanline_texture, renderer/tracer_frame.h creates_tracer_pool_shaders;
+// D-NET-NEW-L3-35, D-NET-NEW-LF-13).
 void GameWorld::load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host) {
 	p_timeline->span("frame_fx_textures");
+	if (framefx_ != nullptr && opennova::renderer::creates_view_effect_shaders(p_dedicated_host)) {
+		framefx_->init_view_effects();
+	}
+	EffectWorld *effect_world = get_effect_world();
+	if (effect_world != nullptr && opennova::renderer::creates_tracer_pool_shaders(p_dedicated_host)) {
+		effect_world->create_tracer_pool_devices();
+	}
 	scene_.init_frame_fx_mission_textures(p_dedicated_host);
 	p_timeline->end_span();
 }
@@ -1291,6 +1313,10 @@ void GameWorld::configure_foliage() {
 	if (dispatcher_ == nullptr || terrain_data_.is_null()) {
 		return;
 	}
+	// The definitions' load creates the foliage's vertex shaders first: the MODEL masks' device
+	// shader here (engine terrain/terrain_load_legs.h loads_foliage_definitions carries the
+	// witness, D-NET-NEW-LF-13).
+	dispatcher_->create_mask_device();
 	const Array diagnostics = scene_.configure_foliage(resource_root_, terrain_data_);
 	for (int64_t i = 0; i < diagnostics.size(); ++i) {
 		const Dictionary diagnostic = diagnostics[i];

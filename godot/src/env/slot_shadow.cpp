@@ -369,6 +369,11 @@ bool SlotShadow::is_capture_effect_installed() const {
 	return false;
 }
 
+void SlotShadow::create_capture_device() {
+	if (!shutdown_ && effect_.is_valid())
+		effect_->create_device();
+}
+
 void SlotShadow::_ensure_captures() {
 	if (shutdown_ || !is_inside_tree()) {
 		return;

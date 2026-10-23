@@ -263,6 +263,10 @@ public:
 	void republish_globals() { mask_pass_.republish_globals(); }
 	static void publish_absent() { FoliageMaskPass::publish_absent(); }
 	static int64_t get_global_writes() { return FoliageMaskPass::get_global_writes(); }
+	// The MODEL masks' device shader, created with the foliage's vertex shaders as the
+	// foliage's definitions load (engine terrain/terrain_load_legs.h loads_foliage_definitions
+	// carries the witness, D-NET-NEW-LF-13).
+	void create_mask_device() { mask_pass_.create_device(); }
 
 protected:
   static void _bind_methods();

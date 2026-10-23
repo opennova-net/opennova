@@ -83,6 +83,9 @@ public:
 
 	SlotShadow();
 
+	// The renderer's start: the captures' device shader, as the effect set's PROJSHAD passes
+	// load (engine renderer/object_shader_template.h carries the witness, D-NET-NEW-LF-13).
+	void create_capture_device();
 	void set_environment_node(MissionEnvironment *p_environment);
 	// The terrain the anchor march probes (engine: runtime/renderer/render_slot_shadow.h); without it the anchor
 	// stays at the entity (the march's step-0 exit on a ground-standing

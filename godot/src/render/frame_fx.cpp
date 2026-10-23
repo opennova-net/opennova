@@ -684,6 +684,12 @@ public:
 		rd = server != nullptr ? server->get_rendering_device() : nullptr;
 		q3_adapter.release_device(rd);
 		nvg_view.release(rd);
+		release_frame_fx();
+	}
+
+	// FrameFX's own device objects. The Q3 glow source's and the NVG view's are their own
+	// creates (the renderer's start's, the view effects'), which FrameFX's create keeps.
+	void release_frame_fx() {
 		release_targets();
 		release_scanlines();
 		for (auto &entry : pipelines)
@@ -769,7 +775,7 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 	if (rd != nullptr && shader.is_valid() && sampler.is_valid() &&
 			repeat_sampler.is_valid())
 		return true;
-	release_all();
+	release_frame_fx();
 	RenderingServer *server = RenderingServer::get_singleton();
 	rd = server != nullptr ? server->get_rendering_device() : nullptr;
 	if (rd == nullptr) {
@@ -1767,6 +1773,44 @@ void FrameFxCompositorEffect::_bind_methods() {
 			&FrameFxCompositorEffect::get_backend_report);
 }
 
+void FrameFxCompositorEffect::create_glow_source_device() {
+	if (impl_ && !impl_->shutdown_requested.load(std::memory_order_acquire))
+		call_device_create(callable_mp(this,
+				&FrameFxCompositorEffect::create_glow_source_device_on_render_thread));
+}
+
+void FrameFxCompositorEffect::create_view_effects_device() {
+	if (impl_ && !impl_->shutdown_requested.load(std::memory_order_acquire))
+		call_device_create(callable_mp(this,
+				&FrameFxCompositorEffect::create_view_effects_device_on_render_thread));
+}
+
+void FrameFxCompositorEffect::create_frame_fx_device() {
+	if (impl_ && !impl_->shutdown_requested.load(std::memory_order_acquire))
+		call_device_create(callable_mp(this,
+				&FrameFxCompositorEffect::create_frame_fx_device_on_render_thread));
+}
+
+void FrameFxCompositorEffect::create_glow_source_device_on_render_thread() {
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (impl_ && !impl_->shutdown_requested.load(std::memory_order_acquire) && server != nullptr)
+		impl_->q3_adapter.create_device(server->get_rendering_device());
+}
+
+void FrameFxCompositorEffect::create_view_effects_device_on_render_thread() {
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (!impl_ || impl_->shutdown_requested.load(std::memory_order_acquire) || server == nullptr)
+		return;
+	// A refused create is the lens draw's to report: its own create runs again there.
+	std::string failure;
+	impl_->nvg_view.create_device(server->get_rendering_device(), failure);
+}
+
+void FrameFxCompositorEffect::create_frame_fx_device_on_render_thread() {
+	if (impl_ && impl_->initialize_rd())
+		impl_->ensure_decode_compute();
+}
+
 void FrameFxCompositorEffect::compile_q3_frame(Node *p_scope,
 		Viewport *p_viewport, Camera3D *p_camera) {
 	if (impl_ && !impl_->shutdown_requested.load(std::memory_order_acquire))
@@ -2106,6 +2150,21 @@ void FrameFx::advance_screen_effects() {
 	if (frame->plan.nvg.sighted)
 		frame->nvg_sights = nvg_sights_;
 	terminal_effect_->publish_screen_effects(frame);
+}
+
+void FrameFx::create_glow_source_device() {
+	if (!shutdown_ && terminal_effect_.is_valid())
+		terminal_effect_->create_glow_source_device();
+}
+
+void FrameFx::init_view_effects() {
+	if (!shutdown_ && terminal_effect_.is_valid())
+		terminal_effect_->create_view_effects_device();
+}
+
+void FrameFx::create_pixel_shaders() {
+	if (!shutdown_ && terminal_effect_.is_valid())
+		terminal_effect_->create_frame_fx_device();
 }
 
 void FrameFx::init_mission_textures() {

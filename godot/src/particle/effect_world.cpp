@@ -478,7 +478,13 @@ int EffectWorld::warm_all_effects(const Vector3 &p_position) {
 }
 
 void EffectWorld::build_texture_atlases() {
-	_ensure_renderer()->build_catalog();
+	ParticleRenderer *renderer = _ensure_renderer();
+	renderer->build_catalog();
+	renderer->create_particle_devices();
+}
+
+void EffectWorld::create_tracer_pool_devices() {
+	_ensure_renderer()->create_tracer_pool_devices();
 }
 
 int64_t EffectWorld::render_now(int64_t p_time_ms) {

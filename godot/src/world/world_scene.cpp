@@ -7,7 +7,7 @@
 #include <formats/env/env.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
-#include <runtime/renderer/frame_fx_effects.h> // builds_frame_fx_scanline_texture
+#include <runtime/renderer/frame_fx_effects.h> // creates_frame_fx_pixel_shaders, builds_frame_fx_scanline_texture
 
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
@@ -294,11 +294,17 @@ void WorldScene::load_sky_maps(bool p_dedicated_host) const {
 	}
 }
 
-// The texels draw from the render CRT stream (engine renderer/frame_fx_effects.h
-// builds_frame_fx_scanline_texture carries the witness).
+// FrameFX's pixel shaders, then the scanline texture, whose texels draw from the render CRT stream
+// (engine renderer/frame_fx_effects.h creates_frame_fx_pixel_shaders and
+// builds_frame_fx_scanline_texture carry the witness).
 void WorldScene::init_frame_fx_mission_textures(bool p_dedicated_host) const {
-	if (nodes_.framefx != nullptr &&
-			opennova::renderer::builds_frame_fx_scanline_texture(p_dedicated_host)) {
+	if (nodes_.framefx == nullptr) {
+		return;
+	}
+	if (opennova::renderer::creates_frame_fx_pixel_shaders(p_dedicated_host)) {
+		nodes_.framefx->create_pixel_shaders();
+	}
+	if (opennova::renderer::builds_frame_fx_scanline_texture(p_dedicated_host)) {
 		nodes_.framefx->init_mission_textures();
 	}
 }

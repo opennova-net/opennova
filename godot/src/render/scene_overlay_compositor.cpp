@@ -828,6 +828,17 @@ void SceneOverlayCompositorEffect::set_view_kind(ViewKind p_kind) {
 	impl_->view_kind.store(p_kind, std::memory_order_release);
 }
 
+void SceneOverlayCompositorEffect::create_device() {
+	if (!impl_->shutdown_requested.load(std::memory_order_acquire))
+		call_device_create(callable_mp(this,
+				&SceneOverlayCompositorEffect::create_device_on_render_thread));
+}
+
+void SceneOverlayCompositorEffect::create_device_on_render_thread() {
+	if (!impl_->shutdown_requested.load(std::memory_order_acquire))
+		impl_->initialize_rd();
+}
+
 void SceneOverlayCompositorEffect::publish(
 		const std::shared_ptr<const SceneOverlaySubmission> &p_submission) {
 	if (impl_->shutdown_requested.load(std::memory_order_acquire))

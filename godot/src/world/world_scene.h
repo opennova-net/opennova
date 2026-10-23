@@ -127,9 +127,9 @@ public:
 	// The loaded environment's sky maps at the mission textures stage: the full arm's, none on a
 	// dedicated host's reduced arm (EnvFile::load_mission_sky_maps, D-NET-NEW-L3-34).
 	void load_sky_maps(bool p_dedicated_host) const;
-	// FrameFX's mission texture (the "ffscan" scanlines, FrameFx::init_mission_textures) at the
-	// mission textures stage: the full arm's, none on a dedicated host's reduced arm
-	// (D-NET-NEW-L3-35).
+	// FrameFX's pixel shaders (FrameFx::create_pixel_shaders) and its mission texture (the
+	// "ffscan" scanlines, FrameFx::init_mission_textures) at the mission textures stage: the full
+	// arm's, none on a dedicated host's reduced arm (D-NET-NEW-L3-35, D-NET-NEW-LF-13).
 	void init_frame_fx_mission_textures(bool p_dedicated_host) const;
 	// The mission header's attrib-gated overrides over the loaded environment
 	// (null clears them) and the water's own rung for the header's height.

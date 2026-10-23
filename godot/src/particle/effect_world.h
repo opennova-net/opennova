@@ -181,8 +181,15 @@ public:
 	// frame's file decoded into its page: the mission start's effect system
 	// builds them once at its init, ahead of the load window and the terrain, so
 	// the load's first draw builds none (engine renderer/particle_atlas.h carries
-	// the witness, D-NET-NEW-L3-26).
+	// the witness, D-NET-NEW-L3-26). The particle materials create as the pages build, so
+	// every particle pass's device shaders create with them (ParticleRenderer::
+	// create_particle_devices; the same header carries the witness, D-NET-NEW-LF-13).
 	void build_texture_atlases();
+	// The tracer pool's materials at the mission textures stage: the distortion ribbons' and
+	// the overlay stages' device objects (ParticleRenderer::create_tracer_pool_devices;
+	// engine renderer/tracer_frame.h creates_tracer_pool_shaders carries the witness,
+	// D-NET-NEW-LF-13).
+	void create_tracer_pool_devices();
 	// The renderer's full draw-list diagnostics (world + first-person lists,
 	// backends, atlas pages/entries) for the F3 Particles page — the one
 	// Dictionary report this facade keeps (the allowlisted transport edge).

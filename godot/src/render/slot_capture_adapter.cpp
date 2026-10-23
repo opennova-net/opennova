@@ -1160,6 +1160,10 @@ bool SlotCaptureAdapter::draw(RenderingDevice *p_rd) {
 	return impl_->draw(*frame);
 }
 
+bool SlotCaptureAdapter::create_device(RenderingDevice *p_rd) {
+	return impl_ && impl_->initialize(p_rd);
+}
+
 void SlotCaptureAdapter::release_device(RenderingDevice *p_rd) {
 	if (impl_)
 		impl_->release_device(p_rd);
@@ -1187,6 +1191,18 @@ SlotCaptureCompositorEffect::~SlotCaptureCompositorEffect() = default;
 void SlotCaptureCompositorEffect::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&SlotCaptureCompositorEffect::get_backend_report);
+}
+
+void SlotCaptureCompositorEffect::create_device() {
+	if (!is_shutdown())
+		call_device_create(callable_mp(this,
+				&SlotCaptureCompositorEffect::create_device_on_render_thread));
+}
+
+void SlotCaptureCompositorEffect::create_device_on_render_thread() {
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (!is_shutdown() && server != nullptr)
+		adapter_->create_device(server->get_rendering_device());
 }
 
 void SlotCaptureCompositorEffect::release_device_resources() {

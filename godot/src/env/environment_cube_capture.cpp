@@ -356,9 +356,27 @@ void EnvironmentCubeCapture::publish_absent() {
 	_write_global(rs, "opennova_environment_cube", Variant());
 }
 
+void EnvironmentCubeCapture::create_cube_device() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (!is_inside_tree() || !is_selected_renderer(rs)) {
+		return;
+	}
+	if (!blit_) {
+		blit_ = std::make_unique<EnvironmentCubeBlit>();
+	}
+	rs->call_on_render_thread(callable_mp(this, &EnvironmentCubeCapture::_create_on_render_thread));
+}
+
 void EnvironmentCubeCapture::_publish_on_render_thread() {
 	if (blit_) {
 		blit_->publish();
+	}
+}
+
+void EnvironmentCubeCapture::_create_on_render_thread() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (blit_ && rs != nullptr) {
+		blit_->create_device(rs->get_rendering_device());
 	}
 }
 

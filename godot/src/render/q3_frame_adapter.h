@@ -44,6 +44,9 @@ public:
 	bool draw_view(RenderingDevice *p_rd, RenderData *p_render_data,
 			std::uint32_t p_view, const RID &p_framebuffer,
 			std::size_t &r_draw_calls);
+	// Render thread: the shader, sampler, fallback texture and vertex format on
+	// p_rd, ahead of the first draw (draw_view's own create then finds them).
+	bool create_device(RenderingDevice *p_rd);
 	// Free resources only through the caller's known-live device. A null device
 	// discards cached handles without dereferencing the adapter's old raw pointer.
 	void release_device(RenderingDevice *p_rd);

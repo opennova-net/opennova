@@ -111,6 +111,11 @@ public:
 	~SceneOverlayCompositorEffect() override;
 
 	void set_view_kind(ViewKind p_kind);
+	// The stage's device objects (its shader, samplers, white texture and vertex format), created
+	// at the mission textures stage with the tracer pool's materials, its NVG laser's among them
+	// (ParticleRenderer::create_tracer_pool_devices), queued on the render thread (rd_glsl.h
+	// call_device_create). The callback's own create then finds them.
+	void create_device();
 	void publish(const std::shared_ptr<const SceneOverlaySubmission> &p_submission);
 	void clear_submission();
 	// Release RenderingDevice objects only while the owner knows the server
@@ -128,6 +133,8 @@ protected:
 private:
 	class Impl;
 	std::unique_ptr<Impl> impl_;
+
+	void create_device_on_render_thread();
 };
 
 } // namespace godot
