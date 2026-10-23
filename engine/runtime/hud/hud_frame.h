@@ -1129,9 +1129,6 @@ struct HudFrameState {
 	std::array<bool, kDeclutterSlotCount> declutter_visible =
 			declutter_all_visible();
 	int hud_detail_level = 0;
-	// The HUD item flash timers (hud_declutter.h HudItemFlash) the blinking
-	// items read this frame.
-	std::array<int32_t, HudItemFlash::kCount> item_flash{};
 	// The showhud 2-bit FP-view flags [orig: g_FpWeaponViewFlags — cycle
 	// (flags + 1) & 3 @ 0x4E0561]: bit 0 gates the FP gun/viewmodel draw
 	// (consumed device-side where the viewmodel submits), bit 1 gates the
@@ -1314,10 +1311,20 @@ public:
 	// (memset @0x59dd4e), the radar blip table unk_2721F40 + the edge timers
 	// dword_2721EEC/EF0 (@0x59dd5e..0x59dd6a) and the radar tick
 	// dword_2723EAC (@0x59dd83) are the local player's radar state, reset by
-	// the round init (world::radar_reset); the layer visibility call
-	// @0x59dd75, dword_2723EA8 (@0x59dd7d) and the target-overlay stamp
-	// dword_2723D58 (@0x59dd95) have none here.
+	// the round init (world::radar_reset); the item flash timers' last tick
+	// g_HUDItemFlashLastTick (@0x59dd7d) is item_flash_'s (HudItemFlash::reset_last_tick);
+	// the layer visibility call @0x59dd75 is the embedder's (its declutter table)
+	// and the target-overlay stamp dword_2723D58 (@0x59dd95) has none here.
 	void reset_overlay_buffers();
+
+	// The 16 HUD item flash timers (hud_declutter.h HudItemFlash) BMS action 28 sub 37
+	// arms: the compiler owns them because the gameplay overlay pass ticks them at its head,
+	// past the round-over, white-flash and level-3 returns (compile_overlay_pass), and its
+	// blinking items, the big map's and the map windows' legs read them as they stand.
+	// The store: the timer only; the embedder rebuilds its declutter table at level 0
+	// [orig: RenderState_SetLayerVisibilityByIndex @0x5A3020 - the store @0x5A302A].
+	void set_item_flash(int index, int32_t value) { item_flash_.set(index, value); }
+	const HudItemFlash &item_flash() const { return item_flash_; }
 
 	// The HUD-owned gates the radar legs ride, as bits the embedder hands the
 	// session's per-frame radar step (inmatch/session.h; world::radar_hud_frame):
@@ -1650,6 +1657,9 @@ private:
 	// @0x5A8070 - the round-over and white-flash returns @0x5A8084 / @0x5A8098, the level-3
 	// return @0x5A80C4, the store @0x5A810C; the cycle @0x49AFE0 / @0x49AFE7].
 	bool hud_palette2_refreshed_ = false;
+	// The item flash timers and their last tick (set_item_flash): BSS-zero, never
+	// cleared; only the overlay-buffer reset zeroes the last tick.
+	HudItemFlash item_flash_;
 	int silhouette_stamp_ = 0;
 	uint64_t silhouette_vehicle_ = 0;
 	std::string silhouette_weapon_;

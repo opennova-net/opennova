@@ -358,6 +358,31 @@ func test_crosshair_requires_active_weapon() -> void:
 		"An armed hip stance emits the five tapered regions (14 triangles).")
 
 
+# BMS action 28 sub 37's item flash rebuilds the layer table at level 0 and
+# keeps the stored hud_detail level; the round init's overlay-buffer reset
+# rebuilds it at the stored level again [orig: RenderState_SetLayerVisibilityByIndex
+# @0x5A3020 -> CRenderState_SetLayerVisibility(0) @0x5A3031; HUD_ResetAllOverlayBuffers
+# @0x59DD40 - g_HUDDetailLevel @0x59DD6F, the CRenderState_SetLayerVisibility call
+# @0x59DD75].
+func test_the_overlay_buffer_reset_rebuilds_the_layer_table_at_the_stored_level() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+		"HUDDECLUT_XHAIRS 0 1 0 0",
+	]), PackedStringArray(["cross01.tga"]), {
+		"cross01.tga": Vector2i(8, 8),
+	})
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
+	hud.set_hud_detail_level(1)
+	assert_eq(hud.get_draw_list_stats().tris, 14, "level 1 shows the crosshair row")
+	hud.set_item_flash(3, 0x40)
+	assert_eq(hud.get_draw_list_stats().tris, 0, "the flash rebuilds the table at level 0")
+	assert_eq(hud.get_hud_detail_level(), 1, "and keeps the stored level")
+	hud.reset_overlay_buffers()
+	assert_eq(hud.get_draw_list_stats().tris, 14, "the reset rebuilds it at the stored level")
+
+
 # install_weapon is set_weapon over a PlayerHudWeaponDef's slice (the
 # presenter's weapon change), and clear_weapon for none: the clip graphic and
 # one round icon per round in the clip draw at the HUDCLIP anchor.

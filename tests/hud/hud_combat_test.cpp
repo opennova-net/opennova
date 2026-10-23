@@ -118,11 +118,11 @@ static void geometry_and_draw() {
 			return q.filled && near(q.x0, 20) && near(q.x1, 24) && near(q.y1 - q.y0, 200);
 		});
 	};
-	s.item_flash[0] = 0x20;
+	compiler.set_item_flash(0, 0x20);
 	CHECK(!agl_bar(compiler.compile(s, 1024, 768)));
-	s.item_flash[0] = 0x30;
+	compiler.set_item_flash(0, 0x30);
 	CHECK(agl_bar(compiler.compile(s, 1024, 768)));
-	s.item_flash[0] = 0;
+	compiler.set_item_flash(0, 0);
 }
 
 static void mortar_map_and_world_cues() {

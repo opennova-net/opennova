@@ -137,22 +137,31 @@ private:
 
 // The 16 HUD item flash timers BMS action 28 sub 37 arms (timer index =
 // param1, value = param2): each nonzero timer drops by the logic-tick delta
-// between HUD frames, clamped at 0, and the items it drives blink on its bit
-// 0x10. Retail leaves the index unchecked; an index outside 0..15 lands on
-// the neighbouring HUD globals and is not modeled (the write is dropped).
-// [orig: the timers dword_2723CF8..dword_2723D34; the write
+// since the last tick that ran, clamped at 0, and the items it drives blink on
+// its bit 0x10. The tick runs only inside the gameplay overlay pass, past its
+// head returns (HudFrameCompiler owns the timers and ticks them there), so the
+// first pass after a gated stretch takes the whole stretch at once, a timer
+// armed inside it included. Retail leaves the index unchecked; an index outside
+// 0..15 lands on the neighbouring HUD globals and is not modeled (the write is
+// dropped).
+// [orig: the timers g_HUDItemFlashTimers @ 0x2723CF8 (16 words); the write
 //  RenderState_SetLayerVisibilityByIndex @ 0x5A3020 (@ 0x5A302A); the tick
-//  HUD_TickItemFlashTimers @ 0x59A9E0, called per HUD frame with the current tick from
-//  HUD_RenderAllOverlays @ 0x5A80FB]
+//  HUD_TickItemFlashTimers @ 0x59A9E0, whose one caller is HUD_RenderAllOverlays (the
+//  call @ 0x5A80FB, past the head returns @ 0x5A8084..0x5A80DB)]
 class HudItemFlash {
 public:
 	static constexpr int kCount = 16;
 
 	void set(int index, int32_t value);
 	// [orig: HUD_TickItemFlashTimers @ 0x59A9E0 — the same tick returns @ 0x59A9EC; the
-	//  delta @ 0x59A9F0; each nonzero timer minus the delta, 0 when the delta
-	//  reaches it @ 0x59AA06..0x59AA10]
+	//  delta @ 0x59A9F0 against the last tick that ran, g_HUDItemFlashLastTick (stored @ 0x59A9F2);
+	//  each nonzero timer minus the delta, 0 when the delta reaches it @ 0x59AA06..0x59AA10]
 	void tick(int32_t now);
+	// The overlay-buffer reset zeroes that last tick and leaves the timers: the next
+	// tick's delta is the whole clock, so a round init lapses every timer at or under it.
+	// [orig: HUD_ResetAllOverlayBuffers @ 0x59DD40 - `mov g_HUDItemFlashLastTick, esi` @ 0x59DD7D;
+	//  called from Game_InitNewRound @ 0x4227A7 and HUD_InitOverlaySystem @ 0x5A4949]
+	void reset_last_tick() { last_tick_ = 0; }
 	int32_t timer(int index) const {
 		return index >= 0 && index < kCount ? timers_[static_cast<std::size_t>(index)] : 0;
 	}

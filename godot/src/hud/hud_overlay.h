@@ -365,8 +365,8 @@ public:
 	int get_hud_detail_level() const;
 	// BMS action 28 sub 37: HUD item flash timer `index` takes `value` and the
 	// layer table rebuilds at declutter level 0 (hud_declutter.h HudItemFlash
-	// / HudDeclutter::apply_level). The timers count down on the logic tick
-	// set_frame_clocks carries.
+	// / HudDeclutter::apply_level). The compiler holds the timers; its overlay
+	// pass counts them down on the logic tick set_frame_clocks carries.
 	void set_item_flash(int p_index, int p_value);
 	// The showhud 2-bit FP-view flags (engine: runtime/hud/hud_toggles.cpp): bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.
@@ -550,7 +550,6 @@ private:
 	// witness map); apply_declutter_() restamps the compiler input's
 	// visibility table after any mask or level change.
 	opennova::hud::HudDeclutter declutter_;
-	opennova::hud::HudItemFlash item_flash_;
 	Ref<ResourceRoot> root_;
 	std::array<Ref<Texture2D>, kTextureSlots> textures_;
 	// The colour map the last set_minimap_terrain installed, which a terrain

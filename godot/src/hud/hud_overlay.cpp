@@ -913,6 +913,12 @@ void HudOverlay::clear_weapon() {
 
 void HudOverlay::reset_overlay_buffers() {
     compiler_.reset_overlay_buffers();
+	// The reset rebuilds the layer table at the stored hud_detail level, so an item
+	// flash's level-0 side path ends at the round init [orig: HUD_ResetAllOverlayBuffers
+	// @0x59DD40 - g_HUDDetailLevel @0x59DD6F, the CRenderState_SetLayerVisibility call
+	// @0x59DD75].
+	declutter_.apply_level(declutter_.level());
+	apply_declutter_();
     queue_redraw();
 }
 
@@ -986,10 +992,8 @@ void HudOverlay::set_frame_clocks(int64_t p_logic_tick, int64_t p_main_frame,
 	state_.main_frame = main_frame;
 	state_.session_frame = static_cast<uint32_t>(p_session_frame);
 	state_.hud_frame = static_cast<uint32_t>(p_hud_frame);
-	// The HUD item flash countdown runs once per HUD frame on the logic
-	// tick (hud_declutter.h HudItemFlash::tick).
-	item_flash_.tick(state_.ticks);
-	state_.item_flash = item_flash_.timers();
+	// The HUD item flash countdown is the overlay pass's own, at its head past the
+	// early-outs (HudFrameCompiler::compile_overlay_pass ticks it on state_.ticks).
 	queue_redraw();
 }
 
@@ -1523,10 +1527,10 @@ int HudOverlay::get_hud_detail_level() const {
 }
 
 void HudOverlay::set_item_flash(int p_index, int p_value) {
-	// The timer store, then the level-0 layer rebuild that leaves the stored
-	// level alone (hud_declutter.h HudItemFlash::set / apply_level).
-	item_flash_.set(p_index, p_value);
-	state_.item_flash = item_flash_.timers();
+	// The timer store (the compiler owns the timers: its pass ticks them), then the
+	// level-0 layer rebuild that leaves the stored level alone (hud_declutter.h
+	// HudItemFlash::set / HudDeclutter::apply_level).
+	compiler_.set_item_flash(p_index, p_value);
 	declutter_.apply_level(0);
 	state_.declutter_visible = declutter_.visible();
 	queue_redraw();

@@ -157,6 +157,8 @@ void HudFrameCompiler::reset_overlay_buffers() {
     stance_.stamp = 0;
     flash_stamp_ = 0;
 	silhouette_stamp_ = 0;
+	// [orig: HUD_ResetAllOverlayBuffers @0x59DD40 - `mov g_HUDItemFlashLastTick, esi` @0x59DD7D]
+	item_flash_.reset_last_tick();
     draw_list_ = HudDrawList{};
 }
 
@@ -575,9 +577,13 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 // Render_ProcessMainSceneFrame @0x5cac50 -> HUD_BuildMapOverlayView @0x5a7e10].
 void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float surface_w,
 		float surface_h) {
-	// The pass refreshes palette entry 2 from the hudpos text colour past its early-outs (the
-	// caller's overlay_pass_runs and level test), ahead of the /NOHUD gate
-	// (hud_palette2_refreshed_ carries the witness).
+	// Past its early-outs (the caller's overlay_pass_runs and level test) the pass first ticks
+	// the item flash timers on the logic tick, so a gated stretch's ticks land on the next
+	// pass whole (HudItemFlash) [orig: HUD_RenderAllOverlays @0x5A8070 - g_CurrentTick
+	// @0x5A80F3, the HUD_TickItemFlashTimers call @0x5A80FB]. It then refreshes palette
+	// entry 2 from the hudpos text colour, ahead of the /NOHUD gate (hud_palette2_refreshed_
+	// carries the witness).
+	item_flash_.tick(state.ticks);
 	hud_palette2_refreshed_ = true;
 	if ((state.overlay_master & 2u) == 0u) {
 		element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
@@ -838,7 +844,7 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	input.ticks = state.ticks;
 	input.hud_frame = state.hud_frame;
 	input.session_frame = state.session_frame;
-	input.item_flash = state.item_flash;
+	input.item_flash = item_flash_.timers();
 	input.waypoint_present = state.waypoint.present;
 	input.waypoint_x = state.waypoint.world_x;
 	input.waypoint_y = state.waypoint.world_y;
@@ -946,8 +952,8 @@ namespace {
 
 // The same frame-state feed the spinmap element reads, copy-assigned into the
 // persistent input (the markers vector keeps its capacity).
-void map_window_input(const HudFrameState &state, float surface_w, float surface_h,
-		HudMinimapInput &input) {
+void map_window_input(const HudFrameState &state, const HudItemFlash &item_flash,
+		float surface_w, float surface_h, HudMinimapInput &input) {
 	input = state.minimap;
 	input.footprints = &state.map_footprints;
 	input.surface_w = surface_w;
@@ -958,7 +964,7 @@ void map_window_input(const HudFrameState &state, float surface_w, float surface
 	// The windowed passes run the same legs as the big map (the CMAP mask is
 	// the big-map mask), so they read the same non-bank feed, flash timers,
 	// FARP target and colours.
-	input.item_flash = state.item_flash;
+	input.item_flash = item_flash.timers();
 	input.farp_present = state.combat.farp_present;
 	input.farp_x = state.combat.farp_x_q16;
 	input.farp_y = state.combat.farp_y_q16;
@@ -973,7 +979,7 @@ const HudFrameCompiler::MapWindowDraw &HudFrameCompiler::compile_death_map(
 	// The zone letters and score lines lay out in the bold label slot like the
 	// other map labels [orig: MapOverlay_DrawView — HUD_DrawTextCentered_HalfBright(
 	// g_HUDLabelFontBold) @0x5a5c59/@0x5a5cbf/@0x5a5d14].
-	map_window_input(state, surface_w, surface_h, map_window_input_);
+	map_window_input(state, item_flash_, surface_w, surface_h, map_window_input_);
 	map_window_input_.hudpos_text_color = layout_.hud_text;
 	map_window_input_.overlay_color = active_color(state);
 	death_map_draw_.glyphs.clear();
@@ -1025,7 +1031,7 @@ const HudDrawList &HudFrameCompiler::compile_console_messages(const HudFrameStat
 const HudFrameCompiler::MapWindowDraw &HudFrameCompiler::compile_command_map(
 		const HudFrameState &state, CommandMapView &cmap, const MapViewRect &rect,
 		int32_t scaled_800, const DeathMapFacts &facts, float surface_w, float surface_h) {
-	map_window_input(state, surface_w, surface_h, map_window_input_);
+	map_window_input(state, item_flash_, surface_w, surface_h, map_window_input_);
 	map_window_input_.hudpos_text_color = layout_.hud_text;
 	map_window_input_.overlay_color = active_color(state);
 	command_map_draw_.glyphs.clear();

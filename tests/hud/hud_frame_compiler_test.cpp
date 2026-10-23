@@ -956,13 +956,13 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	// line: an armed timer in its dark phase skips it, the lit phase (bit
 	// 0x10) draws it. [orig: HUD_DrawMapOverlay @0x5a785b..0x5a7866]
 	{
-		HudFrameState flash_state = state;
-		flash_state.item_flash[5] = 0x20;
-		CHECK(compiler.compile(flash_state, 1024.0f, 768.0f).map.lines.empty(),
+		compiler.set_item_flash(5, 0x20);
+		CHECK(compiler.compile(state, 1024.0f, 768.0f).map.lines.empty(),
 				"a dark flash phase hides the waypoint state line");
-		flash_state.item_flash[5] = 0x30;
-		CHECK(compiler.compile(flash_state, 1024.0f, 768.0f).map.lines.size() == 1,
+		compiler.set_item_flash(5, 0x30);
+		CHECK(compiler.compile(state, 1024.0f, 768.0f).map.lines.size() == 1,
 				"the lit flash phase draws the waypoint state line");
+		compiler.set_item_flash(5, 0);
 	}
 	// The M-cycle big map: mode 3 compiles the fullscreen north-up pass —
 	// grid rules and water appear, the compass ring does not (mask 0xAF937 has
