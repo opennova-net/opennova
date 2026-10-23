@@ -1836,7 +1836,11 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 						rt.state().health_updates_applied;
 			}
 		}
-		spawn_and_arm_local_player();
+		{
+			// L's birth on the stats board (an instrument).
+			devtools::ProfileScope birth(world.profile, devtools::Slot::SIM_CLIENT_LOCAL_BIRTH);
+			spawn_and_arm_local_player();
+		}
 		rebuild_local_from_full_spawn();
 		fold_local_record();
 		apply_world_state_load();

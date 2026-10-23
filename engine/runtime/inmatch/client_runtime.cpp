@@ -1714,6 +1714,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the
 	//  0x4C timer @0x42C23E and the send block @0x42C3DD]
 	if (after_receive != nullptr && *after_receive) (*after_receive)();
+	// The stats board splits the maintenance lap (an instrument): the receive-handler writes
+	// above, the timers below, then the movers.
+	lap.mark(devtools::Slot::SIM_CLIENT_AFTER_RECEIVE);
 
 	// The roster revive countdown precedes the zone-list advance in the frame
 	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA, then @0x42C2E1].
@@ -1725,6 +1728,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	advance_zone_timers();
 	advance_tracked_window();
 	view_.refresh_minimap_live_markers();
+	lap.mark(devtools::Slot::SIM_CLIENT_TIMERS);
 	// Client_ProcessNetworkFrame and its maintenance continue, but the later
 	// Entity_UpdateAllEntities body is skipped while the phase-0 mirror is
 	// nonzero, and in a session while the round-over gate is up. These portable

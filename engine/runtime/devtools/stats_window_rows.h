@@ -41,7 +41,7 @@ inline constexpr Slot k_replication_fan_unattributed[] = {Slot::SIM_REPLICATION_
 inline constexpr Slot k_replication_unattributed[] = {Slot::SIM_REPLICATION_QUERY_PREP, Slot::SIM_REPLICATION_SNAPSHOT, Slot::SIM_REPLICATION_FAN};
 inline constexpr Slot k_server_unattributed[] = {Slot::SIM_SERVER_INPUT, Slot::SIM_SERVER_WORLD, Slot::SIM_MATCH, Slot::SIM_SERVER_RULES, Slot::SIM_SERVER_REPLICATION};
 inline constexpr Slot k_host_unattributed[] = {Slot::SIM_HOST_RECEIVE, Slot::SIM_HOST_CONNECTIONS, Slot::SIM_HOST_ADAPTER, Slot::SIM_SERVER_TICK, Slot::SIM_HOST_SEND};
-inline constexpr Slot k_client_unattributed[] = {Slot::SIM_CLIENT_SETUP, Slot::SIM_CLIENT_RECEIVE, Slot::SIM_CLIENT_MAINTENANCE, Slot::SIM_CLIENT_SEND};
+inline constexpr Slot k_client_unattributed[] = {Slot::SIM_CLIENT_SETUP, Slot::SIM_CLIENT_RECEIVE, Slot::SIM_CLIENT_AFTER_RECEIVE, Slot::SIM_CLIENT_TIMERS, Slot::SIM_CLIENT_MAINTENANCE, Slot::SIM_CLIENT_SEND};
 inline constexpr Slot k_sim_unattributed[] = {Slot::SIM_HOST_PREP, Slot::SIM_HOST_PUMP, Slot::SIM_PLAYER_TAIL, Slot::SIM_WEAPON_WALK, Slot::SIM_NET, Slot::SIM_CLIENT_MATERIALIZE, Slot::SIM_CLIENT_MIRROR, Slot::SIM_CLIENT_PROXIES, Slot::SIM_CLIENT_WORLD, Slot::SIM_CLIENT_ATTACH, Slot::SIM_CLIENT_PLAYER, Slot::SIM_ADM_RESOLVE};
 inline constexpr Slot k_trace[] = {Slot::TRACE_TERRAIN, Slot::TRACE_STATIC, Slot::TRACE_DYNAMIC, Slot::TRACE_PERSON};
 inline constexpr Slot k_present[] = {Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
@@ -142,9 +142,12 @@ inline constexpr StatsRow kRows[] = {
 	{"net", "Client network/decode", 4, RowKind::SPAN, Slot::SIM_NET, nullptr, 0},
 	{"client_setup", "Client clock/setup", 5, RowKind::SPAN, Slot::SIM_CLIENT_SETUP, nullptr, 0},
 	{"client_receive", "Receive + state fold", 5, RowKind::SPAN, Slot::SIM_CLIENT_RECEIVE, nullptr, 0},
-	{"client_maintenance", "Replica maintenance/movers", 5, RowKind::SPAN, Slot::SIM_CLIENT_MAINTENANCE, nullptr, 0},
+	{"client_after_receive", "Receive-handler writes on L", 5, RowKind::SPAN, Slot::SIM_CLIENT_AFTER_RECEIVE, nullptr, 0},
+	{"client_local_birth", "L's birth (in-match edge)", 6, RowKind::SPAN, Slot::SIM_CLIENT_LOCAL_BIRTH, nullptr, 0},
+	{"client_timers", "Replica timers/markers", 5, RowKind::SPAN, Slot::SIM_CLIENT_TIMERS, nullptr, 0},
+	{"client_maintenance", "Replica movers", 5, RowKind::SPAN, Slot::SIM_CLIENT_MAINTENANCE, nullptr, 0},
 	{"client_send", "Joiner C2S build/send", 5, RowKind::SPAN, Slot::SIM_CLIENT_SEND, nullptr, 0},
-	{"client_unattributed", "Client-frame unattributed", 5, RowKind::RESIDUAL, Slot::SIM_NET, k_client_unattributed, 4},
+	{"client_unattributed", "Client-frame unattributed", 5, RowKind::RESIDUAL, Slot::SIM_NET, k_client_unattributed, 6},
 	{"client_materialize", "Joiner stream materialize + folds", 4, RowKind::SPAN, Slot::SIM_CLIENT_MATERIALIZE, nullptr, 0},
 	{"client_mirror", "Joiner wire pose mirror", 4, RowKind::SPAN, Slot::SIM_CLIENT_MIRROR, nullptr, 0},
 	{"client_proxies", "Joiner collision proxies", 4, RowKind::SPAN, Slot::SIM_CLIENT_PROXIES, nullptr, 0},

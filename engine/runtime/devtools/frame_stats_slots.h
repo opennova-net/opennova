@@ -136,7 +136,10 @@
     X(SIM_HOST_SEND, "remote transport drain/frame/send") \
     X(SIM_CLIENT_SETUP, "client role clock + keepalive setup") \
     X(SIM_CLIENT_RECEIVE, "loopback/wire receive + state fold") \
-    X(SIM_CLIENT_MAINTENANCE, "decoded-state timers and movers") \
+    X(SIM_CLIENT_AFTER_RECEIVE, "the embedder's receive-handler writes on L (kit, L's birth, its record, the 0x0F's pose)") \
+    X(SIM_CLIENT_LOCAL_BIRTH, "joiner: L's birth on the in-match edge, inside the receive-handler writes") \
+    X(SIM_CLIENT_TIMERS, "revive countdown, zone timers, tracked window, minimap live markers") \
+    X(SIM_CLIENT_MAINTENANCE, "decoded-state movers: the frame tick, the lean / dip / tracked-target legs, the remote motion") \
     X(SIM_CLIENT_SEND, "joiner-only C2S build/frame") \
     /* The joiner frame after its wire leg (JoinerRole::pump phases). */ \
     X(SIM_CLIENT_MATERIALIZE, "joiner: stream materialize + decoded-state folds (spawn/health/mount/ammo/events/weather)") \
