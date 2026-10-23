@@ -108,19 +108,16 @@ void merge_planner_diagnostics(
 
 // Godot Image -> engine alpha pyramid. The one genuinely device-bound leg of
 // caster resolution: texture pixels decode here, policy lives in
-// engine/runtime/terrain/terrain_static_shadow_geometry.
+// engine/runtime/terrain/terrain_static_shadow_geometry. The pixels are the
+// caster texture's levels decoded on the CPU (ObjectData::load_texture_image_name),
+// never a device texture read back; each load is the caller's own (uncached), so it
+// converts in place.
 std::shared_ptr<const opennova::terrain::TerrainStaticShadowAlphaPyramid>
-extract_alpha_pyramid(const Ref<Texture2D> &p_texture) {
-	if (p_texture.is_null()) return {};
-	const Ref<Image> source = p_texture->get_image();
-	if (source.is_null() || source->is_empty() || source->get_width() <= 0 ||
-			source->get_height() <= 0) {
+extract_alpha_pyramid(const Ref<Image> &image) {
+	if (image.is_null() || image->is_empty() || image->get_width() <= 0 ||
+			image->get_height() <= 0) {
 		return {};
 	}
-	Ref<Image> image = Image::create_from_data(source->get_width(),
-			source->get_height(), source->has_mipmaps(), source->get_format(),
-			source->get_data());
-	if (image.is_null()) return {};
 	image->convert(Image::FORMAT_RGBA8);
 	const PackedByteArray bytes = image->get_data();
 	if (bytes.is_empty()) return {};
@@ -170,7 +167,7 @@ public:
 		if (data_.is_null() || p_texture_name.empty()) return {};
 		const String name = String::utf8(p_texture_name.data(),
 				static_cast<int>(p_texture_name.size()));
-		return extract_alpha_pyramid(data_->load_texture_name(name));
+		return extract_alpha_pyramid(data_->load_texture_image_name(name));
 	}
 
 private:

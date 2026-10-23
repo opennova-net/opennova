@@ -39,9 +39,17 @@ godot::Ref<godot::Image> load_texture_image(const std::vector<renderer::TextureL
 // rules that read the name's case have already decided).
 std::string texture_load_key(const std::vector<renderer::TextureLoad> &attempts);
 
-// The texture the game draws an image with: the mip chain a DDS carries, else
-// generated.
+// The pixels the game's texture of an image holds, on the CPU: decompressed, the mip
+// chain a DDS carries, else generated; null for no image. `image` is changed in place.
+godot::Ref<godot::Image> image_with_mipmaps(const godot::Ref<godot::Image> &image);
+
+// The texture the game draws an image with: image_with_mipmaps's, uploaded.
 godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image> &image);
+
+// load_texture_with_mipmaps's pixels made on the CPU alone (image_with_mipmaps over the
+// first attempt that decodes), no device texture made and none read back; uncached.
+godot::Ref<godot::Image> load_image_with_mipmaps(const std::vector<renderer::TextureLoad> &attempts,
+		const TextureReadFn &read);
 
 // A loader's texture: the first of its attempts that reads and decodes
 // (load_texture_image), with its mip chain (texture_with_mipmaps). A texture the
@@ -54,6 +62,11 @@ godot::Ref<godot::Texture2D> load_texture_with_mipmaps(const std::vector<rendere
 // dir loads the exact name through ResourceLoader (the imported texture survives
 // export); an absolute dir decodes the raw bytes the retail way.
 godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, const godot::String &filename,
+		renderer::TextureLoader loader);
+
+// load_texture_from_dir's pixels with their mip chain: an absolute dir's decoded on the
+// CPU (load_image_with_mipmaps, uncached); a res:// dir's imported texture's image.
+godot::Ref<godot::Image> load_image_from_dir(const godot::String &dir, const godot::String &filename,
 		renderer::TextureLoader loader);
 
 // The highest mip level retail's device samples for a texture: one D3DX built

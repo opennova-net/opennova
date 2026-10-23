@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -27,6 +28,9 @@ public:
 	// A texture by name as `loader` loads it (ResourceRoot::load_texture's rule): the files
 	// it opens, the first that decodes; null when none does.
 	godot::Ref<godot::Texture2D> load_texture(const godot::String &name, renderer::TextureLoader loader) const;
+	// The pixels that texture holds, made on the CPU (ResourceRoot::load_image_with_mipmaps's
+	// rule): its levels, no device texture made; uncached.
+	godot::Ref<godot::Image> load_image_with_mipmaps(const godot::String &name, renderer::TextureLoader loader) const;
 	// One material row's texture of runtime `type` (ResourceRoot::load_material_texture's rule:
 	// the texture registered under the row's key, the first row of a key to load deciding it).
 	godot::Ref<godot::Texture> load_material_texture(const godot::String &name, uint8_t type) const;

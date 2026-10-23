@@ -277,17 +277,17 @@ int ObjectData::resolve_materials() const {
 	return static_cast<int>(rows.size());
 }
 
-Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const {
+Ref<Image> ObjectData::load_texture_image_name(const String &p_texture_name) const {
 	if (!source_model_ || p_texture_name.is_empty()) {
-		return Ref<Texture2D>();
+		return Ref<Image>();
 	}
 	// A model texture name loads through the stage loader, as its diffuse row does.
 	if (texture_files_) {
-		return texture_files_->load_texture(p_texture_name, opennova::renderer::TextureLoader::Stage);
+		return texture_files_->load_image_with_mipmaps(p_texture_name, opennova::renderer::TextureLoader::Stage);
 	}
 	if (resource_root.is_valid()) {
-		return resource_root->load_texture(p_texture_name, ResourceRoot::TEXTURE_LOADER_STAGE);
+		return resource_root->load_image_with_mipmaps(p_texture_name, ResourceRoot::TEXTURE_LOADER_STAGE);
 	}
-	return opennova::load_texture_from_dir(source_dir, p_texture_name,
+	return opennova::load_image_from_dir(source_dir, p_texture_name,
 			opennova::renderer::TextureLoader::Stage);
 }

@@ -9,6 +9,7 @@ struct WeatherOscillator;
 }
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -186,7 +187,10 @@ public:
 	// loader slot code is set (renderer::material_texture_runtime_slot) through its loader
 	// (load_material_texture). Returns the rows resolved. C++ siblings only.
 	int resolve_materials() const;
-	Ref<Texture2D> load_texture_name(const String &p_texture_name) const;
+	// A model texture by name as its stage loader makes it, as the pixels its texture holds (the
+	// levels: a DDS's own chain, else generated), made on the CPU: no device texture made or read
+	// back (the terrain's static-shadow casters' alpha). C++ siblings only.
+	Ref<Image> load_texture_image_name(const String &p_texture_name) const;
 	int get_light_count() const;
 	// One LGHT record (object/model_light.h); null out of range.
 	Ref<ModelLight> get_light_info(int p_index) const;

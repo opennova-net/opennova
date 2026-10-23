@@ -355,9 +355,9 @@ namespace {
 std::unordered_set<uint64_t> g_authored_mip_chains;
 } // namespace
 
-godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image> &image) {
+godot::Ref<godot::Image> image_with_mipmaps(const godot::Ref<godot::Image> &image) {
 	if (image.is_null() || image->is_empty()) {
-		return godot::Ref<godot::Texture2D>();
+		return godot::Ref<godot::Image>();
 	}
 	if (image->is_compressed()) {
 		image->decompress();
@@ -366,7 +366,18 @@ godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image>
 	if (!image->has_mipmaps()) {
 		image->generate_mipmaps();
 	}
-	return godot::ImageTexture::create_from_image(image);
+	return image;
+}
+
+godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image> &image) {
+	const godot::Ref<godot::Image> prepared = image_with_mipmaps(image);
+	return prepared.is_valid() ? godot::Ref<godot::Texture2D>(godot::ImageTexture::create_from_image(prepared))
+							   : godot::Ref<godot::Texture2D>();
+}
+
+godot::Ref<godot::Image> load_image_with_mipmaps(const std::vector<renderer::TextureLoad> &attempts,
+		const TextureReadFn &read) {
+	return image_with_mipmaps(load_texture_image(attempts, read));
 }
 
 godot::Ref<godot::Texture2D> load_texture_with_mipmaps(const std::vector<renderer::TextureLoad> &attempts,
@@ -382,37 +393,21 @@ godot::Ref<godot::Texture2D> load_texture_with_mipmaps(const std::vector<rendere
 	return texture;
 }
 
-godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, const godot::String &filename,
+namespace {
+// An absolute/external original-asset dir's attempts for a loader: a loose directory is the
+// only source, so no loose-first search competes; the particle folder is the directory's "tga"
+// folder.
+std::vector<renderer::TextureLoad> dir_texture_attempts(const godot::String &dir, const godot::String &filename,
 		renderer::TextureLoader loader) {
-	if (filename.is_empty()) {
-		return godot::Ref<godot::Texture2D>();
-	}
-	if (is_resource_dir(dir)) {
-		// res:// holds the project's own imported textures, not retail data:
-		// ResourceLoader resolves the imported texture, the only form that
-		// survives export.
-		const godot::String path = dir.path_join(filename);
-		godot::ResourceLoader *resource_loader = godot::ResourceLoader::get_singleton();
-		return resource_loader->exists(path) ? godot::Ref<godot::Texture2D>(resource_loader->load(path))
-											  : godot::Ref<godot::Texture2D>();
-	}
-	// Absolute/external original-asset path: decode the raw bytes the retail way. A
-	// loose directory is the only source, so no loose-first search competes; the
-	// particle folder is the directory's "tga" folder.
 	renderer::TextureFileQuery files;
 	files.exists = [&dir](const std::string &name) {
 		return !resolve_file_in_dir(dir, to_gd(name)).is_empty();
 	};
-	const std::vector<renderer::TextureLoad> attempts =
-			renderer::texture_load_attempts(loader, to_std(filename), files);
-	// Cached directory listing + decoded-texture cache, keyed by the files and readers
-	// the loader resolved, so a shared texture is decoded and uploaded once.
-	const std::string key = "dir:" + to_std(dir) + ":" + texture_load_key(attempts);
-	const auto cached = g_texture_cache.find(key);
-	if (cached != g_texture_cache.end()) {
-		return cached->second;
-	}
-	const auto read = [&dir](const renderer::TextureLoad &load) {
+	return renderer::texture_load_attempts(loader, to_std(filename), files);
+}
+
+TextureReadFn dir_texture_read(const godot::String &dir) {
+	return [dir](const renderer::TextureLoad &load) {
 		godot::PackedByteArray bytes;
 		if (load.source == renderer::TextureFileSource::ParticleTextureDir) {
 			const godot::String path = resolve_file_in_dir(dir.path_join("tga"), to_gd(load.file));
@@ -424,7 +419,48 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 		}
 		return bytes;
 	};
-	const godot::Ref<godot::Texture2D> texture = load_texture_with_mipmaps(attempts, read);
+}
+
+// res:// holds the project's own imported textures, not retail data: ResourceLoader
+// resolves the imported texture, the only form that survives export.
+godot::Ref<godot::Texture2D> imported_texture(const godot::String &dir, const godot::String &filename) {
+	const godot::String path = dir.path_join(filename);
+	godot::ResourceLoader *resource_loader = godot::ResourceLoader::get_singleton();
+	return resource_loader->exists(path) ? godot::Ref<godot::Texture2D>(resource_loader->load(path))
+										  : godot::Ref<godot::Texture2D>();
+}
+} // namespace
+
+godot::Ref<godot::Image> load_image_from_dir(const godot::String &dir, const godot::String &filename,
+		renderer::TextureLoader loader) {
+	if (filename.is_empty()) {
+		return godot::Ref<godot::Image>();
+	}
+	if (is_resource_dir(dir)) {
+		const godot::Ref<godot::Texture2D> texture = imported_texture(dir, filename);
+		return texture.is_valid() ? texture->get_image() : godot::Ref<godot::Image>();
+	}
+	return load_image_with_mipmaps(dir_texture_attempts(dir, filename, loader), dir_texture_read(dir));
+}
+
+godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, const godot::String &filename,
+		renderer::TextureLoader loader) {
+	if (filename.is_empty()) {
+		return godot::Ref<godot::Texture2D>();
+	}
+	if (is_resource_dir(dir)) {
+		return imported_texture(dir, filename);
+	}
+	// Absolute/external original-asset path: decode the raw bytes the retail way.
+	const std::vector<renderer::TextureLoad> attempts = dir_texture_attempts(dir, filename, loader);
+	// Cached directory listing + decoded-texture cache, keyed by the files and readers
+	// the loader resolved, so a shared texture is decoded and uploaded once.
+	const std::string key = "dir:" + to_std(dir) + ":" + texture_load_key(attempts);
+	const auto cached = g_texture_cache.find(key);
+	if (cached != g_texture_cache.end()) {
+		return cached->second;
+	}
+	const godot::Ref<godot::Texture2D> texture = load_texture_with_mipmaps(attempts, dir_texture_read(dir));
 	// Cache the null too: a missing or undecodable file is not re-read per probe.
 	g_texture_cache.emplace(key, texture);
 	return texture;
