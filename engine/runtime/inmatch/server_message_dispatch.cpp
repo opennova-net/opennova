@@ -1415,10 +1415,18 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					const world::EntityHandle h{handle};
 					if (static_cast<size_t>(h.slot()) < world->registry.pool_capacity(pool)) {
 						FullEntitySpawnRecord frec;
+						// A free row serializes as its memory stands: the destroy's tail (its
+						// 0xFFFF / 0xFF stamps over the zeroed block, the last occupant's
+						// words past it) or, never taken since the pool's clear, all zeros.
+						// Either way its type 0 makes the client clear its slot.
+						// [orig: NetPacket_SerializeObjectToBuffer @0x504D10 over the pool
+						//  row @0x514201; Entity_Destroy @0x43EA70..0x43EA92; Pool_Clear @0x442060]
 						if (const world::Entity *e = world->registry.get(h)) {
 							frec = replication::build_full_entity_spawn(*e);
+						} else if (const world::Entity *stale = world->registry.destroyed_row(h)) {
+							frec = replication::build_destroyed_row_full_entity_spawn(h, *stale);
 						} else {
-							frec.slot_id = handle; // empty slot: type-0 record clears the client's entity
+							frec.slot_id = handle;
 						}
 						replies.push_back(make_protocol_message(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(frec)));
 					}

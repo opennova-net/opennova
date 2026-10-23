@@ -121,6 +121,17 @@ public:
     // an AI slot belongs to. Stable until configure_pool or restore_from
     // replaces the pool.
     Entity *row_storage(EntityHandle h);
+    // A free row whose last occupant left through the destroy, as that occupant
+    // left it; null for a live row, a row no spawn has taken since the pool was
+    // cleared, or one past the capacity. The destroy zeroes the row's first
+    // 0x2B4 bytes and stores its sentinels after them, so the words past the
+    // memset are this occupant's and the zeroed ones read as the sentinels or 0
+    // (replication::build_destroyed_row_full_entity_spawn). A spawn into the row
+    // and the pool's clear end it; HeliLift's +0x219 clear (clear_destroyed)
+    // leaves it.
+    // [orig: Entity_Destroy @0x43E810 - memset(entity, 0, 0x2B4) @0x43EA70, the
+    //  stores @0x43EA75..0x43EA92; Pool_Clear @0x442060]
+    const Entity *destroyed_row(EntityHandle h) const;
 
     // Restore authored/runtime-visible registry state without rewinding the
     // host-only lifetime serial. Collision and skeletal caches use that serial
@@ -232,6 +243,9 @@ private:
         // entity+0x219: set by a despawn [orig: Entity_Destroy - `mov byte ptr
         // [esi+219h], 1` @0x43EA7F], cleared by the next occupant's spawn.
         std::vector<char> destroyed;
+        // The row holds Entity_Destroy's tail (destroyed_row): set by a despawn,
+        // cleared by the next occupant's spawn.
+        std::vector<char> freed_by_destroy;
         size_t live = 0;
         size_t used_count = 0; // g_PoolList[pool].used, the high-water mark (pool_used)
     };

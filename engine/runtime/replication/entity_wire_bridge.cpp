@@ -588,6 +588,19 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 	return rec;
 }
 
+// See header.
+FullEntitySpawnRecord build_destroyed_row_full_entity_spawn(world::EntityHandle slot,
+		const world::Entity &stale) {
+	FullEntitySpawnRecord rec;
+	rec.slot_id = slot.packed; // the row's own address [orig: @0x504D25..0x504D9E]
+	rec.mount_handle_8 = wire_handle::kInvalid;
+	rec.mount_handle_9 = wire_handle::kInvalid;
+	rec.ai_state = static_cast<uint8_t>(entity_word_2b4(stale));
+	rec.anim_slot = stale.anim_slot;
+	rec.player_slot_id = 0xFF;
+	return rec;
+}
+
 
 // The vehicle brain's +0x318 state byte the 0x0D record streams under field
 // 0x1000, rebuilt from the latches the port keeps on the motor state (bit 0

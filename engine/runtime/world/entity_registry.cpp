@@ -19,6 +19,7 @@ void EntityRegistry::configure_pool(int pool, size_t capacity) {
     p.slots.assign(capacity, Entity{});
     p.used.assign(capacity, 0);
     p.destroyed.assign(capacity, 0);
+    p.freed_by_destroy.assign(capacity, 0);
     p.live = 0;
     p.used_count = 0; // [orig: Pool_Clear @0x442060 -- used = 0 @0x4420DE..0x4420F6]
 }
@@ -53,6 +54,7 @@ EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entit
             if (next_spawn_id_ == 0) next_spawn_id_ = 1;
             p.used[s] = 1;
             p.destroyed[s] = 0;
+            p.freed_by_destroy[s] = 0;
             ++p.live;
             // An includeInUse-1 allocation takes the first free row below the
             // used count when there is one, so the count moves only when the
@@ -83,6 +85,7 @@ EntityHandle EntityRegistry::spawn_at(EntityHandle h, const Entity &seed) {
     if (next_spawn_id_ == 0) next_spawn_id_ = 1;
     p.used[slot] = 1;
     p.destroyed[slot] = 0;
+    p.freed_by_destroy[slot] = 0;
     ++p.live;
     // A slotted load raises the count to the slot + 1, never lowers it.
     // [orig: Pool_UpdateMaxUsedFromSlotId @0x442100 -- @0x442115..0x442123;
@@ -102,6 +105,7 @@ void EntityRegistry::despawn(EntityHandle h) {
     if (p.used[slot]) {
         p.used[slot] = 0;
         p.destroyed[slot] = 1; // [orig: Entity_Destroy @0x43EA7F]
+        p.freed_by_destroy[slot] = 1; // [orig: Entity_Destroy @0x43EA70..0x43EA92]
         --p.live;
     }
     // The slot keeps its bytes where retail zeroes the struct [orig: Entity_Destroy @0x43E810 -
@@ -143,6 +147,17 @@ Entity *EntityRegistry::get(EntityHandle h) {
 
 const Entity *EntityRegistry::get(EntityHandle h) const {
     return const_cast<EntityRegistry *>(this)->get(h);
+}
+
+const Entity *EntityRegistry::destroyed_row(EntityHandle h) const {
+    if (!h.valid()) return nullptr;
+    const int pool = h.pool();
+    const int slot = h.slot();
+    if (pool < 0 || pool >= kPoolCount) return nullptr;
+    const Pool &p = pools_[pool];
+    if (slot < 0 || static_cast<size_t>(slot) >= p.slots.size()) return nullptr;
+    const size_t s = static_cast<size_t>(slot);
+    return !p.used[s] && p.freed_by_destroy[s] ? &p.slots[s] : nullptr;
 }
 
 Entity *EntityRegistry::row_storage(EntityHandle h) {

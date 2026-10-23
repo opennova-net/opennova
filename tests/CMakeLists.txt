@@ -5268,6 +5268,12 @@ add_executable(anim_wire_ratio_test anim/wire_anim_ratio_test.cpp)
 target_link_libraries(anim_wire_ratio_test PRIVATE opennova_runtime)
 target_include_directories(anim_wire_ratio_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME anim_wire_ratio COMMAND anim_wire_ratio_test)
+# The host's S2C 0x18 answer to a C2S 0x0F: a live row's record, a destroyed row's tail (the
+# 0xFFFF mount words, +0x154 0xFF, the occupant's aiState / animSlot), a cleared row's zeros,
+# and the pool / capacity / requester gates (L4-s30, x9's aikill OR handle-0 answer).
+add_executable(npruntime_entity_info_query_reply_test npruntime/entity_info_query_reply_test.cpp)
+target_link_libraries(npruntime_entity_info_query_reply_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_entity_info_query_reply COMMAND npruntime_entity_info_query_reply_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

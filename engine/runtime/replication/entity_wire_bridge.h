@@ -145,6 +145,21 @@ Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 // NetPacket_SerializeObjectToBuffer @0x504d10]
 FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e);
 
+// The same record for a pool row the destroy freed (world::EntityRegistry::destroyed_row,
+// `stale` its last occupant as it left): the serializer walks the row's memory, which the
+// destroy zeroed through +0x2B3 and then stamped, so the null itemDef writes type 0 (the
+// client clears its slot and reads no further), the null links write 0xFFFF, the two
+// fixed mount words take the destroy's 0xFFFF, +0x154 its 0xFF, and the aiState (+0x2B4)
+// and animSlot (+0x374) bytes, past the memset, keep the occupant's. A row no spawn took
+// since the pool's clear is all zeros: its record is the slot id over the defaults.
+// [orig: NetPacket_SerializeObjectToBuffer @0x504D10 - the def tests @0x504D67 /
+//  @0x504DB7 / @0x504FE8, the link tests @0x504E88 / @0x504EFD / @0x504F75, mountHandles
+//  [8] / [9] @0x505105 / @0x50511B, aiState @0x50518C, animSlot @0x5051A0, +0x154
+//  @0x5051EB; Entity_Destroy @0x43E810 - memset(entity, 0, 0x2B4) @0x43EA70, +0x154 = 0xFF
+//  @0x43EA78, mountHandles[0..9] = 0xFFFF @0x43EA86..0x43EA92]
+FullEntitySpawnRecord build_destroyed_row_full_entity_spawn(world::EntityHandle slot,
+		const world::Entity &stale);
+
 // entity+0x2B4, whose low byte the 0x0C / 0x18 records carry as aiState: the first word
 // past the common block the destroy and the 0x0D memset clear, owned per class. A dead
 // vehicle's is 0 (its death chain zeroes the block, then stores its death effects' group
