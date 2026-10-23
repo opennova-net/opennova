@@ -20,6 +20,7 @@
 
 #include <net/npwire/flat_tlv.h>
 #include <net/npwire/lan_discovery.h>
+#include <net/napi/envelope.h>
 #include <net/novaworld/proxy_rendezvous.h>
 #include <net/npwire/net_ports.h>
 #include <net/npwire/peer_addr.h>
@@ -679,7 +680,16 @@ void test_proxy_rendezvous_leads_each_burst() {
     if (burst.size() != 3) return;
     CHECK(burst[0].rendezvous);
     CHECK(burst[0].node == peer_addr_from_octets({10, 1, 2, 3}, 4000));
-    const std::vector<uint8_t> &r = burst[0].bytes;
+    // The manager's send envelopes it: 52 bytes on the wire, the 48-byte body inside (the LN S1b
+    // retail joiner's 52 B datagrams to NI / NP; D-NET-NEW-L9-30).
+    // [orig: CNapiNPConnection_SendPingPacket @0x61F8C0 - flags 1 @0x61F9B1, CNapiNPManager_SendTo
+    //  called @0x61F9DA; NapiSocket_SendTo @0x62CFA0 - NapiSocket_EncodePacket called @0x62CFFF]
+    CHECK(burst[0].bytes.size() == 52);
+    std::vector<uint8_t> r(burst[0].bytes.size());
+    std::size_t decoded = 0;
+    CHECK(opennova::napi_envelope_decode(burst[0].bytes.data(), burst[0].bytes.size(), r.data(),
+            r.size(), &decoded) == 0);
+    r.resize(decoded);
     CHECK(r.size() == 48);
     if (r.size() != 48) return;
     CHECK(r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 0);

@@ -1,5 +1,7 @@
 #include <net/npwire/lan_discovery.h>
 
+#include <net/napi/envelope.h> // the manager send's envelope over the rendezvous
+
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -170,8 +172,19 @@ std::vector<LanBurstDatagram> LanDiscoveryBrowser::burst() const {
 		rendezvous.node.port = static_cast<uint16_t>(proxy_.node_port & 0xFFFFu);
 		const std::array<uint8_t, kProxyRendezvousDatagramSize> bytes =
 				build_proxy_rendezvous_datagram(proxy_);
-		rendezvous.bytes.assign(bytes.begin(), bytes.end());
-		out.push_back(std::move(rendezvous));
+		// The manager's send with its encode flag set: the 48 bytes go out in the NAPI envelope,
+		// 52 on the wire, as every NWU datagram does (D-NET-NEW-L9-30).
+		// [orig: CNapiNPConnection_SendPingPacket @0x61F8C0 - flags 1 pushed @0x61F9B1, the length
+		//  0x30 @0x61F9B3, CNapiNPManager_SendTo called @0x61F9DA; CNapiNPManager_SendTo @0x61EC20 -
+		//  NapiSocket_SendTo called @0x61EC7A; NapiSocket_SendTo @0x62CFA0 - the encode test
+		//  @0x62CFEA, NapiSocket_EncodePacket called @0x62CFFF]
+		rendezvous.bytes.resize(bytes.size() + 4);
+		size_t encoded = 0;
+		if (napi_envelope_encode(bytes.data(), bytes.size(), rendezvous.bytes.data(),
+					rendezvous.bytes.size(), &encoded) == 0) {
+			rendezvous.bytes.resize(encoded);
+			out.push_back(std::move(rendezvous));
+		}
 	}
 	for (int port = port_min_; port <= port_max_; ++port) {
 		LanBurstDatagram announce;
