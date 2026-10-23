@@ -465,9 +465,9 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				target_heading = static_cast<int32_t>(
 						uint32_t(e.euler_z) - uint32_t(kInfantryTargetClamp));
 			}
-			rec.infantry.pitch_byte = uint8_t(
+			rec.infantry.aim_heading_byte = uint8_t(
 					(uint32_t(target_heading) + 0x00800000u) >> 24);
-			rec.infantry.aim_yaw_byte = uint8_t(
+			rec.infantry.aim_pitch_byte = uint8_t(
 					(uint32_t(e.infantry_aim_pitch_bam) + 0x00800000u) >> 24);
 			rec.infantry.anim_byte = snapshot_anim_byte(e); // [orig: @0x4C0988..0x4C099F]
 			break;

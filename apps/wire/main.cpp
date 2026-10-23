@@ -656,13 +656,13 @@ void print_vehicle_compact_record(const FrameUpdate *fu, const VehicleCompactRec
 void print_infantry_compact_record(const FrameUpdate *fu, const InfantryCompactRecord &r) {
 	std::printf("            infantry: seatBone=%u vehHdl=%s "
 	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x flags=0x%02x "
-	            "pitch=0x%02x aimYaw=0x%02x anim=0x%02x%s\n",
+	            "aimHeading=0x%02x aimPitch=0x%02x anim=0x%02x%s\n",
 	            unsigned(r.seat_bone_idx),
 	            handle_str(r.vehicle_slot_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed),
 	            unsigned(r.yaw_byte), unsigned(r.flags_byte),
-	            unsigned(r.pitch_byte), unsigned(r.aim_yaw_byte),
+	            unsigned(r.aim_heading_byte), unsigned(r.aim_pitch_byte),
 	            unsigned(r.anim_byte),
 	            abs_pos_str(fu, r.pos_x_compressed, r.pos_y_compressed,
 	                        r.pos_z_compressed, r.vehicle_slot_handle).c_str());

@@ -394,8 +394,8 @@ std::vector<uint8_t> seated_infantry_frame(uint8_t aim_heading, uint8_t aim_pitc
 	rec.infantry.pos_x_compressed = nw::network_compress_fixedpoint(fixed_of(1.0));
 	rec.infantry.yaw_byte = 0x10;
 	rec.infantry.flags_byte = flags;
-	rec.infantry.pitch_byte = aim_heading;
-	rec.infantry.aim_yaw_byte = aim_pitch;
+	rec.infantry.aim_heading_byte = aim_heading;
+	rec.infantry.aim_pitch_byte = aim_pitch;
 	rec.infantry.anim_byte = as::kIdle;
 	fu.records.push_back(rec);
 	return nw::encode_frame_update(fu);
@@ -495,7 +495,7 @@ void test_overlay_pitch_is_the_live_pitch_word() {
 	npc.carrier_handle = kHull;
 	npc.mount_bone = 2;
 	npc.pitch_bam = 0x00765432;
-	npc.aim_yaw_byte = 0xF0;
+	npc.aim_pitch_byte = 0xF0;
 	expect(opennova::inmatch::aim_overlay_inputs_for_client(npc, state, {}, in) &&
 					in.aim_pitch == 0x00765432,
 			"a live seated org1 row's overlay reads its live Pitch");

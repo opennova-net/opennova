@@ -101,7 +101,7 @@ ParityEntity entity_record(const InGameMessage &message, uint64_t ts_ns, const F
 			out.pos_y = record.infantry.pos_y_compressed;
 			out.pos_z = record.infantry.pos_z_compressed;
 			out.orient_a = record.infantry.yaw_byte;
-			out.orient_b = record.infantry.pitch_byte;
+			out.orient_b = record.infantry.aim_heading_byte;
 			out.state_a = record.infantry.flags_byte;
 			out.state_b = record.infantry.anim_byte;
 			break;

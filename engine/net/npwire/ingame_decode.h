@@ -769,8 +769,10 @@ struct InfantryCompactRecord {
 	uint16_t pos_z_compressed = 0;
 	uint8_t  yaw_byte = 0;                 // entity+16 BAM high (v+0x800000)>>24
 	uint8_t  flags_byte = 0;               // entity+36
-	uint8_t  pitch_byte = 0;               // entity+748
-	uint8_t  aim_yaw_byte = 0;             // entity+720
+	uint8_t  aim_heading_byte = 0;         // entity+0x2EC (748), the aim heading's high byte
+	                                       // [orig: the read's store @0x4C066C]
+	uint8_t  aim_pitch_byte = 0;           // entity+0x2D0 (720), the aim pitch's high byte
+	                                       // [orig: the read's store @0x4C0672]
 	uint8_t  anim_byte = 0;                // entity+696 if non-zero else entity+700
 };
 

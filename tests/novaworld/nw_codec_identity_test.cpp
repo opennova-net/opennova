@@ -209,8 +209,8 @@ std::vector<Case> build_corpus() {
 		r.pos_z_compressed = 0xBCD7;
 		r.yaw_byte = 0x40;
 		r.flags_byte = 0x06;
-		r.pitch_byte = 0x12;
-		r.aim_yaw_byte = 0x80;
+		r.aim_heading_byte = 0x12;
+		r.aim_pitch_byte = 0x80;
 		r.anim_byte = 0x05;
 		add("infantry_compact", encode_infantry_compact_record(r));
 	}

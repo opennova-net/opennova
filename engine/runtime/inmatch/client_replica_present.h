@@ -97,7 +97,7 @@ inline bool aim_overlay_inputs_for_client(
 			(entity.state_flags & world::kEntityFlagDead) == 0u;
 	out.aim_pitch = entity.cls == EntityClass::Player || live_seated_infantry
 			? entity.pitch_bam
-			: static_cast<int32_t>(static_cast<uint32_t>(entity.aim_yaw_byte) << 24);
+			: static_cast<int32_t>(static_cast<uint32_t>(entity.aim_pitch_byte) << 24);
 	out.body_yaw = out.aim_yaw;
 	out.leg_yaw_r = out.body_yaw;
 	out.leg_yaw_l = out.body_yaw;

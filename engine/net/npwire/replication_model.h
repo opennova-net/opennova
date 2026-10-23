@@ -134,7 +134,7 @@ struct GameEntitySnapshot {
 	// byte packing from entity+0x1A8/+0x2EC/+0x2D0. They add no wire fields.
 	int32_t infantry_target_heading_bam = 0; // entity+424 (+0x1A8): the yaw byte's source
 	int32_t infantry_aim_heading_bam = 0;    // entity+748 (+0x2EC): clamp around heading, rounded high byte
-	int32_t infantry_aim_pitch_bam = 0;      // entity+720: rounded high byte (wire aim_yaw_byte)
+	int32_t infantry_aim_pitch_bam = 0;      // entity+720: rounded high byte (wire aim_pitch_byte)
 	// entity+0x157 attachBoneId — the RAW wire seat bone this player mounted by; the mounted
 	// player record's byte 0 [orig: @0x4c0a1a reads +0x157 when mounted]. 0 when unmounted.
 	uint8_t veh_bone = 0;

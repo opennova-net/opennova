@@ -1370,7 +1370,7 @@ void ClientReplicaPipeline::tick_seated_looks() {
 				replica_seat_frame_resolver_(carrier->handle, carrier->type_id, es.mount_bone, seat))
 			es.rm_body_heading = seat.heading;
 		const int32_t aim_heading = static_cast<int32_t>(static_cast<uint32_t>(es.pitch_byte) << 24);
-		const int32_t aim_pitch = static_cast<int32_t>(static_cast<uint32_t>(es.aim_yaw_byte) << 24);
+		const int32_t aim_pitch = static_cast<int32_t>(static_cast<uint32_t>(es.aim_pitch_byte) << 24);
 		int32_t yaw_step = io::bam_sar(io::bam_add(io::bam_sub(aim_heading, es.heading_bam), 2), 2);
 		if (yaw_step > 0x2000000) yaw_step = 0x2000000;
 		else if (yaw_step < -0x2000000) yaw_step = -0x2000000;

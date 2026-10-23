@@ -631,8 +631,8 @@ bool decode_infantry_compact_record(const uint8_t *body, size_t len,
 	out.pos_z_compressed    = c.u16();
 	out.yaw_byte            = c.u8();
 	out.flags_byte          = c.u8();
-	out.pitch_byte          = c.u8();
-	out.aim_yaw_byte        = c.u8();
+	out.aim_heading_byte    = c.u8();
+	out.aim_pitch_byte      = c.u8();
 	out.anim_byte           = c.u8();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);

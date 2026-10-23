@@ -356,8 +356,10 @@ struct ClientEntityState {
 	uint16_t record_carrier = 0xFFFF;
 	uint8_t mount_bone = 0;                       // player vehicle_bone / infantry seat_bone_idx
 	uint8_t seat_type = 0;                        // player-only seat attribute; 0 for infantry
-	uint8_t pitch_byte = 0;                       // class-specific witnessed compact byte
-	uint8_t aim_yaw_byte = 0;                     // infantry-only entity+720 byte
+	// The class-specific compact byte: a player record's pitch (entity+0x14), an infantry
+	// record's aim heading (entity+0x2EC).
+	uint8_t pitch_byte = 0;
+	uint8_t aim_pitch_byte = 0;                   // infantry-only: the aim pitch (entity+0x2D0)
 	uint8_t anim_state_id = 0;                    // player anim_state_id / infantry anim_byte
 	uint8_t anim_channel_ratio = 0;               // player-only; 0 for infantry
 	// A body-anim state that was applied and then OVERWRITTEN by a later record

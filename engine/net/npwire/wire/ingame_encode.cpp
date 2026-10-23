@@ -369,8 +369,8 @@ std::vector<uint8_t> encode_infantry_compact_record(const InfantryCompactRecord 
 	w.u16(rec.pos_z_compressed);     // [orig: 0x4c083c / 0x4c08c5]
 	w.u8(rec.yaw_byte);              // (entity+16 + 0x800000) >> 24  [orig: 0x4c08f8]
 	w.u8(rec.flags_byte);            // entity+36                     [orig: 0x4c0917]
-	w.u8(rec.pitch_byte);            // entity+748 (clamped)          [orig: 0x4c0960]
-	w.u8(rec.aim_yaw_byte);          // entity+720                    [orig: 0x4c0983]
+	w.u8(rec.aim_heading_byte);      // entity+748 (clamped)          [orig: 0x4c0960]
+	w.u8(rec.aim_pitch_byte);        // entity+720                    [orig: 0x4c0983]
 	w.u8(rec.anim_byte);             // entity+696 ?: entity+700      [orig: 0x4c09ae]
 	return out; // 14 B
 }

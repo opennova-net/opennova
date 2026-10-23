@@ -382,8 +382,8 @@ bool run_compact_pose_fields_survive_client_fold() {
 	infantry.cls = nw::EntityClass::Infantry;
 	infantry.infantry.seat_bone_idx = 3;
 	infantry.infantry.vehicle_slot_handle = 0x1008;
-	infantry.infantry.pitch_byte = 0x31;
-	infantry.infantry.aim_yaw_byte = 0xF4;
+	infantry.infantry.aim_heading_byte = 0x31;
+	infantry.infantry.aim_pitch_byte = 0xF4;
 	infantry.infantry.anim_byte = 47;
 	mounted.records.push_back(infantry);
 
@@ -414,13 +414,13 @@ bool run_compact_pose_fields_survive_client_fold() {
 	const ns::ClientEntityState *p = view.state().find(0x0001);
 	if (!expect(p != nullptr && p->carrier_handle == 0x1007 && p->mount_bone == 5 &&
 	                    p->seat_type == 2 && p->pitch_byte == 0x21 &&
-	                    p->aim_yaw_byte == 0 && p->anim_state_id == 62 &&
+	                    p->aim_pitch_byte == 0 && p->anim_state_id == 62 &&
 	                    p->anim_channel_ratio == 19 && p->health_class_byte == 0x28,
 	            "player compact mount/pose bytes survive the client fold")) return false;
 	const ns::ClientEntityState *i = view.state().find(0x0002);
 	if (!expect(i != nullptr && i->carrier_handle == 0x1008 && i->mount_bone == 3 &&
 	                    i->seat_type == 0 && i->pitch_byte == 0x31 &&
-	                    i->aim_yaw_byte == 0xF4 && i->anim_state_id == 47 &&
+	                    i->aim_pitch_byte == 0xF4 && i->anim_state_id == 47 &&
 	                    i->anim_channel_ratio == 0 && i->pitch_bam == 0,
 	            "infantry compact stages its aim bytes and writes no live Pitch"))
 		return false;
@@ -1134,8 +1134,8 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	            "UseGun infantry leaves the generic vehicle-seat flag clear")) return false;
 	if (!expect(wire->infantry.yaw_byte == 0x10,
 	            "mounted infantry's yaw byte is its target heading, carrier-local")) return false;
-	if (!expect(wire->infantry.pitch_byte == 0x20 &&
-	                    wire->infantry.aim_yaw_byte == 0xF0 &&
+	if (!expect(wire->infantry.aim_heading_byte == 0x20 &&
+	                    wire->infantry.aim_pitch_byte == 0xF0 &&
 	                    wire->infantry.anim_byte == 47,
 	            "mounted infantry carries witnessed aim and animation bytes")) return false;
 
@@ -1157,7 +1157,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	const ns::ClientEntityState *decoded = view.state().find(ih.packed);
 	if (!expect(decoded != nullptr && decoded->carrier_handle == vh.packed &&
 	                    decoded->mount_bone == 3 && decoded->pitch_byte == 0x20 &&
-	                    decoded->aim_yaw_byte == 0xF0 && decoded->anim_state_id == 47 &&
+	                    decoded->aim_pitch_byte == 0xF0 && decoded->anim_state_id == 47 &&
 	                    decoded->pitch_bam == 0,
 	            "mounted infantry selector and aim bytes survive the production fold; the record "
 	            "writes no live Pitch (the seat branch's look chases it every tick)"))

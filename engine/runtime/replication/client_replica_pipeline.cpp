@@ -1097,7 +1097,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// The second pass re-arms this only if the final carrier resolves.
 		es.net_seat_valid = false;
 		es.pitch_byte = 0;
-		es.aim_yaw_byte = 0;
+		es.aim_pitch_byte = 0;
 		es.anim_state_id = 0;
 		es.anim_channel_ratio = 0;
 
@@ -1294,8 +1294,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			es.carrier_handle = rec.infantry.seat_bone_idx != 0
 					? rec.infantry.vehicle_slot_handle : wire_handle::kInvalid;
 			es.mount_bone = rec.infantry.seat_bone_idx;
-			es.pitch_byte = rec.infantry.pitch_byte;
-			es.aim_yaw_byte = rec.infantry.aim_yaw_byte;
+			es.pitch_byte = rec.infantry.aim_heading_byte;
+			es.aim_pitch_byte = rec.infantry.aim_pitch_byte;
 			es.anim_state_id = rec.infantry.anim_byte;
 			es.state_flags = rec.infantry.flags_byte;
 			// The record carries the aim words (+0x2EC, +0x2D0), not the live Yaw / Pitch: a
