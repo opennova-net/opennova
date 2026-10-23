@@ -52,7 +52,7 @@ int facial_expression_index(const std::string &name) {
 
 void step_facial_animation(FacialSlot &slot, bool dead, uint32_t display_frame,
 		uint32_t wall_time_ms) {
-	// [orig: CScarDecal_Update @0x57FA50]
+	// [orig: FaceAnim_UpdateSlot @0x57FA50]
 	slot.blend += 0.125f;
 	if ((display_frame & 63u) == 0) {
 		// Render-family draw: the thread-local effects stream, not
@@ -204,7 +204,7 @@ void FacialSystem::initialize(World &world) {
 void FacialSystem::tick(World &world) {
 	initialize(world);
 	// The process's GetTickCount, the main loop's clock (world/tick_count_clock.h)
-	// [orig: CScarDecal_Update @0x57FA50 - GetTickCount @0x57FAEA].
+	// [orig: FaceAnim_UpdateSlot @0x57FA50 - GetTickCount @0x57FAEA].
 	const uint32_t now_ms = frame_tick_count_ms();
 	for (auto &slot : slots_) {
 		const Entity *entity = world.registry.get(slot.owner);

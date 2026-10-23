@@ -1,5 +1,5 @@
 // Mission-owned facial slots and GRM texture animation.
-// [orig: CScarDecal_Init @0x57F900; FaceAnim_AllocEntitySlot; CScarDecal_Update @0x57FA50]
+// [orig: CScarDecal_Init @0x57F900; FaceAnim_AllocEntitySlot; FaceAnim_UpdateSlot @0x57FA50]
 #pragma once
 
 #include <formats/grm/grm.h>
@@ -42,7 +42,7 @@ struct FacialSlot {
 // The gaze pair is gated on the display counter, so it draws from the
 // thread-local render/effects CRT stream (base/crt/crt_rng.h), never from the
 // session-seeded World::crt_rand (D-NET-115).
-// [orig: CScarDecal_Update @0x57FA50, caller @0x4C21FB]
+// [orig: FaceAnim_UpdateSlot @0x57FA50, caller @0x4C21FB]
 void step_facial_animation(FacialSlot &slot, bool dead, uint32_t display_frame,
 		uint32_t wall_time_ms);
 

@@ -1494,7 +1494,7 @@ uint32_t power_throw_windup_start(World &world, LocalPlayerWeapon &w) {
 // [orig: Input_HandleActionBinding_0 @0x4E0420 - the press leg @0x4E0A25..0x4E0A78, the
 //  release leg @0x4E087F..0x4E08D2: the slot word entity+0x1B8 (0: none @0x4E0A33 /
 //  @0x4E088D), its row unk_26C77A0 + 100 * (word & 0x7FFF): +0x2C = 4, +0x30 = 15,
-//  +0x50 = 15, +0x48 / +0x4C = 0.0; the fields as CScarDecal_Update @0x57FA50 reads them
+//  +0x50 = 15, +0x48 / +0x4C = 0.0; the fields as FaceAnim_UpdateSlot @0x57FA50 reads them
 //  (+0x2C the override @0x57FACB, +0x30 its timer @0x57FAD2, +0x48 / +0x4C the directed gaze
 //  @0x57FB2C / @0x57FB48, +0x50 its timer @0x57FB25..0x57FB35); Game_ProcessMainFrame
 //  @0x5263F0 - Input_ProcessFrame @0x52661D ahead of Entity_UpdateAllEntities @0x52674B

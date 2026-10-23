@@ -5,7 +5,7 @@
 // ahead of the update's facial step.
 // [orig: Input_HandleActionBinding_0 @0x4E0420 - the press leg @0x4E0A06..0x4E0A78, the release
 //  leg @0x4E086F..0x4E08D2 (FaceAnim row +0x2C = 4, +0x30 = 15, +0x50 = 15, +0x48 / +0x4C =
-//  0.0); WeaponSlot_RequestFire @0x53EFA0; CScarDecal_Update @0x57FA50 from
+//  0.0); WeaponSlot_RequestFire @0x53EFA0; FaceAnim_UpdateSlot @0x57FA50 from
 //  FaceAnim_UpdateAllSlots @0x580000]
 #include <cstdio>
 #include <cstring>
@@ -101,7 +101,7 @@ void test_a_taken_press_sets_the_fire_face_at_its_record() {
 	CHECK(fire_face(*face)); // at the dispatch, before any pump
 	// The update's facial step follows the input frame: it runs the face's first step, the
 	// gaze directed. [orig: Game_ProcessMainFrame @0x5263F0 - Input_ProcessFrame @0x52661D
-	//  ahead of Entity_UpdateAllEntities @0x52674B; CScarDecal_Update @0x57FB25..0x57FB35]
+	//  ahead of Entity_UpdateAllEntities @0x52674B; FaceAnim_UpdateSlot @0x57FB25..0x57FB35]
 	f->world.facials.tick(f->world);
 	CHECK(face->directed_timer == 14);
 	CHECK(face->expression_override == 4);
@@ -167,7 +167,7 @@ void test_no_facial_slot_takes_no_face() {
 // facial slot writes no row: retail's unguarded write lands in row 0, another character's face,
 // which ours leaves alone (PERMANENT, Q22-1 (a)).
 // [orig: Player_OnDamageReceived @0x4DD880 - the row @0x4DD8F3..0x4DD907, +0x2C = 6 @0x4DD90F,
-//  +0x30 = 10 @0x4DD916; CScarDecal_Update @0x57FA50 (@0x57FACB / @0x57FAD2)]
+//  +0x30 = 10 @0x4DD916; FaceAnim_UpdateSlot @0x57FA50 (@0x57FACB / @0x57FAD2)]
 void test_the_damage_face() {
 	auto f = std::make_unique<Fixture>();
 	auto local = std::make_unique<LocalPlayer>(f->world);
