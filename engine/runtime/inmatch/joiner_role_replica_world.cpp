@@ -517,24 +517,32 @@ void JoinerRole::fold_local_record() {
 }
 
 // A 0x18 naming the joiner's own handle rebuilds its body in place: retail's slot is the one
-// g_LocalPlayerEntity names, so the record's stores land on L. The destroy and the memset clear
-// the block below +0x2B4 (world::clear_body_block_below_2b4); then the record's def by its type
+// g_LocalPlayerEntity names, so the record's stores land on L. The destroy frees a held GRM facial
+// slot and zeroes a held AI slot, and the memset clears the block below +0x2B4
+// (world::clear_body_block_below_2b4); an AIData def then takes a fresh, zeroed AI slot (ours: the
+// zeroed colocated one); then the record's def by its type
 // word, its Flags word, Position and the Yaw / Pitch words, Health the def's healthMax, its Team,
 // NetId, animSlot, class word and +0x154 slot byte, refNum, the Name (an AIData def's), its
 // ground entity (+0x28), no occupant and no mount, the lean 0, the model init's savedLivePose;
 // then the def's class init (the plyr row's: the equipped default, the DcbId) and its traits.
 // The record's subType byte lands on +0x214. The words past +0x2B4 stay. The record's +0x16C and +0x170 handles are not modeled here: L stays
-// unmounted, with no occupant.
+// unmounted, with no occupant. The model init's fresh facial slot is the caller's, after the
+// body's traits bind (JoinerRole::rebuild_local_from_full_spawn).
 // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_Destroy @0x433815, the memset
 //  @0x433821, Flags @0x433B69, Position / Yaw @0x433B77..0x433B8C, NetId / Team / Pitch / class /
 //  +0x154 @0x433B9F..0x433BBB, subType @0x433BC1, ItemList_FindIndexByTypeId @0x433BC7, the
 //  def stores @0x433BD4..0x433BDF, Health = healthMax @0x433C39, +0x170 @0x433C91, +0x28
 //  @0x433CDD, +0x16C @0x433D21, the lean @0x433E5C, Entity_InitFromModel @0x433E6C, the class
-//  init @0x433E82]
+//  init @0x433E82; Entity_Destroy @0x43E810 - FaceAnim_FreeEntitySlot (the call @0x43E894), the AI
+//  slot memset @0x43E9AE; the AIData test @0x433D37, Entity_AllocateAISlot @0x40D2C0 (the call
+//  @0x433D41, its memset @0x40D2E9)]
 void rebuild_local_body_words(world::World &world, world::Entity &local, world::AiEntity &local_ai,
 		const replication::ClientEntityState &self) {
 	// The destroy and the memset first, so every word of the block the record does not store
 	// reads zero (D-NET-NEW-L5-28) [orig: Entity_Destroy @0x433815, the memset @0x433821].
+	world.facials.release(local);
+	local.facial_checked = false;
+	local_ai.slot = world::AiSlot{};
 	world::clear_body_block_below_2b4(local_ai, local);
 	world::bind_player_item_row(world, local, world::item_index_by_type_id(world, self.type_id));
 	local.flags = self.spawn_entity_flags;
@@ -597,6 +605,10 @@ void JoinerRole::rebuild_local_from_full_spawn() {
 	if (local == nullptr || local_ai == nullptr) return;
 	rebuild_local_body_words(world, *local, *local_ai, *self);
 	kernel_->bind_spawned_body(world.cached.local_player);
+	// The model init's fresh, append-only facial slot, ahead of the class init
+	// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_InitFromModel @0x433E6C ->
+	//  FaceAnim_AllocEntitySlot @0x57FDF0 (the call @0x40E22E), the class init @0x433E82].
+	world.facials.initialize_entity(world, *local);
 	world::player_body_class_init(world, *local);
 }
 

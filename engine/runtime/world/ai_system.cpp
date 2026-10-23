@@ -778,9 +778,14 @@ static void person_ewep_anchored_attach(World &world, AiEntity &e, Entity &body,
 // hold +0x174, the last attacker +0x178, the toggle fallback +0x180, the radar / heat words
 // +0x1A6 / +0x1A4, the death tick +0x1AC, the reviving latch +0x1E0, the target refcount +0x212,
 // subType +0x214, refNum +0x215, the location +0x280, playerClass +0x294, +0x2AC and the
-// equipped ADM index +0x2B0, whose zero is the null def). Its words past +0x2B4 stay
-// (the spawn backup, animSlot +0x374, the lean and radio words). The GRM facial slot (+0x1B8) is
-// an allocation ours releases with the row, the bounding-box centre (+0x1FC) the model's stamp.
+// equipped ADM index +0x2B0, whose zero is the null def), and the AI entity's homes of block
+// words (below). Its words past +0x2B4 stay (the spawn backup, animSlot +0x374, the lean ramp and
+// radio words). Not here: the GRM facial slot (+0x1B8), which the destroy frees ahead of the memset
+// (the callers release ours: FacialSystem::release); the bound radius (+0x0) and the bounding-box
+// centre (+0x1FC), the model's stamps, which Entity_InitFromModel restamps (bind_spawned_body
+// re-derives both from the same model); and the input words (MoveOrder +0x12C, the analog bytes
+// +0x130..+0x133), which the next input pack and the 0x0A tail's stance re-latch
+// (NapiNPClientMsg_0x00A @0x430562 / @0x430570) restamp.
 // [orig: Entity_Destroy @0x43E810 - `push 2B4h` @0x43EA69, the memset @0x43EA70;
 //  NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_Destroy @0x433815, `push 2B4h` @0x43381A,
 //  the memset @0x433821]
@@ -842,13 +847,20 @@ void clear_body_block_below_2b4(AiEntity &e, Entity &body) {
     body.player_class = 0;
     body.spawn_phase = 0;
     body.equipped_adm_index = 0;
-    // The AI entity's mirrors of the same block: the DcbId +0x7C, the relation key +0x11C, Team
-    // +0x162, the body heading +0x8C, the eye triple, org2's jump latch / org1's target heading
-    // +0x1A8, and the chase's stage +0x234..+0x244 and its count / bucket +0x27C / +0x27E.
+    // The AI entity's homes of the same block: the DcbId +0x7C, the relation key +0x11C, Team
+    // +0x162, the body heading +0x8C and pitch +0x90 (savedLivePose's words, which the player
+    // body's head pose reads: `fild [esi+90h]` @0x4B6A8F), the lean angle +0xB0 (the camera's roll
+    // reads it, @0x437FCD), the standing-idle count +0x148 (the corpse timer's word: `add
+    // [esi+148h], 1` @0x4B727B, idle 0x2B + (count >= 0x3E) @0x4B7293), the eye triple, org2's
+    // jump latch / org1's target heading +0x1A8, and the chase's stage +0x234..+0x244 and its
+    // count / bucket +0x27C / +0x27E.
     e.net_id = 0;
     e.relmat_id = 0;
     e.team = 0;
     e.inf.body_heading = 0;
+    e.body_pitch = 0;
+    e.inf.lean_angle = 0;
+    e.inf.idle_counter = 0;
     e.inf.eye_offset_x = 0;
     e.inf.eye_offset_y = 0;
     e.inf.eye_offset_z = 0;
@@ -862,16 +874,26 @@ void clear_body_block_below_2b4(AiEntity &e, Entity &body) {
 }
 
 // Entity_Destroy over the local player's own body, which stays the local player's (retail's
-// g_LocalPlayerEntity keeps naming the slot): the memset over +0..+0x2B4 (clear_body_block_below_2b4)
+// g_LocalPlayerEntity keeps naming the slot): the GRM facial slot is freed first (+0x1B8 nonzero),
+// so the 0x18's model init allocates a fresh, append-only one; an AIData def's AI slot (+0x68) is
+// zeroed (a person never holds a brain at +0x64: its only allocator, Entity_InitVehicleAI, is a
+// vehicle / helicopter class init's); then the memset over +0..+0x2B4 (clear_body_block_below_2b4)
 // leaves it no def, so the pool-0 walk runs nothing over it (its +0x1C4 is 0), its uplink stops (the
 // serializer's def test) and its record applies are dropped (the case-2 def test); then the
 // destroy's tail stores 0xFF in the slot byte (+0x154). A 0x18 of its handle rebuilds it
 // (JoinerRole::rebuild_local_from_full_spawn).
-// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70, +0x154 @0x43EA78;
+// [orig: Entity_Destroy @0x43E810 - the +0x1B8 test @0x43E88A, FaceAnim_FreeEntitySlot @0x57FCA0
+//  (the call @0x43E894), the AI slot memset @0x43E9AE, the memset @0x43EA70, +0x154 @0x43EA78;
+//  Entity_InitVehicleAI @0x460200 - the +0x64 store @0x460252, reached from the class table's
+//  CHel / cveh / cbot / cpln / ctrn rows (@0x8132A0, @0x813378..0x8133C0), not from the person
+//  rows org0 / org1 / plyr (@0x813018..0x813048);
 //  Entity_UpdateAllEntities @0x4C2100 - the null test @0x4C246F; Pool_SerializeEntityViaVTable
 //  @0x4D64E0 - the def test @0x4D654F..0x4D6554; NetPacket_SerializePlayerState @0x4C09C0 - the
 //  def test @0x4C0F92]
-static void destroy_local_body_in_place(AiEntity &e, Entity &body) {
+static void destroy_local_body_in_place(World &world, AiEntity &e, Entity &body) {
+    world.facials.release(body);
+    body.facial_checked = false;
+    e.slot = AiSlot{};
     clear_body_block_below_2b4(e, body);
     body.player_slot_id = 0xFF;
 }
@@ -918,7 +940,7 @@ void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
         world.out.entity_info_requests.push_back(body.ground_target);
         world.out.entity_info_requests.push_back(body.handle);
         if (&body == world.registry.get(world.cached.local_player))
-            destroy_local_body_in_place(e, body);
+            destroy_local_body_in_place(world, e, body);
         return;
     }
     // A ground link to a destroyed slot reads a zeroed ground (link_reads_zeroed_slot): no def, no

@@ -104,11 +104,17 @@ public:
 	void render_scene_passes(World &world, const LocalPlayerViewFrame &view,
 			std::vector<FacialDraw> &out);
 
+	// One row's model init: a person row with no live slot takes the next append-only slot
+	// (the tick's initialize runs it over every row; a 0x18 that rebuilds the joiner's own body
+	// runs it at the record's model init).
+	// [orig: Entity_InitFromModel @0x40DC30 - FaceAnim_AllocEntitySlot @0x57FDF0 (the call
+	//  @0x40E22E, the +0x1B8 store @0x40E236)]
+	void initialize_entity(World &world, Entity &entity);
+
 	const std::vector<FacialSlot> &slots() const { return slots_; }
 	uint32_t display_frame() const { return display_frame_; }
 
 private:
-	void initialize_entity(World &world, Entity &entity);
 	const ResourceIndex *index_ = nullptr;
 	std::unordered_map<int32_t, std::string> model_names_;
 	std::vector<std::pair<std::string, std::shared_ptr<const grm::File>>> models_;

@@ -411,7 +411,18 @@ void test_the_full_spawn_rebuilds_the_local_body() {
 	body.eye_offset_z = 0xD000;
 	body.carry_flags = 0x10100;
 	body.display_name = "Lead";
+	// The AI entity's homes of block words (+0x90, the idle count +0x148), its AI slot, and a
+	// face slot the record's destroy frees (V-ROLL-AQ D1 / D2 / D3).
+	ai.body_pitch = 0x00300000;
+	ai.inf.idle_counter = 40;
+	ai.slot.f[3] = 5;
+	body.facial_slot = 0x8000;
+	body.facial_checked = true;
 	opennova::inmatch::rebuild_local_body_words(r.world, body, ai, self);
+	expect(ai.body_pitch == 0 && ai.inf.idle_counter == 0 && ai.slot.f[3] == 0,
+			"the memset's AI-entity homes and the destroy's AI slot memset");
+	expect(body.facial_slot == 0 && !body.facial_checked,
+			"the destroy frees the face slot; the model init allocates a fresh one");
 	expect(body.has_item_def && body.item_type_index == 1 && body.item_id == 0x14B9,
 			"the record's type word binds the def");
 	expect(body.health == 150 && ai.health == 150, "Health is the def's healthMax");

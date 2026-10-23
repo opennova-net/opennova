@@ -1885,6 +1885,11 @@ void test_an_ewep_row_local_body_is_destroyed_in_place() {
 		body->ref_num = 7;
 		body->carry_flags = 0x10100;
 		body->anim_slot = 3;
+		// The AI entity's homes of block words (V-ROLL-AQ D1 / D2 and note 1): +0x90, the
+		// standing-idle count +0x148, the lean angle +0xB0.
+		ae->body_pitch = 0x00300000;
+		ae->inf.idle_counter = 40;
+		ae->inf.lean_angle = 0x03000000;
 		r.world->rules.mp_session = true;
 		r.world->rules.mp_session_peer = true;
 		r.world->rules.logic_authority = false;
@@ -1918,6 +1923,9 @@ void test_an_ewep_row_local_body_is_destroyed_in_place() {
 		CHECK(body->ref_num == (local ? 0 : 7));
 		CHECK(body->carry_flags == (local ? 0u : 0x10100u));
 		CHECK(body->anim_slot == 3);
+		// The same block words' AI-entity homes: +0x90 (`fild [esi+90h]` @0x4B6A8F), the idle
+		// count +0x148 (@0x4B727B) and the lean +0xB0 (@0x437FCD) read zero on the local body.
+		CHECK(!local || (ae->body_pitch == 0 && ae->inf.idle_counter == 0 && ae->inf.lean_angle == 0));
 		CHECK(body->spawn_position.x.q16 == 0x00012345);
 		CHECK(ae->inf.leg_yaw[0] == 0x40000000);
 		CHECK(!local || r.world->cached.local_player == self);

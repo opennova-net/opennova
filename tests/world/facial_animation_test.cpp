@@ -6,6 +6,7 @@
 #include <formats/def/def.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/facial_animation.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/local_player_view.h>
@@ -280,6 +281,47 @@ void test_scene_passes_step_once_per_pass() {
 	CHECK(f->slot(near_inset).priority == 0 && f->slot(near_main).priority == 1);
 }
 
+// The local body's in-place destroy (the ewep row's stale-ground leg on a joiner) frees its face
+// slot ahead of the memset and zeroes its AI slot; through the window the body has no def, so the
+// tick's initialize allocates nothing; the 0x18's model init then takes the next append-only slot,
+// never the freed one. Another row keeps its slot. (D-NET-NEW-L5-28, V-ROLL-AQ D3.)
+// [orig: Entity_Destroy @0x43E810 - the +0x1B8 test @0x43E88A, FaceAnim_FreeEntitySlot @0x57FCA0
+//  (the call @0x43E894), the AI slot memset @0x43E9AE; Entity_InitFromModel @0x40DC30 -
+//  FaceAnim_AllocEntitySlot @0x57FDF0 (the call @0x40E22E); NapiNPClientMsg_FullEntitySpawn
+//  @0x433780 - Entity_InitFromModel @0x433E6C]
+void test_the_local_body_in_place_destroy_frees_its_face() {
+	auto f = std::make_unique<Fixture>();
+	const auto other = f->spawn(1);
+	const auto self = f->spawn(2);
+	CHECK(f->entity(self).facial_slot == 0x8001);
+	static constexpr uint16_t kGround = 0x1003;
+	f->world.cached.local_player = self;
+	f->entity(self).ground_target = EntityHandle{kGround};
+	f->world.rules.mp_session = true;
+	f->world.rules.mp_session_peer = true;
+	f->world.rules.logic_authority = false;
+	f->world.destroyed_mark = [](uint16_t handle) { return handle == kGround; };
+	f->world.logic_tick = 0x7F;
+	auto ai = std::make_unique<AiEntity>();
+	ai->slot.f[3] = 5;
+	person_ewep_mover(f->world, *ai, f->entity(self));
+	CHECK(f->world.out.entity_info_requests.size() == 2);
+	CHECK(!f->entity(self).has_item_def && f->entity(self).player_slot_id == 0xFF);
+	CHECK(f->entity(self).facial_slot == 0 && f->world.facials.for_entity(f->entity(self)) == nullptr);
+	CHECK(!f->world.facials.slots()[1].owner.valid());
+	CHECK(f->world.facials.for_entity(f->entity(other)) != nullptr);
+	CHECK(ai->slot.f[3] == 0);
+	f->world.facials.initialize(f->world);
+	CHECK(f->entity(self).facial_slot == 0 && f->world.facials.slots().size() == 2);
+	Entity &body = f->entity(self);
+	body.item_id = 11;
+	body.item_type = 3;
+	body.has_item_def = true;
+	f->world.facials.initialize_entity(f->world, body);
+	CHECK(body.facial_slot == 0x8002 && f->world.facials.slots().size() == 3);
+	CHECK(f->world.facials.for_entity(body) != nullptr && !f->world.facials.slots()[1].owner.valid());
+}
+
 } // namespace
 
 int main() {
@@ -290,5 +332,6 @@ int main() {
 	test_automatic_expression();
 	test_look_back_uses_the_placement_heading();
 	test_scene_passes_step_once_per_pass();
+	test_the_local_body_in_place_destroy_frees_its_face();
 	return failures ? 1 : 0;
 }
