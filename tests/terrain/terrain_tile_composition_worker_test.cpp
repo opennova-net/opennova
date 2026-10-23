@@ -197,12 +197,12 @@ int main() {
 	//  composite PolyTrn_RenderTile @0x60E0C6..0x60E19D]
 	{
 		opennova::TerrainTilePageKey shadow_page_key{};
-		shadow_page_key.sector_origin_x = 100;
+		shadow_page_key.sector_origin_x = 128;
 		shadow_page_key.page_lod_level = 4; // a 64-unit span
 		auto shadow = std::make_shared<opennova::terrain::TerrainStaticShadowCompilationSnapshot>();
 		shadow->revision = 1;
 		shadow->planner.set_light({ 0.3f, 0.9f, 0.3f }, { 127, 200, 200 });
-		shadow->planner.replace_casters({ box_caster(108.0f, 8.0f) }, false);
+		shadow->planner.replace_casters({ box_caster(136.0f, 8.0f) }, false);
 		CHECK(shadow->planner.plan(shadow_page_key).raster_required);
 		std::array<std::optional<TerrainTileCompositionWorker::Completion>, 2> modes;
 		for (std::size_t mode = 0; mode < modes.size(); ++mode) {
@@ -211,7 +211,7 @@ int main() {
 			shadow_cache.begin_frame(0);
 			shadow_cache.begin_frame(0);
 			shadow_worker.install_sources(solid_sources());
-			const opennova::TerrainTileCompositionJob shadow_job = job_for(shadow_cache, 100, 4);
+			const opennova::TerrainTileCompositionJob shadow_job = job_for(shadow_cache, 128, 4);
 			CHECK(shadow_worker.enqueue(shadow_job, shadow_worker.sources(), tint, light, {}, 11,
 					shadow, 0, false, /*device_shadow=*/mode == 1));
 			shadow_worker.wait_idle();
