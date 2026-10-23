@@ -153,12 +153,15 @@ void HudFrameCompiler::update_layout(const HudLayout &layout) {
 }
 
 void HudFrameCompiler::reset_overlay_buffers() {
-    stance_.stamp = 0;
-    flash_stamp_ = 0;
-	silhouette_stamp_ = 0;
-	// [orig: HUD_ResetAllOverlayBuffers @0x59DD40 - `mov g_HUDItemFlashLastTick, esi` @0x59DD7D]
+	// The compiler's four words of the reset, in its order past the radar's tick (world::
+	// radar_reset) [orig: HUD_ResetAllOverlayBuffers @0x59DD40 - `mov g_HUDItemFlashLastTick,
+	//  esi` @0x59DD7D, g_HUDAmmoFadeStamp @0x59DD89, g_HUDStanceFadeStamp @0x59DD8F,
+	//  g_HUDSilhouetteFadeStamp @0x59DD95].
 	item_flash_.reset_last_tick();
-    draw_list_ = HudDrawList{};
+	flash_stamp_ = 0;
+	stance_.stamp = 0;
+	silhouette_stamp_ = 0;
+	draw_list_ = HudDrawList{};
 }
 
 void HudFrameCompiler::reset_runtime_state() {

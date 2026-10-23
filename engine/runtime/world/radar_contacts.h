@@ -7,7 +7,7 @@
 // [orig: Radar_AddBlip @0x59b280; Radar_UpdateContacts @0x59a7e0;
 //  Radar_TrackMissile @0x59b200 (the missile list); HUD_ResetAllOverlayBuffers
 //  @0x59dd40 (the reset); the state @0x2721EEC..0x2721F3C, @0x2721F40,
-//  @0x2722B40, @0x2723EAC]
+//  @0x2722B40, g_RadarLastUpdateTick @0x2723EAC]
 #pragma once
 
 #include <array>
@@ -81,7 +81,7 @@ struct RadarContactState {
 	std::array<uint8_t, 12> olive12{};
 	std::array<uint8_t, 24> red24{};
 	std::array<uint8_t, 24> olive24{};
-	uint32_t last_tick = 0; // [orig: dword_2723EAC]
+	uint32_t last_tick = 0; // [orig: g_RadarLastUpdateTick]
 	// The incoming guided-missile list. The append writes ONE PAST the count
 	// (index count + 1), so row 0 stays null and the newest row sits outside
 	// the [0, count) range every reader walks; the 64th append writes past the

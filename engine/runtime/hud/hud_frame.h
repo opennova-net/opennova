@@ -1310,21 +1310,30 @@ public:
 	void reset_runtime_state();
 	// Respawn clears the overlay clocks, retaining the chat/system rings and
 	// the previous stance/ammo values [orig: HUD_ResetAllOverlayBuffers
-	// @0x59dd40]. Of that routine the compiler holds state for exactly two
-	// words: stance_.stamp is dword_2723D38 and flash_stamp_ is dword_2723D48
-	// (cleared @0x59dd8f / @0x59dd89), the stamp stores of
-	// HUD_DrawStanceIndicator @0x599f98 and HUD_DrawAmmoIndicator @0x599aca;
-	// their prev/cur bytes (byte_2723D3C/D3D @0x599f8c/@0x599f92,
-	// byte_2723D4C @0x599ac5) are retained as in retail. The rest of the
-	// routine has no compiler-side state: the missile list unk_2722B40
-	// (memset @0x59dd4e), the radar blip table unk_2721F40 + the edge timers
-	// dword_2721EEC/EF0 (@0x59dd5e..0x59dd6a) and the radar tick
-	// dword_2723EAC (@0x59dd83) are the local player's radar state, reset by
-	// the round init (world::radar_reset); the item flash timers' last tick
-	// g_HUDItemFlashLastTick (@0x59dd7d) is item_flash_'s (HudItemFlash::reset_last_tick);
-	// the layer visibility call @0x59dd75 at g_HUDDetailLevel (@0x59dd6f) is the embedder's
-	// (its declutter table, rebuilt at the stored level: HudOverlay::reset_overlay_buffers)
-	// and the target-overlay stamp dword_2723D58 (@0x59dd95) has none here.
+	// @0x59dd40]. Of that routine the compiler holds state for four words: the
+	// three fade stamps, stance_.stamp g_HUDStanceFadeStamp, flash_stamp_
+	// g_HUDAmmoFadeStamp and silhouette_stamp_ g_HUDSilhouetteFadeStamp (cleared
+	// @0x59dd8f / @0x59dd89 / @0x59dd95), the stamp stores of
+	// HUD_DrawStanceIndicator @0x599f98, HUD_DrawAmmoIndicator @0x599aca and the
+	// one HUD_DrawTargetEntityOverlay @0x59a60a and HUD_DrawWeaponSilhouette
+	// @0x59a74a share, and the item flash timers' last tick g_HUDItemFlashLastTick
+	// (@0x59dd7d), item_flash_'s (HudItemFlash::reset_last_tick). The stamps'
+	// keys are retained as in retail: the prev/cur bytes (byte_2723D3C/D3D
+	// @0x599f8c/@0x599f92, byte_2723D4C @0x599ac5) and the silhouette keys
+	// (silhouette_vehicle_ / silhouette_weapon_, dword_2723D60 @0x59a604 /
+	// dword_2723D5C @0x59a744). The rest of the routine has no compiler-side
+	// state: the missile list unk_2722B40 (memset @0x59dd4e), the radar blip
+	// table unk_2721F40 + the edge timers dword_2721EEC/EF0 (@0x59dd5e..0x59dd6a)
+	// and the radar's last tick g_RadarLastUpdateTick (@0x59dd83) are the local
+	// player's radar state (world::radar_reset); the layer visibility call
+	// @0x59dd75 at g_HUDDetailLevel (@0x59dd6f) is the embedder's (its declutter
+	// table, rebuilt at the stored level: HudOverlay::reset_overlay_buffers). Its
+	// two callers: the round init, through the local round reset effect
+	// (HudOverlay) and world::LocalPlayer::reset_for_new_round's radar_reset, and
+	// every mission start's HUD init, where the embedder builds a new HUD and the
+	// new kernel a new LocalPlayer, each of these words zero
+	// [orig: Game_InitNewRound @0x422740 - the call @0x4227A7; HUD_InitOverlaySystem
+	//  @0x5A4620 - the call @0x5A4949].
 	void reset_overlay_buffers();
 
 	// The 16 HUD item flash timers (hud_declutter.h HudItemFlash) BMS action 28 sub 37
@@ -1655,7 +1664,7 @@ private:
 	StanceFade stance_;
 	// The clip-indicator flash latch: the (bucket, reserve, class byte) key
 	// and the stamp, BSS-zero like retail's [orig: dword_2723D40 / dword_2723D44
-	// / byte_2723D4C, stamp dword_2723D48; HUD_DrawAmmoIndicator @0x599A96..0x599ACA].
+	// / byte_2723D4C, stamp g_HUDAmmoFadeStamp; HUD_DrawAmmoIndicator @0x599A96..0x599ACA].
 	int32_t flash_key_bucket_ = 0;
 	int32_t flash_key_reserve_ = 0;
 	uint8_t flash_key_class_ = 0;
@@ -1704,6 +1713,10 @@ private:
 	// else writes them (compile_overlay_pass).
 	uint32_t waypoint_altitude_color_ = 0;
 	int waypoint_altitude_band_ = 0;
+	// The silhouettes' shared fade stamp and their two keys, the controlled vehicle and the
+	// weapon [orig: g_HUDSilhouetteFadeStamp - HUD_DrawTargetEntityOverlay @0x59A60A (key
+	//  dword_2723D60 @0x59A604), HUD_DrawWeaponSilhouette @0x59A74A (key dword_2723D5C
+	//  @0x59A744)].
 	int silhouette_stamp_ = 0;
 	uint64_t silhouette_vehicle_ = 0;
 	std::string silhouette_weapon_;
