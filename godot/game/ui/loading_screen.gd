@@ -190,35 +190,78 @@ func present(force := false) -> void:
 	if is_inside_tree() and not GameRuntimeRoot.is_headless():
 		# A present draws the screen and its bar alone, no world pass (engine
 		# runtime/hud/loading_screen.h carries the witness): the world under the
-		# opaque layer is this viewport's 3D, left out of the forced draw.
+		# opaque layer is this viewport's 3D, and every offscreen target (the
+		# environment cube's faces, the water mirrors, the Inset) is held for the
+		# forced draw, so only the screen's own viewport chain draws.
 		var viewport := get_viewport()
 		var world_was_off := viewport.disable_3d
 		viewport.disable_3d = true
+		var held := hold_offscreen_targets(get_tree().root, viewport)
 		if OS.is_stdout_verbose():
-			# The instrument's GPU read: the root's draws are timed from the load's first present.
+			# The instrument's GPU reads: the root's and the screen viewport's draws are
+			# timed from the load's first present.
 			RenderingServer.viewport_set_measure_render_time(get_tree().root.get_viewport_rid(), true)
+			RenderingServer.viewport_set_measure_render_time(viewport.get_viewport_rid(), true)
 		var draw_start := Time.get_ticks_usec()
 		RenderingServer.force_draw(true, 0.0)
-		_note_slow_present(Time.get_ticks_usec() - draw_start, now)
+		_note_slow_present(Time.get_ticks_usec() - draw_start, now, viewport, held)
+		release_offscreen_targets(held)
 		viewport.disable_3d = world_was_off
 
 
+## The offscreen targets a present holds: every SubViewport under `tree_root` but
+## the screen's own viewport and the viewports that contain it (the debug view's
+## GameViewport carries the screen), each the RenderingServer would draw (its
+## server-side update mode, not the node property an UPDATE_ONCE keeps after its
+## draw), set to UPDATE_DISABLED. Returns [rid, mode, name, size] rows for
+## release_offscreen_targets, which puts each server mode back as it stood, so a
+## capture still pending (UPDATE_ONCE) draws with the next world frame (engine
+## runtime/hud/loading_screen.h carries the witness: no other target renders).
+static func hold_offscreen_targets(tree_root: Node, screen_viewport: Viewport) -> Array:
+	var held := []
+	if tree_root == null:
+		return held
+	for node in tree_root.find_children("*", "SubViewport", true, false):
+		var target := node as SubViewport
+		if target == screen_viewport or (screen_viewport != null and target.is_ancestor_of(screen_viewport)):
+			continue
+		var rid := target.get_viewport_rid()
+		var mode := RenderingServer.viewport_get_update_mode(rid)
+		if mode == RenderingServer.VIEWPORT_UPDATE_DISABLED:
+			continue
+		RenderingServer.viewport_set_update_mode(rid, RenderingServer.VIEWPORT_UPDATE_DISABLED)
+		held.append([rid, mode, target.name, target.size])
+	return held
+
+
+## Put back each target hold_offscreen_targets held, at its server mode.
+static func release_offscreen_targets(held: Array) -> void:
+	for row in held:
+		RenderingServer.viewport_set_update_mode(row[0], row[1])
+
+
 ## An instrument (--verbose only): a present whose forced draw ran 50 ms or more names
-## its split and the offscreen targets that drew in it beside the screen.
-func _note_slow_present(draw_usec: int, present_start_ms: int) -> void:
+## its split (the forced draw's frame setup, the scene and canvas updates ahead of the
+## draws), the root's and the screen viewport's last measured draws, and the offscreen
+## targets it held.
+func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: Viewport,
+		held: Array) -> void:
 	if draw_usec < 50000 or not OS.is_stdout_verbose():
 		return
-	var drawn := PackedStringArray()
-	for node in get_tree().root.find_children("*", "SubViewport", true, false):
-		var target := node as SubViewport
-		if target.render_target_update_mode != SubViewport.UPDATE_DISABLED:
-			drawn.append("%s %dx%d" % [target.name, target.size.x, target.size.y])
+	var held_names := PackedStringArray()
+	for row in held:
+		held_names.append("%s %dx%d mode %d" % [row[2], row[3].x, row[3].y, row[1]])
 	var root_rid := get_tree().root.get_viewport_rid()
-	print_verbose("LoadingScreen: present at %d%%: %d ms, force_draw %d ms; the root's last measured draw gpu %.1f ms cpu %.1f ms; the targets drawing: [%s]" % [
+	var screen_rid := screen_viewport.get_viewport_rid()
+	print_verbose("LoadingScreen: present at %d%%: %d ms, force_draw %d ms (frame setup %.1f ms); the root's last measured draw gpu %.1f ms cpu %.1f ms; the screen viewport %s's gpu %.1f ms cpu %.1f ms; the targets held: [%s]" % [
 			_progress, GameWorld.tick_count_ms() - present_start_ms, draw_usec / 1000,
+			RenderingServer.get_frame_setup_time_cpu(),
 			RenderingServer.viewport_get_measured_render_time_gpu(root_rid),
 			RenderingServer.viewport_get_measured_render_time_cpu(root_rid),
-			", ".join(drawn)])
+			screen_viewport.name,
+			RenderingServer.viewport_get_measured_render_time_gpu(screen_rid),
+			RenderingServer.viewport_get_measured_render_time_cpu(screen_rid),
+			", ".join(held_names)])
 
 
 ## Give a newly mounted Control one complete SceneTree frame to receive layout
