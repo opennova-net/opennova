@@ -723,8 +723,13 @@ struct InfantryState {
         idle_counter = 0;
         lean_left = false;
         lean_right = false;
-        lean_angle = 0;
-        torso_roll = 0;
+        // The lean (+0xB0) and the torso roll (+0x2DC) are not a respawn's: the joiner's record
+        // respawn arm stores neither (nor does the host's deploy, infantry_respawn_snap), so a
+        // redeployed body eases out of its corpse's words. A spawn holds both at the class
+        // init's zeros (player_class_init_animation) over a fresh attach.
+        // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the respawn arm @0x4C1109..0x4C114C,
+        //  Entity_ResetToSpawnState called @0x4C113C, Game_InitNewRound called @0x4C114C;
+        //  PlayerClass_InitEntity @0x4B1060 - +0x2DC @0x4B11B2, +0xB0 @0x4B11B8]
         body_heading = heading;
         target_heading = heading;
         leg_yaw[0] = leg_yaw[1] = heading;

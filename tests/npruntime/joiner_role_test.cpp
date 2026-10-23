@@ -3189,6 +3189,14 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 	// The respawn reset returns the map zoom to its spawn default (the round
 	// init leaves the zooms alone), so a moved zoom marks it.
 	h.kernel->local.hud_map_control.zoom_q16 = 1;
+	// D-NET-NEW-L5-61: the respawn arm stores neither the torso roll (+0x2DC) nor the lean
+	// (+0xB0), so L comes back with the corpse's words, the body ticks easing them (a zeroed
+	// pair would hold 0 on L's level ground). [orig: NetPacket_SerializePlayerState @0x4C09C0 -
+	//  the arm @0x4C1109..0x4C114C; the decay @0x4B5C97, the chase @0x4B5CFF..0x4B5D6D]
+	if (w::AiEntity *dead_ai = h.kernel->local.player_ai()) {
+		dead_ai->inf.torso_roll = 0x08000000;
+		dead_ai->inf.lean_angle = 0x20000000;
+	}
 	frame(100, 0x00); // the revive deploy: no 0x5A, the record alive again
 	frame(100, 0x00); // the next tail revives L
 	local = h.kernel->local.player();
@@ -3203,6 +3211,9 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 		return false;
 	if (!expect(local_ai->heading == static_cast<int32_t>(0xCC000000u),
 			"revive: L faces the record's heading byte"))
+		return false;
+	if (!expect(local_ai->inf.torso_roll > 0x04000000 && local_ai->inf.lean_angle > 0x10000000,
+			"revive: L keeps the corpse's torso roll and lean"))
 		return false;
 	return expect(h.role.runtime->authoritative_loadout_revision() == grants,
 			"revive: no grant folds, so L keeps the kit it died with");

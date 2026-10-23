@@ -384,6 +384,41 @@ bool run_respawn_releases_the_corpse_group() {
 	return expect(releases() == 0, "a live record after it releases nothing");
 }
 
+// D-NET-NEW-L5-61: the respawn arm and its reset store neither the torso roll (+0x2DC) nor the
+// lean (+0xB0), so the dead->alive fold leaves the row's corpse words for its body ticks to ease,
+// while the reset zeroes the Roll. [orig: NetPacket_SerializePlayerState @0x4C09C0 - the arm
+// @0x4C1109..0x4C114C, Entity_ResetToSpawnState called @0x4C113C; Entity_ResetToSpawnState
+// @0x4B9610 - Roll @0x4B97E3]
+bool run_respawn_keeps_the_torso_roll_and_lean() {
+	ns::ClientReplicaPipeline view(class_of);
+	view.set_remote_motion_mode(true);
+	const uint16_t handle = 0x000C;
+	seed_row(view, handle, kPlayerType);
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax)));
+	view.tick_remote_motion(0xFFFF);
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax, 0x02)));
+	view.tick_remote_motion(0xFFFF);
+	static constexpr int32_t kTorsoRoll = 0x03210000;
+	static constexpr int32_t kLean = -0x04560000;
+	ns::ClientEntityState *dead = view.state().find(handle);
+	if (!expect(dead != nullptr, "the dead row exists")) return false;
+	dead->torso_roll = kTorsoRoll;
+	dead->lean_angle = kLean;
+	dead->roll_bam = 0x01000000;
+	const auto edges = dead->respawn_revision;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax + (80 << 16))));
+	const ns::ClientEntityState *es = view.state().find(handle);
+	if (!expect(es != nullptr && es->respawn_revision == edges + 1, "the respawn edge folded"))
+		return false;
+	if (!expect(es->roll_bam == 0, "the reset zeroes the Roll")) return false;
+	return expect(es->torso_roll == kTorsoRoll && es->lean_angle == kLean,
+	              "the respawn edge keeps the torso roll and the lean");
+}
+
 // Pin the org2 bucket ladder's exact per-step math at three distances,
 // INCLUDING the verbatim non-monotonic [0x6000,0x7000) -> 7 rung — a silent
 // "monotonicizing fix" must fail here [orig: the ladder @0x4B44C4..0x4B4581;
@@ -1938,6 +1973,7 @@ int main() {
 	ok &= run_player_deadband_ignores_jitter();
 	ok &= run_respawn_snaps_without_glide();
 	ok &= run_respawn_releases_the_corpse_group();
+	ok &= run_respawn_keeps_the_torso_roll_and_lean();
 	ok &= run_org2_bucket_ladder_is_verbatim();
 	ok &= run_vehicle_bucket_ladder_is_verbatim();
 	ok &= run_vehicle_bit0_record_keeps_chasing();

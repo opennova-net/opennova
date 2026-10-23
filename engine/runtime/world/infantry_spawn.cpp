@@ -170,6 +170,15 @@ void player_class_init_animation(World &world, Entity &entity) {
     AiEntity *body = ai.for_handle(entity.handle);
     if (body == nullptr || !body->inf.active) return;
     InfantryState &inf = body->inf;
+    // The init's word run zeroes the torso roll (+0x2DC) and the lean (+0xB0) ahead of its
+    // channel test, so a body holding no channel takes them too. No respawn stores them
+    // (InfantryState::reset_for_spawn); the joiner's own 0x18 rebuild takes the torso roll's
+    // zero here, its memset stopping short of +0x2DC.
+    // [orig: PlayerClass_InitEntity @0x4B1060 - +0x2DC @0x4B11B2, +0xB0 @0x4B11B8, the channel
+    //  test @0x4B116D / @0x4B11D0; NapiNPClientMsg_FullEntitySpawn @0x433780 - `push 2B4h`
+    //  @0x43381A, the memset @0x433821, the lean @0x433E5C, the class init @0x433E82]
+    inf.torso_roll = 0;
+    inf.lean_angle = 0;
     if (!infantry_has_anim_channel(inf, ai.root_motion)) return;
     // [orig: PlayerClass_InitEntity @0x4B115B / @0x4B1161 / @0x4B1176]
     begin_spawn_channels(inf, anim_state::kIdle, ai.root_motion, ai.anim_rings);
@@ -274,6 +283,8 @@ void organic_init_body(World &world, AiEntity *body, Entity &entity, uint32_t dc
     entity.saved_live_pitch = entity.saved_live_roll = 0;
     body->pitch = body->body_pitch = body->roll = 0;
     entity.pitch_bam = entity.roll_bam = 0;
+    // [orig: Entity_InitOrganicAI @0x4BFCC0 - +0x2DC @0x4BFD8D, +0xB0 @0x4BFD93 (ecx = 0
+    //  @0x4BFD38)]
     inf.torso_roll = inf.lean_angle = 0;
     inf.arms_dip_ticks = inf.reload_anim_ticks = 0;
     inf.head_look_target = inf.last_look_target = inf.previous_look_target = {};

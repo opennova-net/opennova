@@ -1007,6 +1007,13 @@ int main() {
 		//  @0x517740, Entity_ResetToSpawnState @0x4B9610: no +0x2E0 store]
 		static constexpr int32_t kPitchLag = 0x00123400;
 		body_motor->inf.carrier_pitch_lag = kPitchLag;
+		// D-NET-NEW-L5-61: nor the torso roll (+0x2DC) or the lean (+0xB0), which the
+		// corpse's own words carry into the new life. [orig: Server_DeployPlayer @0x517740 and
+		//  its callees @0x50CF60 / @0x4B8B20 / @0x4B9610 / @0x422740: no +0x2DC, no +0xB0 store]
+		static constexpr int32_t kTorsoRoll = -0x05432100;
+		static constexpr int32_t kLean = 0x00654300;
+		body_motor->inf.torso_roll = kTorsoRoll;
+		body_motor->inf.lean_angle = kLean;
 		bare_world->out.destruction.effects.clear();
 		inmatch::Server_ReleasePlayerDeployment(
 				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
@@ -1018,6 +1025,8 @@ int main() {
 		            "the deploy releases the corpse's decay emitter")) return 1;
 		if (!expect(body_motor->inf.carrier_pitch_lag == kPitchLag,
 		            "the deploy leaves the deck ride's pitch lag")) return 1;
+		if (!expect(body_motor->inf.torso_roll == kTorsoRoll && body_motor->inf.lean_angle == kLean,
+		            "the deploy leaves the torso roll and the lean")) return 1;
 	}
 
 	// A join-time spectator is POSITIONED with the substitute team while its

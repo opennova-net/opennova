@@ -276,6 +276,10 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 			es.rm_leg_seeded = true;
 			es.rm_body_pitch = 0;
 			es.roll_bam = 0;
+			// The torso roll (+0x2DC) and the lean (+0xB0) stay: neither arm nor the reset
+			// stores them (D-NET-NEW-L5-61) [orig: NetPacket_SerializePlayerState @0x4C09C0 - the
+			//  arm @0x4C1109..0x4C114C; NetPacket_SerializeInfantryEntityState @0x4C0320 - the arm
+			//  @0x4C05B3..0x4C05FE; Entity_ResetToSpawnState @0x4B9610].
 		}
 		if (force_live_snap && remote_motion_mode_) {
 			// Retail stages the target BEFORE the respawn branch snaps the live

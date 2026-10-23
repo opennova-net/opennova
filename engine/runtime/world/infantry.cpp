@@ -447,13 +447,14 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.idle_counter = 0;
     inf.lean_left = false;
     inf.lean_right = false;
-    inf.lean_angle = 0;
-    inf.torso_roll = 0;
-    // The deck ride's pitch lag (+0x2E0) survives a respawn: no store on the deploy path
-    // writes it, so a residual still steps into the Pitch a thirty-second a tick.
+    // The deck ride's pitch lag (+0x2E0), the torso roll (+0x2DC) and the lean (+0xB0)
+    // survive a respawn: no store on the deploy path writes them, so a residual pitch lag
+    // still steps into the Pitch a thirty-second a tick, and the torso roll and the lean
+    // ease out of the corpse's (the camera roll, the spine and head roll terms).
     // [orig: Server_DeployPlayer @0x517740 and its Server_PositionPlayerForSpawn @0x50CF60,
     //  Entity_WarmUpOrganicAnimation @0x4B8B20, Entity_ResetToSpawnState @0x4B9610 and
-    //  Game_InitNewRound @0x422740 store no +0x2E0; the step @0x4B57CD..0x4B57E5]
+    //  Game_InitNewRound @0x422740 store none of the three; the step @0x4B57CD..0x4B57E5;
+    //  the decay @0x4B5C97, the chase @0x4B5CFF..0x4B5D6D]
     inf.body_heading = heading;
     inf.target_heading = heading;
     inf.leg_yaw[0] = inf.leg_yaw[1] = heading;

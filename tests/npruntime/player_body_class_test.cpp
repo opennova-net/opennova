@@ -819,8 +819,10 @@ struct Clips final : w::IRootMotionSource {
 // 43 with nothing pending, then 8 * ((c & 12) + 8 * ((c & 2) + 4 * (c & 1))) + 10 dual updates
 // for the owning connection id c (+0x78), each the secondary's 43 then the primary's, their root
 // output dropped (the body stays put). An org0 or item row's body runs none of it, nor does a
-// body holding no animation channel.
-// [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B115B, @0x4B1161, @0x4B1176, the channel test
+// body holding no animation channel. Ahead of the channel test the init zeroes the torso roll
+// and the lean, a channel-less plyr body's too (D-NET-NEW-L5-61).
+// [orig: PlayerClass_InitEntity @0x4B1060 - +0x2DC @0x4B11B2, +0xB0 @0x4B11B8,
+//  @0x4B115B, @0x4B1161, @0x4B1176, the channel test
 //  @0x4B116D / @0x4B11D0, the count @0x4B11D2..0x4B11E8, the loop @0x4B11F3..0x4B1225 (the
 //  AnimMap_UpdateDualChannels call @0x4B11FB into a stack buffer)]
 void test_the_plyr_class_init_warms_up_its_channels() {
@@ -842,10 +844,15 @@ void test_the_plyr_class_init_warms_up_its_channels() {
 			continue;
 		}
 		const int32_t z = body->position.z.q16;
+		if (w::AiEntity *seeded = r.world->ai.for_handle(body->handle)) {
+			seeded->inf.torso_roll = 0x01230000;
+			seeded->inf.lean_angle = -0x02340000;
+		}
 		w::player_class_init_animation(*r.world, *body);
 		const w::AiEntity *ae = r.world->ai.for_handle(body->handle);
 		CHECK(ae != nullptr);
 		if (ae != nullptr) {
+			CHECK(ae->inf.torso_roll == 0 && ae->inf.lean_angle == 0);
 			CHECK(ae->inf.anim_state == w::anim_state::kIdle);
 			CHECK(ae->inf.wpn_state == w::anim_state::kIdle);
 			CHECK(ae->inf.anim_pending == 0);
@@ -873,10 +880,18 @@ void test_the_plyr_class_init_warms_up_its_channels() {
 			r.world->ai.root_motion = nullptr;
 			continue;
 		}
+		if (w::AiEntity *seeded = r.world->ai.for_handle(body->handle)) {
+			seeded->inf.torso_roll = 0x01230000;
+			seeded->inf.lean_angle = -0x02340000;
+		}
 		w::player_class_init_animation(*r.world, *body);
 		const w::AiEntity *ae = r.world->ai.for_handle(body->handle);
 		CHECK(ae != nullptr && ae->inf.clip_phase == 0 && ae->inf.wpn_clip_phase == 0);
 		CHECK(clips.calls.empty());
+		// The plyr init's word run zeroes both ahead of its channel test, so its channel-less
+		// body takes them; the org0 and item rows run no plyr init.
+		const bool plyr = player_class == kPlyr;
+		CHECK(ae != nullptr && (ae->inf.torso_roll == 0) == plyr && (ae->inf.lean_angle == 0) == plyr);
 		r.world->ai.root_motion = nullptr;
 	}
 }
