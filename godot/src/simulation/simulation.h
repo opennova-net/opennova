@@ -825,6 +825,9 @@ public:
 	// `p_toggles`' status view, for a frame the session did not advance (an advanced frame's
 	// own verdict, taken after its drain, rides MissionFrameOutcome::is_scene_drawn).
 	bool session_draws_scene(const Ref<HudToggles> &p_toggles) const;
+	// Whether the session's entities are presented at all (engine
+	// inmatch::Session::presents_entities): never on a dedicated host.
+	bool session_presents_entities() const { return session_.presents_entities(); }
 	int session_state() const { return static_cast<int>(session_.state()); }
 	// The fixed logic-tick quantum (1/62.5 s) — the ONE cadence constant,
 	// re-exported from the engine accumulator for GDScript composition.
@@ -1786,6 +1789,10 @@ public:
 	// events; the tests author a DestructionDrain through its data leg.
 	void drain_vehicle_effects(std::vector<opennova::world::VehicleEffectEvent> &r_events);
 	void drain_destruction_events(opennova::world::DestructionEvents &r_events);
+	// Every queue the entity presenter's passes drain, dropped undrawn: a session that
+	// presents no entity (a dedicated host) empties them each ticked frame (engine
+	// world::discard_entity_presentation). NOT ClassDB-bound: MissionRoot's session step.
+	void discard_entity_presentation();
 	// NOT ClassDB-bound: the piece pool + frame draws; the NVG laser persons + ray clip.
 	void fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const;
 	const std::vector<opennova::world::DeathPieceDraw> &death_piece_draws() const;

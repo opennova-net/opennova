@@ -615,6 +615,17 @@ public:
 	//  the view word @0x521CD6, is_authority @0x521CDF..0x521CE6; Render_ProcessMainSceneFrame
 	//  @0x521CE8 or Server_DrawStatusScreen @0x521CEF]
 	bool draws_scene(const hud::HudToggleState *toggles) const;
+	// Whether the session's entities are presented at all. A dedicated host (no session peer)
+	// never takes the scene arm its entities are collected and drawn in, and its mission start
+	// jumps over the render subsystems' init: nothing presents its entities, and what its
+	// session raised for their presentation drops undrawn (world::discard_entity_presentation).
+	// Every other role presents them, a listen host under its status page included: the page
+	// stands in for a frame's draw, never for the entities' state.
+	// [orig: GameLoop_RenderFrame @0x521310 - is_mp_session_peer @0x52134E, `jz` @0x521355 to
+	//  Server_DrawStatusScreen @0x521CEF, past Render_ProcessMainSceneFrame @0x521CE8;
+	//  Game_StartMission @0x524360 - the dedicated word @0x524942..0x52495C, its test @0x5259B4
+	//  past Render_InitRenderingSubsystems @0x5259D1 and Render_InitTerrainSubsystems @0x5259FD]
+	bool presents_entities() const { return kind_ != RoleKind::DedicatedHost; }
 	// The main loop's frame statistics the authority's status page shows:
 	// the frames rendered during the last 62 logic updates and the CPU share
 	// of the frame-rate window (world::TickAccumulator::cpu_percent). A paused

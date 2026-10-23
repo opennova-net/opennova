@@ -287,8 +287,9 @@ public:
 	// mission container, nullable) hosts the tracer geometry, the throwable
 	// models and the node-less husk grafts; `item_db` names the husk/round
 	// graphics; `resource_root` resolves the scar strips. `audio` (nullable)
-	// gates the fire/destruction sound legs — the dedicated-host tri-state: no
-	// audio, no sounds, the effect legs still run; `fx` (nullable) the effect
+	// gates the fire/destruction sound legs: no audio, no sounds, the effect
+	// legs still run (a dedicated host binds no pass at all, MissionRoot's
+	// session step presents nothing there); `fx` (nullable) the effect
 	// legs; `lights` (nullable) the MF_Light muzzle glow and the death flash;
 	// `environment` (nullable) the scar fog cull + terrain light; `anchors`
 	// (nullable) the owner-anchor registry the wreck/piece/move effect groups

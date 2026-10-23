@@ -278,4 +278,15 @@ void fill_round_glows(const World &world, std::vector<RoundGlowRow> &r_rows) {
 	}
 }
 
+// A host that presents no entity drops what the passes would have drained (the header
+// carries the witness).
+void discard_entity_presentation(World &world) {
+	world.round_sim.fired.clear();
+	(void)world.out.fire_sounds.drain();
+	world.out.slot_sounds.clear();
+	world.out.sound_emitters.clear();
+	world.out.destruction.clear();
+	world.out.vehicle_effects.clear();
+}
+
 } // namespace opennova::world

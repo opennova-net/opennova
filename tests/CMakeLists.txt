@@ -5167,6 +5167,11 @@ add_executable(npruntime_add_send_phase_test npruntime/add_send_phase_test.cpp)
 target_link_libraries(npruntime_add_send_phase_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_add_send_phase_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_add_send_phase COMMAND npruntime_add_send_phase_test)
+# A dedicated host presents no entity: the passes' queues drop undrawn each ticked frame, the
+# fire ring among them (L3-s16 row 0).
+add_executable(entity_presentation_discard_test world/entity_presentation_discard_test.cpp)
+target_link_libraries(entity_presentation_discard_test PRIVATE opennova_runtime)
+add_test(NAME entity_presentation_discard COMMAND entity_presentation_discard_test)
 
 # --- parity lane L4 (spawn/death) ---
 # The player body's death edge raising the player-death transaction in the

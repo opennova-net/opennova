@@ -139,14 +139,15 @@ public:
 	Ref<MissionPresentStats> get_mission_present_stats() const;
 
 	// Bind the present passes' typed collaborators (ADR 0043 d9), after
-	// setup(): `audio` (nullable) gates the fire/destruction sound legs — a
-	// dedicated serve presents no sounds while the effect legs still run;
-	// `fx` (nullable) the effect legs; `lights` (nullable) the MF_Light
+	// setup(): `audio` (nullable) gates the fire/destruction sound legs (no
+	// audio plays no sound while the effect legs still run); `fx` (nullable)
+	// the effect legs; `lights` (nullable) the MF_Light
 	// muzzle glow + the death flash; `environment` (nullable) the scar pass's
 	// fog distance + combined terrain light; `anchors` (nullable) the
 	// owner-anchor registry the wreck/piece/move effect groups anchor
 	// through. The load calls this once the audio and effect stages have run;
-	// isolated tests pass what they have.
+	// isolated tests pass what they have. A session that presents no entity (a
+	// dedicated host) binds nothing.
 	void setup_passes(MissionAudio *p_audio, EffectWorld *p_fx,
 			EffectLightDirector *p_lights, MissionEnvironment *p_environment,
 			ItemEffectDirector *p_anchors);
@@ -288,6 +289,11 @@ private:
 	// each pass timed onto the stats board while the Stats tab captures. Owns
 	// the bundled perf_present_us_ the probe scripts read.
 	void present_frame(bool p_stats_on);
+	// A session frame's presentation: the whole present frame on a ticked frame,
+	// the rows alone on a zero-tick one; on a session that presents no entity (a
+	// dedicated host) nothing is built or applied and a ticked frame drops the
+	// passes' queues undrawn.
+	void present_session_frame(bool p_did_tick);
 	bool stats_capture_on() const;
 	// Pull the frame's tick accounting into the probe counters from the typed
 	// outcome. The session phase spans (SIM_STEP and the SIM_* attribution)

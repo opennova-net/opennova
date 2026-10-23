@@ -27,6 +27,7 @@
 #include <runtime/inmatch/server_console.h> // the chat display wrap
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
+#include <runtime/world/present_drains.h> // discard_entity_presentation (no presenter)
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the NovaWorld session's clock)
 
 #include <chrono>
@@ -875,8 +876,10 @@ bool Server::frame(double delta_seconds) {
 	input.delta_seconds = delta_seconds;
 	input.loaded_model_list_count = loaded_model_list_count_;
 	const inmatch::FrameOutcome outcome = session_->advance(input);
-	// No presenter drains the presentation half of the outbox.
+	// No presenter drains the presentation half of the outbox, nor the entity presenter's
+	// queues: the fire ring among them, which grew by every round fired until the next map.
 	kernel_->world.out.discard_presentation();
+	world::discard_entity_presentation(kernel_->world);
 	if (!outcome.terminal()) {
 		// The admin pump ends a game frame; a frame whose mission exit pushes the
 		// Post Menu returns before it [orig: Game_ProcessMainFrame @0x526872..0x526878

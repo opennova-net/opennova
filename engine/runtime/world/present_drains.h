@@ -143,4 +143,12 @@ void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow>
 void fill_death_pieces(const World &world, std::vector<DeathPieceRow> &r_pieces);
 void fill_round_glows(const World &world, std::vector<RoundGlowRow> &r_rows);
 
+// The entity presenter's queues dropped undrawn, for a host that presents no entity (a
+// dedicated host; inmatch::Session::presents_entities carries the witness): everything the
+// presenter's passes drain each ticked frame goes, the fire ring, the ready fire sounds, the
+// slot sounds, the sound emitters, the destruction events and the vehicle effects, so nothing
+// accumulates over a long run. The fixed-size state (the fire-sound countdown slots, the scar
+// rings, the death pieces) and every other queue stay for their own drains.
+void discard_entity_presentation(World &world);
+
 } // namespace opennova::world

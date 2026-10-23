@@ -356,6 +356,12 @@ void Simulation::drain_fire_sounds(std::vector<opennova::world::ReadyFireSound> 
 	r_sounds = kernel_->world.out.fire_sounds.drain();
 }
 
+// A session that presents no entity drops the passes' queues undrawn
+// (world/present_drains.h discard_entity_presentation).
+void Simulation::discard_entity_presentation() {
+	if (world_installed_) opennova::world::discard_entity_presentation(kernel_->world);
+}
+
 // The destruction presentation drain (world/destruction.h; §24): one call per
 // present, handing the sim's events to the C++ pass whole (the counters ride
 // along: `crackles` is the wreck-fire crackle rolls fired, S12b). The events

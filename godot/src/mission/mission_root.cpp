@@ -551,6 +551,12 @@ void MissionRoot::setup_passes(MissionAudio *p_audio, EffectWorld *p_fx,
 	if (presenter == nullptr) {
 		return;
 	}
+	// A session that presents no entity (a dedicated host) binds no pass: nothing they would
+	// build is ever drawn, the tracer ribbon's mesh included (engine
+	// inmatch::Session::presents_entities carries the witness).
+	if (sim_.is_valid() && !sim_->session_presents_entities()) {
+		return;
+	}
 	presenter->setup_passes(container(), item_db_, resource_root_, p_audio, p_fx, p_lights,
 			p_environment, p_anchors);
 }
@@ -750,6 +756,22 @@ void MissionRoot::present_frame(bool p_stats_on) {
 	perf_present_us_ = now_usec() - present_start;
 }
 
+void MissionRoot::present_session_frame(bool p_did_tick) {
+	// A session that presents no entity (a dedicated host) builds and applies nothing: no row
+	// walk, no pass; a ticked frame drops what its updates raised for the passes, undrawn
+	// (engine inmatch::Session::presents_entities carries the witness).
+	if (!sim_->session_presents_entities()) {
+		perf_present_us_ = 0;
+		if (p_did_tick) sim_->discard_entity_presentation();
+		return;
+	}
+	if (p_did_tick) {
+		present_frame(stats_capture_on());
+	} else {
+		present_entity_rows(stats_capture_on());
+	}
+}
+
 bool MissionRoot::tick() {
 	perf_effects_us_ = 0;
 	if (sim_.is_null()) {
@@ -771,7 +793,7 @@ bool MissionRoot::tick() {
 	}
 	read_frame_perf(outcome);
 	if (outcome.is_valid() && !outcome->is_terminal() && outcome->did_tick()) {
-		present_frame(stats_capture_on());
+		present_session_frame(true);
 	}
 	return outcome.is_valid() && outcome->did_tick();
 }
@@ -784,8 +806,10 @@ bool MissionRoot::on_session_tick(const opennova::inmatch::TickOutcome &p_tick) 
 	}
 	begin_present_effect_tick(p_tick.logic_tick);
 	// The throwable pass's fixed-tick half: the round-bound move groups
-	// reconcile BEFORE the effect world advances on this tick.
-	if (EntityPresenter *presenter = entities()) {
+	// reconcile BEFORE the effect world advances on this tick. A session that
+	// presents no entity runs none (its frame drops the vehicle effects).
+	EntityPresenter *presenter = entities();
+	if (presenter != nullptr && sim_->session_presents_entities()) {
 		presenter->sync_fixed_tick_effects();
 	}
 	const int64_t effects_start = now_usec();
@@ -886,11 +910,7 @@ Ref<MissionFrameOutcome> MissionRoot::advance_session_frame(
 	if (outcome.is_null() || outcome->is_terminal()) {
 		return outcome;
 	}
-	if (outcome->did_tick()) {
-		present_frame(stats_capture_on());
-	} else {
-		present_entity_rows(stats_capture_on());
-	}
+	present_session_frame(outcome->did_tick());
 	return outcome;
 }
 
