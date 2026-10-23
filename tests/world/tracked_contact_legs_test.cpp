@@ -218,9 +218,14 @@ void test_the_crash_latch_per_family() {
 // still falling past 0x1000 rebounds at |vz >> 1| capped 0x5000 and strikes its pads (the strike
 // forces fold into the chassis pose at once, none left queued); slower, it stops and re-enters the
 // crash state (+0x2EF), as does a crashed hull already down. The latched hull then settles in the
-// fit (crashed, frozen, slow and upright: +0x2F0).
+// fit (crashed, frozen, slow and upright: +0x2F0 set, +0x2EC cleared), so the pair clear after the
+// fit, which reads +0x2EC from the entity, drops +0x2EF the same tick: the settle is the latch's
+// witness. A hull still rolling (speed 0x1000 or more) is not settled and keeps both bytes.
 // [orig: @0x47E7F5..0x47E8E0; Entity_ApplyLightVehicleSuspensionForces @0x463750 (the call
-//  @0x47E861); Entity_ClearSuspensionForces @0x468980 (the call @0x47E870)]
+//  @0x47E861); Entity_ClearSuspensionForces @0x468980 (the call @0x47E870); the fit
+//  Entity_ProcessWheeledVehicleSuspension @0x46B140 (the call @0x47EC4D): the speed gate
+//  @0x46B4C8..0x46B4D3, +0x2F0 = 1 @0x46B4F4, +0x2EC = 0 @0x46B4FB; the pair clear's +0x2EC test
+//  @0x47ED31, +0x2EF = 0 @0x47ED59]
 void test_the_grounded_crashed_block() {
 	const auto crashed_hull = [](Rig &rig, bool in_air) -> Entity & {
 		Entity &v = rig.e();
@@ -245,16 +250,24 @@ void test_the_grounded_crashed_block() {
 		Entity &v = crashed_hull(*rig, true);
 		rig->solve(kPadsDown, -0x800);
 		CHECK(v.veh.slide_z == 0);
-		CHECK(v.veh.byte_2ef == 1);
 		CHECK(v.veh.settle_2f0 == 1 && v.veh.crashed == 0);
+		CHECK(v.veh.byte_2ef == 0);
 	}
 	{
 		auto rig = std::make_unique<Rig>(true);
 		Entity &v = crashed_hull(*rig, false);
 		rig->solve(kPadsDown, -0x14000);
-		CHECK(v.veh.byte_2ef == 1);
 		CHECK(v.veh.settle_2f0 == 1 && v.veh.crashed == 0);
+		CHECK(v.veh.byte_2ef == 0);
 		CHECK(!v.veh.chassis_active);
+	}
+	{
+		auto rig = std::make_unique<Rig>(true);
+		Entity &v = crashed_hull(*rig, false);
+		v.veh.speed = 0x8000;
+		rig->solve(kPadsDown, -0x14000);
+		CHECK(v.veh.crashed == 1 && v.veh.byte_2ef == 1);
+		CHECK(v.veh.settle_2f0 == 0);
 	}
 }
 

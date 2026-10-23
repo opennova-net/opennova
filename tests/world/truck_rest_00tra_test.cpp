@@ -121,19 +121,25 @@ int main() {
 
 		// The hard fall: dropped from 40 u, the truck's fall passes the authority's
 		// crash bound (|vz| > 0x7000) in the air; the request latches the crash at
-		// the next suspension fit, and the hull comes down a wreck.
+		// the next suspension fit. The crashed hull rebounds off its pads at half
+		// speed until it lands under 0x1000, which freezes it (+0x2EF); the fit then
+		// settles the stopped, upright hull, a wreck at rest (+0x2F0 set, +0x2EC
+		// cleared; the settle arm runs only on a frozen crashed hull).
 		// [orig: Entity_ProcessTrackedVehiclePhysics -- the hard-fall request
 		//  @0x47d771..0x47d7a8, the latch Entity_ProcessWheeledVehicleSuspension
-		//  @0x46b1a6..0x46b314]
+		//  @0x46b1a6..0x46b314; the grounded crashed block @0x47E7F5..0x47E8E0; the
+		//  fit's settle @0x46B4C8..0x46B4FB (the call @0x47EC4D)]
 		const w::Vec3 rest = rig.world.registry.get(handle)->position;
 		rig.world.commands.set_entity_position(handle, w::Vec3{rest.x, rest.y, rest.z + 40.0f});
 		rig.tick(310);
 		const w::Entity *fallen = rig.world.registry.get(handle);
 		if (expect(fallen != nullptr, "the dropped truck is still in the world")) {
-			std::printf("truck-rest: hard fall ssn=%u z %.3f -> %.3f crashed=%d\n", unsigned(ssn), rest.z + 40.0f,
-					float(fallen->position.z), int(fallen->veh.crashed));
+			std::printf("truck-rest: hard fall ssn=%u z %.3f -> %.3f crashed=%d frozen=%d settled=%d health=%d\n",
+					unsigned(ssn), rest.z + 40.0f, float(fallen->position.z), int(fallen->veh.crashed),
+					int(fallen->veh.byte_2ef), int(fallen->veh.settle_2f0), int(fallen->health));
 			expect(fallen->position.z < rest.z + 5.0f, "the dropped truck came down");
-			expect(fallen->veh.crashed != 0, "a 40 u fall latches the truck's crash");
+			expect(fallen->veh.settle_2f0 != 0 && fallen->veh.crashed == 0,
+					"a 40 u fall latches the truck's crash and settles it a wreck at rest");
 		}
 	}
 
