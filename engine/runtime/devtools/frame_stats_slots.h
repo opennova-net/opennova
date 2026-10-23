@@ -134,7 +134,9 @@
     X(SIM_REPLICATION_ENCODE, "selected 0x0A body serialization") \
     X(SIM_REPLICATION_ENQUEUE, "semantic transport enqueue") \
     X(SIM_HOST_SEND, "remote transport drain/frame/send") \
-    X(SIM_CLIENT_ROW_ADM, "joiner: the frame's providers and the decoded rows' .adm resolution, ahead of the receive")     X(SIM_CLIENT_DEPOSIT, "joiner: the hello and the socket drain into the runtime's receive queue")     X(SIM_CLIENT_SETUP, "client role clock + keepalive setup") \
+    X(SIM_CLIENT_ROW_ADM, "joiner: the frame's providers and the decoded rows' .adm resolution, ahead of the receive") \
+    X(SIM_CLIENT_DEPOSIT, "joiner: the hello and the socket drain into the runtime's receive queue") \
+    X(SIM_CLIENT_SETUP, "client role clock + keepalive setup") \
     X(SIM_CLIENT_RECEIVE, "loopback/wire receive + state fold") \
     X(SIM_CLIENT_AFTER_RECEIVE, "the embedder's receive-handler writes on L (kit, L's birth, its record, the 0x0F's pose)") \
     X(SIM_CLIENT_LOCAL_BIRTH, "joiner: L's birth on a seeded session's in-match edge (a join's is in its mission start)") \
