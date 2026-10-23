@@ -380,6 +380,14 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// its first 0x2F: its sound banks, the entity models' reload and the rows' init all
 	// run ahead of the first submission, and the model freeze after it (engine:
 	// inmatch::JoinerRole::MissionStartLegs carries the witness, D-NET-NEW-L2-42).
+	// The reload's pool-0 leg loads and registers each person row's animation map here, in
+	// the load, not on the first frame past it (engine: inmatch::JoinerRole::
+	// reload_pool0_row_channels, D-NET-NEW-L2-56).
+	if (joiner_start) {
+		timeline->span("pool0_channels");
+		challenge_sim->reload_join_pool0_row_channels();
+		timeline->end_span();
+	}
 	bool wire_world_placed = false;
 	if (joiner_start && wire_header_join) {
 		timeline->span("streamed_world");

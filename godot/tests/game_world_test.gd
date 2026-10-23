@@ -2569,11 +2569,15 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 				top.append(span.name)
 		var audio := top.find("audio")
 		var streamed := top.find("streamed_world")
+		var pool0_channels := top.find("pool0_channels")
 		var first_leg := top.find("first_leg")
 		var effects := top.find("effects")
 		var terrain_textures := top.find("terrain_textures")
 		var effects_warm := top.find("effects_warm")
 		assert_true(audio >= 0 and streamed > audio, "the streamed world follows the audio: %s" % [top])
+		# The reload's pool-0 animation maps sit between them (D-NET-NEW-L2-56).
+		assert_true(pool0_channels > audio and streamed > pool0_channels,
+				"the reload's pool-0 channels follow the audio and lead the streamed world: %s" % [top])
 		assert_true(first_leg > streamed, "the first leg follows the streamed world: %s" % [top])
 		assert_true(effects > first_leg, "the effect builds follow the first leg: %s" % [top])
 		assert_true(terrain_textures > effects and effects_warm > terrain_textures,

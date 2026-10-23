@@ -202,6 +202,12 @@ public:
 	//  NapiNPClientMsg_0x010 @0x433400 - Pool_UpdateMaxUsed called @0x433771;
 	//  Game_StartMission @0x524360 - Entity_InitAllFromModels called @0x52567F]
 	void materialize_world_stream();
+	// The mission start's model reload, its pool-0 leg's animation maps: each decoded pool-0
+	// person row's channel from its row (a player's at its class's camouflage item), the .adm
+	// loaded and registered in the load, ahead of the rows' init (D-NET-NEW-L2-56). The embedder
+	// runs it at the reload's place in a joiner's mission start (joiner_role.cpp carries the
+	// witness).
+	void reload_pool0_row_channels();
 	// The mission data's rules word into the world (bring_up and the S2C 0x64 copy's step).
 	void stamp_mission_rules();
 	// The witnessed key handlers queue one C2S 0x1D with the action id; it leaves
@@ -415,6 +421,8 @@ private:
 	void send_hello_once();
 	// Resolve each decoded organic row's adm id once its type is known.
 	void resolve_row_adm_ids();
+	// A kernel rearm (its adm revision moved) restarts every row's channel (-2: resolve again).
+	void rearm_row_adm_ids();
 	uint64_t infantry_adm_revision_seen_ = 0;
 	// A streamed topology/world change materialized: rebuild the asset-backed
 	// caches (collision/occlusion instances, item traits, seat specs) for the

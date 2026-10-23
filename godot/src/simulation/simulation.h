@@ -951,6 +951,9 @@ public:
 	// The streamed pools into the World ahead of the settle's placement (engine:
 	// inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
 	void materialize_join_world_stream();
+	// The mission start's model reload's pool-0 animation maps, at the reload's place in the
+	// load (engine: inmatch::JoinerRole::reload_pool0_row_channels, D-NET-NEW-L2-56).
+	void reload_join_pool0_row_channels();
 	// The game-start wait's pass and, when it takes the S2C 0x1A, the mission start's call in
 	// the same call: the shell's load, its settle, then the push and the final wait's first
 	// pass (engine: inmatch::JoinerRole::poll_mission_start, D-NET-NEW-L2-35). Stopped

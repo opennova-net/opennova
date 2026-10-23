@@ -1054,6 +1054,10 @@ void Simulation::materialize_join_world_stream() {
 	if (joiner_role_ != nullptr) joiner_role_->materialize_world_stream();
 }
 
+void Simulation::reload_join_pool0_row_channels() {
+	if (joiner_role_ != nullptr) joiner_role_->reload_pool0_row_channels();
+}
+
 opennova::inmatch::JoinerRole::MissionStartPass Simulation::poll_join_mission_start(
 		const opennova::inmatch::JoinerRole::MissionStartLegs &p_legs) {
 	if (joiner_role_ == nullptr) return opennova::inmatch::JoinerRole::MissionStartPass::Stopped;

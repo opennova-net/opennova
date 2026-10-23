@@ -626,14 +626,8 @@ bool JoinerRole::send_stance_request(int stance) {
 void JoinerRole::resolve_row_adm_ids() {
 	mission::MissionKernel &kernel = *kernel_;
 	if (!runtime) return;
-	const bool rearm = infantry_adm_revision_seen_ != kernel.infantry_adm_revision();
+	rearm_row_adm_ids();
 	for (replication::ClientEntityState &es : runtime->state().entities) {
-		if (rearm) {
-			es.rm_adm_id = -2;
-			es.rm_state = -1;
-			es.wpn_state = es.wpn_playing = -1;
-			es.wpn_deferred = 0;
-		}
 		if (es.rm_adm_id != -2) continue;
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) continue;
 		if (es.type_id == 0) continue;
@@ -641,7 +635,6 @@ void JoinerRole::resolve_row_adm_ids() {
 		if (adm_id < -1) continue; // the sources are not armed yet: leave the row pending
 		es.rm_adm_id = static_cast<int16_t>(adm_id);
 	}
-	infantry_adm_revision_seen_ = kernel.infantry_adm_revision();
 	// The first decoded row may have registered the first usable model map.
 	runtime->view().set_root_motion_source(kernel.root_motion.empty() ? nullptr : &kernel.root_motion);
 	// The rows serve their channels from the ring heads the World's bodies use (D-NET-196),
@@ -654,6 +647,57 @@ void JoinerRole::resolve_row_adm_ids() {
 	runtime->view().set_pool1_interleave(true);
 	// The rows' secondary selection reads the held record's hold kind.
 	runtime->view().set_weapon_table(&kernel.world.tables.weapons);
+}
+
+void JoinerRole::rearm_row_adm_ids() {
+	mission::MissionKernel &kernel = *kernel_;
+	if (infantry_adm_revision_seen_ == kernel.infantry_adm_revision()) return;
+	for (replication::ClientEntityState &es : runtime->state().entities) {
+		es.rm_adm_id = -2;
+		es.rm_state = -1;
+		es.wpn_state = es.wpn_playing = -1;
+		es.wpn_deferred = 0;
+	}
+	infantry_adm_revision_seen_ = kernel.infantry_adm_revision();
+}
+
+// The mission start's model reload walks pool 0 last: a slot with a row takes it again, a
+// player's (Flags 0x100) at its class's camouflage item for the climate, and a row naming an
+// animDef loads that .adm and registers the body; the pool-1 and pool-2 legs load models alone.
+// A joiner's pool 0 is its replica's person rows, which its stream's spawn records built ahead
+// of the reload (replica_pool0_bodies), so their channels are stamped here, in the load, and
+// the frame's row pass (resolve_row_adm_ids) leaves a stamped row as it stands (D-NET-NEW-L2-56).
+// The rows keep their record's type: only the channel is the reload's.
+// [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks called @0x52550E,
+//  ahead of Entity_InitAllFromModels called @0x52567F; Game_ReloadEntityModelsAndCallbacks
+//  @0x522830 - the pool-1 leg's load @0x5229B8, the pool-2 leg's @0x522B16, the pool-0 walk
+//  @0x522C0C..0x522C33, the Flags 0x100 test @0x522C52 (its jz @0x522C59), the class word +0x294
+//  and the climate's property @0x522C5B..0x522C90, CharAttr_GetCammoTypeId called @0x522C91,
+//  ItemList_FindIndexByTypeId called @0x522CA2, the animDef test @0x522D07,
+//  AnimMap_LoadAdmFile called @0x522D14, AnimMap_RegisterEntity called @0x522D38]
+void JoinerRole::reload_pool0_row_channels() {
+	if (kernel_ == nullptr || !runtime) return;
+	mission::MissionKernel &kernel = *kernel_;
+	const world::World &w = kernel.world;
+	rearm_row_adm_ids();
+	for (replication::ClientEntityState &es : runtime->state().entities) {
+		if ((es.handle >> 12) != 0 || es.type_id == 0) continue;
+		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) continue;
+		uint16_t type_id = es.type_id;
+		if ((es.rm_entity_flags & world::kEntityFlagPlayer) != 0u && !w.tables.item_rows.empty() &&
+				w.tables.class_cammo_installed) {
+			// The class word as the stream left it: a compact's class nibble, else the spawn's.
+			const uint8_t player_class = es.net_has_compact
+					? static_cast<uint8_t>(es.health_class_byte & 0x0Fu)
+					: es.spawn_player_class;
+			const int32_t index = world::item_index_by_type_id(
+					w, world::player_cammo_type_id(w, player_class));
+			type_id = static_cast<uint16_t>(w.tables.item_rows[static_cast<size_t>(index)].type_id);
+		}
+		const int adm_id = kernel.adm_id_for_runtime_type(type_id);
+		if (adm_id < -1) continue; // the sources are not armed: the frame's pass resolves it
+		es.rm_adm_id = static_cast<int16_t>(adm_id);
+	}
 }
 
 // A streamed topology/world change landed in the registry: retire the

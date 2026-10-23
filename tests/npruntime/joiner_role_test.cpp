@@ -28,6 +28,7 @@
 #include <formats/def/def.h>
 #include <formats/mission/mission.h>
 #include <runtime/mission/item_traits.h>
+#include <runtime/mission/placement_traits.h> // kItemTypePerson
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/mission/seat_spec_extract.h> // the def load's seat table (a 0x18 row's)
 #include <runtime/assets/asset_store.h>
@@ -3953,6 +3954,65 @@ bool run_the_respawn_arm_lands_l_in_its_receive() {
 			"respawn arm: the next 0x0C keeps the record's pitch and the composed heading");
 }
 
+// D-NET-NEW-L2-56: the mission start's model reload registers each pool-0 person row's
+// animation map in the load. A pool-0 row takes its channel from its row's animDef there, and
+// the frame's row pass leaves it; a pool-1 row (that leg loads models alone) waits for the
+// frame's pass.
+// [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 - the pool-1 leg's load @0x5229B8, the
+//  animDef test @0x522D07, AnimMap_LoadAdmFile called @0x522D14, AnimMap_RegisterEntity called
+//  @0x522D38]
+bool run_the_mission_start_reload_registers_pool0_channels() {
+	const std::string anim = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/anim";
+	if (test_io::is_lfs_pointer(test_io::read_file(anim + "/idle.bad"))) {
+		std::printf("[skip] fixtures/anim/idle.bad is an unpulled LFS pointer\n");
+		return true;
+	}
+	ResourceIndex index;
+	if (!expect(index.scan(anim, std::string(), VfsMountMode::LooseOnly),
+			    "pool-0 reload: the animation fixtures index"))
+		return false;
+	assets::AssetStore store{&index};
+	def::DefItemDef rows[2]{};
+	rows[0].id = static_cast<int>(w::kPlayerInfantryTypeId) + mission::kItemIdOffset;
+	rows[1].id = mission::kItemIdOffset + 42;
+	for (def::DefItemDef &row : rows) {
+		row.type = mission::kItemTypePerson;
+		row.hp = 100;
+		std::strcpy(row.anim_def, "soldier");
+	}
+	def::DefItemsFile items{rows, 2};
+	Harness h;
+	h.kernel->set_items_table(&items);
+	h.kernel->rearm_infantry_adm(&store);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	auto &player = h.role.runtime->state().upsert(0x0002);
+	player.cls = EntityClass::Player;
+	player.type_id = w::kPlayerInfantryTypeId;
+	auto &soldier = h.role.runtime->state().upsert(0x1003);
+	soldier.cls = EntityClass::Infantry;
+	soldier.type_id = 42;
+	h.role.reload_pool0_row_channels();
+	const replication::ClientEntityState *p = h.role.runtime->state().find(0x0002);
+	const replication::ClientEntityState *s = h.role.runtime->state().find(0x1003);
+	if (!expect(p != nullptr && p->rm_adm_id >= 0,
+			    "pool-0 reload: the player row takes its animDef's channel in the load"))
+		return false;
+	if (!expect(s != nullptr && s->rm_adm_id == -2,
+			    "pool-0 reload: a pool-1 row waits for the frame's pass"))
+		return false;
+	const int16_t channel = p->rm_adm_id;
+	h.role.run_tick(h.input);
+	p = h.role.runtime->state().find(0x0002);
+	s = h.role.runtime->state().find(0x1003);
+	if (!expect(p != nullptr && p->rm_adm_id == channel,
+			    "pool-0 reload: the frame's pass leaves the reload's channel"))
+		return false;
+	return expect(s != nullptr && s->rm_adm_id >= 0,
+			"pool-0 reload: the frame's pass resolves the pool-1 row");
+}
+
 // The Respawn key on a joiner (dispatch 55): past the live-player gate the
 // input reset runs (with L's def bound: the input word cleared, the pack over
 // it, a moving state dropped to the idle 43) and, in a session, one bodiless
@@ -5698,6 +5758,7 @@ int main() {
 	ok &= run_a_seated_death_sends_the_seat_leave();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_the_respawn_arm_lands_l_in_its_receive();
+	ok &= run_the_mission_start_reload_registers_pool0_channels();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_respawn_key_before_the_first_tail();
 	ok &= run_a_preround_death_latches_when_the_round_opens();
