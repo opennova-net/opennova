@@ -5764,8 +5764,11 @@ bool check_minimap_overlay_flag_carrier_pass() {
 // StartDelay is a host-side seconds phase, not a second gameplay clock. The
 // ordinary 62 Hz clock and network maintenance continue, while the World
 // systems stay frozen through the boundary that changes 1 -> 0. Gameplay
-// resumes on the following frame.
-// [orig: Server_ResetRoundCounters @0x516C8D; Server_TickUpdate
+// resumes on the following frame. The session create's round-state init stores
+// no pre-round timer; the mission start's round-counters reset does
+// (D-NET-NEW-L1-51).
+// [orig: Server_InitNewRoundState @0x51C8E0 (no timer store); Server_ResetRoundCounters
+// @0x516C8D, called by Game_StartMission @0x525B90; Server_TickUpdate
 // @0x51D8BD and @0x51DC20..0x51DC33]
 bool check_preround_delay_phase_boundary() {
 	struct CountingSystem final : opennova::world::ISystem {
@@ -5791,8 +5794,12 @@ bool check_preround_delay_phase_boundary() {
 	ctx.world = &world;
 	ctx.config.start_delay = 2;
 	opennova::inmatch::Server_InitNewRoundState(ctx);
+	if (!expect(world.preround_delay_seconds == 0,
+	            "the create's round-state init stores no pre-round timer"))
+		return false;
+	opennova::inmatch::store_preround_delay_timer(ctx);
 	if (!expect(world.preround_delay_seconds == 2,
-	            "round init seeds StartDelay as whole seconds"))
+	            "the mission start's round-counters reset seeds StartDelay as whole seconds"))
 		return false;
 
 	opennova::inmatch::Server_TickUpdate(ctx);

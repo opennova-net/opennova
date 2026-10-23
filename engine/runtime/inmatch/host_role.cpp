@@ -642,15 +642,10 @@ void HostRole::init_round_after_premission() {
 void HostRole::run_round_init() {
 	// The round counters' reset copies the configured StartDelay seconds into the one live
 	// pre-round timer, in a session on the authority, at every mission start, a map change's
-	// included. The timer stays on the World: it is the authority's phase predicate and the
-	// source of the phase-0 0x0A projection, rather than a second connection-local countdown
-	// (D-NET-NEW-L1-51).
-	// [orig: Server_ResetRoundCounters @0x516C50 - the session test @0x516C66, the authority test
-	//  @0x516C80, `mov eax, g_StartDelay` @0x516C88, the g_PreRoundDelayTimer store @0x516C8D;
+	// included (store_preround_delay_timer, D-NET-NEW-L1-51).
+	// [orig: Server_ResetRoundCounters @0x516C50 - the g_PreRoundDelayTimer store @0x516C8D;
 	//  called by Game_StartMission @0x525B90]
-	const NapiNPServerCtx &ctx = state.host_owner.ctx;
-	if (ctx.is_in_session != 0 && ctx.is_authority != 0)
-		kernel_->world.preround_delay_seconds = ctx.config.start_delay;
+	store_preround_delay_timer(state.host_owner.ctx);
 	if (staged_bringup_.round_counters_tail) staged_bringup_.round_counters_tail();
 	init_round_after_premission();
 	init_local_player_at_mission_start();

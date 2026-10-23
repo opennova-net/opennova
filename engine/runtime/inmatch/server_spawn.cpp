@@ -505,6 +505,15 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// step, not the spawn gate.
 }
 
+// See server_spawn.h. The timer stays on the World: it is the authority's phase predicate and the
+// source of the phase-0 0x0A projection, rather than a second connection-local countdown.
+// [orig: Server_ResetRoundCounters @0x516C50 - the session test @0x516C66, the authority test
+//  @0x516C80, `mov eax, g_StartDelay` @0x516C88, the g_PreRoundDelayTimer store @0x516C8D]
+void store_preround_delay_timer(NapiNPServerCtx &ctx) {
+	if (ctx.world == nullptr || ctx.is_in_session == 0 || ctx.is_authority == 0) return;
+	ctx.world->preround_delay_seconds = ctx.config.start_delay;
+}
+
 namespace {
 
 // A remote add's send-state reset, past the slot's report clocks: with the slot's net player

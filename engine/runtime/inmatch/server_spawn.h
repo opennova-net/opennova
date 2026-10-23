@@ -158,6 +158,15 @@ world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World 
 // unless ctx.is_authority.
 void Server_InitNewRoundState(NapiNPServerCtx &ctx);
 
+// The mission start's round-counters reset, its pre-round timer leg: in a session on the
+// authority, the configured StartDelay seconds into the bound World's one live pre-round timer,
+// at every mission start (a map change's included), ahead of the round init. The session
+// create's round-state init stores none (D-NET-NEW-L1-51). HostRole::run_round_init runs it; a
+// no-op with no World bound.
+// [orig: Server_ResetRoundCounters @0x516C50 - the g_PreRoundDelayTimer store @0x516C8D;
+//  called by Game_StartMission @0x525B90]
+void store_preround_delay_timer(NapiNPServerCtx &ctx);
+
 // §5.2a step 2 — [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]. Gated
 // is_authority && !world.match.outcome().ended. Walks connection_list; for each accepted-but-unspawned node
 // (self_id_seen && phase < PlayerAdded) builds + registers its pool-0 player entity in `world`. The
