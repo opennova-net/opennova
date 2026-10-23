@@ -70,6 +70,7 @@ void ClientReplicaPipeline::lean_ramp_row(ClientEntityState &es) {
 // The remote arms-dip integrator: the exact block AiSystem::infantry_weapon_channel
 // runs for authoritative bodies, applied here to wire-decoded peers. The window byte
 // decrements in BOTH branches -- twice per tick -- so an 80 stamp dips for 40 ticks.
+// That is the player body's (org2's) block; an Infantry row takes org1's (arms_dip_row).
 // [orig: @0x4b5cab..0x4b5ce7]
 void ClientReplicaPipeline::tick_arms_dip(uint16_t self_handle) {
 	const uint32_t park = remote_walk_park_key(self_handle);
@@ -79,6 +80,30 @@ void ClientReplicaPipeline::tick_arms_dip(uint16_t self_handle) {
 
 void ClientReplicaPipeline::arms_dip_row(ClientEntityState &es) {
 	if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) return;
+	// An Infantry row's update is org1's, whose block has no dip window: the term eases an
+	// eighth-step alone and the window byte is never read, so a 0x49 stamp stays and dips
+	// nothing. Its torso roll is org1's own: prone idle decays it a thirty-second step toward
+	// level, otherwise it chases the Roll word a sixteenth with the lag clamped to +-20 degrees
+	// (no roll states). The authority's twin is world::infantry_org1_torso_roll_tick.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ease @0x4BE883..0x4BE891, `cmp dword ptr
+	//  [esi+2BCh], 30h` @0x4BE897, the decay @0x4BE8A6..0x4BE8AC, the chase @0x4BE8B0..0x4BE8BD,
+	//  the clamps @0x4BE8C8..0x4BE8EA; the window byte +0x371 is read only by
+	//  Entity_UpdateInfantryPlayerBody @0x4B5CAB / @0x4B5CDB]
+	if (es.cls == EntityClass::Infantry) {
+		es.pitch_kick_accum = io::bam_sub(es.pitch_kick_accum,
+				io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3));
+		if (es.rm_state == world::anim_state::kIdleProne) {
+			es.torso_roll = io::bam_sub(es.torso_roll,
+					io::bam_sar(io::bam_add(es.torso_roll, 16), 5));
+			return;
+		}
+		es.torso_roll = io::bam_add(es.torso_roll,
+				io::bam_sar(io::bam_add(io::bam_sub(es.roll_bam, es.torso_roll), 8), 4));
+		const int32_t lag = io::bam_sub(es.torso_roll, es.roll_bam);
+		if (lag > 0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, 0x0E38E380);
+		if (lag < -0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, -0x0E38E380);
+		return;
+	}
 	if (es.arms_dip_ticks > 0) {
 		--es.arms_dip_ticks;                 // [orig: @0x4b5cb5]
 		es.pitch_kick_accum = io::bam_sub(
@@ -95,7 +120,6 @@ void ClientReplicaPipeline::arms_dip_row(ClientEntityState &es) {
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - prone idle 0x30 @0x4b5d05, the
 	//  chase's skip of the rolls @0x4b5d20..0x4b5d28, the chase and clamps @0x4b5d4e /
 	//  @0x4b5d61; the rolls @0x4b700e / @0x4b701d]
-	if (es.cls != EntityClass::Player) return;
 	if (es.rm_state == world::anim_state::kIdleProne) {
 		es.torso_roll = io::bam_sub(es.torso_roll, io::bam_sar(io::bam_add(es.torso_roll, 8), 4));
 		return;
