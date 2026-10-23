@@ -5,8 +5,9 @@
 // sticky; the loads in Game_StartMission's order (the Avatars.def combos at the climate's
 // variant, the ammo rows' tracer items, weapon.def's gfx1 / gfx3, the reloaded items, the
 // celestial models and upl.3di, hudfx.def, the terrain's foliage).
-// [orig: ThreediGp_LoadModel @0x5B6160; CEffectDef_Construct @0x5b01e0; CEffectWorld_
-//  RebuildAllModelBuffers @0x5B3A80; Avatars_LoadComboModels @0x57a0b0; AmmoDef_LoadTracerItemModels
+// [orig: ThreediGp_LoadModel @0x5B6160; CEffectDef_Construct @0x5b01e0;
+//  CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80; Avatars_LoadComboModels
+//  @0x57a0b0; AmmoDef_LoadTracerItemModels
 //  @0x4098c0; WeaponDefs_ParseLineCallback @0x543680; Game_ReloadEntityModelsAndCallbacks
 //  @0x522830; EntityDef_LoadModelsAndCallbacks @0x439f50; EffectWorld_LoadCelestialModels
 //  @0x5adc50; HUD_InitOverlaySystem @0x5a4620; Foliage_LoadDefAssets @0x601260;
@@ -229,11 +230,12 @@ void test_the_mission_start_list() {
 	const std::vector<uint32_t> page = list.freeze();
 	CHECK(page.size() == created_count - 2);
 	for (const uint32_t v : page) CHECK(v == 0u);
-	// The files the shell builds at the load (FX-5): the page's nodes in load order, every
-	// listed row's husk family among them (SOLXA / solxb, wreck / wreckfin, crate_s), the
+	// The files the shell loads and resolves at the freeze: the page's nodes in load order,
+	// every listed row's husk family among them (SOLXA / solxb, wreck / wreckfin, crate_s), the
 	// marked foliage (the terrain's foliage pass's) left out [orig: EntityDef_LoadModelsAnd-
 	// Callbacks @0x439F50 - husk @0x43A0B6, the "xb" final husk @0x43A1C8, huskfinal
-	// @0x43A26E, huskshadow @0x43A38A; CEffectWorld_RebuildAllModelBuffers @0x5B3A80].
+	// @0x43A26E, huskshadow @0x43A38A; CEffectWorld_ResolveMaterialsAndRebuildChallengeList
+	// @0x5B3A80].
 	std::vector<std::string> expected_files;
 	for (size_t i = 0; i < created_count; ++i)
 		if (std::strcmp(created[i], "pine.3DI") != 0 && std::strcmp(created[i], "bush.3DI") != 0)
@@ -500,8 +502,8 @@ void test_the_305_entry_pages() {
 
 // The model-list readout (an instrument): the nodes head first, as the freeze walks them, each
 // with its place in load order and its dword's place in the page, a foliage node off the page
-// [orig: CEffectWorld_RebuildAllModelBuffers @0x5B3A80 - the walk @0x5b3a89, the unmarked
-//  count @0x5b13b0..0x5b13d6, the values @0x5b142b].
+// [orig: CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80 - the walk @0x5b3a89,
+//  the unmarked count @0x5b13b0..0x5b13d6, the values @0x5b142b].
 void test_the_readout_entries() {
 	inmatch::LoadedModelList list([](const std::string &) { return true; });
 	CHECK(list.load("first.3di"));

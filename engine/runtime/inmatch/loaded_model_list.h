@@ -4,15 +4,17 @@
 // (D-NET-527). Retail keeps one node per model file ThreediGp_LoadModel created: the name
 // up to its first '.' with ".3DI", found again case-insensitively, a file that does not
 // load leaving no node, each new node inserted at the head. Game_StartMission empties the
-// list at its teardown, its loads fill it in their order, and CEffectWorld_RebuildAllModel-
-// Buffers freezes it: one dword per node not marked as foliage, head first, the page a
-// joiner's 0x3D answers and the count a host's S2C 0x68 cursor wraps at.
+// list at its teardown, its loads fill it in their order, and
+// CEffectWorld_ResolveMaterialsAndRebuildChallengeList freezes it: one dword per node not
+// marked as foliage, head first, the page a joiner's 0x3D answers and the count a host's
+// S2C 0x68 cursor wraps at.
 // [orig: ThreediGp_LoadModel @0x5B6160 - the name @0x5b61a6..0x5b61d0, the find
 //  CEffectDef_FindByTypeName @0x5b01a0 (the stricmp call @0x5B01B8), CEffectDef_Construct @0x5b01e0
 //  (the head insert @0x5b0229 / @0x5b0232), the failed load's destroy @0x5b623f;
 //  Game_StartMission @0x524360 - EffectWorld_DestroyAllAndInitDeviceCaps @0x524a6f;
-//  CEffectDef_MarkFoliage @0x5b2220 (node+0x3D4); CEffectWorld_RebuildAllModelBuffers
-//  @0x5B3A80 - the count @0x5b13b0..0x5b13d6, the values @0x5b142b]
+//  CEffectDef_MarkFoliage @0x5b2220 (node+0x3D4);
+//  CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80 - the count
+//  @0x5b13b0..0x5b13d6, the values @0x5b142b]
 
 #include <runtime/inmatch/charattr_table.h>
 #include <runtime/mission/runtime_boot.h>
@@ -68,8 +70,8 @@ public:
 	// shell loads ahead of the mission's first frame, as each load fills its model's memory and
 	// the freeze's first pass resolves every node's materials, so a later swap to one (a death's
 	// husk) loads nothing [orig: ThreediGp_LoadModel @0x5B6160 (ThreediGp_LoadFromFile @0x5b6230);
-	// CEffectWorld_RebuildAllModelBuffers @0x5B3A80 (each node's CEffectDef_ResolveSubobjectMaterials
-	// call @0x5B3A92)]. The
+	// CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80 (each node's
+	// CEffectDef_ResolveSubobjectMaterials call @0x5B3A92)]. The
 	// marked foliage nodes are the terrain's foliage pass's to build. The freeze's first pass walks
 	// the list head first, the reverse of this order, resolving each node's materials (their stage
 	// textures and their effect: renderer/material_texture.h material_resolve_rows) and building
@@ -77,10 +79,11 @@ public:
 	// no marked node): the full arm runs its other device inits around it, the reduced arm none
 	// past the terrain's textures, so a shell builds and draws no listed model at the freeze on
 	// either (D-NET-NEW-L3-25, D-NET-NEW-L3-31)
-	// [orig: CEffectWorld_RebuildAllModelBuffers @0x5B3A80 - the walk @0x5B3A81..0x5B3AA5;
-	//  CEffectDef_ResolveSubobjectMaterials @0x5B25C0 -> Material_ResolveEffectSubobjectsAndShader
-	//  @0x5B1870 (the call @0x5B25DC; Material_LoadStageTexture @0x5B16F0 per row, the call
-	//  @0x5B189D; HLSLEffect_FindByName @0x5ADE70, the call @0x5B18C1);
+	// [orig: CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80 - the walk
+	//  @0x5B3A81..0x5B3AA5; CEffectDef_ResolveSubobjectMaterials @0x5B25C0 ->
+	//  Material_ResolveEffectSubobjectsAndShader @0x5B1870 (the call @0x5B25DC;
+	//  Material_LoadStageTexture @0x5B16F0 per row, the call @0x5B189D; HLSLEffect_FindByName
+	//  @0x5ADE70, the call @0x5B18C1);
 	//  Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the full arm's call
 	//  @0x5871CF, the reduced arm's @0x58728C].
 	std::vector<std::string> model_files() const;
@@ -158,13 +161,13 @@ struct MissionStartModelSources {
 // where the variant is empty, in the file's order, repeats included (the load finds them
 // again). A joiner loads them at its S2C 0x11, after the 0x0B header's terrain and ahead of
 // the game-start wait, so their files are in before the 0x1A; the freeze at the end of the
-// mission start builds their buffers with every other node's. Empty when the mount holds no
-// Avatars.def that parses.
+// mission start resolves their materials with every other node's. Empty when the mount holds
+// no Avatars.def that parses.
 // [orig: Game_StartMission @0x524360 - Game_LoadTerrainDuringConnect @0x524DF2, then
 //  Avatars_LoadComboModels(&g_AvatarDefs, g_BmsClimate) @0x524E24 ahead of
 //  NapiClient_WaitForGameStart @0x524E29 (the joiner's arm; @0x525267 the other); the freeze
-//  CEffectWorld_RebuildAllModelBuffers @0x5B3A80 (each node's CEffectDef_ResolveSubobjectMaterials
-//  @0x5B3A92) from Render_InitMissionTextures @0x525A6E]
+//  CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80 (each node's
+//  CEffectDef_ResolveSubobjectMaterials @0x5B3A92) from Render_InitMissionTextures @0x525A6E]
 std::vector<std::string> avatar_combo_models(const mission::BootFileSource *files,
 		bms::ClimateType climate);
 
@@ -188,7 +191,7 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 // host (opennova-serve, the game's Serve Only host) on the reduced arm with no foliage leg
 // before it [orig: Game_StartMission @0x524360 (the call @0x525A6E, the flag its third
 // argument) -> Render_InitMissionTextures @0x587120 (the full arm's call @0x5871CF, the
-// reduced arm's @0x58728C) -> CEffectWorld_RebuildAllModelBuffers @0x5B3A80].
+// reduced arm's @0x58728C) -> CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80].
 std::vector<uint32_t> mission_start_model_page(const mission::MissionKernel &kernel,
 		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority,
 		bool dedicated);
@@ -206,9 +209,9 @@ LoadedModelList mission_start_model_list(const mission::MissionKernel &kernel,
 // file, its foliage mark, its place in load order (0 the first load) and its dword's place in
 // the frozen page (-1 for a marked node, which the page skips). Retail's list is walked from
 // g_ModelDefListHead, head first, the order the freeze reads it in [orig:
-// CEffectWorld_RebuildAllModelBuffers @0x5B3A80 - the walk @0x5b3a89, the unmarked count
-// @0x5b13b0..0x5b13d6, the values @0x5b142b; CEffectDef_FindByTypeName @0x5b01a0 - the node's
-// name +0xFC @0x5B01B0, its next +0 @0x5B01C4].
+// CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80 - the walk @0x5b3a89, the
+// unmarked count @0x5b13b0..0x5b13d6, the values @0x5b142b; CEffectDef_FindByTypeName
+// @0x5b01a0 - the node's name +0xFC @0x5B01B0, its next +0 @0x5B01C4].
 struct LoadedModelListEntry {
 	std::string name;
 	bool foliage = false;

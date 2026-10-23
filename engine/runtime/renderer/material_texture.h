@@ -112,8 +112,8 @@ struct MaterialResolveRow {
 // material in turn, each of its rows whose loader slot code is set (material_texture_runtime_slot),
 // each by the stage dispatcher on its runtime type (material_texture_source). The resolve's effect
 // lookup then copies the shader's parameter blocks into the def, which makes no device object.
-// [orig: CEffectWorld_RebuildAllModelBuffers @ 0x5B3A80 - each node's call @ 0x5B3A92;
-//  CEffectDef_ResolveSubobjectMaterials @ 0x5B25C0 - the material walk @ 0x5B25DC;
+// [orig: CEffectWorld_ResolveMaterialsAndRebuildChallengeList @ 0x5B3A80 - each node's call
+//  @ 0x5B3A92; CEffectDef_ResolveSubobjectMaterials @ 0x5B25C0 - the material walk @ 0x5B25DC;
 //  Material_ResolveEffectSubobjectsAndShader @ 0x5B1870 - the row's test @ 0x5B1890,
 //  Material_LoadStageTexture @ 0x5B18A2, HLSLEffect_FindByName @ 0x5B18C1]
 std::vector<MaterialResolveRow> material_resolve_rows(const threedi::Threedi3di3 &model);

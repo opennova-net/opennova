@@ -104,7 +104,7 @@ public:
 	// Resolve the .3DI definitions that LocalPlayerPresenter would otherwise
 	// load only on its first visible frame. Retail's
 	// Game_ReloadEntityModelsAndCallbacks and HUD model pass load the player +
-	// current weapon overlay before CEffectWorld_RebuildAllModelBuffers freezes
+	// current weapon overlay before CEffectWorld_ResolveMaterialsAndRebuildChallengeList freezes
 	// the C2S 0x3D source; doing the lightweight data lookup here gives our
 	// snapshot the same boundary without constructing hidden scene nodes.
 	// Later builders hit the placer's cache, so they cannot introduce a

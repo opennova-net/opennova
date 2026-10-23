@@ -24,7 +24,7 @@
 //  - the non-foliage loaded-.3DI page freezes once, after the entity,
 //    celestial, HUD and renderer resource loads and before the loading screen
 //    drops — late network spawns must not change it
-//    [orig: CEffectWorld_RebuildAllModelBuffers @0x5871CF from @0x525A6E];
+//    [orig: CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5871CF from @0x525A6E];
 //  - the game music context opens and its vars seed before runtime compiles
 //    WAC M# operands [orig: @0x525581..0x52561b before WAC init @0x525CB3];
 //  - the effect system loads every .ptl and its textures at load, so the
