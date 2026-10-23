@@ -2063,6 +2063,20 @@ void test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp() {
     CHECK(lw.w.out.script_sounds.size() == 2);
 }
 
+// The category keys (cases 200-210) are refused while the binocular view is up or a PowerThrow
+// windup runs, before the walk. [orig: Input_HandleActionBinding_0 @0x4E0420 - cases 200-210:
+//  g_BinocularsViewActive @0x4E112A, g_FireChargeStartTick @0x4E1137, the walk @0x4E1152]
+void test_weapon_category_refused_while_a_windup_runs() {
+    LocalPlayerWeapon w = scoped_weapon(0);
+    PlayerViewState v;
+    CHECK(local_player_weapon_category_admitted(w, v));
+    w.power_throw_start_tick = 40;
+    CHECK(!local_player_weapon_category_admitted(w, v));
+    w.power_throw_start_tick = 0;
+    v.binoculars_view_active = true;
+    CHECK(!local_player_weapon_category_admitted(w, v));
+}
+
 // Exercise the complete default mouse binding -> action -> optical route.
 // [orig: catalog P/N @0x816A1C/@0x816A88; Input_HandleActionBinding_0 @0x4E0420]
 void test_default_wheel_binding_zooms_in_away_from_the_player() {
@@ -4118,6 +4132,7 @@ int main() {
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
     test_arms_dip_follows_the_weapon_category_not_the_anim_map();
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();
+    test_weapon_category_refused_while_a_windup_runs();
     test_default_wheel_binding_zooms_in_away_from_the_player();
     test_frame_chase_shake_consumes_the_tick();
     test_use_item_vehicle_loadout_zone_gates();

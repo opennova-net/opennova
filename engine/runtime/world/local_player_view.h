@@ -263,6 +263,14 @@ void local_player_scope_zoom_mount_clamp(const World &world, const ScopeZoomLimi
                                          int32_t def_flags, int32_t scope_max_mag,
                                          WeaponSlotState &slot);
 
+// The weapon-category actions' dispatcher leg (cases 200-210, the keys 1..9): refused while
+// the binocular view is up or a PowerThrow windup runs (g_FireChargeStartTick), else the
+// caller walks to the category, Player_SwitchToWeaponByHandle((action - 200) * 65)
+// (weapon_switch_to_handle). [orig: Input_HandleActionBinding_0 @0x4E0420 - cases 200-210:
+//  g_BinocularsViewActive @0x4E112A, g_FireChargeStartTick @0x4E1137, the handle
+//  @0x4E1144, the walk @0x4E1152]
+bool local_player_weapon_category_admitted(const LocalPlayerWeapon &w, const PlayerViewState &v);
+
 // The weapon-cycle actions' dispatcher leg [orig: Input_HandleActionBinding_0
 // cases 0xD4 (212, cycleweaponP "Cycle Weapon Prev": +1 / +2) / 0xD6 (214,
 // cycleweaponN "Cycle Weapon Next": -1 / -2) @0x4e130c..0x4e13ae]: refused while

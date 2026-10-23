@@ -264,6 +264,12 @@ void local_player_scope_zoom_mount_clamp(const World &world, const ScopeZoomLimi
     else if (slot.scope_zoom > scope_max_mag) slot.scope_zoom = scope_max_mag; // @0x4dfb13
 }
 
+bool local_player_weapon_category_admitted(const LocalPlayerWeapon &w, const PlayerViewState &v) {
+    // [orig: Input_HandleActionBinding_0 cases 200-210 @0x4E112A..0x4E113E:
+    //  g_BinocularsViewActive || g_FireChargeStartTick -> return]
+    return !v.binoculars_view_active && w.power_throw_start_tick == 0;
+}
+
 WeaponCycleRoute local_player_weapon_cycle_route(World &world, LocalPlayerWeapon &w,
                                                  const PlayerViewState &v,
                                                  const ScopeZoomLimits &limits,

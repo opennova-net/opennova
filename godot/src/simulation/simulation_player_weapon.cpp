@@ -52,10 +52,13 @@ static_assert(opennova::world::weapon_flag2::kInset ==
 		"kInset drifted from def.h");
 
 void Simulation::request_local_player_weapon_category(WeaponCategory p_category) {
-	if (kernel_->local.view.binoculars_view_active) return;
+	// The case's gates, the binocular view and a running PowerThrow windup, are the
+	// engine's (world::local_player_weapon_category_admitted).
 	// [orig: input cases 200-210 @ 0x4e1144 -> Player_SwitchToWeaponByHandle
-	//  ((action-200)*65). The binoculars-view and fire-charge input gates have no
-	//  sim mechanics yet — record note.]
+	//  ((action-200)*65)]
+	if (!opennova::world::local_player_weapon_category_admitted(kernel_->local.weapon,
+				kernel_->local.view))
+		return;
 	if (kernel_->local.weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
 	if (!kernel_->local.inventory_valid) return;
 	if (p_category < 0 || p_category >= opennova::world::weapon_combo::kCategories)
