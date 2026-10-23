@@ -50,6 +50,10 @@ using ControlRegisterValues =
 // the first registry entry, FF_ST_OP); only the parameters that effect
 // references are evaluated, so a non-#UV effect never runs the UV transform
 // and never draws its noise samples.
+// time_ms is GetTickCount's DWORD, the embedder's one clock (world::frame_tick_count_ms)
+// [orig: Material_ApplyShaderParameters @0x58DB80 - GetTickCount @0x58DBD2 (the animated
+//  frame), g_RenderShaderTickMs @0x58DE58 / @0x58E368; AlphaGen_EvaluateValue's
+//  g_RenderPanmTickMs @0x5B236C; RgbGen_EvaluateColor's g_RenderRgbGenTickMs @0x5B246D].
 MaterialRuntime eval_material_runtime(const opennova::threedi::ThreediMaterial& mat,
                                       uint32_t time_ms,
                                       const std::vector<std::string>& ctrl_names,

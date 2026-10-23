@@ -3,6 +3,7 @@
 #include <runtime/renderer/particle_density.h>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <limits>
 #include <utility>
@@ -763,6 +764,29 @@ bool thermal_material_contract() {
 			"the thermal secondary materials by type");
 }
 
+// The Distort wave's angle from GetTickCount's DWORD: read unsigned, times
+// flt_7DB864 (0.004f) at extended precision into fsin / fcos; ours folds it to one
+// turn, so the sine a long uptime takes is still retail's (a naive float product
+// at a five-day count is up to 0.06 rad off).
+// [orig: CEffectWorld_SetupRenderState @0x5E02B0 - @0x5E046C..0x5E04B0]
+bool distort_theta_contract() {
+	const double scale = static_cast<double>(0.004f);
+	const std::uint32_t ticks[] = {0u, 1000u, 0x7FFFFFFFu, 0x80000000u, 432000000u, 0xFFFFFFFFu};
+	for (const std::uint32_t tick : ticks) {
+		const float theta = r::particle_distort_theta(tick);
+		const double exact = static_cast<double>(tick) * scale;
+		if (!check(theta >= 0.0f && theta < 6.2831855f, "the wave angle folds to one turn"))
+			return false;
+		if (!check(std::fabs(std::sin(static_cast<double>(theta)) - std::sin(exact)) < 1e-5 &&
+						std::fabs(std::cos(static_cast<double>(theta)) - std::cos(exact)) < 1e-5,
+				"the folded angle keeps the DWORD's phase, read unsigned"))
+			return false;
+	}
+	return check(near(r::particle_distort_theta(1000u), 4.0f) &&
+					r::particle_distort_theta(0u) == 0.0f,
+			"the angle is the DWORD x 0.004");
+}
+
 } // namespace
 
 int main() {
@@ -781,5 +805,6 @@ int main() {
 	if (!thermal_material_contract()) return 1;
 	if (!distortion_class_pass_contract()) return 1;
 	if (!section_hidden_group_contract()) return 1;
+	if (!distort_theta_contract()) return 1;
 	return 0;
 }

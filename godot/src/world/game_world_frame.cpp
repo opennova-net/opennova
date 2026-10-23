@@ -281,9 +281,16 @@ int64_t GameWorld::current_frame_clock_ms() {
 	const int64_t frame = static_cast<int64_t>(Engine::get_singleton()->get_process_frames());
 	if (clock.frame != frame) {
 		clock.frame = frame;
-		clock.milliseconds = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+		// The readers are retail's GetTickCount readers (the PANM / material / light DWORD,
+		// the foliage sway, the particle Distort wave, the tracer ribbons, the menus' caret
+		// and timers), each cited at its engine port: the one clock, never Godot's.
+		clock.milliseconds = static_cast<int64_t>(opennova::world::frame_tick_count_ms());
 	}
 	return clock.milliseconds;
+}
+
+int64_t GameWorld::tick_count_ms() {
+	return static_cast<int64_t>(opennova::world::frame_tick_count_ms());
 }
 
 PackedStringArray GameWorld::frame_leg_names() {

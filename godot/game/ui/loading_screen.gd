@@ -152,10 +152,13 @@ func set_progress(percent: int) -> void:
 func present(force := false) -> void:
 	if _texture == null:
 		return  # no background loaded -> no screen at all [orig: @ 0x586bfd]
-	var now := Time.get_ticks_msec()
+	# The process's one clock (GetTickCount), read now: the screen presents inside a
+	# blocking load, past the frame's sample. The elapsed time is the DWORD difference,
+	# compared unsigned (held to the native int's range, which keeps the compare).
+	var now := GameWorld.tick_count_ms()
 	# The shared native due rule (interval elapsed or a real checkpoint changed)
 	# lives in engine/runtime/hud/loading_screen.h.
-	var due := HudPos.loading_present_due(now - _last_present_ms,
+	var due := HudPos.loading_present_due(mini((now - _last_present_ms) & 0xFFFFFFFF, 0x7FFFFFFF),
 			_last_drawn_progress != _progress)
 	if not (force or due):
 		return
@@ -466,7 +469,7 @@ func _process(_delta: float) -> void:
 # The 512 ms two-phase pulse the continue line rides
 # [orig: GetTickCount() & 0x200 selects the color @ 0x5209b0-0x5209be].
 func _splash_blink_phase() -> bool:
-	return (Time.get_ticks_msec() & HudPos.SPLASH_BLINK_MASK_MS) != 0
+	return (GameWorld.tick_count_ms() & HudPos.SPLASH_BLINK_MASK_MS) != 0
 
 
 func _splash_exit_edge() -> void:

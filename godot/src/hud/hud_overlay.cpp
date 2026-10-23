@@ -21,6 +21,7 @@
 
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
 #include <formats/def/def_hudpos_write.h> // hudpos_unauthored (the layout of a file with no key)
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the status page's GetTickCount)
 #include <runtime/hud/feed_format.h> // kGameTextLineColor (the 0x32 join/leave lines)
 #include <runtime/hud/hud_combat.h> // frustum_clip_mask (the label projector's clip rule)
 #include <runtime/hud/hud_lfp_panel.h> // lfp_under_attack_text / lfp_ready_text (D-25)
@@ -1734,9 +1735,9 @@ void HudOverlay::set_minimap_grid_origin(const Vector2 &p_mission_position,
 }
 
 void HudOverlay::server_status_clock_(uint32_t &r_now_ms, bool &r_window_active) const {
-	// The wall clock and the window's focus the page's throttle reads
-	// (hud_server_status.h server_status_page_due).
-	r_now_ms = static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec());
+	// GetTickCount (the process's one clock, engine world/tick_count_clock.h) and the
+	// window's focus the page's throttle reads (hud_server_status.h server_status_page_due).
+	r_now_ms = opennova::world::frame_tick_count_ms();
 	const Window *window = get_window();
 	r_window_active = window == nullptr || window->has_focus();
 }

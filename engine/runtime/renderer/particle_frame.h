@@ -51,6 +51,17 @@ enum class ParticleWaterSubset : std::uint8_t {
 ParticleWaterSubset particle_water_subset_for_side(bool camera_above_water,
 		bool camera_side);
 
+// The Distort graphic's wave angle from GetTickCount's DWORD (the embedder's one
+// clock): retail reads the DWORD unsigned (`fild`, plus 2^32 when the sign bit is
+// set), multiplies by flt_7DB864 = 0.004f and hands the product, still at the
+// x87's extended precision, straight to fsin / fcos for the (sin, cos, -sin) wave.
+// A float shader's sin takes the angle folded to one turn, so a long uptime keeps
+// the phase retail's sine sees (sin and cos are periodic: nothing observable moves).
+// [orig: CEffectWorld_SetupRenderState @0x5E02B0 - GetTickCount @0x5E046C, the
+//  unsigned fix-up @0x5E0474..0x5E047E, `fmul flt_7DB864` @0x5E0484, fsin @0x5E049C,
+//  fcos @0x5E04B0]
+float particle_distort_theta(std::uint32_t tick_ms);
+
 // Exact PTL graphic type values. Retail atlas pages are partitioned by type.
 enum class ParticlePipeline : std::uint8_t {
 	Blend = 0,

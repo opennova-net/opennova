@@ -811,8 +811,10 @@ const std::vector<opennova::TerrainTilePageBinding> &Terrain::_compose_pages(
 				cached_env_node->get_light_direction_render_tuple();
 	}
 	if (p_display_frame_start) {
+		// The casters' material clock is GetTickCount's DWORD (the frame clock): an int
+		// past 2^31 ms of uptime is that DWORD's high half, never a time before zero.
 		static_shadow_rasterizer.begin_frame(page_light_direction,
-				light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
+				static_cast<uint32_t>(light_time_ms));
 		// The pages a changed caster's shadow touched or touches, composed
 		// again below (only while the casters are followed: the editor's
 		// mission device). Mission (x, y) is Godot (x, -z).

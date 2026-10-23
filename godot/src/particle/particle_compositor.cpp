@@ -1424,8 +1424,9 @@ void ParticleCompositorEffect::Impl::write_view_push_constants(
 			static_cast<float>(submission.fog_type));
 	write_f32(push_constants, 112, static_cast<float>(size.x));
 	write_f32(push_constants, 116, static_cast<float>(size.y));
+	// The Distort wave's angle (engine renderer::particle_distort_theta).
 	write_f32(push_constants, 120,
-			static_cast<float>(submission.time_ms) * 0.004f);
+			opennova::renderer::particle_distort_theta(submission.time_ms));
 }
 
 void ParticleCompositorEffect::Impl::release_distortion_target() {

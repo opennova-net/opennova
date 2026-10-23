@@ -354,6 +354,14 @@ ParticleWaterSubset particle_water_subset_for_side(bool camera_above_water,
 			ParticleWaterSubset::Below;
 }
 
+float particle_distort_theta(std::uint32_t tick_ms) {
+	constexpr double kTwoPi = 6.283185307179586;
+	// flt_7DB864, the float nearest 0.004 (the header carries the witness).
+	constexpr float kTickScale = 0.004f;
+	return static_cast<float>(
+			std::fmod(static_cast<double>(tick_ms) * static_cast<double>(kTickScale), kTwoPi));
+}
+
 ParticleThermalMaterial particle_thermal_material(ParticlePipeline pipeline, bool thermal) {
 	if (!thermal)
 		return ParticleThermalMaterial::Primary;

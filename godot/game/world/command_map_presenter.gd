@@ -203,7 +203,9 @@ func _process(_delta: float) -> void:
 		return
 	_place_map_window()
 	_place_delete_button()
-	var gates := _screen.refresh(Time.get_ticks_msec())
+	# The recruit holds run on the frame's GetTickCount sample (engine
+	# menu/command_map_screen.h command_map_team_list_timers).
+	var gates := _screen.refresh(_view.frame_clock_ms)
 	if gates >= 0:
 		_apply_tab_gates(gates)
 	_draw_chat_msgs()
@@ -441,7 +443,7 @@ func _on_table_cell_clicked(_id: int, widget_name: String, row: int, column: int
 		cell_value: int, _double_click: bool) -> void:
 	if _screen != null:
 		_screen.table_cell_clicked(widget_name, row, column, state, cell_value,
-				Time.get_ticks_msec())
+				_view.frame_clock_ms)
 
 
 # WPNAME's Enter presses WPNAME_OK.
