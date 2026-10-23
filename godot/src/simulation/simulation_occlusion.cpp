@@ -191,7 +191,16 @@ bool Simulation::run_mirror_occlusion(const Transform3D &p_camera, double p_fov_
 	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_camera,
 			p_fov_deg, 1.0, p_viewport_width, p_fog_dist_units, p_water_z_units,
 			p_force_indoors, kernel_->collision.local_player_blink_flags, p_object_detail);
-	return kernel_->occlusion.mirror_water_visible(kernel_->world, kernel_->collision, cam);
+	// The mirror's collect, its entity walk included (engine
+	// runtime/inmatch/occlusion_collect.h collect_mirror_view): the walk ticks the
+	// latches and draws the shared stream ahead of the scene's collect.
+	std::vector<int32_t> mirror_culled_bms;
+	std::vector<int32_t> mirror_culled_wire;
+	return opennova::inmatch::collect_mirror_view(
+			opennova::inmatch::PresentRowsContext{*kernel_, runtime_, is_joiner(), nullptr,
+					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
+			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam,
+			mirror_culled_bms, mirror_culled_wire);
 }
 
 int64_t Simulation::building_visibility_mask(int64_t p_packed) {

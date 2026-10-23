@@ -20,6 +20,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <unordered_map>
 #include <vector>
 
@@ -261,7 +262,10 @@ public:
     // masks over the live eye UNMIRRORED and a square view, the building walk
     // keeping only Reflective statics while that eye is at or above the water
     // (the camera-below-water word), and its mask build writes the word the
-    // scene's water letter label then reads ahead of its own collect. `cam`
+    // scene's water letter label then reads ahead of its own collect. Then the
+    // entity collectors walk over those masks with the same match: the statics'
+    // and pools 0 / 1's (`walk_entities`, handed the mirror's camera, its match
+    // set; inmatch::collect_mirror_view runs the scene collect's walk there). `cam`
     // carries that eye and view; the match is derived here from its eye and
     // water words. The frame words build in a scratch frame, so the selected
     // view's are untouched; the entity latches and the shared PRNG stream
@@ -271,13 +275,35 @@ public:
     //  projection @ 0x5c16e8, the below-water word @ 0x5c16ed..0x5c16fb, the call
     //  @ 0x5c16fc; Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 — the
     //  match @ 0x5c9109..0x5c911f, the walk @ 0x5c9127, the sort @ 0x5c912c, the
-    //  planes @ 0x5c9131, the masks @ 0x5c9136]
+    //  planes @ 0x5c9131, the masks @ 0x5c9136, then the statics' collector
+    //  Terrain_CollectVisibleEntities_0 @ 0x5c913d and pools 0 / 1's
+    //  Terrain_CollectVisibleEntitiesForTerrain @ 0x5c9145 / @ 0x5c914e, each
+    //  passed the match @ 0x5c913b / @ 0x5c9142 / @ 0x5c914a]
+    using MirrorEntityWalk = std::function<void(const OcclusionFrameCamera &mirror)>;
     bool mirror_water_visible(World &world, CollisionWorld &collision,
-                              const OcclusionFrameCamera &cam);
+                              const OcclusionFrameCamera &cam,
+                              const MirrorEntityWalk &walk_entities);
+    // The collectors' Flags match: a nonzero match (the camera's
+    // collect_flag_match) passes only a Flags word carrying every bit of it.
+    // [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6ff2..0x5c7001 (its
+    //  filterMask); Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8d01..0x5c8d10
+    //  (its required flags); Terrain_CollectVisibleSectorUserpoints
+    //  @ 0x5c6c27..0x5c6c39]
+    static bool collect_flags_match(const OcclusionFrameCamera &cam, uint32_t flags_word) {
+        return (flags_word & cam.collect_flag_match) == cam.collect_flag_match;
+    }
+    // An entity's one retail Flags word as the walks read it (entity+0x24): the
+    // runtime word, the spawn-composed word and the Reflective bit every
+    // vehicle's init sets.
+    // [orig: Entity_InitFromModel @ 0x40e204..0x40e20a]
+    static uint32_t entity_flags_word(const Entity &e) {
+        return e.flags | e.engine_flags | (e.item_type == 1 ? kEntityFlagReflective : 0u);
+    }
 
     // Per-entity render gate for non-building entities (the entity collectors'
-    // occlusion rules, then the render waves' render_TOC): the blink-hits
-    // gate, then the person leg for organics (person_render_visible) or the
+    // occlusion rules, then the render waves' render_TOC): the camera's Flags
+    // match (collect_flags_match; the mirror's collect alone sets one), the
+    // blink-hits gate, then the person leg for organics (person_render_visible) or the
     // model leg's full-Euler bound sphere, and the outdoors-only three-ray
     // terrain latch (mutates Entity::occlusion_latch); an entity in no blink
     // box then takes render_TOC (render_wave_toc_occluded). TRUE = render.

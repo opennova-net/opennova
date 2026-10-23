@@ -36,4 +36,19 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 		std::vector<int32_t> &r_culled_bms, std::vector<int32_t> &r_culled_wire,
 		std::vector<world::Vec3> &r_anchors);
 
+// The water mirror's collect ahead of a scene's (the main scene's or the weapon
+// Inset's): the building walk and the section masks over its eye and square view
+// (OcclusionWorld::mirror_water_visible), then over those masks the same entity walk
+// as a scene's, every row through the gates under the mirror's Flags match (the
+// Reflective bit while the eye is at or above the water, none below), so each
+// collected row's latch ticks or re-arms on the shared PRNG stream as in the scene's
+// collect. Returns the mask build's g_BlinkWaterVisible; `r_culled_bms` /
+// `r_culled_wire` take the rows the mirror's walk dropped, the complement of the
+// reflected subscene's draw lists; the shared `r_wire_latch` and `r_handles` are the
+// scene collect's. [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 - the
+// statics' walk @ 0x5c913d, pools 0 / 1's @ 0x5c9145 / @ 0x5c914e]
+bool collect_mirror_view(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
+		std::vector<world::EntityHandle> &r_handles, const world::OcclusionFrameCamera &cam,
+		std::vector<int32_t> &r_culled_bms, std::vector<int32_t> &r_culled_wire);
+
 } // namespace opennova::inmatch

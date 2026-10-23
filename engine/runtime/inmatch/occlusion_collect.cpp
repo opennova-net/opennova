@@ -134,6 +134,16 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			// row's full Euler pose.
 			const world::ResolvedCollisionShape shape =
 					kernel.wire_collision_shape_for_type(es.type_id);
+			// The walk's Flags match (the water mirror's collect alone sets one)
+			// over the client-built entity's Flags word, the vehicle init's
+			// Reflective bit included, ahead of the blink gate and the latch
+			// (world/occlusion.h collect_flags_match carries the witness).
+			if (!world::OcclusionWorld::collect_flags_match(cam,
+						es.rm_entity_flags |
+								(shape.item_type == 1 ? world::kEntityFlagReflective : 0u))) {
+				r_culled_wire.push_back(static_cast<int32_t>(handle));
+				continue;
+			}
 			const int32_t pos[3] = {es.x, es.y, es.z};
 			// The row's blink quad from the client's own blink walk (the one
 			// the lighting feed runs for a twin-less row): the collector's
@@ -232,6 +242,18 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			kernel.occlusion.entity_render_visible(
 					kernel.world, kernel.collision, *local, cam))
 		anchor_entity(*local);
+}
+
+bool collect_mirror_view(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
+		std::vector<world::EntityHandle> &r_handles, const world::OcclusionFrameCamera &cam,
+		std::vector<int32_t> &r_culled_bms, std::vector<int32_t> &r_culled_wire) {
+	mission::MissionKernel &kernel = context.kernel;
+	std::vector<world::Vec3> anchors;
+	return kernel.occlusion.mirror_water_visible(kernel.world, kernel.collision, cam,
+			[&](const world::OcclusionFrameCamera &mirror) {
+				collect_view_verdicts(context, r_wire_latch, r_handles, mirror, r_culled_bms,
+						r_culled_wire, anchors);
+			});
 }
 
 } // namespace opennova::inmatch

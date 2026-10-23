@@ -8,6 +8,7 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_camera.h>
 
 #include <algorithm>
@@ -41,7 +42,7 @@ bool has_anchor(const std::vector<w::Vec3> &v, float x, float y, float z) {
 }
 
 // Presentation frame: the eye at mission (0, 0, 2) looking down mission +x.
-w::OcclusionFrameCamera camera_down_x() {
+w::OcclusionFrameCamera camera_down_x(float water_z_units = -1000.0f) {
 	w::OcclusionViewSpec view;
 	view.eye[0] = 0.0f;
 	view.eye[1] = 2.0f;
@@ -53,7 +54,7 @@ w::OcclusionFrameCamera camera_down_x() {
 	view.aspect = 16.0f / 9.0f;
 	view.viewport_width = 1920.0f;
 	view.fog_dist_units = 1000.0f;
-	view.water_z_units = -1000.0f;
+	view.water_z_units = water_z_units;
 	w::OcclusionFrameCamera cam;
 	w::occlusion_camera_from_view(view, cam);
 	return cam;
@@ -177,10 +178,63 @@ void test_the_walk() {
 			"a joiner's wire walk takes the row at L's packed handle");
 }
 
+// The water mirror's collect (collect_mirror_view) runs the scene collect's walk over
+// the mirror's camera under its Flags match: at or above the water a placed person and
+// a bare wire row without the Reflective bit drop ahead of their latches while a
+// vehicle's latch ticks; below the water the walk is unfiltered.
+// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 - the calls @ 0x5c913d /
+//  @ 0x5c9145 / @ 0x5c914e, the match passed @ 0x5c913b / @ 0x5c9142 / @ 0x5c914a]
+void test_the_mirror_walk() {
+	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	opennova::mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 16);
+	kernel.world.registry.configure_pool(1, 16);
+	w::Entity &person = row(kernel, 0, 1, w::EntityKind::Organic, 101, 20.0f, 0.0f);
+	w::Entity &car = row(kernel, 1, 1, w::EntityKind::Item, 102, 20.0f, 1.0f);
+	car.item_type = 1; // a vehicle def: its init's Reflective bit
+	opennova::renderer::ObjectProjectionSphere unstamped;
+	unstamped.valid = true;
+	kernel.occlusion.assign_render_model(car.handle, unstamped);
+	im::ClientRuntime runtime("OcclusionCollectMirror");
+	opennova::replication::ClientEntityState &bare = runtime.state().upsert(0x1003);
+	bare.type_id = 0x1234;
+	bare.cls = opennova::EntityClass::NoNetworkCallback;
+	bare.x = 15 << 16;
+	bare.z = 2 << 16;
+
+	im::WireOcclusionLatchMap latches;
+	std::vector<w::EntityHandle> scratch;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	const im::PresentRowsContext context{kernel, &runtime, false};
+
+	// The eye above the water.
+	im::collect_mirror_view(context, latches, scratch, camera_down_x(), culled_bms, culled_wire);
+	expect(contains(culled_bms, 101) && person.occlusion_latch == 5,
+			"above the water the person drops ahead of its latch");
+	expect(!contains(culled_bms, 102) && car.occlusion_latch == 4,
+			"the vehicle is collected and its latch ticks");
+	expect(contains(culled_wire, 0x1003) && latches.count(0x1003) == 0,
+			"the bare row without the Reflective bit drops ahead of its latch");
+	expect(kernel.occlusion.selected_view() == w::OcclusionView::kMain,
+			"the scene's view stays selected");
+
+	// The eye below the water: unfiltered.
+	im::collect_mirror_view(context, latches, scratch, camera_down_x(10.0f), culled_bms,
+			culled_wire);
+	expect(!contains(culled_bms, 101) && person.occlusion_latch == 4,
+			"below the water the person is collected and its latch ticks");
+	expect(!contains(culled_bms, 102) && car.occlusion_latch == 3,
+			"the vehicle again");
+	expect(latches.count(0x1003) == 1 && contains(culled_wire, 0x1003),
+			"the bare row reaches its latch, then drops for its missing model");
+}
+
 } // namespace
 
 int main() {
 	test_the_walk();
+	test_the_mirror_walk();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

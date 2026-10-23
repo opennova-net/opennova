@@ -550,11 +550,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         // The walk's Flags match (the mirror's Reflective filter): the one
         // retail Flags word, the vehicle init's Reflective bit included.
         // [orig: @ 0x5c6c27..0x5c6c39; Entity_InitFromModel @ 0x40e204..0x40e20a]
-        if (cam.collect_flag_match != 0) {
-            const uint32_t flags_word = e->flags | e->engine_flags |
-                    (e->item_type == 1 ? kEntityFlagReflective : 0u);
-            if ((flags_word & cam.collect_flag_match) != cam.collect_flag_match) continue;
-        }
+        if (!collect_flags_match(cam, entity_flags_word(*e))) continue;
         const CollisionModel *cm = collision.model_for(world, slot.h);
         if (cm == nullptr || !cm->valid()) continue; // [orig: the entity+48 model gate]
 
@@ -1562,9 +1558,10 @@ void OcclusionWorld::swap_frame(ParkedFrame &p) {
 }
 
 bool OcclusionWorld::mirror_water_visible(World &world, CollisionWorld &collision,
-                                          const OcclusionFrameCamera &cam) {
-    // The camera-below-water word picks the walk's match: unfiltered below,
-    // the Reflective statics alone at or above. [orig: Render_MainScene
+                                          const OcclusionFrameCamera &cam,
+                                          const MirrorEntityWalk &walk_entities) {
+    // The camera-below-water word picks the walks' match: unfiltered below,
+    // the Reflective entities alone at or above. [orig: Render_MainScene
     // `cmp eax, g_EnvWaterHeightFixed; setl dl` @ 0x5c16f2..0x5c16f8;
     // Terrain_CollectVisibleEntitiesForReflection @ 0x5c9109..0x5c911f]
     OcclusionFrameCamera mirror = cam;
@@ -1572,6 +1569,14 @@ bool OcclusionWorld::mirror_water_visible(World &world, CollisionWorld &collisio
     swap_frame(mirror_frame_);
     build_frame(world, collision, mirror);
     const bool visible = water_visible_;
+    // Then the entity collectors over the mirror's section masks with the same
+    // match: their latches tick and their re-arms draw the shared PRNG stream
+    // as in any collect, and the reflected subscene draws the lists they build.
+    // [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 — the calls
+    //  @ 0x5c913d / @ 0x5c9145 / @ 0x5c914e; Water_RenderReflectedWorldScene
+    //  @ 0x5c8510 — Terrain_RenderSectorEntities @ 0x5c857b and
+    //  Terrain_RenderSectorEntitiesBySide @ 0x5c8590 / @ 0x5c8599 over them]
+    if (walk_entities) walk_entities(mirror);
     swap_frame(mirror_frame_);
     return visible;
 }
@@ -1587,6 +1592,9 @@ bool OcclusionWorld::mirror_water_visible(World &world, CollisionWorld &collisio
 bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collision, Entity &ent,
                                            const OcclusionFrameCamera &cam) {
     if ((ent.flags & 1u) != 0) return false; // [orig: @ 0x5c6fec]
+    // The walk's Flags match, ahead of the blink-hits gate and the latch.
+    // [orig: @ 0x5c6ff2..0x5c7001 / @ 0x5c8d01..0x5c8d10]
+    if (!collect_flags_match(cam, entity_flags_word(ent))) return false;
     if (!blink_hits_render_active(ent.blink_hits)) return false;
 
     int32_t epos[3];

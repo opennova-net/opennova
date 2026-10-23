@@ -1575,16 +1575,16 @@ void test_the_mirror_collect_leaves_the_scene_words() {
 
     // The eye above the water: the plain building is not Reflective, so the
     // walk skips it ahead of its latch; outdoors the word is set.
-    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam));
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam, {}));
     CHECK(b->occlusion_latch == armed);
     // The eye below the water: the walk is unfiltered and ticks it.
     OcclusionFrameCamera below = cam;
     below.water_z = fx(10.0);
-    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, below));
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, below, {}));
     CHECK(b->occlusion_latch == armed - 1);
     // A Reflective static enters the walk above the water too.
     b->engine_flags |= kEntityFlagReflective;
-    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam));
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam, {}));
     CHECK(b->occlusion_latch == armed - 2);
 
     // The scene's own words stand.
@@ -1592,6 +1592,88 @@ void test_the_mirror_collect_leaves_the_scene_words() {
     CHECK(rig.ow.building_batched(building));
     CHECK(rig.ow.section_mask(building) == main_mask);
     CHECK(rig.ow.exterior_visible() && rig.ow.water_visible());
+}
+
+// The water mirror's entity collectors: past its section masks and ahead of the
+// scene's words coming back, the statics' and pools 0 / 1's walks run over the
+// mirror's camera with its match. At or above the water a person is skipped ahead
+// of its latch while a vehicle (its init's Reflective bit) is collected and its
+// latch re-arms on the shared PRNG stream; below the water the walk is unfiltered.
+// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 - the calls
+//  @ 0x5c913d / @ 0x5c9145 / @ 0x5c914e, the match passed @ 0x5c913b / @ 0x5c9142 /
+//  @ 0x5c914a; the collectors' tests @ 0x5c6ff2..0x5c7001 / @ 0x5c8d01..0x5c8d10;
+//  Entity_InitFromModel @ 0x40e204..0x40e20a; PRNG_Next16_C @ 0x6131b0]
+void test_the_mirror_collect_walks_the_entities_under_its_match() {
+    Rig rig;
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.net_id = rig.next_net_id++;
+    npc.position = {60.0f, 10.0f, 0.0f};
+    npc.bound_radius = 1.5625f;
+    npc.alive = true;
+    const EntityHandle nh = rig.world.registry.spawn(0, npc);
+    Entity car;
+    car.kind = EntityKind::Item;
+    car.item_type = 1; // a vehicle def
+    car.net_id = rig.next_net_id++;
+    car.position = {60.0f, 12.0f, 1.0f};
+    car.heading = placed_heading_bam(90);
+    car.alive = true;
+    const EntityHandle vh = rig.world.registry.spawn(1, car);
+    rig.rebuild();
+    opennova::renderer::ObjectProjectionSphere unstamped;
+    unstamped.valid = true;
+    rig.ow.assign_render_model(vh, unstamped);
+    uint32_t stream = 0x00C0FFEEu;
+    rig.ow.bind_focal_wind_random(&stream);
+    // PRNG_Next16_C's step, the oracle for one draw.
+    const auto next16 = [](uint32_t &s) {
+        const auto rol = [](uint32_t v, int k) { return (v << k) | (v >> (32 - k)); };
+        const uint32_t rotated = rol(s + rol(s, 11), 4);
+        s = rotated ^ 1u;
+        return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
+    };
+
+    OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    cam.water_z = fx(-10.0);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    Entity *n = rig.world.registry.get(nh);
+    Entity *v = rig.world.registry.get(vh);
+    CHECK(n != nullptr && v != nullptr);
+    if (n == nullptr || v == nullptr) return;
+    int walks = 0;
+    uint32_t match = 0xFFFFFFFFu;
+    bool person = false;
+    bool vehicle = false;
+    const auto walk = [&](const OcclusionFrameCamera &mirror) {
+        ++walks;
+        match = mirror.collect_flag_match;
+        person = rig.ow.entity_render_visible(rig.world, rig.cw, *n, mirror);
+        vehicle = rig.ow.entity_render_visible(rig.world, rig.cw, *v, mirror);
+    };
+
+    // The eye above the water: the person stays out ahead of its latch, the vehicle's
+    // latch re-arms with exactly one draw of the shared stream.
+    uint32_t expected = stream;
+    const uint16_t draw = next16(expected);
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam, walk));
+    CHECK(walks == 1 && match == kEntityFlagReflective);
+    CHECK(!person && n->occlusion_latch == 0);
+    CHECK(vehicle && v->occlusion_latch == static_cast<uint8_t>((draw & 7) + 16));
+    CHECK(stream == expected);
+    // The scene's collect then ticks the vehicle's latch the mirror armed.
+    const uint8_t armed = v->occlusion_latch;
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *v, cam));
+    CHECK(v->occlusion_latch == armed - 1);
+
+    // The eye below the water: unfiltered, the person's latch arms too.
+    OcclusionFrameCamera below = cam;
+    below.water_z = fx(10.0);
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, below, walk));
+    CHECK(walks == 2 && match == 0u);
+    CHECK(person && n->occlusion_latch >= 16 && n->occlusion_latch <= 23);
+    CHECK(vehicle && v->occlusion_latch == armed - 2);
+    CHECK(rig.ow.selected_view() == OcclusionView::kMain);
 }
 
 // A round restart never re-runs the portal register + weld: the kernel's
@@ -1906,6 +1988,7 @@ int main() {
     test_model_leg_render_model_sphere();
     test_collector_runs_per_view();
     test_the_mirror_collect_leaves_the_scene_words();
+    test_the_mirror_collect_walks_the_entities_under_its_match();
     test_round_restart_keeps_the_first_weld();
     test_eye_in_front_of_a_window_keeps_the_exterior();
     test_decoration_rows_are_entity_collected();
