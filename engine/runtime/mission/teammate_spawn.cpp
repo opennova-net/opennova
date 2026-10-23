@@ -139,11 +139,13 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
         world.ai.row(ai.brain.f[AiBrain::kCurState]).enter(context);
     }
 
-    const ItemAttachmentSpawns children = spawn_item_attachments(world, {handle}, seat_specs);
-    for (EntityHandle child : children.handles) {
-        mission::resolve_item_traits(world, *table, item_wire_class_, &assets(), child);
-        ensure_collision_instance(world, child);
-    }
+    // Neither factory spawns addeweap children: the helicopter is a clone of a
+    // refNum-0 template and the person a def spawn, and only the load and a
+    // deployable run the child spawner, so a teammate's def rows never become guns.
+    // [orig: Entity_SpawnHelicopter @0x4521A0 (the template's refNum byte 0
+    //  @0x45227C, Entity_CloneFromTemplateWithAI @0x4522E1); Entity_SpawnFromItemDef
+    //  @0x452390; Entity_SpawnAddEWeapChildren @0x40F300, called only from
+    //  Mission_LoadBMSFile @0x40FD69 / @0x40FD8E and Entity_SpawnDeployable @0x51C49A]
     world.facials.initialize(world);
     collision.refresh_after_registry_change(world);
     return handle;
