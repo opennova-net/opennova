@@ -72,8 +72,8 @@ inline Vec3 sky_dome_anchor(const Vec3 &cam_pos) {
 // [orig: Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the full arm's
 //  call @0x587187 (PolyTrn_InitTextures @0x58715E before it, the freeze @0x5871CF after),
 //  none on the reduced arm @0x58727A..0x58728C; Terrain_InitRenderingResources @0x5789E0 - the
-//  advanced clouds test @0x578A17, sky_map1 and sky_map2 through Texture_LoadFromArchive
-//  @0x578A97 / @0x578AA5]
+//  advanced clouds test @0x578A17, sky_map1 and sky_map2 through Texture_LoadFromArchive (the
+//  calls @0x578A82 / @0x578A9A)]
 constexpr bool loads_mission_sky_maps(bool dedicated_host, int advanced_clouds) noexcept {
 	return !dedicated_host && advanced_clouds != 0;
 }
