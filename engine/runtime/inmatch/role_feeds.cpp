@@ -351,29 +351,24 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	// The drawer's session gate, the same session bit as the MP lines below
 	// [orig: `cmp is_in_session, 0` @0x4c3210].
 	out.net_quality.in_session = view.kernel->world.rules.mp_session;
-	// The weapon inset's friendly name: the HUD target cursor is the lock word,
-	// whatever it holds, else (a zero word only) the head-look target, and its
-	// display name the lookup's over the session rules word, the HUD's team and
-	// the role's 0x4C slot table. A lock on a round (a flare the heat lock took)
-	// is the cursor too: pool 0 holds no round, so the inset's pool test draws
-	// neither brackets nor a name for it. The word is read once, as L6's
-	// crosshair leg reads it (world/hud_combat_feed.cpp).
-	// [orig: HUD_BuildEntityInfo @0x4B8440 -- the lock (aiRuntime+0xC) @0x4B87F0,
-	//  a round included (@0x4B87ED..0x4B882D), headLookTarget (+0x344) @0x4B881F
-	//  only for a zero word (`cmp [esi+168h], 0` @0x4B8816); Render_WeaponInsetScene
-	//  @0x5C9740 -- the pool test @0x5C9F78, the call @0x5CA0AB; Entity_GetDisplayName
+	// The weapon inset's friendly name: the HUD target cursor (the lock word,
+	// whatever it holds, else, a zero word only, the head-look target) as the
+	// scene frame found it, ahead of that frame's HUD pass: the last pass's
+	// record (world::HudTargetCursor), stale through every frame whose pass
+	// returned before its build. Its display name is the lookup's over the
+	// session rules word, the HUD's team and the role's 0x4C slot table. A lock
+	// on a round (a flare the heat lock took) is the cursor too: pool 0 holds no
+	// round, so the inset's pool test draws neither brackets nor a name for it.
+	// [orig: Render_WeaponInsetScene @0x5C9740 -- g_HUDTargetCursorEntity @0x5CA0A4, the pool
+	//  test @0x5C9F78, the call @0x5CA0AB; Render_ProcessMainSceneFrame @0x5CA0F0 -- the inset's
+	//  call @0x5CA949 ahead of the HUD pass's @0x5CACE3 / @0x5CAD04; Entity_GetDisplayName
 	//  @0x59BF70 (its pool test @0x59BF87..0x59BF94)]
 	{
 		const world::World &tw = view.kernel->world;
 		const world::Entity *local = tw.registry.get(tw.cached.local_player);
-		const world::AiEntity *body =
-				local != nullptr ? tw.ai.for_handle(local->handle) : nullptr;
-		const world::TargetRef word =
-				body != nullptr ? world::AiSlot::target_of(body->slot.f[3]) : world::TargetRef{};
-		const world::Entity *cursor = word.entity.valid() ? tw.registry.get(word.entity) : nullptr;
-		if (!word.valid() && body != nullptr)
-			cursor = tw.registry.get(body->inf.head_look_target);
-		if (cursor != nullptr)
+		const world::Entity *cursor = world::hud_target_cursor_entity(
+				tw, view.kernel->local.hud_target_cursor_at_scene());
+		if (cursor != nullptr && local != nullptr)
 			(void)entity_display_name(*cursor, local->team, session_rules_word(view),
 					view.runtime != nullptr ? &view.runtime->state() : nullptr,
 					out.inset_target_name);
@@ -1518,6 +1513,17 @@ hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint3
 		}
 	}
 	return f;
+}
+
+void build_hud_entity_info(mission::MissionKernel &kernel, bool round_over) {
+	if (round_over) return; // [orig: `cmp g_RoundOver, 0` @0x5A8084]
+	world::LocalPlayer &local = kernel.local;
+	// [orig: `cmp g_ScreenFlashWhiteHit, 0` @0x5A8098]
+	if (world::screen_flash_hud_overlays_suppressed(local.view.flash)) return;
+	// [orig: `test ebp, ebp; jz` @0x5A80A1..0x5A80A3]
+	if (local.player() == nullptr) return;
+	// [orig: memset(g_HUDEntityInfo, 0, 0x240) @0x5A80B1, the HUD_BuildEntityInfo call @0x5A80BC]
+	local.build_hud_target_cursor();
 }
 
 void step_hud_radar(mission::MissionKernel &kernel, ClientRuntime *runtime, bool pass_runs,

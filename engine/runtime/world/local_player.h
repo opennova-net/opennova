@@ -9,6 +9,7 @@
 
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/entity_registry.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/player_loadout.h>
@@ -27,6 +28,29 @@
 namespace opennova::world {
 
 class World;
+
+// THE HUD ENTITY-INFO RECORD'S TARGET CURSOR (g_HUDTargetCursorEntity, record +0x168) as the HUD
+// pass last built it: the lock word (AiSlot +0xC, an entity or a round), else, under a zero word
+// only, the head-look target, which on a joiner may be the aim ray's decoded remote person (its
+// wire row). The pass builds the record at its head, past the round-over, white-flash and
+// no-player returns and ahead of the level-3 one (inmatch::build_hud_entity_info, from the
+// session's HUD step), so the readers outside the pass read the last build: the joiner uplink's
+// interest list in the frame's update, and the weapon inset's name in the scene frame ahead of
+// that frame's pass (LocalPlayer::hud_target_cursor_at_scene). Entity_Destroy zeroes the word
+// for its entity; the cursor holds the named entity's lifetime, so a destroyed or replaced
+// entity resolves to none (hud_target_cursor_entity). A mission start's HUD init zeroes the
+// record: each kernel's LocalPlayer starts with none.
+// [orig: HUD_RenderAllOverlays @0x5A8070 - the HUD_BuildEntityInfo call @0x5A80BC;
+//  HUD_BuildEntityInfo @0x4B8440 (@0x4B87ED..0x4B882D); Entity_Destroy @0x43E810
+//  (@0x43E89C..0x43E8A4); HUD_InitOverlaySystem @0x5A4620 (the memset @0x5A4941)]
+struct HudTargetCursor {
+    TargetRef lock;                 // the lock word: an entity or a round
+    EntityLifetime entity;          // the named entity: the lock's, else the head-look target
+    uint16_t wire_person = 0xFFFF;  // the aim ray's decoded remote person, under neither
+};
+// The cursor's entity as a reader resolves it now: none for a round lock, for no word, or for
+// a named entity destroyed (or its slot reused) since the build.
+const Entity *hud_target_cursor_entity(const World &world, const HudTargetCursor &cursor);
 
 class LocalPlayer {
 public:
@@ -392,6 +416,16 @@ public:
     // 0xFFFF. [orig: Entity_UpdateInfantryPlayerBody -- headLookTarget (+0x344)
     //  @0x4b4f75 / @0x4b5036, the hit of a walk over every pool-0 row]
     uint16_t aim_wire_person() const { return aim_wire_person_; }
+    // The HUD pass head's record build (HudTargetCursor; the caller holds the head's gates),
+    // and the scene frame's read ahead of its pass: the weapon inset reads the cursor as the
+    // frame found it, the uplink the latest build.
+    // [orig: HUD_RenderAllOverlays @0x5A8070 - the HUD_BuildEntityInfo call @0x5A80BC;
+    //  Render_ProcessMainSceneFrame @0x5CA0F0 - the Render_WeaponInsetScene call @0x5CA949
+    //  ahead of the HUD_RenderAllOverlays calls @0x5CACE3 / @0x5CAD04]
+    void build_hud_target_cursor();
+    void note_hud_scene_head() { hud_cursor_at_scene_ = hud_cursor_; }
+    const HudTargetCursor &hud_target_cursor() const { return hud_cursor_; }
+    const HudTargetCursor &hud_target_cursor_at_scene() const { return hud_cursor_at_scene_; }
     // Reset the frame-input state and seed the look heading from the (auto-)
     // spawned local player's facing — the session bring-up's tail.
     void reset_local_player_input_to_player_facing();
@@ -432,6 +466,8 @@ private:
     // The sim-owned stance latch (0 stand, 1 crouch, 2 prone).
     int stance_latch_ = 0;
     uint16_t aim_wire_person_ = 0xFFFF;
+    HudTargetCursor hud_cursor_;
+    HudTargetCursor hud_cursor_at_scene_;
     bool medic_dead_edge_seen_ = false;
     // These process globals have no round, weapon, scope-toggle or player-spawn
     // reset writer. Each axis resets its drift only when it observes a changed

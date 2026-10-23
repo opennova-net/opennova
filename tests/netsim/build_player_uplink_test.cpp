@@ -1038,27 +1038,45 @@ bool run_hud_cursor_names_a_remote_person() {
 	w::Entity crate;
 	crate.kind = w::EntityKind::Item;
 	const w::EntityHandle crate_h = world.registry.spawn(1, crate);
-	w::AiEntity ae;
+	const auto lifetime = [&world](w::EntityHandle h) {
+		const w::Entity *e = world.registry.get(h);
+		return w::EntityLifetime{h, e != nullptr ? e->registry_spawn_id : 0};
+	};
+	// The cursor as the HUD pass built it (world::HudTargetCursor).
+	w::HudTargetCursor cursor;
 	constexpr uint16_t kSelf = 0x0002, kPerson = 0x0007;
-	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == kPerson,
+	cursor.wire_person = kPerson;
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == kPerson,
 			"an empty head-look target names the aimed-at remote person");
-	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, 0xFFFF) == 0xFFFF,
+	cursor.wire_person = 0xFFFF;
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
 			"no aim-ray row, no cursor");
-	ae.inf.head_look_target = crate_h;
-	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == crate_h.packed,
+	cursor.entity = lifetime(crate_h);
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == crate_h.packed,
 			"a live head-look target wins");
-	ae.inf.head_look_target = {};
-	ae.inf.combat_target = world.cached.local_player;
-	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == kSelf,
+	cursor.lock = w::TargetRef{world.cached.local_player};
+	cursor.entity = lifetime(world.cached.local_player);
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == kSelf,
 			"the lock wins, L answering to its self handle");
 	// A lock on a round (a flare): the cursor is the round, which matches no entity, so no
 	// head-look fallback [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B882D;
 	// Server_BuildEntityPriorityListForPlayer @0x50E1C6 / @0x50E42C]. (D-NET-64)
-	ae.inf.combat_target = {};
-	ae.inf.head_look_target = crate_h;
-	ae.slot.f[3] = w::AiSlot::target_word(w::TargetRef::of_round(4));
-	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == 0xFFFF,
+	cursor.lock = w::TargetRef::of_round(4);
+	cursor.entity = {};
+	cursor.wire_person = kPerson;
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
 			"a round lock names no cursor entity");
+	// The destroy zeroes the word: an entity destroyed since the build names none, and so
+	// does a new one in its slot [orig: Entity_Destroy @0x43E810 - @0x43E89C..0x43E8A4].
+	cursor = {};
+	cursor.entity = lifetime(crate_h);
+	world.registry.despawn(crate_h);
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
+			"a destroyed cursor entity names none");
+	const w::EntityHandle reused = world.registry.spawn_at(crate_h, crate);
+	ok &= expect(reused == crate_h &&
+			ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
+			"a new entity in the destroyed one's slot is not the cursor");
 	return ok;
 }
 

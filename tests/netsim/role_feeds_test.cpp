@@ -37,10 +37,12 @@ static int failures = 0;
 // The weapon inset's friendly name (D-NET-655): Entity_GetDisplayName of the
 // HUD target cursor, the aim lock else the head-look target, over the live
 // rules word, the HUD's team and the role's S2C 0x4C slot table; none when
-// the lookup names none.
+// the lookup names none. The cursor is the HUD pass's record as the scene frame
+// found it (D-NET-NEW-L8-48): each read below runs one pass's build, then the
+// next scene frame's read; the stale cases follow.
 // [orig: Render_WeaponInsetScene -- @0x5CA0A4..0x5CA0B5; HUD_BuildEntityInfo
 //  -- the lock @0x4B87F0, the head-look target @0x4B881F; Entity_GetDisplayName
-//  @0x59BF70]
+//  @0x59BF70; HUD_RenderAllOverlays @0x5A8070 -- the build @0x5A80BC]
 static void inset_target_name_cases() {
 	auto runtime_heap = std::make_unique<ClientRuntime>("host");
 	ClientRuntime &host_runtime = *runtime_heap;
@@ -81,44 +83,50 @@ static void inset_target_name_cases() {
 			body->inf.combat_target = h;
 			body->slot.f[3] = world::AiSlot::target_word(world::TargetRef{h});
 		};
-		CHECK(hud_role_facts(host).inset_target_name.empty()); // no cursor
+		// One frame: the HUD pass builds the record, the next scene frame's inset reads it.
+		const auto inset = [&]() {
+			build_hud_entity_info(kernel, false);
+			kernel.local.note_hud_scene_head();
+			return hud_role_facts(host).inset_target_name;
+		};
+		CHECK(inset().empty()); // no cursor
 		body->inf.head_look_target = mate_h;
-		CHECK(hud_role_facts(host).inset_target_name == "Mate");
+		CHECK(inset() == "Mate");
 		// The lock outranks the head-look target; another team names none.
 		lock(foe_h);
-		CHECK(hud_role_facts(host).inset_target_name.empty());
+		CHECK(inset().empty());
 		// An unnamed teammate: '^' + the fallback at its pool-encoded id.
 		lock(unnamed_h);
-		CHECK(hud_role_facts(host).inset_target_name ==
+		CHECK(inset() ==
 				hud::friendly_tag_fallback_name(unnamed_h.packed));
 		// FriendlyTag 0 in the live rules word nulls every name.
 		kernel.world.rules.mpattrib = 0x400;
 		lock(mate_h);
-		CHECK(hud_role_facts(host).inset_target_name.empty());
+		CHECK(inset().empty());
 		kernel.world.rules.mpattrib = 0;
 		// A player names the first 0x4C slot driving it, never its body's
 		// name; with none it is unnamed.
 		lock(player_h);
-		CHECK(hud_role_facts(host).inset_target_name.empty());
+		CHECK(inset().empty());
 		replication::ClientRosterSlot &slot = host_runtime.state().roster[3];
 		slot.bound = true;
 		slot.name = "Pat";
 		slot.registry_clan = "TAG";
 		slot.entity_slot = static_cast<int16_t>(player_h.slot());
 		host_runtime.state().visible_players.push_back({3, player_h.packed});
-		CHECK(hud_role_facts(host).inset_target_name == "Pat <ch>TAG<co>");
+		CHECK(inset() == "Pat <ch>TAG<co>");
 		// A lock on a round (a flare the heat lock took, the +0xC word) is the cursor: no
 		// pool holds a round, so the inset names nothing, whatever the head-look target
 		// [orig: HUD_BuildEntityInfo @0x4B8440 (@0x4B87ED..0x4B882D); Render_WeaponInsetScene
 		//  @0x5C9740 (the pool test @0x5C9F78)] (D-NET-64).
 		lock(world::EntityHandle{});
 		body->inf.head_look_target = mate_h;
-		CHECK(hud_role_facts(host).inset_target_name == "Mate");
+		CHECK(inset() == "Mate");
 		body->slot.f[3] = world::AiSlot::target_word(world::TargetRef::of_round(3));
-		CHECK(hud_role_facts(host).inset_target_name.empty());
+		CHECK(inset().empty());
 		// An entity lock in the same word names its entity again.
 		lock(mate_h);
-		CHECK(hud_role_facts(host).inset_target_name == "Mate");
+		CHECK(inset() == "Mate");
 		// The cursor is the word alone, read once: a word the guided round's init wrote
 		// without the combat target names the word's entity, and a combat target over a
 		// zero word is no cursor, so the head-look target names itself
@@ -126,11 +134,46 @@ static void inset_target_name_cases() {
 		//  only for a zero word (`cmp dword ptr [esi+168h], 0` @0x4B8816, @0x4B881F)].
 		body->inf.combat_target = world::EntityHandle{};
 		body->slot.f[3] = world::AiSlot::target_word(world::TargetRef{unnamed_h});
-		CHECK(hud_role_facts(host).inset_target_name ==
+		CHECK(inset() ==
 				hud::friendly_tag_fallback_name(unnamed_h.packed));
 		body->inf.combat_target = foe_h;
 		body->slot.f[3] = 0;
+		CHECK(inset() == "Mate");
+		// The scene frame reads ahead of its own pass: the inset names the last pass's
+		// cursor, and this frame's build shows on the next frame [orig: Render_ProcessMainSceneFrame
+		//  @0x5CA0F0 - the inset @0x5CA949 ahead of the pass @0x5CACE3 / @0x5CAD04].
+		body->inf.combat_target = world::EntityHandle{};
+		body->inf.head_look_target = unnamed_h;
+		kernel.local.note_hud_scene_head();
 		CHECK(hud_role_facts(host).inset_target_name == "Mate");
+		build_hud_entity_info(kernel, false);
+		CHECK(hud_role_facts(host).inset_target_name == "Mate");
+		kernel.local.note_hud_scene_head();
+		CHECK(hud_role_facts(host).inset_target_name ==
+				hud::friendly_tag_fallback_name(unnamed_h.packed));
+		// A pass that returns at its head builds nothing: the round-over latch, the white hit
+		// flash and a missing local player each leave the last build standing
+		// [orig: HUD_RenderAllOverlays @0x5A8084 / @0x5A8098 / @0x5A80A3, ahead of the build
+		//  @0x5A80BC].
+		body->inf.head_look_target = mate_h;
+		build_hud_entity_info(kernel, true);
+		kernel.local.note_hud_scene_head();
+		CHECK(hud_role_facts(host).inset_target_name ==
+				hud::friendly_tag_fallback_name(unnamed_h.packed));
+		kernel.local.view.flash.white = 40;
+		CHECK(inset() == hud::friendly_tag_fallback_name(unnamed_h.packed));
+		kernel.local.view.flash.white = 0;
+		kernel.world.cached.local_player = world::EntityHandle{};
+		build_hud_entity_info(kernel, false);
+		kernel.world.cached.local_player = me;
+		kernel.local.note_hud_scene_head();
+		CHECK(hud_role_facts(host).inset_target_name ==
+				hud::friendly_tag_fallback_name(unnamed_h.packed));
+		CHECK(inset() == "Mate");
+		// The destroy zeroes the cursor word: a target destroyed since the build names none
+		// until the next build [orig: Entity_Destroy @0x43E810 - @0x43E89C..0x43E8A4].
+		kernel.world.registry.despawn(mate_h);
+		CHECK(hud_role_facts(host).inset_target_name.empty());
 	}
 }
 

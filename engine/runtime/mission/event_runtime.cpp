@@ -433,7 +433,7 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     return input_bit(1u << ((static_cast<uint32_t>(static_cast<uint8_t>(t.param1)) + 15u) & 31u));
                 case bms::PlayerTriggerType::PlayerLookByteBit0Clear:
                     // `(byte_27234FC & 1) == 0`: the byte is hudInfo
-                    // (dword_2723388) +0x174, whose only store in the image
+                    // (g_HUDEntityInfo) +0x174, whose only store in the image
                     // writes 0, beside the struct memsets and the per-frame
                     // save/restore copy, so bit 0 never sets: sub 26 is always
                     // true and sub 27 always false. The byte's other readers

@@ -1893,9 +1893,9 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 				(e->flags & 2u) != 0u || !e->has_item_def)
 			return false;
 		// The interest list scores the decoded entities against L; the HUD
-		// target cursor is the aim acquisition's combat target, else its
-		// aim-ray entity, named by its wire handle (a materialized pool-1..3
-		// row sits at its own; L answers to its self handle).
+		// target cursor is the HUD pass's last build of its record (the lock
+		// word, else the aim-ray entity), named by its wire handle (a
+		// materialized pool-1..3 row sits at its own; L answers to its self handle).
 		// [orig: HUD_BuildEntityInfo @0x4B87DA..0x4B882D -> g_HUDTargetCursorEntity
 		//  (HUD+0x168), read @0x50E1C6 / @0x50E42C]
 		// The receive's fold of L's own record (its compact revision moved) re-pointed
@@ -1910,7 +1910,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		};
 		interest.self_wire_handle = self;
 		interest.hud_target_wire_handle = replication::uplink_hud_target_wire_handle(
-				world, *ae, self, kernel.local.aim_wire_person());
+				world, kernel.local.hud_target_cursor(), self);
 		interest.avg_fps = uplink_avg_fps_;
 		interest.cpu_percent = uplink_cpu_percent_;
 		const replication::ClientEntityState *self_row = rt.state().find(self);

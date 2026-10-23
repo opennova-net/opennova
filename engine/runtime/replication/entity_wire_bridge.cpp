@@ -1273,19 +1273,23 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 
 } // namespace
 
-uint16_t uplink_hud_target_wire_handle(const world::World &world, const world::AiEntity &ae,
-		uint16_t self_wire_handle, uint16_t aim_wire_person) {
+uint16_t uplink_hud_target_wire_handle(const world::World &world,
+		const world::HudTargetCursor &cursor, uint16_t self_wire_handle) {
 	// A lock on a round (a flare the heat lock took) is the cursor too, and the interest
 	// list's compares match it to no entity [orig: HUD_BuildEntityInfo @0x4B8440 (@0x4B87ED..0x4B882D:
 	//  the +0xC word, a round included); Server_BuildEntityPriorityListForPlayer
 	//  @0x50DF20 (@0x50E1C6 / @0x50E42C)].
-	if (world::AiSlot::target_of(ae.slot.f[3]).round >= 0) return 0xFFFF;
-	const world::EntityHandle cursor =
-			ae.inf.combat_target.valid() ? ae.inf.combat_target : ae.inf.head_look_target;
-	if (cursor == world.cached.local_player) return self_wire_handle;
-	if (cursor.valid()) return cursor.pool() >= 1 && cursor.pool() <= 3 ? cursor.packed : 0xFFFF;
+	if (cursor.lock.round >= 0) return 0xFFFF;
+	if (cursor.entity.handle.valid()) {
+		// A named entity destroyed since the build: the destroy zeroed the word
+		// [orig: Entity_Destroy @0x43E810 - the clear @0x43E8A4].
+		const world::Entity *named = world::hud_target_cursor_entity(world, cursor);
+		if (named == nullptr) return 0xFFFF;
+		if (named->handle == world.cached.local_player) return self_wire_handle;
+		return named->handle.pool() >= 1 && named->handle.pool() <= 3 ? named->handle.packed : 0xFFFF;
+	}
 	// The head-look store named a decoded remote person: its wire row.
-	return aim_wire_person;
+	return cursor.wire_person;
 }
 
 PlayerExtendedUplink build_player_uplink(world::World &world,

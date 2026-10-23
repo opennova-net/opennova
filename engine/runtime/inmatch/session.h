@@ -785,6 +785,9 @@ private:
 	// frames it publishes, for the running and the paused frame alike.
 	void count_update_into_second();
 	void count_rendered_frame();
+	// The drawn scene frame's read of the HUD target cursor ahead of its HUD pass
+	// (world::LocalPlayer::note_hud_scene_head), then the pass's own step.
+	void step_hud_scene_cursor();
 	void step_hud_radar_frame();
 	// The render callback's cine and world-skip legs after the drain: the listener update's
 	// cine test on a session peer, under the page too, then the drawn scene frame's

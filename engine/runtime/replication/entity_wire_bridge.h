@@ -8,6 +8,7 @@
 #include <net/npwire/replication_model.h> // GameEntitySnapshot
 #include <runtime/world/ai.h>                  // AiEntity (engine-frame live pose)
 #include <runtime/world/entity.h>
+#include <runtime/world/local_player.h>   // HudTargetCursor
 #include <runtime/world/world.h>
 
 namespace opennova::replication {
@@ -260,13 +261,18 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
                                          const UplinkClientInputs &interest = {});
 
 // The HUD target cursor (g_HUDTargetCursorEntity, HUD+0x168) as the uplink's
-// interest list reads it, as a wire handle: the aim runtime's lock, else the
-// body's head-look target. L answers to its self handle and a materialized
-// pool-1..3 row to its own; a decoded remote person, which has no registry
-// entity, answers to the aim acquisition's wire row (`aim_wire_person`).
+// interest list reads it, as a wire handle: the HUD pass's last build of the
+// record (world::HudTargetCursor: the aim runtime's lock, else the body's
+// head-look target), so a frame whose pass returned before its build, and every
+// update ahead of the frame's render, reads the previous build. L answers to its
+// self handle and a materialized pool-1..3 row to its own; a decoded remote
+// person, which has no registry entity, answers to the aim acquisition's wire row;
+// a round lock, or a named entity destroyed since the build, answers to none.
 // [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B8825 -- the lock (aiRuntime+0xC)
-//  @0x4B87F0, else headLookTarget (+0x344) @0x4B881F; read @0x50E1C6 / @0x50E42C]
-uint16_t uplink_hud_target_wire_handle(const world::World &world, const world::AiEntity &ae,
-		uint16_t self_wire_handle, uint16_t aim_wire_person);
+//  @0x4B87F0, else headLookTarget (+0x344) @0x4B881F; read @0x50E1C6 / @0x50E42C,
+//  from Client_ProcessNetworkFrame @0x526692 in the update, ahead of the render's
+//  HUD_RenderAllOverlays; Entity_Destroy's clear @0x43E89C..0x43E8A4]
+uint16_t uplink_hud_target_wire_handle(const world::World &world,
+		const world::HudTargetCursor &cursor, uint16_t self_wire_handle);
 
 } // namespace opennova::replication

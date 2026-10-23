@@ -1126,6 +1126,15 @@ void Session::step_scene_head(const FrameInput &input, FrameOutcome &out) {
 	if (kernel != nullptr) kernel->local.view.world_skipped = skipped;
 }
 
+void Session::step_hud_scene_cursor() {
+	// The scene frame reads the HUD target cursor ahead of its own HUD pass: the weapon
+	// inset's name takes the last pass's build (world::HudTargetCursor)
+	// [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - the Render_WeaponInsetScene call
+	//  @0x5CA949, the HUD_RenderAllOverlays calls @0x5CACE3 / @0x5CAD04].
+	if (role_ == nullptr || role_->kernel() == nullptr) return;
+	role_->kernel()->local.note_hud_scene_head();
+}
+
 void Session::step_hud_radar_frame() {
 	if (role_ == nullptr || role_->kernel() == nullptr) return;
 	static_assert(kHudRadarGatesDefault == hud::HudFrameCompiler::kRadarGatePass,
@@ -1135,6 +1144,9 @@ void Session::step_hud_radar_frame() {
 	// @0x5a8084], live; the hud_detail-3 early-out and the map site are the
 	// embedder's HUD's.
 	const bool spawn_gate = runtime != nullptr && runtime->state().spawn_success_gate;
+	// The pass's head builds the entity-info record past its first three returns, ahead of
+	// the level-3 one and the radar legs (build_hud_entity_info carries the witness).
+	build_hud_entity_info(*role_->kernel(), spawn_gate);
 	const bool pass_runs =
 			(hud_radar_gates_ & hud::HudFrameCompiler::kRadarGatePass) != 0u && !spawn_gate;
 	const bool map_site = (hud_radar_gates_ & hud::HudFrameCompiler::kRadarGateMapSite) != 0u;
@@ -1173,6 +1185,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		step_scene_head(input, out);
 		count_rendered_frame();
 		if (!out.terminal() && out.scene_drawn) {
+			step_hud_scene_cursor();
 			if (hud_pass_called(input, out)) step_hud_radar_frame();
 			step_map_overlay_death_clear(out);
 			step_cine_render_frame();
@@ -1262,6 +1275,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// inside the world block @0x5CA620..0x5CA640 jumps past, the clear @0x5CAC6D, then
 	// @0x5CADFC -> Cine_RenderOrEndPlayback, the scene arm @0x521CE8 alone].
 	if (!out.terminal() && out.scene_drawn) {
+		step_hud_scene_cursor();
 		if (hud_pass_called(input, out)) step_hud_radar_frame();
 		step_map_overlay_death_clear(out);
 		step_cine_render_frame();

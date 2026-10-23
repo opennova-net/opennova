@@ -470,4 +470,14 @@ struct EntityLightingFeed {
 void step_hud_radar(mission::MissionKernel &kernel, ClientRuntime *runtime, bool pass_runs,
 		bool map_site, bool menu_paused, hud::HudMinimapRadar &out);
 
+// The HUD pass's head as it reaches the entity-info record: the round-over latch
+// (`round_over`), the white hit flash and a missing local player return before it; past
+// them the record is built (world::LocalPlayer::build_hud_target_cursor), ahead of the
+// level-3 return. The session runs it in its HUD step, on a frame whose scene frame calls
+// the pass, ahead of the radar legs.
+// [orig: HUD_RenderAllOverlays @0x5A8070 - g_RoundOver @0x5A8084, g_ScreenFlashWhiteHit
+//  @0x5A8098, `test ebp, ebp` @0x5A80A1 (g_LocalPlayerEntity), the HUD_BuildEntityInfo call
+//  @0x5A80BC, g_HUDDetailLevel @0x5A80C4]
+void build_hud_entity_info(mission::MissionKernel &kernel, bool round_over);
+
 } // namespace opennova::inmatch

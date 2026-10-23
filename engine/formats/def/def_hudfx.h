@@ -51,7 +51,7 @@ HudFxFile hudfx_parse(const uint8_t *data, size_t size);
 // The nine names the slots hold once the game has read the file: the line's model copied into its slot and on,
 // a name of 16 or more characters running into the slots after it, as the copy runs [orig: @
 // 0x58F992..0x58FB42]; the last slot's run past the nine goes into a buffer the init clears after [orig:
-// memset(&dword_2723388, 0, 0x240) @ 0x5A4941]. Each slot's name is what its load reads, to its first NUL.
+// memset(&g_HUDEntityInfo, 0, 0x240) @ 0x5A4941]. Each slot's name is what its load reads, to its first NUL.
 std::array<std::string, kHudFxSlots> hudfx_slot_names(const HudFxFile &file);
 
 // The file's text from scratch (ADR 0003; no original writer of hudfx.def is witnessed, so the form is
