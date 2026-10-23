@@ -283,6 +283,9 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// witness).
 	const bool head_loaded = wire_header_join && join_terrain_preloaded_;
 	join_terrain_preloaded_ = false;
+	// The simulation whose host session this load runs: a fresh one's, staged with its create,
+	// else a map change's kept one (null on any other load).
+	Ref<Simulation> host_sim;
 	// load_mission's entry timeline, when it ran (its mount and document spans).
 	Ref<LoadTimeline> timeline = entry_timeline_;
 	entry_timeline_.unref();
@@ -302,17 +305,18 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 				return create_error;
 			}
 		}
-		// A host's map change starts the next mission ahead of its terrain, and pumps its
-		// session through the load's stages, as retail's load does (engine
-		// inmatch/map_change.h; HostRole::begin_next_mission_load / pump_load_stage).
-		drive_.begin_next_host_mission_load(p_mission, p_bms_name, p_resource_root);
+		host_sim = staged_runtime_options_.is_valid() ? staged_runtime_options_->get_simulation()
+													  : drive_.kept_simulation();
+		// A host's mission start runs its head ahead of its terrain, a fresh session's past its
+		// create and a map change's on the kept session, and pumps the session through the
+		// load's window and stages, as retail's load does (engine inmatch/host_role.h
+		// begin_mission_load / begin_next_mission_load / pump_load_stage, D-NET-116).
+		if (host_sim.is_valid())
+			host_sim->begin_host_mission_load(p_mission, p_resource_root, p_bms_name);
 		// A NovaWorld listen host's mission-start server-info update, past its session's create or
 		// the map change's head and ahead of the effect system and every load (engine
 		// inmatch/server_info.h apply_mission_start_columns carries the witness, D-NET-NEW-L1-50).
-		drive_.publish_host_mission_start(staged_runtime_options_.is_valid()
-						? staged_runtime_options_->get_simulation()
-						: drive_.kept_simulation(),
-				p_mission, p_resource_root, p_bms_name);
+		drive_.publish_host_mission_start(host_sim, p_mission, p_resource_root, p_bms_name);
 		if (timeline.is_null()) {
 			timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
 			last_load_timeline_ = timeline;
@@ -321,7 +325,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		// Then the mission start's effect system at the copies' words, past the head's per-slot
 		// reset and ahead of the window's first pumps and the terrain, on every load but a
 		// dedicated host's: retail's skips it in session on the authority with no client of its
-		// own (engine inmatch/host_role.h open_next_mission_load_window carries the witness,
+		// own (engine inmatch/host_role.h open_mission_load_window carries the witness,
 		// D-NET-NEW-L3-22). A join's mission-data load built one already
 		// (load_join_effect_system); a single player's restart, whose effect system retail keeps
 		// from its first load, builds one here too, its unload having freed the last.
@@ -332,13 +336,13 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 			head_effect_world_id_ = ObjectID(create_effect_world(p_resource_root, timeline)->get_instance_id());
 			timeline->end_span();
 		}
-		drive_.open_host_load_window();
+		if (host_sim.is_valid()) host_sim->open_host_load_window();
 		const int head_error = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
 		if (head_error != OK) {
 			staged_runtime_options_.unref(); // the created session goes with its simulation
 			return head_error;
 		}
-		drive_.pump_host_load_stage(); // after the terrain
+		if (host_sim.is_valid()) host_sim->pump_host_load_stage(); // after the terrain
 	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_OBJECTS));
 	// A join's loading steps run its session's periodic update after each present.
@@ -349,10 +353,12 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	start_mission_root();
 	// A join whose S2C 0x11 ran the head keeps that load's placer, the avatar models in it.
 	if (!head_loaded) placer_.unref();
-	// A host's map change: the stages after the mission's document and after the avatars
-	// and the clock, ahead of the objects.
-	drive_.pump_host_load_stage();
-	drive_.pump_host_load_stage();
+	// A host's load: the stages after the mission's document and after the avatars and the
+	// clock, ahead of the objects.
+	if (host_sim.is_valid()) {
+		host_sim->pump_host_load_stage();
+		host_sim->pump_host_load_stage();
+	}
 	place_mission_objects(p_mission);
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_RUNTIME));
@@ -1819,7 +1825,7 @@ void GameWorld::load_join_effect_system(const Ref<ResourceRoot> &p_resource_root
 void GameWorld::start_effect_world() {
 	// The effect world a join's mission-data load built (load_join_effect_system) or the
 	// mission start's head did (load_mission_internal). A dedicated host has none: retail's
-	// loads no effect system (engine inmatch/host_role.h open_next_mission_load_window carries
+	// loads no effect system (engine inmatch/host_role.h open_mission_load_window carries
 	// the witness), so its passes and its warm run without one and the sim's item emitters keep
 	// the kernel's own scene. Any other load without one builds it here.
 	EffectWorld *effect_world = take_effect_world(join_effect_world_id_);

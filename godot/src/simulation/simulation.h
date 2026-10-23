@@ -1028,12 +1028,13 @@ public:
 	// map change (the next map's file; empty when the rotation ended) and the joiner's reload.
 	String begin_host_map_change();
 	bool begin_joiner_reload();
-	// The latched map change's load (engine inmatch/host_boot.h begin_next_host_mission_load):
-	// its world-free head over the next map's document, ahead of the world's effect system,
-	// the head's window past that effect system (HostRole::open_next_mission_load_window), and
-	// one of the stage pumps the world runs at its terrain and ahead of its objects. All three
-	// are no-ops on any other load.
-	void begin_next_host_mission_load(const Ref<MissionData> &p_mission,
+	// A host's mission load ahead of the world's effect system: the latched map change's
+	// world-free head over the next map's document (engine inmatch/host_boot.h
+	// begin_next_host_mission_load), else a fresh session's head past its create
+	// (create_host_session; HostRole::begin_mission_load); then the head's window past that
+	// effect system (HostRole::open_mission_load_window), and one of the stage pumps the world
+	// runs at its terrain and ahead of its objects. All three are no-ops on any other load.
+	void begin_host_mission_load(const Ref<MissionData> &p_mission,
 			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
 	void open_host_load_window();
 	void pump_host_load_stage();

@@ -102,16 +102,20 @@ void Simulation::stage_next_mission_session_config(const opennova::bms::File &p_
 	net_.host_session_config.spawn_names.clear();
 }
 
-// The head runs on the session the map change latched, over the next map's document as the
-// world parsed it, before the world's terrain: the session record boot_mission builds for it
-// (its mission file the runtime's, the file's name), the mount's text-override table and the
-// session's score.ini (engine inmatch/host_boot.h carries the witnesses).
-void Simulation::begin_next_host_mission_load(const Ref<MissionData> &p_mission,
+// A map change's head runs on the session the map change latched, over the next map's document
+// as the world parsed it, before the world's terrain: the session record boot_mission builds for
+// it (its mission file the runtime's, the file's name), the mount's text-override table and the
+// session's score.ini. A fresh session's runs past its create, which the world's load ran just
+// before (engine inmatch/host_boot.h and host_role.h begin_mission_load carry the witnesses).
+void Simulation::begin_host_mission_load(const Ref<MissionData> &p_mission,
 		const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file) {
 	namespace inmatch = opennova::inmatch;
-	if (!net_.map_change_pending || host_role_ == nullptr || !is_host_listening() ||
-			p_mission.is_null() || p_resource_root.is_null())
+	if (host_role_ == nullptr || host_role_->mission_load_begun()) return;
+	if (!net_.map_change_pending) {
+		if (host_role_->create_ran()) host_role_->begin_mission_load();
 		return;
+	}
+	if (!is_host_listening() || p_mission.is_null() || p_resource_root.is_null()) return;
 	const opennova::bms::File &document = p_mission->native_file();
 	stage_next_mission_session_config(document);
 	const std::string mission_file = opennova::to_std(p_mission_file.replace("\\", "/").get_file());
@@ -126,13 +130,12 @@ void Simulation::begin_next_host_mission_load(const Ref<MissionData> &p_mission,
 }
 
 void Simulation::open_host_load_window() {
-	if (net_.map_change_pending && host_role_ != nullptr && host_role_->next_mission_load_begun())
-		host_role_->open_next_mission_load_window();
+	if (host_role_ != nullptr && host_role_->mission_load_begun())
+		host_role_->open_mission_load_window();
 }
 
 void Simulation::pump_host_load_stage() {
-	if (net_.map_change_pending && host_role_ != nullptr && host_role_->next_mission_load_begun())
-		host_role_->pump_load_stage();
+	if (host_role_ != nullptr && host_role_->mission_load_begun()) host_role_->pump_load_stage();
 }
 
 bool Simulation::begin_joiner_reload() {

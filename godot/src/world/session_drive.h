@@ -150,14 +150,6 @@ public:
 		return pending_join_.is_null() && join_preload_sim_.is_null() && kept_sim_.is_null();
 	}
 	int load_next_host_mission(const String &p_bms_name);
-	// That load's head ahead of the world's effect system, the head's window past it, and its
-	// stage pumps at the terrain and ahead of the objects, on the kept session
-	// (Simulation::begin_next_host_mission_load, open_host_load_window, pump_host_load_stage);
-	// no-ops on any other load.
-	void begin_next_host_mission_load(const Ref<MissionData> &p_mission, const String &p_bms_name,
-			const Ref<ResourceRoot> &p_resource_root);
-	void open_host_load_window();
-	void pump_host_load_stage();
 	// The join's simulation ahead of the runtime's adoption (stage_runtime_options), null
 	// otherwise: a join's load steps pump its session there (GameWorld::pump_join_load_step).
 	Ref<Simulation> join_preload_simulation() const { return join_preload_sim_; }

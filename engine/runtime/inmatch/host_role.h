@@ -120,12 +120,13 @@ public:
 	// over the role's socket): an in-session authority's load runs the server
 	// protocol's receive, its handlers and its send at the load's pump points,
 	// with the load's spawn gate set (NapiNPServerCtx::net_spawn_suspended,
-	// D-NET-116): a map change's teardown pump (the gate clear) and its load's first,
-	// then the load's window (load_window_pumps): a map change's from its load's head
-	// through its stages and its bring-up, a fresh session's all after its bring-up
-	// (with its first) [orig: Server_PumpNetworkTransport @0x4FD960, called by
-	//  Game_TeardownMission @0x522588 and Game_StartMission @0x5245E8 .. @0x525AC5]. `count` pumps back to back: each steps every
-	// connection's send clock, as each of retail's does (its receive's holdoff step).
+	// D-NET-116): a map change's teardown pump (the gate clear) and its load's first, a
+	// fresh session's first at its load's head (begin_mission_load), then the load's window
+	// (load_window_pumps) from the head through the stages and the bring-up, a fresh
+	// session's and a map change's alike; a bring-up whose load ran no head runs them all
+	// [orig: Server_PumpNetworkTransport @0x4FD960, called by Game_TeardownMission @0x522588
+	//  and Game_StartMission @0x5245E8 .. @0x525AC5]. `count` pumps back to back: each steps
+	// every connection's send clock, as each of retail's does (its receive's holdoff step).
 	void pump_load(int count = 1);
 	// The load's pump count from the round-over clear to the PreMission pass.
 	int load_window_pumps() const;
@@ -156,7 +157,7 @@ public:
 	// the file-transfer session and the report clocks, the mission text and the "Server"
 	// strings, the continued session (its streams rebuilt) and the per-slot reset. The
 	// embedder's effect system loads next (a host with its own client), then
-	// open_next_mission_load_window. `head` is the bring-up record as the boot builds it (its
+	// open_mission_load_window. `head` is the bring-up record as the boot builds it (its
 	// integrity tables the previous mission's until the load's def loads;
 	// HostBringup::next_mission). The embedder runs it, or phase A does when no one did.
 	// [orig: Game_StartMission @0x524360 - the add @0x5244B4 / the store @0x5244C6,
@@ -165,9 +166,21 @@ public:
 	//  @0x5248A7, Server_ResetAllPlayerSlotFrameState @0x5248BC; the effect system's init
 	//  @0x524980..0x5249D4 follows]
 	void begin_next_mission_load(HostBringup head);
-	// The head's window past the effect system: the console's clear, then the window's first
-	// two pumps, so the reset's 0x25s and a kept joiner's reload legs meet the load's pumps
-	// while it loads. Between the head and the window the embedder loads its effect system on
+	// A fresh session's mission start up to its terrain, under its create (create_session): the
+	// load's spawn gate, the authority's arm (the report clocks loading, the process's
+	// file-transfer step), then the head's pump, so what a remote sends during the load meets
+	// the session's pumps at retail's points from the load's start (D-NET-116). The embedder's
+	// effect system and open_mission_load_window follow, as a map change's do; the bring-up runs
+	// none of these again. The embedder runs it past its create, or phase A does when no one did.
+	// [orig: Game_StartMission @0x524360 - g_NetSpawnSuspended = 1 @0x524398, the authority arm's
+	//  CServerTick_SetState(1) @0x5244A4 / @0x5244AF, the add @0x5244B4 and the store @0x5244C6,
+	//  Server_PumpNetworkTransport @0x5245E8; GameLoop_Init's Game_StartMission call @0x526377
+	//  past the create (CNapiGameSession_BuildAndCreateSession @0x5694D0)]
+	void begin_mission_load();
+	// The head's window past the effect system, a fresh session's (begin_mission_load) and a map
+	// change's (begin_next_mission_load) alike: the console's clear, then the window's first two
+	// pumps, so a remote's legs and a map change's reset 0x25s and kept joiners' reload legs meet
+	// the load's pumps while it loads. Between the head and the window the embedder loads its effect system on
 	// every load but a dedicated host's (the game's world load: GameWorld::load_mission_internal),
 	// ahead of the terrain, the objects and the runtime (D-NET-NEW-L3-22). A dedicated host
 	// loads none at all (D-NET-NEW-L3-23), and its freeze is the reduced arm: the terrain's
@@ -182,7 +195,7 @@ public:
 	//  @0x52499E, CEffectSystem_BuildTextureAtlases @0x5249B9, Precipitation_Reset @0x5249D4, all
 	//  under is_first_load @0x52496C; Chat_ClearAllChannels @0x524A10, Server_PumpNetworkTransport
 	//  @0x524A63 and @0x524F76; the router's pump @0x5245E8 precedes the head]
-	void open_next_mission_load_window();
+	void open_mission_load_window();
 	// One of the load's stage pumps between the head and the bring-up: after the terrain,
 	// after the mission's document, after the avatars and the environment clock.
 	// [orig: Game_StartMission - Server_PumpNetworkTransport @0x524F8C (after
@@ -190,8 +203,9 @@ public:
 	//  @0x524FFA), @0x5253EA (after Avatars_LoadComboModels @0x525267 and
 	//  CAIPathData_LoadAINFile @0x52534F)]
 	void pump_load_stage();
-	// The head ran for the load in hand (bring_up_next_mission spends it).
-	bool next_mission_load_begun() const { return next_mission_head_run_; }
+	// A head ran for the load in hand, a fresh session's or a map change's (the bring-up spends
+	// it).
+	bool mission_load_begun() const { return mission_load_head_run_; }
 	// The mission start's authority tail past the PreMission pass, every bring-up's
 	// (MissionKernel::round_init, which begin_mission_start runs last): the round counters'
 	// charattr tail (HostBringup::round_counters_tail), the round init
@@ -261,10 +275,12 @@ public:
 	// the shell's mission text and terrain tiles), the mission's half under the
 	// session create: the World under the session (the process's CRT stream onto
 	// it), the mission's text and tiles, the session's rules (bind_host_session_world;
-	// the host's own add ran inside the create), the client view and the load's pumps.
-	// A caller that ran no create_session for this load has it run first. The rules word is the
-	// config's mpattrib in a session and 0x4204 for a socketless host, the
-	// shell's single player (D-NET-405).
+	// the host's own add ran inside the create), the client view, then past the load's head
+	// (begin_mission_load) the first load's second chat clear and the window's pumps the head and
+	// the stages left, else the start's spawn gate, report clocks and file-transfer step and every
+	// load pump. A caller that ran no create_session for this load has it run first. The rules
+	// word is the config's mpattrib in a session and 0x4204 for a socketless host, the shell's
+	// single player (D-NET-405).
 	void bring_up(const HostBringup &bringup);
 	// The embedder's bring-up record for the next boot-hook bring_up(): staged
 	// right before the kernel boots (the text, tiles and config are final by
@@ -382,9 +398,9 @@ private:
 	CreateSessionResult session_create_ = CreateSessionResult::Created;
 	// create_session ran for the load in hand (the bring-up's mission half spends it).
 	bool create_ran_ = false;
-	// A map change's load: its head ran (begin_next_mission_load), and the window's pumps
-	// the head and the stages ran ahead of the bring-up, which runs the rest.
-	bool next_mission_head_run_ = false;
+	// The load's head ran (begin_mission_load, begin_next_mission_load), and the window's pumps
+	// the head's window and the stages ran ahead of the bring-up, which runs the rest.
+	bool mission_load_head_run_ = false;
 	int window_pumps_run_ = 0;
 	// The embedder runs the render arm (set_render_arm_deferred), and its pumps the bring-up
 	// left owed.

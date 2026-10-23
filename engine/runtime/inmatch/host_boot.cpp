@@ -13,7 +13,6 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
-#include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_message_dispatch.h> // session_mission_name
 #include <runtime/inmatch/session_status.h>
@@ -314,27 +313,29 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	if (request.host != nullptr && host_cfg.logs.profile != nullptr)
 		(void)host_cfg.logs.profile->open(host_cfg.config.mission_file);
 
-	// A map change's load head, when the embedder ran none ahead of its own loads (a
-	// headless host): the start's world-free legs and the window's first pumps, then the
-	// load's stage pumps below (HostRole::begin_next_mission_load,
-	// open_next_mission_load_window, pump_load_stage). A headless host has no client of its
-	// own, so no effect system loads between the head and the window [orig: Game_StartMission
-	//  - the gate @0x524958..0x524979 skips CEffectSystem_Init @0x524980 in session on the
-	//  authority with no own client].
-	const bool stage_pumps = request.host != nullptr && request.next_mission &&
-			!request.host->next_mission_load_begun();
-	if (stage_pumps) {
+	// The load's head, when the embedder ran none ahead of its own loads (a headless host): a
+	// fresh session's past its create (its spawn gate, report clocks, file-transfer step and
+	// head pump) or a map change's world-free legs, then the window's first pumps, then the
+	// load's stage pumps below (HostRole::begin_mission_load / begin_next_mission_load,
+	// open_mission_load_window, pump_load_stage). A headless host has no client of its own, so
+	// no effect system loads between the head and the window [orig: Game_StartMission - the gate
+	//  @0x524958..0x524979 skips CEffectSystem_Init @0x524980 in session on the authority with
+	//  no own client].
+	const bool stage_pumps = request.host != nullptr && !request.host->mission_load_begun();
+	if (stage_pumps && request.next_mission) {
 		HostBringup head;
 		head.host_cfg = host_cfg;
 		head.mission_text = boot.mission_text;
 		head.server_text = boot.server_text;
 		head.next_mission = true;
 		request.host->begin_next_mission_load(std::move(head));
+	} else if (stage_pumps) {
+		request.host->begin_mission_load();
 	}
 	// The mission start's server-info update and its periodic update, past the head and ahead of
 	// the window and the loads (HostBootRequest::mission_start_update carries the witness).
 	if (request.host != nullptr && request.mission_start_update) request.mission_start_update();
-	if (stage_pumps) request.host->open_next_mission_load_window();
+	if (stage_pumps) request.host->open_mission_load_window();
 
 	if (!request.session->begin_load().applied()) {
 		error = "the session did not enter its load";
@@ -373,13 +374,6 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		install_class_attribute_flags(kernel.world, nullptr, boot.charattr);
 	}
 
-	// The chat rings start every mission empty, once its BMS has loaded; a map
-	// change's head cleared them (HostRole::begin_next_mission_load).
-	// [orig: Game_StartMission @0x524A10 -> Chat_ClearAllChannels @0x497D30; the
-	//  start's only earlier exit is the BMS load's failure @0x5247A7]
-	if (request.host != nullptr && !request.next_mission)
-		server_console_clear(request.host->state.host_owner.ctx);
-
 	// The terrain field (the embedder's parsed documents, else the kernel's
 	// file entry), the placed tiles over it and the tileset's .TSD table: the
 	// store carries them on the surface view every wiring copies.
@@ -398,9 +392,9 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	//  EventTrigger_UpdateAllWithFlag2 call @0x525B86].
 	load_environment_and_water(files, kernel, boot);
 
-	// A map change's stage pumps the boot owes (stage_pumps above): after the terrain with
-	// its environment, after the mission's document, after the avatars and the environment
-	// clock, all ahead of the def loads and the objects [orig: Game_StartMission -
+	// The load's stage pumps the boot owes (stage_pumps above): after the terrain with its
+	// environment, after the mission's document, after the avatars and the environment clock,
+	// all ahead of the def loads and the objects [orig: Game_StartMission -
 	//  Game_LoadTerrainDuringConnect @0x524F7C, Server_PumpNetworkTransport @0x524F8C,
 	//  Mission_LoadBMSFile @0x524FFA, @0x525256, Avatars_LoadComboModels @0x525267, @0x5253EA,
 	//  AmmoDef_LoadAll @0x525495, Entity_InitAllFromModels @0x52567F].

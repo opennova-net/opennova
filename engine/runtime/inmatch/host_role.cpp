@@ -376,6 +376,9 @@ CreateSessionResult HostRole::create_session(const HostBringup &bringup) {
 	host_cfg.text_override = bringup.mission_text.override_table.get();
 	if (host_cfg.client_process != nullptr) client_process_ = host_cfg.client_process;
 	create_ran_ = true;
+	// The create starts a load whose head has not run yet (begin_mission_load).
+	mission_load_head_run_ = false;
+	window_pumps_run_ = 0;
 	// A server an earlier error-arm exit left unstopped stops first, over this session's socket
 	// (the host screen opened it), ahead of the create
 	// [orig: PreMenu_HostSetup @0x5691F0 - CNapiGameSession_ResetActiveSession called @0x5691F5,
@@ -436,17 +439,24 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	}
 	create_ran_ = false;
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	// The load's head ran its start's spawn gate, report clocks and file-transfer step and its
+	// pumps up to here (begin_mission_load, open_mission_load_window, pump_load_stage); a load
+	// that ran none runs them here.
+	const bool head_run = mission_load_head_run_;
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
 	bind_session_world(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
 			host_cfg.title);
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
-	// The authority's mission start steps the process's file-transfer session words, which the
-	// context reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
-	client_process_->file_transfer_session.start_mission();
-	// The context stands inside the mission load, which holds the spawn gate
-	// until its end (finish_mission_load) [orig: Game_StartMission @0x524398].
-	ctx.net_spawn_suspended = 1;
+	if (!head_run) {
+		// The authority's mission start steps the process's file-transfer session words, which
+		// the context reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store
+		//  @0x5244C6)].
+		client_process_->file_transfer_session.start_mission();
+		// The context stands inside the mission load, which holds the spawn gate
+		// until its end (finish_mission_load) [orig: Game_StartMission @0x524398].
+		ctx.net_spawn_suspended = 1;
+	}
 	ctx.terrain_til_data = bringup.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
 	ctx.mission_text_loaded = bringup.mission_text.loaded;
 	ctx.mission_briefing3 = bringup.mission_text.briefing3();
@@ -462,7 +472,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	// The mission start that follows the create sets both report clocks loading
 	// (D-NET-NEW-L9-22) [orig: Game_StartMission @0x524360 - CServerTick_SetState(1) @0x5244A4 /
 	//  @0x5244AF, after the create's constructs].
-	inmatch::gate_clocks_mission_start(ctx);
+	if (!head_run) inmatch::gate_clocks_mission_start(ctx);
 	keep_round_state_init_tick();
 	fill_spawn_buffer_out_of_session();
 	install_spawned_body_bind();
@@ -473,18 +483,24 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	}
 	// Retail's session host stands its session up before its mission load and pumps it
 	// through the load, so a remote's hello, connect and admission legs are answered
-	// inside the load; ours's pumps run here, at the bring-up, ahead of the PreMission
-	// pass, where retail's last in-load pumps fall: all of the load's pumps run here, each
-	// stepping the connections' send clocks as retail's do (D-NET-116), but the render
-	// arm's when the embedder's device stages run them (render_arm_pumps).
-	// [orig: Server_PumpNetworkTransport @0x4FD960 from Game_StartMission @0x52589D /
-	//  @0x5258E5 / @0x525A5C / @0x525AC5, ahead of the EventTrigger_UpdateAllWithFlag2
-	//  call @0x525B86; the session create ahead of the load, CNapiGameSession_CreateSession
-	//  @0x4C97C0 from CNapiGameSession_BuildAndCreateSession @0x56997D (the PreMenu's
-	//  MultiPlayer_JoinSessionStateMachine @0x56A46A), before GameLoop_Init's
-	//  Game_StartMission call @0x526377]
+	// inside the load. Past the load's head, its head, window and stage pumps ran where
+	// retail's fall (begin_mission_load), and the first load's second chat clear drops a line
+	// a remote sent while the map loaded, ahead of the window's last pumps here, past the def
+	// loads and ahead of the PreMission pass, each stepping the connections' send clocks as
+	// retail's do (D-NET-116); a load with no head runs every pump here. The render arm's
+	// stay owed when the embedder's device stages run them (render_arm_pumps).
+	// [orig: Game_StartMission - `is_first_load` (= !is_restart) @0x5243A6, its test @0x525425,
+	//  Chat_ClearAllChannels @0x52546D; Server_PumpNetworkTransport @0x4FD960 from
+	//  Game_StartMission @0x52589D / @0x5258E5 / @0x5259EC / @0x525A5C / @0x525AC5, ahead of the
+	//  EventTrigger_UpdateAllWithFlag2 call @0x525B86; the session create ahead of the load,
+	//  CNapiGameSession_CreateSession @0x4C97C0 from CNapiGameSession_BuildAndCreateSession
+	//  @0x56997D (the PreMenu's MultiPlayer_JoinSessionStateMachine @0x56A46A), before
+	//  GameLoop_Init's Game_StartMission call @0x526377]
+	if (head_run) server_console_clear(ctx);
 	render_arm_pumps_owed_ = render_arm_deferred_ ? render_arm_pumps() : 0;
-	pump_load(1 + load_window_pumps() - render_arm_pumps_owed_);
+	pump_load((head_run ? 0 : 1) + load_window_pumps() - render_arm_pumps_owed_ - window_pumps_run_);
+	mission_load_head_run_ = false;
+	window_pumps_run_ = 0;
 }
 
 // See host_role.h. The map change's next mission start up to its terrain, on the kept
@@ -532,14 +548,35 @@ void HostRole::begin_next_mission_load(HostBringup head) {
 	//  @0x5248AC..0x5248BC].
 	if (ctx.is_in_session != 0 && ctx.is_authority != 0)
 		inmatch::Server_ResetAllPlayerSlotFrameState(ctx);
-	next_mission_head_run_ = true;
+	mission_load_head_run_ = true;
+	window_pumps_run_ = 0;
+}
+
+// See host_role.h. A fresh session's mission start under its create, with no World yet: the
+// context it pumps is the create's (its own add made, no body), so the head's pump answers a
+// remote's hello and connect from the load's start, the spawn gate held.
+void HostRole::begin_mission_load() {
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	// [orig: Game_StartMission @0x524360 - g_NetSpawnSuspended = 1 @0x524398]
+	ctx.net_spawn_suspended = 1;
+	// The authority's arm: both report clocks loading (D-NET-NEW-L9-22), then the process's
+	// file-transfer session words, which the context reads [orig: Game_StartMission -
+	//  CServerTick_SetState(1) @0x5244A4 / @0x5244AF, the add @0x5244B4, the store @0x5244C6].
+	inmatch::gate_clocks_mission_start(ctx);
+	client_process_->file_transfer_session.start_mission();
+	// The head's pump, ahead of the session settings' apply, the mission text and the
+	// mission-start update [orig: Game_StartMission - Server_PumpNetworkTransport @0x5245E8,
+	//  ahead of Game_ApplySessionSettingsToGlobals @0x524662 and Lobby_UpdateServerInfo
+	//  @0x5248F5].
+	pump_load();
+	mission_load_head_run_ = true;
 	window_pumps_run_ = 0;
 }
 
 // See host_role.h. The effect system's init (a host with its own client) ran between the
 // per-slot reset and here [orig: Game_StartMission - the gate @0x524958..0x524979,
 //  CEffectSystem_Init @0x524980 .. Precipitation_Reset @0x5249D4].
-void HostRole::open_next_mission_load_window() {
+void HostRole::open_mission_load_window() {
 	// The chat rings start every mission empty: CHAT GET and the status page list none of
 	// the last map's lines [orig: Game_StartMission @0x524A10 -> Chat_ClearAllChannels
 	//  @0x497D30].
@@ -602,7 +639,7 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	// gate still held (D-NET-116), the render arm's left to an embedder's device stages.
 	render_arm_pumps_owed_ = render_arm_deferred_ ? render_arm_pumps() : 0;
 	pump_load(load_window_pumps() - render_arm_pumps_owed_ - window_pumps_run_);
-	next_mission_head_run_ = false;
+	mission_load_head_run_ = false;
 	window_pumps_run_ = 0;
 }
 

@@ -12,7 +12,8 @@
 //
 // Pinned here, core-only (a synthetic mount, a recording socket, no retail data):
 //   - a fresh session's boot runs the update once, ahead of the fresh kernel, the terrain step
-//     and every server pump, past the session's create, whose keys it reads (D-NET-NEW-L1-50);
+//     and every server pump but the load head's (@0x5245E8, D-NET-116), past the session's
+//     create, whose keys it reads (D-NET-NEW-L1-50);
 //   - a dedicated host's map change runs it past the head (the next map's session settings on
 //     the context, the old World gone with the teardown) and ahead of the window's first pump,
 //     which sends the kept joiner its S2C 0x25, and ahead of the next kernel and its terrain;
@@ -236,15 +237,17 @@ void add_kept_joiner(DedicatedHost &host) {
 	host.ctx().np_protocol.connection_list.push_back(std::move(c));
 }
 
-// A fresh session: once, ahead of the fresh kernel, the terrain and every server pump.
+// A fresh session: once, ahead of the fresh kernel, the terrain and every server pump but the
+// load head's [orig: Game_StartMission - Server_PumpNetworkTransport @0x5245E8 ahead of
+// Lobby_UpdateServerInfo @0x5248F5 and of the window's @0x524A63].
 void test_a_fresh_session_updates_ahead_of_its_load() {
 	auto host = std::make_unique<DedicatedHost>();
 	CHECK(host->boot_current(/*next_mission=*/false));
 	CHECK(host->seen.runs == 1);
 	CHECK(host->seen.kernel_was_old); // no kernel yet: fresh_kernel had not run
 	CHECK(!host->seen.terrain_ran);
-	CHECK(host->seen.drains == 0);
-	CHECK(host->socket.drains > 0); // the load's pumps followed it
+	CHECK(host->seen.drains == 1); // the head's pump (D-NET-116)
+	CHECK(host->socket.drains > host->seen.drains); // the window's pumps and the rest followed it
 	CHECK(host->session.state() == inmatch::State::Running);
 	// The session's create ran ahead of it (D-NET-NEW-L1-50): the update reads the keys its
 	// round-state init drew, the ones the session keeps [orig: CNapiGameSession_BuildAndCreateSession

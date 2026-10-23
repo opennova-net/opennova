@@ -687,10 +687,10 @@ void test_the_embedder_head_leaves_its_window_to_the_effect_system() {
 	inmatch::begin_next_host_mission_load(host->role, test_boot::source_over(&host->files),
 			mission::mission_base_name(host->rotation.list.map_file), {},
 			host->current_host_cfg(), /*session_score_ini=*/false);
-	CHECK(host->role.next_mission_load_begun());
+	CHECK(host->role.mission_load_begun());
 	CHECK(drains == 2);
 	CHECK(!host->ctx().console_chat.empty());
-	host->role.open_next_mission_load_window();
+	host->role.open_mission_load_window();
 	CHECK(drains == 4);
 	CHECK(host->ctx().console_chat.empty());
 	for (int stage = 0; stage < 3; ++stage) host->role.pump_load_stage();

@@ -1892,7 +1892,7 @@ func test_lan_host_threads_truthful_base_metadata_into_the_native_session() -> v
 
 # Retail's mission start loads its effect system at the head on every load but a dedicated
 # host's (the test in session on the authority with no client of its own; engine
-# inmatch/host_role.h open_next_mission_load_window carries the witness): a listen host's world
+# inmatch/host_role.h open_mission_load_window carries the witness): a listen host's world
 # builds it ahead of its environment, a Serve Only host's has none and still loads.
 func test_a_dedicated_host_loads_no_effect_system() -> void:
 	for serve_and_play in [true, false]:
@@ -2832,7 +2832,7 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 	# The entry's mount and document, then the mission start's effect system ahead of its
 	# terrain, as retail's loads it past the head's per-slot reset (CEffectSystem_Init @0x524980
 	# ahead of Game_LoadTerrainDuringConnect @0x524F7C; engine inmatch/host_role.h
-	# open_next_mission_load_window carries the witness), its texture atlases built inside it
+	# open_mission_load_window carries the witness), its texture atlases built inside it
 	# (engine renderer/particle_atlas.h, D-NET-NEW-L3-26).
 	assert_eq(spans.size(), 6)
 	if spans.size() == 6:

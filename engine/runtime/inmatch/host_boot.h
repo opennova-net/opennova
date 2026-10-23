@@ -19,9 +19,12 @@
 //     session's create (HostRole::create_session: its round-state init's CRT
 //     seed and key draws, ahead of every World and of the mission start),
 //     unless the embedder ran it ahead of its own loads (create_host_session),
-//     Session::begin_load, the fresh kernel and its open, the terrain field
-//     with the placed tiles and the .TSD table, the environment and the water
-//     plane (both before the PreMission pass), the HostRole's staged
+//     the load's head and window (HostRole::begin_mission_load, its pump at
+//     the load's head, the mission-start update, open_mission_load_window),
+//     unless the embedder ran them, Session::begin_load, the fresh kernel and
+//     its open, the terrain field with the placed tiles and the .TSD table,
+//     the environment and the water plane (both before the PreMission pass),
+//     the load's stage pumps (a head the boot ran), the HostRole's staged
 //     bring-up, MissionKernel::boot with the bringup_net_session hook, the
 //     item catalog and traits, charattr.def, then the mission start's head
 //     (the PreMission pass, the restrictions, a map change's round init,
@@ -36,7 +39,8 @@
 // A map change (inmatch/map_change.h) boots the next map through the same
 // two phases with HostBootRequest::next_mission: the role's bring-up
 // continues the kept session instead of starting one, its load's head and
-// stage pumps run ahead of it (begin_next_host_mission_load).
+// stage pumps run ahead of it (begin_next_host_mission_load), as a fresh
+// session's run past its create.
 //
 // Retail's whole sequence is Game_StartMission @0x524360 inside the Game Loop
 // mode's initialize, which the loop's clock never banks (session.cpp carries
@@ -243,7 +247,7 @@ HostLoadingBand host_loading_band(const mission::BootFileSource &files,
 // config with the loose score.ini when `session_score_ini` (as phase A reads it), the
 // mission text and the "Server" strings, read as phase A reads them. The embedder then
 // loads its effect system (a host with its own client), opens the head's window
-// (HostRole::open_next_mission_load_window) and runs the load's three stage pumps
+// (HostRole::open_mission_load_window) and runs the load's three stage pumps
 // (HostRole::pump_load_stage) at its own terrain and ahead of its objects; phase A runs
 // none of them again. A headless host leaves them to phase A, which runs the head and its
 // window after its text reads and the stages after its terrain and environment.
@@ -256,8 +260,11 @@ void begin_next_host_mission_load(HostRole &host, const mission::BootFileSource 
 // loose score.ini when `session_score_ini`, Avatars.def, the own slot's character selection),
 // the mission text and the "Server" strings as phase A reads them, then HostRole::create_session,
 // at the load's start, ahead of the mission start and of every one of its stages. Phase A then
-// runs none (HostRole::create_ran). ProcessExit: the `mpreset` word refused it; the embedder
-// ends its process with code 0 and boots nothing.
+// runs none (HostRole::create_ran). The embedder runs the mission start's head next
+// (HostRole::begin_mission_load), then its effect system, the head's window and the stage pumps
+// as a map change's (begin_next_host_mission_load); phase A runs none of them again.
+// ProcessExit: the `mpreset` word refused it; the embedder ends its process with code 0 and
+// boots nothing.
 // [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 (Server_InitNewRoundState called
 //  @0x5695B3, CNapiGameSession_CreateSession called @0x56997D), from the PreMenu's
 //  MultiPlayer_JoinSessionStateMachine @0x56A320 (state 2's call @0x56A46A) after the host
