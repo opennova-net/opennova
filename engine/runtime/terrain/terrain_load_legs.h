@@ -44,4 +44,16 @@ constexpr TerrainLoadLeg terrain_load_leg(TerrainLoadFile file) noexcept {
 			: TerrainLoadLeg::Connect;
 }
 
+// Whether a mission start loads the foliage's definitions (their models and :fd textures), which
+// load with the render subsystems ahead of the mission textures. A dedicated host's start (in
+// session, the authority, no session peer) jumps over the render subsystems and loads none
+// (D-NET-NEW-LF-3).
+// [orig: Game_StartMission @0x524360 - the dedicated flag @0x524952..0x524964, its test @0x5259B4
+//  skipping Render_InitRenderingSubsystems (the call @0x5259D1) and Render_InitTerrainSubsystems
+//  (the call @0x5259FD); Render_InitTerrainSubsystems @0x587000 -> Render_InitLodCacheAndFoliage
+//  @0x604DA0 (the call @0x587004) -> Foliage_LoadDefAssets @0x601260]
+constexpr bool loads_foliage_definitions(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
+
 } // namespace opennova::terrain

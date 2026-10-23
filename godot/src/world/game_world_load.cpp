@@ -16,6 +16,7 @@
 #include <runtime/ragdoll/ragdoll_option.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/mission/mission_sidecars.h>
+#include <runtime/terrain/terrain_load_legs.h> // loads_foliage_definitions (the dedicated arm)
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -139,7 +140,7 @@ int GameWorld::load_world(const String &p_dir) {
 	// texture slots, its build and the foliage's, D-NET-NEW-L2-46) follows the connect leg at once.
 	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("World load %s", terrain_file_));
 	last_load_timeline_ = timeline;
-	load_terrain_textures(timeline);
+	load_terrain_textures(timeline, true);
 	timeline->finish();
 
 	world_ready_ = true;
@@ -404,13 +405,16 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM));
 	// The mission textures stage opens with the terrain's, on every arm, a dedicated host's reduced
 	// one too: the texture slots and the tile set's atlas the head's connect leg held, then the
-	// terrain's build and the foliage's (engine terrain/terrain_load_legs.h carries the witness,
-	// D-NET-NEW-L2-46).
-	load_terrain_textures(timeline);
+	// terrain's build (engine terrain/terrain_load_legs.h carries the witness, D-NET-NEW-L2-46).
+	// The foliage's definitions load with the render subsystems, which a dedicated host's start
+	// jumps over (the same header's loads_foliage_definitions, D-NET-NEW-LF-3).
+	const bool dedicated_host = challenge_sim.is_valid() &&
+			challenge_sim->session_role() == Simulation::ROLE_DEDICATED_HOST;
+	load_terrain_textures(timeline, opennova::terrain::loads_foliage_definitions(dedicated_host));
 	const PackedStringArray start_models = challenge_sim.is_valid()
 			? challenge_sim->get_mission_start_model_files()
 			: PackedStringArray();
-	if (challenge_sim.is_valid() && challenge_sim->session_role() == Simulation::ROLE_DEDICATED_HOST) {
+	if (dedicated_host) {
 		// A dedicated host's freeze is the reduced arm: the listed models' materials resolve, and
 		// no effect spawns, no model builds, no pipeline warm and no forced frame run (engine
 		// inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness,
@@ -1154,7 +1158,7 @@ bool GameWorld::load_terrain(
 	return true;
 }
 
-void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline) {
+void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool p_foliage) {
 	if (!terrain_textures_pending_) {
 		return;
 	}
@@ -1165,7 +1169,7 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline) {
 	p_timeline->span("terrain_textures");
 	terrain_data_->load_textures();
 	terrain_->build();
-	configure_foliage();
+	if (p_foliage) configure_foliage();
 	p_timeline->end_span();
 }
 

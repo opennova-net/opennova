@@ -8,6 +8,7 @@
 
 using opennova::terrain::TerrainLoadFile;
 using opennova::terrain::TerrainLoadLeg;
+using opennova::terrain::loads_foliage_definitions;
 using opennova::terrain::terrain_load_leg;
 
 static int failures = 0;
@@ -32,6 +33,10 @@ int main() {
 	// atlas's name stands from the connect leg; its pixels load here).
 	CHECK(terrain_load_leg(TerrainLoadFile::TextureSlot) == TerrainLoadLeg::MissionTextures);
 	CHECK(terrain_load_leg(TerrainLoadFile::TileSetAtlas) == TerrainLoadLeg::MissionTextures);
+	// The foliage's definitions load with the render subsystems, which a dedicated host's start
+	// jumps over (D-NET-NEW-LF-3).
+	CHECK(loads_foliage_definitions(false));
+	CHECK(!loads_foliage_definitions(true));
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

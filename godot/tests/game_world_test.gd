@@ -1886,6 +1886,14 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 						"a dedicated host resolves its listed models' materials: %s" % [names])
 				for leg in warm_legs:
 					assert_false(names.has(leg), "no %s on a dedicated host: %s" % [leg, names])
+		# The foliage's definitions load with the render subsystems, which a dedicated host's start
+		# jumps over (Game_StartMission's dedicated arm skips Render_InitTerrainSubsystems): its
+		# dispatcher stays unconfigured, a listen host's takes the terrain.
+		var dispatcher: FoliageDispatcher = world.get_foliage_dispatcher()
+		assert_not_null(dispatcher)
+		if dispatcher != null:
+			assert_eq(dispatcher.get_terrain_data() != null, serve_and_play,
+					"the foliage configures on a listen host's start alone")
 		world.unload()
 
 
