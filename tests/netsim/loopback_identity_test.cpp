@@ -1446,7 +1446,20 @@ bool run_apply_rejects_own_player() {
 }
 
 // A wire-owned player's death still executes the retail relationship edge. The
-// real seat claim must release before the same tick's player compact is built.
+// real seat claim must release before the same tick's player compact is built:
+// the record's bone and seat bytes are zero. Its carrier is the ground link, not
+// 0xFFFF: the update's head took the mount as the ground, the death edge's detach
+// clears the mount, the bone and the seat type but never the ground, the dead body's
+// ride keeps a ground within its bound radius, and the record writes the mount, else
+// the ground. In a world with terrain the body's ground probe would rewrite the ground
+// later in the pass; this rig has none.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the head store @0x4B41A2..0x4B41B4,
+//  Entity_DetachFromVehicleIfServer @0x4359D0 called @0x4B4C11, the edge's +0x184
+//  store @0x4B4CDB, the radius drop @0x4B529F..0x4B52FF; Entity_DetachFromVehicle
+//  @0x4355F0 - +0x16C @0x435915, +0x157 @0x43591B, +0x168 @0x435921;
+//  NetPacket_SerializePlayerState @0x4C09C0 - the +0x16C load @0x4C0A00, the +0x28 read
+//  @0x4C0A08, the +0x16C override @0x4C0A15..0x4C0A20, the zero bone and seat @0x4C0A7B /
+//  @0x4C0A95]
 bool run_remote_mounted_player_death_detaches_compact() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
@@ -1524,9 +1537,9 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	const nw::FrameUpdateRecord *wire_peer = nullptr;
 	for (const nw::FrameUpdateRecord &record : frame.records)
 		if (record.handle == ph.packed) wire_peer = &record;
-	return expect(wire_peer != nullptr && wire_peer->player.carrier_handle == 0xFFFFu &&
-	                      wire_peer->player.vehicle_bone == 0,
-	              "same-tick dead player compact carries detached FFFF/zero relationship");
+	return expect(wire_peer != nullptr && wire_peer->player.carrier_handle == vh.packed &&
+	                      wire_peer->player.vehicle_bone == 0 && wire_peer->player.seat_type == 0,
+	              "same-tick dead player compact carries its ground link with a zero bone and seat");
 }
 
 // On a client the infantry motor skips a wire-owned remote body entirely: the joiner's replica
