@@ -1759,6 +1759,58 @@ bool run_replica_turret_channel() {
    "another render class publishes no EWEAP words");
 }
 
+// D-NET-NEW-L5-31: a remote Player gunner's gun channel runs in the pool-1 walk, ahead of the
+// gunner's body chase in the pool-0 walk: the immediate gun's words come from the look before
+// this tick's chase step. The gunner's staged heading 0x1C000000 is 0xC000000 off its look
+// 0x10000000, a twelfth (0x1000000) a tick: the words take -0x10000000 >> 16 = -4096, where a
+// channel after the chase took -0x11000000 >> 16 = -4352.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9 ahead of the
+//  pool-0 walk @0x4C2426..0x4C2472; Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C8 call
+//  @0x4B8E3C; Entity_UpdateChildAttachment @0x4409A0 - the immediate words @0x440B3F..0x440B58;
+//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the angle apply @0x4B43E6..0x4B440A]
+bool run_remote_gunner_channel_precedes_its_chase() {
+ Harness h;
+ auto &world = h.kernel->world;
+ world.registry.configure_pool(1, 4);
+ world.load_systems();
+ h.role.poll_preload();
+ // In the game loop (the seeded session), so the frame's entity update walks the rows.
+ h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+   1, 0, /*self_handle=*/5, w::kPlayerInfantryTypeId);
+ h.role.run_tick(h.input);
+ w::Entity twin;
+ twin.kind = w::EntityKind::Item;
+ twin.item_id = 123;
+ twin.emplaced_ctrl_publisher = true;
+ const uint16_t gun_handle = world.registry.spawn(1, twin).packed;
+ auto &state = h.role.runtime->state();
+ mission::ItemSeatSpec spec;
+ spec.type_id = 123;
+ w::Seat seat;
+ seat.type = w::SeatType::Gunner;
+ seat.bone_index = 1;
+ spec.seats.push_back(seat);
+ h.kernel->seat_specs.push_back(spec);
+ auto &mount = state.upsert(gun_handle);
+ mount.type_id = 123;
+ mount.cls = EntityClass::NoNetworkCallback;
+ mount.heading_known = true;
+ mount.heading_bam = 0;
+ auto &gunner = state.upsert(2);
+ gunner.cls = EntityClass::Player;
+ gunner.carrier_handle = gun_handle;
+ gunner.mount_bone = 1;
+ gunner.net_has_compact = true;
+ gunner.rm_adm_id = 0;
+ gunner.heading_bam = 0x10000000;
+ gunner.net_smooth_heading = 0x1C000000;
+ h.role.run_tick(h.input);
+ const auto *gun = state.find(gun_handle);
+ if (!expect(gun != nullptr && gun->emplaced_gun_yaw_word == -4096,
+   "the remote gunner's words come from its look ahead of the chase step")) return false;
+ return expect(state.find(2)->heading_bam == 0x11000000,
+   "(the chase then steps the look a twelfth)");
+}
 
 bool run_local_replica_turret_channel() {
  Harness h;
@@ -4592,6 +4644,7 @@ bool run_role_runtimes_step_the_process_report_count() {
 int main() {
 	if (!run_local_replica_turret_channel()) return 1;
 	if (!run_replica_turret_channel()) return 1;
+	if (!run_remote_gunner_channel_precedes_its_chase()) return 1;
 	if (!run_received_loadout_policy_and_sounds()) return 1;
 	if (!run_received_reload_refills_an_eweap_entity()) return 1;
 	bool ok = true;

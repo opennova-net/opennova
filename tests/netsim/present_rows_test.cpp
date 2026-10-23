@@ -46,6 +46,17 @@ const float *row_at(const std::vector<float> &rows, size_t i) {
 	return rows.data() + i * w::PF_STRIDE;
 }
 
+// The joiner's two replica gun legs in its frame's order: the pool-1 walk's, then the one after
+// the own body's update (im::ReplicaGunLeg).
+void tick_replica_guns(opennova::replication::ClientState &state,
+		const std::vector<opennova::mission::ItemSeatSpec> &specs, w::World &world,
+		const opennova::replication::ClientWorldMaterializer *materializer, bool wire_header_world) {
+	im::tick_replica_emplaced_channels(state, specs, world, 0xFFFF, materializer,
+			wire_header_world, im::ReplicaGunLeg::Pool1Walk);
+	im::tick_replica_emplaced_channels(state, specs, world, 0xFFFF, materializer,
+			wire_header_world, im::ReplicaGunLeg::AfterOwnBody);
+}
+
 // One organic spawned into pool 0 of a bare kernel's registry at a known slot.
 w::Entity *spawn_pool_row(opennova::mission::MissionKernel &kernel, int pool, int slot,
 		int32_t item_id) {
@@ -915,8 +926,8 @@ bool test_emplaced_channels_take_the_owned_lifetime() {
 		return false;
 	mine->emplaced_spin_phase = 77;
 	mine->emplaced_ctrl_publisher = true;
-	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
-			&materializer, kernel.wire_header_world);
+	tick_replica_guns(runtime.state(), kernel.seat_specs, kernel.world, &materializer,
+			kernel.wire_header_world);
 	const opennova::replication::ClientEntityState *row = runtime.state().find(decoded.handle);
 	bool ok = expect(row != nullptr && row->emplaced_spin_phase == 77 && row->emplaced_controls_valid,
 			"the owned mount's spin phase and publisher reach its row");
@@ -928,8 +939,8 @@ bool test_emplaced_channels_take_the_owned_lifetime() {
 	newcomer.emplaced_ctrl_publisher = true;
 	if (!expect(kernel.world.registry.spawn_at(h, newcomer) == h, "a same-type newcomer spawns"))
 		return false;
-	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
-			&materializer, kernel.wire_header_world);
+	tick_replica_guns(runtime.state(), kernel.seat_specs, kernel.world, &materializer,
+			kernel.wire_header_world);
 	row = runtime.state().find(decoded.handle);
 	ok = expect(row != nullptr && row->emplaced_spin_phase == 0 && !row->emplaced_controls_valid,
 			"the newcomer forwards neither its phase nor its publisher") && ok;
@@ -1094,8 +1105,7 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	turret_row.parent_handle = 0x0000;
 	turret_row.emplaced_gun_yaw_word = 0x1234;
 	runtime.state().upsert(turret_row.handle) = turret_row;
-	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
-			nullptr, false);
+	tick_replica_guns(runtime.state(), kernel.seat_specs, kernel.world, nullptr, false);
 	const im::PresentRowsContext context{ kernel, &runtime, true };
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
@@ -1109,8 +1119,7 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 					hull_present[w::PF_VEHICLE_GUN_YAW] == static_cast<float>(0x1234),
 			"the turret's yaw word drives the joiner hull's VEHICLE_GUNYAW");
 	runtime.state().find(turret_row.handle)->target_handle = w::EntityHandle::kInvalid;
-	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
-			nullptr, false);
+	tick_replica_guns(runtime.state(), kernel.seat_specs, kernel.world, nullptr, false);
 	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
 	ok = expect(row_at(rows, 0)[w::PF_VEHICLE_GUN_YAW] == static_cast<float>(0x1234),
 			"the hull keeps the last published word, like the brain") && ok;
@@ -1129,8 +1138,7 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	turret_row.target_handle = hull_row.handle;
 	plain_runtime.state().upsert(hull_row.handle) = hull_row;
 	plain_runtime.state().upsert(turret_row.handle) = turret_row;
-	im::tick_replica_emplaced_channels(plain_runtime.state(), plain.seat_specs, plain.world, 0xFFFF,
-			nullptr, false);
+	tick_replica_guns(plain_runtime.state(), plain.seat_specs, plain.world, nullptr, false);
 	const im::PresentRowsContext plain_context{ plain, &plain_runtime, true };
 	im::PoolPresentLifecycleMap plain_lifecycle;
 	im::build_client_replica_present_rows(plain_context, plain_lifecycle, rows, doors);

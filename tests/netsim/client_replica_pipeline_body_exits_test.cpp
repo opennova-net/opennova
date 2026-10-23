@@ -481,7 +481,7 @@ void test_gun_channel_leaves_the_gunner_aim_heading() {
 	specs[0].seats.push_back(gunner_seat);
 	view->tick_remote_motion(0xFFFF); // the walk arms the seated look
 	opennova::inmatch::tick_replica_emplaced_channels(view->state(), specs, *world, 0xFFFF,
-			nullptr, false);
+			nullptr, false, opennova::inmatch::ReplicaGunLeg::Pool1Walk);
 	expect(rider.pitch_byte == 0x30 && rider.heading_bam == 0 && rider.pitch_bam == 0x30000000,
 			"(the gun channel left the look and wrote the Pitch byte back)");
 	view->tick_org1_looks();

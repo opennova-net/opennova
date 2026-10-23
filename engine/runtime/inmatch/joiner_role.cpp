@@ -1113,7 +1113,13 @@ void JoinerRole::pump() {
 	//  pool-0 walk @0x4C2426..0x4C2472; Entity_MovementCollisionResolver @0x4B2BD0 (the
 	//  dead skip @0x4B3B89..0x4B3B8D, the live reads @0x4B3B93..0x4B3B99);
 	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 (the death gate @0x4B4BF1)]
-	world.before_pool0_walk = [this, &rt] {
+	// Ahead of them, the replica guns' channels: each gun's ai-fn and class update run in the
+	// pool-1 walk, so a remote gunner's words and window store precede its body's chase
+	// (D-NET-NEW-L5-31). [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C8 call @0x4B8E3C,
+	//  the +0x1C4 call @0x4B8E53; Entity_UpdateAllEntities @0x4C2100 - @0x4C2158..0x4C21E9]
+	world.before_pool0_walk = [this, &rt, &kernel, &world] {
+		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle(),
+				&materializer_, kernel.wire_header_world, ReplicaGunLeg::Pool1Walk);
 		rt.view().tick_remote_motion_through_self();
 		sync_wire_collision_proxies_live();
 	};
@@ -1257,7 +1263,7 @@ void JoinerRole::pump() {
 			world.out.destruction.effects.push_back(std::move(effect));
 		}
 		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle(),
-				&materializer_, kernel.wire_header_world);
+				&materializer_, kernel.wire_header_world, ReplicaGunLeg::AfterOwnBody);
 		rt.tick_remote_recoil();
 	}
 	rt.view().tick_org1_looks(); // org1's looks, after the gun channels and the recoil

@@ -138,7 +138,8 @@ void write_present_replica_vehicle_gun(float *record, const world::World &world,
 void tick_replica_emplaced_channels(replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs, world::World &world,
 		uint16_t self_handle, const replication::ClientWorldMaterializer *materializer,
-		bool wire_header_world) {
+		bool wire_header_world, ReplicaGunLeg leg) {
+	const bool pool1 = leg == ReplicaGunLeg::Pool1Walk;
 	for (auto &mount : state.entities) {
 		// The row's own native row, by the replica rule while it is still this
 		// wire entity's type: a reused handle, a same-type newcomer included,
@@ -147,12 +148,13 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				world::EntityHandle{mount.handle}, mount.type_id, wire_header_world);
 		const world::Entity *spin_source = local_mount;
 		const bool same_type = spin_source != nullptr;
-		mount.emplaced_spin_phase = same_type ? spin_source->emplaced_spin_phase : 0;
+		if (pool1) mount.emplaced_spin_phase = same_type ? spin_source->emplaced_spin_phase : 0;
 		// An 'ewep' render class publishes its held words whether or not a
 		// gunner is seated: an emptied turret keeps its last traverse.
 		// [orig: HUD_CacheWeaponSlotInfo @0x440930 via the 'ewep' render-class
 		//  row @0x82CFA0, no occupant test]
-		mount.emplaced_controls_valid = same_type && spin_source->emplaced_ctrl_publisher;
+		if (pool1)
+			mount.emplaced_controls_valid = same_type && spin_source->emplaced_ctrl_publisher;
 		// Retail's joiner holds a remote gunner as an entity attached to this
 		// UseGun seat; its body update's seat call writes this carrier's words
 		// every tick unless the rider's Flags carry the hidden or the dead bit.
@@ -162,7 +164,7 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		//  @0x4B411E..0x4B4127, seat type 3 @0x4B63A5, the call @0x4B63C7;
 		//  Entity_AttachToBoneAndUpdateTransform -- the dead-bit skip
 		//  @0x5463FC..0x546400, HUD_CacheWeaponSlotInfo(parent) @0x546517..0x546518]
-		if (local_mount != nullptr) local_mount->replica_usegun_rider = false;
+		if (pool1 && local_mount != nullptr) local_mount->replica_usegun_rider = false;
 		const auto *spec = mission::item_seat_spec_for_type(specs, mount.type_id);
 		if (spec == nullptr)
 			continue;
@@ -177,9 +179,11 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 			if (!gunner_seat)
 				continue;
 			const auto *local_gunner = world.ai.for_handle(world.cached.local_player);
-			if (occupant.handle == self_handle && local_mount != nullptr &&
+			const bool own_copy = occupant.handle == self_handle && local_mount != nullptr &&
 					local_gunner != nullptr &&
-					local_mount->primary_weapon_owner == world.cached.local_player) {
+					local_mount->primary_weapon_owner == world.cached.local_player;
+			if (own_copy == pool1) break; // the other leg's gunner
+			if (own_copy) {
 				mount.emplaced_gun_yaw_word = local_mount->emplaced_gun_yaw_word;
 				mount.emplaced_gun_pitch_word = local_mount->emplaced_gun_pitch_word;
 				occupant.heading_bam = local_gunner->heading;
@@ -226,6 +230,6 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 			break;
 		}
 	}
-	publish_replica_gun_words(state, specs, world, materializer, wire_header_world);
+	if (!pool1) publish_replica_gun_words(state, specs, world, materializer, wire_header_world);
 }
 } //namespace opennova::inmatch
