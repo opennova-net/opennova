@@ -748,6 +748,12 @@ public:
 	// fold tells its own slot's notice from another's [orig:
 	// NapiNPClientMsg_HandleSpawnSlot @0x4317f0].
 	void set_local_player_slot(uint8_t slot) { local_player_slot_ = slot; }
+	// The local body's in-place destroy (its ewep update's stale-ground leg, which a joiner's
+	// role sees as the body's own C2S 0x0F): the destroy's tail stores 0xFF in its slot byte,
+	// which local_body_slot reads until a record of the body's handle rebuilds it.
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the body's 0x0F @0x440E29, Entity_Destroy
+	//  @0x440E2F; Entity_Destroy @0x43E810 - +0x154 = 0xFF @0x43EA78]
+	void mark_local_body_destroyed() { local_body_slot_ = 0xFF; }
 
 	// The death screen's spectate writers over the replica rows
 	// (client_replica_spectate.cpp): the local player's own wire handle the
@@ -775,10 +781,10 @@ public:
 	static constexpr int kSpectateActionPrevTarget = 502;
 	bool spectate_action(int code);
 
-	// The local player's roster slot (entity+0x154, which the host stamps
-	// from the slot id S2C 0x04 byte 17 carries): the slot
-	// set_local_player_slot latched, whether or not its entity is bound.
-	int local_roster_slot() const;
+	// The local body's slot byte (g_LocalPlayerEntity+0x154), which the squad folds, the
+	// command map's walks and sends, the join send's sound and the stat fill read
+	// (client_replica_squad.cpp).
+	int local_body_slot() const;
 private:
 	// A destroyed spectate target re-picks [orig: Entity_Destroy @0x43e820].
 	void spectate_on_entity_removed(uint16_t handle);
@@ -967,6 +973,9 @@ private:
 	uint16_t spectate_local_handle_ = 0xFFFF;
 	uint32_t mp_attributes_ = 0;
 	uint8_t local_player_slot_ = 0;
+	// The local body's slot byte as its last record or its in-place destroy stored it; -1 while
+	// no record of the viewer's handle has landed (local_body_slot reads the latched slot).
+	int16_t local_body_slot_ = -1;
 	// Mission-seeded PRNG_Next16 stand-in shared by every decoded row in this
 	// view. The body consumes one draw per person per tick even when recoil is
 	// zero. Retail also has unrelated process-global consumers that this decoded

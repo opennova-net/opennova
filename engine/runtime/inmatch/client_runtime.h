@@ -716,9 +716,9 @@ public:
 	//  @0x5488ae (0x3F) — every IDB name a misnomer; all
 	//  CNapiNetwork_QueueReliableMessage(tag, 1, 0)]
 	bool queue_squad_message(uint8_t c2s_tag, std::vector<uint8_t> body);
-	// The local player's roster slot (entity+0x154; the pipeline's
-	// set_local_player_slot).
-	int local_roster_slot() const { return view_.local_roster_slot(); }
+	// The local body's slot byte (g_LocalPlayerEntity+0x154; the pipeline's local_body_slot):
+	// the latched slot, 0xFF while the body is destroyed in place.
+	int local_body_slot() const { return view_.local_body_slot(); }
 	// The squad folds' HUD lines (hud/squad_feed.h) since the last drain.
 	std::vector<hud::SquadFeedLine> drain_squad_lines();
 	// Ring lines the client's own receive legs raise with their own sink and
@@ -763,7 +763,9 @@ public:
 	//  CMap_BuildAndSendOrderCommand @0x547839; CCommandMap_HandleOrderAction
 	//  @0x548c25; CMap_HandlePlayerListCallback @0x54889b..0x5488b9]
 	void send_squad_recruit(uint8_t target);
-	void send_squad_join(uint8_t leader);
+	// The join also plays the local body's RECRUIT_ACCEPT set when the leader is not its own
+	// slot byte [orig: NetPacket_SendWeaponSlotSwitch @0x42dc3c..0x42dc5d].
+	void send_squad_join(world::World &world, uint8_t leader);
 	void send_fireteam_assign(uint8_t fireteam, const std::vector<uint8_t> &members);
 	void send_squad_order(uint8_t kind, const std::string &text,
 			const std::vector<uint8_t> &targets);

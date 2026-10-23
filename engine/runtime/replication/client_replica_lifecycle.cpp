@@ -78,6 +78,9 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     row.spawn_ai_state = rec.ai_state;
     row.spawn_anim_slot = rec.anim_slot;
     row.spawn_byte_154 = rec.player_slot_id;
+    // A record of the local body's handle rebuilds its slot byte, the in-place destroy's 0xFF
+    // included (local_body_slot) [orig: @0x433BBB].
+    if (rec.slot_id == viewer_handle_) local_body_slot_ = rec.player_slot_id;
     row.spawn_mount_mask = rec.seat_mask;
     for (std::size_t i = 0; i < 8; ++i)
         row.spawn_mount_handles[i] = resolved_spawn_handle(rec.mount_handles[i]);

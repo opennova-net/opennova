@@ -191,6 +191,9 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		es.spawn_anim_slot = rec.anim_slot;
 		es.spawn_player_class = rec.player_class;
 		es.spawn_byte_154 = rec.player_slot_id;
+		// A record of the local body's handle stores its slot byte (local_body_slot)
+		// [orig: @0x42EA06].
+		if (rec.slot_id == viewer_handle_) local_body_slot_ = rec.player_slot_id;
 		es.spawn_ref_num = rec.alert_level;
 		es.spawn_sub_type = rec.sub_type;
 		es.mount_bone = rec.weapon_type;

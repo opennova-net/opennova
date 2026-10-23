@@ -1133,9 +1133,15 @@ void JoinerRole::pump() {
 	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the 0x0Fs @0x440DAB / @0x440E29;
 	//  Game_ProcessMainFrame: Client_ProcessNetworkFrame @0x526692, then
 	//  Entity_UpdateAllEntities @0x52674B]
-	for (const world::EntityHandle request : world.out.entity_info_requests)
-		rt.queue_entity_info_request(request == world.cached.local_player ? self_wire_handle()
-		                                                                  : request.packed);
+	// L's own request is its stale-ground leg's, which destroys L in place right after it:
+	// the destroy's tail stores 0xFF in L's slot byte, which the receive's readers of it take
+	// until a record of H rebuilds it (ClientReplicaPipeline::mark_local_body_destroyed).
+	// [orig: @0x440E29, Entity_Destroy @0x440E2F; Entity_Destroy @0x43E810 - @0x43EA78]
+	for (const world::EntityHandle request : world.out.entity_info_requests) {
+		const bool own = request == world.cached.local_player;
+		rt.queue_entity_info_request(own ? self_wire_handle() : request.packed);
+		if (own) rt.view().mark_local_body_destroyed();
+	}
 	world.out.entity_info_requests.clear();
 	if (!preround_active)
 		mirror_predicted_vehicles(); // predicted boat poses -> presented rows

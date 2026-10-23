@@ -196,10 +196,11 @@ EndRoundSessionState end_round_session_state(const RoleView &view) {
 	v.death_screen = local_death_screen_active(view);
 	v.local_team = local_team_of(view);
 	// The local player entity's slot id the stat fill selects its row by
-	// [orig: g_LocalPlayerEntity +0x154, read @0x562724]: the slot the role's
-	// runtime latched (a joiner's S2C 0x04, the listen host's own connection),
-	// as the command map's roster reads it.
-	v.local_slot = view.runtime->local_roster_slot();
+	// [orig: StatScreen_PopulateStatResultsList - g_LocalPlayerEntity +0x154, read
+	// @0x562724]: the local body's slot byte (local_body_slot: the slot the role's runtime
+	// latched, a joiner's S2C 0x04 or the listen host's own connection, 0xFF while the
+	// body is destroyed in place), as the command map's roster reads it.
+	v.local_slot = view.runtime->local_body_slot();
 	// The team-mode arm stat.mnu's RADIO_TAB_* trio rides (the g_GameType
 	// 0x10000 bit, base/gameprofile/game_type.h; the show callback's witness is
 	// stat_screen_feed.h's).
@@ -914,7 +915,11 @@ bool command_map_roster(const RoleView &view, menu::CommandMapRoster &out) {
 	const world::World &w = view.kernel->world;
 	const ClientRuntime &runtime = *view.runtime;
 	const replication::ClientState &cs = runtime.state();
-	const int local_slot = runtime.local_roster_slot();
+	// The command map's walks and sends read the local body's slot byte, 0xFF while the body is
+	// destroyed in place [orig: CMap_PopulateTeamList_0 @0x548d80; CMap_BuildAndSendOrderCommand
+	//  @0x5476cf; CCommandMap_SendWeaponActionToTeammates @0x548d30; CMap_OnGoCodeButton
+	//  @0x54829f; CMap_EntityWidgetHandler @0x548653].
+	const int local_slot = runtime.local_body_slot();
 	out.local_slot = static_cast<uint8_t>(local_slot < 0 ? 0xFF : local_slot);
 	if (const world::Entity *player = w.registry.get(w.cached.local_player))
 		out.local_team = static_cast<int8_t>(player->team);
