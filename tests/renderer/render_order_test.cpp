@@ -212,6 +212,30 @@ int main() {
 		CHECK(scene_water_visible(0x8, true));
 		CHECK(scene_water_visible(0x2 | 0x4 | 0x20, false));
 	}
+	// The one g_BlinkWaterVisible word: each scene's label reads it ahead of
+	// its own collect, the mirror's collect landing first when that mirror ran,
+	// else the last collect's (the previous scene's).
+	// [orig: Terrain_RenderWorldScene, the label's read @0x5c93c1 ahead of the
+	//  collect @0x5c94f0; Render_MainScene, the mirror's collect @0x5c16fc]
+	{
+		using opennova::renderer::SceneWaterWord;
+		SceneWaterWord w;
+		// The main scene, its mirror up: the mirror's verdict decides the label;
+		// its own collect then writes the word.
+		CHECK(w.label(0x8, true, true));
+		w.collect(false);
+		// The weapon Inset, its mirror down: the main collect's word.
+		CHECK(!w.label(0x8, false, true));
+		w.collect(true);
+		// The next frame's main scene, its mirror down: the Inset's word.
+		CHECK(w.label(0x8, false, false));
+		w.collect(false);
+		// With its mirror up, the mirror's word whatever the last collect left.
+		w.collect(true);
+		CHECK(!w.label(0x8, true, false));
+		// No water letter: every label passes.
+		CHECK(w.label(0, false, false));
+	}
 	// The force-indoors attribute and the blink hit's owning building.
 	{
 		using opennova::world::BlinkAccum;

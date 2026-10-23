@@ -1538,14 +1538,32 @@ void GameWorld::render_material_frame() {
 		frames[1] = ObjectLodFrame::from_camera(inset, inset_width, object_detail_);
 		frame_count = frames[1].valid ? 2 : 1;
 		if (frame_count == 2 && world_ready_ && !frame_skip_occlusion_) {
-			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors(),
-					object_detail_);
-			// The Inset pass's own terrain frame, then its foliage frame, after
-			// its own collect and after the main view's
+			// The Inset pass's own terrain frame first: its visible bounds feed
+			// the Inset's water-active test, which its water mirror's collect and
+			// its water letter label read ahead of its own collect (the Inset's
+			// terrain scene and its prerender run ahead of its scene core: engine
+			// environment/water_mirror.h inset_mirror_source; world/occlusion.h
+			// OcclusionWorld::mirror_water_visible). Then its collect, after the
+			// main view's, then its foliage frame over that collect's anchors
 			// (Terrain::render_inset_frame, FoliageDispatcher::render_inset_frame).
+			HudInsetScope *scope =
+					Object::cast_to<HudInsetScope>(ObjectDB::get_instance(inset_scope_id_));
 			if (terrain_ != nullptr) {
 				terrain_->render_inset_frame(inset);
+				if (water_ != nullptr) {
+					water_->set_inset_visible_terrain_bounds(
+							terrain_->has_inset_visible_terrain_bounds(),
+							terrain_->get_inset_visible_terrain_min_height(),
+							terrain_->get_inset_visible_terrain_max_height());
+				}
 			}
+			// The view block the Inset's mirror reflects, while that mirror can
+			// render (render_inset_water_frame's own conditions).
+			const Transform3D mirror_block =
+					scope != nullptr ? scope->get_view_block_transform() : Transform3D();
+			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors(),
+					object_detail_,
+					scope != nullptr && terrain_ != nullptr ? &mirror_block : nullptr);
 			if (dispatcher_ != nullptr) {
 				dispatcher_->render_inset_frame(inset,
 						occlusion_->get_inset_foliage_mask_anchors(), get_frame_clock_ms());

@@ -184,6 +184,16 @@ void Simulation::release_inset_occlusion() {
 	present_.inset_occlusion = InsetOcclusionView();
 }
 
+bool Simulation::run_mirror_occlusion(const Transform3D &p_camera, double p_fov_deg,
+		double p_viewport_width, double p_fog_dist_units, double p_water_z_units,
+		bool p_force_indoors, int p_object_detail) {
+	if (!kernel_) return false;
+	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_camera,
+			p_fov_deg, 1.0, p_viewport_width, p_fog_dist_units, p_water_z_units,
+			p_force_indoors, kernel_->collision.local_player_blink_flags, p_object_detail);
+	return kernel_->occlusion.mirror_water_visible(kernel_->world, kernel_->collision, cam);
+}
+
 int64_t Simulation::building_visibility_mask(int64_t p_packed) {
 	return static_cast<int64_t>(opennova::world::building_visibility_mask(p_packed));
 }

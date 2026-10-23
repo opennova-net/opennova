@@ -102,8 +102,7 @@ void Water::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_blink_water_latch"), &Water::get_blink_water_latch);
 	ClassDB::bind_method(D_METHOD("latch_blink_water", "water_pass_runs", "visible"),
 			&Water::latch_blink_water);
-	ClassDB::bind_method(D_METHOD("latch_inset_blink_water", "water_pass_runs", "visible"),
-			&Water::latch_inset_blink_water);
+	ClassDB::bind_method(D_METHOD("open_inset_water_latch"), &Water::open_inset_water_latch);
 	ClassDB::bind_method(D_METHOD("set_inset_visible_terrain_bounds", "valid",
 								"min_height", "max_height"),
 			&Water::set_inset_visible_terrain_bounds);
@@ -357,10 +356,8 @@ void Water::latch_blink_water(bool p_water_pass_runs, bool p_visible) {
 			opennova::env::water_pass_latch(blink_water_visible_, p_water_pass_runs, p_visible);
 }
 
-void Water::latch_inset_blink_water(bool p_water_pass_runs, bool p_visible) {
+void Water::open_inset_water_latch() {
 	inset_blink_latch_ = blink_water_visible_;
-	blink_water_visible_ =
-			opennova::env::water_pass_latch(blink_water_visible_, p_water_pass_runs, p_visible);
 }
 
 // The labels reach the strips alone; the node, the mirrors and the bloom's

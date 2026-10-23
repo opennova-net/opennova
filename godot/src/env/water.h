@@ -143,16 +143,19 @@ public:
 	// collect's water pass below.
 	void set_blink_water_visible(bool p_visible);
 	bool get_blink_water_latch() const { return blink_water_visible_; }
-	// The main collect's water pass: past its water letter (p_water_pass_runs)
-	// it stores that collect's verdict.
+	// A scene's water pass: past its water letter (p_water_pass_runs) it stores
+	// its collect's verdict, the main scene's and then the Inset's (for the next
+	// frame's main scene).
 	void latch_blink_water(bool p_water_pass_runs, bool p_visible);
-	// The Inset collect's: the Inset's own water-active test reads the latch as
-	// it stands here (the main collect's of this frame), then the Inset's pass
-	// stores its own for the next frame's main scene.
-	void latch_inset_blink_water(bool p_water_pass_runs, bool p_visible);
-	// Each view's water letter label (renderer::scene_water_visible): the
-	// main collect's, and the Inset scene core's on its own collect's
-	// g_BlinkWaterVisible (engine: world/occlusion.h OcclusionView). A label
+	// The Inset scene's water-active test reads the latch as the main scene's
+	// water pass left it this frame: open it ahead of that test (and the Inset
+	// mirror's collect), before the Inset's own pass stores through
+	// latch_blink_water.
+	void open_inset_water_latch();
+	// Each view's water letter label (renderer::scene_water_visible), over the
+	// g_BlinkWaterVisible word as its scene core reads it ahead of its own
+	// collect: its mirror's collect's, else the last scene's (OcclusionFrame;
+	// engine: world/occlusion.h OcclusionWorld::mirror_water_visible). A label
 	// gates its view's strip alone: the mirrors render on their g_WaterActive
 	// and the bloom's redraw draws on its side whatever the labels say. While
 	// the Inset pass draws (advance_inset_frame) each view has its own strip:

@@ -547,6 +547,14 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
 
         Entity *e = world.registry.get(slot.h);
         if (e == nullptr) continue;
+        // The walk's Flags match (the mirror's Reflective filter): the one
+        // retail Flags word, the vehicle init's Reflective bit included.
+        // [orig: @ 0x5c6c27..0x5c6c39; Entity_InitFromModel @ 0x40e204..0x40e20a]
+        if (cam.collect_flag_match != 0) {
+            const uint32_t flags_word = e->flags | e->engine_flags |
+                    (e->item_type == 1 ? kEntityFlagReflective : 0u);
+            if ((flags_word & cam.collect_flag_match) != cam.collect_flag_match) continue;
+        }
         const CollisionModel *cm = collision.model_for(world, slot.h);
         if (cm == nullptr || !cm->valid()) continue; // [orig: the entity+48 model gate]
 
@@ -1525,7 +1533,10 @@ void OcclusionWorld::build_frame(World &world, CollisionWorld &collision,
 void OcclusionWorld::select_view(OcclusionView view) {
     if (view == selected_view_) return;
     selected_view_ = view;
-    ParkedFrame &p = parked_view_;
+    swap_frame(parked_view_);
+}
+
+void OcclusionWorld::swap_frame(ParkedFrame &p) {
     batch_.swap(p.batch);
     slots_.swap(p.slots);
     occluder_edge_planes_.swap(p.occluder_edge_planes);
@@ -1548,6 +1559,21 @@ void OcclusionWorld::select_view(OcclusionView view) {
     std::swap(exterior_visible_, p.exterior_visible);
     std::swap(water_visible_, p.water_visible);
     std::swap(camera_indoors_, p.camera_indoors);
+}
+
+bool OcclusionWorld::mirror_water_visible(World &world, CollisionWorld &collision,
+                                          const OcclusionFrameCamera &cam) {
+    // The camera-below-water word picks the walk's match: unfiltered below,
+    // the Reflective statics alone at or above. [orig: Render_MainScene
+    // `cmp eax, g_EnvWaterHeightFixed; setl dl` @ 0x5c16f2..0x5c16f8;
+    // Terrain_CollectVisibleEntitiesForReflection @ 0x5c9109..0x5c911f]
+    OcclusionFrameCamera mirror = cam;
+    mirror.collect_flag_match = cam.pos_fixed[2] < cam.water_z ? 0u : kEntityFlagReflective;
+    swap_frame(mirror_frame_);
+    build_frame(world, collision, mirror);
+    const bool visible = water_visible_;
+    swap_frame(mirror_frame_);
+    return visible;
 }
 
 // ----------------------------------------------------------------------------

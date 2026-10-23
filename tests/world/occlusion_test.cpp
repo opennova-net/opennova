@@ -1548,6 +1548,52 @@ void test_collector_runs_per_view() {
     rig.ow.select_view(OcclusionView::kMain);
 }
 
+// The water mirror's collect: the same building walk and mask build over the
+// unmirrored eye, keeping only Reflective statics while that eye is at or above
+// the water, in a scratch frame, so the selected view's words stand; the
+// building latch ticks as in any collect.
+// [orig: Render_MainScene @ 0x5c16fc -> Terrain_CollectVisibleEntitiesForReflection
+//  @ 0x5c90a0, the match @ 0x5c9109..0x5c911f; Terrain_CollectVisibleSectorUserpoints
+//  the test @ 0x5c6c27..0x5c6c39]
+void test_the_mirror_collect_leaves_the_scene_words() {
+    Rig rig;
+    const EntityHandle building =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    cam.water_z = fx(-10.0);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.building_batched(building));
+    const uint32_t main_mask = rig.ow.section_mask(building);
+    CHECK(main_mask == 0xFFFFFFFu);
+    Entity *b = rig.world.registry.get(building);
+    CHECK(b != nullptr);
+    if (b == nullptr) return;
+    const uint8_t armed = b->occlusion_latch;
+    CHECK(armed >= 16 && armed <= 23);
+
+    // The eye above the water: the plain building is not Reflective, so the
+    // walk skips it ahead of its latch; outdoors the word is set.
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam));
+    CHECK(b->occlusion_latch == armed);
+    // The eye below the water: the walk is unfiltered and ticks it.
+    OcclusionFrameCamera below = cam;
+    below.water_z = fx(10.0);
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, below));
+    CHECK(b->occlusion_latch == armed - 1);
+    // A Reflective static enters the walk above the water too.
+    b->engine_flags |= kEntityFlagReflective;
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam));
+    CHECK(b->occlusion_latch == armed - 2);
+
+    // The scene's own words stand.
+    CHECK(rig.ow.selected_view() == OcclusionView::kMain);
+    CHECK(rig.ow.building_batched(building));
+    CHECK(rig.ow.section_mask(building) == main_mask);
+    CHECK(rig.ow.exterior_visible() && rig.ow.water_visible());
+}
+
 // A round restart never re-runs the portal register + weld: the kernel's
 // OcclusionWorld outlives MissionKernel::restore_baseline, so the weld
 // registry, the retyped shared records and the building flags stay the first
@@ -1859,6 +1905,7 @@ int main() {
     test_building_visibility_feed_word();
     test_model_leg_render_model_sphere();
     test_collector_runs_per_view();
+    test_the_mirror_collect_leaves_the_scene_words();
     test_round_restart_keeps_the_first_weld();
     test_eye_in_front_of_a_window_keeps_the_exterior();
     test_decoration_rows_are_entity_collected();

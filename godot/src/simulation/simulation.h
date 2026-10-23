@@ -2128,6 +2128,13 @@ public:
 	                         int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The weapon Inset pass's own collect, after the main one (simulation_present_state.h).
 	const InsetOcclusionView &run_inset_occlusion(const InsetOcclusionRequest &p_request);
+	// A water mirror's collect ahead of its scene's: the live eye unmirrored over
+	// a square view of p_fov_deg; returns the word its mask build leaves, the one
+	// its scene's water letter label reads (engine world/occlusion.h
+	// OcclusionWorld::mirror_water_visible).
+	bool run_mirror_occlusion(const Transform3D &p_camera, double p_fov_deg,
+			double p_viewport_width, double p_fog_dist_units, double p_water_z_units,
+			bool p_force_indoors, int p_object_detail);
 	void release_inset_occlusion();
 
 	// Frame results: [bms_id, packed, forced] triples for the buildings the

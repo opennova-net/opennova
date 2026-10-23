@@ -170,6 +170,13 @@ struct OcclusionFrameCamera {
     // (renderer::kObjectLodDetailLevelMax's note). [orig: dword_24D2048, read by
     // DeathPiece_RenderVisible @ 0x57b831]
     int32_t object_detail = renderer::kObjectLodDetailLevelMax;
+    // The sector-building walk's entity-flag match: a static whose Flags word
+    // lacks any of these bits is skipped ahead of its model gate. The scene
+    // collects pass 0; the water mirror's collect passes the Reflective bit
+    // while its eye is at or above the water (OcclusionWorld::mirror_water_visible).
+    // [orig: Terrain_CollectVisibleSectorUserpoints @ 0x5c6b60, the test
+    //  @ 0x5c6c27..0x5c6c39]
+    uint32_t collect_flag_match = 0;
 };
 
 // The viewport projector's near word (1/32 u): a bound sphere whose view depth
@@ -246,6 +253,27 @@ public:
     // retail's second Terrain_CollectVisibleEntities does.
     void select_view(OcclusionView view);
     OcclusionView selected_view() const { return selected_view_; }
+
+    // The water mirror's collect, for the one word a scene reads from it: its
+    // g_BlinkWaterVisible. Every mirror prerender (the main scene's and the
+    // weapon Inset's, under their g_WaterActive and a nonzero height) runs the
+    // building collect, the slot sort, the occluder planes and the section
+    // masks over the live eye UNMIRRORED and a square view, the building walk
+    // keeping only Reflective statics while that eye is at or above the water
+    // (the camera-below-water word), and its mask build writes the word the
+    // scene's water letter label then reads ahead of its own collect. `cam`
+    // carries that eye and view; the match is derived here from its eye and
+    // water words. The frame words build in a scratch frame, so the selected
+    // view's are untouched; the entity latches and the shared PRNG stream
+    // tick as in any collect.
+    // [orig: Render_MainScene @ 0x5c1240 — the view block @ 0x5c1464..0x5c1482
+    //  (the RTT square) and @ 0x5c16a3..0x5c16e1 (the live camera block), the
+    //  projection @ 0x5c16e8, the below-water word @ 0x5c16ed..0x5c16fb, the call
+    //  @ 0x5c16fc; Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 — the
+    //  match @ 0x5c9109..0x5c911f, the walk @ 0x5c9127, the sort @ 0x5c912c, the
+    //  planes @ 0x5c9131, the masks @ 0x5c9136]
+    bool mirror_water_visible(World &world, CollisionWorld &collision,
+                              const OcclusionFrameCamera &cam);
 
     // Per-entity render gate for non-building entities (the entity collectors'
     // occlusion rules, then the render waves' render_TOC): the blink-hits
@@ -623,6 +651,9 @@ private:
     };
     ParkedFrame parked_view_;
     OcclusionView selected_view_ = OcclusionView::kMain;
+    // The mirror collect's scratch frame (mirror_water_visible).
+    ParkedFrame mirror_frame_;
+    void swap_frame(ParkedFrame &p);
 
 	int32_t parachute_radius_q16_ = 0;
 	uint32_t *shared_latch_rng_ = nullptr;

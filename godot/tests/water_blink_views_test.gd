@@ -170,7 +170,8 @@ func test_skipping_labels_leave_the_inset_mirror() -> void:
 	assert_true(bool(water.get_night_vision_material().get_shader_parameter("u_has_reflection")))
 	# The Inset's g_WaterActive down: its prerender stops, labels or not.
 	water.set_blink_water_visible(false)
-	water.latch_inset_blink_water(false, false)
+	water.open_inset_water_latch()
+	water.latch_blink_water(false, false)
 	water.set_inset_visible_terrain_bounds(true, 20.0, 40.0)
 	water.advance_inset_frame(fixture["inset"], fixture["block"])
 	assert_false(water.is_inset_water_pass_active())

@@ -13,9 +13,7 @@
 
 #include "devtools/frame_stats.h"
 
-namespace opennova::renderer {
-struct ScenePassGateEdges;
-} // namespace opennova::renderer
+#include <runtime/renderer/scene_pass_gates.h>
 
 namespace godot {
 
@@ -71,7 +69,11 @@ class Water;
 //    that leg), then apply_frame below lands THIS frame's water letter label
 //    on the strip (Water::set_blink_water_views) and stores the latch. The
 //    label reaches the strips alone, never the node, the mirrors or the
-//    bloom's redraw (renderer::scene_water_visible).
+//    bloom's redraw (renderer::scene_water_visible). A label reads the one
+//    g_BlinkWaterVisible word ahead of its scene's collect: the word its
+//    water mirror's collect left when that scene's water pass is active
+//    (Simulation::run_mirror_occlusion, run first), else the last collect's,
+//    the previous scene's; every collect then writes it (blink_water_word_).
 //  * the world's is_water_render_active() gate decides the water_z handed to
 //    run_occlusion_frame: an inactive water (no load, a load in progress)
 //    passes the -100000 sentinel, never its retained authored height.
@@ -149,8 +151,12 @@ public:
 	// set_static_instance_inset_occlusion_hidden); an entity the Inset collect
 	// gives no verdict follows the main view's. `viewport_width` is the Inset
 	// target's width, the projector's focal source for that view.
+	// `mirror_block` is the view block the Inset's water mirror reflects
+	// (HudInsetScope::get_view_block_transform), the eye its mirror's collect
+	// runs over, null while that mirror cannot render; the Inset's terrain
+	// bounds reach the water first.
 	void apply_inset_frame(Camera3D *p_camera, float p_viewport_width, bool p_forces_indoors,
-			int p_object_detail);
+			int p_object_detail, const Transform3D *p_mirror_block);
 	// The Inset stopped rendering (or the world unloads): every Inset verdict
 	// releases onto the main view's and the sim forgets the Inset baselines.
 	void release_inset();
@@ -266,6 +272,14 @@ private:
 	// The last terrain gate written (edge-triggered).
 	bool terrain_gate_ = true;
 	bool blink_water_suppressed_ = false;
+	// The one g_BlinkWaterVisible word every collect writes (the main scene's,
+	// the Inset's and each water mirror's) and each scene's water letter label
+	// reads ahead of its own collect; it carries from scene to scene and frame
+	// to frame (engine renderer/scene_pass_gates.h SceneWaterWord).
+	opennova::renderer::SceneWaterWord blink_water_word_;
+	// The main scene's label this frame, which the Inset's apply keeps on the
+	// main strip.
+	bool main_water_label_ = true;
 	bool probe_timing_ = false;
 	// bms_id -> resolved ObjectModel, so steady frames skip registry lookups;
 	// every node this frame hid or masked is in it, so the release walk (A/B

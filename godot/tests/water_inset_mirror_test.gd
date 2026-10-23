@@ -110,7 +110,8 @@ func test_no_inset_mirror_or_strip_without_its_water_pass() -> void:
 	# Every visible sector above the water and the latch clear: the Inset's
 	# g_WaterActive is down, so no prerender and no strip.
 	water.set_blink_water_visible(false)
-	water.latch_inset_blink_water(true, true)
+	water.open_inset_water_latch()
+	water.latch_blink_water(true, true)
 	water.set_inset_visible_terrain_bounds(true, 20.0, 40.0)
 	water.advance_inset_frame(fixture["inset"], fixture["block"])
 	assert_false(water.is_inset_water_pass_active())
@@ -121,7 +122,8 @@ func test_no_inset_mirror_or_strip_without_its_water_pass() -> void:
 	# The latch as the main collect left it forces it (the Inset collect's own
 	# store came after the Inset's test read it).
 	water.set_blink_water_visible(true)
-	water.latch_inset_blink_water(true, false)
+	water.open_inset_water_latch()
+	water.latch_blink_water(true, false)
 	assert_false(water.get_blink_water_latch(), "the Inset collect's store")
 	water.advance_inset_frame(fixture["inset"], fixture["block"])
 	assert_true(water.is_inset_water_pass_active())
@@ -170,7 +172,8 @@ func test_the_latch_is_one_word_for_both_scenes() -> void:
 	assert_true(water.is_water_pass_active())
 	water.latch_blink_water(false, false)
 	assert_true(water.get_blink_water_latch(), "a letter-skipped pass leaves the latch")
-	water.latch_inset_blink_water(true, false)
+	water.open_inset_water_latch()
+	water.latch_blink_water(true, false)
 	assert_false(water.get_blink_water_latch(), "the Inset collect's store")
 	assert_false(water.is_water_pass_active(),
 			"the next main scene reads the Inset collect's verdict")

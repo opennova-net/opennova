@@ -61,9 +61,9 @@ inline ScenePassGates scene_pass_gates(uint32_t blink_flags,
 }
 
 // The two water passes' gate: the authored water letter (accum bit 0x8)
-// skips them unless the frame's occlusion pass latched the water visible
-// (g_BlinkWaterVisible: the exterior latched, a camera building straddling
-// the water plane); before that pass runs, the letter alone decides
+// skips them unless the g_BlinkWaterVisible word the scene reads ahead of its
+// own collect is set (SceneWaterWord: the exterior latched, a camera building
+// straddling the water plane); with no collect yet, the letter alone decides
 // (`occlusion_water_visible` false).
 // [orig: Terrain_RenderWorldScene @ 0x5c93cb / @ 0x5c95d2..0x5c95ea;
 //  g_BlinkWaterVisible @ 0x29ACE40]
@@ -80,6 +80,32 @@ inline ScenePassGates scene_pass_gates(uint32_t blink_flags,
 inline bool scene_water_visible(uint32_t blink_flags, bool occlusion_water_visible) {
 	return (blink_flags & world::kBlinkWaterOffBit) == 0 || occlusion_water_visible;
 }
+
+// The one g_BlinkWaterVisible word a frame's scenes share. Every collect's mask
+// build writes it: the main scene's, the weapon Inset's, and each water
+// mirror's, which runs ahead of its scene's own while that scene's water pass
+// is active (world/occlusion.h OcclusionWorld::mirror_water_visible). Each
+// scene core's water letter label reads it AHEAD of the scene's own collect,
+// so with its mirror up a scene's label takes the mirror collect's verdict, and
+// with it down the last collect's (the previous scene's: the last frame's
+// Inset or main). The scene's water passes then store its own collect's
+// verdict in the latch (env::water_pass_latch), read past that collect.
+// [orig: Terrain_RenderWorldScene @ 0x5c93a0 — the label's read @0x5c93c1
+//  ahead of its collect's call @0x5c94f0, the passes' reads @0x5c95d4 /
+//  @0x5c95e1; the mirror's collect Render_MainScene (the call @0x5c16fc);
+//  the writes Terrain_BuildSectorVisibilityMasks @ 0x5c8610 (@0x5c86c9,
+//  @0x5c8924, @0x5c89ab, @0x5c8aeb)]
+struct SceneWaterWord {
+	bool word = false;
+	// The scene's label ahead of its collect: its mirror's verdict lands on the
+	// word first when that mirror's collect ran (mirror_ran).
+	bool label(uint32_t blink_flags, bool mirror_ran, bool mirror_verdict) {
+		if (mirror_ran) word = mirror_verdict;
+		return scene_water_visible(blink_flags, word);
+	}
+	// The scene's own collect writes it.
+	void collect(bool verdict) { word = verdict; }
+};
 
 // The passes a letter change reopens. The letters gate the frame they are
 // read in: retail reads them at the top of the main frame, ahead of its
