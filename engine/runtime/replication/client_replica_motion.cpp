@@ -1738,11 +1738,12 @@ bool ClientReplicaPipeline::person_takes_item_row(const ClientEntityState &es,
 // chase, death edge, deck ride and root motion (tick_remote_motion's walk order).
 void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t self_handle,
 		uint32_t rm_key) {
-	// The deck-ride + root-motion pair every organic chase leg ends with: the
-	// deck-ride runs at the witnessed mover position — after the chase, before
-	// root motion — for every armed org row with a grounded carrier, clip or no
-	// clip [orig: org2 ride @0x4b52a0 between the chase @0x4b4470 and the
-	// integrate @0x4b7cbf].
+	// The root-motion tail every organic chase leg ends with, a player row's deck ride
+	// ahead of it: org2's ride runs at the witnessed mover position, after the chase and
+	// before root motion, for every armed row with a grounded carrier, clip or no clip
+	// [orig: org2 ride @0x4b52a0 between the chase @0x4b4470 and the integrate @0x4b7cbf].
+	// A free-standing org1 row rides earlier, after its slope pass and ahead of its body
+	// chase (the Infantry case below).
 	RowConformIo conform_io;
 	conform_io.probe = &replica_ground_probe_;
 	conform_io.def_attrib = &replica_def_attrib_resolver_;
@@ -1751,7 +1752,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	conform_io.tick = rm_key;
 	auto organic_chase_tail = [&](ClientEntityState &row, bool is_self,
 	                              bool starved = false) {
-		if (!is_self && !starved && carrier_pose_provider_)
+		if (row.cls == EntityClass::Player && !is_self && !starved && carrier_pose_provider_)
 			row_deck_ride(row, carrier_pose_provider_, org1_ride_aim_adds(row));
 		// The body pass's ride link, after the ride and ahead of the integrate
 		// [orig: @0x4B5EA9..0x4B5F2C]; the client's own body runs the World's.
@@ -1993,19 +1994,24 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		// chase (D-NET-NEW-L5-36) [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BA066..0x4BA343,
 		//  ahead of the ride @0x4BA45D and the body chase @0x4BE8FD].
 		row_org1_slope_pass(es, rm_key, def_attrib, current_state, conform_io);
+		// The deck ride on the row's ground entity, after the slope pass and the position
+		// chase and ahead of the body chase: its pitch and roll deltas turn by the carrier's
+		// Yaw less the rider's as the last tick's look left it (D-NET-NEW-L5-41).
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the position step @0x4B9BDF..0x4B9C06,
+		//  the ride @0x4BA45D..0x4BA88E (the relative yaw @0x4BA7A5..0x4BA7A8), the body
+		//  chase @0x4BE8FD]
+		if (carrier_pose_provider_)
+			row_deck_ride(es, carrier_pose_provider_, org1_ride_aim_adds(es));
 		// The body chase: the body heading (+0x8C) steps a quarter of the way to the
 		// promoted target (+0x1A8, one record behind the wire, §5.38e §1), the step
 		// clamped to +-69273360, and the Yaw (+0x10) takes the same step, keeping the
 		// look's offset from the body; the legs follow (row_org1_legs). The look (Yaw toward
 		// +0x2EC, Pitch toward +0x2D0, the 90-degree clamp about the body) runs after the
 		// tick's recoil (tick_org1_looks); the root turns by the body heading
-		// (row_root_motion_tick). Retail's deck ride comes first: it adds the carrier's yaw
-		// delta to +0x8C, +0x1A8, the Yaw and the four leg words alike, which the chase and the
-		// legs read only as differences, so riding after them leaves the same words.
-		// The sibling world-side port is infantry_org1_heading_chase.
-		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ride's adds @0x4BA849..0x4BA87F, the
-		//  body chase @0x4BE8FD..0x4BE931, the legs @0x4BE934..0x4BEB12, the look
-		//  @0x4BEB18..0x4BEBE7, the clamp @0x4BEFC5..0x4BEFED, the rotation @0x4BF001]
+		// (row_root_motion_tick). The sibling world-side port is infantry_org1_heading_chase.
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the body chase @0x4BE8FD..0x4BE931, the
+		//  legs @0x4BE934..0x4BEB12, the look @0x4BEB18..0x4BEBE7, the clamp
+		//  @0x4BEFC5..0x4BEFED, the rotation @0x4BF001]
 		{
 			int32_t step = io::bam_sar(
 					io::bam_add(io::bam_sub(es.net_target_heading_bam,

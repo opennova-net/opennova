@@ -1016,6 +1016,41 @@ void test_overlay_pitch_is_the_live_pitch_word() {
 			"its leg words");
 }
 
+// D-NET-NEW-L5-41 (V-ROLL-AV F1): a free-standing org1 row rides its deck after its slope pass
+// and ahead of its body chase, so the ride turns the deck's pitch delta by the deck's Yaw less
+// the rider's as the last look left it (0 here): the whole delta lands in the Pitch, the aim
+// pitch word and savedLivePitch, none in the Roll, though the body chase then steps the Yaw
+// 0x4000000 toward its target. Riding after the chase would split the delta by that step.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ride @0x4BA45D..0x4BA88E (the relative yaw
+//  @0x4BA7A5..0x4BA7A8, Pitch @0x4BA88E, +0x2D0 @0x4BA852, +0x90 @0x4BA885, Roll @0x4BA88B),
+//  the body chase @0x4BE8FD..0x4BE931]
+void test_org1_deck_ride_precedes_the_body_chase() {
+	BodySource src;
+	auto view = free_infantry_view(src, 0x00, 0x00);
+	static constexpr uint16_t kDeck = 0x1009; // static: MSVC needs no capture for it
+	static constexpr int32_t kPitchDelta = 0x01000000;
+	view->set_carrier_pose_provider(
+			[](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
+				if (handle != kDeck) return false;
+				out = ns::ClientReplicaPipeline::CarrierPose{};
+				out.pos[0] = out.saved_pos[0] = fixed_of(100.0);
+				out.pos[1] = out.saved_pos[1] = fixed_of(200.0);
+				out.pos[2] = out.saved_pos[2] = fixed_of(10.0);
+				out.pitch = kPitchDelta; // the deck pitches 0x1000000 this tick
+				out.bound_radius = 0x7FFFFFFF;
+				return true;
+			});
+	ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+	es.resolved_ground = kDeck;
+	es.net_target_heading_bam = 0x10000000;
+	view->tick_remote_motion(0xFFFF);
+	expect(es.rm_body_heading == 0x04000000 && es.heading_bam == 0x04000000,
+			"(the body chase stepped the body heading and the Yaw a quarter)");
+	expect(es.pitch_bam == kPitchDelta && es.rm_aim_word == kPitchDelta &&
+					es.rm_body_pitch == kPitchDelta && es.roll_bam == 0,
+			"the ride turns the deck's pitch by the Yaw ahead of the body chase");
+}
+
 // A terrain rising toward +x: each texel (one unit, its column the position's whole units) is
 // `per_texel` raw above the one before it over x 64..191, so the gradient under x = 100 is
 // (raw(101) - raw(99), 0) = (2 * per_texel, 0).
@@ -1174,6 +1209,7 @@ int main() {
 	test_org1_dead_body_tumbles_in_the_air();
 	test_org1_ride_skips_the_aim_adds_on_a_turret();
 	test_overlay_pitch_is_the_live_pitch_word();
+	test_org1_deck_ride_precedes_the_body_chase();
 	test_player_gradient_slide_replaces_the_world_pair();
 	test_infantry_gradient_slide_replaces_the_clip_pair();
 	test_authority_rows_never_starve();
