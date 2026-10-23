@@ -1515,6 +1515,7 @@ private:
 	bool corner_spinmap_visible(const HudFrameState &state) const;
 	void element_objectives(const HudFrameState &state, float w, float h);
 	void element_attach_labels(const HudFrameState &state);
+	// The friendly tags' label pass (hud_frame_friendly_tags.cpp).
 	void element_friendly_tags(const HudFrameState &state, float surface_w);
 	// The MP session lines (hud_frame_session_lines.cpp) and the HUDLS bar
 	// (hud_frame_slot_bar.cpp).

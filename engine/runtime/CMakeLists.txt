@@ -547,6 +547,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad_registry.cpp # the NovaWorld squad registry (D-NET-NEW-L8-2)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_devices.cpp # the log devices the server switches arm (game and serve)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/remote_admin.cpp # the process's remote-admin console half (game and serve)
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_friendly_tags.cpp # the friendly tags' label pass (split off hud_frame.cpp)
     # --- parity lane L9 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/gate_metrics_reports.cpp # the METPROTOCOL report clocks and senders (D-NET-NEW-L9-22)
     # --- parity lane LH sources ---
