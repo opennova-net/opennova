@@ -1644,7 +1644,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // is org1-witnessed and does not apply to the player body.
             fwd = 0;
             lat = 0;
-        } else if (inf.anim_state == anim_state::kJumpLoop) {
+        } else if (npc_body && inf.anim_state == anim_state::kJumpLoop) {
+            // Org1 alone: the player body stores no 0x400 and tests no state 31.
+            // [orig: Entity_UpdateInfantryAI `cmp dword ptr [esi+2BCh], 1Fh` @0x4BEFF0,
+            //  the store @0x4BEFF9; Entity_UpdateInfantryPlayerBody @0x4B40E0 carries
+            //  neither]
             fwd = 1024; // [data: retail ADM dump root row 4756]
         }
         // Both motors rotate locomotion by BODY heading. Independent gaze must

@@ -1149,6 +1149,58 @@ void test_org1_deck_ride_precedes_the_body_chase() {
 			"the ride turns the deck's pitch by the Yaw ahead of the body chase");
 }
 
+// D-NET-NEW-L5-43 (V-ROLL-AW N1): an org1 row whose current state (+0x2BC) is the jump loop walks
+// the forward word 0x400; a player row in the jump loop walks its clip (here no root at all): the
+// player body stores no such word.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - `cmp dword ptr [esi+2BCh], 1Fh` @0x4BEFF0, the
+//  store @0x4BEFF9, the rotation @0x4BF001; Entity_UpdateInfantryPlayerBody @0x4B40E0]
+void test_jump_loop_word_is_org1s() {
+	{
+		BodySource src;
+		auto view = free_infantry_view(src, 0x00, 0x00);
+		ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+		es.net_anim_current = as::kJumpLoop;
+		es.rm_body_heading = es.net_target_heading_bam = 0;
+		view->tick_remote_motion(0xFFFF);
+		expect(es.x == fixed_of(100.0) + 0x400 && es.y == fixed_of(200.0),
+				"an org1 row in the jump loop walks 0x400 along its body heading");
+	}
+	{
+		BodySource src;
+		auto view = make_view(src);
+		view->state().upsert(0x0003).type_id = kPlayerType;
+		view->apply(0x0A, frame({{0x0003, nw::EntityClass::Player, 0x00}}));
+		ns::ClientEntityState &es = *view->state().find(0x0003);
+		es.rm_adm_id = 0;
+		es.net_anim_current = as::kJumpLoop;
+		view->tick_remote_motion(0xFFFF);
+		expect(es.rm_state == as::kJumpLoop && es.x == fixed_of(100.0) && es.y == fixed_of(200.0),
+				"a player row in the jump loop walks its clip's root alone");
+	}
+}
+
+// D-NET-NEW-L5-44 (V-ROLL-AW N2): the 0x18 registers the spawned body's channel in its handler,
+// so the update after it plays a clip; a type whose sources are unarmed stays pending.
+// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - AnimMap_RegisterEntity @0x40BB60 called
+//  @0x433DAA]
+void test_full_spawn_registers_the_channel() {
+	for (const bool armed : {true, false}) {
+		BodySource src;
+		auto view = make_view(src);
+		view->set_replica_adm_resolver([armed](uint16_t) { return armed ? 0 : -2; });
+		nw::FullEntitySpawnRecord rec;
+		rec.slot_id = 0x0003;
+		rec.item_type_id = kPlayerType;
+		rec.item_type = 3;
+		rec.minimap_flags = nw::world::kEntityFlagPlayer;
+		view->apply(nw::s2c::FULL_ENTITY_SPAWN, nw::encode_full_entity_spawn(rec));
+		const ns::ClientEntityState &es = *view->state().find(0x0003);
+		expect(es.rm_adm_id == (armed ? 0 : -2),
+				armed ? "the 0x18 stamps the body's channel in its handler"
+				      : "an unarmed type's row stays pending");
+	}
+}
+
 // A terrain rising toward +x: each texel (one unit, its column the position's whole units) is
 // `per_texel` raw above the one before it over x 64..191, so the gradient under x = 100 is
 // (raw(101) - raw(99), 0) = (2 * per_texel, 0).
@@ -1310,6 +1362,8 @@ int main() {
 	test_player_overlay_reads_the_body_and_leg_words();
 	test_player_init_and_reset_stamp_the_legs();
 	test_org1_deck_ride_precedes_the_body_chase();
+	test_jump_loop_word_is_org1s();
+	test_full_spawn_registers_the_channel();
 	test_player_gradient_slide_replaces_the_world_pair();
 	test_infantry_gradient_slide_replaces_the_clip_pair();
 	test_authority_rows_never_starve();

@@ -1487,6 +1487,9 @@ void JoinerRole::wire_frame_providers() {
 						: nullptr;
 				return item != nullptr ? static_cast<uint32_t>(item->attrib) : 0u;
 			});
+	// A 0x18 body's channel, stamped in the handler as resolve_row_adm_ids stamps the rest.
+	rt.view().set_replica_adm_resolver(
+			[this](uint16_t type_id) { return kernel_->adm_id_for_runtime_type(type_id); });
 	// An org1 deck ride reads its parent's second attrib word (the IsTurret bit) from the same
 	// items.def [orig: Entity_UpdateInfantryAI @0x4B9910 - `test dword ptr [eax+58h], 1000h`
 	//  @0x4BA823].

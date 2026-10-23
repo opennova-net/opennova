@@ -75,6 +75,15 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     //  Entity_InitOrganicAI @0x4BFCC0; PlayerClass_InitEntity @0x4B1060]
     if (row.cls == EntityClass::Infantry) seed_org1_init_words(row, row.heading_bam);
     if (row.cls == EntityClass::Player) seed_player_init_words(row, row.heading_bam);
+    // The handler registers the body's channel, so the update after it runs with one
+    // (D-NET-NEW-L5-44); a type whose sources are unarmed stays pending.
+    // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - AnimMap_RegisterEntity @0x40BB60 called
+    //  @0x433DAA]
+    if ((row.cls == EntityClass::Player || row.cls == EntityClass::Infantry) &&
+            replica_adm_resolver_) {
+        const int adm_id = replica_adm_resolver_(row.type_id);
+        if (adm_id >= -1) row.rm_adm_id = static_cast<int16_t>(adm_id);
+    }
     row.net_smooth_target[0] = row.x;
     row.net_smooth_target[1] = row.y;
     row.net_smooth_target[2] = row.z;

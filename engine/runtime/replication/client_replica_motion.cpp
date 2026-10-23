@@ -943,7 +943,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           world::AnimVariantRings *rings,
                           const terrain::TerrainHeightField *terrain,
                           const RowConformIo &conform_io,
-                          uint32_t key, bool is_self, bool starved,
+                          uint32_t key, bool is_self, bool starved, int death_state,
                           const ClientReplicaPipeline::ReplicaContactResolver *resolver,
                           const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_resolver,
                           const ClientReplicaPipeline::ReplicaPeerSphere *peers,
@@ -1032,8 +1032,19 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	if (es.cls == EntityClass::Infantry && !is_self && !starved &&
 			es.resolved_ground == wire_handle::kInvalid)
 		row_gradient_slide(es, terrain, fwd, lat);
-	if (es.rm_state == world::anim_state::kJumpLoop)
-		fwd = 1024; // [data: retail ADM dump root row 4756]
+	// An org1 row whose current state (+0x2BC: the arbitrated current after this tick's
+	// channel update, or the state this tick's death edge stored) is the jump loop walks the
+	// forward word 0x400 instead (the slide's pair included). The player body has no such
+	// word: its update stores no 0x400 and tests no state 31.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - `cmp dword ptr [esi+2BCh], 1Fh` @0x4BEFF0, the
+	//  store @0x4BEFF9, the death edge's +0x2BC stores @0x4B9CFE..0x4B9D06;
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 carries neither]
+	if (es.cls == EntityClass::Infantry) {
+		const int current = death_state >= 0 ? death_state
+				: es.net_anim_current >= 0 ? static_cast<int>(es.net_anim_current)
+				                          : static_cast<int>(es.anim_state_id);
+		if (current == world::anim_state::kJumpLoop) fwd = 0x400;
+	}
 	// The witnessed vertical: the capsule-bottom history delta replaces the
 	// raw track dz while the slot is live [orig: AnimMap_UpdateEntity reads,
 	// subtracts, and rewrites anim_slot[19] @0x40B88E..0x40B8A0].
@@ -1752,19 +1763,20 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	conform_io.terrain = remote_motion_terrain_;
 	conform_io.tick = rm_key;
 	auto organic_chase_tail = [&](ClientEntityState &row, bool is_self,
-	                              bool starved = false) {
+	                              bool starved = false, int16_t death_state = -1) {
 		if (row.cls == EntityClass::Player && !is_self && !starved && carrier_pose_provider_)
 			row_deck_ride(row, carrier_pose_provider_, org1_ride_aim_adds(row));
-		// The body pass's ride link, after the ride and ahead of the integrate
-		// [orig: @0x4B5EA9..0x4B5F2C]; the client's own body runs the World's.
-		if (!is_self && row.cls == EntityClass::Player && ground_occupant_provider_)
+		// The body pass's ride link, after the ride and ahead of the integrate; a starved
+		// body returned ahead of both [orig: @0x4B5EA9..0x4B5F2C; the starved return
+		// @0x4B4669..0x4B4670]; the client's own body runs the World's.
+		if (!is_self && !starved && row.cls == EntityClass::Player && ground_occupant_provider_)
 			row_ride_link(row, state_, ground_occupant_provider_);
 		// The own row's channel shadows the World body's, which serves the rings
 		// for that body: a second serve would double its plays (D-NET-196).
 		if (root_motion_ != nullptr)
 			row_root_motion_tick(row, *root_motion_, is_self ? nullptr : anim_rings_,
 			                     remote_motion_terrain_, conform_io,
-			                     rm_key, is_self, starved, &replica_contact_resolver_,
+			                     rm_key, is_self, starved, death_state, &replica_contact_resolver_,
 			                     &replica_bound_radius_resolver_,
 			                     contact_peer_scratch_.data(),
 			                     static_cast<int32_t>(contact_peer_scratch_.size()),
@@ -1961,7 +1973,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		// Entity_DropCarriedObject].
 		if (death_state >= 0) drop_carried_objective(es.handle);
 		corpse_leg(es, death_state >= 0, /*org1=*/false);
-		organic_chase_tail(es, is_self);
+		organic_chase_tail(es, is_self, /*starved=*/false, death_state);
 		commit_death_state(es, death_state);
 		break;
 	}
@@ -2027,7 +2039,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			es.rm_look_due = true;
 			es.rm_look_seated = false;
 		}
-		organic_chase_tail(es, is_self);
+		organic_chase_tail(es, is_self, /*starved=*/false, death_state);
 		commit_death_state(es, death_state);
 		break;
 	}

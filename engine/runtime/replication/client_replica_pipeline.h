@@ -707,6 +707,15 @@ public:
 	void set_replica_def_attrib2_resolver(ReplicaDefAttribResolver resolver) {
 		replica_def_attrib2_resolver_ = std::move(resolver);
 	}
+	// A person row's channel (its .adm registry id, rm_adm_id), by wire type: -1 for a type with
+	// no usable model map, below -1 while the sources are unarmed. The 0x18 registers the
+	// spawned body's channel in its handler, so the update after it runs with one
+	// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - AnimMap_RegisterEntity @0x40BB60
+	//  called @0x433DAA]; JoinerRole::resolve_row_adm_ids stamps every other row.
+	using ReplicaAdmResolver = std::function<int(uint16_t type_id)>;
+	void set_replica_adm_resolver(ReplicaAdmResolver resolver) {
+		replica_adm_resolver_ = std::move(resolver);
+	}
 	// A seated row's seat type (+0x168: 1 sitex, 2 ctrlx, 3 UseGun, 5 drvrx), the
 	// type of the carrier's seat whose bone the record names, which the attach
 	// stamps from the carrier model's userpoint; 0 for none. The embedder answers
@@ -968,6 +977,7 @@ private:
 	ReplicaGroundProbe replica_ground_probe_;
 	ReplicaDefAttribResolver replica_def_attrib_resolver_;
 	ReplicaDefAttribResolver replica_def_attrib2_resolver_;
+	ReplicaAdmResolver replica_adm_resolver_;
 	ReplicaSeatTypeResolver replica_seat_type_resolver_;
 	ReplicaSeatFrameResolver replica_seat_frame_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
