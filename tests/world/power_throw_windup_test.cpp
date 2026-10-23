@@ -199,6 +199,119 @@ void test_an_ordinary_def_keeps_no_windup() {
 	CHECK(!f.weapon.power_throw_released);
 }
 
+// The windup's test is WeaponSlot_CanFireInCurrentState's and WeaponSlot_HasAmmoAvailable's: the
+// slot's current action alone (IDLE; an automatic def's FIRE, RECOIL, SCOPEUP and SCOPEDOWN too),
+// never the queued action or a switch, and rounds loaded or in the pool (a clipless def's pool
+// alone). So a reload record ahead of a key's press in the same drain leaves the press its
+// windup. [orig: Input_HandleActionBinding_0 @0x4E0420 - the press leg's tests @0x4E0922 /
+//  @0x4E0935; WeaponSlot_CanFireInCurrentState @0x53F0B0; WeaponSlot_HasAmmoAvailable @0x541B30]
+void test_the_windup_test_reads_the_current_action_and_any_ammo() {
+	{
+		Fixture f;
+		f.weapon.slot.next = weapon_action::kReload; // a reload record ahead in the drain
+		CHECK(local_weapon_power_throw_press(f.world, f.weapon));
+		CHECK(f.weapon.power_throw_start_tick == local_weapon_input_tick(f.world));
+	}
+	{
+		Fixture f;
+		f.weapon.switch_in_flight = true; // a walk whose SWITCHFROM the pump has not entered
+		f.weapon.switch_deferred_action = weapon_action::kSwitchFrom;
+		CHECK(local_weapon_power_throw_press(f.world, f.weapon));
+	}
+	struct Row {
+		bool auto_fire;
+		int32_t current;
+		bool starts;
+	};
+	const Row rows[] = {
+		{false, weapon_action::kIdle, true},      {false, weapon_action::kFire, false},
+		{false, weapon_action::kRecoil, false},   {false, weapon_action::kEmptyIdle, false},
+		{false, weapon_action::kScopeUp, false},  {true, weapon_action::kIdle, true},
+		{true, weapon_action::kFire, true},       {true, weapon_action::kRecoil, true},
+		{true, weapon_action::kScopeUp, true},    {true, weapon_action::kScopeDown, true},
+		{true, weapon_action::kEmptyIdle, false}, {true, weapon_action::kReload, false},
+		{true, weapon_action::kSwitchTo, false},
+	};
+	for (const Row &row : rows) {
+		Fixture f;
+		f.weapon.def.auto_fire = row.auto_fire;
+		f.weapon.slot.current = row.current;
+		CHECK(local_weapon_power_throw_press(f.world, f.weapon) == row.starts);
+	}
+	{
+		Fixture f;
+		f.weapon.slot.clip = 0;
+		f.weapon.slot.reserve = 4; // none loaded, the pool has rounds
+		CHECK(local_weapon_power_throw_press(f.world, f.weapon));
+	}
+	{
+		Fixture f;
+		f.weapon.def.clip_capacity = -1; // clipless: the pool alone
+		f.weapon.slot.clip = 3;
+		f.weapon.slot.reserve = 0;
+		CHECK(!local_weapon_power_throw_press(f.world, f.weapon));
+		f.weapon.slot.reserve = 2;
+		CHECK(local_weapon_power_throw_press(f.world, f.weapon));
+	}
+}
+
+// The weapon walk never clears a running windup: not for the dead body, a UseGun switch in flight
+// or a def with no PowerThrow flag. g_FireChargeStartTick's writers are the input legs, the walk
+// Player_SwitchToWeaponByHandle (past its seat gate) and the round's init.
+// [orig: g_FireChargeStartTick @0xB76800 - Input_ProcessBindings @0x4DDAF6 / @0x4DDAFE;
+//  Input_HandleActionBinding_0 @0x4E0801 / @0x4E0947 / @0x4E0954; Player_SwitchToWeaponByHandle
+//  @0x4E019B (the seat gate @0x4E017D..0x4E0192); Game_InitNewRound @0x42277E;
+//  DialogSystem_Init @0x52776D]
+void test_the_walk_keeps_a_running_windup() {
+	{
+		Fixture f;
+		f.update(true, true);
+		const uint32_t started = f.weapon.power_throw_start_tick;
+		CHECK(started != 0);
+		Entity *body = f.world.registry.get(f.player);
+		body->alive = false;
+		body->health = 0;
+		for (int tick = 0; tick < 3; ++tick) f.update(true);
+		CHECK(f.weapon.power_throw_start_tick == started); // the dead body keeps it
+	}
+	{
+		Fixture f;
+		f.update(true, true);
+		const uint32_t started = f.weapon.power_throw_start_tick;
+		f.weapon.usegun_switch = LocalUseGunSwitch::kDetach;
+		CHECK(local_weapon_input_block(f.world, f.weapon) == LocalWeaponInputBlock::kUseGunSwitch);
+		for (int tick = 0; tick < 3; ++tick) f.update(true);
+		CHECK(f.weapon.power_throw_start_tick == started); // a UseGun switch in flight keeps it
+	}
+	{
+		Fixture f;
+		f.update(true, true);
+		const uint32_t started = f.weapon.power_throw_start_tick;
+		f.weapon.def.flags = 0;
+		for (int tick = 0; tick < 3; ++tick) f.update(true);
+		CHECK(f.weapon.power_throw_start_tick == started); // a def with no PowerThrow flag keeps it
+	}
+}
+
+void test_the_walk_clears_the_windup_past_its_seat_gate() {
+	Fixture f;
+	Entity *body = f.world.registry.get(f.player);
+	for (const SeatType seat : {SeatType::Gunner, SeatType::Controller, SeatType::Driver}) {
+		body->mounted = true;
+		body->mount_type = seat;
+		f.weapon.power_throw_start_tick = 7;
+		local_weapon_walk_clears_windup(f.world, f.weapon);
+		CHECK(f.weapon.power_throw_start_tick == 7); // the seat walks nothing
+	}
+	body->mount_type = SeatType::Passenger;
+	local_weapon_walk_clears_windup(f.world, f.weapon);
+	CHECK(f.weapon.power_throw_start_tick == 0);
+	body->mounted = false;
+	f.weapon.power_throw_start_tick = 7;
+	local_weapon_walk_clears_windup(f.world, f.weapon);
+	CHECK(f.weapon.power_throw_start_tick == 0);
+}
+
 } // namespace
 
 int main() {
@@ -210,6 +323,9 @@ int main() {
 	test_the_left_downs_gates();
 	test_a_drivers_key_windup_throws();
 	test_an_ordinary_def_keeps_no_windup();
+	test_the_windup_test_reads_the_current_action_and_any_ammo();
+	test_the_walk_keeps_a_running_windup();
+	test_the_walk_clears_the_windup_past_its_seat_gate();
 	if (failures != 0) {
 		std::printf("power_throw_windup: %d failure(s)\n", failures);
 		return 1;

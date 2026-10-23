@@ -747,6 +747,27 @@ bool weapon_fsm_fire_request_taken(const WeaponFsmDef &def, const WeaponSlotStat
     }
 }
 
+bool weapon_fsm_can_fire_in_current_state(const WeaponFsmDef &def, const WeaponSlotState &slot) {
+    // [orig: WeaponSlot_CanFireInCurrentState @0x53F0B0; the declaration carries the cases]
+    if (!def.auto_fire) return slot.current == weapon_action::kIdle; // @0x53F0EE
+    switch (slot.current) {
+        case weapon_action::kIdle:
+        case weapon_action::kFire:
+        case weapon_action::kRecoil:
+        case weapon_action::kScopeUp:
+        case weapon_action::kScopeDown:
+            return true; // @0x53F0E6
+        default:
+            return false;
+    }
+}
+
+bool weapon_fsm_has_ammo_available(const WeaponFsmDef &def, const WeaponSlotState &slot) {
+    // [orig: WeaponSlot_HasAmmoAvailable @0x541B30; the declaration carries the order]
+    if (def.clip_capacity < 0) return slot.reserve != 0; // @0x541B47 -> @0x541B85
+    return slot.clip != 0 || slot.reserve != 0;           // @0x541B65 / @0x541B8F
+}
+
 bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot) {
     // [orig: WeaponSlot_RequestFire @ 0x53efa0]
     const bool taken = weapon_fsm_fire_request_taken(def, slot);

@@ -512,6 +512,19 @@ bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot);
 // [orig: WeaponSlot_RequestFire @0x53EFA0 - mov eax, 1 @0x53EFE5 / @0x53F005, the state in
 //  eax @0x53F020..0x53F028, xor eax, eax @0x53F013]
 bool weapon_fsm_fire_request_taken(const WeaponFsmDef &def, const WeaponSlotState &slot);
+// WeaponSlot_CanFireInCurrentState: the slot's current action alone. An automatic def (Flags
+// 0x100) can fire in IDLE, FIRE, RECOIL, SCOPEUP and SCOPEDOWN, any other def in IDLE only. It
+// reads neither the queued action nor a switch.
+// [orig: WeaponSlot_CanFireInCurrentState @0x53F0B0 - Flags & 0x100 @0x53F0C2..0x53F0CE, the
+//  current action +0x2C's switch @0x53F0D0..0x53F0DF (cases 0, 2, 3, 9, 10 -> 1 @0x53F0E6), the
+//  IDLE test @0x53F0EE..0x53F0F1]
+bool weapon_fsm_can_fire_in_current_state(const WeaponFsmDef &def, const WeaponSlotState &slot);
+// WeaponSlot_HasAmmoAvailable: a clipless def (no clip size) by its pool alone; any other by its
+// loaded rounds (the shared bucket's, which the slot mirrors, else its own), then its pool.
+// [orig: WeaponSlot_HasAmmoAvailable @0x541B30 - def+0x58 == -1 @0x541B47 -> the pool
+//  @0x541B85; the bucket @0x541B55 / the slot word @0x541B5F, nonzero -> 1 @0x541B65; the pool
+//  @0x541B76, nonzero -> 1 @0x541B8F]
+bool weapon_fsm_has_ammo_available(const WeaponFsmDef &def, const WeaponSlotState &slot);
 // [orig: WeaponSlot_RequestReload @ 0x53f110] next {0,1,11} and no reload pending
 // (phase sign bit) -> next = RELOAD.
 void weapon_fsm_request_reload(WeaponSlotState &slot);

@@ -1345,19 +1345,21 @@ uint32_t local_weapon_input_tick(const World &world) {
 
 namespace {
 
-// The PowerThrow windup test on the equipped slot: WeaponSlot_CanFireInCurrentState (no
-// action running or queued, no switch in flight or deferred, which the draw leaves) and
-// WeaponSlot_HasAmmoAvailable pass: the windup's start, the input phase's tick; else 0.
-// Without the queued and deferred legs a press inside the draw-in latched a windup whose
-// release the FSM then refused. [orig: Input_ProcessBindings @0x4DDACB / @0x4DDAE4;
-//  Input_HandleActionBinding_0 case 0x95's press leg @0x4E0922 / @0x4E0935]
+// The PowerThrow windup test on the equipped slot: WeaponSlot_CanFireInCurrentState (the
+// current action alone: IDLE, and on an automatic def FIRE, RECOIL, SCOPEUP and SCOPEDOWN too)
+// and WeaponSlot_HasAmmoAvailable (rounds loaded or in the pool; a clipless def's pool) pass:
+// the windup's start, the input phase's tick; else 0. Neither reads the queued action or a
+// switch, so a reload record ahead of a key's press in the same drain, or a walk whose
+// SWITCHFROM the pump has not entered yet, leaves the press its windup (a draw in progress
+// is SWITCHTO's, which refuses it). [orig: Input_ProcessBindings @0x4DDACB / @0x4DDAE4;
+//  Input_HandleActionBinding_0 case 0x95's press leg @0x4E0922 / @0x4E0935;
+//  WeaponSlot_CanFireInCurrentState @0x53F0B0; WeaponSlot_HasAmmoAvailable @0x541B30]
 uint32_t power_throw_windup_start(World &world, LocalPlayerWeapon &w) {
 	const WeaponSlotState &slot = *active_local_weapon_slot(world, w);
-	const bool fireable = slot.current == weapon_action::kIdle &&
-			slot.next == weapon_action::kIdle && !w.switch_in_flight &&
-			w.switch_deferred_action < 0;
-	const bool has_ammo = slot.clip > 0 || w.def.clip_capacity < 0;
-	return fireable && has_ammo ? local_weapon_input_tick(world) : 0u;
+	return weapon_fsm_can_fire_in_current_state(w.def, slot) &&
+					weapon_fsm_has_ammo_available(w.def, slot)
+			? local_weapon_input_tick(world)
+			: 0u;
 }
 
 // The fire face: after case 0x95's fire request returns nonzero, the local player's facial
@@ -1403,6 +1405,15 @@ bool local_weapon_power_throw_press(World &world, LocalPlayerWeapon &w) {
 	if (!w.active || w.power_throw_start_tick != 0) return false; // @0x4E08EC / @0x4E0915
 	w.power_throw_start_tick = power_throw_windup_start(world, w); // @0x4E0947 / @0x4E0954
 	return w.power_throw_start_tick != 0;
+}
+
+void local_weapon_walk_clears_windup(const World &world, LocalPlayerWeapon &w) {
+	// [orig: Player_SwitchToWeaponByHandle @0x4E0170; the declaration carries the gate]
+	const Entity *player = world.registry.get(world.cached.local_player);
+	const SeatType seat = player != nullptr && player->mounted ? player->mount_type : SeatType::None;
+	if (seat == SeatType::Gunner || seat == SeatType::Controller || seat == SeatType::Driver)
+		return; // @0x4E017D / @0x4E0186 / @0x4E018F
+	w.power_throw_start_tick = 0; // @0x4E019B
 }
 
 bool local_weapon_release_fire(World &world, LocalPlayerWeapon &w) {
@@ -1667,9 +1678,17 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			player != nullptr && player->alive && player->health > 0;
 	const bool usegun_switch_pending =
 			w.usegun_switch != LocalUseGunSwitch::kNone;
+	// A running PowerThrow windup survives the dead body (below), as it does a UseGun switch in
+	// flight and a def with no PowerThrow flag: the walk never writes g_FireChargeStartTick.
+	// Its writers are the input legs (the left button's down, case 0x95's press and release
+	// legs), the walk Player_SwitchToWeaponByHandle (Player_InitPlayer's at a respawn,
+	// LocalPlayer::respawn_init) and the round's init.
+	// [orig: g_FireChargeStartTick @0xB76800 - Input_ProcessBindings @0x4DDAF6 / @0x4DDAFE;
+	//  Input_HandleActionBinding_0 @0x4E0801 / @0x4E0947 / @0x4E0954;
+	//  Player_SwitchToWeaponByHandle @0x4E019B; Game_InitNewRound @0x42277E;
+	//  DialogSystem_Init @0x52776D]
 	if (!player_alive && !usegun_switch_pending) {
 		active_slot.refire_queued = false;
-		w.power_throw_start_tick = 0;
 		w.pending_throw_charge = 0;
 		w.fire_pressed = false;
 		w.reload_pressed = false;
@@ -1702,9 +1721,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95's release leg
 	//  WeaponSlot_RequestFire(EquippedSlot, 0x96, charge) @0x4E086F; the press leg's
 	//  PowerThrow branch @0x4E08FD..0x4E095C requests none; world-wac-ai-re §27]
-	// The dead body and a UseGun switch in flight end a windup with no throw. The seat does
-	// not: the PowerThrow branch sits ahead of the press leg's seat test and the release leg
-	// has none, a Driver's EquippedSlot (an unarmed Controller's too) stays its own weapon's,
+	// The dead body and a UseGun switch in flight drop a release's throw, and the windup runs
+	// on (above). The seat drops neither: the PowerThrow branch sits ahead of the press leg's
+	// seat test and the release leg has none, a Driver's EquippedSlot (an unarmed Controller's too) stays its own weapon's,
 	// and the walk, the fire action and the send test no seat, so a key's windup throws from
 	// those seats. [orig: Input_HandleActionBinding_0 - the PowerThrow sign bit @0x4E08FD ahead
 	//  of the seat test @0x4E09CB..0x4E09DE; Entity_AttachToVehicleSlot @0x4946D0 - the Driver
@@ -1715,14 +1734,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		in.fire_held = false;
 		in.fire_pressed = false;
 		if (!accept_weapon_input && input_block != LocalWeaponInputBlock::kSeat) {
-			w.power_throw_start_tick = 0;
 			w.pending_throw_charge = 0;
 		} else if (w.power_throw_released) {
 			in.fire_pressed = true;
 			power_throw_release = true;
 		}
 	} else {
-		w.power_throw_start_tick = 0;
 		// A sourceless press meets WAC's category gate here, before the seat and
 		// fireability rejection; a press dispatched through case 0x95's press leg at its
 		// record (a deferred refire's among them) passed it there (local_weapon_press_fire).

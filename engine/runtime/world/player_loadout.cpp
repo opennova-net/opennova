@@ -106,6 +106,10 @@ namespace {
 //  select @0x4296E3, Player_MountWeaponSlot @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer
 //  @0x565CD0 (the select @0x566285, the mount @0x56628A..0x566297)].
 void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventory &inventory) {
+    // Player_InitPlayer's walk follows the select whatever it found, and clears a running
+    // PowerThrow windup at its head [orig: Player_InitPlayer @0x4E15F0 -
+    //  Player_SwitchToWeaponByHandle @0x4E19A1; local_weapon_walk_clears_windup].
+    local_weapon_walk_clears_windup(world, weapon);
     const WeaponTable &table = world.tables.weapons;
     const WeaponSwitchGates gates =
             local_weapon_switch_gates(world, weapon, &inventory);

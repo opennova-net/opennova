@@ -167,7 +167,9 @@ func test_reinstall_during_holster_preserves_the_switch() -> void:
 	assert_eq(_sim.get_local_player_weapon_name(), "WPN_GRENADEHE")
 
 
-# A PowerThrow press inside the queued draw-in is refused (the fireable gate),
+# A PowerThrow throw released inside the draw-in is refused (the FSM takes no fire
+# request in SWITCHTO; a press while the draw is only queued, the current action
+# still IDLE, starts a windup as retail's WeaponSlot_CanFireInCurrentState lets it),
 # and no charge byte leaks onto a later shot's wire slot_byte.
 func test_windup_during_draw_leaves_no_stale_charge() -> void:
 	_boot_kit(KIT_M4_GRENADE)

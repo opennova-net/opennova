@@ -563,6 +563,13 @@ void local_weapon_left_button_down(World &world, LocalPlayerWeapon &w,
 //  @0x4E08DC..0x4E08EC, the PowerThrow sign bit @0x4E08FD, the device test @0x4E090B, the
 //  start test @0x4E0915, the store @0x4E0947, the clear @0x4E0954]
 bool local_weapon_power_throw_press(World &world, LocalPlayerWeapon &w);
+// The walk's windup clear: Player_SwitchToWeaponByHandle clears a running PowerThrow windup at
+// its head, past its seat gate (a Controller, Gunner or Driver seat walks nothing), whatever
+// the walk then finds. The weapon walk, the dead body and a UseGun switch clear none
+// (local_weapon_pump_tick).
+// [orig: Player_SwitchToWeaponByHandle @0x4E0170 - entity+0x168 3 / 2 / 5 @0x4E017D..0x4E0192,
+//  g_FireChargeStartTick = 0 @0x4E019B]
+void local_weapon_walk_clears_windup(const World &world, LocalPlayerWeapon &w);
 // The fire row's release leg at its record (inmatch::Role::dispatch_record, the binding up,
 // past the head, the binocular view and the cease fire): a running windup ends, its held
 // ticks (the input phase's tick less its start) become the charge byte

@@ -200,11 +200,19 @@ void test_power_throw_windup() {
 	LocalPlayerWeaponView v = rig.view();
 	CHECK(v.windup_active);
 	CHECK(v.windup_held_ticks == 15);
-	// No ammo and a finite clip: no windup; an infinite clip winds up anyway.
+	// The ammo gate is WeaponSlot_HasAmmoAvailable: none loaded but rounds in the pool draws the
+	// bar, none at all draws none, and a clipless def reads its pool alone.
+	// [orig: HUD_DrawPowerThrowChargeBar @0x599830 - @0x59988F; WeaponSlot_HasAmmoAvailable
+	//  @0x541B30]
 	rig.weapon.slot.clip = 0;
+	CHECK(rig.view().windup_active);
+	rig.weapon.slot.reserve = 0;
 	v = rig.view();
 	CHECK(!v.windup_active && v.windup_held_ticks == 0);
 	rig.weapon.def.clip_capacity = -1;
+	rig.weapon.slot.clip = 17;
+	CHECK(!rig.view().windup_active);
+	rig.weapon.slot.reserve = 5;
 	CHECK(rig.view().windup_active);
 	// The start tick and the def bit are both gates.
 	rig.weapon.power_throw_start_tick = 0;
