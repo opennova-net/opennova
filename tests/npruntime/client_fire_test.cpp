@@ -1210,6 +1210,12 @@ int main() {
 			return 1;
 		if (!expect(sh->last_fire_target == hc, "claimed target stamped on the shooter"))
 			return 1;
+		// The store lands in the shooter's AI slot word, the one the tag-2 serializer reads
+		// [orig: Server_ClientFiredRound @0x50C2A2..0x50C2AD].
+		const w::AiEntity *slot = world.ai.for_handle(hb);
+		if (!expect(slot != nullptr && slot->slot.f[3] == int32_t(hc.packed) + 1,
+		            "claimed target stored in the shooter's AI slot word"))
+			return 1;
 	}
 	{
 		std::vector<uint8_t> raw;

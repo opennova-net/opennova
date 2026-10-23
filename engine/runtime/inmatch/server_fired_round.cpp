@@ -270,13 +270,17 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			world::weapon_fsm_arm_network_fire(fire_def, armed, arm_inputs, arm_events);
 		}
 	}
-	// Stamp the claimed target on the shooter; the tag-2 serializer reads it LIVE
-	// [orig: @0x50c2ad shooter+104->+12; NetPacket_SerializeRoundEvent @0x50485a].
+	// Stamp the claimed target into the shooter's AI slot word (+0xC), when it has a slot;
+	// the tag-2 serializer reads that word LIVE.
+	// [orig: Server_ClientFiredRound @0x50BAA0 - `mov eax, [eax+68h]` @0x50C2A2, the null
+	//  test @0x50C2A7, the store @0x50C2AD; NetPacket_SerializeRoundEvent @0x504855]
 	world::EntityHandle fire_target{};
 	if (!wire_handle::is_batch_end_sentinel(fr.target_handle)) {
 		const world::EntityHandle th{fr.target_handle};
 		if (world->registry.get(th) != nullptr) fire_target = th; // [orig: @0x5135d2]
 	}
+	if (world::AiEntity *shooter_slot = world->ai.for_handle(shooter->handle))
+		shooter_slot->slot.f[3] = world::AiSlot::target_word(fire_target);
 	shooter->last_fire_target = fire_target;
 	// A primary round re-enters through the adm fire action, whose
 	// local pass scores the shot (scorer event 1) once it clears the

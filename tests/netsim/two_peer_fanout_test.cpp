@@ -2147,7 +2147,9 @@ bool run_round_event_fanout() {
 	{
 		w::Entity *shooter = world.registry.get(peer_h);
 		if (!expect(shooter != nullptr, "shooter entity live")) return false;
-		shooter->last_fire_target = host_h; // [orig: @0x50c2ad]
+		// The claimed target in the shooter's AI slot word [orig: Server_ClientFiredRound
+		//  @0x50C2AD; the read NetPacket_SerializeRoundEvent @0x504855].
+		ai.for_handle(peer_h)->slot.f[3] = w::AiSlot::target_word(host_h);
 		w::RoundEvent ev;
 		ev.shooter_handle = peer_h.packed;
 		ev.origin_x = ox;
@@ -2213,7 +2215,8 @@ bool run_round_event_fanout() {
 	{
 		w::Entity *shooter = world.registry.get(peer_h);
 		if (!expect(shooter != nullptr, "shooter entity live")) return false;
-		shooter->last_fire_target = w::TargetRef::of_round(3);
+		ai.for_handle(peer_h)->slot.f[3] =
+				w::AiSlot::target_word(w::TargetRef::of_round(3));
 		w::RoundEvent ev;
 		ev.shooter_handle = peer_h.packed;
 		ev.origin_x = ox;
@@ -2307,7 +2310,28 @@ bool run_ai_round_reaches_the_joiner() {
 	// A slotless shooter's ammo arm hands the pool 0xF600 over the fresh word's low
 	// nine bits, which the round keeps as its id and the ring carries
 	// [orig: Server_ClientFiredRound @0x50BDAE..0x50BDBC; RoundData_AddRound @0x4FDCF5].
-	return expect(re.shot_seq == 0xF7FF, "the AI round's word is the slotless 0xF7FF");
+	if (!expect(re.shot_seq == 0xF7FF, "the AI round's word is the slotless 0xF7FF"))
+		return false;
+	// The shooter's AI slot word (+0xC) is the round's target: an AI's scan writes it, and
+	// with it set the record takes 0x40 and the target's handle, as retail's AI rounds at the
+	// joiner do (x9 aikill RR: flags 0x41 / 0x72, target 0x005D); a cleared word sends none.
+	// [orig: NetPacket_SerializeRoundEvent @0x504820 - @0x50484E / @0x504855, the flag
+	//  @0x5048BF..0x5048C1; Entity_UpdateInfantryAI @0x4BBF82..0x4BBF85]
+	world.ai.for_handle(pilot_h)->slot.f[3] = w::AiSlot::target_word(peer_h);
+	nw::FrameUpdate targeted;
+	if (!expect(fire_and_read(targeted) && targeted.round_events.size() == 1,
+			"the targeted round reaches the joiner"))
+		return false;
+	if (!expect((targeted.round_events[0].flags & 0x40) != 0 &&
+					targeted.round_events[0].target_handle == peer_h.packed,
+			"the slot word rides the 0x40 target"))
+		return false;
+	world.ai.for_handle(pilot_h)->slot.f[3] = 0;
+	nw::FrameUpdate cleared;
+	if (!expect(fire_and_read(cleared) && cleared.round_events.size() == 1,
+			"the untargeted round reaches the joiner"))
+		return false;
+	return expect((cleared.round_events[0].flags & 0x40) == 0, "a cleared slot word sends no target");
 }
 
 // (i4) The drive-authority chain (net-re §5.13 witness 2026-07-04): vehicles have NO wire

@@ -1043,15 +1043,24 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 			rec.flags |= 0x80;
 			rec.slot_byte = ev.slot_byte;
 		}
-		// The shooter's fire target is read LIVE off its entity at serialize time
-		// [orig: @0x50485a reads shooter+104->+12; a freed shooter reads as no target].
-		// Any target sets 0x40; a round (a flare the heat lock took) lies in no pool,
-		// so the walk writes its word as 0xFFFF [orig: NetPacket_SerializeRoundEvent @0x504820
-		// (the walk's miss @0x504886; the flag @0x5048BF..0x5048C1)].
-		const world::Entity *shooter = w.registry.get(world::EntityHandle{ev.shooter_handle});
-		if (shooter != nullptr && shooter->last_fire_target.valid()) {
+		// The shooter's fire target is its AI slot's +0xC word, read LIVE at serialize
+		// time: the word an AI's target scan and SetAITarget write, and the 0x06 handler for
+		// a remote player's claimed target. A shooter with no slot, or a freed one, has no
+		// target. Any target sets 0x40; a round (a flare the heat lock took) lies in no pool,
+		// so the walk writes its word as 0xFFFF.
+		// [orig: NetPacket_SerializeRoundEvent @0x504820 - `mov ecx, [ecx+68h]` @0x50484E,
+		//  `mov esi, [ecx+0Ch]` @0x504855, the walk's miss @0x504886, the flag
+		//  @0x5048BF..0x5048C1; the writers Entity_UpdateInfantryAI @0x4BBF82..0x4BBF85,
+		//  Entity_SetAITarget @0x45D760 (@0x45D7B2), Server_ClientFiredRound
+		//  @0x50C2A2..0x50C2AD]
+		const world::EntityHandle shooter_h{ev.shooter_handle};
+		const world::AiEntity *shooter_slot =
+				w.registry.get(shooter_h) != nullptr ? w.ai.for_handle(shooter_h) : nullptr;
+		const world::TargetRef fire_target = shooter_slot != nullptr
+				? world::AiSlot::target_of(shooter_slot->slot.f[3]) : world::TargetRef{};
+		if (fire_target.valid()) {
 			rec.flags |= 0x40;
-			rec.target_handle = shooter->last_fire_target.entity.packed;
+			rec.target_handle = fire_target.entity.packed;
 		}
 		rec.shot_seq = ev.shot_seq;
 		// Fire origin compressed against the SAME anchor the frame header carries
