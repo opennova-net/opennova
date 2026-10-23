@@ -994,8 +994,10 @@ void JoinerRole::pump() {
 	devtools::ProfileLap lap(world.profile);
 	wire_frame_providers();
 	resolve_row_adm_ids();
+	lap.mark(devtools::Slot::SIM_CLIENT_ROW_ADM);
 	send_hello_once();
 	deposit_inbound();
+	lap.mark(devtools::Slot::SIM_CLIENT_DEPOSIT);
 	// The frame input reaches L's body BEFORE the client net frame builds
 	// this frame's C2S 0x0C from that body: retail's Player_PackInputStateToEntity
 	// immediately precedes Player_BuildTag0CInputBody in the send block, the
