@@ -9,8 +9,11 @@ extends GameProbe
 ## (its top-level spans, up to 20, largest first); each span in order with its `name`,
 ## `depth`, `end_us` (0 while open) and `duration_us` (its start is end_us - duration_us);
 ## and the two clocks at the read, `ticks_usec` (the spans' clock) and `unix_ms`, so a span
-## end lands on a capture's clock at unix_ms - (ticks_usec - end_us) / 1000. The record
-## goes to load_timeline.json in the run directory; the log carries the summary line.
+## end lands on a capture's clock at unix_ms - (ticks_usec - end_us) / 1000. The first frames
+## past the load (GameWorld.last_post_load_frames(): a span per frame, its legs nested, its
+## session updates as an `updates_<n>` span) ride under `post_load_frames` with their `label`,
+## `total_ms` and `spans` on the same clock. The record goes to load_timeline.json in the run
+## directory; the log carries the summary line.
 
 const SUMMARY_TOP_N := 20
 const MS_PER_S := 1000.0
@@ -26,14 +29,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	# Both clocks back to back, ahead of the walk.
 	var ticks_usec := Time.get_ticks_usec()
 	var unix_ms := roundi(Time.get_unix_time_from_system() * MS_PER_S)
-	var spans: Array = []
-	for span: LoadTimelineSpan in timeline.spans():
-		spans.append({
-			"name": span.name,
-			"depth": span.depth,
-			"end_us": span.end_us,
-			"duration_us": span.duration_us(),
-		})
+	var spans := _span_records(timeline)
 	var summary := timeline.summary(SUMMARY_TOP_N)
 	var result := {
 		"label": timeline.label,
@@ -43,6 +39,13 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		"unix_ms": unix_ms,
 		"spans": spans,
 	}
+	var post_load: LoadTimeline = world.last_post_load_frames()
+	if post_load != null:
+		result["post_load_frames"] = {
+			"label": post_load.label,
+			"total_ms": post_load.total_ms(),
+			"spans": _span_records(post_load),
+		}
 	ctx.log(summary)
 	var path := ctx.artifact_dir.path_join("load_timeline.json")
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -51,3 +54,15 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		file.close()
 		ctx.artifact("load_timeline", path, "json")
 	return ProbeVerdict.passed("%s (%d span(s))" % [summary, spans.size()], result)
+
+
+func _span_records(timeline: LoadTimeline) -> Array:
+	var spans: Array = []
+	for span: LoadTimelineSpan in timeline.spans():
+		spans.append({
+			"name": span.name,
+			"depth": span.depth,
+			"end_us": span.end_us,
+			"duration_us": span.duration_us(),
+		})
+	return spans

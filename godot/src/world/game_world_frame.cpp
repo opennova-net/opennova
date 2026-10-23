@@ -331,6 +331,9 @@ void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext 
 		// The status page stands in for the scene frame: its rows do not run.
 		if ((leg.flags & kSceneLeg) != 0 && !r_ctx.scene_drawn) continue;
 		if (live_table && i < 64) last_frame_run_mask_ |= uint64_t{1} << i;
+		// One of the first frames past a load: the leg's span under the frame's (an instrument).
+		LoadTimeline *post_load = live_table ? r_ctx.post_load_frame : nullptr;
+		if (post_load != nullptr) post_load->span(leg.name);
 		LegResult result = kLegRan;
 		{
 			// The board is latched by the begin row (frame_stats_on_), so every
@@ -340,6 +343,14 @@ void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext 
 			result = (this->*leg.run)(r_ctx);
 			if (result == kLegSkipped) {
 				scope.cancel();
+			}
+		}
+		if (post_load != nullptr) {
+			post_load->end_span();
+			// The session's updates this frame, as a span of no length named by their count.
+			if (leg.run == &GameWorld::leg_session && r_ctx.outcome.is_valid()) {
+				post_load->span(vformat("updates_%d", r_ctx.outcome->get_ticks_run()));
+				post_load->end_span();
 			}
 		}
 		if (result == kLegStop && (leg.flags & kStopsFrame) != 0) {
@@ -370,8 +381,33 @@ Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 	frame_delta_ = p_delta;
 	FrameContext ctx;
 	ctx.input = input;
+	// One of the first frames past a mission load: a span of the post-load timeline, its legs
+	// nested (an instrument). The load's end opened it (begin_post_load_frames).
+	const Ref<LoadTimeline> post_load =
+			post_load_frames_left_ > 0 ? post_load_frames_ : Ref<LoadTimeline>();
+	if (post_load.is_valid()) {
+		post_load->span(vformat("frame_%d", kPostLoadFrames - post_load_frames_left_ + 1));
+		ctx.post_load_frame = post_load.ptr();
+	}
 	run_leg_table(kFrameLegs, kFrameLegCount, ctx, true);
+	// An unload inside the frame printed it already (end_post_load_frames).
+	if (post_load.is_valid() && post_load_frames_left_ > 0) {
+		post_load->end_span();
+		if (--post_load_frames_left_ == 0) post_load->finish();
+	}
 	return ctx.outcome;
+}
+
+void GameWorld::begin_post_load_frames(const String &p_bms_name) {
+	end_post_load_frames();
+	post_load_frames_ = LoadTimeline::begin(vformat("Post-load frames %s", p_bms_name));
+	post_load_frames_left_ = kPostLoadFrames;
+}
+
+void GameWorld::end_post_load_frames() {
+	// The timeline prints once, at its last frame or at an unload ahead of it.
+	if (post_load_frames_left_ > 0 && post_load_frames_.is_valid()) post_load_frames_->finish();
+	post_load_frames_left_ = 0;
 }
 
 void GameWorld::on_frame_post_draw() {

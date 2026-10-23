@@ -462,6 +462,11 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	emit_signal(kSignalWorldLoaded);
 	timeline->end_span();
 	timeline->finish();
+	// The first frames past the load, timed on a timeline of their own (an instrument): a host's
+	// S2C 0x7B leaves at the first open send boundary of their updates (engine
+	// HostRole::finish_mission_load), and the mission start's first frames bank no render time
+	// (engine inmatch::Session::complete_load), so their draws are the load's tail on the wire.
+	begin_post_load_frames(p_bms_name);
 	return OK;
 }
 
@@ -693,6 +698,8 @@ void GameWorld::unload() {
 	// its clock, so no leg sees the time since this mission's last frame (engine
 	// world::TickAccumulator::bank carries the witness; D-NET-NEW-LI-6).
 	frame_clock_ms_ = 0;
+	// A post-load timeline still timing its frames prints what it has (an instrument).
+	end_post_load_frames();
 	ragdolls_.clear();
 	scene_overlay_bodies_.clear();
 	minimap_water_mask_.unref();

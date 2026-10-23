@@ -1916,6 +1916,40 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 		world.unload()
 
 
+# The first frames past a mission load ride a timeline of their own (an instrument): a span per
+# frame, the legs that ran nested in it, the session's updates as an updates_<n> span; it stops
+# at its last frame.
+func test_the_first_frames_past_a_load_are_timed() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	assert_eq(world.load_mission_as_host(_lan_host_config("mnml.bms", 0)), OK)
+	var frames: LoadTimeline = world.last_post_load_frames()
+	assert_not_null(frames, "the load opened its post-load timeline")
+	if frames == null:
+		world.unload()
+		return
+	assert_true(frames.span_names().is_empty(), "no frame ran yet")
+	for _frame in 10:
+		world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, null)
+	var names := Array(frames.span_names())
+	assert_true(names.has("frame_1") and names.has("frame_8") and not names.has("frame_9"),
+			"the first eight frames, no more: %s" % [names])
+	var first := names.find("frame_1")
+	assert_true(first >= 0 and first + 1 < names.size() and names[first + 1] == "begin",
+			"a frame's legs nest under its span, the begin row first: %s" % [names])
+	var depths := {}
+	for span: LoadTimelineSpan in frames.spans():
+		depths[span.name] = span.depth
+	assert_eq(int(depths.get("frame_1", -1)), 0, "a frame is a top-level span")
+	assert_eq(int(depths.get("begin", -1)), 1, "a leg is nested in its frame")
+	world.unload()
+
+
 func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless() -> void:
 	# Reserve an OS-chosen endpoint, then request that exact port through the
 	# production GameWorld host path. The old behavior silently started an SP

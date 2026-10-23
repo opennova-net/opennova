@@ -139,6 +139,9 @@ public:
 		// The scene gate's verdict (leg_scene_gate): false while the status page stands in for
 		// the scene frame, when no kSceneLeg row runs.
 		bool scene_drawn = true;
+		// One of the first frames past a mission load: its legs nest as spans under the frame's
+		// span of the post-load timeline (an instrument; null on every other frame).
+		LoadTimeline *post_load_frame = nullptr;
 	};
 	enum FrameLegFlags : uint32_t {
 		kLegNone = 0,
@@ -433,6 +436,11 @@ public:
 	Ref<WeaponDatabase> get_weapon_database();
 	// The timing of the most recent mission load (null before the first load).
 	Ref<LoadTimeline> last_load_timeline() const { return last_load_timeline_; }
+	// The first frames past the most recent mission load (null before the first load): a span per
+	// frame, the legs that ran nested in it and the session's updates counted, the time between
+	// two frame spans being the device draw and the shell's own process (an instrument, printed
+	// under --verbose once kPostLoadFrames frames are in).
+	Ref<LoadTimeline> last_post_load_frames() const { return post_load_frames_; }
 	MissionRoot *get_runtime() const;
 	Ref<MissionPlacementStats> get_mission_stats() const { return mission_stats_; }
 	// The placer's static populations that currently carry at least one live
@@ -932,6 +940,13 @@ private:
 	Ref<MissionPlacementStats> mission_stats_;
 	Ref<MissionObjectPlacer> placer_; // kept so mission audio reuses its item database
 	Ref<LoadTimeline> last_load_timeline_; // the most recent load_mission timing
+	// The first frames past the most recent mission load (last_post_load_frames) and the count
+	// still to time.
+	static constexpr int kPostLoadFrames = 8;
+	Ref<LoadTimeline> post_load_frames_;
+	int post_load_frames_left_ = 0;
+	void begin_post_load_frames(const String &p_bms_name);
+	void end_post_load_frames();
 	// load_mission's timeline (its mount and document spans, an instrument), which
 	// load_mission_internal goes on with.
 	Ref<LoadTimeline> entry_timeline_;
