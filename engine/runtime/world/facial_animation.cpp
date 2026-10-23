@@ -6,10 +6,10 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
+#include <runtime/world/tick_count_clock.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
-#include <chrono>
 #include <numeric>
 #include <unordered_set>
 #include <utility>
@@ -203,8 +203,9 @@ void FacialSystem::initialize(World &world) {
 
 void FacialSystem::tick(World &world) {
 	initialize(world);
-	const uint32_t now_ms = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count());
+	// The process's GetTickCount, the main loop's clock (world/tick_count_clock.h)
+	// [orig: CScarDecal_Update @0x57FA50 - GetTickCount @0x57FAEA].
+	const uint32_t now_ms = frame_tick_count_ms();
 	for (auto &slot : slots_) {
 		const Entity *entity = world.registry.get(slot.owner);
 		if (!entity || entity->registry_spawn_id != slot.spawn_id) continue;

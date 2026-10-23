@@ -9,6 +9,7 @@
 #include "util/string_convert.h"
 
 #include <base/crt/crt_rng.h>
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the screen effects' GetTickCount)
 
 #include <algorithm>
 #include <array>
@@ -2074,8 +2075,9 @@ void FrameFx::advance_screen_effects() {
 	inputs.view = view_effects_;
 	inputs.distortion_present = distortion_drawer_ &&
 			distortion_drawer_->frame_has_distortion();
-	// GetTickCount's millisecond clock; only its low bits reach the angle.
-	inputs.clock_ms = static_cast<std::uint32_t>(Time::get_singleton()->get_ticks_msec());
+	// GetTickCount's millisecond clock, the main loop's (engine world/tick_count_clock.h); only its
+	// low bits reach the angle.
+	inputs.clock_ms = opennova::world::frame_tick_count_ms();
 	auto frame = std::make_shared<FrameFxScreenFrame>();
 	frame->frame_id = ++screen_frame_id_;
 	frame->plan = opennova::renderer::plan_frame_fx(inputs, planner_state_,
