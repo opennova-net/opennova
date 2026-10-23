@@ -419,7 +419,9 @@ function Read-ParityScenario {
     # does a host already past it: the tick never comes back). Both hosts zero
     # the tick at the mission start and step it once a frame, so one value is
     # one condition on both. The wait for it is at most 50 s on either side
-    # (Wait-RetailHostTick, the stage_slot probe).
+    # (Wait-RetailHostTick, the stage_slot probe). A scenario with a prelude
+    # stages after it, inside the window (medic_revive, R-LX-s28-2), so its
+    # `value` sits past every cell's prelude end.
     if ($spec.PSObject.Properties.Name -contains "staging_tick") {
         $hostTick = $spec.staging_tick
         if (-not ($spec.PSObject.Properties.Name -contains "staging")) {
