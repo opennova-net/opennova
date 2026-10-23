@@ -262,6 +262,21 @@ Ref<Texture> ObjectData::load_material_texture(int p_material_index, int p_textu
 	return opennova::load_material_texture_from_dir(source_dir, texture_name, type);
 }
 
+// A model def's material resolve at the mission start's freeze: the rows it loads, in its order,
+// each through its loader (engine renderer/material_texture.h material_resolve_rows carries the
+// witness). Its effect lookup makes no device object.
+int ObjectData::resolve_materials() const {
+	if (!source_model_) {
+		return 0;
+	}
+	const std::vector<opennova::renderer::MaterialResolveRow> rows =
+			opennova::renderer::material_resolve_rows(native_model());
+	for (const opennova::renderer::MaterialResolveRow &row : rows) {
+		(void)load_material_texture(static_cast<int>(row.material), static_cast<int>(row.row));
+	}
+	return static_cast<int>(rows.size());
+}
+
 Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const {
 	if (!source_model_ || p_texture_name.is_empty()) {
 		return Ref<Texture2D>();

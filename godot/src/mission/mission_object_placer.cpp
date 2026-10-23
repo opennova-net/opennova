@@ -1642,6 +1642,20 @@ int MissionObjectPlacer::warm_models(const PackedStringArray &p_files, Node3D *p
 	return built;
 }
 
+int MissionObjectPlacer::resolve_model_materials(const PackedStringArray &p_files) {
+	_check_epoch();
+	const uint64_t start = Time::get_singleton()->get_ticks_usec();
+	int rows = 0;
+	for (int64_t i = p_files.size() - 1; i >= 0; --i) {
+		const Ref<ObjectData> data = _load_object_data(p_files[i]);
+		if (data.is_valid()) rows += data->resolve_materials();
+	}
+	UtilityFunctions::print_verbose(vformat(
+			"MissionObjectPlacer: model materials %d row(s) over %d file(s): %d ms", rows, p_files.size(),
+			static_cast<int>((Time::get_singleton()->get_ticks_usec() - start) / 1000)));
+	return rows;
+}
+
 Node3D *MissionObjectPlacer::_ensure_container(Node3D *p_parent) {
 	Node *existing = p_parent->get_node_or_null(NodePath(kContainerName));
 	if (existing != nullptr) {

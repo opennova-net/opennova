@@ -837,8 +837,8 @@ private:
 	int warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects = true,
 			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
 	// A new effect world under this world with every mounted .ptl of `p_resource_root` parsed
-	// at the session's words (the mission start's head's, load_join_effect_system's and a
-	// dedicated host's start_effect_world's).
+	// at the session's words (the mission start's head's, load_join_effect_system's and
+	// start_effect_world's for a load that built none; a dedicated host's builds none).
 	EffectWorld *create_effect_world(const Ref<ResourceRoot> &p_resource_root);
 	void free_join_effect_world();
 	void free_head_effect_world();

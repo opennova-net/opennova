@@ -165,8 +165,10 @@ public:
 	// while it loads. Between the head and the window the embedder loads its effect system on
 	// every load but a dedicated host's (the game's world load: GameWorld::load_mission_internal),
 	// ahead of the terrain, the objects and the runtime (D-NET-NEW-L3-22). A dedicated host
-	// loads none at all; its freeze still builds the mission's model buffers, with none of the
-	// render arm's device inits (D-NET-NEW-L3-23) [orig: Render_InitMissionTextures @0x587120 -
+	// loads none at all (D-NET-NEW-L3-23), and its freeze is the reduced arm: the terrain's
+	// textures and the model list's material resolve, none of the render arm's other device
+	// inits (inmatch/loaded_model_list.h model_files, D-NET-NEW-L3-25)
+	// [orig: Render_InitMissionTextures @0x587120 -
 	//  the dedicated test @0x58713C -> @0x58727A: PolyTrn_InitTextures @0x58727A,
 	//  CEffectWorld_RebuildAllModelBuffers @0x58728C; Game_StartMission - the render arm's test
 	//  @0x5259B4, the freeze's call @0x525A6E].

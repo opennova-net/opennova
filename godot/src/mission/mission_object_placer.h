@@ -277,6 +277,12 @@ public:
 	// inmatch/loaded_model_list.h, mission_start_model_list; D-NET-NEW-L5-8). The caller
 	// draws them once and frees `parent`. Returns the models built.
 	int warm_models(const PackedStringArray &p_files, Node3D *p_parent);
+	// A dedicated host's freeze (its reduced arm): the same list's material resolve alone, no
+	// model built and nothing drawn: each file's data, its materials' rows through their loaders
+	// (ObjectData::resolve_materials), the list walked head first, the reverse of `files`' load
+	// order (engine inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness;
+	// D-NET-NEW-L3-25). Returns the rows resolved.
+	int resolve_model_materials(const PackedStringArray &p_files);
 
 	// --- destruction support (world-wac-ai-re §24.6) ----------------------
 	// Diagnostic/read-back identity for the entity's graphic/reflection group.

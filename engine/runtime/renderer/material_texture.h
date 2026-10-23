@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 
+namespace opennova::threedi {
+struct Threedi3di3;
+} // namespace opennova::threedi
+
 namespace opennova::renderer {
 
 enum class MaterialTextureTransform : uint8_t { Unchanged, NormalFromAlpha, HorizonVolume, AmbientOcclusion, ChunkNormal, ChunkHorizon, ChunkOcclusion, Checkerboard };
@@ -90,6 +94,29 @@ bool material_texture_dds_only(const char *name, uint8_t type, std::string &open
 // [orig: ThreediGp_LoadFromFile memset @ 0x5B59E5; Material_ConvertDefinition
 // switch @ 0x5B045B..0x5B04A0 over byte_5B0778]
 uint8_t material_texture_runtime_type(uint8_t authored_type);
+// The loader's slot code for an authored texture slot: 1 and 2 kept, 3 to 7 as 8 to 12; any other
+// leaves the runtime byte at the record memset's zero. The freeze's material resolve loads a row
+// only when that byte is set (a model's every material, each of its rows in order).
+// [orig: ThreediGp_LoadFromFile memset @ 0x5B59E5; Material_ConvertDefinition @ 0x5B03C0 - the
+//  slot switch @ 0x5B0428, its stores @ 0x5B042F..0x5B0453; Material_ResolveEffectSubobjectsAndShader
+//  @ 0x5B1870 - the row's test @ 0x5B1890, Material_LoadStageTexture @ 0x5B18A2]
+uint8_t material_texture_runtime_slot(uint8_t authored_slot);
+
+// One row a model def's material resolve loads: its material's place in the model's MTRL array
+// and its own place in that material.
+struct MaterialResolveRow {
+	uint32_t material = 0;
+	uint32_t row = 0;
+};
+// The rows a model def's material resolve loads at the mission start's freeze, in its order: each
+// material in turn, each of its rows whose loader slot code is set (material_texture_runtime_slot),
+// each by the stage dispatcher on its runtime type (material_texture_source). The resolve's effect
+// lookup then copies the shader's parameter blocks into the def, which makes no device object.
+// [orig: CEffectWorld_RebuildAllModelBuffers @ 0x5B3A80 - each node's call @ 0x5B3A92;
+//  CEffectDef_ResolveSubobjectMaterials @ 0x5B25C0 - the material walk @ 0x5B25DC;
+//  Material_ResolveEffectSubobjectsAndShader @ 0x5B1870 - the row's test @ 0x5B1890,
+//  Material_LoadStageTexture @ 0x5B18A2, HLSLEffect_FindByName @ 0x5B18C1]
+std::vector<MaterialResolveRow> material_resolve_rows(const threedi::Threedi3di3 &model);
 
 // Specialized producer types preserve their dimensionality: 6 and 17 are
 // volumes, 7 is the retail white AO producer, 16/18 load NQ8B/AOC8 chunks.

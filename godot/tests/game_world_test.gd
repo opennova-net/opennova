@@ -1839,6 +1839,42 @@ func test_a_dedicated_host_loads_no_effect_system() -> void:
 		world.unload()
 
 
+# Retail's mission textures stage runs its reduced arm on a dedicated host: the terrain's textures
+# and the model list's material resolve, none of the full arm's other device inits (engine
+# inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness): a Serve Only
+# host's load resolves its listed models' materials and runs none of the warm's legs (no effect
+# spawn, no model build, no pipeline warm, no forced frame); a listen host's runs the warm.
+func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
+	var warm_legs := ["effects_warm", "effect_spawn", "model_warm", "present_pipelines",
+			"forced_draw_1", "forced_draw_2", "force_sync", "warm_reset"]
+	for serve_and_play in [true, false]:
+		var world := WorldFixture.make_world(self)
+		await get_tree().process_frame
+		world.set_playable(false)
+		var root := ResourceRoot.new()
+		assert_eq(root.set_root_dir(
+				ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+		world.set_resource_root(root)
+		var options := _lan_host_config("mnml.bms", 0)
+		options.serve_and_play = serve_and_play
+		assert_eq(world.load_mission_as_host(options), OK)
+		var timeline: LoadTimeline = world.last_load_timeline()
+		assert_not_null(timeline)
+		if timeline != null:
+			var names := Array(timeline.span_names())
+			if serve_and_play:
+				assert_false(names.has("model_materials"),
+						"a listen host's mission textures are the full arm: %s" % [names])
+				for leg in ["effects_warm", "effect_spawn", "model_warm"]:
+					assert_true(names.has(leg), "a listen host's warm runs %s: %s" % [leg, names])
+			else:
+				assert_true(names.has("model_materials"),
+						"a dedicated host resolves its listed models' materials: %s" % [names])
+				for leg in warm_legs:
+					assert_false(names.has(leg), "no %s on a dedicated host: %s" % [leg, names])
+		world.unload()
+
+
 func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless() -> void:
 	# Reserve an OS-chosen endpoint, then request that exact port through the
 	# production GameWorld host path. The old behavior silently started an SP

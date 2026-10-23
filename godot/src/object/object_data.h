@@ -182,6 +182,10 @@ public:
 	static void clear_static_caches();
 	Array get_control_registers() const;
 	Ref<Texture> load_material_texture(int p_material_index, int p_texture_index) const;
+	// The freeze's material resolve of this model: every material's rows in order, each whose
+	// loader slot code is set (renderer::material_texture_runtime_slot) through its loader
+	// (load_material_texture). Returns the rows resolved. C++ siblings only.
+	int resolve_materials() const;
 	Ref<Texture2D> load_texture_name(const String &p_texture_name) const;
 	int get_light_count() const;
 	// One LGHT record (object/model_light.h); null out of range.

@@ -396,14 +396,24 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// pays this at load (the load plan's effect-system witness).
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM));
-	timeline->span("effects_warm");
-	// The mission start's models warm in the same forced frames (FX-5), a wire-header
-	// joiner's too: its list froze above, its world stream landed.
-	warm_effect_world_catalog(challenge_sim.is_valid()
-					? challenge_sim->get_mission_start_model_files()
-					: PackedStringArray(),
-			!effects_preloaded, timeline);
-	timeline->end_span();
+	const PackedStringArray start_models = challenge_sim.is_valid()
+			? challenge_sim->get_mission_start_model_files()
+			: PackedStringArray();
+	if (challenge_sim.is_valid() && challenge_sim->session_role() == Simulation::ROLE_DEDICATED_HOST) {
+		// A dedicated host's freeze is the reduced arm: the listed models' materials resolve, and
+		// no effect spawns, no model builds, no pipeline warm and no forced frame run (engine
+		// inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness,
+		// D-NET-NEW-L3-25).
+		timeline->span("model_materials");
+		if (placer_.is_valid()) placer_->resolve_model_materials(start_models);
+		timeline->end_span();
+	} else {
+		timeline->span("effects_warm");
+		// The mission start's models warm in the same forced frames (FX-5), a wire-header
+		// joiner's too: its list froze above, its world stream landed.
+		warm_effect_world_catalog(start_models, !effects_preloaded, timeline);
+		timeline->end_span();
+	}
 	// A host's mission start past its device stages: phase B opens with the render arm's
 	// last pump, then the PreMission pass, the round init and Player_InitPlayer, as retail's
 	// start runs them past its mission textures (engine inmatch/host_boot.h start_host_mission
@@ -1379,9 +1389,8 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 	const auto leg_end = [&p_timeline]() {
 		if (p_timeline.is_valid()) p_timeline->end_span();
 	};
-	// A dedicated host has no effect world (start_effect_world): its mission start's models
-	// still build and draw here, as retail's dedicated freeze still builds its model buffers
-	// (engine inmatch/host_role.h open_next_mission_load_window carries the witness).
+	// A load with no effect world and no models has nothing to warm. A dedicated host never comes
+	// here: its freeze is the reduced arm (load_mission_internal, D-NET-NEW-L3-25).
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world == nullptr && p_models.is_empty()) {
 		return 0;

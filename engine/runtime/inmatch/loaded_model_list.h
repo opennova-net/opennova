@@ -70,7 +70,14 @@ public:
 	// nothing [orig: ThreediGp_LoadModel @0x5B6160 (ThreediGp_LoadFromFile @0x5b6230);
 	// CEffectWorld_RebuildAllModelBuffers @0x5B3A80 (each node's CEffectDef_ResolveSubobjectMaterials
 	// call @0x5B3A92)]. The
-	// marked foliage nodes are the terrain's foliage pass's to build.
+	// marked foliage nodes are the terrain's foliage pass's to build. The freeze's first pass walks
+	// the list head first, the reverse of this order, resolving each node's materials
+	// (renderer/material_texture.h material_resolve_rows); a dedicated host, whose list has no marked
+	// node, runs that pass and the page alone (past the terrain's textures, its freeze's reduced arm
+	// skips every other device init), so a shell there builds and draws no model (D-NET-NEW-L3-25)
+	// [orig: CEffectWorld_RebuildAllModelBuffers @0x5B3A80 - the walk @0x5B3A81..0x5B3AA5;
+	//  Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the reduced arm's
+	//  call @0x58728C].
 	std::vector<std::string> model_files() const;
 	// The nodes head first, each with its mark (tests and diagnostics).
 	struct Node {
