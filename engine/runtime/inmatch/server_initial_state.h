@@ -40,10 +40,17 @@ struct InitialStateStep {
 	bool advanced = false;                      // false => burst not eligible / already complete
 };
 
-// The retail CNapiServerConfig_BuildFlags computation captured by
-// create_session. ServerHello P2 and the trailing dword of S2C 0x08 both read
-// that snapshot; callers may use this helper to compute/inspect the live value.
+// The retail CNapiServerConfig_BuildFlags computation, live: create_session stores it as the
+// advertised P2 (np_protocol.build_flags, which an admin password SET recomputes); the S2C
+// 0x08's tail and the spawn pump's balance gate call it at the time (D-NET-NEW-L1-40).
+// [orig: CNapiServerConfig_BuildFlags @0x4C4DC0 - its callers CNapiGameSession_CreateSession
+//  @0x4C9A0F, ServerConfig_SerializeToPacket @0x505D29, CNapiServer_ProcessPendingPlayerSpawns
+//  @0x4C8E82]
 uint32_t build_server_config_flags(const NapiNPServerCtx &ctx);
+
+// The S2C 0x08 session-config record (51 bytes): the ten rule dwords, the seven config bytes
+// and BuildFlags called live. [orig: ServerConfig_SerializeToPacket @0x505BD0]
+std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx);
 
 // Advance `conn.burst` by one phase step and return the message(s) to ship. Drive it once per frame
 // per non-spawned connection; the world stream's 0x1A leaves the slot in state 5, awaiting its

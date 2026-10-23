@@ -70,9 +70,14 @@ std::vector<uint8_t> serialize_server_name_map(const GameConfig &cfg) {
 // [orig: CNapiServerConfig_BuildFlags - `if (this->is_in_session)` @0x4C4DC4; reached in the
 //  single player by Server_SendPlayerSlotStateFrame @0x51BF95 (ServerConfig_SerializeToPacket
 //  @0x505D29); CNapiNetwork_SetNetworkType @0x4C4A85]
+// The team test reads the create's game_settings words (ctx.session_game_type /
+// session_mp_attributes), the first test the cfg block's live mp-attribute word
+// (config.mp_attributes, which an admin SET's tail rewrites) (D-NET-NEW-L1-40).
+// [orig: `test byte ptr g_GameConfigState.multiplayerAttributeFlags_34C, al` @0x4C4DD2;
+//  `test [ecx+0F34h], 10000h` @0x4C4E30, `test [ecx+0F38h], al` @0x4C4E3C]
 uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	const GameConfig &r = ctx.config;   // rule-flag inputs (squad / perm-death / config_flag_*)
-	const GameConfig &gs = ctx.config;  // §6.4 game_settings inputs (passwords / game_type / mp_attributes)
+	const GameConfig &gs = ctx.config;  // §6.4 game_settings inputs (passwords)
 	uint32_t flags = 0;
 	if (!ctx.is_in_session || ctx.socket_state == SocketMode::Socketless) return flags;
 	// dword_2550A04 is the one live mp-attribute store. Its TeamChoose bit feeds
@@ -96,8 +101,9 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 		flags |= server_flag::kSpectators;
 		if (!gs.spectator_password.empty()) flags |= server_flag::kSpectatorPassword;
 	}
-	if ((gs.game_type & 0x10000u) != 0) {     // team game
-		if ((gs.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) flags |= server_flag::kTeamChoice;
+	if ((ctx.session_game_type & 0x10000u) != 0) {     // team game
+		if ((ctx.session_mp_attributes & GameConfig::kMpAttribTeamChoose) != 0)
+			flags |= server_flag::kTeamChoice;
 		if (!gs.side_a_password.empty()) flags |= server_flag::kSideAPassword;
 		if (!gs.side_b_password.empty()) flags |= server_flag::kSideBPassword;
 	}
@@ -106,7 +112,10 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	return flags;
 }
 
-// [orig: ServerConfig_SerializeToPacket @0x505bd0] S2C 0x08: 10 rule dwords + 7 bytes + flags dword.
+} // namespace
+
+// See header. [orig: ServerConfig_SerializeToPacket @0x505bd0] S2C 0x08: 10 rule dwords + 7 bytes
+// + flags dword.
 std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx) {
 	const GameConfig &r = ctx.config;
 	std::vector<uint8_t> b;
@@ -122,12 +131,15 @@ std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx) {
 	io::append_u32_le(b, r.destroy_buildings);   // [orig: g_DestroyBuildings @0x24D2164, SET `destroybuild`]
 	io::append_u32_le(b, r.death_messages);      // [orig: g_DeathMessages @0x24D2168, SET `deathmes`]
 	for (int i = 0; i < 7; ++i) b.push_back(r.config_bytes[i]);
-	// P2 advertised the create-session snapshot. Keep the later 0x08 record on
-	// that same immutable contract even if a caller mutates ctx.config while a
-	// paced joiner is still entering the world.
-	io::append_u32_le(b, ctx.np_protocol.build_flags);
+	// The tail is BuildFlags called live, not the create's P2 word: an admin SET after the
+	// create (ChangeTeam's mp-attribute bit, a password) reaches a later joiner's 0x08
+	// (D-NET-NEW-L1-40) [orig: CNapiServerConfig_BuildFlags(&g_NapiNPCtx) @0x505D29, stored
+	//  @0x505D3B].
+	io::append_u32_le(b, build_server_config_flags(ctx));
 	return b; // 51 bytes
 }
+
+namespace {
 
 // [orig: NetPacket_SerializeWeaponRestrictionTable @0x5102c0] S2C 0x66: count byte, then (index,value)
 // pairs for each restricted weapon (value 0 or the title's armory-only value: JO's 2, DFX2's 3,

@@ -366,6 +366,16 @@ struct NapiNPServerCtx {
 	// @0x51B7F5]
 	std::vector<SquadRegistryNode> squad_registry;
 	GameConfig config;            // [orig g_NapiNPCtx.game_settings @+0xE68 + the scattered g_* rule globals]
+	// Two game_settings words the session's create copies and nothing after it writes, which
+	// BuildFlags' team test reads: the create's game type (config.game_type is each mission's,
+	// a rotation row's) and the create's copy of the cfg block's mp-attribute word
+	// (config.mp_attributes is that word itself, which an admin SET's tail rewrites)
+	// (D-NET-NEW-L1-40). [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - the row's type
+	//  into the settings +0xCC @0x569655 / @0x569678, multiplayerAttributeFlags_34C into +0xD0
+	//  @0x569662 / @0x56967F, the create's call @0x56997D; CNapiServerConfig_BuildFlags @0x4C4DC0 -
+	//  `test [ecx+0F34h], 10000h` @0x4C4E30, `test [ecx+0F38h], al` @0x4C4E3C]
+	uint32_t session_game_type = 0;
+	uint32_t session_mp_attributes = 0;
 	NapiNPProtocol np_protocol;    // [orig +0xE5C] (pointer in the original; embedded here)
 
 	// [§5.2a] The advertised weapon-restriction set (S2C 0x66). The original reads a 255-entry

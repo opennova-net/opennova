@@ -97,7 +97,7 @@ void start_mission_state(NapiNPServerCtx &ctx, const GameConfig &config) {
 // The config the session serves from: the resolved send period, the session
 // title (the mount's override table `text_override` answering first), the
 // mission-data block (its rules word the title identity's, `title`; its +0x74
-// the session title), the advertised name, cap and flag words.
+// the session title), the advertised name and cap.
 void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
 		const TitleIdentity *title, const rtxt::File *text_override) {
 	// Resolve the session-selected retail default once at session creation so
@@ -123,11 +123,6 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
 	// ctx+0xF28, CNapiGameSession_CreateSession @0x4C9A80;
 	// NapiNPProtocol_SendServerInfoPacket @0x6209FF].
 	ctx.np_protocol.max_players = config.max_players;
-	// The original snapshots both advertised flag words while building the
-	// session config. P2 and the S2C 0x08 tail are the same BuildFlags value;
-	// computing it once here prevents those two wire legs from drifting.
-	ctx.np_protocol.server_flags = config.game_type;
-	ctx.np_protocol.build_flags = build_server_config_flags(ctx);
 }
 
 } // namespace
@@ -174,6 +169,11 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	//  @0x4C8AAC) -> CDynBuffer_Clear(&g_SpawnWaveList.field_C) @0x51B505].
 	ctx.squad_registry.clear();
 	start_mission_state(ctx, config);
+	// The create's settings: its game type and its copy of the cfg block's mp-attribute word,
+	// which a map change does not rewrite (D-NET-NEW-L1-40) [orig:
+	//  CNapiGameSession_BuildAndCreateSession - @0x569678, @0x56967F].
+	ctx.session_game_type = config.game_type;
+	ctx.session_mp_attributes = config.mp_attributes;
 	// Retail seeds the process CRT stream from the clock once when the host
 	// allocates its player-slot table and immediately spends one draw on the
 	// table's anti-cheat base offset (`rand() % 25145`); the simulation's owned
@@ -189,6 +189,14 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
 	// The title the start installs below (start_server) builds the block.
 	resolve_mission_config(ctx, config, startup.title, startup.text_override);
+	// The two advertised flag words, the create's: P1 the session's game type and P2 its
+	// BuildFlags word. Only the create and an admin SET of a password write them, so a map
+	// change keeps them; the S2C 0x08 tail calls BuildFlags live (serialize_server_config)
+	// (D-NET-NEW-L1-40). [orig: CNapiGameSession_CreateSession @0x4C97C0 - game_settings +0xCC
+	//  into protocol +0x500 @0x4C99FE / @0x4C9A09, CNapiServerConfig_BuildFlags @0x4C9A0F into
+	//  +0x504 @0x4C9A1A; the admin arms CAdminServer_HandleSetCommand @0x405B52 / @0x40629A]
+	ctx.np_protocol.server_flags = ctx.session_game_type;
+	ctx.np_protocol.build_flags = build_server_config_flags(ctx);
 
 	if (ctx.is_authority) {
 		// §5.2a step 1: the round-state init runs AHEAD of the session create, the server start

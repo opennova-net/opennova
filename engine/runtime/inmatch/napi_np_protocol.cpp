@@ -1601,10 +1601,11 @@ ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hel
 	reply.sn = ctx.config.server_name;
 	// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204b0, SF]
 	reply.sf = ctx.config.server_password.empty() ? 0u : 1u;
-	reply.p1 = ctx.config.game_type;
-	// Retail advertises the same session BuildFlags value here and in the
-	// trailing dword of S2C 0x08. create_session snapshots that live semantic
-	// value after installing GameConfig; never substitute a captured constant.
+	// P1 and P2 are the protocol's two flag words, the create's game type and BuildFlags word
+	// (an admin password SET recomputes both), not the running mission's type or a live
+	// BuildFlags call (D-NET-NEW-L1-40) [orig: NapiNPProtocol_SendServerInfoPacket - +0x500
+	//  @0x6208A8 into P1 @0x6208BF, +0x504 @0x6208CF into P2 @0x6208E6].
+	reply.p1 = ctx.np_protocol.server_flags;
 	reply.p2 = ctx.np_protocol.build_flags;
 	reply.np = occupied_player_count(ctx);
 	reply.mp = ctx.np_protocol.max_players; // the session's cap [orig: protocol +0x524 @0x6209FF]

@@ -259,7 +259,8 @@ std::string password_field(const std::string &value) {
 //  server_flags = game_settings.game_type and build_flags = CNapiServerConfig_BuildFlags
 //  @0x4C4DC0]
 void republish_flags(NapiNPServerCtx &ctx) {
-	ctx.np_protocol.server_flags = ctx.config.game_type;
+	// game_settings' type is the create's (D-NET-NEW-L1-40).
+	ctx.np_protocol.server_flags = ctx.session_game_type;
 	ctx.np_protocol.build_flags = build_server_config_flags(ctx);
 }
 

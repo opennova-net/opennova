@@ -197,7 +197,9 @@ int main_impl() {
 	ctx.mission_location_names = {"Weapons Cache", "Rebel Outpost"};
 	const uint32_t advertised_build_flags = ctx.np_protocol.build_flags;
 	ctx.config.server_password = "mutated-after-create";
-	if (!expect(inmatch::build_server_config_flags(ctx) != advertised_build_flags,
+	const uint32_t live_build_flags = inmatch::build_server_config_flags(ctx);
+	if (!expect(live_build_flags == (advertised_build_flags | 0x8u) &&
+	                    live_build_flags != advertised_build_flags,
 	            "fixture mutation changes the live BuildFlags computation")) return 1;
 
 	// Spawn the host's own pool-0 player (so the burst's 0x0C has it with dcb 2).
@@ -403,8 +405,12 @@ int main_impl() {
 		}
 		if (!expect(dwords_match,
 		            "0x08 rule dwords carry only the 0x00010020 game type")) return 1;
-		if (!expect(read_u32_le(*b, 47) == advertised_build_flags,
-		            "0x08 BuildFlags stays identical to the create-session P2 snapshot"))
+		// The tail is BuildFlags called live, not the create's P2 word (D-NET-NEW-L1-40)
+		// [orig: ServerConfig_SerializeToPacket - CNapiServerConfig_BuildFlags @0x505D29,
+		//  stored @0x505D3B].
+		if (!expect(read_u32_le(*b, 47) == live_build_flags &&
+		                    ctx.np_protocol.build_flags == advertised_build_flags,
+		            "0x08's BuildFlags is the live word; P2 keeps the create's"))
 			return 1;
 	}
 	{
