@@ -45,8 +45,16 @@ dispatcher dropped moves it by that drift alone (the same cell's dead medic: -10
 BAM against a -379,584,512 BAM look). The check asks for at least half the expected
 turn, in its direction.
 
+A steps_tick scenario's first aim resolves before its staging (R-LX-s29-1 (b')), its
+actor's words from the setup pose as both drivers write them (`pose`): the Position
+words trunc(v * 65536) and the +0x10 heading of mission yaw Y, the wrapped
+trunc(((90 - Y) mod 360) * 2^32 / 360) (devtools::script_pose_from_mission, the
+onHook bridge's ApplyPose of the same snapshot: a yaw-0 pose reads 0x40000000, x7's
+revive pre-flight).
+
 usage:
   scenario_aim.py look --heading-bam=H --actor=X,Y --target=X,Y --sensitivity=S
+  scenario_aim.py pose --x=X --y=Y --yaw-deg=Y
   scenario_aim.py turned --before-bam=H0 --after-bam=H1 --expected-bam=HE
   scenario_aim.py profile-word --copy=DIR
 Each prints one JSON object.
@@ -124,6 +132,18 @@ def aim_look(heading_bam: int, actor: tuple[float, float], target: tuple[float, 
     }
 
 
+def pose_words(x: float, y: float, yaw_deg: float) -> dict:
+    """A setup pose's Position words (x, y) and +0x10 heading as the drivers write them."""
+    if not all(math.isfinite(v) for v in (x, y, yaw_deg)):
+        raise ValueError("a setup pose's x, y and yaw must be finite")
+    normalized = math.fmod(90.0 - yaw_deg, 360.0)
+    if normalized < 0.0:
+        normalized += 360.0
+    heading = wrap32(int(normalized * (4294967296.0 / 360.0)) & 0xFFFFFFFF)
+    return {"x_q16": int(math.trunc(x * 65536.0)), "y_q16": int(math.trunc(y * 65536.0)),
+            "heading_bam": heading}
+
+
 def look_turned(before_bam: int, after_bam: int, expected_after_bam: int) -> dict:
     """Whether a look turned the actor: the heading read after it moved at least half
     the look's expected turn, in its direction (a look of no turn passes)."""
@@ -173,9 +193,15 @@ def main(argv: list[str]) -> int:
     turned.add_argument("--expected-bam", type=int, required=True)
     word = sub.add_parser("profile-word")
     word.add_argument("--copy", type=Path, required=True)
+    pose = sub.add_parser("pose")
+    pose.add_argument("--x", type=float, required=True)
+    pose.add_argument("--y", type=float, required=True)
+    pose.add_argument("--yaw-deg", type=float, required=True)
     args = parser.parse_args(argv)
     if args.command == "look":
         out = aim_look(args.heading_bam, args.actor, args.target, args.sensitivity)
+    elif args.command == "pose":
+        out = pose_words(args.x, args.y, args.yaw_deg)
     elif args.command == "turned":
         out = look_turned(args.before_bam, args.after_bam, args.expected_bam)
     else:

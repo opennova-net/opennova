@@ -161,6 +161,25 @@ class ProfileWordTest(unittest.TestCase):
             scenario_aim.profile_mouse_sensitivity(player_sav(0, 128), 5)
 
 
+class PoseWordsTest(unittest.TestCase):
+    def test_the_drivers_words(self):
+        # A yaw-0 pose reads heading 0x40000000 (x7's revive pre-flight); medic_revive's
+        # pose (29.93, -188.0) truncates to its 16.16 words.
+        self.assertEqual(scenario_aim.pose_words(29.93, -188.0, 0.0),
+                         {"x_q16": 1961492, "y_q16": -12320768, "heading_bam": 0x40000000})
+        self.assertEqual(scenario_aim.pose_words(0.0, 0.0, 90.0)["heading_bam"], 0)
+        self.assertEqual(scenario_aim.pose_words(0.0, 0.0, 180.0)["heading_bam"], -0x40000000)
+        self.assertEqual(scenario_aim.pose_words(0.0, 0.0, 270.0)["heading_bam"], -0x80000000)
+        self.assertEqual(scenario_aim.pose_words(0.0, 0.0, 288.0)["heading_bam"],
+                         scenario_aim.wrap32(int(162.0 * 4294967296.0 / 360.0)))
+        self.assertEqual(scenario_aim.pose_words(-0.5, 1.99999, -90.0),
+                         {"x_q16": -32768, "y_q16": 131071, "heading_bam": -0x80000000})
+
+    def test_refuses_a_non_finite_pose(self):
+        with self.assertRaises(ValueError):
+            scenario_aim.pose_words(float("nan"), 0.0, 0.0)
+
+
 class CommandLineTest(unittest.TestCase):
     def run_main(self, argv):
         out = io.StringIO()
@@ -172,6 +191,10 @@ class CommandLineTest(unittest.TestCase):
         out = self.run_main(["look", "--heading-bam=0", "--actor=-1.5,-2", "--target=-1.5,8",
                              "--sensitivity=128"])
         self.assertEqual(out["look_px"], -4096)
+
+    def test_pose(self):
+        self.assertEqual(self.run_main(["pose", "--x=29.93", "--y=-188.0", "--yaw-deg=0"]),
+                         {"x_q16": 1961492, "y_q16": -12320768, "heading_bam": 1073741824})
 
     def test_turned(self):
         out = self.run_main(["turned", "--before-bam=1352935218", "--after-bam=1352925183",

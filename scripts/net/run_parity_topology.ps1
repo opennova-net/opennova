@@ -310,7 +310,7 @@ function Read-ParityScenario {
     }
     $spec = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     $expected = @("schema", "name", "mission", "game_type", "actor", "prelude",
-        "setup", "staging", "staging_tick", "steps", "settle_seconds", "expect", "ends_joiner_session")
+        "setup", "staging", "staging_tick", "steps_tick", "steps", "settle_seconds", "expect", "ends_joiner_session")
     $extra = @($spec.PSObject.Properties.Name | Where-Object { $_ -notin $expected })
     if ($extra.Count -gt 0) {
         throw "Scenario $Path has unknown fields: $($extra -join ', ')"
@@ -433,6 +433,36 @@ function Read-ParityScenario {
                 -not (Test-JsonInteger $hostTick.value) -or $hostTick.value -le $hostTick.tolerance -or $hostTick.value -gt 65535 -or
                 $hostTick.why -isnot [string] -or [string]::IsNullOrWhiteSpace($hostTick.why)) {
             throw "Scenario $($spec.name): staging_tick is {value tolerance+1..65535, tolerance 1..64, why}"
+        }
+    }
+    # R-LX-s29-1 (b'): the host tick the main stage's aim parts play on, {value,
+    # tolerance, why} (Invoke-ScenarioAimStage): each part that starts at an aim_at
+    # plays its relative tick 0 on host tick value + that aim's tick, so an actor's
+    # play keeps one place against the camp AI's think keys as the staging does
+    # (the runner's reads and calls between parts take 32..52 ticks and vary). The
+    # part before an aim ends one tick past its last step, so the aim's reads fall
+    # in the script's gap, and a part whose reads end past its tick fails the cell.
+    # An aim_at at tick 0 resolves before the staging, its actor from the setup
+    # pose (Resolve-ScenarioFirstAim). The parts play through onhook_play_input on
+    # the retail host's own tick, so the actor is the host on RR or RO.
+    if ($spec.PSObject.Properties.Name -contains "steps_tick") {
+        $partTick = $spec.steps_tick
+        $fields = @(if ($partTick -is [pscustomobject]) { $partTick.PSObject.Properties.Name })
+        if ((@($fields | Sort-Object) -join ",") -cne "tolerance,value,why" -or
+                -not (Test-JsonInteger $partTick.tolerance) -or $partTick.tolerance -lt 1 -or $partTick.tolerance -gt 64 -or
+                -not (Test-JsonInteger $partTick.value) -or $partTick.value -le $partTick.tolerance -or $partTick.value -gt 65535 -or
+                $partTick.why -isnot [string] -or [string]::IsNullOrWhiteSpace($partTick.why)) {
+            throw "Scenario $($spec.name): steps_tick is {value tolerance+1..65535, tolerance 1..64, why}"
+        }
+        if (@($steps | Where-Object { $_.PSObject.Properties.Name -contains "aim_at" }).Count -eq 0) {
+            throw "Scenario $($spec.name): steps_tick times the parts an aim_at starts, and the steps hold none"
+        }
+        if ([string] $spec.actor -cne "host" -or $Topology -notin @("RR", "RO")) {
+            throw "Scenario $($spec.name): steps_tick plays its parts on the retail host's own tick: a host actor on RR or RO, not the $($spec.actor) on $Topology"
+        }
+        if ($spec.PSObject.Properties.Name -contains "staging_tick" -and
+                $partTick.value - $partTick.tolerance -le $spec.staging_tick.value + $spec.staging_tick.tolerance) {
+            throw "Scenario $($spec.name): steps_tick's parts follow the staging: its value - tolerance must lie past staging_tick's value + tolerance"
         }
     }
     # A menu click is onHook's (click: opennova-int #75, a named menu widget
@@ -2186,7 +2216,8 @@ function Read-RetailHostTick {
 }
 
 function Wait-RetailHostTick {
-    param([Parameter(Mandatory = $true)] [string] $RetailHostInstanceId, [Parameter(Mandatory = $true)] $HostTick)
+    param([Parameter(Mandatory = $true)] [string] $RetailHostInstanceId, [Parameter(Mandatory = $true)] $HostTick,
+        [string] $Label = "Staging tick")
     $leadTicks = 6
     $value = [long] $HostTick.value
     $started = [DateTime]::UtcNow
@@ -2199,7 +2230,7 @@ function Wait-RetailHostTick {
         if ($null -eq $firstTick) { $firstTick = $tick }
         $ahead = $value - $tick
         if ($ahead -lt -[long] $HostTick.tolerance) {
-            throw "Staging tick: the retail host was already at tick $tick, past $value + $($HostTick.tolerance), when its staging was due ($reads reads)"
+            throw "${Label}: the retail host was already at tick $tick, past $value + $($HostTick.tolerance), when it was due ($reads reads)"
         }
         if ($ahead -le $leadTicks) {
             return [pscustomobject][ordered]@{
@@ -2212,7 +2243,7 @@ function Wait-RetailHostTick {
             }
         }
         if ([DateTime]::UtcNow -ge $deadline) {
-            throw "Staging tick: the retail host's tick never came within $leadTicks of $value in 50 s ($reads reads, last $tick)"
+            throw "${Label}: the retail host's tick never came within $leadTicks of $value in 50 s ($reads reads, last $tick)"
         }
         # Sleep at retail's 16 ms a tick through all but the gap's last 30
         # ticks; those are read back to back.
@@ -2496,7 +2527,9 @@ function Invoke-ScenarioStage {
         [string] $RetailInstanceId = "",
         # The setup pose alone (Invoke-ScenarioSetupBeforeWindow): a retail
         # actor plays no input; an OpenNova actor plays -Steps, the lone end.
-        [switch] $SetupOnly
+        [switch] $SetupOnly,
+        # steps_tick's host tick for this part's relative tick 0 (Invoke-ScenarioAimStage).
+        $DueTick = $null
     )
     if (-not $SetupOnly -and
             @($Steps | Where-Object { $_.PSObject.Properties.Name -contains "aim_at" }).Count -gt 0) {
@@ -2524,6 +2557,16 @@ function Invoke-ScenarioStage {
         if ($SetupOnly) {
             return [pscustomobject]@{ driver = "onhook_load_debug_snapshot"; setup = $setupResult; record = $null }
         }
+        # steps_tick (R-LX-s29-1 (b')): the play arms on the frame callback that
+        # serves the call and starts on the next tick (start_logic_tick = armed + 1),
+        # so the part waits for its due tick less one as the staging waits for its
+        # own (Wait-RetailHostTick: a read 2 to 6 ticks ahead, the arm 3 to 5 after).
+        $partTick = $null
+        if ($null -ne $DueTick) {
+            $partTick = $script:ScenarioSpec.steps_tick
+            $dueRead = Wait-RetailHostTick -RetailHostInstanceId $RetailInstanceId -Label "Part tick" `
+                -HostTick ([pscustomobject]@{ value = [long] $DueTick - 1; tolerance = [long] $partTick.tolerance })
+        }
         $played = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_play_input" -Arguments @{
             instance_id = $RetailInstanceId
             steps = $Steps
@@ -2546,6 +2589,19 @@ function Invoke-ScenarioStage {
         })
         if ($missed.Count -gt 0) {
             throw "Retail scenario $($script:ScenarioSpec.name) did not play: $($missed.Count) click(s) found no widget on screen (steps $(@($missed.index) -join ','))"
+        }
+        if ($null -ne $partTick) {
+            $offset = [long] $played.start_logic_tick - [long] $DueTick
+            $played | Add-Member -NotePropertyName steps_tick -Force -NotePropertyValue ([pscustomobject][ordered]@{
+                due_tick = [long] $DueTick
+                tolerance = [int] $partTick.tolerance
+                read_before = $dueRead
+                start_logic_tick = [long] $played.start_logic_tick
+                offset = $offset
+            })
+            if ([Math]::Abs($offset) -gt [long] $partTick.tolerance) {
+                throw "Retail scenario $($script:ScenarioSpec.name): a part started on host tick $($played.start_logic_tick), $offset off its steps_tick $DueTick (tolerance $($partTick.tolerance))"
+            }
         }
         return [pscustomobject]@{ driver = "onhook_play_input"; setup = $setupResult; record = $played }
     }
@@ -2622,7 +2678,11 @@ function Invoke-ScenarioAimTool {
 function Resolve-ScenarioAim {
     param(
         [Parameter(Mandatory = $true)] [string] $Handle,
-        [string] $RetailInstanceId = ""
+        [string] $RetailInstanceId = "",
+        # Resolve-ScenarioFirstAim: the actor's heading and position words are its setup
+        # pose's, as the drivers write them (scenario_aim.py pose); the target and the
+        # sensitivity word are read live.
+        $ActorPose = $null
     )
     $byRole = $Handle -in @("joiner", "host")
     $target = if ($byRole) { -1 } else { [Convert]::ToInt32($Handle.Substring(2), 16) }
@@ -2676,7 +2736,21 @@ function Resolve-ScenarioAim {
         }
         $actorXY = "$([long] $self[0].pos[0]),$([long] $self[0].pos[1])"
         $targetXY = "$([long] $mark[0].pos[0]),$([long] $mark[0].pos[1])"
+        if ($null -ne $ActorPose) {
+            $position = @($ActorPose.position_bms)
+            $words = Invoke-ScenarioAimTool -Arguments @("pose",
+                "--x=$(([double] $position[0]).ToString('R', $invariant))",
+                "--y=$(([double] $position[1]).ToString('R', $invariant))",
+                "--yaw-deg=$(([double] $ActorPose.yaw).ToString('R', $invariant))")
+            $read | Add-Member -NotePropertyName actor_from -NotePropertyValue "setup pose"
+            $read.heading_bam = [long] $words.heading_bam
+            $read.actor_q16 = @([long] $words.x_q16, [long] $words.y_q16, $self[0].pos[2])
+            $actorXY = "$([long] $words.x_q16),$([long] $words.y_q16)"
+        }
     } else {
+        if ($null -ne $ActorPose) {
+            throw "aim_at ${Handle}: an aim resolved from the setup pose reads a retail actor's pool (steps_tick plays on a retail host)"
+        }
         $port = if ($actor -eq "host") { $HostMcpPort } else { $JoinerMcpPort }
         $process = if ($actor -eq "host") { $script:OpenNovaHost } else { $script:OpenNovaJoiner }
         $status = Invoke-GameProbe -Port $port -Name "scenario_play" -Process $process `
@@ -2745,35 +2819,71 @@ function Resolve-ScenarioAim {
     return $aim
 }
 
+# R-LX-s29-1 (b'): with steps_tick, an aim_at at the main stage's tick 0 resolves
+# before the staging, so after the staging only its after-read and the setup pose
+# stand between it and the first part (LX-s29's read of LP-s21's revive cells: the
+# aim's reads after the setup took 48..52 ticks, a pool read of 53 ms behind the
+# setup's 165 ms play and about 600 ms of decode and two python runs, and put the
+# medic's first tap past 0x0019's retarget). The actor's heading and position words
+# are the setup pose's, the target's position and the sensitivity word read live:
+# the camp AI hold their posts until a threat comes.
+$script:ScenarioFirstAim = $null
+function Resolve-ScenarioFirstAim {
+    param([string] $RetailInstanceId = "")
+    $spec = $script:ScenarioSpec
+    $script:ScenarioFirstAim = $null
+    if (-not ($spec.PSObject.Properties.Name -contains "steps_tick")) { return }
+    $first = @($spec.steps)[0]
+    if (-not ($first.PSObject.Properties.Name -contains "aim_at") -or [int] $first.tick -ne 0) { return }
+    $pose = if ($spec.PSObject.Properties.Name -contains "setup" -and $null -ne $spec.setup) { $spec.setup.pose } else { $null }
+    $script:ScenarioFirstAim = Resolve-ScenarioAim -Handle ([string] $first.aim_at) `
+        -RetailInstanceId $RetailInstanceId -ActorPose $pose
+}
+
 # A stage with aim_at steps plays in parts: the steps before each aim_at (the
 # setup pose with the first part) up to an end on the aim_at's tick, then the
 # aim's reads and look, then the next part from that tick on, its ticks
 # relative to it and its first step the look (one look_px per same-tick step
 # scenario_aim.py gives; the steps of one tick sum into one axis word on both
 # drivers, so it rounds once). The witness records each part's record and
-# each aim.
+# each aim. With steps_tick each part an aim starts plays its tick 0 on host
+# tick value + the aim's tick (Invoke-ScenarioStage -DueTick), and the part
+# before an aim ends one tick past its last step, so the aim's reads fall in
+# the script's gap.
 function Invoke-ScenarioAimStage {
     param(
         [Parameter(Mandatory = $true)] [object[]] $Steps,
         $Setup = $null,
         [string] $RetailInstanceId = ""
     )
+    $spec = $script:ScenarioSpec
+    $partTick = if ($spec.PSObject.Properties.Name -contains "steps_tick") { $spec.steps_tick } else { $null }
     $parts = [System.Collections.Generic.List[object]]::new()
     $aims = [System.Collections.Generic.List[object]]::new()
     $pending = [System.Collections.Generic.List[object]]::new()
     $partSetup = $Setup
     $origin = 0
+    $due = $null
     foreach ($step in $Steps) {
         if ($step.PSObject.Properties.Name -contains "aim_at") {
             $at = [int] $step.tick
             if ($pending.Count -gt 0 -or $null -ne $partSetup -or $at -gt $origin) {
-                $pending.Add([pscustomobject]@{ tick = $at - $origin; end = $true })
+                $end = $at - $origin
+                if ($partTick -and $pending.Count -gt 0) {
+                    $end = [int] ($pending | Measure-Object -Property tick -Maximum).Maximum + 1
+                }
+                $pending.Add([pscustomobject]@{ tick = $end; end = $true })
                 $parts.Add((Invoke-ScenarioStage -Steps $pending.ToArray() -Setup $partSetup `
-                    -RetailInstanceId $RetailInstanceId))
+                    -RetailInstanceId $RetailInstanceId -DueTick $due))
                 $partSetup = $null
             }
-            $aim = Resolve-ScenarioAim -Handle ([string] $step.aim_at) -RetailInstanceId $RetailInstanceId
+            $aim = if ($aims.Count -eq 0 -and $at -eq 0 -and $script:ScenarioFirstAim) {
+                $script:ScenarioFirstAim
+            } else {
+                Resolve-ScenarioAim -Handle ([string] $step.aim_at) -RetailInstanceId $RetailInstanceId
+            }
             $aims.Add($aim)
+            if ($partTick) { $due = [long] $partTick.value + $at }
             $pending = [System.Collections.Generic.List[object]]::new()
             foreach ($px in @($aim.look.look_steps)) {
                 $pending.Add([pscustomobject]@{ tick = 0; look_px = @([int] $px, 0) })
@@ -2787,7 +2897,7 @@ function Invoke-ScenarioAimStage {
         $pending.Add([pscustomobject] $copy)
     }
     $parts.Add((Invoke-ScenarioStage -Steps $pending.ToArray() -Setup $partSetup `
-        -RetailInstanceId $RetailInstanceId))
+        -RetailInstanceId $RetailInstanceId -DueTick $due))
     return [pscustomobject]@{
         driver = $parts[0].driver
         setup = $parts[0].setup
@@ -2865,6 +2975,7 @@ function Invoke-ScenarioSetupBeforeWindow {
         $setup = (Invoke-ScenarioStage -Steps @([pscustomobject]@{ tick = 0; end = $true }) `
             -Setup $spec.setup -RetailInstanceId $retailInstanceId -SetupOnly).setup
     }
+    Resolve-ScenarioFirstAim -RetailInstanceId $retailInstanceId
     $staging = Invoke-ScenarioStaging -RetailHostInstanceId $RetailHostInstanceId
     $stagedUtc = [DateTime]::UtcNow.ToString("o")
     # The window opens on the setup's bodies at rest (Wait-ScenarioBodiesAtRest).
@@ -2921,6 +3032,7 @@ function Invoke-ScenarioIfRequested {
         $staging = $early.staging
         $setup = $null
     } else {
+        Resolve-ScenarioFirstAim -RetailInstanceId $retailInstanceId
         $staging = Invoke-ScenarioStaging -RetailHostInstanceId $RetailHostInstanceId
         $setup = if ($spec.PSObject.Properties.Name -contains "setup") { $spec.setup } else { $null }
     }
