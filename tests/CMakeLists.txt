@@ -5775,3 +5775,11 @@ add_executable(tick_count_clock_test world/tick_count_clock_test.cpp)
 target_link_libraries(tick_count_clock_test PRIVATE opennova_runtime)
 target_compile_features(tick_count_clock_test PRIVATE cxx_std_17)
 add_test(NAME tick_count_clock COMMAND tick_count_clock_test)
+# A rig's clip keys sampled at their first read (runtime/anim/anim_sample.h ClipSampler,
+# Clip::key; D-NET-NEW-LF-14): sample_clip bit-identical to the former whole-table sampler on
+# every minted .bad and mode, a rig's load sampling no key, each key and pose the old table's.
+add_executable(clip_keys_test anim/clip_keys_test.cpp)
+target_link_libraries(clip_keys_test PRIVATE opennova_runtime)
+target_include_directories(clip_keys_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(clip_keys_test PRIVATE cxx_std_17)
+add_test(NAME clip_keys COMMAND clip_keys_test)

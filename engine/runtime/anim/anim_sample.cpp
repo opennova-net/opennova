@@ -7,6 +7,7 @@
 #include <formats/bad/bad.h>
 
 #include <cmath>
+#include <utility>
 
 using namespace opennova::bad;
 
@@ -173,9 +174,16 @@ std::vector<Vec3> positions_from_model(const BadFile &bind_bad,
     return out;
 }
 
-Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins, bool model_bind,
-                 const BadFile *bind_source, const std::vector<int> &model_parents) {
-    Clip clip;
+ClipSampler::ClipSampler(std::shared_ptr<const BadFile> bad, const std::vector<Vec3> &shared_rest_origins,
+                         bool model_bind, const BadFile *bind_source, const std::vector<int> &model_parents)
+    : ClipSampler(*bad, shared_rest_origins, model_bind, bind_source, model_parents) {
+    owner_ = std::move(bad);
+}
+
+ClipSampler::ClipSampler(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins, bool model_bind,
+                         const BadFile *bind_source, const std::vector<int> &model_parents)
+    : bad_(&bad), model_bind_(model_bind) {
+    Clip &clip = header_;
     clip.fps = bad.fps;
     clip.flags = bad.flags;
     clip.frame_count = bad.frame_count;
@@ -294,132 +302,160 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
         }
         rest_pivots[b] = pivot;
     }
+    translated_ = translated;
+    model_table_ = model_table;
+    rest_origins_ = std::move(rest_origins);
+    rest_pivots_ = std::move(rest_pivots);
+    bind_rot_ = std::move(bind_rot);
+}
 
-    // The channel tables carry frame_count + 1 keys — the header counts INTERVALS
-    // (fence-post): a 16-frame idle stores 17 keys, and a ONE-frame clip stores its
-    // entire motion as key 0 -> key 1 (the M4 viewmodel fire kick, m4_1f). Bake a
-    // pose at every key tick, 0..frame_count inclusive; stopping at frame_count - 1
-    // dropped the final key — invisible on loops (the seam key ~= key 0) but it
-    // erased a one-frame clip's whole motion into a static pose.
-    // [orig: BoneAnim_FindKeyframeAtTime @0x410220 walks every channel key; the
-    //  final window holds key_last]
-    clip.frames.resize(clip.frame_count + 1);
+// One key of the clip: every row's rotation, then its place, then its parent-local form, from the
+// constructor's rows and the clip's channels at tick `f`.
+void ClipSampler::sample_key(uint32_t f, std::vector<BoneSample> &frame) const {
+    const BadFile &bad = *bad_;
+    const Clip &clip = header_;
+    const size_t bad_bone_count = bad.num_bones;
+    const size_t bone_count = clip.bones.size();
+    const bool translated = translated_;
+    const bool model_table = model_table_;
+    const bool model_bind = model_bind_;
+    const std::vector<Vec3> &rest_origins = rest_origins_;
+    const std::vector<Vec3> &rest_pivots = rest_pivots_;
+    const std::vector<Quat> &bind_rot = bind_rot_;
     std::vector<Quat> raw_rotation(bone_count, kIdentityQuat);
-    for (uint32_t f = 0; f <= clip.frame_count; ++f) {
-        std::vector<BoneSample> &frame = clip.frames[f];
-        frame.resize(bone_count);
+    frame.resize(bone_count);
 
-        // Every bone's rotation before any position: a channel row is a model-space
-        // rotation that needs no parent, and the FK below reads a parent numbered AFTER
-        // its child as this raw entry, its rotation at the model origin, because the
-        // original builds the matrices in place and reaches that parent later.
-        for (size_t b = 0; b < bone_count; ++b) {
-            // Per-bone WORLD rotation at tick f, walking THIS bone's own keyframe duration table
-            // (sample_bone_world_rot / BoneAnim_FindKeyframeAtTime @0x410220) -- NOT a flat
-            // rotations[f] index, which snaps sparsely-keyed bones to identity on compressed clips.
-            Quat world_rot = kIdentityQuat;
-            if (b < bad.num_channels) {
-                world_rot = sample_bone_world_rot(bad.channels[b], f);
-            } else if (model_table) {
-                // Model rows past the .bad's channels take row 0's already-COMPOSED rotation --
-                // the original copies bone 0's finished matrix into every extra slot before the
-                // FK [orig: the padding loop @0x40c5a1]; with no channels at all the identity
-                // stands.
-                raw_rotation[b] = (bad.num_channels > 0) ? raw_rotation[0] : kIdentityQuat;
-                continue;
-            }
-            if (model_bind) {
-                // Compose against the SKELETON bind: the .bad stores each bind 3x3 TRANSPOSED
-                // relative to the channel quats (on-data: mat3(stored) x channel-at-reset ==
-                // identity on every clip's own records), so with our row-major read the
-                // witnessed `Transpose(bind 3x3) x channel` is mat3(stored) x channel --
-                // quat form: q(stored) * channel. Identity at the skeleton's own reset
-                // clip; the pose that carries the rig from the bind (T-pose) into the
-                // clip's stance everywhere else -- the FP hold at anim_wpn_idle. The
-                // operand order was pinned VISUALLY on the ak47 rig: this order renders
-                // the two-armed hold; the conjugate (channel * bind, oscarmike's
-                // pose x inverse-bind shape) collapses the rig -- their pipeline differs
-                // because its Skeleton3D rest carries the bind rotations, ours bakes the
-                // whole composition into the pose over identity rests.
-                // [orig: AnimChannel_ComputeBoneMatrices @0x410da0; sense pin D-INF-14.]
-                world_rot = quat_normalize(quat_mul(bind_rot[b], world_rot));
-            }
-            raw_rotation[b] = world_rot;
+    // Every bone's rotation before any position: a channel row is a model-space
+    // rotation that needs no parent, and the FK below reads a parent numbered AFTER
+    // its child as this raw entry, its rotation at the model origin, because the
+    // original builds the matrices in place and reaches that parent later.
+    for (size_t b = 0; b < bone_count; ++b) {
+        // Per-bone WORLD rotation at tick f, walking THIS bone's own keyframe duration table
+        // (sample_bone_world_rot / BoneAnim_FindKeyframeAtTime @0x410220) -- NOT a flat
+        // rotations[f] index, which snaps sparsely-keyed bones to identity on compressed clips.
+        Quat world_rot = kIdentityQuat;
+        if (b < bad.num_channels) {
+            world_rot = sample_bone_world_rot(bad.channels[b], f);
+        } else if (model_table) {
+            // Model rows past the .bad's channels take row 0's already-COMPOSED rotation --
+            // the original copies bone 0's finished matrix into every extra slot before the
+            // FK [orig: the padding loop @0x40c5a1]; with no channels at all the identity
+            // stands.
+            raw_rotation[b] = (bad.num_channels > 0) ? raw_rotation[0] : kIdentityQuat;
+            continue;
         }
-
-        // A bone's parent: the finished bone for a lower index; for a parent numbered
-        // after the bone, the parent's raw entry, its rotation with no translation: the
-        // bone's own model-space pivot turned about the model origin (its ancestors'
-        // motion lost, not its place). A self-parent stays the root (above): the shipped
-        // one is part 0, whose rest is the origin, where the raw read changes nothing.
-        // [orig: BoneAnim_BuildWorldMatrices @0x40C400 -- the in-place FK reads
-        //  outputMatrices[parent] @0x40C674 (parent from the row's +20 @0x40C5F6), filled
-        //  raw by the first loop with the translation zeroed @0x40C53F..0x40C553, or with
-        //  matrix 0's copy past the clip's bones @0x40C5B6; the pivot it carries is the
-        //  row's +36 @0x40C5F2..0x40C619, the ROBJ abs GPM_LoadRenderModel @0x5B5000
-        //  stores there]
-        const auto place = [&](size_t b, const Vec3 &translation) {
-            const int parent = clip.bones[b].parent_index;
-            Vec3 carried = rest_origins[b];
-            if (parent >= 0 && static_cast<size_t>(parent) < b) {
-                const BoneSample &p = frame[static_cast<size_t>(parent)];
-                carried = vec_add(p.world_position, quat_rotate(p.world_rotation, rest_origins[b]));
-            } else if (parent >= 0) {
-                carried = quat_rotate(raw_rotation[static_cast<size_t>(parent)], rest_pivots[b]);
-            }
-            frame[b].world_position = vec_add(carried, translation);
-        };
-
-        for (size_t b = 0; b < bone_count; ++b) {
-            frame[b].world_rotation = raw_rotation[b];
-            if (b >= bad.num_channels && model_table) {
-                place(b, kZeroVec);  // orig sums uninitialized stack here (UB): D-INF-15
-                continue;
-            }
-
-            Vec3 translation = kZeroVec;
-            if (translated && bad.translations != nullptr && b < bad_bone_count) {
-                // The translation block is laid out by the FILE's own bone count (its stride),
-                // regardless of the rig's row count in model-table mode. The original reads
-                // row trunc(frame_count * t) and lerps it with the NEXT row by the fraction:
-                // at frame f that is row f at weight 0 against row f + 1, so the final frame
-                // reads row frame_count, the fence-post row the block carries like the keys.
-                // [orig: AnimChannel_GetTranslationRowAtTime @0x4102d0 via BoneAnim_TransformBones @0x410360 --
-                //  row = trunc(frame_count * t) under the 0xC00 control word @0x410317,
-                //  weight = the remainder @0x41034f, (1 - w) * row + w * next row with the
-                //  next row at +12 * bone_count @0x410497..0x4104cd.]
-                // A frame_count * t of exactly 0 is read as 1.0 (@0x4102f7..0x410304), so
-                // the one sample at t == 0 takes row 1; the pose table cannot carry that
-                // instant, because frame 0 is also the left end of the first window
-                // eval_clip_pose interpolates, where the original reads the lerp of rows 0
-                // and 1. A file shorter than its frame count holds the last row it has.
-                const size_t rows = bad.num_translations / bad_bone_count;
-                if (rows > 0) {
-                    const size_t row = f < rows ? static_cast<size_t>(f) : rows - 1;
-                    const float *t = bad.translations[row * bad_bone_count + b];
-                    translation = {t[0], t[1], t[2]};
-                }
-            }
-            place(b, translation);
+        if (model_bind) {
+            // Compose against the SKELETON bind: the .bad stores each bind 3x3 TRANSPOSED
+            // relative to the channel quats (on-data: mat3(stored) x channel-at-reset ==
+            // identity on every clip's own records), so with our row-major read the
+            // witnessed `Transpose(bind 3x3) x channel` is mat3(stored) x channel --
+            // quat form: q(stored) * channel. Identity at the skeleton's own reset
+            // clip; the pose that carries the rig from the bind (T-pose) into the
+            // clip's stance everywhere else -- the FP hold at anim_wpn_idle. The
+            // operand order was pinned VISUALLY on the ak47 rig: this order renders
+            // the two-armed hold; the conjugate (channel * bind, oscarmike's
+            // pose x inverse-bind shape) collapses the rig -- their pipeline differs
+            // because its Skeleton3D rest carries the bind rotations, ours bakes the
+            // whole composition into the pose over identity rests.
+            // [orig: AnimChannel_ComputeBoneMatrices @0x410da0; sense pin D-INF-14.]
+            world_rot = quat_normalize(quat_mul(bind_rot[b], world_rot));
         }
-
-        // Second pass: parent-relative (local) transforms.
-        for (size_t b = 0; b < bone_count; ++b) {
-            const int parent = clip.bones[b].parent_index;
-            BoneSample &out = frame[b];
-            if (parent < 0) {
-                out.local_rotation = quat_normalize(out.world_rotation);
-                out.local_position = out.world_position;
-            } else {
-                const BoneSample &p = frame[static_cast<size_t>(parent)];
-                out.local_rotation = quat_normalize(quat_mul(quat_inv(p.world_rotation), out.world_rotation));
-                out.local_position = quat_rotate(quat_inv(p.world_rotation),
-                                                 vec_sub(out.world_position, p.world_position));
-            }
-        }
+        raw_rotation[b] = world_rot;
     }
 
+    // A bone's parent: the finished bone for a lower index; for a parent numbered
+    // after the bone, the parent's raw entry, its rotation with no translation: the
+    // bone's own model-space pivot turned about the model origin (its ancestors'
+    // motion lost, not its place). A self-parent stays the root (above): the shipped
+    // one is part 0, whose rest is the origin, where the raw read changes nothing.
+    // [orig: BoneAnim_BuildWorldMatrices @0x40C400 -- the in-place FK reads
+    //  outputMatrices[parent] @0x40C674 (parent from the row's +20 @0x40C5F6), filled
+    //  raw by the first loop with the translation zeroed @0x40C53F..0x40C553, or with
+    //  matrix 0's copy past the clip's bones @0x40C5B6; the pivot it carries is the
+    //  row's +36 @0x40C5F2..0x40C619, the ROBJ abs GPM_LoadRenderModel @0x5B5000
+    //  stores there]
+    const auto place = [&](size_t b, const Vec3 &translation) {
+        const int parent = clip.bones[b].parent_index;
+        Vec3 carried = rest_origins[b];
+        if (parent >= 0 && static_cast<size_t>(parent) < b) {
+            const BoneSample &p = frame[static_cast<size_t>(parent)];
+            carried = vec_add(p.world_position, quat_rotate(p.world_rotation, rest_origins[b]));
+        } else if (parent >= 0) {
+            carried = quat_rotate(raw_rotation[static_cast<size_t>(parent)], rest_pivots[b]);
+        }
+        frame[b].world_position = vec_add(carried, translation);
+    };
+
+    for (size_t b = 0; b < bone_count; ++b) {
+        frame[b].world_rotation = raw_rotation[b];
+        if (b >= bad.num_channels && model_table) {
+            place(b, kZeroVec);  // orig sums uninitialized stack here (UB): D-INF-15
+            continue;
+        }
+
+        Vec3 translation = kZeroVec;
+        if (translated && bad.translations != nullptr && b < bad_bone_count) {
+            // The translation block is laid out by the FILE's own bone count (its stride),
+            // regardless of the rig's row count in model-table mode. The original reads
+            // row trunc(frame_count * t) and lerps it with the NEXT row by the fraction:
+            // at frame f that is row f at weight 0 against row f + 1, so the final frame
+            // reads row frame_count, the fence-post row the block carries like the keys.
+            // [orig: AnimChannel_GetTranslationRowAtTime @0x4102d0 via BoneAnim_TransformBones @0x410360 --
+            //  row = trunc(frame_count * t) under the 0xC00 control word @0x410317,
+            //  weight = the remainder @0x41034f, (1 - w) * row + w * next row with the
+            //  next row at +12 * bone_count @0x410497..0x4104cd.]
+            // A frame_count * t of exactly 0 is read as 1.0 (@0x4102f7..0x410304), so
+            // the one sample at t == 0 takes row 1; the pose table cannot carry that
+            // instant, because frame 0 is also the left end of the first window
+            // eval_clip_pose interpolates, where the original reads the lerp of rows 0
+            // and 1. A file shorter than its frame count holds the last row it has.
+            const size_t rows = bad.num_translations / bad_bone_count;
+            if (rows > 0) {
+                const size_t row = f < rows ? static_cast<size_t>(f) : rows - 1;
+                const float *t = bad.translations[row * bad_bone_count + b];
+                translation = {t[0], t[1], t[2]};
+            }
+        }
+        place(b, translation);
+    }
+
+    // Second pass: parent-relative (local) transforms.
+    for (size_t b = 0; b < bone_count; ++b) {
+        const int parent = clip.bones[b].parent_index;
+        BoneSample &out = frame[b];
+        if (parent < 0) {
+            out.local_rotation = quat_normalize(out.world_rotation);
+            out.local_position = out.world_position;
+        } else {
+            const BoneSample &p = frame[static_cast<size_t>(parent)];
+            out.local_rotation = quat_normalize(quat_mul(quat_inv(p.world_rotation), out.world_rotation));
+            out.local_position = quat_rotate(quat_inv(p.world_rotation),
+                                             vec_sub(out.world_position, p.world_position));
+        }
+    }
+}
+
+// The channel tables carry frame_count + 1 keys — the header counts INTERVALS
+// (fence-post): a 16-frame idle stores 17 keys, and a ONE-frame clip stores its
+// entire motion as key 0 -> key 1 (the M4 viewmodel fire kick, m4_1f). Bake a
+// pose at every key tick, 0..frame_count inclusive; stopping at frame_count - 1
+// dropped the final key — invisible on loops (the seam key ~= key 0) but it
+// erased a one-frame clip's whole motion into a static pose.
+// [orig: BoneAnim_FindKeyframeAtTime @0x410220 walks every channel key; the
+//  final window holds key_last]
+Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins, bool model_bind,
+                 const BadFile *bind_source, const std::vector<int> &model_parents) {
+    const ClipSampler sampler(bad, shared_rest_origins, model_bind, bind_source, model_parents);
+    Clip clip = sampler.header();
+    clip.frames.resize(clip.frame_count + 1);
+    for (uint32_t f = 0; f <= clip.frame_count; ++f) sampler.sample_key(f, clip.frames[f]);
     return clip;
+}
+
+const std::vector<BoneSample> &Clip::key(size_t frame) const {
+    std::vector<BoneSample> &slot = frames[frame];
+    if (sampler != nullptr && slot.empty()) sampler->sample_key(static_cast<uint32_t>(frame), slot);
+    return slot;
 }
 
 }  // namespace opennova::anim

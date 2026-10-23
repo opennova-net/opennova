@@ -44,6 +44,7 @@
 #include <runtime/anim/clip_timeline.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -82,6 +83,8 @@ struct ClipBone {
     float rest_position[3] = {0, 0, 0};
 };
 
+class ClipSampler;
+
 struct Clip {
     uint32_t fps = 0;
     uint32_t flags = 0;            // bit0 = loop, bit1 = translation present
@@ -91,8 +94,24 @@ struct Clip {
     // (SkeletalClips::pose_person_rows_past_clip).
     uint32_t file_bones = 0;
     std::vector<ClipBone> bones;   // skeleton: names + parent indices (shared by all frames)
-    // frames[frame][bone]. Empty bones list + zero frames on a malformed clip.
-    std::vector<std::vector<BoneSample>> frames;
+    // frames[key][bone], frame_count + 1 keys. Empty bones list + zero keys on a malformed
+    // clip. A table sample_clip returns holds every key. A rig's clip (SkeletalClips) holds
+    // the key slots alone, with its `sampler`: each key is sampled at its first read (key())
+    // and kept for the next, as retail computes a playing clip's bone matrices from its
+    // channels when a bone builder reads them and bakes no table at load
+    // [orig: AnimMap_RegisterEntity @0x40BB60 pins the rig's skeleton once;
+    //  AnimChannel_ComputeBoneMatrices @0x410DA0, called by Entity_BuildBoneTransformMatrices
+    //  @0x4B1290 (the call @0x4B1388) and BoneAnim_BuildWorldMatrices @0x40C400 (the call
+    //  @0x40C421)].
+    mutable std::vector<std::vector<BoneSample>> frames;
+    // The keys' sampler of a rig's clip; null for a table filled whole.
+    std::shared_ptr<const ClipSampler> sampler;
+
+    // The key slots (frame_count + 1 on a sampled clip).
+    size_t key_count() const { return frames.size(); }
+    // Key `frame`'s bone samples (frame < key_count()): sampled on its first read when the
+    // clip has a sampler. Access is serialized by the embedder, as the rig store's is.
+    const std::vector<BoneSample> &key(size_t frame) const;
 
     bool loops() const { return (flags & 0x01u) != 0; }
     const ClipTimeline &playback() const {
@@ -152,6 +171,39 @@ struct Clip {
 Clip sample_clip(const opennova::bad::BadFile &bad, const std::vector<Vec3> &shared_rest_origins = {},
                  bool model_bind = false, const opennova::bad::BadFile *bind_source = nullptr,
                  const std::vector<int> &model_parents = {});
+
+// sample_clip's two halves. The constructor takes sample_clip's inputs and builds what no key
+// changes: the clip's header and rows (header(), its key slots empty), each row's rest origin
+// and model-space pivot, the bind operands and the translation gate. sample_key then builds one
+// key's bone samples from the clip's channels and translation rows alone. sample_clip is the
+// constructor and every key in order, so a key sampled here is bit-identical to the same key of
+// sample_clip's table. The sampler reads `bad` at every key and `bind_source` in the constructor
+// alone; the owning constructor keeps the parsed file alive (a rig's clip outlives the store's
+// cache entry).
+class ClipSampler {
+public:
+    ClipSampler(const opennova::bad::BadFile &bad, const std::vector<Vec3> &shared_rest_origins = {},
+                bool model_bind = false, const opennova::bad::BadFile *bind_source = nullptr,
+                const std::vector<int> &model_parents = {});
+    ClipSampler(std::shared_ptr<const opennova::bad::BadFile> bad,
+                const std::vector<Vec3> &shared_rest_origins, bool model_bind,
+                const opennova::bad::BadFile *bind_source, const std::vector<int> &model_parents);
+
+    const Clip &header() const { return header_; }
+    // Key `frame`'s bone samples (0 <= frame <= frame_count) into r_frame, one per row.
+    void sample_key(uint32_t frame, std::vector<BoneSample> &r_frame) const;
+
+private:
+    std::shared_ptr<const opennova::bad::BadFile> owner_;
+    const opennova::bad::BadFile *bad_ = nullptr;
+    Clip header_;
+    bool translated_ = false;
+    bool model_table_ = false;
+    bool model_bind_ = false;
+    std::vector<Vec3> rest_origins_;
+    std::vector<Vec3> rest_pivots_;
+    std::vector<Quat> bind_rot_;
+};
 
 // Reconstruct the BadBone.position table from the MODEL's bone table + the skeleton
 // .bad's bind rotations -- the corpus-exact export relation (94 rigs, <=5e-4 on every

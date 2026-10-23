@@ -123,7 +123,7 @@ void mat3_orthonormalize(Mat3 &m) {
 void eval_clip_pose(const Clip &clip, double playhead_seconds,
                     std::vector<PoseBone> &r_pose) {
     r_pose.clear();
-    if (clip.frames.empty() || clip.bones.empty()) return;
+    if (clip.key_count() == 0 || clip.bones.empty()) return;
 
     const int frame_count = static_cast<int>(clip.frame_count);
     const double fps = clip.fps > 0 ? static_cast<double>(clip.fps) : 30.0;
@@ -145,7 +145,7 @@ void eval_clip_pose(const Clip &clip, double playhead_seconds,
     // One-shots play every window and HOLD the true final key — a one-frame
     // clip is one full window of motion, not a static pose [orig: hold-last
     // past the summed durations @0x410220].
-    const int last_pose = static_cast<int>(clip.frames.size()) - 1;
+    const int last_pose = static_cast<int>(clip.key_count()) - 1;
     if (clip.loops() && frame_count > 1) {
         double m = std::fmod(frame_time, static_cast<double>(frame_count));
         if (m < 0.0) {
@@ -164,8 +164,9 @@ void eval_clip_pose(const Clip &clip, double playhead_seconds,
         b = a + 1;
     }
 
-    const std::vector<BoneSample> &fa = clip.frames[a];
-    const std::vector<BoneSample> &fb = clip.frames[b];
+    // The two keys of the window, each sampled at its first read on a rig's clip (Clip::key).
+    const std::vector<BoneSample> &fa = clip.key(static_cast<size_t>(a));
+    const std::vector<BoneSample> &fb = clip.key(static_cast<size_t>(b));
     const size_t bone_count = clip.bones.size();
     if (fa.size() < bone_count || fb.size() < bone_count) return;
     r_pose.resize(bone_count);
