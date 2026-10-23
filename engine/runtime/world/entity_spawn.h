@@ -27,13 +27,21 @@ int32_t max_health_with_difficulty(const World &world, const Entity &e, int32_t 
 
 // [orig: Entity_ResetToSpawnState @0x4B9610] Entity-only seeding is for a
 // fresh row before its motor is attached. Live rows use the World overload:
-// it also resets the motor, clears references/mounts and refreshes collision.
+// it also resets the motor, runs the spawn-pose leg (the state request, the
+// twelve dual updates, the resolve and its lift, the spawn effect) on a body
+// whose dead bit is clear, clears references/mounts and ends in the slice
+// build and the body's list. Every live caller uses it: the NPC respawn, the
+// teleports, the player deploy (Server_ReleasePlayerDeployment, which clears
+// the dead bit first) and the joiner's record respawn arm
+// (JoinerRole::land_local_respawn_arm, on a still-dead L).
 void entity_reset_to_spawn_state(Entity &e);
 // The same with the health raise's ceiling given: the entity-only form's is the def word, the
-// World form's max_health_with_difficulty's.
+// World form's max_health_with_difficulty's unless its caller names one (the deploy's, over its
+// player row's hp).
 void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling);
 void entity_reset_to_spawn_state(World &world, Entity &e);
 void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &e);
+void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &e, int32_t health_ceiling);
 
 // Fresh NPC initialization after its ADM, definition and collision bindings.
 // [orig: Entity_InitOrganicAI @0x4BFCC0; warmup @0x4B8B20]

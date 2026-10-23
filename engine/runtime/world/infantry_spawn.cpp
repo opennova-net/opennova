@@ -507,6 +507,16 @@ void player_body_class_init(World &world, Entity &entity) {
 }
 
 void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
+    // The reset's one raise is to the ceiling with the difficulty term (the local
+    // player's out of a session), no def-word raise ahead of it [orig:
+    // Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax @0x43C290 ->
+    // Entity_GetMaxHealthWithDifficulty]; a row with no definition keeps the def word.
+    entity_reset_to_spawn_state(world, ai, entity, entity.has_item_def
+            ? max_health_with_difficulty(world, entity) : entity.health_max);
+}
+
+void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
+                                 int32_t health_ceiling) {
     // Port-side invariants, not retail words: Entity_ResetToSpawnState
     // @0x4B9610 writes no fade/destroy state. destroy_phases_q16 /
     // destroy_progress are derived values update_item_destroy_fade zeroes and
@@ -528,6 +538,12 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
     const uint32_t flags = entity.flags | entity.engine_flags;
     AiEntity *body = ai.for_handle(entity.handle);
     if (body != nullptr) {
+        // The resolver's idle-skip count (+0x373) starts over, so the resolve below runs whole
+        // whatever count the body kept, rather than taking the skip band's return.
+        // [orig: Entity_ResetToSpawnState @0x4B9610 - +0x373 = 0 @0x4B9656, ahead of the
+        //  resolver call @0x4B9755; Entity_MovementCollisionResolver @0x4B2BD0 - the count's
+        //  read @0x4B2CBC, the skip return @0x4B2CF5, its clear @0x4B2D09]
+        body->collide_state.skip_counter = 0;
         for (int axis = 0; axis < 3; ++axis) body->inf.vel[axis] = 0;
         body->inf.z_quarter_step = 0; // [orig: @0x4B967A]
         body->heading = heading;
@@ -545,8 +561,17 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
         body->slot.f[38] = ai.nearest_route_node(*body, uint32_t(body->slot.f[37]));
         inf.anim_pending = 0;
 
-        // Dead-flag callers retain their current body. A respawn restores the
-        // saved live flags BEFORE entering here, so it takes the spawn-pose leg.
+        // Dead-flag callers retain their current body: no state request, no dual
+        // update, no resolve and no spawn effect. A respawn that clears the dead bit
+        // first takes the spawn-pose leg: the NPC respawn restores its saved live
+        // flags, the player deploy clears the bit itself (Server_ReleasePlayerDeployment);
+        // the joiner's record respawn arm calls the reset on its still-dead L, so it
+        // takes none of it (JoinerRole::land_local_respawn_arm).
+        // [orig: Entity_ResetToSpawnState @0x4B9610 - `test byte ptr [esi+24h], 2`
+        //  @0x4B96ED, its jnz @0x4B96F7; Server_DeployPlayer @0x517740 - the clear
+        //  @0x51787A ahead of the call @0x517899; NetPacket_SerializePlayerState
+        //  @0x4C09C0 - the dead test @0x4C1109, the call @0x4C113C with no Flags store
+        //  between]
         if ((flags & kEntityFlagDead) == 0) {
             const int state = ai.root_motion != nullptr &&
                     ai.root_motion->has_clip(inf.adm_id, 153) ? 153 : 44;
@@ -569,9 +594,13 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
             }
             if (ai.collision != nullptr) {
                 std::array<int32_t, 3> pos = body->self->position.words();
-                // The eye point is the body's CameraOffset words as they stand; the reset
-                // writes none (as the warm-up's, warm_up_organic_body).
-                // [orig: Entity_ResetToSpawnState @0x4B9610 - the resolver call @0x4B9755;
+                // After the twelve dual updates the body resolves where it stands, over
+                // the slice its last build left (the reset's own build is its tail, below),
+                // and a clearance at or below zero lifts it by that much. The eye point is
+                // the body's CameraOffset words as they stand; the reset writes none (as
+                // the warm-up's, warm_up_organic_body).
+                // [orig: Entity_ResetToSpawnState @0x4B9610 - the resolver call @0x4B9755,
+                //  `cmp eax, ebx; jg` @0x4B975D..0x4B975F, `sub [esi+0Ch], eax` @0x4B9761;
                 //  Entity_MovementCollisionResolver - the read @0x4B2EE2..0x4B2EFB]
                 const int32_t eye_offset[3] = {
                         inf.eye_offset_x, inf.eye_offset_y, inf.eye_offset_z};
@@ -598,12 +627,8 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
         clear_target(world, ai, *body);
     }
 
-    // The reset's one raise is to the ceiling with the difficulty term (the local
-    // player's out of a session), no def-word raise ahead of it [orig:
-    // Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax @0x43C290 ->
-    // Entity_GetMaxHealthWithDifficulty]; a row with no definition keeps the def word.
-    entity_reset_to_spawn_state(entity, entity.has_item_def
-            ? max_health_with_difficulty(world, entity) : entity.health_max);
+    // The reset's one raise, to the caller's ceiling [orig: Entity_ResetToSpawnState @0x4B97BC].
+    entity_reset_to_spawn_state(entity, health_ceiling);
     // The backup precedes collision correction in the original reset.
     entity.spawn_position = origin;
     entity.spawn_heading = heading;
@@ -641,7 +666,11 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
             });
         }
     }
-    if (ai.collision != nullptr) ai.collision->refresh_after_registry_change(world);
+    // The tail publishes no table: it builds every slice over the tables already published
+    // (restarting the 17-tick phase), then the body's own list (D-COL-21, D-COL-23).
+    // [orig: Entity_ResetToSpawnState @0x4B9610 - Entity_BuildProximityListsFromPools called
+    //  @0x4B98EB, Entity_BuildProximityList called @0x4B98F1]
+    if (ai.collision != nullptr) ai.collision->refresh_entity_proximity(world, entity);
 }
 
 void entity_reset_to_spawn_state(World &world, Entity &entity) {

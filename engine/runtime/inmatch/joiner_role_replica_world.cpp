@@ -489,11 +489,19 @@ void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &ar
 	local->net_analog_x = 0;
 	local->net_analog_y = 0;
 	local->net_analog_z = 0;
-	world::entity_reset_to_spawn_state(*local);
-	// The reset releases the corpse's +0x1CC emitter (its own corpse leg's
-	// decay, or a hit's) [orig: NetPacket_SerializePlayerState - Entity_ResetToSpawnState
-	//  @0x4B9610 called @0x4C113C; the release @0x4B97CB..0x4B97F5].
-	world::release_corpse_effect(world, *local);
+	// The shared World reset, on L as the arm finds it: its dead bit still set (the arm's own
+	// test), so the reset's spawn-pose leg (the state request, the twelve dual updates, the
+	// resolve and its lift, the spawn effect) does not run and L stays on the record's sample
+	// in the receive; its own update resolves it from the next entity pass. The rest runs:
+	// the motor's words, the resolver's skip count, the dead-bit clear and the raise, the
+	// corpse's +0x1CC release, and the tail, every slice and L's own list (D-NET-687), so that
+	// first resolve walks a slice built at the redeployed pose (D-AI-9's player leg).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead test @0x4C1109, the stores
+	//  @0x4C110F..0x4C1135 (no Flags store), Entity_ResetToSpawnState called @0x4C113C;
+	//  Entity_ResetToSpawnState @0x4B9610 - +0x373 @0x4B9656, the dead test @0x4B96ED (its jnz
+	//  past the resolver @0x4B96F7), the clear @0x4B97B0, the release @0x4B97CB..0x4B97F5,
+	//  the builder @0x4B98EB, the list @0x4B98F1]
+	world::entity_reset_to_spawn_state(world, world.ai, *local);
 
 	local_ai->heading = heading;
 	local_ai->pitch = pitch;
@@ -513,10 +521,6 @@ void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &ar
 	// The shared spawn/revive reset (InfantryState::reset_for_spawn): one field list with the
 	// host spawn seeding, so a NEW motor field re-defaults here without a second hand-list.
 	inf.reset_for_spawn(heading);
-	// The reset's tail rebuilds every slice, then L's own list (D-NET-687) [orig: @0x4C113C ->
-	// Entity_ResetToSpawnState - @0x4B98EB, @0x4B98F1].
-	if (world.ai.collision != nullptr)
-		world.ai.collision->refresh_entity_proximity(world, *local);
 
 	lp.weapon.fire_held = false;
 	lp.weapon.fire_pressed = false;

@@ -427,17 +427,18 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     e.net_smooth_pitch = 0;
     e.net_interp_progress = 0;
     e.net_interp_steps = 0;
-    e.collide_state = {};
+    // No channel reseed and no collide-cache clear here: the deploy's reset ran first and
+    // did both as retail's does (the respawn state into both requests and the twelve dual
+    // updates out of the death clip, the resolver's skip count zeroed ahead of its resolve),
+    // so the body leaves the deploy on what that resolve left.
+    // [orig: Entity_ResetToSpawnState @0x4B9610 - +0x373 @0x4B9656, +0x2BC @0x4B9708 /
+    //  @0x4B9714, +0x2C8 @0x4B972A, the updates @0x4B973D, the resolve @0x4B9755]
 
     InfantryState &inf = e.inf;
     inf.player_moving = false;
     inf.player_move_dir_index = 0;
     inf.move_mode = 0;
     inf.target_dist = 0;
-    // The death clip is a LOCKED anim family (flags 0x82), so the selection commit would
-    // defer every later change to clip end and keep the corpse posed. Reseed the spawn
-    // idle the way the original's respawn does [orig: @0x4b9714 — spawn body state 44].
-    inf.reset_body_animation(anim_state::kIdle);
     inf.reload_anim_ticks = 0;
     inf.arms_dip_ticks = 0;
     inf.pitch_kick_accum = 0;

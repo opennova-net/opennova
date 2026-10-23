@@ -140,11 +140,19 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	const int32_t ceiling = def_hp || player->health_max > 0 ? world::max_health_with_difficulty(
 			world, *player, def_hp ? *row.item_hp : player->health_max) : 100;
 	if (world::retail_signed_i16(player->health) < ceiling) player->health = ceiling;
-	world::entity_reset_to_spawn_state(*player, ceiling);
-	// The reset releases the corpse's +0x1CC emitter (its corpse leg's decay, or a hit's)
-	// [orig: Server_DeployPlayer - Entity_ResetToSpawnState @0x4B9610 called @0x517899; the
-	//  release @0x4B97CB..0x4B97F5].
-	world::release_corpse_effect(world, *player);
+	// The leg clears the dead bit itself, ahead of the reset, so the reset takes its spawn-pose
+	// leg on the placed body: the respawn state, the twelve dual updates, the resolve over the
+	// body's slice with its lift, the spawn effect. Then its stores, the corpse's +0x1CC
+	// release, the authority's reference sweep, and its tail: every slice over the published
+	// tables and the body's own list (D-COL-21). The shared World reset (D-AI-9's player leg).
+	// [orig: Server_DeployPlayer @0x517740 - `and dword ptr [eax+24h], 0FFFFFFFDh` @0x51787A,
+	//  Entity_ResetToSpawnState called @0x517899; Entity_ResetToSpawnState @0x4B9610 - the
+	//  dead test @0x4B96ED, AnimMap_UpdateDualChannels called @0x4B973D,
+	//  Entity_MovementCollisionResolver called @0x4B9755, the lift @0x4B9761, the release
+	//  @0x4B97CB..0x4B97F5, the builder @0x4B98EB, the list @0x4B98F1]
+	player->flags &= ~world::kEntityFlagDead;
+	player->engine_flags &= ~world::kEntityFlagDead;
+	world::entity_reset_to_spawn_state(world, world.ai, *player, ceiling);
 	// Spawn protection: every deploy of a non-bot slot whose revive latch (+89932)
 	// is clear stores the title's ticks into entity+292 (deploy_spawn_protection_ticks;
 	// the reset above never touches it); the per-tick arm in Server_TickUpdate counts it
@@ -166,10 +174,6 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const int32_t heading = pose.found ? pose.heading_bam : motor->heading;
 		world::infantry_respawn_snap(*motor, motor_position, heading, player->health);
 	}
-	// The reset's tail rebuilds every slice at the placed pose (restarting the 17-tick phase),
-	// then the body's list; its resolver pass is D-AI-9's [orig: Entity_ResetToSpawnState
-	// @0x4B9610 - the resolver @0x4B9755, the builder @0x4B98EB, its list @0x4B98F1].
-	if (world.collision != nullptr) world.collision->refresh_entity_proximity(world, *player);
 	// [orig: Server_DeployPlayer @0x5178aa]
     if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
         world.local_player_state->reset_for_new_round();

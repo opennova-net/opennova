@@ -4070,6 +4070,157 @@ bool run_the_respawn_arm_leaves_the_stage_to_the_later_record() {
 			"arm stage: the chase's stage is the later record's, so L snaps to it");
 }
 
+// D-AI-9's player leg (D-NET-NEW-L5-65): the arm resets L through the shared World reset on its
+// still-dead body, so the reset's spawn-pose leg (its resolve and lift) does not run in the
+// receive; its other stores and its tail do. The arm's record lands L a quarter unit into a
+// wall whose +Y face L's corpse slice holds (its savedLivePose 1.25 units outside that face,
+// where a resolve would push it out): the release frame's 0x0C carries the record's sample as
+// it stands, the reset clears L's hit words, and L's own update in the same frame, walking the
+// slice the reset's tail built at the redeployed pose, pushes L out along +Y (a stock joiner is
+// pushed off a hut wall in its first ticks the same way, fragrespawn).
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead test @0x4C1109, the stores
+//  @0x4C110F..0x4C1135 (no Flags store), Entity_ResetToSpawnState called @0x4C113C;
+//  Entity_ResetToSpawnState @0x4B9610 - wasHit @0x4B96BC / @0x4B979D, damageTimer @0x4B96CE /
+//  @0x4B97A3, the dead test @0x4B96ED (its jnz @0x4B96F7), the builder @0x4B98EB, the list
+//  @0x4B98F1; Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
+//  block @0x42C3DD; Game_ProcessMainFrame @0x5263F0 - Entity_UpdateAllEntities called @0x52674B;
+//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the savedLivePose stamp @0x4B4187..0x4B419C,
+//  Entity_MovementCollisionResolver called @0x4B7CF4]
+bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
+	Harness h;
+	auto &world = h.kernel->world;
+	world.registry.configure_pool(2, 4);
+	def::DefItemDef defs[2]{};
+	defs[0].id = 100000;
+	defs[1].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[1].type = 3;
+	defs[1].hp = 100;
+	std::strcpy(defs[1].move_function, "org2");
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_collision_instances();
+	// The wall at (16, 0, 0): one solid volume, its +Y face a quarter unit past the origin,
+	// every other face 20 units off.
+	constexpr int32_t kOne = 65536;
+	w::CollisionModel model;
+	const auto plane = [&](int16_t x, int16_t y, int16_t z, int32_t dist) {
+		w::CollisionPlane p;
+		p.nx = x;
+		p.ny = y;
+		p.nz = z;
+		p.dist = dist;
+		model.planes.push_back(p);
+	};
+	plane(16384, 0, 0, -20 * kOne);
+	plane(-16384, 0, 0, -20 * kOne);
+	plane(0, 16384, 0, -kOne / 4);
+	plane(0, -16384, 0, -20 * kOne);
+	plane(0, 0, 16384, -20 * kOne);
+	plane(0, 0, -16384, -20 * kOne);
+	w::CollisionVolume volume;
+	volume.type = w::bvol_type::kSolidCB;
+	volume.min_x = volume.min_y = volume.min_z = -20 * kOne;
+	volume.max_x = volume.max_z = 20 * kOne;
+	volume.max_y = kOne / 4;
+	volume.plane_count = 6;
+	model.volumes.push_back(volume);
+	w::CollisionSection section;
+	section.volume_count = 1;
+	model.sections.push_back(section);
+	w::Entity building;
+	building.kind = w::EntityKind::Building;
+	building.position = {16.0f, 0.0f, 0.0f};
+	building.heading = w::placed_heading_bam(90); // the identity rotation
+	building.bound_radius = 30.0f;
+	building.alive = true;
+	const w::EntityHandle wall = world.registry.spawn(2, building);
+	h.kernel->collision.assign_entity(wall, h.kernel->collision.add_model(std::move(model)));
+	h.kernel->collision.build_initial_tables(world);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	auto &self_row = h.role.runtime->state().upsert(0x0005);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	// Every record's sample is the frame anchor, (16, 0, 0): a quarter unit into the wall.
+	auto frame = [&](int16_t health, uint8_t state_flags) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = health;
+		fu.anchor_x = 16 * kOne;
+		fu.anchor_y = 0;
+		fu.anchor_z = 0;
+		FrameUpdateRecord rec;
+		rec.handle = 0x0005;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.state_flags = state_flags;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	frame(100, 0x00);
+	frame(0, w::kEntityFlagDead);
+	w::Entity *local = world.registry.get(world.cached.local_player);
+	w::AiEntity *local_ai = h.kernel->local.player_ai();
+	if (!expect(local != nullptr && local_ai != nullptr && !local->alive &&
+					(local->flags & w::kEntityFlagDead) != 0u &&
+					h.role.runtime->deployment_pick_pending(),
+			"arm reset: the death downs L, its dead bit latched, and owes a pick"))
+		return false;
+	// L's corpse 1.25 units off the +Y face, its slice built there and its savedLivePose stamped
+	// there; its hit words set.
+	local->position.set_q16({16 * kOne, kOne + kOne / 2, 0});
+	local->saved_live_pos[0] = 16 * kOne;
+	local->saved_live_pos[1] = kOne + kOne / 2;
+	local->saved_live_pos[2] = 0;
+	local->saved_live_valid = true;
+	h.kernel->collision.rebuild_candidate_slices(world);
+	if (!expect(h.kernel->collision.candidate_count(local->handle) >= 1,
+			"arm reset: the corpse's slice holds the wall"))
+		return false;
+	local_ai->inf.was_hit = true;
+	local_ai->inf.damage_timer = 12;
+	if (!expect(h.role.runtime->queue_deployment_pick(0xFFFF), "arm reset: the Default Spawn pick"))
+		return false;
+	h.role.run_tick(h.input);
+	// The release: the record alive again; its receive's respawn arm lands L at (16, 0, 0).
+	h.socket.datagrams.clear();
+	frame(100, 0x00);
+	local = world.registry.get(world.cached.local_player);
+	local_ai = h.kernel->local.player_ai();
+	if (!expect(local != nullptr && local_ai != nullptr && local->alive &&
+					(local->flags & w::kEntityFlagDead) == 0u,
+			"arm reset: the record's receive revives L"))
+		return false;
+	ProtocolMessage message;
+	EntityPacketSubHeader sub;
+	PlayerExtendedUplink up;
+	size_t header_bytes = 0, body_bytes = 0;
+	if (!expect(h.socket.last_message(0x0C, message) &&
+					decode_entity_packet_sub_header(message.payload.data(),
+							message.payload.size(), sub, header_bytes) &&
+					decode_player_extended_uplink(message.payload.data() + header_bytes,
+							message.payload.size() - header_bytes, up, body_bytes),
+			"arm reset: the release frame ships its 0x0C"))
+		return false;
+	if (!expect(std::abs(up.pos_x - 16 * kOne) < 0x1000 && std::abs(up.pos_y) < 0x1000,
+			"arm reset: the 0x0C carries the record's sample, no resolve moved L in the receive"))
+		return false;
+	if (!expect(!local_ai->inf.was_hit && local_ai->inf.damage_timer == 0,
+			"arm reset: the shared reset clears L's hit words"))
+		return false;
+	return expect(local->position.y.q16 > kOne / 4,
+			"arm reset: L's own update pushes it out of the wall along +Y");
+}
+
 // D-NET-NEW-L2-59: a body its own update destroyed is a def-less slot to the receive. Its self
 // record fails the pre-apply check: a C2S 0x0F asks for the slot by its handle and nothing of
 // the record lands, so a dead L's alive record is no respawn arm: the dead latch holds and L
@@ -6076,6 +6227,7 @@ int main() {
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_the_respawn_arm_lands_l_in_its_receive();
 	ok &= run_the_respawn_arm_leaves_the_stage_to_the_later_record();
+	ok &= run_the_respawn_arm_resolves_nothing_in_the_receive();
 	ok &= run_a_defless_l_drops_its_own_record();
 	ok &= run_the_mission_start_reload_registers_pool0_channels();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
