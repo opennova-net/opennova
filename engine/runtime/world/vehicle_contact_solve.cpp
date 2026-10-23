@@ -698,8 +698,9 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 			// PERMANENT (Q21-1 (a)): a deliberate fix of a retail bug: slots 1..3 read as 0, the
 			// free lift along +up.
 			// [orig: @0x47E4D2..0x47E56C: the gates @0x47E4D5..0x47E4F8, the search
-			//  @0x47E4FA..0x47E549, the slot write @0x47E561, Entity_ApplyLightVehicleSuspensionForces
-			//  @0x463750 (the call @0x47E56C) with the solve's matrix]
+			//  @0x47E4FA..0x47E549, the slot write @0x47E561,
+			//  Entity_ApplyTrackedVehicleSuspensionForces @0x463750 (the call @0x47E56C) with the
+			//  solve's matrix]
 			if ((veh.flags & kEntityFlagInAir) == 0 && !world.ai.is_authority && !m.crashed &&
 					((veh.flags | veh.engine_flags) & 0x10u) != 0) {
 				int lowest = 0;
@@ -742,7 +743,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	// at once; a crashed hull falling slower stops and re-enters the crash state, as does every
 	// crashed hull already down.
 	// [orig: @0x47E7F5..0x47E8E0: the crashed test @0x47E7F5, the in-air test @0x47E803, the
-	//  rebound @0x47E80C..0x47E844, Entity_ApplyLightVehicleSuspensionForces @0x463750 (the call
+	//  rebound @0x47E80C..0x47E844, Entity_ApplyTrackedVehicleSuspensionForces @0x463750 (the call
 	//  @0x47E861, the records from var_1CC), Entity_ClearSuspensionForces @0x468980 (the call
 	//  @0x47E870); vz = 0 @0x47E880; the latch +0x2EF / +0x2EC and Entity_ClearSuspensionState's
 	//  stores inline @0x47E894..0x47E8E0]

@@ -397,8 +397,8 @@ void vehicle_apply_wheel_suspension_forces(World &world, Entity &e, const Vehicl
 }
 
 // A crashed tracked hull striking the ground: the tank's strike with the lighter press and lift.
-// Its only callers are the tracked solve's (the IDB's "light" names the rates, not the light solve).
-// [orig: Entity_ApplyLightVehicleSuspensionForces @0x463750 (the cues @0x463794..0x463829, +0x2EC
+// Its only callers are the tracked solve's.
+// [orig: Entity_ApplyTrackedVehicleSuspensionForces @0x463750 (the cues @0x463794..0x463829, +0x2EC
 //  @0x463832, flt_7C3310 @0x46386F, flt_7C6EB0 = -1500.0 / flt_7C6EAC = -700.0 @0x46388E..0x463894,
 //  the support words at a 12-byte stride from +8 @0x46389C / @0x4638F9; the missing-input arm
 //  @0x463917..0x46392A), called from Entity_ProcessTrackedVehiclePhysics @0x47E56C / @0x47E861]

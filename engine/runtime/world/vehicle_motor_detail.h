@@ -423,7 +423,7 @@ void vehicle_queue_suspension_force(
 void vehicle_apply_wheel_suspension_forces(World &, Entity &, const VehicleTraits &,
 		bool has_contact, const int32_t *support, const CollisionMatrix *matrix);
 // The crashed tracked hull's strike forces: the same with the lighter press and lift.
-// [orig: Entity_ApplyLightVehicleSuspensionForces @0x463750]
+// [orig: Entity_ApplyTrackedVehicleSuspensionForces @0x463750]
 void vehicle_apply_tracked_suspension_forces(World &, Entity &, const VehicleTraits &,
 		bool has_contact, const int32_t *support, const CollisionMatrix *matrix);
 

@@ -221,7 +221,7 @@ void test_the_crash_latch_per_family() {
 // fit (crashed, frozen, slow and upright: +0x2F0 set, +0x2EC cleared), so the pair clear after the
 // fit, which reads +0x2EC from the entity, drops +0x2EF the same tick: the settle is the latch's
 // witness. A hull still rolling (speed 0x1000 or more) is not settled and keeps both bytes.
-// [orig: @0x47E7F5..0x47E8E0; Entity_ApplyLightVehicleSuspensionForces @0x463750 (the call
+// [orig: @0x47E7F5..0x47E8E0; Entity_ApplyTrackedVehicleSuspensionForces @0x463750 (the call
 //  @0x47E861); Entity_ClearSuspensionForces @0x468980 (the call @0x47E870); the fit
 //  Entity_ProcessWheeledVehicleSuspension @0x46B140 (the call @0x47EC4D): the speed gate
 //  @0x46B4C8..0x46B4D3, +0x2F0 = 1 @0x46B4F4, +0x2EC = 0 @0x46B4FB; the pair clear's +0x2EC test
