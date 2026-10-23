@@ -134,8 +134,10 @@ public:
 	// world (materialize_world_stream, then the statics' placement) after its sound banks and
 	// ahead of the first leg's pumps (push_mission_start_first_loadout), as the mission start
 	// reloads the entity models and initializes every pool's rows from them ahead of its first
-	// 0x2F (D-NET-NEW-L2-42); `settle`, the model freeze's analog after it (the loaded-model
-	// list and its warm). A leg that returns false stops the call, its embedder reporting why.
+	// 0x2F (D-NET-NEW-L2-42), and the model freeze's analog after the first leg (the
+	// loaded-model list and its warm); `settle`, the embedder's check on the streamed world
+	// before the push. A
+	// leg that returns false stops the call, its embedder reporting why.
 	// A mission start the 0x1A already released goes straight to the load. Waiting: the pass
 	// took no 0x1A.
 	// [orig: NapiClient_WaitForGameStart @0x42CC10 - the receive @0x42CC88, the send @0x42CC92,

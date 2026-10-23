@@ -342,7 +342,7 @@ void SessionDrive::step_preload() {
 		reloading_join_ = false;
 		return true;
 	};
-	// The host's streamed assets settle and the loaded-model list freezes, ahead of the push.
+	// The streamed world's settle ahead of the push: a failure the load latched is reported.
 	legs.settle = [&]() {
 		join_window_mark("settle_begin");
 		if (world_->settle_join_wire_assets()) {

@@ -307,12 +307,12 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	if (challenge_sim.is_valid() && challenge_sim->is_joiner()) {
 		// A joiner's mission start initializes every streamed row from its model, then queues
 		// its first 0x2F: its sound banks, the entity models' reload and the rows' init all
-		// run ahead of the first submission, and the model freeze after it (the settle,
-		// settle_join_wire_assets) (engine: inmatch::JoinerRole::MissionStartLegs carries the
-		// witness, D-NET-NEW-L2-42).
+		// run ahead of the first submission, and the model freeze after it (engine:
+		// inmatch::JoinerRole::MissionStartLegs carries the witness, D-NET-NEW-L2-42).
+		bool wire_world_placed = false;
 		if (wire_header_join) {
 			timeline->span("streamed_world");
-			(void)place_join_wire_world(challenge_sim, timeline);
+			wire_world_placed = place_join_wire_world(challenge_sim, timeline);
 			timeline->end_span();
 		}
 		// The definitions and the world are in: the mission start's first leg queues the first
@@ -321,6 +321,15 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		timeline->span("first_leg");
 		challenge_sim->push_join_mission_start_first_loadout();
 		timeline->end_span();
+		// A wire-header joiner's C2S 0x3D page freezes here, its streamed world in, after the
+		// first leg as the freeze follows the first 0x2F; the warm below builds and draws its
+		// models, as a host's does (D-NET-527, D-NET-NEW-L5-8, D-NET-NEW-L2-42).
+		if (wire_world_placed) {
+			timeline->span("model_list");
+			player_visuals_->prewarm_loaded_model_challenge_definitions();
+			challenge_sim->finalize_loaded_model_challenge_snapshot();
+			timeline->end_span();
+		}
 	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS));
 	timeline->span("effects");
@@ -340,9 +349,9 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM));
 	timeline->span("effects_warm");
-	// The mission start's models warm in the same forced frames (FX-5); a header-only
-	// joiner's list exists once its world stream lands (finish_join_wire_assets).
-	warm_effect_world_catalog(challenge_sim.is_valid() && !wire_header_join
+	// The mission start's models warm in the same forced frames (FX-5), a wire-header
+	// joiner's too: its list froze above, its world stream landed.
+	warm_effect_world_catalog(challenge_sim.is_valid()
 					? challenge_sim->get_mission_start_model_files()
 					: PackedStringArray(),
 			!effects_preloaded);
@@ -862,7 +871,7 @@ bool GameWorld::apply_join_wire_til_if_ready() {
 	join_wire_til_applied_ = true;
 	// S2C 0x45 arrives only after the client releases the world-ready gate, so
 	// terrain already exists. Both setters invalidate/rebuild their derived data;
-	// the loading screen remains raised until settle_join_wire_assets below.
+	// the loading screen remains raised through the mission start's load.
 	if (terrain_ != nullptr) {
 		terrain_->set_tile_info_override(tile_info);
 	}
@@ -905,10 +914,10 @@ bool GameWorld::place_join_wire_world(const Ref<Simulation> &p_sim, const Ref<Lo
 }
 
 // Complete the wire-only part of a retail join once the protocol reaches its
-// deployment/admission boundary: the model freeze's analog, after the load's first
-// submission (load_mission_internal placed the streamed world ahead of it). SessionDrive
-// calls this before revealing the world (or deploy map), guaranteeing the C2S 0x3D page
-// (inmatch/loaded_model_list.h) reflects the completed initial stream.
+// deployment/admission boundary: the load placed the streamed world, froze the C2S 0x3D page
+// (inmatch/loaded_model_list.h) over the completed initial stream and warmed its models
+// (load_mission_internal); SessionDrive calls this before revealing the world (or deploy map)
+// and reports a failure the load latched.
 bool GameWorld::settle_join_wire_assets() {
 	if (join_wire_assets_failed_) {
 		return false;
@@ -921,23 +930,6 @@ bool GameWorld::settle_join_wire_assets() {
 		join_wire_assets_failed_ = true;
 		return false;
 	}
-	// The settle's own timeline (an instrument: its lines print under --verbose beside the
-	// load's), the rest of the joiner's 0x1A -> C 0x2F window after load_mission_internal.
-	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Join settle %s", loaded_mission_file_));
-	timeline->span("model_list");
-	player_visuals_->prewarm_loaded_model_challenge_definitions();
-	sim->finalize_loaded_model_challenge_snapshot();
-	timeline->end_span();
-	// The joiner's mission start models, its list known now: built and freed undrawn (the
-	// list freezes after the load's forced frames), so a death's husk swap finds its data,
-	// meshes, textures and shaders built (D-NET-NEW-L5-8).
-	timeline->span("model_warm");
-	if (Node3D *model_warm = build_model_warm(sim->get_mission_start_model_files(), Vector3())) {
-		model_warm->set_visible(false);
-		model_warm->queue_free();
-	}
-	timeline->end_span();
-	timeline->finish();
 	join_wire_assets_pending_ = false;
 	return true;
 }
