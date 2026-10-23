@@ -135,6 +135,12 @@ int GameWorld::load_world(const String &p_dir) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", terrain_file_));
 		return ERR_CANT_OPEN;
 	}
+	// A world with no mission has no mission start: the terrain's mission textures stage (its
+	// texture slots, its build and the foliage's, D-NET-NEW-L2-46) follows the connect leg at once.
+	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("World load %s", terrain_file_));
+	last_load_timeline_ = timeline;
+	load_terrain_textures(timeline);
+	timeline->finish();
 
 	world_ready_ = true;
 	prepare_autonomous_weather();
