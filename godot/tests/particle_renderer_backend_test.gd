@@ -1493,6 +1493,10 @@ func test_far_pass_materials_follow_a_catalog_rebuild() -> void:
 	camera.position = Vector3(0.0, 10.0, 5.0)
 	camera.current = true
 	viewport.add_child(camera)
+	# The eye looks at the quad: an emitter out of its view never submits, so it
+	# would run no pass at all (retail CParticleEmitter_TrySubmitForRender
+	# @ 0x5e7540 tests the bounds against the view before it registers).
+	camera.look_at(Vector3(0.0, 1.0, 0.0), Vector3.UP)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("rebuilt", 0)
 	renderer.image_provider = _red_image
