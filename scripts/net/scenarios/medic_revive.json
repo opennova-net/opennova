@@ -4,6 +4,10 @@
   "mission": "CP04.bms",
   "game_type": 196640,
   "actor": "host",
+  "prelude": [
+    {"tick": 60, "press": 153},
+    {"tick": 240, "end": true}
+  ],
   "staging": [
     {"slot": 1, "position_bms": [29.93, -178.78, 31.4]}
   ],

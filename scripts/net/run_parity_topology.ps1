@@ -40,13 +40,21 @@ param(
     # @0x51A6E9..0x51A6F2, the slot's bit 0x10 iff SpawnZoneList_GetCount() is
     # nonzero], which the host holds open through the S2C 0x0A flags1 bit 1
     # [orig: NapiNPClientMsg_0x00A @0x42FF7A..0x42FF82, g_DeployScreenActive].
-    # An in_match auto-deploy cell deploys every retail role with onHook's
+    # An in_match auto-deploy cell deploys a retail joiner with onHook's
     # deploy (SPACE until a local player stands): the screen's SPACE is the
     # auto team pick [orig: Input_HandleSpecialKeys, the gate @0x49C9DA, the
     # SPACE @0x49CA06..0x49CA14: Input_QueueEvent(12, 0xFFFE)], which an
     # OpenNova joiner sends through parity_joiner_ready's auto_deploy. onHook's
     # deploy defaults off for jo, so without it a retail joiner never stands
-    # and its in_match never comes (x5's cp04-objcoop-revive RR / RR-aa).
+    # and its in_match never comes (x5's cp04-objcoop-revive RR / RR-aa). A
+    # listen host's own slot joins undeployed too [orig: Server_OnPlayerJoin
+    # @0x51A6E9..0x51A6F2, +0x15F38 bit 0x10], but a JO host's Person stands
+    # from the mission start, so onHook's deploy never presses for it and the
+    # host stays on its deploy screen, which drops its look rows (0x0C100425 /
+    # 0x0C200425) [orig: Input_HandleActionBinding @0x49AD40, flag 0x8000000 against
+    # g_DeployScreenActive @0x49ADC8..0x49ADD7] (p195's revive RR: the medic's
+    # first look never turned it). A scenario whose retail host acts deploys it
+    # with its prelude's SPACE, as a player does (medic_revive, capture_base).
     [switch] $DeployZones,
 
     [switch] $ExerciseInput,
