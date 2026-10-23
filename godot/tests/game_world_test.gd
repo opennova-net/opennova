@@ -1939,6 +1939,52 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 		world.unload()
 
 
+# A dedicated host's load builds no placed entity's draw object: a model's load fills memory
+# alone, and the scene arm a placed entity is drawn in never runs there (engine
+# mission::builds_placement_draws carries the witness, D-NET-NEW-L3-30). The sim's words stand
+# on both roles: the building's entity and its collision instance. A listen host is the control.
+func test_a_dedicated_hosts_load_places_no_draw_object() -> void:
+	var root_dir := _stage_building_fixture("dedicated_placement")
+	var mission := MissionData.new()
+	assert_eq(mission.open_file(root_dir.path_join("mnml.bms")), OK)
+	var placed := mission.add_entity(
+			MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO)
+	assert_not_null(placed)
+	if placed == null:
+		return
+	assert_eq(mission.save_as(root_dir.path_join("mnml.bms")), OK)
+	for serve_and_play in [true, false]:
+		var world := WorldFixture.make_world(self)
+		await get_tree().process_frame
+		world.set_playable(false)
+		var root := ResourceRoot.new()
+		assert_eq(root.set_root_dir(root_dir), OK)
+		world.set_resource_root(root)
+		var options := _lan_host_config("mnml.bms", 0)
+		options.serve_and_play = serve_and_play
+		assert_eq(world.load_mission_as_host(options), OK)
+		var sim: Simulation = world.get_sim()
+		assert_not_null(sim)
+		if sim == null:
+			world.unload()
+			continue
+		assert_eq(sim.session_role(), Simulation.ROLE_LISTEN_HOST if serve_and_play
+				else Simulation.ROLE_DEDICATED_HOST)
+		var stats: MissionPlacementStats = world.get_mission_stats()
+		assert_not_null(stats)
+		if stats != null:
+			assert_eq(stats.placed > 0, serve_and_play,
+					"the placement builds the building's draw on a listen host alone")
+		var runtime: MissionRoot = world.get_runtime()
+		assert_eq(runtime.get_node_or_null(NodePath("MissionObjects")) != null, serve_and_play,
+				"the placed objects' container exists on a listen host alone")
+		assert_eq(runtime.get_entity_index().resolve_single(placed.bms_id) != null,
+				serve_and_play, "the building's node exists on a listen host alone")
+		assert_true(sim.has_collision_instance(placed.bms_id),
+				"the sim's collision world holds the building on either role")
+		world.unload()
+
+
 # The first frames past a mission load ride a timeline of their own (an instrument): a span per
 # frame, the legs that ran nested in it, the session's updates as an updates_<n> span; it stops
 # at its last frame.

@@ -242,6 +242,24 @@ inline PlacementVec3 presentation_to_bms_position(const PlacementVec3 &p) {
 PlacementBasis bms_to_presentation_basis(float pitch_deg, float yaw_deg,
 		float roll_deg);
 
+// Whether a mission start builds the draw objects of its placed entities (the shell's
+// placement: each model's node, each static graphic's populations). A model's load fills memory
+// on every role: its vertices are copied into a FastMem block, no device object made. A placed
+// entity is drawn only in the frame's scene arm, which a dedicated host (in session, the
+// authority, no session peer) never takes, and its start skips the render subsystems' init as
+// well. So a dedicated host's load builds none; the sim's entities, their collision and the
+// mission start's model list stand as on every other role (D-NET-NEW-L3-30).
+// [orig: ThreediGp_LoadModel @0x5B6160 (the call @0x5B6230) -> ThreediGp_LoadFromFile @0x5B5780
+//  -> GPM_LoadRenderModel @0x5B5000 (the call @0x5B5B8F) -> ThreediGp_ConvertVerticesToGPUFormat
+//  @0x5B4C90 (the call @0x5B50CB): FastMem_AllocLabeled @0x759E20 "GPM RModel Vert" (@0x5B4CDA);
+//  GameLoop_RenderFrame @0x521310 - is_mp_session_peer @0x52134E, jz @0x521355 to
+//  Server_DrawStatusScreen @0x521CEF past Render_ProcessMainSceneFrame @0x521CE8;
+//  Game_StartMission @0x524360 - the dedicated word @0x524942..0x52495C, its test @0x5259B4
+//  past Render_InitRenderingSubsystems (the call @0x5259D1)]
+constexpr bool builds_placement_draws(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
+
 
 // --- placement-pass witness ledger -----------------------------------------
 // Retail placement/present behaviors the shell's placer device leg mirrors.

@@ -16,6 +16,7 @@
 #include <runtime/ragdoll/ragdoll_option.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/mission/mission_sidecars.h>
+#include <runtime/mission/placement_traits.h> // builds_placement_draws (the dedicated host's placement)
 #include <runtime/terrain/terrain_load_legs.h> // loads_foliage_definitions (the dedicated arm)
 
 #include <godot_cpp/classes/engine.hpp>
@@ -665,7 +666,12 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 	options["progress"] = callable_mp(this, &GameWorld::pulse_object_stage_progress);
 	// The placement's model builds split by phase (ObjectModel::take_build_profile), from here.
 	(void)ObjectModel::take_build_profile();
-	mission_stats_ = placer_->place(p_mission, get_runtime(), options);
+	// A dedicated host's load builds no placed entity's draw object: the placement runs with no
+	// parent, an empty census (engine mission::builds_placement_draws carries the witness,
+	// D-NET-NEW-L3-30). The sim's entities and their collision come from the mission and the
+	// mount, not from these nodes.
+	const bool draws = opennova::mission::builds_placement_draws(drive_.pending_dedicated());
+	mission_stats_ = placer_->place(p_mission, draws ? get_runtime() : nullptr, options);
 	const PackedInt64Array build_profile = ObjectModel::take_build_profile();
 	apply_occlusion_culling_policy();
 	// Static tile shadows are composed from the placer's resolved ObjectData and
