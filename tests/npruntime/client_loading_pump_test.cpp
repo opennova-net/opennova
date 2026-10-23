@@ -1026,6 +1026,35 @@ bool run_the_final_wait_end_ends_the_mode_init() {
 			"final wait end: the game loop's ticks end nothing");
 }
 
+// D-NET-NEW-L2-51: the push's pass is the final wait's first, so the first tick after the
+// embedder's mission start call (poll_mission_start, which pushes between ticks) whose receive
+// takes the S2C 0x0F ends the Game Loop mode's initialize, once, as a later wait pass's does.
+// [orig: Game_StartMission @0x524360 - the send @0x526255, the final wait @0x526295..0x5262E5
+//  (CNapiNetwork_PumpManagerReceive @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE,
+//  CNapiNetwork_PumpClientProtocolSend @0x5262DA, the exit test @0x5262DF); GameLoop_Init
+//  @0x526370 (the call @0x526377)]
+bool run_a_0x0f_after_the_mission_start_call_ends_the_mode_init() {
+	RoleHarness h;
+	if (!expect(drive_into_the_world_stream(h, 0), "call end: the world stream runs")) return false;
+	h.client.set_mission_start_loading(true);
+	(void)h.frame({self_spawn_record()});
+	const std::vector<uint8_t> release = frame_server_session(h.server_tx, h.server_scrk,
+			h.auth.ck, {make_protocol_message(0x1A, {})});
+	h.client.receive(release.data(), release.size());
+	inmatch::JoinerRole::MissionStartLegs legs;
+	legs.load = [] { return true; };
+	if (!expect(h.role.poll_mission_start(legs) == inmatch::JoinerRole::MissionStartPass::Started &&
+	                    h.client.in_final_wait() && !h.role.take_final_wait_end(),
+			"call end: the mission start's call ends in the final wait"))
+		return false;
+	std::vector<uint8_t> world_state(23 + kWorldStateAmmoPoolCount * 4 + 4, 0);
+	(void)h.frame({first_grant(), make_protocol_message(0x0F, world_state)});
+	if (!expect(h.client.in_game_loop() && h.role.take_final_wait_end(),
+			"call end: the first tick's 0x0F ends the initialize"))
+		return false;
+	return expect(!h.role.take_final_wait_end(), "call end: reported once");
+}
+
 // D-NET-NEW-L2-48 (V-ROLL-AP's order note): the pass whose receive takes the S2C 0x0F is the
 // final wait's, and what its receive's handlers write lands in that pass, as retail's
 // handlers write it inside the wait's receive; the game loop's first frame (its input pass
@@ -1851,6 +1880,7 @@ int main() {
 	ok = run_a_bodyless_joiner_pings() && ok;
 	ok = run_the_release_pass_bears_l_and_the_first_frame_ships_its_uplink() && ok;
 	ok = run_the_final_wait_end_ends_the_mode_init() && ok;
+	ok = run_a_0x0f_after_the_mission_start_call_ends_the_mode_init() && ok;
 	ok = run_the_0x0f_pass_lands_its_handler_writes() && ok;
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
 	ok = run_the_link_indicators_step_in_the_main_frame_alone() && ok;

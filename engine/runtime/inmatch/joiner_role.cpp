@@ -186,17 +186,22 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 // send in the same call, no frame between (D-NET-NEW-L2-35): its manager receive reads the
 // socket, its client receive runs the handlers over what came during the load, and its send
 // ships what the push's countdown held (the busy spin's passes count it out at once). The
-// wait's later passes are the frames' (run_tick), until the S2C 0x0F.
+// wait's later passes are the frames' (run_tick), until the S2C 0x0F: a pass that leaves the
+// role inside the wait is the wait's, as run_tick latches it, so the first tick after the push
+// whose receive takes the 0x0F ends the Game Loop mode's initialize (take_final_wait_end;
+// D-NET-NEW-L2-51).
 // [orig: Game_StartMission @0x524360 - @0x5258a2, the send @0x526255, Game_PumpWindowMessages
 //  @0x52625A, Input_ResetKeyQueue @0x526288, the wait's first pass:
 //  CNapiNetwork_PumpManagerReceive @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE,
-//  CNapiNetwork_PumpClientProtocolSend @0x5262DA]
+//  CNapiNetwork_PumpClientProtocolSend @0x5262DA, the exit test @0x5262DF; GameLoop_Init
+//  @0x526370 (the call @0x526377)]
 void JoinerRole::push_mission_start_end() {
 	if (!runtime) return;
 	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_end()) send(dg);
 	if (!runtime->in_final_wait()) return;
 	deposit_inbound();
 	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_)) send(dg);
+	final_wait_seen_ = runtime->in_final_wait();
 }
 
 // The game-start wait's pass, and when its receive took the S2C 0x1A the mission start's call
