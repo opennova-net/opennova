@@ -890,9 +890,9 @@ private:
 	void load_player_weapon_profile();
 	void start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	// `p_spawn_effects` false: the catalog was warmed already (a join's effect system load), so
-	// only the models and the presenters' fire pipelines draw in the forced frames.
+	// only the presenters' fire pipelines draw in the forced frames.
 	// `p_timeline` (may be null) takes the warm's legs as nested spans (an instrument).
-	int warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects = true,
+	int warm_effect_world_catalog(bool p_spawn_effects = true,
 			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
 	// A new effect world under this world with every mounted .ptl of `p_resource_root` parsed
 	// at the session's words and its texture atlases built (the mission start's head's,
@@ -903,10 +903,6 @@ private:
 			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
 	void free_join_effect_world();
 	void free_head_effect_world();
-	// The mission start's models (Simulation::get_mission_start_model_files) built under one
-	// container at `p_at` through MissionObjectPlacer::warm_models; null when none built. The
-	// caller frees it (FX-5).
-	Node3D *build_model_warm(const PackedStringArray &p_models, const Vector3 &p_at);
 	void start_effect_world();
 	void apply_occlusion_culling_policy();
 

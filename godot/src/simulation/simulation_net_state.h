@@ -152,7 +152,7 @@ struct SimulationNetState {
 	// (finalize_loaded_model_challenge_snapshot): a host's S2C 0x68 cursor wrap.
 	uint32_t loaded_model_list_count = 0;
 	// The same list's model files in load order (LoadedModelList::model_files): what the
-	// shell's load builds before the first frame, a death's husk family among them (FX-5).
+	// shell's freeze resolves before the first frame, a death's husk family among them (FX-5).
 	std::vector<std::string> mission_start_model_files;
 	// The same list's nodes head first, foliage included (inmatch::loaded_model_list_entries):
 	// the model-list readout's (an instrument).

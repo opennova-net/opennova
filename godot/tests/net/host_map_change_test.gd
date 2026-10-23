@@ -69,6 +69,16 @@ func test_the_map_change_keeps_the_listen_hosts_session_across_the_reload() -> v
 	assert_true(sim.is_mp_session())
 	var config := sim.get_host_session_config()
 	assert_eq(String(config.mission_file).to_lower(), "mnml.bms")
+	# The next map's freeze is the first map's: its listed models' materials resolve and none
+	# builds, then the full arm's device warm runs (D-NET-NEW-L3-31).
+	var timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(timeline)
+	if timeline != null:
+		var names := Array(timeline.span_names())
+		var freeze := names.find("model_materials")
+		assert_true(freeze >= 0 and names.find("effects_warm") > freeze,
+				"the listen host's map change freezes, then warms: %s" % [names])
+		assert_false(names.has("model_warm"), "no listed model builds: %s" % [names])
 	world.unload()
 
 

@@ -905,9 +905,10 @@ public:
 	// S2C entity spawns and presentation loads deliberately cannot mutate it.
 	void finalize_loaded_model_challenge_snapshot();
 	// The model files that list's loads created, in load order, its foliage left out
-	// (engine: LoadedModelList::model_files): the shell's load builds each before the first
-	// frame, as retail's loads build every listed row's husk family at the mission start
-	// (FX-5). Empty until the snapshot is finalized.
+	// (engine: LoadedModelList::model_files): the shell's freeze resolves each one's materials
+	// before the first frame, as retail's loads fill every listed row's husk family at the
+	// mission start and its freeze resolves their materials (FX-5, D-NET-NEW-L3-31). Empty until
+	// the snapshot is finalized.
 	PackedStringArray get_mission_start_model_files() const;
 	// The model-list readout (a debug instrument; engine inmatch/loaded_model_list.h
 	// loaded_model_list_entries, the model_list_dump probe): the list this mission's load froze,

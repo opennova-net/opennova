@@ -1849,9 +1849,10 @@ func test_a_dedicated_host_loads_no_effect_system() -> void:
 # and the model list's material resolve, none of the full arm's other device inits (engine
 # inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness): a Serve Only
 # host's load resolves its listed models' materials and runs none of the warm's legs (no effect
-# spawn, no model build, no pipeline warm, no forced frame); a listen host's runs the warm.
+# spawn, no pipeline warm, no forced frame); a listen host's runs the same freeze, then the warm.
+# Neither builds a listed model at the freeze (D-NET-NEW-L3-25, D-NET-NEW-L3-31).
 func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
-	var warm_legs := ["effects_warm", "effect_spawn", "model_warm", "present_pipelines",
+	var warm_legs := ["effects_warm", "effect_spawn", "present_pipelines",
 			"forced_draw_1", "forced_draw_2", "force_sync", "warm_reset"]
 	for serve_and_play in [true, false]:
 		var world := WorldFixture.make_world(self)
@@ -1875,19 +1876,20 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 			assert_true(names.find("terrain") >= 0 and names.find("objects") > names.find("terrain")
 					and terrain_textures > names.find("objects"),
 					"the head reads the terrain, the mission textures stage loads its textures: %s" % [names])
-			var arm := names.find("model_materials" if not serve_and_play else "effects_warm")
-			assert_true(terrain_textures >= 0 and arm > terrain_textures,
-					"the terrain's textures open the stage's arm: %s" % [names])
+			var freeze := names.find("model_materials")
+			assert_true(terrain_textures >= 0 and freeze > terrain_textures,
+					"the terrain's textures open the stage, then the freeze: %s" % [names])
+			assert_false(names.has("model_warm"), "no arm builds a listed model: %s" % [names])
 			if serve_and_play:
-				assert_false(names.has("model_materials"),
-						"a listen host's mission textures are the full arm: %s" % [names])
-				for leg in ["effects_warm", "effect_spawn", "model_warm"]:
+				for leg in ["effects_warm", "effect_spawn"]:
 					assert_true(names.has(leg), "a listen host's warm runs %s: %s" % [leg, names])
+				assert_true(names.find("effects_warm") > freeze,
+						"the full arm's device warm follows its freeze: %s" % [names])
 			else:
-				assert_true(names.has("model_materials"),
-						"a dedicated host resolves its listed models' materials: %s" % [names])
 				for leg in warm_legs:
 					assert_false(names.has(leg), "no %s on a dedicated host: %s" % [leg, names])
+		assert_null(world.get_node_or_null("MissionStartModelWarm"),
+				"no listed model stands under the world past its load")
 		# The foliage's definitions load with the render subsystems, which a dedicated host's start
 		# jumps over (Game_StartMission's dedicated arm skips Render_InitTerrainSubsystems): its
 		# dispatcher stays unconfigured, a listen host's takes the terrain.

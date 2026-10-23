@@ -258,8 +258,8 @@ public:
 		BUILD_PROFILE_ALPHA_COPIES_US, // an alpha strip's own copy of its material
 		BUILD_PROFILE_SLOT_COUNT,
 	};
-	// The process's scene builds since the last take, then zeroed: the mission load's model warm
-	// and its placement print it under --verbose (format_build_profile).
+	// The process's scene builds since the last take, then zeroed: the mission load's placement
+	// prints it under --verbose (format_build_profile).
 	static PackedInt64Array take_build_profile();
 	static String format_build_profile(const PackedInt64Array &p_profile);
 

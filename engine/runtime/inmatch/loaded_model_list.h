@@ -65,19 +65,24 @@ public:
 	// the per-entry store @0x42d9f0, the 0x32 cap @0x42da7d].
 	std::vector<uint32_t> freeze() const;
 	// The files of the nodes the freeze pages (the unmarked ones), in load order: the models a
-	// shell builds ahead of the mission's first frame, as each load builds its model and the
-	// freeze's first pass every node's buffers, so a later swap to one (a death's husk) builds
-	// nothing [orig: ThreediGp_LoadModel @0x5B6160 (ThreediGp_LoadFromFile @0x5b6230);
+	// shell loads ahead of the mission's first frame, as each load fills its model's memory and
+	// the freeze's first pass resolves every node's materials, so a later swap to one (a death's
+	// husk) loads nothing [orig: ThreediGp_LoadModel @0x5B6160 (ThreediGp_LoadFromFile @0x5b6230);
 	// CEffectWorld_RebuildAllModelBuffers @0x5B3A80 (each node's CEffectDef_ResolveSubobjectMaterials
 	// call @0x5B3A92)]. The
 	// marked foliage nodes are the terrain's foliage pass's to build. The freeze's first pass walks
-	// the list head first, the reverse of this order, resolving each node's materials
-	// (renderer/material_texture.h material_resolve_rows); a dedicated host, whose list has no marked
-	// node, runs that pass and the page alone (past the terrain's textures, its freeze's reduced arm
-	// skips every other device init), so a shell there builds and draws no model (D-NET-NEW-L3-25)
+	// the list head first, the reverse of this order, resolving each node's materials (their stage
+	// textures and their effect: renderer/material_texture.h material_resolve_rows) and building
+	// no buffer and no model, on the full arm as on a dedicated host's reduced one (whose list has
+	// no marked node): the full arm runs its other device inits around it, the reduced arm none
+	// past the terrain's textures, so a shell builds and draws no listed model at the freeze on
+	// either (D-NET-NEW-L3-25, D-NET-NEW-L3-31)
 	// [orig: CEffectWorld_RebuildAllModelBuffers @0x5B3A80 - the walk @0x5B3A81..0x5B3AA5;
-	//  Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the reduced arm's
-	//  call @0x58728C].
+	//  CEffectDef_ResolveSubobjectMaterials @0x5B25C0 -> Material_ResolveEffectSubobjectsAndShader
+	//  @0x5B1870 (the call @0x5B25DC; Material_LoadStageTexture @0x5B16F0 per row, the call
+	//  @0x5B189D; HLSLEffect_FindByName @0x5ADE70, the call @0x5B18C1);
+	//  Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the full arm's call
+	//  @0x5871CF, the reduced arm's @0x58728C].
 	std::vector<std::string> model_files() const;
 	// The nodes head first, each with its mark (tests and diagnostics).
 	struct Node {
@@ -188,7 +193,7 @@ std::vector<uint32_t> mission_start_model_page(const mission::MissionKernel &ker
 		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority,
 		bool dedicated);
 // The list that page freezes, from the same sources: its model_files() are what the shell
-// builds at the load, every listed item row's husk family among them [orig:
+// loads and resolves at the freeze, every listed item row's husk family among them [orig:
 // EntityDef_LoadModelsAndCallbacks @0x439F50 - husk @0x43A0B6, the "xb" final husk @0x43A1C8,
 // huskfinal @0x43A245 / @0x43A26E, huskshadow @0x43A38A]. A wire-header joiner passes its
 // `replica`, whose pool 0 the reload walks (MissionStartModelSources::pool0).

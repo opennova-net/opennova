@@ -372,14 +372,15 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 			timeline->end_span();
 		}
 		// The definitions and the world are in: the mission start's first leg queues the first
-		// 0x2F and runs the pumps ahead of the effect builds and the model warm, the freeze's
-		// analog (engine: ClientRuntime::push_mission_start_first_loadout, D-NET-NEW-L2-35).
+		// 0x2F and runs the pumps ahead of the effect builds and the freeze (engine:
+		// ClientRuntime::push_mission_start_first_loadout, D-NET-NEW-L2-35).
 		timeline->span("first_leg");
 		challenge_sim->push_join_mission_start_first_loadout();
 		timeline->end_span();
 		// A wire-header joiner's C2S 0x3D page freezes here, its streamed world in, after the
-		// first leg as the freeze follows the first 0x2F; the warm below builds and draws its
-		// models, as a host's does (D-NET-527, D-NET-NEW-L5-8, D-NET-NEW-L2-42).
+		// first leg as the freeze follows the first 0x2F; the mission textures stage's freeze
+		// below resolves its models' materials, as a host's does (D-NET-527, D-NET-NEW-L2-42,
+		// D-NET-NEW-L3-31).
 		if (wire_world_placed) {
 			timeline->span("model_list");
 			player_visuals_->prewarm_loaded_model_challenge_definitions();
@@ -412,22 +413,22 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	const bool dedicated_host = challenge_sim.is_valid() &&
 			challenge_sim->session_role() == Simulation::ROLE_DEDICATED_HOST;
 	load_terrain_textures(timeline, opennova::terrain::loads_foliage_definitions(dedicated_host));
-	const PackedStringArray start_models = challenge_sim.is_valid()
-			? challenge_sim->get_mission_start_model_files()
-			: PackedStringArray();
-	if (dedicated_host) {
-		// A dedicated host's freeze is the reduced arm: the listed models' materials resolve, and
-		// no effect spawns, no model builds, no pipeline warm and no forced frame run (engine
-		// inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness,
-		// D-NET-NEW-L3-25).
-		timeline->span("model_materials");
-		if (placer_.is_valid()) placer_->resolve_model_materials(start_models);
-		timeline->end_span();
-	} else {
+	// Then the freeze, on every arm: the listed models' materials resolve and no model builds, a
+	// wire-header joiner's list too (it froze above, its world stream landed). The full arm's
+	// freeze is the reduced arm's, with the render arm's device inits after it (engine
+	// inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness,
+	// D-NET-NEW-L3-25, D-NET-NEW-L3-31).
+	timeline->span("model_materials");
+	if (placer_.is_valid() && challenge_sim.is_valid()) {
+		placer_->resolve_model_materials(challenge_sim->get_mission_start_model_files());
+	}
+	timeline->end_span();
+	if (!dedicated_host) {
+		// The render arm's device inits past the freeze: the effect catalog and the presenters'
+		// fire pipelines warm in the forced frames; a dedicated host's reduced arm runs none (no
+		// effect spawn, no pipeline warm, no forced frame).
 		timeline->span("effects_warm");
-		// The mission start's models warm in the same forced frames (FX-5), a wire-header
-		// joiner's too: its list froze above, its world stream landed.
-		warm_effect_world_catalog(start_models, !effects_preloaded, timeline);
+		warm_effect_world_catalog(!effects_preloaded, timeline);
 		timeline->end_span();
 	}
 	// A host's mission start past its device stages: phase B opens with the render arm's
@@ -1411,36 +1412,15 @@ void GameWorld::build_minimap_water_mask() {
 	emit_signal(kSignalMinimapWaterChanged, minimap_water_mask_);
 }
 
-Node3D *GameWorld::build_model_warm(const PackedStringArray &p_models, const Vector3 &p_at) {
-	if (placer_.is_null() || p_models.is_empty()) {
-		return nullptr;
-	}
-	Node3D *container = memnew(Node3D);
-	container->set_name("MissionStartModelWarm");
-	add_child(container);
-	if (container->is_inside_tree()) {
-		container->set_global_position(p_at);
-	}
-	if (placer_->warm_models(p_models, container) == 0) {
-		container->queue_free();
-		return nullptr;
-	}
-	return container;
-}
-
 // The load-time effect warm pass: spawn every catalog effect in front of the
 // load camera, advance the fixed tick so fresh emitters actually emit,
 // force-draw two frames SYNCHRONOUSLY so every new material/pipeline draws
 // once (no coroutine — the load path stays callable without await), then
 // clear the warm spawns exactly like the sim-restart path (reset +
 // re-register the persistent item effects). Returns the count. The mission
-// start's models (`p_models`) build in front of the same camera and draw in
-// the same frames, then free with the spawns: retail's mission start loads
-// every listed row's models, its husk family among them, and the freeze
-// builds their buffers, so a death's swap builds nothing (D-NET-NEW-L5-8; the
-// witness: engine inmatch/loaded_model_list.h, mission_start_model_list).
-int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects,
-		const Ref<LoadTimeline> &p_timeline) {
+// start's models build nothing here: the freeze ahead of it resolved their
+// materials alone (load_mission_internal, D-NET-NEW-L3-31).
+int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTimeline> &p_timeline) {
 	// The legs as nested spans of the caller's timeline (an instrument).
 	const auto leg = [&p_timeline](const char *p_name) {
 		if (p_timeline.is_valid()) p_timeline->span(p_name);
@@ -1448,10 +1428,10 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 	const auto leg_end = [&p_timeline]() {
 		if (p_timeline.is_valid()) p_timeline->end_span();
 	};
-	// A load with no effect world and no models has nothing to warm. A dedicated host never comes
-	// here: its freeze is the reduced arm (load_mission_internal, D-NET-NEW-L3-25).
+	// A load with no effect world has nothing to warm. A dedicated host never comes here: its
+	// reduced arm runs the freeze alone (load_mission_internal, D-NET-NEW-L3-25).
 	EffectWorld *effect_world = get_effect_world();
-	if (effect_world == nullptr && p_models.is_empty()) {
+	if (effect_world == nullptr) {
 		return 0;
 	}
 	Vector3 warm_pos;
@@ -1471,11 +1451,8 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 	const int spawned =
 			p_spawn_effects && effect_world != nullptr ? effect_world->warm_all_effects(warm_pos) : 0;
 	leg_end();
-	leg("model_warm");
-	Node3D *model_warm = build_model_warm(p_models, warm_pos);
-	leg_end();
 	// A warmed catalog still draws the presenters' fire pipelines below.
-	if (spawned <= 0 && model_warm == nullptr && (p_spawn_effects || get_runtime() == nullptr)) {
+	if (spawned <= 0 && (p_spawn_effects || get_runtime() == nullptr)) {
 		if (effect_world != nullptr) {
 			effect_world->reset_runtime_state();
 			if (restore_particles_hidden) {
@@ -1531,9 +1508,6 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 		set_visible(was_visible);
 	}
 	leg("warm_reset");
-	if (model_warm != nullptr) {
-		model_warm->queue_free();
-	}
 	if (effect_world != nullptr) {
 		effect_world->reset_runtime_state();
 		if (restore_particles_hidden) {
@@ -1621,7 +1595,7 @@ void GameWorld::load_join_effect_system(const Ref<ResourceRoot> &p_resource_root
 	timeline->span("effects_warm");
 	const ObjectID live_effect_world = effect_world_id_;
 	effect_world_id_ = ObjectID(effect_world->get_instance_id());
-	warm_effect_world_catalog(PackedStringArray());
+	warm_effect_world_catalog();
 	effect_world_id_ = live_effect_world;
 	timeline->end_span();
 	join_effect_world_id_ = ObjectID(effect_world->get_instance_id());

@@ -269,19 +269,13 @@ public:
 
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
-	// The load's model warm (FX-5): one model built under `parent` from each file (the mission
-	// start's list, Simulation::get_mission_start_model_files), so each file's data, its LOD
-	// meshes, textures and shaders are built before the first frame and a later build of the
-	// same file (a death's husk swap) only instances them, as retail's loads build every
-	// listed model and the freeze its buffers at the mission start (the witness: engine
-	// inmatch/loaded_model_list.h, mission_start_model_list; D-NET-NEW-L5-8). The caller
-	// draws them once and frees `parent`. Returns the models built.
-	int warm_models(const PackedStringArray &p_files, Node3D *p_parent);
-	// A dedicated host's freeze (its reduced arm): the same list's material resolve alone, no
-	// model built and nothing drawn: each file's data, its materials' rows through their loaders
+	// The mission start's freeze, every arm's (the full arm's and a dedicated host's reduced one):
+	// the list's (Simulation::get_mission_start_model_files) material resolve, no model built and
+	// nothing drawn: each file's data, its materials' rows through their loaders
 	// (ObjectData::resolve_materials), the list walked head first, the reverse of `files`' load
-	// order (engine inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness;
-	// D-NET-NEW-L3-25). Returns the rows resolved.
+	// order. A later build of a listed file (a death's husk swap) finds its data and its textures
+	// loaded (engine inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness;
+	// D-NET-NEW-L3-25, D-NET-NEW-L3-31, D-NET-NEW-L5-8). Returns the rows resolved.
 	int resolve_model_materials(const PackedStringArray &p_files);
 
 	// --- destruction support (world-wac-ai-re §24.6) ----------------------

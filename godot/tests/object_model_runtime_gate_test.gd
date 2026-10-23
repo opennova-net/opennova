@@ -780,8 +780,8 @@ func test_a_model_drops_its_weather_sample_once_no_rings_stand() -> void:
 	assert_eq(model.get_ctrl_values().get("FLICKER"), 0x2000, "a value written since stands")
 
 
-# The scene builds' phase split (an instrument the mission load's model warm and placement print
-# under --verbose): one set_object_data is one build, its phases are no longer than the build's wall
+# The scene builds' phase split (an instrument the mission load's placement prints under
+# --verbose): one set_object_data is one build, its phases are no longer than the build's wall
 # time, and a take zeroes the profile.
 func test_a_scene_build_counts_on_the_build_profile() -> void:
 	ObjectModel.take_build_profile()

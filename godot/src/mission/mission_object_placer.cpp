@@ -1606,46 +1606,6 @@ Ref<ObjectData> MissionObjectPlacer::object_data_for(const String &p_graphic) {
 	return _load_object_data(p_graphic);
 }
 
-int MissionObjectPlacer::warm_models(const PackedStringArray &p_files, Node3D *p_parent) {
-	_check_epoch();
-	int built = 0;
-	// The warm's cost split (an instrument, printed under --verbose): the files' data loads
-	// (parse) apart from the model builds, and the slowest files.
-	Time *time = Time::get_singleton();
-	uint64_t data_usec = 0;
-	uint64_t build_usec = 0;
-	std::vector<std::pair<uint64_t, String>> slowest;
-	// The builds' own phase split (ObjectModel::take_build_profile), from here.
-	(void)ObjectModel::take_build_profile();
-	for (const String &file : p_files) {
-		const uint64_t start = time->get_ticks_usec();
-		(void)_load_object_data(file);
-		const uint64_t loaded = time->get_ticks_usec();
-		// The same build a husk swap runs (husk_swap.cpp: the authored LODs retained), so its
-		// meshes, textures and shaders are the ones a death's swap asks for.
-		if (build_model_from_graphic(file, String(), p_parent, String(), String(), true) != nullptr) {
-			++built;
-		}
-		const uint64_t end = time->get_ticks_usec();
-		data_usec += loaded - start;
-		build_usec += end - loaded;
-		slowest.emplace_back(end - start, file);
-	}
-	std::sort(slowest.begin(), slowest.end(),
-			[](const auto &a, const auto &b) { return a.first > b.first; });
-	PackedStringArray top;
-	for (size_t i = 0; i < slowest.size() && i < 10; ++i) {
-		top.append(vformat("%s %d", slowest[i].second, static_cast<int>(slowest[i].first / 1000)));
-	}
-	UtilityFunctions::print_verbose(vformat(
-			"MissionObjectPlacer: model warm %d/%d built: data %d ms, build %d ms; slowest (ms): %s",
-			built, p_files.size(), static_cast<int>(data_usec / 1000), static_cast<int>(build_usec / 1000),
-			String(", ").join(top)));
-	UtilityFunctions::print_verbose(String("MissionObjectPlacer: model warm scene builds: ") +
-			ObjectModel::format_build_profile(ObjectModel::take_build_profile()));
-	return built;
-}
-
 int MissionObjectPlacer::resolve_model_materials(const PackedStringArray &p_files) {
 	_check_epoch();
 	const uint64_t start = Time::get_singleton()->get_ticks_usec();
