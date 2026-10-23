@@ -800,8 +800,18 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
 	// a completion [orig: Player_MountWeaponSlot @0x4DFB8D..0x4DFB9E;
 	// g_PendingWeaponSlot's only commits WeaponAction_SwitchFrom @0x543475 /
 	// WeaponAction_SwitchRank @0x543539].
-	if (w.switch_in_flight && !preserve_slot_state)
-		w.switch_deferred_action = weapon_action::kSwitchFrom;
+	// A word naming the EquippedSlot itself (a loadout apply's mount of the slot its select
+	// stored, a SWITCHRANK on itself) leaves nothing to commit: its completion would store the
+	// same slot again and change nothing past the stamp the select already wrote
+	// (commit_pending_weapon_switch), so the fresh slot ends that switch with nothing resumed.
+	// [orig: WeaponAction_SwitchRank @0x543500 (the store @0x543539, the stamp @0x54355A);
+	//  Player_SelectWeaponSlot @0x4DD680 (the store @0x4DD704, the stamp @0x4DD727)]
+	if (w.switch_in_flight && !preserve_slot_state) {
+		if (inventory != nullptr && inventory->pending_combo == inventory->equipped_combo)
+			w.switch_in_flight = false;
+		else
+			w.switch_deferred_action = weapon_action::kSwitchFrom;
+	}
 	// A mount leaves a running PowerThrow windup alone: the walk clears it ahead of the mount
 	// (local_weapon_walk_clears_windup, past the walk's own gates), and a mount no walk runs (a
 	// UseGun's, a ToSpecial switch's, a loadout apply's) carries it onto the new slot, whose

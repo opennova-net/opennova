@@ -48,8 +48,14 @@ int failures = 0;
 // Two fire modes of one rifle (category 3, ranks 0 and 1), a pistol (category 2) and an
 // Emplaced def at the rifle's rank 2, each with timed switch rows (an untimed SWITCHFROM
 // falls back to its previous action with no commit; a SWITCHTO with no delaystart seeds its
-// -900 timer on its first call: a 33-tick draw).
+// -900 timer on its first call: a 33-tick draw). The classes carry 1000-round caps, as the
+// shipped table's do: a loadout apply's pool writes clamp to the class's cap, which a class
+// with no ammoclass_max_carry line holds at 0 (an apply would empty every slot)
+// [orig: WeaponSlot_SetAmmoCount @0x540B50 - the g_AmmoClassMaxCarry clamp @0x540C32..0x540C45].
 constexpr const char *kWeaponDef =
+		"ammoclass_max_carry CLASS_556MM 1000\r\n"
+		"ammoclass_max_carry CLASS_762MM 1000\r\n"
+		"ammoclass_max_carry CLASS_9MM 1000\r\n"
 		"weapon \"WPN_RIFLE\"\r\n"
 		"\tcategory 3\r\n"
 		"\trank 0\r\n"
