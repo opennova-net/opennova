@@ -447,7 +447,9 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.aimed_shot_available = false;
     inf.idle_counter = 0;
     // The lean keys (MoveOrder 0x40 / 0x80) survive the deploy, which clears the stance bits
-    // alone; the local body's next pack and a remote slot's next uplink rewrite them.
+    // alone, and that ahead of its reset (Server_ReleasePlayerDeployment, with the motor's
+    // stance mirror), so nothing here stores either; the local body's next pack and a remote
+    // slot's next uplink rewrite the lean keys.
     // [orig: Server_DeployPlayer @0x517740 - `and [eax+12Ch], 0FFFFFDFFh` @0x517880, `and
     //  [eax+12Ch], 0FFFFFEFFh` @0x51788C, ahead of Entity_ResetToSpawnState called @0x517899;
     //  Player_PackInputStateToEntity @0x4DF450 - the MoveOrder store @0x4DF68F, 0x40
@@ -466,7 +468,6 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.leg_target[0] = inf.leg_target[1] = heading;
     inf.vel[0] = inf.vel[1] = inf.vel[2] = 0;
     inf.z_quarter_step = 0; // [orig: Entity_ResetToSpawnState @0x4B967A]
-    inf.stance = InfantryState::Stance::kStand;
     // `airborne` stays with the registry word, which no retail respawn writer
     // touches (see InfantryState::reset_for_spawn) [orig: Entity_ResetToSpawnState
     // @0x4b97b0 `Flags &= ~2`; Server_DeployPlayer @0x51787a].

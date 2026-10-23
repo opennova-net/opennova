@@ -59,7 +59,14 @@ void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling) {
     e.net_anim_state = 44;
     e.net_anim_pending = 0;
     e.net_anim_phase = 0;
-    e.net_stance_bits = 0; // stance latches reset with the body [orig: the @0x4b9610 reseed]
+    // No MoveOrder store: the stance bits (net_stance_bits) stay. Only the player deploy
+    // clears them, ahead of its call (Server_ReleasePlayerDeployment); a teleport, an NPC
+    // respawn and the joiner's respawn arm leave them as they are.
+    // [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x12C store);
+    //  Server_DeployPlayer @0x517740 - @0x517880 / @0x51788C ahead of the call @0x517899;
+    //  Entity_TeleportTeamToSpawn @0x43D426, EventAction_TeleportEntityToSpawn @0x43E0AF,
+    //  Entity_UpdateInfantryAI @0x4BA044, WacCmd_TeleSsn @0x4F7F07,
+    //  NetPacket_SerializePlayerState @0x4C113C (no +0x12C store ahead of the call)]
 }
 
 } // namespace opennova::world

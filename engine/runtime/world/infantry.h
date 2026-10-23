@@ -1297,7 +1297,8 @@ struct AiEntity;
 // (entity_reset_to_spawn_state) already reset the motor's words retail's reset stores, its
 // channels (the respawn state and the twelve dual updates) and its resolve; this resets
 // the rest of the motor half: the heading and health mirrors, the interpolation staging
-// at the reset's pose, and the InfantryState move, stance and weapon latches.
+// at the reset's pose, and the InfantryState move and weapon latches (the stance bits and
+// their mirror are the deploy's own clear, ahead of the reset).
 //
 // [orig: Server_DeployPlayer @0x517740 - Entity_ResetToSpawnState called @0x517899]
 void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,

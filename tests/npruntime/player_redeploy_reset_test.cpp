@@ -211,6 +211,23 @@ bool run_the_reset_on_a_dead_body_resolves_nothing() {
 	              "dead reset: the tail's list runs on the body");
 }
 
+// Retail's reset neither reads nor stores MoveOrder: the stance bits are the player deploy's own
+// clear, ahead of its call (V-ROLL-BF N1 on D-NET-NEW-L5-65), so a body the reset alone resets (a
+// teleport, an NPC respawn, the joiner's arm) keeps them, and its motor mirror with them.
+// [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x12C store); Server_DeployPlayer
+//  @0x517740 - `and dword ptr [eax+12Ch], 0FFFFFDFFh` @0x517880, `and dword ptr [eax+12Ch],
+//  0FFFFFEFFh` @0x51788C, ahead of the reset called @0x517899]
+bool run_the_reset_leaves_the_stance_bits() {
+	Rig r(/*dead=*/false);
+	static constexpr uint8_t kCrouchBit = w::Entity::kMoveOrderCrouch >> 8;
+	r.entity().net_stance_bits = kCrouchBit;
+	r.motor().inf.stance = w::InfantryState::Stance::kCrouch;
+	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
+	return expect(r.entity().net_stance_bits == kCrouchBit &&
+	                      r.motor().inf.stance == w::InfantryState::Stance::kCrouch,
+	              "stance: the reset keeps the stance bits and their mirror");
+}
+
 // The host's deploy places a dead body on the 6002 start (123, 456, 7), a quarter unit into a
 // wall whose +Y face its corpse's slice holds, and clears the dead bit ahead of the reset: the
 // deploy leaves the body pushed out along +Y, its X the start's. The host's world is the
@@ -280,11 +297,20 @@ bool run_the_deploy_pushes_the_body_out_of_a_wall() {
 	body->health = 0;
 	body->flags |= w::kEntityFlagDead;
 	body->engine_flags |= w::kEntityFlagDead;
+	// The corpse crouched: MoveOrder 0x200 and the motor's mirror of it.
+	body->net_stance_bits = static_cast<uint8_t>(w::Entity::kMoveOrderCrouch >> 8);
+	w::AiEntity *motor = world->ai.for_handle(body_h);
+	if (!expect(motor != nullptr && motor->inf.active, "deploy: the player has a motor"))
+		return false;
+	motor->inf.stance = w::InfantryState::Stance::kCrouch;
 	world->entity_update_counter = 1;
 	inmatch::Server_ReleasePlayerDeployment(ctx.config, own, *world, w::EntityHandle{}, 0xFFFF);
 	body = world->registry.get(body_h);
 	if (!expect(body != nullptr && body->alive && (body->flags & w::kEntityFlagDead) == 0u,
 	            "deploy: the body is deployed")) return false;
+	if (!expect(body->net_stance_bits == 0 &&
+	                    motor->inf.stance == w::InfantryState::Stance::kStand,
+	            "deploy: the deploy's own clear stands the body")) return false;
 	if (!expect(body->position.x.q16 == 123 * kOne, "deploy: the body stands on the start's X"))
 		return false;
 	if (!expect(body->spawn_position.y.q16 == 456 * kOne,
@@ -326,6 +352,7 @@ int main() {
 	bool ok = true;
 	ok &= run_the_reset_resolves_a_live_body_out_of_a_wall();
 	ok &= run_the_reset_on_a_dead_body_resolves_nothing();
+	ok &= run_the_reset_leaves_the_stance_bits();
 	ok &= run_the_deploy_pushes_the_body_out_of_a_wall();
 	ok &= run_a_joiner_bodys_death_edge_reads_its_flags();
 	if (!ok) return 1;

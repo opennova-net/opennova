@@ -152,6 +152,17 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	//  @0x4B97CB..0x4B97F5, the builder @0x4B98EB, the list @0x4B98F1]
 	player->flags &= ~world::kEntityFlagDead;
 	player->engine_flags &= ~world::kEntityFlagDead;
+	// Then the stance bits, crouch then prone, still ahead of the reset, which neither reads nor
+	// stores MoveOrder: the clear is the deploy's own (the motor's stance is our mirror of the two
+	// bits). The lean keys stay (D-NET-NEW-L5-63).
+	// [orig: Server_DeployPlayer @0x517740 - `and dword ptr [eax+12Ch], 0FFFFFDFFh` @0x517880,
+	//  `and dword ptr [eax+12Ch], 0FFFFFEFFh` @0x51788C, ahead of the reset called @0x517899;
+	//  Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x12C store)]
+	player->net_stance_bits &= static_cast<uint8_t>(~(world::Entity::kMoveOrderCrouch >> 8));
+	player->net_stance_bits &= static_cast<uint8_t>(~(world::Entity::kMoveOrderProne >> 8));
+	if (world::AiEntity *mirror = world.ai.for_handle(player->handle);
+			mirror != nullptr && mirror->inf.active)
+		mirror->inf.stance = world::InfantryState::Stance::kStand;
 	world::entity_reset_to_spawn_state(world, world.ai, *player, ceiling);
 	// Spawn protection: every deploy of a non-bot slot whose revive latch (+89932)
 	// is clear stores the title's ticks into entity+292 (deploy_spawn_protection_ticks;

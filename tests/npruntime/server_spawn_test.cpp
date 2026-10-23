@@ -1025,6 +1025,9 @@ int main() {
 		//  @0x51788C (0x100), ahead of Entity_ResetToSpawnState called @0x517899]
 		body_motor->inf.lean_left = true;
 		body_motor->inf.lean_right = true;
+		// The body died prone: MoveOrder 0x100 and its motor mirror.
+		body->net_stance_bits = static_cast<uint8_t>(w::Entity::kMoveOrderProne >> 8);
+		body_motor->inf.stance = w::InfantryState::Stance::kProne;
 		bare_world->out.destruction.effects.clear();
 		inmatch::Server_ReleasePlayerDeployment(
 				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
@@ -1039,7 +1042,8 @@ int main() {
 		if (!expect(body_motor->inf.torso_roll == kTorsoRoll && body_motor->inf.lean_angle == kLean,
 		            "the deploy leaves the torso roll and the lean")) return 1;
 		if (!expect(body_motor->inf.lean_left && body_motor->inf.lean_right &&
-		                    body_motor->inf.stance == w::InfantryState::Stance::kStand,
+		                    body_motor->inf.stance == w::InfantryState::Stance::kStand &&
+		                    body->net_stance_bits == 0,
 		            "the deploy leaves the lean keys and clears the stance")) return 1;
 		// The shared spawn / revive reset (the joiner's redeploy of L on its record's respawn
 		// arm) keeps them too: the arm stores no MoveOrder. [orig: NetPacket_SerializePlayerState
