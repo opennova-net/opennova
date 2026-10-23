@@ -417,6 +417,9 @@ void Lister::sync_flow_context() {
 		ctx.server_nwuid = session->server_nwuid();
 	}
 	ctx.identity_vars = identity_vars_;
+	// The jar's gate-reply fields: the junction pair and the locale three's switch (D-NET-NEW-L9-32).
+	ctx.use_junction = lobby_.use_junction();
+	ctx.extended_metrics = options_.extended_metrics;
 	flow_.set_context(std::move(ctx));
 }
 

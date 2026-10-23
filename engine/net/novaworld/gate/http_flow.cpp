@@ -136,6 +136,13 @@ std::string page_title(const std::string &html) {
 	return html.substr(begin + 1, end == std::string::npos ? std::string::npos : end - begin - 1);
 }
 
+// The locale three the gate reply's processing and the Cookie var-list's overlay write only with
+// mpextractextendedmetricinformation set (D-NET-NEW-L9-32).
+bool is_locale_identity_var(const std::string &name) {
+	return strutil::iequals(name, "CountryName") || strutil::iequals(name, "Language") ||
+	       strutil::iequals(name, "TimeZoneBias");
+}
+
 // The URL a <META http-equiv="refresh" content="N;URL=..."> names ("" when none), quotes stripped.
 std::string meta_refresh_url(const std::string &html) {
 	const std::string lower = to_lower(html);
@@ -323,36 +330,49 @@ void LobbyHttpFlow::merge_response_cookies(const std::vector<std::string> &respo
 	if (!values.empty()) jar_.merge_set_cookie_values(values);
 }
 
-// The identity set into the jar (identity_vars, the live nwuid for the empty NWUID entry), ahead of
-// every cookie a page sets: retail's connection-up writes them as browser form fields before the
-// web lobby's first request, so the first request carries them and every later Cookie list (the
-// headers, the UDP statements' "Cookie" var-list) leads with them (D-NET-NEW-L9-26).
-// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - CUIBrowser_AddFormField NWUID (the call
+// The identity set as the jar takes it, ahead of every cookie a page sets. Two writers fill it
+// before the web lobby's first request, so the first request carries it and every later Cookie
+// list (the headers, the UDP statements' "Cookie" var-list) leads with it (D-NET-NEW-L9-26):
+//  - the gate reply's processing: with the junction word set, USEJUNCTION "1" and an empty
+//    JUNCTIONCODE first; with mpextractextendedmetricinformation set (cfg +0x33C), CountryName,
+//    Language and TimeZoneBias; then MyInstalledExpBits, always (D-NET-NEW-L9-32);
+//  - the connection-up's six, NWUID .. NWHWI (the live nwuid for the empty NWUID entry).
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the junction word's test @0x4CF71B,
+//  CUIBrowser_AddFormField USEJUNCTION ("%ld" of 1) @0x4CF74E, JUNCTIONCODE "" @0x4CF76E, the
+//  +0x33C test @0x4CF773, CountryName @0x4CF796, Language @0x4CF7AB, TimeZoneBias @0x4CF7DE,
+//  MyInstalledExpBits @0x4CF811; CNapiGameSession_OnNovaWorldConnected @0x4D1570 - NWUID (the call
 //  @0x4D16A9), NWCDKIID @0x4D16ED, NWCDKIIDEXP1 @0x4D1702, NWPSSK @0x4D1724, NWUSID @0x4D1746,
 //  NWHWI @0x4D17AA; CNapiSession_ReadLocaleInfo @0x4CE390 - the jar's walk in its order (the call
 //  @0x4CE3E5), CNapiVarList_SetOrCreate per entry (the call @0x4CE443)]
-void LobbyHttpFlow::seed_identity_cookies() {
-	for (const auto &kv : ctx_.identity_vars) {
-		std::string value = kv.second;
-		if (kv.first == "NWUID" && value.empty()) value = ctx_.server_nwuid;
-		jar_.set(kv.first, value);
+std::vector<std::pair<std::string, std::string>> LobbyHttpFlow::identity_seed() const {
+	std::vector<std::pair<std::string, std::string>> seed;
+	if (ctx_.use_junction != 0) {
+		seed.emplace_back("USEJUNCTION", "1");
+		seed.emplace_back("JUNCTIONCODE", "");
 	}
+	for (const auto &kv : ctx_.identity_vars) {
+		if (!ctx_.extended_metrics && is_locale_identity_var(kv.first)) continue;
+		seed.emplace_back(kv.first,
+				kv.first == "NWUID" && kv.second.empty() ? ctx_.server_nwuid : kv.second);
+	}
+	return seed;
 }
 
-// The Cookie var-list reads the browser jar at use, then overlays locale.
-// Initial identity fills the pre-login case before seed_identity_cookies runs;
-// once present, HTTP-issued cookie values (NWPF/NWPF2/account/ticket) win.
-// [orig: CNapiSession_ReadLocaleInfo @ 0x4ce390 -> cookie enumeration @ 0x64eb70]
+void LobbyHttpFlow::seed_identity_cookies() {
+	for (const auto &kv : identity_seed()) jar_.set(kv.first, kv.second);
+}
+
+// The Cookie var-list reads the browser jar at use, then overlays the locale three when
+// mpextractextendedmetricinformation is set (none at all when it is clear, D-NET-NEW-L9-32).
+// The identity seed fills the pre-login case before seed_identity_cookies runs; once present,
+// HTTP-issued cookie values (NWPF/NWPF2/account/ticket) win.
+// [orig: CNapiSession_ReadLocaleInfo @0x4CE390 - the jar's walk (CUIBrowser_QueryMatchingCookies
+//  called @0x4CE3E5), the +0x33C test @0x4CE44E / @0x4CE455, CountryName @0x4CE46B, Language
+//  @0x4CE480, TimeZoneBias @0x4CE4AC]
 std::vector<std::pair<std::string, std::string>> LobbyHttpFlow::session_cookie_vars() const {
 	CookieJar cookies = jar_;
-	for (const auto &kv : ctx_.identity_vars) {
-		const bool locale = strutil::iequals(kv.first, "CountryName") ||
-		                    strutil::iequals(kv.first, "Language") ||
-		                    strutil::iequals(kv.first, "TimeZoneBias");
-		if (!cookies.find(kv.first) || locale) {
-			cookies.set(kv.first, kv.first == "NWUID" && kv.second.empty()
-			                             ? ctx_.server_nwuid : kv.second);
-		}
+	for (const auto &kv : identity_seed()) {
+		if (!cookies.find(kv.first) || is_locale_identity_var(kv.first)) cookies.set(kv.first, kv.second);
 	}
 	std::vector<std::pair<std::string, std::string>> vars;
 	vars.reserve(cookies.names().size());

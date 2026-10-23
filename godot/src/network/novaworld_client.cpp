@@ -859,6 +859,12 @@ void NovaWorldClient::sync_flow_context() {
 	ctx.server_nwuid = lobby_.session() ? lobby_.session()->server_nwuid() : std::string();
 	ctx.locale = opennova::to_std(OS::get_singleton()->get_locale());
 	ctx.identity_vars = identity_vars_;
+	// The jar's gate-reply fields: the junction pair and the locale three's switch, the cfg block's
+	// mpextractextendedmetricinformation (engine: LobbyHttpContext, D-NET-NEW-L9-32).
+	ctx.use_junction = lobby_.use_junction();
+	ctx.extended_metrics = (game_config_.is_valid() ? game_config_->native().cfg()
+	                                                : opennova::gamecfg::defaults())
+	                               .mp_extract_extended_metric_information != 0;
 	flow_.set_context(std::move(ctx));
 }
 

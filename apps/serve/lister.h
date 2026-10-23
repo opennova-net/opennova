@@ -49,6 +49,9 @@ struct ListerOptions {
 	// mpgateserverlocalport quad (inmatch::gate_bind_ports; the server passes its game.cfg's),
 	// the shipped block's when the embedder has none.
 	std::vector<uint16_t> gate_ports = inmatch::gate_bind_ports(gamecfg::defaults());
+	// The process block's mpextractextendedmetricinformation (+0x33C, the shipped default 1): clear,
+	// the jar and the Cookie var-lists carry no locale three (LobbyHttpContext::extended_metrics).
+	bool extended_metrics = gamecfg::defaults().mp_extract_extended_metric_information != 0;
 };
 
 // opennova-serve's NovaWorld listing kept up: the engine's NWU driver and host role, the account

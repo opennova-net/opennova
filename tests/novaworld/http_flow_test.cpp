@@ -9,6 +9,7 @@
 #include <net/novaworld/gsb.h>
 #include <net/novacrypto/epask.h>
 #include <net/novacrypto/url_cipher.h>
+#include <net/novaworld/lobby_vars.h> // make_lobby_identity_vars
 
 #include <cstdio>
 #include <string>
@@ -616,7 +617,57 @@ static bool test_joi_page_refresh() {
 	return g_fail == 0;
 }
 
+// D-NET-NEW-L9-32: the gate reply's jar fields ahead of the connection-up's six. A set junction
+// word leads with USEJUNCTION "1" and an empty JUNCTIONCODE; a clear mpextractextendedmetricinformation
+// leaves CountryName / Language / TimeZoneBias out of the jar and the Cookie var-lists, and
+// MyInstalledExpBits stays.
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CF71B, @0x4CF74E, @0x4CF76E, @0x4CF773,
+//  @0x4CF796, @0x4CF7AB, @0x4CF7DE, @0x4CF811; CNapiSession_ReadLocaleInfo @0x4CE390 - @0x4CE44E]
+static bool test_gate_reply_jar_fields() {
+	const auto identity = nw::make_lobby_identity_vars(nw::LobbyIdentityParams{});
+	auto names_of = [](const std::vector<std::pair<std::string, std::string>> &vars) {
+		std::vector<std::string> out;
+		for (const auto &kv : vars) out.push_back(kv.first);
+		return out;
+	};
+	{
+		nw::LobbyHttpContext c = concrete_ctx();
+		c.identity_vars = identity;
+		c.use_junction = 1;
+		nw::LobbyHttpFlow f;
+		f.set_context(c);
+		const auto vars = f.session_cookie_vars();
+		const std::vector<std::string> want = {"USEJUNCTION", "JUNCTIONCODE", "CountryName", "Language",
+				"TimeZoneBias", "MyInstalledExpBits", "NWUID", "NWCDKIID", "NWCDKIIDEXP1", "NWPSSK",
+				"NWUSID", "NWHWI"};
+		expect(names_of(vars) == want, "a set junction word leads the Cookie list with its pair");
+		expect(vars.size() >= 2 && vars[0].second == "1" && vars[1].second.empty(),
+		       "USEJUNCTION is \"1\" and JUNCTIONCODE empty");
+		const nw::LoginResult r = f.login("p", "s");
+		expect(r.request.headers.size() >= 6 && r.request.headers[4] == "Cookie: USEJUNCTION=1;" &&
+		               r.request.headers[5] == "Cookie: JUNCTIONCODE=;",
+		       "the first request's cookie lines lead with the junction pair");
+	}
+	{
+		nw::LobbyHttpContext c = concrete_ctx();
+		c.identity_vars = identity;
+		c.extended_metrics = false;
+		nw::LobbyHttpFlow f;
+		f.set_context(c);
+		const std::vector<std::string> want = {"MyInstalledExpBits", "NWUID", "NWCDKIID", "NWCDKIIDEXP1",
+				"NWPSSK", "NWUSID", "NWHWI"};
+		expect(names_of(f.session_cookie_vars()) == want,
+		       "a clear extended-metrics switch drops the locale three from the Cookie list");
+		f.login("p", "s");
+		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		expect(f.cookies().find("CountryName") == nullptr && f.cookies().find("MyInstalledExpBits") != nullptr,
+		       "the jar seeds no locale three, MyInstalledExpBits stays");
+	}
+	return g_fail == 0;
+}
+
 int main() {
+	test_gate_reply_jar_fields();
 	test_joi_page_refresh();
 	test_browser_cache_bust();
 	test_host_resolves();

@@ -299,6 +299,9 @@ public:
 	const ClientSession *session() const { return session_.get(); }
 	bool session_verified() const { return session_ && session_->is_verified(); }
 	const GateResponse &gate_response() const { return memory().response; }
+	// The kept junction word (dword_B5FD38: the reply's USEJUNCTION, the command line's override
+	// applied), which the web lobby's jar reads (LobbyHttpContext::use_junction).
+	int32_t use_junction() const { return memory().use_junction; }
 	MatchFacts match_facts() const;
 	// The connection's CI (1 once a session is made, 0 before) and the CK its last 0x81 drew.
 	uint32_t client_index() const { return client_index_; }

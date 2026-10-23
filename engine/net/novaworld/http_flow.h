@@ -75,6 +75,13 @@ struct LobbyHttpContext {
 	std::string server_nwuid; // ServerAuth nwuid (the empty-NWUID identity cookie substitute)
 	std::string locale;       // OS locale ("en_US"); the [CC] region is derived from it (injected, not read here)
 	std::vector<std::pair<std::string, std::string>> identity_vars; // the NW-S5 "Cookie" identity set (seeded as cookies)
+	// The gate reply's junction word as the session keeps it (USEJUNCTION, the command line's
+	// override applied; NwuLobbySession::use_junction): set, the jar leads with USEJUNCTION "1" and
+	// an empty JUNCTIONCODE.
+	int32_t use_junction = 0;
+	// game.cfg's mpextractextendedmetricinformation (cfg +0x33C, default 1): clear, neither the jar
+	// nor the Cookie var-lists carry CountryName / Language / TimeZoneBias.
+	bool extended_metrics = true;
 };
 
 // --- login ---
@@ -240,6 +247,9 @@ private:
 	std::vector<std::string> post_headers(std::size_t content_length) const;
 	void merge_response_cookies(const std::vector<std::string> &response_headers);
 	void seed_identity_cookies();
+	// The jar's identity seed in retail's order (the gate reply's fields, then the connection-up's),
+	// the live nwuid for the empty NWUID entry.
+	std::vector<std::pair<std::string, std::string>> identity_seed() const;
 	LoginResult login_post();                 // the /NWLogin.dll POST (the 13-field form), or Failed
 	std::string gsb_url() const;
 	// A relay page's META refresh as an absolute URL ("" when it names none).
