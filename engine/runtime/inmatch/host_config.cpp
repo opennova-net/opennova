@@ -209,6 +209,9 @@ void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cf
 	config.no_scope_drift = cfg.mp_no_scope_drift;
 
 	config.num_teams = static_cast<uint8_t>(cfg.mp_numteams); // g_NumTeamsConfig @0x551BAC
+	// The block's own game type, which the remote add's TDM preference test reads
+	// (GameConfig::cfg_game_type) [orig: Server_PlayerAdd @0x51CC6C].
+	config.cfg_game_type = cfg.mp_gametype;
 	// The net config's side byte [orig: (char)g_GameConfigState.sideRequirement_424 @0x5697C3].
 	config.host_side_request = static_cast<int8_t>(cfg.side_req);
 	config.mp_attributes = static_cast<uint32_t>(cfg.mpattrib); // game_settings @0x56967F

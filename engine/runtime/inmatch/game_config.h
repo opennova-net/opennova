@@ -130,6 +130,18 @@ struct GameConfig {
 	//  sideBPassword_394, 0x11) @0x552054; Server_AssignPlayerTeam @0x4FE310 - @0x4FE41C..0x4FE6C9]
 	std::string mission_side_a_password;
 	std::string mission_side_b_password;
+	// The cfg block's own words the remote add's TDM preference test reads live: the block's game
+	// type (gameType_3F0, game.cfg's `mp_gametype` or a host file's GameType, which nothing in a
+	// session writes; the mission's g_GameType is game_type), mapped from the block
+	// (apply_block_session_settings), and its two side passwords as the create's or a map change's
+	// config carries them (create_session / continue_session), which an admin SET then writes at
+	// once (D-NET-NEW-L1-46). [orig: Server_PlayerAdd @0x51CC6C..0x51CC91; the game type's writers
+	//  Config_ParseSettingsLine @0x550557, ServerConfig_ApplyHostSetting @0x4A610B;
+	//  CAdminServer_HandleSetCommand @0x405A60 - strncpy(sideAPassword_383, .., 0x11) @0x406230,
+	//  (sideBPassword_394) @0x406268]
+	int32_t cfg_game_type = 0;
+	std::string cfg_side_a_password;
+	std::string cfg_side_b_password;
 	// Signed spectator limit: 0 disables spectating, -1 shares max_players, and
 	// a positive value is the game-layer join's spectator count (DPC 15); it
 	// never widens the 0x42 gate (join_capacity) nor the slot table: a spectator

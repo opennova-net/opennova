@@ -126,6 +126,18 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
 
 } // namespace
 
+namespace {
+
+// The cfg block's side passwords as the start's config carries them, which the remote add's TDM
+// preference test reads live; an admin SET writes them after (D-NET-NEW-L1-46).
+// [orig: Server_PlayerAdd @0x51CC78 / @0x51CC85]
+void take_block_side_passwords(GameConfig &config) {
+	config.cfg_side_a_password = config.side_a_password;
+	config.cfg_side_b_password = config.side_b_password;
+}
+
+} // namespace
+
 void apply_mission_side_passwords(GameConfig &config) {
 	// One 17-byte field's string: the word when it is shorter than 17 characters, else its
 	// first 17 and the string of the field behind it.
@@ -150,6 +162,7 @@ void continue_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	//  Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E]
 	GameConfig next = config;
 	apply_mission_side_passwords(next);
+	take_block_side_passwords(next);
 	next.server_password = ctx.config.server_password;
 	next.side_a_password = ctx.config.side_a_password;
 	next.side_b_password = ctx.config.side_b_password;
@@ -203,6 +216,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	// [orig: GameLoop_Init @0x526370 - Game_StartMission(0) @0x526377 after the create; the
 	//  first-load flag @0x5243A4, Game_ApplySessionSettingsToGlobals @0x524662]
 	apply_mission_side_passwords(ctx.config);
+	take_block_side_passwords(ctx.config);
 	// A create of a game that is no team game clears game_settings' two side passwords, so the
 	// join check's leg (18 / 19 / 20), the form post's 17, the balance gate and BuildFlags see
 	// none of the cfg block's words in that session; an admin SET writes them again. The team

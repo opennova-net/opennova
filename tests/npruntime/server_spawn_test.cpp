@@ -472,20 +472,21 @@ int main() {
 					std::vector<uint8_t>({3}),
 				"four-team password flags feed retail's mixed-index availability lookup")) return 1;
 
-		// A TDM (exactly 0x10000) host with ANY side password forces the add
-		// event's preference to automatic before the assignment runs, so a
-		// TR for the open side still balances. With two team-2 players
-		// present the sort walks [0,2,3,1] over the locked-A availability
-		// row and lands on team 3, not the requested side B.
-		// [orig: Server_PlayerAdd @0x51CC76..0x51CC91 -> @0x51CF24]
+		// A host whose cfg block's game type is TDM (exactly 0x10000) and whose block
+		// carries ANY side password forces the add event's preference to automatic before
+		// the assignment runs, so a TR for the open side still balances. With two team-2
+		// players present the sort walks [0,2,3,1] over the locked-A availability row and
+		// lands on team 3, not the requested side B. The test reads the block's own words
+		// (cfg_game_type, cfg_side_a_password), never the mission's type or the pick's pair
+		// (D-NET-NEW-L1-46).
+		// [orig: Server_PlayerAdd @0x51CC6C, @0x51CC76..0x51CC91 -> @0x51CF24]
 		{
 			inmatch::GameConfig tdm_locked;
 			tdm_locked.game_type = opennova::game_type::kTeamDeathmatch;
 			tdm_locked.num_teams = 4;
 			tdm_locked.mp_attributes = inmatch::GameConfig::kMpAttribTeamChoose;
-			// The add's test reads the cfg block's word (ours: game_settings'), the pick's
-			// availability row the mission start's pair: the block's word in both.
-			tdm_locked.side_a_password = "side-a";
+			tdm_locked.cfg_game_type = static_cast<int32_t>(opennova::game_type::kTeamDeathmatch);
+			tdm_locked.cfg_side_a_password = "side-a";
 			tdm_locked.mission_side_a_password = "side-a";
 			std::vector<inmatch::NapiNPConnection> roster(3);
 			for (std::size_t i = 0; i < 2; ++i) {
@@ -497,15 +498,30 @@ int main() {
 			roster.back().char_vars.team_request = 1; // side B, which is open
 			if (!expect(inmatch::Server_ReservePlayerTeam(
 						tdm_locked, true, roster, roster.back()) == 3,
-					"TDM with a locked side forces TR to automatic (balance picks team 3)")) return 1;
-			// The force is keyed on the exact 0x10000 game type: TKOTH keeps
-			// honoring the open-side request under the same passwords.
-			inmatch::GameConfig tkoth_locked = tdm_locked;
-			tkoth_locked.game_type = opennova::game_type::kTeamKingOfTheHill;
+					"a TDM block with a locked side forces TR to automatic (balance picks team 3)")) return 1;
+			// The force is keyed on the block's exact 0x10000: a TKOTH block keeps honoring
+			// the open-side request under the same passwords, on a TDM mission too.
+			inmatch::GameConfig tkoth_block = tdm_locked;
+			tkoth_block.cfg_game_type = static_cast<int32_t>(opennova::game_type::kTeamKingOfTheHill);
 			roster.back().assigned_team_valid = false;
 			if (!expect(inmatch::Server_ReservePlayerTeam(
-						tkoth_locked, true, roster, roster.back()) == 2,
-					"non-TDM four-team hosts still honor the open-side TR")) return 1;
+						tkoth_block, true, roster, roster.back()) == 2,
+					"a non-TDM block honors the open-side TR on a TDM mission")) return 1;
+			// A TDM block forces it on a four-team TKOTH mission.
+			inmatch::GameConfig tkoth_mission = tdm_locked;
+			tkoth_mission.game_type = opennova::game_type::kTeamKingOfTheHill;
+			roster.back().assigned_team_valid = false;
+			if (!expect(inmatch::Server_ReservePlayerTeam(
+						tkoth_mission, true, roster, roster.back()) == 3,
+					"a TDM block forces TR on a TKOTH mission")) return 1;
+			// The block's side words, not the pick's pair: with the block's side A cleared (an
+			// admin SET mid-mission) the force is gone while the pick's pair still locks A.
+			inmatch::GameConfig unlocked_block = tdm_locked;
+			unlocked_block.cfg_side_a_password.clear();
+			roster.back().assigned_team_valid = false;
+			if (!expect(inmatch::Server_ReservePlayerTeam(
+						unlocked_block, true, roster, roster.back()) == 2,
+					"no block side password: the open-side TR is honored")) return 1;
 		}
 
 		// D-NET-NEW-L3-6: the balance tally reads the slot rows' team bytes, each active row

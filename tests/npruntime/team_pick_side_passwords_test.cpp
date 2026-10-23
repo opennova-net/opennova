@@ -14,6 +14,8 @@
 //   - a 17-character side password fills its 17-byte field with no NUL, so the pick's string
 //     runs on into the field behind it (side A's into g_SidePasswordB, side B's into
 //     g_SessionCountryCode).
+// And the remote add's TDM preference test reads neither copy: it takes the cfg block's own game
+// type and side passwords, live (D-NET-NEW-L1-46).
 // [orig: Server_AssignPlayerTeam @0x4FE310 - g_SidePasswordA @0x4FE41C / _stricmp @0x4FE43F,
 //  side A's team g_RotationSideTeam0 @0x4FE456, g_SidePasswordB @0x4FE464 / @0x4FE47D, side B's
 //  g_RotationSideTeam1 @0x4FE492, both set and no match +416 = 0 @0x4FE4BA, return 0 @0x4FE4CA;
@@ -73,11 +75,12 @@ std::unique_ptr<inmatch::NapiNPServerCtx> host(uint32_t type) {
 	return ctx;
 }
 
-// The team the pick gives a fresh joiner with JSP `password` and an automatic team request.
-uint8_t pick(const inmatch::NapiNPServerCtx &ctx, const char *password) {
+// The team the pick gives a fresh joiner with JSP `password` and team request `tr` (0xFF:
+// automatic).
+uint8_t pick(const inmatch::NapiNPServerCtx &ctx, const char *password, uint8_t tr = 0xFF) {
 	std::vector<inmatch::NapiNPConnection> roster(1);
 	roster.front().join_password = password;
-	roster.front().char_vars.team_request = 0xFF;
+	roster.front().char_vars.team_request = tr;
 	return inmatch::Server_ReservePlayerTeam(ctx.config, true, roster, roster.front());
 }
 
@@ -165,6 +168,49 @@ bool run_a_17_character_side_password_runs_on() {
 	              "a JSP of the 17 characters matches neither run-on side");
 }
 
+// D-NET-NEW-L1-46: the remote add's TDM preference test reads the cfg block's own words, its game
+// type (not the mission's) and its side passwords, which an admin SET writes at once: on a
+// four-team TDM mission with TeamChoose, a side-B request (TR 1) is honored (team 2) unless the
+// block's type is TDM and a block side password is set, when it is forced to automatic and the
+// empty table's balance gives team 1.
+// [orig: Server_PlayerAdd @0x51CBC0 - eax 0 @0x51CBDF, `cmp gameType_3F0, 10000h` @0x51CC6C,
+//  sideAPassword_383 @0x51CC78, sideBPassword_394 @0x51CC85, event+97 = -1 @0x51CC91;
+//  Server_AssignPlayerTeam @0x4FE310 - the team-choose legs @0x4FE52E..0x4FE56D, the balance
+//  @0x4FE588..0x4FE723; CAdminServer_HandleSetCommand @0x405A60 - the block's side A @0x406230]
+std::unique_ptr<inmatch::NapiNPServerCtx> four_team_host(int32_t block_game_type) {
+	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::GameConfig config;
+	config.max_players = 8;
+	config.game_type = game_type::kTeamDeathmatch;
+	config.num_teams = 4;
+	config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;
+	config.cfg_game_type = block_game_type;
+	inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			/*host_key=*/0, nullptr, config);
+	return ctx;
+}
+
+bool run_the_add_reads_the_blocks_words() {
+	auto dm_block = four_team_host(static_cast<int32_t>(game_type::kDeathmatch));
+	if (!expect(pick(*dm_block, "", 1) == 2, "no side password: the side-B request is honored"))
+		return false;
+	if (!expect(admin_set(*dm_block, "SET SideAPassword blue1") &&
+	                    dm_block->config.mission_side_a_password.empty() &&
+	                    pick(*dm_block, "", 1) == 2,
+	            "a deathmatch block's type never forces the request, on a TDM mission too"))
+		return false;
+	auto tdm_block = four_team_host(static_cast<int32_t>(game_type::kTeamDeathmatch));
+	if (!expect(pick(*tdm_block, "", 1) == 2,
+	            "a TDM block with no side password honors the side-B request"))
+		return false;
+	if (!expect(admin_set(*tdm_block, "SET SideAPassword blue1") &&
+	                    tdm_block->config.mission_side_a_password.empty(),
+	            "SET SideAPassword writes the block's word, not the pick's pair"))
+		return false;
+	return expect(pick(*tdm_block, "", 1) == 1,
+	              "the block's side password forces the request at once: the balance's team 1");
+}
+
 } // namespace
 
 int main() {
@@ -172,6 +218,7 @@ int main() {
 	if (!run_a_deathmatch_create_continued_into_a_team_mission()) ++failures;
 	if (!run_an_admin_set_reaches_the_pick_at_the_next_start()) ++failures;
 	if (!run_a_17_character_side_password_runs_on()) ++failures;
+	if (!run_the_add_reads_the_blocks_words()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

@@ -295,12 +295,15 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 			}
 		} else if (strutil::iequals(key, "SideAPassword")) {
 			if (block != nullptr) block->mp_host_side_password_a.clear();
+			// The block's word the remote add reads live (D-NET-NEW-L1-46).
+			c.cfg_side_a_password.clear();
 			if (protocol_up) {
 				c.side_a_password.clear();
 				republish_flags(ctx_);
 			}
 		} else if (strutil::iequals(key, "SideBPassword")) {
 			if (block != nullptr) block->mp_host_side_password_b.clear();
+			c.cfg_side_b_password.clear();
 			if (protocol_up) {
 				c.side_b_password.clear();
 				republish_flags(ctx_);
@@ -429,6 +432,8 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 	} else if (strutil::iequals(key, "SideAPassword")) {
 		const std::string pw = password_field(value);
 		if (block != nullptr) block->mp_host_side_password_a = pw;
+		// The block's word the remote add reads live (D-NET-NEW-L1-46) [orig: @0x406230].
+		c.cfg_side_a_password = pw;
 		if (protocol_up) {
 			c.side_a_password = pw;
 			republish_flags(ctx_);
@@ -436,6 +441,7 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 	} else if (strutil::iequals(key, "SideBPassword")) {
 		const std::string pw = password_field(value);
 		if (block != nullptr) block->mp_host_side_password_b = pw;
+		c.cfg_side_b_password = pw; // [orig: @0x406268]
 		if (protocol_up) {
 			c.side_b_password = pw;
 			republish_flags(ctx_);

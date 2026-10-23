@@ -5106,7 +5106,8 @@ target_link_libraries(npruntime_side_password_gate_test PRIVATE opennova_net ope
 target_include_directories(npruntime_side_password_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_side_password_gate COMMAND npruntime_side_password_gate_test)
 # D-NET-NEW-L1-44's DIVERGENT: the team pick reads the mission start's side-password pair
-# (g_SidePasswordA / B), which neither the create's clear nor an admin SET writes.
+# (g_SidePasswordA / B), which neither the create's clear nor an admin SET writes; D-NET-NEW-L1-46:
+# the remote add's TDM preference test reads the cfg block's own type and side words.
 add_executable(npruntime_team_pick_side_passwords_test npruntime/team_pick_side_passwords_test.cpp)
 target_link_libraries(npruntime_team_pick_side_passwords_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_team_pick_side_passwords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

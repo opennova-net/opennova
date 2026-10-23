@@ -125,18 +125,19 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 
 	// jsp[60] is signed at the original call site: 0/1 request side A/B and
 	// 0xFF means automatic. A locked requested side falls through to balance.
-	// Server_PlayerAdd overwrites the add event's preference byte with -1
-	// BEFORE the assignment runs whenever the game type is exactly 0x10000
-	// (TDM) and either side password is set, so a TDM host with any locked
-	// side never honors TR. That test reads the cfg block's live side words, not
-	// the pick's pair; ours takes game_settings' (config.side_a_password), which
-	// an admin SET writes with the block's.
-	// [orig: Server_PlayerAdd @0x51CC76..0x51CC91 (event+97 = -1; gameType_3F0 @0x51CC6C,
-	// sideAPassword_383 @0x51CC78, sideBPassword_394 @0x51CC85), passed as
-	// teamPref @0x51CF24; assignment @0x4FE51A..0x4FE587]
+	// Server_PlayerAdd's remote arm overwrites the add event's preference byte with -1
+	// BEFORE the assignment runs whenever the cfg block's game type is exactly 0x10000
+	// (TDM) and either of the block's side passwords is set. Both are the block's live
+	// words, not the mission's game type nor the pick's pair: the block's type is
+	// game.cfg's or the host file's (a host screen's mission choice sets the mission's
+	// alone), and an admin SET's side password reaches the test at once (D-NET-NEW-L1-46).
+	// [orig: Server_PlayerAdd @0x51CBC0 - eax 0 @0x51CBDF, the local add's skip @0x51CC29,
+	//  `cmp gameType_3F0, 10000h` @0x51CC6C / jnz @0x51CC76, sideAPassword_383 @0x51CC78,
+	//  sideBPassword_394 @0x51CC85, event+97 = -1 @0x51CC91, passed as teamPref @0x51CF24;
+	//  assignment @0x4FE51A..0x4FE587]
 	uint8_t team_request = joining.char_vars.team_request;
-	if (gt == opennova::game_type::kTeamDeathmatch &&
-			(!config.side_a_password.empty() || !config.side_b_password.empty()))
+	if (config.cfg_game_type == static_cast<int32_t>(opennova::game_type::kTeamDeathmatch) &&
+			(!config.cfg_side_a_password.empty() || !config.cfg_side_b_password.empty()))
 		team_request = 0xFF;
 	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) {
 		// [orig: side A's team @0x4FE543, side B's @0x4FE56D]
