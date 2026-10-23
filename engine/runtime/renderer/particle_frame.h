@@ -2,13 +2,16 @@
 
 // Portable particle frame compilation. This is the seam between an immutable
 // simulation snapshot and an embedding renderer. It owns ordering and draw list
-// formation; there are no Godot or particle-simulator dependencies.
+// formation; there are no Godot dependencies (the view's frustum and its sphere
+// test are the simulator's, particle/emitter.h).
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <type_traits>
 #include <vector>
+
+#include <runtime/particle/emitter.h>
 
 namespace opennova::renderer {
 
@@ -231,6 +234,16 @@ struct ParticleViewInput {
 	//  CParticleEmitter_RenderStaticBillboards @ 0x5F4E82..0x5F4EC2;
 	//  CParticleEmitter_RenderTopAlignedBillboards @ 0x5F5681..0x5F56E6]
 	std::uint32_t lod_divisor = 1;
+	// The view's clip state for the render submit: an emitter joins the frame's render
+	// list only with live particles and with its bounds' sphere inside this view
+	// (particle::bounds_visible_in_frustum over the bounds the partition sorts by), so an
+	// emitter out of view is neither partitioned, depth-sorted nor built.
+	// [orig: CParticleEmitter_TrySubmitForRender @ 0x5e7540 - the live-count test
+	//  @0x5e754a, the bounds test's call @0x5e755d, CEffectWorld_RegisterRenderObject's
+	//  call @0x5e756a; it is CParticleSystem's vtable slot +0x24 (0x7dcae0), the call
+	//  CParticleGroup_RenderChildren @ 0x5e5890 makes per child @0x5e58ec / @0x5e58ff /
+	//  @0x5e5979]. Not valid: no clip state, every emitter with live particles submits.
+	particle::ParticleViewFrustum frustum{};
 };
 
 struct ParticleDrawCommand {
@@ -264,6 +277,11 @@ struct ParticleFrameDebugCounters {
 	std::size_t domain_filtered_particles = 0;
 	// Emitters of groups the building-section gate hides this frame.
 	std::size_t section_hidden_emitters = 0;
+	// Emitters the render submit left out: no live particle, or bounds outside the
+	// view's frustum (ParticleViewInput::frustum).
+	std::size_t empty_emitters = 0;
+	std::size_t frustum_culled_emitters = 0;
+	std::size_t frustum_culled_particles = 0;
 	std::size_t water_filtered_emitters = 0;
 	std::size_t water_filtered_particles = 0;
 	std::size_t invisible_particles = 0;

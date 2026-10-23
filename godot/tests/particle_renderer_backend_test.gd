@@ -233,6 +233,9 @@ func test_world_emitter_subsets_reverse_at_the_water_plane() -> void:
 	camera.position = Vector3(0.0, 10.0, 5.0)
 	camera.current = true
 	viewport.add_child(camera)
+	# The eye looks at the emitters: one out of its view never submits (retail
+	# CParticleEmitter_TrySubmitForRender @ 0x5e7540).
+	camera.look_at(Vector3.ZERO, Vector3.UP)
 	var renderer := ParticleRenderer.new()
 	# Equality is above-inclusive in retail. Keeping one emitter exactly on the
 	# plane makes this integration vector cover that boundary as well as the
@@ -255,6 +258,7 @@ func test_world_emitter_subsets_reverse_at_the_water_plane() -> void:
 	assert_eq(int(near.get("water_filtered_emitters", -1)), 1)
 
 	camera.position.y = -10.0
+	camera.look_at(Vector3.ZERO, Vector3.UP)
 	renderer.render_now(GameWorld.current_frame_clock_ms())
 	report = renderer.get_debug_draw_list_report()
 	far = report.get("world_far_side", {})
@@ -263,6 +267,46 @@ func test_world_emitter_subsets_reverse_at_the_water_plane() -> void:
 			"a below-water camera draws above/equal emitters first")
 	assert_eq(int(near.get("selected_emitters", -1)), 1,
 			"the strict-below emitter moves to the camera-side pass")
+
+
+# The render submit reads the view's own eye: an emitter behind the camera never joins
+# the render list, so it is neither partitioned, depth-sorted nor built, and turning the
+# eye toward it submits it (retail CParticleEmitter_TrySubmitForRender @ 0x5e7540 tests
+# the emitter's bounds against the view before it registers).
+func test_an_emitter_out_of_the_view_never_submits() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var renderer := ParticleRenderer.new()
+	# One emitter ahead of the eye (looking down -Z), one 15 m behind it.
+	var scene := _live_world_scene_at_heights(PackedFloat32Array())
+	for z in [0.0, 20.0]:
+		var transform := Transform3D.IDENTITY
+		transform.origin.z = z
+		assert_eq(scene.spawn(EffectSpawnRequest.make(scene.intern("GPU effect"),
+				transform)).status, EffectScene.SPAWN_STATUS_SPAWNED)
+	scene.advance_in_place(0.1)
+	renderer.scene = scene
+	renderer.procedural_fallback_enabled = true
+	viewport.add_child(renderer)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+
+	var near: Dictionary = renderer.get_debug_draw_list_report().get("world_camera_side", {})
+	assert_eq(int(near.get("selected_emitters", -1)), 1, "the emitter ahead submits")
+	assert_eq(int(near.get("frustum_culled_emitters", -1)), 1,
+			"the emitter behind the eye never submits")
+	assert_gt(int(near.get("rendered_quad_count", 0)), 0)
+
+	camera.look_at(Vector3(0.0, 0.0, 20.0), Vector3.UP)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	near = renderer.get_debug_draw_list_report().get("world_camera_side", {})
+	assert_eq(int(near.get("selected_emitters", -1)), 1, "turned around, the other submits")
+	assert_eq(int(near.get("frustum_culled_emitters", -1)), 1)
 
 
 func test_world_backend_executes_a_live_gpu_submission() -> void:

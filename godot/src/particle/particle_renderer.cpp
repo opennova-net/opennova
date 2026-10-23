@@ -131,6 +131,9 @@ struct ParticleCameraFrame {
 	Basis view_basis{};
 	std::array<float, 16> projection{};
 	bool projection_valid = false;
+	// The eye's six planes: the render submit's clip state (renderer::ParticleViewInput
+	// frustum carries the witness).
+	opennova::particle::ParticleViewFrustum frustum{};
 };
 
 // The manager camera matrix retail folds into view space per frame
@@ -163,6 +166,10 @@ ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 		}
 	}
 	result.projection_valid = true;
+	// A point just past the near plane reads inside every plane (EffectWorld's
+	// NOVISNOUPDATE state takes its probe the same way).
+	result.frustum = particle_view_frustum(camera->get_frustum(),
+			transform.origin - transform.basis.get_column(2) * (camera->get_near() + 1.0f));
 	return result;
 }
 
@@ -197,6 +204,9 @@ Dictionary draw_list_report(const opennova::renderer::ParticleDrawList &draw_lis
 			static_cast<int64_t>(debug.water_filtered_emitters);
 	result["water_filtered_particles"] =
 			static_cast<int64_t>(debug.water_filtered_particles);
+	result["empty_emitters"] = static_cast<int64_t>(debug.empty_emitters);
+	result["frustum_culled_emitters"] = static_cast<int64_t>(debug.frustum_culled_emitters);
+	result["frustum_culled_particles"] = static_cast<int64_t>(debug.frustum_culled_particles);
 	result["invisible_particles"] = static_cast<int64_t>(debug.invisible_particles);
 	result["lod_skipped_particles"] = static_cast<int64_t>(debug.lod_skipped_particles);
 	result["truncated_particles"] = static_cast<int64_t>(debug.truncated_particles);
@@ -1407,6 +1417,8 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 				view.projection);
 		view.projection_valid = view_camera.projection_valid;
 		view.projection_near_is_one = true;
+		// Each world view's own eye: an emitter out of it never submits.
+		view.frustum = view_camera.frustum;
 		const opennova::renderer::ParticleDrawList &draw_list =
 				impl_->compilers[slot].compile(impl_->render_snapshot, view);
 		impl_->slot_present[slot] = true;

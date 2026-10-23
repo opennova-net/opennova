@@ -471,6 +471,24 @@ const ParticleDrawList &ParticleFrameCompiler::compile(
 			debug.water_filtered_particles += particle_count;
 			continue;
 		}
+		// The child's render submit: no live particle, or bounds outside the view, and
+		// the emitter never joins the render list the partition walks
+		// (ParticleViewInput::frustum carries the witness). The test reads the bounds the
+		// registration sorts by, as retail's both read the emitter's one box.
+		if (particle_count == 0) {
+			++debug.empty_emitters;
+			continue;
+		}
+		if (view.frustum.valid) {
+			const ParticleVec3 &low = emitter.bounds.valid ? emitter.bounds.min : emitter.position;
+			const ParticleVec3 &high = emitter.bounds.valid ? emitter.bounds.max : emitter.position;
+			if (!particle::bounds_visible_in_frustum({low.x, low.y, low.z},
+						{high.x, high.y, high.z}, view.frustum)) {
+				++debug.frustum_culled_emitters;
+				debug.frustum_culled_particles += particle_count;
+				continue;
+			}
+		}
 
 		++debug.selected_emitters;
 		selected_particles += particle_count;

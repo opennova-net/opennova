@@ -367,34 +367,7 @@ void EffectScene::set_global_wind(const Vector3 &p_wind) {
 
 void EffectScene::set_view_frustum(const TypedArray<Plane> &p_planes,
 		const Vector3 &p_inside_probe) {
-	frustum_ = {};
-	if (p_planes.size() != 6) {
-		return;
-	}
-	// Godot planes answer `normal . p - d`; the simulator wants
-	// `a x + b y + c z + d >= 0` inside. Camera3D::get_frustum points its
-	// normals outward, so the inside probe reads negative ("under") and the
-	// set is flipped; a plane set that already reads the probe inside is kept.
-	float sign = 1.0f;
-	{
-		const Plane first = p_planes[0];
-		if (first.normal.dot(p_inside_probe) - first.d < 0.0f) {
-			sign = -1.0f;
-		}
-	}
-	for (int index = 0; index < 6; ++index) {
-		const Plane plane = p_planes[index];
-		if (!std::isfinite(plane.normal.x) || !std::isfinite(plane.normal.y) ||
-				!std::isfinite(plane.normal.z) || !std::isfinite(plane.d)) {
-			frustum_ = {};
-			return;
-		}
-		frustum_.planes[index][0] = sign * plane.normal.x;
-		frustum_.planes[index][1] = sign * plane.normal.y;
-		frustum_.planes[index][2] = sign * plane.normal.z;
-		frustum_.planes[index][3] = -sign * plane.d;
-	}
-	frustum_.valid = true;
+	frustum_ = particle_view_frustum(p_planes, p_inside_probe);
 }
 
 void EffectScene::clear_view_frustum() {
