@@ -1910,6 +1910,31 @@ void test_inset_pass_runs_in_the_non_nvg_fork_alone() {
     CHECK(frame.inset_fov_over_zoom == 0.0f);
 }
 
+// The Inset byte is the Scoped selector's split: the Scoped query reads the def's
+// Scoped bit (flags & 1) and the promoted byte, and only past it does the Inset bit
+// (flags2 0x200) take the Inset byte instead of the Scoped one. A Sighted def's Inset
+// bit never reaches it: the Sighted query (flags & 2, the slot's action not SWITCHFROM)
+// raises the Sighted byte, and no Inset pass runs. Every shipped Inset row is Sighted.
+// [orig: Render_ProcessMainSceneFrame @0x5CA290..0x5CA2D5 (Player_IsEquippedWeaponScoped
+//  @0x4DCC80 called @0x5CA299, the Inset split @0x5CA2A2..0x5CA2C7,
+//  Player_IsVehicleGunnerScoped @0x4DCD30 called @0x5CA2CC), the Inset gate
+//  @0x5CA937..0x5CA945]
+void test_a_sighted_inset_def_runs_no_inset_pass() {
+    LocalWorld lw;
+    lw.w.weather.seed(WeatherSeed{});
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED, DEF_WEAPON_FLAG2_INSET);
+    PlayerViewState view;
+    CHECK(local_player_scope_toggle(lw.w, w, view, w.slot));
+    settle_ease(view);
+    local_player_view_frame(&lw.w, w, view, tracker, frame);
+    CHECK(frame.scope_settled);
+    CHECK(frame.frame_fx.sighted_selector && !frame.frame_fx.scoped_selector);
+    CHECK(!frame.inset_scope_active && !frame.fp_inset_scoped);
+    CHECK(frame.inset_fov_over_zoom == 0.0f);
+}
+
 void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
     LocalWorld lw;
     LocalPlayerWeapon weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
@@ -4214,6 +4239,7 @@ int main() {
     test_scope_fov_target_and_render_queries_share_weather_state();
     test_frame_publishes_the_fp_draw_gates();
     test_inset_pass_runs_in_the_non_nvg_fork_alone();
+    test_a_sighted_inset_def_runs_no_inset_pass();
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
     test_arms_dip_follows_the_weapon_category_not_the_anim_map();
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();
