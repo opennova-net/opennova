@@ -4,6 +4,7 @@
 #include "util/axes.h"
 
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -398,9 +399,13 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 	LocalVector<int32_t> spawned_items;
 	int spawn_attempts = 0;
 	int pending_spawns = 0;
-	// The frame's cold spawns timed with their scene builds' phases (an instrument: the
-	// verbose line past the rows names what a wire row's first present costs).
+	// The frame's cold spawns timed with their scene builds' phases (an instrument, read under
+	// --verbose alone: the line past the rows names what a wire row's first present costs, split
+	// into the spawns' calls, the placer's file and animation-map reads inside them, and the rows'
+	// presents, the new rows' first ones apart).
+	const bool profile_spawns = OS::get_singleton()->is_stdout_verbose();
 	uint64_t spawn_start_usec = 0;
+	uint64_t spawn_calls_usec = 0;
 	PackedStringArray spawned_graphics;
 	for (int i = 0; i < count; ++i) {
 		const int base = i * p_stride;
@@ -475,23 +480,30 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 				++pending_spawns;
 				continue;
 			}
-			if (spawn_attempts == 0) {
+			if (spawn_attempts == 0 && profile_spawns) {
 				(void)ObjectModel::take_build_profile();
+				(void)placer_->take_load_profile();
+				wire_first_present_usec_ = 0;
 				spawn_start_usec = Time::get_singleton()->get_ticks_usec();
 			}
 			++spawn_attempts;
+			const uint64_t call_start =
+					profile_spawns ? Time::get_singleton()->get_ticks_usec() : 0;
 			// build_player_animated_model maps the player runtime type to its
 			// visual item and passes other organics through — the SAME chain
 			// the host uses for the local avatar and placed NPCs.
 			node = placer_->build_player_animated_model(
 					type_id, parent, character_id);
+			if (profile_spawns) {
+				spawn_calls_usec += Time::get_singleton()->get_ticks_usec() - call_start;
+			}
 			if (node == nullptr) {
 				unresolved_[handle] = visual_identity;
 				++stat_unresolved_;
 				continue;
 			}
 			node->set_name(vformat("Wire_%04x", handle));
-			spawned_graphics.push_back(node->get_graphic_name());
+			if (profile_spawns) spawned_graphics.push_back(node->get_graphic_name());
 			Ref<EntityRef> ref;
 			ref.instantiate();
 			ref->set_kind(runtime_kind);
@@ -518,16 +530,26 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 			spawned_items.push_back(visual_item_id);
 		}
 	}
+	const bool profile_rows = profile_spawns && spawn_attempts > 0;
+	const uint64_t rows_start = profile_rows ? Time::get_singleton()->get_ticks_usec() : 0;
+	wire_profile_first_presents_ = profile_rows;
 	present_wire_rows(p_snap, p_stride, tick_delta);
-	if (spawn_attempts > 0) {
+	wire_profile_first_presents_ = false;
+	if (profile_rows) {
 		// The spawned rows' held weapons build in the rows above, so the span runs through them.
+		const uint64_t now = Time::get_singleton()->get_ticks_usec();
 		const PackedInt64Array build_profile = ObjectModel::take_build_profile();
+		const MissionObjectPlacer::LoadProfile loads = placer_->take_load_profile();
 		UtilityFunctions::print_verbose(vformat(
 				"EntityPresenter: wire cold spawns %d (%d owed to later frames): %d ms with the rows "
-				"(%s); scene %s",
-				spawn_attempts, pending_spawns,
-				static_cast<int>((Time::get_singleton()->get_ticks_usec() - spawn_start_usec) / 1000),
-				String(", ").join(spawned_graphics), ObjectModel::format_build_profile(build_profile)));
+				"(%s): spawn calls %d ms (model files %d read %d ms, animation maps %d read %d ms), "
+				"rows %d ms (first presents %d ms); scene %s",
+				spawn_attempts, pending_spawns, static_cast<int>((now - spawn_start_usec) / 1000),
+				String(", ").join(spawned_graphics), static_cast<int>(spawn_calls_usec / 1000),
+				loads.data_loads, static_cast<int>(loads.data_us / 1000), loads.rig_loads,
+				static_cast<int>(loads.rig_us / 1000), static_cast<int>((now - rows_start) / 1000),
+				static_cast<int>(wire_first_present_usec_ / 1000),
+				ObjectModel::format_build_profile(build_profile)));
 	}
 	pending_spawn_count_ = pending_spawns;
 	for (uint32_t i = 0; i < spawned_nodes.size(); ++i) {
@@ -824,7 +846,14 @@ void EntityPresenter::present_wire_rows(PresentRowsView snap,
 		if (model == nullptr) {
 			continue;
 		}
-		present_one_wire_row(row, model, snap, tick_delta);
+		if (wire_profile_first_presents_ && row.spawned_now) {
+			// A new row's first present, timed apart (the cold walk's instrument).
+			const uint64_t start = Time::get_singleton()->get_ticks_usec();
+			present_one_wire_row(row, model, snap, tick_delta);
+			wire_first_present_usec_ += Time::get_singleton()->get_ticks_usec() - start;
+		} else {
+			present_one_wire_row(row, model, snap, tick_delta);
+		}
 		row.spawned_now = false;
 	}
 }

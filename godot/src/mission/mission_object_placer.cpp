@@ -711,9 +711,13 @@ Ref<ObjectData> MissionObjectPlacer::_load_object_data(
 	Ref<ObjectData> data;
 	const String model_name = _model_name_for(p_graphic);
 	if (!model_name.is_empty() && resource_root_.is_valid()) {
+		const uint64_t load_start = Time::get_singleton()->get_ticks_usec();
 		Ref<ObjectData> d;
 		d.instantiate();
-		if (d->open_from_resource_root(resource_root_, model_name) == OK) {
+		const Error opened = d->open_from_resource_root(resource_root_, model_name);
+		++load_profile_.data_loads;
+		load_profile_.data_us += Time::get_singleton()->get_ticks_usec() - load_start;
+		if (opened == OK) {
 			data = d;
 		} else if (!resource_root_->has_file(model_name)) {
 			// No file of the name (one there that does not read is no miss): the log line the editor's
@@ -910,12 +914,15 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	if (cached != nullptr) {
 		return *cached;
 	}
+	const uint64_t load_start = Time::get_singleton()->get_ticks_usec();
 	Ref<SkeletalAnim> skeletal;
 	skeletal.instantiate();
 	if (!skeletal->load_from_resource_root(resource_root_, adm_name,
 				p_bone_origins, p_bone_parents)) {
 		skeletal.unref();
 	}
+	++load_profile_.rig_loads;
+	load_profile_.rig_us += Time::get_singleton()->get_ticks_usec() - load_start;
 	skeletal_cache_[cache_key] = skeletal;
 	return skeletal;
 }
@@ -1604,6 +1611,12 @@ String MissionObjectPlacer::graphic_for(int p_item_id) {
 Ref<ObjectData> MissionObjectPlacer::object_data_for(const String &p_graphic) {
 	_check_epoch();
 	return _load_object_data(p_graphic);
+}
+
+MissionObjectPlacer::LoadProfile MissionObjectPlacer::take_load_profile() {
+	const LoadProfile taken = load_profile_;
+	load_profile_ = LoadProfile();
+	return taken;
 }
 
 int MissionObjectPlacer::resolve_model_materials(const PackedStringArray &p_files,

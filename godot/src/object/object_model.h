@@ -256,6 +256,9 @@ public:
 		BUILD_PROFILE_MATERIAL_TEXTURES_US, // a new material's stage textures (a first load decodes)
 		BUILD_PROFILE_MATERIAL_CREATES_US, // a new material past its textures: shader, parameters
 		BUILD_PROFILE_ALPHA_COPIES_US, // an alpha strip's own copy of its material
+		// Inside the creates, counted apart: a new material's shader bind (a key's first use loads
+		// its shader resource).
+		BUILD_PROFILE_MATERIAL_SHADERS_US,
 		BUILD_PROFILE_SLOT_COUNT,
 	};
 	// The process's scene builds since the last take, then zeroed: the mission load's placement

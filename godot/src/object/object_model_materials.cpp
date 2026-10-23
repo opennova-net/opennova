@@ -221,7 +221,12 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 		// (render-material-re.md §FF technique tables).
 		key &= ~opennova::renderer::OSCAP_DETAIL;
 	}
+	// The shader bind on the build profile's own slot (an instrument; a key's first use loads its
+	// shader resource).
+	const uint64_t shader_start = Time::get_singleton()->get_ticks_usec();
 	shader_cache->configure_material_for_key(material, key);
+	build_profile_[BUILD_PROFILE_MATERIAL_SHADERS_US] +=
+			static_cast<int64_t>(Time::get_singleton()->get_ticks_usec() - shader_start);
 	const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
 			opennova::renderer::describe_object_shader_pipeline(static_cast<uint32_t>(key));
 	// A skinned effect's vertex program poses the strip from the model's

@@ -182,10 +182,12 @@ void ObjectModel::rebuild_scene() {
 			// them) apart from the rest of its build.
 			build_phase(BUILD_PROFILE_MATERIALS_US);
 			const int64_t textures_before = build_profile_[BUILD_PROFILE_MATERIAL_TEXTURES_US];
+			const int64_t shaders_before = build_profile_[BUILD_PROFILE_MATERIAL_SHADERS_US];
 			Ref<ShaderMaterial> material = material_for_index(surface.material_index);
 			build_phase(BUILD_PROFILE_MATERIAL_CREATES_US);
 			build_profile_[BUILD_PROFILE_MATERIAL_CREATES_US] -=
-					build_profile_[BUILD_PROFILE_MATERIAL_TEXTURES_US] - textures_before;
+					build_profile_[BUILD_PROFILE_MATERIAL_TEXTURES_US] - textures_before +
+					build_profile_[BUILD_PROFILE_MATERIAL_SHADERS_US] - shaders_before;
 			// One source submesh is one retail strip. Transparent strips must own
 			// their material instance because Godot stores render_priority on the
 			// material, while retail chooses Q1/Q2 independently for every strip on

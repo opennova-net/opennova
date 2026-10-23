@@ -269,6 +269,16 @@ public:
 
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
+	// The model files and animation maps this placer read from the mount since the last take:
+	// their counts and wall time (an instrument: the wire walk's cold spawns print it beside
+	// ObjectModel's build profile). C++ siblings only.
+	struct LoadProfile {
+		int data_loads = 0;
+		uint64_t data_us = 0;
+		int rig_loads = 0;
+		uint64_t rig_us = 0;
+	};
+	LoadProfile take_load_profile();
 	// The mission start's freeze, every arm's (the full arm's and a dedicated host's reduced one):
 	// the list's (Simulation::get_mission_start_model_files) material resolve, no model built and
 	// nothing drawn: each file's data, its materials' rows through their loaders
@@ -602,6 +612,7 @@ private:
 
 	HashMap<String, Ref<ObjectData>> object_data_cache_;
 	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
+	LoadProfile load_profile_; // take_load_profile
 	HashMap<String, Vector<StaticBatch>> static_batch_cache_;
 	HashMap<String, PackedVector3Array> static_face_cache_; // get_static_graphic_faces
 	HashMap<String, StaticLodProfile> static_lod_profile_cache_;

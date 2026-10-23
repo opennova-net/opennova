@@ -723,6 +723,9 @@ private:
 	HashMap<int32_t, Ref<PersonOverlayModels>> person_overlays_;
 	HashMap<int32_t, LightingContext> lighting_contexts_;
 	int pending_spawn_count_ = 0;
+	// The cold walk's instrument (--verbose): the new rows' first presents timed apart.
+	bool wire_profile_first_presents_ = false;
+	uint64_t wire_first_present_usec_ = 0;
 	int64_t last_present_logic_tick_ = -1;
 	int64_t stat_spawned_ = 0;
 	int64_t stat_unresolved_ = 0;
