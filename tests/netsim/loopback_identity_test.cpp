@@ -421,15 +421,18 @@ bool run_compact_pose_fields_survive_client_fold() {
 	if (!expect(i != nullptr && i->carrier_handle == 0x1008 && i->mount_bone == 3 &&
 	                    i->seat_type == 0 && i->pitch_byte == 0x31 &&
 	                    i->aim_yaw_byte == 0xF4 && i->anim_state_id == 47 &&
-	                    i->anim_channel_ratio == 0 &&
-	                    i->pitch_bam == static_cast<int32_t>(0xFE800000u),
-	            "infantry compact target advances live pitch by retail's one-eighth chase"))
+	                    i->anim_channel_ratio == 0 && i->pitch_bam == 0,
+	            "infantry compact stages its aim bytes and writes no live Pitch"))
 		return false;
+	// The infantry record writes the aim words (+0x2EC, +0x2D0) and never the live Pitch: the
+	// body update's look chases it every tick (a seated body's in tick_seated_looks), so a
+	// second fold leaves it where it was.
+	// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the stores @0x4C066C /
+	//  @0x4C0672; Entity_UpdateInfantryAI @0x4B9910 - the look @0x4BEF87..0x4BEF97]
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(mounted));
 	i = view.state().find(0x0002);
-	if (!expect(i != nullptr &&
-	                    i->pitch_bam == static_cast<int32_t>(0xFD300000u),
-	            "successive mounted frames continue the stateful pitch chase"))
+	if (!expect(i != nullptr && i->pitch_bam == 0,
+	            "successive mounted frames write no live Pitch either"))
 		return false;
 
 	// A subsequent free-standing record is the dismount signal. Overwrite every
@@ -451,8 +454,8 @@ bool run_compact_pose_fields_survive_client_fold() {
 	            "player dismount clears retained selector fields")) return false;
 	if (!expect(i != nullptr && i->carrier_handle == 0xFFFF && i->mount_bone == 0,
 	            "infantry dismount clears retained selector fields")) return false;
-	if (!expect(i->pitch_bam == static_cast<int32_t>(0xFD300000u),
-	            "infantry dismount retains the last reconstructed live pitch")) return false;
+	if (!expect(i->pitch_bam == 0,
+	            "the free-standing record writes no live Pitch")) return false;
 	return true;
 }
 
@@ -773,13 +776,17 @@ bool run_carried_child_follows_later_carrier_same_mover_tick() {
 			static_cast<uint32_t>(moved_carrier->heading_bam),
 			static_cast<uint32_t>(moved_carrier->pitch_bam),
 			static_cast<uint32_t>(moved_carrier->roll_bam));
-	const int32_t expected_heading = opennova::io::bam_add(
-			moved_carrier->heading_bam,
-			static_cast<int32_t>(uint32_t{0x10} << 24));
-	return expect(moved_child->x == expected.x && moved_child->y == expected.y &&
-	                      moved_child->z == expected.z &&
-	                      moved_child->heading_bam == expected_heading,
-	              "child-first rider follows the carrier's final same-tick pose");
+	if (!expect(moved_child->x == expected.x && moved_child->y == expected.y &&
+	                    moved_child->z == expected.z,
+	            "child-first rider follows the carrier's final same-tick pose")) return false;
+	// A live seated org1 body's Yaw is its seat branch's look (tick_seated_looks, after the
+	// tick's gun channels), never the follow's: the walk only arms that look, and the record
+	// wrote no live Yaw (no respawn edge).
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
+	//  look @0x4BEF57..0x4BEF97; NetPacket_SerializeInfantryEntityState @0x4C0320 - the
+	//  respawn arm's +0x10 store @0x4C05D5]
+	return expect(moved_child->heading_bam == 0 && moved_child->rm_seat_look_due,
+	              "the follow writes no Yaw for a live seated org1 rider; its look is armed");
 }
 
 // A NoNetworkCallback attachment has no compact mover of its own. Its 0x0D
