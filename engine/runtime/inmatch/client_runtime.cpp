@@ -2247,7 +2247,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_first_loadou
 	return log_client_sends(std::move(outbound), joiner_->session_lost());
 }
 
-std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end() {
+std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end(
+		const std::function<void()> &present) {
 	std::vector<std::vector<uint8_t>> outbound;
 	if (joiner_ == nullptr || !joiner_->mission_start_released()) return outbound;
 	// The first leg here when the embedder's load did not run it at its point.
@@ -2264,6 +2265,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end() {
 	(void)joiner_->take_mission_start_submissions(submissions);
 	mission_start_receive_pump();
 	send_queue_.push_back(std::move(submissions.second_loadout));
+	// The loading screen's 100 %, past the second 0x2F's queue and ahead of the 0x0B's: the
+	// mission start presents it itself, ahead of the final wait (the header carries the
+	// witness, D-NET-NEW-L8-41).
+	if (present) present();
 	send_queue_.push_back(std::move(submissions.mission_status));
 	mission_start_send_pump(outbound);
 	// The push ends here. What the countdown still holds waits in the queue for the final

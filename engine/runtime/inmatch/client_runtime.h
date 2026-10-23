@@ -933,8 +933,14 @@ public:
 	//  @0x5258A2 / @0x5258EA / @0x5259F1 / @0x525A61, the freeze @0x525A6E, the pump
 	//  @0x525ACA, the zero @0x525B9F, the receive @0x525BD9, the second 0x2F @0x525C2E, the
 	//  0x0B @0x52624B, the send @0x526255]
+	// `present` is the embedder's loading screen at 100 %, which the mission start presents
+	// past the second 0x2F's queue and ahead of the 0x0B's (R-L2-s38-1, D-NET-NEW-L8-41)
+	// [orig: Game_StartMission @0x524360 - the second 0x2F @0x525C2E, `push 64h` @0x525D22,
+	//  LoadingScreen_UpdateAndPresent @0x525D29, the 0x0B @0x52620E..0x52624B, the send
+	//  @0x526255].
 	std::vector<std::vector<uint8_t>> push_mission_start_first_loadout();
-	std::vector<std::vector<uint8_t>> push_mission_start_end();
+	std::vector<std::vector<uint8_t>> push_mission_start_end(
+			const std::function<void()> &present = {});
 	void set_weapon_table(const world::WeaponTable *weapons) {
 		if (joiner_) joiner_->set_weapon_table(weapons);
 	}

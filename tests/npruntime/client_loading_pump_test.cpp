@@ -1412,11 +1412,13 @@ bool run_the_mission_start_first_leg_runs_mid_load() {
 // inside it), the settle, the push and the final wait's first pass, all in that one call
 // (JoinerRole::poll_mission_start); a pass that takes no 0x1A runs none of them. The push's
 // countdown holds the second 0x2F and the 0x0B (c = 11, as above), and the final wait's first
-// pass, inside the same call, ships them.
+// pass, inside the same call, ships them. The embedder's 100 % loading present runs inside the
+// push, after the settle and ahead of anything the push sends (D-NET-NEW-L8-41).
 // [orig: NapiClient_WaitForGameStart @0x42CC10 - the receive @0x42CC88, the send @0x42CC92,
 //  the flag test @0x42CCB9..0x42CCBF, the return @0x42CCC1; Game_StartMission @0x524360 -
-//  the call @0x524E29, the first 0x2F @0x525836, the 0x0B @0x52624B, the send @0x526255,
-//  the final wait's first pass @0x5262B4 / @0x5262BE / @0x5262DA]
+//  the call @0x524E29, the first 0x2F @0x525836, the second 0x2F @0x525C2E, `push 64h`
+//  @0x525D22, LoadingScreen_UpdateAndPresent @0x525D29, the 0x0B @0x52624B, the send
+//  @0x526255, the final wait's first pass @0x5262B4 / @0x5262BE / @0x5262DA]
 bool run_the_mission_start_runs_in_the_0x1a_pass() {
 	RoleHarness h;
 	if (!expect(drive_into_the_world_stream(h, 12), "mission start call: the world stream runs"))
@@ -1427,6 +1429,7 @@ bool run_the_mission_start_runs_in_the_0x1a_pass() {
 	std::vector<std::vector<uint8_t>> first_leg;
 	std::size_t load_from = 0;
 	std::size_t settle_from = 0;
+	std::size_t present_from = 0;
 	inmatch::JoinerRole::MissionStartLegs legs;
 	legs.after_pass = [&] {
 		order.push_back(h.client.mission_start_released() ? "pass 0x1A" : "pass");
@@ -1445,6 +1448,10 @@ bool run_the_mission_start_runs_in_the_0x1a_pass() {
 		settle_from = h.socket.sent.size();
 		return true;
 	};
+	legs.present = [&] {
+		order.push_back("present");
+		present_from = h.socket.sent.size();
+	};
 	if (!expect(h.client.send_holdoff_countdown() == 3 &&
 	                    h.role.poll_mission_start(legs) ==
 	                            inmatch::JoinerRole::MissionStartPass::Waiting &&
@@ -1460,8 +1467,12 @@ bool run_the_mission_start_runs_in_the_0x1a_pass() {
 	h.client.receive(release.data(), release.size());
 	if (!expect(h.role.poll_mission_start(legs) ==
 	                    inmatch::JoinerRole::MissionStartPass::Started &&
-	                    order == std::vector<std::string>{"pass 0x1A", "load", "settle"},
-			"mission start call: the 0x1A's pass runs the load, then the settle, in its call"))
+	                    order == std::vector<std::string>{"pass 0x1A", "load", "settle", "present"},
+			"mission start call: the 0x1A's pass runs the load, then the settle, then the push's "
+			"100 % present, in its call"))
+		return false;
+	if (!expect(present_from == settle_from,
+			"mission start call: the 100 % present runs inside the push, ahead of its sends"))
 		return false;
 	if (!expect(load_from == call_from && h.packets(first_leg, {{0x2F}}) &&
 	                    settle_from == load_from + first_leg.size(),

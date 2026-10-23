@@ -78,12 +78,17 @@ func finish_presentation() -> void:
 	dismiss()
 
 
-## Present the final checkpoint only at the shell's reveal/transition edge.
-## GameWorld stops at WORLD_READY so a joiner waiting for authoritative
-## admission never claims to be complete.
+## Present the final checkpoint at the shell's reveal/transition edge, which a
+## single player's or a host's load reaches inside its own call. A joiner's
+## mission start presented 100 itself, past its second 0x2F and ahead of its
+## 0x0B and the final wait (engine inmatch::ClientRuntime::push_mission_start_end
+## carries the witness, D-NET-NEW-L8-41): its admission's reveal presents
+## nothing more.
 func complete_progress() -> bool:
 	if _screen == null or not _presentation_active:
 		return false
+	if _screen.displayed_progress() == MissionData.LOAD_PROGRESS_COMPLETE:
+		return true
 	_screen.set_progress(MissionData.LOAD_PROGRESS_COMPLETE)
 	_screen.present(true)
 	return true

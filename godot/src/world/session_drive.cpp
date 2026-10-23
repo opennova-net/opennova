@@ -33,6 +33,7 @@ constexpr const char *kSignalJoinSessionIdentified = "join_session_identified";
 constexpr const char *kSignalJoinAdmissionReady = "join_admission_ready";
 constexpr const char *kSignalJoinDeployPickRequired = "join_deploy_pick_required";
 constexpr const char *kSignalSessionLost = "session_lost";
+constexpr const char *kSignalLoadProgress = "load_progress";
 // HostSessionOptions.channel for the NovaWorld browser/lobby: the LAN channel
 // never reads or manufactures NovaWorld service configuration; a NovaWorld host
 // is hosted by the NovaWorld session the shell hands over.
@@ -344,6 +345,13 @@ void SessionDrive::step_preload() {
 		world_->report_join_wire_asset_failure(
 				"join: failed to settle the host's streamed mission assets");
 		return false;
+	};
+	// The mission start presents its loading screen at 100 % itself, past the second 0x2F's
+	// queue and ahead of the 0x0B's and the final wait, so the admission's reveal presents
+	// nothing more (engine inmatch::ClientRuntime::push_mission_start_end carries the witness,
+	// R-L2-s38-1, D-NET-NEW-L8-41).
+	legs.present = [&]() {
+		world_->emit_signal(kSignalLoadProgress, MissionData::LOAD_PROGRESS_COMPLETE);
 	};
 	if (sim->poll_join_mission_start(legs) ==
 			opennova::inmatch::JoinerRole::MissionStartPass::Started)

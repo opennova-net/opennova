@@ -140,8 +140,10 @@ public:
 	// The end of the mission start the S2C 0x1A released, once the embedder's load has run
 	// (ClientRuntime::push_mission_start_end): sends what its pumps build, the two
 	// 0x2F and the 0x0B, then runs the final wait's first pass for the S2C 0x0F, which
-	// ships what the push's countdown held; nothing before the release.
-	void push_mission_start_end();
+	// ships what the push's countdown held; nothing before the release. `present` is the
+	// embedder's 100 % loading present, which the push runs between the second 0x2F's queue
+	// and the 0x0B's (ClientRuntime::push_mission_start_end carries the witness).
+	void push_mission_start_end(const std::function<void()> &present = {});
 	// The mission start's call, from the game-start wait's pass whose receive takes the S2C
 	// 0x1A to the final wait's first pass, with no frame between its legs (D-NET-NEW-L2-35):
 	// the wait's pass returns on the 0x1A's flag straight into the mission start's load, whose
@@ -153,7 +155,8 @@ public:
 	// reloads the entity models and initializes every pool's rows from them ahead of its first
 	// 0x2F (D-NET-NEW-L2-42), and the model freeze's analog after the first leg (the
 	// loaded-model list and its warm); `settle`, the embedder's check on the streamed world
-	// before the push. A
+	// before the push; `present`, the embedder's loading screen at 100 %, which the push runs
+	// past the second 0x2F's queue and ahead of the 0x0B's (D-NET-NEW-L8-41). A
 	// leg that returns false stops the call, its embedder reporting why.
 	// A mission start the 0x1A already released goes straight to the load. Waiting: the pass
 	// took no 0x1A.
@@ -167,6 +170,7 @@ public:
 		std::function<bool()> after_pass;
 		std::function<bool()> load;
 		std::function<bool()> settle;
+		std::function<void()> present;
 	};
 	enum class MissionStartPass : uint8_t { Waiting, Stopped, Started };
 	MissionStartPass poll_mission_start(const MissionStartLegs &legs);

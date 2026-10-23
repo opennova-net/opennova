@@ -509,8 +509,13 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 				"the HUD's overlay init ran ahead of the first 0x2F's leg: %s" % [spans])
 	assert_true(bool(observed["held"]),
 			"local world_loaded cannot reveal the joiner before host admission")
-	assert_eq(int(observed["held_progress"]), MissionData.LOAD_PROGRESS_WORLD_READY,
-			"the held joiner reports local-world readiness, not false completion")
+	# The joiner's mission start presents 100 % itself, past its second 0x2F and ahead of its
+	# 0x0B and the final wait, so the held joiner shows 100 while it awaits its admission
+	# (R-L2-s38-1, D-NET-NEW-L8-41; this flips the old "never claims complete" premise)
+	# [orig: Game_StartMission @0x524360 - `push 64h` @0x525D22, LoadingScreen_UpdateAndPresent
+	# @0x525D29, the 0x0B @0x52624B, the final wait @0x526295].
+	assert_eq(int(observed["held_progress"]), MissionData.LOAD_PROGRESS_COMPLETE,
+			"the held joiner shows the mission start's 100 % while it awaits admission")
 	assert_false(_shell.is_world_loading(),
 			"the loading screen releases after the authoritative join edge")
 	assert_eq(_shell.loading_progress_percent(), -1,

@@ -195,9 +195,9 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 //  CNapiNetwork_PumpManagerReceive @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE,
 //  CNapiNetwork_PumpClientProtocolSend @0x5262DA, the exit test @0x5262DF; GameLoop_Init
 //  @0x526370 (the call @0x526377)]
-void JoinerRole::push_mission_start_end() {
+void JoinerRole::push_mission_start_end(const std::function<void()> &present) {
 	if (!runtime) return;
-	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_end()) send(dg);
+	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_end(present)) send(dg);
 	if (!runtime->in_final_wait()) return;
 	deposit_inbound();
 	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_)) send(dg);
@@ -219,7 +219,7 @@ JoinerRole::MissionStartPass JoinerRole::poll_mission_start(const MissionStartLe
 	}
 	if (!legs.load || !legs.load()) return MissionStartPass::Stopped;
 	if (legs.settle && !legs.settle()) return MissionStartPass::Stopped;
-	push_mission_start_end();
+	push_mission_start_end(legs.present);
 	return MissionStartPass::Started;
 }
 

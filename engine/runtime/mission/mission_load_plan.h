@@ -10,9 +10,8 @@
 // 95,100 (LoadingScreen_UpdateAndPresent calls @0x52498f..0x525d29); our
 // pipeline has fewer stages than the original's ~30 call sites. OpenNova uses
 // deterministic ten-percentage-point checkpoints for actual operations and
-// reserves 90 for local-world readiness and 100 for the shell's
-// presentation-release edge (docs/interface/loading-screen-re.md
-// D-LOADSCR-1)]. Order witnesses
+// reserves 90 for local-world readiness and 100 for the mission start's last
+// present (docs/interface/loading-screen-re.md D-LOADSCR-1)]. Order witnesses
 // the stages carry:
 //  - the shared .3DI definition cache is destroyed before the environment
 //    and terrain loads (celestial resolves its models from the environment,
@@ -90,9 +89,14 @@ inline constexpr int kMissionLoadStageCount =
 static_assert(kMissionLoadStageCount == static_cast<int>(MissionLoadStage::kCount),
 		"every load stage has one plan row");
 
-// Local construction stops at world-ready so a joiner truthfully remains
-// incomplete while awaiting authoritative admission. The shell presents 100
-// only at the release/reveal edge.
+// Local construction stops at world-ready. 100 is the mission start's last
+// present: a joiner's mission start presents it past its second 0x2F's queue and
+// ahead of its 0x0B's and the final wait, so the joiner shows 100 while it awaits
+// its admission (R-L2-s38-1, D-NET-NEW-L8-41); a single player's or a host's shell
+// presents it at the reveal, inside the load's own call
+// [orig: Game_StartMission @0x524360 - the second 0x2F @0x525C2E, `push 64h`
+// @0x525D22, LoadingScreen_UpdateAndPresent @0x525D29, LoadingScreen_ReleaseEffect
+// @0x525D52, the 0x0B @0x52624B, the final wait @0x526295].
 inline constexpr int kMissionLoadProgressWorldReady = 90;
 inline constexpr int kMissionLoadProgressComplete = 100;
 
