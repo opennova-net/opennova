@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -39,7 +40,25 @@ struct HttpRequestSpec {
 	std::vector<std::string> headers; // "Header: value" lines (Content-Type, Cookie)
 	std::string body;                 // form body (POST); empty otherwise
 	bool valid = false;               // false when there is no request to issue
+	// The menu browser's GET: once the transport resolved the server, the URL takes its
+	// nocachefix pair (browser_cache_bust_url) before it goes out. A form post takes none.
+	bool cache_bust = false;
 };
+
+// A menu-browser GET's URL as it goes out: "?nocachefix=" (or "&nocachefix=" behind a query)
+// and "%d%d" of the process tick (GetTickCount's) and the resolved server's IPv4 address, its
+// four octets in network order read as one little-endian int (207.178.209.204 prints
+// -858672433). A URL with no path goes out as it is (D-NET-NEW-L9-31).
+// [orig: CUIBrowser_SendHTTPRequest @0x658840 - the query test `cmp dword ptr [ebp+1Ch], 0`
+//  @0x65889F, the request's +0x30 word read @0x6588A3, GetTickCount @0x6588AA / @0x6588F6,
+//  "?nocachefix=%d%d" (0x7E1E28) pushed @0x6588B5, "&nocachefix=%d%d" (0x7E1DFC) pushed
+//  @0x658901, the path's length test (String_SafeLen called @0x658910), "GET / HTTP/1.0" with no
+//  pair @0x658942; the request's +0x30 word the server's address: CNapiWinsock_InitFromUrl
+//  @0x658DA0 called @0x659797 over the request's +0x28 (@0x65978D) - CNapiWinsock_ResolveHostAsync
+//  called @0x658E4B into its +8, read as the connect's address (`lea eax, [esi+30h]` @0x6597F3,
+//  CNapiWinsock_ConnectNonBlocking @0x667600 called @0x6597F7)]
+std::string browser_cache_bust_url(const std::string &url, uint32_t tick_ms,
+		const std::array<uint8_t, 4> &server_ip);
 
 // The lobby context the HTTP machines read — filled by the owner from the gate response + the NWU
 // session leg (the UDP side stays in the binding/ClientSession; here we only consume its outputs).
@@ -70,9 +89,12 @@ struct LoginResult {
 
 // --- join ---
 struct JoinResult {
-	enum class Kind { NeedRequest, Resolved, Failed };
+	// Settled: the .joi page's refresh came back (its cookies merged); nothing more to do.
+	enum class Kind { NeedRequest, Resolved, Failed, Settled };
 	Kind kind = Kind::Failed;
-	HttpRequestSpec request;  // when NeedRequest
+	HttpRequestSpec request;  // when NeedRequest; when Resolved, the .joi page's refresh GET
+	                          // (invalid when the page names none), which the owner ships after
+	                          // its play leg starts and feeds back to on_join_response
 	std::string host_ip;      // when Resolved: the decoded-NK endpoint (NK is the only dial authority)
 	uint16_t host_port = 0;   // when Resolved
 	// The .joi lobby number. Nonzero means the retail transport dials the
@@ -210,7 +232,7 @@ public:
 
 private:
 	enum class LoginStep { Idle, Prepare, NwStart, Post, Poll };
-	enum class JoinStep { Idle, First, Second };
+	enum class JoinStep { Idle, First, Second, Page };
 	enum class HostStep { Idle, Fetching };
 
 	// The menu browser's GET headers and its form post's (each past the request line and Host).

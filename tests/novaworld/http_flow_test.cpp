@@ -549,7 +549,76 @@ static bool test_host_resolves() {
 	return g_fail == 0;
 }
 
+// D-NET-NEW-L9-31: a menu-browser GET's nocachefix pair, "%d%d" of the tick and the resolved
+// server's IPv4 address read as one little-endian int ('?' or '&' by the URL's query; none with no
+// path), and which requests carry it: every GET, no form post. The LN S1 / S1b records' pairs have
+// this form (a nine-digit tick, then the web server's address, negative above 127.x.x.x).
+// [orig: CUIBrowser_SendHTTPRequest @0x658840 - @0x65889F, @0x6588A3, @0x6588B5, @0x658901,
+//  @0x658942; CNapiWinsock_InitFromUrl @0x658DA0 - CNapiWinsock_ResolveHostAsync called @0x658E4B]
+static bool test_browser_cache_bust() {
+	expect(nw::browser_cache_bust_url("http://nw.example.test/jop_2_login.mnx", 676778718u,
+	               {198, 51, 100, 7}) ==
+	               "http://nw.example.test/jop_2_login.mnx?nocachefix=676778718124007366",
+	       "a GET with no query takes ?nocachefix= and the address's int");
+	expect(nw::browser_cache_bust_url("http://nw.example.test/jop_2.gsb?a=1", 676811359u,
+	               {203, 0, 113, 250}) ==
+	               "http://nw.example.test/jop_2.gsb?a=1&nocachefix=676811359-93257525",
+	       "behind a query it is &nocachefix=, a high octet printing negative");
+	expect(nw::browser_cache_bust_url("http://nw.example.test", 5u, {198, 51, 100, 7}) ==
+	               "http://nw.example.test",
+	       "a URL with no path goes out as it is");
+	expect(nw::browser_cache_bust_url("http://nw.example.test/a", 0x80000000u, {0, 0, 0, 0}) ==
+	               "http://nw.example.test/a?nocachefix=-21474836480",
+	       "the tick prints signed");
+
+	nw::LobbyHttpFlow f;
+	f.set_context(concrete_ctx());
+	nw::LoginResult r = f.login("p", "s");
+	expect(r.request.cache_bust, "the prepare GET is cache-busted");
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	expect(r.request.method == nw::HttpMethod::Post && !r.request.cache_bust,
+	       "the form post takes no pair");
+	r = f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
+	expect(r.request.cache_bust, "the poll GET is cache-busted");
+	nw::JoinResult j = f.join(9);
+	expect(j.request.cache_bust, "the NWJoin GET is cache-busted");
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-31: the .joi page's refresh. The menu browser follows every META refresh at its
+// next frame whatever the delay (the delay's seconds stand where its test reads a GetTickCount
+// deadline), so the JO .joi's "10;URL=jop_2_jend.htm" is fetched right behind the join (the LN S1b
+// retail joiner: 0.25 s after the .joi). Its answer settles the flow; a failed fetch leaves the
+// join standing.
+// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - @0x655783; CUIScene_EndFrame @0x63E600 -
+//  @0x63E626, UIScene_OpenUrl called @0x63E635]
+static bool test_joi_page_refresh() {
+	const std::string nk = nw::url_cipher_encode("10.1.2.3:3001", nw::URL_CIPHER_KEY_NK);
+	const std::string joi = "<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=\"10;URL=jop_2_jend.htm\">"
+			"<TITLE>[NK=" + nk + "&GS=x]</TITLE></HEAD></HTML>";
+	for (const bool fetched : {true, false}) {
+		nw::LobbyHttpFlow f;
+		f.set_context(concrete_ctx());
+		f.join(5);
+		f.on_join_response(true, 200, set_cookie("NWJOINSESSIONTAG=j"), relay_to("NWJoin.dll"));
+		const nw::JoinResult r = f.on_join_response(true, 200, {}, bytes(joi));
+		if (!expect(r.kind == nw::JoinResult::Kind::Resolved, ".joi with a refresh -> resolved")) return false;
+		expect(r.request.valid && r.request.method == nw::HttpMethod::Get &&
+		               r.request.url == "http://gs.opennova.test:8080/jop_2_jend.htm" &&
+		               r.request.cache_bust,
+		       "the resolve carries the .joi page's refresh GET");
+		expect(f.join_active(), "the flow waits for the page's answer");
+		const nw::JoinResult settled = fetched ? f.on_join_response(true, 200, {}, bytes("<HTML></HTML>"))
+		                                       : f.on_join_response(false, 0, {}, {});
+		expect(settled.kind == nw::JoinResult::Kind::Settled && !f.join_active(),
+		       "the page's answer, or its failure, settles the flow");
+	}
+	return g_fail == 0;
+}
+
 int main() {
+	test_joi_page_refresh();
+	test_browser_cache_bust();
 	test_host_resolves();
 	test_url_builders();
 	test_login_success_concrete();

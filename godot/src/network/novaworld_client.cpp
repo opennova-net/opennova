@@ -871,11 +871,10 @@ void NovaWorldClient::sync_flow_context() {
 Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestSpec &spec) {
 	PackedStringArray headers;
 	// The URL's host, with its port unless it is 80 (Godot's own Host rule).
-	const std::string &url = spec.url;
-	const std::size_t scheme = url.find("://");
+	const std::size_t scheme = spec.url.find("://");
 	const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
-	const std::size_t path_at = url.find('/', host_at);
-	std::string authority = url.substr(host_at,
+	const std::size_t path_at = spec.url.find('/', host_at);
+	std::string authority = spec.url.substr(host_at,
 			path_at == std::string::npos ? std::string::npos : path_at - host_at);
 	if (authority.size() > 3 && authority.compare(authority.size() - 3, 3, ":80") == 0)
 		authority.resize(authority.size() - 3);
@@ -884,9 +883,26 @@ Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestS
 		headers.push_back(opennova::to_gd(h));
 	}
 	http->set_accept_gzip(false);
+	// A menu-browser GET takes its nocachefix pair: the tick now and the server's resolved
+	// address (engine: browser_cache_bust_url, D-NET-NEW-L9-31).
+	std::string url = spec.url;
+	if (spec.cache_bust) {
+		const std::size_t colon = authority.find(':');
+		std::array<uint8_t, 4> server{};
+		if (IP *ip = IP::get_singleton()) {
+			const PackedStringArray octets =
+					ip->resolve_hostname(opennova::to_gd(authority.substr(0, colon)), IP::TYPE_IPV4)
+							.split(".");
+			if (octets.size() == 4) {
+				for (int i = 0; i < 4; ++i)
+					server[static_cast<std::size_t>(i)] = static_cast<uint8_t>(octets[i].to_int());
+			}
+		}
+		url = opennova::browser_cache_bust_url(url, opennova::world::frame_tick_count_ms(), server);
+	}
 	const HTTPClient::Method method = (spec.method == opennova::HttpMethod::Post)
 		? HTTPClient::METHOD_POST : HTTPClient::METHOD_GET;
-	return http->request(opennova::to_gd(spec.url), headers, method, opennova::to_gd(spec.body));
+	return http->request(opennova::to_gd(url), headers, method, opennova::to_gd(spec.body));
 }
 
 void NovaWorldClient::trigger_gsb() {
@@ -1153,6 +1169,12 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 		trace(String("join resolved host ") + opennova::cp1252_to_gd(r.host_ip) + ":"
 			+ String::num_int64(static_cast<int64_t>(r.host_port)));
 		start_playing(r);
+		// The .joi page's refresh (engine: JoinResult::request, D-NET-NEW-L9-31), behind the
+		// play leg it started; its answer settles the flow.
+		if (r.request.valid && ship_spec(join_http_, r.request) != OK)
+			(void)flow_.on_join_response(false, 0, {}, {});
+		break;
+	case opennova::JoinResult::Kind::Settled:
 		break;
 	case opennova::JoinResult::Kind::Failed:
 		// D-1: any async join failure falls back to the lobby (CONNECTED) — consolidates

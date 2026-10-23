@@ -1,6 +1,7 @@
 #include <net/novaworld/http_flow.h>
 
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 
 #include <base/io/crt_ftol.h>
@@ -160,6 +161,7 @@ std::string meta_refresh_url(const std::string &html) {
 }
 
 LoginResult login_need(HttpRequestSpec req) {
+	req.cache_bust = req.method == HttpMethod::Get;
 	LoginResult r;
 	r.kind = LoginResult::Kind::NeedRequest;
 	r.request = std::move(req);
@@ -172,6 +174,7 @@ LoginResult login_fail(std::string reason) {
 	return r;
 }
 JoinResult join_need(HttpRequestSpec req) {
+	req.cache_bust = true;
 	JoinResult r;
 	r.kind = JoinResult::Kind::NeedRequest;
 	r.request = std::move(req);
@@ -200,6 +203,7 @@ ProxyRendezvousConfig proxy_rendezvous_from_join(const JoinResult &resolved) {
 }
 
 HostKeyResult host_need(HttpRequestSpec req) {
+	req.cache_bust = true;
 	HostKeyResult r;
 	r.kind = HostKeyResult::Kind::NeedRequest;
 	r.request = std::move(req);
@@ -574,6 +578,7 @@ HttpRequestSpec LobbyHttpFlow::gsb_request() const {
 	req.method = HttpMethod::Get;
 	req.url = url;
 	req.headers = request_headers();
+	req.cache_bust = true;
 	return req;
 }
 
@@ -615,6 +620,12 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 	const JoinStep step = join_step_;
 	if (!transport_ok || code != 200) {
 		join_step_ = JoinStep::Idle;
+		// The .joi page's refresh is the browser's page alone: the join it started goes on.
+		if (step == JoinStep::Page) {
+			JoinResult settled;
+			settled.kind = JoinResult::Kind::Settled;
+			return settled;
+		}
 		const std::string message = extract_message(body);
 		if (!message.empty()) return join_fail(message);
 		return join_fail("join HTTP failed (code " + std::to_string(code) + ")");
@@ -663,6 +674,24 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			// The PUB* identity cookies the authenticated login/NWJoin set, packed
 			// as the CD blob the 0x00 JOIN relays (host code 23).
 			r.cd_cookie = jar_.build_prefixed_blob("PUB");
+			// The .joi page refreshes (JO's to jop_2_jend.htm, "10;"), and the menu browser follows
+			// it at its next frame whatever the delay: the page's delay, in seconds, is stored where
+			// the frame's test reads a GetTickCount deadline, so the test passes at once (the LN S1b
+			// retail joiner's jend GET 0.25 s after the .joi; D-NET-NEW-L9-31).
+			// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - the delay's strtol stored to
+			//  the parser's +4 @0x655783; CUIHTMLParser_BuildContentNodeFromHTML @0x656080 - the
+			//  copy @0x6563EB; UI_ProcessWebResponseContent @0x63D450 - the scene's +0x40 @0x63D507;
+			//  CUIScene_EndFrame @0x63E600 - `cmp eax, [esi+40h]` against GetTickCount @0x63E626,
+			//  UIScene_OpenUrl called @0x63E635]
+			const std::string next = relay_refresh_url(body);
+			if (!next.empty()) {
+				join_step_ = JoinStep::Page;
+				r.request.valid = true;
+				r.request.method = HttpMethod::Get;
+				r.request.url = next;
+				r.request.headers = request_headers();
+				r.request.cache_bust = true;
+			}
 			opennova::io::logf(opennova::io::LogLevel::kInfo,
 					"joi: CD identity cookie = %zu bytes from %zu PUB* cookie(s)",
 					r.cd_cookie.size(),
@@ -673,6 +702,13 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 						return n;
 					}());
 			return r;
+		}
+		case JoinStep::Page: {
+			// The refresh's page is shown; its cookies are in the jar (merged above).
+			join_step_ = JoinStep::Idle;
+			JoinResult settled;
+			settled.kind = JoinResult::Kind::Settled;
+			return settled;
 		}
 		case JoinStep::Idle:
 		default:
@@ -784,6 +820,23 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 	const std::string message = extract_message(body);
 	if (!message.empty()) return host_fail(message);
 	return host_fail("host: no HOSTKEY page");
+}
+
+// See http_flow.h.
+std::string browser_cache_bust_url(const std::string &url, uint32_t tick_ms,
+		const std::array<uint8_t, 4> &server_ip) {
+	const std::size_t scheme = url.find("://");
+	const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
+	const std::size_t path_at = url.find('/', host_at);
+	if (path_at == std::string::npos) return url;
+	const uint32_t address = static_cast<uint32_t>(server_ip[0]) |
+			(static_cast<uint32_t>(server_ip[1]) << 8) | (static_cast<uint32_t>(server_ip[2]) << 16) |
+			(static_cast<uint32_t>(server_ip[3]) << 24);
+	char pair[64];
+	std::snprintf(pair, sizeof pair, "nocachefix=%d%d", static_cast<int32_t>(tick_ms),
+			static_cast<int32_t>(address));
+	const bool has_query = url.find('?', path_at) != std::string::npos;
+	return url + (has_query ? "&" : "?") + pair;
 }
 
 } // namespace opennova
