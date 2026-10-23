@@ -1,4 +1,4 @@
-// The contact solves' two depth views (D-NET-NEW-L6-11, D-NET-NEW-L6-15). Retail's second force
+// The contact solves' two depth views (D-NET-NEW-L6-11, -15, -21). Retail's second force
 // pass writes the probe records in place, so the records hold pass two's depths whatever it found;
 // a separate contact copy, taken from pass one, averages with pass two only when pass two
 // classified a contact and takes the mass share. The tracked solve hands its second call the hit
@@ -72,6 +72,47 @@ void test_the_second_pass_writes_the_records() {
 	}
 }
 
+// The light solve's pass two (D-NET-NEW-L6-21): the push sums probes 0..4 only (the mid-hull
+// probe's force moves nothing), the records come back zero, the copy keeps pass one's depths, the
+// hit slot is reset, and a wall byte pass one set stays set.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47A20F..0x47A2A8, the second
+//  Entity_CheckCollisionState @0x47A2F6; Entity_CheckCollisionState @0x462A30 - @0x46326E]
+void test_the_light_second_pass_leaves_the_mid_hull_probe_out() {
+	auto owner = std::make_unique<World>();
+	World &world = *owner;
+	world.registry.configure_pool(1, 4);
+	Entity h;
+	h.kind = EntityKind::Item;
+	h.alive = true;
+	Entity &veh = *world.registry.get(world.registry.spawn(1, h));
+
+	int32_t probes[6][3] = {};
+	for (int i = 0; i < 6; ++i) probes[i][0] = 65536 * i;
+	const int32_t radii[6] = { 4096, 4096, 4096, 4096, 4096, 4096 };
+	detail::PlatProbeForce forces[6];
+	int32_t d[6];
+	for (int i = 0; i < 6; ++i) {
+		forces[i].fx = 100 * (i + 1);
+		forces[i].fy = -50;
+		forces[i].fz = 3000 + i;
+		d[i] = forces[i].fz;
+	}
+	forces[5].fx = 1 << 20; // the mid-hull probe: left out of the push
+	forces[5].wall_contact = true;
+	EntityHandle hit = EntityHandle::make(2, 7);
+	int32_t px = 0, py = 0;
+	detail::plat_second_pass(world, veh, detail::ProbeForcePass::CheckCollisionState, probes, radii,
+			0, 0, forces, d, px, py, 0, hit, true, 5);
+	for (int i = 0; i < 6; ++i) {
+		CHECK(forces[i].fz == 0 && forces[i].fx == 0 && forces[i].fy == 0);
+		CHECK(d[i] == 3000 + i);
+	}
+	CHECK(forces[5].wall_contact && !forces[0].wall_contact);
+	CHECK(probes[0][0] == 1500 && probes[0][1] == -250);
+	CHECK(px == 1500 && py == -250);
+	CHECK(!hit.valid());
+}
+
 // Item 1294's box (the 01TR truck) as an amphibian, level over a flat 42.0 field, its pads half a
 // unit clear of the ground and under a water word one unit above it. The water leg raises every
 // pad's contact depth to the water (33416), so the hull takes the grounded arm, but the force
@@ -139,6 +180,7 @@ void test_the_tracked_water_leg_raises_only_the_contact_copy() {
 
 int main() {
 	test_the_second_pass_writes_the_records();
+	test_the_light_second_pass_leaves_the_mid_hull_probe_out();
 	test_the_tracked_water_leg_raises_only_the_contact_copy();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

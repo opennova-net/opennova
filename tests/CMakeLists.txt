@@ -5395,7 +5395,7 @@ add_test(NAME aircraft_spring_legs COMMAND aircraft_spring_legs_test)
 add_executable(contact_stability_byte_test world/contact_stability_byte_test.cpp)
 target_link_libraries(contact_stability_byte_test PRIVATE opennova_runtime)
 add_test(NAME contact_stability_byte COMMAND contact_stability_byte_test)
-# D-NET-NEW-L6-11 / D-NET-NEW-L6-15: the contact solves' force records and contact copy.
+# D-NET-NEW-L6-11 / -15 / -21: the contact solves' force records and contact copy.
 add_executable(contact_depth_views_test world/contact_depth_views_test.cpp)
 target_link_libraries(contact_depth_views_test PRIVATE opennova_runtime)
 add_test(NAME contact_depth_views COMMAND contact_depth_views_test)

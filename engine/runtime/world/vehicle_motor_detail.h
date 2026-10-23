@@ -234,28 +234,34 @@ inline void contact_speed_response(Entity::VehicleMotorState &m, const VehicleTr
     }
 }
 
-// The shared second contact pass, after the planar probe shift. The probe records keep pass two
+// The shared second contact pass, after the planar probe shift by the first `push_count` probes'
+// summed forces (the light solve leaves its mid-hull probe out). The probe records keep pass two
 // verbatim: retail's second call writes the same record buffer, so their depths are pass two's
-// whatever it found. The separate depth copy `d` averages with pass two only when pass two
-// classified a contact, then takes the contacted entity's mass share. Each solve reads both
-// views at its own sites. The share's entity is the hit slot: the tracked solve hands its second
-// call the same slot, which that call resets and rewrites (`pass_two_hit_slot`: pass two's hit
-// sizes the share); the aircraft hands its second call none (pass one's hit). Boat keeps its depth
-// buffer locally because the grounded branch consumes it.
+// whatever it found; the per-probe wall bytes it only ever sets keep pass one's. The separate
+// depth copy `d` averages with pass two only when pass two classified a contact, then takes the
+// contacted entity's mass share. Each solve reads both views at its own sites. The share's entity
+// is the hit slot: the tracked and light solves hand their second call the same slot, which that
+// call resets and rewrites (`pass_two_hit_slot`: pass two's hit sizes the share); the aircraft
+// hands its second call none (pass one's hit). Boat keeps its depth buffer locally because the
+// grounded branch consumes it.
 // [orig: Entity_ProcessAircraftContactPhysics @0x47EF10 - the second Entity_ComputeCollisionForces
 //  into the records with a null hit slot @0x47FED0..0x47FF11, the average into the copy
 //  @0x47FF1F..0x48002B, the mass share on pass one's hit (ebx from @0x47F8A8) @0x480032..0x48013C;
 //  Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the second Entity_CheckCollisionState into the
 //  records (`lea eax, [esp+..+var_1CC]` @0x47D1CC) and the hit slot (`lea edx, [esp+..+var_274]`
 //  @0x47D1C7), the call @0x47D209, the average @0x47D217..0x47D329, the mass share reading that
-//  slot @0x47D330; Entity_CheckCollisionState @0x462A30 resets its hit slot @0x462AA7..0x462AB2]
+//  slot @0x47D330; Entity_ProcessLightVehiclePhysics @0x479600 - the five-probe push
+//  @0x47A20F..0x47A2A8, the second call @0x47A2F6, the average @0x47A30A..0x47A3F3, the mass share
+//  @0x47A3FA..0x47A511; Entity_CheckCollisionState @0x462A30 zeroes the records
+//  @0x462A5D..0x462A71, resets its hit slot @0x462AA7..0x462AB2 and only sets the wall bytes
+//  @0x46326E]
 template <int N>
 inline void plat_second_pass(World &world, Entity &vehicle, ProbeForcePass pass,
 		int32_t (&probes)[N][3], const int32_t (&radii)[N], int32_t soft, int32_t hard,
 		PlatProbeForce (&forces)[N], int32_t (&d)[N], int32_t &px, int32_t &py, int32_t pz,
-		EntityHandle &hit, bool pass_two_hit_slot) {
+		EntityHandle &hit, bool pass_two_hit_slot, int push_count = N) {
 	int64_t dX = 0, dY = 0;
-	for (int i = 0; i < N; ++i) {
+	for (int i = 0; i < push_count; ++i) {
 		dX += forces[i].fx;
 		dY += forces[i].fy;
 	}
@@ -266,11 +272,14 @@ inline void plat_second_pass(World &world, Entity &vehicle, ProbeForcePass pass,
     PlatProbeForce forces2[N];
 	const int32_t sev2 = plat_probe_pass(world, vehicle, pass, probes, radii, soft, hard, forces2,
 			px, py, pz, pass_two_hit_slot ? &hit : nullptr);
-	for (int i = 0; i < N; ++i)
+	for (int i = 0; i < N; ++i) {
+		const bool wall = forces[i].wall_contact || forces2[i].wall_contact;
 		forces[i] = forces2[i];
+		forces[i].wall_contact = wall;
+	}
 	if (sev2 != 0) {
 		int64_t dX2 = 0, dY2 = 0;
-		for (int i = 0; i < N; ++i) {
+		for (int i = 0; i < push_count; ++i) {
             dX2 += forces2[i].fx;
             dY2 += forces2[i].fy;
         }

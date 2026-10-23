@@ -1445,8 +1445,15 @@ static void light_capture_launch(Entity &entity, const VehicleEulerBasis &basis,
 // right-multiplied by a local-Y rotation, then the rate loses 298261 BAM.
 // Entity_UpdatePartSpinAccumulator runs later in the mover and intentionally
 // acts on that same word, exactly as it does in retail.
+// `rec` is the solve's force records' depth words (the chassis call's contact block, read at
+// [2] / [5] / [8] / [11] / [14] / [17]): the airborne arm's snapshot, the grounded arm's records
+// as its spring loop resolved them. The corners are the caller's quad: each wheel's corner takes
+// the catch-up in either arm, and its resolved record on the ground.
+// [orig: the contact block @0x468BAA..0x468D17; the callers' quad var_8C + 12k: the airborne
+//  catch-up @0x47B4BC and the call @0x47B540, the grounded catch-up @0x47B9A0, the lift
+//  @0x47BB5D and the call @0x47BBAE]
 bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits,
-		const VehicleEulerBasis &basis, const int32_t d[6], int32_t px, int32_t py, int32_t pz,
+		const VehicleEulerBasis &basis, const int32_t rec[6], int32_t px, int32_t py, int32_t pz,
 		const int32_t corner_adjust[4]) {
 	auto &m = veh.veh;
 	if (!m.crashed)
@@ -1458,10 +1465,9 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
         up[k] = matrix.m[4*k+2] >> 6;
         side[k] = matrix.m[4*k+1] >> 6;
     }
-	if ((veh.flags & kEntityFlagInAir) == 0) {
-		corners[0][2] = io::bam_add(corners[0][2], io::bam_add(d[0], corner_adjust[0]));
-		corners[1][2] = io::bam_add(corners[1][2], io::bam_add(d[1], corner_adjust[1]));
-	}
+	const bool grounded = (veh.flags & kEntityFlagInAir) == 0;
+	corners[0][2] = io::bam_add(corners[0][2], io::bam_add(grounded ? rec[0] : 0, corner_adjust[0]));
+	corners[1][2] = io::bam_add(corners[1][2], io::bam_add(grounded ? rec[1] : 0, corner_adjust[1]));
 	const auto force = [&](int corner, int32_t rate, const int32_t direction[3]) {
 		std::copy_n(direction, 3, m.chassis_forces[corner].direction);
 		m.chassis_forces[corner].rate = rate;
@@ -1479,18 +1485,18 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
 	} else {
 		const int32_t speed = io::bam_abs(m.speed);
 		const int32_t rate = speed <= 256 ? 4000 : 5000;
-		const bool both = (d[0] > 250 && d[1] > 250) || d[4] > 0;
+		const bool both = (rec[0] > 250 && rec[1] > 250) || rec[4] > 0;
 		if (both)
 			m.wheelie_active = 0;
 		// [orig: Entity_UpdateVehicleChassisOrientation contact/speed gate @0x468BC1]
-		const bool low_contact = d[0] > 0 && d[1] > 0 && d[4] > 0 && speed < 8192;
+		const bool low_contact = rec[0] > 0 && rec[1] > 0 && rec[4] > 0 && speed < 8192;
 		if (low_contact && !m.wreck_2fc) {
 			vehicle_clear_chassis(m);
 			m.wreck_2fc = 1;
 			if (speed > 4096)
 				m.part_spin.speed = kBikeFallSeedBam;
 		}
-		if (d[5] > 5000)
+		if (rec[5] > 5000)
 			m.wheelie_active = 0;
 		if (m.wreck_2fc) {
 			const auto rotation = vehicle_euler_basis(0, m.part_spin.speed, 0).q22;
@@ -1512,9 +1518,9 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
 				apply();
 			}
 			if (!low_contact) {
-				const int first = d[5] > 500 || up[2] < 0 ? 0 : 2;
+				const int first = rec[5] > 500 || up[2] < 0 ? 0 : 2;
 				for (int i = first; i < first + 2; ++i)
-					if (d[i] == 0)
+					if (rec[i] == 0)
 						force(i, rate, side);
 				apply();
 			}
@@ -1602,37 +1608,32 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 					hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
 	contact_speed_response(m, traits, sev, hit_entity, forces, probes, 5, px, py);
+	// The contact copy: pass one's depths, averaged with pass two's below.
+	// [orig: the copy var_250..var_23C from the records' depth words @0x479CB6..0x479D19]
 	int32_t d[6];
     for (int i = 0; i < 6; ++i) d[i] = forces[i].fz;
-    if (sev >= 1) {
-        // Pass 2: the push sums probes 0..4 only — the mid-hull probe never
-        // contributes to the planar separation [orig: the five-term fx/fy
-        // sums @0x479ppp-region 5.., push @0x47A0AF..0x47A0BE].
-        int64_t dX = 0, dY = 0;
-        for (int i = 0; i < 5; ++i) { dX += forces[i].fx; dY += forces[i].fy; }
-        for (int i = 0; i < 6; ++i) {
-            probes[i][0] += int32_t(dX);
-            probes[i][1] += int32_t(dY);
-        }
-        PlatProbeForce forces2[6];
-		const int32_t sev2 =
-				plat_probe_pass(world, veh, ProbeForcePass::CheckCollisionState, probes, radii,
-						soft, hard, forces2, px, py, pz);
-		if (sev2 != 0) {
-			int64_t dX2 = 0, dY2 = 0;
-            for (int i = 0; i < 5; ++i) {
-                dX2 += forces2[i].fx;
-                dY2 += forces2[i].fy;
-            }
-            for (int i = 0; i < 6; ++i) d[i] = (forces2[i].fz + d[i]) >> 1;
-            dX = (dX2 + dX) >> 1;
-            dY = (dY2 + dY) >> 1;
-		}
-		int32_t dx = int32_t(dX), dy = int32_t(dY);
-		vehicle_contact_mass_share(world, veh, hit_entity, dx, dy, d, 6);
-		px += dx;
-		py += dy;
-	}
+	// Pass 2: the push sums probes 0..4 only, the mid-hull probe never contributing to the planar
+	// separation; the second call writes the same record buffer and hit slot, so the records are
+	// pass two's whatever it found and pass two's hit sizes the copy's mass share.
+	// [orig: the five-term fx / fy sums @0x47A20F..0x47A254, the probe shift @0x47A25B..0x47A2A8;
+	//  the second Entity_CheckCollisionState @0x47A2F6 into the records (`lea eax,
+	//  [esp+..+headingDelta]` @0x47A2B9) and the hit slot (`lea edx, [esp+..+var_264]` @0x47A2B4);
+	//  the average into the copy @0x47A30A..0x47A3F3, the mass share on the copy @0x47A3FA..0x47A511]
+	if (sev >= 1)
+		plat_second_pass(world, veh, ProbeForcePass::CheckCollisionState, probes, radii, soft, hard,
+				forces, d, px, py, pz, hit_entity, /*pass_two_hit_slot=*/true, /*push_count=*/5);
+	// The force records' depth words (pass two's whenever it ran): the crash and the airborne
+	// depth scans, the fall-over legs and the grounded spring loop with its corner lift read them;
+	// `d`, the contact copy, feeds every contact test.
+	// [orig: Entity_ProcessLightVehiclePhysics @0x479600, the records var_1F4 + 12k: the snapshot
+	//  for the chassis calls @0x47A7DB..0x47A8D9, the crash depth @0x47AD31..0x47ADA6, the
+	//  airborne depth @0x47B393..0x47B3E5, the grounded min / max @0x47B8CE..0x47B908, the loop's
+	//  settle term @0x47BA1F, `sub [esp+edi+..+var_1F4], eax` @0x47BB1B and the lift
+	//  @0x47BB54..0x47BB5D; Entity_UpdateVehicleChassisOrientation @0x468A50 reads the depth words
+	//  [2] / [5] / [8] / [11] / [14] / [17] @0x468BAA..0x468D17]
+	int32_t rec[6];
+	for (int i = 0; i < 6; ++i)
+		rec[i] = forces[i].fz;
 
 	// Bike water entry uses the two-wheel mean without hysteresis, against the raw water word
 	// (0 with no water authored), and emits the local effect and positioned sound once.
@@ -1703,7 +1704,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     // [orig: Entity_ProcessLightVehiclePhysics @ 0x479600]
     int32_t crash_depth = -1;
     if (m.crashed || up_z16 < 0 || m.settle_2f0)
-        for (int i = 0; i < 5; ++i) crash_depth = std::max(crash_depth, d[i]);
+        for (int i = 0; i < 5; ++i) crash_depth = std::max(crash_depth, rec[i]);
     // The contact gate reads the previous rear-contact run; its tail increments later.
     // [orig: Entity_ProcessLightVehiclePhysics @ 0x47A909..0x47A94E]
     m.grounded = up_z16 > 4096 && io::bam_abs(side_z16) < 40960 &&
@@ -1747,7 +1748,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     if (m.crashed != 0 && m.byte_2ef == 0) {
         bool body_contact = !both_wheels_off;
         for (int i = 0; i < 5 && !body_contact; ++i)
-            body_contact = d[i] > 0;
+            body_contact = rec[i] > 0; // [orig: @0x47B393..0x47B3FA]
         if (body_contact) m.byte_2ef = 1;
     }
     int32_t corner_adj[4] = {0, 0, 0, 0};
@@ -1762,14 +1763,14 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         if ((m.crashed && m.byte_2ef) || m.settle_2f0) {
             int32_t depth = -1;
             if (m.crashed || up_z16 < 0)
-                for (int i = 0; i < 5; ++i) depth = std::max(depth, d[i]);
-            pz = io::bam_add(pz, depth);
+                for (int i = 0; i < 5; ++i) depth = std::max(depth, rec[i]);
+            pz = io::bam_add(pz, depth); // [orig: @0x47B4EC..0x47B50B]
         }
         veh.flags |= kEntityFlagInAir;
         const bool just_armed =
                 world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
         const bool falling = !just_armed &&
-                light_fall_over_tick(world, veh, traits, basis, d, px, py, pz, corner_adj);
+                light_fall_over_tick(world, veh, traits, basis, rec, px, py, pz, corner_adj);
         if (!falling) {
             int32_t corners[4][3];
             light_bounding_quad(traits, basis, px, py, pz, corners);
@@ -1815,19 +1816,19 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     // shape — vehicle_suspension.h names the bike's own loop a residual)
     // [orig: the light solve's Suspension_CompressWheelQuadratic @0x47B431 /
     //  @0x47BAD0 and OscillateWheelFast calls].
-    world.vehicles.suspension_grounded_loop(veh, traits, 2, d, wheel_contact,
+    world.vehicles.suspension_grounded_loop(veh, traits, 2, rec, wheel_contact,
                                      kSinkGrowthBike, corner_adj);
     int32_t axle[4][3];
     light_bounding_quad(traits, basis, px, py, pz, axle);
     int32_t cf[3], cr[3];
     std::copy_n(axle[0], 3, cf);
     std::copy_n(axle[1], 3, cr);
-    cf[2] += d[0] + corner_adj[0];
-    cr[2] += d[1] + corner_adj[1];
+    cf[2] += rec[0] + corner_adj[0];
+    cr[2] += rec[1] + corner_adj[1];
     const bool just_armed =
             world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
 	const bool falling = !just_armed &&
-			light_fall_over_tick(world, veh, traits, basis, d, px, py, pz, corner_adj);
+			light_fall_over_tick(world, veh, traits, basis, rec, px, py, pz, corner_adj);
 	// The fall-over arm runs only while crashed, which keeps the parked arm below off; so the
 	// matrix that arm reads is this frame's.
 	CollisionMatrix fitted = basis.q22;
