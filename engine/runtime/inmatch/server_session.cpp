@@ -117,7 +117,6 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
 	ctx.session_title = mission_session_title(text_override, config.mission_file);
 	ctx.mission_metadata_blob = build_mission_metadata_blob(
 			ctx.config, ctx.is_mp_session_peer != 0, title, ctx.session_title);
-	ctx.np_protocol.session_name = config.server_name; // "HOST STARTED \"%s\"" log name
 	// The MP TLV (the 0x82 and the LAN discovery 0x81) carries the session's
 	// cap, never the slot limit's dedicated slot [orig: protocol +0x524 =
 	// ctx+0xF28, CNapiGameSession_CreateSession @0x4C9A80;
@@ -207,6 +206,14 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	//  +0x504 @0x4C9A1A; the admin arms CAdminServer_HandleSetCommand @0x405B52 / @0x40629A]
 	ctx.np_protocol.server_flags = ctx.session_game_type;
 	ctx.np_protocol.build_flags = build_server_config_flags(ctx);
+	// The protocol's own copies the hello (SN, SF) and the 0x42's PW gate read: game_settings'
+	// name, "Untitled" when it is empty, and its server password. Only the create writes them,
+	// and the admin SET's ServerName / ServerPassword arms after it, so a map change keeps them
+	// (D-NET-NEW-L1-43). [orig: CNapiGameSession_CreateSession @0x4C97C0 - the empty name's
+	//  default @0x4C986F..0x4C9885, the name into +0x288 @0x4C9985, the password into +0x300
+	//  @0x4C99F3]
+	ctx.np_protocol.session_name = config.server_name.empty() ? "Untitled" : config.server_name;
+	ctx.np_protocol.server_password = config.server_password;
 
 	if (ctx.is_authority) {
 		// §5.2a step 1: the round-state init runs AHEAD of the session create, the server start

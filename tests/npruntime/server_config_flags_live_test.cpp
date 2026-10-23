@@ -12,7 +12,9 @@
 //   - a map change to a team mission keeps the create's type in the team test (a side password
 //     arms no 0x20) and leaves P1 / P2 as created;
 //   - a map change keeps game_settings' server and side passwords, the create's or an admin
-//     SET's, whatever the next config carries (D-NET-NEW-L1-42).
+//     SET's, whatever the next config carries (D-NET-NEW-L1-42);
+//   - the hello's SN / SF read the protocol's copies, which the create and the admin SET write
+//     and a map change does not (D-NET-NEW-L1-43).
 // [orig: ServerConfig_SerializeToPacket @0x505BD0 - CNapiServerConfig_BuildFlags @0x505D29,
 //  stored @0x505D3B; CNapiServerConfig_BuildFlags @0x4C4DC0 - the cfg word's bit 4 @0x4C4DD2,
 //  `test [ecx+0F34h], 10000h` @0x4C4E30, `test [ecx+0F38h], al` @0x4C4E3C, side A @0x4C4E5F;
@@ -28,8 +30,11 @@
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_server.h>
+#include <net/npwire/session_hello.h> // make_title_client_hello, ServerHello
+#include <net/title/title_identity.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/game_config.h>
+#include <runtime/inmatch/napi_np_protocol.h> // host_server_hello
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_session.h>
@@ -157,6 +162,58 @@ bool run_a_map_change_keeps_the_settings_passwords() {
 	              "after a map change the passwords are the create's and the admin's");
 }
 
+// D-NET-NEW-L1-43: the hello's SN and SF and the 0x42's PW gate read the protocol's copies of
+// the name (+0x288, "Untitled" for an empty one) and the password (+0x300): the create writes
+// them, then only the admin SET's ServerName / ServerPassword arms, so a SET ServerName reaches
+// the next hello at once and a map change leaves both as they were.
+// [orig: CNapiGameSession_CreateSession @0x4C97C0 - the default @0x4C986F..0x4C9885, +0x288
+//  @0x4C9985, +0x300 @0x4C99F3; NapiNPProtocol_SendServerInfoPacket @0x6204B0 - SN
+//  @0x6207B2..0x6207DA, SF @0x620872..0x620898; CAdminServer_HandleSetCommand - the name into
+//  +0x288 @0x406179, the lone ServerPassword's +0x300 @0x405AD6]
+opennova::ServerHello hello_of(const inmatch::NapiNPServerCtx &ctx) {
+	const opennova::TitleIdentity &jo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+	return inmatch::host_server_hello(ctx, opennova::make_title_client_hello(jo, 1),
+			opennova::PeerAddr{0x0100007Fu, 32110});
+}
+
+bool run_the_hello_reads_the_protocols_copies() {
+	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	config.server_name = "Named Host";
+	config.server_password = "sesame";
+	inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			/*host_key=*/0, nullptr, config);
+	opennova::ServerHello hello = hello_of(*ctx);
+	if (!expect(hello.sn == "Named Host" && hello.sf == 1u &&
+	                    ctx->np_protocol.server_password == "sesame",
+	            "the create's name and password in the hello"))
+		return false;
+	inmatch::GameConfig next = config; // a map change's next config, another name
+	next.server_name = "Next Config Name";
+	inmatch::continue_session(*ctx, next, nullptr);
+	hello = hello_of(*ctx);
+	if (!expect(hello.sn == "Named Host" && hello.sf == 1u,
+	            "a map change rewrites neither protocol copy"))
+		return false;
+	if (!expect(admin_set(*ctx, "SET ServerName Admin Renamed"), "SET ServerName is accepted"))
+		return false;
+	if (!expect(hello_of(*ctx).sn == "Admin Renamed ", "the SET's name reaches the next hello"))
+		return false;
+	if (!expect(admin_set(*ctx, "SET ServerPassword") && hello_of(*ctx).sf == 0u &&
+	                    ctx->np_protocol.server_password.empty(),
+	            "a lone SET ServerPassword clears the protocol's copy"))
+		return false;
+	auto untitled = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::GameConfig unnamed;
+	unnamed.max_players = 4;
+	unnamed.server_name.clear();
+	inmatch::test::bring_up_host(*untitled, inmatch::ConnectionMode::HostOnly,
+			inmatch::SocketMode::Lan, /*host_key=*/0, nullptr, unnamed);
+	return expect(hello_of(*untitled).sn == "Untitled" && untitled->config.server_name.empty(),
+	              "an empty name: the protocol's copy is \"Untitled\", the config's stays empty");
+}
+
 } // namespace
 
 int main() {
@@ -165,6 +222,7 @@ int main() {
 	if (!run_the_team_test_reads_the_creates_copy()) ++failures;
 	if (!run_a_map_change_keeps_the_creates_words()) ++failures;
 	if (!run_a_map_change_keeps_the_settings_passwords()) ++failures;
+	if (!run_the_hello_reads_the_protocols_copies()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

@@ -132,8 +132,16 @@ struct NapiNPProtocol {
 	//  CNapiNPConnection_OnStateChange @0x626060 - @0x626199..0x62619C;
 	//  CNapiNPConnection_SendSessionInit @0x620ef0 - MI = +0x18 @0x620FD4..0x620FE8]
 
-	// [orig +0x288] the session/server name ("HOST STARTED \"%s\"" log; lobby-visible).
+	// [orig +0x288] the session/server name ("HOST STARTED \"%s\"" log; lobby-visible): the
+	// hello's SN [orig: NapiNPProtocol_SendServerInfoPacket @0x6207B2..0x6207DA].
 	std::string session_name;
+	// [orig +0x300] the join password: the hello's SF (set when nonempty) and the 0x42's PW gate
+	// (reject 4). The create copies game_settings' and the admin SET's ServerPassword arms write
+	// it, nothing else (D-NET-NEW-L1-43). [orig: NapiNPProtocol_SendServerInfoPacket
+	//  @0x620872..0x620898; NapiNPProtocol_HandleClientJoin @0x62BE01..0x62BE18;
+	//  CNapiGameSession_CreateSession @0x4C99F3; CAdminServer_HandleSetCommand @0x405AD6 /
+	//  @0x4061F8]
+	std::string server_password;
 
 	// [orig +0xE44 / +0xE80] the cs_dir1 / cs_dir0 connection-template blocks — the reap window
 	// (CS field 0) and outbound pool bound (CS field 11) every server-side node is created with

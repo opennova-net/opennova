@@ -964,10 +964,12 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	log_manager_dispatch(ctx, peer, unpacked_len, out);
 	// The PW and PV2 compares are case-insensitive C-string compares
 	// [orig: Napi_StrCaseEqual @0x616e70].
+	// The PW gate reads the protocol's copy (D-NET-NEW-L1-43) [orig: `cmp [ebp+300h], bl`
+	//  @0x62BE01, Napi_StrCaseEqual @0x62BE18].
 	uint32_t reject = 0;
 	if (auth.hk != ctx.np_protocol.host_key) reject = 3;
-	else if (!ctx.config.server_password.empty() &&
-	         !strutil::iequals(auth.pw, std::string_view(ctx.config.server_password.c_str()))) reject = 4;
+	else if (!ctx.np_protocol.server_password.empty() &&
+	         !strutil::iequals(auth.pw, std::string_view(ctx.np_protocol.server_password.c_str()))) reject = 4;
 	// PV2 against the installed one. [orig: HandleClientJoin @0x62b750 - `proto+364 != PV2`
 	//  @0x62be40]
 	else if (!strutil::iequals(auth.pv2, identity->pv2)) reject = 7;
@@ -1598,9 +1600,11 @@ ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hel
 	// A LAN 0x41 is a stateless enumerate/handshake probe. Populate the retail
 	// game-server fields from live host state without registering the source as
 	// a peer; only a validated 0x42 creates the connection node.
-	reply.sn = ctx.config.server_name;
-	// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204b0, SF]
-	reply.sf = ctx.config.server_password.empty() ? 0u : 1u;
+	// SN and SF are the protocol's copies, the create's or an admin SET's, not the session
+	// config's (D-NET-NEW-L1-43) [orig: NapiNPProtocol_SendServerInfoPacket @0x6204B0 - SN from
+	//  +0x288 @0x6207B2..0x6207DA, SF = (+0x300's first byte != 0) @0x620872..0x620898].
+	reply.sn = ctx.np_protocol.session_name;
+	reply.sf = ctx.np_protocol.server_password.empty() ? 0u : 1u;
 	// P1 and P2 are the protocol's two flag words, the create's game type and BuildFlags word
 	// (an admin password SET recomputes both), not the running mission's type or a live
 	// BuildFlags call (D-NET-NEW-L1-40) [orig: NapiNPProtocol_SendServerInfoPacket - +0x500

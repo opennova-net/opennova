@@ -287,6 +287,9 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 		if (strutil::iequals(key, "ServerPassword")) {
 			if (block != nullptr) block->mp_host_game_password.clear();
 			if (protocol_up) {
+				// The protocol's join password, then game_settings' (D-NET-NEW-L1-43)
+				// [orig: Napi_CopyString(+0x300) @0x405AD6, CAITask_SetName @0x405AE8].
+				ctx_.np_protocol.server_password.clear();
 				c.server_password.clear();
 				republish_flags(ctx_);
 			}
@@ -418,6 +421,8 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 		const std::string pw = password_field(value);
 		if (block != nullptr) block->mp_host_game_password = pw;
 		if (protocol_up) {
+			// [orig: Napi_CopyString(+0x300) @0x4061F8, CAITask_SetName @0x40620A]
+			ctx_.np_protocol.server_password = pw;
 			c.server_password = pw;
 			republish_flags(ctx_);
 		}

@@ -1344,7 +1344,7 @@ void HostRole::close() {
 		// And the words a 0x42 the held protocol queues meets: its own gates' (the password, the
 		// refusal byte, the node template) and the validate callback's (the join lock, the
 		// address bans, the capacity), none of which the error arm resets (receive_unstopped_server).
-		unstopped.server_password = ctx.config.server_password;
+		unstopped.server_password = ctx.np_protocol.server_password; // +0x300 (D-NET-NEW-L1-43)
 		unstopped.reject_new_connections = ctx.np_protocol.reject_new_connections;
 		unstopped.node_template = server_node_template(ctx);
 		unstopped.join_locked = ctx.join_locked;
