@@ -3173,9 +3173,17 @@ void test_a_hull_commits_its_death_the_update_after_health_zero() {
 		CHECK(((r.veh().flags | r.veh().engine_flags) & (kEntityFlagDead | kEntityFlagHusk)) == 0);
 		CHECK(b.f[AiBrain::kCurState] == 16);
 		CHECK(r.player().health == 150 && r.player().mounted);
-		// The planar velocity words (+0x98 / +0x9C) T's mover leaves.
+		// The planar velocity words (+0x98 / +0x9C) and the speed register (+0x29C) T's mover
+		// leaves. The words are read twice in T+1: by the think, ahead of the mover, and by the
+		// dying state's enter in the timed dispatch, after it; the grounded straight arm in
+		// between stores the register times the forward row into them, so a moving hull is one
+		// whose register holds its speed.
+		// [orig: AI_TransitionToDeath_GroundVehicle @0x467B20 - the +0x9C / +0x98 reads
+		//  @0x467C09 / @0x467C0F, `cmp eax, 421h` @0x467C4C; Entity_UpdateVehiclePhysics
+		//  @0x48AF00 - the +0x29C products @0x48CCF4..0x48CD52, the stores @0x48CD7F / @0x48CD85]
 		r.veh().veh.vel_x = moving ? 3000 : 100;
 		r.veh().veh.vel_y = moving ? 4000 : 0;
+		r.veh().veh.speed = moving ? 5000 : 0;
 		// T+1: the death commits and the blast lands on the rider.
 		r.w.update_all_entities(ctx);
 		++r.w.logic_tick;
@@ -3189,10 +3197,11 @@ void test_a_hull_commits_its_death_the_update_after_health_zero() {
 		CHECK(r.veh().spawn_phase == (moving ? 15 : 61));
 		if (failures != failures_before)
 			std::printf("  (moving %d: state %d pend %d clock %d health %d flags 0x%x/0x%x vel %d %d "
-					"rider health %d mounted %d)\n",
+					"speed %d rider health %d mounted %d)\n",
 					int(moving), b.f[AiBrain::kCurState], b.f[AiBrain::kPendState],
 					r.veh().spawn_phase, r.veh().health, r.veh().flags, r.veh().engine_flags,
-					r.veh().veh.vel_x, r.veh().veh.vel_y, r.player().health, int(r.player().mounted));
+					r.veh().veh.vel_x, r.veh().veh.vel_y, r.veh().veh.speed, r.player().health,
+					int(r.player().mounted));
 	}
 }
 
