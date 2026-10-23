@@ -538,6 +538,7 @@ add_library(opennova_runtime STATIC
     # --- parity lane L5 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-NEW-L5-5)
     # --- parity lane L7 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_usegun.cpp # the local player's UseGun transition leg (split off player_weapon.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/deployable_spawn.cpp # a vehicle bay's deployable (D-NET-332)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/projectile_target_ring.cpp # the flare rounds' target ring (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/round_pool.cpp # the round pool's allocator and 0x59 found leg (D-ITEMDEF-32)
