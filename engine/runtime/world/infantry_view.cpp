@@ -31,7 +31,7 @@ constexpr int32_t kViewYawLimit = 0x55555500;
 constexpr int32_t kPitchLimit = 0x38E38E00;
 constexpr int32_t kPronePitchLimit = 0x1C71C700;
 
-// A vehicle (its def's type 1, Entity_HasActiveParent's test) in its crash state (+0x2EC).
+// A vehicle (its def's type 1, Entity_IsVehicle's test) in its crash state (+0x2EC).
 bool crashed_vehicle(const Entity *e) {
     return e != nullptr && e->has_item_def && e->item_type == 1u && e->veh.crashed != 0;
 }
@@ -56,7 +56,7 @@ bool crashed_vehicle(const Entity *e) {
 // The local body's clamp also lands on g_LocalPlayerLookYaw, which our `yaw` word is for it.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the canopy chase @0x4B4945..0x4B496C, the
 //  skip test @0x4B4972..0x4B4978, the mount config test @0x4B4AC6..0x4B4ADE, the ground test
-//  @0x4B4AE0..0x4B4AF9 (Entity_HasActiveParent @0x402BB0 called @0x4B4AE9), the clamp
+//  @0x4B4AE0..0x4B4AF9 (Entity_IsVehicle @0x402BB0 called @0x4B4AE9), the clamp
 //  @0x4B4AFB..0x4B4B59, the legs @0x4B4B5F..0x4B4B6B, the selector @0x4B497E..0x4B4984, the idle
 //  windows @0x4B4991..0x4B49E3 (the key @0x4B467A..0x4B4683), the chases @0x4B49E9..0x4B4AA3, the
 //  midpoint @0x4B4AA9..0x4B4ABB, the limit select @0x4B4B71..0x4B4B7D, the mount's crash test

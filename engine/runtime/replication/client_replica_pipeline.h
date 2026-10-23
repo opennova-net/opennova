@@ -718,7 +718,7 @@ public:
 	}
 	// Whether a ground entity (a wire handle) is a vehicle (def type 1) in its crash state (its
 	// +0x2EC byte): a player row on a ladder or under a canopy standing on one keeps its Yaw
-	// unclamped [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - Entity_HasActiveParent
+	// unclamped [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - Entity_IsVehicle
 	// @0x402BB0 called @0x4B4AE9, `cmp byte ptr [edi+2ECh], 0` @0x4B4AF2].
 	using ReplicaGroundCrashedResolver = std::function<bool(uint16_t ground)>;
 	void set_replica_ground_crashed_resolver(ReplicaGroundCrashedResolver resolver) {

@@ -1180,7 +1180,7 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
 // axis, the longest CameraOffset seen as the lift, under its own rotation
 // triple — neither the recoil doubling nor the lean roll nor the pull-back.
 // [orig: Camera_ComputeThirdPersonView @0x437EB5..0x437F97 — groundEntity
-//  +0x28 @0x437EB5, Entity_HasActiveParent @0x402BB0 via @0x437EC2, the
+//  +0x28 @0x437EB5, Entity_IsVehicle @0x402BB0 via @0x437EC2, the
 //  +0x2EC / +0x2F0 bytes @0x437ECF..0x437EDF]
 bool compose_ground_leg(World &world, const AiEntity &p, const Entity &e,
                         PlayerViewState &v, PlayerCameraPose &out) {
