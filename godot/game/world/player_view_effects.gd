@@ -92,6 +92,9 @@ func _build_damage_feedback_quads() -> void:
 	_red_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_red_vignette.modulate = Color(1.0, 0.0, 0.0, 0.0)
 	_red_vignette.visible = false
+	# The texture the mission load's set_resource_root read, ahead of this node's
+	# entering the tree (the HUD loads inside the load and mounts on its first frame).
+	_red_vignette.texture = _vignette
 	add_child(_red_vignette, false, Node.INTERNAL_MODE_BACK)
 	_red_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# 3. The medic revive tint: retail sends an OPAQUE (alpha 255) quad whose

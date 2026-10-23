@@ -473,9 +473,10 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 			ItemDbFixture.NULL_ROW, ItemDbFixture.fixture_text(self)))
 	assert_true(host.load_from_mission_data(mission))
 
-	var observed := {"local_load": false, "held": false, "held_progress": -1}
+	var observed := {"local_load": false, "held": false, "held_progress": -1, "hud_at_load": null}
 	world.world_loaded.connect(func() -> void:
 		observed["local_load"] = true
+		observed["hud_at_load"] = _shell.get_hud_presenter().get_game_hud()
 	, CONNECT_ONE_SHOT)
 	var target := JoinTarget.new()
 	target.host_ip = "127.0.0.1"
@@ -495,6 +496,17 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 			break
 
 	assert_true(bool(observed["local_load"]), "the joiner completed its wire-header world load")
+	# The joiner's HUD builds inside its mission start's load, its overlay init ahead of its
+	# first 0x2F's leg, not on its first frame with a player of its own (D-NET-NEW-L8-40)
+	# [orig: Game_StartMission @0x524360 - HUD_InitOverlaySystem @0x525733, the first 0x2F
+	# @0x525836].
+	assert_not_null(observed["hud_at_load"], "the joiner's load built its HUD")
+	var load_timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(load_timeline)
+	if load_timeline != null:
+		var spans := Array(load_timeline.span_names())
+		assert_true(spans.find("hud_init") >= 0 and spans.find("hud_init") < spans.find("first_leg"),
+				"the HUD's overlay init ran ahead of the first 0x2F's leg: %s" % [spans])
 	assert_true(bool(observed["held"]),
 			"local world_loaded cannot reveal the joiner before host admission")
 	assert_eq(int(observed["held_progress"]), MissionData.LOAD_PROGRESS_WORLD_READY,

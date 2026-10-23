@@ -778,6 +778,11 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	hudpos_font_lo_ = assets.font_lo;
 	hudpos_font_hi_ = assets.font_hi;
 
+	// The HUD's render materials with its textures, not at its first draw: the texture
+	// load creates them (engine mission/mission_load_plan.h carries the witness).
+	ensure_flat_material_();
+	ensure_map_materials_();
+
 	configured_ = true;
 	compiler_.configure(layout_, nullptr);
 	// Retail loads the overlay fonts at HUD init as well as on a resolution

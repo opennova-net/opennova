@@ -47,6 +47,8 @@ constexpr const char *kSignalMusicContextClosed = "music_context_closed";
 constexpr const char *kSignalMusicVarChanged = "music_var_changed";
 constexpr const char *kSignalCaptureChanged = "capture_changed";
 constexpr const char *kSignalProcessExitRequested = "process_exit_requested";
+constexpr const char *kSignalHudOverlayInit = "hud_overlay_init";
+constexpr const char *kSignalHudTexturesLoad = "hud_textures_load";
 
 } // namespace
 
@@ -954,6 +956,13 @@ void GameWorld::_bind_methods() {
 	// witnessed per-stage anchors, engine/runtime/mission/mission_load_plan.h)
 	// and pulsed at the object stage's value from inside the placement loop.
 	ADD_SIGNAL(MethodInfo(kSignalLoadProgress, PropertyInfo(Variant::INT, "percent")));
+	// The two HUD legs of every mission start's load, a dedicated host's included: the
+	// overlay system's init past the rows' init and ahead of a joiner's first 0x2F
+	// (`mission_file` names the mission whose text the HUD's tables resolve), then the
+	// HUD's textures and fonts at the mission textures stage, past the model freeze. The
+	// shell's HUD builds in them, inside the load (game_world_load.cpp carries the witness).
+	ADD_SIGNAL(MethodInfo(kSignalHudOverlayInit, PropertyInfo(Variant::STRING, "mission_file")));
+	ADD_SIGNAL(MethodInfo(kSignalHudTexturesLoad));
 	// Presentation side effects drained from the mission runtime's EffectLog
 	// each tick (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/
 	// "set_light"/"dialog"). Player text is consumed by the HUD; debug_text

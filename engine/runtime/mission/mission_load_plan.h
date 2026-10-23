@@ -31,7 +31,27 @@
 //    first live spawn pays nothing [orig: CEffectSystem_Init @0x5f6070 from
 //    @0x524980]; the placed pools' glow lights spawn after it
 //    [orig: Game_SpawnAllEntityGlowEffects @0x5227b0 from @0x525d19];
-//  - the blink letter bits clear at mission start [orig: @0x525c45].
+//  - the blink letter bits clear at mission start [orig: @0x525c45];
+//  - the HUD's overlay system inits on every mission start, every role (a
+//    dedicated host's included, whether or not a player of its own will ever
+//    draw it), past the rows' init and ahead of a joiner's first 0x2F: its
+//    layout file and its map-grid origin scan. The shell's HUD builds there,
+//    inside the load, not on the first frame past it (GameWorld's
+//    hud_overlay_init leg, D-NET-NEW-L8-40)
+//    [orig: Game_StartMission @0x524360 - Entity_InitAllFromModels @0x52567F,
+//    HUD_InitOverlaySystem @0x525733 (no branch around it), the first 0x2F
+//    @0x525836; HUD_InitOverlaySystem @0x5A4620 (hudpos @0x5A4931, the
+//    type-2043 pool scan @0x5A4999)];
+//  - the HUD's textures and their render materials load at the mission
+//    textures stage past the freeze on the full arm, then every arm, the
+//    reduced one too, loads the HUD's fonts and the stdbox frame the status
+//    page draws (GameWorld's hud_textures_load leg, D-NET-NEW-L8-40)
+//    [orig: Render_InitMissionTextures @0x587120 - the freeze @0x5871CF,
+//    HUD_LoadAllTextures @0x587205 (its materials GfxShader_CreateForTexture
+//    @0x59E029 / @0x59E08F / @0x59E0A8 / @0x59E19E / @0x59E22C), the reduced
+//    arm's freeze @0x58728C and return; Game_StartMission - the call
+//    @0x525A6E, HUD_InitAllFonts @0x525A9A, BoxTexture_LoadAndSetupUVRegions
+//    ("stdbox") @0x525AC0].
 
 namespace opennova::mission {
 

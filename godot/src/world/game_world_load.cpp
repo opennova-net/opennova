@@ -50,6 +50,8 @@ constexpr const char *kSignalLoadProgress = "load_progress";
 constexpr const char *kSignalMinimapWaterChanged = "minimap_water_changed";
 constexpr const char *kSignalMusicContextOpened = "music_context_opened";
 constexpr const char *kSignalMusicContextClosed = "music_context_closed";
+constexpr const char *kSignalHudOverlayInit = "hud_overlay_init";
+constexpr const char *kSignalHudTexturesLoad = "hud_textures_load";
 
 } // namespace
 
@@ -360,17 +362,25 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->span("audio");
 	start_mission_audio(p_mission, p_bms_name);
 	timeline->end_span();
-	if (challenge_sim.is_valid() && challenge_sim->is_joiner()) {
-		// A joiner's mission start initializes every streamed row from its model, then queues
-		// its first 0x2F: its sound banks, the entity models' reload and the rows' init all
-		// run ahead of the first submission, and the model freeze after it (engine:
-		// inmatch::JoinerRole::MissionStartLegs carries the witness, D-NET-NEW-L2-42).
-		bool wire_world_placed = false;
-		if (wire_header_join) {
-			timeline->span("streamed_world");
-			wire_world_placed = place_join_wire_world(challenge_sim, timeline);
-			timeline->end_span();
-		}
+	const bool joiner_start = challenge_sim.is_valid() && challenge_sim->is_joiner();
+	// A joiner's mission start initializes every streamed row from its model, then queues
+	// its first 0x2F: its sound banks, the entity models' reload and the rows' init all
+	// run ahead of the first submission, and the model freeze after it (engine:
+	// inmatch::JoinerRole::MissionStartLegs carries the witness, D-NET-NEW-L2-42).
+	bool wire_world_placed = false;
+	if (joiner_start && wire_header_join) {
+		timeline->span("streamed_world");
+		wire_world_placed = place_join_wire_world(challenge_sim, timeline);
+		timeline->end_span();
+	}
+	// The HUD's overlay init, on every mission start and every role: past the rows' init
+	// and ahead of a joiner's first 0x2F. The shell's HUD builds here, its layout and its
+	// map-grid origin scan, not on the first frame past the load (engine
+	// mission/mission_load_plan.h carries the witness, D-NET-NEW-L8-40).
+	timeline->span("hud_init");
+	emit_signal(kSignalHudOverlayInit, p_bms_name);
+	timeline->end_span();
+	if (joiner_start) {
 		// The definitions and the world are in: the mission start's first leg queues the first
 		// 0x2F and runs the pumps ahead of the effect builds and the freeze (engine:
 		// ClientRuntime::push_mission_start_first_loadout, D-NET-NEW-L2-35).
@@ -423,6 +433,14 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	if (placer_.is_valid() && challenge_sim.is_valid()) {
 		placer_->resolve_model_materials(challenge_sim->get_mission_start_model_files());
 	}
+	timeline->end_span();
+	// The HUD's textures and fonts at the mission textures stage, past the freeze: the full
+	// arm loads the HUD's textures and their materials there, and every arm, a dedicated
+	// host's reduced one too, then loads the HUD's fonts and the stdbox frame the status page
+	// draws. The shell's HUD loads them here, inside the load (engine
+	// mission/mission_load_plan.h carries the witness, D-NET-NEW-L8-40).
+	timeline->span("hud_textures");
+	emit_signal(kSignalHudTexturesLoad);
 	timeline->end_span();
 	if (!dedicated_host) {
 		// The render arm's device inits past the freeze: the effect catalog and the presenters'

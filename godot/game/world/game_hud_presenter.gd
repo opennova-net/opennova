@@ -60,8 +60,10 @@ const MAX_PENDING_HUD_MESSAGES := 40
 # wac/remote_command.cpp, wac/vm.cpp, hud/hud_frame.h push_chat_line).
 const SCRIPT_CHAT_ARGB := -1
 
-# HudOverlay, built on the first frame a mission has a local player
-# (ensure_game_hud(); the GUT files build the real one over a staged root).
+# HudOverlay, built and loaded inside every mission start's load (the world's
+# hud_overlay_init / hud_textures_load legs) and mounted on the first frame the
+# mission has a local player (ensure_game_hud(); the GUT files build the real one
+# over a staged root).
 var _game_hud: HudOverlay = null
 var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
 var _vehicle_panel := VehiclePanelPresenterScript.new()  # the mounted-vehicle panel lane
@@ -191,6 +193,12 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 	if _world != null and not _world.minimap_water_changed.is_connected(
 			_on_minimap_water_changed):
 		_world.minimap_water_changed.connect(_on_minimap_water_changed)
+	# The HUD builds and loads inside every mission start's load, at its two HUD
+	# legs (GameWorld carries the witness, D-NET-NEW-L8-40).
+	if _world != null and not _world.hud_overlay_init.is_connected(_on_hud_overlay_init):
+		_world.hud_overlay_init.connect(_on_hud_overlay_init)
+	if _world != null and not _world.hud_textures_load.is_connected(_on_hud_textures_load):
+		_world.hud_textures_load.connect(_on_hud_textures_load)
 
 
 ## Undo everything a mission built: the HUD node (its card/effects children go
@@ -346,17 +354,46 @@ func get_slot_bar_key_labels_revision() -> int:
 	return _slot_bar_key_labels_revision
 
 
-## Build the overlay if the mission has none yet (update() does it on the first
-## frame with a local player; the GUT files build it over a staged root).
-## The in-game HUD over the live runtime: built lazily the first frame a mission
-## has a local player (so net spectators, which have none, never get it), from
-## the witnessed hudpos.def layout on the world's mounted VFS; the SIGHTS card
-## and the PlayerViewEffects post stack mount as behind-parent children of the
-## overlay, the child-control stack the ported shell HUD carried.
+## Build, load and mount the overlay if the mission has none yet: the load's two
+## HUD legs (_on_hud_overlay_init, _on_hud_textures_load) build and load it inside
+## every mission start's load; the first frame with a local player (a dedicated
+## host's first frame) mounts it; the GUT files run all three here over a staged
+## root. The SIGHTS card and the PlayerViewEffects post stack ride as behind-parent
+## children of the overlay, the child-control stack the ported shell HUD carried.
 ## [orig: HUD_RenderAllOverlays @0x5a8070]
 func ensure_game_hud() -> void:
+	if _game_hud == null:
+		_init_overlay_system(_world.get_loaded_mission_file() if _world != null else "")
+	if not _game_hud.is_configured():
+		_load_hud_textures()
+	_mount_game_hud()
+
+
+## The load's overlay-init leg (GameWorld.hud_overlay_init, every mission start and
+## every role, ahead of a joiner's first 0x2F): the overlay and its children are
+## built off the tree and the HUD's layout file, string tables and map-grid origin
+## are read, as retail's mission start inits its overlay system there whether or not
+## a player of its own will ever draw it (engine mission/mission_load_plan.h carries
+## the witness).
+func _on_hud_overlay_init(mission_file: String) -> void:
 	if _game_hud != null:
 		return
+	_init_overlay_system(mission_file)
+
+
+## The load's HUD textures leg (GameWorld.hud_textures_load, at the mission textures
+## stage past the model freeze, on every arm; engine mission/mission_load_plan.h
+## carries the witness).
+func _on_hud_textures_load() -> void:
+	if _game_hud != null and not _game_hud.is_configured():
+		_load_hud_textures()
+
+
+# The overlay system's init: the overlay and its child controls, the hudpos.def
+# parse, the string tables, the map-grid origin and the toggles' per-mission
+# pushes. Nothing is mounted: the overlay draws from the first frame a mission has
+# a player of its own (_mount_game_hud).
+func _init_overlay_system(mission_file: String) -> void:
 	_game_hud = HudOverlay.new()
 	_game_hud.name = "GameHud"
 	# The /NOHUD launch flag clears the overlay master word for the process.
@@ -366,12 +403,6 @@ func ensure_game_hud() -> void:
 	_slot_bar_key_labels_revision = -1
 	_map_legend_labels = PackedStringArray()
 	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var mount: Node = _ui_parent if _ui_parent != null else self
-	mount.add_child(_game_hud)
-	# anchors AND offsets: an anchors-only preset keeps a fresh Control's
-	# zero rect, and a clipping UI parent can then clip every HUD element to
-	# nothing.
-	_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# Internal children stay out of scene ownership; INTERNAL_MODE_BACK plus
 	# show_behind_parent keeps the post-process/masks a stable layer below the
 	# card rows and the overlay's own draw list.
@@ -380,24 +411,17 @@ func ensure_game_hud() -> void:
 	_view_effects.show_behind_parent = true
 	_view_effects.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_hud.add_child(_view_effects, false, Node.INTERNAL_MODE_BACK)
-	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_inset_scope = HudInsetScope.new()
 	_inset_scope.name = "InsetScope"
 	_inset_scope.show_behind_parent = true
 	_inset_scope.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_inset_scope.visible = false
 	_game_hud.add_child(_inset_scope)
-	_inset_scope.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# The world's local-view leg stamps and hands over the Inset camera from the
-	# view it just composed, before every Inset leg of the frame reads it.
-	if _world != null:
-		_world.set_inset_scope(_inset_scope)
 	_sights_card = HudSightsCardScript.new()
 	_sights_card.name = "SightsCard"
 	_sights_card.show_behind_parent = true
 	_sights_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_hud.add_child(_sights_card)
-	_sights_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# The scoped-view circle mask sits AFTER the card in the overlay's child
 	# order, so the annulus covers the card's own corners -- retail submits the
 	# SIGHTS card first and the mask straight after it on the Scoped arm.
@@ -407,7 +431,6 @@ func ensure_game_hud() -> void:
 	_scope_circle_mask.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_scope_circle_mask.visible = false
 	_game_hud.add_child(_scope_circle_mask)
-	_scope_circle_mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_push_sight_state()
 	var hudpos := HudPos.new()
 	var root: ResourceRoot = _world.get_resource_root() \
@@ -420,19 +443,7 @@ func ensure_game_hud() -> void:
 		# Problems row (ADR 0046 DI-27).
 		if not root.has_file("hudpos.def"):
 			ResourceRoot.report_missing("file", "hudpos.def")
-	_game_hud.set_crosshair_style(_crosshair_style)
-	_game_hud.set_crosshair_color(_crosshair_color)
-	_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
-	_game_hud.set_aspect_mode(_aspect_mode)
-	_game_hud.configure(hudpos, root)
 	_hud_pos = hudpos
-	# TerrainData owns the TRN 16x16 sector routing table and the colormap
-	# texture; the native overlay copies only the portable routing scalars.
-	# The raw colormap remains the sharp base; depthspin supplies water only.
-	_game_hud.set_minimap_terrain(
-			_world.get_terrain_data() if _world != null else null,
-			_world.get_minimap_water_mask() if _world != null else null,
-			_session_texcompression_level())
 	# The grid-label origin marker (mission type-2043 entity), resolved once
 	# per world. [orig: HUD_InitOverlaySystem @0x5a4999 pool scan]
 	var sim_for_origin := _world.get_sim() if _world != null else null
@@ -448,8 +459,7 @@ func ensure_game_hud() -> void:
 	else:
 		_map_grid_origin_present = false
 		_game_hud.set_minimap_grid_origin(Vector2.ZERO, false)
-	_view_effects.set_resource_root(root)
-	HudTextTables.register(root, _world)
+	HudTextTables.register(root, mission_file)
 	# The objectives-panel header, resolved once against the freshly registered
 	# gametext table. [orig: STROVER_MISSIONOBJECTIVES @0x5ba986]
 	if Strings.has_text(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"):
@@ -469,6 +479,47 @@ func ensure_game_hud() -> void:
 	var session_sim: Simulation = _world.get_sim() if _world != null else null
 	if session_sim != null:
 		_toggles.session_init(session_sim.is_mp_session(), _mp_session_peer(session_sim))
+
+
+# The HUD's textures, fonts and map pictures over the layout the init read
+# (HudOverlay.configure: the HUD loader's textures, the overlay fonts, the stdbox
+# frame), the terrain's colour map and the view effects' art.
+func _load_hud_textures() -> void:
+	var root: ResourceRoot = _world.get_resource_root() if _world != null else null
+	_game_hud.set_crosshair_style(_crosshair_style)
+	_game_hud.set_crosshair_color(_crosshair_color)
+	_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
+	_game_hud.set_aspect_mode(_aspect_mode)
+	_game_hud.configure(_hud_pos, root)
+	# TerrainData owns the TRN 16x16 sector routing table and the colormap
+	# texture; the native overlay copies only the portable routing scalars.
+	# The raw colormap remains the sharp base; depthspin supplies water only.
+	_game_hud.set_minimap_terrain(
+			_world.get_terrain_data() if _world != null else null,
+			_world.get_minimap_water_mask() if _world != null else null,
+			_session_texcompression_level())
+	_view_effects.set_resource_root(root)
+
+
+# The first frame a mission has a player of its own (a dedicated host's first
+# frame) puts the loaded overlay on the HUD layer; a later frame finds it there.
+func _mount_game_hud() -> void:
+	if _game_hud.is_inside_tree():
+		return
+	var mount: Node = _ui_parent if _ui_parent != null else self
+	mount.add_child(_game_hud)
+	# anchors AND offsets: an anchors-only preset keeps a fresh Control's
+	# zero rect, and a clipping UI parent can then clip every HUD element to
+	# nothing.
+	_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_inset_scope.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_sights_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_scope_circle_mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# The world's local-view leg stamps and hands over the Inset camera from the
+	# view it just composed, before every Inset leg of the frame reads it.
+	if _world != null:
+		_world.set_inset_scope(_inset_scope)
 
 
 # The shared F3 frame-stats board (null outside the game shell): while its
@@ -866,7 +917,8 @@ func _apply_attach_labels() -> void:
 
 
 
-## The live HudOverlay node (null until the first in-world HUD frame builds it).
+## The mission's HudOverlay node: null until the load's overlay init builds it, on
+## the HUD layer from the first frame the mission has a local player.
 func get_game_hud() -> HudOverlay:
 	return _game_hud
 

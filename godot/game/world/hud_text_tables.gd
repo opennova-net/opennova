@@ -8,7 +8,7 @@ extends RefCounted
 ##  TextResource_LoadMissionTextBin @0x51ed90]
 
 
-static func register(root: ResourceRoot, world: GameWorld) -> void:
+static func register(root: ResourceRoot, mission_file: String) -> void:
 	if root == null:
 		return
 	# Refresh this global registry from the current world's root every build.
@@ -21,7 +21,5 @@ static func register(root: ResourceRoot, world: GameWorld) -> void:
 	# inside the engine's host boot, so every host carries them, D-NET-344.)
 	# The per-mission table: <mission>.bin, else medmssn.bin — the engine's
 	# resolver (runtime_boot resolve_mission_text) owns the fallback rule.
-	var base := ""
-	if world != null:
-		base = String(world.get_loaded_mission_file()).get_basename()
+	var base := mission_file.get_basename()
 	Strings.register_table(Strings.TABLE_MISSION, RtxtStringFile.load_mission_table(root, base))
