@@ -337,7 +337,6 @@ void vehicle_crash_state(
 		World &world, Entity &e, const VehicleTraits &traits, const int32_t *depths, int32_t up_z16);
 void vehicle_flush_sinks(World &world, Entity &e, int32_t up_z16, int32_t pz);
 void vehicle_expire_contact_wake(World &, Entity &);
-void vehicle_kill_crash_occupants(World &, Entity &);
 void vehicle_rebuild_rest_orientation(World &, Entity &, bool inverted);
 void vehicle_rest_state(World &, Entity &, VehicleFamily);
 void vehicle_emit_skid_effects(World &, Entity &, const VehicleTraits &);
@@ -466,6 +465,10 @@ void wheeled_contact_solve(World &world, Entity &veh,
 // wheels + 3 spine + 1 mid-hull; the 2-corner axle fit replaces the quad fit
 // [orig: Entity_UpdateVehicleChassisOrientation @0x468A50].
 bool light_contact_solve_active(const VehicleTraits &traits);
+// The bike's live wall leg: any wall byte from either pass halves a speed past 17580; retail's
+// head-on tiers read wall bytes nothing writes (D-NET-NEW-L6-23).
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600, @0x47AE05..0x47B1A9]
+void light_wall_speed_halving(Entity::VehicleMotorState &m, const PlatProbeForce (&forces)[6]);
 void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
                          Entity::VehicleMotorState &m,
                          int32_t start_x, int32_t start_y,

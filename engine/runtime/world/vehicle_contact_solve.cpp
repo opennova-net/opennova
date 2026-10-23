@@ -1541,6 +1541,32 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
 
 } // namespace
 
+// The bike's wall test. Only the any-wall byte is live: a wall contact on either pass halves a
+// speed past 17580 (|velocity|, capped at 0x7FFF0000). Retail's head-on block beside it never runs:
+// the solve hands Entity_CheckCollisionState the per-probe wall bytes at var_14 (entry - 0x14:
+// `lea edx, [esp+2B4h]` @0x479649 at sp delta 0x2C8, stored into the call's block @0x479655)
+// and the call sets byte [var_14 + probe] (@0x46326E), but the solve zeroes and reads six other
+// bytes, var_C / var_8 (entry - 0xC: zeroed @0x479761 / @0x479768, read @0x47AE8F..0x47AF6D and
+// @0x47B106), which nothing writes. So its flagged-record sum is zero, the normal and its dot
+// with the velocity are zero, the head-on flag var_2AD (dot < -57070, @0x47B0EE..0x47B0F5) never
+// sets, and neither the probe-5 crew kill with its +0x2ED request (@0x47B106..0x47B14C) nor the
+// speed tiers (health 0 past 0x7274, Entity_ResetOccupantAnimSlots @0x463B20 past 0x55D7, -20
+// past 0x4A65; @0x47B26D..0x47B2DB) run: they would sit between the speed and the halving.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600: the speed @0x47AE05..0x47AE59, the any-wall
+//  byte var_2B9 (set @0x463261, read @0x47AE5F), the halving @0x47B19A..0x47B1A9]
+void light_wall_speed_halving(Entity::VehicleMotorState &m, const PlatProbeForce (&forces)[6]) {
+	bool any_wall = false;
+	for (const auto &force : forces)
+		any_wall = any_wall || force.wall_contact;
+	// |velocity| in the x87's order, (vy^2 + vz^2) + vx^2, capped at flt_7C19E0 and truncated.
+	// [orig: @0x47AE05..0x47AE3D; the cap @0x47AE3F..0x47AE52; _ftol2_sse @0x47AE54]
+	const double vx = m.vel_x, vy = m.vel_y, vz = m.slide_z;
+	const int32_t speed =
+			int32_t(std::min(double(2147418100.0f), std::sqrt((vy * vy + vz * vz) + vx * vx)));
+	if (any_wall && speed > 17580)
+		m.speed >>= 1;
+}
+
 void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
     // ---- sleep fast-path [orig: @0x47972C..0x479790]: velocities/speed/
     // rates zero, not airborne, not carried, slideDecay in (-300,-1] (the
@@ -1654,52 +1680,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 
 	vehicle_bike_lean(veh, traits, basis.q22.m[9] >> 6);
 
-	// Wall contact sums only flagged probe forces before normalizing.
-	// The upper hull probe has its own crew-kill/crash-request branch.
-	// [orig: Entity_ProcessLightVehiclePhysics @0x479600]
-	{
-		bool any_contact = false;
-		int64_t normal_sum[3] = {};
-		for (const auto &force : forces) {
-			if (!force.wall_contact)
-				continue;
-			any_contact = true;
-			normal_sum[0] += force.fx;
-			normal_sum[1] += force.fy;
-			normal_sum[2] += force.fz;
-		}
-		const int64_t velocity[3] = { m.vel_x, m.vel_y, m.slide_z };
-		int32_t normal[3], direction[3];
-		q16_normalize(normal_sum, normal);
-		q16_normalize(velocity, direction);
-		const int32_t dot = io::bam_add(io::bam_add(retail_q16_mul_rhu(normal[0], direction[0]),
-												retail_q16_mul_rhu(normal[1], direction[1])),
-				retail_q16_mul_rhu(normal[2], direction[2]));
-		const int32_t speed = int32_t(std::min(2147418100.0,
-				std::sqrt(double(velocity[0]) * velocity[0] + double(velocity[1]) * velocity[1] +
-						double(velocity[2]) * velocity[2])));
-		if (world.ai.is_authority && any_contact && dot < -57070) {
-			if (forces[5].wall_contact && speed > 26370) {
-				vehicle_kill_crash_occupants(world, veh);
-				if (!m.crashed && (d[0] || d[1]))
-					m.crash_request = 1;
-			} else if (speed > 29300) {
-				veh.health = 0;
-				veh.last_attacker = {};
-			} else if (speed > 21975) {
-				vehicle_kill_crash_occupants(world, veh);
-			} else if (speed > 19045) {
-				veh.health = int16_t(veh.health - 20);
-				if (veh.health < 0) {
-					veh.health = 0;
-					veh.last_attacker = {};
-				}
-			}
-		}
-		// Any planar contact above the threshold halves speed. [orig: @0x47B19A..0x47B1A9]
-		if (any_contact && speed > 17580)
-			m.speed >>= 1;
-	}
+	light_wall_speed_halving(m, forces); // [orig: @0x47AE05..0x47B1A9]
 
 	// ---- solve select [orig: the `!d_front && !d_rear` split @0x47B32D..0x47B340].
 	int32_t up_z16 = static_cast<int32_t>(basis.up[2] * io::kFp16OneD);

@@ -8,24 +8,6 @@
 
 namespace opennova::world::detail {
 
-// The misleadingly named retail reset writes each rider's Health to zero,
-// clears its attacker, and chooses the crash death animation; it does not detach.
-// [orig: Entity_ResetOccupantAnimSlots @0x463B20]
-void vehicle_kill_crash_occupants(World &world, Entity &e) {
-	if (!world.ai.is_authority)
-		return;
-	auto kill = [&](EntityHandle h) {
-		if (Entity *rider = world.registry.get(h)) {
-			rider->death_anim_state = compute_death_anim_state(0, 2, 2);
-			rider->health = 0;
-			rider->last_attacker = {};
-		}
-	};
-	for (const auto &seat : e.seats)
-		kill(seat.occupant);
-	kill(e.primary_occupant);
-}
-
 // Expiry follows the sleep test, so a newly expired row still solves this tick.
 // [orig: @0x47602E..0x476048; @0x47973F..0x479759; @0x47C457..0x47C471;
 // @0x47F192..0x47F1AC; @0x481A65..0x481A7F]

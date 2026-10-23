@@ -216,6 +216,36 @@ void test_the_tank_hull_bottom_carries_wheel_0s_compression() {
 	CHECK((v.flags & 0x8000u) != 0);
 }
 
+// D-NET-NEW-L6-23: the bike's only live wall leg. A wall byte from either pass halves a speed whose
+// |velocity| passes 17580; nothing else of the head-on block runs (its wall bytes are never
+// written in retail), so no velocity, however fast, touches anything but the speed.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47AE05..0x47AE59, @0x47B19A..0x47B1A9]
+void test_the_bike_wall_leg_only_halves_the_speed() {
+	Entity::VehicleMotorState m;
+	detail::PlatProbeForce forces[6];
+	m.speed = 0x10000;
+	m.vel_x = 30000; // head-on past every retail tier
+	detail::light_wall_speed_halving(m, forces);
+	CHECK(m.speed == 0x10000); // no wall byte
+	forces[5].wall_contact = true;
+	detail::light_wall_speed_halving(m, forces);
+	CHECK(m.speed == 0x8000);
+	m.vel_x = 17580;
+	detail::light_wall_speed_halving(m, forces);
+	CHECK(m.speed == 0x8000); // not past the threshold
+	m.vel_x = 12000;
+	m.vel_y = 12000;
+	m.slide_z = 4000; // |v| = 17435.6: under
+	detail::light_wall_speed_halving(m, forces);
+	CHECK(m.speed == 0x8000);
+	m.slide_z = 4500; // |v| = 17557.1: under
+	detail::light_wall_speed_halving(m, forces);
+	CHECK(m.speed == 0x8000);
+	m.slide_z = 5000; // |v| = 17691.8: past
+	detail::light_wall_speed_halving(m, forces);
+	CHECK(m.speed == 0x4000);
+}
+
 } // namespace
 
 int main() {
@@ -223,6 +253,7 @@ int main() {
 	test_the_light_second_pass_leaves_the_mid_hull_probe_out();
 	test_the_tracked_water_leg_raises_only_the_contact_copy();
 	test_the_tank_hull_bottom_carries_wheel_0s_compression();
+	test_the_bike_wall_leg_only_halves_the_speed();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
