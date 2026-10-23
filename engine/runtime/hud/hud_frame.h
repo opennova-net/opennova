@@ -1660,6 +1660,27 @@ private:
 	// The item flash timers and their last tick (set_item_flash): BSS-zero, never
 	// cleared; only the overlay-buffer reset zeroes the last tick.
 	HudItemFlash item_flash_;
+	// THE ENTITY-INFO RECORD'S MAP FIELDS (g_HUDEntityInfo) as the pass's head last built them:
+	// the waypoint's active byte and position, and the nearest FARP. The head builds them past
+	// its round-over and white-flash returns, ahead of the level-3 one (compile); the corner map
+	// draws inside the pass from this frame's build, the big map, a scene-frame leg, and the map
+	// windows from the last build, so a gated frame's big map keeps it
+	// [orig: HUD_BuildEntityInfo @0x4B8440 - +0x175 @0x4B88B7 / @0x4B88E8, +0x190..0x198
+	//  @0x4B88F7..0x4B8914, +0x184..0x18C @0x4B89D4..0x4B89E6; HUD_DrawMapOverlay @0x5A5F40 -
+	//  the reads @0x5A7835, @0x5A7868, @0x5A7894, @0x5A7951; HUD_BuildMapOverlayView's call
+	//  @0x5A805A].
+	struct RecordMapFields {
+		bool waypoint_present = false;
+		int32_t waypoint_x = 0, waypoint_y = 0, waypoint_z = 0;
+		bool farp_present = false;
+		int32_t farp_x = 0, farp_y = 0;
+	};
+	RecordMapFields record_map_;
+	// g_WaypointAltitudeColor / g_WaypointAltitudeBand: the pass sets them past its level-3
+	// return while the record's waypoint is active and keeps them otherwise; BSS-zero, nothing
+	// else writes them (compile_overlay_pass).
+	uint32_t waypoint_altitude_color_ = 0;
+	int waypoint_altitude_band_ = 0;
 	int silhouette_stamp_ = 0;
 	uint64_t silhouette_vehicle_ = 0;
 	std::string silhouette_weapon_;

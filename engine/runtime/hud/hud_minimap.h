@@ -420,6 +420,13 @@ struct HudMinimapInput {
 	int32_t waypoint_x = 0;
 	int32_t waypoint_y = 0;
 	int32_t waypoint_z = 0; // Q16 [orig: g_WaypointPosZ (0x2723520), HUD_UpdateWaypointAltitudeColor @0x590970 altitude test]
+	// The waypoint's altitude colour and band as the gameplay pass last set them (the HUD
+	// compiler holds them: HudFrameCompiler::compile_overlay_pass): the pointer's and the
+	// WPIndctr nub's colour, and the nub's frame, band 0 above, 1 below, 2 level.
+	// [orig: g_WaypointAltitudeColor / g_WaypointAltitudeBand, read by HUD_DrawMapOverlay
+	//  @0x5A7878 / @0x5A79E7 and @0x5A79B5]
+	uint32_t waypoint_altitude_color = 0;
+	int waypoint_altitude_band = 0;
 	// The nearest FARP HUD_BuildEntityInfo resolved this frame (hudInfo+0x10
 	// and g_TrackedTargetPos) [orig: @0x4b891a..0x4b89e3].
 	bool farp_present = false;

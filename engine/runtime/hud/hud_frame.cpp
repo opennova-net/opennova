@@ -509,6 +509,19 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 		element_(HudElement::ServicePrompt, [&] { element_service_prompt(state, surface_w, surface_h); });
 	}
 	element_(HudElement::InsetCues, [&] { element_inset_cues(state, surface_w, surface_h); });
+	// The pass's head builds the entity-info record past its round-over and white-flash returns
+	// and ahead of the level-3 one: its map fields are what the big map and the map windows read
+	// (record_map_) [orig: HUD_RenderAllOverlays @0x5A8070 - the HUD_BuildEntityInfo call
+	//  @0x5A80BC, ahead of g_HUDDetailLevel @0x5A80C4].
+	if (overlay_pass_runs(state)) {
+		record_map_.waypoint_present = state.waypoint.present;
+		record_map_.waypoint_x = state.waypoint.world_x;
+		record_map_.waypoint_y = state.waypoint.world_y;
+		record_map_.waypoint_z = state.waypoint.world_z;
+		record_map_.farp_present = state.combat.farp_present;
+		record_map_.farp_x = state.combat.farp_x_q16;
+		record_map_.farp_y = state.combat.farp_y_q16;
+	}
 	if (state.hud_detail_level >= 3) {
 		element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
 		// The tip rides the scene frame, not the overlay pass: the blank level
@@ -585,6 +598,25 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// carries the witness).
 	item_flash_.tick(state.ticks);
 	hud_palette2_refreshed_ = true;
+	// The waypoint's altitude colour and band, past the palette store and the projection: set
+	// only while the record's waypoint is active, kept otherwise. The x86 `sub` wraps; the
+	// compares are signed [orig: HUD_RenderAllOverlays - the HUD_UpdateWaypointAltitudeColor call
+	//  @0x5A815F; HUD_UpdateWaypointAltitudeColor @0x590970 - g_WaypointActiveByte @0x590970, the
+	//  delta @0x590984, `jge` @0x59098C, `jle` @0x5909A8, the stores @0x59098E..0x5909C9].
+	if (record_map_.waypoint_present) {
+		const int32_t dz = static_cast<int32_t>(static_cast<uint32_t>(record_map_.waypoint_z) -
+				static_cast<uint32_t>(state.minimap.player_z));
+		if (dz < -0x20000) {
+			waypoint_altitude_color_ = 0xFF20407Fu; // below: blue
+			waypoint_altitude_band_ = 1;
+		} else if (dz > 0x20000) {
+			waypoint_altitude_color_ = 0xFF7F5000u; // above: orange
+			waypoint_altitude_band_ = 0;
+		} else {
+			waypoint_altitude_color_ = 0xFF007000u; // level: green
+			waypoint_altitude_band_ = 2;
+		}
+	}
 	if ((state.overlay_master & 2u) == 0u) {
 		element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
 		return;
@@ -845,17 +877,20 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	input.hud_frame = state.hud_frame;
 	input.session_frame = state.session_frame;
 	input.item_flash = item_flash_.timers();
-	input.waypoint_present = state.waypoint.present;
-	input.waypoint_x = state.waypoint.world_x;
-	input.waypoint_y = state.waypoint.world_y;
-	input.waypoint_z = state.waypoint.world_z;
+	// The record's waypoint and nearest FARP as the pass's head last built them (record_map_),
+	// the altitude colour and band as the pass last set them, the tether's neutral colour
+	// (g_HudposTextColor = the hudpos hud_textcolor), and the non-bank legs' feed (hud_minimap.h
+	// HudMinimapOverlays).
+	input.waypoint_present = record_map_.waypoint_present;
+	input.waypoint_x = record_map_.waypoint_x;
+	input.waypoint_y = record_map_.waypoint_y;
+	input.waypoint_z = record_map_.waypoint_z;
+	input.waypoint_altitude_color = waypoint_altitude_color_;
+	input.waypoint_altitude_band = waypoint_altitude_band_;
 	input.waypoint_distance_offset = layout_.spinmap_wp_dist_off;
-	// The nearest FARP the HUD info build resolved, the tether's neutral
-	// colour (g_HudposTextColor = the hudpos hud_textcolor), and the non-bank
-	// legs' feed (hud_minimap.h HudMinimapOverlays).
-	input.farp_present = state.combat.farp_present;
-	input.farp_x = state.combat.farp_x_q16;
-	input.farp_y = state.combat.farp_y_q16;
+	input.farp_present = record_map_.farp_present;
+	input.farp_x = record_map_.farp_x;
+	input.farp_y = record_map_.farp_y;
 	input.hudpos_text_color = layout_.hud_text;
 	input.overlays = &state.map_overlays;
 	input.map_coords_x = layout_.map_coords_x;
@@ -963,11 +998,8 @@ void map_window_input(const HudFrameState &state, const HudItemFlash &item_flash
 	input.session_frame = state.session_frame;
 	// The windowed passes run the same legs as the big map (the CMAP mask is
 	// the big-map mask), so they read the same non-bank feed, flash timers,
-	// FARP target and colours.
+	// FARP target (the record's, set by the caller) and colours.
 	input.item_flash = item_flash.timers();
-	input.farp_present = state.combat.farp_present;
-	input.farp_x = state.combat.farp_x_q16;
-	input.farp_y = state.combat.farp_y_q16;
 	input.overlays = &state.map_overlays;
 }
 
@@ -980,6 +1012,9 @@ const HudFrameCompiler::MapWindowDraw &HudFrameCompiler::compile_death_map(
 	// other map labels [orig: MapOverlay_DrawView — HUD_DrawTextCentered_HalfBright(
 	// g_HUDLabelFontBold) @0x5a5c59/@0x5a5cbf/@0x5a5d14].
 	map_window_input(state, item_flash_, surface_w, surface_h, map_window_input_);
+	map_window_input_.farp_present = record_map_.farp_present;
+	map_window_input_.farp_x = record_map_.farp_x;
+	map_window_input_.farp_y = record_map_.farp_y;
 	map_window_input_.hudpos_text_color = layout_.hud_text;
 	map_window_input_.overlay_color = active_color(state);
 	death_map_draw_.glyphs.clear();
@@ -1032,6 +1067,9 @@ const HudFrameCompiler::MapWindowDraw &HudFrameCompiler::compile_command_map(
 		const HudFrameState &state, CommandMapView &cmap, const MapViewRect &rect,
 		int32_t scaled_800, const DeathMapFacts &facts, float surface_w, float surface_h) {
 	map_window_input(state, item_flash_, surface_w, surface_h, map_window_input_);
+	map_window_input_.farp_present = record_map_.farp_present;
+	map_window_input_.farp_x = record_map_.farp_x;
+	map_window_input_.farp_y = record_map_.farp_y;
 	map_window_input_.hudpos_text_color = layout_.hud_text;
 	map_window_input_.overlay_color = active_color(state);
 	command_map_draw_.glyphs.clear();

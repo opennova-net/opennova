@@ -938,22 +938,11 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			input.farp_present)
 		draw_farp_pointer(c);
 
-	uint32_t waypoint_state_color = 0;
-	int waypoint_nub_frame = 3; // blank
-	if (input.waypoint_present) {
-		// [orig: HUD_UpdateWaypointAltitudeColor @0x590970 — waypoint z - player z vs +-0x20000 (2.0 wu)]
-		const int32_t dz = input.waypoint_z - input.player_z;
-		if (dz < -0x20000) {
-			waypoint_state_color = 0xFF20407Fu; // below -> blue
-			waypoint_nub_frame = 1;
-		} else if (dz > 0x20000) {
-			waypoint_state_color = 0xFF7F5000u; // above -> orange
-			waypoint_nub_frame = 0;
-		} else {
-			waypoint_state_color = 0xFF007000u; // level -> green
-			waypoint_nub_frame = 2;
-		}
-	}
+	// The altitude colour and band the gameplay pass last set (HudFrameCompiler holds them;
+	// the big map outside the pass reads them as they stand).
+	// [orig: g_WaypointAltitudeColor @0x5A7878 / @0x5A79E7, g_WaypointAltitudeBand @0x5A79B5]
+	const uint32_t waypoint_state_color = input.waypoint_altitude_color;
+	const int waypoint_nub_frame = input.waypoint_altitude_band;
 	// The waypoint pointer: suppressed by any drawn tether, blinking with
 	// flash timer 5 (idle or lit draws) [orig: @0x5a7844..0x5a7893 —
 	//  !HIBYTE(v142) @0x5a7853, dword_2723D0C @0x5a7859].
