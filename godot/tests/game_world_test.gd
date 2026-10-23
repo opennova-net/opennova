@@ -51,6 +51,30 @@ func test_mission_load_reports_only_real_stage_checkpoints() -> void:
 		"the real load pipeline reports exact stage starts through world ready")
 
 
+# The minimap's depthspin water mask is made with the terrain's textures, ahead of the
+# freeze and the HUD's textures, not at the load's end (engine
+# mission/mission_load_plan.h carries the witness, D-NET-NEW-L3-37): the textures leg
+# finds it made.
+func test_the_water_mask_is_made_with_the_terrains_textures() -> void:
+	var world := WorldFixture.make_world(self)
+	var order := []
+	world.minimap_water_changed.connect(func(_mask: ImageTexture) -> void:
+			order.append("water_mask"))
+	world.hud_textures_load.connect(func(_full_arm: bool) -> void:
+			order.append("hud_textures"))
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	assert_eq(order, ["water_mask", "hud_textures"],
+			"one mask, made ahead of the HUD's textures")
+	var timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(timeline)
+	if timeline != null:
+		var names := Array(timeline.span_names())
+		assert_true(names.find("terrain_textures") < names.find("model_materials")
+				and names.find("model_materials") < names.find("hud_textures"),
+				"the terrain's textures, the freeze, then the HUD's: %s" % [names])
+
+
 # The object detail (game.cfg's object_polydetail; engine renderer/object_lod.h):
 # the shell's options word reaches the frames only through the copy each
 # mission start takes, so a change made mid-mission waits for the next one.

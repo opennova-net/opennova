@@ -259,8 +259,11 @@ func get_ui_parent() -> Node:
 
 
 func _on_minimap_water_changed(mask: ImageTexture) -> void:
-	# A reduced arm's HUD holds no terrain picture (_load_hud_textures).
-	if _game_hud == null or not _hud_full_arm:
+	# A reduced arm's HUD holds no terrain picture (_load_hud_textures). The load
+	# makes the mask with the terrain's textures, ahead of the HUD's: the textures
+	# leg takes it then, so an overlay not yet loaded waits for that leg rather than
+	# making the map picture twice.
+	if _game_hud == null or not _game_hud.is_configured() or not _hud_full_arm:
 		return
 	_game_hud.set_minimap_terrain(
 			_world.get_terrain_data() if _world != null else null, mask,

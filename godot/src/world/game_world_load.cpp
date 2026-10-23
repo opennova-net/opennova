@@ -433,9 +433,13 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// freeze is the reduced arm's, with the render arm's device inits after it (engine
 	// inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness,
 	// D-NET-NEW-L3-25, D-NET-NEW-L3-31).
+	// Each listed file's resolve presents the loading screen at its stored checkpoint, the
+	// stage's start (MissionObjectPlacer::resolve_model_materials carries the witness).
 	timeline->span("model_materials");
 	if (placer_.is_valid() && challenge_sim.is_valid()) {
-		placer_->resolve_model_materials(challenge_sim->get_mission_start_model_files());
+		placer_->resolve_model_materials(challenge_sim->get_mission_start_model_files(),
+				callable_mp(this, &GameWorld::pulse_load_progress)
+						.bind(MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM)));
 	}
 	timeline->end_span();
 	// The HUD's textures and fonts at the mission textures stage, past the freeze: the full
@@ -483,9 +487,10 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->end_span();
 	loaded_mission_file_ = p_bms_name;
 	world_ready_ = true;
+	// The water's world rendering opens at the load's end; its minimap mask was made with the
+	// terrain's textures (load_terrain_textures).
 	timeline->span("water");
 	set_water_world_rendering_enabled(true);
-	build_minimap_water_mask();
 	timeline->end_span();
 	timeline->span("world_loaded");
 	emit_signal(kSignalLoadProgress, MissionData::LOAD_PROGRESS_WORLD_READY);
@@ -647,8 +652,8 @@ void GameWorld::start_mission_root() {
 	runtime_id_ = ObjectID(runtime->get_instance_id());
 }
 
-void GameWorld::pulse_object_stage_progress() {
-	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_OBJECTS));
+void GameWorld::pulse_load_progress(int p_percent) {
+	emit_signal(kSignalLoadProgress, p_percent);
 }
 
 // Populate the world with the mission's placed objects under the mission
@@ -693,7 +698,8 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 	// joins still use their complete document.
 	// Pulse the load-progress screen from inside the model-load loop at the
 	// object stage's constant value (the load plan's per-model pulse witness).
-	options["progress"] = callable_mp(this, &GameWorld::pulse_object_stage_progress);
+	options["progress"] = callable_mp(this, &GameWorld::pulse_load_progress)
+			.bind(MissionData::load_progress_percent(MissionData::LOAD_STAGE_OBJECTS));
 	// The placement's model builds split by phase (ObjectModel::take_build_profile), from here.
 	(void)ObjectModel::take_build_profile();
 	// A dedicated host's load builds no placed entity's draw object: the placement runs with no
@@ -1216,6 +1222,10 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 	}
 	p_timeline->span("terrain_textures");
 	terrain_data_->load_textures();
+	// The minimap's depthspin water mask among the terrain's textures, on both arms, ahead of the
+	// freeze and the HUD's textures (engine mission/mission_load_plan.h carries the witness,
+	// D-NET-NEW-L3-37).
+	build_minimap_water_mask();
 	terrain_->build(opennova::terrain::builds_lod_cache(p_dedicated_host),
 			opennova::terrain::builds_tile_cache_targets(p_dedicated_host));
 	if (opennova::terrain::loads_foliage_definitions(p_dedicated_host)) configure_foliage();

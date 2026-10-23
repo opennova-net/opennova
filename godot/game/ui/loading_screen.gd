@@ -188,7 +188,14 @@ func present(force := false) -> void:
 		_sync_bar_fill()
 	queue_redraw()
 	if is_inside_tree() and not GameRuntimeRoot.is_headless():
+		# A present draws the screen and its bar alone, no world pass (engine
+		# runtime/hud/loading_screen.h carries the witness): the world under the
+		# opaque layer is this viewport's 3D, left out of the forced draw.
+		var viewport := get_viewport()
+		var world_was_off := viewport.disable_3d
+		viewport.disable_3d = true
 		RenderingServer.force_draw(true, 0.0)
+		viewport.disable_3d = world_was_off
 
 
 ## Give a newly mounted Control one complete SceneTree frame to receive layout

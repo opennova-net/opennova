@@ -24,6 +24,20 @@
 //    celestial, HUD and renderer resource loads and before the loading screen
 //    drops — late network spawns must not change it
 //    [orig: CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5871CF from @0x525A6E];
+//    its material resolve presents the loading screen at the stored checkpoint past
+//    each listed model's resolve, the stage's value unchanged (the shell's
+//    model_materials leg presents past each listed file's, D-NET-NEW-L3-37)
+//    [orig: CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80 - the
+//    resolve call @0x5B3A92, LoadingScreen_PresentStoredProgress @0x586D70 called
+//    @0x5B3A9C (slot 15 of the screen's vtable with the checkpoint it stored)];
+//  - a present draws the loading screen alone: no world pass runs in it
+//    (hud/loading_screen.h carries the witness), so the shell's present draws
+//    its viewport's canvas with the 3D world off (D-NET-NEW-L3-37);
+//  - the minimap's depthspin water texture is made inside the terrain's
+//    mission textures (its texture slots and atlas, on both arms), ahead of the
+//    freeze, not at the load's end (the shell's terrain_textures leg builds the
+//    mask, D-NET-NEW-L3-37) [orig: PolyTrn_InitTextures @0x60AAA0 - the
+//    depthspin texels @0x60BA20..0x60BB11, the texture made @0x60BB3B];
 //  - the game music context opens and its vars seed before runtime compiles
 //    WAC M# operands [orig: @0x525581..0x52561b before WAC init @0x525CB3];
 //  - the effect system loads every .ptl and its textures at load, so the

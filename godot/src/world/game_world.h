@@ -855,9 +855,10 @@ private:
 			const Ref<ResourceRoot> &p_resource_root, Ref<LoadTimeline> &r_timeline);
 	void start_mission_root();
 	void place_mission_objects(const Ref<MissionData> &p_mission);
-	// The placer's per-model progress pulse (the load plan's per-model pulse
-	// witness): the loading screen at the object stage's constant value.
-	void pulse_object_stage_progress();
+	// One load-progress present at `p_percent` (the loading screen's due rule gates it): the
+	// placer's per-model pulse at the object stage's constant value (the load plan's per-model
+	// pulse witness) and the freeze's per-file present, each at its stored checkpoint.
+	void pulse_load_progress(int p_percent);
 	// The terrain's .trn, overcast.def and the named .env over the engine
 	// defaults, as the time-of-day load reads them; never fails.
 	void load_environment(const String &p_trn_path, const String &p_env_path);

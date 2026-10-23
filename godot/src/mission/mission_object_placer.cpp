@@ -1606,13 +1606,15 @@ Ref<ObjectData> MissionObjectPlacer::object_data_for(const String &p_graphic) {
 	return _load_object_data(p_graphic);
 }
 
-int MissionObjectPlacer::resolve_model_materials(const PackedStringArray &p_files) {
+int MissionObjectPlacer::resolve_model_materials(const PackedStringArray &p_files,
+		const Callable &p_present) {
 	_check_epoch();
 	const uint64_t start = Time::get_singleton()->get_ticks_usec();
 	int rows = 0;
 	for (int64_t i = p_files.size() - 1; i >= 0; --i) {
 		const Ref<ObjectData> data = _load_object_data(p_files[i]);
 		if (data.is_valid()) rows += data->resolve_materials();
+		if (p_present.is_valid()) p_present.call();
 	}
 	UtilityFunctions::print_verbose(vformat(
 			"MissionObjectPlacer: model materials %d row(s) over %d file(s): %d ms", rows, p_files.size(),
