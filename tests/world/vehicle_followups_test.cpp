@@ -588,6 +588,58 @@ void the_fit_runs_on_the_occupant() {
     CHECK(std::abs(fit.yaw_bam - 0x40000000) < 0x100000);
 }
 
+// D-NET-NEW-L6-36 (row 1): the platform solve's lever corners are the position plus two products,
+// each rounded half up on its own, of a halved extent (truncated) and a row's extract word (`sar
+// 6`): row 1 with the beam's half, row 0 with the length's. Words with low bits set, an odd beam
+// (200001) and an odd length (500003) separate it from one rounding over the Q22 words (which
+// gives c0 (1208619, -2169875, 322654)).
+// [orig: Entity_ProcessPlatformPhysics @0x481870 - the halves @0x482E3D / @0x482EF6, c0
+//  @0x482E57..0x482FE0, c1 @0x482FF7..0x48316B, c2 @0x483176..0x4832F1, c3 @0x4832FC..0x48346D]
+void platform_corners_round_each_product() {
+    CollisionMatrix raw;
+    raw.m[0] = 4000037;
+    raw.m[4] = -1250005;
+    raw.m[8] = 300063;
+    raw.m[1] = 1250003;
+    raw.m[5] = 4000041;
+    raw.m[9] = -200017;
+    raw.m[10] = 4194304;
+    int32_t c[4][3];
+    detail::vehicle_platform_corners(raw, 200001, 500003, 1000000, -2000000, 300000, c);
+    const int32_t want[4][3] = { { 1208618, -2169876, 322653 }, { 1268222, -1979142, 313113 },
+        { 731778, -2020858, 286887 }, { 791382, -1830124, 277347 } };
+    for (int k = 0; k < 4; ++k)
+        for (int i = 0; i < 3; ++i)
+            CHECK(c[k][i] == want[k][i]);
+}
+
+// D-NET-NEW-L6-36 (row 1): the boat's fit runs on the platform solve's occupant matrix, not on one
+// it builds from the hull's euler words: a crashed, unfrozen hull in the air takes the arm that
+// fits nothing, so the matrix leaves the call as it entered.
+// [orig: Entity_ComputeSuspensionOrientation @0x46C8E0, the calls @0x483D00 / @0x483F2B with
+//  isUnderwater, the extraction Math_FixedPointMatrixToEulerAngles @0x483D1C / @0x483F3D]
+void the_boat_fit_runs_on_the_occupant() {
+    Rig r;
+    const VehicleTraits t = r.traits(VehicleFamily::Watercraft, true);
+    auto &v = r.entity();
+    v.veh.yaw_bam = v.veh.air_pitch_bam = v.veh.air_roll_bam = 0;
+    v.veh.crashed = 1;
+    v.veh.byte_2ef = 0;
+    v.flags |= kEntityFlagInAir;
+    const int32_t origin[3] = {};
+    const CollisionMatrix occupant = detail::vehicle_matrix_rows(
+            collision_matrix_from_euler(0x40000000, 0x08000000, 0, origin));
+    int32_t corners[4][3] = {};
+    detail::PlatFit fit;
+    detail::vehicle_boat_suspension_fit(r.world, v, t, occupant, corners, fit, 0, 0, 0);
+    for (int i = 0; i < 16; ++i)
+        CHECK(fit.matrix.m[i] == occupant.m[i]);
+    int32_t euler[3];
+    collision_matrix_to_euler(occupant, euler);
+    CHECK(fit.yaw_bam == euler[0] && fit.pitch_bam == euler[1] && fit.roll_bam == euler[2]);
+    CHECK(std::abs(fit.yaw_bam - 0x40000000) < 0x100000);
+}
+
 // D-NET-NEW-L6-32 (row L): a bike the last tick left in the air landing on its wheels with no
 // wheelie request drops its retained chassis state at the wheel arm's entry; a request keeps it.
 // A crashed, fallen bike (+0x2EF, +0x2FC: the fall-over arm only spins its matrix) isolates the
@@ -1240,6 +1292,8 @@ int main() {
     occupant_rows_floor_each_word();
     occupant_rows_are_normalized();
     the_fit_runs_on_the_occupant();
+    platform_corners_round_each_product();
+    the_boat_fit_runs_on_the_occupant();
     bike_landing_clears_the_chassis_state();
     bike_unleaned_drops_lean_rates();
     bike_sinks_flush_under_water();

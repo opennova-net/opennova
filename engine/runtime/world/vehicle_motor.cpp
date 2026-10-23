@@ -1341,6 +1341,26 @@ int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z, 
 
 namespace detail {
 
+// Corner k is the position plus two products, each rounded half up on its own, of a half extent
+// (ftol of the extent times -0.5f or 0.5f, truncated toward zero) and a row's extract word: row 1
+// (side) with the beam's half, row 0 (forward) with the length's. c0 (+f, -s), c1 (+f, +s),
+// c2 (-f, -s), c3 (-f, +s).
+// [orig: Entity_ProcessPlatformPhysics @0x481870 - the halves flt_7C59B0 (-0.5f) @0x482E3D and
+//  flt_7C3B94 (0.5f) @0x482EF6; c0 @0x482E57..0x482FE0, c1 @0x482FF7..0x48316B, c2
+//  @0x483176..0x4832F1, c3 @0x4832FC..0x48346D (`add eax, 8000h; adc edx, 0; shrd eax, edx, 10h`
+//  per product)]
+void vehicle_platform_corners(const CollisionMatrix &raw, int32_t beam, int32_t length,
+		int32_t px, int32_t py, int32_t pz, int32_t out[4][3]) {
+	const int32_t forward_half[4] = { length / 2, length / 2, -length / 2, -length / 2 };
+	const int32_t side_half[4] = { -beam / 2, beam / 2, -beam / 2, beam / 2 };
+	const int32_t position[3] = { px, py, pz };
+	for (int k = 0; k < 4; ++k)
+		for (int i = 0; i < 3; ++i)
+			out[k][i] = io::bam_add(position[i],
+					io::bam_add(retail_q16_mul_rhu(side_half[k], raw.m[4 * i + 1] >> 6),
+							retail_q16_mul_rhu(forward_half[k], raw.m[4 * i] >> 6)));
+}
+
 // The shared 4-normal plane fit, ported in the witnessed fixed/float mix
 // (record §4.1 "Port literally"): 16.16-quantized normalized edges, RHU
 // fixed-point cross products, the set-1/set-2 duplicated normal, integer
@@ -1499,14 +1519,18 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     // World transform: the pose matrix from {Pos, Yaw, Pitch, Roll} — the
     // boat's live attitude rides air_pitch_bam/air_roll_bam (the shared
     // attitude fields the sim mirrors to the row).
-	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-	const double *fwdv = basis.fwd;
-	const double *sidev = basis.side;
-	const double *upv = basis.up;
+	const VehicleEulerBasis basis =
+			vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
     // The probes ride the head matrix, the hull's effective scale included.
     // [orig: @0x481BEE..0x481C45]
+	const CollisionMatrix head = vehicle_solve_matrix(veh);
     int32_t probes[7][3];
-    place_probes(vehicle_solve_matrix(veh), probes_model, px, py, pz, probes);
+	place_probes(head, probes_model, px, py, pz, probes);
+	// The occupant matrix (isUnderwater in the IDB): the head's rows extracted and set back, not
+	// normalized. The fits and the euler extraction after them read it.
+	// [orig: @0x481C48..0x481CAF; the readers @0x483BBE / @0x483D00 / @0x483F2B, @0x483BD0 /
+	//  @0x483D1C / @0x483F3D]
+	CollisionMatrix occupant = vehicle_matrix_rows(head);
 
     // ---- §4/§6 first force pass + severity response (plat_probe_pass).
     const int32_t soft = cos22_of_bam_x87(traits.max_slope);
@@ -1569,8 +1593,9 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
         liftHi = int32_t(double(t_pitch_vel) * F * 0.004);
         liftLo = liftHi >> 1;
         planeSpd = 20000;
-        const double arz = std::abs(sidev[2]) * 65536.0;
-        if (arz > double(0x2000)) { // heavily rolled [orig: @0x482259]
+        // Heavily rolled: the head's row 1 z, its extract's word.
+        // [orig: `mov eax, [esp+..+var_244]` (row 1 z of the @0x481C55 extract) @0x482259]
+        if (io::bam_abs(head.m[9] >> 6) > 0x2000) {
             pitchThr = int32_t(double(t_pitch) * 0.1 * 409.6);
             liftHi = 250;
         } else {
@@ -1610,42 +1635,23 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
 	detail::vehicle_water_entry(
 			world, veh, probes[water_pad][0], probes[water_pad][1], trail_was_water);
 
-	// ---- §9 lever corners around the CURRENT pose + machines. Built through
-	// the same Q22 rotate as the probes — the witnessed corner products are
-	// round-half-up 16.16 through the pose matrix [orig: @0x482E31..0x48346D],
-	// not double-precision basis-row sums.
+	// ---- §9 lever corners around the CURRENT pose + machines, off the rows of the matrix the
+	// solve rebuilds unscaled from the euler words (vehicle_platform_corners). The crash state's
+	// righting below replaces the rows but not these corners.
+	// [orig: Math_BuildFixedPointMatrixFromEulerAngles (the call @0x482DCA) and its extracts
+	//  @0x482DDC..0x482E2C; no corner build after the righting @0x4835EF / @0x483642]
+	const CollisionMatrix &raw = basis.q22;
 	int32_t c[4][3];
-	{
-        const int32_t hb2 = hb >> 1, hl2 = hl >> 1;
-        const int32_t corner_model[4][3] = {
-            {+hl2, -hb2, 0}, // c0: (-hb/2)*right + (+hl/2)*fwd
-            {+hl2, +hb2, 0}, // c1
-            {-hl2, -hb2, 0}, // c2
-            {-hl2, +hb2, 0}, // c3
-        };
-        for (int k = 0; k < 4; ++k) {
-            int32_t rotated[3];
-            basis.q22.rotate_point(corner_model[k], rotated);
-            c[k][0] = px + rotated[0];
-            c[k][1] = py + rotated[1];
-            c[k][2] = pz + rotated[2];
-        }
-    }
-	vehicle_crash_state(world, veh, traits, nullptr, int32_t(upv[2] * 65536.0));
-	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-	// Righting can replace the attitude after the first lever-corner build.
-	{
-		const int32_t hx = hl >> 1, hy = hb >> 1;
-		const int32_t local[4][3] = { { hx, -hy, 0 }, { hx, hy, 0 }, { -hx, -hy, 0 },
-			{ -hx, hy, 0 } };
-		for (int k = 0; k < 4; ++k) {
-			int32_t rotated[3];
-			basis.q22.rotate_point(local[k], rotated);
-			c[k][0] = io::bam_add(px, rotated[0]);
-			c[k][1] = io::bam_add(py, rotated[1]);
-			c[k][2] = io::bam_add(pz, rotated[2]);
-		}
-	}
+	vehicle_platform_corners(raw, hb, hl, px, py, pz, c);
+	// The crash state reads that matrix's row 2 z; a righting replaces the occupant, and the rows
+	// read from here on are then its extracts.
+	// [orig: `mov ecx, [esp+..+var_25C]` @0x483467; Entity_BuildOrientationFromVectors @0x458DF0
+	//  (the call @0x4835EF) / Entity_RebuildOrientationMatrixFromAxes @0x4632E0 (the call
+	//  @0x483642) into isUnderwater, the re-extracts @0x483601..0x483625 / @0x483654..0x483678]
+	const VehicleEulerBasis rows =
+			vehicle_crash_state(world, veh, traits, nullptr, raw.m[10] >> 6, &occupant)
+			? vehicle_basis_from_matrix(occupant)
+			: basis;
 
 	// Accumulator ramp [orig: @0x483680..0x4836E6].
 	for (int k = 0; k < 4; ++k)
@@ -1656,13 +1662,19 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     // driver's [136] is the §1.8 current/received average, and the solve reads
     // that averaged command, not the raw wire value.
     const int32_t cmd = m.cmd_speed;
-    const double fwd_z_now = fwdv[2] * 65536.0;
+	// The forward z word: the rows' (the righting's, else the rebuild's), re-extracted from the
+	// rebuild's matrix when the bow arm runs, whose whole body afloat gates.
+	// [orig: Math_ExtractRow0FromFixedPoint22 (the call @0x483723) from `matrix` under the speed
+	//  and lift gates @0x4836EC..0x483710, the afloat test @0x48372B, the reads of var_250
+	//  @0x4837BF / @0x4839D7 / @0x483B04, the cmd test @0x483741 -> @0x483881]
+	int32_t fwd_z_now = rows.q22.m[8] >> 6;
     if (m.speed > 0 && liftLo > 0 && liftHi > 0) {
-        if (m.plat_afloat && cmd > 0) {
+		fwd_z_now = raw.m[8] >> 6;
+		if (m.plat_afloat && cmd > 0) {
             m.plat_acc[0] = m.plat_acc[1] = 0;
             m.plat_planing = true;
             if (!m.plat_porpoise) {
-                if (fwd_z_now > double(pitchThr)) {
+                if (fwd_z_now > pitchThr) {
                     // dist/293 > (cmd/293)*0.5 -> latch (the per-tick travel
                     // is our speed here; the saved-pose dist is equivalent
                     // between integrations).
@@ -1673,20 +1685,21 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
                     c[1][2] += lift; // bow rises
                 }
             } else {
-                if (fwd_z_now < double(dipExit)) m.plat_porpoise = false;
+                if (fwd_z_now < dipExit) m.plat_porpoise = false;
                 else { c[0][2] -= liftHi; c[1][2] -= liftHi; }
             }
-        } else if (cmd <= 0) {
+        } else if (m.plat_afloat) {
             m.plat_planing = false;
         }
     }
 	// Post-machine adjustments [orig: @0x483893..0x48398C].
 	if (m.plat_planing) {
+		// The side z word: the rows' row 1 z. [orig: `mov edi, [esp+..+var_244]` @0x48389A]
 		if (m.plat_afloat && m.speed > 0x2000) {
-			vehicle_boat_lean(veh, traits, basis.q22.m[9] >> 6);
+			vehicle_boat_lean(veh, traits, rows.q22.m[9] >> 6);
 			m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
 		} else {
-			const int32_t error = basis.q22.m[9] >> 6;
+			const int32_t error = rows.q22.m[9] >> 6;
 			m.byte_2ef = 0;
 			m.air_roll_rate = io::bam_abs(error) > 240 ? (error < 0 ? -2386239 : 2386092) : 0;
 			m.part_spin.angle = 0;
@@ -1727,14 +1740,15 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
             c[k][2] += lift;
         }
         m.slide_z = 0; // [orig: @0x483F25]
-		vehicle_boat_suspension_fit(world, veh, traits, c, fit, px, py, pz);
+		vehicle_boat_suspension_fit(world, veh, traits, occupant, c, fit, px, py, pz);
 		pz = fit.z_avg;
 		m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
 	} else {
         // At-rest bob arm [orig: @0x4839C5..0x483A29].
         int32_t floatH_eff = floatH;
-        if (m.speed < 100 && m.plat_afloat &&
-            std::abs(fwd_z_now) < 5.0 && std::abs(sidev[2] * 65536.0) < 5.0) {
+        // [orig: |var_250| < 5 @0x4839D7..0x4839E3, |edi| (var_244) < 5 @0x4839E5..0x4839EF]
+        if (m.speed < 100 && m.plat_afloat && io::bam_abs(fwd_z_now) < 5 &&
+                io::bam_abs(rows.q22.m[9] >> 6) < 5) {
             if (!m.plat_at_rest) {
                 m.plat_at_rest = true;
                 m.plat_bob_phase = 4.71f; // 3pi/2 [orig: flt_7C6F84]
@@ -1763,7 +1777,7 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
                 }
                 c[k][2] += lift;
             }
-			vehicle_boat_suspension_fit(world, veh, traits, c, fit, px, py, pz);
+			vehicle_boat_suspension_fit(world, veh, traits, occupant, c, fit, px, py, pz);
 			pz = fit.z_avg;
 		} else {
 			// C. Settled / airborne.
@@ -1776,7 +1790,7 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
                     if (k != lowest && c[k][2] < c[second][2]) second = k;
                 if (cmd <= 0) {
                     m.plat_acc[lowest] = m.plat_acc[second] = 0;
-                    if (fwd_z_now < 100.0)
+                    if (fwd_z_now < 100)
                         m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
                                 m.plat_acc[3] = 0;
                 }
@@ -1788,9 +1802,7 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
             // The wheeled solver's settled/airborne fit: same 4-normal fit;
             // Z = the average of the ABOVE-ground corners, rise-clamped
             // +0x2000/tick (blockers §3).
-			vehicle_suspension_fit(world, veh,
-					vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22, c, nullptr,
-					fit, px, py, pz);
+			vehicle_suspension_fit(world, veh, occupant, c, nullptr, fit, px, py, pz);
 			if (m.plat_afloat) {
 				// The wheeled solver's settled-fit Z: the average of the
 				// ABOVE-ZERO corners only, rise-clamped +0x2000/tick

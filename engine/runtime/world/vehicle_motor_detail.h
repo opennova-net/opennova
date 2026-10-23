@@ -450,6 +450,12 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matr
 // [orig: Entity_ComputeBoundingQuad @0x45B6E0, the non-square arm]
 void vehicle_bounding_quad(const CollisionMatrix &matrix, int32_t width, int32_t length,
 		int32_t x, int32_t y, int32_t z, int32_t out[4][3]);
+// The platform solve's lever corners over the beam (along the side row) and the length (along the
+// forward row): c0 (+f, -s), c1 (+f, +s), c2 (-f, -s), c3 (-f, +s), each product of a halved extent
+// and a row's extract word rounded half up on its own.
+// [orig: Entity_ProcessPlatformPhysics @0x481870, @0x482E31..0x48346D]
+void vehicle_platform_corners(const CollisionMatrix &raw, int32_t beam, int32_t length,
+		int32_t px, int32_t py, int32_t pz, int32_t out[4][3]);
 // The square bounding quad: c0 / c1 the origin plus / minus half the larger |width| / |length|
 // along `axis`, c2 / c3 their copies lifted by half |z_span| along the entity's euler matrix's
 // row 2: c2 (-axis, lifted), c3 (+axis, lifted).
@@ -467,8 +473,12 @@ void vehicle_compute_chassis_orientation(Entity &, const int32_t corners[4][3], 
 bool vehicle_suspension_fit(World &, Entity &, const CollisionMatrix &occupant,
 		int32_t corners[4][3], const bool *contacts, PlatFit &, int32_t px, int32_t py, int32_t pz,
 		bool tank = false);
-void vehicle_boat_suspension_fit(World &, Entity &, const VehicleTraits &, int32_t corners[4][3],
-		PlatFit &, int32_t px, int32_t py, int32_t pz);
+// The boat's fit, on the platform solve's occupant matrix (the head's rows, not normalized).
+// [orig: Entity_ComputeSuspensionOrientation @0x46C8E0, the calls @0x483D00 / @0x483F2B with
+//  isUnderwater]
+void vehicle_boat_suspension_fit(World &, Entity &, const VehicleTraits &,
+		const CollisionMatrix &occupant, int32_t corners[4][3], PlatFit &, int32_t px, int32_t py,
+		int32_t pz);
 void vehicle_boat_lean(Entity &, const VehicleTraits &, int32_t side_z16);
 void vehicle_bike_lean(Entity &, const VehicleTraits &, int32_t side_z16);
 void vehicle_apply_lean(Entity &, CollisionMatrix &);

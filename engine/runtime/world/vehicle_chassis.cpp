@@ -603,11 +603,12 @@ bool vehicle_suspension_fit(World &world, Entity &e, const CollisionMatrix &occu
 // null contact array. Its capsize threshold and slow inverted force differ
 // from the wheeled suspension callback used by the settled/airborne leg.
 // [orig: Entity_ComputeSuspensionOrientation @0x46C8E0;
-// calls @0x483D00/@0x483F2B]
+// calls @0x483D00/@0x483F2B, its matrix the solve's occupant]
 void vehicle_boat_suspension_fit(World &world, Entity &e, const VehicleTraits &t,
-		int32_t corners[4][3], PlatFit &out, int32_t px, int32_t py, int32_t pz) {
+		const CollisionMatrix &occupant, int32_t corners[4][3], PlatFit &out, int32_t px,
+		int32_t py, int32_t pz) {
 	auto &m = e.veh;
-	CollisionMatrix matrix = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22;
+	CollisionMatrix matrix = occupant;
 	out.z_avg = out.positive_z_avg = pz;
 	int32_t a[3], b[3], normal[3];
 	int64_t edge[3], cross[3];
