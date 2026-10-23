@@ -594,6 +594,7 @@ public:
 	void render_environment_nodes_frame();
 	void render_terrain_frame();
 	void render_water_frame();
+	void render_inset_water_frame();
 	void render_foliage_frame();
 	bool drive_network_frame();
 	void apply_blink_frame();
@@ -781,6 +782,7 @@ private:
 	LegResult leg_lights(FrameContext &r_ctx);
 	LegResult leg_ragdolls(FrameContext &r_ctx);
 	LegResult leg_materials(FrameContext &r_ctx);
+	LegResult leg_inset_water(FrameContext &r_ctx);
 	LegResult leg_framefx(FrameContext &r_ctx);
 	LegResult leg_slot_shadows(FrameContext &r_ctx);
 	LegResult leg_particles(FrameContext &r_ctx);

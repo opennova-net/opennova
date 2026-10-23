@@ -1399,7 +1399,9 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 	water.water_height = 7.0
 	viewport.add_child(water)
 	water.advance_frame(1.0 / 62.0)
-	var water_material := water.get_water_material()
+	# The bloom's redraw draws through its own material, over the mirror the
+	# frame rendered last (environment/water_mirror.h bloom_water_mirror_image).
+	var water_material := water.get_night_vision_material()
 	water_material.set_shader_parameter("u_water_color", Vector3.ZERO)
 	water_material.set_shader_parameter("u_has_reflection", false)
 	water_material.set_shader_parameter("u_noise_normal",

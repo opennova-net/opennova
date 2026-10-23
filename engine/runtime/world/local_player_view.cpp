@@ -1395,12 +1395,14 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, PlayerViewState
     // [orig: Render_ProcessMainSceneFrame @0x5CA34D].
     if (!local_player_camera_compose(*world, v, t, out.camera, out.mounted_camera)) return;
     out.inset_camera = out.camera;
+    out.inset_view_block = out.camera;
     if (out.inset_scope_active) {
         // The Inset scene composes once more — a second shake step — then
         // takes its own slot offsets [orig: Render_WeaponInsetScene
         //  @0x5C9841].
         bool inset_mounted = false;
         local_player_camera_compose(*world, v, t, out.inset_camera, inset_mounted);
+        out.inset_view_block = out.inset_camera;
         apply_inset_slot_offsets(*world, w, out);
     }
     out.camera_pose_valid = true;
@@ -1414,6 +1416,7 @@ void local_player_view_observe(World *world, LocalPlayerWeapon &w, const PlayerV
     out.camera = t.composed;
     out.mounted_camera = t.composed_mounted;
     out.inset_camera = out.camera;
+    out.inset_view_block = out.camera;
     if (out.inset_scope_active) apply_inset_slot_offsets(*world, w, out);
     out.camera_pose_valid = true;
 }

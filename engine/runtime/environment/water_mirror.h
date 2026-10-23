@@ -247,4 +247,52 @@ inline WaterMirrorView build_water_mirror_view(const MirrorSourceView &source,
 	return view;
 }
 
+// The weapon Inset pass renders a mirror of its own. Its scene re-runs the terrain routine with
+// no world position [orig: Render_WeaponInsetScene @ 0x5c9740 -> Render_TerrainScene(pass, NULL)
+// (the call @0x5c99b7) -> Water_ReflectionPrerender (the call @0x610ce0, under the g_WaterActive
+// the Inset's own view set: the test @0x610cd2) -> Render_MainScene (the call @0x5c27c6)],
+// which mirrors the view block g_ViewPos / g_ViewRot as the main frame's prerender does. That
+// block holds the Inset's own compose (Camera_ComputeThirdPersonView, the call @0x5c9841)
+// without the Inset's slot offsets: the pass copies it into its local camera
+// (@0x5c9857..0x5c9888) and offsets only that copy (@0x5c98fc / @0x5c9903). With no world
+// position the mirror projects at aspect 1.0 (@0x5c125c) through the fov the Inset's viewport
+// build left (dword_A7839C, read @0x5c1336; the Inset built it @0x5c999b from its
+// elevation-derived fov @0x5c98ea), which Viewport_BuildProjectionMatrix @ 0x410fb0 spans
+// across the rect's width (@0x410fc6..0x410fcb). It renders into the one
+// g_WaterReflectionTexture (GTexRT_SelectThunk @0x5c15d5), after the main scene drew its water
+// over the main frame's image, so the Inset's water and every later reader of the target sample
+// the Inset's image (bloom_water_mirror_image).
+inline constexpr float kInsetMirrorAspect = 1.0f;
+
+// The Inset mirror's source from its view block: the block's pose and the Inset's horizontal
+// fov in `view_block`, at the Inset's aspect.
+inline MirrorSourceView inset_mirror_source(MirrorSourceView view_block) {
+	view_block.projection = MirrorProjection::kPerspective;
+	view_block.keep_aspect_height = false;
+	view_block.aspect = kInsetMirrorAspect;
+	view_block.frustum_offset_x = 0.0f;
+	view_block.frustum_offset_y = 0.0f;
+	view_block.v_offset = 0.0f;
+	return view_block;
+}
+
+// The image a frame's bloom redraws its water over: the last mirror the frame rendered. The
+// bloom runs after the Inset pass [orig: Render_ProcessMainSceneFrame: FrameFX_ApplyScreenEffect
+// type 2 (the call @0x5caa97) after Render_WeaponInsetScene (the call @0x5ca949)], and its glow
+// source's water [orig: FrameFX_BloomKernel @ 0x5841d0 -> FrameFX_RenderGlowSource (the call
+// @0x584234) -> Render_WaterSurface(0, 1) (the call @0x582a5d)] marches the main view, rebuilt
+// after the Inset (@0x5ca958), through g_WaterShaderBlendNV (loaded @0x5c3452, applied by the
+// call @0x5c3478), which samples g_WaterReflectionTexture (Water_InitSurfaceShaders @ 0x5c19b0:
+// the build's call @0x5c1c37, stored @0x5c1c4d). So on a
+// frame whose Inset pass rendered its mirror the main view's bloom water samples the Inset's
+// image, else the main frame's.
+enum class WaterMirrorImage : uint8_t {
+	kMain,
+	kInset,
+};
+
+constexpr WaterMirrorImage bloom_water_mirror_image(bool inset_mirror_rendered) {
+	return inset_mirror_rendered ? WaterMirrorImage::kInset : WaterMirrorImage::kMain;
+}
+
 } // namespace opennova::env

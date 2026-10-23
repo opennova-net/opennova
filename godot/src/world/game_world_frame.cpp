@@ -173,6 +173,13 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// Per-model runtime advance (ex-self-clocked ObjectModel _process): after
 	// occlusion resolves visibility, before the particle composite over it.
 	{ "materials", FrameStats::WORLD_MATERIAL, &GameWorld::leg_materials, kSceneLeg },
+	// The weapon Inset pass's own water after the main scene's (the water row):
+	// its water-active test over its own terrain frame and the latch the main
+	// collect left (both settled by the materials row), its mirror and its strip
+	// (engine environment/water_mirror.h inset_mirror_source carries the order),
+	// ahead of the bloom's compile that samples the last mirror rendered and of
+	// the particle rows that compile its mirror's pair.
+	{ "inset_water", FrameStats::WORLD_WATER, &GameWorld::leg_inset_water, kSceneLeg | kWorldLeg },
 	// Compile focused Q3 only after this frame's celestial, water, occlusion,
 	// and object-material producers have published their final transforms
 	// and parameters. The typed snapshot is consumed by the terminal
@@ -691,6 +698,11 @@ GameWorld::LegResult GameWorld::leg_materials(FrameContext &r_ctx) {
 	return kLegRan;
 }
 
+GameWorld::LegResult GameWorld::leg_inset_water(FrameContext &r_ctx) {
+	render_inset_water_frame();
+	return kLegRan;
+}
+
 GameWorld::LegResult GameWorld::leg_framefx(FrameContext &r_ctx) {
 	sync_framefx_frame();
 	return kLegRan;
@@ -1198,8 +1210,9 @@ void GameWorld::render_environment_nodes_frame() {
 // The water strip march + mirror camera for this frame's render eye
 // (ex-self-clocked Water._process), under retail's per-frame water-active
 // test: the terrain leg just tracked the visible terrain bounds, and the
-// occlusion frame's Blink water verdict is last frame's, as retail reads it
-// (engine: runtime/terrain/quadtree.h).
+// water pass latch is what the last scene's water pass left, last frame's
+// main collect or the Inset's after it (OcclusionFrame stores it; engine:
+// runtime/terrain/quadtree.h, environment/water_frame.h).
 void GameWorld::render_water_frame() {
 	if (water_ == nullptr) {
 		return;
@@ -1209,9 +1222,28 @@ void GameWorld::render_water_frame() {
 				terrain_->get_visible_terrain_min_height(), terrain_->get_visible_terrain_max_height());
 	}
 	Ref<Simulation> sim = get_sim();
-	water_->set_blink_water_visible(sim.is_valid() && sim->occlusion_water_visible());
 	if (sim.is_valid()) water_->set_noise_frame_counter(sim->entity_update_counter());
 	water_->advance_frame(frame_delta_);
+}
+
+// The weapon Inset pass's water while that pass renders (Water::advance_inset_frame):
+// the Inset's own terrain frame's visible bounds, its camera, and the view block
+// its mirror reflects (HudInsetScope::get_view_block_transform). A frame without
+// the pass retires the Inset's water.
+void GameWorld::render_inset_water_frame() {
+	if (water_ == nullptr) {
+		return;
+	}
+	Camera3D *inset = inset_pass_camera();
+	HudInsetScope *scope = Object::cast_to<HudInsetScope>(ObjectDB::get_instance(inset_scope_id_));
+	if (inset == nullptr || scope == nullptr || terrain_ == nullptr) {
+		water_->advance_inset_frame(nullptr, Transform3D());
+		return;
+	}
+	water_->set_inset_visible_terrain_bounds(terrain_->has_inset_visible_terrain_bounds(),
+			terrain_->get_inset_visible_terrain_min_height(),
+			terrain_->get_inset_visible_terrain_max_height());
+	water_->advance_inset_frame(inset, scope->get_view_block_transform());
 }
 
 // Select the main scene's per-pass fog after the local player has placed the

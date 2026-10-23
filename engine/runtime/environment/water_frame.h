@@ -119,4 +119,21 @@ struct WaterSurfaceSides {
 
 WaterSurfaceSides water_surface_sides(float eye_y, float water_height);
 
+// The water pass's latch, the Blink water word g_WaterActive reads
+// [orig: g_WaterPassBlinkLatch @ 0x31BC910]. A
+// scene's two water passes run only past its water letter (Terrain_RenderWorldScene @ 0x5c93a0:
+// the label @0x5c93b8..0x5c93cd ahead of the Terrain_RenderWaterPass calls @0x5c95dc /
+// @0x5c95ea), and each stores the g_BlinkWaterVisible that scene's collect left
+// (Terrain_RenderWaterPass @ 0x610640: the store @0x610666, or @0x610671 with no water active).
+// Terrain_SetupViewAndLighting @ 0x60fe40 then forces g_WaterActive on it (the test @0x60ff20,
+// the store @0x60ff33). It is one word for every scene of a frame: the main scene's
+// g_WaterActive (its Render_TerrainScene, the call @0x5ca504) reads what the last scene's water
+// pass left; the weapon Inset pass's own (its Render_TerrainScene, the call @0x5c99b7) reads
+// the main collect's of the same frame (Terrain_RenderWorldScene, the call @0x5ca8ec); and the
+// Inset's collect (the call @0x5c9de9) leaves its own for the next frame's main scene. A scene
+// whose letter skips its water passes leaves the latch as it was.
+constexpr bool water_pass_latch(bool latch, bool water_pass_runs, bool blink_water_visible) {
+	return water_pass_runs ? blink_water_visible : latch;
+}
+
 } // namespace opennova::env

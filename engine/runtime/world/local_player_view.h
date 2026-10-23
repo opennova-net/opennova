@@ -458,6 +458,12 @@ struct LocalPlayerViewFrame {
 	// runs (FacialSystem::render_scene_passes).
 	bool world_skipped = false;
 	PlayerCameraPose inset_camera;
+	// The view block the Inset pass leaves in g_ViewPos / g_ViewRot: its own compose without
+	// its slot offsets, which land in its local camera only. Its water prerender mirrors this
+	// block (environment/water_mirror.h inset_mirror_source carries the witness).
+	// [orig: Render_WeaponInsetScene @0x5C9857..0x5C9888 (the copy), @0x5C98FC / @0x5C9903
+	//  (the offsets)]
+	PlayerCameraPose inset_view_block;
 	float inset_fov_over_zoom = 0;
     bool scope_camera_zero_active = false;
     bool scope_details_active = false;

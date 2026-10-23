@@ -138,6 +138,8 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_patches_active"), &Terrain::get_patches_active);
 	ClassDB::bind_method(D_METHOD("has_visible_terrain_bounds"),
 			&Terrain::has_visible_terrain_bounds);
+	ClassDB::bind_method(D_METHOD("has_inset_visible_terrain_bounds"),
+			&Terrain::has_inset_visible_terrain_bounds);
 
 	ClassDB::bind_method(D_METHOD("set_debug_no_frustum", "enabled"), &Terrain::set_debug_no_frustum);
 	ClassDB::bind_method(D_METHOD("get_debug_no_frustum"), &Terrain::get_debug_no_frustum);
@@ -641,11 +643,21 @@ void Terrain::render_inset_frame(Camera3D *p_camera) {
 	if (!is_visible_in_tree() || !built || terrain_material.is_null() ||
 			p_camera == nullptr || !p_camera->is_inside_tree()) {
 		release_inset_frame();
+		// A hidden terrain draws no Inset patches, but the Inset's bounds walk
+		// still feeds its water-active test, as the main frame's does
+		// (opennova::track_terrain_visible_bounds).
+		if (built && p_camera != nullptr && p_camera->is_inside_tree()) {
+			inset_frame_bounds = opennova::track_terrain_visible_bounds(scene_snapshot,
+					_view_input_for(p_camera));
+			inset_frame_bounds_live = true;
+		}
 		return;
 	}
 	const opennova::TerrainDrawList &draw_list =
 			inset_frame_compiler.compile(scene_snapshot, _view_input_for(p_camera));
 	inset_draw_list_live = true;
+	inset_frame_bounds = draw_list.visible_bounds;
+	inset_frame_bounds_live = true;
 	_sync_inset_material();
 	if (!inset_pool.instances[0].is_valid()) {
 		_create_pool_instances(inset_pool, inset_material->get_rid());
@@ -660,6 +672,7 @@ void Terrain::render_inset_frame(Camera3D *p_camera) {
 
 void Terrain::release_inset_frame() {
 	inset_draw_list_live = false;
+	inset_frame_bounds_live = false;
 	_set_pool_world_layer(main_pool, visual_layers::WORLD);
 	if (inset_pool.instances[0].is_valid()) {
 		_free_pool_instances(inset_pool);
@@ -1731,6 +1744,18 @@ float Terrain::get_visible_terrain_min_height() const {
 
 float Terrain::get_visible_terrain_max_height() const {
 	return has_visible_terrain_bounds() ? frame_bounds.max[1] : 0.0f;
+}
+
+bool Terrain::has_inset_visible_terrain_bounds() const {
+	return inset_frame_bounds_live && inset_frame_bounds.valid;
+}
+
+float Terrain::get_inset_visible_terrain_min_height() const {
+	return has_inset_visible_terrain_bounds() ? inset_frame_bounds.min[1] : 0.0f;
+}
+
+float Terrain::get_inset_visible_terrain_max_height() const {
+	return has_inset_visible_terrain_bounds() ? inset_frame_bounds.max[1] : 0.0f;
 }
 
 int Terrain::get_patches_active() const {

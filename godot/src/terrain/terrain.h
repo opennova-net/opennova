@@ -93,6 +93,9 @@ private:
 	bool frame_bounds_live = false;
 	// The Inset's own frame compiled since it opened (release_inset_frame).
 	bool inset_draw_list_live = false;
+	// The Inset frame's tracked visible-terrain bounds (render_inset_frame).
+	opennova::VisibleBounds inset_frame_bounds;
+	bool inset_frame_bounds_live = false;
 
 	// One view's light rows: one RGBAF row per pool slot, two texels per light
 	// — (position.xyz Godot world, inv_scale) then (c0, the patch's count).
@@ -458,6 +461,12 @@ public:
 	bool has_visible_terrain_bounds() const;
 	float get_visible_terrain_min_height() const;
 	float get_visible_terrain_max_height() const;
+	// The same for the weapon Inset pass's own frame (its water-active input),
+	// tracked whether or not the Inset patches draw; false while the Inset
+	// frame is down.
+	bool has_inset_visible_terrain_bounds() const;
+	float get_inset_visible_terrain_min_height() const;
+	float get_inset_visible_terrain_max_height() const;
 
 	// Debug API
 	// The last compile's counters (native; the F3 Render window) and whether

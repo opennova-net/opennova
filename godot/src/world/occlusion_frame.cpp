@@ -313,8 +313,12 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	// @ 0x29ACE40]
 	const int64_t water_apply_start = timing ? ticks_usec() : 0;
 	if (w != nullptr) {
-		w->set_visible(opennova::renderer::scene_water_visible(
-				blink_letters_, s->occlusion_water_visible()));
+		const bool water_passes =
+				opennova::renderer::scene_water_visible(blink_letters_, s->occlusion_water_visible());
+		w->set_visible(water_passes);
+		// The scene's water passes store this collect's verdict in the latch
+		// the next scenes' water-active tests read (Water::latch_blink_water).
+		w->latch_blink_water(water_passes, s->occlusion_water_visible());
 	}
 	if (timing) {
 		water_apply_us = ticks_usec() - water_apply_start;
@@ -375,10 +379,15 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 	inset_active_ = true;
 	inset_foliage_mask_anchors_ = inset.foliage_mask_anchors;
 	// Each view's water gate (apply_frame applied the main one): the
-	// authored water letter and that view's own blink-water verdict.
+	// authored water letter and that view's own blink-water verdict. The
+	// Inset's water passes then store its verdict in the latch, after the
+	// Inset's own water-active test read the main collect's
+	// (Water::latch_inset_blink_water).
 	if (w != nullptr) {
+		const bool inset_water_passes = !blink_water_suppressed_ || inset.water_visible;
 		w->set_blink_water_views(!blink_water_suppressed_ || s->occlusion_water_visible(),
-				!blink_water_suppressed_ || inset.water_visible);
+				inset_water_passes);
+		w->latch_inset_blink_water(inset_water_passes, inset.water_visible);
 	}
 	MissionObjectPlacer *statics = placer();
 	const auto note = [this](ObjectModel *p_node) {

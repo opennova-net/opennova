@@ -5172,6 +5172,11 @@ add_test(NAME npruntime_add_send_phase COMMAND npruntime_add_send_phase_test)
 add_executable(entity_presentation_discard_test world/entity_presentation_discard_test.cpp)
 target_link_libraries(entity_presentation_discard_test PRIVATE opennova_runtime)
 add_test(NAME entity_presentation_discard COMMAND entity_presentation_discard_test)
+# The weapon Inset pass's water: the one water pass latch, the Inset's own mirror source,
+# the image the bloom's water samples, the Inset mirror's particle stride (L3-s23).
+add_executable(inset_water_mirror_test environment/inset_water_mirror_test.cpp)
+target_link_libraries(inset_water_mirror_test PRIVATE opennova_runtime)
+add_test(NAME inset_water_mirror COMMAND inset_water_mirror_test)
 
 # --- parity lane L4 (spawn/death) ---
 # The player body's death edge raising the player-death transaction in the

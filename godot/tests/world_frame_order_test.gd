@@ -12,8 +12,8 @@ func test_frame_leg_table_is_the_witnessed_order() -> void:
 		"begin", "session", "remote_admin", "scene_gate", "script_voice", "local_view",
 		"facial", "scene_environment",
 		"environment_nodes", "terrain", "water", "network", "blink",
-		"occlusion", "foliage", "iris", "sun_veil", "lights", "ragdolls", "materials", "framefx",
-		"slot_shadows", "particles", "precipitation", "scene_overlay",
+		"occlusion", "foliage", "iris", "sun_veil", "lights", "ragdolls", "materials",
+		"inset_water", "framefx", "slot_shadows", "particles", "precipitation", "scene_overlay",
 		"screen_effects", "audio", "clear", "environment_cube", "finish",
 	])
 
@@ -30,6 +30,18 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 			"terrain tracks the visible bounds the water leg's g_WaterActive test reads")
 	assert_lt(names.find("water"), names.find("foliage"),
 			"foliage consumes this frame's detail-cell handoff after terrain")
+	# The weapon Inset pass draws after the main scene's water (Render_TerrainScene @0x5CA504,
+	# then Render_WeaponInsetScene @0x5CA949): its own water follows the main water and the
+	# Inset's terrain frame and collect (the materials row), ahead of the bloom compile that
+	# samples the last mirror rendered and the particle row that compiles its mirror's pair.
+	assert_gt(names.find("inset_water"), names.find("water"),
+			"the Inset's water follows the main scene's")
+	assert_gt(names.find("inset_water"), names.find("materials"),
+			"the Inset's water reads its own terrain frame and the latch the main collect left")
+	assert_lt(names.find("inset_water"), names.find("framefx"),
+			"the bloom's water samples the mirror the Inset rendered")
+	assert_lt(names.find("inset_water"), names.find("particles"),
+			"the Inset mirror's particle pair compiles after its mirror is placed")
 	assert_gt(names.find("screen_effects"), names.find("particles"),
 			"the FrameFX plan reads this frame's published distortion content")
 	assert_lt(names.find("occlusion"), names.find("foliage"),
@@ -82,7 +94,7 @@ func test_the_scene_rows_are_the_scene_frame() -> void:
 # it when the head's world-skip word is up: a cine plays, or the command map is over the
 # menu): its state legs are flagged, all of them scene rows.
 func test_the_world_block_rows() -> void:
-	var world_rows := ["terrain", "water", "occlusion", "foliage", "sun_veil"]
+	var world_rows := ["terrain", "water", "occlusion", "foliage", "sun_veil", "inset_water"]
 	for name in Array(GameWorld.frame_leg_names()):
 		assert_eq(GameWorld.frame_leg_in_world(name), world_rows.has(name),
 				"%s is the world block's: %s" % [name, world_rows.has(name)])

@@ -121,21 +121,47 @@ public:
 	bool is_water_render_active() const {
 		return world_rendering_enabled_ && is_water_active();
 	}
-	// The frame's tracked visible-terrain bounds and last frame's Blink water
-	// verdict feed the engine's g_WaterActive predicate
+	// The frame's tracked visible-terrain bounds and the water pass latch
+	// feed the engine's g_WaterActive predicate
 	// (terrain::water_pass_active, engine/runtime/terrain/quadtree.h).
 	void set_visible_terrain_bounds(bool p_valid, float p_min_height,
 			float p_max_height);
+	// The water pass latch every scene's g_WaterActive reads, one word for the
+	// main scene and the weapon Inset's (engine environment/water_frame.h
+	// water_pass_latch carries the witness): set outright here, or stored by a
+	// collect's water pass below.
 	void set_blink_water_visible(bool p_visible);
-	// While the weapon Inset renders, each view's blink-water gate: the
-	// Inset scene core draws its water passes on its own collect's
-	// g_BlinkWaterVisible (engine: world/occlusion.h OcclusionView). The one
-	// strip carries both views' verdicts: both -> the water layer, the main
-	// view alone -> MAIN_VIEW_WATER (the beauty camera admits it, neither the
-	// Inset nor either mirror mask does), the Inset alone -> the Inset bit,
-	// neither -> hidden. (true, true) restores the ordinary strip.
+	bool get_blink_water_latch() const { return blink_water_visible_; }
+	// The main collect's water pass: past its water letter (p_water_pass_runs)
+	// it stores that collect's verdict.
+	void latch_blink_water(bool p_water_pass_runs, bool p_visible);
+	// The Inset collect's: the Inset's own water-active test reads the latch as
+	// it stands here (the main collect's of this frame), then the Inset's pass
+	// stores its own for the next frame's main scene.
+	void latch_inset_blink_water(bool p_water_pass_runs, bool p_visible);
+	// Each view's water letter gate while the weapon Inset renders: the Inset
+	// scene core draws its water passes on its own collect's
+	// g_BlinkWaterVisible (engine: world/occlusion.h OcclusionView). While the
+	// Inset pass draws (advance_inset_frame) each view has its own strip: the
+	// main view's on MAIN_VIEW_WATER (the beauty camera admits it, neither the
+	// Inset nor either mirror mask does), the Inset's on its own bit; a view
+	// whose gate is down draws none, and the node hides with both down.
+	// (true, true) with the Inset down restores the ordinary strip.
 	void set_blink_water_views(bool p_main, bool p_inset);
 	bool is_water_pass_active() const;
+	// The weapon Inset pass's own water (engine environment/water_mirror.h
+	// inset_mirror_source carries the witness): its g_WaterActive over its own
+	// view's visible terrain bounds and the latch as the main collect left it,
+	// then its mirror of the view block p_view_block (the Inset's compose
+	// without its slot offsets) at its camera's fov and aspect 1.0, and its own
+	// strip marched through p_camera (the Inset camera, offsets in) sampling
+	// that mirror. After the main scene's water (advance_frame); null retires
+	// the Inset's water.
+	void set_inset_visible_terrain_bounds(bool p_valid, float p_min_height,
+			float p_max_height);
+	bool is_inset_water_pass_active() const;
+	void advance_inset_frame(Camera3D *p_camera, const Transform3D &p_view_block);
+	bool is_inset_mirror_rendered() const { return inset_mirror_rendered_; }
 	// The world's entity-update counter, the noise pair's frame counter (the
 	// one retail's noise generator reads; witness in advance_frame): a frame
 	// whose world held its entity update regenerates the same pair. A Water
@@ -165,8 +191,16 @@ public:
 	MeshInstance3D *get_night_vision_mesh_instance() const {
 		return night_vision_mesh_instance_;
 	}
-	SubViewport *get_reflection_viewport() const { return reflection_viewport_; }
-	Camera3D *get_reflection_camera() const { return reflection_camera_; }
+	// Its material: the water program sampling the mirror the frame rendered
+	// last (environment/water_mirror.h bloom_water_mirror_image).
+	Ref<ShaderMaterial> get_night_vision_material() const { return night_vision_material_; }
+	SubViewport *get_reflection_viewport() const { return mirror_.viewport; }
+	Camera3D *get_reflection_camera() const { return mirror_.camera; }
+	// The weapon Inset pass's own mirror and strip (advance_inset_frame).
+	SubViewport *get_inset_reflection_viewport() const { return inset_mirror_.viewport; }
+	Camera3D *get_inset_reflection_camera() const { return inset_mirror_.camera; }
+	MeshInstance3D *get_inset_mesh_instance() const { return inset_mesh_instance_; }
+	Ref<ShaderMaterial> get_inset_water_material() const { return inset_material_; }
 
 	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
@@ -204,23 +238,60 @@ private:
 		bool frame_perspective = false;
 	};
 	DrawingView _drawing_view(Camera3D *p_surface_cam) const;
+	// One reflection target: the RTT SubViewport on the shared World3D, its
+	// mirror camera, and the camera's decode-only compositor.
+	struct MirrorRig {
+		SubViewport *viewport = nullptr;
+		Camera3D *camera = nullptr;
+		// The camera's decode-only FrameFx effect: kept here so process-exit
+		// teardown can detach and drain the render callback while
+		// RenderingServer is still alive, before deleting the view.
+		Ref<FrameFxCompositorEffect> decode_effect;
+		Ref<Compositor> compositor;
+	};
+	void _build_mirror_rig(MirrorRig &r_rig, const String &p_viewport_name,
+			const String &p_camera_name);
+	void _release_mirror_rig(MirrorRig &r_rig);
 	void _update_reflection_camera(Camera3D *p_cam, const Projection &p_projection,
 			bool p_frame_perspective);
+	// Installs p_source's mirror into r_rig: the camera, its cull mask, its
+	// node-side frame p_source_frame and the served raster.
+	void _install_mirror_view(MirrorRig &r_rig, const opennova::env::MirrorSourceView &p_source,
+			double p_near, double p_far, real_t p_h_offset, const Vector2i &p_source_frame);
 	void _apply_reflection_clear();
-	void _install_reflection_decode();
-	void _release_reflection_decode();
-	// One strip march for `p_view` into WaterCore's rows; returns the row count
-	// (0 when the view cannot march). The pass fog end follows the side.
+	void _apply_reflection_clear(MirrorRig &r_rig);
+	void _install_reflection_decode(MirrorRig &r_rig);
+	void _release_reflection_decode(MirrorRig &r_rig);
+	// The march inputs a frame's water passes share, with the lit colours
+	// pushed to every water material.
+	struct MarchInputs {
+		float murk = 0.0f;
+		float fog_end = 0.0f;
+		opennova::env::WaterDepthCurve depth_curve;
+		Color lit;
+		Ref<EnvFile> env_data;
+	};
+	MarchInputs _march_inputs(MissionEnvironment *p_env);
+	// The animated noise pair at this frame's counter, once per counter value.
+	void _regenerate_noise();
+	// One strip march for p_view into WaterCore's rows; returns the row count
+	// (0 when the view cannot march). The pass fog end follows the side; the
+	// scene depth range lands on p_material.
 	int _march_strip(const DrawingView &p_view, bool p_underwater, bool p_nightvision,
-			float p_murk, float p_fog_end,
-			const opennova::env::WaterDepthCurve &p_depth_curve,
-			const Color &p_lit, const Ref<EnvFile> &p_env_data);
+			const MarchInputs &p_inputs, const Ref<ShaderMaterial> &p_material);
+	// The strips' layers from the views' gates and the Inset pass's state.
+	void _apply_strip_layers();
+	// The bloom strip's mirror image (environment/water_mirror.h
+	// bloom_water_mirror_image).
+	void _apply_night_vision_reflection();
+	void _retire_inset();
 	// The last march as ArrayMesh surface arrays.
 	Array _strip_arrays() const;
 	static void _upload_strip(MeshInstance3D *p_mesh_instance, const Array &p_arrays,
 			const Ref<ShaderMaterial> &p_material);
 	void _clear_strip_surfaces();
 	void _clear_night_vision_surfaces();
+	void _clear_inset_strip_surfaces();
 
 	NodePath environment_path_;
 	Ref<TerrainData> terrain_data_;
@@ -244,16 +315,30 @@ private:
 
 	MeshInstance3D *mesh_instance_ = nullptr;
 	MeshInstance3D *night_vision_mesh_instance_ = nullptr;
+	MeshInstance3D *inset_mesh_instance_ = nullptr;
 	Ref<ShaderMaterial> water_material_;
-	SubViewport *reflection_viewport_ = nullptr;
-	Camera3D *reflection_camera_ = nullptr;
-	// The reflection camera owns a decode-only FrameFx effect. Keep both
-	// resources here so process-exit teardown can detach and drain the render
-	// callback while RenderingServer is still alive, before deleting the view.
-	Ref<FrameFxCompositorEffect> reflection_decode_effect_;
-	Ref<Compositor> reflection_compositor_;
-	// The mirror camera's own clear environment (_apply_reflection_clear).
+	Ref<ShaderMaterial> night_vision_material_;
+	Ref<ShaderMaterial> inset_material_;
+	// The main frame's mirror and the weapon Inset pass's own.
+	MirrorRig mirror_;
+	MirrorRig inset_mirror_;
+	// The mirror cameras' one clear environment (_apply_reflection_clear).
 	Ref<Environment> reflection_environment_;
+	// The views' water letter gates (set_blink_water_views).
+	bool main_view_water_ = true;
+	bool inset_view_water_ = true;
+	// The Inset pass's water this frame (advance_inset_frame).
+	bool inset_open_ = false;
+	bool inset_mirror_rendered_ = false;
+	bool main_reflection_active_ = false;
+	bool inset_bounds_valid_ = false;
+	float inset_min_height_ = 0.0f;
+	float inset_max_height_ = 0.0f;
+	// The latch as the main collect left it, the Inset's g_WaterActive input.
+	bool inset_blink_latch_ = false;
+	// The counter the noise pair was last generated at.
+	int noise_counter_ = 0;
+	bool noise_counter_valid_ = false;
 	bool mirror_scene_outdoors_ = true;
 	bool built_ = false;
 	bool has_drawable_surface_ = false;
