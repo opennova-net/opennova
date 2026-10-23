@@ -171,17 +171,23 @@ void player_class_init_animation(World &world, Entity &entity) {
     AiEntity *body = ai.for_handle(entity.handle);
     if (body == nullptr || !body->inf.active) return;
     InfantryState &inf = body->inf;
-    // The init's word run zeroes the torso roll (+0x2DC) and the lean (+0xB0) ahead of its
-    // channel test, so a body holding no channel takes them too. No respawn stores them
-    // (InfantryState::reset_for_spawn); the joiner's own 0x18 rebuild takes the torso roll's
-    // zero here, its memset stopping short of +0x2DC.
-    // [orig: PlayerClass_InitEntity @0x4B1060 - +0x2DC @0x4B11B2, +0xB0 @0x4B11B8, the channel
-    //  test @0x4B116D / @0x4B11D0; NapiNPClientMsg_FullEntitySpawn @0x433780 - `push 2B4h`
-    //  @0x43381A, the memset @0x433821, the lean @0x433E5C, the class init @0x433E82]
+    // The init's word run stores the hold and body state words (43, idle), the pending word
+    // (0), the torso roll (+0x2DC) and the lean (+0xB0) ahead of its channel test, so a body
+    // holding no channel takes them too. No respawn stores the roll or the lean
+    // (InfantryState::reset_for_spawn); the joiner's own 0x18 rebuild takes all five here, its
+    // memset stopping short of +0x2B8.
+    // [orig: PlayerClass_InitEntity @0x4B1060 - +0x2C8 @0x4B115B, +0x2BC @0x4B1161, +0x2B8
+    //  @0x4B1176, +0x2DC @0x4B11B2, +0xB0 @0x4B11B8, the channel test @0x4B116D / @0x4B11D0;
+    //  NapiNPClientMsg_FullEntitySpawn @0x433780 - `push 2B4h` @0x43381A, the memset @0x433821,
+    //  the lean @0x433E5C, the class init @0x433E82]
+    inf.wpn_state = anim_state::kIdle;
+    inf.anim_state = anim_state::kIdle;
+    inf.anim_pending = 0;
     inf.torso_roll = 0;
     inf.lean_angle = 0;
     if (!infantry_has_anim_channel(inf, ai.root_motion)) return;
-    // [orig: PlayerClass_InitEntity @0x4B115B / @0x4B1161 / @0x4B1176]
+    // The channel starts its hold and body clips on those words (its first dual update plays
+    // them). [orig: PlayerClass_InitEntity @0x4B115B / @0x4B1161 / @0x4B1176]
     begin_spawn_channels(inf, anim_state::kIdle, ai.root_motion, ai.anim_rings);
     // The count is the organic warm-up's arithmetic over +0x78, recomputed each pass from a
     // word nothing in the loop writes. [orig: @0x4B11D2..0x4B11E8, @0x4B1200..0x4B1225]
