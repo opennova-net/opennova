@@ -309,8 +309,11 @@ func _process(_delta: float) -> void:
 	# local death. Only all falling closes it: retail's frame loop closes the
 	# latched screen exactly when its open triggers are gone (the per-frame
 	# fold and close-on-clear witnesses live on ClientState.death_menu_open_latch
-	# and hud-re D-HUD-19).
-	if not bool(sim.is_death_menu_held()):
+	# and hud-re D-HUD-19). That close is the scene frame's: a frame a listen
+	# host's status page stood in for closes nothing (its ToggleServer row passes
+	# this screen's input frame; the same witness), and the screen's own frame
+	# runs on until the next drawn frame closes it.
+	if not bool(sim.is_death_menu_held()) and (_view == null or _view.scene_drawn()):
 		close()
 		return
 	# The shroud reveal and, inside it, the content refresh on each 16-tick

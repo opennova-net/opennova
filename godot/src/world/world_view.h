@@ -23,7 +23,9 @@ class GameWorld;
 // live one over itself; a test fakes it by overriding the two hooks (ADR 0043
 // rule 11: a presenter depends on the narrowest surface it uses, never on a
 // world double). The bound verbs dispatch to a script override of the hook
-// first, else to the C++ implementation behind them.
+// first, else to the C++ implementation behind them. scene_drawn is the last
+// frame's scene gate verdict (GameWorld.get_last_frame_scene_drawn): a screen's
+// scene-frame legs run on it; the base and a world-less view answer drawn.
 class WorldView : public RefCounted {
 	GDCLASS(WorldView, RefCounted)
 
@@ -32,15 +34,18 @@ protected:
 
 	GDVIRTUAL0R(Ref<Simulation>, _sim)
 	GDVIRTUAL0R(Ref<ResourceRoot>, _resource_root)
+	GDVIRTUAL0R(bool, _scene_drawn)
 
 	// The C++ implementations behind the bound verbs; the base answers none.
 	virtual Ref<Simulation> sim_impl() const { return Ref<Simulation>(); }
 	virtual Ref<ResourceRoot> resource_root_impl() const { return Ref<ResourceRoot>(); }
+	virtual bool scene_drawn_impl() const { return true; }
 
 public:
 	int64_t get_frame_clock_ms() const;
 	Ref<Simulation> sim();
 	Ref<ResourceRoot> resource_root();
+	bool scene_drawn();
 };
 
 // The armory screen's view of the world: the WorldView pair plus the weapon
@@ -91,6 +96,7 @@ protected:
 	static void _bind_methods() {}
 	Ref<Simulation> sim_impl() const override;
 	Ref<ResourceRoot> resource_root_impl() const override;
+	bool scene_drawn_impl() const override;
 	GameWorld *world() const;
 
 private:

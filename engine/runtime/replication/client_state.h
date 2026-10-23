@@ -1455,6 +1455,15 @@ struct ClientState {
 	// [orig: Render_ProcessMainSceneFrame @0x5CAB83 / @0x5CAB8B, the clear's
 	//  Game_CloseInGameScreens call @0x5CAC9C; the scene arm GameLoop_RenderFrame
 	//  @0x521CE8].
+	// The screen's close on the clear (the deploy presenter's) is the scene frame's
+	// too, and the page can stand over the open screen: the screen's pass-through
+	// runs the input frame, whose ToggleServer row (both binding modes, no gate bit)
+	// reaches its case on a listen host, so a clear under the page waits for the next
+	// drawn frame [orig: UI_ProcessMenuScreenFrame @0x54E650 - the pass-through test
+	//  @0x54E686, Input_ProcessFrame @0x54E695; the catalog row 83 @0x817CAC (code 11,
+	//  flags 0x04000000, modes 3; Input_IsBindingActiveForMode @0x497EA0);
+	//  Input_HandleActionBinding case 11 @0x49AFF1..0x49B018 (in session, authority,
+	//  peer, `xor g_ServerStatusViewActive, 1`); the close's branch @0x5CAC81..0x5CAC9C].
 	bool take_death_menu_open(bool triggered, bool menu_open) {
 		if (!triggered) {
 			death_menu_open_latch = false;

@@ -28,13 +28,23 @@ Ref<ResourceRoot> WorldView::resource_root() {
 	return resource_root_impl();
 }
 
+bool WorldView::scene_drawn() {
+	bool out = true;
+	if (GDVIRTUAL_CALL(_scene_drawn, out)) {
+		return out;
+	}
+	return scene_drawn_impl();
+}
+
 void WorldView::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_frame_clock_ms"), &WorldView::get_frame_clock_ms);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_clock_ms"), "", "get_frame_clock_ms");
 	GDVIRTUAL_BIND(_sim);
 	GDVIRTUAL_BIND(_resource_root);
+	GDVIRTUAL_BIND(_scene_drawn);
 	ClassDB::bind_method(D_METHOD("sim"), &WorldView::sim);
 	ClassDB::bind_method(D_METHOD("resource_root"), &WorldView::resource_root);
+	ClassDB::bind_method(D_METHOD("scene_drawn"), &WorldView::scene_drawn);
 }
 
 // --- ArmoryWorldView ---------------------------------------------------------
@@ -104,6 +114,11 @@ Ref<Simulation> LiveWorldView::sim_impl() const {
 Ref<ResourceRoot> LiveWorldView::resource_root_impl() const {
 	GameWorld *w = world();
 	return w != nullptr ? w->get_resource_root() : Ref<ResourceRoot>();
+}
+
+bool LiveWorldView::scene_drawn_impl() const {
+	GameWorld *w = world();
+	return w == nullptr || w->get_last_frame_scene_drawn();
 }
 
 void LiveArmoryWorldView::bind(GameWorld *p_world) {

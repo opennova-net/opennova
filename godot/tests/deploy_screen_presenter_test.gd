@@ -25,6 +25,8 @@ const ZONE_ITEMS_FILE := "deploy_spawn_zone_items.def"
 
 
 var _overlay: Control = null
+# The world view the last _make_presenter built (a test turns its scene verdict).
+var _last_view: PresenterFixture.FakeWorldView = null
 
 
 # The shell's ring legs (MainGame's ring_* legs), trimmed to the deploy screen's:
@@ -94,6 +96,7 @@ func before_each() -> void:
 
 func after_each() -> void:
 	_overlay = null
+	_last_view = null
 	Strings.clear()
 
 
@@ -241,6 +244,7 @@ func _make_presenter(sim: Simulation) -> DeployPresenter:
 	var view := PresenterFixture.FakeWorldView.new()
 	view.root = PresenterFixture.root_over(self, TMP_DIR)
 	view.sim_value = sim
+	_last_view = view
 	_overlay = Control.new()
 	_overlay.size = Vector2(800, 600)
 	add_child_autofree(_overlay)
@@ -1179,17 +1183,28 @@ func test_the_listen_host_deploys_its_own_player_through_the_deploy_map() -> voi
 		pair.joiner.step()
 	assert_true(host.is_local_player_dead(), "the expired hold redeploys nothing")
 	var death_presenter := _make_presenter(host)
+	var death_view := _last_view
 	assert_true(death_presenter.open(), "the death opens the host's deploy screen")
 	_ring_key(death_presenter, KeyboardPass.new(), DeployRingLegs.new(death_presenter, host),
 			KEY_X)
 	await get_tree().process_frame
 	assert_true(death_presenter.is_open(), "a death re-pick keeps the screen until the release")
+	# The listen host raises its status page over the open screen (the screen's input frame
+	# passes its ToggleServer row): the frames the page stands in for close nothing, the close
+	# on the clear being the scene frame's (engine ClientState::death_menu_open_latch carries
+	# the witness); the next drawn frame closes it.
+	death_view.scene_drawn_value = false
 	var respawned := false
 	for _i in range(240):
 		host.step()
 		pair.joiner.step()
 		await get_tree().process_frame
-		if not host.is_local_player_dead() and not death_presenter.is_open():
+		if not host.is_local_player_dead() and not host.is_death_menu_held():
 			respawned = true
 			break
-	assert_true(respawned, "the host's X pick redeploys it and the release closes the screen")
+	assert_true(respawned, "the host's X pick redeploys it and the release clears the triggers")
+	await get_tree().process_frame
+	assert_true(death_presenter.is_open(), "under the status page the clear closes nothing")
+	death_view.scene_drawn_value = true
+	await get_tree().process_frame
+	assert_false(death_presenter.is_open(), "the next drawn frame closes the screen")
