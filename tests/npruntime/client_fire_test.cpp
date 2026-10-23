@@ -1237,11 +1237,25 @@ int main() {
 
 	// --- 4. Alt fire appends WITHOUT touching the clip [orig: @0x50bb0d/@0x50be2b]. ---
 	dispatch_fire(roster[1], roster, world,
-	              fire_body(hb.packed, 0x23, 5, 0, 0, 0, 0, 0, 0xFFFF, 3, 12, 0));
+	              fire_body(hb.packed, 0x23, 5, 0, 0, 0, 0, 0, ha.packed, 3, 12, 0));
 	if (!expect(world.out.rounds.count == 2, "alt fire appended")) return 1;
 	if (!expect(slots_of(world, roster[1])[uint16_t(3 * 65 + 2)].clip == 29,
 	            "alt fire leaves the clip untouched"))
 		return 1;
+	{
+		// The alt leg returns through RoundData_AddRound without the slot word's store, so
+		// its claim (A) leaves the last primary claim (C) in place; the refused requests of
+		// steps 2 and 3 never reached it either.
+		// [orig: Server_ClientFiredRound - the alt return @0x50BE4B..0x50BE65, the store
+		//  @0x50C2AD on the primary leg @0x50C172]
+		const w::AiEntity *slot = world.ai.for_handle(hb);
+		if (!expect(slot != nullptr && slot->slot.f[3] == int32_t(hc.packed) + 1,
+		            "an alt round's claim leaves the slot word"))
+			return 1;
+		if (!expect(world.registry.get(hb)->last_fire_target == hc,
+		            "an alt round's claim leaves the mirror"))
+			return 1;
+	}
 
 	// --- 5. The host's own loopback 0x06 is a no-op [orig: @0x50c18d]. ---
 	dispatch_fire(roster[0], roster, world,
@@ -1285,11 +1299,42 @@ int main() {
 		                        12, 0));
 	if (!expect(world.out.rounds.count == 7, "no-clip weapon fires freely")) return 1;
 
+	// --- 7b. The claimed target resolves by its handle's bounds alone: a row the destroy
+	// freed is still the target (its word, so the record's 0x40 and handle); a slot past
+	// the pool's capacity, or a pool past 4, is none.
+	// [orig: NapiNPServerMsg_0x006_ClientFiredRound - 0xFFFF @0x51359D, pool < 5
+	//  @0x5135B3, slot < capacity @0x5135CC..0x5135D2, else 0 @0x5135E5] ---
+	{
+		const w::EntityHandle hd = world.registry.spawn(0, w::Entity{});
+		if (!expect(hd.valid(), "a fourth row taken")) return 1;
+		world.registry.despawn(hd);
+		if (!expect(world.registry.get(hd) == nullptr, "the fourth row destroyed")) return 1;
+		dispatch_fire(roster[1], roster, world,
+		              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, hd.packed, 13, 12, 0));
+		if (!expect(world.out.rounds.count == 8, "the fire at a destroyed row lands")) return 1;
+		const w::AiEntity *slot = world.ai.for_handle(hb);
+		if (!expect(slot != nullptr && slot->slot.f[3] == int32_t(hd.packed) + 1,
+		            "a destroyed row's handle is the stored target"))
+			return 1;
+		const uint16_t past_capacity = uint16_t(world.registry.pool_capacity(0)); // pool 0
+		dispatch_fire(roster[1], roster, world,
+		              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, past_capacity, 14, 12, 0));
+		if (!expect(world.out.rounds.count == 9, "the fire past the capacity lands")) return 1;
+		if (!expect(slot->slot.f[3] == 0, "a slot past the capacity is no target")) return 1;
+		dispatch_fire(roster[1], roster, world,
+		              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, hd.packed, 15, 12, 0));
+		dispatch_fire(roster[1], roster, world,
+		              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, 0x5000, 16, 12, 0));
+		if (!expect(world.out.rounds.count == 11 && slot->slot.f[3] == 0,
+		            "a pool past 4 is no target"))
+			return 1;
+	}
+
 	// --- 8. Table-less host accepts without bookkeeping (the 0x5A echo fallback shape). ---
 	world.tables.weapons.entries.clear();
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 9, 0, 0, 0, 0, 0, 0xFFFF, 20, 12, 0));
-	if (!expect(world.out.rounds.count == 8, "table-less host accepts the fire")) return 1;
+	if (!expect(world.out.rounds.count == 12, "table-less host accepts the fire")) return 1;
 
 	std::printf("OK\n");
 	return 0;

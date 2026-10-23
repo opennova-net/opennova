@@ -48,6 +48,17 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		return;
 	world::Entity *shooter = world->registry.get(conn.link.owned_entity);
 	if (shooter == nullptr) return;
+	// The claimed target resolves to its pool row by the handle's bounds alone: not
+	// 0xFFFF, pool < 5, slot < the pool's capacity. A row the destroy already freed
+	// still resolves (no liveness test), so its handle is the target.
+	// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310 - the 0xFFFF test
+	//  @0x51359D, pool < 5 @0x5135B3, slot < capacity @0x5135CC..0x5135D2, the row
+	//  @0x5135D4..0x5135DD, else 0 @0x5135E5]
+	world::EntityHandle fire_target{};
+	if (!wire_handle::is_batch_end_sentinel(fr.target_handle)) {
+		const world::EntityHandle th{fr.target_handle};
+		if (world->registry.row_storage(th) != nullptr) fire_target = th;
+	}
 	if (!Server_AcceptsPlayerFireTick(conn, fr.current_tick, world->out.rounds.frame_clock,
 			config.effective_send_holdoff_ticks())) return;
 
@@ -249,6 +260,17 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 				fire_pitch = pose[4];
 			}
 		}
+		// The primary leg, past its refusals and ahead of the arm, stores the claimed
+		// target into the shooter's AI slot word (+0xC), when it has a slot; the tag-2
+		// serializer reads that word LIVE. The alt leg returns through
+		// RoundData_AddRound without it, so an alt round leaves the last primary claim.
+		// [orig: Server_ClientFiredRound @0x50BAA0 - the primary leg @0x50C172,
+		//  `mov eax, [eax+68h]` @0x50C2A2, the null test @0x50C2A7, the store
+		//  @0x50C2AD, the arm @0x50C2B0; the alt return @0x50BE4B..0x50BE65;
+		//  NetPacket_SerializeRoundEvent @0x504855]
+		if (world::AiEntity *shooter_slot = world->ai.for_handle(shooter->handle))
+			shooter_slot->slot.f[3] = world::AiSlot::target_word(fire_target);
+		shooter->last_fire_target = fire_target;
 		const world::FixedVec3 claimed{fr.pos_x, fr.pos_y, fr.pos_z};
 		round_lands =
 				world::weapon_fire_owner_status(*world, *shooter, slot_def, false) == 0 &&
@@ -270,18 +292,6 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			world::weapon_fsm_arm_network_fire(fire_def, armed, arm_inputs, arm_events);
 		}
 	}
-	// Stamp the claimed target into the shooter's AI slot word (+0xC), when it has a slot;
-	// the tag-2 serializer reads that word LIVE.
-	// [orig: Server_ClientFiredRound @0x50BAA0 - `mov eax, [eax+68h]` @0x50C2A2, the null
-	//  test @0x50C2A7, the store @0x50C2AD; NetPacket_SerializeRoundEvent @0x504855]
-	world::EntityHandle fire_target{};
-	if (!wire_handle::is_batch_end_sentinel(fr.target_handle)) {
-		const world::EntityHandle th{fr.target_handle};
-		if (world->registry.get(th) != nullptr) fire_target = th; // [orig: @0x5135d2]
-	}
-	if (world::AiEntity *shooter_slot = world->ai.for_handle(shooter->handle))
-		shooter_slot->slot.f[3] = world::AiSlot::target_word(fire_target);
-	shooter->last_fire_target = fire_target;
 	// A primary round re-enters through the adm fire action, whose
 	// local pass scores the shot (scorer event 1) once it clears the
 	// pose checks; alt fire returns through RoundData_AddRound first.
