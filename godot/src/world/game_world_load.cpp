@@ -17,7 +17,7 @@
 #include <runtime/environment/environment_state.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/placement_traits.h> // builds_placement_draws (the dedicated host's placement)
-#include <runtime/terrain/terrain_load_legs.h> // builds_lod_cache, loads_foliage_definitions (the dedicated arm)
+#include <runtime/terrain/terrain_load_legs.h> // the dedicated arm's terrain legs
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -418,9 +418,10 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// The mission textures stage opens with the terrain's, on every arm, a dedicated host's reduced
 	// one too: the texture slots and the tile set's atlas the head's connect leg held, then the
 	// terrain's build (engine terrain/terrain_load_legs.h carries the witness, D-NET-NEW-L2-46).
-	// The terrain's LOD cache and the foliage's definitions build with the render subsystems,
-	// which a dedicated host's start jumps over (the same header's builds_lod_cache and
-	// loads_foliage_definitions, D-NET-NEW-L3-32, D-NET-NEW-LF-3).
+	// The terrain's LOD cache, its tile cache's page targets and the foliage's definitions build
+	// with the render subsystems, which a dedicated host's start jumps over (the same header's
+	// builds_lod_cache, builds_tile_cache_targets and loads_foliage_definitions, D-NET-NEW-L3-32,
+	// D-NET-NEW-L3-33, D-NET-NEW-LF-3).
 	const bool dedicated_host = challenge_sim.is_valid() &&
 			challenge_sim->session_role() == Simulation::ROLE_DEDICATED_HOST;
 	load_terrain_textures(timeline, dedicated_host);
@@ -505,8 +506,9 @@ int GameWorld::load_join_terrain(const Ref<MissionData> &p_mission, const String
 	const int err = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
 	if (err != OK) return err;
 	// Then the avatar combos' models, at the header's climate: their data loads into the
-	// placer the S2C 0x1A's load keeps, and that load's warm builds them with the rest of the
-	// list (engine: inmatch/loaded_model_list.h avatar_combo_models, D-NET-NEW-L2-19).
+	// placer the S2C 0x1A's load keeps, and that load's freeze resolves their materials with the
+	// rest of the list (engine: inmatch/loaded_model_list.h avatar_combo_models, D-NET-NEW-L2-19,
+	// D-NET-NEW-L3-31).
 	timeline->span("avatars");
 	placer_ = MissionObjectPlacer::create(resource_root_, Ref<ItemDatabase>());
 	const opennova::mission::BootFileSource files =
@@ -1206,7 +1208,8 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 	}
 	p_timeline->span("terrain_textures");
 	terrain_data_->load_textures();
-	terrain_->build(opennova::terrain::builds_lod_cache(p_dedicated_host));
+	terrain_->build(opennova::terrain::builds_lod_cache(p_dedicated_host),
+			opennova::terrain::builds_tile_cache_targets(p_dedicated_host));
 	if (opennova::terrain::loads_foliage_definitions(p_dedicated_host)) configure_foliage();
 	p_timeline->end_span();
 }

@@ -129,7 +129,7 @@ bool TerrainTileCacheDevice::_refresh_shadow_snapshot() {
 bool TerrainTileCacheDevice::rebuild(
 		const Ref<TerrainData> &p_data,
 		const Ref<TerrainSurfaceInputs> &p_surface_inputs,
-		const Ref<TerrainTileInfo> &p_tile_info_override) {
+		const Ref<TerrainTileInfo> &p_tile_info_override, bool p_page_targets) {
 	clear();
 	if (p_data.is_null() || p_surface_inputs.is_null()) {
 		return false;
@@ -233,6 +233,13 @@ bool TerrainTileCacheDevice::rebuild(
 	}
 
 	source_revision_ = next_source_revision_++;
+	if (!p_page_targets) {
+		// The sources are the mission textures stage's, which load on both arms; the page targets
+		// are the render subsystems', which a dedicated host's start jumps over (engine
+		// terrain/terrain_load_legs.h builds_tile_cache_targets carries the witness).
+		async_->install_sources(std::move(snapshot));
+		return false;
+	}
 	sources_ready_ = _allocate_texture();
 	if (sources_ready_) {
 		async_->install_sources(std::move(snapshot));

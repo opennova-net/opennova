@@ -9,6 +9,7 @@
 using opennova::terrain::TerrainLoadFile;
 using opennova::terrain::TerrainLoadLeg;
 using opennova::terrain::builds_lod_cache;
+using opennova::terrain::builds_tile_cache_targets;
 using opennova::terrain::loads_foliage_definitions;
 using opennova::terrain::terrain_load_leg;
 
@@ -43,6 +44,10 @@ int main() {
 	// (D-NET-NEW-L3-32).
 	CHECK(builds_lod_cache(false));
 	CHECK(!builds_lod_cache(true));
+	// The tile cache's page targets are the render subsystems' too: a dedicated host's start makes
+	// none, its cache's sources load at the mission textures stage on both arms (D-NET-NEW-L3-33).
+	CHECK(builds_tile_cache_targets(false));
+	CHECK(!builds_tile_cache_targets(true));
 	CHECK(terrain_load_leg(TerrainLoadFile::TextureSlot) == TerrainLoadLeg::MissionTextures);
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

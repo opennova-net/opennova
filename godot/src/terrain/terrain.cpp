@@ -108,7 +108,8 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_suppressed_static_shadow_bms_ids"),
 		&Terrain::get_suppressed_static_shadow_bms_ids);
 
-	ClassDB::bind_method(D_METHOD("build", "lod_cache"), &Terrain::build, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("build", "lod_cache", "tile_cache_targets"), &Terrain::build,
+			DEFVAL(true), DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("refresh_region", "rects", "tiles", "foliage"), &Terrain::refresh_region_rects, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_refresh_us"), &Terrain::get_refresh_us);
 	ClassDB::bind_method(D_METHOD("get_heightfield_normal_bytes"), &Terrain::get_heightfield_normal_bytes);
@@ -118,7 +119,8 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_refresh_pages_retired"), &Terrain::get_refresh_pages_retired);
 	ClassDB::bind_method(D_METHOD("get_tile_lod_mesh", "tile", "lod", "flat"), &Terrain::get_tile_lod_mesh);
 	ClassDB::bind_method(D_METHOD("get_heightfield_normal_texture"), &Terrain::get_heightfield_normal_texture);
-	ClassDB::bind_method(D_METHOD("build_begin", "lod_cache"), &Terrain::build_begin, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("build_begin", "lod_cache", "tile_cache_targets"),
+			&Terrain::build_begin, DEFVAL(true), DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("build_step"), &Terrain::build_step);
 	ClassDB::bind_method(D_METHOD("get_build_step_count"), &Terrain::get_build_step_count);
 	ClassDB::bind_method(D_METHOD("get_build_steps_done"), &Terrain::get_build_steps_done);
@@ -1197,7 +1199,8 @@ void Terrain::_load_textures() {
 	}
 	surface_inputs->rebuild(terrain_data, tile_info_override);
 	surface_inputs->apply_to_material(terrain_material);
-	tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override);
+	tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override,
+			build_tile_cache_targets_);
 	terrain_material->set_shader_parameter(
 			"u_tile_cache", tile_cache_device.get_texture());
 	terrain_material->set_shader_parameter(
@@ -1210,7 +1213,8 @@ void Terrain::_rebuild_tile_overlay_pages() {
 	}
 	surface_inputs->set_terrain_data(terrain_data);
 	surface_inputs->set_tile_info_override(tile_info_override);
-	tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override);
+	tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override,
+			build_tile_cache_targets_);
 	terrain_material->set_shader_parameter(
 			"u_tile_cache", tile_cache_device.get_texture());
 	terrain_material->set_shader_parameter(
@@ -1352,17 +1356,18 @@ void Terrain::_clear_terrain() {
 	building_ = false;
 }
 
-void Terrain::build(bool p_lod_cache) {
-	if (!build_begin(p_lod_cache)) {
+void Terrain::build(bool p_lod_cache, bool p_tile_cache_targets) {
+	if (!build_begin(p_lod_cache, p_tile_cache_targets)) {
 		return;
 	}
 	while (build_step() == BUILD_STEP_MORE) {
 	}
 }
 
-bool Terrain::build_begin(bool p_lod_cache) {
+bool Terrain::build_begin(bool p_lod_cache, bool p_tile_cache_targets) {
 	_clear_terrain();
 	build_lod_cache_ = p_lod_cache;
+	build_tile_cache_targets_ = p_tile_cache_targets;
 	build_done_ = 0;
 	build_total_ = 0;
 	if (terrain_data.is_null() || !terrain_data->is_loaded()) {
@@ -1433,7 +1438,10 @@ Terrain::BuildStep Terrain::build_step() {
 				break;
 			case 5:
 				if (terrain_material.is_valid()) {
-					tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override);
+					// The page array is the render subsystems' targets; a build without them loads the
+					// sources alone (engine terrain/terrain_load_legs.h builds_tile_cache_targets).
+					tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override,
+							build_tile_cache_targets_);
 					terrain_material->set_shader_parameter(
 							"u_tile_cache", tile_cache_device.get_texture());
 					terrain_material->set_shader_parameter(

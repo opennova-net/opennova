@@ -71,4 +71,22 @@ constexpr bool builds_lod_cache(bool dedicated_host) noexcept {
 	return !dedicated_host;
 }
 
+// Whether a mission start makes the terrain tile cache's page targets: the render targets its
+// pages compose into, one per page slot and the extra one. They build in the render subsystems'
+// init, which a dedicated host's start jumps over, so it makes none and composes no page. The
+// cache's sources are the mission textures stage's and load on both arms: the colour map's
+// quadrants, the scorch textures and the tile set's atlas all come from PolyTrn_InitTextures
+// (D-NET-NEW-L3-33).
+// [orig: Game_StartMission @0x524360 - the dedicated test (the cmp @0x5259B2, the jz @0x5259B4)
+//  skipping Render_InitRenderingSubsystems (the call @0x5259D1); Render_InitRenderingSubsystems
+//  @0x586EE0 -> Terrain_CreateTileCacheTargets @0x604DD0 (the call @0x586F01): a target per page
+//  slot (the loop @0x604DD3..0x604E3C, each made @0x604DF3) and the extra target @0x604E46;
+//  PolyTrn_InitTextures @0x60AAA0 (Render_InitMissionTextures' full arm's call @0x58715E, the
+//  reduced arm's @0x58727A) - the colour map's quadrants (Terrain_SplitTileIntoQuadrants @0x604E60,
+//  the calls @0x60B510 / @0x60B964), Terrain_LoadScorchTextures @0x604CE0 (the call @0x60C5B4),
+//  Terrain_LoadTileSetAtlas @0x604A90 (the call @0x60C5BE)]
+constexpr bool builds_tile_cache_targets(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
+
 } // namespace opennova::terrain

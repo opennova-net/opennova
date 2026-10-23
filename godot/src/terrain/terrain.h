@@ -172,6 +172,9 @@ private:
 	bool building_ = false;
 	// Whether the build in flight builds the LOD cache (build_begin's `p_lod_cache`).
 	bool build_lod_cache_ = true;
+	// Whether the last build made the tile cache's page array (build_begin's
+	// `p_tile_cache_targets`); the cache's later rebuilds keep that choice.
+	bool build_tile_cache_targets_ = true;
 	int build_done_ = 0;
 	int build_total_ = 0;
 	int build_total_verts_ = 0;
@@ -372,20 +375,22 @@ public:
 	int get_light_rows_total() const { return light_rows_total; }
 
 	// `p_lod_cache` false: the build without the LOD cache, the device geometry the patches draw
-	// from (each tile's LOD meshes and the patch pool), a dedicated host's mission start, which
-	// jumps over the render subsystems' terrain leg; the textures, the material and the scene
-	// snapshot build either way (engine terrain/terrain_load_legs.h builds_lod_cache,
-	// D-NET-NEW-L3-32). Such a terrain draws nothing.
-	void build(bool p_lod_cache = true);
+	// from (each tile's LOD meshes and the patch pool); `p_tile_cache_targets` false: the tile
+	// cache's sources load and no page array is made. Both are a dedicated host's mission start,
+	// which jumps over the render subsystems; the textures, the material and the scene snapshot
+	// build either way (engine terrain/terrain_load_legs.h builds_lod_cache, D-NET-NEW-L3-32;
+	// builds_tile_cache_targets, D-NET-NEW-L3-33). Such a terrain draws nothing.
+	void build(bool p_lod_cache = true, bool p_tile_cache_targets = true);
 	// The same build a unit at a time (the OpenNova Editor's mission device builds a terrain over
 	// its frames): build_begin drops what was built and plans the units (the scene snapshot and
 	// the material, a unit per tile's meshes, the patch pool, the surface inputs' heightfield,
 	// blend and detail textures, the tile cache's pages, the lights; the tiles' meshes and the
-	// pool only with `p_lod_cache`); build_step runs the next and says whether more are left, the
-	// terrain is built or the build failed (no valid baked terrain). build() is build_begin and
-	// every step. The node must be in the tree, as for build(): its patch pool binds the
-	// scenario. False from build_begin: no loaded terrain data.
-	bool build_begin(bool p_lod_cache = true);
+	// pool only with `p_lod_cache`, the page array only with `p_tile_cache_targets`); build_step
+	// runs the next and says whether more are left, the terrain is built or the build failed (no
+	// valid baked terrain). build() is build_begin and every step. The node must be in the tree,
+	// as for build(): its patch pool binds the scenario. False from build_begin: no loaded
+	// terrain data.
+	bool build_begin(bool p_lod_cache = true, bool p_tile_cache_targets = true);
 	BuildStep build_step();
 	bool is_built() const { return built; }
 	// The terrain shown again over regions of its heights (the OpenNova Editor's sculpt, ADR 0046 S25), after

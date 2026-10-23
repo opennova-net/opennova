@@ -1910,6 +1910,11 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 				if terrain.get_tile_lod_mesh(0, lod, false) != null:
 					meshes += 1
 			assert_eq(meshes > 0, serve_and_play, "the tiles' LOD meshes build on a listen host alone")
+			# Its tile cache's page targets are the render subsystems' too (D-NET-NEW-L3-33; the
+			# same header's builds_tile_cache_targets).
+			if not serve_and_play:
+				assert_null(terrain.get_tile_cache_texture(),
+						"a dedicated host makes no tile cache page array")
 		# The status page stands in for the scene frame: a dedicated host's always, a listen
 		# host's while its status view is up (engine hud_server_status.h main_frame_draws_scene).
 		world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, null)

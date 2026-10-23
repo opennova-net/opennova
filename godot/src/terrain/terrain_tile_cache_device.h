@@ -69,9 +69,12 @@ public:
 	TerrainTileCacheDevice(const TerrainTileCacheDevice &) = delete;
 	TerrainTileCacheDevice &operator=(const TerrainTileCacheDevice &) = delete;
 
+	// `p_page_targets` false: the sources load and install, and no page array is made, so nothing
+	// composes and the cache is not ready (a dedicated host's mission start; engine
+	// terrain/terrain_load_legs.h builds_tile_cache_targets).
 	bool rebuild(const Ref<TerrainData> &p_data,
 			const Ref<TerrainSurfaceInputs> &p_surface_inputs,
-			const Ref<TerrainTileInfo> &p_tile_info_override);
+			const Ref<TerrainTileInfo> &p_tile_info_override, bool p_page_targets = true);
 	void clear();
 	// One PolyTrn_RenderFrame: the cache frame advances and this frame's
 	// claims stamp the given TOD epoch (g_EnvTodEpoch).

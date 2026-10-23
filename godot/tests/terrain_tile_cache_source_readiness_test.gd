@@ -83,6 +83,33 @@ func test_tile_free_mission_keeps_base_page_cache_ready_without_tilestrip() -> v
 		"u_has_tile_cache")))
 
 
+func test_a_build_without_the_page_targets_makes_no_page_array() -> void:
+	# A dedicated host's mission start jumps over the render subsystems, whose init makes the
+	# tile cache's page targets; the cache's sources and the surface textures load at the mission
+	# textures stage on both arms (D-NET-NEW-L3-33; engine terrain/terrain_load_legs.h
+	# builds_tile_cache_targets carries the witness).
+	var full_data := _loaded_data()
+	full_data.set_tileinfo_filename("")
+	full_data.set_tilestrip_tex(null)
+	var full := _build(full_data)
+	assert_not_null(full.get_tile_cache_texture(), "the full arm makes the page array")
+
+	var data := _loaded_data()
+	data.set_tileinfo_filename("")
+	data.set_tilestrip_tex(null)
+	var terrain: Terrain = add_child_autofree(Terrain.new())
+	terrain.set_terrain_data(data)
+	terrain.build(false, false)
+	assert_true(terrain.is_built(), "the reduced arm builds the terrain")
+	assert_null(terrain.get_tile_cache_texture(), "no page array without the page targets")
+	assert_false(bool(terrain.get_tile_cache_diagnostics()["available"]),
+		"nothing composes without the page targets")
+	assert_false(bool(terrain.get_terrain_material().get_shader_parameter(
+		"u_has_tile_cache")))
+	assert_not_null(terrain.get_heightfield_normal_texture(),
+		"the surface inputs' textures build on both arms")
+
+
 func test_unresolved_scorch_set_rejects_records_without_dropping_base_pages() -> void:
 	# The fixture root carries no trscrch/qburn decal TGAs, so the permanent
 	# scorch overlay is absent for the whole mission. That is an optional
