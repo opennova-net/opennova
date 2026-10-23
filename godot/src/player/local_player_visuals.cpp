@@ -337,8 +337,12 @@ void LocalPlayerVisuals::apply_local_player_spawn_loadout() {
 	for (const opennova::world::SpawnLoadoutKitRow &row : plan.kit) {
 		kit.push_back(WeaponKitEntry::make(opennova::to_gd(row.name), row.clips));
 	}
+	// An apply that took nothing (its 0x2F refused, or no kit applied) mounts nothing in the
+	// sim either: retail's ACCEPT mounts only on its offline arm, past its select; its session
+	// arm sends the 0x2F and skips to the tail (the engine's inmatch/loadout_submit.h
+	// armory_accept_in_session carries the witness). The viewmodel follows the inventory.
 	if (!spawn_sim->apply_local_player_loadout(kit, plan.player_class)) {
-		sync_local_player_weapon_from_inventory(spawn_sim, /*p_mount=*/true);
+		sync_local_player_weapon_from_inventory(spawn_sim, /*p_mount=*/false);
 		return;
 	}
 	if (plan.after_apply == opennova::world::SpawnLoadoutAfterApply::kClearWeapon) {

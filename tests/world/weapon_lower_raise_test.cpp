@@ -1231,7 +1231,7 @@ void test_a_switchrank_completion_clears_the_scope_byte_for_a_def_with_no_optic(
 // Here the apply's kit drops the held pistol, so the select falls through to the optic of
 // another category: the byte and the fov target stand, and the optic engages.
 // [orig: Player_SelectWeaponSlot @0x4DD680 (the stores @0x4DD704 / @0x4DD727, the latch
-//  @0x4DD72D, nothing else); WeaponLoadout_ApplyFromBuffer @0x565CD0 (the select @0x566285,
+//  @0x4DD730, nothing else); WeaponLoadout_ApplyFromBuffer @0x565CD0 (the select @0x566285,
 //  the mount @0x56628A..0x566297); Player_MountWeaponSlot @0x4DFA40 (the category compare
 //  @0x4DFB4C..0x4DFB5E, the bind and engage @0x4DFC35..0x4DFC9A)]
 void test_a_loadout_apply_writes_its_view_words_at_its_mount() {

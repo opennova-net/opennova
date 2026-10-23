@@ -215,12 +215,13 @@ opennova::world::WeaponInstallData Simulation::install_data_from_def(
 	return data;
 }
 
-// The production mount (S6b): the kernel finds the row in ITS retained
+// The embedder's by-name mount (S6b): the kernel finds the row in ITS retained
 // weapon.def parse and mounts the descriptors the weapon table baked as it
 // loaded; the channel plays from the table's shared ANIMADM rings, no shell
-// dictionary and no render dependency [orig: the ACCEPT chain —
+// dictionary and no render dependency [orig: the table's bake:
 // WeaponSlotTable_LoadAllFromDefs @ 0x5414e0 + Player_MountWeaponSlot
 // @ 0x4dfa40; Anim_InitActions @ 0x541fa0 baked the delays at the def's END].
+// A loadout apply's ACCEPT mounts in the sim itself; the shell presents after it.
 bool Simulation::install_local_player_weapon_by_name(
 		const String &p_weapon_name, bool p_preserve_slot_state) {
 	return kernel_->install_weapon(

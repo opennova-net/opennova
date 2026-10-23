@@ -2407,7 +2407,8 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 		joiner.step()
 		host.step()
 		var settled := joiner.get_local_player_weapon_state()
-		if String(joiner.get_local_player_inventory().equipped_name) == "WPN_M4AUTO" 				and int(settled.current_action) == 0 and int(settled.next_action) == 0:
+		if String(joiner.get_local_player_inventory().equipped_name) == "WPN_M4AUTO" \
+				and int(settled.current_action) == 0 and int(settled.next_action) == 0:
 			granted = true
 			break
 	assert_true(granted, "the granted M4 idles past its SWITCHRANK")

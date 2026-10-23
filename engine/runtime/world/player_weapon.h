@@ -478,7 +478,7 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 // select (Player_InitPlayer's) is followed by no mount here (its walk's, D-WPN-21), and
 // its install writes the mount's view words in that mount's stead.
 // [orig: Player_SelectWeaponSlot @0x4DD680 (the stores @0x4DD704 / @0x4DD727, the latch
-//  @0x4DD72D); NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the select @0x4296E3, the
+//  @0x4DD730); NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the select @0x4296E3, the
 //  mount @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285,
 //  @0x56628A..0x566297); Player_InitPlayer @0x4E15F0 (the select @0x4E1995)]
 enum class PendingCommit : uint8_t {

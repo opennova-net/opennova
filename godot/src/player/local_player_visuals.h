@@ -110,11 +110,12 @@ public:
 	// Later builders hit the placer's cache, so they cannot introduce a
 	// definition just after freeze. Returns the graphics warmed, in order.
 	PackedStringArray prewarm_loaded_model_challenge_definitions();
-	// Armory apply, presentation side: point the FP viewmodel + action FSM at
-	// `weapon_name`. Validates against weapon.def; the caller (main_game)
-	// drops the old viewmodel so the per-frame pass rebuilds gun/arms/FSM from
-	// the new def [orig: the ACCEPT re-mount, WeaponLoadout_ApplyFromBuffer
-	// @0x565cd0 -> Player_MountWeaponSlot @0x4dfa40].
+	// A mount the embedder asks for: point the FP viewmodel at `weapon_name` and mount it in
+	// the sim on a fresh slot. Validates against weapon.def; the caller drops the old
+	// viewmodel so the per-frame pass rebuilds gun/arms from the new def. A loadout apply
+	// mounts in the sim itself [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 ->
+	// Player_MountWeaponSlot @0x4dfa40], and the shell then presents its def
+	// (present_local_player_weapon), never this.
 	bool set_local_player_weapon_by_name(const String &p_weapon_name, bool p_preserve_slot_state = false);
 	// A switch the sim's own commit mounted (world::WeaponPresentationEvent::installed):
 	// the render-side half alone -- the def record the viewmodel reads and the FP model's
@@ -202,8 +203,8 @@ private:
 	Ref<MissionData> loaded_mission() const;
 	void set_first_person_model_available(bool p_available);
 	// The viewmodel onto the inventory's equipped weapon: `p_mount` mounts it in the sim too
-	// (set_local_player_weapon_by_name), else the sim already mounted it (an apply's select)
-	// and only the render side follows (present_local_player_weapon).
+	// (set_local_player_weapon_by_name); past a loadout apply, whose mount, if any, is the
+	// sim's own, only the render side follows (present_local_player_weapon).
 	void sync_local_player_weapon_from_inventory(const Ref<Simulation> &p_sim, bool p_mount);
 
 	// The GameWorld whose local player these visuals present (public surface only).
