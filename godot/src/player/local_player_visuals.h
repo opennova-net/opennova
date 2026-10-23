@@ -138,6 +138,9 @@ public:
 	// (player_viewmodel_rig.cpp). Null when the placer or both models fail to
 	// resolve.
 	Node3D *build_local_player_viewmodel();
+	// The placer's model-file and animation-map reads since the last take (an instrument:
+	// LocalPlayerPresenter's model builds print them under --verbose). C++ siblings only.
+	MissionObjectPlacer::LoadProfile take_placer_load_profile();
 	// The FP viewmodel's typed model parts (arms/gun), rebuilt with the
 	// container -- the rig consumes this instead of scanning children (the
 	// live ones; a freed part drops out).

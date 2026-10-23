@@ -510,6 +510,12 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	return container;
 }
 
+MissionObjectPlacer::LoadProfile LocalPlayerVisuals::take_placer_load_profile() {
+	const Ref<MissionObjectPlacer> mission_placer = placer();
+	return mission_placer.is_valid() ? mission_placer->take_load_profile()
+									 : MissionObjectPlacer::LoadProfile();
+}
+
 TypedArray<ObjectModel> LocalPlayerVisuals::local_player_viewmodel_parts() const {
 	TypedArray<ObjectModel> out;
 	for (const ObjectID &id : local_viewmodel_parts_) {

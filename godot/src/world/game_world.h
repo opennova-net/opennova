@@ -460,7 +460,8 @@ public:
 	bool is_post_load_frames_open() const { return post_load_open_; }
 	// Whether the post-load timeline times another frame past `p_frames_timed`: kPostLoadFrames at
 	// least; past them only while a joiner awaits its first C2S 0x0C past the final wait (the S2C
-	// 0x0F's first-send window, the third pong's), and never past kPostLoadFramesMax.
+	// 0x0F's first-send window, the third pong's), and never past kPostLoadFramesMax. The caller
+	// passes the wait only under --verbose, whose PostLoadFrame lines read those frames.
 	static bool post_load_frames_continue(int p_frames_timed, bool p_awaits_uplink);
 	MissionRoot *get_runtime() const;
 	Ref<MissionPlacementStats> get_mission_stats() const { return mission_stats_; }

@@ -18,14 +18,17 @@
 #include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <cmath>
 
@@ -547,12 +550,46 @@ void LocalPlayerPresenter::ensure_models() {
 	if (avatar() != nullptr && type_id != avatar_type_id_) {
 		release_avatar();
 	}
-	if (avatar() == nullptr) {
+	// The builds' wall time, each with its scene and load profiles (an instrument, --verbose: a
+	// line only for a frame that built either).
+	const bool avatar_owed = avatar() == nullptr;
+	const bool viewmodel_owed = viewmodel() == nullptr;
+	const bool profile = (avatar_owed || viewmodel_owed) && OS::get_singleton()->is_stdout_verbose();
+	const auto take_profile = [this]() {
+		const MissionObjectPlacer::LoadProfile loads = visuals_->take_placer_load_profile();
+		return vformat("model files %d read %d ms, animation maps %d read %d ms; scene %s",
+				loads.data_loads, static_cast<int>(loads.data_us / 1000), loads.rig_loads,
+				static_cast<int>(loads.rig_us / 1000),
+				ObjectModel::format_build_profile(ObjectModel::take_build_profile()));
+	};
+	if (profile) {
+		(void)take_profile();
+	}
+	const uint64_t avatar_start = profile ? Time::get_singleton()->get_ticks_usec() : 0;
+	String avatar_line;
+	if (avatar_owed) {
 		ObjectModel *built = visuals_->build_local_player_avatar(type_id);
 		avatar_id_ = built != nullptr ? ObjectID(built->get_instance_id()) : ObjectID();
 		avatar_type_id_ = type_id;
+		if (profile) {
+			avatar_line = vformat("avatar %s %d ms (%s)",
+					built != nullptr ? built->get_graphic_name() : String("(none)"),
+					static_cast<int>((Time::get_singleton()->get_ticks_usec() - avatar_start) / 1000),
+					take_profile());
+		}
 	}
+	const uint64_t viewmodel_start = profile ? Time::get_singleton()->get_ticks_usec() : 0;
 	viewmodel_rig_->ensure_viewmodel();
+	if (profile && (avatar_owed || viewmodel() != nullptr)) {
+		const String viewmodel_line = viewmodel_owed
+				? vformat("view model %s %d ms (%s)", viewmodel() != nullptr ? "built" : "none",
+						  static_cast<int>(
+								  (Time::get_singleton()->get_ticks_usec() - viewmodel_start) / 1000),
+						  take_profile())
+				: String("view model kept");
+		UtilityFunctions::print_verbose(vformat("LocalPlayerPresenter: models: %s; %s",
+				avatar_owed ? avatar_line : String("avatar kept"), viewmodel_line));
+	}
 }
 
 void LocalPlayerPresenter::release_avatar() {

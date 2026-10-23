@@ -500,8 +500,11 @@ Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 	if (post_load.is_valid() && post_load_open_) {
 		post_load->end_span();
 		++post_load_frame_count_;
+		// The first-send window runs on only under --verbose, the one reader of its frames (the
+		// PostLoadFrame lines); a plain joiner's timeline times the first frames alone.
 		const Ref<Simulation> sim = get_sim();
-		const bool awaits_uplink = sim.is_valid() && sim->is_joiner() && !post_load_uplink_seen_;
+		const bool awaits_uplink = OS::get_singleton()->is_stdout_verbose() && sim.is_valid() &&
+				sim->is_joiner() && !post_load_uplink_seen_;
 		if (!post_load_frames_continue(post_load_frame_count_, awaits_uplink)) {
 			post_load_open_ = false;
 			post_load->finish();
