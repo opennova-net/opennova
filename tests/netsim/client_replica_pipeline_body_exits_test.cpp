@@ -477,7 +477,11 @@ void test_seated_org1_rider_rides_its_parent() {
 		});
 		ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
 		tick(*view);
-		expect(rider.x == fixed_of(51.0) && rider.rm_body_heading == 0 &&
+		// The seat follows the hull row, whose x is its record's -50 u decoded one word under
+		// (a negative compressed word decodes one's-complemented: sign ^ magnitude).
+		// [orig: Network_DecompressFixedPoint @0x4C27E0]
+		const int32_t hull_x = view->state().find(kHull)->x;
+		expect(rider.x == hull_x + fixed_of(1.0) && rider.rm_body_heading == 0 &&
 						rider.net_target_heading_bam == 0x01000000 && rider.resolved_ground == kHull,
 				"the seated ride turns the target; the seat keeps the position and the body heading");
 		// The seated look: (0x20000000 + 2) >> 2 clamps to 0x2000000 either way.
@@ -513,8 +517,11 @@ void test_dead_seated_infantry_takes_the_free_standing_branch() {
 				});
 		ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
 		tick(*view); // alive: the seat's clamped quarter and eighth
+		// The hull row's x is its record's -50 u, decoded one word under (sign ^ magnitude)
+		// [orig: Network_DecompressFixedPoint @0x4C27E0].
+		const int32_t hull_x = view->state().find(kHull)->x;
 		expect(rider.heading_bam == 0x02000000 && rider.pitch_bam == -0x02000000 &&
-						rider.x == fixed_of(51.0),
+						rider.x == hull_x + fixed_of(1.0),
 				"(the live seated tick looks from its seat at the hull's x + 1)");
 		const int16_t death = as::kDeathBulletBase + 6;
 		view->apply(nw::s2c::ENTITY_DEATH,
@@ -526,7 +533,7 @@ void test_dead_seated_infantry_takes_the_free_standing_branch() {
 		expect(rider.carrier_handle == kHull && rider.resolved_ground == kHull &&
 						(rider.rm_entity_flags & nw::world::kEntityFlagDead) != 0,
 				"the dead seated body keeps its parent as its ground and takes its death edge");
-		expect(rider.x == fixed_of(52.0),
+		expect(rider.x == hull_x + fixed_of(2.0),
 				"no seat pose: the body rides its parent's 1 u, not the hull's 2 u seat move");
 		// (0x1E000000 + 4) >> 3 = 0x3C00000; (-0xE000000 + 4) >> 3 clamps to -0xC00000.
 		expect(rider.heading_bam == 0x05C00000 && rider.pitch_bam == -0x02C00000,
