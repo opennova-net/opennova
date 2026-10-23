@@ -80,7 +80,8 @@ constexpr bool builds_lod_cache(bool dedicated_host) noexcept {
 // [orig: Game_StartMission @0x524360 - the dedicated test (the cmp @0x5259B2, the jz @0x5259B4)
 //  skipping Render_InitRenderingSubsystems (the call @0x5259D1); Render_InitRenderingSubsystems
 //  @0x586EE0 -> Terrain_CreateTileCacheTargets @0x604DD0 (the call @0x586F01): a target per page
-//  slot (the loop @0x604DD3..0x604E3C, each made @0x604DF3) and the extra target @0x604E46;
+//  slot (the loop @0x604DD3..0x604E3C, each made by GTexRT_Create @0x680370, the call @0x604DE8)
+//  and the extra target (the call @0x604E46);
 //  PolyTrn_InitTextures @0x60AAA0 (Render_InitMissionTextures' full arm's call @0x58715E, the
 //  reduced arm's @0x58727A) - the colour map's quadrants (Terrain_SplitTileIntoQuadrants @0x604E60,
 //  the calls @0x60B510 / @0x60B964), Terrain_LoadScorchTextures @0x604CE0 (the call @0x60C5B4),
