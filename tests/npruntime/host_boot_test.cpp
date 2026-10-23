@@ -603,6 +603,42 @@ int main() {
 		CHECK(host.kernel != nullptr && host.kernel->world.preround_delay_seconds == 7u);
 	}
 
+	// --- D-NET-NEW-L1-50: an embedder that loads ahead of phase A (the game's world load) creates
+	// the session at its load's start (create_host_session), and phase A's head creates none
+	// again: the session keeps the start tick its create stamped, past every clock read of the
+	// boot. A refused create leaves nothing to boot.
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - CNapiGameSession_BuildAndCreateSession
+	//  called @0x56A46A, after UI_HandleHostSessionStart's SetTransportMode(3) call @0x556EA6;
+	//  GameLoop_Init's Game_StartMission call @0x526377]
+	{
+		Host host;
+		uint32_t clock = 5000;
+		inmatch::HostBootRequest r = host.request(0);
+		r.host_cfg.clock_ms = [&clock] { return clock += 10; };
+		CHECK(inmatch::create_host_session(host.role, r.files, r.mission_basename,
+					r.text_override_table, r.host_cfg, r.session_score_ini) ==
+				inmatch::CreateSessionResult::Created);
+		CHECK(host.role.create_ran());
+		const uint32_t start_tick = host.role.state.host_owner.ctx.np_protocol.host_start_tick;
+		const uint32_t key = host.role.state.host_owner.ctx.game_server_baffle_key;
+		CHECK(start_tick != 0u && key != 0u);
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+		CHECK(ctx.np_protocol.host_start_tick == start_tick);
+		CHECK(ctx.game_server_baffle_key == key);
+		CHECK(!host.role.create_ran()); // the bring-up spent it
+		CHECK(host.kernel != nullptr && ctx.world == &host.kernel->world);
+
+		Host refused;
+		inmatch::HostBootRequest rr = refused.request(0);
+		rr.host_cfg.config.multiplayer_reset = 1;
+		CHECK(inmatch::create_host_session(refused.role, rr.files, rr.mission_basename,
+					rr.text_override_table, rr.host_cfg, rr.session_score_ini) ==
+				inmatch::CreateSessionResult::ProcessExit);
+		CHECK(refused.role.state.host_owner.ctx.is_in_session == 0);
+	}
+
 	// --- a role with no HostRole (the game's joiner) skips the authority's legs
 	{
 		std::map<std::string, std::string> files = mount();

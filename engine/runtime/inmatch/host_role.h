@@ -254,6 +254,9 @@ public:
 	//  @0x5695B3, CNapiGameSession_CreateSession called @0x56997D; GameLoop_Init's
 	//  Game_StartMission call @0x526377 follows]
 	CreateSessionResult create_session(const HostBringup &bringup);
+	// create_session ran for the load in hand and its bring-up has not run yet: the host boot's
+	// head runs none again.
+	bool create_ran() const { return create_ran_; }
 	// The shell's general bring-up (the LAN host or its SP listen server with
 	// the shell's mission text and terrain tiles), the mission's half under the
 	// session create: the World under the session (the process's CRT stream onto

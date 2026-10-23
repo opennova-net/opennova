@@ -98,6 +98,11 @@ public:
 	// The single player's restart (Simulation.set_restart_boot), C++ only.
 	bool get_restart_boot() const { return restart_boot_; }
 	void set_restart_boot(bool p_value) { restart_boot_ = p_value; }
+	// The simulation already stands staged with its session created (the world load ran
+	// MissionRoot::stage_simulation and Simulation::create_host_session at its start), so the
+	// root's setup adopts it as is, C++ only.
+	bool get_session_staged() const { return session_staged_; }
+	void set_session_staged(bool p_value) { session_staged_ = p_value; }
 	// The process's server log devices (Simulation.use_log_devices), C++ only. Null = none.
 	opennova::inmatch::ServerLogDevices *get_log_devices() const { return log_devices_; }
 	void set_log_devices(opennova::inmatch::ServerLogDevices *p_value) { log_devices_ = p_value; }
@@ -183,6 +188,7 @@ private:
 	opennova::inmatch::HostRotation *host_rotation_ = nullptr;
 	opennova::inmatch::ClientProcessState *client_process_ = nullptr;
 	bool restart_boot_ = false;
+	bool session_staged_ = false;
 	opennova::inmatch::ServerLogDevices *log_devices_ = nullptr;
 	Ref<ControlsModel> controls_model_;
 	Ref<CharacterJoinProfile> join_character_profile_;
