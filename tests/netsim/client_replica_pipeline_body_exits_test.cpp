@@ -102,6 +102,16 @@ nw::FrameUpdate hull_update(double hull_x) {
 	return fu;
 }
 
+// The hull row's x off frame()'s default record, pinned absolutely (V-ROLL-AX N1): the anchor's
+// 100 u plus the record's -50 u, one 16.16 word under. The compress folds -50 u with its sign mask,
+// v ^ (v >> 31) = 0x31FFFF; bsr 21 makes the shift 7; (0x31FFFF + (8 << 7)) >> 7 = 0x6407, its
+// bits 4..15 kept (0x6400) beside the shift code; the decompress shifts 0x6400 back by 7
+// (0x320000, 50 u) and xors the sign mask in: ~0x320000 = -50 u - 1 word.
+// [orig: Network_CompressFixedPoint @0x4C2780 - the fold @0x4C2795..0x4C2798, bsr @0x4C279D, the
+//  round @0x4C27AF..0x4C27B3, the mask @0x4C27C6; Network_DecompressFixedPoint @0x4C27E0 - the
+//  shift @0x4C27FE, the xor @0x4C2800]
+const int32_t kHullDecodedX = fixed_of(100.0) + fixed_of(-50.0) - 1;
+
 std::vector<uint8_t> frame(const std::vector<Row> &rows, double hull_x = 50.0) {
 	nw::FrameUpdate fu = hull_update(hull_x);
 	for (const Row &row : rows) {
@@ -481,6 +491,7 @@ void test_seated_org1_rider_rides_its_parent() {
 		// (a negative compressed word decodes one's-complemented: sign ^ magnitude).
 		// [orig: Network_DecompressFixedPoint @0x4C27E0]
 		const int32_t hull_x = view->state().find(kHull)->x;
+		expect(hull_x == kHullDecodedX, "the hull row stands at the anchor's -50 u, one word under");
 		expect(rider.x == hull_x + fixed_of(1.0) && rider.rm_body_heading == 0 &&
 						rider.net_target_heading_bam == 0x01000000 && rider.resolved_ground == kHull,
 				"the seated ride turns the target; the seat keeps the position and the body heading");
@@ -520,6 +531,7 @@ void test_dead_seated_infantry_takes_the_free_standing_branch() {
 		// The hull row's x is its record's -50 u, decoded one word under (sign ^ magnitude)
 		// [orig: Network_DecompressFixedPoint @0x4C27E0].
 		const int32_t hull_x = view->state().find(kHull)->x;
+		expect(hull_x == kHullDecodedX, "the hull row stands at the anchor's -50 u, one word under");
 		expect(rider.heading_bam == 0x02000000 && rider.pitch_bam == -0x02000000 &&
 						rider.x == hull_x + fixed_of(1.0),
 				"(the live seated tick looks from its seat at the hull's x + 1)");
