@@ -133,22 +133,6 @@ public:
 	// legs have no deadline (net-re §5.70.7).
 	bool keep_session(MissionRoot *p_runtime);
 	bool has_kept_session() const { return kept_sim_.is_valid(); }
-	// The kept session's simulation, a map change's, until the runtime adopts it.
-	Ref<Simulation> kept_simulation() const { return kept_sim_; }
-	// A NovaWorld listen host's mission-start server-info update at the load's head, past its
-	// session's create (a fresh one's) or the map change's head, ahead of the effect system and
-	// every load: the hosting session's columns read off `p_sim`'s session with the mission
-	// start's own (the mission text's title else the header's name, its climate, TimeOfDay 0,
-	// the last round's clock), its own player's slot, then both lists whole (and the session's
-	// first mission's METPROTOCOL ID report). Nothing when no NovaWorld session hosts.
-	void publish_host_mission_start(const Ref<Simulation> &p_sim, const Ref<MissionData> &p_mission,
-			const Ref<ResourceRoot> &p_resource_root, const String &p_bms_name);
-	// True while the load is a fresh host's or single player's: no join staged or preloaded and
-	// no kept session, so the world's load creates its session at its start
-	// (GameWorld::create_fresh_session).
-	bool fresh_authority_load() const {
-		return pending_join_.is_null() && join_preload_sim_.is_null() && kept_sim_.is_null();
-	}
 	int load_next_host_mission(const String &p_bms_name);
 	// That load's head ahead of the world's effect system, the head's window past it, and its
 	// stage pumps at the terrain and ahead of the objects, on the kept session
@@ -241,9 +225,6 @@ private:
 	// GSID, the join-ticket hook, the roster mirror).
 	void bind_nw_host(const Ref<MissionSetupOptions> &p_opts);
 	void unbind_nw_host();
-	// The hosting session's own player slot, the match's own add's PlayerList entry (its name,
-	// the login PCID, the own row's PlayerTeam / PlayerType), on a serve-and-play host.
-	void set_nw_self_slot(const Ref<Simulation> &p_sim, const String &p_player_name);
 	// Mirror the admitted joiners onto the hosting session's per-slot roster
 	// (the PlayerList + ClientHostPlayerAdded/Removed).
 	void sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<Simulation> &p_sim);
@@ -270,9 +251,6 @@ private:
 	// the roster sync keeps its identity and follows its PlayerTeam / PlayerType.
 	opennova::HostPlayerSlot nw_self_slot_;
 	bool nw_self_slot_set_ = false;
-	// The mission start's update went out at the load's head (publish_host_mission_start); the
-	// runtime's bind publishes none again.
-	bool nw_mission_start_published_ = false;
 	// The typed session request at the shell seam (ADR 0017): exactly one is
 	// non-null during a net load -- the host screen's HostSessionOptions or
 	// the joiner's dial JoinTarget -- stamped onto MissionSetupOptions as

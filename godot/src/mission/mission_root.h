@@ -96,14 +96,6 @@ public:
 	int setup(const Ref<MissionData> &p_mission, Node *p_container,
 			const Ref<MissionSetupOptions> &p_options = Ref<MissionSetupOptions>());
 	int get_setup_error() const { return setup_error_; }
-	// The session half of a setup, which the world's load runs at its start for a fresh host or
-	// single player (ahead of its own loads, so the session create can follow it there): `r_sim`
-	// (a fresh one when null) takes the options' process words and profiles, then its role, the
-	// joiner's dial, the host's session record and its bound socket, or the single player's
-	// socketless listen server. OK, ERR_UNCONFIGURED (no title identity to host with) or
-	// ERR_CANT_CREATE (a host that could not bind its socket); `r_sim` is cleared on a failure.
-	static int stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData> &p_mission,
-			const Ref<MissionSetupOptions> &p_options);
 	// The failed setup's session create ended the process on the cfg block's
 	// mpreset word (Simulation.session_create_ended_process): the embedder
 	// exits with code 0 instead of reporting a load failure.

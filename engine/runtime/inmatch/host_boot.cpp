@@ -121,51 +121,7 @@ void apply_session_score_ini(const mission::BootFileSource &files, GameConfig &c
 		io::logf(io::LogLevel::kWarn, "host boot: score.ini rejected; the default table stands");
 }
 
-// The process's own reads a host's config takes ahead of its session create: the loose score.ini
-// over the session config (apply_session_score_ini), the host's character table and the own
-// slot's character selection.
-void apply_process_host_config(const mission::BootFileSource &files, HostConfig &host_cfg,
-		bool session_score_ini) {
-	if (session_score_ini) apply_session_score_ini(files, host_cfg.config);
-
-	// The host's character table, g_AvatarDefs, which a joiner's add validates its
-	// ids against (D-NET-137): the embedder's when it installed one, else the
-	// mounted Avatars.def (empty without the file). A shell boot whose simulation
-	// was created after the world mounted its Avatars.def carries none.
-	// [orig: CAvatarDefs_Init @0x57B180 - File_ParseASCIIFile("Avatars.def") @0x57B1D5]
-	if (host_cfg.characters.empty()) {
-		std::vector<uint8_t> avatars_bytes;
-		if (files.valid() && files.read_file("Avatars.def", avatars_bytes)) {
-			avatars::AvatarsFile avatars = {};
-			if (avatars::avatars_parse_memory(avatars_bytes.data(), avatars_bytes.size(),
-						&avatars) == 0)
-				host_cfg.characters = CharacterRegistry::from_file(avatars);
-			avatars::avatars_free(&avatars);
-		}
-	}
-
-	// The host's own slot's character selection when the embedder installed none
-	// (a headless host): a fresh profile's over that table, as the boot's fresh
-	// record packs each side's first combo; an install with no Avatars.def takes
-	// the empty table's (D-NET-NEW-L2-7).
-	// [orig: PlayerProfile_InitDefaults @0x54BB40 -> CAvatarDefs_PackFirstComboOfAlignment
-	//  @0x57AD40 over g_AvatarDefs]
-	if (!host_cfg.local_character_vars)
-		host_cfg.local_character_vars = fresh_profile_character_vars(host_cfg.characters);
-}
-
 } // namespace
-
-CreateSessionResult create_host_session(HostRole &host, const mission::BootFileSource &files,
-		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table,
-		HostConfig host_cfg, bool session_score_ini) {
-	apply_process_host_config(files, host_cfg, session_score_ini);
-	HostBringup create;
-	create.mission_text = read_host_mission_text(files, mission_basename, text_override_table);
-	create.server_text = read_host_server_text(files, create.mission_text.override_table.get());
-	create.host_cfg = std::move(host_cfg);
-	return host.create_session(create);
-}
 
 void begin_next_host_mission_load(HostRole &host, const mission::BootFileSource &files,
 		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table,
@@ -249,9 +205,34 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	charattr_restrictions.no_crosshair_spread = host_cfg.config.no_crosshair_spread != 0;
 	charattr_restrictions.no_scope_drift = host_cfg.config.no_scope_drift != 0;
 
-	// The process's own reads the host config takes (score.ini, Avatars.def, the own slot's
-	// character selection: apply_process_host_config).
-	if (request.host != nullptr) apply_process_host_config(files, host_cfg, request.session_score_ini);
+	// The loose score.ini into the session config (apply_session_score_ini).
+	if (request.host != nullptr && request.session_score_ini)
+		apply_session_score_ini(files, host_cfg.config);
+
+	// The host's character table, g_AvatarDefs, which a joiner's add validates its
+	// ids against (D-NET-137): the embedder's when it installed one, else the
+	// mounted Avatars.def (empty without the file). A shell boot whose simulation
+	// was created after the world mounted its Avatars.def carries none.
+	// [orig: CAvatarDefs_Init @0x57B180 - File_ParseASCIIFile("Avatars.def") @0x57B1D5]
+	if (request.host != nullptr && host_cfg.characters.empty()) {
+		std::vector<uint8_t> avatars_bytes;
+		if (files.valid() && files.read_file("Avatars.def", avatars_bytes)) {
+			avatars::AvatarsFile avatars = {};
+			if (avatars::avatars_parse_memory(avatars_bytes.data(), avatars_bytes.size(),
+						&avatars) == 0)
+				host_cfg.characters = CharacterRegistry::from_file(avatars);
+			avatars::avatars_free(&avatars);
+		}
+	}
+
+	// The host's own slot's character selection when the embedder installed none
+	// (a headless host): a fresh profile's over that table, as the boot's fresh
+	// record packs each side's first combo; an install with no Avatars.def takes
+	// the empty table's (D-NET-NEW-L2-7).
+	// [orig: PlayerProfile_InitDefaults @0x54BB40 -> CAvatarDefs_PackFirstComboOfAlignment
+	//  @0x57AD40 over g_AvatarDefs]
+	if (request.host != nullptr && !host_cfg.local_character_vars)
+		host_cfg.local_character_vars = fresh_profile_character_vars(host_cfg.characters);
 
 	// The mission's placed tiles: one shared array serving the S2C 0x45
 	// stream, the render overlay and the surface walk. The authority (every
@@ -294,10 +275,9 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	//  @0x56A320 - state 2's call @0x56A46A; SinglePlayer_StartMission @0x561AF0 -
 	//  @0x561C23, @0x561E65, UI_NavHistoryPush(&g_GameModeGameLoop) @0x561E85; GameLoop_Init
 	//  @0x526370 - Game_StartMission(0) called @0x526377]
-	if (request.host != nullptr && !request.next_mission && !request.host->create_ran()) {
+	if (request.host != nullptr && !request.next_mission) {
 		HostBringup create;
 		create.host_cfg = host_cfg;
-		create.host_cfg.mission_type = static_cast<uint8_t>(request.mission.header.mission_type);
 		create.mission_text = boot.mission_text;
 		create.server_text = boot.server_text;
 		if (request.host->create_session(create) == CreateSessionResult::ProcessExit) {

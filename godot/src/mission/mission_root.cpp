@@ -121,46 +121,73 @@ Node3D *MissionRoot::container() const {
 			: nullptr;
 }
 
-int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData> &p_mission,
+int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		const Ref<MissionSetupOptions> &p_options) {
-	if (r_sim.is_null()) {
-		r_sim.instantiate();
-		// `--capture-pcap <path>` (LaunchFlags) records this process's datagrams.
-		r_sim->set_capture_pcap_path(LaunchFlags::capture_pcap());
+	Ref<MissionSetupOptions> options = p_options;
+	if (options.is_null()) {
+		options.instantiate();
 	}
+	clear_present_effect_poses();
+	setup_error_ = OK;
+	process_exit_ = false;
+	mission_ = p_mission;
+	// A remote join may already own the live socket + NP session while it waits
+	// for S2C 0x7B to identify the mission. Keep that exact connection across the
+	// wire-header world construction instead of reconnecting after discovery. Standalone host/SP and
+	// isolated test/tooling callers do not provide a simulation and retain the fresh-instance path.
+	sim_ = options->get_simulation();
+	if (sim_.is_null()) {
+		sim_.instantiate();
+		// `--capture-pcap <path>` (LaunchFlags) records this process's datagrams.
+		sim_->set_capture_pcap_path(LaunchFlags::capture_pcap());
+	}
+	sim_->set_music_director(options->get_music_director());
+	sim_->set_frame_stats(frame_stats_);
+	has_trace_stats_sampling_ = sim_.is_valid();
+	sync_runtime_profiling();
+	mission_file_ = options->get_mission_file().replace("\\", "/").get_file();
+	mission_name_ = options->get_mission_name();
+	if (mission_name_.is_empty() && p_mission.is_valid()) {
+		mission_name_ = p_mission->get_mission_name().strip_edges();
+	}
+	if (mission_name_.is_empty() && !mission_file_.is_empty()) {
+		mission_name_ = mission_file_.get_file().get_basename();
+	}
+
 	// The listen host stamps its own type-2 connection during role bring-up, so
 	// its two per-side character selections must already be present here. The
 	// same profile is what a joiner uploads through ClientAuth.
 	// [orig: Game_ApplySessionSettingsToGlobals @0x551500;
 	//  Server_PlayerAdd @0x51CBC0 -> packed id @0x51D0B1]
-	if (p_options->get_local_character_profile().is_valid()) {
-		r_sim->set_local_character_profile(p_options->get_local_character_profile());
+	if (options->get_local_character_profile().is_valid()) {
+		sim_->set_local_character_profile(options->get_local_character_profile());
 	}
 	// The player profile's current records ahead of the boot: single player's
 	// session words are the record's (the session config the boot builds).
-	if (p_options->get_player_profiles().is_valid()) {
-		r_sim->use_player_profile(p_options->get_player_profiles());
+	if (options->get_player_profiles().is_valid()) {
+		sim_->use_player_profile(options->get_player_profiles());
 	}
 	// The process's cfg block, whose mpreset word every session create reads.
-	if (p_options->get_game_config().is_valid())
-		r_sim->use_game_config(p_options->get_game_config());
+	if (options->get_game_config().is_valid())
+		sim_->use_game_config(options->get_game_config());
 	// The process's map-rotation words, which a session hands the next (D-NET-353).
-	r_sim->use_host_rotation(p_options->get_host_rotation());
+	sim_->use_host_rotation(options->get_host_rotation());
 	// The process's server log devices, which every hosted session writes.
-	r_sim->use_log_devices(p_options->get_log_devices());
-	r_sim->set_controls_model(p_options->get_controls_model());
+	sim_->use_log_devices(options->get_log_devices());
+	sim_->set_controls_model(options->get_controls_model());
 	// The process's client words, which every hosted session's own client steps on.
-	r_sim->use_client_process(p_options->get_client_process());
+	sim_->use_client_process(options->get_client_process());
 	// The single player's restart boot (Game_RestartRoundSP's Game_StartMission(1)).
-	r_sim->set_restart_boot(p_options->get_restart_boot());
+	sim_->set_restart_boot(options->get_restart_boot());
 	// P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	// load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
 	// sole live runtime owner (ADR 0025). Isolated tests may instantiate this same
 	// seam. A co-op LAN host additionally binds a real UDP
 	// socket; a joiner is the non-authority client.
-	const Ref<JoinTarget> join_target = p_options->get_join_target();
-	const Ref<HostSessionOptions> host_session = p_options->get_host_session();
-	const bool is_joiner = join_target.is_valid() || r_sim->is_joiner();
+	const bool playable = options->get_playable();
+	const Ref<JoinTarget> join_target = options->get_join_target();
+	const Ref<HostSessionOptions> host_session = options->get_host_session();
+	const bool is_joiner = join_target.is_valid() || sim_->is_joiner();
 	if (is_joiner) {
 		// Co-op LAN JOINER (a non-authority client): dial the host and run the witnessed
 		// in-match JOIN. The local player L is spawned on the name-match (inside the sim's
@@ -168,35 +195,35 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		// A preconnected simulation already completed this socket leg while the loading
 		// screen was up; do not replace its connection, restart its handshake, or
 		// reload charattr after ordered S2C 0x41 mutations have already landed.
-		const bool needs_join_connection = !r_sim->is_joiner();
-		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
-			r_sim->load_charattr(p_options->get_resource_root());
+		const bool needs_join_connection = !sim_->is_joiner();
+		if (needs_join_connection && options->get_resource_root().is_valid()) {
+			sim_->load_charattr(options->get_resource_root());
 		}
 		// The title the mounted game speaks, the joiner's identity; one whose identity is
 		// not witnessed has none to join with, so the joiner does not dial.
 		bool join_identity = true;
-		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
+		if (needs_join_connection && options->get_resource_root().is_valid()) {
 			std::string title_error;
 			const opennova::TitleIdentity *title =
-					p_options->get_resource_root()->title_identity(title_error);
+					options->get_resource_root()->title_identity(title_error);
 			if (title == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to join with: %s",
 						opennova::to_gd(title_error)));
 				join_identity = false;
 			}
-			r_sim->set_title(title);
+			sim_->set_title(title);
 		}
-		if (needs_join_connection && p_options->get_join_character_profile().is_valid()) {
-			r_sim->set_join_character_profile(p_options->get_join_character_profile());
+		if (needs_join_connection && options->get_join_character_profile().is_valid()) {
+			sim_->set_join_character_profile(options->get_join_character_profile());
 		}
 		// The join's JSR and JSPP: the cfg block's join-screen words, as the session
 		// drive's dial sends them (GameConfigBlock::join_choice; D-NET-NEW-L2-12).
 		int join_role = JoinTarget::ROLE_PLAYER;
 		String spectator_password;
 		if (needs_join_connection && join_target.is_valid())
-			GameConfigBlock::join_choice(p_options->get_game_config(), join_target, join_role,
+			GameConfigBlock::join_choice(options->get_game_config(), join_target, join_role,
 					spectator_password);
-		if (needs_join_connection && join_target.is_valid() && join_identity && !r_sim->enable_join(
+		if (needs_join_connection && join_target.is_valid() && join_identity && !sim_->enable_join(
 				join_target->get_host_ip(), join_target->get_port(),
 				join_target->get_player_name(), join_role,
 				spectator_password, join_target->get_server_password())) {
@@ -206,8 +233,8 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		}
 		// The JOIN VERSIONCRCSTRING checksum reads the loose
 		// expansion/<name>/version.txt under the install root (D-NET-166).
-		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
-			r_sim->set_join_expansion_version_root(p_options->get_resource_root()->get_root_dir());
+		if (needs_join_connection && options->get_resource_root().is_valid()) {
+			sim_->set_join_expansion_version_root(options->get_resource_root()->get_root_dir());
 		}
 	} else if (host_session.is_valid()) {
 		// Co-op LAN HOST: the typed session request already projected to the sim's
@@ -224,18 +251,18 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 			}
 			session_options->set_game_type(NetProtocol::game_type_for_mission_mode(mission_mode));
 		}
-		String mission_name = p_options->get_mission_name().strip_edges();
+		String mission_name = options->get_mission_name().strip_edges();
 		if (mission_name.is_empty() && p_mission.is_valid()) {
 			mission_name = p_mission->get_mission_name().strip_edges();
 		}
-		if (mission_name.is_empty() && !p_options->get_mission_file().is_empty()) {
-			mission_name = p_options->get_mission_file().get_basename();
+		if (mission_name.is_empty() && !options->get_mission_file().is_empty()) {
+			mission_name = options->get_mission_file().get_basename();
 		}
-		if (!p_options->get_mission_file().is_empty()) {
-			session_options->set_mission_file(p_options->get_mission_file());
+		if (!options->get_mission_file().is_empty()) {
+			session_options->set_mission_file(options->get_mission_file());
 		}
-		if (!p_options->get_spawn_names().is_empty()) {
-			session_options->set_spawn_names(p_options->get_spawn_names());
+		if (!options->get_spawn_names().is_empty()) {
+			session_options->set_spawn_names(options->get_spawn_names());
 		}
 		if (!mission_name.is_empty()) {
 			session_options->set_mission_name(mission_name);
@@ -249,89 +276,49 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		// CRC'd from the loose expansion/<name>/version.txt under the install root;
 		// the join gate compares it against each joiner's VERSIONCRCSTRING while an
 		// expansion is active (D-NET-166).
-		if (p_options->get_resource_root().is_valid()) {
-			session_options->set_game_root(p_options->get_resource_root()->get_root_dir());
+		if (options->get_resource_root().is_valid()) {
+			session_options->set_game_root(options->get_resource_root()->get_root_dir());
 		}
 		// The title the mounted game speaks, the host's identity: a host without a
 		// witnessed one would answer no joiner, so it does not host.
-		if (p_options->get_resource_root().is_valid()) {
+		if (options->get_resource_root().is_valid()) {
 			std::string title_error;
 			const opennova::TitleIdentity *title =
-					p_options->get_resource_root()->title_identity(title_error);
+					options->get_resource_root()->title_identity(title_error);
 			if (title == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to host with: %s",
 						opennova::to_gd(title_error)));
-				r_sim.unref();
-				return ERR_UNCONFIGURED;
+				setup_error_ = ERR_UNCONFIGURED;
+				sim_.unref();
+				has_trace_stats_sampling_ = false;
+				return 0;
 			}
-			r_sim->set_title(title);
+			sim_->set_title(title);
 		}
 		// The loose score.ini overlays the session's score table inside the
 		// boot, ahead of the bring-up (inmatch/host_boot.h).
-		r_sim->configure_host_session(session_options);
+		sim_->configure_host_session(session_options);
 		// A NovaWorld host's match rides its NovaWorld session's socket (D-NET-346).
-		const Ref<UdpPump> host_pump = p_options->get_host_pump();
-		const bool listening = host_pump.is_valid() ? r_sim->enable_host_listen_on(host_pump)
-		                                            : r_sim->enable_host_listen(host_session->get_bind_port());
+		const Ref<UdpPump> host_pump = options->get_host_pump();
+		const bool listening = host_pump.is_valid() ? sim_->enable_host_listen_on(host_pump)
+		                                            : sim_->enable_host_listen(host_session->get_bind_port());
 		if (!listening) {
 			// A requested LAN host that cannot own its UDP endpoint is not a host.
 			// Never degrade into the visually-identical socketless SP/listen path:
 			// the caller must surface the bind failure and keep the menu active.
-			r_sim.unref();
-			return ERR_CANT_CREATE;
+			setup_error_ = ERR_CANT_CREATE;
+			sim_.unref();
+			has_trace_stats_sampling_ = false;
+			return 0;
 		}
-	} else if (!r_sim->is_host_listening()) {
+	} else if (!sim_->is_host_listening()) {
 		// Standalone SP (or an isolated tooling/test preview): the in-process listen server. Live
 		// play reaches this branch only through GameWorld. The host player spawns at the mission
 		// start's round init.
 		// A host's map change brings its live session (its role, its bound socket and its
 		// connections) in the simulation the drive kept, and boots the next map inside it.
-		r_sim->enable_listen_server(true);
+		sim_->enable_listen_server(true);
 	}
-	return OK;
-}
-
-int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
-		const Ref<MissionSetupOptions> &p_options) {
-	Ref<MissionSetupOptions> options = p_options;
-	if (options.is_null()) {
-		options.instantiate();
-	}
-	clear_present_effect_poses();
-	setup_error_ = OK;
-	process_exit_ = false;
-	mission_ = p_mission;
-	// A remote join may already own the live socket + NP session while it waits
-	// for S2C 0x7B to identify the mission. Keep that exact connection across the
-	// wire-header world construction instead of reconnecting after discovery. Standalone host/SP and
-	// isolated test/tooling callers do not provide a simulation and retain the fresh-instance path.
-	// The session half: the world's load staged it at its start for a fresh host or single
-	// player, its session created ahead of its own loads (stage_simulation; Simulation::
-	// create_host_session); every other caller stages it here.
-	sim_ = options->get_simulation();
-	if (!options->get_session_staged()) {
-		const int stage_error = stage_simulation(sim_, p_mission, options);
-		if (stage_error != OK) {
-			setup_error_ = stage_error;
-			has_trace_stats_sampling_ = false;
-			return 0;
-		}
-	}
-	sim_->set_music_director(options->get_music_director());
-	sim_->set_frame_stats(frame_stats_);
-	has_trace_stats_sampling_ = sim_.is_valid();
-	sync_runtime_profiling();
-	mission_file_ = options->get_mission_file().replace("\\", "/").get_file();
-	mission_name_ = options->get_mission_name();
-	if (mission_name_.is_empty() && p_mission.is_valid()) {
-		mission_name_ = p_mission->get_mission_name().strip_edges();
-	}
-	if (mission_name_.is_empty() && !mission_file_.is_empty()) {
-		mission_name_ = mission_file_.get_file().get_basename();
-	}
-
-	const bool playable = options->get_playable();
-	const bool is_joiner = options->get_join_target().is_valid() || sim_->is_joiner();
 	// S9 (ADR 0028): the ordered mission boot. The sequence, its gates, and the
 	// file-resolution policy (mission-text fallback, .aip profile speeds, the
 	// adm default) live in engine/runtime/mission runtime_boot; boot_mission

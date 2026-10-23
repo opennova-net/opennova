@@ -191,13 +191,6 @@ struct HostConfig {
 	// (fresh_profile_character_vars), and a session started with neither takes the
 	// no-table form.
 	std::optional<CharacterJoinVars> local_character_vars;
-	// The selected mission's type byte (its BMS header's +0x22A, the mission list entry's
-	// +0x1134), which a socketless single player's create takes its own side-A class word from,
-	// ahead of its own add; unset: none known (the profile's class stands).
-	// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (@0x551707..0x551725), called by
-	//  SinglePlayer_StartMission @0x561C28 ahead of CNapiGameSession_CreateSession @0x561E65;
-	//  MissionList_ScanAndBuildFromFiles @0x563170 (optionA_1134 = the header's byte @0x563365)]
-	std::optional<uint8_t> mission_type;
 	// The host's character table (the mounted Avatars.def; empty without the
 	// file), installed on the server ctx before any player add (D-NET-137).
 	CharacterRegistry characters;
@@ -230,8 +223,7 @@ struct HostConfig {
 
 // Stand `owner`'s session up: the session create every host runs ahead of its first mission's
 // World (HostRole::create_session). `serve_and_play` selects HostClient and registers the type-2
-// loopback and adds the host's own player, bodyless; otherwise it selects HostOnly and creates
-// no local player. The round-state init draws
+// loopback; otherwise it selects HostOnly and creates no local player. The round-state init draws
 // on the session's CRT stream (session_crt_rand: the process's while no World is bound). Reads no
 // World. ProcessExit when the session create refused on `cfg.config.multiplayer_reset`
 // (server_session.h): no session stands and nothing past the create ran.
@@ -240,8 +232,10 @@ struct HostConfig {
 CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg);
 
 // The created session onto its first mission's World (`owner.ctx.world`, set by the caller once
-// the load built it): the World's clock stamp, the session's rules (the match, the spawn waves,
-// the rule words) and the first mission's class mask and weapon table. A no-op with no World.
+// the load built it): the World's clock stamp, a socketless single player's side-A class word,
+// the session's rules (the match, the spawn waves, the rule words), the first mission's class
+// mask and weapon table, then on serve-and-play the host's own add, which spawns no body. A
+// no-op with no World.
 void bind_host_session_world(HostOwner &owner, const HostConfig &cfg);
 
 // The map change's continue (net-re §5.70.6): the next mission inside the SAME

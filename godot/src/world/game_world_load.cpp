@@ -292,27 +292,10 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 			last_load_timeline_ = timeline;
 		}
 	} else {
-		// A fresh host's or single player's session stands before the mission start's every load:
-		// its simulation staged (the host's bound socket) and its session created here, ahead of
-		// the head's terrain and the objects (create_fresh_session, D-NET-NEW-L1-50).
-		if (drive_.fresh_authority_load()) {
-			const int create_error = create_fresh_session(p_mission, p_bms_name, p_resource_root);
-			if (create_error != OK) {
-				if (timeline.is_valid()) timeline->finish();
-				return create_error;
-			}
-		}
 		// A host's map change starts the next mission ahead of its terrain, and pumps its
 		// session through the load's stages, as retail's load does (engine
 		// inmatch/map_change.h; HostRole::begin_next_mission_load / pump_load_stage).
 		drive_.begin_next_host_mission_load(p_mission, p_bms_name, p_resource_root);
-		// A NovaWorld listen host's mission-start server-info update, past its session's create or
-		// the map change's head and ahead of the effect system and every load (engine
-		// inmatch/server_info.h apply_mission_start_columns carries the witness, D-NET-NEW-L1-50).
-		drive_.publish_host_mission_start(staged_runtime_options_.is_valid()
-						? staged_runtime_options_->get_simulation()
-						: drive_.kept_simulation(),
-				p_mission, p_resource_root, p_bms_name);
 		if (timeline.is_null()) {
 			timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
 			last_load_timeline_ = timeline;
@@ -334,10 +317,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		}
 		drive_.open_host_load_window();
 		const int head_error = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
-		if (head_error != OK) {
-			staged_runtime_options_.unref(); // the created session goes with its simulation
-			return head_error;
-		}
+		if (head_error != OK) return head_error;
 		drive_.pump_host_load_stage(); // after the terrain
 	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_OBJECTS));
@@ -812,8 +792,6 @@ void GameWorld::unload() {
 	// its clock, so no leg sees the time since this mission's last frame (engine
 	// world::TickAccumulator::bank carries the witness; D-NET-NEW-LI-6).
 	frame_clock_ms_ = 0;
-	// A session the load's start created for a runtime that never came up goes with it.
-	staged_runtime_options_.unref();
 	// A post-load timeline still timing its frames prints what it has (an instrument).
 	end_post_load_frames();
 	ragdolls_.clear();
@@ -1377,9 +1355,11 @@ void GameWorld::configure_foliage() {
 // drives it explicitly from tick(); its drained side effects route through
 // on_runtime_effects. A reload reuses this GameWorld, so any prior runtime is
 // freed in unload() first.
-// See game_world.h.
-Ref<MissionSetupOptions> GameWorld::make_runtime_options(const Ref<MissionData> &p_mission,
-		const String &p_bms_name) {
+int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name) {
+	MissionRoot *runtime = get_runtime();
+	Node *container = runtime->get_node_or_null(NodePath("MissionObjects"));
+	// A null board is a no-op on the root (its own board is null too).
+	runtime->set_frame_stats(frame_stats_);
 	String mission_file = p_bms_name.get_file();
 	if (mission_file.is_empty()) {
 		mission_file = p_bms_name;
@@ -1388,9 +1368,13 @@ Ref<MissionSetupOptions> GameWorld::make_runtime_options(const Ref<MissionData> 
 	if (mission_label.is_empty()) {
 		mission_label = mission_file.get_basename();
 	}
+	// A mission with no AI still ticks (BMS events / WAC); only a promote
+	// failure leaves a null sim. Hand the loaded terrain to the runtime so
+	// promoted AI grounds on it (entities hug the terrain), and the resource
+	// root so soldiers resolve their .adm/.bad root-motion clips.
 	Ref<MissionSetupOptions> opts;
 	opts.instantiate();
-	// The resource root, so soldiers resolve their .adm/.bad root-motion clips.
+	opts->set_terrain(terrain_data_);
 	opts->set_resource_root(resource_root_);
 	// The by-name readers' base: the mission's name cut at its first '.'
 	// (runtime/mission/mission_sidecars.h mission_base_name).
@@ -1401,6 +1385,10 @@ Ref<MissionSetupOptions> GameWorld::make_runtime_options(const Ref<MissionData> 
 	PackedStringArray spawn_names;
 	spawn_names.push_back(mission_label);
 	opts->set_spawn_names(spawn_names);
+	// The placer's item database (item_id -> anim_def), so each soldier
+	// grounds off its own model's .adm clip set (per-entity capsule_bottom),
+	// not the shared default. [D-INF-6]
+	opts->set_item_db(placer_.is_valid() ? placer_->get_item_db() : Ref<ItemDatabase>());
 	opts->set_local_character_profile(local_character_profile_);
 	opts->set_player_profiles(player_profiles_);
 	opts->set_game_config(game_config_);
@@ -1416,67 +1404,6 @@ Ref<MissionSetupOptions> GameWorld::make_runtime_options(const Ref<MissionData> 
 	// "dedicated") serves WITHOUT a local player — same listen server, just no
 	// own-player spawn; main_game skips the HUD when there is no local player.
 	// Diagnostic previews opt out via playable_.
-	opts->set_playable(playable_ && !drive_.pending_dedicated());
-	// This load runs the boot's phase B itself, after its device stages.
-	opts->set_mission_start_deferred(true);
-	// Stamp the staged net-session request (typed record + derived staging +
-	// the surrendered preload sim, consumed once per load) onto the runtime's
-	// options — MissionRoot alone adopts opts.simulation (ADR 0011/0012).
-	drive_.stage_runtime_options(opts);
-	return opts;
-}
-
-// See game_world.h. Retail's host opens its socket at the host screen's START and creates its
-// session in the pre-game menu, both ahead of the Game Loop's mission start; a single player's
-// start creates its session ahead of it too. So the session stands before the mission start's
-// every load (D-NET-NEW-L1-50; engine inmatch/host_boot.h create_host_session carries the
-// witness).
-int GameWorld::create_fresh_session(const Ref<MissionData> &p_mission, const String &p_bms_name,
-		const Ref<ResourceRoot> &p_resource_root) {
-	staged_runtime_options_.unref();
-	resource_root_ = p_resource_root;
-	Ref<MissionSetupOptions> opts = make_runtime_options(p_mission, p_bms_name);
-	Ref<Simulation> sim = opts->get_simulation();
-	const int stage_error = MissionRoot::stage_simulation(sim, p_mission, opts);
-	if (stage_error != OK) {
-		if (stage_error == ERR_CANT_CREATE && opts->get_net_transport() == "lan") {
-			emit_signal(kSignalLoadFailed,
-					vformat("host start: could not bind LAN UDP port %d", opts->get_bind_port()));
-		} else {
-			emit_signal(kSignalLoadFailed, "failed to start mission runtime");
-		}
-		return stage_error;
-	}
-	if (sim->create_host_session(p_mission, p_resource_root,
-				opts->get_mission_file().replace("\\", "/").get_file()) != OK) {
-		// The session create ended the process (exit code 0): no load failure to show, the
-		// shell exits.
-		emit_signal(kSignalProcessExitRequested, 0);
-		return ERR_CANT_CREATE;
-	}
-	opts->set_simulation(sim);
-	opts->set_session_staged(true);
-	staged_runtime_options_ = opts;
-	return OK;
-}
-
-int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name) {
-	MissionRoot *runtime = get_runtime();
-	Node *container = runtime->get_node_or_null(NodePath("MissionObjects"));
-	// A null board is a no-op on the root (its own board is null too).
-	runtime->set_frame_stats(frame_stats_);
-	// The options: the ones the load's start staged with its created session, else this load's.
-	Ref<MissionSetupOptions> opts = staged_runtime_options_;
-	staged_runtime_options_.unref();
-	if (opts.is_null()) opts = make_runtime_options(p_mission, p_bms_name);
-	// A mission with no AI still ticks (BMS events / WAC); only a promote
-	// failure leaves a null sim. Hand the loaded terrain to the runtime so
-	// promoted AI grounds on it (entities hug the terrain).
-	opts->set_terrain(terrain_data_);
-	// The placer's item database (item_id -> anim_def), so each soldier
-	// grounds off its own model's .adm clip set (per-entity capsule_bottom),
-	// not the shared default. [D-INF-6]
-	opts->set_item_db(placer_.is_valid() ? placer_->get_item_db() : Ref<ItemDatabase>());
 	// Terrain-tile (.til) bytes for the S2C 0x45 terrain-tile load a listen
 	// host streams to joiners so their g_LoadingProgress climbs 5 -> 6 and
 	// terrain finishes loading (net-re §5.37). The tile-overlay .til is named
@@ -1487,6 +1414,13 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	if (!mission_til_bytes_.is_empty()) {
 		opts->set_terrain_til(mission_til_bytes_);
 	}
+	opts->set_playable(playable_ && !drive_.pending_dedicated());
+	// This load runs the boot's phase B itself, after its device stages.
+	opts->set_mission_start_deferred(true);
+	// Stamp the staged net-session request (typed record + derived staging +
+	// the surrendered preload sim, consumed once per load) onto the runtime's
+	// options — MissionRoot alone adopts opts.simulation (ADR 0011/0012).
+	drive_.stage_runtime_options(opts);
 	// The placer + environment node let the wire present pass resolve + light
 	// its remote-entity avatars (build_player_animated_model): every remote
 	// row on a joiner, and the admitted players' synthetic-origin rows on the

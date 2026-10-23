@@ -696,14 +696,6 @@ public:
 			const PackedByteArray &p_terrain_til, const String &p_wac_basename,
 			const String &p_infantry_adm, const String &p_mission_file,
 			bool p_playable);
-	// A fresh host's or single player's session create at the world load's start, ahead of its
-	// own loads (the head's terrain, the objects) and of boot_mission, whose phase A then creates
-	// none: the rotation seeded from the mount (a listening host's), then the engine's
-	// inmatch::create_host_session over the session record. OK when created or when there is
-	// nothing to create (no host role, a map change); ERR_CANT_CREATE when the `mpreset` word
-	// ended the process (session_create_ended_process).
-	int64_t create_host_session(const Ref<MissionData> &p_mission,
-			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
 	// Build + promote a small synthetic patrol mission (no file) for the headless unit test.
 	void build_demo_mission();
 	bool is_loaded() const;
@@ -786,9 +778,6 @@ public:
 	void configure_host_session(const Ref<HostSessionOptions> &p_options);
 	// A snapshot of the live host session as the same record.
 	Ref<HostSessionOptions> get_host_session_config() const;
-	// The last round's clock, which a mission start's server-info update reads ahead of its loads:
-	// the previous mission's World at a map change's head (its kernel still stands), else 0.
-	int32_t previous_round_time_remaining_ticks() const;
 	// The BMS header the tag=0x0B join reply carries: 0 until a mission loaded.
 	int get_mission_header_size() const;
 	// Debug/test hook: directly admit a synthetic remote peer at a Godot-space

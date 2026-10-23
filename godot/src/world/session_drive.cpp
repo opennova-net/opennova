@@ -11,13 +11,11 @@
 #include "network/novaworld_client.h"
 #include <base/vfs/vfs.h> // vfs_country_code (the listing's GCC)
 #include <net/npwire/peer_addr.h>
-#include <runtime/inmatch/host_boot.h> // read_host_mission_text (the mission start's title)
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/mission_exit.h> // the post-mission router
 #include <runtime/inmatch/mission_rotation.h> // HostRotation::round_count (the ID report's first mission)
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_info.h> // read_session_listing_columns (the listing's columns)
-#include <runtime/mission/mission_sidecars.h> // mission_base_name (the mission start's title)
 #include "object/avatar_database.h"
 #include "object/item_database.h"
 #include "resource_index/launch_flags.h"
@@ -1142,105 +1140,39 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 				});
 	}
 	if (p_opts.is_valid() && p_opts->get_host_session().is_valid() &&
-			p_opts->get_host_session()->get_serve_and_play())
-		set_nw_self_slot(sim, p_opts->get_player_name());
-	// The mission start's update went out at the load's head (publish_host_mission_start), ahead
-	// of the loads, where retail's runs.
-	if (nw_mission_start_published_) {
-		nw_mission_start_published_ = false;
-		return;
+			p_opts->get_host_session()->get_serve_and_play()) {
+		opennova::HostPlayerSlot self;
+		self.slot = 0;
+		// The host's own name as its roster carries it, the page's bytes (D-NET-661).
+		self.player_name =
+				opennova::utf8_to_retail_text(opennova::to_std(p_opts->get_player_name()));
+		self.ip_and_port = opennova::peer_addr_to_string(opennova::PeerAddr{});
+		self.pcid = login_pcid; // the host's own player's PCID is its login cookie
+		// Its PlayerTeam / PlayerType are the match's, as for any added player.
+		self.team = "0";
+		self.type = "0";
+		// The local player's slot: its add sends ClientHostPlayerAdded alone (engine:
+		// HostPlayerSlot::local, D-NET-659).
+		self.local = true;
+		for (const opennova::inmatch::HostPlayerListRow &row : sim->host_player_list_rows()) {
+			if (!row.own) continue;
+			self.team = row.slot.team;
+			self.type = row.slot.type;
+		}
+		host.set_player_slot(self);
+		nw_self_slot_ = self;
+		nw_self_slot_set_ = true;
 	}
-	// A load whose head published none (a session that started hosting during it): the mission
-	// start's update here (NwuHostRole::publish_mission_start, which carries Game_StartMission's
-	// cite): both lists whole, the columns the started mission's. The session's first mission
-	// (the rotation's round count 0) then sends the gate its METPROTOCOL ID report
-	// (D-NET-NEW-L9-22).
+	// The mission start's update, at every mission start of a hosting session, map changes
+	// included (NwuHostRole::publish_mission_start, which carries Game_StartMission's cite):
+	// both lists whole, the columns the started mission's. A fresh host's first full Host list,
+	// its HostKey included, is this one, since its host result publishes nothing (D-NET-465).
+	// The session's first mission (the rotation's round count 0) then sends the gate its
+	// METPROTOCOL ID report (D-NET-NEW-L9-22).
 	const opennova::inmatch::NapiNPServerCtx *round_ctx = sim->host_ctx();
 	host.publish_mission_start(round_ctx != nullptr && round_ctx->rotation != nullptr
 					? round_ctx->rotation->round_count
 					: 0);
-}
-
-void SessionDrive::set_nw_self_slot(const Ref<Simulation> &p_sim, const String &p_player_name) {
-	NovaWorldClient *client = nw_client();
-	if (client == nullptr || p_sim.is_null()) return;
-	opennova::HostPlayerSlot self;
-	self.slot = 0;
-	// The host's own name as its roster carries it, the page's bytes (D-NET-661).
-	self.player_name = opennova::utf8_to_retail_text(opennova::to_std(p_player_name));
-	self.ip_and_port = opennova::peer_addr_to_string(opennova::PeerAddr{});
-	self.pcid = client->get_login_pcid(); // the host's own player's PCID is its login cookie
-	// Its PlayerTeam / PlayerType are the match's, as for any added player.
-	self.team = "0";
-	self.type = "0";
-	// The local player's slot: its add sends ClientHostPlayerAdded alone (engine:
-	// HostPlayerSlot::local, D-NET-659).
-	self.local = true;
-	for (const opennova::inmatch::HostPlayerListRow &row : p_sim->host_player_list_rows()) {
-		if (!row.own) continue;
-		self.team = row.slot.team;
-		self.type = row.slot.type;
-	}
-	client->host_role().set_player_slot(self);
-	nw_self_slot_ = self;
-	nw_self_slot_set_ = true;
-}
-
-// See session_drive.h. Retail's mission start runs its server-info update and its periodic update
-// past the mission text and the per-slot reset, ahead of the effect system and the loads, on a
-// NovaWorld authority in session, every mission start (engine inmatch/server_info.h
-// apply_mission_start_columns and NwuHostRole::publish_mission_start carry the witnesses,
-// D-NET-NEW-L9-27, D-NET-NEW-L1-50). The source reads the session on `p_sim` while the load holds
-// it (a fresh session's staged simulation, a map change's kept one); the runtime's bind installs
-// the live one.
-void SessionDrive::publish_host_mission_start(const Ref<Simulation> &p_sim,
-		const Ref<MissionData> &p_mission, const Ref<ResourceRoot> &p_resource_root,
-		const String &p_bms_name) {
-	nw_mission_start_published_ = false;
-	NovaWorldClient *client = nw_client();
-	if (client == nullptr || !client->is_hosting() || p_sim.is_null() ||
-			!p_sim->is_host_listening() || p_sim->host_ctx() == nullptr || p_mission.is_null() ||
-			p_resource_root.is_null())
-		return;
-	opennova::NwuHostRole &host = client->host_role();
-	const opennova::bms::File &document = p_mission->native_file();
-	const std::string mission_file =
-			opennova::to_std(p_bms_name.replace("\\", "/").get_file());
-	const PackedByteArray table = p_resource_root->get_expansion_override_table();
-	const std::string title =
-			opennova::inmatch::read_host_mission_text(
-					opennova::mission::boot_files_from_index(p_resource_root->native_index()),
-					opennova::mission::mission_base_name(mission_file),
-					std::vector<uint8_t>(table.ptr(), table.ptr() + table.size()))
-					.get_string("info", "title");
-	const std::string header_name = document.get_mission_name();
-	const int32_t climate = static_cast<int32_t>(document.header.climate);
-	const int32_t last_round_ticks = p_sim->previous_round_time_remaining_ticks();
-	const ObjectID sim_id = ObjectID(p_sim->get_instance_id());
-	const ObjectID columns_client_id = nw_client_id_;
-	const std::string country_code =
-			opennova::vfs_country_code(opennova::to_std(p_resource_root->get_root_dir()));
-	host.set_column_source([sim_id, columns_client_id, country_code, title, header_name, climate,
-								   last_round_ticks](opennova::HostRegistration &r) {
-		const Simulation *sim = Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id));
-		NovaWorldClient *live_client =
-				Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(columns_client_id));
-		const opennova::inmatch::NapiNPServerCtx *ctx = sim != nullptr ? sim->host_ctx() : nullptr;
-		if (ctx == nullptr) return false;
-		r.gcc = country_code;
-		opennova::inmatch::read_session_listing_columns(r, *ctx,
-				game_text_lookup(live_client != nullptr ? live_client->get_gametext()
-														: Ref<RtxtStringFile>()));
-		opennova::inmatch::apply_mission_start_columns(r, title, header_name, climate,
-				last_round_ticks);
-		return true;
-	});
-	const Ref<HostSessionOptions> session = p_sim->get_host_session_config();
-	if (session.is_valid() && session->get_serve_and_play())
-		set_nw_self_slot(p_sim, session->get_player_name());
-	const opennova::inmatch::NapiNPServerCtx *round_ctx = p_sim->host_ctx();
-	host.publish_mission_start(round_ctx->rotation != nullptr ? round_ctx->rotation->round_count : 0);
-	nw_mission_start_published_ = true;
 }
 
 void SessionDrive::unbind_nw_host() {
