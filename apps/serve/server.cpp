@@ -345,7 +345,7 @@ void Server::run_mission_start_update(const std::string &header_name, int32_t cl
 	// witness): the mission text's title else the header's name, its climate, TimeOfDay 0, the last
 	// round's clock.
 	inmatch::apply_mission_start_columns(r, boot_.mission_text.get_string("info", "title"),
-			header_name, climate, kernel_ ? kernel_->world.match.remaining_ticks() : 0);
+			header_name, climate, client_process_.round_time_remaining_ticks);
 	listing_->set_base(std::move(r));
 	lister_->publish_server_info(rotation_.round_count);
 	(void)lister_->tick(wall_ms());

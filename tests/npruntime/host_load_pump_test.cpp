@@ -25,6 +25,9 @@
 //     yet), then the window's nine after the per-slot reset (the kept slot's ping word
 //     already zeroed; the first five before the next World stands), never after the 0x7B;
 //   - the gate is clear once the load ends;
+//   - the round clock outlives its mission and its session (D-NET-NEW-L1-52): a second
+//     session's first mission-start update in the same process reads the first session's last
+//     clock, and a map change's reads the old round's;
 //   - the reset's 0x25 to a kept remote leaves at the load pump its send countdown's
 //     residual names (the head for 1), ahead of the 0x7B, or with the 0x7B at the first
 //     tick once the residual passes the load's pumps (holdoff 12, residual 11), and an
@@ -226,6 +229,11 @@ struct Host {
 	int drains_at_update = -1;
 	size_t sent_at_update = 0;
 	bool world_at_update = true;
+	// The process's words the host runs over (null: the role's own), its round limit, and the
+	// process's round clock at the mission-start update.
+	inmatch::ClientProcessState *process = nullptr;
+	uint32_t round_minutes = 0;
+	int32_t clock_at_update = -2;
 
 	inmatch::NapiNPServerCtx &ctx() { return role.state.host_owner.ctx; }
 
@@ -247,6 +255,8 @@ struct Host {
 		r.host_cfg.config.num_teams = 2;
 		r.host_cfg.socket_mode = inmatch::SocketMode::Lan;
 		r.host_cfg.serve_and_play = false;
+		r.host_cfg.client_process = process;
+		r.host_cfg.config.round_time_limit_minutes = round_minutes;
 		r.next_mission = next_mission;
 		r.boot_options.playable = false;
 		r.boot_options.mp_session = true;
@@ -263,6 +273,7 @@ struct Host {
 			drains_at_update = socket.empty_drains;
 			sent_at_update = socket.sent.size();
 			world_at_update = ctx().world != nullptr;
+			clock_at_update = process != nullptr ? process->round_time_remaining_ticks : -2;
 		};
 		r.fresh_kernel = [this]() -> mission::MissionKernel & {
 			auto fresh = std::make_unique<mission::MissionKernel>();
@@ -670,9 +681,70 @@ void test_map_change_server_info_stream_is_empty_until_the_rebuild() {
 
 } // namespace
 
+// The round clock is a process global, zero in a fresh process, that no session's or mission's
+// end writes: a mission start's server-info update, which reads it ahead of the start's own
+// stores, reads the last mission's clock, an earlier session's in the same process included. So
+// a second hosted session's first update carries the first session's last clock, and a map
+// change's carries the old round's, each as its World left it.
+// [orig: g_RoundTimeRemaining @0x24C1958 (zero-initialized); Lobby_UpdateServerInfo's read
+//  @0x4FED57, called by Game_StartMission @0x5248F5 ahead of its stores @0x524A5D / @0x525251;
+//  Game_ProcessMainFrame's step @0x526602]
+void test_the_round_clock_outlives_its_session() {
+	// The process both sessions run in, on the heap with the hosts (the 1 MB Windows stack).
+	auto process = std::make_unique<inmatch::ClientProcessState>();
+	int32_t first_clock = 0;
+	{
+		auto host = std::make_unique<Host>();
+		host->process = process.get();
+		host->round_minutes = 1;
+		host->role.set_socket(&host->socket);
+		host->role.set_rotation(&host->rotation);
+		inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
+		CHECK(host->boot_current(/*next_mission=*/false));
+		// A fresh process: the update read 0.
+		CHECK(host->clock_at_update == 0);
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		for (int f = 0; f < 8; ++f) (void)host->session.advance(input);
+		// The round's clock, seeded from the one-minute limit, as the World holds it at the end.
+		first_clock = host->kernel->world.match.remaining_ticks();
+		CHECK(first_clock > 0 && first_clock <= 3720);
+		(void)host->session.close();
+		CHECK(process->round_time_remaining_ticks == first_clock);
+	}
+	{
+		auto host = std::make_unique<Host>();
+		host->process = process.get();
+		host->round_minutes = 2;
+		host->role.set_socket(&host->socket);
+		host->role.set_rotation(&host->rotation);
+		inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
+		CHECK(host->boot_current(/*next_mission=*/false));
+		// The second session's first update read the first session's last clock.
+		CHECK(host->clock_at_update == first_clock);
+		// Its map change: the old round's clock as its World left it, handed back at the
+		// teardown, is what the next mission start's update reads.
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		host->ctx().mission_exit_reason = inmatch::kMissionExitMapCycle;
+		bool ended = false;
+		for (int f = 0; f < 16 && !ended; ++f) ended = host->session.advance(input).terminal();
+		CHECK(ended);
+		const int32_t round_clock = host->kernel->world.match.remaining_ticks();
+		CHECK(round_clock > 0 && round_clock <= 2 * 3720);
+		CHECK(inmatch::begin_host_map_change(host->role, host->catalog) ==
+				inmatch::MapChangeStep::NextMission);
+		CHECK(process->round_time_remaining_ticks == round_clock);
+		CHECK(host->boot_current(/*next_mission=*/true));
+		CHECK(host->clock_at_update == round_clock);
+		(void)host->session.close();
+	}
+}
+
 int main() {
 	test_handlers_drop_under_the_load_gate();
 	test_fresh_load_pumps_its_session();
+	test_the_round_clock_outlives_its_session();
 	test_map_change_load_pumps_after_the_slot_reset();
 	test_map_change_reset_leaves_at_the_residual_pump();
 	test_map_change_server_info_stream_is_empty_until_the_rebuild();

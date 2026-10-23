@@ -1360,6 +1360,12 @@ void HostRole::close() {
 	// pools 0, 1 and 2 @0x52236F / @0x52239A / @0x5223C0]. A map change's teardown already
 	// ran it, its pump and its PostMission sweep on this kernel (map_change.h).
 	const bool tear_down = kernel_ != nullptr && !map_change.torn_down;
+	// The round clock outlives the session: g_RoundTimeRemaining holds the last frame's value,
+	// which the next session's first mission-start update reads (D-NET-NEW-L1-52)
+	// [orig: g_RoundTimeRemaining @0x24C1958; Lobby_UpdateServerInfo's read @0x4FED57, ahead of
+	//  Game_StartMission's store @0x524A5D].
+	if (kernel_ != nullptr)
+		client_process_->round_time_remaining_ticks = kernel_->world.match.remaining_ticks();
 	// The last frame's entity pass queued its records at their calls, so they lead the
 	// teardown's destroys and its pump, which sends them; ours raised them for the next tick's
 	// head, which never comes: they are routed first.

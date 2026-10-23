@@ -787,7 +787,8 @@ public:
 	// A snapshot of the live host session as the same record.
 	Ref<HostSessionOptions> get_host_session_config() const;
 	// The last round's clock, which a mission start's server-info update reads ahead of its loads:
-	// the previous mission's World at a map change's head (its kernel still stands), else 0.
+	// the process's (inmatch::ClientProcessState::round_time_remaining_ticks), as the previous
+	// mission left it, a map change's or an earlier session's, 0 in a fresh process.
 	int32_t previous_round_time_remaining_ticks() const;
 	// The BMS header the tag=0x0B join reply carries: 0 until a mission loaded.
 	int get_mission_header_size() const;

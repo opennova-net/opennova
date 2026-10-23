@@ -304,7 +304,7 @@ void Match::configure(const MatchRules &rules) {
     // Game_StartMission starts at -1 and seeds GameTime only for a network
     // session outside the Co-op waypoint family, and only when nonzero.
     // [orig: g_RoundTimeRemaining=-1 @0x524A5D; seed
-    // 3720*g_RoundTimeLimitMinutes @0x525242..0x525251; decrement @0x5266D6]
+    // 3720*g_RoundTimeLimitMinutes @0x525242..0x525251; decrement @0x526602]
     if (rules.game_time_minutes != 0 && !is_waypoint_family(rules.game_type)) {
         const uint64_t ticks = uint64_t(rules.game_time_minutes) * kTicksPerMinute;
         remaining_ticks_ = ticks > uint64_t(std::numeric_limits<int32_t>::max())

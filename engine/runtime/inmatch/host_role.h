@@ -289,6 +289,11 @@ public:
 	// The process's CRT stream (ClientProcessState::crt_rand), which a map change's teardown
 	// hands the old World's back to (map_change.h).
 	io::CrtRand &process_crt_rand() { return client_process_->crt_rand; }
+	// The process's round clock (ClientProcessState::round_time_remaining_ticks), which a map
+	// change's teardown and the session's close hand the World's back to.
+	int32_t &process_round_time_remaining_ticks() {
+		return client_process_->round_time_remaining_ticks;
+	}
 	bool bring_up() override;
 	// The last bring-up's session create: ProcessExit when the config's
 	// `mpreset` word refused it (server_session.h), which leaves the role with

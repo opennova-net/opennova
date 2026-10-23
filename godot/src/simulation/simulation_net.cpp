@@ -690,7 +690,7 @@ Ref<HostSessionOptions> Simulation::get_host_session_config() const {
 }
 
 int32_t Simulation::previous_round_time_remaining_ticks() const {
-	return kernel_ != nullptr && net_.map_change_pending ? kernel_->world.match.remaining_ticks() : 0;
+	return net_.client_process != nullptr ? net_.client_process->round_time_remaining_ticks : 0;
 }
 
 int Simulation::get_mission_header_size() const {

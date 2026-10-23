@@ -2427,6 +2427,12 @@ void JoinerRole::close() {
 		kernel_->wire_person_pose = {};
 	}
 	if (!runtime) return;
+	// The round clock the joiner's S2C 0x0A wrote outlives the session: a later host's first
+	// mission-start update in this process reads it (D-NET-NEW-L1-52) [orig: NapiNPClientMsg_0x00A
+	//  @0x42FEC0 - the g_RoundTimeRemaining stores @0x430220 / @0x430235; Lobby_UpdateServerInfo's
+	//  read @0x4FED57].
+	if (client_process_ != nullptr)
+		client_process_->round_time_remaining_ticks = runtime->state().round_time_remaining_ticks;
 	// The shell's abort of a mission-start wait (its ESC, a window's expiry) is the wait's
 	// return, which stores reason 1 ahead of the Post Menu.
 	int32_t reason = runtime->mission_exit_reason();

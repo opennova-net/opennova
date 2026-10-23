@@ -144,6 +144,19 @@ struct ClientProcessState {
 	//  SinglePlayer_StartMission @0x561AF0 @0x561C23, each ahead of its create and of the Game
 	//  Loop's Game_StartMission (GameLoop_Init @0x526370, the call @0x526377)]
 	io::CrtRand crt_rand;
+	// g_RoundTimeRemaining as the last mission left it, in ticks (-1 untimed). It is a process
+	// global no session or mission end writes, so a mission start's server-info update, which reads
+	// it ahead of the start's own stores, reads the last mission's clock: a map change's previous
+	// mission's, or a previous session's of any role in the same process (0 in a fresh process).
+	// While a mission runs its clock lives on its World (the authority's match) or its client (a
+	// joiner's S2C 0x0A copy); the host's map-change teardown and session close and a joiner's close
+	// hand it back here (D-NET-NEW-L1-52).
+	// [orig: g_RoundTimeRemaining @0x24C1958 (zero-initialized); its writers Game_StartMission
+	//  @0x524A5D (-1) and @0x525251 (3720 x the limit), Game_ProcessMainFrame's step @0x526602,
+	//  Server_CheckWinConditions @0x51B064 (0), CAdminServer_HandleSetCommand's GameTime @0x405E86,
+	//  NapiNPClientMsg_0x00A @0x430220 / @0x430235 and NapiNPClientMsg_0x01F @0x427CD8 / @0x427CE7;
+	//  Lobby_UpdateServerInfo's read @0x4FED57, called @0x5248F5 ahead of @0x524A5D]
+	int32_t round_time_remaining_ticks = 0;
 	// ctx+0xD94, the client callback's disconnect latch (mission_exit.h ProcessDisconnectLatch):
 	// process-lived, first-wins, cleared at a join's connect start. The host's own client writes
 	// it at its teardown (NapiNPServerCtx::client_disconnect_latch), a joiner at its connected

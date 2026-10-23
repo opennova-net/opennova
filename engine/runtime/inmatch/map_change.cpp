@@ -293,6 +293,11 @@ MapChangeStep begin_host_map_change(HostRole &role,
 		// mission continues it [orig: Server_AllocatePlayerSlotTable @0x51C1AA, srand's only
 		// session caller].
 		role.process_crt_rand() = kernel->world.crt_rand;
+		// ... as the round clock: the next mission start's update reads the old round's last
+		// value ahead of the start's own stores (D-NET-NEW-L1-52) [orig: g_RoundTimeRemaining
+		//  @0x24C1958; Lobby_UpdateServerInfo's read @0x4FED57, called @0x5248F5 ahead of
+		//  Game_StartMission's store @0x524A5D].
+		role.process_round_time_remaining_ticks() = kernel->world.match.remaining_ticks();
 	}
 	role.map_change.torn_down = true;
 	reset_all_player_slots(role);

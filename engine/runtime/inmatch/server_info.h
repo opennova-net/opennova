@@ -36,8 +36,9 @@ void read_session_listing_columns(
 // The mission start's update reads the globals as they stand ahead of its loads: the mission
 // text's [info] title, else the BMS header's name the validate read (`header_name`); the header's
 // climate; TimeOfDay's class, which the session settings' apply cleared (0); the last round's
-// clock (`last_round_ticks`: the previous mission's, 0 in a fresh process). Both embedders run it
-// over the session's columns (opennova-serve's update, the game's listen host's).
+// clock (`last_round_ticks`: the process's, ClientProcessState::round_time_remaining_ticks, as the
+// previous mission left it, an earlier session's included; 0 in a fresh process). Both embedders
+// run it over the session's columns (opennova-serve's update, the game's listen host's).
 // [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals called @0x524662 (`xor
 //  ebp, ebp` @0x552064, the g_EnvTimeOfDayEnum store @0x55207B), BMS_LoadAndValidateHeader called
 //  @0x524774, TextResource_LoadMissionTextBin @0x5247CE, Lobby_UpdateServerInfo called @0x5248F5;
