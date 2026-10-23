@@ -1301,15 +1301,40 @@ std::vector<w::CollisionWorld::DebugHitboxEntity> MissionKernel::hitboxes(
 
 // --- world::IPoseProvider: seats ---------------------------------------------
 
+// The carrier's model, entity+0x30: what the load of its def's graphic returned. The seat
+// extraction names the graphic of every type with seat or attachment metadata; any other
+// type's (a person's ewep-row ground, say) comes off its def row.
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the ThreediGp_LoadModel store @0x439FDC]
+assets::Model MissionKernel::carrier_model(const w::Entity &carrier) {
+	const auto graphic = mounted_graphics.find(carrier.item_id);
+	if (graphic != mounted_graphics.end()) return assets().model(graphic->second);
+	if (items_table() == nullptr) return {};
+	const DefItemDef *def = mission::find_item_def(*items_table(),
+			mission::visual_item_id_for_runtime_type(carrier.item_id));
+	if (def == nullptr || def->graphic[0] == '\0') return {};
+	return assets().model(std::string(def->graphic));
+}
+
+// The record's subobject word off the carrier's model. [orig: Entity_UpdateTransformAndTurret
+//  @0x440CA0 - the record @0x440F3A..0x440F40, `cmp dword ptr [ebx+18h], 0` @0x440F50]
+bool MissionKernel::userpoint_subobject(w::World &p_world, const w::Entity &carrier,
+		int userpoint_index, int32_t &out) {
+	if (&p_world != &world || userpoint_index <= 0) return false;
+	const assets::Model model = carrier_model(carrier);
+	if (!model || model->user_points == nullptr ||
+			static_cast<size_t>(userpoint_index) > model->user_point_count)
+		return false;
+	out = model->user_points[userpoint_index - 1].subobject_index;
+	return true;
+}
+
 bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &carrier,
 		const w::Seat &seat, w::MountedPose &out) {
 	// The kernel IS the world's IPoseProvider: the one mounted-pose
 	// resolver every embedder's world reaches.
 	if (&p_world != &world || seat.type != w::SeatType::Gunner || seat.bone_index == 0) return false;
 	++mounted_queries;
-	assets::Model model_asset;
-	const auto graphic = mounted_graphics.find(carrier.item_id);
-	if (graphic != mounted_graphics.end()) model_asset = assets().model(graphic->second);
+	const assets::Model model_asset = carrier_model(carrier);
 	if (!model_asset) {
 		++mounted_declines;
 		return false;

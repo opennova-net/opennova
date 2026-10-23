@@ -477,21 +477,21 @@ inline EmplacedParentGunWords emplaced_parent_gun_words(const World &world,
 	return out;
 }
 
-inline void publish_emplaced_gun_words_to_parent(World &world,
-		const Entity &mount) {
-	if (!mount.emplaced_update || !mount.emplacement_parent.valid()) return;
-	if (emplaced_slot_def(world, mount) == nullptr) return;
-	// A child promoted onto an authored userpoint (index > 0) that rides the
-	// parent root; an unstamped subobject (-1) keeps the leg off.
-	if (mount.emplacement_bone == 0 || mount.emplacement_anchor_subobject != 0)
-		return;
-	AiEntity *parent_ai = world.ai.for_handle(mount.emplacement_parent);
+// The publication's write: the parent's brain (its +0x64; ours the parent's AiEntity, live
+// while its owner word is set) takes the two words by its profile type. The ewep class update
+// runs it over an addeweap child's gun words and over a person body's +0x322 / +0x324 words
+// alike (person_ewep_anchored_attach).
+// [orig: Entity_UpdateTransformAndTurret @0x440ca0 - brain [edi+64h] @0x440f5a, the stores
+//  @0x440f7a / @0x440f8a, @0x441007 / @0x44100d and @0x44101a / @0x441020]
+inline void publish_gun_words_to_brain(World &world, EntityHandle parent_handle,
+		int16_t yaw_word, int16_t pitch_word) {
+	AiEntity *parent_ai = world.ai.for_handle(parent_handle);
 	if (parent_ai == nullptr || parent_ai->brain.f[AiBrain::kOwner] == 0)
 		return;
-	const Entity *parent = world.registry.get(mount.emplacement_parent);
+	const Entity *parent = world.registry.get(parent_handle);
 	if (parent == nullptr) return;
 	const EmplacedParentGunWords words = emplaced_parent_gun_words(world, *parent,
-			parent_ai->profile.type, mount.emplaced_gun_yaw_word, mount.emplaced_gun_pitch_word);
+			parent_ai->profile.type, yaw_word, pitch_word);
 	if (words.yaw) {
 		parent_ai->brain.f[AiBrain::kActiveYaw] = words.yaw_bam;
 		parent_ai->brain.f[AiBrain::kStagingBlock + 3] = words.yaw_bam;
@@ -500,6 +500,18 @@ inline void publish_emplaced_gun_words_to_parent(World &world,
 		parent_ai->brain.f[AiBrain::kActivePitch] = words.pitch_bam;
 		parent_ai->brain.f[AiBrain::kStagingBlock + 4] = words.pitch_bam;
 	}
+}
+
+inline void publish_emplaced_gun_words_to_parent(World &world,
+		const Entity &mount) {
+	if (!mount.emplaced_update || !mount.emplacement_parent.valid()) return;
+	if (emplaced_slot_def(world, mount) == nullptr) return;
+	// A child promoted onto an authored userpoint (index > 0) that rides the
+	// parent root; an unstamped subobject (-1) keeps the leg off.
+	if (mount.emplacement_bone == 0 || mount.emplacement_anchor_subobject != 0)
+		return;
+	publish_gun_words_to_brain(world, mount.emplacement_parent, mount.emplaced_gun_yaw_word,
+			mount.emplaced_gun_pitch_word);
 }
 
 // The ewep class update's first gate: a carrier (groundEntity +0x28, the

@@ -1663,7 +1663,8 @@ void test_an_arty_row_body_runs_the_barrage() {
 // unanchored body on a ground whose matrix bit is clear takes the ground's root pose
 // (Position, Yaw, Pitch, Roll, savedLivePose); the body's matrix bit is set either way. An
 // anchored body (the backup X's second byte inside 1..the ground model's userpoint count) takes
-// no root copy. A zero +0x2D4 with a ground ends the update before the vehicle leg.
+// no root copy, and with no pose provider its words stay (test_an_ewep_row_body_rides_its_anchor
+// has the anchored leg). A zero +0x2D4 with a ground ends the update before the vehicle leg.
 // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - @0x440CBF..0x440CE1, @0x440E8E..0x440EA0,
 //  @0x440EA6..0x440EEF, @0x440F04..0x440F34, @0x4410EA..0x4411C2, @0x4411C9,
 //  @0x4413FE..0x44140E, @0x44142B..0x441447]
@@ -2010,6 +2011,118 @@ void test_an_ewep_row_body_lets_go_of_a_rider_off_it() {
 	}
 }
 
+// The ewep row's anchored leg over a person body (D-NET-NEW-L4-14 (a), L4-s28). The anchor byte
+// (the spawn backup X's second byte, 2) names the ground model's second userpoint record. A record
+// on the model's root (subobject 0) publishes the body's +0x322 word (the backup Z's high half),
+// shifted up, into a type-2 ground brain's live and staged turret yaw, ahead of the attach; a
+// record off the root publishes nothing. The body then takes the record's attachment frame on the
+// ground (the provider's attachment-frame pose for userpoint 2): its Position and Yaw / Pitch /
+// Roll words, savedLivePose those words as they were, and its matrix bit. The update's other legs
+// see no difference: the spin tail runs after it.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - @0x440F3A..0x440F8A, Bone_BuildAttachmentMatrix
+//  @0x44109D, savedLivePose @0x4410A2..0x4410D7, Math_FixedPointMatrixToEulerAngles @0x4410DD,
+//  @0x4411C2]
+struct AnchorFrames final : w::IPoseProvider {
+	w::EntityHandle ground;
+	int32_t subobject = 0;
+	int subobject_queries = 0;
+	int pose_queries = 0;
+	int bone = -1;
+	bool attachment_frame = false;
+	int32_t yaw_at_pose = -1;
+	bool userpoint_subobject(w::World &, const w::Entity &carrier, int index,
+			int32_t &out) override {
+		++subobject_queries;
+		if (carrier.handle != ground || index != 2) return false;
+		out = subobject;
+		return true;
+	}
+	bool resolve_mounted_pose(w::World &world, const w::Entity &carrier, const w::Seat &seat,
+			w::MountedPose &out) override {
+		++pose_queries;
+		bone = seat.bone_index;
+		attachment_frame = seat.attachment_frame && seat.type == w::SeatType::Gunner;
+		if (const w::AiEntity *brain = world.ai.for_handle(carrier.handle))
+			yaw_at_pose = brain->brain.f[w::AiBrain::kActiveYaw];
+		if (carrier.handle != ground) return false;
+		out.position.set_q16({0x00150000, 0x00260000, 0x00048000});
+		out.heading = 0x10000000;
+		out.pitch = 0x02000000;
+		out.roll = 0x00300000;
+		return true;
+	}
+};
+
+void test_an_ewep_row_body_rides_its_anchor() {
+	for (const int32_t subobject : {0, 1}) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		r.world->registry.configure_pool(1, 4);
+		w::Entity seed;
+		seed.alive = true;
+		seed.has_item_def = true;
+		seed.item_type = 3;
+		seed.engine_flags = w::kEntityFlagMatrixBuilt;
+		seed.has_graphic_model = true;
+		seed.graphic_model_userpoints = 3;
+		seed.position.set_q16({10 << 16, 20 << 16, 3 << 16});
+		const w::EntityHandle ground = r.world->registry.spawn(1, seed);
+		CHECK(ground.valid());
+		r.world->ai.at(r.world->ai.attach(ground))->profile.type = 2;
+		w::Entity *body = r.spawn_remote(kEwep);
+		w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+		CHECK(ae != nullptr);
+		if (!ground.valid() || ae == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		AnchorFrames frames;
+		frames.ground = ground;
+		frames.subobject = subobject;
+		r.world->pose_provider = &frames;
+		body->ground_target = ground;
+		body->engine_flags &= ~w::kEntityFlagMatrixBuilt;
+		body->position.set_q16({100 << 16, 200 << 16, 7 << 16});
+		body->heading = ae->heading = 0x11110000;
+		body->pitch_bam = ae->pitch = 0x22220000;
+		body->roll_bam = ae->roll = 0x33330000;
+		body->spawn_position.set_q16(w::FixedVec3{0x00120200, 0x00340000, 0x12345678});
+		ae->inf.leg_yaw[0] = 0x40000000;
+		ae->inf.aim_point[0] = 0x00123456;
+		ae->inf.detour_target[0] = 0x00005678;
+		r.world->ai.update_organic(*ae, *r.world, 1);
+		const w::AiEntity *brain = r.world->ai.for_handle(ground);
+		CHECK(brain != nullptr);
+		const int32_t published = subobject == 0 ? 0x12340000 : 0;
+		if (brain != nullptr) {
+			CHECK(brain->brain.f[w::AiBrain::kActiveYaw] == published);
+			CHECK(brain->brain.f[w::AiBrain::kStagingBlock + 3] == published);
+			CHECK(brain->brain.f[w::AiBrain::kActivePitch] == 0);
+		}
+		CHECK(frames.subobject_queries == 1 && frames.pose_queries == 1);
+		CHECK(frames.bone == 2 && frames.attachment_frame);
+		CHECK(frames.yaw_at_pose == published); // the publication runs ahead of the attach
+		CHECK(body->position.x.q16 == 0x00150000);
+		CHECK(body->position.y.q16 == 0x00260000);
+		CHECK(body->position.z.q16 == 0x00048000);
+		CHECK(body->heading == 0x10000000 && ae->heading == 0x10000000);
+		CHECK(body->pitch_bam == 0x02000000 && ae->pitch == 0x02000000);
+		CHECK(body->roll_bam == 0x00300000 && ae->roll == 0x00300000);
+		CHECK(body->saved_live_pos[0] == (100 << 16));
+		CHECK(body->saved_live_pos[1] == (200 << 16));
+		CHECK(body->saved_live_pos[2] == (7 << 16));
+		CHECK(body->saved_live_yaw == 0x11110000);
+		CHECK(body->saved_live_pitch == 0x22220000);
+		CHECK(body->saved_live_roll == 0x33330000);
+		CHECK(body->saved_live_valid);
+		CHECK((body->engine_flags & w::kEntityFlagMatrixBuilt) != 0);
+		CHECK(body->spawn_position.x.q16 == 0x00120200);
+		r.world->pose_provider = nullptr;
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 // A body bound to the psec row runs the physics step over its own words: the savedLivePose
 // stamp, then its velocity triple (+0x98 / +0x9C / +0xA0, the motor's) against the terrain
 // plus a quarter unit (no terrain here: 0x4000). Airborne it moves by the triple, falls 167,
@@ -2182,6 +2295,7 @@ int main() {
 	test_an_ewep_row_body_over_a_zeroed_ground();
 	test_an_ewep_row_body_lets_go_of_a_rider_off_it();
 	test_an_ewep_row_body_refills_its_anchor_byte();
+	test_an_ewep_row_body_rides_its_anchor();
 	test_a_flare_row_body_takes_the_flare_init();
 	test_an_ele0_row_body_runs_the_elevator_mover();
 	test_an_upfx_row_body_runs_the_husk_leg();

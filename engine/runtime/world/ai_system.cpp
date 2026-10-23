@@ -675,9 +675,9 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 //  @0x4B96AA; Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8 / @0x4C0238]
 // The rest of the ewep mover runs over the person's words (person_ewep_mover), save the legs
 // that need a word ours does not yet home on a person (D-NET-NEW-L4-14 (a), narrowed): the
-// joiner's destroy of its own body behind its C2S 0x0F pair, the anchored bone attach, and a
-// riding +0x170 occupant's turret window (garbage-pointer limits, the Q16-1 (a) class) with the
-// HUD_COM2GUN leg behind it.
+// joiner's destroy of its own body behind its C2S 0x0F pair, and a riding +0x170 occupant's
+// turret window (garbage-pointer limits, the Q16-1 (a) class) with the HUD_COM2GUN leg behind
+// it.
 // The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
 // narrowed): towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
@@ -693,10 +693,11 @@ static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
 // update when there is a ground. A vehicle ground (def type 1) clears the body's Flags bits
 // 0..2 (on a person the hide, dead and NVG bits), copies its 16-bit Health word and its blink
 // quad; its def+0x144 CTRL writer writes only the global bus, which ours composes with the
-// carrier's pose. Unanchored (the +0x319 byte, the spawn backup X's second byte, outside
-// 1..the ground model's userpoint count), a ground whose matrix bit is clear gives the body its
-// root pose: the Position, Yaw, Pitch and Roll words and savedLivePose as they are. The body's
-// matrix bit is set either way. Then, with the +0x2D4 word nonzero, the spin tail over the
+// carrier's pose. Anchored (the +0x319 byte, the spawn backup X's second byte, inside 1..the
+// ground model's userpoint count), the body rides that userpoint (person_ewep_anchored_attach).
+// Unanchored, a ground whose matrix bit is clear gives the body its root pose: the Position,
+// Yaw, Pitch and Roll words and savedLivePose as they are. The body's matrix bit is set either
+// way. Then, with the +0x2D4 word nonzero, the spin tail over the
 // spawn backup's bytes: while the aim anchor X's top byte (+0x30F) is nonzero, +0x31B (the
 // backup X's top byte) takes 60 and +0x30F counts down; +0x31B coasts down a step a tick,
 // adding 32 times what is left to the 16-bit word +0x320 (the backup Z's low half).
@@ -719,6 +720,52 @@ static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
 static bool link_reads_zeroed_slot(const World &world, EntityHandle link) {
     return link.valid() && world.registry.get(link) == nullptr &&
             (!world.destroyed_mark || world.destroyed_mark(link.packed));
+}
+
+// The anchored leg of the ewep mover over a person body. The anchor byte names a record of the
+// ground model's userpoint table (48 bytes each, 1-based). A record on the model's root part
+// (its subobject word +0x18 is 0) under a ground with a brain publishes the body's +0x322 /
+// +0x324 words to the ground brain by its profile type, as an addeweap child's gun words
+// (publish_gun_words_to_brain): on a person those are the spawn backup Z's high half and
+// detour_target[0]'s low half. Then the body's matrix is the record's attachment frame on the
+// ground's posed model (the provider's attachment-frame pose; the ground's matrix is its live
+// words'), savedLivePose takes the body's Position and Yaw / Pitch / Roll words as they were, and
+// those words take the frame's translation and euler. Without the ground's model data (no
+// provider answer) the words stay; savedLivePose is stored either way.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the record @0x440F3A..0x440F40, the
+//  subobject test @0x440F50, the brain @0x440F5A, the profile type @0x440F65..0x440F6B, type 2
+//  @0x440F70..0x440F8A, type 1 @0x440F95..0x441020, the ground's matrix @0x441026..0x441086,
+//  Bone_BuildAttachmentMatrix @0x44109D, savedLivePose @0x4410A2..0x4410D7,
+//  Math_FixedPointMatrixToEulerAngles @0x4410DD, the jump @0x4410E5 to @0x4411BE;
+//  Entity_ResetToSpawnState @0x4B9610 - the backup Z +0x320 @0x4B9644]
+static void person_ewep_anchored_attach(World &world, AiEntity &e, Entity &body,
+                                        const Entity &ground, int anchor) {
+    int32_t subobject = -1;
+    if (world.pose_provider != nullptr &&
+            world.pose_provider->userpoint_subobject(world, ground, anchor, subobject) &&
+            subobject == 0)
+        publish_gun_words_to_brain(world, ground.handle,
+                static_cast<int16_t>(static_cast<uint32_t>(body.spawn_position.z.q16) >> 16),
+                static_cast<int16_t>(e.inf.detour_target[0]));
+    Seat point;
+    point.type = SeatType::Gunner;
+    point.bone_index = static_cast<uint8_t>(anchor);
+    point.attachment_frame = true;
+    MountedPose frame;
+    const bool posed = world.pose_provider != nullptr &&
+            world.pose_provider->resolve_mounted_pose(world, ground, point, frame);
+    body.saved_live_pos[0] = body.position.x.q16;
+    body.saved_live_pos[1] = body.position.y.q16;
+    body.saved_live_pos[2] = body.position.z.q16;
+    body.saved_live_yaw = body.heading;
+    body.saved_live_pitch = body.pitch_bam;
+    body.saved_live_roll = body.roll_bam;
+    body.saved_live_valid = true;
+    if (!posed) return;
+    body.position = frame.position;
+    body.heading = e.heading = frame.heading;
+    body.pitch_bam = e.pitch = frame.pitch;
+    body.roll_bam = e.roll = frame.roll;
 }
 
 static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
@@ -801,7 +848,9 @@ static void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
                 static_cast<uint32_t>(body.spawn_position.x.q16) >> 8);
         const bool anchored = ground->has_graphic_model && ground->graphic_model_userpoints > 0 &&
                 anchor > 0 && static_cast<uint32_t>(anchor) <= ground->graphic_model_userpoints;
-        if (!anchored && ((ground->flags | ground->engine_flags) & kEntityFlagMatrixBuilt) == 0) {
+        if (anchored) {
+            person_ewep_anchored_attach(world, e, body, *ground, anchor);
+        } else if (((ground->flags | ground->engine_flags) & kEntityFlagMatrixBuilt) == 0) {
             body.position = ground->position;
             const int32_t yaw = ground->veh.yaw_seeded ? ground->veh.yaw_bam : ground->heading;
             const int32_t pitch = ground->veh.yaw_seeded ? ground->veh.air_pitch_bam

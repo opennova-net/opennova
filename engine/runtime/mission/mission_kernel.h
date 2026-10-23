@@ -540,6 +540,8 @@ public:
 			const world::Seat &seat, world::MountedPose &out) override;
 	bool resolve_seat_bone(world::World &w, const world::Entity &carrier,
 			int bone_index) override;
+	bool userpoint_subobject(world::World &w, const world::Entity &carrier,
+			int userpoint_index, int32_t &out) override;
 	bool ensure_collision_instance(world::World &w, world::EntityHandle entity) override;
 	bool build_wire_person_section_matrices(world::World &w, uint16_t wire_handle,
 			int32_t model_id, const world::CollisionMatrix &entity_world,
@@ -578,6 +580,8 @@ public:
 
 private:
 	std::function<PromoteOptions::AiProfileDefaults(int32_t)> ai_profile_defaults_fn() const;
+	// A carrier's model (its +0x30): the load of its def's graphic.
+	assets::Model carrier_model(const world::Entity &carrier);
 	bool load_mission_into_world(const KernelBootOptions &options);
 	void register_mission_systems();
 	// The live asset source: the embedder's installed index, else the kernel's
