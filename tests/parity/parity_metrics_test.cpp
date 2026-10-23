@@ -3360,6 +3360,167 @@ void test_steady_rules() {
 	}
 }
 
+// --- the round events' fire target (round.target)
+
+struct RoundRun {
+	uint32_t shooter;
+	uint32_t flags;
+	size_t count;
+};
+
+// x8 / x9 01tr-coop-aikill: each shooter's S2C 0x0A round events to the joiner 0x005D by flag
+// byte, as L4-s31 counted them over the cells' decodes, every 0x40 target the joiner. The
+// rifles key I.alt (0x01 / 0x41), the mounted gunner 0x0006 I.adm (0x32 / 0x72).
+const std::vector<RoundRun> kAikillRR = { { 0x0019, 0x01, 4 }, { 0x0019, 0x41, 6 },
+	{ 0x0027, 0x01, 2 }, { 0x0027, 0x41, 10 }, { 0x0028, 0x01, 4 }, { 0x0028, 0x41, 8 },
+	{ 0x0001, 0x01, 9 }, { 0x0001, 0x41, 3 }, { 0x0000, 0x41, 1 }, { 0x0006, 0x32, 1 },
+	{ 0x0006, 0x72, 8 } };
+const std::vector<RoundRun> kAikillRRaa = { { 0x0019, 0x41, 5 }, { 0x0027, 0x01, 4 },
+	{ 0x0027, 0x41, 8 }, { 0x0028, 0x41, 6 }, { 0x0001, 0x01, 9 }, { 0x0001, 0x41, 3 },
+	{ 0x0000, 0x41, 2 }, { 0x0006, 0x72, 6 } };
+const std::vector<RoundRun> kAikillRO = { { 0x0019, 0x01, 4 }, { 0x0019, 0x41, 6 },
+	{ 0x0027, 0x41, 12 }, { 0x0028, 0x01, 3 }, { 0x0028, 0x41, 9 }, { 0x0001, 0x01, 6 },
+	{ 0x0001, 0x41, 6 }, { 0x0000, 0x41, 1 }, { 0x0006, 0x72, 13 } };
+// Our host before D-NET-NEW-L4-27 (x8 and x9 OR / OO): every rifle round 0x01, the gunner's
+// 0x32, none naming a target (RR's per-shooter totals).
+const std::vector<RoundRun> kAikillOursBefore = { { 0x0019, 0x01, 10 }, { 0x0027, 0x01, 12 },
+	{ 0x0028, 0x01, 12 }, { 0x0001, 0x01, 12 }, { 0x0000, 0x01, 1 }, { 0x0006, 0x32, 9 } };
+
+constexpr uint32_t kAikillJoiner = 0x005D;
+
+// The scripted case with the joiner as 0x005D, the aikill shooters' records in the window's
+// first frame only and `runs` one round per frame after it, each 0x40 round naming `target`:
+// a round's shooter resolves to its latest earlier record's class.
+wire::ParityTrace aikill(
+		uint32_t seed, const std::vector<RoundRun> &runs, uint32_t target = kAikillJoiner) {
+	wire::ParityTrace trace = scripted(seed);
+	for (wire::ParityUplinkState &u : trace.uplinks)
+		u.handle = kAikillJoiner;
+	for (wire::ParityEntity &e : trace.entities)
+		if (e.handle == 0x1000)
+			e.handle = kAikillJoiner;
+	std::vector<wire::ParityFrameState> window;
+	for (const wire::ParityFrameState &f : trace.frames)
+		if (f.ts_ns >= kSteadyStart && f.ts_ns <= kSteadyStart + uint64_t(kSteadySeconds * 1e9))
+			window.push_back(f);
+	for (const uint32_t shooter : { 0x0000u, 0x0001u, 0x0006u, 0x0019u, 0x0027u, 0x0028u }) {
+		wire::ParityEntity e;
+		e.frame = window.front().frame;
+		e.ts_ns = window.front().ts_ns;
+		e.session = kClientPort;
+		e.cls = 'I';
+		e.handle = shooter;
+		e.type_id = 1799;
+		e.pos_x = 4000 + shooter;
+		e.pos_y = 4000;
+		e.pos_z = 100;
+		place(e, window.front());
+		trace.entities.push_back(e);
+	}
+	size_t k = 1;
+	for (const RoundRun &run : runs)
+		for (size_t i = 0; i < run.count; ++i, ++k) {
+			wire::ParityRoundEvent round;
+			round.frame = window.at(k).frame;
+			round.ts_ns = window.at(k).ts_ns;
+			round.session = kClientPort;
+			round.shooter = run.shooter;
+			round.flags = run.flags;
+			round.adm = (run.flags & 0x02) ? 38 : 21;
+			round.target = (run.flags & 0x40) ? target : 0xFFFF;
+			round.seq = uint32_t(k);
+			trace.rounds.push_back(round);
+		}
+	return trace;
+}
+
+// Whether a kind of shooter's round events ever name a target, and whom, never their share:
+// retail's tag-2 writer reads the shooter's AI slot word live at the send [orig:
+// NetPacket_SerializeRoundEvent @0x504820 (@0x50484E / @0x504855, the flag
+// @0x5048BF..0x5048C1)], so the rounds before it acquires the joiner go without one.
+void test_round_target() {
+	auto share = [](const std::vector<RoundRun> &runs) {
+		size_t targeted = 0, total = 0;
+		for (const RoundRun &run : runs) {
+			total += run.count;
+			if (run.flags & 0x40)
+				targeted += run.count;
+		}
+		return std::to_string(targeted) + "/" + std::to_string(total);
+	};
+	check(share(kAikillRR) == "36/56" && share(kAikillRRaa) == "30/43" &&
+					share(kAikillRO) == "47/60" && share(kAikillOursBefore) == "0/56",
+			"the aikill oracle's per-cell shares (L4-s31)");
+	{
+		// Retail against retail: the shares differ, the rows do not.
+		const Case c =
+				judge_case(aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, kAikillRO));
+		for (const char *kind : { "I.alt", "I.adm" }) {
+			expect_row(c, 'S', "round_target", kind, "pass");
+			expect_row(c, 'S', "round_target_relation", kind, "pass");
+		}
+		const VerdictRow *rr = find_row(c.verdict.rows, 'S', "round_target", "I.alt");
+		check(rr && rr->value.reference == "filled (28 of 47)" &&
+						rr->value.subject == "filled (34 of 47)",
+				"round_target renders each side's targeted rounds of the kind");
+	}
+	{
+		// Our host before L4-27: the rows x8 and x9's OR / OO would have failed on.
+		const Case c = judge_case(
+				aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, kAikillOursBefore), "OR");
+		expect_row(c, 'S', "round_target", "I.alt", "fail", "ROUND_TARGET_MISSING");
+		expect_row(c, 'S', "round_target", "I.adm", "fail", "ROUND_TARGET_MISSING");
+		expect_row(c, 'S', "round_target_relation", "I.alt", "skip");
+	}
+	{
+		// Every round naming the joiner (no acquisition phase at all) is no divergence.
+		const std::vector<RoundRun> every = { { 0x0019, 0x41, 10 }, { 0x0027, 0x41, 12 },
+			{ 0x0028, 0x41, 12 }, { 0x0001, 0x41, 12 }, { 0x0000, 0x41, 1 }, { 0x0006, 0x72, 9 } };
+		const Case c =
+				judge_case(aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, every), "OO");
+		expect_row(c, 'S', "round_target", "I.alt", "pass");
+		expect_row(c, 'S', "round_target", "I.adm", "pass");
+		expect_row(c, 'S', "round_target_relation", "I.adm", "pass");
+	}
+	{
+		// Whom: another entity, or the word for a pointer in no pool (@0x504882..0x504886).
+		const Case other = judge_case(
+				aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, kAikillRO, 0x0042), "OO");
+		expect_row(other, 'S', "round_target", "I.alt", "pass");
+		expect_row(other, 'S', "round_target_relation", "I.alt", "fail",
+				"ROUND_TARGET_RELATION_MISMATCH");
+		const Case unpooled = judge_case(
+				aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, kAikillRO, 0xFFFF), "OO");
+		expect_row(unpooled, 'S', "round_target_relation", "I.adm", "fail",
+				"ROUND_TARGET_RELATION_MISMATCH");
+		const VerdictRow *row =
+				find_row(unpooled.verdict.rows, 'S', "round_target_relation", "I.adm");
+		check(row && row->value.subject == "{unpooled}" && row->value.reference == "{self}",
+				"the relation renders 0xFFFF as unpooled and the joiner as self");
+	}
+	{
+		// The other way: RR's rounds never name a target and the run's do.
+		const Case c = judge_case(
+				aikill(1, kAikillOursBefore), aikill(2, kAikillOursBefore), aikill(3, kAikillRO));
+		expect_row(c, 'S', "round_target", "I.alt", "fail", "ROUND_TARGET_UNEXPECTED");
+	}
+	{
+		// A kind the run never fires is short: it fails unless RR-aa never fired it either.
+		const std::vector<RoundRun> rifles(kAikillRO.begin(), kAikillRO.end() - 1);
+		const std::vector<RoundRun> rifles_aa(kAikillRRaa.begin(), kAikillRRaa.end() - 1);
+		expect_row(judge_case(aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, rifles)), 'S',
+				"round_target", "I.adm", "fail");
+		expect_row(judge_case(aikill(1, kAikillRR), aikill(2, rifles_aa), aikill(3, rifles)), 'S',
+				"round_target", "I.adm", "pass");
+	}
+	{
+		// No round in any run: no round rows.
+		const Case c = judge_case(scripted(1), scripted(2), scripted(3));
+		check(find_row(c.verdict.rows, 'S', "round_target", "I.alt") == nullptr,
+				"a case with no round events has no round rows");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -3398,6 +3559,7 @@ int main() {
 	test_frame_draws();
 	test_position_quantum();
 	test_entity_carrier();
+	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return 1;

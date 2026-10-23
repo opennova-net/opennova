@@ -719,6 +719,19 @@ inline constexpr Normalization kNormalizations[] = {
 			"pool-2 buildings under their placed spots (0x213F under 42 at the local offset "
 			"(2.94, 0.45, -0.69)), where our x8 host sent world records; read anchor-relative, "
 			"the building-local offsets sat about 3 units from the joiner" },
+	{ "round.target", MaskKind::Field, 'S', 0x00A, "round event flags / target", 0,
+			"a S2C 0x0A round event carries flag 0x40 and its target word when the shooter's AI "
+			"slot word (+0x68 -> +0xC) names a target at the send, the target's pool handle or "
+			"0xFFFF for a pointer in no pool (NetPacket_SerializeRoundEvent @0x504820: the reads "
+			"@0x50484E / @0x504855, the pool walk @0x50485C..0x5048A7, 0xFFFF "
+			"@0x504882..0x504886, the flag @0x5048BF..0x5048C1, the word @0x50494D..0x504966). "
+			"The word is live, so a shooter's rounds before it acquires a target carry none and "
+			"the targeted share is the acquisition's phase: x8's 01tr-coop-aikill RR sent the "
+			"target on 36 of 56 rounds (0x0019 6 of 10, 0x0001 3 of 12), RR-aa on 30 of 43 "
+			"(0x0019 5 of 5), x9's RO on 47 of 60, every one naming the joiner. So only whether "
+			"a kind of shooter (its class by its entity records, handles being per session, and "
+			"its fire leg) ever names a target compares, and whom: the recipient's own body, "
+			"0xFFFF, or another" },
 	{ "state.position", MaskKind::Field, '*', 0, "position/orientation/analog", 0,
 			"motion follows independent input: origin-normalized range and step within 8x "
 			"of RR, and a 64-unit initial baseline. Entity positions compare decompressed "

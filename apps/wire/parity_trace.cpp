@@ -457,6 +457,22 @@ void ParityTraceBuilder::emit_message(const InGameMessage &message, uint64_t ts_
 	sink_.on_frame(out);
 	for (const FrameUpdateRecord &record : frame.records)
 		sink_.on_entity(entity_record(message, ts_ns, frame, record));
+	for (size_t i = 0; i < frame.round_events.size(); ++i) {
+		const RoundEventRecord &event = frame.round_events[i];
+		ParityRoundEvent round;
+		round.frame = message.frame_index;
+		round.ts_ns = ts_ns;
+		round.session = message.session;
+		round.index = uint32_t(i);
+		round.shooter = event.shooter_handle;
+		round.flags = event.flags;
+		round.adm = event.adm_index;
+		round.sub = event.subtype;
+		round.target = event.has_target_handle() ? event.target_handle : 0xFFFFu;
+		round.seq = event.shot_seq;
+		round.slot = event.has_slot_byte() ? event.slot_byte : 0u;
+		sink_.on_round(round);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -595,6 +611,16 @@ void ParityTracePrinter::on_entity(const ParityEntity &record) {
 			unsigned(record.vital));
 }
 
+void ParityTracePrinter::on_round(const ParityRoundEvent &record) {
+	std::fprintf(out_,
+			"PARITY_ROUND frame=%d ts_ns=%llu session=%d index=%u shooter=%u flags=0x%02x "
+			"adm=%u sub=%u target=%u seq=%u slot=%u\n",
+			record.frame, static_cast<unsigned long long>(record.ts_ns), record.session,
+			unsigned(record.index), unsigned(record.shooter), unsigned(record.flags),
+			unsigned(record.adm), unsigned(record.sub), unsigned(record.target),
+			unsigned(record.seq), unsigned(record.slot));
+}
+
 // ---------------------------------------------------------------------------
 // Collector
 
@@ -618,6 +644,9 @@ void ParityTraceCollector::on_frame(const ParityFrameState &record) {
 }
 void ParityTraceCollector::on_entity(const ParityEntity &record) {
 	trace_.entities.push_back(record);
+}
+void ParityTraceCollector::on_round(const ParityRoundEvent &record) {
+	trace_.rounds.push_back(record);
 }
 
 bool read_parity_trace(

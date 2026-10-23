@@ -17,6 +17,8 @@
 //                      entity and uplink positions one sequence per carrier frame;
 //                      priority scores' per-slot median likewise;
 //                      initial position/anchor within 64 units
+//   round targets      per shooter kind, whether its S2C 0x0A round events ever name
+//                      a target and whom (the recipient's own body, 0xFFFF, another)
 // Session-local handles reduce to none/bound (normalization.h).
 
 #include "metric.h"
@@ -29,6 +31,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <set>
 #include <string>
@@ -1027,6 +1030,139 @@ void compare_self_offset(const RunFacts &rr, const RunFacts &other, std::vector<
 	out.push_back(value);
 }
 
+// ---------------------------------------------------------------------------
+// S2C 0x0A round events
+
+// Each handle's entity records in time: the class a round's shooter resolves to.
+using ClassTimeline = std::map<uint32_t, std::vector<std::pair<uint64_t, char>>>;
+
+ClassTimeline class_timeline(const RunFacts &run) {
+	ClassTimeline out;
+	for (const wire::ParityEntity &e : run.trace.entities)
+		out[e.handle].emplace_back(e.ts_ns, e.cls);
+	for (auto &entry : out)
+		std::stable_sort(entry.second.begin(), entry.second.end(),
+				[](const auto &x, const auto &y) { return x.first < y.first; });
+	return out;
+}
+
+// The class of the shooter's latest record at or before the round (its own frame's
+// first), else of its first later one; 'U' when the trace never carries it.
+char shooter_class(const ClassTimeline &timeline, const wire::ParityRoundEvent &round) {
+	const auto found = timeline.find(round.shooter);
+	if (found == timeline.end())
+		return 'U';
+	const auto &records = found->second;
+	const auto after = std::upper_bound(records.begin(), records.end(), round.ts_ns,
+			[](uint64_t ts, const std::pair<uint64_t, char> &record) { return ts < record.first; });
+	return after == records.begin() ? records.front().second : std::prev(after)->second;
+}
+
+// A round's kind: its shooter's class and its fire leg, the flag byte's adm-indexed bit
+// ("adm"), else its alt-fire bit ("alt"), else "plain" (ingame_decode.h's round flags).
+std::string round_kind(char cls, uint32_t flags) {
+	const char *leg = (flags & kRoundEventFlagAdmIndexed) ? "adm"
+			: (flags & kRoundEventFlagAltFire)			  ? "alt"
+														  : "plain";
+	return std::string(1, cls) + "." + leg;
+}
+
+struct RoundFacts {
+	std::map<std::string, size_t> rounds; // per kind: its steady rounds
+	std::map<std::string, size_t> targeted; // per kind: those carrying a target
+	std::map<std::string, std::set<std::string>> relations; // per kind: whom they name
+};
+
+RoundFacts round_facts(const RunFacts &run) {
+	RoundFacts out;
+	const ClassTimeline timeline = class_timeline(run);
+	uint32_t self = 0;
+	const bool has_self = own_handle(run, self);
+	for (const wire::ParityRoundEvent &round : run.trace.rounds) {
+		if (!run.in_steady(round.ts_ns))
+			continue;
+		const std::string kind = round_kind(shooter_class(timeline, round), round.flags);
+		++out.rounds[kind];
+		if (!(round.flags & kRoundEventHasTargetHandle))
+			continue;
+		++out.targeted[kind];
+		const char *relation = "other";
+		if (round.target == 0xFFFF)
+			relation = "unpooled";
+		else if (has_self && round.target == self)
+			relation = "self";
+		out.relations[kind].insert(relation);
+	}
+	return out;
+}
+
+// The round events' fire target. Retail's tag-2 writer sets 0x40 when the shooter's AI slot
+// word (+0x68 -> +0xC) names a target and then writes that target's pool handle, 0xFFFF for
+// a pointer in no pool [orig: NetPacket_SerializeRoundEvent @0x504820 (the reads @0x50484E /
+// @0x504855, the pool walk @0x50485C..0x5048A7, 0xFFFF @0x504882..0x504886, the flag
+// @0x5048BF..0x5048C1, the word @0x50494D..0x504966)]. The word is read live at the send, so
+// a shooter's rounds before it acquires a target go without one: how many carry it is the
+// acquisition's phase and is not compared. Whether a kind of shooter's rounds ever carry a
+// target, and whom they name, is its AI's (round.target):
+//   round_target <kind>           RR's rounds of the kind carry a target and the run's never
+//                                 do (ROUND_TARGET_MISSING), or the run's do and RR's never
+//                                 (ROUND_TARGET_UNEXPECTED); a side with no rounds of the
+//                                 kind in its steady window is short;
+//   round_target_relation <kind>  whom the targets name: self (the recipient's own body, the
+//                                 handle its uplinks name), unpooled (0xFFFF) or other; a
+//                                 side with no target of the kind leaves it to round_target.
+void compare_rounds(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
+	static_assert(has_normalization("round.target"));
+	const RoundFacts a = round_facts(rr), b = round_facts(other);
+	std::set<std::string> kinds;
+	for (const auto &entry : a.rounds)
+		kinds.insert(entry.first);
+	for (const auto &entry : b.rounds)
+		kinds.insert(entry.first);
+	auto count = [](const std::map<std::string, size_t> &counts, const std::string &kind) {
+		const auto found = counts.find(kind);
+		return found == counts.end() ? size_t(0) : found->second;
+	};
+	auto relations = [](const RoundFacts &facts, const std::string &kind) {
+		const auto found = facts.relations.find(kind);
+		return found == facts.relations.end() ? std::set<std::string>() : found->second;
+	};
+	auto fill = [](size_t rounds, size_t targeted) {
+		return (targeted ? std::string("filled (") : std::string("never filled (")) +
+				std::to_string(targeted) + " of " + std::to_string(rounds) + ")";
+	};
+	for (const std::string &kind : kinds) {
+		const size_t na = count(a.rounds, kind), nb = count(b.rounds, kind);
+		const size_t ta = count(a.targeted, kind), tb = count(b.targeted, kind);
+		MetricValue target = metric('S', "round_target", kind,
+				tb == 0 ? "ROUND_TARGET_MISSING" : "ROUND_TARGET_UNEXPECTED");
+		target.distance = (ta != 0) != (tb != 0) ? 1.0 : 0.0;
+		target.subject = fill(nb, tb);
+		target.reference = fill(na, ta);
+		if (na == 0 || nb == 0) {
+			target.comparable = false;
+			target.reference_short = na == 0;
+			target.detail = std::string(na == 0 ? "RR's" : "the run's") +
+					" steady window holds no round of this kind";
+		}
+		out.push_back(target);
+
+		MetricValue relation =
+				metric('S', "round_target_relation", kind, "ROUND_TARGET_RELATION_MISMATCH");
+		const std::set<std::string> ra = relations(a, kind), rb = relations(b, kind);
+		relation.subject = render_set(rb);
+		relation.reference = render_set(ra);
+		if (ta == 0 || tb == 0) {
+			relation.comparable = false;
+			relation.reference_short = true;
+			relation.detail = "a side's rounds of this kind name no target: round_target judges it";
+		} else {
+			relation.distance = jaccard_distance(ra, rb);
+		}
+		out.push_back(relation);
+	}
+}
+
 } // namespace
 
 void compare_state(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
@@ -1034,6 +1170,7 @@ void compare_state(const RunFacts &rr, const RunFacts &other, std::vector<Metric
 	compare_frames(rr, other, out);
 	compare_entities(rr, other, out);
 	compare_self_offset(rr, other, out);
+	compare_rounds(rr, other, out);
 }
 
 } // namespace opennova::parity

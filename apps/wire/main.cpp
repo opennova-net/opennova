@@ -1890,7 +1890,7 @@ int main(int argc, char *argv[]) {
 		             "frame=.. dir=.. session=.. sid=.. seq=.. ack=.. flags=.. "
 		             "records=.. tags=..' line per decrypted 0x43/0x83 datagram\n"
 		             "       --parity-events emits stable PARITY_DATAGRAM, PARITY_PACKET, and "
-		             "PARITY_EVENT/STATE/ENTITY lines with capture timestamps, "
+		             "PARITY_EVENT/STATE/ENTITY/ROUND lines with capture timestamps, "
 		             "ordered raw/LEN/SKIP/fragment record framing, semantic order, "
 		             "decoded gameplay state, and full non-gameplay bodies\n"
 		             "       --scenario-events emits one decoded SCENARIO_EVENT line per "

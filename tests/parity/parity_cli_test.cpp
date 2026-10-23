@@ -192,6 +192,13 @@ int main(int argc, char **argv) {
 		check(runs && runs->get("rr") &&
 						runs->get("rr")->get_string("capture", "") == rr + "/joiner/traffic.pcap",
 				"the summary's capture path is rebased onto the moved run directory");
+		// The committed session fires no round: the run's records count none, and no round row
+		// is judged (the round.target rows key on rounds a run carries).
+		const io::JsonValue *records =
+				runs && runs->get("ro") ? runs->get("ro")->get("records") : nullptr;
+		check(records && records->get_number("rounds", -1.0) == 0.0,
+				"the verdict counts each run's round events");
+		check(!contains(text, "\"round_target\""), "a case with no round events has no round rows");
 	}
 	{
 		std::vector<std::string> args = base;

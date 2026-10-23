@@ -12,9 +12,10 @@
 //                     tags and the physical raw-flags/LEN/SKIP framing
 //   PARITY_EVENT      one per reassembled message; the body is the byte witness,
 //                     except the two high-rate gameplay bodies (C2S 0x0C, S2C
-//                     0x0A) whose decoded STATE/ENTITY records carry the contract
+//                     0x0A) whose decoded STATE/ENTITY/ROUND records carry the contract
 //   PARITY_STATE      the decoded C2S 0x0C uplink / S2C 0x0A frame header
 //   PARITY_ENTITY     one per S2C 0x0A per-entity compact record
+//   PARITY_ROUND      one per S2C 0x0A tag-2 round event, after its frame's entities
 //
 // Every record carries its capture timestamp (ts_ns, nanoseconds since the epoch;
 // 0 when the input has none) and its capture frame. The line formats are a
@@ -176,6 +177,28 @@ struct ParityEntity {
 	uint32_t carrier_bone = 0;
 };
 
+// One S2C 0x0A tag-2 round event (a round another entity fired), as the frame carries it.
+// The flag byte is the ring record's fire-mode byte (+30) with 0x40 set when the shooter's
+// AI slot word (+0x68 -> +0xC) names a target and 0x80 when the slot byte (+32) is
+// nonzero; the target word follows only under 0x40, the pointer's pool handle or 0xFFFF
+// when it lies in no pool [orig: NetPacket_SerializeRoundEvent @0x504820 (the reads
+// @0x50484E / @0x504855, the pool walk @0x50485C..0x5048A7, 0xFFFF @0x504882..0x504886,
+// the flag @0x5048BF..0x5048C1, 0x80 @0x5048C4..0x5048C8, the word under 0x40
+// @0x50494D..0x504966)].
+struct ParityRoundEvent {
+	int frame = 0;
+	uint64_t ts_ns = 0;
+	int session = 0;
+	uint32_t index = 0; // the event's place among its frame's round events
+	uint32_t shooter = 0xFFFF;
+	uint32_t flags = 0;
+	uint32_t adm = 0;
+	uint32_t sub = 0;
+	uint32_t target = 0xFFFF; // the word when flags & 0x40, else 0xFFFF
+	uint32_t seq = 0; // the per-shot sequence word
+	uint32_t slot = 0; // the slot byte when flags & 0x80, else 0
+};
+
 // The records in emission order, delivered as they are built.
 class ParityTraceSink {
 public:
@@ -187,12 +210,13 @@ public:
 	virtual void on_uplink(const ParityUplinkState &) {}
 	virtual void on_frame(const ParityFrameState &) {}
 	virtual void on_entity(const ParityEntity &) {}
+	virtual void on_round(const ParityRoundEvent &) {}
 };
 
 // Builds the trace over the shared decoder. Streaming (a pcap): push() each
 // datagram in capture order; per datagram it emits the handshake record, the
 // datagram record, the packet record, then each completed message's event and
-// its decoded state/entities. Batch (a hexcap, no timestamps, no handshake
+// its decoded state, entities and rounds. Batch (a hexcap, no timestamps, no handshake
 // records): push_decoded() one whole decode_capture result.
 class ParityTraceBuilder {
 public:
@@ -234,6 +258,7 @@ public:
 	void on_uplink(const ParityUplinkState &record) override;
 	void on_frame(const ParityFrameState &record) override;
 	void on_entity(const ParityEntity &record) override;
+	void on_round(const ParityRoundEvent &record) override;
 
 private:
 	std::FILE *out_;
@@ -248,6 +273,7 @@ struct ParityTrace {
 	std::vector<ParityUplinkState> uplinks;
 	std::vector<ParityFrameState> frames;
 	std::vector<ParityEntity> entities;
+	std::vector<ParityRoundEvent> rounds;
 };
 
 class ParityTraceCollector : public ParityTraceSink {
@@ -260,6 +286,7 @@ public:
 	void on_uplink(const ParityUplinkState &record) override;
 	void on_frame(const ParityFrameState &record) override;
 	void on_entity(const ParityEntity &record) override;
+	void on_round(const ParityRoundEvent &record) override;
 
 private:
 	ParityTrace &trace_;

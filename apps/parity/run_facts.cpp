@@ -463,6 +463,7 @@ RunFacts make_run_facts(RunInfo info, wire::ParityTrace trace) {
 	keep_if(t.uplinks, [session](const auto &r) { return r.session == session; });
 	keep_if(t.frames, [session](const auto &r) { return r.session == session; });
 	keep_if(t.entities, [session](const auto &r) { return r.session == session; });
+	keep_if(t.rounds, [session](const auto &r) { return r.session == session; });
 
 	static_assert(has_normalization("trace.ts_ns"));
 	bool any = false;
