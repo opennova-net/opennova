@@ -1799,6 +1799,35 @@ void test_state() {
 		expect_row(flips, 'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
 	}
 	{
+		// A seated uplink sent in the net frame that received a S2C 0x0A names the vehicle's
+		// own ground link, 0xFFFF on open ground (uplink.echo_frame_carrier): x8's drive OR,
+		// a retail joiner on our host, sent six (13 changes against RR's 3). A run of seated
+		// carrier-none uplinks between two seated uplinks naming one carrier is dropped
+		// before the count; the same flips unseated, or between two carriers, still count.
+		auto drive = [](uint32_t seed, size_t echo_every, uint32_t echo_state, bool two_seats) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			for (size_t i = half; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				const size_t k = i - half;
+				const bool echo = echo_every != 0 && k % echo_every == echo_every - 1;
+				const bool second = two_seats && echo_every != 0 && (k / echo_every) % 2 == 1;
+				u.carrier = echo ? 0xFFFF : second ? 0x102E : 0x1002;
+				u.state_flags = echo ? echo_state : 0x40;
+			}
+			return trace;
+		};
+		const Case echoes =
+				judge_case(drive(1, 0, 0, false), drive(2, 0, 0, false), drive(3, 7, 0x40, false));
+		expect_row(echoes, 'C', "uplink_carrier_changes", "", "pass");
+		const Case unseated =
+				judge_case(drive(1, 0, 0, false), drive(2, 0, 0, false), drive(3, 7, 0, false));
+		expect_row(unseated, 'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
+		const Case seats =
+				judge_case(drive(1, 0, 0, false), drive(2, 0, 0, false), drive(3, 7, 0x40, true));
+		expect_row(seats, 'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
+	}
+	{
 		// A step across a carrier change is no motion: each carrier's uplinks are one
 		// sequence. x8's fragrespawn RR-aa and OR carried the respawn's jump from world into
 		// the hut's frame as their p90 step (3885822 / 3895546) where RR's ranked a motion

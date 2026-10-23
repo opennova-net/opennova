@@ -596,6 +596,23 @@ inline constexpr Normalization kNormalizations[] = {
 			"spans a frame change: "
 			"x8's fragrespawn RR-aa and OR ranked the respawn's jump into the hut's frame as "
 			"their p90 step (3885822, 3895546) against RR's motion step (102143)" },
+	{ "uplink.echo_frame_carrier", MaskKind::Field, 'C', 0x00C, "carrier (seated echo)", 0,
+			"a seated joiner's uplink sent in the net frame that received a S2C 0x0A names its "
+			"vehicle's own ground link, 0xFFFF on open ground, where every other seated uplink "
+			"names the vehicle: the receive's fold of the joiner's own record sets a mounted "
+			"body's link to its mount's (NetPacket_SerializePlayerState @0x4C09C0, "
+			"@0x4C1346..0x4C1358) and the uplink built later in the same frame reads it "
+			"(Client_ProcessNetworkFrame @0x42C180: the recv called @0x42C228, the build called "
+			"@0x42C482); a seat sets Flags 0x40, the uplink's state byte "
+			"(Entity_AttachToVehicleSlot @0x4946D0, @0x494760). Whether a run holds such uplinks "
+			"turns on the per-run phase of the host's 0x0A against the joiner's 0x0C, on retail's "
+			"pairs as on ours. x8's drive OR, a retail joiner on our host, sent the six seated "
+			"uplinks that left 0.4..1.0 ms after their 0x0A with 0xFFFF and every other seated "
+			"uplink, 46 ms or more after its 0x0A, with 0x1002 (13 changes against RR's 3). The "
+			"judge cannot see which frame received a 0x0A, so before uplink_carrier_changes "
+			"counts, a run of carrier-none uplinks is dropped when every uplink in it is seated "
+			"and the uplinks on both sides are seated and name the same carrier: x8 OR 13 -> 3, "
+			"x11 OO 5 -> 3, x10 OO 22 -> 6; RR, RR-aa, RO and every other run unchanged" },
 	{ "uplink.priority_handle", MaskKind::Field, 'C', 0x00C, "priority_handle", 0,
 			"priority handles are session-local: compared as occupied/empty" },
 	{ "uplink.priority_score", MaskKind::Field, 'C', 0x00C, "priority_score", 0,

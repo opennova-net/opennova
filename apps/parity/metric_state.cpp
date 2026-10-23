@@ -314,6 +314,50 @@ std::vector<const wire::ParityUplinkState *> steady_uplinks(const RunFacts &run)
 	return out;
 }
 
+// A seat sets the body's Flags 0x40 and its mount +0x16C [orig: Entity_AttachToVehicleSlot
+// @0x4946D0 (the or @0x494760, the mount @0x494763)], and the uplink's state byte is
+// Flags' low byte. The receive's fold of the joiner's own record sets the seated body's
+// ground link to the mount's own, else the wire carrier, and the uplink reads that link
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 (the fold @0x4C1346..0x4C1358; the state
+// byte read @0x4C1B17)] when it is built later in the same net frame [orig:
+// Client_ProcessNetworkFrame @0x42C180 (the recv called @0x42C228, the build called
+// @0x42C482)]. So a seated uplink sent in a frame that received a S2C 0x0A names the
+// vehicle's own link, 0xFFFF on open ground, where every other seated uplink names the
+// vehicle: x8's drive OR, a retail joiner on our host, sent six, 0.4..1.0 ms after their
+// 0x0A. The judge cannot see which frame received a 0x0A, so a run of seated carrier-none
+// uplinks between two seated uplinks naming one carrier is that echo, and is dropped
+// (uplink.echo_frame_carrier).
+constexpr uint32_t kUplinkStateSeated = 0x40;
+constexpr uint32_t kUplinkCarrierNone = 0xFFFF;
+
+std::vector<const wire::ParityUplinkState *> without_seated_echoes(
+		const std::vector<const wire::ParityUplinkState *> &states) {
+	static_assert(has_normalization("uplink.echo_frame_carrier"));
+	auto seated = [](const wire::ParityUplinkState *s) {
+		return (s->state_flags & kUplinkStateSeated) != 0;
+	};
+	std::vector<const wire::ParityUplinkState *> kept;
+	for (size_t i = 0; i < states.size();) {
+		size_t end = i;
+		while (end < states.size() && states[end]->carrier == kUplinkCarrierNone &&
+				seated(states[end]))
+			++end;
+		if (end == i) {
+			kept.push_back(states[i++]);
+			continue;
+		}
+		const bool echo = i > 0 && end < states.size() &&
+				states[i - 1]->carrier != kUplinkCarrierNone &&
+				states[i - 1]->carrier == states[end]->carrier && seated(states[i - 1]) &&
+				seated(states[end]);
+		if (!echo)
+			kept.insert(kept.end(), states.begin() + std::ptrdiff_t(i),
+					states.begin() + std::ptrdiff_t(end));
+		i = end;
+	}
+	return kept;
+}
+
 void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("uplink.carrier"));
 	static_assert(has_normalization("uplink.priority_handle"));
@@ -344,8 +388,10 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 			[](const U &s) { return std::string(s.carrier == 0xFFFF ? "none" : "bound"); });
 	// The carrier word is the body's ground link and the uplink's position is relative
 	// to it, so each change of the word between consecutive uplinks changes the
-	// position's frame of reference (uplink.carrier).
-	auto carrier_changes = [](const std::vector<const U *> &states) {
+	// position's frame of reference (uplink.carrier), counted past the seated echo-frame
+	// uplinks (uplink.echo_frame_carrier).
+	auto carrier_changes = [](const std::vector<const U *> &uplinks) {
+		const std::vector<const U *> states = without_seated_echoes(uplinks);
 		size_t changes = 0;
 		for (size_t i = 1; i < states.size(); ++i)
 			changes += states[i]->carrier != states[i - 1]->carrier ? 1 : 0;
@@ -353,7 +399,8 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 	};
 	MetricValue frames = metric('C', "uplink_carrier_changes", "", "UPLINK_CARRIER_SEQUENCE");
 	count_metric(frames, carrier_changes(a), 0.0, carrier_changes(b), 0.0);
-	frames.detail = "changes of the carrier word between consecutive uplinks";
+	frames.detail = "changes of the carrier word between consecutive uplinks, seated echo-frame "
+					"carrier-none runs dropped";
 	out.push_back(frames);
 	auto occupied = [](const U &s, int slot) {
 		return s.priority_handle[slot] != 0 || s.priority_score[slot] != 0;
