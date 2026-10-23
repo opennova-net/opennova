@@ -519,20 +519,18 @@ bool VehicleSystem::suspension_arm(
 	return true;
 }
 
-void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int wheels,
-                                     int32_t up_z16) {
+void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int32_t up_z16) {
 	Entity::VehicleMotorState &m = veh.veh;
 	// Each pad in contact zeroes its own sink [orig: tracked @0x47eced /
 	//  @0x47ecfb / @0x47ed09 / @0x47ed17 — `cmp pad, 0; jz; mov sink, 0`].
-	for (int k = 0; k < wheels; ++k)
+	for (int k = 0; k < 4; ++k)
 		if (contact[k]) m.plat_acc[k] = 0;
 	// Then a diagonal pair in contact [orig: (0 && 2) || (1 && 3)
 	//  @0x47ed1d..0x47ed2b], the hull upright [orig: `cmp ebp, 0; jle` on
 	//  up.z @0x47ed2d] and not crashed [orig: @0x47ed31] → the hard-landing
 	// marker, every sink and byte_2ef clear [orig: @0x47ed3a..0x47ed59; the
 	// `crashed = 0` @0x47ed60 is already true under the gate].
-	const bool pair = wheels >= 4 ? ((contact[0] && contact[2]) || (contact[1] && contact[3]))
-	                              : (contact[0] && contact[1]);
+	const bool pair = (contact[0] && contact[2]) || (contact[1] && contact[3]);
 	if (pair && up_z16 > 0 && m.crashed == 0) {
 		m.landing_2ee = 0;
 		for (int k = 0; k < 4; ++k) m.plat_acc[k] = 0;

@@ -450,6 +450,27 @@ void bike_tail_parks_and_rebuilds() {
     }
 }
 
+// D-NET-NEW-L6-28: the bike's pair clear has no up or crash gate and leaves +0x2EF. A crashed bike
+// on both wheels clears its wheel sinks and landing marker and halves a fall, keeping +0x2EF.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47BD0E..0x47BD78]
+void bike_pair_clear_is_ungated() {
+    Rig r;
+    auto t = r.traits(VehicleFamily::Bike, true);
+    auto &v = r.entity();
+    auto &m = v.veh;
+    m.crashed = 1;
+    m.byte_2ef = 1;
+    m.landing_2ee = 1;
+    m.plat_acc[0] = m.plat_acc[1] = 1000;
+    m.slide_z = -0x800;
+    int32_t z = to_fixed(v.position.z);
+    r.contact(t, z);
+    CHECK(m.crashed == 1 && m.byte_2ef == 1);
+    CHECK(m.landing_2ee == 0);
+    CHECK(m.plat_acc[0] == 0 && m.plat_acc[1] == 0);
+    CHECK(m.slide_z == -0x400);
+}
+
 // A climbing track can be supported by its inboard belly station while its
 // outer wheel is clear. Retail uses max(wheel, belly) for sink growth, spring
 // catch-up and the retained-contact tail. [orig: @ 0x4784CC..0x47853A,
@@ -1007,6 +1028,7 @@ int main() {
     parked_hull_latches_through_the_square_quad();
     bike_wreck_at_rest_leaves_the_wheel_arm();
     bike_tail_parks_and_rebuilds();
+    bike_pair_clear_is_ungated();
     bike_off_contact_planar_forward();
     vehicle_respawn_reseeds_destroy_timer();
     bike_indestructible_hull_skips_impact_damage();

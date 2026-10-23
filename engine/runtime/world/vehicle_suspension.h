@@ -152,9 +152,9 @@ void vehicle_suspension_grow_sinks(Entity &veh, const bool contact[4], int wheel
 //  contact ((0 && 2) || (1 && 3) @0x47ed1d..0x47ed2b), the hull upright
 //  (up.z > 0 @0x47ed2d) and not crashed @0x47ed31 → landing_2ee = 0, all
 //  four sinks = 0, byte_2ef = 0 (@0x47ed3a..0x47ed59; the `crashed = 0`
-//  @0x47ed60 is redundant under the gate). A two-wheel row pairs 0 && 1.
-void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int wheels,
-                                     int32_t up_z16);
+//  @0x47ed60 is redundant under the gate). The bike has its own ungated pair
+//  clear (vehicle_contact_solve.cpp, D-NET-NEW-L6-28).
+void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int32_t up_z16);
 
 // 6. The family tail [orig: crash_request = 0 unconditionally @0x47eeee /
 //  @0x4795da / @0x47c0b6; the amplitude tail @0x48178a..0x4817c4: all four

@@ -626,36 +626,29 @@ void test_post_contact_and_tail() {
 	reseed();
 	// A pad in contact zeroes ITS sink; nothing else moves.
 	const bool one[4] = {true, false, false, false};
-	vehicle_suspension_post_contact(veh, one, 4, 60000);
+	vehicle_suspension_post_contact(veh, one, 60000);
 	CHECK(veh.veh.plat_acc[0] == 0 && veh.veh.plat_acc[1] == 5 && veh.veh.plat_acc[3] == 5,
 			"a pad in contact zeroes its own sink only");
 	CHECK(veh.veh.landing_2ee == 1 && veh.veh.byte_2ef == 1, "and clears no latch");
 	// An ADJACENT pair is not the gate.
 	reseed();
 	const bool adjacent[4] = {true, true, false, false};
-	vehicle_suspension_post_contact(veh, adjacent, 4, 60000);
+	vehicle_suspension_post_contact(veh, adjacent, 60000);
 	CHECK(veh.veh.plat_acc[2] == 5 && veh.veh.plat_acc[3] == 5 && veh.veh.landing_2ee == 1,
 			"an adjacent pair is not a diagonal: no clear");
 	// A DIAGONAL pair clears — on an upright, uncrashed hull.
 	reseed();
 	const bool diagonal[4] = {false, true, false, true};
-	vehicle_suspension_post_contact(veh, diagonal, 4, -60000);
+	vehicle_suspension_post_contact(veh, diagonal, -60000);
 	CHECK(veh.veh.plat_acc[0] == 5 && veh.veh.landing_2ee == 1, "inverted: no clear");
 	veh.veh.crashed = 1;
-	vehicle_suspension_post_contact(veh, diagonal, 4, 60000);
+	vehicle_suspension_post_contact(veh, diagonal, 60000);
 	CHECK(veh.veh.plat_acc[0] == 5 && veh.veh.landing_2ee == 1, "crashed: no clear");
 	veh.veh.crashed = 0;
-	vehicle_suspension_post_contact(veh, diagonal, 4, 60000);
+	vehicle_suspension_post_contact(veh, diagonal, 60000);
 	CHECK(veh.veh.plat_acc[0] == 0 && veh.veh.plat_acc[2] == 0 &&
 					veh.veh.landing_2ee == 0 && veh.veh.byte_2ef == 0,
 			"a diagonal pair on an upright hull clears every sink, the landing marker and +0x2EF");
-	// A two-wheel row pairs its two wheels.
-	reseed();
-	vehicle_suspension_post_contact(veh, one, 2, 60000);
-	CHECK(veh.veh.plat_acc[1] == 5, "one wheel of two: no clear");
-	vehicle_suspension_post_contact(veh, adjacent, 2, 60000);
-	CHECK(veh.veh.plat_acc[1] == 0 && veh.veh.plat_acc[3] == 0 && veh.veh.landing_2ee == 0,
-			"both wheels down: the clear");
 
 	veh.veh.crash_request = 1;
 	veh.veh.spring_energy = 7;

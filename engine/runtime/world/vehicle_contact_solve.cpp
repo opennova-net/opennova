@@ -810,7 +810,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // (per pad, then the diagonal-pair clear on an upright hull)
     // [orig: @0x47ECE9..0x47ED60] and the tail clears the per-tick request
     // [orig: @0x47EEEE].
-    vehicle_suspension_post_contact(veh, pad_contact, 4, up_z16);
+    vehicle_suspension_post_contact(veh, pad_contact, up_z16);
 	// [orig: @0x47ED67..0x47EE49] the final contact pass may recover an
 	// inverted hull after its replicated parked bit was cleared; the rebuilt rows refresh the up
 	// word the tail reads [orig: the row-2 extract into var_288's vector @0x47ED94, the reload
@@ -1889,10 +1889,21 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     } else {
         pz = io::bam_add(pz, crash_depth);
     }
-    // Both-wheel landing absorbs half the fall [orig: `if (d0 && d1 &&
-    // slideDecay < 0) slideDecay -= slideDecay >> 1` @0x47BD68..0x47BD78].
-    if (d[0] != 0 && d[1] != 0 && m.slide_z < 0)
-        m.slide_z -= m.slide_z >> 1;
+	// The pair clear: each copy slot 0..3 touching zeroes its sink; both wheels down clear the
+	// landing marker and the two wheel sinks and absorb half a fall. No up or crash gate, and
+	// +0x2EF stays as it stands.
+	// [orig: @0x47BD0E..0x47BD78: the slot clears @0x47BD0E..0x47BD47, the wheel pair
+	//  @0x47BD4D..0x47BD53, +0x2EE = 0 @0x47BD55, the sinks @0x47BD5C / @0x47BD62, `sar ecx, 1;
+	//  sub eax, ecx` on a negative vz @0x47BD68..0x47BD78]
+	for (int k = 0; k < 4; ++k)
+		if (d[k] != 0)
+			m.plat_acc[k] = 0;
+	if (d[0] != 0 && d[1] != 0) {
+		m.landing_2ee = 0;
+		m.plat_acc[0] = m.plat_acc[1] = 0;
+		if (m.slide_z < 0)
+			m.slide_z -= m.slide_z >> 1;
+	}
 	// Replicated parked state: records 2 and 3 push along the fitted matrix's row 1 at rate 2,
 	// over the square quad of the full box spans along its row 0, lifted by half the box Z span
 	// along the hull's euler row 2; the records fold in and clear, then the bare quad folds in
@@ -1927,12 +1938,6 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     // run longer than one tick [orig: the +1 @0x47B739-region, reset in the
     // both-wheels-off branch; `|entity[1].pad_040[8]| <= 1` kills the byte].
     if (m.crashed) m.grounded = false;
-
-	// The crash latch armed at the chassis-call site above (the bike seed
-	// ejects its riders) [orig: @0x468B00..0x468B3B]. Wheels back in contact
-	// reset the sinks (the tracked form, both wheels as the pair); the tail
-	// clears the per-tick request [orig: @0x47C0B6].
-	vehicle_suspension_post_contact(veh, wheel_contact, 2, up_z16);
 	light_tail();
 }
 
