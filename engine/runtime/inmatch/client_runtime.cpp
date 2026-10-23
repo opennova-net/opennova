@@ -1197,7 +1197,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// ended; the frame after it is the game-start wait's first, whose head queues the 0x0A
 	// ahead of its receive (JoinerConnection::set_sync_tail_loading carries the witness).
 	if (joiner_ != nullptr && joiner_->sync_tail_load_running()) return outbound;
+	// The final S2C 0x64's declared load (the effect system's) the same way; the frame after
+	// it is the sync-tail wait's first, whose head queues the 0x09
+	// (JoinerConnection::set_mission_data_loading carries the witness).
+	if (joiner_ != nullptr && joiner_->mission_data_load_running()) return outbound;
 	if (joiner_ != nullptr) {
+		if (std::optional<ProtocolMessage> request = joiner_->take_sync_request())
+			send_queue_.push_back(std::move(*request));
 		if (std::optional<ProtocolMessage> request = joiner_->take_world_stream_request())
 			send_queue_.push_back(std::move(*request));
 	}

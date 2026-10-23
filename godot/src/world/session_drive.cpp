@@ -222,6 +222,10 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// freeze), whose end sends the two 0x2F and the 0x0B (engine:
 	// inmatch/joiner_connection.h set_mission_start_loading, D-NET-531, D-NET-NEW-L2-19).
 	join_preload_sim_->set_join_mission_start_loading(true);
+	// Ahead of both, every mission start's effect system loads between its final S2C 0x64
+	// and its 0x09 (step_preload; engine: inmatch/joiner_connection.h set_mission_data_loading,
+	// D-NET-NEW-L2-43).
+	join_preload_sim_->set_join_mission_data_loading(true);
 	// The JOIN VERSIONCRCSTRING checksum reads the loose
 	// expansion/<name>/version.txt under this install root (D-NET-166).
 	join_preload_sim_->set_join_expansion_version_root(resource_root->get_root_dir());
@@ -248,6 +252,13 @@ void SessionDrive::step_preload() {
 		// D-NET-NEW-L2-19).
 		join_preload_sim_->set_join_sync_tail_loading(true);
 		join_preload_sim_->poll_join_preload();
+		// The final S2C 0x64's pass ended the mission data: the mission start's effect system
+		// loads here, ahead of the 0x09, which the next poll queues at its head (engine:
+		// inmatch/joiner_connection.h set_mission_data_loading, D-NET-NEW-L2-43).
+		if (join_preload_sim_->is_join_mission_data_load_running()) {
+			world_->load_join_effect_system(join_preload_root_);
+			join_preload_sim_->end_join_mission_data_load();
+		}
 		// The abandoned start's game loop runs no window: it lingers until the round's end
 		// stores exit 4 (retail's game loop has no clock; the next mission's identification
 		// arms the stream wait's window again; engine inmatch::ClientRuntime::run_frame and

@@ -921,6 +921,12 @@ public:
 	// set_sync_tail_loading): the shell declares it while the 0x11 is awaited and clears it
 	// once the load has ended; the 0x0A follows.
 	void set_join_sync_tail_loading(bool p_loading);
+	// The joiner's effect system load between the final S2C 0x64 and the 0x09 (engine:
+	// inmatch/joiner_connection.h set_mission_data_loading): the shell declares it once for
+	// every mission start and ends each load; the 0x09 follows.
+	void set_join_mission_data_loading(bool p_loading);
+	bool is_join_mission_data_load_running() const;
+	void end_join_mission_data_load();
 	bool is_join_mission_start_released() const;
 	// The load's first leg once its definition and model loads are in (engine:
 	// ClientRuntime::push_mission_start_first_loadout): the first 0x2F; nothing before the

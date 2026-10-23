@@ -773,6 +773,11 @@ private:
 	// entry (load_mission_data) converge here.
 	int load_mission_internal(const Ref<MissionData> &p_mission, const String &p_bms_name,
 			const Ref<ResourceRoot> &p_resource_root);
+	// A join's effect system at its final S2C 0x64, ahead of the 0x09: a fresh effect world
+	// with every mounted .ptl parsed and its catalog warmed, which the S2C 0x1A's load adopts
+	// (start_effect_world) (engine: inmatch/joiner_connection.h set_mission_data_loading,
+	// D-NET-NEW-L2-43). An earlier one (an abandoned mission start's) is freed first.
+	void load_join_effect_system(const Ref<ResourceRoot> &p_resource_root);
 	// A join's S2C 0x11 load (SessionDrive::step_preload): the mission start's head and its
 	// terrain off the host's 0x0B header; its S2C 0x1A load_mission_internal goes on from the
 	// objects.
@@ -816,7 +821,13 @@ private:
 	void run_mission_start();
 	void load_player_weapon_profile();
 	void start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name);
-	int warm_effect_world_catalog(const PackedStringArray &p_models);
+	// `p_spawn_effects` false: the catalog was warmed already (a join's effect system load), so
+	// only the models and the presenters' fire pipelines draw in the forced frames.
+	int warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects = true);
+	// A new effect world under this world with every mounted .ptl of `p_resource_root` parsed
+	// at the session's words (start_effect_world's and load_join_effect_system's head).
+	EffectWorld *create_effect_world(const Ref<ResourceRoot> &p_resource_root);
+	void free_join_effect_world();
 	// The mission start's models (Simulation::get_mission_start_model_files) built under one
 	// container at `p_at` through MissionObjectPlacer::warm_models; null when none built. The
 	// caller frees it (FX-5).
@@ -885,6 +896,9 @@ private:
 	ObjectID music_director_id_;
 	ObjectID mission_audio_id_;
 	ObjectID effect_world_id_; // the runtime .ptl effect world (render-only, per mission)
+	// The effect world a join's mission-data load built ahead of its 0x09, until the S2C 0x1A's
+	// load adopts it (load_join_effect_system).
+	ObjectID join_effect_world_id_;
 	// Frame-clear cache (divergence #21): recompute only when the env
 	// generation moves or the camera crosses the water plane.
 	int64_t clear_env_generation_ = -1;

@@ -1521,6 +1521,48 @@ bool run_the_sync_tail_0x0a_joins_the_queue() {
 	return true;
 }
 
+// The final S2C 0x64's 0x09 waits for the mission start's effect system load (D-NET-NEW-L2-43):
+// the mission data's spin ends on the final chunk's pass, the mission start parses the effects
+// and registers their materials, and only then does the sync-tail wait queue the 0x09 at its
+// head. Under a declared mission-data load the chunk's frame and every frame while the load runs
+// send nothing, a list arriving meanwhile waits, and the frame after the load's end queues the
+// 0x09 at its head, the waiting list's 0x22 behind it. Without the declaration the 0x09 leaves at
+// the sync-tail wait's pace (run_the_sync_request_needs_no_player_list).
+// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 - the send @0x51EA57, the exit
+//  @0x51EA62; Game_StartMission @0x524360 - CEffectSystem_Init @0x524980,
+//  CEffectManager_RegisterAllMaterials @0x52499E, the sync-tail wait (the call @0x524DAB);
+//  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - the 0x09 queued @0x42CB43]
+bool run_the_mission_data_load_holds_the_0x09() {
+	Harness h;
+	if (!expect(h.handshake(), "0x09 hold: handshake")) return false;
+	h.frame({settings_record(0), settings_record(1)});
+	h.frame({make_protocol_message(0x00, {})});
+	std::vector<uint8_t> probe(64, 0);
+	probe[8] = 16;
+	h.frame({make_protocol_message(0x02, probe)});
+	h.frame({holdoff_record(12), make_protocol_message(0x03, {0x01})});
+	h.frame({make_protocol_message(0x05, {0x01}),
+			make_protocol_message(0x04, slot_assignment(0x02)),
+			make_protocol_message(0x7B, full_player_info())});
+	(void)frame_until_sent(h, 16);
+	(void)h.frame({make_protocol_message(0x60, transfer_chunk(1, 171, 0, 171, 0xA5))});
+	h.client.set_mission_data_loading(true);
+	if (!expect(h.frame({make_protocol_message(0x64, transfer_chunk(1, 180, 0, 180, 0x5A))})
+	                    .empty() &&
+	                    h.client.mission_data_load_running(),
+			"0x09 hold: the final chunk's frame builds nothing and the declared load runs"))
+		return false;
+	bool quiet = h.frame({make_protocol_message(0x16, player_list({{0, 1}}))}).empty();
+	for (int i = 0; i < 8; ++i) quiet = h.frame().empty() && quiet;
+	if (!expect(quiet, "0x09 hold: the declared load pumps nothing, a list arriving meanwhile waits"))
+		return false;
+	h.client.end_mission_data_load();
+	if (!expect(!h.client.mission_data_load_running(), "0x09 hold: the end ends the load"))
+		return false;
+	return expect(h.one_packet(h.frame(), {0x09, 0x22}),
+			"0x09 hold: after the load the 0x09 leads, the waiting list's 0x22 behind it");
+}
+
 // The join screen reads where the join stands: the dial until ServerAuth
 // accepts, the connect until the host's S2C 0x00, the verification until its
 // S2C 0x01 reads 1, the host's S2C 0x03 queue record, and the game start at
@@ -1678,6 +1720,7 @@ int main() {
 	ok = run_the_net_readout_records_each_frame() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_sync_tail_0x0a_joins_the_queue() && ok;
+	ok = run_the_mission_data_load_holds_the_0x09() && ok;
 	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;
 	ok = run_the_mission_start_first_leg_runs_mid_load() && ok;
 	ok = run_the_mission_start_runs_in_the_0x1a_pass() && ok;

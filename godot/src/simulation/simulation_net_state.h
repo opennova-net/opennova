@@ -148,6 +148,9 @@ struct SimulationNetState {
 	// The joiner's S2C 0x11 load seam (JoinerConnection::set_sync_tail_loading): the shell's
 	// terrain load runs at the 0x11, ahead of the 0x0A. Retained across rebuilds.
 	bool join_sync_tail_loading = false;
+	// The joiner's final S2C 0x64 load seam (JoinerConnection::set_mission_data_loading): the
+	// shell's effect system load runs there, ahead of the 0x09. Retained across rebuilds.
+	bool join_mission_data_loading = false;
 	// The count of the loaded-model list frozen at this mission's load
 	// (finalize_loaded_model_challenge_snapshot): a host's S2C 0x68 cursor wrap.
 	uint32_t loaded_model_list_count = 0;

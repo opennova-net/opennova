@@ -248,6 +248,8 @@ std::vector<uint8_t> JoinerConnection::start() {
 	session_send_clock_armed_ = false;
 	session_ack_pending_ = false;
 	pending_spawn_menu_request_ = false;
+	sync_request_owed_ = false;
+	mission_data_load_running_ = false;
 	spawn_ack_timestamp_ = 0;
 	game_start_ack_timestamp_ = 0;
 	rtt_ring_.fill(0);
@@ -1534,9 +1536,14 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 					// 0x22 re-requests (ClientRuntime's fold), which join the 0x09 when they
 					// land before that pace opens [orig: Game_StartMission @0x524360 (the
 					// call @0x524dab) -> NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (the queue
-					// @0x42cb43, the send @0x42cb4d)].
-					periodic_replies.push_back(
-							make_protocol_message(c2s::CHECKSUM_RESPONSE, {}));
+					// @0x42cb43, the send @0x42cb4d)]. A declared load (the effect system's,
+					// set_mission_data_loading) holds it until the load has ended.
+					if (mission_data_loading_) {
+						sync_request_owed_ = true;
+						mission_data_load_running_ = true;
+					} else
+						periodic_replies.push_back(
+								make_protocol_message(c2s::CHECKSUM_RESPONSE, {}));
 					enter_initial_sync_tail();
 				}
 			}
@@ -2461,6 +2468,8 @@ std::vector<uint8_t> JoinerConnection::begin_mission_reload() {
 	deployment_pick_sequence_unbound_ = false;
 	deployment_reply_seen_ = false;
 	pending_spawn_menu_request_ = false;
+	sync_request_owed_ = false;
+	mission_data_load_running_ = false;
 	has_self_handle_ = false;
 	self_handle_ = 0;
 	spawn_ = SelfSpawn{};

@@ -425,6 +425,17 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 	return out;
 }
 
+// The sync-tail wait's head: the final S2C 0x64's empty reliable 0x09, once a declared
+// mission-data load has ended (set_mission_data_loading carries the witness).
+// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - the 0x09 queued @0x42CB43]
+std::optional<ProtocolMessage> JoinerConnection::take_sync_request() {
+	if (!sync_request_owed_ || mission_data_load_running_ || phase_ != Phase::Driving ||
+			session_lost())
+		return std::nullopt;
+	sync_request_owed_ = false;
+	return make_protocol_message(c2s::CHECKSUM_RESPONSE, {});
+}
+
 // The game-start wait's head: the 0x11's empty reliable 0x0A, once the sync-tail pass ended
 // and any declared load has run (set_sync_tail_loading carries the witness). A latched early
 // 0x11 (applied when the final S2C 0x64 entered the sync-tail stage) owes it the same way.

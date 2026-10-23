@@ -639,6 +639,35 @@ public:
 	//  @0x52076F, Environment_SetWaterColor @0x5207A8, Environment_SetWaterMurk @0x5207CE]
 	void set_sync_tail_loading(bool loading) { sync_tail_loading_ = loading; }
 	bool sync_tail_loading() const { return sync_tail_loading_; }
+	// The final S2C 0x64's answer (D-NET-NEW-L2-43). The mission data's spin ends on the
+	// final chunk's pass, which still runs its send; the mission start then initializes its
+	// effect system (every .ptl parsed, the effect materials registered, the effect world's
+	// device state), all ahead of the sync-tail wait, whose head queues the empty reliable
+	// 0x09 and pumps it. So the 0x09 leaves the mission start's local work after the final
+	// chunk, not on the chunk's own pass. An embedder whose effect load runs there at every
+	// mission start declares it once (a reload's and an abandoned start's restart included)
+	// and ends each load (end_mission_data_load): from the final 0x64 to that end, later
+	// frames neither receive nor send (the client runtime's frame returns at its head), and
+	// the frame after the end queues the 0x09 at its head. Without the declaration the 0x09
+	// joins the queue on the chunk's pass.
+	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 - the spin's receive
+	//  @0x51EA3B, its send @0x51EA57, the exit on the transfer's flag @0x51EA62;
+	//  Game_StartMission @0x524360 - the spin (the call @0x5248A7), CEffectSystem_Init
+	//  @0x524980 (on a mission start that is not the restart's, [esp+eventId] = (arg == 0)
+	//  @0x5243A6, past a dedicated host @0x524977), CEffectManager_RegisterAllMaterials
+	//  @0x52499E, EffectWorld_DestroyAllAndInitDeviceCaps @0x524A6F, then
+	//  NapiClient_SendPlayerSyncAndWaitForSyncTail (the call @0x524DAB);
+	//  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - the 0x09 queued @0x42CB43, the
+	//  entry pump @0x42CB4D]
+	void set_mission_data_loading(bool loading) { mission_data_loading_ = loading; }
+	bool mission_data_loading() const { return mission_data_loading_; }
+	// The declared mission-data load runs: the final 0x64 came and the embedder has not ended
+	// its load.
+	bool mission_data_load_running() const { return mission_data_load_running_; }
+	void end_mission_data_load() { mission_data_load_running_ = false; }
+	// The sync-tail wait's 0x09 for the client runtime's one queue: nullopt when none is owed
+	// or the declared load still runs.
+	std::optional<ProtocolMessage> take_sync_request();
 	// The declared 0x11 load runs: the 0x11 came and its 0x0A is still owed.
 	bool sync_tail_load_running() const {
 		return sync_tail_loading_ && pending_spawn_menu_request_;
@@ -1430,6 +1459,9 @@ private:
 	bool mission_start_loading_ = false;          // set_mission_start_loading
 	bool mission_start_first_loadout_taken_ = false; // take_mission_start_first_loadout
 	bool sync_tail_loading_ = false;              // set_sync_tail_loading
+	bool mission_data_loading_ = false;           // set_mission_data_loading
+	bool mission_data_load_running_ = false;      // the final 0x64 to end_mission_data_load
+	bool sync_request_owed_ = false;              // the 0x09 a declared mission-data load holds
 	CharacterJoinVars character_join_vars_{};
 	uint32_t auto_medic_disabled_ = 0; // profile +1660 (set_auto_medic_preference)
 	uint8_t current_player_class_ = 0; // authoritative S2C 0x5A avatarClass

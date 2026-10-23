@@ -1025,6 +1025,19 @@ void Simulation::set_join_sync_tail_loading(bool p_loading) {
 	install_join_mission_start();
 }
 
+void Simulation::set_join_mission_data_loading(bool p_loading) {
+	net_.join_mission_data_loading = p_loading;
+	install_join_mission_start();
+}
+
+bool Simulation::is_join_mission_data_load_running() const {
+	return is_joiner() && runtime_ && runtime_->mission_data_load_running();
+}
+
+void Simulation::end_join_mission_data_load() {
+	if (is_joiner() && runtime_) runtime_->end_mission_data_load();
+}
+
 bool Simulation::is_join_mission_start_released() const {
 	return is_joiner() && runtime_ != nullptr && runtime_->mission_start_released();
 }

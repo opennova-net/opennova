@@ -324,6 +324,9 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	}
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS));
 	timeline->span("effects");
+	// A join's mission-data load built and warmed the effect world ahead of its 0x09; the
+	// rest binds it to this mission (load_join_effect_system).
+	const bool effects_preloaded = ObjectDB::get_instance(join_effect_world_id_) != nullptr;
 	start_effect_world();
 	timeline->end_span();
 	// A host's render arm: its load window's pumps ahead of the mission's textures, which the
@@ -341,7 +344,8 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// joiner's list exists once its world stream lands (finish_join_wire_assets).
 	warm_effect_world_catalog(challenge_sim.is_valid() && !wire_header_join
 					? challenge_sim->get_mission_start_model_files()
-					: PackedStringArray());
+					: PackedStringArray(),
+			!effects_preloaded);
 	timeline->end_span();
 	// A host's mission start past its device stages: phase B opens with the render arm's
 	// last pump, then the PreMission pass, the round init and Player_InitPlayer, as retail's
@@ -677,6 +681,7 @@ void GameWorld::unload() {
 		effect_world->queue_free();
 	}
 	effect_world_id_ = ObjectID();
+	free_join_effect_world();
 	mission_audio_id_ = ObjectID();
 	placer_.unref();
 	weapon_db_.unref(); // re-resolves against the next load's mounted root
@@ -1311,7 +1316,7 @@ Node3D *GameWorld::build_model_warm(const PackedStringArray &p_models, const Vec
 // every listed row's models, its husk family among them, and the freeze
 // builds their buffers, so a death's swap builds nothing (D-NET-NEW-L5-8; the
 // witness: engine inmatch/loaded_model_list.h, mission_start_model_list).
-int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models) {
+int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects) {
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world == nullptr) {
 		return 0;
@@ -1329,9 +1334,10 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models) {
 	if (restore_particles_hidden) {
 		effect_world->set_particles_hidden(false);
 	}
-	const int spawned = effect_world->warm_all_effects(warm_pos);
+	const int spawned = p_spawn_effects ? effect_world->warm_all_effects(warm_pos) : 0;
 	Node3D *model_warm = build_model_warm(p_models, warm_pos);
-	if (spawned <= 0 && model_warm == nullptr) {
+	// A warmed catalog still draws the presenters' fire pipelines below.
+	if (spawned <= 0 && model_warm == nullptr && (p_spawn_effects || get_runtime() == nullptr)) {
 		effect_world->reset_runtime_state();
 		if (restore_particles_hidden) {
 			effect_world->set_particles_hidden(true);
@@ -1386,15 +1392,61 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models) {
 // Mission-start load of EVERY mounted .ptl into the runtime effect world
 // [orig: CEffectSystem_Init @ 0x5f6070 <- Game_StartMission @ 0x524980 — no fixed
 // file list: the loose ptl\*.ptl set and every PFF .ptl entry both parse].
-void GameWorld::start_effect_world() {
+EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_root) {
 	EffectWorld *effect_world = memnew(EffectWorld);
 	effect_world->set_name("EffectWorld");
 	add_child(effect_world);
-	effect_world_id_ = ObjectID(effect_world->get_instance_id());
 	effect_world->set_environment_source(env_);
 	if (item_fx_->particles_hidden()) {
 		effect_world->set_particles_hidden(true);
 	}
+	// The session's words, before the pages are built (CParticleTexture_InitTextureAndChannels
+	// runs inside the effect load, after the mission start's copy).
+	effect_world->set_session_render_settings(session_texcompression_level_, session_particle_density_);
+	const int count = effect_world->load_from_resource_root(p_resource_root);
+	UtilityFunctions::print_verbose(vformat("GameWorld: effect world — %d effect(s) across %d .ptl file(s)",
+			count, effect_world->file_count()));
+	return effect_world;
+}
+
+void GameWorld::free_join_effect_world() {
+	EffectWorld *pending = Object::cast_to<EffectWorld>(ObjectDB::get_instance(join_effect_world_id_));
+	join_effect_world_id_ = ObjectID();
+	if (pending != nullptr) {
+		pending->release_runtime_renderer_resources();
+		pending->queue_free();
+	}
+}
+
+void GameWorld::load_join_effect_system(const Ref<ResourceRoot> &p_resource_root) {
+	// Its own timeline (an instrument: its lines print under --verbose).
+	Ref<LoadTimeline> timeline = LoadTimeline::begin("Join effects");
+	free_join_effect_world();
+	// The mission start's copies the effect pages build at (the S2C 0x11's head copies them
+	// again for its terrain).
+	session_texcompression_level_ = texcompression_level_;
+	session_particle_density_ = particle_density_;
+	timeline->span("effects");
+	EffectWorld *effect_world = create_effect_world(p_resource_root);
+	timeline->end_span();
+	// The catalog warms in front of the load camera as the load's warm does; no mission
+	// root lives yet, so no presenter pipeline warms here (the S2C 0x1A's load draws those).
+	timeline->span("effects_warm");
+	effect_world_id_ = ObjectID(effect_world->get_instance_id());
+	warm_effect_world_catalog(PackedStringArray());
+	effect_world_id_ = ObjectID();
+	timeline->end_span();
+	join_effect_world_id_ = ObjectID(effect_world->get_instance_id());
+	timeline->finish();
+}
+
+void GameWorld::start_effect_world() {
+	EffectWorld *effect_world = Object::cast_to<EffectWorld>(ObjectDB::get_instance(join_effect_world_id_));
+	join_effect_world_id_ = ObjectID();
+	if (effect_world == nullptr) {
+		effect_world = create_effect_world(resource_root_);
+	}
+	effect_world_id_ = ObjectID(effect_world->get_instance_id());
 	// The mission header's wind drives GLOBALWIND particles
 	// (engine: runtime/particle/emitter.h).
 	if (loaded_mission_.is_valid()) {
@@ -1402,10 +1454,6 @@ void GameWorld::start_effect_world() {
 			effect_world->set_mission_wind(info->get_wind_speed(), info->get_wind_direction());
 		}
 	}
-	// The session's words, before the pages are built (CParticleTexture_InitTextureAndChannels
-	// runs inside the effect load, after the mission start's copy).
-	effect_world->set_session_render_settings(session_texcompression_level_, session_particle_density_);
-	const int count = effect_world->load_from_resource_root(resource_root_);
     if (const Ref<Simulation> sim = get_sim(); sim.is_valid())
         sim->bind_item_effect_scene(effect_world->shared_native_scene());
 	if (water_ != nullptr) {
@@ -1420,8 +1468,6 @@ void GameWorld::start_effect_world() {
 			water_sim->set_water_z(water_->get_water_height());
 		}
 	}
-	UtilityFunctions::print_verbose(vformat("GameWorld: effect world — %d effect(s) across %d .ptl file(s)",
-			count, effect_world->file_count()));
 	// Item-effect wiring — the owner-pose provider, the persistent per-item
 	// attaches, and the wire-spawn callback — lives in the director.
 	item_fx_->on_effect_world_started();

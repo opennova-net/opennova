@@ -899,6 +899,19 @@ public:
 	void set_sync_tail_loading(bool loading) {
 		if (joiner_) joiner_->set_sync_tail_loading(loading);
 	}
+	// The final S2C 0x64's load (JoinerConnection::set_mission_data_loading): an embedder whose
+	// effect system load runs between the mission data's end and the 0x09 at every mission
+	// start declares it once and ends each load; from the final 0x64 to that end the frame
+	// neither receives nor sends, and the next frame queues the 0x09 at its head.
+	void set_mission_data_loading(bool loading) {
+		if (joiner_) joiner_->set_mission_data_loading(loading);
+	}
+	bool mission_data_load_running() const {
+		return joiner_ && joiner_->mission_data_load_running();
+	}
+	void end_mission_data_load() {
+		if (joiner_) joiner_->end_mission_data_load();
+	}
 	bool mission_start_released() const { return joiner_ && joiner_->mission_start_released(); }
 	// Game_StartMission's network pumps from the 0x1A to the final wait for the S2C 0x0F,
 	// in its order: its receive pumps step the send-holdoff countdown, its send pumps build
