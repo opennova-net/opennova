@@ -837,9 +837,12 @@ private:
 	int warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects = true,
 			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
 	// A new effect world under this world with every mounted .ptl of `p_resource_root` parsed
-	// at the session's words (the mission start's head's, load_join_effect_system's and
-	// start_effect_world's for a load that built none; a dedicated host's builds none).
-	EffectWorld *create_effect_world(const Ref<ResourceRoot> &p_resource_root);
+	// at the session's words and its texture atlases built (the mission start's head's,
+	// load_join_effect_system's and start_effect_world's for a load that built none; a
+	// dedicated host's builds none). `p_timeline` (may be null) takes the atlas build as a
+	// nested span (an instrument).
+	EffectWorld *create_effect_world(const Ref<ResourceRoot> &p_resource_root,
+			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
 	void free_join_effect_world();
 	void free_head_effect_world();
 	// The mission start's models (Simulation::get_mission_start_model_files) built under one

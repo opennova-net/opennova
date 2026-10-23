@@ -265,6 +265,14 @@ public:
 	Ref<Image> load_texture_image(const String &name, TextureLoader loader,
 			LookupPolicy policy = LOOKUP_SESSION_DEFAULT, bool *r_alpha_only = nullptr,
 			opennova::renderer::TextureReader *r_reader = nullptr) const;
+	// load_texture_image bound: the decoded image alone, no device texture made. The effect
+	// world's particle frames read through it, as the game's atlas build decodes each frame
+	// into its page (engine renderer/particle_atlas.h carries the witness).
+	Ref<Image> load_image(const String &name, TextureLoader loader,
+			LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
+	// The device textures load_texture holds decoded (its cache's entries, a miss's
+	// included): a structural count for tests.
+	int64_t get_decoded_texture_count() const;
 	// One material row's texture of runtime `type`: the texture the registry keeps
 	// under the row's key (renderer::texture_registry_key: the name as written and
 	// its loader's suffix, without case), so the first row of a key to load decides

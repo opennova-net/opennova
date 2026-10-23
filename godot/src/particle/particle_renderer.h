@@ -42,7 +42,7 @@ private:
 	class Impl;
 	std::unique_ptr<Impl> impl_;
 	Ref<EffectScene> scene_;
-	Callable texture_provider_;
+	Callable image_provider_;
 	String texture_dir_;
 	ObjectID environment_source_;
 	ObjectID reflection_camera_;
@@ -73,8 +73,10 @@ public:
 	void set_scene(const Ref<EffectScene> &p_scene);
 	Ref<EffectScene> get_scene() const;
 
-	void set_texture_provider(const Callable &p_provider);
-	Callable get_texture_provider() const;
+	// What answers a particle frame's name with its decoded Image (the effect
+	// world's: the mount's particle loader, ResourceRoot::load_image).
+	void set_image_provider(const Callable &p_provider);
+	Callable get_image_provider() const;
 	void set_texture_dir(const String &p_texture_dir);
 	void set_environment_source(Node *p_source);
 	Node *get_environment_source() const;
@@ -130,6 +132,12 @@ public:
 	// Process-driven rendering calls this automatically; tests and previews may
 	// call it explicitly after advancing a scene.
 	void render_now(int64_t p_time_ms);
+	// The catalog's atlas built now, from the scene's definitions under the
+	// session's page flags, when it is not already built for them: the effect
+	// system's init builds it once at the mission start, so the first draw
+	// builds none (engine renderer/particle_atlas.h carries the witness,
+	// D-NET-NEW-L3-26). render_now builds it the same way when it is stale.
+	void build_catalog();
 
 	// The post-particle overlay tail (runtime/renderer/scene_overlay.h): every
 	// view this renderer composes carries one overlay pass right after its

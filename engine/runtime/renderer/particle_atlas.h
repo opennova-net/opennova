@@ -166,6 +166,18 @@ struct ParticleAtlasBuild {
 // Registration is first-win. Re-registering an equivalent name and exact type
 // returns the original id and does not replace its spelling or pixels. build()
 // is value-returning and repeatable; embedder upload state remains outside.
+//
+// What registers is each frame's file decoded to pixels, never a device texture:
+// the game's build decodes every frame's TGA into a CTextureData on its own stack,
+// copies the rows into the page's buffer and frees it, and makes a device texture
+// for each page alone [orig: CParticleManager_BuildTextureAtlases @ 0x5E8DB0
+// (CTextureData_LoadTGA @ 0x5F7B20, the call @0x5E9087, its `this` the stack
+// frame @0x5E9083; CParticleTexture_InitTextureAndChannels @ 0x5E8210, the call
+// @0x5E91A8)]. The build runs once a mission start, at the effect system's init,
+// ahead of the start's load window and its terrain [orig:
+// CEffectSystem_BuildTextureAtlases @ 0x5F65B0 <- Game_StartMission @ 0x524360
+// (the call @0x5249B9, past CEffectSystem_Init @0x524980)], so the start's first
+// draw builds no atlas (D-NET-NEW-L3-26).
 class ParticleAtlasBuilder {
 public:
 	ParticleAtlasEntryId register_frame(std::string name, std::uint8_t type,

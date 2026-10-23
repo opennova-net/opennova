@@ -787,7 +787,7 @@ func test_second_scene_backend_draws_the_particle_into_its_own_target() -> void:
 
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("impact", 0)
-	renderer.texture_provider = _overlap_texture  # opaque red
+	renderer.image_provider = _overlap_image  # opaque red
 	renderer.set_water_plane(-100.0, null)
 	renderer.set_second_scene_camera(second_camera)
 	viewport.add_child(renderer)
@@ -941,13 +941,13 @@ func test_second_scene_view_follows_every_renderer_lifecycle_leg() -> void:
 	assert_engine_error_count(0)
 
 
-func _overlap_texture(name: String) -> Texture2D:
+func _overlap_image(name: String) -> Image:
 	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
 	var color := Color(0.5, 0.5, 1.0, 1.0)
 	if name == "impact.tga":
 		color = Color.RED
 	image.fill(color)
-	return ImageTexture.create_from_image(image)
+	return image
 
 
 func _overlap_document(name: String, blend: int, properties: String = "") -> String:
@@ -1021,7 +1021,7 @@ void fragment() {
 	scene.open([file])
 	var renderer := ParticleRenderer.new()
 	renderer.scene = scene
-	renderer.texture_provider = _overlap_texture
+	renderer.image_provider = _overlap_image
 	renderer.set_water_plane(-100.0, null)
 	viewport.add_child(renderer)
 	renderer.attach_distortion_row(fx)
@@ -1100,12 +1100,12 @@ func test_distortion_particles_draw_in_the_framefx_row() -> void:
 	assert_gt(_column_contrast(after, 4, 16), 0.8, "outside the haze the frame is untouched")
 
 
-func _asymmetric_dirt_texture(_name: String) -> Texture2D:
+func _asymmetric_dirt_image(_name: String) -> Image:
 	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
 	for y in image.get_height():
 		for x in image.get_width():
 			image.set_pixel(x, y, Color(1.0, 0.0, 0.0, 1.0 - float(y) / 31.0))
-	return ImageTexture.create_from_image(image)
+	return image
 
 
 func test_dirt_splash_keeps_its_dense_base_below_its_fading_top() -> void:
@@ -1131,7 +1131,7 @@ func test_dirt_splash_keeps_its_dense_base_below_its_fading_top() -> void:
 	scene.open([file])
 	var renderer := ParticleRenderer.new()
 	renderer.scene = scene
-	renderer.texture_provider = _asymmetric_dirt_texture
+	renderer.image_provider = _asymmetric_dirt_image
 	renderer.set_water_plane(-100.0, null)
 	viewport.add_child(renderer)
 	_overlap_spawn(scene, "dirt", 0.0)
@@ -1170,7 +1170,7 @@ func test_bump_adds_its_specular_colour_and_does_not_fog() -> void:
 	viewport.add_child(background)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _live_lit_scene()
-	renderer.texture_provider = _overlap_texture
+	renderer.image_provider = _overlap_image
 	renderer.set_water_plane(-100.0, null)
 	var fog_source := _live_fog_source()
 	viewport.add_child(fog_source)
@@ -1222,7 +1222,7 @@ func _thermal_pixel(blend: int, thermal: bool, background: Color,
 	viewport.add_child(clear)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("thermal", blend)
-	renderer.texture_provider = _overlap_texture
+	renderer.image_provider = _overlap_image
 	renderer.set_water_plane(1.5 if far_side else -100.0, null)
 	var source := _thermal_view_source(thermal)
 	viewport.add_child(source)
@@ -1283,7 +1283,7 @@ func test_atlas_pages_carry_their_three_point_mip_levels() -> void:
 		viewport.add_child(camera)
 		var renderer := ParticleRenderer.new()
 		renderer.scene = _single_quad_scene("mips%d" % blend, blend)
-		renderer.texture_provider = _overlap_texture
+		renderer.image_provider = _overlap_image
 		viewport.add_child(renderer)
 		renderer.render_now(GameWorld.current_frame_clock_ms())
 		var pages: Array = renderer.get_debug_draw_list_report().get("atlas_pages", [])
@@ -1314,7 +1314,7 @@ func test_atlas_pages_follow_the_session_compression_and_density() -> void:
 	viewport.add_child(camera)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("pagewords", 0)
-	renderer.texture_provider = _overlap_texture
+	renderer.image_provider = _overlap_image
 	viewport.add_child(renderer)
 	var cases := [
 		# [texcompression, density, flags, dxt5, device side]
@@ -1341,18 +1341,18 @@ func test_atlas_pages_follow_the_session_compression_and_density() -> void:
 			assert_true(bool(page.get("texture_mipmaps", false)), "the page texture is mipmapped")
 
 
-func _solid_texture(color: Color) -> Texture2D:
+func _solid_image(color: Color) -> Image:
 	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
 	image.fill(color)
-	return ImageTexture.create_from_image(image)
+	return image
 
 
-func _red_texture(_name: String) -> Texture2D:
-	return _solid_texture(Color.RED)
+func _red_image(_name: String) -> Image:
+	return _solid_image(Color.RED)
 
 
-func _green_texture(_name: String) -> Texture2D:
-	return _solid_texture(Color.GREEN)
+func _green_image(_name: String) -> Image:
+	return _solid_image(Color.GREEN)
 
 
 # The page textures pass A's render-list runs bind (ParticleFarPass: the
@@ -1368,7 +1368,7 @@ func _far_run_textures(renderer: ParticleRenderer) -> Array:
 	return textures
 
 
-# A catalog rebuild (here a new texture provider) builds new atlas pages, and
+# A catalog rebuild (here a new image provider) builds new atlas pages, and
 # pass A's runs draw with them: the far-pass materials are made again with the
 # pages, never kept from the catalog they were first made for.
 func test_far_pass_materials_follow_a_catalog_rebuild() -> void:
@@ -1379,7 +1379,7 @@ func test_far_pass_materials_follow_a_catalog_rebuild() -> void:
 	viewport.add_child(camera)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("rebuilt", 0)
-	renderer.texture_provider = _red_texture
+	renderer.image_provider = _red_image
 	# The quad at y 1 sits below the plane and the eye above it: pass A. The
 	# uncompressed page words keep the page readable.
 	renderer.set_water_plane(5.0, null)
@@ -1390,7 +1390,7 @@ func test_far_pass_materials_follow_a_catalog_rebuild() -> void:
 	var before := _far_run_textures(renderer)
 	assert_eq(before.size(), 1, "one pass-A run")
 
-	renderer.texture_provider = _green_texture
+	renderer.image_provider = _green_image
 	renderer.render_now(GameWorld.current_frame_clock_ms())
 	var after := _far_run_textures(renderer)
 	assert_eq(after.size(), 1, "one pass-A run after the rebuild")
@@ -1440,7 +1440,7 @@ func test_views_build_particles_in_the_scene_pass_stride() -> void:
 	_overlap_spawn(scene, "stride", 0.0)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = scene
-	renderer.texture_provider = _overlap_texture
+	renderer.image_provider = _overlap_image
 	viewport.add_child(renderer)
 	var built := {}
 	for words in [[2, false], [1, false], [0, false], [2, true], [0, true]]:

@@ -132,6 +132,9 @@ void ResourceRoot::_bind_methods() {
 			&ResourceRoot::load_texture_created);
 	ClassDB::bind_method(D_METHOD("load_texture", "name", "loader", "policy"), &ResourceRoot::load_texture,
 			DEFVAL(LOOKUP_SESSION_DEFAULT));
+	ClassDB::bind_method(D_METHOD("load_image", "name", "loader", "policy"), &ResourceRoot::load_image,
+			DEFVAL(LOOKUP_SESSION_DEFAULT));
+	ClassDB::bind_method(D_METHOD("get_decoded_texture_count"), &ResourceRoot::get_decoded_texture_count);
 	ClassDB::bind_method(D_METHOD("load_material_texture", "name", "type"), &ResourceRoot::load_material_texture);
 	ClassDB::bind_method(D_METHOD("load_font", "name"), &ResourceRoot::load_font);
 	ClassDB::bind_method(D_METHOD("list_missing_boot_resources"), &ResourceRoot::list_missing_boot_resources);
@@ -727,9 +730,17 @@ Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader lo
 	return image;
 }
 
+Ref<Image> ResourceRoot::load_image(const String &name, TextureLoader loader, LookupPolicy policy) const {
+	return load_texture_image(name, loader, policy);
+}
+
 void ResourceRoot::release_decoded_textures() {
 	texture_cache_.clear();
 	texture_registry_.clear();
+}
+
+int64_t ResourceRoot::get_decoded_texture_count() const {
+	return static_cast<int64_t>(texture_cache_.size());
 }
 
 void ResourceRoot::sync_texture_caches_() const {

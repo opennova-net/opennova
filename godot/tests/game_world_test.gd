@@ -1829,8 +1829,12 @@ func test_a_dedicated_host_loads_no_effect_system() -> void:
 			if timeline != null:
 				var names := Array(timeline.span_names())
 				var effect_system := names.find("effect_system")
-				assert_true(effect_system >= 0 and names.find("environment") == effect_system + 1,
-						"the effect system leads the environment: %s" % [names])
+				# Its texture atlases build inside it, at its init, so the warm's first draw
+				# builds none (engine renderer/particle_atlas.h carries the witness,
+				# D-NET-NEW-L3-26).
+				assert_true(effect_system >= 0 and names.find("texture_atlases") == effect_system + 1
+						and names.find("environment") == effect_system + 2,
+						"the effect system and its atlases lead the environment: %s" % [names])
 		else:
 			assert_null(world.get_effect_world(), "a dedicated host's world loads none")
 			if timeline != null:
@@ -2496,8 +2500,10 @@ func test_a_mission_whose_environment_does_not_load_starts_on_the_engine_default
 		var timeline: LoadTimeline = world.last_load_timeline()
 		assert_not_null(timeline)
 		if timeline != null:
-			# The mission start's effect system leads its head (load_mission_internal).
-			assert_eq(timeline.spans()[1].name, "environment", "the environment stage ran")
+			# The mission start's effect system, its texture atlases nested in it, leads its head
+			# (load_mission_internal).
+			assert_eq(timeline.spans()[1].name, "texture_atlases", "the effect system built its atlases")
+			assert_eq(timeline.spans()[2].name, "environment", "the environment stage ran")
 		world.unload()
 
 
@@ -2533,15 +2539,18 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 	# The entry's mount and document, then the mission start's effect system ahead of its
 	# terrain, as retail's loads it past the head's per-slot reset (CEffectSystem_Init @0x524980
 	# ahead of Game_LoadTerrainDuringConnect @0x524F7C; engine inmatch/host_role.h
-	# open_next_mission_load_window carries the witness).
-	assert_eq(spans.size(), 5)
-	if spans.size() == 5:
+	# open_next_mission_load_window carries the witness), its texture atlases built inside it
+	# (engine renderer/particle_atlas.h, D-NET-NEW-L3-26).
+	assert_eq(spans.size(), 6)
+	if spans.size() == 6:
 		assert_eq(spans[0].name, "mount")
 		assert_eq(spans[1].name, "document")
 		assert_eq(spans[2].name, "effect_system")
-		assert_eq(spans[3].name, "environment")
-		assert_eq(spans[4].name, "terrain")
-		assert_gt(spans[4].end_us, 0,
+		assert_eq(spans[3].name, "texture_atlases")
+		assert_eq(spans[3].depth, 1, "the atlases nest in the effect system")
+		assert_eq(spans[4].name, "environment")
+		assert_eq(spans[5].name, "terrain")
+		assert_gt(spans[5].end_us, 0,
 			"finish closes the terrain span left open by the early return")
 
 

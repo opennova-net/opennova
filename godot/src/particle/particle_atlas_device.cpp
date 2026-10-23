@@ -26,19 +26,26 @@ namespace {
 
 using opennova::particle::GraphicLayer;
 
+// A frame's pixels: the provider's decoded image (a fresh one the build may convert; the
+// effect world's is the mount's particle loader, ResourceRoot::load_image), never a device
+// texture made and read back per frame (engine renderer/particle_atlas.h carries the witness:
+// the game decodes each frame into its page, D-NET-NEW-L3-26). A loose effect file's own
+// directory still loads through the texture directory's cache.
 Ref<Image> load_particle_image(const Callable &provider,
 		const String &texture_dir, const std::string &name) {
 	const String candidate = opennova::to_gd(name);
-	Ref<Texture2D> texture;
+	Ref<Image> image;
 	if (provider.is_valid())
-		texture = provider.call(candidate);
-	if (texture.is_null() && !texture_dir.is_empty())
-		texture = opennova::load_texture_from_dir(texture_dir, candidate,
+		image = provider.call(candidate);
+	if (image.is_null() && !texture_dir.is_empty()) {
+		const Ref<Texture2D> texture = opennova::load_texture_from_dir(texture_dir, candidate,
 				opennova::renderer::TextureLoader::Particle);
-	if (texture.is_null())
+		if (texture.is_valid())
+			image = texture->get_image();
+	}
+	if (image.is_null() || image->is_empty())
 		return Ref<Image>();
-	Ref<Image> image = texture->get_image();
-	if (image.is_null())
+	if (image->is_compressed() && image->decompress() != OK)
 		return Ref<Image>();
 	if (image->get_format() != Image::FORMAT_RGBA8)
 		image->convert(Image::FORMAT_RGBA8);

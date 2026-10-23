@@ -1015,10 +1015,10 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::set_scene);
 	ClassDB::bind_method(D_METHOD("get_scene"),
 			&ParticleRenderer::get_scene);
-	ClassDB::bind_method(D_METHOD("set_texture_provider", "provider"),
-			&ParticleRenderer::set_texture_provider);
-	ClassDB::bind_method(D_METHOD("get_texture_provider"),
-			&ParticleRenderer::get_texture_provider);
+	ClassDB::bind_method(D_METHOD("set_image_provider", "provider"),
+			&ParticleRenderer::set_image_provider);
+	ClassDB::bind_method(D_METHOD("get_image_provider"),
+			&ParticleRenderer::get_image_provider);
 	ClassDB::bind_method(D_METHOD("set_environment_source", "source"),
 			&ParticleRenderer::set_environment_source);
 	ClassDB::bind_method(D_METHOD("get_environment_source"),
@@ -1044,6 +1044,8 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::get_procedural_fallback_enabled);
 	ClassDB::bind_method(D_METHOD("render_now", "time_ms"),
 			&ParticleRenderer::render_now);
+	ClassDB::bind_method(D_METHOD("build_catalog"),
+			&ParticleRenderer::build_catalog);
 	ClassDB::bind_method(D_METHOD("shutdown"), &ParticleRenderer::shutdown);
 	ClassDB::bind_method(D_METHOD("attach_distortion_row", "frame_fx"),
 			&ParticleRenderer::attach_distortion_row);
@@ -1060,8 +1062,8 @@ void ParticleRenderer::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "scene"),
 			"set_scene", "get_scene");
-	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "texture_provider"),
-			"set_texture_provider", "get_texture_provider");
+	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "image_provider"),
+			"set_image_provider", "get_image_provider");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "environment_source",
 			PROPERTY_HINT_NODE_TYPE, "Node"),
 			"set_environment_source", "get_environment_source");
@@ -1122,13 +1124,13 @@ Ref<EffectScene> ParticleRenderer::get_scene() const {
 	return scene_;
 }
 
-void ParticleRenderer::set_texture_provider(const Callable &p_provider) {
-	texture_provider_ = p_provider;
+void ParticleRenderer::set_image_provider(const Callable &p_provider) {
+	image_provider_ = p_provider;
 	_invalidate_catalog();
 }
 
-Callable ParticleRenderer::get_texture_provider() const {
-	return texture_provider_;
+Callable ParticleRenderer::get_image_provider() const {
+	return image_provider_;
 }
 
 void ParticleRenderer::set_texture_dir(const String &p_texture_dir) {
@@ -1308,6 +1310,19 @@ bool ParticleRenderer::get_procedural_fallback_enabled() const {
 	return procedural_fallback_enabled_;
 }
 
+void ParticleRenderer::build_catalog() {
+	if (shutdown_ || !impl_ || scene_.is_null())
+		return;
+	const opennova::particle::ParticleFrameSnapshot &frame =
+			scene_->native_frame_snapshot();
+	const std::uint32_t page_flags = opennova::renderer::particle_atlas_page_creation_flags(
+			session_texcompression_level_, session_particle_density_);
+	if (impl_->atlas.needs_rebuild(frame.definitions, page_flags)) {
+		impl_->rebuild_catalog(frame.definitions, image_provider_, texture_dir_,
+				procedural_fallback_enabled_, page_flags);
+	}
+}
+
 void ParticleRenderer::render_now(int64_t p_time_ms) {
 	if (shutdown_ || !impl_)
 		return;
@@ -1350,14 +1365,9 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 		return;
 	}
 
+	build_catalog();
 	const opennova::particle::ParticleFrameSnapshot &frame =
 			scene_->native_frame_snapshot();
-	const std::uint32_t page_flags = opennova::renderer::particle_atlas_page_creation_flags(
-			session_texcompression_level_, session_particle_density_);
-	if (impl_->atlas.needs_rebuild(frame.definitions, page_flags)) {
-		impl_->rebuild_catalog(frame.definitions, texture_provider_, texture_dir_,
-				procedural_fallback_enabled_, page_flags);
-	}
 	// Each view's particle stride from the session's density (D-RMAT-24;
 	// renderer::particle_frame_strides).
 	const opennova::renderer::ParticleFrameStrides strides = opennova::renderer::particle_frame_strides(
@@ -1601,6 +1611,7 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	const std::vector<ParticleAtlasDevice::Page> &pages = impl_->atlas.pages();
 	const std::vector<opennova::renderer::ParticleAtlasEntry> &entries = impl_->atlas.entries();
 	result["atlas_page_count"] = static_cast<int64_t>(pages.size());
+	result["atlas_generation"] = static_cast<int64_t>(impl_->atlas.generation());
 	result["atlas_entry_count"] = static_cast<int64_t>(entries.size());
 	std::size_t resolved_entries = 0;
 	for (const opennova::renderer::ParticleAtlasEntry &entry : entries) {

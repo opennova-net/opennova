@@ -96,7 +96,29 @@ func test_load_from_resource_root_scans_every_ptl() -> void:
 	# synth_smallest is table-only.
 	assert_eq(count, 9, "all effects across the mounts register")
 	assert_gt(world.effect_count(), 0)
-	assert_true(world.get_texture_provider().is_valid(), "textures route through the mounted root")
+	assert_true(world.get_image_provider().is_valid(), "textures route through the mounted root")
+
+
+# The mission start's effect system builds the catalog's texture atlases at its init, each
+# frame's file decoded into its page and freed, a device texture made per page and none per
+# frame, so the load's first draw builds no atlas again (engine renderer/particle_atlas.h
+# carries the witness, D-NET-NEW-L3-26): the build leaves the mount's decoded textures
+# empty, and a draw after it keeps the atlas it built.
+func test_the_atlas_builds_once_from_decoded_frames() -> void:
+	# synth_minimal_effect's graphic1 is spark.tga.
+	TestFs.write_bytes(self, _root_dir.path_join("spark.tga"), TestFs.tga_bytes(Vector2i(8, 8)))
+	var root := _make_root()
+	var world := _make_world()
+	world.load_from_resource_root(root)
+	var before := int(world.get_debug_draw_list_report().get("atlas_generation", 0))
+	world.build_texture_atlases()
+	var report := world.get_debug_draw_list_report()
+	assert_eq(int(report.get("atlas_generation", 0)), before + 1, "the init builds the atlas once")
+	assert_gt(int(report.get("atlas_resolved_entry_count", 0)), 0, "spark.tga is on a page")
+	assert_eq(root.get_decoded_texture_count(), 0, "no device texture is made for a frame")
+	world.render_now(0)
+	assert_eq(int(world.get_debug_draw_list_report().get("atlas_generation", 0)), before + 1,
+			"the first draw builds no atlas again")
 
 
 # Retail's effect loader walks every mounted archive's directory and skips an

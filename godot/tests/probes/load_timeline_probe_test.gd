@@ -72,11 +72,12 @@ func test_the_read_after_a_load_carries_its_spans() -> void:
 		assert_true(int(span.duration_us) >= 0, "%s has a duration" % span.name)
 		last_end_us = maxi(last_end_us, int(span.end_us))
 	assert_eq(names, Array(timeline.span_names()), "every span, in the load's order")
-	assert_true(names.size() >= 7, "the load bracketed its stages")
-	if names.size() >= 7:
-		assert_eq(names.slice(0, 7),
-				["mount", "document", "effect_system", "environment", "terrain", "objects", "runtime"],
-				"the entry's mount and document, the effect system, the head's environment and terrain, then the objects and the runtime")
+	assert_true(names.size() >= 8, "the load bracketed its stages")
+	if names.size() >= 8:
+		assert_eq(names.slice(0, 8),
+				["mount", "document", "effect_system", "texture_atlases", "environment", "terrain",
+					"objects", "runtime"],
+				"the entry's mount and document, the effect system with its texture atlases, the head's environment and terrain, then the objects and the runtime")
 	assert_eq(String(verdict.data.label), timeline.label)
 	assert_true(int(verdict.data.ticks_usec) >= last_end_us, "the read follows the load's last span")
 	assert_gt(int(verdict.data.unix_ms), 0)

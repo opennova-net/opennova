@@ -65,7 +65,7 @@ ParticleRenderer *EffectWorld::_ensure_renderer() {
 	add_child(renderer);
 	renderer_id_ = renderer->get_instance_id();
 	renderer->set_scene(scene_);
-	renderer->set_texture_provider(texture_provider_);
+	renderer->set_image_provider(image_provider_);
 	renderer->set_texture_dir(texture_dir_);
 	renderer->set_environment_source(_environment_source());
 	renderer->set_water_plane(water_height_, _reflection_camera());
@@ -127,8 +127,8 @@ bool EffectWorld::are_particles_hidden() const {
 	return particles_disabled_;
 }
 
-Callable EffectWorld::get_texture_provider() const {
-	return texture_provider_;
+Callable EffectWorld::get_image_provider() const {
+	return image_provider_;
 }
 
 void EffectWorld::set_owner_position_provider(const Callable &p_provider) {
@@ -179,9 +179,11 @@ int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
 	}
 	root_ = p_root;
 	// A particle graphic loads through the particle manager's reader: the loose
-	// tga folder first, then the mounted name (renderer::TextureLoader::Particle).
-	texture_provider_ = Callable(p_root.ptr(), "load_texture").bind(ResourceRoot::TEXTURE_LOADER_PARTICLE);
-	_ensure_renderer()->set_texture_provider(texture_provider_);
+	// tga folder first, then the mounted name (renderer::TextureLoader::Particle),
+	// decoded to an image the atlas copies into its page, never a device texture
+	// of its own (engine renderer/particle_atlas.h carries the witness).
+	image_provider_ = Callable(p_root.ptr(), "load_image").bind(ResourceRoot::TEXTURE_LOADER_PARTICLE);
+	_ensure_renderer()->set_image_provider(image_provider_);
 	// The effect files in the archive walk's order, `.ptl` and the gore set
 	// interleaved, less what it skips (ResourceIndex::effect_files, D-VFS-13).
 	const PackedStringArray names = p_root->effect_files();
@@ -225,7 +227,7 @@ void EffectWorld::_open_files() {
     scene_->shared_native_scene()->set_spawn_enabled(!particles_disabled_);
 	ParticleRenderer *renderer = _ensure_renderer();
 	renderer->set_scene(scene_);
-	renderer->set_texture_provider(texture_provider_);
+	renderer->set_image_provider(image_provider_);
 	renderer->set_texture_dir(texture_dir_);
 }
 
@@ -237,7 +239,7 @@ void EffectWorld::clear_world() {
 	owner_pose_cache_.clear();
 	next_token_ = 1;
 	root_.unref();
-	texture_provider_ = Callable();
+	image_provider_ = Callable();
 	texture_dir_ = String();
 	owner_position_provider_ = Callable();
 	water_height_ = 0.0f;
@@ -252,7 +254,7 @@ void EffectWorld::clear_world() {
     scene_->shared_native_scene()->set_spawn_enabled(!particles_disabled_);
 	ParticleRenderer *renderer = _ensure_renderer();
 	renderer->set_scene(scene_);
-	renderer->set_texture_provider(texture_provider_);
+	renderer->set_image_provider(image_provider_);
 	renderer->set_texture_dir(String());
 }
 
@@ -468,6 +470,10 @@ int EffectWorld::warm_all_effects(const Vector3 &p_position) {
 		renderer->clear_warm_pipelines();
 	}
 	return spawned;
+}
+
+void EffectWorld::build_texture_atlases() {
+	_ensure_renderer()->build_catalog();
 }
 
 int64_t EffectWorld::render_now(int64_t p_time_ms) {
@@ -828,7 +834,7 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_particles_hidden", "hidden"),
 			&EffectWorld::set_particles_hidden);
 	ClassDB::bind_method(D_METHOD("are_particles_hidden"), &EffectWorld::are_particles_hidden);
-	ClassDB::bind_method(D_METHOD("get_texture_provider"), &EffectWorld::get_texture_provider);
+	ClassDB::bind_method(D_METHOD("get_image_provider"), &EffectWorld::get_image_provider);
 	ClassDB::bind_method(D_METHOD("set_owner_position_provider", "provider"),
 			&EffectWorld::set_owner_position_provider);
 	ClassDB::bind_method(D_METHOD("set_water_plane", "value", "reflection_camera"),
@@ -858,6 +864,7 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::spawn_effect_request, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("warm_all_effects", "position"), &EffectWorld::warm_all_effects);
 	ClassDB::bind_method(D_METHOD("render_now", "time_ms"), &EffectWorld::render_now);
+	ClassDB::bind_method(D_METHOD("build_texture_atlases"), &EffectWorld::build_texture_atlases);
 	ClassDB::bind_method(D_METHOD("attach_distortion_row", "frame_fx"),
 			&EffectWorld::attach_distortion_row);
 	ClassDB::bind_method(D_METHOD("get_debug_draw_list_report"),

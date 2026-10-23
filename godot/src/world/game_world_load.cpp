@@ -293,7 +293,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		if (!drive_.pending_dedicated() && ObjectDB::get_instance(join_effect_world_id_) == nullptr) {
 			timeline->span("effect_system");
 			free_head_effect_world();
-			head_effect_world_id_ = ObjectID(create_effect_world(p_resource_root)->get_instance_id());
+			head_effect_world_id_ = ObjectID(create_effect_world(p_resource_root, timeline)->get_instance_id());
 			timeline->end_span();
 		}
 		drive_.open_host_load_window();
@@ -1427,15 +1427,21 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 	}
 	// The tracer ribbon pipelines compile in the same forced frames.
 	leg("present_pipelines");
+	leg("fire_pipelines");
 	MissionRoot *runtime = get_runtime();
 	if (runtime != nullptr) {
 		runtime->warm_present_pipelines(warm_pos);
 	}
+	leg_end();
+	// The effect world's atlases were built at its creation (create_effect_world): this
+	// draw compiles the spawned catalog's lists alone.
+	leg("effect_draw");
 	if (effect_world != nullptr) {
 		effect_world->advance_simulation_tick(Simulation::tick_dt(),
 				get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
 		effect_world->render_now(get_frame_clock_ms());
 	}
+	leg_end();
 	leg_end();
 	// Pipeline compiles need real draws. Skip the forced frames inside the
 	// editor embedder (re-entrant editor drawing); the texture warm above still
@@ -1490,7 +1496,8 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 // Mission-start load of EVERY mounted .ptl into the runtime effect world
 // [orig: CEffectSystem_Init @ 0x5f6070 <- Game_StartMission @ 0x524980 — no fixed
 // file list: the loose ptl\*.ptl set and every PFF .ptl entry both parse].
-EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_root) {
+EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_root,
+		const Ref<LoadTimeline> &p_timeline) {
 	EffectWorld *effect_world = memnew(EffectWorld);
 	effect_world->set_name("EffectWorld");
 	add_child(effect_world);
@@ -1502,6 +1509,12 @@ EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_
 	// runs inside the effect load, after the mission start's copy).
 	effect_world->set_session_render_settings(session_texcompression_level_, session_particle_density_);
 	const int count = effect_world->load_from_resource_root(p_resource_root);
+	// Then its texture atlases, each frame's file decoded into its page, as the effect system's
+	// init builds them; the warm's first draw then builds none (engine renderer/particle_atlas.h
+	// carries the witness, D-NET-NEW-L3-26).
+	if (p_timeline.is_valid()) p_timeline->span("texture_atlases");
+	effect_world->build_texture_atlases();
+	if (p_timeline.is_valid()) p_timeline->end_span();
 	UtilityFunctions::print_verbose(vformat("GameWorld: effect world — %d effect(s) across %d .ptl file(s)",
 			count, effect_world->file_count()));
 	return effect_world;
@@ -1542,7 +1555,7 @@ void GameWorld::load_join_effect_system(const Ref<ResourceRoot> &p_resource_root
 	session_texcompression_level_ = texcompression_level_;
 	session_particle_density_ = particle_density_;
 	timeline->span("effects");
-	EffectWorld *effect_world = create_effect_world(p_resource_root);
+	EffectWorld *effect_world = create_effect_world(p_resource_root, timeline);
 	timeline->end_span();
 	// The catalog warms in front of the load camera as the load's warm does; no mission
 	// root lives yet, so no presenter pipeline warms here (the S2C 0x1A's load draws those).
