@@ -271,7 +271,7 @@ uint8_t blend_fragment(uint8_t destination,
 
 bool validate(const TerrainStaticShadowRasterInput &input,
 		const TerrainStaticShadowAlphaPage &page) noexcept {
-	if (!page.is_valid() || !std::isfinite(input.receiver_depth)) return false;
+	if (!page.is_valid() || !std::isfinite(input.clear_depth)) return false;
 	if (page.width > std::numeric_limits<uint32_t>::max() / kTemporaryScale ||
 			page.height > std::numeric_limits<uint32_t>::max() / kTemporaryScale) {
 		return false;
@@ -607,7 +607,7 @@ bool rasterize_terrain_static_shadow_alpha(
 	try {
 		temporary.resize(high_count);
 		resolved.resize(page.alpha.size());
-		depth_buffer.assign(high_count, input.receiver_depth);
+		depth_buffer.assign(high_count, input.clear_depth);
 		live.counts.assign(static_cast<std::size_t>(live.columns) * block_rows, 0);
 	} catch (const std::bad_alloc &) {
 		return false;
@@ -652,8 +652,8 @@ bool rasterize_terrain_static_shadow_alpha(
 				// (Sutherland-Hodgman, exactly the clipper's arithmetic).
 				// [orig: RenderSlot_SetupShadowCascadeMatrices_0 @0x58D5F8 (P[10] =
 				// 0.0005), @0x58D602 (P[14] = -0.00005), @0x58D60C (P[15] = 1);
-				// the temp RT clear depth 0.99995 @0x60D5BF places the far side
-				// likewise]
+				// the temp's depth clear 0.99995 (kTerrainStaticShadowTempClearDepth,
+				// @0x60D5BF) is the far side the casters' LESSEQUAL test admits]
 				std::array<TerrainStaticShadowRasterVertex, kClippedPolygonMax> clipped;
 				const std::size_t clipped_count = clip_near_plane(
 						triangle.vertices, clipped);

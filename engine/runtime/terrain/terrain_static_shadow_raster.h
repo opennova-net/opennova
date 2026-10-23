@@ -5,9 +5,9 @@
 // this module owns the witnessed temporary-RT semantics: the near-plane clip
 // (depth < 0, i.e. geometry lower than 0.1 u above the caster's ground plane,
 // never casts — buried skirts and foundations are cut away), 2x coverage,
-// z<=0.5 receiver admission, material alpha testing/blending, and a linear
-// resolve into the destination-resolution light-alpha carrier. It never
-// changes RGB.
+// LESSEQUAL admission against the temp's depth clear, material alpha
+// testing/blending, and a linear resolve into the destination-resolution
+// light-alpha carrier. It never changes RGB.
 // [orig: Terrain_CollectAndRenderTileModels @0x60D5BF..0x60DA4F;
 // the ortho depth row RenderSlot_SetupShadowCascadeMatrices_0 @0x58D5F8..0x58D60C;
 // PROJSHAD submits @0x60D960..0x60D97D; temp-blue composite
@@ -34,6 +34,16 @@ inline constexpr float kTerrainStaticShadowMinimumVerticalLight = 0.25f;
 // @ 0x58D4D3..0x58D618].
 inline constexpr float kTerrainStaticShadowDepthScale = 0.00050000002f;
 inline constexpr float kTerrainStaticShadowDepthBias = -0.000050000002f;
+// The temp target's depth clear, flt_7DA0B0 (0x3F7FFCB9), which the casters test against:
+// the DOT3 light quad drawn into the temp ahead of them neither tests nor writes depth (its
+// pass flags 0x1700000 set bits 20 and 21: ZWRITEENABLE false, ZFUNC ALWAYS), so a caster
+// fragment shadows up to depth 0.99995, h = 2000 u above its ground plane
+// [orig: Terrain_CollectAndRenderTileModels @0x60D250 - the clear's load @0x60D5A0 into
+//  GTexRT_SelectThunk (the call @0x60D5BF), the light pass's flags @0x60D784 into
+//  GfxShader_ApplyPassChecked (the call @0x60D794); CGfxShader_ApplyPass @0x683190 - the
+//  flags' bits 20 / 21 @0x683221..0x683249; CGfxDevice_ApplyRenderStates @0x67E230 -
+//  D3DRS_ZFUNC ALWAYS @0x67E28A..0x67E29E, D3DRS_ZWRITEENABLE @0x67E265].
+inline constexpr float kTerrainStaticShadowTempClearDepth = 0.99995f;
 
 struct TerrainStaticShadowRasterVertex {
 	// Normalized destination-page coordinates. (0,0) and (1,1) are the outer
@@ -155,7 +165,7 @@ struct TerrainStaticShadowRasterInput {
 	// already admitted for culling/material visibility by the binding.
 	std::vector<TerrainStaticShadowRasterTriangle> triangles;
 	std::vector<TerrainStaticShadowAlphaTextureView> alpha_textures;
-	float receiver_depth = 0.5f;
+	float clear_depth = kTerrainStaticShadowTempClearDepth;
 	// Threads the pixel loop may split its rows across (1 = the calling
 	// thread only). Every count produces the same bytes.
 	std::size_t threads = 1;

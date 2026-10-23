@@ -482,7 +482,7 @@ int main() {
 	// the material state at the planner's tick (frame one's alpha pyramid at 100 ms), and the
 	// job evaluated on the CPU rasterizes the planner's own bytes.
 	// [orig: Terrain_CollectAndRenderTileModels @0x60D250 - Render_SubmitEntity (the call
-	//  @0x60D971, mode 2), CRenderBatchQueue_SortAndFlush (the call @0x60D97D)]
+	//  @0x60D971, its flags argument 2), CRenderBatchQueue_SortAndFlush (the call @0x60D97D)]
 	{
 		TerrainStaticShadowDeviceJob device_job;
 		if (!expect(animated_planner.build_device_job(page, device_job) &&

@@ -1,28 +1,31 @@
 #pragma once
 
 // The static-shadow page pass in the form the device draws it. Retail's CPU collects the
-// casters and sets each one's matrices, then submits it once (Render_SubmitEntity, mode 2)
-// and flushes the batch queue (CRenderBatchQueue_SortAndFlush) into the temp target: the
-// casters' vertices are the device's, its vertex stage applying the caster's world matrix,
-// the shadow ortho's row and the material's UV transform. A TerrainStaticShadowDeviceDraw is
-// one caster surface's batch with the state it draws under, in the collector / ROBJ / strip
-// order the CPU raster takes; the walk that lists them is the CPU's whole share of a page.
-// rasterize_terrain_static_shadow_device_job evaluates the same job on the CPU: the device
-// pass's oracle, and the raster wherever no device runs.
+// casters and sets each one's matrices, then submits it once (Render_SubmitEntity, its flags
+// argument 2) and flushes the batch queue (CRenderBatchQueue_SortAndFlush) into the temp
+// target: the casters' vertices are the device's, its vertex stage applying the caster's
+// world matrix, the shadow ortho's row and the material's UV transform. A
+// TerrainStaticShadowDeviceDraw is one caster surface's batch with the state it draws under,
+// in the collector / ROBJ / strip order the CPU raster takes; the walk that lists them is the
+// CPU's whole share of a page. rasterize_terrain_static_shadow_device_job evaluates the same
+// job on the CPU: the device pass's oracle, and the raster wherever no device runs.
 // [orig: Terrain_CollectAndRenderTileModels @0x60D250 - the temp target GTexRT_SelectThunk
-//  (the call @0x60D5BF), per caster Render_SubmitEntity @0x5DAD80 (the call @0x60D971, mode 2)
-//  and CRenderBatchQueue_SortAndFlush @0x5DAE40 (the call @0x60D97D), GTexRT_RestoreThunk
-//  (the call @0x60DA4F)]
+//  (the call @0x60D5BF), per caster Render_SubmitEntity @0x5DAD80 (the call @0x60D971, its
+//  4th argument 2: IDA's numBones, the flags word Render_CollectRenderObjectsForBatch
+//  @0x5D8F20 takes as renderFlags and tests for bit 2 @0x5D9130) and
+//  CRenderBatchQueue_SortAndFlush @0x5DAE40 (the call @0x60D97D), GTexRT_RestoreThunk (the
+//  call @0x60DA4F)]
 //
 // The device's steps per job, each the CPU raster's (the embedder's device pass, godot/src/
 // terrain/terrain_static_shadow_device_pass.h, records them):
 // - the temp's fill from the page's DOT3 light alpha, nearest 2x: retail's light quad into
 //   the temp [orig: Terrain_CollectAndRenderTileModels - the GfxShader_ApplyPassChecked call
 //   @0x60D794, the fill @0x60D7A8];
-// - the casters into the temp over a depth cleared to the receiver plane, LESSEQUAL with z
-//   writes, the ordinary pass culling CCW (the clockwise front face of a target whose y
-//   grows down) and a two-sided material culling nothing [orig: CRenderBatchQueue_FlushBatches
-//   @0x5DA0FA..0x5DA137], one submit and flush per caster [orig: @0x60D971 / @0x60D97D];
+// - the casters into the temp over its depth clear (kTerrainStaticShadowTempClearDepth: the
+//   light quad writes no depth), LESSEQUAL with z writes, the ordinary pass culling CCW (the
+//   clockwise front face of a target whose y grows down) and a two-sided material culling
+//   nothing [orig: CRenderBatchQueue_FlushBatches @0x5DA0FA..0x5DA137], one submit and flush
+//   per caster [orig: @0x60D971 / @0x60D97D];
 // - the resolve of the temp's 2x2 boxes into the page alpha, RGB untouched: the composite's
 //   MINFILTER LINEAR fetch at the box centre [orig: PolyTrn_RenderTile @0x60E0C6..0x60E19D].
 
@@ -70,8 +73,8 @@ struct TerrainStaticShadowDeviceJob {
 	TerrainTilePageKey page{};
 	// Presentation-world surface-to-light (the projection's light).
 	TerrainStaticShadowLightDirection surface_to_light{};
-	// The temp target's depth clear: the receiver plane LESSEQUAL admits.
-	float receiver_depth = 0.5f;
+	// The temp target's depth clear, which the casters' LESSEQUAL test admits up to.
+	float clear_depth = kTerrainStaticShadowTempClearDepth;
 	std::vector<TerrainStaticShadowDeviceDraw> draws;
 	uint64_t triangle_count = 0;
 };

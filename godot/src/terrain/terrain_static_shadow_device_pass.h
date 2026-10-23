@@ -10,10 +10,11 @@
 // Per job, recorded on the RenderingDevice ahead of the frame's terrain draw:
 // - the fill: a compute pass writes the temp (R8, twice the page) from the uploaded layer's
 //   DOT3 light alpha, nearest 2x, where retail draws its DOT3 light quad into the temp;
-// - the casters: one draw list into the temp and a D32F depth cleared to the receiver plane,
-//   one draw per caster surface in the job's order, LESSEQUAL with depth writes, the vertex
-//   stage projecting the caster as the shadow ortho does and the fragment stage writing the
-//   black PROJSHAD fragment under the material's alpha test and blend;
+// - the casters: one draw list into the temp and a D32F depth cleared to the job's
+//   clear_depth (retail's temp clear: its light quad writes no depth), one draw per caster
+//   surface in the job's order, LESSEQUAL with depth writes, the vertex stage projecting the
+//   caster as the shadow ortho does and the fragment stage writing the black PROJSHAD
+//   fragment under the material's alpha test and blend;
 // - the resolve: a compute pass writes the layer's alpha from the temp's 2x2 boxes (the
 //   composite's MINFILTER LINEAR fetch at the box centre), its RGB untouched.
 // The witnesses for each step are the engine's (runtime/terrain/

@@ -81,7 +81,7 @@ bool build_terrain_static_shadow_device_raster_input(const TerrainStaticShadowDe
 	try {
 		input = TerrainStaticShadowRasterInput{};
 		input.threads = threads;
-		input.receiver_depth = job.receiver_depth;
+		input.clear_depth = job.clear_depth;
 		// The texture slots in draw order, one per distinct pyramid; each draw's triangles
 		// start at its prefix.
 		std::vector<int32_t> texture_slots(job.draws.size(), -1);

@@ -14,7 +14,7 @@ extends GutTest
 const SYN_HOUSE_SINE := "res://../fixtures/threedi/synth/house_lod0_sine_rotx.3di"
 const TMAP_STAGE := "static_shadow_device"
 # The share of a page's pixels whose alpha may differ by more than one step: a pixel centre
-# on a triangle edge, a fragment within a float step of the receiver plane, an alpha-tested
+# on a triangle edge, a fragment within a float step of the depth clear, an alpha-tested
 # texel at its reference (fixed-point edges, D32F depth and 8-bit filter weights against the
 # oracle's exact float arithmetic).
 const EDGE_SHARE_LIMIT := 0.005

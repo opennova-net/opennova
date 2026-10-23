@@ -613,11 +613,11 @@ bool TerrainStaticShadowDevicePass::record(const TerrainStaticShadowDeviceJob &p
 	if (!projection.has_value()) return fail("the job's page has no projection");
 	// The temp starts as the layer's DOT3 light alpha (retail's light quad into the temp).
 	if (!dispatch(fill_pipeline_, fill_set_, p_layer, temp_dimension_)) return false;
-	// The casters into the temp over a depth cleared to the receiver plane, in the job's
-	// order: one submit and flush per caster.
+	// The casters into the temp over its depth clear (the light quad writes no depth), in the
+	// job's order: one submit and flush per caster.
 	PackedColorArray no_clear;
 	const int64_t list = rd_->draw_list_begin(framebuffer_, RenderingDevice::DRAW_CLEAR_DEPTH,
-			no_clear, p_job.receiver_depth);
+			no_clear, p_job.clear_depth);
 	if (list == RenderingDevice::INVALID_ID) return fail("the device could not begin the caster draw list");
 	write_f32(caster_push_, 96, p_job.surface_to_light.x);
 	write_f32(caster_push_, 100, p_job.surface_to_light.y);

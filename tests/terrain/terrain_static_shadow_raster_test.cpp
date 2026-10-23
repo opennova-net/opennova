@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace {
@@ -100,25 +101,49 @@ bool test_opaque_projection_preserves_outside_and_resolves_edges() {
 }
 
 bool test_depth_and_winding_admission() {
+	// The temp's depth clear is retail's flt_7DA0B0, and the DOT3 light quad ahead of the
+	// casters writes no depth (its pass flags 0x1700000), so the casters test against the
+	// clear itself [orig: Terrain_CollectAndRenderTileModels - the clear's load @0x60D5A0, the
+	// light pass's flags @0x60D784; CGfxShader_ApplyPass @0x683221..0x683249].
+	uint32_t clear_bits = 0;
+	std::memcpy(&clear_bits, &kTerrainStaticShadowTempClearDepth, sizeof clear_bits);
+	if (!expect(clear_bits == 0x3F7FFCB9u && TerrainStaticShadowRasterInput{}.clear_depth ==
+			kTerrainStaticShadowTempClearDepth,
+			"the temp's depth clear is retail's 0.99995")) return false;
 	TerrainStaticShadowRasterInput input;
 	TerrainStaticShadowAlphaPage result = alpha_page(2, 2,
 			std::vector<uint8_t>(4, 200));
-	const auto behind = rectangle(0.0f, 0.0f, 1.0f, 1.0f, 0.75f);
+	// A caster 1500 u above its ground plane (depth 0.74995): under the clear, it shadows.
+	const float high_depth = 1500.0f * kTerrainStaticShadowDepthScale +
+			kTerrainStaticShadowDepthBias;
+	const auto high = rectangle(0.0f, 0.0f, 1.0f, 1.0f, high_depth);
+	input.triangles.assign(high.begin(), high.end());
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, result) &&
+			std::all_of(result.alpha.begin(), result.alpha.end(),
+					[](uint8_t value) { return value == 0; }),
+			"a caster 1500 u up shadows under the temp's depth clear")) return false;
+
+	result = alpha_page(2, 2, std::vector<uint8_t>(4, 200));
+	const auto behind = rectangle(0.0f, 0.0f, 1.0f, 1.0f, 0.99998f);
 	input.triangles.assign(behind.begin(), behind.end());
 	if (!expect(rasterize_terrain_static_shadow_alpha(input, result),
 			"depth-rejected projection is still a valid raster job")) return false;
 	if (!expect(std::all_of(result.alpha.begin(), result.alpha.end(),
 			[](uint8_t value) { return value == 200; }),
-			"fragments behind the z=0.5 receiver quad do not shadow")) return false;
+			"fragments behind the temp's depth clear do not shadow")) return false;
 
-	// Reversed input still rasterizes when the authored material is two-sided.
+	// Reversed input still rasterizes when the authored material is two-sided; LESSEQUAL
+	// admits a fragment at the clear itself (a dyadic clear here, so every sample's
+	// interpolated depth is exactly the vertices').
+	const float at = 0.5f;
+	input.clear_depth = at;
 	input.triangles.clear();
 	input.triangles.push_back(triangle(
-			vertex(0.0f, 0.0f, 0.5f), vertex(0.0f, 1.0f, 0.5f),
-			vertex(1.0f, 1.0f, 0.5f)));
+			vertex(0.0f, 0.0f, at), vertex(0.0f, 1.0f, at),
+			vertex(1.0f, 1.0f, at)));
 	input.triangles.push_back(triangle(
-			vertex(0.0f, 0.0f, 0.5f), vertex(1.0f, 1.0f, 0.5f),
-			vertex(1.0f, 0.0f, 0.5f)));
+			vertex(0.0f, 0.0f, at), vertex(1.0f, 1.0f, at),
+			vertex(1.0f, 0.0f, at)));
 	for (TerrainStaticShadowRasterTriangle &draw : input.triangles) {
 		draw.two_sided = true;
 	}
@@ -126,7 +151,7 @@ bool test_depth_and_winding_admission() {
 			"clockwise projection rasterizes")) return false;
 	return expect(std::all_of(result.alpha.begin(), result.alpha.end(),
 			[](uint8_t value) { return value == 0; }),
-			"clockwise fragments at the receiver depth are admitted");
+			"clockwise fragments at the clear depth are admitted");
 }
 
 bool test_one_sided_cull_and_two_sided_override() {
