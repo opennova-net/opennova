@@ -91,21 +91,6 @@ func test_the_world_block_rows() -> void:
 	assert_false(GameWorld.frame_leg_in_world("no_such_leg"))
 
 
-# A joiner's mission start ends in its final wait for the S2C 0x0F, a busy loop that renders
-# nothing (Game_StartMission's wait @0x526295..0x5262E5; engine inmatch::Session::renders): the
-# render callback's rows are the scene rows and the audio row, its emitter mix ahead of the
-# scene or page choice, and none of them runs there; the update's rows run on.
-func test_the_render_rows_are_the_render_callback() -> void:
-	var update_rows := ["begin", "session", "remote_admin", "scene_gate", "network", "finish"]
-	for name in Array(GameWorld.frame_leg_names()):
-		assert_eq(GameWorld.frame_leg_in_render(name), not update_rows.has(name),
-				"%s is the render callback's: %s" % [name, not update_rows.has(name)])
-		if GameWorld.frame_leg_draws_scene(name):
-			assert_true(GameWorld.frame_leg_in_render(name), "%s is a render row" % name)
-	assert_false(GameWorld.frame_leg_draws_scene("audio"), "the audio row runs under the page")
-	assert_false(GameWorld.frame_leg_in_render("no_such_leg"))
-
-
 func test_only_the_session_and_network_rows_stop_the_frame() -> void:
 	for name in GameWorld.frame_leg_names():
 		var stops := GameWorld.frame_leg_stops_frame(name)

@@ -251,10 +251,12 @@ int main() {
 
 	// A joiner's mission start ends at its final wait for the S2C 0x0F, not at the load:
 	// the update that leaves the wait ends the mode's initialize, so the frame drains no
-	// further update, the main loop resets its bank, smoothing and phase, and the three
-	// frames drawn after it bank only the time since their render. A hitch frame there
-	// fast-forwards nothing (D-NET-NEW-L2-36) [orig: Game_StartMission @0x525E1F, the
-	// final wait @0x526295..0x5262E5; Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E;
+	// further update, the main loop resets its bank, smoothing and phase, and its first frame,
+	// whose render is that frame's, counts the first of the three re-based frames down: the
+	// three frames after it bank only the time since a render, the fourth its full time. A
+	// hitch frame there fast-forwards nothing (D-NET-NEW-L2-36, V-ROLL-AW F2) [orig:
+	// Game_StartMission @0x525E1F, the final wait @0x526295..0x5262E5;
+	// Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E (the count-down @0x5CAF08);
 	// Game_MainLoop @0x52B70F..0x52B757, @0x52B766].
 	{
 		TickProbe target;
@@ -274,16 +276,16 @@ int main() {
 		target.final_wait_end_after = target.inputs.size() + 1;
 		if (!expect(session.advance(hitch).ticks_run() == 1,
 				"final wait: the update that leaves it is the frame's last")) return 1;
-		// No fast-forward: the first frame and the three drawn after the wait bank only
-		// the time since their render (here none), against no smoothing history.
+		// No fast-forward: the three frames after it bank only the time since a render (here
+		// none), against no smoothing history.
 		FrameInput drawn;
 		drawn.delta_seconds = 1.0;
 		drawn.since_render_seconds = 0.0;
-		for (int frame = 0; frame < 4; ++frame) {
+		for (int frame = 0; frame < 3; ++frame) {
 			if (!expect(session.advance(drawn).ticks_run() == 0,
 					"final wait: the frames after it bank no hitch")) return 1;
 		}
-		// The full 160 ms banks again over the seed-only history: (7 * 16 + 2576 + 4) >> 3 =
+		// The fourth banks its full 160 ms over the seed-only history: (7 * 16 + 2576 + 4) >> 3 =
 		// 336 units, 5 quanta from phase 0, 2 ticks.
 		FrameInput full;
 		full.delta_seconds = TickAccumulator::kTickDt * 10.0;

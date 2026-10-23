@@ -196,9 +196,9 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// the distortion row's content gate reads it; the terminal compositor
 	// executes the plan after every transparent.
 	{ "screen_effects", kNoSlot, &GameWorld::leg_screen_effects, kSceneLeg },
-	// The audio leg (banked at finish): the render callback's emitter mix, ahead of its scene or
-	// page choice, so it runs under the status page but not in a joiner's final wait.
-	{ "audio", kNoSlot, &GameWorld::leg_audio, kRenderLeg },
+	// The audio leg (banked at finish): the update's sound drains, then the render callback's
+	// listener and emitter mix, which a joiner's final wait stands down (mix_audio_frame).
+	{ "audio", kNoSlot, &GameWorld::leg_audio, kLegNone },
 	{ "clear", FrameStats::WORLD_CLEAR, &GameWorld::leg_clear, kSceneLeg },
 	{ "environment_cube", FrameStats::WORLD_ENV_CUBE, &GameWorld::leg_environment_cube, kSceneLeg },
 	// Banks the foliage/audio counters + the RENDER_WATER_* / RENDER_Q3_* /
@@ -338,15 +338,6 @@ bool GameWorld::frame_leg_in_world(const String &p_name) {
 	return false;
 }
 
-bool GameWorld::frame_leg_in_render(const String &p_name) {
-	for (int i = 0; i < kFrameLegCount; ++i) {
-		if (p_name == kFrameLegs[i].name) {
-			return (kFrameLegs[i].flags & (kRenderLeg | kSceneLeg)) != 0;
-		}
-	}
-	return false;
-}
-
 bool GameWorld::frame_leg_stops_frame(const String &p_name) {
 	for (int i = 0; i < kFrameLegCount; ++i) {
 		if (p_name == kFrameLegs[i].name) {
@@ -363,8 +354,6 @@ void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext 
 	if (live_table) last_frame_run_mask_ = 0;
 	for (int i = 0; i < p_count; ++i) {
 		const FrameLeg &leg = p_legs[i];
-		// A joiner's final wait runs no render callback: none of its rows run.
-		if ((leg.flags & kRenderLeg) != 0 && !r_ctx.rendered) continue;
 		// The status page stands in for the scene frame: its rows do not run.
 		if ((leg.flags & kSceneLeg) != 0 && !r_ctx.scene_drawn) continue;
 		// A frame that skips its world runs none of its world block's rows.
@@ -728,7 +717,7 @@ GameWorld::LegResult GameWorld::leg_scene_overlay(FrameContext &r_ctx) {
 }
 
 GameWorld::LegResult GameWorld::leg_audio(FrameContext &r_ctx) {
-	mix_audio_frame(r_ctx.outcome.is_valid() ? r_ctx.outcome->get_ticks_run() : 0);
+	mix_audio_frame(r_ctx.outcome.is_valid() ? r_ctx.outcome->get_ticks_run() : 0, r_ctx.rendered);
 	return kLegRan;
 }
 
@@ -1361,7 +1350,7 @@ void GameWorld::render_environment_cube_frame() {
 	environment_cube_->advance_frame(capture_position);
 }
 
-void GameWorld::mix_audio_frame(int p_ticks_run) {
+void GameWorld::mix_audio_frame(int p_ticks_run, bool p_rendered) {
 	const int64_t audio_start = now_us();
 	MissionAudio *audio = get_mission_audio();
 	if (world_ready_ && audio != nullptr) {
@@ -1402,7 +1391,11 @@ void GameWorld::mix_audio_frame(int p_ticks_run) {
 				if (channels) audio->shutdown_audio_channels();
 			}
 		}
-		audio->tick(frame_camera_pos_, frame_delta_);
+		// The listener and emitter mix is the render callback's head: a frame inside a joiner's
+		// final wait runs no render callback, so it mixes nothing; the drains above are the
+		// update's, and a sound a wait pass raised plays at once, as retail's handler plays it
+		// inside the wait's receive (engine inmatch::Session::renders carries the witness).
+		if (p_rendered) audio->tick(frame_camera_pos_, frame_delta_);
 		music_var_pump();
 		perf_audio_us_ = now_us() - audio_start;
 	}

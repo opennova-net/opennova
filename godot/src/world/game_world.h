@@ -137,8 +137,9 @@ public:
 		Ref<MissionFrameInput> input;
 		Ref<MissionFrameOutcome> outcome;
 		// The render gate's verdict (leg_scene_gate, engine inmatch::Session::renders): false
-		// while a joiner's mission start is in its final wait for the S2C 0x0F, when no
-		// kRenderLeg row runs (and no kSceneLeg row: scene_drawn is false with it).
+		// while a joiner's mission start is in its final wait for the S2C 0x0F, when no kSceneLeg
+		// row runs (scene_drawn is false with it) and the audio row runs its drains alone, its
+		// listener and emitter mix (the render callback's head) standing down.
 		bool rendered = true;
 		// The scene gate's verdict (leg_scene_gate): false while the status page stands in for
 		// the scene frame, when no kSceneLeg row runs.
@@ -164,11 +165,6 @@ public:
 		// frame's composes, the water pass, the collect, the foliage and the sun veil's
 		// stop-down target (engine inmatch::FrameOutcome::world_skipped carries the witness).
 		kWorldLeg = 1u << 2,
-		// The row is the render callback's outside its scene frame (retail's GameLoop_RenderFrame:
-		// the listener and emitter legs ahead of the scene or the page): it runs under the status
-		// page, but not in a joiner's final wait, which runs no render callback (engine
-		// inmatch::Session::renders carries the witness).
-		kRenderLeg = 1u << 3,
 	};
 	// What a leg body reports back to the loop: it ran (its LegScope banks
 	// the span), it did not run this frame (nothing is banked -- a skipped
@@ -563,9 +559,6 @@ public:
 	static bool frame_leg_draws_scene(const String &p_name);
 	// Whether the live table's row `p_name` is the world block's (kWorldLeg).
 	static bool frame_leg_in_world(const String &p_name);
-	// Whether the live table's row `p_name` is the render callback's (kRenderLeg or kSceneLeg):
-	// none of them runs in a joiner's final wait.
-	static bool frame_leg_in_render(const String &p_name);
 	// The live table's rows whose bodies the last frame ran, in table order (a structural seam:
 	// the scene gate's skip is visible here).
 	PackedStringArray get_last_frame_legs() const;
@@ -612,7 +605,7 @@ public:
 	void render_scene_overlay_frame();
 	void append_celestial_overlays(SceneOverlaySubmission &r_submission);
 	void append_nvg_laser_overlays(SceneOverlaySubmission &r_submission);
-	void mix_audio_frame(int p_ticks_run);
+	void mix_audio_frame(int p_ticks_run, bool p_rendered);
 	void update_clear_frame();
 	void render_environment_cube_frame();
 	void finish_device_frame();

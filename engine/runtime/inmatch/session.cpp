@@ -1225,28 +1225,30 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// Each update counted toward the 62-update second inside the loop; this
 	// frame's render counts now (a frame inside the final wait renders none).
 	if (out.rendered) count_rendered_frame();
+	// A joiner's mission start ends at its final wait, not at the load: the start arms
+	// its three frames ahead of that wait, which renders nothing, so they are the first
+	// three drawn after the S2C 0x0F; the mode's initialize returns only then, and the
+	// main loop resets its bank, smoothing and phase and reads its clock after it. The
+	// frames that ran the wait's passes (ours do; they render nothing, renders) bank nothing
+	// of what follows. The frame whose drain took the 0x0F renders the main loop's first
+	// frame past that reset, so the three arm ahead of its count-down below and its render
+	// takes the first: the next three frames bank only the time since a render.
+	// [orig: Game_StartMission @0x524360 - dword_24C1174 = 3 @0x525E1F, the final wait
+	//  @0x526295..0x5262E5 (no render); Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E
+	//  (the count-down @0x5CAF08); Game_MainLoop @0x52B630 - the mode-init reset
+	//  @0x52B70F..0x52B757 (the smoothing @0x52B71B), the clock read @0x52B766]
+	if (final_wait_ended_) {
+		final_wait_ended_ = false;
+		accumulator_.reset();
+		start_rebase_frames_ = kStartRebaseFrames;
+		rebase_clock_ = true;
+	}
 	// Each of the first frames drawn after the mission start counts down and
 	// raises the re-base flag, the scene frame's tail: a frame the status page
 	// stands in for counts none down [orig: Render_ProcessMainSceneFrame
 	// @0x5caeff..0x5caf0e, the scene arm @0x521CE8 alone].
 	if (out.scene_drawn && start_rebase_frames_ > 0) {
 		--start_rebase_frames_;
-		rebase_clock_ = true;
-	}
-	// A joiner's mission start ends at its final wait, not at the load: the start arms
-	// its three frames ahead of that wait, which renders nothing, so they are the first
-	// three drawn after the S2C 0x0F; the mode's initialize returns only then, and the
-	// main loop resets its bank, smoothing and phase and reads its clock after it. The
-	// frames that ran the wait's passes (ours do; they render nothing, renders) bank nothing
-	// of what follows.
-	// [orig: Game_StartMission @0x524360 - dword_24C1174 = 3 @0x525E1F, the final wait
-	//  @0x526295..0x5262E5 (no render); Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E;
-	//  Game_MainLoop @0x52B630 - the mode-init reset @0x52B70F..0x52B757 (the smoothing
-	//  @0x52B71B), the clock read @0x52B766]
-	if (final_wait_ended_) {
-		final_wait_ended_ = false;
-		accumulator_.reset();
-		start_rebase_frames_ = kStartRebaseFrames;
 		rebase_clock_ = true;
 	}
 	last_perf_ = out.perf;

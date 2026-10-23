@@ -338,7 +338,8 @@ struct FrameOutcome {
 	uint32_t frame_stamp_ms = 0;
 	// The main frame's render callback runs (Session::renders): false only while a joiner's
 	// mission start is in its final wait for the S2C 0x0F, which renders nothing (no audio legs,
-	// no scene, no page; scene_drawn is false with it). The embedder runs its render legs on it.
+	// no scene, no page; scene_drawn is false with it). The embedder stands its render work down
+	// on it (its scene legs, its listener and emitter mix); the update's drains run on.
 	bool rendered = true;
 	// The render callback's choice after the drain: the scene frame, or the status page in its
 	// place (Session::draws_scene). The embedder runs its scene legs on this verdict.
