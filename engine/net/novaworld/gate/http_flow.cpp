@@ -3,7 +3,11 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <string_view>
+#include <utility>
+#include <vector>
 
+#include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
@@ -143,29 +147,161 @@ bool is_locale_identity_var(const std::string &name) {
 	       strutil::iequals(name, "TimeZoneBias");
 }
 
-// The URL a <META http-equiv="refresh" content="N;URL=..."> names ("" when none), quotes stripped.
-std::string meta_refresh_url(const std::string &html) {
-	const std::string lower = to_lower(html);
-	std::size_t at = 0;
-	while ((at = lower.find("<meta", at)) != std::string::npos) {
-		const std::size_t close = lower.find('>', at);
-		if (close == std::string::npos) return std::string();
-		const std::string tag = lower.substr(at, close - at);
-		if (tag.find("http-equiv") != std::string::npos && tag.find("refresh") != std::string::npos) {
-			const std::size_t u = tag.find("url=");
-			if (u == std::string::npos) return std::string();
-			std::size_t begin = at + u + 4;
-			while (begin < close && (html[begin] == '"' || html[begin] == '\'' || html[begin] == ' ')) ++begin;
-			std::size_t end = begin;
-			while (end < close && html[end] != '"' && html[end] != '\'' && html[end] != '>' &&
-			       !std::isspace(static_cast<unsigned char>(html[end])))
-				++end;
-			return html.substr(begin, end - begin);
-		}
-		at = close + 1;
-	}
-	return std::string();
+// The menu browser's markup white space: space, tab, LF, CR.
+// [orig: D3DX_IsWhitespace @0x651A60]
+bool html_space(char c) {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
+
+// One tag's attributes as the browser's attribute parser reads them, in the tag's order, from
+// `cur` (just past the tag name). Each is a name of alphanumerics and '-' (the CRT isalnum of the
+// sign-extended byte, cp1252's), then '=' and a value: a quoted one to its closing quote, else
+// one to the next white space or '>'; no '=' leaves the value empty. White space and every quote
+// after a value are passed over. The parse stops at a '>' where a name would start or at an empty
+// name; only a '>' reached after a value moves `cur` to it. Retail's quoted and unquoted scans run
+// on past the document's end; here they stop there.
+// [orig: XML_ParseAttributes @0x655410 - the white space @0x655431..0x655452, the '>' test
+//  @0x655454, the name's isalnum / '-' @0x655464 / @0x655470, an empty name @0x65547E, '='
+//  @0x6554A2 (none: the empty value @0x6554A9), the white space after it @0x6554CC..0x6554EF, the
+//  quoted value @0x6554F4..0x65553B, the unquoted one @0x655510..0x655527, the skip after a value
+//  @0x655561..0x655579, the node linked at the list's head @0x655586..0x655589, the cursor at the
+//  '>' @0x65558B..0x655598]
+std::vector<std::pair<std::string, std::string>> html_tag_attributes(const std::string &html, std::size_t &cur) {
+	const auto at = [&html](std::size_t i) { return i < html.size() ? html[i] : '\0'; };
+	const auto name_char = [](char c) {
+		return c == '-' || cp1252_isalpha_sign_extended(c) ||
+		       cp1252_isdigit(static_cast<uint8_t>(c));
+	};
+	std::vector<std::pair<std::string, std::string>> attributes;
+	std::size_t p = cur;
+	for (;;) {
+		while (html_space(at(p))) ++p;
+		if (at(p) == '>') break;
+		const std::size_t name_at = p;
+		while (name_char(at(p))) ++p;
+		if (p == name_at) break;
+		std::string name = html.substr(name_at, p - name_at);
+		std::string value;
+		if (at(p) == '=') {
+			++p;
+			while (html_space(at(p))) ++p;
+			const char quote = at(p);
+			if (quote == '"' || quote == '\'') {
+				const std::size_t value_at = ++p;
+				while (p < html.size() && html[p] != quote) ++p;
+				value = html.substr(value_at, p - value_at);
+			} else {
+				const std::size_t value_at = p;
+				while (p < html.size() && html[p] != '>' && !html_space(html[p])) ++p;
+				value = html.substr(value_at, p - value_at);
+			}
+		}
+		while (html_space(at(p)) || at(p) == '"' || at(p) == '\'') ++p;
+		attributes.emplace_back(std::move(name), std::move(value));
+		if (at(p) == '>') {
+			cur = p;
+			break;
+		}
+	}
+	return attributes;
+}
+
+// An attribute's value by its name, case-insensitively: the list is built head first, so the
+// lookup's first match is the tag's LAST attribute of that name. Null when the tag has none.
+// [orig: sub_6555C0 @0x6555C0 - the stricmp walk @0x6555EE]
+const std::string *html_attribute(
+		const std::vector<std::pair<std::string, std::string>> &attributes, const char *name) {
+	for (auto it = attributes.rbegin(); it != attributes.rend(); ++it)
+		if (strutil::iequals(it->first, name)) return &it->second;
+	return nullptr;
+}
+
+// The browser's element table, in its order (the first whose name the tag's prefixes wins).
+// [orig: the table @0x84C148, 12-byte rows {element, handler, name}]
+constexpr const char *kHtmlElements[] = {"meta", "TITLE", "FORM", "IB3_TEMPLATE", "IB3_SUBST",
+		"IB3_FORM", "IB3_DEFINE", "IB3_COND", "IB3_GLOBAL", "INPUT", "BR", "P"};
+
+} // namespace
+
+// See http_flow.h.
+std::string meta_refresh_url(const std::string &page) {
+	// The browser reads the page as a C string: nothing past a NUL.
+	const std::string html = page.substr(0, page.find('\0'));
+	std::string url;
+	std::size_t cur = 0;
+	while (cur < html.size()) {
+		if (html[cur] != '<') {
+			++cur;
+			continue;
+		}
+		// [orig: CUIHTMLParser_ParseTag @0x655E20 - the white space past '<' @0x655E40..0x655E50,
+		//  '/' @0x655E5C, the name's end at '>', '!' or white space @0x655E83..0x655E9B, the table
+		//  compare (String_CompareNoCaseN called @0x655EC4: strnicmp over the name's length, so a
+		//  name that prefixes an element's, the empty one included, is that element),
+		//  XML_ParseAttributes called @0x655EFC, the handler called @0x655F8B, the skip to the next
+		//  '>' @0x655FFC..0x65600F and past it @0x65601B]
+		++cur;
+		while (html_space(html[cur])) ++cur;
+		const bool closing = html[cur] == '/';
+		if (closing) {
+			++cur;
+			while (html_space(html[cur])) ++cur;
+		}
+		std::size_t name_end = cur;
+		while (name_end < html.size() && html[name_end] != '>' && html[name_end] != '!' &&
+		       !html_space(html[name_end]))
+			++name_end;
+		const std::string_view name(html.data() + cur, name_end - cur);
+		const char *element = nullptr;
+		for (const char *candidate : kHtmlElements) {
+			const std::string_view full(candidate);
+			if (name.size() <= full.size() && strutil::iequals(name, full.substr(0, name.size()))) {
+				element = candidate;
+				break;
+			}
+		}
+		if (element != nullptr) {
+			cur = name_end;
+			if (!closing) {
+				const auto attributes = html_tag_attributes(html, cur);
+				// META's handler: an HTTP-EQUIV of REFRESH, whole, and a CONTENT. The URL is
+				// sought from the CONTENT's first ';' as "URL=", one leading quote is skipped, and
+				// the copy runs to a quote or the end; each such tag overwrites the last. With no
+				// ';' or no "URL=", retail copies its uninitialized buffer (a retail bug): none here.
+				// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - the HTTP-EQUIV lookup called
+				//  @0x65565F, String_CompareNoCase against "REFRESH" called @0x655676, the CONTENT
+				//  lookup called @0x655693, the ';' scan @0x6556B0..0x6556BC, String_CompareNoCaseN
+				//  against "URL=" called @0x6556CD, one quote skipped @0x6556EE..0x6556F6, the copy
+				//  to a quote or the end @0x655701..0x655717, the uninitialized buffer's copy on the
+				//  other paths @0x655733]
+				const std::string *equiv = html_attribute(attributes, "HTTP-EQUIV");
+				const std::string *content = html_attribute(attributes, "CONTENT");
+				if (element == kHtmlElements[0] && equiv != nullptr && strutil::iequals(*equiv, "REFRESH") &&
+						content != nullptr) {
+					url.clear();
+					const std::size_t semicolon = content->find(';');
+					std::size_t u = semicolon == std::string::npos ? content->size() : semicolon;
+					while (u < content->size() &&
+					       !strutil::starts_with_icase(std::string_view(*content).substr(u), "URL="))
+						++u;
+					if (u < content->size()) {
+						std::size_t begin = u + 4;
+						if (begin < content->size() && ((*content)[begin] == '"' || (*content)[begin] == '\''))
+							++begin;
+						std::size_t end = begin;
+						while (end < content->size() && (*content)[end] != '"' && (*content)[end] != '\'') ++end;
+						url = content->substr(begin, end - begin);
+					}
+				}
+			}
+		}
+		while (cur < html.size() && html[cur] != '>') ++cur;
+		if (cur < html.size()) ++cur;
+	}
+	return url;
+}
+
+namespace {
 
 LoginResult login_need(HttpRequestSpec req) {
 	req.cache_bust = req.method == HttpMethod::Get;
@@ -447,10 +583,10 @@ LoginResult LobbyHttpFlow::login_post() {
 // A relay page's next request: the menu browser follows the page's META refresh to the URL it
 // names (the service's relay names the bare .dll, whose session tag rides the jar's cookie), so
 // the login's polls and the join's second leg go where the page sends them, as the host leg's do
-// (D-NET-NEW-L9-31). Empty when the page names none.
-// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - HTTP-EQUIV REFRESH @0x655670, the URL= scan
-//  @0x6556D7, a leading quote skipped @0x6556F4..0x6556F6, the copy to a closing quote
-//  @0x655703 / @0x655707]
+// (D-NET-NEW-L9-31). Empty when the page names none (meta_refresh_url, D-NET-NEW-L9-34).
+// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - String_CompareNoCase against "REFRESH"
+//  called @0x655676, String_CompareNoCaseN against "URL=" called @0x6556CD, a leading quote
+//  skipped @0x6556EE..0x6556F6, the copy to a closing quote @0x655703 / @0x655707]
 std::string LobbyHttpFlow::relay_refresh_url(const std::vector<uint8_t> &body) const {
 	const std::string next = meta_refresh_url(to_string_body(body));
 	return next.empty() ? std::string() : absolute_url(next);

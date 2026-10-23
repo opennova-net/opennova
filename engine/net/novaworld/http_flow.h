@@ -60,6 +60,15 @@ struct HttpRequestSpec {
 std::string browser_cache_bust_url(const std::string &url, uint32_t tick_ms,
 		const std::array<uint8_t, 4> &server_ip);
 
+// The URL a page's META refresh names, as the menu browser's parser reads it ("" when none):
+// the last tag the element table takes as META whose HTTP-EQUIV is REFRESH, whole and
+// case-insensitively, and which has a CONTENT; in that CONTENT, "URL=" sought from its first ';',
+// one leading quote skipped, the copy to a quote or the end. A refresh with no ';' or no "URL="
+// names none (retail copies an uninitialized buffer there). (D-NET-NEW-L9-34)
+// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620; XML_ParseAttributes @0x655410;
+//  CUIHTMLParser_ParseTag @0x655E20]
+std::string meta_refresh_url(const std::string &page);
+
 // The lobby context the HTTP machines read — filled by the owner from the gate response + the NWU
 // session leg (the UDP side stays in the binding/ClientSession; here we only consume its outputs).
 struct LobbyHttpContext {

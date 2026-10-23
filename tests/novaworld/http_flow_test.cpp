@@ -621,6 +621,43 @@ static bool test_joi_page_refresh() {
 	return g_fail == 0;
 }
 
+// D-NET-NEW-L9-34: the META refresh's URL as the menu browser's parser reads it. The tag's
+// attributes are split as its attribute parser splits them; HTTP-EQUIV must be REFRESH whole; the
+// URL is sought from the CONTENT's first ';' as "URL=", one quote skipped, and copied to a quote or
+// the end, spaces included; no ';' or no "URL=" names none; the page's last refresh wins.
+// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - @0x655676, @0x6556B0..0x6556BC, @0x6556CD,
+//  @0x6556EE..0x6556F6, @0x655701..0x655717; XML_ParseAttributes @0x655410; sub_6555C0 @0x6555C0;
+//  CUIHTMLParser_ParseTag @0x655E20 - @0x655EC4]
+static bool test_meta_refresh_walk() {
+	const auto url_of = [](const std::string &tag) {
+		return nw::meta_refresh_url("<HTML><HEAD>" + tag + "</HEAD></HTML>");
+	};
+	expect(url_of("<META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\">") == "NWLogin.dll",
+	       "the service's relay form: an unquoted CONTENT, the URL's one quote skipped");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"5; URL=my page.htm\">") == "my page.htm",
+	       "a spaced URL is copied whole, to the end");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"0;URL= a.htm\">") == " a.htm",
+	       "no white space is skipped after URL=");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"0;URL='a.htm' b\">") == "a.htm",
+	       "the copy ends at a quote");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"0; URL = x.htm\">").empty(),
+	       "\"URL = x\" names none");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"URL=x.htm\">").empty(), "no ';' names none");
+	expect(url_of("<META HTTP-EQUIV=\"refresh-now\" CONTENT=\"0;URL=x.htm\">").empty(),
+	       "HTTP-EQUIV must be REFRESH whole");
+	expect(url_of("<meta content=\"0;url=x.htm\" http-equiv=refresh>") == "x.htm",
+	       "attribute names and URL= match case-insensitively, in any order");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"0;URL=a.htm\" CONTENT=\"0;URL=b.htm\">") ==
+	               "b.htm",
+	       "a tag's last CONTENT is the one read");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"0;URL=a.htm\"><META HTTP-EQUIV=\"Refresh\" "
+	              "CONTENT=\"0;URL=b.htm\">") == "b.htm",
+	       "the page's last refresh wins");
+	expect(url_of("<METAX HTTP-EQUIV=\"Refresh\" CONTENT=\"0;URL=a.htm\">").empty(),
+	       "a longer tag name is no META");
+	return g_fail == 0;
+}
+
 // D-NET-NEW-L9-32: the gate reply's jar fields ahead of the connection-up's six. A set junction
 // word leads with USEJUNCTION "1" and an empty JUNCTIONCODE; a clear mpextractextendedmetricinformation
 // leaves CountryName / Language / TimeZoneBias out of the jar and the Cookie var-lists, and
@@ -672,6 +709,7 @@ static bool test_gate_reply_jar_fields() {
 
 int main() {
 	test_gate_reply_jar_fields();
+	test_meta_refresh_walk();
 	test_joi_page_refresh();
 	test_browser_cache_bust();
 	test_host_resolves();
