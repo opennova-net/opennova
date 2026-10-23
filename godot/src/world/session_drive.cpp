@@ -256,6 +256,10 @@ void SessionDrive::step_preload() {
 		// loads here, ahead of the 0x09, which the next poll queues at its head (engine:
 		// inmatch/joiner_connection.h set_mission_data_loading, D-NET-NEW-L2-43).
 		if (join_preload_sim_->is_join_mission_data_load_running()) {
+			// The effect load reads the mount's .ptl set, so the host's data set (its S2C 0x7B
+			// expansion) is mounted first; the 0x11's identification reconciles again and keeps
+			// it (D-NET-178).
+			if (!reconcile_join_expansion()) return;
 			world_->load_join_effect_system(join_preload_root_);
 			join_preload_sim_->end_join_mission_data_load();
 		}
@@ -720,6 +724,8 @@ void SessionDrive::cancel_join_preload() {
 	join_preload_sim_.unref();
 	join_preload_root_.unref();
 	join_identified_ = false;
+	// An effect world the join's mission-data load built goes with it.
+	world_->free_join_effect_world();
 }
 
 bool SessionDrive::pending_session() const {
