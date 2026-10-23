@@ -5,7 +5,8 @@
 // next SWITCHFROM / SWITCHRANK completion commits it. Outside it a same-category mount
 // queues SWITCHRANK at once, preempting a draw, and a cross-category mount's SWITCHFROM is
 // refused over a running draw. A draw holds at the -901 sentinel while the pending word
-// names an Emplaced def.
+// names an Emplaced def. The UseGun attach / swap / detach mounts take the same leg (L7-s25),
+// and both interps publish the six shared view-bias words the mount request clears.
 // [orig: Player_MountWeaponSlot @0x4DFA40 - the interp test @0x4DFB8D..0x4DFB93,
 //  WeaponSlot_TryQueueSwitchRank @0x4DFB96, WeaponSlot_ForceQueueSwitchFrom @0x4DFB9E,
 //  Player_StartWeaponLowerRaiseInterp(0) @0x4DFBC5; WeaponAction_SwitchFrom @0x5433B0 -
@@ -19,6 +20,8 @@
 #include <vector>
 
 #include <formats/def/def.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_loadout.h>
 #include <runtime/world/player_view.h>
@@ -99,6 +102,54 @@ constexpr const char *kWeaponDef =
 		"\tclipsize 15\r\n"
 		"\tstartrounds 45\r\n"
 		"\tammoclass CLASS_9MM 1\r\n"
+		"\taction \"switchto\"\r\n"
+		"\t\tdelaystart 0\r\n"
+		"\t\tdelayend 2\r\n"
+		"\tend\r\n"
+		"\taction \"switchfrom\"\r\n"
+		"\t\tdelaystart 2\r\n"
+		"\t\tdelayend 2\r\n"
+		"\tend\r\n"
+		"end\r\n"
+		// Three guns of one category for UseGun seats: two Emplaced, one not.
+		"weapon \"WPN_GUN_E\"\r\n"
+		"\tcategory 9\r\n"
+		"\trank 0\r\n"
+		"\tclipsize 100\r\n"
+		"\tstartrounds 100\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
+		"\tflags Emplaced\r\n"
+		"\taction \"switchto\"\r\n"
+		"\t\tdelaystart 0\r\n"
+		"\t\tdelayend 2\r\n"
+		"\tend\r\n"
+		"\taction \"switchfrom\"\r\n"
+		"\t\tdelaystart 2\r\n"
+		"\t\tdelayend 2\r\n"
+		"\tend\r\n"
+		"end\r\n"
+		"weapon \"WPN_GUN_F\"\r\n"
+		"\tcategory 9\r\n"
+		"\trank 1\r\n"
+		"\tclipsize 100\r\n"
+		"\tstartrounds 100\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
+		"\tflags Emplaced\r\n"
+		"\taction \"switchto\"\r\n"
+		"\t\tdelaystart 0\r\n"
+		"\t\tdelayend 2\r\n"
+		"\tend\r\n"
+		"\taction \"switchfrom\"\r\n"
+		"\t\tdelaystart 2\r\n"
+		"\t\tdelayend 2\r\n"
+		"\tend\r\n"
+		"end\r\n"
+		"weapon \"WPN_GUN_N\"\r\n"
+		"\tcategory 9\r\n"
+		"\trank 2\r\n"
+		"\tclipsize 100\r\n"
+		"\tstartrounds 100\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
 		"\taction \"switchto\"\r\n"
 		"\t\tdelaystart 0\r\n"
 		"\t\tdelayend 2\r\n"
@@ -473,6 +524,262 @@ void test_a_gated_emplaced_word_holds_the_draw() {
 	CHECK(rig->adm_byte() == rig->adm("WPN_RIFLE"));
 }
 
+// --- the UseGun mounts (L7-s25 row 0) ---------------------------------------------------
+
+// An EWeap gun with one UseGun seat (bone 2), its slot prepared for `weapon`.
+EntityHandle spawn_gun(World &world, const char *weapon, float x) {
+	Entity g;
+	g.kind = EntityKind::Item;
+	g.has_item_def = true;
+	g.has_graphic_model = true;
+	g.item_type = 6;
+	g.item_attrib = kItemAttribEweap | kItemAttribPlayerControl;
+	g.health = g.health_max = 1000;
+	g.alive = true;
+	g.position = {x, 2.0f, 0.0f};
+	g.primary_weapon = weapon;
+	Seat u;
+	u.type = SeatType::Gunner;
+	u.bone_index = 2;
+	u.source_name = "UseGun";
+	u.seat_local = {0.0f, -1.0f, 1.0f};
+	g.seats.push_back(u);
+	const EntityHandle h = world.registry.spawn(1, g);
+	Entity *spawned = world.registry.get(h);
+	CHECK(spawned != nullptr && world.vehicles.prepare_weapon_slot(*spawned));
+	return h;
+}
+
+// The rig's body with its AI record, as a seat's attach reads it.
+void give_body_an_ai(World &world) {
+	AiEntity *ae = world.ai.at(world.ai.attach(world.cached.local_player));
+	if (ae == nullptr) return;
+	ae->health = 100;
+	ae->inf.active = true;
+}
+
+WeaponSlotState &gun_slot(World &world, EntityHandle gun) {
+	return world.registry.get(gun)->primary_weapon_slot;
+}
+
+// Seats L on the gun (the authority's process) and ticks until the gun's slot is the
+// EquippedSlot and its draw and the raise have run out.
+void seat_and_settle(Rig &rig, EntityHandle gun) {
+	World &world = rig.world;
+	CHECK(world.vehicles.attach_to_seat(world.cached.local_player, {gun, 0, SeatType::Gunner}));
+	for (int t = 0; t < 300; ++t) {
+		const WeaponSlotState &slot = gun_slot(world, gun);
+		if (rig.weapon().usegun_slot_active && rig.weapon().usegun_mount == gun &&
+				!rig.lower_raise_active() && slot.current == weapon_action::kIdle &&
+				slot.next == weapon_action::kIdle)
+			return;
+		rig.tick();
+	}
+	CHECK(false);
+}
+
+// A UseGun attach whose relation lands over a running draw: the attach's mount is
+// Player_MountWeaponSlot's, so its cross-category ForceQueueSwitchFrom is refused over the
+// SWITCHTO, nothing is queued or retained, no lower starts, and the word stays stored. With
+// an Emplaced gun the draw then holds at the -901 sentinel; with a plain one it runs out to
+// its previous action and the player sits on the gun holding the rifle, the gun uncommitted.
+// [orig: Entity_AttachToUseGunSlot @0x546B80 (@0x546C38); Player_MountWeaponSlot @0x4DFA40
+//  (@0x4DFB9E..0x4DFBC5); WeaponSlot_ForceQueueSwitchFrom @0x53F170 (@0x53F17A..0x53F185);
+//  WeaponAction_SwitchTo @0x5431D0 (the next = prev seed @0x543204..0x543213, the -901 hold
+//  @0x54321E..0x543240)]
+void test_a_usegun_attach_over_a_draw_queues_nothing() {
+	for (const bool emplaced : {true, false}) {
+		const auto rig = std::make_unique<Rig>(rifle_kit());
+		World &world = rig->world;
+		LocalPlayerWeapon &w = rig->weapon();
+		give_body_an_ai(world);
+		const EntityHandle gun = spawn_gun(world, emplaced ? "WPN_GUN_E" : "WPN_GUN_N", 4.0f);
+		rig->tick();
+		WeaponSlotState &slot = w.slot;
+		slot.current = weapon_action::kSwitchTo;
+		slot.next = weapon_action::kIdle;
+		slot.phase = weapon_phase::kDone;
+		slot.counter = 2;
+		slot.switch_timer = -600;
+		// A client's relation: the attach is forced, whatever the slot runs.
+		world.ai.is_authority = false;
+		CHECK(world.vehicles.apply_confirmed_mount(world.cached.local_player, gun, 2));
+		rig->tick(); // the transition stages the attach's mount
+		CHECK(w.usegun_switch == LocalUseGunSwitch::kAttach && !w.usegun_slot_active);
+		CHECK(w.switch_deferred_action == -1);
+		CHECK(slot.next != weapon_action::kSwitchFrom);
+		CHECK(!rig->lower_raise_active());
+		bool ran_from = false;
+		for (int t = 0; t < 150; ++t) {
+			rig->tick();
+			ran_from = ran_from || slot.current == weapon_action::kSwitchFrom ||
+					slot.next == weapon_action::kSwitchFrom;
+		}
+		CHECK(!ran_from);
+		CHECK(!w.usegun_slot_active && w.usegun_switch == LocalUseGunSwitch::kAttach);
+		CHECK(rig->inventory().equipped_combo == kRifle);
+		CHECK(rig->adm_byte() == rig->adm("WPN_RIFLE"));
+		if (emplaced) {
+			CHECK(slot.current == weapon_action::kSwitchTo && slot.switch_timer == -871);
+		} else {
+			CHECK(slot.current == weapon_action::kIdle);
+		}
+	}
+}
+
+// A seat detach's switch back is the detach's own mount: inside the detach it force-queues
+// SWITCHFROM on the gun's slot and lowers the view (the gun's category against the
+// rifle's), and that SWITCHFROM's completion stores the rifle, draws it and raises it.
+// [orig: Entity_DetachFromVehicle @0x4355F0 (+0x308 @0x43563A, Player_MountWeaponSlot
+//  @0x43565F); Player_MountWeaponSlot @0x4DFA40 (@0x4DFB9E..0x4DFBC5);
+//  WeaponAction_SwitchFrom @0x5433B0 (@0x543475, @0x5434A3, @0x5434AA)]
+void test_a_usegun_detach_mounts_the_personal_slot_inside_the_detach() {
+	const auto rig = std::make_unique<Rig>(rifle_kit());
+	World &world = rig->world;
+	LocalPlayerWeapon &w = rig->weapon();
+	give_body_an_ai(world);
+	const EntityHandle gun = spawn_gun(world, "WPN_GUN_E", 4.0f);
+	rig->tick();
+	seat_and_settle(*rig, gun);
+	CHECK(rig->adm_byte() == rig->adm("WPN_GUN_E"));
+	CHECK(world.vehicles.detach(world.cached.local_player));
+	CHECK(w.usegun_switch == LocalUseGunSwitch::kDetach);
+	CHECK(rig->inventory().pending_combo == kRifle);
+	CHECK(gun_slot(world, gun).next == weapon_action::kSwitchFrom);
+	CHECK(rig->lower_raise_active());
+	CHECK(rig->view().weapon_lower_raise_interp.target.position_q16[2] == -65536.0f);
+	CHECK(w.switch_deferred_action == -1);
+	int committed = -1;
+	for (int t = 1; t <= 60 && committed < 0; ++t) {
+		rig->tick();
+		if (!w.usegun_slot_active) committed = t;
+	}
+	CHECK(committed >= 1);
+	CHECK(w.usegun_switch == LocalUseGunSwitch::kNone);
+	CHECK(rig->inventory().equipped_combo == kRifle);
+	CHECK(rig->adm_byte() == rig->adm("WPN_RIFLE"));
+	CHECK(w.slot.next == weapon_action::kSwitchTo || w.slot.current == weapon_action::kSwitchTo);
+	CHECK(rig->lower_raise_active());
+	CHECK(rig->view().weapon_lower_raise_interp.target.position_q16[2] == 0.0f);
+}
+
+// A gun-to-gun move: the process's detach mounts the rifle's slot first (SWITCHFROM on gun
+// E's slot, the lower), then the attach mounts gun F's over it; F's category is E's, and
+// inside the lower that mount stores the word and queues no SWITCHRANK. E's SWITCHFROM
+// then commits F, draws it and raises it.
+// [orig: Entity_ProcessVehicleAttach @0x435AA0 (the requester's detach @0x435BCE ahead of
+//  the attach); Entity_DetachFromVehicle @0x4355F0 (@0x43565F); Entity_AttachToUseGunSlot
+//  @0x546B80 (@0x546C38); Player_MountWeaponSlot @0x4DFA40 (@0x4DFB8D..0x4DFB96);
+//  WeaponAction_SwitchFrom @0x5433B0 (@0x543475, @0x5434A3, @0x5434AA)]
+void test_a_gun_to_gun_move_inside_the_lower_commits_at_the_switchfrom() {
+	const auto rig = std::make_unique<Rig>(rifle_kit());
+	World &world = rig->world;
+	LocalPlayerWeapon &w = rig->weapon();
+	give_body_an_ai(world);
+	const EntityHandle gun_e = spawn_gun(world, "WPN_GUN_E", 4.0f);
+	const EntityHandle gun_f = spawn_gun(world, "WPN_GUN_F", -4.0f);
+	rig->tick();
+	seat_and_settle(*rig, gun_e);
+	CHECK(world.vehicles.attach_to_seat(world.cached.local_player, {gun_f, 0, SeatType::Gunner}));
+	CHECK(rig->lower_raise_active()); // the detach's lower
+	CHECK(gun_slot(world, gun_e).next == weapon_action::kSwitchFrom);
+	bool ran_rank = false;
+	int committed = -1;
+	for (int t = 1; t <= 60 && committed < 0; ++t) {
+		rig->tick();
+		const WeaponSlotState &e_slot = gun_slot(world, gun_e);
+		ran_rank = ran_rank || e_slot.current == weapon_action::kSwitchRank ||
+				e_slot.next == weapon_action::kSwitchRank;
+		if (w.usegun_mount == gun_f && w.usegun_switch == LocalUseGunSwitch::kNone) committed = t;
+	}
+	CHECK(!ran_rank);
+	CHECK(committed >= 1);
+	CHECK(w.usegun_slot_active);
+	CHECK(rig->adm_byte() == rig->adm("WPN_GUN_F"));
+	const WeaponSlotState &f_slot = gun_slot(world, gun_f);
+	CHECK(f_slot.next == weapon_action::kSwitchTo || f_slot.current == weapon_action::kSwitchTo);
+	CHECK(rig->lower_raise_active()); // the raise onto F (one step)
+	CHECK(rig->view().weapon_lower_raise_interp.target.position_q16[2] == 0.0f);
+}
+
+// --- the published view bias (L7-s25 row 1) ---------------------------------------------
+
+// Both interps write the same six words, the lower / raise last: a frame both step
+// publishes the lower's (its X lane 0 where the scope's is 21), the lowered Z's first step
+// ftol(-65536 / 31) = -2114, and the viewmodel's position reads those words.
+// [orig: Player_UpdatePerFrame @0x4DE4C9 / @0x4DE4FD..0x4DE522; Player_StepFpViewBiasInterp
+//  @0x4DDF42..0x4DDFC3; Player_UpdateFirstPersonCamera @0x4DD4CE..0x4DD4DA]
+void test_the_last_interp_step_publishes_the_view_bias() {
+	auto v = std::make_unique<PlayerViewState>();
+	v->weapon_pose_bound = true;
+	v->weapon_ads_pose = {{315.0f, 0.0f, 0.0f}, {0u, 0u, 0u}};
+	CHECK(player_view_set_engaged(*v, true, false));
+	player_view_promote_tick(*v);
+	CHECK(v->view_bias.position_q16[0] == 21); // the scope's step alone
+	player_view_start_weapon_lower(*v);
+	player_view_promote_tick(*v);
+	CHECK(v->view_bias.position_q16[0] == 0);
+	CHECK(v->view_bias.position_q16[2] == -2114);
+	const float pos[3] = {10.0f, 20.0f, 30.0f};
+	float out[3];
+	player_view_bias_units(*v, pos, out);
+	CHECK(out[0] == 10.0f && out[2] == 30.0f - 2114.0f / kWeaponDefPosScale);
+	// The lower runs out at the full drop, its last moving step the last write.
+	for (int t = 0; t < 40; ++t) player_view_promote_tick(*v);
+	CHECK(!player_view_weapon_lower_raise_active(*v));
+	CHECK(v->view_bias.position_q16[2] == -65536);
+}
+
+// The mount request clears the six words; the commit that stores the slot later clears
+// none, so the lowered words hold across the SWITCHFROM's commit until the raise's first
+// step publishes. A gated mount inside the raise queues nothing and still clears them.
+// [orig: Player_MountWeaponSlot @0x4DFA40 (the clear @0x4DFBCF..0x4DFBE8);
+//  WeaponAction_SwitchFrom @0x5433B0 / WeaponAction_SwitchRank @0x543500 write none]
+void test_the_mount_request_clears_the_view_bias_and_the_commit_does_not() {
+	const auto rig = std::make_unique<Rig>(rifle_kit());
+	LocalPlayerWeapon &w = rig->weapon();
+	rig->tick();
+	rig->press(2);
+	CHECK(rig->lower_raise_active());
+	CHECK(rig->view().view_bias.position_q16[2] == 0);
+	// One main frame at a time, the view leg ahead of the walk, until the commit.
+	bool held = false;
+	for (int t = 0; t < 200 && !held; ++t) {
+		++rig->world.logic_tick;
+		player_view_promote_tick(rig->view());
+		const PlayerViewBias before = rig->view().view_bias;
+		const int32_t combo = rig->inventory().equipped_combo;
+		rig->local().pump_local_weapon();
+		if (rig->inventory().equipped_combo != combo) {
+			held = true;
+			CHECK(before.position_q16[2] < 0);
+			for (int i = 0; i < 3; ++i)
+				CHECK(rig->view().view_bias.position_q16[i] == before.position_q16[i] &&
+						rig->view().view_bias.rotation_bam[i] == before.rotation_bam[i]);
+		}
+	}
+	CHECK(held && rig->inventory().equipped_combo == kPistol);
+	// The raise's first step publishes from the lowered pose.
+	rig->tick();
+	CHECK(rig->view().view_bias.position_q16[2] < 0);
+	CHECK(rig->lower_raise_active());
+	// Back to the rifle, then a fire-mode press inside its raise: gated, it queues nothing
+	// and still clears the words, which the raise's next step publishes again.
+	rig->settle();
+	rig->press(3);
+	CHECK(rig->tick_until_commit() >= 1);
+	for (int t = 0; t < 3; ++t) rig->tick();
+	CHECK(rig->lower_raise_active() && rig->view().view_bias.position_q16[2] < 0);
+	const WeaponSwitchOutcome gated = rig->press(3);
+	CHECK(gated.kind == WeaponSwitchOutcome::kMount && gated.same_category);
+	CHECK(w.slot.next != weapon_action::kSwitchRank);
+	for (int i = 0; i < 3; ++i)
+		CHECK(rig->view().view_bias.position_q16[i] == 0 &&
+				rig->view().view_bias.rotation_bam[i] == 0);
+	rig->tick();
+	CHECK(rig->view().view_bias.position_q16[2] < 0);
+}
+
 } // namespace
 
 int main() {
@@ -484,6 +791,11 @@ int main() {
 	test_a_press_over_a_draw_outside_the_interp();
 	test_the_switchto_hold_reads_the_pending_word();
 	test_a_gated_emplaced_word_holds_the_draw();
+	test_a_usegun_attach_over_a_draw_queues_nothing();
+	test_a_usegun_detach_mounts_the_personal_slot_inside_the_detach();
+	test_a_gun_to_gun_move_inside_the_lower_commits_at_the_switchfrom();
+	test_the_last_interp_step_publishes_the_view_bias();
+	test_the_mount_request_clears_the_view_bias_and_the_commit_does_not();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

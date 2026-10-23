@@ -207,6 +207,49 @@ bool local_pending_slot_is_emplaced(const World &world, const LocalPlayerWeapon 
 			(to->flags & weapon_flag::kEmplaced) != 0;
 }
 
+// The bound local player's view, whose words retail's mount writes as process globals;
+// null for a weapon no LocalPlayer of this world holds.
+PlayerViewState *local_weapon_view(World &world, const LocalPlayerWeapon &w) {
+	LocalPlayer *local = world.local_player_state;
+	return local != nullptr && &local->weapon == &w ? &local->view : nullptr;
+}
+
+// Player_MountWeaponSlot past its g_PendingWeaponSlot store, for every local mount (a weapon
+// key's, a seat detach's switch back, a UseGun attach's or swap's): the NVG latch clears; the
+// EquippedSlot queues at once, nothing retained: same category, SWITCHRANK (preempting a draw
+// through the pump's counter-0 transition) unless the lower / raise interp runs; cross
+// category, a forced SWITCHFROM, refused over a running SWITCHTO / SWITCHFROM, whose queue
+// lowers the view (the saved-game load word is zero in a session); then the six view-bias
+// words clear. The next SWITCHFROM / SWITCHRANK completion commits the stored word.
+// [orig: Player_MountWeaponSlot @0x4DFA40 - @0x4DFB16, dword_B76554 @0x4DFB75, the compare
+//  @0x4DFB7B..0x4DFB8B, the interp test @0x4DFB8D..0x4DFB93, WeaponSlot_TryQueueSwitchRank
+//  @0x4DFB96, WeaponSlot_ForceQueueSwitchFrom @0x4DFB9E, its return @0x4DFBA6, nextAction == 7
+//  @0x4DFBAA..0x4DFBBA, dword_A892C8 @0x4DFBBC, the lower @0x4DFBC5, the bias clear
+//  @0x4DFBCF..0x4DFBE8; WeaponAction_ProcessFrame @0x540E60 (@0x5413B1..0x5413EC); callers
+//  Entity_AttachToUseGunSlot @0x546B80 (@0x546C38), Entity_AttachToVehicleSlot @0x4946D0
+//  (@0x494838), Entity_DetachFromVehicle @0x4355F0 (@0x43565F)]
+void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState *view,
+		bool same_category) {
+	w.nvg_scope_restore = false;
+	WeaponSlotState *slot = active_local_weapon_slot(world, w);
+	if (same_category) {
+		if (view == nullptr || !player_view_weapon_lower_raise_active(*view))
+			weapon_fsm_queue_switch_rank(*slot);
+	} else if (weapon_fsm_queue_switch_from(*slot) && slot->next == weapon_action::kSwitchFrom &&
+			view != nullptr) {
+		player_view_start_weapon_lower(*view);
+	}
+	if (view != nullptr) player_view_mount_clear_bias(*view);
+}
+
+// The UseGun transition's category compare: the EquippedSlot's def against the mounted
+// slot's [orig: Player_MountWeaponSlot @0x4DFB7B..0x4DFB8B].
+bool usegun_same_category(const World &world, uint8_t from_adm, uint8_t to_adm) {
+	const WeaponTableEntry *from = world.tables.weapons.by_index(from_adm);
+	const WeaponTableEntry *to = world.tables.weapons.by_index(to_adm);
+	return from != nullptr && to != nullptr && from->category == to->category;
+}
+
 } // namespace
 
 // With a pending slot, SWITCHFROM is instant when the EquippedSlot's def or the
@@ -226,20 +269,20 @@ bool local_usegun_switch_is_instant(const World &world,
 
 void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
 		bool same_category) {
+	// An at-once commit draws by it; a queued one's completing action decides.
 	w.usegun_switch_action = same_category ? weapon_action::kSwitchRank
 	                                       : weapon_action::kSwitchFrom;
-	w.switch_deferred_action = w.usegun_switch_action;
 	if (!w.active ||
 			(w.usegun_slot_active &&
 			 active_local_weapon_slot(world, w) == &w.slot)) {
 		commit_local_usegun_weapon_switch(world, w);
 		return;
 	}
-	WeaponSlotState *slot = active_local_weapon_slot(world, w);
-	if (w.usegun_switch_action == weapon_action::kSwitchRank)
-		weapon_fsm_queue_switch_rank(*slot);
-	else
-		weapon_fsm_queue_switch_from(*slot);
+	// The attach's, swap's and detach's mounts are Player_MountWeaponSlot's, the weapon key's
+	// leg: a refused or gated word stays stored with nothing retained.
+	// [orig: Entity_AttachToUseGunSlot @0x546B80 (the Player_MountWeaponSlot call @0x546C38);
+	//  Entity_DetachFromVehicle @0x4355F0 (@0x43565F)]
+	mount_queue_switch_out(world, w, local_weapon_view(world, w), same_category);
 }
 
 void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
@@ -362,6 +405,20 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 		w.events[event_index].installed = commit_mount(world, w, next_def->name, true);
 }
 
+// A seat-2 / seat-3 detach's mount of the slot it restores (local_weapon_detach_mount staged
+// it), queued by the mount's own leg inside the detach, ahead of the attach a gun-to-gun move
+// runs next [orig: Entity_DetachFromVehicle @0x4355F0 (@0x43562A..0x43565F);
+//  Entity_ProcessVehicleAttach @0x435AA0 (@0x435BCE)]
+static void stage_local_usegun_switch_back(World &world, LocalPlayerWeapon &w) {
+	const uint8_t from_adm = w.usegun_slot_active ? w.usegun_weapon_adm : w.usegun_saved_adm;
+	w.usegun_pending_mount = EntityHandle{};
+	w.usegun_pending_weapon_adm = 0xFF;
+	w.usegun_pending_on_foot = false;
+	w.usegun_switch = LocalUseGunSwitch::kDetach;
+	queue_local_usegun_weapon_switch(world, w,
+			usegun_same_category(world, from_adm, w.usegun_saved_adm));
+}
+
 void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 	if (!world.cached.local_player.valid()) return;
 	Entity *player = world.registry.get(world.cached.local_player);
@@ -395,12 +452,6 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 	const bool on_usegun = mounted_parent != nullptr &&
 			player->use_gun_slot_swapped && mounted_slot != nullptr &&
 			mounted_adm != 0xFF;
-	const auto same_category = [&](uint8_t p_from, uint8_t p_to) {
-		const WeaponTableEntry *from = world.tables.weapons.by_index(p_from);
-		const WeaponTableEntry *to = world.tables.weapons.by_index(p_to);
-		return from != nullptr && to != nullptr &&
-				from->category == to->category;
-	};
 	const auto stage_parent = [&](Entity &p_mount, uint8_t target_adm) {
 		// No camera reset here: the UseGun attach's, like a control seat's, ran
 		// at the attach (vehicle_attach.cpp attach_apply), and a designated-G
@@ -451,20 +502,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		const uint8_t from_adm =
 				w.usegun_slot_active ? w.usegun_weapon_adm : w.usegun_saved_adm;
 		queue_local_usegun_weapon_switch(world, w,
-				same_category(from_adm, target_adm));
-	};
-	const auto stage_personal = [&]() {
-		const uint8_t from_adm =
-				w.usegun_slot_active ? w.usegun_weapon_adm : w.usegun_saved_adm;
-		w.usegun_pending_mount = EntityHandle{};
-		w.usegun_pending_weapon_adm = 0xFF;
-		w.usegun_pending_on_foot = false;
-		w.usegun_switch = LocalUseGunSwitch::kDetach;
-		// Seats 2 and 3 share the detach restore through Player_MountWeaponSlot
-		// (its NVG latch clear ran at the detach, local_weapon_detach_mount).
-		// [orig: Entity_DetachFromVehicle @0x43562A..0x43565F]
-		queue_local_usegun_weapon_switch(world, w,
-				same_category(from_adm, w.usegun_saved_adm));
+				usegun_same_category(world, from_adm, target_adm));
 	};
 
 	if (on_usegun) {
@@ -522,11 +560,12 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 			(w.usegun_switch == LocalUseGunSwitch::kAttach ||
 			 w.usegun_switch == LocalUseGunSwitch::kSwap))
 		return;
+	// A borrow off its seat with no detach that staged its switch back stages it here.
 	if ((w.usegun_slot_active ||
 			 w.usegun_switch == LocalUseGunSwitch::kAttach ||
 			 w.usegun_switch == LocalUseGunSwitch::kSwap) &&
 			w.usegun_switch != LocalUseGunSwitch::kDetach)
-		stage_personal();
+		stage_local_usegun_switch_back(world, w);
 }
 
 // The def of the slot a borrow of `gun` holds: its own, or its carrier's when the
@@ -772,8 +811,8 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 		}
 		if (target != nullptr && inventory != nullptr) {
 			// The mount stores the target in g_PendingWeaponSlot, whose completion
-			// makes it the EquippedSlot: the switch back the transition stages
-			// (stage_personal) restores its def, and its commit the slot.
+			// makes it the EquippedSlot: the switch back staged below
+			// (stage_local_usegun_switch_back) restores its def, and its commit the slot.
 			// [orig: Player_MountWeaponSlot @0x4DFA40 (the store @0x4DFB16);
 			//  WeaponAction_SwitchFrom @0x5433B0 (@0x543475) / WeaponAction_SwitchRank
 			//  @0x543500 (@0x543539)]
@@ -793,6 +832,15 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 		}
 	}
 	w.nvg_scope_restore = false; // [orig: dword_B76554 = 0 @0x4dfb75]
+	// The mount runs inside the detach (its queue on the gun's slot, its lower), ahead of the
+	// attach a gun-to-gun move runs next; a staged switch back or a pending borrow held on
+	// foot stages nothing, as the transition's own staging skips them.
+	// [orig: Entity_DetachFromVehicle @0x4355F0 (Player_MountWeaponSlot @0x43565F);
+	//  Entity_ProcessVehicleAttach @0x435AA0 (@0x435BCE)]
+	if (w.usegun_switch != LocalUseGunSwitch::kDetach &&
+			!(w.usegun_pending_on_foot && (w.usegun_switch == LocalUseGunSwitch::kAttach ||
+					w.usegun_switch == LocalUseGunSwitch::kSwap)))
+		stage_local_usegun_switch_back(world, w);
 }
 
 bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
@@ -816,11 +864,14 @@ bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	const WeaponInventorySlot *slot = inventory->slot(combo);
 	if (slot == nullptr || slot->adm_index < 0) return false;
 	inventory->equipped_combo = combo;
-	// The personal slot is the EquippedSlot now: a borrow held on foot ends
-	// (D-NET-420) [orig: WeaponAction_SwitchFrom @0x5433B0 (the store @0x543475) /
-	// WeaponAction_SwitchRank @0x543500 (the store @0x543539) put g_PendingWeaponSlot
-	// in the EquippedSlot].
-	if (w.usegun_on_foot) {
+	// The personal slot is the EquippedSlot now: a borrow held on foot ends (D-NET-420), and
+	// one off its seat whose switch back was refused (the respawn's select, its staged switch
+	// back with it) [orig: WeaponAction_SwitchFrom @0x5433B0 (@0x543475); WeaponAction_SwitchRank
+	// @0x543500 (@0x543539); Player_SelectWeaponSlot @0x4DD680 (@0x4DD6E0..0x4DD704)].
+	const bool seated = e != nullptr && e->mounted &&
+			(e->mount_type == SeatType::Controller || e->mount_type == SeatType::Gunner);
+	if (w.usegun_on_foot || (w.usegun_slot_active && !seated)) {
+		if (!w.usegun_on_foot) w.usegun_switch = LocalUseGunSwitch::kNone;
 		w.usegun_on_foot = false;
 		w.usegun_slot_active = false;
 		w.usegun_mount = EntityHandle{};
@@ -891,36 +942,12 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 				commit_pending_weapon_switch(world, w, inventory, false);
 				break;
 			}
-			// The mount clears the NVG restore latch at the request, past its
-			// early-outs (no equipped slot or def) [orig: @0x4dfa4d..0x4dfa74,
-			// dword_B76554 = 0 @0x4dfb75].
-			w.nvg_scope_restore = false;
-			// The word is stored (pending_combo); whichever SWITCHFROM / SWITCHRANK
-			// completes next commits it. The mount queues on the EquippedSlot at once,
-			// with no retained request: a same-category mount queues SWITCHRANK
-			// (WeaponSlot_TryQueueSwitchRank, which preempts a draw through the
-			// pump's counter-0 transition) unless the weapon view's lower / raise interp
-			// runs, when it queues nothing; a cross-category mount force-queues
-			// SWITCHFROM, which a running SWITCHTO or SWITCHFROM refuses, and a
-			// SWITCHFROM it queued lowers the weapon view (the saved-game load word it
-			// also tests is zero in every session).
-			// [orig: Player_MountWeaponSlot @0x4DFA40 - g_PendingWeaponSlot @0x4DFB16, the
-			//  category compare @0x4DFB7B..0x4DFB8B, the interp test @0x4DFB8D..0x4DFB93,
-			//  WeaponSlot_TryQueueSwitchRank @0x4DFB96; WeaponSlot_ForceQueueSwitchFrom
-			//  @0x4DFB9E, its return @0x4DFBA6, the EquippedSlot's nextAction == 7
-			//  @0x4DFBAA..0x4DFBBA, dword_A892C8 @0x4DFBBC, Player_StartWeaponLowerRaiseInterp(0)
-			//  @0x4DFBC5; WeaponAction_ProcessFrame @0x540E60 - the transition
-			//  @0x5413B1..0x5413EC]
+			// The word is stored (pending_combo); the mount's queue, its NVG latch clear
+			// past its early-outs (no equipped slot or def) and its bias clear are the
+			// shared leg's (mount_queue_switch_out) [orig: @0x4dfa4d..0x4dfa74].
 			w.switch_in_flight = true;
 			w.switch_deferred_action = -1;
-			WeaponSlotState *active_slot = active_local_weapon_slot(world, w);
-			if (out.same_category) {
-				if (!player_view_weapon_lower_raise_active(view))
-					weapon_fsm_queue_switch_rank(*active_slot);
-			} else if (weapon_fsm_queue_switch_from(*active_slot) &&
-					active_slot->next == weapon_action::kSwitchFrom) {
-				player_view_start_weapon_lower(view);
-			}
+			mount_queue_switch_out(world, w, &view, out.same_category);
 			break;
 		}
 		default:

@@ -34,7 +34,9 @@ static int failures = 0;
 
 namespace {
 
-uint64_t pose_interp_fingerprint(uint64_t hash, const PlayerViewBiasInterp &interp) {
+// The interp's own words, then the six published bias words its steps write.
+uint64_t pose_interp_fingerprint(uint64_t hash, const PlayerViewBiasInterp &interp,
+                                 const PlayerViewBias &published) {
     const auto word = [&hash](uint32_t value) {
         for (int shift = 0; shift < 32; shift += 8) {
             hash ^= (value >> shift) & 0xFFu;
@@ -54,8 +56,8 @@ uint64_t pose_interp_fingerprint(uint64_t hash, const PlayerViewBiasInterp &inte
     pose(interp.current);
     pose(interp.target);
     word(interp.active ? 1u : 0u);
-    for (int32_t component : interp.position_bias_q16) word(static_cast<uint32_t>(component));
-    for (int32_t component : interp.rotation_bias_bam) word(static_cast<uint32_t>(component));
+    for (int32_t component : published.position_q16) word(static_cast<uint32_t>(component));
+    for (int32_t component : published.rotation_bam) word(static_cast<uint32_t>(component));
     return hash;
 }
 
@@ -95,16 +97,18 @@ void test_authored_pose_interp_matches_original_six_lane_traces() {
     };
     for (const Case &c : cases) {
         PlayerViewBiasInterp interp;
+        PlayerViewBias published;
         player_view_bias_interp_setup(interp, c.steps, c.hip, c.ads);
-        uint64_t hash = pose_interp_fingerprint(UINT64_C(14695981039346656037), interp);
+        uint64_t hash =
+                pose_interp_fingerprint(UINT64_C(14695981039346656037), interp, published);
         for (int tick = 0; tick < 20; ++tick) {
             if (tick == c.reverse_after) {
                 const PlayerViewPose unrelated{{99, 88, 77}, {7, 8, 9}};
                 player_view_bias_interp_setup(interp, 15, unrelated, c.hip);
-                hash = pose_interp_fingerprint(hash, interp);
+                hash = pose_interp_fingerprint(hash, interp, published);
             }
-            player_view_bias_interp_step(interp, c.hip);
-            hash = pose_interp_fingerprint(hash, interp);
+            player_view_bias_interp_step(interp, c.hip, published);
+            hash = pose_interp_fingerprint(hash, interp, published);
         }
         if (hash != c.fingerprint)
             std::printf("pose trace mismatch: steps %u reverse %d, got %llx expected %llx\n",
@@ -118,20 +122,21 @@ void test_authored_pose_interp_keeps_original_snap_and_completion_rules() {
     const PlayerViewPose hip{{256, 512, 768}, {0x10000000u, 0x10000000u, 0xF0000000u}};
     const PlayerViewPose ads{{512, -256, 1024}, {0x08000000u, 0x20000000u, 0x10000000u}};
     PlayerViewBiasInterp interp;
+    PlayerViewBias published;
     player_view_bias_interp_setup(interp, 15, hip, ads);
     CHECK(interp.remaining == 0 && interp.active);
     CHECK(interp.velocity.rotation_bam[0] == 0x00888888u);
     CHECK(interp.velocity.rotation_bam[1] == 0xFEEEEEEFu);
     CHECK(interp.velocity.rotation_bam[2] == 0xFDDDDDDEu);
-    player_view_bias_interp_step(interp, hip);
+    player_view_bias_interp_step(interp, hip, published);
     CHECK(interp.current.rotation_bam[0] == 0x0F777778u);
     CHECK(interp.current.rotation_bam[1] == ads.rotation_bam[1]);
     CHECK(interp.current.rotation_bam[2] == ads.rotation_bam[2]);
-    CHECK(interp.position_bias_q16[0] == 17 && interp.position_bias_q16[1] == -51);
-    for (int tick = 1; tick < 15; ++tick) player_view_bias_interp_step(interp, hip);
+    CHECK(published.position_q16[0] == 17 && published.position_q16[1] == -51);
+    for (int tick = 1; tick < 15; ++tick) player_view_bias_interp_step(interp, hip, published);
     CHECK(interp.active); // all lanes landed, latch waits one more call
     for (int i = 0; i < 3; ++i) CHECK(interp.current.rotation_bam[i] == ads.rotation_bam[i]);
-    player_view_bias_interp_step(interp, hip);
+    player_view_bias_interp_step(interp, hip, published);
     CHECK(!interp.active);
 
     // An idle all-zero setup arms seven ticks without copying source into
@@ -143,7 +148,7 @@ void test_authored_pose_interp_keeps_original_snap_and_completion_rules() {
     const PlayerViewPose zero;
     player_view_bias_interp_setup(interp, 1, ads, zero);
     CHECK(interp.active && interp.remaining == 7);
-    for (int tick = 0; tick < 7; ++tick) player_view_bias_interp_step(interp, hip);
+    for (int tick = 0; tick < 7; ++tick) player_view_bias_interp_step(interp, hip, published);
     CHECK(!interp.active);
 }
 
@@ -203,7 +208,7 @@ void test_scope_ease_settles_on_the_call_after_the_last_snap() {
         CHECK(!player_view_scope_settled(v));
         player_view_tick(v, eye);
         CHECK(v.weapon_pose_interp.current.position_q16[0] == 21.0f * static_cast<float>(i));
-        CHECK(v.weapon_pose_interp.position_bias_q16[0] == 21 * i);
+        CHECK(v.view_bias.position_q16[0] == 21 * i);
     }
     CHECK(player_view_scope_ease_active(v)); // the lanes landed; the latch holds
     CHECK(!player_view_scope_settled(v));
@@ -213,7 +218,7 @@ void test_scope_ease_settles_on_the_call_after_the_last_snap() {
     CHECK(player_view_scope_fraction(v) == 1.0f);
     player_view_tick(v, eye); // idle: nothing steps, nothing re-promotes
     CHECK(player_view_scope_settled(v) && !player_view_scope_ease_active(v));
-    CHECK(v.weapon_pose_interp.position_bias_q16[0] == 315);
+    CHECK(v.view_bias.position_q16[0] == 315);
     CHECK(player_view_set_engaged(v, false, false));
     CHECK(!player_view_scope_settled(v)); // cleared at the toggle @0x4df20c
     CHECK(v.weapon_pose_interp.velocity.position_q16[0] == 21.0f); // tpos -> hip
@@ -270,8 +275,8 @@ void test_scope_reset_preserves_original_switch_bookkeeping() {
     interp.current = {{4, 5, 6}, {0x22222222u, 0x33333333u, 0x44444444u}};
     interp.target = {{7, 8, 9}, {0x55555555u, 0x66666666u, 0x77777777u}};
     for (int i = 0; i < 3; ++i) {
-        interp.position_bias_q16[i] = 11 + i;
-        interp.rotation_bias_bam[i] = 14 + i;
+        v.view_bias.position_q16[i] = 11 + i;
+        v.view_bias.rotation_bam[i] = 14 + i;
     }
     // Executed original Player_ResetCameraAndMovementState @0x4DE1F0 on
     // this 21-word state: counter=37, rotations copied from velocity, position
@@ -286,7 +291,7 @@ void test_scope_reset_preserves_original_switch_bookkeeping() {
               interp.target.position_q16[i] == 0);
         CHECK(interp.current.rotation_bam[i] == velocity[i] &&
               interp.velocity.rotation_bam[i] == velocity[i] && interp.target.rotation_bam[i] == target[i]);
-        CHECK(interp.position_bias_q16[i] == 11 + i && interp.rotation_bias_bam[i] == 14 + i);
+        CHECK(v.view_bias.position_q16[i] == 11 + i && v.view_bias.rotation_bam[i] == 14 + i);
     }
     const int32_t eye[3] = {};
     player_view_tick(v, eye);
@@ -323,8 +328,7 @@ void test_equal_ticks_equal_state_regardless_of_frame_grouping() {
     for (int i = 0; i < 3; ++i) {
         CHECK(per_frame.weapon_pose_interp.current.position_q16[i] ==
               bursty.weapon_pose_interp.current.position_q16[i]);
-        CHECK(per_frame.weapon_pose_interp.position_bias_q16[i] ==
-              bursty.weapon_pose_interp.position_bias_q16[i]);
+        CHECK(per_frame.view_bias.position_q16[i] == bursty.view_bias.position_q16[i]);
     }
     CHECK(per_frame.tp_anchor_valid && bursty.tp_anchor_valid);
     for (int i = 0; i < 3; ++i) CHECK(per_frame.tp_anchor[i] == bursty.tp_anchor[i]);
@@ -1556,8 +1560,7 @@ void test_bias_view_units() {
     // [orig: Player_StepFpViewBiasInterp @0x4ddf53..0x4ddf85]; then suppressed.
     v.scope_engaged = v.scope_settled = true;
     for (int i = 0; i < 3; ++i)
-        v.weapon_pose_interp.position_bias_q16[i] =
-            static_cast<int32_t>((tpos[i] - pos[i]) * 256.0f);
+        v.view_bias.position_q16[i] = static_cast<int32_t>((tpos[i] - pos[i]) * 256.0f);
     player_view_bias_view_units(v, false, pos, out);
     CHECK(near_eq(out[0], -62.33f / 256.0f));
     CHECK(near_eq(out[1], 29.19f / 256.0f));

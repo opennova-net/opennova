@@ -1406,7 +1406,7 @@ void local_player_viewmodel_rotation_bias(World *world, const LocalPlayerWeapon 
     // difference is suppressed. ForceScoped does not bypass this camera gate.
     // [orig: Player_UpdateFirstPersonCamera @0x4DD40D..0x4DD456]
     for (int i = 0; i < 3; ++i)
-        out_bam[i] = suppressed ? 0 : v.weapon_pose_interp.rotation_bias_bam[i];
+        out_bam[i] = suppressed ? 0 : v.view_bias.rotation_bam[i];
 }
 
 void local_player_viewmodel_bias(World *world, const LocalPlayerWeapon &w,

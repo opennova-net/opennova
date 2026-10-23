@@ -74,7 +74,8 @@ void player_view_bias_interp_setup(PlayerViewBiasInterp &interp, uint32_t steps,
     }
 }
 
-void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip) {
+void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip,
+                                  PlayerViewBias &published) {
     if (!interp.active) return;
     if (interp.remaining != 0) --interp.remaining;
     bool moving = false;
@@ -113,11 +114,12 @@ void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerView
         }
     }
     // [orig: @0x4DDF42..0x4DDFC3] float difference -> truncating ftol for
-    // position, modular subtraction for rotation; both are relative to hip.
+    // position, modular subtraction for rotation; both are relative to hip, and
+    // both land in the six shared words (PlayerViewBias).
     for (int i = 0; i < 3; ++i) {
-        interp.position_bias_q16[i] = static_cast<int32_t>(
+        published.position_q16[i] = static_cast<int32_t>(
                 static_cast<double>(interp.current.position_q16[i]) - hip.position_q16[i]);
-        interp.rotation_bias_bam[i] = io::bam_sub(
+        published.rotation_bam[i] = io::bam_sub(
                 static_cast<int32_t>(interp.current.rotation_bam[i]),
                 static_cast<int32_t>(hip.rotation_bam[i]));
     }
@@ -291,12 +293,8 @@ void player_view_weapon_switch_reset(PlayerViewState &v) {
 void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed) {
     if ((flags & 0x20000000) != 0) v.scope_settled = true;
     else if (category_changed) v.scope_settled = false;
-    // Mount clears only the six published biases, retaining the running pose.
-    // [orig: Player_MountWeaponSlot @0x4DFBCF..0x4DFBE8]
-    for (int i = 0; i < 3; ++i) {
-        v.weapon_pose_interp.position_bias_q16[i] = 0;
-        v.weapon_pose_interp.rotation_bias_bam[i] = 0;
-    }
+    // The running pose is retained; the six published words were the request's to
+    // clear (player_view_mount_clear_bias).
     v.weapon_pose_bound = (flags & (3 | 0x04000000)) != 0;
     if ((flags & 3) != 0 && v.scope_settled) {
         // [orig: g_ScopeEngaged = 1 @0x4dfc5b; Setup(1, +0x10C hip, +0x124 tpos)
@@ -305,6 +303,11 @@ void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_c
         scope_interp_setup(v, 1, v.weapon_hip_pose, v.weapon_ads_pose);
         v.scope_hipfire = false;
     }
+}
+
+void player_view_mount_clear_bias(PlayerViewState &v) {
+    // [orig: Player_MountWeaponSlot @0x4DFBCF..0x4DFBE8]
+    v.view_bias = PlayerViewBias{};
 }
 
 void player_view_tick(PlayerViewState &v, const int32_t eye_q16[3]) {
@@ -325,15 +328,18 @@ void player_view_promote_tick(PlayerViewState &v) {
     // [orig: Player_StepFpViewBiasInterp null slot/Def @0x4DDD2B..0x4DDDBC].
     if (v.weapon_pose_interp.active) {
         if (v.weapon_pose_bound)
-            player_view_bias_interp_step(v.weapon_pose_interp, v.weapon_hip_pose);
+            player_view_bias_interp_step(v.weapon_pose_interp, v.weapon_hip_pose, v.view_bias);
         else
             v.weapon_pose_interp.active = false;
         if (!v.weapon_pose_interp.active) v.scope_settled = v.scope_engaged;
     }
     // The weapon view's lower / raise interp, behind its own latch; no callback
-    // runs at its drop [orig: Player_UpdatePerFrame @0x4DE4FD..0x4DE522].
+    // runs at its drop [orig: Player_UpdatePerFrame @0x4DE4FD..0x4DE522]. Its step
+    // writes the same six bias words after the scope's, so it wins a frame both move
+    // [orig: Player_StepFpViewBiasInterp @0x4DDF42..0x4DDFC3].
     if (v.weapon_lower_raise_interp.active)
-        player_view_bias_interp_step(v.weapon_lower_raise_interp, v.weapon_lower_raise_hip_pose);
+        player_view_bias_interp_step(v.weapon_lower_raise_interp, v.weapon_lower_raise_hip_pose,
+                                     v.view_bias);
 }
 
 namespace {
@@ -748,8 +754,7 @@ void player_view_bias_units(const PlayerViewState &v, const float pos[3], float 
     // The published Q16 bias (interp_current - hip copy, truncated) is in the
     // def's *256 scale; back in file units that is bias / 256.
     for (int i = 0; i < 3; ++i)
-        out[i] = pos[i] + static_cast<float>(v.weapon_pose_interp.position_bias_q16[i]) /
-                                  kWeaponDefPosScale;
+        out[i] = pos[i] + static_cast<float>(v.view_bias.position_q16[i]) / kWeaponDefPosScale;
 }
 
 void player_view_bias_view_units(const PlayerViewState &v, bool suppress_bias,

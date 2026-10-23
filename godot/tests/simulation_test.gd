@@ -5504,7 +5504,14 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			"the mounted definition cannot pump the restored personal slot")
 
 
-func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> void:
+# A gun-to-gun move is the process's detach and then its attach: the detach's mount
+# force-queues SWITCHFROM on the old gun's slot and lowers the view, the attach's mount
+# (the same category) finds that lower and queues no SWITCHRANK, and the old slot's
+# SWITCHFROM commits the new gun and queues its draw (L7-s25)
+# [orig: Entity_ProcessVehicleAttach @0x435AA0 (@0x435BCE); Entity_DetachFromVehicle
+#  @0x4355F0 (@0x43565F); Player_MountWeaponSlot @0x4DFA40 (@0x4DFB8D..0x4DFB96);
+#  WeaponAction_SwitchFrom @0x5433B0 (@0x543475, @0x5434A3)].
+func test_local_usegun_direct_swap_commits_the_latest_parent_at_the_detach_switchfrom() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	# Three guns in a row along their +y facing, 3.5 u apart: a seated USE
@@ -5585,7 +5592,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_true(sim.local_player_toggle_mount(),
 			"a second gun inside the seated 5 deg cone is a direct mounted-seat swap")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
-			"the old parent remains equipped until the rank commit")
+			"the old parent remains equipped until the detach's SWITCHFROM commits")
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
 			first_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"pre-commit swap restores the old parent world model")
@@ -5611,8 +5618,8 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			second_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
 			"the resolved EMPLCD50 replacement culls only its own world model")
 	sim.step()
-	assert_eq(sim.get_local_player_weapon_state().current_action, 0,
-			"SWITCHRANK does not queue SWITCHTO onto the target parent slot")
+	assert_eq(sim.get_local_player_weapon_state().current_action, 6,
+			"the SWITCHFROM's commit draws the target parent slot (SWITCHTO)")
 	assert_true(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 
 	# The scan walks the rider's proximity slice, which refreshes every 16
@@ -5662,6 +5669,8 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal_def: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
+	# The kit the respawn's select rebuilds.
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	sim.set_local_player_weapon(personal_def, {})
 	sim.drain_local_player_weapon_events()
 
@@ -5681,21 +5690,32 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	var rounds_before := sim.get_local_player_weapon_state().round_ring_count
 	sim.set_local_player_weapon_input(true, true, false)
 	sim.debug_set_entity_health(0, 0)
+	# The death's detach mounts the personal slot over the gun's running draw: its
+	# SWITCHFROM is refused and nothing retains it, so the draw runs out and the dead
+	# gunner holds the gun's slot (L7-s25) [orig: Entity_DetachFromVehicle @0x4355F0
+	# (@0x43565F); WeaponSlot_ForceQueueSwitchFrom @0x53F170 (@0x53F17A..0x53F185)].
 	var restore_event: PlayerWeaponEvent = null
 	for _tick in range(160):
 		sim.step()
 		for raw in sim.drain_local_player_weapon_events():
 			if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_M4AUTO":
 				restore_event = raw
-		if not restore_event == null:
-			break
-	assert_false(restore_event == null,
-			"forced detach during SWITCHTO eventually restores the personal slot")
+	assert_true(restore_event == null,
+			"a forced detach during SWITCHTO commits no switch back while the player is dead")
+	assert_true(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 	assert_eq(sim.get_local_player_weapon_state().fired_serial,
 			fired_before, "a dead local gunner cannot fire the emplacement")
 	assert_eq(sim.get_local_player_weapon_state().round_ring_count, rounds_before,
 			"no round of the dead gunner's reached the ring")
-	assert_true(restore_event.installed)
+	# The respawn's select stores the personal slot as the EquippedSlot, off any seat,
+	# which ends the borrow [orig: Player_SelectWeaponSlot @0x4DD680 (@0x4DD6E0..0x4DD704)].
+	sim.respawn_local_player_loadout()
+	for raw in sim.drain_local_player_weapon_events():
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_M4AUTO":
+			restore_event = raw
+	assert_false(restore_event == null, "the respawn's select restores the personal slot")
+	if restore_event != null:
+		assert_true(restore_event.installed)
 	assert_false(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 
 

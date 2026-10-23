@@ -383,14 +383,36 @@ struct PlayerViewBiasInterp {
     PlayerViewPose velocity;
     uint32_t remaining = 0;
     bool active = false;
-    int32_t position_bias_q16[3] = {};
-    int32_t rotation_bias_bam[3] = {};
+};
+
+// THE PUBLISHED VIEW BIAS: six process words, not an interp's own. Every step of
+// either view interp (the scope's, then the lower / raise) writes all six, so the
+// last step of a frame wins; a call that moves no lane writes none; the mount
+// request clears them; the first-person camera alone reads them, adding them to the
+// held def's Bone, which moves the viewmodel. Position in 16.16 (the truncating
+// ftol of the current pose less the bound def's +0x10C copy), rotation the BAM
+// difference. No aim or fire word reads the camera they move: its other readers place
+// the muzzle-flash / heat-glow emitter, the action effects and the NVG laser beam.
+// [orig: g_ViewPosBiasX / Y / Z @0xB76520 / @0xB76524 / @0xB76528, g_ViewRotBiasYaw /
+//  Pitch / Roll @0xB7652C / @0xB76530 / @0xB76534 - the writers Player_StepFpViewBiasInterp
+//  @0x4DDF42..0x4DDFC3 and Player_MountWeaponSlot @0x4DFBCF..0x4DFBE8, the one reader
+//  Player_UpdateFirstPersonCamera @0x4DD380 (@0x4DD444..0x4DD450, @0x4DD4CE..0x4DD4DA),
+//  whose g_ViewMatrix Entity_GetCameraTransform @0x4B8C00 serves to
+//  Entity_ComputeWeaponFireTransform @0x4011F0 (WeaponAction_ProcessFrame's emitter
+//  @0x5411DB), Entity_ComputeActionTransform @0x401310 (ActionSlot_SpawnEffect
+//  @0x402002) and Entity_ComputeBoneTransform @0x401890 (through
+//  Entity_ComputeBoneTransformWithClear @0x4DC950 from Entity_RenderNVGLaserBeam @0x5C6090)]
+struct PlayerViewBias {
+    int32_t position_q16[3] = {};
+    int32_t rotation_bam[3] = {};
 };
 
 void player_view_bias_interp_setup(PlayerViewBiasInterp &interp, uint32_t steps,
                                   const PlayerViewPose &idle_source,
                                   const PlayerViewPose &target);
-void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip);
+// One step; a step that moves a lane publishes the six words into `published`.
+void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip,
+                                  PlayerViewBias &published);
 
 struct PlayerViewState {
     // THE ADS SCOPE TRI-STATE beside the FP camera interp below.
@@ -412,8 +434,8 @@ struct PlayerViewState {
     // endpoints (WeaponDef +0x10C hip copy / +0x124 tpos) and the six-lane
     // interpolator every Setup targets. Its `active` latch IS the ease gate
     // the toggle tests, its completion IS what the settle promoter waits
-    // for, and its published biases ARE the camera's position/rotation
-    // offsets; there is no separate scalar clock.
+    // for, and its steps publish the camera's position/rotation offsets
+    // (`view_bias`); there is no separate scalar clock.
     PlayerViewPose weapon_hip_pose;
     PlayerViewPose weapon_ads_pose;
     PlayerViewBiasInterp weapon_pose_interp;
@@ -425,12 +447,14 @@ struct PlayerViewState {
     // the committed one's (player_view_start_weapon_lower / _raise). Its active
     // latch is the same-category mount's gate (player_view_weapon_lower_raise_active).
     // `weapon_lower_raise_hip_pose` is the bound slot's def +0x10C at the start,
-    // the step's bias reference. Its published bias words are not presented: the
-    // first-person view reads `weapon_pose_interp`'s. A mission start's fresh view
+    // the step's bias reference. Its steps publish `view_bias` after the scope's,
+    // so the viewmodel drops and rises with it. A mission start's fresh view
     // starts it idle, as Player_InitPlayer's clear does [orig: Player_InitPlayer
     // @0x4E15F0 (@0x4E171C / @0x4E1722), called @0x525BBC].
     PlayerViewBiasInterp weapon_lower_raise_interp;
     PlayerViewPose weapon_lower_raise_hip_pose;
+    // The six published bias words both interps' steps write (PlayerViewBias).
+    PlayerViewBias view_bias;
     // The movement-held latch: written by the input pack only, from the packed
     // word's direction bits, so a joiner's latches once per send boundary.
     // [orig: g_MovementKeyHeld @ 0xB7653B; Player_PackInputStateToEntity
@@ -739,11 +763,19 @@ void player_view_scope_reset(PlayerViewState &v);
 // copy angle velocity into current, then deactivate the interpolator.
 // [orig: Player_ResetCameraAndMovementState @0x4DE1F0..0x4DE281]
 void player_view_weapon_switch_reset(PlayerViewState &v);
-// A direct mount clears only the published biases. Same-category mounts keep
-// the promoted byte; ForceScoped sets it; an optical promoted mount sets up a
-// one-step transition to the new def's ADS pose without stepping it here.
-// [orig: Player_MountWeaponSlot @0x4DFB31..0x4DFC9A]
+// A mount's view words past its bias clear (player_view_mount_clear_bias, run at the
+// request): same-category mounts keep the promoted byte; ForceScoped sets it; an
+// optical promoted mount sets up a one-step transition to the new def's ADS pose
+// without stepping it here; the running pose is retained.
+// [orig: Player_MountWeaponSlot @0x4DFB31..0x4DFB66, @0x4DFC35..0x4DFC9A]
 void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed);
+// The mount request's clear of the six published bias words, past its queue (and the
+// lower that queue starts), ahead of its first-person camera update; the commit that
+// later stores the slot clears nothing.
+// [orig: Player_MountWeaponSlot @0x4DFA40 - @0x4DFBCF..0x4DFBE8, Player_UpdateFirstPersonCamera
+//  @0x4DFBED; WeaponAction_SwitchFrom @0x5433B0 / WeaponAction_SwitchRank @0x543500 write
+//  none of them]
+void player_view_mount_clear_bias(PlayerViewState &v);
 
 // Whether a scope request for `engaged` has anything to do: false when that
 // target is already reached or in flight. The one exception is the engaged
@@ -929,9 +961,10 @@ ViewProjection nvg_view_projection(const ViewProjection &frame,
 float viewmodel_focal_ratio(float world_fov_h_deg, float renderfov_h_deg);
 
 // The first-person view position in RAW weapon.def units: the def `pos`
-// (+0xF4) plus the interp's PUBLISHED position bias (g_ViewPosBiasX/Y/Z,
-// the truncating ftol of interp_current - the hip copy at +0x10C, in the
-// def's *256 Q16 scale) brought back to file units over kWeaponDefPosScale.
+// (+0xF4) plus the PUBLISHED position bias (view_bias, g_ViewPosBiasX/Y/Z:
+// the last step's truncating ftol of its interp's current - the hip copy at
+// +0x10C, in the def's *256 Q16 scale) brought back to file units over
+// kWeaponDefPosScale.
 // Zero bias at the hip, tpos - pos once the lanes snap; no float blend and no
 // tpos input, the ADS endpoint lives in the bound pose. [orig:
 // Player_UpdateFirstPersonCamera @ 0x4dd380 -- ftol(Bone +0xF4) @0x4dd479..

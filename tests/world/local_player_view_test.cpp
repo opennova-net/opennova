@@ -1093,6 +1093,15 @@ void test_detach_mount_latch_target() {
         {2, true, true},      // a saved def of category 11: the current slot
         {1, false, true},     // a saved def of category 3 is the target
     };
+    // The borrowed gun whose slot the EquippedSlot is: the mount queues its switch back there
+    // inside the detach [orig: Entity_DetachFromVehicle @0x4355F0 (@0x43565F)].
+    world.registry.configure_pool(1, 4);
+    Entity gun_seed;
+    gun_seed.kind = EntityKind::Item;
+    gun_seed.has_item_def = true;
+    gun_seed.item_attrib = kItemAttribEweap;
+    gun_seed.alive = true;
+    const EntityHandle gun = world.registry.spawn(1, gun_seed);
     for (const Case &c : cases) {
         WeaponInventory inventory;
         inventory.reset(world.tables.weapons);
@@ -1106,15 +1115,20 @@ void test_detach_mount_latch_target() {
         LocalPlayerWeapon w;
         w.active = true;
         w.usegun_slot_active = true;
+        w.usegun_mount = gun;
         w.nvg_scope_restore = true;
         PlayerViewState view;
         local_weapon_detach_mount(world, w, &inventory, view);
         CHECK(w.nvg_scope_restore == !c.clears);
+        // A target's mount stages the switch back at once, queued on the gun's slot; none
+        // stages nothing.
+        CHECK(w.usegun_switch == (c.clears ? LocalUseGunSwitch::kDetach : LocalUseGunSwitch::kNone));
         if (c.clears) {
             // [orig: Player_MountWeaponSlot @0x4DFA40 (g_PendingWeaponSlot @0x4DFB16)]
             const bool saved_target = c.saved == 1;
             CHECK(inventory.pending_combo == (saved_target ? 7 * 65 : 3 * 65));
             CHECK(w.usegun_saved_adm == 1);
+            CHECK(world.registry.get(gun)->primary_weapon_slot.next == weapon_action::kSwitchFrom);
         }
     }
     // Unborrowed: +0x308 (the selected slot) else the current slot; the mount
@@ -2381,11 +2395,11 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     body.inf.vel[2] = 0x1600;
     local_player_view_frame(&lw.w, weapon, view, tracker, frame);
     CHECK(frame.suppress_view_bias && view.scope_engaged);
-    CHECK(view.weapon_pose_interp.position_bias_q16[0] == 3 * 4096);
+    CHECK(view.view_bias.position_q16[0] == 3 * 4096);
     check_bias(1.0f, 2.0f, 3.0f);
     body.inf.vel[2] = -0x1600;
     for (int i = 0; i < 5; ++i) player_view_tick(view, eye);
-    CHECK(view.weapon_pose_interp.position_bias_q16[0] == 8 * 4096);
+    CHECK(view.view_bias.position_q16[0] == 8 * 4096);
     CHECK(player_view_scope_ease_active(view));
     check_bias(1.0f, 2.0f, 3.0f);
 
@@ -2396,7 +2410,7 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     body.inf.airborne = false;
     body.inf.vel[2] = 0;
     local_player_view_frame(&lw.w, weapon, view, tracker, frame);
-    CHECK(!frame.suppress_view_bias && view.weapon_pose_interp.position_bias_q16[0] == 8 * 4096);
+    CHECK(!frame.suppress_view_bias && view.view_bias.position_q16[0] == 8 * 4096);
     // 8 of 15 steps: 8 * 4096 / 65536 = 0.5 u on the 240-unit x/y lanes and
     // 8 * 8192 / 65536 = 1.0 u on the 480-unit z lane (each lane eases its own span).
     check_bias(1.5f, 1.5f, 4.0f);
@@ -3221,8 +3235,9 @@ void test_scope_zero_bake_rows_follow_the_x87_scale() {
     CHECK(zero.elevation[5] == 2216066);
 }
 
-// Direct mounts retain the current pose and velocities. Published bias alone
-// clears, then the next step uses the newly bound def's hip reference.
+// Direct mounts retain the current pose and velocities, and the published bias words
+// too: their clear is the mount request's (player_view_mount_clear_bias), which a commit's
+// install does not run; the next step publishes against the newly bound def's hip.
 void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
     LocalWorld lw;
     for (int i = 0; i < 3; ++i) {
@@ -3246,6 +3261,8 @@ void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
     const int32_t eye[3] = {};
     for (int i = 0; i < 3; ++i) player_view_tick(v, eye);
     const PlayerViewBiasInterp before = v.weapon_pose_interp;
+    const PlayerViewBias published_before = v.view_bias;
+    CHECK(published_before.rotation_bam[0] != 0);
     data.name = "POSE_1";
     data.view_hip_pose = {{10, 20, 30}, {0x02000000u, 0x03000000u, 0x04000000u}};
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
@@ -3255,10 +3272,17 @@ void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
         CHECK(v.weapon_pose_interp.current.rotation_bam[i] == before.current.rotation_bam[i]);
         CHECK(v.weapon_pose_interp.velocity.position_q16[i] == before.velocity.position_q16[i]);
         CHECK(v.weapon_pose_interp.velocity.rotation_bam[i] == before.velocity.rotation_bam[i]);
-        CHECK(v.weapon_pose_interp.position_bias_q16[i] == 0 &&
-              v.weapon_pose_interp.rotation_bias_bam[i] == 0);
+        CHECK(v.view_bias.position_q16[i] == published_before.position_q16[i] &&
+              v.view_bias.rotation_bam[i] == published_before.rotation_bam[i]);
     }
     CHECK(v.weapon_pose_interp.remaining == before.remaining);
+    // The request's clear zeroes the six words alone, the running pose kept.
+    PlayerViewState cleared = v;
+    player_view_mount_clear_bias(cleared);
+    for (int i = 0; i < 3; ++i) {
+        CHECK(cleared.view_bias.position_q16[i] == 0 && cleared.view_bias.rotation_bam[i] == 0);
+        CHECK(cleared.weapon_pose_interp.current.rotation_bam[i] == before.current.rotation_bam[i]);
+    }
     player_view_tick(v, eye);
     int32_t out[3];
     local_player_viewmodel_rotation_bias(&lw.w, w, v, out);
@@ -3270,10 +3294,11 @@ void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
     settle_ease(v);
     CHECK(player_view_scope_settled(v));
     data.name = "POSE_0";
+    const int32_t settled_bias = v.view_bias.rotation_bam[0];
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
     CHECK(player_view_scope_settled(v) && v.weapon_pose_interp.active);
     CHECK(v.weapon_pose_interp.current.rotation_bam[0] == 0x02000000u);
-    CHECK(v.weapon_pose_interp.rotation_bias_bam[0] == 0);
+    CHECK(v.view_bias.rotation_bam[0] == settled_bias);
     data.name = "POSE_2";
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
     CHECK(!player_view_scope_settled(v) && v.weapon_pose_interp.active);
@@ -3287,7 +3312,7 @@ void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
     data.view_ads_pose = {{0, 0, 0}, {0x10000000u, 0x20000000u, 0x30000000u}};
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
     CHECK(v.scope_engaged && player_view_scope_settled(v) && !v.scope_hipfire);
-    CHECK(v.weapon_pose_interp.active && v.weapon_pose_interp.rotation_bias_bam[0] == 0);
+    CHECK(v.weapon_pose_interp.active);
     CHECK(!local_player_scope_toggle(lw.w, w, v, w.slot)); // forced sight stays pinned
     player_view_tick(v, eye);
     local_player_viewmodel_rotation_bias(&lw.w, w, v, out);
@@ -3333,12 +3358,18 @@ void test_category_request_resets_before_commit_while_cycle_retains_pose() {
     player_view_tick(v, eye);
     const uint32_t current = v.weapon_pose_interp.current.rotation_bam[0];
     const uint32_t velocity = v.weapon_pose_interp.velocity.rotation_bam[0];
-    const int32_t published = v.weapon_pose_interp.rotation_bias_bam[0];
+    const int32_t published = v.view_bias.rotation_bam[0];
+    CHECK(published != 0);
     const auto cycle = weapon_cycle_slot(lw.w.tables.weapons, inventory, 1,
                                          local_weapon_switch_gates(lw.w, w, &inventory));
     CHECK(cycle.kind == WeaponSwitchOutcome::kMount && !cycle.reset_view);
     handle_weapon_switch_outcome(lw.w, w, &inventory, cycle, v);
     CHECK(v.weapon_pose_interp.active && v.weapon_pose_interp.current.rotation_bam[0] == current);
+    // The cycle's mount request clears the six published words, the pose kept
+    // [orig: Player_MountWeaponSlot @0x4DFBCF..0x4DFBE8].
+    CHECK(v.view_bias.rotation_bam[0] == 0);
+    player_view_tick(v, eye);
+    CHECK(v.view_bias.rotation_bam[0] != 0);
     w.slot.current = weapon_action::kIdle;
     const auto category = weapon_switch_to_handle(lw.w.tables.weapons, inventory, 65,
                                                   local_weapon_switch_gates(lw.w, w, &inventory));
@@ -3347,7 +3378,8 @@ void test_category_request_resets_before_commit_while_cycle_retains_pose() {
     CHECK(w.switch_in_flight && inventory.equipped_combo == 65); // action has not committed
     CHECK(!v.weapon_pose_interp.active && !v.scope_engaged && v.scope_hipfire);
     CHECK(v.weapon_pose_interp.current.rotation_bam[0] == velocity);
-    CHECK(v.weapon_pose_interp.rotation_bias_bam[0] == published); // reset is not mount bias clear
+    // The reset leaves the words (player_view_test); the category key's mount clears them.
+    CHECK(v.view_bias.rotation_bam[0] == 0);
     const auto denied = weapon_switch_to_handle(lw.w.tables.weapons, inventory, 11 * 65,
                                                 local_weapon_switch_gates(lw.w, w, &inventory));
     CHECK(denied.kind == WeaponSwitchOutcome::kDeny && denied.reset_view);
