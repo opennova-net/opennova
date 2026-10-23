@@ -1175,7 +1175,11 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
 	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
-	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+	// The 0x42 leaves at the first pump whose clock reads past the connect state's start: the
+	// held join's test clock steps there (the steady helper waits on a clock it never moves).
+	const std::vector<uint8_t> auth_datagram = held_in_the_queue
+			? inmatch::test::enumerated_join_auth(joiner, clock_ms)
+			: inmatch::test::enumerated_join_auth(joiner);
 	if (!expect(!auth_datagram.empty(),
 			"ServerHello leads to one ClientAuth")) {
 		return false;
@@ -1340,6 +1344,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 		// the holdoff settings pair, the 0x01 verification, the 0x7A, the 0x7B and the
 		// 0x03 [queued 1][position 1][length 1].
 		const std::vector<uint8_t> nag = {0x01, 0x01, 0x00, 0x01, 0x00};
+		const uint64_t first_nag_ms = clock_ms;
 		server_seq.last_inbound_seq = 5;
 		uint32_t client_seq = 5;
 		int acks = 0;
@@ -1399,7 +1404,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 		// record's stamp (the not-queued -> queued edge alone stamps it).
 		const inmatch::JoinQueueRecord &queue = joiner.join_queue();
 		if (!expect(queue.queued && queue.position == 1 && queue.length == 1 &&
-						queue.queued_since_ms == 1000,
+						queue.queued_since_ms == first_nag_ms,
 				"held: the queue record is the host's, stamped at the first nag")) {
 			return false;
 		}
