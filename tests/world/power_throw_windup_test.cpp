@@ -312,6 +312,38 @@ void test_the_walk_clears_the_windup_past_its_seat_gate() {
 	CHECK(f.weapon.power_throw_start_tick == 0);
 }
 
+// A mount no walk runs (a UseGun's, a ToSpecial switch's) carries a running windup onto the new
+// slot, and its release requests fire there with the charge: the release leg tests no def.
+// [orig: Player_MountWeaponSlot @0x4DFA40 (no g_FireChargeStartTick write);
+//  Input_HandleActionBinding_0 @0x4E0420 - the release leg @0x4E07E9..0x4E086F
+//  (WeaponSlot_RequestFire(EquippedSlot, 0x96, charge) @0x4E086F)]
+void test_a_mount_carries_the_windup_to_the_new_slots_release() {
+	Fixture f;
+	f.update(true, true);
+	const uint32_t started = f.weapon.power_throw_start_tick;
+	CHECK(started != 0);
+	WeaponInstallData gun;
+	gun.name = "WPN_GUNTEST";
+	gun.clipsize = 30;
+	gun.rows.resize(3);
+	const char *const names[3] = {"idle", "fire", "recoil"};
+	for (int i = 0; i < 3; ++i) {
+		std::snprintf(gun.rows[i].name, sizeof(gun.rows[i].name), "%s", names[i]);
+		gun.rows[i].delaystart = 0;
+		gun.rows[i].delayend = 0;
+	}
+	local_weapon_install(f.world, f.weapon, gun, false, false, nullptr, f.view);
+	CHECK((f.weapon.def.flags & weapon_flag::kPowerThrow) == 0);
+	CHECK(f.weapon.power_throw_start_tick == started); // the mount leaves it
+	for (int tick = 0; tick < 2; ++tick) f.update(true);
+	CHECK(f.weapon.fired_serial == 0); // the held binding requests nothing
+	f.update(false, false, true); // the release record
+	CHECK(f.weapon.power_throw_start_tick == 0);
+	CHECK(f.weapon.fired_serial == 1); // the gun fires the release's request
+	f.update(false);
+	CHECK(f.weapon.fired_serial == 1);
+}
+
 } // namespace
 
 int main() {
@@ -326,6 +358,7 @@ int main() {
 	test_the_windup_test_reads_the_current_action_and_any_ammo();
 	test_the_walk_keeps_a_running_windup();
 	test_the_walk_clears_the_windup_past_its_seat_gate();
+	test_a_mount_carries_the_windup_to_the_new_slots_release();
 	if (failures != 0) {
 		std::printf("power_throw_windup: %d failure(s)\n", failures);
 		return 1;

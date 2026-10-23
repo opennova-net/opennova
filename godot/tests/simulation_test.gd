@@ -5353,8 +5353,10 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	var personal_def: WeaponDef = weapons.get_weapon(personal_idx)
 	var mounted_def: WeaponDef = weapons.get_weapon(mounted_idx)
 	# Exercise the merge seam with a PowerThrow-shaped personal def while the
-	# authoritative inventory still selects WPN_M4AUTO. A UseGun handoff must
-	# cancel its windup before borrowing the parent's persistent slot.
+	# authoritative inventory still selects WPN_M4AUTO. A UseGun handoff runs no walk,
+	# so the running windup rides onto the parent's persistent slot (retail's mount
+	# writes no g_FireChargeStartTick); the gun's def draws no charge bar, and no
+	# charged personal round leaks.
 	var powerthrow_personal := personal_def.copy()
 	powerthrow_personal.flags = personal_def.flags | (1 << 31)
 	sim.set_local_player_weapon(powerthrow_personal, {})
@@ -5391,7 +5393,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER")
 	var handed_off := sim.get_local_player_weapon_state()
 	assert_false(handed_off.windup_active,
-			"UseGun input suppression cancels the outgoing PowerThrow windup")
+			"the borrowed gun's def (no PowerThrow flag) draws no charge bar")
 	assert_eq(handed_off.fired_serial, personal_fired_before)
 	assert_eq(handed_off.round_ring_count, personal_rounds_before,
 			"releasing through the handoff cannot leak a charged personal round")

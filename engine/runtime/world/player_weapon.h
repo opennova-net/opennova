@@ -141,11 +141,14 @@ struct LocalPlayerWeapon {
     bool fire_pressed = false;    // latched until the pump consumes the edge
     bool reload_pressed = false;
     // The PowerThrow windup's start, g_FireChargeStartTick: the input phase's tick
-    // (local_weapon_input_tick) its left-down or key press stored, 0 for none.
+    // (local_weapon_input_tick) its left-down or key press stored, 0 for none. Only the input
+    // legs, the walk (local_weapon_walk_clears_windup) and the round's init write it: the
+    // weapon walk and a mount leave it, so it rides a mount no walk runs.
     uint32_t power_throw_start_tick = 0;
     uint8_t pending_throw_charge = 0;
     // The fire row's release leg took the windup at its record (local_weapon_release_fire):
-    // the pump requests the throw with the charge byte; consumed with the press latch.
+    // the pump requests fire on the slot with the charge byte, whatever its def (a PowerThrow
+    // def's throw, or the slot a windup rode onto); consumed with the press latch.
     bool power_throw_released = false;
     // The latched press passed case 0x95's press-leg gates at its record
     // (local_weapon_press_fire): the pump requests it with no WAC gate of its own; and

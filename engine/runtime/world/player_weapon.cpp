@@ -1203,9 +1203,13 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	// once the draw completes, so the pending combo still commits.
 	if (w.switch_in_flight)
 		w.switch_deferred_action = weapon_action::kSwitchFrom;
-	// The mount is the charge epoch [orig: Player_SwitchToWeaponByHandle zeroes
-	// g_FireChargeStartTick on the walk, before the mount].
-	w.power_throw_start_tick = 0;
+	// A mount leaves a running PowerThrow windup alone: the walk clears it ahead of the mount
+	// (local_weapon_walk_clears_windup, past the walk's own gates), and a mount no walk runs (a
+	// UseGun's, a ToSpecial switch's) carries it onto the new slot, whose release requests fire
+	// there (local_weapon_pump_tick). [orig: Player_MountWeaponSlot @0x4DFA40 writes no
+	//  g_FireChargeStartTick (@0xB76800); Player_SwitchToWeaponByHandle @0x4E019B;
+	//  Entity_AttachToUseGunSlot @0x546B80 (the mount @0x546C38); Input_HandleActionBinding_0
+	//  case 0xDC's Player_EquipWeaponByEntity @0x4E11B2 / @0x4E125B]
 	w.pending_throw_charge = 0;
 	w.play_serial = 0;
 	// Retail's channel halves and latch live in the per-.adm cached record,
@@ -1759,6 +1763,21 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			if (def != nullptr && !world.script.weapon_input.record_fire_request(def->category))
 				in.fire_pressed = false;
 		}
+		// A release whose windup ran on into this slot (a UseGun mount, a ToSpecial switch:
+		// neither walks) requests fire here with its charge, as the PowerThrow branch's throw
+		// does: the release leg tests no def, and the request writes the charge byte whatever
+		// it then queues. Blocked as the branch's is, it drops the charge.
+		// [orig: Input_HandleActionBinding_0 @0x4E0420 - the release leg @0x4E07E9..0x4E086F
+		//  (WeaponSlot_RequestFire(EquippedSlot, 0x96, charge) @0x4E086F, no def test);
+		//  WeaponSlot_RequestFire @0x53EFA0 (the charge byte +0x5C @0x53EFB5)]
+		if (w.power_throw_released) {
+			if (accept_weapon_input || input_block == LocalWeaponInputBlock::kSeat) {
+				in.fire_pressed = true;
+				power_throw_release = true;
+			} else {
+				w.pending_throw_charge = 0;
+			}
+		}
 	}
 	// The dispatch gate runs here now: the raw reload edge is refused on a full
 	// magazine or an empty reserve [orig: input case 0xD3 @ 0x4e0420].
@@ -2158,6 +2177,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			// grenade/LAW switchback, unconditional per throw].
 			if (ev.action_finished == weapon_action::kRecoil &&
 					eq_def->has_switchcategory) {
+				local_weapon_walk_clears_windup(world, w); // [orig: @0x54307C -> @0x4E019B]
 				handle_weapon_switch_outcome(world, w, io.inventory,
 						weapon_switch_to_handle(world.tables.weapons, inventory,
 								eq_def->switchcategory *
