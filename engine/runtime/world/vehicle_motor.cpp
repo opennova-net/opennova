@@ -1106,6 +1106,13 @@ CollisionMatrix vehicle_solve_matrix(const Entity &veh) {
 			m.yaw_bam, m.air_pitch_bam, m.air_roll_bam, origin, veh.uniform_scale_q16);
 }
 
+int32_t vehicle_crash_test_up(const CollisionMatrix &head) {
+	const int64_t row2[3] = { head.m[2] >> 6, head.m[6] >> 6, head.m[10] >> 6 };
+	int32_t unit[3];
+	q16_normalize(row2, unit);
+	return unit[2];
+}
+
 CollisionMatrix vehicle_matrix_rows(const CollisionMatrix &head) {
 	CollisionMatrix out = head;
 	for (int row = 0; row < 3; ++row)

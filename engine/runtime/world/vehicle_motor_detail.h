@@ -150,6 +150,19 @@ CollisionMatrix vehicle_solve_matrix(const Entity &veh);
 //  Math_SetRow0FromVec3Scaled @0x613820 (@0x47990C), Math_SetRow2FromVec3Scaled @0x613850
 //  (@0x47991E)]
 CollisionMatrix vehicle_matrix_rows(const CollisionMatrix &head);
+// The tracked and wheeled solves' crash tests' up word: the head matrix's row 2 extract
+// normalized on the x87 (the length of the three squares' sum, each component times 65536.0f
+// over it, truncated; a zero length all 0), its z. The tests dot it with the world up (0, 0, 0x10000),
+// whose x operand is a zeroed local, so the dot is the z. Both solves normalize all three
+// extracts into their occupant matrix, but rebuild the matrix unscaled from the euler words before
+// any other reader, so only the tests see a normalized word.
+// [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 - the normalize @0x476366..0x4763CC
+//  (flt_7C32BC loaded @0x4762B2, `fdivrp` @0x476391), the world up var_418 / var_414 / var_410 =
+//  0 / 0 / 0x10000 @0x4760F5..0x4760FD, the dot @0x4776DB..0x47773D;
+//  Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the normalize @0x47C72F..0x47C795, the world
+//  up @0x47C486..0x47C494, the dot @0x47D6BF..0x47D722; the normalize form is q16_normalize's
+//  (Q3-11)]
+int32_t vehicle_crash_test_up(const CollisionMatrix &head);
 
 // One bilinear terrain probe force [orig: Entity_ComputeCollisionForces
 // @0x462150, terrain loop @0x462246..0x4624CA]: 4 samples at ±r, gradient

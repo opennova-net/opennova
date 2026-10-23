@@ -479,8 +479,9 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	// The probes ride the head matrix, the hull's effective scale included.
 	// [orig: @0x47C58B..0x47C5E2, the transforms from @0x47C84F]
+	const CollisionMatrix head = vehicle_solve_matrix(veh);
 	int32_t probes[7][3];
-	place_probes(vehicle_solve_matrix(veh), probes_model, px, py, pz, probes);
+	place_probes(head, probes_model, px, py, pz, probes);
 
     // ---- the two force passes + severity (the shared sub-contract with the
     // platform/air solves; terrain leg only) [orig: Entity_CheckCollisionState
@@ -568,7 +569,10 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	const bool pad_contact[7] = { d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0, d[4] != 0, d[5] != 0,
 		d[6] != 0 };
 	vehicle_landing_damage(world, veh, traits, d, 7, up_z16);
-	world.vehicles.suspension_crash_tests(veh, traits, up_z16, SuspensionFamily::Tracked);
+	// The crash tests read the head matrix's row 2 normalized (they run ahead of the rebuild
+	// whose extracts every other up read takes). [orig: the dot @0x47D6BF..0x47D722]
+	world.vehicles.suspension_crash_tests(
+			veh, traits, vehicle_crash_test_up(head), SuspensionFamily::Tracked);
 	{
 		int32_t quad[4][3];
 		vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, quad);
@@ -980,8 +984,9 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	// The probes ride the head matrix, the hull's effective scale included.
 	// [orig: @0x4761F9..0x476250, the transforms @0x4764E0..0x47660B]
+	const CollisionMatrix head = vehicle_solve_matrix(veh);
 	int32_t probes[13][3];
-	place_probes(vehicle_solve_matrix(veh), probes_model, px, py, pz, probes);
+	place_probes(head, probes_model, px, py, pz, probes);
     int32_t radii[13]; // the 13 radius stores all copy suspensionOffset
     for (int i = 0; i < 13; ++i) radii[i] = r;
 
@@ -1023,9 +1028,15 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	// Witness sites: [orig: @0x477496, @0x48f004]
 	plat_water_flag(world, veh, traits, probes, r, hull_bottom_neg, world.env.water_z);
 
-	int32_t up_z16 = static_cast<int32_t>(basis.up[2] * io::kFp16OneD);
-	// The crash tests (a)/(b). [orig: @0x477760..0x4777BF]
-	world.vehicles.suspension_crash_tests(veh, traits, up_z16, SuspensionFamily::Tank);
+	// The crash tests (a)/(b) read the head matrix's row 2 normalized. The matrix is then rebuilt
+	// unscaled from the euler words and every other up read takes its row 2 extract's z.
+	// [orig: the dot @0x4776DB..0x47773D, the tests @0x477760..0x4777BF; the rebuild
+	//  Math_BuildFixedPointMatrixFromEulerAngles (the call @0x4777D2) and its extracts @0x4777E4 /
+	//  @0x4777F6; the readers @0x477D2F (the stability byte), @0x477E93 (the landing), @0x478048
+	//  (the crush), @0x4782C0 (the crash state)]
+	world.vehicles.suspension_crash_tests(
+			veh, traits, vehicle_crash_test_up(head), SuspensionFamily::Tank);
+	int32_t up_z16 = basis.q22.m[10] >> 6;
 
 	// ---- the wall walk: only a probe that struck a steep model face carries a
 	// wall byte. Each flagged record sums into the contact vector and marks a

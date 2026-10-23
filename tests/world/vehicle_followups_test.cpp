@@ -517,6 +517,29 @@ void occupant_rows_floor_each_word() {
         CHECK(plain.m[i] == euler.m[i]);
 }
 
+// D-NET-NEW-L6-34 (row J): the tracked and wheeled solves' crash tests read the head matrix's row 2
+// extract normalized, its z: a twice-scaled level hull reads 65536 (its raw extract 131072); a row
+// 2 of (30000, 0, 58000) reads 58210 and one of (-1234, 40000, 51000) 51557 (the raw z 58000 and
+// 51000); a zero row reads 0. Each word sits clear of an integer edge at 24, 53 and 64 bits.
+// [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 - @0x476366..0x4763CC, the dot
+//  @0x4776DB..0x47773D; Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47C72F..0x47C795, the
+//  dot @0x47D6BF..0x47D722]
+void crash_test_up_is_the_normalized_row() {
+    Entity e;
+    e.uniform_scale_q16 = 2 * 65536;
+    CHECK(detail::vehicle_crash_test_up(detail::vehicle_solve_matrix(e)) == 65536);
+    CollisionMatrix head;
+    head.m[2] = 30000 * 64;
+    head.m[6] = 0;
+    head.m[10] = 58000 * 64;
+    CHECK(detail::vehicle_crash_test_up(head) == 58210);
+    head.m[2] = -1234 * 64;
+    head.m[6] = 40000 * 64;
+    head.m[10] = 51000 * 64;
+    CHECK(detail::vehicle_crash_test_up(head) == 51557);
+    CHECK(detail::vehicle_crash_test_up(CollisionMatrix{}) == 0);
+}
+
 // D-NET-NEW-L6-30: a slow, level bike on its wheels is not leaning (the lean leaves +0x2EF clear),
 // so the solve drops both lean rates; a fast one leans (+0x2EF set) and keeps its pitch rate.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the lean @0x47A78B..0x47A7D8, the clear
@@ -1136,6 +1159,7 @@ int main() {
     bike_pair_clear_is_ungated();
     bike_probes_ride_the_scaled_matrix();
     occupant_rows_floor_each_word();
+    crash_test_up_is_the_normalized_row();
     bike_unleaned_drops_lean_rates();
     bike_sinks_flush_under_water();
     bike_crashed_wheel_takes_the_landing_impulse();
