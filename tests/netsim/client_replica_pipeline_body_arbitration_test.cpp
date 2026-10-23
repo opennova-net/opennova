@@ -658,6 +658,8 @@ void test_seated_row_eye_reads_its_channel_capsule() {
 	row.rm_adm_id = 0;
 	row.anim_state_id = as::kIdle;
 	row.heading_bam = kSeatYaw + 0x08000000; // the look, a twist off the seat
+	// Its record staged that look, so the seated chase holds it (D-NET-NEW-L5-27).
+	row.net_smooth_heading = row.heading_bam;
 	row.move_input = static_cast<uint8_t>(world::Entity::kMoveOrderLeanLeft);
 	view.tick_remote_motion(0xFFFF);
 	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);

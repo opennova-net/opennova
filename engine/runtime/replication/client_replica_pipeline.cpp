@@ -458,6 +458,11 @@ void ClientReplicaPipeline::follow_carrier_seat(ClientEntityState &child,
 	child.x = posed.x;
 	child.y = posed.y;
 	child.z = posed.z;
+	// A seated player body's Yaw word is its chase's (visit_remote_row's carrier branch): its
+	// mounted site's seat carry writes the body heading, Roll and savedLivePitch only.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the angle apply @0x4B43E6..0x4B440A,
+	//  the seat carry @0x4B654E..0x4B6575]
+	if (child.cls == EntityClass::Player) return;
 	child.heading_bam = io::bam_add(carrier->heading_bam, child.net_seat_local_heading_bam);
 	child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
 }
@@ -1196,7 +1201,6 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 							prior_player_class)
 					: rec.player.health_class_byte;
 			if (es.carrier_handle != wire_handle::kInvalid) {
-				es.pitch_bam = static_cast<int32_t>(static_cast<uint32_t>(es.pitch_byte) << 24);
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.player.carrier_handle, cx, cy, cz,
 						static_cast<int32_t>(
@@ -1544,20 +1548,28 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		child->record_sample[0] = w.x;
 		child->record_sample[1] = w.y;
 		child->record_sample[2] = w.z;
-		// A seated person's record restarts its chase count as a free-standing one does:
-		// the vehicle compose falls into the same stage and reset.
-		// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TransformLocalToWorld
-		//  @0x4C10D4, the reset @0x4C0FFC; NetPacket_SerializeInfantryEntityState @0x4C0320 -
-		//  Entity_TransformLocalToWorld @0x4C05A2, the reset @0x4C04E1]
-		if (child->cls == EntityClass::Player || child->cls == EntityClass::Infantry)
-			child->net_interp_progress = 0;
 		// World heading = carrier + local for every carried class: the player
 		// read composes its yaw byte [orig: @0x4c10d4] and the vehicle read
 		// lifts its eulerZ through Entity_TransformLocalToWorld's out[3] =
 		// carrier[3] + local[3] [orig: @0x4608ce / @0x43bd00 -> the entity+576
 		// store @0x4607f5]. BAM addition holds in the yaw byte's 8-bit ring.
-		child->heading_bam = io::bam_add(carrier->heading_bam, pending.local_heading_bam);
-		child->yaw_byte = yaw_byte_from_bam(child->heading_bam);
+		const int32_t heading = io::bam_add(carrier->heading_bam, pending.local_heading_bam);
+		child->yaw_byte = yaw_byte_from_bam(heading);
+		// A seated person's record falls into the same stage and count reset as a
+		// free-standing one does after the vehicle compose. A player record writes no live
+		// Yaw / Pitch there: it stages the composed sample, yaw and pitch (land_compact_pose),
+		// which the chase steps (visit_remote_row's carrier branch) on a client; the respawn
+		// edge and the authority's snap folds land them live, as there.
+		// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TransformLocalToWorld
+		//  @0x4C10D4, the stores @0x4C0FD7..0x4C0FF6, the reset @0x4C0FFC;
+		//  NetPacket_SerializeInfantryEntityState @0x4C0320 - Entity_TransformLocalToWorld
+		//  @0x4C05A2, the reset @0x4C04E1]
+		if (child->cls == EntityClass::Player) {
+			land_compact_pose(*child, w.x, w.y, w.z, true, heading, pending.force_live_snap);
+		} else {
+			if (child->cls == EntityClass::Infantry) child->net_interp_progress = 0;
+			child->heading_bam = heading;
+		}
 		// A deck-carried vehicle is a carried OBJECT (the bit0-flagged attach
 		// class @0x43C14A) whose mover is bit0-skipped — the per-tick
 		// seat-follow owns its motion between records, so nothing chases a

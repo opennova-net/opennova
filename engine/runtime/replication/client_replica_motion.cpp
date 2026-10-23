@@ -1119,6 +1119,85 @@ static void row_chase_step_and_cap(ClientEntityState &es, int16_t progress) {
 	row_chase_count(es, progress);
 }
 
+// The org2 chase's restage and its apply's angle half: at progress 0 the staged target
+// against the live pose picks the snap (position, and Yaw / Pitch off the local body), the
+// deadband or the bucket, each restaging the angle steps; then the Yaw / Pitch steps while
+// progress is below the divisor on a body not the local one. A seated body runs it too, its
+// position words the mounted site's (`seated`: the snap moves no position).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the restage @0x4B42A7..0x4B464A, the angle
+//  apply @0x4B43E6..0x4B440A (the local test @0x4B43F3)]
+static void row_org2_chase_restage_and_angles(ClientEntityState &es, bool is_self, bool seated) {
+	const int64_t dx = int64_t(es.net_smooth_target[0]) - es.x;
+	const int64_t dy = int64_t(es.net_smooth_target[1]) - es.y;
+	const int64_t dz = int64_t(es.net_smooth_target[2]) - es.z;
+	constexpr int32_t kOrg2HeadingDiv = 12; // the client's heading / pitch divisor
+	if (es.net_interp_progress == 0) {
+		const int32_t dist = dist_16_16(dx, dy, dz);
+		if (dist > 0x20000) {
+			// Snap: position always (a seated body's is its mounted site's);
+			// heading/pitch only for a non-self row.
+			if (!seated) {
+				es.x = es.net_smooth_target[0];
+				es.y = es.net_smooth_target[1];
+				es.z = es.net_smooth_target[2];
+			}
+			if (!is_self) {
+				es.heading_bam = es.net_smooth_heading;
+				es.pitch_bam = es.net_smooth_pitch;
+			}
+			es.net_smooth_target[0] = 0;
+			es.net_smooth_target[1] = 0;
+			es.net_smooth_target[2] = 0;
+			es.net_interp_steps = 0;
+			es.net_smooth_heading = 0;
+			es.net_smooth_pitch = 0;
+		} else if (dist < 0x2AAA) {
+			// Position deadband — heading/pitch still chase.
+			es.net_smooth_target[0] = 0;
+			es.net_smooth_target[1] = 0;
+			es.net_smooth_target[2] = 0;
+			es.net_interp_steps = 0;
+			es.net_smooth_heading = chase_step(
+					io::bam_sub(es.net_smooth_heading, es.heading_bam),
+					kOrg2HeadingDiv);
+			es.net_smooth_pitch = chase_step(
+					io::bam_sub(es.net_smooth_pitch, es.pitch_bam),
+					kOrg2HeadingDiv);
+		} else {
+			if (is_self) {
+				// The own-player soft reconciliation: 48 moving / 512
+				// still, position only [orig: @0x4B4490/@0x4B449E].
+				es.net_interp_steps =
+						(es.move_input & 0x08u) != 0u ? 48 : 512;
+			} else {
+				es.net_interp_steps =
+						org2_bucket(dist_16_16(dx, dy, 0));
+			}
+			const int32_t n = es.net_interp_steps;
+			es.net_smooth_target[0] = chase_step(int32_t(dx), n);
+			es.net_smooth_target[1] = chase_step(int32_t(dy), n);
+			int32_t step_z = chase_step(int32_t(dz), n);
+			// Client vertical damping [orig: @0x4B4626/@0x4B4635].
+			const int32_t adz =
+					int32_t(dz < 0 ? -dz : dz);
+			if (adz < 0x5555) step_z >>= 1;
+			if (adz < 0x2AAA) step_z = 0;
+			es.net_smooth_target[2] = step_z;
+			es.net_smooth_heading = chase_step(
+					io::bam_sub(es.net_smooth_heading, es.heading_bam),
+					kOrg2HeadingDiv);
+			es.net_smooth_pitch = chase_step(
+					io::bam_sub(es.net_smooth_pitch, es.pitch_bam),
+					kOrg2HeadingDiv);
+		}
+	}
+	const int16_t progress = es.net_interp_progress;
+	if (progress < kOrg2HeadingDiv && !is_self) {
+		es.heading_bam = io::bam_add(es.heading_bam, es.net_smooth_heading);
+		es.pitch_bam = io::bam_add(es.pitch_bam, es.net_smooth_pitch);
+	}
+}
+
 // The organic death edge's mover-side halves (client_replica_body_arbitration
 // .cpp replica_death_edge): the gate and latch run at the witnessed point after
 // the chase, ahead of this tick's integrate and resolve, which read the latch
@@ -1385,14 +1464,18 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		// A seated body runs the chase apply too (no exit ahead of it tests the seat): the
 		// seated record resets its count, and with no record for 512 ticks it starves and
 		// returns ahead of its ride link and its mounted site. Its position step is the
-		// mounted site's to overwrite, so the count, the cap's idle force and the starved exit
-		// stand here alone.
+		// mounted site's to overwrite, so a player body's chase runs its restage and its Yaw /
+		// Pitch steps (the site's seat carry writes the body heading, Roll and savedLivePitch,
+		// never those two words), then the count, the cap's idle force and the starved exit.
 		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the one chase skip, the
-		//  authority's local player, @0x4B4279..0x4B428F, the count @0x4B4431..0x4B443E, the
-		//  starved exit @0x4B4669..0x4B4670, the site selector @0x4B637C..0x4B638F;
-		//  Entity_UpdateInfantryAI @0x4B9910 - the chase @0x4B9A8C, the starved exit
-		//  @0x4B9C09..0x4B9C39]
+		//  authority's local player, @0x4B4279..0x4B428F, the restage @0x4B42A7..0x4B464A, the
+		//  angle apply @0x4B43E6..0x4B440A, the count @0x4B4431..0x4B443E, the starved exit
+		//  @0x4B4669..0x4B4670, the site selector @0x4B637C..0x4B638F, the seat carry
+		//  @0x4B654E..0x4B6575; Entity_UpdateInfantryAI @0x4B9910 - the chase @0x4B9A8C, the
+		//  starved exit @0x4B9C09..0x4B9C39]
 		if (organic) {
+			if (es.cls == EntityClass::Player)
+				row_org2_chase_restage_and_angles(es, es.handle == self_handle, /*seated=*/true);
 			row_chase_count(es, es.net_interp_progress);
 			if (es.rm_starved) return;
 		}
@@ -1439,72 +1522,10 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 
 	switch (es.cls) {
 	case EntityClass::Player: {
-		// The org2 body-pass chase [orig: Entity_UpdateInfantryPlayerBody
-		// @0x4B4470..0x4B46C0]. Client heading/pitch divisor = 12.
-		constexpr int32_t kOrg2HeadingDiv = 12;
-		if (es.net_interp_progress == 0) {
-			const int32_t dist = dist_16_16(dx, dy, dz);
-			if (dist > 0x20000) {
-				// Snap: position always; heading/pitch only for a non-self
-				// row.
-				es.x = es.net_smooth_target[0];
-				es.y = es.net_smooth_target[1];
-				es.z = es.net_smooth_target[2];
-				if (!is_self) {
-					es.heading_bam = es.net_smooth_heading;
-					es.pitch_bam = es.net_smooth_pitch;
-				}
-				es.net_smooth_target[0] = 0;
-				es.net_smooth_target[1] = 0;
-				es.net_smooth_target[2] = 0;
-				es.net_interp_steps = 0;
-				es.net_smooth_heading = 0;
-				es.net_smooth_pitch = 0;
-			} else if (dist < 0x2AAA) {
-				// Position deadband — heading/pitch still chase.
-				es.net_smooth_target[0] = 0;
-				es.net_smooth_target[1] = 0;
-				es.net_smooth_target[2] = 0;
-				es.net_interp_steps = 0;
-				es.net_smooth_heading = chase_step(
-						io::bam_sub(es.net_smooth_heading, es.heading_bam),
-						kOrg2HeadingDiv);
-				es.net_smooth_pitch = chase_step(
-						io::bam_sub(es.net_smooth_pitch, es.pitch_bam),
-						kOrg2HeadingDiv);
-			} else {
-				if (is_self) {
-					// The own-player soft reconciliation: 48 moving / 512
-					// still, position only [orig: @0x4B4490/@0x4B449E].
-					es.net_interp_steps =
-							(es.move_input & 0x08u) != 0u ? 48 : 512;
-				} else {
-					es.net_interp_steps =
-							org2_bucket(dist_16_16(dx, dy, 0));
-				}
-				const int32_t n = es.net_interp_steps;
-				es.net_smooth_target[0] = chase_step(int32_t(dx), n);
-				es.net_smooth_target[1] = chase_step(int32_t(dy), n);
-				int32_t step_z = chase_step(int32_t(dz), n);
-				// Client vertical damping [orig: @0x4B4626/@0x4B4635].
-				const int32_t adz =
-						int32_t(dz < 0 ? -dz : dz);
-				if (adz < 0x5555) step_z >>= 1;
-				if (adz < 0x2AAA) step_z = 0;
-				es.net_smooth_target[2] = step_z;
-				es.net_smooth_heading = chase_step(
-						io::bam_sub(es.net_smooth_heading, es.heading_bam),
-						kOrg2HeadingDiv);
-				es.net_smooth_pitch = chase_step(
-						io::bam_sub(es.net_smooth_pitch, es.pitch_bam),
-						kOrg2HeadingDiv);
-			}
-		}
+		// The org2 body-pass chase (row_org2_chase_restage_and_angles) [orig:
+		// Entity_UpdateInfantryPlayerBody @0x4B4470..0x4B46C0]. Client heading/pitch divisor = 12.
+		row_org2_chase_restage_and_angles(es, is_self, /*seated=*/false);
 		const int16_t progress = es.net_interp_progress;
-		if (progress < kOrg2HeadingDiv && !is_self) {
-			es.heading_bam = io::bam_add(es.heading_bam, es.net_smooth_heading);
-			es.pitch_bam = io::bam_add(es.pitch_bam, es.net_smooth_pitch);
-		}
 		// The position step + progress cap + starved idle force
 		// [orig: @0x4b464f/@0x4b465f] (row_chase_step_and_cap), then the
 		// deck-ride/root-motion tail (organic_chase_tail).

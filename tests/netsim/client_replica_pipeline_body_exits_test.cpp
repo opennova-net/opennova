@@ -69,6 +69,7 @@ struct Row {
 	nw::EntityClass cls = nw::EntityClass::Player;
 	uint8_t flags = 0;
 	uint16_t carrier = 0xFFFF;
+	uint8_t pitch = 0;
 };
 
 // One 0x0A from the anchor (100, 200, 10): each row free-standing at the anchor, or seated on
@@ -100,6 +101,7 @@ std::vector<uint8_t> frame(const std::vector<Row> &rows, double hull_x = 50.0) {
 			rec.player.pos_x_compressed = nw::network_compress_fixedpoint(
 					row.carrier != 0xFFFF ? fixed_of(1.0) : 0);
 			rec.player.yaw_byte = 0x40;
+			rec.player.pitch_byte = row.pitch;
 			rec.player.state_flags = row.flags;
 			rec.player.anim_state_id = as::kIdle;
 		} else {
@@ -333,6 +335,40 @@ void test_seated_row_counts_and_starves() {
 			"the next seated record puts the rider back on its seat");
 }
 
+// D-NET-NEW-L5-27: a seated player's record stages its composed Yaw and its Pitch (no live
+// write), and the chase steps both a twelfth per tick (the client's divisor, (d + 6) / 12) for
+// twelve ticks, then holds them while the hull turns between records: the mounted site writes
+// the body heading, never the Yaw word.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TransformLocalToWorld @0x4C10D4, the
+//  stores @0x4C0FD7..0x4C0FF6; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the angle restage
+//  @0x4B444A..0x4B445E, the step @0x4B459D, the apply @0x4B43E6..0x4B440A, the seat carry
+//  @0x4B654E..0x4B6575]
+void test_seated_rider_yaw_chases_its_record() {
+	BodySource src;
+	auto view = make_view(src);
+	std::vector<Row> rows = {{0x0003, nw::EntityClass::Player, 0x00, kHull, 0x10}};
+	seed(*view, rows);
+	ns::ClientEntityState &rider = *view->state().find(0x0003);
+	rider.recoil_pitch = 0; // no recoil step on the Yaw / Pitch words
+	// The hull's Euler is 0, the record's local yaw 0x40 and pitch 0x10.
+	expect(rider.heading_bam == 0 && rider.pitch_bam == 0 &&
+					rider.net_smooth_heading == 0x40000000 && rider.net_smooth_pitch == 0x10000000,
+			"the seated record stages the composed Yaw and the Pitch, writing neither live");
+	const int32_t yaw_step = (0x40000000 + 6) / 12;
+	const int32_t pitch_step = (0x10000000 + 6) / 12;
+	tick(*view);
+	expect(rider.heading_bam == yaw_step && rider.pitch_bam == pitch_step,
+			"the first seated tick steps a twelfth of each");
+	for (int i = 1; i < 12; ++i) tick(*view);
+	expect(rider.heading_bam == 12 * yaw_step && rider.pitch_bam == 12 * pitch_step,
+			"twelve steps, then the chase stops");
+	ns::ClientEntityState &hull = *view->state().find(kHull);
+	hull.heading_bam += 0x10000000;
+	for (int i = 0; i < 8; ++i) tick(*view);
+	expect(rider.heading_bam == 12 * yaw_step && rider.pitch_bam == 12 * pitch_step,
+			"the Yaw holds while the hull turns between records");
+}
+
 // The authority's view runs no chase, so its rows count nothing and never starve: with no
 // record for 600 ticks a row still takes its legs.
 void test_authority_rows_never_starve() {
@@ -354,6 +390,7 @@ int main() {
 	test_channel_less_row_runs_nothing();
 	test_starved_row_stops();
 	test_seated_row_counts_and_starves();
+	test_seated_rider_yaw_chases_its_record();
 	test_authority_rows_never_starve();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
