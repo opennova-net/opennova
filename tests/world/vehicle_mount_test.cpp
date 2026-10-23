@@ -12,6 +12,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/destruction.h> // kAmmoKzOrganicBlast
 #include <runtime/world/entity.h>
 #include <runtime/world/entity_pose.h>
 #include <formats/threedi/threedi_3di3.h>
@@ -3099,6 +3100,102 @@ void test_vehicle_pending_death_survives_drive_tick() {
 	}
 }
 
+// The riders' death tick (D-NET-NEW-L4-19): a ground hull whose mover burns its Health to 0 in
+// update T commits its death in update T+1, and its rider dies in T+1. The pool-1 visit thinks
+// before its mover, so T's think still reads a live hull. T+1's follow-waypoint think queues the
+// death event by the hull's planar speed (3 at >= 1057, else 4), the mover head requests 21, and
+// the timed dispatch after the pool-1 walk commits 21 (DYING, step 16) on a moving hull or 23
+// (DEAD, step 62) on a still one. Either enter runs the death transforms (Flags 6) and queues the
+// kz blast, which the same update's explosion drain lands on the seated rider (kz type 4 passes
+// the seat gate). The next visit's think re-arms the clock from the new state's step.
+// Retail's 03TR hull 0x1014 (LP-s10 h / gh, LP-s12 jm and k3): Health 0 at tick 4783; Flags 6,
+// state 21 and both riders dead at 4784; +0x2AC 15 at 4785.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the think gate @0x4B8E1B, its call @0x4B8E3C, the
+//  mover @0x4B8E53, the decrement @0x4B8EA0; AI_HandleEvent_HelicopterCombatD @0x467730 (row
+//  16's tick) - the Health test @0x467747, the speed @0x467954..0x46798F, `cmp eax, 421h`
+//  @0x4679A4, type 4 @0x4679B6; AI_HandleEvent_HelicopterCombatB @0x4679F0 (row 16's event) -
+//  3 -> 21 @0x467A3A, 4 -> 23 @0x467A2B; Entity_UpdateVehiclePhysics @0x48AF00 - the pend 21
+//  @0x48AFD9..0x48AFF6, the critical burn @0x48B06C..0x48B083; Entity_UpdateAllEntities - the
+//  timed dispatch @0x4C2226, the explosion drain @0x4C223F]
+void test_a_hull_commits_its_death_the_update_after_health_zero() {
+	for (const bool moving : { true, false }) {
+		const int failures_before = failures;
+		Rig r;
+		VehicleTraits traits = truck_traits();
+		traits.family = VehicleFamily::Ground;
+		traits.critical_hp = 100;
+		traits.critical_drain = 40;
+		r.w.vehicles.traits.set(r.veh().item_id, traits);
+		ItemDeathTraits death;
+		death.unit_type = 1;
+		death.has_husk = true;
+		death.husk_model_loaded = true;
+		death.kz = 10.0f;
+		r.w.tables.item_death_traits.set(r.veh().item_id, death);
+		// The death blast's row.
+		r.w.tables.ammo.entries.resize(2);
+		r.w.tables.ammo.entries[0].name = "AT_NULL";
+		r.w.tables.ammo.entries[0].valid = true;
+		AmmoTableEntry &blast = r.w.tables.ammo.entries[1];
+		blast.name = kAmmoKzOrganicBlast;
+		blast.valid = true;
+		blast.kztype = ammo_kz::kRadiusBlast;
+		blast.kz_damage = 1000;
+		blast.kz_minradius = 0.5f;
+		blast.kz_maxradius = 5.0f;
+		// An AI driver keeps the hull out of the parked arm's state-22 stamp; the rider sits in
+		// the vehicle seat, on another team than the hull.
+		Entity npc;
+		npc.kind = EntityKind::Organic;
+		npc.item_id = 2072;
+		npc.health = 150;
+		npc.alive = true;
+		npc.team = 1;
+		const EntityHandle driver = r.w.registry.spawn(0, npc);
+		CHECK(r.w.vehicles.process_attach(driver, r.veh_h, 1));
+		r.player().team = 1;
+		CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
+		AiEntity &hull = test_common::brain_hull(r.w, r.veh_h);
+		hull.profile.flags100 |= 2; // no target scan in T's live think
+		AiBrain &b = hull.brain;
+		b.f[AiBrain::kCurState] = 16;
+		b.f[AiBrain::kPendState] = 16;
+		b.f[AiBrain::kStep] = 0;
+		r.veh().spawn_phase = 0; // the think runs at every visit
+		r.veh().health = 40;     // the critical band's last burn
+		r.w.logic_tick = 52;     // (52 + 36 * 11) & 63 == 0: T burns
+		TickContext ctx{};
+		ctx.is_authority = true;
+		// T: the think reads a live hull, then the mover burns it to 0.
+		r.w.update_all_entities(ctx);
+		++r.w.logic_tick;
+		CHECK(r.veh().health == 0);
+		CHECK(((r.veh().flags | r.veh().engine_flags) & (kEntityFlagDead | kEntityFlagHusk)) == 0);
+		CHECK(b.f[AiBrain::kCurState] == 16);
+		CHECK(r.player().health == 150 && r.player().mounted);
+		// The planar velocity words (+0x98 / +0x9C) T's mover leaves.
+		r.veh().veh.vel_x = moving ? 3000 : 100;
+		r.veh().veh.vel_y = moving ? 4000 : 0;
+		// T+1: the death commits and the blast lands on the rider.
+		r.w.update_all_entities(ctx);
+		++r.w.logic_tick;
+		CHECK((r.veh().engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+				(kEntityFlagDead | kEntityFlagHusk));
+		CHECK(b.f[AiBrain::kCurState] == (moving ? 21 : 23));
+		CHECK(r.player().health <= 0);
+		// T+2: the think re-arms the clock from the new state's step.
+		r.w.update_all_entities(ctx);
+		CHECK(b.f[AiBrain::kCurState] == (moving ? 21 : 23));
+		CHECK(r.veh().spawn_phase == (moving ? 15 : 61));
+		if (failures != failures_before)
+			std::printf("  (moving %d: state %d pend %d clock %d health %d flags 0x%x/0x%x vel %d %d "
+					"rider health %d mounted %d)\n",
+					int(moving), b.f[AiBrain::kCurState], b.f[AiBrain::kPendState],
+					r.veh().spawn_phase, r.veh().health, r.veh().flags, r.veh().engine_flags,
+					r.veh().veh.vel_x, r.veh().veh.vel_y, r.player().health, int(r.player().mounted));
+	}
+}
+
 // The AI-driver leg: an NPC in the ctrl seat + a staged brain waypoint drives the truck
 // toward the node; no controller parks it (SM state 22, no movement).
 // [orig: @0x48bc12-0x48c034 / the parked stamp @0x48c002-0x48c02d]
@@ -5612,6 +5709,7 @@ int main() {
     test_seat_and_emplacement_keep_subdegree_carrier_pose();
     test_script_remove_releases_carrier_and_occupant_ownership();
 	test_vehicle_pending_death_survives_drive_tick();
+	test_a_hull_commits_its_death_the_update_after_health_zero();
 	test_seat_frame_matches_collision_frame();
 	test_usegun_attach_presnaps_local_look();
     test_host_crewed_helicopter_rotor_turns();
