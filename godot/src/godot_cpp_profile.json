@@ -191,6 +191,7 @@
 		"Texture",
 		"Texture2D",
 		"Texture2DArray",
+		"Texture2DArrayRD",
 		"Texture2DRD",
 		"Texture3D",
 		"TextureCubemapRD",

@@ -561,6 +561,15 @@ bool TerrainStaticShadowPlanner::walk_device_job(const CachedPlan &cached,
 			}
 			const std::size_t count = surface.indices.size() / 3;
 			if (count == 0) continue;
+			// The raster refuses an alpha-tested surface with no alpha texture and a texture
+			// with an empty level (rasterize_terrain_static_shadow_alpha's validation): the
+			// walk refuses the page there, for the device form as for the CPU's.
+			if ((material.alpha_test_enabled && material_state.alpha_texture == nullptr) ||
+					(material_state.alpha_texture != nullptr &&
+							!terrain_static_shadow_alpha_pyramid_valid(
+									*material_state.alpha_texture))) {
+				return false;
+			}
 			diagnostics_.frame_triangles += count;
 			if (material.alpha_test_enabled) {
 				diagnostics_.frame_alpha_test_triangles += count;

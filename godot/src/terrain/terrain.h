@@ -281,12 +281,16 @@ public:
 		static_shadow_rasterizer.set_reports_caster_changes(p_on);
 	}
 	void set_tile_cache_capture_diagnostics(bool p_enabled);
+	// The windowed device checks' seams (TerrainTileCacheDevice::set_device_shadow_enabled,
+	// read_device_layer).
+	void set_tile_cache_device_shadow(bool p_enabled);
+	PackedByteArray get_tile_cache_layer_bytes(int p_layer) const;
 	void set_suppressed_static_shadow_bms_ids(
 			const PackedInt32Array &p_bms_ids);
 	PackedInt32Array get_suppressed_static_shadow_bms_ids() const;
 	Ref<TerrainSurfaceInputs> get_surface_inputs() const;
 	Ref<Texture2D> get_heightfield_normal_texture() const;
-	Ref<Texture2DArray> get_tile_cache_texture() const;
+	Ref<TextureLayered> get_tile_cache_texture() const;
 	Dictionary get_tile_cache_diagnostics() const;
 	bool append_terrain_scorch(int64_t p_texture_index,
 			int64_t p_minimum_x_q16, int64_t p_minimum_z_q16,

@@ -1075,7 +1075,7 @@ void FoliageDispatcher::_update_materials() {
   }
   const bool has_colormap = colormap.is_valid();
   Ref<Texture2D> heightfield_normal;
-  Ref<Texture2DArray> tile_cache;
+  Ref<TextureLayered> tile_cache;
   if (terrain_ != nullptr) {
     heightfield_normal = terrain_->get_heightfield_normal_texture();
     tile_cache = terrain_->get_tile_cache_texture();

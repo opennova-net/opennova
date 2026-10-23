@@ -28,6 +28,18 @@ std::array<float, 3> transform_point(const std::array<float, 12> &transform,
 
 } // namespace
 
+bool terrain_static_shadow_alpha_pyramid_valid(
+		const TerrainStaticShadowAlphaPyramid &pyramid) noexcept {
+	if (pyramid.mips.empty()) return false;
+	for (const TerrainStaticShadowAlphaMipView &mip : pyramid.mips) {
+		if (mip.width == 0 || mip.height == 0 || mip.alpha == nullptr ||
+				mip.row_stride < mip.width) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool project_terrain_static_shadow_device_vertex(const TerrainStaticShadowDeviceJob &job,
 		const TerrainStaticShadowDeviceDraw &draw, std::size_t vertex,
 		TerrainStaticShadowRasterVertex &r_projected) noexcept {

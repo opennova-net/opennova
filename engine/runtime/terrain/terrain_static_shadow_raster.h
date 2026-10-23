@@ -23,6 +23,18 @@
 
 namespace opennova::terrain {
 
+// The temp target is twice the page at every tier: config+0x1740 selects page
+// dword_31A00D4 = 0x100 with temp dword_31A00D0 = 0x200, otherwise 0x80 with 0x100
+// [orig: PolyTrn_LoadTerrainConfig @0x60E41D..0x60E446].
+inline constexpr uint32_t kTerrainStaticShadowTemporaryScale = 2;
+// The collector's clamp on the light's vertical component (its fixed twin 0x4000)
+// [orig: float clamp @ 0x60D33F..0x60D341, fixed twin @ 0x60d325..0x60d32c].
+inline constexpr float kTerrainStaticShadowMinimumVerticalLight = 0.25f;
+// Projected depth h*0.0005 - 0.00005 [orig: RenderSlot_SetupShadowCascadeMatrices_0
+// @ 0x58D4D3..0x58D618].
+inline constexpr float kTerrainStaticShadowDepthScale = 0.00050000002f;
+inline constexpr float kTerrainStaticShadowDepthBias = -0.000050000002f;
+
 struct TerrainStaticShadowRasterVertex {
 	// Normalized destination-page coordinates. (0,0) and (1,1) are the outer
 	// pixel edges. depth is post-projection D3D depth; texture UVs are wrapped.

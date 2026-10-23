@@ -13,6 +13,18 @@
 //  (the call @0x60D5BF), per caster Render_SubmitEntity @0x5DAD80 (the call @0x60D971, mode 2)
 //  and CRenderBatchQueue_SortAndFlush @0x5DAE40 (the call @0x60D97D), GTexRT_RestoreThunk
 //  (the call @0x60DA4F)]
+//
+// The device's steps per job, each the CPU raster's (the embedder's device pass, godot/src/
+// terrain/terrain_static_shadow_device_pass.h, records them):
+// - the temp's fill from the page's DOT3 light alpha, nearest 2x: retail's light quad into
+//   the temp [orig: Terrain_CollectAndRenderTileModels - the GfxShader_ApplyPassChecked call
+//   @0x60D794, the fill @0x60D7A8];
+// - the casters into the temp over a depth cleared to the receiver plane, LESSEQUAL with z
+//   writes, the ordinary pass culling CCW (the clockwise front face of a target whose y
+//   grows down) and a two-sided material culling nothing [orig: CRenderBatchQueue_FlushBatches
+//   @0x5DA0FA..0x5DA137], one submit and flush per caster [orig: @0x60D971 / @0x60D97D];
+// - the resolve of the temp's 2x2 boxes into the page alpha, RGB untouched: the composite's
+//   MINFILTER LINEAR fetch at the box centre [orig: PolyTrn_RenderTile @0x60E0C6..0x60E19D].
 
 #include <runtime/terrain/terrain_static_shadow.h>
 #include <runtime/terrain/terrain_static_shadow_alpha.h>
@@ -72,6 +84,11 @@ struct TerrainStaticShadowProjectedBounds {
 	float max_u = 0.0f;
 	float max_v = 0.0f;
 };
+
+// Whether every level of a pyramid holds bytes the raster can sample (the raster refuses a
+// texture that does not).
+bool terrain_static_shadow_alpha_pyramid_valid(
+		const TerrainStaticShadowAlphaPyramid &pyramid) noexcept;
 
 // One caster vertex as the device's vertex stage produces it: the surface vertex plus its
 // ROBJ offset, through the caster's transform, projected onto the page; the UV through the

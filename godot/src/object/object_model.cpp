@@ -1227,9 +1227,9 @@ void ObjectModel::refresh_match_terrain_frame(Terrain *p_terrain) {
 	for (ObjectModel *model : match_terrain_models_) {
 		batch.push_back(model);
 	}
-	const Ref<Texture2DArray> cache = p_terrain != nullptr
+	const Ref<TextureLayered> cache = p_terrain != nullptr
 			? p_terrain->get_tile_cache_texture()
-			: Ref<Texture2DArray>();
+			: Ref<TextureLayered>();
 	for (ObjectModel *model : batch) {
 		if (!match_terrain_models_.has(model)) {
 			continue;

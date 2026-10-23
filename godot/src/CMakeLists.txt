@@ -72,6 +72,7 @@ add_library(opennova_bindings OBJECT
     terrain/terrain.cpp
     terrain/terrain_surface_inputs.cpp
     terrain/terrain_static_shadow_rasterizer.cpp
+    terrain/terrain_static_shadow_device_pass.cpp
     terrain/terrain_tile_cache_device.cpp
     terrain/terrain_data.cpp
     terrain/terrain_foliage_def.cpp

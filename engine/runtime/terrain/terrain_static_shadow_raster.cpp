@@ -19,24 +19,17 @@
 namespace opennova::terrain {
 namespace {
 
-// The temp target is twice the page at every tier: config+0x1740 selects
-// page dword_31A00D4 = 0x100 with temp dword_31A00D0 = 0x200, otherwise
-// 0x80 with 0x100 [orig: PolyTrn_LoadTerrainConfig @0x60E41D..0x60E446]. The
+// The temp target is twice the page (kTerrainStaticShadowTemporaryScale). The
 // collector sizes its viewport from the temp dimension [orig: @0x60D5E0,
 // @0x60D9E4], and the page composite samples the temp with MINFILTER LINEAR
 // over a quad spanning [-0.5, page - 0.5] [orig: PolyTrn_RenderTile
 // @0x60E0D1..0x60E0E0, @0x60E152..0x60E166]: every page pixel lands exactly
 // between two temp texels per axis, so the bilinear fetch is the 2x2 box.
-constexpr uint32_t kTemporaryScale = 2;
+constexpr uint32_t kTemporaryScale = kTerrainStaticShadowTemporaryScale;
 constexpr float kDegenerateArea = 1.0e-12f;
-// The same 0.25 vertical clamp the collect phase applies in fixed point
-// [orig: float clamp @ 0x60D33F..0x60D341, fixed twin (0x4000)
-// @ 0x60d325..0x60d32c].
-constexpr float kMinimumVerticalLight = 0.25f;
-// Projected depth h*0.0005 - 0.00005 [orig: RenderSlot_SetupShadowCascadeMatrices_0
-// @ 0x58D4D3..0x58D618].
-constexpr float kProjectedDepthScale = 0.00050000002f;
-constexpr float kProjectedDepthBias = -0.000050000002f;
+constexpr float kMinimumVerticalLight = kTerrainStaticShadowMinimumVerticalLight;
+constexpr float kProjectedDepthScale = kTerrainStaticShadowDepthScale;
+constexpr float kProjectedDepthBias = kTerrainStaticShadowDepthBias;
 
 struct ScreenVertex {
 	float x = 0.0f;

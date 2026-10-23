@@ -93,6 +93,10 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(
 		D_METHOD("set_tile_cache_capture_diagnostics", "enabled"),
 		&Terrain::set_tile_cache_capture_diagnostics);
+	ClassDB::bind_method(D_METHOD("set_tile_cache_device_shadow", "enabled"),
+		&Terrain::set_tile_cache_device_shadow);
+	ClassDB::bind_method(D_METHOD("get_tile_cache_layer_bytes", "layer"),
+		&Terrain::get_tile_cache_layer_bytes);
 	ClassDB::bind_method(D_METHOD("set_static_shadow_placer", "placer"),
 		&Terrain::set_static_shadow_placer);
 	ClassDB::bind_method(D_METHOD("set_static_terrain_shadow_enabled", "enabled"),
@@ -271,12 +275,20 @@ Ref<Texture2D> Terrain::get_heightfield_normal_texture() const {
 	return surface_inputs->get_heightfield_normal_texture();
 }
 
-Ref<Texture2DArray> Terrain::get_tile_cache_texture() const {
+Ref<TextureLayered> Terrain::get_tile_cache_texture() const {
 	return tile_cache_device.get_texture();
 }
 
 void Terrain::set_tile_cache_capture_diagnostics(bool p_enabled) {
 	tile_cache_device.set_capture_diagnostics(p_enabled);
+}
+
+void Terrain::set_tile_cache_device_shadow(bool p_enabled) {
+	tile_cache_device.set_device_shadow_enabled(p_enabled);
+}
+
+PackedByteArray Terrain::get_tile_cache_layer_bytes(int p_layer) const {
+	return tile_cache_device.read_device_layer(p_layer);
 }
 
 Dictionary Terrain::get_tile_cache_diagnostics() const {
