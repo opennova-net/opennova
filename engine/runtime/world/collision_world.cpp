@@ -786,12 +786,7 @@ void CollisionWorld::build_initial_tables(World &world) {
     build_tables(world, true);
 }
 
-void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
-    // Every pool-table publication is a new trace-view epoch, including the
-    // mission-initial and registry-refresh paths that do not advance retail's
-    // 17-tick candidate-slice cadence.
-    invalidate_trace_views();
-    tick_tables_built_ = true;
+void CollisionWorld::prune_stale_bindings(World &world) {
     // Packed pool/slot handles are reused. Remove every binding whose recorded
     // lifetime no longer names the registry occupant before any proximity,
     // contact, or occlusion consumer can observe its old model or husk.
@@ -808,17 +803,16 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         }
     }
     purge_stale_candidate_slices(world);
+}
 
+void CollisionWorld::build_statics(World &world) {
     // --- pool-2 statics: buildings first, then the rest. Built at mission
     // start / teleport / the instance and registry edges that arm
     // statics_dirty_, never per tick [orig: Entity_BuildAllProximityLists
     // @0x4c20f0 -> 0x4b9430; xrefs = Entity_InitAllFromModels @0x40e5a1,
     // Game_StartMission @0x525c90 and the teleport paths] ---
-    const bool rebuild_statics = statics_dirty_;
-    if (rebuild_statics) {
-        statics_.clear();
-        static_building_count_ = 0;
-    }
+    statics_.clear();
+    static_building_count_ = 0;
     auto push_static = [&](const Entity &e) {
         // The original's count saturates at 1199 — the 1200th slot is written
         // but never counted, so 1199 is the effective cap. [orig: the
@@ -846,6 +840,30 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     };
     // [orig: pass 1 = itemDef type == Building; pass 2 = everything else with a
     // def — our instance map plays the "has a collision model" role.]
+    // The split key is the items.def TYPE, not the record family: every
+    // pool-2 row is a BMS "building" record, but only the Building-type
+    // defs form the prefix; the decorations and foliage follow it.
+    // [orig: `def->type == ItemType_Building` @ 0x4b946e, `!=` @ 0x4b9502
+    //  — building_def_row, world/collision.h]
+    world.registry.for_each_in_pool(2, [&](const Entity &e) {
+        if (building_def_row(e)) push_static(e);
+    });
+    static_building_count_ = static_cast<int32_t>(statics_.size());
+    world.registry.for_each_in_pool(2, [&](const Entity &e) {
+        if (!building_def_row(e)) push_static(e);
+    });
+    static_count_ = static_cast<int32_t>(statics_.size());
+    statics_dirty_ = false;
+}
+
+void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
+    // Every pool-table publication is a new trace-view epoch, including the
+    // mission-initial and registry-refresh paths that do not advance retail's
+    // 17-tick candidate-slice cadence.
+    invalidate_trace_views();
+    tick_tables_built_ = true;
+    prune_stale_bindings(world);
+
     // --- pool-0 persons + pool-1 dynamics. [orig: 0x4b9340] ---
     persons_.clear();
     dynamics_.clear();
@@ -932,22 +950,7 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // pool-2 entry [orig: 0x4b9430].
     world.registry.for_each_in_pool(0, push_person);
     world.registry.for_each_in_pool(1, push_dynamic);
-    if (rebuild_statics) {
-        // The split key is the items.def TYPE, not the record family: every
-        // pool-2 row is a BMS "building" record, but only the Building-type
-        // defs form the prefix; the decorations and foliage follow it.
-        // [orig: `def->type == ItemType_Building` @ 0x4b946e, `!=` @ 0x4b9502
-        //  — building_def_row, world/collision.h]
-        world.registry.for_each_in_pool(2, [&](const Entity &e) {
-            if (building_def_row(e)) push_static(e);
-        });
-        static_building_count_ = static_cast<int32_t>(statics_.size());
-        world.registry.for_each_in_pool(2, [&](const Entity &e) {
-            if (!building_def_row(e)) push_static(e);
-        });
-        static_count_ = static_cast<int32_t>(statics_.size());
-        statics_dirty_ = false;
-    }
+    if (statics_dirty_) build_statics(world);
 
     if (!advance_candidate_slices) return;
 
@@ -1145,6 +1148,16 @@ void CollisionWorld::refresh_entity_proximity(World &world, Entity &entity) {
 void CollisionWorld::rebuild_candidate_slices(World &world) {
     invalidate_trace_views();
     build_candidate_slices(world);
+}
+
+void CollisionWorld::rebuild_statics(World &world) {
+    invalidate_trace_views();
+    prune_stale_bindings(world);
+    build_statics(world);
+}
+
+void CollisionWorld::rebuild_pool01(World &world) {
+    build_tables(world, false);
 }
 
 void CollisionWorld::rebuild_pool01_and_slices(World &world) {

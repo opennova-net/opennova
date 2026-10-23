@@ -5409,6 +5409,12 @@ add_test(NAME infantry_org2_view COMMAND infantry_org2_view_test)
 add_executable(npruntime_player_redeploy_reset_test npruntime/player_redeploy_reset_test.cpp)
 target_link_libraries(npruntime_player_redeploy_reset_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_player_redeploy_reset COMMAND npruntime_player_redeploy_reset_test)
+# D-COL-23's remainder (L5-s35): each teleport action's own proximity tail (the single action's
+# per-pool tail, the group's tables and member lists, teleSSN's statics for a decoration or
+# building marker alone).
+add_executable(teleport_tails_test world/teleport_tails_test.cpp)
+target_link_libraries(teleport_tails_test PRIVATE opennova_runtime)
+add_test(NAME teleport_tails COMMAND teleport_tails_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

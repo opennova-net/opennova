@@ -1348,6 +1348,17 @@ public:
     // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by
     //  Entity_RespawnVehicle @0x460133]
     void rebuild_candidate_slices(World &world);
+    // The statics table alone (buildings first, then the rest), outside the instance and
+    // registry edges that otherwise rebuild it: the teleport actions' Pool2 calls.
+    // [orig: Entity_BuildProximityLists_Pool2 @0x4B9430, called by
+    //  Entity_TeleportTeamToSpawn @0x43D4F8, EventAction_TeleportEntityToSpawn @0x43E1F2,
+    //  WacCmd_TeleSsn @0x4F7F3E]
+    void rebuild_statics(World &world);
+    // The pool-0 / pool-1 tables alone, no slice build (the statics too only where an
+    // instance or registry edge left them dirty): the teleport actions' Pool01 calls.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340, called by
+    //  Entity_TeleportTeamToSpawn @0x43D4FD, WacCmd_TeleSsn @0x4F7F43]
+    void rebuild_pool01(World &world);
     // The mission start's authority rebuild after the WAC initial run: the pool-0/1
     // tables, then every source's slice (which restarts the 17-tick cadence); the
     // statics table stands as the @0x525C90 rebuild left it.
@@ -2000,6 +2011,11 @@ public:
 
 private:
     void build_tables(World &world, bool advance_candidate_slices);
+    // Drops the bindings (and candidate slices) whose registry lifetime ended.
+    void prune_stale_bindings(World &world);
+    // The statics table over the pool-2 rows [orig: Entity_BuildProximityLists_Pool2
+    //  @0x4B9430].
+    void build_statics(World &world);
     void build_candidate_slices(World &world);
     void purge_stale_candidate_slices(const World &world);
     // entity_los_clear over an endpoint described by its read fields.

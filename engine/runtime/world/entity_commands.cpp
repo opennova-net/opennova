@@ -1859,7 +1859,7 @@ int EntityCommands::teleport_group_to_marker(int group,
     const Entity *marker = find_teleport_marker(world_, marker_wp_number);
     if (marker == nullptr) return 0;
     const Entity marker_copy = *marker;
-    int changed = 0;
+    std::vector<EntityHandle> members;
     static constexpr int pools[] = {0, 1, 2};
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -1870,12 +1870,24 @@ int EntityCommands::teleport_group_to_marker(int group,
                 static_cast<int>(entity->group_id) != group)
                 continue;
             copy_marker_pose(world_, *entity, marker_copy, false);
-            ++changed;
+            members.push_back(entity->handle);
         }
     }
-    if (changed != 0 && world_.collision != nullptr)
-        world_.collision->refresh_after_registry_change(world_);
-    return changed;
+    // Once the marker matched, members or none: the statics, the pool-0 / pool-1 tables and
+    // every slice, then each member's own list, pools 0, 1, 2 in order (the same gated walk;
+    // a pool-0 member's reset already ran its own tail).
+    // [orig: Entity_TeleportTeamToSpawn @0x43D390 - Entity_BuildProximityLists_Pool2 called
+    //  @0x43D4F8, Entity_BuildProximityLists_Pool01 @0x43D4FD,
+    //  Entity_BuildProximityListsFromPools @0x43D502, Entity_BuildProximityList @0x43D53D /
+    //  @0x43D57D / @0x43D5BD]
+    if (CollisionWorld *collision = world_.collision) {
+        collision->rebuild_statics(world_);
+        collision->rebuild_pool01(world_);
+        collision->rebuild_candidate_slices(world_);
+        for (const EntityHandle member : members)
+            collision->refresh_blink(world_, *world_.registry.get(member));
+    }
+    return static_cast<int>(members.size());
 }
 
 bool EntityCommands::wac_teleport_ssn(EntityTarget source, int32_t marker_wp_number) {
@@ -1899,8 +1911,18 @@ bool EntityCommands::wac_teleport_ssn(EntityTarget source, int32_t marker_wp_num
     } else {
         marker.flags &= ~kEntityFlagMatrixBuilt;
         marker.engine_flags &= ~kEntityFlagMatrixBuilt;
-        if (world_.collision != nullptr)
-            world_.collision->refresh_after_registry_change(world_);
+        // The statics for a decoration (2) or a building (5) marker alone, then the pool-0 /
+        // pool-1 tables, every slice and the marker's own list.
+        // [orig: WacCmd_TeleSsn @0x4F7E00 - the def type tests @0x4F7F34 / @0x4F7F39,
+        //  Entity_BuildProximityLists_Pool2 called @0x4F7F3E, Entity_BuildProximityLists_Pool01
+        //  @0x4F7F43, Entity_BuildProximityListsFromPools @0x4F7F48,
+        //  Entity_BuildProximityList @0x4F7F4E]
+        if (CollisionWorld *collision = world_.collision) {
+            if (marker.item_type == 2 || marker.item_type == kItemDefTypeBuilding)
+                collision->rebuild_statics(world_);
+            collision->rebuild_pool01(world_);
+            collision->refresh_entity_proximity(world_, marker);
+        }
     }
     return true;
 }
@@ -1945,8 +1967,17 @@ bool EntityCommands::teleport_ssn_to_marker(uint16_t ssn,
     Entity *entity = world_.registry.get(resolve_teleport_target(world_, ssn));
     if (entity == nullptr) return false;
     copy_marker_pose(world_, *entity, marker_copy, true);
-    if (world_.collision != nullptr)
-        world_.collision->refresh_after_registry_change(world_);
+    // The target pool's own tail, no pool-0 / pool-1 table published: a pool-0 target's
+    // reset ran its tail and the action returns; a pool-1 target builds every slice and
+    // its own list; a pool-2 target rebuilds the statics first.
+    // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0 - Entity_ResetToSpawnState called
+    //  @0x43E0AF, the return @0x43E0BA; Entity_BuildProximityListsFromPools @0x43E14F,
+    //  Entity_BuildProximityList @0x43E155; Entity_BuildProximityLists_Pool2 @0x43E1F2,
+    //  Entity_BuildProximityListsFromPools @0x43E1F7, Entity_BuildProximityList @0x43E1FD]
+    if (world_.collision != nullptr && entity->handle.pool() != 0) {
+        if (entity->handle.pool() == 2) world_.collision->rebuild_statics(world_);
+        world_.collision->refresh_entity_proximity(world_, *entity);
+    }
     return true;
 }
 bool EntityCommands::group_alive(int group) const {
