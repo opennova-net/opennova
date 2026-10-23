@@ -20,17 +20,18 @@ func test_the_catalog_registers_stage_slot() -> void:
 	assert_false(def.validate_args({"staging": []}).ok, "at least one entry")
 	assert_false(def.validate_args({"staging": [1]}).ok, "entries are objects")
 	assert_true(def.validate_args({"staging": [{"slot": 1, "position_bms": [1.0, 2.0, 3.0]}]}).ok)
-	# The runner's staging_tick_phase (R-L4-s32-1): three optional integers, 0 = none.
+	# The runner's staging_tick (R-L4-s32-1, R-LX-s26-1): two optional integers, 0 = none.
 	var plain := def.validate_args({"staging": [{"slot": 1, "position_bms": [1.0, 2.0, 3.0]}]})
-	assert_eq(plain.values.get("phase_modulus"), 0, "no phase by default")
-	var phased := def.validate_args({"staging": [{"slot": 1, "position_bms": [1.0, 2.0, 3.0]}],
-			"phase_modulus": 256, "phase_value": 176, "phase_tolerance": 7})
-	assert_true(phased.ok)
-	assert_eq(phased.values.get("phase_value"), 176)
+	assert_eq(plain.values.get("stage_tick"), 0, "no staging tick by default")
+	var timed := def.validate_args({"staging": [{"slot": 1, "position_bms": [1.0, 2.0, 3.0]}],
+			"stage_tick": 4528, "stage_tolerance": 7})
+	assert_true(timed.ok)
+	assert_eq(timed.values.get("stage_tick"), 4528)
+	assert_eq(timed.values.get("stage_tolerance"), 7)
 	assert_false(def.validate_args({"staging": [{"slot": 1, "position_bms": [1.0, 2.0, 3.0]}],
-			"phase_modulus": 2048}).ok, "one lap is at most 1024 ticks")
+			"stage_tick": 65536}).ok, "the tick is at most 65535")
 	assert_false(def.validate_args({"staging": [{"slot": 1, "position_bms": [1.0, 2.0, 3.0]}],
-			"phase_tolerance": 65}).ok, "the tolerance is at most 64 ticks")
+			"stage_tolerance": 65}).ok, "the tolerance is at most 64 ticks")
 
 
 func test_the_binding_refuses_without_a_host_session() -> void:
