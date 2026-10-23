@@ -163,6 +163,13 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx);
 // (self_id_seen && phase < PlayerAdded) builds + registers its pool-0 player entity in `world`. The
 // host's own type-2 loopback is just another entry in this list. Returns the number spawned this pass.
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world);
+// The same pump with or without a World bound: with none (a session create's, ahead of its
+// first mission's World, HostRole::create_session) it adds the host's own node alone, bodyless,
+// as the own connection's new-connection callback does inside retail's create, and every other
+// node waits for the World-bound pump (D-NET-NEW-L1-50).
+// [orig: NapiNPServer_HandleNewConnection @0x4C8040 - the local arm @0x4C8213, its
+//  Server_BuildPlayerInfoAndAdd call @0x4C82A5; Server_PlayerAdd's own arm @0x51CC33..0x51CC60]
+int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World *world);
 
 // The spawn pump's pending list is one list, in listing order, of the session's net players
 // (`connections`): a node is on it while self_id_seen and not spawn_queue_unlinked, its place
@@ -217,7 +224,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 // no body the slot's team byte and class. The
 // spawn pump's add and the synthetic admit stamp it; the round init's re-add
 // of a kept slot does not.
-void stamp_player_list_add(NapiNPConnection &conn, const world::World &world);
+void stamp_player_list_add(NapiNPConnection &conn, const world::World *world);
 
 // server_deploy.cpp defines the deploy, death, spectator and team-change legs
 // declared below; admit_synthetic_peer stays with the add in server_spawn.cpp.

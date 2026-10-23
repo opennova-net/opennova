@@ -777,12 +777,13 @@ int64_t Simulation::create_host_session(const Ref<MissionData> &p_mission,
 		host_role_->set_rotation(&net_.rotation());
 	}
 	const PackedByteArray table = p_resource_root->get_expansion_override_table();
+	inmatch::HostConfig cfg = host_session_cfg(
+			opennova::game_type::for_mission_attribs(document.header.attrib_flags), mission_file);
+	cfg.mission_type = static_cast<uint8_t>(document.header.mission_type);
 	const inmatch::CreateSessionResult created = inmatch::create_host_session(*host_role_,
 			opennova::mission::boot_files_from_index(p_resource_root->native_index()),
 			opennova::mission::mission_base_name(mission_file),
-			std::vector<uint8_t>(table.ptr(), table.ptr() + table.size()),
-			host_session_cfg(opennova::game_type::for_mission_attribs(document.header.attrib_flags),
-					mission_file),
+			std::vector<uint8_t>(table.ptr(), table.ptr() + table.size()), std::move(cfg),
 			/*session_score_ini=*/is_host_listening());
 	return created == inmatch::CreateSessionResult::ProcessExit ? ERR_CANT_CREATE : OK;
 }

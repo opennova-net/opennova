@@ -344,6 +344,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	host_cfg.host_key = state.host_key;
 	host_cfg.host_start_tick = state.host_start_tick;
 	host_cfg.session_seed_id = state.session_seed_id;
+	host_cfg.mission_type = static_cast<uint8_t>(kernel.mission.header.mission_type);
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
 	// Then the mission's World under it.
@@ -426,7 +427,13 @@ CreateSessionResult HostRole::create_session(const HostBringup &bringup) {
 // mission half under the session create, which the host boot runs ahead of the
 // mission (create_session); a caller that ran none has it run here first.
 void HostRole::bring_up(const HostBringup &bringup) {
-	if (!create_ran_) (void)create_session(bringup);
+	if (!create_ran_) {
+		// The create inside the boot's hook: the load's mission is the selected one.
+		HostBringup create = bringup;
+		if (!create.host_cfg.mission_type)
+			create.host_cfg.mission_type = static_cast<uint8_t>(kernel_->mission.header.mission_type);
+		(void)create_session(create);
+	}
 	create_ran_ = false;
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
 	mission::MissionKernel &kernel = *kernel_;

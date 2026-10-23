@@ -630,6 +630,26 @@ int main() {
 		CHECK(!host.role.create_ran()); // the bring-up spent it
 		CHECK(host.kernel != nullptr && ctx.world == &host.kernel->world);
 
+		// A listen host's own player is added inside the create, bodyless, before any World:
+		// its connection's new-connection callback runs the add there.
+		// [orig: NapiNPServer_HandleNewConnection @0x4C8040 - the local arm @0x4C8213, its
+		//  Server_BuildPlayerInfoAndAdd call @0x4C82A5; Server_PlayerAdd's own arm
+		//  @0x51CC33..0x51CC60]
+		Host listen;
+		listen.role.set_kind(inmatch::RoleKind::ListenHost);
+		inmatch::HostBootRequest lr = listen.request(0);
+		lr.host_cfg.serve_and_play = true;
+		CHECK(inmatch::create_host_session(listen.role, lr.files, lr.mission_basename,
+					lr.text_override_table, lr.host_cfg, lr.session_score_ini) ==
+				inmatch::CreateSessionResult::Created);
+		const inmatch::NapiNPConnection *own = nullptr;
+		const inmatch::NapiNPServerCtx &listen_ctx = listen.role.state.host_owner.ctx;
+		for (const inmatch::NapiNPConnection &c : listen_ctx.np_protocol.connection_list)
+			if (c.type == inmatch::NapiNPConnection::kTypeClientSide) own = &c;
+		CHECK(listen_ctx.world == nullptr);
+		CHECK(own != nullptr && own->phase == inmatch::ConnectionPhase::PlayerAdded &&
+				!own->link.owned_entity.valid());
+
 		Host refused;
 		inmatch::HostBootRequest rr = refused.request(0);
 		rr.host_cfg.config.multiplayer_reset = 1;
