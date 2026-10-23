@@ -2198,6 +2198,38 @@ bool run_stance_follows_the_authority_echo() {
 			"stance echo: the next tail re-latches stand");
 }
 
+// A mount request the receive raises (a 0x5A grant's apply mounting a ForceCrouch def; the
+// kit seam stands in for that apply) queues its C2S 0x1D inside the receive, as retail's
+// handler does, so the same frame's send block frames it, once.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the mount @0x4296F4) ->
+//  Player_MountWeaponSlot @0x4DFA40 (NetPacket_WriteInt16C(0xA9) @0x4DFC04..0x4DFC13,
+//  CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC1B..0x4DFC30); Client_ProcessNetworkFrame
+//  @0x42C180 - the receive @0x42C228 ahead of the send block @0x42C3DD]
+bool run_a_receive_time_mount_request_ships_in_its_frame() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	if (!expect(h.role.local_spawned(), "receive-time 0x1D: L spawned")) return false;
+	bool raise = true;
+	h.role.kit_seams.apply_authoritative = [&h, &raise] {
+		if (!raise) return;
+		raise = false;
+		h.kernel->world.out.stance_requests.push_back(0xA9);
+	};
+	const std::size_t before = h.socket.messages_with(0x1D).size();
+	h.role.run_tick(h.input);
+	const std::vector<ProtocolMessage> sent = h.socket.messages_with(0x1D);
+	if (!expect(sent.size() == before + 1 && sent.back().payload.size() == 2 &&
+					sent.back().payload[0] == 0xA9 && sent.back().payload[1] == 0x00,
+			"receive-time 0x1D: the receive's frame ships the crouch"))
+		return false;
+	h.role.run_tick(h.input);
+	return expect(h.socket.messages_with(0x1D).size() == before + 1,
+			"receive-time 0x1D: shipped once");
+}
+
 // Every C2S 0x0C body the role shipped from datagram `from` on, decoded.
 std::vector<PlayerExtendedUplink> uplinks_since(const CountingSocket &socket, std::size_t from) {
 	std::vector<PlayerExtendedUplink> out;
@@ -4680,6 +4712,7 @@ int main() {
 	ok &= run_uplink_carries_the_frame_statistics();
 	ok &= run_uplink_dead_test_is_the_builders();
 	ok &= run_stance_follows_the_authority_echo();
+	ok &= run_a_receive_time_mount_request_ships_in_its_frame();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();

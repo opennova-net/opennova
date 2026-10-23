@@ -1171,8 +1171,9 @@ void JoinerRole::pump() {
 	// (world/infantry_death.cpp carries the witness).
 	for (const uint16_t target : world.out.detach_requests) (void)rt.queue_detach_packet(target);
 	world.out.detach_requests.clear();
-	// The mount requests' 0x1Ds the receive (a 0x5A apply) and the tick raised, in raise
-	// order (world/player_weapon.cpp mount_queue_switch_out carries the witness).
+	// The mount requests' 0x1Ds the tick raised, in raise order, for the next send block (the
+	// receive's own flushed inside it, run_client_net_frame's after_receive;
+	// world/player_weapon.cpp mount_queue_switch_out carries the witness).
 	flush_stance_requests();
 	// The movers' C2S 0x0F requests, raised in the entity update behind this frame's send
 	// block, queue for the next boundary in raise order; the own body L asks by its wire handle
@@ -1854,6 +1855,14 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		rebuild_local_from_full_spawn();
 		fold_local_record();
 		apply_world_state_load();
+		// The receive's mount requests (a 0x5A apply's mount of a ForceCrouch def) queue their
+		// C2S 0x1D in the receive, as the handler's own call does, so this frame's send block
+		// frames them, not the next one's.
+		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the mount @0x4296F4) ->
+		//  Player_MountWeaponSlot @0x4DFA40 (CNapiNetwork_QueueReliableMessage(0x1D)
+		//  @0x4DFC1B..0x4DFC30); Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228
+		//  ahead of the send block @0x42C3DD]
+		flush_stance_requests();
 	};
 	// The builder at the send block, on L as the receive left it. Its own refusals: no
 	// body, a Health word of 0, the dead bit (no alive latch, D-NET-433), and its serializer's
