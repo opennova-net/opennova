@@ -651,6 +651,11 @@ public:
 	// mission, and the post-mission router reads it.
 	void set_mission_exit_reason(int32_t reason) { mission_exit_reason_ = reason; }
 	int32_t mission_exit_reason() const;
+	// The input action the in-match connection's teardown queued (JoinerConnection::
+	// take_teardown_input_action; 0: none), taken once.
+	int32_t take_teardown_input_action() {
+		return joiner_ ? joiner_->take_teardown_input_action() : 0;
+	}
 	uint32_t client_ping_ms() const { return joiner_ ? joiner_->client_ping_ms() : 0; }
 	uint32_t client_average_ping_ms() const {
 		return joiner_ ? joiner_->client_average_ping_ms() : 0;

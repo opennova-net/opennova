@@ -1524,7 +1524,8 @@ void test_a_browse_start_releases_the_held_own_pair() {
 	const inmatch::ProcessDisconnectLatch &latch = host->process->disconnect_latch;
 	CHECK(latch.valid && latch.event.ds == 2 && latch.event.dc == 2 && latch.event.dpc == 0 &&
 			latch.event.dstr == "N.C:CSSAC");
-	CHECK(latch.exit_reason() == inmatch::kMissionExitNone);
+	CHECK(latch.disconnect_exit().reason == inmatch::kMissionExitNone &&
+			latch.disconnect_exit().input_action == 0);
 	CHECK(held.nodes.size() == 2 && held.nodes[0].conn.pending_disconnect &&
 			held.nodes[0].conn.disconnect_event_valid &&
 			held.nodes[0].conn.disconnect_event.dstr == "N.C:CSSAC");

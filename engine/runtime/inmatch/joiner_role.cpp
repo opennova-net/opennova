@@ -846,6 +846,19 @@ void JoinerRole::sync_class_attribute_flags() {
 	kernel_->world.tables.class_cammo_installed = live != nullptr && live->loaded;
 }
 
+namespace {
+
+// Input action 3's Exit Mission tone on the world's interface channel, which the session leg's
+// terminal frame still plays (inmatch/mission_exit.h kExitMissionSoundset carries the witness).
+void raise_exit_mission_tone(world::World &world) {
+	world::ScriptSoundEvent tone;
+	tone.kind = world::ScriptSoundEvent::Kind::Interface;
+	tone.name = kExitMissionSoundset;
+	world.out.script_sounds.push_back(std::move(tone));
+}
+
+} // namespace
+
 // The joiner frame [orig: Game_ProcessMainFrame @0x5263f0 -- the client-side
 // branch of the one frame function the host frame also rides]: the view
 // session sample, the pump (provider wiring, hello, recv-fold + uplink +
@@ -870,6 +883,24 @@ void JoinerRole::run_tick(const TickInput &) {
 	const bool waiting = runtime->in_final_wait();
 	if (final_wait_seen_ && !waiting && runtime->in_game_loop()) final_wait_end_ = true;
 	final_wait_seen_ = waiting;
+	// A description record's punt whose callback queued an input action (DPC 1, 33 or an
+	// unlisted code: action 3; DPC 34: action 36), which the input pass dispatches: action 3
+	// stores exit reason 1, plays the Exit Mission tone and runs a disconnect that finds the
+	// connection gone; action 36 stores exit reason 5. Retail's pass is the next main frame's;
+	// ours runs it at the loss's tick, which the session leaves (session_lost), as the HUD leg
+	// below does.
+	// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - Input_QueueEvent(36) @0x4C6596,
+	//  Input_QueueEvent(3) @0x4C67A4; Game_ProcessMainFrame @0x5263F0 - Input_ProcessFrame
+	//  @0x52661D; Input_HandleActionBinding @0x49AD40 - case 3: reason 1 @0x49AF26, the tone
+	//  @0x49AF30, the disconnect @0x49AF42; case 36: reason 5 @0x49B780]
+	if (const int32_t action = runtime->take_teardown_input_action(); action != 0) {
+		if (action == kInputActionExit) {
+			raise_exit_mission_tone(kernel.world);
+			quit_to_menu();
+		} else {
+			runtime->set_mission_exit_reason(mission_exit_reason_for_input_action(action));
+		}
+	}
 	// A link the connection lost with no exit reason (the silence reap, a record outside the
 	// description class) leaves only g_LoadingTimeoutFlag; the HUD's overlay pass then runs
 	// input action 3 once the round-over gate is up: exit reason 1 and the action's Exit
@@ -882,10 +913,7 @@ void JoinerRole::run_tick(const TickInput &) {
 	if (runtime->session_lost() && runtime->mission_exit_reason() == kMissionExitNone &&
 			runtime->state().spawn_success_gate) {
 		runtime->set_mission_exit_reason(kMissionExitQuit);
-		world::ScriptSoundEvent tone;
-		tone.kind = world::ScriptSoundEvent::Kind::Interface;
-		tone.name = kExitMissionSoundset;
-		kernel.world.out.script_sounds.push_back(std::move(tone));
+		raise_exit_mission_tone(kernel.world);
 	}
 	sync_class_attribute_flags();
 	// The pump's phases, its wire leg and the local world tick's own breakdown

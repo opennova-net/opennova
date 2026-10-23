@@ -243,6 +243,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	enumerate_pass_ended_ = false;
 	enumerated_session_sn_.clear();
 	teardown_exit_reason_ = 0;
+	teardown_input_action_ = 0;
 	post_auth_stage_ = PostAuthStage::Inactive;
 	goodbye_sent_ = false;
 	session_last_send_ms_ = 0;

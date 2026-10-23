@@ -42,25 +42,48 @@ inline constexpr int32_t kMissionExitDisconnectLast = 19;
 // The host's mission file failed its header check [orig: Game_StartMission @0x524785].
 inline constexpr int32_t kMissionExitBadMission = 20;
 
-// The exit reason an in-match disconnect stores: a description-family record (class 2) maps its
-// reason code (DPC) through the client's switch; any other class leaves the reason alone.
-// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 — the `dc == 2` test @0x4C655F (its jnz
-//  @0x4c6563), the
-//  DPC switch @0x4c6583..0x4c677c: 1 / 33 / an unlisted code queue input event 3 (reason 1),
-//  34 queues event 36 (reason 5), 35 -> 7, 36..45 -> 9..18, 46 and 49 -> 19, 0 nothing]
-inline int32_t mission_exit_reason_for_disconnect(const DisconnectEvent &event) {
-	if (event.dc != 2 || event.dpc == 0) return kMissionExitNone;
+// The input actions the disconnected callback queues (Input_QueueEvent's code), which the next
+// input pass dispatches: 3 the exit (exit reason 1, the Exit Mission tone, a disconnect that finds
+// no connection once the link is gone), 36 the CD-trouble exit (exit reason 5).
+// [orig: Input_HandleActionBinding @0x49AD40 - case 3: reason 1 @0x49AF26, the tone @0x49AF30,
+//  CNapiNetwork_DisconnectActiveConnection @0x49AF42; case 36: reason 5 @0x49B780]
+inline constexpr int32_t kInputActionExit = 3;
+inline constexpr int32_t kInputActionCdTrouble = 36;
+
+// The exit reason a queued input action stores at its dispatch (none for any other code).
+inline int32_t mission_exit_reason_for_input_action(int32_t code) {
+	if (code == kInputActionExit) return kMissionExitQuit;
+	if (code == kInputActionCdTrouble) return kMissionExitCdTrouble;
+	return kMissionExitNone;
+}
+
+// What an in-match disconnect does with its record: a description-family record (class 2) maps
+// its reason code (DPC) through the client's switch, which stores an exit reason (35 -> 7,
+// 36..45 -> 9..18, 46 and 49 -> 19) or queues an input action for the next input pass (1 / 33 /
+// an unlisted code: action 3; 34: action 36); a zero DPC or any other class does nothing.
+// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 - the `dc == 2` test @0x4C655F (its jnz
+//  @0x4c6563), the DPC switch @0x4c6583..0x4c677c: Input_QueueEvent(36) @0x4C6596, the stores
+//  @0x4C65A2..0x4C677C, Input_QueueEvent(3) @0x4C67A4]
+struct DisconnectExit {
+	int32_t reason = kMissionExitNone; // the callback's own store
+	int32_t input_action = 0;          // the action the callback queues (0: none)
+};
+inline DisconnectExit mission_exit_for_disconnect(const DisconnectEvent &event) {
+	DisconnectExit out;
+	if (event.dc != 2 || event.dpc == 0) return out;
 	switch (event.dpc) {
-	case 34: return kMissionExitCdTrouble;
-	case 35: return kMissionExitPirate;
+	case 34: out.input_action = kInputActionCdTrouble; return out;
+	case 35: out.reason = kMissionExitPirate; return out;
 	case 46:
-	case 49: return kMissionExitDisconnectLast;
+	case 49: out.reason = kMissionExitDisconnectLast; return out;
 	default: break;
 	}
 	if (event.dpc >= 36 && event.dpc <= 45) {
-		return kMissionExitDisconnectFirst + static_cast<int32_t>(event.dpc - 36);
+		out.reason = kMissionExitDisconnectFirst + static_cast<int32_t>(event.dpc - 36);
+		return out;
 	}
-	return kMissionExitQuit;
+	out.input_action = kInputActionExit;
+	return out;
 }
 
 // The client callback's process-lifetime disconnect latch (ctx+0xD94): the disconnected callback
@@ -84,9 +107,9 @@ struct ProcessDisconnectLatch {
 		valid = true;
 	}
 	void clear() { *this = ProcessDisconnectLatch{}; }
-	// The callback's exit reason: the switch over the latch (none while it is empty).
-	int32_t exit_reason() const {
-		return valid ? mission_exit_reason_for_disconnect(event) : kMissionExitNone;
+	// The callback's exit: the switch over the latch (nothing while it is empty).
+	DisconnectExit disconnect_exit() const {
+		return valid ? mission_exit_for_disconnect(event) : DisconnectExit{};
 	}
 };
 

@@ -521,8 +521,8 @@ void test_session_destroy_routes() {
 		consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
 		return consoles.status_report();
 	};
-	const int32_t kicked = inmatch::mission_exit_reason_for_disconnect(
-			make_disconnect_event(1, 2, 0, 0, "", 37, ""));
+	const int32_t kicked = inmatch::mission_exit_for_disconnect(
+			make_disconnect_event(1, 2, 0, 0, "", 37, "")).reason;
 	expect(kicked == 10, "a DPC 37 record maps to exit reason 10");
 	expect(menus_after(kicked).find(kept) != std::string::npos,
 	       "reason 10: the error arm keeps the last session's game type");

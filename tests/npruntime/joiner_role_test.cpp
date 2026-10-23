@@ -3290,6 +3290,63 @@ bool run_a_lost_link_at_round_over_runs_input_action_3() {
 	return ok;
 }
 
+// L2-s32 FOUND (L2-s34 row 3): a host description record's punt (class 2) queues an input action
+// for the DPCs the callback's switch does not store: 1, 33 (the kick's "S.C:SPA", the deploy-idle
+// punt) and an unlisted code queue action 3, whose dispatch stores exit reason 1 and plays the Exit
+// Mission tone, mid-round too; 34 queues action 36, exit reason 5 with no tone; a stored DPC (37 ->
+// 10) plays no tone. Ours dispatches it at the loss's tick, which the session leaves.
+// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the DPC switch @0x4C6583,
+//  Input_QueueEvent(36) @0x4C6596, Input_QueueEvent(3) @0x4C67A4; Input_HandleActionBinding
+//  @0x49AD40 - case 3: reason 1 @0x49AF26, the tone @0x49AF30; case 36: reason 5 @0x49B780]
+bool run_a_description_punt_dispatches_its_queued_input_action() {
+	struct Case {
+		uint32_t dpc;
+		int32_t reason;
+		bool tone;
+	};
+	const Case cases[] = {
+			{1, inmatch::kMissionExitQuit, true},
+			{33, inmatch::kMissionExitQuit, true},
+			{50, inmatch::kMissionExitQuit, true},
+			{34, inmatch::kMissionExitCdTrouble, false},
+			{37, 10, false},
+	};
+	bool ok = true;
+	for (const Case &c : cases) {
+		Harness h;
+		h.kernel->world.load_systems();
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h.role.run_tick(h.input);
+		DisconnectEvent punt;
+		punt.ds = 1;
+		punt.dc = 2;
+		punt.dpc = c.dpc;
+		punt.ddstr = "S.C:SPA";
+		SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(0x03, connection_description_to_bytes(punt), 0xA0)},
+				packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.kernel->world.out.script_sounds.clear();
+		h.role.run_tick(h.input);
+		int tones = 0;
+		for (const w::ScriptSoundEvent &s : h.kernel->world.out.script_sounds)
+			tones += s.kind == w::ScriptSoundEvent::Kind::Interface && s.name == "PU_EXIT_CONFIRM";
+		inmatch::SessionError lost;
+		ok &= expect(h.role.runtime->session_lost() && h.role.session_lost(lost),
+				"description punt: the record ends the link and the session leaves");
+		ok &= expect(h.role.runtime->mission_exit_reason() == c.reason && tones == (c.tone ? 1 : 0),
+				"description punt: the queued action's reason and its tone (action 3 alone plays it)");
+		ok &= expect(h.role.runtime->take_teardown_input_action() == 0,
+				"description punt: the action is dispatched once");
+	}
+	return ok;
+}
+
 // L2-s8 FOUND 4: the mission start's block on a non-null local player runs on a joiner's L
 // too: the indoors bit and the medic-revive latch cleared, the hidden bit cleared, the
 // proximity rebuild, the hidden bit set again; so a spawned L with no record folded and no
@@ -4493,6 +4550,7 @@ int main() {
 	ok &= run_the_console_quit_stores_the_reset_exit();
 	ok &= run_the_mission_start_leaves_l_hidden();
 	ok &= run_a_lost_link_at_round_over_runs_input_action_3();
+	ok &= run_a_description_punt_dispatches_its_queued_input_action();
 	ok &= run_a_console_deploy_pick_ends_the_drain();
 	ok &= run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it();
 	ok &= run_the_teardown_goodbye_follows_the_exit_route();

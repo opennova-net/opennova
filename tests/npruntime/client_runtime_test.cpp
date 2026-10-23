@@ -5805,26 +5805,49 @@ bool run_novaworld_exit_on_a_joiner() {
 			"the NWU session's own exit store lands as is");
 }
 
-// The exit reason an in-match disconnect stores and the post-mission router's verdict on it
-// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 (the dc == 2 DPC switch);
-//  PostMenu_RouteMissionExit @0x568460]: class-2 records map their DPC (1 / 33 / an unlisted
-// code quit, 34 -> 5, 35 -> 7, 36..45 -> 9..18, 46 / 49 -> 19), any other class or a zero DPC
-// stores nothing; reasons 2, 5..7, 9..20 drop the NovaWorld session (5..7 / 20 with a gameerr
-// text, 9..19 with the disconnect text), every other reason keeps it on a NovaWorld session.
+// What an in-match disconnect does with its record and the post-mission router's verdict on the
+// reason [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 (the dc == 2 DPC switch:
+//  Input_QueueEvent(36) @0x4C6596, Input_QueueEvent(3) @0x4C67A4); Input_HandleActionBinding
+//  @0x49AD40 (case 3 @0x49AF26, case 36 @0x49B780); PostMenu_RouteMissionExit @0x568460]:
+// class-2 records map their DPC (1 / 33 / an unlisted code queue input action 3, whose dispatch
+// stores 1; 34 queues action 36, whose dispatch stores 5; 35 -> 7, 36..45 -> 9..18, 46 / 49 -> 19
+// stored at once), any other class or a zero DPC does nothing; reasons 2, 5..7, 9..20 drop the
+// NovaWorld session (5..7 / 20 with a gameerr text, 9..19 with the disconnect text), every other
+// reason keeps it on a NovaWorld session.
 bool run_mission_exit_routes() {
-	const auto dpc = [](uint32_t dc, uint32_t code) {
+	const auto exit_of = [](uint32_t dc, uint32_t code) {
 		DisconnectEvent event;
 		event.dc = dc;
 		event.dpc = code;
-		return inmatch::mission_exit_reason_for_disconnect(event);
+		return inmatch::mission_exit_for_disconnect(event);
 	};
-	if (!expect(dpc(2, 0) == inmatch::kMissionExitNone, "a zero DPC stores nothing") ||
-			!expect(dpc(3, 40) == inmatch::kMissionExitNone, "a non-description class stores nothing") ||
-			!expect(dpc(2, 1) == inmatch::kMissionExitQuit, "DPC 1 queues the quit") ||
-			!expect(dpc(2, 33) == inmatch::kMissionExitQuit, "DPC 33 (a punt) queues the quit") ||
-			!expect(dpc(2, 50) == inmatch::kMissionExitQuit, "an unlisted DPC queues the quit") ||
-			!expect(dpc(2, 34) == inmatch::kMissionExitCdTrouble, "DPC 34 -> 5") ||
-			!expect(dpc(2, 35) == inmatch::kMissionExitPirate, "DPC 35 -> 7") ||
+	const auto dpc = [&exit_of](uint32_t dc, uint32_t code) { return exit_of(dc, code).reason; };
+	const auto queued = [&exit_of](uint32_t dc, uint32_t code) {
+		return exit_of(dc, code).input_action;
+	};
+	if (!expect(dpc(2, 0) == inmatch::kMissionExitNone && queued(2, 0) == 0,
+				"a zero DPC does nothing") ||
+			!expect(dpc(3, 40) == inmatch::kMissionExitNone && queued(3, 40) == 0,
+					"a non-description class does nothing") ||
+			!expect(dpc(2, 1) == inmatch::kMissionExitNone &&
+							queued(2, 1) == inmatch::kInputActionExit,
+					"DPC 1 queues input action 3") ||
+			!expect(dpc(2, 33) == inmatch::kMissionExitNone &&
+							queued(2, 33) == inmatch::kInputActionExit,
+					"DPC 33 (a punt) queues input action 3") ||
+			!expect(dpc(2, 50) == inmatch::kMissionExitNone &&
+							queued(2, 50) == inmatch::kInputActionExit,
+					"an unlisted DPC queues input action 3") ||
+			!expect(dpc(2, 34) == inmatch::kMissionExitNone &&
+							queued(2, 34) == inmatch::kInputActionCdTrouble,
+					"DPC 34 queues input action 36") ||
+			!expect(inmatch::mission_exit_reason_for_input_action(inmatch::kInputActionExit) ==
+							inmatch::kMissionExitQuit &&
+							inmatch::mission_exit_reason_for_input_action(
+									inmatch::kInputActionCdTrouble) == inmatch::kMissionExitCdTrouble,
+					"action 3 stores 1, action 36 stores 5") ||
+			!expect(dpc(2, 35) == inmatch::kMissionExitPirate && queued(2, 35) == 0,
+					"DPC 35 -> 7") ||
 			!expect(dpc(2, 36) == 9 && dpc(2, 39) == inmatch::kMissionExitNovaWorld &&
 							dpc(2, 45) == 18,
 					"DPC 36..45 -> 9..18") ||

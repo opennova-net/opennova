@@ -906,6 +906,14 @@ public:
 	//  @0x4CA1A6..0x4CA1B4]
 	void use_disconnect_latch(ProcessDisconnectLatch *latch) { disconnect_latch_ = latch; }
 	int32_t teardown_exit_reason() const { return teardown_exit_reason_; }
+	// The input action the teardown's callback queued (a description record's DPC 1, 33 or an
+	// unlisted code: action 3; DPC 34: action 36; 0: none), taken once by the input pass that
+	// dispatches it (JoinerRole::run_tick).
+	int32_t take_teardown_input_action() {
+		const int32_t action = teardown_input_action_;
+		teardown_input_action_ = 0;
+		return action;
+	}
 	// The error record retail's reason text is built from: the CR=0 join
 	// failure fields and the latched disconnect record (disconnect_reason.h).
 	ConnectionErrorRecord connection_error_record() const;
@@ -1421,6 +1429,7 @@ private:
 	std::string enumerated_session_sn_; // the record's SN (its 63-character copy)
 	ProcessDisconnectLatch *disconnect_latch_ = nullptr; // use_disconnect_latch
 	int32_t teardown_exit_reason_ = 0; // the leave callback's switch over the latch (0: none)
+	int32_t teardown_input_action_ = 0; // the action that switch queued (0: none)
 	// The connect state from a session record (a browse row's, or the enumerate's 0x81): retail's
 	// StartClientConnection -> InitFromSession, state 3, start = now, last = now - 2000, no send.
 	void enter_session_connect_state();

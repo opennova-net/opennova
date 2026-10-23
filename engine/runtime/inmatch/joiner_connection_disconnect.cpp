@@ -196,13 +196,17 @@ std::vector<std::vector<uint8_t>> JoinerConnection::disconnect(std::string_view 
 	std::vector<std::vector<uint8_t>> burst(
 			disconnect_burst_count(conn_.timeouts.recv_max_per_tick), std::move(datagram));
 	// The leave callback after the burst: the process latch keeps the first record (a
-	// connection with none latches zeros), and the exit reason is the switch over the latch.
+	// connection with none latches zeros), and the switch over the latch stores an exit reason
+	// or queues an input action for the next input pass (teardown_input_action).
 	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the callback
 	//  @0x6254D5..0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - @0x4C6535,
-	//  the copy @0x4C6545, the memset @0x4C6551, valid @0x4C6559, the switch from @0x4C655F]
+	//  the copy @0x4C6545, the memset @0x4C6551, valid @0x4C6559, the switch from @0x4C655F,
+	//  Input_QueueEvent(36) @0x4C6596, Input_QueueEvent(3) @0x4C67A4]
 	if (disconnect_latch_ != nullptr) {
 		disconnect_latch_->latch(disconnect_event_set_ ? last_disconnect_event_ : DisconnectEvent{});
-		teardown_exit_reason_ = disconnect_latch_->exit_reason();
+		const DisconnectExit exit = disconnect_latch_->disconnect_exit();
+		teardown_exit_reason_ = exit.reason;
+		teardown_input_action_ = exit.input_action;
 	}
 	return burst;
 }

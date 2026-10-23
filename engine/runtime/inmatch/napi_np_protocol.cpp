@@ -1514,7 +1514,11 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 static void own_client_disconnected(NapiNPServerCtx &ctx, const DisconnectEvent &record) {
 	if (ctx.client_disconnect_latch == nullptr) return;
 	ctx.client_disconnect_latch->latch(record);
-	const int32_t reason = ctx.client_disconnect_latch->exit_reason();
+	// A queued action's reason folds in at once here (1 for action 3, 5 for 36).
+	const DisconnectExit exit = ctx.client_disconnect_latch->disconnect_exit();
+	const int32_t reason = exit.reason != kMissionExitNone
+			? exit.reason
+			: mission_exit_reason_for_input_action(exit.input_action);
 	if (reason != kMissionExitNone) ctx.mission_exit_reason = reason;
 }
 
