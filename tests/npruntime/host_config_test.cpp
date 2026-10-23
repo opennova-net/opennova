@@ -292,8 +292,10 @@ int main() {
 		source.profile = &profile;
 		source.cfg_block = &block;
 		HostConfig host = shell_host_config(source);
-		// An empty name advertises "": the create copies the block word with no default
-		// [orig: CNapiGameSession_BuildAndCreateSession @0x5695D2].
+		// An empty name stays "" in the request: the settings build copies the block word with
+		// no default [orig: CNapiGameSession_BuildAndCreateSession @0x5695D2]; the create's own
+		// "Untitled" default reaches only the protocol's copy, the 0x81's SN (D-NET-NEW-L1-43)
+		// [orig: CNapiGameSession_CreateSession @0x4C986F..0x4C9885].
 		TEST_EXPECT(host.config.server_name.empty());
 		TEST_EXPECT(host.config.game_type == game_type::kTeamDeathmatch);
 		TEST_EXPECT(host.config.max_players == 9u && host.config.dedicated_server);
