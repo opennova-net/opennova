@@ -351,6 +351,23 @@ struct RootRotationQ22 {
 };
 RootRotationQ22 root_rotation_q22(int32_t heading, bool org2_player_body);
 
+// The terrain-gradient slide's arithmetic, which both organic motors run on a body with no
+// ground entity (each motor keeps its own gates, its Flags 0x10000 writes and its side of the
+// root rotation; the joiner's replica motor runs it too). `grad_dx` / `grad_dy` are the
+// terrain's raw height gradient under the body (Terrain_GetHeightGradient); its magnitude is
+// the x87 root of the squares, saturated at 2147418112.0 and truncated. At 768 or more the
+// slide pair is the downhill push, x = -round(419392 * grad_dx / 65536) and y =
+// +round(419392 * grad_dy / 65536), each the IMUL, the 0x8000 round and the SHRD 16 keeping
+// the low dword, and the vertical velocity (+0xA0) is held at -167 or below; true. Below 768
+// nothing is written; false.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the call @0x4BA8CC, the magnitude
+//  @0x4BA8D1..0x4BA8FB, the test @0x4BA900, the pair @0x4BA907..0x4BA931, the velocity
+//  @0x4BA935..0x4BA941; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the call @0x4B7A13, the
+//  magnitude @0x4B7A18..0x4B7A42, the test @0x4B7A47, the pair @0x4B7A4E..0x4B7A78, the
+//  velocity @0x4B7A80..0x4B7A8D]
+bool infantry_gradient_slide(int32_t grad_dx, int32_t grad_dy, int32_t &slide_x,
+                             int32_t &slide_y, int32_t &vel_z);
+
 // Runtime source for real .bad/.adm data, with tests providing IDA-shaped doubles.
 class IRootMotionSource {
 public:

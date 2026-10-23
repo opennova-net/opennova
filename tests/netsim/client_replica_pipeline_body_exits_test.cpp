@@ -28,7 +28,9 @@
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
+#include <runtime/terrain_query/height_field.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -1014,6 +1016,127 @@ void test_overlay_pitch_is_the_live_pitch_word() {
 			"its leg words");
 }
 
+// A terrain rising toward +x: each texel (one unit, its column the position's whole units) is
+// `per_texel` raw above the one before it over x 64..191, so the gradient under x = 100 is
+// (raw(101) - raw(99), 0) = (2 * per_texel, 0).
+struct SlopeTerrain {
+	static constexpr int kDim = 512;
+	std::vector<uint16_t> heightmap;
+	std::vector<int> sector_grid;
+	opennova::terrain::TerrainHeightField field;
+
+	explicit SlopeTerrain(int per_texel) : heightmap(kDim * kDim), sector_grid(16 * 16, 1) {
+		for (int z = 0; z < kDim; ++z)
+			for (int x = 0; x < kDim; ++x)
+				heightmap[static_cast<size_t>(z) * kDim + x] =
+						static_cast<uint16_t>(std::clamp(x - 64, 0, 127) * per_texel);
+		field.heightmap = heightmap.data();
+		field.dim = kDim;
+		field.layout.sector_grid = sector_grid.data();
+	}
+};
+
+// Every clip walks 0x2000 forward a tick, the bodies' capsule as BodySource's.
+struct WalkSource final : public opennova::world::IRootMotionSource {
+	bool has_clip(int, int) const override { return true; }
+	bool advance(int, int, int32_t &phase, opennova::world::RootMotionFrame &out) override {
+		++phase;
+		out = {};
+		out.dx = 0x2000;
+		out.capsule_bottom = 1 << 16;
+		out.capsule_top = 2 << 16;
+		return true;
+	}
+	int32_t clip_length_ticks(int, int, int) const override { return 62; }
+	bool clip_loops(int, int, int) const override { return true; }
+};
+
+// The slide pair under a gradient of (1000, 0): x = -((419392 * 1000 + 0x8000) >> 16), y = 0.
+constexpr int32_t kGradientSlideX = -6399;
+constexpr uint32_t kFlagSlide = 0x10000u;
+
+// D-NET-NEW-L5-40: a player row with no ground entity on terrain whose gradient magnitude
+// reaches 768 takes the downhill push in place of its rotated root pair (the clip's 0x2000 step
+// is gone, whatever the body heading), holds its vertical velocity at -167 and sets Flags
+// 0x10000. A gentler slope (600), an indoors row or one with a ground entity keep the root and
+// clear the bit.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the rotation @0x4B41E4..0x4B4255, the Flags
+//  test @0x4B79DC, the ground test @0x4B79E8, Terrain_GetHeightGradient called @0x4B7A13, the
+//  test @0x4B7A47, the pair @0x4B7A4E..0x4B7A7C, the velocity @0x4B7A80..0x4B7A8D, the set
+//  @0x4B7A93, the clears @0x4B7A9C / @0x4B7AA5]
+void test_player_gradient_slide_replaces_the_world_pair() {
+	SlopeTerrain steep(500);
+	SlopeTerrain gentle(300);
+	enum class Case { Steep, Gentle, Indoors, Grounded };
+	for (const Case c : {Case::Steep, Case::Gentle, Case::Indoors, Case::Grounded}) {
+		WalkSource src;
+		auto view = make_view(src);
+		view->set_remote_motion_terrain(c == Case::Gentle ? &gentle.field : &steep.field);
+		view->state().upsert(0x0003).type_id = kPlayerType;
+		view->apply(0x0A, frame({{0x0003, nw::EntityClass::Player, 0x00}}));
+		ns::ClientEntityState &es = *view->state().find(0x0003);
+		es.rm_adm_id = 0;
+		es.rm_entity_flags = kFlagSlide;
+		if (c == Case::Indoors) es.rm_entity_flags |= nw::world::kEntityFlagIndoors;
+		if (c == Case::Grounded) es.resolved_ground = kHull;
+		view->tick_remote_motion(0xFFFF);
+		if (c == Case::Steep) {
+			expect(es.x == fixed_of(100.0) + kGradientSlideX && es.y == fixed_of(200.0),
+					"the slide replaces the rotated root pair");
+			expect((es.rm_entity_flags & kFlagSlide) != 0 && es.rm_vel_z == -167,
+					"the slide sets Flags 0x10000 and holds the vertical velocity at -167");
+		} else {
+			expect(es.x != fixed_of(100.0) + kGradientSlideX &&
+							(es.x != fixed_of(100.0) || es.y != fixed_of(200.0)),
+					"a row the slide skips walks its root");
+			expect((es.rm_entity_flags & kFlagSlide) == 0 && es.rm_vel_z == 0,
+					"a row the slide skips clears Flags 0x10000 and keeps its velocity");
+		}
+	}
+}
+
+// D-NET-NEW-L5-40: a free-standing org1 row with no ground entity takes the push in place of its
+// clip's unrotated pair, which its body heading (+0x8C) then turns: at 0x40000000 the push
+// (-6399, 0) leaves along the heading's rotation, not along -x as a player's does. A row with a
+// ground entity rides it instead and leaves Flags 0x10000 as it was.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ground test @0x4BA45D..0x4BA479, the Flags test
+//  @0x4BA896, Terrain_GetHeightGradient called @0x4BA8CC, the pair's stores @0x4BA91D /
+//  @0x4BA93B, the velocity @0x4BA935..0x4BA941, the set @0x4BA947, the rotation @0x4BF001]
+void test_infantry_gradient_slide_replaces_the_clip_pair() {
+	SlopeTerrain steep(500);
+	for (const bool grounded : {false, true}) {
+		WalkSource src;
+		auto view = make_view(src);
+		view->set_remote_motion_terrain(&steep.field);
+		view->state().upsert(kFreeInfantry).type_id = kInfantryType;
+		view->apply(0x0A, free_infantry_frame(0x00, 0x00));
+		ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+		es.rm_adm_id = 0;
+		es.rm_body_heading = es.net_target_heading_bam = 0x40000000;
+		es.rm_entity_flags = kFlagSlide;
+		if (grounded) es.resolved_ground = kHull;
+		view->tick_remote_motion(0xFFFF);
+		const opennova::world::RootRotationQ22 rot =
+				opennova::world::root_rotation_q22(0x40000000, false);
+		const auto q22 = [](int32_t v, int32_t k) {
+			return static_cast<int32_t>((static_cast<int64_t>(v) * k) >> 22);
+		};
+		if (!grounded) {
+			expect(es.x == fixed_of(100.0) + q22(kGradientSlideX, rot.c) &&
+							es.y == fixed_of(200.0) + q22(kGradientSlideX, rot.s),
+					"the body heading turns the slide that replaced the clip's pair");
+			expect((es.rm_entity_flags & kFlagSlide) != 0 && es.rm_vel_z == -167,
+					"the slide sets Flags 0x10000 and holds the vertical velocity at -167");
+		} else {
+			expect(es.x == fixed_of(100.0) + q22(0x2000, rot.c) &&
+							es.y == fixed_of(200.0) + q22(0x2000, rot.s),
+					"a grounded row walks its clip's pair");
+			expect((es.rm_entity_flags & kFlagSlide) != 0 && es.rm_vel_z == 0,
+					"a grounded row leaves Flags 0x10000 and its velocity alone");
+		}
+	}
+}
+
 // The authority's view runs no chase, so its rows count nothing and never starve: with no
 // record for 600 ticks a row still takes its legs.
 void test_authority_rows_never_starve() {
@@ -1051,6 +1174,8 @@ int main() {
 	test_org1_dead_body_tumbles_in_the_air();
 	test_org1_ride_skips_the_aim_adds_on_a_turret();
 	test_overlay_pitch_is_the_live_pitch_word();
+	test_player_gradient_slide_replaces_the_world_pair();
+	test_infantry_gradient_slide_replaces_the_clip_pair();
 	test_authority_rows_never_starve();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

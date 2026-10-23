@@ -524,8 +524,28 @@ static bool entity_is_player_class(const World &world, EntityHandle handle) {
 }
 
 
-// The two organic motors share the gradient/gain kernel but apply its result
-// on opposite sides of the body rotation. The NPC also arms the detour latch.
+// See the infantry.h contract.
+bool infantry_gradient_slide(int32_t grad_dx, int32_t grad_dy, int32_t &slide_x,
+                             int32_t &slide_y, int32_t &vel_z) {
+    const int32_t magnitude = static_cast<int32_t>(std::min(
+            std::sqrt(double(grad_dx) * grad_dx + double(grad_dy) * grad_dy),
+            2147418112.0));
+    if (magnitude < 768) return false;
+    // IMUL, ADD/ADC 0x8000, SHRD 16: retain the low signed dword.
+    // The unsigned shift also pins the negative-product bits in C++17.
+    const auto scale = [](int32_t value) {
+        return static_cast<int32_t>(
+                static_cast<uint64_t>(int64_t(value) * 419392 + 0x8000) >> 16);
+    };
+    slide_x = io::bam_sub(0, scale(grad_dx));
+    slide_y = scale(grad_dy);
+    vel_z = std::min(vel_z, -167);
+    return true;
+}
+
+// The two organic motors share the gradient/gain kernel (infantry_gradient_slide)
+// but apply its result on opposite sides of the body rotation. The NPC also arms
+// the detour latch.
 // [orig: Entity_UpdateInfantryAI @0x4BA896..0x4BA96E;
 // Entity_UpdateInfantryPlayerBody @0x4B79DC..0x4B7AAE]
 static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
@@ -540,25 +560,13 @@ static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
     terrain::TerrainHeightGradient gradient;
     if (!carried && (flags & 0x90A000u) == 0 && field != nullptr)
         gradient = terrain::height_field_gradient_fixed(*field, e.self->position.x.q16, e.self->position.y.q16);
-    const int32_t magnitude = static_cast<int32_t>(std::min(
-            std::sqrt(double(gradient.dx) * gradient.dx + double(gradient.dy) * gradient.dy),
-            2147418112.0));
-    if (magnitude < 768) {
+    if (!infantry_gradient_slide(gradient.dx, gradient.dy, dx, dy, e.inf.vel[2])) {
         if (entity != nullptr) {
             entity->flags &= ~0x10000u;
             entity->engine_flags &= ~0x10000u;
         }
         return false;
     }
-    // IMUL, ADD/ADC 0x8000, SHRD 16: retain the low signed dword.
-    // The unsigned shift also pins the negative-product bits in C++17.
-    const auto scale = [](int32_t value) {
-        return static_cast<int32_t>(
-                static_cast<uint64_t>(int64_t(value) * 419392 + 0x8000) >> 16);
-    };
-    dx = io::bam_sub(0, scale(gradient.dx));
-    dy = scale(gradient.dy);
-    e.inf.vel[2] = std::min(e.inf.vel[2], -167);
     if (entity != nullptr) {
         entity->flags |= 0x10000u;
         entity->engine_flags |= 0x10000u;

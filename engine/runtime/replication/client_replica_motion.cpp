@@ -907,6 +907,37 @@ bool row_channel_advance(ClientEntityState &es, world::IRootMotionSource &src,
 	return have;
 }
 
+// The terrain-gradient slide of a row with no ground entity (resolved_ground, retail's +0x28),
+// over the motors' shared arithmetic (world::infantry_gradient_slide): a row whose Flags carry
+// none of 0x90A000 (indoors, the ladder, afloat, in the air) samples the terrain's height
+// gradient under its position; at a magnitude of 768 or more the downhill push replaces `pair`,
+// the vertical velocity is held at -167 or below and Flags 0x10000 sets; under one of those
+// Flags, or below 768, the bit clears. No terrain reads as a level one, as retail's zeroed out
+// words do. Org1 replaces the clip's unrotated pair, org2 the rotated world pair (the call
+// sites). Org1's path-state byte (+0x369 = 1 @0x4BA94E) has no reader on a client: its
+// readers, the boarding @0x4BB325 and the detour calls @0x4BD490..0x4BD5A4, sit in the think,
+// behind the authority test @0x4BA97E..0x4BA985. The authority's twin is
+// world::infantry_terrain_motion.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ground test @0x4BA45D..0x4BA479, the Flags
+//  test @0x4BA896..0x4BA8A4, Terrain_GetHeightGradient @0x606330 called @0x4BA8CC, the set
+//  @0x4BA947, the clears @0x4BA957 / @0x4BA960..0x4BA965; Entity_UpdateInfantryPlayerBody
+//  @0x4B40E0 - the Flags test @0x4B79DC..0x4B79E2, the ground test @0x4B79E8..0x4B79EB, the call
+//  @0x4B7A13, the set @0x4B7A93, the clears @0x4B7A9C / @0x4B7AA5..0x4B7AAB]
+void row_gradient_slide(ClientEntityState &es, const terrain::TerrainHeightField *terrain,
+		int32_t &pair_x, int32_t &pair_y) {
+	if ((es.rm_entity_flags & 0x90A000u) == 0u) {
+		terrain::TerrainHeightGradient gradient;
+		if (terrain != nullptr)
+			gradient = terrain::height_field_gradient_fixed(*terrain, es.x, es.y);
+		if (world::infantry_gradient_slide(gradient.dx, gradient.dy, pair_x, pair_y,
+				es.rm_vel_z)) {
+			es.rm_entity_flags |= 0x10000u;
+			return;
+		}
+	}
+	es.rm_entity_flags &= ~0x10000u;
+}
+
 void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           world::AnimVariantRings *rings,
                           const terrain::TerrainHeightField *terrain,
@@ -990,6 +1021,16 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		return;
 	}
 	int32_t fwd = frame.dx, lat = frame.dy;
+	// An org1 row with no ground entity takes the gradient slide over the clip's unrotated pair,
+	// ahead of the think and its rotation (a starved row returned ahead of both; a row with a
+	// ground entity rode it instead, leaving Flags 0x10000 as it was). The jump loop's forward
+	// word overwrites the slide's below.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ground test @0x4BA45D..0x4BA479 ->
+	//  @0x4BA896, the pair's stores @0x4BA91D / @0x4BA93B, the jump loop's @0x4BEFF0..0x4BEFF9, the
+	//  rotation @0x4BF001; the starved exit @0x4B9C09..0x4B9C39]
+	if (es.cls == EntityClass::Infantry && !is_self && !starved &&
+			es.resolved_ground == wire_handle::kInvalid)
+		row_gradient_slide(es, terrain, fwd, lat);
 	if (es.rm_state == world::anim_state::kJumpLoop)
 		fwd = 1024; // [data: retail ADM dump root row 4756]
 	// The witnessed vertical: the capsule-bottom history delta replaces the
@@ -1088,6 +1129,19 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		};
 		es.rm_vel_xy[0] = ground_decay(es.rm_vel_xy[0]);
 		es.rm_vel_xy[1] = ground_decay(es.rm_vel_xy[1]);
+	}
+	// A player row takes the gradient slide over the already-rotated world pair, after its
+	// velocity maintenance (its in-air arm's zeroed pair included: the 0x2000 bit then fails the
+	// slide's Flags test); a row with a ground entity clears Flags 0x10000.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the rotation's stores
+	//  @0x4B4251 / @0x4B4255, the maintenance @0x4B78A8..0x4B79D6, the ground test
+	//  @0x4B79E8..0x4B79EB, the pair's stores @0x4B7A64 / @0x4B7A7C, ahead of the suppressions
+	//  @0x4B7AAE..0x4B7AC4]
+	if (es.cls == EntityClass::Player) {
+		if (es.resolved_ground == wire_handle::kInvalid)
+			row_gradient_slide(es, terrain, wx, wy);
+		else
+			es.rm_entity_flags &= ~0x10000u;
 	}
 
 	// Root suppression flag channels: the float bit zeroes the vertical
