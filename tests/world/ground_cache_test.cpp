@@ -349,6 +349,78 @@ void test_the_replica_keeps_a_cached_link() {
 	}
 }
 
+// D-NET-NEW-L6-40 follow-up: the record's TARGET lands once, as its row is built, and as the
+// slot's address. A later write to the row's link (a mover's or a falling-death probe) survives
+// any other row's fold; a TARGET naming an empty slot keeps naming it, so the row a later record
+// builds there is the link; a word past the pool tables (pool 5, a slot past its pool's
+// capacity) stores the null; the row's own next record stores its word again.
+// [orig: NapiNPClientMsg_0x00D @0x432C40 - the walk @0x433282..0x4332CF, the store @0x4332D7]
+void test_the_record_target_is_stored_once() {
+	namespace rp = opennova::replication;
+	rp::ClientReplicaPipeline pipeline;
+	opennova::PoolSpawnRecord truck;
+	truck.slot_id = 0x1000;
+	truck.item_type_id = 1294;
+	opennova::PoolSpawnRecord crate = truck;
+	crate.slot_id = 0x1001;
+	crate.item_type_id = 4302;
+	opennova::PoolSpawnRecord rider = truck;
+	rider.slot_id = 0x1002;
+	rider.item_type_id = 4303;
+	rider.target_handle = truck.slot_id;
+	opennova::PoolSpawnRecord early = rider; // its carrier's record comes later
+	early.slot_id = 0x1003;
+	early.target_handle = 0x1005;
+	opennova::PoolSpawnRecord past_pools = rider;
+	past_pools.slot_id = 0x1004;
+	past_pools.target_handle = 0x5001; // pool 5
+	opennova::PoolSpawnRecord past_slots = rider;
+	past_slots.slot_id = 0x1006;
+	past_slots.target_handle = 0x14B0; // pool 1's slot 1200, its capacity
+	opennova::PoolSpawnBatch batch;
+	batch.records = { truck, crate, rider, early, past_pools, past_slots };
+	pipeline.apply(0x0D, opennova::encode_pool_spawn_batch(batch));
+	auto world = std::make_unique<World>();
+	world->registry.configure_pool(1, 16);
+	rp::ClientWorldMaterializer materializer;
+	materializer.sync(pipeline.state(), *world);
+	const auto row = [&](uint16_t packed) { return materializer.owned(*world, EntityHandle{ packed }); };
+	Entity *on_rider = row(0x1002);
+	const Entity *on_early = row(0x1003);
+	const Entity *on_past_pools = row(0x1004);
+	const Entity *on_past_slots = row(0x1006);
+	CHECK(on_rider != nullptr && on_early != nullptr && on_past_pools != nullptr &&
+			on_past_slots != nullptr);
+	if (on_rider == nullptr || on_early == nullptr || on_past_pools == nullptr ||
+			on_past_slots == nullptr)
+		return;
+	CHECK(on_rider->ground_target == EntityHandle{ 0x1000 });
+	CHECK(on_early->ground_target == EntityHandle{ 0x1005 } &&
+			world->registry.get(EntityHandle{ 0x1005 }) == nullptr);
+	CHECK(!on_past_pools->ground_target.valid());
+	CHECK(!on_past_slots->ground_target.valid());
+	const uint64_t rider_lifetime = on_rider->registry_spawn_id;
+	on_rider->ground_target = EntityHandle{ 0x1001 }; // a probe's write: the crate
+	opennova::PoolSpawnRecord jeep = truck;
+	jeep.slot_id = 0x1005;
+	jeep.item_type_id = 1295;
+	batch.records = { jeep };
+	pipeline.apply(0x0D, opennova::encode_pool_spawn_batch(batch));
+	materializer.sync(pipeline.state(), *world);
+	on_rider = row(0x1002);
+	on_early = row(0x1003);
+	CHECK(on_rider != nullptr && on_rider->registry_spawn_id == rider_lifetime &&
+			on_rider->ground_target == EntityHandle{ 0x1001 });
+	CHECK(on_early != nullptr && row(0x1005) != nullptr &&
+			world->registry.get(on_early->ground_target) == row(0x1005));
+	batch.records = { rider };
+	pipeline.apply(0x0D, opennova::encode_pool_spawn_batch(batch));
+	materializer.sync(pipeline.state(), *world);
+	on_rider = row(0x1002);
+	CHECK(on_rider != nullptr && on_rider->registry_spawn_id != rider_lifetime &&
+			on_rider->ground_target == EntityHandle{ 0x1000 });
+}
+
 } // namespace
 
 int main() {
@@ -360,6 +432,7 @@ int main() {
 	test_the_deployable_spawn();
 	test_the_powerup_walk();
 	test_the_replica_keeps_a_cached_link();
+	test_the_record_target_is_stored_once();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

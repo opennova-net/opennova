@@ -327,7 +327,11 @@ bool wire_target_authors_ground_separately_from_parent() {
 
 	// Losing the materializer-owned TARGET lifetime must clear the structural
 	// carrier; an unrelated replacement at the same packed handle cannot be
-	// adopted by the next fold, and the occupant back-ref never stands in.
+	// adopted by the next fold, and the occupant back-ref never stands in. The
+	// ground link is the record's slot address, stored once as the row was
+	// built: it still names the slot, whatever lives there now.
+	// [orig: NapiNPClientMsg_0x00D @0x432C40 - the walk @0x433282..0x4332CF,
+	//  the store @0x4332D7]
 	world.registry.despawn(hull_h);
 	if (!expect(world.registry.get(hull_h) == nullptr,
 			"the materialized target lifetime can be retired"))
@@ -340,9 +344,10 @@ bool wire_target_authors_ground_separately_from_parent() {
 	materializer.sync(pipeline.state(), world);
 	live_gun = materializer.owned(world, gun_h);
 	return expect(live_gun != nullptr &&
-			!live_gun->ground_target.valid() &&
+			live_gun->ground_target == hull_h &&
 			!live_gun->emplacement_parent.valid(),
-			"a foreign replacement lifetime cannot inherit the wire target relation");
+			"a foreign replacement lifetime cannot inherit the attachment carrier; "
+			"the ground link keeps naming the slot");
 }
 
 // A retail host's 0x0D can name its own player (slot 0) as a vehicle's
@@ -1293,10 +1298,14 @@ bool objective_state_attaches_and_detaches_flag() {
 	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE,
 			nw::encode_objective_entity_state(carried));
 	materializer.sync(pipeline.state(), world);
+	// The ground word stores its slot's address whether or not a row holds it.
+	// [orig: NapiNPClientMsg_0x02F @0x430E10 - the walk @0x430F63..0x430FB3,
+	//  the store @0x430FBD]
 	return expect(flag_entity->primary_occupant == w::EntityHandle{} &&
 			carrier_entity->mounted_child == w::EntityHandle{} &&
-			flag_entity->ground_target == w::EntityHandle{},
-			"a detached 0x2F clears both carry links and ignores an unresolved ground row");
+			world.registry.get(w::EntityHandle{0x1002}) == nullptr &&
+			flag_entity->ground_target == w::EntityHandle{0x1002},
+			"a detached 0x2F clears both carry links and names its ground's empty slot");
 }
 
 // A client dropping the flag off its own player reads that player's own
