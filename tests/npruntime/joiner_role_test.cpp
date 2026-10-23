@@ -2865,6 +2865,54 @@ bool run_two_team_assigns_each_run_on_their_own_side() {
 	return ok;
 }
 
+// A self S2C 0x50 a receive outside a frame's folded (the final wait's first pass runs the client
+// receive with no after-receive) keeps its leg for the next after-receive, ahead of that frame's
+// own marked 0x50, each on its own team (L7-s29, V-ROLL-AZ N1): two receives, teams 2 then 1, copy
+// pages {2, 1}.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910, once per message (CNapiNPConnection_DispatchMessage
+//  @0x625EF1); Game_StartMission @0x524360 - the final wait's first pass
+//  CNapiNetwork_PumpClientProtocolRecv @0x5262BE]
+bool run_an_unmarked_team_assign_runs_ahead_of_the_frames() {
+	Harness h;
+	std::vector<uint8_t> copied;
+	h.role.kit_seams.reseed_on_team_assign = [&copied](uint8_t team) { copied.push_back(team); };
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+	                             /*game_type=*/0x10002u);
+	h.role.run_tick(h.input); // the spawn frame
+	auto &row = h.role.runtime->state().upsert(0x0005);
+	row.cls = EntityClass::Player;
+	row.type_id = w::kPlayerInfantryTypeId;
+	if (!expect(h.role.local_spawned(), "unmarked team assign: L spawned")) return false;
+	copied.clear();
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	const auto datagram_for = [&seq](uint8_t team) {
+		TeamAssign assign;
+		assign.entity_handle = 0x0005;
+		assign.team = team;
+		assign.net_id = 0x0213;
+		assign.anim_slot = 0x2C;
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, packet);
+		return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	};
+	// The receive outside a frame's after-receive.
+	const std::vector<uint8_t> first = datagram_for(2);
+	h.role.runtime->receive(first.data(), first.size());
+	(void)h.role.runtime->Client_ProcessNetworkFrame(h.role.now_tick());
+	if (!expect(copied.empty(), "unmarked team assign: no leg runs outside an after-receive"))
+		return false;
+	// The frame's own receive.
+	const std::vector<uint8_t> second = datagram_for(1);
+	h.role.runtime->receive(second.data(), second.size());
+	h.role.run_tick(h.input);
+	return expect(copied == std::vector<uint8_t>{2, 1},
+			"unmarked team assign: the earlier receive's leg runs ahead of the frame's, each on its "
+			"own team");
+}
+
 bool run_a_grant_mount_request_queues_at_the_grants_place() {
 	bool ok = true;
 	for (const bool grant_first : {true, false}) {
@@ -5404,6 +5452,7 @@ int main() {
 	ok &= run_a_grant_behind_a_pickup_rebuilds_its_table();
 	ok &= run_a_team_assign_behind_a_grant_rebuilds_from_the_page();
 	ok &= run_two_team_assigns_each_run_on_their_own_side();
+	ok &= run_an_unmarked_team_assign_runs_ahead_of_the_frames();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();

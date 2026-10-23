@@ -1078,9 +1078,11 @@ public:
 	// The team the last self S2C 0x50 stored on the joiner's own entity (its leg 2,
 	// whether or not that entity is the local one yet) [orig: @0x4319EE].
 	uint8_t self_assigned_team() const { return self_assigned_team_; }
-	// Bumps on every S2C 0x50 whose local arm ran (the per-side reselect and the 0x2F)
-	// [orig: NapiNPClientMsg_TeamAssign @0x431A1B..0x431AAD].
-	uint64_t local_resubmit_revision() const { return local_resubmit_revision_; }
+	// The team of every S2C 0x50 whose local arm ran (the per-side reselect and the 0x2F) since
+	// the last drain, in arrival order, a receive outside a frame's (the push's final-wait pass)
+	// included; the embedder's after-receive runs one leg per entry, the frame's at their marks
+	// (receive_legs) [orig: NapiNPClientMsg_TeamAssign @0x431A1B..0x431AAD, once per message].
+	std::vector<uint8_t> drain_self_team_assigns() { return std::move(self_team_assigns_); }
 	// Roster slots whose bookkeeping the host cleared via S2C 0x46 bit15. Draining
 	// keeps it a one-shot; the associated ENTITY row is deliberately untouched
 	// (only S2C 0x5D retires an entity). [orig: @0x431411..0x43144c]
@@ -1492,7 +1494,7 @@ private:
 	uint64_t authoritative_spawn_release_revision_ = 0;
 	uint64_t self_team_revision_ = 0;           // S2C 0x50 self re-latch edges
 	uint8_t self_assigned_team_ = 0;            // self_assigned_team
-	uint64_t local_resubmit_revision_ = 0;      // local_resubmit_revision
+	std::vector<uint8_t> self_team_assigns_;    // drain_self_team_assigns
 	std::vector<uint8_t> cleared_player_slots_; // S2C 0x46 bit15 roster clears
 
 	// --- §5.44 per-frame housekeeping counters (P6) — mirror the witnessed per-instance globals of

@@ -1875,13 +1875,14 @@ void JoinerRole::apply_receive_writes(bool local_existed_before) {
 				[at](const ClientRuntime::ReceiveLeg &leg) { return leg.at == at; }));
 	};
 	if (rt.receive_loadout_grant_count() == 0) apply_grant(0);
-	const uint64_t local_resubmit_revision = rt.local_resubmit_revision();
-	const bool unmarked_team_assign = local_resubmit_revision > local_resubmit_revision_seen_ &&
-			marked(ClientRuntime::ReceiveMount::kSelfTeamAssign) == 0;
-	local_resubmit_revision_seen_ = std::max(local_resubmit_revision_seen_,
-			local_resubmit_revision);
-	if (unmarked_team_assign) {
-		apply_self_team_assign(rt.self_assigned_team());
+	// Every self 0x50 whose local arm ran since the last after-receive, the profile kit re-arm
+	// following the arm, not every self 0x50 (D-NET-572): the ones ahead of this frame's marks
+	// (a receive outside a frame's) each run here, with the team its arm read.
+	const std::vector<uint8_t> team_assigns = rt.drain_self_team_assigns();
+	const std::size_t unmarked_team_assigns = team_assigns.size() -
+			std::min(team_assigns.size(), marked(ClientRuntime::ReceiveMount::kSelfTeamAssign));
+	for (std::size_t i = 0; i < unmarked_team_assigns; ++i) {
+		apply_self_team_assign(team_assigns[i]);
 		flush_stance_requests();
 	}
 	const std::vector<WeaponPickupNotice> pickups = rt.drain_weapon_pickups();
@@ -2252,7 +2253,6 @@ void JoinerRole::reset_for_join() {
 	final_wait_seen_ = false;
 	final_wait_end_ = false;
 	deployment_release_revision_seen_ = 0;
-	local_resubmit_revision_seen_ = 0;
 	mounted_ammo_revision_seen_ = 0;
 	redeploy_release_pending_ = false;
 	redeploy_health_updates_at_release_ = 0;

@@ -363,7 +363,6 @@ public:
 	// re-arms and the receive-side cursors restart with it.
 	void reset_for_runtime_rebuild() {
 		started_ = false;
-		local_resubmit_revision_seen_ = 0;
 		weather_revision_seen_ = 0;
 		weapon_availability_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
@@ -561,9 +560,6 @@ private:
 	// join-time team arrives through the spawn, so only later edges apply here.
 	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the latch @0x4319db]
 	uint64_t self_team_revision_seen_ = 0;
-	// The S2C 0x50 local arms consumed (ClientRuntime::local_resubmit_revision): the
-	// profile kit re-arm follows the arm, not every self 0x50 (D-NET-572).
-	uint64_t local_resubmit_revision_seen_ = 0;
 	// Receive-once cursor for the conditional flags2&0x0f==8 mounted-ammo
 	// record. A stale net sample must not refill a locally firing gun each tick.
 	uint32_t mounted_ammo_revision_seen_ = 0;

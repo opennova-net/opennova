@@ -472,7 +472,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	self_assigned_team_ = 0;
 	local_dead_latch_ = false;
 	local_entity_health_ = 0;
-	local_resubmit_revision_ = 0;
+	self_team_assigns_.clear();
 	cleared_player_slots_.clear();
 	current_tick_ = 0;
 	last_keepalive_tick_ = 0;
@@ -1551,8 +1551,10 @@ bool ClientRuntime::client_receive_pass(std::vector<std::vector<uint8_t>> &outbo
 			++self_team_revision_;
 			self_assigned_team_ = pr.self_team;
 		}
-		// One per self 0x50, each handler's own re-run [orig: @0x431B14].
-		local_resubmit_revision_ += pr.local_resubmit_entries.size();
+		// One per self 0x50, each handler's own re-run, with the team its arm read
+		// [orig: @0x431A27, @0x431B14].
+		self_team_assigns_.insert(self_team_assigns_.end(), pr.local_resubmit_teams.begin(),
+				pr.local_resubmit_teams.end());
 		// S2C 0x46 bit15 — roster bookkeeping only; the entity row stays.
 		// [orig: PlayerSlot_ClearAndUnlink @0x434730 via @0x431411..0x43144c]
 		for (uint8_t slot : pr.cleared_player_slots)
