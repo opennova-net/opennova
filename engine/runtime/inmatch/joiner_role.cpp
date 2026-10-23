@@ -119,6 +119,7 @@ bool JoinerRole::bring_up() {
 	// (V-L2-s8) [orig: Game_StartMission @0x524360 - `mov g_RoundOver, ebx` @0x524A1F].
 	reset_for_load(runtime->deployment_release_revision());
 	stamp_mission_rules();
+	mirror_session_zoom_rule(); // the load's fresh world, ahead of its fill
 	kernel_->local.loadout.pending_player_class = -1; // the embedder re-applies the kit after each load
 	// The process's spawn buffer, which no start clears (world::SpawnLoadoutBuffer)
 	// [orig: g_SpawnLoadoutBuffer @0x24D4E00].
@@ -142,6 +143,28 @@ void JoinerRole::stamp_mission_rules() {
 	if (!kernel_ || !runtime) return;
 	apply_rules_word(kernel_->world, runtime->view().mp_attributes());
 	mp_attributes_revision_seen_ = runtime->mp_attributes_revision();
+}
+
+// The session's sniper-zoom rule is the S2C 0x08 flags dword's bit 16, a session byte the
+// handler stores at its receive. Each mission start's player sync carries the 0x08 (ahead of
+// the S2C 0x11 and the 0x1A), so the load's Player_InitPlayer fills the slots from it, as each
+// S2C 0x5A rebuild does: in a session on a peer WeaponSlot_InitFromDef reads that byte. Ours
+// folds the dword into the client state and mirrors the byte onto the world's rules after each
+// fold (the preload's passes, the head of the net frame's after-receive leg, ahead of its kit
+// apply) and onto the load's fresh world (bring_up), ahead of its fill (L2-s36 FOUND).
+// [orig: NapiNPClientMsg_HandleSessionConfig @0x4281D0 - the bit-16 store @0x42837A..0x428392;
+//  Server_SendPlayerSlotStateFrame @0x51BBA0 - ServerConfig_SerializeToPacket called @0x51BF95;
+//  Game_StartMission @0x524360 - NapiClient_SendPlayerSyncAndWaitForSyncTail @0x524DAB,
+//  NapiClient_WaitForGameStart @0x524E29, Player_InitPlayer @0x525BBC; Player_InitPlayer
+//  @0x4E15F0 - WeaponSlotTable_LoadAllFromDefs @0x4E1920; NapiNPClientMsg_HandleWeaponLoadoutSync
+//  @0x4290E0 - WeaponSlotTable_LoadAllFromDefs @0x4294FA; WeaponSlotTable_LoadAllFromDefs
+//  @0x5414E0 - WeaponSlot_InitFromDef @0x5415E4; WeaponSlot_InitFromDef @0x53EE70 -
+//  @0x53EF07..0x53EF17]
+void JoinerRole::mirror_session_zoom_rule() {
+	if (!kernel_ || !runtime) return;
+	world::World &world = kernel_->world;
+	world.rules.allow_sniper_scope_zoom = (runtime->state().session_rules_flags & 0x10000u) != 0;
+	world.rules.sniper_zoom_fill = world.rules.allow_sniper_scope_zoom; // an in-session peer
 }
 
 // --- the role's own legs ---------------------------------------------------
@@ -275,6 +298,7 @@ void JoinerRole::poll_preload() {
 	}
 	if (!first_send.empty()) send(first_send);
 	const std::vector<std::vector<uint8_t>> frame = runtime->Client_ProcessNetworkFrame(now_tick_);
+	mirror_session_zoom_rule(); // the player sync's S2C 0x08 lands in these passes
 	// The join's connect succeeded: a NovaWorld join sends PING to the gate's metrics address
 	// over the join's socket ahead of the JOIN (D-NET-NEW-L9-22).
 	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - the NovaWorld test @0x56A4D6,
@@ -1064,10 +1088,6 @@ void JoinerRole::pump() {
     // The joiner's own roster slot rides a fresh round id [orig:
     //  NapiNPClientMsg_SessionSlotConfig @0x4254A2 -> g_LocalPlayerSlotId].
     world.round_sim.local_slot_id = rt.local_player_slot();
-	// The session's sniper-zoom rule is the S2C 0x08 flags dword's bit 16
-	// [orig: NapiNPClientMsg_HandleSessionConfig @0x42837A..0x428392 -> byte_A821F0].
-	world.rules.allow_sniper_scope_zoom = (rt.state().session_rules_flags & 0x10000u) != 0;
-	world.rules.sniper_zoom_fill = world.rules.allow_sniper_scope_zoom; // an in-session peer
 	if (rt.mp_attributes_revision() != mp_attributes_revision_seen_) stamp_mission_rules();
     materializer_.fill_minefield_actors(rt.state(), self_wire_handle(), world.minefields.remote_actors);
 	stamp_spectator_motor(kernel, runtime.get(), /*joiner=*/true); // this frame's receive folded
@@ -1737,6 +1757,9 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	//  @0x4319DB / @0x4319EE, the local arm @0x431A35..0x431A9E; NapiNPClientMsg_0x00F
 	//  @0x42E200 - the hold clear @0x42E391, the pose stores @0x42E3B9..0x42E3F2]
 	const ClientRuntime::AfterReceive after_receive = [&] {
+		// The receive's S2C 0x08 byte, which a first grant's 0x5A slot rebuild (the kit apply
+		// below) fills from (mirror_session_zoom_rule).
+		mirror_session_zoom_rule();
 		// The host policy is installed before either the granted kit or side
 		// reseed can consult availability. A pre-load packet remains retained in
 		// ClientState until the first world frame reaches this boundary.

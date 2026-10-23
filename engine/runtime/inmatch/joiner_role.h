@@ -408,6 +408,9 @@ private:
 	void pump();
 	FrameSignals run_client_net_frame();
 	void wire_frame_providers();
+	// The S2C 0x08's sniper-zoom byte onto the world's rules: after each receive's fold and on
+	// the load's fresh world (bring_up), ahead of every slot fill.
+	void mirror_session_zoom_rule();
 	// The replica-world mirror and the authoritative appliers, through
 	// refresh_wire_collision_proxies (joiner_role_replica_world.cpp).
 	void materialize_replica_world();

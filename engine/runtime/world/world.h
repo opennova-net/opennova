@@ -776,7 +776,8 @@ struct SessionRules {
     // server_initial_state.cpp emits from the option); offline it stays 0, which
     // locks snipers at max. Hosts stamp it from GameConfig::allow_sniper_scope_zoom
     // (HostRole::apply_rule_words), joiners from their session-config bitflags
-    // (JoinerRole's frame); the slot fills read sniper_zoom_fill below.
+    // after each fold and on the load's fresh world (JoinerRole::mirror_session_zoom_rule);
+    // the slot fills read sniper_zoom_fill below.
     // [orig: Game_ApplySessionSettingsToGlobals @0x552284 (the reset) / @0x5522b9
     //  (the authority stamp); NapiNPClientMsg_HandleSessionConfig @0x428392;
     //  readers Player_AdjustWeaponElevation @0x4dbe36, Player_MountWeaponSlot

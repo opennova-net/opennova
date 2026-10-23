@@ -4466,6 +4466,91 @@ bool run_zoom_rule_follows_the_session_flags() {
 	return expect(!world.rules.allow_sniper_scope_zoom, "zoom rule: bit 16 clear locks it");
 }
 
+// A slot fill's scope seed for a class-6 owner on a Primary (category 3) def
+// ('scope_max_mag 10 2', 'scope_min_mag 1'), through the fill's own call with the
+// world's word (world::local_loadout_rebuild's): the initial magnification when the
+// session allows the zoom, the max (the sniper lock's floor) when it does not.
+// [orig: WeaponSlot_InitFromDef @0x53EE70 - the class / category tests @0x53EEF9 /
+//  @0x53EF02, the session byte @0x53EF07..0x53EF17, the seed @0x53EF27..0x53EF44]
+int32_t sniper_fill_zoom(const w::World &world) {
+	w::WeaponTable table;
+	table.ammo_class_names.emplace_back("");
+	table.ammo_class_caps.push_back(0);
+	w::WeaponTableEntry null_entry;
+	null_entry.name = "null";
+	null_entry.valid = true;
+	table.entries.push_back(null_entry);
+	w::WeaponTableEntry sniper;
+	sniper.name = "WPN_SNIPER";
+	sniper.valid = true;
+	sniper.category = 3;
+	sniper.scope_max_mag = 10;
+	sniper.scope_initial_mag = 2;
+	sniper.scope_min_mag = 1;
+	table.entries.push_back(sniper);
+	w::WeaponInventory inventory;
+	inventory.reset(table);
+	(void)w::weapon_inventory_load_from_display(table, {"WPN_SNIPER"}, inventory,
+			/*owner_class=*/6, world.rules.sniper_zoom_fill);
+	return inventory.slot(3 * 65)->scope_zoom;
+}
+
+// L2-s36 FOUND: the mission start's load fills L's slots from the session's S2C 0x08
+// byte, which the player sync landed ahead of the S2C 0x1A. The shell's load swaps in a
+// fresh kernel (one per load) and boots it; the boot's bring-up runs ahead of its weapon
+// table's fill, so a class-6 joiner on a zoom-allowed host starts its scope at the initial
+// magnification, and on a host that forbids it at the max.
+// [orig: Game_StartMission @0x524360 - NapiClient_SendPlayerSyncAndWaitForSyncTail
+//  @0x524DAB, Player_InitPlayer @0x525BBC; Player_InitPlayer @0x4E15F0 -
+//  WeaponSlotTable_LoadAllFromDefs @0x4E1920; WeaponSlotTable_LoadAllFromDefs @0x5414E0 -
+//  WeaponSlot_InitFromDef @0x5415E4; NapiNPClientMsg_HandleSessionConfig @0x4281D0 -
+//  @0x42837A..0x428392]
+bool run_the_loads_fill_reads_the_session_zoom_byte(uint32_t session_flags, int32_t zoom) {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.runtime->state().session_rules_flags = session_flags; // the player sync's 0x08
+	{
+		// The load's fresh kernel, bound ahead of its boot (Simulation::reset_world).
+		auto fresh = std::make_unique<mission::MissionKernel>();
+		fresh->world.registry.configure_pool(0, 16);
+		std::swap(h.kernel, fresh);
+		h.role.bind(*h.kernel);
+	}
+	(void)h.role.bring_up(); // the boot's bring-up, ahead of the weapon table's fill
+	const int32_t seeded = sniper_fill_zoom(h.kernel->world);
+	if (!expect(seeded == zoom, "load fill: the class-6 scope seeds from the session's 0x08 byte")) {
+		std::fprintf(stderr, "  flags 0x%x: zoom %d, expected %d\n",
+				static_cast<unsigned>(session_flags), seeded, zoom);
+		return false;
+	}
+	return true;
+}
+
+// The net frame's after-receive leg mirrors the byte ahead of its kit apply, so a first
+// grant's S2C 0x5A slot rebuild in the frame that runs it fills from the session's 0x08
+// (a fold no earlier mirror took).
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - WeaponSlotTable_LoadAllFromDefs
+//  @0x4294FA; WeaponSlot_InitFromDef @0x53EE70 - @0x53EF17]
+bool run_a_first_grants_fill_reads_the_session_zoom_byte() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.runtime->state().session_rules_flags = 0x10000u;
+	int32_t seeded = -1;
+	h.role.kit_seams.apply_authoritative = [&h, &seeded] {
+		seeded = sniper_fill_zoom(h.kernel->world);
+	};
+	h.role.run_tick(h.input);
+	if (!expect(seeded == 2, "first grant: the 0x5A rebuild's class-6 scope seeds from the 0x08")) {
+		std::fprintf(stderr, "  zoom %d, expected 2\n", seeded);
+		return false;
+	}
+	return true;
+}
+
 // D-NET-602: the role hands every runtime it creates the process's 0x4C count, a
 // rebuild included: a count standing at 300 reports on the 11th game-loop frame.
 // [orig: Client_ProcessNetworkFrame @0x42C180 - the step @0x42C22D..0x42C239, the
@@ -4568,6 +4653,9 @@ int main() {
 	ok &= run_alt_round_event_flies_its_ammo_byte();
 	ok &= run_round_event_needs_a_resolved_shooter();
 	ok &= run_zoom_rule_follows_the_session_flags();
+	ok &= run_the_loads_fill_reads_the_session_zoom_byte(0x10000u, 2);
+	ok &= run_the_loads_fill_reads_the_session_zoom_byte(0x8000u, 10);
+	ok &= run_a_first_grants_fill_reads_the_session_zoom_byte();
 	ok &= run_role_runtimes_step_the_process_report_count();
 	ok &= run_the_settle_materializes_the_world_stream();
 	ok &= run_a_full_spawn_row_loads_its_def();
