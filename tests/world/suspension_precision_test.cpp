@@ -134,6 +134,31 @@ void test_the_fit_reads_the_edge_normalized_twice() {
 			"the side axis is untouched");
 }
 
+// The normalize divides first: k = 65536 over the length once, then each component times k,
+// truncated. An axis vector of length 131019 or -425 then reads 65535 / -65535 at 24, 53 and 64
+// bits alike, where a multiply-first `v * 65536 / length` reads 65536 / -65536 at every length;
+// a vector clear of the edge, (3000, 4000, 0), reads (39321, 52428, 0) either way, and a zero
+// vector all 0.
+// [orig: Vehicle_ComputeOrientationFrom4Wheels @0x459310 (`fdivr st, st(5)` @0x4593A6 over
+//  flt_7C32BC); Entity_ComputeSuspensionOrientation @0x46C8E0 (`fdivrp st(3), st` @0x46C9C1);
+//  Entity_ApplyBoneAttachmentTransform @0x45A750 (@0x45A8A8)]
+void test_the_normalize_divides_first() {
+	int32_t out[3];
+	const int64_t axis[3] = { 131019, 0, 0 };
+	detail::q16_normalize(axis, out);
+	CHECK(out[0] == 65535 && out[1] == 0 && out[2] == 0, "131019 along x reads 65535");
+	const int64_t short_axis[3] = { 0, -425, 0 };
+	detail::q16_normalize(short_axis, out);
+	CHECK(out[0] == 0 && out[1] == -65535 && out[2] == 0, "-425 along y reads -65535");
+	const int64_t clear[3] = { 3000, 4000, 0 };
+	detail::q16_normalize(clear, out);
+	CHECK(out[0] == 39321 && out[1] == 52428 && out[2] == 0,
+			"(3000, 4000, 0) reads (39321, 52428, 0)");
+	const int64_t zero[3] = { 0, 0, 0 };
+	detail::q16_normalize(zero, out);
+	CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0, "a zero vector reads 0");
+}
+
 } // namespace
 
 int main() {
@@ -143,6 +168,7 @@ int main() {
 	test_the_bounding_quad();
 	test_the_square_quad();
 	test_the_fit_reads_the_edge_normalized_twice();
+	test_the_normalize_divides_first();
 	if (failures == 0) std::printf("suspension_precision: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
