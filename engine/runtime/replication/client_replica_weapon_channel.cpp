@@ -194,8 +194,12 @@ void ClientReplicaPipeline::advance_row_weapon_channel(ClientEntityState &es,
 }
 
 void ClientReplicaPipeline::select_row_weapon_channels(uint16_t self_handle, uint32_t tick) {
+	// The selection is the org2 update's own: a person whose bound move row the walk took
+	// elsewhere (person_takes_item_row) runs none.
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472]
 	for (ClientEntityState &es : state_.entities)
-		if (!es.rm_parked) select_row_weapon_channel(es, self_handle, tick);
+		if (!es.rm_parked && !person_takes_item_row(es, self_handle))
+			select_row_weapon_channel(es, self_handle, tick);
 }
 
 void ClientReplicaPipeline::select_row_weapon_channel(ClientEntityState &es,

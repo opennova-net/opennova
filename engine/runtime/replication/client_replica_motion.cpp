@@ -1269,6 +1269,15 @@ std::optional<world::PhysicsClass> ClientReplicaPipeline::person_move_row(uint16
 	return world::physics_class_from_move_function(profile->callbacks.move_function);
 }
 
+bool ClientReplicaPipeline::person_takes_item_row(const ClientEntityState &es,
+		uint16_t self_handle) const {
+	if (es.handle == self_handle || world::EntityHandle{es.handle}.pool() != 0 ||
+			(es.cls != EntityClass::Player && es.cls != EntityClass::Infantry))
+		return false;
+	const std::optional<world::PhysicsClass> row = person_move_row(es.type_id);
+	return row && *row != world::PhysicsClass::Org1 && *row != world::PhysicsClass::Org2;
+}
+
 // One row's whole visit in the body walk: its secondary channel, then its family's
 // chase, death edge, deck ride and root motion (tick_remote_motion's walk order).
 void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t self_handle,
@@ -1321,20 +1330,17 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	// own row is its World body's (L runs the World's update).
 	// [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472;
 	//  Entity_UpdateTransformAndTurret @0x440CA0 - Entity_Destroy @0x440E2F]
-	if (es.handle != self_handle && world::EntityHandle{es.handle}.pool() == 0 &&
-			(es.cls == EntityClass::Player || es.cls == EntityClass::Infantry)) {
-		const std::optional<world::PhysicsClass> row = person_move_row(es.type_id);
-		if (row && *row != world::PhysicsClass::Org1 && *row != world::PhysicsClass::Org2) {
-			if (*row == world::PhysicsClass::Ewep && person_ewep_mover_ && person_ewep_mover_(es)) {
-				// The stale-ground leg: the ground's C2S 0x0F, then the body's, and the body's
-				// destroy, the row leaving after the walk.
-				// [orig: @0x440DAB, @0x440E29, Entity_Destroy @0x440E2F]
-				queue_carrier_repair(es.resolved_ground);
-				queue_carrier_repair(es.handle);
-				remote_motion_expired_.emplace_back(es.handle, false);
-			}
-			return;
+	if (person_takes_item_row(es, self_handle)) {
+		if (person_move_row(es.type_id) == world::PhysicsClass::Ewep && person_ewep_mover_ &&
+				person_ewep_mover_(es)) {
+			// The stale-ground leg: the ground's C2S 0x0F, then the body's, and the body's
+			// destroy, the row leaving after the walk.
+			// [orig: @0x440DAB, @0x440E29, Entity_Destroy @0x440E2F]
+			queue_carrier_repair(es.resolved_ground);
+			queue_carrier_repair(es.handle);
+			remote_motion_expired_.emplace_back(es.handle, false);
 		}
+		return;
 	}
 	advance_row_weapon_channel(es, self_handle);
 	if (!es.net_has_compact) return;

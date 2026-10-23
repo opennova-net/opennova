@@ -356,6 +356,9 @@ public:
 	// The bound move row of a person row's type, by the def's move_function; none without a
 	// catalog entry (the row keeps its class's chase).
 	std::optional<world::PhysicsClass> person_move_row(uint16_t type_id) const;
+	// Whether the walk runs a decoded person row's bound move row in place of the org chases (a
+	// pool-0 Player / Infantry row other than the joiner's own whose row is neither org1 nor org2).
+	bool person_takes_item_row(const ClientEntityState &es, uint16_t self_handle) const;
 	// The ride link's ground words: the embedder's entity at a ground handle,
 	// its occupant (+0x170) and its own ground entity (+0x28) as wire
 	// handles (0xFFFF for none); false where it has no entity there. A remote
