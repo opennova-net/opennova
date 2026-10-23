@@ -1538,13 +1538,17 @@ void compare_milestones(const RunFacts &rr, const RunFacts &other, std::vector<M
 	out.push_back(order);
 }
 
-// The steady window's time a run's joiner lay dead through `end`: from each S2C 0x13
-// naming its body (the modal uplink handle) to its next uplink, else to `end`. The 0x13
-// zeroes the body's Health [orig: NapiNPClientMsg_EntityDeath @0x42EB50 (the store
-// @0x42EBD6)] and the uplink builder refuses a Health of 0 [orig:
-// Player_BuildTag0CInputBody @0x42A550 (@0x42A58F)] until the respawn's body sends
-// (window.alive_span).
-uint64_t dead_span_ns(const RunFacts &run, uint64_t end) {
+// The joiner's own C2S 0x0C send rate through `end` (window.alive_span). Each S2C 0x13
+// naming its body (the modal uplink handle) zeroes the body's Health [orig:
+// NapiNPClientMsg_EntityDeath @0x42EB50 (the store @0x42EBD6)] and the uplink builder
+// refuses a Health of 0 [orig: Player_BuildTag0CInputBody @0x42A550 (@0x42A58F)] until
+// the respawn's body sends, so each such 0x13 ends a stretch of sends. The rate is the
+// intervals between consecutive sends inside the stretches over their spans; where the
+// window opens ahead of the first send, or a stretch ends (its 0x13, else `end`) past
+// its last, a gap longer than one send period is a stall and joins the span, and one
+// period or less is the edge's phase against the send clock. Fewer than two sends in
+// every stretch leaves the count over the window. Returns -1 with no send at all.
+double alive_send_rate(const RunFacts &run, uint64_t end, double seconds) {
 	static_assert(has_normalization("window.alive_span"));
 	std::map<uint32_t, size_t> handles;
 	std::vector<uint64_t> sends;
@@ -1555,7 +1559,7 @@ uint64_t dead_span_ns(const RunFacts &run, uint64_t end) {
 		sends.push_back(state.ts_ns);
 	}
 	if (handles.empty())
-		return 0;
+		return -1.0;
 	uint32_t own = 0;
 	size_t most = 0;
 	for (const auto &entry : handles)
@@ -1564,18 +1568,48 @@ uint64_t dead_span_ns(const RunFacts &run, uint64_t end) {
 			most = entry.second;
 		}
 	std::sort(sends.begin(), sends.end());
-	uint64_t dead = 0, resumed = 0;
+	std::vector<uint64_t> deaths;
 	for (const wire::ParityEvent &event : run.trace.events) {
 		if (event.dir != 'S' || event_identity(event) != 0x013 || event.body.size() < 2 ||
-				!run.in_steady(event.ts_ns) || event.ts_ns > end || event.ts_ns < resumed)
+				!run.in_steady(event.ts_ns) || event.ts_ns > end)
 			continue;
-		if (uint32_t(event.body[0] | (event.body[1] << 8)) != own)
-			continue;
-		const auto next = std::upper_bound(sends.begin(), sends.end(), event.ts_ns);
-		resumed = next != sends.end() ? *next : end;
-		dead += resumed - event.ts_ns;
+		if (uint32_t(event.body[0] | (event.body[1] << 8)) == own)
+			deaths.push_back(event.ts_ns);
 	}
-	return dead;
+	std::sort(deaths.begin(), deaths.end());
+	// Each stretch: its first and last send and where it stops.
+	struct Stretch {
+		size_t first, last;
+		uint64_t stop;
+	};
+	std::vector<Stretch> stretches;
+	size_t begin = 0;
+	for (size_t i = 1; i <= sends.size(); ++i) {
+		const auto death = std::upper_bound(deaths.begin(), deaths.end(), sends[i - 1]);
+		const bool cut = death != deaths.end() && (i == sends.size() || *death < sends[i]);
+		if (i < sends.size() && !cut)
+			continue;
+		stretches.push_back({ begin, i - 1, cut ? *death : end });
+		begin = i;
+	}
+	size_t intervals = 0;
+	double span = 0.0;
+	for (const Stretch &s : stretches) {
+		intervals += s.last - s.first;
+		span += double(sends[s.last] - sends[s.first]) / 1e9;
+	}
+	if (intervals == 0 || span <= 0.0)
+		return double(sends.size()) / seconds;
+	const double period = span / double(intervals);
+	auto stall = [period](uint64_t from, uint64_t to) {
+		return to > from ? std::max(0.0, double(to - from) / 1e9 - period) : 0.0;
+	};
+	const uint64_t lead_end =
+			deaths.empty() ? sends.front() : std::min(sends.front(), deaths.front());
+	span += stall(run.info.steady_start_ns, lead_end);
+	for (const Stretch &s : stretches)
+		span += stall(sends[s.last], std::min(s.stop, end));
+	return double(intervals) / span;
 }
 
 void compare_rates(
@@ -1602,14 +1636,10 @@ void compare_rates(
 		const uint64_t end = coverage_end(run);
 		double samples = 0.0;
 		if (dir == 'C') {
-			for (const wire::ParityUplinkState &state : run.trace.uplinks)
-				samples += state.decoded && run.in_steady(state.ts_ns) && state.ts_ns <= end
-						? 1.0
-						: 0.0;
-			// The joiner's uplinks per second alive (window.alive_span).
-			const double alive = seconds(run, end) - double(dead_span_ns(run, end)) / 1e9;
-			if (alive > 0.0)
-				return samples / alive;
+			// The joiner's own send rate while it lived (window.alive_span).
+			const double rate = alive_send_rate(run, end, seconds(run, end));
+			if (rate >= 0.0)
+				return rate;
 		} else {
 			for (const wire::ParityFrameState &state : run.trace.frames)
 				samples += state.decoded && run.in_steady(state.ts_ns) && state.ts_ns <= end
@@ -1632,7 +1662,7 @@ void compare_rates(
 	cadence.floor = 0.20;
 	cadence.subject = render_number(std::round(gb * 10) / 10) + "/s";
 	cadence.reference = render_number(std::round(ga * 10) / 10) + "/s";
-	cadence.detail = dir == 'C' ? "decoded C2S 0x0C uplinks per steady second the joiner lived"
+	cadence.detail = dir == 'C' ? "the joiner's C2S 0x0C send rate while it lived"
 								: "decoded S2C 0x0A frames per steady second";
 	out.push_back(cadence);
 }

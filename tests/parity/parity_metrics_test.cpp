@@ -1723,6 +1723,46 @@ void test_milestones_and_rates() {
 		const Case q = judge_case(killed(1, 9 * kSec), killed(2, 9 * kSec), quiet);
 		expect_row(q, 'C', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
 	}
+	{
+		// x10 / x11's aikill: the joiner sends one uplink per 0.19 s and dies 1.3 to 1.9 s into
+		// the window. x10's RR sent 7 from 166 ms, the last 186 ms before its 0x13 (1508 ms);
+		// x11's OO sent 8 from 60 ms, the last 5 ms before its 0x13 (1394 ms): 4.64 against
+		// 5.74 /s over each span alive, the edges' phase against the send clock. The sends'
+		// own rate compares (window.alive_span).
+		auto brief = [](uint32_t seed, uint64_t first, size_t sends, uint64_t death,
+							 uint64_t period) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<wire::ParityUplinkState> kept;
+			wire::ParityUplinkState model;
+			for (const wire::ParityUplinkState &u : trace.uplinks) {
+				if (u.ts_ns < kSteadyStart)
+					kept.push_back(u);
+				else
+					model = u;
+			}
+			for (size_t k = 0; k < sends; ++k) {
+				model.ts_ns = kSteadyStart + first + k * period;
+				kept.push_back(model);
+			}
+			trace.uplinks = std::move(kept);
+			splice(trace, 'S', 0x013, kSteadyStart + death, bytes({ 0x00, 0x10, 0x00, 0x00 }));
+			return trace;
+		};
+		const Case edges = judge_case(brief(1, 166 * kMs, 7, 1508 * kMs, 190 * kMs),
+				brief(2, 151 * kMs, 8, 1540 * kMs, 190 * kMs),
+				brief(3, 60 * kMs, 8, 1394 * kMs, 190 * kMs), "OO");
+		expect_row(edges, 'C', "gameplay_cadence", "", "pass");
+		// A joiner sending at another rate still fails: one per 0.27 s.
+		expect_row(judge_case(brief(1, 166 * kMs, 7, 1508 * kMs, 190 * kMs),
+						   brief(2, 151 * kMs, 8, 1540 * kMs, 190 * kMs),
+						   brief(3, 60 * kMs, 5, 1394 * kMs, 270 * kMs), "OO"),
+				'C', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
+		// So does one silent for a second before its death.
+		expect_row(judge_case(brief(1, 166 * kMs, 7, 1508 * kMs, 190 * kMs),
+						   brief(2, 151 * kMs, 8, 1540 * kMs, 190 * kMs),
+						   brief(3, 60 * kMs, 4, 1900 * kMs, 190 * kMs), "OO"),
+				'C', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
+	}
 }
 
 void test_state() {
