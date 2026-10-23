@@ -120,7 +120,7 @@ CollisionMatrix four_wheel_orientation(const int32_t c[4][3]) {
 // lean_velocity*0.01) and scaleFactor=1 (unclamped error/8192).
 // [orig: Entity_SmoothHeadingToTarget @0x45B2C0 (IDB name; the bike lean —
 //  its sole caller is Entity_ProcessLightVehiclePhysics @0x479600, site
-//  @0x47A7B1..0x47A7D3). The boat servo is Vehicle_UpdateTurretRotation
+//  @0x47A7B1..0x47A7D3). The boat servo is Vehicle_UpdateBoatLean
 //  @0x45AEA0 below.]
 void vehicle_bike_lean(Entity &e, const VehicleTraits &t, int32_t error) {
 	auto &m = e.veh;
@@ -179,9 +179,8 @@ void vehicle_bike_lean(Entity &e, const VehicleTraits &t, int32_t error) {
 
 // Planing boats retain both the lean acceleration and the error interval
 // used to decelerate it. The +470 interval is deliberately a 16-bit store.
-// [orig: IDB: Vehicle_UpdateTurretRotation @0x45AEA0 (a misnomer — the boat
-//  lean servo; its sole caller is Entity_ProcessPlatformPhysics @0x481870,
-//  site @0x4838CF)]
+// [orig: Vehicle_UpdateBoatLean @0x45AEA0 (its sole caller is Entity_ProcessPlatformPhysics
+//  @0x481870, site @0x4838CF)]
 // Platform capsize latch and righting feed the retained chassis state.
 // [orig: @0x483474..0x48348B, @0x4835DA..0x48367D]
 void vehicle_boat_lean(Entity &e, const VehicleTraits &traits, int32_t error) {

@@ -1403,7 +1403,7 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 // Bike/light contact uses two wheel probes, three spine probes and one mid-hull probe. The two-
 // corner axle fit preserves roll continuity and mean wheel height. Rider ejection, wheelie, spring
 // and tumble state retain the family gates. The bike lean helper is Entity_SmoothHeadingToTarget
-// at 0x45B2C0 (sole caller @0x47A7D3; Vehicle_UpdateTurretRotation @0x45AEA0 is the boat's, sole
+// at 0x45B2C0 (sole caller @0x47A7D3; Vehicle_UpdateBoatLean @0x45AEA0 is the boat's, sole
 // caller @0x4838CF). See vehicle-client-movers-re.md sections 9 and 12-32.
 // Witness sites: [orig: @0x479600, @0x483FE0, @0x486672, @0x48eff4, @0x468A50, @0x468D34,
 // @0x47A343, @0x45CFB0, @0x45D110, @0x45B2C0, @0x47a7d3]
