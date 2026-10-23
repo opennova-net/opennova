@@ -126,6 +126,16 @@ struct TerrainStaticShadowRasterStats {
 	uint64_t absorbed_blocks = 0;
 	// Black temp pixels skipped inside a live block.
 	uint64_t absorbed_pixels = 0;
+	// Wall time of the raster's stages, microseconds (an instrument): the temp's fill, the
+	// triangles' setup on the lanes, the pixel loop on the lanes, and the resolve. The pixel
+	// loop also sums its lanes' own times and keeps the slowest lane's: their ratio is the
+	// parallelism the lane pool gave it.
+	uint64_t setup_us = 0;
+	uint64_t prepare_us = 0;
+	uint64_t pixel_us = 0;
+	uint64_t pixel_lane_sum_us = 0;
+	uint64_t pixel_lane_max_us = 0;
+	uint64_t resolve_us = 0;
 };
 
 struct TerrainStaticShadowRasterInput {

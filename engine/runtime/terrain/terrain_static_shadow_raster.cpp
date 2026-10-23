@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <new>
@@ -436,10 +437,18 @@ struct LiveBlocks {
 };
 
 // One lane's counts on a cache line of its own (the lanes bump them per
-// fragment).
+// fragment), and its pixel loop's own wall time.
 struct alignas(64) LaneStats {
 	TerrainStaticShadowRasterStats counts;
+	uint64_t elapsed_us = 0;
 };
+
+using RasterClock = std::chrono::steady_clock;
+
+uint64_t microseconds_since(RasterClock::time_point started) noexcept {
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+			RasterClock::now() - started).count());
+}
 
 // The pixel loop of one prepared triangle over rows [row_begin, row_end).
 void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
@@ -591,6 +600,7 @@ bool rasterize_terrain_static_shadow_alpha(
 		const TerrainStaticShadowRasterInput &input,
 		TerrainStaticShadowAlphaPage &page) noexcept {
 	if (!validate(input, page)) return false;
+	const RasterClock::time_point setup_started = RasterClock::now();
 	const uint32_t high_width = page.width * kTemporaryScale;
 	const uint32_t high_height = page.height * kTemporaryScale;
 	const std::size_t high_count =
@@ -621,6 +631,8 @@ bool rasterize_terrain_static_shadow_alpha(
 		}
 	}
 
+	const uint64_t setup_us = microseconds_since(setup_started);
+	const RasterClock::time_point prepare_started = RasterClock::now();
 	// Every fan triangle, set up once in input order: lane k prepares the
 	// k-th contiguous run of the input, and the runs are walked in lane order.
 	const std::size_t lanes = input.triangles.size() >= kParallelMinimumTriangles
@@ -669,10 +681,13 @@ bool rasterize_terrain_static_shadow_alpha(
 		return false;
 	}
 
+	const uint64_t prepare_us = microseconds_since(prepare_started);
+	const RasterClock::time_point pixel_started = RasterClock::now();
 	// Each pixel's fragments arrive in triangle order however the rows are
 	// split, so the stripes below produce the serial loop's bytes exactly.
 	std::vector<LaneStats> lane_stats(lanes);
 	run_row_stripe_lanes(lanes, [&](std::size_t lane) noexcept {
+		const RasterClock::time_point lane_started = RasterClock::now();
 		TerrainStaticShadowRasterStats &stats = lane_stats[lane].counts;
 		for (const std::vector<PreparedTriangle> &prepared : runs) {
 			for (const PreparedTriangle &triangle : prepared) {
@@ -683,14 +698,10 @@ bool rasterize_terrain_static_shadow_alpha(
 						});
 			}
 		}
+		lane_stats[lane].elapsed_us = microseconds_since(lane_started);
 	});
-	if (input.stats != nullptr) {
-		for (const LaneStats &lane : lane_stats) {
-			input.stats->fragments += lane.counts.fragments;
-			input.stats->absorbed_blocks += lane.counts.absorbed_blocks;
-			input.stats->absorbed_pixels += lane.counts.absorbed_pixels;
-		}
-	}
+	const uint64_t pixel_us = microseconds_since(pixel_started);
+	const RasterClock::time_point resolve_started = RasterClock::now();
 
 	for (uint32_t y = 0; y < page.height; ++y) {
 		for (uint32_t x = 0; x < page.width; ++x) {
@@ -707,6 +718,20 @@ bool rasterize_terrain_static_shadow_alpha(
 		}
 	}
 	page.alpha.swap(resolved);
+	if (input.stats != nullptr) {
+		for (const LaneStats &lane : lane_stats) {
+			input.stats->fragments += lane.counts.fragments;
+			input.stats->absorbed_blocks += lane.counts.absorbed_blocks;
+			input.stats->absorbed_pixels += lane.counts.absorbed_pixels;
+			input.stats->pixel_lane_sum_us += lane.elapsed_us;
+			input.stats->pixel_lane_max_us = std::max(input.stats->pixel_lane_max_us,
+					lane.elapsed_us);
+		}
+		input.stats->setup_us += setup_us;
+		input.stats->prepare_us += prepare_us;
+		input.stats->pixel_us += pixel_us;
+		input.stats->resolve_us += microseconds_since(resolve_started);
+	}
 	return true;
 }
 

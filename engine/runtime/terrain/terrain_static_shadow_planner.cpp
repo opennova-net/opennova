@@ -637,6 +637,10 @@ bool TerrainStaticShadowPlanner::rasterize(const TerrainTilePageKey &page,
 			}
 		}
 		input.triangles.resize(triangle_total);
+		diagnostics_.frame_triangle_walk_us += static_cast<uint64_t>(
+				std::chrono::duration_cast<std::chrono::microseconds>(
+						std::chrono::steady_clock::now() - build_started)
+						.count());
 
 		struct LaneResult {
 			bool failed = false;

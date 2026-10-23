@@ -273,6 +273,8 @@ void TerrainTileCacheDevice::clear() {
 	frame_compose_page_us_ = 0;
 	frame_compose_shadow_plan_us_ = 0;
 	frame_compose_shadow_build_us_ = 0;
+	frame_compose_shadow_walk_us_ = 0;
+	frame_compose_raster_ = {};
 	frame_compose_wait_us_ = 0;
 	frame_upload_us_ = 0;
 	frame_uploads_ = 0;
@@ -298,6 +300,8 @@ void TerrainTileCacheDevice::begin_frame(uint64_t p_frame_id, uint32_t p_tod_epo
 	frame_compose_page_us_ = 0;
 	frame_compose_shadow_plan_us_ = 0;
 	frame_compose_shadow_build_us_ = 0;
+	frame_compose_shadow_walk_us_ = 0;
+	frame_compose_raster_ = {};
 	frame_compose_wait_us_ = 0;
 	frame_upload_us_ = 0;
 	frame_uploads_ = 0;
@@ -502,6 +506,19 @@ void TerrainTileCacheDevice::_upload_completed() {
 		frame_compose_shadow_plan_us_ += completion.shadow_plan_us;
 		frame_compose_shadow_build_us_ +=
 				completion.shadow_diagnostics.frame_triangle_build_us;
+		frame_compose_shadow_walk_us_ +=
+				completion.shadow_diagnostics.frame_triangle_walk_us;
+		{
+			const opennova::terrain::TerrainStaticShadowRasterStats &raster =
+					completion.shadow_diagnostics.frame_raster;
+			frame_compose_raster_.setup_us += raster.setup_us;
+			frame_compose_raster_.prepare_us += raster.prepare_us;
+			frame_compose_raster_.pixel_us += raster.pixel_us;
+			frame_compose_raster_.pixel_lane_sum_us += raster.pixel_lane_sum_us;
+			frame_compose_raster_.pixel_lane_max_us =
+					std::max(frame_compose_raster_.pixel_lane_max_us, raster.pixel_lane_max_us);
+			frame_compose_raster_.resolve_us += raster.resolve_us;
+		}
 		const opennova::TerrainTileCompositionJob &job = completion.job;
 		// Validate the claim before touching its Texture2DArray layer. The cache
 		// is render-thread-owned, so it cannot become stale between this check
@@ -797,6 +814,20 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 			static_cast<int64_t>(frame_compose_shadow_plan_us_);
 	diagnostics["frame_compose_shadow_build_us"] =
 			static_cast<int64_t>(frame_compose_shadow_build_us_);
+	diagnostics["frame_compose_shadow_walk_us"] =
+			static_cast<int64_t>(frame_compose_shadow_walk_us_);
+	diagnostics["frame_compose_raster_setup_us"] =
+			static_cast<int64_t>(frame_compose_raster_.setup_us);
+	diagnostics["frame_compose_raster_prepare_us"] =
+			static_cast<int64_t>(frame_compose_raster_.prepare_us);
+	diagnostics["frame_compose_raster_pixel_us"] =
+			static_cast<int64_t>(frame_compose_raster_.pixel_us);
+	diagnostics["frame_compose_raster_pixel_lane_sum_us"] =
+			static_cast<int64_t>(frame_compose_raster_.pixel_lane_sum_us);
+	diagnostics["frame_compose_raster_pixel_lane_max_us"] =
+			static_cast<int64_t>(frame_compose_raster_.pixel_lane_max_us);
+	diagnostics["frame_compose_raster_resolve_us"] =
+			static_cast<int64_t>(frame_compose_raster_.resolve_us);
 	diagnostics["frame_compose_wait_us"] =
 			static_cast<int64_t>(frame_compose_wait_us_);
 	diagnostics["frame_upload_us"] = static_cast<int64_t>(frame_upload_us_);

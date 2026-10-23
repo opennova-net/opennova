@@ -99,8 +99,11 @@ struct TerrainStaticShadowPlannerDiagnostics {
 	uint64_t frame_raster_count = 0;
 	uint64_t frame_triangles = 0;
 	// Wall time spent projecting the plan's triangles for the raster (the
-	// serial setup ahead of rasterize_terrain_static_shadow_alpha).
+	// serial setup ahead of rasterize_terrain_static_shadow_alpha), and its serial head: the
+	// walk over the plan's draws (the casters' material states, the texture slots and the
+	// triangles' layout) ahead of the lanes' projection (an instrument).
 	uint64_t frame_triangle_build_us = 0;
+	uint64_t frame_triangle_walk_us = 0;
 	uint64_t frame_alpha_test_triangles = 0;
 	std::array<uint64_t, 4> frame_blend_triangles{};
 	// The pixel loop's work (TerrainStaticShadowRasterStats): fragments that

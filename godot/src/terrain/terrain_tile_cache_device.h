@@ -210,6 +210,10 @@ private:
 	// then the main thread's own wall time: the wait on the pool and the
 	// completed pages' uploads.
 	uint64_t frame_compose_shadow_build_us_ = 0;
+	// The build's serial walk and the raster's stages, summed per page (an instrument:
+	// TerrainStaticShadowPlannerDiagnostics::frame_triangle_walk_us, TerrainStaticShadowRasterStats).
+	uint64_t frame_compose_shadow_walk_us_ = 0;
+	opennova::terrain::TerrainStaticShadowRasterStats frame_compose_raster_{};
 	uint64_t frame_compose_wait_us_ = 0;
 	uint64_t frame_upload_us_ = 0;
 	uint64_t frame_uploads_ = 0;
