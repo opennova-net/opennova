@@ -1227,6 +1227,11 @@ void ParticleRenderer::clear_warm_pipelines() {
 	warm_nodes_.clear();
 }
 
+void ParticleRenderer::clear_draws() {
+	if (impl_)
+		impl_->clear_draws();
+}
+
 void ParticleRenderer::shutdown() {
 	if (shutdown_)
 		return;

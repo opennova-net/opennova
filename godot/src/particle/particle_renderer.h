@@ -114,6 +114,10 @@ public:
 	// quads and cancels an unserviced compositor request.
 	void warm_pipelines(const Vector3 &p_position);
 	void clear_warm_pipelines();
+	// Retires every published submission (both camera views, the far passes,
+	// the first-person batch, the distortion row) until the next render_now:
+	// what a reset scene leaves draws nothing (EffectWorld::reset_runtime_state).
+	void clear_draws();
 	// Process-exit boundary for compositor callbacks and device-owned effects.
 	// EXIT_TREE calls it too; the retired effects and the latch it leaves
 	// behind are undone by the next ENTER_TREE (fresh effects, latch cleared),

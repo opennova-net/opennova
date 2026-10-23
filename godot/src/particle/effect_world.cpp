@@ -266,6 +266,11 @@ void EffectWorld::reset_runtime_state() {
 	next_token_ = 1;
 	if (ParticleRenderer *renderer = _renderer()) {
 		renderer->clear_warm_pipelines();
+		// The reset scene draws nothing until the next render_now. A load's warm ends here,
+		// and a join's waits and loading presents run no particle frame after it: the warm's
+		// last submission must not stay on the camera's compositor through them (engine
+		// runtime/hud/loading_screen.h carries the witness, D-NET-NEW-L2-45).
+		renderer->clear_draws();
 	}
 	scene_->reset_runtime_state();
 }

@@ -128,6 +128,19 @@ inline bool loading_present_due(int elapsed_ms, bool reported_changed) {
 	return elapsed_ms >= kLoadingPresentIntervalMs || reported_changed;
 }
 
+// What a present draws: the screen and its bar alone. It clears, draws the screen and the
+// bar, and presents; no world pass and no particle pass runs in it. The join's waits draw no
+// more: the sync-tail wait's pass and the world stream's 0x0D / 0x10 records present this
+// screen at its stored checkpoint, the game-start wait's pass draws nothing. So no particle a
+// load's warm drew is drawn again until the mission's own frames: the device side retires a
+// reset effect scene's submissions (D-NET-NEW-L2-45).
+// [orig: LoadingScreen_UpdateAndPresent @0x586be0 - Clear @0x586c5a, the screen @0x586c64,
+//  the bar @0x586cd0, Present @0x586d53; LoadingScreen_PresentStoredProgress @0x586d70 (slot
+//  15 of the screen's vtable with this[8], the checkpoint the present stores @0x586c32);
+//  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42cb20 - the call @0x42cb79;
+//  NapiNPClientMsg_0x00D @0x432c40 - the call @0x433236; NapiNPClientMsg_0x010 @0x433400 -
+//  the call @0x43342b; NapiClient_WaitForGameStart @0x42cc10 - the pass @0x42cc67..0x42ccbf]
+
 // The composited resources: the stock background when the mission has no
 // sidecar image [orig: "loadscrn.pcx" @ 0x521e20], the two text fonts
 // [orig: "Arials18.fnt" @ 0x521eec, "Arial22.fnt" @ 0x521f5a], and the

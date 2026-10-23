@@ -621,6 +621,46 @@ func test_render_now_submits_a_freshly_advanced_warm_snapshot() -> void:
 			"the public warm facade synchronously submits non-empty material runs")
 
 
+# A load's warm ends in the reset: its last submission leaves the camera's compositor with the
+# warm's spawns, so a join's waits and loading presents (whose frames run no render_now) draw
+# no particle; retail's presents draw the loading screen alone (engine
+# runtime/hud/loading_screen.h carries the witness, D-NET-NEW-L2-45).
+func test_a_reset_retires_the_published_particle_submission() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var world := EffectWorld.new()
+	viewport.add_child(world)
+	world.load_particle_file(_make_renderable_effect_file())
+	assert_gt(world.spawn_effect("puff", Vector3.ZERO), 0)
+	world.advance_fixed_tick(Simulation.tick_dt())
+	assert_gt(world.render_now(GameWorld.current_frame_clock_ms()), 0)
+	var drawn := world.get_debug_draw_list_report()
+	assert_true(bool(drawn.get("world_compositor_attached", false)))
+	var published := int((drawn.get("world_camera_backend", {}) as Dictionary).get(
+			"submitted_commands", 0)) + int(drawn.get("world_far_render_runs", 0))
+	assert_gt(published, 0, "the render publishes the warm spawn to the camera's view")
+
+	world.reset_runtime_state()
+	var reset := world.get_debug_draw_list_report()
+	assert_true((reset.get("world_camera_side", {}) as Dictionary).is_empty())
+	assert_true((reset.get("world_far_side", {}) as Dictionary).is_empty())
+	assert_eq(int(reset.get("world_far_render_runs", -1)), 0)
+	for key in ["world_far_backend", "world_camera_backend"]:
+		assert_eq(int((reset.get(key, {}) as Dictionary).get("submitted_commands", -1)), 0,
+				"%s draws nothing after the reset" % key)
+	# The next render publishes the reset scene: still nothing.
+	world.render_now(GameWorld.current_frame_clock_ms())
+	var next := world.get_debug_draw_list_report()
+	assert_eq(int((next.get("world_camera_backend", {}) as Dictionary).get(
+			"submitted_commands", -1)), 0)
+
+
 func test_runtime_renderer_release_is_explicit_and_idempotent() -> void:
 	var world := _make_world()
 	await get_tree().process_frame
