@@ -1820,42 +1820,49 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 			lp.loadout.availability.values = rt.state().weapon_availability;
 			weapon_availability_revision_seen_ = rt.state().weapon_availability_revision;
 		}
-		if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
-		// The apply's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x5A's place
-		// among this receive's sends, ahead of what the handlers of the messages behind it in
-		// the datagram queued, as the handler's own mount queues it
-		// (ClientRuntime::queue_receive_mount_stance_change).
-		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
-		//  @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30]
-		{
-			// The apply takes the receive's last grant (ClientRuntime::authoritative_loadout).
-			const std::size_t grants =
-					rt.receive_mount_count(ClientRuntime::ReceiveMount::kWeaponLoadout);
-			flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kWeaponLoadout,
-					grants == 0 ? 0 : grants - 1);
-		}
-		// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
-		// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
-		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
-		//  the climate pick @0x42942D..0x429463, ItemList_FindIndexByTypeId @0x42946C, the
-		//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485, no index compare, the model
-		//  words through @0x4294BA, AnimMap_InitBoneTypes @0x4294C4]
-		if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
-			loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
-			// The apply first rebuilds the process's loadout name list from the list's rows (each
-			// row whose weapon the table has: its name and three values), ahead of its L test, so
-			// the next body the joiner spawns takes the list's first weapon (D-NET-143).
-			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the
-			//  rows @0x429230..0x4293B9 (AdmDef_GetEntryByIndex @0x42923D, the name @0x4292F0), the
-			//  L test @0x4293F2]
-			apply_weapon_loadout_name_list(world, rt.authoritative_loadout());
-			if (world::Entity *local = world.registry.get(world.cached.local_player)) {
-				world::rebind_player_camouflage_row(world, *local);
-				// Off the authority the grant's class is also its side's class word
-				// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the Team test
-				//  @0x429411..0x42941D, g_CharClassTeam2 @0x42941F, g_CharClassTeam1 @0x429427].
-				granted_side_class_[local->team == 1 || local->team == 3 ? 0 : 1] = local->player_class;
+		// Each of the receive's S2C 0x5A grants applies at its turn (a grant deferred from an
+		// earlier receive, with none in this one, once): the kit, its mount request, whose C2S
+		// 0x1D queues at its 0x5A's place, the name list and L's row.
+		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0, once per message
+		//  (CNapiNPConnection_DispatchMessage @0x625EF1)]
+		const auto apply_grant = [&](std::size_t grant) {
+			if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
+			// The apply's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x5A's place
+			// among this receive's sends, ahead of what the handlers of the messages behind it in
+			// the datagram queued, as the handler's own mount queues it
+			// (ClientRuntime::queue_receive_mount_stance_change).
+			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
+			//  @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30]
+			flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kWeaponLoadout, grant);
+			// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
+			// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
+			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
+			//  the climate pick @0x42942D..0x429463, ItemList_FindIndexByTypeId @0x42946C, the
+			//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485, no index compare, the model
+			//  words through @0x4294BA, AnimMap_InitBoneTypes @0x4294C4]
+			if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
+				loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
+				// The apply first rebuilds the process's loadout name list from the list's rows (each
+				// row whose weapon the table has: its name and three values), ahead of its L test, so
+				// the next body the joiner spawns takes the list's first weapon (D-NET-143).
+				// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the
+				//  rows @0x429230..0x4293B9 (AdmDef_GetEntryByIndex @0x42923D, the name @0x4292F0), the
+				//  L test @0x4293F2]
+				apply_weapon_loadout_name_list(world, rt.authoritative_loadout());
+				if (world::Entity *local = world.registry.get(world.cached.local_player)) {
+					world::rebind_player_camouflage_row(world, *local);
+					// Off the authority the grant's class is also its side's class word
+					// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the Team test
+					//  @0x429411..0x42941D, g_CharClassTeam2 @0x42941F, g_CharClassTeam1 @0x429427].
+					granted_side_class_[local->team == 1 || local->team == 3 ? 0 : 1] = local->player_class;
+				}
 			}
+		};
+		const std::size_t grants = rt.receive_loadout_grant_count();
+		if (grants == 0) apply_grant(0);
+		for (std::size_t grant = 0; grant < grants; ++grant) {
+			rt.stage_receive_loadout_grant(grant);
+			apply_grant(grant);
 		}
 		// The team selector may only just have become known (the S2C 0x04 latch landing
 		// after the catalog) or may have moved us across the line (S2C 0x50). Either way the

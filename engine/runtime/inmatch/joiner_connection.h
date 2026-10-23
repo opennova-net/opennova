@@ -234,6 +234,9 @@ public:
 		bool send_holdoff_set = false;
 		uint32_t send_holdoff = 0;
 		std::vector<WeaponLoadout> loadout_grants;
+		// Per grant, the inbound_reducer entries through its 0x5A (its index + 1): its handler
+		// mounts at its place [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296F4)].
+		std::vector<std::size_t> loadout_grant_entries;
 		// S2C 0x0F — the authority's per-ammo-class pool image (serverPlayer+88664),
 		// the fixed 128-dword span at body offset 23 that retail copies straight into
 		// g_LocalAmmoPools before re-drawing every clip. `set` marks a 0x0F seen this

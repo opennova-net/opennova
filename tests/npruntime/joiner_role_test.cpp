@@ -2488,6 +2488,53 @@ bool run_a_self_team_assign_resubmits_ahead_of_its_pair() {
 	return expect(order == expected, "self 0x50 order: the 0x2F, then the 0x22 / 0x23 pair");
 }
 
+// Each S2C 0x5A of a receive applies at its turn (L7-s28, V-ROLL-AX N1): two grants around a
+// time-sync ping run the apply twice, each grant's own (the second the receive's last), and each
+// apply's mount request queues its C2S 0x1D at its own 0x5A's place: 0x1D, 0x08, 0x1D.
+// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - CNapiNPConnection_DispatchMessage @0x625EF1
+//  per message; NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
+//  @0x4296F4 -> @0x4DFC30; NapiNPClientMsg_0x043 @0x42FA90 - @0x42FAD3]
+bool run_each_grant_mounts_at_its_place() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	if (!expect(h.role.local_spawned(), "each grant: L spawned")) return false;
+	std::vector<uint8_t> classes;
+	h.role.kit_seams.apply_authoritative = [&h, &classes] {
+		classes.push_back(h.role.runtime->authoritative_loadout().avatar_class);
+		h.kernel->world.out.stance_requests.push_back(0xA9);
+	};
+	WeaponLoadout first;
+	first.avatar_class = 6;
+	WeaponLoadoutSlot slot;
+	slot.type_id = 1;
+	first.slots = {slot};
+	WeaponLoadout second = first;
+	second.avatar_class = 7;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::WEAPON_LOADOUT, encode_weapon_loadout(first)),
+					make_protocol_message(s2c::TIME_SYNC_PING, {0x78, 0x56, 0x34, 0x12}),
+					make_protocol_message(s2c::WEAPON_LOADOUT, encode_weapon_loadout(second))},
+			packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	const std::size_t from = h.socket.datagrams.size();
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input);
+	bool ok = expect(classes == std::vector<uint8_t>{6, 7},
+			"each grant: the apply runs per grant, in order");
+	ok &= expect(h.role.runtime->authoritative_loadout().avatar_class == 7,
+			"each grant: the receive's last grant stands");
+	const std::vector<uint8_t> order = sent_tags_since(h.socket, from,
+			{0x1D, c2s::TIME_SYNC_REPLY});
+	ok &= expect(order == std::vector<uint8_t>{0x1D, c2s::TIME_SYNC_REPLY, 0x1D},
+			"each grant: each 0x1D at its own 0x5A's place");
+	return ok;
+}
+
 bool run_a_grant_mount_request_queues_at_the_grants_place() {
 	bool ok = true;
 	for (const bool grant_first : {true, false}) {
@@ -5023,6 +5070,7 @@ int main() {
 	ok &= run_a_team_assign_walk_mount_queues_at_the_0x50s_place();
 	ok &= run_a_self_team_assign_resubmits_ahead_of_its_pair();
 	ok &= run_a_pickup_mount_queues_at_the_0x35s_place();
+	ok &= run_each_grant_mounts_at_its_place();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();

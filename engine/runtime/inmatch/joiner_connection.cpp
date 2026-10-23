@@ -1429,6 +1429,7 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			if (decode_weapon_loadout(
 					m.payload.data(), m.payload.size(), loadout)) {
 				valid_weapon_loadout = true;
+				out.loadout_grant_entries.push_back(out.inbound_reducer.size());
 				// The handler's tail clears g_ClientDeployHold for every valid apply,
 				// including a loadout echo unrelated to deploy-UI completion.
 				out.gameplay_release_applied = true;

@@ -283,6 +283,13 @@ public:
 			uint16_t action_id);
 	// How many messages of `at` this frame's receive folded (their marks).
 	std::size_t receive_mount_count(ReceiveMount at) const;
+	// This frame's receive's S2C 0x5A grants, in arrival order. The receive leaves the last one
+	// as authoritative_loadout at the revision past them all; staging grant `i` sets it and the
+	// revision as they stood past that grant, so the embedder applies each grant at its turn, as
+	// each 0x5A's handler applies its own [orig: NapiNPClientMsg_HandleWeaponLoadoutSync
+	// @0x4290E0, run once per message by CNapiNPConnection_DispatchMessage @0x625EF1].
+	std::size_t receive_loadout_grant_count() const { return receive_loadout_grants_.size(); }
+	void stage_receive_loadout_grant(std::size_t i);
 	// Queue one reliable C2S 0x1A door section request {handle, record state,
 	// section} the joiner world's door callback raised; it leaves inside the
 	// next open send boundary in queue order. False for HostClient or before
@@ -1402,6 +1409,8 @@ private:
 		std::size_t entry = 0;
 	};
 	std::vector<ReceiveSendMark> receive_send_marks_;
+	std::vector<WeaponLoadout> receive_loadout_grants_;
+	uint64_t receive_loadout_revision_base_ = 0;
 	void mark_receive_mount(ReceiveMount at, std::size_t entry);
 	uint32_t attach_requests_sent_ = 0; // the USE readout's count (attach_requests_sent)
 	// S2C 0x49 handlers run inside the receive pump. Preserve their decoded

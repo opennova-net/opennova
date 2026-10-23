@@ -834,6 +834,13 @@ std::size_t ClientRuntime::receive_mount_count(ReceiveMount at) const {
 	return n;
 }
 
+void ClientRuntime::stage_receive_loadout_grant(std::size_t i) {
+	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0; the declaration carries it]
+	if (i >= receive_loadout_grants_.size()) return;
+	authoritative_loadout_ = receive_loadout_grants_[i];
+	authoritative_loadout_revision_ = receive_loadout_revision_base_ + i + 1;
+}
+
 void ClientRuntime::mark_receive_mount(ReceiveMount at, std::size_t entry) {
 	ReceiveSendMark mark;
 	mark.at = at;
@@ -1215,6 +1222,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	receive_sends_logged_ = 0;
 	receive_leave_logged_ = false;
 	receive_send_marks_.clear();
+	receive_loadout_grants_.clear();
 	frame_trace_ = JoinerNetTraceRecord{}; // the joiner net readout's record (an instrument)
 	// Session loss is a terminal owner state, not only a receive-side event. A
 	// prior host description (or the silence reap below) must stop the next frame
@@ -1659,7 +1667,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
 				// @0x4296F4; NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1)
 				// @0x431B14].
-				if (tb.first == s2c::WEAPON_LOADOUT)
+				if (std::find(pr.loadout_grant_entries.begin(), pr.loadout_grant_entries.end(),
+						entries_folded) != pr.loadout_grant_entries.end())
 					mark_receive_mount(ReceiveMount::kWeaponLoadout, entries_folded);
 				if (pr.local_resubmit && entries_folded == pr.local_resubmit_entries)
 					mark_receive_mount(ReceiveMount::kSelfTeamAssign, entries_folded);
@@ -1701,9 +1710,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				//  PumpFlags reload @0x6297f3..0x629802]
 				send_holdoff_ticks_ = pr.send_holdoff;
 			}
+			receive_loadout_revision_base_ = authoritative_loadout_revision_;
 			for (const WeaponLoadout &grant : pr.loadout_grants) {
 				authoritative_loadout_ = grant;
 				++authoritative_loadout_revision_;
+				receive_loadout_grants_.push_back(grant);
 			}
 			// The 0x0F pool image follows the 0x5A grants in retail's burst; the
 			// embedder applies it AFTER the slot rebuild, as the client handler's
