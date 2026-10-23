@@ -46,6 +46,7 @@
 #include "host_test_setup.h"
 #include "conn_fixture.h"
 #include "enumerated_join.h"
+#include "joiner_mission_start.h" // the harness's end of a released mission start
 #include <runtime/inmatch/server_message_dispatch.h>
 
 #include <runtime/replication/connection.h>
@@ -2598,6 +2599,7 @@ bool run_roundtrip() {
 	}
 	for (int f = 0; f < 4; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
+		push_released_mission_start(client, pump_host);
 		for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
 			for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 			for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
@@ -2609,6 +2611,10 @@ bool run_roundtrip() {
 	// --- 2) Spawn-gate burst, driven entirely from the per-frame client role. ---
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
+		// The 0x1A's frame: this harness has no load to run, so its end of the released mission
+		// start ships the push right after the frame, as the retired run_frame tail push did
+		// (R-L2-s35-1; joiner_mission_start.h).
+		push_released_mission_start(client, pump_host);
 		// Several host ticks per frame so entity_batch_count climbs through world streaming (F3) and the
 		// spawn gate opens; ship the burst replies back to the client. The match service advances
 		// with each host tick: the pending-player spawn pump admits only on its periodic second
@@ -3046,9 +3052,14 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	uint64_t client_now_ms = 1000;
 	inmatch::ClientRuntime client(kName, [&client_now_ms] { return client_now_ms; });
 	client.set_title(&kJo);
+	// A frame that took the S2C 0x1A ends this load-less harness's released mission start right
+	// after its own sends (joiner_mission_start.h).
 	auto client_frame = [&client, &client_now_ms](uint32_t now_tick) {
 		client_now_ms += 16;
-		return client.Client_ProcessNetworkFrame(now_tick);
+		std::vector<std::vector<uint8_t>> out = client.Client_ProcessNetworkFrame(now_tick);
+		push_released_mission_start(client,
+				[&out](std::vector<uint8_t> datagram) { out.push_back(std::move(datagram)); });
+		return out;
 	};
 	// The binding seam under test alongside the zones flow: the shell's applied kit
 	// replaces the capture-default 0x2F pair content (D-NET-168). The wire team byte
