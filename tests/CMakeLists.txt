@@ -5692,3 +5692,9 @@ add_executable(terrain_load_legs_test terrain/terrain_load_legs_test.cpp)
 target_link_libraries(terrain_load_legs_test PRIVATE opennova_runtime)
 target_compile_features(terrain_load_legs_test PRIVATE cxx_std_17)
 add_test(NAME terrain_load_legs COMMAND terrain_load_legs_test)
+# The main loop's clock (runtime/world/tick_count_clock.h, D-NET-NEW-LF-2): GetTickCount's
+# system-timer steps, and the bank and frame lock stepping with them.
+add_executable(tick_count_clock_test world/tick_count_clock_test.cpp)
+target_link_libraries(tick_count_clock_test PRIVATE opennova_runtime)
+target_compile_features(tick_count_clock_test PRIVATE cxx_std_17)
+add_test(NAME tick_count_clock COMMAND tick_count_clock_test)

@@ -1089,7 +1089,7 @@ private:
 	double frame_delta_ = 0.0;
 	// Time::get_ticks_usec() at the last frame_post_draw (0: none yet).
 	uint64_t last_post_draw_usec_ = 0;
-	// inmatch::host_monotonic_milliseconds() at the last take_frame_elapsed_seconds (0: none).
+	// world::frame_tick_count_ms() at the last take_frame_elapsed_seconds (0: none).
 	uint32_t frame_clock_ms_ = 0;
 	bool frame_probe_enabled_ = false;
 	bool frame_stats_on_ = false;

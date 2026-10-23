@@ -16,6 +16,7 @@
 #include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <runtime/world/tick_accumulator.h>
+#include <runtime/world/tick_count_clock.h>
 
 #include "net_sockets.h"
 
@@ -78,14 +79,15 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 	}
 	io::logf(io::LogLevel::kInfo, "opennova-serve: serving on UDP %u (Ctrl+C stops)", server.bound_port());
 
-	// The session banks the measured wall clock, as Game_MainLoop banks its
-	// GetTickCount deltas; the loop wakes once per logic quantum.
+	// The session banks the main loop's clock, as Game_MainLoop banks its GetTickCount
+	// deltas: the system timer's 15 and 16 ms steps (engine world/tick_count_clock.h
+	// carries the witness, D-NET-NEW-LF-2); the loop wakes once per logic quantum.
 	using clock = std::chrono::steady_clock;
 	const auto period = std::chrono::nanoseconds(
 			static_cast<int64_t>(1e9 * world::TickAccumulator::kTickDt));
-	auto last = clock::now();
-	const auto started = last;
-	auto next = last + period;
+	const auto started = clock::now();
+	uint32_t last_tick_count = world::frame_tick_count_ms();
+	auto next = started + period;
 	int code = 0;
 	// The status page stands in for the scene a retail dedicated host draws;
 	// stdin is its chat input line (status_console.h). A supervised server
@@ -97,8 +99,9 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 	serve::TickStats ticks;
 	while (!g_stop.load()) {
 		const auto now = clock::now();
-		const double delta = std::chrono::duration<double>(now - last).count();
-		last = now;
+		const uint32_t tick_count = world::frame_tick_count_ms();
+		const double delta = static_cast<double>(tick_count - last_tick_count) / 1000.0;
+		last_tick_count = tick_count;
 		if (!server.frame(delta)) {
 			// The rotation's end and the remote admin's quit are the session's
 			// own end: the router's teardown (PostMenu_RouteMissionExit

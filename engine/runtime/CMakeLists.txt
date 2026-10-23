@@ -549,6 +549,8 @@ add_library(opennova_runtime STATIC
     # --- parity lane LH sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_takeover_status.cpp # the takeover dialog (HUD_DrawTakeoverStatus)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/takeover_status_feed.cpp # its nearest zone-timer entry
+    # --- parity lane LF sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_count_clock.cpp # the main loop's GetTickCount clock (D-NET-NEW-LF-2)
 )
 
 # engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.

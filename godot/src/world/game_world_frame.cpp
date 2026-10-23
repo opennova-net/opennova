@@ -11,7 +11,7 @@
 #include <runtime/renderer/scene_overlay.h>
 #include <runtime/renderer/scene_pass_gates.h>
 #include <runtime/environment/water_mirror.h>
-#include <runtime/inmatch/host_session.h> // host_monotonic_milliseconds (the frame clock)
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame clock)
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
@@ -357,14 +357,15 @@ double GameWorld::get_seconds_since_render() const {
 }
 
 double GameWorld::take_frame_elapsed_seconds() {
-	// The session banks the frame's own elapsed wall time, in whole milliseconds
-	// of the monotonic clock, as the main loop banks GetTickCount's difference
-	// from the previous frame's stamp (engine world::TickAccumulator::bank
-	// carries the witness; the bank clamps a frame past 500 ms). Godot's process
-	// step is capped at max_physics_steps_per_frame over the physics rate (8/60 s
-	// by default), so banking it dropped the time past 133 ms that retail's bank
-	// keeps (D-NET-NEW-LI-6).
-	const uint32_t now_ms = opennova::inmatch::host_monotonic_milliseconds();
+	// The session banks the frame's own elapsed wall time as the main loop banks
+	// GetTickCount's difference from the previous frame's stamp, in the system
+	// timer's 15 and 16 ms steps (engine world::TickAccumulator::bank and
+	// world/tick_count_clock.h carry the witness, D-NET-NEW-LF-2; the bank clamps a
+	// frame past 500 ms). Godot's process step is capped at
+	// max_physics_steps_per_frame over the physics rate (8/60 s by default), so
+	// banking it dropped the time past 133 ms that retail's bank keeps
+	// (D-NET-NEW-LI-6).
+	const uint32_t now_ms = opennova::world::frame_tick_count_ms();
 	const uint32_t elapsed_ms = frame_clock_ms_ != 0 ? now_ms - frame_clock_ms_ : 0u;
 	frame_clock_ms_ = now_ms;
 	return static_cast<double>(elapsed_ms) / 1000.0;

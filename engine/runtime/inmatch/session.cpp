@@ -4,7 +4,7 @@
 #include <runtime/controls/controls.h> // action_code (the console's by-code dispatch)
 #include <runtime/hud/hud_frame.h> // HudFrameCompiler::kRadarGate*
 #include <runtime/inmatch/client_runtime.h>
-#include <runtime/inmatch/host_session.h> // host_monotonic_milliseconds (the frame lock clock)
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame lock clock)
 #include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit row's exit)
 #include <runtime/inmatch/role_feeds.h> // step_hud_radar
 #include <runtime/inmatch/spectator_session.h>
@@ -29,16 +29,17 @@ SessionError invalid_transition(const char *message) {
 	return {SessionErrorCode::InvalidTransition, message};
 }
 
-// The frame lock's platform primitives: a 1 ms sleep (retail's Sleep(1)) and the steady
-// millisecond clock the shell's frame stamp reads (retail's GetTickCount).
-class SteadyFrameLockClock final : public world::FrameLockClock {
+// The frame lock's platform primitives: a 1 ms sleep (retail's Sleep(1)) and the main loop's
+// clock the shell's frame stamp reads, retail's GetTickCount with its system-timer steps (engine
+// world/tick_count_clock.h carries the witness, D-NET-NEW-LF-2).
+class TickCountFrameLockClock final : public world::FrameLockClock {
 public:
 	void sleep_one_ms() override { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
-	uint32_t now_ms() override { return host_monotonic_milliseconds(); }
+	uint32_t now_ms() override { return world::frame_tick_count_ms(); }
 };
 
-world::FrameLockClock &steady_frame_lock_clock() {
-	static SteadyFrameLockClock clock;
+world::FrameLockClock &tick_count_frame_lock_clock() {
+	static TickCountFrameLockClock clock;
 	return clock;
 }
 
@@ -50,7 +51,7 @@ int32_t Session::bank_frame(double elapsed, const FrameInput &input, uint32_t &l
 	lock_stamp_ms = 0;
 	if (!input.frame_lock || input.frame_stamp_ms == 0) return accumulator_.bank(elapsed);
 	world::FrameLock lock;
-	lock.clock = frame_lock_clock_ != nullptr ? frame_lock_clock_ : &steady_frame_lock_clock();
+	lock.clock = frame_lock_clock_ != nullptr ? frame_lock_clock_ : &tick_count_frame_lock_clock();
 	lock.stamp_ms = input.frame_stamp_ms;
 	const int32_t due = accumulator_.bank(elapsed, &lock);
 	if (lock.sleeps > 0) lock_stamp_ms = lock.stamp_ms;
