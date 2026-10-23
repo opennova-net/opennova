@@ -209,6 +209,20 @@ bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	const int32_t combo = inventory->pending_combo;
 	const WeaponInventorySlot *slot = inventory->slot(combo);
 	if (slot == nullptr || slot->adm_index < 0) return false;
+	// A SWITCHRANK completion storing the slot the EquippedSlot already is (a loadout apply's
+	// mount of the slot its select stored, same category with itself) changes nothing past the
+	// stamp: the slot runs on through its SWITCHRANK's tail, no mount, no draw.
+	// [orig: WeaponAction_SwitchRank @0x543500 (the store @0x543539, the stamp @0x54355A)]
+	if (!select && completed_rank && combo == inventory->equipped_combo &&
+			!w.usegun_slot_active && !w.usegun_on_foot && e != nullptr) {
+		const WeaponTableEntry *held = world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
+		if (held != nullptr && strutil::iequals(held->name, w.def_name)) {
+			e->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
+			w.start_in_switchto = false;
+			w.presentation_pending = false;
+			return true;
+		}
+	}
 	inventory->equipped_combo = combo;
 	// The personal slot is the EquippedSlot now: a borrow held on foot ends (D-NET-420), and
 	// one off its seat whose switch back was refused (the respawn's select, its staged switch

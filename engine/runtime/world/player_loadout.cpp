@@ -7,6 +7,7 @@
 #include <base/io/strutil.h>
 
 #include <runtime/world/entity.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::def;
@@ -105,7 +106,8 @@ namespace {
 //  read of the word @0x4E198E); NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the
 //  select @0x4296E3, Player_MountWeaponSlot @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer
 //  @0x565CD0 (the select @0x566285, the mount @0x56628A..0x566297)].
-void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventory &inventory) {
+void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                         bool mount) {
     // No walk here: both loadout applies end on the select and the mount alone, so a running
     // PowerThrow windup survives them; the walk that clears it is Player_InitPlayer's
     // (local_loadout_rebuild) [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285,
@@ -134,6 +136,24 @@ void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventor
     weapon.nvg_scope_restore = false;
     inventory.pending_combo = inventory.equipped_combo;
     commit_pending_weapon_switch(world, weapon, &inventory, /*select=*/true);
+    if (!mount) return;
+    // The loadout applies then mount the EquippedSlot the select stored, through the mount's
+    // own leg: its def's category is its own, so the queue is SWITCHRANK on that slot (none
+    // while the lower / raise interp runs), the six view-bias words clear, and the
+    // completion stores the same slot again (commit_pending_weapon_switch): no draw, no
+    // raise (D-WPN-21's select plays none). With no local body (a joiner's grant ahead of
+    // L) there is no EquippedSlot to mount [orig: Player_MountWeaponSlot @0x4DFA40 - the
+    // EquippedSlot test @0x4DFA63..0x4DFA71].
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the select @0x4296E3, the
+    //  mount of g_LocalPlayerEntity->EquippedSlot @0x4296E8..0x4296F4);
+    //  WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285, @0x56628A..0x566297);
+    //  Player_MountWeaponSlot @0x4DFA40 (the store @0x4DFB16, the compare @0x4DFB8B,
+    //  WeaponSlot_TryQueueSwitchRank @0x4DFB96, the bias clear @0x4DFBCF..0x4DFBE8)]
+    LocalPlayer *local = world.local_player_state;
+    if (local == nullptr || &local->weapon != &weapon || !weapon.active ||
+            weapon.presentation_pending)
+        return;
+    local_player_mount_weapon_slot(world, weapon, inventory, local->view, inventory.equipped_combo);
 }
 
 } // namespace
@@ -189,8 +209,8 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     //  @0x4E019B); local_weapon_walk_clears_windup].
     local_weapon_walk_clears_windup(world, weapon);
     // The select of the word [orig: Player_InitPlayer @0x4E15F0 (the
-    //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E)].
-    select_current_slot(world, weapon, inventory);
+    //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E)]; no mount follows it here.
+    select_current_slot(world, weapon, inventory, /*mount=*/false);
 }
 
 bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
@@ -307,7 +327,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     //  @0x565CD0 (@0x566250..0x566276, the word's read @0x56627E)]
     if (const WeaponTableEntry *held = table.by_index(held_adm))
         inventory.current_slot = held->category * weapon_combo::kRanksPerCategory + held->rank;
-    select_current_slot(world, weapon, inventory);
+    select_current_slot(world, weapon, inventory, /*mount=*/true);
     return true;
 }
 

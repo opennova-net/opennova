@@ -873,6 +873,80 @@ void test_a_claimants_detach_holds_its_equipped_slot_ready() {
 	}
 }
 
+// --- the loadout applies' mount (L7-s26 row 2) ------------------------------------------
+
+// Whether a record from `first` on names a switch (a commit's mount).
+bool switch_recorded_since(const LocalPlayerWeapon &w, size_t first) {
+	for (size_t i = first; i < w.events.size(); ++i)
+		if (!w.events[i].switch_to_weapon.empty()) return true;
+	return false;
+}
+
+// A loadout apply ends on its select and then the mount of the EquippedSlot that select
+// stored: the slot's def is its own category, so the mount stores the word, queues
+// SWITCHRANK on the slot and clears the six view-bias words. The completion stores the
+// same slot again, which mounts nothing and draws nothing: the slot runs on in its
+// SWITCHRANK, no SWITCHTO, no raise, the rifle and its AdmDef byte kept. Inside a raise
+// the mount stores the word and queues nothing, and the word stays stored.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the select @0x4296E3, the mount
+//  @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285, @0x566297);
+//  Player_MountWeaponSlot @0x4DFA40 (@0x4DFB16, @0x4DFB8B..0x4DFB96, @0x4DFBCF..0x4DFBE8);
+//  WeaponAction_SwitchRank @0x543500 (@0x543539)]
+void test_a_loadout_apply_mounts_its_selected_slot() {
+	{
+		const auto rig = std::make_unique<Rig>(rifle_kit());
+		LocalPlayerWeapon &w = rig->weapon();
+		rig->tick();
+		rig->settle();
+		rig->view().view_bias.position_q16[2] = -100;
+		CHECK(local_loadout_apply_accept(rig->world, rig->local().loadout, w, rig->inventory(),
+				rig->local().inventory_valid, rifle_kit(), 0, false));
+		CHECK(rig->inventory().equipped_combo == kRifle);
+		CHECK(w.switch_in_flight && rig->inventory().pending_combo == kRifle);
+		CHECK(w.slot.next == weapon_action::kSwitchRank && w.slot.counter == 0);
+		CHECK(rig->view().view_bias.position_q16[2] == 0);
+		CHECK(!rig->lower_raise_active());
+		const size_t applied = w.events.size();
+		rig->tick(); // the untimed SWITCHRANK enters and completes
+		CHECK(!w.switch_in_flight);
+		CHECK(w.slot.current == weapon_action::kSwitchRank && w.slot.phase == weapon_phase::kDone);
+		CHECK(!switch_recorded_since(w, applied));
+		bool drew = false;
+		for (int t = 0; t < 20; ++t) {
+			rig->tick();
+			drew = drew || w.slot.current == weapon_action::kSwitchTo ||
+					w.slot.next == weapon_action::kSwitchTo;
+		}
+		CHECK(!drew);
+		CHECK(!rig->lower_raise_active());
+		CHECK(w.slot.current == weapon_action::kIdle);
+		CHECK(rig->inventory().equipped_combo == kRifle);
+		CHECK(rig->adm_byte() == rig->adm("WPN_RIFLE"));
+	}
+	{
+		const auto rig = std::make_unique<Rig>(rifle_kit());
+		LocalPlayerWeapon &w = rig->weapon();
+		rig->tick();
+		rig->press(2);
+		CHECK(rig->tick_until_commit() >= 1);
+		CHECK(rig->lower_raise_active()); // the pistol's raise
+		CHECK(local_loadout_apply_accept(rig->world, rig->local().loadout, w, rig->inventory(),
+				rig->local().inventory_valid, rifle_kit(), 0, false));
+		CHECK(rig->inventory().equipped_combo == kPistol);
+		CHECK(w.switch_in_flight && rig->inventory().pending_combo == kPistol);
+		CHECK(w.slot.next != weapon_action::kSwitchRank);
+		bool ran_rank = false;
+		for (int t = 0; t < 60; ++t) {
+			rig->tick();
+			ran_rank = ran_rank || w.slot.current == weapon_action::kSwitchRank;
+		}
+		CHECK(!ran_rank);
+		CHECK(!rig->lower_raise_active());
+		CHECK(w.switch_in_flight); // the word stays stored
+		CHECK(rig->inventory().equipped_combo == kPistol);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -890,6 +964,7 @@ int main() {
 	test_the_last_interp_step_publishes_the_view_bias();
 	test_the_mount_request_clears_the_view_bias_and_the_commit_does_not();
 	test_a_claimants_detach_holds_its_equipped_slot_ready();
+	test_a_loadout_apply_mounts_its_selected_slot();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
