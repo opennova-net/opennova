@@ -100,6 +100,13 @@ TitleIdentity jo_row() {
 	t.gate_tag_keys = "jop:2:oyez";
 	// The host lists end at LAN. [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50]
 	t.host_category_var = false;
+	// NovaLogic's live gate answered JO's tag with no POST pair, an http://[domainname] startupurl
+	// and a TimeOnGateServer line after the reflected pair (the LN S1 retail host record,
+	// 2026-10-23), as it answered DFX2's: the reply the service's gate gives this title.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the in-use word set by a udpnovaworld
+	//  line @0x4CF541 skips the POST tests @0x4CF5A0, and no key reads TimeOnGateServer;
+	//  Mission_DeobfuscateDescription @0x4CDAA0 - [DOMAINNAME] @0x4CDB88]
+	t.gate_reply_witnessed = true;
 	// The retail jop_2 pages' pfid (docs/net/novaworld-net-re.md §2, the NWLogin row).
 	t.pfid = 28;
 	// The retail jop_2 pages (docs/net/novaworld-net-re.md §2 and its wave 6, the authenticated web
