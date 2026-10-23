@@ -17,8 +17,8 @@ enum class CoreFinding;
 // What ships (ADR 0046 S16): Export copies the last good build, which the build's gate let through,
 // into a folder of its own, the project's export folder (project.opennova's `export.output`, or the
 // one the request names), as a player puts it in place: a standalone game's archives and loose
-// files, which an OpenNova runtime boots with --resource-dir (with the runtime's own folder under
-// `runtime/` when the project's `export.include_runtime` asks for it); an expansion's
+// files, which an OpenNova runtime boots with --resource-dir (with the runtime's files beside the
+// archives when the project's `export.include_runtime` asks for it, ready to launch); an expansion's
 // `expansion/<b>/` laid out as in an install, which a player copies into the game's folder and plays
 // with `/exp <b>`. The build's record stays behind; the export's own, `export.json`, names the
 // project, the build, the expansion and the files it wrote, and is what lets a later Export replace
@@ -43,7 +43,6 @@ enum class CoreFinding;
 // the folder as it was (export.cancelled).
 inline constexpr const char *kExportRecordFileName = "export.json";
 inline constexpr int kExportRecordSchemaVersion = 1;
-inline constexpr const char *kExportRuntimeFolder = "runtime";
 
 struct ExportRequest {
 	std::string build_dir;   // the published build

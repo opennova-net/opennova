@@ -1052,7 +1052,7 @@ static std::vector<std::string> files_under(const std::string &dir) {
 // first, one of anything else refused and left as it is; a folder named with a trailing separator;
 // stepped by bytes and cancelled leaving the folder as it was (export.cancelled); the scan passing over
 // the export folder's staging and set-aside siblings; an expansion's laid out as in an install; the
-// runtime's folder under runtime/ when asked. The build is only read.
+// runtime's files beside the archives when asked. The build is only read.
 static int test_export() {
 	Project p("opennova_editor_export_test");
 	TEST_EXPECT(p.create());
@@ -1191,15 +1191,29 @@ static int test_export() {
 	TEST_EXPECT(!export_build(into).ok && !fs::exists(system_path(into.export_dir)));
 	TEST_EXPECT(editor_test::tree_digest(build.build_dir) == tree);
 
-	// The runtime's folder under runtime/ when asked; one not there refused.
+	// The runtime's files beside the archives when asked; one not there refused.
 	ExportRequest runtime = request;
 	runtime.export_dir = p.dir.file("with_runtime");
 	runtime.runtime_dir = p.dir.file("runtime_package");
 	TEST_EXPECT(test_io::write_text(runtime.runtime_dir + "/opennova.exe", "exe") &&
 	            test_io::write_text(runtime.runtime_dir + "/data/opennova.pck", "pck"));
-	TEST_EXPECT(export_build(runtime).ok && fs::is_regular_file(system_path(runtime.export_dir + "/runtime/opennova.exe")) &&
-	            fs::is_regular_file(system_path(runtime.export_dir + "/runtime/data/opennova.pck")) &&
-	            fs::is_regular_file(system_path(runtime.export_dir + "/language.pff")));
+	TEST_EXPECT(export_build(runtime).ok && fs::is_regular_file(system_path(runtime.export_dir + "/opennova.exe")) &&
+	            fs::is_regular_file(system_path(runtime.export_dir + "/data/opennova.pck")) &&
+	            fs::is_regular_file(system_path(runtime.export_dir + "/language.pff")) &&
+	            !fs::exists(system_path(runtime.export_dir + "/runtime")));
+	const auto runtime_tree = editor_test::tree_digest(runtime.export_dir);
+	for (const std::string &collision : {"RESOURCE.PFF", "EXPORT.JSON", "resource.pff/child", "data"}) {
+		const std::string file = runtime.runtime_dir + "/" + collision;
+		// "data" conflicts with the runtime's own data/opennova.pck; put it in the build.
+		const std::string source = collision == "data" ? runtime.build_dir + "/data" : file;
+		TEST_EXPECT(test_io::write_text(source, "collision"));
+		refused = export_build(runtime);
+		TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.write" &&
+		            editor_test::tree_digest(runtime.export_dir) == runtime_tree &&
+		            !fs::exists(system_path(runtime.export_dir + kExportStagingSuffix)));
+		fs::remove(system_path(source));
+		if (collision == "resource.pff/child") fs::remove(system_path(runtime.runtime_dir + "/resource.pff"));
+	}
 	runtime.runtime_dir = p.dir.file("no_runtime");
 	runtime.export_dir = p.dir.file("without_runtime");
 	refused = export_build(runtime);

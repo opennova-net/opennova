@@ -213,7 +213,7 @@ void ExportRun::check() {
 		return fail(CoreFinding::ExportRuntime,
 		            "The runtime to ship beside the game was not found in " + request_.runtime_dir +
 		                    ": set the runtime in File > Project settings..., or export without it.");
-	// What it writes: the build's files but its record, the runtime's under runtime/.
+	// What it writes: the build's files but its record, and the runtime beside them.
 	std::string error;
 	std::vector<Found> found;
 	if (!files_under(system_path(request_.build_dir), found, error)) return fail(CoreFinding::ExportWrite, error);
@@ -227,10 +227,23 @@ void ExportRun::check() {
 		found.clear();
 		if (!files_under(system_path(request_.runtime_dir), found, error)) return fail(CoreFinding::ExportWrite, error);
 		for (const Found &file : found) {
-			const std::string to = std::string(kExportRuntimeFolder) + "/" + file.relative;
-			files_.push_back({ utf8_of(file.path), to, file.size, true });
-			writes.insert(lower(to));
+			files_.push_back({ utf8_of(file.path), file.relative, file.size, true });
+			writes.insert(lower(file.relative));
 		}
+	}
+	// Flattening the runtime must not overwrite game data or the export's ownership record.
+	// Check the complete destination set before staging, including file/directory conflicts.
+	std::set<std::string> destinations{lower(kExportRecordFileName)};
+	for (const File &file : files_) {
+		const std::string key = lower(file.to);
+		if (!destinations.insert(key).second)
+			return fail(CoreFinding::ExportWrite, "Export files collide at " + file.to + ".");
+	}
+	for (const std::string &name : destinations) {
+		const std::string prefix = name + "/";
+		const auto child = destinations.lower_bound(prefix);
+		if (child != destinations.end() && child->compare(0, prefix.size(), prefix) == 0)
+			return fail(CoreFinding::ExportWrite, "Export file conflicts with a directory at " + name + ".");
 	}
 	// Over an earlier export of the project: what the person did there.
 	io::JsonValue record;

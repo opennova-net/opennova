@@ -18,7 +18,7 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `engine/` | Native formats, runtime, networking, and service code. |
 | `godot/` | Godot game, project resources, and GDScript tests. |
 | `assets/` | OpenNova's own game, an OpenNova Editor project whose Build ships beside `opennova.exe`: its menus, the "Indigo Shore" mission, and the models, sounds and textures exported from the authoring sources in `art/` (`assets/README.md`). |
-| `expansions/` | OpenNova's own expansions, each an OpenNova Editor expansion project on the base game in `assets/` (today `onjo1`, Indigo Storm); the game zip ships each one built in `assets/expansion/<name>/` ([expansions/README.md](expansions/README.md)). |
+| `expansions/` | OpenNova's own expansions, each an OpenNova Editor expansion project on the base game in `assets/` (today `onjo1`, Indigo Storm); the game zip ships each one built in `expansion/<name>/` ([expansions/README.md](expansions/README.md)). |
 | `art/` | Authoring sources (Blender scenes and their textures, in Git LFS) whose exports land in `assets/`. |
 | `apps/` | Native command-line and NovaWorld service applications. |
 | `switcher/` | OpenNova Switcher: a Windows tray app that points a stock Joint Operations or Delta Force Xtreme 2 install at OpenNova's NovaWorld, NovaLogic's, or an address you enter, through the hosts file (.NET 8, with its xunit tests). Only the original exes need it: `opennova.exe` reaches OpenNova's NovaWorld itself. |
@@ -102,7 +102,7 @@ picks another. To boot a game-data directory directly instead:
 $GODOT_BIN --path godot -- --resource-dir "C:/Games/Joint Operations"
 ```
 
-The packaged Windows runtime works the same way: run `opennova.exe`, or
+The packaged Windows runtime loads the game files beside `opennova.exe`: run it, or
 `opennova.exe -- --resource-dir "C:\Games\Joint Operations"`.
 
 For loose data without boot archives, add `--loose-root /d`. `/game <code>`
@@ -114,9 +114,10 @@ code 1.
 ## Downloads
 
 CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
-contains `opennova.exe`, the matching native dependencies, OpenNova's own game
-in `assets/` (with its expansion), and launch instructions. Retail game data is
-supplied separately. Debug builds include the game's dev tools (Insert).
+contains `opennova.exe`, the matching native dependencies, OpenNova's own PFFs and
+loose game files at the ZIP root, expansions under `expansion/`, and launch
+instructions. Retail game data is supplied separately. Debug builds include
+the game's dev tools (Insert).
 
 They also publish `opennova-editor-windows-v<version>.zip`: `editor/` holds the
 OpenNova Editor (`opennova-editor.exe`) and `runtime/` the game it plays your project
