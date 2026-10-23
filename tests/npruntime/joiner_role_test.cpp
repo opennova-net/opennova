@@ -2369,9 +2369,18 @@ bool run_a_pickup_mount_queues_at_the_0x35s_place() {
 //  +0x68 test @0x4E023A, the Flags test @0x4E0265, the rank cycle @0x4E02C9..0x4E0342, the mount
 //  @0x4E0362; Player_MountWeaponSlot @0x4DFA40 - CNapiNetwork_QueueReliableMessage(0x1D)
 //  @0x4DFC30; NapiNPClientMsg_0x043 @0x42FA90 - @0x42FAD3]
+// The mortar draws from its own ammo class: the cycle takes only a rank with ammo (pool plus
+// clip), and in a class the rifle shares, the seed's later slot (the mortar's 10) is the
+// whole pool, which the rifle's clip of 10 draws dry, so the cycle would find the mortar
+// empty and play the deny.
+// [orig: Player_SwitchToWeaponByHandle @0x4E0170 - the cycle's weapon-class and ammo tests
+//  @0x4E0307..0x4E032D (Score_CalculateKillScore, the call @0x4E0323);
+//  WeaponSlots_SeedAmmoPoolsFromDefs @0x541690; WeaponSlots_RecalculateAmmoFromCapacity
+//  @0x542280 - the clamp @0x542362..0x542366]
 bool run_a_team_assign_walk_mount_queues_at_the_0x50s_place() {
 	static const char kDefs[] =
 			"ammoclass_max_carry CLASS_TA 1000\r\n"
+			"ammoclass_max_carry CLASS_TB 1000\r\n"
 			"weapon \"WPN_TA_RIFLE\"\r\n"
 			"\tcategory 3\r\n"
 			"\trank 0\r\n"
@@ -2384,7 +2393,7 @@ bool run_a_team_assign_walk_mount_queues_at_the_0x50s_place() {
 			"\trank 1\r\n"
 			"\tclipsize 1\r\n"
 			"\tstartrounds 10\r\n"
-			"\tammoclass CLASS_TA 1\r\n"
+			"\tammoclass CLASS_TB 1\r\n"
 			"\tflags ForceCrouch\r\n"
 			"end\r\n";
 	bool ok = true;
