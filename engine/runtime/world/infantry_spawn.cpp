@@ -24,8 +24,13 @@ namespace opennova::world {
 
 namespace {
 
-void clear_target(World &world, AiSystem &ai, AiEntity &body) {
-    ai.ai_set_target(world, body, {});
+// The reset's target clear is a raw store of the AI controller's word (+0x0C, our slot.f[3]
+// and its infantry mirror): the brain's target slot (+0x98) and the old target's reference
+// count (+0x212), which Entity_SetAITarget keeps beside it, stay as they are.
+// [orig: Entity_ResetToSpawnState @0x4B9610 - `mov [eax+0Ch], ebx` @0x4B9785 (its own) and
+//  @0x4B9852 / @0x4B98E6 (the sweep's); Entity_SetAITarget @0x45D760 - the brain slot
+//  @0x45D7A9, the controller word @0x45D7B2, the counts @0x45D788 / @0x45D7BF]
+void clear_slot_target(AiEntity &body) {
     body.slot.f[3] = 0;
     body.inf.combat_target = {};
 }
@@ -633,7 +638,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
             }
         }
         inf.magazine = static_cast<int16_t>(body->profile.clip_size);
-        clear_target(world, ai, *body);
+        clear_slot_target(*body);
     }
 
     // The reset's one raise, to the caller's ceiling [orig: Entity_ResetToSpawnState @0x4B97BC].
@@ -652,14 +657,20 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
     if (ai.is_authority) {
         if (entity.mount_target.valid()) world.vehicles.detach(entity.handle);
         const int32_t packed = int32_t(entity.handle.packed) + 1;
+        // Every row with an item type (+0x1C) and an AI controller; a pool-0 row (not the body)
+        // also drops its +0x2F4 / +0x170 / +0x2F0 / +0x344 / +0x338 references (the aim point
+        // with the last), and every row its controller word. Nothing here stores another row's
+        // kill-credit attacker (+0x178).
+        // [orig: Entity_ResetToSpawnState @0x4B9610 - pool 1 @0x4B9826..0x4B9855 (the +0x1C
+        //  gate @0x4B9841), pool 0 @0x4B9857..0x4B98E9 (the +0x1C gate @0x4B9879, the self skip
+        //  @0x4B987E, the stores @0x4B9889..0x4B98E6)]
         for (int pool = 0; pool < 2; ++pool) {
             world.registry.for_each_in_pool(pool, [&](const Entity &row) {
                 Entity &other = *world.registry.get(row.handle);
-                if (other.item_id == 0 || other.handle == entity.handle) return;
+                if (other.item_type_index == 0 || other.handle == entity.handle) return;
                 AiEntity *other_body = ai.for_handle(other.handle);
                 if (other_body == nullptr) return;
                 if (pool == 0) {
-                    if (other.last_attacker == entity.handle) other.last_attacker = {};
                     if (other.primary_occupant == entity.handle) other.primary_occupant = {};
                     auto &inf = other_body->inf;
                     if (inf.last_attacker == entity.handle) inf.last_attacker = {};
@@ -670,8 +681,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
                         std::fill_n(inf.aim_point, 3, 0);
                     }
                 }
-                if (other_body->slot.f[3] == packed)
-                    clear_target(world, ai, *other_body);
+                if (other_body->slot.f[3] == packed) clear_slot_target(*other_body);
             });
         }
     }

@@ -3576,6 +3576,7 @@ void test_spawn_reset_clears_refs_and_restarts_nearest_route() {
     World &w = *r.storage;
     Entity other;
     other.item_id = 102;
+    other.item_type_index = 1; // the +0x1C word the reset's sweep gates on
     const auto other_handle = w.registry.spawn(0, other);
     w.ai.attach(other_handle);
     auto *observer = w.ai.for_handle(other_handle);
@@ -3605,7 +3606,15 @@ void test_spawn_reset_clears_refs_and_restarts_nearest_route() {
     CHECK(observer->slot.f[3] == 0 && !observer->inf.ai_focus.valid());
     CHECK(!observer->inf.last_attacker.valid() && !observer->inf.aim_ref0.valid());
     CHECK(observer->inf.aim_point[0] == 0);
-    CHECK(!w.registry.get(other_handle)->last_attacker.valid());
+    // The sweep stores no other row's kill-credit attacker (+0x178), and the target clears are
+    // raw controller-word stores: each brain keeps its target slot and every count stands.
+    // [orig: Entity_ResetToSpawnState @0x4B9610 - the stores @0x4B9785 / @0x4B9889..0x4B98E6;
+    //  Entity_SetAITarget @0x45D760 - the brain slot @0x45D7A9]
+    CHECK(w.registry.get(other_handle)->last_attacker == r.handle);
+    CHECK(observer->brain.f[AiBrain::kTargetSlot] == int32_t(r.handle.packed) + 1);
+    CHECK(r.body().brain.f[AiBrain::kTargetSlot] == int32_t(other_handle.packed) + 1);
+    CHECK(r.entity().ai_target_refcount == 1 &&
+          w.registry.get(other_handle)->ai_target_refcount == 1);
     r.body().slot.f[37] = 125;
     r.body().slot.f[38] = 912;
     entity_reset_to_spawn_state(w, r.entity());
