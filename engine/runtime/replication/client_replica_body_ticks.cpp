@@ -51,10 +51,14 @@ bool ClientReplicaPipeline::body_update_ended(const ClientEntityState &es) {
 //  @0x4C223A ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
 //  @0x4B40E0 - the decay @0x4B5C97..0x4B5CA5, the dip @0x4B5CAB..0x4B5CE7, the torso
 //  roll @0x4B5CFF..0x4B5D67]
+// A person bound to an item row runs that row's update alone, never these org2 legs, in the
+// walk's half as in the parked one (visit_parked_rows, D-NET-892).
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472]
 void ClientReplicaPipeline::tick_lean_decay(uint16_t self_handle) {
 	const uint32_t park = remote_walk_park_key(self_handle);
 	for (ClientEntityState &es : state_.entities)
-		if (remote_walk_key(es.handle) < park) lean_decay_row(es);
+		if (remote_walk_key(es.handle) < park && !person_takes_item_row(es, self_handle))
+			lean_decay_row(es);
 }
 
 void ClientReplicaPipeline::lean_decay_row(ClientEntityState &es) {
@@ -66,7 +70,7 @@ void ClientReplicaPipeline::lean_decay_row(ClientEntityState &es) {
 
 void ClientReplicaPipeline::tick_lean_ramp() {
 	for (ClientEntityState &es : state_.entities)
-		if (!es.rm_parked) lean_ramp_row(es);
+		if (!es.rm_parked && !person_takes_item_row(es, parked_self_)) lean_ramp_row(es);
 }
 
 void ClientReplicaPipeline::lean_ramp_row(ClientEntityState &es) {
@@ -107,7 +111,8 @@ void ClientReplicaPipeline::lean_ramp_row(ClientEntityState &es) {
 void ClientReplicaPipeline::tick_arms_dip(uint16_t self_handle) {
 	const uint32_t park = remote_walk_park_key(self_handle);
 	for (ClientEntityState &es : state_.entities)
-		if (remote_walk_key(es.handle) < park) arms_dip_row(es);
+		if (remote_walk_key(es.handle) < park && !person_takes_item_row(es, self_handle))
+			arms_dip_row(es);
 }
 
 void ClientReplicaPipeline::arms_dip_row(ClientEntityState &es) {

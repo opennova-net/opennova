@@ -160,6 +160,38 @@ void test_the_split_walk_runs_no_body_legs_over_an_item_row() {
 			org2->torso_roll != 0, "and its dip and roll");
 }
 
+// The walk with no own-body split (the HostClient view's, the authority never interpolating)
+// runs the lean decay, the arms dip and the lean ramp from its own legs over every row: an
+// item-row person takes none of them there either, an org2 row every one.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472;
+//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the dip
+//  @0x4B5CAB..0x4B5CE7, the ramp @0x4B7DBF]
+void test_the_unsplit_walk_runs_no_body_legs_over_an_item_row() {
+	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	view->set_item_catalog(person_catalog());
+	const auto body = [&](uint16_t handle, uint16_t type) {
+		ns::ClientEntityState &row = staged(*view, handle, type);
+		row.lean_angle = 0x01000000;
+		row.move_input = static_cast<uint8_t>(w::Entity::kMoveOrderLeanLeft);
+		row.pitch_kick_accum = 0x00100000;
+		row.arms_dip_ticks = 4;
+		row.roll_bam = 0x10000000;
+	};
+	body(0x0021, kEwepType);
+	body(0x0023, kOrg2Type);
+	view->tick_lean_decay(kNone);
+	view->tick_arms_dip(kNone);
+	view->tick_remote_motion(kNone);
+	view->tick_lean_ramp();
+	const ns::ClientEntityState *ewep = view->state().find(0x0021);
+	const ns::ClientEntityState *org2 = view->state().find(0x0023);
+	expect(ewep->lean_angle == 0x01000000 && ewep->pitch_kick_accum == 0x00100000 &&
+			ewep->arms_dip_ticks == 4 && ewep->torso_roll == 0,
+			"the unsplit walk runs no decay, dip, roll or ramp over the item row");
+	expect(org2->lean_angle != 0x01000000 && org2->pitch_kick_accum != 0x00100000 &&
+			org2->torso_roll != 0, "and every one over the org2 row");
+}
+
 // The recoil chase and its PRNG draw belong to the org2 and org1 updates: an item-row person
 // draws nothing and keeps its recoil, Yaw and Pitch words, so the shared stream's draws fall to
 // the org rows alone.
@@ -460,6 +492,7 @@ int main() {
 	test_the_respawn_edge_runs_the_reset();
 	test_the_walk_runs_the_bound_move_row();
 	test_the_split_walk_runs_no_body_legs_over_an_item_row();
+	test_the_unsplit_walk_runs_no_body_legs_over_an_item_row();
 	test_the_recoil_draws_nothing_for_an_item_row();
 	test_every_repair_request_is_queued();
 	test_the_update_runs_over_the_rows_words();
