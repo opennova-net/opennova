@@ -408,7 +408,6 @@ private:
 	void pump();
 	FrameSignals run_client_net_frame();
 	void wire_frame_providers();
-	void apply_weather_sample();
 	// The replica-world mirror and the authoritative appliers, through
 	// refresh_wire_collision_proxies (joiner_role_replica_world.cpp).
 	void materialize_replica_world();
@@ -438,8 +437,11 @@ private:
 	void sync_wire_collision_proxy_live(const replication::ClientEntityState &row);
 	// The live Flags bits a row's proxy carries for the traces' skip (0x2000001).
 	uint32_t wire_proxy_live_flags(const replication::ClientEntityState &row);
+	// The decoded-gameplay appliers: the S2C gameplay drains, the replayed round's
+	// spawn and the ENV sample (joiner_role_gameplay_events.cpp).
 	void apply_gameplay_events();
     void apply_round_event(const replication::ClientRoundEvent &);
+	void apply_weather_sample();
 
 	opennova::IDatagramSocket *socket_ = nullptr;
 	PeerAddr host_addr_{};
