@@ -773,6 +773,18 @@ inline constexpr Normalization kNormalizations[] = {
 			"pool-2 buildings under their placed spots (0x213F under 42 at the local offset "
 			"(2.94, 0.45, -0.69)), where our x8 host sent world records; read anchor-relative, "
 			"the building-local offsets sat about 3 units from the joiner" },
+	{ "entity.short_window", MaskKind::Field, 'S', 0x00A, "entity motion over a short window", 0,
+			"a window under 16 steady frames holds a slice of an entity's periodic motion, as "
+			"it does of the route nibbles (frame.phase_counter): a boat at rest on the water "
+			"heaves on a sine whose phase steps 0.0348889 a tick (Entity_ApplyBreathingOscillation "
+			"@0x463BE0, the step @0x463BEE) from 3pi/2 at the rest's latch "
+			"(Entity_ProcessPlatformPhysics @0x481870, @0x4839FA..0x483A07), one cycle in 180.09 "
+			"ticks, and 16 frames at the 12-tick send cadence span 192. x8's tdh-i3a-tdm RR and "
+			"x11's OR, the anchor fixed, show V4110's z code heave 2.88 s a cycle, +-48 codes, "
+			"on both hosts; kick's six frames (1.1 s before the punt) caught the slope on x8's RR "
+			"(V range 640), less on RR-aa (256, its displacement 0 against RR's 384) and x10's "
+			"OO (256), and the crest on x11's OO (0). The entity range, displacement and step "
+			"rows compare only with 16 steady frames or more on both sides" },
 	{ "round.target", MaskKind::Field, 'S', 0x00A, "round event flags / target", 0,
 			"a S2C 0x0A round event carries flag 0x40 and its target word when the shooter's AI "
 			"slot word (+0x68 -> +0xC) names a target at the send, the target's pool handle or "

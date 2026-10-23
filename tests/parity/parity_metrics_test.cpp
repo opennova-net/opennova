@@ -3331,6 +3331,24 @@ void test_position_quantum() {
 			"entity_V_position_displacement_p90", "", "pass");
 	expect_row(judge_case(vehicle(1, kDrive), vehicle(2, kDrive), vehicle(3, 0), "OO"), 'S',
 			"entity_V_position_displacement_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	// x8 / x10 / x11's kick: six steady frames before the punt hold a slice of the boats'
+	// at-rest heave, 180 ticks a cycle, so under 16 steady frames on either side the entity
+	// rows skip (entity.short_window); sixteen on both sides compare again.
+	auto cut = [](wire::ParityTrace trace, size_t keep) {
+		std::vector<wire::ParityFrameState> frames;
+		size_t steady = 0;
+		for (const wire::ParityFrameState &f : trace.frames)
+			if (f.ts_ns < kSteadyStart || steady++ < keep)
+				frames.push_back(f);
+		trace.frames = std::move(frames);
+		return trace;
+	};
+	expect_row(judge_case(cut(vehicle(1, kDrive), 6), cut(vehicle(2, kDrive), 6),
+					   cut(vehicle(3, 0), 6), "OO"),
+			'S', "entity_V_position_displacement_p90", "", "skip");
+	expect_row(judge_case(cut(vehicle(1, kDrive), 16), cut(vehicle(2, kDrive), 16),
+					   cut(vehicle(3, 0), 16), "OO"),
+			'S', "entity_V_position_displacement_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
 }
 
 // x8's 01tr-coop (L7-s19): a civilian standing on the building under its placed spot streams

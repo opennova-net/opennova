@@ -919,6 +919,17 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 	// carrier word, so a carrier-local offset is a position in its carrier's frame and
 	// no step or motion key spans two frames.
 	static_assert(has_normalization("entity.carrier"));
+	// A window under 16 steady frames holds a slice of an entity's periodic motion, as it
+	// does of the route nibbles: a boat at rest on the water heaves on a sine whose phase
+	// steps 0.0348889 a tick [orig: Entity_ApplyBreathingOscillation @0x463BE0 (the step
+	// @0x463BEE)] from 3pi/2 [orig: Entity_ProcessPlatformPhysics @0x481870 (the latch
+	// @0x4839FA..0x483A07)], one cycle in 180.09 ticks, and 16 frames at the 12-tick send cadence
+	// span 192. So the dynamic rows compare only with 16 or more on both sides
+	// (entity.short_window).
+	static_assert(has_normalization("entity.short_window"));
+	constexpr size_t kMotionWindowFrames = size_t(kFrameFlags2RouteMask) + 1;
+	const bool short_window = steady_frames(rr).size() < kMotionWindowFrames ||
+			steady_frames(other).size() < kMotionWindowFrames;
 	for (const char cls : { 'P', 'V', 'I' }) {
 		std::vector<const E *> ca, cb;
 		for (const E *e : a)
@@ -960,10 +971,17 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 			return out;
 		};
 		const double modulus = cls == 'V' ? 65536.0 : 256.0;
+		const size_t first_dynamic = out.size();
 		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_position", samples(ca, false),
 				samples(cb, false), 0.0, false);
 		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_orientation", samples(ca, true),
 				samples(cb, true), modulus, false);
+		if (short_window)
+			for (size_t i = first_dynamic; i < out.size(); ++i) {
+				out[i].comparable = false;
+				out[i].reference_short = true;
+				out[i].detail = "fewer than 16 steady frames: an entity's motion is a phase slice";
+			}
 	}
 }
 
