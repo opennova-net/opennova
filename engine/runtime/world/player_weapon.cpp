@@ -1360,6 +1360,30 @@ uint32_t power_throw_windup_start(World &world, LocalPlayerWeapon &w) {
 	return fireable && has_ammo ? local_weapon_input_tick(world) : 0u;
 }
 
+// The fire face: after case 0x95's fire request returns nonzero, the local player's facial
+// slot (none: nothing) takes expression 4 for 15 transitions and its gaze straight ahead, (0,
+// 0), for 15 steps. The legs read the request's return at their record, as retail's call
+// returns it there: the pump requests the latched press or throw on the same slot, whose
+// current action only the walk moves between them, so the face lands ahead of the world
+// tick's facial step as retail's does ahead of its entity update.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - the press leg @0x4E0A25..0x4E0A78, the
+//  release leg @0x4E087F..0x4E08D2: the slot word entity+0x1B8 (0: none @0x4E0A33 /
+//  @0x4E088D), its row unk_26C77A0 + 100 * (word & 0x7FFF): +0x2C = 4, +0x30 = 15,
+//  +0x50 = 15, +0x48 / +0x4C = 0.0; the fields as CScarDecal_Update @0x57FA50 reads them
+//  (+0x2C the override @0x57FACB, +0x30 its timer @0x57FAD2, +0x48 / +0x4C the directed gaze
+//  @0x57FB2C / @0x57FB48, +0x50 its timer @0x57FB25..0x57FB35); Game_ProcessMainFrame
+//  @0x5263F0 - Input_ProcessFrame @0x52661D ahead of Entity_UpdateAllEntities @0x52674B
+//  (FaceAnim_UpdateAllSlots @0x580000, the call @0x4C21FB)]
+void local_player_fire_face(World &world) {
+	const Entity *player = world.registry.get(world.cached.local_player);
+	FacialSlot *face = player != nullptr ? world.facials.for_entity(*player) : nullptr;
+	if (face == nullptr) return;
+	face->expression_override = 4; // +0x2C
+	face->override_timer = 15;     // +0x30
+	face->directed_timer = 15;     // +0x50
+	face->directed_eyes = {};      // +0x48 / +0x4C
+}
+
 } // namespace
 
 void local_weapon_left_button_down(World &world, LocalPlayerWeapon &w,
@@ -1390,6 +1414,8 @@ bool local_weapon_release_fire(World &world, LocalPlayerWeapon &w) {
 	w.power_throw_start_tick = 0; // @0x4E0801
 	w.pending_throw_charge = power_throw_charge_from_hold(held);
 	w.power_throw_released = true; // the request @0x4E086F, the pump's
+	if (w.active && weapon_fsm_fire_request_taken(w.def, *active_local_weapon_slot(world, w)))
+		local_player_fire_face(world); // @0x4E0877..0x4E08D2
 	return true;
 }
 
@@ -1620,6 +1646,8 @@ bool local_weapon_press_fire(World &world, LocalPlayerWeapon &w, const PlayerVie
 	local_weapon_set_input(w, view, true, true, false);
 	w.fire_press_dispatched = true;
 	w.fire_press_dry = dry;
+	if (weapon_fsm_fire_request_taken(w.def, *active_local_weapon_slot(world, w)))
+		local_player_fire_face(world); // @0x4E0A0E..0x4E0A78
 	return true;
 }
 

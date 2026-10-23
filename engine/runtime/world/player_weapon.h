@@ -568,7 +568,9 @@ bool local_weapon_power_throw_press(World &world, LocalPlayerWeapon &w);
 // ticks (the input phase's tick less its start) become the charge byte
 // (power_throw_charge_from_hold), and the pump requests the throw with it
 // (LocalPlayerWeapon::power_throw_released). Any def: the leg reads the windup alone. A
-// release with no windup does nothing. True = a throw requested.
+// release with no windup does nothing. True = a throw requested. A request the slot takes
+// (weapon_fsm_fire_request_taken) sets the fire face, as the press leg's does
+// (local_weapon_press_fire; @0x4E0877..0x4E08D2).
 // [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95's release leg @0x4E07E9..0x4E0879
 //  (the start test @0x4E07EF, held @0x4E07F7..0x4E07FC, the clear @0x4E0801, the charge
 //  @0x4E07FE..0x4E085A, WeaponSlot_RequestFire(EquippedSlot, 0x96, charge) @0x4E086F)]
@@ -600,7 +602,9 @@ bool local_weapon_request_reload(World &world, LocalPlayerWeapon &w,
 // takes the slot by its current action whatever the order against a reload) with no WAC
 // gate of its own; a sourceless frame's press keeps the pump's gate. True = latched.
 // So the script's same-update pass sees the press, and a BlockFire it sets there refuses
-// no press dispatched ahead of it.
+// no press dispatched ahead of it. A request the slot takes (weapon_fsm_fire_request_taken,
+// read here at the record as retail's call returns it) sets the local player's fire face
+// (its facial slot's expression 4 for 15 transitions, its gaze ahead for 15 steps).
 // [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95's press leg: the EquippedSlot
 //  @0x4E08DC..0x4E08EC, the WAC latch dword_C6EA44[type] @0x4E0961..0x4E0968 and the
 //  BlockFire test dword_C6EA6C @0x4E096F..0x4E0976, OnlyFireScoped (0x4000) @0x4E097C..0x4E098B
