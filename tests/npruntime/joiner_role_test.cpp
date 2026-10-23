@@ -3954,6 +3954,153 @@ bool run_the_respawn_arm_lands_l_in_its_receive() {
 			"respawn arm: the next 0x0C keeps the record's pitch and the composed heading");
 }
 
+// A dead L in a seeded session, for the self record's arm cases below: L spawned with its
+// def, its self row typed, one alive self record, then a dead one.
+struct DeadLocalRig {
+	Harness h;
+	def::DefItemDef defs[2]{};
+	def::DefItemsFile items{};
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+
+	DeadLocalRig() {
+		w::World &world = h.kernel->world;
+		defs[0].id = 100000;
+		defs[1].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+		defs[1].type = 3;
+		defs[1].hp = 100;
+		std::strcpy(defs[1].move_function, "org2");
+		items = def::DefItemsFile{defs, 2};
+		h.kernel->set_items_table(&items);
+		h.kernel->resolve_collision_instances();
+		h.kernel->collision.build_initial_tables(world);
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+				1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h.role.run_tick(h.input);
+		auto &self_row = h.role.runtime->state().upsert(0x0005);
+		self_row.cls = EntityClass::Player;
+		self_row.type_id = w::kPlayerInfantryTypeId;
+		deposit(100, open());
+		h.role.run_tick(h.input);
+		PlayerCompactRecord dead = open();
+		dead.state_flags = w::kEntityFlagDead;
+		deposit(0, dead);
+		h.role.run_tick(h.input);
+	}
+	~DeadLocalRig() { h.kernel->set_items_table(nullptr); }
+
+	static PlayerCompactRecord open() {
+		PlayerCompactRecord player;
+		player.carrier_handle = 0xFFFF;
+		return player;
+	}
+	// One S2C 0x0A carrying the self record, into the receive queue (the next frame folds it).
+	void deposit(int16_t health, const PlayerCompactRecord &player) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = health;
+		FrameUpdateRecord rec;
+		rec.handle = 0x0005;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player = player;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+	}
+	w::Entity *local() {
+		w::World &world = h.kernel->world;
+		return world.registry.get(world.cached.local_player);
+	}
+};
+
+// V-ROLL-BD N1 (D-NET-NEW-L2-55): the respawn arm writes no stage word; the record's stage owns
+// them. A receive whose first self record is the arm's and whose second is a later alive one
+// lands L on the arm's sample, which the frame's 0x0C carries, and leaves the chase's stage at
+// the later record's sample, which the body's own update then reaches: more than 2 units off,
+// the joiner's own body snaps to it.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FD7..0x4C0FFC, the arm
+//  @0x4C1109..0x4C114C; Entity_ResetToSpawnState @0x4B9610 (no stage store), Game_InitNewRound
+//  @0x422740 (no stage store); Entity_UpdateInfantryPlayerBody @0x4B40E0 - the savedLivePose
+//  stamp @0x4B4187..0x4B419C, the gap @0x4B42C1..0x4B431A, the snap @0x4B4332..0x4B434A]
+bool run_the_respawn_arm_leaves_the_stage_to_the_later_record() {
+	DeadLocalRig r;
+	w::Entity *local = r.local();
+	if (!expect(local != nullptr && !local->alive && r.h.role.runtime->deployment_pick_pending(),
+			"arm stage: the death downs L and owes a pick"))
+		return false;
+	if (!expect(r.h.role.runtime->queue_deployment_pick(0xFFFF), "arm stage: the Default Spawn pick"))
+		return false;
+	r.h.role.run_tick(r.h.input);
+	// The release's receive: the arm's record at x 16 units, then a later alive one at x 24.
+	PlayerCompactRecord arm = DeadLocalRig::open();
+	arm.pos_x_compressed = 0x0808;
+	PlayerCompactRecord later = DeadLocalRig::open();
+	later.pos_x_compressed = 0x0C08;
+	const int32_t arm_x = network_decompress_fixedpoint(0x0808);
+	const int32_t later_x = network_decompress_fixedpoint(0x0C08);
+	if (!expect(arm_x == 16 * 65536 && later_x == 24 * 65536,
+			"arm stage: the two records' x words are 16 and 24 units"))
+		return false;
+	r.h.socket.datagrams.clear();
+	r.deposit(100, arm);
+	r.deposit(100, later);
+	r.h.role.run_tick(r.h.input);
+	local = r.local();
+	if (!expect(local != nullptr && local->alive, "arm stage: the first record's arm revives L"))
+		return false;
+	ProtocolMessage message;
+	EntityPacketSubHeader sub;
+	PlayerExtendedUplink up;
+	size_t header_bytes = 0, body_bytes = 0;
+	if (!expect(r.h.socket.last_message(0x0C, message) &&
+					decode_entity_packet_sub_header(message.payload.data(),
+							message.payload.size(), sub, header_bytes) &&
+					decode_player_extended_uplink(message.payload.data() + header_bytes,
+							message.payload.size() - header_bytes, up, body_bytes),
+			"arm stage: the release frame ships its 0x0C"))
+		return false;
+	if (!expect(std::abs(up.pos_x - arm_x) < 65536,
+			"arm stage: the frame's 0x0C carries the arm's sample"))
+		return false;
+	return expect(std::abs(local->position.x.q16 - later_x) < 0x4000,
+			"arm stage: the chase's stage is the later record's, so L snaps to it");
+}
+
+// D-NET-NEW-L2-59: a body its own update destroyed is a def-less slot to the receive. Its self
+// record fails the pre-apply check: a C2S 0x0F asks for the slot by its handle and nothing of
+// the record lands, so a dead L's alive record is no respawn arm: the dead latch holds and L
+// stays down, until a 0x18 rebuilds the slot.
+// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - the def null test @0x4307B5..0x4307BA, the 0x0F
+//  @0x4307E9, the target nulled @0x4307F2; NetPacket_SerializePlayerState @0x4C09C0 - the
+//  entity and def tests @0x4C0F8A / @0x4C0F92 ahead of the arm @0x4C1109; Entity_Destroy
+//  @0x43E810 - the memset @0x43EA70]
+bool run_a_defless_l_drops_its_own_record() {
+	DeadLocalRig r;
+	w::Entity *local = r.local();
+	w::AiEntity *local_ai = r.h.kernel->local.player_ai();
+	if (!expect(local != nullptr && local_ai != nullptr && !local->alive &&
+					r.h.role.runtime->local_player_dead(),
+			"def-less L: the death downs L"))
+		return false;
+	// L's own update destroys it in place (the ewep mover's stale-ground leg).
+	w::clear_body_block_below_2b4(*local_ai, *local);
+	r.h.socket.datagrams.clear();
+	r.deposit(100, DeadLocalRig::open());
+	r.h.role.run_tick(r.h.input);
+	r.h.role.run_tick(r.h.input);
+	int asks = 0;
+	for (const ProtocolMessage &m : r.h.socket.messages_with(c2s::ENTITY_INFO_QUERY))
+		if (m.payload.size() == 2 && (m.payload[0] | (m.payload[1] << 8)) == 0x0005) ++asks;
+	if (!expect(asks == 1, "def-less L: its self record asks one 0x0F by the handle")) return false;
+	local = r.local();
+	return expect(r.h.role.runtime->local_player_dead() && local != nullptr && !local->alive,
+			"def-less L: the alive record is no respawn arm; L stays down");
+}
+
 // D-NET-NEW-L2-56: the mission start's model reload registers each pool-0 person row's
 // animation map in the load. A pool-0 row takes its channel from its row's animDef there, and
 // the frame's row pass leaves it; a pool-1 row (that leg loads models alone) waits for the
@@ -5928,6 +6075,8 @@ int main() {
 	ok &= run_a_seated_death_sends_the_seat_leave();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_the_respawn_arm_lands_l_in_its_receive();
+	ok &= run_the_respawn_arm_leaves_the_stage_to_the_later_record();
+	ok &= run_a_defless_l_drops_its_own_record();
 	ok &= run_the_mission_start_reload_registers_pool0_channels();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_respawn_key_before_the_first_tail();

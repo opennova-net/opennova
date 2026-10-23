@@ -429,17 +429,39 @@ void JoinerRole::spawn_and_arm_local_player() {
 	if (init_local_player_at_mission_start()) run_mission_start_local_block();
 }
 
+// L is the client's own pool-0 slot, so a body its own update destroyed (no def, until a 0x18
+// rebuilds it) is a def-less slot to the receive: each self record fails the pre-apply check,
+// which queues a C2S 0x0F by the handle and lands nothing of the record (no dead store or alive
+// floor, no respawn arm, no stage), as the replica's def-less row (type 0) does
+// (D-NET-NEW-L2-59). The frame's net leg runs it ahead of its receive.
+// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - the def null test @0x4307B5..0x4307BA, the 0x0F
+//  @0x4307E9, the target nulled @0x4307F2; NetPacket_SerializePlayerState @0x4C09C0 - the
+//  entity and def tests @0x4C0F8A / @0x4C0F92 ahead of the stage and the respawn arm;
+//  Entity_Destroy @0x43E810 - the memset @0x43EA70]
+void JoinerRole::mark_defless_self_slot() {
+	if (!local_spawned_ || !runtime->has_self_handle()) return;
+	world::World &world = kernel_->world;
+	const world::Entity *local = world.registry.get(world.cached.local_player);
+	if (local == nullptr || local->has_item_def) return;
+	if (replication::ClientEntityState *self = runtime->state().find(runtime->self_handle()))
+		self->type_id = 0;
+}
+
 // The self record's respawn arm onto L, where the record decode runs it: inside the receive,
 // past the record's stage and ahead of its class pick and Flags fold, so the release frame's
 // own send block builds the C2S 0x0C from the redeployed body. The arm writes the record's
 // world sample, its composed Yaw (a carrier's Yaw plus the record's byte, never the byte of
 // that sum) and its Pitch byte, which is the local body's look pitch (+0x14), then
-// g_LocalPlayerLookYaw, the reset and Game_InitNewRound. L then falls from the host's spawn
-// height under its own update, as a stock joiner's does (D-NET-NEW-L2-55).
+// g_LocalPlayerLookYaw, the reset and Game_InitNewRound. The arm's Roll store reads a word
+// case 2 never fills, and the reset zeroes Roll after it, so L's Roll is 0. The chase's stage
+// is the record stage's alone (fold_local_record): neither the arm nor the reset writes it.
+// L then falls from the host's spawn height under its own update, as a stock joiner's does
+// (D-NET-NEW-L2-55).
 // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FD7..0x4C0FFC, the dead
-//  test @0x4C1109, Position @0x4C110F..0x4C111D, Yaw @0x4C1120, Pitch @0x4C1123,
-//  g_LocalPlayerLookYaw @0x4C1135, Entity_ResetToSpawnState called @0x4C113C, Game_InitNewRound
-//  called @0x4C114C, the climate pick from @0x4C1248, the Flags fold @0x4C12FF;
+//  test @0x4C1109, Position @0x4C110F..0x4C111D, Yaw @0x4C1120, Pitch @0x4C1123, Roll
+//  @0x4C112A, g_LocalPlayerLookYaw @0x4C1135, Entity_ResetToSpawnState called @0x4C113C,
+//  Game_InitNewRound called @0x4C114C, the climate pick from @0x4C1248, the Flags fold
+//  @0x4C12FF; Entity_ResetToSpawnState @0x4B9610 - Roll = 0 @0x4B97E3;
 //  Entity_TransformLocalToWorld @0x43BD00 - out[3] @0x43BE7E, out[4] @0x43BE8A;
 //  Game_InitNewRound @0x422740 - g_LocalPlayerLookYaw = Yaw @0x4227E3]
 void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &arm) {
@@ -480,13 +502,9 @@ void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &ar
 	local_ai->health = static_cast<int16_t>(local->health);
 	local_ai->vel_x = 0;
 	local_ai->vel_y = 0;
-	local_ai->net_smooth_target[0] = arm.position[0];
-	local_ai->net_smooth_target[1] = arm.position[1];
-	local_ai->net_smooth_target[2] = arm.position[2];
-	local_ai->net_smooth_heading = heading;
-	local_ai->net_smooth_pitch = pitch;
-	local_ai->net_interp_progress = 0;
-	local_ai->net_interp_steps = 0;
+	// No stage word: the arm and the reset write none, so the chase targets the receive's
+	// last self record, which fold_local_record staged (a later record in the same receive
+	// than the arm's) (V-ROLL-BD N1).
 	local_ai->collide_state = {};
 
 	world::InfantryState &inf = local_ai->inf;

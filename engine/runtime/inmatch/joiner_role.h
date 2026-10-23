@@ -477,6 +477,9 @@ private:
 	void fold_local_record();
 	// The self record's respawn arm onto L, in the receive (D-NET-NEW-L2-55).
 	void land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &arm);
+	// Ahead of the receive: an L with no def types its self row 0, the replica's def-less slot,
+	// so its records drop and ask the C2S 0x0F (D-NET-NEW-L2-59).
+	void mark_defless_self_slot();
 	// A 0x18 naming the joiner's own handle rebuilds L in place (its ewep update's destroy
 	// asks for one), once per such record.
 	void rebuild_local_from_full_spawn();

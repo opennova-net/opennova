@@ -2098,6 +2098,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	const uint32_t self_revision_before =
 			self_row_before != nullptr ? self_row_before->compact_revision : 0;
 	rt.set_local_player_position(world); // L, the receive handlers' local player
+	mark_defless_self_slot(); // a destroyed L's records drop (D-NET-NEW-L2-59)
 	// The receive handlers' writes on L, in the receive's place: the runtime runs this leg
 	// right after its receive pump, ahead of the send block, open or not
 	// (ClientRuntime::AfterReceive). Each fold applies what the receive brought (each is
