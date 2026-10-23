@@ -37,8 +37,14 @@ float foliage_detail_wind_phase(uint32_t time_ms, int32_t wind_osc_ring0) {
 	constexpr double kTwoPi = 6.283185307179586;
 	// flt_7DE9D0 = 0x35CCCCCD, the float nearest 1/655360 (@ 0x600767).
 	constexpr float kRingScale = 0x1.99999Ap-20f;
-	const double clock_term =
-			std::fmod(static_cast<double>(time_ms) * 0.003, kTwoPi);
+	// flt_7DE9D4 = 0x3B449BA6, the float nearest 0.003 (@ 0x600757).
+	constexpr float kClockScale = 0x1.89374Cp-9f;
+	// The GetTickCount DWORD is read signed: `fild` with no unsigned fix-up
+	// [orig: the store @0x60070C, the read @0x60074A]. fmod keeps the sign; the
+	// sine is periodic.
+	const double clock_term = std::fmod(
+			static_cast<double>(static_cast<int32_t>(time_ms)) * static_cast<double>(kClockScale),
+			kTwoPi);
 	return static_cast<float>(clock_term +
 			static_cast<double>(wind_osc_ring0) * static_cast<double>(kRingScale));
 }

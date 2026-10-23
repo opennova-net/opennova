@@ -116,7 +116,9 @@ LoadingBarRects loading_bar_rects(int surface_w, int surface_h, int displayed);
 inline constexpr uint32_t kLoadingBarBorderGray = 0xC0C0C0u;
 inline constexpr uint32_t kLoadingBarFillArgb = 0xFFEB0000u;
 
-// Redraw throttle [orig: GetTickCount() - last >= 100 @ 0x586c24].
+// Redraw throttle: GetTickCount() - last >= 100, the difference read signed
+// [orig: LoadingScreen_UpdateAndPresent `sub eax, [esi+1Ch]; cmp eax, 64h; jge`
+//  @0x586C10..0x586C1A; the gate @ 0x586c24].
 inline constexpr int kLoadingPresentIntervalMs = 100;
 
 // Redraw + present when the window-pump interval elapses or a real checkpoint

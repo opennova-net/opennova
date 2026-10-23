@@ -153,13 +153,16 @@ func present(force := false) -> void:
 	if _texture == null:
 		return  # no background loaded -> no screen at all [orig: @ 0x586bfd]
 	# The process's one clock (GetTickCount), read now: the screen presents inside a
-	# blocking load, past the frame's sample. The elapsed time is the DWORD difference,
-	# compared unsigned (held to the native int's range, which keeps the compare).
+	# blocking load, past the frame's sample. The elapsed time is the DWORD difference
+	# read signed, as retail compares it (engine runtime/hud/loading_screen.h
+	# loading_present_due carries the witness).
 	var now := GameWorld.tick_count_ms()
+	var elapsed := (now - _last_present_ms) & 0xFFFFFFFF
+	if elapsed >= 0x80000000:
+		elapsed -= 0x100000000
 	# The shared native due rule (interval elapsed or a real checkpoint changed)
 	# lives in engine/runtime/hud/loading_screen.h.
-	var due := HudPos.loading_present_due(mini((now - _last_present_ms) & 0xFFFFFFFF, 0x7FFFFFFF),
-			_last_drawn_progress != _progress)
+	var due := HudPos.loading_present_due(elapsed, _last_drawn_progress != _progress)
 	if not (force or due):
 		return
 	_last_present_ms = now
