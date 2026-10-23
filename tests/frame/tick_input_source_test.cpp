@@ -9,6 +9,7 @@
 // dispatch (D-NET-NEW-LI-3).
 #include <runtime/controls/controls.h> // action_code (the pause row's record)
 #include <runtime/devtools/scripted_input.h>
+#include <runtime/hud/hud_toggles.h> // the HUD toggle rows' catalog rows
 #include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit record)
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
@@ -1013,6 +1014,148 @@ void test_the_fire_record_tests_its_binding_live() {
 	}
 }
 
+// D-NET-710 (the weapon rows' leg, LI-s20): fire and reload reach the weapon only through records
+// that pass the dispatcher's whole head by their rows' flags (attack_1 0x8C400C01, magazine
+// 0x0C000801), the auto-fire continuation through its deferred record. So a fire press in the
+// pre-round timer (0x400) starts nothing and a key held past the timer fires only at its next
+// press, while the reload row, which carries no 0x400, reloads there; at round over (bit 0) a
+// running burst's deferred record drops and the burst ends, and the reload drops too.
+// [orig: Input_HandleActionBinding @0x49AD40 - the flags dword_8159AC[code * 0x6C] @0x49AD8D,
+//  0x400 with g_ClientPreRoundTimer @0x49ADB3..0x49ADC2, bit 0 with g_RoundOver
+//  @0x49ADEE..0x49AE16, the def+0x170 callback past them @0x49AEB6; the catalog rows' code and
+//  flags: attack_1 @0x816BCC (0x95, 0x8C400C01), magazine @0x816D7C (0xD3, 0x0C000801);
+//  Input_HandleActionBinding_0 @0x4E0420 - case 0x95 @0x4E07B5..0x4E07E3, case 0xD3's
+//  WeaponSlot_RequestReload @0x4E12E9; WeaponAction_Recoil @0x542DD0 - Input_IsBindingActive(0x95)
+//  @0x542E7F, Input_QueueDeferredEvent @0x542E9D; Input_ProcessFrame @0x49D520 -
+//  Input_FlushDeferredEvents @0x49D591, the drain @0x49D599..0x49D5D8]
+void test_the_weapon_rows_take_the_whole_head() {
+	using opennova::controls::InputEventOrigin;
+	using opennova::controls::InputEventQueue;
+	const int32_t fire = opennova::controls::action_code(43);   // 149
+	const int32_t reload = opennova::controls::action_code(47); // 211
+	CHECK(fire == 149 && reload == 211, "the fire and reload rows' codes");
+	struct Device final : TickInputSource {
+		bool held = true;
+		std::vector<int32_t> next; // the records the next update's input frame queues
+		InputPacket sample_tick(uint32_t) override {
+			InputPacket p;
+			p.held_action_bits = held ? HELD_FIRE : 0u;
+			return p;
+		}
+		void queue_records(InputEventQueue &records) override {
+			for (const int32_t code : next)
+				(void)records.push({code, 0, 0, 0, false, InputEventOrigin::Device});
+			next.clear();
+		}
+	};
+	// A live local player holding a weapon the reload case takes: a magazine short of its
+	// capacity, a pool.
+	const auto arm = [](TickRecorder &role) -> opennova::world::LocalPlayerWeapon & {
+		spawn_local_player(role);
+		role.kernel.world.registry.get(role.kernel.world.cached.local_player)->health = 100;
+		opennova::world::LocalPlayerWeapon &w = role.kernel.local.weapon;
+		w.active = true;
+		w.def.clip_capacity = 30;
+		w.slot.clip = 12;
+		w.slot.reserve = 60;
+		return w;
+	};
+	FrameInput three;
+	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	{
+		// The pre-round timer: the press drops, the reload passes.
+		auto role = std::make_unique<TickRecorder>();
+		opennova::world::LocalPlayerWeapon &w = arm(*role);
+		role->kernel.world.cached.client_preround_timer = 5;
+		Device device;
+		device.next = {reload, fire};
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 3, "three updates");
+		CHECK(w.slot.next == opennova::world::weapon_action::kReload,
+				"the reload row carries no 0x400: it reloads in the pre-round");
+		CHECK(!w.fire_press_dispatched && !w.fire_pressed, "the pre-round drops the fire press");
+		// The timer ends with the key still held: no record, no fire.
+		role->kernel.world.cached.client_preround_timer = 0;
+		CHECK(session.advance(three).ticks_run() == 3, "three more updates");
+		CHECK(!w.fire_press_dispatched && !w.fire_pressed,
+				"a key held past the timer fires nothing without its next press");
+		device.next = {fire};
+		CHECK(session.advance(three).ticks_run() == 3, "the next press's updates");
+		CHECK(w.fire_press_dispatched && w.fire_pressed, "the next press fires");
+	}
+	for (const bool round_over : {false, true}) {
+		// A burst's deferred fire record (the recoil's re-queue) and a reload record, with the
+		// round running and over.
+		auto role = std::make_unique<TickRecorder>();
+		opennova::world::LocalPlayerWeapon &w = arm(*role);
+		opennova::world::World &world = role->kernel.world;
+		if (round_over) CHECK(world.match.finish(0, world), "the round ends");
+		role->kernel.local.queue_deferred_event(role->kernel.local.kDeferredFireCode);
+		Device device;
+		device.next = {reload};
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		three.tick_source = &device;
+		(void)session.advance(three);
+		CHECK(role->kernel.local.deferred_events.empty(), "the flush took the deferred record");
+		CHECK(w.fire_press_dispatched == !round_over,
+				round_over ? "at round over the head drops the burst's deferred record: it ends"
+				           : "a running round's deferred record goes on firing");
+		CHECK((w.slot.next == opennova::world::weapon_action::kReload) == !round_over,
+				round_over ? "at round over the head drops the reload"
+				           : "a running round's reload requests it");
+	}
+}
+
+// D-NET-710 (the HUD toggle rows' leg, LI-s20): the rows the HUD poll's head mask reads
+// (PlayerInputRouter::poll_hud_toggles fills HudKeyPoll::head_drops from the role's head at each
+// record's dispatch) take the whole head by their catalog flags, not only its pause and dead
+// legs: dotsize, ShowFriendly, AudioEmote and RadioMacro (codes 216 / 30 / 33 / 54, flags
+// 0x0C000C01) drop in the pre-round timer (0x400), at round over and under the pause word (bit 0);
+// the pause row (0x05000800) carries no head gate.
+// [orig: Input_HandleActionBinding @0x49AD40 - the flags @0x49AD8D, 0x400 @0x49ADB3..0x49ADC2,
+//  the pause word @0x49ADDD..0x49ADE8, g_RoundOver @0x49ADEE..0x49AE16; the static rows' code and
+//  flags: dotsize @0x8169B0 (0xD8), ShowFriendly @0x8183D8 (0x1E), AudioEmote @0x818444 (0x21),
+//  RadioMacro @0x8184B0 (0x36), each 0x0C000C01]
+void test_the_hud_toggle_rows_take_the_whole_head() {
+	namespace hud = opennova::hud;
+	const int32_t codes[4] = {
+			opennova::controls::action_code(hud::hud_toggle_row_catalog_row(hud::kRowDotsize)),
+			opennova::controls::action_code(hud::hud_toggle_row_catalog_row(hud::kRowFriendlyTags)),
+			opennova::controls::action_code(hud::hud_toggle_row_catalog_row(hud::kRowAudioEmote)),
+			opennova::controls::action_code(hud::hud_toggle_row_catalog_row(hud::kRowRadioMacro))};
+	CHECK(codes[0] == 216 && codes[1] == 30 && codes[2] == 33 && codes[3] == 54,
+			"the four rows' dispatch codes");
+	const int32_t pause =
+			opennova::controls::action_code(hud::hud_toggle_row_catalog_row(hud::kRowPause));
+	CHECK(pause == 25, "the pause row's code");
+	auto role = std::make_unique<TickRecorder>();
+	spawn_local_player(*role);
+	opennova::world::World &world = role->kernel.world;
+	world.registry.get(world.cached.local_player)->health = 100;
+	const auto all_admitted = [&role, &codes] {
+		for (const int32_t code : codes)
+			if (!role->action_head_admits(code)) return false;
+		return true;
+	};
+	const auto none_admitted = [&role, &codes] {
+		for (const int32_t code : codes)
+			if (role->action_head_admits(code)) return false;
+		return true;
+	};
+	CHECK(all_admitted(), "a live player in a running round");
+	world.cached.client_preround_timer = 5;
+	CHECK(none_admitted() && role->action_head_admits(pause), "the pre-round timer (0x400)");
+	world.cached.client_preround_timer = 0;
+	world.rules.pause_word = true;
+	CHECK(none_admitted() && role->action_head_admits(pause), "the pause word (bit 0)");
+	world.rules.pause_word = false;
+	CHECK(world.match.finish(0, world), "the round ends");
+	CHECK(none_admitted() && role->action_head_admits(pause), "round over (bit 0)");
+}
+
 // D-CTRL-6 (LI-s16): the held USE row's record (code 177 = 0xB1) is the analog pass's, behind
 // the update's key records, and its arm runs at its dispatch: a reset record ahead of it in the
 // drain (a Respawn's, an Escape's, a deploy pick's Input_ResetAllState) drops it, so the frame
@@ -1102,6 +1245,8 @@ int main() {
 	test_a_menu_screen_an_update_opens_gates_the_frames_later_updates();
 	test_a_deploy_pick_is_a_record_of_the_drain_in_key_order();
 	test_the_fire_record_tests_its_binding_live();
+	test_the_weapon_rows_take_the_whole_head();
+	test_the_hud_toggle_rows_take_the_whole_head();
 	test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
