@@ -289,6 +289,9 @@ void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits
 	controls::InputEventRecord record;
 	while (input_events_.pop(record)) dispatch_record(record, source);
 	pause_flips_ = false;
+	// The frame's tail behind the drain: the USE row's release edge (TickInputSource::
+	// end_input_frame) [orig: Input_ProcessFrame @0x49D520 - @0x49D6C1..0x49D6DC].
+	if (source != nullptr) source->end_input_frame();
 }
 
 void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSource *source) {

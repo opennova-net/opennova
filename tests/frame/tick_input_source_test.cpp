@@ -934,6 +934,76 @@ void test_the_fire_record_tests_its_binding_live() {
 	}
 }
 
+// D-CTRL-6 (LI-s16): the held USE row's record (code 177 = 0xB1) is the analog pass's, behind
+// the update's key records, and its arm runs at its dispatch: a reset record ahead of it in the
+// drain (a Respawn's, an Escape's, a deploy pick's Input_ResetAllState) drops it, so the frame
+// latches no hold. The input frame's tail (the USE release edge) runs after the drain, once per
+// update whose input frame ran, and not under a menu screen.
+// [orig: Input_ProcessAnalogBindings @0x4995F0 (the queue @0x499660) from
+//  Input_ProcessPlayerFrame @0x49D50C; Input_ProcessFrame @0x49D520 - the drain
+//  @0x49D599..0x49D5E7, the release edge @0x49D6C1..0x49D6DC; Input_ResetAllState @0x497ED0
+//  (the memset @0x497EE6)]
+void test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain() {
+	using opennova::controls::InputEventOrigin;
+	using opennova::controls::InputEventQueue;
+	using opennova::controls::InputEventRecord;
+	const int32_t use = opennova::controls::action_code(44);
+	CHECK(use == 177, "the useitem row's code");
+	struct UseDevice final : TickInputSource {
+		TickRecorder *role = nullptr;
+		std::vector<int32_t> codes;
+		bool queued = false;
+		bool menu = false;
+		std::vector<int32_t> dispatched;
+		std::vector<size_t> tails; // the dispatched count at each tail
+		InputPacket sample_tick(uint32_t) override {
+			InputPacket p;
+			if (menu) p.held_action_bits = HELD_MENU_OPEN;
+			return p;
+		}
+		void queue_records(InputEventQueue &records) override {
+			if (queued) return;
+			queued = true;
+			for (const int32_t code : codes)
+				(void)records.push({code, 0, 0, 0, false, InputEventOrigin::Device});
+		}
+		void dispatch_record(const InputEventRecord &record) override {
+			dispatched.push_back(record.code);
+			if (record.code == 300) role->reset_all_input_state();
+		}
+		void end_input_frame() override { tails.push_back(dispatched.size()); }
+	};
+	FrameInput three;
+	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	{
+		auto role = std::make_unique<TickRecorder>();
+		UseDevice device;
+		device.role = role.get();
+		device.codes = {201, 300, use};
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 3, "three updates");
+		CHECK(device.dispatched == std::vector<int32_t>({201, 300}),
+				"the reset ahead of USE's record drops it: no arm runs");
+		CHECK(device.tails == std::vector<size_t>({2u, 2u, 2u}),
+				"the tail follows each update's drain, once per input frame");
+	}
+	{
+		auto role = std::make_unique<TickRecorder>();
+		UseDevice device;
+		device.role = role.get();
+		device.codes = {use};
+		device.menu = true;
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		three.tick_source = &device;
+		CHECK(session.advance(three).ticks_run() == 3, "three updates");
+		CHECK(device.dispatched.empty() && device.tails.empty(),
+				"under a menu screen no input frame runs: no record, no tail");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -952,6 +1022,7 @@ int main() {
 	test_a_menu_screen_an_update_opens_gates_the_frames_later_updates();
 	test_a_deploy_pick_is_a_record_of_the_drain_in_key_order();
 	test_the_fire_record_tests_its_binding_live();
+	test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

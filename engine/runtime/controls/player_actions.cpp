@@ -136,56 +136,68 @@ PlayerActions::PlayerActions() : rows_(std::size(kRows)) {}
 //  the release edge @0x49d6c1..0x49d6dc -> Entity_ToggleVehicleMount
 //  @0x436950; Input_HandleActionBinding_0 case 0xB1 @0x4e0a84, LABEL_121
 //  @0x4e0b65..0x4e0b71]
-void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,
-		PlayerActionFrame &frame) {
+void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate) {
 	use_held_prev_ = use_latched_;
 	use_latched_ = false;
-	// The held row runs case 0xB1 on every frame a key is down, under the
-	// row's mode word (bit 1 alive, bit 2 the death screen): its arm comes
-	// through the press latch, and only the mount chain sets the hold latch,
-	// so a frame whose arm leaves the chain ends the hold as a release does
-	// (the armory opens first, then the release edge's toggle).
+	use_frame_aged_ = true;
+	// The held row queues its record (case 0xB1) on every frame a key is down, under the
+	// row's mode word (bit 1 alive, bit 2 the death screen): the poll's last record, the
+	// analog pass running last in the player frame; its arm runs at the record's dispatch
+	// (use_item_record) and the release edge at the frame's tail (end_input_frame).
 	// [orig: Input_ProcessAnalogBindings @0x4995F0 -- the keys @0x499635, the
-	//  mode word @0x49963E..0x499650; case 0xB1 @0x4E0A82, the mount chain
-	//  @0x4E0B5E..0x4E0B71]
+	//  mode word @0x49963E..0x499650, the queue @0x499660; Input_ProcessPlayerFrame - the
+	//  analog pass's call @0x49D50C]
 	const bool use_admitted = !gate.death_screen || (row_modes("useitem") & 2u) != 0;
 	// A key held through a menu close's reset reads up in the device's key
 	// state (KeyStateReset), so the row reads it up too.
 	const bool use_down = source.pressed("useitem");
-	if (gate.active && use_admitted && use_down) {
-		// The case turns the auto-run's toggle off at its head (D-NET-563).
-		// [orig: Input_HandleActionBinding_0 case 0xB1 - Input_DisableScrollLock @0x4E0A84]
-		frame.scroll_lock_off.push_back(row_code("useitem"));
-		const UseItemPressArm arm = gate.take_use_item_arm ? gate.take_use_item_arm()
-		                                                   : UseItemPressArm::kMountChain;
-		if (arm == UseItemPressArm::kMountChain) {
-			if (!use_held_prev_) use_hold_consumed_ = false;
-			use_latched_ = true;
-		} else if (arm == UseItemPressArm::kOpenArmory) {
-			frame.requests.push_back({Action::OpenArmory});
-		} else if (arm == UseItemPressArm::kOpenVehicleMenu) {
-			frame.requests.push_back({Action::OpenVehicleMenu});
-		}
+	use_row_down_ = gate.active && use_admitted && use_down;
+	menu_digits_ = gate.active && (gate.emotes_menu_open || gate.radio_menu_open);
+}
+
+PlayerActionFrame PlayerActions::use_item_record(UseItemPressArm arm) {
+	PlayerActionFrame frame;
+	// The case turns the auto-run's toggle off at its head (D-NET-563).
+	// [orig: Input_HandleActionBinding_0 case 0xB1 - Input_DisableScrollLock @0x4E0A84]
+	frame.scroll_lock_off.push_back(row_code("useitem"));
+	// Only the mount chain sets the hold latch, so a frame whose arm leaves the chain ends
+	// the hold as a release does (the armory opens first, then the tail's toggle).
+	// [orig: case 0xB1 @0x4E0A82, the mount chain @0x4E0B5E..0x4E0B71]
+	if (arm == UseItemPressArm::kMountChain) {
+		if (!use_held_prev_) use_hold_consumed_ = false;
+		use_latched_ = true;
+	} else if (arm == UseItemPressArm::kOpenArmory) {
+		frame.requests.push_back({Action::OpenArmory});
+	} else if (arm == UseItemPressArm::kOpenVehicleMenu) {
+		frame.requests.push_back({Action::OpenVehicleMenu});
 	}
+	return frame;
+}
+
+PlayerActionFrame PlayerActions::end_input_frame(bool simulation_available) {
+	PlayerActionFrame frame;
+	if (!use_frame_aged_) return frame;
+	use_frame_aged_ = false;
+	// A shell chord's consume lands after the frame's fresh-press reset.
 	if (use_consume_pending_) {
 		use_hold_consumed_ = true;
 		use_consume_pending_ = false;
 	}
-	menu_digits_ = gate.active && (gate.emotes_menu_open || gate.radio_menu_open);
 	// The release tail turns the auto-run's toggle off ahead of its mount toggle, whether or
 	// not a seat pick consumed the hold (D-NET-563).
 	// [orig: Input_ProcessFrame - the release test @0x49D6AD..0x49D6C1, Input_DisableScrollLock
 	//  @0x49D6C5, the consumed test @0x49D6CD]
 	if (!use_latched_ && use_held_prev_) frame.scroll_lock_off.push_back(-1);
-	if (!use_latched_ && use_held_prev_ && !use_hold_consumed_ && gate.simulation_available)
+	if (!use_latched_ && use_held_prev_ && !use_hold_consumed_ && simulation_available)
 		frame.requests.push_back({Action::ToggleMount});
+	return frame;
 }
 
 PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const PlayerActionPoll &gate) {
 	PlayerActionFrame frame;
 	// No input frame runs under a menu screen (PlayerActionPoll::menu_open).
 	if (gate.menu_open) return frame;
-	sample_use(source, gate, frame);
+	sample_use(source, gate);
 	const bool captured = gate.active && gate.captured;
 	// Fire held+edge, reload raw edge (refusal belongs to the sim), ADS toggle
 	// request: their latches see the CAPTURE-GATED state, so UI clicks never
@@ -249,7 +261,7 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// Retail's auto-run (D-NET-563, PlayerActionFrame::auto_run_forward): the Scroll Lock word
 	// and the held Last_move row queue the forward event; the forward, back and strafe keys'
 	// own held events (the analog pass, skipped under a text line, where pressed() reads them
-	// up), the Respawn press's input reset and the USE row (sample_use) turn the toggle off.
+	// up), the Respawn press's input reset and the USE row (use_item_record) turn the toggle off.
 	// [orig: Input_ProcessPlayerFrame @0x49D4C0 - @0x49D4E6..0x49D4FA, the analog pass
 	//  Input_ProcessAnalogBindings (the call @0x49D50C; the held rows @0x499635, their mode word
 	//  @0x49963E..0x499650, Input_QueueEvent(code, 0, 0, 0) @0x499660); Input_HandleActionBinding
@@ -388,6 +400,8 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 				gate.simulation_available)
 			frame.requests.push_back(request_of(row, false, false));
 	}
+	// The held USE row's record, the analog pass's, behind every other (sample_use).
+	if (use_row_down_) frame.requests.push_back({Action::UseItem, 0, row_code("useitem")});
 	return frame;
 }
 

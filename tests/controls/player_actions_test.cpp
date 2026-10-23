@@ -5,6 +5,8 @@
 #include <runtime/controls/key_state_reset.h>
 
 #include <cstdlib>
+#include <utility>
+#include <functional>
 #include <initializer_list>
 #include <iostream>
 #include <map>
@@ -76,6 +78,35 @@ bool requests_are(const PlayerActionFrame &frame, const std::vector<PlayerAction
 	return true;
 }
 
+// One input frame as the embedder runs it: the poll, then the drain's held USE record through
+// `arm` (the press latch's arm; the mount chain when unset), then the frame's tail; the
+// frame's requests and Scroll Lock turn-offs in that order, the USE record replaced by its
+// arm's (PlayerActions::use_item_record, end_input_frame).
+// [orig: Input_ProcessFrame @0x49D520 - the drain @0x49D599..0x49D5E7, the release edge
+//  @0x49D6C1..0x49D6DC; Input_HandleActionBinding_0 case 0xB1 @0x4E0A84]
+PlayerActionFrame poll_frame(PlayerActions &actions, const PlayerActionSource &source,
+		const PlayerActionPoll &gate, const std::function<UseItemPressArm()> &arm = {}) {
+	PlayerActionFrame frame = actions.poll(source, gate);
+	std::vector<PlayerActionRequest> requests;
+	for (const PlayerActionRequest &request : frame.requests) {
+		if (request.action != Action::UseItem) {
+			requests.push_back(request);
+			continue;
+		}
+		const PlayerActionFrame use =
+				actions.use_item_record(arm ? arm() : UseItemPressArm::kMountChain);
+		requests.insert(requests.end(), use.requests.begin(), use.requests.end());
+		frame.scroll_lock_off.insert(frame.scroll_lock_off.end(), use.scroll_lock_off.begin(),
+				use.scroll_lock_off.end());
+	}
+	const PlayerActionFrame tail = actions.end_input_frame(gate.simulation_available);
+	requests.insert(requests.end(), tail.requests.begin(), tail.requests.end());
+	frame.scroll_lock_off.insert(frame.scroll_lock_off.end(), tail.scroll_lock_off.begin(),
+			tail.scroll_lock_off.end());
+	frame.requests = std::move(requests);
+	return frame;
+}
+
 // The special-key chain's take of a key-down names this pick (code -1: past no head).
 bool picks(const ChainDigitTake &take, Action action, int value) {
 	return take.taken && take.pick && take.pick->action == action && take.pick->value == value &&
@@ -120,32 +151,32 @@ bool test_event_rows_fire_once_per_event() {
 	keys.hold("Knife", '1');
 	PlayerActionPoll gate = kLive;
 	gate.key_events = {key_row("Secondary", '2'), key_row("Knife", '1'), key_row("Knife", '1')};
-	CHECK(requests_are(actions.poll(keys, gate), {{Action::WeaponCategory, 2},
+	CHECK(requests_are(poll_frame(actions, keys, gate), {{Action::WeaponCategory, 2},
 			{Action::WeaponCategory, 1}, {Action::WeaponCategory, 1}}));
-	CHECK(actions.poll(keys, kLive).requests.empty()); // the held key fires nothing
+	CHECK(poll_frame(actions, keys, kLive).requests.empty()); // the held key fires nothing
 	keys.off.insert("binoculars");
 	gate.key_events = {key_row("NVG", 'N')};
-	CHECK(requests_are(actions.poll(keys, gate), {{Action::NightVision}, {Action::Binoculars}}));
-	CHECK(actions.poll(keys, kLive).requests.empty()); // the arm held: no new edge
+	CHECK(requests_are(poll_frame(actions, keys, gate), {{Action::NightVision}, {Action::Binoculars}}));
+	CHECK(poll_frame(actions, keys, kLive).requests.empty()); // the arm held: no new edge
 	keys.off.clear();
 	gate.key_events = {key_row("NextWaypoint", 0x76, true), key_row("NextWaypoint", 0x76)};
-	CHECK(requests_are(actions.poll(keys, gate),
+	CHECK(requests_are(poll_frame(actions, keys, gate),
 			{{Action::WaypointCycle, -1}, {Action::WaypointCycle, 1}}));
 	PlayerActionPoll uncaptured = kLive;
 	uncaptured.captured = false;
 	uncaptured.key_events = {key_row("Knife", '1'), key_row("NVG", 'N')};
-	CHECK(requests_are(actions.poll(keys, uncaptured), {{Action::NightVision}}));
+	CHECK(requests_are(poll_frame(actions, keys, uncaptured), {{Action::NightVision}}));
 	PlayerActionPoll no_sim = kLive;
 	no_sim.simulation_available = false;
 	no_sim.key_events = {key_row("NVG", 'N')};
-	CHECK(actions.poll(keys, no_sim).requests.empty());
+	CHECK(poll_frame(actions, keys, no_sim).requests.empty());
 	PlayerActionPoll menu = kLive;
 	menu.menu_open = true;
 	menu.key_events = {key_row("NVG", 'N')};
-	CHECK(actions.poll(keys, menu).requests.empty());
+	CHECK(poll_frame(actions, keys, menu).requests.empty());
 	// Each request's event passes the dispatcher's head by its row's code.
 	gate.key_events = {key_row("Prone", 'Z')};
-	const auto frame = actions.poll(keys, gate);
+	const auto frame = poll_frame(actions, keys, gate);
 	CHECK(frame.requests.size() == 1 && frame.requests[0].code == code_of("Prone"));
 	return true;
 }
@@ -167,7 +198,7 @@ bool test_the_chain_takes_digit_keys() {
 	QueuedKeys keys;
 	CHECK(!actions.chain_digit_key('1', false, false).taken); // no arm holds
 	keys.hold("useitem", 0x10);
-	actions.poll(keys, kLive); // the hold latches for the next frame's chain
+	poll_frame(actions, keys, kLive); // the hold latches for the next frame's chain
 	CHECK(!actions.chain_digit_key('N', false, false).taken);
 	CHECK(!actions.chain_digit_key('N', true, false).taken); // the menu's arm never runs
 	CHECK(picks(actions.chain_digit_key('0', true, false), Action::SelectSeat, 9));
@@ -176,10 +207,10 @@ bool test_the_chain_takes_digit_keys() {
 	// The keys the chain left reach their rows, a digit's among them.
 	PlayerActionPoll gate = kLive;
 	gate.key_events = {key_row("radarout", 0xBD), key_row("MedicReq", '9')};
-	auto frame = actions.poll(keys, gate);
+	auto frame = poll_frame(actions, keys, gate);
 	CHECK(requests_are(frame, {{Action::RadarZoom, 1}}) && medic(frame) == 1);
 	keys.release("useitem");
-	CHECK(actions.poll(keys, kLive).requests.empty()); // the consumed hold toggles nothing
+	CHECK(poll_frame(actions, keys, kLive).requests.empty()); // the consumed hold toggles nothing
 	CHECK(picks(actions.chain_digit_key('5', true, true), Action::EmotePick, 5));
 	CHECK(picks(actions.chain_digit_key('0', false, true), Action::RadioPick, 10));
 	CHECK(!actions.chain_digit_key(':', false, true).taken);
@@ -200,30 +231,30 @@ bool test_reload_medic_and_respawn_fire_on_their_events() {
 	PlayerActionPoll gate = kLive;
 	gate.key_events = {key_row("magazine", 'R'), key_row("MedicReq", '9'),
 			key_row("respawn", 'R')};
-	auto frame = actions.poll(keys, gate);
+	auto frame = poll_frame(actions, keys, gate);
 	CHECK(reload(frame) && medic(frame) == 1 && respawn(frame) == 1);
 	CHECK(frame.requests.size() == 3 && frame.requests[0].action == Action::Reload &&
 			frame.requests[0].code == 211 && frame.requests[1].action == Action::MedicRequest &&
 			frame.requests[1].code == 217 && frame.requests[2].action == Action::Respawn &&
 			frame.requests[2].code == 55);
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(!reload(frame) && !medic(frame) && !respawn(frame));
 	PlayerActionPoll inactive = kLive;
 	inactive.active = false;
 	inactive.key_events = gate.key_events;
-	frame = actions.poll(keys, inactive);
+	frame = poll_frame(actions, keys, inactive);
 	CHECK(!reload(frame) && medic(frame) && !respawn(frame));
 	keys.off.insert("magazine");
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(reload(frame)); // the off-keyboard arm's press edge
-	CHECK(!reload(actions.poll(keys, kLive)));
+	CHECK(!reload(poll_frame(actions, keys, kLive)));
 	// The records keep the key order across the action rows and the role's rows: Knife,
 	// Respawn, Primary queue as 201, 55, 203; the medic call's off-keyboard arm queues behind
 	// the keyboard pass's events.
 	keys.off = {"MedicReq"};
 	PlayerActionPoll ordered = kLive;
 	ordered.key_events = {key_row("Knife", '1'), key_row("respawn", 'R'), key_row("Primary", '3')};
-	frame = actions.poll(keys, ordered);
+	frame = poll_frame(actions, keys, ordered);
 	CHECK(frame.requests.size() == 4 && frame.requests[0].code == code_of("Knife") &&
 			frame.requests[1].action == Action::Respawn && frame.requests[1].code == 55 &&
 			frame.requests[2].code == code_of("Primary") &&
@@ -249,7 +280,7 @@ bool test_embedder_rows_keep_the_key_order() {
 	gate.embedder_row = [&](int code) { return code == huddetail || code == pause; };
 	gate.key_events = {key_row("huddetail", 0x75), key_row("Knife", '1'), key_row("pause", 0x13),
 			key_row("Primary", '3')};
-	auto frame = actions.poll(keys, gate);
+	auto frame = poll_frame(actions, keys, gate);
 	CHECK(frame.requests.size() == 4 && frame.requests[0].action == Action::EmbedderRow &&
 			frame.requests[0].code == 19 && frame.requests[1].code == code_of("Knife") &&
 			frame.requests[2].action == Action::EmbedderRow && frame.requests[2].code == 25 &&
@@ -257,7 +288,7 @@ bool test_embedder_rows_keep_the_key_order() {
 	PlayerActionPoll inactive = gate;
 	inactive.active = false;
 	inactive.captured = false;
-	frame = actions.poll(keys, inactive);
+	frame = poll_frame(actions, keys, inactive);
 	CHECK(frame.requests.size() == 2 && frame.requests[0].code == 19 &&
 			frame.requests[1].code == 25);
 	return true;
@@ -280,26 +311,26 @@ bool test_fire_row_dispatches_its_key_events() {
 	PlayerActionPoll gate = kLive;
 	gate.key_events = {KeyRowEvent{code, false, 'J', false}, key_row("Knife", '1'),
 			KeyRowEvent{code, false, 'J', false}};
-	auto frame = actions.poll(keys, gate);
+	auto frame = poll_frame(actions, keys, gate);
 	CHECK(frame.fire_held && frame.requests.size() == 3 &&
 			frame.requests[0].action == Action::Fire && frame.requests[0].code == 149 &&
 			frame.requests[1].action == Action::WeaponCategory && frame.requests[2].action == Action::Fire);
-	CHECK(!fire(actions.poll(keys, kLive))); // the held key: no event
+	CHECK(!fire(poll_frame(actions, keys, kLive))); // the held key: no event
 	PlayerActionPoll uncaptured = kLive;
 	uncaptured.captured = false;
 	uncaptured.key_events = {KeyRowEvent{code, false, 'J', false}};
-	CHECK(!fire(actions.poll(keys, uncaptured)));
+	CHECK(!fire(poll_frame(actions, keys, uncaptured)));
 	keys.release("attack_1");
 	uncaptured.key_events = {KeyRowEvent{code, false, 'J', true}};
-	frame = actions.poll(keys, uncaptured);
+	frame = poll_frame(actions, keys, uncaptured);
 	CHECK(!frame.fire_held && fire(frame) == 1); // the release pass's event: no gate
 	keys.off.insert("attack_1");
 	keys.hold("attack_1");
-	CHECK(fire(actions.poll(keys, kLive)) == 1); // the off-keyboard arm's press
-	CHECK(!fire(actions.poll(keys, kLive)));
+	CHECK(fire(poll_frame(actions, keys, kLive)) == 1); // the off-keyboard arm's press
+	CHECK(!fire(poll_frame(actions, keys, kLive)));
 	keys.off.clear();
 	keys.release("attack_1");
-	CHECK(fire(actions.poll(keys, kLive)) == 1); // and its release
+	CHECK(fire(poll_frame(actions, keys, kLive)) == 1); // and its release
 	return true;
 }
 
@@ -317,23 +348,23 @@ bool test_to_special_dispatches_its_key_events() {
 	keys.raw.insert("ToSpecial");
 	PlayerActionPoll gate = kLive;
 	gate.key_events = {KeyRowEvent{code, false, 'F', false}};
-	auto frame = actions.poll(keys, gate);
+	auto frame = poll_frame(actions, keys, gate);
 	CHECK(frame.to_special_held && to_special(frame));
-	CHECK(!to_special(actions.poll(keys, kLive))); // the held key: no event
-	CHECK(to_special(actions.poll(keys, gate)));   // an OS repeat's event
+	CHECK(!to_special(poll_frame(actions, keys, kLive))); // the held key: no event
+	CHECK(to_special(poll_frame(actions, keys, gate)));   // an OS repeat's event
 	PlayerActionPoll uncaptured = gate;
 	uncaptured.captured = false;
-	CHECK(!to_special(actions.poll(keys, uncaptured)));
+	CHECK(!to_special(poll_frame(actions, keys, uncaptured)));
 	keys.raw.clear();
 	PlayerActionPoll screen = kLive;
 	screen.active = false;
 	screen.captured = false;
 	screen.key_events = {KeyRowEvent{code, false, 'F', true}};
-	frame = actions.poll(keys, screen);
+	frame = poll_frame(actions, keys, screen);
 	CHECK(!frame.to_special_held && to_special(frame));
 	PlayerActionPoll no_sim = screen;
 	no_sim.simulation_available = false;
-	CHECK(!to_special(actions.poll(keys, no_sim)));
+	CHECK(!to_special(poll_frame(actions, keys, no_sim)));
 	return true;
 }
 
@@ -348,7 +379,7 @@ bool test_spectator_rows_fire_on_their_events() {
 	dead.death_screen = true;
 	dead.key_events = {key_row("DecSpectatorTarget", 0), key_row("CycleSpectatorMode", 0),
 			key_row("DecSpectatorTarget", 0)};
-	const auto requests = actions.poll(keys, dead).requests;
+	const auto requests = poll_frame(actions, keys, dead).requests;
 	CHECK(requests.size() == 3 && requests[0].action == Action::Spectate &&
 			requests[0].value == 502 && requests[1].value == 500 && requests[2].value == 502);
 	// Each is a record of the update's drain by its code, which maps back to its request
@@ -360,7 +391,7 @@ bool test_spectator_rows_fire_on_their_events() {
 	CHECK(actions.poll_spectator(keys, true).empty()); // no off-keyboard arm held
 	PlayerActionPoll idle = dead;
 	idle.active = false;
-	CHECK(actions.poll(keys, idle).requests.empty());
+	CHECK(poll_frame(actions, keys, idle).requests.empty());
 	return true;
 }
 
@@ -380,7 +411,7 @@ bool test_picks_escape_and_spectator_rows_keep_the_key_order() {
 	const KeyRowEvent pick{12, false, 0, false, 3};
 	gate.key_events = {key_row("Knife", '1'), pick, KeyRowEvent{18, false, 0x1B, false},
 			key_row("Primary", '3')};
-	auto frame = actions.poll(keys, gate);
+	auto frame = poll_frame(actions, keys, gate);
 	CHECK(frame.requests.size() == 4 && frame.requests[0].code == code_of("Knife") &&
 			frame.requests[1].action == Action::EmbedderRow && frame.requests[1].code == 12 &&
 			frame.requests[1].value == 3 && frame.requests[2].action == Action::EmbedderRow &&
@@ -389,17 +420,17 @@ bool test_picks_escape_and_spectator_rows_keep_the_key_order() {
 	PlayerActionPoll dead = gate;
 	dead.death_screen = true;
 	dead.key_events = {key_row("DecSpectatorTarget", 0), pick, key_row("CycleSpectatorMode", 0)};
-	frame = actions.poll(keys, dead);
+	frame = poll_frame(actions, keys, dead);
 	CHECK(frame.requests.size() == 3 && frame.requests[0].action == Action::Spectate &&
 			frame.requests[0].code == 502 && frame.requests[1].code == 12 &&
 			frame.requests[2].action == Action::Spectate && frame.requests[2].value == 500);
 	PlayerActionPoll alive = gate;
 	alive.key_events = {key_row("CycleSpectatorMode", 0)};
-	CHECK(actions.poll(keys, alive).requests.empty());
+	CHECK(poll_frame(actions, keys, alive).requests.empty());
 	PlayerActionPoll idle = dead;
 	idle.active = false;
 	idle.key_events = {key_row("CycleSpectatorMode", 0)};
-	CHECK(actions.poll(keys, idle).requests.empty());
+	CHECK(poll_frame(actions, keys, idle).requests.empty());
 	return true;
 }
 
@@ -407,7 +438,7 @@ bool test_order_and_held_rows() {
 	PlayerActions actions;
 	Keys keys;
 	keys.hold("useitem");
-	CHECK(requests_are(actions.poll(keys, kLive), {}));
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {}));
 	keys.release("useitem");
 	// A USE release and every binding arrive together. Request order affects
 	// mount/weapon/stance admission, so assert the emitted stream in full.
@@ -417,9 +448,10 @@ bool test_order_and_held_rows() {
 			"Detonator", "medpack", "cycleweaponP", "cycleweaponN", "Stand", "Crouch", "Prone",
 			"ScopeZeroDec", "ScopeZeroInc", "radarout", "radarin", "map_toggle", "binoculars",
 			"NVG", "nvggainup", "nvggaindown", "NextWaypoint"}) keys.hold(token);
-	auto frame = actions.poll(keys, kLive);
+	auto frame = poll_frame(actions, keys, kLive);
 	CHECK(frame.fire_held && fire(frame) == 1 && reload(frame) && medic(frame));
-	std::vector<PlayerActionRequest> expected{{Action::ToggleMount}, {Action::ToggleScope}};
+	// The rows' records first; the USE release's mount toggle is the frame's tail.
+	std::vector<PlayerActionRequest> expected{{Action::ToggleScope}};
 	for (int seat = 0; seat < 10; ++seat) expected.push_back({Action::SelectSeat, seat});
 	for (int category = 1; category <= 9; ++category)
 		expected.push_back({Action::WeaponCategory, category});
@@ -429,8 +461,9 @@ bool test_order_and_held_rows() {
 			{Action::Binoculars}, {Action::NightVision}, {Action::NvgGain, 1}, {Action::NvgGain, -1},
 			{Action::WaypointCycle, 1}})
 		expected.push_back(request);
+	expected.push_back({Action::ToggleMount});
 	CHECK(requests_are(frame, expected));
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(frame.fire_held && !fire(frame) && !reload(frame) && !medic(frame));
 	CHECK(frame.requests.empty());
 	return true;
@@ -441,24 +474,24 @@ bool test_capture_and_overlay_edges() {
 	Keys keys;
 	for (const char *token : {"attack_1", "magazine", "scope", "MedicReq", "Knife", "seat1",
 			"cycleweaponN", "Crouch", "radarout", "map_toggle"}) keys.hold(token);
-	auto frame = actions.poll(keys, {false, true, true});
+	auto frame = poll_frame(actions, keys, {false, true, true});
 	CHECK(!frame.fire_held && !fire(frame) && !reload(frame) && medic(frame) == 1);
 	CHECK(requests_are(frame, {}));
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(frame.fire_held && fire(frame) == 1 && reload(frame) && !medic(frame));
 	CHECK(requests_are(frame, {{Action::ToggleScope}})); // raw held rows do not re-fire
-	frame = actions.poll(keys, {true, false, true});
+	frame = poll_frame(actions, keys, {true, false, true});
 	// The freed cursor ends the trigger arm's gated hold: its release record.
 	CHECK(!frame.fire_held && requests_are(frame, {}) && !reload(frame) && fire(frame) == 1);
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(fire(frame) == 1 && reload(frame));
 	CHECK(requests_are(frame, {{Action::ToggleScope}}));
 	keys = Keys{};
-	actions.poll(keys, kLive);
+	poll_frame(actions, keys, kLive);
 	keys.hold("Knife"); keys.hold("Crouch"); keys.hold("radarout");
-	frame = actions.poll(keys, {true, false, true});
+	frame = poll_frame(actions, keys, {true, false, true});
 	CHECK(requests_are(frame, {{Action::Stance, 1}, {Action::RadarZoom, 1}}));
-	CHECK(actions.poll(keys, kLive).requests.empty()); // category consumed without capture
+	CHECK(poll_frame(actions, keys, kLive).requests.empty()); // category consumed without capture
 	return true;
 }
 
@@ -468,19 +501,19 @@ bool test_missing_simulation_freezes_only_scope_zero() {
 	for (const char *token : {"attack_1", "magazine", "scope", "MedicReq", "seat1", "Knife",
 			"cycleweaponP", "Prone", "ScopeZeroDec", "ScopeZeroInc", "radarin", "map_toggle"})
 		keys.hold(token);
-	auto frame = actions.poll(keys, {true, true, false});
+	auto frame = poll_frame(actions, keys, {true, true, false});
 	CHECK(fire(frame) == 1 && reload(frame) && medic(frame) == 1 && requests_are(frame, {}));
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(!fire(frame) && !reload(frame) && !medic(frame));
 	CHECK(requests_are(frame, {{Action::ScopeZero, -1}, {Action::ScopeZero, 1}}));
 	keys = Keys{};
-	actions.poll(keys, {true, true, false}); // zero's held latch does not see this release
+	poll_frame(actions, keys, {true, true, false}); // zero's held latch does not see this release
 	keys.hold("ScopeZeroInc"); keys.hold("map_toggle");
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::MapCycle}}));
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::MapCycle}}));
 	keys.release("ScopeZeroInc");
-	actions.poll(keys, kLive);
+	poll_frame(actions, keys, kLive);
 	keys.hold("ScopeZeroInc");
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::ScopeZero, 1}}));
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::ScopeZero, 1}}));
 	return true;
 }
 
@@ -490,16 +523,16 @@ bool test_reset_preserves_switch_hud_medic_and_use_state() {
 	for (const char *token : {"attack_1", "magazine", "scope", "MedicReq", "seat1", "Knife",
 			"cycleweaponP", "Stand", "Crouch", "Prone", "ScopeZeroDec", "ScopeZeroInc",
 			"radarout", "radarin", "map_toggle", "useitem"}) keys.hold(token);
-	actions.poll(keys, kLive);
+	poll_frame(actions, keys, kLive);
 	actions.reset();
-	auto frame = actions.poll(keys, kLive);
+	auto frame = poll_frame(actions, keys, kLive);
 	CHECK(fire(frame) == 1 && reload(frame) && !medic(frame));
 	CHECK(requests_are(frame, {{Action::ToggleScope}, {Action::Stance, 0}, {Action::Stance, 1},
 			{Action::Stance, 2}, {Action::ScopeZero, -1}, {Action::ScopeZero, 1}}));
 	CHECK(picks(actions.chain_digit_key('8', false, false), Action::SelectSeat, 7));
 	actions.reset();
 	keys.held.clear(); // the consumed hold survives the reset: its release toggles nothing
-	CHECK(actions.poll(keys, kLive).requests.empty());
+	CHECK(poll_frame(actions, keys, kLive).requests.empty());
 	return true;
 }
 
@@ -512,22 +545,22 @@ bool test_use_previous_frame_and_single_seat() {
 	Keys keys;
 	keys.hold("useitem"); keys.hold("Knife", '1');
 	CHECK(!actions.chain_digit_key('1', false, false).taken); // USE was not held before the 1
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WeaponCategory, 1}}));
-	CHECK(actions.poll(keys, kLive).requests.empty());
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::WeaponCategory, 1}}));
+	CHECK(poll_frame(actions, keys, kLive).requests.empty());
 	keys.release("Knife");
-	actions.poll(keys, kLive);
+	poll_frame(actions, keys, kLive);
 	keys.hold("radarout", '9');
 	CHECK(picks(actions.chain_digit_key('9', false, false), Action::SelectSeat, 8));
-	CHECK(actions.poll(keys, kLive).requests.empty()); // the digit's row is swallowed
+	CHECK(poll_frame(actions, keys, kLive).requests.empty()); // the digit's row is swallowed
 	const ChainDigitTake again = actions.chain_digit_key('0', false, false);
 	CHECK(again.taken && !again.pick); // one seat per hold
 	keys.release("useitem");
-	CHECK(actions.poll(keys, kLive).requests.empty()); // consumed release never mounts
-	CHECK(actions.poll(keys, kLive).requests.empty()); // swallowed held row cannot re-fire
+	CHECK(poll_frame(actions, keys, kLive).requests.empty()); // consumed release never mounts
+	CHECK(poll_frame(actions, keys, kLive).requests.empty()); // swallowed held row cannot re-fire
 	keys.release("radarout");
-	actions.poll(keys, kLive);
+	poll_frame(actions, keys, kLive);
 	keys.hold("radarout", '9');
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::RadarZoom, 1}}));
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::RadarZoom, 1}}));
 	return true;
 }
 
@@ -541,20 +574,20 @@ bool test_use_release_digit_priority_and_no_sim_consumption() {
 	PlayerActions actions;
 	Keys keys;
 	keys.hold("useitem");
-	actions.poll(keys, kLive);
+	poll_frame(actions, keys, kLive);
 	keys.release("useitem");
 	keys.hold("Knife", '1'); keys.hold("seat10", '0'); keys.hold("scope");
 	CHECK(picks(actions.chain_digit_key('0', false, false), Action::SelectSeat, 9));
 	const ChainDigitTake second = actions.chain_digit_key('1', false, false);
 	CHECK(second.taken && !second.pick);
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::ToggleScope}}));
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::ToggleScope}}));
 	PlayerActions no_sim;
 	keys = Keys{}; keys.hold("useitem");
-	no_sim.poll(keys, kLive);
+	poll_frame(no_sim, keys, kLive);
 	CHECK(no_sim.chain_digit_key('4', false, false).taken);
-	CHECK(no_sim.poll(keys, {true, true, false}).requests.empty());
+	CHECK(poll_frame(no_sim, keys, {true, true, false}).requests.empty());
 	keys.release("useitem");
-	CHECK(no_sim.poll(keys, kLive).requests.empty());
+	CHECK(poll_frame(no_sim, keys, kLive).requests.empty());
 	return true;
 }
 
@@ -564,23 +597,23 @@ bool test_shell_consume_and_overlay_cancel() {
 	actions.consume_use_hold(); // a same-frame shell chord survives fresh-press reset
 	actions.reset();
 	keys.hold("useitem");
-	actions.poll(keys, kLive);
+	poll_frame(actions, keys, kLive);
 	keys.release("useitem");
-	CHECK(actions.poll(keys, kLive).requests.empty());
+	CHECK(poll_frame(actions, keys, kLive).requests.empty());
 	keys.hold("useitem");
-	actions.poll(keys, kLive);
+	poll_frame(actions, keys, kLive);
 	// An inactive frame runs the input frame too: the held USE's digit picks a
 	// seat (the hold is consumed), and the arm is not asked.
 	CHECK(picks(actions.chain_digit_key('2', false, false), Action::SelectSeat, 1));
-	CHECK(actions.poll(keys, {false, false, true}).requests.empty());
-	CHECK(actions.poll(keys, kLive).requests.empty()); // a fresh hold
+	CHECK(poll_frame(actions, keys, {false, false, true}).requests.empty());
+	CHECK(poll_frame(actions, keys, kLive).requests.empty()); // a fresh hold
 	keys.release("useitem");
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::ToggleMount}})); // fresh hold
-	keys.hold("useitem"); actions.poll(keys, kLive);
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::ToggleMount}})); // fresh hold
+	keys.hold("useitem"); poll_frame(actions, keys, kLive);
 	keys.release("useitem");
 	// The release edge runs on an inactive frame as on any input frame.
-	CHECK(requests_are(actions.poll(keys, {false, false, true}), {{Action::ToggleMount}}));
-	CHECK(actions.poll(keys, kLive).requests.empty());
+	CHECK(requests_are(poll_frame(actions, keys, {false, false, true}), {{Action::ToggleMount}}));
+	CHECK(poll_frame(actions, keys, kLive).requests.empty());
 	return true;
 }
 
@@ -588,11 +621,11 @@ bool test_use_swallows_only_digit_event_rows() {
 	for (const int vk : {0, 0x2f, 0x30, 0x39, 0x3a, 0x60}) {
 		PlayerActions actions;
 		Keys keys;
-		keys.hold("useitem"); actions.poll(keys, kLive);
+		keys.hold("useitem"); poll_frame(actions, keys, kLive);
 		for (const char *token : {"attack_1", "magazine", "scope", "MedicReq", "Primary",
 				"seat5", "cycleweaponN", "Prone", "ScopeZeroInc", "radarout", "map_toggle"})
 			keys.hold(token, vk);
-		const auto frame = actions.poll(keys, kLive);
+		const auto frame = poll_frame(actions, keys, kLive);
 		CHECK(fire(frame) == 1 && reload(frame) && medic(frame));
 		if (vk == 0x30 || vk == 0x39) {
 			CHECK(requests_are(frame, {{Action::ToggleScope}}));
@@ -628,21 +661,21 @@ bool test_live_binding_modifier_remap_and_use_stream() {
 	// (361) in the scan's walk, so the bare 7 takes the weapon alone
 	// [orig: Input_ProcessKeyboardEvents @0x49d488 / @0x49d490].
 	keys.down = {'7'};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WeaponCategory, 7}}));
-	keys.down.clear(); actions.poll(keys, kLive);
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::WeaponCategory, 7}}));
+	keys.down.clear(); poll_frame(actions, keys, kLive);
 	keys.down = {17, '7'}; // Ctrl's modified seat row claims the digit from both bare rows
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::SelectSeat, 6}}));
-	keys.down.clear(); actions.poll(keys, kLive);
-	keys.down = {16}; actions.poll(keys, kLive); // Shift is USE; special keys run first
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::SelectSeat, 6}}));
+	keys.down.clear(); poll_frame(actions, keys, kLive);
+	keys.down = {16}; poll_frame(actions, keys, kLive); // Shift is USE; special keys run first
 	keys.down.insert('7');
 	CHECK(picks(actions.chain_digit_key('7', false, false), Action::SelectSeat, 6));
-	CHECK(actions.poll(keys, kLive).requests.empty()); // the 7's rows are swallowed
+	CHECK(poll_frame(actions, keys, kLive).requests.empty()); // the 7's rows are swallowed
 	keys.down.clear();
-	CHECK(actions.poll(keys, kLive).requests.empty());
+	CHECK(poll_frame(actions, keys, kLive).requests.empty());
 	keys.down = {'7'};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WeaponCategory, 7}}));
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::WeaponCategory, 7}}));
 	keys.down = {0xBD}; // radarout's own '-' still zooms
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::RadarZoom, 1}}));
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::RadarZoom, 1}}));
 	return true;
 }
 
@@ -655,32 +688,32 @@ bool test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint() {
 	PlayerActions actions;
 	BoundKeys keys;
 	keys.down = {0xBB};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::RadarZoom, -1}}));
-	keys.down.clear(); actions.poll(keys, kLive);
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::RadarZoom, -1}}));
+	keys.down.clear(); poll_frame(actions, keys, kLive);
 	keys.down = {17, 0xBB};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::NvgGain, 1}}));
-	keys.down.clear(); actions.poll(keys, kLive);
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::NvgGain, 1}}));
+	keys.down.clear(); poll_frame(actions, keys, kLive);
 	keys.down = {17, 0xBD};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::NvgGain, -1}}));
-	keys.down.clear(); actions.poll(keys, kLive);
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::NvgGain, -1}}));
+	keys.down.clear(); poll_frame(actions, keys, kLive);
 	keys.down = {0x76};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WaypointCycle, 1}}));
-	keys.down.clear(); actions.poll(keys, kLive);
-	keys.down = {16}; actions.poll(keys, kLive);
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::WaypointCycle, 1}}));
+	keys.down.clear(); poll_frame(actions, keys, kLive);
+	keys.down = {16}; poll_frame(actions, keys, kLive);
 	keys.down.insert(0x76);
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WaypointCycle, -1}}));
-	keys.down.clear(); actions.poll(keys, kLive);
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::WaypointCycle, -1}}));
+	keys.down.clear(); poll_frame(actions, keys, kLive);
 	// Rebound to Ctrl+F7 the row fires through the modifier pass, unsigned:
 	// Shift held still cycles forward [orig: @0x49d41e..0x49d42f].
 	const int waypoint = keys.bindings.index_of_token("NextWaypoint");
 	CHECK(keys.bindings.assign_key(waypoint, 0x76, true, false, false, false));
 	keys.down = {16, 17, 0x76};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WaypointCycle, 1}}));
-	keys.down.clear(); actions.poll(keys, kLive);
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::WaypointCycle, 1}}));
+	keys.down.clear(); poll_frame(actions, keys, kLive);
 	keys.down = {'B'};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::Binoculars}}));
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::Binoculars}}));
 	keys.down = {'N'};
-	CHECK(requests_are(actions.poll(keys, kLive), {{Action::NightVision}}));
+	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::NightVision}}));
 	return true;
 }
 
@@ -693,25 +726,25 @@ bool test_respawn_edges_on_ctrl_r() {
 	PlayerActions actions;
 	BoundKeys keys;
 	keys.down = {17, 'R'};
-	auto frame = actions.poll(keys, kLive);
+	auto frame = poll_frame(actions, keys, kLive);
 	CHECK(respawn(frame) && !reload(frame));
-	CHECK(!respawn(actions.poll(keys, kLive)));
-	keys.down.clear(); actions.poll(keys, kLive);
+	CHECK(!respawn(poll_frame(actions, keys, kLive)));
+	keys.down.clear(); poll_frame(actions, keys, kLive);
 	keys.down = {'R'};
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(!respawn(frame) && reload(frame));
-	keys.down.clear(); actions.poll(keys, kLive);
+	keys.down.clear(); poll_frame(actions, keys, kLive);
 	keys.down = {17, 'R'};
-	CHECK(!respawn(actions.poll(keys, {false, true, true})));
-	CHECK(!respawn(actions.poll(keys, kLive))); // the latch followed the hold
-	keys.down.clear(); actions.poll(keys, kLive);
+	CHECK(!respawn(poll_frame(actions, keys, {false, true, true})));
+	CHECK(!respawn(poll_frame(actions, keys, kLive))); // the latch followed the hold
+	keys.down.clear(); poll_frame(actions, keys, kLive);
 	PlayerActionPoll dead = kLive;
 	dead.death_screen = true;
 	keys.down = {17, 'R'};
-	CHECK(!respawn(actions.poll(keys, dead)));
-	keys.down.clear(); actions.poll(keys, kLive);
+	CHECK(!respawn(poll_frame(actions, keys, dead)));
+	keys.down.clear(); poll_frame(actions, keys, kLive);
 	keys.down = {17, 'R'};
-	CHECK(respawn(actions.poll(keys, kLive)));
+	CHECK(respawn(poll_frame(actions, keys, kLive)));
 	return true;
 }
 
@@ -728,14 +761,14 @@ bool test_key_rows_carry_their_dispatch_codes() {
 		PlayerActions actions;
 		Keys keys;
 		keys.hold("seat1", '1');
-		const PlayerActionFrame frame = actions.poll(keys, kLive);
+		const PlayerActionFrame frame = poll_frame(actions, keys, kLive);
 		CHECK(requests_are(frame, {{Action::SelectSeat, 0}}) && frame.requests[0].code == 182);
 	}
 	{
 		PlayerActions actions;
 		Keys keys;
 		keys.hold("scope");
-		const PlayerActionFrame frame = actions.poll(keys, kLive);
+		const PlayerActionFrame frame = poll_frame(actions, keys, kLive);
 		CHECK(requests_are(frame, {{Action::ToggleScope}}) && frame.requests[0].code == 6);
 	}
 	// The wheel's record names the row the walk took (BindingSet::mouse_click_action): its
@@ -747,7 +780,7 @@ bool test_key_rows_carry_their_dispatch_codes() {
 		PlayerActions actions;
 		Keys keys;
 		keys.hold("useitem");
-		actions.poll(keys, kLive);
+		poll_frame(actions, keys, kLive);
 		CHECK(picks(actions.chain_digit_key('1', false, false), Action::SelectSeat, 0));
 	}
 	return true;
@@ -816,15 +849,15 @@ bool test_voice_menu_digits_pick_and_swallow_the_rows() {
 	Keys keys;
 	keys.hold("Knife", '1');
 	CHECK(picks(actions.chain_digit_key('1', true, false), Action::EmotePick, 1));
-	CHECK(actions.poll(keys, emotes).requests.empty()); // the digit's row is swallowed
+	CHECK(poll_frame(actions, keys, emotes).requests.empty()); // the digit's row is swallowed
 	// The embedder closed the menu; the held digit fires no row afterwards.
-	CHECK(actions.poll(keys, kLive).requests.empty());
+	CHECK(poll_frame(actions, keys, kLive).requests.empty());
 	keys.release("Knife");
-	actions.poll(keys, kLive);
+	poll_frame(actions, keys, kLive);
 	CHECK(!actions.chain_digit_key('1', false, false).taken); // closed: the scan's key
 	// The held-USE seat arm comes first.
 	keys.hold("useitem");
-	actions.poll(keys, emotes);
+	poll_frame(actions, keys, emotes);
 	CHECK(picks(actions.chain_digit_key('3', true, false), Action::SelectSeat, 2));
 	return true;
 }
@@ -839,28 +872,28 @@ bool test_voice_menu_digits_pick_and_swallow_the_rows() {
 bool test_to_special_dispatches_both_edges() {
 	PlayerActions actions;
 	Keys keys;
-	PlayerActionFrame frame = actions.poll(keys, kLive);
+	PlayerActionFrame frame = poll_frame(actions, keys, kLive);
 	CHECK(!frame.to_special_held && !to_special(frame));
 	keys.hold("ToSpecial", 0x46);
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(frame.to_special_held && to_special(frame));
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(frame.to_special_held && !to_special(frame));
 	keys.release("ToSpecial");
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(!frame.to_special_held && to_special(frame));
 	// Uncaptured: the press latches, no dispatch; nor its release.
 	PlayerActionPoll uncaptured = kLive;
 	uncaptured.captured = false;
 	keys.hold("ToSpecial", 0x46);
-	frame = actions.poll(keys, uncaptured);
+	frame = poll_frame(actions, keys, uncaptured);
 	CHECK(frame.to_special_held && !to_special(frame));
-	frame = actions.poll(keys, kLive);
+	frame = poll_frame(actions, keys, kLive);
 	CHECK(!to_special(frame));
 	keys.release("ToSpecial");
 	PlayerActionPoll no_sim = kLive;
 	no_sim.simulation_available = false;
-	frame = actions.poll(keys, no_sim);
+	frame = poll_frame(actions, keys, no_sim);
 	CHECK(!frame.to_special_held && !to_special(frame));
 	return true;
 }
@@ -881,37 +914,37 @@ bool test_held_use_runs_the_arm_every_frame() {
 	std::vector<Arm> arms;
 	std::size_t asked = 0;
 	PlayerActionPoll gate = kLive;
-	gate.take_use_item_arm = [&]() { return asked < arms.size() ? arms[asked++] : Arm::kTaken; };
+	const auto arm = [&]() { return asked < arms.size() ? arms[asked++] : Arm::kTaken; };
 	PlayerActions actions;
 	Keys keys;
 	arms = {Arm::kMountChain, Arm::kMountChain, Arm::kOpenArmory, Arm::kTaken};
 	keys.hold("useitem");
-	CHECK(actions.poll(keys, gate).requests.empty());
-	CHECK(actions.poll(keys, gate).requests.empty());
-	CHECK(requests_are(actions.poll(keys, gate), {{Action::OpenArmory}, {Action::ToggleMount}}));
-	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(poll_frame(actions, keys, gate, arm).requests.empty());
+	CHECK(poll_frame(actions, keys, gate, arm).requests.empty());
+	CHECK(requests_are(poll_frame(actions, keys, gate, arm), {{Action::OpenArmory}, {Action::ToggleMount}}));
+	CHECK(poll_frame(actions, keys, gate, arm).requests.empty());
 	CHECK(asked == 4);
 	keys.release("useitem");
-	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(poll_frame(actions, keys, gate, arm).requests.empty());
 	CHECK(asked == 4);
 
 	PlayerActions fresh;
 	arms = {Arm::kOpenArmory};
 	asked = 0;
 	keys.hold("useitem");
-	CHECK(requests_are(fresh.poll(keys, gate), {{Action::OpenArmory}}));
+	CHECK(requests_are(poll_frame(fresh, keys, gate, arm), {{Action::OpenArmory}}));
 	keys.release("useitem");
-	CHECK(fresh.poll(keys, gate).requests.empty());
+	CHECK(poll_frame(fresh, keys, gate, arm).requests.empty());
 
 	PlayerActions dead;
 	PlayerActionPoll dead_gate = gate;
 	dead_gate.death_screen = true;
 	asked = 0;
 	keys.hold("useitem");
-	CHECK(dead.poll(keys, dead_gate).requests.empty());
+	CHECK(poll_frame(dead, keys, dead_gate, arm).requests.empty());
 	CHECK(asked == 0);
 	keys.release("useitem");
-	CHECK(dead.poll(keys, dead_gate).requests.empty());
+	CHECK(poll_frame(dead, keys, dead_gate, arm).requests.empty());
 
 	return true;
 }
@@ -930,33 +963,33 @@ bool test_use_held_is_the_hold_the_chain_reads() {
 	std::vector<Arm> arms;
 	std::size_t asked = 0;
 	PlayerActionPoll gate = kLive;
-	gate.take_use_item_arm = [&]() { return asked < arms.size() ? arms[asked++] : Arm::kTaken; };
+	const auto arm = [&]() { return asked < arms.size() ? arms[asked++] : Arm::kTaken; };
 	PlayerActions actions;
 	Keys keys;
 	CHECK(!actions.use_held());
 	arms = {Arm::kMountChain, Arm::kMountChain, Arm::kMountChain, Arm::kTaken};
 	keys.hold("useitem");
-	actions.poll(keys, gate);
+	poll_frame(actions, keys, gate, arm);
 	CHECK(actions.use_held()); // the first held frame's latch: the next frame's word
 	CHECK(picks(actions.chain_digit_key('2', false, false), Action::SelectSeat, 1));
 	CHECK(actions.use_held()); // the seat pick consumes the hold, not the word
-	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(poll_frame(actions, keys, gate, arm).requests.empty());
 	CHECK(actions.use_held());
-	actions.poll(keys, gate);
+	poll_frame(actions, keys, gate, arm);
 	CHECK(actions.use_held());
 	// A taken press latches no hold: the word drops while the key is down, and the
 	// consumed hold's release edge toggles nothing.
-	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(poll_frame(actions, keys, gate, arm).requests.empty());
 	CHECK(!actions.use_held());
 	keys.release("useitem");
-	actions.poll(keys, gate);
+	poll_frame(actions, keys, gate, arm);
 	CHECK(!actions.use_held());
 
 	PlayerActions armory;
 	arms = {Arm::kOpenArmory};
 	asked = 0;
 	keys.hold("useitem");
-	CHECK(requests_are(armory.poll(keys, gate), {{Action::OpenArmory}}));
+	CHECK(requests_are(poll_frame(armory, keys, gate, arm), {{Action::OpenArmory}}));
 	CHECK(!armory.use_held());
 	keys.release("useitem");
 
@@ -964,10 +997,10 @@ bool test_use_held_is_the_hold_the_chain_reads() {
 	arms = {Arm::kMountChain};
 	asked = 0;
 	keys.hold("useitem");
-	released.poll(keys, gate);
+	poll_frame(released, keys, gate, arm);
 	CHECK(released.use_held());
 	keys.release("useitem");
-	CHECK(requests_are(released.poll(keys, gate), {{Action::ToggleMount}}));
+	CHECK(requests_are(poll_frame(released, keys, gate, arm), {{Action::ToggleMount}}));
 	CHECK(!released.use_held());
 	return true;
 }
@@ -1019,26 +1052,26 @@ bool test_menu_freezes_the_use_hold() {
 	gate.simulation_available = true;
 	PlayerActions actions;
 	keys.hold("useitem", 0x10);
-	CHECK(actions.poll(keys, gate).requests.empty()); // the chain holds
+	CHECK(poll_frame(actions, keys, gate).requests.empty()); // the chain holds
 	PlayerActionPoll menu = gate;
 	menu.active = false;
 	menu.captured = false;
 	menu.menu_open = true;
-	CHECK(actions.poll(keys, menu).requests.empty());
+	CHECK(poll_frame(actions, keys, menu).requests.empty());
 	keys.release("useitem"); // read up after the close's reset
-	CHECK(actions.poll(keys, menu).requests.empty());
-	CHECK(requests_are(actions.poll(keys, gate), {{Action::ToggleMount}}));
-	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(poll_frame(actions, keys, menu).requests.empty());
+	CHECK(requests_are(poll_frame(actions, keys, gate), {{Action::ToggleMount}}));
+	CHECK(poll_frame(actions, keys, gate).requests.empty());
 	// An inactive frame that is no menu runs the input frame: the arm is not
 	// asked, so the hold ends there and the mount toggles.
 	PlayerActions overlay;
 	keys.hold("useitem", 0x10);
-	overlay.poll(keys, gate);
+	poll_frame(overlay, keys, gate);
 	PlayerActionPoll inactive = gate;
 	inactive.active = false;
-	CHECK(requests_are(overlay.poll(keys, inactive), {{Action::ToggleMount}}));
+	CHECK(requests_are(poll_frame(overlay, keys, inactive), {{Action::ToggleMount}}));
 	keys.release("useitem");
-	CHECK(overlay.poll(keys, gate).requests.empty());
+	CHECK(poll_frame(overlay, keys, gate).requests.empty());
 	return true;
 }
 
@@ -1055,19 +1088,19 @@ bool test_to_special_release_over_a_screen() {
 	gate.simulation_available = true;
 	PlayerActions actions;
 	keys.hold("ToSpecial", 'F');
-	CHECK(to_special(actions.poll(keys, gate)));
+	CHECK(to_special(poll_frame(actions, keys, gate)));
 	PlayerActionPoll screen = gate;
 	screen.active = false;
 	screen.captured = false;
-	CHECK(!to_special(actions.poll(keys, screen)));
+	CHECK(!to_special(poll_frame(actions, keys, screen)));
 	keys.release("ToSpecial");
-	CHECK(to_special(actions.poll(keys, screen))); // the release, over the screen
+	CHECK(to_special(poll_frame(actions, keys, screen))); // the release, over the screen
 	keys.hold("ToSpecial", 'F');
-	CHECK(!to_special(actions.poll(keys, screen))); // no press there
+	CHECK(!to_special(poll_frame(actions, keys, screen))); // no press there
 	keys.release("ToSpecial");
 	PlayerActionPoll typing = gate;
 	typing.keyboard_captured = true;
-	CHECK(!to_special(actions.poll(keys, typing))); // the text line drops it
+	CHECK(!to_special(poll_frame(actions, keys, typing))); // the text line drops it
 	return true;
 }
 

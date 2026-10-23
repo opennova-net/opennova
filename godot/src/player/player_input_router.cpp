@@ -45,6 +45,23 @@ bool shell_record(int p_code) {
 	return p_code == kDeployPickCode || p_code == opennova::controls::action_code(kEscapeRow);
 }
 
+// The held USE row's arm through the sim's press latch (engine
+// LocalPlayer::take_use_item_press), its record having passed the dispatcher's head.
+opennova::controls::UseItemPressArm use_item_arm(Simulation &p_sim) {
+	using Arm = opennova::controls::UseItemPressArm;
+	switch (p_sim.take_use_item_press()) {
+		case Simulation::USE_ITEM_ARM_MOUNT_CHAIN: return Arm::kMountChain;
+		case Simulation::USE_ITEM_ARM_ARMORY: return Arm::kOpenArmory;
+		// The vehicle-loadout arm opens vehicle.mnu when the ground's team
+		// byte is 0 or the player's, else takes the press (engine
+		// local_player_vehicle_zone_team_matches carries the witness).
+		case Simulation::USE_ITEM_ARM_VEHICLE_LOADOUT:
+			return p_sim.local_player_vehicle_zone_team_matches() ? Arm::kOpenVehicleMenu
+			                                                      : Arm::kTaken;
+		default: return Arm::kTaken;
+	}
+}
+
 // The Num Lock state the process start found, which its exit puts back; the exit runs only
 // once the start leg ran.
 bool s_key_locks_started = false;
@@ -118,6 +135,7 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		case Action::Reload: break;
 		case Action::ToSpecial: break;
 		case Action::Fire: break;
+		case Action::UseItem: break;
 		// The router's own records (PlayerInputRouter::dispatch_record): never handed here.
 		case Action::EmbedderRow: break;
 	}
@@ -427,8 +445,48 @@ void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventReco
 		if (record_leg_.is_valid()) record_leg_.call(p_record.code, p_record.p1);
 		return;
 	}
+	// The held USE row's record (case 0xB1) past the dispatcher's head by its row's flags (the
+	// deploy overlay, the round-over gate and the pause word drop it as the dead bit does,
+	// under a pass-through screen's input frame too): its Scroll Lock turn-off and the arm the
+	// sim's press latch decides (engine controls::PlayerActions::use_item_record carries the
+	// witness). A dropped record arms nothing, so the hold ends at the frame's tail.
+	if (p_record.code == opennova::controls::action_code(kUseItemRow)) {
+		if (!record_sim->action_head_admits(p_record.code)) return;
+		apply_immediate(actions_.use_item_record(use_item_arm(*record_sim.ptr())), record_sim);
+		return;
+	}
 	if (const auto request = opennova::controls::player_action_request(p_record))
 		apply_player_action(*record_sim.ptr(), *request);
+}
+
+void PlayerInputRouter::end_input_frame() {
+	// The input frame's tail: the USE hold's release edge (engine
+	// controls::PlayerActions::end_input_frame carries the witness).
+	const Ref<Simulation> tail_sim = sim();
+	apply_immediate(actions_.end_input_frame(tail_sim.is_valid()), tail_sim);
+}
+
+void PlayerInputRouter::apply_immediate(const opennova::controls::PlayerActionFrame &p_frame,
+		const Ref<Simulation> &p_sim) {
+	// Retail's auto-run turn-offs: a case that turns its toggle off passes the dispatcher's
+	// head by its code; one turn-off per frame, as the keyboard state reads it only once the
+	// window's messages are read (engine controls::PlayerActionFrame::scroll_lock_off).
+	for (const int code : p_frame.scroll_lock_off) {
+		if (scroll_lock_turned_off_) break;
+		if (code < 0 || (p_sim.is_valid() && p_sim->action_head_admits(code)))
+			scroll_lock_turned_off_ = scroll_lock_device_turn_off();
+	}
+	// The arms that run at once (no code): the USE row's opens, its release's mount toggle.
+	for (const auto &request : p_frame.requests) {
+		if (request.code >= 0) continue;
+		if (request.action == opennova::controls::PlayerAction::OpenArmory) {
+			armory_requested_ = true;
+		} else if (request.action == opennova::controls::PlayerAction::OpenVehicleMenu) {
+			vehicle_menu_requested_ = true;
+		} else if (p_sim.is_valid()) {
+			apply_player_action(*p_sim.ptr(), request);
+		}
+	}
 }
 
 void PlayerInputRouter::queue_row_event(int p_code, bool p_signed, int p_key) {
@@ -579,29 +637,6 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	// The Scroll Lock word is a device the scripted input replaces like the keys.
 	gate.scroll_lock_on =
 			input_override_.is_null() && !scroll_lock_turned_off_ && scroll_lock_device_on();
-	// The held USE row's arm through the sim's press latch (engine
-	// LocalPlayer::take_use_item_press), once its event passed the dispatcher's
-	// head by the row's flags: the deploy overlay, the round-over gate and the
-	// pause word drop it as the dead bit does, under a pass-through screen's
-	// input frame too (engine inmatch::Role::action_head_admits carries the
-	// witness). A dropped press arms nothing.
-	gate.take_use_item_arm = [&action_sim]() {
-		using Arm = opennova::controls::UseItemPressArm;
-		if (action_sim.is_null()) return Arm::kMountChain;
-		if (!action_sim->action_head_admits(opennova::controls::action_code(kUseItemRow)))
-			return Arm::kTaken;
-		switch (action_sim->take_use_item_press()) {
-			case Simulation::USE_ITEM_ARM_MOUNT_CHAIN: return Arm::kMountChain;
-			case Simulation::USE_ITEM_ARM_ARMORY: return Arm::kOpenArmory;
-			// The vehicle-loadout arm opens vehicle.mnu when the ground's team
-			// byte is 0 or the player's, else takes the press (engine
-			// local_player_vehicle_zone_team_matches carries the witness).
-			case Simulation::USE_ITEM_ARM_VEHICLE_LOADOUT:
-				return action_sim->local_player_vehicle_zone_team_matches() ? Arm::kOpenVehicleMenu
-				                                                            : Arm::kTaken;
-			default: return Arm::kTaken;
-		}
-	};
 	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
 	// Retail's auto-run rides the forward key (engine controls::PlayerActionFrame::
 	// auto_run_forward). A case that turns its toggle off passes the dispatcher's head by its
@@ -609,11 +644,7 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	// messages are read.
 	p_input->set_movement(forward || actions.auto_run_forward, back, left, right, lean_left,
 			lean_right, jump);
-	for (const int code : actions.scroll_lock_off) {
-		if (scroll_lock_turned_off_) break;
-		if (code < 0 || (action_sim.is_valid() && action_sim->action_head_admits(code)))
-			scroll_lock_turned_off_ = scroll_lock_device_turn_off();
-	}
+	apply_immediate(actions, action_sim);
 	// The fire binding's and the ToSpecial keys' state, which their records' arms test live;
 	// the fire, reload and ToSpecial rows are records (engine inmatch::Role::dispatch_record
 	// carries the witness).
@@ -627,24 +658,13 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	for (const auto &request : actions.requests) {
 		// An action row's request is a record the update's drain dispatches in queue order
 		// (queue_records, dispatch_record), a talk, HUD, pause or escape row's key event's and
-		// a deploy pick's among them (a pick's parameter its first argument); the USE row's
-		// opens and its release arm run here.
-		if (request.code >= 0) {
-			const int32_t first =
-					request.action == opennova::controls::PlayerAction::EmbedderRow ? request.value : 0;
-			sample_records_.push_back({request.code, first, 0, 0, request.sign,
-					opennova::controls::InputEventOrigin::Device});
-			continue;
-		}
-		if (request.action == opennova::controls::PlayerAction::OpenArmory) {
-			armory_requested_ = true;
-			continue;
-		}
-		if (request.action == opennova::controls::PlayerAction::OpenVehicleMenu) {
-			vehicle_menu_requested_ = true;
-			continue;
-		}
-		if (action_sim.is_valid()) apply_player_action(*action_sim.ptr(), request);
+		// a deploy pick's among them (a pick's parameter its first argument), the held USE
+		// row's last.
+		if (request.code < 0) continue;
+		const int32_t first =
+				request.action == opennova::controls::PlayerAction::EmbedderRow ? request.value : 0;
+		sample_records_.push_back({request.code, first, 0, 0, request.sign,
+				opennova::controls::InputEventOrigin::Device});
 	}
 	// The death screen's own rows (the spectate sub-mode and target): their key events are
 	// the poll's records in key order; their off-keyboard arms' press edges are records of

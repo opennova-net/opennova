@@ -13,9 +13,11 @@
 #include <runtime/controls/player_actions.h>
 
 #include <algorithm>
+#include <functional>
 #include <iostream>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace opennova::controls;
@@ -36,6 +38,35 @@ struct Keys : PlayerActionSource {
 	bool fire_signed(const char *) const override { return false; }
 	bool keys_down(const char *token) const override { return pressed(token); }
 };
+
+// One input frame as the embedder runs it: the poll, then the drain's held USE record through
+// `arm` (the press latch's arm; the mount chain when unset), then the frame's tail; the
+// frame's requests and Scroll Lock turn-offs in that order, the USE record replaced by its
+// arm's (PlayerActions::use_item_record, end_input_frame).
+// [orig: Input_ProcessFrame @0x49D520 - the drain @0x49D599..0x49D5E7, the release edge
+//  @0x49D6C1..0x49D6DC; Input_HandleActionBinding_0 case 0xB1 @0x4E0A84]
+PlayerActionFrame poll_frame(PlayerActions &actions, const PlayerActionSource &source,
+		const PlayerActionPoll &gate, const std::function<UseItemPressArm()> &arm = {}) {
+	PlayerActionFrame frame = actions.poll(source, gate);
+	std::vector<PlayerActionRequest> requests;
+	for (const PlayerActionRequest &request : frame.requests) {
+		if (request.action != PlayerAction::UseItem) {
+			requests.push_back(request);
+			continue;
+		}
+		const PlayerActionFrame use =
+				actions.use_item_record(arm ? arm() : UseItemPressArm::kMountChain);
+		requests.insert(requests.end(), use.requests.begin(), use.requests.end());
+		frame.scroll_lock_off.insert(frame.scroll_lock_off.end(), use.scroll_lock_off.begin(),
+				use.scroll_lock_off.end());
+	}
+	const PlayerActionFrame tail = actions.end_input_frame(gate.simulation_available);
+	requests.insert(requests.end(), tail.requests.begin(), tail.requests.end());
+	frame.scroll_lock_off.insert(frame.scroll_lock_off.end(), tail.scroll_lock_off.begin(),
+			tail.scroll_lock_off.end());
+	frame.requests = std::move(requests);
+	return frame;
+}
 
 PlayerActionPoll live(bool scroll_lock_on) {
 	PlayerActionPoll gate;
@@ -58,10 +89,10 @@ bool test_the_word_walks_forward() {
 	PlayerActions actions;
 	Keys keys;
 	for (int frame = 0; frame < 3; ++frame) {
-		const PlayerActionFrame out = actions.poll(keys, live(true));
+		const PlayerActionFrame out = poll_frame(actions, keys, live(true));
 		CHECK(out.auto_run_forward && out.scroll_lock_off.empty() && out.requests.empty());
 	}
-	const PlayerActionFrame off = actions.poll(keys, live(false));
+	const PlayerActionFrame off = poll_frame(actions, keys, live(false));
 	CHECK(!off.auto_run_forward && off.scroll_lock_off.empty());
 	return true;
 }
@@ -72,10 +103,10 @@ bool test_menu_and_inactive_frames() {
 	Keys keys;
 	PlayerActionPoll menu = live(true);
 	menu.menu_open = true;
-	CHECK(!actions.poll(keys, menu).auto_run_forward);
+	CHECK(!poll_frame(actions, keys, menu).auto_run_forward);
 	PlayerActionPoll inactive = live(true);
 	inactive.active = false;
-	CHECK(!actions.poll(keys, inactive).auto_run_forward);
+	CHECK(!poll_frame(actions, keys, inactive).auto_run_forward);
 	return true;
 }
 
@@ -85,7 +116,7 @@ bool test_last_move_row() {
 	PlayerActions actions;
 	Keys keys;
 	keys.held.insert("Last_move");
-	const PlayerActionFrame out = actions.poll(keys, live(false));
+	const PlayerActionFrame out = poll_frame(actions, keys, live(false));
 	CHECK(out.auto_run_forward && out.scroll_lock_off.empty());
 	return true;
 }
@@ -96,16 +127,16 @@ bool test_movement_keys_turn_it_off() {
 	PlayerActions actions;
 	Keys keys;
 	keys.held.insert("move_forward");
-	CHECK(offs_are(actions.poll(keys, live(true)), {152}));
-	CHECK(offs_are(actions.poll(keys, live(true)), {152}));
+	CHECK(offs_are(poll_frame(actions, keys, live(true)), {152}));
+	CHECK(offs_are(poll_frame(actions, keys, live(true)), {152}));
 	keys.held = {"move_back", "strafe_left", "strafe_right"};
-	const PlayerActionFrame out = actions.poll(keys, live(true));
+	const PlayerActionFrame out = poll_frame(actions, keys, live(true));
 	CHECK(out.auto_run_forward && offs_are(out, {151, 156, 157}));
 	// The death screen admits the movement rows (mode word 3).
 	PlayerActionPoll dead = live(true);
 	dead.death_screen = true;
 	keys.held = {"move_forward"};
-	CHECK(offs_are(actions.poll(keys, dead), {152}));
+	CHECK(offs_are(poll_frame(actions, keys, dead), {152}));
 	return true;
 }
 
@@ -115,20 +146,20 @@ bool test_use_row_and_release_tail() {
 	PlayerActions actions;
 	Keys keys;
 	keys.held.insert("useitem");
-	CHECK(offs_are(actions.poll(keys, live(false)), {177}));
+	CHECK(offs_are(poll_frame(actions, keys, live(false)), {177}));
 	keys.held.clear();
-	const PlayerActionFrame released = actions.poll(keys, live(false));
+	const PlayerActionFrame released = poll_frame(actions, keys, live(false));
 	CHECK(offs_are(released, {-1}) && released.requests.size() == 1 &&
 			released.requests[0].action == PlayerAction::ToggleMount);
 
 	PlayerActions consumed;
 	keys.held = {"useitem"};
-	(void)consumed.poll(keys, live(false));
+	(void)poll_frame(consumed, keys, live(false));
 	const ChainDigitTake picked = consumed.chain_digit_key('1', false, false);
 	CHECK(picked.pick && picked.pick->action == PlayerAction::SelectSeat);
-	CHECK(consumed.poll(keys, live(false)).requests.empty());
+	CHECK(poll_frame(consumed, keys, live(false)).requests.empty());
 	keys.held.clear();
-	const PlayerActionFrame tail = consumed.poll(keys, live(false));
+	const PlayerActionFrame tail = poll_frame(consumed, keys, live(false));
 	CHECK(offs_are(tail, {-1}) && tail.requests.empty());
 	return true;
 }
@@ -138,10 +169,10 @@ bool test_respawn_press() {
 	PlayerActions actions;
 	Keys keys;
 	keys.held.insert("respawn");
-	const PlayerActionFrame pressed = actions.poll(keys, live(false));
+	const PlayerActionFrame pressed = poll_frame(actions, keys, live(false));
 	CHECK(pressed.requests.size() == 1 && pressed.requests[0].action == PlayerAction::Respawn &&
 			offs_are(pressed, {55}));
-	CHECK(actions.poll(keys, live(false)).scroll_lock_off.empty());
+	CHECK(poll_frame(actions, keys, live(false)).scroll_lock_off.empty());
 	return true;
 }
 

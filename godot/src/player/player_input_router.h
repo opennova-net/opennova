@@ -94,6 +94,8 @@ public:
 	// through the dispatcher's head (engine inmatch::TickInputSource carries the witness).
 	void queue_records(opennova::controls::InputEventQueue &r_records) override;
 	void dispatch_record(const opennova::controls::InputEventRecord &p_record) override;
+	// The input frame's tail behind the update's drain: the USE hold's release edge.
+	void end_input_frame() override;
 	// The shell's keyboard pass over the key queue (its KeyboardPass over the
 	// shell's legs), run at each update's input-frame head under no menu screen;
 	// it decides itself whether its shell state drains the keys. Kept across a
@@ -221,6 +223,10 @@ private:
 	// through the key queue's events.
 	int hud_rows_down() const;
 	int talk_rows_down() const;
+	// The Scroll Lock turn-offs and the arms with no code (the USE row's opens, its release's
+	// mount toggle) of an action frame, at once.
+	void apply_immediate(const opennova::controls::PlayerActionFrame &p_frame,
+			const Ref<Simulation> &p_sim);
 	// A mouse event's record (a button's down, up or double click, a wheel notch's 256 / 512)
 	// for the next update's message pump: the row the binding walk takes, if any.
 	void queue_mouse_event_record(int p_event);

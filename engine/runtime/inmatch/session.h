@@ -214,6 +214,11 @@ public:
 	}
 	virtual void queue_records(controls::InputEventQueue &records) { (void)records; }
 	virtual void dispatch_record(const controls::InputEventRecord &record) { (void)record; }
+	// The input frame's tail after the update's drain, when the frame ran (no menu screen, a
+	// joiner in its game loop): the held USE row's release edge (controls::PlayerActions::
+	// end_input_frame) [orig: Input_ProcessFrame @0x49D520 - the release edge
+	//  @0x49D6C1..0x49D6DC behind the drain @0x49D599..0x49D5E7].
+	virtual void end_input_frame() {}
 };
 
 struct FrameInput {

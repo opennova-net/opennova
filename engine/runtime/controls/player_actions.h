@@ -88,6 +88,10 @@ enum class PlayerAction {
 	// owns (inmatch::Role::dispatch_record), past the head there, a key's press and its
 	// release pass's event alike (PlayerActionFrame::fire_held carries the witness).
 	Fire,
+	// The held USE row's record (catalog row 44 useitem, code 177 = 0xB1, flags 0x0C000805: a
+	// held row), the analog pass's every frame a key is down, the poll's last record: the
+	// embedder dispatches it past the head (PlayerActions::use_item_record).
+	UseItem,
 	// A key event whose arm the embedder owns (PlayerActionPoll::embedder_row: the talk, HUD
 	// and pause rows, the escape row, the special-key chain's deploy pick): its record, in key
 	// order with the action rows', value = the record's first argument (KeyRowEvent::param:
@@ -171,13 +175,6 @@ struct PlayerActionPoll {
 	// [orig: Input_IsScrollLockOn @0x760E10 - GetKeyboardState @0x760E28, `KeyState[145] != 0`
 	//  @0x760E57]
 	bool scroll_lock_on = false;
-	// The held USE row's arm, asked once on every frame either of its keys is
-	// down: the row is a held row (flags 0x0C000805, bit 4), which the analog
-	// pass queues each frame, so case 0xB1 runs each frame the key is held.
-	// Unset = the mount chain.
-	// [orig: Input_ProcessAnalogBindings @0x4995F0, run from
-	//  Input_ProcessPlayerFrame @0x49D50C]
-	std::function<UseItemPressArm()> take_use_item_arm;
 	// The keyboard pass's events for the action rows since the last poll, in their
 	// queue order: each scanned key-down (an OS auto-repeat included) fires its row
 	// once, and the release pass's events dispatch ToSpecial's release. Each queued
@@ -282,9 +279,10 @@ struct PlayerActionFrame {
 	//  @0x76117A; Game_InitSubsystems (the call @0x4A7260); Game_ShutdownSubsystems (the call
 	//  @0x4A53B7)]
 	std::vector<int> scroll_lock_off;
-	// In order: the USE row's opens and its release arm (no code: they run at once), then the
-	// action rows' records (a code: the embedder queues them for the update's drain), the
-	// keyboard pass's events first, then the off-keyboard arms' press edges.
+	// The action rows' records (a code: the embedder queues them for the update's drain), the
+	// keyboard pass's events first, then the off-keyboard arms' press edges, then the held USE
+	// row's record (PlayerAction::UseItem). The USE row's arm (use_item_record) and the
+	// input frame's tail (end_input_frame) return theirs with no code: they run at once.
 	std::vector<PlayerActionRequest> requests;
 };
 
@@ -364,8 +362,8 @@ public:
 	void reset();
 	// Deferred until after the next poll's fresh-USE-press reset.
 	void consume_use_hold();
-	// The USE hold the special-key chain's held-USE arm reads: the hold the last poll's USE
-	// row latched, which the next input frame's head ages into the word its keyboard pass
+	// The USE hold the special-key chain's held-USE arm reads: the hold the last input frame's
+	// USE record latched (use_item_record), which the next poll ages into the word the frame
 	// reads, so a key the embedder's chain takes between two polls meets it. While it
 	// holds, the arm takes a digit (the seat pick, chain_digit_key) and passes every other
 	// key to the chain's tail: the Emotes, Radio and round-over arms, the Tab board's page
@@ -398,6 +396,26 @@ public:
 	//  skip of the scan @0x49d305; Input_ProcessFrame @0x49d520 - the release edge's consumed
 	//  test @0x49d6d4]
 	ChainDigitTake chain_digit_key(int vk, bool emotes_menu_open, bool radio_menu_open);
+	// The held USE row's record at its dispatch, past the head (the embedder's): case 0xB1
+	// turns the auto-run's toggle off at its head (scroll_lock_off, the row's code), then runs
+	// the arm the press latch decides (the embedder's world::LocalPlayer::take_use_item_press):
+	// the mount chain latches the hold, its fresh press clearing the consumed word; the
+	// armory's and the vehicle screen's opens are requests; a taken press latches nothing, so
+	// the hold ends as a release does. A record a reset or the head dropped runs no arm, and
+	// the hold ends there too.
+	// [orig: Input_ProcessAnalogBindings @0x4995F0 - the held row's queue @0x499660, run last
+	//  in Input_ProcessPlayerFrame @0x49D50C; Input_HandleActionBinding_0 case 0xB1 @0x4E0A84
+	//  (Input_DisableScrollLock), the vehicle team test @0x4E0AD8..0x4E0AEB, the mount chain
+	//  @0x4E0B5E..0x4E0B71]
+	PlayerActionFrame use_item_record(UseItemPressArm arm);
+	// The input frame's tail after the update's drain (the embedder runs it when the frame
+	// ran): a shell chord's pending consume lands, then the release edge: a hold the last
+	// frame latched and this frame did not ends, turning the auto-run's toggle off (-1) and,
+	// unless a seat pick consumed it, toggling the mount (ToggleMount).
+	// [orig: Input_ProcessFrame @0x49D520 - the release test @0x49D6AD..0x49D6C1,
+	//  Input_DisableScrollLock @0x49D6C5, the consumed test @0x49D6D4,
+	//  Entity_ToggleVehicleMount @0x49D6DC]
+	PlayerActionFrame end_input_frame(bool simulation_available);
 	// The death screen's spectator rows, the catalog's mode-2 rows 110..112
 	// (CycleSpectatorMode, IncSpectatorTarget, DecSpectatorTarget): the binding
 	// scan admits them only while the death screen is up, so the embedder
@@ -425,10 +443,13 @@ private:
 	// This frame's open Emotes / Radio menu while gameplay input ran: a digit row's
 	// off-keyboard arm fires nothing under it, as under the USE hold.
 	bool menu_digits_ = false;
+	// The poll aged the hold and owes the frame's tail (end_input_frame); the USE row was
+	// down under its gates (its record is the poll's last).
+	bool use_frame_aged_ = false;
+	bool use_row_down_ = false;
 	bool spectator_was_down_[3] = {};
 
-	void sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,
-			PlayerActionFrame &frame);
+	void sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate);
 };
 
 } // namespace opennova::controls
