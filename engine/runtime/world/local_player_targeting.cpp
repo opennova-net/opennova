@@ -43,7 +43,65 @@ bool flare_roll_drops(World &world, const LiveRound &flare, const Entity *attack
     return static_cast<int32_t>((draw >> 2) % 101) >= chance;
 }
 
+// A decoded remote person's def, as the pool-0 entity retail's client built for it holds it:
+// ItemList_FindIndexByTypeId over the record's type word into +0x1C, whose index 0 (no row of
+// the type, or the first row) leaves the slot with no def (+0x20) [orig: NapiNPClientMsg_0x00C
+// @0x42E730 - ItemList_FindIndexByTypeId @0x42E84A, Entity_InitFromItemDef called @0x42E84D;
+// Entity_InitFromItemDef @0x49E550 - the zero test @0x49E559].
+const PlayerTemplate *wire_person_row(const World &world, const World::WirePerson &person) {
+    const int32_t index = item_index_by_type_id(world, person.type_id);
+    return index != 0 ? &world.tables.item_rows[static_cast<size_t>(index)] : nullptr;
+}
+
+// The person's DcbId (+0x7C): a plyr row's class init stores 10000 + its +0x154 byte, which
+// every decoded pool-0 row ran with its record's byte in place (the join's 0x0C rows at the
+// mission start's re-init of every pool-0 slot, a 0x18 row after its store); no other class
+// init stores one, and the record's slot memset leaves 0.
+// [orig: PlayerClass_InitEntity @0x4B1060 - `movzx edx, byte ptr [esi+154h]` @0x4B1149, the add
+//  @0x4B1155, the +0x7C store @0x4B1173; Entity_InitAllFromModels @0x40E460 - the pool-0 class
+//  inits @0x40E5DA..0x40E60B; NapiNPClientMsg_FullEntitySpawn @0x433780 - the +0x154 store
+//  @0x433BBB ahead of the class init called @0x433E82]
+int32_t wire_person_dcb_id(const PlayerTemplate &row, const World::WirePerson &person) {
+    return row.body_class == PlayerBodyClass::kPlayer ? 10000 + person.byte_154 : 0;
+}
+
+// Entity_ComputeWeaponFireOrigin over the person: a person def's (type 3) Position plus its
+// CameraOffset, halved in X / Y with the full Z, or quartered with half the Z when bit 7 of
+// g_CurrentTick + 36 * DcbId is up, plus the XY jitter of the same word's 0x60 bits, as
+// AiSystem::weapon_aim_origin reads a registry person. Any other def takes the model's point,
+// which a decoded row holds no pose for: its Position, the no-model leg.
+// [orig: Entity_ComputeWeaponFireOrigin @0x43B4B0 - the type test @0x43B4C0, the phase
+//  @0x43B4D1, the halves @0x43B4DA..0x43B509, the jitter @0x43B50F..0x43B523, the no-model
+//  leg @0x43B54F]
+void wire_person_fire_origin(const World &world, const PlayerTemplate &row,
+        const World::WirePerson &person, int32_t out[3]) {
+    for (int axis = 0; axis < 3; ++axis) out[axis] = person.pos[axis];
+    if (row.item_type != 3) return;
+    const uint32_t phase = world.logic_tick + 36u * uint32_t(wire_person_dcb_id(row, person));
+    const bool low = (phase & 0x80u) != 0;
+    const int32_t jitter = int32_t(phase & 0x60u);
+    out[0] = io::bam_add(out[0], io::bam_add(io::bam_sar(person.eye[0], low ? 2 : 1),
+                                           (jitter - 64) * 64));
+    out[1] = io::bam_add(out[1], io::bam_add(io::bam_sar(person.eye[1], low ? 2 : 1),
+                                           (jitter - 32) * 64));
+    out[2] = io::bam_add(out[2], low ? io::bam_sar(person.eye[2], 1) : person.eye[2]);
+}
+
 } // namespace
+
+bool wire_person_target_origin(const World &world, uint16_t wire_handle, int32_t out[3]) {
+    World::WirePerson person;
+    if (!world.wire_person || !world.wire_person(wire_handle, person)) return false;
+    const PlayerTemplate *row = wire_person_row(world, person);
+    if (row == nullptr) {
+        // No def: no graphic model either, the raw Position [orig: Entity_ComputeWeaponFireOrigin
+        //  @0x43B4B0 - @0x43B54F].
+        for (int axis = 0; axis < 3; ++axis) out[axis] = person.pos[axis];
+        return true;
+    }
+    wire_person_fire_origin(world, *row, person, out);
+    return true;
+}
 
 // The heat-seeker arm of the shared target query, contexts 6 and 11: the
 // pool-0 and pool-1 legs and, for a query carrying the 0x200 flag, the
@@ -77,7 +135,7 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
         return {};
     int32_t pose[6] = {0, 0, 0, body.heading, body.pitch, body.roll};
     world.ai.weapon_aim_origin(world, body, pose);
-    struct Candidate { EntityHandle handle; int32_t round; int32_t score; };
+    struct Candidate { EntityHandle handle; int32_t round; uint16_t wire; int32_t score; };
     std::vector<Candidate> candidates;
     candidates.reserve(128);
     const auto descending = [](const Candidate &a, const Candidate &b) { return a.score > b.score; };
@@ -86,6 +144,65 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
         if (candidates.size() == 128) {
             std::stable_sort(candidates.begin(), candidates.end(), descending);
             candidates.pop_back();
+        }
+    };
+    // The validator's Player test: out while the local cheat word's 0x800 bit is up
+    // (World::rules.ai_rules_skip_local_player) and once the round has ended
+    // [orig: Entity_ValidateWeaponTarget @0x53A400 - the 0x100 test @0x53A466, `test
+    //  dword_24C1930, 800h` @0x53A46E..0x53A478, g_RoundOver @0x53A482..0x53A489].
+    const auto player_out = [&world](uint32_t flags) {
+        return (flags & kEntityFlagPlayer) != 0 &&
+                (world.rules.ai_rules_skip_local_player || world.match.outcome().ended);
+    };
+    // A joiner's decoded remote persons: retail's client built each as its own pool-0 entity,
+    // so the pool-0 walk visits them with every test it runs on any slot. Ours keeps no
+    // registry entity for them; a joiner's registry holds its own player alone in pool 0
+    // (replication::ClientWorldMaterializer), which the walk skips as the query entity or its
+    // occupant, so they follow it in slot order. Each word is the client-built entity's:
+    // ItemTypeIndex by the record's type (wire_person_row), the Flags word, the 16-tick death
+    // window over Health and the edge's +0x1AC, the Player test, the selector words over its
+    // DcbId (wire_person_dcb_id) and its commandGroup (+0x11C, the slot memset's 0: no client
+    // message stores it), the team byte, the def's armor words, the heat leg over +0x1A4 (the
+    // model init's copy of the def's heatsig, which every decoded pool-0 row ran: the join's 0x0C
+    // rows at the mission start's re-init, a 0x18 row at its own call) and the def type's
+    // drowning drop. [orig: Entity_FindTargets @0x53A610 - the pool-0 leg @0x53A6E7..0x53A8A3
+    //  (ItemTypeIndex @0x53A721, Flags @0x53A727..0x53A72F, the death window
+    //  @0x53A731..0x53A74D, the query entity and its occupant @0x53A756..0x53A76C, the
+    //  selectors @0x53A782..0x53A7E0, the team @0x53A80E..0x53A824, Entity_ValidateWeaponTarget
+    //  called @0x53A846, Weapon_CalcDamageByType called @0x53A865, the armor words
+    //  @0x53A878..0x53A892); Entity_InitFromModel @0x40DC30 - the heatsig copy @0x40E136 /
+    //  @0x40E13D; Entity_InitAllFromModels @0x40E460 - the pool-0 call @0x40E51F;
+    //  NapiNPClientMsg_FullEntitySpawn @0x433780 - the call @0x433E6C;
+    //  NapiNPClientMsg_0x00C @0x42E730 - the slot memset @0x42E7F1]
+    std::vector<uint16_t> wire_persons;
+    if (world.wire_person && world.wire_person_handles) world.wire_person_handles(wire_persons);
+    const auto wire_pool0_leg = [&]() {
+        for (const uint16_t wire : wire_persons) {
+            World::WirePerson person;
+            if (!world.wire_person(wire, person)) continue;
+            const PlayerTemplate *row = wire_person_row(world, person);
+            if (row == nullptr) continue;
+            const uint32_t flags = person.flags;
+            if ((flags & 0x8000001u) != 0) continue;
+            if (((flags & 2u) != 0 || person.health_zero) && person.death_age > 16) continue;
+            if (player_out(flags)) continue;
+            const int32_t dcb_id = wire_person_dcb_id(*row, person);
+            if (!owner.target_selectors.admits_team(dcb_id, 0) &&
+                    (person.team == 0 || person.team == team)) continue;
+            if (!owner.target_selectors.allows(dcb_id, 0)) continue;
+            if (row->armor_impact == -1 && row->armor_kz == -1) continue;
+            int32_t aim[3], metrics[6];
+            wire_person_fire_origin(world, *row, person, aim);
+            const uint32_t arc = AiSystem::weapon_relative_metrics(pose, aim, metrics);
+            if (arc > uint32_t(ammo.boresight_maxang) ||
+                    metrics[2] > int32_t(uint32_t(ammo.heat_det_range) << 16) ||
+                    metrics[2] >= int32_t(uint32_t(uint16_t(row->heat_sig)) << 16)) continue;
+            if (row->item_type == 3 && (flags & 0x8000u) != 0) continue;
+            int32_t score = io::bam_sub(0, static_cast<int32_t>(arc));
+            if (world.rules.mp_session) score = io::bam_add(uint16_t(row->heat_sig), score >> 12);
+            score = owner.target_selectors.adjust_score(score, dcb_id, 0);
+            if (score == INT32_MAX) continue;
+            push({EntityHandle{}, -1, wire, score});
         }
     };
     for (int pool = 0; pool <= 1; ++pool) {
@@ -97,7 +214,7 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
             if ((flags & 0x8000001u) != 0) continue;
             if (((flags & 2u) != 0 || target->health <= 0) &&
                 int32_t(world.logic_tick - target->death_tick) > 16) continue;
-            if ((flags & kEntityFlagPlayer) != 0 && world.match.outcome().ended) continue;
+            if (player_out(flags)) continue;
             // The SSN selector words match the target's DcbId (+0x7C, entity_dcb_id), a
             // player's 10000 + slot [orig: Entity_FindTargets @0x53A791 / @0x53A7C3;
             //  Entity_ValidateWeaponTarget @0x53A4C0; Weapon_CalcDamageByType @0x53944C].
@@ -117,8 +234,9 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
             if (world.rules.mp_session) score = io::bam_add(uint16_t(target->heat_sig), score >> 12);
             score = owner.target_selectors.adjust_score(score, dcb_id, target->group_id);
             if (score == INT32_MAX) continue;
-            push({h, -1, score});
+            push({h, -1, 0xFFFF, score});
         }
+        if (pool == 0) wire_pool0_leg();
     }
     {
         const ProjectileTargetRing &ring = world.round_sim.target_ring;
@@ -142,23 +260,39 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
             }
             score = owner.target_selectors.adjust_score(score, 0, 0);
             if (score == INT32_MAX) continue;
-            push({EntityHandle{}, index, score});
+            push({EntityHandle{}, index, 0xFFFF, score});
         }
     }
     std::stable_sort(candidates.begin(), candidates.end(), descending);
     for (const Candidate &candidate : candidates) {
         int32_t aim[3];
+        // A decoded person's ray end is its fire origin again, and its end of the sector walk
+        // excludes its seat mount, its Flags word gating the terrain leg (the pool-0 entity
+        // itself lies in neither sector pool) [orig: Entity_FindTargets @0x53A610 -
+        // Entity_ComputeWeaponFireOrigin called @0x53AED7, Physics_RaycastTerrainAndSectors
+        // called @0x53AEF4 / @0x53AF21; Physics_RaycastTerrainAndSectors @0x539910 - the
+        // indoors pair @0x539944..0x53994C, entityB's +0x268 / +0x16C @0x5399FA..0x539A12].
+        World::WirePerson person;
+        const bool wire = candidate.wire != 0xFFFF;
+        if (wire) world.wire_person(candidate.wire, person);
         if (candidate.round >= 0) round_target_origin(world, candidate.round, aim);
+        else if (wire) wire_person_fire_origin(world, *wire_person_row(world, person), person, aim);
         else world.ai.weapon_aim_origin(world, *world.registry.get(candidate.handle), aim);
         const TargetRef pick = candidate.round >= 0 ? TargetRef::of_round(candidate.round)
-                                                    : TargetRef{candidate.handle};
-        if (world.ai.line_of_sight_clear(world, pose, aim, owner.handle, candidate.handle)) return pick;
+                : wire ? TargetRef::of_wire_person(candidate.wire)
+                       : TargetRef{candidate.handle};
+        const auto clear = [&](const int32_t from[3]) {
+            return wire ? world.ai.line_of_sight_clear_to_person(world, from, aim, owner.handle,
+                                  EntityHandle{person.seat_parent}, person.flags)
+                        : world.ai.line_of_sight_clear(world, from, aim, owner.handle, candidate.handle);
+        };
+        if (clear(pose)) return pick;
         if (((owner.flags | owner.engine_flags) & kEntityFlagIndoors) != 0) {
             const int32_t zero[3] = {}, offset[3] = {24576, 0, 0};
             int32_t shifted[3];
             collision_matrix_from_euler(body.heading, 0, 0, zero).rotate_point(offset, shifted);
             for (int axis = 0; axis < 3; ++axis) shifted[axis] = io::bam_add(pose[axis], shifted[axis]);
-            if (world.ai.line_of_sight_clear(world, shifted, aim, owner.handle, candidate.handle)) return pick;
+            if (clear(shifted)) return pick;
         }
     }
     return {};
@@ -333,13 +467,17 @@ HudTargetCursor hud_target_cursor_build(const World &world, const AiEntity *body
     // leaves [orig: HUD_BuildEntityInfo @0x4B8440 - the word @0x4B87F0, `cmp dword ptr
     //  [esi+168h], 0` @0x4B8816, headLookTarget @0x4B881F; Entity_ClearAllReferences @0x465670 -
     //  the aiRuntime +0xC clear @0x4656DB..0x4656E7].
+    // A word naming a joiner's decoded remote person (the heat lock's pool-0 leg) names its
+    // row until the client's destroy clears the word (LocalPlayer::note_wire_entity_destroyed).
     HudTargetCursor cursor;
     if (body != nullptr) {
         cursor.lock = AiSlot::target_of(body->slot.f[3]);
         if (cursor.lock.entity.valid() && world.registry.get(cursor.lock.entity) == nullptr)
             cursor.lock = TargetRef{};
         const EntityHandle named = cursor.lock.valid() ? cursor.lock.entity : body->inf.head_look_target;
-        if (const Entity *e = world.registry.get(named))
+        if (cursor.lock.wire_person != 0xFFFF)
+            cursor.wire_person = cursor.lock.wire_person;
+        else if (const Entity *e = world.registry.get(named))
             cursor.entity = EntityLifetime{e->handle, e->registry_spawn_id};
         else if (!cursor.lock.valid())
             cursor.wire_person = aim_wire_person;
@@ -349,6 +487,12 @@ HudTargetCursor hud_target_cursor_build(const World &world, const AiEntity *body
 
 void LocalPlayer::build_hud_target_cursor() {
     view_tracker.hud_cursor = hud_target_cursor_build(world_, player_ai(), aim_wire_person_);
+}
+
+void LocalPlayer::note_wire_entity_destroyed(uint16_t wire_handle) {
+    hud_target_cursor_note_destroyed(view_tracker.hud_cursor, wire_handle);
+    if (AiEntity *body = player_ai())
+        if (AiSlot::target_of(body->slot.f[3]).wire_person == wire_handle) body->slot.f[3] = 0;
 }
 
 const Entity *hud_target_cursor_entity(const World &world, const HudTargetCursor &cursor) {

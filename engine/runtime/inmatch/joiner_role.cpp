@@ -1464,21 +1464,41 @@ void JoinerRole::wire_frame_providers() {
                 row->ride_occupant == runtime->self_handle();
         return true;
     };
-    // The HUD target cursor's decoded remote person (world::HudTargetCursor::wire_person): the
-    // team byte and the def's type of the pool-0 entity retail's client built for its row,
-    // the def the spawn typed it from [orig: NapiNPClientMsg_0x00C @0x42E730 - the team
-    //  @0x42E979; HUD_DrawCrosshair @0x592640 - the def type @0x592CE8..0x592CF3].
-    world.wire_cursor_person = [this](uint16_t handle, world::World::WireCursorPerson &out) {
+    // A decoded remote person's words as the pool-0 entity retail's client built for its row
+    // holds them (world::World::WirePerson): the record's type word, team byte and +0x154
+    // byte, the Flags word with the client's latches, the zeroed Health, the death edge's
+    // stamp on the replica clock (g_CurrentTick's stand-in), the Position, the CameraOffset
+    // the body update restamps, and the seat mount a seated row's compact names (its carrier
+    // under a nonzero bone, D-NET-224). The pool-0 walks visit every row but the client's own,
+    // which is the registry's local player. [orig: NapiNPClientMsg_0x00C @0x42E730 - the type
+    //  word @0x42E83B, the team @0x42E979, the +0x154 byte @0x42EA06; Entity_FindTargets
+    //  @0x53A610 - the pool-0 walk @0x53A6E7..0x53A8A3]
+    world.wire_person = [this](uint16_t handle, world::World::WirePerson &out) {
         const replication::ClientEntityState *row = runtime->state().find(handle);
         if (row == nullptr) return false;
+        out = world::World::WirePerson{};
+        out.type_id = row->type_id;
         out.team = row->team_known ? row->team : 0;
-        const def::DefItemsFile *items = kernel_->items_table();
-        const def::DefItemDef *item = items != nullptr
-                ? mission::find_item_def(*items,
-                          static_cast<int>(row->type_id) + mission::kItemIdOffset)
-                : nullptr;
-        out.item_type = item != nullptr ? static_cast<uint8_t>(item->type) : 0;
+        out.byte_154 = row->spawn_byte_154;
+        out.flags = row->rm_entity_flags;
+        out.health_zero = row->net_health_zero;
+        out.death_age = static_cast<int32_t>(runtime->view().frame_tick() - row->death_tick);
+        out.pos[0] = row->x;
+        out.pos[1] = row->y;
+        out.pos[2] = row->z;
+        for (int axis = 0; axis < 3; ++axis) out.eye[axis] = row->eye_offset[axis];
+        if (row->carrier_handle != world::EntityHandle::kInvalid && row->mount_bone != 0)
+            out.seat_parent = row->carrier_handle;
         return true;
+    };
+    world.wire_person_handles = [this](std::vector<uint16_t> &handles) {
+        handles.clear();
+        const bool self = runtime->has_self_handle();
+        for (const replication::ClientEntityState &row : runtime->state().entities)
+            if (wire_handle::pool(row.handle) == wire_handle::kPoolOrganic &&
+                    !(self && row.handle == runtime->self_handle()))
+                handles.push_back(row.handle);
+        std::sort(handles.begin(), handles.end());
     };
     // The damage pass's wire-built persons: a remote player or infantry is a
     // replica row here, where retail's client flies its rounds into its own
@@ -2359,7 +2379,8 @@ void JoinerRole::close() {
 		kernel_->world.round_sim.guided_inputs_provider = {};
 		kernel_->world.round_sim.wire_actor_provider = {};
 		kernel_->world.destroyed_mark = {};
-		kernel_->world.wire_cursor_person = {};
+		kernel_->world.wire_person = {};
+		kernel_->world.wire_person_handles = {};
 		kernel_->world.round_sim.wire_person_body = {};
 		kernel_->wire_person_pose = {};
 	}

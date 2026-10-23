@@ -550,8 +550,9 @@ static void world_feeds() {
 // The crosshair reads this pass's record of the HUD target cursor, the weapon inset the record
 // as the scene frame found it ahead of the pass (the last pass's), and on a joiner either may
 // name a decoded remote person, read through its row as the pool-0 entity retail's client
-// built for it (World::wire_cursor_person): its pool, its team byte and, for the crosshair's
-// brackets only, its def's type. A head-look target sets no cursor flag, so no cursor quad.
+// built for it (World::wire_person): its pool, its team byte and, for the crosshair's
+// brackets only, the type of the def its record's type word indexes (none at index 0). A
+// head-look target sets no cursor flag, so no cursor quad.
 // [orig: HUD_DrawCrosshair @0x592640 - the pool test (the call @0x592675), the team read
 //  @0x592692, the def type @0x592CE8..0x592CF3, the cursor flag @0x592776..0x592790;
 //  Render_WeaponInsetScene @0x5C9740 - g_HUDTargetCursorEntity @0x5C9F5D, the pool test (the
@@ -595,18 +596,26 @@ static void cursor_records() {
 	CHECK(st.target_brackets && st.inset_friendly);
 	st = read(none, named);
 	CHECK(!st.target_brackets && st.inset_friendly);
-	// A decoded remote person: no registry entity, its row through the role's hook.
+	// A decoded remote person: no registry entity, its row through the role's hook. The items
+	// rows: index 0 reads as no def, type 10 a person (3), type 11 a vehicle (1).
+	world.tables.item_rows.assign(3, PlayerTemplate{});
+	world.tables.item_rows[0].type_id = 1;
+	world.tables.item_rows[1].type_id = 10;
+	world.tables.item_rows[1].item_type = 3;
+	world.tables.item_rows[2].type_id = 11;
+	world.tables.item_rows[2].item_type = 1;
 	struct Row {
 		uint16_t handle;
-		uint8_t team, item_type;
+		uint8_t team;
+		uint16_t type_id;
 	};
-	std::vector<Row> rows = { { 0x0005, 1, 3 }, { 0x0006, 2, 3 }, { 0x0007, 1, 0 },
-		{ 0x1008, 1, 3 } };
-	world.wire_cursor_person = [&rows](uint16_t handle, World::WireCursorPerson &out) {
+	std::vector<Row> rows = { { 0x0005, 1, 10 }, { 0x0006, 2, 10 }, { 0x0007, 1, 11 },
+		{ 0x1008, 1, 10 }, { 0x000A, 1, 99 } };
+	world.wire_person = [&rows](uint16_t handle, World::WirePerson &out) {
 		for (const Row &row : rows)
 			if (row.handle == handle) {
 				out.team = row.team;
-				out.item_type = row.item_type;
+				out.type_id = row.type_id;
 				return true;
 			}
 		return false;
@@ -622,6 +631,8 @@ static void cursor_records() {
 	st = person(0x0006); // the other team
 	CHECK(!st.target_brackets && !st.inset_friendly);
 	st = person(0x0007); // no person def: the inset takes no def test
+	CHECK(!st.target_brackets && st.inset_friendly);
+	st = person(0x000A); // no items row of the type: index 0, no def
 	CHECK(!st.target_brackets && st.inset_friendly);
 	st = person(0x1008); // off pool 0
 	CHECK(!st.target_brackets && !st.inset_friendly);

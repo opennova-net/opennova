@@ -105,6 +105,9 @@ struct EntityHandle {
 struct TargetRef {
     EntityHandle entity;
     int32_t round = -1; // a RoundSim::rounds slot; -1: none
+    // A joiner's decoded remote person by its wire handle (World::wire_person), the pool-0
+    // entity retail's client built for it; 0xFFFF: none.
+    uint16_t wire_person = 0xFFFF;
 
     constexpr TargetRef() = default;
     constexpr TargetRef(EntityHandle h) : entity(h) {}
@@ -113,8 +116,21 @@ struct TargetRef {
         t.round = slot;
         return t;
     }
-    constexpr bool valid() const { return entity.valid() || round >= 0; }
-    bool operator==(const TargetRef &o) const { return entity == o.entity && round == o.round; }
+    static constexpr TargetRef of_wire_person(uint16_t wire_handle) {
+        TargetRef t;
+        t.wire_person = wire_handle;
+        return t;
+    }
+    constexpr bool valid() const { return entity.valid() || round >= 0 || wire_person != 0xFFFF; }
+    // The word a pool walk of the target finds, pool << 12 | slot: a decoded person's slot is
+    // its wire handle; a round lies in no pool (0xFFFF), as does no target.
+    // [orig: NetPacket_WriteEntityPositionUpdate @0x42A610 - the walk @0x42A713..0x42A745]
+    constexpr uint16_t pool_word() const {
+        return wire_person != 0xFFFF ? wire_person : entity.packed;
+    }
+    bool operator==(const TargetRef &o) const {
+        return entity == o.entity && round == o.round && wire_person == o.wire_person;
+    }
     bool operator!=(const TargetRef &o) const { return !(*this == o); }
 };
 

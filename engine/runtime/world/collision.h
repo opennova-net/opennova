@@ -1631,6 +1631,12 @@ public:
 	bool wire_person_los_clear(World &world, EntityHandle query, const LosWireEndpoint &endpoint,
 			const int32_t start[3], const int32_t end[3], int32_t height_offset,
 			bool all_types = false);
+	// raycast_clear with a decoded remote person as entity B through the same two fields: its
+	// Flags indoors bit (the terrain leg's pair) and its parent slot (excluded from the walk).
+	// [orig: Physics_RaycastTerrainAndSectors @0x539910 - entityB's Flags @0x539949, its
+	//  +0x16C @0x539A08..0x539A12]
+	bool raycast_clear_to_person(World &world, const int32_t a[3], const int32_t b[3],
+			EntityHandle exclude_a, EntityHandle parent_a, const LosWireEndpoint &person);
 	// Same exact query with per-target section matrices retained for a caller-
     // declared stable world phase. The server resets the cache after gameplay
     // movement and again before snapshot fan-out; every recipient LOS ray can
@@ -2160,10 +2166,12 @@ private:
     bool stable_los_dense_enabled_ = false;
     bool stable_los_index_ready_ = false;
     const CollisionTargetView *trace_target_view(const World &world, EntityHandle h) const;
+    // `wire_b`: entity B is a decoded remote person (raycast_clear_to_person), whose Flags
+    // indoors bit stands in for a registry B's.
     bool raycast_clear_impl(World &world, const int32_t a[3], const int32_t b[3],
                             EntityHandle exclude_a, EntityHandle exclude_b,
                             EntityHandle parent_a, EntityHandle parent_b,
-                            bool cache_target_views);
+                            bool cache_target_views, const LosWireEndpoint *wire_b = nullptr);
     uint64_t last_los_sector_candidates_ = 0;
     ProjectileHit trace_projectile_impl(const World &world,
                                         const ProjectileTrace &trace,

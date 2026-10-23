@@ -406,11 +406,12 @@ public:
     const HudTargetCursor &hud_target_cursor_at_scene() const {
         return view_tracker.hud_cursor_at_scene;
     }
-    // A decoded remote person's row went through the client's destroy
-    // (hud_target_cursor_note_destroyed carries the witness).
-    void note_wire_entity_destroyed(uint16_t wire_handle) {
-        hud_target_cursor_note_destroyed(view_tracker.hud_cursor, wire_handle);
-    }
+    // A decoded remote person's row went through the client's destroy: the cursor record names
+    // it no more (hud_target_cursor_note_destroyed carries the witness), nor does the local
+    // body's +0xC word, which the destroy's reference sweep clears in every AI slot naming it.
+    // [orig: Entity_Destroy @0x43E810 - Entity_ClearAllReferences called @0x43E921;
+    //  Entity_ClearAllReferences @0x465670 - the aiRuntime +0xC clear @0x4656DB..0x4656E7]
+    void note_wire_entity_destroyed(uint16_t wire_handle);
     // Reset the frame-input state and seed the look heading from the (auto-)
     // spawned local player's facing — the session bring-up's tail.
     void reset_local_player_input_to_player_facing();

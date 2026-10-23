@@ -569,6 +569,25 @@ bool AiSystem::line_of_sight_clear_impl(World &world, const int32_t a[3],
     return !los_terrain_blocked(*terrain, a, b);
 }
 
+// See the ai.h declaration.
+bool AiSystem::line_of_sight_clear_to_person(World &world, const int32_t a[3],
+                                             const int32_t b[3], EntityHandle from,
+                                             EntityHandle person_seat,
+                                             uint32_t person_flags) const {
+    if (terrain == nullptr || !terrain->valid()) return true;
+    if (collision != nullptr) {
+        const CollisionWorld::RayDebugScope ray_scope(collision,
+                                                      CollisionWorld::RayDebugCategory::kAiLos);
+        CollisionWorld::LosWireEndpoint person;
+        person.indoors = (person_flags & kEntityFlagIndoors) != 0;
+        person.parent = person_seat;
+        return collision->raycast_clear_to_person(world, a, b, from,
+                                                  los_walker_parent(world.registry.get(from)),
+                                                  person);
+    }
+    return !los_terrain_blocked(*terrain, a, b);
+}
+
 // The retail argument is unused: the radius is always 100 world units.
 // Only pool 1 is visited, and a qualifying ally makes the caller's controller
 // red even if that ally has no brain. [orig: Entity_AlertNearbyAllies @0x4654B0]

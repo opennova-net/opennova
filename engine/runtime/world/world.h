@@ -1414,19 +1414,38 @@ public:
     // readers run off the authority only). [orig: Entity_Destroy @0x43E810 - the memset
     // @0x43EA70, the mark @0x43EA7F; read by Entity_UpdateTransformAndTurret @0x440D2A]
     std::function<bool(uint16_t wire_handle)> destroyed_mark;
-    // A decoded remote person's entity fields the HUD target cursor's readers take, by its wire
-    // handle (HudTargetCursor::wire_person): retail's client built the person as its own pool-0
-    // entity, whose team byte (+0x162) the crosshair's and the inset's team compares read and
-    // whose def's type (+0x20 -> +0x5C) the crosshair's bracket test reads. A joiner's role
-    // binds it over its replica rows (false: no row holds the handle); empty on every other
-    // peer, whose cursor names registry entities only. [orig: HUD_DrawCrosshair @0x592640 -
-    // the team read @0x592692, the def type @0x592CE8..0x592CF3; Render_WeaponInsetScene
-    // @0x5C9740 - the team read @0x5C9F84]
-    struct WireCursorPerson {
-        uint8_t team = 0;      // the row's team byte (0 while none decoded)
-        uint8_t item_type = 0; // the row's ItemDef type, 0 with no def
+    // A decoded remote person's entity words, by its wire handle: retail's client built the
+    // person as its own pool-0 entity, and its readers take these words of it. The HUD target
+    // cursor's (HudTargetCursor::wire_person): the team byte the crosshair's and the inset's team
+    // compares read, the def type the crosshair's bracket test reads. The heat query's pool-0
+    // leg (guided_heat_target), which walks the client's pool-0 slots and so these persons: the
+    // walk's words and the fire origin's. The def words come from the items row the record's
+    // type word names (item_index_by_type_id: no row is index 0, no def). A joiner's role binds
+    // both hooks over its replica rows (false: no row holds the handle); both are empty on
+    // every other peer, whose pool-0 persons are registry entities.
+    // [orig: NapiNPClientMsg_0x00C @0x42E730 - ItemList_FindIndexByTypeId's index @0x42E84A,
+    //  the team @0x42E979; HUD_DrawCrosshair @0x592640 - the team read @0x592692, the def type
+    //  @0x592CE8..0x592CF3; Render_WeaponInsetScene @0x5C9740 - the team read @0x5C9F84;
+    //  Entity_FindTargets @0x53A610 - the pool-0 walk @0x53A6E7..0x53A8A3]
+    struct WirePerson {
+        uint16_t type_id = 0;  // the record's type word (+0x1C's ItemList_FindIndexByTypeId key)
+        uint8_t team = 0;      // +0x162, 0 while none decoded
+        uint8_t byte_154 = 0;  // +0x154, the record's slot byte
+        uint32_t flags = 0;    // +0x24: the spawn's word and the client's own latches on it
+        bool health_zero = false; // Health (+0x11E) zeroed by a death record
+        // g_CurrentTick less +0x1AC, the death edge's stamp (0 until an edge): a dead body
+        // stays a target for 16 ticks [orig: Entity_UpdateInfantryPlayerBody @0x4B4CC1 /
+        //  @0x4B4CCC; Entity_UpdateInfantryAI @0x4B9D24 / @0x4B9D2F].
+        int32_t death_age = 0;
+        int32_t pos[3] = {};   // Position (+4..+0xC)
+        int32_t eye[3] = {};   // CameraOffset (+0x6C..+0x74)
+        // The seat mount (+0x16C), a pool-1 handle (0xFFFF none): the LOS walk's target parent.
+        uint16_t seat_parent = 0xFFFF;
     };
-    std::function<bool(uint16_t wire_handle, WireCursorPerson &out)> wire_cursor_person;
+    std::function<bool(uint16_t wire_handle, WirePerson &out)> wire_person;
+    // The decoded pool-0 rows other than the local player's own, by handle (pool-0 slot)
+    // ascending: the slots the client's pool-0 walks visit.
+    std::function<void(std::vector<uint16_t> &handles)> wire_person_handles;
     // The authority's GetTickCount: the process clock its host binds (HostConfig::clock_ms, at
     // the session start and at each next mission's bind); empty is the deterministic logic-tick
     // seam (authority_tick_count_ms). The 0x26 sender's entity+560 stamp reads it, and so do

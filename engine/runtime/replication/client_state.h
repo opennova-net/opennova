@@ -395,6 +395,11 @@ struct ClientEntityState {
 	// Entity_UpdateInfantryAI @0x4b9c51..0x4b9d3e].
 	int16_t net_death_anim = 0;
 	bool net_health_zero = false;
+	// +0x1AC, the death edge's stamp of the tick it ran on (the replica clock, the walk's
+	// key); a record's slot memset leaves 0. The heat query's 16-tick window over a dead body
+	// reads it (world::World::WirePerson::death_age). [orig: Entity_UpdateInfantryPlayerBody
+	//  @0x4B4CC1 / @0x4B4CCC; Entity_UpdateInfantryAI @0x4B9D24 / @0x4B9D2F]
+	uint32_t death_tick = 0;
 	// The corpse timer (moveTimer) the death edge seeds from the def's
 	// deathtime and the dead tail counts down; at 186 the def's decay effect
 	// spawns, and an org1 corpse is destroyed at 0 on a session client

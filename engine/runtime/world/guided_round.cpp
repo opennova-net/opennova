@@ -49,11 +49,20 @@ GuidedInputs inputs(World &world, const LiveRound &r, bool authority, bool launc
             if (body->slot.f[3]) owner_target = AiSlot::target_of(body->slot.f[3]);
             std::copy_n(body->inf.aim_point, 3, in.aim);
         }
-        in.owner_target = owner_target.entity.packed;
+        // A decoded remote person (a joiner's heat lock) is the client's own pool-0 entity:
+        // its handle names it, its raw Position the get-target copy [orig: PersonClass_GetTarget
+        //  @0x4B0DD0 - @0x4B0DEA..0x4B0E12].
+        in.owner_target = owner_target.pool_word();
         in.owner_target_round = owner_target.round;
+        World::WirePerson person;
         if (owner_target.round >= 0) {
             in.owner_aim = true;
             round_target_origin(world, owner_target.round, in.aim);
+        } else if (owner_target.wire_person != 0xFFFF) {
+            if (world.wire_person && world.wire_person(owner_target.wire_person, person)) {
+                in.owner_aim = true;
+                std::copy_n(person.pos, 3, in.aim);
+            }
         } else if (const Entity *aim = world.registry.get(owner_target.entity)) {
             in.owner_aim = true;
             target_position(*aim, in.aim);
@@ -113,7 +122,7 @@ void RoundSim::init_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
                 body->slot.f[3] = AiSlot::target_word(target);
                 owner->last_fire_target = target;
                 in.acquisition_ran = true; in.acquired = target.valid();
-                in.acquired_target = target.entity.packed;
+                in.acquired_target = target.pool_word();
                 in.acquired_round = target.round;
             }
         }

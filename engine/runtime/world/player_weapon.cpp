@@ -1720,10 +1720,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					io.fired.ammo_index = adm->ammo_index;
 					io.fired.charge = w.pending_throw_charge;
                     // The C2S 0x06 target word pool-walks the +0xC pointer: a round
-                    // lies in no pool, so it writes 0xFFFF, a round's entity word.
+                    // lies in no pool, so it writes 0xFFFF, a round's entity word; a
+                    // decoded remote person is the client's own pool-0 entity, its word
+                    // the person's handle (D-NET-NEW-L8-56).
                     // [orig: NetPacket_WriteEntityPositionUpdate @0x42A610 (the walk
                     //  @0x42A713..0x42A745, its miss @0x42A745)]
-                    io.fired.target_handle = fire_target.entity.packed;
+                    io.fired.target_handle = fire_target.pool_word();
 					io.fired.shooter_pose[0] = p->self->position.x.q16;
 					io.fired.shooter_pose[1] = p->self->position.y.q16;
 					io.fired.shooter_pose[2] = p->self->position.z.q16;

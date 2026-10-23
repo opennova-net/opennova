@@ -1539,6 +1539,10 @@ bool run_dead_row_takes_its_death_clip_and_respawn_rearms() {
 	ok &= expect(es->net_anim_current == opennova::world::anim_state::kDeathFire &&
 	                     (es->rm_entity_flags & 0x2u) != 0u && es->net_death_anim == 0,
 	             "the death edge commits the parked state and latches the bit");
+	// The edge stamps its tick into +0x1AC [orig: Entity_UpdateInfantryPlayerBody
+	//  @0x4B4CC1 / @0x4B4CCC].
+	ok &= expect(es->death_tick == view.frame_tick() && es->death_tick != 0,
+	             "the death edge stamps the walk's tick as the death tick");
 	view.tick_remote_motion(0xFFFF);
 	ok &= expect(view.state().find(handle)->rm_state ==
 	                     opennova::world::anim_state::kDeathFire,
@@ -1652,6 +1656,9 @@ bool run_entity_death_parks_the_death_anim() {
 	es = view.state().find(handle);
 	ok &= expect(es->net_anim_current == death && (es->rm_entity_flags & 0x2u) != 0u,
 	             "the death edge commits the 0x13 state and latches the bit");
+	// [orig: Entity_UpdateInfantryAI @0x4B9D24 / @0x4B9D2F]
+	ok &= expect(es->death_tick == view.frame_tick() && es->death_tick != 0,
+	             "the org1 death edge stamps the walk's tick as the death tick");
 	return ok;
 }
 

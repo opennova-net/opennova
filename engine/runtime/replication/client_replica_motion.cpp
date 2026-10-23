@@ -1481,10 +1481,10 @@ static void row_org1_chase_restage(ClientEntityState &es, bool seated) {
 // the tail, so the channel takes it on the next tick, as retail's top-of-pass
 // AnimMap update does [orig: AnimMap_UpdateDualChannels @0x4B41C9 precedes
 // the edge @0x4b4bf1].
-static int16_t row_death_edge(ClientEntityState &es) {
+static int16_t row_death_edge(ClientEntityState &es, uint32_t tick) {
 	if (!es.net_health_zero || (es.rm_entity_flags & world::kEntityFlagDead) != 0)
 		return -1;
-	return replica_death_edge(es);
+	return replica_death_edge(es, tick);
 }
 
 static void commit_death_state(ClientEntityState &es, int16_t state) {
@@ -1991,7 +1991,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			if (es.radio_request_seconds != 0) --es.radio_request_seconds;
 			else es.radio_request = 0;
 		}
-		const int16_t death_state = row_death_edge(es);
+		const int16_t death_state = row_death_edge(es, rm_key);
 		if (death_state >= 0 && !is_self) death_edges_.push_back(es.handle);
 		// The org2 death edge drops the carried flag on every machine,
 		// ungated [orig: Entity_UpdateInfantryPlayerBody @0x4b4d0d ->
@@ -2019,7 +2019,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			organic_chase_tail(es, is_self, /*starved=*/true);
 			break;
 		}
-		const int16_t death_state = row_death_edge(es);
+		const int16_t death_state = row_death_edge(es, rm_key);
 		if (death_state >= 0 && !is_self) death_edges_.push_back(es.handle);
 		corpse_leg(es, death_state >= 0, /*org1=*/true);
 		// The update's current state (+0x2BC) past the death edge, which writes it directly.

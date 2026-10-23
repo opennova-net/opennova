@@ -449,7 +449,8 @@ inline void rocket_motor_tick(LiveRound &round) {
 // Entity_SpawnWeaponEffect runs it for all three of its callers (the player's lock, the
 // Stinger's launch, its in-flight acquisition): the pool legs and the projectile target
 // ring's leg (their context flags 0x662 carry 0x200), so the winner is an entity or a
-// round. `query_slot` is the query entity's AI slot (+0x68; null for the missile round),
+// round, or on a joiner a decoded remote person (the pool-0 leg walks the persons its
+// client built, World::wire_person). `query_slot` is the query entity's AI slot (+0x68; null for the missile round),
 // whose 0x200 bit the head exit reads for a team-0 query; `attacker_occupant` is the query
 // entity's +368, which the MP air-flare roll reads.
 // [orig: Entity_SpawnWeaponEffect @0x545840 (the flags @0x54591B, the Entity_FindTargets call @0x545925)]
@@ -465,6 +466,11 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
 //  (@0x43B54F / @0x43B619)]
 int32_t round_target_health(const World &world, int32_t slot);
 void round_target_origin(const World &world, int32_t slot, int32_t out[3]);
+// A decoded remote person held as a target (TargetRef::wire_person): its fire origin,
+// Entity_ComputeWeaponFireOrigin over the pool-0 entity retail's client built for it (a person
+// def's phased CameraOffset point); false when no row holds the handle.
+// [orig: Entity_ComputeWeaponFireOrigin @0x43B4B0 (@0x43B4C0..0x43B523, @0x43B54F)]
+bool wire_person_target_origin(const World &world, uint16_t wire_handle, int32_t out[3]);
 
 // Retail keeps the selected TrcrID item/class bound independently of tracer
 // cadence (@0x4ec79b..0x4ec7b7), but clears the round+0x30 visible-model

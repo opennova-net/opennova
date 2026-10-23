@@ -440,11 +440,25 @@ bool CollisionWorld::raycast_clear_cached(World &world, const int32_t a[3],
     return clear;
 }
 
+bool CollisionWorld::raycast_clear_to_person(World &world, const int32_t a[3],
+                                             const int32_t b[3], EntityHandle exclude_a,
+                                             EntityHandle parent_a,
+                                             const LosWireEndpoint &person) {
+    const bool clear = raycast_clear_impl(world, a, b, exclude_a, EntityHandle{}, parent_a,
+                                          person.parent, false, &person);
+    if (ray_debug_enabled_) {
+        ray_debug_record(RayDebugCategory::kUncategorized, world.logic_tick, a, b,
+                         nullptr, clear ? kRayDebugClear : kRayDebugBlocked);
+    }
+    return clear;
+}
+
 bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
                                         const int32_t b[3], EntityHandle exclude_a,
                                         EntityHandle exclude_b, EntityHandle parent_a,
                                         EntityHandle parent_b,
-                                        bool cache_target_views) {
+                                        bool cache_target_views,
+                                        const LosWireEndpoint *wire_b) {
     // [orig: Physics_RaycastTerrainAndSectors @ 0x539910, TRUE = clear; the LOS
     // callers pass ray radius 0, so the witnessed thick-ray Z-drop (@ 0x53994e)
     // and volume inflation are no-ops and are folded out here.]
@@ -460,9 +474,9 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     // interiors) [orig: the Flags & 0x800000 pair gate @ 0x53994c]. The original's
     // null-entity buried-endpoint variant (@ 0x53999a) has no caller on the LOS
     // chain and is not modeled.
-    const bool both_indoors = ea != nullptr && eb != nullptr &&
-                              (ea->flags & kEntityFlagIndoors) != 0 &&
-                              (eb->flags & kEntityFlagIndoors) != 0;
+    const bool b_indoors = wire_b != nullptr ? wire_b->indoors
+                                             : eb != nullptr && (eb->flags & kEntityFlagIndoors) != 0;
+    const bool both_indoors = ea != nullptr && (ea->flags & kEntityFlagIndoors) != 0 && b_indoors;
     const bool terrain_hit = !both_indoors && terrain != nullptr && terrain->valid() &&
                              los_terrain_blocked(*terrain, a, b);
     lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_LOS_TERRAIN);

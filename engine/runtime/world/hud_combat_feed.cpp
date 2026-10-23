@@ -18,8 +18,12 @@ namespace opennova::world {
 namespace {
 // The HUD target cursor's entity as a HUD reader takes it at its read: a registry entity the
 // record names (none once destroyed, hud_target_cursor_entity), else, on a joiner, the decoded
-// remote person the record names through its row (World::wire_cursor_person), as retail's
-// client reads the pool-0 entity it built for that person. A round lock names no pool entity.
+// remote person the record names through its row (World::wire_person), as retail's client
+// reads the pool-0 entity it built for that person: its team byte and the type of the def its
+// record's type word indexes (none at index 0). A round lock names no pool entity.
+// [orig: NapiNPClientMsg_0x00C @0x42E730 - ItemList_FindIndexByTypeId @0x42E84A,
+//  Entity_InitFromItemDef called @0x42E84D; Entity_InitFromItemDef @0x49E550 - the zero test
+//  @0x49E559]
 struct CursorSubject {
 	bool pool0 = false;
 	uint8_t team = 0;
@@ -33,12 +37,13 @@ CursorSubject cursor_subject(const World &world, const HudTargetCursor &cursor) 
 		out.item_type = e->has_item_def ? e->item_type : 0;
 		return out;
 	}
-	World::WireCursorPerson person;
-	if (cursor.wire_person != 0xFFFF && world.wire_cursor_person &&
-			world.wire_cursor_person(cursor.wire_person, person)) {
+	World::WirePerson person;
+	if (cursor.wire_person != 0xFFFF && world.wire_person &&
+			world.wire_person(cursor.wire_person, person)) {
 		out.pool0 = EntityHandle{cursor.wire_person}.pool() == 0;
 		out.team = person.team;
-		out.item_type = person.item_type;
+		const int32_t index = item_index_by_type_id(world, person.type_id);
+		out.item_type = index != 0 ? world.tables.item_rows[static_cast<size_t>(index)].item_type : 0;
 	}
 	return out;
 }
@@ -91,16 +96,26 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	//  @0x592776..0x592790, the team compare @0x5927AA..0x5927BD,
 	//  Entity_ComputeWeaponFireOrigin @0x592803; the pool test (the call @0x592675), the team
 	//  read @0x592692; the bracket gate's def type @0x592CE8..0x592CF3]
+	// On a joiner the word may name a decoded remote person (the heat lock's pool-0 leg): the
+	// quad sits at the client-built entity's fire origin, tinted by its team byte.
 	const HudTargetCursor &cursor = tracker.hud_cursor;
 	const Entity *target = hud_target_cursor_entity(world, cursor);
 	const bool round_cursor = cursor.lock.round >= 0 &&
 			static_cast<size_t>(cursor.lock.round) < world.round_sim.rounds.size();
-	s.target_cursor = cursor.lock.valid() && (target != nullptr || round_cursor) && weapon.active;
+	World::WirePerson wire_lock;
+	const bool wire_cursor = cursor.lock.wire_person != 0xFFFF && world.wire_person &&
+			world.wire_person(cursor.lock.wire_person, wire_lock);
+	s.target_cursor = cursor.lock.valid() && (target != nullptr || round_cursor || wire_cursor) &&
+			weapon.active;
 	s.target_locked = body && (body->slot.f[2] & 1);
 	if (round_cursor) {
 		s.target_friendly =
 				world.round_sim.rounds[static_cast<size_t>(cursor.lock.round)].team == player->team;
 		round_target_origin(world, cursor.lock.round, out.target.data());
+		out.target_valid = true;
+	} else if (wire_cursor) {
+		s.target_friendly = wire_lock.team == player->team;
+		wire_person_target_origin(world, cursor.lock.wire_person, out.target.data());
 		out.target_valid = true;
 	} else if (target) {
 		s.target_friendly = target->team == player->team;

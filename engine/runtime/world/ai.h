@@ -263,16 +263,20 @@ struct AiSlot {
     enum { kAlertByte = 136 };
     // +0xC (f[3]), the current target pointer as one word: an entity's handle + 1, a
     // round's -(slot + 1) (the heat-seeker query's 0x200 leg returns a round of the
-    // projectile array, D-NET-64), or 0. One word, so a writer of either kind replaces
-    // the other, as retail's one pointer store does.
+    // projectile array, D-NET-64), a joiner's decoded remote person's 0x10001 + its wire
+    // handle (the query's pool-0 leg walks the person retail's client built in its pool 0,
+    // D-NET-NEW-L8-56), or 0. One word, so a writer of any kind replaces the others, as
+    // retail's one pointer store does.
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B520A); the stng init StngClass_InitFromDef @0x445EF0 (@0x445F10);
-    //  Entity_FindTargets @0x53A610 (the ring leg @0x53ACF0..0x53ADE0)]
+    //  Entity_FindTargets @0x53A610 (the pool-0 leg @0x53A6E7..0x53A8A3, the ring leg @0x53ACF0..0x53ADE0)]
     static int32_t target_word(const TargetRef &t) {
         if (t.round >= 0) return -(t.round + 1);
+        if (t.wire_person != 0xFFFF) return 0x10001 + static_cast<int32_t>(t.wire_person);
         return t.entity.valid() ? static_cast<int32_t>(t.entity.packed) + 1 : 0;
     }
     static TargetRef target_of(int32_t word) {
         if (word < 0) return TargetRef::of_round(-word - 1);
+        if (word > 0x10000) return TargetRef::of_wire_person(static_cast<uint16_t>(word - 0x10001));
         return word != 0 ? TargetRef{EntityHandle{static_cast<uint16_t>(word - 1)}} : TargetRef{};
     }
 };
@@ -1063,6 +1067,14 @@ public:
     // matrices reused inside a server-declared stable query epoch.
     bool line_of_sight_clear_cached(World &world, const int32_t a[3], const int32_t b[3],
                                     EntityHandle from, EntityHandle to) const;
+    // The same LOS toward a joiner's decoded remote person (World::wire_person), the pool-0
+    // entity of retail's client that no sector pool holds: its end of the walk excludes its
+    // seat mount, and its Flags word is the indoors pair's second half.
+    // [orig: Physics_RaycastTerrainAndSectors @0x539910 - the indoors pair
+    //  @0x539944..0x53994C, entityB's +0x16C @0x539A08..0x539A12]
+    bool line_of_sight_clear_to_person(World &world, const int32_t a[3], const int32_t b[3],
+                                       EntityHandle from, EntityHandle person_seat,
+                                       uint32_t person_flags) const;
 
     // [orig: Entity_AlertNearbyAllies @0x4654b0] pool-1 (rebase: + pool-0 organics with
     // brains) same-team, alive, non-building entities within `radius_units` (16.16):
