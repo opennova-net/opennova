@@ -896,6 +896,71 @@ void test_the_plyr_class_init_warms_up_its_channels() {
 	}
 }
 
+// D-NET-NEW-L5-62: the plyr init's words ahead of its channel test, over a body it re-inits in
+// place (the joiner's own 0x18 rebuild): the local body's camera shake and lock tone 0, the
+// ammo-def word 3, the equipped byte the list's first weapon, Health raised to the ceiling and
+// Armor the def's armor max; the arms dip, the reload window and the idle-skip count 0, the legs,
+// their targets, the body heading and savedLiveYaw the Yaw; savedLiveRoll, Roll, savedLivePitch
+// and the Pitch 0, the local body's look pitch with it. A remote body keeps the local globals and
+// its look pitch; an org0 row runs none of it.
+// [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B10D0..0x4B10DE, +0x160 @0x4B1105, +0x2B0
+//  @0x4B1116, Entity_RaiseHealthToMax called @0x4B112B, Armor @0x4B113D, the Yaw @0x4B1167,
+//  @0x4B117C..0x4B11CD; Input_HandleActionBinding_0 @0x4E0420 - `add [eax+14h], edx` @0x4E0D39]
+void test_the_plyr_class_init_word_run() {
+	static constexpr int32_t kYaw = 0x23450000;
+	for (const uint8_t player_class : {kPlyr, kOrg}) {
+		for (const bool local : {true, false}) {
+			Rig r;
+			w::Entity *body = local ? r.spawn_local(player_class) : r.spawn_remote(player_class);
+			w::AiEntity *ae = body != nullptr ? r.world->ai.for_handle(body->handle) : nullptr;
+			CHECK(ae != nullptr);
+			if (ae == nullptr) continue;
+			// The joiner's case: in a session the ceiling is the def word.
+			r.world->rules.mp_session = true;
+			body->heading = ae->heading = kYaw;
+			body->pitch_bam = ae->pitch = 0x01230000;
+			body->roll_bam = ae->roll = 0x00450000;
+			body->saved_live_yaw = 0x11110000;
+			body->saved_live_pitch = 0x02220000;
+			body->saved_live_roll = 0x00330000;
+			ae->body_pitch = 0x00300000;
+			ae->inf.body_heading = 0x10000000;
+			ae->inf.leg_yaw[0] = ae->inf.leg_yaw[1] = 0x12340000;
+			ae->inf.leg_target[0] = ae->inf.leg_target[1] = 0x13570000;
+			ae->inf.arms_dip_ticks = 9;
+			ae->inf.reload_anim_ticks = 80;
+			ae->collide_state.skip_counter = 15;
+			ae->inf.look_pitch = 0x00200000;
+			body->ammo_def_word = 0x13;
+			body->equipped_adm_index = 9;
+			body->mana_max = 75; // the traits sweep's def+0x17E
+			body->mana = 0;
+			body->health = 1;
+			ae->health = 1;
+			r.local->view.shake.counter = 40;
+			r.local->radar.lock_tone = 31;
+			w::player_class_init_words(*r.world, *body);
+			const bool plyr = player_class == kPlyr;
+			CHECK((body->ammo_def_word == 3) == plyr);
+			CHECK(body->equipped_adm_index ==
+					(plyr ? w::player_spawn_equipped_default(*r.world) : uint8_t{9}));
+			CHECK(body->health == (plyr ? 150 : 1) && ae->health == body->health);
+			CHECK(body->mana == (plyr ? 75 : 0));
+			CHECK((ae->inf.arms_dip_ticks == 0) == plyr && (ae->inf.reload_anim_ticks == 0) == plyr &&
+					(ae->collide_state.skip_counter == 0) == plyr);
+			CHECK((ae->inf.leg_yaw[0] == kYaw && ae->inf.leg_yaw[1] == kYaw) == plyr);
+			CHECK((ae->inf.leg_target[0] == kYaw && ae->inf.leg_target[1] == kYaw) == plyr);
+			CHECK((ae->inf.body_heading == kYaw && body->saved_live_yaw == kYaw) == plyr);
+			CHECK((body->saved_live_roll == 0 && body->roll_bam == 0 && ae->roll == 0) == plyr);
+			CHECK((body->saved_live_pitch == 0 && ae->body_pitch == 0) == plyr);
+			CHECK((body->pitch_bam == 0 && ae->pitch == 0) == plyr);
+			CHECK((ae->inf.look_pitch == 0) == (plyr && local));
+			CHECK((r.local->view.shake.counter == 0) == (plyr && local));
+			CHECK((r.local->radar.lock_tone == 0) == (plyr && local));
+			CHECK(body->heading == kYaw);
+		}
+	}
+}
 
 // The placement's warm-up counts by the body's DcbId (+0x7C): 10000 + the slot byte on a plyr
 // row (its class init's stamp), the spawn memset's 0 on an org0 or item row (their inits write
@@ -2453,6 +2518,7 @@ int main() {
 	test_the_nade_row_has_no_callback();
 	test_a_device_rows_body_runs_the_device_think();
 	test_the_plyr_class_init_warms_up_its_channels();
+	test_the_plyr_class_init_word_run();
 	test_the_placement_warm_up_counts_by_the_dcb_id();
 	test_the_update_follows_the_rows_move_function();
 	test_the_walk_skips_a_null_row_body_whole();

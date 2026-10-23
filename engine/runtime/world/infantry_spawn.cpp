@@ -10,6 +10,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry_internal.h>
+#include <runtime/world/local_player.h> // LocalPlayer::view / radar (the class init's local resets)
 #include <runtime/world/player_spawn.h> // player_item_row (the bound row's class)
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
@@ -189,6 +190,57 @@ void player_class_init_animation(World &world, Entity &entity) {
     for (uint32_t i = 0; i < steps; ++i)
         infantry_dual_update(inf, ai.root_motion, ai.anim_rings, frame);
     ai.mirror_wire_anim(*body, world);
+}
+
+// See entity_spawn.h. The init's model init (the call @0x4B10C8) restamps what the 0x18's own
+// stamped from the same words, and its dialog call (Player_QueueDialogSound @0x5293C0, the call
+// @0x4B1144, eventData -1) empties a queue nothing else fills (its one caller), so neither has a
+// store here. The stores read nothing the others write: ours runs them in retail's order.
+void player_class_init_words(World &world, Entity &entity) {
+    if (player_item_row(world, entity).body_class != PlayerBodyClass::kPlayer) return;
+    AiEntity *body = world.ai.for_handle(entity.handle);
+    if (body == nullptr || !body->inf.active) return;
+    InfantryState &inf = body->inf;
+    // [orig: PlayerClass_InitEntity @0x4B1060 - `cmp g_LocalPlayerEntity, esi` @0x4B10D0,
+    //  g_CameraShakeCounter @0x4B10D8, g_LockOnMeToneTicks @0x4B10DE]
+    if (entity.handle == world.cached.local_player && world.local_player_state != nullptr) {
+        world.local_player_state->view.shake.counter = 0;
+        world.local_player_state->radar.lock_tone = 0;
+    }
+    // [orig: `mov word ptr [esi+160h], 3` @0x4B1105; AdmDef_FindIndexByName called @0x4B110E,
+    //  `mov [esi+2B0h], al` @0x4B1116]
+    constexpr int16_t kPlayerClassAmmoDefWord = 3;
+    entity.ammo_def_word = kPlayerClassAmmoDefWord;
+    entity.equipped_adm_index = player_spawn_equipped_default(world);
+    // The raise is a signed word compare against the ceiling; Armor takes def+0x17E, the word
+    // the traits sweep binds as mana_max.
+    // [orig: Entity_RaiseHealthToMax @0x43C290 (called @0x4B112B) - `cmp [esi+11Eh], ax`
+    //  @0x43C2A1, `jge` @0x43C2A8; the def word `mov cx, [eax+17Eh]` @0x4B1133, the store
+    //  @0x4B113D]
+    const int32_t ceiling = max_health_with_difficulty(world, entity);
+    if (retail_signed_i16(entity.health) < ceiling) entity.health = ceiling;
+    body->health = static_cast<int16_t>(entity.health);
+    entity.mana = entity.mana_max;
+    // The word run over the Yaw [orig: `mov eax, [esi+10h]` @0x4B1167].
+    const int32_t yaw = entity.heading;
+    inf.arms_dip_ticks = 0;    // +0x371 [orig: @0x4B117C]
+    inf.reload_anim_ticks = 0; // +0x372 [orig: @0x4B1182]
+    // [orig: +0x2E4 / +0x2E8 @0x4B118E / @0x4B1194, +0x2D4 / +0x2D8 @0x4B119A / @0x4B11A0]
+    inf.leg_target[0] = inf.leg_target[1] = yaw;
+    inf.leg_yaw[0] = inf.leg_yaw[1] = yaw;
+    body->collide_state.skip_counter = 0; // +0x373 [orig: @0x4B11A6]
+    // +0x8C, the body heading and savedLiveYaw [orig: @0x4B11AC]
+    inf.body_heading = yaw;
+    entity.saved_live_yaw = yaw;
+    entity.saved_live_roll = 0; // +0x94 [orig: @0x4B11BE]
+    entity.roll_bam = body->roll = 0; // [orig: Roll @0x4B11C4]
+    // +0x90, savedLivePitch and the body pitch [orig: @0x4B11C7]
+    entity.saved_live_pitch = 0;
+    body->body_pitch = 0;
+    // The Pitch, which the local body's input accumulates [orig: @0x4B11CD;
+    //  Input_HandleActionBinding_0 @0x4E0420 - `add [eax+14h], edx` @0x4E0D39]
+    entity.pitch_bam = body->pitch = 0;
+    if (inf.is_local_player) inf.look_pitch = 0;
 }
 
 bool organic_init_class(const char *ai_function) {

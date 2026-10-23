@@ -545,10 +545,12 @@ void JoinerRole::fold_local_record() {
 // slot and zeroes a held AI slot, and the memset clears the block below +0x2B4
 // (world::clear_body_block_below_2b4); an AIData def then takes a fresh, zeroed AI slot (ours: the
 // zeroed colocated one); then the record's def by its type
-// word, its Flags word, Position and the Yaw / Pitch words, Health the def's healthMax, its Team,
-// NetId, animSlot, class word and +0x154 slot byte, refNum, the Name (an AIData def's), its
-// ground entity (+0x28), no occupant and no mount, the lean 0, the model init's savedLivePose;
-// then the def's class init (the plyr row's: the equipped default, the DcbId) and its traits.
+// word, its Flags word, Position and the Yaw / Pitch words (the local body's look words too),
+// Health the def's healthMax, its Team, NetId, animSlot, class word and +0x154 slot byte, refNum,
+// the Name (an AIData def's), its ground entity (+0x28), no occupant and no mount, the lean 0,
+// the model init's savedLivePose and chase stage (+0x234..+0x244); then the caller binds the
+// def's traits and runs its class init (the plyr row's word run, world::player_class_init_words,
+// then its channel half).
 // The record's subType byte lands on +0x214. The words past +0x2B4 stay. The record's +0x16C and +0x170 handles are not modeled here: L stays
 // unmounted, with no occupant. The model init's fresh facial slot is the caller's, after the
 // body's traits bind (JoinerRole::rebuild_local_from_full_spawn).
@@ -576,6 +578,14 @@ void rebuild_local_body_words(world::World &world, world::Entity &local, world::
 	local.heading = local_ai.heading = self.heading_bam;
 	local.pitch_bam = local_ai.pitch = self.pitch_bam;
 	local.roll_bam = local_ai.roll = 0;
+	// The local body's Yaw and Pitch words are its look: its input accumulates both, and the
+	// look yaw global follows the Yaw at the next input pass (ours: the post-tick sync of the look
+	// words, LocalPlayer::sync_local_mounted_input_heading), so the record's words land on them.
+	// [orig: @0x433B8C, @0x433BB2; Input_HandleActionBinding_0 @0x4E0420 - `add [eax+10h], ecx`
+	//  @0x4E0D26, `add [eax+14h], edx` @0x4E0D39, the Yaw read @0x4E0439, `cmp ecx,
+	//  g_LocalPlayerLookYaw` @0x4E043C, the store @0x4E0456]
+	local_ai.inf.target_heading = local.heading;
+	local_ai.inf.look_pitch = local.pitch_bam;
 	const world::PlayerTemplate &item_row = world::player_item_row(world, local);
 	local.health = item_row.has_item_def && item_row.item_hp.has_value()
 			? world::retail_signed_i16(*item_row.item_hp) : 0;
@@ -613,6 +623,19 @@ void rebuild_local_body_words(world::World &world, world::Entity &local, world::
 	local.saved_live_pitch = local.pitch_bam;
 	local.saved_live_roll = 0;
 	local.saved_live_valid = true;
+	// The model init stamps the chase's stage from the same words (Position, the Yaw, the
+	// record's Pitch; +0x248 the Roll, 0, unmodeled): the own body's first chase then finds no
+	// gap to its savedLivePose, where a zeroed stage would snap it to the origin. The class
+	// init's model init restamps the same values ahead of its Pitch zero.
+	// [orig: Entity_InitFromModel @0x40DC30 (called @0x433E6C; PlayerClass_InitEntity @0x4B1060 -
+	//  called @0x4B10C8) - +0x234 / +0x238 / +0x23C @0x40E183 / @0x40E195 / @0x40E19E, +0x240
+	//  @0x40E1A7, +0x244 @0x40E1B0, +0x248 @0x40E1B6; Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+	//  the gap @0x4B42C1..0x4B431A, the snap @0x4B4332..0x4B434A]
+	local_ai.net_smooth_target[0] = local.position.x.q16;
+	local_ai.net_smooth_target[1] = local.position.y.q16;
+	local_ai.net_smooth_target[2] = local.position.z.q16;
+	local_ai.net_smooth_heading = local.heading;
+	local_ai.net_smooth_pitch = local.pitch_bam;
 }
 
 void JoinerRole::rebuild_local_from_full_spawn() {
@@ -633,6 +656,10 @@ void JoinerRole::rebuild_local_from_full_spawn() {
 	// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_InitFromModel @0x433E6C ->
 	//  FaceAnim_AllocEntitySlot @0x57FDF0 (the call @0x40E22E), the class init @0x433E82].
 	world.facials.initialize_entity(world, *local);
+	// The class init's word run, then its channel half (a plyr row's; an org row's body runs the
+	// organic init) [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B10D0..0x4B11CD, the channel
+	//  test @0x4B116D / @0x4B11D0].
+	world::player_class_init_words(world, *local);
 	world::player_body_class_init(world, *local);
 }
 

@@ -55,8 +55,9 @@ void warm_up_player_body(World &world, Entity &e);
 // arithmetic gives for the owning connection id (+0x78), their root output dropped (the body
 // does not move). A body holding no animation channel runs neither: its spawn's 43 / 43 stand
 // with nothing to update them. Another row's body (org0 / org1, an item class) runs none of it.
-// A joiner's 0x0C body takes the class init ahead of any registration, so a joiner never calls
-// this. [orig: PlayerClass_InitEntity @0x4B1060 - the hold @0x4B115B, the body @0x4B1161, the
+// A joiner's 0x0C body takes the class init ahead of any registration; a joiner calls this for
+// its own body's 0x18 rebuild alone, after player_class_init_words.
+// [orig: PlayerClass_InitEntity @0x4B1060 - the hold @0x4B115B, the body @0x4B1161, the
 //  pending clear @0x4B1176, the channel test @0x4B116D / @0x4B11D0, the count from +0x78
 //  @0x4B11D2..0x4B11E8, the loop @0x4B11F3..0x4B1225 (AnimMap_UpdateDualChannels @0x40B8C0
 //  called @0x4B11FB into a stack buffer); Entity_SpawnFromAnimSlotProperty @0x43C390 -
@@ -64,6 +65,26 @@ void warm_up_player_body(World &world, Entity &e);
 //  NapiNPClientMsg_0x00C @0x42E730 - Entity_InitFromItemDef called @0x42E84D, its tail
 //  call @0x49E5EA]
 void player_class_init_animation(World &world, Entity &e);
+
+// The plyr row's class init ahead of its channel test, over a player body it re-inits in place:
+// the joiner's own body a 0x18 rebuilt (JoinerRole::rebuild_local_from_full_spawn), its record's
+// words and model init already stored. The local body's camera shake and incoming-lock tone go
+// to 0; the ammo-def word takes 3 and the equipped byte the loadout list's first weapon
+// (player_spawn_equipped_default); Health rises to the ceiling and Armor takes the def's armor
+// max; then the word run: the arms dip and the reload window 0, the four leg words the Yaw, the
+// resolver's idle-skip count 0, the body heading and savedLiveYaw the Yaw, savedLiveRoll, Roll,
+// savedLivePitch and the Pitch 0 (the local body's Pitch being its look pitch). The torso roll
+// and the lean are player_class_init_animation's, which follows. The run's +0x363 byte has no
+// reader and is not modeled. The authority's spawn stores the same words inline
+// (spawn_player_entity) over its fresh attach (InfantryState::reset_for_spawn).
+// [orig: PlayerClass_InitEntity @0x4B1060 - the local test @0x4B10D0, g_CameraShakeCounter
+//  @0x4B10D8, g_LockOnMeToneTicks @0x4B10DE, +0x160 @0x4B1105, AdmDef_FindIndexByName called
+//  @0x4B110E, +0x2B0 @0x4B1116, Entity_RaiseHealthToMax @0x43C290 called @0x4B112B, Armor
+//  @0x4B1130..0x4B113D, the Yaw read @0x4B1167, +0x371 @0x4B117C, +0x372 @0x4B1182, +0x363
+//  @0x4B1188, +0x2E4 / +0x2E8 @0x4B118E / @0x4B1194, +0x2D4 / +0x2D8 @0x4B119A / @0x4B11A0,
+//  +0x373 @0x4B11A6, +0x8C @0x4B11AC, +0x94 @0x4B11BE, Roll @0x4B11C4, +0x90 @0x4B11C7, Pitch
+//  @0x4B11CD; NapiNPClientMsg_FullEntitySpawn @0x433780 - the class init called @0x433E82]
+void player_class_init_words(World &world, Entity &e);
 
 // The class init a player body's spawn calls, its bound row's (def+0x148, by the row's
 // ai_function): the plyr row's player_class_init_animation; the org0 / org1 rows'

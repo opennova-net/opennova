@@ -450,6 +450,31 @@ void test_the_full_spawn_rebuilds_the_local_body() {
 	ai.slot.f[3] = 5;
 	body.facial_slot = 0x8000;
 	body.facial_checked = true;
+	// The local body's look words and the chase's stage, ahead of the record (D-NET-NEW-L5-62).
+	ai.inf.target_heading = 0x11110000;
+	ai.inf.look_pitch = 0x02220000;
+	ai.net_smooth_target[0] = 7 << 16;
+	ai.net_smooth_heading = 0x33330000;
+	ai.net_smooth_pitch = 0x04440000;
+	opennova::inmatch::rebuild_local_body_words(r.world, body, ai, self);
+	// D-NET-NEW-L5-62: the record's Yaw and Pitch land on the local body's look words (its input
+	// accumulates both), and the model init stamps the chase's stage from Position, the Yaw and
+	// the record's Pitch, so the own body's first chase finds no gap: a zeroed stage snapped it to
+	// the origin. [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - Yaw @0x433B8C, Pitch
+	//  @0x433BB2, Entity_InitFromModel called @0x433E6C; Entity_InitFromModel @0x40DC30 - +0x234
+	//  @0x40E183, +0x240 @0x40E1A7, +0x244 @0x40E1B0; Input_HandleActionBinding_0 @0x4E0420 -
+	//  @0x4E0D26, @0x4E0D39; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the gap
+	//  @0x4B42C1..0x4B431A, the snap @0x4B4332..0x4B434A]
+	expect(ai.inf.target_heading == 0x20000000 && ai.inf.look_pitch == 0x01000000,
+			"the record's Yaw and Pitch are the local body's look words");
+	expect(ai.net_smooth_target[0] == (1 << 16) && ai.net_smooth_target[1] == (2 << 16) &&
+					ai.net_smooth_target[2] == (3 << 16) && ai.net_smooth_heading == 0x20000000 &&
+					ai.net_smooth_pitch == 0x01000000,
+			"the model init stamps the chase's stage from Position and the angles");
+	expect(w::player_body_network_chase(ai, body, /*authority=*/false, /*local=*/true) &&
+					body.position.x.q16 == (1 << 16) && body.position.y.q16 == (2 << 16) &&
+					body.position.z.q16 == (3 << 16),
+			"the own body's first chase finds no gap and stays where the record put it");
 	opennova::inmatch::rebuild_local_body_words(r.world, body, ai, self);
 	expect(ai.body_pitch == 0 && ai.inf.idle_counter == 0 && ai.slot.f[3] == 0,
 			"the memset's AI-entity homes and the destroy's AI slot memset");

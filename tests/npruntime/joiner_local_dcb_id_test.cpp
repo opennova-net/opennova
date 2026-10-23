@@ -137,12 +137,64 @@ void check_a_later_0x18_rebuilds_the_local_body() {
 	CHECK(w::entity_dcb_id(h->kernel->world, *local) == 10000 + 4);
 }
 
+// D-NET-NEW-L5-62 (L5-s31 FOUND 1): the rebuild runs the plyr class init's word run, not its
+// animation half alone: the local camera shake and lock tone 0, the ammo-def word 3 (the C2S
+// 0x06 off32 byte), the equipped byte the list's first weapon (the C2S 0x0C byte 24), the arms
+// dip and the reload window 0, the legs and the body heading the record's Yaw, which is the look
+// yaw too; the Pitch, the look pitch and savedLivePitch 0.
+// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - Yaw @0x433B8C, the class init called
+//  @0x433E82; PlayerClass_InitEntity @0x4B1060 - @0x4B10D0..0x4B10DE, @0x4B1105, @0x4B1116,
+//  @0x4B117C..0x4B11CD]
+void check_a_later_0x18_runs_the_class_inits_word_run() {
+	auto h = std::make_unique<Harness>(s2c::ENTITY_SPAWN_BATCH);
+	w::Entity *before = h->kernel->local.player();
+	w::AiEntity *ai = h->kernel->local.player_ai();
+	CHECK(before != nullptr && ai != nullptr);
+	if (before == nullptr || ai == nullptr) return;
+	before->ammo_def_word = 0x13;
+	before->equipped_adm_index = 9;
+	ai->inf.body_heading = 0x10000000;
+	ai->inf.leg_yaw[0] = ai->inf.leg_yaw[1] = 0x12340000;
+	ai->inf.leg_target[0] = ai->inf.leg_target[1] = 0x13570000;
+	ai->inf.arms_dip_ticks = 9;
+	ai->inf.reload_anim_ticks = 80;
+	h->kernel->local.view.shake.counter = 40;
+	h->kernel->local.radar.lock_tone = 31;
+	FullEntitySpawnRecord rec;
+	rec.slot_id = kSelf;
+	rec.item_type_id = w::kPlayerInfantryTypeId;
+	rec.item_type = 3;
+	rec.team = 1;
+	rec.minimap_flags = static_cast<uint16_t>(w::kEntityFlagPlayer);
+	rec.player_slot_id = kRosterSlot;
+	rec.heading_hi = 0x2000;
+	rec.pitch_hi = 0x0100;
+	h->role.runtime->view().apply(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(rec));
+	h->role.run_tick(h->input);
+	const w::Entity *local = h->kernel->local.player();
+	ai = h->kernel->local.player_ai();
+	CHECK(local != nullptr && ai != nullptr);
+	if (local == nullptr || ai == nullptr) return;
+	static constexpr int32_t kYaw = 0x20000000;
+	CHECK(local->ammo_def_word == 3);
+	CHECK(local->equipped_adm_index == w::player_spawn_equipped_default(h->kernel->world));
+	CHECK(ai->inf.body_heading == kYaw);
+	CHECK(ai->inf.leg_yaw[0] == kYaw && ai->inf.leg_yaw[1] == kYaw);
+	CHECK(ai->inf.leg_target[0] == kYaw && ai->inf.leg_target[1] == kYaw);
+	CHECK(ai->inf.target_heading == kYaw);
+	CHECK(ai->inf.arms_dip_ticks == 0 && ai->inf.reload_anim_ticks == 0);
+	CHECK(local->pitch_bam == 0 && ai->inf.look_pitch == 0 && local->saved_live_pitch == 0);
+	CHECK(h->kernel->local.view.shake.counter == 0);
+	CHECK(h->kernel->local.radar.lock_tone == 0);
+}
+
 } // namespace
 
 int main() {
 	check_the_local_body_takes_the_records_slot(s2c::ENTITY_SPAWN_BATCH);
 	check_the_local_body_takes_the_records_slot(s2c::FULL_ENTITY_SPAWN);
 	check_a_later_0x18_rebuilds_the_local_body();
+	check_a_later_0x18_runs_the_class_inits_word_run();
 	if (failures != 0) {
 		std::printf("%d check(s) failed\n", failures);
 		return 1;

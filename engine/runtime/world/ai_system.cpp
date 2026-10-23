@@ -803,6 +803,10 @@ void clear_body_block_below_2b4(AiEntity &e, Entity &body) {
     body.heading = e.heading = 0;
     body.pitch_bam = e.pitch = 0;
     body.roll_bam = e.roll = 0;
+    // The local body's input accumulates its Yaw and Pitch words, ours its look words
+    // (inf.target_heading, zeroed below, and inf.look_pitch), so the memset zeroes the look
+    // pitch too [orig: Input_HandleActionBinding_0 @0x4E0420 - `add [eax+14h], edx` @0x4E0D39].
+    e.inf.look_pitch = 0;
     body.eye_offset_x = 0;
     body.eye_offset_y = 0;
     body.eye_offset_z = 0;
@@ -852,7 +856,8 @@ void clear_body_block_below_2b4(AiEntity &e, Entity &body) {
     // body's head pose reads: `fild [esi+90h]` @0x4B6A8F), the lean angle +0xB0 (the camera's roll
     // reads it, @0x437FCD), the standing-idle count +0x148 (the corpse timer's word: `add
     // [esi+148h], 1` @0x4B727B, idle 0x2B + (count >= 0x3E) @0x4B7293), the eye triple, org2's
-    // jump latch / org1's target heading +0x1A8, and the chase's stage +0x234..+0x244 and its
+    // jump latch / org1's target heading +0x1A8 (the local body's look yaw, its Yaw word, in
+    // ours), and the chase's stage +0x234..+0x244 and its
     // count / bucket +0x27C / +0x27E.
     e.net_id = 0;
     e.relmat_id = 0;
