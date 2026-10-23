@@ -93,9 +93,11 @@ JoinResult join_after_moving(bool mp_session) {
 	ctx.world = world.get();
 	inmatch::Server_InitNewRoundState(ctx);
 	expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, *world) == 1, "the own add runs");
+	expect(!world->cached.local_player.valid(), "the own add spawns no body (D-NET-NEW-L7-39)");
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init
 	w::Entity *body = world->registry.get(world->cached.local_player);
-	if (!expect(body != nullptr, "the own add binds the local player")) return {};
-	expect(body->position.x.q16 == 100 * 65536, "the add places the body on the marker");
+	if (!expect(body != nullptr, "the round init spawns the local player")) return {};
+	expect(body->position.x.q16 == 100 * 65536, "the round init places the body on the marker");
 	body->position.x.q16 = 5 * 65536;
 	inmatch::NapiNPConnection &own = ctx.np_protocol.connection_list.front();
 	expect(own.slot_state != inmatch::PlayerSlotState::Joined, "the join is the slot's state-6 entry");

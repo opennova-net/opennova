@@ -68,7 +68,9 @@
 namespace opennova::mission {
 
 struct KernelBootOptions {
-	bool playable = true;   // spawn the authoritative side's own player after load
+	// The bare kernel's own player after load (no role installed a round init: a
+	// session's bodies spawn at its round init, MissionKernel::round_init).
+	bool playable = true;
 	std::shared_ptr<opennova::mus::MusGlobals> music_globals;
 	bool wac = true;        // game.wac / server.wac / <mission>.wac when present
 	// A world presenter seeds weather after boot, then completes mission start.
@@ -223,17 +225,31 @@ public:
 	// parsed documents when it built the store, else the kernel's own load),
 	// then the ordered step sequence with its gates (a missing file source
 	// skips every file-fed step, a missing item db the trait/collision steps,
-	// a joiner never spawns its own player). Every step that ran lands in
-	// boot_trace, in order (the ctest-locked contract); a map change's host
-	// boot appends its round init ("round_init") after it.
+	// a joiner never spawns its own player, nor does a boot whose role runs the
+	// round init). Every step that ran lands in boot_trace, in order (the
+	// ctest-locked contract); a host's round init ("round_init") follows the
+	// PreMission pass.
 	bool boot(const KernelBootOptions &options, std::string &error);
 	std::vector<std::string> boot_trace;
 	// The boot's last legs, which KernelBootOptions::defer_premission leaves to the
 	// embedder: on the authority the PreMission pass ("premission") and the SP score
 	// block's zero, then on every peer the frame tick and the HUD's frame counters zeroed;
-	// the mission start (complete_mission_start) is then pending. False when the boot ran
-	// them already or did not run.
+	// the mission start (complete_mission_start) is then pending; last, the round init
+	// (round_init) when a role installed one. False when the boot ran them already or did
+	// not run.
 	bool begin_mission_start();
+	// The authority's round init and Player_InitPlayer, which begin_mission_start runs
+	// last, past the PreMission pass, the round counters and the HUD's frame counters. A
+	// session host's role installs it at its bring-up (inmatch::HostRole::run_round_init):
+	// every player body of the session, the host's own included, spawns there, hidden,
+	// and none in the boot, whose own spawn step stands down for it. Null = the bare
+	// kernel, whose spawn step places the local player (a joiner's L spawns on its
+	// name-match).
+	// [orig: Game_StartMission @0x524360 - the EventTrigger_UpdateAllWithFlag2 call
+	//  @0x525B86, Server_ResetRoundCounters @0x525B90, the tick @0x525B9F,
+	//  Game_ResetSessionHudState @0x525BAA, Server_InitAllPlayerEntitiesForRound
+	//  @0x525BAF, Player_InitPlayer @0x525BBC]
+	std::function<void()> round_init;
 	// This boot is the SP restart's (KernelBootOptions::restart), for the
 	// bring-up's legs its start skips.
 	bool restart_boot() const { return restart_boot_; }
@@ -362,7 +378,8 @@ public:
 	// model .adm from here on (D-INF-6); the boot's resolve_infantry_adm step
 	// and the shell's explicit re-arm share this body.
 	void rearm_infantry_adm(const assets::AssetStore *adm_assets = nullptr);
-	// Spawn the authoritative side's own player at the mission's player-START
+	// Spawn the bare kernel's own player (a session host's spawns at its round
+	// init, round_init) at the mission's player-START
 	// marker, selected the way the original engine does (by game type,
 	// FARTHEST from the enemy set). 1 = spawned at a real marker, 0 = origin
 	// fallback, -1 = failed. [orig: Server_PositionPlayerForSpawn @0x50cf60 ->

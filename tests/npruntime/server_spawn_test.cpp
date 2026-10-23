@@ -1,7 +1,8 @@
 // P3 — the World-driven host-side player spawn pipeline (server_spawn.{h,cpp}). Proves the §5.2a
 // step 1-2 flow spawns the pool-0 player in World (ADR 0012), stamping entity+0x78 ownerConnectionId
-// from the connection dcb, for BOTH the host's own type-2 loopback (-> spawn_player, publishes
-// cached.local_player at the host dcb 2) and a remote type-1 joiner (-> spawn_remote_player at its
+// from the connection dcb, for BOTH the host's own type-2 loopback (its add binds no body; the
+// mission start's round init -> spawn_player, publishes cached.local_player at the host dcb 2,
+// D-NET-NEW-L7-39) and a remote type-1 joiner (-> spawn_remote_player at its
 // own dcb, host's local player untouched). End-to-end: build_pool0_organic_batch then carries the
 // real dcb at OrganicSpawnRecord::owner_connection_id (the §1 wiring), the F3 self-match field.
 
@@ -101,7 +102,10 @@ int main() {
 	// --- §5.2a step 1-2: spawn the host's OWN player (the type-2 loopback). ---
 	inmatch::Server_InitNewRoundState(ctx);
 	const int n1 = inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
-	if (!expect(n1 == 1, "host's own player spawned exactly once")) return 1;
+	if (!expect(n1 == 1, "host's own player added exactly once")) return 1;
+	if (!expect(!world.cached.local_player.valid(), "the own add spawns no body")) return 1;
+	// The mission start's round init spawns it, hidden (D-NET-NEW-L7-39).
+	inmatch::test::round_init_own_body(ctx);
 
 	if (!expect(world.cached.local_player.valid(), "cached.local_player published for the host")) return 1;
 	const w::Entity *host = world.registry.get(world.cached.local_player);
@@ -621,7 +625,9 @@ int main() {
 		const uint32_t cspec_dcb = opennova::next_connection_index();
 		const uint32_t cnext_dcb = opennova::next_connection_index();
 		inmatch::Server_InitNewRoundState(cctx);
-		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: host spawned")) return 1;
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: host added")) return 1;
+		// The own add binds no body: the mission start's round init spawns it (D-NET-NEW-L7-39).
+		inmatch::test::round_init_own_body(cctx);
 
 		// The joiner: golden CU var set (side A 1/0x0200 class 8, side B 4/0x8207 class 5, TR auto).
 		{
@@ -768,7 +774,8 @@ int main() {
 		const uint32_t own_dcb = inmatch::test::own_dcb(ectx);
 		const uint32_t ejoin_dcb = opennova::next_connection_index();
 		inmatch::Server_InitNewRoundState(ectx);
-		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ectx, ew) == 1, "own-add: host spawned")) return 1;
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ectx, ew) == 1, "own-add: host added")) return 1;
+		inmatch::test::round_init_own_body(ectx);
 		{
 			inmatch::NapiNPConnection joiner;
 			joiner.type = 1;
@@ -818,6 +825,7 @@ int main() {
 			sp_ctx.world = sp_world.get();
 			inmatch::Server_InitNewRoundState(sp_ctx);
 			if (inmatch::Server_ProcessPendingPlayerSpawns(sp_ctx, *sp_world) != 1) return false;
+			inmatch::test::round_init_own_body(sp_ctx); // the mission start's round init
 			const w::Entity *sp_player = sp_world->registry.get(sp_world->cached.local_player);
 			if (sp_player == nullptr) return false;
 			out = sp_player->position;
@@ -863,7 +871,8 @@ int main() {
 		cp01_ctx.world = cp01_world.get();
 		inmatch::Server_InitNewRoundState(cp01_ctx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cp01_ctx, *cp01_world) == 1,
-		            "the CP01 host player spawns")) return 1;
+		            "the CP01 host player is added")) return 1;
+		inmatch::test::round_init_own_body(cp01_ctx); // the mission start's round init
 		const w::AiEntity *motor = cp01_world->ai.for_handle(cp01_world->cached.local_player);
 		if (!expect(motor != nullptr && static_cast<uint32_t>(motor->heading) == 0xCC160000u,
 		            "the host player's motor heading is the marker's word 0xCC160000")) return 1;
@@ -925,7 +934,8 @@ int main() {
 		bare_ctx.world = bare_world.get();
 		inmatch::Server_InitNewRoundState(bare_ctx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(bare_ctx, *bare_world) == 1,
-		            "the marker-less host player spawns")) return 1;
+		            "the marker-less host player is added")) return 1;
+		inmatch::test::round_init_own_body(bare_ctx); // the mission start's round init
 		inmatch::NapiNPConnection &own = bare_ctx.np_protocol.connection_list.front();
 		w::Entity *body = bare_world->registry.get(bare_world->cached.local_player);
 		w::AiEntity *body_motor = bare_world->ai.for_handle(bare_world->cached.local_player);
@@ -1264,7 +1274,8 @@ int main() {
 		slice_ctx.world = slice_world.get();
 		inmatch::Server_InitNewRoundState(slice_ctx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(slice_ctx, *slice_world) == 1,
-		            "slice: the host player spawns")) return 1;
+		            "slice: the host player is added")) return 1;
+		inmatch::test::round_init_own_body(slice_ctx); // the mission start's round init
 		inmatch::NapiNPConnection &own = slice_ctx.np_protocol.connection_list.front();
 		const w::EntityHandle body_h = slice_world->cached.local_player;
 		w::Entity *body = slice_world->registry.get(body_h);

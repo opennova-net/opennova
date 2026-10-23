@@ -160,6 +160,7 @@ void test_a_markerless_add_takes_heading_word_zero() {
 	ctx.world = world.get();
 	inmatch::Server_InitNewRoundState(ctx);
 	CHECK(inmatch::Server_ProcessPendingPlayerSpawns(ctx, *world) == 1);
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	const w::Entity *player = world->registry.get(world->cached.local_player);
 	const w::AiEntity *motor = world->ai.for_handle(world->cached.local_player);
 	CHECK(player != nullptr && motor != nullptr);

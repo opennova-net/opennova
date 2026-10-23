@@ -99,10 +99,13 @@ void in_match_writers() {
 	conn.char_vars.char_class[1] = 6; // side B
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	// The own add binds no body; the mission start's round init spawns it (D-NET-NEW-L7-39).
+	expect(conn.phase == inmatch::ConnectionPhase::PlayerAdded && !conn.link.owned_entity.valid(),
+	       "the own add binds no body");
+	inmatch::init_all_player_entities_for_round(ctx);
 	const w::Entity *player = world.registry.get(conn.link.owned_entity);
-	expect(conn.phase == inmatch::ConnectionPhase::PlayerAdded && player != nullptr &&
-	               player->team == 1 && player->player_class == 8,
-	       "the add bound the host's player on team 1, side A's class 8");
+	expect(player != nullptr && player->team == 1 && player->player_class == 8,
+	       "the round init spawned the host's player on team 1, side A's class 8");
 	if (player == nullptr) return;
 
 	// The own add: the bodyless arm, the slot's team and its class as the add finds it,
@@ -133,7 +136,7 @@ void in_match_writers() {
 	       "with no entity an envelope abort draws no 0x5A and keeps PlayerType");
 	(void)submit_loadout(ctx, conn, world, /*team=*/1, /*class=*/9, 100);
 	expect(conn.player_list_type == 0, "with no entity an accepted 0x2F keeps PlayerType");
-	inmatch::init_all_player_entities_for_round(*role_storage);
+	inmatch::init_all_player_entities_for_round(ctx);
 	player = world.registry.get(conn.link.owned_entity);
 	expect(player != nullptr && player->team == 1 && player->player_class == 5,
 	       "the round init re-adds the kept slot on team 1 with class 5");
@@ -219,7 +222,7 @@ void remote_slot_class_at_round_init() {
 		world.registry.despawn(c->link.owned_entity);
 		c->link.owned_entity = {};
 	}
-	inmatch::init_all_player_entities_for_round(*role_storage);
+	inmatch::init_all_player_entities_for_round(ctx);
 	body = world.registry.get(accepted.link.owned_entity);
 	expect(body != nullptr && body->player_class == 7 && accepted.slot_class == 7,
 	       "the round init spawns the accepted slot with its class 7, not the join's 8");

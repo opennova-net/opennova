@@ -24,9 +24,8 @@
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_message_dispatch.h>
-#include <runtime/inmatch/server_loadout_grant.h> // PlayerSlot_SeedOwnLoadoutBuffer (the first round init)
 #include <runtime/inmatch/server_powerup.h> // ServerRemoteWeaponTables
-#include <runtime/inmatch/server_spawn.h> // Server_SpawnHostSlotBody (the first round init)
+#include <runtime/inmatch/server_spawn.h> // Player_InitPlayerSideWords (the mission start's body leg)
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/entity_wire_bridge.h>
@@ -211,10 +210,10 @@ void HostRole::fill_spawn_buffer_out_of_session() {
 	(void)seed_single_player_kit_from_profile(kernel.world, nullptr, kernel.local.loadout);
 }
 
-// Every body the session spawns from here on (a mid-match join, a map change's
-// kept slots, whose context the session keeps) binds its items.def row at its
-// spawn, through the kernel the role is bound to at that time; the bodies the
-// bring-up spawned are the boot's later steps' (D-NET-395).
+// Every body the session spawns (each mission start's round init, a mid-match join, a map
+// change's kept slots, whose context the session keeps) binds its items.def row at its
+// spawn, through the kernel the role is bound to at that time; the bring-up itself spawns
+// none (D-NET-395, D-NET-NEW-L7-39).
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 -> Entity_InitFromModel @0x40DC30]
 // The vehicle bays' C2S 0x40 spawns through the same kernel (D-NET-332)
 // [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0 -> Entity_SpawnDeployable
@@ -223,6 +222,7 @@ void HostRole::install_spawned_body_bind() {
 	state.host_owner.ctx.bind_spawned_body = [this](world::EntityHandle body) {
 		kernel_->bind_spawned_body(body);
 	};
+	install_round_init();
 	state.host_owner.ctx.deployable_spawner = [this](world::World &, uint16_t item_id,
 			uint8_t team, const int32_t position[6]) {
 		return kernel_->spawn_deployable(item_id, team, position);
@@ -335,8 +335,6 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	fill_spawn_buffer_out_of_session();
 	install_spawned_body_bind();
 	make_client_runtime(config.game_type);
-	// Seed the look heading from the auto-spawned player's facing.
-	kernel.local.reset_local_player_input_to_player_facing();
 }
 
 // The shell's bring-up: the LAN host from its consolidated server config, or
@@ -412,7 +410,6 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	install_spawned_body_bind();
 	if (host_cfg.serve_and_play) {
 		make_client_runtime(host_cfg.config.game_type);
-		kernel.local.reset_local_player_input_to_player_facing();
 	} else {
 		state.client_runtime.reset();
 	}
@@ -507,7 +504,7 @@ void HostRole::pump_load_stage() {
 // rule words are the next map's), the CRT stream carried over, the def loads'
 // integrity tables, the host's own client view rebuilt over the loopback, then the
 // window's remaining pumps. The round init over the kept slots waits for the
-// PreMission pass (init_round_after_premission).
+// PreMission pass (run_round_init, the kernel's round_init this installs).
 // [orig: Game_StartMission - AmmoDef_LoadAll @0x525495, WeaponDefs_LoadFile @0x5254BD,
 //  Entity_InitAllFromModels @0x52567F, then the server pumps (Server_PumpNetworkTransport
 //  @0x4FD960) @0x52589D, @0x5258E5, @0x5259EC, @0x525A5C and @0x525AC5 ahead of the
@@ -538,6 +535,7 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	ctx.config.integrity_sources = host_cfg.config.integrity_sources;
 	inmatch::configure_continued_session_world(state.host_owner, host_cfg);
 	map_change.torn_down = false;
+	install_round_init();
 	if (host_cfg.serve_and_play) make_client_runtime(host_cfg.config.game_type);
 	// Then the window's pumps the head and the stages left, over the new World, the spawn
 	// gate still held (D-NET-116), the render arm's left to an embedder's device stages.
@@ -547,16 +545,16 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	window_pumps_run_ = 0;
 }
 
-// The map change's round init, after the kernel boot's PreMission pass and
-// the round counters' reset: a new entity for every kept slot, the host's own
-// included, each bound to its items.def row at its spawn as the boot's steps
-// bound the bodies that existed then (the context's bind_spawned_body:
-// MissionKernel::bind_spawned_body, the traits, the sound-profile pair, the
-// organic weapons, the collision instance) [orig: Entity_SpawnFromAnimSlotProperty
-// @0x43C390 -> Entity_InitFromModel @0x40DC30], then on serve-and-play Player_InitPlayer's
-// weapon leg over the host's own new entity, its client's load-time stream
-// over the loopback (as a fresh session's bring-up queues it) and its look
-// heading.
+// Every mission start's round init, after the kernel boot's PreMission pass and
+// the round counters' reset: a new hidden entity for every active slot, the host's own
+// included (a fresh session's own slot and a map change's kept slots alike), each bound
+// to its items.def row at its spawn as the boot's steps bound the bodies that existed
+// then (the context's bind_spawned_body: MissionKernel::bind_spawned_body, the traits,
+// the sound-profile pair, the organic weapons, the collision instance)
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 -> Entity_InitFromModel @0x40DC30],
+// then on serve-and-play Player_InitPlayer's weapon leg over the host's own new entity,
+// its client's load-time stream over the loopback (D-NET-NEW-L7-39: the session create
+// queues none, its own body being this round init's) and its look heading.
 // [orig: Game_StartMission @0x524360 -- the EventTrigger_UpdateAllWithFlag2
 //  call @0x525B86, the Server_ResetRoundCounters call @0x525B90, the tick
 //  zeroed @0x525B9F, the Server_InitAllPlayerEntitiesForRound call
@@ -564,21 +562,31 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 void HostRole::init_round_after_premission() {
 	mission::MissionKernel &kernel = *kernel_;
 	kernel.boot_trace.emplace_back("round_init");
-	init_all_player_entities_for_round(*this);
-	if (!staged_bringup_.host_cfg.serve_and_play) return;
+	init_all_player_entities_for_round(state.host_owner.ctx);
+	if (!state.host_owner.serve_and_play) return;
 	world::local_loadout_rebuild(kernel.world, kernel.local.loadout, kernel.local.weapon,
 			kernel.local.inventory, kernel.local.inventory_valid, /*select_spawn_default=*/true);
 	(void)tick_connections(state.host_owner.ctx, /*elapsed_ms=*/0, state.host_owner.now_tick);
 	kernel.local.reset_local_player_input_to_player_facing();
 }
 
-void HostRole::seed_own_slot_at_first_round_init() {
-	if (kernel_ == nullptr) return;
-	for (NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
-		if (conn.type == NapiNPConnection::kTypeClientSide)
-			PlayerSlot_SeedOwnLoadoutBuffer(conn, kernel_->world);
-	// A Serve Only host's own row's hidden body, slot 0's at this round init (D-NET-352).
-	(void)Server_SpawnHostSlotBody(state.host_owner.ctx, kernel_->world);
+// See host_role.h. The charattr tail, then the round init, then Player_InitPlayer, at the
+// end of the kernel's begin_mission_start: a fresh session's own body is born here, as a map
+// change's kept slots are, never in the session create (D-NET-NEW-L7-39).
+// [orig: Game_StartMission @0x524360 - Server_ResetRoundCounters @0x525B90 (its tail
+//  @0x516DBD -> @0x4FCF10), Server_InitAllPlayerEntitiesForRound @0x525BAF, Player_InitPlayer
+//  @0x525BBC; its two callers GameLoop_Init (the call @0x526377; a session's and
+//  SinglePlayer_StartMission @0x561AF0's game loop) and Game_RestartRoundSP (the call
+//  @0x5263DB)]
+void HostRole::run_round_init() {
+	if (staged_bringup_.round_counters_tail) staged_bringup_.round_counters_tail();
+	init_round_after_premission();
+	init_local_player_at_mission_start();
+}
+
+// The kernel's round init is this role's, through the kernel it is bound to at its bring-up.
+void HostRole::install_round_init() {
+	kernel_->round_init = [this] { run_round_init(); };
 }
 
 // See host_role.h. Player_InitPlayer re-stamps the local body's class word and animSlot by

@@ -244,8 +244,9 @@ bool check_spawn_protection_seeded_at_creation() {
 		ctx.world = &world;
 		inmatch::Server_InitNewRoundState(ctx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
-				"host-own creation fixture spawns the local player"))
+				"host-own creation fixture adds the local player"))
 			return false;
+		inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
 		inmatch::NapiNPConnection &own = ctx.np_protocol.connection_list.front();
 		std::vector<inmatch::InitialStateMessage> own_burst;
 		(void)inmatch::test::drive_host_own_burst_and_join(ctx, own, /*now_tick=*/1, own_burst);

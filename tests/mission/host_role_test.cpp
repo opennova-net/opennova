@@ -989,7 +989,15 @@ int main() {
 		CHECK(host.host_owner.ctx.config.max_players == 4u);
 		CHECK(local_loopback_connections(host) == 0);
 		CHECK(host.host_owner.ctx.np_protocol.connection_list.empty());
-		CHECK(!kernel.local.has_local_player());
+		// Its mission start's round init spawned only its connectionless row's hidden body,
+		// which Player_InitPlayer takes for the local player (D-NET-352, D-NET-NEW-L7-39).
+		const auto row_is_local = [&] {
+			const w::Entity *row = kernel.world.registry.get(kernel.world.cached.local_player);
+			return host.host_owner.ctx.host_slot.body.valid() &&
+					kernel.world.cached.local_player == host.host_owner.ctx.host_slot.body &&
+					row != nullptr && (row->flags & w::kEntityFlagCarried) != 0;
+		};
+		CHECK(row_is_local());
 
 		// The same frame drives a dedicated host: the logic clock and the
 		// owner tick advance together, and the drain has no local connection
@@ -1007,9 +1015,9 @@ int main() {
 		CHECK(kernel.local.view_session_inputs.in_session);
 		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
-		CHECK(!kernel.local.has_local_player());
+		CHECK(row_is_local());
 
-		// Its HUD rows pass the dispatcher's head with no player of ours: the non-peer
+		// Its HUD rows pass the dispatcher's head with no session player of ours: the non-peer
 		// authority's operand is the constant 2, read without the local entity, so help
 		// (row 106, flags 0x05000800), lockgame (84) and playerlist_alt (63) pass and a
 		// bit-0 row (dotsize, 38, 0x0C000C01) drops by the operand.
@@ -1541,8 +1549,13 @@ int main() {
 			return triggered;
 		};
 		if (!mp_session) {
-			CHECK(!own->link.respawn_pending && (player->flags & 1u) == 0);
+			// The round init's body leaves the mission start hidden; the own C2S 0x0B's join
+			// in the first frame's receive pump clears the bit and holds nothing out of a
+			// session (D-NET-NEW-L7-39) [orig: Entity_SpawnFromAnimSlotProperty @0x43C508;
+			//  Game_StartMission @0x525C9E; Server_OnPlayerJoin - the clear @0x51A7DA].
+			CHECK(!own->link.respawn_pending && (player->flags & 1u) != 0);
 			for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
+			CHECK(!own->link.respawn_pending && (player->flags & 1u) == 0);
 			CHECK(!inmatch::death_menu_triggered(view));
 			CHECK(!dead_triggers());
 			kernel.world.tables.mission_attrib_flags |=

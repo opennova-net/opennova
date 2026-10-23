@@ -159,23 +159,20 @@ struct Host {
 			return false;
 		}
 		++missions;
-		// A map change's round init spawns the kept slots after the PreMission
-		// pass, none of them in the bring-up ahead of it (D-NET-354); a fresh
-		// session has none. [orig: Game_StartMission @0x524360 -- the
+		// Every mission start's round init spawns the active slots after the
+		// PreMission pass, none of them in the bring-up ahead of it: a map
+		// change's kept slots (D-NET-354) and a fresh session's own slot alike
+		// (D-NET-NEW-L7-39). [orig: Game_StartMission @0x524360 -- the
 		//  EventTrigger_UpdateAllWithFlag2 call @0x525B86, the
 		//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
 		const std::vector<std::string> &trace = kernel->boot_trace;
 		const auto at = [&trace](const char *name) {
 			return static_cast<size_t>(std::find(trace.begin(), trace.end(), name) - trace.begin());
 		};
-		if (next_mission) {
-			++map_changes;
-			CHECK(at("premission") < trace.size());
-			CHECK(at("premission") < at("round_init") && at("round_init") + 1 == trace.size());
-			CHECK(!kept_slot_spawned_in_bringup);
-		} else {
-			CHECK(at("round_init") == trace.size());
-		}
+		if (next_mission) ++map_changes;
+		CHECK(at("premission") < trace.size());
+		CHECK(at("premission") < at("round_init") && at("round_init") + 1 == trace.size());
+		CHECK(!kept_slot_spawned_in_bringup);
 		kept_slot_spawned_in_bringup = false;
 		return true;
 	}

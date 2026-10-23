@@ -166,10 +166,8 @@ struct HostBoot {
 	bool load_end_owed = false;
 	// The mission start's head a deferred authority boot leaves to phase B, which the
 	// embedder runs after its device stages: the render arm's last pump, the PreMission
-	// pass, the restrictions, the round init and Player_InitPlayer (the words it reads).
+	// pass, the restrictions, the round init and Player_InitPlayer.
 	bool mission_start_head_owed = false;
-	bool next_mission = false;
-	CharAttrRestrictions charattr_restrictions;
 	// The tables the boot read, for the embedder to retain.
 	mission::MissionText mission_text;
 	std::vector<uint8_t> terrain_til;

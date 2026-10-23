@@ -375,8 +375,7 @@ void Server_ResetAllPlayerSlotFrameState(NapiNPServerCtx &ctx) {
 	}
 }
 
-void init_all_player_entities_for_round(HostRole &role) {
-	NapiNPServerCtx &ctx = role.state.host_owner.ctx;
+void init_all_player_entities_for_round(NapiNPServerCtx &ctx) {
 	if (ctx.is_authority == 0 || ctx.world == nullptr) return;
 	world::World &world = *ctx.world;
 	// Auto-balance first, while the previous-mode word still names the

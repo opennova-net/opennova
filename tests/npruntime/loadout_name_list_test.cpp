@@ -132,6 +132,7 @@ void test_a_listen_hosts_own_list_names_every_body_after_its_fold() {
 	Rig r(inmatch::ConnectionMode::HostClient);
 	auto own_client = std::make_unique<inmatch::ClientRuntime>(r.loop);
 	CHECK(inmatch::Server_ProcessPendingPlayerSpawns(*r.ctx, r.world) >= 1);
+	inmatch::test::round_init_own_body(*r.ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb)) == kM4);
 	inmatch::NapiNPConnection *own = r.own();
 	CHECK(own != nullptr);

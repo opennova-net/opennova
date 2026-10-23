@@ -30,6 +30,8 @@
 #include "common/boot_file_source.h"
 #include "common/synthetic_mission.h"
 
+#include <algorithm>
+#include <functional>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -83,6 +85,8 @@ struct SpMission {
 	std::unique_ptr<ms::MissionKernel> kernel = std::make_unique<ms::MissionKernel>();
 	std::unique_ptr<im::HostRole> role = std::make_unique<im::HostRole>();
 	std::unique_ptr<im::Session> session;
+	// Run inside the boot's bring-up, past the role's (the round init it installed stands).
+	std::function<void()> after_bringup;
 
 	bool boot(const std::map<std::string, std::string> &files, bool restart,
 			ms::MissionKernel *previous = nullptr) {
@@ -94,7 +98,10 @@ struct SpMission {
 				static_cast<bms::AttribFlags>(kernel->mission.header.attrib_flags)));
 		options.restart = restart;
 		im::HostRole *host = role.get();
-		options.bringup_net_session = [host] { host->bring_up_singleplayer(); };
+		options.bringup_net_session = [this, host] {
+			host->bring_up_singleplayer();
+			if (after_bringup) after_bringup();
+		};
 		std::string error;
 		if (!kernel->boot(options, error)) {
 			std::printf("boot failed: %s\n", error.c_str());
@@ -185,6 +192,76 @@ void test_counter_step_plays_text_end_on_arrival() {
 			CHECK(s.kind == w::ScriptSoundEvent::Kind::Interface);
 	}
 	CHECK(std::string(w::kEpilogCounterEndSoundset) == "TEXT_END");
+}
+
+// D-NET-NEW-L7-39: the single player's session create adds its own slot with no body (the own
+// arm stores g_LocalPlayerEntity, which every teardown zeroes), and its mission start's round
+// init spawns the body, hidden, past the PreMission pass; Player_InitPlayer and the start's
+// local-player block leave it hidden until the own join, which clears it. A restart's start
+// (Game_StartMission(1)) runs the same pass and round init. So the PreMission pass meets no
+// local player: its ShowWinSubgoal shows the objective and plays no NEW_GOAL (the null test).
+// [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC60; Game_TeardownMission - the memset of
+//  g_LocalPlayerEntity @0x522774..0x522780; Game_StartMission @0x524360 - the
+//  EventTrigger_UpdateAllWithFlag2 call @0x525B86, the Server_InitAllPlayerEntitiesForRound call
+//  @0x525BAF, the Player_InitPlayer call @0x525BBC; EventAction_Dispatch case 35 - the
+//  g_LocalPlayerEntity test @0x4546E7..0x4546F1; Entity_SpawnFromAnimSlotProperty - Flags |=
+//  0x101 @0x43C508; Server_OnPlayerJoin - the clear @0x51A7DA; Game_RestartRoundSP - the
+//  Game_StartMission call @0x5263DB]
+void test_the_local_body_is_born_at_the_round_init() {
+	const std::map<std::string, std::string> files;
+	for (const bool restart : {false, true}) {
+		auto m = std::make_unique<SpMission>();
+		m->kernel->world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+		bool body_ahead_of_round_init = true;
+		ms::MissionKernel *kernel = m->kernel.get();
+		m->after_bringup = [kernel, &body_ahead_of_round_init] {
+			const std::function<void()> round_init = kernel->round_init;
+			CHECK(static_cast<bool>(round_init));
+			kernel->round_init = [kernel, &body_ahead_of_round_init, round_init] {
+				body_ahead_of_round_init = kernel->local.has_local_player();
+				if (round_init) round_init();
+			};
+		};
+		CHECK(m->boot(files, restart));
+		w::World &world = m->world();
+		// Absent through the PreMission pass: the pass ran its ShowWinSubgoal (the objective
+		// bit) and played no NEW_GOAL.
+		CHECK(!body_ahead_of_round_init);
+		CHECK((world.script.subgoals.show_win & (1u << 1)) != 0);
+		int new_goals = 0;
+		for (const w::ReadyFireSound &ready : world.out.fire_sounds.drain())
+			if (ready.set_name == "NEW_GOAL") ++new_goals;
+		CHECK(new_goals == 0);
+		// The boot spawned none; the round init followed the pass.
+		const std::vector<std::string> &trace = m->kernel->boot_trace;
+		const auto at = [&trace](const char *name) {
+			return static_cast<size_t>(std::find(trace.begin(), trace.end(), name) - trace.begin());
+		};
+		CHECK(at("spawn_local_player") == trace.size());
+		CHECK(at("premission") < at("round_init") && at("round_init") < trace.size());
+		// Present and hidden past the round init: the own slot's body, under the round
+		// init's 620-tick protection, the only one.
+		const im::NapiNPConnection *own = nullptr;
+		for (const im::NapiNPConnection &conn : m->role->state.host_owner.ctx.np_protocol.connection_list)
+			if (conn.type == im::NapiNPConnection::kTypeClientSide) own = &conn;
+		CHECK(own != nullptr);
+		const w::Entity *body = world.registry.get(world.cached.local_player);
+		CHECK(body != nullptr);
+		if (own == nullptr || body == nullptr) continue;
+		CHECK(own->link.owned_entity == world.cached.local_player);
+		CHECK((body->flags & w::kEntityFlagCarried) != 0);
+		CHECK(body->damage_state == 620);
+		int bodies = 0;
+		world.registry.for_each_in_pool(0, [&](const w::Entity &e) {
+			if (e.owner_connection_id == own->connection_id) ++bodies;
+		});
+		CHECK(bodies == 1);
+		// The own join (the start's own 0x0B, the first frame's receive pump) clears the bit,
+		// out of a session for good.
+		m->frames(2);
+		body = world.registry.get(world.cached.local_player);
+		CHECK(body != nullptr && (body->flags & w::kEntityFlagCarried) == 0);
+	}
 }
 
 } // namespace
@@ -610,6 +687,7 @@ int main() {
 	}
 
 	test_counter_step_plays_text_end_on_arrival();
+	test_the_local_body_is_born_at_the_round_init();
 	if (failures == 0) std::printf("sp_mission_lifecycle: OK\n");
 	return failures == 0 ? 0 : 1;
 }

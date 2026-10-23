@@ -4361,10 +4361,12 @@ bool run_host_as_client() {
 	w::AiSystem &ai = world.ai;
 	ctx.world = &world;
 
-	// Spawn the host's own player through the real pipeline (type-2 loopback -> spawn_player ->
-	// cached.local_player; binds conn.link.owned_entity = the host player, the D-NET-121 anchor).
+	// Add the host's own player through the real pipeline (the type-2 loopback's add binds no
+	// body), then the mission start's round init spawns it (spawn_player -> cached.local_player;
+	// binds conn.link.owned_entity = the host player, the D-NET-121 anchor; D-NET-NEW-L7-39).
 	const int spawned = inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
-	if (!expect(spawned == 1, "the host's own player spawned via the pipeline")) return false;
+	if (!expect(spawned == 1, "the host's own player added via the pipeline")) return false;
+	inmatch::test::round_init_own_body(ctx);
 
 	// Find the host loopback connection; confirm its owned_entity is the host player + mark it in-match.
 	// (In production burst.spawned latches when the host loopback's §5.2a burst completes — covered by
@@ -4558,6 +4560,11 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	cfg.socket_mode = inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = true;
 	inmatch::start_host_session(owner, cfg);
+	// The mission start's round init: the own body (the session create's add binds none), then
+	// the own client's load-time stream over the loopback (HostRole::init_round_after_premission,
+	// D-NET-NEW-L7-39).
+	inmatch::test::round_init_own_body(owner.ctx);
+	(void)inmatch::tick_connections(owner.ctx, /*elapsed_ms=*/0, owner.now_tick);
 
 	// Match Simulation's startup order: construct/install the replica pipeline after host bring-up,
 	// then fold the queued initial stream and first whole-world compact frame together. The

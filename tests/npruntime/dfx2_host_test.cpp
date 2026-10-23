@@ -90,6 +90,7 @@ void join_own_player(JoinedHost &host, const TitleIdentity *title) {
 	host.ctx.world = &host.world;
 	inmatch::Server_InitNewRoundState(host.ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(host.ctx, host.world);
+	inmatch::test::round_init_own_body(host.ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	inmatch::NapiNPConnection &conn = host.ctx.np_protocol.connection_list[0];
 	std::vector<uint8_t> body;
 	std::vector<inmatch::InitialStateMessage> emitted;

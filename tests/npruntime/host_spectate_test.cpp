@@ -13,6 +13,7 @@
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/map_change.h> // init_all_player_entities_for_round (the mission start's)
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -75,6 +76,9 @@ struct Rig {
 		cfg.config.side_a_password = side_a_password;
 		cfg.config.side_b_password = side_b_password;
 		inmatch::start_host_session(*owner, cfg);
+		// The own add binds no body: the mission start's round init spawns it
+		// (D-NET-NEW-L7-39).
+		inmatch::init_all_player_entities_for_round(owner->ctx);
 	}
 	inmatch::NapiNPConnection *own() {
 		for (inmatch::NapiNPConnection &c : owner->ctx.np_protocol.connection_list)
@@ -104,7 +108,7 @@ struct Rig {
 };
 
 // The own slot's latch and the own connection's JSR follow the word on a session peer; the
-// own add's body takes no spectator leg.
+// own slot's round-init body takes no spectator leg.
 void test_the_own_slot_and_connection_take_the_word() {
 	for (const int32_t spectate : {0, 1}) {
 		Rig r(spectate);

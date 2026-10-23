@@ -18,7 +18,6 @@
 #include <base/io/strutil.h>
 #include <net/npwire/nw_session_framing.h> // next_connection_index (a synthetic node's dcb)
 #include <net/npwire/protocol_message.h> // make_protocol_message (a transport-less join's replies)
-#include <net/title/title_identity.h>  // title_in_match (the join's state byte, DFX2-11)
 #include <runtime/inmatch/punt_log.h>     // the punt table the round init clears
 #include <runtime/inmatch/server_log_recorder.h> // the /PROFILE PDEF of a player add
 
@@ -592,7 +591,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// assignment, a null side password's call (no password, team-choose or balance leg: 1,
 	// or 0 for a session spectator), from which its add writes its PlayerList entry (the
 	// bodyless arm, stamp_player_list_add); then the create's profile init overwrites the
-	// slot's team, which the body (the next round init's, ours spawned here) takes. A map
+	// slot's team, which the body (the mission start's round init's) takes. A map
 	// change's re-add keeps the slot's.
 	// [orig: Server_InitNewRoundState @0x51C8E0 - ebx 0 @0x51C93E, Server_AssignPlayerTeam(slot,
 	//  0, g_SideRequirement, 0) @0x51CABE..0x51CAC8; Server_PlayerAdd's own arm, the entry
@@ -604,6 +603,27 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 				ctx.rotation != nullptr ? ctx.rotation->side_team : std::array<uint8_t, 2>{1, 2},
 				&ctx.host_slot, /*side_password=*/nullptr);
 		spawn.team = PlayerSession_InitOwnSlotTeam(ctx, conn);
+		// The own arm spawns nothing and places nothing: it stores g_LocalPlayerEntity as the
+		// slot's entity, none at a session create (each mission's World starts with none, as
+		// retail's teardown zeroes the word), so the row is added bodyless, as the bodyless
+		// arm below leaves a row; the profile init then stores the slot's class, and the
+		// mission start's round init spawns the body past the PreMission pass
+		// (D-NET-NEW-L7-39).
+		// [orig: Server_PlayerAdd's own arm - g_LocalNetPlayer @0x51CC33, [slot+0] =
+		//  g_LocalPlayerEntity @0x51CC58..0x51CC5D, `jmp loc_51D314` @0x51CC60;
+		//  Game_TeardownMission - the memset of g_LocalPlayerEntity @0x522774..0x522780;
+		//  CNapiGameSession_CreateSession - PlayerSession_InitFromProfile @0x4C9CCE;
+		//  Game_StartMission - the EventTrigger_UpdateAllWithFlag2 call @0x525B86, the
+		//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
+		conn.link.owned_entity = world.cached.local_player;
+		PlayerSession_InitOwnSlotClass(ctx, conn);
+		conn.reply.player_slot = *player_slot;
+		const std::string &own_name =
+				!conn.player_name.empty() ? conn.player_name : ctx.config.player_name;
+		if (!own_name.empty()) conn.reply.player_name = own_name;
+		conn.phase = ConnectionPhase::PlayerAdded;
+		conn.reply.player_slot_reserved = false;
+		return conn.link.owned_entity;
 	} else {
 		spawn.team = Server_ReservePlayerTeam(
 				ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
@@ -690,10 +710,6 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
 		const uint8_t cls = conn.char_vars.char_class[side];
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
-		// The session's own add is the create's, whose profile init stores the slot's
-		// class after it (the add's PlayerList entry reads the zeroed class:
-		// stamp_player_list_add); a map change's round init keeps the class.
-		if (!round_init) PlayerSession_InitOwnSlotClass(ctx, conn);
 		// The body itself is the round init's spawn with the slot's class byte, which
 		// binds its camouflage row (D-NET-348): retail's own add attaches the local
 		// entity and never spawns, and every mission start's round init spawns the own
@@ -790,17 +806,13 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 
 	// The join (Server_OnPlayerJoin, server_initial_state.cpp) writes the slot's state byte and
 	// the armory cooldown; the add writes neither (D-NET-502) [orig: Server_PlayerAdd
-	// @0x51CBC0, its row memset @0x51CD06]. A remote add's body is hidden until its join
-	// (D-NET-503) [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Flags |= 0x101
-	// @0x43C433 and again @0x43C508]. The host's own add binds its local player (retail's
-	// local arm spawns nothing, @0x51CC33..0x51CC5D), hidden while it is undeployed in a
-	// session [orig: NetPacket_WritePlayerState @0x4FF7AA..0x4FF7B8].
-	const TitleInMatch &title_rules = title_in_match(ctx.np_protocol.identity);
-	const bool held = (world.zones.has_spawn_zone() || title_rules.join_state_fixed) &&
-			world.rules.mp_session;
-	if (!is_host_own || (held && !conn.link.spectator)) {
-		if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
-	}
+	// @0x51CBC0, its row memset @0x51CD06]. Every body spawned here is hidden: a remote
+	// add's until its join (D-NET-503), and the round init's, the host's own included,
+	// which the mission start's Player_InitPlayer and local-player block leave hidden until
+	// its own join (HostRole::init_local_player_at_mission_start, D-NET-NEW-L7-39)
+	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Flags |= 0x101 @0x43C433 and
+	// again @0x43C508].
+	if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
 	// The round init's re-add stores the 620-tick spawn protection for every active slot;
 	// a pump add's body carries none until its join stores it after the 0x0F.
 	// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 @0x516bba; Server_OnPlayerJoin

@@ -865,15 +865,13 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 	configure_session_world(owner, cfg);
 	apply_first_mission_settings(owner, cfg);
 	if (cfg.serve_and_play && owner.ctx.world != nullptr) {
-		// Serve-and-play: spawn the host's own player and queue its load-time stream before it gets the
-		// per-frame 0x0A its local view renders from. A dedicated/headless HostOnly session has no
-		// local-player connection, so it intentionally performs neither operation.
+		// Serve-and-play: the host's own add, inside the create, which spawns no body: the
+		// mission start's round init spawns it past the PreMission pass and then queues the
+		// own client's load-time stream (HostRole::init_round_after_premission,
+		// D-NET-NEW-L7-39). A dedicated/headless HostOnly session has no local-player
+		// connection [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC60; Game_StartMission
+		// @0x524360 - the Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 		Server_ProcessPendingPlayerSpawns(owner.ctx, *owner.ctx.world);
-		// Run the existing type-2 initial-state path instead of latching spawned directly. The
-		// loopback's effectively-unbounded burst budget queues every load-time pool batch now,
-		// including the 0x0D carrier pose required by mounted children whose ewep parent has no
-		// per-frame compact callback.
-		(void)tick_connections(owner.ctx, /*elapsed_ms=*/0, owner.now_tick);
 	}
 	return CreateSessionResult::Created;
 }

@@ -202,9 +202,11 @@ int main_impl() {
 	                    live_build_flags != advertised_build_flags,
 	            "fixture mutation changes the live BuildFlags computation")) return 1;
 
-	// Spawn the host's own pool-0 player (so the burst's 0x0C has it with dcb 2).
+	// The host's own add, then the mission start's round init spawns its pool-0 player (so the
+	// burst's 0x0C has it with dcb 2; D-NET-NEW-L7-39).
 	inmatch::Server_InitNewRoundState(ctx);
-	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1, "host player spawned")) return 1;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1, "host player added")) return 1;
+	inmatch::test::round_init_own_body(ctx);
 
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 
@@ -465,7 +467,8 @@ int main_impl() {
 		ctx2.world = &w2;
 		ctx2.mission = &mission;
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx2, w2) == 1,
-		            "world-path pose player spawned")) return 1;
+		            "world-path pose player added")) return 1;
+		inmatch::test::round_init_own_body(ctx2); // the mission start's round init (D-NET-NEW-L7-39)
 		inmatch::NapiNPConnection &pose_conn = ctx2.np_protocol.connection_list[0];
 		w::AiEntity *pose_ai = ai2.for_handle(pose_conn.link.owned_entity);
 		if (!expect(pose_ai != nullptr, "world-path pose resolves the owned AiEntity")) return 1;
@@ -572,6 +575,7 @@ int main_impl() {
 		ctx3.mission = &mission;
 		inmatch::Server_InitNewRoundState(ctx3);
 		inmatch::Server_ProcessPendingPlayerSpawns(ctx3, w3);
+		inmatch::test::round_init_own_body(ctx3); // the mission start's round init (D-NET-NEW-L7-39)
 
 		// Simulate a remote joiner by adding a type-1 connection with PlayerAdded phase.
 		// Built in place: a NapiNPConnection is several KiB, and this frame's stack is full.
@@ -774,6 +778,7 @@ int main_impl() {
 		ctx4.mission = &mission;
 		inmatch::Server_InitNewRoundState(ctx4);
 		inmatch::Server_ProcessPendingPlayerSpawns(ctx4, w4);
+		inmatch::test::round_init_own_body(ctx4); // the mission start's round init (D-NET-NEW-L7-39)
 		inmatch::NapiNPConnection &sconn = ctx4.np_protocol.connection_list.emplace_back();
 		sconn.type = 1;
 		sconn.connection_id = inmatch::kFirstJoinerDcb;
@@ -1096,6 +1101,7 @@ int pool3_page_start_impl() {
 	ctx.world = &world;
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	std::vector<std::vector<uint8_t>> pages;
 	std::vector<inmatch::InitialStateMessage> emitted;
@@ -1210,6 +1216,7 @@ int location_names_by_name_index_impl() {
 		return 1;
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const std::vector<uint8_t> *body = nullptr;
 	std::vector<inmatch::InitialStateMessage> emitted;
@@ -1267,6 +1274,7 @@ int location_names_fall_back_to_marker_labels_impl() {
 	ctx.mission_location_names.clear();
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const std::vector<uint8_t> *body = nullptr;
 	std::vector<inmatch::InitialStateMessage> emitted;

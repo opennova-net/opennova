@@ -49,6 +49,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -150,8 +151,8 @@ ServeOnlyStart run_serve_only_start(inmatch::ClientProcessState &process,
 		CHECK(seeded_side == -1);
 		CHECK(process.spawn_loadout_buffer.entries.size() == before);
 	}
-	role.seed_own_slot_at_first_round_init();
-	role.init_local_player_at_mission_start();
+	// The kernel boot's mission start ran the round init's row body and Player_InitPlayer
+	// (MissionKernel::round_init), ahead of the shell's seed above.
 	const w::Entity *body = kernel.world.registry.get(kernel.world.cached.local_player);
 	CHECK(body != nullptr);
 	if (body != nullptr) out.equipped = body->equipped_adm_index;
@@ -169,9 +170,10 @@ inmatch::TickInput tick_input() {
 }
 
 // A LAN listen host over the two-entity mission whose placed item stands in
-// for an authored spawn zone, so the host's own player joins held.
-// `mission_start` runs the mission start's Player_InitPlayer body leg.
-void run_held_host(bool mission_start) {
+// for an authored spawn zone, so the host's own player joins held. The kernel
+// boot's mission start runs the round init and Player_InitPlayer's body leg
+// (MissionKernel::round_init, D-NET-NEW-L7-39).
+void run_held_host() {
 	std::map<std::string, std::string> files;
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
 	ms::MissionKernel &kernel = *kernel_storage;
@@ -219,24 +221,20 @@ void run_held_host(bool mission_start) {
 		const w::Entity *e = kernel.world.registry.get(body);
 		return e != nullptr && (e->flags & w::kEntityFlagCarried) != 0;
 	};
-	// The held own body is hidden after the bring-up, whose burst left the own
-	// slot in state 5; the mission start's end queued the own client's C2S
-	// 0x0B, which the first frame's receive pump hands to its receiver
-	// (D-NET-NEW-L4-5). The eager WAC load leaves its clock at 1 [orig:
-	// WacScript_InitAndLoad @0x4F9665 / @0x4F9770].
+	// The held own body leaves the mission start hidden, named after the local profile
+	// (the session config's player name), and the round init's burst left the own slot
+	// in state 5; the mission start's end queued the own client's C2S 0x0B, which the
+	// first frame's receive pump hands to its receiver (D-NET-NEW-L4-5). The eager WAC
+	// load leaves its clock at 1 [orig: WacScript_InitAndLoad @0x4F9665 / @0x4F9770].
 	CHECK(own->slot_state == inmatch::PlayerSlotState::AwaitJoin && !own->burst.spawned);
 	CHECK(!own->link.respawn_pending && hidden());
-	// The own client's mission start queued its two 0x2F and its 0x0B (D-NET-695).
-	CHECK(host.host_loop.c2s_pending() == 3);
-	kernel.world.cached.wac_ticks = 1;
-	if (mission_start) {
-		// The body leaves the mission start hidden, named after the local profile (the
-		// session config's player name).
-		role.init_local_player_at_mission_start();
-		CHECK(hidden());
+	{
 		const w::Entity *e = kernel.world.registry.get(body);
 		CHECK(e != nullptr && e->name == host.host_owner.ctx.config.player_name);
 	}
+	// The own client's mission start queued its two 0x2F and its 0x0B (D-NET-695).
+	CHECK(host.host_loop.c2s_pending() == 3);
+	kernel.world.cached.wac_ticks = 1;
 	const uint32_t updates = kernel.world.entity_update_counter;
 	role.run_tick(tick_input());
 	// The receive pump's join holds the undeployed slot; it clears the body's
@@ -523,8 +521,8 @@ void run_single_player_retry_replays_the_own_join() {
 	CHECK(kernel.boot(options, error));
 	opennova::inmatch::NullDatagramSocket socket;
 	role.set_socket(&socket);
-	// The host boot's order: Player_InitPlayer's leg and the block, then the baseline.
-	role.init_local_player_at_mission_start();
+	// The host boot's order: Player_InitPlayer's leg and the block (the kernel boot's round
+	// init ran them), then the baseline.
 	kernel.capture_baseline();
 	auto own = [&]() -> inmatch::NapiNPConnection * {
 		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
@@ -552,9 +550,9 @@ void run_single_player_retry_replays_the_own_join() {
 // buffer as it stands: a playing host's mission start copied its side's class page into it
 // first (the shell's seed_session_kit_from_profile; here the title's default kit stands for
 // it, the two of its weapons the mission's weapon.def carries, in the kit's order); the
-// session's own add, inside the load ahead of the weapon table, seeds nothing. The host boot
-// runs the seed at its round-init point (HostRole::seed_own_slot_at_first_round_init); this
-// rig's bare kernel boot calls it as that step does.
+// session's own add, inside the load ahead of the weapon table, seeds nothing. The kernel
+// boot's mission start runs the seed at its round init (HostRole::run_round_init); this rig
+// fills the spawn buffer just ahead of it, as the shell's seed does.
 // [orig: Game_StartMission @0x525BAF -> Server_InitAllPlayerEntitiesForRound
 //  @0x516BC4..0x516BE3; the peer's side page @0x525767..0x525818]
 void run_first_round_init_seeds_the_own_buffer() {
@@ -567,6 +565,7 @@ void run_first_round_init_seeds_the_own_buffer() {
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
 	kernel.open_document(two_entity_mission(), "own_buffer_seed", source_over(&files));
+	bool add_seeded_nothing = false;
 	ms::KernelBootOptions options;
 	options.mp_session = true;
 	options.game_type = mission_game_type(kernel.mission);
@@ -581,9 +580,21 @@ void run_first_round_init_seeds_the_own_buffer() {
 		inmatch::HostBringup bringup;
 		bringup.host_cfg = cfg;
 		role.bring_up(bringup);
+		// The add, inside the load ahead of the weapon table, seeded nothing; the round init
+		// past the PreMission pass seeds the buffer from the spawn buffer as it then stands.
+		const std::function<void()> round_init = kernel.round_init;
+		kernel.round_init = [&, round_init] {
+			for (const inmatch::NapiNPConnection &conn :
+					host.host_owner.ctx.np_protocol.connection_list)
+				if (conn.type == inmatch::NapiNPConnection::kTypeClientSide)
+					add_seeded_nothing = conn.reply.loadout_buffer.entries.empty();
+			kernel.local.loadout.spawn_kit() = w::weapon_kit_default(kernel.world.rules.title);
+			round_init();
+		};
 	};
 	std::string error;
 	CHECK(kernel.boot(options, error));
+	CHECK(add_seeded_nothing);
 	// Entry 0 is the engine's "null" def; the file's two follow it.
 	CHECK(kernel.world.tables.weapons.index_of("WPN_KNIFE") == 1 &&
 			kernel.world.tables.weapons.index_of("WPN_M4AUTO") == 2);
@@ -592,11 +603,6 @@ void run_first_round_init_seeds_the_own_buffer() {
 		if (conn.type == inmatch::NapiNPConnection::kTypeClientSide) own = &conn;
 	CHECK(own != nullptr);
 	if (own == nullptr) return;
-	// The add, inside the load ahead of the weapon table, seeded nothing; the host boot's
-	// round-init point (host_boot.cpp, after the PreMission pass) seeds the buffer.
-	CHECK(own->reply.loadout_buffer.entries.empty());
-	kernel.local.loadout.spawn_kit() = w::weapon_kit_default(kernel.world.rules.title);
-	role.seed_own_slot_at_first_round_init();
 	const std::vector<LoadoutSubmitEntry> &entries = own->reply.loadout_buffer.entries;
 	CHECK(own->reply.loadout_buffer_set && entries.size() == 2);
 	if (entries.size() == 2) CHECK(entries[0].adm_index == 2 && entries[1].adm_index == 1);
@@ -733,7 +739,7 @@ void run_single_player_class_is_the_missions_type() {
 		if (own == nullptr) continue;
 		CHECK(own->char_vars.char_class[0] == c.cls);
 		CHECK(own->char_vars.char_class[1] == 6);
-		role.init_local_player_at_mission_start();
+		// The kernel boot's round init ran Player_InitPlayer's body leg.
 		const w::Entity *body = kernel.world.registry.get(kernel.world.cached.local_player);
 		CHECK(body != nullptr);
 		if (body != nullptr) CHECK(body->team == 1 && body->player_class == c.cls);
@@ -784,7 +790,7 @@ void run_single_player_restart_keeps_the_class_word() {
 		CHECK(own != nullptr);
 		if (own == nullptr) continue;
 		CHECK(own->char_vars.char_class[0] == 2);
-		role.init_local_player_at_mission_start();
+		// The kernel boot's round init ran Player_InitPlayer's body leg.
 		const w::Entity *body = kernel.world.registry.get(kernel.world.cached.local_player);
 		CHECK(body != nullptr);
 		if (body != nullptr) CHECK(body->team == 1 && body->player_class == 2);
@@ -938,8 +944,7 @@ void run_a_single_player_fill_carries_into_a_serve_only_row() {
 } // namespace
 
 int main() {
-	run_held_host(/*mission_start=*/true);
-	run_held_host(/*mission_start=*/false);
+	run_held_host();
 	run_own_join_warms_the_wired_body();
 	run_own_mission_start_submits_its_kit();
 	run_single_player_mission_start_submits_no_kit();

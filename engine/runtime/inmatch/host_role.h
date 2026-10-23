@@ -56,6 +56,11 @@ struct HostBringup {
 	// The map change's bring-up: the next mission inside the kept session
 	// (inmatch/map_change.h), not a fresh session.
 	bool next_mission = false;
+	// The round counters' charattr tail, which the mission start's round init follows
+	// (the host boot's: the session's restriction words over the process's charattr
+	// table, HostRole::run_round_init). Null = a bring-up with no charattr table.
+	// [orig: Server_ResetRoundCounters @0x516C50, its tail @0x516DBD -> @0x4FCF10]
+	std::function<void()> round_counters_tail;
 };
 
 // The SP listen server's session config: SINGLEPLAYERGAME, the literal
@@ -187,9 +192,20 @@ public:
 	void pump_load_stage();
 	// The head ran for the load in hand (bring_up_next_mission spends it).
 	bool next_mission_load_begun() const { return next_mission_head_run_; }
-	// The map change's round init over the kept slots, which the host boot
-	// runs after the kernel boot's PreMission pass and the round counters
-	// (map_change.h) [orig: Game_StartMission @0x524360, the
+	// The mission start's authority tail past the PreMission pass, every bring-up's
+	// (MissionKernel::round_init, which begin_mission_start runs last): the round counters'
+	// charattr tail (HostBringup::round_counters_tail), the round init
+	// (init_round_after_premission), then Player_InitPlayer's body leg
+	// (init_local_player_at_mission_start). A fresh session's own body and a map change's
+	// kept slots alike are born here, so the PreMission pass meets no local body
+	// (D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 - the EventTrigger_UpdateAllWithFlag2
+	// call @0x525B86, Server_ResetRoundCounters @0x525B90,
+	// Server_InitAllPlayerEntitiesForRound @0x525BAF, Player_InitPlayer @0x525BBC].
+	void run_round_init();
+	// The round init over the session's active slots, a fresh session's own slot and a map
+	// change's kept slots alike (map_change.h), then on serve-and-play Player_InitPlayer's
+	// weapon leg over the host's own new body, its client's load-time stream over the
+	// loopback and its look heading [orig: Game_StartMission @0x524360, the
 	// Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 	void init_round_after_premission();
 	// Player_InitPlayer's body leg at every mission start, after the round
@@ -201,12 +217,6 @@ public:
 	//  @0x525C6B..0x525C9E; Player_InitPlayer @0x4E15F0 -- the side words
 	//  @0x4E1809..0x4E1843, the Name @0x4E184F..0x4E186A, `Flags &= ~1` @0x4E19C2].
 	void init_local_player_at_mission_start();
-	// A fresh session's first mission start, at its round init: the own slot's buffer
-	// seeded from the spawn buffer, which the mission load filled by then (a map
-	// change's round init seeds its own, init_all_player_entities_for_round).
-	// [orig: Game_StartMission @0x525BAF -> Server_InitAllPlayerEntitiesForRound
-	//  @0x516BC4..0x516BE3, after the load's Mission_LoadBMSFile @0x40F4E0]
-	void seed_own_slot_at_first_round_init();
 	// The playing host's own client's mission-start end, as every session
 	// peer's: its C2S 0x0B queued and pumped onto the loopback, which the next
 	// frame's receive pump hands to the server's 0x0B receiver, whose join
@@ -317,8 +327,11 @@ private:
 	void apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
 			const TitleIdentity *title);
 	// The context's spawn-time body bind over this role's kernel
-	// (NapiNPServerCtx::bind_spawned_body), installed after a bring-up's own spawn.
+	// (NapiNPServerCtx::bind_spawned_body), installed at a fresh session's bring-up, with
+	// the kernel's round init (install_round_init).
 	void install_spawned_body_bind();
+	// The kernel's MissionKernel::round_init: run_round_init, at every bring-up.
+	void install_round_init();
 	void make_client_runtime(uint32_t game_type);
 	// The own client's S2C 0x0F local-player block on the host's own body (the one body the
 	// host and its client share), run once per decoded 0x0F.

@@ -781,7 +781,8 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	//  @0x50CF60, the no-pick arm @0x50CFB1; Entity_SpawnFromAnimSlotProperty @0x43C459]
 	// The single player skips it (retail's is_in_session is 0 there; ours is the session
 	// fact world.rules.mp_session): the own body keeps the mission start's placement
-	// (MissionKernel::spawn_local_player_at_start), the marker's raw words with no settle,
+	// (the round init's re-add, Server_BuildPlayerInfoAndAdd), the marker's raw words with
+	// no settle,
 	// since that spawn places a body whose AI slot is not yet allocated and the warm-up
 	// returns on it (D-NET-NEW-L1-19).
 	// [orig: Server_OnPlayerJoin `cmp g_NapiNPCtx.is_in_session, ebx` @0x51A777, `jz`

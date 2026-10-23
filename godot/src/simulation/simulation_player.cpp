@@ -16,9 +16,9 @@ using namespace sim_internal;
 
 bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {
 	if (!world_installed_) return false;
-	// P7: the inmatch listen server auto-spawns the host's own player at bring-up (the faithful §5.0
-	// mode-3 path), so an explicit spawn is a no-op success there. The legacy LAN host + any non-listen
-	// caller (no auto-spawn) still spawn at the requested pose below.
+	// P7: the inmatch listen server's mission start spawns the host's own player at its round
+	// init (the faithful §5.0 mode-3 path, past the PreMission pass), so an explicit spawn is a
+	// no-op success there. Any caller with no host role still spawns at the requested pose below.
 	if (has_local_player()) return true;
 	opennova::world::PlayerSpawn spawn;
 	// Godot (x,y,z) -> mission (x, -z, y): the inverse of the present (x,y,z) -> (x, z, -y) remap.
@@ -39,8 +39,8 @@ uint32_t Simulation::mission_game_type() const {
 
 int Simulation::spawn_local_player_at_start() {
 	if (!world_installed_) return -1;
-	// The inmatch listen server auto-spawns the host's own player at
-	// bring-up via the SAME retail spawn-pose operation
+	// The inmatch listen server's mission start spawns the host's own player at
+	// its round init via the SAME retail spawn-pose operation
 	// (Server_BuildPlayerInfoAndAdd), so when a player already exists this is
 	// a no-op success. The bare path runs the kernel's marker-select spawn
 	// (engine: runtime/world/spawn_select.h).

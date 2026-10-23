@@ -568,12 +568,12 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	weapon_defs_ok = true;
 	world.tables.weapon_defs = &weapon_defs;
 	mission::stamp_seat_spec_turret_limits(world, seat_specs);
-	// The authoritative side's own player spawned before this feed: re-stamp
+	// The bare kernel's own player spawned before this feed: re-stamp
 	// its equipped default now that the process's loadout name list's first name
 	// resolves by name (w::player_spawn_equipped_default)
-	// [orig: PlayerClass_InitEntity @0x4B1100..0x4B1116] (D-NET-143). A fresh session's
-	// own player only: a map change's kept slots spawn after the PreMission
-	// pass and take it at the spawn (D-NET-354).
+	// [orig: PlayerClass_InitEntity @0x4B1100..0x4B1116] (D-NET-143). A session's
+	// bodies spawn at its round init, after the PreMission pass, and take it at
+	// the spawn (D-NET-354, D-NET-NEW-L7-39).
 	const uint8_t equipped_default = w::player_spawn_equipped_default(world);
 	if (equipped_default != w::kAdmSlotNone) {
 		std::vector<w::EntityHandle> handles;
@@ -799,10 +799,16 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 				&world, &script_effect_catalog, &script_sound_catalog, options.music_globals);
 		wac_loaded = status == wac::WacLayeredLoadStatus::kLoaded;
 	}
-	// The host's own player as an authoritative pool-0 entity (ADR 0012 /
+	// The bare kernel's own player as an authoritative pool-0 entity (ADR 0012 /
 	// net-re §5.2b) — after load (the spawn needs the AI system wired). A
-	// joiner's L spawns on the name-match instead.
-	if (options.playable && !options.joiner) {
+	// joiner's L spawns on the name-match instead, and a session host's at its
+	// round init past the PreMission pass (round_init, installed by the role's
+	// bring-up above): retail's session create spawns no local body, and its
+	// mission start's round init spawns every active slot's
+	// (D-NET-NEW-L7-39) [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC5D;
+	//  Game_StartMission @0x524360 - the EventTrigger_UpdateAllWithFlag2 call
+	//  @0x525B86, the Server_InitAllPlayerEntitiesForRound call @0x525BAF].
+	if (options.playable && !options.joiner && !round_init) {
 		step("spawn_local_player");
 		const int status = spawn_local_player_at_start(options.game_type);
 		if (status < 0)
@@ -812,7 +818,8 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 					"mission kernel: no player-start marker - spawned at the origin");
 	}
 	// Per-entity grounding: each soldier's OWN model .adm (D-INF-6). After
-	// the NPC promote AND the player spawn so both are covered.
+	// the NPC promote AND the bare kernel's player spawn so both are covered (a
+	// round init's bodies register at their spawn: bind_spawned_body).
 	if (has_files && has_item_db) {
 		step("infantry_adm");
 		rearm_infantry_adm();
@@ -924,6 +931,12 @@ bool MissionKernel::begin_mission_start() {
 	// @0x525BAA -> Game_ResetSessionHudState @0x434BD0].
 	world.hud_frames = w::HudFrameCounters{};
 	mission_start_pending = true;
+	// Then the authority's round init and Player_InitPlayer (a session host's role):
+	// the first local body of the mission is born here, hidden, so the PreMission pass
+	// above met none (D-NET-NEW-L7-39) [orig: Game_StartMission - the
+	// Server_InitAllPlayerEntitiesForRound call @0x525BAF, the Player_InitPlayer call
+	// @0x525BBC, past Game_ResetSessionHudState @0x525BAA].
+	if (round_init) round_init();
 	return true;
 }
 

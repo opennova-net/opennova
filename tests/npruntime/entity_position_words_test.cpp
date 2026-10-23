@@ -265,6 +265,7 @@ int placement_and_world_state_load_keep_the_words() {
 	ctx.world = &world;
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const w::Entity *player = world.registry.get(conn.link.owned_entity);
 	if (!expect(player != nullptr &&

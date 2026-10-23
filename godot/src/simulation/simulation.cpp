@@ -782,7 +782,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	}
 	opennova::mission::KernelBootOptions options;
 	options.music_globals = wac_music_globals();
-	options.playable = false; // callers spawn explicitly (or the listen bring-up auto-spawns)
+	options.playable = false; // callers spawn explicitly (or a host role's round init spawns)
 	options.joiner = is_joiner();
 	options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);

@@ -5,6 +5,7 @@
 // is_in_session + (when authority) host_running, so the gated handshake legs admit a join.
 
 #include <runtime/inmatch/joiner_connection.h> // build_mission_status (the own C2S 0x0B)
+#include <runtime/inmatch/map_change.h> // init_all_player_entities_for_round (the mission start's)
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_session.h>
@@ -63,6 +64,18 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
 	GameConfig config;
 	config.max_players = 2;
 	bring_up_host(ctx, mode, socket, host_key, local_client, config);
+}
+
+// The mission start's round init past the session create: a new hidden body for every active
+// slot that holds none, the host's own among them, which its add (the own arm) never spawns
+// (D-NET-NEW-L7-39). Returns the own slot's body (none on a host with no own connection).
+// [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC60; Game_StartMission @0x524360 - the
+//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
+inline world::EntityHandle round_init_own_body(NapiNPServerCtx &ctx) {
+	init_all_player_entities_for_round(ctx);
+	for (const NapiNPConnection &connection : ctx.np_protocol.connection_list)
+		if (connection.type == NapiNPConnection::kTypeClientSide) return connection.link.owned_entity;
+	return {};
 }
 
 // The host's own client's C2S 0x0B: its mission start's end queues it and the server's next

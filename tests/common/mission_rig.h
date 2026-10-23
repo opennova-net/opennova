@@ -20,7 +20,9 @@
 namespace opennova::testrig {
 
 struct BootOptions {
-	bool playable = true;   // spawn the host's own player after load
+	// The bare no-net rig's own player after load; the listen server's mission start spawns
+	// its own at the round init past the PreMission pass (MissionKernel::round_init).
+	bool playable = true;
 	bool wac = true;        // game.wac / server.wac / <mission>.wac when present
 	bool terrain = true;    // the mission's .cpt/.trn height field
 	bool collision = true;

@@ -44,8 +44,8 @@
 //     the render arm's (3 / 2) when the game's device stages run them
 //     (HostRole::render_arm_pumps).
 //   after the kernel's PreMission pass and the round counters' reset,
-//     the round init over the kept slots
-//     (HostRole::init_round_after_premission -> init_all_player_entities_for_round);
+//     the round init over the kept slots, as every mission start's
+//     (HostRole::run_round_init -> init_all_player_entities_for_round);
 //     with the game's device stages these run in phase B, past the render arm's last pump.
 //   the boot's phase B, or end_host_mission_load after it on the game,
 //     ends with the load-end S2C 0x7B to every slot.
@@ -122,12 +122,13 @@ MapChangeStep begin_host_map_change(HostRole &role,
 		const std::vector<mission_catalog::Row> &catalog, gamecfg::GameCfg *cfg_block = nullptr,
 		HostScreenState *session = nullptr);
 
-// The round init over the kept slots on the next mission's World, which a
-// map change runs after the PreMission pass: auto-balance when it is due, the
-// previous-mode word, the objective and non-team coercion (team 2 -> 1), and
-// a new entity for every active slot, a remote one with the slot's class.
+// The round init over the session's active slots on the mission's World, which every
+// authority mission start runs after the PreMission pass, a fresh session's (its own slot)
+// and a map change's (the kept slots) alike: auto-balance when it is due, the previous-mode
+// word, the objective and non-team coercion (team 2 -> 1), and a new hidden entity for every
+// active slot, a remote one with the slot's class (D-NET-354, D-NET-NEW-L7-39).
 // [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 (the call @0x525BAF)]
-void init_all_player_entities_for_round(HostRole &role);
+void init_all_player_entities_for_round(NapiNPServerCtx &ctx);
 
 // The teardown's Attack-and-Defend arm (the map change runs it on an
 // in-session authority with the launch option set): every live slot takes a

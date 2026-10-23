@@ -53,31 +53,16 @@ ServerTextTable read_host_server_text(const mission::BootFileSource &files,
 namespace {
 
 // The mission start's head on the authority, past the render device's mission inits and
-// the load's last pump: the kernel's PreMission pass and its tail (MissionKernel::
-// begin_mission_start; a no-op when the boot ran it), then the round's start below.
+// the load's last pump: the kernel's PreMission pass and its tail, which ends in the role's
+// round init (MissionKernel::begin_mission_start -> HostRole::run_round_init: the round
+// counters' charattr tail, the round init over every active slot, a fresh session's own
+// and a map change's kept slots alike, then Player_InitPlayer; D-NET-354,
+// D-NET-NEW-L7-39); a no-op when the boot ran it.
+// [orig: Game_StartMission @0x524360 -- the EventTrigger_UpdateAllWithFlag2 call @0x525B86,
+//  the Server_ResetRoundCounters call @0x525B90, the Server_InitAllPlayerEntitiesForRound
+//  call @0x525BAF, the Player_InitPlayer call @0x525BBC]
 void run_host_mission_start_head(HostBoot &boot) {
-	mission::MissionKernel &kernel = *boot.kernel;
-	(void)kernel.begin_mission_start();
-	// Each mission start on the authority zeroes and disables the
-	// properties the session's mp_No* words name (D-NET-374).
-	// [orig: Game_StartMission @0x525b90 -> Server_ResetRoundCounters
-	//  @0x516C50, its tail @0x516DBD -> @0x4FCF10, the body of
-	//  CharAttr_ApplyMpRestrictions @0x4247D0; single player's
-	//  SinglePlayer_StartMission @0x561e7b runs the same step]
-	charattr_apply_restrictions(boot.charattr, boot.charattr_restrictions);
-	install_class_attribute_flags(kernel.world, nullptr, boot.charattr);
-	// A map change's round init over the kept slots follows the
-	// PreMission pass and the round counters' reset with its charattr
-	// tail, where retail's mission start runs it (D-NET-354); a fresh
-	// session's own player still spawns in the bring-up, ahead of the pass.
-	// [orig: Game_StartMission @0x524360 -- the EventTrigger_UpdateAllWithFlag2
-	//  call @0x525B86, the Server_ResetRoundCounters call @0x525B90, the
-	//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
-	if (boot.next_mission) boot.host->init_round_after_premission();
-	else boot.host->seed_own_slot_at_first_round_init();
-	// Then Player_InitPlayer's body leg, a fresh session's and a map
-	// change's alike [orig: Game_StartMission @0x525BBC].
-	boot.host->init_local_player_at_mission_start();
+	(void)boot.kernel->begin_mission_start();
 }
 
 // The mission's environment (its .trn, overcast.def and its .env) with the BMS
@@ -204,8 +189,6 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	boot.load_end_deferred = request.host != nullptr && request.render_arm_deferred;
 	boot.load_end_owed = false;
 	boot.mission_start_head_owed = false;
-	boot.next_mission = false;
-	boot.charattr_restrictions = CharAttrRestrictions{};
 	if (request.session == nullptr || request.role == nullptr || !request.fresh_kernel) {
 		error = "the host boot needs a session, a role and a fresh kernel";
 		return false;
@@ -389,7 +372,14 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	if (request.host != nullptr) host_cfg.config.integrity_sources = integrity;
 
 	// The host's bring-up record, staged for the boot hook: the config with
-	// its score rows, the .til, the mission text and the Server strings.
+	// its score rows, the .til, the mission text and the Server strings, and the
+	// round counters' charattr tail its round init follows: each mission start on
+	// the authority zeroes and disables the properties the session's mp_No* words
+	// name (D-NET-374).
+	// [orig: Game_StartMission @0x525b90 -> Server_ResetRoundCounters
+	//  @0x516C50, its tail @0x516DBD -> @0x4FCF10, the body of
+	//  CharAttr_ApplyMpRestrictions @0x4247D0; single player's
+	//  SinglePlayer_StartMission @0x561e7b runs the same step]
 	if (request.host != nullptr) {
 		HostBringup bringup;
 		bringup.host_cfg = std::move(host_cfg);
@@ -397,6 +387,10 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		bringup.mission_text = boot.mission_text;
 		bringup.server_text = boot.server_text;
 		bringup.next_mission = request.next_mission;
+		bringup.round_counters_tail = [&boot, charattr_restrictions] {
+			charattr_apply_restrictions(boot.charattr, charattr_restrictions);
+			install_class_attribute_flags(boot.kernel->world, nullptr, boot.charattr);
+		};
 		request.host->stage_bringup(std::move(bringup));
 		// The bring-up's window leaves the render arm's pumps to an embedder that runs its
 		// render device's mission inits after this phase.
@@ -412,12 +406,12 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	// An embedder with a render device: the PreMission pass waits for the head phase B runs
 	// past the device stages (run_host_mission_start_head).
 	options.defer_premission = boot.load_end_deferred;
-	// A map change's host player is a kept slot: the round init after the
-	// boot spawns it and Player_InitPlayer finds it, so the kernel's own spawn
-	// step stands down. [orig: Player_InitPlayer @0x4E15F0 ->
-	//  Player_FindLocalPlayerEntity @0x4E0090; Game_StartMission @0x524360 calls
+	// A host's player is an active slot's: the role's round init past the PreMission
+	// pass spawns it and Player_InitPlayer finds it, so the kernel's own spawn step stands
+	// down for every host boot (MissionKernel::round_init, which the bring-up installs).
+	// [orig: Player_InitPlayer @0x4E15F0 -> Player_FindLocalPlayerEntity @0x4E0090 (the
+	//  Flags 0x100 and ownerConnectionId test @0x4E0124); Game_StartMission @0x524360 calls
 	//  the round init @0x525BAF, then the Player_InitPlayer call @0x525BBC]
-	if (request.host != nullptr && request.next_mission) options.playable = false;
 	options.people_name_resolver = [names = boot.mission_text](int32_t index) {
 		return names.people_name(index);
 	};
@@ -464,8 +458,6 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	}
 
 	if (request.host != nullptr) {
-		boot.next_mission = request.next_mission;
-		boot.charattr_restrictions = charattr_restrictions;
 		// The mission start's head, now, or past the embedder's device stages, which hold
 		// its render arm (phase B).
 		if (boot.load_end_deferred) boot.mission_start_head_owed = true;

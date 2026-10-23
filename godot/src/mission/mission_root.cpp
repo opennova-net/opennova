@@ -313,7 +313,8 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		}
 	} else if (!sim_->is_host_listening()) {
 		// Standalone SP (or an isolated tooling/test preview): the in-process listen server. Live
-		// play reaches this branch only through GameWorld. The host player auto-spawns at bring-up.
+		// play reaches this branch only through GameWorld. The host player spawns at the mission
+		// start's round init.
 		// A host's map change brings its live session (its role, its bound socket and its
 		// connections) in the simulation the drive kept, and boots the next map inside it.
 		sim_->enable_listen_server(true);
