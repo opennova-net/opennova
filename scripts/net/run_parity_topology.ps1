@@ -1026,11 +1026,24 @@ function Register-OpenNovaLaunchProof {
         [System.Diagnostics.Process] $Process
     )
     # The desktop guard takes the foreground only from this cell's own Godot.
+    # The guard job reads this file every 100 ms, and Windows PowerShell's
+    # Add-Content cannot open a file another handle is reading, even one that
+    # shares read and write: an append that met the guard's read threw "Stream
+    # was not readable" (LP-s14's round OO, x11's kick OO: an OO cell, which
+    # registers two roles). Both sides open it sharing read and write.
     if ($script:DesktopGuardPids) {
         $guarded = @([string] $Process.Id)
         $launcher = $Process.PSObject.Properties['OpenNovaLauncherProcess']
         if ($launcher -and $launcher.Value) { $guarded += [string] $launcher.Value.Id }
-        Add-Content -LiteralPath $script:DesktopGuardPids -Value $guarded
+        $stream = [System.IO.File]::Open($script:DesktopGuardPids, [System.IO.FileMode]::Append,
+            [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+        try {
+            $writer = New-Object System.IO.StreamWriter($stream)
+            foreach ($id in $guarded) { $writer.WriteLine($id) }
+            $writer.Flush()
+        } finally {
+            $stream.Dispose()
+        }
     }
     if ($script:OpenNovaLaunchProofs.Contains($Role)) {
         throw "Duplicate OpenNova launch proof for role '$Role'."
@@ -1464,8 +1477,22 @@ public static class ParityDesktopGuard {
         # focus (WM_KILLFOCUS: retail clears its focus flag, @0x762670), as an
         # alt-tab away would.
         $handled = [IntPtr]::Zero
+        $own = @()
         while ($true) {
-            $own = @(if (Test-Path -LiteralPath $PidFile) { Get-Content -LiteralPath $PidFile })
+            # Read sharing read and write, as the runner's append does
+            # (Register-OpenNovaLaunchProof); a failed read keeps the last list.
+            if (Test-Path -LiteralPath $PidFile) {
+                try {
+                    $stream = [System.IO.File]::Open($PidFile, [System.IO.FileMode]::Open,
+                        [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                    try {
+                        $own = @((New-Object System.IO.StreamReader($stream)).ReadToEnd() -split "\r?\n")
+                    } finally {
+                        $stream.Dispose()
+                    }
+                } catch {
+                }
+            }
             $games = @(@(Get-Process -Name Jointops -ErrorAction SilentlyContinue | ForEach-Object { [uint32] $_.Id }) +
                 @($own | Where-Object { $_ } | ForEach-Object { [uint32] $_ }))
             if ($games.Count -gt 0) {
