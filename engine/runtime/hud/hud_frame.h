@@ -1329,6 +1329,9 @@ public:
 	static constexpr uint32_t kRadarGatePass = 1u;
 	static constexpr uint32_t kRadarGateMapSite = 2u;
 	uint32_t radar_frame_gates(const HudFrameState &state) const;
+	// Whether the gameplay overlay pass gets past its head: neither the round-over latch nor
+	// the white hit flash [orig: HUD_RenderAllOverlays @0x5A8084..0x5A809F].
+	static bool overlay_pass_runs(const HudFrameState &state);
 
 	// THE CONNECTION INDICATORS' DRAWER, shared by both of retail's callers
 	// [orig: CNetQuality_DrawIndicators @0x4c3200]: the HUD compile's last
@@ -1642,9 +1645,10 @@ private:
 	// hudpos text colour since the HUD init left it the 0xFF010101 placeholder: the pass
 	// stores it at its head, past its early-outs, and nothing else writes the entry, so a
 	// dedicated host's (no gameplay pass) keeps the placeholder, which the hudcolor cycle's
-	// raw palette[index] store then reads (D-NET-NEW-L8-42) [orig: HUD_RenderAllOverlays
-	// @0x5A8070 - the level-3 return @0x5A80C4, the store @0x5A810C; the cycle @0x49AFE0 /
-	// @0x49AFE7].
+	// raw palette[index] store then reads (D-NET-NEW-L8-42); so does a frame the round-over
+	// latch or the white flash returns early (overlay_pass_runs) [orig: HUD_RenderAllOverlays
+	// @0x5A8070 - the round-over and white-flash returns @0x5A8084 / @0x5A8098, the level-3
+	// return @0x5A80C4, the store @0x5A810C; the cycle @0x49AFE0 / @0x49AFE7].
 	bool hud_palette2_refreshed_ = false;
 	int silhouette_stamp_ = 0;
 	uint64_t silhouette_vehicle_ = 0;

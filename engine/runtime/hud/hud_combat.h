@@ -100,6 +100,10 @@ struct HudCombatState {
 	// [orig: g_DeathScreenActive @0xA860EC -- HUD_DrawCrosshair @0x592646,
 	//  HUD_RenderOverlays @0x5A7BBC, HUD_RenderAllOverlays @0x5A850D]
 	bool death_screen = false;
+	// The white hit flash's word is burning: the gameplay overlay pass returns at its head
+	// (HudFrameCompiler::compile; world/player_view.h screen_flash_hud_overlays_suppressed)
+	// [orig: HUD_RenderAllOverlays @0x5A8098..0x5A809F].
+	bool white_flash = false;
 	// Armory/bay use one line; an eligible FARP replaces it later in the walk.
 	int service_prompt = 0, service_wait_seconds = 0;
 	bool service_above_declutter = false;

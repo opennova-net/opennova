@@ -1150,6 +1150,7 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
 	if (world)
 		fill_hud_combat_view(*world, w, out, t, optical_view);
 	out.hud_combat.state.death_screen = v.death_screen_active;
+	out.hud_combat.state.white_flash = out.hud_overlays_suppressed;
     out.tp_anchor[0] = v.tp_anchor[0];
     out.tp_anchor[1] = v.tp_anchor[1];
     out.tp_anchor[2] = v.tp_anchor[2];

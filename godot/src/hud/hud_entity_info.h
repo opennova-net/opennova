@@ -57,8 +57,7 @@ public:
 	X(int, flash_white, INT)                         \
 	X(int, flash_red, INT)                           \
 	X(int, flash_revive, INT)                        \
-	X(int, flash_revive_channel, INT)                \
-	X(bool, overlays_suppressed, BOOL)
+	X(int, flash_revive_channel, INT)
 
 #define HUD_ENTITY_INFO_GETTER(m_type, m_name, m_variant) \
 	m_type get_##m_name() const { return value_.m_name; }

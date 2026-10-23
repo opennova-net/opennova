@@ -810,14 +810,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 				info.nvg_mask, info.nvg_gain)
 		_view_effects.update_damage_feedback(info.flash_white, info.flash_red,
 				info.flash_revive, info.flash_revive_channel)
-	# retail: while the white hit flash burns, the whole HUD overlay pass
-	# early-returns, so a collision or explosion blanks the gameplay HUD for up
-	# to 64 ticks. The overlay's own draw list is what that pass covers; its
-	# children (this node's view effects, the SIGHTS card) belong to the scene
-	# frame and keep drawing, which is exactly what self_modulate leaves alone.
-	# The addressed witness lives in docs/interface/hud-re.md.
-	_game_hud.self_modulate = Color(1.0, 1.0, 1.0, 0.0) if info.overlays_suppressed \
-			else Color.WHITE
+	# The white hit flash's return of the gameplay overlay pass is the engine
+	# compiler's (hud_frame.h HudFrameCompiler::overlay_pass_runs): the scene
+	# frame's other legs on this node (the message log, the chat line, the kill
+	# banner) keep drawing through it.
 	var probe_t4 := Time.get_ticks_usec() if stats_on else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps this frame's main-frame

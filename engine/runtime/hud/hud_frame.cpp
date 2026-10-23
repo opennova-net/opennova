@@ -523,7 +523,16 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 		compile_gameplay_overlay_windows(state, surface_w, surface_h);
 		return draw_list_;
 	}
-	compile_overlay_pass(state, surface_w, surface_h);
+	// The gameplay overlay pass also returns at its head on the round-over latch and while the
+	// white hit flash burns, before any draw or any of its state work (the palette entry 2
+	// refresh, the GAMEINFO restamp, the stance cross-fade): only the big map of the scene
+	// frame's own legs takes its place, and the legs below draw as on any frame
+	// [orig: HUD_RenderAllOverlays @0x5A8084 (g_RoundOver), @0x5A8098 (g_ScreenFlashWhiteHit),
+	//  the return @0x5A80DB].
+	if (overlay_pass_runs(state))
+		compile_overlay_pass(state, surface_w, surface_h);
+	else
+		element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
 	// The tip at MRCLIPPYNORMAL follows the HUD pass while the M-cycle map is
 	// closed, ahead of the gameplay overlays and the overlay panels
 	// [orig: Render_ProcessMainSceneFrame @0x5cac50 (map mode 0) -> @0x5cad21
@@ -566,8 +575,9 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 // Render_ProcessMainSceneFrame @0x5cac50 -> HUD_BuildMapOverlayView @0x5a7e10].
 void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float surface_w,
 		float surface_h) {
-	// The pass refreshes palette entry 2 from the hudpos text colour at its head, ahead of
-	// the /NOHUD gate (hud_palette2_refreshed_ carries the witness).
+	// The pass refreshes palette entry 2 from the hudpos text colour past its early-outs (the
+	// caller's overlay_pass_runs and level test), ahead of the /NOHUD gate
+	// (hud_palette2_refreshed_ carries the witness).
 	hud_palette2_refreshed_ = true;
 	if ((state.overlay_master & 2u) == 0u) {
 		element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
@@ -767,13 +777,20 @@ void HudFrameCompiler::element_scope_details(const HudFrameState &state, float w
 //  @0x5A80C4; big map @0x5cac50]
 bool HudFrameCompiler::corner_spinmap_visible(const HudFrameState &state) const {
 	// The corner map's gates: the authored HUDSPINMAP rect, the /NOHUD
-	// overlay master's bit 1, the level-3 early-out, the HUDDECLUT slot-17
-	// cmp nested in the showhud bit-1 test [orig: /NOHUD mask @0x4a7a09 /
-	// @0x5a81ce; level early-out @0x5A80C4; showhud test 2 @0x5A8635;
+	// overlay master's bit 1, the level-3 early-out and the pass's head
+	// (overlay_pass_runs), the HUDDECLUT slot-17 cmp nested in the showhud
+	// bit-1 test [orig: /NOHUD mask @0x4a7a09 / @0x5a81ce; level early-out
+	// @0x5A80C4; the head @0x5A8084..0x5A809F; showhud test 2 @0x5A8635;
 	// slot-17 cmp @0x5A86E8].
 	return layout_.spinmap_rect.present && (state.overlay_master & 2u) != 0u &&
-			state.hud_detail_level < 3 && state.declutter_visible[kDeclutterSpinmap] &&
-			(state.showhud_flags & 2u) != 0u;
+			state.hud_detail_level < 3 && overlay_pass_runs(state) &&
+			state.declutter_visible[kDeclutterSpinmap] && (state.showhud_flags & 2u) != 0u;
+}
+
+// The overlay pass's head past the level test: the round-over latch and the white hit flash
+// return before it draws [orig: HUD_RenderAllOverlays @0x5A8084..0x5A809F].
+bool HudFrameCompiler::overlay_pass_runs(const HudFrameState &state) {
+	return !state.spawn_success_gate && !state.combat.white_flash;
 }
 
 uint32_t HudFrameCompiler::radar_frame_gates(const HudFrameState &state) const {

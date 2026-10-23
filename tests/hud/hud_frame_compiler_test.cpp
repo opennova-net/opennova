@@ -3339,7 +3339,14 @@ void test_compiler_breath_bar(const fnt_font_t *font) {
 	};
 	HudFrameState gated = state;
 	gated.spawn_success_gate = true;
-	CHECK(hidden(gated), "the round-over latch skips the bar");
+	// The latch also returns the overlay pass at its head (hud_overlay_pass_head_test), so
+	// its frame is measured against a latched idle frame.
+	HudFrameState gated_idle = gated;
+	gated_idle.breath_samples = 0;
+	const size_t gated_idle_quads = compiler.compile(gated_idle, 1024, 768).quads.size();
+	const HudDrawList &latched = compiler.compile(gated, 1024, 768);
+	CHECK(latched.quads.size() == gated_idle_quads && bold_glyphs(latched).empty(),
+			"the round-over latch skips the bar");
 	gated = state;
 	gated.declutter_visible[kDeclutterBreathTime] = false;
 	CHECK(hidden(gated), "a hidden BREATHTIME slot skips the bar");

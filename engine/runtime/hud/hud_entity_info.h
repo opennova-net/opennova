@@ -66,8 +66,8 @@ struct HudEntityInfo {
 	bool scope_mask_draw_crosshair = true;
 	bool scope_mask_nvg_lens = false;
 	// The view effects: the binocular view and its rangefinder, the NVG mask
-	// and gain, the three damage-feedback quads, and the HUD overlay pass's
-	// early return under the white flash.
+	// and gain, and the three damage-feedback quads (the white flash's early
+	// return of the HUD overlay pass is the compiler's: HudCombatState::white_flash).
 	bool binoculars_view_active = false;
 	int32_t binocular_range = 1;
 	bool nvg_mask = false;
@@ -76,7 +76,6 @@ struct HudEntityInfo {
 	int32_t flash_red = 0;
 	int32_t flash_revive = 0;
 	int32_t flash_revive_channel = 255;
-	bool overlays_suppressed = false;
 };
 
 // The record for one frame. `view` is the frame the HUD presents (null: no

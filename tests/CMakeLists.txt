@@ -5649,6 +5649,11 @@ add_executable(screenshot_tga_test tga/screenshot_tga_test.cpp)
 target_link_libraries(screenshot_tga_test PRIVATE opennova_formats)
 target_include_directories(screenshot_tga_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME screenshot_tga COMMAND screenshot_tga_test)
+# D-NET-NEW-L8-46: the gameplay overlay pass's head (the round-over latch, the white hit flash).
+add_executable(hud_overlay_pass_head_test hud/hud_overlay_pass_head_test.cpp)
+target_link_libraries(hud_overlay_pass_head_test PRIVATE opennova_runtime)
+target_include_directories(hud_overlay_pass_head_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_overlay_pass_head COMMAND hud_overlay_pass_head_test)
 
 # --- parity lane L9 (NovaWorld) ---
 add_executable(npruntime_listing_baffle_key_test npruntime/listing_baffle_key_test.cpp)
