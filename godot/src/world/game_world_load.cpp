@@ -1783,16 +1783,19 @@ Node3D *GameWorld::build_person_pipeline_warm(const Vector3 &p_position) {
 		(void)placer_->take_load_profile();
 	}
 	PackedStringArray graphics;
-	// The local body: a joiner's type word and character id are its learned record's ahead of
-	// L's birth (Simulation::get_local_player_type_id).
+	// The local body and its view model, once the local player is known: a joiner's type word
+	// and character id are its learned record's ahead of L's birth
+	// (Simulation::get_local_player_type_id).
+	int viewmodel_parts = 0;
 	if (sim->has_local_player() || (sim->is_joiner() && sim->get_joiner_self_handle() > 0)) {
 		if (ObjectModel *body = placer_->build_player_animated_model(
 					sim->get_local_player_type_id(), warm, sim->get_local_player_character_id())) {
 			graphics.push_back(body->get_graphic_name());
 		}
+		if (player_visuals_.is_valid()) {
+			viewmodel_parts = player_visuals_->build_viewmodel_pipeline_warm(warm);
+		}
 	}
-	const int viewmodel_parts =
-			player_visuals_.is_valid() ? player_visuals_->build_viewmodel_pipeline_warm(warm) : 0;
 	const int wire_models = runtime->warm_wire_spawn_pipelines(
 			sim->get_present_snapshot(), sim->get_present_stride(), warm, graphics);
 	if (profile) {
