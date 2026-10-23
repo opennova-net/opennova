@@ -1910,6 +1910,12 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 			assert_true(sky_maps > terrain_textures and freeze > sky_maps,
 					"the sky maps load past the terrain's textures, ahead of the freeze: %s" % [names])
 			assert_false(names.has("model_warm"), "no arm builds a listed model: %s" % [names])
+			# The celestial bodies' models load past the rows' init, ahead of the HUD's overlay
+			# init, on both arms (D-NET-NEW-L3-38; engine environment/celestial_frame.h
+			# builds_celestial_draws carries the witness).
+			var celestial := names.find("celestial")
+			assert_true(celestial > names.find("objects") and celestial < names.find("hud_init"),
+					"the bodies load past the objects, ahead of the HUD: %s" % [names])
 			# FrameFX's mission texture follows the HUD's, past the freeze, on both arms; it makes
 			# the scanlines on the full arm alone (D-NET-NEW-L3-35; engine
 			# renderer/frame_fx_effects.h builds_frame_fx_scanline_texture carries the witness).

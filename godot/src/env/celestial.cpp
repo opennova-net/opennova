@@ -236,7 +236,8 @@ void Celestial::_rebuild_if_needed() {
 			continue;
 		}
 		Ref<ObjectData> data = _load_object_data(spec.name);
-		if (data.is_null()) {
+		if (data.is_null() || !draws_bodies_) {
+			// Loaded, nothing built: no frame of this world draws the body.
 			continue;
 		}
 		ObjectModel *model = memnew(ObjectModel);

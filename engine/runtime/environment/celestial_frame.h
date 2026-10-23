@@ -48,6 +48,23 @@
 
 namespace opennova::env {
 
+// Where a mission start loads the celestial bodies' models, and on which arm it builds their draw
+// objects. The start loads them on every arm past the rows' init and ahead of the HUD's overlay
+// init, the joiner's included: inside its S2C 0x1A load, never in its S2C 0x11 connect leg. Each
+// load is a model def with no device object; a model's device buffers are made at its first
+// submit, and a dedicated host's frames draw no scene, so a dedicated host's start builds none of
+// the bodies' draw objects (D-NET-NEW-L3-38).
+// [orig: Game_StartMission @0x524360 - Entity_InitAllFromModels (the call @0x52567F),
+//  EffectWorld_LoadCelestialModels @0x5ADC50 (the call @0x525724), HUD_InitOverlaySystem (the
+//  call @0x525733); EffectWorld_LoadCelestialModels - ThreediGp_LoadModel @0x5B6160 (the calls
+//  @0x5ADC6C / @0x5ADC94 / @0x5ADCC9 / @0x5ADCFE / @0x5ADD2A); Render_SubmitEntity @0x5DAD80 ->
+//  CEffectWorld_AllocateLODGPUBuffers @0x5B2610 (the call @0x5DADD7); GameLoop_RenderFrame
+//  @0x521310 - is_mp_session_peer @0x52134E, jz @0x521355 to Server_DrawStatusScreen @0x521CEF
+//  past Render_ProcessMainSceneFrame @0x521CE8]
+constexpr bool builds_celestial_draws(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
+
 // One call of the water-glint leg [orig: Environment_UpdateSunGlare @ 0x5ad130, once
 // per scene pass from Terrain_RenderWorldScene @ 0x5c96c0: the main scene's,
 // then the weapon Inset pass's at its own camera and view, on the same

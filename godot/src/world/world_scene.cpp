@@ -334,9 +334,6 @@ WorldEnvironmentLoad WorldScene::load_environment(
 	if (nodes_.weather != nullptr) {
 		nodes_.weather->resync_colors();
 	}
-	if (nodes_.celestial != nullptr) {
-		nodes_.celestial->set_resource_root(p_root);
-	}
 	if (nodes_.precipitation != nullptr) {
 		nodes_.precipitation->set_resource_root(p_root);
 	}
@@ -344,6 +341,13 @@ WorldEnvironmentLoad WorldScene::load_environment(
 		nodes_.environment_cube->force_capture();
 	}
 	return report;
+}
+
+void WorldScene::load_celestial_models(const Ref<ResourceRoot> &p_root, bool p_draws) const {
+	if (nodes_.celestial != nullptr) {
+		nodes_.celestial->set_draws_bodies(p_draws);
+		nodes_.celestial->set_resource_root(p_root);
+	}
 }
 
 void WorldScene::apply_mission_overrides(

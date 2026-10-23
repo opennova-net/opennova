@@ -393,8 +393,9 @@ void PreviewSceneLayers::run_environment_() {
 	// weather's colours snapped, the bodies and the drops read through the project's files, the
 	// cube captured again. What the load lacks is a note, as the game's load reports it.
 	const WorldEnvironmentLoad load = scene_.load_environment(root_files_, trn, environment);
-	// The device draws, as the game's full arm does: the environment's sky maps and FrameFX's
-	// mission texture load with it.
+	// The device draws, as the game's full arm does: the environment's celestial bodies, its sky
+	// maps and FrameFX's mission texture load with it.
+	scene_.load_celestial_models(root_files_, /*p_draws=*/true);
 	scene_.load_sky_maps(/*p_dedicated_host=*/false);
 	scene_.init_frame_fx_mission_textures(/*p_dedicated_host=*/false);
 	if (load.environment_missing)

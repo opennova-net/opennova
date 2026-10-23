@@ -14,6 +14,7 @@
 #include <formats/mission/bms_edit.h>
 #include <runtime/inmatch/loaded_model_list.h> // avatar_combo_models (the 0x11's avatar loads)
 #include <runtime/ragdoll/ragdoll_option.h>
+#include <runtime/environment/celestial_frame.h> // builds_celestial_draws (the bodies' arm)
 #include <runtime/environment/environment_state.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/placement_traits.h> // builds_placement_draws (the dedicated host's placement)
@@ -135,6 +136,8 @@ int GameWorld::load_world(const String &p_dir) {
 	clear_mission_tile_info();
 	resource_root_ = resource_root;
 	load_environment(terrain_file_, env_file_);
+	// A world with no mission start loads its celestial bodies with its environment and draws them.
+	scene_.load_celestial_models(resource_root_, /*p_draws=*/true);
 	if (!load_terrain(terrain_file_, String(), env_file_.get_basename())) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", terrain_file_));
 		return ERR_CANT_OPEN;
@@ -375,6 +378,16 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		wire_world_placed = place_join_wire_world(challenge_sim, timeline);
 		timeline->end_span();
 	}
+	const bool dedicated_host = challenge_sim.is_valid() &&
+			challenge_sim->session_role() == Simulation::ROLE_DEDICATED_HOST;
+	// The celestial bodies' models past the rows' init, ahead of the HUD's overlay init, on every
+	// arm (a joiner's inside its S2C 0x1A load, not its 0x11 head); their draw objects on the full
+	// arm alone (engine environment/celestial_frame.h builds_celestial_draws carries the witness,
+	// D-NET-NEW-L3-38).
+	timeline->span("celestial");
+	scene_.load_celestial_models(resource_root_,
+			opennova::env::builds_celestial_draws(dedicated_host));
+	timeline->end_span();
 	// The HUD's overlay init, on every mission start and every role: past the rows' init
 	// and ahead of a joiner's first 0x2F. The shell's HUD builds here, its layout and its
 	// map-grid origin scan, not on the first frame past the load (engine
@@ -424,8 +437,6 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// with the render subsystems, which a dedicated host's start jumps over (the same header's
 	// builds_lod_cache, builds_tile_cache_targets and loads_foliage_definitions, D-NET-NEW-L3-32,
 	// D-NET-NEW-L3-33, D-NET-NEW-LF-3).
-	const bool dedicated_host = challenge_sim.is_valid() &&
-			challenge_sim->session_role() == Simulation::ROLE_DEDICATED_HOST;
 	load_terrain_textures(timeline, dedicated_host);
 	load_sky_maps(timeline, dedicated_host);
 	// Then the freeze, on every arm: the listed models' materials resolve and no model builds, a

@@ -63,6 +63,11 @@ public:
 	void set_entities_clear(EntitiesClear p_clear) { entities_clear_ = std::move(p_clear); }
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
+	// Whether the bodies build their draw objects (C++ only; true unless told): false loads each
+	// named model's data and builds no node, a dedicated host's mission start (engine
+	// environment/celestial_frame.h builds_celestial_draws carries the witness). Takes effect at the
+	// next set_resource_root.
+	void set_draws_bodies(bool p_draws) { draws_bodies_ = p_draws; }
 	void set_environment_capture_layer_mask(uint32_t p_mask);
 	uint32_t get_environment_capture_layer_mask() const {
 		return environment_capture_layer_mask_;
@@ -271,6 +276,7 @@ private:
 	HashMap<String, Body> bodies_;
 	// name-signature change detection (undo/scrub safe rebuilds).
 	HashMap<String, String> loaded_names_;
+	bool draws_bodies_ = true;
 	ObjectID env_node_id_;
 	ObjectID cached_cam_id_;
 	uint32_t environment_capture_layer_mask_ = 0;
