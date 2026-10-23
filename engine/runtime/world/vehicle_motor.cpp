@@ -1078,10 +1078,14 @@ namespace detail {
 // following tick.
 VehicleEulerBasis vehicle_euler_basis(int32_t yaw_bam, int32_t pitch_bam,
                                       int32_t roll_bam) {
-    VehicleEulerBasis out;
     const int32_t origin[3] = {};
-    out.q22 = collision_matrix_from_euler(
-            yaw_bam, pitch_bam, roll_bam, origin);
+    return vehicle_basis_from_matrix(collision_matrix_from_euler(
+            yaw_bam, pitch_bam, roll_bam, origin));
+}
+
+VehicleEulerBasis vehicle_basis_from_matrix(const CollisionMatrix &q22) {
+    VehicleEulerBasis out;
+    out.q22 = q22;
     constexpr double kInvQ22 = io::kInvQ22One;
     out.fwd[0] = double(out.q22.m[0]) * kInvQ22;
     out.fwd[1] = double(out.q22.m[4]) * kInvQ22;
@@ -1093,6 +1097,21 @@ VehicleEulerBasis vehicle_euler_basis(int32_t yaw_bam, int32_t pitch_bam,
     out.up[1] = double(out.q22.m[6]) * kInvQ22;
     out.up[2] = double(out.q22.m[10]) * kInvQ22;
     return out;
+}
+
+CollisionMatrix vehicle_solve_matrix(const Entity &veh) {
+	const auto &m = veh.veh;
+	const int32_t origin[3] = {};
+	return collision_matrix_from_euler_scaled(
+			m.yaw_bam, m.air_pitch_bam, m.air_roll_bam, origin, veh.uniform_scale_q16);
+}
+
+CollisionMatrix vehicle_matrix_rows(const CollisionMatrix &head) {
+	CollisionMatrix out = head;
+	for (int row = 0; row < 3; ++row)
+		for (int k = 0; k < 3; ++k)
+			out.m[4 * k + row] = bam_shl_wrap(head.m[4 * k + row] >> 6, 6);
+	return out;
 }
 
 } // namespace detail
@@ -1472,8 +1491,10 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
 	const double *fwdv = basis.fwd;
 	const double *sidev = basis.side;
 	const double *upv = basis.up;
+    // The probes ride the head matrix, the hull's effective scale included.
+    // [orig: @0x481BEE..0x481C45]
     int32_t probes[7][3];
-    place_probes(basis, probes_model, px, py, pz, probes);
+    place_probes(vehicle_solve_matrix(veh), probes_model, px, py, pz, probes);
 
     // ---- §4/§6 first force pass + severity response (plat_probe_pass).
     const int32_t soft = cos22_of_bam_x87(traits.max_slope);

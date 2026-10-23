@@ -125,6 +125,31 @@ inline void q16_cross(const int32_t a[3], const int32_t b[3], int64_t r[3]) {
 // bone transforms (defined beside the platform solve in vehicle_motor.cpp).
 VehicleEulerBasis vehicle_euler_basis(int32_t yaw_bam, int32_t pitch_bam,
                                       int32_t roll_bam);
+// The same basis over a matrix a solve built otherwise (its rows read as Q22).
+VehicleEulerBasis vehicle_basis_from_matrix(const CollisionMatrix &q22);
+
+// The head matrix the tracked, wheeled, light, aircraft and platform solves build from the hull's
+// euler words: through the scaled builder when the hull has an effective scale (entity +0x158,
+// else its def's +0x1B8, which ours folds into uniform_scale_q16 at spawn), the plain builder
+// otherwise. Every probe of the solve is transformed through it (place_probes).
+// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47C58B..0x47C5E2;
+//  Entity_ProcessWheeledVehiclePhysics @0x475DE0 - @0x4761F9..0x476250, the probe transforms
+//  @0x4764E0..0x47660B; Entity_ProcessLightVehiclePhysics @0x479600 - @0x47985D..0x4798B4, the
+//  probe transforms @0x4799B2..0x479BFF; Entity_ProcessAircraftContactPhysics @0x47EF10 -
+//  @0x47F28E..0x47F2E5; Entity_ProcessPlatformPhysics @0x481870 - @0x481BEE..0x481C45;
+//  Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210;
+//  Math_BuildFixedPointMatrixFromEulerAngles @0x613F40]
+CollisionMatrix vehicle_solve_matrix(const Entity &veh);
+// The occupant matrix a solve sets from its head matrix's rows: each row extracted (`sar 6`) and
+// set back (`shl 6`), so every rotation word loses its low six bits; the light solve reads its up
+// and side words, every row and its chassis calls' matrix from it.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the extracts
+//  Math_ExtractRow1FromFixedPoint22 @0x6137D0 (the call @0x4798C4),
+//  Math_ExtractRow0FromFixedPoint22 @0x613770 (@0x4798D6), Math_ExtractRow2FromFixedPoint22
+//  @0x6137A0 (@0x4798E8), the sets Math_SetRow1FromVec3Scaled @0x613880 (@0x4798FA),
+//  Math_SetRow0FromVec3Scaled @0x613820 (@0x47990C), Math_SetRow2FromVec3Scaled @0x613850
+//  (@0x47991E)]
+CollisionMatrix vehicle_matrix_rows(const CollisionMatrix &head);
 
 // One bilinear terrain probe force [orig: Entity_ComputeCollisionForces
 // @0x462150, terrain loop @0x462246..0x4624CA]: 4 samples at ±r, gradient
@@ -135,14 +160,15 @@ int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z, 
 		int32_t soft, int32_t hard, PlatProbeForce &out, bool wheel_probe = false);
 
 // The probe placement every contact solve shares: each model-space probe
-// rotated by the hull's Q22 euler basis, then offset by the hull position.
+// rotated by the solve's Q22 head matrix (vehicle_solve_matrix: the effective
+// scale included), then offset by the hull position.
 template <int N>
-inline void place_probes(const VehicleEulerBasis &basis,
+inline void place_probes(const CollisionMatrix &matrix,
                          const int32_t (&probes_model)[N][3], int32_t px,
                          int32_t py, int32_t pz, int32_t (&probes)[N][3]) {
     for (int i = 0; i < N; ++i) {
         int32_t rotated[3];
-        basis.q22.rotate_point(probes_model[i], rotated);
+        matrix.rotate_point(probes_model[i], rotated);
         probes[i][0] = px + rotated[0];
         probes[i][1] = py + rotated[1];
         probes[i][2] = pz + rotated[2];

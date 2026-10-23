@@ -471,6 +471,52 @@ void bike_pair_clear_is_ungated() {
     CHECK(m.slide_z == -0x400);
 }
 
+// D-NET-NEW-L6-33 (row I): the light solve's probes ride its head matrix, the hull's effective
+// scale included. A level bike whose wheel probes (model Z -0x4000) sit 0x2000 clear of the flat
+// field unscaled sits 0x2000 into it at twice the scale (model Z -0x8000): the unscaled bike takes
+// the both-off arm (in the air), the scaled one its wheels.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the head @0x47985D..0x4798B4, the probe
+//  transforms @0x4799B2..0x479BFF; Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
+//  @0x614210]
+void bike_probes_ride_the_scaled_matrix() {
+    for (const bool scaled : {false, true}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        v.uniform_scale_q16 = scaled ? 2 * 65536 : 0;
+        int32_t z = 0x12000;
+        r.contact(t, z);
+        CHECK(((v.flags & kEntityFlagInAir) != 0) == !scaled);
+    }
+}
+
+// The occupant matrix (row I): each rotation word round-trips `sar 6` / `shl 6`, so it loses its
+// low six bits, a negative word toward minus infinity: the light solve's up word for a row 2 z of
+// -100 is -2 (the truncating form it replaced gave -1). The other seven words are the head's.
+// [orig: Math_ExtractRow2FromFixedPoint22 @0x6137A0, Math_SetRow2FromVec3Scaled @0x613850]
+void occupant_rows_floor_each_word() {
+    CollisionMatrix head;
+    for (int i = 0; i < 16; ++i)
+        head.m[i] = 1000 + i;
+    head.m[10] = -100;
+    head.m[9] = 127;
+    const CollisionMatrix rows = detail::vehicle_matrix_rows(head);
+    CHECK(rows.m[10] == -128 && (rows.m[10] >> 6) == -2);
+    CHECK(rows.m[9] == 64);
+    CHECK(rows.m[0] == 960 && rows.m[6] == 960);
+    CHECK(rows.m[3] == 1003 && rows.m[7] == 1007 && rows.m[11] == 1011 && rows.m[15] == 1015);
+    const int32_t origin[3] = {};
+    Entity e;
+    e.uniform_scale_q16 = 2 * 65536;
+    const CollisionMatrix twice = detail::vehicle_solve_matrix(e);
+    CHECK(twice.m[0] == 2 * 4194304 && twice.m[5] == 2 * 4194304 && twice.m[10] == 2 * 4194304);
+    e.uniform_scale_q16 = 0;
+    const CollisionMatrix plain = detail::vehicle_solve_matrix(e);
+    const CollisionMatrix euler = collision_matrix_from_euler(0, 0, 0, origin);
+    for (int i = 0; i < 16; ++i)
+        CHECK(plain.m[i] == euler.m[i]);
+}
+
 // D-NET-NEW-L6-30: a slow, level bike on its wheels is not leaning (the lean leaves +0x2EF clear),
 // so the solve drops both lean rates; a fast one leans (+0x2EF set) and keeps its pitch rate.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the lean @0x47A78B..0x47A7D8, the clear
@@ -1088,6 +1134,8 @@ int main() {
     bike_wreck_at_rest_leaves_the_wheel_arm();
     bike_tail_parks_and_rebuilds();
     bike_pair_clear_is_ungated();
+    bike_probes_ride_the_scaled_matrix();
+    occupant_rows_floor_each_word();
     bike_unleaned_drops_lean_rates();
     bike_sinks_flush_under_water();
     bike_crashed_wheel_takes_the_landing_impulse();

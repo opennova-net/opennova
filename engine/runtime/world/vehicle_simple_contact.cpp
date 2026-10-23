@@ -50,7 +50,7 @@ void vehicle_simple_contact(
 		spine_radius };
 	int32_t points[7][3];
 	const auto basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-	place_probes(basis, model, x, y, z, points);
+	place_probes(basis.q22, model, x, y, z, points);
 	for (int i = 0; i < 4; ++i)
 		points[i][2] = io::bam_add(points[i][2], m.wheel_comp[i]);
 	PlatProbeForce first[7], second[7];

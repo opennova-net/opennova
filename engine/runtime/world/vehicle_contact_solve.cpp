@@ -141,8 +141,10 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
             (traits.foot_x_hi - r) - (traits.foot_x_lo + r);
 
 	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	// The probes ride the head matrix, the hull's effective scale included.
+	// [orig: @0x47F28E..0x47F2E5]
 	int32_t probes[7][3];
-	place_probes(basis, probes_model, px, py, pz, probes);
+	place_probes(vehicle_solve_matrix(veh), probes_model, px, py, pz, probes);
 
     // ---- §6.4 the two force passes + severity (terrain leg; the shared
     // sub-contract with the platform solve) [orig: @0x47F855..0x480150].
@@ -475,8 +477,10 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
             (traits.foot_x_hi - r) - (traits.foot_x_lo + r); // [orig: @0x47CB85]
 
 	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	// The probes ride the head matrix, the hull's effective scale included.
+	// [orig: @0x47C58B..0x47C5E2, the transforms from @0x47C84F]
 	int32_t probes[7][3];
-	place_probes(basis, probes_model, px, py, pz, probes);
+	place_probes(vehicle_solve_matrix(veh), probes_model, px, py, pz, probes);
 
     // ---- the two force passes + severity (the shared sub-contract with the
     // platform/air solves; terrain leg only) [orig: Entity_CheckCollisionState
@@ -974,8 +978,10 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
             (traits.foot_x_hi - r) - (traits.foot_x_lo + r));
 
 	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	// The probes ride the head matrix, the hull's effective scale included.
+	// [orig: @0x4761F9..0x476250, the transforms @0x4764E0..0x47660B]
 	int32_t probes[13][3];
-	place_probes(basis, probes_model, px, py, pz, probes);
+	place_probes(vehicle_solve_matrix(veh), probes_model, px, py, pz, probes);
     int32_t radii[13]; // the 13 radius stores all copy suspensionOffset
     for (int i = 0; i < 13; ++i) radii[i] = r;
 
@@ -1375,15 +1381,18 @@ constexpr int32_t kBikeFallAccelerationBam = 298261;
 
 // Square footprint: the lower axle, then its copy lifted by half the model height. The two spans
 // are the footprint's, each side inset by the wheel radius: the width the Y pair, the length
-// the X pair; the square arm takes the larger. (The parked arm's quad passes the box spans.)
+// the X pair; the square arm takes the larger. (The parked arm's quad passes the box spans.) The
+// axis is the solve's row 0 extract (the occupant's, `basis`); the lift rides the builder's own
+// unscaled euler matrix (`euler`).
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the radius `sub ebp, ebx; sar ebp, 1;
 //  add ebp, 0FFFFC000h` @0x479946..0x479954, the inset sides @0x47995A..0x479994, the spans
-//  @0x479C17..0x479C44; Entity_ComputeBoundingQuad @0x45B6E0's square arm, the call @0x47AB1C]
-static void light_bounding_quad(const VehicleTraits &traits, const VehicleEulerBasis &basis,
-        int32_t x, int32_t y, int32_t z, int32_t out[4][3]) {
+//  @0x479C17..0x479C44, the row 0 extract (originY) and row 1 extract (vec) pushed
+//  @0x47AAC5..0x47AB07; Entity_ComputeBoundingQuad @0x45B6E0's square arm, the call @0x47AB1C]
+static void light_bounding_quad(const VehicleTraits &traits, const CollisionMatrix &euler,
+        const VehicleEulerBasis &basis, int32_t x, int32_t y, int32_t z, int32_t out[4][3]) {
     const int32_t radius = ((traits.box_z_hi - traits.box_z_lo) >> 1) - 0x4000;
     const int32_t forward[3] = {basis.q22.m[0] >> 6, basis.q22.m[4] >> 6, basis.q22.m[8] >> 6};
-    vehicle_square_quad(basis.q22, io::bam_sub(traits.box_z_hi, traits.box_z_lo),
+    vehicle_square_quad(euler, io::bam_sub(traits.box_z_hi, traits.box_z_lo),
             (traits.foot_y_hi - radius) - (traits.foot_y_lo + radius),
             (traits.foot_x_hi - radius) - (traits.foot_x_lo + radius), forward, x, y, z, out);
 }
@@ -1460,14 +1469,14 @@ static void light_capture_launch(Entity &entity, const VehicleEulerBasis &basis,
 //  catch-up @0x47B4BC and the call @0x47B540, the exit's call @0x47B88E, the grounded catch-up
 //  @0x47B9A0, the lift @0x47BB5D and the call @0x47BBAE]
 bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits,
-		const VehicleEulerBasis &basis, const int32_t rec[6], int32_t px, int32_t py, int32_t pz,
-		const int32_t corner_lift[2]) {
+		const CollisionMatrix &euler, const VehicleEulerBasis &basis, const int32_t rec[6],
+		int32_t px, int32_t py, int32_t pz, const int32_t corner_lift[2]) {
 	auto &m = veh.veh;
 	if (!m.crashed)
 		return false;
 	CollisionMatrix matrix = basis.q22;
     int32_t corners[4][3], up[3], side[3];
-    light_bounding_quad(traits, basis, px, py, pz, corners);
+    light_bounding_quad(traits, euler, basis, px, py, pz, corners);
     for (int k = 0; k < 3; ++k) {
         up[k] = matrix.m[4*k+2] >> 6;
         side[k] = matrix.m[4*k+1] >> 6;
@@ -1646,9 +1655,20 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         {traits.box_x_lo + (Lbox >> 1), box_ymid, traits.box_z_lo + 3 * r},
     };
 
-	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	// The head matrix (the hull's effective scale included) carries the probes. Its three rows,
+	// extracted `sar 6` and set back `shl 6`, are the occupant matrix (`basis`) every later read
+	// takes: the up and side words (the row 2 and row 1 extracts' z), the rows the legs read and
+	// the chassis calls' matrix. The square quad's lift keeps the plain euler matrix (`euler`).
+	// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the head @0x47985D..0x4798B4, the
+	//  extracts @0x4798C4 / @0x4798D6 / @0x4798E8 into vec / originY / upZ (var_268 and var_274
+	//  their z), the sets into occupant @0x4798FA..0x47991E, the probe transforms
+	//  @0x4799B2..0x479BFF; the chassis call's widgetMatrix occupant @0x47BB9E]
+	const CollisionMatrix euler =
+			vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22;
+	const CollisionMatrix head = vehicle_solve_matrix(veh);
+	const VehicleEulerBasis basis = vehicle_basis_from_matrix(vehicle_matrix_rows(head));
 	int32_t probes[6][3];
-	place_probes(basis, probes_model, px, py, pz, probes);
+	place_probes(head, probes_model, px, py, pz, probes);
 
 	// The two contact passes retain the six-probe layout. Shared response applies sound and
 	// momentum; the terrain-only quarter-speed cut scans probes 0 through 4, excluding the mid-
@@ -1718,9 +1738,11 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 	light_wall_speed_halving(m, forces); // [orig: @0x47AE05..0x47B1A9]
 
 	// ---- solve select [orig: the `!d_front && !d_rear` split @0x47B32D..0x47B340].
-	int32_t up_z16 = static_cast<int32_t>(basis.up[2] * io::kFp16OneD);
-	const int32_t side_z16 = static_cast<int32_t>(basis.side[2] * io::kFp16OneD);
-    // [orig: Entity_ProcessLightVehiclePhysics @ 0x479600]
+	// The up and side words are the row 2 and row 1 extracts' z (var_274, var_268).
+	// [orig: Math_ExtractRow2FromFixedPoint22 @0x6137A0 (the call @0x4798E8),
+	//  Math_ExtractRow1FromFixedPoint22 @0x6137D0 (the call @0x4798C4)]
+	const int32_t up_z16 = basis.q22.m[10] >> 6;
+	const int32_t side_z16 = basis.q22.m[9] >> 6;
     int32_t crash_depth = -1;
     if (m.crashed || up_z16 < 0 || m.settle_2f0)
         for (int i = 0; i < 5; ++i) crash_depth = std::max(crash_depth, rec[i]);
@@ -1740,7 +1762,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
             // Two upward force records on the front pair, rate 50, mode 3.
             // [orig: Entity_ProcessLightVehiclePhysics @ 0x47B1BC..0x47B25E]
             int32_t corners[4][3];
-            light_bounding_quad(traits, basis, px, py, pz, corners);
+            light_bounding_quad(traits, euler, basis, px, py, pz, corners);
             if (!m.chassis_contact_active) {
                 for (int i : {0, 3}) {
                     auto &force = m.chassis_forces[i];
@@ -1824,10 +1846,10 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         const bool just_armed =
                 world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
         const bool falling = !just_armed &&
-                light_fall_over_tick(world, veh, traits, basis, rec, px, py, pz, corner_adj);
+                light_fall_over_tick(world, veh, traits, euler, basis, rec, px, py, pz, corner_adj);
         if (!falling) {
             int32_t corners[4][3];
-            light_bounding_quad(traits, basis, px, py, pz, corners);
+            light_bounding_quad(traits, euler, basis, px, py, pz, corners);
             corners[0][2] = io::bam_add(corners[0][2], corner_adj[0]);
             corners[1][2] = io::bam_add(corners[1][2], corner_adj[1]);
             light_apply_frame(world, veh, just_armed ? basis.q22 : light_axle_frame(corners, basis.q22), true);
@@ -1875,9 +1897,9 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 			const int32_t no_lift[2] = { 0, 0 };
 			const bool armed = world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
 			if (armed ||
-					!light_fall_over_tick(world, veh, traits, basis, rec, px, py, quad_z, no_lift)) {
+					!light_fall_over_tick(world, veh, traits, euler, basis, rec, px, py, quad_z, no_lift)) {
 				int32_t corners[4][3];
-				light_bounding_quad(traits, basis, px, py, quad_z, corners);
+				light_bounding_quad(traits, euler, basis, px, py, quad_z, corners);
 				light_apply_frame(world, veh,
 						armed ? basis.q22 : light_axle_frame(corners, basis.q22), true);
 			}
@@ -1889,7 +1911,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 	// [orig: @0x47B8CE..0x47BB7D]
 	world.vehicles.suspension_bike_grounded_loop(veh, traits, rec, wheel_contact, corner_adj);
     int32_t axle[4][3];
-    light_bounding_quad(traits, basis, px, py, pz, axle);
+    light_bounding_quad(traits, euler, basis, px, py, pz, axle);
     int32_t cf[3], cr[3];
     std::copy_n(axle[0], 3, cf);
     std::copy_n(axle[1], 3, cr);
@@ -1900,7 +1922,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 	const int32_t grounded_lift[2] = { io::bam_add(rec[0], corner_adj[0]),
 		io::bam_add(rec[1], corner_adj[1]) };
 	const bool falling = !just_armed &&
-			light_fall_over_tick(world, veh, traits, basis, rec, px, py, pz, grounded_lift);
+			light_fall_over_tick(world, veh, traits, euler, basis, rec, px, py, pz, grounded_lift);
 	// The fall-over arm runs only while crashed, which keeps the parked arm below off; so the
 	// matrix that arm reads is this frame's.
 	CollisionMatrix fitted = basis.q22;
