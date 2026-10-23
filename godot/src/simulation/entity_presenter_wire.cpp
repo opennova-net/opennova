@@ -4,6 +4,7 @@
 #include "util/axes.h"
 
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -397,6 +398,10 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 	LocalVector<int32_t> spawned_items;
 	int spawn_attempts = 0;
 	int pending_spawns = 0;
+	// The frame's cold spawns timed with their scene builds' phases (an instrument: the
+	// verbose line past the rows names what a wire row's first present costs).
+	uint64_t spawn_start_usec = 0;
+	PackedStringArray spawned_graphics;
 	for (int i = 0; i < count; ++i) {
 		const int base = i * p_stride;
 		const int type_id = int(snap[base + PF_TYPE_ID]);
@@ -470,6 +475,10 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 				++pending_spawns;
 				continue;
 			}
+			if (spawn_attempts == 0) {
+				(void)ObjectModel::take_build_profile();
+				spawn_start_usec = Time::get_singleton()->get_ticks_usec();
+			}
 			++spawn_attempts;
 			// build_player_animated_model maps the player runtime type to its
 			// visual item and passes other organics through — the SAME chain
@@ -482,6 +491,7 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 				continue;
 			}
 			node->set_name(vformat("Wire_%04x", handle));
+			spawned_graphics.push_back(node->get_graphic_name());
 			Ref<EntityRef> ref;
 			ref.instantiate();
 			ref->set_kind(runtime_kind);
@@ -509,6 +519,16 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 		}
 	}
 	present_wire_rows(p_snap, p_stride, tick_delta);
+	if (spawn_attempts > 0) {
+		// The spawned rows' held weapons build in the rows above, so the span runs through them.
+		const PackedInt64Array build_profile = ObjectModel::take_build_profile();
+		UtilityFunctions::print_verbose(vformat(
+				"EntityPresenter: wire cold spawns %d (%d owed to later frames): %d ms with the rows "
+				"(%s); scene %s",
+				spawn_attempts, pending_spawns,
+				static_cast<int>((Time::get_singleton()->get_ticks_usec() - spawn_start_usec) / 1000),
+				String(", ").join(spawned_graphics), ObjectModel::format_build_profile(build_profile)));
+	}
 	pending_spawn_count_ = pending_spawns;
 	for (uint32_t i = 0; i < spawned_nodes.size(); ++i) {
 		if (ObjectModel *node = model_for_id(spawned_nodes[i])) {
