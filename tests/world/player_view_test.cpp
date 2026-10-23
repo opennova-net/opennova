@@ -735,6 +735,7 @@ void test_view_bias_blend() {
         v.weapon_hip_pose.position_q16[i] = pos[i] * 256.0f;
         v.weapon_ads_pose.position_q16[i] = tpos[i] * 256.0f;
     }
+    v.weapon_pose_bound_hip = v.weapon_hip_pose; // the bound def's, as an install binds it
     float out[3];
     player_view_bias_units(v, pos, out);
     CHECK(out[0] == pos[0] && out[1] == pos[1] && out[2] == pos[2]);

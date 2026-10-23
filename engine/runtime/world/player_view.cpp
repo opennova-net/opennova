@@ -293,14 +293,20 @@ void player_view_weapon_switch_reset(PlayerViewState &v) {
 void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed) {
     if ((flags & 0x20000000) != 0) v.scope_settled = true;
     else if (category_changed) v.scope_settled = false;
+    player_view_weapon_mount_bind(v, flags, v.weapon_hip_pose, v.weapon_ads_pose);
+}
+
+void player_view_weapon_mount_bind(PlayerViewState &v, int32_t flags, const PlayerViewPose &hip,
+                                   const PlayerViewPose &ads) {
     // The running pose is retained; the six published words were the request's to
     // clear (player_view_mount_clear_bias).
     v.weapon_pose_bound = (flags & (3 | 0x04000000)) != 0;
+    v.weapon_pose_bound_hip = hip;
     if ((flags & 3) != 0 && v.scope_settled) {
         // [orig: g_ScopeEngaged = 1 @0x4dfc5b; Setup(1, +0x10C hip, +0x124 tpos)
         //  @0x4dfc7d; g_ScopeHipfire = 0 @0x4dfc83]
         v.scope_engaged = true;
-        scope_interp_setup(v, 1, v.weapon_hip_pose, v.weapon_ads_pose);
+        scope_interp_setup(v, 1, hip, ads);
         v.scope_hipfire = false;
     }
 }
@@ -328,7 +334,8 @@ void player_view_promote_tick(PlayerViewState &v) {
     // [orig: Player_StepFpViewBiasInterp null slot/Def @0x4DDD2B..0x4DDDBC].
     if (v.weapon_pose_interp.active) {
         if (v.weapon_pose_bound)
-            player_view_bias_interp_step(v.weapon_pose_interp, v.weapon_hip_pose, v.view_bias);
+            player_view_bias_interp_step(v.weapon_pose_interp, v.weapon_pose_bound_hip,
+                                         v.view_bias);
         else
             v.weapon_pose_interp.active = false;
         if (!v.weapon_pose_interp.active) v.scope_settled = v.scope_engaged;

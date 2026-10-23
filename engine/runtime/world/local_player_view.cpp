@@ -111,6 +111,7 @@ void local_player_camera_reset(World *world, LocalPlayerWeapon &w, PlayerViewSta
     // [orig: Player_ResetCameraAndMovementState @0x4DE1F0]
     player_view_weapon_switch_reset(v);
     v.weapon_pose_bound = w.active && (w.def.flags & 3) != 0; // @0x4de287..0x4de2a7
+    v.weapon_pose_bound_hip = v.weapon_hip_pose;                // the EquippedSlot's def
     if (world != nullptr) world->weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
     v.binoculars_view_active = false; // @0x4de2ad
     v.binoculars_requested = false;   // @0x4de2b3

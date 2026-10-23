@@ -46,10 +46,13 @@ bool local_slot_zoom_sniper_lock(const World &world, int32_t def_category) {
 			def_category, world.rules.sniper_zoom_fill);
 }
 
-// The install's body past its presentation-epoch clear (local_weapon_install).
+// The install's body past its presentation-epoch clear (local_weapon_install). `view_writes`:
+// the install writes the mount request's pitch and view words itself (no request ran ahead of
+// it: an embedder's install, a select); a switch's commit, or a store no mount runs, writes
+// none (mount_queue_switch_out wrote them at the request).
 void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &data,
 		bool preserve_slot_state, bool allow_same_weapon_rebake, WeaponInventory *inventory,
-		PlayerViewState &view);
+		PlayerViewState &view, bool view_writes);
 
 // The install payload of the weapon.def row a name's last block holds
 // (MissionTables::weapon_defs); false with no parse or no such row.
@@ -86,13 +89,13 @@ bool install_data_by_name(const World &world, const std::string &name,
 //  Input_HandleActionBinding_0 @0x4E0420 - the EquippedSlot @0x4E08E2, its def @0x4E08F2,
 //  the PowerThrow sign bit @0x4E08FD]
 bool commit_mount(World &world, LocalPlayerWeapon &w, const std::string &name,
-		bool preserve_slot_state) {
+		bool preserve_slot_state, bool view_writes) {
 	LocalPlayer *local = world.local_player_state;
 	if (local == nullptr || &local->weapon != &w) return false;
 	WeaponInstallData data;
 	if (!install_data_by_name(world, name, false, data)) return false;
 	mount_install(world, w, data, preserve_slot_state, false,
-			local->inventory_valid ? &local->inventory : nullptr, local->view);
+			local->inventory_valid ? &local->inventory : nullptr, local->view, view_writes);
 	return true;
 }
 
@@ -161,22 +164,54 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 	return gates;
 }
 
-// Player_MountWeaponSlot past its g_PendingWeaponSlot store, for every local mount (a weapon
-// key's, a seat detach's switch back, a UseGun attach's or swap's): the NVG latch clears; the
+// Player_MountWeaponSlot's request, for every local mount (a weapon key's, a loadout apply's, a
+// seat detach's switch back, a UseGun attach's or swap's) on `target`, the mounted slot's def
+// (null: none to read). An AbsorbPitch def levels the body's Pitch and takes its elevation span
+// as the offset, any other zeroes the offset. Past the g_PendingWeaponSlot store (the caller's) a
+// ForceScoped def sets the promoted scope byte and seeds the rangefinder word with its +0xA0;
+// another category's def clears the byte and resets the fov target. The NVG latch clears; the
 // EquippedSlot queues at once, nothing retained: same category, SWITCHRANK (preempting a draw
 // through the pump's counter-0 transition) unless the lower / raise interp runs; cross
 // category, a forced SWITCHFROM, refused over a running SWITCHTO / SWITCHFROM, whose queue
 // lowers the view (the saved-game load word is zero in a session); then the six view-bias
-// words clear. The next SWITCHFROM / SWITCHRANK completion commits the stored word.
-// [orig: Player_MountWeaponSlot @0x4DFA40 - @0x4DFB16, dword_B76554 @0x4DFB75, the compare
+// words clear, and the first-person camera interp binds the mounted slot, engaging an optic
+// def's scope while the byte is set. All of it at the request, a refused or gated queue's
+// included: the next SWITCHFROM / SWITCHRANK completion commits the stored word and writes
+// none of it (commit_mount's view_writes).
+// [orig: Player_MountWeaponSlot @0x4DFA40 - AbsorbPitch @0x4DFA7A..0x4DFA86, Pitch = 0
+//  @0x4DFAA9, the offset @0x4DFAB3..0x4DFAB7, else 0 @0x4DFABE; @0x4DFB16; ForceScoped
+//  @0x4DFB23..0x4DFB2F, g_WeaponScopeActive = 1 @0x4DFB31, dword_B76808 = Def+0xA0
+//  @0x4DFB3B..0x4DFB44, the category compare @0x4DFB4C..0x4DFB5E, g_WeaponScopeActive = 0
+//  @0x4DFB60, g_CameraFovTargetQ16 @0x4DFB66; dword_B76554 @0x4DFB75, the compare
 //  @0x4DFB7B..0x4DFB8B, the interp test @0x4DFB8D..0x4DFB93, WeaponSlot_TryQueueSwitchRank
 //  @0x4DFB96, WeaponSlot_ForceQueueSwitchFrom @0x4DFB9E, its return @0x4DFBA6, nextAction == 7
 //  @0x4DFBAA..0x4DFBBA, dword_A892C8 @0x4DFBBC, the lower @0x4DFBC5, the bias clear
-//  @0x4DFBCF..0x4DFBE8; WeaponAction_ProcessFrame @0x540E60 (@0x5413B1..0x5413EC); callers
-//  Entity_AttachToUseGunSlot @0x546B80 (@0x546C38), Entity_AttachToVehicleSlot @0x4946D0
-//  (@0x494838), Entity_DetachFromVehicle @0x4355F0 (@0x43565F)]
+//  @0x4DFBCF..0x4DFBE8, the bind and engage @0x4DFC35..0x4DFC9A; WeaponAction_ProcessFrame
+//  @0x540E60 (@0x5413B1..0x5413EC); callers Entity_AttachToUseGunSlot @0x546B80 (@0x546C38),
+//  Entity_AttachToVehicleSlot @0x4946D0 (@0x494838), Entity_DetachFromVehicle @0x4355F0
+//  (@0x43565F), NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296F4)]
 void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState *view,
-		bool same_category) {
+		bool same_category, const WeaponTableEntry *target) {
+	WeaponInstallData data;
+	const bool has_data =
+			target != nullptr && install_data_by_name(world, target->name, false, data);
+	if (has_data) {
+		if ((data.flags & DEF_WEAPON_FLAG_ABSORBPITCH) != 0) {
+			local_player_level_pitch(world);
+			w.pitch_offset_bam = io::bam_sub(data.pitch_max_bam, data.pitch_min_bam);
+		} else {
+			w.pitch_offset_bam = 0;
+		}
+	}
+	if (target != nullptr) {
+		if ((target->flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0) {
+			if (view != nullptr) view->scope_settled = true;
+			w.aim_range_q16 = target->action_fsm.scope_zero.default_metres;
+		} else if (!same_category) {
+			if (view != nullptr) view->scope_settled = false;
+			world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
+		}
+	}
 	w.nvg_scope_restore = false;
 	WeaponSlotState *slot = active_local_weapon_slot(world, w);
 	if (same_category) {
@@ -186,7 +221,12 @@ void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState 
 			view != nullptr) {
 		player_view_start_weapon_lower(*view);
 	}
-	if (view != nullptr) player_view_mount_clear_bias(*view);
+	if (view != nullptr) {
+		player_view_mount_clear_bias(*view);
+		if (has_data)
+			player_view_weapon_mount_bind(*view, data.flags, data.view_hip_pose,
+					data.view_ads_pose);
+	}
 }
 
 bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
@@ -272,7 +312,9 @@ bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// The committed slot and its def mount with the store (commit_mount): a fresh slot
 	// whose draw the switch action's completion queued (start_in_switchto).
 	// [orig: WeaponAction_SwitchFrom @0x5433B0 - WeaponSlot_TryQueueSwitchTo @0x5434A3]
-	event.installed = def != nullptr && commit_mount(world, w, def->name, false);
+	// A switch's commit writes none of the mount's view words (its request did); a select runs
+	// no request, and its install writes them.
+	event.installed = def != nullptr && commit_mount(world, w, def->name, false, select);
 	w.events.push_back(std::move(event));
 	return true;
 }
@@ -307,7 +349,12 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 			// shared leg's (mount_queue_switch_out) [orig: @0x4dfa4d..0x4dfa74].
 			w.switch_in_flight = true;
 			w.switch_deferred_action = -1;
-			mount_queue_switch_out(world, w, &view, out.same_category);
+			const WeaponInventorySlot *target =
+					inventory != nullptr ? inventory->slot(out.combo) : nullptr;
+			mount_queue_switch_out(world, w, &view, out.same_category,
+					target != nullptr && target->adm_index >= 0
+							? world.tables.weapons.by_index(static_cast<uint8_t>(target->adm_index))
+							: nullptr);
 			break;
 		}
 		default:
@@ -537,7 +584,7 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	// mounts with no clear (commit_mount): its records stay in tick order.
 	if (!install_is_same_weapon_rebake(w, data, allow_same_weapon_rebake)) w.events.clear();
 	mount_install(world, w, data, preserve_slot_state, allow_same_weapon_rebake, inventory,
-			view);
+			view, /*view_writes=*/true);
 }
 
 bool local_weapon_install_by_name(World &world, LocalPlayerWeapon &w, const std::string &name,
@@ -555,7 +602,7 @@ namespace {
 
 void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &data,
 		bool preserve_slot_state, bool allow_same_weapon_rebake, WeaponInventory *inventory,
-		PlayerViewState &view) {
+		PlayerViewState &view, bool view_writes) {
 	const bool same_weapon_rebake =
 			install_is_same_weapon_rebake(w, data, allow_same_weapon_rebake);
 	// The NVG scope restore latch is the switch request's to clear (the reset,
@@ -628,7 +675,7 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
     w.emplaced_stance = data.emplaced_stance;
     w.pitch_min_bam = data.pitch_min_bam;
     w.pitch_max_bam = data.pitch_max_bam;
-    if (!same_weapon_rebake) {
+    if (!same_weapon_rebake && view_writes) {
         const bool absorb = (flags & DEF_WEAPON_FLAG_ABSORBPITCH) != 0;
         w.pitch_offset_bam = absorb ? io::bam_sub(w.pitch_max_bam, w.pitch_min_bam) : 0;
         // The mount stamp reads the RAW def flag, not the seat-flag query.
@@ -782,9 +829,14 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
     const bool category_changed = old_index >= 0 && new_index >= 0 &&
             world.tables.weapons.entries[old_index].category !=
             world.tables.weapons.entries[new_index].category;
-    if (category_changed && (data.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0)
-        world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
-    player_view_weapon_mount(view, data.flags, category_changed);
+    if (view_writes) {
+        if (category_changed && (data.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0)
+            world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
+        // [orig: dword_B76808 = Def+0xA0 @0x4DFB3B..0x4DFB44]
+        if ((data.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0)
+            w.aim_range_q16 = data.scope_zero.default_metres;
+        player_view_weapon_mount(view, data.flags, category_changed);
+    }
 	w.def_name = data.name;
 	w.active = true;
 }

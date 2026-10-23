@@ -440,6 +440,12 @@ struct PlayerViewState {
     PlayerViewPose weapon_ads_pose;
     PlayerViewBiasInterp weapon_pose_interp;
     bool weapon_pose_bound = false; // fpCameraInterp.entitySlotPtr + its non-null Def
+    // The bound slot's def +0x10C hip copy, the scope interp step's bias reference: the
+    // EquippedSlot's def after a camera reset or an install, the mounted slot's def from a
+    // mount request on, ahead of the commit that stores it [orig: Player_StepFpViewBiasInterp
+    // @0x4DDD20 - entitySlotPtr @0x4DDD25, its def @0x4DDF42, the def's +0x10C @0x4DDF48;
+    // Player_MountWeaponSlot @0x4DFC4B binds the slot].
+    PlayerViewPose weapon_pose_bound_hip;
     // THE WEAPON VIEW'S LOWER / RAISE INTERP, the same interpolator on its own
     // record [orig: g_WeaponLowerRaiseInterp @0x82CEA0 -- the counter +0,
     // entitySlotPtr +76, activeFlag +80]: a cross-category mount's queued
@@ -763,12 +769,22 @@ void player_view_scope_reset(PlayerViewState &v);
 // copy angle velocity into current, then deactivate the interpolator.
 // [orig: Player_ResetCameraAndMovementState @0x4DE1F0..0x4DE281]
 void player_view_weapon_switch_reset(PlayerViewState &v);
-// A mount's view words past its bias clear (player_view_mount_clear_bias, run at the
-// request): same-category mounts keep the promoted byte; ForceScoped sets it; an
-// optical promoted mount sets up a one-step transition to the new def's ADS pose
-// without stepping it here; the running pose is retained.
+// A mount's view words, as an install that ran no mount request writes them: same-category
+// mounts keep the promoted byte; ForceScoped sets it; a category change clears it; then the
+// bind (player_view_weapon_mount_bind) on the installed def's poses. A switch's commit writes
+// none: its mount request wrote them (mount_queue_switch_out).
 // [orig: Player_MountWeaponSlot @0x4DFB31..0x4DFB66, @0x4DFC35..0x4DFC9A]
 void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed);
+// The mount's bind of the first-person camera interp to the mounted slot, past its bias clear:
+// bound for an optic def (Flags & 3) or a 0x04000000 one, the step's reference that def's hip
+// pose; an optic def with the promoted byte set engages the scope and sets up a one-step
+// transition to its ADS pose, not stepped here; the running pose is retained.
+// [orig: Player_MountWeaponSlot @0x4DFA40 - entitySlotPtr @0x4DFC4B, Flags & 3 @0x4DFC44..0x4DFC51,
+//  g_WeaponScopeActive @0x4DFC53, g_ScopeEngaged = 1 @0x4DFC5B, CNetPlayerInterp_Setup(1, +0x10C,
+//  +0x124) @0x4DFC65..0x4DFC7D, g_ScopeHipfire = 0 @0x4DFC83, the 0x04000000 test and the unbind
+//  @0x4DFC8E..0x4DFC9A]
+void player_view_weapon_mount_bind(PlayerViewState &v, int32_t flags, const PlayerViewPose &hip,
+                                   const PlayerViewPose &ads);
 // The mount request's clear of the six published bias words, past its queue (and the
 // lower that queue starts), ahead of its first-person camera update; the commit that
 // later stores the slot clears nothing.

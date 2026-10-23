@@ -106,7 +106,11 @@ void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// leg: a refused or gated word stays stored with nothing retained.
 	// [orig: Entity_AttachToUseGunSlot @0x546B80 (the Player_MountWeaponSlot call @0x546C38);
 	//  Entity_DetachFromVehicle @0x4355F0 (@0x43565F)]
-	mount_queue_switch_out(world, w, local_weapon_view(world, w), same_category);
+	mount_queue_switch_out(world, w, local_weapon_view(world, w), same_category,
+			world.tables.weapons.by_index(w.usegun_switch == LocalUseGunSwitch::kAttach ||
+							w.usegun_switch == LocalUseGunSwitch::kSwap
+					? w.usegun_pending_weapon_adm
+					: w.usegun_saved_adm));
 }
 
 void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
@@ -226,7 +230,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	//  (@0x543475) / WeaponAction_SwitchRank @0x543500 (@0x543539); WeaponAction_ProcessFrame
 	//  @0x540E71]
 	if (next_def != nullptr)
-		w.events[event_index].installed = commit_mount(world, w, next_def->name, true);
+		w.events[event_index].installed = commit_mount(world, w, next_def->name, true, false);
 }
 
 // A seat-2 / seat-3 detach's mount of the slot it restores (local_weapon_detach_mount staged
@@ -361,7 +365,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 					event.switch_to_weapon = def->name;
 					event.preserve_slot_state = true;
 					// The routed slot's def mounts with the store (commit_mount).
-					event.installed = commit_mount(world, w, def->name, true);
+					event.installed = commit_mount(world, w, def->name, true, false);
 					w.events.push_back(std::move(event));
 				}
 			} else {
@@ -504,7 +508,7 @@ void local_usegun_store_equipped_slot(World &world, LocalPlayerWeapon &w, Entity
 		event.switch_to_weapon = def->name;
 		event.preserve_slot_state = true;
 		// The stored slot's def mounts with the store (commit_mount).
-		event.installed = commit_mount(world, w, def->name, true);
+		event.installed = commit_mount(world, w, def->name, true, false);
 		w.events.push_back(std::move(event));
 	}
 }
@@ -534,7 +538,7 @@ void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun)
 	event.world_position = local_player_mission_position(world);
 	event.switch_to_weapon = def->name;
 	event.preserve_slot_state = true;
-	event.installed = commit_mount(world, w, def->name, true);
+	event.installed = commit_mount(world, w, def->name, true, false);
 	w.events.push_back(std::move(event));
 }
 

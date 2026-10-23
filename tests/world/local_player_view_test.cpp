@@ -1482,6 +1482,7 @@ void test_forced_scope_toggle_sees_the_same_tick_promotion() {
             v.weapon_hip_pose.position_q16[i] = (256 + 64 * i) * 256;
             v.weapon_ads_pose.position_q16[i] = (496 + 64 * i) * 256;
         }
+        v.weapon_pose_bound_hip = v.weapon_hip_pose; // the bound def's, as an install binds it
         LocalPlayerViewTracker t;
         LocalViewSessionInputs s;
         local_player_view_tick(&lw.w, v, t, s, &w);
@@ -1648,6 +1649,7 @@ void test_water_scope_legs() {
             v.weapon_hip_pose.position_q16[i] = (256 + 64 * i) * 256;
             v.weapon_ads_pose.position_q16[i] = (496 + 64 * i) * 256;
         }
+        v.weapon_pose_bound_hip = v.weapon_hip_pose; // the bound def's, as an install binds it
         LocalPlayerViewTracker t;
         LocalViewSessionInputs s;
         local_player_view_tick(&lw.w, v, t, s, &w);
@@ -2384,6 +2386,7 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
         view.weapon_hip_pose.position_q16[i] = hip[i] * 256.0f;
         view.weapon_ads_pose.position_q16[i] = sight[i] * 256.0f;
     }
+    view.weapon_pose_bound_hip = view.weapon_hip_pose; // the bound def's, as an install binds it
     const int32_t eye[3] = {};
     const auto check_bias = [&](float x, float y, float z) {
         float bias[3];
@@ -2493,6 +2496,7 @@ void test_airborne_bias_is_separate_from_reload_and_force_scope_admission() {
             view.weapon_hip_pose.position_q16[i] = hip[i] * 256.0f;
             view.weapon_ads_pose.position_q16[i] = sight[i] * 256.0f;
         }
+        view.weapon_pose_bound_hip = view.weapon_hip_pose; // the bound def's, as an install binds it
         CHECK(player_view_set_engaged(view, true, false));
         settle_ease(view);
         LocalPlayerViewTracker tracker;

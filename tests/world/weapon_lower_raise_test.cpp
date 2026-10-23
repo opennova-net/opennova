@@ -158,6 +158,47 @@ constexpr const char *kWeaponDef =
 		"\t\tdelaystart 2\r\n"
 		"\t\tdelayend 2\r\n"
 		"\tend\r\n"
+		"end\r\n"
+		// A ForceScoped optic (category 6) with distinct hip and sight poses and a 300 m
+		// default zero (Def+0xA0), and an AbsorbPitch def (category 8) spanning -10..50
+		// degrees (L7-s26 row 3).
+		"weapon \"WPN_FORCED\"\r\n"
+		"\tcategory 6\r\n"
+		"\trank 0\r\n"
+		"\tclipsize 5\r\n"
+		"\tstartrounds 20\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
+		"\tflags Scoped\r\n"
+		"\tflags ForceScoped\r\n"
+		"\tscope_max_zero 10 25 300\r\n"
+		"\tpos 1,2,3,0,0,0\r\n"
+		"\ttpos 4,5,6,0,0,0\r\n"
+		"\taction \"switchto\"\r\n"
+		"\t\tdelaystart 0\r\n"
+		"\t\tdelayend 2\r\n"
+		"\tend\r\n"
+		"\taction \"switchfrom\"\r\n"
+		"\t\tdelaystart 2\r\n"
+		"\t\tdelayend 2\r\n"
+		"\tend\r\n"
+		"end\r\n"
+		"weapon \"WPN_MORTAR\"\r\n"
+		"\tcategory 8\r\n"
+		"\trank 0\r\n"
+		"\tclipsize 1\r\n"
+		"\tstartrounds 10\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
+		"\tflags AbsorbPitch\r\n"
+		"\ttargetpitchmin 10\r\n"
+		"\ttargetpitchmax 50\r\n"
+		"\taction \"switchto\"\r\n"
+		"\t\tdelaystart 0\r\n"
+		"\t\tdelayend 2\r\n"
+		"\tend\r\n"
+		"\taction \"switchfrom\"\r\n"
+		"\t\tdelaystart 2\r\n"
+		"\t\tdelayend 2\r\n"
+		"\tend\r\n"
 		"end\r\n";
 
 constexpr int32_t kRifle = 3 * weapon_combo::kRanksPerCategory;
@@ -947,6 +988,101 @@ void test_a_loadout_apply_mounts_its_selected_slot() {
 	}
 }
 
+// --- the mount request's view words (L7-s26 row 3) --------------------------------------
+
+// The mount writes its view words at the request, the key press, and the commit that later
+// stores the slot writes none. A cross-category press clears the promoted scope byte and
+// resets the fov target at once, a refused one over a running draw included (nothing
+// queues, nothing commits, the byte is gone all the same); a same-category press keeps the
+// byte. A ForceScoped def raises the byte, seeds the rangefinder word with its +0xA0 and,
+// optic, engages its scope: the interp binds the mounted slot (the step's reference its hip
+// pose) and sets up one step to its sight pose, the held def's poses untouched until the
+// commit. An AbsorbPitch def levels the look and takes its elevation span as the offset; a
+// mount of any other def zeroes the offset.
+// [orig: Player_MountWeaponSlot @0x4DFA40 - AbsorbPitch @0x4DFA7A..0x4DFA86, Pitch = 0
+//  @0x4DFAA9, the offset @0x4DFAB3..0x4DFAB7, else 0 @0x4DFABE; ForceScoped @0x4DFB23..0x4DFB2F,
+//  g_WeaponScopeActive = 1 @0x4DFB31, dword_B76808 = Def+0xA0 @0x4DFB3B..0x4DFB44,
+//  g_WeaponScopeActive = 0 @0x4DFB60, g_CameraFovTargetQ16 @0x4DFB66, the bind and engage
+//  @0x4DFC35..0x4DFC9A; WeaponAction_SwitchFrom @0x5433B0 / WeaponAction_SwitchRank
+//  @0x543500 write none of them]
+void test_the_mount_request_writes_the_view_words() {
+	const auto fov = [](Rig &rig) -> int32_t & {
+		return rig.world.weather.core.scalar_channels.camera_fov_target_fp;
+	};
+	{
+		const auto rig = std::make_unique<Rig>(rifle_kit());
+		rig->tick();
+		rig->view().scope_settled = true;
+		rig->press(2); // the key's camera reset keeps the byte; the mount request clears it
+		CHECK(!rig->view().scope_settled);
+		CHECK(fov(*rig) == (80 << 16));
+		CHECK(rig->inventory().equipped_combo == kRifle); // not committed yet
+		fov(*rig) = 20 << 16;
+		CHECK(rig->tick_until_commit() >= 1);
+		CHECK(rig->inventory().equipped_combo == kPistol);
+		CHECK(fov(*rig) == (20 << 16)); // the commit writes none
+		CHECK(!rig->view().scope_settled);
+	}
+	{
+		const auto rig = std::make_unique<Rig>(rifle_kit());
+		LocalPlayerWeapon &w = rig->weapon();
+		rig->tick();
+		w.slot.current = weapon_action::kSwitchTo;
+		w.slot.next = weapon_action::kIdle;
+		w.slot.phase = weapon_phase::kDone;
+		w.slot.counter = 2;
+		w.slot.switch_timer = -600;
+		rig->view().scope_settled = true;
+		rig->press(2); // refused over the draw: the word stays, nothing queues
+		CHECK(w.slot.current == weapon_action::kSwitchTo && w.slot.next == weapon_action::kIdle);
+		CHECK(!rig->view().scope_settled);
+	}
+	{
+		const auto rig = std::make_unique<Rig>(rifle_kit());
+		rig->tick();
+		rig->view().scope_settled = true;
+		rig->press(3); // the other fire mode: one category (the key's camera reset keeps it too)
+		CHECK(rig->view().scope_settled);
+	}
+	{
+		const auto rig = std::make_unique<Rig>(std::vector<WeaponKitEntry>{
+				WeaponKitEntry{"WPN_RIFLE", -1, -1, -1}, WeaponKitEntry{"WPN_FORCED", -1, -1, -1}});
+		LocalPlayerWeapon &w = rig->weapon();
+		rig->tick();
+		CHECK(!rig->view().scope_settled && !rig->view().weapon_pose_bound);
+		w.aim_range_q16 = 0;
+		const WeaponSwitchOutcome out = rig->press(6);
+		CHECK(out.kind == WeaponSwitchOutcome::kMount && !out.same_category);
+		CHECK(rig->view().scope_settled);
+		CHECK(w.aim_range_q16 == 300);
+		CHECK(rig->view().weapon_pose_bound && rig->view().scope_engaged &&
+				!rig->view().scope_hipfire);
+		CHECK(rig->view().weapon_pose_bound_hip.position_q16[0] == 256.0f);
+		CHECK(rig->view().weapon_pose_interp.active);
+		CHECK(rig->view().weapon_pose_interp.target.position_q16[0] == 1024.0f);
+		CHECK(rig->view().weapon_hip_pose.position_q16[0] == 0.0f); // the rifle's, held
+		CHECK(rig->tick_until_commit() >= 1);
+		CHECK(rig->view().weapon_hip_pose.position_q16[0] == 256.0f);
+	}
+	{
+		const auto rig = std::make_unique<Rig>(std::vector<WeaponKitEntry>{
+				WeaponKitEntry{"WPN_RIFLE", -1, -1, -1}, WeaponKitEntry{"WPN_MORTAR", -1, -1, -1}});
+		LocalPlayerWeapon &w = rig->weapon();
+		rig->tick();
+		CHECK(w.pitch_offset_bam == 0);
+		rig->local().input.look_pitch = 1234;
+		rig->press(8);
+		CHECK(rig->local().input.look_pitch == 0);
+		CHECK(w.pitch_offset_bam == 60 * 11930464); // 50 - (-10) degrees in truncated BAM
+		CHECK(rig->tick_until_commit() >= 1);
+		CHECK(w.pitch_offset_bam == 60 * 11930464);
+		rig->settle();
+		rig->press(3);
+		CHECK(w.pitch_offset_bam == 0); // at the request, the mortar still held
+		CHECK(rig->inventory().equipped_combo == 8 * weapon_combo::kRanksPerCategory);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -965,6 +1101,7 @@ int main() {
 	test_the_mount_request_clears_the_view_bias_and_the_commit_does_not();
 	test_a_claimants_detach_holds_its_equipped_slot_ready();
 	test_a_loadout_apply_mounts_its_selected_slot();
+	test_the_mount_request_writes_the_view_words();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

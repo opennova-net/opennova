@@ -17,14 +17,16 @@ namespace opennova::world {
 Vec3 local_player_mission_position(const World &world);
 
 // The commit's own mount of the EquippedSlot's def (player_weapon.cpp carries the witness);
-// false when nothing mounts. Defined in player_weapon.cpp.
+// false when nothing mounts. `view_writes`: the install writes the mount request's pitch and
+// view words (a select's); a switch's commit, or a store no mount runs, writes none. Defined
+// in player_weapon.cpp.
 bool commit_mount(World &world, LocalPlayerWeapon &w, const std::string &name,
-		bool preserve_slot_state);
+		bool preserve_slot_state, bool view_writes);
 
-// Player_MountWeaponSlot past its g_PendingWeaponSlot store, every local mount's leg
+// Player_MountWeaponSlot's request on the mounted slot's def `target`, every local mount's leg
 // (player_weapon.cpp carries the witness). Defined in player_weapon.cpp.
 void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState *view,
-		bool same_category);
+		bool same_category, const WeaponTableEntry *target);
 
 // Whether the pending slot's def is Emplaced (the FSM's pending_emplaced). Defined in
 // player_weapon_usegun.cpp.
