@@ -721,8 +721,12 @@ struct InfantryState {
         weapon_weight_spread = 0;
         aimed_shot_available = false;
         idle_counter = 0;
-        lean_left = false;
-        lean_right = false;
+        // The lean keys (MoveOrder 0x40 / 0x80) are not a respawn's either: the record's respawn
+        // arm stores no MoveOrder (the host's deploy clears the stance bits alone,
+        // infantry_respawn_snap), and the next pack rewrites them.
+        // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the arm @0x4C1109..0x4C114C;
+        //  Player_PackInputStateToEntity @0x4DF450 - the MoveOrder store @0x4DF68F, 0x40
+        //  @0x4DF71F, 0x80 @0x4DF737]
         // The lean (+0xB0) and the torso roll (+0x2DC) are not a respawn's: the joiner's record
         // respawn arm stores neither (nor does the host's deploy, infantry_respawn_snap), so a
         // redeployed body eases out of its corpse's words. A spawn holds both at the class

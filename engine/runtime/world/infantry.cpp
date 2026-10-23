@@ -445,8 +445,12 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.weapon_weight_spread = 0;
     inf.aimed_shot_available = false;
     inf.idle_counter = 0;
-    inf.lean_left = false;
-    inf.lean_right = false;
+    // The lean keys (MoveOrder 0x40 / 0x80) survive the deploy, which clears the stance bits
+    // alone; the local body's next pack and a remote slot's next uplink rewrite them.
+    // [orig: Server_DeployPlayer @0x517740 - `and [eax+12Ch], 0FFFFFDFFh` @0x517880, `and
+    //  [eax+12Ch], 0FFFFFEFFh` @0x51788C, ahead of Entity_ResetToSpawnState called @0x517899;
+    //  Player_PackInputStateToEntity @0x4DF450 - the MoveOrder store @0x4DF68F, 0x40
+    //  @0x4DF71F, 0x80 @0x4DF737]
     // The deck ride's pitch lag (+0x2E0), the torso roll (+0x2DC) and the lean (+0xB0)
     // survive a respawn: no store on the deploy path writes them, so a residual pitch lag
     // still steps into the Pitch a thirty-second a tick, and the torso roll and the lean

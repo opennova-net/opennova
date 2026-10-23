@@ -1014,6 +1014,11 @@ int main() {
 		static constexpr int32_t kLean = 0x00654300;
 		body_motor->inf.torso_roll = kTorsoRoll;
 		body_motor->inf.lean_angle = kLean;
+		// D-NET-NEW-L5-63: nor the lean keys (MoveOrder 0x40 / 0x80): the deploy clears the
+		// stance bits alone. [orig: Server_DeployPlayer @0x517740 - @0x517880 (0x200),
+		//  @0x51788C (0x100), ahead of Entity_ResetToSpawnState called @0x517899]
+		body_motor->inf.lean_left = true;
+		body_motor->inf.lean_right = true;
 		bare_world->out.destruction.effects.clear();
 		inmatch::Server_ReleasePlayerDeployment(
 				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
@@ -1027,6 +1032,18 @@ int main() {
 		            "the deploy leaves the deck ride's pitch lag")) return 1;
 		if (!expect(body_motor->inf.torso_roll == kTorsoRoll && body_motor->inf.lean_angle == kLean,
 		            "the deploy leaves the torso roll and the lean")) return 1;
+		if (!expect(body_motor->inf.lean_left && body_motor->inf.lean_right &&
+		                    body_motor->inf.stance == w::InfantryState::Stance::kStand,
+		            "the deploy leaves the lean keys and clears the stance")) return 1;
+		// The shared spawn / revive reset (the joiner's redeploy of L on its record's respawn
+		// arm) keeps them too: the arm stores no MoveOrder. [orig: NetPacket_SerializePlayerState
+		//  @0x4C09C0 - the arm @0x4C1109..0x4C114C]
+		w::InfantryState revived;
+		revived.lean_left = true;
+		revived.lean_right = true;
+		revived.reset_for_spawn(0x10000000);
+		if (!expect(revived.lean_left && revived.lean_right && revived.body_heading == 0x10000000,
+		            "the spawn / revive reset leaves the lean keys")) return 1;
 	}
 
 	// A join-time spectator is POSITIONED with the substitute team while its
