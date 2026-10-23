@@ -16,6 +16,8 @@
 //  the vehicle compose @0x4C10D4, the reset @0x4C0FFC]
 
 #include <runtime/replication/client_replica_pipeline.h>
+#include <runtime/anim/aim_overlay.h>
+#include <runtime/inmatch/client_replica_present.h>
 
 #include <net/npwire/entity_class.h>
 #include <net/npwire/ingame_decode.h>
@@ -74,7 +76,7 @@ struct Row {
 
 // One 0x0A from the anchor (100, 200, 10): each row free-standing at the anchor, or seated on
 // the hull (bone 1) at the local x +1, the hull free-standing at hull_x.
-std::vector<uint8_t> frame(const std::vector<Row> &rows, double hull_x = 50.0) {
+nw::FrameUpdate hull_update(double hull_x) {
 	nw::FrameUpdate fu;
 	fu.flags2 = 0;
 	fu.carried_handle = 0xFFFF;
@@ -90,6 +92,11 @@ std::vector<uint8_t> frame(const std::vector<Row> &rows, double hull_x = 50.0) {
 	hull.vehicle.pos_x_compressed = nw::network_compress_fixedpoint(fixed_of(hull_x - 100.0));
 	hull.vehicle.health_word = 100;
 	fu.records.push_back(hull);
+	return fu;
+}
+
+std::vector<uint8_t> frame(const std::vector<Row> &rows, double hull_x = 50.0) {
+	nw::FrameUpdate fu = hull_update(hull_x);
 	for (const Row &row : rows) {
 		nw::FrameUpdateRecord rec;
 		rec.handle = row.handle;
@@ -150,13 +157,15 @@ void seed(ns::ClientReplicaPipeline &view, const std::vector<Row> &rows) {
 }
 
 // ClientRuntime's order with no own-body split: the decay, the dip, the walk (and its
-// selection), the ramp, then the joiner's recoil leg.
+// selection), the ramp, then the joiner's recoil leg and its seated looks (JoinerRole's order:
+// no gun channel here).
 void tick(ns::ClientReplicaPipeline &view) {
 	view.tick_lean_decay(0xFFFF);
 	view.tick_arms_dip(0xFFFF);
 	view.tick_remote_motion(0xFFFF);
 	view.tick_lean_ramp();
 	view.tick_recoil();
+	view.tick_seated_looks();
 }
 
 struct Words {
@@ -369,6 +378,134 @@ void test_seated_rider_yaw_chases_its_record() {
 			"the Yaw holds while the hull turns between records");
 }
 
+constexpr uint16_t kSeatedInfantry = 0x0004;
+
+// One 0x0A: the hull, and an org1 row seated on it (bone 2, the local x +1, the local target
+// heading byte 0x10) carrying its two aim bytes, the aim heading's (+0x2EC) and the aim pitch's
+// (+0x2D0).
+std::vector<uint8_t> seated_infantry_frame(uint8_t aim_heading, uint8_t aim_pitch, uint8_t flags) {
+	nw::FrameUpdate fu = hull_update(50.0);
+	nw::FrameUpdateRecord rec;
+	rec.handle = kSeatedInfantry;
+	rec.type_id = kInfantryType;
+	rec.cls = nw::EntityClass::Infantry;
+	rec.infantry.seat_bone_idx = 2;
+	rec.infantry.vehicle_slot_handle = kHull;
+	rec.infantry.pos_x_compressed = nw::network_compress_fixedpoint(fixed_of(1.0));
+	rec.infantry.yaw_byte = 0x10;
+	rec.infantry.flags_byte = flags;
+	rec.infantry.pitch_byte = aim_heading;
+	rec.infantry.aim_yaw_byte = aim_pitch;
+	rec.infantry.anim_byte = as::kIdle;
+	fu.records.push_back(rec);
+	return nw::encode_frame_update(fu);
+}
+
+// A view with the seat frame's body heading 0 and the carrier's mount config (3 when wide).
+std::unique_ptr<ns::ClientReplicaPipeline> seated_infantry_view(BodySource &src, bool wide,
+		uint8_t aim_heading, uint8_t aim_pitch, uint8_t flags = 0) {
+	auto view = make_view(src);
+	view->set_replica_seat_frame_resolver([wide](uint16_t, uint16_t, uint8_t,
+			ns::ClientReplicaPipeline::ReplicaSeatFrame &out) {
+		out = {};
+		out.mount_config_valid = wide;
+		out.mount_config = wide ? 3 : 0;
+		return true;
+	});
+	view->state().upsert(kSeatedInfantry).type_id = kInfantryType;
+	view->apply(0x0A, seated_infantry_frame(aim_heading, aim_pitch, flags));
+	view->state().find(kSeatedInfantry)->rm_adm_id = 0;
+	return view;
+}
+
+// D-NET-NEW-L5-29: a live seated org1 row's record stages its aim words and writes neither the
+// live Yaw nor the Pitch; each tick its seat branch steps the Yaw a quarter of the way to the
+// aim heading, the step clamped to +-0x2000000, and the Pitch an eighth of the way to the aim
+// pitch. The hull's turn is not carried into the Yaw. A dead record zeroed the body's Health,
+// so the row takes no look (the seat follow keeps its yaw).
+// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the stores @0x4C066C / @0x4C0672,
+//  the dead arm's Health store @0x4C04FC; Entity_UpdateInfantryAI @0x4B9910 - the seat test
+//  @0x4B9960..0x4B9985, the look @0x4BEF57..0x4BEF97]
+void test_seated_infantry_look_chases_its_aim_words() {
+	BodySource src;
+	auto view = seated_infantry_view(src, false, 0x20, 0xF0);
+	ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
+	expect(rider.carrier_handle == kHull && rider.mount_bone == 2 && rider.net_seat_valid,
+			"(the org1 row is seated on the hull)");
+	expect(rider.heading_bam == 0 && rider.pitch_bam == 0,
+			"the seated record writes neither the live Yaw nor the Pitch");
+	tick(*view);
+	// (0x20000000 + 2) >> 2 clamps to 0x2000000; (-0x10000000 + 4) >> 3 = -0x2000000.
+	expect(rider.heading_bam == 0x02000000 && rider.pitch_bam == -0x02000000,
+			"the first tick steps the Yaw a clamped quarter and the Pitch an eighth");
+	view->state().find(kHull)->heading_bam += 0x10000000;
+	tick(*view);
+	// (-0x0E000000 + 4) >> 3 = -0x01C00000.
+	expect(rider.heading_bam == 0x04000000 && rider.pitch_bam == -0x03C00000,
+			"the second tick steps from the live words; the hull's turn is not carried");
+
+	auto dead = seated_infantry_view(src, false, 0x20, 0xF0,
+			static_cast<uint8_t>(nw::world::kEntityFlagDead));
+	ns::ClientEntityState &corpse = *dead->state().find(kSeatedInfantry);
+	tick(*dead);
+	const ns::ClientEntityState &hull = *dead->state().find(kHull);
+	expect(corpse.pitch_bam == 0 && corpse.heading_bam == static_cast<int32_t>(
+					static_cast<uint32_t>(hull.heading_bam) + 0x10000000u),
+			"a dead seated row takes no look: the seat follow's carrier + local yaw");
+}
+
+// D-NET-NEW-L5-29: the seated look holds the Yaw within 90 degrees of the seat's body heading
+// (+0x8C, the seat bone's yaw) unless the carrier's config is 3, 4, 5 or 7.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the config gate @0x4BEF9A..0x4BEFC3, the clamp
+//  @0x4BEFC5..0x4BEFED]
+void test_seated_infantry_look_holds_within_ninety_degrees() {
+	for (const bool wide : {false, true}) {
+		BodySource src;
+		auto view = seated_infantry_view(src, wide, 0x80, 0x00);
+		ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
+		for (int i = 0; i < 32; ++i) tick(*view);
+		expect(rider.heading_bam == -0x40000000, "32 clamped steps turn the Yaw 90 degrees");
+		tick(*view);
+		expect(rider.heading_bam == (wide ? -0x42000000 : -0x40000000),
+				wide ? "a wide config lets the Yaw past 90 degrees"
+				     : "the Yaw holds 90 degrees off the seat's body heading");
+	}
+}
+
+// Row 2 (D-NET-NEW-L5-29 / D-NET-NEW-L5-27): the replica aim overlay's pitch is the body's live
+// Pitch word for a player row, seated or not, and for a live seated org1 row; a free-standing
+// org1 row presents its aim pitch word.
+// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `mov edx, [ebp+14h]` @0x4B17AD]
+void test_overlay_pitch_is_the_live_pitch_word() {
+	ns::ClientState state;
+	opennova::anim::AimOverlayInputs in;
+	ns::ClientEntityState player;
+	player.handle = 0x0003;
+	player.cls = nw::EntityClass::Player;
+	player.carrier_handle = kHull;
+	player.mount_bone = 1;
+	player.pitch_bam = 0x01234567;
+	player.pitch_byte = 0x40;
+	expect(opennova::inmatch::aim_overlay_inputs_for_client(player, state, {}, in) &&
+					in.aim_pitch == 0x01234567,
+			"a seated player's overlay reads its live Pitch, not the record's byte");
+	ns::ClientEntityState npc;
+	npc.handle = kSeatedInfantry;
+	npc.cls = nw::EntityClass::Infantry;
+	npc.carrier_handle = kHull;
+	npc.mount_bone = 2;
+	npc.pitch_bam = 0x00765432;
+	npc.aim_yaw_byte = 0xF0;
+	expect(opennova::inmatch::aim_overlay_inputs_for_client(npc, state, {}, in) &&
+					in.aim_pitch == 0x00765432,
+			"a live seated org1 row's overlay reads its live Pitch");
+	npc.carrier_handle = 0xFFFF;
+	npc.mount_bone = 0;
+	expect(opennova::inmatch::aim_overlay_inputs_for_client(npc, state, {}, in) &&
+					in.aim_pitch == static_cast<int32_t>(0xF0000000u),
+			"a free-standing org1 row presents its aim pitch word");
+}
+
 // The authority's view runs no chase, so its rows count nothing and never starve: with no
 // record for 600 ticks a row still takes its legs.
 void test_authority_rows_never_starve() {
@@ -391,6 +528,9 @@ int main() {
 	test_starved_row_stops();
 	test_seated_row_counts_and_starves();
 	test_seated_rider_yaw_chases_its_record();
+	test_seated_infantry_look_chases_its_aim_words();
+	test_seated_infantry_look_holds_within_ninety_degrees();
+	test_overlay_pitch_is_the_live_pitch_word();
 	test_authority_rows_never_starve();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

@@ -271,6 +271,11 @@ public:
 	// slot's decoded row takes its visit there, then its twin's pose or its twin the
 	// row's, then its proxy's live words (D-NET-196; joiner_role_replica_world.cpp).
 	void visit_replica_pool1_slot(world::EntityHandle handle);
+	// The pipeline's seat frame resolver (ReplicaSeatFrameResolver): a seated row's seat
+	// carry over this world's carrier, and the carrier's mount config
+	// (joiner_role_replica_world.cpp).
+	bool resolve_replica_seat_frame(uint16_t carrier_handle, uint16_t carrier_type_id,
+			uint8_t bone, replication::ClientReplicaPipeline::ReplicaSeatFrame &out);
 
 	// The JOINER's per-frame clock (the host uses HostOwner::now_tick). The
 	// preload frame shares it, so it advances there too.

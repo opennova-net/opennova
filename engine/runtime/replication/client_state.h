@@ -730,6 +730,11 @@ struct ClientEntityState {
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `cmp ax, 200h; jge`
 	//  @0x4B4431..0x4B4435; Entity_UpdateInfantryAI @0x4B9910 - @0x4B9C09..0x4B9C0D]
 	bool rm_starved = false;
+	// This tick's visit of a live seated org1 row reached its seat branch, whose look half
+	// (ClientReplicaPipeline::tick_seated_looks) runs after the tick's gun channels.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
+	//  branch @0x4BE8F7, the look @0x4BEF57..0x4BEF97]
+	bool rm_seat_look_due = false;
 	// Vehicle speed register mirror (retail vehicleData[177]) — the DECOMPRESSED
 	// 16.16 wire value [orig: the mode-2 read decompresses weaponAimY before the
 	// store]. Gates the fast-vehicle snap threshold (>= 293 ~ 0.28 m/s ->

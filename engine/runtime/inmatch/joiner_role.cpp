@@ -1257,6 +1257,7 @@ void JoinerRole::pump() {
 				&materializer_, kernel.wire_header_world);
 		rt.tick_remote_recoil();
 	}
+	rt.view().tick_seated_looks(); // org1's seated look, after the gun channels and the recoil
 	lp.sync_local_mounted_input_heading();
 	// What the view arbiter reads from the session (death screen, end round,
 	// the death camera): the joiner samples it AFTER this frame's recv fold,
@@ -1440,32 +1441,11 @@ void JoinerRole::wire_frame_providers() {
 					if (seat.bone_index == bone) return static_cast<uint8_t>(seat.type);
 				return 0;
 			});
-	// A seated row's seat carry: the seat bone's frame on this world's carrier, as
-	// an authority's seated body takes it (pose_mounted_occupant over a transient
-	// rider: the bone point's yaw, pitch and roll; the rider's own words are not
-	// read) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
-	// Entity_GetBoneTransformAndOrientation @0x4B6510, +0x8C @0x4B654E, Roll
-	// @0x4B6572, +0x90 @0x4B6575].
+	// A seated row's seat carry and its carrier's mount config (resolve_replica_seat_frame).
 	rt.view().set_replica_seat_frame_resolver(
 			[this](uint16_t carrier_handle, uint16_t carrier_type_id, uint8_t bone,
-					replication::ClientReplicaPipeline::ReplicaSeatFrame &out) -> bool {
-				world::World &world = kernel_->world;
-				const world::Entity *carrier =
-						replica_world_entity(world, world::EntityHandle{carrier_handle});
-				const mission::ItemSeatSpec *spec =
-						mission::item_seat_spec_for_type(kernel_->seat_specs, carrier_type_id);
-				if (carrier == nullptr || spec == nullptr) return false;
-				for (const world::Seat &seat : spec->seats) {
-					if (seat.bone_index != bone) continue;
-					world::Entity rider;
-					const world::MountedPose pose =
-							world.vehicles.pose_mounted_occupant(rider, *carrier, seat);
-					out.heading = pose.heading;
-					out.pitch = pose.pitch;
-					out.roll = pose.roll;
-					return true;
-				}
-				return false;
+					replication::ClientReplicaPipeline::ReplicaSeatFrame &out) {
+				return resolve_replica_seat_frame(carrier_handle, carrier_type_id, bone, out);
 			});
 	// The player body's slope conform on a remote row reads the def's attrib
 	// word (the 0x200 conform bit), from the same items.def

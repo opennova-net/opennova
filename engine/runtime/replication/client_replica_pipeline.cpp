@@ -73,15 +73,6 @@ inline uint8_t yaw_byte_from_bam(int32_t bam) {
 	return static_cast<uint8_t>(static_cast<uint32_t>(bam) >> 24);
 }
 
-inline int32_t chase_infantry_pitch(int32_t current, uint8_t target_byte) {
-	const int32_t target = static_cast<int32_t>(
-			static_cast<uint32_t>(target_byte) << 24);
-	const int32_t delta = opennova::io::bam_sub(target, current);
-	const int32_t step = opennova::io::bam_sar(
-			opennova::io::bam_add(delta, 4), 3);
-	return opennova::io::bam_add(current, step);
-}
-
 // Disarm the row's root-motion channel: the next free-standing tick re-arms
 // it fresh from the wire state (+ the live phase seed). Used by the mover
 // freezes (dead/bit0/carried — retail applies the anim byte per record
@@ -463,6 +454,13 @@ void ClientReplicaPipeline::follow_carrier_seat(ClientEntityState &child,
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the angle apply @0x4B43E6..0x4B440A,
 	//  the seat carry @0x4B654E..0x4B6575]
 	if (child.cls == EntityClass::Player) return;
+	// So is a live seated org1 body's: its seat branch's look half (tick_seated_looks); the bone
+	// pose writes the body heading, Roll and savedLivePitch.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the bone pose @0x4BED96..0x4BEDDA, the look
+	//  @0x4BEF57..0x4BEF97]
+	if (child.cls == EntityClass::Infantry && child.mount_bone != 0 &&
+			(child.state_flags & world::kEntityFlagDead) == 0u)
+		return;
 	child.heading_bam = io::bam_add(carrier->heading_bam, child.net_seat_local_heading_bam);
 	child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
 }
@@ -1300,19 +1298,16 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			es.aim_yaw_byte = rec.infantry.aim_yaw_byte;
 			es.anim_state_id = rec.infantry.anim_byte;
 			es.state_flags = rec.infantry.flags_byte;
-			// The compact carries desired aim pitch (entity+0x2D0), not live
-			// entity+0x14. Retail's remote gunner rebuilds the latter locally
-			// with the same wrapped one-eighth chase as authoritative AI.
-			// [orig: chase @0x4bef7b..0x4bef97]
-			if (es.carrier_handle != wire_handle::kInvalid) {
-				es.pitch_bam = chase_infantry_pitch(
-						es.pitch_bam, rec.infantry.aim_yaw_byte);
-			}
+			// The record carries the aim words (+0x2EC, +0x2D0), not the live Yaw / Pitch: a
+			// seated body's seat branch chases them every tick (tick_seated_looks).
+			// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the stores @0x4C066C /
+			//  @0x4C0672; Entity_UpdateInfantryAI @0x4B9910 - the look @0x4BEF57..0x4BEF97]
 			if (es.carrier_handle != wire_handle::kInvalid) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,
 						static_cast<int32_t>(
-								static_cast<uint32_t>(rec.infantry.yaw_byte) << 24)});
+								static_cast<uint32_t>(rec.infantry.yaw_byte) << 24),
+						/*ground=*/false, /*force_live_snap=*/respawned_this_record});
 				skip_pos = true;
 			} else if (rec.infantry.vehicle_slot_handle != wire_handle::kInvalid) {
 				ground_carrier = rec.infantry.vehicle_slot_handle;
@@ -1566,8 +1561,16 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		//  @0x4C05A2, the block @0x4C04E1, the reset @0x4C04EC]
 		if (child->cls == EntityClass::Player) {
 			land_compact_pose(*child, w.x, w.y, w.z, true, heading, pending.force_live_snap);
+		} else if (child->cls == EntityClass::Infantry) {
+			child->net_interp_progress = 0;
+			// An infantry record writes the live Yaw on its respawn edge alone; a live seated
+			// body's is its look's (tick_seated_looks).
+			// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the respawn arm's
+			//  +0x10 store @0x4C05D5, the stage @0x4C0689..0x4C06AA]
+			if (pending.force_live_snap || child->mount_bone == 0 ||
+					(child->state_flags & world::kEntityFlagDead) != 0u)
+				child->heading_bam = heading;
 		} else {
-			if (child->cls == EntityClass::Infantry) child->net_interp_progress = 0;
 			child->heading_bam = heading;
 		}
 		// A deck-carried vehicle is a carried OBJECT (the bit0-flagged attach

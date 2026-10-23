@@ -1151,8 +1151,9 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	if (!expect(decoded != nullptr && decoded->carrier_handle == vh.packed &&
 	                    decoded->mount_bone == 3 && decoded->pitch_byte == 0x20 &&
 	                    decoded->aim_yaw_byte == 0xF0 && decoded->anim_state_id == 47 &&
-	                    decoded->pitch_bam == static_cast<int32_t>(0xFE000000u),
-	            "mounted infantry selector and chased live pitch survive the production fold"))
+	                    decoded->pitch_bam == 0,
+	            "mounted infantry selector and aim bytes survive the production fold; the record "
+	            "writes no live Pitch (the seat branch's look chases it every tick)"))
 		return false;
 	decoded_carrier = view.state().find(vh.packed);
 	if (!expect(decoded_carrier != nullptr && decoded->x == decoded_carrier->x &&

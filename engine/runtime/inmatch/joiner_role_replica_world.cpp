@@ -8,6 +8,7 @@
 #include <runtime/inmatch/joiner_role.h>
 
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/mission/seat_spec_extract.h> // item_seat_spec_for_type (the seat frame resolver)
 
 #include <runtime/replication/client_replica_pipeline.h>
 
@@ -1549,6 +1550,35 @@ void JoinerRole::visit_replica_pool1_slot(world::EntityHandle handle) {
 	else
 		mirror_mission_entity(*row);
 	sync_wire_collision_proxy_live(*row);
+}
+
+// A seated row's seat carry: the seat bone's frame on this world's carrier, as an authority's
+// seated body takes it (pose_mounted_occupant over a transient rider: the bone point's yaw,
+// pitch and roll; the rider's own words are not read). The carrier def's mount config (+0x86C)
+// rides along whenever the carrier's seat table resolves, the frame found or not: org1's seated
+// look clamp reads it.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - Entity_GetBoneTransformAndOrientation
+//  @0x4B6510, +0x8C @0x4B654E, Roll @0x4B6572, +0x90 @0x4B6575; Entity_UpdateInfantryAI
+//  @0x4B9910 - the config gate @0x4BEF9A..0x4BEFC3]
+bool JoinerRole::resolve_replica_seat_frame(uint16_t carrier_handle, uint16_t carrier_type_id,
+		uint8_t bone, replication::ClientReplicaPipeline::ReplicaSeatFrame &out) {
+	world::World &world = kernel_->world;
+	const world::Entity *carrier = replica_world_entity(world, world::EntityHandle{carrier_handle});
+	const mission::ItemSeatSpec *spec =
+			mission::item_seat_spec_for_type(kernel_->seat_specs, carrier_type_id);
+	out.mount_config_valid = spec != nullptr && spec->mount_config_valid;
+	if (out.mount_config_valid) out.mount_config = spec->mount_config;
+	if (carrier == nullptr || spec == nullptr) return false;
+	for (const world::Seat &seat : spec->seats) {
+		if (seat.bone_index != bone) continue;
+		world::Entity rider;
+		const world::MountedPose pose = world.vehicles.pose_mounted_occupant(rider, *carrier, seat);
+		out.heading = pose.heading;
+		out.pitch = pose.pitch;
+		out.roll = pose.roll;
+		return true;
+	}
+	return false;
 }
 
 } // namespace opennova::inmatch

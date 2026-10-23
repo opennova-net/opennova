@@ -422,6 +422,20 @@ public:
 	void tick_remote_motion(uint16_t self_handle);
 	void tick_remote_motion_through_self();
 	void tick_remote_motion_after_self();
+	// The look half of a live seated org1 row's seat branch, for each row this tick's visit
+	// reached it on (rm_seat_look_due): the Yaw chases the aim heading (+0x2EC) a quarter of
+	// the way, the step clamped to +-0x2000000, the Pitch the aim pitch (+0x2D0) an eighth,
+	// then the Yaw is held within 90 degrees of the seat's body heading (+0x8C) unless the
+	// carrier's config is 3, 4, 5 or 7. Retail walks pool 1 (a gun's ai-fn tether and its
+	// class update's window store) before the pool-0 body, and the body's recoil block precedes
+	// its seat branch, so the embedder calls this leg after its gun channels and tick_recoil
+	// (a joiner: after tick_replica_emplaced_channels and tick_remote_recoil).
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the recoil @0x4BE7FD..0x4BE84B, the seat bone
+	//  @0x4BED72 (+0x8C @0x4BEDB3), the look @0x4BEF57..0x4BEF97, the clamp @0x4BEF9A..0x4BEFED;
+	//  Entity_AttachToBoneAndUpdateTransform @0x5463D0 (+0x8C @0x546620);
+	//  Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9 ahead of the
+	//  pool-0 walk @0x4C2426..0x4C2472]
+	void tick_seated_looks();
 	void set_self_body_split(bool on) { self_body_split_ = on; }
 	// The pool-1 interleave (a joiner, whose World walks pool 1 by slot): the walk parks
 	// every pool-1 row too, and each takes its visit at its own slot of the World's pool-1
@@ -697,10 +711,15 @@ public:
 	// carrier and seat table; false = no frame (the row keeps its words).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - Entity_GetBoneTransformAndOrientation
 	//  @0x4B6510, +0x8C @0x4B654E, Roll @0x4B6572, +0x90 @0x4B6575]
+	// The carrier def's mount config (+0x86C) rides along, filled whenever the carrier's
+	// seat table resolves, the frame found or not: org1's seated look clamp reads it
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BEF9A..0x4BEFC3].
 	struct ReplicaSeatFrame {
 		int32_t heading = 0;
 		int32_t pitch = 0;
 		int32_t roll = 0;
+		bool mount_config_valid = false;
+		int32_t mount_config = 0;
 	};
 	using ReplicaSeatFrameResolver = std::function<bool(
 			uint16_t carrier_handle, uint16_t carrier_type_id, uint8_t bone, ReplicaSeatFrame &out)>;

@@ -1347,6 +1347,46 @@ void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es) {
 	                               es.roll_bam, es.rm_body_pitch, es.eye_offset);
 }
 
+// The look half of org1's seat branch over every row whose visit this tick reached it. The
+// seat's body heading is the seat bone's yaw (the frame resolver; a frame that does not
+// resolve leaves the word as it was, as a failed bone lookup leaves +0x8C). The aim words are
+// the record's two aim bytes, each the high byte of its word: +0x2EC (the yaw byte the host
+// clamps within 0x1FFFFFE0 of its Yaw) and +0x2D0.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - Entity_GetBoneTransformAndOrientation @0x4BED72,
+//  +0x8C @0x4BEDB3; the look: `mov eax, [esi+2ECh]` @0x4BEF57, (aim - Yaw + 2) >> 2
+//  @0x4BEF5D..0x4BEF62, the clamp to +-0x2000000 @0x4BEF65..0x4BEF7A, the Yaw store
+//  @0x4BEF84, `mov ecx, [esi+2D0h]` @0x4BEF87, Pitch + ((aim - Pitch + 4) >> 3)
+//  @0x4BEF8D..0x4BEF97; the config gate @0x4BEF9A..0x4BEFC3, the 90-degree clamp about +0x8C
+//  @0x4BEFC5..0x4BEFED; Entity_AttachToBoneAndUpdateTransform @0x5463D0 - a gunner's +0x8C
+//  @0x546620; NetPacket_SerializeInfantryEntityState @0x4C0320 - the byte stores
+//  @0x4C066C / @0x4C0672, the host's clamp @0x4C0921..0x4C0960]
+void ClientReplicaPipeline::tick_seated_looks() {
+	for (ClientEntityState &es : state_.entities) {
+		if (!es.rm_seat_look_due) continue;
+		es.rm_seat_look_due = false;
+		const ClientEntityState *carrier = state_.find(es.carrier_handle);
+		ReplicaSeatFrame seat;
+		if (carrier != nullptr && replica_seat_frame_resolver_ &&
+				replica_seat_frame_resolver_(carrier->handle, carrier->type_id, es.mount_bone, seat))
+			es.rm_body_heading = seat.heading;
+		const int32_t aim_heading = static_cast<int32_t>(static_cast<uint32_t>(es.pitch_byte) << 24);
+		const int32_t aim_pitch = static_cast<int32_t>(static_cast<uint32_t>(es.aim_yaw_byte) << 24);
+		int32_t yaw_step = io::bam_sar(io::bam_add(io::bam_sub(aim_heading, es.heading_bam), 2), 2);
+		if (yaw_step > 0x2000000) yaw_step = 0x2000000;
+		else if (yaw_step < -0x2000000) yaw_step = -0x2000000;
+		es.heading_bam = io::bam_add(es.heading_bam, yaw_step);
+		es.pitch_bam = io::bam_add(es.pitch_bam,
+				io::bam_sar(io::bam_add(io::bam_sub(aim_pitch, es.pitch_bam), 4), 3));
+		const int32_t cfg = seat.mount_config;
+		if (!(seat.mount_config_valid && (cfg == 3 || cfg == 4 || cfg == 5 || cfg == 7))) {
+			const int32_t twist = io::bam_sub(es.heading_bam, es.rm_body_heading);
+			if (twist > 0x40000000) es.heading_bam = io::bam_add(es.rm_body_heading, 0x40000000);
+			if (twist < -0x40000000) es.heading_bam = io::bam_sub(es.rm_body_heading, 0x40000000);
+		}
+		es.yaw_byte = static_cast<uint8_t>(static_cast<uint32_t>(es.heading_bam) >> 24);
+	}
+}
+
 std::optional<world::PhysicsClass> ClientReplicaPipeline::person_move_row(uint16_t type_id) const {
 	const ItemReplicationProfile *profile = item_def(type_id);
 	if (profile == nullptr) return std::nullopt;
@@ -1479,6 +1519,15 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			row_chase_count(es, es.net_interp_progress);
 			if (es.rm_starved) return;
 		}
+		// A seated org1 body with Health reaches its seat branch, whose look half runs after
+		// the tick's gun channels (tick_seated_looks). A dead one's record zeroed its Health,
+		// so it takes the on-foot branch.
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
+		//  branch @0x4BE8F7; NetPacket_SerializeInfantryEntityState @0x4C0320 - the dead bit's
+		//  Health store @0x4C04FC]
+		if (es.cls == EntityClass::Infantry && es.mount_bone != 0 &&
+				(es.state_flags & world::kEntityFlagDead) == 0u)
+			es.rm_seat_look_due = true;
 		// A seated body's pass still refreshes its ride link off the seat's
 		// ground link (the record's store) [orig: @0x4B5EA9..0x4B5F2C;
 		// the ground store @0x4C1353].

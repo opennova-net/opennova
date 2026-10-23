@@ -271,6 +271,26 @@ void test_isturret_npc_gunner_yaw_tether() {
     CHECK(r.gun().emplaced_gun_yaw_word == static_cast<int16_t>(0x93));
 }
 
+// D-NET-NEW-L5-29, the authority's channel: an NPC gunner's tick tethers its Yaw first (the
+// gun's ai-fn in the pool-1 walk), then its seat branch chases the aim words: the Yaw a quarter
+// of the way (the step clamped to +-0x2000000), the Pitch an eighth.
+// [orig: Entity_UpdateChildAttachment @0x4409A0 - the NPC tether @0x440abd..0x440ade;
+//  Entity_UpdateInfantryAI @0x4B9910 - the look @0x4BEF57..0x4BEF97; Entity_UpdateAllEntities
+//  @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9 ahead of the pool-0 walk @0x4C2426..0x4C2472]
+void test_isturret_npc_gunner_tether_then_look() {
+    Rig r(/*local=*/false, /*player_bit=*/false,
+            opennova::def::DEF_ITEM_ATTRIB2_ISTURRET);
+    r.look(bam_sub(kGunHeading, 10 * kBamPerDegree), 0);
+    r.body->inf.aim_heading = kGunHeading;
+    r.body->inf.aim_pitch = 0x08000000;
+    CHECK(r.w.ai.pose_if_mounted(*r.body, r.w));
+    // The tether leaves 0x3D275280 (the gun's Yaw less 4 degrees and the word's half); the
+    // chase adds (0x40000000 - 0x3D275280 + 2) >> 2 = 0xB62B60; the Pitch (0x08000000 + 4) >> 3.
+    CHECK(r.body->heading == 0x3DDD7DE0);
+    CHECK(r.gunner().heading == 0x3DDD7DE0);
+    CHECK(r.body->pitch == 0x01000000);
+}
+
 // IsTurret, a remote Player occupant: neither tether — the look stays, the
 // word still slews. [orig: the Player bit jnz @0x440abb skips the NPC clamp;
 //  the local compare @0x440a76 fails for a remote human]
@@ -935,6 +955,7 @@ int main() {
     test_isturret_slews_per_tick();
     test_isturret_local_gunner_yaw_tether();
     test_isturret_npc_gunner_yaw_tether();
+    test_isturret_npc_gunner_tether_then_look();
     test_isturret_remote_player_untethered();
     test_isturret_recoil_after_rate_clamp();
     test_isturret_window_pins_after_slew();
