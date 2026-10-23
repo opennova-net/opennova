@@ -352,6 +352,38 @@ bool run_respawn_snaps_without_glide() {
 	return expect(es->respawn_revision == 1, "the respawn edge was counted once");
 }
 
+// D-NET-NEW-L5-60: the respawn arm's reset releases the row's +0x1CC group (a decay or a hit
+// emitter): the dead record queues no release, the dead->alive edge queues exactly one for the
+// row, and a further live record none. [orig: NetPacket_SerializePlayerState @0x4C09C0 - the
+// dead test @0x4C1109, Entity_ResetToSpawnState called @0x4C113C; the reset's release
+// @0x4B97CB..0x4B97F5]
+bool run_respawn_releases_the_corpse_group() {
+	ns::ClientReplicaPipeline view(class_of);
+	view.set_remote_motion_mode(true);
+	const uint16_t handle = 0x000B;
+	seed_row(view, handle, kPlayerType);
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	const auto releases = [&] {
+		int count = 0;
+		for (const auto &d : view.drain_corpse_decays())
+			if (d.release && d.handle == handle) ++count;
+		return count;
+	};
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax)));
+	view.tick_remote_motion(0xFFFF);
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax, 0x02)));
+	view.tick_remote_motion(0xFFFF);
+	if (!expect(releases() == 0, "a dead record releases nothing")) return false;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax + (80 << 16))));
+	if (!expect(releases() == 1, "the respawn edge releases the row's group once")) return false;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax + (80 << 16))));
+	return expect(releases() == 0, "a live record after it releases nothing");
+}
+
 // Pin the org2 bucket ladder's exact per-step math at three distances,
 // INCLUDING the verbatim non-monotonic [0x6000,0x7000) -> 7 rung — a silent
 // "monotonicizing fix" must fail here [orig: the ladder @0x4B44C4..0x4B4581;
@@ -1905,6 +1937,7 @@ int main() {
 	ok &= run_player_large_jump_snaps_in_one_tick();
 	ok &= run_player_deadband_ignores_jitter();
 	ok &= run_respawn_snaps_without_glide();
+	ok &= run_respawn_releases_the_corpse_group();
 	ok &= run_org2_bucket_ladder_is_verbatim();
 	ok &= run_vehicle_bucket_ladder_is_verbatim();
 	ok &= run_vehicle_bit0_record_keeps_chasing();

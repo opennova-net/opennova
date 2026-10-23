@@ -1181,6 +1181,19 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			if (was_known && was_dead && is_alive) {
 				++es.respawn_revision;
 				respawned_this_record = true;
+				// The respawn arm's reset releases the body's +0x1CC group (its corpse leg's
+				// decay, or a hit's), every organic row's, the own one's included: the embedder
+				// stops it as it does an expired row's (erase_expired_remote_rows).
+				// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead test @0x4C1109,
+				//  Entity_ResetToSpawnState @0x4B9610 called @0x4C113C;
+				//  NetPacket_SerializeInfantryEntityState @0x4C0320 - the dead test @0x4C05B3, the
+				//  call @0x4C05EC; the reset's release @0x4B97CB..0x4B97F5]
+				if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
+					ReplicaCorpseDecay release;
+					release.handle = es.handle;
+					release.release = true;
+					corpse_decays_.push_back(release);
+				}
 			}
 		}
 		// The organic wire-dead position skip (LABEL_151). Vehicle wrecks are the
