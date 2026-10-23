@@ -17,8 +17,8 @@
 // no POST pair, the startupurl on http://[domainname]/, a TimeOnGateServer line
 // in asctime's shape after the reflected pair); the JO demo's alias of JO's tag,
 // whose live reply is unrecorded, gets JO's lobby in the reply this gate always
-// sent, byte for byte; OpenNova's gets its row's; a tag no row answers to gets
-// nothing. A
+// sent, byte for byte; OpenNova's tag (its row's own, a JO row) gets its row's
+// values in JO's live shape; a tag no row answers to gets nothing. A
 // configured GLSVSS leg (ONNET_GLSVSS_*) stands in for a row with none, never
 // for DFX2's own.
 //
@@ -254,11 +254,12 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(reply.startup_url.compare(0, startup.size(), startup) == 0);
 
 	// Each tag's lobby: JO's and DFX2's as their live gates answer, the JO demo's
-	// alias in JO's lobby with the reply this gate always sent, and OpenNova's row.
+	// alias in JO's lobby with the reply this gate always sent, and OpenNova's row,
+	// whose title is JO's, in JO's live shape (its tag is the row's own, no alias).
 	const Lobby jo{ "jop_2_consumer", kJoQuery, "", "", "", true };
 	const Lobby jo_demo{ "jop_2_consumer", kJoQuery, "", "", "" };
 	const Lobby dfx2{ "dfx2_0_consumer", kDfx2Query, "[DFX2]KILLS", "3600000", "45000", true };
-	const Lobby on{ "opennova_0_consumer", kJoQuery, "", "", "" };
+	const Lobby on{ "opennova_0_consumer", kJoQuery, "", "", "", true };
 	if (expect_lobby(port, "jop:cus2", jo) != 0)
 		return 1;
 	if (expect_lobby(port, kJoDemo.gate_tag, jo_demo) != 0)

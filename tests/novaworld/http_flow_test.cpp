@@ -145,8 +145,12 @@ static bool test_login_success_concrete() {
 	// follows it in the later Cookie lists, the UDP statements' var-list included.
 	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - CUIBrowser_AddFormField @0x4D16A9..
 	//  @0x4D17AA; CNapiSession_ReadLocaleInfo @0x4CE390 - the jar's walk @0x4CE3E5]
-	expect(r.request.headers == std::vector<std::string>{"Cookie: NWUID=ABCDEF0123456789;",
-	                                                      "Cookie: CountryName=us;"},
+	// The cookie lines follow the menu browser's four GET headers (D-NET-NEW-L9-31).
+	// [orig: CUIBrowser_SendHTTPRequest @0x658840 - @0x658969, @0x658979, @0x658989, @0x6589D5]
+	expect(r.request.headers ==
+	               std::vector<std::string>{"Accept: image/jpeg, image/x-pcx, image/pcx, image/png, text/html",
+	                       "Accept-Language: en", "User-Agent: NovaLogic IBrowse 2.0", "Pragma: no-cache",
+	                       "Cookie: NWUID=ABCDEF0123456789;", "Cookie: CountryName=us;"},
 	       "the prepare GET carries the identity cookies, in their order");
 
 	// PREPARE response: the server issues the EPASK bundle as a cookie. Concrete url -> straight to POST.
