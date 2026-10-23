@@ -8,6 +8,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h> // infantry_anim_flags
+#include <runtime/world/local_player.h> // PlayerViewState::camera_mode (g_CameraMode)
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -136,6 +137,14 @@ void infantry_org2_view_tick(const World &world, AiEntity &e, const Entity *tick
     const Entity *ground = mount != nullptr ? mount
             : tick_entity != nullptr        ? world.registry.get(tick_entity->ground_target)
                                             : nullptr;
+    // The local body in a control seat (+0x168 ctrlx 2 or drvrx 5) under the chase camera
+    // (g_CameraMode 1) halves its Pitch every tick, ahead of the phase.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the local test @0x4B4921, the camera
+    //  test @0x4B4929, the seat tests @0x4B4932..0x4B4940, `sar dword ptr [esi+14h], 1` @0x4B4942]
+    if (local && tick_entity != nullptr && world.local_player_state != nullptr &&
+            world.local_player_state->view.camera_mode == 1 &&
+            is_vehicle_control_seat(tick_entity->mount_type))
+        inf.look_pitch = io::bam_sar(inf.look_pitch, 1);
     Org2ViewGates gates;
     gates.flags = flags;
     gates.anim_state = inf.anim_state;

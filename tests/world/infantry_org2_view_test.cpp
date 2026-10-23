@@ -6,12 +6,14 @@
 //   about the body heading its last seat carry left, unless its mount's config is 3 or its ground
 //   (the mount) is a crashed vehicle; its prone local clears.
 // - D-NET-NEW-L5-49: the pitch clamp is skipped while the mount is a crashed vehicle.
+// - D-NET-NEW-L5-50: the local body in a control seat halves its Pitch under the chase camera.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the canopy chase @0x4B4945..0x4B496C, the
 //  skip test @0x4B4972..0x4B4978, the mount config test @0x4B4AC6..0x4B4ADE, the ground test
 //  @0x4B4AE0..0x4B4AF9, the clamp @0x4B4AFB..0x4B4B59, the legs @0x4B4B5F..0x4B4B6B, the leg model
 //  @0x4B497E..0x4B4ABB, the limit select @0x4B4B71..0x4B4B7D, the mount's crash test
 //  @0x4B4B82..0x4B4BA0, the pitch clamp @0x4B4BA2..0x4B4BC6; the prone local @0x4B416C..0x4B4183,
-//  its clear @0x4B46FC..0x4B471B; the ground = mount store @0x4B41A2..0x4B41B4]
+//  its clear @0x4B46FC..0x4B471B; the ground = mount store @0x4B41A2..0x4B41B4; the chase camera's
+//  halving @0x4B4921..0x4B4942]
 // Core-only: every value is the test's own; the World is heap-held.
 #include <base/io/bam.h>
 #include <runtime/world/ai.h>
@@ -19,6 +21,7 @@
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/infantry_view.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/world.h>
 
 #include <cstdint>
@@ -224,6 +227,48 @@ void test_seated_player_runs_the_phase(Mount kind) {
 	CHECK(occ != nullptr && occ->heading == yaw_want);
 }
 
+// D-NET-NEW-L5-50: the local body in a control seat (ctrlx / drvrx) under the chase camera
+// (g_CameraMode 1) halves its Pitch ahead of the phase, every tick; a passenger seat, the first
+// person camera or a body not the local one keeps it [orig: @0x4B4921..0x4B4942].
+void test_chase_camera_halves_a_drivers_pitch() {
+	struct Case {
+		w::SeatType seat;
+		int camera_mode;
+		bool local;
+		bool halved;
+	};
+	for (const Case c : {Case{w::SeatType::Controller, 1, true, true},
+				Case{w::SeatType::Driver, 1, true, true},
+				Case{w::SeatType::Passenger, 1, true, false},
+				Case{w::SeatType::Driver, 0, true, false},
+				Case{w::SeatType::Driver, 1, false, false}}) {
+		auto wp = std::make_unique<w::World>();
+		w::World &world = *wp;
+		world.registry.configure_pool(0, 16);
+		auto local = std::make_unique<w::LocalPlayer>(world);
+		local->view.camera_mode = c.camera_mode;
+		world.local_player_state = local.get();
+		w::Entity body;
+		body.kind = w::EntityKind::Organic;
+		body.health = 100;
+		body.alive = true;
+		body.mount_type = c.seat; // +0x168 alone: no mount, so no Flags 0x40 skip and no clamp skips
+		const w::EntityHandle bh = world.registry.spawn(0, body);
+		w::AiEntity *ae = world.ai.at(world.ai.attach(bh));
+		CHECK(ae != nullptr);
+		if (ae == nullptr) continue;
+		ae->inf.active = true;
+		ae->inf.is_local_player = c.local;
+		static constexpr int32_t kPitch = -0x10000001;
+		ae->inf.look_pitch = kPitch;
+		ae->pitch = kPitch;
+		w::infantry_org2_view_tick(world, *ae, world.registry.get(bh), 1);
+		const int32_t want = c.halved ? io::bam_sar(kPitch, 1) : kPitch;
+		CHECK((c.local ? ae->inf.look_pitch : ae->pitch) == want);
+		world.local_player_state = nullptr;
+	}
+}
+
 } // namespace
 
 int main() {
@@ -236,6 +281,7 @@ int main() {
 	test_seated_player_runs_the_phase(Mount::kPlain);
 	test_seated_player_runs_the_phase(Mount::kConfig3);
 	test_seated_player_runs_the_phase(Mount::kCrashed);
+	test_chase_camera_halves_a_drivers_pitch();
 	if (failures == 0) std::printf("infantry_org2_view: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
