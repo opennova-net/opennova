@@ -283,21 +283,20 @@ void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits
 	fire_held_ = (held_action_bits & HELD_FIRE) != 0;
 	fire_keys_held_ = (held_action_bits & HELD_FIRE_KEYS) != 0;
 	// Input_FlushDeferredEvents: each deferred dispatch (ToSpecial's, kept by a reload or a
-	// draw in progress) is queued again behind the update's records, its third argument the
+	// draw in progress; the fire row's, an automatic weapon's re-queue) is queued again in
+	// order behind the update's records, its first two arguments its own and its third the
 	// deferred marker 0xFFFFEEEE, under the queue's cap, the deferred queue emptied; it
 	// passes the head again at its dispatch, which drops it for good [orig:
 	// Input_ProcessFrame @0x49D520 - Input_ProcessPlayerFrame @0x49D58B, then
 	// Input_FlushDeferredEvents @0x49D591; Input_FlushDeferredEvents @0x497AC0 - the count
 	// test @0x497AC0, `push 0FFFFEEEEh` @0x497AE1, Input_QueueEvent @0x497AE9, the shift
 	// @0x497B04..0x497B21].
-	constexpr int kToSpecialRow = 37;
 	constexpr int32_t kDeferredMarker = static_cast<int32_t>(0xFFFFEEEEu);
-	world::LocalPlayer &local = kernel_->local;
-	const int32_t deferred = local.to_special_queued;
-	local.to_special_queued = 0;
-	for (int32_t i = 0; i < deferred; ++i)
-		(void)input_events_.push({controls::action_code(kToSpecialRow), 0, 0, kDeferredMarker,
-				false, controls::InputEventOrigin::Device});
+	std::vector<world::LocalPlayer::DeferredInputEvent> deferred;
+	deferred.swap(kernel_->local.deferred_events);
+	for (const world::LocalPlayer::DeferredInputEvent &event : deferred)
+		(void)input_events_.push({event.code, event.p1, event.p2, kDeferredMarker, false,
+				controls::InputEventOrigin::Device});
 	controls::InputEventRecord record;
 	while (input_events_.pop(record)) dispatch_record(record, source);
 	pause_flips_ = false;
@@ -368,7 +367,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// ToSpecial (catalog row 37, code 220 = 0xDC, flags 0x8C000801) past the head (a dead
 	// local player, the pause, the deploy hold and the round over drop it, a deferred one
 	// for good): one dispatch with the keys' live state, which a reload or a draw in progress
-	// defers to the next input frame's flush (LocalPlayer::to_special_queued). (The press
+	// defers to the next input frame's flush (LocalPlayer::deferred_events). (The press
 	// scan's own dead gate, @0x49D330..0x49D339, takes the same press first.)
 	// [orig: Input_HandleActionBinding @0x49AD40 - the head @0x49AD8A..0x49AE16 (bit 0
 	//  with g_RoundOver @0x49ADFD in a session, @0x49AE16 out of one);
@@ -376,10 +375,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	//  Input_QueueDeferredEvent @0x4993E0 (the 32 cap @0x4993E8)]
 	constexpr int kToSpecialRow = 37;
 	if (code == controls::action_code(kToSpecialRow)) {
-		if (action_head_admits(code)) {
-			kernel_->local.queue_to_special();
-			kernel_->local.dispatch_to_special(to_special_held_);
-		}
+		if (action_head_admits(code)) kernel_->local.dispatch_to_special(to_special_held_);
 		return;
 	}
 	// The fire row (catalog row 43 attack_1, code 149 = 0x95, flags 0x8C400C01) past the head:
@@ -391,7 +387,9 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// binding up: none under a cease fire or an open text line (whose release pass queues no
 	// event). A PowerThrow def's press leg requests no fire: it starts the windup only when the
 	// binding's device is the keyboard (HELD_FIRE_KEYS), a mouse press's windup being its
-	// left-down's (world::local_weapon_left_button_down), a joystick's none.
+	// left-down's (world::local_weapon_left_button_down), a joystick's none. A deferred record
+	// (an automatic weapon's re-queue, LocalPlayer::deferred_events) dispatches as a fresh one,
+	// so the refire meets every gate a press does.
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95: g_BinocularsViewActive
 	//  @0x4E07B5, g_InCeaseFire @0x4E07C2, Input_IsBindingActive(0x95) @0x4E07D9, the release
 	//  leg @0x4E07E9, the press leg @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device

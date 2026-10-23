@@ -42,6 +42,18 @@ void set_row(WeaponFsmActionRow &row, const char *name, int32_t ds, int32_t de) 
 }
 
 float no_clip_seconds(void *, const char *) { return 0.0f; }
+
+// One tick as the game runs it: the deferred fire record the slot's last tick queued (its
+// refire_queued, Input_QueueDeferredEvent(149): the recoil window's re-queue or a mid-FIRE
+// request's) dispatches at this tick's input frame, where case 0x95's press leg requests fire
+// only while the binding is still down; the FSM consumes no re-queue of its own.
+// [orig: Input_FlushDeferredEvents @0x497AC0 from Input_ProcessFrame @0x49D591;
+//  Input_HandleActionBinding_0 case 0x95 - Input_IsBindingActive(0x95) @0x4E07D9]
+void game_tick(const WeaponFsmDef &def, WeaponSlotState &s, WeaponFsmInputs in,
+               WeaponFsmEvents &ev) {
+    in.fire_pressed = in.fire_pressed || (s.refire_queued && in.fire_held);
+    weapon_fsm_tick(def, s, in, ev);
+}
 int no_clip(void *, const char *) { return 0; }
 
 // The M4AUTO's FSM rows: idle, fire {0, 3}, recoil {0, 2}, reload, empty.
@@ -72,7 +84,7 @@ int fsm_shots_for_hold(int hold) {
         in.fire_pressed = t == 0;
         in.fire_held = t < hold;
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         if (ev.fired) ++fired;
     }
     return fired;
@@ -109,7 +121,7 @@ void test_mid_fire_press_banks_only_while_held() {
             in.fire_pressed = t == 0 || t == 2;
             in.fire_held = t == 0 || (t >= 2 && t < release);
             WeaponFsmEvents ev;
-            weapon_fsm_tick(def, s, in, ev);
+            game_tick(def, s, in, ev);
             if (ev.fired) ++fired;
         }
         // Released on tick 4 (still inside FIRE): the dispatch on 4 drops it, and the
@@ -153,6 +165,8 @@ struct Rig {
     WeaponInventory inv;
     EntityHandle shooter;
     int m4 = 0;
+    // The deferred fire record the last pump queued (LocalWeaponPumpIO::fire_deferred).
+    bool deferred = false;
 
     explicit Rig(bool bucket) {
         world.registry.configure_pool(0, 4);
@@ -224,8 +238,11 @@ struct Rig {
         local_weapon_install(world, local.weapon, data, false, false, &inv, local.view);
     }
 
+    // One update: the binding's state and press, the deferred fire record's dispatch at
+    // the input frame (its press leg while the binding holds), then the pump.
     void tick(bool held, bool pressed) {
         local_weapon_set_input(local.weapon, local.view, held, pressed, false);
+        if (deferred) (void)local.fire_record(held, false);
         LocalWeaponPumpIO io;
         io.view = &local.view;
         io.inventory = &inv;
@@ -233,6 +250,7 @@ struct Rig {
         io.self_wire_handle = shooter.packed;
         ++world.logic_tick;
         local_weapon_pump_tick(world, local.weapon, io);
+        deferred = io.fire_deferred;
     }
 };
 

@@ -142,9 +142,9 @@ void run_the_roles_frame_reads_the_dedicated_operand() {
 		// stash stays.
 		lp.inventory_valid = true;
 		lp.inventory.quick_switch_stash = 0;
-		lp.to_special_queued = 1;
+		lp.queue_deferred_event(lp.kToSpecialCode);
 		r.frame(0); // the input frame's flush queues the deferred record again
-		CHECK(lp.to_special_queued == 0);
+		CHECK(lp.deferred_events.empty());
 		CHECK(lp.inventory.quick_switch_stash == (peer ? -1 : 0));
 		// The mouse look's axis events pass the same head.
 		const int32_t heading = lp.input.look_heading;

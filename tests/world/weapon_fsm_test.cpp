@@ -24,6 +24,18 @@ static int failures = 0;
 
 namespace {
 
+// One tick as the game runs it: the deferred fire record the slot's last tick queued (its
+// refire_queued, Input_QueueDeferredEvent(149): the recoil window's re-queue or a mid-FIRE
+// request's) dispatches at this tick's input frame, where case 0x95's press leg requests fire
+// only while the binding is still down; the FSM consumes no re-queue of its own.
+// [orig: Input_FlushDeferredEvents @0x497AC0 from Input_ProcessFrame @0x49D591;
+//  Input_HandleActionBinding_0 case 0x95 - Input_IsBindingActive(0x95) @0x4E07D9]
+void game_tick(const WeaponFsmDef &def, WeaponSlotState &s, WeaponFsmInputs in,
+               WeaponFsmEvents &ev) {
+    in.fire_pressed = in.fire_pressed || (s.refire_queued && in.fire_held);
+    weapon_fsm_tick(def, s, in, ev);
+}
+
 // Clip table double: every anim_wpn_* key resolves to a fixed length.
 float clip_seconds(void *, const char *key) {
     if (std::strcmp(key, "anim_wpn_fire") == 0) return 0.096f;   // -> 7 ticks
@@ -199,7 +211,7 @@ void test_action_anim_slots() {
 WeaponFsmEvents run_ticks(const WeaponFsmDef &def, WeaponSlotState &s,
                           const WeaponFsmInputs &in, int n) {
     WeaponFsmEvents ev;
-    for (int i = 0; i < n; ++i) weapon_fsm_tick(def, s, in, ev);
+    for (int i = 0; i < n; ++i) game_tick(def, s, in, ev);
     return ev;
 }
 
@@ -267,13 +279,13 @@ void test_emptyidle_bound_to_idle_or_empty() {
 			WeaponFsmInputs in;
 			in.auto_reload = auto_reload;
 			WeaponFsmEvents ev;
-			weapon_fsm_tick(def, s, in, ev); // idle -> EMPTYIDLE
+			game_tick(def, s, in, ev); // idle -> EMPTYIDLE
 			CHECK(s.current == wa::kEmptyIdle);
 			CHECK(ev.play_anim);
 			const std::string played = ev.anim_key;
 			bool reloaded = false;
 			for (int t = 0; t < 30; ++t) {
-				weapon_fsm_tick(def, s, in, ev);
+				game_tick(def, s, in, ev);
 				reloaded |= s.current == wa::kReload;
 			}
 			if (std::strcmp(function, "wpn_std_idle") == 0) {
@@ -324,7 +336,7 @@ void test_unbaked_def_runs_the_default_handlers() {
 	in.fire_pressed = true;
 	in.fire_held = true;
 	WeaponFsmEvents ev;
-	weapon_fsm_tick(def, s, in, ev);
+	game_tick(def, s, in, ev);
 	CHECK(def.actions[wa::kFire].handler == weapon_handler::kPlaceholder);
 	CHECK(s.current == wa::kFire);
 	CHECK(ev.fired);
@@ -338,7 +350,7 @@ void test_fire_chains_recoil() {
     in.fire_pressed = true;
     in.fire_held = true;
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, s, in, ev); // request lands; idle transitions to FIRE
+    game_tick(def, s, in, ev); // request lands; idle transitions to FIRE
     CHECK(s.current == wa::kFire);
     CHECK(ev.fired);                 // fire ds == 0 -> the shot on the entry tick
     CHECK(ev.fired_clip_before_consume == 30); // mode byte samples MountSlot+0x10 first
@@ -347,9 +359,9 @@ void test_fire_chains_recoil() {
     CHECK(s.kick > 0);
     in.fire_pressed = false;
     in.fire_held = false;
-    for (int t = 0; t < 6; ++t) weapon_fsm_tick(def, s, in, ev); // the delayend window
+    for (int t = 0; t < 6; ++t) game_tick(def, s, in, ev); // the delayend window
     CHECK(s.current == wa::kFire);   // still counting the fire row's delayend
-    weapon_fsm_tick(def, s, in, ev); // FIRE(done) -> RECOIL
+    game_tick(def, s, in, ev); // FIRE(done) -> RECOIL
     CHECK(s.current == wa::kRecoil);
     // The recoil anim starts on its entry tick.
     CHECK(ev.play_anim);
@@ -365,7 +377,7 @@ void test_auto_refire_cadence() {
     int fired = 0;
     for (int t = 0; t < 100; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.fire_pressed = false;
         if (ev.fired) ++fired;
     }
@@ -404,7 +416,7 @@ void test_revx_m4_zero_recoil_auto_cadence() {
     int fire_ends = 0;
     for (int t = 0; t < 100; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.fire_pressed = false;
         if (ev.fired) ++fired;
         if (ev.action_finished == wa::kFire) ++fire_ends;
@@ -427,7 +439,7 @@ void test_semi_no_auto_refire() {
     int fired = 0;
     for (int t = 0; t < 60; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.fire_pressed = false; // held but no new edge
         if (ev.fired) ++fired;
     }
@@ -445,7 +457,7 @@ void test_burst3() {
     int fired = 0;
     for (int t = 0; t < 60; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.fire_pressed = false;
         if (ev.fired) ++fired;
     }
@@ -467,7 +479,7 @@ void test_empty_clip_paths() {
     bool saw_emptyidle = false;
     for (int t = 0; t < 40; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.fire_pressed = false;
         if (s.current == wa::kEmptyIdle) saw_emptyidle = true;
     }
@@ -482,7 +494,7 @@ void test_empty_clip_paths() {
     bool held_click = false;
     for (int t = 0; t < 20; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev); // still held, no new edge
+        game_tick(def, s, in, ev); // still held, no new edge
         held_click |= ev.dry_fired;
     }
     CHECK(!held_click);
@@ -491,7 +503,7 @@ void test_empty_clip_paths() {
     for (int t = 0; t < 20; ++t) {
         WeaponFsmEvents ev;
         in.fire_pressed = (t == 0);
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         if (ev.dry_fired) ++clicks;
     }
     CHECK(clicks == 1);
@@ -517,7 +529,7 @@ void test_empty_clip_held_auto_reload() {
     bool applied = false;
     for (int t = 0; t < 200; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.fire_pressed = false;
         if (ev.fired) ++fired;
         if (ev.action_started == wa::kRecoil) ++recoil_starts;
@@ -531,7 +543,7 @@ void test_empty_clip_held_auto_reload() {
     // A fresh press edge restarts the volley from the refilled magazine.
     WeaponFsmEvents ev;
     in.fire_pressed = true;
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     CHECK(ev.fired);
     CHECK(s.current == wa::kFire);
 }
@@ -549,7 +561,7 @@ void test_tap_during_fire_drops_at_dispatch() {
     for (int t = 0; t < 60; ++t) {
         WeaponFsmEvents ev;
         in.fire_pressed = (t == 0 || t == 3); // tap, tap-mid-FIRE-window
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         if (ev.fired) ++fired;
     }
     CHECK(fired == 1);
@@ -568,7 +580,7 @@ void test_auto_reload_from_recoil() {
     bool requested = false, applied = false;
     for (int t = 0; t < 80 && !applied; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.fire_pressed = false;
         requested |= ev.reload_requested;
         applied |= ev.reload_applied;
@@ -583,7 +595,7 @@ void test_auto_reload_from_recoil() {
     // Reload runs its clip then lands IDLE with the burst reset [orig: @ 0x54316e].
     for (int t = 0; t < 80 && s.current != wa::kIdle; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
     }
     CHECK(s.current == wa::kIdle);
     CHECK(s.burst == 0);
@@ -597,13 +609,13 @@ void test_reload_scope_stash() {
     in.scope_active = true; // scoped when the reload starts
     in.reload_pressed = true;
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, s, in, ev); // request lands, idle -> RELOAD transition
+    game_tick(def, s, in, ev); // request lands, idle -> RELOAD transition
     in.reload_pressed = false;
     CHECK(s.current == wa::kReload);
     bool unscoped = ev.unscope;
     bool rescoped = false;
     for (int t = 0; t < 80 && s.current == wa::kReload; ++t) {
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         unscoped |= ev.unscope;
         rescoped |= ev.rescope;
     }
@@ -632,7 +644,7 @@ void test_scope_queue() {
     weapon_fsm_queue_scope_up(s); // [orig: WeaponSlot_TryQueueScopeUp @ 0x53f050]
     CHECK(s.next == wa::kScopeUp);
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     CHECK(s.current == wa::kScopeUp);
     // Zero-length pass-through (no shipped scopeup rows) -> back to idle.
     run_ticks(def, s, in, 3);
@@ -641,7 +653,7 @@ void test_scope_queue() {
     // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0].
     run_ticks(def, s, in, 2);
     weapon_fsm_queue_scope_up(s);
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     CHECK(s.current == wa::kScopeUp);
     CHECK(weapon_fsm_request_fire(def, s));
 }
@@ -658,11 +670,11 @@ void test_idle_plays_once_per_entry() {
     def.auto_fire = false;
     in.fire_pressed = true;
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     in.fire_pressed = false;
     int idle_plays = 0;
     for (int t = 0; t < 260; ++t) {
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         if (ev.play_anim && std::strcmp(ev.anim_key, "anim_wpn_idle") == 0) ++idle_plays;
     }
     CHECK(s.current == wa::kIdle);
@@ -681,15 +693,15 @@ void test_channel_advance_is_counter_gated() {
     WeaponFsmEvents ev;
     // One semi shot, then walk to the settled idle (kDone, played).
     in.fire_pressed = true;
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     in.fire_pressed = false;
     for (int t = 0; t < 40 && !(s.current == wa::kIdle && s.phase == weapon_phase::kDone);
          ++t)
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
     CHECK(s.current == wa::kIdle);
     // Align to a drained tick (post-tick counter == 0; that tick never steps).
     int guard = 0;
-    while (s.counter != 0 && ++guard < 200) weapon_fsm_tick(def, s, in, ev);
+    while (s.counter != 0 && ++guard < 200) game_tick(def, s, in, ev);
     CHECK(s.counter == 0);
     CHECK(!ev.advance_anim);
     // One full idle reseed cycle (ds + de ticks, baked from the clip): every
@@ -699,7 +711,7 @@ void test_channel_advance_is_counter_gated() {
     CHECK(cycle > 2);
     int advances = 0;
     for (int t = 0; t < cycle; ++t) {
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         if (ev.advance_anim) ++advances;
         if (s.counter == 0) CHECK(!ev.advance_anim); // the drained tick never steps
     }
@@ -709,7 +721,7 @@ void test_channel_advance_is_counter_gated() {
     in.is_local = false;
     advances = 0;
     for (int t = 0; t < cycle; ++t) {
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         if (ev.advance_anim) ++advances;
     }
     CHECK(advances == 0);
@@ -718,7 +730,7 @@ void test_channel_advance_is_counter_gated() {
     def.actions[wa::kIdle].has_anim = false;
     advances = 0;
     for (int t = 0; t < cycle; ++t) {
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         if (ev.advance_anim) ++advances;
     }
     CHECK(advances == 0);
@@ -744,7 +756,7 @@ void test_short_idle_and_emptyidle_hold_never_step() {
 		int advances = 0;
 		int plays = 0;
 		for (int t = 0; t < 120; ++t) {
-			weapon_fsm_tick(def, s, in, ev);
+			game_tick(def, s, in, ev);
 			advances += ev.advance_anim ? 1 : 0;
 			plays += ev.play_anim ? 1 : 0;
 		}
@@ -764,11 +776,11 @@ void test_short_idle_and_emptyidle_hold_never_step() {
 	s.next = wa::kEmptyIdle;
 	WeaponFsmInputs in;
 	WeaponFsmEvents ev;
-	weapon_fsm_tick(def, s, in, ev);
+	game_tick(def, s, in, ev);
 	CHECK(s.current == wa::kEmptyIdle && ev.play_anim);
 	int advances = 0;
 	for (int t = 0; t < 120; ++t) {
-		weapon_fsm_tick(def, s, in, ev);
+		game_tick(def, s, in, ev);
 		advances += ev.advance_anim ? 1 : 0;
 		CHECK(!ev.play_anim);
 	}
@@ -803,7 +815,7 @@ void test_action_sound_legs() {
     WeaponFsmInputs in;
     in.fire_pressed = true;
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     CHECK(ev.fired);
     CHECK(ev.action_started == wa::kFire);
     CHECK(ev.action_finished == wa::kFire); // the per-shot GS_* leg
@@ -822,7 +834,7 @@ void test_held_replay_skips_the_begin_sound_leg() {
     s.counter = 2;
     WeaponFsmInputs in;
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     CHECK(ev.play_anim);
     CHECK(ev.action_started == -1);
 }
@@ -837,7 +849,7 @@ void test_fire_abort_finishes_silently() {
     WeaponFsmInputs in;
     in.fire_pressed = true;
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     CHECK(s.current == wa::kFire);
     CHECK(!ev.fired);
     CHECK(ev.action_finished == -1);
@@ -855,7 +867,7 @@ void test_reload_end_leg() {
     int end_legs = 0;
     for (int t = 0; t < 80; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.reload_pressed = false;
         if (ev.action_finished == wa::kReload) ++end_legs;
     }
@@ -877,7 +889,7 @@ void test_keep_scope_reload_class() {
     bool unscoped = false, rescoped = false;
     for (int t = 0; t < 80; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.reload_pressed = false;
         unscoped |= ev.unscope;
         rescoped |= ev.rescope;
@@ -924,7 +936,7 @@ void test_scope_legs_run_inline() {
         in.scope = &scope;
         in.reload_pressed = true;
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.reload_pressed = false;
         CHECK(s.current == wa::kReload && ev.unscope && scope.calls == "T");
         CHECK(s.next == wa::kIdle); // the stash's SCOPEDOWN mid-phase leaves IDLE
@@ -932,7 +944,7 @@ void test_scope_legs_run_inline() {
         bool rescoped = false;
         for (int t = 0; t < 80 && s.current == wa::kReload; ++t) {
             WeaponFsmEvents tick;
-            weapon_fsm_tick(def, s, in, tick);
+            game_tick(def, s, in, tick);
             rescoped |= tick.rescope;
             CHECK(!tick.unscope && !tick.scope_cleared);
         }
@@ -954,7 +966,7 @@ void test_scope_legs_run_inline() {
         bool rescoped = false;
         for (int t = 0; t < 80; ++t) {
             WeaponFsmEvents ev;
-            weapon_fsm_tick(def, s, in, ev);
+            game_tick(def, s, in, ev);
             in.reload_pressed = false;
             rescoped |= ev.rescope;
         }
@@ -974,7 +986,7 @@ void test_scope_legs_run_inline() {
         in.scope_active = promoted;
         in.scope = &scope;
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         CHECK(ev.unscope == promoted && !ev.scope_cleared);
         CHECK(scope.calls == (promoted ? "T" : ""));
         CHECK(s.next == (promoted ? wa::kScopeDown : wa::kEmptyIdle));
@@ -995,7 +1007,7 @@ void test_scope_legs_run_inline() {
             WeaponFsmInputs in;
             in.scope = &scope;
             WeaponFsmEvents ev;
-            weapon_fsm_tick(def, s, in, ev);
+            game_tick(def, s, in, ev);
             CHECK(s.next == wa::kEmptyIdle);
             CHECK(ev.scope_cleared == !force && !ev.unscope);
             CHECK(scope.calls == (force ? "" : "C"));
@@ -1017,7 +1029,7 @@ void test_non_local_recoil_makes_no_decision() {
     WeaponFsmInputs in;
     in.is_local = false; // remote entities skip the arbiter [orig: @ 0x542fe9]
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     CHECK(s.next == wa::kIdle); // no reload/emptyidle decision made
     CHECK(ev.action_effect < 0); // direct leg is local-player-only [orig: @0x542efa]
 }
@@ -1095,7 +1107,7 @@ void test_recoil_effect_leg() {
     int fired = 0, casings = 0;
     for (int t = 0; t < 120; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.fire_pressed = false;
         if (ev.fired) ++fired;
         if (ev.action_effect == wa::kRecoil) ++casings;
@@ -1112,7 +1124,7 @@ void test_recoil_effect_leg() {
     int quiet_effects = 0;
     for (int t = 0; t < 60; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(quiet, qs, in, ev);
+        game_tick(quiet, qs, in, ev);
         in.fire_pressed = false;
         if (ev.action_effect >= 0) ++quiet_effects;
     }
@@ -1142,7 +1154,7 @@ void test_recoil_effect_leg() {
     int fired_tick = -1, casing_tick = -1;
     for (int t = 0; t < 200 && casing_tick < 0; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(bolt, bs, bin, ev);
+        game_tick(bolt, bs, bin, ev);
         bin.fire_pressed = false;
         if (ev.fired && fired_tick < 0) fired_tick = t;
         if (ev.action_effect == wa::kRecoil && casing_tick < 0) casing_tick = t;
@@ -1165,7 +1177,7 @@ void test_recoil_effect_leg() {
     int reloading = 0, bound_effects = 0;
     for (int t = 0; t < 120; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(bound, rs, rin, ev);
+        game_tick(bound, rs, rin, ev);
         rin.reload_pressed = false;
         if (rs.current == wa::kReload) ++reloading;
         if (ev.action_effect >= 0) ++bound_effects;
@@ -1191,7 +1203,7 @@ void test_switch_completion_signal() {
     int holster_completions = 0;
     for (int t = 0; t < 80; ++t) {
         WeaponFsmEvents ev;
-        weapon_fsm_tick(def, holster, in, ev);
+        game_tick(def, holster, in, ev);
         if (ev.switch_completed) {
             ++holster_completions;
             CHECK(ev.action_finished == -1);
@@ -1203,7 +1215,7 @@ void test_switch_completion_signal() {
     rank.phase = weapon_phase::kDone;
     weapon_fsm_queue_switch_rank(rank);
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, rank, in, ev);
+    game_tick(def, rank, in, ev);
     CHECK(ev.switch_completed);
     CHECK(ev.action_finished == -1);
 }
@@ -1220,7 +1232,7 @@ void test_emplaced_switchfrom_and_try_switchto_contract() {
     WeaponFsmInputs in;
     in.instant_emplaced_switch = true;
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, holster, in, ev);
+    game_tick(def, holster, in, ev);
     CHECK(ev.switch_completed); // shipped emplaced rows use delaystart=1
 
     WeaponSlotState ready_target;
@@ -1341,7 +1353,7 @@ void test_emplaced_gun_overheats_and_locks_out() {
         in.current_tick = tick;
         // What the pump itself sees when it decides whether to deny.
         const int32_t heat_at_pump = weapon_slot_accumulated_heat(def, s, tick);
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.fire_pressed = false; // the press edge starts it; the refire chain sustains
         const int32_t h = weapon_slot_accumulated_heat(def, s, tick);
         if (h > peak_heat) peak_heat = h;
@@ -1371,7 +1383,7 @@ void test_emplaced_gun_overheats_and_locks_out() {
     const int shots_at_deny = shots;
     for (int i = 0; i < 400; ++i) {
         in.current_tick = ++tick;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         if (ev.fired) ++shots;
     }
     CHECK(shots == shots_at_deny);
@@ -1383,7 +1395,7 @@ void test_emplaced_gun_overheats_and_locks_out() {
     // Once the deadline passes, the pump zeroes the window and the gun reads cold.
     tick = s.heat_window_end_tick + 1;
     in.current_tick = tick;
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     CHECK(s.heat_window_end_tick == 0); // [orig: @ 0x54125f]
     CHECK(weapon_slot_accumulated_heat(def, s, tick) == 0);
 }
@@ -1422,7 +1434,7 @@ void test_no_heat_model_never_stamps_a_window() {
     WeaponFsmEvents ev;
     for (int32_t tick = 0; tick < 400; ++tick) {
         in.current_tick = tick;
-        weapon_fsm_tick(def, s, in, ev);
+        game_tick(def, s, in, ev);
         in.fire_pressed = false;
         CHECK(s.heat_window_end_tick == 0);
         CHECK(weapon_slot_accumulated_heat(def, s, tick) == 0);
@@ -1439,14 +1451,14 @@ void test_submerging_clears_the_heat_window() {
     in.current_tick = 100;
     in.submerged = true;
     WeaponFsmEvents ev;
-    weapon_fsm_tick(def, s, in, ev);
+    game_tick(def, s, in, ev);
     CHECK(s.heat_window_end_tick == 0); // [orig: @ 0x54125f]
 
     WeaponFsmDef wet = make_emplaced_50_def();
     wet.flags |= weapon_flag::kUnderwater;
     WeaponSlotState s2{};
     s2.heat_window_end_tick = 500;
-    weapon_fsm_tick(wet, s2, in, ev);
+    game_tick(wet, s2, in, ev);
     CHECK(s2.heat_window_end_tick == 500); // the window survives
 }
 
@@ -1462,20 +1474,20 @@ void test_weapon_level_sound_and_kick_gate() {
         WeaponFsmInputs in;
         WeaponFsmEvents out;
         in.fire_pressed = true;
-        weapon_fsm_tick(def, slot, in, out);
+        game_tick(def, slot, in, out);
         CHECK(out.fired);
         CHECK(out.head_started);
         CHECK(slot.kick == (with_loop ? 20 : 10));
         in.fire_pressed = false;
-        weapon_fsm_tick(def, slot, in, out);
+        game_tick(def, slot, in, out);
         CHECK(!out.head_started);
         CHECK(out.fireloop_lifetime_ticks == (with_loop ? 19 : 0));
         slot.current = wa::kIdle;
-        weapon_fsm_tick(def, slot, in, out);
+        game_tick(def, slot, in, out);
         CHECK(out.trailoff_started);
         CHECK(out.fireloop_lifetime_ticks == 0);
         CHECK(slot.kick == 0);
-        weapon_fsm_tick(def, slot, in, out);
+        game_tick(def, slot, in, out);
         CHECK(!out.trailoff_started);
     }
 }
@@ -1542,9 +1554,9 @@ void test_received_action_kick_and_signed_loop_lifetime() {
     WeaponFsmInputs input;
     input.is_local = false;
     input.current_tick = 100;
-    weapon_fsm_tick(def, slot, input, event);
+    game_tick(def, slot, input, event);
     CHECK(event.fireloop_lifetime_ticks == 81 && !event.fired && slot.current == wa::kIdle);
-    weapon_fsm_tick(def, slot, input, event);
+    game_tick(def, slot, input, event);
     CHECK(event.trailoff_started && slot.kick == 0 && event.fireloop_lifetime_ticks == 0);
 
     slot = {};
@@ -1552,11 +1564,11 @@ void test_received_action_kick_and_signed_loop_lifetime() {
     slot.phase = weapon_phase::kDone;
     slot.counter = 3;
     slot.kick = 200;
-    weapon_fsm_tick(def, slot, input, event);
+    game_tick(def, slot, input, event);
     CHECK(slot.kick == 199 && event.fireloop_lifetime_ticks == -57);
     input.owner_present = false;
     slot.current = wa::kIdle;
-    weapon_fsm_tick(def, slot, input, event);
+    game_tick(def, slot, input, event);
     CHECK(slot.kick == 198 && !event.trailoff_started && event.fireloop_lifetime_ticks == 0);
     slot.current = wa::kRecoil;
     weapon_fsm_replay_action(def, slot, 100, event);
@@ -1580,10 +1592,10 @@ void test_fireloop_emitter_waits_for_the_last_catch_up_tick() {
     input.current_tick = 100;
     input.last_tick_of_batch = false;
     WeaponFsmEvents event;
-    weapon_fsm_tick(def, slot, input, event);
+    game_tick(def, slot, input, event);
     CHECK(slot.kick == 19 && event.fireloop_lifetime_ticks == 0);
     input.last_tick_of_batch = true;
-    weapon_fsm_tick(def, slot, input, event);
+    game_tick(def, slot, input, event);
     CHECK(slot.kick == 18 && event.fireloop_lifetime_ticks == 18);
 }
 

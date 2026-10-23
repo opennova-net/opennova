@@ -748,8 +748,9 @@ bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot) {
                 // event: the loop self-sustains, one dispatch a tick, while the
                 // trigger stays down, until a state that accepts the dispatch
                 // consumes it (RECOIL banks the shot); a release drops it at the
-                // next dispatch (weapon_fsm_tick). [orig: @ 0x53effd
-                // Input_QueueDeferredEvent; the dispatch's binding test @0x4E07D9]
+                // next dispatch (the fire record's live binding test). [orig:
+                // @ 0x53effd Input_QueueDeferredEvent; the dispatch's binding test
+                // @0x4E07D9]
                 slot.refire_queued = true;
                 return false;
             default:
@@ -920,21 +921,19 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
     // Input-dispatcher writers run before the frame pump [orig: the input layer
     // dispatches binding events ahead of WeaponAction_ProcessAllEntities in the
     // frame]. Held-trigger auto fire is NOT a per-tick re-request: the press edge
-    // starts the volley and the recoil window's deferred re-queue sustains it,
-    // consumed here one tick after it was queued — the deferred dispatch
-    // [orig: Input_QueueDeferredEvent @ 0x4993e0 -> WeaponSlot_RequestFire @ 0x53efa0].
-    // The deferred event reaches the fire binding's case, which requests fire
-    // only while the binding is still active at that dispatch: a trigger released
-    // before the tick after the re-queue drops it (the release leg fires only a
-    // pending PowerThrow charge). [orig: Input_ProcessFrame @0x49D520
-    // (Input_FlushDeferredEvents @0x49D591, the dispatch @0x49D5D8);
-    // Input_HandleActionBinding_0 @0x4E0420 (case 0x95: Input_IsBindingActive(149)
-    // @0x4E07D9, the release leg @0x4E07E9..0x4E07F1); Input_IsBindingActive
-    // @0x498320]
+    // starts the volley and the recoil window's deferred re-queue sustains it. The
+    // re-queue is the tick's output (refire_queued), which the caller's deferred
+    // input queue takes: the next input frame's flush dispatches it as a fire
+    // record, whose press leg requests fire (in.fire_pressed) only while the binding
+    // is still active, past the record's gates (world::LocalPlayer::deferred_events,
+    // inmatch::Role::drain_input_events).
+    // [orig: Input_QueueDeferredEvent @0x4993E0; Input_ProcessFrame @0x49D520
+    //  (Input_FlushDeferredEvents @0x49D591, the dispatch @0x49D5D8);
+    //  Input_HandleActionBinding_0 @0x4E0420 (case 0x95: Input_IsBindingActive(149)
+    //  @0x4E07D9)]
     if (in.reload_pressed) weapon_fsm_request_reload(slot);
-    const bool fire_request = in.fire_pressed || (slot.refire_queued && in.fire_held);
-    slot.refire_queued = false; // consumed (RequestFire may re-queue it mid-FIRE)
-    if (fire_request && weapon_fsm_request_fire(def, slot) && in.fire_dry)
+    slot.refire_queued = false; // the last tick's re-queue is the caller's queue's
+    if (in.fire_pressed && weapon_fsm_request_fire(def, slot) && in.fire_dry)
         slot.next = weapon_action::kEmpty; // [orig: @0x4E0A1E]
 
     // --- the pump tail [orig: WeaponAction_ProcessFrame @ 0x541262..0x5414ac] -----

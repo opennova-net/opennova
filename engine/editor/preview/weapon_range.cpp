@@ -512,6 +512,15 @@ void WeaponRange::apply_gestures_(int32_t tick) {
 		}
 		}
 	}
+	// The deferred fire records the last pump queued (an automatic weapon's re-queue),
+	// behind the tick's own gestures: each the fire key's record with the key's live state
+	// [orig: Input_FlushDeferredEvents @0x497AC0 from Input_ProcessFrame @0x49D591;
+	// world::LocalPlayer::deferred_events].
+	std::vector<world::LocalPlayer::DeferredInputEvent> deferred;
+	deferred.swap(local_->deferred_events);
+	for (const world::LocalPlayer::DeferredInputEvent &event : deferred)
+		if (event.code == world::LocalPlayer::kDeferredFireCode)
+			(void)local_->fire_record(holding_, true);
 	local_->set_weapon_input(holding_, false, reload);
 }
 

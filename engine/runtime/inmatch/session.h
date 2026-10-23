@@ -439,8 +439,9 @@ public:
 	// frame, nor does an update under a menu screen: the records wait (a screen's close
 	// resets them). Session::run_updates runs it in every update, ahead of the update's
 	// body, and apply_input when called on its own (TickInput::drained). Ahead of the
-	// loop the deferred dispatches (ToSpecial's, LocalPlayer::to_special_queued) join the
-	// queue behind the update's records, each passing the head again at its dispatch.
+	// loop the deferred dispatches (ToSpecial's and the fire row's re-queue,
+	// LocalPlayer::deferred_events) join the queue behind the update's records in order,
+	// each passing the head again at its dispatch.
 	// `held_action_bits`: the update's sample's held bits (HELD_MENU_OPEN, under which no
 	// input frame runs; HELD_TO_SPECIAL, the keys' state ToSpecial's dispatch reads;
 	// HELD_FIRE, the binding state the fire row's dispatch reads).

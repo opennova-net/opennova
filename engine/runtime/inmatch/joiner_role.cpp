@@ -695,6 +695,7 @@ void JoinerRole::tick_local_weapon() {
 				kernel_->seat_specs);
 	};
 	world::local_weapon_pump_tick(kernel.world, lp.weapon, io);
+	if (io.fire_deferred) lp.queue_deferred_event(world::LocalPlayer::kDeferredFireCode);
 	lp.hud_map_control.weapon_command(io.map_command);
 	std::vector<world::LocalWeaponFiredWire> fires;
 	// Each descriptor's shooter's entity+0x160 word (its off32), beside it.

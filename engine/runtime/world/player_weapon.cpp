@@ -1580,6 +1580,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	io.map_command = 0;
 	io.fired = LocalWeaponFiredWire{};
 	io.reload = LocalWeaponReloadWire{};
+	io.fire_deferred = false;
 	if (io.view == nullptr || !world.cached.local_player.valid()) return;
 	PlayerViewState &view = *io.view;
 	sync_local_usegun_weapon_transition(world, w);
@@ -1639,20 +1640,15 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		}
 	} else {
 		w.power_throw_start_tick = 0;
-		// Ordinary presses and deferred auto-fire requests pass through WAC's
-		// category gate before the seat/fireability rejection. PowerThrow uses
-		// its separate press/release path above. Do not cancel an accepted FIRE:
-		// only refuse the new binding request, including a deferred one. A
-		// deferred one reaches the gate only while the binding is still active
-		// (weapon_fsm_tick drops it otherwise).
+		// A sourceless press meets WAC's category gate here, before the seat and
+		// fireability rejection; a press dispatched through case 0x95's press leg at its
+		// record (a deferred refire's among them) passed it there (local_weapon_press_fire).
+		// PowerThrow uses its separate press/release path above. Do not cancel an accepted
+		// FIRE: only refuse the new binding request.
 		// [orig: Input_HandleActionBinding_0 @0x4E0420 (Input_IsBindingActive(149)
 		//  @0x4E07D9 ahead of the gate @0x4E0968..0x4E097B)]
-		// A press dispatched through case 0x95's press leg at its record passed the gate
-		// there (local_weapon_press_fire); a sourceless press and the deferred refire meet it
-		// here.
 		const bool undispatched_press = w.fire_pressed && !w.fire_press_dispatched;
-		const bool refire = !w.fire_pressed && active_slot.refire_queued && in.fire_held;
-		if (player_alive && (undispatched_press || refire)) {
+		if (player_alive && undispatched_press) {
 			// The gate reads the EquippedSlot's def, not the AdmDef byte.
 			// [orig: Input_HandleActionBinding_0 @0x4E0420 - the EquippedSlot
 			//  @0x4E08DC..0x4E08E2, its def @0x4E08F2, the def's Type @0x4E0961]
@@ -1660,10 +1656,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			const uint8_t slot_adm = local_equipped_slot_def_adm(world, w, slot_has_def);
 			const WeaponTableEntry *def =
 					slot_has_def ? world.tables.weapons.by_index(slot_adm) : nullptr;
-			if (def != nullptr && !world.script.weapon_input.record_fire_request(def->category)) {
+			if (def != nullptr && !world.script.weapon_input.record_fire_request(def->category))
 				in.fire_pressed = false;
-				active_slot.refire_queued = false;
-			}
 		}
 	}
 	// The dispatch gate runs here now: the raw reload edge is refused on a full
@@ -1694,9 +1688,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// The heat window's water gate rides the environment inputs (the walked
 	// entity's body Z against the water word).
 	if (player != nullptr) weapon_fire_environment_inputs(world, *player, in);
-	if (!accept_weapon_input) active_slot.refire_queued = false;
 	WeaponFsmEvents ev;
 	weapon_fsm_tick(w.def, active_slot, in, ev);
+	// The tick's re-queue leaves as a deferred fire record (its dispatch next input frame
+	// runs the record's gates: the head, the cease fire, the live binding, the press leg's).
+	io.fire_deferred = active_slot.refire_queued;
 	io.map_command = ev.map_command;
 	if (player != nullptr) weapon_sound_publish(world, *player, w.def, ev);
 	// A release whose fire request the FSM refused must not leave the charge

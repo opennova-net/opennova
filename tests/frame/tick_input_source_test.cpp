@@ -740,7 +740,7 @@ void test_the_reload_record_meets_the_head_in_key_order() {
 	for (const bool reload_first : {true, false}) {
 		auto role = std::make_unique<TickRecorder>();
 		spawn_local_player(*role);
-		role->kernel.local.to_special_queued = 1; // a deferred ToSpecial dispatch
+		role->kernel.local.queue_deferred_event(role->kernel.local.kToSpecialCode); // a deferred ToSpecial
 		// An equipped weapon the case can reload: a magazine short of its capacity, a pool.
 		opennova::world::LocalPlayerWeapon &weapon = role->kernel.local.weapon;
 		weapon.active = true;
@@ -762,8 +762,60 @@ void test_the_reload_record_meets_the_head_in_key_order() {
 				reload_first ? "the reload ahead of the pause row requests it on the slot"
 				             : "the reload behind the pause row drops at the head");
 		CHECK(!weapon.reload_pressed, "no pump latch: the request is the dispatch's");
-		CHECK(role->kernel.local.to_special_queued == 0,
+		CHECK(role->kernel.local.deferred_events.empty(),
 				"the input frame's flush moved the deferred ToSpecial into the event queue");
+	}
+}
+
+// D-CTRL-6 (LI-s17): an automatic weapon's fire re-queue is a deferred record (the weapon
+// pump's LocalWeaponPumpIO::fire_deferred, LocalPlayer::deferred_events): the next input frame's
+// flush queues it behind the update's records and it dispatches as a fresh fire record, past the
+// head (a pause row ahead of it drops it), the binocular view and the cease fire, its press leg
+// latching the pump's request while the binding holds and none when it reads up.
+// [orig: WeaponAction_Recoil @0x542E9D, WeaponSlot_RequestFire @0x53EFFD ->
+//  Input_QueueDeferredEvent @0x4993E0; Input_ProcessFrame @0x49D520 (Input_FlushDeferredEvents
+//  @0x49D591); Input_HandleActionBinding_0 case 0x95 @0x4E07B5..0x4E08DC]
+void test_the_deferred_fire_record() {
+	using opennova::controls::InputEventOrigin;
+	using opennova::controls::InputEventQueue;
+	struct Device final : TickInputSource {
+		bool held = true;
+		bool pause_first = false;
+		bool queued = false;
+		InputPacket sample_tick(uint32_t) override {
+			InputPacket p;
+			p.held_action_bits = held ? HELD_FIRE : 0u;
+			return p;
+		}
+		void queue_records(InputEventQueue &records) override {
+			if (queued) return;
+			queued = true;
+			if (pause_first) (void)records.push({25, 0, 0, 0, false, InputEventOrigin::Device});
+		}
+	};
+	for (const int face : {0, 1, 2, 3}) { // held; up; a cease fire; a pause row ahead of it
+		auto role = std::make_unique<TickRecorder>();
+		spawn_local_player(*role);
+		opennova::world::LocalPlayer &local = role->kernel.local;
+		local.weapon.active = true;
+		role->kernel.world.registry.get(role->kernel.world.cached.local_player)->health = 100;
+		role->kernel.world.rules.cease_fire = face == 2;
+		local.queue_deferred_event(local.kDeferredFireCode);
+		Device device;
+		device.held = face != 1;
+		device.pause_first = face == 3;
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		FrameInput three;
+		three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		three.tick_source = &device;
+		(void)session.advance(three);
+		CHECK(local.deferred_events.empty(), "the flush emptied the deferred queue");
+		CHECK(local.weapon.fire_press_dispatched == (face == 0),
+				face == 0   ? "a held binding's deferred record latches the fire request"
+				: face == 1 ? "a binding that reads up drops the refire"
+				: face == 2 ? "a cease fire drops the deferred record"
+				            : "behind the pause row the head drops it");
 	}
 }
 
@@ -1046,6 +1098,7 @@ int main() {
 	test_the_keyboard_pass_runs_in_the_update_that_samples_it();
 	test_the_update_drains_its_records_in_queue_order();
 	test_the_reload_record_meets_the_head_in_key_order();
+	test_the_deferred_fire_record();
 	test_a_menu_screen_an_update_opens_gates_the_frames_later_updates();
 	test_a_deploy_pick_is_a_record_of_the_drain_in_key_order();
 	test_the_fire_record_tests_its_binding_live();

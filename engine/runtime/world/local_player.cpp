@@ -420,24 +420,19 @@ bool LocalPlayer::request_reload() {
 }
 
 void LocalPlayer::clear_deferred_input() {
-	to_special_queued = 0;
+	deferred_events.clear();
 }
 
-void LocalPlayer::queue_to_special() {
-	if (to_special_queued < 32) ++to_special_queued; // [orig: @0x4993E8]
+void LocalPlayer::queue_deferred_event(int32_t code, int32_t p1, int32_t p2) {
+	// [orig: Input_QueueDeferredEvent @0x4993E0; the declaration carries the witness]
+	if (deferred_events.size() < 32) deferred_events.push_back({code, p1, p2}); // @0x4993E8
 }
 
 void LocalPlayer::dispatch_to_special(bool keys_held) {
-	if (!inventory_valid) {
-		to_special_queued = 0;
-		return;
-	}
-	while (to_special_queued > 0) {
-		if (w::local_player_to_special(world_, weapon, inventory, view, keys_held) ==
-				w::ToSpecialResult::kDeferred)
-			return; // re-dispatched next frame [orig: Input_FlushDeferredEvents @0x497AC0]
-		--to_special_queued;
-	}
+	if (!inventory_valid) return;
+	if (w::local_player_to_special(world_, weapon, inventory, view, keys_held) ==
+			w::ToSpecialResult::kDeferred)
+		queue_deferred_event(kToSpecialCode); // [orig: @0x4E1211]
 }
 
 bool LocalPlayer::mount_toggle_allowed() {
@@ -929,6 +924,7 @@ void LocalPlayer::pump_local_weapon() {
 	io.is_authority = true;
 	io.authority_fire_admitted = authority_fire_admitted;
 	w::local_weapon_pump_tick(world, weapon, io);
+	if (io.fire_deferred) queue_deferred_event(kDeferredFireCode);
 	hud_map_control.weapon_command(io.map_command);
 	// The wire-facing outcome for the embedder's relay leg (the local reload
 	// producer the listen drain consumes).

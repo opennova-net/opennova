@@ -297,11 +297,11 @@ struct WeaponSlotState {
     // rescope when it completes (a ForceScoped def never rescopes).
     // [orig: g_RescopeAfterReload @ 0xB7647C; write @ 0x54312f, consume @ 0x54139e]
     bool rescope_after_reload = false;
-    // The deferred fire re-queue — the port's slot for the original's
-    // Input_QueueDeferredEvent(149, current_tick) events: set by the recoil window's
-    // refire and by a mid-FIRE fire request, consumed as a fire request by the NEXT
-    // tick's input stage (the deferred dispatch runs before the pump).
-    // [orig: Input_QueueDeferredEvent @ 0x4993e0; writers @ 0x542e9d / @ 0x53effd]
+    // The deferred fire re-queue: the tick's Input_QueueDeferredEvent(149) output, set
+    // by the recoil window's refire and by a mid-FIRE fire request, cleared at the next
+    // tick's head. The local pump hands it to the local player's deferred input queue
+    // (LocalWeaponPumpIO::fire_deferred), whose next input frame dispatches it as a fire
+    // record. [orig: Input_QueueDeferredEvent @ 0x4993e0; writers @ 0x542e9d / @ 0x53effd]
     bool refire_queued = false;
     // Retail MountSlot+0x5E bit 8: when this slot belongs to an attached
     // designated-G EWeap, route ammo/FSM state through groundEntity's vehicle

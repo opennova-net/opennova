@@ -757,17 +757,18 @@ int main() {
 		// [orig: Game_ProcessMainFrame @0x52660D; Input_FlushDeferredEvents's one
 		//  caller @0x49D591]
 		{
-			kernel.local.to_special_queued = 2;
+			kernel.local.queue_deferred_event(kernel.local.kToSpecialCode);
+			kernel.local.queue_deferred_event(kernel.local.kToSpecialCode);
 			inmatch::TickInput menu = tick_input(0);
 			menu.consume_one_shots = true;
 			menu.player.held_action_bits = inmatch::HELD_MENU_OPEN;
 			role.apply_input(menu);
-			CHECK(kernel.local.to_special_queued == 2);
+			CHECK(kernel.local.deferred_events.size() == 2);
 			inmatch::TickInput live = tick_input(0);
 			live.consume_one_shots = true;
 			role.apply_input(live);
-			CHECK(kernel.local.to_special_queued < 2);
-			kernel.local.to_special_queued = 0;
+			CHECK(kernel.local.deferred_events.size() < 2);
+			kernel.local.deferred_events.clear();
 		}
 
 		// The local gameplay drain consumes reloads while preserving movement

@@ -326,6 +326,12 @@ struct LocalWeaponPumpIO {
     std::function<uint16_t()> carrier_exclusion;
     LocalWeaponFiredWire fired;
     LocalWeaponReloadWire reload;
+    // The slot queued a deferred fire record this tick (its refire_queued: the recoil
+    // window's re-queue or a mid-FIRE request's): the caller queues it on the local
+    // player's deferred input queue (LocalPlayer::queue_deferred_event).
+    // [orig: WeaponAction_Recoil @0x542E9D; WeaponSlot_RequestFire @0x53EFFD ->
+    //  Input_QueueDeferredEvent @0x4993E0]
+    bool fire_deferred = false;
 };
 
 // The active slot: the borrowed UseGun parent slot when engaged, else the

@@ -551,14 +551,15 @@ void test_to_special_queue_defers() {
     data.clipsize = 30;
     local_weapon_install(world, lp.weapon, data, false, false, &lp.inventory, lp.view);
     lp.weapon.slot.current = weapon_action::kReload;
-    lp.queue_to_special();
-    lp.dispatch_to_special(true);
-    CHECK(lp.to_special_queued == 1 && lp.inventory.quick_switch_stash == -1);
+    lp.dispatch_to_special(true); // a reload in progress defers it [orig: @0x4E1211]
+    CHECK(lp.deferred_events.size() == 1 && lp.deferred_events[0].code == lp.kToSpecialCode &&
+          lp.inventory.quick_switch_stash == -1);
     lp.weapon.slot.current = weapon_action::kIdle;
+    lp.deferred_events.clear(); // the next input frame's flush takes it to its record
     lp.dispatch_to_special(true);
-    CHECK(lp.to_special_queued == 0 && lp.inventory.quick_switch_stash == 3 * 65);
-    for (int i = 0; i < 40; ++i) lp.queue_to_special();
-    CHECK(lp.to_special_queued == 32);
+    CHECK(lp.deferred_events.empty() && lp.inventory.quick_switch_stash == 3 * 65);
+    for (int i = 0; i < 40; ++i) lp.queue_deferred_event(lp.kToSpecialCode);
+    CHECK(lp.deferred_events.size() == 32); // [orig: the cap @0x4993E8]
 }
 
 void test_cycle() {

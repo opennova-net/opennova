@@ -225,17 +225,37 @@ public:
     //  @0x4E07B5, Input_IsBindingActive(0x95) @0x4E07D9, the release leg @0x4E07E9, the press
     //  leg @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device test @0x4E090B)]
     bool fire_record(bool binding_held, bool from_keyboard);
-    // The ToSpecial action (input case 220): each press or release edge of its
-    // keys queues one dispatch, and dispatch_to_special runs the queue with the
-    // keys' live state, keeping a deferred dispatch (and those behind it) for
-    // the next frame, as retail's 32-entry deferred input queue does.
+    // The deferred input queue: Input_QueueDeferredEvent's records (a dispatch code and
+    // its first two arguments) in queue order, at most 32. The next input frame's flush
+    // queues each behind the frame's records with the deferred marker
+    // (inmatch::Role::drain_input_events), where each passes the head again; the input
+    // reset empties it (clear_deferred_input). Its writers: case 0xDC's deferral
+    // (dispatch_to_special) and the weapon pump's fire re-queue
+    // (LocalWeaponPumpIO::fire_deferred). The queue's own mode test (the row's mode bit
+    // for the death screen or not) drops nothing either writer queues: both run only for a
+    // live player past the head, and the death screen is a dead one's.
+    // [orig: Input_QueueDeferredEvent @0x4993E0 (the 32 cap @0x4993E8, the mode test
+    //  @0x499404..0x499415, the record @0x499420..0x49946B); Input_FlushDeferredEvents
+    //  @0x497AC0 from Input_ProcessFrame @0x49D591]
+    struct DeferredInputEvent {
+        int32_t code = 0;
+        int32_t p1 = 0;
+        int32_t p2 = 0;
+    };
+    // The fire row's code the re-queue names [orig: WeaponAction_Recoil `push 95h` @0x542E98].
+    static constexpr int32_t kDeferredFireCode = 0x95;
+    // ToSpecial's (catalog row 37) [orig: case 0xDC's Input_QueueDeferredEvent(ecx = the code)
+    //  @0x4E1210].
+    static constexpr int32_t kToSpecialCode = 0xDC;
+    std::vector<DeferredInputEvent> deferred_events;
+    void queue_deferred_event(int32_t code, int32_t p1 = 0, int32_t p2 = 0);
+    // The ToSpecial action (input case 220) at its record's dispatch, with the keys' live
+    // state: a reload or a draw in progress defers it to the next input frame
+    // (queue_deferred_event), as case 0xDC does.
     // [orig: the release pass Input_ProcessKeyboardEvents @0x49D249..0x49D2B9
     //  (row flags & 0x80800000; ToSpecial's row flags 0x8C000801), the press
-    //  @0x49D42F; Input_QueueDeferredEvent @0x4993E0 (the 32 cap @0x4993E8);
-    //  Input_FlushDeferredEvents @0x497AC0 from Input_ProcessFrame @0x49D591]
-    void queue_to_special();
+    //  @0x49D42F; Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1211]
     void dispatch_to_special(bool keys_held);
-    int32_t to_special_queued = 0;
     // The USE-ITEM mount toggle [orig: Input_ProcessFrame release edge
     // @0x49d6dc -> Entity_ToggleVehicleMount @0x436950], including the
     // out-of-session UseGun rejection (rules.mp_session, the retail

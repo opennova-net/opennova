@@ -56,13 +56,20 @@ struct Fixture {
         vm.execute(world);
     }
 
+    // The deferred fire record the last pump queued (LocalWeaponPumpIO::fire_deferred).
+    bool deferred = false;
+
+    // One update: the binding's state and a sourceless press, the deferred fire record's
+    // press leg while the binding holds (case 0x95 at its record), then the pump.
     void pump(bool held, bool pressed = false) {
         ++world.logic_tick;
         weapon.fire_held = held;
         weapon.fire_pressed = pressed;
+        if (deferred && held) (void)local_weapon_press_fire(world, weapon, view);
         LocalWeaponPumpIO io;
         io.view = &view;
         local_weapon_pump_tick(world, weapon, io);
+        deferred = io.fire_deferred;
     }
 };
 
@@ -95,9 +102,9 @@ static void test_auto_refire_passes_through_the_same_gate() {
     f.weapon.def.auto_fire = true;
     f.pump(true, true);
     CHECK(f.weapon.slot.clip == 29);
-    for (int tick = 0; tick < 20 && !f.weapon.slot.refire_queued; ++tick)
+    for (int tick = 0; tick < 20 && !f.deferred; ++tick)
         f.pump(true);
-    CHECK(f.weapon.slot.refire_queued); // queued by the actual recoil handler
+    CHECK(f.deferred); // queued by the actual recoil handler, a deferred fire record
     f.script("blockfire(3,1)\n");
     CHECK(!f.world.script.weapon_input.fire_requested(3));
     f.pump(true);
