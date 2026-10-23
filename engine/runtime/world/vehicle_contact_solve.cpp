@@ -598,6 +598,29 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	if (((d[0] != 0 && d[2] != 0) || (d[1] != 0 && d[3] != 0)) && m.wreck_2fc == 0)
 		m.fresh_2f1 = 1;
 	int32_t corner_adj[4] = { 0, 0, 0, 0 };
+	// The tail both arms share: the spring energy's quiet clear, the solved-once byte, a client's
+	// inverted free hull rebuilt from its axes, the airborne tick count, a grounded wreck at rest
+	// halving vz, and the request clear. The up word is the solve's own (var_288), re-read only
+	// where a rebuild extracts its rows; the entity's Pitch / Roll leave as the fits and the
+	// rebuilds wrote them.
+	// [orig: @0x47EE50..0x47EEEE: the quiet clear @0x47EE50..0x47EE8A, +0x3CE @0x47EE94, the client
+	//  rebuild (Entity_RebuildOrientationMatrixFromAxes @0x4632E0, the call @0x47EEB7) under
+	//  !authority && up.z < 0 && !(Flags & 0x10) @0x47EE9B..0x47EEAC (up.z in ebp from var_288
+	//  @0x47E611 / @0x47EC92 / @0x47EE34), +0x3D4 @0x47EEBF..0x47EED1, `sar dword ptr [esi+0A0h],
+	//  1` under !in-air && +0x2F0 @0x47EED8..0x47EEE4, +0x2ED @0x47EEEE; Pitch / Roll written by
+	//  the fits @0x47E61F / @0x47E622, @0x47EC75 / @0x47EC83 and the rebuild @0x463512..0x463523]
+	const auto tracked_tail = [&](int32_t tail_up_z16) {
+		vehicle_suspension_tick_tail(veh, traits);
+		m.contact_solved_once = true;
+		if (!world.ai.is_authority && tail_up_z16 < 0 &&
+				((veh.flags | veh.engine_flags) & 0x10u) == 0)
+			vehicle_rebuild_rest_orientation(world, veh, false);
+		m.plat_airborne_ticks = (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
+		if ((veh.flags & kEntityFlagInAir) == 0 && m.settle_2f0 != 0)
+			m.slide_z = io::bam_sar(m.slide_z, 1);
+		veh.pitch_bam = m.air_pitch_bam;
+		veh.roll_bam = m.air_roll_bam;
+	};
 
 	// ---- solve select: the no-pad branch [orig: the all-zero pad test
     // @0x47E1A9].
@@ -611,10 +634,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
             if (maxd > 0) {
                 pz += maxd;
                 veh.flags &= ~kEntityFlagInAir;
-                vehicle_suspension_tick_tail(veh, traits);
-				m.contact_solved_once = true;
-				m.plat_airborne_ticks =
-						(veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
+				tracked_tail(up_z16);
 				return;
 			}
         }
@@ -631,9 +651,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 		m.air_roll_bam = fit.roll_bam;
 		if (m.crashed)
 			m.yaw_bam = fit.yaw_bam;
-		vehicle_suspension_tick_tail(veh, traits);
-		m.contact_solved_once = true;
-		m.plat_airborne_ticks = (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
+		tracked_tail(up_z16);
 		return;
 	}
 	if (d[2] != 0 && d[3] != 0)
@@ -700,8 +718,6 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	m.air_roll_bam = fit.roll_bam;
 	if (m.crashed != 0)
 		m.yaw_bam = fit.yaw_bam;
-	veh.pitch_bam = m.air_pitch_bam;
-	veh.roll_bam = m.air_roll_bam;
     if (m.crashed == 0 && up_z16 > 0) {
         // Upright: slideDecay clamped toward the ground, then Z = the solver
         // chassis Z — the wheeled solver's positive-corner average,
@@ -725,16 +741,17 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // [orig: @0x47EEEE].
     vehicle_suspension_post_contact(veh, pad_contact, 4, up_z16);
 	// [orig: @0x47ED67..0x47EE49] the final contact pass may recover an
-	// inverted hull after its replicated parked bit was cleared.
+	// inverted hull after its replicated parked bit was cleared; the rebuilt rows refresh the up
+	// word the tail reads [orig: the row-2 extract into var_288's vector @0x47ED94, the reload
+	// @0x47EE34].
 	if (((veh.flags | veh.engine_flags) & 0x10u) == 0 && up_z16 < 0) {
 		vehicle_rebuild_rest_orientation(world, veh, false);
 		m.crashed = 0;
 		m.byte_2ef = 0;
 		m.settle_2f0 = 0;
+		up_z16 = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22.m[10] >> 6;
 	}
-	vehicle_suspension_tick_tail(veh, traits);
-	m.contact_solved_once = true;
-	m.plat_airborne_ticks = (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
+	tracked_tail(up_z16);
 }
 
 namespace {

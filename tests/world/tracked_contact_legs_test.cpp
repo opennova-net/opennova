@@ -1,6 +1,6 @@
 // The tracked contact solve's extend-loop and respawn legs (D-NET-NEW-L6-16), the aircraft and
-// tracked crash-state latch (D-NET-NEW-L6-17) and the grounded arm's crashed block
-// (D-NET-NEW-L6-19).
+// tracked crash-state latch (D-NET-NEW-L6-17), the grounded arm's crashed block (D-NET-NEW-L6-19)
+// and the tail legs (D-NET-NEW-L6-20).
 // - The extend loop resets every oscillator's remaining range to 0xFFFF, after the pad quad's
 //   chassis-force clear. [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the quad
 //   @0x47DAE2 and Entity_ClearSuspensionForces @0x47DAF2; the reset @0x47DB70]
@@ -258,6 +258,43 @@ void test_the_grounded_crashed_block() {
 	}
 }
 
+// D-NET-NEW-L6-20: the tail both arms share. A client's crashed hull hanging inverted in the air
+// (the crash state rebuilds no crashed hull) with Flags 0x10 clear is rebuilt upright from its
+// axes, which clears the crash pair; the authority's is not. A grounded wreck at rest (+0x2F0)
+// halves vz. The entity Pitch / Roll leave as the solve last wrote them.
+// [orig: @0x47EE9B..0x47EEB7; `sar dword ptr [esi+0A0h], 1` @0x47EED8..0x47EEE4]
+void test_the_tail_legs() {
+	const int32_t kHigh = kGround + (20 << 16); // no probe reaches the field
+	for (const bool authority : { false, true }) {
+		auto rig = std::make_unique<Rig>(authority);
+		Entity &v = rig->e();
+		v.health = 0;
+		v.veh.crashed = 1;
+		v.veh.air_roll_bam = int32_t(0x80000000u);
+		rig->solve(kHigh);
+		const int32_t up = detail::vehicle_euler_basis(v.veh.yaw_bam, v.veh.air_pitch_bam,
+				v.veh.air_roll_bam).q22.m[10] >> 6;
+		CHECK((v.flags & kEntityFlagInAir) != 0);
+		if (authority) {
+			CHECK(v.veh.crashed == 1);
+			CHECK(up < 0);
+		} else {
+			CHECK(v.veh.crashed == 0);
+			CHECK(up > 0);
+		}
+		CHECK(v.pitch_bam == v.veh.air_pitch_bam && v.roll_bam == v.veh.air_roll_bam);
+	}
+	{
+		auto rig = std::make_unique<Rig>(true);
+		Entity &v = rig->e();
+		v.health = 0;
+		v.veh.settle_2f0 = 1;
+		rig->solve(kPadsDown, -400);
+		CHECK((v.flags & kEntityFlagInAir) == 0);
+		CHECK(v.veh.slide_z == -200);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -266,6 +303,7 @@ int main() {
 	test_the_client_window_runs_only_grounded();
 	test_the_crash_latch_per_family();
 	test_the_grounded_crashed_block();
+	test_the_tail_legs();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
