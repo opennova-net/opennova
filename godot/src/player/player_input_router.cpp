@@ -87,6 +87,9 @@ public:
 	bool held_off_keyboard(const char *p_token) const override {
 		return controls_.is_valid() && controls_->is_token_held_off_keyboard(p_token);
 	}
+	bool scripted_left_button(const char *p_token) const override {
+		return controls_.is_valid() && controls_->is_token_scripted_left_button(p_token);
+	}
 	// Shift's sign bit reads the key-state array, which a menu close's reset
 	// clears (engine controls::KeyStateReset carries the witness).
 	bool fire_signed(const char *p_token) const override {
@@ -650,9 +653,10 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	// carries the witness).
 	p_input->set_weapon_input(actions.fire_held, false, false);
 	p_input->set_fire_keys_held(actions.fire_keys_held);
-	// The scripted fire hold stands for its mouse button: its press owes the left button's
-	// down (engine controls::PlayerActionFrame::fire_off_press carries the witness).
-	if (actions.fire_off_press) left_down_owed_ = true;
+	// The scripted fire hold standing for the left button: its press owes the left button's
+	// down, a joystick's none (engine controls::PlayerActionFrame::fire_scripted_left_down
+	// carries the witness).
+	if (actions.fire_scripted_left_down) left_down_owed_ = true;
 	p_input->set_to_special_held(actions.to_special_held);
 	p_input->set_menu_open(frame_menu_open_);
 	for (const auto &request : actions.requests) {

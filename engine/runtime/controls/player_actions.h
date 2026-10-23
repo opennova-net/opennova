@@ -45,6 +45,13 @@ public:
 	// (the embedder's, queued at its update's message pump); these arms keep their press
 	// edges. A source with no key queue reads every arm here.
 	virtual bool held_off_keyboard(const char *token) const { return pressed(token); }
+	// Whether the scripted device holds the token's row and the row's binding names the left
+	// mouse button: the hold then stands for that button (the embedder's device; retail has no
+	// scripted device). A joystick's hold is never one.
+	virtual bool scripted_left_button(const char *token) const {
+		(void)token;
+		return false;
+	}
 };
 
 enum class PlayerAction {
@@ -225,11 +232,15 @@ struct PlayerActionFrame {
 	// [orig: Input_IsBindingActive @0x498320 (the key slots @0x498348, device 1 @0x498355);
 	//  Input_HandleActionBinding_0 case 0x95 - the device test @0x4E090B]
 	bool fire_keys_held = false;
-	// The fire row's off-keyboard arm pressed this poll (PlayerActionSource::held_off_keyboard:
-	// the scripted device's hold, which stands for the mouse button its row binds): the
+	// The fire row's off-keyboard arm pressed this poll by the scripted device's hold standing
+	// for the left mouse button its row binds (PlayerActionSource::scripted_left_button): the
 	// embedder owes the left button's down its PowerThrow windup test, as a real click's
-	// message does (world::local_weapon_left_button_down carries the witness).
-	bool fire_off_press = false;
+	// message does (world::local_weapon_left_button_down carries the witness). The left-down
+	// leg is the left button's message alone, so a joystick's press owes none: its press leg
+	// starts no windup either (device 3).
+	// [orig: Input_ProcessBindings @0x4DDA50 - event 2 @0x4DDA88 (Input_DispatchMouseEvent
+	//  @0x761470); Input_HandleActionBinding_0 case 0x95 - the device test @0x4E090B]
+	bool fire_scripted_left_down = false;
 	// The reload (catalog row 47 magazine, code 211 = 0xD3) and ToSpecial (row 37, default
 	// F, code 220 = 0xDC) rows are records in `requests` (PlayerAction::Reload / ToSpecial),
 	// one per event in key order with the action rows', whose arms the role owns

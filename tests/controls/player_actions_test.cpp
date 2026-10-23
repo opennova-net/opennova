@@ -334,6 +334,39 @@ bool test_fire_row_dispatches_its_key_events() {
 	return true;
 }
 
+// The fire row's off-keyboard press owes the left button's down (its PowerThrow windup test)
+// only when the scripted device's hold stands for the left button the row binds; a
+// joystick's press owes none, as retail's left-down leg is the left button's message alone
+// and a joystick's press leg starts no windup.
+// [orig: Input_ProcessBindings @0x4DDA50 - event 2 @0x4DDA88; Input_HandleActionBinding_0
+//  case 0x95 - the device test @0x4E090B]
+struct ScriptedKeys : QueuedKeys {
+	std::set<std::string> scripted_left;
+	bool scripted_left_button(const char *token) const override {
+		return scripted_left.count(token) != 0;
+	}
+};
+
+bool test_only_the_scripted_left_button_owes_the_left_down() {
+	PlayerActions actions;
+	ScriptedKeys keys;
+	keys.off.insert("attack_1");
+	keys.hold("attack_1");
+	auto frame = poll_frame(actions, keys, kLive); // a joystick's press
+	CHECK(fire(frame) == 1 && !frame.fire_scripted_left_down);
+	keys.off.clear();
+	keys.release("attack_1");
+	CHECK(fire(poll_frame(actions, keys, kLive)) == 1); // its release
+	keys.off.insert("attack_1");
+	keys.hold("attack_1");
+	keys.scripted_left.insert("attack_1");
+	frame = poll_frame(actions, keys, kLive); // the scripted hold standing for the left button
+	CHECK(fire(frame) == 1 && frame.fire_scripted_left_down);
+	frame = poll_frame(actions, keys, kLive); // held: no second down
+	CHECK(!fire(frame) && !frame.fire_scripted_left_down);
+	return true;
+}
+
 // ToSpecial's press dispatches on its key-down's event (an OS repeat again), with
 // captured gameplay input; its release on the release pass's event, which has no
 // capture or mode gate (over a screen too); neither with no simulation. The
@@ -1119,6 +1152,7 @@ int main() {
 			test_event_rows_fire_once_per_event, test_the_chain_takes_digit_keys,
 			test_reload_medic_and_respawn_fire_on_their_events, test_embedder_rows_keep_the_key_order,
 			test_to_special_dispatches_its_key_events, test_fire_row_dispatches_its_key_events,
+			test_only_the_scripted_left_button_owes_the_left_down,
 			test_spectator_rows_fire_on_their_events,
 			test_picks_escape_and_spectator_rows_keep_the_key_order,
 			test_voice_menu_digits_pick_and_swallow_the_rows,

@@ -361,6 +361,13 @@ bool ControlsModel::is_token_held_off_keyboard(const String &p_token) const {
 	return token_pressed_(p_token, false, false);
 }
 
+bool ControlsModel::is_token_scripted_left_button(const char *p_token) const {
+	const opennova::controls::BindingRecord *r = bindings_.record(bindings_.index_of_token(p_token));
+	return r != nullptr && r->mouse_mask == opennova::controls::kMouseLeft &&
+			scripted_input_.is_valid() && !bindings_.keyboard_captured() &&
+			scripted_input_->native().token_held(p_token);
+}
+
 int ControlsModel::mouse_click_code(int p_event) const {
 	const auto key_down = [this](int vk) { return vk_down_(vk); };
 	const int index = bindings_.mouse_click_action(static_cast<uint32_t>(p_event), key_down,
