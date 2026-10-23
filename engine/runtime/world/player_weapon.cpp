@@ -181,7 +181,8 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 // slot, whose owner its attach writes past the mount; `personal_slot` false) or the
 // promoted byte, as written above, is set. All of it at the request, a refused or gated
 // queue's included: the next SWITCHFROM / SWITCHRANK completion commits the stored word and
-// writes none of it (commit_mount's view_writes).
+// writes none of it (commit_mount's view_writes) but a SWITCHRANK's clear of the scope byte
+// for a def with no optic (clear_scope_at_local_switchrank).
 // [orig: Player_MountWeaponSlot @0x4DFA40 - AbsorbPitch @0x4DFA7A..0x4DFA86, Pitch = 0
 //  @0x4DFAA9, the offset @0x4DFAB3..0x4DFAB7, else 0 @0x4DFABE; @0x4DFB16; ForceScoped
 //  @0x4DFB23..0x4DFB2F, g_WeaponScopeActive = 1 @0x4DFB31, dword_B76808 = Def+0xA0
@@ -321,8 +322,9 @@ bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// The committed slot and its def mount with the store (commit_mount): a fresh slot
 	// whose draw the switch action's completion queued (start_in_switchto).
 	// [orig: WeaponAction_SwitchFrom @0x5433B0 - WeaponSlot_TryQueueSwitchTo @0x5434A3]
-	// A switch's commit writes none of the mount's view words (its request did); a select runs
-	// no request, and its install writes them.
+	// A switch's commit writes none of the mount's view words (its request did) but a
+	// SWITCHRANK's scope byte clear, which the pump runs past this store
+	// (clear_scope_at_local_switchrank); a select runs no request, and its install writes them.
 	event.installed = def != nullptr && commit_mount(world, w, def->name, false, select);
 	w.events.push_back(std::move(event));
 	return true;
@@ -1298,6 +1300,21 @@ void start_local_weapon_raise(const World &world, const LocalPlayerWeapon &w,
 			def != nullptr && (def->flags & weapon_flag::kEmplaced) != 0);
 }
 
+// A local SWITCHRANK completion's scope write, past its store and its AdmDef stamp: the
+// committed EquippedSlot's def, as the commit mounted it, with neither Scoped nor Sighted
+// (Flags & 3) clears the promoted scope byte, the bare write; an optic def keeps it. The
+// store of the slot the EquippedSlot already is (a loadout apply's mount) clears it the same.
+// A SWITCHFROM's commit writes no view word.
+// [orig: WeaponAction_SwitchRank @0x543500 - the store @0x543539, the stamp @0x54355A, the
+//  EquippedSlot def's Flags & 3 @0x543564..0x54357A, g_WeaponScopeActive = 0 @0x54357C;
+//  WeaponAction_SwitchFrom @0x5433B0 (@0x543464..0x5434AA) writes none]
+void clear_scope_at_local_switchrank(const World &world, const LocalPlayerWeapon &w,
+		PlayerViewState &view) {
+	const WeaponFsmDef *def = local_equipped_slot_def(world, w);
+	if (def != nullptr && (def->flags & (DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SIGHTED)) == 0)
+		player_view_clear_scope_promoted(view);
+}
+
 } // namespace
 
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
@@ -1784,9 +1801,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	if (w.usegun_switch != LocalUseGunSwitch::kNone && ev.switch_completed) {
 		w.usegun_switch_action = active_slot.current;
 		const bool completed_from = active_slot.current == weapon_action::kSwitchFrom;
+		const bool completed_rank = active_slot.current == weapon_action::kSwitchRank;
 		commit_local_usegun_weapon_switch(world, w);
-		// A SWITCHFROM's commit raises the weapon view on the stored slot's def.
+		// A SWITCHFROM's commit raises the weapon view on the stored slot's def; a SWITCHRANK's
+		// drops the promoted scope byte for a def with no optic.
 		if (completed_from && w.active) start_local_weapon_raise(world, w, view);
+		if (completed_rank && w.active) clear_scope_at_local_switchrank(world, w, view);
 		// The switch back hands the personal slot to its readers again, which read
 		// a bucket weapon's rounds through the seat as it now stands: the mirror the
 		// staging pump read through the gunner seat (the gun's clip) does not carry
@@ -1840,10 +1860,15 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	if (io.inventory != nullptr && (!borrowed_usegun_slot || w.usegun_on_foot) &&
 			w.switch_in_flight && ev.switch_completed) {
 		// The completing action, read before the commit replaces the slot: a
-		// SWITCHFROM's commit draws the stored slot and raises the weapon view.
+		// SWITCHFROM's commit draws the stored slot and raises the weapon view, a
+		// SWITCHRANK's (the store of the slot already held included) drops the promoted
+		// scope byte for a def with no optic.
 		const bool completed_from = active_slot.current == weapon_action::kSwitchFrom;
-		if (commit_pending_weapon_switch(world, w, io.inventory, false) && completed_from)
-			start_local_weapon_raise(world, w, view);
+		const bool completed_rank = active_slot.current == weapon_action::kSwitchRank;
+		if (commit_pending_weapon_switch(world, w, io.inventory, false)) {
+			if (completed_from) start_local_weapon_raise(world, w, view);
+			if (completed_rank) clear_scope_at_local_switchrank(world, w, view);
+		}
 	}
 	// The FSM's scope legs already ran inside the tick (LocalWeaponScope);
 	// the serials count the calls for the dev tools.

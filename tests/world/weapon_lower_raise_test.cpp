@@ -233,6 +233,22 @@ constexpr const char *kWeaponDef =
 		"\tammoclass CLASS_762MM 1\r\n"
 		"\tflags ForceCrouch\r\n"
 		"\tflags OnlyScoped\r\n"
+		"end\r\n"
+		// An optic (Scoped) rank and an iron-sighted one of one category, 4 (L7-s27).
+		"weapon \"WPN_OPTIC\"\r\n"
+		"\tcategory 4\r\n"
+		"\trank 0\r\n"
+		"\tclipsize 10\r\n"
+		"\tstartrounds 40\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
+		"\tflags Scoped\r\n"
+		"end\r\n"
+		"weapon \"WPN_IRON\"\r\n"
+		"\tcategory 4\r\n"
+		"\trank 1\r\n"
+		"\tclipsize 10\r\n"
+		"\tstartrounds 40\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
 		"end\r\n";
 
 constexpr int32_t kRifle = 3 * weapon_combo::kRanksPerCategory;
@@ -1164,6 +1180,49 @@ void test_a_force_crouch_mount_requests_the_crouch() {
 	}
 }
 
+// --- the SWITCHRANK completion's scope byte (L7-s27 row 0) ------------------------------
+
+// A local SWITCHRANK completion clears the promoted scope byte, past its store, when the
+// def it stored has neither Scoped nor Sighted; an optic def keeps it. The mount request
+// keeps the byte (one category), so the clear is the completion's own: the switch back to
+// the optic binds it with the byte clear and engages nothing. Over a byte raised on the iron
+// sight the switch to the optic engages at its request and its completion keeps the byte.
+// [orig: WeaponAction_SwitchRank @0x543500 - the store @0x543539, the EquippedSlot def's
+//  Flags & 3 @0x543564..0x54357A, g_WeaponScopeActive = 0 @0x54357C; Player_MountWeaponSlot
+//  @0x4DFA40 - the category compare @0x4DFB4C..0x4DFB5E, the bind and engage
+//  @0x4DFC35..0x4DFC9A]
+void test_a_switchrank_completion_clears_the_scope_byte_for_a_def_with_no_optic() {
+	constexpr int32_t kOptic = 4 * weapon_combo::kRanksPerCategory;
+	const auto rig = std::make_unique<Rig>(std::vector<WeaponKitEntry>{
+			WeaponKitEntry{"WPN_OPTIC", -1, -1, -1}, WeaponKitEntry{"WPN_IRON", -1, -1, -1}});
+	CHECK(rig->inventory().equipped_combo == kOptic);
+	rig->tick();
+	rig->view().scope_settled = true;
+	const WeaponSwitchOutcome out = rig->press(4);
+	CHECK(out.kind == WeaponSwitchOutcome::kMount && out.same_category && out.combo == kOptic + 1);
+	CHECK(rig->view().scope_settled); // one category: the request keeps it
+	CHECK(rig->tick_until_commit() >= 1);
+	CHECK(rig->inventory().equipped_combo == kOptic + 1);
+	CHECK(!rig->view().scope_settled); // the iron sight's SWITCHRANK cleared it
+	rig->settle();
+	rig->press(4); // back to the optic: bound, the byte clear, nothing engaged
+	CHECK(rig->view().weapon_pose_bound && !rig->view().scope_engaged);
+	CHECK(rig->tick_until_commit() >= 1);
+	CHECK(rig->inventory().equipped_combo == kOptic);
+	CHECK(!rig->view().scope_settled);
+	rig->settle();
+	rig->press(4);
+	CHECK(rig->tick_until_commit() >= 1);
+	rig->settle();
+	CHECK(rig->inventory().equipped_combo == kOptic + 1);
+	rig->view().scope_settled = true;
+	rig->press(4); // the optic over a raised byte: engaged at the request
+	CHECK(rig->view().weapon_pose_bound && rig->view().scope_engaged);
+	CHECK(rig->tick_until_commit() >= 1);
+	CHECK(rig->inventory().equipped_combo == kOptic);
+	CHECK(rig->view().scope_settled); // an optic's SWITCHRANK keeps it
+}
+
 } // namespace
 
 int main() {
@@ -1184,6 +1243,7 @@ int main() {
 	test_a_loadout_apply_mounts_its_selected_slot();
 	test_the_mount_request_writes_the_view_words();
 	test_a_force_crouch_mount_requests_the_crouch();
+	test_a_switchrank_completion_clears_the_scope_byte_for_a_def_with_no_optic();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

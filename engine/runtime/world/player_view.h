@@ -756,7 +756,9 @@ inline bool player_view_scope_settled(const PlayerViewState &v) {
 // The weapon FSM's bare `g_WeaponScopeActive = 0`: the promoted byte alone,
 // the target, the interp and the hipfire latch untouched (no ease, no FOV
 // write, no tip). [orig: WeaponAction_Idle @0x5429f0; WeaponAction_EmptyIdle
-//  @0x542ad3; WeaponAction_ProcessFrame @0x5413a0, ahead of its toggle]
+//  @0x542ad3; WeaponAction_ProcessFrame @0x5413a0, ahead of its toggle;
+//  WeaponAction_SwitchRank @0x54357C, a local completion's new EquippedSlot def with
+//  no optic]
 inline void player_view_clear_scope_promoted(PlayerViewState &v) {
     v.scope_settled = false;
 }
@@ -772,7 +774,8 @@ void player_view_weapon_switch_reset(PlayerViewState &v);
 // A mount's view words, as an install that ran no mount request writes them: same-category
 // mounts keep the promoted byte; ForceScoped sets it; a category change clears it; then the
 // bind (player_view_weapon_mount_bind) on the installed def's poses. A switch's commit writes
-// none: its mount request wrote them (mount_queue_switch_out).
+// none (its mount request wrote them, mount_queue_switch_out) but a SWITCHRANK's bare clear
+// of the byte for a def with no optic (player_view_clear_scope_promoted).
 // [orig: Player_MountWeaponSlot @0x4DFB31..0x4DFB66, @0x4DFC35..0x4DFC9A]
 void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed);
 // The mount's bind of the first-person camera interp to the mounted slot, past its bias clear:
