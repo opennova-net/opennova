@@ -183,6 +183,15 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	//  CNapiGameSession_BuildAndCreateSession - @0x569678, @0x56967F].
 	ctx.session_game_type = config.game_type;
 	ctx.session_mp_attributes = config.mp_attributes;
+	// A create of a game that is no team game clears game_settings' two side passwords, so no
+	// side-password leg (the join check's 18 / 19 / 20, the form post's 17, the team pick) sees
+	// the cfg block's words in that session; an admin SET writes them again (D-NET-NEW-L1-44).
+	// [orig: CNapiGameSession_CreateSession @0x4C97C0 - `test dword ptr [ebp+0F34h], 10000h`
+	//  @0x4C98E2, side B +0xEC8 @0x4C98FC, side A +0xEA8 @0x4C990F]
+	if ((ctx.session_game_type & 0x10000u) == 0) {
+		ctx.config.side_a_password.clear();
+		ctx.config.side_b_password.clear();
+	}
 	// Retail seeds the process CRT stream from the clock once when the host
 	// allocates its player-slot table and immediately spends one draw on the
 	// table's anti-cheat base offset (`rand() % 25145`); the simulation's owned

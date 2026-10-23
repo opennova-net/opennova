@@ -9,11 +9,15 @@
 //   - a deathmatch host created without TeamChoose runs the leg once `SET ChangeTeam 1` armed the
 //     cfg word;
 //   - a deathmatch host created with TeamChoose drops the leg after `SET ChangeTeam 0`.
+// A deathmatch create clears game_settings' side passwords (D-NET-NEW-L1-44), so there the leg
+// compares the cleared words (any password passes) until an admin SET writes one again.
 // [orig: Server_ValidatePlayerJoinRequest @0x512100 - CNapiServerConfig_BuildFlags(&g_NapiNPCtx)
 //  @0x512495, `test al, 4` @0x51249A, side A's reject 19 @0x51256C; CNapiServerConfig_BuildFlags
 //  @0x4C4DC0 - the cfg word's bit 4 @0x4C4DD2, `test [ecx+0F34h], 10000h` @0x4C4E30, `test
 //  [ecx+0F38h], al` @0x4C4E3C; CAdminServer_HandleSetCommand @0x405A60 - ChangeTeam @0x405C80 /
-//  @0x405C89, the cfg word @0x406190]
+//  @0x405C89, the cfg word @0x406190, CAdminServer_SetSidePassword @0x406247;
+//  CNapiGameSession_CreateSession @0x4C97C0 - the non-team clear @0x4C98E2..0x4C990F; the
+//  empty side A's admit `test esi, esi` @0x512547]
 
 #include "host_test_setup.h"
 
@@ -108,18 +112,28 @@ bool run_a_team_host_keeps_the_leg_after_change_team_0() {
 	              "the create's copy keeps the leg: a wrong password is still refused 19");
 }
 
+// A deathmatch create clears the side passwords (D-NET-NEW-L1-44), so the cfg block's "blue1"
+// never reaches the leg; an admin SET SideAPassword writes it again.
 bool run_a_deathmatch_host_follows_the_cfg_word() {
 	auto off = host(game_type::kDeathmatch, false);
-	if (!expect(join_code(*off, "wrong") == 0,
-	            "a deathmatch host without TeamChoose runs no side-password leg"))
+	if (!expect(off->config.side_a_password.empty() && join_code(*off, "wrong") == 0,
+	            "a deathmatch create clears side A; without TeamChoose no leg runs"))
 		return false;
 	if (!expect(admin_set(*off, "SET ChangeTeam 1"), "SET ChangeTeam 1 is accepted")) return false;
-	if (!expect(join_code(*off, "wrong") == 19,
-	            "after SET ChangeTeam 1 the live cfg word arms the leg"))
+	if (!expect(join_code(*off, "wrong") == 0,
+	            "the live cfg word arms the leg, and the cleared side A admits any password"))
+		return false;
+	if (!expect(admin_set(*off, "SET SideAPassword blue1"), "SET SideAPassword is accepted"))
+		return false;
+	if (!expect(join_code(*off, "wrong") == 19 && join_code(*off, "BLUE1") == 0,
+	            "the admin's side A password: a wrong one is refused 19"))
 		return false;
 	auto on = host(game_type::kDeathmatch, true);
-	if (!expect(join_code(*on, "wrong") == 19,
-	            "a deathmatch host created with TeamChoose runs the leg"))
+	if (!expect(join_code(*on, "wrong") == 0,
+	            "a deathmatch host created with TeamChoose: the leg runs over a cleared side A"))
+		return false;
+	if (!expect(admin_set(*on, "SET SideAPassword blue1") && join_code(*on, "wrong") == 19,
+	            "the admin's side A password is refused 19 for a wrong one"))
 		return false;
 	if (!expect(admin_set(*on, "SET ChangeTeam 0"), "SET ChangeTeam 0 is accepted")) return false;
 	return expect(join_code(*on, "wrong") == 0,

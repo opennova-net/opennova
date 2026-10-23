@@ -5098,7 +5098,8 @@ target_link_libraries(npruntime_server_config_flags_live_test PRIVATE opennova_n
 target_include_directories(npruntime_server_config_flags_live_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_server_config_flags_live COMMAND npruntime_server_config_flags_live_test)
 # D-NET-NEW-L1-41: the join check's side-password leg runs under BuildFlags' team-choose bit
-# (the cfg word or, in a team game, the create's copy), not the cfg word alone.
+# (the cfg word or, in a team game, the create's copy), not the cfg word alone; D-NET-NEW-L1-44:
+# a deathmatch create clears the side passwords the leg compares.
 add_executable(npruntime_side_password_gate_test npruntime/side_password_gate_test.cpp)
 target_link_libraries(npruntime_side_password_gate_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_side_password_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
