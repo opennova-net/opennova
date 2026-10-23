@@ -786,6 +786,9 @@ public:
 	void configure_host_session(const Ref<HostSessionOptions> &p_options);
 	// A snapshot of the live host session as the same record.
 	Ref<HostSessionOptions> get_host_session_config() const;
+	// The last round's clock, which a mission start's server-info update reads ahead of its loads:
+	// the previous mission's World at a map change's head (its kernel still stands), else 0.
+	int32_t previous_round_time_remaining_ticks() const;
 	// The BMS header the tag=0x0B join reply carries: 0 until a mission loaded.
 	int get_mission_header_size() const;
 	// Debug/test hook: directly admit a synthetic remote peer at a Godot-space

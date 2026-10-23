@@ -65,6 +65,14 @@ void read_session_listing_columns(
 	r.game_server_baffle_key = ctx.game_server_baffle_key;
 }
 
+void apply_mission_start_columns(HostRegistration &r, const std::string &mission_text_title,
+		const std::string &header_name, int32_t climate, int32_t last_round_ticks) {
+	r.mission_name = !mission_text_title.empty() ? mission_text_title : header_name;
+	r.region_index = climate;
+	r.time_of_day = 0;
+	r.round_time_remaining_ticks = last_round_ticks;
+}
+
 bool Server_ToggleJoinLock(NapiNPServerCtx &ctx) {
 	// [orig: `cmp g_ServerJoinLocked, eax(0); sete al; mov g_ServerJoinLocked, eax`
 	//  @0x50D750..0x50D75D]

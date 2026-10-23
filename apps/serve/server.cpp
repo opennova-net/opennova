@@ -341,14 +341,11 @@ void Server::run_mission_start_update(const std::string &header_name, int32_t cl
 				[this](const char *section, const char *key, const char *fallback) {
 					return game_text(have_gametext_ ? &gametext_ : nullptr, section, key, fallback);
 				});
-	// [orig: Lobby_UpdateServerInfo - MissionText_GetString("info", "title") @0x4FE989..0x4FE993,
-	//  the header's name when it reads empty @0x4FE99D..0x4FE9AD; the climate @0x4FE9D5]
-	const std::string title = boot_.mission_text.get_string("info", "title");
-	r.mission_name = !title.empty() ? title : header_name;
-	r.region_index = climate;
-	// [orig: g_EnvTimeOfDayEnum read @0x4FF038; g_RoundTimeRemaining read @0x4FED57]
-	r.time_of_day = 0;
-	r.round_time_remaining_ticks = kernel_ ? kernel_->world.match.remaining_ticks() : 0;
+	// Then the mission start's own columns (inmatch::apply_mission_start_columns carries the
+	// witness): the mission text's title else the header's name, its climate, TimeOfDay 0, the last
+	// round's clock.
+	inmatch::apply_mission_start_columns(r, boot_.mission_text.get_string("info", "title"),
+			header_name, climate, kernel_ ? kernel_->world.match.remaining_ticks() : 0);
 	listing_->set_base(std::move(r));
 	lister_->publish_server_info(rotation_.round_count);
 	(void)lister_->tick(wall_ms());
