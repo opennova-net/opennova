@@ -7,6 +7,7 @@
 #include <runtime/inmatch/occlusion_collect.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_state.h>
+#include <runtime/world/collision.h> // kStaticProxCountBound, kItemDefTypeBuilding
 #include <runtime/world/entity.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_camera.h>
@@ -260,6 +261,7 @@ void test_the_walk_order() {
 	// A decoration: a pool-2 row whose def is not Building-type, entity-collected.
 	w::Entity &decoration = row(kernel, 2, 3, w::EntityKind::Building, 303, 20.0f, -1.0f);
 	decoration.has_item_def = true;
+	decoration.item_type_index = 1;
 	decoration.item_type = 6;
 	kernel.occlusion.assign_render_model(decoration.handle, unstamped);
 	w::Entity *const order[5] = {&decoration, &person, &spawned, &local, &vehicle};
@@ -305,12 +307,66 @@ void test_the_walk_order() {
 	expect(vehicle.occlusion_latch == expected[4], "pool 1's vehicle the last");
 }
 
+// The statics' walk is the static prox list's tail, and the list counts at most
+// 1199 rows, Building-type defs first: with 1198 buildings listed, the first
+// decoration after them is collected and the next one is never walked (no verdict,
+// its latch untouched); a row with no def or no item type is never listed.
+// [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 - pass 1's tests @ 0x4b945d /
+//  @ 0x4b9466 and bound @ 0x4b94b7 / @ 0x4b94cb, pass 2's @ 0x4b94f1 / @ 0x4b94fa
+//  and @ 0x4b954b / @ 0x4b955f; Terrain_CollectVisibleEntities_0 @ 0x5c6f20, the
+//  walk to g_StaticProxCount @ 0x5c6f48..0x5c721e]
+void test_the_statics_bound() {
+	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	opennova::mission::MissionKernel &kernel = *kernel_heap;
+	constexpr int kBuildings = w::kStaticProxCountBound - 1;
+	kernel.world.registry.configure_pool(2, kBuildings + 3);
+	opennova::renderer::ObjectProjectionSphere unstamped;
+	unstamped.valid = true;
+	// A def-less decoration ahead of every listed row: never listed.
+	w::Entity &unlisted = row(kernel, 2, 0, w::EntityKind::Item, 400, 20.0f, 0.0f);
+	kernel.occlusion.assign_render_model(unlisted.handle, unstamped);
+	for (int slot = 1; slot <= kBuildings; ++slot) {
+		w::Entity &b = row(kernel, 2, slot, w::EntityKind::Building, 0, -20.0f, 0.0f);
+		b.has_item_def = true;
+		b.item_type_index = 2;
+		b.item_type = w::kItemDefTypeBuilding;
+	}
+	const auto decoration = [&](int slot, int32_t bms_id) -> w::Entity & {
+		w::Entity &d = row(kernel, 2, slot, w::EntityKind::Building, bms_id, 20.0f, 1.0f);
+		d.has_item_def = true;
+		d.item_type_index = 1;
+		d.item_type = 6;
+		d.occlusion_latch = 0;
+		kernel.occlusion.assign_render_model(d.handle, unstamped);
+		return d;
+	};
+	w::Entity &counted = decoration(kBuildings + 1, 401);
+	w::Entity &past = decoration(kBuildings + 2, 402);
+	unlisted.occlusion_latch = 0;
+
+	const w::OcclusionFrameCamera cam = camera_down_x();
+	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+	im::WireOcclusionLatchMap latches;
+	std::vector<w::EntityHandle> scratch;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<w::Vec3> anchors;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, scratch, cam,
+			culled_bms, culled_wire, anchors);
+	expect(culled_bms.empty(), "no static is culled");
+	expect(counted.occlusion_latch >= 16 && counted.occlusion_latch <= 23,
+			"the 1199th listed row is walked and its latch re-arms");
+	expect(past.occlusion_latch == 0, "the row past the bound is never walked");
+	expect(unlisted.occlusion_latch == 0, "a def-less row is never listed");
+}
+
 } // namespace
 
 int main() {
 	test_the_walk();
 	test_the_mirror_walk();
 	test_the_walk_order();
+	test_the_statics_bound();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

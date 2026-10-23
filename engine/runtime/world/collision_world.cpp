@@ -817,7 +817,7 @@ void CollisionWorld::build_statics(World &world) {
         // The original's count saturates at 1199 — the 1200th slot is written
         // but never counted, so 1199 is the effective cap. [orig: the
         // `count < 1199` post-increment gate @ 0x4b94cb / 0x4b955f]
-        if (statics_.size() >= 1199) return;
+        if (statics_.size() >= static_cast<size_t>(kStaticProxCountBound)) return;
         auto it = instances_.find(e.handle.packed);
         const CollisionModel *attached =
             it != instances_.end() ? model(it->second.model_id) : nullptr;

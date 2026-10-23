@@ -1098,6 +1098,18 @@ inline bool building_def_row(const Entity &e) {
                           : e.kind == EntityKind::Building;
 }
 
+// The static prox list's membership and bound: a pool-2 row with an item type
+// (+0x1C) and a def (+0x20) is written, and the count advances only while it is
+// under 1199, so the 1200th row's write lands but is never counted and no
+// later row is. [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 - pass 1's
+// tests @ 0x4b945d / @ 0x4b9466, `cmp eax, 4AFh` @ 0x4b94b7 and its `jge`
+// @ 0x4b94cb; pass 2's @ 0x4b94f1 / @ 0x4b94fa, `cmp eax, 4AFh` @ 0x4b954b and
+// its `jge` @ 0x4b955f]
+inline constexpr int32_t kStaticProxCountBound = 1199;
+inline bool static_prox_listed(const Entity &e) {
+    return e.item_type_index != 0 && e.has_item_def;
+}
+
 // ----------------------------------------------------------------------------
 // CollisionWorld: the proximity tables + per-entity instances, and the
 // world-level blink state. [orig: the g_StaticProx* table is built at mission

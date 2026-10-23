@@ -238,9 +238,23 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	// Entity_BuildProximityLists_Pool2 @ 0x4b9430's second pass, pool 2 in slot order
 	// @ 0x4b94e0..0x4b9568 (the type test @ 0x4b9502); ForTerrain's slot walk
 	// @ 0x5c8caa..0x5c8ced]
+	// The list holds the pool-2 rows with an item type and a def, the Building-type
+	// ones first, and counts at most kStaticProxCountBound of them: a static past the
+	// bound is never in the walked tail (world/collision.h static_prox_listed carries
+	// the witness).
+	int32_t listed = 0;
+	kernel.world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
+		if (world::static_prox_listed(e) && e.item_type == world::kItemDefTypeBuilding &&
+				listed < world::kStaticProxCountBound)
+			++listed;
+	});
 	std::vector<world::EntityHandle> &handles = r_handles;
 	handles.clear();
 	kernel.world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
+		if (!world::static_prox_listed(e) || e.item_type == world::kItemDefTypeBuilding ||
+				listed >= world::kStaticProxCountBound)
+			return;
+		++listed;
 		if (placed_row(e)) handles.push_back(e.handle);
 	});
 	for (const world::EntityHandle h : handles) gate_placed(h);
