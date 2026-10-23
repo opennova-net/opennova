@@ -1570,6 +1570,31 @@ void light_wall_speed_halving(Entity::VehicleMotorState &m, const PlatProbeForce
 		m.speed >>= 1;
 }
 
+// The upright grounded bike's landing compression: each wheel whose probe ended clear of the
+// terrain gives its gap back from its compression, floored at 0, and re-derives its oscillator's
+// extension, while the handbrake latch holds or the retained contact direction is nonzero. The
+// gap is Entity_CheckCollisionState's per-probe word: the probe's height over its four bilinear
+// samples less 2r^2 / |gradient|, written for every probe of the terrain branch and zeroed for a
+// penetrating one, so max(0, pen); both calls write it, so it is pass two's whenever pass two ran
+// (ours: the records' terrain_gap). The length test is the integer direction's x87 length capped
+// at flt_7C19E0 and truncated: nonzero exactly when a component is. The gap's 0 arm
+// (dword_815180 >> 7) sits under the > 0 gate and never runs.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the gap var_1B4 (the call block's third
+//  pointer, var_258 = &var_1B4 @0x47961E..0x479629, both calls @0x479C3C / @0x47A2AF), the loop
+//  @0x47BC3D..0x47BCFF: var_1B4[k] > 0 @0x47BC50, +0x3CD @0x47BC5E, |+0x3BC..+0x3C4|
+//  @0x47BC67..0x47BCBD, comp -= |gap| floored at 0 @0x47BCBF..0x47BCE0, +0x308 + 0x18k =
+//  dword_815180 - comp @0x47BCE7..0x47BCF0; Entity_CheckCollisionState @0x462A30 - the terrain
+//  branch's gate @0x462AE0..0x462AFA, the word @0x462BEB..0x462C13, its 0 @0x462D1C]
+void light_landing_compression(Entity::VehicleMotorState &m, const PlatProbeForce (&forces)[6]) {
+	for (int k = 0; k < 2; ++k) {
+		const int32_t gap = forces[k].terrain_gap;
+		if (gap <= 0 || (m.handbrake_latched == 0 && !vehicle_has_contact_direction(m)))
+			continue;
+		m.wheel_comp[k] = std::max(0, io::bam_sub(m.wheel_comp[k], gap));
+		m.wheel_osc[k].extension = io::bam_sub(kSuspFull, m.wheel_comp[k]);
+	}
+}
+
 void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
     // ---- sleep fast-path [orig: @0x47972C..0x479790]: velocities/speed/
     // rates zero, not airborne, not carried, slideDecay in (-300,-1] (the
@@ -1895,6 +1920,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         if (m.slide_z > 0) m.slide_z = 0;
         pz = static_cast<int32_t>(
                 (int64_t(cf[2]) + cr[2]) / 2);
+		light_landing_compression(m, forces); // [orig: @0x47BC3D..0x47BCF3]
     } else {
         pz = io::bam_add(pz, crash_depth);
     }

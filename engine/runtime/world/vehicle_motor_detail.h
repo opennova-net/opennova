@@ -469,6 +469,11 @@ bool light_contact_solve_active(const VehicleTraits &traits);
 // head-on tiers read wall bytes nothing writes (D-NET-NEW-L6-23).
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600, @0x47AE05..0x47B1A9]
 void light_wall_speed_halving(Entity::VehicleMotorState &m, const PlatProbeForce (&forces)[6]);
+// The upright grounded bike's landing compression: a wheel clear of the terrain by its probe's
+// gap gives it back from its compression (floored at 0) and re-derives its extension, while the
+// handbrake latch holds or the contact direction is nonzero (D-NET-NEW-L6-27).
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600, @0x47BC3D..0x47BCF3]
+void light_landing_compression(Entity::VehicleMotorState &m, const PlatProbeForce (&forces)[6]);
 void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
                          Entity::VehicleMotorState &m,
                          int32_t start_x, int32_t start_y,

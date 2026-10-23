@@ -1,4 +1,4 @@
-// The contact solves' two depth views (D-NET-NEW-L6-11, -15, -21). Retail's second force
+// The contact solves' two depth views (D-NET-NEW-L6-11, -15, -21, -27). Retail's second force
 // pass writes the probe records in place, so the records hold pass two's depths whatever it found;
 // a separate contact copy, taken from pass one, averages with pass two only when pass two
 // classified a contact and takes the mass share. The tracked solve hands its second call the hit
@@ -246,6 +246,40 @@ void test_the_bike_wall_leg_only_halves_the_speed() {
 	CHECK(m.speed == 0x4000);
 }
 
+// D-NET-NEW-L6-27: the upright grounded bike's landing compression. Each of the two wheels whose
+// probe gap is positive gives the gap back from its compression, floored at 0, and its extension
+// becomes 0xFFFF less the compression; only while the handbrake latch holds or the contact
+// direction is nonzero. The spine probes' gaps and wheels 2 / 3 are never read.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47BC3D..0x47BCF3]
+void test_the_bike_landing_compression() {
+	Entity::VehicleMotorState m;
+	detail::PlatProbeForce forces[6];
+	for (int k = 0; k < 4; ++k) {
+		m.wheel_comp[k] = 0x3000;
+		m.wheel_osc[k].extension = 0x1234;
+	}
+	forces[0].terrain_gap = 0x1000;
+	forces[1].terrain_gap = 0x5000; // more than the compression: floored at 0
+	forces[2].terrain_gap = 0x1000;
+	// No latch, no direction: nothing moves.
+	detail::light_landing_compression(m, forces);
+	CHECK(m.wheel_comp[0] == 0x3000 && m.wheel_comp[1] == 0x3000);
+	CHECK(m.wheel_osc[0].extension == 0x1234 && m.wheel_osc[1].extension == 0x1234);
+	m.contact_direction[2] = -1; // one nonzero component passes the length test
+	detail::light_landing_compression(m, forces);
+	CHECK(m.wheel_comp[0] == 0x2000 && m.wheel_osc[0].extension == 0xDFFF);
+	CHECK(m.wheel_comp[1] == 0 && m.wheel_osc[1].extension == 0xFFFF);
+	CHECK(m.wheel_comp[2] == 0x3000 && m.wheel_osc[2].extension == 0x1234);
+	// The handbrake latch alone, a zero gap on wheel 1: only wheel 0 moves.
+	m.contact_direction[2] = 0;
+	m.handbrake_latched = 1;
+	forces[1].terrain_gap = 0;
+	m.wheel_osc[1].extension = 0x1234;
+	detail::light_landing_compression(m, forces);
+	CHECK(m.wheel_comp[0] == 0x1000 && m.wheel_osc[0].extension == 0xEFFF);
+	CHECK(m.wheel_comp[1] == 0 && m.wheel_osc[1].extension == 0x1234);
+}
+
 } // namespace
 
 int main() {
@@ -254,6 +288,7 @@ int main() {
 	test_the_tracked_water_leg_raises_only_the_contact_copy();
 	test_the_tank_hull_bottom_carries_wheel_0s_compression();
 	test_the_bike_wall_leg_only_halves_the_speed();
+	test_the_bike_landing_compression();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
