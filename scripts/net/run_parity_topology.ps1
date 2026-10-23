@@ -2561,10 +2561,19 @@ function Resolve-ScenarioAim {
     # 2 (0x1 @0x49AD76..0x49ADA0) or the round's end (@0x49ADEE..0x49AE16)
     # [orig: Input_HandleActionBinding @0x49AD40]. x7's revive pre-flight (push 167,
     # RR) read the posed heading 0x40000000 on all three aims, so aims two and
-    # three turned from a heading the actor no longer had in mind.
+    # three turned from a heading the actor no longer had in mind. Case 166 subtracts
+    # the tick's whole turn in one store, so the check asks for at least half the
+    # look's turn in its direction (scenario_aim.py turned), not a changed word: x9's
+    # revive pre-flight (push 203, RR) passed aim 3 on a dead medic's -10,035 BAM
+    # drift against aim 2's -379,584,512 BAM look.
     $previous = $script:LastScenarioAim
-    if ($null -ne $previous -and [int] $previous.look.look_px -ne 0 -and
-            [long] $read.heading_bam -eq [long] $previous.read.heading_bam) {
+    $turn = $null
+    if ($null -ne $previous -and [int] $previous.look.look_px -ne 0) {
+        $turn = Invoke-ScenarioAimTool -Arguments @("turned",
+            "--before-bam=$([long] $previous.read.heading_bam)", "--after-bam=$([long] $read.heading_bam)",
+            "--expected-bam=$([long] $previous.look.heading_after_bam)")
+    }
+    if ($null -ne $turn -and -not [bool] $turn.ok) {
         # The actor's own screen at that moment shows which gate holds (a deploy
         # screen or an open menu); a failed shot does not hide the finding.
         if ($retailActor) {
@@ -2576,7 +2585,10 @@ function Resolve-ScenarioAim {
                 }
             } catch { Write-Host "PARITY_RUN_NOTE aim_at ${Handle}: the gated actor's screenshot failed: $($_.Exception.Message)" }
         }
-        throw "aim_at ${Handle}: the previous look ($($previous.look.look_px) px for $($previous.aim_at)) did not turn the $actor (heading still $($read.heading_bam) BAM, expected $($previous.look.heading_after_bam)): its look rows are gated; read $(ConvertTo-Json $read -Compress)"
+        # A retail read's +0x24 bit 0x2 is the dead body the dispatcher's head drops the
+        # look for (@0x49AD76..0x49ADA0).
+        $dead = if ($retailActor -and ([long] $read.actor_flags -band 2) -ne 0) { " (the $actor is dead: +0x24 bit 0x2)" } else { "" }
+        throw "aim_at ${Handle}: the previous look ($($previous.look.look_px) px for $($previous.aim_at)) did not turn the $actor$dead (turned $($turn.turned_bam) BAM of the look's $($turn.expected_bam); heading $($read.heading_bam), expected $($previous.look.heading_after_bam)): its look rows are gated; read $(ConvertTo-Json $read -Compress)"
     }
     $look = Invoke-ScenarioAimTool -Arguments @("look", "--heading-bam=$($read.heading_bam)",
         "--actor=$actorXY", "--target=$targetXY", "--sensitivity=$($read.mouse_sensitivity)")

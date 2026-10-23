@@ -114,6 +114,34 @@ def player_sav(slot: int, word: int) -> bytes:
     return bytes(data)
 
 
+class LookTurnedTest(unittest.TestCase):
+    # x9's revive pre-flight (push 203, RR, the retail host's aims; LP-s12 item a):
+    # aim 1 read 0x40000000 and looked onto 1352925184; aim 2 read 1352935218 (turned).
+    # The medic then died; aim 3 read 1352925183 after aim 2's look onto 973350706.
+    def test_a_look_that_reached_the_body(self):
+        out = scenario_aim.look_turned(1073741824, 1352935218, 1352925184)
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["turned_bam"], 279193394)
+        self.assertEqual(out["expected_bam"], 279183360)
+
+    def test_a_dead_body_drifts_but_does_not_turn(self):
+        out = scenario_aim.look_turned(1352935218, 1352925183, 973350706)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["turned_bam"], -10035)
+        self.assertEqual(out["expected_bam"], -379584512)
+
+    def test_half_the_turn_in_its_direction(self):
+        self.assertTrue(scenario_aim.look_turned(0, 50, 100)["ok"])
+        self.assertFalse(scenario_aim.look_turned(0, 49, 100)["ok"])
+        self.assertFalse(scenario_aim.look_turned(0, -100, 100)["ok"])
+        self.assertTrue(scenario_aim.look_turned(5, 5, 5)["ok"])  # a look of no turn
+
+    def test_the_turn_wraps_like_the_register(self):
+        out = scenario_aim.look_turned(0x7FFF0000, -0x7FFF0000, -0x7FFE0000)
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["turned_bam"], 0x20000)
+
+
 class ProfileWordTest(unittest.TestCase):
     def test_the_current_record_word(self):
         self.assertEqual(scenario_aim.profile_mouse_sensitivity(player_sav(2, 200), 2), 200)
@@ -144,6 +172,11 @@ class CommandLineTest(unittest.TestCase):
         out = self.run_main(["look", "--heading-bam=0", "--actor=-1.5,-2", "--target=-1.5,8",
                              "--sensitivity=128"])
         self.assertEqual(out["look_px"], -4096)
+
+    def test_turned(self):
+        out = self.run_main(["turned", "--before-bam=1352935218", "--after-bam=1352925183",
+                             "--expected-bam=973350706"])
+        self.assertEqual(out, {"turned_bam": -10035, "expected_bam": -379584512, "ok": False})
 
     def test_profile_word(self):
         with tempfile.TemporaryDirectory() as root:

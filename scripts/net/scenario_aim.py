@@ -37,8 +37,17 @@ The look is the px whose rounded turn lands nearest the bearing (the inverse of 
 half-up rounding above, a tie to the smaller |px|). onHook takes at most 32767 px
 per step, so a larger look is split into same-tick steps, which sum to the one word.
 
+The next aim's read checks that the previous look turned the actor (`turned`): case
+166 subtracts the tick's whole turn from the heading in one store, so a look that
+reached the body moves it by its turn, give or take the body's own drift over the
+part (x9's revive RR: 10,034 BAM against a 279,183,360 BAM look), and a look the
+dispatcher dropped moves it by that drift alone (the same cell's dead medic: -10,035
+BAM against a -379,584,512 BAM look). The check asks for at least half the expected
+turn, in its direction.
+
 usage:
   scenario_aim.py look --heading-bam=H --actor=X,Y --target=X,Y --sensitivity=S
+  scenario_aim.py turned --before-bam=H0 --after-bam=H1 --expected-bam=HE
   scenario_aim.py profile-word --copy=DIR
 Each prints one JSON object.
 """
@@ -115,6 +124,16 @@ def aim_look(heading_bam: int, actor: tuple[float, float], target: tuple[float, 
     }
 
 
+def look_turned(before_bam: int, after_bam: int, expected_after_bam: int) -> dict:
+    """Whether a look turned the actor: the heading read after it moved at least half
+    the look's expected turn, in its direction (a look of no turn passes)."""
+    expected = wrap32(expected_after_bam - before_bam)
+    turned = wrap32(after_bam - before_bam)
+    ok = expected == 0 or ((turned > 0) == (expected > 0) and turned != 0 and
+                           2 * abs(turned) >= abs(expected))
+    return {"turned_bam": turned, "expected_bam": expected, "ok": ok}
+
+
 def profile_slot(game_cfg_text: str) -> int:
     """The current profile record game.cfg's player_index names (0 outside 0..5)."""
     found = PLAYER_INDEX_RE.findall(game_cfg_text)
@@ -148,11 +167,17 @@ def main(argv: list[str]) -> int:
     look.add_argument("--actor", type=pair, required=True)
     look.add_argument("--target", type=pair, required=True)
     look.add_argument("--sensitivity", type=int, required=True)
+    turned = sub.add_parser("turned")
+    turned.add_argument("--before-bam", type=int, required=True)
+    turned.add_argument("--after-bam", type=int, required=True)
+    turned.add_argument("--expected-bam", type=int, required=True)
     word = sub.add_parser("profile-word")
     word.add_argument("--copy", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "look":
         out = aim_look(args.heading_bam, args.actor, args.target, args.sensitivity)
+    elif args.command == "turned":
+        out = look_turned(args.before_bam, args.after_bam, args.expected_bam)
     else:
         slot = profile_slot((args.copy / "game.cfg").read_bytes().decode("latin-1"))
         out = {"slot": slot,
