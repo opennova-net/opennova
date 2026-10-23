@@ -535,9 +535,13 @@ void reset_added_slot_send_holdoff(const NapiNPServerCtx &ctx, NapiNPConnection 
 
 } // namespace
 
+namespace {
+
+// The add over `p_world`, which only the host's own arm may meet null (a session create's, ahead
+// of its first mission's World: g_LocalPlayerEntity is none there).
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
-world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
-                                                 world::World &world, bool round_init) {
+world::EntityHandle build_player_info_and_add(NapiNPServerCtx &ctx, NapiNPConnection &conn,
+		world::World *p_world, bool round_init) {
 	const std::optional<uint8_t> player_slot =
 			Server_ReservePlayerSlot(
 					ctx.np_protocol.connection_list, conn,
@@ -621,7 +625,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		//  CNapiGameSession_CreateSession - PlayerSession_InitFromProfile @0x4C9CCE;
 		//  Game_StartMission - the EventTrigger_UpdateAllWithFlag2 call @0x525B86, the
 		//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
-		conn.link.owned_entity = world.cached.local_player;
+		conn.link.owned_entity =
+				p_world != nullptr ? p_world->cached.local_player : world::EntityHandle{};
 		PlayerSession_InitOwnSlotClass(ctx, conn);
 		conn.reply.player_slot = *player_slot;
 		const std::string &own_name =
@@ -635,6 +640,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 				ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
 				conn, ctx.rotation, &ctx.host_slot); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	}
+	world::World &world = *p_world;
 	// The join spawn enters the no-pick arm (Server_OnPlayerJoin passes spawn
 	// handle low word 0, which Server_ResolveSpawnTargetHandle rejects), where
 	// a spectator slot is POSITIONED with the substitute team (Co-op 1; team
@@ -938,12 +944,19 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	return h;
 }
 
+} // namespace
+
+world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
+                                                 world::World &world, bool round_init) {
+	return build_player_info_and_add(ctx, conn, &world, round_init);
+}
+
 // The add's PlayerList entry: PlayerTeam the entity's signed team byte,
 // PlayerType its class; with no body, the slot's team byte (+416, unsigned) and
 // class (+89820) [orig: Server_PlayerAdd: movsx entity+0x162 @0x51D368,
 // entity+0x294 @0x51D382; the bodyless arm's slot+0x1A0 @0x51D398 and
 // slot+0x15EDC @0x51D3AF; the SetOrCreates @0x51D48F / @0x51D4AA].
-void stamp_player_list_add(NapiNPConnection &conn, const world::World &world) {
+void stamp_player_list_add(NapiNPConnection &conn, const world::World *world) {
 	// The listen host's own add finds no entity: its arm stores g_LocalPlayerEntity as
 	// the slot's entity, which is null at a session create from the menu (zero at boot,
 	// and the last mission's teardown zeroed it; the own body is a mission start's), so it
@@ -961,7 +974,8 @@ void stamp_player_list_add(NapiNPConnection &conn, const world::World &world) {
 		conn.player_list_type = 0;
 		return;
 	}
-	const world::Entity *player = world.registry.get(conn.link.owned_entity);
+	const world::Entity *player =
+			world != nullptr ? world->registry.get(conn.link.owned_entity) : nullptr;
 	if (player == nullptr) {
 		conn.player_list_team = conn.assigned_team_valid ? conn.assigned_team : 0;
 		conn.player_list_type = conn.slot_class;
@@ -1188,7 +1202,11 @@ std::vector<uint8_t> spawn_queue_record(const std::vector<NapiNPConnection> &con
 // balance-join gate holds is re-nagged with S2C 0x03 at most once per 1000 ms
 // (@0x4C8F7A..0x4C8FD1, staged here and framed by tick_connections).
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world) {
-	if (!ctx.is_authority || world.match.outcome().ended) return 0;
+	return Server_ProcessPendingPlayerSpawns(ctx, &world);
+}
+
+int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World *world) {
+	if (!ctx.is_authority || (world != nullptr && world->match.outcome().ended)) return 0;
 	int spawned = 0;
 	// The pump's one GetTickCount, the process clock the re-nag's 1000 ms test and its stamp
 	// read, so a host load counts (D-NET-NEW-L8-36) [orig: GetTickCount @0x4C8DF8, kept
@@ -1208,6 +1226,9 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 			// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - conn+0x24 == 1, the net
 			//  player @0x4C8E5A, the list membership @0x4C8E68..0x4C8E6C]
 			if (!conn.self_id_seen || conn.spawn_queue_unlinked) continue;
+			// With no World bound (a session create's own add) only the host's own node is added;
+			// any other waits for the World-bound pump.
+			if (world == nullptr && conn.type != NapiNPConnection::kTypeClientSide) continue;
 			if (has_spawn_slots && balance_join_admits(ctx, conn)) {
 				// Retail unlinks the node and sends its 0x03 before the add, so a
 				// failed add (no free row) leaves a joiner with no row, no body and
@@ -1233,7 +1254,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 					conn.ammo_damage_classes.fill(0);
 				// The add fails only with no free row; a bodyless add is a success
 				// (D-NET-NEW-L1-10) [orig: the success test @0x4C904E on the row].
-				(void)Server_BuildPlayerInfoAndAdd(ctx, conn, world, /*round_init=*/false);
+				(void)build_player_info_and_add(ctx, conn, world, /*round_init=*/false);
 				if (conn.phase < ConnectionPhase::PlayerAdded) {
 					// The unlink's 0x03 is all it gets (framed by tick_connections, the
 					// held-joiner 0x03's writer): the unlinked node's [0].
@@ -1269,7 +1290,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				Server_AnnounceSquadronEntered(ctx, conn);
 				broadcast_player_joined_text(ctx.np_protocol.connection_list, conn);
 				broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list,
-						conn, &world);
+						conn, world);
 				// The added player's own records queue here, at the add: the one-byte 0x03,
 				// the send-state reset's settings, the squad add, then the 0x05, the 0x04 and
 				// the 0x7B, so a later send to the slot (a scoreboard boundary's 0x16 before
@@ -1284,7 +1305,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 						!conn.reply.spawn_metadata_pushed) {
 					for (ProtocolMessage &m : build_spawn_pump_metadata(ctx.config,
 							ctx.mission_text_title, ctx.session_title, conn,
-							ctx.np_protocol.connection_list, &world,
+							ctx.np_protocol.connection_list, world,
 							ctx.rotation, &ctx.host_slot))
 						conn.link.transport->host_send(m.tag, std::move(m.payload), m.reliable,
 								m.flags.raw, m.capacity_exempt, m.retention_flushes);
@@ -1400,7 +1421,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	world.match.set_player_slot_team(h, conn->assigned_team); // the slot team mirror (D-NET-650)
 	// The add's class is the slot's [orig: Server_PlayerAdd @0x51D09A].
 	conn->slot_class = world.registry.get(h)->player_class;
-	stamp_player_list_add(*conn, world);
+	stamp_player_list_add(*conn, &world);
 	return h;
 }
 

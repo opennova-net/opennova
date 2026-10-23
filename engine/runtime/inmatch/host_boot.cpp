@@ -297,6 +297,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	if (request.host != nullptr && !request.next_mission && !request.host->create_ran()) {
 		HostBringup create;
 		create.host_cfg = host_cfg;
+		create.host_cfg.mission_type = static_cast<uint8_t>(request.mission.header.mission_type);
 		create.mission_text = boot.mission_text;
 		create.server_text = boot.server_text;
 		if (request.host->create_session(create) == CreateSessionResult::ProcessExit) {
