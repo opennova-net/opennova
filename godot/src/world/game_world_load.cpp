@@ -306,6 +306,13 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		// session through the load's stages, as retail's load does (engine
 		// inmatch/map_change.h; HostRole::begin_next_mission_load / pump_load_stage).
 		drive_.begin_next_host_mission_load(p_mission, p_bms_name, p_resource_root);
+		// A NovaWorld listen host's mission-start server-info update, past its session's create or
+		// the map change's head and ahead of the effect system and every load (engine
+		// inmatch/server_info.h apply_mission_start_columns carries the witness, D-NET-NEW-L1-50).
+		drive_.publish_host_mission_start(staged_runtime_options_.is_valid()
+						? staged_runtime_options_->get_simulation()
+						: drive_.kept_simulation(),
+				p_mission, p_resource_root, p_bms_name);
 		if (timeline.is_null()) {
 			timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
 			last_load_timeline_ = timeline;
